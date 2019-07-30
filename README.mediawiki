@@ -1,3 +1,10 @@
+=Decred DEX=
+
+This is the repository for the Decred Distributed Exchange (DEX), for which this
+document provides the '''DRAFT''' specification.
+
+__TOC__
+
 ==Abstract==
 
 We propose here a decentralized, non-custodial, trustless, and intermediary-free
