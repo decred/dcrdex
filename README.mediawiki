@@ -19,7 +19,7 @@ out with all the cryptographic security guarantees of the respective blockchains
 A custom order matching procedure is offered to mitigate common abusive trading
 patterns associated with high-frequency trading (HFT) algorithms and other
 bot-driven trading.
-Elimination of per-trade fees disincintevizes deceptive bookkeeping practices
+Elimination of per-trade fees disincentivizes deceptive bookkeeping practices
 commonly observed in centralized exchanges.
 
 To encourage open and active development, descriptions of critical protocol
@@ -60,8 +60,7 @@ transmitted by the clients. Thus, the exchange of funds is trustless and secure.
 The purpose of the DEX is to facilitate such peer-to-peer trades, while
 disincentivizing manipulative or abusive trading patterns, and utilizing an
 independently verifiable order matching algorithm that is difficult to game by
-traders and operators alike. The proposed DEX is not: an escrow service, an
-arbitration service, or a platform for HFT.
+traders and operators alike.
 
 While trades are fully trustless, steps are taken to discourage malicious
 clients from hindering normal trade activity.
@@ -211,10 +210,11 @@ The DEX operator specifies an on-chain transaction '''fee rate'''
 [[#Calculating_Transaction_Fees|calculating the fees]] for initialization
 transactions.
 
-Each asset will also have a '''minimum number of confirmations'''. This is the
-number of confirmations that are required for backing UTXOs as well as the
-number required during settlement on the first swap transaction before the
-second swap transaction is broadcast.
+Each asset has two distinct '''minimum numbers of confirmations'''.
+The <code>fundconf</code> is the number of confirmations required for
+[[#Order_Preparation|backing UTXOs]]. The <code>swapconf</code> is the number
+of confirmations required during settlement on the first swap transaction,
+before the second swap transaction is broadcast.
 
 The minimum confirmation rule is waived for a change output from a transaction
 involved in a DEX-monitored trade.
@@ -223,7 +223,7 @@ The '''broadcast timeout''' is the amount of time a client has to broadcast a
 transaction. For the maker, the broadcast time is measured from the time of
 match notification.
 For the taker, timeout is measured from  the time when the maker's swap receives
-its <code>minconf</code><sup>th</sup> confirmation.
+its <code>swapconf</code><sup>th</sup> confirmation.
 
 Asset info should be requested by the user immediately after connecting.
 
@@ -258,7 +258,9 @@ Asset info should be requested by the user immediately after connecting.
 |-
 | swapsize || int || the size of the initialization transaction (bytes)
 |-
-| minconf  || int || minimum confirmations for backing UTXOs and swap transactions
+| swapconf || int || minimum confirmations for swap transactions
+|-
+| fundconf || int || minimum confirmations for backing UTXOs
 |-
 | scripts  || &#91;string&#93; || acceptable backing UTXO script types. minimum &#91;"P2PKH"&#93;
 |}
@@ -301,7 +303,7 @@ For many assets, low fees are possible without increasing the time until mined.
 Transaction fees tend to rise as an asset pushes the limits of on-chain scaling.
 For high-fee assets, the DEX operator must find a balance between lower fees,
 which are preferable from an accounting standpoint, and higher fees, which can
-decrease settlement time by increasing the speed at which a transactions are
+decrease settlement time by increasing the speed at which transactions are
 mined.
 
 See also: [[#Calculating_Transaction_Fees|Calculating Transaction Fees]]
@@ -312,10 +314,10 @@ In order to devalue predatory behavior exhibited by certain high-frequency
 trading algorithms, received orders are not processed continuously, but rather
 after a shuffling step with all other orders received in a fixed duration period
 called an ''epoch''.
-The goal of this algorithm is to reduce the probability that an individual or
-collaborating pair can submit two orders that match with each other. Limiting
-this possibility mitigates advantages gained from front-running, spoofing, and
-other manipulative trading practices.
+The goal of this algorithm is to ensure that an individual client cannot obtain
+a deterministic latency advantage over other clients when executing trades.
+Limiting this possibility mitigates advantages gained from front-running,
+spoofing, and other manipulative trading practices.
 
 ====Epoch Time====
 
@@ -369,8 +371,8 @@ left unfilled.
 Market orders and immediate limit orders cannot match orders further down the
 queue.
 
-When a limit order matches a limit order, the price assigned to the match is the
-average of the two orders, with a split atom going to the maker.
+When a limit order matches a limit order, the match is assigned the price
+rate of the taker's order.
 
 The process continues with the next order in the list and iterates until all
 orders have been processed.
@@ -389,7 +391,7 @@ public key, so using client public keys directly for identity purposes is a
 natural simplification that obviates the need for client user names and
 passwords.
 
-Further, since Politeia, Decred's governance platform, also employs a PKI, the
+Further, since Politeia, Decred's governance platform, also employs PKI, the
 same identities may be used on both services to facilitate time-stamping
 exchange data via Politeia. For example, given common identities between the DEX
 and Politeia, anchoring data related to DEX client and server conduct on the
@@ -397,8 +399,8 @@ Decred blockchain may be useful for establishing a reputation system.
 
 ===Blockchain Interaction===
 
-'''Clients''' need atomic-swap enabled wallets and the ability to broadcast
-transactions to each of the blockchain networks involved in
+'''Clients''' need wallets that support atomic swaps and the ability to
+broadcast transactions to each of the blockchain networks involved in
 [[#Atomic_Settlement|the swap]].
 
 '''DEX operators''' need access to trusted full nodes for each of the
@@ -425,7 +427,7 @@ will release their own appropriately vetted plugins.
 
 An account is uniquely identified by the client's public account key (pubkey),
 which the client provides during registration.
-After registration, the client does identify themselves with their pubkey
+After registration, the client does not identify themselves with their pubkey
 directly.
 Instead, the account is identified by an '''account ID''', which is the
 double SHA-256 hash of the client's pubkey,
@@ -541,8 +543,8 @@ The server immediately sends their receipt and then closes the connection.
 Once the transaction is mined and has the
 [[#Exchange_Variables|requisite number of confirmations]], the client
 should [[#Session_Authentication|create a new authenticated connection]].
-If the client attempts to connect before <code>minconf</code> confirmations, the
-DEX should reject the connection outright.
+If the client attempts to connect before <code>swapconf</code> confirmations,
+the DEX should reject the connection outright.
 
 ==Client Order Management==
 
@@ -765,7 +767,7 @@ own UTXOs.
 
 In addition, the client must show the ability to cover ''base fees'' for any
 initialization transactions that will be generated. The client must show that
-they have the funds to cover all fees for the worst-case-scenario, which is
+they have the funds to cover all fees for the worst-case scenario, which is
 single-lot matches for the entire order.
 In practice, large orders will rarely pay the total of the base fees because
 many of the matches will be more than a single-lot.
@@ -781,6 +783,7 @@ based on the ''lot size'', '''''l''''' (units ''Z''), a ''fee rate'',
 '''''s''''' is pre-calculated based on an initialization transaction with 1
 standard P2PKH input, 1 standard P2PKH output, and 1 swap output.
 
+<!--R_z = \frac{ s r }{ l }-->
 [[File:spec/images/fee_max_ratio.png]]
 
 The ''base fee ratio'' is a constant until the DEX operator changes one of its
@@ -789,6 +792,7 @@ factors.
 The ''base fees'', '''''f<sub>base</sub>''''' (units ''Z'') can be calculated
 from '''''R<sub>z</sub>''''' and the ''order quantity'', '''''Q'''''.
 
+<!--f_{base} = Q R_z-->
 [[File:spec/images/base_fees.png]]
 
 The base fees scale linearly with order size, but the actual realized portion of
@@ -802,13 +806,15 @@ The DEX will verify the UTXO sum before accepting the order.
 
 ====UTXO Preparation====
 
-All backing UTXOs must have a minimum number of confirmations. The exact number
-is set by the DEX operator.
+All backing UTXOs must have a minimum number of confirmations. The exact number,
+<code>swapconf</code>, is an [#Exchange_Variables}|asset variable]] set by the
+DEX operator.
 
 With the exception of market buy orders, which are detailed below, for an order
 of quantity '''''Q''''', the sum value of the selected UTXOs, '''''V''''',
 must satisfy the relation
 
+<!--V \ge Q + f_{base} + f_{utxo}-->
 [[File:spec/images/utxo-sum.png]]
 
 There may be types of pubkey script which are not implemented.
@@ -1251,7 +1257,7 @@ The revoked match quantity is not added back to the orderbook in any form.
 
 There are a number of scenarios where the server may suspend operations,
 intentionally or not.
-During trade suspension, standing limit are not necessarily revoked.
+During trade suspension, standing limit orders are not necessarily revoked.
 
 If the server intentionally suspends operations, they should provide a
 notification to connected clients as early as possible, ideally with several
@@ -1486,7 +1492,7 @@ matched.
 
 ===Penalties===
 
-The primary penalty for breeches of conduct is a '''ban''', which includes loss
+The primary penalty for breaches of conduct is a '''ban''', which includes loss
 of trading privileges, forfeiture of registration fee, and immediate revocation
 of any unfilled orders.
 
@@ -1499,18 +1505,14 @@ Trade history will be made available to both websocket and HTTP clients.
 
 ==Exchange Administration==
 
-Operation of the DEX will require substantial administrative labor.
-High throughput and low latency networking and high performance hardware are
-expected requirements.
-Historical trade data should be archived for some reasonable amount of time,
-if not forever.
+Operation of the DEX will require a non-trivial amount of administrative labor.
 Clients will expect near-perfect uptime and long-term operation.
 
-Additionally, operators will need to manage exchange settings properly to keep
-markets liquid and to balance fees and settlement speed.
-That said, changes to exchange or asset variables will often entail server
-revocation of all existing orders on a market, so should be done as infrequently
-as possible.
+Operators must manage exchange settings properly to keep markets liquid and to
+balance fees and settlement speed.
+That said, changes to exchange or asset variables will often entail revocation
+of all existing orders on a market, so should be done as infrequently as
+possible.
 
 '''Exchange Variables'''
 
@@ -1537,7 +1539,9 @@ as possible.
 |-
 | fee&nbsp;rate  || atoms/byte || The minimum fee rate for swap transactions.
 |-
-| minimum&nbsp;confirmations|| count || The Minimum confirmations for backing UTXOs and swap transactions.
+| utxo&nbsp;confirmations|| count || The Minimum confirmations for backing UTXOs
+|-
+| swap&nbsp;confirmations|| count || The Minimum confirmations before acting on a swap transaction
 |}
 
 See also [[#Exchange_Variables|Exchange Variables]].
