@@ -1,0 +1,14 @@
+.vscode/
+*.exe
+*.log
+*.log.*.gz
+*.bak
+.idea/
+debug
+*.cert
+*.key
+/vendor/
+*.orig
+*.pprof
+.DS_Store
+\.project
