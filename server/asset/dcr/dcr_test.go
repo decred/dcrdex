@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/dcrec"
+	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 )
 
@@ -38,11 +40,15 @@ func TestMain(m *testing.M) {
 		return
 	}
 	// Call tidyConfig to set the global chainParams.
-	tidyConfig(&DCRConfig{
+	err = tidyConfig(&DCRConfig{
 		Net:      mainnetName,
 		DcrdUser: "testuser",
 		DcrdPass: "testpass",
 	})
+	if err != nil {
+		fmt.Printf("tidyConfig error: %v\n", err)
+		return
+	}
 	os.Exit(m.Run())
 }
 
@@ -103,6 +109,10 @@ func TestTidyConfig(t *testing.T) {
 	}
 }
 
+// The remaining tests use the testBlockchain which, is a stub for
+// rpcclient.Client. UTXOs, transactions and blocks are added to the blockchain
+// as jsonrpc types to be requested by the dcrBackend.
+//
 // General formula for testing
 // 1. Create a dcrBackend with the node field set to a dcrNode-implementing stub
 // 2. Create a fake UTXO and all of the necessary jsonrpc-type blocks and
@@ -111,11 +121,18 @@ func TestTidyConfig(t *testing.T) {
 // 4. Optionally add more blocks and/or transactions to the blockchain and check
 //    return values again, as things near the top of the chain can change.
 
+func randomBytes(len int) []byte {
+	bytes := make([]byte, len)
+	rand.Read(bytes)
+	return bytes
+}
+
 func randomHash() *chainhash.Hash {
 	hash := new(chainhash.Hash)
-	bytes := make([]byte, 32)
-	rand.Read(bytes)
-	hash.SetBytes(bytes)
+	err := hash.SetBytes(randomBytes(32))
+	if err != nil {
+		fmt.Printf("chainhash.Hash.SetBytes error: %v", err)
+	}
 	return hash
 }
 
@@ -155,7 +172,7 @@ func (testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjs
 
 func (testNode) GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error) {
 	tx, found := testChain.txRaws[*txHash]
-	if ! found {
+	if !found {
 		return nil, fmt.Errorf("test transaction not found\n")
 	}
 	return tx, nil
@@ -178,13 +195,12 @@ func (testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 }
 
 // Create a chainjson.GetTxOutResult such as is returned from GetTxOut.
-func testGetTxOut(confirmations int64, pkScript []byte, isCoinbase bool) *chainjson.GetTxOutResult {
+func testGetTxOut(confirmations int64, pkScript []byte) *chainjson.GetTxOutResult {
 	return &chainjson.GetTxOutResult{
 		Confirmations: confirmations,
 		ScriptPubKey: chainjson.ScriptPubKeyResult{
 			Hex: hex.EncodeToString(pkScript),
 		},
-		Coinbase: isCoinbase,
 	}
 }
 
@@ -195,26 +211,36 @@ func testRawTransactionVerbose(txid, blockHash *chainhash.Hash, blockHeight, con
 	if blockHash != nil {
 		hash = blockHash.String()
 	}
-	return &chainjson.TxRawResult {
-		Txid: txid.String(),
-		BlockHash: hash,
-		BlockHeight: blockHeight,
-		BlockIndex: vout,
+	return &chainjson.TxRawResult{
+		Txid:          txid.String(),
+		BlockHash:     hash,
+		BlockHeight:   blockHeight,
+		BlockIndex:    vout,
 		Confirmations: confirmations,
 	}
 }
 
 // Add a transaction output and it's getrawtransaction data.
-func testAddTxOut(blockHash, txHash *chainhash.Hash, blockHeight, vout uint32, confirmations int64, pkScript []byte, isCoinbase bool) *chainjson.GetTxOutResult {
-	txOut := testGetTxOut(confirmations, pkScript, isCoinbase)
+func testAddTxOut(blockHash, txHash *chainhash.Hash, blockHeight, vout uint32, confirmations int64, pkScript []byte) *chainjson.GetTxOutResult {
+	txOut := testGetTxOut(confirmations, pkScript)
 	testChain.txOuts[txOutID(txHash, vout)] = txOut
-	testChain.txRaws[*txHash] = testRawTransactionVerbose(txHash, blockHash, int64(blockHeight), confirmations, vout)
+	testAddTxVerbose(txHash, blockHash, blockHeight, vout, confirmations)
 	return txOut
+}
+
+// Add a chainjson.TxRawResult to the blockchain.
+func testAddTxVerbose(txHash, blockHash *chainhash.Hash, blockHeight, vout uint32, confirmations int64) *chainjson.TxRawResult {
+	tx := testRawTransactionVerbose(txHash, blockHash, int64(blockHeight), confirmations, vout)
+	testChain.txRaws[*txHash] = tx
+	return tx
 }
 
 // Create a *chainjson.GetBlockVerboseResult such as is returned by
 // GetBlockVerbose.
 func testBlockVerbose(blockHash *chainhash.Hash, confirmations, height int64, stx []string, voteBits uint16) *chainjson.GetBlockVerboseResult {
+	if voteBits&1 != 0 {
+		testChain.hashes[height] = blockHash
+	}
 	return &chainjson.GetBlockVerboseResult{
 		Hash:          blockHash.String(),
 		Confirmations: confirmations,
@@ -231,6 +257,22 @@ func testAddBlockVerbose(blockHash *chainhash.Hash, confirmations int64, height 
 	}
 	testChain.blocks[*blockHash] = testBlockVerbose(blockHash, confirmations, int64(height), stx, voteBits)
 	return blockHash
+}
+
+func testVout(value float64, pkScript []byte) chainjson.Vout {
+	return chainjson.Vout{
+		Value: value,
+		ScriptPubKey: chainjson.ScriptPubKeyResult{
+			Hex: hex.EncodeToString(pkScript),
+		},
+	}
+}
+
+func testVin(txHash *chainhash.Hash, vout uint32) chainjson.Vin {
+	return chainjson.Vin{
+		Txid: txHash.String(),
+		Vout: vout,
+	}
 }
 
 func TestUTXOs(t *testing.T) {
@@ -250,8 +292,10 @@ func TestUTXOs(t *testing.T) {
 	//     mainchain block, so is still valid.
 
 	// Create a dcrBackend with the test node.
+	ctx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
 	dcr := unconnectedDCR(&DCRConfig{
-		Context: context.Background(),
+		Context: ctx,
 	})
 	dcr.node = testNode{}
 
@@ -260,7 +304,7 @@ func TestUTXOs(t *testing.T) {
 	txHeight := uint32(50)
 
 	// A general reset function that clears the testBlockchain and the blockCache.
-	reset := func () {
+	reset := func() {
 		cleanTestChain()
 		dcr.blockCache = newBlockCache()
 		vout = uint32(rand.Int())
@@ -273,16 +317,21 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	txHash := randomHash()
 	blockHash := randomHash()
-	testAddTxOut(nil, txHash, 0, vout, 0, testP2PKHScript, false)
+	testAddTxOut(nil, txHash, 0, vout, 0, testP2PKHScript)
 	// There is no block info to add, since this is a mempool transaction
 	utxo, err := dcr.utxo(txHash, vout)
 	if err != nil {
 		t.Fatalf("case 1 - unexpected error: %v", err)
 	}
+	// While we're here, check the spend script size is correct.
+	scriptSize := utxo.ScriptSize()
+	if scriptSize != P2PKHSigScriptSize {
+		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, scriptSize)
+	}
 	// Now "mine" the transaction.
 	testAddBlockVerbose(blockHash, 1, txHeight, nil, 1)
 	// Overwrite the test blockchain transaction details.
-	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript, false)
+	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript)
 	confs, err := utxo.Confirmations()
 	if err != nil {
 		t.Fatalf("case 1 - error retrieving confirmations after transaction \"mined\": %v", err)
@@ -298,7 +347,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, nil, 1)
 	txHash = randomHash()
-	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript, false)
+	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript)
 	_, err = dcr.utxo(txHash, vout)
 	if err != nil {
 		t.Fatalf("case 2 - unexpected error: %v", err)
@@ -315,7 +364,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, nil, 1)
 	txHash = randomHash()
-	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testNotP2PKHScript, false)
+	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testNotP2PKHScript)
 	_, err = dcr.utxo(txHash, vout)
 	if err == nil {
 		t.Fatalf("case 4 - received no error for a UTXO with wrong script type")
@@ -327,7 +376,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, nil, 1)
 	txHash = randomHash()
-	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript, false)
+	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript)
 	utxo, err = dcr.utxo(txHash, vout)
 	if err != nil {
 		t.Fatalf("case 5 - unexpected error: %v", err)
@@ -335,7 +384,10 @@ func TestUTXOs(t *testing.T) {
 	// Now reject the block.
 	rejectingHash := testAddBlockVerbose(nil, 1, txHeight+1, nil, 0)
 	rejectingBlock := testChain.blocks[*rejectingHash]
-	dcr.blockCache.add(rejectingBlock)
+	_, err = dcr.blockCache.add(rejectingBlock)
+	if err != nil {
+		t.Fatalf("case 5 - error adding to block cache: %v", err)
+	}
 	_, err = utxo.Confirmations()
 	if err == nil {
 		t.Fatalf("case 5 - block not detected as invalid after stakeholder invalidation")
@@ -347,7 +399,7 @@ func TestUTXOs(t *testing.T) {
 	txHash = randomHash()
 	s := txHash.String()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, []string{s}, 1)
-	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript, false)
+	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript)
 	utxo, err = dcr.utxo(txHash, vout)
 	if err != nil {
 		t.Fatalf("case 6 - unexpected error: %v", err)
@@ -355,7 +407,10 @@ func TestUTXOs(t *testing.T) {
 	// Now reject the block.
 	rejectingHash = testAddBlockVerbose(nil, 1, txHeight+1, nil, 0)
 	rejectingBlock = testChain.blocks[*rejectingHash]
-	dcr.blockCache.add(rejectingBlock)
+	_, err = dcr.blockCache.add(rejectingBlock)
+	if err != nil {
+		t.Fatalf("case 5 - error adding to block cache: %v", err)
+	}
 	_, err = utxo.Confirmations()
 	if err != nil {
 		t.Fatalf("case 6 - unexpected error during confirmation check: %v", err)
@@ -365,7 +420,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, []string{txHash.String()}, 1)
-	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript, false)
+	testAddTxOut(blockHash, txHash, txHeight, vout, 1, testP2PKHScript)
 	utxo, err = dcr.utxo(txHash, vout)
 	if err != nil {
 		t.Fatalf("case 7 - received error for utxo")
@@ -376,7 +431,7 @@ func TestUTXOs(t *testing.T) {
 	}
 	betterHash := testAddBlockVerbose(nil, 1, txHeight, nil, 1)
 	dcr.anyQ <- betterHash
-	time.Sleep(time.Millisecond*50)
+	time.Sleep(time.Millisecond * 50)
 	// Remove the txout from the blockchain, since dcrd would no longer return it.
 	delete(testChain.txOuts, txOutID(txHash, vout))
 	_, err = utxo.Confirmations()
@@ -389,7 +444,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	txHash = randomHash()
 	orphanHash := testAddBlockVerbose(nil, 1, txHeight, []string{txHash.String()}, 1)
-	testAddTxOut(orphanHash, txHash, txHeight, vout, 1, testP2PKHScript, false)
+	testAddTxOut(orphanHash, txHash, txHeight, vout, 1, testP2PKHScript)
 	utxo, err = dcr.utxo(txHash, vout)
 	if err != nil {
 		t.Fatalf("case 8 - received error for utxo")
@@ -397,8 +452,8 @@ func TestUTXOs(t *testing.T) {
 	// Now orphan the block, by doing a reorg.
 	betterHash = testAddBlockVerbose(nil, 1, txHeight, nil, 1)
 	dcr.anyQ <- betterHash
-	time.Sleep(time.Millisecond*50)
-	testAddTxOut(betterHash, txHash, txHeight, vout, 1, testP2PKHScript, false)
+	time.Sleep(time.Millisecond * 50)
+	testAddTxOut(betterHash, txHash, txHeight, vout, 1, testP2PKHScript)
 	_, err = utxo.Confirmations()
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error after reorg")
@@ -409,8 +464,8 @@ func TestUTXOs(t *testing.T) {
 	// Do it again, but this time, put the utxo into mempool.
 	evenBetter := testAddBlockVerbose(nil, 1, txHeight, nil, 1)
 	dcr.anyQ <- evenBetter
-	time.Sleep(time.Millisecond*50)
-	testAddTxOut(nil, txHash, 0, vout, 0, testP2PKHScript, false)
+	time.Sleep(time.Millisecond * 50)
+	testAddTxOut(nil, txHash, 0, vout, 0, testP2PKHScript)
 	_, err = utxo.Confirmations()
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error for mempool tx after reorg")
@@ -432,7 +487,7 @@ func TestReorg(t *testing.T) {
 	// A general reset function that clears the testBlockchain and the blockCache.
 	tipHeight := 10
 	var tipHash *chainhash.Hash
-	reset := func () {
+	reset := func() {
 		cleanTestChain()
 		dcr.blockCache = newBlockCache()
 		for h := 0; h <= tipHeight; h++ {
@@ -445,14 +500,14 @@ func TestReorg(t *testing.T) {
 		}
 		// Check that the tip is at the expected height and the block is mainchain.
 		block, found := dcr.blockCache.mainchain[uint32(tipHeight)]
-		if ! found {
+		if !found {
 			t.Fatalf("tip block not found in cache mainchain")
 		}
 		if block.orphaned {
 			t.Fatalf("block unexpectedly orphaned before reorg")
 		}
 		_, found = dcr.blockCache.block(&block.hash)
-		if ! found {
+		if !found {
 			t.Fatalf("block not found with block method before reorg")
 		}
 		tipHash = &block.hash
@@ -461,10 +516,10 @@ func TestReorg(t *testing.T) {
 	ensureOrphaned := func(hash *chainhash.Hash, height int) {
 		// Make sure mainchain is empty at the tip height.
 		block, found := dcr.blockCache.block(hash)
-		if ! found {
+		if !found {
 			t.Fatalf("orphaned block from height %d not found after reorg", height)
 		}
-		if ! block.orphaned {
+		if !block.orphaned {
 			t.Fatalf("reorged block from height %d (%s) not marked as orphaned", height, hash)
 		}
 	}
@@ -475,10 +530,10 @@ func TestReorg(t *testing.T) {
 	newHash := testAddBlockVerbose(nil, 1, uint32(tipHeight), nil, 1)
 	// Passing the hash to anyQ triggers the reorganization.
 	dcr.anyQ <- newHash
-	time.Sleep(time.Millisecond*50)
+	time.Sleep(time.Millisecond * 50)
 	ensureOrphaned(tipHash, tipHeight)
 	newTip, found := dcr.blockCache.mainchain[uint32(tipHeight)]
-	if ! found {
+	if !found {
 		t.Fatalf("3-deep reorg-causing new tip block not found on mainchain")
 	}
 	if newTip.hash != *newHash {
@@ -495,7 +550,7 @@ func TestReorg(t *testing.T) {
 	}
 	newHash = testAddBlockVerbose(nil, 1, uint32(tipHeight-2), nil, 1)
 	dcr.anyQ <- newHash
-	time.Sleep(time.Millisecond*50)
+	time.Sleep(time.Millisecond * 50)
 	ensureOrphaned(&tip.hash, int(tip.height))
 	ensureOrphaned(&oneDeep.hash, int(tip.height))
 	ensureOrphaned(&twoDeep.hash, int(tip.height))
@@ -504,7 +559,7 @@ func TestReorg(t *testing.T) {
 		t.Fatalf("from tip height after 3-block reorg. expected %d, saw %d", twoDeep.height-1, newHeight)
 	}
 	newTip, found = dcr.blockCache.mainchain[uint32(newHeight)]
-	if ! found {
+	if !found {
 		t.Fatalf("3-deep reorg-causing new tip block not found on mainchain")
 	}
 	if newTip.hash != *newHash {
@@ -518,7 +573,7 @@ func TestSignatures(t *testing.T) {
 		pubkey, _ := hex.DecodeString(pk)
 		message, _ := hex.DecodeString(msg)
 		signature, _ := hex.DecodeString(sig)
-		if ! dcr.VerifySignature(message, pubkey, signature) {
+		if !dcr.VerifySignature(message, pubkey, signature) {
 			t.Fatalf("failed signature with pubkey %s", pk)
 		}
 	}
@@ -547,7 +602,7 @@ func TestPaysToPubkey(t *testing.T) {
 		utxo := &UTXO{
 			pkScript: pkScript,
 		}
-		if ! utxo.PaysToPubkey(pubkey, nil) {
+		if !utxo.PaysToPubkey(pubkey, nil) {
 			t.Fatalf("pubkey %s not found in script %s", pk, script)
 		}
 	}
@@ -562,4 +617,155 @@ func TestPaysToPubkey(t *testing.T) {
 		"76a914b9b3944f5307161bf2f84ed5e5d09e687a437acf88ac",
 		"0328280073f257b54b6be3574f467a30b1c25dfbbf08524e24dcd2a3b5000e37f9",
 	)
+}
+
+// Create a swap (initialization) contract with random pubkeys and return the
+// pubkey script and addresses.
+func testSwapContract() ([]byte, string, string) {
+	contract := make([]byte, 0, SwapContractSize)
+	addHex := func(s string) {
+		bytes, _ := hex.DecodeString(s)
+		contract = append(contract, bytes...)
+	}
+	addHex("6382012088c020") // This snippet checks the size of the secret and hashes it.
+	// hashed secret
+	secretKey := randomBytes(32)
+	contract = append(contract, secretKey...)
+	addHex("8876a914") // check the hash
+	receiverPKH := randomBytes(20)
+	contract = append(contract, receiverPKH...)
+	addHex("6704f690625db17576a914") // check the pubkey hash,  else
+	senderPKH := randomBytes(20)
+	contract = append(contract, senderPKH...)
+	addHex("6888ac") // check the pubkey hash
+	receiverAddr, _ := dcrutil.NewAddressPubKeyHash(receiverPKH, chainParams, dcrec.STEcdsaSecp256k1)
+	senderAddr, _ := dcrutil.NewAddressPubKeyHash(senderPKH, chainParams, dcrec.STEcdsaSecp256k1)
+	return contract, senderAddr.String(), receiverAddr.String()
+}
+
+func TestTransactions(t *testing.T) {
+	// Create a dcrBackend with the test node.
+	ctx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
+	dcr := unconnectedDCR(&DCRConfig{
+		Context: ctx,
+	})
+	dcr.node = testNode{}
+
+	// Test 1: Test different states of validity.
+	cleanTestChain()
+	blockHeight := uint32(500)
+	txHash := randomHash()
+	blockHash := randomHash()
+	vout := int64(0)
+	verboseTx := testAddTxVerbose(txHash, blockHash, blockHeight, 2, vout)
+	// Mine the transaction and an approving block.
+	testAddBlockVerbose(blockHash, 1, blockHeight, nil, 1)
+	testAddBlockVerbose(randomHash(), 1, blockHeight+1, nil, 1)
+	// Add some random transaction at index 0.
+	verboseTx.Vout = append(verboseTx.Vout, testVout(1, randomBytes(20)))
+	// Add a swap transaction at index 1.
+	pkScript, sender, receiver := testSwapContract()
+	verboseTx.Vout = append(verboseTx.Vout, testVout(1, pkScript))
+	// Make a spending transaction.
+	spentTx := randomHash()
+	spentVout := rand.Uint32()
+	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTx, spentVout))
+	// Get the transaction through the backend.
+	dexTx, err := dcr.transaction(txHash)
+	if err != nil {
+		t.Fatalf("error getting dex tx: %v", err)
+	}
+	// Check that there are 2 confirmations.
+	confs, err := dexTx.Confirmations()
+	if err != nil {
+		t.Fatalf("unexpected error getting confirmation count: %v", err)
+	}
+	if confs != 2 {
+		t.Fatalf("expected 2 confirmations, but %d were reported", confs)
+	}
+	// Check that the spent tx is in dexTx.
+	spent := dexTx.SpendsUTXO(spentTx.String(), spentVout)
+	if !spent {
+		t.Fatalf("transaction not confirming spent utxo")
+	}
+	// Check that there is an error when trying to retrieve swap details for a
+	// non-swap transaction.
+	_, _, _, err = dexTx.SwapDetails(0)
+	if err == nil {
+		t.Fatalf("no error when retreiving swap details for non-swap output")
+	}
+	sendAddr, receiveAddr, sentVal, err := dexTx.SwapDetails(1)
+	if err != nil {
+		t.Fatalf("received an error getting swap details: %v", err)
+	}
+	if sendAddr != sender {
+		t.Fatalf("expected sender address %s, got %s", sender, sendAddr)
+	}
+	if receiveAddr != receiver {
+		t.Fatalf("expected receiver address %s, got %s", receiver, receiveAddr)
+	}
+	if sentVal != 1e8 {
+		t.Fatalf("expected sent value 1e8, got %d", sentVal)
+	}
+	// Now do an invalidating reorg, and check that Confirmations returns an
+	// error.
+	newHash := testAddBlockVerbose(nil, 1, blockHeight+1, nil, 0)
+	// Passing the hash to anyQ triggers the reorganization.
+	dcr.anyQ <- newHash
+	time.Sleep(time.Millisecond * 50)
+	_, err = dexTx.Confirmations()
+	if err == nil {
+		t.Fatalf("no error when checking confirmations on an invalidated tx")
+	}
+	// Make it a stake transaction and make sure the transaction is valid again,
+	// since stake transactions are not invalidated by stakeholders.
+	testAddBlockVerbose(blockHash, 1, blockHeight, []string{txHash.String()}, 1)
+	block := testChain.blocks[*blockHash]
+	_, err = dcr.blockCache.add(block)
+	if err != nil {
+		t.Fatalf("case 5 - error adding to block cache: %v", err)
+	}
+	_, err = dexTx.Confirmations()
+	if err != nil {
+		t.Fatalf("error for stake transaction in stakeholder-invalidated block: %v", err)
+	}
+
+	// Test 2: Before and after mining.
+	cleanTestChain()
+	dcr.blockCache = newBlockCache()
+	txHash = randomHash()
+	// Add a transaction to mempool.
+	testAddTxVerbose(txHash, nil, 0, 0, vout)
+	// Get the transaction data through the backend and make sure it has zero
+	// confirmations.
+	dexTx, err = dcr.transaction(txHash)
+	if err != nil {
+		t.Fatalf("unexpected error retrieving transaction through backend: %v", err)
+	}
+	confs, err = dexTx.Confirmations()
+	if err != nil {
+		t.Fatalf("unexpected error getting confirmations on mempool transaction: %v", err)
+	}
+	if confs != 0 {
+		t.Fatalf("expected 0 confirmations for mempool transaction, got %d", confs)
+	}
+	// Now mine the transaction
+	blockHash = testAddBlockVerbose(nil, 1, blockHeight, nil, 0)
+	// Update the verbose tx data
+	testAddTxVerbose(txHash, blockHash, blockHeight, 1, vout)
+	// Check Confirmations
+	confs, err = dexTx.Confirmations()
+	if err != nil {
+		t.Fatalf("unexpected error getting confirmations on mined transaction: %v", err)
+	}
+	if confs != 1 {
+		t.Fatalf("expected 1 confirmation for mined transaction, got %d", confs)
+	}
+	if dexTx.blockHash != *blockHash {
+		t.Fatalf("unexpected block hash on a mined transaction. expected %s, got %s", blockHash, dexTx.blockHash)
+	}
+	if dexTx.height != int64(blockHeight) {
+		t.Fatalf("unexpected block height on a mined transaction. expected %d, got %d", blockHeight, dexTx.height)
+	}
 }

@@ -60,7 +60,9 @@ func (cache *blockCache) block(h *chainhash.Hash) (*dcrBlock, bool) {
 	return blk, found
 }
 
-// Getter for a mainchain block by it's height.
+// Getter for a mainchain block by its height. This method does not attempt
+// to load the block from the blockchain if it is not found. If that is required
+// use (*dcrBackend).getMainchainDcrBlock.
 func (cache *blockCache) atHeight(height uint32) (*dcrBlock, bool) {
 	cache.mtx.RLock()
 	defer cache.mtx.RUnlock()
@@ -83,7 +85,8 @@ func convertStxids(txids []string) []chainhash.Hash {
 }
 
 // Add a block to the blockCache. This method will translate the RPC result
-// to a dcrBlock, returning the dcrBlock. If the
+// to a dcrBlock, returning the dcrBlock. If the block is not orphaned, it will
+// be added to the mainchain.
 func (cache *blockCache) add(block *chainjson.GetBlockVerboseResult) (*dcrBlock, error) {
 	cache.mtx.Lock()
 	defer cache.mtx.Unlock()
@@ -117,8 +120,8 @@ func (cache *blockCache) tipHeight() uint32 {
 	return cache.tip
 }
 
-// Trigger a reorg, setting any blocks at the provided height as orphaned and
-// removing them from mainchain.
+// Trigger a reorg, setting any blocks at or above the provided height as
+// orphaned and removing them from mainchain, but not the blocks map.
 func (cache *blockCache) reorg(newTip int64) {
 	cache.mtx.Lock()
 	defer cache.mtx.Unlock()
@@ -131,7 +134,7 @@ func (cache *blockCache) reorg(newTip int64) {
 			log.Errorf("reorg block not found on mainchain at height %d for a reorg from %d to %d", height, newTip, cache.tip)
 			continue
 		}
-		// Delete the block from mainchain
+		// Delete the block from mainchain.
 		delete(cache.mainchain, uint32(block.height))
 		// Store an orphaned block in the blocks cache.
 		log.Debugf("marking block %s as orphaned\n", block.hash)

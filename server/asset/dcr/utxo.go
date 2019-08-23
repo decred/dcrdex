@@ -57,7 +57,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 		// not been orphaned or voted as invalid.
 		mainchainBlock, found := dcr.blockCache.atHeight(utxo.height)
 		if !found {
-			return -1, fmt.Errorf("no mainchain block for tx %s at height %d", utxo.txHash, utxo.height)
+			return -1, fmt.Errorf("no mainchain block for tx %s at height %d", utxo.txHash.String(), utxo.height)
 		}
 		// If the UTXO's block has been orphaned, check for a new containing block.
 		if mainchainBlock.hash != utxo.blockHash {
@@ -78,8 +78,11 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 		}
 		// If the block is set, check for stakeholder invalidation.
 		if mainchainBlock != nil && !mainchainBlock.txInStakeTree(&utxo.txHash) {
-			nextBlock, found := dcr.blockCache.atHeight(utxo.height + 1)
-			if found && !nextBlock.vote {
+			nextBlock, err := dcr.getMainchainDcrBlock(utxo.height + 1)
+			if err != nil {
+				return -1, fmt.Errorf("error retreiving approving block for utxo %s:%d: %v", utxo.txHash, utxo.vout, err)
+			}
+			if nextBlock != nil && !nextBlock.vote {
 				return -1, fmt.Errorf("utxo's block has been voted as invalid")
 			}
 		}
@@ -104,4 +107,15 @@ func (utxo *UTXO) PaysToPubkey(pubkey, _ []byte) bool {
 	pkHash := dcrutil.Hash160(pubkey)
 	extracted := extractPubKeyHash(utxo.pkScript)
 	return extracted != nil && bytes.Equal(extracted, pkHash)
+}
+
+// ScriptSize returns the maximum spend script size of the UTXO, in bytes.
+func (utxo *UTXO) ScriptSize() uint32 {
+	if isPubKeyHashScript(utxo.pkScript) {
+		return P2PKHSigScriptSize
+	}
+	// This condition should be impossible. If the UTXO was created, it has a
+	// supported script type.
+	log.Errorf("utxo found with unsupported script")
+	return 0
 }

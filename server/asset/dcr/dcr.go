@@ -11,12 +11,30 @@ import (
 	"sync"
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1"
+	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/rpcclient/v4"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/dcrdex/server/asset"
+)
+
+var zeroHash chainhash.Hash
+
+const (
+	dcrToAtoms       = 1e8
+	SwapContractSize = 97
+	// P2PKHSigScriptSize is the worst case (largest) serialize size
+	// of a transaction input script that redeems a compressed P2PKH output.
+	// It is calculated as:
+	//
+	//   - OP_DATA_73
+	//   - 72 bytes DER signature + 1 byte sighash
+	//   - OP_DATA_33
+	//   - 33 bytes serialized compressed pubkey
+	P2PKHSigScriptSize = 1 + 73 + 1 + 33
 )
 
 // dcrNode represents a blockchain information fetcher. In practice, it is
@@ -32,7 +50,7 @@ type dcrNode interface {
 // dcrBackend is an asset backend for Decred. It has utilities for fetching UTXO
 // information and subscribing to block updates. It maintains a cache of block
 // data for quick lookups. dcrBackend implements asset.DEXAsset, so provides
-// exported methods for UTXO info and signature verification.
+// exported methods for DEX-related blockchain info.
 type dcrBackend struct {
 	// An application context provided as part of the DCRConfig. The dcrBackend
 	// will perform some cleanup when the context is cancelled.
@@ -76,7 +94,10 @@ func NewDCR(cfg *DCRConfig) (*dcrBackend, error) {
 	if err != nil {
 		return nil, err
 	}
-	dcr.client.NotifyBlocks()
+	err = dcr.client.NotifyBlocks()
+	if err != nil {
+		return nil, fmt.Errorf("error registering for block notifications")
+	}
 	dcr.node = dcr.client
 	// Prime the cache with the best block.
 	bestHash, _, err := dcr.client.GetBestBlock()
@@ -92,7 +113,94 @@ func NewDCR(cfg *DCRConfig) (*dcrBackend, error) {
 	return dcr, nil
 }
 
-// unconnectedDCR returns a DCR without a node set. The node should be set
+// BlockChannel creates and returns a new channel on which to receive block
+// updates. If the returned channel is ever blocking, there will be no error
+// logged from the dcr package. Part of the asset.DEXAsset interface.
+func (dcr *dcrBackend) BlockChannel(size int) chan uint32 {
+	c := make(chan uint32, size)
+	dcr.signalMtx.Lock()
+	defer dcr.signalMtx.Unlock()
+	dcr.blockChans = append(dcr.blockChans, c)
+	return c
+}
+
+// UTXO is part of the asset.UTXO interface, so returns the asset.UTXO type.
+func (dcr *dcrBackend) UTXO(txid string, vout uint32) (asset.UTXO, error) {
+	txHash, err := chainhash.NewHashFromStr(txid)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
+	}
+	return dcr.utxo(txHash, vout)
+}
+
+func (dcr *dcrBackend) Transaction(txid string) (asset.DEXTx, error) {
+	txHash, err := chainhash.NewHashFromStr(txid)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
+	}
+	return dcr.transaction(txHash)
+}
+
+// Get the Tx. Transaction info is not cached, so every call will result in a
+// GetRawTransactionVerbose RPC call.
+func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+	}
+
+	// If it's not a mempool transaction, get and cache the block data.
+	var blockHash *chainhash.Hash
+	if verboseTx.BlockHash != "" {
+		blockHash, err = chainhash.NewHashFromStr(verboseTx.BlockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %v", verboseTx.BlockHash, txHash, err)
+		}
+		// Make sure the block info is cached.
+		_, err := dcr.getDcrBlock(blockHash)
+		if err != nil {
+			return nil, fmt.Errorf("error caching the block data for transaction %s", txHash)
+		}
+	}
+
+	// Parse inputs and outputs, grabbing only what's needed.
+	inputs := make([]txIn, 0, len(verboseTx.Vin))
+	for _, input := range verboseTx.Vin {
+		if input.Txid == "" {
+			inputs = append(inputs, txIn{vout: input.Vout})
+			continue
+		}
+		hash, err := chainhash.NewHashFromStr(input.Txid)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding previous tx hash %sfor tx %s: %v", input.Txid, txHash, err)
+		}
+		inputs = append(inputs, txIn{prevTx: *hash, vout: input.Vout})
+	}
+
+	outputs := make([]txOut, 0, len(verboseTx.Vout))
+	for vout, output := range verboseTx.Vout {
+		pkScript, err := hex.DecodeString(output.ScriptPubKey.Hex)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %v",
+				output.ScriptPubKey.Hex, txHash, vout, err)
+		}
+		outputs = append(outputs, txOut{
+			value:    uint64(output.Value * dcrToAtoms),
+			pkScript: pkScript,
+		})
+	}
+	return newTransaction(dcr, txHash, blockHash, verboseTx.BlockHeight, inputs, outputs), nil
+}
+
+// Shutdown down the rpcclient.Client.
+func (dcr *dcrBackend) shutdown() {
+	if dcr.client != nil {
+		dcr.client.Shutdown()
+		dcr.client.WaitForShutdown()
+	}
+}
+
+// unconnectedDCR returns a dcrBAckend without a node. The node should be set
 // before use.
 func unconnectedDCR(cfg *DCRConfig) *dcrBackend {
 	dcr := &dcrBackend{
@@ -105,28 +213,9 @@ func unconnectedDCR(cfg *DCRConfig) *dcrBackend {
 	return dcr
 }
 
-// Shutdown the node connection.
-func (dcr *dcrBackend) shutdown() {
-	if dcr.client != nil {
-		dcr.client.Shutdown()
-		dcr.client.WaitForShutdown()
-	}
-}
-
-// BlockChannel creates and returns a new channel on which to receive block
-// updates. If the returned channel is ever blocking, there will be no error
-// logged from the dcr package. Part of the asset.DEXAsset interface.
-func (dcr *dcrBackend) BlockChannel(size int) chan uint32 {
-	c := make(chan uint32, size)
-	dcr.signalMtx.Lock()
-	defer dcr.signalMtx.Unlock()
-	dcr.blockChans = append(dcr.blockChans, c)
-	return c
-}
-
-// superQueue should be run as a goroutine. The dcrd-registered block handler
-// should perform any necessary type conversion and then deposit the payload
-// into the anyQ channel.
+// superQueue should be run as a goroutine. The dcrd-registered handlers should
+// perform any necessary type conversion and then deposit the payload into the
+// anyQ channel.
 func (dcr *dcrBackend) superQueue() {
 out:
 	for {
@@ -183,17 +272,8 @@ func (dcr *dcrBackend) onBlockConnected(serializedHeader []byte, _ [][]byte) {
 	dcr.anyQ <- blockHeader.BlockHash()
 }
 
-// UTXO is part of the asset.UTXO interface, so returns the asset.UTXO type.
-func (dcr *dcrBackend) UTXO(txBytes []byte, vout uint32) (asset.UTXO, error) {
-	txHash := new(chainhash.Hash)
-	err := txHash.SetBytes(txBytes)
-	if err != nil {
-		return nil, fmt.Errorf("error setting hash bytes")
-	}
-	return dcr.utxo(txHash, vout)
-}
-
-// Get the UTXO populating the block data along the way.
+// Get the UTXO, populating the block data along the way. Only spendable UTXOs
+// with know types of pubkey script will be returned.
 func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32) (*UTXO, error) {
 	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(txHash, vout)
 	if err != nil {
@@ -231,8 +311,8 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32) (*UTXO, error) 
 	}, nil
 }
 
-// The backend only knows a subset of pubkey script types. Returns an error for
-// others.
+// Get information for an unspent transaction output. Returns an error if the
+// output has an unsupported pubkey script type.
 func (dcr *dcrBackend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
@@ -348,8 +428,8 @@ func isPubKeyHashScript(script []byte) bool {
 	return extractPubKeyHash(script) != nil
 }
 
-// extractPubKeyHash extracts the public key hash from the passed script if it
-// is a standard pay-to-pubkey-hash script.  It will return nil otherwise.
+// extractPubKeyHash extracts the pubkey hash from the passed script if it is a
+// /standard pay-to-pubkey-hash script.  It will return nil otherwise.
 func extractPubKeyHash(script []byte) []byte {
 	// A pay-to-pubkey-hash script is of the form:
 	//  OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
@@ -364,4 +444,67 @@ func extractPubKeyHash(script []byte) []byte {
 	}
 
 	return nil
+}
+
+// Extract the sender and receiver addresses from a swap contract. If the
+// provided script is not a swap contract, an error will be returned.
+func extractSwapAddresses(pkScript []byte) (string, string, error) {
+	// A swaap redemption sigScript is <pubkey> <secret> and satisfies the
+	// following swap contract.
+	//
+	// OP_IF
+	//  OP_SIZE hashSize OP_EQUALVERIFY OP_SHA256 OP_DATA_32 secretHash OP_EQUALVERIFY OP_DUP OP_HASH160 OP_DATA20 pkHashReceiver
+	//     1   +   2    +      1       +    1    +   1      +   32     +      1       +   1  +   1      +    1    +    20
+	// OP_ELSE
+	//  OP_DATA4 locktime OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 OP_DATA_20 pkHashSender
+	//     1    +    4   +           1          +   1   +  1   +    1     +   1      +    20
+	// OP_ENDIF
+	// OP_EQUALVERIFY
+	// OP_CHECKSIG
+	//
+	// 5 bytes if-else-endif-equalverify-checksig
+	// 1 + 2 + 1 + 1 + 1 + 32 + 1 + 1 + 1 + 1 + 20 = 62 bytes for redeem block
+	// 1 + 4 + 1 + 1 + 1 + 1 + 1 + 20 = 30 bytes for refund block
+	// 5 + 62 + 30 = 97 bytes
+	if len(pkScript) != SwapContractSize {
+		return "", "", fmt.Errorf("incorrect swap contract length")
+	}
+	if pkScript[0] == txscript.OP_IF &&
+		pkScript[1] == txscript.OP_SIZE &&
+		// secret key hash size (2 bytes)
+		pkScript[4] == txscript.OP_EQUALVERIFY &&
+		pkScript[5] == txscript.OP_SHA256 &&
+		pkScript[6] == txscript.OP_DATA_32 &&
+		// secretHash (32 bytes)
+		pkScript[39] == txscript.OP_EQUALVERIFY &&
+		pkScript[40] == txscript.OP_DUP &&
+		pkScript[41] == txscript.OP_HASH160 &&
+		pkScript[42] == txscript.OP_DATA_20 &&
+		// receiver's pkh (20 bytes)
+		pkScript[63] == txscript.OP_ELSE &&
+		pkScript[64] == txscript.OP_DATA_4 &&
+		// time (4 bytes)
+		pkScript[69] == txscript.OP_CHECKLOCKTIMEVERIFY &&
+		pkScript[70] == txscript.OP_DROP &&
+		pkScript[71] == txscript.OP_DUP &&
+		pkScript[72] == txscript.OP_HASH160 &&
+		pkScript[73] == txscript.OP_DATA_20 &&
+		// sender's pkh (20 bytes)
+		pkScript[94] == txscript.OP_ENDIF &&
+		pkScript[95] == txscript.OP_EQUALVERIFY &&
+		pkScript[96] == txscript.OP_CHECKSIG {
+
+		receiverAddr, err := dcrutil.NewAddressPubKeyHash(pkScript[43:63], chainParams, dcrec.STEcdsaSecp256k1)
+		if err != nil {
+			return "", "", fmt.Errorf("error decoding address from recipient's pubkey hash")
+		}
+
+		senderAddr, err := dcrutil.NewAddressPubKeyHash(pkScript[74:94], chainParams, dcrec.STEcdsaSecp256k1)
+		if err != nil {
+			return "", "", fmt.Errorf("error decoding address from sender's pubkey hash")
+		}
+
+		return senderAddr.String(), receiverAddr.String(), nil
+	}
+	return "", "", fmt.Errorf("invalid swap contract")
 }
