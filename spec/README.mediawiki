@@ -988,7 +988,7 @@ the epoch match cycle) is left unfilled.
 |-
 | side      || string || one of "buy" or "sell"
 |-
-| ordersize || int    || order size, in atoms (*1e8). See notes on market buy orders below.
+| ordersize || int    || order size, in atoms. See notes on market buy orders below.
 |-
 | utxos     || &#91;[[#UTXO_Preparation|UTXO]]&#93; || list of backing UTXOs
 |-
