@@ -345,8 +345,8 @@ Shuffling is deterministic, using the Fisher-Yates algorithm where the
 random number generator seed is derived from the hash of the concatenated order
 [[#Order_ID|ID hashes]].
 Specifically for hash function '''''f''''', the seed is the 64-bit integer
-corresponding to the little-endian byte order interpretation first 8 bytes of
-the hash.
+corresponding to the little-endian byte order interpretation of the first 8
+bytes of the hash.
 The hash is computed as
 
 <!--H_{seed} = f(f(order_1) || f(order_2) || ... || f(order_N))-->
