@@ -345,7 +345,7 @@ Shuffling is deterministic, using the Fisher-Yates algorithm where the
 random number generator seed is derived from the hash of the concatenated order
 [[#Order_ID|ID hashes]].
 Specifically for hash function '''''f''''', the seed hash,
-'''''H<sub>seed</sub>''''' is computed as
+'''''H<sub>seed</sub>''''' is the first 8 bytes of the hash computed as
 
 <!--H_{seed} = f(f(order_1) || f(order_2) || ... || f(order_N))-->
 [[File:images/seed-eq.png]]
