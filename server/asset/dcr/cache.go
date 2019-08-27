@@ -21,18 +21,6 @@ type dcrBlock struct {
 	height   int64
 	orphaned bool
 	vote     bool // stakeholder vote result for the previous block
-	stxIDs   []chainhash.Hash
-}
-
-// Check if the given transaction hash is in the list of stake tree Transactions
-// for this block.
-func (block *dcrBlock) txInStakeTree(txHash *chainhash.Hash) bool {
-	for _, hash := range block.stxIDs {
-		if hash == *txHash {
-			return true
-		}
-	}
-	return false
 }
 
 // The blockCache caches block information to prevent repeated calls to
@@ -70,20 +58,6 @@ func (cache *blockCache) atHeight(height uint32) (*dcrBlock, bool) {
 	return blk, found
 }
 
-// Convert a slice of strings to their corresponding chainhash.Hash.
-func convertStxids(txids []string) []chainhash.Hash {
-	hashes := make([]chainhash.Hash, 0, len(txids))
-	for _, txid := range txids {
-		txHash, err := chainhash.NewHashFromStr(txid)
-		if err != nil {
-			log.Errorf("convertStxids error decoding transaction id %s: %v", txid, err)
-			continue
-		}
-		hashes = append(hashes, *txHash)
-	}
-	return hashes
-}
-
 // Add a block to the blockCache. This method will translate the RPC result
 // to a dcrBlock, returning the dcrBlock. If the block is not orphaned, it will
 // be added to the mainchain.
@@ -99,7 +73,6 @@ func (cache *blockCache) add(block *chainjson.GetBlockVerboseResult) (*dcrBlock,
 		height:   block.Height,
 		orphaned: block.Confirmations == -1,
 		vote:     block.VoteBits&1 != 0,
-		stxIDs:   convertStxids(block.STx),
 	}
 	cache.blocks[*hash] = blk
 
@@ -143,7 +116,6 @@ func (cache *blockCache) reorg(newTip int64) {
 			height:   block.height,
 			orphaned: true,
 			vote:     block.vote,
-			stxIDs:   block.stxIDs,
 		}
 	}
 	cache.tip = uint32(newTip)

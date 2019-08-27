@@ -2,14 +2,14 @@
 //
 // These tests can be run by using the -tags flag.
 //
-// go test -tags=dcrlive -run=LiveUTXO
+// go test -v -tags dcrlive -run LiveUTXO
 // -----------------------------------
 // This command will check the UTXO paths by iterating backwards through
 // the transactions in the mainchain, starting with mempool, and requesting
 // all found outputs through the dcrBackend.utxo method. All utxos must be
 // found or found to be spent.
 //
-// go test -tags=dcrlive -run=CacheAdvantage
+// go test -v -tags dcrlive -run CacheAdvantage
 // -----------------------------------------
 // Check the difference between using the block cache and requesting via RPC.
 
@@ -27,7 +27,6 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -52,8 +51,6 @@ func TestMain(m *testing.M) {
 		fmt.Printf("error reading dcrd config: %v\n", err)
 		return
 	}
-	// fmt.Printf("dcrd user: %s\n", cfg.RPCUser)
-	// fmt.Printf("dcrd pass: %s\n", cfg.RPCPass)
 	dcr, err = NewDCR(&DCRConfig{
 		Net:      mainnetName,
 		DcrdUser: cfg.RPCUser,
@@ -75,7 +72,10 @@ func TestLiveUTXO(t *testing.T) {
 	var bestHash *chainhash.Hash
 	var mempool []*wire.MsgTx
 	var txs []*wire.MsgTx
+	var p2shCount, immatureCountBefore, immatureCountAfter, stakeCount int
+	var currentHeight, tipHeight int64
 	maturity := uint32(chainParams.CoinbaseMaturity)
+	numBlocks := 512
 
 	// Check if the best hash is still bestHash.
 	blockChanged := func() bool {
@@ -122,23 +122,44 @@ func TestLiveUTXO(t *testing.T) {
 		mempool = getMsgTxs(mpHashes)
 	}
 
-	// checkTransactions checks that the UTXO for a all outputs is what is
-	// expected.
+	// checkTransactions checks that the UTXO for all outputs is what is expected.
 	checkTransactions := func(expectedConfs uint32, txSet []*wire.MsgTx) error {
 		txs = append(txs, txSet...)
-		for i, msgTx := range txSet {
-			if i == 0 && expectedConfs < maturity {
-				continue
-			}
+		for _, msgTx := range txSet {
 			txHash := msgTx.CachedTxHash()
 			for vout, out := range msgTx.TxOut {
 				if out.Value == 0 {
 					continue
 				}
+				if out.Version != currentScriptVersion {
+					continue
+				}
+				scriptType := parseScriptType(currentScriptVersion, out.PkScript, nil)
+				// We can't do P2SH during live testing, because we don't have the
+				// scripts. Just count them for now.
+				if scriptType.isP2SH() {
+					p2shCount++
+					continue
+				}
+				if scriptType.isStake() {
+					stakeCount++
+				}
 				// Check if its an acceptable script type.
-				scriptTypeOK := isAcceptableScript(out.PkScript)
+				scriptTypeOK := scriptType != scriptUnsupported
 				// Now try to get the UXO with the dcrBackend
-				utxo, err := dcr.utxo(txHash, uint32(vout))
+				utxo, err := dcr.utxo(txHash, uint32(vout), nil)
+				// Can't do stakebase or cainbase.
+				// ToDo: Use a custom error and check it.
+				if err == immatureTransactionError {
+					// just count these for now.
+					confs := tipHeight - currentHeight + 1
+					if confs < int64(maturity) {
+						immatureCountBefore++
+					} else {
+						immatureCountAfter++
+					}
+					continue
+				}
 				// There are 4 possibilities
 				// 1. script is of acceptable type and utxo was found, in which case there
 				//    should be zero confirmations (unless a new block snuck in).
@@ -169,10 +190,7 @@ func TestLiveUTXO(t *testing.T) {
 				case !scriptTypeOK && err == nil:
 					return fmt.Errorf("received UTXO for unacceptable script type")
 				default: // !scriptTypeOK && err != nil
-					// should receive an UnsupportedScriptError
-					if err != asset.UnsupportedScriptError {
-						return fmt.Errorf("expected unsupported script error for %s:%d, but received '%v'", txHash, vout, err)
-					}
+					// this is normal. Do nothing.
 				} // end switch
 			} // end tx check
 		} // end tx loop
@@ -200,6 +218,7 @@ func TestLiveUTXO(t *testing.T) {
 	// that a block change was detected so the test should be run again.
 	checkNextBlock := func() bool {
 		block, err := dcr.client.GetBlock(prevHash)
+		currentHeight = int64(block.Header.Height)
 		if err != nil {
 			t.Fatalf("error retrieving previous block (%s): %v", prevHash, err)
 		}
@@ -215,8 +234,9 @@ func TestLiveUTXO(t *testing.T) {
 	for {
 		// The loop can continue until a test completes without any block changes.
 		var err error
-		bestHash, _, err = dcr.client.GetBestBlock()
+		bestHash, currentHeight, err = dcr.client.GetBestBlock()
 		prevHash = bestHash
+		tipHeight = currentHeight
 		if err != nil {
 			t.Fatalf("error retreiving best block: %v", err)
 		}
@@ -228,7 +248,7 @@ func TestLiveUTXO(t *testing.T) {
 		// Scan 10 more blocks.
 		confs = 1
 		startOver := false
-		for i := 0; i < 10; i++ {
+		for i := 0; i < numBlocks; i++ {
 			if checkNextBlock() {
 				startOver = true
 				break
@@ -238,6 +258,10 @@ func TestLiveUTXO(t *testing.T) {
 			break
 		}
 	}
+	t.Logf("%d P2SH outputs skipped", p2shCount)
+	t.Logf("%d immature transactions in the last %d blocks", immatureCountBefore, maturity)
+	t.Logf("%d immature transactions before %d blocks ago", immatureCountAfter, maturity)
+	t.Logf("%d stake transactions", stakeCount)
 }
 
 func TestCacheAdvantage(t *testing.T) {
@@ -263,7 +287,7 @@ func TestCacheAdvantage(t *testing.T) {
 			t.Fatalf("error decoding block id %s: %v", block.PreviousHash, err)
 		}
 	}
-	fmt.Printf("%d blocks fetched via RPC in %.3f ms\n", numBlocks, float64(time.Since(start).Nanoseconds())/1e6)
+	t.Logf("%d blocks fetched via RPC in %.3f ms", numBlocks, float64(time.Since(start).Nanoseconds())/1e6)
 	// Now go back trough the blocks, summing the encoded size and building a
 	// slice of hashes.
 	cache := newBlockCache()
@@ -282,7 +306,7 @@ func TestCacheAdvantage(t *testing.T) {
 		}
 		hashes = append(hashes, hash)
 	}
-	fmt.Printf("%.1f MB of RPC bandwidth\n", float32(byteCount)/1e6)
+	t.Logf("%.1f MB of RPC bandwidth", float32(byteCount)/1e6)
 	start = time.Now()
 	// See how long it takes to retrieve the same block info from the cache.
 	for _, hash := range hashes {
@@ -292,5 +316,5 @@ func TestCacheAdvantage(t *testing.T) {
 		}
 		_ = b
 	}
-	fmt.Printf("%d cached blocks retreived in %.3f ms\n", numBlocks, float64(time.Since(start).Nanoseconds())/1e6)
+	t.Logf("%d cached blocks retreived in %.3f ms", numBlocks, float64(time.Since(start).Nanoseconds())/1e6)
 }

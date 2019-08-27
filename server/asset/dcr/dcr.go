@@ -4,37 +4,31 @@
 package dcr
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	"strings"
 	"sync"
 
+	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/rpcclient/v4"
-	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/dcrdex/server/asset"
 )
 
 var zeroHash chainhash.Hash
 
+type Error = asset.Error
+
 const (
-	dcrToAtoms       = 1e8
-	SwapContractSize = 97
-	// P2PKHSigScriptSize is the worst case (largest) serialize size
-	// of a transaction input script that redeems a compressed P2PKH output.
-	// It is calculated as:
-	//
-	//   - OP_DATA_73
-	//   - 72 bytes DER signature + 1 byte sighash
-	//   - OP_DATA_33
-	//   - 33 bytes serialized compressed pubkey
-	P2PKHSigScriptSize = 1 + 73 + 1 + 33
+	dcrToAtoms               = 1e8
+	immatureTransactionError = Error("immature output")
 )
 
 // dcrNode represents a blockchain information fetcher. In practice, it is
@@ -125,12 +119,12 @@ func (dcr *dcrBackend) BlockChannel(size int) chan uint32 {
 }
 
 // UTXO is part of the asset.UTXO interface, so returns the asset.UTXO type.
-func (dcr *dcrBackend) UTXO(txid string, vout uint32) (asset.UTXO, error) {
+func (dcr *dcrBackend) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
 	}
-	return dcr.utxo(txHash, vout)
+	return dcr.utxo(txHash, vout, redeemScript)
 }
 
 func (dcr *dcrBackend) Transaction(txid string) (asset.DEXTx, error) {
@@ -148,6 +142,13 @@ func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
 	}
+
+	// Figure out if it's a stake transaction
+	msgTx, err := msgTxFromHex(verboseTx.Hex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode MsgTx from hex for transaction %s: %v", txHash, err)
+	}
+	isStake := stake.DetermineTxType(msgTx) != stake.TxTypeRegular
 
 	// If it's not a mempool transaction, get and cache the block data.
 	var blockHash *chainhash.Hash
@@ -189,7 +190,7 @@ func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 			pkScript: pkScript,
 		})
 	}
-	return newTransaction(dcr, txHash, blockHash, verboseTx.BlockHeight, inputs, outputs), nil
+	return newTransaction(dcr, txHash, blockHash, verboseTx.BlockHeight, isStake, inputs, outputs), nil
 }
 
 // Shutdown down the rpcclient.Client.
@@ -200,7 +201,7 @@ func (dcr *dcrBackend) shutdown() {
 	}
 }
 
-// unconnectedDCR returns a dcrBAckend without a node. The node should be set
+// unconnectedDCR returns a dcrBackend without a node. The node should be set
 // before use.
 func unconnectedDCR(cfg *DCRConfig) *dcrBackend {
 	dcr := &dcrBackend{
@@ -273,11 +274,48 @@ func (dcr *dcrBackend) onBlockConnected(serializedHeader []byte, _ [][]byte) {
 }
 
 // Get the UTXO, populating the block data along the way. Only spendable UTXOs
-// with know types of pubkey script will be returned.
-func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32) (*UTXO, error) {
+// with known types of pubkey script will be successfully retrieved.
+func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
 	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(txHash, vout)
 	if err != nil {
 		return nil, err
+	}
+	scriptType := parseScriptType(currentScriptVersion, pkScript, redeemScript)
+	if scriptType == scriptUnsupported {
+		return nil, asset.UnsupportedScriptError
+	}
+
+	// If it's a pay-to-script-hash, extract the script hash and check it against
+	// the hash of the user-supplied redeem script.
+	if scriptType.isP2SH() {
+		scriptHash, err := extractScriptHashByType(scriptType, pkScript)
+		if err != nil {
+			return nil, fmt.Errorf("utxo error: %v", err)
+		}
+		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
+			return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
+		}
+	}
+
+	// Get information about the signatures and pubkeys needed to spend the utxo.
+	scriptAddrs, err := extractScriptAddrs(scriptType, pkScript, redeemScript)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing utxo script addresses")
+	}
+
+	// Most supported script types are P2PKH, with or without a leading stake-tree
+	// byte, e.g. OP_SSGEN, OP_SSRTX
+	sigScriptSize := P2PKHSigScriptSize
+	// If it's a P2SH, the size must be calculated based on other factors.
+	if scriptType.isP2SH() {
+		// Start with the signatures.
+		sigScriptSize = 74 * scriptAddrs.nRequired // 73 max for sig, 1 for push code
+		// If there are pubkey-hash addresses, they'll need pubkeys.
+		if scriptAddrs.numPKH > 0 {
+			sigScriptSize += scriptAddrs.nRequired * (pubkeyLength + 1)
+		}
+		// Then add the length of the script and another push opcode byte.
+		sigScriptSize += len(redeemScript) + 1
 	}
 
 	blockHeight := uint32(verboseTx.BlockHeight)
@@ -295,45 +333,58 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32) (*UTXO, error) 
 		blockHeight = uint32(blk.height)
 		blockHash = blk.hash
 	}
+
+	// Coinbase, vote, and revocation transactions all must mature before
+	// spending.
 	var maturity int64
-	if txOut.Coinbase {
+	if scriptType.isStake() || txOut.Coinbase {
 		maturity = int64(chainParams.CoinbaseMaturity)
+	}
+	if txOut.Confirmations < maturity {
+		return nil, immatureTransactionError
 	}
 
 	return &UTXO{
-		dcr:       dcr,
-		height:    blockHeight,
-		blockHash: blockHash,
-		txHash:    *txHash,
-		vout:      vout,
-		maturity:  int32(maturity),
-		pkScript:  pkScript,
+		dcr:          dcr,
+		height:       blockHeight,
+		blockHash:    blockHash,
+		txHash:       *txHash,
+		vout:         vout,
+		maturity:     int32(maturity),
+		scriptType:   scriptType,
+		pkScript:     pkScript,
+		redeemScript: redeemScript,
+		numSigs:      scriptAddrs.nRequired,
+		size:         uint32(sigScriptSize),
 	}, nil
 }
 
-// Get information for an unspent transaction output. Returns an error if the
-// output has an unsupported pubkey script type.
+// MsgTxFromHex creates a wire.MsgTx by deserializing the hex transaction.
+func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
+	msgTx := wire.NewMsgTx()
+	if err := msgTx.Deserialize(hex.NewDecoder(strings.NewReader(txhex))); err != nil {
+		return nil, err
+	}
+	return msgTx, nil
+}
+
+// Get information for an unspent transaction output.
 func (dcr *dcrBackend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, *chainjson.TxRawResult, []byte, error) {
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("GetTxOut error for txid %s: %v", txHash, err)
+		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err)
 	}
 	if txOut == nil {
-		return txOut, nil, nil, fmt.Errorf("UTXO - no unspent txout found for %s:%d", txHash, vout)
+		return nil, nil, nil, fmt.Errorf("UTXO - no unspent txout found for %s:%d", txHash, vout)
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
-		return txOut, nil, nil, fmt.Errorf("pk script decode error for txid %s: %v", txHash, err)
+		return nil, nil, nil, fmt.Errorf("failed to decode pubkey from '%s' for output %s:%d", txOut.ScriptPubKey.Hex, txHash, vout)
 	}
-	if !isAcceptableScript(pkScript) {
-		return txOut, nil, pkScript, asset.UnsupportedScriptError
-	}
-
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
-		return txOut, nil, pkScript, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+		return nil, nil, nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
 	}
-
 	return txOut, verboseTx, pkScript, nil
 }
 
@@ -414,97 +465,4 @@ func connectNodeRPC(host, user, pass, cert string,
 	}
 
 	return dcrdClient, nil
-}
-
-// Check if the pubkey script is of a supported type.
-func isAcceptableScript(script []byte) bool {
-	// Only P2PKH for now.
-	return isPubKeyHashScript(script)
-}
-
-// isPubKeyHashScript returns whether or not the passed script is a standard
-// pay-to-pubkey-hash script.
-func isPubKeyHashScript(script []byte) bool {
-	return extractPubKeyHash(script) != nil
-}
-
-// extractPubKeyHash extracts the pubkey hash from the passed script if it is a
-// /standard pay-to-pubkey-hash script.  It will return nil otherwise.
-func extractPubKeyHash(script []byte) []byte {
-	// A pay-to-pubkey-hash script is of the form:
-	//  OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
-	if len(script) == 25 &&
-		script[0] == txscript.OP_DUP &&
-		script[1] == txscript.OP_HASH160 &&
-		script[2] == txscript.OP_DATA_20 &&
-		script[23] == txscript.OP_EQUALVERIFY &&
-		script[24] == txscript.OP_CHECKSIG {
-
-		return script[3:23]
-	}
-
-	return nil
-}
-
-// Extract the sender and receiver addresses from a swap contract. If the
-// provided script is not a swap contract, an error will be returned.
-func extractSwapAddresses(pkScript []byte) (string, string, error) {
-	// A swaap redemption sigScript is <pubkey> <secret> and satisfies the
-	// following swap contract.
-	//
-	// OP_IF
-	//  OP_SIZE hashSize OP_EQUALVERIFY OP_SHA256 OP_DATA_32 secretHash OP_EQUALVERIFY OP_DUP OP_HASH160 OP_DATA20 pkHashReceiver
-	//     1   +   2    +      1       +    1    +   1      +   32     +      1       +   1  +   1      +    1    +    20
-	// OP_ELSE
-	//  OP_DATA4 locktime OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 OP_DATA_20 pkHashSender
-	//     1    +    4   +           1          +   1   +  1   +    1     +   1      +    20
-	// OP_ENDIF
-	// OP_EQUALVERIFY
-	// OP_CHECKSIG
-	//
-	// 5 bytes if-else-endif-equalverify-checksig
-	// 1 + 2 + 1 + 1 + 1 + 32 + 1 + 1 + 1 + 1 + 20 = 62 bytes for redeem block
-	// 1 + 4 + 1 + 1 + 1 + 1 + 1 + 20 = 30 bytes for refund block
-	// 5 + 62 + 30 = 97 bytes
-	if len(pkScript) != SwapContractSize {
-		return "", "", fmt.Errorf("incorrect swap contract length")
-	}
-	if pkScript[0] == txscript.OP_IF &&
-		pkScript[1] == txscript.OP_SIZE &&
-		// secret key hash size (2 bytes)
-		pkScript[4] == txscript.OP_EQUALVERIFY &&
-		pkScript[5] == txscript.OP_SHA256 &&
-		pkScript[6] == txscript.OP_DATA_32 &&
-		// secretHash (32 bytes)
-		pkScript[39] == txscript.OP_EQUALVERIFY &&
-		pkScript[40] == txscript.OP_DUP &&
-		pkScript[41] == txscript.OP_HASH160 &&
-		pkScript[42] == txscript.OP_DATA_20 &&
-		// receiver's pkh (20 bytes)
-		pkScript[63] == txscript.OP_ELSE &&
-		pkScript[64] == txscript.OP_DATA_4 &&
-		// time (4 bytes)
-		pkScript[69] == txscript.OP_CHECKLOCKTIMEVERIFY &&
-		pkScript[70] == txscript.OP_DROP &&
-		pkScript[71] == txscript.OP_DUP &&
-		pkScript[72] == txscript.OP_HASH160 &&
-		pkScript[73] == txscript.OP_DATA_20 &&
-		// sender's pkh (20 bytes)
-		pkScript[94] == txscript.OP_ENDIF &&
-		pkScript[95] == txscript.OP_EQUALVERIFY &&
-		pkScript[96] == txscript.OP_CHECKSIG {
-
-		receiverAddr, err := dcrutil.NewAddressPubKeyHash(pkScript[43:63], chainParams, dcrec.STEcdsaSecp256k1)
-		if err != nil {
-			return "", "", fmt.Errorf("error decoding address from recipient's pubkey hash")
-		}
-
-		senderAddr, err := dcrutil.NewAddressPubKeyHash(pkScript[74:94], chainParams, dcrec.STEcdsaSecp256k1)
-		if err != nil {
-			return "", "", fmt.Errorf("error decoding address from sender's pubkey hash")
-		}
-
-		return senderAddr.String(), receiverAddr.String(), nil
-	}
-	return "", "", fmt.Errorf("invalid swap contract")
 }

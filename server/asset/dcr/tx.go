@@ -10,18 +10,21 @@ import (
 	"github.com/decred/dcrdex/server/asset"
 )
 
-// UTXO is information about a transaction. It must satisfy the asset.DEXTx
+// Tx is information about a transaction. It must satisfy the asset.DEXTx
 // interface to be DEX-compatible.
 type Tx struct {
+	// Because a Tx's validity and block info can change after creation, keep a
+	// dcrBackend around to query the state of the tx and update the block info.
 	dcr       *dcrBackend
 	blockHash chainhash.Hash
 	height    int64
 	hash      chainhash.Hash
 	ins       []txIn
 	outs      []txOut
+	isStake   bool
 }
 
-// Check that DEXTx satisfies the asset.DEXTx interface
+// Check that Tx satisfies the asset.DEXTx interface
 var _ asset.DEXTx = (*Tx)(nil)
 
 // A txIn holds information about a transaction input, mainly to verify which
@@ -38,7 +41,8 @@ type txOut struct {
 }
 
 // A getter for a new Tx.
-func newTransaction(dcr *dcrBackend, txHash, blockHash *chainhash.Hash, blockHeight int64, ins []txIn, outs []txOut) *Tx {
+func newTransaction(dcr *dcrBackend, txHash, blockHash *chainhash.Hash, blockHeight int64,
+	isStake bool, ins []txIn, outs []txOut) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash
 	if hash == nil {
@@ -51,6 +55,7 @@ func newTransaction(dcr *dcrBackend, txHash, blockHash *chainhash.Hash, blockHei
 		hash:      *txHash,
 		ins:       ins,
 		outs:      outs,
+		isStake:   isStake,
 	}
 }
 
@@ -102,7 +107,7 @@ func (tx *Tx) Confirmations() (int64, error) {
 		}
 	}
 	// If it's a regular transaction, check stakeholder validation.
-	if mainchainBlock != nil && !mainchainBlock.txInStakeTree(&tx.hash) {
+	if mainchainBlock != nil && !tx.isStake {
 		nextBlock, err := tx.dcr.getMainchainDcrBlock(uint32(tx.height) + 1)
 		if err != nil {
 			return -1, fmt.Errorf("error retreiving approving block for tx %s: %v", tx.hash, err)

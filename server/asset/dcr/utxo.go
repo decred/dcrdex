@@ -15,13 +15,19 @@ import (
 // A UTXO is information regarding an unspent transaction output. It must
 // satisfy the asset.UTXO interface to be DEX-compatible.
 type UTXO struct {
-	dcr       *dcrBackend
-	height    uint32
-	blockHash chainhash.Hash
-	txHash    chainhash.Hash
-	vout      uint32
-	maturity  int32
-	pkScript  []byte
+	// Because a UTXO's validity and block info can change after creation, keep a
+	// dcrBackend around to query the state of the tx and update the block info.
+	dcr          *dcrBackend
+	height       uint32
+	blockHash    chainhash.Hash
+	txHash       chainhash.Hash
+	vout         uint32
+	maturity     int32
+	scriptType   dcrScriptType
+	pkScript     []byte
+	redeemScript []byte
+	numSigs      int
+	size         uint32
 }
 
 // Check that UTXO satisfies the asset.UTXO interface
@@ -62,7 +68,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 		// If the UTXO's block has been orphaned, check for a new containing block.
 		if mainchainBlock.hash != utxo.blockHash {
 			// See if we can find the utxo in another block.
-			newUtxo, err := dcr.utxo(&utxo.txHash, utxo.vout)
+			newUtxo, err := dcr.utxo(&utxo.txHash, utxo.vout, utxo.redeemScript)
 			if err != nil {
 				return -1, fmt.Errorf("utxo block is not mainchain")
 			}
@@ -76,8 +82,9 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 				}
 			}
 		}
-		// If the block is set, check for stakeholder invalidation.
-		if mainchainBlock != nil && !mainchainBlock.txInStakeTree(&utxo.txHash) {
+		// If the block is set, check for stakeholder invalidation. Stakeholders
+		// can only invalidate a regular-tree transaction.
+		if mainchainBlock != nil && !utxo.scriptType.isStake() {
 			nextBlock, err := dcr.getMainchainDcrBlock(utxo.height + 1)
 			if err != nil {
 				return -1, fmt.Errorf("error retreiving approving block for utxo %s:%d: %v", utxo.txHash, utxo.vout, err)
@@ -100,22 +107,71 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 	return int64(confs), nil
 }
 
-// PaysToPubkey verifies that the utxo pays to the supplied public key. This is
-// an asset.DEXAsset method. The second argument is for additional data as would
-// be needed if P2SH support was enabled.
-func (utxo *UTXO) PaysToPubkey(pubkey, _ []byte) bool {
-	pkHash := dcrutil.Hash160(pubkey)
-	extracted := extractPubKeyHash(utxo.pkScript)
-	return extracted != nil && bytes.Equal(extracted, pkHash)
+// PaysToPubkeys verifies that the utxo pays to the supplied public key(s). This
+// is an asset.DEXAsset method.
+func (utxo *UTXO) PaysToPubkeys(pubkeys [][]byte) (bool, error) {
+	if len(pubkeys) < utxo.numSigs {
+		return false, fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(pubkeys))
+	}
+	scriptAddrs, err := extractScriptAddrs(utxo.scriptType, utxo.pkScript, utxo.redeemScript)
+	if err != nil {
+		return false, err
+	}
+	if scriptAddrs.nRequired != utxo.numSigs {
+		return false, fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.txHash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
+	}
+	numMatches := countMatches(pubkeys, scriptAddrs.pubkeys, nil)
+	numMatches += countMatches(pubkeys, scriptAddrs.pkHashes, dcrutil.Hash160)
+	if numMatches < utxo.numSigs {
+		return false, fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, numMatches)
+	}
+	return true, nil
+}
+
+// countMatches looks through a set of addresses and a set of pubkeys and counts
+// the matches.
+func countMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []byte) int {
+	var numMatches int
+	if hasher == nil {
+		hasher = func(a []byte) []byte { return a }
+	}
+	matches := make(map[string]struct{})
+	for _, addr := range addrs {
+		for _, pubkey := range pubkeys {
+			if bytes.Equal(addr.ScriptAddress(), hasher(pubkey)) {
+				addrStr := addr.String()
+				_, alreadyFound := matches[addrStr]
+				if alreadyFound {
+					continue
+				}
+				matches[addrStr] = struct{}{}
+				numMatches++
+				break
+			}
+		}
+	}
+	return numMatches
 }
 
 // ScriptSize returns the maximum spend script size of the UTXO, in bytes.
+// This is a method of the asset.UTXO interface.
 func (utxo *UTXO) ScriptSize() uint32 {
-	if isPubKeyHashScript(utxo.pkScript) {
-		return P2PKHSigScriptSize
-	}
-	// This condition should be impossible. If the UTXO was created, it has a
-	// supported script type.
-	log.Errorf("utxo found with unsupported script")
-	return 0
+	return utxo.size
+}
+
+// TxHash is the transaction hash. TxHash is a method of the asset.UTXO
+// interface.
+func (utxo *UTXO) TxHash() []byte {
+	return utxo.txHash.CloneBytes()
+}
+
+// Vout is the output index. Vout is a method of the asset.UTXO interface.
+func (utxo *UTXO) Vout() uint32 {
+	return utxo.vout
+}
+
+// TxID is the txid, which is the hex-encoded byte-reversed transaction hash.
+// TxID is a method of the asset.UTXO interface.
+func (utxo *UTXO) TxID() string {
+	return utxo.txHash.String()
 }

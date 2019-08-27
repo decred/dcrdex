@@ -16,35 +16,42 @@ const (
 // to monitor community conduct.
 type DEXAsset interface {
 	// UTXO should return a UTXO only for outputs that would be spendable on the
-	// blockchain immediately.
-	UTXO(txid string, vout uint32) (UTXO, error)
+	// blockchain immediately. Pay-to-script-hash UTXOs require the redeem script
+	// in order to calculate sigScript length and verify pubkeys.
+	UTXO(txid string, vout uint32, redeemScript []byte) (UTXO, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) chan uint32
-	// Transaction returns a DEXTx, which has utitlities for checking UTXO
-	// spending and swap contract info.
+	// Transaction returns a DEXTx, which has methods for checking UTXO spending
+	// and swap contract info.
 	Transaction(txid string) (DEXTx, error)
 	// VerifySignature verifies that the message was signed with the private key
-	// corresponding to the provided public key.
+	// corresponding to the provided serialized public key.
 	VerifySignature(message, pubkey, signature []byte) bool
 }
 
-// UTXO provides data about unspent transaction outputs.
+// UTXO provides data about an unspent transaction output.
 type UTXO interface {
 	// Confirmations returns the number of confirmations for a UTXO's transaction.
 	// Because a UTXO can become invalid after once being considered valid, this
 	// condition should be checked for during confirmation counting and an error
 	// returned if this UTXO is no longer ready to spend. An unmined transaction
 	// should have zero confirmations. A transaction in the current best block
-	// should have one transaction. A negative number can be returned if error
+	// should have one confirmation. A negative number can be returned if error
 	// is not nil.
 	Confirmations() (int64, error)
-	// PaysToPubkey checks that the hex-encoded pubkey can spend the UTXO. The
-	// script argument will be nil for P2PKH, but will be needed if P2SH scripts
-	// are supported.
-	PaysToPubkey(pubkey, script []byte) bool
-	// ScriptSize returns the UTXO's maximum spend script size, in bytes.
+	// PaysToPubkeys checks that the provided pubkeys can spend the UTXO.
+	PaysToPubkeys(pubkeys [][]byte) (bool, error)
+	// ScriptSize returns the UTXO's maximum sigScript byte count.
 	ScriptSize() uint32
+	// TxHash is a byte-slice of the UTXO's transaction hash.
+	TxHash() []byte
+	// TxID is a string identifier for the transaction, typically a hexadecimal
+	// representation of the byte-reversed transaction hash. Should always return
+	// the same value as the txid argument passed to (DEXAsset).UTXO.
+	TxID() string
+	// Vout is the output index of the UTXO.
+	Vout() uint32
 }
 
 // DEXTx provides methods for verifying transaction data.
@@ -60,7 +67,7 @@ type DEXTx interface {
 	// SpendsUTXO checks if the transaction spends a specified previous output.
 	SpendsUTXO(txid string, vout uint32) bool
 	// SwapDetails returns basic information about a swap transaction. The info
-	// returned is, in order, the sender's address, the receiver's address, and
-	// the value being sent, in atoms/satoshi.
+	// returned is, in order, the sender's address (time-locked return address),
+	// the receiver's address, and the value being sent, in atoms/satoshi.
 	SwapDetails(vout uint32) (string, string, uint64, error)
 }
