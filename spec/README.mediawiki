@@ -1206,9 +1206,7 @@ relay to the matching party.
 |-
 | timestamp  || int    || UTC timestamp. order broadcast time
 |-
-| secrethash || string || hex-encoded secret hash
-|-
-| address    || string || sender's return address
+| contract   || hex-encoded swap redeem script
 |-
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
@@ -1228,9 +1226,7 @@ relay to the matching party.
 |-
 | timestamp  || 8  || the client's UNIX timestamp
 |-
-| secrethash || 32 || hex-encoded secret hash
-|-
-| address    || varies || ASCII-encoded return address
+| contract   || varies || swap redeem script
 |}
 
 The DEX will respond with an acknowledgement.
@@ -1251,16 +1247,14 @@ contract and issue their redemption.
 |-
 | matchid   || int    || the match ID to use for progress notifications
 |-
-| secrethash || string || hex-encoded secret hash
+| timestamp || int  || the client's UNIX timestamp
 |-
-| timestamp  || 8  || the client's UNIX timestamp
+| contract  || string || hex-encoded swap redeem script
 |-
-| address    || string || sender's return address
-|-
-| sig        || string || DEX's signature of the serialized notification. serialization described below
+| sig       || string || DEX's signature of the serialized notification. serialization described below
 |}
 
-'''Contract notification serialization'''
+'''Audit notification serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
@@ -1269,11 +1263,9 @@ contract and issue their redemption.
 |-
 | matchid    || 8  || the ID assigned to this match
 |-
-| secrethash || 32 || hex-encoded secret hash
-|-
 | timestamp  || 8  || the client's UNIX timestamp
 |-
-| address    || varies || ASCII-encoded return address
+| contract   || varies || swap redeem script
 |}
 
 The client responds with an acknowledgement.
