@@ -831,18 +831,20 @@ As part of the order, the client will submit a list of ''UTXO objects''.
 |-
 | vout      || int    || the transaction output index
 |-
-| pubkey    || string || hex-encoded public key
+| pubkeys   || [string] || array of hex-encoded pubkeys which satisfy the pubkey script
 |-
-| sig       || string || hex-encoded signature of serialized UTXO data. serialization described below
+| sigs      || [string] || array of signatures of serialized UTXO. serialization described below
 |-
-| extradata || string || hex-encoded data. the script for P2SH. empty for P2PKH
+| redeem    || string || hex-encoded redeem script for P2SH. empty for P2PKH
 |}
 
-The <code>sig</code> is a signature of the UTXO data serialized according to the
-table below. The data is signed with the private key corresponding to
-<code>pubkey</code>.
-The <code>pubkey</code> must hash to a receiving address in the UTXO's pubkey
-script.
+In order to enable multi-signature support, more than one pubkey can be
+submitted. If more than one pubkey is submitted, there should be a signature
+for each one.
+The data is signed with the private key(s) corresponding to the
+<code>pubkeys</code>.
+The <code>pubkeys</code> themselves must correspond with addresses in the
+UTXO's pubkey script (or corresponding redeem script).
 
 '''UTXO serialization'''
 
