@@ -335,24 +335,48 @@ func testMsgTxRegular() *testMsgTx {
 	}
 }
 
+type testMsgTxSwap struct {
+	tx        *wire.MsgTx
+	vout      uint32
+	contract  []byte
+	recipient dcrutil.Address
+}
+
 // Create a swap (initialization) contract with random pubkeys and return the
 // pubkey script and addresses.
-func testSwapContract() ([]byte, dcrutil.Address, dcrutil.Address, []byte) {
+func testSwapContract() ([]byte, dcrutil.Address) {
 	contract := make([]byte, 0, SwapContractSize)
 	contract = addHex(contract, "6382012088c020") // This snippet checks the size of the secret and hashes it.
 	// hashed secret
 	secretKey := randomBytes(32)
 	contract = append(contract, secretKey...)
 	contract = addHex(contract, "8876a914") // check the hash
-	receiverPubkey, receiverPKH := genPubkey()
+	_, receiverPKH := genPubkey()
 	contract = append(contract, receiverPKH...)
 	contract = addHex(contract, "6704f690625db17576a914") // check the pubkey hash,  else
 	_, senderPKH := genPubkey()
 	contract = append(contract, senderPKH...)
 	contract = addHex(contract, "6888ac") // check the pubkey hash
 	receiverAddr, _ := dcrutil.NewAddressPubKeyHash(receiverPKH, chainParams, dcrec.STEcdsaSecp256k1)
-	senderAddr, _ := dcrutil.NewAddressPubKeyHash(senderPKH, chainParams, dcrec.STEcdsaSecp256k1)
-	return contract, senderAddr, receiverAddr, receiverPubkey
+	// senderAddr, _ := dcrutil.NewAddressPubKeyHash(senderPKH, chainParams, dcrec.STEcdsaSecp256k1)
+	return contract, receiverAddr
+}
+
+func testMsgTxSwapInit() *testMsgTxSwap {
+	msgTx := wire.NewMsgTx()
+	contract, recipient := testSwapContract()
+	pkScript := make([]byte, 0, 23)
+	pkScript = append(pkScript, txscript.OP_HASH160)
+	pkScript = append(pkScript, txscript.OP_DATA_20)
+	scriptHash := dcrutil.Hash160(contract)
+	pkScript = append(pkScript, scriptHash...)
+	pkScript = append(pkScript, txscript.OP_EQUAL)
+	msgTx.AddTxOut(wire.NewTxOut(1, pkScript))
+	return &testMsgTxSwap{
+		tx:        msgTx,
+		contract:  contract,
+		recipient: recipient,
+	}
 }
 
 // A MsgTx for a vote. Votes have a stricter set of requirements to pass
@@ -962,8 +986,8 @@ func TestSignatures(t *testing.T) {
 	)
 }
 
-// TestTransactions checks the transaction-related methods and functions.
-func TestTransactions(t *testing.T) {
+// TestTx checks the transaction-related methods and functions.
+func TestTx(t *testing.T) {
 	// Create a dcrBackend with the test node.
 	ctx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
@@ -984,10 +1008,11 @@ func TestTransactions(t *testing.T) {
 	testAddBlockVerbose(randomHash(), 1, blockHeight+1, 1)
 	// Add some random transaction at index 0.
 	verboseTx.Vout = append(verboseTx.Vout, testVout(1, randomBytes(20)))
-	// Add a swap transaction at index 1.
-	pkScript, sender, receiver, _ := testSwapContract()
-	verboseTx.Vout = append(verboseTx.Vout, testVout(1, pkScript))
-	// Make a spending transaction.
+	// Add a swap output at index 1.
+	swap := testMsgTxSwapInit()
+	swapTxOut := swap.tx.TxOut[swap.vout]
+	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(swapTxOut.Value)/dcrToAtoms, swapTxOut.PkScript))
+	// Make a transaction input spending some random utxo.
 	spentTx := randomHash()
 	spentVout := rand.Uint32()
 	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTx, spentVout))
@@ -1009,25 +1034,24 @@ func TestTransactions(t *testing.T) {
 	if !spent {
 		t.Fatalf("transaction not confirming spent utxo")
 	}
-	// Check that there is an error when trying to retrieve swap details for a
-	// non-swap transaction output.
-	_, _, _, err = dexTx.SwapDetails(0)
+
+	// Check that the swap contract doesn't match the first input.
+	_, _, err = dexTx.AuditContract(0, swap.contract)
 	if err == nil {
-		t.Fatalf("no error when retreiving swap details for non-swap output")
+		t.Fatalf("no error for contract audit on non-swap output")
 	}
-	sendAddr, receiveAddr, sentVal, err := dexTx.SwapDetails(1)
+	// Now try again with the correct vout.
+	recipient, swapVal, err := dexTx.AuditContract(1, swap.contract)
 	if err != nil {
-		t.Fatalf("received an error getting swap details: %v", err)
+		t.Fatalf("unexpected error auditing contract: %v", err)
 	}
-	if sendAddr != sender.String() {
-		t.Fatalf("expected sender address %s, got %s", sender, sendAddr)
+	if recipient != swap.recipient.String() {
+		t.Fatalf("wrong recipient. wanted '%s' got '%s'", recipient, swap.recipient.String())
 	}
-	if receiveAddr != receiver.String() {
-		t.Fatalf("expected receiver address %s, got %s", receiver, receiveAddr)
+	if swapVal != uint64(swapTxOut.Value) {
+		t.Fatalf("unexpected output value. wanted %d, got %d", swapVal, swapTxOut.Value)
 	}
-	if sentVal != 1e8 {
-		t.Fatalf("expected sent value 1e8, got %d", sentVal)
-	}
+
 	// Now do an invalidating reorg, and check that Confirmations returns an
 	// error.
 	newHash := testAddBlockVerbose(nil, 1, blockHeight+1, 0)

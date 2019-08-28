@@ -66,8 +66,8 @@ type DEXTx interface {
 	Confirmations() (int64, error)
 	// SpendsUTXO checks if the transaction spends a specified previous output.
 	SpendsUTXO(txid string, vout uint32) bool
-	// SwapDetails returns basic information about a swap transaction. The info
-	// returned is, in order, the sender's address (time-locked return address),
-	// the receiver's address, and the value being sent, in atoms/satoshi.
-	SwapDetails(vout uint32) (string, string, uint64, error)
+	// AuditContract checks that the provided swap contract hashes to the script
+	// hash specified in the output at the indicated vout. The receiving address
+	// and output value (in atoms) are returned if no error is encountered.
+	AuditContract(vout uint32, contract []byte) (string, uint64, error)
 }

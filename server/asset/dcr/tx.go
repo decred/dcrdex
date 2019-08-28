@@ -4,9 +4,11 @@
 package dcr
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrdex/server/asset"
 )
 
@@ -134,15 +136,24 @@ func (tx *Tx) SpendsUTXO(txid string, vout uint32) bool {
 	return false
 }
 
-// SwapDetails returns information about a swap contract at the specified
-// transaction output. If the specified output is not a swap contract, an
-// error will be returned. The returned data is sender address, receiver
-// address, and contract value, in atoms.
-func (tx *Tx) SwapDetails(vout uint32) (string, string, uint64, error) {
+// AuditContract checks that the provided swap contract hashes to the script
+// hash specified in the output at the indicated vout. The output value
+// (in atoms) and receiving address are returned if no error is encountered.
+func (tx *Tx) AuditContract(vout uint32, contract []byte) (string, uint64, error) {
 	if len(tx.outs) <= int(vout) {
-		return "", "", 0, fmt.Errorf("invalid index %d for transaction %s", vout, tx.hash)
+		return "", 0, fmt.Errorf("invalid index %d for transaction %s", vout, tx.hash)
 	}
 	output := tx.outs[int(vout)]
-	sender, receiver, err := extractSwapAddresses(output.pkScript)
-	return sender, receiver, output.value, err
+	scriptHash := extractScriptHash(output.pkScript)
+	if scriptHash == nil {
+		return "", 0, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, vout)
+	}
+	if !bytes.Equal(dcrutil.Hash160(contract), scriptHash) {
+		return "", 0, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, vout)
+	}
+	_, receiver, err := extractSwapAddresses(contract)
+	if err != nil {
+		return "", 0, fmt.Errorf("error extracting address from swap contract for %s:%d", tx.hash, vout)
+	}
+	return receiver, output.value, nil
 }
