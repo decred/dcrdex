@@ -1,11 +1,12 @@
-// This code is available on the terms of the project LICENSE.md file,
-// also available online at https://blueoakcouncil.org/license/1.0.0.
+// Copyright (c) 2019, The Decred developers
+// See LICENSE for details.
 
 // Package order defines the Order and Match types used throughout the DEX.
 package order
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"math"
 	"time"
 
@@ -19,6 +20,12 @@ const OrderIDSize = blake256.Size
 // OrderID is the unique identifier for each order.
 type OrderID [OrderIDSize]byte
 
+// String returns a hexadecimal representation of the OrderID. String implements
+// fmt.Stringer.
+func (oid OrderID) String() string {
+	return hex.EncodeToString(oid[:])
+}
+
 // OrderType distinguishes the different kinds of orders (e.g. limit, market,
 // cancel).
 type OrderType uint8
@@ -28,15 +35,6 @@ const (
 	LimitOrderType OrderType = iota
 	MarketOrderType
 	CancelOrderType
-)
-
-// OrderSide distinguishes buy and sell orders.
-type OrderSide uint8
-
-// The OrderSide value is either BuySide and SellSide.
-const (
-	BuySide OrderSide = iota
-	SellSide
 )
 
 // TimeInForce indicates how limit order execution is to be handled. That is,
@@ -121,11 +119,11 @@ func (p *Prefix) Serialize() []byte {
 	copy(b[:offset], p.AccountID[:])
 
 	// base asset
-	binary.LittleEndian.PutUint32(b[offset:offset+4], uint32(p.BaseAsset))
+	binary.LittleEndian.PutUint32(b[offset:offset+4], p.BaseAsset)
 	offset += 4
 
 	// quote asset
-	binary.LittleEndian.PutUint32(b[offset:offset+4], uint32(p.QuoteAsset))
+	binary.LittleEndian.PutUint32(b[offset:offset+4], p.QuoteAsset)
 	offset += 4
 
 	// order type (e.g. market, limit, cancel)
@@ -150,14 +148,22 @@ func (p *Prefix) Serialize() []byte {
 type MarketOrder struct {
 	Prefix
 	UTXOs    []UTXO
-	Side     OrderSide
+	Sell     bool
 	Quantity uint64
 	Address  string
+
+	// Filled is not part of the order's serialization.
+	Filled uint64
 }
 
 // ID computes the order ID.
 func (o *MarketOrder) ID() OrderID {
 	return calcOrderID(o)
+}
+
+// UID computes the order ID, returning the string representation.
+func (o *MarketOrder) UID() string {
+	return o.ID().String()
 }
 
 // SerializeSize returns the length of the serialized MarketOrder.
@@ -193,7 +199,11 @@ func (o *MarketOrder) Serialize() []byte {
 	}
 
 	// order side
-	b[offset] = uint8(o.Side)
+	var side uint8
+	if o.Sell {
+		side = 1
+	}
+	b[offset] = side
 	offset++
 
 	// order quantity
@@ -210,6 +220,11 @@ func (o *MarketOrder) Type() OrderType {
 	return MarketOrderType
 }
 
+// Remaining returns the remaining order amount.
+func (o *MarketOrder) Remaining() uint64 {
+	return o.Quantity - o.Filled
+}
+
 // Ensure MarketOrder is an Order.
 var _ Order = (*MarketOrder)(nil)
 
@@ -224,6 +239,11 @@ type LimitOrder struct {
 // ID computes the order ID.
 func (o *LimitOrder) ID() OrderID {
 	return calcOrderID(o)
+}
+
+// UID computes the order ID, returning the string representation.
+func (o *LimitOrder) UID() string {
+	return o.ID().String()
 }
 
 // SerializeSize returns the length of the serialized LimitOrder.
@@ -264,12 +284,17 @@ var _ Order = (*LimitOrder)(nil)
 // the order to be canceled.
 type CancelOrder struct {
 	Prefix
-	OrderID
+	TargetOrderID OrderID
 }
 
 // ID computes the order ID.
 func (o *CancelOrder) ID() OrderID {
 	return calcOrderID(o)
+}
+
+// UID computes the order ID, returning the string representation.
+func (o *CancelOrder) UID() string {
+	return o.ID().String()
 }
 
 // SerializeSize returns the length of the serialized CancelOrder.
@@ -279,12 +304,17 @@ func (o *CancelOrder) SerializeSize() int {
 
 // Serialize marshals the CancelOrder into a []byte.
 func (o *CancelOrder) Serialize() []byte {
-	return append(o.Prefix.Serialize(), o.OrderID[:]...)
+	return append(o.Prefix.Serialize(), o.TargetOrderID[:]...)
 }
 
 // Type returns CancelOrderType for a CancelOrder.
 func (o *CancelOrder) Type() OrderType {
 	return CancelOrderType
+}
+
+// Remaining always returns 0 for a CancelOrder.
+func (o *CancelOrder) Remaining() uint64 {
+	return 0
 }
 
 // Ensure LimitOrder is an Order.

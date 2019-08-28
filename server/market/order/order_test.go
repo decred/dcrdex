@@ -87,7 +87,7 @@ func TestMarketOrder_Serialize(t *testing.T) {
 	type fields struct {
 		Prefix   Prefix
 		UTXOs    []UTXO
-		Side     OrderSide
+		Sell     bool
 		Quantity uint64
 		Address  string
 	}
@@ -108,7 +108,7 @@ func TestMarketOrder_Serialize(t *testing.T) {
 					ServerTime: time.Unix(1566497656, 0),
 				},
 				UTXOs:    []UTXO{},
-				Side:     BuySide,
+				Sell:     false,
 				Quantity: 132413241324,
 				Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 			},
@@ -130,7 +130,7 @@ func TestMarketOrder_Serialize(t *testing.T) {
 			o := &MarketOrder{
 				Prefix:   tt.fields.Prefix,
 				UTXOs:    tt.fields.UTXOs,
-				Side:     tt.fields.Side,
+				Sell:     tt.fields.Sell,
 				Quantity: tt.fields.Quantity,
 				Address:  tt.fields.Address,
 			}
@@ -171,7 +171,7 @@ func TestLimitOrder_Serialize(t *testing.T) {
 						ServerTime: time.Unix(1566497656, 0),
 					},
 					UTXOs:    []UTXO{},
-					Side:     BuySide,
+					Sell:     false,
 					Quantity: 132413241324,
 					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
@@ -213,8 +213,8 @@ func TestLimitOrder_Serialize(t *testing.T) {
 
 func TestCancelOrder_Serialize(t *testing.T) {
 	type fields struct {
-		Prefix  Prefix
-		OrderID OrderID
+		Prefix        Prefix
+		TargetOrderID OrderID
 	}
 	tests := []struct {
 		name   string
@@ -232,7 +232,7 @@ func TestCancelOrder_Serialize(t *testing.T) {
 					ClientTime: time.Unix(1566497693, 0),
 					ServerTime: time.Unix(1566497696, 0),
 				},
-				OrderID: OrderID{0xce, 0x8c, 0xc8, 0xd, 0xda, 0x9a, 0x40, 0xbb, 0x43,
+				TargetOrderID: OrderID{0xce, 0x8c, 0xc8, 0xd, 0xda, 0x9a, 0x40, 0xbb, 0x43,
 					0xba, 0x58, 0x9, 0x75, 0xfd, 0x23, 0x85, 0x4c, 0x4, 0x4d, 0x8, 0x12,
 					0x54, 0x1f, 0x88, 0x25, 0x48, 0xaa, 0x8, 0x78, 0xe5, 0xa2, 0x67},
 			},
@@ -250,8 +250,8 @@ func TestCancelOrder_Serialize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &CancelOrder{
-				Prefix:  tt.fields.Prefix,
-				OrderID: tt.fields.OrderID,
+				Prefix:        tt.fields.Prefix,
+				TargetOrderID: tt.fields.TargetOrderID,
 			}
 			got := o.Serialize()
 			if !reflect.DeepEqual(got, tt.want) {
@@ -274,7 +274,7 @@ func TestMarketOrder_ID(t *testing.T) {
 	type fields struct {
 		Prefix   Prefix
 		UTXOs    []UTXO
-		Side     OrderSide
+		Sell     bool
 		Quantity uint64
 		Address  string
 	}
@@ -295,7 +295,7 @@ func TestMarketOrder_ID(t *testing.T) {
 					ServerTime: time.Unix(1566497656, 0),
 				},
 				UTXOs:    []UTXO{},
-				Side:     BuySide,
+				Sell:     false,
 				Quantity: 132413241324,
 				Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 			},
@@ -307,7 +307,7 @@ func TestMarketOrder_ID(t *testing.T) {
 			o := &MarketOrder{
 				Prefix:   tt.fields.Prefix,
 				UTXOs:    tt.fields.UTXOs,
-				Side:     tt.fields.Side,
+				Sell:     tt.fields.Sell,
 				Quantity: tt.fields.Quantity,
 				Address:  tt.fields.Address,
 			}
@@ -346,7 +346,7 @@ func TestLimitOrder_ID(t *testing.T) {
 						ServerTime: time.Unix(1566497656, 0),
 					},
 					UTXOs:    []UTXO{},
-					Side:     BuySide,
+					Sell:     false,
 					Quantity: 132413241324,
 					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
@@ -379,8 +379,8 @@ func TestCancelOrder_ID(t *testing.T) {
 	copy(orderID[:], orderID0)
 
 	type fields struct {
-		Prefix  Prefix
-		OrderID OrderID
+		Prefix        Prefix
+		TargetOrderID OrderID
 	}
 	tests := []struct {
 		name   string
@@ -398,7 +398,7 @@ func TestCancelOrder_ID(t *testing.T) {
 					ClientTime: time.Unix(1566497693, 0),
 					ServerTime: time.Unix(1566497696, 0),
 				},
-				OrderID: limitOrderID,
+				TargetOrderID: limitOrderID,
 			},
 			orderID,
 		},
@@ -406,8 +406,8 @@ func TestCancelOrder_ID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &CancelOrder{
-				Prefix:  tt.fields.Prefix,
-				OrderID: tt.fields.OrderID,
+				Prefix:        tt.fields.Prefix,
+				TargetOrderID: tt.fields.TargetOrderID,
 			}
 			if got := o.ID(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("CancelOrder.ID() = %x, want %x", got, tt.want)
