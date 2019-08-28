@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 // Package order defines the Order and Match types used throughout the DEX.
 package order
 
@@ -53,10 +56,27 @@ const (
 // Order specifies the methods required for a type to function as a DEX order.
 // See the concrete implementations of MarketOrder, LimitOrder, and CancelOrder.
 type Order interface {
+	// ID computes the Order's ID from its serialization as per the spec.
 	ID() OrderID
+
+	// UID gives the string representation of the order ID. It is named to
+	// reflect the intent of providing a unique identifier.
+	UID() string
+
+	// Serialize marshals the order as per the spec.
 	Serialize() []byte
+
+	// SerializeSize gives the length of the serialized order in bytes.
 	SerializeSize() int
+
+	// Type indicates the Order's type (e.g. LimitOrder, MarketOrder, etc.).
 	Type() OrderType
+
+	// Time returns the Order's server time, when it was received by the server.
+	Time() int64
+
+	// Remaining computes the unfilled amount of the order.
+	Remaining() uint64
 }
 
 // An order's ID is computed as the Blake-256 hash of the serialized order.
