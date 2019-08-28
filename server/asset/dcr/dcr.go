@@ -41,7 +41,7 @@ type dcrNode interface {
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 }
 
-// dcrBackend is an asset backend for Decred. It has utilities for fetching UTXO
+// dcrBackend is an asset backend for Decred. It has methods for fetching UTXO
 // information and subscribing to block updates. It maintains a cache of block
 // data for quick lookups. dcrBackend implements asset.DEXAsset, so provides
 // exported methods for DEX-related blockchain info.
@@ -127,6 +127,8 @@ func (dcr *dcrBackend) UTXO(txid string, vout uint32, redeemScript []byte) (asse
 	return dcr.utxo(txHash, vout, redeemScript)
 }
 
+// Transaction is part of the asset.DEXTx interface, so includes methods for
+// checking spent utxos and validating swap contracts.
 func (dcr *dcrBackend) Transaction(txid string) (asset.DEXTx, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
@@ -270,7 +272,8 @@ func (dcr *dcrBackend) onBlockConnected(serializedHeader []byte, _ [][]byte) {
 		log.Errorf("error decoding serialized header: %v", err)
 		return
 	}
-	dcr.anyQ <- blockHeader.BlockHash()
+	h := blockHeader.BlockHash()
+	dcr.anyQ <- &h
 }
 
 // Get the UTXO, populating the block data along the way. Only spendable UTXOs
@@ -303,8 +306,7 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		return nil, fmt.Errorf("error parsing utxo script addresses")
 	}
 
-	// Most supported script types are P2PKH, with or without a leading stake-tree
-	// byte, e.g. OP_SSGEN, OP_SSRTX
+	// Most supported script types are P2PKH.
 	sigScriptSize := P2PKHSigScriptSize
 	// If it's a P2SH, the size must be calculated based on other factors.
 	if scriptType.isP2SH() {
@@ -355,7 +357,10 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		pkScript:     pkScript,
 		redeemScript: redeemScript,
 		numSigs:      scriptAddrs.nRequired,
-		size:         uint32(sigScriptSize),
+		// The total size associated with the wire.TxIn. See
+		// (wire.TxIn).SerializeSizeWitness and
+		// and (wire.TxIn).SerializeSizePrefix
+		spendSize: uint32(sigScriptSize) + txInOverhead,
 	}, nil
 }
 
@@ -442,7 +447,7 @@ func (dcr *dcrBackend) VerifySignature(msg, pkBytes, sigBytes []byte) bool {
 }
 
 // connectNodeRPC attempts to create a new websocket connection to a dcrd node
-// with the given credentials and optional notification handlers.
+// with the given credentials and notification handlers.
 func connectNodeRPC(host, user, pass, cert string,
 	notifications *rpcclient.NotificationHandlers) (*rpcclient.Client, error) {
 

@@ -27,7 +27,7 @@ type UTXO struct {
 	pkScript     []byte
 	redeemScript []byte
 	numSigs      int
-	size         uint32
+	spendSize    uint32
 }
 
 // Check that UTXO satisfies the asset.UTXO interface
@@ -156,7 +156,7 @@ func countMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte)
 // ScriptSize returns the maximum spend script size of the UTXO, in bytes.
 // This is a method of the asset.UTXO interface.
 func (utxo *UTXO) ScriptSize() uint32 {
-	return utxo.size
+	return utxo.spendSize
 }
 
 // TxHash is the transaction hash. TxHash is a method of the asset.UTXO

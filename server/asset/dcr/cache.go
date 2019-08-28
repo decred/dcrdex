@@ -12,10 +12,7 @@ import (
 )
 
 // The dcrBlock structure should hold a minimal amount of information about a
-// block needed to verify UTXO validity. The stake related transaction hashes
-// are stored for quick tx tree checks. More sophisticated methods such as
-// examining the pubkey scripts may be used in the future to make this structure
-// even smaller.
+// block needed to verify UTXO validity.
 type dcrBlock struct {
 	hash     chainhash.Hash
 	height   int64

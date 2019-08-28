@@ -97,13 +97,13 @@ func TestTidyConfig(t *testing.T) {
 	}
 }
 
-// The remaining tests use the testBlockchain which, is a stub for
+// The remaining tests use the testBlockchain which is a stub for
 // rpcclient.Client. UTXOs, transactions and blocks are added to the blockchain
 // as jsonrpc types to be requested by the dcrBackend.
 //
 // General formula for testing
-// 1. Create a dcrBackend with the node field set to a dcrNode-implementing stub
-// 2. Create a fake UTXO and all of the necessary jsonrpc-type blocks and
+// 1. Create a dcrBackend with the node field set to a testNode
+// 2. Create a fake UTXO and all of the associated jsonrpc-type blocks and
 //    transactions and add the to the test blockchain.
 // 3. Verify the dcrBackend and UTXO methods are returning whatever is expected.
 // 4. Optionally add more blocks and/or transactions to the blockchain and check
@@ -124,7 +124,7 @@ func randomHash() *chainhash.Hash {
 	return hash
 }
 
-// A fake blockchain to be used for RPC calls by the dcrNode.
+// A fake "blockchain" to be used for RPC calls by the dcrNode.
 type testBlockChain struct {
 	txOuts map[string]*chainjson.GetTxOutResult
 	txRaws map[chainhash.Hash]*chainjson.TxRawResult
@@ -136,7 +136,8 @@ type testBlockChain struct {
 // node stub to request.
 var testChain testBlockChain
 
-// This must be called before using the testNode.
+// This must be called before using the testNode, and should be called
+// in-between independent tests.
 func cleanTestChain() {
 	testChain = testBlockChain{
 		txOuts: make(map[string]*chainjson.GetTxOutResult),
@@ -303,7 +304,7 @@ func genPubkey() ([]byte, []byte) {
 
 // A pay-to-script-hash pubkey script.
 func newP2PKHScript() ([]byte, []byte, []byte) {
-	script := make([]byte, 0, SwapContractSize)
+	script := make([]byte, 0, P2PKHSigScriptSize)
 	script = addHex(script, "76a914")
 	pubkey, pkHash := genPubkey()
 	script = append(script, pkHash...)
@@ -335,6 +336,7 @@ func testMsgTxRegular() *testMsgTx {
 	}
 }
 
+// Information about a swap contract.
 type testMsgTxSwap struct {
 	tx        *wire.MsgTx
 	vout      uint32
@@ -345,7 +347,7 @@ type testMsgTxSwap struct {
 // Create a swap (initialization) contract with random pubkeys and return the
 // pubkey script and addresses.
 func testSwapContract() ([]byte, dcrutil.Address) {
-	contract := make([]byte, 0, SwapContractSize)
+	contract := make([]byte, 0, 25)
 	contract = addHex(contract, "6382012088c020") // This snippet checks the size of the secret and hashes it.
 	// hashed secret
 	secretKey := randomBytes(32)
@@ -362,6 +364,7 @@ func testSwapContract() ([]byte, dcrutil.Address) {
 	return contract, receiverAddr
 }
 
+// Create a transaction with a P2SH swap output at vout 0.
 func testMsgTxSwapInit() *testMsgTxSwap {
 	msgTx := wire.NewMsgTx()
 	contract, recipient := testSwapContract()
@@ -410,6 +413,7 @@ func testMsgTxVote() *testMsgTx {
 	}
 }
 
+// Information about a transaction with a P2SH output.
 type testMsgTxP2SH struct {
 	tx       *wire.MsgTx
 	pubkeys  [][]byte
@@ -558,7 +562,7 @@ func TestUTXOs(t *testing.T) {
 	}
 	// While we're here, check the spend script size is correct.
 	scriptSize := utxo.ScriptSize()
-	if scriptSize != P2PKHSigScriptSize {
+	if scriptSize != P2PKHSigScriptSize+txInOverhead {
 		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, scriptSize)
 	}
 	// Now "mine" the transaction.
@@ -1136,5 +1140,4 @@ func TestAuxiliary(t *testing.T) {
 	if utxo.TxID() != txid {
 		t.Fatalf("utxo txid doesn't match")
 	}
-
 }

@@ -103,7 +103,7 @@ func (tx *Tx) Confirmations() (int64, error) {
 			mainchainBlock = nil
 		} else {
 			mainchainBlock, found = tx.dcr.blockCache.atHeight(uint32(tx.height))
-			if !found {
+			if !found || mainchainBlock.hash != tx.blockHash {
 				return -1, fmt.Errorf("new block not found for utxo moved from orphaned block")
 			}
 		}

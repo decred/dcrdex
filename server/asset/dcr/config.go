@@ -32,7 +32,7 @@ var (
 // DCRConfig is passed to the constructor.
 type DCRConfig struct {
 	// Net should one of "mainnet", "testnet3", "simnet". Any other value will
-	// cause an tidyConfig error.
+	// cause a tidyConfig error.
 	Net string
 	// DcrdUser is the RPC username provided to dcrd configuration as the rpcuser
 	// parameter.

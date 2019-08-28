@@ -56,6 +56,8 @@ const (
 	P2PKHSigScriptSize = 1 + 73 + 1 + 33
 	// All pubkey scripts are assumed to be version 0.
 	currentScriptVersion = 0
+	// Overhead for a wire.TxIn with a script length < 254.
+	txInOverhead = 58
 )
 
 // parseScriptType creates a dcrScriptType bitmap for the script type. A script

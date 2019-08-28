@@ -1,6 +1,8 @@
 // +build dcrlive
 //
-// These tests can be run by using the -tags flag.
+// Since at least one live test runs for an hour, you should run live tests
+// individually using the -run flag. All of these tests will only run with the
+// 'dcrlive' build tag, specified with the -tags flag.
 //
 // go test -v -tags dcrlive -run LiveUTXO
 // -----------------------------------
@@ -12,6 +14,11 @@
 // go test -v -tags dcrlive -run CacheAdvantage
 // -----------------------------------------
 // Check the difference between using the block cache and requesting via RPC.
+//
+// go test -v -tags dcrlive -run BlockMonitor -timeout 61m
+// ------------------------------------------
+// Monitor the block chain for a while and make sure that the block cache is
+// updating appropriately.
 
 package dcr
 
@@ -317,4 +324,38 @@ func TestCacheAdvantage(t *testing.T) {
 		_ = b
 	}
 	t.Logf("%d cached blocks retreived in %.3f ms", numBlocks, float64(time.Since(start).Nanoseconds())/1e6)
+}
+
+// TestBlockMonitor is a live test that connects to dcrd and listens for block
+// updates, checking the state of the cache along the way.
+func TestBlockMonitor(t *testing.T) {
+	testDuration := 60 * time.Minute
+	fmt.Printf("Starting BlockMonitor test. Test will last for %d minutes\n", int(testDuration.Minutes()))
+	blockChan := dcr.BlockChannel(5)
+	expire := time.NewTimer(testDuration).C
+	lastHeight := dcr.blockCache.tipHeight()
+out:
+	for {
+		select {
+		case height := <-blockChan:
+			if height > lastHeight {
+				t.Logf("block received for height %d", height)
+			} else {
+				reorgDepth := lastHeight - height + 1
+				t.Logf("block received for block %d causes a %d block reorg", height, reorgDepth)
+			}
+			tipHeight := dcr.blockCache.tipHeight()
+			if tipHeight != height {
+				t.Fatalf("unexpected height after block notification. expected %d, received %d", height, tipHeight)
+			}
+			_, err := dcr.getMainchainDcrBlock(height)
+			if err != nil {
+				t.Fatalf("error getting newly connected block at height %d", height)
+			}
+		case <-dcr.ctx.Done():
+			break out
+		case <-expire:
+			break out
+		}
+	}
 }
