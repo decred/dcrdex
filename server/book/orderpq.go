@@ -13,6 +13,7 @@ import (
 type OrderRater interface {
 	UID() string
 	Rate() float64
+	Time() int64
 }
 
 type orderEntry struct {
@@ -22,11 +23,11 @@ type orderEntry struct {
 
 type orderHeap []*orderEntry
 
-// OrderPQ is a priority queue for orders, provided as an OrderRater, based on
+// OrderPQ is a priority queue for orders, provided as OrderRaters, based on
 // rate. A max-oriented queue with highest rates on top is constructed via
 // NewMaxOrderPQ, while a min-oriented queue is constructed via NewMinOrderPQ.
 type OrderPQ struct {
-	mtx      sync.RWMutex
+	mtx      sync.Mutex
 	oh       orderHeap
 	capacity uint32
 	lessFn   func(bi, bj OrderRater) bool
@@ -37,14 +38,14 @@ type OrderPQ struct {
 // with the given capacity, and sets the default LessFn for a min heap. Use
 // OrderPQ.SetLessFn to redefine the comparator.
 func NewMinOrderPQ(capacity uint32) *OrderPQ {
-	return newOrderPQ(capacity, LessByRate)
+	return newOrderPQ(capacity, LessByRateThenTime)
 }
 
 // NewMaxOrderPQ is the constructor for OrderPQ that initializes an empty heap
 // with the given capacity, and sets the default LessFn for a max heap. Use
 // OrderPQ.SetLessFn to redefine the comparator.
 func NewMaxOrderPQ(capacity uint32) *OrderPQ {
-	return newOrderPQ(capacity, GreaterByRate)
+	return newOrderPQ(capacity, GreaterByRateThenTime)
 }
 
 func newOrderPQ(cap uint32, lessFn func(bi, bj OrderRater) bool) *OrderPQ {
@@ -52,7 +53,7 @@ func newOrderPQ(cap uint32, lessFn func(bi, bj OrderRater) bool) *OrderPQ {
 		oh:       orderHeap{},
 		capacity: cap,
 		lessFn:   lessFn,
-		orders:   make(map[string]*orderEntry),
+		orders:   make(map[string]*orderEntry, cap),
 	}
 }
 
@@ -86,14 +87,32 @@ func (pq *OrderPQ) SetLessFn(lessFn func(bi, bj OrderRater) bool) {
 	pq.lessFn = lessFn
 }
 
-// LessByHeight defines a higher priority as having a higher rate.
+// LessByRate defines a higher priority as having a lower rate.
 func LessByRate(bi, bj OrderRater) bool {
 	return bi.Rate() < bj.Rate()
 }
 
-// GreaterByRate defines a higher priority as having a lower rate.
+// GreaterByRate defines a higher priority as having a higher rate.
 func GreaterByRate(bi, bj OrderRater) bool {
 	return bi.Rate() > bj.Rate()
+}
+
+// LessByRateThenTime defines a higher priority as having a lower rate, with
+// older orders breaking any tie.
+func LessByRateThenTime(bi, bj OrderRater) bool {
+	if bi.Rate() == bj.Rate() {
+		return bi.Time() < bj.Time()
+	}
+	return LessByRate(bi, bj)
+}
+
+// GreaterByRateThenTime defines a higher priority as having a higher rate, with
+// older orders breaking any tie.
+func GreaterByRateThenTime(bi, bj OrderRater) bool {
+	if bi.Rate() == bj.Rate() {
+		return bi.Time() < bj.Time()
+	}
+	return GreaterByRate(bi, bj)
 }
 
 // Push an order (a OrderRater). Use heap.Push, not this directly.
@@ -154,11 +173,29 @@ func (pq *OrderPQ) PeekBest() OrderRater {
 	return pq.oh[0].OrderRater
 }
 
-// ResetHeap creates a fresh queue given the input []*orderEntry. For every
-// element in the queue, ResetHeap resets the heap index. The heap is then
+// Reset creates a fresh queue given the input []OrderRater. For every
+// element in the queue, Reset resets the heap index. The heap is then
+// heapified. The input slice is note modifed.
+func (pq *OrderPQ) Reset(orders []OrderRater) {
+	pq.oh = make([]*orderEntry, 0, len(orders))
+	for i, o := range orders {
+		pq.oh = append(pq.oh, &orderEntry{
+			OrderRater: o,
+			heapIdx:    i,
+		})
+	}
+
+	pq.orders = make(map[string]*orderEntry, len(pq.oh))
+
+	// Do not call Reheap unless you want a deadlock.
+	heap.Init(pq)
+}
+
+// resetHeap creates a fresh queue given the input []*orderEntry. For every
+// element in the queue, resetHeap resets the heap index. The heap is then
 // heapified. NOTE: the input slice is modifed, but not reordered. A fresh slice
 // is created for PQ internal use.
-func (pq *OrderPQ) ResetHeap(oh []*orderEntry) {
+func (pq *OrderPQ) resetHeap(oh []*orderEntry) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 
@@ -169,7 +206,7 @@ func (pq *OrderPQ) ResetHeap(oh []*orderEntry) {
 	pq.oh = make([]*orderEntry, len(oh))
 	copy(pq.oh, oh)
 
-	pq.orders = make(map[string]*orderEntry)
+	pq.orders = make(map[string]*orderEntry, len(oh))
 
 	// Do not call Reheap unless you want a deadlock.
 	heap.Init(pq)
