@@ -9,10 +9,14 @@ import "github.com/decred/dcrdex/server/market/order"
 // type provided to the matcher. This Booker is just a hint.
 
 type Booker interface {
-	BestSell() *order.Order
-	BestBuy() *order.Order
-	Insert(*order.Order)
-	Remove(*order.Order)
+	LotSize() uint64
+	BuyCount() int
+	SellCount() int
+	BestSell() *order.LimitOrder
+	BestBuy() *order.LimitOrder
+	//Best(sell bool) *order.LimitOrder
+	Insert(*order.LimitOrder)
+	Remove(order.OrderID) (*order.LimitOrder, bool)
 }
 
 // type EpochQueuer interface {

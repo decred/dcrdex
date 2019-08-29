@@ -85,7 +85,7 @@ func calcOrderID(order Order) OrderID {
 // UTXO is the interface required to be satisfied by any asset's implementation
 // of a UTXO type.
 type UTXO interface {
-	TxHash() string
+	TxHash() []byte
 	Vout() uint32
 	Serialize() []byte
 	SerializeSize() int
@@ -94,8 +94,8 @@ type UTXO interface {
 // Prefix is the order prefix containing data fields common to all orders.
 type Prefix struct {
 	AccountID  account.AccountID
-	BaseAsset  uint32 // unused for CancelOrder?
-	QuoteAsset uint32 // unused for CancelOrder
+	BaseAsset  uint32 // must be 0 for CancelOrder
+	QuoteAsset uint32 // must be 0 for CancelOrder
 	OrderType  OrderType
 	ClientTime time.Time
 	ServerTime time.Time
@@ -107,6 +107,11 @@ const PrefixLen = account.HashSize + 4 + 4 + 1 + 8 + 8
 // SerializeSize returns the length of the serialized order Prefix.
 func (p *Prefix) SerializeSize() int {
 	return PrefixLen
+}
+
+// Time returns the order prefix's server time as a UNIX epoch time.
+func (p *Prefix) Time() int64 {
+	return p.ServerTime.Unix()
 }
 
 // Serialize marshals the Prefix into a []byte.
@@ -317,5 +322,5 @@ func (o *CancelOrder) Remaining() uint64 {
 	return 0
 }
 
-// Ensure LimitOrder is an Order.
+// Ensure CancelOrder is an Order.
 var _ Order = (*CancelOrder)(nil)

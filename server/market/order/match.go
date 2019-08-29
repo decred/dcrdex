@@ -8,6 +8,9 @@ package order
 // and partial fills.
 
 type Match struct {
-	Maker Order
-	Taker Order
+	Taker   Order
+	Makers  []*LimitOrder
+	Amounts []uint64
+	Rates   []float64
+	Total   uint64
 }
