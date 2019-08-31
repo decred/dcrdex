@@ -3,10 +3,13 @@
 
 package order
 
-// TODO. PLACEHOLDER. This Match is likely to be much different, especially
-// depending on whether match groups are required to deal with multiple makers
-// and partial fills.
-
+// Match represents the result of matching a single Taker order from the epoch
+// queue with one or more standing limit orders from the book, the Makers. The
+// Amounts and Rates of each limit order paired with the taker order are stored.
+// The Rates slice is for convenience as each rate must match with the Maker's
+// rates. However, one of the Amounts may be less than the full quantity of the
+// corresponding limit order, indicating a partial fill of the Maker. The sum of
+// the amounts, Total, is provided for convenience.
 type Match struct {
 	Taker   Order
 	Makers  []*LimitOrder
