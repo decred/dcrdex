@@ -371,8 +371,9 @@ left unfilled.
 Market orders and immediate limit orders cannot match orders further down the
 queue.
 
-When a limit order matches a limit order, the match is assigned the price
-rate of the taker's order.
+When a limit order from the queue matches a standing limit order on the book,
+the match is assigned the price rate of the maker's order (the standing order's
+price rate).
 
 The process continues with the next order in the list and iterates until all
 orders have been processed.
