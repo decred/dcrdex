@@ -957,9 +957,9 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | side       || 1 || 0 for buy, 1 for sell
 |-
-| quantity   || 8 || quanity to buy or sell (atoms)
+| quantity   || 8 || quantity to buy or sell (atoms)
 |-
-| address   || varies || client's receiving address
+| address    || varies || client's receiving address
 |-
 | rate       || 8 || price rate
 |-
@@ -1464,7 +1464,7 @@ Swap transactions must be created at the correct times (see
 
 In the event that the maker fails to start the atomic swap process with their
 initialization transaction, the taker will be notified that order execution is
-terminated due to failure of the taker to accept the order. The Maker's limit
+terminated due to failure of the maker to accept the order. The Maker's limit
 order will not go back on the order book, but they may be given the option to
 replace the order.
 
