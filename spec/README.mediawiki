@@ -459,7 +459,7 @@ pre-published for further validation.
 |-
 | pubkey    || string || hex-encoded public account key
 |-
-| timestamp || int    || UTC timestamp
+| timestamp || int    || UNIX timestamp
 |-
 | sig       || string || hex-encoded signature of serialized registration. serialization described below
 |}
@@ -469,7 +469,7 @@ pre-published for further validation.
 {|
 ! field     !! size (bytes) !! description
 |-
-| pubkey    || 32 || the user's public account key
+| pubkey    || 33 || the user's public account key
 |-
 | timestamp || 8  || the client's UNIX timestamp
 |}
@@ -495,15 +495,15 @@ pre-published for further validation.
 {|
 ! field      !! size (bytes) !! description
 |-
-| DEX pubkey || 32 || the server's public key
+| DEX pubkey || 33 || the server's public key
 |-
-| client pubkey || 32 || the client's public account  key
+| client pubkey || 33 || the client's public account  key
 |-
 | timestamp  || 8  || the server's UNIX timestamp
 |-
 | fee        || 8  || registration fee (atoms)
 |-
-| address    || varies || ASCII-encoded fee address
+| address    || varies || UTF-8 encoded fee address
 |}
 
 ===Step 2: Fee Notification===
@@ -861,7 +861,7 @@ UTXO's pubkey script (or corresponding redeem script).
 {|
 ! field   !! size (bytes) !! description
 |-
-| tx hash || 32 || the transaction hash
+| tx hash || asset-dependent || the transaction hash
 |-
 | vout    || 4  || the UTXO's transaction output index
 |}
@@ -920,7 +920,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | accountid   || string || client's account ID
 |-
-| timestamp   || int    || UTC timestamp generated at the time of order submission of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.
+| timestamp   || int    || UNIX timestamp generated at the time of order submission of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.
 |-
 | tradepair   || string || market. trading pair. e.g. DCR/BTC
 |-
@@ -992,7 +992,7 @@ the epoch match cycle) is left unfilled.
 |-
 | accountid || string || client's account ID
 |-
-| timestamp || int    || UTC timestamp. order broadcast time
+| timestamp || int    || UNIX timestamp. order broadcast time
 |-
 | tradepair || string || market. trading pair. e.g. DCR/BTC
 |-
@@ -1093,7 +1093,7 @@ This is by design and discourages certain types of spoofing.
 |-
 | accountid || string || client's account ID
 |-
-| timestamp || int    || UTC timestamp. order broadcast time
+| timestamp || int    || UNIX timestamp. order broadcast time
 |-
 | tradepair || string || market. trading pair. e.g. DCR/BTC
 |-
@@ -1145,7 +1145,7 @@ If the client's order has one or more matches at the end of a match cycle, the
 DEX will send a list of '''match objects'''. The maker is the first to act, so
 after sending their acknowledgement, they should broadcast their initialization
 transaction and inform the server with an <code>init</code> notification
-(described next).
+(described after).
 
 '''JSON-RPC method:''' <code>match</code>, '''originator:''' DEX
 
@@ -1182,7 +1182,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | timestamp  || 8  || the client's UNIX timestamp
 |-
-| address    || varies || ASCII encoded receiving address for the match
+| address    || varies || UTF-8 encoded receiving address for the match
 |}
 
 The client will respond with a list of signed match acknowledgements.
@@ -1204,9 +1204,9 @@ relay to the matching party.
 |-
 | vout       || int    || the output index
 |-
-| timestamp  || int    || UTC timestamp. order broadcast time
+| timestamp  || int    || UNIX timestamp. order broadcast time
 |-
-| contract   || hex-encoded swap redeem script
+| contract   || string || hex-encoded swap redeem script
 |-
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
@@ -1220,13 +1220,13 @@ relay to the matching party.
 |-
 | matchid    || 8  || the ID assigned to this match
 |-
-| tx hash    || 32  || the transaction hash
+| tx hash    || asset-dependent  || the transaction hash
 |-
 | vout       || 4 || the output index
 |-
 | timestamp  || 8  || the client's UNIX timestamp
 |-
-| contract   || varies || swap redeem script
+| contract   || asset-dependent || swap redeem script
 |}
 
 The DEX will respond with an acknowledgement.
@@ -1265,7 +1265,7 @@ contract and issue their redemption.
 |-
 | timestamp  || 8  || the client's UNIX timestamp
 |-
-| contract   || varies || swap redeem script
+| contract   || asset-dependent || swap redeem script
 |}
 
 The client responds with an acknowledgement.
@@ -1285,7 +1285,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | vout       || int    || the output index
 |-
-| timestamp  || int    || UTC timestamp. order broadcast time
+| timestamp  || int    || UNIX timestamp. order broadcast time
 |-
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
@@ -1299,7 +1299,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | matchid    || 8  || the ID assigned to this match
 |-
-| tx hash    || 32  || the transaction hash
+| tx hash    || asset-dependent  || the transaction hash
 |-
 | vout       || 4 || the output index
 |-
@@ -1320,11 +1320,11 @@ key from the maker's redemption and broadcast their own redemption.
 |-
 | matchid    || 8  || the ID assigned to this match
 |-
-| tx hash    || 32  || the transaction hash
+| tx hash    || asset-dependent  || the transaction hash
 |-
 | vout       || 4 || the output index
 |-
-| timestamp  || int    || UTC timestamp. order broadcast time
+| timestamp  || int    || UNIX timestamp. order broadcast time
 |-
 | sig        || string || DEX's signature of the serialized notification. serialization described below
 |}
@@ -1338,7 +1338,7 @@ key from the maker's redemption and broadcast their own redemption.
 |-
 | matchid    || 8  || the ID assigned to this match
 |-
-| tx hash    || 32  || the transaction hash
+| tx hash    || asset-dependent  || the transaction hash
 |-
 | vout       || 4 || the output index
 |-
