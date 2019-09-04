@@ -179,7 +179,7 @@ func matchLimitOrder(book Booker, ord *order.LimitOrder) (match *order.Match) {
 		if best == nil {
 			return
 		}
-		assertOrderLotSize(best, book.LotSize())
+		assertOrderLotSize(best, lotSize)
 
 		// Check rate.
 		if !rateMatch(ord.Rate, best.Rate) {

@@ -54,14 +54,17 @@ const (
 // Order specifies the methods required for a type to function as a DEX order.
 // See the concrete implementations of MarketOrder, LimitOrder, and CancelOrder.
 type Order interface {
-	// ID computes the Order's ID from its serialization as per the spec.
+	// ID computes the Order's ID from its serialization. Serialization is
+	// detailed in the 'Client Order Management' section of the DEX
+	// specification.
 	ID() OrderID
 
 	// UID gives the string representation of the order ID. It is named to
 	// reflect the intent of providing a unique identifier.
 	UID() string
 
-	// Serialize marshals the order as per the spec.
+	// Serialize marshals the order. Serialization is detailed in the 'Client
+	// Order Management' section of the DEX specification.
 	Serialize() []byte
 
 	// SerializeSize gives the length of the serialized order in bytes.
