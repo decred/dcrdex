@@ -21,16 +21,11 @@ const (
 	HashSize = blake256.Size
 )
 
-type Matcher struct {
-	marketBuyBuffer uint64 // base asset amount required above lot size for market buys
-}
+type Matcher struct{}
 
-// New creates a new Matcher. marketBuyBuffer is the base asset amount required
-// above lot size for market buys to be matched with standing orders.
-func New(marketBuyBuffer uint64) *Matcher {
-	return &Matcher{
-		marketBuyBuffer: marketBuyBuffer,
-	}
+// New creates a new Matcher.
+func New() *Matcher {
+	return &Matcher{}
 }
 
 // orderLotSizeOK checks if the remaining Order quantity is not a multiple of
@@ -67,10 +62,12 @@ func assertOrderLotSize(ord order.Order, lotSize uint64) {
 // (specified in quote asset) is sufficient according to the Matcher's
 // configured market buy buffer, which is in base asset units, and the best
 // standing sell order according to the provided Booker.
-func (m *Matcher) CheckMarketBuyBuffer(book Booker, ord *order.MarketOrder) bool {
-	rate := book.BestSell().Rate
-	minBase := m.marketBuyBuffer + book.LotSize()
-	return ord.Remaining() >= uint64(rate*float64(minBase))
+func CheckMarketBuyBuffer(book Booker, ord *order.MarketOrder, marketBuyBuffer float64) bool {
+	if ord.Sell {
+		return true // The market buy buffer does not apply to sell orders.
+	}
+	minBaseAsset := marketBuyBuffer * float64(book.LotSize())
+	return ord.Remaining() >= uint64(book.BestSell().Rate*minBaseAsset)
 }
 
 // Match matches orders given a standing order book and an epoch queue. Matched
@@ -134,9 +131,7 @@ func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Matc
 			} else {
 				// Market buy order Quantity is denominated in the quote asset,
 				// and lot size multiples are not applicable.
-				if m.CheckMarketBuyBuffer(book, o) {
-					match = matchMarketBuyOrder(book, o)
-				}
+				match = matchMarketBuyOrder(book, o)
 			}
 			if match != nil {
 				matches = append(matches, match)

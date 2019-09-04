@@ -452,7 +452,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 	startLogger()
 
 	// New matching engine.
-	me := New(LotSize / 2)
+	me := New()
 
 	fakeOrder := newLimitOrder(false, 0.0455, 1, order.ImmediateTiF, 0)
 
@@ -561,7 +561,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 	startLogger()
 
 	// New matching engine.
-	me := New(LotSize / 2)
+	me := New()
 
 	badLotsizeOrder := newLimitOrder(false, 0.05, 1, order.ImmediateTiF, 0)
 	badLotsizeOrder.Quantity /= 2
@@ -737,7 +737,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	startLogger()
 
 	// New matching engine.
-	me := New(LotSize / 2)
+	me := New()
 
 	badLotsizeOrder := newMarketSellOrder(1, 0)
 	badLotsizeOrder.Quantity /= 2
@@ -879,8 +879,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 	startLogger()
 
 	// New matching engine.
-	marketBuyBuffer := LotSize / 4
-	me := New(marketBuyBuffer)
+	me := New()
 
 	nSell := len(bookSellOrders)
 	//nBuy := len(bookBuyOrders)
@@ -911,7 +910,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 	buyLotsAmt := func(lots int) uint64 {
 		totalBufferedBase := uint64(lots) * LotSize
 		if lots < 2 {
-			totalBufferedBase += marketBuyBuffer
+			totalBufferedBase += LotSize / 2
 		}
 		return totalBufferedBase
 	}
