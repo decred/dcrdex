@@ -1162,6 +1162,8 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | rate      || int    || the rate that the order matched at (as quote asset per unit base asset, atoms)
 |-
+| timestamp || int    || server's UNIX timestamp
+|-
 | address   || string || the counterparty's receiving address
 |-
 | sig       || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
@@ -1180,7 +1182,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | rate       || 8  || the rate that the order matched at
 |-
-| timestamp  || 8  || the client's UNIX timestamp
+| timestamp  || 8  || server's UNIX timestamp
 |-
 | address    || varies || UTF-8 encoded receiving address for the match
 |}
@@ -1204,7 +1206,7 @@ relay to the matching party.
 |-
 | vout       || int    || the output index
 |-
-| timestamp  || int    || UNIX timestamp. order broadcast time
+| timestamp  || int    || client's UNIX timestamp
 |-
 | contract   || string || hex-encoded swap redeem script
 |-
@@ -1247,7 +1249,7 @@ contract and issue their redemption.
 |-
 | matchid   || int    || the match ID to use for progress notifications
 |-
-| timestamp || int  || the client's UNIX timestamp
+| timestamp || int  || server's UNIX timestamp
 |-
 | contract  || string || hex-encoded swap redeem script
 |-
@@ -1263,7 +1265,7 @@ contract and issue their redemption.
 |-
 | matchid    || 8  || the ID assigned to this match
 |-
-| timestamp  || 8  || the client's UNIX timestamp
+| timestamp  || 8  || server's UNIX timestamp
 |-
 | contract   || asset-dependent || swap redeem script
 |}
@@ -1285,7 +1287,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | vout       || int    || the output index
 |-
-| timestamp  || int    || UNIX timestamp. order broadcast time
+| timestamp  || int    || client's UNIX timestamp
 |-
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
@@ -1324,7 +1326,7 @@ key from the maker's redemption and broadcast their own redemption.
 |-
 | vout       || 4 || the output index
 |-
-| timestamp  || int    || UNIX timestamp. order broadcast time
+| timestamp  || int    || server's UNIX timestamp
 |-
 | sig        || string || DEX's signature of the serialized notification. serialization described below
 |}
@@ -1342,7 +1344,7 @@ key from the maker's redemption and broadcast their own redemption.
 |-
 | vout       || 4 || the output index
 |-
-| timestamp  || 8  || the client's UNIX timestamp
+| timestamp  || 8  || server's UNIX timestamp
 |}
 
 The client will respond with an acknowledgement.
