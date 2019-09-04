@@ -61,28 +61,28 @@ func newOrderPQ(cap uint32, lessFn func(bi, bj OrderRater) bool) *OrderPQ {
 // to be used by the container/heap functions via other thread-safe OrderPQ
 // methods. These are not thread safe.
 
-// Len is require for heap.Interface. It is not thread-safe.
+// Len is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Len() int {
 	return len(pq.oh)
 }
 
 // Less performs the comparison priority(i) vs. priority(j). Use
 // OrderPQ.SetLessFn to define the desired behavior for the orderEntry heap[i]
-// and heap[j]. Less is require for heap.Interface. It is not thread-safe.
+// and heap[j]. Less is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Less(i, j int) bool {
 	return pq.lessFn(pq.oh[i], pq.oh[j])
 }
 
 // Swap swaps the orderEntry at i and j. This is used by container/heap. Swap is
-// require for heap.Interface. It is not thread-safe.
+// required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Swap(i, j int) {
 	pq.oh[i], pq.oh[j] = pq.oh[j], pq.oh[i]
 	pq.oh[i].heapIdx = i
 	pq.oh[j].heapIdx = j
 }
 
-// Push an order (a OrderRater). Use heap.Push, not this directly. Push is
-// require for heap.Interface. It is not thread-safe.
+// Push an order, which must be an OrderRater. Use heap.Push, not this directly.
+// Push is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Push(ord interface{}) {
 	rater, ok := ord.(OrderRater)
 	if !ok || rater == nil {
@@ -107,8 +107,8 @@ func (pq *OrderPQ) Push(ord interface{}) {
 }
 
 // Pop will return an interface{} that may be cast to OrderRater (or the
-// underlying concrete type). Use heap.Pop or OrderPQ.PopBest, not this. Pop is
-// require for heap.Interface. It is not thread-safe.
+// underlying concrete type). Use heap.Pop or OrderPQ.ExtractBest, not this. Pop
+// is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Pop() interface{} {
 	n := pq.Len()
 	old := pq.oh
