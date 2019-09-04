@@ -252,7 +252,7 @@ Asset info should be requested by the user immediately after connecting.
 |-
 | lotsize  || int || lot size (atoms)
 |-
-| ratestep || int || the price rate increment (atoms)
+| ratestep || float || the price rate increment (unitless ratio of quote asset per base asset)
 |-
 | feerate  || int || the fee rate for transactions (atoms/byte)
 |-
@@ -692,7 +692,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 |-
 | osize   || int    || order size (atoms)
 |-
-| rate    || int    || price rate (quote asset per unit base asset, atoms). only set on limit orders
+| rate    || float  || price rate (unitless ratio o fquote asset per base asset). only set on limit orders
 |-
 | tif     || string || time in force. one of "i" for ''immediate'' or "s" for ''standing''. only set on limit orders
 |-
@@ -918,7 +918,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | ordersize   || int    || order size (atoms)
 |-
-| rate        || int    || price rate (quote asset per unit base asset, atoms)
+| rate        || float    || price rate (ratio of quote asset per unit base asset)
 |-
 | timeinforce || string || one of ''standing'' or ''immediate''
 |-
@@ -954,13 +954,13 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | side       || 1 || 0 for buy, 1 for sell
 |-
-| rate       || 8 || price rate
-|-
 | quantity   || 8 || quanity to buy or sell (atoms)
 |-
-| time in force || 1 || 0 for ''standing'', 1 for ''immediate''
+| address    || varies || client's receiving address
 |-
-| address   || varies || client's receiving address
+| rate       || 8 || price rate in double precision IEEE 754 floating-point format
+|-
+| time in force || 1 || 0 for ''standing'', 1 for ''immediate''
 |}
 
 ===Market Order===
@@ -1128,7 +1128,7 @@ DEX will send a list of '''Match objects'''.
 |-
 | quantity  || int    || the matched amount, in atoms of the base asset
 |-
-| rate      || int    || the rate that the order matched at (as quote asset per unit base asset, atoms)
+| rate      || float  || the rate that the order matched at (ratio of quote asset per base asset)
 |-
 | address   || string || the client's receiving address
 |-
@@ -1164,7 +1164,7 @@ The client will return a list of signed match acknowledgements.
 |-
 | quantity   || 8  || the matched amount, in atoms of the base asset
 |-
-| rate       || 8  || the rate that the order matched at
+| rate       || 8  || the rate at which the order was matched, in double precision IEEE 754 floating-point format
 |-
 | address    || varies || ASCII encoded receiving address for the match
 |}
@@ -1535,7 +1535,7 @@ possible.
 |-
 | lot&nbsp;size  || atoms ||  The minimum order quantity and the order quantity increment when an asset is the base asset.
 |-
-| rate&nbsp;step || atoms || The minimum price rate and the price rate increment when an asset is the quote asset.
+| rate&nbsp;step || unitless ratio || The price rate increment as a quote asset, and the minimum price rate as a base asset.
 |-
 | fee&nbsp;rate  || atoms/byte || The minimum fee rate for swap transactions.
 |-
