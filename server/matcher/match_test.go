@@ -2,7 +2,6 @@ package matcher
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"reflect"
 	"testing"
@@ -81,7 +80,7 @@ var (
 				Quantity: 2 * LotSize,
 				Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 			},
-			Rate:  0.043,
+			Rate:  4300000,
 			Force: order.StandingTiF,
 		},
 		{ // limit SELL of 3 lots at 0.045
@@ -99,7 +98,7 @@ var (
 				Quantity: 3 * LotSize,
 				Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
 			},
-			Rate:  0.045,
+			Rate:  4500000,
 			Force: order.StandingTiF,
 		},
 		{ // limit BUY of 1 lot at 0.046
@@ -117,7 +116,7 @@ var (
 				Quantity: 1 * LotSize,
 				Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 			},
-			Rate:  0.046,
+			Rate:  4600000,
 			Force: order.StandingTiF,
 		},
 		{ // limit BUY of 1 lot at 0.045
@@ -135,7 +134,7 @@ var (
 				Quantity: 1 * LotSize,
 				Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 			},
-			Rate:  0.045,
+			Rate:  4500000,
 			Force: order.StandingTiF,
 		},
 	}
@@ -204,7 +203,7 @@ func (b *BookStub) Remove(orderID order.OrderID) (*order.LimitOrder, bool) {
 
 var _ Booker = (*BookStub)(nil)
 
-func newLimitOrder(sell bool, rate float64, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
+func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
 	addr := "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui"
 	if sell {
 		addr = "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm"
@@ -266,30 +265,30 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 var (
 	// Create a coherent order book of standing orders and sorted rates.
 	bookBuyOrders = []*order.LimitOrder{
-		newLimitOrder(false, 0.025, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 0.027, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 0.032, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 0.033, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 0.033, 1, order.StandingTiF, 2), // newer
-		newLimitOrder(false, 0.036, 4, order.StandingTiF, 0),
-		newLimitOrder(false, 0.039, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 0.040, 10, order.StandingTiF, 0),
-		newLimitOrder(false, 0.043, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 0.043, 4, order.StandingTiF, 1), // newer
-		newLimitOrder(false, 0.045, 1, order.StandingTiF, 0),
+		newLimitOrder(false, 2500000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 2700000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 3200000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 3300000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 3300000, 1, order.StandingTiF, 2), // newer
+		newLimitOrder(false, 3600000, 4, order.StandingTiF, 0),
+		newLimitOrder(false, 3900000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 4000000, 10, order.StandingTiF, 0),
+		newLimitOrder(false, 4300000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 4300000, 4, order.StandingTiF, 1), // newer
+		newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
 	}
 	bookSellOrders = []*order.LimitOrder{
-		newLimitOrder(true, 0.062, 2, order.StandingTiF, 0),
-		newLimitOrder(true, 0.062, 2, order.StandingTiF, 1), // newer
-		newLimitOrder(true, 0.061, 2, order.StandingTiF, 0),
-		newLimitOrder(true, 0.060, 2, order.StandingTiF, 0),
-		newLimitOrder(true, 0.055, 1, order.StandingTiF, 0),
-		newLimitOrder(true, 0.054, 4, order.StandingTiF, 0),
-		newLimitOrder(true, 0.050, 2, order.StandingTiF, 0),
-		newLimitOrder(true, 0.047, 10, order.StandingTiF, 0),
-		newLimitOrder(true, 0.047, 4, order.StandingTiF, 1), // newer
-		newLimitOrder(true, 0.046, 2, order.StandingTiF, 0),
-		newLimitOrder(true, 0.0455, 1, order.StandingTiF, 0),
+		newLimitOrder(true, 6200000, 2, order.StandingTiF, 0),
+		newLimitOrder(true, 6200000, 2, order.StandingTiF, 1), // newer
+		newLimitOrder(true, 6100000, 2, order.StandingTiF, 0),
+		newLimitOrder(true, 6000000, 2, order.StandingTiF, 0),
+		newLimitOrder(true, 5500000, 1, order.StandingTiF, 0),
+		newLimitOrder(true, 5400000, 4, order.StandingTiF, 0),
+		newLimitOrder(true, 5000000, 2, order.StandingTiF, 0),
+		newLimitOrder(true, 4700000, 10, order.StandingTiF, 0),
+		newLimitOrder(true, 4700000, 4, order.StandingTiF, 1), // newer
+		newLimitOrder(true, 4600000, 2, order.StandingTiF, 0),
+		newLimitOrder(true, 4550000, 1, order.StandingTiF, 0),
 	}
 )
 
@@ -317,7 +316,7 @@ func resetMakers() {
 
 func newMatch(taker order.Order, makers []*order.LimitOrder, lastPartialAmount ...uint64) *order.Match {
 	amounts := make([]uint64, len(makers))
-	rates := make([]float64, len(makers))
+	rates := make([]uint64, len(makers))
 	var total uint64
 	for i := range makers {
 		total += makers[i].Quantity
@@ -342,11 +341,11 @@ func Test_matchLimitOrder(t *testing.T) {
 	startLogger()
 
 	takers := []*order.LimitOrder{
-		newLimitOrder(false, 0.0455, 1, order.ImmediateTiF, 0), // buy, 1 lot, immediate, equal rate
-		newLimitOrder(true, 0.0445, 1, order.ImmediateTiF, 0),  // sell, 1 lot, immediate, overlapping rate
-		newLimitOrder(true, 0.043, 5, order.StandingTiF, 0),    // sell, 5 lots, immediate, multiple makers
-		newLimitOrder(true, 0.043, 4, order.StandingTiF, 0),    // sell, 4 lots, immediate, multiple makers, partial last maker
-		newLimitOrder(true, 0.043, 8, order.StandingTiF, 0),    // sell, 8 lots, immediate, multiple makers, partial taker remaining
+		newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0), // buy, 1 lot, immediate, equal rate
+		newLimitOrder(true, 4450000, 1, order.ImmediateTiF, 0),  // sell, 1 lot, immediate, overlapping rate
+		newLimitOrder(true, 4300000, 5, order.StandingTiF, 0),   // sell, 5 lots, immediate, multiple makers
+		newLimitOrder(true, 4300000, 4, order.StandingTiF, 0),   // sell, 4 lots, immediate, multiple makers, partial last maker
+		newLimitOrder(true, 4300000, 8, order.StandingTiF, 0),   // sell, 8 lots, immediate, multiple makers, partial taker remaining
 	}
 	resetTakers := func() {
 		for _, o := range takers {
@@ -454,7 +453,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 	// New matching engine.
 	me := New()
 
-	fakeOrder := newLimitOrder(false, 0.0455, 1, order.ImmediateTiF, 0)
+	fakeOrder := newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0)
 
 	// takers is heterogenous w.r.t. type
 	takers := []order.Order{
@@ -563,16 +562,16 @@ func TestMatch_limitsOnly(t *testing.T) {
 	// New matching engine.
 	me := New()
 
-	badLotsizeOrder := newLimitOrder(false, 0.05, 1, order.ImmediateTiF, 0)
+	badLotsizeOrder := newLimitOrder(false, 05000000, 1, order.ImmediateTiF, 0)
 	badLotsizeOrder.Quantity /= 2
 
 	// takers is heterogenous w.r.t. type
 	takers := []order.Order{
-		newLimitOrder(false, 0.0455, 1, order.ImmediateTiF, 0), // buy, 1 lot, immediate, equal rate
-		newLimitOrder(false, 0.0455, 2, order.StandingTiF, 0),  // buy, 2 lot, standing, equal rate, partial taker insert to book
-		newLimitOrder(false, 0.0455, 2, order.ImmediateTiF, 0), // buy, 2 lot, immediate, equal rate, partial taker unfilled
-		newLimitOrder(false, 0.041, 1, order.ImmediateTiF, 0),  // buy, 1 lot, immediate, unfilled fail
-		newLimitOrder(true, 0.0454, 1, order.ImmediateTiF, 0),  // sell, 1 lot, immediate
+		newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0), // buy, 1 lot, immediate, equal rate
+		newLimitOrder(false, 4550000, 2, order.StandingTiF, 0),  // buy, 2 lot, standing, equal rate, partial taker insert to book
+		newLimitOrder(false, 4550000, 2, order.ImmediateTiF, 0), // buy, 2 lot, immediate, equal rate, partial taker unfilled
+		newLimitOrder(false, 4100000, 1, order.ImmediateTiF, 0), // buy, 1 lot, immediate, unfilled fail
+		newLimitOrder(true, 4540000, 1, order.ImmediateTiF, 0),  // sell, 1 lot, immediate
 	}
 
 	resetTakers := func() {
@@ -687,7 +686,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 					Taker:   takers[4],
 					Makers:  []*order.LimitOrder{takers[1].(*order.LimitOrder)},
 					Amounts: []uint64{1 * LotSize}, // 2 - 1
-					Rates:   []float64{0.0455},
+					Rates:   []uint64{4550000},
 					Total:   1 * LotSize,
 				},
 			},
@@ -886,12 +885,12 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 
 	// marketBuyRate computes the effective price rate if the specified number
 	// of lots were to be purchased given the current sell order book.
-	marketBuyRate := func(lots int) float64 {
-		var weightedRate float64
-		if lots > len(bookSellOrders) {
-			lots = len(bookSellOrders)
+	marketBuyRate := func(lots uint64) uint64 {
+		var weightedRate uint64
+		if lots > uint64(len(bookSellOrders)) {
+			lots = uint64(len(bookSellOrders))
 		}
-		lotsRemaining := uint64(lots)
+		lotsRemaining := lots
 		var i int
 		for lotsRemaining > 0 {
 			orderLots := bookSellOrders[nSell-1-i].Quantity / LotSize
@@ -900,15 +899,15 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			}
 			lotsRemaining -= orderLots
 			i++
-			weightedRate += float64(orderLots) * bookSellOrders[nSell-1-i].Rate
+			weightedRate += orderLots * bookSellOrders[nSell-1-i].Rate
 		}
-		return weightedRate / float64(lots)
+		return weightedRate / lots
 	}
 
 	// buyLotsAmt computes the base asset amount required to purchase the
 	// specified number of lots, where buying just 1 lot requires a buffer.
-	buyLotsAmt := func(lots int) uint64 {
-		totalBufferedBase := uint64(lots) * LotSize
+	buyLotsAmt := func(lots uint64) uint64 {
+		totalBufferedBase := lots * LotSize
 		if lots < 2 {
 			totalBufferedBase += LotSize / 2
 		}
@@ -918,12 +917,8 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 	// quoteAmt computes the required amount of the quote asset required to
 	// purchase the specified number of lots given the current order book and
 	// required amount buffering in the single lot case.
-	quoteAmt := func(lots int) float64 {
-		amt := float64(buyLotsAmt(lots)) * marketBuyRate(lots)
-		return math.Nextafter(amt, amt+1)
-	}
-	quoteAmtInt := func(lots int) uint64 {
-		return uint64(quoteAmt(lots))
+	quoteAmt := func(lots uint64) uint64 {
+		return BaseToQuote(marketBuyRate(lots), buyLotsAmt(lots))
 	}
 
 	// fmt.Printf("%d\n", buyLotsAmt(99))                 // exact cost of N lots in base asset
@@ -932,10 +927,10 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 
 	// takers is heterogenous w.r.t. type
 	takers := []order.Order{
-		newMarketBuyOrder(quoteAmtInt(1), 0),  // buy, 1 lot
-		newMarketBuyOrder(quoteAmtInt(2), 0),  // buy, 2 lot
-		newMarketBuyOrder(quoteAmtInt(3), 0),  // buy, 3 lot
-		newMarketBuyOrder(quoteAmtInt(99), 0), // buy, 99 lot
+		newMarketBuyOrder(quoteAmt(1), 0),  // buy, 1 lot
+		newMarketBuyOrder(quoteAmt(2), 0),  // buy, 2 lot
+		newMarketBuyOrder(quoteAmt(3), 0),  // buy, 3 lot
+		newMarketBuyOrder(quoteAmt(99), 0), // buy, 99 lot
 	}
 
 	resetTakers := func() {
@@ -1085,9 +1080,9 @@ func Test_shuffleQueue(t *testing.T) {
 
 	// q3Shuffled is the expected result of sorting q3_1 and q3_2
 	q3Shuffled := []order.Order{
-		limitOrders[0],
 		marketOrders[0],
 		marketOrders[1],
+		limitOrders[0],
 	}
 
 	// shuffleQueue should work with nil slice
@@ -1438,6 +1433,250 @@ func TestOrdersMatch(t *testing.T) {
 			if got := OrdersMatch(tt.args.a, tt.args.b); got != tt.want {
 				t.Errorf("OrdersMatch() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestBaseToQuote(t *testing.T) {
+	type args struct {
+		rate      uint64
+		rateFloat float64
+		base      uint64
+	}
+	tests := []struct {
+		name      string
+		args      args
+		wantQuote uint64
+	}{
+		{
+			name: "ok <1",
+			args: args{
+				rate:      1234132,
+				rateFloat: 0.01234132,
+				base:      4200000000,
+			},
+			wantQuote: 51833544,
+		},
+		{
+			name: "ok 1",
+			args: args{
+				rate:      100000000,
+				rateFloat: 1.0,
+				base:      4200000000,
+			},
+			wantQuote: 4200000000,
+		},
+		{
+			name: "ok >1",
+			args: args{
+				rate:      100000022,
+				rateFloat: 1.00000022,
+				base:      4200000000,
+			},
+			wantQuote: 4200000924,
+		},
+		{
+			name: "ok >>1",
+			args: args{
+				rate:      19900000022,
+				rateFloat: 199.00000022,
+				base:      4200000000,
+			},
+			wantQuote: 835800000924,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotQuote := BaseToQuote(tt.args.rate, tt.args.base)
+			if gotQuote != tt.wantQuote {
+				t.Errorf("BaseToQuote() = %v, want %v", gotQuote, tt.wantQuote)
+			}
+			quote2 := uint64(tt.args.rateFloat * float64(tt.args.base))
+			t.Logf("quote from integer rate = %d, from float rate = %d, diff = %d",
+				gotQuote, quote2, int64(gotQuote-quote2))
+		})
+	}
+}
+
+func TestQuoteToBase(t *testing.T) {
+	type args struct {
+		rate      uint64
+		rateFloat float64
+		quote     uint64
+	}
+	tests := []struct {
+		name     string
+		args     args
+		wantBase uint64
+	}{
+		{
+			name: "ok <1",
+			args: args{
+				rate:      1234132,
+				rateFloat: 0.01234132,
+				quote:     51833544,
+			},
+			wantBase: 4200000000,
+		},
+		{
+			name: "ok 1",
+			args: args{
+				rate:      100000000,
+				rateFloat: 1.0,
+				quote:     4200000000,
+			},
+			wantBase: 4200000000,
+		},
+		{
+			name: "ok >1",
+			args: args{
+				rate:      100000022,
+				rateFloat: 1.00000022,
+				quote:     4200000924,
+			},
+			wantBase: 4200000000,
+		},
+		{
+			name: "ok >>1",
+			args: args{
+				rate:      19900000022,
+				rateFloat: 199.00000022,
+				quote:     835800000924,
+			},
+			wantBase: 4200000000,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotBase := QuoteToBase(tt.args.rate, tt.args.quote)
+			if gotBase != tt.wantBase {
+				t.Errorf("QuoteToBase() = %v, want %v", gotBase, tt.wantBase)
+			}
+			base2 := uint64(float64(tt.args.quote) / tt.args.rateFloat)
+			t.Logf("base2 from integer rate = %d, from float rate = %d, diff = %d",
+				gotBase, base2, int64(gotBase-base2))
+		})
+	}
+}
+
+func TestQuoteToBaseToQuote(t *testing.T) {
+	type args struct {
+		rate      uint64
+		rateFloat float64
+		quote     uint64
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "ok <1",
+			args: args{
+				rate:      1234132,
+				rateFloat: 0.01234132,
+				quote:     51833544,
+			},
+		},
+		{
+			name: "ok 1",
+			args: args{
+				rate:      100000000,
+				rateFloat: 1.0,
+				quote:     4200000000,
+			},
+		},
+		{
+			name: "ok >1",
+			args: args{
+				rate:      100000022,
+				rateFloat: 1.00000022,
+				quote:     4200000924,
+			},
+		},
+		{
+			name: "ok >>1",
+			args: args{
+				rate:      19900000022,
+				rateFloat: 199.00000022,
+				quote:     835800000924,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotBase := QuoteToBase(tt.args.rate, tt.args.quote)
+			gotQuote := BaseToQuote(tt.args.rate, gotBase)
+			if gotQuote != tt.args.quote {
+				t.Errorf("Failed quote->base->quote round trip. %d != %d",
+					gotQuote, tt.args.quote)
+			}
+
+			baseFlt := float64(tt.args.quote) / tt.args.rateFloat
+			quoteFlt := baseFlt * tt.args.rateFloat
+
+			t.Logf("expected quote = %d, final quote = %d, float quote = %f",
+				tt.args.quote, gotQuote, quoteFlt)
+		})
+	}
+}
+
+func TestBaseToQuoteToBase(t *testing.T) {
+	type args struct {
+		rate      uint64
+		rateFloat float64
+		base      uint64
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "ok <1",
+			args: args{
+				rate:      1234132,
+				rateFloat: 0.01234132,
+				base:      4200000000,
+			},
+		},
+		{
+			name: "ok 1",
+			args: args{
+				rate:      100000000,
+				rateFloat: 1.0,
+				base:      4200000000,
+			},
+		},
+		{
+			name: "ok >1",
+			args: args{
+				rate:      100000022,
+				rateFloat: 1.00000022,
+				base:      4200000000,
+			},
+		},
+		{
+			name: "ok >>1",
+			args: args{
+				rate:      19900000022,
+				rateFloat: 199.00000022,
+				base:      4200000000,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotQuote := BaseToQuote(tt.args.rate, tt.args.base)
+			gotBase := QuoteToBase(tt.args.rate, gotQuote)
+			if gotBase != tt.args.base {
+				t.Errorf("Failed base->quote->base round trip. %d != %d",
+					gotBase, tt.args.base)
+			}
+
+			quoteFlt := float64(tt.args.base) * tt.args.rateFloat
+			baseFlt := quoteFlt / tt.args.rateFloat
+
+			t.Logf("expected quote = %d, final quote = %d, float quote = %f",
+				tt.args.base, gotBase, baseFlt)
 		})
 	}
 }

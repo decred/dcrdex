@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"math/rand"
 	"sort"
 
@@ -19,7 +20,11 @@ var HashFunc = blake256.Sum256
 
 const (
 	HashSize = blake256.Size
+
+	atomsPerCoin uint64 = 1e8
 )
+
+var bigAtomsPerCoin = big.NewInt(int64(atomsPerCoin))
 
 type Matcher struct{}
 
@@ -54,9 +59,27 @@ func assertOrderLotSize(ord order.Order, lotSize uint64) {
 		ord.ID(), ord.Remaining(), lotSize))
 }
 
-// func midMarketRate(book Booker) float64 {
-// 	return (book.BestBuy().Rate + book.BestSell().Rate) / 2
-// }
+// BaseToQuote computes a quote asset amount based on a base asset amount
+// and an integer representation of the price rate. That is,
+//    quoteAmt = rate * baseAmt / atomsPerCoin
+func BaseToQuote(rate uint64, base uint64) (quote uint64) {
+	bigRate := big.NewInt(int64(rate))
+	bigBase := big.NewInt(int64(base))
+	bigBase.Mul(bigBase, bigRate)
+	bigBase.Div(bigBase, bigAtomsPerCoin)
+	return bigBase.Uint64()
+}
+
+// QuoteToBase computes a base asset amount based on a quote asset amount
+// and an integer representation of the price rate. That is,
+//    baseAmt = quoteAmt * atomsPerCoin / rate
+func QuoteToBase(rate uint64, quote uint64) (base uint64) {
+	bigRate := big.NewInt(int64(rate))
+	bigQuote := big.NewInt(int64(quote))
+	bigQuote.Mul(bigQuote, bigAtomsPerCoin)
+	bigQuote.Div(bigQuote, bigRate)
+	return bigQuote.Uint64()
+}
 
 // CheckMarketBuyBuffer verifies that the given market buy order's quantity
 // (specified in quote asset) is sufficient according to the Matcher's
@@ -66,8 +89,8 @@ func CheckMarketBuyBuffer(book Booker, ord *order.MarketOrder, marketBuyBuffer f
 	if ord.Sell {
 		return true // The market buy buffer does not apply to sell orders.
 	}
-	minBaseAsset := marketBuyBuffer * float64(book.LotSize())
-	return ord.Remaining() >= uint64(book.BestSell().Rate*minBaseAsset)
+	minBaseAsset := uint64(marketBuyBuffer * float64(book.LotSize()))
+	return ord.Remaining() >= BaseToQuote(book.BestSell().Rate, minBaseAsset)
 }
 
 // Match matches orders given a standing order book and an epoch queue. Matched
@@ -160,11 +183,11 @@ func matchLimitOrder(book Booker, ord *order.LimitOrder) (match *order.Match) {
 	assertOrderLotSize(ord, lotSize)
 
 	bestFunc := book.BestSell
-	rateMatch := func(b, s float64) bool { return s <= b }
+	rateMatch := func(b, s uint64) bool { return s <= b }
 	if ord.Sell {
 		// order is a sell order
 		bestFunc = book.BestBuy
-		rateMatch = func(s, b float64) bool { return s <= b }
+		rateMatch = func(s, b uint64) bool { return s <= b }
 	}
 
 	// Find matches until the order has been depleted.
@@ -206,7 +229,7 @@ func matchLimitOrder(book Booker, ord *order.LimitOrder) (match *order.Match) {
 				Taker:   ord,
 				Makers:  []*order.LimitOrder{best},
 				Amounts: []uint64{amt},
-				Rates:   []float64{best.Rate},
+				Rates:   []uint64{best.Rate},
 				Total:   amt,
 			}
 		} else {
@@ -266,7 +289,8 @@ func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (match *order.Matc
 
 		// Convert the market buy order's quantity into base asset:
 		//   quoteAmt = rate * baseAmt
-		amtRemainingBase := uint64(float64(amtRemaining) / best.Rate) // trunc
+		amtRemainingBase := QuoteToBase(best.Rate, amtRemaining)
+		//amtRemainingBase := uint64(float64(amtRemaining) / best.Rate) // trunc
 		if amtRemainingBase < lotSize {
 			return
 		}
@@ -290,7 +314,8 @@ func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (match *order.Matc
 
 		// Reduce the remaining quantity of the taker order.
 		// amtRemainingBase -= amt // FYI
-		amtQuote := uint64(float64(amt) * best.Rate)
+		amtQuote := BaseToQuote(best.Rate, amt)
+		//amtQuote := uint64(float64(amt) * best.Rate)
 		amtRemaining -= amtQuote // quote asset remaining
 		ord.Filled += amtQuote   // quote asset filled
 
@@ -300,7 +325,7 @@ func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (match *order.Matc
 				Taker:   ord,
 				Makers:  []*order.LimitOrder{best},
 				Amounts: []uint64{amt},
-				Rates:   []float64{best.Rate},
+				Rates:   []uint64{best.Rate},
 				Total:   amt,
 			}
 		} else {
@@ -354,7 +379,7 @@ func OrdersMatch(a, b order.Order) bool {
 	}
 
 	// For limit-limit orders, check that the rates overlap.
-	cmp := func(buyRate, sellRate float64) bool { return sellRate <= buyRate }
+	cmp := func(buyRate, sellRate uint64) bool { return sellRate <= buyRate }
 	if bSell {
 		// a is buy, b is sell
 		return cmp(aRate, bRate)
@@ -363,7 +388,7 @@ func OrdersMatch(a, b order.Order) bool {
 	return cmp(bRate, aRate)
 }
 
-func orderData(o order.Order) (orderType order.OrderType, sell bool, amount uint64, rate float64) {
+func orderData(o order.Order) (orderType order.OrderType, sell bool, amount, rate uint64) {
 	orderType = o.Type()
 
 	switch ot := o.(type) {

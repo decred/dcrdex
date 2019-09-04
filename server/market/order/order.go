@@ -7,7 +7,6 @@ package order
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"math"
 	"time"
 
 	"github.com/decred/dcrd/crypto/blake256"
@@ -239,8 +238,8 @@ var _ Order = (*MarketOrder)(nil)
 // LimitOrder defines a limit order in terms of a MarketOrder and limit-specific
 // data including rate (price) and time in force.
 type LimitOrder struct {
-	MarketOrder         // order type in the prefix is the only difference
-	Rate        float64 // price as quote asset per base asset
+	MarketOrder        // order type in the prefix is the only difference
+	Rate        uint64 // price as atoms of quote asset, applied per 1e8 units of the base asset
 	Force       TimeInForce
 }
 
@@ -270,9 +269,9 @@ func (o *LimitOrder) Serialize() []byte {
 	// var fb bytes.Buffer
 	// _ = binary.Write(&fb, binary.LittleEndian, o.Rate)
 	// copy(b[mSz:], fb.Bytes())
-	binary.LittleEndian.PutUint64(b[offset:offset+8], math.Float64bits(o.Rate))
+	//binary.LittleEndian.PutUint64(b[offset:offset+8], math.Float64bits(o.Rate))
 	// Price rate in atoms of quote asset
-	// binary.LittleEndian.PutUint64(b[offset:offset+8], o.Rate)
+	binary.LittleEndian.PutUint64(b[offset:offset+8], o.Rate)
 	offset += 8
 
 	// Time in force

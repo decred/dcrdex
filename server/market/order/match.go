@@ -14,6 +14,6 @@ type Match struct {
 	Taker   Order
 	Makers  []*LimitOrder
 	Amounts []uint64
-	Rates   []float64
+	Rates   []uint64
 	Total   uint64
 }

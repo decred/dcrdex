@@ -196,7 +196,7 @@ func TestMarketOrder_Serialize_SerializeSize(t *testing.T) {
 func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 	type fields struct {
 		MarketOrder MarketOrder
-		Rate        float64
+		Rate        uint64
 		Force       TimeInForce
 	}
 	tests := []struct {
@@ -224,7 +224,7 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 					Quantity: 132413241324,
 					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
-				Rate:  0.13241324,
+				Rate:  13241324,
 				Force: StandingTiF,
 			},
 			[]byte{0x22, 0x4c, 0xba, 0xaa, 0xfa, 0x80, 0xbf, 0x3b, 0xd1, 0xff, 0x73, 0x15,
@@ -241,8 +241,8 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 				0xb7, 0x71, 0xd4, 0x1e, 0x0, 0x0, 0x0, 0x44, 0x63, 0x71, 0x58, 0x73,
 				0x77, 0x6a, 0x54, 0x50, 0x6e, 0x55, 0x63, 0x64, 0x34, 0x46, 0x52, 0x43,
 				0x6b, 0x58, 0x34, 0x76, 0x52, 0x4a, 0x78, 0x6d, 0x56, 0x74, 0x66, 0x67,
-				0x47, 0x56, 0x61, 0x35, 0x75, 0x69, 0x40, 0xbf, 0xad, 0xc3, 0xea, 0xf2,
-				0xc0, 0x3f, 0x1},
+				0x47, 0x56, 0x61, 0x35, 0x75, 0x69, 0xec, 0xb, 0xca, 0x0, 0x0, 0x0,
+				0x0, 0x0, 0x1},
 		},
 	}
 	for _, tt := range tests {
@@ -380,13 +380,13 @@ func TestMarketOrder_ID(t *testing.T) {
 }
 
 func TestLimitOrder_ID(t *testing.T) {
-	orderID0, _ := hex.DecodeString("9158e76a36999a0f5194dd30fb6f01508355d213defc08e9c11b8d8efe9afbe1")
+	orderID0, _ := hex.DecodeString("60ba7b92d0905aeaf93df3a69f28df2c7133b52361ec6114c825989b69bcf25b")
 	var orderID OrderID
 	copy(orderID[:], orderID0)
 
 	type fields struct {
 		MarketOrder MarketOrder
-		Rate        float64
+		Rate        uint64
 		Force       TimeInForce
 	}
 	tests := []struct {
@@ -413,7 +413,7 @@ func TestLimitOrder_ID(t *testing.T) {
 					Quantity: 132413241324,
 					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
-				Rate:  0.132413241324,
+				Rate:  13241324,
 				Force: StandingTiF,
 			},
 			orderID,
@@ -439,13 +439,13 @@ func TestLimitOrder_ID(t *testing.T) {
 }
 
 func TestCancelOrder_ID(t *testing.T) {
-	limitOrderID0, _ := hex.DecodeString("9158e76a36999a0f5194dd30fb6f01508355d213defc08e9c11b8d8efe9afbe1")
+	limitOrderID0, _ := hex.DecodeString("60ba7b92d0905aeaf93df3a69f28df2c7133b52361ec6114c825989b69bcf25b")
 	var limitOrderID OrderID
 	copy(limitOrderID[:], limitOrderID0)
 
-	orderID0, _ := hex.DecodeString("84733c6860a373f67a5c63fc124240a6635b8a99cda0f3b9ddfe6c5c8175792e")
-	var orderID OrderID
-	copy(orderID[:], orderID0)
+	orderID0, _ := hex.DecodeString("a737c78f0acfb2ba3f8c2d635a327c729fa54e756a1ed4e63a3c440aab372207")
+	var cancelOrderID OrderID
+	copy(cancelOrderID[:], orderID0)
 
 	type fields struct {
 		Prefix        Prefix
@@ -467,7 +467,7 @@ func TestCancelOrder_ID(t *testing.T) {
 				},
 				TargetOrderID: limitOrderID,
 			},
-			orderID,
+			cancelOrderID,
 		},
 	}
 	for _, tt := range tests {
