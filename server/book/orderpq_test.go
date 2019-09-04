@@ -357,7 +357,10 @@ func TestOrderPriorityQueue_Replace(t *testing.T) {
 		t.Errorf("Failed to insert order %v", orders[0])
 	}
 
-	pq.ReplaceOrder(orders[0], orders[1])
+	ok = pq.ReplaceOrder(orders[0], orders[1])
+	if !ok {
+		t.Fatalf("failed to ReplaceOrder for %v <- %v", orders[0], orders[1])
+	}
 	if pq.Len() != 1 {
 		t.Fatalf("expected queue length 1, got %d", pq.Len())
 	}
