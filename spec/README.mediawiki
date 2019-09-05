@@ -843,7 +843,7 @@ As part of the order, the client will submit a list of ''UTXO objects''.
 |-
 | pubkeys   || [string] || array of hex-encoded pubkeys which satisfy the pubkey script
 |-
-| sigs      || [string] || array of signatures of serialized UTXO. serialization described below
+| sigs      || [string] || array of signatures of Blake-256 hashes of the serialized UTXO. serialization described below
 |-
 | redeem    || string || hex-encoded redeem script for P2SH. empty for P2PKH
 |}
