@@ -32,9 +32,11 @@ github.com/decred/dcrd/chaincfg/v2 v2.0.2/go.mod h1:hpKvhLCDAD/xDZ3V1Pqpv9fIKVYY
 github.com/decred/dcrd/chaincfg/v2 v2.1.0/go.mod h1:hpKvhLCDAD/xDZ3V1Pqpv9fIKVYYi11DyxETguazyvg=
 github.com/decred/dcrd/crypto/blake256 v1.0.0/go.mod h1:sQl2p6Y26YV+ZOcSTP6thNdn47hh8kt6rqSlvmrXFAc=
 github.com/decred/dcrd/database/v2 v2.0.0/go.mod h1:Sj2lvTRB0mfSu9uD7ObfwCY/eJ954GFU/X+AndJIyfE=
+github.com/decred/dcrd/dcrec v1.0.0 h1:W+z6Es+Rai3MXYVoPAxYr5U1DGis0Co33scJ6uH2J6o=
 github.com/decred/dcrd/dcrec v1.0.0/go.mod h1:HIaqbEJQ+PDzQcORxnqen5/V1FR3B4VpIfmePklt8Q8=
 github.com/decred/dcrd/dcrec/edwards v1.0.0/go.mod h1:HblVh1OfMt7xSxUL1ufjToaEvpbjpWvvTAUx4yem8BI=
 github.com/decred/dcrd/dcrec/secp256k1 v1.0.1/go.mod h1:lhu4eZFSfTJWUnR3CFRcpD+Vta0KUAqnhTsTksHXgy0=
+github.com/decred/dcrd/dcrec/secp256k1 v1.0.2 h1:awk7sYJ4pGWmtkiGHFfctztJjHMKGLV8jctGQhAbKe0=
 github.com/decred/dcrd/dcrec/secp256k1 v1.0.2/go.mod h1:CHTUIVfmDDd0KFVFpNX1pFVCBUegxW387nN0IGwNKR0=
 github.com/decred/dcrd/dcrjson/v3 v3.0.0/go.mod h1:pWYlHJ3VFidPwqD5HHiJXjfGaplif8uspAL2qFdifkY=
 github.com/decred/dcrd/dcrutil/v2 v2.0.0/go.mod h1:gUshVAXpd51DlcEhr51QfWL2HJGkMDM1U8chY+9VvQg=

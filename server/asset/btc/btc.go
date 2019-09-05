@@ -259,7 +259,11 @@ func (btc *BTCBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 	}
 
 	// Get information about the signatures and pubkeys needed to spend the utxo.
-	scriptAddrs, err := extractScriptAddrs(scriptType, pkScript, redeemScript, btc.chainParams)
+	evalScript := pkScript
+	if scriptType.isP2SH() {
+		evalScript = redeemScript
+	}
+	scriptAddrs, err := extractScriptAddrs(evalScript, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing utxo script addresses")
 	}

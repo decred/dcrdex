@@ -112,7 +112,11 @@ func (utxo *UTXO) PaysToPubkeys(pubkeys [][]byte) (bool, error) {
 			utxo.txHash, utxo.vout, utxo.numSigs, len(pubkeys))
 	}
 	// Extract the addresses from the pubkey scripts and redeem scripts.
-	scriptAddrs, err := extractScriptAddrs(utxo.scriptType, utxo.pkScript, utxo.redeemScript, utxo.btc.chainParams)
+	evalScript := utxo.pkScript
+	if utxo.scriptType.isP2SH() {
+		evalScript = utxo.redeemScript
+	}
+	scriptAddrs, err := extractScriptAddrs(evalScript, utxo.btc.chainParams)
 	if err != nil {
 		return false, err
 	}

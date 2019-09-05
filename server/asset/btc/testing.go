@@ -141,7 +141,11 @@ out:
 						unknowns = append(unknowns, txHash.String()+":"+fmt.Sprintf("%d", vin))
 						stats.unknown++
 					}
-					scriptAddrs, err := extractScriptAddrs(scriptType, pkScript, redeemScript, btc.chainParams)
+					evalScript := pkScript
+					if scriptType.isP2SH() {
+						evalScript = redeemScript
+					}
+					scriptAddrs, err := extractScriptAddrs(evalScript, btc.chainParams)
 					if err != nil {
 						stats.addrErr++
 						continue
