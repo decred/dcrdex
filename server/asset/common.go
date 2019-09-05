@@ -43,6 +43,10 @@ type DEXAsset interface {
 	// Transaction returns a DEXTx, which has methods for checking UTXO spending
 	// and swap contract info.
 	Transaction(txid string) (DEXTx, error)
+	// InitTxSize is the size of a serialized atomic swap initialization
+	// transaction with 1 input spending a P2PKH utxo, 1 swap contract output and
+	// 1 change output.
+	InitTxSize() uint32
 }
 
 // UTXO provides data about an unspent transaction output.

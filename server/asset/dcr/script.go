@@ -26,33 +26,9 @@ const (
 	scriptUnsupported
 )
 
-const pubkeyLength = 33 // Length of a serialized compressed pubkey.
-
-func (s dcrScriptType) isP2SH() bool {
-	return s&scriptP2SH != 0
-}
-
-func (s dcrScriptType) isP2PKH() bool {
-	return s&scriptP2PKH != 0
-}
-
-func (s dcrScriptType) isStake() bool {
-	return s&scriptStake != 0
-}
-
-func (s dcrScriptType) isEdwardsSig() bool {
-	return s&scriptSigEdwards != 0
-}
-
-func (s dcrScriptType) isSchnorrSig() bool {
-	return s&scriptSigSchnorr != 0
-}
-
-// func (s dcrScriptType) isMultiSig() bool {
-// 	return s&scriptMultiSig != 0
-// }
-
 const (
+	// Size of serialized compressed public key.
+	pubkeyLength = 33 // Length of a serialized compressed pubkey.
 	// SwapContractSize is the worst case scenario size for a swap contract,
 	// which is the pk-script of the non-change output of an initialization
 	// transaction as used in execution of an atomic swap.
@@ -71,7 +47,31 @@ const (
 	currentScriptVersion = 0
 	// Overhead for a wire.TxIn with a script length < 254.
 	txInOverhead = 58
+	// initTxSize is the size of a standard serialized atomic swap initialization
+	// transaction with one change output.
+	// MsgTx overhead is 4 bytes version + 4 bytes locktime + 4 bytes expiry 3
+	// bytes of varints for the number of transaction inputs (x2 for witness and
+	// prefix) and outputs
+	// A TxIn prefix is 41 bytes. TxIn witness is 8 bytes value + 4 bytes block
+	// height + 4 bytes block index + 1 byte varint sig script size + len(sig
+	// script)
+	// TxOut is 8 bytes value + 2 bytes version + 1 byte serialized varint length
+	// pubkey script + length of pubkey script. There is one swap output and one
+	// change output
+	initTxSize = 4 + 4 + 4 + 3 + 41 + 8 + 4 + 4 + 1 + P2PKHSigScriptSize + 2*(8+2+1) + SwapContractSize + 25
 )
+
+func (s dcrScriptType) isP2SH() bool {
+	return s&scriptP2SH != 0
+}
+
+func (s dcrScriptType) isStake() bool {
+	return s&scriptStake != 0
+}
+
+// func (s dcrScriptType) isMultiSig() bool {
+// 	return s&scriptMultiSig != 0
+// }
 
 // parseScriptType creates a dcrScriptType bitmap for the script type. A script
 // type will be some combination of pay-to-pubkey-hash, pay-to-script-hash,
@@ -416,8 +416,7 @@ func isStandardAltSignatureType(op byte) bool {
 	return sigType == dcrec.STEd25519 || sigType == dcrec.STSchnorrSecp256k1
 }
 
-// checkSig checks that the signature against the pubkey and message for the
-// specified signature algorithm.
+// checkSig checks the signature against the pubkey and message.
 func checkSig(msg, pkBytes, sigBytes []byte, sigType dcrec.SignatureType) error {
 	switch sigType {
 	case dcrec.STEcdsaSecp256k1:

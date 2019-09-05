@@ -157,11 +157,11 @@ func TestLiveUTXO(t *testing.T) {
 						stats.p2sh++
 					}
 					continue
-				} else if scriptType.isP2PKH() {
+				} else if scriptType&scriptP2PKH != 0 {
 					switch{
-					case scriptType.isEdwardsSig():
+					case scriptType&scriptSigEdwards != 0:
 						stats.p2pkhEdwards++
-					case scriptType.isSchnorrSig():
+					case scriptType&scriptSigSchnorr != 0:
 						stats.p2pkhSchnorr++
 					case scriptType.isStake():
 						stats.sp2pkh++

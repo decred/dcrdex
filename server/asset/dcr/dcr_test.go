@@ -312,7 +312,6 @@ type testAuth struct {
 type testMsgTx struct {
 	tx     *wire.MsgTx
 	auth   *testAuth
-	pkHash []byte
 	vout   uint32
 	script []byte
 }
@@ -409,6 +408,9 @@ func newP2PKHScript(sigType dcrec.SignatureType) ([]byte, *testAuth) {
 		return nil, nil
 	}
 	pkScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		fmt.Printf("PayToAddrScript error: %v\n", err)
+	}
 	return pkScript, auth
 }
 

@@ -109,6 +109,12 @@ func NewDCR(ctx context.Context, configPath string, logger asset.Logger, network
 	return dcr, nil
 }
 
+// InitTxSize is an asset.DEXAsset method that must produce the max size of a
+// standardized atomic swap initialization transaction.
+func (btc *dcrBackend) InitTxSize() uint32 {
+	return initTxSize
+}
+
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the dcr package. Part of the asset.DEXAsset interface.
