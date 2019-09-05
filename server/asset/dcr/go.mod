@@ -8,7 +8,10 @@ require (
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.2
 	github.com/decred/dcrd/chaincfg/v2 v2.1.0
 	github.com/decred/dcrd/dcrec v1.0.0
+	github.com/decred/dcrd/dcrec/edwards v1.0.0
+	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.0-20190905151318-0781162661f7
 	github.com/decred/dcrd/dcrec/secp256k1 v1.0.2
+	github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0-20190905151318-0781162661f7
 	github.com/decred/dcrd/dcrjson v1.2.0
 	github.com/decred/dcrd/dcrutil/v2 v2.0.0
 	github.com/decred/dcrd/rpc/jsonrpc/types v1.0.0

@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrdex/server/asset"
 )
@@ -130,7 +131,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 
 // PaysToPubkeys verifies that the utxo pays to the supplied public key(s). This
 // is an asset.DEXAsset method.
-func (utxo *UTXO) PaysToPubkeys(pubkeys [][]byte) (bool, error) {
+func (utxo *UTXO) PaysToPubkeys(pubkeys, sigs [][]byte, msg []byte) (bool, error) {
 	if len(pubkeys) < utxo.numSigs {
 		return false, fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(pubkeys))
 	}
@@ -145,37 +146,74 @@ func (utxo *UTXO) PaysToPubkeys(pubkeys [][]byte) (bool, error) {
 	if scriptAddrs.nRequired != utxo.numSigs {
 		return false, fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.txHash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
 	}
-	numMatches := countMatches(pubkeys, scriptAddrs.pubkeys, nil)
-	numMatches += countMatches(pubkeys, scriptAddrs.pkHashes, dcrutil.Hash160)
-	if numMatches < utxo.numSigs {
-		return false, fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, numMatches)
+	matches, err := pkMatches(pubkeys, scriptAddrs.pubkeys, nil)
+	if err != nil {
+		return false, fmt.Errorf("error during pubkey matching: %v", err)
+	}
+	m, err := pkMatches(pubkeys, scriptAddrs.pkHashes, dcrutil.Hash160)
+	if err != nil {
+		return false, fmt.Errorf("error during pubkey hash matching: %v", err)
+	}
+	matches = append(matches, m...)
+	if len(matches) < utxo.numSigs {
+		return false, fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(matches))
+	}
+	for _, match := range matches {
+		err := checkSig(msg, match.pubkey, sigs[match.idx], match.sigType)
+		if err != nil {
+			return false, err
+		}
+
 	}
 	return true, nil
 }
 
-// countMatches looks through a set of addresses and a set of pubkeys and counts
-// the matches.
-func countMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []byte) int {
-	var numMatches int
+type pkMatch struct {
+	pubkey  []byte
+	sigType dcrec.SignatureType
+	idx     int
+}
+
+// pkMatches looks through a set of addresses and a returns a set of match
+// structs with details about the match.
+func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []byte) ([]pkMatch, error) {
+	matches := make([]pkMatch, 0, len(pubkeys))
 	if hasher == nil {
 		hasher = func(a []byte) []byte { return a }
 	}
-	matches := make(map[string]struct{})
+	matchIndex := make(map[string]struct{})
 	for _, addr := range addrs {
-		for _, pubkey := range pubkeys {
+		for i, pubkey := range pubkeys {
 			if bytes.Equal(addr.ScriptAddress(), hasher(pubkey)) {
 				addrStr := addr.String()
-				_, alreadyFound := matches[addrStr]
+				_, alreadyFound := matchIndex[addrStr]
 				if alreadyFound {
 					continue
 				}
-				matches[addrStr] = struct{}{}
-				numMatches++
+				var sigType dcrec.SignatureType
+				switch a := addr.(type) {
+				case *dcrutil.AddressPubKeyHash:
+					sigType = a.DSA()
+				case *dcrutil.AddressSecpPubKey:
+					sigType = dcrec.STEcdsaSecp256k1
+				case *dcrutil.AddressEdwardsPubKey:
+					sigType = dcrec.STEd25519
+				case *dcrutil.AddressSecSchnorrPubKey:
+					sigType = dcrec.STSchnorrSecp256k1
+				default:
+					return nil, fmt.Errorf("unsupported signature type")
+				}
+				matchIndex[addrStr] = struct{}{}
+				matches = append(matches, pkMatch{
+					pubkey:  pubkey,
+					sigType: sigType,
+					idx:     i,
+				})
 				break
 			}
 		}
 	}
-	return numMatches
+	return matches, nil
 }
 
 // ScriptSize returns the maximum spend script size of the UTXO, in bytes.

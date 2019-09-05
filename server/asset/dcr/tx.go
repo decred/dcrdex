@@ -18,11 +18,15 @@ type Tx struct {
 	// Because a Tx's validity and block info can change after creation, keep a
 	// dcrBackend around to query the state of the tx and update the block info.
 	dcr       *dcrBackend
+	// The height and hash of the transaction's best known block.
 	blockHash chainhash.Hash
 	height    int64
+	// The transaction hash.
 	hash      chainhash.Hash
+	// Transaction inputs and outputs.
 	ins       []txIn
 	outs      []txOut
+	// Whether the transaction is a stake-related transaction.
 	isStake   bool
 	// Used to conditionally skip block lookups on mempool transactions during
 	// calls to Confirmations.

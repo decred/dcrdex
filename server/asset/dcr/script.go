@@ -7,6 +7,9 @@ import (
 	"fmt"
 
 	"github.com/decred/dcrd/dcrec"
+	"github.com/decred/dcrd/dcrec/edwards/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2/schnorr"
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrd/txscript/v2"
 )
@@ -18,6 +21,8 @@ const (
 	scriptP2SH
 	scriptStake
 	scriptMultiSig
+	scriptSigEdwards
+	scriptSigSchnorr
 	scriptUnsupported
 )
 
@@ -33,6 +38,14 @@ func (s dcrScriptType) isP2PKH() bool {
 
 func (s dcrScriptType) isStake() bool {
 	return s&scriptStake != 0
+}
+
+func (s dcrScriptType) isEdwardsSig() bool {
+	return s&scriptSigEdwards != 0
+}
+
+func (s dcrScriptType) isSchnorrSig() bool {
+	return s&scriptSigSchnorr != 0
 }
 
 // func (s dcrScriptType) isMultiSig() bool {
@@ -77,6 +90,17 @@ func parseScriptType(scriptVersion uint16, pkScript, redeemScript []byte) dcrScr
 		scriptType |= scriptP2PKH | scriptStake
 	case isStakeScriptHashScript(pkScript):
 		scriptType |= scriptP2SH | scriptStake
+	case isPubKeyHashAltScript(pkScript):
+		scriptType |= scriptP2PKH
+		_, sigType := extractPubKeyHashAltDetails(pkScript)
+		switch sigType {
+		case dcrec.STEd25519:
+			scriptType |= scriptSigEdwards
+		case dcrec.STSchnorrSecp256k1:
+			scriptType |= scriptSigSchnorr
+		default:
+			return scriptUnsupported
+		}
 	default:
 		return scriptUnsupported
 	}
@@ -323,4 +347,136 @@ func extractScriptHashByType(scriptType dcrScriptType, pkScript []byte) ([]byte,
 		return nil, fmt.Errorf("failed to parse p2sh script")
 	}
 	return redeemScript, nil
+}
+
+// extractPubKeyHashAltDetails extracts the public key hash and signature type
+// from the passed script if it is a standard pay-to-alt-pubkey-hash script.  It
+// will return nil otherwise.
+func extractPubKeyHashAltDetails(script []byte) ([]byte, dcrec.SignatureType) {
+	// A pay-to-alt-pubkey-hash script is of the form:
+	//  DUP HASH160 <20-byte hash> EQUALVERIFY SIGTYPE CHECKSIG
+	//
+	// The only two currently supported alternative signature types are ed25519
+	// and schnorr + secp256k1 (with a compressed pubkey).
+	//
+	//  DUP HASH160 <20-byte hash> EQUALVERIFY <1-byte ed25519 sigtype> CHECKSIG
+	//  DUP HASH160 <20-byte hash> EQUALVERIFY <1-byte schnorr+secp sigtype> CHECKSIG
+	//
+	//  Notice that OP_0 is not specified since signature type 0 disabled.
+
+	if len(script) == 26 &&
+		script[0] == txscript.OP_DUP &&
+		script[1] == txscript.OP_HASH160 &&
+		script[2] == txscript.OP_DATA_20 &&
+		script[23] == txscript.OP_EQUALVERIFY &&
+		isStandardAltSignatureType(script[24]) &&
+		script[25] == txscript.OP_CHECKSIGALT {
+
+		return script[3:23], dcrec.SignatureType(asSmallInt(script[24]))
+	}
+
+	return nil, 0
+}
+
+// isPubKeyHashAltScript returns whether or not the passed script is a standard
+// pay-to-alt-pubkey-hash script.
+func isPubKeyHashAltScript(script []byte) bool {
+	pk, _ := extractPubKeyHashAltDetails(script)
+	return pk != nil
+}
+
+// asSmallInt returns the passed opcode, which must be true according to
+// isSmallInt(), as an integer.
+func asSmallInt(op byte) int {
+	if op == txscript.OP_0 {
+		return 0
+	}
+
+	return int(op - (txscript.OP_1 - 1))
+}
+
+// isSmallInt returns whether or not the opcode is considered a small integer,
+// which is an OP_0, or OP_1 through OP_16.
+//
+// NOTE: This function is only valid for version 0 opcodes.  Since the function
+// does not accept a script version, the results are undefined for other script
+// versions.
+func isSmallInt(op byte) bool {
+	return op == txscript.OP_0 || (op >= txscript.OP_1 && op <= txscript.OP_16)
+}
+
+// isStandardAltSignatureType returns whether or not the provided opcode
+// represents a push of a standard alt signature type.
+func isStandardAltSignatureType(op byte) bool {
+	if !isSmallInt(op) {
+		return false
+	}
+
+	sigType := asSmallInt(op)
+	return sigType == dcrec.STEd25519 || sigType == dcrec.STSchnorrSecp256k1
+}
+
+// checkSig checks that the signature against the pubkey and message for the
+// specified signature algorithm.
+func checkSig(msg, pkBytes, sigBytes []byte, sigType dcrec.SignatureType) error {
+	switch sigType {
+	case dcrec.STEcdsaSecp256k1:
+		return checkSigS256(msg, pkBytes, sigBytes)
+	case dcrec.STEd25519:
+		return checkSigEdwards(msg, pkBytes, sigBytes)
+	case dcrec.STSchnorrSecp256k1:
+		return checkSigSchnorr(msg, pkBytes, sigBytes)
+	}
+	return fmt.Errorf("unsupported signature type")
+}
+
+// checkSigS256 checks that the message's signature was created with the
+// private key for the provided secp256k1 public key.
+func checkSigS256(msg, pkBytes, sigBytes []byte) error {
+	pubKey, err := secp256k1.ParsePubKey(pkBytes)
+	if err != nil {
+		return fmt.Errorf("error decoding secp256k1 PublicKey from bytes: %v", err)
+	}
+	signature, err := secp256k1.ParseDERSignature(sigBytes)
+	if err != nil {
+		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
+	}
+	if !signature.Verify(msg, pubKey) {
+		return fmt.Errorf("secp256k1 signature verification failed")
+	}
+	return nil
+}
+
+// checkSigEdwards checks that the message's signature was created with the
+// private key for the provided edwards public key.
+func checkSigEdwards(msg, pkBytes, sigBytes []byte) error {
+	pubKey, err := edwards.ParsePubKey(pkBytes)
+	if err != nil {
+		return fmt.Errorf("error decoding edwards PublicKey from bytes: %v", err)
+	}
+	signature, err := edwards.ParseSignature(sigBytes)
+	if err != nil {
+		return fmt.Errorf("error decoding edwards Signature from bytes: %v", err)
+	}
+	if !signature.Verify(msg, pubKey) {
+		return fmt.Errorf("edwards signature verification failed")
+	}
+	return nil
+}
+
+// checkSigSchnorr checks that the message's signature was created with the
+// private key for the provided schnorr public key.
+func checkSigSchnorr(msg, pkBytes, sigBytes []byte) error {
+	pubKey, err := schnorr.ParsePubKey(pkBytes)
+	if err != nil {
+		return fmt.Errorf("error decoding schnorr PublicKey from bytes: %v", err)
+	}
+	signature, err := schnorr.ParseSignature(sigBytes)
+	if err != nil {
+		return fmt.Errorf("error decoding schnorr Signature from bytes: %v", err)
+	}
+	if !signature.Verify(msg, pubKey) {
+		return fmt.Errorf("schnorr signature verification failed")
+	}
+	return nil
 }

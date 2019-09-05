@@ -21,7 +21,9 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrec"
-	"github.com/decred/dcrd/dcrec/secp256k1"
+	"github.com/decred/dcrd/dcrec/edwards/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2/schnorr"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/txscript/v2"
@@ -31,9 +33,12 @@ import (
 	flags "github.com/jessevdk/go-flags"
 )
 
+var testLogger slog.Logger
+
 func TestMain(m *testing.M) {
 	// Call tidyConfig to set the global chainParams.
 	chainParams = chaincfg.MainNetParams()
+	testLogger = slog.NewBackend(os.Stdout).Logger("TEST")
 	os.Exit(m.Run())
 }
 
@@ -297,9 +302,16 @@ func testVin(txHash *chainhash.Hash, vout uint32) chainjson.Vin {
 	}
 }
 
+type testAuth struct {
+	pubkey []byte
+	pkHash []byte
+	msg    []byte
+	sig    []byte
+}
+
 type testMsgTx struct {
 	tx     *wire.MsgTx
-	pubkey []byte
+	auth   *testAuth
 	pkHash []byte
 	vout   uint32
 	script []byte
@@ -313,48 +325,113 @@ func genPubkey() ([]byte, []byte) {
 	return pubkey, pkHash
 }
 
-// A pay-to-script-hash pubkey script.
-func newP2PKHScript() ([]byte, []byte, []byte) {
-	pubkey, pkHash := genPubkey()
-	var pkScript []byte
-	var err error
-	pkScript, err = txscript.NewScriptBuilder().
-		AddOps([]byte{
-			txscript.OP_DUP,
-			txscript.OP_HASH160,
-		}).
-		AddData(pkHash).
-		AddOps([]byte{
-			txscript.OP_EQUALVERIFY,
-			txscript.OP_CHECKSIG,
-		}).Script()
+func s256Auth(msg []byte) *testAuth {
+	priv, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
-		fmt.Printf("newP2PKHScript error: %v\n", err)
+		fmt.Printf("s256Auth error: %v\n", err)
 	}
-	return pkScript, pubkey, pkHash
+	pubkey := priv.PubKey().Serialize()
+	if msg == nil {
+		msg = randomBytes(32)
+	}
+	sig, err := priv.Sign(msg)
+	if err != nil {
+		fmt.Printf("s256Auth sign error: %v\n", err)
+	}
+	return &testAuth{
+		pubkey: pubkey,
+		pkHash: dcrutil.Hash160(pubkey),
+		msg:    msg,
+		sig:    sig.Serialize(),
+	}
+}
+
+func edwardsAuth(msg []byte) *testAuth {
+	priv, err := edwards.GeneratePrivateKey()
+	if err != nil {
+		fmt.Printf("edwardsAuth error: %v\n", err)
+	}
+	pubkey := priv.PubKey().Serialize()
+	if msg == nil {
+		msg = randomBytes(32)
+	}
+	sig, err := priv.Sign(msg)
+	if err != nil {
+		fmt.Printf("edwardsAuth sign error: %v\n", err)
+	}
+	return &testAuth{
+		pubkey: pubkey,
+		pkHash: dcrutil.Hash160(pubkey),
+		msg:    msg,
+		sig:    sig.Serialize(),
+	}
+}
+
+func schnorrAuth(msg []byte) *testAuth {
+	priv, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		fmt.Printf("schnorrAuth error: %v\n", err)
+	}
+	pubkey := priv.PubKey().Serialize()
+	if msg == nil {
+		msg = randomBytes(32)
+	}
+	r, s, err := schnorr.Sign(priv, msg)
+	if err != nil {
+		fmt.Printf("schnorrAuth sign error: %v\n", err)
+	}
+	sig := schnorr.NewSignature(r, s)
+	return &testAuth{
+		pubkey: pubkey,
+		pkHash: dcrutil.Hash160(pubkey),
+		msg:    msg,
+		sig:    sig.Serialize(),
+	}
+}
+
+// A pay-to-script-hash pubkey script.
+func newP2PKHScript(sigType dcrec.SignatureType) ([]byte, *testAuth) {
+	var auth *testAuth
+	switch sigType {
+	case dcrec.STEcdsaSecp256k1:
+		auth = s256Auth(nil)
+	case dcrec.STEd25519:
+		auth = edwardsAuth(nil)
+	case dcrec.STSchnorrSecp256k1:
+		auth = schnorrAuth(nil)
+	default:
+		fmt.Printf("NewAddressPubKeyHash unknown sigType")
+	}
+	var addr dcrutil.Address
+	addr, err := dcrutil.NewAddressPubKeyHash(auth.pkHash, chainParams, sigType)
+	if err != nil {
+		fmt.Printf("NewAddressPubKeyHash error: %v\n", err)
+		return nil, nil
+	}
+	pkScript, err := txscript.PayToAddrScript(addr)
+	return pkScript, auth
 }
 
 // A pay-to-script-hash pubkey script, with a prepended stake-tree indicator
 // byte.
-func newStakeP2PKHScript(opcode byte) ([]byte, []byte, []byte) {
-	script, pubkey, pkHash := newP2PKHScript()
+func newStakeP2PKHScript(opcode byte) ([]byte, *testAuth) {
+	script, auth := newP2PKHScript(dcrec.STEcdsaSecp256k1)
 	stakeScript := make([]byte, 0, len(script)+1)
 	stakeScript = append(stakeScript, opcode)
 	stakeScript = append(stakeScript, script...)
-	return stakeScript, pubkey, pkHash
+	return stakeScript, auth
 }
 
 // A MsgTx for a regular transaction with a single output. No inputs, so it's
 // not really a valid transaction, but that's okay on testBlockchain and
 // irrelevant to dcrBackend.
-func testMsgTxRegular() *testMsgTx {
-	pkScript, pubkey, pkHash := newP2PKHScript()
+func testMsgTxRegular(sigType dcrec.SignatureType) *testMsgTx {
+	pkScript, auth := newP2PKHScript(sigType)
 	msgTx := wire.NewMsgTx()
 	msgTx.AddTxOut(wire.NewTxOut(1, pkScript))
 	return &testMsgTx{
-		tx:     msgTx,
-		pubkey: pubkey,
-		pkHash: pkHash,
+		tx:   msgTx,
+		auth: auth,
 	}
 }
 
@@ -452,56 +529,63 @@ func testMsgTxVote() *testMsgTx {
 	}
 	msgTx.AddTxOut(wire.NewTxOut(1, script2))
 	// Now just a P2PKH script with a prepended OP_SSGEN
-	script3, pubkey, pkHash := newStakeP2PKHScript(txscript.OP_SSGEN)
+	script3, auth := newStakeP2PKHScript(txscript.OP_SSGEN)
 	msgTx.AddTxOut(wire.NewTxOut(2, script3))
 	return &testMsgTx{
-		tx:     msgTx,
-		pubkey: pubkey,
-		pkHash: pkHash,
-		vout:   2,
+		tx:   msgTx,
+		auth: auth,
+		vout: 2,
 	}
+}
+
+type testMultiSigAuth struct {
+	pubkeys  [][]byte
+	pkHashes [][]byte
+	msg      []byte
+	sigs     [][]byte
 }
 
 // Information about a transaction with a P2SH output.
 type testMsgTxP2SH struct {
-	tx       *wire.MsgTx
-	pubkeys  [][]byte
-	pkHashes [][]byte
-	vout     uint32
-	script   []byte
-	n        int
-	m        int
+	tx     *wire.MsgTx
+	auth   *testMultiSigAuth
+	vout   uint32
+	script []byte
+	n      int
+	m      int
 }
 
 // An M-of-N mutli-sig script. This script is pay-to-pubkey.
-func testMultiSigScriptMofN(m, n int) ([]byte, [][]byte, [][]byte) {
+func testMultiSigScriptMofN(m, n int) ([]byte, *testMultiSigAuth) {
 	// serialized compressed pubkey used for multisig
 	addrs := make([]*dcrutil.AddressSecpPubKey, 0, n)
-	pubkeys := make([][]byte, 0, n)
-	pkHashes := make([][]byte, 0, n)
+	auth := &testMultiSigAuth{
+		msg: randomBytes(32),
+	}
 
 	for i := 0; i < m; i++ {
-		pubkey, pkHash := genPubkey()
-		pubkeys = append(pubkeys, pubkey)
-		pkHashes = append(pkHashes, pkHash)
-		addr, err := dcrutil.NewAddressSecpPubKey(pubkey, chainParams)
+		a := s256Auth(auth.msg)
+		auth.pubkeys = append(auth.pubkeys, a.pubkey)
+		auth.pkHashes = append(auth.pkHashes, a.pkHash)
+		auth.sigs = append(auth.sigs, a.sig)
+		addr, err := dcrutil.NewAddressSecpPubKey(a.pubkey, chainParams)
 		if err != nil {
 			fmt.Printf("error creating AddressSecpPubKey: %v", err)
-			return nil, nil, nil
+			return nil, nil
 		}
 		addrs = append(addrs, addr)
 	}
 	script, err := txscript.MultiSigScript(addrs, m)
 	if err != nil {
 		fmt.Printf("error creating MultiSigScript: %v", err)
-		return nil, nil, nil
+		return nil, nil
 	}
-	return script, pubkeys, pkHashes
+	return script, auth
 }
 
 // A pay-to-script-hash M-of-N multi-sig MsgTx.
 func testMsgTxP2SHMofN(m, n int) *testMsgTxP2SH {
-	script, pubkeys, pkHashes := testMultiSigScriptMofN(m, n)
+	script, auth := testMultiSigScriptMofN(m, n)
 	pkScript := make([]byte, 0, 23)
 	pkScript = append(pkScript, txscript.OP_HASH160)
 	pkScript = append(pkScript, txscript.OP_DATA_20)
@@ -511,13 +595,12 @@ func testMsgTxP2SHMofN(m, n int) *testMsgTxP2SH {
 	msgTx := wire.NewMsgTx()
 	msgTx.AddTxOut(wire.NewTxOut(1, pkScript))
 	return &testMsgTxP2SH{
-		tx:       msgTx,
-		pubkeys:  pubkeys,
-		pkHashes: pkHashes,
-		script:   script,
-		vout:     0,
-		n:        n,
-		m:        m,
+		tx:     msgTx,
+		auth:   auth,
+		script: script,
+		vout:   0,
+		n:      n,
+		m:      m,
 	}
 }
 
@@ -546,20 +629,18 @@ func testMsgTxRevocation() *testMsgTx {
 	// Need a single input from stake tree
 	msgTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&zeroHash, 0, 1), 0, nil))
 	// All outputs must have OP_SSRTX prefix.
-	script, pubkey, pkHash := newStakeP2PKHScript(txscript.OP_SSRTX)
+	script, auth := newStakeP2PKHScript(txscript.OP_SSRTX)
 	msgTx.AddTxOut(wire.NewTxOut(1, script))
 	return &testMsgTx{
-		tx:     msgTx,
-		pubkey: pubkey,
-		pkHash: pkHash,
+		tx:   msgTx,
+		auth: auth,
 	}
 }
 
 // Make a backend that logs to stdout.
 func testBackend() (*dcrBackend, func()) {
-	logger := slog.NewBackend(os.Stdout).Logger("TEST")
 	ctx, shutdown := context.WithCancel(context.Background())
-	dcr := unconnectedDCR(ctx, logger)
+	dcr := unconnectedDCR(ctx, testLogger)
 	dcr.node = testNode{}
 	return dcr, shutdown
 }
@@ -568,7 +649,7 @@ func testBackend() (*dcrBackend, func()) {
 func TestUTXOs(t *testing.T) {
 	// The various UTXO types to check:
 	// 1. A valid UTXO in a mempool transaction
-	// 2. A valid UTXO in a mined block
+	// 2. A valid UTXO in a mined block. All three signature types
 	// 3. A UTXO that is invalid because it is non-existent. This case covers
 	//    other important cases, as dcrd will only return a result from
 	//    GetTxOut if the utxo is valid and ready to spend.
@@ -590,7 +671,7 @@ func TestUTXOs(t *testing.T) {
 	defer shutdown()
 
 	// The vout will be randomized during reset.
-	txHeight := uint32(50)
+	txHeight := uint32(32)
 
 	// A general reset function that clears the testBlockchain and the blockCache.
 	reset := func() {
@@ -605,7 +686,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	txHash := randomHash()
 	blockHash := randomHash()
-	msg := testMsgTxRegular()
+	msg := testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	// For a regular test tx, the output is at output index 0. Pass nil for the
 	// block hash and 0 for the block height and confirmations for a mempool tx.
 	testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
@@ -633,7 +714,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 1 - expected 1 confirmation after mining transaction, found %d", confs)
 	}
 	// Make sure the pubkey spends the output.
-	spends, err := utxo.PaysToPubkeys([][]byte{msg.pubkey})
+	spends, err := utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
 		t.Fatalf("case 1 - PaysToPubkeys error: %v", err)
 	}
@@ -642,22 +723,24 @@ func TestUTXOs(t *testing.T) {
 	}
 
 	// CASE 2: A valid UTXO in a mined block. This UTXO will have non-zero
-	// confirmations, a valid pkScipt
-	reset()
-	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
-	txHash = randomHash()
-	msg = testMsgTxRegular()
-	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
-	utxo, err = dcr.utxo(txHash, msg.vout, nil)
-	if err != nil {
-		t.Fatalf("case 2 - unexpected error: %v", err)
-	}
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.pubkey})
-	if err != nil {
-		t.Fatalf("case 2 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 2 - false returned from PaysToPubkeys")
+	// confirmations, a valid pkScipt. Test all three signature types.
+	for _, sigType := range []dcrec.SignatureType{dcrec.STEcdsaSecp256k1, dcrec.STEd25519, dcrec.STSchnorrSecp256k1} {
+		reset()
+		blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
+		txHash = randomHash()
+		msg = testMsgTxRegular(sigType)
+		testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
+		utxo, err = dcr.utxo(txHash, msg.vout, nil)
+		if err != nil {
+			t.Fatalf("case 2 - unexpected error for sig type %d: %v", int(sigType), err)
+		}
+		spends, err = utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
+		if err != nil {
+			t.Fatalf("case 2 - PaysToPubkeys error with sig type %d: %v", int(sigType), err)
+		}
+		if !spends {
+			t.Fatalf("case 2 - false returned from PaysToPubkeys for sig type %d", int(sigType))
+		}
 	}
 
 	// CASE 3: A UTXO that is invalid because it is non-existent
@@ -671,7 +754,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	txHash = randomHash()
-	msg = testMsgTxRegular()
+	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	// make the script nonsense.
 	msg.tx.TxOut[0].PkScript = []byte{0x00, 0x01, 0x02, 0x03}
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
@@ -686,7 +769,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
 	txHash = randomHash()
-	msg = testMsgTxRegular()
+	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
 	utxo, err = dcr.utxo(txHash, msg.vout, nil)
 	if err != nil {
@@ -740,7 +823,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 6 - unexpected error after maturing block: %v", err)
 	}
 	// Since this is our first stake transaction, let's check the pubkey
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.pubkey})
+	spends, err = utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
 		t.Fatalf("case 6 - PaysToPubkeys error: %v", err)
 	}
@@ -752,7 +835,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	txHash = randomHash()
 	blockHash = testAddBlockVerbose(nil, 1, txHeight, 1)
-	msg = testMsgTxRegular()
+	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), 1)
 	utxo, err = dcr.utxo(txHash, msg.vout, nil)
 	if err != nil {
@@ -777,7 +860,7 @@ func TestUTXOs(t *testing.T) {
 	reset()
 	txHash = randomHash()
 	orphanHash := testAddBlockVerbose(nil, 1, txHeight, 1)
-	msg = testMsgTxRegular()
+	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxOut(msg.tx, msg.vout, txHash, orphanHash, int64(txHeight), 1)
 	utxo, err = dcr.utxo(txHash, msg.vout, nil)
 	if err != nil {
@@ -832,7 +915,7 @@ func TestUTXOs(t *testing.T) {
 	if confs != 1 {
 		t.Fatalf("case 9 - expected 1 confirmation, got %d", confs)
 	}
-	spends, err = utxo.PaysToPubkeys(msgMultiSig.pubkeys[:1])
+	spends, err = utxo.PaysToPubkeys(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
 	if err != nil {
 		t.Fatalf("case 9 - PaysToPubkeys error: %v", err)
 	}
@@ -852,12 +935,12 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 10 - received error for utxo: %v", err)
 	}
 	// Try to get by with just one of the pubkeys.
-	_, err = utxo.PaysToPubkeys(msgMultiSig.pubkeys[:1])
+	_, err = utxo.PaysToPubkeys(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
 	if err == nil {
 		t.Fatalf("case 10 - no error when only provided one of two required pubkeys")
 	}
 	// Now do both.
-	spends, err = utxo.PaysToPubkeys(msgMultiSig.pubkeys)
+	spends, err = utxo.PaysToPubkeys(msgMultiSig.auth.pubkeys, msgMultiSig.auth.sigs, msgMultiSig.auth.msg)
 	if err != nil {
 		t.Fatalf("case 10 - PaysToPubkeys error: %v", err)
 	}
@@ -882,12 +965,12 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 11 - stake p2sh not marked as stake")
 	}
 	// Give it nonsense.
-	_, err = utxo.PaysToPubkeys([][]byte{randomBytes(33)})
+	_, err = utxo.PaysToPubkeys([][]byte{randomBytes(33)}, [][]byte{randomBytes(33)}, randomBytes(32))
 	if err == nil {
 		t.Fatalf("case 11 - no error when providing nonsense pubkey")
 	}
 	// Now give it the right one.
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.pubkey})
+	spends, err = utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
 		t.Fatalf("case 11 - PaysToPubkeys error: %v", err)
 	}
@@ -912,7 +995,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 12 - stake p2sh not marked as stake")
 	}
 	// Check the pubkey.
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.pubkey})
+	spends, err = utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
 		t.Fatalf("case 12 - PaysToPubkeys error: %v", err)
 	}
@@ -1011,35 +1094,6 @@ func TestReorg(t *testing.T) {
 	}
 }
 
-// TestSignatures checks that signature verification is working.
-func TestSignatures(t *testing.T) {
-	dcr := dcrBackend{}
-	verify := func(pk, msg, sig string) {
-		pubkey, _ := hex.DecodeString(pk)
-		message, _ := hex.DecodeString(msg)
-		signature, _ := hex.DecodeString(sig)
-		if !dcr.VerifySignature(message, pubkey, signature) {
-			t.Fatalf("failed signature with pubkey %s", pk)
-		}
-	}
-	// Some randomly generated messages, pubkeys, signatures.
-	verify(
-		"0286a0a6e0b95a540671c9237f84ceb9a98970729b5fd76e02cb5e449138d5f873",
-		"2258cbd6271157d1ba6676c9a8520a2da4194e8f511a5885156470d2de667171913fbb35019b31b6da8c914408ca25fb7b6a",
-		"30440220436d2c54a5e22ca99ec23d8e0f3ae6cac0fbda9224809a2302dd865502033f6702206132532571cdccec3f48fe7db954680f7aac72b308a71ec06299ab8108bb8810e",
-	)
-	verify(
-		"024cd2f9e57b674e90ffed62acbc554d3bf9d76ebbc82236f3b4d2243b648f8906",
-		"c42acf2b8e8693d2e29864758a313c3737b993bef3dd85d4eaa052f02c7c844caa3b9ae431a948f62b92293eebed9645387c",
-		"3045022100e7411d6da3c92020083e74834f7e0935aba0d44b1a47b1a2ae0372c69f564fdb02204eb254124ee42d637dabb4137cce08124a603963a339f08f65a2157e013fd8d7",
-	)
-	verify(
-		"030e5386d7744aa05c7f7e8751ee3fec109991e355f5d194cc390d4a621851761e",
-		"d62b3c3c56ea1fa5152a5bb84bcce9fe880ffc2c646caa029e92203e6eee2f0c22a7958c891dbccfc3b0e578fad8d2566db4",
-		"304402204ad2ac5695d0f4a28fc1f01466d03b2bd0300ce41f393b8ac398dd57aad8086f02203f4789d13c060a2c976aca2ca39184125c3fe2d9ba2350b1c27059acb29d6757",
-	)
-}
-
 // TestTx checks the transaction-related methods and functions.
 func TestTx(t *testing.T) {
 	// Create a dcrBackend with the test node.
@@ -1051,7 +1105,7 @@ func TestTx(t *testing.T) {
 	blockHeight := uint32(500)
 	txHash := randomHash()
 	blockHash := randomHash()
-	msg := testMsgTxRegular()
+	msg := testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 2)
 	// Mine the transaction and an approving block.
 	testAddBlockVerbose(blockHash, 1, blockHeight, 1)
@@ -1118,7 +1172,7 @@ func TestTx(t *testing.T) {
 	dcr.blockCache = newBlockCache(dcr.log)
 	txHash = randomHash()
 	// Add a transaction to mempool.
-	msg = testMsgTxRegular()
+	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	testAddTxVerbose(msg.tx, txHash, nil, 0, 0)
 	// Get the transaction data through the backend and make sure it has zero
 	// confirmations.

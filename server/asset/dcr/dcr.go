@@ -14,7 +14,6 @@ import (
 
 	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrec/secp256k1"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/rpcclient/v4"
@@ -450,22 +449,6 @@ func (dcr *dcrBackend) getMainchainDcrBlock(height uint32) (*dcrBlock, error) {
 		return nil, nil
 	}
 	return dcr.getDcrBlock(hash)
-}
-
-// VerifySignatures checks that the message's signature was created with the
-// private key for the provided public key. This is an asset.DEXAsset method.
-func (dcr *dcrBackend) VerifySignature(msg, pkBytes, sigBytes []byte) bool {
-	pubKey, err := secp256k1.ParsePubKey(pkBytes)
-	if err != nil {
-		dcr.log.Errorf("error decoding PublicKey from bytes: %v", err)
-		return false
-	}
-	signature, err := secp256k1.ParseDERSignature(sigBytes)
-	if err != nil {
-		dcr.log.Errorf("error decoding Signature from bytes: %v", err)
-		return false
-	}
-	return signature.Verify(msg, pubKey)
 }
 
 // connectNodeRPC attempts to create a new websocket connection to a dcrd node

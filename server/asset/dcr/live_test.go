@@ -74,7 +74,17 @@ func TestLiveUTXO(t *testing.T) {
 	var bestHash *chainhash.Hash
 	var mempool []*wire.MsgTx
 	var txs []*wire.MsgTx
-	var p2shCount, immatureCountBefore, immatureCountAfter, stakeCount int
+	type testStats struct {
+		p2pkh int
+		sp2pkh int
+		p2pkhSchnorr int
+		p2pkhEdwards int
+		p2sh int
+		sp2sh int
+		immatureBefore int
+		immatureAfter int
+	}
+	stats := new(testStats)
 	var currentHeight, tipHeight int64
 	maturity := uint32(chainParams.CoinbaseMaturity)
 	numBlocks := 512
@@ -140,11 +150,24 @@ func TestLiveUTXO(t *testing.T) {
 				// We can't do P2SH during live testing, because we don't have the
 				// scripts. Just count them for now.
 				if scriptType.isP2SH() {
-					p2shCount++
+					switch {
+					case scriptType.isStake():
+						stats.sp2sh++
+					default:
+						stats.p2sh++
+					}
 					continue
-				}
-				if scriptType.isStake() {
-					stakeCount++
+				} else if scriptType.isP2PKH() {
+					switch{
+					case scriptType.isEdwardsSig():
+						stats.p2pkhEdwards++
+					case scriptType.isSchnorrSig():
+						stats.p2pkhSchnorr++
+					case scriptType.isStake():
+						stats.sp2pkh++
+					default:
+						stats.p2pkh++
+					}
 				}
 				// Check if its an acceptable script type.
 				scriptTypeOK := scriptType != scriptUnsupported
@@ -156,9 +179,9 @@ func TestLiveUTXO(t *testing.T) {
 					// just count these for now.
 					confs := tipHeight - currentHeight + 1
 					if confs < int64(maturity) {
-						immatureCountBefore++
+						stats.immatureBefore++
 					} else {
-						immatureCountAfter++
+						stats.immatureAfter++
 					}
 					continue
 				}
@@ -260,10 +283,14 @@ func TestLiveUTXO(t *testing.T) {
 			break
 		}
 	}
-	t.Logf("%d P2SH outputs skipped", p2shCount)
-	t.Logf("%d immature transactions in the last %d blocks", immatureCountBefore, maturity)
-	t.Logf("%d immature transactions before %d blocks ago", immatureCountAfter, maturity)
-	t.Logf("%d stake transactions", stakeCount)
+	t.Logf("%d P2PKH scripts", stats.p2pkh)
+	t.Logf("%d stake P2PKH scripts", stats.sp2pkh)
+	t.Logf("%d Schnorr P2PKH scripts", stats.p2pkhSchnorr)
+	t.Logf("%d Edwards P2PKH scripts", stats.p2pkhEdwards)
+	t.Logf("%d P2SH scripts", stats.p2sh)
+	t.Logf("%d stake P2SH scripts", stats.sp2sh)
+	t.Logf("%d immature transactions in the last %d blocks", stats.immatureBefore, maturity)
+	t.Logf("%d immature transactions before %d blocks ago", stats.immatureAfter, maturity)
 }
 
 func TestCacheAdvantage(t *testing.T) {

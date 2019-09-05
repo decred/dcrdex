@@ -43,9 +43,6 @@ type DEXAsset interface {
 	// Transaction returns a DEXTx, which has methods for checking UTXO spending
 	// and swap contract info.
 	Transaction(txid string) (DEXTx, error)
-	// VerifySignature verifies that the message was signed with the private key
-	// corresponding to the provided serialized public key.
-	VerifySignature(message, pubkey, signature []byte) bool
 }
 
 // UTXO provides data about an unspent transaction output.
@@ -58,8 +55,9 @@ type UTXO interface {
 	// should have one confirmation. A negative number can be returned if error
 	// is not nil.
 	Confirmations() (int64, error)
-	// PaysToPubkeys checks that the provided pubkeys can spend the UTXO.
-	PaysToPubkeys(pubkeys [][]byte) (bool, error)
+	// PaysToPubkeys checks that the provided pubkeys can spend the UTXO and
+	// the signatures are valid.
+	PaysToPubkeys(pubkeys, sigs [][]byte, msg []byte) (bool, error)
 	// ScriptSize returns the UTXO's maximum sigScript byte count.
 	ScriptSize() uint32
 	// TxHash is a byte-slice of the UTXO's transaction hash.
