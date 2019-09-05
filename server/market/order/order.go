@@ -89,8 +89,19 @@ func calcOrderID(order Order) OrderID {
 type UTXO interface {
 	TxHash() []byte
 	Vout() uint32
-	Serialize() []byte
-	SerializeSize() int
+}
+
+func utxoSize(u UTXO) int {
+	return len(u.TxHash()) + 4
+}
+
+func serializeUTXO(u UTXO) []byte {
+	b := make([]byte, utxoSize(u))
+	hash := u.TxHash()
+	hashLen := len(hash)
+	copy(b, hash)
+	binary.LittleEndian.PutUint32(b[hashLen:], u.Vout())
+	return b
 }
 
 // Prefix is the order prefix containing data fields common to all orders.
@@ -178,7 +189,7 @@ func (o *MarketOrder) SerializeSize() int {
 	// Compute the size of the serialized UTXOs.
 	var utxosSize int
 	for _, u := range o.UTXOs {
-		utxosSize += u.SerializeSize()
+		utxosSize += len(u.TxHash()) + 4
 		// TODO: ensure all UTXOs have the same size, indicating the same asset?
 	}
 	// The serialized order includes a byte for UTXO count, but this is implicit
@@ -200,9 +211,9 @@ func (o *MarketOrder) Serialize() []byte {
 
 	// UTXO data
 	for _, u := range o.UTXOs {
-		utxoSize := u.SerializeSize()
-		copy(b[offset:offset+utxoSize], u.Serialize())
-		offset += utxoSize
+		utxoSz := utxoSize(u)
+		copy(b[offset:offset+utxoSz], serializeUTXO(u))
+		offset += utxoSz
 	}
 
 	// order side

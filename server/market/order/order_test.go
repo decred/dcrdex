@@ -2,7 +2,6 @@
 package order
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"reflect"
 	"testing"
@@ -38,17 +37,6 @@ const (
 type utxo struct {
 	txHash []byte
 	vout   uint32
-}
-
-func (u *utxo) Serialize() []byte {
-	b := make([]byte, u.SerializeSize())
-	copy(b, u.txHash)
-	binary.LittleEndian.PutUint32(b[len(u.txHash):], u.vout)
-	return b
-}
-
-func (u *utxo) SerializeSize() int {
-	return len(u.txHash) + 4
 }
 
 func (u *utxo) TxHash() []byte {
@@ -482,6 +470,43 @@ func TestCancelOrder_ID(t *testing.T) {
 			}
 			if got := o.ID(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("CancelOrder.ID() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// func randomHash() (h [32]byte) {
+// 	rand.Read(h[:])
+// 	return
+// }
+
+func Test_serializeUTXO(t *testing.T) {
+	type args struct {
+		u *utxo
+	}
+	tests := []struct {
+		name string
+		args args
+		want []byte
+	}{
+		{
+			"ok",
+			args{
+				newUtxo("bc4b0ffe3a70cf159657b1f8f12c2d895c5d7e849de6ac1c3358be86842f4549", 4),
+			},
+			[]byte{
+				0xbc, 0x4b, 0xf, 0xfe, 0x3a, 0x70, 0xcf, 0x15,
+				0x96, 0x57, 0xb1, 0xf8, 0xf1, 0x2c, 0x2d, 0x89,
+				0x5c, 0x5d, 0x7e, 0x84, 0x9d, 0xe6, 0xac, 0x1c,
+				0x33, 0x58, 0xbe, 0x86, 0x84, 0x2f, 0x45, 0x49,
+				0x4, 0x0, 0x0, 0x0,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := serializeUTXO(tt.args.u); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("serializeUTXO() = %#v, want %v", got, tt.want)
 			}
 		})
 	}
