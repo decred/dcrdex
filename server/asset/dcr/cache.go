@@ -16,7 +16,7 @@ import (
 // block needed to verify UTXO validity.
 type dcrBlock struct {
 	hash     chainhash.Hash
-	height   int64
+	height   uint32
 	orphaned bool
 	vote     bool // stakeholder vote result for the previous block
 }
@@ -27,7 +27,7 @@ type blockCache struct {
 	mtx       sync.RWMutex
 	blocks    map[chainhash.Hash]*dcrBlock
 	mainchain map[uint32]*dcrBlock
-	tip       uint32
+	best      dcrBlock
 	log       asset.Logger
 }
 
@@ -70,7 +70,7 @@ func (cache *blockCache) add(block *chainjson.GetBlockVerboseResult) (*dcrBlock,
 	}
 	blk := &dcrBlock{
 		hash:     *hash,
-		height:   block.Height,
+		height:   uint32(block.Height),
 		orphaned: block.Confirmations == -1,
 		vote:     block.VoteBits&1 != 0,
 	}
@@ -79,8 +79,9 @@ func (cache *blockCache) add(block *chainjson.GetBlockVerboseResult) (*dcrBlock,
 	// Orphaned blocks will have -1 confirmations. Don't add them to mainchain.
 	if block.Confirmations > -1 {
 		cache.mainchain[uint32(block.Height)] = blk
-		if uint32(block.Height) > cache.tip {
-			cache.tip = uint32(block.Height)
+		if block.Height > int64(cache.best.height) {
+			cache.best.height = uint32(block.Height)
+			cache.best.hash = *hash
 		}
 	}
 	return blk, nil
@@ -90,21 +91,30 @@ func (cache *blockCache) add(block *chainjson.GetBlockVerboseResult) (*dcrBlock,
 func (cache *blockCache) tipHeight() uint32 {
 	cache.mtx.Lock()
 	defer cache.mtx.Unlock()
-	return cache.tip
+	return cache.best.height
+}
+
+// Get the best known block hash in the blockCache.
+func (cache *blockCache) tipHash() chainhash.Hash {
+	cache.mtx.RLock()
+	defer cache.mtx.RUnlock()
+	return cache.best.hash
 }
 
 // Trigger a reorg, setting any blocks at or above the provided height as
-// orphaned and removing them from mainchain, but not the blocks map.
-func (cache *blockCache) reorg(newTip int64) {
+// orphaned and removing them from mainchain, but not the blocks map. reorg
+// clears the best block, so should always be followed with the addition of a
+// new mainchain block.
+func (cache *blockCache) reorg(newTip *chainjson.GetBlockVerboseResult) {
 	cache.mtx.Lock()
 	defer cache.mtx.Unlock()
-	if newTip < 0 {
+	if newTip.Height < 0 {
 		return
 	}
-	for height := uint32(newTip); height <= cache.tip; height++ {
+	for height := uint32(newTip.Height); height <= cache.best.height; height++ {
 		block, found := cache.mainchain[height]
 		if !found {
-			cache.log.Errorf("reorg block not found on mainchain at height %d for a reorg from %d to %d", height, newTip, cache.tip)
+			cache.log.Errorf("reorg block not found on mainchain at height %d for a reorg from %d to %d", height, newTip, cache.best.height)
 			continue
 		}
 		// Delete the block from mainchain.
@@ -117,5 +127,7 @@ func (cache *blockCache) reorg(newTip int64) {
 			vote:     block.vote,
 		}
 	}
-	cache.tip = uint32(newTip)
+	// Set this to a zero block so that the new block will replace it even if
+	// it is of the same height as the previous best block.
+	cache.best = dcrBlock{}
 }

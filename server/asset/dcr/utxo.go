@@ -17,17 +17,33 @@ import (
 type UTXO struct {
 	// Because a UTXO's validity and block info can change after creation, keep a
 	// dcrBackend around to query the state of the tx and update the block info.
-	dcr          *dcrBackend
-	height       uint32
-	blockHash    chainhash.Hash
-	txHash       chainhash.Hash
-	vout         uint32
-	maturity     int32
-	scriptType   dcrScriptType
-	pkScript     []byte
+	dcr *dcrBackend
+	// The height and hash of the transaction's best known block.
+	height    uint32
+	blockHash chainhash.Hash
+	txHash    chainhash.Hash
+	vout      uint32
+	// The number of confirmations needed for maturity. For outputs of a coinbase
+	// transaction, this will be set to chaincfg.Params.CoinbaseMaturity (100 for
+	// BTC). For other supported script types, this will be zero.
+	maturity int32
+	// A bitmask for script type information.
+	scriptType dcrScriptType
+	// The output's scriptPubkey.
+	pkScript []byte
+	// If the pubkey script is P2SH or P2WSH, the UTXO will only be generated if
+	// the redeem script is supplied and the script-hash validated. For P2PKH and
+	// P2WPKH pubkey scripts, the redeem script should be nil.
 	redeemScript []byte
-	numSigs      int
-	spendSize    uint32
+	// numSigs is the number of signatures required to spend this output.
+	numSigs int
+	// spendSize stores the best estimate of the size (bytes) of the serialized
+	// transaction input that spends this UTXO.
+	spendSize uint32
+	// While the utxo's tx is still in mempool, the tip hash will be stored.
+	// This enables an optimization in the Confirmations method to return zero
+	// without extraneous RPC calls.
+	lastLookup *chainhash.Hash
 }
 
 // Check that UTXO satisfies the asset.UTXO interface
@@ -35,28 +51,33 @@ var _ asset.UTXO = (*UTXO)(nil)
 
 // Confirmations is an asset.DEXAsset method that returns the number of
 // confirmations for a UTXO. Because it is possible for a UTXO that was once
-// considered valid to later be considered invalid, Confirmations can return
+// considered valid to later be considered invalid, this method can return
 // an error to indicate the UTXO is no longer valid. The definition of UTXO
 // validity should not be confused with the validity of regular tree
 // transactions that is voted on by stakeholders. While stakeholder approval is
 // a part for UTXO validity, there are other considerations as well.
 func (utxo *UTXO) Confirmations() (int64, error) {
 	dcr := utxo.dcr
+	tipHash := dcr.blockCache.tipHash()
 	// If the UTXO was in a mempool transaction, check if it has been confirmed.
 	if utxo.height == 0 {
-		txOut, verboseTx, _, err := dcr.getTxOutInfo(&utxo.txHash, utxo.vout)
-		if err != nil {
-			return -1, err
-		}
-		// More than zero confirmations would indicate that the transaction has
-		// been mined. Collect the block info and update the utxo fields.
-		if txOut.Confirmations > 0 {
-			blk, err := dcr.getBlockInfo(verboseTx.BlockHash)
+		// If the tip hasn't changed, don't do anything here.
+		if utxo.lastLookup == nil || *utxo.lastLookup != tipHash {
+			utxo.lastLookup = &tipHash
+			txOut, verboseTx, _, err := dcr.getTxOutInfo(&utxo.txHash, utxo.vout)
 			if err != nil {
 				return -1, err
 			}
-			utxo.height = uint32(blk.height)
-			utxo.blockHash = blk.hash
+			// More than zero confirmations would indicate that the transaction has
+			// been mined. Collect the block info and update the utxo fields.
+			if txOut.Confirmations > 0 {
+				blk, err := dcr.getBlockInfo(verboseTx.BlockHash)
+				if err != nil {
+					return -1, err
+				}
+				utxo.height = uint32(blk.height)
+				utxo.blockHash = blk.hash
+			}
 		}
 	} else {
 		// The UTXO was included in a block, but make sure that the utxo's block has
@@ -170,8 +191,9 @@ func (utxo *UTXO) Vout() uint32 {
 	return utxo.vout
 }
 
-// TxID is the txid, which is the hex-encoded byte-reversed transaction hash.
-// TxID is a method of the asset.UTXO interface.
+// TxID is a string identifier for the transaction, typically a hexadecimal
+// representation of the byte-reversed transaction hash. Should always return
+// the same value as the txid argument passed to (DEXAsset).UTXO.
 func (utxo *UTXO) TxID() string {
 	return utxo.txHash.String()
 }

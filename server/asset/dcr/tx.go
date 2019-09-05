@@ -24,6 +24,9 @@ type Tx struct {
 	ins       []txIn
 	outs      []txOut
 	isStake   bool
+	// Used to conditionally skip block lookups on mempool transactions during
+	// calls to Confirmations.
+	lastLookup *chainhash.Hash
 }
 
 // Check that Tx satisfies the asset.DEXTx interface
@@ -43,7 +46,7 @@ type txOut struct {
 }
 
 // A getter for a new Tx.
-func newTransaction(dcr *dcrBackend, txHash, blockHash *chainhash.Hash, blockHeight int64,
+func newTransaction(dcr *dcrBackend, txHash, blockHash, lastLookup *chainhash.Hash, blockHeight int64,
 	isStake bool, ins []txIn, outs []txOut) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash
@@ -51,13 +54,14 @@ func newTransaction(dcr *dcrBackend, txHash, blockHash *chainhash.Hash, blockHei
 		hash = &zeroHash
 	}
 	return &Tx{
-		dcr:       dcr,
-		blockHash: *hash,
-		height:    blockHeight,
-		hash:      *txHash,
-		ins:       ins,
-		outs:      outs,
-		isStake:   isStake,
+		dcr:        dcr,
+		blockHash:  *hash,
+		height:     blockHeight,
+		hash:       *txHash,
+		ins:        ins,
+		outs:       outs,
+		isStake:    isStake,
+		lastLookup: lastLookup,
 	}
 }
 
@@ -68,7 +72,9 @@ func newTransaction(dcr *dcrBackend, txHash, blockHash *chainhash.Hash, blockHei
 func (tx *Tx) Confirmations() (int64, error) {
 	// A zeroed block hash means this is a mempool transaction. Check if it has
 	// been mined.
-	if tx.blockHash == zeroHash {
+	tipHash := tx.dcr.blockCache.tipHash()
+	if tx.blockHash == zeroHash && (tx.lastLookup == nil || *tx.lastLookup != tipHash) {
+		tx.lastLookup = &tipHash
 		verboseTx, err := tx.dcr.node.GetRawTransactionVerbose(&tx.hash)
 		if err != nil {
 			return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", tx.hash, err)
@@ -79,7 +85,7 @@ func (tx *Tx) Confirmations() (int64, error) {
 				return -1, err
 			}
 			tx.blockHash = blk.hash
-			tx.height = blk.height
+			tx.height = int64(blk.height)
 		}
 	}
 	// If there is still no block hash, it's a mempool transaction.

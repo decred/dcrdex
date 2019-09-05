@@ -297,13 +297,6 @@ func testVin(txHash *chainhash.Hash, vout uint32) chainjson.Vin {
 	}
 }
 
-// Decode the hex string and append it to the script, returning the script.
-func addHex(script []byte, encoded string) []byte {
-	bytes, _ := hex.DecodeString(encoded)
-	script = append(script, bytes...)
-	return script
-}
-
 type testMsgTx struct {
 	tx     *wire.MsgTx
 	pubkey []byte
@@ -1006,7 +999,7 @@ func TestReorg(t *testing.T) {
 	ensureOrphaned(&oneDeep.hash, int(tip.height))
 	ensureOrphaned(&twoDeep.hash, int(tip.height))
 	newHeight := int64(dcr.blockCache.tipHeight())
-	if newHeight != twoDeep.height {
+	if newHeight != int64(twoDeep.height) {
 		t.Fatalf("from tip height after 3-block reorg. expected %d, saw %d", twoDeep.height-1, newHeight)
 	}
 	newTip, found = dcr.blockCache.mainchain[uint32(newHeight)]
@@ -1142,6 +1135,11 @@ func TestTx(t *testing.T) {
 	}
 	// Now mine the transaction
 	blockHash = testAddBlockVerbose(nil, 1, blockHeight, 0)
+	verboseBlock := testChain.blocks[*blockHash]
+	_, err = dcr.blockCache.add(verboseBlock)
+	if err != nil {
+		t.Fatalf("error adding block to blockCache: %v", err)
+	}
 	// Update the verbose tx data
 	testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 1)
 	// Check Confirmations

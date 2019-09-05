@@ -157,7 +157,13 @@ func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 
 	// If it's not a mempool transaction, get and cache the block data.
 	var blockHash *chainhash.Hash
-	if verboseTx.BlockHash != "" {
+	var lastLookup *chainhash.Hash
+	if verboseTx.BlockHash == "" {
+		tipHash := dcr.blockCache.tipHash()
+		if tipHash != zeroHash {
+			lastLookup = &tipHash
+		}
+	} else {
 		blockHash, err = chainhash.NewHashFromStr(verboseTx.BlockHash)
 		if err != nil {
 			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %v", verboseTx.BlockHash, txHash, err)
@@ -195,7 +201,7 @@ func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 			pkScript: pkScript,
 		})
 	}
-	return newTransaction(dcr, txHash, blockHash, verboseTx.BlockHeight, isStake, inputs, outputs), nil
+	return newTransaction(dcr, txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, inputs, outputs), nil
 }
 
 // Shutdown down the rpcclient.Client.
@@ -241,7 +247,7 @@ out:
 				// Check if this forces a reorg.
 				currentTip := int64(dcr.blockCache.tipHeight())
 				if blockVerbose.Height <= currentTip {
-					dcr.blockCache.reorg(blockVerbose.Height)
+					dcr.blockCache.reorg(blockVerbose)
 				}
 				block, err := dcr.blockCache.add(blockVerbose)
 				if err != nil {
@@ -326,6 +332,7 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 
 	blockHeight := uint32(verboseTx.BlockHeight)
 	var blockHash chainhash.Hash
+	var lastLookup *chainhash.Hash
 	// UTXO is assumed to be valid while in mempool, so skip the validity check.
 	if txOut.Confirmations > 0 {
 		if blockHeight == 0 {
@@ -338,6 +345,12 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		}
 		blockHeight = uint32(blk.height)
 		blockHash = blk.hash
+	} else {
+		// Set the lastLookup to the current tip.
+		tipHash := dcr.blockCache.tipHash()
+		if tipHash != zeroHash {
+			lastLookup = &tipHash
+		}
 	}
 
 	// Coinbase, vote, and revocation transactions all must mature before
@@ -364,7 +377,8 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		// The total size associated with the wire.TxIn. See
 		// (wire.TxIn).SerializeSizeWitness and
 		// and (wire.TxIn).SerializeSizePrefix
-		spendSize: uint32(sigScriptSize) + txInOverhead,
+		spendSize:  uint32(sigScriptSize) + txInOverhead,
+		lastLookup: lastLookup,
 	}, nil
 }
 
