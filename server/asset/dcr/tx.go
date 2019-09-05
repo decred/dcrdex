@@ -125,7 +125,7 @@ func (tx *Tx) Confirmations() (int64, error) {
 func (tx *Tx) SpendsUTXO(txid string, vout uint32) bool {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
-		log.Warnf("error decoding txid %s: %v", txid, err)
+		tx.dcr.log.Warnf("error decoding txid %s: %v", txid, err)
 		return false
 	}
 	for _, txIn := range tx.ins {

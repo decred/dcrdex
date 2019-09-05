@@ -3,6 +3,8 @@
 
 package asset
 
+import "github.com/decred/slog"
+
 type Error string
 
 func (err Error) Error() string { return string(err) }
@@ -10,6 +12,22 @@ func (err Error) Error() string { return string(err) }
 const (
 	UnsupportedScriptError = Error("unsupported script type")
 )
+
+// Network flags passed to asset backends to signify which network to use.
+type Network uint8
+
+const (
+	Mainnet Network = iota
+	Testnet
+	Regtest
+)
+
+// The DEX recognizes only three networks. Simnet is a alias of Regtest.
+const Simnet = Regtest
+
+// Every backend constructor will accept a Logger. All logging should take place
+// through the provided logger.
+type Logger = slog.Logger
 
 // The DEXAsset interface is an interface for a blockchain backend. The DEX
 // primarily needs to track UTXOs and transactions to validate orders, and

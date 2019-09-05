@@ -9,6 +9,7 @@ import (
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
+	"github.com/decred/dcrdex/server/asset"
 )
 
 // The dcrBlock structure should hold a minimal amount of information about a
@@ -27,13 +28,15 @@ type blockCache struct {
 	blocks    map[chainhash.Hash]*dcrBlock
 	mainchain map[uint32]*dcrBlock
 	tip       uint32
+	log       asset.Logger
 }
 
 // Constructor for a blockCache.
-func newBlockCache() *blockCache {
+func newBlockCache(logger asset.Logger) *blockCache {
 	return &blockCache{
 		blocks:    make(map[chainhash.Hash]*dcrBlock),
 		mainchain: make(map[uint32]*dcrBlock),
+		log:       logger,
 	}
 }
 
@@ -101,13 +104,12 @@ func (cache *blockCache) reorg(newTip int64) {
 	for height := uint32(newTip); height <= cache.tip; height++ {
 		block, found := cache.mainchain[height]
 		if !found {
-			log.Errorf("reorg block not found on mainchain at height %d for a reorg from %d to %d", height, newTip, cache.tip)
+			cache.log.Errorf("reorg block not found on mainchain at height %d for a reorg from %d to %d", height, newTip, cache.tip)
 			continue
 		}
 		// Delete the block from mainchain.
 		delete(cache.mainchain, uint32(block.height))
 		// Store an orphaned block in the blocks cache.
-		log.Debugf("marking block %s as orphaned\n", block.hash)
 		cache.blocks[block.hash] = &dcrBlock{
 			hash:     block.hash,
 			height:   block.height,

@@ -34,6 +34,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/wire"
+	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -41,6 +42,7 @@ import (
 var (
 	dcrdConfigPath = filepath.Join(dcrdHomeDir, "dcrd.conf")
 	dcr            *dcrBackend
+	testLogger     asset.Logger
 )
 
 type dcrdConfig struct {
@@ -49,7 +51,7 @@ type dcrdConfig struct {
 }
 
 func TestMain(m *testing.M) {
-	UseLogger(slog.NewBackend(os.Stdout).Logger("DCRTEST"))
+	testLogger = slog.NewBackend(os.Stdout).Logger("TEST")
 	ctx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 	cfg := new(dcrdConfig)
@@ -58,14 +60,7 @@ func TestMain(m *testing.M) {
 		fmt.Printf("error reading dcrd config: %v\n", err)
 		return
 	}
-	dcr, err = NewDCR(&DCRConfig{
-		Net:      mainnetName,
-		DcrdUser: cfg.RPCUser,
-		DcrdPass: cfg.RPCPass,
-		DcrdServ: defaultMainnet,
-		DcrdCert: defaultDaemonRPCCertFile,
-		Context:  ctx,
-	})
+	dcr, err = NewDCR(ctx, "", testLogger, asset.Mainnet)
 	if err != nil {
 		fmt.Printf("NewDCR error: %v\n", err)
 		return
@@ -297,7 +292,7 @@ func TestCacheAdvantage(t *testing.T) {
 	t.Logf("%d blocks fetched via RPC in %.3f ms", numBlocks, float64(time.Since(start).Nanoseconds())/1e6)
 	// Now go back trough the blocks, summing the encoded size and building a
 	// slice of hashes.
-	cache := newBlockCache()
+	cache := newBlockCache(testLogger)
 	byteCount := 0
 	hashes := make([]*chainhash.Hash, 0, numBlocks)
 	for _, block := range blocks {

@@ -9,91 +9,109 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
+	"github.com/decred/dcrdex/server/asset"
+	"github.com/decred/slog"
+	flags "github.com/jessevdk/go-flags"
 )
 
 func TestMain(m *testing.M) {
 	// Call tidyConfig to set the global chainParams.
-	err := tidyConfig(&DCRConfig{
-		Net:      mainnetName,
-		DcrdUser: "testuser",
-		DcrdPass: "testpass",
-	})
-	if err != nil {
-		fmt.Printf("tidyConfig error: %v\n", err)
-		return
-	}
+	chainParams = chaincfg.MainNetParams()
 	os.Exit(m.Run())
 }
 
 // TestTidyConfig checks that configuration parsing works as expected.
 func TestTidyConfig(t *testing.T) {
-	cfg := &DCRConfig{Net: mainnetName}
-	err := tidyConfig(cfg)
-	if err == nil {
-		t.Errorf("expected error for config with no dcrd username/password, but saw none")
-	}
-	cfg = &DCRConfig{
-		Net:      mainnetName,
-		DcrdUser: "abc",
-	}
-	err = tidyConfig(cfg)
-	if err == nil {
-		t.Errorf("expected error for config with no dcrd username, but saw none")
-	}
-	cfg = &DCRConfig{
-		Net:      mainnetName,
-		DcrdPass: "def",
-	}
-	err = tidyConfig(cfg)
-	if err == nil {
-		t.Errorf("expected error for config with no dcrd password, but saw none")
-	}
-	cfg = &DCRConfig{
-		Net:      mainnetName,
-		DcrdUser: "abc",
-		DcrdPass: "def",
-	}
-	err = tidyConfig(cfg)
+	cfg := &DCRConfig{}
+	parsedCfg := &DCRConfig{}
+
+	tempDir, err := ioutil.TempDir("", "btctest")
 	if err != nil {
-		t.Errorf("unexpected error for config with username and password set: %v", err)
+		t.Fatalf("error creating temporary directory: %v", err)
 	}
-	if cfg.DcrdServ != defaultMainnet {
-		t.Errorf("DcrdServ not set implicitly")
+	defer os.RemoveAll(tempDir)
+	filePath := filepath.Join(tempDir, "test.conf")
+	rootParser := flags.NewParser(cfg, flags.None)
+	iniParser := flags.NewIniParser(rootParser)
+
+	runCfg := func(config *DCRConfig) error {
+		*cfg = *config
+		err := iniParser.WriteFile(filePath, flags.IniNone)
+		if err != nil {
+			return err
+		}
+		parsedCfg, err = loadConfig(filePath, asset.Mainnet)
+		return err
 	}
-	if cfg.DcrdCert != defaultDaemonRPCCertFile {
-		t.Errorf("DcrdCert not set implicitly")
+
+	// Try with just the name. Error expected.
+	err = runCfg(&DCRConfig{
+		RPCUser: "somename",
+	})
+	if err == nil {
+		t.Fatalf("no error when just name provided")
 	}
-	cfg = &DCRConfig{
-		Net:      mainnetName,
-		DcrdUser: "abc",
-		DcrdPass: "def",
-		DcrdServ: "123",
-		DcrdCert: "456",
+
+	// Try with just the password. Error expected.
+	err = runCfg(&DCRConfig{
+		RPCPass: "somepass",
+	})
+	if err == nil {
+		t.Fatalf("no error when just password provided")
 	}
-	err = tidyConfig(cfg)
+
+	// Give both name and password. This should not be an error.
+	err = runCfg(&DCRConfig{
+		RPCUser: "somename",
+		RPCPass: "somepass",
+	})
 	if err != nil {
-		t.Errorf("unexpected error when settings DcrdServ/DcrdCert explicitly")
+		t.Fatalf("unexpected error when both name and password provided: %v", err)
 	}
-	if cfg.DcrdServ != "123" {
-		t.Errorf("DcrdServ not set to provided value")
+	if parsedCfg.RPCListen != defaultMainnet {
+		t.Fatalf("unexpected default rpc address. wanted %s, got %s", defaultMainnet, cfg.RPCListen)
 	}
-	if cfg.DcrdCert != "456" {
-		t.Errorf("DcrdCert not set to provided value")
+	// sanity check for name and password match
+	if parsedCfg.RPCUser != cfg.RPCUser {
+		t.Fatalf("name mismatch")
+	}
+	if parsedCfg.RPCPass != cfg.RPCPass {
+		t.Fatalf("password mismatch")
+	}
+	if parsedCfg.RPCCert != defaultRPCCert {
+		t.Errorf("RPCCert not set implicitly")
+	}
+	err = runCfg(&DCRConfig{
+		RPCUser:   "abc",
+		RPCPass:   "def",
+		RPCListen: "123",
+		RPCCert:   "456",
+	})
+	if err != nil {
+		t.Errorf("unexpected error when settings RPCListen/RPCCert explicitly: %v", err)
+	}
+	if cfg.RPCListen != "123" {
+		t.Errorf("RPCListen not set to provided value")
+	}
+	if cfg.RPCCert != "456" {
+		t.Errorf("RPCCert not set to provided value")
 	}
 }
 
@@ -304,12 +322,23 @@ func genPubkey() ([]byte, []byte) {
 
 // A pay-to-script-hash pubkey script.
 func newP2PKHScript() ([]byte, []byte, []byte) {
-	script := make([]byte, 0, P2PKHSigScriptSize)
-	script = addHex(script, "76a914")
 	pubkey, pkHash := genPubkey()
-	script = append(script, pkHash...)
-	script = addHex(script, "88ac")
-	return script, pubkey, pkHash
+	var pkScript []byte
+	var err error
+	pkScript, err = txscript.NewScriptBuilder().
+		AddOps([]byte{
+			txscript.OP_DUP,
+			txscript.OP_HASH160,
+		}).
+		AddData(pkHash).
+		AddOps([]byte{
+			txscript.OP_EQUALVERIFY,
+			txscript.OP_CHECKSIG,
+		}).Script()
+	if err != nil {
+		fmt.Printf("newP2PKHScript error: %v\n", err)
+	}
+	return pkScript, pubkey, pkHash
 }
 
 // A pay-to-script-hash pubkey script, with a prepended stake-tree indicator
@@ -347,20 +376,40 @@ type testMsgTxSwap struct {
 // Create a swap (initialization) contract with random pubkeys and return the
 // pubkey script and addresses.
 func testSwapContract() ([]byte, dcrutil.Address) {
-	contract := make([]byte, 0, 25)
-	contract = addHex(contract, "6382012088c020") // This snippet checks the size of the secret and hashes it.
-	// hashed secret
+	lockTime := time.Now().Add(time.Hour * 24).Unix()
 	secretKey := randomBytes(32)
-	contract = append(contract, secretKey...)
-	contract = addHex(contract, "8876a914") // check the hash
 	_, receiverPKH := genPubkey()
-	contract = append(contract, receiverPKH...)
-	contract = addHex(contract, "6704f690625db17576a914") // check the pubkey hash,  else
 	_, senderPKH := genPubkey()
-	contract = append(contract, senderPKH...)
-	contract = addHex(contract, "6888ac") // check the pubkey hash
+	contract, err := txscript.NewScriptBuilder().
+		AddOps([]byte{
+			txscript.OP_IF,
+			txscript.OP_SIZE,
+		}).AddInt64(32).
+		AddOps([]byte{
+			txscript.OP_EQUALVERIFY,
+			txscript.OP_SHA256,
+		}).AddData(secretKey).
+		AddOps([]byte{
+			txscript.OP_EQUALVERIFY,
+			txscript.OP_DUP,
+			txscript.OP_HASH160,
+		}).AddData(receiverPKH).
+		AddOp(txscript.OP_ELSE).
+		AddInt64(lockTime).AddOps([]byte{
+		txscript.OP_CHECKLOCKTIMEVERIFY,
+		txscript.OP_DROP,
+		txscript.OP_DUP,
+		txscript.OP_HASH160,
+	}).AddData(senderPKH).
+		AddOps([]byte{
+			txscript.OP_ENDIF,
+			txscript.OP_EQUALVERIFY,
+			txscript.OP_CHECKSIG,
+		}).Script()
+	if err != nil {
+		fmt.Printf("testSwapContract error: %v\n", err)
+	}
 	receiverAddr, _ := dcrutil.NewAddressPubKeyHash(receiverPKH, chainParams, dcrec.STEcdsaSecp256k1)
-	// senderAddr, _ := dcrutil.NewAddressPubKeyHash(senderPKH, chainParams, dcrec.STEcdsaSecp256k1)
 	return contract, receiverAddr
 }
 
@@ -368,12 +417,15 @@ func testSwapContract() ([]byte, dcrutil.Address) {
 func testMsgTxSwapInit() *testMsgTxSwap {
 	msgTx := wire.NewMsgTx()
 	contract, recipient := testSwapContract()
-	pkScript := make([]byte, 0, 23)
-	pkScript = append(pkScript, txscript.OP_HASH160)
-	pkScript = append(pkScript, txscript.OP_DATA_20)
 	scriptHash := dcrutil.Hash160(contract)
-	pkScript = append(pkScript, scriptHash...)
-	pkScript = append(pkScript, txscript.OP_EQUAL)
+	pkScript, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_HASH160).
+		AddData(scriptHash).
+		AddOp(txscript.OP_EQUAL).
+		Script()
+	if err != nil {
+		fmt.Printf("script building error in testMsgTxSwapInit: %v", err)
+	}
 	msgTx.AddTxOut(wire.NewTxOut(1, pkScript))
 	return &testMsgTxSwap{
 		tx:        msgTx,
@@ -393,14 +445,18 @@ func testMsgTxVote() *testMsgTx {
 	// Second outpoint needs to be stake tree
 	msgTx.AddTxIn(wire.NewTxIn(wire.NewOutPoint(&zeroHash, 0, 1), 0, nil))
 	// First output must have OP_RETURN script
-	script1 := make([]byte, stake.SSGenBlockReferenceOutSize)
-	script1[0] = txscript.OP_RETURN
-	script1[1] = txscript.OP_DATA_36
+	script1, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_RETURN).AddData(randomBytes(36)).Script()
+	if err != nil {
+		fmt.Printf("script1 building error in testMsgTxVote: %v", err)
+	}
 	msgTx.AddTxOut(wire.NewTxOut(0, script1))
 	// output 2
-	script2 := make([]byte, stake.SSGenVoteBitsOutputMinSize)
-	script2[0] = txscript.OP_RETURN
-	script2[1] = txscript.OP_DATA_2
+	script2, err := txscript.NewScriptBuilder().
+		AddOp(txscript.OP_RETURN).AddData(randomBytes(2)).Script()
+	if err != nil {
+		fmt.Printf("script2 building error in testMsgTxVote: %v", err)
+	}
 	msgTx.AddTxOut(wire.NewTxOut(1, script2))
 	// Now just a P2PKH script with a prepended OP_SSGEN
 	script3, pubkey, pkHash := newStakeP2PKHScript(txscript.OP_SSGEN)
@@ -506,6 +562,15 @@ func testMsgTxRevocation() *testMsgTx {
 	}
 }
 
+// Make a backend that logs to stdout.
+func testBackend() (*dcrBackend, func()) {
+	logger := slog.NewBackend(os.Stdout).Logger("TEST")
+	ctx, shutdown := context.WithCancel(context.Background())
+	dcr := unconnectedDCR(ctx, logger)
+	dcr.node = testNode{}
+	return dcr, shutdown
+}
+
 // TestUTXOs tests all UTXO related paths.
 func TestUTXOs(t *testing.T) {
 	// The various UTXO types to check:
@@ -528,12 +593,8 @@ func TestUTXOs(t *testing.T) {
 	// 12. A revocation.
 
 	// Create a dcrBackend with the test node.
-	ctx, shutdown := context.WithCancel(context.Background())
+	dcr, shutdown := testBackend()
 	defer shutdown()
-	dcr := unconnectedDCR(&DCRConfig{
-		Context: ctx,
-	})
-	dcr.node = testNode{}
 
 	// The vout will be randomized during reset.
 	txHeight := uint32(50)
@@ -541,7 +602,7 @@ func TestUTXOs(t *testing.T) {
 	// A general reset function that clears the testBlockchain and the blockCache.
 	reset := func() {
 		cleanTestChain()
-		dcr.blockCache = newBlockCache()
+		dcr.blockCache = newBlockCache(dcr.log)
 	}
 
 	// CASE 1: A valid UTXO in a mempool transaction. This UTXO will have zero
@@ -871,19 +932,15 @@ func TestUTXOs(t *testing.T) {
 // checks that the cache is responding as expected.
 func TestReorg(t *testing.T) {
 	// Create a dcrBackend with the test node.
-	ctx, shutdown := context.WithCancel(context.Background())
+	dcr, shutdown := testBackend()
 	defer shutdown()
-	dcr := unconnectedDCR(&DCRConfig{
-		Context: ctx,
-	})
-	dcr.node = testNode{}
 
 	// A general reset function that clears the testBlockchain and the blockCache.
 	tipHeight := 10
 	var tipHash *chainhash.Hash
 	reset := func() {
 		cleanTestChain()
-		dcr.blockCache = newBlockCache()
+		dcr.blockCache = newBlockCache(dcr.log)
 		for h := 0; h <= tipHeight; h++ {
 			blockHash := testAddBlockVerbose(nil, int64(tipHeight-h+1), uint32(h), 1)
 			// force dcr to get and cache the block
@@ -993,12 +1050,8 @@ func TestSignatures(t *testing.T) {
 // TestTx checks the transaction-related methods and functions.
 func TestTx(t *testing.T) {
 	// Create a dcrBackend with the test node.
-	ctx, shutdown := context.WithCancel(context.Background())
+	dcr, shutdown := testBackend()
 	defer shutdown()
-	dcr := unconnectedDCR(&DCRConfig{
-		Context: ctx,
-	})
-	dcr.node = testNode{}
 
 	// Test 1: Test different states of validity.
 	cleanTestChain()
@@ -1069,7 +1122,7 @@ func TestTx(t *testing.T) {
 
 	// Test 2: Before and after mining.
 	cleanTestChain()
-	dcr.blockCache = newBlockCache()
+	dcr.blockCache = newBlockCache(dcr.log)
 	txHash = randomHash()
 	// Add a transaction to mempool.
 	msg = testMsgTxRegular()
@@ -1111,12 +1164,8 @@ func TestTx(t *testing.T) {
 // TxID.
 func TestAuxiliary(t *testing.T) {
 	// Create a dcrBackend with the test node.
-	ctx, shutdown := context.WithCancel(context.Background())
+	dcr, shutdown := testBackend()
 	defer shutdown()
-	dcr := unconnectedDCR(&DCRConfig{
-		Context: ctx,
-	})
-	dcr.node = testNode{}
 
 	// Add a transaction and retrieve it. Use a vote, since it has non-zero vout.
 	cleanTestChain()

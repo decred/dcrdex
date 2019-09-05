@@ -65,26 +65,29 @@ type dcrBackend struct {
 	// dcrd block and reorganization are synchronized through a general purpose
 	// queue.
 	anyQ chan interface{}
+	// A logger will be provided by the DEX. All logging should use the provided
+	// logger.
+	log asset.Logger
 }
 
 // Check that dcrBackend satisfies the DEXAsset interface.
 var _ asset.DEXAsset = (*dcrBackend)(nil)
 
-func NewDCR(cfg *DCRConfig) (*dcrBackend, error) {
+func NewDCR(ctx context.Context, configPath string, logger asset.Logger, network asset.Network) (*dcrBackend, error) {
 	// tidyConfig will set fields if defaults are used and set the chainParams
 	// package variable.
-	err := tidyConfig(cfg)
+	cfg, err := loadConfig(configPath, network)
 	if err != nil {
 		return nil, err
 	}
-	dcr := unconnectedDCR(cfg)
+	dcr := unconnectedDCR(ctx, logger)
 	notifications := &rpcclient.NotificationHandlers{
 		OnBlockConnected: dcr.onBlockConnected,
 	}
 	// When the exported constructor is used, the node will be an
 	// rpcclient.Client.
-	dcr.client, err = connectNodeRPC(cfg.DcrdServ, cfg.DcrdUser, cfg.DcrdPass,
-		cfg.DcrdCert, notifications)
+	dcr.client, err = connectNodeRPC(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass,
+		cfg.RPCCert, notifications)
 	if err != nil {
 		return nil, err
 	}
@@ -205,12 +208,13 @@ func (dcr *dcrBackend) shutdown() {
 
 // unconnectedDCR returns a dcrBackend without a node. The node should be set
 // before use.
-func unconnectedDCR(cfg *DCRConfig) *dcrBackend {
+func unconnectedDCR(ctx context.Context, logger asset.Logger) *dcrBackend {
 	dcr := &dcrBackend{
-		ctx:        cfg.Context,
+		ctx:        ctx,
 		blockChans: make([]chan uint32, 0),
-		blockCache: newBlockCache(),
+		blockCache: newBlockCache(logger),
 		anyQ:       make(chan interface{}, 128), // way bigger than needed.
+		log:        logger,
 	}
 	go dcr.superQueue()
 	return dcr
@@ -228,10 +232,10 @@ out:
 			case *chainhash.Hash:
 				// This is a new block notification.
 				blockHash := msg
-				log.Debugf("superQueue: Processing new block %s", blockHash)
+				dcr.log.Debugf("superQueue: Processing new block %s", blockHash)
 				blockVerbose, err := dcr.node.GetBlockVerbose(blockHash, false)
 				if err != nil {
-					log.Errorf("onBlockConnected error retrieving block %s: %v", blockHash, err)
+					dcr.log.Errorf("onBlockConnected error retrieving block %s: %v", blockHash, err)
 					return
 				}
 				// Check if this forces a reorg.
@@ -241,19 +245,19 @@ out:
 				}
 				block, err := dcr.blockCache.add(blockVerbose)
 				if err != nil {
-					log.Errorf("error adding block to cache")
+					dcr.log.Errorf("error adding block to cache")
 				}
 				dcr.signalMtx.RLock()
 				for _, c := range dcr.blockChans {
 					select {
 					case c <- uint32(block.height):
 					default:
-						log.Errorf("tried sending block update on blocking channel")
+						dcr.log.Errorf("tried sending block update on blocking channel")
 					}
 				}
 				dcr.signalMtx.RUnlock()
 			default:
-				log.Warn("unknown message type in superQueue: %T", rawMsg)
+				dcr.log.Warn("unknown message type in superQueue: %T", rawMsg)
 			}
 		case <-dcr.ctx.Done():
 			dcr.shutdown()
@@ -269,7 +273,7 @@ func (dcr *dcrBackend) onBlockConnected(serializedHeader []byte, _ [][]byte) {
 	blockHeader := new(wire.BlockHeader)
 	err := blockHeader.FromBytes(serializedHeader)
 	if err != nil {
-		log.Errorf("error decoding serialized header: %v", err)
+		dcr.log.Errorf("error decoding serialized header: %v", err)
 		return
 	}
 	h := blockHeader.BlockHash()
@@ -435,12 +439,12 @@ func (dcr *dcrBackend) getMainchainDcrBlock(height uint32) (*dcrBlock, error) {
 func (dcr *dcrBackend) VerifySignature(msg, pkBytes, sigBytes []byte) bool {
 	pubKey, err := secp256k1.ParsePubKey(pkBytes)
 	if err != nil {
-		log.Errorf("error decoding PublicKey from bytes: %v", err)
+		dcr.log.Errorf("error decoding PublicKey from bytes: %v", err)
 		return false
 	}
 	signature, err := secp256k1.ParseDERSignature(sigBytes)
 	if err != nil {
-		log.Errorf("error decoding Signature from bytes: %v", err)
+		dcr.log.Errorf("error decoding Signature from bytes: %v", err)
 		return false
 	}
 	return signature.Verify(msg, pubKey)
