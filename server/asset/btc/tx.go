@@ -121,18 +121,18 @@ func (tx *Tx) Confirmations() (int64, error) {
 }
 
 // SpendsUTXO checks whether a particular previous output is spent in this tx.
-func (tx *Tx) SpendsUTXO(txid string, vout uint32) bool {
+func (tx *Tx) SpendsUTXO(txid string, vout uint32) (bool, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
 		tx.btc.log.Warnf("error decoding txid %s: %v", txid, err)
-		return false
+		return false, fmt.Errorf("error decoding txid %s: %v", txid, err)
 	}
 	for _, txIn := range tx.ins {
 		if txIn.prevTx == *txHash && txIn.vout == vout {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // AuditContract checks that the provided swap contract hashes to the script

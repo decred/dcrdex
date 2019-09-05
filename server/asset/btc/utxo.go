@@ -104,11 +104,12 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 	return int64(confs), nil
 }
 
-// PaysToPubkeys checks that the provided pubkeys can spend the UTXO.
-func (utxo *UTXO) PaysToPubkeys(pubkeys [][]byte) (bool, error) {
+// Auth verifies that the utxo pays to the supplied public key(s). This is an
+// asset.DEXAsset method.
+func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	// If there are not enough pubkeys, no reason to check anything.
 	if len(pubkeys) < utxo.numSigs {
-		return false, fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d",
+		return fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d",
 			utxo.txHash, utxo.vout, utxo.numSigs, len(pubkeys))
 	}
 	// Extract the addresses from the pubkey scripts and redeem scripts.
@@ -118,52 +119,72 @@ func (utxo *UTXO) PaysToPubkeys(pubkeys [][]byte) (bool, error) {
 	}
 	scriptAddrs, err := extractScriptAddrs(evalScript, utxo.btc.chainParams)
 	if err != nil {
-		return false, err
+		return err
 	}
 	// Sanity check that the required signature count matches the count parsed
 	// during UTXO initialization.
 	if scriptAddrs.nRequired != utxo.numSigs {
-		return false, fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d",
+		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d",
 			utxo.txHash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
 	}
-	// For unhashsed pubkeys, just compare the lists directly.
-	numMatches := countMatches(pubkeys, scriptAddrs.pubkeys, nil)
-	// For pubkey hash addresses, compare the hash160.
-	numMatches += countMatches(pubkeys, scriptAddrs.pkHashes, btcutil.Hash160)
-	if numMatches < utxo.numSigs {
-		return false, fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d",
-			utxo.txHash, utxo.vout, utxo.numSigs, numMatches)
+	matches, err := pkMatches(pubkeys, scriptAddrs.pubkeys, nil)
+	if err != nil {
+		return fmt.Errorf("error during pubkey matching: %v", err)
 	}
-	return true, nil
+	m, err := pkMatches(pubkeys, scriptAddrs.pkHashes, btcutil.Hash160)
+	if err != nil {
+		return fmt.Errorf("error during pubkey hash matching: %v", err)
+	}
+	matches = append(matches, m...)
+	if len(matches) < utxo.numSigs {
+		return fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d",
+			utxo.txHash, utxo.vout, utxo.numSigs, len(matches))
+	}
+	for _, match := range matches {
+		err := checkSig(msg, match.pubkey, sigs[match.idx])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// countMatches looks through a set of addresses and a set of pubkeys and counts
-// the matches.
-func countMatches(pubkeys [][]byte, addrs []btcutil.Address, hasher func([]byte) []byte) int {
-	var numMatches int
+type pkMatch struct {
+	pubkey []byte
+	idx    int
+}
+
+// pkMatches looks through a set of addresses and a returns a set of match
+// structs with details about the match.
+func pkMatches(pubkeys [][]byte, addrs []btcutil.Address, hasher func([]byte) []byte) ([]pkMatch, error) {
+	matches := make([]pkMatch, 0, len(pubkeys))
 	if hasher == nil {
 		hasher = func(a []byte) []byte { return a }
 	}
-	matches := make(map[string]struct{})
+	matchIndex := make(map[string]struct{})
 	for _, addr := range addrs {
-		for _, pubkey := range pubkeys {
+		for i, pubkey := range pubkeys {
 			if bytes.Equal(addr.ScriptAddress(), hasher(pubkey)) {
 				addrStr := addr.String()
-				_, alreadyFound := matches[addrStr]
+				_, alreadyFound := matchIndex[addrStr]
 				if alreadyFound {
 					continue
 				}
-				matches[addrStr] = struct{}{}
-				numMatches++
+				matchIndex[addrStr] = struct{}{}
+				matches = append(matches, pkMatch{
+					pubkey: pubkey,
+					idx:    i,
+				})
 				break
 			}
 		}
 	}
-	return numMatches
+	return matches, nil
 }
 
-// ScriptSize returns the UTXO's maximum sigScript byte count.
-func (utxo *UTXO) ScriptSize() uint32 {
+// SpendSize returns the maximum size of the serialized TxIn that spends this
+// UTXO, in bytes. This is a method of the asset.UTXO interface.
+func (utxo *UTXO) SpendSize() uint32 {
 	return utxo.spendSize
 }
 

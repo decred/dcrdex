@@ -459,11 +459,38 @@ func testVin(txHash *chainhash.Hash, vout uint32) btcjson.Vin {
 	}
 }
 
-type testMsgTx struct {
-	tx     *wire.MsgTx
+type testAuth struct {
 	pubkey []byte
 	pkHash []byte
-	vout   uint32
+	msg    []byte
+	sig    []byte
+}
+
+type testMsgTx struct {
+	tx   *wire.MsgTx
+	auth *testAuth
+	vout uint32
+}
+
+func s256Auth(msg []byte) *testAuth {
+	priv, err := btcec.NewPrivateKey(btcec.S256())
+	if err != nil {
+		fmt.Printf("s256Auth error: %v\n", err)
+	}
+	pubkey := priv.PubKey().SerializeCompressed()
+	if msg == nil {
+		msg = randomBytes(32)
+	}
+	sig, err := priv.Sign(msg)
+	if err != nil {
+		fmt.Printf("s256Auth sign error: %v\n", err)
+	}
+	return &testAuth{
+		pubkey: pubkey,
+		pkHash: btcutil.Hash160(pubkey),
+		msg:    msg,
+		sig:    sig.Serialize(),
+	}
 }
 
 // Generate a public key on the secp256k1 curve.
@@ -475,14 +502,14 @@ func genPubkey() ([]byte, []byte) {
 }
 
 // A pay-to-script-hash pubkey script.
-func newP2PKHScript(segwit bool) ([]byte, []byte, []byte) {
-	pubkey, pkHash := genPubkey()
+func newP2PKHScript(segwit bool) ([]byte, *testAuth) {
+	auth := s256Auth(nil)
 	var pkScript []byte
 	var err error
 	if segwit {
 		pkScript, err = txscript.NewScriptBuilder().
 			AddOp(txscript.OP_0).
-			AddData(pkHash).
+			AddData(auth.pkHash).
 			Script()
 		if err != nil {
 			fmt.Printf("newP2PKHScript error: %v\n", err)
@@ -493,7 +520,7 @@ func newP2PKHScript(segwit bool) ([]byte, []byte, []byte) {
 				txscript.OP_DUP,
 				txscript.OP_HASH160,
 			}).
-			AddData(pkHash).
+			AddData(auth.pkHash).
 			AddOps([]byte{
 				txscript.OP_EQUALVERIFY,
 				txscript.OP_CHECKSIG,
@@ -503,19 +530,18 @@ func newP2PKHScript(segwit bool) ([]byte, []byte, []byte) {
 		}
 	}
 
-	return pkScript, pubkey, pkHash
+	return pkScript, auth
 }
 
 // A MsgTx for a regular transaction with a single output. No inputs, so it's
 // not really a valid transaction, but that's okay on testBlockchain.
 func testMakeMsgTx(segwit bool) *testMsgTx {
-	pkScript, pubkey, pkHash := newP2PKHScript(segwit)
+	pkScript, auth := newP2PKHScript(segwit)
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.AddTxOut(wire.NewTxOut(1, pkScript))
 	return &testMsgTx{
-		tx:     msgTx,
-		pubkey: pubkey,
-		pkHash: pkHash,
+		tx:   msgTx,
+		auth: auth,
 	}
 }
 
@@ -586,45 +612,54 @@ func testMsgTxSwapInit() *testMsgTxSwap {
 	}
 }
 
-type testMsgTxP2SH struct {
-	tx       *wire.MsgTx
+type testMultiSigAuth struct {
 	pubkeys  [][]byte
 	pkHashes [][]byte
-	vout     uint32
-	script   []byte
-	n        int
-	m        int
+	msg      []byte
+	sigs     [][]byte
+}
+
+// Information about a transaction with a P2SH output.
+type testMsgTxP2SH struct {
+	tx     *wire.MsgTx
+	auth   *testMultiSigAuth
+	vout   uint32
+	script []byte
+	n      int
+	m      int
 }
 
 // An M-of-N mutli-sig script.
-func testMultiSigScriptMofN(m, n int) ([]byte, [][]byte, [][]byte) {
+func testMultiSigScriptMofN(m, n int) ([]byte, *testMultiSigAuth) {
 	// serialized compressed pubkey used for multisig
 	addrs := make([]*btcutil.AddressPubKey, 0, n)
-	pubkeys := make([][]byte, 0, n)
-	pkHashes := make([][]byte, 0, n)
+	auth := &testMultiSigAuth{
+		msg: randomBytes(32),
+	}
 
 	for i := 0; i < m; i++ {
-		pubkey, pkHash := genPubkey()
-		pubkeys = append(pubkeys, pubkey)
-		pkHashes = append(pkHashes, pkHash)
-		addr, err := btcutil.NewAddressPubKey(pubkey, testParams)
+		a := s256Auth(auth.msg)
+		auth.pubkeys = append(auth.pubkeys, a.pubkey)
+		auth.pkHashes = append(auth.pkHashes, a.pkHash)
+		auth.sigs = append(auth.sigs, a.sig)
+		addr, err := btcutil.NewAddressPubKey(a.pubkey, testParams)
 		if err != nil {
 			fmt.Printf("error creating AddressSecpPubKey: %v\n", err)
-			return nil, nil, nil
+			return nil, nil
 		}
 		addrs = append(addrs, addr)
 	}
 	script, err := txscript.MultiSigScript(addrs, m)
 	if err != nil {
 		fmt.Printf("error creating MultiSigScript: %v\n", err)
-		return nil, nil, nil
+		return nil, nil
 	}
-	return script, pubkeys, pkHashes
+	return script, auth
 }
 
 // A pay-to-script-hash M-of-N multi-sig output and vout 0 of a MsgTx.
 func testMsgTxP2SHMofN(m, n int, segwit bool) *testMsgTxP2SH {
-	script, pubkeys, pkHashes := testMultiSigScriptMofN(m, n)
+	script, auth := testMultiSigScriptMofN(m, n)
 	var pkScript []byte
 	var err error
 	if segwit {
@@ -650,13 +685,12 @@ func testMsgTxP2SHMofN(m, n int, segwit bool) *testMsgTxP2SH {
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.AddTxOut(wire.NewTxOut(1, pkScript))
 	return &testMsgTxP2SH{
-		tx:       msgTx,
-		pubkeys:  pubkeys,
-		pkHashes: pkHashes,
-		script:   script,
-		vout:     0,
-		n:        n,
-		m:        m,
+		tx:     msgTx,
+		auth:   auth,
+		script: script,
+		vout:   0,
+		n:      n,
+		m:      m,
 	}
 }
 
@@ -710,7 +744,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 1 - unexpected error: %v", err)
 	}
 	// While we're here, check the spend script size is correct.
-	scriptSize := utxo.ScriptSize()
+	scriptSize := utxo.SpendSize()
 	if scriptSize != P2PKHSigScriptSize+txInOverhead {
 		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, scriptSize)
 	}
@@ -729,13 +763,9 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 1 - expected 1 confirmation after mining transaction, found %d", confs)
 	}
 	// Make sure the pubkey spends the output.
-	spends, err := utxo.PaysToPubkeys([][]byte{msg.pubkey})
+	err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
-		t.Fatalf("case 1 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		//
-		t.Fatalf("case 1 - false returned from PaysToPubkeys")
+		t.Fatalf("case 1 - Auth error: %v", err)
 	}
 
 	// CASE 2: A valid UTXO in a mined block. This UTXO will have non-zero
@@ -749,12 +779,9 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 2 - unexpected error: %v", err)
 	}
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.pubkey})
+	err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
-		t.Fatalf("case 2 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 2 - false returned from PaysToPubkeys")
+		t.Fatalf("case 2 - Auth error: %v", err)
 	}
 
 	// CASE 3: A UTXO that is invalid because it is non-existent
@@ -834,12 +861,9 @@ func TestUTXOs(t *testing.T) {
 	if confs != 1 {
 		t.Fatalf("case 6 - expected 1 confirmation, got %d", confs)
 	}
-	spends, err = utxo.PaysToPubkeys(msgMultiSig.pubkeys[:1])
+	err = utxo.Auth(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
 	if err != nil {
-		t.Fatalf("case 6 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 6 - false returned from PaysToPubkeys")
+		t.Fatalf("case 6 - Auth error: %v", err)
 	}
 
 	// CASE 7: A UTXO with a pay-to-script-hash for a 2-of-2 multisig redeem
@@ -854,17 +878,14 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 7 - received error for utxo: %v", err)
 	}
 	// Try to get by with just one of the pubkeys.
-	_, err = utxo.PaysToPubkeys(msgMultiSig.pubkeys[:1])
+	err = utxo.Auth(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
 	if err == nil {
 		t.Fatalf("case 7 - no error when only provided one of two required pubkeys")
 	}
 	// Now do both.
-	spends, err = utxo.PaysToPubkeys(msgMultiSig.pubkeys)
+	err = utxo.Auth(msgMultiSig.auth.pubkeys, msgMultiSig.auth.sigs, msgMultiSig.auth.msg)
 	if err != nil {
-		t.Fatalf("case 7 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 7 - false returned from PaysToPubkeys")
+		t.Fatalf("case 7 - Auth error: %v", err)
 	}
 
 	// CASE 8: A UTXO spending a pay-to-witness-pubkey-hash (P2WPKH) script.
@@ -881,12 +902,9 @@ func TestUTXOs(t *testing.T) {
 	if !utxo.scriptType.isSegwit() {
 		t.Fatalf("case 8 - script type parsed as non-segwit")
 	}
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.pubkey})
+	err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
-		t.Fatalf("case 8 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 8 - false returned from PaysToPubkeys")
+		t.Fatalf("case 8 - Auth error: %v", err)
 	}
 
 	// CASE 9: A UTXO spending a pay-to-witness-script-hash (P2WSH) 2-of-2
@@ -905,17 +923,14 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 9 - script type parsed as non-segwit")
 	}
 	// Try to get by with just one of the pubkeys.
-	_, err = utxo.PaysToPubkeys(msgMultiSig.pubkeys[:1])
+	err = utxo.Auth(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
 	if err == nil {
 		t.Fatalf("case 9 - no error when only provided one of two required pubkeys")
 	}
 	// Now do both.
-	spends, err = utxo.PaysToPubkeys(msgMultiSig.pubkeys)
+	err = utxo.Auth(msgMultiSig.auth.pubkeys, msgMultiSig.auth.sigs, msgMultiSig.auth.msg)
 	if err != nil {
-		t.Fatalf("case 9 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 9 - false returned from PaysToPubkeys")
+		t.Fatalf("case 9 - Auth error: %v", err)
 	}
 
 	// CASE 10: A UTXO from a coinbase transaction, before and after maturing.
@@ -1045,35 +1060,6 @@ func TestReorg(t *testing.T) {
 	}
 }
 
-// TestSignatures checks that signature verification is working.
-func TestSignatures(t *testing.T) {
-	btc := BTCBackend{}
-	verify := func(pk, msg, sig string) {
-		pubkey, _ := hex.DecodeString(pk)
-		message, _ := hex.DecodeString(msg)
-		signature, _ := hex.DecodeString(sig)
-		if !btc.VerifySignature(message, pubkey, signature) {
-			t.Fatalf("failed signature with pubkey %s", pk)
-		}
-	}
-	// Some randomly generated messages, pubkeys, signatures.
-	verify(
-		"0286a0a6e0b95a540671c9237f84ceb9a98970729b5fd76e02cb5e449138d5f873",
-		"2258cbd6271157d1ba6676c9a8520a2da4194e8f511a5885156470d2de667171913fbb35019b31b6da8c914408ca25fb7b6a",
-		"30440220436d2c54a5e22ca99ec23d8e0f3ae6cac0fbda9224809a2302dd865502033f6702206132532571cdccec3f48fe7db954680f7aac72b308a71ec06299ab8108bb8810e",
-	)
-	verify(
-		"024cd2f9e57b674e90ffed62acbc554d3bf9d76ebbc82236f3b4d2243b648f8906",
-		"c42acf2b8e8693d2e29864758a313c3737b993bef3dd85d4eaa052f02c7c844caa3b9ae431a948f62b92293eebed9645387c",
-		"3045022100e7411d6da3c92020083e74834f7e0935aba0d44b1a47b1a2ae0372c69f564fdb02204eb254124ee42d637dabb4137cce08124a603963a339f08f65a2157e013fd8d7",
-	)
-	verify(
-		"030e5386d7744aa05c7f7e8751ee3fec109991e355f5d194cc390d4a621851761e",
-		"d62b3c3c56ea1fa5152a5bb84bcce9fe880ffc2c646caa029e92203e6eee2f0c22a7958c891dbccfc3b0e578fad8d2566db4",
-		"304402204ad2ac5695d0f4a28fc1f01466d03b2bd0300ce41f393b8ac398dd57aad8086f02203f4789d13c060a2c976aca2ca39184125c3fe2d9ba2350b1c27059acb29d6757",
-	)
-}
-
 // TestTx checks the transaction-related methods and functions.
 func TestTx(t *testing.T) {
 	// Create a BTCBackend with the test node.
@@ -1115,7 +1101,10 @@ func TestTx(t *testing.T) {
 		t.Fatalf("expected 2 confirmations, but %d were reported", confs)
 	}
 	// Check that the spent tx is in dexTx.
-	spent := dexTx.SpendsUTXO(spentTx.String(), spentVout)
+	spent, err := dexTx.SpendsUTXO(spentTx.String(), spentVout)
+	if err != nil {
+		t.Fatalf("SpendsUTXO error: %v", err)
+	}
 	if !spent {
 		t.Fatalf("transaction not confirming spent utxo")
 	}

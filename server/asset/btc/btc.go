@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -192,22 +191,6 @@ func (btc *BTCBackend) BlockChannel(size int) chan uint32 {
 	defer btc.signalMtx.Unlock()
 	btc.blockChans = append(btc.blockChans, c)
 	return c
-}
-
-// VerifySignatures checks that the message's signature was created with the
-// private key for the provided public key. This is an asset.DEXAsset method.
-func (btc *BTCBackend) VerifySignature(msg, pkBytes, sigBytes []byte) bool {
-	pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
-	if err != nil {
-		btc.log.Errorf("error decoding PublicKey from bytes: %v", err)
-		return false
-	}
-	signature, err := btcec.ParseDERSignature(sigBytes, btcec.S256())
-	if err != nil {
-		btc.log.Errorf("error decoding Signature from bytes: %v", err)
-		return false
-	}
-	return signature.Verify(msg, pubKey)
 }
 
 // InitTxSize is an asset.DEXAsset method that must produce the max size of a

@@ -104,7 +104,9 @@ func (cache *blockCache) tip() cachedBlock {
 }
 
 // Trigger a reorg, setting any blocks at or above the provided height as
-// orphaned and removing them from mainchain, but not the blocks map.
+// orphaned and removing them from mainchain, but not the blocks map. reorg
+// clears the best block, so should always be followed with the addition of a
+// new mainchain block.
 func (cache *blockCache) reorg(from int64) {
 	cache.mtx.Lock()
 	defer cache.mtx.Unlock()
@@ -126,4 +128,7 @@ func (cache *blockCache) reorg(from int64) {
 			orphaned: true,
 		}
 	}
+	// Set this to a dummy block with just the height. Caller will add mainchain
+	// block after call to reorg.
+	cache.best = cachedBlock{height: uint32(from)}
 }

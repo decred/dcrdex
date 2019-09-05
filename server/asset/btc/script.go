@@ -6,6 +6,7 @@ package btc
 import (
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcutil"
@@ -253,4 +254,21 @@ func extractSwapAddresses(pkScript []byte, chainParams *chaincfg.Params) (string
 		return senderAddr.String(), receiverAddr.String(), nil
 	}
 	return "", "", fmt.Errorf("invalid swap contract")
+}
+
+// checkSig checks that the message's signature was created with the
+// private key for the provided public key.
+func checkSig(msg, pkBytes, sigBytes []byte) error {
+	pubKey, err := btcec.ParsePubKey(pkBytes, btcec.S256())
+	if err != nil {
+		return fmt.Errorf("error decoding PublicKey from bytes: %v", err)
+	}
+	signature, err := btcec.ParseDERSignature(sigBytes, btcec.S256())
+	if err != nil {
+		return fmt.Errorf("error decoding Signature from bytes: %v", err)
+	}
+	if !signature.Verify(msg, pubKey) {
+		return fmt.Errorf("signature verification failed")
+	}
+	return nil
 }
