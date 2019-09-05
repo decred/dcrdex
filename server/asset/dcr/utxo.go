@@ -134,7 +134,11 @@ func (utxo *UTXO) PaysToPubkeys(pubkeys [][]byte) (bool, error) {
 	if len(pubkeys) < utxo.numSigs {
 		return false, fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(pubkeys))
 	}
-	scriptAddrs, err := extractScriptAddrs(utxo.scriptType, utxo.pkScript, utxo.redeemScript)
+	evalScript := utxo.pkScript
+	if utxo.scriptType.isP2SH() {
+		evalScript = utxo.redeemScript
+	}
+	scriptAddrs, err := extractScriptAddrs(evalScript)
 	if err != nil {
 		return false, err
 	}
