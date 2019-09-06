@@ -198,6 +198,11 @@ In particular, for ''lot size''  '''''l''''', the requested ''order quantity'',
 <!--Q = n l, n \in \{1, 2, 3, ...\}-->
 [[File:images/lot-sizes.png]]
 
+Every asset is assigned a unique integer ID that will be used to identify the
+asset in serialized structures. Whenever possible, the ID is the same as the
+BIP-0044 registered coin type index
+[https://github.com/satoshilabs/slips/blob/master/slip-0044.md &#91;7&#93;].
+
 When the asset is the quote asset, a '''price increment''' is enforced.
 The '''rate''', '''''r''''', of a limit order must be an integer multiple of the
 ''price increment'', '''''p'''''.
@@ -249,6 +254,8 @@ Asset info should be requested by the user immediately after connecting.
 ! field    !! type !! description
 |-
 | symbol   || string || ticker symbol
+|-
+| id       || int || a unique per-asset ID
 |-
 | lotsize  || int || lot size (atoms)
 |-
@@ -875,9 +882,9 @@ All order serializations have a common ''prefix structure''.
 |-
 | account ID  || 16 || client account ID
 |-
-| base asset  || 5  || the base asset for the market. ASCII-encoded ticker symbol, with leading zeros for 3- and 4-letter tickers
+| base asset  || 4  || the base asset ID
 |-
-| quote asset || 5  || the quote asset for the market. ASCII-encoded ticker symbol, with leading zeros for 3- and 4-letter tickers
+| quote asset || 4  || the quote asset ID
 |-
 | order type  || 1  || the type of order. limit = 0, market=2, cancel=3
 |-
@@ -1562,3 +1569,5 @@ See also [[#Exchange_Variables|Exchange Variables]].
 &#91;5&#93; [https://tools.ietf.org/html/rfc8446 Transport Layer Security 1.3]
 
 &#91;6&#93; [https://www.jsonrpc.org/specification JSON-RPC 2.0 Specification]
+
+&#91;7&#93; [https://github.com/satoshilabs/slips/blob/master/slip-0044.md BIP-0044 Registered Coins]
