@@ -85,7 +85,10 @@ type DEXTx interface {
 	// if error is not nil.
 	Confirmations() (int64, error)
 	// SpendsUTXO checks if the transaction spends a specified previous output.
-	SpendsUTXO(txid string, vout uint32) bool
+	// An error will be returned if the input is not parseable. If the UTXO is not
+	// spent in this transaction, the boolean return value will be false, but no
+	// error is returned.
+	SpendsUTXO(txid string, vout uint32) (bool, error)
 	// AuditContract checks that the provided swap contract hashes to the script
 	// hash specified in the output at the indicated vout. The receiving address
 	// and output value (in atoms) are returned if no error is encountered.

@@ -17,17 +17,17 @@ import (
 type Tx struct {
 	// Because a Tx's validity and block info can change after creation, keep a
 	// dcrBackend around to query the state of the tx and update the block info.
-	dcr       *dcrBackend
+	dcr *dcrBackend
 	// The height and hash of the transaction's best known block.
 	blockHash chainhash.Hash
 	height    int64
 	// The transaction hash.
-	hash      chainhash.Hash
+	hash chainhash.Hash
 	// Transaction inputs and outputs.
-	ins       []txIn
-	outs      []txOut
+	ins  []txIn
+	outs []txOut
 	// Whether the transaction is a stake-related transaction.
-	isStake   bool
+	isStake bool
 	// Used to conditionally skip block lookups on mempool transactions during
 	// calls to Confirmations.
 	lastLookup *chainhash.Hash
@@ -132,18 +132,17 @@ func (tx *Tx) Confirmations() (int64, error) {
 }
 
 // SpendsUTXO checks whether a particular previous output is spent in this tx.
-func (tx *Tx) SpendsUTXO(txid string, vout uint32) bool {
+func (tx *Tx) SpendsUTXO(txid string, vout uint32) (bool, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
-		tx.dcr.log.Warnf("error decoding txid %s: %v", txid, err)
-		return false
+		return false, fmt.Errorf("error decoding txid %s: %v", txid, err)
 	}
 	for _, txIn := range tx.ins {
 		if txIn.prevTx == *txHash && txIn.vout == vout {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // AuditContract checks that the provided swap contract hashes to the script

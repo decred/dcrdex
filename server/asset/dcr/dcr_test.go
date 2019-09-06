@@ -1136,7 +1136,10 @@ func TestTx(t *testing.T) {
 		t.Fatalf("expected 2 confirmations, but %d were reported", confs)
 	}
 	// Check that the spent tx is in dexTx.
-	spent := dexTx.SpendsUTXO(spentTx.String(), spentVout)
+	spent, err := dexTx.SpendsUTXO(spentTx.String(), spentVout)
+	if err != nil {
+		t.Fatalf("SpendsUTXO error: %v", err)
+	}
 	if !spent {
 		t.Fatalf("transaction not confirming spent utxo")
 	}
@@ -1158,10 +1161,24 @@ func TestTx(t *testing.T) {
 		t.Fatalf("unexpected output value. wanted %d, got %d", swapVal, swapTxOut.Value)
 	}
 
-	// Now do an invalidating reorg, and check that Confirmations returns an
-	// error.
-	newHash := testAddBlockVerbose(nil, 1, blockHeight+1, 0)
+	// Now do an 1-deep invalidating reorg, and check that Confirmations returns
+	// an error.
+	newHash := testAddBlockVerbose(nil, 1, blockHeight, 0)
 	// Passing the hash to anyQ triggers the reorganization.
+	dcr.anyQ <- newHash
+	time.Sleep(time.Millisecond * 50)
+	_, err = dexTx.Confirmations()
+	if err == nil {
+		t.Fatalf("no error when checking confirmations on an invalidated tx")
+	}
+
+	// Undo the reorg
+	dcr.anyQ <- blockHash
+	time.Sleep(time.Millisecond * 50)
+
+	// Now do a 2-deep invalidating reorg, and check that Confirmations returns
+	// an error.
+	newHash = testAddBlockVerbose(nil, 1, blockHeight+1, 0)
 	dcr.anyQ <- newHash
 	time.Sleep(time.Millisecond * 50)
 	_, err = dexTx.Confirmations()
