@@ -122,13 +122,10 @@ type dcrScriptAddrs struct {
 // pubkey script is P2SH. Addresses can be of several types, but the types
 // suppported will be pubkey
 func extractScriptAddrs(script []byte) (*dcrScriptAddrs, error) {
-	var err error
-	var addrs []dcrutil.Address
-	var numRequired int
 	pubkeys := make([]dcrutil.Address, 0)
 	pkHashes := make([]dcrutil.Address, 0)
 	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
-	_, addrs, numRequired, err = txscript.ExtractPkScriptAddrs(0, script, chainParams)
+	_, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("extractScriptAddrs: %v", err)
 	}

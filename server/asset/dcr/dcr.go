@@ -127,6 +127,13 @@ func (dcr *dcrBackend) BlockChannel(size int) chan uint32 {
 }
 
 // UTXO is part of the asset.UTXO interface, so returns the asset.UTXO type.
+// Only spendable UTXOs with known types of pubkey script will be successfully
+// retrieved. A spendable UTXO is one that can be spent in the next block. Every
+// regular-tree output from a non-coinbase transaction is spendable immediately.
+// Coinbase and stake tree outputs are only spendable after CoinbaseMaturity
+// confirmations. Pubkey scripts can be P2PKH or P2SH in either regular- or
+// stake-tree flavor. P2PKH supports two alternative signatures, Schnorr and
+// Edwards. Multi-sig P2SH redeem scripts are supported as well.
 func (dcr *dcrBackend) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
@@ -291,8 +298,7 @@ func (dcr *dcrBackend) onBlockConnected(serializedHeader []byte, _ [][]byte) {
 	dcr.anyQ <- &h
 }
 
-// Get the UTXO, populating the block data along the way. Only spendable UTXOs
-// with known types of pubkey script will be successfully retrieved.
+// Get the UTXO, populating the block data along the way.
 func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
 	txOut, verboseTx, pkScript, err := dcr.getTxOutInfo(txHash, vout)
 	if err != nil {
