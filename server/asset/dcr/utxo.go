@@ -129,11 +129,11 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 	return int64(confs), nil
 }
 
-// PaysToPubkeys verifies that the utxo pays to the supplied public key(s). This
-// is an asset.DEXAsset method.
-func (utxo *UTXO) PaysToPubkeys(pubkeys, sigs [][]byte, msg []byte) (bool, error) {
+// Auth verifies that the utxo pays to the supplied public key(s). This is an
+// asset.DEXAsset method.
+func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	if len(pubkeys) < utxo.numSigs {
-		return false, fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(pubkeys))
+		return fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(pubkeys))
 	}
 	evalScript := utxo.pkScript
 	if utxo.scriptType.isP2SH() {
@@ -141,31 +141,31 @@ func (utxo *UTXO) PaysToPubkeys(pubkeys, sigs [][]byte, msg []byte) (bool, error
 	}
 	scriptAddrs, err := extractScriptAddrs(evalScript)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if scriptAddrs.nRequired != utxo.numSigs {
-		return false, fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.txHash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
+		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.txHash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
 	}
 	matches, err := pkMatches(pubkeys, scriptAddrs.pubkeys, nil)
 	if err != nil {
-		return false, fmt.Errorf("error during pubkey matching: %v", err)
+		return fmt.Errorf("error during pubkey matching: %v", err)
 	}
 	m, err := pkMatches(pubkeys, scriptAddrs.pkHashes, dcrutil.Hash160)
 	if err != nil {
-		return false, fmt.Errorf("error during pubkey hash matching: %v", err)
+		return fmt.Errorf("error during pubkey hash matching: %v", err)
 	}
 	matches = append(matches, m...)
 	if len(matches) < utxo.numSigs {
-		return false, fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(matches))
+		return fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(matches))
 	}
 	for _, match := range matches {
 		err := checkSig(msg, match.pubkey, sigs[match.idx], match.sigType)
 		if err != nil {
-			return false, err
+			return err
 		}
 
 	}
-	return true, nil
+	return nil
 }
 
 type pkMatch struct {
@@ -216,9 +216,9 @@ func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []
 	return matches, nil
 }
 
-// ScriptSize returns the maximum spend script size of the UTXO, in bytes.
-// This is a method of the asset.UTXO interface.
-func (utxo *UTXO) ScriptSize() uint32 {
+// SpendSize returns the maximum size of the serialized TxIn that spends this
+// UTXO, in bytes. This is a method of the asset.UTXO interface.
+func (utxo *UTXO) SpendSize() uint32 {
 	return utxo.spendSize
 }
 

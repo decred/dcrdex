@@ -697,10 +697,10 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 1 - unexpected error: %v", err)
 	}
-	// While we're here, check the spend script size is correct.
-	scriptSize := utxo.ScriptSize()
-	if scriptSize != P2PKHSigScriptSize+txInOverhead {
-		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, scriptSize)
+	// While we're here, check the spend size is correct.
+	spendSize := utxo.SpendSize()
+	if spendSize != P2PKHSigScriptSize+txInOverhead {
+		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, spendSize)
 	}
 	// Now "mine" the transaction.
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
@@ -716,12 +716,9 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 1 - expected 1 confirmation after mining transaction, found %d", confs)
 	}
 	// Make sure the pubkey spends the output.
-	spends, err := utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
+	err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
-		t.Fatalf("case 1 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 1 - false returned from PaysToPubkeys")
+		t.Fatalf("case 1 - Auth error: %v", err)
 	}
 
 	// CASE 2: A valid UTXO in a mined block. This UTXO will have non-zero
@@ -736,12 +733,9 @@ func TestUTXOs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("case 2 - unexpected error for sig type %d: %v", int(sigType), err)
 		}
-		spends, err = utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
+		err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 		if err != nil {
-			t.Fatalf("case 2 - PaysToPubkeys error with sig type %d: %v", int(sigType), err)
-		}
-		if !spends {
-			t.Fatalf("case 2 - false returned from PaysToPubkeys for sig type %d", int(sigType))
+			t.Fatalf("case 2 - Auth error with sig type %d: %v", int(sigType), err)
 		}
 	}
 
@@ -825,12 +819,9 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 6 - unexpected error after maturing block: %v", err)
 	}
 	// Since this is our first stake transaction, let's check the pubkey
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
+	err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
-		t.Fatalf("case 6 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 6 - false returned from PaysToPubkeys")
+		t.Fatalf("case 6 - Auth error: %v", err)
 	}
 
 	// CASE 7: A UTXO that becomes invalid in a reorg
@@ -917,12 +908,9 @@ func TestUTXOs(t *testing.T) {
 	if confs != 1 {
 		t.Fatalf("case 9 - expected 1 confirmation, got %d", confs)
 	}
-	spends, err = utxo.PaysToPubkeys(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
+	err = utxo.Auth(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
 	if err != nil {
-		t.Fatalf("case 9 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 9 - false returned from PaysToPubkeys")
+		t.Fatalf("case 9 - Auth error: %v", err)
 	}
 
 	// CASE 10: A UTXO with a pay-to-script-hash for a 2-of-2 multisig redeem
@@ -937,17 +925,21 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 10 - received error for utxo: %v", err)
 	}
 	// Try to get by with just one of the pubkeys.
-	_, err = utxo.PaysToPubkeys(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
+	err = utxo.Auth(msgMultiSig.auth.pubkeys[:1], msgMultiSig.auth.sigs[:1], msgMultiSig.auth.msg)
 	if err == nil {
-		t.Fatalf("case 10 - no error when only provided one of two required pubkeys")
+		t.Fatalf("case 10 - no Auth error when only provided one of two required pubkeys")
 	}
 	// Now do both.
-	spends, err = utxo.PaysToPubkeys(msgMultiSig.auth.pubkeys, msgMultiSig.auth.sigs, msgMultiSig.auth.msg)
+	err = utxo.Auth(msgMultiSig.auth.pubkeys, msgMultiSig.auth.sigs, msgMultiSig.auth.msg)
 	if err != nil {
-		t.Fatalf("case 10 - PaysToPubkeys error: %v", err)
+		t.Fatalf("case 10 - Auth error: %v", err)
 	}
-	if !spends {
-		t.Fatalf("case 10 - false returned from PaysToPubkeys")
+	// Try with a duplicate pubkey and signature.
+	dupeKeys := [][]byte{msgMultiSig.auth.pubkeys[0], msgMultiSig.auth.pubkeys[0]}
+	dupeSigs := [][]byte{msgMultiSig.auth.sigs[0], msgMultiSig.auth.sigs[0]}
+	err = utxo.Auth(dupeKeys, dupeSigs, msgMultiSig.auth.msg)
+	if err == nil {
+		t.Fatalf("case 10 - no Auth error with duplicate keys/sigs")
 	}
 
 	// CASE 11: A UTXO with a pay-to-script-hash for a P2PKH redeem script.
@@ -967,17 +959,14 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 11 - stake p2sh not marked as stake")
 	}
 	// Give it nonsense.
-	_, err = utxo.PaysToPubkeys([][]byte{randomBytes(33)}, [][]byte{randomBytes(33)}, randomBytes(32))
+	err = utxo.Auth([][]byte{randomBytes(33)}, [][]byte{randomBytes(33)}, randomBytes(32))
 	if err == nil {
-		t.Fatalf("case 11 - no error when providing nonsense pubkey")
+		t.Fatalf("case 11 - no Auth error when providing nonsense pubkey")
 	}
 	// Now give it the right one.
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
+	err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
-		t.Fatalf("case 11 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 11 - false returned from PaysToPubkeys")
+		t.Fatalf("case 11 - Auth error: %v", err)
 	}
 
 	// CASE 12: A revocation.
@@ -997,12 +986,9 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 12 - stake p2sh not marked as stake")
 	}
 	// Check the pubkey.
-	spends, err = utxo.PaysToPubkeys([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
+	err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
 	if err != nil {
-		t.Fatalf("case 12 - PaysToPubkeys error: %v", err)
-	}
-	if !spends {
-		t.Fatalf("case 12 - false returned from PaysToPubkeys")
+		t.Fatalf("case 12 - Auth error: %v", err)
 	}
 }
 

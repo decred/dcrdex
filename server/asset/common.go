@@ -59,11 +59,12 @@ type UTXO interface {
 	// should have one confirmation. A negative number can be returned if error
 	// is not nil.
 	Confirmations() (int64, error)
-	// PaysToPubkeys checks that the provided pubkeys can spend the UTXO and
-	// the signatures are valid.
-	PaysToPubkeys(pubkeys, sigs [][]byte, msg []byte) (bool, error)
-	// ScriptSize returns the UTXO's maximum sigScript byte count.
-	ScriptSize() uint32
+	// Auth checks that the owner of the provided pubkeys can spend the UTXO.
+	// The signatures (sigs) generated with the private keys corresponding
+	// to pubkeys must validate against the pubkeys and signing message (msg).
+	Auth(pubkeys, sigs [][]byte, msg []byte) error
+	// SpendSize returns the size of the serialized input that spends this UTXO.
+	SpendSize() uint32
 	// TxHash is a byte-slice of the UTXO's transaction hash.
 	TxHash() []byte
 	// TxID is a string identifier for the transaction, typically a hexadecimal
