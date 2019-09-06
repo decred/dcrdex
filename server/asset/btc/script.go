@@ -163,13 +163,10 @@ type btcScriptAddrs struct {
 // pubkey script is P2SH. Addresses can be of several types, but the types
 // suppported will be pubkey
 func extractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*btcScriptAddrs, error) {
-	var err error
-	var addrs []btcutil.Address
-	var numRequired int
 	pubkeys := make([]btcutil.Address, 0)
 	pkHashes := make([]btcutil.Address, 0)
 	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
-	_, addrs, numRequired, err = txscript.ExtractPkScriptAddrs(script, chainParams)
+	_, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(script, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("extractScriptAddrs: %v", err)
 	}
