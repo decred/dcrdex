@@ -1,0 +1,8 @@
+module github.com/decred/dcrdex/server/account
+
+go 1.12
+
+require (
+	github.com/decred/dcrd/crypto/blake256 v1.0.0
+	github.com/decred/dcrd/dcrec/secp256k1 v1.0.2
+)

@@ -45,7 +45,9 @@ dcrdex
 │   │   ├── admin      # administrative tools and portal (may need RPC server too)
 │   │   └── controller # controller for multiple markets, users, api, comms, etc.
 │   ├── docs
+│   ├── htttpapi       # HTTP API
 │   ├── market         # market manager
+│   │   └── order      # the ubiquitous order type
 │   ├── matcher        # order matching engine
 │   └── swap           # the swap executor/coordinator
 └── spec
