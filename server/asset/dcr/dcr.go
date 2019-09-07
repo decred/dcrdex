@@ -1,5 +1,5 @@
-// Copyright (c) 2019, The Decred developers
-// See LICENSE for details.
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
 
 package dcr
 
@@ -45,11 +45,11 @@ type dcrNode interface {
 // data for quick lookups. dcrBackend implements asset.DEXAsset, so provides
 // exported methods for DEX-related blockchain info.
 type dcrBackend struct {
-	// An application context provided as part of the DCRConfig. The dcrBackend
+	// An application context provided as part of the constructor. The dcrBackend
 	// will perform some cleanup when the context is cancelled.
 	ctx context.Context
 	// If an rpcclient.Client is used for the node, keeping a reference at client
-	// will result the (Client).Shutdown() being called on context cancellation.
+	// will result in (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
 	// node is used throughout for RPC calls, and in typical use will be the same
 	// as client. For testing, it can be set to a stub.
@@ -72,8 +72,13 @@ type dcrBackend struct {
 // Check that dcrBackend satisfies the DEXAsset interface.
 var _ asset.DEXAsset = (*dcrBackend)(nil)
 
-func NewDCR(ctx context.Context, configPath string, logger asset.Logger, network asset.Network) (*dcrBackend, error) {
-	// tidyConfig will set fields if defaults are used and set the chainParams
+// NewBackend is the exported constructor by which the DEX will import the
+// dcrBackend. The provided context.Context should be cancelled when the DEX
+// application exits. If configPath is an empty string, the backend will
+// attempt to read the settings directly from the dcrd config file in its
+// default system location.
+func NewBackend(ctx context.Context, configPath string, logger asset.Logger, network asset.Network) (*dcrBackend, error) {
+	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
 	cfg, err := loadConfig(configPath, network)
 	if err != nil {
@@ -142,8 +147,8 @@ func (dcr *dcrBackend) UTXO(txid string, vout uint32, redeemScript []byte) (asse
 	return dcr.utxo(txHash, vout, redeemScript)
 }
 
-// Transaction is part of the asset.DEXTx interface, so includes methods for
-// checking spent utxos and validating swap contracts.
+// Transaction is part of the asset.DEXTx interface. The returned DEXTx has
+// methods for checking spent outputs and validating swap contracts.
 func (dcr *dcrBackend) Transaction(txid string) (asset.DEXTx, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
@@ -240,7 +245,8 @@ func unconnectedDCR(ctx context.Context, logger asset.Logger) *dcrBackend {
 
 // superQueue should be run as a goroutine. The dcrd-registered handlers should
 // perform any necessary type conversion and then deposit the payload into the
-// anyQ channel.
+// anyQ channel. superQueue processes the queue and monitors the application
+// context.
 func (dcr *dcrBackend) superQueue() {
 out:
 	for {
@@ -331,7 +337,7 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		return nil, fmt.Errorf("error parsing utxo script addresses")
 	}
 
-	// Most supported script types are P2PKH.
+	// Get the size of the signature script.
 	sigScriptSize := P2PKHSigScriptSize
 	// If it's a P2SH, the size must be calculated based on other factors.
 	if scriptType.isP2SH() {
@@ -389,9 +395,7 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		pkScript:     pkScript,
 		redeemScript: redeemScript,
 		numSigs:      scriptAddrs.nRequired,
-		// The total size associated with the wire.TxIn. See
-		// (wire.TxIn).SerializeSizeWitness and
-		// and (wire.TxIn).SerializeSizePrefix
+		// The total size associated with the wire.TxIn.
 		spendSize:  uint32(sigScriptSize) + txInOverhead,
 		lastLookup: lastLookup,
 	}, nil
@@ -417,7 +421,7 @@ func (dcr *dcrBackend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*chain
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to decode pubkey from '%s' for output %s:%d", txOut.ScriptPubKey.Hex, txHash, vout)
+		return nil, nil, nil, fmt.Errorf("failed to decode pubkey script from '%s' for output %s:%d", txOut.ScriptPubKey.Hex, txHash, vout)
 	}
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
 	if err != nil {

@@ -60,29 +60,30 @@ func TestMain(m *testing.M) {
 		fmt.Printf("error reading dcrd config: %v\n", err)
 		return
 	}
-	dcr, err = NewDCR(ctx, "", testLogger, asset.Mainnet)
+	dcr, err = NewBackend(ctx, "", testLogger, asset.Mainnet)
 	if err != nil {
-		fmt.Printf("NewDCR error: %v\n", err)
+		fmt.Printf("NewBackend error: %v\n", err)
 		return
 	}
 	os.Exit(m.Run())
 }
 
 // TestLiveUTXO will iterate the blockchain backwards, starting with mempool,
-// checking that UTXOs are behaving as expected along the way.
+// checking that UTXOs are behaving as expected along the way. Stats will be
+// collected on the types of scripts found.
 func TestLiveUTXO(t *testing.T) {
 	var bestHash *chainhash.Hash
 	var mempool []*wire.MsgTx
 	var txs []*wire.MsgTx
 	type testStats struct {
-		p2pkh int
-		sp2pkh int
-		p2pkhSchnorr int
-		p2pkhEdwards int
-		p2sh int
-		sp2sh int
+		p2pkh          int
+		sp2pkh         int
+		p2pkhSchnorr   int
+		p2pkhEdwards   int
+		p2sh           int
+		sp2sh          int
 		immatureBefore int
-		immatureAfter int
+		immatureAfter  int
 	}
 	stats := new(testStats)
 	var currentHeight, tipHeight int64
@@ -158,7 +159,7 @@ func TestLiveUTXO(t *testing.T) {
 					}
 					continue
 				} else if scriptType&scriptP2PKH != 0 {
-					switch{
+					switch {
 					case scriptType&scriptSigEdwards != 0:
 						stats.p2pkhEdwards++
 					case scriptType&scriptSigSchnorr != 0:
@@ -293,9 +294,9 @@ func TestLiveUTXO(t *testing.T) {
 	t.Logf("%d immature transactions before %d blocks ago", stats.immatureAfter, maturity)
 }
 
+// TestCacheAdvantage compares the speed of requesting blocks from the RPC vs.
+//  using the cache to provide justification the added complexity.
 func TestCacheAdvantage(t *testing.T) {
-	// Compare the speed of requesting blocks from the RPC vs. using the cache,
-	// just to justify the added complexity.
 	client := dcr.client
 	nextHash, _, err := client.GetBestBlock()
 	if err != nil {

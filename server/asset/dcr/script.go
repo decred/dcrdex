@@ -1,5 +1,5 @@
-// Copyright (c) 2019, The Decred developers
-// See LICENSE for details.
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
 
 package dcr
 
@@ -45,7 +45,8 @@ const (
 	P2PKHSigScriptSize = 1 + 73 + 1 + 33
 	// All pubkey scripts are assumed to be version 0.
 	currentScriptVersion = 0
-	// Overhead for a wire.TxIn with a script length < 254.
+	// Overhead for a wire.TxIn with a scriptSig length < 254.  See
+	// (wire.TxIn).SerializeSizeWitness and (wire.TxIn).SerializeSizePrefix
 	txInOverhead = 58
 	// initTxSize is the size of a standard serialized atomic swap initialization
 	// transaction with one change output.
@@ -235,8 +236,8 @@ func extractSwapAddresses(pkScript []byte) (string, string, error) {
 	return "", "", fmt.Errorf("invalid swap contract")
 }
 
-// isStakePubkeyHashScript returns whether or not the passed script is stake
-// generation P2PKH script. Script is assumed to be version 0.
+// isStakePubkeyHashScript returns whether or not the passed script is a
+// stake-related P2PKH script. Script is assumed to be version 0.
 func isStakePubkeyHashScript(script []byte) bool {
 	opcode := stakeOpcode(script)
 	if opcode == 0 {
@@ -245,8 +246,8 @@ func isStakePubkeyHashScript(script []byte) bool {
 	return extractStakePubKeyHash(script, opcode) != nil
 }
 
-// isStakePubkeyHashScript returns whether or not the passed script is stake
-// generation P2SH script. Script is assumed to be version 0.
+// isStakePubkeyHashScript returns whether or not the passed script is a
+// stake-related P2SH script. Script is assumed to be version 0.
 func isStakeScriptHashScript(script []byte) bool {
 	opcode := stakeOpcode(script)
 	if opcode == 0 {

@@ -1,5 +1,5 @@
-// Copyright (c) 2019, The Decred developers
-// See LICENSE for details.
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
 
 package dcr
 
@@ -25,16 +25,17 @@ type UTXO struct {
 	txHash    chainhash.Hash
 	vout      uint32
 	// The number of confirmations needed for maturity. For outputs of a coinbase
-	// transaction, this will be set to chaincfg.Params.CoinbaseMaturity (100 for
-	// BTC). For other supported script types, this will be zero.
+	// transactions and stake-related transactions, this will be set to
+	// chaincfg.Params.CoinbaseMaturity (256 for mainchain). For other supported
+	// script types, this will be zero.
 	maturity int32
 	// A bitmask for script type information.
 	scriptType dcrScriptType
 	// The output's scriptPubkey.
 	pkScript []byte
-	// If the pubkey script is P2SH or P2WSH, the UTXO will only be generated if
-	// the redeem script is supplied and the script-hash validated. For P2PKH and
-	// P2WPKH pubkey scripts, the redeem script should be nil.
+	// If the pubkey script is P2SH, the UTXO will only be generated if
+	// the redeem script is supplied and the script-hash validated. If the
+	// pubkey script is not P2SH, redeemScript will be nil.
 	redeemScript []byte
 	// numSigs is the number of signatures required to spend this output.
 	numSigs int
@@ -56,7 +57,7 @@ var _ asset.UTXO = (*UTXO)(nil)
 // an error to indicate the UTXO is no longer valid. The definition of UTXO
 // validity should not be confused with the validity of regular tree
 // transactions that is voted on by stakeholders. While stakeholder approval is
-// a part for UTXO validity, there are other considerations as well.
+// a part of UTXO validity, there are other considerations as well.
 func (utxo *UTXO) Confirmations() (int64, error) {
 	dcr := utxo.dcr
 	tipHash := dcr.blockCache.tipHash()
