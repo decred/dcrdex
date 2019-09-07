@@ -268,8 +268,8 @@ func TestCancelOrder_Serialize(t *testing.T) {
 			fields{
 				Prefix: Prefix{
 					AccountID:  acct0,
-					BaseAsset:  AssetDCR, // !
-					QuoteAsset: AssetBTC, // !
+					BaseAsset:  AssetDCR,
+					QuoteAsset: AssetBTC,
 					OrderType:  CancelOrderType,
 					ClientTime: time.Unix(1566497693, 0),
 					ServerTime: time.Unix(1566497696, 0),
@@ -431,7 +431,7 @@ func TestCancelOrder_ID(t *testing.T) {
 	var limitOrderID OrderID
 	copy(limitOrderID[:], limitOrderID0)
 
-	orderID0, _ := hex.DecodeString("a737c78f0acfb2ba3f8c2d635a327c729fa54e756a1ed4e63a3c440aab372207")
+	orderID0, _ := hex.DecodeString("ba9aa378c9bfdce863ca65833cd254a1a2cc7a935a2942eb7ca47631a764cb2d")
 	var cancelOrderID OrderID
 	copy(cancelOrderID[:], orderID0)
 
@@ -449,6 +449,8 @@ func TestCancelOrder_ID(t *testing.T) {
 			fields{
 				Prefix: Prefix{
 					AccountID:  acct0,
+					BaseAsset:  AssetDCR,
+					QuoteAsset: AssetBTC,
 					OrderType:  CancelOrderType,
 					ClientTime: time.Unix(1566497693, 0),
 					ServerTime: time.Unix(1566497696, 0),

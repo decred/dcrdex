@@ -107,8 +107,8 @@ func serializeUTXO(u UTXO) []byte {
 // Prefix is the order prefix containing data fields common to all orders.
 type Prefix struct {
 	AccountID  account.AccountID
-	BaseAsset  uint32 // must be 0 for CancelOrder
-	QuoteAsset uint32 // must be 0 for CancelOrder
+	BaseAsset  uint32
+	QuoteAsset uint32
 	OrderType  OrderType
 	ClientTime time.Time
 	ServerTime time.Time
