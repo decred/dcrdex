@@ -15,7 +15,7 @@ type Booker interface {
 	BestSell() *order.LimitOrder
 	BestBuy() *order.LimitOrder
 	//Best(sell bool) *order.LimitOrder
-	Insert(*order.LimitOrder)
+	Insert(*order.LimitOrder) bool
 	Remove(order.OrderID) (*order.LimitOrder, bool)
 }
 

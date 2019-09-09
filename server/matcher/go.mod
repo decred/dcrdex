@@ -9,7 +9,7 @@ replace (
 
 require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.0
-	github.com/decred/dcrdex/server/account v0.0.0-00010101000000-000000000000
+	github.com/decred/dcrdex/server/account v0.0.0-20190907171020-c48f5b8f4bbc
 	github.com/decred/dcrdex/server/order v0.0.0-00010101000000-000000000000
 	github.com/decred/slog v1.0.0
 )
