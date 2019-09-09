@@ -9,28 +9,28 @@ import (
 	"sync"
 )
 
-// OrderRater is the type stored in the priority queue.
-type OrderRater interface {
+// OrderPrice is the type stored in the priority queue.
+type OrderPricer interface {
 	UID() string
-	Rate() float64
+	Price() uint64
 	Time() int64
 }
 
 type orderEntry struct {
-	OrderRater
+	OrderPricer
 	heapIdx int
 }
 
 type orderHeap []*orderEntry
 
-// OrderPQ is a priority queue for orders, provided as OrderRaters, based on
-// rate. A max-oriented queue with highest rates on top is constructed via
+// OrderPQ is a priority queue for orders, provided as OrderPricers, based on
+// price rate. A max-oriented queue with highest rates on top is constructed via
 // NewMaxOrderPQ, while a min-oriented queue is constructed via NewMinOrderPQ.
 type OrderPQ struct {
 	mtx      sync.Mutex
 	oh       orderHeap
 	capacity uint32
-	lessFn   func(bi, bj OrderRater) bool
+	lessFn   func(bi, bj OrderPricer) bool
 	orders   map[string]*orderEntry
 }
 
@@ -38,17 +38,17 @@ type OrderPQ struct {
 // with the given capacity, and sets the default LessFn for a min heap. Use
 // OrderPQ.SetLessFn to redefine the comparator.
 func NewMinOrderPQ(capacity uint32) *OrderPQ {
-	return newOrderPQ(capacity, LessByRateThenTime)
+	return newOrderPQ(capacity, LessByPriceThenTime)
 }
 
 // NewMaxOrderPQ is the constructor for OrderPQ that initializes an empty heap
 // with the given capacity, and sets the default LessFn for a max heap. Use
 // OrderPQ.SetLessFn to redefine the comparator.
 func NewMaxOrderPQ(capacity uint32) *OrderPQ {
-	return newOrderPQ(capacity, GreaterByRateThenTime)
+	return newOrderPQ(capacity, GreaterByPriceThenTime)
 }
 
-func newOrderPQ(cap uint32, lessFn func(bi, bj OrderRater) bool) *OrderPQ {
+func newOrderPQ(cap uint32, lessFn func(bi, bj OrderPricer) bool) *OrderPQ {
 	return &OrderPQ{
 		oh:       orderHeap{},
 		capacity: cap,
@@ -57,11 +57,11 @@ func newOrderPQ(cap uint32, lessFn func(bi, bj OrderRater) bool) *OrderPQ {
 	}
 }
 
-// Count
+// Count returns the number of orders in the queue.
 func (pq *OrderPQ) Count() int {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
-	return len(pq.oh)
+	return len(pq.orders)
 }
 
 // Satisfy heap.Inferface (Len, Less, Swap, Push, Pop). These functions are only
@@ -88,18 +88,18 @@ func (pq *OrderPQ) Swap(i, j int) {
 	pq.oh[j].heapIdx = j
 }
 
-// Push an order, which must be an OrderRater. Use heap.Push, not this directly.
+// Push an order, which must be an OrderPricer. Use heap.Push, not this directly.
 // Push is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Push(ord interface{}) {
-	rater, ok := ord.(OrderRater)
-	if !ok || rater == nil {
+	pricer, ok := ord.(OrderPricer)
+	if !ok || pricer == nil {
 		fmt.Printf("Failed to push an order: %v", ord)
 		return
 	}
 
 	entry := &orderEntry{
-		OrderRater: rater,
-		heapIdx:    len(pq.oh),
+		OrderPricer: pricer,
+		heapIdx:     len(pq.oh),
 	}
 
 	uid := entry.UID()
@@ -113,7 +113,7 @@ func (pq *OrderPQ) Push(ord interface{}) {
 	pq.oh = append(pq.oh, entry)
 }
 
-// Pop will return an interface{} that may be cast to OrderRater (or the
+// Pop will return an interface{} that may be cast to OrderPricer (or the
 // underlying concrete type). Use heap.Pop or OrderPQ.ExtractBest, not this. Pop
 // is required for heap.Interface. It is not thread-safe.
 func (pq *OrderPQ) Pop() interface{} {
@@ -123,7 +123,7 @@ func (pq *OrderPQ) Pop() interface{} {
 	order.heapIdx = -1
 	pq.oh = old[0 : n-1]
 	delete(pq.orders, order.UID())
-	return order.OrderRater
+	return order.OrderPricer
 }
 
 // End heap.Inferface.
@@ -131,66 +131,66 @@ func (pq *OrderPQ) Pop() interface{} {
 // SetLessFn sets the function called by Less. The input lessFn must accept two
 // *orderEntry and return a bool, unlike Less, which accepts heap indexes i, j.
 // This allows to define a comparator without requiring a heap.
-func (pq *OrderPQ) SetLessFn(lessFn func(bi, bj OrderRater) bool) {
+func (pq *OrderPQ) SetLessFn(lessFn func(bi, bj OrderPricer) bool) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 	pq.lessFn = lessFn
 }
 
-// LessByRate defines a higher priority as having a lower rate.
-func LessByRate(bi, bj OrderRater) bool {
-	return bi.Rate() < bj.Rate()
+// LessByPrice defines a higher priority as having a lower price rate.
+func LessByPrice(bi, bj OrderPricer) bool {
+	return bi.Price() < bj.Price()
 }
 
-// GreaterByRate defines a higher priority as having a higher rate.
-func GreaterByRate(bi, bj OrderRater) bool {
-	return bi.Rate() > bj.Rate()
+// GreaterByPrice defines a higher priority as having a higher price rate.
+func GreaterByPrice(bi, bj OrderPricer) bool {
+	return bi.Price() > bj.Price()
 }
 
-// LessByRateThenTime defines a higher priority as having a lower rate, with
-// older orders breaking any tie.
-func LessByRateThenTime(bi, bj OrderRater) bool {
-	if bi.Rate() == bj.Rate() {
+// LessByPriceThenTime defines a higher priority as having a lower price rate,
+// with older orders breaking any tie.
+func LessByPriceThenTime(bi, bj OrderPricer) bool {
+	if bi.Price() == bj.Price() {
 		return bi.Time() < bj.Time()
 	}
-	return LessByRate(bi, bj)
+	return LessByPrice(bi, bj)
 }
 
-// GreaterByRateThenTime defines a higher priority as having a higher rate, with
-// older orders breaking any tie.
-func GreaterByRateThenTime(bi, bj OrderRater) bool {
-	if bi.Rate() == bj.Rate() {
+// GreaterByPriceThenTime defines a higher priority as having a higher price
+// rate, with older orders breaking any tie.
+func GreaterByPriceThenTime(bi, bj OrderPricer) bool {
+	if bi.Price() == bj.Price() {
 		return bi.Time() < bj.Time()
 	}
-	return GreaterByRate(bi, bj)
+	return GreaterByPrice(bi, bj)
 }
 
 // ExtractBest a.k.a. pop removes the highest priority order from the queue, and
 // returns it.
-func (pq *OrderPQ) ExtractBest() OrderRater {
+func (pq *OrderPQ) ExtractBest() OrderPricer {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 	if pq.Len() == 0 {
 		return nil
 	}
-	return heap.Pop(pq).(OrderRater)
+	return heap.Pop(pq).(OrderPricer)
 }
 
 // PeekBest returns the highest priority order without removing it from the
 // queue.
-func (pq *OrderPQ) PeekBest() OrderRater {
+func (pq *OrderPQ) PeekBest() OrderPricer {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 	if pq.Len() == 0 {
 		return nil
 	}
-	return pq.oh[0].OrderRater
+	return pq.oh[0].OrderPricer
 }
 
-// Reset creates a fresh queue given the input []OrderRater. For every element
+// Reset creates a fresh queue given the input []OrderPricer. For every element
 // in the queue, Reset resets the heap index. The heap is then heapified. The
 // input slice is note modifed.
-func (pq *OrderPQ) Reset(orders []OrderRater) {
+func (pq *OrderPQ) Reset(orders []OrderPricer) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 
@@ -198,8 +198,8 @@ func (pq *OrderPQ) Reset(orders []OrderRater) {
 	pq.orders = make(map[string]*orderEntry, len(pq.oh))
 	for i, o := range orders {
 		entry := &orderEntry{
-			OrderRater: o,
-			heapIdx:    i,
+			OrderPricer: o,
+			heapIdx:     i,
 		}
 		pq.oh = append(pq.oh, entry)
 		pq.orders[o.UID()] = entry
@@ -243,7 +243,7 @@ func (pq *OrderPQ) Reheap() {
 // if at capacity, fail
 // else (not at capacity)
 // 		- heap.Push, which is pq.Push (append at bottom) then heapup
-func (pq *OrderPQ) Insert(rater OrderRater) bool {
+func (pq *OrderPQ) Insert(pricer OrderPricer) bool {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 
@@ -251,11 +251,11 @@ func (pq *OrderPQ) Insert(rater OrderRater) bool {
 		return false
 	}
 
-	if rater == nil || rater.UID() == "" {
+	if pricer == nil || pricer.UID() == "" {
 		return false
 	}
 
-	if pq.orders[rater.UID()] != nil {
+	if pq.orders[pricer.UID()] != nil {
 		return false
 	}
 
@@ -266,13 +266,13 @@ func (pq *OrderPQ) Insert(rater OrderRater) bool {
 
 	// With room to grow, append at bottom and bubble up. Note that
 	// (*OrderPQ).Push will update the OrderPQ.orders map.
-	heap.Push(pq, rater)
+	heap.Push(pq, pricer)
 	return true
 }
 
-// ReplaceOrder will update the specified OrderRater, which must be in the
+// ReplaceOrder will update the specified OrderPricer, which must be in the
 // queue, and then restores heapiness.
-func (pq *OrderPQ) ReplaceOrder(old OrderRater, new OrderRater) bool {
+func (pq *OrderPQ) ReplaceOrder(old OrderPricer, new OrderPricer) bool {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
 
@@ -293,7 +293,7 @@ func (pq *OrderPQ) ReplaceOrder(old OrderRater, new OrderRater) bool {
 	// Above is commented to update regardless of UID.
 
 	delete(pq.orders, oldUID)
-	entry.OrderRater = new
+	entry.OrderPricer = new
 	pq.orders[newUID] = entry
 
 	heap.Fix(pq, entry.heapIdx)
@@ -302,38 +302,67 @@ func (pq *OrderPQ) ReplaceOrder(old OrderRater, new OrderRater) bool {
 
 // RemoveOrder attempts to remove the provided order from the priority queue
 // based on it's UID.
-func (pq *OrderPQ) RemoveOrder(r OrderRater) {
+func (pq *OrderPQ) RemoveOrder(r OrderPricer) (OrderPricer, bool) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
-	pq.removeOrder(pq.orders[r.UID()])
+	return pq.removeOrder(pq.orders[r.UID()])
 }
 
 // RemoveOrderUID attempts to remove the order with the given UID from the
 // priority queue.
-func (pq *OrderPQ) RemoveOrderUID(uid string) {
+func (pq *OrderPQ) RemoveOrderUID(uid string) (OrderPricer, bool) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
-	pq.removeOrder(pq.orders[uid])
+	return pq.removeOrder(pq.orders[uid])
 }
 
 // removeOrder removes the specified orderEntry from the queue. This function is
 // NOT thread-safe.
-func (pq *OrderPQ) removeOrder(o *orderEntry) {
+func (pq *OrderPQ) removeOrder(o *orderEntry) (OrderPricer, bool) {
 	if o != nil && o.heapIdx >= 0 && o.heapIdx < pq.Len() {
 		// Only remove the order if it is really in the queue.
 		uid := o.UID()
-		if pq.oh[o.heapIdx].UID() == uid {
+		removed := pq.oh[o.heapIdx].OrderPricer
+		if removed.UID() == uid {
 			delete(pq.orders, uid)
 			pq.removeIndex(o.heapIdx)
-			return
+			return removed, true
 		}
 		fmt.Printf("Tried to remove an order that was NOT in the PQ. ID: %s",
 			o.UID())
 	}
+	return nil, false
 }
 
 // removeIndex removes the orderEntry at the specified position in the heap.
 // This function is NOT thread-safe.
 func (pq *OrderPQ) removeIndex(idx int) {
 	heap.Remove(pq, idx)
+}
+
+func (pq *OrderPQ) leafNodes() []*orderEntry {
+	n := len(pq.oh)
+	if n == 0 {
+		return nil
+	}
+	numLeaves := n/2 + n%2
+	return pq.oh[n-numLeaves:]
+}
+
+func (pq *OrderPQ) Worst() OrderPricer {
+	// Check the leaf nodes for the worst order according to lessFn.
+	leaves := pq.leafNodes()
+	switch len(leaves) {
+	case 0:
+		return nil
+	case 1:
+		return leaves[0].OrderPricer
+	}
+	worst := leaves[0]
+	for i := 0; i < len(leaves)-1; i++ {
+		if pq.lessFn(worst, leaves[i+1]) {
+			worst = leaves[i+1]
+		}
+	}
+	return worst.OrderPricer
 }
