@@ -12,7 +12,7 @@ import (
 	"sort"
 
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrdex/server/market/order"
+	"github.com/decred/dcrdex/server/order"
 )
 
 // HashFunc is the hash function used to generate the shuffling seed.

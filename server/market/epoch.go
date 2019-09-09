@@ -1,6 +1,6 @@
 package market
 
-import "github.com/decred/dcrdex/server/market/order"
+import "github.com/decred/dcrdex/server/order"
 
 // TODO. PLACEHOLDER.
 

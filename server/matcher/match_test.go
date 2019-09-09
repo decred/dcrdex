@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/market/order"
+	"github.com/decred/dcrdex/server/order"
 	"github.com/decred/slog"
 )
 
