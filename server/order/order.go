@@ -298,6 +298,11 @@ func (o *LimitOrder) Type() OrderType {
 // Ensure LimitOrder is an Order.
 var _ Order = (*LimitOrder)(nil)
 
+// Price the order price rate for a LimitOrder.
+func (o *LimitOrder) Price() uint64 {
+	return o.Rate
+}
+
 // CancelOrder defines a cancel order in terms of an order Prefix and the ID of
 // the order to be canceled.
 type CancelOrder struct {
