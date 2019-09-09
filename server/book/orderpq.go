@@ -57,6 +57,13 @@ func newOrderPQ(cap uint32, lessFn func(bi, bj OrderRater) bool) *OrderPQ {
 	}
 }
 
+// Count
+func (pq *OrderPQ) Count() int {
+	pq.mtx.Lock()
+	defer pq.mtx.Unlock()
+	return len(pq.oh)
+}
+
 // Satisfy heap.Inferface (Len, Less, Swap, Push, Pop). These functions are only
 // to be used by the container/heap functions via other thread-safe OrderPQ
 // methods. These are not thread safe.
@@ -188,14 +195,15 @@ func (pq *OrderPQ) Reset(orders []OrderRater) {
 	defer pq.mtx.Unlock()
 
 	pq.oh = make([]*orderEntry, 0, len(orders))
+	pq.orders = make(map[string]*orderEntry, len(pq.oh))
 	for i, o := range orders {
-		pq.oh = append(pq.oh, &orderEntry{
+		entry := &orderEntry{
 			OrderRater: o,
 			heapIdx:    i,
-		})
+		}
+		pq.oh = append(pq.oh, entry)
+		pq.orders[o.UID()] = entry
 	}
-
-	pq.orders = make(map[string]*orderEntry, len(pq.oh))
 
 	heap.Init(pq)
 }
@@ -216,6 +224,9 @@ func (pq *OrderPQ) resetHeap(oh []*orderEntry) {
 	copy(pq.oh, oh)
 
 	pq.orders = make(map[string]*orderEntry, len(oh))
+	for _, oe := range oh {
+		pq.orders[oe.UID()] = oe
+	}
 
 	// Do not call Reheap unless you want a deadlock.
 	heap.Init(pq)
