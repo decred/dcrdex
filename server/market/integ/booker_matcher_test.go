@@ -373,6 +373,167 @@ func TestMatchWithBook_limitsOnly(t *testing.T) {
 	}
 }
 
+func orderInSlice(o order.Order, s []order.Order) int {
+	for i := range s {
+		if s[i].ID() == o.ID() {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
+	// Setup the match package's logger.
+	startLogger()
+
+	// New matching engine.
+	me := matcher.New()
+
+	// epochQueue is heterogenous w.r.t. type
+	epochQueue := []order.Order{
+		// buys
+		newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0), // 0: buy, 1 lot, immediate
+		newLimitOrder(false, 4550000, 2, order.StandingTiF, 0),  // 1: buy, 2 lot, standing
+		newLimitOrder(false, 4550000, 2, order.ImmediateTiF, 0), // 2: buy, 2 lot, immediate
+		newLimitOrder(false, 4100000, 1, order.ImmediateTiF, 0), // 3: buy, 1 lot, immediate
+		// sells
+		newLimitOrder(true, 4540000, 1, order.ImmediateTiF, 0), // 4: sell, 1 lot, immediate
+		newLimitOrder(true, 4300000, 4, order.ImmediateTiF, 0), // 5: sell, 4 lot, immediate
+		newLimitOrder(true, 4700000, 40, order.StandingTiF, 0), // 6: sell, 40 lot, standing, unfilled insert
+	}
+	epochQueueInit := make([]order.Order, len(epochQueue))
+	copy(epochQueueInit, epochQueue)
+
+	// Apply the shuffling to determine matching order that will be used.
+	//t.Log(epochQueue)
+	// matcher.ShuffleQueue(epochQueue)
+	// t.Log(epochQueue)
+	// -> Shuffles to [0, 3, 4, 1, 5, 6, 2]
+	// 0 is filled
+	// 3 is unfilled (fail)
+	// 4 is unfilled (fail)
+	// 1 is partially filled and then inserted into the buy order book
+	// 5 is filled
+	// 6 is partially filled and then inserted into the sell order book
+	// 2 is unfilled (fail)
+
+	// order book from bookBuyOrders and bookSellOrders
+	b := newBook(t)
+
+	resetQueue := func() {
+		for _, o := range epochQueue {
+			switch ot := o.(type) {
+			case *order.MarketOrder:
+				ot.Filled = 0
+			case *order.LimitOrder:
+				ot.Filled = 0
+			}
+		}
+	}
+
+	// nSell := len(bookSellOrders)
+	// nBuy := len(bookBuyOrders)
+
+	// Reset Filled amounts of all pre-defined orders before each test.
+	resetQueue()
+	resetMakers()
+
+	matches, passed, failed, partial, inserted := me.Match(b, epochQueue)
+	//t.Log(matches, passed, failed, partial, inserted)
+
+	// PASSED orders
+
+	// epoch order 0 should be order 0 in passed slice
+	expectedLoc := 0
+	if loc := orderInSlice(epochQueueInit[0], passed); loc == -1 {
+		t.Errorf("Order not in passed slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in passed slice: %d", loc)
+	}
+
+	// epoch order 5 should be order 1 in passed slice
+	expectedLoc = 1
+	if loc := orderInSlice(epochQueueInit[5], passed); loc == -1 {
+		t.Errorf("Order not in passed slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in passed slice: %d", loc)
+	}
+
+	// FAILED orders
+
+	// epoch order 3 should be order 0 in failed slice
+	expectedLoc = 0
+	if loc := orderInSlice(epochQueueInit[3], failed); loc == -1 {
+		t.Errorf("Order not in failed slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in failed slice: %d", loc)
+	}
+
+	// epoch order 4 should be order 1 in failed slice
+	expectedLoc = 1
+	if loc := orderInSlice(epochQueueInit[4], failed); loc == -1 {
+		t.Errorf("Order not in failed slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in failed slice: %d", loc)
+	}
+
+	// epoch order 2 should be order 2 in failed slice
+	expectedLoc = 2
+	if loc := orderInSlice(epochQueueInit[2], failed); loc == -1 {
+		t.Errorf("Order not in failed slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in failed slice: %d", loc)
+	}
+
+	// PARTIAL fills
+
+	// epoch order 1 should be order 0 in partial slice
+	expectedLoc = 0
+	if loc := orderInSlice(epochQueueInit[1], partial); loc == -1 {
+		t.Errorf("Order not in partial slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in partial slice: %d", loc)
+	}
+
+	// epoch order 6 should be order 1 in partial slice
+	expectedLoc = 1
+	if loc := orderInSlice(epochQueueInit[6], partial); loc == -1 {
+		t.Errorf("Order not in partial slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in partial slice: %d", loc)
+	}
+
+	// INSERTED orders
+
+	// epoch order 1 should be order 0 in inserted slice
+	expectedLoc = 0
+	if loc := orderInSlice(epochQueueInit[1], inserted); loc == -1 {
+		t.Errorf("Order not in inserted slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in inserted slice: %d", loc)
+	}
+
+	// epoch order 6 should be order 1 in inserted slice
+	expectedLoc = 1
+	if loc := orderInSlice(epochQueueInit[6], inserted); loc == -1 {
+		t.Errorf("Order not in inserted slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in inserted slice: %d", loc)
+	}
+
+	// epoch order 5 (sell, 4 lots, immediate @ 4300000) is match 1, matched
+	// with 3 orders, the first of which of which is epoch order 1 (buy, 2 lots,
+	// standing @ 4550000) that was inserted as a standing order.
+	if matches[1].Taker.ID() != epochQueueInit[5].ID() {
+		t.Errorf("Taker order ID expected %v, got %v",
+			epochQueueInit[5].UID(), matches[1].Taker.UID())
+	}
+	if matches[1].Makers[0].ID() != epochQueueInit[1].ID() {
+		t.Errorf("First match was expected to be %v, got %v",
+			epochQueueInit[1], matches[1].Makers[0].ID())
+	}
+}
+
 func newCancelOrder(targetOrderID order.OrderID) *order.CancelOrder {
 	return &order.CancelOrder{
 		TargetOrderID: targetOrderID,
