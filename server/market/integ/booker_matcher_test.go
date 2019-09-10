@@ -791,6 +791,36 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	}
 }
 
+func marketBuyQuoteAmt(lots uint64) uint64 {
+	var amt uint64
+	var i int
+	nSell := len(bookSellOrders)
+	for lots > 0 && i < nSell {
+		sellOrder := bookSellOrders[nSell-1-i]
+		orderLots := sellOrder.Quantity / LotSize
+		if orderLots > lots {
+			orderLots = lots
+		}
+		lots -= orderLots
+
+		amt += matcher.BaseToQuote(sellOrder.Rate, orderLots*LotSize)
+		i++
+	}
+	return amt
+}
+
+// quoteAmt computes the required amount of the quote asset required to purchase
+// the specified number of lots given the current order book and required amount
+// buffering in the single lot case.
+func quoteAmt(lots uint64) uint64 {
+	amt := marketBuyQuoteAmt(lots)
+	if lots == 1 {
+		amt *= 3
+		amt /= 2
+	}
+	return amt
+}
+
 func TestMatch_marketBuysOnly(t *testing.T) {
 	// Setup the match package's logger.
 	startLogger()
@@ -800,35 +830,6 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 
 	nSell := len(bookSellOrders)
 	//nBuy := len(bookBuyOrders)
-
-	marketBuyQuoteAmt := func(lots uint64) uint64 {
-		var amt uint64
-		var i int
-		for lots > 0 && i < nSell {
-			sellOrder := bookSellOrders[nSell-1-i]
-			orderLots := sellOrder.Quantity / LotSize
-			if orderLots > lots {
-				orderLots = lots
-			}
-			lots -= orderLots
-
-			amt += matcher.BaseToQuote(sellOrder.Rate, orderLots*LotSize)
-			i++
-		}
-		return amt
-	}
-
-	// quoteAmt computes the required amount of the quote asset required to
-	// purchase the specified number of lots given the current order book and
-	// required amount buffering in the single lot case.
-	quoteAmt := func(lots uint64) uint64 {
-		amt := marketBuyQuoteAmt(lots)
-		if lots == 1 {
-			amt *= 3
-			amt /= 2
-		}
-		return amt
-	}
 
 	// takers is heterogenous w.r.t. type
 	takers := []order.Order{
@@ -971,4 +972,130 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
+	// Setup the match package's logger.
+	startLogger()
+
+	// New matching engine.
+	me := matcher.New()
+
+	nSell := len(bookSellOrders)
+	nBuy := len(bookBuyOrders)
+
+	// epochQueue is heterogenous w.r.t. type
+	epochQueue := []order.Order{
+		// buys
+		newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0), // 0: buy, 1 lot, immediate
+		newLimitOrder(false, 4550000, 2, order.StandingTiF, 0),  // 1: buy, 2 lot, standing
+		newLimitOrder(false, 4550000, 2, order.ImmediateTiF, 0), // 2: buy, 2 lot, immediate
+		newLimitOrder(false, 4100000, 1, order.ImmediateTiF, 0), // 3: buy, 1 lot, immediate
+		// sells
+		newLimitOrder(true, 4540000, 1, order.ImmediateTiF, 0), // 4: sell, 1 lot, immediate
+		newLimitOrder(true, 4800000, 4, order.StandingTiF, 0),  // 5: sell, 4 lot, immediate
+		newLimitOrder(true, 4300000, 4, order.ImmediateTiF, 0), // 6: sell, 4 lot, immediate
+		newLimitOrder(true, 4700000, 40, order.StandingTiF, 0), // 7: sell, 40 lot, standing, unfilled insert
+		// market
+		newMarketSellOrder(2, 0),          // 8
+		newMarketSellOrder(4, 0),          // 9
+		newMarketBuyOrder(quoteAmt(1), 0), // 10
+		newMarketBuyOrder(quoteAmt(2), 0), // 11
+		// cancel
+		newCancelOrder(bookSellOrders[6].ID()),       // 12
+		newCancelOrder(bookBuyOrders[8].ID()),        // 13
+		newCancelOrder(bookBuyOrders[nBuy-1].ID()),   // 14
+		newCancelOrder(bookSellOrders[nSell-1].ID()), // 15
+	}
+	// cancel some the epoch queue orders too
+	epochQueue = append(epochQueue, newCancelOrder(epochQueue[7].ID())) // 16
+	epochQueue = append(epochQueue, newCancelOrder(epochQueue[5].ID())) // 17
+
+	epochQueueInit := make([]order.Order, len(epochQueue))
+	copy(epochQueueInit, epochQueue)
+
+	// Apply the shuffling to determine matching order that will be used.
+	matcher.ShuffleQueue(epochQueue)
+	for i := range epochQueue {
+		t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
+	}
+	// -> Shuffles to [12, 3, 13, 4, 8, 0, 2, 16, 11, 5, 15, 9, 10, 7, 17, 14, 6, 1]
+	expectedPassed := []int{12, 13, 8, 0, 11, 9, 10, 17}
+	expectedFailed := []int{3, 4, 2, 16, 15, 14, 6}
+	expectedPartial := []int{5, 7, 1}
+	expectedInserted := []int{5, 7, 1} // all StandingTiF
+
+	// order book from bookBuyOrders and bookSellOrders
+	b := newBook(t)
+
+	resetQueue := func() {
+		for _, o := range epochQueue {
+			switch ot := o.(type) {
+			case *order.MarketOrder:
+				ot.Filled = 0
+			case *order.LimitOrder:
+				ot.Filled = 0
+			}
+		}
+	}
+
+	// Reset Filled amounts of all pre-defined orders before each test.
+	resetQueue()
+	resetMakers()
+
+	matches, passed, failed, partial, inserted := me.Match(b, epochQueue)
+	t.Log("Matches:", matches)
+	t.Log("Passed:", passed)
+	t.Log("Failed:", failed)
+	t.Log("Partial:", partial)
+	t.Log("Inserted:", inserted)
+	for i := range matches {
+		t.Log("Match", i, ":", matches[i])
+	}
+
+	// PASSED orders
+
+	for i, qi := range expectedPassed {
+		if oi := orderInSlice(epochQueueInit[qi], passed); oi != i {
+			t.Errorf("Order not at expected location in passed slice. Got %d, expected %d",
+				oi, i)
+		}
+	}
+
+	for i, qi := range expectedFailed {
+		if oi := orderInSlice(epochQueueInit[qi], failed); oi != i {
+			t.Errorf("Order not at expected location in failed slice. Got %d, expected %d",
+				oi, i)
+		}
+	}
+
+	for i, qi := range expectedPartial {
+		if oi := orderInSlice(epochQueueInit[qi], partial); oi != i {
+			t.Errorf("Order not at expected location in partial slice. Got %d, expected %d",
+				oi, i)
+		}
+	}
+
+	for i, qi := range expectedInserted {
+		if oi := orderInSlice(epochQueueInit[qi], inserted); oi != i {
+			t.Errorf("Order not at expected location in inserted slice. Got %d, expected %d",
+				oi, i)
+		}
+	}
+
+	if len(matches) != 8 {
+		t.Errorf("Incorrect number of matches. Got %d, expected %d", len(matches), 8)
+	}
+
+	// match 7 (epoch order 17) cancels epoch order 5
+	if matches[7].Taker.ID() != epochQueueInit[17].ID() {
+		t.Errorf("Taker order ID expected %v, got %v",
+			epochQueueInit[17].UID(), matches[7].Taker.UID())
+	}
+	if matches[7].Makers[0].ID() != epochQueueInit[5].ID() {
+		t.Errorf("First match was expected to be %v, got %v",
+			epochQueueInit[5], matches[7].Makers[0].ID())
+	}
+
+	t.Log(bookSellOrders[nSell-4:])
 }

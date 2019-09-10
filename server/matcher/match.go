@@ -412,6 +412,10 @@ func sortQueue(queue []order.Order) {
 	})
 }
 
+// func ShuffleQueue(queue []order.Order) {
+// 	shuffleQueue(queue)
+// }
+
 // shuffleQueue deterministically shuffles the Orders using a Fisher-Yates
 // algorithm seeded with the hash of the concatenated order ID hashes.
 func shuffleQueue(queue []order.Order) {
