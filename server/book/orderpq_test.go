@@ -2,6 +2,7 @@ package book
 
 import (
 	"encoding/hex"
+
 	//"math"
 	"math/rand"
 	//"reflect"
@@ -504,5 +505,36 @@ func TestOrderPQMax_Worst(t *testing.T) {
 	worst := pq.Worst()
 	if worst.UID() != bigList[len(bigList)-1].UID() {
 		t.Errorf("Incorrect worst order. Got %s, expected %s", worst.UID(), bigList[len(bigList)-1].UID())
+	}
+}
+
+func TestOrderPQMax_leafNodes(t *testing.T) {
+	genBigList()
+
+	// Max oriented queue
+	newQ := func(list []*Order) *OrderPQ {
+		pq := NewMaxOrderPQ(uint32(len(list) * 3 / 2))
+		for _, o := range list {
+			ok := pq.Insert(o)
+			if !ok {
+				t.Fatalf("Failed to insert order %v", o)
+			}
+		}
+		return pq
+	}
+
+	for sz := 0; sz < 131; sz++ {
+		list := bigList[:sz]
+		pq := newQ(list)
+		leaves := pq.leafNodes()
+		total := pq.Count()
+		expectedNum := total / 2
+		if total%2 != 0 {
+			expectedNum++
+		}
+		if len(leaves) != expectedNum {
+			t.Errorf("Incorrect number of leaf nodes. Got %d, expected %d",
+				len(leaves), expectedNum)
+		}
 	}
 }
