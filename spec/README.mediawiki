@@ -344,8 +344,10 @@ First, the order pool is shuffled.
 Shuffling is deterministic, using the Fisher-Yates algorithm where the
 random number generator seed is derived from the hash of the concatenated order
 [[#Order_ID|ID hashes]].
-Specifically for hash function '''''f''''', the seed hash,
-'''''H<sub>seed</sub>''''' is computed as
+Specifically for hash function '''''f''''', the seed is the 64-bit integer
+corresponding to the little-endian byte order interpretation of the first 8
+bytes of the hash.
+The hash is computed as
 
 <!--H_{seed} = f(f(order_1) || f(order_2) || ... || f(order_N))-->
 [[File:images/seed-eq.png]]
@@ -431,8 +433,8 @@ which the client provides during registration.
 After registration, the client does not identify themselves with their pubkey
 directly.
 Instead, the account is identified by an '''account ID''', which is the
-double SHA-256 hash of the client's pubkey,
-'''''<code>sha256(sha256(pubkey))</code>''''', provided as a hex-encoded
+double Blake-256 hash of the client's pubkey,
+'''''<code>blake256(blake256(pubkey))</code>''''', provided as a hex-encoded
 string in JSON-RPC calls.
 
 ===Step 1: Registration===
@@ -630,7 +632,7 @@ in penalties.
 The client should manage their orders carefully to ensure that this doesn't
 occur.
 
-Market orders and limit orders with time in force ''immediate'' are not
+Market orders, and limit orders with time in force ''immediate'', are not
 cancelled under disconnection. Once submitted, these orders will always go
 through a single match cycle.
 
@@ -700,7 +702,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 | epoch   || int    || the epoch in which the order was received
 |}
 
-'''Changes to the orderbook''' will be received from the DEX as a stream of
+'''Changes to the order book''' will be received from the DEX as a stream of
 updates.
 These updates take the JSON-RPC notification format, so omit an <code>id</code>
 attribute.
@@ -887,7 +889,7 @@ All order serializations have a common ''prefix structure''.
 ====Order ID====
 
 The order serialization is used to create a unique order ID.
-The ID is defined as the SHA-256 hash of the serialized order.
+The ID is defined as the Blake-256 hash of the serialized order.
 It is represented in messaging as a hex-encoded string.
 
 ===Limit Order===
@@ -955,13 +957,13 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | side       || 1 || 0 for buy, 1 for sell
 |-
-| rate       || 8 || price rate
-|-
 | quantity   || 8 || quanity to buy or sell (atoms)
 |-
-| time in force || 1 || 0 for ''standing'', 1 for ''immediate''
-|-
 | address   || varies || client's receiving address
+|-
+| rate       || 8 || price rate
+|-
+| time in force || 1 || 0 for ''standing'', 1 for ''immediate''
 |}
 
 ===Market Order===
@@ -989,7 +991,7 @@ the epoch match cycle) is left unfilled.
 |-
 | side      || string || one of "buy" or "sell"
 |-
-| ordersize || int    || order size, in atoms (*1e8). See notes on market buy orders below.
+| ordersize || int    || order size, in atoms. See notes on market buy orders below.
 |-
 | utxos     || &#91;[[#UTXO_Preparation|UTXO]]&#93; || list of backing UTXOs
 |-
@@ -1021,11 +1023,9 @@ the epoch match cycle) is left unfilled.
 |-
 | UTXO data  || 36 x count || [[#utxo-preparation|sequence of UTXO data]]
 |-
-| side      || 1 || 0 for buy, 1 for sell
+| side       || 1 || 0 for buy, 1 for sell
 |-
 | quantity   || 8 || quantity to buy or sell (atoms)
-|-
-| time in force || 1 || 0 for ''standing'', 1 for ''immediate''
 |-
 | address    || varies || client's receiving address
 |}
@@ -1230,7 +1230,7 @@ for verification and relay to the counterparty.
 A match can be revoked by the server if a client fails to act within the
 [[#Exchange_Variables|broadcast timeout]]. A match revocation will result in
 penalties for the violating party only.
-The revoked match quantity is not added back to the orderbook in any form.
+The revoked match quantity is not added back to the order book in any form.
 
 '''JSON-RPC method:''' <code>revoke_match</code>, '''originator:''' DEX
 
@@ -1288,7 +1288,7 @@ does not reconnect before the next [[#Session_Authentication|startepoch]].
 |-
 | epoch      || int    || the epoch in which the suspension will start
 |-
-| persist    || bool   || whether standling limit order's will persist through the suspension
+| persist    || bool   || whether standing limit order's will persist through the suspension
  |}
 
 ==Atomic Settlement==
