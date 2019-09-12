@@ -13,6 +13,8 @@ const (
 	bookHalfCapacity uint32 = 1 << 21 // 4 * 2 MiB
 )
 
+// Book is a market's order book. The Book uses a configurable lot size, of
+// which all inserted orders must have a quantity that is a multiple.
 type Book struct {
 	lotSize uint64
 	buys    *OrderPQ
@@ -58,6 +60,11 @@ func (b *Book) BestBuy() *order.LimitOrder {
 }
 
 func (b *Book) Insert(o *order.LimitOrder) bool {
+	if o.Quantity%b.lotSize != 0 {
+		log.Warnf("(*Book).Insert: Refusing to insert an order with a " +
+			"quantity that is not a multiple of lot size.")
+		return false
+	}
 	if o.Sell {
 		return b.sells.Insert(o)
 	}

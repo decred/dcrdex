@@ -180,6 +180,12 @@ func TestBook(t *testing.T) {
 			b.BestSell().ID(), bestSellOrder.ID())
 	}
 
+	badOrder := newLimitOrder(false, 2500000, 1, order.StandingTiF, 0)
+	badOrder.Quantity /= 3
+	if b.Insert(badOrder) {
+		t.Errorf("Inserted order with non-integer multiple of lot size!")
+	}
+
 	removed, ok := b.Remove(order.OrderID{})
 	if ok {
 		t.Fatalf("Somehow removed order for fake ID. Removed %v", removed.ID())
