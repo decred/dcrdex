@@ -436,6 +436,21 @@ func TestOrderPriorityQueue_Remove(t *testing.T) {
 func TestOrderPQMin_Worst(t *testing.T) {
 	genBigList()
 
+	pq0 := NewMinOrderPQ(4)
+	worst := pq0.Worst()
+	if worst != nil {
+		t.Errorf("Worst for an empty queue should be nil, got %v", worst)
+	}
+
+	pq1 := NewMinOrderPQ(4)
+	if !pq1.Insert(bigList[0]) {
+		t.Fatalf("Failed to insert order %v", bigList[0])
+	}
+	worst = pq1.Worst()
+	if worst.UID() != bigList[0].UID() {
+		t.Errorf("Worst failed to return the only order in the queue, got %v", worst)
+	}
+
 	// Min oriented queue
 	pq := NewMinOrderPQ(uint32(len(bigList) * 3 / 2))
 	for _, o := range bigList {
@@ -456,10 +471,8 @@ func TestOrderPQMin_Worst(t *testing.T) {
 		return bigList[i].Price() < bigList[j].Price()
 	})
 
-	t.Log(bigList[0].Price(), bigList[len(bigList)-1].Price(), pq.PeekBest().Price())
-
 	// Worst for a min queue is highest rate.
-	worst := pq.Worst()
+	worst = pq.Worst()
 	if worst.UID() != bigList[len(bigList)-1].UID() {
 		t.Errorf("Incorrect worst order. Got %s, expected %s", worst.UID(), bigList[len(bigList)-1].UID())
 	}

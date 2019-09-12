@@ -27,7 +27,7 @@ type Book struct {
 
 // New creates a new order book with the given lot size. Capacity of the order
 // book is fixed at 2^21 orders (2 mebiorders = 2,097,152 orders) per book side
-// (buy or sell). TODO: allow order dynamic capacity.
+// (buy or sell). TODO: allow dynamic order book capacity.
 func New(lotSize uint64) *Book {
 	return &Book{
 		lotSize: lotSize,
