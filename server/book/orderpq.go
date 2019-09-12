@@ -349,6 +349,11 @@ func (pq *OrderPQ) leafNodes() []*orderEntry {
 	return pq.oh[n-numLeaves:]
 }
 
+// Worst returns the worst order (depending on the queue's lessFn) in the queue.
+// This is done by scanning the binary heap's leaf nodes since only the best
+// order's position (first element) is known, while the only guarantee regarding
+// the worst element is that it will not be another node's parent (i.e. it is a
+// leaf node).
 func (pq *OrderPQ) Worst() OrderPricer {
 	// Check the leaf nodes for the worst order according to lessFn.
 	leaves := pq.leafNodes()
