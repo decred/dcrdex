@@ -58,40 +58,6 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 	}
 }
 
-func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
-	return &order.MarketOrder{
-		Prefix: order.Prefix{
-			AccountID:  acct0,
-			BaseAsset:  AssetDCR,
-			QuoteAsset: AssetBTC,
-			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(1566497653+timeOffset, 0),
-			ServerTime: time.Unix(1566497656+timeOffset, 0),
-		},
-		UTXOs:    []order.UTXO{},
-		Sell:     true,
-		Quantity: quantityLots * LotSize,
-		Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
-	}
-}
-
-func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
-	return &order.MarketOrder{
-		Prefix: order.Prefix{
-			AccountID:  acct0,
-			BaseAsset:  AssetDCR,
-			QuoteAsset: AssetBTC,
-			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(1566497653+timeOffset, 0),
-			ServerTime: time.Unix(1566497656+timeOffset, 0),
-		},
-		UTXOs:    []order.UTXO{},
-		Sell:     false,
-		Quantity: quantityQuoteAsset,
-		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
-	}
-}
-
 var (
 	// Create a coherent order book of standing orders and sorted rates.
 	bookBuyOrders = []*order.LimitOrder{
