@@ -874,6 +874,8 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	}
 }
 
+// marketBuyQuoteAmt gives the exact amount in the quote asset require to
+// purchase lots worth of the base asset given the current sell order book.
 func marketBuyQuoteAmt(lots uint64) uint64 {
 	var amt uint64
 	var i int
@@ -892,9 +894,9 @@ func marketBuyQuoteAmt(lots uint64) uint64 {
 	return amt
 }
 
-// quoteAmt computes the required amount of the quote asset required to
-// purchase the specified number of lots given the current order book and
-// required amount buffering in the single lot case.
+// quoteAmt computes the required amount of the quote asset required to purchase
+// the specified number of lots given the current order book and required amount
+// buffering in the single lot case.
 func quoteAmt(lots uint64) uint64 {
 	amt := marketBuyQuoteAmt(lots)
 	if lots == 1 {
