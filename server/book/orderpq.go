@@ -189,7 +189,7 @@ func (pq *OrderPQ) PeekBest() OrderPricer {
 
 // Reset creates a fresh queue given the input []OrderPricer. For every element
 // in the queue, Reset resets the heap index. The heap is then heapified. The
-// input slice is note modifed.
+// input slice is not modifed.
 func (pq *OrderPQ) Reset(orders []OrderPricer) {
 	pq.mtx.Lock()
 	defer pq.mtx.Unlock()
@@ -328,7 +328,7 @@ func (pq *OrderPQ) removeOrder(o *orderEntry) (OrderPricer, bool) {
 			pq.removeIndex(o.heapIdx)
 			return removed, true
 		}
-		fmt.Printf("Tried to remove an order that was NOT in the PQ. ID: %s",
+		log.Warnf("Tried to remove an order that was NOT in the PQ. ID: %s",
 			o.UID())
 	}
 	return nil, false

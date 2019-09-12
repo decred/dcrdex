@@ -28,7 +28,7 @@ const (
 )
 
 func startLogger() {
-	logger := slog.NewBackend(os.Stdout).Logger("MATCHTEST")
+	logger := slog.NewBackend(os.Stdout).Logger("BOOKTEST")
 	logger.SetLevel(slog.LevelDebug)
 	UseLogger(logger)
 }
@@ -97,7 +97,7 @@ var (
 	bookBuyOrders = []*order.LimitOrder{
 		newLimitOrder(false, 2500000, 2, order.StandingTiF, 0),
 		newLimitOrder(false, 2700000, 2, order.StandingTiF, 0),
-		//newLimitOrder(false, 3200000, 2, order.StandingTiF, 0),
+		//newLimitOrder(false, 3200000, 2, order.StandingTiF, 0), // Commented in these tests to buy and sell books are different lengths.
 		newLimitOrder(false, 3300000, 1, order.StandingTiF, 2), // newer
 		newLimitOrder(false, 3300000, 2, order.StandingTiF, 0), // older
 		newLimitOrder(false, 3600000, 4, order.StandingTiF, 0),

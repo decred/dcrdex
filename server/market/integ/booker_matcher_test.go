@@ -791,6 +791,8 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	}
 }
 
+// marketBuyQuoteAmt gives the exact amount in the quote asset require to
+// purchase lots worth of the base asset given the current sell order book.
 func marketBuyQuoteAmt(lots uint64) uint64 {
 	var amt uint64
 	var i int
@@ -1015,10 +1017,10 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	copy(epochQueueInit, epochQueue)
 
 	// Apply the shuffling to determine matching order that will be used.
-	matcher.ShuffleQueue(epochQueue)
-	for i := range epochQueue {
-		t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
-	}
+	// matcher.ShuffleQueue(epochQueue)
+	// for i := range epochQueue {
+	// 	t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
+	// }
 	// -> Shuffles to [12, 3, 13, 4, 8, 0, 2, 16, 11, 5, 15, 9, 10, 7, 17, 14, 6, 1]
 	expectedPassed := []int{12, 13, 8, 0, 11, 9, 10, 17}
 	expectedFailed := []int{3, 4, 2, 16, 15, 14, 6}
@@ -1044,11 +1046,11 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	resetMakers()
 
 	matches, passed, failed, partial, inserted := me.Match(b, epochQueue)
-	t.Log("Matches:", matches)
-	t.Log("Passed:", passed)
-	t.Log("Failed:", failed)
-	t.Log("Partial:", partial)
-	t.Log("Inserted:", inserted)
+	// t.Log("Matches:", matches)
+	// t.Log("Passed:", passed)
+	// t.Log("Failed:", failed)
+	// t.Log("Partial:", partial)
+	// t.Log("Inserted:", inserted)
 	for i := range matches {
 		t.Log("Match", i, ":", matches[i])
 	}
@@ -1096,6 +1098,4 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 		t.Errorf("First match was expected to be %v, got %v",
 			epochQueueInit[5], matches[7].Makers[0].ID())
 	}
-
-	t.Log(bookSellOrders[nSell-4:])
 }

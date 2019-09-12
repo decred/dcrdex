@@ -2,12 +2,8 @@ package book
 
 import (
 	"encoding/hex"
-
-	//"math"
 	"math/rand"
-	//"reflect"
 	"sort"
-	//"sync"
 	"testing"
 
 	"github.com/decred/dcrd/crypto/blake256"
@@ -103,13 +99,6 @@ func genBigList() {
 
 func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 	genBigList()
-
-	// f, err := os.Create("insert.pprof")
-	// if err != nil {
-	// 	t.Fatal("poo")
-	// }
-	// pprof.StartCPUProfile(f)
-	// defer pprof.StopCPUProfile()
 
 	// Max oriented queue
 	pq := NewMaxOrderPQ(uint32(len(bigList) * 3 / 2))
