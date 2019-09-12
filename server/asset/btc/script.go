@@ -70,7 +70,7 @@ func (s btcScriptType) isMultiSig() bool {
 	return s&scriptMultiSig != 0
 }
 
-// parseScriptType creates a dcrScriptType bitmap for the script type. A script
+// parseScriptType creates a btcScriptType bitmap for the script type. A script
 // type will be some combination of pay-to-pubkey-hash, pay-to-script-hash,
 // and stake. If a script type is P2SH, it may or may not be mutli-sig.
 func parseScriptType(pkScript, redeemScript []byte) btcScriptType {

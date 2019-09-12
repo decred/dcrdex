@@ -49,7 +49,7 @@ type btcNode interface {
 // data for quick lookups. BTCBackend implements asset.DEXAsset, so provides
 // exported methods for DEX-related blockchain info.
 type BTCBackend struct {
-	// An application context provided as part of the DCRConfig. The dcrBackend
+	// An application context provided as part of the constructor. The BTCBackend
 	// will perform some cleanup when the context is cancelled.
 	ctx context.Context
 	// If an rpcclient.Client is used for the node, keeping a reference at client
@@ -125,6 +125,18 @@ func NewBTCClone(ctx context.Context, configPath string, logger asset.Logger,
 	btc := newBTC(ctx, params, logger, client)
 	// Setting the client field will enable shutdown
 	btc.client = client
+
+	// Prime the cache
+	bestHash, err := btc.client.GetBestBlockHash()
+	if err != nil {
+		return nil, fmt.Errorf("error getting best block from rpc: %v", err)
+	}
+	if bestHash != nil {
+		_, err := btc.getBtcBlock(bestHash)
+		if err != nil {
+			return nil, fmt.Errorf("error priming the cache: %v", err)
+		}
+	}
 
 	return btc, nil
 }

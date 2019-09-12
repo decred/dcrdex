@@ -17,7 +17,7 @@ import (
 // interface to be DEX-compatible.
 type Tx struct {
 	// Because a Tx's validity and block info can change after creation, keep a
-	// dcrBackend around to query the state of the tx and update the block info.
+	// BTCBackend around to query the state of the tx and update the block info.
 	btc *BTCBackend
 	// The height and hash of the transaction's best known block.
 	blockHash chainhash.Hash
