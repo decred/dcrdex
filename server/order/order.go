@@ -298,7 +298,7 @@ func (o *LimitOrder) Type() OrderType {
 // Ensure LimitOrder is an Order.
 var _ Order = (*LimitOrder)(nil)
 
-// Price the order price rate for a LimitOrder.
+// Price returns the limit order's price rate.
 func (o *LimitOrder) Price() uint64 {
 	return o.Rate
 }
