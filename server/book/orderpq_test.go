@@ -11,17 +11,17 @@ import (
 
 type Order struct {
 	uid  string
-	rate float64
+	rate uint64
 	time int64
 }
 
-var _ OrderRater = (*Order)(nil)
+var _ OrderPricer = (*Order)(nil)
 
 func (o *Order) UID() string {
 	return o.uid
 }
 
-func (o *Order) Rate() float64 {
+func (o *Order) Price() uint64 {
 	return o.rate
 }
 
@@ -38,23 +38,23 @@ var (
 	orders  = []*Order{
 		{
 			uid:  "fakefakefake1324",
-			rate: 42,
+			rate: 42000000,
 			time: 56789,
 		},
 		{
 			uid:  "1324fakefakefake",
-			rate: 0.0001,
-			time: 56789,
-		},
-		{
-			uid:  "topDog",
-			rate: 123,
+			rate: 10000,
 			time: 56789,
 		},
 		{
 			uid:  "fakefakefake1324OLDER",
-			rate: 42,
+			rate: 42000000,
 			time: 45678,
+		},
+		{
+			uid:  "topDog",
+			rate: 123000000,
+			time: 56789,
 		},
 	}
 )
@@ -87,7 +87,7 @@ func genBigList() {
 		uid := randomHash()
 		order := &Order{
 			uid:  hex.EncodeToString(uid[:]),
-			rate: rand.Float64() * 4,
+			rate: uint64(rand.Int63n(90000000)),
 			time: rand.Int63n(240) + refTime,
 		}
 		if (i+1)%(listSize/400) == 0 {
@@ -99,13 +99,6 @@ func genBigList() {
 
 func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 	genBigList()
-
-	// f, err := os.Create("insert.pprof")
-	// if err != nil {
-	// 	t.Fatal("poo")
-	// }
-	// pprof.StartCPUProfile(f)
-	// defer pprof.StopCPUProfile()
 
 	// Max oriented queue
 	pq := NewMaxOrderPQ(uint32(len(bigList) * 3 / 2))
@@ -122,12 +115,12 @@ func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 
 	initLen := pq.Len()
 	best := pq.ExtractBest()
-	allOrders := make([]OrderRater, 0, initLen)
+	allOrders := make([]OrderPricer, 0, initLen)
 	allOrders = append(allOrders, best)
 
 	lastTime := best.Time()
-	lastRate := best.Rate()
-	rates := make([]float64, initLen)
+	lastRate := best.Price()
+	rates := make([]uint64, initLen)
 	rates[0] = lastRate
 
 	lastLen := pq.Len()
@@ -135,9 +128,9 @@ func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 	for pq.Len() > 0 {
 		best = pq.ExtractBest()
 		allOrders = append(allOrders, best)
-		rate := best.Rate()
+		rate := best.Price()
 		if rate > lastRate {
-			t.Fatalf("Current rate %g > last rate %g. Should be less.",
+			t.Fatalf("Current rate %d > last rate %d. Should be less.",
 				rate, lastRate)
 		}
 		thisTime := best.Time()
@@ -169,7 +162,7 @@ func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 	if pq.Len() != len(bigList) {
 		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
 	}
-	if pq.PeekBest().Rate() != rates[0] {
+	if pq.PeekBest().Price() != rates[0] {
 		t.Errorf("Heap Reset failed.")
 	}
 
@@ -177,7 +170,7 @@ func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 	if pq.Len() != len(bigList) {
 		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
 	}
-	if pq.PeekBest().Rate() != rates[0] {
+	if pq.PeekBest().Price() != rates[0] {
 		t.Errorf("Heap Reset failed.")
 	}
 }
@@ -200,12 +193,12 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 
 	initLen := pq.Len()
 	best := pq.ExtractBest()
-	allOrders := make([]OrderRater, 0, initLen)
+	allOrders := make([]OrderPricer, 0, initLen)
 	allOrders = append(allOrders, best)
 
 	lastTime := best.Time()
-	lastRate := best.Rate()
-	rates := make([]float64, initLen)
+	lastRate := best.Price()
+	rates := make([]uint64, initLen)
 	rates[0] = lastRate
 
 	lastLen := pq.Len()
@@ -213,9 +206,9 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 	for pq.Len() > 0 {
 		best = pq.ExtractBest()
 		allOrders = append(allOrders, best)
-		rate := best.Rate()
+		rate := best.Price()
 		if rate < lastRate {
-			t.Fatalf("Current (%d) rate %g < last rate %g. Should be greater.",
+			t.Fatalf("Current (%d) rate %d < last rate %d. Should be greater.",
 				i, rate, lastRate)
 		}
 		thisTime := best.Time()
@@ -247,7 +240,7 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 	if pq.Len() != len(bigList) {
 		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
 	}
-	if pq.PeekBest().Rate() != rates[0] {
+	if pq.PeekBest().Price() != rates[0] {
 		t.Errorf("Heap Reset failed.")
 	}
 
@@ -255,53 +248,60 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 	if pq.Len() != len(bigList) {
 		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
 	}
-	if pq.PeekBest().Rate() != rates[0] {
+	if pq.PeekBest().Price() != rates[0] {
 		t.Errorf("Heap Reset failed.")
 	}
 }
 
 func TestMinOrderPriorityQueue(t *testing.T) {
-	pq := NewMinOrderPQ(2)
+	pq := NewMinOrderPQ(4)
 
-	ok := pq.Insert(orders[0])
-	if !ok {
-		t.Errorf("Failed to insert order %v", orders[0])
-	}
-
-	ok = pq.Insert(orders[1])
-	if !ok {
-		t.Errorf("Failed to insert order %v", orders[1])
+	for _, o := range orders {
+		ok := pq.Insert(o)
+		if !ok {
+			t.Errorf("Failed to insert order %v", o)
+		}
 	}
 
 	best := pq.ExtractBest().(*Order)
 	if best.UID() != orders[1].uid {
-		t.Errorf("Incorrect lowest rate order returned: rate = %g, UID = %s",
-			best.Rate(), best.UID())
+		t.Errorf("Incorrect lowest rate order returned: rate = %d, UID = %s",
+			best.Price(), best.UID())
 	}
 }
 
 func TestMaxOrderPriorityQueue(t *testing.T) {
-	pq := NewMaxOrderPQ(3)
+	pq := NewMaxOrderPQ(4)
 
-	ok := pq.Insert(orders[0])
-	if !ok {
-		t.Errorf("Failed to insert order %v", orders[0])
-	}
-
-	ok = pq.Insert(orders[1])
-	if !ok {
-		t.Errorf("Failed to insert order %v", orders[1])
-	}
-
-	ok = pq.Insert(orders[2])
-	if !ok {
-		t.Errorf("Failed to insert order %v", orders[2])
+	for _, o := range orders {
+		ok := pq.Insert(o)
+		if !ok {
+			t.Errorf("Failed to insert order %v", o)
+		}
 	}
 
 	best := pq.ExtractBest().(*Order)
+	if best.UID() != orders[3].uid {
+		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
+			best.Price(), best.UID())
+	}
+}
+
+func TestMaxOrderPriorityQueue_TieRate(t *testing.T) {
+	pq := NewMaxOrderPQ(4)
+
+	for _, o := range orders[:3] {
+		ok := pq.Insert(o)
+		if !ok {
+			t.Errorf("Failed to insert order %v", o)
+		}
+	}
+
+	best := pq.ExtractBest().(*Order)
+	//t.Log(best.String()) // the older order
 	if best.UID() != orders[2].uid {
-		t.Errorf("Incorrect highest rate order returned: rate = %g, UID = %s",
-			best.Rate(), best.UID())
+		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
+			best.Price(), best.UID())
 	}
 }
 
@@ -325,8 +325,8 @@ func TestOrderPriorityQueueCapacity(t *testing.T) {
 
 	best := pq.PeekBest().(*Order)
 	if best.UID() != orders[0].uid {
-		t.Errorf("Incorrect highest rate order returned: rate = %g, UID = %s",
-			best.Rate(), best.UID())
+		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
+			best.Price(), best.UID())
 	}
 }
 
@@ -366,8 +366,8 @@ func TestOrderPriorityQueue_Replace(t *testing.T) {
 	}
 	best := pq.ExtractBest()
 	if best.UID() != orders[1].uid {
-		t.Errorf("Incorrect highest rate order returned: rate = %g, UID = %s",
-			best.Rate(), best.UID())
+		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
+			best.Price(), best.UID())
 	}
 }
 
@@ -376,12 +376,12 @@ func TestResetHeap(t *testing.T) {
 
 	orderEntries := []*orderEntry{
 		{
-			OrderRater: orders[0],
-			heapIdx:    -1,
+			OrderPricer: orders[0],
+			heapIdx:     -1,
 		},
 		{
-			OrderRater: orders[1],
-			heapIdx:    -1,
+			OrderPricer: orders[1],
+			heapIdx:     -1,
 		},
 	}
 
@@ -389,14 +389,14 @@ func TestResetHeap(t *testing.T) {
 
 	best := pq.ExtractBest()
 	if best.UID() != orders[0].uid {
-		t.Errorf("Incorrect highest rate order returned: rate = %g, UID = %s",
-			best.Rate(), best.UID())
+		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
+			best.Price(), best.UID())
 	}
 
 	best = pq.ExtractBest()
 	if best.UID() != orders[1].uid {
-		t.Errorf("Incorrect highest rate order returned: rate = %g, UID = %s",
-			best.Rate(), best.UID())
+		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
+			best.Price(), best.UID())
 	}
 
 	best = pq.ExtractBest()
@@ -430,5 +430,113 @@ func TestOrderPriorityQueue_Remove(t *testing.T) {
 	pq.RemoveOrderUID(remainingUID)
 	if pq.Len() != 0 {
 		t.Errorf("Expected empty queue, got %d", pq.Len())
+	}
+}
+
+func TestOrderPQMin_Worst(t *testing.T) {
+	genBigList()
+
+	pq0 := NewMinOrderPQ(4)
+	worst := pq0.Worst()
+	if worst != nil {
+		t.Errorf("Worst for an empty queue should be nil, got %v", worst)
+	}
+
+	pq1 := NewMinOrderPQ(4)
+	if !pq1.Insert(bigList[0]) {
+		t.Fatalf("Failed to insert order %v", bigList[0])
+	}
+	worst = pq1.Worst()
+	if worst.UID() != bigList[0].UID() {
+		t.Errorf("Worst failed to return the only order in the queue, got %v", worst)
+	}
+
+	// Min oriented queue
+	pq := NewMinOrderPQ(uint32(len(bigList) * 3 / 2))
+	for _, o := range bigList {
+		ok := pq.Insert(o)
+		if !ok {
+			t.Fatalf("Failed to insert order %v", o)
+		}
+	}
+
+	if pq.Len() != len(bigList) {
+		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
+	}
+
+	sort.Slice(bigList, func(i, j int) bool {
+		if bigList[i].Price() == bigList[j].Price() {
+			return bigList[i].Time() < bigList[j].Time()
+		}
+		return bigList[i].Price() < bigList[j].Price()
+	})
+
+	// Worst for a min queue is highest rate.
+	worst = pq.Worst()
+	if worst.UID() != bigList[len(bigList)-1].UID() {
+		t.Errorf("Incorrect worst order. Got %s, expected %s", worst.UID(), bigList[len(bigList)-1].UID())
+	}
+}
+
+func TestOrderPQMax_Worst(t *testing.T) {
+	genBigList()
+
+	// Max oriented queue
+	pq := NewMaxOrderPQ(uint32(len(bigList) * 3 / 2))
+	for _, o := range bigList {
+		ok := pq.Insert(o)
+		if !ok {
+			t.Fatalf("Failed to insert order %v", o)
+		}
+	}
+
+	if pq.Len() != len(bigList) {
+		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
+	}
+
+	sort.Slice(bigList, func(j, i int) bool {
+		if bigList[i].Price() == bigList[j].Price() {
+			return bigList[i].Time() < bigList[j].Time()
+		}
+		return bigList[i].Price() < bigList[j].Price()
+	})
+
+	t.Log(bigList[0].Price(), bigList[len(bigList)-1].Price(), pq.PeekBest().Price())
+
+	// Worst for a min queue is highest rate.
+	worst := pq.Worst()
+	if worst.UID() != bigList[len(bigList)-1].UID() {
+		t.Errorf("Incorrect worst order. Got %s, expected %s", worst.UID(), bigList[len(bigList)-1].UID())
+	}
+}
+
+func TestOrderPQMax_leafNodes(t *testing.T) {
+	genBigList()
+
+	// Max oriented queue
+	newQ := func(list []*Order) *OrderPQ {
+		pq := NewMaxOrderPQ(uint32(len(list) * 3 / 2))
+		for _, o := range list {
+			ok := pq.Insert(o)
+			if !ok {
+				t.Fatalf("Failed to insert order %v", o)
+			}
+		}
+		return pq
+	}
+
+	for sz := 0; sz < 131; sz++ {
+		list := bigList[:sz]
+		pq := newQ(list)
+		leaves := pq.leafNodes()
+		total := pq.Count()
+		expectedNum := total / 2
+		if total%2 != 0 {
+			expectedNum++
+		}
+		if len(leaves) != expectedNum {
+			t.Errorf("Incorrect number of leaf nodes. Got %d, expected %d",
+				len(leaves), expectedNum)
+		}
 	}
 }

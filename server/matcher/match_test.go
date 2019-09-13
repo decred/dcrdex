@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/market/order"
+	"github.com/decred/dcrdex/server/order"
 	"github.com/decred/slog"
 )
 
@@ -172,13 +172,14 @@ func (b *BookStub) BuyCount() int {
 	return len(b.buyOrders)
 }
 
-func (b *BookStub) Insert(ord *order.LimitOrder) {
+func (b *BookStub) Insert(ord *order.LimitOrder) bool {
 	// Only "inserts" by making it the best order.
 	if ord.Sell {
 		b.sellOrders = append(b.sellOrders, ord)
 	} else {
 		b.buyOrders = append(b.buyOrders, ord)
 	}
+	return true
 }
 
 func (b *BookStub) Remove(orderID order.OrderID) (*order.LimitOrder, bool) {
@@ -268,25 +269,25 @@ var (
 		newLimitOrder(false, 2500000, 2, order.StandingTiF, 0),
 		newLimitOrder(false, 2700000, 2, order.StandingTiF, 0),
 		newLimitOrder(false, 3200000, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 3300000, 2, order.StandingTiF, 0),
 		newLimitOrder(false, 3300000, 1, order.StandingTiF, 2), // newer
+		newLimitOrder(false, 3300000, 2, order.StandingTiF, 0), // older
 		newLimitOrder(false, 3600000, 4, order.StandingTiF, 0),
 		newLimitOrder(false, 3900000, 2, order.StandingTiF, 0),
 		newLimitOrder(false, 4000000, 10, order.StandingTiF, 0),
-		newLimitOrder(false, 4300000, 2, order.StandingTiF, 0),
 		newLimitOrder(false, 4300000, 4, order.StandingTiF, 1), // newer
+		newLimitOrder(false, 4300000, 2, order.StandingTiF, 0), // older
 		newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
 	}
 	bookSellOrders = []*order.LimitOrder{
-		newLimitOrder(true, 6200000, 2, order.StandingTiF, 0),
 		newLimitOrder(true, 6200000, 2, order.StandingTiF, 1), // newer
+		newLimitOrder(true, 6200000, 2, order.StandingTiF, 0), // older
 		newLimitOrder(true, 6100000, 2, order.StandingTiF, 0),
 		newLimitOrder(true, 6000000, 2, order.StandingTiF, 0),
 		newLimitOrder(true, 5500000, 1, order.StandingTiF, 0),
 		newLimitOrder(true, 5400000, 4, order.StandingTiF, 0),
 		newLimitOrder(true, 5000000, 2, order.StandingTiF, 0),
-		newLimitOrder(true, 4700000, 10, order.StandingTiF, 0),
-		newLimitOrder(true, 4700000, 4, order.StandingTiF, 1), // newer
+		newLimitOrder(true, 4700000, 4, order.StandingTiF, 1),  // newer
+		newLimitOrder(true, 4700000, 10, order.StandingTiF, 0), // older
 		newLimitOrder(true, 4600000, 2, order.StandingTiF, 0),
 		newLimitOrder(true, 4550000, 1, order.StandingTiF, 0),
 	}
@@ -343,8 +344,8 @@ func Test_matchLimitOrder(t *testing.T) {
 	takers := []*order.LimitOrder{
 		newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0), // buy, 1 lot, immediate, equal rate
 		newLimitOrder(true, 4450000, 1, order.ImmediateTiF, 0),  // sell, 1 lot, immediate, overlapping rate
-		newLimitOrder(true, 4300000, 5, order.StandingTiF, 0),   // sell, 5 lots, immediate, multiple makers
-		newLimitOrder(true, 4300000, 4, order.StandingTiF, 0),   // sell, 4 lots, immediate, multiple makers, partial last maker
+		newLimitOrder(true, 4300000, 3, order.StandingTiF, 0),   // sell, 3 lots, immediate, multiple makers
+		newLimitOrder(true, 4300000, 2, order.StandingTiF, 0),   // sell, 4 lots, immediate, multiple makers, partial last maker
 		newLimitOrder(true, 4300000, 8, order.StandingTiF, 0),   // sell, 8 lots, immediate, multiple makers, partial taker remaining
 	}
 	resetTakers := func() {
@@ -404,7 +405,7 @@ func Test_matchLimitOrder(t *testing.T) {
 				ord:  takers[3],
 			},
 			true,
-			newMatch(takers[3], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}, 3*LotSize),
+			newMatch(takers[3], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}, 1*LotSize),
 			0,
 		},
 		{
@@ -744,7 +745,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	// takers is heterogenous w.r.t. type
 	takers := []order.Order{
 		newMarketSellOrder(1, 0),  // sell, 1 lot
-		newMarketSellOrder(5, 0),  // sell, 2 lot
+		newMarketSellOrder(3, 0),  // sell, 2 lot
 		newMarketSellOrder(6, 0),  // sell, 3 lot, partial maker fill
 		newMarketSellOrder(99, 0), // sell, 99 lot, partial taker fill
 	}
@@ -815,7 +816,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			},
 			doesMatch: true,
 			wantMatches: []*order.Match{
-				newMatch(takers[2], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2], bookBuyOrders[nBuy-3]}, 1*LotSize),
+				newMatch(takers[2], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2], bookBuyOrders[nBuy-3]}, 3*LotSize),
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
@@ -873,6 +874,38 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	}
 }
 
+// marketBuyQuoteAmt gives the exact amount in the quote asset require to
+// purchase lots worth of the base asset given the current sell order book.
+func marketBuyQuoteAmt(lots uint64) uint64 {
+	var amt uint64
+	var i int
+	nSell := len(bookSellOrders)
+	for lots > 0 && i < nSell {
+		sellOrder := bookSellOrders[nSell-1-i]
+		orderLots := sellOrder.Quantity / LotSize
+		if orderLots > lots {
+			orderLots = lots
+		}
+		lots -= orderLots
+
+		amt += BaseToQuote(sellOrder.Rate, orderLots*LotSize)
+		i++
+	}
+	return amt
+}
+
+// quoteAmt computes the required amount of the quote asset required to purchase
+// the specified number of lots given the current order book and required amount
+// buffering in the single lot case.
+func quoteAmt(lots uint64) uint64 {
+	amt := marketBuyQuoteAmt(lots)
+	if lots == 1 {
+		amt *= 3
+		amt /= 2
+	}
+	return amt
+}
+
 func TestMatch_marketBuysOnly(t *testing.T) {
 	// Setup the match package's logger.
 	startLogger()
@@ -882,48 +915,6 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 
 	nSell := len(bookSellOrders)
 	//nBuy := len(bookBuyOrders)
-
-	// marketBuyRate computes the effective price rate if the specified number
-	// of lots were to be purchased given the current sell order book.
-	marketBuyRate := func(lots uint64) uint64 {
-		var weightedRate uint64
-		if lots > uint64(len(bookSellOrders)) {
-			lots = uint64(len(bookSellOrders))
-		}
-		lotsRemaining := lots
-		var i int
-		for lotsRemaining > 0 {
-			orderLots := bookSellOrders[nSell-1-i].Quantity / LotSize
-			if orderLots > lotsRemaining {
-				orderLots = lotsRemaining
-			}
-			lotsRemaining -= orderLots
-			i++
-			weightedRate += orderLots * bookSellOrders[nSell-1-i].Rate
-		}
-		return weightedRate / lots
-	}
-
-	// buyLotsAmt computes the base asset amount required to purchase the
-	// specified number of lots, where buying just 1 lot requires a buffer.
-	buyLotsAmt := func(lots uint64) uint64 {
-		totalBufferedBase := lots * LotSize
-		if lots < 2 {
-			totalBufferedBase += LotSize / 2
-		}
-		return totalBufferedBase
-	}
-
-	// quoteAmt computes the required amount of the quote asset required to
-	// purchase the specified number of lots given the current order book and
-	// required amount buffering in the single lot case.
-	quoteAmt := func(lots uint64) uint64 {
-		return BaseToQuote(marketBuyRate(lots), buyLotsAmt(lots))
-	}
-
-	// fmt.Printf("%d\n", buyLotsAmt(99))                 // exact cost of N lots in base asset
-	// fmt.Printf("%f\n", quoteAmt(99))                   // float cost of N lots in quote asset
-	// fmt.Printf("%f\n", quoteAmt(99)/marketBuyRate(99)) // back to base asset -- NOTE PRECISION LOSS!!!
 
 	// takers is heterogenous w.r.t. type
 	takers := []order.Order{
@@ -958,6 +949,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 		args            args
 		doesMatch       bool
 		wantMatches     []*order.Match
+		remaining       []uint64
 		wantNumPassed   int
 		wantNumFailed   int
 		wantNumPartial  int
@@ -973,6 +965,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantMatches: []*order.Match{
 				newMatch(takers[0], []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
+			remaining:       []uint64{quoteAmt(1) - marketBuyQuoteAmt(1)},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
 			wantNumPartial:  0,
@@ -988,6 +981,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantMatches: []*order.Match{
 				newMatch(takers[1], []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}, 1*LotSize),
 			},
+			remaining:       []uint64{0},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
 			wantNumPartial:  0,
@@ -1003,6 +997,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantMatches: []*order.Match{
 				newMatch(takers[2], []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}),
 			},
+			remaining:       []uint64{0},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
 			wantNumPartial:  0,
@@ -1018,6 +1013,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantMatches: []*order.Match{
 				newMatch(takers[3], bookSellOrdersReverse),
 			},
+			remaining:       []uint64{0},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
 			wantNumPartial:  0,
@@ -1030,8 +1026,6 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			resetTakers()
 			resetMakers()
 
-			fmt.Printf("%v\n", takers)
-
 			matches, passed, failed, partial, inserted := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
@@ -1043,6 +1037,10 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			for i := range matches {
 				if !reflect.DeepEqual(matches[i], tt.wantMatches[i]) {
 					t.Errorf("matches[%d] = %v, want %v", i, matches[i], tt.wantMatches[i])
+				}
+				if matches[i].Taker.Remaining() != tt.remaining[i] {
+					t.Errorf("Incorrect taker order amount remaining. Expected %d, got %d",
+						tt.remaining[i], matches[i].Taker.Remaining())
 				}
 			}
 			if len(passed) != tt.wantNumPassed {

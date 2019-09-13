@@ -12,7 +12,7 @@ import (
 	"sort"
 
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrdex/server/market/order"
+	"github.com/decred/dcrdex/server/order"
 )
 
 // HashFunc is the hash function used to generate the shuffling seed.
@@ -411,6 +411,10 @@ func sortQueue(queue []order.Order) {
 		return bytes.Compare(ii[:], ij[:]) >= 0
 	})
 }
+
+// func ShuffleQueue(queue []order.Order) {
+// 	shuffleQueue(queue)
+// }
 
 // shuffleQueue deterministically shuffles the Orders using a Fisher-Yates
 // algorithm seeded with the hash of the concatenated order ID hashes.

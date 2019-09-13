@@ -3,7 +3,7 @@
 
 package matcher
 
-import "github.com/decred/dcrdex/server/market/order"
+import "github.com/decred/dcrdex/server/order"
 
 // TODO. PLACEHOLDER. There needs to be an interface satisfied by the order book
 // type provided to the matcher. This Booker is just a hint.
@@ -15,7 +15,7 @@ type Booker interface {
 	BestSell() *order.LimitOrder
 	BestBuy() *order.LimitOrder
 	//Best(sell bool) *order.LimitOrder
-	Insert(*order.LimitOrder)
+	Insert(*order.LimitOrder) bool
 	Remove(order.OrderID) (*order.LimitOrder, bool)
 }
 
