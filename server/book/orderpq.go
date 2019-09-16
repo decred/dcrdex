@@ -71,12 +71,18 @@ func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
 		orders[oe.UID()] = oe
 	}
 
-	return &OrderPQ{
+	newPQ := &OrderPQ{
 		oh:       orderHeap,
 		capacity: newCap,
 		lessFn:   pq.lessFn,
 		orders:   orders,
 	}
+
+	// Since the heap is copied in the same order, and with the same heap
+	// indexes, it should not be necessary to reheap. But do it to be safe.
+	heap.Init(newPQ)
+
+	return newPQ
 }
 
 // Orders copies all orders, sorted with the lessFn. The is heap sort. To avoid
@@ -251,8 +257,11 @@ func GreaterByPriceThenTime(bi, bj OrderPricer) bool {
 // ExtractBest a.k.a. pop removes the highest priority order from the queue, and
 // returns it.
 func (pq *OrderPQ) ExtractBest() OrderPricer {
-	pq.mtx.Lock()
-	defer pq.mtx.Unlock()
+	return pq.extractBest()
+}
+
+// extractBest is the not thread-safe version of ExtractBest
+func (pq *OrderPQ) extractBest() OrderPricer {
 	if pq.Len() == 0 {
 		return nil
 	}
