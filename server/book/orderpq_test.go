@@ -253,6 +253,103 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 	}
 }
 
+func TestLargeOrderMaxPriorityQueue_Orders(t *testing.T) {
+	genBigList()
+
+	// Max oriented queue (sell book)
+	pq := NewMaxOrderPQ(uint32(len(bigList) * 3 / 2))
+	for _, o := range bigList {
+		ok := pq.Insert(o)
+		if !ok {
+			t.Fatalf("Failed to insert order %v", o)
+		}
+	}
+
+	if pq.Len() != len(bigList) {
+		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
+	}
+
+	// Copy out all orders, sorted.
+	ordersSorted := pq.Orders()
+
+	// Ensure sorted in a different way.
+	sorted := sort.SliceIsSorted(ordersSorted, func(i, j int) bool {
+		if ordersSorted[i].Price() == ordersSorted[j].Price() {
+			return ordersSorted[i].Time() < ordersSorted[j].Time()
+		}
+		return ordersSorted[i].Price() > ordersSorted[j].Price() // max pq
+	})
+	if !sorted {
+		t.Errorf("Rates should have been sorted")
+		// for _, op := range ordersSorted {
+		// 	t.Log(op.Price(), op.Time())
+		// }
+	}
+
+	pq.Reset(ordersSorted)
+	if pq.Len() != len(bigList) {
+		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
+	}
+	if pq.PeekBest().Price() != ordersSorted[0].Price() {
+		t.Errorf("Heap Reset failed.")
+	}
+}
+
+func TestLargeOrderMaxPriorityQueue_Realloc(t *testing.T) {
+	genBigList()
+
+	// Max oriented queue (sell book)
+	pq := NewMaxOrderPQ(uint32(len(bigList)))
+	for _, o := range bigList {
+		ok := pq.Insert(o)
+		if !ok {
+			t.Fatalf("Failed to insert order %v", o)
+		}
+	}
+
+	if pq.Len() != len(bigList) {
+		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
+	}
+
+	newCap := pq.capacity * 3 / 2
+	pq.Realloc(newCap)
+
+	if pq.capacity != newCap {
+		t.Errorf("Reallocated capacity incorrect. Expected %d, got %d",
+			newCap, pq.capacity)
+	}
+
+	if pq.Len() != len(bigList) {
+		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
+	}
+
+	// Extract all orders, sorted.
+	ordersSorted := pq.ExtractN(pq.Count())
+
+	// Ensure sorted in a different way.
+	sorted := sort.SliceIsSorted(ordersSorted, func(i, j int) bool {
+		if ordersSorted[i].Price() == ordersSorted[j].Price() {
+			return ordersSorted[i].Time() < ordersSorted[j].Time()
+		}
+		return ordersSorted[i].Price() > ordersSorted[j].Price() // max pq
+	})
+	if !sorted {
+		t.Errorf("Rates should have been sorted")
+		// for _, op := range ordersSorted {
+		// 	t.Log(op.Price(), op.Time())
+		// }
+	}
+
+	// Remake the queue with the extracted orders.
+	pq.Reset(ordersSorted)
+	if pq.Len() != len(bigList) {
+		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
+	}
+	if pq.PeekBest().Price() != ordersSorted[0].Price() {
+		t.Errorf("Heap Reset failed.")
+	}
+}
+
 func TestMinOrderPriorityQueue(t *testing.T) {
 	pq := NewMinOrderPQ(4)
 
