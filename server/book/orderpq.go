@@ -34,6 +34,89 @@ type OrderPQ struct {
 	orders   map[string]*orderEntry
 }
 
+// Copy makes a deep copy of the OrderPQ. The OrderPricers are the same; each
+// orderEntry is new. The capacity and lessFn are the same.
+func (pq *OrderPQ) Copy() *OrderPQ {
+	pq.mtx.Lock()
+	defer pq.mtx.Unlock()
+	return pq.copy(pq.capacity)
+}
+
+// Copy makes a deep copy of the OrderPQ with the given capacity. The
+// OrderPricers are the same; each orderEntry is new. The lessFn is the same.
+func (pq *OrderPQ) Realloc(newCap uint32) {
+	pq.mtx.Lock()
+	defer pq.mtx.Unlock()
+	newPQ := pq.copy(newCap)
+	pq.capacity = newCap
+	pq.orders = newPQ.orders
+	pq.oh = newPQ.oh
+}
+
+// copy makes a deep copy of the OrderPQ. The OrderPricers are the same; each
+// orderEntry is new. The lessFn is the same. This function is not thread-safe.
+func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
+	// Deep copy the order heap.
+	orderHeap := make(orderHeap, 0, newCap)
+	for _, oe := range pq.oh {
+		orderHeap = append(orderHeap, &orderEntry{
+			oe.OrderPricer,
+			oe.heapIdx,
+		})
+	}
+
+	// Deep copy the orders map.
+	orders := make(map[string]*orderEntry, newCap)
+	for _, oe := range orderHeap {
+		orders[oe.UID()] = oe
+	}
+
+	return &OrderPQ{
+		oh:       orderHeap,
+		capacity: newCap,
+		lessFn:   pq.lessFn,
+		orders:   orders,
+	}
+}
+
+// Orders copies all orders, sorted with the lessFn. The is heap sort. To avoid
+// modifying the OrderPQ or any of the data fields, a deep copy of the OrderPQ
+// is made and ExtractBest is called until all entries are extracted.
+func (pq *OrderPQ) Orders() []OrderPricer {
+	return pq.OrdersN(len(pq.oh))
+}
+
+// OrdersN copies the N best orders, sorted with the lessFn. The is heap sort.
+// To avoid modifying the OrderPQ or any of the data fields, a deep copy of the
+// OrderPQ is made and ExtractBest is called until the entries are extracted.
+func (pq *OrderPQ) OrdersN(count int) []OrderPricer {
+	// Make a deep copy since extracting all the orders in sorted order (i.e.
+	// heap sort) modifies the heap, and the heapIdx of each orderEntry.
+	tmp := pq.Copy()
+	return tmp.ExtractN(count)
+}
+
+// ExtractN extracts the N best orders, sorted with the lessFn. The is heap
+// sort. ExtractBest is called until all entries are extracted. Thus, the
+// OrderPQ is reduced in length by count, or the length of the heap, whichever
+// is shorter. To avoid modifying the queue, use Orders or OrdersN.
+func (pq *OrderPQ) ExtractN(count int) []OrderPricer {
+	pq.mtx.Lock()
+	defer pq.mtx.Unlock()
+	sz := len(pq.oh)
+	if sz < count {
+		count = sz
+	}
+	if count < 1 {
+		return nil
+	}
+	orders := make([]OrderPricer, 0, count)
+	for len(orders) < count {
+		orders = append(orders, pq.ExtractBest())
+	}
+	return orders
+}
+
 // NewMinOrderPQ is the constructor for OrderPQ that initializes an empty heap
 // with the given capacity, and sets the default LessFn for a min heap. Use
 // OrderPQ.SetLessFn to redefine the comparator.
@@ -50,7 +133,7 @@ func NewMaxOrderPQ(capacity uint32) *OrderPQ {
 
 func newOrderPQ(cap uint32, lessFn func(bi, bj OrderPricer) bool) *OrderPQ {
 	return &OrderPQ{
-		oh:       orderHeap{},
+		oh:       make(orderHeap, 0, cap),
 		capacity: cap,
 		lessFn:   lessFn,
 		orders:   make(map[string]*orderEntry, cap),
