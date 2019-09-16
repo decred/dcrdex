@@ -146,6 +146,18 @@ func TestBook(t *testing.T) {
 			b.BestSell().ID(), bestSellOrder.ID())
 	}
 
+	sells := b.SellOrders()
+	if len(sells) != b.SellCount() {
+		t.Errorf("Incorrect number of sell orders. Got %d, expected %d",
+			len(sells), b.SellCount())
+	}
+
+	buys := b.BuyOrders()
+	if len(buys) != b.BuyCount() {
+		t.Errorf("Incorrect number of buy orders. Got %d, expected %d",
+			len(buys), b.BuyCount())
+	}
+
 	badOrder := newLimitOrder(false, 2500000, 1, order.StandingTiF, 0)
 	badOrder.Quantity /= 3
 	if b.Insert(badOrder) {

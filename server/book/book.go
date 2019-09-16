@@ -99,3 +99,41 @@ func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 	}
 	return nil, false
 }
+
+// SellOrders copies out all sell orders in the book, sorted.
+func (b *Book) SellOrders() []*order.LimitOrder {
+	return b.SellOrdersN(b.SellCount())
+}
+
+// SellOrdersN copies out the N best sell orders in the book, sorted.
+func (b *Book) SellOrdersN(N int) []*order.LimitOrder {
+	orders := b.sells.OrdersN(N) // N = len(orders)
+	limits := make([]*order.LimitOrder, 0, len(orders))
+	for _, o := range orders {
+		lo, ok := o.(*order.LimitOrder)
+		if !ok {
+			panic(fmt.Sprintf("A sell order is not a *order.LimitOrder: %T", o))
+		}
+		limits = append(limits, lo)
+	}
+	return limits
+}
+
+// BuyOrders copies out all buy orders in the book, sorted.
+func (b *Book) BuyOrders() []*order.LimitOrder {
+	return b.BuyOrdersN(b.BuyCount())
+}
+
+// BuyOrdersN copies out the N best buy orders in the book, sorted.
+func (b *Book) BuyOrdersN(N int) []*order.LimitOrder {
+	orders := b.buys.OrdersN(N) // N = len(orders)
+	limits := make([]*order.LimitOrder, 0, len(orders))
+	for _, o := range orders {
+		lo, ok := o.(*order.LimitOrder)
+		if !ok {
+			panic(fmt.Sprintf("A buy order is not a *order.LimitOrder: %T", o))
+		}
+		limits = append(limits, lo)
+	}
+	return limits
+}
