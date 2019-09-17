@@ -286,6 +286,24 @@ func TestLargeOrderMaxPriorityQueue_Orders(t *testing.T) {
 		// }
 	}
 
+	// Copy out just the six best orders.
+	sixOrders := pq.OrdersN(6)
+	for i := range sixOrders {
+		if sixOrders[i].UID() != ordersSorted[i].UID() {
+			t.Errorf("Order %d incorrect. Got %s, expected %s",
+				i, sixOrders[i].UID(), ordersSorted[i].UID())
+		}
+	}
+
+	// Do it again to ensure the queue is not changed by copying.
+	sixOrders2 := pq.OrdersN(6)
+	for i := range sixOrders2 {
+		if sixOrders[i].UID() != sixOrders2[i].UID() {
+			t.Errorf("Order %d incorrect. Got %s, expected %s",
+				i, sixOrders2[i].UID(), sixOrders[i].UID())
+		}
+	}
+
 	pq.Reset(ordersSorted)
 	if pq.Len() != len(bigList) {
 		t.Errorf("pq length incorrect. expected %d, got %d", len(bigList), pq.Len())
