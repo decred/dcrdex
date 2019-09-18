@@ -42,7 +42,7 @@ import (
 )
 
 var (
-	btc *BTCBackend
+	btc *Backend
 )
 
 func TestMain(m *testing.M) {
@@ -56,9 +56,9 @@ func TestMain(m *testing.M) {
 		return
 	}
 	var ok bool
-	btc, ok = dexAsset.(*BTCBackend)
+	btc, ok = dexAsset.(*Backend)
 	if !ok {
-		fmt.Printf("Could not cast DEXAsset to *BTCBackend")
+		fmt.Printf("Could not cast DEXAsset to *Backend")
 		return
 	}
 	os.Exit(m.Run())
@@ -147,9 +147,9 @@ out:
 // 	if err != nil {
 // 		t.Fatalf("error creating DEXAsset from imported constructor: %v", err)
 // 	}
-// 	btc, ok := dexAsset.(*BTCBackend)
+// 	btc, ok := dexAsset.(*Backend)
 // 	if !ok {
-// 		t.Fatalf("failed to cast plugin DEXAsset to *BTCBackend")
+// 		t.Fatalf("failed to cast plugin DEXAsset to *Backend")
 // 	}
 // 	_, err = btc.node.GetBestBlockHash()
 // 	if err != nil {

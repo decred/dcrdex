@@ -31,16 +31,16 @@ const (
 	defaultHost = "localhost"
 )
 
-type BTCConfig struct {
+type Config struct {
 	RPCUser string `long:"rpcuser" description:"JSON-RPC user"`
 	RPCPass string `long:"rpcpassword" description:"JSON-RPC password"`
 	RPCBind string `long:"rpcbind" description:"RPC address. Can be <addr> or <addr>:<port>, which would override rpcport"`
 	RPCPort int    `long:"rpcport" description:"JSON-RPC port"`
 }
 
-func LoadConfig(configPath string, network asset.Network, ports NetPorts) (*BTCConfig, error) {
-	cfg := &BTCConfig{}
-	// Since we are not reading command-line arguments, and the BTCConfig fields
+func LoadConfig(configPath string, network asset.Network, ports NetPorts) (*Config, error) {
+	cfg := &Config{}
+	// Since we are not reading command-line arguments, and the Config fields
 	// share names with the bitcoind configuration options, passing just
 	// IgnoreUnknown allows us to have the option to read directly from the
 	// bitcoin.conf file.
@@ -48,12 +48,11 @@ func LoadConfig(configPath string, network asset.Network, ports NetPorts) (*BTCC
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("no BTC config file found at %s", configPath)
-	} else {
-		// The config file exists, so attempt to parse it.
-		err = flags.NewIniParser(parser).ParseFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing BTC ini file: %v", err)
-		}
+	}
+	// The config file exists, so attempt to parse it.
+	err := flags.NewIniParser(parser).ParseFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing BTC ini file: %v", err)
 	}
 
 	if cfg.RPCUser == "" {

@@ -25,7 +25,7 @@ import (
 )
 
 var (
-	ltc *btc.BTCBackend
+	ltc *btc.Backend
 )
 
 func TestMain(m *testing.M) {
@@ -39,9 +39,9 @@ func TestMain(m *testing.M) {
 		return
 	}
 	var ok bool
-	ltc, ok = dexAsset.(*btc.BTCBackend)
+	ltc, ok = dexAsset.(*btc.Backend)
 	if !ok {
-		fmt.Printf("Could not cast DEXAsset to *BTCBackend")
+		fmt.Printf("Could not cast DEXAsset to *Backend")
 		return
 	}
 	os.Exit(m.Run())

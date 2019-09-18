@@ -17,8 +17,8 @@ import (
 // interface to be DEX-compatible.
 type Tx struct {
 	// Because a Tx's validity and block info can change after creation, keep a
-	// BTCBackend around to query the state of the tx and update the block info.
-	btc *BTCBackend
+	// Backend around to query the state of the tx and update the block info.
+	btc *Backend
 	// The height and hash of the transaction's best known block.
 	blockHash chainhash.Hash
 	height    int64
@@ -49,7 +49,7 @@ type txOut struct {
 }
 
 // A getter for a new Tx.
-func newTransaction(btc *BTCBackend, txHash, blockHash, lastLookup *chainhash.Hash,
+func newTransaction(btc *Backend, txHash, blockHash, lastLookup *chainhash.Hash,
 	blockHeight int64, ins []txIn, outs []txOut) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash

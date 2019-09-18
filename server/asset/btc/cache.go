@@ -46,7 +46,7 @@ func (cache *blockCache) block(h *chainhash.Hash) (*cachedBlock, bool) {
 
 // Getter for a mainchain block by its height. This method does not attempt
 // to load the block from the blockchain if it is not found. If that is required
-// use (*BTCBackend).getMainchaincachedBlock.
+// use (*Backend).getMainchaincachedBlock.
 func (cache *blockCache) atHeight(height uint32) (*cachedBlock, bool) {
 	cache.mtx.RLock()
 	defer cache.mtx.RUnlock()
@@ -120,7 +120,7 @@ func (cache *blockCache) reorg(from int64) {
 			continue
 		}
 		// Delete the block from mainchain.
-		delete(cache.mainchain, uint32(block.height))
+		delete(cache.mainchain, block.height)
 		// Store an orphaned block in the blocks cache.
 		cache.blocks[block.hash] = &cachedBlock{
 			hash:     block.hash,

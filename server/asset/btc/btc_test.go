@@ -40,7 +40,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	// Set any created BTCBackends to poll for blocks every 50 ms to
+	// Set any created Backends to poll for blocks every 50 ms to
 	// accommodate reorg testing.
 	blockPollInterval = time.Millisecond * 50
 	blockPollDelay = blockPollInterval + time.Millisecond*5
@@ -49,8 +49,8 @@ func TestMain(m *testing.M) {
 
 // TestConfig tests the LoadConfig function.
 func TestConfig(t *testing.T) {
-	cfg := &BTCConfig{}
-	parsedCfg := &BTCConfig{}
+	cfg := &Config{}
+	parsedCfg := &Config{}
 
 	tempDir, err := ioutil.TempDir("", "btctest")
 	if err != nil {
@@ -61,7 +61,7 @@ func TestConfig(t *testing.T) {
 	rootParser := flags.NewParser(cfg, flags.None)
 	iniParser := flags.NewIniParser(rootParser)
 
-	runCfg := func(config *BTCConfig) error {
+	runCfg := func(config *Config) error {
 		*cfg = *config
 		err := iniParser.WriteFile(filePath, flags.IniNone)
 		if err != nil {
@@ -78,7 +78,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Try with just the name. Error expected.
-	err = runCfg(&BTCConfig{
+	err = runCfg(&Config{
 		RPCUser: "somename",
 	})
 	if err == nil {
@@ -86,7 +86,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Try with just the password. Error expected.
-	err = runCfg(&BTCConfig{
+	err = runCfg(&Config{
 		RPCPass: "somepass",
 	})
 	if err == nil {
@@ -94,7 +94,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Give both name and password. This should not be an error.
-	err = runCfg(&BTCConfig{
+	err = runCfg(&Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 	})
@@ -120,7 +120,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with a designated port, but no host specified.
-	err = runCfg(&BTCConfig{
+	err = runCfg(&Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCPort: 1234,
@@ -141,7 +141,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with rpcbind set (without designated port) and custom rpcport.
-	err = runCfg(&BTCConfig{
+	err = runCfg(&Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "127.0.0.2",
@@ -163,7 +163,7 @@ func TestConfig(t *testing.T) {
 
 	// Check with a port set with both rpcbind and rpcport. The rpcbind port
 	// should take precedence.
-	err = runCfg(&BTCConfig{
+	err = runCfg(&Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "127.0.0.2:1234",
@@ -184,7 +184,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with just a port for rpcbind and make sure it gets parsed.
-	err = runCfg(&BTCConfig{
+	err = runCfg(&Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: ":1234",
@@ -204,7 +204,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// IPv6
-	err = runCfg(&BTCConfig{
+	err = runCfg(&Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "[24c2:2865:4c7e:fd9b:76ea:4aa0:263d:6377]:1234",
@@ -226,13 +226,13 @@ func TestConfig(t *testing.T) {
 
 // The remaining tests use the testBlockchain which feeds a testNode stub for
 // rpcclient.Client. UTXOs, transactions and blocks are added to the blockchain
-// as jsonrpc types to be requested by the BTCBackend.
+// as jsonrpc types to be requested by the Backend.
 //
 // General formula for testing
-// 1. Create a BTCBackend with the node field set to a testNode
+// 1. Create a Backend with the node field set to a testNode
 // 2. Create a fake UTXO and all of the associated jsonrpc-type blocks and
 //    transactions and add the to the test blockchain.
-// 3. Verify the BTCBackend and UTXO methods are returning whatever is expected.
+// 3. Verify the Backend and UTXO methods are returning whatever is expected.
 // 4. Optionally add more blocks and/or transactions to the blockchain and check
 //    return values again, as things near the top of the chain can change.
 
@@ -259,7 +259,7 @@ type testBlockChain struct {
 	hashes map[int64]*chainhash.Hash
 }
 
-// The testChain is a "blockchain" to store RPC responses for the BTCBackend
+// The testChain is a "blockchain" to store RPC responses for the Backend
 // node stub to request.
 var testChain testBlockChain
 var testChainMtx sync.RWMutex
@@ -355,7 +355,7 @@ func testGetTxOut(confirmations int64, pkScript []byte) *btcjson.GetTxOutResult 
 
 // Create a *btcjson.TxRawResult such as is returned by
 // GetRawTransactionVerbose.
-func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Hash, blockHeight,
+func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Hash,
 	confirmations int64) *btcjson.TxRawResult {
 
 	var hash string
@@ -382,13 +382,13 @@ func testAddTxOut(msgTx *wire.MsgTx, vout uint32, txHash, blockHash *chainhash.H
 	defer testChainMtx.Unlock()
 	txOut := testGetTxOut(confirmations, msgTx.TxOut[vout].PkScript)
 	testChain.txOuts[txOutID(txHash, vout)] = txOut
-	testAddTxVerbose(msgTx, txHash, blockHash, blockHeight, confirmations)
+	testAddTxVerbose(msgTx, txHash, blockHash, confirmations)
 	return txOut
 }
 
 // Add a btcjson.TxRawResult to the blockchain.
-func testAddTxVerbose(msgTx *wire.MsgTx, txHash, blockHash *chainhash.Hash, blockHeight, confirmations int64) *btcjson.TxRawResult {
-	tx := testRawTransactionVerbose(msgTx, txHash, blockHash, blockHeight, confirmations)
+func testAddTxVerbose(msgTx *wire.MsgTx, txHash, blockHash *chainhash.Hash, confirmations int64) *btcjson.TxRawResult {
+	tx := testRawTransactionVerbose(msgTx, txHash, blockHash, confirmations)
 	testChain.txRaws[*txHash] = tx
 	return tx
 }
@@ -695,7 +695,7 @@ func testMsgTxP2SHMofN(m, n int, segwit bool) *testMsgTxP2SH {
 }
 
 // Make a backend that logs to stdout.
-func testBackend() (*BTCBackend, func()) {
+func testBackend() (*Backend, func()) {
 	logger := slog.NewBackend(os.Stdout).Logger("TEST")
 	ctx, shutdown := context.WithCancel(context.Background())
 	btc := newBTC(ctx, testParams, logger, testNode{})
@@ -717,7 +717,7 @@ func TestUTXOs(t *testing.T) {
 	//    redeem script
 	// 10. A UTXO from a coinbase transaction, before and after maturing.
 
-	// Create a BTCBackend with the test node.
+	// Create a Backend with the test node.
 	btc, shutdown := testBackend()
 	defer shutdown()
 
@@ -959,13 +959,13 @@ func TestUTXOs(t *testing.T) {
 }
 
 // TestReorg tests various reorg paths. Because bitcoind doesn't support
-// websocket notifications, and ZeroMQ is not desirable, BTCBackend polls for
+// websocket notifications, and ZeroMQ is not desirable, Backend polls for
 // new block data every 5 seconds or so. The poll interval means it's possible
 // for various flavors of reorg to happen before a new block is detected. These
 // tests check that reorgs of various depths are correctly handled by the
 // block monitor loop and the block cache.
 func TestReorg(t *testing.T) {
-	// Create a BTCBackend with the test node.
+	// Create a Backend with the test node.
 	btc, shutdown := testBackend()
 	defer shutdown()
 
@@ -1062,7 +1062,7 @@ func TestReorg(t *testing.T) {
 
 // TestTx checks the transaction-related methods and functions.
 func TestTx(t *testing.T) {
-	// Create a BTCBackend with the test node.
+	// Create a Backend with the test node.
 	btc, shutdown := testBackend()
 	defer shutdown()
 
@@ -1072,7 +1072,7 @@ func TestTx(t *testing.T) {
 	txHash := randomHash()
 	blockHash := randomHash()
 	msg := testMakeMsgTx(false)
-	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 2)
+	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, 2)
 	// Mine the transaction and an approving block.
 	testAddBlockVerbose(blockHash, nil, 1, blockHeight)
 	testAddBlockVerbose(randomHash(), nil, 1, blockHeight+1)
@@ -1130,7 +1130,7 @@ func TestTx(t *testing.T) {
 	// error.
 	testClearBestBlock()
 	testAddBlockVerbose(nil, nil, 1, blockHeight)
-	// Wait for the reorg to be seen by the BTCBackend.loop.
+	// Wait for the reorg to be seen by the Backend.loop.
 	time.Sleep(blockPollDelay)
 	_, err = dexTx.Confirmations()
 	if err == nil {
@@ -1143,7 +1143,7 @@ func TestTx(t *testing.T) {
 	txHash = randomHash()
 	// Add a transaction to mempool.
 	msg = testMakeMsgTx(false)
-	testAddTxVerbose(msg.tx, txHash, nil, 0, 0)
+	testAddTxVerbose(msg.tx, txHash, nil, 0)
 	// Get the transaction data through the backend and make sure it has zero
 	// confirmations.
 	dexTx, err = btc.transaction(txHash)
@@ -1161,7 +1161,7 @@ func TestTx(t *testing.T) {
 	blockHash = testAddBlockVerbose(nil, nil, 1, blockHeight)
 	time.Sleep(blockPollDelay)
 	// Update the verbose tx data
-	testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 1)
+	testAddTxVerbose(msg.tx, txHash, blockHash, 1)
 	// Check Confirmations
 	confs, err = dexTx.Confirmations()
 	if err != nil {
@@ -1181,7 +1181,7 @@ func TestTx(t *testing.T) {
 // TestAuxiliary checks the UTXO convenience functions like TxHash, Vout, and
 // TxID.
 func TestAuxiliary(t *testing.T) {
-	// Create a BTCBackend with the test node.
+	// Create a Backend with the test node.
 	btc, shutdown := testBackend()
 	defer shutdown()
 

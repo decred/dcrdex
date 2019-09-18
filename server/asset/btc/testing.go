@@ -13,12 +13,12 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 )
 
-// LiveP2SHStats will scan the provided BTCBackend's node for inputs that spend
+// LiveP2SHStats will scan the provided Backend's node for inputs that spend
 // pay-to-script-hash outputs. The pubkey scripts and redeem scripts are
 // examined to ensure the backend understands what they are and can extract
 // addresses. Ideally, the stats will show no scripts which were unparseable by
-// the backend, but the presense of unknowns is not an error.
-func LiveP2SHStats(btc *BTCBackend, t *testing.T) {
+// the backend, but the presence of unknowns is not an error.
+func LiveP2SHStats(btc *Backend, t *testing.T) {
 	numToDo := 10000
 	type scriptStats struct {
 		unknown      int
@@ -191,18 +191,18 @@ out:
 			t.Logf("    %x", unknown)
 		}
 	} else {
-		t.Logf("no unkown script types")
+		t.Logf("no unknown script types")
 	}
 }
 
-// LiveP2SHStats will scan the provided BTCBackend's node for transaction
+// LiveUTXOStats will scan the provided Backend's node for transaction
 // outputs. The outputs are requested with GetRawTransactionVerbose, and
 // statistics collected regarding spendability and pubkey script types. This
-// test does not request via the BTCBackend.UTXO method and is not meant to
+// test does not request via the Backend.UTXO method and is not meant to
 // cover that code. Instead, these tests check the backend's real-world
 // blockchain literacy. Ideally, the stats will show no scripts which were
-// unparseable by the backend, but the presense of unknowns is not an error.
-func LiveUTXOStats(btc *BTCBackend, t *testing.T) {
+// unparseable by the backend, but the presence of unknowns is not an error.
+func LiveUTXOStats(btc *Backend, t *testing.T) {
 	numToDo := 10000
 	hash, err := btc.node.GetBestBlockHash()
 	if err != nil {
@@ -311,7 +311,7 @@ out:
 			t.Logf("    %s", hex.EncodeToString(unknown))
 		}
 	} else {
-		t.Logf("no unkown script types")
+		t.Logf("no unknown script types")
 	}
 }
 
@@ -350,7 +350,7 @@ type CompatibilityItems struct {
 	WSHAddr      string
 }
 
-// CompatibilityCheck checks various scripts' compatibility with the BTCBackend.
+// CompatibilityCheck checks various scripts' compatibility with the Backend.
 // If a fork's CompatibilityItems can pass the CompatibilityCheck, the node
 // can likely use NewBTCClone to create a DEX-compatible backend.
 func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params, t *testing.T) {

@@ -15,8 +15,8 @@ import (
 // satisfy the asset.UTXO interface to be DEX-compatible.
 type UTXO struct {
 	// Because a UTXO's validity and block info can change after creation, keep a
-	// btcBackend around to query the state of the tx and update the block info.
-	btc *BTCBackend
+	// Backend around to query the state of the tx and update the block info.
+	btc *Backend
 	// The height and hash of the transaction's best known block.
 	height    uint32
 	blockHash chainhash.Hash
@@ -70,7 +70,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 				if err != nil {
 					return -1, err
 				}
-				utxo.height = uint32(blk.height)
+				utxo.height = blk.height
 				utxo.blockHash = blk.hash
 			}
 		}
@@ -127,15 +127,8 @@ func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d",
 			utxo.txHash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
 	}
-	matches, err := pkMatches(pubkeys, scriptAddrs.pubkeys, nil)
-	if err != nil {
-		return fmt.Errorf("error during pubkey matching: %v", err)
-	}
-	m, err := pkMatches(pubkeys, scriptAddrs.pkHashes, btcutil.Hash160)
-	if err != nil {
-		return fmt.Errorf("error during pubkey hash matching: %v", err)
-	}
-	matches = append(matches, m...)
+	matches := append(pkMatches(pubkeys, scriptAddrs.pubkeys, nil),
+		pkMatches(pubkeys, scriptAddrs.pkHashes, btcutil.Hash160)...)
 	if len(matches) < utxo.numSigs {
 		return fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d",
 			utxo.txHash, utxo.vout, utxo.numSigs, len(matches))
@@ -156,7 +149,7 @@ type pkMatch struct {
 
 // pkMatches looks through a set of addresses and a returns a set of match
 // structs with details about the match.
-func pkMatches(pubkeys [][]byte, addrs []btcutil.Address, hasher func([]byte) []byte) ([]pkMatch, error) {
+func pkMatches(pubkeys [][]byte, addrs []btcutil.Address, hasher func([]byte) []byte) []pkMatch {
 	matches := make([]pkMatch, 0, len(pubkeys))
 	if hasher == nil {
 		hasher = func(a []byte) []byte { return a }
@@ -179,7 +172,7 @@ func pkMatches(pubkeys [][]byte, addrs []btcutil.Address, hasher func([]byte) []
 			}
 		}
 	}
-	return matches, nil
+	return matches
 }
 
 // SpendSize returns the maximum size of the serialized TxIn that spends this

@@ -44,12 +44,12 @@ type btcNode interface {
 	GetBestBlockHash() (*chainhash.Hash, error)
 }
 
-// BTCBackend is an asset backend for Bitcoin. It has methods for fetching UTXO
+// Backend is an asset backend for Bitcoin. It has methods for fetching UTXO
 // information and subscribing to block updates. It maintains a cache of block
-// data for quick lookups. BTCBackend implements asset.DEXAsset, so provides
+// data for quick lookups. Backend implements asset.DEXAsset, so provides
 // exported methods for DEX-related blockchain info.
-type BTCBackend struct {
-	// An application context provided as part of the constructor. The BTCBackend
+type Backend struct {
+	// An application context provided as part of the constructor. The Backend
 	// will perform some cleanup when the context is cancelled.
 	ctx context.Context
 	// If an rpcclient.Client is used for the node, keeping a reference at client
@@ -71,8 +71,8 @@ type BTCBackend struct {
 	log asset.Logger
 }
 
-// Check that BTCBackend satisfies the DEXAsset interface.
-var _ asset.DEXAsset = (*BTCBackend)(nil)
+// Check that Backend satisfies the DEXAsset interface.
+var _ asset.DEXAsset = (*Backend)(nil)
 
 // NewBackend is the exported constructor by which the DEX will import the
 // backend. The provided context.Context should be cancelled when the DEX
@@ -100,10 +100,10 @@ func NewBackend(ctx context.Context, configPath string, logger asset.Logger, net
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
 // network ports. A BTC clone can use this method, possibly in conjunction with
-// ReadCloneParams, to create a BTCBackend for other assets with minimal coding.
+// ReadCloneParams, to create a Backend for other assets with minimal coding.
 // See ReadCloneParams and CompatibilityCheck for more info.
 func NewBTCClone(ctx context.Context, configPath string, logger asset.Logger,
-	network asset.Network, params *chaincfg.Params, ports NetPorts) (*BTCBackend, error) {
+	network asset.Network, params *chaincfg.Params, ports NetPorts) (*Backend, error) {
 
 	// Read the configuration parameters
 	cfg, err := LoadConfig(configPath, network, ports)
@@ -143,7 +143,7 @@ func NewBTCClone(ctx context.Context, configPath string, logger asset.Logger,
 
 // This entire module may be usable by a BTC clone if certain conditions are
 // met. Many BTC clones have btcd forks with their own go config files. The
-// BTCBackend only uses a handful of configuration settings, so if all of those
+// Backend only uses a handful of configuration settings, so if all of those
 // settings are present in the clone parameter files, the ReadCloneParams can
 // likely translate them into btcd-flavor.
 //
@@ -169,14 +169,14 @@ func ReadCloneParams(cloneParams interface{}) (*chaincfg.Params, error) {
 	}
 	err = json.Unmarshal(cloneJson, &p)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling nework params: %v", err)
+		return nil, fmt.Errorf("error unmarshalling network params: %v", err)
 	}
 	return p, nil
 }
 
-// UTXO is part of the asset.UTXO interface. See the unexported BTCBackend.utxo
+// UTXO is part of the asset.UTXO interface. See the unexported Backend.utxo
 // method for the full implementation.
-func (btc *BTCBackend) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
+func (btc *Backend) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
@@ -185,8 +185,8 @@ func (btc *BTCBackend) UTXO(txid string, vout uint32, redeemScript []byte) (asse
 }
 
 // Transaction is part of the asset.DEXTx interface. See the unexported
-// BTCBackend.transaction method for the full implementation.
-func (btc *BTCBackend) Transaction(txid string) (asset.DEXTx, error) {
+// Backend.transaction method for the full implementation.
+func (btc *Backend) Transaction(txid string) (asset.DEXTx, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
@@ -197,7 +197,7 @@ func (btc *BTCBackend) Transaction(txid string) (asset.DEXTx, error) {
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the btc package. Part of the asset.DEXAsset interface.
-func (btc *BTCBackend) BlockChannel(size int) chan uint32 {
+func (btc *Backend) BlockChannel(size int) chan uint32 {
 	c := make(chan uint32, size)
 	btc.signalMtx.Lock()
 	defer btc.signalMtx.Unlock()
@@ -207,13 +207,13 @@ func (btc *BTCBackend) BlockChannel(size int) chan uint32 {
 
 // InitTxSize is an asset.DEXAsset method that must produce the max size of a
 // standardized atomic swap initialization transaction.
-func (btc *BTCBackend) InitTxSize() uint32 {
+func (btc *Backend) InitTxSize() uint32 {
 	return initTxSize
 }
 
-// Create a *BTCBackend and start the block monitor loop.
-func newBTC(ctx context.Context, chainParams *chaincfg.Params, logger asset.Logger, node btcNode) *BTCBackend {
-	btc := &BTCBackend{
+// Create a *Backend and start the block monitor loop.
+func newBTC(ctx context.Context, chainParams *chaincfg.Params, logger asset.Logger, node btcNode) *Backend {
+	btc := &Backend{
 		ctx:         ctx,
 		blockCache:  newBlockCache(),
 		blockChans:  make([]chan uint32, 0),
@@ -226,7 +226,7 @@ func newBTC(ctx context.Context, chainParams *chaincfg.Params, logger asset.Logg
 }
 
 // Get the UTXO data and perform some checks for script support.
-func (btc *BTCBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
+func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
 	txOut, verboseTx, pkScript, err := btc.getTxOutInfo(txHash, vout)
 	if err != nil {
 		return nil, err
@@ -286,7 +286,7 @@ func (btc *BTCBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		if err != nil {
 			return nil, fmt.Errorf("error retreiving block for hash %s", verboseTx.BlockHash)
 		}
-		blockHeight = uint32(blk.height)
+		blockHeight = blk.height
 		blockHash = blk.hash
 	} else {
 		// Set the lastLookup to the current tip.
@@ -323,7 +323,7 @@ func (btc *BTCBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 
 // Get the Tx. Transaction info is not cached, so every call will result in a
 // GetRawTransactionVerbose RPC call.
-func (btc *BTCBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
+func (btc *Backend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
 		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
@@ -360,7 +360,7 @@ func (btc *BTCBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 		}
 		hash, err := chainhash.NewHashFromStr(input.Txid)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding previous tx hash %sfor tx %s: %v", input.Txid, txHash, err)
+			return nil, fmt.Errorf("error decoding previous tx hash %s for tx %s: %v", input.Txid, txHash, err)
 		}
 		inputs = append(inputs, txIn{prevTx: *hash, vout: input.Vout})
 	}
@@ -381,7 +381,7 @@ func (btc *BTCBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 }
 
 // Get information for an unspent transaction output and it's transaction.
-func (btc *BTCBackend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, *btcjson.TxRawResult, []byte, error) {
+func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, *btcjson.TxRawResult, []byte, error) {
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err)
@@ -402,7 +402,7 @@ func (btc *BTCBackend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjs
 
 // Get the block information, checking the cache first. Same as
 // getBtcBlock, but takes a string argument.
-func (btc *BTCBackend) getBlockInfo(blockid string) (*cachedBlock, error) {
+func (btc *Backend) getBlockInfo(blockid string) (*cachedBlock, error) {
 	blockHash, err := chainhash.NewHashFromStr(blockid)
 	if err != nil {
 		return nil, fmt.Errorf("unable to decode block hash from %s", blockid)
@@ -411,7 +411,7 @@ func (btc *BTCBackend) getBlockInfo(blockid string) (*cachedBlock, error) {
 }
 
 // Get the block information, checking the cache first.
-func (btc *BTCBackend) getBtcBlock(blockHash *chainhash.Hash) (*cachedBlock, error) {
+func (btc *Backend) getBtcBlock(blockHash *chainhash.Hash) (*cachedBlock, error) {
 	cachedBlk, found := btc.blockCache.block(blockHash)
 	if found {
 		return cachedBlk, nil
@@ -425,7 +425,7 @@ func (btc *BTCBackend) getBtcBlock(blockHash *chainhash.Hash) (*cachedBlock, err
 
 // loop should be run as a goroutine. This loop is responsible for best block
 // polling and checking the application context to trigger a clean shutdown.
-func (btc *BTCBackend) loop() {
+func (btc *Backend) loop() {
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 	addBlock := func(block *btcjson.GetBlockVerboseResult) {
@@ -476,6 +476,7 @@ out:
 			// It must be a reorg. Crawl blocks backwards until finding a mainchain
 			// block, flagging blocks from the cache as orphans along the way.
 			iHash := &tip.hash
+			reorgHeight := int64(0)
 			for {
 				if *iHash == zeroHash {
 					break
@@ -489,16 +490,18 @@ out:
 					// This is a mainchain block, nothing to do.
 					break
 				}
-				// It's an orphan. reorg it.
-				btc.blockCache.reorg(iBlock.Height)
 				if iBlock.Height == 0 {
 					break
 				}
+				reorgHeight = iBlock.Height
 				iHash, err = chainhash.NewHashFromStr(iBlock.PreviousHash)
 				if err != nil {
 					btc.log.Errorf("error decoding previous hash %s: %v", iBlock.PreviousHash, err)
 					break
 				}
+			}
+			if reorgHeight > 0 {
+				btc.blockCache.reorg(reorgHeight)
 			}
 			// Now add the new block.
 			addBlock(block)
@@ -510,7 +513,7 @@ out:
 }
 
 // Shutdown down the rpcclient.Client.
-func (btc *BTCBackend) shutdown() {
+func (btc *Backend) shutdown() {
 	if btc.client != nil {
 		btc.client.Shutdown()
 		btc.client.WaitForShutdown()
