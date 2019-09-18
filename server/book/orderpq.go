@@ -85,6 +85,8 @@ func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
 // OrderPQ or any of the data fields, a deep copy of the OrderPQ is made and
 // ExtractBest is called until all entries are extracted.
 func (pq *OrderPQ) Orders() []*order.LimitOrder {
+	pq.mtx.Lock()
+
 	// To use the configured lessFn, make a temporary OrderPQ with just the
 	// lessFn and orderHeap set. Do not use the constructor since we do not care
 	// about the orders map or capacity.
@@ -93,6 +95,7 @@ func (pq *OrderPQ) Orders() []*order.LimitOrder {
 		oh:     make(orderHeap, len(pq.oh)),
 	}
 	copy(pqTmp.oh, pq.oh)
+	pq.mtx.Unlock()
 
 	// Sort the orderHeap, which implements sort.Interface with the configured
 	// lessFn.
@@ -466,6 +469,8 @@ func (pq *OrderPQ) leafNodes() []*orderEntry {
 // the worst element is that it will not be another node's parent (i.e. it is a
 // leaf node).
 func (pq *OrderPQ) Worst() *order.LimitOrder {
+	pq.mtx.Lock()
+	defer pq.mtx.Unlock()
 	// Check the leaf nodes for the worst order according to lessFn.
 	leaves := pq.leafNodes()
 	switch len(leaves) {
