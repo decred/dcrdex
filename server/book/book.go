@@ -5,8 +5,6 @@
 package book
 
 import (
-	"fmt"
-
 	"github.com/decred/dcrdex/server/order"
 )
 
@@ -68,23 +66,13 @@ func (b *Book) SellCount() int {
 // BestSell returns a pointer to the best sell order in the order book. The
 // order is NOT removed from the book.
 func (b *Book) BestSell() *order.LimitOrder {
-	best, ok := b.sells.PeekBest().(*order.LimitOrder)
-	if !ok {
-		panic(fmt.Sprintf("Best sell order is not a *order.LimitOrder: %T",
-			b.sells.PeekBest()))
-	}
-	return best
+	return b.sells.PeekBest()
 }
 
 // BestBuy returns a pointer to the best buy order in the order book. The
 // order is NOT removed from the book.
 func (b *Book) BestBuy() *order.LimitOrder {
-	best, ok := b.buys.PeekBest().(*order.LimitOrder)
-	if !ok {
-		panic(fmt.Sprintf("Best sell order is not a *order.LimitOrder: %T",
-			b.sells.PeekBest()))
-	}
-	return best
+	return b.buys.PeekBest()
 }
 
 // Insert attempts to insert the provided order into the order book, returning a
@@ -106,10 +94,10 @@ func (b *Book) Insert(o *order.LimitOrder) bool {
 func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 	uid := oid.String()
 	if removed, ok := b.sells.RemoveOrderUID(uid); ok {
-		return removed.(*order.LimitOrder), true
+		return removed, true
 	}
 	if removed, ok := b.buys.RemoveOrderUID(uid); ok {
-		return removed.(*order.LimitOrder), true
+		return removed, true
 	}
 	return nil, false
 }
@@ -124,11 +112,7 @@ func (b *Book) SellOrdersN(N int) []*order.LimitOrder {
 	orders := b.sells.OrdersN(N) // N = len(orders)
 	limits := make([]*order.LimitOrder, 0, len(orders))
 	for _, o := range orders {
-		lo, ok := o.(*order.LimitOrder)
-		if !ok {
-			panic(fmt.Sprintf("A sell order is not a *order.LimitOrder: %T", o))
-		}
-		limits = append(limits, lo)
+		limits = append(limits, o)
 	}
 	return limits
 }
@@ -143,11 +127,7 @@ func (b *Book) BuyOrdersN(N int) []*order.LimitOrder {
 	orders := b.buys.OrdersN(N) // N = len(orders)
 	limits := make([]*order.LimitOrder, 0, len(orders))
 	for _, o := range orders {
-		lo, ok := o.(*order.LimitOrder)
-		if !ok {
-			panic(fmt.Sprintf("A buy order is not a *order.LimitOrder: %T", o))
-		}
-		limits = append(limits, lo)
+		limits = append(limits, o)
 	}
 	return limits
 }

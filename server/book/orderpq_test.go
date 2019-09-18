@@ -1,72 +1,43 @@
 package book
 
 import (
-	"encoding/hex"
 	"math/rand"
 	"sort"
 	"testing"
 
-	"github.com/decred/dcrd/crypto/blake256"
+	"github.com/decred/dcrdex/server/order"
 )
 
-type Order struct {
-	uid  string
-	rate uint64
-	time int64
-}
-
-var _ OrderPricer = (*Order)(nil)
-
-func (o *Order) UID() string {
-	return o.uid
-}
-
-func (o *Order) Price() uint64 {
-	return o.rate
-}
-
-func (o *Order) Time() int64 {
-	return o.time
-}
-
-func (o *Order) String() string {
-	return o.UID()
-}
+type Order = order.LimitOrder
 
 var (
 	bigList []*Order
 	orders  = []*Order{
-		{
-			uid:  "fakefakefake1324",
-			rate: 42000000,
-			time: 56789,
-		},
-		{
-			uid:  "1324fakefakefake",
-			rate: 10000,
-			time: 56789,
-		},
-		{
-			uid:  "fakefakefake1324OLDER",
-			rate: 42000000,
-			time: 45678,
-		},
-		{
-			uid:  "topDog",
-			rate: 123000000,
-			time: 56789,
-		},
+		newLimitOrder(false, 42000000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 10000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 42000000, 2, order.StandingTiF, -1000),
+		newLimitOrder(false, 123000000, 2, order.StandingTiF, 0),
 	}
 )
 
-func randomBytes(len int) []byte {
-	bytes := make([]byte, len)
-	rand.Read(bytes)
-	return bytes
-}
+// func randomBytes(len int) []byte {
+// 	bytes := make([]byte, len)
+// 	rand.Read(bytes)
+// 	return bytes
+// }
 
-func randomHash() [32]byte {
-	return blake256.Sum256(randomBytes(32))
+// func randomHash() [32]byte {
+// 	return blake256.Sum256(randomBytes(32))
+// }
+
+func newFakeAddr() string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	b := make([]byte, 35)
+	for i := range b {
+		b[i] = letters[rand.Int63()%int64(len(letters))]
+	}
+	b[0], b[1] = 'D', 's' // at least have it resemble an address
+	return string(b)
 }
 
 func genBigList() {
@@ -79,33 +50,32 @@ func genBigList() {
 	seed := int64(-3405439173988651889)
 	rand.Seed(seed)
 
-	refTime := int64(1567100226)
-
 	listSize := 1000000
 	bigList = make([]*Order, 0, listSize)
 	for i := 0; i < listSize; i++ {
-		uid := randomHash()
-		order := &Order{
-			uid:  hex.EncodeToString(uid[:]),
-			rate: uint64(rand.Int63n(90000000)),
-			time: rand.Int63n(240) + refTime,
-		}
+		order := newLimitOrder(false, uint64(rand.Int63n(90000000)), uint64(rand.Int63n(6))+1, order.StandingTiF, rand.Int63n(240)-120)
+		order.Address = newFakeAddr()
+		// duplicate some prices
 		if (i+1)%(listSize/400) == 0 {
-			order.rate = bigList[i/2].rate
+			order.Rate = bigList[i/2].Rate
+			order.Quantity = bigList[i/2].Quantity + 1
 		}
+		_ = order.ID()
 		bigList = append(bigList, order)
 	}
 }
 
 func TestLargeOrderMaxPriorityQueue(t *testing.T) {
+	startLogger()
+
 	genBigList()
 
 	// Max oriented queue
 	pq := NewMaxOrderPQ(uint32(len(bigList) * 3 / 2))
-	for _, o := range bigList {
+	for i, o := range bigList {
 		ok := pq.Insert(o)
 		if !ok {
-			t.Fatalf("Failed to insert order %v", o)
+			t.Fatalf("Failed to insert order %d: %v", i, o)
 		}
 	}
 
@@ -115,7 +85,7 @@ func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 
 	initLen := pq.Len()
 	best := pq.ExtractBest()
-	allOrders := make([]OrderPricer, 0, initLen)
+	allOrders := make([]*Order, 0, initLen)
 	allOrders = append(allOrders, best)
 
 	lastTime := best.Time()
@@ -176,6 +146,8 @@ func TestLargeOrderMaxPriorityQueue(t *testing.T) {
 }
 
 func TestLargeOrderMinPriorityQueue(t *testing.T) {
+	startLogger()
+
 	genBigList()
 
 	// Min oriented queue
@@ -193,7 +165,7 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 
 	initLen := pq.Len()
 	best := pq.ExtractBest()
-	allOrders := make([]OrderPricer, 0, initLen)
+	allOrders := make([]*Order, 0, initLen)
 	allOrders = append(allOrders, best)
 
 	lastTime := best.Time()
@@ -254,6 +226,8 @@ func TestLargeOrderMinPriorityQueue(t *testing.T) {
 }
 
 func TestLargeOrderMaxPriorityQueue_Orders(t *testing.T) {
+	startLogger()
+
 	genBigList()
 
 	// Max oriented queue (sell book)
@@ -314,6 +288,8 @@ func TestLargeOrderMaxPriorityQueue_Orders(t *testing.T) {
 }
 
 func TestLargeOrderMaxPriorityQueue_Realloc(t *testing.T) {
+	startLogger()
+
 	genBigList()
 
 	// Max oriented queue (sell book)
@@ -369,6 +345,8 @@ func TestLargeOrderMaxPriorityQueue_Realloc(t *testing.T) {
 }
 
 func TestMinOrderPriorityQueue(t *testing.T) {
+	startLogger()
+
 	pq := NewMinOrderPQ(4)
 
 	for _, o := range orders {
@@ -378,14 +356,16 @@ func TestMinOrderPriorityQueue(t *testing.T) {
 		}
 	}
 
-	best := pq.ExtractBest().(*Order)
-	if best.UID() != orders[1].uid {
+	best := pq.ExtractBest()
+	if best.UID() != orders[1].UID() {
 		t.Errorf("Incorrect lowest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
 }
 
 func TestMaxOrderPriorityQueue(t *testing.T) {
+	startLogger()
+
 	pq := NewMaxOrderPQ(4)
 
 	for _, o := range orders {
@@ -395,14 +375,16 @@ func TestMaxOrderPriorityQueue(t *testing.T) {
 		}
 	}
 
-	best := pq.ExtractBest().(*Order)
-	if best.UID() != orders[3].uid {
+	best := pq.ExtractBest()
+	if best.UID() != orders[3].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
 }
 
 func TestMaxOrderPriorityQueue_TieRate(t *testing.T) {
+	startLogger()
+
 	pq := NewMaxOrderPQ(4)
 
 	for _, o := range orders[:3] {
@@ -412,15 +394,17 @@ func TestMaxOrderPriorityQueue_TieRate(t *testing.T) {
 		}
 	}
 
-	best := pq.ExtractBest().(*Order)
+	best := pq.ExtractBest()
 	//t.Log(best.String()) // the older order
-	if best.UID() != orders[2].uid {
+	if best.UID() != orders[2].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
 }
 
 func TestOrderPriorityQueueCapacity(t *testing.T) {
+	startLogger()
+
 	pq := NewMaxOrderPQ(2)
 
 	ok := pq.Insert(orders[0])
@@ -438,14 +422,16 @@ func TestOrderPriorityQueueCapacity(t *testing.T) {
 		t.Errorf("Should have failed to insert order %v, but succeeded", orders[2])
 	}
 
-	best := pq.PeekBest().(*Order)
-	if best.UID() != orders[0].uid {
+	best := pq.PeekBest()
+	if best.UID() != orders[0].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
 }
 
 func TestOrderPriorityQueueNegative_Insert(t *testing.T) {
+	startLogger()
+
 	pq := NewMinOrderPQ(2)
 
 	ok := pq.Insert(orders[0])
@@ -465,6 +451,8 @@ func TestOrderPriorityQueueNegative_Insert(t *testing.T) {
 }
 
 func TestOrderPriorityQueue_Replace(t *testing.T) {
+	startLogger()
+
 	pq := NewMinOrderPQ(2)
 
 	ok := pq.Insert(orders[0])
@@ -480,36 +468,38 @@ func TestOrderPriorityQueue_Replace(t *testing.T) {
 		t.Fatalf("expected queue length 1, got %d", pq.Len())
 	}
 	best := pq.ExtractBest()
-	if best.UID() != orders[1].uid {
+	if best.UID() != orders[1].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
 }
 
 func TestResetHeap(t *testing.T) {
+	startLogger()
+
 	pq := NewMaxOrderPQ(2)
 
 	orderEntries := []*orderEntry{
 		{
-			OrderPricer: orders[0],
-			heapIdx:     -1,
+			order:   orders[0],
+			heapIdx: -1,
 		},
 		{
-			OrderPricer: orders[1],
-			heapIdx:     -1,
+			order:   orders[1],
+			heapIdx: -1,
 		},
 	}
 
 	pq.resetHeap(orderEntries)
 
 	best := pq.ExtractBest()
-	if best.UID() != orders[0].uid {
+	if best.UID() != orders[0].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
 
 	best = pq.ExtractBest()
-	if best.UID() != orders[1].uid {
+	if best.UID() != orders[1].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
@@ -521,6 +511,8 @@ func TestResetHeap(t *testing.T) {
 }
 
 func TestOrderPriorityQueue_Remove(t *testing.T) {
+	startLogger()
+
 	pq := NewMaxOrderPQ(2)
 
 	ok := pq.Insert(orders[0])
@@ -549,6 +541,8 @@ func TestOrderPriorityQueue_Remove(t *testing.T) {
 }
 
 func TestOrderPQMin_Worst(t *testing.T) {
+	startLogger()
+
 	genBigList()
 
 	pq0 := NewMinOrderPQ(4)
@@ -594,6 +588,8 @@ func TestOrderPQMin_Worst(t *testing.T) {
 }
 
 func TestOrderPQMax_Worst(t *testing.T) {
+	startLogger()
+
 	genBigList()
 
 	// Max oriented queue
@@ -626,6 +622,8 @@ func TestOrderPQMax_Worst(t *testing.T) {
 }
 
 func TestOrderPQMax_leafNodes(t *testing.T) {
+	startLogger()
+
 	genBigList()
 
 	// Max oriented queue
