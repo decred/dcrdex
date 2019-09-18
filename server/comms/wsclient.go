@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/decred/dcrdex/server/comms/rpc"
 	"github.com/gorilla/websocket"
@@ -207,6 +208,8 @@ out:
 // It uses a buffered channel to serialize output messages while allowing the
 // sender to continue running asynchronously.  It must be run as a goroutine.
 func (c *RPCClient) outHandler() {
+	ticker := time.NewTicker(pingPeriod)
+	ping := []byte{}
 out:
 	for {
 		// Send any messages ready for send until the quit channel is
@@ -218,7 +221,13 @@ out:
 				c.disconnect()
 				break out
 			}
-
+		case <-ticker.C:
+			err := c.conn.WriteMessage(websocket.PingMessage, ping)
+			if err != nil {
+				// Don't really care what the error is, but log it at debug level.
+				log.Debugf("WriteMessage ping error: %v", err)
+				break out
+			}
 		case <-c.quit:
 			break out
 		}

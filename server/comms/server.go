@@ -42,6 +42,16 @@ var (
 	// websocket.Upgrader is the preferred method of upgrading a request to a
 	// websocket connection.
 	upgrader = websocket.Upgrader{}
+
+	// Time allowed to read the next pong message from the peer. The
+	// default is intended for production, but leaving as a var instead of const
+	// to facilitate testing.
+	pongWait = 60 * time.Second
+
+	// Send pings to peer with this period. Must be less than pongWait. The
+	// default is intended for production, but leaving as a var instead of const
+	// to facilitate testing.
+	pingPeriod = (pongWait * 9) / 10
 )
 
 var idCounter uint64
@@ -227,13 +237,15 @@ func (s *RPCServer) Start() {
 			http.Error(w, "400 Bad Request.", http.StatusBadRequest)
 			return
 		}
-		// Clear the read deadline that was set before the websocket hijacked
-		// the connection. A zero value means writes will not time out.
-		err = ws.SetReadDeadline(timeZeroVal)
+		pongHandler := func(string) error {
+			return ws.SetReadDeadline(time.Now().Add(pongWait))
+		}
+		err = pongHandler("")
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
+		ws.SetPongHandler(pongHandler)
 		go s.websocketHandler(ws, ip)
 	})
 

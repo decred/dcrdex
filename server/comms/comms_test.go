@@ -1,6 +1,7 @@
 package comms
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -64,11 +65,15 @@ func lockedExe(f func()) {
 
 // nonEOF can specify a particular error should be returned through ReadMessage.
 var nonEOF = make(chan struct{})
+var pongTrigger = []byte("pong")
 
 func (conn *wsConnStub) ReadMessage() (int, []byte, error) {
 	var b []byte
 	select {
 	case b = <-conn.msg:
+		if bytes.Equal(b, pongTrigger) {
+			return websocket.PongMessage, []byte{}, nil
+		}
 	case <-conn.quit:
 		return 0, nil, io.EOF
 	case <-testCtx.Done():
@@ -82,9 +87,16 @@ func (conn *wsConnStub) ReadMessage() (int, []byte, error) {
 
 var writeErr = ""
 
-func (conn *wsConnStub) WriteMessage(int, []byte) error {
+func (conn *wsConnStub) WriteMessage(msgType int, _ []byte) error {
 	testMtx.Lock()
 	defer testMtx.Unlock()
+	if msgType == websocket.PingMessage {
+		select {
+		case conn.msg <- pongTrigger:
+		default:
+		}
+		return nil
+	}
 	conn.write++
 	if writeErr == "" {
 		return nil
@@ -418,6 +430,8 @@ func TestOnline(t *testing.T) {
 
 	keyPath := filepath.Join(tempDir, "rpc.key")
 	certPath := filepath.Join(tempDir, "rpc.cert")
+	pongWait = 50 * time.Millisecond
+	pingPeriod = (pongWait * 9) / 10
 	server, err := NewRPCServer(&RPCConfig{
 		ListenAddrs: []string{portAddr},
 		RPCKey:      keyPath,
@@ -514,6 +528,9 @@ func TestOnline(t *testing.T) {
 		time.Sleep(time.Millisecond * 10)
 		return err
 	}
+
+	// Sleep for a few  pongs to make sure the client doesn't disconnect.
+	time.Sleep(pongWait * 3)
 
 	err = sendReq("noresponse", "{}")
 	if err != nil {
