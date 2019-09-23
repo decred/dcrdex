@@ -5,13 +5,14 @@
 package book
 
 import (
-	"fmt"
-
 	"github.com/decred/dcrdex/server/order"
 )
 
 const (
-	bookHalfCapacity uint32 = 1 << 21 // 4 * 2 MiB
+	// DefaultBookHalfCapacity is the default capacity of one side (buy or sell)
+	// of the order book. It is set to 2^21 orders (2 mebiorders = 2,097,152
+	// orders) per book side.
+	DefaultBookHalfCapacity uint32 = 1 << 21 // 4 * 2 MiB
 )
 
 // Book is a market's order book. The Book uses a configurable lot size, of
@@ -25,15 +26,26 @@ type Book struct {
 	sells   *OrderPQ
 }
 
-// New creates a new order book with the given lot size. Capacity of the order
-// book is fixed at 2^21 orders (2 mebiorders = 2,097,152 orders) per book side
-// (buy or sell). TODO: allow dynamic order book capacity.
-func New(lotSize uint64) *Book {
+// New creates a new order book with the given lot size, and optional order
+// capacity of each side of the book. To change capacity of an existing Book,
+// use the Realloc method.
+func New(lotSize uint64, halfCapacity ...uint32) *Book {
+	halfCap := DefaultBookHalfCapacity
+	if len(halfCapacity) > 0 {
+		halfCap = halfCapacity[0]
+	}
 	return &Book{
 		lotSize: lotSize,
-		buys:    NewMaxOrderPQ(bookHalfCapacity),
-		sells:   NewMinOrderPQ(bookHalfCapacity),
+		buys:    NewMaxOrderPQ(halfCap),
+		sells:   NewMinOrderPQ(halfCap),
 	}
+}
+
+// Realloc changes the capacity of the order book given the specified capacity
+// of both buy and sell sides of the book.
+func (b *Book) Realloc(newHalfCap uint32) {
+	b.buys.Realloc(newHalfCap)
+	b.sells.Realloc(newHalfCap)
 }
 
 // LotSize returns the Book's configured lot size in atoms of the base asset.
@@ -54,23 +66,13 @@ func (b *Book) SellCount() int {
 // BestSell returns a pointer to the best sell order in the order book. The
 // order is NOT removed from the book.
 func (b *Book) BestSell() *order.LimitOrder {
-	best, ok := b.sells.PeekBest().(*order.LimitOrder)
-	if !ok {
-		panic(fmt.Sprintf("Best sell order is not a *order.LimitOrder: %T",
-			b.sells.PeekBest()))
-	}
-	return best
+	return b.sells.PeekBest()
 }
 
 // BestBuy returns a pointer to the best buy order in the order book. The
 // order is NOT removed from the book.
 func (b *Book) BestBuy() *order.LimitOrder {
-	best, ok := b.buys.PeekBest().(*order.LimitOrder)
-	if !ok {
-		panic(fmt.Sprintf("Best sell order is not a *order.LimitOrder: %T",
-			b.sells.PeekBest()))
-	}
-	return best
+	return b.buys.PeekBest()
 }
 
 // Insert attempts to insert the provided order into the order book, returning a
@@ -92,10 +94,40 @@ func (b *Book) Insert(o *order.LimitOrder) bool {
 func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 	uid := oid.String()
 	if removed, ok := b.sells.RemoveOrderUID(uid); ok {
-		return removed.(*order.LimitOrder), true
+		return removed, true
 	}
 	if removed, ok := b.buys.RemoveOrderUID(uid); ok {
-		return removed.(*order.LimitOrder), true
+		return removed, true
 	}
 	return nil, false
+}
+
+// SellOrders copies out all sell orders in the book, sorted.
+func (b *Book) SellOrders() []*order.LimitOrder {
+	return b.SellOrdersN(b.SellCount())
+}
+
+// SellOrdersN copies out the N best sell orders in the book, sorted.
+func (b *Book) SellOrdersN(N int) []*order.LimitOrder {
+	orders := b.sells.OrdersN(N) // N = len(orders)
+	limits := make([]*order.LimitOrder, 0, len(orders))
+	for _, o := range orders {
+		limits = append(limits, o)
+	}
+	return limits
+}
+
+// BuyOrders copies out all buy orders in the book, sorted.
+func (b *Book) BuyOrders() []*order.LimitOrder {
+	return b.BuyOrdersN(b.BuyCount())
+}
+
+// BuyOrdersN copies out the N best buy orders in the book, sorted.
+func (b *Book) BuyOrdersN(N int) []*order.LimitOrder {
+	orders := b.buys.OrdersN(N) // N = len(orders)
+	limits := make([]*order.LimitOrder, 0, len(orders))
+	for _, o := range orders {
+		limits = append(limits, o)
+	}
+	return limits
 }

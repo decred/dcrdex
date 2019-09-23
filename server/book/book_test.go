@@ -93,7 +93,7 @@ var (
 func newBook(t *testing.T) *Book {
 	resetMakers()
 
-	b := New(LotSize)
+	b := New(LotSize, DefaultBookHalfCapacity)
 
 	for _, o := range bookBuyOrders {
 		if ok := b.Insert(o); !ok {
@@ -144,6 +144,44 @@ func TestBook(t *testing.T) {
 	if b.BestSell().ID() != bestSellOrder.ID() {
 		t.Errorf("The book returned the wrong best sell order. Got %v, expected %v",
 			b.BestSell().ID(), bestSellOrder.ID())
+	}
+
+	sells := b.SellOrders()
+	if len(sells) != b.SellCount() {
+		t.Errorf("Incorrect number of sell orders. Got %d, expected %d",
+			len(sells), b.SellCount())
+	}
+
+	buys := b.BuyOrders()
+	if len(buys) != b.BuyCount() {
+		t.Errorf("Incorrect number of buy orders. Got %d, expected %d",
+			len(buys), b.BuyCount())
+	}
+
+	b.Realloc(DefaultBookHalfCapacity * 2)
+
+	buys2 := b.BuyOrders()
+	if len(buys) != len(buys2) {
+		t.Errorf("Incorrect number of buy orders after realloc. Got %d, expected %d",
+			len(buys), len(buys2))
+	}
+	for i := range buys2 {
+		if buys2[i] != buys[i] {
+			t.Errorf("Buy order %d mismatch after realloc. Got %s, expected %s",
+				i, buys2[i].UID(), buys[i].UID())
+		}
+	}
+
+	sells2 := b.SellOrders()
+	if len(sells) != len(sells2) {
+		t.Errorf("Incorrect number of sell orders after realloc. Got %d, expected %d",
+			len(sells), len(sells2))
+	}
+	for i := range sells2 {
+		if sells2[i] != sells[i] {
+			t.Errorf("Sell order %d mismatch after realloc. Got %s, expected %s",
+				i, sells2[i].UID(), sells[i].UID())
+		}
 	}
 
 	badOrder := newLimitOrder(false, 2500000, 1, order.StandingTiF, 0)

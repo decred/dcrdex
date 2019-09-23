@@ -112,6 +112,11 @@ type Prefix struct {
 	OrderType  OrderType
 	ClientTime time.Time
 	ServerTime time.Time
+
+	//nolint:structcheck
+	id *OrderID // cache of the order's OrderID
+	//nolint:structcheck
+	uid string // cache of the order's UID
 }
 
 // PrefixLen is the length in bytes of the serialized order Prefix.
@@ -176,12 +181,22 @@ type MarketOrder struct {
 
 // ID computes the order ID.
 func (o *MarketOrder) ID() OrderID {
-	return calcOrderID(o)
+	if o.id != nil {
+		return *o.id
+	}
+	id := calcOrderID(o)
+	o.id = &id
+	return id
 }
 
 // UID computes the order ID, returning the string representation.
 func (o *MarketOrder) UID() string {
-	return o.ID().String()
+	if o.uid != "" {
+		return o.uid
+	}
+	uid := o.ID().String()
+	o.uid = uid
+	return uid
 }
 
 // SerializeSize returns the length of the serialized MarketOrder.
@@ -256,12 +271,22 @@ type LimitOrder struct {
 
 // ID computes the order ID.
 func (o *LimitOrder) ID() OrderID {
-	return calcOrderID(o)
+	if o.id != nil {
+		return *o.id
+	}
+	id := calcOrderID(o)
+	o.id = &id
+	return id
 }
 
 // UID computes the order ID, returning the string representation.
 func (o *LimitOrder) UID() string {
-	return o.ID().String()
+	if o.uid != "" {
+		return o.uid
+	}
+	uid := o.ID().String()
+	o.uid = uid
+	return uid
 }
 
 // SerializeSize returns the length of the serialized LimitOrder.
@@ -312,12 +337,22 @@ type CancelOrder struct {
 
 // ID computes the order ID.
 func (o *CancelOrder) ID() OrderID {
-	return calcOrderID(o)
+	if o.id != nil {
+		return *o.id
+	}
+	id := calcOrderID(o)
+	o.id = &id
+	return id
 }
 
 // UID computes the order ID, returning the string representation.
 func (o *CancelOrder) UID() string {
-	return o.ID().String()
+	if o.uid != "" {
+		return o.uid
+	}
+	uid := o.ID().String()
+	o.uid = uid
+	return uid
 }
 
 // SerializeSize returns the length of the serialized CancelOrder.
