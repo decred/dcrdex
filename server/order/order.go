@@ -62,6 +62,9 @@ type Order interface {
 	// reflect the intent of providing a unique identifier.
 	UID() string
 
+	// User gives the user's account ID.
+	User() account.AccountID
+
 	// Serialize marshals the order. Serialization is detailed in the 'Client
 	// Order Management' section of the DEX specification.
 	Serialize() []byte
@@ -77,6 +80,10 @@ type Order interface {
 
 	// Remaining computes the unfilled amount of the order.
 	Remaining() uint64
+
+	// SwapAddress returns the order's payment address. Will be empty string for
+	// CancelOrder.
+	SwapAddress() string
 }
 
 // An order's ID is computed as the Blake-256 hash of the serialized order.
@@ -130,6 +137,11 @@ func (p *Prefix) SerializeSize() int {
 // Time returns the order prefix's server time as a UNIX epoch time.
 func (p *Prefix) Time() int64 {
 	return p.ServerTime.Unix()
+}
+
+// User gives the user's account ID.
+func (p *Prefix) User() account.AccountID {
+	return p.AccountID
 }
 
 // Serialize marshals the Prefix into a []byte.
@@ -197,6 +209,11 @@ func (o *MarketOrder) UID() string {
 	uid := o.ID().String()
 	o.uid = uid
 	return uid
+}
+
+// SwapAddress returns the order's payment address.
+func (o *MarketOrder) SwapAddress() string {
+	return o.Address
 }
 
 // SerializeSize returns the length of the serialized MarketOrder.
@@ -373,6 +390,12 @@ func (o *CancelOrder) Type() OrderType {
 // Remaining always returns 0 for a CancelOrder.
 func (o *CancelOrder) Remaining() uint64 {
 	return 0
+}
+
+// SwapAddress returns the order's payment address, which is an empty string
+// for a CancelOrder.
+func (o *CancelOrder) SwapAddress() string {
+	return ""
 }
 
 // Ensure CancelOrder is an Order.

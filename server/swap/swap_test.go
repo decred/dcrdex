@@ -1,0 +1,1604 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
+package swap
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/decred/dcrdex/server/account"
+	"github.com/decred/dcrdex/server/asset"
+	"github.com/decred/dcrdex/server/comms/rpc"
+	"github.com/decred/dcrdex/server/matcher"
+	"github.com/decred/dcrdex/server/order"
+)
+
+const (
+	ABCID = 123
+	XYZID = 789
+)
+
+var (
+	testCtx      context.Context
+	acctTemplate = account.AccountID{
+		0x22, 0x4c, 0xba, 0xaa, 0xfa, 0x80, 0xbf, 0x3b, 0xd1, 0xff, 0x73, 0x15,
+		0x90, 0xbc, 0xbd, 0xda, 0x5a, 0x76, 0xf9, 0x1e, 0x60, 0xa1, 0x56, 0x99,
+		0x46, 0x34, 0xe9, 0x1c, 0xaa, 0xaa, 0xaa, 0xaa,
+	}
+	acctCounter uint32 = 0
+)
+
+type tUser struct {
+	sig      []byte
+	sigHex   string
+	acct     account.AccountID
+	addr     string
+	lbl      string
+	matchIDs []string
+}
+
+func tickMempool() {
+	time.Sleep(recheckInterval * 3 / 2)
+}
+
+func timeOutMempool() {
+	time.Sleep(txWaitExpiration * 3 / 2)
+}
+
+func timeoutBroadcast() {
+	// swapper.bTimeout is 5*txWaitExpiration for testing
+	time.Sleep(txWaitExpiration * 6)
+}
+
+// A new tUser with a unique account ID, signature, and address.
+func tNewUser(lbl string) *tUser {
+	intBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(intBytes, acctCounter)
+	acctID := account.AccountID{}
+	copy(acctID[:], acctTemplate[:])
+	copy(acctID[account.HashSize-4:], intBytes)
+	addr := strconv.Itoa(int(acctCounter))
+	sig := []byte{0xab} // Just to differentiate from the addr.
+	sig = append(sig, intBytes...)
+	sigHex := hex.EncodeToString(sig)
+	acctCounter++
+	return &tUser{
+		sig:    sig,
+		sigHex: sigHex,
+		acct:   acctID,
+		addr:   addr,
+		lbl:    lbl,
+	}
+}
+
+type TRequest struct {
+	req      *rpc.Request
+	respFunc func(*rpc.Response)
+}
+
+// This stub satisfies AuthManager.
+type TAuthManager struct {
+	mtx     sync.Mutex
+	authErr error
+	reqs    map[account.AccountID][]*TRequest
+	resps   map[account.AccountID][]*rpc.Response
+	penalty struct {
+		violator account.AccountID
+		match    *order.Match
+		step     order.MatchStatus
+	}
+}
+
+func newTAuthManager() *TAuthManager {
+	return &TAuthManager{
+		reqs:  make(map[account.AccountID][]*TRequest),
+		resps: make(map[account.AccountID][]*rpc.Response),
+	}
+}
+
+func (m *TAuthManager) Respond(user account.AccountID, resp *rpc.Response) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	l := m.resps[user]
+	if l == nil {
+		l = make([]*rpc.Response, 0, 1)
+	}
+	m.resps[user] = append(l, resp)
+}
+
+func (m *TAuthManager) Request(user account.AccountID, req *rpc.Request, f func(*rpc.Response)) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	tReq := &TRequest{
+		req:      req,
+		respFunc: f,
+	}
+	l := m.reqs[user]
+	if l == nil {
+		l = make([]*TRequest, 0, 1)
+	}
+	m.reqs[user] = append(l, tReq)
+}
+func (m *TAuthManager) Sign(...rpc.Signable) {}
+func (m *TAuthManager) Auth(user account.AccountID, msg, sig []byte) error {
+	return m.authErr
+}
+func (m *TAuthManager) RegisterMethod(string,
+	func(account.AccountID, *rpc.Request) *rpc.RPCError) {
+}
+
+func (m *TAuthManager) Penalize(id account.AccountID, match *order.Match, step order.MatchStatus) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	m.penalty.violator = id
+	m.penalty.match = match
+	m.penalty.step = step
+}
+
+func (m *TAuthManager) flushPenalty() (account.AccountID, *order.Match, order.MatchStatus) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	user := m.penalty.violator
+	match := m.penalty.match
+	step := m.penalty.step
+	m.penalty.violator = account.AccountID{}
+	m.penalty.match = nil
+	m.penalty.step = 0
+	return user, match, step
+}
+
+func (m *TAuthManager) getReq(id account.AccountID) *TRequest {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	reqs := m.reqs[id]
+	if len(reqs) == 0 {
+		return nil
+	}
+	req := reqs[0]
+	m.reqs[id] = reqs[1:]
+	return req
+}
+
+func (m *TAuthManager) pushReq(id account.AccountID, req *TRequest) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	m.reqs[id] = append([]*TRequest{req}, m.reqs[id]...)
+}
+
+func (m *TAuthManager) pushResp(id account.AccountID, resp *rpc.Response) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	m.resps[id] = append([]*rpc.Response{resp}, m.resps[id]...)
+}
+
+func (m *TAuthManager) getResp(id account.AccountID) *rpc.Response {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	resps := m.resps[id]
+	if len(resps) == 0 {
+		return nil
+	}
+	resp := resps[0]
+	m.resps[id] = resps[1:]
+	return resp
+}
+
+type TStorage struct{}
+
+func (s *TStorage) UpdateMatch(match *order.Match) {}
+func (s *TStorage) CancelOrder(*order.LimitOrder)  {}
+
+// This stub satisfies asset.DEXAsset.
+type TAsset struct {
+	mtx     sync.RWMutex
+	utxo    asset.UTXO
+	utxoErr error
+	bChan   chan uint32
+	tx      asset.DEXTx
+	txErr   error
+	lbl     string
+}
+
+func newTAsset(lbl string) *TAsset {
+	return &TAsset{
+		bChan: make(chan uint32, 5),
+		lbl:   lbl,
+	}
+}
+
+func (a *TAsset) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
+	return a.utxo, a.utxoErr
+}
+func (a *TAsset) BlockChannel(size int) chan uint32 { return a.bChan }
+func (a *TAsset) Transaction(txid string) (asset.DEXTx, error) {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
+	if a.txErr != nil {
+		return nil, a.txErr
+	}
+	return a.tx, nil
+}
+func (a *TAsset) InitTxSize() uint32 { return 100 }
+
+func (a *TAsset) setTxErr(err error) {
+	a.mtx.Lock()
+	defer a.mtx.Unlock()
+	a.txErr = err
+}
+
+// This stub satisfies asset.Transaction, used by asset.DEXAsset.
+type TTransaction struct {
+	mtx       sync.RWMutex
+	confs     int64
+	confsErr  error
+	auditAddr string
+	auditVal  uint64
+}
+
+func (tx *TTransaction) Confirmations() (int64, error) {
+	tx.mtx.RLock()
+	defer tx.mtx.RUnlock()
+	return tx.confs, tx.confsErr
+}
+
+func (tx *TTransaction) setConfs(confs int64) {
+	tx.mtx.Lock()
+	defer tx.mtx.Unlock()
+	tx.confs = confs
+}
+
+const (
+	tNoSpoofSpendsUTXO = iota
+	tSpoofSpendsUTXOErr
+	tSpoofSpendsUTXONotFound
+)
+
+var tSpoofSpendsUTXO = tNoSpoofSpendsUTXO
+
+func (tx *TTransaction) SpendsUTXO(txid string, vout uint32) (bool, error) {
+	if tSpoofSpendsUTXO == tSpoofSpendsUTXOErr {
+		return false, fmt.Errorf("test error")
+	} else if tSpoofSpendsUTXO == tSpoofSpendsUTXONotFound {
+		return false, nil
+	}
+	return true, nil
+}
+
+var tAuditContractErr error = nil
+
+func (tx *TTransaction) AuditContract(vout uint32, contract []byte) (string, uint64, error) {
+	if tAuditContractErr != nil {
+		return "", 0, tAuditContractErr
+	}
+	return tx.auditAddr, tx.auditVal, nil
+}
+
+func TNewAsset(backend asset.DEXAsset) *asset.Asset {
+	return &asset.Asset{
+		Backend:  backend,
+		SwapConf: 2,
+	}
+}
+
+func tNewResponse(id interface{}, resp []byte) *rpc.Response {
+	return &rpc.Response{
+		ID:     &id,
+		Result: json.RawMessage(resp),
+	}
+}
+
+// testRig is the primary test data structure.
+type testRig struct {
+	abc       *asset.Asset
+	abcNode   *TAsset
+	xyz       *asset.Asset
+	xyzNode   *TAsset
+	auth      *TAuthManager
+	swapper   *Swapper
+	matches   *tMatchSet
+	matchInfo *tMatch
+}
+
+func tNewTestRig(matchInfo *tMatch) *testRig {
+	abcBackend := newTAsset("abc")
+	abcAsset := TNewAsset(abcBackend)
+	xyzBackend := newTAsset("xyz")
+	xyzAsset := TNewAsset(xyzBackend)
+	authMgr := newTAuthManager()
+	storage := &TStorage{}
+	swapper := NewSwapper(&Config{
+		Ctx: testCtx,
+		Assets: map[uint32]*asset.Asset{
+			ABCID: abcAsset,
+			XYZID: xyzAsset,
+		},
+		Storage:          storage,
+		AuthManager:      authMgr,
+		BroadcastTimeout: txWaitExpiration * 5,
+	})
+
+	return &testRig{
+		abc:       abcAsset,
+		abcNode:   abcBackend,
+		xyz:       xyzAsset,
+		xyzNode:   xyzBackend,
+		auth:      authMgr,
+		swapper:   swapper,
+		matchInfo: matchInfo,
+	}
+}
+
+func (rig *testRig) getTracker() *matchTracker {
+	return rig.swapper.matches[rig.matchInfo.matchID]
+}
+
+// Taker: Acknowledge the servers match notification.
+func (rig *testRig) ackMatch_maker(checkSig bool) (err error) {
+	matchInfo := rig.matchInfo
+	err = rig.ackMatch(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
+	if err != nil {
+		return err
+	}
+	if checkSig {
+		tracker := rig.getTracker()
+		if !bytes.Equal(tracker.Sigs.MakerMatch, matchInfo.maker.sig) {
+			return fmt.Errorf("expected maker audit signature '%x', got '%x'", matchInfo.maker.sig, tracker.Sigs.MakerMatch)
+		}
+	}
+	return nil
+}
+
+// Maker: Acknowledge the servers match notification.
+func (rig *testRig) ackMatch_taker(checkSig bool) error {
+	matchInfo := rig.matchInfo
+	err := rig.ackMatch(matchInfo.taker, matchInfo.takerOID, matchInfo.maker.addr)
+	if err != nil {
+		return err
+	}
+	if checkSig {
+		tracker := rig.getTracker()
+		if !bytes.Equal(tracker.Sigs.TakerMatch, matchInfo.taker.sig) {
+			return fmt.Errorf("expected taker audit signature '%x', got '%x'", matchInfo.taker.sig, tracker.Sigs.TakerMatch)
+		}
+	}
+	return nil
+}
+
+func (rig *testRig) ackMatch(user *tUser, oid, counterAddr string) error {
+	// If the match is already acked, which might be the case for the taker when
+	// an order.MatchSet hash multiple makers, skip the this step without error.
+	req := rig.auth.getReq(user.acct)
+	if req == nil {
+		return fmt.Errorf("failed to find match notification for %s", user.lbl)
+	}
+	if req.req.Method != rpc.MatchMethod {
+		return fmt.Errorf("expected method '%s', got '%s'", rpc.MatchMethod, req.req.Method)
+	}
+	err := rig.checkMatchNotification(req.req, oid, counterAddr)
+	if err != nil {
+		return err
+	}
+	// The maker and taker would sign the notifications and return a list of
+	// authorizations.
+	resp := tNewResponse(req.req.ID, tAckArr(user, user.matchIDs))
+	req.respFunc(resp)
+	return nil
+}
+
+// helper to check the match notifications.
+func (rig *testRig) checkMatchNotification(req *rpc.Request, oid, counterAddr string) error {
+	matchInfo := rig.matchInfo
+	var notes []*rpc.MatchNotification
+	err := json.Unmarshal(req.Params, &notes)
+	if err != nil {
+		fmt.Printf("checkMatchNotification unmarshal error: %v\n", err)
+	}
+	var notification *rpc.MatchNotification
+	for _, n := range notes {
+		if n.MatchID == matchInfo.matchID {
+			notification = n
+			break
+		}
+	}
+	if notification == nil {
+		return fmt.Errorf("did not find match ID %s in match notifications", matchInfo.matchID)
+	}
+	if notification.OrderID != oid {
+		return fmt.Errorf("expected order ID %s, got %s", oid, notification.OrderID)
+	}
+	if notification.Quantity != matchInfo.qty {
+		return fmt.Errorf("expected order quantity %d, got %d", matchInfo.qty, notification.Quantity)
+	}
+	if notification.Rate != matchInfo.rate {
+		return fmt.Errorf("expected match rate %d, got %d", matchInfo.rate, notification.Rate)
+	}
+	if notification.Address != counterAddr {
+		return fmt.Errorf("expected match address %s, got %s", counterAddr, notification.Address)
+	}
+	return nil
+}
+
+// Can be used to ensure that a non-error response is returned from the swapper.
+func (rig *testRig) checkResponse(user *tUser, txType string) error {
+	resp := rig.auth.getResp(user.acct)
+	if resp == nil {
+		return fmt.Errorf("unexpected nil response to %s's '%s'", user.lbl, txType)
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("%s swap rpc error. code: %d, msg: %s", user.lbl, resp.Error.Code, resp.Error.Message)
+	}
+	return nil
+}
+
+// Maker: Send swap transaction.
+func (rig *testRig) sendSwap_maker(checkStatus bool) (err error) {
+	matchInfo := rig.matchInfo
+	swap, err := rig.sendSwap(matchInfo.maker, matchInfo.makerOID, matchInfo.taker.addr)
+	if err != nil {
+		return fmt.Errorf("error sending maker swap transaction: %v", err)
+	}
+	matchInfo.db.makerSwap = swap
+	tracker := rig.getTracker()
+	// Check the match status.
+	if checkStatus {
+		if tracker.Status != order.MakerSwapCast {
+			return fmt.Errorf("unexpected swap status %d after maker swap notification", tracker.Status)
+		}
+		err := rig.checkResponse(matchInfo.maker, "init")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Taker: Send swap transaction.
+func (rig *testRig) sendSwap_taker(checkStatus bool) (err error) {
+	matchInfo := rig.matchInfo
+	taker := matchInfo.taker
+	swap, err := rig.sendSwap(taker, matchInfo.takerOID, matchInfo.maker.addr)
+	if err != nil {
+		return fmt.Errorf("error sending taker swap transaction: %v", err)
+	}
+	matchInfo.db.takerSwap = swap
+	if err != nil {
+		return err
+	}
+	tracker := rig.getTracker()
+	// Check the match status.
+	if checkStatus {
+		if tracker.Status != order.TakerSwapCast {
+			return fmt.Errorf("unexpected swap status %d after taker swap notification", tracker.Status)
+		}
+		err := rig.checkResponse(matchInfo.taker, "init")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (rig *testRig) sendSwap(user *tUser, oid, recipient string) (*tSwap, error) {
+	matchInfo := rig.matchInfo
+	swap := tNewSwap(matchInfo, oid, recipient, user)
+	if isQuoteSwap(user, matchInfo.match) {
+		rig.xyzNode.tx = swap.tx
+	} else {
+		rig.abcNode.tx = swap.tx
+	}
+	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
+	if rpcErr != nil {
+		resp, _ := rpc.NewResponse(swap.req.ID, nil, rpcErr)
+		rig.auth.Respond(user.acct, resp)
+		return nil, fmt.Errorf("%s swap rpc error. code: %d, msg: %s", user.lbl, rpcErr.Code, rpcErr.Message)
+	}
+	return swap, nil
+}
+
+// Taker: Process the 'audit' request from the swapper. The request should be
+// acknowledged separately with ackAudit_taker.
+func (rig *testRig) auditSwap_taker() error {
+	matchInfo := rig.matchInfo
+	req := rig.auth.getReq(matchInfo.taker.acct)
+	matchInfo.db.takerAudit = req
+	if req == nil {
+		return fmt.Errorf("failed to find audit request for taker after maker's init")
+	}
+	return rig.auditSwap(req.req, matchInfo.takerOID, matchInfo.db.makerSwap.contract, "taker", matchInfo.taker)
+}
+
+// Maker: Process the 'audit' request from the swapper. The request should be
+// acknowledged separately with ackAudit_maker.
+func (rig *testRig) auditSwap_maker() error {
+	matchInfo := rig.matchInfo
+	req := rig.auth.getReq(matchInfo.maker.acct)
+	matchInfo.db.makerAudit = req
+	if req == nil {
+		return fmt.Errorf("failed to find audit request for maker after taker's init")
+	}
+	return rig.auditSwap(req.req, matchInfo.makerOID, matchInfo.db.takerSwap.contract, "maker", matchInfo.maker)
+}
+
+func (rig *testRig) auditSwap(req *rpc.Request, oid, contract, msg string, user *tUser) error {
+	if req == nil {
+		return fmt.Errorf("no %s 'audit' request from DEX", user.lbl)
+	}
+
+	if req.Method != rpc.AuditMethod {
+		return fmt.Errorf("expected method '%s', got '%s'", rpc.AuditMethod, req.Method)
+	}
+	var params *rpc.AuditParams
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return fmt.Errorf("error unmarshaling audit params: %v", err)
+	}
+	if params.OrderID != oid {
+		return fmt.Errorf("%s : incorrect order ID in auditSwap, expected '%s', got '%s'", msg, oid, params.OrderID)
+	}
+	matchID := rig.matchInfo.matchID
+	if params.MatchID != matchID {
+		return fmt.Errorf("%s : incorrect match ID in auditSwap, expected '%s', got '%s'", msg, matchID, params.MatchID)
+	}
+	if params.Contract != contract {
+		return fmt.Errorf("%s : incorrect contract. expected '%s', got '%s'", msg, contract, params.Contract)
+	}
+	return nil
+}
+
+// Maker: Acknowledge the DEX 'audit' request.
+func (rig *testRig) ackAudit_maker(checkSig bool) error {
+	maker := rig.matchInfo.maker
+	err := rig.ackAudit(maker, rig.matchInfo.db.makerAudit)
+	if err != nil {
+		return err
+	}
+	if checkSig {
+		tracker := rig.getTracker()
+		if !bytes.Equal(tracker.Sigs.MakerAudit, maker.sig) {
+			return fmt.Errorf("expected taker audit signature '%x', got '%x'", maker.sig, tracker.Sigs.MakerAudit)
+		}
+	}
+	return nil
+}
+
+// Taker: Acknowledge the DEX 'audit' request.
+func (rig *testRig) ackAudit_taker(checkSig bool) error {
+	taker := rig.matchInfo.taker
+	err := rig.ackAudit(taker, rig.matchInfo.db.takerAudit)
+	if err != nil {
+		return err
+	}
+	if checkSig {
+		tracker := rig.getTracker()
+		if !bytes.Equal(tracker.Sigs.TakerAudit, taker.sig) {
+			return fmt.Errorf("expected taker audit signature '%x', got '%x'", taker.sig, tracker.Sigs.TakerAudit)
+		}
+	}
+	return nil
+}
+
+func (rig *testRig) ackAudit(user *tUser, req *TRequest) error {
+	if req == nil {
+		return fmt.Errorf("no %s 'audit' request from DEX", user.lbl)
+	}
+	req.respFunc(tNewResponse(req.req.ID, tAck(user, rig.matchInfo.matchID)))
+	return nil
+}
+
+// Maker: Redeem taker's swap transaction.
+func (rig *testRig) redeem_maker(checkStatus bool) error {
+	matchInfo := rig.matchInfo
+	matchInfo.db.makerRedeem = rig.redeem(matchInfo.maker, matchInfo.makerOID)
+	tracker := rig.getTracker()
+	// Check the match status
+	if checkStatus {
+		if tracker.Status != order.MakerRedeemed {
+			return fmt.Errorf("unexpected swap status %d after maker redeem notification", tracker.Status)
+		}
+		err := rig.checkResponse(matchInfo.maker, "redeem")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Taker: Redeem maker's swap transaction.
+func (rig *testRig) redeem_taker(checkStatus bool) error {
+	matchInfo := rig.matchInfo
+	matchInfo.db.takerRedeem = rig.redeem(matchInfo.taker, matchInfo.takerOID)
+	tracker := rig.getTracker()
+	// Check the match status
+	if checkStatus {
+		if tracker.Status != order.MatchComplete {
+			return fmt.Errorf("unexpected swap status %d after taker redeem notification", tracker.Status)
+		}
+		err := rig.checkResponse(matchInfo.taker, "redeem")
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (rig *testRig) redeem(user *tUser, oid string) *tRedeem {
+	matchInfo := rig.matchInfo
+	redeem := tNewRedeem(matchInfo, oid, user)
+	if isQuoteSwap(user, matchInfo.match) {
+		rig.abcNode.tx = redeem.tx
+	} else {
+		rig.xyzNode.tx = redeem.tx
+	}
+	rpcErr := rig.swapper.handleRedeem(user.acct, redeem.req)
+	if rpcErr != nil {
+		resp, _ := rpc.NewResponse(redeem.req.ID, nil, rpcErr)
+		rig.auth.Respond(user.acct, resp)
+	}
+	return redeem
+}
+
+// Taker: Acknowledge the DEX 'redemption' request.
+func (rig *testRig) ackRedemption_taker(checkSig bool) error {
+	matchInfo := rig.matchInfo
+	err := rig.ackRedemption(matchInfo.taker, matchInfo.takerOID, matchInfo.db.makerRedeem)
+	if err != nil {
+		return err
+	}
+	if checkSig {
+		tracker := rig.getTracker()
+		if !bytes.Equal(tracker.Sigs.TakerRedeem, matchInfo.taker.sig) {
+			return fmt.Errorf("expected taker redemption signature '%x', got '%x'", matchInfo.taker.sig, tracker.Sigs.TakerRedeem)
+		}
+	}
+	return nil
+}
+
+// Maker: Acknowledge the DEX 'redemption' request.
+func (rig *testRig) ackRedemption_maker(checkSig bool) error {
+	matchInfo := rig.matchInfo
+	err := rig.ackRedemption(matchInfo.maker, matchInfo.makerOID, matchInfo.db.takerRedeem)
+	if err != nil {
+		return err
+	}
+	if checkSig {
+		tracker := rig.getTracker()
+		if !bytes.Equal(tracker.Sigs.MakerRedeem, matchInfo.maker.sig) {
+			return fmt.Errorf("expected maker redemption signature '%x', got '%x'", matchInfo.maker.sig, tracker.Sigs.MakerRedeem)
+		}
+	}
+	return nil
+}
+
+func (rig *testRig) ackRedemption(user *tUser, oid string, redeem *tRedeem) error {
+	if redeem == nil {
+		return fmt.Errorf("nil redeem info")
+	}
+	req := rig.auth.getReq(user.acct)
+	if req == nil {
+		return fmt.Errorf("failed to find audit request for %s after counterparty's init", user.lbl)
+	}
+	err := rig.checkRedeem(req.req, oid, redeem.txid, user.lbl)
+	if err != nil {
+		return err
+	}
+	req.respFunc(tNewResponse(req.req.ID, tAck(user, rig.matchInfo.matchID)))
+	return nil
+}
+
+func (rig *testRig) checkRedeem(req *rpc.Request, oid, txid, msg string) error {
+	var params *rpc.RedemptionParams
+	err := json.Unmarshal(req.Params, &params)
+	if err != nil {
+		return fmt.Errorf("error unmarshaling redeem params: %v", err)
+	}
+	if params.OrderID != oid {
+		return fmt.Errorf("%s : incorrect order ID in checkRedeem, expected '%s', got '%s'", msg, oid, params.OrderID)
+	}
+	matchID := rig.matchInfo.matchID
+	if params.MatchID != matchID {
+		return fmt.Errorf("%s : incorrect match ID in checkRedeem, expected '%s', got '%s'", msg, matchID, params.MatchID)
+	}
+	if params.TxID != txid {
+		return fmt.Errorf("%s : incorrect txid in checkRedeem. expected '%s', got '%s'", msg, txid, params.TxID)
+	}
+	return nil
+}
+
+func makeCancelOrder(limitOrder *order.LimitOrder, user *tUser) *order.CancelOrder {
+	return &order.CancelOrder{
+		Prefix: order.Prefix{
+			AccountID:  user.acct,
+			BaseAsset:  limitOrder.BaseAsset,
+			QuoteAsset: limitOrder.QuoteAsset,
+			OrderType:  order.CancelOrderType,
+			ClientTime: time.Now(),
+			ServerTime: time.Now(),
+		},
+		TargetOrderID: limitOrder.ID(),
+	}
+}
+
+func makeLimitOrder(qty, rate uint64, user *tUser, makerSell bool) *order.LimitOrder {
+	return &order.LimitOrder{
+		MarketOrder: order.MarketOrder{
+			Prefix: order.Prefix{
+				AccountID:  user.acct,
+				BaseAsset:  ABCID,
+				QuoteAsset: XYZID,
+				OrderType:  order.LimitOrderType,
+			},
+			Sell:     makerSell,
+			Quantity: qty,
+			Address:  user.addr,
+		},
+		Rate: rate,
+	}
+}
+
+func makeMarketOrder(qty uint64, user *tUser, makerSell bool) *order.MarketOrder {
+	return &order.MarketOrder{
+		Prefix: order.Prefix{
+			AccountID:  user.acct,
+			BaseAsset:  ABCID,
+			QuoteAsset: XYZID,
+			OrderType:  order.LimitOrderType,
+		},
+		Sell:     makerSell,
+		Quantity: qty,
+		Address:  user.addr,
+	}
+}
+
+func limitLimitPair(makerQty, takerQty, makerRate, takerRate uint64, maker, taker *tUser, makerSell bool) (*order.LimitOrder, *order.LimitOrder) {
+	return makeLimitOrder(makerQty, makerRate, maker, makerSell), makeLimitOrder(takerQty, takerRate, taker, !makerSell)
+}
+
+func marketLimitPair(makerQty, takerQty, rate uint64, maker, taker *tUser, makerSell bool) (*order.LimitOrder, *order.MarketOrder) {
+	return makeLimitOrder(makerQty, rate, maker, makerSell), makeMarketOrder(takerQty, taker, !makerSell)
+}
+
+func tLimitPair(makerQty, takerQty, matchQty, makerRate, takerRate uint64, sell bool) *tMatchSet {
+	set := new(tMatchSet)
+	maker, taker := tNewUser("maker"), tNewUser("taker")
+	makerOrder, takerOrder := limitLimitPair(makerQty, takerQty, makerRate, takerRate, maker, taker, sell)
+	return set.add(tMatchInfo(maker, taker, matchQty, makerRate, makerOrder, takerOrder))
+}
+
+func tPerfectLimitLimit(qty, rate uint64, sell bool) *tMatchSet {
+	return tLimitPair(qty, qty, qty, rate, rate, sell)
+}
+
+func tMarketPair(makerQty, takerQty, rate uint64, makerSell bool) *tMatchSet {
+	set := new(tMatchSet)
+	maker, taker := tNewUser("maker"), tNewUser("taker")
+	makerOrder, takerOrder := marketLimitPair(makerQty, takerQty, rate, maker, taker, makerSell)
+	return set.add(tMatchInfo(maker, taker, makerQty, rate, makerOrder, takerOrder))
+}
+
+func tPerfectLimitMarket(qty, rate uint64, sell bool) *tMatchSet {
+	return tMarketPair(qty, qty, rate, sell)
+}
+
+func tCancelPair() *tMatchSet {
+	set := new(tMatchSet)
+	user := tNewUser("user")
+	qty := uint64(1e8)
+	rate := uint64(1e8)
+	makerOrder := makeLimitOrder(qty, rate, user, true)
+	cancelOrder := makeCancelOrder(makerOrder, user)
+	return set.add(tMatchInfo(user, user, qty, rate, makerOrder, cancelOrder))
+}
+
+// tMatch is the match info for a single match. A tMatch is typically created
+// with tMatchInfo.
+type tMatch struct {
+	match    *order.Match
+	matchID  string
+	makerOID string
+	takerOID string
+	qty      uint64
+	rate     uint64
+	maker    *tUser
+	taker    *tUser
+	db       struct {
+		makerRedeem *tRedeem
+		takerRedeem *tRedeem
+		makerSwap   *tSwap
+		takerSwap   *tSwap
+		makerAudit  *TRequest
+		takerAudit  *TRequest
+	}
+}
+
+func makeAck(id string, sig string) rpc.AcknowledgementResult {
+	return rpc.AcknowledgementResult{
+		MatchID: id,
+		Sig:     sig,
+	}
+}
+
+func tAck(user *tUser, matchID string) []byte {
+	b, _ := json.Marshal(makeAck(matchID, user.sigHex))
+	return b
+}
+
+func tAckArr(user *tUser, matchIDs []string) []byte {
+	ackArr := make([]rpc.AcknowledgementResult, 0, len(matchIDs))
+	for _, matchID := range matchIDs {
+		ackArr = append(ackArr, makeAck(matchID, user.sigHex))
+	}
+	b, _ := json.Marshal(ackArr)
+	return b
+}
+
+func tMatchInfo(maker, taker *tUser, matchQty, matchRate uint64, makerOrder *order.LimitOrder, takerOrder order.Order) *tMatch {
+	match := &order.Match{
+		Taker:    takerOrder,
+		Maker:    makerOrder,
+		Quantity: matchQty,
+		Rate:     matchRate,
+	}
+	matchID := match.ID().String()
+	maker.matchIDs = append(maker.matchIDs, matchID)
+	taker.matchIDs = append(taker.matchIDs, matchID)
+	return &tMatch{
+		match:    match,
+		qty:      matchQty,
+		rate:     matchRate,
+		matchID:  matchID,
+		makerOID: makerOrder.ID().String(),
+		takerOID: takerOrder.ID().String(),
+		maker:    maker,
+		taker:    taker,
+	}
+}
+
+type tMatches []*tMatch
+
+// Matches are submitted to the swapper in small batches, one for each taker.
+type tMatchSet struct {
+	matchSet   *order.MatchSet
+	matchInfos tMatches
+}
+
+// Add a new match to the tMatchSet.
+func (set *tMatchSet) add(matchInfo *tMatch) *tMatchSet {
+	match := matchInfo.match
+	if set.matchSet == nil {
+		set.matchSet = &order.MatchSet{Taker: match.Taker}
+	}
+	if set.matchSet.Taker.User() != match.Taker.User() {
+		fmt.Println("!!!tMatchSet taker mismatch!!!")
+	}
+	ms := set.matchSet
+	ms.Makers = append(ms.Makers, match.Maker)
+	ms.Amounts = append(ms.Amounts, matchInfo.qty)
+	ms.Rates = append(ms.Rates, matchInfo.rate)
+	ms.Total += matchInfo.qty
+	set.matchInfos = append(set.matchInfos, matchInfo)
+	return set
+}
+
+// Either a market or limit order taker, and any number of makers.
+func tMultiMatchSet(matchQtys, rates []uint64, makerSell bool, isMarket bool) *tMatchSet {
+	var sum uint64
+	for _, v := range matchQtys {
+		sum += v
+	}
+	// Taker order can be > sum of match amounts
+	taker := tNewUser("taker")
+	var takerOrder order.Order
+	if isMarket {
+		takerOrder = makeMarketOrder(sum*5/4, taker, !makerSell)
+	} else {
+		takerOrder = makeLimitOrder(sum*5/4, rates[0], taker, !makerSell)
+	}
+	set := new(tMatchSet)
+	for i, v := range matchQtys {
+		maker := tNewUser("maker" + strconv.Itoa(int(i)))
+		// Alternate market and limit orders
+		makerOrder := makeLimitOrder(v, rates[i], maker, makerSell)
+		matchInfo := tMatchInfo(maker, taker, v, rates[i], makerOrder, takerOrder)
+		set.add(matchInfo)
+	}
+	return set
+}
+
+// tSwap is the information needed for spoofing a swap transaction.
+type tSwap struct {
+	tx       *TTransaction
+	req      *rpc.Request
+	contract string
+}
+
+var tValSpoofer uint64 = 1
+var tRecipientSpoofer = ""
+
+func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
+	auditVal := matchInfo.qty
+	if isQuoteSwap(user, matchInfo.match) {
+		auditVal = matcher.BaseToQuote(matchInfo.rate, matchInfo.qty)
+	}
+	makerSwap := &TTransaction{
+		confs:     0,
+		auditAddr: recipient + tRecipientSpoofer,
+		auditVal:  auditVal * tValSpoofer,
+	}
+	contract := "01234567" + user.sigHex
+	req, _ := rpc.NewRequest(0, rpc.InitMethod, &rpc.InitParams{
+		OrderID: oid,
+		MatchID: matchInfo.matchID,
+		// We control what the backend returns, so the txid doesn't matter right now.
+		TxID:     "swapabc",
+		Time:     uint64(time.Now().Unix()),
+		Contract: contract,
+	})
+
+	return &tSwap{
+		tx:       makerSwap,
+		req:      req,
+		contract: contract,
+	}
+}
+
+func isQuoteSwap(user *tUser, match *order.Match) bool {
+	makerSell := match.Maker.Sell
+	isMaker := user.acct == match.Maker.User()
+	return (isMaker && !makerSell) || (!isMaker && makerSell)
+}
+
+// tRedeem is the information needed to spoof a redemption transaction.
+type tRedeem struct {
+	req  *rpc.Request
+	tx   *TTransaction
+	txid string
+}
+
+func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {
+	txid := "987654" + user.sigHex
+	req, _ := rpc.NewRequest(0, rpc.InitMethod, &rpc.RedeemParams{
+		OrderID: oid,
+		MatchID: matchInfo.matchID,
+		TxID:    txid,
+		Time:    uint64(time.Now().Unix()),
+	})
+	return &tRedeem{
+		req:  req,
+		tx:   &TTransaction{},
+		txid: txid,
+	}
+}
+
+// Create a closure that will call t.Fatal if an error is non-nil.
+func makeEnsureNilErr(t *testing.T) func(error) {
+	return func(err error) {
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+}
+
+func makeMustBeError(t *testing.T) func(error, string) {
+	return func(err error, tag string) {
+		if err == nil {
+			t.Fatalf("no error for %s", tag)
+		}
+	}
+}
+
+// Create a closure that will call t.Fatal if a user doesn't have an
+// rpc.RPCError of the correct type.
+func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
+	return func(user *tUser) {
+		resp := rig.auth.getResp(user.acct)
+		if resp == nil {
+			t.Fatalf("no response for %s", user.lbl)
+		}
+		if resp.Error == nil {
+			t.Fatalf("no error for %s", user.lbl)
+		}
+		if resp.Error.Code != code {
+			t.Fatalf("wrong error code for %s. expected %d, got %d", user.lbl, rpc.SignatureError, resp.Error.Code)
+		}
+	}
+}
+
+func TestMain(m *testing.M) {
+	recheckInterval = time.Millisecond * 5
+	txWaitExpiration = time.Millisecond * 50
+	var shutdown func()
+	testCtx, shutdown = context.WithCancel(context.Background())
+	defer shutdown()
+	// logger := slog.NewBackend(os.Stdout).Logger("COMMSTEST")
+	// logger.SetLevel(slog.LevelTrace)
+	// UseLogger(logger)
+	os.Exit(m.Run())
+}
+
+func testSwap(t *testing.T, rig *testRig) {
+	ensureNilErr := makeEnsureNilErr(t)
+
+	// Step through the negotiation process. No errors should be generated.
+	var takerAcked bool
+	for _, matchInfo := range rig.matches.matchInfos {
+		rig.matchInfo = matchInfo
+		ensureNilErr(rig.ackMatch_maker(true))
+		if !takerAcked {
+			ensureNilErr(rig.ackMatch_taker(true))
+			takerAcked = true
+		}
+		ensureNilErr(rig.sendSwap_maker(true))
+		ensureNilErr(rig.auditSwap_taker())
+		ensureNilErr(rig.ackAudit_taker(true))
+		ensureNilErr(rig.sendSwap_taker(true))
+		ensureNilErr(rig.auditSwap_maker())
+		ensureNilErr(rig.ackAudit_maker(true))
+		ensureNilErr(rig.redeem_maker(true))
+		ensureNilErr(rig.ackRedemption_taker(true))
+		ensureNilErr(rig.redeem_taker(true))
+		ensureNilErr(rig.ackRedemption_maker(true))
+	}
+}
+
+func TestSwaps(t *testing.T) {
+	rig := tNewTestRig(nil)
+	for _, makerSell := range []bool{true, false} {
+		sellStr := " buy"
+		if makerSell {
+			sellStr = " sell"
+		}
+		t.Run("perfect limit-limit match"+sellStr, func(t *testing.T) {
+			rig.matches = tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			testSwap(t, rig)
+		})
+		t.Run("perfect limit-market match"+sellStr, func(t *testing.T) {
+			rig.matches = tPerfectLimitMarket(uint64(1e8), uint64(1e8), makerSell)
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			testSwap(t, rig)
+		})
+		t.Run("imperfect limit-market match"+sellStr, func(t *testing.T) {
+			// only requirement is that maker val > taker val.
+			rig.matches = tMarketPair(uint64(10e8), uint64(2e8), uint64(5e8), makerSell)
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			testSwap(t, rig)
+		})
+		t.Run("imperfect limit-limit match"+sellStr, func(t *testing.T) {
+			rig.matches = tLimitPair(uint64(10e8), uint64(2e8), uint64(2e8), uint64(5e8), uint64(5e8), makerSell)
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			testSwap(t, rig)
+		})
+		for _, isMarket := range []bool{true, false} {
+			marketStr := " limit"
+			if isMarket {
+				marketStr = " market"
+			}
+			t.Run("three match set"+sellStr+marketStr, func(t *testing.T) {
+				matchQtys := []uint64{uint64(1e8), uint64(9e8), uint64(3e8)}
+				rates := []uint64{uint64(10e8), uint64(11e8), uint64(12e8)}
+				rig.matches = tMultiMatchSet(matchQtys, rates, makerSell, isMarket)
+				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+				testSwap(t, rig)
+			})
+		}
+	}
+}
+
+func TestNoAck(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig := tNewTestRig(matchInfo)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	ensureNilErr := makeEnsureNilErr(t)
+	mustBeError := makeMustBeError(t)
+	maker, taker := matchInfo.maker, matchInfo.taker
+
+	// Check that the response from the Swapper is an rpc.SettlementSequenceError.
+	checkSeqError := func(user *tUser) {
+		resp := rig.auth.getResp(user.acct)
+		if resp == nil || resp.Error == nil {
+			t.Fatalf("no error for %s", user.lbl)
+		}
+		if resp.Error.Code != rpc.SettlementSequenceError {
+			t.Fatalf("wrong rpc error for %s. expected %d, got %d", user.lbl, rpc.SettlementSequenceError, resp.Error.Code)
+		}
+	}
+
+	// Don't acknowledge from either side yet. Have the maker broadcast their swap
+	// transaction
+	mustBeError(rig.sendSwap_maker(true), "maker swap send")
+	checkSeqError(maker)
+	ensureNilErr(rig.ackMatch_maker(true))
+	// Should be good to send the swap now.
+	ensureNilErr(rig.sendSwap_maker(true))
+	// For the taker, there must be two acknowledgements before broadcasting the
+	// swap transaction, the match ack and the audit ack.
+	mustBeError(rig.sendSwap_taker(true), "no match-ack taker swap send")
+	checkSeqError(taker)
+	ensureNilErr(rig.ackMatch_taker(true))
+	// Try to send the swap without acknowleding the 'audit'.
+	mustBeError(rig.sendSwap_taker(true), "no audit-ack taker swap send")
+	checkSeqError(taker)
+	ensureNilErr(rig.auditSwap_taker())
+	ensureNilErr(rig.ackAudit_taker(true))
+	ensureNilErr(rig.sendSwap_taker(true))
+	// The maker should have received an 'audit' request. Don't acknowledge yet.
+	mustBeError(rig.redeem_maker(true), "maker redeem")
+	checkSeqError(maker)
+	ensureNilErr(rig.auditSwap_maker())
+	ensureNilErr(rig.ackAudit_maker(true))
+	ensureNilErr(rig.redeem_maker(true))
+	// The taker should have received a 'redemption' request. Don't acknowledge
+	// yet.
+	mustBeError(rig.redeem_taker(true), "taker redeem")
+	checkSeqError(taker)
+	ensureNilErr(rig.ackRedemption_taker(true))
+	ensureNilErr(rig.redeem_taker(true))
+	ensureNilErr(rig.ackRedemption_maker(true))
+}
+
+func TestTxWaiters(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig := tNewTestRig(matchInfo)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	ensureNilErr := makeEnsureNilErr(t)
+	dummyError := fmt.Errorf("test error")
+
+	// Get the MatchNotifications that the swapper sent to the clients and check
+	// the match notification length, content, IDs, etc.
+	ensureNilErr(rig.ackMatch_maker(true))
+	ensureNilErr(rig.ackMatch_taker(true))
+	// Set an error for the maker's swap asset
+	rig.abcNode.setTxErr(dummyError)
+	// The error will be generated by the chainWaiter thread, so will need to
+	// check the response.
+	ensureNilErr(rig.sendSwap_maker(false))
+	timeOutMempool()
+	// Should have an rpc error.
+	resp := rig.auth.getResp(matchInfo.maker.acct)
+	if resp == nil {
+		t.Fatalf("no response for erroneous maker swap")
+	}
+	if resp.Error == nil {
+		t.Fatalf("no rpc error for erroneous maker swap")
+	}
+
+	rig.abcNode.setTxErr(nil)
+	// Everything should work now.
+	ensureNilErr(rig.sendSwap_maker(true))
+	ensureNilErr(rig.auditSwap_taker())
+	ensureNilErr(rig.ackAudit_taker(true))
+	// For the taker swap, simulate latency.
+	rig.xyzNode.setTxErr(dummyError)
+	ensureNilErr(rig.sendSwap_taker(false))
+	// Wait a tick
+	tickMempool()
+	// There should not be a response yet.
+	resp = rig.auth.getResp(matchInfo.taker.acct)
+	if resp != nil {
+		t.Fatalf("unexpected response for latent taker swap")
+	}
+	// Clear the error.
+	rig.xyzNode.setTxErr(nil)
+	tickMempool()
+	resp = rig.auth.getResp(matchInfo.taker.acct)
+	if resp == nil {
+		t.Fatalf("no response for erroneous taker swap")
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error for erroneous taker swap. code: %d, msg: %s",
+			resp.Error.Code, resp.Error.Message)
+	}
+	ensureNilErr(rig.auditSwap_maker())
+	ensureNilErr(rig.ackAudit_maker(true))
+
+	// Set a transaction error for the maker's redemption.
+	rig.xyzNode.setTxErr(dummyError)
+	ensureNilErr(rig.redeem_maker(false))
+	tickMempool()
+	tickMempool()
+	resp = rig.auth.getResp(matchInfo.maker.acct)
+	if resp != nil {
+		t.Fatalf("unexpected response for latent maker redeem")
+	}
+	// Clear the error.
+	rig.xyzNode.setTxErr(nil)
+	tickMempool()
+	resp = rig.auth.getResp(matchInfo.maker.acct)
+	if resp == nil {
+		t.Fatalf("no response for erroneous maker redeem")
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error for erroneous maker redeem. code: %d, msg: %s",
+			resp.Error.Code, resp.Error.Message)
+	}
+	// Back to the taker, but let it timeout first, and then rebroadcast.
+	// Get the tracker now, since it will be removed from the match dict if
+	// everything goes right
+	tracker := rig.getTracker()
+	ensureNilErr(rig.ackRedemption_taker(true))
+	rig.abcNode.setTxErr(dummyError)
+	ensureNilErr(rig.redeem_taker(false))
+	timeOutMempool()
+	resp = rig.auth.getResp(matchInfo.taker.acct)
+	if resp == nil {
+		t.Fatalf("no response for erroneous taker redeem")
+	}
+	if resp.Error == nil {
+		t.Fatalf("no rpc error for erroneous maker redeem")
+	}
+	rig.abcNode.setTxErr(nil)
+	ensureNilErr(rig.redeem_taker(true))
+	// Set the number of confirmations on the redemptions.
+	matchInfo.db.makerRedeem.tx.setConfs(int64(rig.xyz.SwapConf))
+	matchInfo.db.takerRedeem.tx.setConfs(int64(rig.abc.SwapConf))
+	// send a block through for either chain to trigger a completion check.
+	rig.xyzNode.bChan <- 1
+	tickMempool()
+	if tracker.Status != order.MatchComplete {
+		t.Fatalf("match not marked as complete: %d", tracker.Status)
+	}
+	// Make sure that the tracker is removed from swappers match map.
+	if rig.getTracker() != nil {
+		t.Fatalf("matchTracker not removed from swapper's match map")
+	}
+}
+
+func TestBroadcastTimeouts(t *testing.T) {
+	rig := tNewTestRig(nil)
+	ensureNilErr := makeEnsureNilErr(t)
+	sendBlock := func(node *TAsset) {
+		node.bChan <- 1
+		tickMempool()
+	}
+	checkRevokeMatch := func(user *tUser, i int) {
+		req := rig.auth.getReq(user.acct)
+		if req == nil {
+			t.Fatalf("no match_cancellation")
+		}
+		params := new(rpc.RevokeMatchParams)
+		err := json.Unmarshal(req.req.Params, &params)
+		if err != nil {
+			t.Fatalf("unmarshal error for %s at step %d: %s", user.lbl, i, string(req.req.Params))
+		}
+		if params.MatchID != rig.matchInfo.matchID {
+			t.Fatalf("unexpected revocation match ID for %s at step %d. expected %s, got %s",
+				user.lbl, i, rig.matchInfo.matchID, params.MatchID)
+		}
+		if req.req.Method != rpc.RevokeMatchMethod {
+			t.Fatalf("wrong request method for %s at step %d: expected '%s', got '%s'", user.lbl, i, rpc.RevokeMatchMethod, req.req.Method)
+		}
+	}
+	// tryExpire will sleep for the duration of a BroadcastTimeout, and then
+	// check that a penalty was assigned to the appropriate user, and that a
+	// revoke_match message is sent to both users.
+	tryExpire := func(i, j int, step order.MatchStatus, jerk, victim *tUser, node *TAsset) bool {
+		if i != j {
+			return false
+		}
+		// Sending a block through should schedule an inaction check after duration
+		// BroadcastTimeout.
+		sendBlock(node)
+		timeoutBroadcast()
+		user, match, lastStep := rig.auth.flushPenalty()
+		if match == nil {
+			t.Fatalf("no penalty at step %d", i)
+		}
+		if user != jerk.acct {
+			t.Fatalf("user mismatch at step %d", i)
+		}
+		if lastStep != step {
+			t.Fatalf("wrong match status at step %d. expected %d, got %d", i, step, lastStep)
+		}
+		// Make sure the specified user has a cancellation for this order
+		checkRevokeMatch(jerk, i)
+		checkRevokeMatch(victim, i)
+		return true
+	}
+	// Run a timeout test after every important step.
+	for i := 0; i <= 7; i++ {
+		set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+		matchInfo := set.matchInfos[0]
+		rig.matchInfo = matchInfo
+		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+		// Step through the negotiation process. No errors should be generated.
+		ensureNilErr(rig.ackMatch_maker(true))
+		ensureNilErr(rig.ackMatch_taker(true))
+		if tryExpire(i, 0, order.NewlyMatched, matchInfo.maker, matchInfo.taker, rig.abcNode) {
+			continue
+		}
+		if tryExpire(i, 1, order.NewlyMatched, matchInfo.maker, matchInfo.taker, rig.abcNode) {
+			continue
+		}
+		ensureNilErr(rig.sendSwap_maker(true))
+		matchInfo.db.makerSwap.tx.setConfs(int64(rig.abc.SwapConf))
+		// Do the audit here to clear the 'audit' request from the comms queue.
+		ensureNilErr(rig.auditSwap_taker())
+		sendBlock(rig.abcNode)
+		if tryExpire(i, 2, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, rig.xyzNode) {
+			continue
+		}
+		ensureNilErr(rig.ackAudit_taker(true))
+		if tryExpire(i, 3, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, rig.xyzNode) {
+			continue
+		}
+		ensureNilErr(rig.sendSwap_taker(true))
+		matchInfo.db.takerSwap.tx.setConfs(int64(rig.xyz.SwapConf))
+		// Do the audit here to clear the 'audit' request from the comms queue.
+		ensureNilErr(rig.auditSwap_maker())
+		sendBlock(rig.xyzNode)
+		if tryExpire(i, 4, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, rig.xyzNode) {
+			continue
+		}
+		ensureNilErr(rig.ackAudit_maker(true))
+		if tryExpire(i, 5, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, rig.xyzNode) {
+			continue
+		}
+		ensureNilErr(rig.redeem_maker(true))
+		matchInfo.db.makerRedeem.tx.setConfs(int64(rig.xyz.SwapConf))
+		// Ack the redemption here to clear the 'audit' request from the comms queue.
+		ensureNilErr(rig.ackRedemption_taker(true))
+		sendBlock(rig.xyzNode)
+		if tryExpire(i, 6, order.MakerRedeemed, matchInfo.taker, matchInfo.maker, rig.abcNode) {
+			continue
+		}
+		if tryExpire(i, 7, order.MakerRedeemed, matchInfo.taker, matchInfo.maker, rig.abcNode) {
+			continue
+		}
+		return
+	}
+}
+
+func TestSigErrors(t *testing.T) {
+	dummyError := fmt.Errorf("test error")
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig := tNewTestRig(matchInfo)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	ensureNilErr := makeEnsureNilErr(t)
+	// checkResp makes sure that the specified user has a signature error response
+	// from the swapper.
+	checkResp := rpcErrorChecker(t, rig, rpc.SignatureError)
+	// We need a way to restore the state of the queue.
+	var stashedReq *TRequest
+	var stashedResp *rpc.Response
+	apply := func(user *tUser) {
+		if stashedResp != nil {
+			rig.auth.pushResp(user.acct, stashedResp)
+		}
+		if stashedReq != nil {
+			rig.auth.pushReq(user.acct, stashedReq)
+		}
+	}
+	stash := func(user *tUser) {
+		stashedResp = rig.auth.getResp(user.acct)
+		stashedReq = rig.auth.getReq(user.acct)
+		apply(user)
+	}
+	testAction := func(stepFunc func(bool) error, user *tUser) {
+		rig.auth.authErr = dummyError
+		stash(user)
+		// I really don't care if this is an error. The error will be pulled from
+		// the auth manager. But golangci-lint really wants me to check the error.
+		err := stepFunc(false)
+		if err == nil && err != nil {
+			fmt.Printf("impossible")
+		}
+		checkResp(user)
+		rig.auth.authErr = nil
+		apply(user)
+		ensureNilErr(stepFunc(true))
+	}
+	maker, taker := matchInfo.maker, matchInfo.taker
+	testAction(rig.ackMatch_maker, maker)
+	testAction(rig.ackMatch_taker, taker)
+	testAction(rig.sendSwap_maker, maker)
+	ensureNilErr(rig.auditSwap_taker())
+	testAction(rig.ackAudit_taker, taker)
+	testAction(rig.sendSwap_taker, taker)
+	ensureNilErr(rig.auditSwap_maker())
+	testAction(rig.ackAudit_maker, maker)
+	testAction(rig.redeem_maker, maker)
+	testAction(rig.ackRedemption_taker, taker)
+	testAction(rig.redeem_taker, taker)
+	testAction(rig.ackRedemption_maker, maker)
+}
+
+func TestMalformedSwap(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig := tNewTestRig(matchInfo)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	ensureNilErr := makeEnsureNilErr(t)
+	checkContractErr := rpcErrorChecker(t, rig, rpc.ContractError)
+
+	ensureNilErr(rig.ackMatch_maker(true))
+	ensureNilErr(rig.ackMatch_taker(true))
+	// Bad contract value
+	tValSpoofer = 2
+	ensureNilErr(rig.sendSwap_maker(false))
+	checkContractErr(matchInfo.maker)
+	tValSpoofer = 1
+	// Bad contract recipient
+	tRecipientSpoofer = "2"
+	ensureNilErr(rig.sendSwap_maker(false))
+	checkContractErr(matchInfo.maker)
+	tRecipientSpoofer = ""
+	// Unspecified AuditContract error
+	tAuditContractErr = fmt.Errorf("test error")
+	ensureNilErr(rig.sendSwap_maker(false))
+	checkContractErr(matchInfo.maker)
+	tAuditContractErr = nil
+	// Now make sure it works.
+	ensureNilErr(rig.sendSwap_maker(true))
+}
+
+func TestBadRedeems(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig := tNewTestRig(matchInfo)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	ensureNilErr := makeEnsureNilErr(t)
+	checkResp := rpcErrorChecker(t, rig, rpc.RedemptionError)
+
+	// Negotiate up to the redeem transactions.
+	ensureNilErr(rig.ackMatch_maker(true))
+	ensureNilErr(rig.ackMatch_taker(true))
+	ensureNilErr(rig.sendSwap_maker(true))
+	ensureNilErr(rig.auditSwap_taker())
+	ensureNilErr(rig.ackAudit_taker(true))
+	ensureNilErr(rig.sendSwap_taker(true))
+	ensureNilErr(rig.auditSwap_maker())
+	ensureNilErr(rig.ackAudit_maker(true))
+	// SpendsUTXO -> false, nil
+	tSpoofSpendsUTXO = tSpoofSpendsUTXONotFound
+	ensureNilErr(rig.redeem_maker(false))
+	checkResp(matchInfo.maker)
+	// Unspoof
+	tSpoofSpendsUTXO = tNoSpoofSpendsUTXO
+	ensureNilErr(rig.redeem_maker(false))
+	ensureNilErr(rig.ackRedemption_taker(true))
+	// SpendsUTXO -> false, non-nil
+	tSpoofSpendsUTXO = tSpoofSpendsUTXOErr
+	ensureNilErr(rig.redeem_taker(false))
+	checkResp(matchInfo.taker)
+	// Unspoof
+	tSpoofSpendsUTXO = tNoSpoofSpendsUTXO
+	ensureNilErr(rig.redeem_taker(true))
+	ensureNilErr(rig.ackRedemption_maker(true))
+}
+
+func TestBadParams(t *testing.T) {
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+	matchInfo := set.matchInfos[0]
+	rig := tNewTestRig(matchInfo)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	swapper := rig.swapper
+	match := rig.getTracker()
+	user := matchInfo.maker
+	acker := &messageAcker{
+		user:    user.acct,
+		match:   match,
+		isMaker: true,
+		isAudit: true,
+	}
+	stepInfo := &stepInformation{
+		actor: stepActor{
+			user: user.acct,
+		},
+	}
+	resp, _ := rpc.NewResponse(0, nil, nil)
+	req, _ := rpc.NewRequest(0, "", nil)
+	// Use an invalid ID type
+	var invalidID interface{}
+	invalidID = struct{}{}
+	checkIDErr := rpcErrorChecker(t, rig, rpc.IDTypeError)
+	checkParseErr := rpcErrorChecker(t, rig, rpc.RPCParseError)
+	checkSigErr := rpcErrorChecker(t, rig, rpc.SignatureError)
+	checkAckCountErr := rpcErrorChecker(t, rig, rpc.AckCountError)
+	checkMismatchErr := rpcErrorChecker(t, rig, rpc.IDMismatchError)
+
+	ack := &rpc.AcknowledgementResult{
+		MatchID: matchInfo.matchID,
+		// non-hex characters
+		Sig: "zyxw",
+	}
+	ackArr := make([]*rpc.AcknowledgementResult, 0)
+	matches := []*messageAcker{
+		&messageAcker{match: rig.getTracker()},
+	}
+
+	encodedAck := func() json.RawMessage {
+		b, _ := json.Marshal(ack)
+		return json.RawMessage(b)
+	}
+	encodedAckArray := func() json.RawMessage {
+		b, _ := json.Marshal(ackArr)
+		return json.RawMessage(b)
+	}
+
+	// Check invalidID in a couple other places.
+	resp.ID = &invalidID
+	req.ID = invalidID
+	swapper.processAck(resp, acker)
+	checkIDErr(user)
+	swapper.processRedeem(req, nil, stepInfo)
+	checkIDErr(user)
+	swapper.processInit(req, nil, stepInfo)
+	checkIDErr(user)
+	swapper.processMatchAcks(user.acct, resp, []*messageAcker{})
+	checkIDErr(user)
+
+	// Fix the ID, but with invalid result
+	invalidID = 1
+	resp.ID = &invalidID
+	resp.Result = json.RawMessage([]byte("?"))
+	swapper.processAck(resp, acker)
+	checkParseErr(user)
+	swapper.processMatchAcks(user.acct, resp, []*messageAcker{})
+	checkParseErr(user)
+
+	resp.Result = encodedAck()
+	swapper.processAck(resp, acker)
+	checkSigErr(user)
+
+	resp.Result = encodedAckArray()
+	swapper.processMatchAcks(user.acct, resp, matches)
+	checkAckCountErr(user)
+
+	// check bad ack ID
+	ack.MatchID = "bogusid"
+	ackArr = append(ackArr, ack)
+	resp.Result = encodedAckArray()
+	swapper.processMatchAcks(user.acct, resp, matches)
+	checkMismatchErr(user)
+
+	// Fix the ID, but check for a sig error
+	ack.MatchID = matchInfo.matchID
+	resp.Result = encodedAckArray()
+	swapper.processMatchAcks(user.acct, resp, matches)
+	checkSigErr(user)
+}
+
+func TestCancel(t *testing.T) {
+	set := tCancelPair()
+	matchInfo := set.matchInfos[0]
+	rig := tNewTestRig(matchInfo)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	// There should be no matchTracker
+	if rig.getTracker() != nil {
+		t.Fatalf("found matchTracker for a cancellation")
+	}
+	// The user should have two match requests.
+	user := matchInfo.maker
+	req := rig.auth.getReq(user.acct)
+	matchNotes := make([]*rpc.MatchNotification, 0)
+	err := json.Unmarshal(req.req.Params, &matchNotes)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if len(matchNotes) != 2 {
+		t.Fatalf("expected 2 match notification, got %d", len(matchNotes))
+	}
+	makerNote, takerNote := matchNotes[0], matchNotes[1]
+	if makerNote.OrderID != matchInfo.makerOID {
+		t.Fatalf("expected maker ID %s, got %s", matchInfo.makerOID, makerNote.OrderID)
+	}
+	if takerNote.OrderID != matchInfo.takerOID {
+		t.Fatalf("expected taker ID %s, got %s", matchInfo.takerOID, takerNote.OrderID)
+	}
+	if makerNote.MatchID != takerNote.MatchID {
+		t.Fatalf("match ID mismatch. %s != %s", makerNote.MatchID, takerNote.MatchID)
+	}
+}
