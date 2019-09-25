@@ -1127,16 +1127,17 @@ This is by design and discourages certain types of spoofing.
 Swap negotiation details will be relayed through the DEX with a series of
 notifications or progress reports.
 Both the DEX and the clients will need to serialize and sign the notification
-data. The originator includes their signature with the JSON-RPC notification
-itself, while the recipient will return an '''acknowledgement object''', or a
-list of acknowledgement objects.
+data. The originator includes their signature with the JSON-RPC request
+<code>params</code>, while the recipient will return an
+'''acknowledgement object''', or a list of acknowledgement objects, as the
+<code>result</code> of their response.
 
 '''Acknowledgement object'''
 
 {|
 ! field     !! type   !! description
 |-
-| matchid   ||  int  || the match ID
+| matchid   ||  string  || the match ID
 |-
 | sig       ||  string || hex-encoded signature of the notification data.
 |}
@@ -1156,7 +1157,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | orderid   || string || order ID
 |-
-| matchid   || int    || the match ID to use for progress notifications
+| matchid   || string    || the match ID to use for progress notifications
 |-
 | quantity  || int    || the matched amount, in atoms of the base asset
 |-
@@ -1176,7 +1177,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |-
 | quantity   || 8  || the matched amount, in atoms of the base asset
 |-
@@ -1198,9 +1199,9 @@ relay to the matching party.
 {|
 ! field      !! type   !! description
 |-
-| orderid    || 32 || the order ID
+| orderid    || string || the order ID
 |-
-| matchid    || int    || the matchid, retrieved from the [[#Match_notifications|match notification]]
+| matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
 |-
 | txid       || string || the hex-encoded transaction ID
 |-
@@ -1218,9 +1219,9 @@ relay to the matching party.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| orderid    || 16 || the order ID
+| orderid    || 32 || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1247,7 +1248,7 @@ contract and issue their redemption.
 |-
 | orderid   || string || order ID
 |-
-| matchid   || int    || the match ID to use for progress notifications
+| matchid   || string || the match ID to use for progress notifications
 |-
 | timestamp || int  || server's UNIX timestamp
 |-
@@ -1263,7 +1264,7 @@ contract and issue their redemption.
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |-
 | timestamp  || 8  || server's UNIX timestamp
 |-
@@ -1279,9 +1280,9 @@ When a client has redeemed their contract, they will notify the server.
 {|
 ! field      !! type   !! description
 |-
-| orderid    || 32 || the order ID
+| orderid    || string || the order ID
 |-
-| matchid    || int    || the matchid, retrieved from the [[#Match_notifications|match notification]]
+| matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
 |-
 | txid       || string || the hex-encoded transaction ID
 |-
@@ -1297,9 +1298,9 @@ When a client has redeemed their contract, they will notify the server.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| orderid    || 16 || the order ID
+| orderid    || 32 || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1318,9 +1319,9 @@ key from the maker's redemption and broadcast their own redemption.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| orderid    || 16 || the order ID
+| orderid    || 32 || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1336,9 +1337,9 @@ key from the maker's redemption and broadcast their own redemption.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| orderid    || 16 || the order ID
+| orderid    || 32 || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1363,7 +1364,7 @@ The revoked match quantity is not added back to the order book in any form.
 |-
 | orderid  || string || order ID
 |-
-| matchid  ||  int  || the match ID
+| matchid  ||  string  || the match ID
 |-
 | sig      || string || DEX's hex-encoded signature of serialized revocation. serialization described below
 |}
@@ -1375,7 +1376,7 @@ The revoked match quantity is not added back to the order book in any form.
 |-
 | orderid    || 32  || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |}
 
 The client will respond with an acknowledgement.
@@ -1415,7 +1416,7 @@ does not reconnect before the next [[#Session_Authentication|startepoch]].
 | epoch      || int    || the epoch in which the suspension will start
 |-
 | persist    || bool   || whether standing limit order's will persist through the suspension
- |}
+|}
 
 ==Atomic Settlement==
 
