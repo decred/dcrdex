@@ -84,8 +84,7 @@ var timeZeroVal time.Time
 type rpcMethod func(*RPCClient, *rpc.Request) *rpc.RPCError
 
 // rpcMethods maps RPC command strings to appropriate websocket handler
-// functions.  This is set by init because help references rpcMethods and thus
-// causes a dependency loop.
+// functions.
 var rpcMethods map[string]rpcMethod
 
 // RegisterMethod registers a RPC handler for a specified method. The handler
@@ -131,7 +130,8 @@ type RPCServer struct {
 	// A simple counter for generating unique client IDs. The counter is also
 	// protected by the clientMtx.
 	counter uint64
-	// The quarantine map needs protection too.
+	// The quarantine map maps IP addresses to a time in which the quarantine will
+	// be lifted.
 	banMtx     sync.RWMutex
 	quarantine map[string]time.Time
 }
@@ -155,18 +155,17 @@ func NewRPCServer(cfg *RPCConfig) (*RPCServer, error) {
 		return nil, err
 	}
 
+	// Prepare the TLS configuration.
 	tlsConfig := tls.Config{
 		Certificates: []tls.Certificate{keypair},
 		MinVersion:   tls.VersionTLS12,
 	}
-
 	// Parse the specified listen addresses and create the []net.Listener.
 	ipv4ListenAddrs, ipv6ListenAddrs, _, err := parseListeners(cfg.ListenAddrs)
 	if err != nil {
 		return nil, err
 	}
-	listeners := make([]net.Listener, 0,
-		len(ipv6ListenAddrs)+len(ipv4ListenAddrs))
+	listeners := make([]net.Listener, 0, len(ipv6ListenAddrs)+len(ipv4ListenAddrs))
 	for _, addr := range ipv4ListenAddrs {
 		listener, err := tls.Listen("tcp4", addr, &tlsConfig)
 		if err != nil {
@@ -175,7 +174,6 @@ func NewRPCServer(cfg *RPCConfig) (*RPCServer, error) {
 		}
 		listeners = append(listeners, listener)
 	}
-
 	for _, addr := range ipv6ListenAddrs {
 		listener, err := tls.Listen("tcp6", addr, &tlsConfig)
 		if err != nil {
@@ -302,10 +300,8 @@ func (s *RPCServer) banish(ip string) {
 }
 
 // websocketHandler handles a new websocket client by creating a new wsClient,
-// starting it, and blocking until the connection closes.  Since it blocks, it
-// must be run in a goroutine.  It should be invoked from the websocket server
-// handler which runs each new connection in a new goroutine thereby satisfying
-// the requirement.
+// starting it, and blocking until the connection closes. This method should be
+// run in a goroutine.
 func (s *RPCServer) websocketHandler(conn wsConnection, ip string) {
 	log.Tracef("New websocket client %s", ip)
 
@@ -399,8 +395,8 @@ func parseListeners(addrs []string) ([]string, []string, bool, error) {
 			return nil, nil, false, err
 		}
 
-		// Empty host or host of * on plan9 is both IPv4 and IPv6.
-		if host == "" { // || (host == "*" && runtime.GOOS == "plan9") {
+		// Empty host is both IPv4 and IPv6.
+		if host == "" {
 			ipv4ListenAddrs = append(ipv4ListenAddrs, addr)
 			ipv6ListenAddrs = append(ipv6ListenAddrs, addr)
 			haveWildcard = true

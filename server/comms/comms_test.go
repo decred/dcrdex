@@ -202,7 +202,8 @@ func TestOffline(t *testing.T) {
 		}
 		return nil
 	})
-	// 'checkinvalid' should never be run, since the request has invalid formatting.
+	// 'checkinvalid' should never be run, since the request has invalid
+	// formatting.
 	passed := false
 	RegisterMethod("checkinvalid", func(_ *RPCClient, _ *rpc.Request) *rpc.RPCError {
 		testMtx.Lock()
@@ -217,7 +218,7 @@ func TestOffline(t *testing.T) {
 			Message: "somemessage",
 		}
 	})
-	// 'ban' quarantines the user.
+	// 'ban' quarantines the user using the RPCQuarantineClient error code.
 	RegisterMethod("ban", func(_ *RPCClient, _ *rpc.Request) *rpc.RPCError {
 		return &rpc.RPCError{
 			Code:    rpc.RPCQuarantineClient,
