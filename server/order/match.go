@@ -102,7 +102,7 @@ func (match *Match) ID() MatchID {
 
 // MatchSet represents the result of matching a single Taker order from the
 // epoch queue with one or more standing limit orders from the book, the Makers.
-// The Amounts and Rates of each stnding order paired are stored. The Rates
+// The Amounts and Rates of each standing order paired are stored. The Rates
 // slice is for convenience since each rate must be the same as the Maker's
 // rate. However, a amount in Amounts may be less than the full quantity of the
 // corresponding Maker order, indicating a partial fill of the Maker. The sum
