@@ -321,6 +321,24 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 	}, nil
 }
 
+// Get the value of the previous outpoint.
+func (btc *Backend) prevOutputValue(txid string, vout int) (uint64, error) {
+	txHash, err := chainhash.NewHashFromStr(txid)
+	if err != nil {
+		return 0, fmt.Errorf("error decoding tx hash %s: %v", txid, err)
+	}
+	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		return 0, err
+	}
+	if vout > len(verboseTx.Vout)-1 {
+		return 0, fmt.Errorf("prevOutput: vout index out of range")
+	}
+	output := verboseTx.Vout[vout]
+	v := uint64(output.Value * btcToSatoshi)
+	return v, nil
+}
+
 // Get the Tx. Transaction info is not cached, so every call will result in a
 // GetRawTransactionVerbose RPC call.
 func (btc *Backend) transaction(txHash *chainhash.Hash) (*Tx, error) {
@@ -353,16 +371,31 @@ func (btc *Backend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 
 	// Parse inputs and outputs, storing only what's needed.
 	inputs := make([]txIn, 0, len(verboseTx.Vin))
-	for _, input := range verboseTx.Vin {
+	var sumIn, sumOut, valIn uint64
+	for vin, input := range verboseTx.Vin {
+		if input.Coinbase != "" {
+			valIn = uint64(verboseTx.Vout[0].Value * btcToSatoshi)
+		} else {
+			valIn, err = btc.prevOutputValue(input.Txid, int(input.Vout))
+			if err != nil {
+				return nil, fmt.Errorf("error fetching previous output value for %s:%d: %v", txHash, vin, err)
+			}
+		}
+		sumIn += valIn
 		if input.Txid == "" {
-			inputs = append(inputs, txIn{vout: input.Vout})
+			inputs = append(inputs, txIn{
+				vout: input.Vout,
+			})
 			continue
 		}
 		hash, err := chainhash.NewHashFromStr(input.Txid)
 		if err != nil {
 			return nil, fmt.Errorf("error decoding previous tx hash %s for tx %s: %v", input.Txid, txHash, err)
 		}
-		inputs = append(inputs, txIn{prevTx: *hash, vout: input.Vout})
+		inputs = append(inputs, txIn{
+			prevTx: *hash,
+			vout:   input.Vout,
+		})
 	}
 
 	outputs := make([]txOut, 0, len(verboseTx.Vout))
@@ -372,12 +405,18 @@ func (btc *Backend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %v",
 				output.ScriptPubKey.Hex, txHash, vout, err)
 		}
+		vOut := uint64(output.Value * btcToSatoshi)
+		sumOut += vOut
 		outputs = append(outputs, txOut{
-			value:    uint64(output.Value * btcToSatoshi),
+			value:    vOut,
 			pkScript: pkScript,
 		})
 	}
-	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, inputs, outputs), nil
+	var feeRate uint64
+	if verboseTx.Size > 0 {
+		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
+	}
+	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, inputs, outputs, feeRate), nil
 }
 
 // Get information for an unspent transaction output and it's transaction.

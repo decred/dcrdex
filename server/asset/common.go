@@ -94,4 +94,6 @@ type DEXTx interface {
 	// hash specified in the output at the indicated vout. The receiving address
 	// and output value (in atoms) are returned if no error is encountered.
 	AuditContract(vout uint32, contract []byte) (string, uint64, error)
+	// FeeRate returns the transaction fee rate, in atoms/byte equivalent.
+	FeeRate() uint64
 }

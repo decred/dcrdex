@@ -374,6 +374,7 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 		BlockHash:     hash,
 		Confirmations: uint64(confirmations),
 	}
+
 }
 
 // Add a transaction output and it's getrawtransaction data.
@@ -1084,9 +1085,13 @@ func TestTx(t *testing.T) {
 	swapTxOut := swap.tx.TxOut[swap.vout]
 	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(swapTxOut.Value)/btcToSatoshi, swapTxOut.PkScript))
 	// Make an input spending some random utxo.
-	spentTx := randomHash()
-	spentVout := rand.Uint32()
-	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTx, spentVout))
+	spentTxHash := randomHash()
+	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTxHash, 0))
+	// We need to add that transaction to the blockchain too, because it will
+	// be requested for the previous outpoint value.
+	spentMsg := testMakeMsgTx(false)
+	spentTx := testAddTxVerbose(spentMsg.tx, spentTxHash, blockHash, 2)
+	spentTx.Vout = []btcjson.Vout{testVout(1, nil)}
 	// Get the transaction from the backend.
 	dexTx, err := btc.transaction(txHash)
 	if err != nil {
@@ -1101,7 +1106,7 @@ func TestTx(t *testing.T) {
 		t.Fatalf("expected 2 confirmations, but %d were reported", confs)
 	}
 	// Check that the spent tx is in dexTx.
-	spent, err := dexTx.SpendsUTXO(spentTx.String(), spentVout)
+	spent, err := dexTx.SpendsUTXO(spentTxHash.String(), 0)
 	if err != nil {
 		t.Fatalf("SpendsUTXO error: %v", err)
 	}

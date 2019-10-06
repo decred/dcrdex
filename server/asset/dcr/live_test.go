@@ -19,6 +19,11 @@
 // ------------------------------------------
 // Monitor the block chain for a while and make sure that the block cache is
 // updating appropriately.
+//
+// go test -v -tags btclive -run LiveFees
+// ------------------------------------------
+// Test that fees rates are parsed without error and that a few historical fee
+// rates are correct.
 
 package dcr
 
@@ -381,4 +386,79 @@ out:
 			break out
 		}
 	}
+}
+
+// Just some random on-chain tx fee rate data.
+var feeStandards = map[string]uint64{
+	"76634e947f49dfc6228c3e8a09cd3e9e15893439fc06df7df0fc6f08d659856c": 1007,
+	"71c413922061c5822b1031f9cfc36cd9f358aaf1b9e5d9fcef428aadf55da604": 100,
+	"56998118e785cecb187fd6eb64512b07e5c8df2e3c9636a3e7094f0cea3c07cb": 101,
+}
+
+// TestLiveFees scans block by block backwards, grabbing the Tx from the
+// backend for each transaction and taking stats on the fees. The random
+// on-chain data from feeStandards is also checked.
+func TestLiveFees(t *testing.T) {
+	type testStats struct {
+		count int
+		sum   int
+		start time.Time
+	}
+	client := dcr.client
+	stats := testStats{start: time.Now()}
+	numToDo := 100
+	nextHash, _, err := client.GetBestBlock()
+	if err != nil {
+		t.Fatalf("error retreiving best block info")
+	}
+out:
+	for {
+		block, err := client.GetBlockVerbose(nextHash, false)
+		if err != nil {
+			t.Fatalf("error retreving block %s: %v", nextHash, err)
+		}
+		nextHash, err = chainhash.NewHashFromStr(block.PreviousHash)
+		if err != nil {
+			t.Fatalf("error decoding block id %s: %v", block.PreviousHash, err)
+		}
+		for _, txid := range block.Tx {
+			txHash, err := chainhash.NewHashFromStr(txid)
+			if err != nil {
+				t.Fatalf("error parsing transaction hash from %s: %v", txid, err)
+			}
+			tx, err := dcr.transaction(txHash)
+			if err != nil {
+				t.Fatalf("error retreiving transaction %s: %v", txid, err)
+			}
+			stats.count++
+			stats.sum += int(tx.FeeRate())
+			if stats.count >= numToDo {
+				break out
+			}
+			prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
+			if err != nil {
+				t.Fatalf("error retrieving block %s: %v", block.PreviousHash, err)
+			}
+			block, err = dcr.node.GetBlockVerbose(prevHash, false)
+			if err != nil {
+				t.Fatalf("error getting block verbose %s: %v", txHash, err)
+			}
+		}
+	}
+	for txid, expRate := range feeStandards {
+		txHash, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			t.Fatalf("error parsing transaction hash from %s: %v", txid, err)
+		}
+		tx, err := dcr.transaction(txHash)
+		if err != nil {
+			t.Fatalf("error retreiving transaction %s", txid)
+		}
+		feeRate := tx.FeeRate()
+		if feeRate != expRate {
+			t.Fatalf("unexpected fee rate for %s. expected %d, got %d", txid, expRate, feeRate)
+		}
+	}
+	t.Logf("average per-tx fee rate: %d satoshi/byte", stats.sum/stats.count)
+	t.Logf("time per tx: %d ms", time.Since(stats.start).Milliseconds())
 }

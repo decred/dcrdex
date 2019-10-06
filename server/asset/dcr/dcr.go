@@ -192,6 +192,7 @@ func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 		}
 	}
 
+	var sumIn, sumOut uint64
 	// Parse inputs and outputs, grabbing only what's needed.
 	inputs := make([]txIn, 0, len(verboseTx.Vin))
 	for _, input := range verboseTx.Vin {
@@ -199,6 +200,7 @@ func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 			inputs = append(inputs, txIn{vout: input.Vout})
 			continue
 		}
+		sumIn += uint64(input.AmountIn * dcrToAtoms)
 		hash, err := chainhash.NewHashFromStr(input.Txid)
 		if err != nil {
 			return nil, fmt.Errorf("error decoding previous tx hash %sfor tx %s: %v", input.Txid, txHash, err)
@@ -213,12 +215,14 @@ func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %v",
 				output.ScriptPubKey.Hex, txHash, vout, err)
 		}
+		sumOut += uint64(output.Value * dcrToAtoms)
 		outputs = append(outputs, txOut{
 			value:    uint64(output.Value * dcrToAtoms),
 			pkScript: pkScript,
 		})
 	}
-	return newTransaction(dcr, txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, inputs, outputs), nil
+	feeRate := (sumIn - sumOut) / uint64(len(verboseTx.Hex)/2)
+	return newTransaction(dcr, txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, inputs, outputs, feeRate), nil
 }
 
 // Shutdown down the rpcclient.Client.
