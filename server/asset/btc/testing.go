@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -313,6 +314,69 @@ out:
 	} else {
 		t.Logf("no unknown script types")
 	}
+}
+
+// LiveFeeRates scans block by block backwards, grabbing the Tx from the
+// backend for each transaction and taking stats on the fees. A mapping of
+// txid -> fee rate can be provided, and those will be checked for equivalence.
+func LiveFeeRates(btc *Backend, t *testing.T, standards map[string]uint64) {
+	type testStats struct {
+		count int
+		sum   int
+		start time.Time
+	}
+	stats := testStats{start: time.Now()}
+	numToDo := 100
+	hash, err := btc.node.GetBestBlockHash()
+	if err != nil {
+		t.Fatalf("error getting best block hash: %v", err)
+	}
+	block, err := btc.node.GetBlockVerbose(hash)
+	if err != nil {
+		t.Fatalf("error getting best block verbose: %v", err)
+	}
+out:
+	for {
+		for _, txid := range block.Tx {
+			txHash, err := chainhash.NewHashFromStr(txid)
+			if err != nil {
+				t.Fatalf("error parsing transaction hash from %s: %v", txid, err)
+			}
+			tx, err := btc.transaction(txHash)
+			if err != nil {
+				t.Fatalf("error retreiving transaction %s: %v", txid, err)
+			}
+			stats.count++
+			stats.sum += int(tx.FeeRate())
+			if stats.count >= numToDo {
+				break out
+			}
+			prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
+			if err != nil {
+				t.Fatalf("error retrieving block %s: %v", block.PreviousHash, err)
+			}
+			block, err = btc.node.GetBlockVerbose(prevHash)
+			if err != nil {
+				t.Fatalf("error getting block verbose %s: %v", txHash, err)
+			}
+		}
+	}
+	for txid, expRate := range standards {
+		txHash, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			t.Fatalf("error parsing transaction hash from %s: %v", txid, err)
+		}
+		tx, err := btc.transaction(txHash)
+		if err != nil {
+			t.Fatalf("error retreiving transaction %s", txid)
+		}
+		feeRate := tx.FeeRate()
+		if feeRate != expRate {
+			t.Fatalf("unexpected fee rate for %s. expected %d, got %d", txid, expRate, feeRate)
+		}
+	}
+	t.Logf("average per-tx fee rate: %d satoshi/byte", stats.sum/stats.count)
+	t.Logf("time per tx: %d ms", time.Since(stats.start).Milliseconds())
 }
 
 // This is an unsupported type of script, but one of the few that is fairly

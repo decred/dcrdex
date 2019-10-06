@@ -20,6 +20,11 @@
 // Monitor the blockchain for a while and make sure that the block cache is
 // updating appropriately.
 //
+// go test -v -tags btclive -run LiveFees
+// ------------------------------------------
+// Test that fees rates are parsed without error and that a few historical fee
+// rates are correct.
+//
 // This last test does not pass. Leave as a code example for now.
 // go test -v -tags btclive -run Plugin
 // ------------------------------------------
@@ -76,6 +81,14 @@ func TestUTXOStats(t *testing.T) {
 // LiveP2SHStats in testing.go for an explanation of the test.
 func TestP2SHStats(t *testing.T) {
 	LiveP2SHStats(btc, t)
+}
+
+func TestLiveFees(t *testing.T) {
+	LiveFeeRates(btc, t, map[string]uint64{
+		"a32697f1796b7b87d953637ac827e11b84c6b0f9237cff793f329f877af50aea": 5848,
+		"f3e3e209672fc057bd896c0f703f092a251fa4dca09d062a0223f760661b8187": 340,
+		"a1075db55d416d3ca199f55b6084e2115b9345e16c5cf302fc80e9d5fbf5d48d": 4191,
+	})
 }
 
 // TestBlockMonitor is a live test that connects to bitcoind and listens for

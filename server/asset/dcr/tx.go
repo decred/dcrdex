@@ -31,6 +31,8 @@ type Tx struct {
 	// Used to conditionally skip block lookups on mempool transactions during
 	// calls to Confirmations.
 	lastLookup *chainhash.Hash
+	// The calculated transaction fee rate, in satoshis/byte
+	feeRate uint64
 }
 
 // Check that Tx satisfies the asset.DEXTx interface
@@ -51,7 +53,7 @@ type txOut struct {
 
 // A getter for a new Tx.
 func newTransaction(dcr *dcrBackend, txHash, blockHash, lastLookup *chainhash.Hash, blockHeight int64,
-	isStake bool, ins []txIn, outs []txOut) *Tx {
+	isStake bool, ins []txIn, outs []txOut, feeRate uint64) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash
 	if hash == nil {
@@ -66,6 +68,7 @@ func newTransaction(dcr *dcrBackend, txHash, blockHash, lastLookup *chainhash.Ha
 		outs:       outs,
 		isStake:    isStake,
 		lastLookup: lastLookup,
+		feeRate:    feeRate,
 	}
 }
 
@@ -165,4 +168,9 @@ func (tx *Tx) AuditContract(vout uint32, contract []byte) (string, uint64, error
 		return "", 0, fmt.Errorf("error extracting address from swap contract for %s:%d", tx.hash, vout)
 	}
 	return receiver, output.value, nil
+}
+
+// FeeRate returns the transaction fee rate, in atoms/byte.
+func (tx *Tx) FeeRate() uint64 {
+	return tx.feeRate
 }
