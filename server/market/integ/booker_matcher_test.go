@@ -399,7 +399,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 		// sells
 		newLimitOrder(true, 4540000, 1, order.ImmediateTiF, 0), // 4: sell, 1 lot, immediate
 		newLimitOrder(true, 4300000, 4, order.ImmediateTiF, 0), // 5: sell, 4 lot, immediate
-		newLimitOrder(true, 4700000, 40, order.StandingTiF, 0), // 6: sell, 40 lot, standing, unfilled insert
+		newLimitOrder(true, 4720000, 40, order.StandingTiF, 0), // 6: sell, 40 lot, standing, unfilled insert
 	}
 	epochQueueInit := make([]order.Order, len(epochQueue))
 	copy(epochQueueInit, epochQueue)
@@ -408,14 +408,16 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	//t.Log(epochQueue)
 	// matcher.ShuffleQueue(epochQueue)
 	// t.Log(epochQueue)
-	// -> Shuffles to [0, 3, 4, 1, 5, 6, 2]
-	// 0 is filled
-	// 3 is unfilled (fail)
-	// 4 is unfilled (fail)
-	// 1 is partially filled and then inserted into the buy order book
-	// 5 is filled
-	// 6 is partially filled and then inserted into the sell order book
-	// 2 is unfilled (fail)
+	// -> Shuffles to [1, 6, 0, 3, 4, 5, 2]
+	// 1 -> partial match, inserted into book (passed, partial inserted)
+	// 6 -> inserted into book (partial, inserted)
+	// 0 -> is unfilled (failed)
+	// 3 -> is unfilled (failed)
+	// 4 -> fills against order 1, which was just inserted (passed)
+	// 5 -> is filled (passed)
+	// 2 -> is unfilled (failed)
+	// matches: [1, 4, 5], passed: [1, 4], failed: [0, 3, 2]
+	// partial: [1, 6], inserted: [1, 6]
 
 	// order book from bookBuyOrders and bookSellOrders
 	b := newBook(t)
@@ -445,7 +447,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 
 	// epoch order 0 should be order 0 in passed slice
 	expectedLoc := 0
-	if loc := orderInSlice(epochQueueInit[0], passed); loc == -1 {
+	if loc := orderInSlice(epochQueueInit[1], passed); loc == -1 {
 		t.Errorf("Order not in passed slice.")
 	} else if loc != expectedLoc {
 		t.Errorf("Order not at expected location in passed slice: %d", loc)
@@ -453,7 +455,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 
 	// epoch order 5 should be order 1 in passed slice
 	expectedLoc = 1
-	if loc := orderInSlice(epochQueueInit[5], passed); loc == -1 {
+	if loc := orderInSlice(epochQueueInit[4], passed); loc == -1 {
 		t.Errorf("Order not in passed slice.")
 	} else if loc != expectedLoc {
 		t.Errorf("Order not at expected location in passed slice: %d", loc)
@@ -463,7 +465,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 
 	// epoch order 3 should be order 0 in failed slice
 	expectedLoc = 0
-	if loc := orderInSlice(epochQueueInit[3], failed); loc == -1 {
+	if loc := orderInSlice(epochQueueInit[0], failed); loc == -1 {
 		t.Errorf("Order not in failed slice.")
 	} else if loc != expectedLoc {
 		t.Errorf("Order not at expected location in failed slice: %d", loc)
@@ -471,7 +473,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 
 	// epoch order 4 should be order 1 in failed slice
 	expectedLoc = 1
-	if loc := orderInSlice(epochQueueInit[4], failed); loc == -1 {
+	if loc := orderInSlice(epochQueueInit[3], failed); loc == -1 {
 		t.Errorf("Order not in failed slice.")
 	} else if loc != expectedLoc {
 		t.Errorf("Order not at expected location in failed slice: %d", loc)
@@ -524,13 +526,13 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	// epoch order 5 (sell, 4 lots, immediate @ 4300000) is match 1, matched
 	// with 3 orders, the first of which of which is epoch order 1 (buy, 2 lots,
 	// standing @ 4550000) that was inserted as a standing order.
-	if matches[1].Taker.ID() != epochQueueInit[5].ID() {
+	if matches[1].Taker.ID() != epochQueueInit[4].ID() {
 		t.Errorf("Taker order ID expected %v, got %v",
 			epochQueueInit[5].UID(), matches[1].Taker.UID())
 	}
 	if matches[1].Makers[0].ID() != epochQueueInit[1].ID() {
 		t.Errorf("First match was expected to be %v, got %v",
-			epochQueueInit[1], matches[1].Makers[0].ID())
+			epochQueueInit[1].ID(), matches[1].Makers[0].ID())
 	}
 }
 
@@ -997,7 +999,7 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 		newLimitOrder(true, 4540000, 1, order.ImmediateTiF, 0), // 4: sell, 1 lot, immediate
 		newLimitOrder(true, 4800000, 4, order.StandingTiF, 0),  // 5: sell, 4 lot, immediate
 		newLimitOrder(true, 4300000, 4, order.ImmediateTiF, 0), // 6: sell, 4 lot, immediate
-		newLimitOrder(true, 4700000, 40, order.StandingTiF, 0), // 7: sell, 40 lot, standing, unfilled insert
+		newLimitOrder(true, 4800000, 40, order.StandingTiF, 0), // 7: sell, 40 lot, standing, unfilled insert
 		// market
 		newMarketSellOrder(2, 0),          // 8
 		newMarketSellOrder(4, 0),          // 9
@@ -1010,8 +1012,8 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 		newCancelOrder(bookSellOrders[nSell-1].ID()), // 15
 	}
 	// cancel some the epoch queue orders too
-	epochQueue = append(epochQueue, newCancelOrder(epochQueue[7].ID())) // 16
-	epochQueue = append(epochQueue, newCancelOrder(epochQueue[5].ID())) // 17
+	epochQueue = append(epochQueue, newCancelOrder(epochQueue[7].ID())) // 16 misses
+	epochQueue = append(epochQueue, newCancelOrder(epochQueue[5].ID())) // 17 hits
 
 	epochQueueInit := make([]order.Order, len(epochQueue))
 	copy(epochQueueInit, epochQueue)
@@ -1021,11 +1023,29 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	// for i := range epochQueue {
 	// 	t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
 	// }
-	// -> Shuffles to [12, 3, 13, 4, 8, 0, 2, 16, 11, 5, 15, 9, 10, 7, 17, 14, 6, 1]
-	expectedPassed := []int{12, 13, 8, 0, 11, 9, 10, 17}
-	expectedFailed := []int{3, 4, 2, 16, 15, 14, 6}
-	expectedPartial := []int{5, 7, 1}
-	expectedInserted := []int{5, 7, 1} // all StandingTiF
+	// Shuffles to  [16, 6, 3, 14, 7, 12, 9, 13, 11, 1, 4, 10, 5, 2, 17, 8, 15, 0]
+	// 16 is a cancellation for a an epoch order not yet inserted (failed)
+	// 6  limit sell 4 lots matches 1 @ 450, 3 @ 430 (passed)
+	// 3  limit buy misses (failed)
+	// 14 cancel misses because that order matched epoch order 6 already (failed)
+	// 7  limit sell unfilled insert (insert, partial)
+	// 12 cancel order matches (passed)
+	// 9  market sell 4 lots matches 3 @ 430, 1 @ 400 (passed)
+	// 13 cancel order misses because it's order matched already (failed)
+	// 11 market buy 2 lots matches 1 @ 455, 1 @ 460 (passed)
+	// 1  limit buy 1 insert unfilled (partial, inserted)
+	// 4  limit sell 1 matches epoch order 1 just inserted (passed)
+	// 10 market buy 1 lot fills 1 @ 460 (passed)
+	// 5  limit sell unfilled insert (insert, partial)
+	// 2  limit buy misses (failed)
+	// 17 cancel order for epoch order 5 just inserted hits (passed)
+	// 8  market sell 2 lots matches 2 @ 400 (passed)
+	// 15 cancel order misses because it's order matched already (failed)
+	// 0  limit buy misses (failed)
+	expectedPassed := []int{6, 12, 9, 11, 4, 10, 17, 8}
+	expectedFailed := []int{16, 3, 14, 13, 2, 15, 0}
+	expectedPartial := []int{7, 1, 5}
+	expectedInserted := []int{7, 1, 5} // all StandingTiF
 
 	// order book from bookBuyOrders and bookSellOrders
 	b := newBook(t)
@@ -1090,12 +1110,12 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	}
 
 	// match 7 (epoch order 17) cancels epoch order 5
-	if matches[7].Taker.ID() != epochQueueInit[17].ID() {
+	if matches[6].Taker.ID() != epochQueueInit[17].ID() {
 		t.Errorf("Taker order ID expected %v, got %v",
 			epochQueueInit[17].UID(), matches[7].Taker.UID())
 	}
-	if matches[7].Makers[0].ID() != epochQueueInit[5].ID() {
-		t.Errorf("First match was expected to be %v, got %v",
+	if matches[4].Makers[0].ID() != epochQueueInit[1].ID() {
+		t.Errorf("Fourth match was expected to be %v, got %v",
 			epochQueueInit[5], matches[7].Makers[0].ID())
 	}
 }

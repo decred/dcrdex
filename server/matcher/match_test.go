@@ -1203,9 +1203,9 @@ func Test_sortQueue(t *testing.T) {
 
 	// q3Sorted is the expected result of sorting q3_1 and q3_2
 	q3Sorted := []order.Order{
-		limitOrders[0],
-		marketOrders[0],
 		marketOrders[1],
+		marketOrders[0],
+		limitOrders[0],
 	}
 
 	// sortQueue should work with nil slice
@@ -1238,8 +1238,8 @@ func Test_sortQueue(t *testing.T) {
 	}
 
 	q2Sorted := []order.Order{
-		limitOrders[0],
 		marketOrders[0],
+		limitOrders[0],
 	}
 
 	tests := []struct {
@@ -1280,7 +1280,7 @@ func Test_sortQueue(t *testing.T) {
 		{
 			"q1",
 			q1,
-			[]order.Order{q2Sorted[1]},
+			[]order.Order{q2Sorted[0]},
 		},
 		{
 			"q2_a",
@@ -1295,7 +1295,7 @@ func Test_sortQueue(t *testing.T) {
 		{
 			"qDup",
 			qDup,
-			[]order.Order{q2Sorted[1], q2Sorted[1]},
+			[]order.Order{q2Sorted[0], q2Sorted[0]},
 		},
 	}
 	for _, tt := range tests {

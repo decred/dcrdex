@@ -14,7 +14,7 @@ import (
 )
 
 // OrderIDSize defines the length in bytes of an OrderID.
-const OrderIDSize = blake256.Size
+const OrderIDSize = blake256.Size // 32
 
 // OrderID is the unique identifier for each order.
 type OrderID [OrderIDSize]byte
@@ -100,7 +100,7 @@ func serializeUTXO(u UTXO) []byte {
 	hash := u.TxHash()
 	hashLen := len(hash)
 	copy(b, hash)
-	binary.LittleEndian.PutUint32(b[hashLen:], u.Vout())
+	binary.BigEndian.PutUint32(b[hashLen:], u.Vout())
 	return b
 }
 
@@ -142,11 +142,11 @@ func (p *Prefix) Serialize() []byte {
 	copy(b[:offset], p.AccountID[:])
 
 	// base asset
-	binary.LittleEndian.PutUint32(b[offset:offset+4], p.BaseAsset)
+	binary.BigEndian.PutUint32(b[offset:offset+4], p.BaseAsset)
 	offset += 4
 
 	// quote asset
-	binary.LittleEndian.PutUint32(b[offset:offset+4], p.QuoteAsset)
+	binary.BigEndian.PutUint32(b[offset:offset+4], p.QuoteAsset)
 	offset += 4
 
 	// order type (e.g. market, limit, cancel)
@@ -154,11 +154,11 @@ func (p *Prefix) Serialize() []byte {
 	offset++
 
 	// client time
-	binary.LittleEndian.PutUint64(b[offset:offset+8], uint64(p.ClientTime.Unix()))
+	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(p.ClientTime.Unix()))
 	offset += 8
 
 	// server time
-	binary.LittleEndian.PutUint64(b[offset:offset+8], uint64(p.ServerTime.Unix()))
+	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(p.ServerTime.Unix()))
 	return b
 }
 
@@ -240,7 +240,7 @@ func (o *MarketOrder) Serialize() []byte {
 	offset++
 
 	// order quantity
-	binary.LittleEndian.PutUint64(b[offset:offset+8], o.Quantity)
+	binary.BigEndian.PutUint64(b[offset:offset+8], o.Quantity)
 	offset += 8
 
 	// client address for received funds
@@ -303,11 +303,11 @@ func (o *LimitOrder) Serialize() []byte {
 
 	// Price rate
 	// var fb bytes.Buffer
-	// _ = binary.Write(&fb, binary.LittleEndian, o.Rate)
+	// _ = binary.Write(&fb, binary.BigEndian, o.Rate)
 	// copy(b[mSz:], fb.Bytes())
-	//binary.LittleEndian.PutUint64(b[offset:offset+8], math.Float64bits(o.Rate))
+	//binary.BigEndian.PutUint64(b[offset:offset+8], math.Float64bits(o.Rate))
 	// Price rate in atoms of quote asset
-	binary.LittleEndian.PutUint64(b[offset:offset+8], o.Rate)
+	binary.BigEndian.PutUint64(b[offset:offset+8], o.Rate)
 	offset += 8
 
 	// Time in force
