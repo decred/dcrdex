@@ -34,7 +34,7 @@ const (
 	// allowed.
 	rpcMaxClients = 10000
 
-	// banishTime is the default time duration of a client quarantine.
+	// banishTime is the default duration of a client quarantine.
 	banishTime = time.Hour
 )
 
@@ -56,6 +56,7 @@ var (
 
 var idCounter uint64
 
+// NextID returns a unique ID to identify a request-type message.
 func NextID() uint64 {
 	return atomic.AddUint64(&idCounter, 1)
 }
@@ -75,16 +76,10 @@ type Link interface {
 	Banish()
 }
 
-// timeZeroVal is simply the zero value for a time.Time and is used to avoid
-// creating multiple instances.
-var timeZeroVal time.Time
-
-// rpcCommandHandler describes a callback function used to handle a specific
-// command.
+// rpcMethod describes a callback function used to handle a specific command.
 type rpcMethod func(*RPCClient, *rpc.Request) *rpc.RPCError
 
-// rpcMethods maps RPC command strings to appropriate websocket handler
-// functions.
+// rpcMethods maps RPC command strings to websocket handler functions.
 var rpcMethods map[string]rpcMethod
 
 // RegisterMethod registers a RPC handler for a specified method. The handler
@@ -113,7 +108,7 @@ type RPCConfig struct {
 	RPCCert string
 	// AltDNSNames specifies allowable request addresses for an auto-generated
 	// TLS keypair. Changing AltDNSNames does not force the keypair to be
-	// regenerated.
+	// regenerated. To regenerate, delete or move the old files.
 	AltDNSNames []string
 }
 
@@ -301,7 +296,7 @@ func (s *RPCServer) banish(ip string) {
 
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
-// run in a goroutine.
+// run as a goroutine.
 func (s *RPCServer) websocketHandler(conn wsConnection, ip string) {
 	log.Tracef("New websocket client %s", ip)
 
