@@ -1,6 +1,8 @@
 package account
 
 import (
+	"database/sql/driver"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/decred/dcrd/crypto/blake256"
@@ -22,6 +24,33 @@ func NewID(pk []byte) AccountID {
 	h := HashFunc(pk)
 	return HashFunc(h[:])
 }
+
+// String returns a hexadecimal representation of the AccountID. String
+// implements fmt.Stringer.
+func (aid AccountID) String() string {
+	return hex.EncodeToString(aid[:])
+}
+
+// Value implements the sql/driver.Valuer interface.
+func (aid AccountID) Value() (driver.Value, error) {
+	return aid[:], nil // []byte
+}
+
+// Scan implements the sql.Scanner interface.
+func (aid *AccountID) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		copy(aid[:], src)
+		return nil
+		//case string:
+		// case nil:
+		// 	*oid = nil
+		// 	return nil
+	}
+
+	return fmt.Errorf("cannot convert %T to AccountID", src)
+}
+
 
 // Account represents a dex client account.
 type Account struct {

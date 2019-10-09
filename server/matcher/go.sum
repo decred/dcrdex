@@ -10,3 +10,4 @@ github.com/decred/dcrd/dcrec/secp256k1 v1.0.2 h1:awk7sYJ4pGWmtkiGHFfctztJjHMKGLV
 github.com/decred/dcrd/dcrec/secp256k1 v1.0.2/go.mod h1:CHTUIVfmDDd0KFVFpNX1pFVCBUegxW387nN0IGwNKR0=
 github.com/decred/slog v1.0.0 h1:Dl+W8O6/JH6n2xIFN2p3DNjCmjYwvrXsjlSJTQQ4MhE=
 github.com/decred/slog v1.0.0/go.mod h1:zR98rEZHSnbZ4WHZtO0iqmSZjDLKhkXfrPTZQKtAonQ=
+github.com/lib/pq v1.2.0/go.mod h1:5WUZQaWbwv1U+lTReE5YruASi9Al49XbQIvNi/34Woo=

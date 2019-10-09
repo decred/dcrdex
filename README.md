@@ -29,9 +29,8 @@ dcrdex
 ├── server
 │   ├── account        # account/user manager
 │   │   └── pki        # possibly separate for sig. and verif. functions
-│   ├── archivist      # persistent storage
-│   │   ├── kv         # e.g. bbolt, badger
-│   │   └── sql        # e.g. postgresql
+│   ├── db             # persistent storage a.k.a the archivist
+│   │   └── driver     # selectable db drivers in multiple subdirectories
 │   ├── asset          # i.e. interface.go
 │   │   ├── btc        # implement the interface
 │   │   └── dcr
@@ -45,7 +44,7 @@ dcrdex
 │   │   ├── admin      # administrative tools and portal (may need RPC server too)
 │   │   └── controller # controller for multiple markets, users, api, comms, etc.
 │   ├── docs
-│   ├── htttpapi       # HTTP API
+│   ├── httpapi       # HTTP API
 │   ├── market         # market manager
 │   │   └── order      # the ubiquitous order type
 │   ├── matcher        # order matching engine

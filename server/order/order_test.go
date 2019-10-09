@@ -586,3 +586,24 @@ func Test_serializeUTXO(t *testing.T) {
 		})
 	}
 }
+
+func TestUTXOString(t *testing.T) {
+	tests := []struct {
+		name string
+		utxo UTXO
+		want string
+	}{
+		{
+			name: "ok",
+			utxo: newUtxo("aed8e9b2b889bf0a78e559684796800144cd76dc8faac2aeac44fbd1c310124b", 1),
+			want: "aed8e9b2b889bf0a78e559684796800144cd76dc8faac2aeac44fbd1c310124b:1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := UTXOString(tt.utxo); got != tt.want {
+				t.Errorf("UTXOString() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
