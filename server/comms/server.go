@@ -76,24 +76,24 @@ type Link interface {
 	Banish()
 }
 
-// rpcMethod describes a callback function used to handle a specific command.
-type rpcMethod func(*RPCClient, *rpc.Request) *rpc.RPCError
+// rpcRoute describes a handler for a specific message route.
+type rpcRoute func(*RPCClient, *rpc.Message) *rpc.Error
 
-// rpcMethods maps RPC command strings to websocket handler functions.
-var rpcMethods map[string]rpcMethod
+// rpcRoutes maps message routes to the handlers.
+var rpcRoutes = make(map[string]rpcRoute)
 
-// RegisterMethod registers a RPC handler for a specified method. The handler
-// map is global and has no mutex protection. All calls to RegisterHandler
+// Route registers a RPC handler for a specified route. The handler
+// map is global and has no mutex protection. All calls to Route
 // should be done before the RPCServer is started.
-func RegisterMethod(method string, handler rpcMethod) {
+func Route(method string, handler rpcRoute) {
 	if method == "" {
-		panic("RegisterMethod: method is empty string")
+		panic("Route: method is empty string")
 	}
-	_, alreadyHave := rpcMethods[method]
+	_, alreadyHave := rpcRoutes[method]
 	if alreadyHave {
-		panic(fmt.Sprintf("RegisterMethod: double registration: %s", method))
+		panic(fmt.Sprintf("Route: double registration: %s", method))
 	}
-	rpcMethods[method] = handler
+	rpcRoutes[method] = handler
 }
 
 // The RPCConfig is the server configuration settings and the only argument
@@ -420,8 +420,4 @@ func parseListeners(addrs []string) ([]string, []string, bool, error) {
 		}
 	}
 	return ipv4ListenAddrs, ipv6ListenAddrs, haveWildcard, nil
-}
-
-func init() {
-	rpcMethods = make(map[string]rpcMethod)
 }

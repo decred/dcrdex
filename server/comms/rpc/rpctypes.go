@@ -18,179 +18,110 @@ const (
 	UnknownResponseID
 )
 
-const (
-	JSONRPCVersion = "2.0"
-)
-
-// RPCError is returned as part of the Response to indicate that an error
-// occured during method execution.
-type RPCError struct {
+// Error is returned as part of the Response to indicate that an error
+// occurred during method execution.
+type Error struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
-// NewRPCERror is a constructor for an RPCError.
-func NewRPCError(code int, msg string) *RPCError {
-	return &RPCError{
+// NewError is a constructor for an Error.
+func NewError(code int, msg string) *Error {
+	return &Error{
 		Code:    code,
 		Message: msg,
 	}
 }
 
-// Request is the general form of a JSON-RPC request. The type of the Params field varies from one response to the next, so it is implemented as an interface{}.
-type Request struct {
-	// Jsonrpc must be exactly "2.0".
-	Jsonrpc string `json:"jsonrpc"`
-	// The name of the remote procedure being called.
-	Method string `json:"method"`
-	// Params can be any struct or array type, or nil. the type of Params varies
-	// with method.
-	Params json.RawMessage `json:"params"`
-	// ID is a unique identifier the client assigns to this request. If the server
-	// responds the the request, the Response will have the same ID field a
-	// Request. Any integer, string or nil pointer is allowed for ID. A nil
-	// pointer signifies that no response is needed, but may not be valid for all
-	// requests.
-	ID interface{} `json:"id"`
-}
-
-// ID64 attempts to parse the ID into an int64. The boolean return value will
-// be false if the ID type is incompatible.
-func (req *Request) ID64() (int64, bool) {
-	return id64(req.ID)
-}
-
-// Message returns the Request wrapped in a Message.
-func (req *Request) Message() (*Message, error) {
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	return &Message{
-		Type:    RequestMessage,
-		Payload: json.RawMessage(reqBytes),
-	}, nil
-}
-
-// Response is the general form of a JSON-RPC response.  The type of the
-// Result field varies from one response to the next, so it is implemented as a
-// json.RawMessage (alias of []byte). The ID field has to be a pointer to allow
-// for a nil value when empty.
-type Response struct {
-	// Jsonrpc must be exactly "2.0".
-	Jsonrpc string `json:"jsonrpc"`
+// ResponsePayload is the payload for a Response-type Message.
+type ResponsePayload struct {
 	// Result is the payload, if successful, else nil.
 	Result json.RawMessage `json:"result"`
-	// Error is the RPCError if an errror was encountered, else nil.
-	Error *RPCError `json:"error"`
-	// ID is a unique identifier the client assigns to this request. If the server
-	// responds the the request, the Response will have the same ID field a
-	// Request. Any integer, string or nil pointer is allowed for ID. A nil
-	// pointer signifies that no response is needed, but may not be valid for all
-	// requests.
-	ID *interface{} `json:"id"`
+	// Error is the error, or nil if none was encountered.
+	Error *Error `json:"error"`
 }
 
-// NewResponse returns a new JSON-RPC response object. Though JSON-RPC
-// specification dictates that either but not both of the result or the error
-// should be nil, NewResponse does not check this condition.
-func NewResponse(id interface{}, result interface{}, rpcErr *RPCError) (*Response, error) {
-	if !IsValidIDType(id) {
-		return nil, fmt.Errorf("the id of type '%T' is invalid", id)
-	}
+// MessageType indicates the type of message. MessageType is typically the first
+// switch checked when examining a message, and how the rest of the message is
+// decoded depends on its MessageType.
+type MessageType uint8
 
-	marshalledResult, err := json.Marshal(result)
+const (
+	InvalidMessageType MessageType = iota
+	Request
+	Response
+	Notification
+)
+
+// Message is the primary messaging type for websocket communications.
+type Message struct {
+	// Type is the message type.
+	Type MessageType `json:"type"`
+	// Route is used for requests and notifications, and specifies a handler for
+	// the message.
+	Route string `json:"route,omitempty"`
+	// ID is a unique number that is used to link a response to a request.
+	ID uint64 `json:"id",omitempty`
+	// Payload is any data attached to the message. How Payload is decoded
+	// depends on the Route.
+	Payload json.RawMessage `json:"payload",omitempty`
+}
+
+// DecodeMessage decodes a Message from bytes.
+func DecodeMessage(b []byte) (*Message, error) {
+	msg := new(Message)
+	err := json.Unmarshal(b, &msg)
 	if err != nil {
 		return nil, err
 	}
-
-	return &Response{
-		Jsonrpc: JSONRPCVersion,
-		Result:  marshalledResult,
-		Error:   rpcErr,
-		ID:      &id,
-	}, nil
+	return msg, nil
 }
 
-// ID64 attempts to parse the ID into an int64. The boolean return value will
-// be false if the type ID type is incompatible.
-func (resp *Response) ID64() (int64, bool) {
-	return id64(*resp.ID)
-}
-
-// Message returns the Request wrapped in a Message.
-func (resp *Response) Message() (*Message, error) {
-	respBytes, err := json.Marshal(resp)
+// NewRequest is the constructor for a Request-type *Message.
+func NewRequest(id uint64, route string, payload interface{}) (*Message, error) {
+	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	return &Message{
-		Type:    ResponseMessage,
-		Payload: json.RawMessage(respBytes),
+		Type:    Request,
+		Payload: json.RawMessage(encoded),
+		Route:   route,
+		ID:      id,
 	}, nil
 }
 
-// MessageType indicates the type of payload in a message.
-const (
-	InvalidMessage = iota
-	ResponseMessage
-	RequestMessage
-)
-
-// Message is the primary messaging type, and generally wraps a Response or
-// a Request as it's payload. The Message wrapper is required to accomodate
-// bi-directional requests on a single connection, i.e. the client can send
-// Requests to the server, but the server can also send Requests to the client.
-type Message struct {
-	Type    uint8           `json:"type"`
-	Payload json.RawMessage `json:"payload"`
+// NewResponse encodes the result and creates a Response-type *Message.
+func NewResponse(id uint64, result interface{}, rpcErr *Error) (*Message, error) {
+	encResult, err := json.Marshal(result)
+	if err != nil {
+		return nil, err
+	}
+	resp := &ResponsePayload{
+		Result: encResult,
+		Error:  rpcErr,
+	}
+	encResp, err := json.Marshal(resp)
+	if err != nil {
+		return nil, err
+	}
+	return &Message{
+		Type:    Response,
+		Payload: json.RawMessage(encResp),
+		ID:      id,
+	}, nil
 }
 
-// IsValidIDType checks that the ID field (which can go in any of the JSON-RPC
-// requests, responses, or notifications) is valid.JSON-RPC 2.0 only allows
-// string, number, or null, so this function restricts the allowed types to that
-// list.
-func IsValidIDType(id interface{}) bool {
-	switch id.(type) {
-	case int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64,
-		float32, float64,
-		string,
-		nil:
-		return true
-	default:
-		return false
+// Response attempts to decode the payload to a *ResponsePayload. Response will
+// return an error if the Type is not Response.
+func (msg *Message) Response() (*ResponsePayload, error) {
+	if msg.Type != Response {
+		return nil, fmt.Errorf("invalid type %d for ResponsePayload", msg.Type)
 	}
-}
-
-// id64 tries to parse the interface{} as an int64. Only numeric types will
-// parse. If the type is non-numeric, the boolean return value will be false.
-func id64(id interface{}) (int64, bool) {
-	switch i := id.(type) {
-	case int:
-		return int64(i), true
-	case int8:
-		return int64(i), true
-	case int16:
-		return int64(i), true
-	case int32:
-		return int64(i), true
-	case int64:
-		return int64(i), true
-	case uint:
-		return int64(i), true
-	case uint8:
-		return int64(i), true
-	case uint16:
-		return int64(i), true
-	case uint32:
-		return int64(i), true
-	case uint64:
-		return int64(i), true
-	case float32:
-		return int64(i), true
-	case float64:
-		return int64(i), true
+	resp := new(ResponsePayload)
+	err := json.Unmarshal(msg.Payload, &resp)
+	if err != nil {
+		return nil, err
 	}
-	return -1, false
+	return resp, nil
 }

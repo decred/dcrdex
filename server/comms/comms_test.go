@@ -110,67 +110,25 @@ func (conn *wsConnStub) Close() error {
 	return nil
 }
 
-func dummyRPCMethod(_ *RPCClient, _ *rpc.Request) *rpc.RPCError {
+func dummyRPCMethod(_ *RPCClient, _ *rpc.Message) *rpc.Error {
 	return nil
 }
 
-var reqID int
+var reqID uint64
 
-func makeReq(method, msg string) *rpc.Request {
+func makeReq(route, msg string) *rpc.Message {
 	reqID++
-	return &rpc.Request{
-		Jsonrpc: rpc.JSONRPCVersion,
-		Method:  method,
-		Params:  []byte(msg),
-		ID:      reqID,
-	}
+	req, _ := rpc.NewRequest(reqID, route, json.RawMessage(msg))
+	return req
 }
 
-func makeReqMsg(method, msg string) *rpc.Message {
-	reqBytes, _ := json.Marshal(makeReq(method, msg))
-	return makeMsg(rpc.RequestMessage, reqBytes)
-}
-
-func makeResp(id interface{}, msg string) *rpc.Response {
-	return &rpc.Response{
-		Jsonrpc: rpc.JSONRPCVersion,
-		Result:  []byte(msg),
-		Error:   nil,
-		ID:      &id,
-	}
-}
-
-func makeRespMsg(id interface{}, msg string) *rpc.Message {
-	respBytes, _ := json.Marshal(makeResp(id, msg))
-	return makeMsg(rpc.ResponseMessage, respBytes)
-}
-
-func makeMsg(msgType uint8, b []byte) *rpc.Message {
-	return &rpc.Message{
-		Type:    msgType,
-		Payload: json.RawMessage(b),
-	}
-}
-
-func decodeRespMsg(msgBytes []byte) *rpc.Response {
-	msg := new(rpc.Message)
-	err := json.Unmarshal(msgBytes, &msg)
-	if err != nil {
-		fmt.Printf("decodeRespMsg error decoding message: %v\n", err)
-	}
-	if msg.Type != rpc.ResponseMessage {
-		fmt.Printf("wrong message type for decodeRespMsg. exptected %d, got %d\n", rpc.ResponseMessage, msg.Type)
-	}
-	resp := new(rpc.Response)
-	err = json.Unmarshal(msg.Payload, &resp)
-	if err != nil {
-		fmt.Printf("decodeRespMsg error decoding message: %v\n", err)
-	}
+func makeResp(id uint64, msg string) *rpc.Message {
+	resp, _ := rpc.NewResponse(id, json.RawMessage(msg), nil)
 	return resp
 }
 
 func sendToConn(t *testing.T, conn *wsConnStub, method, msg string) {
-	encMsg, err := json.Marshal(makeReqMsg(method, msg))
+	encMsg, err := json.Marshal(makeReq(method, msg))
 	if err != nil {
 		t.Fatalf("error encoding %s request: %v", method, err)
 	}
@@ -215,24 +173,24 @@ func TestMain(m *testing.M) {
 }
 
 // method strings cannot be empty.
-func TestRegisterMethod_PanicsEmtpyString(t *testing.T) {
+func TestRoute_PanicsEmtpyString(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Fatalf("no panic on registering empty string method")
 		}
 	}()
-	RegisterMethod("", dummyRPCMethod)
+	Route("", dummyRPCMethod)
 }
 
 // methods cannot be registered more than once.
-func TestRegisterMethod_PanicsDoubleRegistry(t *testing.T) {
+func TestRoute_PanicsDoubleRegistry(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Fatalf("no panic on registering empty string method")
 		}
 	}()
-	RegisterMethod("somemethod", dummyRPCMethod)
-	RegisterMethod("somemethod", dummyRPCMethod)
+	Route("somemethod", dummyRPCMethod)
+	Route("somemethod", dummyRPCMethod)
 }
 
 // Test the server with a stub for the client connections.
@@ -255,7 +213,7 @@ func TestClientRequests(t *testing.T) {
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's RPCClient.
-	RegisterMethod("getclient", func(c *RPCClient, _ *rpc.Request) *rpc.RPCError {
+	Route("getclient", func(c *RPCClient, _ *rpc.Message) *rpc.Error {
 		testMtx.Lock()
 		defer testMtx.Unlock()
 		client = c
@@ -263,11 +221,11 @@ func TestClientRequests(t *testing.T) {
 	})
 	// Check request parses the request to a map of strings.
 	var parsedParams map[string]string
-	RegisterMethod("checkrequest", func(c *RPCClient, req *rpc.Request) *rpc.RPCError {
+	Route("checkrequest", func(c *RPCClient, msg *rpc.Message) *rpc.Error {
 		testMtx.Lock()
 		defer testMtx.Unlock()
 		parsedParams = make(map[string]string)
-		err := json.Unmarshal(req.Params, &parsedParams)
+		err := json.Unmarshal(msg.Payload, &parsedParams)
 		if err != nil {
 			t.Fatalf("request parse error: %v", err)
 		}
@@ -279,19 +237,19 @@ func TestClientRequests(t *testing.T) {
 	// 'checkinvalid' should never be run, since the request has invalid
 	// formatting.
 	passed := false
-	RegisterMethod("checkinvalid", func(_ *RPCClient, _ *rpc.Request) *rpc.RPCError {
+	Route("checkinvalid", func(_ *RPCClient, _ *rpc.Message) *rpc.Error {
 		testMtx.Lock()
 		defer testMtx.Unlock()
 		passed = true
 		return nil
 	})
-	// 'error' returns an RPCError.
-	RegisterMethod("error", func(_ *RPCClient, _ *rpc.Request) *rpc.RPCError {
-		return rpc.NewRPCError(550, "somemessage")
+	// 'error' returns an Error.
+	Route("error", func(_ *RPCClient, _ *rpc.Message) *rpc.Error {
+		return rpc.NewError(550, "somemessage")
 	})
 	// 'ban' quarantines the user using the RPCQuarantineClient error code.
-	RegisterMethod("ban", func(_ *RPCClient, _ *rpc.Request) *rpc.RPCError {
-		return rpc.NewRPCError(rpc.RPCQuarantineClient, "user quarantined")
+	Route("ban", func(_ *RPCClient, _ *rpc.Message) *rpc.Error {
+		return rpc.NewError(rpc.RPCQuarantineClient, "user quarantined")
 	})
 
 	// A helper function to reconnect to the server and grab the server's
@@ -319,7 +277,7 @@ func TestClientRequests(t *testing.T) {
 	lockedExe(func() {
 		v, found := parsedParams["key"]
 		if !found {
-			t.Fatalf("RegisterMethod key not found")
+			t.Fatalf("Route key not found")
 		}
 		if v != "value" {
 			t.Fatalf(`expected "value", got %s`, v)
@@ -329,7 +287,7 @@ func TestClientRequests(t *testing.T) {
 	// Send invalid params, and make sure the server doesn't pass the message. The
 	// server will not disconnect the client.
 	checkReplacePass := func(old, new string) {
-		sendReplace(t, conn, makeReqMsg("checkinvalid", old), old, new)
+		sendReplace(t, conn, makeReq("checkinvalid", old), old, new)
 		if passed {
 			t.Fatalf("invalid request passed to handler")
 		}
@@ -348,13 +306,6 @@ func TestClientRequests(t *testing.T) {
 	}
 	if server.clientCount() != 0 {
 		t.Fatalf("clientCount != 0")
-	}
-
-	// Send incorrect RPC version
-	reconnect()
-	checkReplacePass(`"2.0"`, `"3.0"`)
-	if clientOn() {
-		t.Fatalf("client connected after invalid json version")
 	}
 
 	// Shut the client down. Check the on flag.
@@ -408,7 +359,14 @@ func TestClientRequests(t *testing.T) {
 
 	checkParseError := func() {
 		lockedExe(func() {
-			resp := decodeRespMsg(conn.lastMsg)
+			msg, err := rpc.DecodeMessage(conn.lastMsg)
+			if err != nil {
+				t.Fatalf("error decoding last message (%s): %v", string(conn.lastMsg), err)
+			}
+			resp, err := msg.Response()
+			if err != nil {
+				t.Fatalf("error decoding response payload: %v", err)
+			}
 			conn.lastMsg = nil
 			if resp.Error == nil || resp.Error.Code != rpc.RPCParseError {
 				t.Fatalf("no error after invalid id")
@@ -418,9 +376,8 @@ func TestClientRequests(t *testing.T) {
 
 	// Test an invalid ID.
 	reconnect()
-	req := makeReq("getclient", `{}`)
-	req.ID = 555
-	msg, _ := req.Message()
+	msg := makeReq("getclient", `{}`)
+	msg.ID = 555
 	sendReplace(t, conn, msg, "555", "{}")
 	checkParseError()
 
@@ -438,7 +395,7 @@ func TestClientResponses(t *testing.T) {
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's RPCClient.
-	RegisterMethod("grabclient", func(c *RPCClient, _ *rpc.Request) *rpc.RPCError {
+	Route("grabclient", func(c *RPCClient, _ *rpc.Message) *rpc.Error {
 		testMtx.Lock()
 		defer testMtx.Unlock()
 		client = c
@@ -446,12 +403,12 @@ func TestClientResponses(t *testing.T) {
 	})
 
 	getClient := func() {
-		encReq, _ := json.Marshal(makeReqMsg("grabclient", `{}`))
+		encReq, _ := json.Marshal(makeReq("grabclient", `{}`))
 		conn.msg <- encReq
 		time.Sleep(time.Millisecond * 10)
 	}
 
-	sendToClient := func(method, params string, f func(*rpc.Response)) interface{} {
+	sendToClient := func(method, params string, f func(*rpc.ResponsePayload)) uint64 {
 		req := makeReq(method, params)
 		err := client.Request(req, f)
 		if err != nil {
@@ -461,8 +418,8 @@ func TestClientResponses(t *testing.T) {
 		return req.ID
 	}
 
-	respondToServer := func(id interface{}, msg string) {
-		encResp, err := json.Marshal(makeRespMsg(id, msg))
+	respondToServer := func(id uint64, msg string) {
+		encResp, err := json.Marshal(makeResp(id, msg))
 		if err != nil {
 			t.Fatalf("error encoding %v (%T) request: %v", id, id, err)
 		}
@@ -481,7 +438,7 @@ func TestClientResponses(t *testing.T) {
 	// Send a request from the server to the client, setting a flag when the
 	// client responds.
 	responded := false
-	id := sendToClient("looptest", `{}`, func(resp *rpc.Response) {
+	id := sendToClient("looptest", `{}`, func(_ *rpc.ResponsePayload) {
 		responded = true
 	})
 	// Respond to the server
@@ -494,38 +451,29 @@ func TestClientResponses(t *testing.T) {
 
 	checkParseError := func(tag string) {
 		lockedExe(func() {
-			resp := decodeRespMsg(conn.lastMsg)
+			msg, err := rpc.DecodeMessage(conn.lastMsg)
+			if err != nil {
+				t.Fatalf("error decoding last message (%s): %v", tag, err)
+			}
+			resp, err := msg.Response()
+			if err != nil {
+				t.Fatalf("error decoding response (%s): %v", tag, err)
+			}
 			conn.lastMsg = nil
 			if resp.Error == nil || resp.Error.Code != rpc.RPCParseError {
-				t.Fatalf("no error after %s id", tag)
+				t.Fatalf("no error after %s", tag)
 			}
 		})
 	}
 
 	// Test an invalid id type.
-	id = struct{}{}
-	respondToServer(id, `{}`)
+	respondToServer(0, `{}`)
 	checkParseError("invalid id")
 
-	// Test a negative id
-	id = -1
-	respondToServer(id, `{}`)
-	checkParseError("negative id")
-
-	// Test a nil id
-	id = nil
-	respondToServer(id, `{}`)
-	checkParseError("null id")
-
 	// Send an invalid payload.
-	respondToServer(5, `?`)
 	old := `{"a":"b"}`
-	sendReplace(t, conn, makeRespMsg(id, old), old, `?`)
+	sendReplace(t, conn, makeResp(id, old), old, `?`)
 	checkParseError("invalid payload")
-
-	// Send a null payload.
-	sendReplace(t, conn, makeRespMsg(id, old), old, "null")
-	checkParseError("null payload")
 }
 
 func TestOnline(t *testing.T) {
@@ -553,31 +501,27 @@ func TestOnline(t *testing.T) {
 
 	// Register methods before starting server.
 	// No response simulates a method that returns no response.
-	RegisterMethod("noresponse", func(_ *RPCClient, _ *rpc.Request) *rpc.RPCError {
+	Route("noresponse", func(_ *RPCClient, _ *rpc.Message) *rpc.Error {
 		return nil
 	})
 	// The 'ok' method returns an affirmative response.
 	type okresult struct {
 		OK bool `json:"ok"`
 	}
-	RegisterMethod("ok", func(c *RPCClient, req *rpc.Request) *rpc.RPCError {
-		resp, err := rpc.NewResponse(req.ID, &okresult{OK: true}, nil)
+	Route("ok", func(c *RPCClient, msg *rpc.Message) *rpc.Error {
+		resp, err := rpc.NewResponse(msg.ID, &okresult{OK: true}, nil)
 		if err != nil {
-			return rpc.NewRPCError(500, err.Error())
+			return rpc.NewError(500, err.Error())
 		}
-		msg, err := resp.Message()
+		err = c.Send(resp)
 		if err != nil {
-			t.Fatalf("failed to get message from response")
-		}
-		err = c.sendMessage(msg)
-		if err != nil {
-			return rpc.NewRPCError(500, err.Error())
+			return rpc.NewError(500, err.Error())
 		}
 		return nil
 	})
 	// The 'banuser' method quarantines the user.
-	RegisterMethod("banuser", func(c *RPCClient, req *rpc.Request) *rpc.RPCError {
-		return rpc.NewRPCError(rpc.RPCQuarantineClient, "test quarantine")
+	Route("banuser", func(c *RPCClient, req *rpc.Message) *rpc.Error {
+		return rpc.NewError(rpc.RPCQuarantineClient, "test quarantine")
 	})
 
 	server.Start()
@@ -628,7 +572,7 @@ func TestOnline(t *testing.T) {
 	}()
 
 	sendToDEX := func(method, msg string) error {
-		b, err := json.Marshal(makeReqMsg(method, msg))
+		b, err := json.Marshal(makeReq(method, msg))
 		if err != nil {
 			t.Fatalf("error encoding %s request: %v", method, err)
 		}
@@ -655,8 +599,11 @@ func TestOnline(t *testing.T) {
 	if nilResponse() {
 		t.Fatalf("no response set for 'ok' request")
 	}
-	var resp *rpc.Response
-	lockedExe(func() { resp = decodeRespMsg(response) })
+	var resp *rpc.ResponsePayload
+	lockedExe(func() {
+		msg, _ := rpc.DecodeMessage(response)
+		resp, _ = msg.Response()
+	})
 	ok := new(okresult)
 	err = json.Unmarshal(resp.Result, &ok)
 	if err != nil {
@@ -666,7 +613,7 @@ func TestOnline(t *testing.T) {
 		t.Fatalf("ok.OK false")
 	}
 
-	// Ban the client using the special RPCError code.
+	// Ban the client using the special Error code.
 	err = sendToDEX("banuser", "{}")
 	if err != nil {
 		t.Fatalf("banuser send error: %v", err)

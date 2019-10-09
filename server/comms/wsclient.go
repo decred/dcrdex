@@ -25,14 +25,14 @@ type wsConnection interface {
 	Close() error
 }
 
-// When the DEX sends a request to the client, a requestCallback is created
+// When the DEX sends a request to the client, a responseHandler is created
 // to wait for the response.
-type requestCallback struct {
+type responseHandler struct {
 	expiration time.Time
-	f          func(*rpc.Response)
+	f          func(*rpc.ResponsePayload)
 }
 
-// The RPCClient is the local, per-connection representation of a DEX client.
+// RPCClient is the local, per-connection representation of a DEX client.
 type RPCClient struct {
 	// The id is the unique identifier assigned to this client.
 	id uint64
@@ -42,7 +42,7 @@ type RPCClient struct {
 	conn wsConnection
 	// quitMtx protects the on flag and closing of the quit channel.
 	quitMtx sync.RWMutex
-	// on is used internally to prevent mutliple Close calls on the unerlying
+	// on is used internally to prevent multiple Close calls on the underlying
 	// connections.
 	on bool
 	// Once the client is disconnected, the quit channel will be closed.
@@ -58,7 +58,7 @@ type RPCClient struct {
 	// For DEX-originating requests, a the response handler is mapped to the
 	// resquest ID.
 	reqMtx       sync.Mutex
-	reqCallbacks map[uint64]*requestCallback
+	respHandlers map[uint64]*responseHandler
 	// Upon closing, the client's IP address will be quarantined by the server if
 	// ban = true.
 	ban bool
@@ -72,33 +72,14 @@ func newRPCClient(addr string, conn wsConnection) *RPCClient {
 		conn:         conn,
 		quit:         make(chan struct{}),
 		outChan:      make(chan []byte, outBufferSize),
-		reqCallbacks: make(map[uint64]*requestCallback),
+		respHandlers: make(map[uint64]*responseHandler),
 	}
 }
 
-// Respond sends a Message-wrapped Response to the client.
-func (c *RPCClient) Respond(resp *rpc.Response) error {
-	msg, err := resp.Message()
-	if err != nil {
-		return err
-	}
-	return c.sendMessage(msg)
-}
-
-// Request sends a Message-wrapped request to the client.
-func (c *RPCClient) Request(req *rpc.Request, callback func(*rpc.Response)) error {
-	msg, err := req.Message()
-	if err != nil {
-		return err
-	}
-	c.logReq(req, callback)
-	return c.sendMessage(msg)
-}
-
-// sendMessage sends the passed message to the websocket client. If the client's
+// Send sends the passed Message to the websocket client. If the client's
 // channel if blocking (outBufferSize pending messages), the client is
 // disconnected.
-func (c *RPCClient) sendMessage(msg interface{}) error {
+func (c *RPCClient) Send(msg *rpc.Message) error {
 	b, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -112,20 +93,22 @@ func (c *RPCClient) sendMessage(msg interface{}) error {
 	return nil
 }
 
-// sendError sends the rpc.RPCError to the client.
-func (c *RPCClient) sendError(id interface{}, jsonErr *rpc.RPCError) {
-	reply, err := rpc.NewResponse(id, nil, jsonErr)
+// Request sends the message to the client and tracks the response handler.
+func (c *RPCClient) Request(msg *rpc.Message, f func(*rpc.ResponsePayload)) error {
+	c.logReq(msg.ID, f)
+	return c.Send(msg)
+}
+
+// sendError sends the rpc.Error to the client.
+func (c *RPCClient) sendError(id uint64, rpcErr *rpc.Error) {
+	msg, err := rpc.NewResponse(id, nil, rpcErr)
 	if err != nil {
-		log.Errorf("sendError: failed to create rpc.Response: %v", err)
+		log.Errorf("sendError: failed to create message: %v", err)
 	}
-	msg, err := reply.Message()
+	err = c.Send(msg)
 	if err != nil {
-		log.Errorf("sendError: failed to encode rpc.Message: %v", err)
-	}
-	err = c.sendMessage(msg)
-	if err != nil {
-		// Something is terribly wrong if rpc.Response is not marshalling.
-		log.Debug("sendError: failed to send rpc.Response to %s: %v", c.ip, err)
+		// Something is terribly wrong if rpc.Message is not marshalling.
+		log.Debug("sendError: failed to send message to %s: %v", c.ip, err)
 	}
 }
 
@@ -185,42 +168,26 @@ out:
 		msg := new(rpc.Message)
 		err = json.Unmarshal(msgBytes, &msg)
 		if err != nil {
-			c.sendError(-1, rpc.NewRPCError(rpc.RPCParseError,
+			c.sendError(0, rpc.NewError(rpc.RPCParseError,
 				"Failed to parse message: "+err.Error()))
 			continue
 		}
 		switch msg.Type {
-		case rpc.RequestMessage:
-			req, rpcErr := decodeReq(msg.Payload)
-			if rpcErr != nil {
-				c.sendError(-1, rpcErr)
-				continue
-			}
-			rpcErr = checkRPCVersion(req.Jsonrpc)
-			if rpcErr != nil {
-				c.sendError(-1, rpcErr)
-				break out
-			}
-			// A null ID is allowed by the JSON-RPC protocol, but the DEX doesn't
-			// have a use for them, so we'll filter them out here too.
-			if !rpc.IsValidIDType(req.ID) {
-				c.sendError(-1, rpc.NewRPCError(rpc.RPCParseError, "unknown ID type"))
-				break
-			}
-			if req.ID == nil {
-				c.sendError(-1, rpc.NewRPCError(rpc.RPCParseError, "null request IDs unsupported"))
+		case rpc.Request:
+			if msg.ID == 0 {
+				c.sendError(0, rpc.NewError(rpc.RPCParseError, "request id cannot be zero"))
 				break
 			}
 			// Look for a registered handler. Failure to find a handler results in an
 			// error response but not a disconnect.
-			handler, found := rpcMethods[req.Method]
+			handler, found := rpcRoutes[msg.Route]
 			if !found {
-				c.sendError(req.ID, rpc.NewRPCError(rpc.RPCUnknownMethod,
-					"unknown method "+req.Method))
+				c.sendError(msg.ID, rpc.NewError(rpc.RPCUnknownMethod,
+					"unknown method "+msg.Route))
 				continue
 			}
 			// Handle the request.
-			rpcError := handler(c, req)
+			rpcError := handler(c, msg)
 			if rpcError != nil {
 				// The server can request a quarantine by returning the
 				// RPCQuarantineClient code.
@@ -228,35 +195,22 @@ out:
 					c.ban = true
 					break out
 				}
-				c.sendError(req.ID, rpcError)
+				c.sendError(msg.ID, rpcError)
 				continue
 			}
-		case rpc.ResponseMessage:
-			resp, rpcErr := decodeResp(msg.Payload)
-			if rpcErr != nil {
-				c.sendError(-1, rpcErr)
+		case rpc.Response:
+			if msg.ID == 0 {
+				c.sendError(0, rpc.NewError(rpc.RPCParseError, "response id cannot be 0"))
 				continue
 			}
-			if resp.ID == nil {
-				c.sendError(-1, rpc.NewRPCError(rpc.RPCParseError, "null response ID"))
+			resp, err := msg.Response()
+			if err != nil {
+				c.sendError(msg.ID, rpc.NewError(rpc.RPCParseError, err.Error()))
 				continue
 			}
-			if !rpc.IsValidIDType(*resp.ID) {
-				c.sendError(-1, rpc.NewRPCError(rpc.RPCParseError, "unknown ID type"))
-				break
-			}
-			signedID, ok := resp.ID64()
-			// Comms pacakge genreates uint64 IDs, so a response with a negative
-			// ID would be invalid.
-			if !ok || signedID < 0 {
-				c.sendError(-1, rpc.NewRPCError(rpc.RPCParseError,
-					"non-integer or negative response ID is not valid"))
-				continue
-			}
-			reqID := uint64(signedID)
-			cb := c.respFunc(reqID)
+			cb := c.respHandler(msg.ID)
 			if cb == nil {
-				c.sendError(*resp.ID, rpc.NewRPCError(rpc.UnknownResponseID,
+				c.sendError(msg.ID, rpc.NewError(rpc.UnknownResponseID,
 					"unkown response ID"))
 				continue
 			}
@@ -311,81 +265,34 @@ cleanup:
 	log.Tracef("Websocket client output handler done for %s", c.ip)
 }
 
-// logReq stores the callbacks in the reqCallbacks map. Requests to the client
-// are associated with a callback function to handle the response.
-func (c *RPCClient) logReq(req *rpc.Request, callback func(*rpc.Response)) {
+// logReq stores the response handler in the respHandlers map. Requests to the
+// client are associated with a response handler.
+func (c *RPCClient) logReq(id uint64, respHandler func(*rpc.ResponsePayload)) {
 	c.reqMtx.Lock()
 	defer c.reqMtx.Unlock()
-	// First, check for expired callbacks.
-	signedID, ok := req.ID64()
-	if !ok || signedID < 0 { // Comms generates IDs as uint64, so < 0 bad.
-		log.Errorf("non-integer or negative request ID")
-		return
-	}
-	reqID := uint64(signedID)
 	expired := make([]uint64, 0)
-	for id, cb := range c.reqCallbacks {
+	for id, cb := range c.respHandlers {
 		if time.Until(cb.expiration) < 0 {
 			expired = append(expired, id)
 		}
 	}
 	for _, id := range expired {
-		delete(c.reqCallbacks, id)
+		delete(c.respHandlers, id)
 	}
-	c.reqCallbacks[reqID] = &requestCallback{
+	c.respHandlers[id] = &responseHandler{
 		expiration: time.Now().Add(time.Minute * 5),
-		f:          callback,
+		f:          respHandler,
 	}
 }
 
-// respFunc gets the callback for the provided request ID if it exists,
-// else nil.
-func (c *RPCClient) respFunc(id uint64) *requestCallback {
+// respHandler gets the response handler for the provided request ID if it
+// exists, else nil.
+func (c *RPCClient) respHandler(id uint64) *responseHandler {
 	c.reqMtx.Lock()
 	defer c.reqMtx.Unlock()
-	cb, ok := c.reqCallbacks[id]
+	cb, ok := c.respHandlers[id]
 	if ok {
-		delete(c.reqCallbacks, id)
+		delete(c.respHandlers, id)
 	}
 	return cb
-}
-
-// Checks the that RPC version is exactly "2.0".
-func checkRPCVersion(version string) *rpc.RPCError {
-	// Check the JSON-RPC version. Only 2.0 is allowed. Disconnect on others.
-	if version != rpc.JSONRPCVersion {
-		return rpc.NewRPCError(rpc.RPCVersionUnsupported,
-			`only RPC version "2.0" supported`)
-	}
-	return nil
-}
-
-// decodeReq decodes the JSON bytes into a rpc Request.
-func decodeReq(reqBytes json.RawMessage) (*rpc.Request, *rpc.RPCError) {
-	req := new(rpc.Request)
-	err := json.Unmarshal(reqBytes, &req)
-	if err != nil {
-		return nil, rpc.NewRPCError(rpc.RPCParseError,
-			"Failed to parse request: "+err.Error())
-	}
-	if req == nil {
-		return nil, rpc.NewRPCError(rpc.RPCParseError,
-			"null request payload")
-	}
-	return req, nil
-}
-
-// decodeResp decodes the JSON bytes into a rpc Response.
-func decodeResp(respBytes json.RawMessage) (*rpc.Response, *rpc.RPCError) {
-	resp := new(rpc.Response)
-	err := json.Unmarshal(respBytes, &resp)
-	if err != nil {
-		return nil, rpc.NewRPCError(rpc.RPCParseError,
-			"Failed to parse request: "+err.Error())
-	}
-	if resp == nil {
-		return nil, rpc.NewRPCError(rpc.RPCParseError,
-			"null response payload")
-	}
-	return resp, nil
 }
