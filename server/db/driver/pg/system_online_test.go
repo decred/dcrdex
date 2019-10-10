@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decred/dcrdex/server/db"
+	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/slog"
 )
 
@@ -28,7 +28,7 @@ var (
 )
 
 func openDB() (func() error, error) {
-	mktInfo, err := db.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
+	mktInfo, err := types.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
 	if err != nil {
 		return func() error { return nil }, fmt.Errorf("invalid market: %v", err)
 	}
@@ -44,7 +44,7 @@ func openDB() (func() error, error) {
 		DBName:       PGTestsDBName,
 		HidePGConfig: false,
 		QueryTimeout: 5 * time.Minute,
-		MarketCfg:    []*db.MarketInfo{mktInfo},
+		MarketCfg:    []*types.MarketInfo{mktInfo},
 	}
 	ctx := context.Background()
 	archie, err = NewArchiver(ctx, &dbi)

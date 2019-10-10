@@ -5,7 +5,7 @@ package pg
 import (
 	"testing"
 
-	"github.com/decred/dcrdex/server/db"
+	"github.com/decred/dcrdex/server/market/types"
 )
 
 func TestCheckCurrentTimeZone(t *testing.T) {
@@ -17,12 +17,12 @@ func TestCheckCurrentTimeZone(t *testing.T) {
 }
 
 func TestPrepareTables(t *testing.T) {
-	mktConfig, err := db.NewMarketInfoFromSymbols("DCR", "BTC", 1e9)
+	mktConfig, err := types.NewMarketInfoFromSymbols("DCR", "BTC", 1e9)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	markets := []*db.MarketInfo{mktConfig}
+	markets := []*types.MarketInfo{mktConfig}
 	err = PrepareTables(archie.db, markets)
 	if err != nil {
 		t.Error(err)

@@ -35,11 +35,11 @@ type Config struct {
 	HidePGConfig                   bool
 	QueryTimeout                   time.Duration
 
-	// MarketCfg specified all of the markets that the Archiver should prepare.
+	// MarketCfg specifies all of the markets that the Archiver should prepare.
 	MarketCfg []*types.MarketInfo
 }
 
-// Archiver implements DEXArchivist.
+// Archiver must implement server/db.DEXArchivist.
 // So far: OrderArchiver.
 type Archiver struct {
 	ctx          context.Context
@@ -113,6 +113,10 @@ func (a *Archiver) Close() error {
 	return a.db.Close()
 }
 
+// nukeAll removes all of the market schemas and the tables within them, as well
+// as all of the DEX tables in the public schema.
+// TODO: find a long term home for this once it is clear if and how it will be
+// used outside fo tests.
 func nukeAll(db *sql.DB) error {
 	// Identify all markets by matching schemas like dcr_btc with '___\____'.
 	rows, err := db.Query(`select nspname from pg_catalog.pg_namespace where nspname like '___\____';`)

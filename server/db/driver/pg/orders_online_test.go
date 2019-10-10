@@ -5,7 +5,7 @@ package pg
 import (
 	"testing"
 
-	"github.com/decred/dcrdex/server/db"
+	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/order"
 )
 
@@ -13,7 +13,7 @@ func TestStoreLoadOrders(t *testing.T) {
 	startLogger()
 	type args struct {
 		lo     *order.LimitOrder
-		status db.OrderStatus
+		status types.OrderStatus
 	}
 	tests := []struct {
 		name    string
@@ -24,7 +24,7 @@ func TestStoreLoadOrders(t *testing.T) {
 			name: "ok",
 			args: args{
 				lo:     newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
-				status: db.OrderStatusBooked,
+				status: types.OrderStatusBooked,
 			},
 			wantErr: false,
 		},
@@ -32,7 +32,7 @@ func TestStoreLoadOrders(t *testing.T) {
 			name: "ok",
 			args: args{
 				lo:     newLimitOrder(false, 4700000, 1, order.StandingTiF, 0),
-				status: db.OrderStatusCanceled,
+				status: types.OrderStatusCanceled,
 			},
 			wantErr: false,
 		},
@@ -40,7 +40,7 @@ func TestStoreLoadOrders(t *testing.T) {
 			name: "ok",
 			args: args{
 				lo:     newLimitOrder(false, 4800000, 1, order.StandingTiF, 0),
-				status: db.OrderStatusExecuted,
+				status: types.OrderStatusExecuted,
 			},
 			wantErr: false,
 		},
@@ -48,7 +48,7 @@ func TestStoreLoadOrders(t *testing.T) {
 			name: "ok",
 			args: args{
 				lo:     newLimitOrder(false, 4900000, 1, order.StandingTiF, 0),
-				status: db.OrderStatusFailed,
+				status: types.OrderStatusFailed,
 			},
 			wantErr: false,
 		},
@@ -56,7 +56,7 @@ func TestStoreLoadOrders(t *testing.T) {
 			name: "ok",
 			args: args{
 				lo:     newLimitOrder(false, 5000000, 1, order.StandingTiF, 0),
-				status: db.OrderStatusMatched,
+				status: types.OrderStatusMatched,
 			},
 			wantErr: false,
 		},
@@ -64,7 +64,7 @@ func TestStoreLoadOrders(t *testing.T) {
 			name: "bad",
 			args: args{
 				lo:     newLimitOrder(false, 5000000, 1, order.ImmediateTiF, 0),
-				status: db.OrderStatusMatched,
+				status: types.OrderStatusMatched,
 			},
 			wantErr: false,
 		},

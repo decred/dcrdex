@@ -124,12 +124,17 @@ type Order interface {
 
 	// Remaining computes the unfilled amount of the order.
 	Remaining() uint64
-
+	
 	// SwapAddress returns the order's payment address. Will be empty string for
 	// CancelOrder.
 	SwapAddress() string
-	
+
+	// Base returns the unique integer identifier of the base asset as defined
+	// in the asset package.
 	Base() uint32
+
+	// Quote returns the unique integer identifier of the quote asset as defined
+	// in the asset package.
 	Quote() uint32
 }
 
