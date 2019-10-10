@@ -38,11 +38,11 @@ var (
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
-	RegisterMethod(string, func(account.AccountID, *rpc.Request) *rpc.RPCError)
+	RegisterMethod(string, func(account.AccountID, *rpc.Message) *rpc.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...rpc.Signable)
-	Respond(account.AccountID, *rpc.Response)
-	Request(account.AccountID, *rpc.Request, func(*rpc.Response))
+	Send(account.AccountID, *rpc.Message)
+	Request(account.AccountID, *rpc.Message, func(*rpc.Message))
 	Penalize(account.AccountID, *order.Match, order.MatchStatus)
 }
 
@@ -91,8 +91,8 @@ type blockNotification struct {
 type waitSettings struct {
 	expiration time.Time
 	accountID  account.AccountID
-	request    *rpc.Request
-	timeoutErr *rpc.RPCError
+	request    *rpc.Message
+	timeoutErr *rpc.Error
 }
 
 // A chainWaiter is a function that is repeated periodically until a boolean
@@ -200,8 +200,8 @@ func NewSwapper(cfg *Config) *Swapper {
 	}
 	// The swapper is only concerned with two types of client-originating
 	// method requests.
-	authMgr.RegisterMethod(rpc.InitMethod, swapper.handleInit)
-	authMgr.RegisterMethod(rpc.RedeemMethod, swapper.handleRedeem)
+	authMgr.RegisterMethod(rpc.InitRoute, swapper.handleInit)
+	authMgr.RegisterMethod(rpc.RedeemRoute, swapper.handleRedeem)
 
 	go swapper.start()
 	return swapper
@@ -261,7 +261,7 @@ func (s *Swapper) start() {
 						log.Error("NewResponse error in (Swapper).loop: %v", err)
 						continue
 					}
-					s.authMgr.Respond(p.accountID, resp)
+					s.authMgr.Send(p.accountID, resp)
 					continue
 				}
 				agains = append(agains, mFunc)
@@ -477,37 +477,37 @@ func (s *Swapper) checkInaction(assetID uint32) {
 }
 
 // respondError sends an rpcError to a user.
-func (s *Swapper) respondError(id interface{}, user account.AccountID, code int, msg string) {
-	log.Debugf("error going to user %x, code: %d, msg: %s", user, code, msg)
-	resp, err := rpc.NewResponse(id, nil, &rpc.RPCError{
+func (s *Swapper) respondError(id uint64, user account.AccountID, code int, errMsg string) {
+	log.Debugf("error going to user %x, code: %d, msg: %s", user, code, errMsg)
+	msg, err := rpc.NewResponse(id, nil, &rpc.Error{
 		Code:    code,
-		Message: msg,
+		Message: errMsg,
 	})
 	if err != nil {
 		log.Errorf("error creating error response with message '%s': %v", msg, err)
 	}
-	s.authMgr.Respond(user, resp)
+	s.authMgr.Send(user, msg)
 }
 
 // respondSuccess sends a successful response to a user.
-func (s *Swapper) respondSuccess(id interface{}, user account.AccountID, result interface{}) {
-	resp, err := rpc.NewResponse(id, result, nil)
+func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result interface{}) {
+	msg, err := rpc.NewResponse(id, result, nil)
 	if err != nil {
 		log.Errorf("failed to send success: %v", err)
 	}
-	s.authMgr.Respond(user, resp)
+	s.authMgr.Send(user, msg)
 }
 
 // step creates a stepInformation structure for the specified match. A new
 // stepInformation should be created for every client communication. The user
 // is also validated as the actor. An error is returned if the user has not
 // acknowledged their previous DEX requests.
-func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation, *rpc.RPCError) {
+func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation, *rpc.Error) {
 	s.matchMtx.RLock()
 	defer s.matchMtx.RUnlock()
 	match, found := s.matches[matchID]
 	if !found {
-		return nil, &rpc.RPCError{
+		return nil, &rpc.Error{
 			Code:    rpc.RPCUnknownMatch,
 			Message: "unknown match ID",
 		}
@@ -519,7 +519,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 	var nextStep order.MatchStatus
 	maker, taker := match.Maker, match.Taker
 	var reqSigs [][]byte
-	ackType := rpc.MatchMethod
+	ackType := rpc.MatchRoute
 	switch match.Status {
 	case order.NewlyMatched, order.TakerSwapCast:
 		counterParty.order, actor.order = taker, maker
@@ -536,7 +536,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 			nextStep = order.MakerRedeemed
 			isBaseAsset = !maker.Sell
 			reqSigs = [][]byte{match.Sigs.MakerAudit}
-			ackType = rpc.AuditMethod
+			ackType = rpc.AuditRoute
 		}
 	case order.MakerSwapCast, order.MakerRedeemed:
 		counterParty.order, actor.order = maker, taker
@@ -549,15 +549,15 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 			nextStep = order.TakerSwapCast
 			isBaseAsset = !maker.Sell
 			reqSigs = [][]byte{match.Sigs.TakerMatch, match.Sigs.TakerAudit}
-			ackType = rpc.AuditMethod
+			ackType = rpc.AuditRoute
 		} else {
 			nextStep = order.MatchComplete
 			isBaseAsset = maker.Sell
 			reqSigs = [][]byte{match.Sigs.TakerRedeem}
-			ackType = rpc.RedemptionMethod
+			ackType = rpc.RedemptionRoute
 		}
 	default:
-		return nil, &rpc.RPCError{
+		return nil, &rpc.Error{
 			Code:    rpc.SettlementSequenceError,
 			Message: "unknown settlement sequence identifier",
 		}
@@ -565,7 +565,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 
 	// Verify that the user specified is the actor for this step.
 	if actor.user != user {
-		return nil, &rpc.RPCError{
+		return nil, &rpc.Error{
 			Code:    rpc.SettlementSequenceError,
 			Message: "expected other party to act",
 		}
@@ -574,7 +574,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 	// Verify that they have acknowledged their previous notification(s).
 	for _, s := range reqSigs {
 		if len(s) == 0 {
-			return nil, &rpc.RPCError{
+			return nil, &rpc.Error{
 				Code:    rpc.SettlementSequenceError,
 				Message: "missing acknowlegment for " + ackType + " request",
 			}
@@ -611,18 +611,18 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 
 // authUser verifies that the rpc.Signable is signed by the user. This method
 // relies on the AuthManager to validate the signature.
-func (s *Swapper) authUser(user account.AccountID, params rpc.Signable) *rpc.RPCError {
+func (s *Swapper) authUser(user account.AccountID, params rpc.Signable) *rpc.Error {
 	// Authorize the user.
 	msg, err := params.Serialize()
 	if err != nil {
-		return &rpc.RPCError{
+		return &rpc.Error{
 			Code:    rpc.SerializationError,
 			Message: fmt.Sprintf("unable to serialize init params: %v", err),
 		}
 	}
 	err = s.authMgr.Auth(user, msg, params.SigBytes())
 	if err != nil {
-		return &rpc.RPCError{
+		return &rpc.Error{
 			Code:    rpc.SignatureError,
 			Message: "error authenticating init params",
 		}
@@ -634,14 +634,14 @@ func (s *Swapper) authUser(user account.AccountID, params rpc.Signable) *rpc.RPC
 // a standardized error message.
 // DRAFT NOTE: 1 minute is pretty arbitrary. Consider making this a DEX
 // variable, or smarter in some way.
-func txWaitRules(user account.AccountID, req *rpc.Request, txid string) *waitSettings {
+func txWaitRules(user account.AccountID, msg *rpc.Message, txid string) *waitSettings {
 	return &waitSettings{
 		// must smarten up this expiration value before merge. Where should this
 		// come from?
 		expiration: time.Now().Add(txWaitExpiration),
 		accountID:  user,
-		request:    req,
-		timeoutErr: &rpc.RPCError{
+		request:    msg,
+		timeoutErr: &rpc.Error{
 			Code:    rpc.TransactionUndiscovered,
 			Message: fmt.Sprintf("failed to find transaction %s", txid),
 		},
@@ -660,35 +660,36 @@ type messageAcker struct {
 
 // processAck processes a single rpc.AcknowledgementResult, validating the
 // signature and updating the (order.Match).Sigs record.
-func (s *Swapper) processAck(resp *rpc.Response, acker *messageAcker) {
-	if resp.ID == nil || !rpc.IsValidIDType(*resp.ID) {
-		s.respondError(-1, acker.user, rpc.IDTypeError,
-			fmt.Sprintf("unsupported ID type: %T", resp.ID))
+func (s *Swapper) processAck(msg *rpc.Message, acker *messageAcker) {
+	var ack rpc.Acknowledgement
+	resp, err := msg.Response()
+	if err != nil {
+		s.respondError(msg.ID, acker.user, rpc.RPCParseError,
+			fmt.Sprintf("error parsing audit notification result: %v", err))
 		return
 	}
-	var ack rpc.AcknowledgementResult
-	err := json.Unmarshal(resp.Result, &ack)
+	err = json.Unmarshal(resp.Result, &ack)
 	if err != nil {
-		s.respondError(*resp.ID, acker.user, rpc.RPCParseError,
+		s.respondError(msg.ID, acker.user, rpc.RPCParseError,
 			fmt.Sprintf("error parsing audit notification acknowledgment: %v", err))
 		return
 	}
 	// Check the signature.
 	sigBytes, err := hex.DecodeString(ack.Sig)
 	if err != nil {
-		s.respondError(*resp.ID, acker.user, rpc.SignatureError,
+		s.respondError(msg.ID, acker.user, rpc.SignatureError,
 			fmt.Sprintf("error decoding signature %s: %v", ack.Sig, err))
 		return
 	}
-	msg, err := acker.params.Serialize()
+	sigMsg, err := acker.params.Serialize()
 	if err != nil {
-		s.respondError(*resp.ID, acker.user, rpc.SerializationError,
+		s.respondError(msg.ID, acker.user, rpc.SerializationError,
 			fmt.Sprintf("unable to serialize mathch params: %v", err))
 		return
 	}
-	err = s.authMgr.Auth(acker.user, msg, sigBytes)
+	err = s.authMgr.Auth(acker.user, sigMsg, sigBytes)
 	if err != nil {
-		s.respondError(*resp.ID, acker.user, rpc.SignatureError,
+		s.respondError(msg.ID, acker.user, rpc.SignatureError,
 			fmt.Sprintf("signature validation error: %v", err))
 		return
 	}
@@ -716,12 +717,7 @@ func (s *Swapper) processAck(resp *rpc.Response, acker *messageAcker) {
 // DEX of a newly broadcast swap transaction. Once the transaction is seen and
 // and audited by the Swapper, the counter-party is informed with an 'audit'
 // request. This method is run as a chainWaiter.
-func (s *Swapper) processInit(req *rpc.Request, params *rpc.InitParams, stepInfo *stepInformation) bool {
-	if !rpc.IsValidIDType(req.ID) {
-		s.respondError(-1, stepInfo.actor.user, rpc.IDTypeError,
-			fmt.Sprintf("unsupported ID type: %T", req.ID))
-		return dontTryAgain
-	}
+func (s *Swapper) processInit(msg *rpc.Message, params *rpc.Init, stepInfo *stepInformation) bool {
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
@@ -737,21 +733,21 @@ func (s *Swapper) processInit(req *rpc.Request, params *rpc.InitParams, stepInfo
 	// Decode the contract and audit the contract.
 	contract, err := hex.DecodeString(params.Contract)
 	if err != nil {
-		s.respondError(req.ID, actor.user, rpc.ContractError, fmt.Sprintf("error decoding contract: %v", err))
+		s.respondError(msg.ID, actor.user, rpc.ContractError, fmt.Sprintf("error decoding contract: %v", err))
 		return dontTryAgain
 	}
 	recipient, val, err := tx.AuditContract(params.Vout, contract)
 	if err != nil {
-		s.respondError(req.ID, actor.user, rpc.ContractError, fmt.Sprintf("error auditing contract: %v", err))
+		s.respondError(msg.ID, actor.user, rpc.ContractError, fmt.Sprintf("error auditing contract: %v", err))
 		return dontTryAgain
 	}
 	if recipient != counterParty.order.SwapAddress() {
-		s.respondError(req.ID, actor.user, rpc.ContractError,
+		s.respondError(msg.ID, actor.user, rpc.ContractError,
 			fmt.Sprintf("incorrect recipient. expected %s. got %s", recipient, counterParty.order.SwapAddress()))
 		return dontTryAgain
 	}
 	if val != stepInfo.checkVal {
-		s.respondError(req.ID, actor.user, rpc.ContractError,
+		s.respondError(msg.ID, actor.user, rpc.ContractError,
 			fmt.Sprintf("contract error. expected contract value to be %d, got %d", stepInfo.checkVal, val))
 		return dontTryAgain
 	}
@@ -771,19 +767,19 @@ func (s *Swapper) processInit(req *rpc.Request, params *rpc.InitParams, stepInfo
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
-	s.respondSuccess(req.ID, actor.user, &rpc.AcknowledgementResult{
+	s.respondSuccess(msg.ID, actor.user, &rpc.Acknowledgement{
 		MatchID: matchID.String(),
 		Sig:     params.Sig,
 	})
 
 	// Prepare an 'audit' request for the counter-party.
-	auditParams := &rpc.AuditParams{
+	auditParams := &rpc.Audit{
 		OrderID:  counterParty.order.ID().String(),
 		MatchID:  matchID.String(),
 		Time:     uint64(time.Now().Unix()),
 		Contract: params.Contract,
 	}
-	notification, err := rpc.NewRequest(comms.NextID(), rpc.AuditMethod, auditParams)
+	notification, err := rpc.NewRequest(comms.NextID(), rpc.AuditRoute, auditParams)
 	if err != nil {
 		// This is likely an impossibly condition.
 		log.Errorf("error creating audit request: %v", err)
@@ -798,8 +794,8 @@ func (s *Swapper) processInit(req *rpc.Request, params *rpc.InitParams, stepInfo
 		isAudit: true,
 	}
 	// Send the 'audit' request to the counter-party.
-	s.authMgr.Request(counterParty.order.User(), notification, func(resp *rpc.Response) {
-		s.processAck(resp, ack)
+	s.authMgr.Request(counterParty.order.User(), notification, func(msg *rpc.Message) {
+		s.processAck(msg, ack)
 	})
 	return dontTryAgain
 }
@@ -807,12 +803,7 @@ func (s *Swapper) processInit(req *rpc.Request, params *rpc.InitParams, stepInfo
 // processRedeem processes a 'redeem' request from a client. processRedeem does
 // not perform user authentication, which is handled in handleRedeem before
 // processRedeem is invoked. This method is run as a chainWaiter.
-func (s *Swapper) processRedeem(req *rpc.Request, params *rpc.RedeemParams, stepInfo *stepInformation) bool {
-	if !rpc.IsValidIDType(req.ID) {
-		s.respondError(-1, stepInfo.actor.user, rpc.IDTypeError,
-			fmt.Sprintf("unsupported ID type: %T", req.ID))
-		return dontTryAgain
-	}
+func (s *Swapper) processRedeem(msg *rpc.Message, params *rpc.Redeem, stepInfo *stepInformation) bool {
 	// Get the transaction
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	chain := stepInfo.asset.Backend
@@ -826,12 +817,12 @@ func (s *Swapper) processRedeem(req *rpc.Request, params *rpc.RedeemParams, step
 	status := counterParty.status
 	spends, err := tx.SpendsUTXO(status.swapTxid, status.swapVout)
 	if err != nil {
-		s.respondError(req.ID, actor.user, rpc.RedemptionError,
+		s.respondError(msg.ID, actor.user, rpc.RedemptionError,
 			fmt.Sprintf("error checking redemption %s:%d: %v", status.swapTxid, status.swapVout, err))
 		return dontTryAgain
 	}
 	if !spends {
-		s.respondError(req.ID, actor.user, rpc.RedemptionError,
+		s.respondError(msg.ID, actor.user, rpc.RedemptionError,
 			fmt.Sprintf("redemption does not spend %s:%d", status.swapTxid, status.swapVout))
 		return dontTryAgain
 	}
@@ -847,13 +838,13 @@ func (s *Swapper) processRedeem(req *rpc.Request, params *rpc.RedeemParams, step
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
-	s.respondSuccess(req.ID, actor.user, &rpc.AcknowledgementResult{
+	s.respondSuccess(msg.ID, actor.user, &rpc.Acknowledgement{
 		MatchID: matchID.String(),
 		Sig:     params.Sig,
 	})
 
 	// Inform the counterparty.
-	rParams := &rpc.RedemptionParams{
+	rParams := &rpc.Redemption{
 		OrderID: counterParty.order.ID().String(),
 		MatchID: matchID.String(),
 		TxID:    params.TxID,
@@ -861,7 +852,7 @@ func (s *Swapper) processRedeem(req *rpc.Request, params *rpc.RedeemParams, step
 		Time:    uint64(time.Now().Unix()),
 	}
 
-	notification, err := rpc.NewRequest(comms.NextID(), rpc.RedemptionMethod, rParams)
+	notification, err := rpc.NewRequest(comms.NextID(), rpc.RedemptionRoute, rParams)
 	if err != nil {
 		log.Errorf("error creating redemption request: %v", err)
 		return dontTryAgain
@@ -873,8 +864,8 @@ func (s *Swapper) processRedeem(req *rpc.Request, params *rpc.RedeemParams, step
 		params:  rParams,
 		isMaker: counterParty.isMaker,
 	}
-	s.authMgr.Request(counterParty.order.User(), notification, func(resp *rpc.Response) {
-		s.processAck(resp, ack)
+	s.authMgr.Request(counterParty.order.User(), notification, func(msg *rpc.Message) {
+		s.processAck(msg, ack)
 	})
 	return dontTryAgain
 
@@ -883,11 +874,11 @@ func (s *Swapper) processRedeem(req *rpc.Request, params *rpc.RedeemParams, step
 // handleInit handles the 'init' request from a user, which is used to inform
 // the DEX of a newly broadcast swap transaction. Most of the work is performed
 // by processInit, but the request is parsed and user is authenticated first.
-func (s *Swapper) handleInit(user account.AccountID, req *rpc.Request) *rpc.RPCError {
-	params := new(rpc.InitParams)
-	err := json.Unmarshal(req.Params, &params)
+func (s *Swapper) handleInit(user account.AccountID, msg *rpc.Message) *rpc.Error {
+	params := new(rpc.Init)
+	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
-		return &rpc.RPCError{
+		return &rpc.Error{
 			Code:    rpc.RPCParseError,
 			Message: "Error decoding 'init' method params",
 		}
@@ -904,8 +895,8 @@ func (s *Swapper) handleInit(user account.AccountID, req *rpc.Request) *rpc.RPCE
 	}
 
 	// Since we have to consider latency, run this as a chainWaiter.
-	s.waitMempool(txWaitRules(user, req, params.TxID), func() bool {
-		return s.processInit(req, params, stepInfo)
+	s.waitMempool(txWaitRules(user, msg, params.TxID), func() bool {
+		return s.processInit(msg, params, stepInfo)
 	})
 	return nil
 }
@@ -913,12 +904,12 @@ func (s *Swapper) handleInit(user account.AccountID, req *rpc.Request) *rpc.RPCE
 // handleRedeem handles the 'redeem' request from a user. Most of the work is
 // performed by processRedeem, but the request is parsed and user is
 // authenticated first.
-func (s *Swapper) handleRedeem(user account.AccountID, req *rpc.Request) *rpc.RPCError {
-	params := new(rpc.RedeemParams)
+func (s *Swapper) handleRedeem(user account.AccountID, msg *rpc.Message) *rpc.Error {
+	params := new(rpc.Redeem)
 
-	err := json.Unmarshal(req.Params, &params)
+	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
-		return &rpc.RPCError{
+		return &rpc.Error{
 			Code:    rpc.RPCParseError,
 			Message: "Error decoding 'init' method params",
 		}
@@ -935,8 +926,8 @@ func (s *Swapper) handleRedeem(user account.AccountID, req *rpc.Request) *rpc.RP
 	}
 
 	// Since we have to consider latency, run this as a chainWaiter.
-	s.waitMempool(txWaitRules(user, req, params.TxID), func() bool {
-		return s.processRedeem(req, params, stepInfo)
+	s.waitMempool(txWaitRules(user, msg, params.TxID), func() bool {
+		return s.processRedeem(msg, params, stepInfo)
 	})
 	return nil
 }
@@ -944,20 +935,20 @@ func (s *Swapper) handleRedeem(user account.AccountID, req *rpc.Request) *rpc.RP
 // revocationRequests prepares a match revocation RPC request for each client.
 // Both the request and the *rpc.RevokeMatchParams are returned, since they
 // cannot be accessed directly from the request (json.RawMessage).
-func revocationRequests(match *matchTracker) (*rpc.RevokeMatchParams, *rpc.Request, *rpc.RevokeMatchParams, *rpc.Request, error) {
-	takerParams := &rpc.RevokeMatchParams{
+func revocationRequests(match *matchTracker) (*rpc.RevokeMatch, *rpc.Message, *rpc.RevokeMatch, *rpc.Message, error) {
+	takerParams := &rpc.RevokeMatch{
 		OrderID: match.Taker.ID().String(),
 		MatchID: match.ID().String(),
 	}
-	takerReq, err := rpc.NewRequest(comms.NextID(), rpc.RevokeMatchMethod, takerParams)
+	takerReq, err := rpc.NewRequest(comms.NextID(), rpc.RevokeMatchRoute, takerParams)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	makerParams := &rpc.RevokeMatchParams{
+	makerParams := &rpc.RevokeMatch{
 		OrderID: match.Maker.ID().String(),
 		MatchID: match.ID().String(),
 	}
-	makerReq, err := rpc.NewRequest(comms.NextID(), rpc.RevokeMatchMethod, makerParams)
+	makerReq, err := rpc.NewRequest(comms.NextID(), rpc.RevokeMatchRoute, makerParams)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -978,8 +969,8 @@ func (s *Swapper) revoke(match *matchTracker) {
 		params:  takerParams,
 		isMaker: false,
 	}
-	s.authMgr.Request(match.Taker.User(), takerReq, func(resp *rpc.Response) {
-		s.processAck(resp, takerAck)
+	s.authMgr.Request(match.Taker.User(), takerReq, func(msg *rpc.Message) {
+		s.processAck(msg, takerAck)
 	})
 	makerAck := &messageAcker{
 		user:    match.Maker.User(),
@@ -987,8 +978,8 @@ func (s *Swapper) revoke(match *matchTracker) {
 		params:  makerParams,
 		isMaker: true,
 	}
-	s.authMgr.Request(match.Maker.User(), makerReq, func(resp *rpc.Response) {
-		s.processAck(resp, makerAck)
+	s.authMgr.Request(match.Maker.User(), makerReq, func(msg *rpc.Message) {
+		s.processAck(msg, makerAck)
 	})
 }
 
@@ -1027,15 +1018,15 @@ func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
 
 // matchNotifications creates a pair of rpc.MatchNotification from a
 // matchTracker.
-func matchNotifications(match *matchTracker) (makerMsg *rpc.MatchNotification, takerMsg *rpc.MatchNotification) {
-	return &rpc.MatchNotification{
+func matchNotifications(match *matchTracker) (makerMsg *rpc.Match, takerMsg *rpc.Match) {
+	return &rpc.Match{
 			OrderID:  match.Maker.ID().String(),
 			MatchID:  match.ID().String(),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
 			Address:  match.Taker.SwapAddress(),
 			Time:     uint64(match.time.Unix()),
-		}, &rpc.MatchNotification{
+		}, &rpc.Match{
 			OrderID:  match.Taker.ID().String(),
 			MatchID:  match.ID().String(),
 			Quantity: match.Quantity,
@@ -1064,21 +1055,22 @@ func newMatchAckers(match *matchTracker) (*messageAcker, *messageAcker) {
 
 // For the 'match' request, the user returns rpc.AcknowledgementResult with an
 // array of signatures, one for each match sent.
-func (s *Swapper) processMatchAcks(user account.AccountID, resp *rpc.Response, matches []*messageAcker) {
-	if resp.ID == nil || !rpc.IsValidIDType(*resp.ID) {
-		s.respondError(-1, user, rpc.IDTypeError,
-			fmt.Sprintf("unsupported ID type: %T", resp.ID))
+func (s *Swapper) processMatchAcks(user account.AccountID, msg *rpc.Message, matches []*messageAcker) {
+	var acks []rpc.Acknowledgement
+	resp, err := msg.Response()
+	if err != nil {
+		s.respondError(msg.ID, user, rpc.RPCParseError,
+			fmt.Sprintf("error parsing match acknowledgment response: %v", err))
 		return
 	}
-	var acks []rpc.AcknowledgementResult
-	err := json.Unmarshal(resp.Result, &acks)
+	err = json.Unmarshal(resp.Result, &acks)
 	if err != nil {
-		s.respondError(*resp.ID, user, rpc.RPCParseError,
+		s.respondError(msg.ID, user, rpc.RPCParseError,
 			fmt.Sprintf("error parsing match notification acknowledgment: %v", err))
 		return
 	}
 	if len(matches) != len(acks) {
-		s.respondError(*resp.ID, user, rpc.AckCountError,
+		s.respondError(msg.ID, user, rpc.AckCountError,
 			fmt.Sprintf("expected %d acknowledgements, got %d", len(acks), len(matches)))
 		return
 	}
@@ -1087,25 +1079,25 @@ func (s *Swapper) processMatchAcks(user account.AccountID, resp *rpc.Response, m
 	for i, matchInfo := range matches {
 		ack := acks[i]
 		if ack.MatchID != matchInfo.match.ID().String() {
-			s.respondError(*resp.ID, user, rpc.IDMismatchError,
+			s.respondError(msg.ID, user, rpc.IDMismatchError,
 				fmt.Sprintf("unexpected match ID at acknowledgment index %d", i))
 			return
 		}
 		sigBytes, err := hex.DecodeString(ack.Sig)
 		if err != nil {
-			s.respondError(*resp.ID, user, rpc.SignatureError,
+			s.respondError(msg.ID, user, rpc.SignatureError,
 				fmt.Sprintf("error decoding signature %s: %v", ack.Sig, err))
 			return
 		}
-		msg, err := matchInfo.params.Serialize()
+		sigMsg, err := matchInfo.params.Serialize()
 		if err != nil {
-			s.respondError(*resp.ID, user, rpc.SerializationError,
+			s.respondError(msg.ID, user, rpc.SerializationError,
 				fmt.Sprintf("unable to serialize mathch params: %v", err))
 			return
 		}
-		err = s.authMgr.Auth(user, msg, sigBytes)
+		err = s.authMgr.Auth(user, sigMsg, sigBytes)
 		if err != nil {
-			s.respondError(*resp.ID, user, rpc.SignatureError,
+			s.respondError(msg.ID, user, rpc.SignatureError,
 				fmt.Sprintf("signature validation error: %v", err))
 			return
 		}
@@ -1155,7 +1147,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 		for _, m := range matches {
 			msgs = append(msgs, m.params)
 		}
-		req, err := rpc.NewRequest(comms.NextID(), rpc.MatchMethod, msgs)
+		req, err := rpc.NewRequest(comms.NextID(), rpc.MatchRoute, msgs)
 		if err != nil {
 			log.Errorf("error creating match notification request: %v", err)
 			continue
@@ -1163,8 +1155,8 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 		{
 			m := matches
 			u := user
-			s.authMgr.Request(user, req, func(resp *rpc.Response) {
-				s.processMatchAcks(u, resp, m)
+			s.authMgr.Request(user, req, func(msg *rpc.Message) {
+				s.processMatchAcks(u, msg, m)
 			})
 		}
 	}

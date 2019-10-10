@@ -36,13 +36,13 @@ const (
 )
 
 const (
-	JSONRPCVersion    = "2.0"
-	MatchMethod       = "match"
-	InitMethod        = "init"
-	AuditMethod       = "audit"
-	RedeemMethod      = "redeem"
-	RedemptionMethod  = "redemption"
-	RevokeMatchMethod = "revoke_match"
+	JSONRPCVersion   = "2.0"
+	MatchRoute       = "match"
+	InitRoute        = "init"
+	AuditRoute       = "audit"
+	RedeemRoute      = "redeem"
+	RedemptionRoute  = "redemption"
+	RevokeMatchRoute = "revoke_match"
 )
 
 // Signable allows for serialization and signing.
@@ -71,121 +71,124 @@ func (s *signable) SigBytes() []byte {
 	return b
 }
 
-// AcknowledgementResult is the 'result' field in a RPCResponse to a request
-// that requires an acknowledgement. It is typically a signature of some
-// serialized data associated with the request.
-type AcknowledgementResult struct {
+// Acknowledgement is the 'result' field in a RPCResponse to a request that
+// requires an acknowledgement. It is typically a signature of some serialized
+// data associated with the request.
+type Acknowledgement struct {
 	MatchID string `json:"matchid"`
 	Sig     string `json:"sig"`
 }
 
-// RPCError is returned as part of an RPC response, and indicates that the
-// the requested method did not succesfully execute.
-type RPCError struct {
-	Code    int
-	Message string
+// Error is returned as part of the Response to indicate that an error
+// occurred during method execution.
+type Error struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
 }
 
-// Request is the general form of a JSON-RPC request. The type of the Params
-// field varies from one response to the next, so it is implemented as an
-// interface{}.
-type Request struct {
-	// Jsonrpc must be exactly "2.0".
-	Jsonrpc string `json:"jsonrpc"`
-	// The name of the remote procedure being called.
-	Method string `json:"method"`
-	// Params can be any struct or array type, or nil. the type of Params varies
-	// with method.
-	Params json.RawMessage `json:"params"`
-	// ID is a unique identifier the client assigns to this request. If the server
-	// responds the the request, the Response will have the same ID field as
-	// Request. Any integer, string or nil pointer is allowed for ID. A nil
-	// pointer signifies that no response is needed, but may not be valid for all
-	// requests.
-	ID interface{} `json:"id"`
-}
-
-// NewRequest returns a new JSON-RPC request object given the provided id,
-// method, and parameters.  The parameters are marshalled into a json.RawMessage
-// for the Params field of the returned request object. This function is only
-// provided in case the caller wants to construct raw requests for some reason.
-// Typically callers will instead want to create a registered concrete command
-// type with the NewCmd or New<Foo>Cmd functions and call the MarshalCmd
-// function with that command to generate the marshalled JSON-RPC request.
-func NewRequest(id interface{}, method string, params interface{}) (*Request, error) {
-	if !IsValidIDType(id) {
-		return nil, fmt.Errorf("the id of type '%T' is invalid", id)
+// NewError is a constructor for an Error.
+func NewError(code int, msg string) *Error {
+	return &Error{
+		Code:    code,
+		Message: msg,
 	}
+}
 
-	marshalledParam, err := json.Marshal(params)
+// ResponsePayload is the payload for a Response-type Message.
+type ResponsePayload struct {
+	// Result is the payload, if successful, else nil.
+	Result json.RawMessage `json:"result"`
+	// Error is the error, or nil if none was encountered.
+	Error *Error `json:"error"`
+}
+
+// MessageType indicates the type of message. MessageType is typically the first
+// switch checked when examining a message, and how the rest of the message is
+// decoded depends on its MessageType.
+type MessageType uint8
+
+const (
+	InvalidMessageType MessageType = iota
+	Request
+	Response
+	Notification
+)
+
+// Message is the primary messaging type for websocket communications.
+type Message struct {
+	// Type is the message type.
+	Type MessageType `json:"type"`
+	// Route is used for requests and notifications, and specifies a handler for
+	// the message.
+	Route string `json:"route,omitempty"`
+	// ID is a unique number that is used to link a response to a request.
+	ID uint64 `json:"id",omitempty`
+	// Payload is any data attached to the message. How Payload is decoded
+	// depends on the Route.
+	Payload json.RawMessage `json:"payload",omitempty`
+}
+
+// DecodeMessage decodes a Message from bytes.
+func DecodeMessage(b []byte) (*Message, error) {
+	msg := new(Message)
+	err := json.Unmarshal(b, &msg)
 	if err != nil {
 		return nil, err
 	}
+	return msg, nil
+}
 
-	return &Request{
-		Jsonrpc: JSONRPCVersion,
+// NewRequest is the constructor for a Request-type *Message.
+func NewRequest(id uint64, route string, payload interface{}) (*Message, error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return &Message{
+		Type:    Request,
+		Payload: json.RawMessage(encoded),
+		Route:   route,
 		ID:      id,
-		Method:  method,
-		Params:  json.RawMessage(marshalledParam),
 	}, nil
 }
 
-// Response is the general form of a JSON-RPC response.  The type of the
-// Result field varies from one response to the next, so it is implemented as an
-// interface{}. The ID field has to be a pointer to allow for a nil value when
-// empty.
-type Response struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	Result  json.RawMessage `json:"result"`
-	Error   *RPCError       `json:"error"`
-	ID      *interface{}    `json:"id"`
-}
-
-// IsValidIDType checks that the ID field (which can go in any of the JSON-RPC
-// requests, responses, or notifications) is valid.  JSON-RPC 1.0 allows any
-// valid JSON type.  JSON-RPC 2.0 (which bitcoind follows for some parts) only
-// allows string, number, or null, so this function restricts the allowed types
-// to that list.  This function is only provided in case the caller is manually
-// marshalling for some reason.    The functions which accept an ID in this
-// package already call this function to ensure the provided id is valid.
-func IsValidIDType(id interface{}) bool {
-	switch id.(type) {
-	case int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64,
-		float32, float64,
-		string,
-		nil:
-		return true
-	default:
-		return false
-	}
-}
-
-// NewResponse returns a new JSON-RPC response object given the provided rpc
-// version, id, marshalled result, and RPC error.  This function is only
-// provided in case the caller wants to construct raw responses for some reason.
-// Typically callers will instead want to create the fully marshalled JSON-RPC
-// response to send over the wire with the MarshalResponse function.
-func NewResponse(id interface{}, result interface{}, rpcErr *RPCError) (*Response, error) {
-	if !IsValidIDType(id) {
-		return nil, fmt.Errorf("the id of type '%T' is invalid", id)
-	}
-
-	marshalledResult, err := json.Marshal(result)
+// NewResponse encodes the result and creates a Response-type *Message.
+func NewResponse(id uint64, result interface{}, rpcErr *Error) (*Message, error) {
+	encResult, err := json.Marshal(result)
 	if err != nil {
 		return nil, err
 	}
-
-	return &Response{
-		Jsonrpc: JSONRPCVersion,
-		Result:  marshalledResult,
-		Error:   rpcErr,
-		ID:      &id,
+	resp := &ResponsePayload{
+		Result: encResult,
+		Error:  rpcErr,
+	}
+	encResp, err := json.Marshal(resp)
+	if err != nil {
+		return nil, err
+	}
+	return &Message{
+		Type:    Response,
+		Payload: json.RawMessage(encResp),
+		ID:      id,
 	}, nil
+}
+
+// Response attempts to decode the payload to a *ResponsePayload. Response will
+// return an error if the Type is not Response.
+func (msg *Message) Response() (*ResponsePayload, error) {
+	if msg.Type != Response {
+		return nil, fmt.Errorf("invalid type %d for ResponsePayload", msg.Type)
+	}
+	resp := new(ResponsePayload)
+	err := json.Unmarshal(msg.Payload, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // MatchNotification is the params for a DEX-originating MatchMethod request.
-type MatchNotification struct {
+type Match struct {
 	signable
 	OrderID  string `json:"orderid"`
 	MatchID  string `json:"matchid"`
@@ -195,11 +198,11 @@ type MatchNotification struct {
 	Time     uint64 `json:"timestamp"`
 }
 
-// Check that MatchNotification satisfies Signable interface.
-var _ Signable = (*MatchNotification)(nil)
+// Check that Match satisfies Signable interface.
+var _ Signable = (*Match)(nil)
 
-// Serialize serializes the MatchNotification data.
-func (params *MatchNotification) Serialize() ([]byte, error) {
+// Serialize serializes the Match data.
+func (params *Match) Serialize() ([]byte, error) {
 	// Match serialization is orderid (32) + matchid (32) + quantity (8) + rate (8)
 	// + address (variable, guess 35). Sum = 115
 	s := make([]byte, 0, 91)
@@ -219,12 +222,13 @@ func (params *MatchNotification) Serialize() ([]byte, error) {
 	s = append(s, matchID...)
 	s = append(s, uint64Bytes(params.Quantity)...)
 	s = append(s, uint64Bytes(params.Rate)...)
+	s = append(s, uint64Bytes(params.Time)...)
 	s = append(s, []byte(params.Address)...)
 	return s, nil
 }
 
-// InitParams are the params for a client-originating InitMethod request.
-type InitParams struct {
+// Init is the payload for a client-originating Init request.
+type Init struct {
 	signable
 	OrderID  string `json:"orderid"`
 	MatchID  string `json:"matchid"`
@@ -234,10 +238,10 @@ type InitParams struct {
 	Contract string `json:"contract"`
 }
 
-var _ Signable = (*InitParams)(nil)
+var _ Signable = (*Init)(nil)
 
-// Serialize serializes the InitParams data.
-func (params *InitParams) Serialize() ([]byte, error) {
+// Serialize serializes the Init data.
+func (params *Init) Serialize() ([]byte, error) {
 	// Init serialization is orderid (32) + matchid (32) + txid (probably 64) +
 	// vout (4) + timestamp (8) + contract (97 ish). Sum = 205
 	s := make([]byte, 0, 237)
@@ -264,8 +268,8 @@ func (params *InitParams) Serialize() ([]byte, error) {
 	return s, nil
 }
 
-// InitParams are the params for a DEX-originating AuditMethod request.
-type AuditParams struct {
+// Audit is the payload for a DEX-originating AuditRoute request.
+type Audit struct {
 	signable
 	OrderID  string `json:"orderid"`
 	MatchID  string `json:"matchid"`
@@ -273,10 +277,10 @@ type AuditParams struct {
 	Contract string `json:"contract"`
 }
 
-var _ Signable = (*AuditParams)(nil)
+var _ Signable = (*Audit)(nil)
 
 // Serialize serializes the AuditParams data.
-func (params *AuditParams) Serialize() ([]byte, error) {
+func (params *Audit) Serialize() ([]byte, error) {
 	// Audit serialization is orderid (32) + matchid (32) + time (8) +
 	// contract (97 ish) = 145
 	s := make([]byte, 0, 169)
@@ -299,18 +303,18 @@ func (params *AuditParams) Serialize() ([]byte, error) {
 	return s, nil
 }
 
-// RevokeMatchParams are the params for a DEX-originating RevokeMatchMethod
+// RevokeMatch are the params for a DEX-originating RevokeMatchMethod
 // request.
-type RevokeMatchParams struct {
+type RevokeMatch struct {
 	signable
 	OrderID string `json:""`
 	MatchID string `json:""`
 }
 
-var _ Signable = (*RevokeMatchParams)(nil)
+var _ Signable = (*RevokeMatch)(nil)
 
 // Serialize serializes the RevokeMatchParams data.
-func (params *RevokeMatchParams) Serialize() ([]byte, error) {
+func (params *RevokeMatch) Serialize() ([]byte, error) {
 	// RevokeMatch serialization is order id (32) + match id (32) = 64 bytes
 	s := make([]byte, 0, 64)
 	oid, err := hex.DecodeString(params.OrderID)
@@ -326,8 +330,8 @@ func (params *RevokeMatchParams) Serialize() ([]byte, error) {
 	return s, nil
 }
 
-// RedeemParams are the params for a client-originating RedeemMethod request.
-type RedeemParams struct {
+// Redeem are the params for a client-originating RedeemMethod request.
+type Redeem struct {
 	signable
 	OrderID string `json:"orderid"`
 	MatchID string `json:"matchid"`
@@ -336,10 +340,10 @@ type RedeemParams struct {
 	Time    uint64 `json:"timestamp"`
 }
 
-var _ Signable = (*RedeemParams)(nil)
+var _ Signable = (*Redeem)(nil)
 
 // Serialize serializes the RedeemParams data.
-func (params *RedeemParams) Serialize() ([]byte, error) {
+func (params *Redeem) Serialize() ([]byte, error) {
 	// Init serialization is orderid (32) + matchid (32) + txid (probably 64) +
 	// vout (4) + timestamp (8) = 205
 	s := make([]byte, 0, 140)
@@ -361,10 +365,10 @@ func (params *RedeemParams) Serialize() ([]byte, error) {
 	return s, nil
 }
 
-// RedemptionParams are the params for a DEX-originating RedemptionMethod
-// request. They are identical to RedeemParams, but RedeemParams are for the
+// Redemption are the params for a DEX-originating RedemptionMethod request.
+// They are identical to RedeemParams, but RedeemParams are for the
 // client-originating RedeemMethod request.
-type RedemptionParams = RedeemParams
+type Redemption = Redeem
 
 // Convert uint64 to 8 bytes.
 func uint64Bytes(i uint64) []byte {

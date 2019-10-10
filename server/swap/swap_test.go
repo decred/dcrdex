@@ -82,8 +82,8 @@ func tNewUser(lbl string) *tUser {
 }
 
 type TRequest struct {
-	req      *rpc.Request
-	respFunc func(*rpc.Response)
+	req      *rpc.Message
+	respFunc func(*rpc.Message)
 }
 
 // This stub satisfies AuthManager.
@@ -91,7 +91,7 @@ type TAuthManager struct {
 	mtx     sync.Mutex
 	authErr error
 	reqs    map[account.AccountID][]*TRequest
-	resps   map[account.AccountID][]*rpc.Response
+	resps   map[account.AccountID][]*rpc.Message
 	penalty struct {
 		violator account.AccountID
 		match    *order.Match
@@ -102,25 +102,25 @@ type TAuthManager struct {
 func newTAuthManager() *TAuthManager {
 	return &TAuthManager{
 		reqs:  make(map[account.AccountID][]*TRequest),
-		resps: make(map[account.AccountID][]*rpc.Response),
+		resps: make(map[account.AccountID][]*rpc.Message),
 	}
 }
 
-func (m *TAuthManager) Respond(user account.AccountID, resp *rpc.Response) {
+func (m *TAuthManager) Send(user account.AccountID, msg *rpc.Message) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	l := m.resps[user]
 	if l == nil {
-		l = make([]*rpc.Response, 0, 1)
+		l = make([]*rpc.Message, 0, 1)
 	}
-	m.resps[user] = append(l, resp)
+	m.resps[user] = append(l, msg)
 }
 
-func (m *TAuthManager) Request(user account.AccountID, req *rpc.Request, f func(*rpc.Response)) {
+func (m *TAuthManager) Request(user account.AccountID, msg *rpc.Message, f func(*rpc.Message)) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	tReq := &TRequest{
-		req:      req,
+		req:      msg,
 		respFunc: f,
 	}
 	l := m.reqs[user]
@@ -134,7 +134,7 @@ func (m *TAuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	return m.authErr
 }
 func (m *TAuthManager) RegisterMethod(string,
-	func(account.AccountID, *rpc.Request) *rpc.RPCError) {
+	func(account.AccountID, *rpc.Message) *rpc.Error) {
 }
 
 func (m *TAuthManager) Penalize(id account.AccountID, match *order.Match, step order.MatchStatus) {
@@ -175,22 +175,23 @@ func (m *TAuthManager) pushReq(id account.AccountID, req *TRequest) {
 	m.reqs[id] = append([]*TRequest{req}, m.reqs[id]...)
 }
 
-func (m *TAuthManager) pushResp(id account.AccountID, resp *rpc.Response) {
+func (m *TAuthManager) pushResp(id account.AccountID, msg *rpc.Message) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	m.resps[id] = append([]*rpc.Response{resp}, m.resps[id]...)
+	m.resps[id] = append([]*rpc.Message{msg}, m.resps[id]...)
 }
 
-func (m *TAuthManager) getResp(id account.AccountID) *rpc.Response {
+func (m *TAuthManager) getResp(id account.AccountID) (*rpc.Message, *rpc.ResponsePayload) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	resps := m.resps[id]
-	if len(resps) == 0 {
-		return nil
+	msgs := m.resps[id]
+	if len(msgs) == 0 {
+		return nil, nil
 	}
-	resp := resps[0]
-	m.resps[id] = resps[1:]
-	return resp
+	msg := msgs[0]
+	m.resps[id] = msgs[1:]
+	resp, _ := msg.Response()
+	return msg, resp
 }
 
 type TStorage struct{}
@@ -290,11 +291,9 @@ func TNewAsset(backend asset.DEXAsset) *asset.Asset {
 	}
 }
 
-func tNewResponse(id interface{}, resp []byte) *rpc.Response {
-	return &rpc.Response{
-		ID:     &id,
-		Result: json.RawMessage(resp),
-	}
+func tNewResponse(id uint64, resp []byte) *rpc.Message {
+	msg, _ := rpc.NewResponse(id, json.RawMessage(resp), nil)
+	return msg
 }
 
 // testRig is the primary test data structure.
@@ -381,8 +380,8 @@ func (rig *testRig) ackMatch(user *tUser, oid, counterAddr string) error {
 	if req == nil {
 		return fmt.Errorf("failed to find match notification for %s", user.lbl)
 	}
-	if req.req.Method != rpc.MatchMethod {
-		return fmt.Errorf("expected method '%s', got '%s'", rpc.MatchMethod, req.req.Method)
+	if req.req.Route != rpc.MatchRoute {
+		return fmt.Errorf("expected method '%s', got '%s'", rpc.MatchRoute, req.req.Route)
 	}
 	err := rig.checkMatchNotification(req.req, oid, counterAddr)
 	if err != nil {
@@ -396,14 +395,14 @@ func (rig *testRig) ackMatch(user *tUser, oid, counterAddr string) error {
 }
 
 // helper to check the match notifications.
-func (rig *testRig) checkMatchNotification(req *rpc.Request, oid, counterAddr string) error {
+func (rig *testRig) checkMatchNotification(msg *rpc.Message, oid, counterAddr string) error {
 	matchInfo := rig.matchInfo
-	var notes []*rpc.MatchNotification
-	err := json.Unmarshal(req.Params, &notes)
+	var notes []*rpc.Match
+	err := json.Unmarshal(msg.Payload, &notes)
 	if err != nil {
 		fmt.Printf("checkMatchNotification unmarshal error: %v\n", err)
 	}
-	var notification *rpc.MatchNotification
+	var notification *rpc.Match
 	for _, n := range notes {
 		if n.MatchID == matchInfo.matchID {
 			notification = n
@@ -430,8 +429,8 @@ func (rig *testRig) checkMatchNotification(req *rpc.Request, oid, counterAddr st
 
 // Can be used to ensure that a non-error response is returned from the swapper.
 func (rig *testRig) checkResponse(user *tUser, txType string) error {
-	resp := rig.auth.getResp(user.acct)
-	if resp == nil {
+	msg, resp := rig.auth.getResp(user.acct)
+	if msg == nil {
 		return fmt.Errorf("unexpected nil response to %s's '%s'", user.lbl, txType)
 	}
 	if resp.Error != nil {
@@ -499,7 +498,7 @@ func (rig *testRig) sendSwap(user *tUser, oid, recipient string) (*tSwap, error)
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
 	if rpcErr != nil {
 		resp, _ := rpc.NewResponse(swap.req.ID, nil, rpcErr)
-		rig.auth.Respond(user.acct, resp)
+		rig.auth.Send(user.acct, resp)
 		return nil, fmt.Errorf("%s swap rpc error. code: %d, msg: %s", user.lbl, rpcErr.Code, rpcErr.Message)
 	}
 	return swap, nil
@@ -529,28 +528,28 @@ func (rig *testRig) auditSwap_maker() error {
 	return rig.auditSwap(req.req, matchInfo.makerOID, matchInfo.db.takerSwap.contract, "maker", matchInfo.maker)
 }
 
-func (rig *testRig) auditSwap(req *rpc.Request, oid, contract, msg string, user *tUser) error {
-	if req == nil {
+func (rig *testRig) auditSwap(msg *rpc.Message, oid, contract, tag string, user *tUser) error {
+	if msg == nil {
 		return fmt.Errorf("no %s 'audit' request from DEX", user.lbl)
 	}
 
-	if req.Method != rpc.AuditMethod {
-		return fmt.Errorf("expected method '%s', got '%s'", rpc.AuditMethod, req.Method)
+	if msg.Route != rpc.AuditRoute {
+		return fmt.Errorf("expected method '%s', got '%s'", rpc.AuditRoute, msg.Route)
 	}
-	var params *rpc.AuditParams
-	err := json.Unmarshal(req.Params, &params)
+	var params *rpc.Audit
+	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
 		return fmt.Errorf("error unmarshaling audit params: %v", err)
 	}
 	if params.OrderID != oid {
-		return fmt.Errorf("%s : incorrect order ID in auditSwap, expected '%s', got '%s'", msg, oid, params.OrderID)
+		return fmt.Errorf("%s : incorrect order ID in auditSwap, expected '%s', got '%s'", tag, oid, params.OrderID)
 	}
 	matchID := rig.matchInfo.matchID
 	if params.MatchID != matchID {
-		return fmt.Errorf("%s : incorrect match ID in auditSwap, expected '%s', got '%s'", msg, matchID, params.MatchID)
+		return fmt.Errorf("%s : incorrect match ID in auditSwap, expected '%s', got '%s'", tag, matchID, params.MatchID)
 	}
 	if params.Contract != contract {
-		return fmt.Errorf("%s : incorrect contract. expected '%s', got '%s'", msg, contract, params.Contract)
+		return fmt.Errorf("%s : incorrect contract. expected '%s', got '%s'", tag, contract, params.Contract)
 	}
 	return nil
 }
@@ -641,8 +640,8 @@ func (rig *testRig) redeem(user *tUser, oid string) *tRedeem {
 	}
 	rpcErr := rig.swapper.handleRedeem(user.acct, redeem.req)
 	if rpcErr != nil {
-		resp, _ := rpc.NewResponse(redeem.req.ID, nil, rpcErr)
-		rig.auth.Respond(user.acct, resp)
+		msg, _ := rpc.NewResponse(redeem.req.ID, nil, rpcErr)
+		rig.auth.Send(user.acct, msg)
 	}
 	return redeem
 }
@@ -695,21 +694,21 @@ func (rig *testRig) ackRedemption(user *tUser, oid string, redeem *tRedeem) erro
 	return nil
 }
 
-func (rig *testRig) checkRedeem(req *rpc.Request, oid, txid, msg string) error {
-	var params *rpc.RedemptionParams
-	err := json.Unmarshal(req.Params, &params)
+func (rig *testRig) checkRedeem(msg *rpc.Message, oid, txid, tag string) error {
+	var params *rpc.Redemption
+	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
 		return fmt.Errorf("error unmarshaling redeem params: %v", err)
 	}
 	if params.OrderID != oid {
-		return fmt.Errorf("%s : incorrect order ID in checkRedeem, expected '%s', got '%s'", msg, oid, params.OrderID)
+		return fmt.Errorf("%s : incorrect order ID in checkRedeem, expected '%s', got '%s'", tag, oid, params.OrderID)
 	}
 	matchID := rig.matchInfo.matchID
 	if params.MatchID != matchID {
-		return fmt.Errorf("%s : incorrect match ID in checkRedeem, expected '%s', got '%s'", msg, matchID, params.MatchID)
+		return fmt.Errorf("%s : incorrect match ID in checkRedeem, expected '%s', got '%s'", tag, matchID, params.MatchID)
 	}
 	if params.TxID != txid {
-		return fmt.Errorf("%s : incorrect txid in checkRedeem. expected '%s', got '%s'", msg, txid, params.TxID)
+		return fmt.Errorf("%s : incorrect txid in checkRedeem. expected '%s', got '%s'", tag, txid, params.TxID)
 	}
 	return nil
 }
@@ -820,8 +819,8 @@ type tMatch struct {
 	}
 }
 
-func makeAck(id string, sig string) rpc.AcknowledgementResult {
-	return rpc.AcknowledgementResult{
+func makeAck(id string, sig string) rpc.Acknowledgement {
+	return rpc.Acknowledgement{
 		MatchID: id,
 		Sig:     sig,
 	}
@@ -833,7 +832,7 @@ func tAck(user *tUser, matchID string) []byte {
 }
 
 func tAckArr(user *tUser, matchIDs []string) []byte {
-	ackArr := make([]rpc.AcknowledgementResult, 0, len(matchIDs))
+	ackArr := make([]rpc.Acknowledgement, 0, len(matchIDs))
 	for _, matchID := range matchIDs {
 		ackArr = append(ackArr, makeAck(matchID, user.sigHex))
 	}
@@ -917,7 +916,7 @@ func tMultiMatchSet(matchQtys, rates []uint64, makerSell bool, isMarket bool) *t
 // tSwap is the information needed for spoofing a swap transaction.
 type tSwap struct {
 	tx       *TTransaction
-	req      *rpc.Request
+	req      *rpc.Message
 	contract string
 }
 
@@ -935,7 +934,7 @@ func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
 		auditVal:  auditVal * tValSpoofer,
 	}
 	contract := "01234567" + user.sigHex
-	req, _ := rpc.NewRequest(0, rpc.InitMethod, &rpc.InitParams{
+	req, _ := rpc.NewRequest(0, rpc.InitRoute, &rpc.Init{
 		OrderID: oid,
 		MatchID: matchInfo.matchID,
 		// We control what the backend returns, so the txid doesn't matter right now.
@@ -959,14 +958,14 @@ func isQuoteSwap(user *tUser, match *order.Match) bool {
 
 // tRedeem is the information needed to spoof a redemption transaction.
 type tRedeem struct {
-	req  *rpc.Request
+	req  *rpc.Message
 	tx   *TTransaction
 	txid string
 }
 
 func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {
 	txid := "987654" + user.sigHex
-	req, _ := rpc.NewRequest(0, rpc.InitMethod, &rpc.RedeemParams{
+	req, _ := rpc.NewRequest(0, rpc.InitRoute, &rpc.Redeem{
 		OrderID: oid,
 		MatchID: matchInfo.matchID,
 		TxID:    txid,
@@ -1000,8 +999,8 @@ func makeMustBeError(t *testing.T) func(error, string) {
 // rpc.RPCError of the correct type.
 func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 	return func(user *tUser) {
-		resp := rig.auth.getResp(user.acct)
-		if resp == nil {
+		msg, resp := rig.auth.getResp(user.acct)
+		if msg == nil {
 			t.Fatalf("no response for %s", user.lbl)
 		}
 		if resp.Error == nil {
@@ -1105,8 +1104,11 @@ func TestNoAck(t *testing.T) {
 
 	// Check that the response from the Swapper is an rpc.SettlementSequenceError.
 	checkSeqError := func(user *tUser) {
-		resp := rig.auth.getResp(user.acct)
-		if resp == nil || resp.Error == nil {
+		msg, resp := rig.auth.getResp(user.acct)
+		if msg == nil {
+			t.Fatalf("checkSeqError: no message")
+		}
+		if resp.Error == nil {
 			t.Fatalf("no error for %s", user.lbl)
 		}
 		if resp.Error.Code != rpc.SettlementSequenceError {
@@ -1166,8 +1168,8 @@ func TestTxWaiters(t *testing.T) {
 	ensureNilErr(rig.sendSwap_maker(false))
 	timeOutMempool()
 	// Should have an rpc error.
-	resp := rig.auth.getResp(matchInfo.maker.acct)
-	if resp == nil {
+	msg, resp := rig.auth.getResp(matchInfo.maker.acct)
+	if msg == nil {
 		t.Fatalf("no response for erroneous maker swap")
 	}
 	if resp.Error == nil {
@@ -1185,15 +1187,15 @@ func TestTxWaiters(t *testing.T) {
 	// Wait a tick
 	tickMempool()
 	// There should not be a response yet.
-	resp = rig.auth.getResp(matchInfo.taker.acct)
-	if resp != nil {
+	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
+	if msg != nil {
 		t.Fatalf("unexpected response for latent taker swap")
 	}
 	// Clear the error.
 	rig.xyzNode.setTxErr(nil)
 	tickMempool()
-	resp = rig.auth.getResp(matchInfo.taker.acct)
-	if resp == nil {
+	msg, resp = rig.auth.getResp(matchInfo.taker.acct)
+	if msg == nil {
 		t.Fatalf("no response for erroneous taker swap")
 	}
 	if resp.Error != nil {
@@ -1208,15 +1210,15 @@ func TestTxWaiters(t *testing.T) {
 	ensureNilErr(rig.redeem_maker(false))
 	tickMempool()
 	tickMempool()
-	resp = rig.auth.getResp(matchInfo.maker.acct)
-	if resp != nil {
+	msg, _ = rig.auth.getResp(matchInfo.maker.acct)
+	if msg != nil {
 		t.Fatalf("unexpected response for latent maker redeem")
 	}
 	// Clear the error.
 	rig.xyzNode.setTxErr(nil)
 	tickMempool()
-	resp = rig.auth.getResp(matchInfo.maker.acct)
-	if resp == nil {
+	msg, resp = rig.auth.getResp(matchInfo.maker.acct)
+	if msg == nil {
 		t.Fatalf("no response for erroneous maker redeem")
 	}
 	if resp.Error != nil {
@@ -1231,12 +1233,9 @@ func TestTxWaiters(t *testing.T) {
 	rig.abcNode.setTxErr(dummyError)
 	ensureNilErr(rig.redeem_taker(false))
 	timeOutMempool()
-	resp = rig.auth.getResp(matchInfo.taker.acct)
-	if resp == nil {
+	msg, resp = rig.auth.getResp(matchInfo.taker.acct)
+	if msg == nil {
 		t.Fatalf("no response for erroneous taker redeem")
-	}
-	if resp.Error == nil {
-		t.Fatalf("no rpc error for erroneous maker redeem")
 	}
 	rig.abcNode.setTxErr(nil)
 	ensureNilErr(rig.redeem_taker(true))
@@ -1267,17 +1266,17 @@ func TestBroadcastTimeouts(t *testing.T) {
 		if req == nil {
 			t.Fatalf("no match_cancellation")
 		}
-		params := new(rpc.RevokeMatchParams)
-		err := json.Unmarshal(req.req.Params, &params)
+		params := new(rpc.RevokeMatch)
+		err := json.Unmarshal(req.req.Payload, &params)
 		if err != nil {
-			t.Fatalf("unmarshal error for %s at step %d: %s", user.lbl, i, string(req.req.Params))
+			t.Fatalf("unmarshal error for %s at step %d: %s", user.lbl, i, string(req.req.Payload))
 		}
 		if params.MatchID != rig.matchInfo.matchID {
 			t.Fatalf("unexpected revocation match ID for %s at step %d. expected %s, got %s",
 				user.lbl, i, rig.matchInfo.matchID, params.MatchID)
 		}
-		if req.req.Method != rpc.RevokeMatchMethod {
-			t.Fatalf("wrong request method for %s at step %d: expected '%s', got '%s'", user.lbl, i, rpc.RevokeMatchMethod, req.req.Method)
+		if req.req.Route != rpc.RevokeMatchRoute {
+			t.Fatalf("wrong request method for %s at step %d: expected '%s', got '%s'", user.lbl, i, rpc.RevokeMatchRoute, req.req.Route)
 		}
 	}
 	// tryExpire will sleep for the duration of a BroadcastTimeout, and then
@@ -1371,19 +1370,19 @@ func TestSigErrors(t *testing.T) {
 	// from the swapper.
 	checkResp := rpcErrorChecker(t, rig, rpc.SignatureError)
 	// We need a way to restore the state of the queue.
-	var stashedReq *TRequest
-	var stashedResp *rpc.Response
+	var tReq *TRequest
+	var msg *rpc.Message
 	apply := func(user *tUser) {
-		if stashedResp != nil {
-			rig.auth.pushResp(user.acct, stashedResp)
+		if msg != nil {
+			rig.auth.pushResp(user.acct, msg)
 		}
-		if stashedReq != nil {
-			rig.auth.pushReq(user.acct, stashedReq)
+		if tReq != nil {
+			rig.auth.pushReq(user.acct, tReq)
 		}
 	}
 	stash := func(user *tUser) {
-		stashedResp = rig.auth.getResp(user.acct)
-		stashedReq = rig.auth.getReq(user.acct)
+		msg, _ = rig.auth.getResp(user.acct)
+		tReq = rig.auth.getReq(user.acct)
 		apply(user)
 	}
 	testAction := func(stepFunc func(bool) error, user *tUser) {
@@ -1493,28 +1492,18 @@ func TestBadParams(t *testing.T) {
 		isMaker: true,
 		isAudit: true,
 	}
-	stepInfo := &stepInformation{
-		actor: stepActor{
-			user: user.acct,
-		},
-	}
-	resp, _ := rpc.NewResponse(0, nil, nil)
-	req, _ := rpc.NewRequest(0, "", nil)
-	// Use an invalid ID type
-	var invalidID interface{}
-	invalidID = struct{}{}
-	checkIDErr := rpcErrorChecker(t, rig, rpc.IDTypeError)
 	checkParseErr := rpcErrorChecker(t, rig, rpc.RPCParseError)
 	checkSigErr := rpcErrorChecker(t, rig, rpc.SignatureError)
 	checkAckCountErr := rpcErrorChecker(t, rig, rpc.AckCountError)
 	checkMismatchErr := rpcErrorChecker(t, rig, rpc.IDMismatchError)
+	checkContractErr := rpcErrorChecker(t, rig, rpc.ContractError)
 
-	ack := &rpc.AcknowledgementResult{
+	ack := &rpc.Acknowledgement{
 		MatchID: matchInfo.matchID,
 		// non-hex characters
 		Sig: "zyxw",
 	}
-	ackArr := make([]*rpc.AcknowledgementResult, 0)
+	ackArr := make([]*rpc.Acknowledgement, 0)
 	matches := []*messageAcker{
 		&messageAcker{match: rig.getTracker()},
 	}
@@ -1528,47 +1517,46 @@ func TestBadParams(t *testing.T) {
 		return json.RawMessage(b)
 	}
 
-	// Check invalidID in a couple other places.
-	resp.ID = &invalidID
-	req.ID = invalidID
-	swapper.processAck(resp, acker)
-	checkIDErr(user)
-	swapper.processRedeem(req, nil, stepInfo)
-	checkIDErr(user)
-	swapper.processInit(req, nil, stepInfo)
-	checkIDErr(user)
-	swapper.processMatchAcks(user.acct, resp, []*messageAcker{})
-	checkIDErr(user)
-
-	// Fix the ID, but with invalid result
-	invalidID = 1
-	resp.ID = &invalidID
-	resp.Result = json.RawMessage([]byte("?"))
-	swapper.processAck(resp, acker)
+	// Invalid result.
+	msg, _ := rpc.NewResponse(1, nil, nil)
+	msg.Payload = json.RawMessage(`{"result":?}`)
+	swapper.processAck(msg, acker)
 	checkParseErr(user)
-	swapper.processMatchAcks(user.acct, resp, []*messageAcker{})
+	swapper.processMatchAcks(user.acct, msg, []*messageAcker{})
 	checkParseErr(user)
 
-	resp.Result = encodedAck()
-	swapper.processAck(resp, acker)
+	msg, _ = rpc.NewResponse(1, encodedAck(), nil)
+	swapper.processAck(msg, acker)
 	checkSigErr(user)
 
-	resp.Result = encodedAckArray()
-	swapper.processMatchAcks(user.acct, resp, matches)
+	msg, _ = rpc.NewResponse(1, encodedAckArray(), nil)
+	swapper.processMatchAcks(user.acct, msg, matches)
 	checkAckCountErr(user)
 
 	// check bad ack ID
 	ack.MatchID = "bogusid"
 	ackArr = append(ackArr, ack)
-	resp.Result = encodedAckArray()
-	swapper.processMatchAcks(user.acct, resp, matches)
+	msg, _ = rpc.NewResponse(1, encodedAckArray(), nil)
+	swapper.processMatchAcks(user.acct, msg, matches)
 	checkMismatchErr(user)
 
 	// Fix the ID, but check for a sig error
 	ack.MatchID = matchInfo.matchID
-	resp.Result = encodedAckArray()
-	swapper.processMatchAcks(user.acct, resp, matches)
+	msg, _ = rpc.NewResponse(1, encodedAckArray(), nil)
+	swapper.processMatchAcks(user.acct, msg, matches)
 	checkSigErr(user)
+
+	// Invalid characters in 'init' contract.
+	swapper.processInit(msg, &rpc.Init{
+		TxID:     "abc",
+		Contract: "xyz",
+	}, &stepInformation{
+		asset: rig.abc,
+		actor: stepActor{
+			user: user.acct,
+		},
+	})
+	checkContractErr(user)
 }
 
 func TestCancel(t *testing.T) {
@@ -1583,8 +1571,8 @@ func TestCancel(t *testing.T) {
 	// The user should have two match requests.
 	user := matchInfo.maker
 	req := rig.auth.getReq(user.acct)
-	matchNotes := make([]*rpc.MatchNotification, 0)
-	err := json.Unmarshal(req.req.Params, &matchNotes)
+	matchNotes := make([]*rpc.Match, 0)
+	err := json.Unmarshal(req.req.Payload, &matchNotes)
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
