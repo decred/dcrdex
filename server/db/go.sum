@@ -19,6 +19,7 @@ github.com/decred/dcrd/chaincfg v1.5.2 h1:dd6l9rqcpxg2GF5neBmE2XxRc5Lqda45fWmN4X
 github.com/decred/dcrd/chaincfg v1.5.2/go.mod h1:FukMzTjkwzjPU+hK7CqDMQe3NMbSZAYU5PAcsx1wlv0=
 github.com/decred/dcrd/chaincfg/chainhash v1.0.1 h1:0vG7U9+dSjSCaHQKdoSKURK2pOb47+b+8FK5q4+Je7M=
 github.com/decred/dcrd/chaincfg/chainhash v1.0.1/go.mod h1:OVfvaOsNLS/A1y4Eod0Ip/Lf8qga7VXCQjUQLbkY0Go=
+github.com/decred/dcrd/chaincfg/chainhash v1.0.2/go.mod h1:BpbrGgrPTr3YJYRN3Bm+D9NuaFd+zGyNeIKgrhCXK60=
 github.com/decred/dcrd/crypto/blake256 v1.0.0 h1:/8DMNYp9SGi5f0w7uCm6d6M4OU2rGFK09Y2A4Xv7EE0=
 github.com/decred/dcrd/crypto/blake256 v1.0.0/go.mod h1:sQl2p6Y26YV+ZOcSTP6thNdn47hh8kt6rqSlvmrXFAc=
 github.com/decred/dcrd/dcrec v1.0.0 h1:W+z6Es+Rai3MXYVoPAxYr5U1DGis0Co33scJ6uH2J6o=
@@ -27,12 +28,18 @@ github.com/decred/dcrd/dcrec/edwards v1.0.0/go.mod h1:HblVh1OfMt7xSxUL1ufjToaEvp
 github.com/decred/dcrd/dcrec/secp256k1 v1.0.1/go.mod h1:lhu4eZFSfTJWUnR3CFRcpD+Vta0KUAqnhTsTksHXgy0=
 github.com/decred/dcrd/dcrec/secp256k1 v1.0.2 h1:awk7sYJ4pGWmtkiGHFfctztJjHMKGLV8jctGQhAbKe0=
 github.com/decred/dcrd/dcrec/secp256k1 v1.0.2/go.mod h1:CHTUIVfmDDd0KFVFpNX1pFVCBUegxW387nN0IGwNKR0=
+github.com/decred/dcrd/dcrec/secp256k1 v1.0.3 h1:u4XpHqlscRolxPxt2YHrFBDVZYY1AK+KMV02H1r+HmU=
+github.com/decred/dcrd/dcrec/secp256k1 v1.0.3/go.mod h1:eCL8H4MYYjRvsw2TuANvEOcVMFbmi9rt/6hJUWU5wlU=
+github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0 h1:3GIJYXQDAKpLEFriGFN8SbSffak10UXHGdIcFaMPykY=
+github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0/go.mod h1:3s92l0paYkZoIHuj4X93Teg/HB7eGM9x/zokGw+u4mY=
 github.com/decred/dcrd/wire v1.2.0 h1:HqJVB7vcklIguzFWgRXw/WYCQ9cD3bUC5TKj53i1Hng=
 github.com/decred/dcrd/wire v1.2.0/go.mod h1:/JKOsLInOJu6InN+/zH5AyCq3YDIOW/EqcffvU8fJHM=
 github.com/decred/dcrdex v0.0.0-20190923160412-147b0ab7b8a4 h1:7+D6pvci42niqI8Co6dI3aUVvkTzlOf8np9aunyKK04=
 github.com/decred/dcrdex v0.0.0-20191007225918-c21cff4ecc64 h1:PdT5DDyrqIciGg2VbRQVVXXD2dENfJUGZhzOhJhLJeY=
 github.com/decred/dcrdex/server/account v0.0.0-20190907171020-c48f5b8f4bbc h1:64rAlejxKBrGkiq3OHSH50u3cSJzMSho7q3fEa3ix9E=
 github.com/decred/dcrdex/server/account v0.0.0-20190907171020-c48f5b8f4bbc/go.mod h1:JLrghdqZ/Ho48JV1Np0qsPcC1nErNekEZd0jJ1QuISI=
+github.com/decred/dcrdex/server/book v0.0.0-20191007225918-c21cff4ecc64/go.mod h1:uFk0hAYdaeOzoZFWOBXbvvaYyOWQgoFvYsGBdFDi5a0=
+github.com/decred/dcrdex/server/matcher v0.0.0-20191007225918-c21cff4ecc64/go.mod h1:VjOS7Be+oJCsqClTKYPxjEe7qryJO4g89TPfD+I1FUk=
 github.com/decred/dcrdex/server/order v0.0.0-20190923160412-147b0ab7b8a4 h1:/wTVwArV1laI1yENFj5zvylEeFJ8PMBbOTtYl7M4KNg=
 github.com/decred/dcrdex/server/order v0.0.0-20190923160412-147b0ab7b8a4/go.mod h1:+bOjO6AlusnQuIFdR+zmO+YHmXt+Ea1/BnL6rbl52pc=
 github.com/decred/slog v1.0.0 h1:Dl+W8O6/JH6n2xIFN2p3DNjCmjYwvrXsjlSJTQQ4MhE=

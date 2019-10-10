@@ -4,96 +4,10 @@
 package db
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/asset"
+	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/order"
 )
-
-// var (
-// 	driverMtx  sync.Mutex
-// 	driverName string
-// 	driver     Driver
-// )
-
-// type Driver interface {
-// 	Open(ctx context.Context, cfg interface{}) (DEXArchivist, error)
-// }
-
-// func Register(name string, d Driver) {
-// 	driverMtx.Lock()
-// 	defer driverMtx.Unlock()
-// 	if d == nil {
-// 		panic("db: Register driver is nil")
-// 	}
-// 	if driver != nil {
-// 		panic("db: Register already called. driver: " + driverName)
-// 	}
-// 	driverName = name
-// 	driver = d
-// }
-
-// MarketInfo specified a market that the Archiver must support.
-type MarketInfo struct {
-	Name    string
-	Base    uint32
-	Quote   uint32
-	LotSize uint64
-}
-
-func marketName(base, quote string) string {
-	return base + "_" + quote
-}
-
-func MarketName(base, quote uint32) (string, error) {
-	baseSymbol := asset.BipIDSymbol(base)
-	if baseSymbol == "" {
-		return "", fmt.Errorf("base asset %d not found", base)
-	}
-	baseSymbol = strings.ToLower(baseSymbol)
-
-	quoteSymbol := asset.BipIDSymbol(quote)
-	if quoteSymbol == "" {
-		return "", fmt.Errorf("quote asset %d not found", quote)
-	}
-	quoteSymbol = strings.ToLower(quoteSymbol)
-
-	return marketName(baseSymbol, quoteSymbol), nil
-}
-
-func NewMarketInfo(base, quote uint32, lotSize uint64) (*MarketInfo, error) {
-	name, err := MarketName(base, quote)
-	if err != nil {
-		return nil, err
-	}
-	return &MarketInfo{
-		Name:    name,
-		Base:    base,
-		Quote:   quote,
-		LotSize: lotSize,
-	}, nil
-}
-
-func NewMarketInfoFromSymbols(base, quote string, lotSize uint64) (*MarketInfo, error) {
-	baseID, found := asset.BipSymbolID(strings.ToLower(base))
-	if !found {
-		return nil, fmt.Errorf(`base asset symbol "%s" unrecognized`, base)
-	}
-
-	quoteID, found := asset.BipSymbolID(strings.ToLower(quote))
-	if !found {
-		return nil, fmt.Errorf(`quote asset symbol "%s" unrecognized`, quote)
-	}
-
-	return &MarketInfo{
-		Name:    marketName(base, quote),
-		Base:    baseID,
-		Quote:   quoteID,
-		LotSize: lotSize,
-	}, nil
-}
 
 type DEXArchivist interface {
 	OrderArchiver
@@ -102,15 +16,15 @@ type DEXArchivist interface {
 type OrderArchiver interface {
 	// Order retrieves an order with the given OrderID, stored for the market
 	// specified by the given base and quote assets.
-	Order(oid order.OrderID, base, quote uint32) (order.Order, OrderStatus, error)
+	Order(oid order.OrderID, base, quote uint32) (order.Order, types.OrderStatus, error)
 	// StoreOrder stores an order with the provided status.
-	StoreOrder(ord order.Order, status OrderStatus) error
+	StoreOrder(ord order.Order, status types.OrderStatus) error
 
-	// OrderStatus gets the status and filled amount of the given order.
-	OrderStatus(order.Order) (OrderStatus, int64, error)
+	// types.OrderStatus gets the status and filled amount of the given order.
+	OrderStatus(order.Order) (types.OrderStatus, int64, error)
 	// OrderStatusByID gets the status and filled amount of the order with the
 	// given OrderID in the market specified by a base and quote asset.
-	OrderStatusByID(oid order.OrderID, base, quote uint32) (OrderStatus, int64, error)
+	OrderStatusByID(oid order.OrderID, base, quote uint32) (types.OrderStatus, int64, error)
 
 	// UpdateOrder updates the filled amount of the given order.
 	UpdateOrder(order.Order) error
@@ -120,117 +34,39 @@ type OrderArchiver interface {
 
 	// UpdateOrderStatus updates the status and filled amount of the given
 	// order.
-	UpdateOrderStatus(order.Order, OrderStatus) error
+	UpdateOrderStatus(order.Order, types.OrderStatus) error
 	// UpdateOrderStatusByID updates the status and filled amount of the order
 	// with the given OrderID in the market specified by a base and quote asset.
-	UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status OrderStatus, filled int64) error
+	UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status types.OrderStatus, filled int64) error
 
 	// UserOrders retrieves all orders for the given account in the market
 	// specified by a base and quote asset.
 	UserOrders(aid account.AccountID, base, quote uint32) ([]order.Order, error)
 }
 
-// OrderStatus indicates how an order is presently being processed, or the final
-// state of the order if processing is completed.
-type OrderStatus uint16
-
-const (
-	// OrderStatusUnknown is a sentinel value to be used when the status of an
-	// order cannot be determined.
-	OrderStatusUnknown OrderStatus = iota
-
-	// There are two general classes of orders: ACTIVE and TERMINAL. Orders with
-	// one of the ACTIVE order statuses that follow are likely to be updated.
-
-	// OrderStatusPending is for active orders that have been received and
-	// validated, but not processed by the epoch order matcher.
-	OrderStatusPending
-	// OrderStatusMatched is for active orders that have been matched with other
-	// orders, but for which an atomic swap has not been initiated.
-	OrderStatusMatched
-	// OrderStatusSwapping is for active orders that have begun the atomic swap
-	// process. Specifically, this is when the first swap initialization
-	// transaction has been broadcast by a client.
-	OrderStatusSwapping
-	// OrderStatusBooked is for active unmatched orders that have been put on
-	// the order book (standing time in force).
-	OrderStatusBooked
-
-	// Below are the TERMINAL order statuses. These orders are unlikely to be
-	// updated. As such, they are suitable for archival.
-
-	// OrderStatusFailed is for terminal unmatched orders that do not go on the
-	// order book, either because the time in force is immediate or the order is
-	// not a limit order.
-	OrderStatusFailed
-	// OrderStatusCanceled is for terminal orders that have been explicitly
-	// canceled by a cancel order or administrative action such as conduct
-	// enforcement.
-	OrderStatusCanceled
-	// OrderStatus Executed is for terminal orders that have been successfully
-	// processed.
-	OrderStatusExecuted
-)
-
-var orderStatusNames = map[OrderStatus]string{
-	OrderStatusUnknown:  "unknown",
-	OrderStatusPending:  "pending",
-	OrderStatusMatched:  "matched",
-	OrderStatusSwapping: "swapping",
-	OrderStatusBooked:   "booked",
-	OrderStatusFailed:   "failed",
-	OrderStatusCanceled: "canceled",
-	OrderStatusExecuted: "executed",
-}
-
-// String implements Stringer.
-func (s OrderStatus) String() string {
-	name, ok := orderStatusNames[s]
-	if !ok {
-		panic("unknown order status!") // programmer error
-	}
-	return name
-}
-
-// Active indicates if the OrderStatus reflects an order that is still
-// live/active (true), or if the order is in a terminal state (false).
-func (s OrderStatus) Active() bool {
-	switch s {
-	case OrderStatusPending, OrderStatusMatched, OrderStatusSwapping,
-		OrderStatusBooked:
-		return true
-	case OrderStatusFailed, OrderStatusCanceled, OrderStatusExecuted,
-		OrderStatusUnknown:
-		return false
-	default:
-		panic("unknown order status!") // programmer error
-	}
-}
-
-// Archived indicates if the OrderStatus reflects an order that has reached a
-// terminal state and is no longer being processed. Archived == !Active.
-func (s OrderStatus) Archived() bool {
-	return !s.Active()
-}
-
-func ValidateOrder(ord order.Order, status OrderStatus, mkt *MarketInfo) bool {
-	//  NO OrderStatusUnknown
-	if status == OrderStatusUnknown {
+// ValidateOrder ensures that the order with the given status for the specified
+// market is sensible. This function is in the database package because the
+// concept of a valid order-status-market state is dependent on the semantics of
+// order archival.
+func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketInfo) bool {
+	// Orders with status OrderStatusUnknown should never reach the database.
+	if status == types.OrderStatusUnknown {
 		return false
 	}
 
-	// Verify the order is for the given market.
+	// Verify the order is for the intended types.
 	if ord.Base() != mkt.Base || ord.Quote() != mkt.Quote {
 		return false
 	}
 
+	// Each order type has different rules about status and lot size.
 	switch ot := ord.(type) {
 	case *order.MarketOrder:
 		// Market orders OK statuses: pending, matched, swapping, failed,
 		// executed, canceled (NOT booked).
 		switch status {
-		case OrderStatusPending, OrderStatusMatched, OrderStatusSwapping,
-			OrderStatusFailed, OrderStatusExecuted, OrderStatusCanceled:
+		case types.OrderStatusPending, types.OrderStatusMatched, types.OrderStatusSwapping,
+			types.OrderStatusFailed, types.OrderStatusExecuted, types.OrderStatusCanceled:
 		default:
 			return false
 		}
@@ -248,8 +84,8 @@ func ValidateOrder(ord order.Order, status OrderStatus, mkt *MarketInfo) bool {
 		// Cancel order OK statuses: pending, matched, failed, executed
 		// (NOT booked, swapping, or canceled).
 		switch status {
-		case OrderStatusPending, OrderStatusMatched, OrderStatusFailed,
-			OrderStatusExecuted:
+		case types.OrderStatusPending, types.OrderStatusMatched, types.OrderStatusFailed,
+			types.OrderStatusExecuted:
 		default:
 			return false
 		}
@@ -267,9 +103,9 @@ func ValidateOrder(ord order.Order, status OrderStatus, mkt *MarketInfo) bool {
 		// Limit order OK statuses: pending, matched, swapping, booked, failed,
 		// executed, canceled (same as market plus booked).
 		switch status {
-		case OrderStatusPending, OrderStatusMatched, OrderStatusSwapping,
-			OrderStatusBooked, OrderStatusFailed, OrderStatusExecuted,
-			OrderStatusCanceled:
+		case types.OrderStatusPending, types.OrderStatusMatched, types.OrderStatusSwapping,
+			types.OrderStatusBooked, types.OrderStatusFailed, types.OrderStatusExecuted,
+			types.OrderStatusCanceled:
 		default:
 			return false
 		}

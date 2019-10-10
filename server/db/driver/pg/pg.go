@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	dexdb "github.com/decred/dcrdex/server/db"
+	"github.com/decred/dcrdex/server/market/types"
 )
 
 // type Driver struct{}
@@ -36,7 +36,7 @@ type Config struct {
 	QueryTimeout                   time.Duration
 
 	// MarketCfg specified all of the markets that the Archiver should prepare.
-	MarketCfg []*dexdb.MarketInfo
+	MarketCfg []*types.MarketInfo
 }
 
 // Archiver implements DEXArchivist.
@@ -46,7 +46,7 @@ type Archiver struct {
 	queryTimeout time.Duration
 	db           *sql.DB
 	dbName       string
-	markets      map[string]*dexdb.MarketInfo
+	markets      map[string]*types.MarketInfo
 }
 
 // NewArchiver constructs a new Archiver. Use Close when done with the Archiver.
@@ -82,7 +82,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 		queryTimeout = time.Hour
 	}
 
-	mktMap := make(map[string]*dexdb.MarketInfo, len(cfg.MarketCfg))
+	mktMap := make(map[string]*types.MarketInfo, len(cfg.MarketCfg))
 	for _, mkt := range cfg.MarketCfg {
 		mktMap[mkt.Name] = mkt
 	}

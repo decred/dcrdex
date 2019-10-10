@@ -7,11 +7,11 @@ import (
 	"database/sql"
 	"fmt"
 
-	dexdb "github.com/decred/dcrdex/server/db"
 	"github.com/decred/dcrdex/server/db/driver/pg/internal"
+	"github.com/decred/dcrdex/server/market/types"
 )
 
-func loadMarkets(db *sql.DB, marketsTableName string) ([]*dexdb.MarketInfo, error) {
+func loadMarkets(db *sql.DB, marketsTableName string) ([]*types.MarketInfo, error) {
 	stmt := fmt.Sprintf(internal.SelectAllMarkets, marketsTableName)
 	rows, err := db.Query(stmt)
 	if err != nil {
@@ -19,7 +19,7 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*dexdb.MarketInfo, erro
 	}
 	defer rows.Close()
 
-	var mkts []*dexdb.MarketInfo
+	var mkts []*types.MarketInfo
 	for rows.Next() {
 		var name string
 		var base, quote uint32
@@ -28,7 +28,7 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*dexdb.MarketInfo, erro
 		if err != nil {
 			return nil, err
 		}
-		mkts = append(mkts, &dexdb.MarketInfo{
+		mkts = append(mkts, &types.MarketInfo{
 			Name:    name,
 			Base:    base,
 			Quote:   quote,

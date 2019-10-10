@@ -13,6 +13,7 @@ import (
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/db"
 	"github.com/decred/dcrdex/server/db/driver/pg/internal"
+	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/order"
 	"github.com/lib/pq"
 )
@@ -52,16 +53,16 @@ func newUtxoFromOutpoint(outpoint string) (*utxo, error) {
 
 var _ db.OrderArchiver = (*Archiver)(nil)
 
-func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, db.OrderStatus, error) {
-	marketSchema, err := db.MarketName(base, quote)
+func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, types.OrderStatus, error) {
+	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
-		return nil, db.OrderStatusUnknown, err
+		return nil, types.OrderStatusUnknown, err
 	}
 	return loadLimitOrder(a.db, a.dbName, marketSchema, oid)
 }
 
-func (a *Archiver) StoreOrder(ord order.Order, status db.OrderStatus) error {
-	marketSchema, err := db.MarketName(ord.Base(), ord.Quote())
+func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
+	marketSchema, err := types.MarketName(ord.Base(), ord.Quote())
 	if err != nil {
 		return err
 	}
@@ -104,20 +105,20 @@ func (a *Archiver) StoreOrder(ord order.Order, status db.OrderStatus) error {
 	return nil
 }
 
-func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (db.OrderStatus, int64, error) {
-	marketSchema, err := db.MarketName(base, quote)
+func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (types.OrderStatus, int64, error) {
+	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
-		return db.OrderStatusUnknown, -1, err
+		return types.OrderStatusUnknown, -1, err
 	}
 	return orderStatus(a.db, oid, a.dbName, marketSchema)
 }
 
-func (a *Archiver) OrderStatus(ord order.Order) (db.OrderStatus, int64, error) {
+func (a *Archiver) OrderStatus(ord order.Order) (types.OrderStatus, int64, error) {
 	return a.OrderStatusByID(ord.ID(), ord.Base(), ord.Quote())
 }
 
-func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status db.OrderStatus, filled int64) error {
-	marketSchema, err := db.MarketName(base, quote)
+func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status types.OrderStatus, filled int64) error {
+	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
 		return err
 	}
@@ -125,7 +126,7 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 	if err != nil {
 		return err
 	}
-	if initStatus == db.OrderStatusUnknown {
+	if initStatus == types.OrderStatusUnknown {
 		return fmt.Errorf("unknown order")
 	}
 	if filled == -1 {
@@ -159,13 +160,13 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 	return nil
 }
 
-func (a *Archiver) UpdateOrderStatus(ord order.Order, status db.OrderStatus) error {
+func (a *Archiver) UpdateOrderStatus(ord order.Order, status types.OrderStatus) error {
 	filled := int64(ord.FilledAmt())
 	return a.UpdateOrderStatusByID(ord.ID(), ord.Base(), ord.Quote(), status, filled)
 }
 
 func (a *Archiver) UpdateOrderByID(oid order.OrderID, base, quote uint32, filled int64) error {
-	marketSchema, err := db.MarketName(base, quote)
+	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
 		return err
 	}
@@ -174,7 +175,7 @@ func (a *Archiver) UpdateOrderByID(oid order.OrderID, base, quote uint32, filled
 	if err != nil {
 		return err
 	}
-	if status == db.OrderStatusUnknown {
+	if status == types.OrderStatusUnknown {
 		return fmt.Errorf("unknown order")
 	}
 
@@ -203,11 +204,11 @@ func fullOrderTableName(dbName, marketSchema string, active bool) string {
 	return dbName + "." + marketSchema + "." + orderTable
 }
 
-func orderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (db.OrderStatus, int64, error) {
+func orderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (types.OrderStatus, int64, error) {
 	// Search active orders first.
 	found, status, filled, err := findOrder(dbe, oid, dbName, marketSchema, false)
 	if err != nil {
-		return db.OrderStatusUnknown, -1, err
+		return types.OrderStatusUnknown, -1, err
 	}
 	if found {
 		return status, filled, nil
@@ -216,17 +217,17 @@ func orderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (d
 	// Search archived orders.
 	found, status, filled, err = findOrder(dbe, oid, dbName, marketSchema, true)
 	if err != nil {
-		return db.OrderStatusUnknown, -1, err
+		return types.OrderStatusUnknown, -1, err
 	}
 	if found {
 		return status, filled, nil
 	}
 
 	// Order not found in either orders table.
-	return db.OrderStatusUnknown, -1, nil
+	return types.OrderStatusUnknown, -1, nil
 }
 
-func findOrder(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string, archived bool) (bool, db.OrderStatus, int64, error) {
+func findOrder(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string, archived bool) (bool, types.OrderStatus, int64, error) {
 	fullTable := fullOrderTableName(dbName, marketSchema, archived)
 	stmt := fmt.Sprintf(internal.OrderStatus, fullTable)
 	var status uint16
@@ -234,15 +235,15 @@ func findOrder(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string, arch
 	err := dbe.QueryRow(stmt, oid).Scan(&status, &filled)
 	switch err {
 	case sql.ErrNoRows:
-		return false, db.OrderStatusUnknown, -1, nil
+		return false, types.OrderStatusUnknown, -1, nil
 	case nil:
-		return true, db.OrderStatus(status), filled, nil
+		return true, types.OrderStatus(status), filled, nil
 	default:
-		return false, db.OrderStatusUnknown, -1, err
+		return false, types.OrderStatusUnknown, -1, err
 	}
 }
 
-func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (*order.LimitOrder, db.OrderStatus, error) {
+func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (*order.LimitOrder, types.OrderStatus, error) {
 	// Search active orders first.
 	fullTable := fullOrderTableName(dbName, marketSchema, false)
 	lo, status, err := loadLimitOrderFromTable(dbe, fullTable, oid)
@@ -254,7 +255,7 @@ func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID)
 		return lo, status, nil
 	default:
 		// query error
-		return lo, db.OrderStatusUnknown, err
+		return lo, types.OrderStatusUnknown, err
 	}
 
 	// Search archived orders.
@@ -263,35 +264,35 @@ func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID)
 	switch err {
 	case sql.ErrNoRows:
 		// not found
-		return nil, db.OrderStatusUnknown, nil
+		return nil, types.OrderStatusUnknown, nil
 	case nil:
 		// found
 		return lo, status, nil
 	default:
 		// query error
-		return lo, db.OrderStatusUnknown, err
+		return lo, types.OrderStatusUnknown, err
 	}
 }
 
-func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.LimitOrder, db.OrderStatus, error) {
+func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.LimitOrder, types.OrderStatus, error) {
 	stmt := fmt.Sprintf(internal.SelectOrder, fullTable)
 
 	var lo order.LimitOrder
 	var id order.OrderID
 	var utxos pq.StringArray
-	var status db.OrderStatus
+	var status types.OrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&id, &lo.OrderType, &lo.Sell,
 		&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, &utxos,
 		&lo.Quantity, &status, &lo.Filled)
 	if err != nil {
-		return nil, db.OrderStatusUnknown, err
+		return nil, types.OrderStatusUnknown, err
 	}
 
 	lo.UTXOs = make([]order.UTXO, 0, len(utxos))
 	for i := range utxos {
 		utxo, err := newUtxoFromOutpoint(utxos[i])
 		if err != nil {
-			return nil, db.OrderStatusUnknown, fmt.Errorf("bad utxo %s: %v", utxos[i], err)
+			return nil, types.OrderStatusUnknown, fmt.Errorf("bad utxo %s: %v", utxos[i], err)
 		}
 		lo.UTXOs = append(lo.UTXOs, utxo)
 	}
@@ -299,7 +300,7 @@ func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (
 	return &lo, status, nil
 }
 
-func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, status db.OrderStatus) (sql.Result, error) {
+func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, status types.OrderStatus) (sql.Result, error) {
 	// UTXOs are stored as an array of strings like ["txid0:vout0", ...] despite
 	// this being less space efficient than a BYTEA because it significantly
 	// simplifies debugging.
@@ -314,7 +315,7 @@ func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, st
 	return result, err
 }
 
-func updateOrderStatus(dbe sqlExecutor, tableName string, oid order.OrderID, status db.OrderStatus) error {
+func updateOrderStatus(dbe sqlExecutor, tableName string, oid order.OrderID, status types.OrderStatus) error {
 	stmt := fmt.Sprintf(internal.UpdateOrderStatus, tableName)
 	_, err := dbe.Exec(stmt, status, oid)
 	return err
@@ -326,7 +327,7 @@ func updateOrderFilledAmt(dbe sqlExecutor, tableName string, oid order.OrderID, 
 	return err
 }
 
-func moveOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.OrderID, newStatus db.OrderStatus, newFilled uint64) (bool, error) {
+func moveOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.OrderID, newStatus types.OrderStatus, newFilled uint64) (bool, error) {
 	stmt := fmt.Sprintf(internal.MoveOrder, oldTableName, newTableName)
 	res, err := dbe.Exec(stmt, oid, newStatus, newFilled)
 	if err != nil {

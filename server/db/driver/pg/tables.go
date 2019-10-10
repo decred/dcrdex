@@ -7,8 +7,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	dexdb "github.com/decred/dcrdex/server/db"
 	"github.com/decred/dcrdex/server/db/driver/pg/internal"
+	"github.com/decred/dcrdex/server/market/types"
 )
 
 const (
@@ -58,7 +58,7 @@ func CreateTable(db *sql.DB, schema, tableName string) (bool, error) {
 
 // PrepareTables ensures that all of the global and market-specific tables are
 // ready.
-func PrepareTables(db *sql.DB, mktConfig []*dexdb.MarketInfo) error {
+func PrepareTables(db *sql.DB, mktConfig []*types.MarketInfo) error {
 	// Create the markets table in the public schema.
 	created, err := CreateTable(db, "public", marketsTableName)
 	if err != nil {
@@ -79,13 +79,13 @@ func PrepareTables(db *sql.DB, mktConfig []*dexdb.MarketInfo) error {
 
 // PrepareMarkets ensures that the market-specific tables required by the
 // provided market configuration.
-func PrepareMarkets(db *sql.DB, mktConfig []*dexdb.MarketInfo) (map[string]*dexdb.MarketInfo, error) {
+func PrepareMarkets(db *sql.DB, mktConfig []*types.MarketInfo) (map[string]*types.MarketInfo, error) {
 	// Load existing markets and ensure there aren't multiple with the same ID.
 	mkts, err := loadMarkets(db, marketsTableName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read markets table: %v", err)
 	}
-	marketMap := make(map[string]*dexdb.MarketInfo, len(mkts))
+	marketMap := make(map[string]*types.MarketInfo, len(mkts))
 	for _, mkt := range mkts {
 		if _, found := marketMap[mkt.Name]; found {
 			return nil, fmt.Errorf(`multiple markets with the same name "%s" found!`,
