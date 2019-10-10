@@ -731,12 +731,7 @@ func (s *Swapper) processInit(msg *rpc.Message, params *rpc.Init, stepInfo *step
 		return tryAgain
 	}
 	// Decode the contract and audit the contract.
-	contract, err := hex.DecodeString(params.Contract)
-	if err != nil {
-		s.respondError(msg.ID, actor.user, rpc.ContractError, fmt.Sprintf("error decoding contract: %v", err))
-		return dontTryAgain
-	}
-	recipient, val, err := tx.AuditContract(params.Vout, contract)
+	recipient, val, err := tx.AuditContract(params.Vout, params.Contract)
 	if err != nil {
 		s.respondError(msg.ID, actor.user, rpc.ContractError, fmt.Sprintf("error auditing contract: %v", err))
 		return dontTryAgain
@@ -774,8 +769,8 @@ func (s *Swapper) processInit(msg *rpc.Message, params *rpc.Init, stepInfo *step
 
 	// Prepare an 'audit' request for the counter-party.
 	auditParams := &rpc.Audit{
-		OrderID:  counterParty.order.ID().String(),
-		MatchID:  matchID.String(),
+		OrderID:  idToBytes(counterParty.order.ID()),
+		MatchID:  matchID[:],
 		Time:     uint64(time.Now().Unix()),
 		Contract: params.Contract,
 	}
@@ -845,8 +840,8 @@ func (s *Swapper) processRedeem(msg *rpc.Message, params *rpc.Redeem, stepInfo *
 
 	// Inform the counterparty.
 	rParams := &rpc.Redemption{
-		OrderID: counterParty.order.ID().String(),
-		MatchID: matchID.String(),
+		OrderID: idToBytes(counterParty.order.ID()),
+		MatchID: matchID[:],
 		TxID:    params.TxID,
 		Vout:    params.Vout,
 		Time:    uint64(time.Now().Unix()),
@@ -889,7 +884,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *rpc.Message) *rpc.Erro
 		return rpcErr
 	}
 
-	stepInfo, rpcErr := s.step(user, params.MatchID)
+	stepInfo, rpcErr := s.step(user, params.MatchID.Hex())
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -920,7 +915,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *rpc.Message) *rpc.Er
 		return rpcErr
 	}
 
-	stepInfo, rpcErr := s.step(user, params.MatchID)
+	stepInfo, rpcErr := s.step(user, params.MatchID.Hex())
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -937,16 +932,16 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *rpc.Message) *rpc.Er
 // cannot be accessed directly from the request (json.RawMessage).
 func revocationRequests(match *matchTracker) (*rpc.RevokeMatch, *rpc.Message, *rpc.RevokeMatch, *rpc.Message, error) {
 	takerParams := &rpc.RevokeMatch{
-		OrderID: match.Taker.ID().String(),
-		MatchID: match.ID().String(),
+		OrderID: idToBytes(match.Taker.ID()),
+		MatchID: idToBytes(match.ID()),
 	}
 	takerReq, err := rpc.NewRequest(comms.NextID(), rpc.RevokeMatchRoute, takerParams)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	makerParams := &rpc.RevokeMatch{
-		OrderID: match.Maker.ID().String(),
-		MatchID: match.ID().String(),
+		OrderID: idToBytes(match.Maker.ID()),
+		MatchID: idToBytes(match.ID()),
 	}
 	makerReq, err := rpc.NewRequest(comms.NextID(), rpc.RevokeMatchRoute, makerParams)
 	if err != nil {
@@ -1020,15 +1015,15 @@ func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
 // matchTracker.
 func matchNotifications(match *matchTracker) (makerMsg *rpc.Match, takerMsg *rpc.Match) {
 	return &rpc.Match{
-			OrderID:  match.Maker.ID().String(),
-			MatchID:  match.ID().String(),
+			OrderID:  idToBytes(match.Maker.ID()),
+			MatchID:  idToBytes(match.ID()),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
 			Address:  match.Taker.SwapAddress(),
 			Time:     uint64(match.time.Unix()),
 		}, &rpc.Match{
-			OrderID:  match.Taker.ID().String(),
-			MatchID:  match.ID().String(),
+			OrderID:  idToBytes(match.Taker.ID()),
+			MatchID:  idToBytes(match.ID()),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
 			Address:  match.Maker.SwapAddress(),
@@ -1160,4 +1155,8 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 			})
 		}
 	}
+}
+
+func idToBytes(id [order.OrderIDSize]byte) []byte {
+	return id[:]
 }

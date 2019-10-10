@@ -36,7 +36,6 @@ const (
 )
 
 const (
-	JSONRPCVersion   = "2.0"
 	MatchRoute       = "match"
 	InitRoute        = "init"
 	AuditRoute       = "audit"
@@ -45,6 +44,37 @@ const (
 	RevokeMatchRoute = "revoke_match"
 )
 
+// Bytes is a byte slice that marshals to and unmarshals from a hexadecimal
+// string. The default go behavior is to marshal []byte to a base-64 string.
+type Bytes []byte
+
+// BytesFromHex is a Bytes constructor that accepts a hex string.
+func BytesFromHex(s string) (Bytes, error) {
+	b, err := hex.DecodeString(s)
+	return Bytes(b), err
+}
+
+// Hex return the hex string encoding of the Bytes.
+func (b Bytes) Hex() string {
+	return hex.EncodeToString(b)
+}
+
+// MarshalJSON satisfies the json.Marshaller interface, and will marshal the
+// bytes to a hex string.
+func (b Bytes) MarshalJSON() ([]byte, error) {
+	return json.Marshal(hex.EncodeToString(b))
+}
+
+// UnmarshalJSON satisfies the json.Unmarshaller interface, and expects a UTF-8
+// encoding of a hex string.
+func (b *Bytes) UnmarshalJSON(encHex []byte) (err error) {
+	if len(encHex) < 2 {
+		return fmt.Errorf("marshalled Bytes, '%s', not valid", string(encHex))
+	}
+	*b, err = hex.DecodeString(string(encHex[1 : len(encHex)-1]))
+	return err
+}
+
 // Signable allows for serialization and signing.
 type Signable interface {
 	Serialize() ([]byte, error)
@@ -52,7 +82,7 @@ type Signable interface {
 	SigBytes() []byte
 }
 
-// signable implements Signable, and should be embedded by any rpc type the
+// signable implements Signable, and should be embedded by any rpc type that
 // is serializable and needs to encode a Sig field.
 type signable struct {
 	Sig string `json:"sig"`
@@ -71,7 +101,7 @@ func (s *signable) SigBytes() []byte {
 	return b
 }
 
-// Acknowledgement is the 'result' field in a RPCResponse to a request that
+// Acknowledgement is the 'result' field in a response to a request that
 // requires an acknowledgement. It is typically a signature of some serialized
 // data associated with the request.
 type Acknowledgement struct {
@@ -79,8 +109,8 @@ type Acknowledgement struct {
 	Sig     string `json:"sig"`
 }
 
-// Error is returned as part of the Response to indicate that an error
-// occurred during method execution.
+// Error is returned as part of a response to indicate that an error occurred
+// during method execution.
 type Error struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -97,9 +127,9 @@ func NewError(code int, msg string) *Error {
 // ResponsePayload is the payload for a Response-type Message.
 type ResponsePayload struct {
 	// Result is the payload, if successful, else nil.
-	Result json.RawMessage `json:"result"`
+	Result json.RawMessage `json:"result,omitempty"`
 	// Error is the error, or nil if none was encountered.
-	Error *Error `json:"error"`
+	Error *Error `json:"error,omitempty"`
 }
 
 // MessageType indicates the type of message. MessageType is typically the first
@@ -108,10 +138,10 @@ type ResponsePayload struct {
 type MessageType uint8
 
 const (
-	InvalidMessageType MessageType = iota
-	Request
-	Response
-	Notification
+	InvalidMessageType MessageType = iota // 0
+	Request                               // 1
+	Response                              // 2
+	Notification                          // 3
 )
 
 // Message is the primary messaging type for websocket communications.
@@ -128,7 +158,7 @@ type Message struct {
 	Payload json.RawMessage `json:"payload",omitempty`
 }
 
-// DecodeMessage decodes a Message from bytes.
+// DecodeMessage decodes a *Message from JSON-formatted bytes.
 func DecodeMessage(b []byte) (*Message, error) {
 	msg := new(Message)
 	err := json.Unmarshal(b, &msg)
@@ -187,154 +217,107 @@ func (msg *Message) Response() (*ResponsePayload, error) {
 	return resp, nil
 }
 
-// MatchNotification is the params for a DEX-originating MatchMethod request.
+// MatchNotification is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	signable
-	OrderID  string `json:"orderid"`
-	MatchID  string `json:"matchid"`
+	OrderID  Bytes `json:"orderid"`
+	MatchID  Bytes `json:"matchid"`
 	Quantity uint64 `json:"quantity"`
 	Rate     uint64 `json:"rate"`
 	Address  string `json:"address"`
 	Time     uint64 `json:"timestamp"`
 }
 
-// Check that Match satisfies Signable interface.
 var _ Signable = (*Match)(nil)
 
 // Serialize serializes the Match data.
-func (params *Match) Serialize() ([]byte, error) {
+func (m *Match) Serialize() ([]byte, error) {
 	// Match serialization is orderid (32) + matchid (32) + quantity (8) + rate (8)
 	// + address (variable, guess 35). Sum = 115
 	s := make([]byte, 0, 91)
-
-	// OrderID
-	oid, err := hex.DecodeString(params.OrderID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding hex '%s': %v", params.OrderID, err)
-	}
-	s = append(s, oid...)
-
-	// Everything else.
-	matchID, err := hex.DecodeString(params.MatchID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding match ID %s: %v", params.MatchID, err)
-	}
-	s = append(s, matchID...)
-	s = append(s, uint64Bytes(params.Quantity)...)
-	s = append(s, uint64Bytes(params.Rate)...)
-	s = append(s, uint64Bytes(params.Time)...)
-	s = append(s, []byte(params.Address)...)
+	s = append(s, m.OrderID...)
+	s = append(s, m.MatchID...)
+	s = append(s, uint64Bytes(m.Quantity)...)
+	s = append(s, uint64Bytes(m.Rate)...)
+	s = append(s, uint64Bytes(m.Time)...)
+	s = append(s, []byte(m.Address)...)
 	return s, nil
 }
 
-// Init is the payload for a client-originating Init request.
+// Init is the payload for a client-originating InitRoute request.
 type Init struct {
 	signable
-	OrderID  string `json:"orderid"`
-	MatchID  string `json:"matchid"`
+	OrderID  Bytes `json:"orderid"`
+	MatchID  Bytes `json:"matchid"`
 	TxID     string `json:"txid"`
 	Vout     uint32 `json:"vout"`
 	Time     uint64 `json:"timestamp"`
-	Contract string `json:"contract"`
+	Contract Bytes `json:"contract"`
 }
 
 var _ Signable = (*Init)(nil)
 
 // Serialize serializes the Init data.
-func (params *Init) Serialize() ([]byte, error) {
+func (init *Init) Serialize() ([]byte, error) {
 	// Init serialization is orderid (32) + matchid (32) + txid (probably 64) +
 	// vout (4) + timestamp (8) + contract (97 ish). Sum = 205
 	s := make([]byte, 0, 237)
 
-	oid, err := hex.DecodeString(params.OrderID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding order id '%s': %v", params.OrderID, err)
-	}
-	s = append(s, oid...)
-	matchID, err := hex.DecodeString(params.MatchID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding match ID %s: %v", params.MatchID, err)
-	}
-	s = append(s, matchID...)
-	txid := []byte(params.TxID)
-	s = append(s, txid...)
-	s = append(s, uint32Bytes(params.Vout)...)
-	s = append(s, uint64Bytes(params.Time)...)
-	contract, err := hex.DecodeString(params.Contract)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding contract '%s': %v", params.Contract, err)
-	}
-	s = append(s, contract...)
+	s = append(s, init.OrderID...)
+	s = append(s, init.MatchID...)
+	s = append(s, []byte(init.TxID)...)
+	s = append(s, uint32Bytes(init.Vout)...)
+	s = append(s, uint64Bytes(init.Time)...)
+	s = append(s, init.Contract...)
 	return s, nil
 }
 
 // Audit is the payload for a DEX-originating AuditRoute request.
 type Audit struct {
 	signable
-	OrderID  string `json:"orderid"`
-	MatchID  string `json:"matchid"`
+	OrderID  Bytes `json:"orderid"`
+	MatchID  Bytes `json:"matchid"`
 	Time     uint64 `json:"timestamp"`
-	Contract string `json:"contract"`
+	Contract Bytes `json:"contract"`
 }
 
 var _ Signable = (*Audit)(nil)
 
 // Serialize serializes the AuditParams data.
-func (params *Audit) Serialize() ([]byte, error) {
+func (audit *Audit) Serialize() ([]byte, error) {
 	// Audit serialization is orderid (32) + matchid (32) + time (8) +
 	// contract (97 ish) = 145
 	s := make([]byte, 0, 169)
-	oid, err := hex.DecodeString(params.OrderID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding order id '%s': %v", params.OrderID, err)
-	}
-	s = append(s, oid...)
-	matchID, err := hex.DecodeString(params.MatchID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding match ID %s: %v", params.MatchID, err)
-	}
-	s = append(s, matchID...)
-	s = append(s, uint64Bytes(params.Time)...)
-	contract, err := hex.DecodeString(params.Contract)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding contract '%s': %v", params.Contract, err)
-	}
-	s = append(s, contract...)
+	s = append(s, audit.OrderID...)
+	s = append(s, audit.MatchID...)
+	s = append(s, uint64Bytes(audit.Time)...)
+	s = append(s, audit.Contract...)
 	return s, nil
 }
 
-// RevokeMatch are the params for a DEX-originating RevokeMatchMethod
-// request.
+// RevokeMatch are the params for a DEX-originating RevokeMatchRoute request.
 type RevokeMatch struct {
 	signable
-	OrderID string `json:""`
-	MatchID string `json:""`
+	OrderID Bytes `json:""`
+	MatchID Bytes `json:""`
 }
 
 var _ Signable = (*RevokeMatch)(nil)
 
 // Serialize serializes the RevokeMatchParams data.
-func (params *RevokeMatch) Serialize() ([]byte, error) {
+func (rev *RevokeMatch) Serialize() ([]byte, error) {
 	// RevokeMatch serialization is order id (32) + match id (32) = 64 bytes
 	s := make([]byte, 0, 64)
-	oid, err := hex.DecodeString(params.OrderID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding order id '%s': %v", params.OrderID, err)
-	}
-	s = append(s, oid...)
-	matchID, err := hex.DecodeString(params.MatchID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding match ID %s: %v", params.MatchID, err)
-	}
-	s = append(s, matchID...)
+	s = append(s, rev.OrderID...)
+	s = append(s, rev.MatchID...)
 	return s, nil
 }
 
-// Redeem are the params for a client-originating RedeemMethod request.
+// Redeem are the params for a client-originating RedeemRoute request.
 type Redeem struct {
 	signable
-	OrderID string `json:"orderid"`
-	MatchID string `json:"matchid"`
+	OrderID Bytes `json:"orderid"`
+	MatchID Bytes `json:"matchid"`
 	TxID    string `json:"txid"`
 	Vout    uint32 `json:"vout"`
 	Time    uint64 `json:"timestamp"`
@@ -343,31 +326,21 @@ type Redeem struct {
 var _ Signable = (*Redeem)(nil)
 
 // Serialize serializes the RedeemParams data.
-func (params *Redeem) Serialize() ([]byte, error) {
+func (redeem *Redeem) Serialize() ([]byte, error) {
 	// Init serialization is orderid (32) + matchid (32) + txid (probably 64) +
 	// vout (4) + timestamp (8) = 205
 	s := make([]byte, 0, 140)
-
-	oid, err := hex.DecodeString(params.OrderID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding order id '%s': %v", params.OrderID, err)
-	}
-	s = append(s, oid...)
-	matchID, err := hex.DecodeString(params.MatchID)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding match ID %s: %v", params.MatchID, err)
-	}
-	s = append(s, matchID...)
-	txid := []byte(params.TxID)
-	s = append(s, txid...)
-	s = append(s, uint32Bytes(params.Vout)...)
-	s = append(s, uint64Bytes(params.Time)...)
+	s = append(s, redeem.OrderID...)
+	s = append(s, redeem.MatchID...)
+	s = append(s, []byte(redeem.TxID)...)
+	s = append(s, uint32Bytes(redeem.Vout)...)
+	s = append(s, uint64Bytes(redeem.Time)...)
 	return s, nil
 }
 
-// Redemption are the params for a DEX-originating RedemptionMethod request.
-// They are identical to RedeemParams, but RedeemParams are for the
-// client-originating RedeemMethod request.
+// Redemption are the params for a DEX-originating RedemptionRoute request.
+// They are identical to the Redeem parameters, but Redeem is for the
+// client-originating RedeemRoute request.
 type Redemption = Redeem
 
 // Convert uint64 to 8 bytes.
