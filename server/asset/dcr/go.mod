@@ -1,4 +1,4 @@
-module github.com/decred/dcrdex/asset/dcr
+module github.com/decred/dcrdex/server/asset/dcr
 
 go 1.12
 
