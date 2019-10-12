@@ -218,8 +218,8 @@ out:
 			}
 			// Look for a registered handler. Failure to find a handler results in an
 			// error response but not a disconnect.
-			handler, found := rpcRoutes[msg.Route]
-			if !found {
+			handler := RouteHandler(msg.Route)
+			if handler == nil {
 				c.sendError(msg.ID, msgjson.NewError(msgjson.RPCUnknownRoute,
 					"unknown route "+msg.Route))
 				continue

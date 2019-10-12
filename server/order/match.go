@@ -134,3 +134,5 @@ func appendOrderID(b []byte, order Order) []byte {
 	oid := order.ID()
 	return append(b, oid[:]...)
 }
+
+type MatchStatus uint8
