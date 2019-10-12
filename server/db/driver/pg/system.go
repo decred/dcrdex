@@ -54,10 +54,10 @@ type sqlExecutor interface {
 
 // sqlExec executes the SQL statement string with any optional arguments, and
 // returns the number of rows affected.
-func sqlExec(db sqlExecutor, stmt, execErrPrefix string, args ...interface{}) (int64, error) {
+func sqlExec(db sqlExecutor, stmt string, args ...interface{}) (int64, error) {
 	res, err := db.Exec(stmt, args...)
 	if err != nil {
-		return 0, fmt.Errorf(execErrPrefix + " " + err.Error())
+		return 0, err
 	}
 	if res == nil {
 		return 0, nil
@@ -73,10 +73,10 @@ func sqlExec(db sqlExecutor, stmt, execErrPrefix string, args ...interface{}) (i
 
 // sqlExecStmt executes the prepared SQL statement with any optional arguments,
 // and returns the number of rows affected.
-func sqlExecStmt(stmt *sql.Stmt, execErrPrefix string, args ...interface{}) (int64, error) {
+func sqlExecStmt(stmt *sql.Stmt, args ...interface{}) (int64, error) {
 	res, err := stmt.Exec(args...)
 	if err != nil {
-		return 0, fmt.Errorf("%v %v", execErrPrefix, err)
+		return 0, err
 	}
 	if res == nil {
 		return 0, nil

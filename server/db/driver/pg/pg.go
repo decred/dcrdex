@@ -29,6 +29,10 @@ import (
 // 	db.Register("pg", &Driver{})
 // }
 
+const (
+	defaultQueryTimeout = 20 * time.Minute
+)
+
 // Config holds the Archiver's configuration.
 type Config struct {
 	Host, Port, User, Pass, DBName string
@@ -36,17 +40,19 @@ type Config struct {
 	QueryTimeout                   time.Duration
 
 	// MarketCfg specifies all of the markets that the Archiver should prepare.
-	MarketCfg []*types.MarketInfo
+	MarketCfg     []*types.MarketInfo
+	CheckedStores bool
 }
 
 // Archiver must implement server/db.DEXArchivist.
 // So far: OrderArchiver.
 type Archiver struct {
-	ctx          context.Context
-	queryTimeout time.Duration
-	db           *sql.DB
-	dbName       string
-	markets      map[string]*types.MarketInfo
+	ctx           context.Context
+	queryTimeout  time.Duration
+	db            *sql.DB
+	dbName        string
+	checkedStores bool
+	markets       map[string]*types.MarketInfo
 }
 
 // NewArchiver constructs a new Archiver. Use Close when done with the Archiver.
@@ -79,7 +85,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 
 	queryTimeout := cfg.QueryTimeout
 	if queryTimeout <= 0 {
-		queryTimeout = time.Hour
+		queryTimeout = defaultQueryTimeout
 	}
 
 	mktMap := make(map[string]*types.MarketInfo, len(cfg.MarketCfg))
@@ -88,11 +94,12 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	}
 
 	archiver := &Archiver{
-		ctx:          ctx,
-		db:           db,
-		dbName:       cfg.DBName,
-		queryTimeout: queryTimeout,
-		markets:      mktMap,
+		ctx:           ctx,
+		db:            db,
+		dbName:        cfg.DBName,
+		queryTimeout:  queryTimeout,
+		markets:       mktMap,
+		checkedStores: cfg.CheckedStores,
 	}
 
 	// Check critical performance-related settings.
@@ -111,47 +118,4 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 // Close closes the underlying DB connection.
 func (a *Archiver) Close() error {
 	return a.db.Close()
-}
-
-// nukeAll removes all of the market schemas and the tables within them, as well
-// as all of the DEX tables in the public schema.
-// TODO: find a long term home for this once it is clear if and how it will be
-// used outside fo tests.
-func nukeAll(db *sql.DB) error {
-	// Identify all markets by matching schemas like dcr_btc with '___\____'.
-	rows, err := db.Query(`select nspname from pg_catalog.pg_namespace where nspname like '___\____';`)
-	if err != nil {
-		return err
-	}
-
-	var markets []string
-	for rows.Next() {
-		var market string
-		if err = rows.Scan(&market); err != nil {
-			rows.Close()
-			return err
-		}
-		markets = append(markets, market)
-	}
-	rows.Close()
-
-	// Drop market schemas.
-	for i := range markets {
-		log.Infof(`Dropping market %s schema...`, markets[i])
-		_, err = db.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE;", markets[i]))
-		if err != nil {
-			return err
-		}
-	}
-
-	// Drop tables in public schema.
-	for i := range createPublicTableStatements {
-		tableName := "public." + createPublicTableStatements[i].name
-		log.Infof(`Dropping DEX table %s...`, tableName)
-		if err = dropTable(db, tableName); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

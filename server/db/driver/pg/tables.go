@@ -27,6 +27,8 @@ var createPublicTableStatements = []tableStmt{
 var createMarketTableStatements = []tableStmt{
 	{"orders_archived", internal.CreateOrdersTable},
 	{"orders_active", internal.CreateOrdersTable},
+	{"cancels_archived", internal.CreateCancelOrdersTable},
+	{"cancels_active", internal.CreateCancelOrdersTable},
 }
 
 var tableMap = func() map[string]string {
@@ -40,6 +42,28 @@ var tableMap = func() map[string]string {
 	}
 	return m
 }()
+
+func fullOrderTableName(dbName, marketSchema string, active bool) string {
+	var orderTable string
+	if active {
+		orderTable = "orders_active"
+	} else {
+		orderTable = "orders_archived"
+	}
+
+	return dbName + "." + marketSchema + "." + orderTable
+}
+
+func fullCancelOrderTableName(dbName, marketSchema string, active bool) string {
+	var orderTable string
+	if active {
+		orderTable = "cancels_active"
+	} else {
+		orderTable = "cancels_archived"
+	}
+
+	return dbName + "." + marketSchema + "." + orderTable
+}
 
 // CreateTable creates one of the known tables by name. The table will be
 // created in the specified schema (schema.tableName). If schema is empty,

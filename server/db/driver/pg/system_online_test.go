@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/slog"
@@ -23,12 +22,14 @@ const (
 )
 
 var (
-	archie *Archiver
-	sqlDb  *sql.DB
+	archie  *Archiver
+	sqlDb   *sql.DB
+	mktInfo *types.MarketInfo
 )
 
 func openDB() (func() error, error) {
-	mktInfo, err := types.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
+	var err error
+	mktInfo, err = types.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
 	if err != nil {
 		return func() error { return nil }, fmt.Errorf("invalid market: %v", err)
 	}
@@ -37,14 +38,15 @@ func openDB() (func() error, error) {
 	AssetBTC = mktInfo.Quote
 
 	dbi := Config{
-		Host:         PGTestsHost,
-		Port:         PGTestsPort,
-		User:         PGTestsUser,
-		Pass:         PGTestsPass,
-		DBName:       PGTestsDBName,
-		HidePGConfig: false,
-		QueryTimeout: 5 * time.Minute,
-		MarketCfg:    []*types.MarketInfo{mktInfo},
+		Host:          PGTestsHost,
+		Port:          PGTestsPort,
+		User:          PGTestsUser,
+		Pass:          PGTestsPass,
+		DBName:        PGTestsDBName,
+		HidePGConfig:  true,
+		QueryTimeout:  0, // zero to use the default
+		MarketCfg:     []*types.MarketInfo{mktInfo},
+		CheckedStores: true,
 	}
 	ctx := context.Background()
 	archie, err = NewArchiver(ctx, &dbi)
@@ -62,13 +64,75 @@ func openDB() (func() error, error) {
 	return closeFn, err
 }
 
+func detectMarkets(db *sql.DB) ([]string, error) {
+	// Identify all markets by matching schemas like dcr_btc with '___\____'.
+	rows, err := db.Query(`select nspname from pg_catalog.pg_namespace where nspname like '___\____';`)
+	if err != nil {
+		return nil, err
+	}
+
+	var markets []string
+	for rows.Next() {
+		var market string
+		if err = rows.Scan(&market); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		markets = append(markets, market)
+	}
+	rows.Close()
+
+	return markets, nil
+}
+
+// nukeAll removes all of the market schemas and the tables within them, as well
+// as all of the DEX tables in the public schema.
+// TODO: find a long term home for this once it is clear if and how it will be
+// used outside fo tests.
+func nukeAll(db *sql.DB) error {
+	markets, err := detectMarkets(db)
+	if err != nil {
+		return fmt.Errorf("failed to detect markets: %v", err)
+	}
+
+	// Drop market schemas.
+	for i := range markets {
+		log.Infof(`Dropping market %s schema...`, markets[i])
+		_, err = db.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE;", markets[i]))
+		if err != nil {
+			return err
+		}
+	}
+
+	// Drop tables in public schema.
+	for i := range createPublicTableStatements {
+		tableName := "public." + createPublicTableStatements[i].name
+		log.Infof(`Dropping DEX table %s...`, tableName)
+		if err = dropTable(db, tableName); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func cleanTables(db *sql.DB) error {
+	err := nukeAll(db)
+	if err != nil {
+		return err
+	}
+
+	return PrepareTables(db, mktConfig())
+}
+
 func TestMain(m *testing.M) {
 	// Setup pg logger.
-	UseLogger(slog.NewBackend(os.Stdout).Logger("pg"))
+	UseLogger(slog.NewBackend(os.Stdout).Logger("PG_DB_TEST"))
 	log.SetLevel(slog.LevelTrace)
 
 	// Wrap openDB so that the cleanUp function may be deferred.
 	doIt := func() int {
+		// Not counted as coverage, must test Archiver constructor explicitly.
 		cleanUp, err := openDB()
 		defer cleanUp()
 		if err != nil {

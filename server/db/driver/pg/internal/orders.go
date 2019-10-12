@@ -10,33 +10,30 @@ const (
 		sell BOOLEAN,          -- ANALYZE or INDEX?
 		account_id BYTEA,      -- INDEX
 		address TEXT,          -- INDEX
-		client_time INT8,
-		server_time INT8,
+		client_time TIMESTAMPTZ,
+		server_time TIMESTAMPTZ,
 		utxos TEXT[],
 		quantity INT8,
+		rate INT8,
+		force INT2,
 		status INT2,
 		filled INT8
 	);`
 
-	CreateCancelOrdersTable = `CREATE TABLE IF NOT EXISTS %s (
-		oid BYTEA PRIMARY KEY, -- UNIQUE INDEX
-		account_id BYTEA,      -- INDEX
-		client_time INT8,
-		server_time INT8,
-		target_order BYTEA,    -- cancel orders ref another order
-	);`
-
 	InsertOrder = `INSERT INTO %s (oid, type, sell, account_id, address,
-			client_time, server_time, utxos, quantity, status, filled)
+			client_time, server_time, utxos, quantity,
+			rate, force, status, filled)
 		VALUES ($1, $2, $3, $4, $5,
-			$6, $7, $8, $9, $10, $11);`
+			$6, $7, $8, $9,
+			$10, $11, $12, $13);`
 
 	SelectOrder = `SELECT * FROM %s WHERE oid = $1;`
 
-	UpdateOrderStatus    = `UPDATE %s SET status = $1 WHERE oid = $2;`
-	UpdateOrderFilledAmt = `UPDATE %s SET filled = $1 WHERE oid = $2;`
+	UpdateOrderStatus             = `UPDATE %s SET status = $1 WHERE oid = $2;`
+	UpdateOrderFilledAmt          = `UPDATE %s SET filled = $1 WHERE oid = $2;`
+	UpdateOrderStatusAndFilledAmt = `UPDATE %s SET status = $1, filled = $2 WHERE oid = $3;`
 
-	OrderStatus = `SELECT status, filled FROM %s WHERE oid = $1;`
+	OrderStatus = `SELECT type, status, filled FROM %s WHERE oid = $1;`
 
 	// MoveOrder moves and order row from one table to another (e.g.
 	// orders_active to orders_archived). e.g.:
@@ -53,6 +50,8 @@ const (
 	//			server_time,
 	//			utxos,
 	//			quantity,
+	//			rate,
+	//			force,
 	//			2,										-- new status ($2)
 	//			123456789								-- new filled ($3)
 	//		)
@@ -62,9 +61,32 @@ const (
 		DELETE FROM %s
 		WHERE oid = $1
 		RETURNING oid, type, sell, account_id, address,
-			client_time, server_time, utxos, quantity, $2, $3
+			client_time, server_time, utxos, quantity,
+			rate, force, %d, %d
 	)
 	INSERT INTO %s
 	SELECT * FROM moved;`
 	// TODO: consider a MoveOrderSameFilled query
+
+	CreateCancelOrdersTable = `CREATE TABLE IF NOT EXISTS %s (
+		oid BYTEA PRIMARY KEY, -- UNIQUE INDEX
+		account_id BYTEA,      -- INDEX
+		client_time TIMESTAMPTZ,
+		server_time TIMESTAMPTZ,
+		target_order BYTEA,    -- cancel orders ref another order
+		status INT2
+	);`
+
+	InsertCancelOrder = `INSERT INTO %s (oid, account_id, client_time, server_time, target_order, status)
+		VALUES ($1, $2, $3, $4, $5, $6);`
+
+	CancelOrderStatus = `SELECT status FROM %s WHERE oid = $1;`
+
+	MoveCancelOrder = `WITH moved AS (
+		DELETE FROM %s
+		WHERE oid = $1
+		RETURNING oid, account_id, client_time, server_time, target_order, %d
+	)
+	INSERT INTO %s
+	SELECT * FROM moved;`
 )

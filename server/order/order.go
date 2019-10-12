@@ -77,6 +77,20 @@ func (ot *OrderType) Scan(src interface{}) error {
 	return nil
 }
 
+// String returns a string representation of the OrderType.
+func (ot OrderType) String() string {
+	switch ot {
+	case LimitOrderType:
+		return "limit"
+	case MarketOrderType:
+		return "market"
+	case CancelOrderType:
+		return "cancel"
+	default:
+		return "unknown"
+	}
+}
+
 // TimeInForce indicates how limit order execution is to be handled. That is,
 // when the order is not immediately matched during processing of the order's
 // epoch, the order may become a standing order or be revoked without a fill.
