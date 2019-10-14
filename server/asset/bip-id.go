@@ -609,4 +609,3 @@ var bipIDs = map[uint32]string{
 	99999998: "fluid",
 	99999999: "qkc",
 }
-
