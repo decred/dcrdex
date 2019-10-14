@@ -61,6 +61,12 @@ func newUtxoFromOutpoint(outpoint string) (*utxo, error) {
 
 var _ db.OrderArchiver = (*Archiver)(nil)
 
+// Order retrieves an order with the given OrderID, stored for the market
+// specified by the given base and quote assets. A non-nil error will be
+// returned if the market is not recognized. If the order is not found, the
+// error value is ErrUnknownOrder, and the type is
+// market/types.OrderStatusUnknown. The only recognized order types are market,
+// limit, and cancel.
 func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, types.OrderStatus, error) {
 	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
@@ -83,13 +89,15 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, ty
 		return co, status, err
 		// no other order types to try presently
 	}
-
 	if err != nil {
-		return nil, types.OrderStatusUnknown, fmt.Errorf("loadLimitOrder failed: %v", err)
+		return nil, types.OrderStatusUnknown, err
 	}
 
 	lo.BaseAsset, lo.QuoteAsset = base, quote
 
+	// Since loadLimitOrder returns both market and limit orders in a
+	// *LimitOrder, identify the real type via the OrderType field. Extract the
+	// MarketOrder if necessary.
 	switch lo.OrderType {
 	case order.MarketOrderType:
 		return &lo.MarketOrder, status, nil
@@ -101,22 +109,29 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, ty
 		fmt.Errorf("retrieved unsupported order type %d (%s)", lo.OrderType, lo.OrderType)
 }
 
+// StoreOrder stores an order with the provided status. The market is determined
+// from the Order. A non-nil error will be returned if the market is not
+// recognized. All orders are validated via server/db.ValidateOrder to ensure
+// only sensible orders reach persistent storage. Updating orders should be done
+// via one of the update functions such as UpdateOrderStatus.
 func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
 	marketSchema, err := types.MarketName(ord.Base(), ord.Quote())
 	if err != nil {
 		return err
 	}
-
 	mkt, found := a.markets[marketSchema]
 	if !found {
 		return fmt.Errorf(`archiver does not support the market "%s" for order %v`,
 			marketSchema, ord.UID())
 	}
+
 	if !db.ValidateOrder(ord, status, mkt) {
 		return fmt.Errorf("invalid order %v for status %v and market %v",
 			ord.UID(), status, mkt.Name)
 	}
 
+	// If enabled, search all tables for the order to ensure it is not already
+	// stored somewhere.
 	if a.checkedStores {
 		var foundStatus types.OrderStatus
 		switch ord.Type() {
@@ -168,6 +183,10 @@ func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
 	return nil
 }
 
+// OrderStatusByID gets the status, ID, and filled amount of the order with the
+// given OrderID in the market specified by a base and quote asset. See also
+// OrderStatus. If the order is not found, the error value is ErrUnknownOrder,
+// and the type is market/types.OrderStatusUnknown.
 func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (types.OrderStatus, order.OrderType, int64, error) {
 	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
@@ -185,10 +204,18 @@ func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (types
 	return status, orderType, filled, err
 }
 
+// OrderStatus gets the status, ID, and filled amount of the given order. See
+// also OrderStatusByID.
 func (a *Archiver) OrderStatus(ord order.Order) (types.OrderStatus, order.OrderType, int64, error) {
 	return a.OrderStatusByID(ord.ID(), ord.Base(), ord.Quote())
 }
 
+// UpdateOrderStatusByID updates the status and filled amount of the order with
+// the given OrderID in the market specified by a base and quote asset. For
+// cancel orders, the filled amount is ignored. OrderStatusByID is used to
+// locate the existing order. If the order is not found, the error value is
+// ErrUnknownOrder, and the type is market/types.OrderStatusUnknown. See also
+// UpdateOrderStatus.
 func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status types.OrderStatus, filled int64) error {
 	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
@@ -200,7 +227,7 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 		return err
 	}
 	if initStatus == types.OrderStatusUnknown {
-		return fmt.Errorf("unknown order")
+		return ErrUnknownOrder
 	}
 	if initStatus == status && filled == initFilled {
 		log.Debugf("Not updating order with no status or filled amount change.")
@@ -247,6 +274,10 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 	}
 }
 
+// UpdateOrderStatus updates the status and filled amount of the given order.
+// Both the market and new filled amount are determined from the Order.
+// OrderStatusByID is used to locate the existing order. See also
+// UpdateOrderStatusByID.
 func (a *Archiver) UpdateOrderStatus(ord order.Order, status types.OrderStatus) error {
 	filled := int64(ord.FilledAmt())
 	return a.UpdateOrderStatusByID(ord.ID(), ord.Base(), ord.Quote(), status, filled)
@@ -276,6 +307,13 @@ func (a *Archiver) moveCancelOrder(oid order.OrderID, srcTableName, dstTableName
 	return nil
 }
 
+// UpdateOrderFilledByID updates the filled amount of the order with the given
+// OrderID in the market specified by a base and quote asset. This function
+// applies only to market and limit orders, not cancel orders. OrderStatusByID
+// is used to locate the existing order. If the order is not found, the error
+// value is ErrUnknownOrder, and the type is market/types.OrderStatusUnknown.
+// See also UpdateOrderFilled. To also update the order status, use
+// UpdateOrderStatusByID or UpdateOrderStatus.
 func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, filled int64) error {
 	// Locate the order.
 	status, orderType, initFilled, err := a.OrderStatusByID(oid, base, quote)
@@ -284,7 +322,7 @@ func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, 
 		return err
 	}
 	if status == types.OrderStatusUnknown {
-		return fmt.Errorf("unknown order")
+		return ErrUnknownOrder
 	}
 
 	switch orderType {
@@ -306,6 +344,10 @@ func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, 
 	return err
 }
 
+// UpdateOrderFilled updates the filled amount of the given order. Both the
+// market and new filled amount are determined from the Order. OrderStatusByID
+// is used to locate the existing order. This function applies only to market
+// and limit orders, not cancel orders. See also UpdateOrderFilledByID.
 func (a *Archiver) UpdateOrderFilled(ord order.Order) error {
 	switch orderType := ord.Type(); orderType {
 	case order.MarketOrderType, order.LimitOrderType:
@@ -316,6 +358,8 @@ func (a *Archiver) UpdateOrderFilled(ord order.Order) error {
 	return a.UpdateOrderFilledByID(ord.ID(), ord.Base(), ord.Quote(), filled)
 }
 
+// UserOrders retrieves all orders for the given account in the market specified
+// by a base and quote asset.
 func (a *Archiver) UserOrders(aid account.AccountID, base, quote uint32) ([]order.Order, error) {
 	return nil, nil // TODO
 }
@@ -391,7 +435,6 @@ func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID)
 		// query error
 		return nil, types.OrderStatusUnknown, err
 	}
-	return lo, status, nil
 }
 
 func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.LimitOrder, types.OrderStatus, error) {

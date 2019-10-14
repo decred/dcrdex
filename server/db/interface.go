@@ -26,12 +26,12 @@ type OrderArchiver interface {
 	// the given OrderID in the market specified by a base and quote asset.
 	OrderStatusByID(oid order.OrderID, base, quote uint32) (types.OrderStatus, order.OrderType, int64, error)
 
-	// UpdateOrder updates the filled amount of the given order. This function
-	// applies only to market and limit orders, not cancel orders.
+	// UpdateOrderFilled updates the filled amount of the given order. This
+	// function applies only to market and limit orders, not cancel orders.
 	UpdateOrderFilled(order.Order) error
-	// UpdateOrderByID updates the filled amount of the order with the given
-	// OrderID in the market specified by a base and quote asset. This function
-	// applies only to market and limit orders, not cancel orders.
+	// UpdateOrderFilledByID updates the filled amount of the order with the
+	// given OrderID in the market specified by a base and quote asset. This
+	// function applies only to market and limit orders, not cancel orders.
 	UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, filled int64) error
 
 	// UpdateOrderStatus updates the status and filled amount of the given
