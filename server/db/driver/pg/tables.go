@@ -80,8 +80,8 @@ func CreateTable(db *sql.DB, schema, tableName string) (bool, error) {
 	return createTable(db, createCommand, schema, tableName)
 }
 
-// PrepareTables ensures that all of the global and market-specific tables are
-// ready.
+// PrepareTables ensures that all tables required by the DEX market config,
+// mktConfig, are ready.
 func PrepareTables(db *sql.DB, mktConfig []*types.MarketInfo) error {
 	// Create the markets table in the public schema.
 	created, err := CreateTable(db, "public", marketsTableName)
@@ -94,16 +94,16 @@ func PrepareTables(db *sql.DB, mktConfig []*types.MarketInfo) error {
 
 	// Verify config of existing markets, creating a new markets table if none
 	// exists.
-	_, err = PrepareMarkets(db, mktConfig)
+	_, err = prepareMarkets(db, mktConfig)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// PrepareMarkets ensures that the market-specific tables required by the
-// provided market configuration.
-func PrepareMarkets(db *sql.DB, mktConfig []*types.MarketInfo) (map[string]*types.MarketInfo, error) {
+// prepareMarkets ensures that the market-specific tables required by the DEX
+// market config, mktConfig, are ready. See also PrepareTables.
+func prepareMarkets(db *sql.DB, mktConfig []*types.MarketInfo) (map[string]*types.MarketInfo, error) {
 	// Load existing markets and ensure there aren't multiple with the same ID.
 	mkts, err := loadMarkets(db, marketsTableName)
 	if err != nil {
