@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/decred/dcrdex/server/market/types"
-	"github.com/decred/slog"
 )
 
 const (
@@ -26,6 +25,24 @@ var (
 	sqlDb   *sql.DB
 	mktInfo *types.MarketInfo
 )
+
+func TestMain(m *testing.M) {
+	startLogger()
+
+	// Wrap openDB so that the cleanUp function may be deferred.
+	doIt := func() int {
+		// Not counted as coverage, must test Archiver constructor explicitly.
+		cleanUp, err := openDB()
+		defer cleanUp()
+		if err != nil {
+			panic(fmt.Sprintln("no db for testing:", err))
+		}
+
+		return m.Run()
+	}
+
+	os.Exit(doIt())
+}
 
 func openDB() (func() error, error) {
 	var err error
@@ -123,26 +140,6 @@ func cleanTables(db *sql.DB) error {
 	}
 
 	return PrepareTables(db, mktConfig())
-}
-
-func TestMain(m *testing.M) {
-	// Setup pg logger.
-	UseLogger(slog.NewBackend(os.Stdout).Logger("PG_DB_TEST"))
-	log.SetLevel(slog.LevelTrace)
-
-	// Wrap openDB so that the cleanUp function may be deferred.
-	doIt := func() int {
-		// Not counted as coverage, must test Archiver constructor explicitly.
-		cleanUp, err := openDB()
-		defer cleanUp()
-		if err != nil {
-			panic(fmt.Sprintln("no db for testing:", err))
-		}
-
-		return m.Run()
-	}
-
-	os.Exit(doIt())
 }
 
 func Test_checkCurrentTimeZone(t *testing.T) {

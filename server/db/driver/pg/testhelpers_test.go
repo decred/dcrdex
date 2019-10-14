@@ -2,12 +2,20 @@ package pg
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/order"
+	"github.com/decred/slog"
 )
+
+func startLogger() {
+	logger := slog.NewBackend(os.Stdout).Logger("PG_DB_TEST")
+	logger.SetLevel(slog.LevelDebug)
+	UseLogger(logger)
+}
 
 const LotSize = uint64(10_000_000_000)
 

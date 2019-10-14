@@ -10,13 +10,29 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"os"
-	"reflect"
 	"regexp"
 	"testing"
 
 	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/order"
 )
+
+func TestMain(m *testing.M) {
+	startLogger()
+
+	mktInfo, err := types.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	AssetDCR = mktInfo.Base
+	AssetBTC = mktInfo.Quote
+
+	sql.Register("stub", &dbStub{})
+
+	os.Exit(m.Run())
+}
 
 // driver.Driver
 type dbStub struct{}
@@ -94,23 +110,6 @@ func (dbs *dbStubResult) Values() []driver.Value {
 	return dbs.values
 }
 
-func TestMain(m *testing.M) {
-	startLogger()
-
-	mktInfo, err := types.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
-	AssetDCR = mktInfo.Base
-	AssetBTC = mktInfo.Quote
-
-	sql.Register("stub", &dbStub{})
-
-	os.Exit(m.Run())
-}
-
 // Test_storeLimitOrder simply exercises the Valuers (OrderID, AccountID,
 // OrderType). Since the DB is a stub, there should never be an error with
 // storeLimitOrder. The Valuers may be tested independently in the order and
@@ -141,16 +140,13 @@ func Test_storeLimitOrder(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, err := storeLimitOrder(stub, "dcrdex", tt.args.lo, tt.args.status)
+			N, err := storeLimitOrder(stub, "dcrdex", tt.args.lo, tt.args.status)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("storeLimitOrder() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			// res is a sql.driverResult, with an unexported field resi (a
-			// driver.Result interface) that contains the (*pg.dbStubResult).
-			// res.resi (interface) -Elem()-> *pg.dbStubResult (ptr) -Elem()-> pg.dbStubResult (struct)
-			// TODO: inspect the this result struct
-			f := reflect.ValueOf(res).FieldByName("resi").Elem().Elem()
-			t.Log(f.FieldByName("values"))
+			if N != 1 {
+				t.Errorf("Expected 1 row affected, got %d", N)
+			}
 		})
 	}
 }
