@@ -18,10 +18,14 @@ const (
 		JOIN   pg_namespace n ON n.oid = c.relnamespace
 		WHERE  c.relname = $1 AND n.nspname = $2`
 
+	// RetrieveSysSettingsConfFile retrieves system settings that are set by a
+	// configuration file.
 	RetrieveSysSettingsConfFile = `SELECT name, setting, unit, short_desc, source, sourcefile, sourceline
 		FROM pg_settings
 		WHERE source='configuration file';`
 
+	// RetrieveSysSettingsServer retrieves system settings related to the
+	// postgres server configuration.
 	RetrieveSysSettingsServer = `SELECT name, setting, unit, short_desc, source, sourcefile, sourceline
 		FROM pg_settings
 		WHERE name='max_connections'
@@ -34,6 +38,8 @@ const (
 			OR name='config_file'
 			OR name='listen_address';`
 
+	// RetrieveSysSettingsPerformance retrieves postgres performance-related
+	// settings.
 	RetrieveSysSettingsPerformance = `SELECT name, setting, unit, short_desc, source, sourcefile, sourceline
 		FROM pg_settings
 		WHERE name='synchronous_commit'
@@ -65,7 +71,9 @@ const (
 			OR name='jit'
 			OR name='jit_provider';`
 
+	// RetrieveSyncCommitSetting retrieves just the synchronous_commit setting.
 	RetrieveSyncCommitSetting = `SELECT setting FROM pg_settings WHERE name='synchronous_commit';`
 
+	// RetrievePGVersion retrieves the version string from the database process.
 	RetrievePGVersion = `SELECT version();`
 )
