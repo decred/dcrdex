@@ -35,6 +35,10 @@ const (
 	// etc.).
 	SelectOrder = `SELECT * FROM %s WHERE oid = $1;`
 
+	// SelectUserOrders retrieves all columns of all orders for the given
+	// account ID.
+	SelectUserOrders = `SELECT * FROM %s WHERE account_id = $1;`
+
 	// UpdateOrderStatus sets the status of an order with the given order ID.
 	UpdateOrderStatus = `UPDATE %s SET status = $1 WHERE oid = $2;`
 	// UpdateOrderFilledAmt sets the filled amount of an order with the given

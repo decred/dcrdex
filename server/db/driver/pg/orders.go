@@ -4,6 +4,7 @@
 package pg
 
 import (
+	"context"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
@@ -360,8 +361,13 @@ func (a *Archiver) UpdateOrderFilled(ord order.Order) error {
 
 // UserOrders retrieves all orders for the given account in the market specified
 // by a base and quote asset.
-func (a *Archiver) UserOrders(aid account.AccountID, base, quote uint32) ([]order.Order, error) {
-	return nil, nil // TODO
+func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []types.OrderStatus, error) {
+	marketSchema, err := types.MarketName(base, quote)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return userOrders(ctx, a.db, a.dbName, marketSchema, aid)
 }
 
 // BEGIN regular order functions
@@ -461,6 +467,64 @@ func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (
 	}
 
 	return &lo, status, nil
+}
+
+func userOrders(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, aid account.AccountID) ([]order.Order, []types.OrderStatus, error) {
+	// Active orders.
+	fullTable := fullOrderTableName(dbName, marketSchema, false)
+	orders, statuses, err := userOrdersFromTable(ctx, dbe, fullTable, aid)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, nil, err
+	}
+
+	// Archived Orders.
+	fullTable = fullOrderTableName(dbName, marketSchema, true)
+	ordersArchived, statusesArchived, err := userOrdersFromTable(ctx, dbe, fullTable, aid)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, nil, err
+	}
+
+	orders = append(orders, ordersArchived...)
+	statuses = append(statuses, statusesArchived...)
+	return orders, statuses, nil
+}
+
+func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid account.AccountID) ([]order.Order, []types.OrderStatus, error) {
+	stmt := fmt.Sprintf(internal.SelectUserOrders, fullTable)
+	rows, err := dbe.QueryContext(ctx, stmt, aid)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var orders []order.Order
+	var statuses []types.OrderStatus
+
+	for rows.Next() {
+		var lo order.LimitOrder
+		var id order.OrderID
+		var utxos pq.StringArray
+		var status types.OrderStatus
+		err = rows.Scan(&id, &lo.OrderType, &lo.Sell,
+			&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, &utxos,
+			&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		lo.UTXOs = make([]order.UTXO, 0, len(utxos))
+		for i := range utxos {
+			utxo, err := newUtxoFromOutpoint(utxos[i])
+			if err != nil {
+				return nil, nil, fmt.Errorf("bad utxo %s: %v", utxos[i], err)
+			}
+			lo.UTXOs = append(lo.UTXOs, utxo)
+		}
+
+		orders = append(orders, &lo)
+		statuses = append(statuses, status)
+	}
+
+	return orders, statuses, nil
 }
 
 func marshalUTXOs(UTXOs []order.UTXO) (utxos []string) {

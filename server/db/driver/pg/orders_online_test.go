@@ -3,6 +3,7 @@
 package pg
 
 import (
+	"context"
 	"encoding/hex"
 	"github.com/davecgh/go-spew/spew"
 	"testing"
@@ -13,7 +14,7 @@ import (
 
 func TestStoreOrder(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	orderBadLotSize := newLimitOrder(false, 4900000, 1, order.StandingTiF, 0)
@@ -178,7 +179,7 @@ func TestStoreOrder(t *testing.T) {
 
 func TestLoadOrderUnknown(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	orderID0, _ := hex.DecodeString("dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d")
@@ -196,7 +197,7 @@ func TestLoadOrderUnknown(t *testing.T) {
 
 func TestStoreLoadLimitOrderActive(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	// Limit: buy, standing, booked
@@ -234,7 +235,7 @@ func TestStoreLoadLimitOrderActive(t *testing.T) {
 
 func TestStoreLoadLimitOrderArchived(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	// Limit: buy, standing, executed
@@ -272,7 +273,7 @@ func TestStoreLoadLimitOrderArchived(t *testing.T) {
 
 func TestStoreLoadMarketOrderActive(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	// Limit: buy, standing, booked
@@ -310,7 +311,7 @@ func TestStoreLoadMarketOrderActive(t *testing.T) {
 
 func TestStoreLoadCancelOrder(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	// order ID for a cancel order
@@ -353,7 +354,7 @@ func TestStoreLoadCancelOrder(t *testing.T) {
 
 func TestOrderStatus(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	// Do not use Stringers when dumping, and stop after 4 levels deep
@@ -422,7 +423,7 @@ func TestOrderStatus(t *testing.T) {
 
 func TestCancelOrderStatus(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	// order ID for a cancel order
@@ -433,10 +434,6 @@ func TestCancelOrderStatus(t *testing.T) {
 	// Cancel: failed (archived)
 	ordIn := newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 0)
 	statusIn := types.OrderStatusFailed
-
-	// Do not use Stringers when dumping, and stop after 4 levels deep
-	spew.Config.MaxDepth = 4
-	spew.Config.DisableMethods = true
 
 	//oid, base, quote := ordIn.ID(), ordIn.BaseAsset, ordIn.QuoteAsset
 
@@ -468,17 +465,13 @@ func TestCancelOrderStatus(t *testing.T) {
 
 func TestUpdateOrder(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	// order ID for a cancel order
 	orderID0, _ := hex.DecodeString("dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d")
 	var targetOrderID order.OrderID
 	copy(targetOrderID[:], orderID0)
-
-	// Do not use Stringers when dumping, and stop after 4 levels deep
-	spew.Config.MaxDepth = 4
-	spew.Config.DisableMethods = true
 
 	orderStatuses := []struct {
 		ord       order.Order
@@ -557,22 +550,17 @@ func TestUpdateOrder(t *testing.T) {
 			t.Fatalf("UpdateOrderStatus(%d:%v, %s) failed: %v", i, ordIn, newStatus, err)
 		}
 	}
-
 }
 
 func TestUpdateOrderFilled(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
-		t.Fatalf("nukeAll: %v", err)
+		t.Fatalf("cleanTables: %v", err)
 	}
 
 	// order ID for a cancel order
 	orderID0, _ := hex.DecodeString("dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d")
 	var targetOrderID order.OrderID
 	copy(targetOrderID[:], orderID0)
-
-	// Do not use Stringers when dumping, and stop after 4 levels deep
-	spew.Config.MaxDepth = 4
-	spew.Config.DisableMethods = true
 
 	orderStatuses := []struct {
 		ord           order.Order
@@ -644,5 +632,64 @@ func TestUpdateOrderFilled(t *testing.T) {
 			t.Fatalf("UpdateOrderFilled(%d:%v) failed: %v", i, ordIn, err)
 		}
 	}
+}
 
+func TestUserOrders(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	limitSell := newLimitOrder(true, 4900000, 1, order.StandingTiF, 0)
+	limitBuy := newLimitOrder(false, 4100000, 1, order.StandingTiF, 0)
+	marketSell := newMarketSellOrder(2, 0)
+	marketBuy := newMarketBuyOrder(2000000000, 0)
+
+	orderStatuses := []struct {
+		ord     order.Order
+		status  types.OrderStatus
+		wantErr bool
+	}{
+		{
+			limitSell,
+			types.OrderStatusBooked, // active
+			false,
+		},
+		{
+			limitBuy,
+			types.OrderStatusCanceled, // archived
+			false,
+		},
+		{
+			marketSell,
+			types.OrderStatusMatched, // active
+			false,
+		},
+		{
+			marketBuy,
+			types.OrderStatusMatched, // active
+			false,
+		},
+	}
+
+	for i := range orderStatuses {
+		ordIn := orderStatuses[i].ord
+		statusIn := orderStatuses[i].status
+		err := archie.StoreOrder(ordIn, statusIn)
+		if err != nil {
+			t.Fatalf("StoreOrder failed: %v", err)
+		}
+	}
+
+	aid := limitSell.AccountID
+
+	ordersOut, statusesOut, err := archie.UserOrders(context.Background(), aid, mktInfo.Base, mktInfo.Quote)
+	if err != nil {
+		t.Error(err)
+	}
+	if len(ordersOut) != len(orderStatuses) {
+		t.Error("poo")
+	}
+	if len(ordersOut) != len(statusesOut) {
+		t.Error("poo")
+	}
 }

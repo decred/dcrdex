@@ -4,6 +4,8 @@
 package db
 
 import (
+	"context"
+
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/order"
@@ -44,7 +46,7 @@ type OrderArchiver interface {
 
 	// UserOrders retrieves all orders for the given account in the market
 	// specified by a base and quote asset.
-	UserOrders(aid account.AccountID, base, quote uint32) ([]order.Order, error)
+	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []types.OrderStatus, error)
 }
 
 // ValidateOrder ensures that the order with the given status for the specified
