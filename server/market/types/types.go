@@ -19,6 +19,9 @@ func marketName(base, quote string) string {
 	return base + "_" + quote
 }
 
+// MarketName creates the string representation of a DEX market (e.g. "dcr_btc")
+// given the base and quote asset indexes defined in BIP-0044. See also
+// github.com/decred/dcrdex/server/asset.BipIDSymbol.
 func MarketName(base, quote uint32) (string, error) {
 	baseSymbol := asset.BipIDSymbol(base)
 	if baseSymbol == "" {
@@ -35,6 +38,8 @@ func MarketName(base, quote uint32) (string, error) {
 	return marketName(baseSymbol, quoteSymbol), nil
 }
 
+// NewMarketInfo creates a new market configuration (MarketInfo) from the given
+// base and quote asset indexes, and order lot size. See also MarketName.
 func NewMarketInfo(base, quote uint32, lotSize uint64) (*MarketInfo, error) {
 	name, err := MarketName(base, quote)
 	if err != nil {
@@ -48,6 +53,9 @@ func NewMarketInfo(base, quote uint32, lotSize uint64) (*MarketInfo, error) {
 	}, nil
 }
 
+// NewMarketInfoFromSymbols is like NewMarketInfo, but the base and quote assets
+// are identified by their symbols as defined in the
+// github.com/decred/dcrdex/server/asset package.
 func NewMarketInfoFromSymbols(base, quote string, lotSize uint64) (*MarketInfo, error) {
 	baseID, found := asset.BipSymbolID(strings.ToLower(base))
 	if !found {
