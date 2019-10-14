@@ -90,7 +90,7 @@ func TestPrefix_Serialize(t *testing.T) {
 				// QuoteAsset 4 bytes
 				0x0, 0x0, 0x0, 0x1,
 				// OrderType 1 byte
-				0x0,
+				0x1,
 				// ClientTime 8 bytes
 				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x75,
 				// ServerTime 8 bytes
@@ -163,7 +163,7 @@ func TestMarketOrder_Serialize_SerializeSize(t *testing.T) {
 				// Prefix - QuoteAsset 4 bytes
 				0x0, 0x0, 0x0, 0x1,
 				// Prefix - OrderType 1 byte
-				0x1,
+				0x2,
 				// Prefix - ClientTime 8 bytes
 				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x75,
 				// Prefix - ServerTime 8 bytes
@@ -258,7 +258,7 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 				// Prefix - QuoteAsset 4 bytes
 				0x0, 0x0, 0x0, 0x1,
 				// Prefix - OrderType 1 byte
-				0x0,
+				0x1,
 				// Prefix - ClientTime 8 bytes
 				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x75,
 				// Prefix - ServerTime 8 bytes
@@ -348,7 +348,7 @@ func TestCancelOrder_Serialize(t *testing.T) {
 				// Prefix - QuoteAsset 4 bytes
 				0x0, 0x0, 0x0, 0x1,
 				// Prefix - OrderType 1 byte
-				0x2,
+				0x3,
 				// Prefix - ClientTime 8 bytes
 				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x9d,
 				// Prefix - ServerTime 8 bytes
@@ -380,7 +380,7 @@ func TestCancelOrder_Serialize(t *testing.T) {
 }
 
 func TestMarketOrder_ID(t *testing.T) {
-	orderID0, _ := hex.DecodeString("5327657626d7b4d4ad2aad4e73d73569a3caed20a0eff860dc2cc10846627dec")
+	orderID0, _ := hex.DecodeString("a347a8b9b9204e7626ed9f03e6a3a49f16a527451fb42c4d6c9494b136e85d50")
 	var orderID OrderID
 	copy(orderID[:], orderID0)
 
@@ -439,7 +439,7 @@ func TestMarketOrder_ID(t *testing.T) {
 }
 
 func TestLimitOrder_ID(t *testing.T) {
-	orderID0, _ := hex.DecodeString("1b0f1c102281f5683ab04877191c52bd662b3dc1d60dd2e7c29cde7713e3556b")
+	orderID0, _ := hex.DecodeString("1bd2250771efa587e2b076bc59b93ee56bcbfd8b8d534a362127d23ce4766f51")
 	var orderID OrderID
 	copy(orderID[:], orderID0)
 
@@ -502,7 +502,7 @@ func TestCancelOrder_ID(t *testing.T) {
 	var limitOrderID OrderID
 	copy(limitOrderID[:], limitOrderID0)
 
-	orderID0, _ := hex.DecodeString("6b7a0e160de0350142936c03a624202e056b3ce24a9e3c37f5d8c1b79f5800bd")
+	orderID0, _ := hex.DecodeString("c051a262af8bd781e1464e72b3c24c2774989eca44d08ef088d82122ce669750")
 	var cancelOrderID OrderID
 	copy(cancelOrderID[:], orderID0)
 
