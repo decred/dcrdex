@@ -76,7 +76,7 @@ const (
 	// order cannot be determined.
 	OrderStatusUnknown OrderStatus = iota
 
-	// There are two general classes of orders: ACTIVE and TERMINAL. Orders with
+	// There are two general classes of orders: ACTIVE and ARCHIVED. Orders with
 	// one of the ACTIVE order statuses that follow are likely to be updated.
 
 	// OrderStatusPending is for active orders that have been received and
@@ -93,18 +93,18 @@ const (
 	// the order book (standing time in force).
 	OrderStatusBooked
 
-	// Below are the TERMINAL order statuses. These orders are unlikely to be
+	// Below are the ARCHIVED order statuses. These orders are unlikely to be
 	// updated. As such, they are suitable for archival.
 
-	// OrderStatusFailed is for terminal unmatched orders that do not go on the
+	// OrderStatusFailed is for archived unmatched orders that do not go on the
 	// order book, either because the time in force is immediate or the order is
 	// not a limit order.
 	OrderStatusFailed
-	// OrderStatusCanceled is for terminal orders that have been explicitly
+	// OrderStatusCanceled is for archived orders that have been explicitly
 	// canceled by a cancel order or administrative action such as conduct
 	// enforcement.
 	OrderStatusCanceled
-	// OrderStatus Executed is for terminal orders that have been successfully
+	// OrderStatus Executed is for archived orders that have been successfully
 	// processed.
 	OrderStatusExecuted
 )
@@ -130,7 +130,7 @@ func (s OrderStatus) String() string {
 }
 
 // Active indicates if the OrderStatus reflects an order that is still
-// live/active (true), or if the order is in a terminal state (false).
+// live/active (true), or if the order is in a archived state (false).
 func (s OrderStatus) Active() bool {
 	switch s {
 	case OrderStatusPending, OrderStatusMatched, OrderStatusSwapping,
@@ -145,7 +145,7 @@ func (s OrderStatus) Active() bool {
 }
 
 // Archived indicates if the OrderStatus reflects an order that has reached a
-// terminal state and is no longer being processed. Archived == !Active.
+// archived state and is no longer being processed. Archived == !Active.
 func (s OrderStatus) Archived() bool {
 	return !s.Active()
 }
