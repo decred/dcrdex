@@ -277,12 +277,9 @@ func (a *Archiver) moveCancelOrder(oid order.OrderID, srcTableName, dstTableName
 }
 
 func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, filled int64) error {
-	marketSchema, err := types.MarketName(base, quote)
-	if err != nil {
-		return err
-	}
 	// Locate the order.
-	status, orderType, initFilled, err := orderStatus(a.db, oid, a.dbName, marketSchema)
+	status, orderType, initFilled, err := a.OrderStatusByID(oid, base, quote)
+	//status, orderType, initFilled, err := orderStatus(a.db, oid, a.dbName, marketSchema) // only checks market and limit orders
 	if err != nil {
 		return err
 	}
@@ -300,12 +297,21 @@ func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, 
 		return nil // nothing to do
 	}
 
+	marketSchema, err := types.MarketName(base, quote)
+	if err != nil {
+		return err // should be caught already by a.OrderStatusByID
+	}
 	tableName := fullOrderTableName(a.dbName, marketSchema, status.Active())
 	err = updateOrderFilledAmt(a.db, tableName, oid, uint64(filled))
 	return err
 }
 
 func (a *Archiver) UpdateOrderFilled(ord order.Order) error {
+	switch orderType := ord.Type(); orderType {
+	case order.MarketOrderType, order.LimitOrderType:
+	default:
+		return fmt.Errorf("cannot set filled amount for order type %v", orderType)
+	}
 	filled := int64(ord.FilledAmt())
 	return a.UpdateOrderFilledByID(ord.ID(), ord.Base(), ord.Quote(), filled)
 }

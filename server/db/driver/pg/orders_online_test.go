@@ -575,50 +575,53 @@ func TestUpdateOrderFilled(t *testing.T) {
 	spew.Config.DisableMethods = true
 
 	orderStatuses := []struct {
-		ord       order.Order
-		status    types.OrderStatus
-		newFilled uint64
+		ord           order.Order
+		status        types.OrderStatus
+		newFilled     uint64
+		wantUpdateErr bool
 	}{
 		{
 			newLimitOrder(false, 4900000, 1, order.StandingTiF, 0),
 			types.OrderStatusBooked, // active
 			0,
+			false,
 		},
 		{
 			newLimitOrder(false, 4100000, 1, order.StandingTiF, 0),
 			types.OrderStatusSwapping, // active
 			0,
+			false,
 		},
 		{
 			newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
 			types.OrderStatusExecuted, // archived
 			0,
+			false,
 		},
 		{
 			newMarketSellOrder(2, 0),
 			types.OrderStatusMatched, // active
 			0,
+			false,
 		},
 		{
 			newMarketSellOrder(1, 0),
 			types.OrderStatusFailed, // archived
 			0,
+			false,
 		},
 		{
 			newMarketBuyOrder(2000000000, 0),
 			types.OrderStatusMatched, // active
 			2000000000,
+			false,
 		},
-		// {
-		// 	newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 1),
-		// 	types.OrderStatusPending, // active
-		// 	0,
-		// },
-		// {
-		// 	newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 0),
-		// 	types.OrderStatusPending, // active
-		// 	0,
-		// },
+		{
+			newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 1),
+			types.OrderStatusPending, // active
+			0,
+			true, // cannot set filled amount for order type cancel
+		},
 	}
 
 	for i := range orderStatuses {
@@ -637,7 +640,7 @@ func TestUpdateOrderFilled(t *testing.T) {
 		}
 
 		err = archie.UpdateOrderFilled(ordIn)
-		if err != nil {
+		if (err != nil) != orderStatuses[i].wantUpdateErr {
 			t.Fatalf("UpdateOrderFilled(%d:%v) failed: %v", i, ordIn, err)
 		}
 	}
