@@ -42,7 +42,7 @@ type AuthManager interface {
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...rpc.Signable)
 	Send(account.AccountID, *rpc.Message)
-	Request(account.AccountID, *rpc.Message, func(*rpc.Message))
+	Request(account.AccountID, *rpc.Message, func(*comms.RPCClient, *rpc.Message))
 	Penalize(account.AccountID, *order.Match, order.MatchStatus)
 }
 
@@ -789,7 +789,7 @@ func (s *Swapper) processInit(msg *rpc.Message, params *rpc.Init, stepInfo *step
 		isAudit: true,
 	}
 	// Send the 'audit' request to the counter-party.
-	s.authMgr.Request(counterParty.order.User(), notification, func(msg *rpc.Message) {
+	s.authMgr.Request(counterParty.order.User(), notification, func(_ *comms.RPCClient, msg *rpc.Message) {
 		s.processAck(msg, ack)
 	})
 	return dontTryAgain
@@ -859,7 +859,7 @@ func (s *Swapper) processRedeem(msg *rpc.Message, params *rpc.Redeem, stepInfo *
 		params:  rParams,
 		isMaker: counterParty.isMaker,
 	}
-	s.authMgr.Request(counterParty.order.User(), notification, func(msg *rpc.Message) {
+	s.authMgr.Request(counterParty.order.User(), notification, func(_ *comms.RPCClient, msg *rpc.Message) {
 		s.processAck(msg, ack)
 	})
 	return dontTryAgain
@@ -964,7 +964,7 @@ func (s *Swapper) revoke(match *matchTracker) {
 		params:  takerParams,
 		isMaker: false,
 	}
-	s.authMgr.Request(match.Taker.User(), takerReq, func(msg *rpc.Message) {
+	s.authMgr.Request(match.Taker.User(), takerReq, func(_ *comms.RPCClient, msg *rpc.Message) {
 		s.processAck(msg, takerAck)
 	})
 	makerAck := &messageAcker{
@@ -973,7 +973,7 @@ func (s *Swapper) revoke(match *matchTracker) {
 		params:  makerParams,
 		isMaker: true,
 	}
-	s.authMgr.Request(match.Maker.User(), makerReq, func(msg *rpc.Message) {
+	s.authMgr.Request(match.Maker.User(), makerReq, func(_ *comms.RPCClient, msg *rpc.Message) {
 		s.processAck(msg, makerAck)
 	})
 }
@@ -1150,7 +1150,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 		{
 			m := matches
 			u := user
-			s.authMgr.Request(user, req, func(msg *rpc.Message) {
+			s.authMgr.Request(user, req, func(_ *comms.RPCClient, msg *rpc.Message) {
 				s.processMatchAcks(u, msg, m)
 			})
 		}

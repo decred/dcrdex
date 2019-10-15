@@ -12,3 +12,5 @@ var idCounter uint64
 func NextID() uint64 {
 	return atomic.AddUint64(&idCounter, 1)
 }
+
+type RPCClient struct{}

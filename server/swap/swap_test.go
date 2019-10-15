@@ -19,7 +19,11 @@ import (
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/dcrdex/server/comms"
+<<<<<<< 8177c2c1b3ea3adc65626bdb38fb3a3a5b1f1f5c
 	"github.com/decred/dcrdex/server/comms/msgjson"
+=======
+	"github.com/decred/dcrdex/server/comms/rpc"
+>>>>>>> use new response handler signature
 	"github.com/decred/dcrdex/server/matcher"
 	"github.com/decred/dcrdex/server/order"
 )
@@ -91,8 +95,13 @@ func tNewUser(lbl string) *tUser {
 }
 
 type TRequest struct {
+<<<<<<< 8177c2c1b3ea3adc65626bdb38fb3a3a5b1f1f5c
 	req      *msgjson.Message
 	respFunc func(comms.Link, *msgjson.Message)
+=======
+	req      *rpc.Message
+	respFunc func(*comms.RPCClient, *rpc.Message)
+>>>>>>> use new response handler signature
 }
 
 // This stub satisfies AuthManager.
@@ -125,7 +134,11 @@ func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 	m.resps[user] = append(l, msg)
 }
 
+<<<<<<< 8177c2c1b3ea3adc65626bdb38fb3a3a5b1f1f5c
 func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
+=======
+func (m *TAuthManager) Request(user account.AccountID, msg *rpc.Message, f func(*comms.RPCClient, *rpc.Message)) {
+>>>>>>> use new response handler signature
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	tReq := &TRequest{
