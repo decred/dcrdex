@@ -3,594 +3,609 @@
 
 package asset
 
-// BipIDs maps ticker symbols to a unique ID based on registered BIP-0044 coin
-// indices.
-var BipIDs = map[string]uint32{
-	"BTC":         0,        // Bitcoin
-	"Testnet":     1,        // (all coins)
-	"LTC":         2,        // Litecoin
-	"DOGE":        3,        // Dogecoin
-	"RDD":         4,        // Reddcoin
-	"DASH":        5,        // Dash (ex Darkcoin)
-	"PPC":         6,        // Peercoin
-	"NMC":         7,        // Namecoin
-	"FTC":         8,        // Feathercoin
-	"XCP":         9,        // Counterparty
-	"BLK":         10,       // Blackcoin
-	"NSR":         11,       // NuShares
-	"NBT":         12,       // NuBits
-	"MZC":         13,       // Mazacoin
-	"VIA":         14,       // Viacoin
-	"XCH":         15,       // ClearingHouse
-	"RBY":         16,       // Rubycoin
-	"GRS":         17,       // Groestlcoin
-	"DGC":         18,       // Digitalcoin
-	"CCN":         19,       // Cannacoin
-	"DGB":         20,       // DigiByte
-	"Open":        21,       // Assets
-	"MONA":        22,       // Monacoin
-	"CLAM":        23,       // Clams
-	"XPM":         24,       // Primecoin
-	"NEOS":        25,       // Neoscoin
-	"JBS":         26,       // Jumbucks
-	"ZRC":         27,       // ziftrCOIN
-	"VTC":         28,       // Vertcoin
-	"NXT":         29,       // NXT
-	"BURST":       30,       // Burst
-	"MUE":         31,       // MonetaryUnit
-	"ZOOM":        32,       // Zoom
-	"VASH":        33,       // Virtual Cash Also known as VPNcoin
-	"CDN":         34,       // Canada eCoin
-	"SDC":         35,       // ShadowCash
-	"PKB":         36,       // ParkByte
-	"PND":         37,       // Pandacoin
-	"START":       38,       // StartCOIN
-	"MOIN":        39,       // MOIN
-	"EXP":         40,       // Expanse
-	"EMC2":        41,       // Einsteinium
-	"DCR":         42,       // Decred
-	"XEM":         43,       // NEM
-	"PART":        44,       // Particl
-	"ARG":         45,       // Argentum
-	"Libertas":    46,       //
-	"Posw":        47,       // coin
-	"SHR":         48,       // Shreeji
-	"GCR":         49,       // Global Currency Reserve (GCRcoin)
-	"NVC":         50,       // Novacoin
-	"AC":          51,       // Asiacoin
-	"BTCD":        52,       // Bitcoindark
-	"DOPE":        53,       // Dopecoin
-	"TPC":         54,       // Templecoin
-	"AIB":         55,       // AIB
-	"EDRC":        56,       // EDRCoin
-	"SYS":         57,       // Syscoin
-	"SLR":         58,       // Solarcoin
-	"SMLY":        59,       // Smileycoin
-	"ETH":         60,       // Ether
-	"ETC":         61,       // Ether Classic
-	"PSB":         62,       // Pesobit
-	"LDCN":        63,       // Landcoin
-	"Open":        64,       // Chain
-	"XBC":         65,       // Bitcoinplus
-	"IOP":         66,       // Internet of People
-	"NXS":         67,       // Nexus
-	"INSN":        68,       // InsaneCoin
-	"OK":          69,       // OKCash
-	"BRIT":        70,       // BritCoin
-	"CMP":         71,       // Compcoin
-	"CRW":         72,       // Crown
-	"BELA":        73,       // BelaCoin
-	"ICX":         74,       // ICON
-	"FJC":         75,       // FujiCoin
-	"MIX":         76,       // MIX
-	"XVG":         77,       // Verge
-	"EFL":         78,       // Electronic Gulden
-	"CLUB":        79,       // ClubCoin
-	"RICHX":       80,       // RichCoin
-	"POT":         81,       // Potcoin
-	"QRK":         82,       // Quarkcoin
-	"TRC":         83,       // Terracoin
-	"GRC":         84,       // Gridcoin
-	"AUR":         85,       // Auroracoin
-	"IXC":         86,       // IXCoin
-	"NLG":         87,       // Gulden
-	"BITB":        88,       // BitBean
-	"BTA":         89,       // Bata
-	"XMY":         90,       // Myriadcoin
-	"BSD":         91,       // BitSend
-	"UNO":         92,       // Unobtanium
-	"MTR":         93,       // MasterTrader
-	"GB":          94,       // GoldBlocks
-	"SHM":         95,       // Saham
-	"CRX":         96,       // Chronos
-	"BIQ":         97,       // Ubiquoin
-	"EVO":         98,       // Evotion
-	"STO":         99,       // SaveTheOcean
-	"BIGUP":       100,      // BigUp
-	"GAME":        101,      // GameCredits
-	"DLC":         102,      // Dollarcoins
-	"ZYD":         103,      // Zayedcoin
-	"DBIC":        104,      // Dubaicoin
-	"STRAT":       105,      // Stratis
-	"SH":          106,      // Shilling
-	"MARS":        107,      // MarsCoin
-	"UBQ":         108,      // Ubiq
-	"PTC":         109,      // Pesetacoin
-	"NRO":         110,      // Neurocoin
-	"ARK":         111,      // ARK
-	"USC":         112,      // UltimateSecureCashMain
-	"THC":         113,      // Hempcoin
-	"LINX":        114,      // Linx
-	"ECN":         115,      // Ecoin
-	"DNR":         116,      // Denarius
-	"PINK":        117,      // Pinkcoin
-	"ATOM":        118,      // Atom
-	"PIVX":        119,      // Pivx
-	"FLASH":       120,      // Flashcoin
-	"ZEN":         121,      // Zencash
-	"PUT":         122,      // Putincoin
-	"ZNY":         123,      // BitZeny
-	"UNIFY":       124,      // Unify
-	"XST":         125,      // StealthCoin
-	"BRK":         126,      // Breakout Coin
-	"VC":          127,      // Vcash
-	"XMR":         128,      // Monero
-	"VOX":         129,      // Voxels
-	"NAV":         130,      // NavCoin
-	"FCT":         131,      // Factom Factoids
-	"EC":          132,      // Factom Entry Credits
-	"ZEC":         133,      // Zcash
-	"LSK":         134,      // Lisk
-	"STEEM":       135,      // Steem
-	"XZC":         136,      // ZCoin
-	"RBTC":        137,      // RSK
-	"Giftblock":   138,      //
-	"RPT":         139,      // RealPointCoin
-	"LBC":         140,      // LBRY Credits
-	"KMD":         141,      // Komodo
-	"BSQ":         142,      // bisq Token
-	"RIC":         143,      // Riecoin
-	"XRP":         144,      // Ripple
-	"BCH":         145,      // Bitcoin Cash
-	"NEBL":        146,      // Neblio
-	"ZCL":         147,      // ZClassic
-	"XLM":         148,      // Stellar Lumens
-	"NLC2":        149,      // NoLimitCoin2
-	"WHL":         150,      // WhaleCoin
-	"ERC":         151,      // EuropeCoin
-	"DMD":         152,      // Diamond
-	"BTM":         153,      // Bytom
-	"BIO":         154,      // Biocoin
-	"XWC":         155,      // Whitecoin
-	"BTG":         156,      // Bitcoin Gold
-	"BTC2X":       157,      // Bitcoin 2x
-	"SSN":         158,      // SuperSkynet
-	"TOA":         159,      // TOACoin
-	"BTX":         160,      // Bitcore
-	"ACC":         161,      // Adcoin
-	"BCO":         162,      // Bridgecoin
-	"ELLA":        163,      // Ellaism
-	"PIRL":        164,      // Pirl
-	"XRB":         165,      // RaiBlocks
-	"VIVO":        166,      // Vivo
-	"FRST":        167,      // Firstcoin
-	"HNC":         168,      // Helleniccoin
-	"BUZZ":        169,      // BUZZ
-	"MBRS":        170,      // Ember
-	"HSR":         171,      // Hcash
-	"HTML":        172,      // HTMLCOIN
-	"ODN":         173,      // Obsidian
-	"ONX":         174,      // OnixCoin
-	"RVN":         175,      // Ravencoin
-	"GBX":         176,      // GoByte
-	"BTCZ":        177,      // BitcoinZ
-	"POA":         178,      // Poa
-	"NYC":         179,      // NewYorkCoin
-	"MXT":         180,      // MarteXcoin
-	"WC":          181,      // Wincoin
-	"MNX":         182,      // Minexcoin
-	"BTCP":        183,      // Bitcoin Private
-	"MUSIC":       184,      // Musicoin
-	"BCA":         185,      // Bitcoin Atom
-	"CRAVE":       186,      // Crave
-	"STAK":        187,      // STRAKS
-	"WBTC":        188,      // World Bitcoin
-	"LCH":         189,      // LiteCash
-	"EXCL":        190,      // ExclusiveCoin
-	"Lynx":        191,      //
-	"LCC":         192,      // LitecoinCash
-	"XFE":         193,      // Feirm
-	"EOS":         194,      // EOS
-	"TRX":         195,      // Tron
-	"KOBO":        196,      // Kobocoin
-	"HUSH":        197,      // HUSH
-	"BANANO":      198,      // Bananos
-	"ETF":         199,      // ETF
-	"OMNI":        200,      // Omni
-	"BIFI":        201,      // BitcoinFile
-	"UFO":         202,      // Uniform Fiscal Object
-	"CNMC":        203,      // Cryptonodes
-	"BCN":         204,      // Bytecoin
-	"RIN":         205,      // Ringo
-	"ATP":         206,      // PlatON
-	"EVT":         207,      // everiToken
-	"ATN":         208,      // ATN
-	"BIS":         209,      // Bismuth
-	"NEET":        210,      // NEETCOIN
-	"BOPO":        211,      // BopoChain
-	"OOT":         212,      // Utrum
-	"XSPEC":       213,      // Spectrecoin
-	"MONK":        214,      // Monkey Project
-	"BOXY":        215,      // BoxyCoin
-	"FLO":         216,      // Flo
-	"MEC":         217,      // Megacoin
-	"BTDX":        218,      // BitCloud
-	"XAX":         219,      // Artax
-	"ANON":        220,      // ANON
-	"LTZ":         221,      // LitecoinZ
-	"BITG":        222,      // Bitcoin Green
-	"ASK":         223,      // AskCoin
-	"SMART":       224,      // Smartcash
-	"XUEZ":        225,      // XUEZ
-	"HLM":         226,      // Helium
-	"WEB":         227,      // Webchain
-	"ACM":         228,      // Actinium
-	"NOS":         229,      // NOS Stable Coins
-	"BITC":        230,      // BitCash
-	"HTH":         231,      // Help The Homeless Coin
-	"TZC":         232,      // Trezarcoin
-	"VAR":         233,      // Varda
-	"IOV":         234,      // IOV
-	"FIO":         235,      // FIO
-	"BSV":         236,      // BitcoinSV
-	"DXN":         237,      // DEXON
-	"QRL":         238,      // Quantum Resistant Ledger
-	"PCX":         239,      // ChainX
-	"LOKI":        240,      // Loki
-	"Imagewallet": 241,      //
-	"NIM":         242,      // Nimiq
-	"SOV":         243,      // Sovereign Coin
-	"JCT":         244,      // Jibital Coin
-	"SLP":         245,      // Simple Ledger Protocol
-	"EWT":         246,      // Energy Web
-	"UC":          247,      // Ulord
-	"EXOS":        248,      // EXOS
-	"ECA":         249,      // Electra
-	"SOOM":        250,      // Soom
-	"XRD":         251,      // Redstone
-	"FREE":        252,      // FreeCoin
-	"NPW":         253,      // NewPowerCoin
-	"BST":         254,      // BlockStamp
-	"SmartHoldem": 255,      //
-	"NANO":        256,      // Bitcoin Nano
-	"BTCC":        257,      // Bitcoin Core
-	"Zen":         258,      // Protocol
-	"ZEST":        259,      // Zest
-	"ABT":         260,      // ArcBlock
-	"PION":        261,      // Pion
-	"DT3":         262,      // DreamTeam3
-	"ZBUX":        263,      // Zbux
-	"KPL":         264,      // Kepler
-	"TPAY":        265,      // TokenPay
-	"ZILLA":       266,      // ChainZilla
-	"ANK":         267,      // Anker
-	"BCC":         268,      // BCChain
-	"HPB":         269,      // HPB
-	"ONE":         270,      // ONE
-	"SBC":         271,      // SBC
-	"IPC":         272,      // IPChain
-	"DMTC":        273,      // Dominantchain
-	"OGC":         274,      // Onegram
-	"SHIT":        275,      // Shitcoin
-	"ANDES":       276,      // Andescoin
-	"AREPA":       277,      // Arepacoin
-	"BOLI":        278,      // Bolivarcoin
-	"RIL":         279,      // Rilcoin
-	"HTR":         280,      // Hathor Network
-	"FCTID":       281,      // Factom ID
-	"BRAVO":       282,      // BRAVO
-	"ALGO":        283,      // Algorand
-	"BZX":         284,      // Bitcoinzero
-	"GXX":         285,      // GravityCoin
-	"HEAT":        286,      // HEAT
-	"XDN":         287,      // DigitalNote
-	"FSN":         288,      // FUSION
-	"CPC":         289,      // Capricoin
-	"BOLD":        290,      // Bold
-	"IOST":        291,      // IOST
-	"TKEY":        292,      // Tkeycoin
-	"USE":         293,      // Usechain
-	"BCZ":         294,      // BitcoinCZ
-	"IOC":         295,      // Iocoin
-	"ASF":         296,      // Asofe
-	"MASS":        297,      // MASS
-	"FAIR":        298,      // FairCoin
-	"NUKO":        299,      // Nekonium
-	"GNX":         300,      // Genaro Network
-	"DIVI":        301,      // Divi Project
-	"CMT":         302,      // Community
-	"EUNO":        303,      // EUNO
-	"IOTX":        304,      // IoTeX
-	"ONION":       305,      // DeepOnion
-	"8BIT":        306,      // 8Bit
-	"ATC":         307,      // AToken Coin
-	"BTS":         308,      // Bitshares
-	"CKB":         309,      // Nervos CKB
-	"UGAS":        310,      // Ultrain
-	"ADS":         311,      // Adshares
-	"ARA":         312,      // Aura
-	"ZIL":         313,      // Zilliqa
-	"MOAC":        314,      // MOAC
-	"SWTC":        315,      // SWTC
-	"VNSC":        316,      // vnscoin
-	"PLUG":        317,      // Pl^g
-	"MAN":         318,      // Matrix AI Network
-	"ECC":         319,      // ECCoin
-	"RPD":         320,      // Rapids
-	"RAP":         321,      // Rapture
-	"GARD":        322,      // Hashgard
-	"ZER":         323,      // Zero
-	"EBST":        324,      // eBoost
-	"SHARD":       325,      // Shard
-	"LINDA":       326,      // Linda Coin
-	"CMM":         327,      // Commercium
-	"BLOCK":       328,      // Blocknet
-	"AUDAX":       329,      // AUDAX
-	"LUNA":        330,      // Terra
-	"ZPM":         331,      // zPrime
-	"KUVA":        332,      // Kuva Utility Note
-	"MEM":         333,      // MemCoin
-	"CS":          334,      // Credits
-	"SWIFT":       335,      // SwiftCash
-	"FIX":         336,      // FIX
-	"CPC":         337,      // CPChain
-	"VGO":         338,      // VirtualGoodsToken
-	"DVT":         339,      // DeVault
-	"N8V":         340,      // N8VCoin
-	"MTNS":        341,      // OmotenashiCoin
-	"BLAST":       342,      // BLAST
-	"DCT":         343,      // DECENT
-	"AUX":         344,      // Auxilium
-	"USDP":        345,      // USDP
-	"HTDF":        346,      // HTDF
-	"YEC":         347,      // Ycash
-	"QLC":         348,      // QLC Chain
-	"TEA":         349,      // Icetea Blockchain
-	"ARW":         350,      // ArrowChain
-	"MDM":         351,      // Medium
-	"CYB":         352,      // Cybex
-	"LTO":         353,      // LTO Network
-	"DOT":         354,      // Polkadot
-	"AEON":        355,      // Aeon
-	"RES":         356,      // Resistance
-	"AYA":         357,      // Aryacoin
-	"DAPS":        358,      // Dapscoin
-	"CSC":         359,      // CasinoCoin
-	"VSYS":        360,      // V Systems
-	"NOLLAR":      361,      // Nollar
-	"XNOS":        362,      // NOS
-	"CPU":         363,      // CPUchain
-	"LAMB":        364,      // Lambda Storage Chain
-	"VCT":         365,      // ValueCyber
-	"CZR":         366,      // Canonchain
-	"ABBC":        367,      // ABBC
-	"HET":         368,      // HET
-	"XAS":         369,      // Asch
-	"VDL":         370,      // Vidulum
-	"MED":         371,      // MediBloc
-	"ZVC":         372,      // ZVChain
-	"VESTX":       373,      // Vestx
-	"DBT":         374,      // DarkBit
-	"SEOS":        375,      // SuperEOS
-	"MXW":         376,      // Maxonrow
-	"ZNZ":         377,      // ZENZO
-	"XCX":         378,      // XChain
-	"SOX":         379,      // SonicX
-	"NYZO":        380,      // Nyzo
-	"ULC":         381,      // ULCoin
-	"RYO":         382,      // Ryo Currency
-	"KAL":         383,      // Kaleidochain
-	"XSN":         384,      // Stakenet
-	"DOGEC":       385,      // DogeCash
-	"BMV":         386,      // Bitcoin Matteo's Vision
-	"QBC":         387,      // Quebecoin
-	"IMG":         388,      // ImageCoin
-	"QOS":         389,      // QOS
-	"PKT":         390,      // PKT
-	"LHD":         391,      // LitecoinHD
-	"CENNZ":       392,      // CENNZnet
-	"HSN":         393,      // Hyper Speed Network
-	"CRO":         394,      // Crypto.com Chain
-	"UMBRU":       395,      // Umbru
-	"TON":         396,      // Telegram
-	"NEAR":        397,      // NEAR Protocol
-	"XPC":         398,      // XPChain
-	"ZOC":         399,      // 01coin
-	"NIX":         400,      // NIX
-	"UC":          401,      // Utopiacoin
-	"XBI":         404,      // XBI
-	"AIN":         412,      // AIN
-	"SLX":         416,      // SLX
-	"NODE":        420,      // NodeHost
-	"AION":        425,      // Aion
-	"BC":          426,      // Bitcoin Confidential
-	"PHR":         444,      // Phore
-	"DIN":         447,      // Dinero
-	"AE":          457,      // æternity
-	"ETI":         464,      // EtherInc
-	"VEO":         488,      // Amoveo
-	"THETA":       500,      // Theta
-	"SOL":         501,      // Solana
-	"KOTO":        510,      // Koto
-	"XRD":         512,      // Radiant
-	"VEE":         516,      // Virtual Economy Era
-	"LET":         518,      // Linkeye
-	"BTCV":        520,      // BitcoinVIP
-	"BU":          526,      // BUMO
-	"YAP":         528,      // Yapstone
-	"PRJ":         533,      // ProjectCoin
-	"BCS":         555,      // Bitcoin Smart
-	"LKR":         557,      // Lkrcoin
-	"NTY":         561,      // Nexty
-	"UTE":         600,      // Unit-e
-	"SSP":         618,      // SmartShare
-	"EAST":        625,      // Eastcoin
-	"SFRX":        663,      // EtherGem Sapphire
-	"ACT":         666,      // Achain
-	"PRKL":        667,      // Perkle
-	"SSC":         668,      // SelfSell
-	"VEIL":        698,      // Veil
-	"XDAI":        700,      // xDai
-	"XTL":         713,      // Katal
-	"BNB":         714,      // Binance
-	"SIN":         715,      // Sinovate
-	"BALLZ":       768,      // Ballzcoin
-	"BTW":         777,      // Bitcoin World
-	"BEET":        800,      // Beetle Coin
-	"DST":         801,      // DSTRA
-	"QVT":         808,      // Qvolta
-	"VET":         818,      // VeChain Token
-	"CLO":         820,      // Callisto
-	"CRUZ":        831,      // cruzbit
-	"DESM":        852,      // Desmos
-	"ADF":         886,      // AD Token
-	"NEO":         888,      // NEO
-	"TOMO":        889,      // TOMO
-	"XSEL":        890,      // Seln
-	"LMO":         900,      // Lumeneo
-	"META":        916,      // Metadium
-	"TWINS":       970,      // TWINS
-	"OKP":         996,      // OK Points
-	"SUM":         997,      // Solidum
-	"LBTC":        998,      // Lightning Bitcoin
-	"BCD":         999,      // Bitcoin Diamond
-	"BTN":         1000,     // Bitcoin New
-	"TT":          1001,     // ThunderCore
-	"BKT":         1002,     // BanKitt
-	"ONE":         1023,     // HARMONY-ONE
-	"ONT":         1024,     // Ontology
-	"KEX":         1026,     // Kira Exchange Token
-	"MCM":         1027,     // Mochimo
-	"BBC":         1111,     // Big Bitcoin
-	"RISE":        1120,     // RISE
-	"CMT":         1122,     // CyberMiles Token
-	"ETSC":        1128,     // Ethereum Social
-	"CDY":         1145,     // Bitcoin Candy
-	"DFC":         1337,     // Defcoin
-	"HYC":         1397,     // Hycon
-	"Taler":       1524,     //
-	"BEAM":        1533,     // Beam
-	"ELF":         1616,     // AELF
-	"ATH":         1620,     // Atheios
-	"BCX":         1688,     // BitcoinX
-	"XTZ":         1729,     // Tezos
-	"LBTC":        1776,     // Liquid BTC
-	"ADA":         1815,     // Cardano
-	"TES":         1856,     // Teslacoin
-	"CLC":         1901,     // Classica
-	"VIPS":        1919,     // VIPSTARCOIN
-	"CITY":        1926,     // City Coin
-	"XMX":         1977,     // Xuma
-	"TRTL":        1984,     // TurtleCoin
-	"EGEM":        1987,     // EtherGem
-	"HODL":        1989,     // HOdlcoin
-	"PHL":         1990,     // Placeholders
-	"POLIS":       1997,     // Polis
-	"XMCC":        1998,     // Monoeci
-	"COLX":        1999,     // ColossusXT
-	"GIN":         2000,     // GinCoin
-	"MNP":         2001,     // MNPCoin
-	"KIN":         2017,     // Kin
-	"EOSC":        2018,     // EOSClassic
-	"GBT":         2019,     // GoldBean Token
-	"PKC":         2020,     // PKC
-	"MCASH":       2048,     // MCashChain
-	"TRUE":        2049,     // TrueChain
-	"IoTE":        2112,     // IoTE
-	"ASK":         2221,     // ASK
-	"QTUM":        2301,     // QTUM
-	"ETP":         2302,     // Metaverse
-	"GXC":         2303,     // GXChain
-	"CRP":         2304,     // CranePay
-	"ELA":         2305,     // Elastos
-	"SNOW":        2338,     // Snowblossom
-	"AOA":         2570,     // Aurora
-	"REOSC":       2894,     // REOSC Ecosystem
-	"LUX":         3003,     // LUX
-	"XHB":         3030,     // Hedera HBAR
-	"COS":         3077,     // Contentos
-	"DYN":         3381,     // Dynamic
-	"SEQ":         3383,     // Sequence
-	"DEO":         3552,     // Destocoin
-	"DST":         3564,     // DeStream
-	"NAS":         2718,     // Nebulas
-	"BND":         2941,     // Blocknode
-	"CCC":         3276,     // CodeChain
-	"ROI":         3377,     // ROIcoin
-	"IOTA":        4218,     // IOTA
-	"AXE":         4242,     // Axe
-	"FIC":         5248,     // FIC
-	"HNS":         5353,     // Handshake
-	"Stacks":      5757,     //
-	"SLU":         5920,     // SILUBIUM
-	"GO":          6060,     // GoChain GO
-	"BPA":         6666,     // Bitcoin Pizza
-	"SAFE":        6688,     // SAFE
-	"ROGER":       6969,     // TheHolyrogerCoin
-	"BTV":         7777,     // Bitvote
-	"BTQ":         8339,     // BitcoinQuark
-	"SBTC":        8888,     // Super Bitcoin
-	"NULS":        8964,     // NULS
-	"BTP":         8999,     // Bitcoin Pay
-	"NRG":         9797,     // Energi
-	"BTF":         9888,     // Bitcoin Faith
-	"GOD":         9999,     // Bitcoin God
-	"FO":          10000,    // FIBOS
-	"BTR":         10291,    // Bitcoin Rhodium
-	"ESS":         11111,    // Essentia One
-	"IPOS":        12345,    // IPOS
-	"BTY":         13107,    // BitYuan
-	"YCC":         13108,    // Yuan Chain Coin
-	"SDGO":        15845,    // SanDeGo
-	"ARDR":        16754,    // Ardor
-	"SAFE":        19165,    // Safecoin
-	"ZEL":         19167,    // ZelCash
-	"RITO":        19169,    // Ritocoin
-	"XND":         20036,    // ndau
-	"PWR":         22504,    // PWRcoin
-	"BELL":        25252,    // Bellcoin
-	"CHX":         25718,    // Own
-	"ESN":         31102,    // EtherSocial Network
-	"ThePower":    31337,    //
-	"TEO":         33416,    // Trust Eth reOrigin
-	"BTCS":        33878,    // Bitcoin Stake
-	"BTT":         34952,    // ByteTrade
-	"FXTC":        37992,    // FixedTradeCoin
-	"AMA":         39321,    // Amabig
-	"STASH":       49344,    // STASH
-	"KETH":        65536,    // Krypton World
-	"RYO":         88888,    // c0ban
-	"WICC":        99999,    // Waykichain
-	"AKA":         200625,   // Akroma
-	"GENOM":       200665,   // GENOM
-	"ATS":         246529,   // ARTIS sigma1
-	"X42":         424242,   // x42
-	"VITE":        666666,   // Vite
-	"ILT":         1171337,  // iOlite
-	"ETHO":        1313114,  // Ether-1
-	"XERO":        1313500,  // Xerom
-	"LAX":         1712144,  // LAPO
-	"BCO":         5249353,  // BitcoinOre
-	"BHD":         5249354,  // BitcoinHD
-	"PTN":         5264462,  // PalletOne
-	"WAN":         5718350,  // Wanchain
-	"WAVES":       5741564,  // Waves
-	"SEM":         7562605,  // Semux
-	"ION":         7567736,  // ION
-	"WGR":         7825266,  // WGR
-	"OBSR":        7825267,  // OBServer
-	"AQUA":        61717561, // Aquachain
-	"kUSD":        91927009, // kUSD
-	"FLUID":       99999998, // FluiChains
-	"QKC":         99999999, // QuarkChain
+var symbolBipIDs map[string]uint32
+
+func BipSymbolID(symbol string) (uint32, bool) {
+	if symbolBipIDs == nil {
+		symbolBipIDs = make(map[string]uint32)
+		for idx, sym := range bipIDs {
+			symbolBipIDs[sym] = idx
+		}
+	}
+
+	idx, found := symbolBipIDs[symbol]
+	return idx, found
+}
+
+func BipIDSymbol(idx uint32) string {
+	return bipIDs[idx]
+}
+
+var bipIDs = map[uint32]string{
+	0:        "btc",
+	1:        "testnet",
+	2:        "ltc",
+	3:        "doge",
+	4:        "rdd",
+	5:        "dash",
+	6:        "ppc",
+	7:        "nmc",
+	8:        "ftc",
+	9:        "xcp",
+	10:       "blk",
+	11:       "nsr",
+	12:       "nbt",
+	13:       "mzc",
+	14:       "via",
+	15:       "xch",
+	16:       "rby",
+	17:       "grs",
+	18:       "dgc",
+	19:       "ccn",
+	20:       "dgb",
+	21:       "openassets",
+	22:       "mona",
+	23:       "clam",
+	24:       "xpm",
+	25:       "neos",
+	26:       "jbs",
+	27:       "zrc",
+	28:       "vtc",
+	29:       "nxt",
+	30:       "burst",
+	31:       "mue",
+	32:       "zoom",
+	33:       "vash",
+	34:       "cdn",
+	35:       "sdc",
+	36:       "pkb",
+	37:       "pnd",
+	38:       "start",
+	39:       "moin",
+	40:       "exp",
+	41:       "emc2",
+	42:       "dcr",
+	43:       "xem",
+	44:       "part",
+	45:       "arg",
+	46:       "libertas",
+	47:       "posw",
+	48:       "shr",
+	49:       "gcr",
+	50:       "nvc",
+	51:       "ac",
+	52:       "btcd",
+	53:       "dope",
+	54:       "tpc",
+	55:       "aib",
+	56:       "edrc",
+	57:       "sys",
+	58:       "slr",
+	59:       "smly",
+	60:       "eth",
+	61:       "etc",
+	62:       "psb",
+	63:       "ldcn",
+	64:       "openchain",
+	65:       "xbc",
+	66:       "iop",
+	67:       "nxs",
+	68:       "insn",
+	69:       "ok",
+	70:       "brit",
+	71:       "cmp",
+	72:       "crw",
+	73:       "bela",
+	74:       "icx",
+	75:       "fjc",
+	76:       "mix",
+	77:       "xvg",
+	78:       "efl",
+	79:       "club",
+	80:       "richx",
+	81:       "pot",
+	82:       "qrk",
+	83:       "trc",
+	84:       "grc",
+	85:       "aur",
+	86:       "ixc",
+	87:       "nlg",
+	88:       "bitb",
+	89:       "bta",
+	90:       "xmy",
+	91:       "bsd",
+	92:       "uno",
+	93:       "mtr",
+	94:       "gb",
+	95:       "shm",
+	96:       "crx",
+	97:       "biq",
+	98:       "evo",
+	99:       "sto",
+	100:      "bigup",
+	101:      "game",
+	102:      "dlc",
+	103:      "zyd",
+	104:      "dbic",
+	105:      "strat",
+	106:      "sh",
+	107:      "mars",
+	108:      "ubq",
+	109:      "ptc",
+	110:      "nro",
+	111:      "ark",
+	112:      "usc",
+	113:      "thc",
+	114:      "linx",
+	115:      "ecn",
+	116:      "dnr",
+	117:      "pink",
+	118:      "atom",
+	119:      "pivx",
+	120:      "flash",
+	121:      "zen",
+	122:      "put",
+	123:      "zny",
+	124:      "unify",
+	125:      "xst",
+	126:      "brk",
+	127:      "vc",
+	128:      "xmr",
+	129:      "vox",
+	130:      "nav",
+	131:      "fct",
+	132:      "ec",
+	133:      "zec",
+	134:      "lsk",
+	135:      "steem",
+	136:      "xzc",
+	137:      "rbtc",
+	138:      "giftblock",
+	139:      "rpt",
+	140:      "lbc",
+	141:      "kmd",
+	142:      "bsq",
+	143:      "ric",
+	144:      "xrp",
+	145:      "bch",
+	146:      "nebl",
+	147:      "zcl",
+	148:      "xlm",
+	149:      "nlc2",
+	150:      "whl",
+	151:      "erc",
+	152:      "dmd",
+	153:      "btm",
+	154:      "bio",
+	155:      "xwc",
+	156:      "btg",
+	157:      "btc2x",
+	158:      "ssn",
+	159:      "toa",
+	160:      "btx",
+	161:      "acc",
+	162:      "bco",
+	163:      "ella",
+	164:      "pirl",
+	165:      "xrb",
+	166:      "vivo",
+	167:      "frst",
+	168:      "hnc",
+	169:      "buzz",
+	170:      "mbrs",
+	171:      "hsr",
+	172:      "html",
+	173:      "odn",
+	174:      "onx",
+	175:      "rvn",
+	176:      "gbx",
+	177:      "btcz",
+	178:      "poa",
+	179:      "nyc",
+	180:      "mxt",
+	181:      "wc",
+	182:      "mnx",
+	183:      "btcp",
+	184:      "music",
+	185:      "bca",
+	186:      "crave",
+	187:      "stak",
+	188:      "wbtc",
+	189:      "lch",
+	190:      "excl",
+	191:      "lynx",
+	192:      "lcc",
+	193:      "xfe",
+	194:      "eos",
+	195:      "trx",
+	196:      "kobo",
+	197:      "hush",
+	198:      "banano",
+	199:      "etf",
+	200:      "omni",
+	201:      "bifi",
+	202:      "ufo",
+	203:      "cnmc",
+	204:      "bcn",
+	205:      "rin",
+	206:      "atp",
+	207:      "evt",
+	208:      "atn",
+	209:      "bis",
+	210:      "neet",
+	211:      "bopo",
+	212:      "oot",
+	213:      "xspec",
+	214:      "monk",
+	215:      "boxy",
+	216:      "flo",
+	217:      "mec",
+	218:      "btdx",
+	219:      "xax",
+	220:      "anon",
+	221:      "ltz",
+	222:      "bitg",
+	223:      "ask",
+	224:      "smart",
+	225:      "xuez",
+	226:      "hlm",
+	227:      "web",
+	228:      "acm",
+	229:      "nos",
+	230:      "bitc",
+	231:      "hth",
+	232:      "tzc",
+	233:      "var",
+	234:      "iov",
+	235:      "fio",
+	236:      "bsv",
+	237:      "dxn",
+	238:      "qrl",
+	239:      "pcx",
+	240:      "loki",
+	241:      "imagewallet",
+	242:      "nim",
+	243:      "sov",
+	244:      "jct",
+	245:      "slp",
+	246:      "ewt",
+	247:      "uc",
+	248:      "exos",
+	249:      "eca",
+	250:      "soom",
+	251:      "xrd",
+	252:      "free",
+	253:      "npw",
+	254:      "bst",
+	255:      "smartholdem",
+	256:      "nano",
+	257:      "btcc",
+	258:      "zenprotocol",
+	259:      "zest",
+	260:      "abt",
+	261:      "pion",
+	262:      "dt3",
+	263:      "zbux",
+	264:      "kpl",
+	265:      "tpay",
+	266:      "zilla",
+	267:      "ank",
+	268:      "bcc",
+	269:      "hpb",
+	270:      "one",
+	271:      "sbc",
+	272:      "ipc",
+	273:      "dmtc",
+	274:      "ogc",
+	275:      "shit",
+	276:      "andes",
+	277:      "arepa",
+	278:      "boli",
+	279:      "ril",
+	280:      "htr",
+	281:      "fctid",
+	282:      "bravo",
+	283:      "algo",
+	284:      "bzx",
+	285:      "gxx",
+	286:      "heat",
+	287:      "xdn",
+	288:      "fsn",
+	289:      "cpc[capricoin]",
+	290:      "bold",
+	291:      "iost",
+	292:      "tkey",
+	293:      "use",
+	294:      "bcz",
+	295:      "ioc",
+	296:      "asf",
+	297:      "mass",
+	298:      "fair",
+	299:      "nuko",
+	300:      "gnx",
+	301:      "divi",
+	302:      "cmt[community]",
+	303:      "euno",
+	304:      "iotx",
+	305:      "onion",
+	306:      "8bit",
+	307:      "atc",
+	308:      "bts",
+	309:      "ckb",
+	310:      "ugas",
+	311:      "ads",
+	312:      "ara",
+	313:      "zil",
+	314:      "moac",
+	315:      "swtc",
+	316:      "vnsc",
+	317:      "plug",
+	318:      "man",
+	319:      "ecc",
+	320:      "rpd",
+	321:      "rap",
+	322:      "gard",
+	323:      "zer",
+	324:      "ebst",
+	325:      "shard",
+	326:      "linda",
+	327:      "cmm",
+	328:      "block",
+	329:      "audax",
+	330:      "luna",
+	331:      "zpm",
+	332:      "kuva",
+	333:      "mem",
+	334:      "cs",
+	335:      "swift",
+	336:      "fix",
+	337:      "cpc[cpcchain]",
+	338:      "vgo",
+	339:      "dvt",
+	340:      "n8v",
+	341:      "mtns",
+	342:      "blast",
+	343:      "dct",
+	344:      "aux",
+	345:      "usdp",
+	346:      "htdf",
+	347:      "yec",
+	348:      "qlc",
+	349:      "tea",
+	350:      "arw",
+	351:      "mdm",
+	352:      "cyb",
+	353:      "lto",
+	354:      "dot",
+	355:      "aeon",
+	356:      "res",
+	357:      "aya",
+	358:      "daps",
+	359:      "csc",
+	360:      "vsys",
+	361:      "nollar",
+	362:      "xnos",
+	363:      "cpu",
+	364:      "lamb",
+	365:      "vct",
+	366:      "czr",
+	367:      "abbc",
+	368:      "het",
+	369:      "xas",
+	370:      "vdl",
+	371:      "med",
+	372:      "zvc",
+	373:      "vestx",
+	374:      "dbt",
+	375:      "seos",
+	376:      "mxw",
+	377:      "znz",
+	378:      "xcx",
+	379:      "sox",
+	380:      "nyzo",
+	381:      "ulc",
+	382:      "ryo",
+	383:      "kal",
+	384:      "xsn",
+	385:      "dogec",
+	386:      "bmv",
+	387:      "qbc",
+	388:      "img",
+	389:      "qos",
+	390:      "pkt",
+	391:      "lhd",
+	392:      "cennz",
+	393:      "hsn",
+	394:      "cro",
+	395:      "umbru",
+	396:      "ton",
+	397:      "near",
+	398:      "xpc",
+	399:      "zoc",
+	400:      "nix",
+	404:      "xbi",
+	412:      "ain",
+	416:      "slx",
+	420:      "node",
+	425:      "aion",
+	426:      "bc",
+	444:      "phr",
+	447:      "din",
+	457:      "ae",
+	464:      "eti",
+	488:      "veo",
+	500:      "theta",
+	501:      "sol",
+	510:      "koto",
+	512:      "xrd[radiant]",
+	516:      "vee",
+	518:      "let",
+	520:      "btcv",
+	526:      "bu",
+	528:      "yap",
+	533:      "prj",
+	555:      "bcs",
+	557:      "lkr",
+	561:      "nty",
+	600:      "ute",
+	618:      "ssp",
+	625:      "east",
+	663:      "sfrx",
+	666:      "act",
+	667:      "prkl",
+	668:      "ssc",
+	698:      "veil",
+	700:      "xdai",
+	713:      "xtl",
+	714:      "bnb",
+	715:      "sin",
+	768:      "ballz",
+	777:      "btw",
+	800:      "beet",
+	801:      "dst[dstra]",
+	808:      "qvt",
+	818:      "vet",
+	820:      "clo",
+	831:      "cruz",
+	852:      "desm",
+	886:      "adf",
+	888:      "neo",
+	889:      "tomo",
+	890:      "xsel",
+	900:      "lmo",
+	916:      "meta",
+	970:      "twins",
+	996:      "okp",
+	997:      "sum",
+	998:      "lbtc",
+	999:      "bcd",
+	1000:     "btn",
+	1001:     "tt",
+	1002:     "bkt",
+	1023:     "one[harmony]",
+	1024:     "ont",
+	1026:     "kex",
+	1027:     "mcm",
+	1111:     "bbc",
+	1120:     "rise",
+	1122:     "cmt[cybermiles]",
+	1128:     "etsc",
+	1145:     "cdy",
+	1337:     "dfc",
+	1397:     "hyc",
+	1524:     "taler",
+	1533:     "beam",
+	1616:     "elf",
+	1620:     "ath",
+	1688:     "bcx",
+	1729:     "xtz",
+	1776:     "l-btc",
+	1815:     "ada",
+	1856:     "tes",
+	1901:     "clc",
+	1919:     "vips",
+	1926:     "city",
+	1977:     "xmx",
+	1984:     "trtl",
+	1987:     "egem",
+	1989:     "hodl",
+	1990:     "phl",
+	1997:     "polis",
+	1998:     "xmcc",
+	1999:     "colx",
+	2000:     "gin",
+	2001:     "mnp",
+	2017:     "kin",
+	2018:     "eosc",
+	2019:     "gbt",
+	2020:     "pkc",
+	2048:     "mcash",
+	2049:     "true",
+	2112:     "iote",
+	2221:     "ask[permission]",
+	2301:     "qtum",
+	2302:     "etp",
+	2303:     "gxc",
+	2304:     "crp",
+	2305:     "ela",
+	2338:     "snow",
+	2570:     "aoa",
+	2718:     "nas",
+	2894:     "reosc",
+	2941:     "bnd",
+	3003:     "lux",
+	3030:     "xhb",
+	3077:     "cos",
+	3276:     "ccc",
+	3377:     "roi",
+	3381:     "dyn",
+	3383:     "seq",
+	3552:     "deo",
+	3564:     "dst[destream]",
+	4218:     "iota",
+	4242:     "axe",
+	5248:     "fic",
+	5353:     "hns",
+	5757:     "stacks",
+	5920:     "slu",
+	6060:     "go",
+	6666:     "bpa",
+	6688:     "safe",
+	6969:     "roger",
+	7777:     "btv",
+	8339:     "btq",
+	8888:     "sbtc",
+	8964:     "nuls",
+	8999:     "btp",
+	9797:     "nrg",
+	9888:     "btf",
+	9999:     "god",
+	10000:    "fo",
+	10291:    "btr",
+	11111:    "ess",
+	12345:    "ipos",
+	13107:    "bty",
+	13108:    "ycc",
+	15845:    "sdgo",
+	16754:    "ardr",
+	19165:    "safe[safecoin]",
+	19167:    "zel",
+	19169:    "rito",
+	20036:    "xnd",
+	22504:    "pwr",
+	25252:    "bell",
+	25718:    "chx",
+	31102:    "esn",
+	31337:    "thepowerio",
+	33416:    "teo",
+	33878:    "btcs",
+	34952:    "btt",
+	37992:    "fxtc",
+	39321:    "ama",
+	49344:    "stash",
+	65536:    "keth",
+	88888:    "ryo[c0ban]",
+	99999:    "wicc",
+	200625:   "aka",
+	200665:   "genom",
+	246529:   "ats",
+	424242:   "x42",
+	666666:   "vite",
+	1171337:  "ilt",
+	1313114:  "etho",
+	1313500:  "xero",
+	1712144:  "lax",
+	5249353:  "bco[ore]",
+	5249354:  "bhd",
+	5264462:  "ptn",
+	5718350:  "wan",
+	5741564:  "waves",
+	7562605:  "sem",
+	7567736:  "ion",
+	7825266:  "wgr",
+	7825267:  "obsr",
+	61717561: "aqua",
+	91927009: "kusd",
+	99999998: "fluid",
+	99999999: "qkc",
 }
