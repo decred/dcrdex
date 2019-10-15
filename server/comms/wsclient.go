@@ -17,6 +17,18 @@ import (
 // messages.
 const outBufferSize = 128
 
+// Error is just a basic error.
+type Error string
+
+// Error satisfies the error interface.
+func (e Error) Error() string {
+	return string(e)
+}
+
+// ErrClientDisconnected will be returned if Send or Request is called on a
+// disconnected RPCClient.
+const ErrClientDisconnected = Error("client disconnected")
+
 // wsConnection represents a communications pathway to the client. In practice,
 // it is satisfied by *websocket.Conn. For testing, a stub can be used.
 type wsConnection interface {
@@ -80,6 +92,9 @@ func newRPCClient(addr string, conn wsConnection) *RPCClient {
 // channel if blocking (outBufferSize pending messages), the client is
 // disconnected.
 func (c *RPCClient) Send(msg *rpc.Message) error {
+	if c.off() {
+		return ErrClientDisconnected
+	}
 	b, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -290,4 +305,11 @@ func (c *RPCClient) respHandler(id uint64) *responseHandler {
 		delete(c.respHandlers, id)
 	}
 	return cb
+}
+
+// off will return true if the client has disconnected.
+func (c *RPCClient) off() bool {
+	c.quitMtx.RLock()
+	defer c.quitMtx.RUnlock()
+	return !c.on
 }

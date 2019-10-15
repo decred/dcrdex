@@ -204,9 +204,7 @@ func TestClientRequests(t *testing.T) {
 	clientOn := func() bool {
 		var on bool
 		lockedExe(func() {
-			client.quitMtx.RLock()
-			defer client.quitMtx.RUnlock()
-			on = client.on
+			on = !client.off()
 		})
 		return on
 	}
@@ -360,6 +358,12 @@ func TestClientRequests(t *testing.T) {
 	if !server.isQuarantined(stubAddr) {
 		t.Fatalf("server has not marked client as quarantined")
 	}
+	// A call to Send should return ErrClientDisconnected
+	lockedExe(func() {
+		if client.Send(nil) != ErrClientDisconnected {
+			t.Fatalf("incorrect error for disconnected client")
+		}
+	})
 
 	checkParseError := func() {
 		lockedExe(func() {
@@ -478,6 +482,35 @@ func TestClientResponses(t *testing.T) {
 	old := `{"a":"b"}`
 	sendReplace(t, conn, makeResp(id, old), old, `?`)
 	checkParseError("invalid payload")
+
+	// check the response handler expiration
+	lockedExe(func() {
+		client.respHandlers = make(map[uint64]*responseHandler)
+	})
+	id = sendToClient("expiration", `{}`, func(_ *RPCClient, _ *rpc.Message) {})
+	// Set the expiration to now
+	lockedExe(func() {
+		handler, found := client.respHandlers[id]
+		if !found {
+			t.Fatalf("response handler not found")
+		}
+		if len(client.respHandlers) != 1 {
+			t.Fatalf("expected 1 response handler, found %d", len(client.respHandlers))
+		}
+		handler.expiration = time.Now()
+	})
+	// If we send another, the length should still be one, because the expired
+	// handler is pruned.
+	sendToClient("expiration", `{}`, func(_ *RPCClient, _ *rpc.Message) {})
+	lockedExe(func() {
+		if len(client.respHandlers) != 1 {
+			t.Fatalf("expired response handler not pruned")
+		}
+		_, found := client.respHandlers[id]
+		if found {
+			t.Fatalf("expired response handler still in map")
+		}
+	})
 }
 
 func TestOnline(t *testing.T) {
