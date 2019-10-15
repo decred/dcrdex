@@ -2,10 +2,12 @@ package pg
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"time"
 
 	"github.com/decred/dcrdex/server/account"
+	"github.com/decred/dcrdex/server/account/pki"
 	"github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/order"
 	"github.com/decred/slog"
@@ -30,6 +32,12 @@ var acct0 = account.AccountID{
 	0x22, 0x4c, 0xba, 0xaa, 0xfa, 0x80, 0xbf, 0x3b, 0xd1, 0xff, 0x73, 0x15,
 	0x90, 0xbc, 0xbd, 0xda, 0x5a, 0x76, 0xf9, 0x1e, 0x60, 0xa1, 0x56, 0x99,
 	0x46, 0x34, 0xe9, 0x1c, 0xec, 0x25, 0xd5, 0x40,
+}
+
+func randomAccountID() account.AccountID {
+	pk := make([]byte, pki.PubKeySize) // size is not important since it is going to be hashed
+	rand.Read(pk)
+	return account.NewID(pk)
 }
 
 func mktConfig() (markets []*types.MarketInfo) {

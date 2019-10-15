@@ -644,6 +644,12 @@ func TestUserOrders(t *testing.T) {
 	marketSell := newMarketSellOrder(2, 0)
 	marketBuy := newMarketBuyOrder(2000000000, 0)
 
+	aid := limitSell.AccountID
+
+	marketSellOtherGuy := newMarketSellOrder(2, 0)
+	marketSellOtherGuy.AccountID = randomAccountID()
+	marketSellOtherGuy.Address = "1MUz4VMYui5qY1mxUiG8BQ1Luv6tqkvaiL"
+
 	orderStatuses := []struct {
 		ord     order.Order
 		status  types.OrderStatus
@@ -669,6 +675,11 @@ func TestUserOrders(t *testing.T) {
 			types.OrderStatusMatched, // active
 			false,
 		},
+		{
+			marketSellOtherGuy,
+			types.OrderStatusFailed, // archived
+			false,
+		},
 	}
 
 	for i := range orderStatuses {
@@ -680,16 +691,19 @@ func TestUserOrders(t *testing.T) {
 		}
 	}
 
-	aid := limitSell.AccountID
-
 	ordersOut, statusesOut, err := archie.UserOrders(context.Background(), aid, mktInfo.Base, mktInfo.Quote)
 	if err != nil {
 		t.Error(err)
 	}
-	if len(ordersOut) != len(orderStatuses) {
-		t.Error("poo")
-	}
+
 	if len(ordersOut) != len(statusesOut) {
-		t.Error("poo")
+		t.Errorf("UserOrders returned %d orders, but %d order status. Should be equal.",
+			len(ordersOut), len(statusesOut))
+	}
+
+	numOrdersForGuy0 := len(orderStatuses) - 1
+	if len(ordersOut) != numOrdersForGuy0 {
+		t.Errorf("incorrect number of orders for user %d retrieved. "+
+			"got %d, expected %d", aid, len(ordersOut), numOrdersForGuy0)
 	}
 }
