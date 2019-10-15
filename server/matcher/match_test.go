@@ -572,7 +572,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 		newLimitOrder(false, 4550000, 2, order.StandingTiF, 0),  // buy, 2 lot, standing, equal rate, partial taker insert to book
 		newLimitOrder(false, 4550000, 2, order.ImmediateTiF, 0), // buy, 2 lot, immediate, equal rate, partial taker unfilled
 		newLimitOrder(false, 4100000, 1, order.ImmediateTiF, 0), // buy, 1 lot, immediate, unfilled fail
-		newLimitOrder(true, 4540000, 1, order.ImmediateTiF, 0),  // sell, 1 lot, immediate
+		newLimitOrder(true, 4540000, 1, order.ImmediateTiF, 5),  // sell, 1 lot, immediate
 	}
 
 	resetTakers := func() {
@@ -1078,8 +1078,8 @@ func Test_shuffleQueue(t *testing.T) {
 
 	// q3Shuffled is the expected result of sorting q3_1 and q3_2
 	q3Shuffled := []order.Order{
-		marketOrders[0],
 		marketOrders[1],
+		marketOrders[0],
 		limitOrders[0],
 	}
 
@@ -1113,8 +1113,8 @@ func Test_shuffleQueue(t *testing.T) {
 	}
 
 	q2Shuffled := []order.Order{
-		limitOrders[0],
 		marketOrders[0],
+		limitOrders[0],
 	}
 
 	tests := []struct {
@@ -1155,7 +1155,7 @@ func Test_shuffleQueue(t *testing.T) {
 		{
 			"q1",
 			q1,
-			[]order.Order{q2Shuffled[1]},
+			[]order.Order{q1[0]},
 		},
 		{
 			"q2_a",
@@ -1170,7 +1170,7 @@ func Test_shuffleQueue(t *testing.T) {
 		{
 			"qDup",
 			qDup,
-			[]order.Order{q2Shuffled[1], q2Shuffled[1]},
+			[]order.Order{q1[0], q1[0]},
 		},
 	}
 	for _, tt := range tests {
@@ -1203,8 +1203,8 @@ func Test_sortQueue(t *testing.T) {
 
 	// q3Sorted is the expected result of sorting q3_1 and q3_2
 	q3Sorted := []order.Order{
-		marketOrders[1],
 		marketOrders[0],
+		marketOrders[1],
 		limitOrders[0],
 	}
 
