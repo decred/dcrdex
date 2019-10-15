@@ -10,8 +10,9 @@ import (
 
 // Error codes
 const (
-	RPCParseError = iota
-	RPCUnknownMethod
+	RPCErrorUnspecified = iota
+	RPCParseError
+	RPCUnknownRoute
 	RPCInternal
 	RPCQuarantineClient
 	RPCVersionUnsupported

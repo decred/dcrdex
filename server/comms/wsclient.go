@@ -29,7 +29,7 @@ type wsConnection interface {
 // to wait for the response.
 type responseHandler struct {
 	expiration time.Time
-	f          func(*rpc.ResponsePayload)
+	f          func(*RPCClient, *rpc.Message)
 }
 
 // RPCClient is the local, per-connection representation of a DEX client.
@@ -94,9 +94,15 @@ func (c *RPCClient) Send(msg *rpc.Message) error {
 }
 
 // Request sends the message to the client and tracks the response handler.
-func (c *RPCClient) Request(msg *rpc.Message, f func(*rpc.ResponsePayload)) error {
+func (c *RPCClient) Request(msg *rpc.Message, f func(conn *RPCClient, msg *rpc.Message)) error {
 	c.logReq(msg.ID, f)
 	return c.Send(msg)
+}
+
+// banish sets the ban flag and closes the client.
+func (c *RPCClient) Banish() {
+	c.ban = true
+	c.disconnect()
 }
 
 // sendError sends the rpc.Error to the client.
@@ -182,19 +188,13 @@ out:
 			// error response but not a disconnect.
 			handler, found := rpcRoutes[msg.Route]
 			if !found {
-				c.sendError(msg.ID, rpc.NewError(rpc.RPCUnknownMethod,
-					"unknown method "+msg.Route))
+				c.sendError(msg.ID, rpc.NewError(rpc.RPCUnknownRoute,
+					"unknown route "+msg.Route))
 				continue
 			}
 			// Handle the request.
 			rpcError := handler(c, msg)
 			if rpcError != nil {
-				// The server can request a quarantine by returning the
-				// RPCQuarantineClient code.
-				if rpcError.Code == rpc.RPCQuarantineClient {
-					c.ban = true
-					break out
-				}
 				c.sendError(msg.ID, rpcError)
 				continue
 			}
@@ -203,18 +203,13 @@ out:
 				c.sendError(0, rpc.NewError(rpc.RPCParseError, "response id cannot be 0"))
 				continue
 			}
-			resp, err := msg.Response()
-			if err != nil {
-				c.sendError(msg.ID, rpc.NewError(rpc.RPCParseError, err.Error()))
-				continue
-			}
 			cb := c.respHandler(msg.ID)
 			if cb == nil {
 				c.sendError(msg.ID, rpc.NewError(rpc.UnknownResponseID,
 					"unkown response ID"))
 				continue
 			}
-			cb.f(resp)
+			cb.f(c, msg)
 		}
 	}
 	// Ensure the connection is closed.
@@ -267,7 +262,7 @@ cleanup:
 
 // logReq stores the response handler in the respHandlers map. Requests to the
 // client are associated with a response handler.
-func (c *RPCClient) logReq(id uint64, respHandler func(*rpc.ResponsePayload)) {
+func (c *RPCClient) logReq(id uint64, respHandler func(*RPCClient, *rpc.Message)) {
 	c.reqMtx.Lock()
 	defer c.reqMtx.Unlock()
 	expired := make([]uint64, 0)

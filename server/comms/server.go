@@ -85,15 +85,15 @@ var rpcRoutes = make(map[string]rpcRoute)
 // Route registers a RPC handler for a specified route. The handler
 // map is global and has no mutex protection. All calls to Route
 // should be done before the RPCServer is started.
-func Route(method string, handler rpcRoute) {
-	if method == "" {
-		panic("Route: method is empty string")
+func Route(route string, handler rpcRoute) {
+	if route == "" {
+		panic("Route: route is empty string")
 	}
-	_, alreadyHave := rpcRoutes[method]
+	_, alreadyHave := rpcRoutes[route]
 	if alreadyHave {
-		panic(fmt.Sprintf("Route: double registration: %s", method))
+		panic(fmt.Sprintf("Route: double registration: %s", route))
 	}
-	rpcRoutes[method] = handler
+	rpcRoutes[route] = handler
 }
 
 // The RPCConfig is the server configuration settings and the only argument
@@ -188,7 +188,7 @@ func NewRPCServer(cfg *RPCConfig) (*RPCServer, error) {
 	}, nil
 }
 
-// Start starts the server. Start should be called only after all methods are
+// Start starts the server. Start should be called only after all routes are
 // registered.
 func (s *RPCServer) Start() {
 	log.Trace("Starting RPC server")

@@ -110,7 +110,7 @@ func (conn *wsConnStub) Close() error {
 	return nil
 }
 
-func dummyRPCMethod(_ *RPCClient, _ *rpc.Message) *rpc.Error {
+func dummyRPCHandler(_ *RPCClient, _ *rpc.Message) *rpc.Error {
 	return nil
 }
 
@@ -179,7 +179,7 @@ func TestRoute_PanicsEmtpyString(t *testing.T) {
 			t.Fatalf("no panic on registering empty string method")
 		}
 	}()
-	Route("", dummyRPCMethod)
+	Route("", dummyRPCHandler)
 }
 
 // methods cannot be registered more than once.
@@ -189,8 +189,8 @@ func TestRoute_PanicsDoubleRegistry(t *testing.T) {
 			t.Fatalf("no panic on registering empty string method")
 		}
 	}()
-	Route("somemethod", dummyRPCMethod)
-	Route("somemethod", dummyRPCMethod)
+	Route("somemethod", dummyRPCHandler)
+	Route("somemethod", dummyRPCHandler)
 }
 
 // Test the server with a stub for the client connections.
@@ -248,8 +248,12 @@ func TestClientRequests(t *testing.T) {
 		return rpc.NewError(550, "somemessage")
 	})
 	// 'ban' quarantines the user using the RPCQuarantineClient error code.
-	Route("ban", func(_ *RPCClient, _ *rpc.Message) *rpc.Error {
-		return rpc.NewError(rpc.RPCQuarantineClient, "user quarantined")
+	Route("ban", func(c *RPCClient, req *rpc.Message) *rpc.Error {
+		err := rpc.NewError(rpc.RPCQuarantineClient, "user quarantined")
+		errMsg, _ := rpc.NewResponse(req.ID, nil, err)
+		c.Send(errMsg)
+		c.Banish()
+		return nil
 	})
 
 	// A helper function to reconnect to the server and grab the server's
@@ -286,13 +290,13 @@ func TestClientRequests(t *testing.T) {
 
 	// Send invalid params, and make sure the server doesn't pass the message. The
 	// server will not disconnect the client.
-	checkReplacePass := func(old, new string) {
+	ensureReplaceFails := func(old, new string) {
 		sendReplace(t, conn, makeReq("checkinvalid", old), old, new)
 		if passed {
 			t.Fatalf("invalid request passed to handler")
 		}
 	}
-	checkReplacePass(`{"a":"b"}`, "?")
+	ensureReplaceFails(`{"a":"b"}`, "?")
 	if !clientOn() {
 		t.Fatalf("client unexpectedly disconnected after invalid message")
 	}
@@ -300,7 +304,7 @@ func TestClientRequests(t *testing.T) {
 	// Send the invalid message again, but error out on the server's WriteMessage
 	// attempt. The server should disconnect the client in this case.
 	writeErr = "basic error"
-	checkReplacePass(`{"a":"b"}`, "?")
+	ensureReplaceFails(`{"a":"b"}`, "?")
 	if clientOn() {
 		t.Fatalf("client connected after WriteMessage error")
 	}
@@ -408,8 +412,8 @@ func TestClientResponses(t *testing.T) {
 		time.Sleep(time.Millisecond * 10)
 	}
 
-	sendToClient := func(method, params string, f func(*rpc.ResponsePayload)) uint64 {
-		req := makeReq(method, params)
+	sendToClient := func(route, payload string, f func(*RPCClient, *rpc.Message)) uint64 {
+		req := makeReq(route, payload)
 		err := client.Request(req, f)
 		if err != nil {
 			t.Logf("sendToClient error: %v", err)
@@ -438,7 +442,7 @@ func TestClientResponses(t *testing.T) {
 	// Send a request from the server to the client, setting a flag when the
 	// client responds.
 	responded := false
-	id := sendToClient("looptest", `{}`, func(_ *rpc.ResponsePayload) {
+	id := sendToClient("looptest", `{}`, func(_ *RPCClient, _ *rpc.Message) {
 		responded = true
 	})
 	// Respond to the server
@@ -499,12 +503,12 @@ func TestOnline(t *testing.T) {
 	}
 	defer server.Stop()
 
-	// Register methods before starting server.
-	// No response simulates a method that returns no response.
+	// Register routes before starting server.
+	// No response simulates a route that returns no response.
 	Route("noresponse", func(_ *RPCClient, _ *rpc.Message) *rpc.Error {
 		return nil
 	})
-	// The 'ok' method returns an affirmative response.
+	// The 'ok' route returns an affirmative response.
 	type okresult struct {
 		OK bool `json:"ok"`
 	}
@@ -519,9 +523,13 @@ func TestOnline(t *testing.T) {
 		}
 		return nil
 	})
-	// The 'banuser' method quarantines the user.
+	// The 'banuser' route quarantines the user.
 	Route("banuser", func(c *RPCClient, req *rpc.Message) *rpc.Error {
-		return rpc.NewError(rpc.RPCQuarantineClient, "test quarantine")
+		err := rpc.NewError(rpc.RPCQuarantineClient, "test quarantine")
+		msg, _ := rpc.NewResponse(req.ID, nil, err)
+		c.Send(msg)
+		c.Banish()
+		return nil
 	})
 
 	server.Start()
@@ -571,10 +579,10 @@ func TestOnline(t *testing.T) {
 		}
 	}()
 
-	sendToDEX := func(method, msg string) error {
-		b, err := json.Marshal(makeReq(method, msg))
+	sendToDEX := func(route, msg string) error {
+		b, err := json.Marshal(makeReq(route, msg))
 		if err != nil {
-			t.Fatalf("error encoding %s request: %v", method, err)
+			t.Fatalf("error encoding %s request: %v", route, err)
 		}
 		err = remoteClient.WriteMessage(websocket.TextMessage, b)
 		time.Sleep(time.Millisecond * 10)
