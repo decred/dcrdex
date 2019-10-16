@@ -30,7 +30,7 @@ func (e Error) Error() string {
 const ErrClientDisconnected = Error("client disconnected")
 
 // Link is an interface for a communication channel with an API client. The
-// reference implemenatation of a Link-satisfying type is the wsLink, which
+// reference implementation of a Link-satisfying type is the wsLink, which
 // passes messages over a websocket connection.
 type Link interface {
 	// ID will return a unique ID by which this connection can be identified.
@@ -238,7 +238,7 @@ out:
 			cb := c.respHandler(msg.ID)
 			if cb == nil {
 				c.sendError(msg.ID, msgjson.NewError(msgjson.UnknownResponseID,
-					"unkown response ID"))
+					"unknown response ID"))
 				continue
 			}
 			cb.f(c, msg)
