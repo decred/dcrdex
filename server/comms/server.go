@@ -18,7 +18,6 @@ import (
 
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/dcrdex/server/comms/msgjson"
-	"github.com/decred/dcrdex/server/comms/rpc"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/gorilla/websocket"
@@ -61,30 +60,15 @@ func NextID() uint64 {
 	return atomic.AddUint64(&idCounter, 1)
 }
 
-// Link is an interface for a communication channel with an API client. The
-// reference implemenatation of a Link-satisfying type is the wsLink, which
-// passes messages over a websocket connection.
-type Link interface {
-	// ID will return a unique ID by which this connection can be identified.
-	ID() uint64
-	// Send sends the msgjson.Message to the client.
-	Send(msg *msgjson.Message) error
-	// Request sends the Request-type msgjson.Message to the client and registers
-	// a handler for the response.
-	Request(msg *msgjson.Message, f func(Link, *msgjson.Message)) error
-	// Banish closes the link and quarantines the client.
-	Banish()
-}
-
 // rpcRoute describes a handler for a specific message route.
-type rpcRoute func(*RPCClient, *rpc.Message) *rpc.Error
+type rpcRoute func(Link, *msgjson.Message) *msgjson.Error
 
 // rpcRoutes maps message routes to the handlers.
 var rpcRoutes = make(map[string]rpcRoute)
 
 // Route registers a RPC handler for a specified route. The handler
 // map is global and has no mutex protection. All calls to Route
-// should be done before the RPCServer is started.
+// should be done before the Server is started.
 func Route(route string, handler rpcRoute) {
 	if route == "" {
 		panic("Route: route is empty string")
@@ -112,16 +96,16 @@ type RPCConfig struct {
 	AltDNSNames []string
 }
 
-// RPCServer is a low-level communications hub. It supports websocket clients
+// Server is a low-level communications hub. It supports websocket clients
 // and an HTTP API.
-type RPCServer struct {
+type Server struct {
 	// A WaitGroup for shutdown synchronization.
 	wg sync.WaitGroup
 	// One listener for each address specified at (RPCConfig).ListenAddrs.
 	listeners []net.Listener
-	// Protect the client map, which maps the (RPCClient).id to the client itself.
+	// Protect the client map, which maps the (link).id to the client itself.
 	clientMtx sync.RWMutex
-	clients   map[uint64]*RPCClient
+	clients   map[uint64]*wsLink
 	// A simple counter for generating unique client IDs. The counter is also
 	// protected by the clientMtx.
 	counter uint64
@@ -131,15 +115,20 @@ type RPCServer struct {
 	quarantine map[string]time.Time
 }
 
-// A constructor for an RPCServer. The RPCServer handles a map of clients, each
+// A constructor for an Server. The Server handles a map of clients, each
 // with at least 3 goroutines for communications. The server is TLS-only, and
 // will generate a key pair with a self-signed certificate if one is not
 // provided as part of the RPCConfig. The server also maintains a IP-based
 // quarantine to short-circuit to an error response for misbehaving clients, if
 // necessary.
-func NewRPCServer(cfg *RPCConfig) (*RPCServer, error) {
+func NewServer(cfg *RPCConfig) (*Server, error) {
 	// Find or create the key pair.
-	if !fileExists(cfg.RPCKey) && !fileExists(cfg.RPCCert) {
+	keyExists := fileExists(cfg.RPCKey)
+	certExists := fileExists(cfg.RPCCert)
+	if certExists == !keyExists {
+		return nil, fmt.Errorf("missing cert pair file")
+	}
+	if !keyExists && !certExists {
 		err := genCertPair(cfg.RPCCert, cfg.RPCKey, cfg.AltDNSNames)
 		if err != nil {
 			return nil, err
@@ -164,16 +153,14 @@ func NewRPCServer(cfg *RPCConfig) (*RPCServer, error) {
 	for _, addr := range ipv4ListenAddrs {
 		listener, err := tls.Listen("tcp4", addr, &tlsConfig)
 		if err != nil {
-			log.Warnf("Can't listen on %s: %v", addr, err)
-			continue
+			return nil, fmt.Errorf("Can't listen on %s: %v", addr, err)
 		}
 		listeners = append(listeners, listener)
 	}
 	for _, addr := range ipv6ListenAddrs {
 		listener, err := tls.Listen("tcp6", addr, &tlsConfig)
 		if err != nil {
-			log.Warnf("Can't listen on %s: %v", addr, err)
-			continue
+			return nil, fmt.Errorf("Can't listen on %s: %v", addr, err)
 		}
 		listeners = append(listeners, listener)
 	}
@@ -181,16 +168,16 @@ func NewRPCServer(cfg *RPCConfig) (*RPCServer, error) {
 		return nil, fmt.Errorf("RPCS: No valid listen address")
 	}
 
-	return &RPCServer{
+	return &Server{
 		listeners:  listeners,
-		clients:    make(map[uint64]*RPCClient),
+		clients:    make(map[uint64]*wsLink),
 		quarantine: make(map[string]time.Time),
 	}, nil
 }
 
 // Start starts the server. Start should be called only after all routes are
 // registered.
-func (s *RPCServer) Start() {
+func (s *Server) Start() {
 	log.Trace("Starting RPC server")
 
 	// Create an HTTP router, putting a couple of useful middlewares in place.
@@ -218,7 +205,7 @@ func (s *RPCServer) Start() {
 			return
 		}
 		if s.clientCount() >= rpcMaxClients {
-			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			http.Error(w, "server at maximum capacity", http.StatusServiceUnavailable)
 			return
 		}
 		ws, err := upgrader.Upgrade(w, r, nil)
@@ -231,7 +218,7 @@ func (s *RPCServer) Start() {
 			return
 		}
 		pongHandler := func(string) error {
-			return ws.SetReadDeadline(time.Now().Add(pongWait))
+			return ws.SetReadDeadline(time.Now().Add(pingPeriod + pongWait))
 		}
 		err = pongHandler("")
 		if err != nil {
@@ -258,7 +245,7 @@ func (s *RPCServer) Start() {
 }
 
 // Stop closes all of the listeners and waits for the WaitGroup.
-func (s *RPCServer) Stop() {
+func (s *Server) Stop() {
 	log.Warnf("RPC server shutting down")
 	for _, listener := range s.listeners {
 		err := listener.Close()
@@ -271,7 +258,7 @@ func (s *RPCServer) Stop() {
 }
 
 // Check if the IP address is quarantined.
-func (s *RPCServer) isQuarantined(ip string) bool {
+func (s *Server) isQuarantined(ip string) bool {
 	s.banMtx.RLock()
 	banTime, banned := s.quarantine[ip]
 	s.banMtx.RUnlock()
@@ -288,7 +275,7 @@ func (s *RPCServer) isQuarantined(ip string) bool {
 }
 
 // Quarantine the specified IP address.
-func (s *RPCServer) banish(ip string) {
+func (s *Server) banish(ip string) {
 	s.banMtx.Lock()
 	defer s.banMtx.Unlock()
 	s.quarantine[ip] = time.Now().Add(banishTime)
@@ -297,13 +284,13 @@ func (s *RPCServer) banish(ip string) {
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *RPCServer) websocketHandler(conn wsConnection, ip string) {
+func (s *Server) websocketHandler(conn wsConnection, ip string) {
 	log.Tracef("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
-	client := newRPCClient(ip, conn)
+	client := newWSLink(ip, conn)
 	s.addClient(client)
 	client.start()
 	client.waitForShutdown()
@@ -316,7 +303,7 @@ func (s *RPCServer) websocketHandler(conn wsConnection, ip string) {
 }
 
 // addClient assigns the client an ID and adds it to the map.
-func (s *RPCServer) addClient(client *RPCClient) {
+func (s *Server) addClient(client *wsLink) {
 	s.clientMtx.Lock()
 	defer s.clientMtx.Unlock()
 	client.id = s.counter
@@ -325,14 +312,14 @@ func (s *RPCServer) addClient(client *RPCClient) {
 }
 
 // Remove the client from the map.
-func (s *RPCServer) removeClient(id uint64) {
+func (s *Server) removeClient(id uint64) {
 	s.clientMtx.Lock()
 	defer s.clientMtx.Unlock()
 	delete(s.clients, id)
 }
 
 // Get the number of active clients.
-func (s *RPCServer) clientCount() uint64 {
+func (s *Server) clientCount() uint64 {
 	s.clientMtx.RLock()
 	defer s.clientMtx.RUnlock()
 	return uint64(len(s.clients))
@@ -340,12 +327,8 @@ func (s *RPCServer) clientCount() uint64 {
 
 // filesExists reports whether the named file or directory exists.
 func fileExists(name string) bool {
-	if _, err := os.Stat(name); err != nil {
-		if os.IsNotExist(err) {
-			return false
-		}
-	}
-	return true
+	_, err := os.Stat(name)
+	return !os.IsNotExist(err)
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -379,8 +362,8 @@ func genCertPair(certFile, keyFile string, altDNSNames []string) error {
 // detects addresses which apply to "all interfaces" and adds the address to
 // both slices.
 func parseListeners(addrs []string) ([]string, []string, bool, error) {
-	ipv4ListenAddrs := make([]string, 0, len(addrs)*2)
-	ipv6ListenAddrs := make([]string, 0, len(addrs)*2)
+	ipv4ListenAddrs := make([]string, 0, len(addrs))
+	ipv6ListenAddrs := make([]string, 0, len(addrs))
 	haveWildcard := false
 
 	for _, addr := range addrs {

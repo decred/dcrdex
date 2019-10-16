@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/decred/dcrdex/server/comms/rpc"
+	"github.com/decred/dcrdex/server/comms/msgjson"
 	"github.com/gorilla/websocket"
 )
 
@@ -26,10 +26,25 @@ func (e Error) Error() string {
 }
 
 // ErrClientDisconnected will be returned if Send or Request is called on a
-// disconnected RPCClient.
+// disconnected link.
 const ErrClientDisconnected = Error("client disconnected")
 
-// wsConnection represents a communications pathway to the client. In practice,
+// Link is an interface for a communication channel with an API client. The
+// reference implemenatation of a Link-satisfying type is the wsLink, which
+// passes messages over a websocket connection.
+type Link interface {
+	// ID will return a unique ID by which this connection can be identified.
+	ID() uint64
+	// Send sends the msgjson.Message to the client.
+	Send(msg *msgjson.Message) error
+	// Request sends the Request-type msgjson.Message to the client and registers
+	// a handler for the response.
+	Request(msg *msgjson.Message, f func(Link, *msgjson.Message)) error
+	// Banish closes the link and quarantines the client.
+	Banish()
+}
+
+// wsConnection represents a websocket connection to the client. In practice,
 // it is satisfied by *websocket.Conn. For testing, a stub can be used.
 type wsConnection interface {
 	ReadMessage() (int, []byte, error)
@@ -41,11 +56,11 @@ type wsConnection interface {
 // to wait for the response.
 type responseHandler struct {
 	expiration time.Time
-	f          func(*RPCClient, *rpc.Message)
+	f          func(Link, *msgjson.Message)
 }
 
-// RPCClient is the local, per-connection representation of a DEX client.
-type RPCClient struct {
+// wsLink is the local, per-connection representation of a DEX client.
+type wsLink struct {
 	// The id is the unique identifier assigned to this client.
 	id uint64
 	// ip is the client's IP address.
@@ -67,7 +82,7 @@ type RPCClient struct {
 	// messages are sent in the correct order, and satisfies the thread-safety
 	// requirements of the (*websocket.Conn).WriteMessage.
 	outChan chan []byte
-	// For DEX-originating requests, a the response handler is mapped to the
+	// For DEX-originating requests, the response handler is mapped to the
 	// resquest ID.
 	reqMtx       sync.Mutex
 	respHandlers map[uint64]*responseHandler
@@ -76,9 +91,9 @@ type RPCClient struct {
 	ban bool
 }
 
-// newRPCClient is a constructor for a new RPCClient.
-func newRPCClient(addr string, conn wsConnection) *RPCClient {
-	return &RPCClient{
+// newWSLink is a constructor for a new wsLink.
+func newWSLink(addr string, conn wsConnection) *wsLink {
+	return &wsLink{
 		on:           true,
 		ip:           addr,
 		conn:         conn,
@@ -91,7 +106,7 @@ func newRPCClient(addr string, conn wsConnection) *RPCClient {
 // Send sends the passed Message to the websocket client. If the client's
 // channel if blocking (outBufferSize pending messages), the client is
 // disconnected.
-func (c *RPCClient) Send(msg *rpc.Message) error {
+func (c *wsLink) Send(msg *msgjson.Message) error {
 	if c.off() {
 		return ErrClientDisconnected
 	}
@@ -101,40 +116,42 @@ func (c *RPCClient) Send(msg *rpc.Message) error {
 	}
 	select {
 	case c.outChan <- b:
-	default:
-		log.Warnf("RPCClient outgoing message channel is blocking. disconnecting")
-		c.disconnect()
+	case <-c.quit:
+		return ErrClientDisconnected
 	}
 	return nil
 }
 
 // Request sends the message to the client and tracks the response handler.
-func (c *RPCClient) Request(msg *rpc.Message, f func(conn *RPCClient, msg *rpc.Message)) error {
+func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Message)) error {
 	c.logReq(msg.ID, f)
 	return c.Send(msg)
 }
 
-// banish sets the ban flag and closes the client.
-func (c *RPCClient) Banish() {
+// Banish sets the ban flag and closes the client.
+func (c *wsLink) Banish() {
 	c.ban = true
 	c.disconnect()
 }
 
-// sendError sends the rpc.Error to the client.
-func (c *RPCClient) sendError(id uint64, rpcErr *rpc.Error) {
-	msg, err := rpc.NewResponse(id, nil, rpcErr)
+func (c *wsLink) ID() uint64 {
+	return c.id
+}
+
+// sendError sends the msgjson.Error to the client.
+func (c *wsLink) sendError(id uint64, rpcErr *msgjson.Error) {
+	msg, err := msgjson.NewResponse(id, nil, rpcErr)
 	if err != nil {
 		log.Errorf("sendError: failed to create message: %v", err)
 	}
 	err = c.Send(msg)
 	if err != nil {
-		// Something is terribly wrong if rpc.Message is not marshalling.
 		log.Debug("sendError: failed to send message to %s: %v", c.ip, err)
 	}
 }
 
 // start begins processing input and output messages.
-func (c *RPCClient) start() {
+func (c *wsLink) start() {
 	log.Tracef("Starting websocket client %s", c.ip)
 
 	// Start processing input and output.
@@ -145,7 +162,7 @@ func (c *RPCClient) start() {
 
 // disconnect closes both the underlying websocket connection and the quit
 // channel.
-func (c *RPCClient) disconnect() {
+func (c *wsLink) disconnect() {
 	c.quitMtx.Lock()
 	defer c.quitMtx.Unlock()
 	if !c.on {
@@ -158,13 +175,13 @@ func (c *RPCClient) disconnect() {
 
 // waitForShutdown blocks until the websocket client goroutines are stopped
 // and the connection is closed.
-func (c *RPCClient) waitForShutdown() {
+func (c *wsLink) waitForShutdown() {
 	c.wg.Wait()
 }
 
 // inHandler handles all incoming messages for the websocket connection. It must
 // be run as a goroutine.
-func (c *RPCClient) inHandler() {
+func (c *wsLink) inHandler() {
 out:
 	for {
 		// Break out of the loop once the quit channel has been closed.
@@ -186,24 +203,24 @@ out:
 		// Attempt to unmarshal the request. Only requests that successfully decode
 		// will be accepted by the server, though failure to decode does not force
 		// a disconnect.
-		msg := new(rpc.Message)
-		err = json.Unmarshal(msgBytes, &msg)
+		msg := new(msgjson.Message)
+		err = json.Unmarshal(msgBytes, msg)
 		if err != nil {
-			c.sendError(0, rpc.NewError(rpc.RPCParseError,
+			c.sendError(1, msgjson.NewError(msgjson.RPCParseError,
 				"Failed to parse message: "+err.Error()))
 			continue
 		}
 		switch msg.Type {
-		case rpc.Request:
+		case msgjson.Request:
 			if msg.ID == 0 {
-				c.sendError(0, rpc.NewError(rpc.RPCParseError, "request id cannot be zero"))
+				c.sendError(1, msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero"))
 				break
 			}
 			// Look for a registered handler. Failure to find a handler results in an
 			// error response but not a disconnect.
 			handler, found := rpcRoutes[msg.Route]
 			if !found {
-				c.sendError(msg.ID, rpc.NewError(rpc.RPCUnknownRoute,
+				c.sendError(msg.ID, msgjson.NewError(msgjson.RPCUnknownRoute,
 					"unknown route "+msg.Route))
 				continue
 			}
@@ -213,14 +230,14 @@ out:
 				c.sendError(msg.ID, rpcError)
 				continue
 			}
-		case rpc.Response:
+		case msgjson.Response:
 			if msg.ID == 0 {
-				c.sendError(0, rpc.NewError(rpc.RPCParseError, "response id cannot be 0"))
+				c.sendError(1, msgjson.NewError(msgjson.RPCParseError, "response id cannot be 0"))
 				continue
 			}
 			cb := c.respHandler(msg.ID)
 			if cb == nil {
-				c.sendError(msg.ID, rpc.NewError(rpc.UnknownResponseID,
+				c.sendError(msg.ID, msgjson.NewError(msgjson.UnknownResponseID,
 					"unkown response ID"))
 				continue
 			}
@@ -235,7 +252,7 @@ out:
 // outHandler handles all outgoing messages for the websocket connection.
 // It uses a buffered channel to serialize output messages while allowing the
 // sender to continue running asynchronously.  It must be run as a goroutine.
-func (c *RPCClient) outHandler() {
+func (c *wsLink) outHandler() {
 	ticker := time.NewTicker(pingPeriod)
 	ping := []byte{}
 out:
@@ -252,6 +269,7 @@ out:
 		case <-ticker.C:
 			err := c.conn.WriteMessage(websocket.PingMessage, ping)
 			if err != nil {
+				c.disconnect()
 				// Don't really care what the error is, but log it at debug level.
 				log.Debugf("WriteMessage ping error: %v", err)
 				break out
@@ -275,12 +293,11 @@ cleanup:
 	log.Tracef("Websocket client output handler done for %s", c.ip)
 }
 
-// logReq stores the response handler in the respHandlers map. Requests to the
-// client are associated with a response handler.
-func (c *RPCClient) logReq(id uint64, respHandler func(*RPCClient, *rpc.Message)) {
+// cleanUpExpired cleans up the response handler map.
+func (c *wsLink) cleanUpExpired() {
 	c.reqMtx.Lock()
 	defer c.reqMtx.Unlock()
-	expired := make([]uint64, 0)
+	var expired []uint64
 	for id, cb := range c.respHandlers {
 		if time.Until(cb.expiration) < 0 {
 			expired = append(expired, id)
@@ -289,15 +306,24 @@ func (c *RPCClient) logReq(id uint64, respHandler func(*RPCClient, *rpc.Message)
 	for _, id := range expired {
 		delete(c.respHandlers, id)
 	}
+}
+
+// logReq stores the response handler in the respHandlers map. Requests to the
+// client are associated with a response handler.
+func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message)) {
+	c.reqMtx.Lock()
+	defer c.reqMtx.Unlock()
 	c.respHandlers[id] = &responseHandler{
 		expiration: time.Now().Add(time.Minute * 5),
 		f:          respHandler,
 	}
+	// clean up the response map.
+	go c.cleanUpExpired()
 }
 
-// respHandler gets the response handler for the provided request ID if it
-// exists, else nil.
-func (c *RPCClient) respHandler(id uint64) *responseHandler {
+// respHandler extracts the response handler for the provided request ID if it
+// exists, else nil. If the handler exists, it will be deleted from the map.
+func (c *wsLink) respHandler(id uint64) *responseHandler {
 	c.reqMtx.Lock()
 	defer c.reqMtx.Unlock()
 	cb, ok := c.respHandlers[id]
@@ -308,7 +334,7 @@ func (c *RPCClient) respHandler(id uint64) *responseHandler {
 }
 
 // off will return true if the client has disconnected.
-func (c *RPCClient) off() bool {
+func (c *wsLink) off() bool {
 	c.quitMtx.RLock()
 	defer c.quitMtx.RUnlock()
 	return !c.on
