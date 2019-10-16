@@ -19,15 +19,7 @@ import (
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/dcrdex/server/comms"
-<<<<<<< 814d2cb440f65424b355518ac237cbfb0c40a599
-<<<<<<< 8177c2c1b3ea3adc65626bdb38fb3a3a5b1f1f5c
 	"github.com/decred/dcrdex/server/comms/msgjson"
-=======
-	"github.com/decred/dcrdex/server/comms/rpc"
->>>>>>> use new response handler signature
-=======
-	"github.com/decred/dcrdex/server/comms/msgjson"
->>>>>>> rpc -> msgjson
 	"github.com/decred/dcrdex/server/matcher"
 	"github.com/decred/dcrdex/server/order"
 )
@@ -99,18 +91,8 @@ func tNewUser(lbl string) *tUser {
 }
 
 type TRequest struct {
-<<<<<<< 814d2cb440f65424b355518ac237cbfb0c40a599
-<<<<<<< 8177c2c1b3ea3adc65626bdb38fb3a3a5b1f1f5c
 	req      *msgjson.Message
 	respFunc func(comms.Link, *msgjson.Message)
-=======
-	req      *rpc.Message
-	respFunc func(*comms.RPCClient, *rpc.Message)
->>>>>>> use new response handler signature
-=======
-	req      *msgjson.Message
-	respFunc func(comms.Link, *msgjson.Message)
->>>>>>> rpc -> msgjson
 }
 
 // This stub satisfies AuthManager.
@@ -143,15 +125,7 @@ func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 	m.resps[user] = append(l, msg)
 }
 
-<<<<<<< 814d2cb440f65424b355518ac237cbfb0c40a599
-<<<<<<< 8177c2c1b3ea3adc65626bdb38fb3a3a5b1f1f5c
 func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
-=======
-func (m *TAuthManager) Request(user account.AccountID, msg *rpc.Message, f func(*comms.RPCClient, *rpc.Message)) {
->>>>>>> use new response handler signature
-=======
-func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
->>>>>>> rpc -> msgjson
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	tReq := &TRequest{
@@ -973,11 +947,7 @@ func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
 		auditVal:  auditVal * tValSpoofer,
 	}
 	contract := "01234567" + user.sigHex
-<<<<<<< 814d2cb440f65424b355518ac237cbfb0c40a599
 	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Init{
-=======
-	req, _ := msgjson.NewRequest(0, msgjson.InitRoute, &msgjson.Init{
->>>>>>> rpc -> msgjson
 		OrderID: dirtyEncode(oid),
 		MatchID: dirtyEncode(matchInfo.matchID),
 		// We control what the backend returns, so the txid doesn't matter right now.
@@ -1008,11 +978,7 @@ type tRedeem struct {
 
 func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {
 	txid := "987654" + user.sigHex
-<<<<<<< 814d2cb440f65424b355518ac237cbfb0c40a599
 	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Redeem{
-=======
-	req, _ := msgjson.NewRequest(0, msgjson.InitRoute, &msgjson.Redeem{
->>>>>>> rpc -> msgjson
 		OrderID: dirtyEncode(oid),
 		MatchID: dirtyEncode(matchInfo.matchID),
 		TxID:    txid,

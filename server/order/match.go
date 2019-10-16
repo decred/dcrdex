@@ -10,10 +10,10 @@ import (
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
-// OrderIDSize defines the length in bytes of an OrderID.
+// MatchIDSize defines the length in bytes of an MatchID.
 const MatchIDSize = blake256.Size
 
-// OrderID is the unique identifier for each order.
+// MatchID is the unique identifier for each match.
 type MatchID [MatchIDSize]byte
 
 var zeroID = MatchID{}
@@ -71,8 +71,8 @@ type Match struct {
 	cachedHash MatchID
 }
 
-// A constructor for a Match. This is the preferred method of making a Match,
-// since it pre-calculates and caches the match ID.
+// A constructor for a Match with Status = NewlyMatched. This is the preferred
+// method of making a Match, since it pre-calculates and caches the match ID.
 func newMatch(taker Order, maker *LimitOrder, qty, rate uint64) *Match {
 	m := &Match{
 		Taker:    taker,

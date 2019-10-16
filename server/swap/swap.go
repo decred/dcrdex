@@ -31,7 +31,7 @@ var (
 	recheckInterval = time.Second * 5
 	zeroTime        = time.Time{}
 	// txWaitExpiration is the longest the Swapper will wait for a chainWaiter.
-	// This could be thought of as the maximum allowabloe backend latency.
+	// This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = time.Minute
 )
 
@@ -590,8 +590,6 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 	} else {
 		actor.swapAsset = maker.QuoteAsset
 		counterParty.swapAsset = maker.BaseAsset
-		// DRAFT NOTE: BaseToQuote should be moved to a different module, probably
-		// the asset module.
 		checkVal = matcher.BaseToQuote(maker.Rate, match.Quantity)
 	}
 
@@ -632,8 +630,8 @@ func (s *Swapper) authUser(user account.AccountID, params msgjson.Signable) *msg
 
 // txWaitRules is a constructor for a waitSettings with a 1-minute timeout and
 // a standardized error message.
-// DRAFT NOTE: 1 minute is pretty arbitrary. Consider making this a DEX
-// variable, or smarter in some way.
+// NOTE: 1 minute is pretty arbitrary. Consider making this a DEX variable, or
+// smarter in some way.
 func txWaitRules(user account.AccountID, msg *msgjson.Message, txid string) *waitSettings {
 	return &waitSettings{
 		// must smarten up this expiration value before merge. Where should this
@@ -694,8 +692,8 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 		return
 	}
 	// Set the appropriate signature, based on the current step and actor.
-	// DRAFT NOTE: Using the matchMtx like this is not ideal. It might be better
-	// to have individual locks on the matchTrackers.
+	// NOTE: Using the matchMtx like this is not ideal. It might be better to have
+	// individual locks on the matchTrackers.
 	s.matchMtx.Lock()
 	defer s.matchMtx.Unlock()
 	if acker.isAudit {
@@ -725,8 +723,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if err != nil {
 		// If there is an error, don't give up yet, since it could be due to network
 		// latency. Check again on the next tick.
-		// DRAFT NOTE: Could get a little smarter here by using go 1.13 (Error).Is
-		// to check that the transaction was not found, and not some other less
+		// NOTE: Could get a little smarter here by using go 1.13 (Error).Is to
+		// check that the transaction was not found, and not some other less
 		// recoverable state. Should require minimal modification of backends.
 		return tryAgain
 	}
@@ -755,7 +753,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	actor.status.swapVout = params.Vout
 	actor.status.swapTime = time.Now()
 	stepInfo.match.Status = stepInfo.nextStep
-	// DRAFT NOTE: If UpdateMatch isn't non-blocking, this will need to be done
+	// NOTE: If UpdateMatch isn't non-blocking, this will need to be done
 	// differently.
 	s.storage.UpdateMatch(stepInfo.match.Match)
 	s.matchMtx.Unlock()
@@ -764,7 +762,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	s.authMgr.Sign(params)
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
 		MatchID: matchID.String(),
-		Sig:     params.Sig,
+		Sig:     params.Sig.String(),
 	})
 
 	// Prepare an 'audit' request for the counter-party.
@@ -835,7 +833,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	s.authMgr.Sign(params)
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
 		MatchID: matchID.String(),
-		Sig:     params.Sig,
+		Sig:     params.Sig.String(),
 	})
 
 	// Inform the counterparty.
@@ -884,7 +882,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 		return rpcErr
 	}
 
-	stepInfo, rpcErr := s.step(user, params.MatchID.Hex())
+	stepInfo, rpcErr := s.step(user, params.MatchID.String())
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -915,7 +913,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 		return rpcErr
 	}
 
-	stepInfo, rpcErr := s.step(user, params.MatchID.Hex())
+	stepInfo, rpcErr := s.step(user, params.MatchID.String())
 	if rpcErr != nil {
 		return rpcErr
 	}

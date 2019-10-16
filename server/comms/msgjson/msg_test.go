@@ -47,6 +47,36 @@ func TestMatch(t *testing.T) {
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
+
+	matchB, err := json.Marshal(match)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var matchBack Match
+	err = json.Unmarshal(matchB, &matchBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(matchBack.MatchID, match.MatchID) {
+		t.Fatal(matchBack.MatchID, match.MatchID)
+	}
+	if !bytes.Equal(matchBack.OrderID, match.OrderID) {
+		t.Fatal(matchBack.OrderID, match.OrderID)
+	}
+	if matchBack.Quantity != match.Quantity {
+		t.Fatal(matchBack.Quantity, match.Quantity)
+	}
+	if matchBack.Rate != match.Rate {
+		t.Fatal(matchBack.Rate, match.Rate)
+	}
+	if matchBack.Address != match.Address {
+		t.Fatal(matchBack.Address, match.Address)
+	}
+	if matchBack.Time != match.Time {
+		t.Fatal(matchBack.Time, match.Time)
+	}
 }
 
 func TestInit(t *testing.T) {
@@ -94,6 +124,36 @@ func TestInit(t *testing.T) {
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
+
+	initB, err := json.Marshal(init)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var initBack Init
+	err = json.Unmarshal(initB, &initBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(initBack.MatchID, init.MatchID) {
+		t.Fatal(initBack.MatchID, init.MatchID)
+	}
+	if !bytes.Equal(initBack.OrderID, init.OrderID) {
+		t.Fatal(initBack.OrderID, init.OrderID)
+	}
+	if initBack.TxID != init.TxID {
+		t.Fatal(initBack.TxID, init.TxID)
+	}
+	if initBack.Vout != init.Vout {
+		t.Fatal(initBack.Vout, init.Vout)
+	}
+	if initBack.Time != init.Time {
+		t.Fatal(initBack.Time, init.Time)
+	}
+	if !bytes.Equal(initBack.Contract, init.Contract) {
+		t.Fatal(initBack.Contract, init.Contract)
+	}
 }
 
 func TestAudit(t *testing.T) {
@@ -130,6 +190,30 @@ func TestAudit(t *testing.T) {
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
+
+	auditB, err := json.Marshal(audit)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var auditBack Audit
+	err = json.Unmarshal(auditB, &auditBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(auditBack.MatchID, audit.MatchID) {
+		t.Fatal(auditBack.MatchID, audit.MatchID)
+	}
+	if !bytes.Equal(auditBack.OrderID, audit.OrderID) {
+		t.Fatal(auditBack.OrderID, audit.OrderID)
+	}
+	if auditBack.Time != audit.Time {
+		t.Fatal(auditBack.Time, audit.Time)
+	}
+	if !bytes.Equal(auditBack.Contract, audit.Contract) {
+		t.Fatal(auditBack.Contract, audit.Contract)
+	}
 }
 
 func TestRevokeMatch(t *testing.T) {
@@ -158,6 +242,24 @@ func TestRevokeMatch(t *testing.T) {
 	}
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
+	}
+
+	revB, err := json.Marshal(revoke)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var revokeBack RevokeMatch
+	err = json.Unmarshal(revB, &revokeBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(revokeBack.MatchID, revoke.MatchID) {
+		t.Fatal(revokeBack.MatchID, revoke.MatchID)
+	}
+	if !bytes.Equal(revokeBack.OrderID, revoke.OrderID) {
+		t.Fatal(revokeBack.OrderID, revoke.OrderID)
 	}
 }
 
@@ -203,6 +305,33 @@ func TestRedeem(t *testing.T) {
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
+
+	redeemB, err := json.Marshal(redeem)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var redeemBack Redeem
+	err = json.Unmarshal(redeemB, &redeemBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(redeemBack.MatchID, redeem.MatchID) {
+		t.Fatal(redeemBack.MatchID, redeem.MatchID)
+	}
+	if !bytes.Equal(redeemBack.OrderID, redeem.OrderID) {
+		t.Fatal(redeemBack.OrderID, redeem.OrderID)
+	}
+	if redeemBack.TxID != redeem.TxID {
+		t.Fatal(redeemBack.TxID, redeem.TxID)
+	}
+	if redeemBack.Vout != redeem.Vout {
+		t.Fatal(redeemBack.Vout, redeem.Vout)
+	}
+	if redeemBack.Time != redeem.Time {
+		t.Fatal(redeemBack.Time, redeem.Time)
+	}
 }
 
 func TestSignable(t *testing.T) {
@@ -241,6 +370,9 @@ func TestBytes(t *testing.T) {
 	}
 
 	marshalled, err := json.Marshal(b)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
 	if string(marshalled) != js {
 		t.Fatalf("marshalled Bytes not correct. wanted %s, got %s", js, string(marshalled))
 	}
@@ -281,6 +413,11 @@ func TestRespReq(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for invalid json")
 	}
+	// Zero ID not valid.
+	_, err = NewResponse(0, 10, nil)
+	if err == nil {
+		t.Fatalf("no error for id = 0")
+	}
 	msg, err := NewResponse(5, 10, nil)
 	if err != nil {
 		t.Fatalf("NewResponse error: %v", err)
@@ -304,7 +441,7 @@ func TestRespReq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error making error response")
 	}
-	resp, err = msg.Response()
+	_, err = msg.Response()
 	if err != nil {
 		t.Fatalf("unexpected error getting error response payload: %v", err)
 	}
@@ -313,6 +450,14 @@ func TestRespReq(t *testing.T) {
 	_, err = NewRequest(5, "testroute", make(chan int))
 	if err == nil {
 		t.Fatalf("no error for invalid json type request payload")
+	}
+	_, err = NewRequest(0, "testroute", 10)
+	if err == nil {
+		t.Fatalf("no error id = 0 request")
+	}
+	_, err = NewRequest(5, "", 10)
+	if err == nil {
+		t.Fatalf("no error for empty string route request")
 	}
 	msg, err = NewRequest(5, "testroute", 10)
 	if err != nil {

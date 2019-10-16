@@ -108,7 +108,7 @@ type Asset struct {
 	RateStep uint64
 	FeeRate  uint64
 	SwapSize uint64
-	SwapConf uint64
-	FundConf uint64
+	SwapConf uint32
+	FundConf uint32
 	Scripts  []string // Not sure that we need this or not.
 }

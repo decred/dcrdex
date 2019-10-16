@@ -2,8 +2,7 @@
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
 // The specifications for the Serialize methods can be found at
-// https://github.com/buck54321/dcrdex/blob/p2sh-swap/spec/README.mediawiki#Match_negotiation
-// DRAFT NOTE: Update this link ASAP.
+// https://github.com/decred/dcrdex/blob/master/spec/README.mediawiki#Match_negotiation
 
 package msgjson
 
@@ -35,12 +34,31 @@ const (
 	AckCountError
 )
 
+// Routes are destinations for a "payload" of data. The type of data being
+// delivered, and what kind of action is expected from the receiving party, is
+// completely dependent on the route. The route designation is a string sent as
+// the "route" parameter of a JSON-encoded Message.
 const (
-	MatchRoute       = "match"
-	InitRoute        = "init"
-	AuditRoute       = "audit"
-	RedeemRoute      = "redeem"
-	RedemptionRoute  = "redemption"
+	// MatchRoute is the route of a DEX-originating request-type message notifying
+	// the client of a match and initiating swap negotiation.
+	MatchRoute = "match"
+	// InitRoute is the route of a client-originating request-type message
+	// notifying the DEX, and subsequently the match counter-party, of the details
+	// of a swap contract.
+	InitRoute = "init"
+	// AuditRoute is the route of a DEX-originating request-type message relaying
+	// swap contract details (from InitRoute) from one client to the other.
+	AuditRoute = "audit"
+	// RedeemRoute is the route of a client-originating request-type message
+	// notifying the DEX, and subsequently the match counter-party, of the details
+	// of a redemption transaction.
+	RedeemRoute = "redeem"
+	// RedemptionRoute is the route of a DEX-originating request-type message
+	// relaying redemption transaction (from RedeemRoute) details from one client
+	// to the other.
+	RedemptionRoute = "redemption"
+	// RevokeMatchRoute is a DEX-originating request-type message informing a
+	// client that a match has been revoked.
 	RevokeMatchRoute = "revoke_match"
 )
 
@@ -54,8 +72,8 @@ func BytesFromHex(s string) (Bytes, error) {
 	return Bytes(b), err
 }
 
-// Hex return the hex string encoding of the Bytes.
-func (b Bytes) Hex() string {
+// String return the hex encoding of the Bytes.
+func (b Bytes) String() string {
 	return hex.EncodeToString(b)
 }
 
@@ -65,7 +83,7 @@ func (b Bytes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hex.EncodeToString(b))
 }
 
-// UnmarshalJSON satisfies the json.Unmarshaller interface, and expects a UTF-8
+// UnmarshalJSON satisfies the json.Unmarshaler interface, and expects a UTF-8
 // encoding of a hex string.
 func (b *Bytes) UnmarshalJSON(encHex []byte) (err error) {
 	if len(encHex) < 2 {
@@ -82,23 +100,22 @@ type Signable interface {
 	SigBytes() []byte
 }
 
-// signable implements Signable, and should be embedded by any rpc type that
-// is serializable and needs to encode a Sig field.
+// signable partially implements Signable, and can be embedded by types intended
+// to satisfy Signable, which must themselves implement the Serialize method.
 type signable struct {
-	Sig string `json:"sig"`
+	Sig Bytes `json:"sig"`
 }
 
 // SetSig sets the Sig field.
 func (s *signable) SetSig(b []byte) {
-	s.Sig = hex.EncodeToString(b)
+	s.Sig = b
 }
 
 // SigBytes returns the signature as a []byte.
 func (s *signable) SigBytes() []byte {
 	// Assuming the Sig was set with SetSig, there is likely no way to error
 	// here. Ignoring error for now.
-	b, _ := hex.DecodeString(s.Sig)
-	return b
+	return s.Sig
 }
 
 // Acknowledgement is the 'result' field in a response to a request that
@@ -152,10 +169,10 @@ type Message struct {
 	// the message.
 	Route string `json:"route,omitempty"`
 	// ID is a unique number that is used to link a response to a request.
-	ID uint64 `json:"id",omitempty`
+	ID uint64 `json:"id,omitempty"`
 	// Payload is any data attached to the message. How Payload is decoded
 	// depends on the Route.
-	Payload json.RawMessage `json:"payload",omitempty`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // DecodeMessage decodes a *Message from JSON-formatted bytes.
@@ -170,6 +187,12 @@ func DecodeMessage(b []byte) (*Message, error) {
 
 // NewRequest is the constructor for a Request-type *Message.
 func NewRequest(id uint64, route string, payload interface{}) (*Message, error) {
+	if id == 0 {
+		return nil, fmt.Errorf("id = 0 not allowed for a request-type message")
+	}
+	if route == "" {
+		return nil, fmt.Errorf("empty string not allowed for route of request-type message")
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -184,6 +207,9 @@ func NewRequest(id uint64, route string, payload interface{}) (*Message, error) 
 
 // NewResponse encodes the result and creates a Response-type *Message.
 func NewResponse(id uint64, result interface{}, rpcErr *Error) (*Message, error) {
+	if id == 0 {
+		return nil, fmt.Errorf("id = 0 not allowed for response-type message")
+	}
 	encResult, err := json.Marshal(result)
 	if err != nil {
 		return nil, err
@@ -217,7 +243,7 @@ func (msg *Message) Response() (*ResponsePayload, error) {
 	return resp, nil
 }
 
-// MatchNotification is the params for a DEX-originating MatchRoute request.
+// Match is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	signable
 	OrderID  Bytes  `json:"orderid"`
@@ -233,8 +259,8 @@ var _ Signable = (*Match)(nil)
 // Serialize serializes the Match data.
 func (m *Match) Serialize() ([]byte, error) {
 	// Match serialization is orderid (32) + matchid (32) + quantity (8) + rate (8)
-	// + address (variable, guess 35). Sum = 115
-	s := make([]byte, 0, 91)
+	// + time (8) + address (variable, guess 35). Sum = 123
+	s := make([]byte, 0, 123)
 	s = append(s, m.OrderID...)
 	s = append(s, m.MatchID...)
 	s = append(s, uint64Bytes(m.Quantity)...)
@@ -259,9 +285,9 @@ var _ Signable = (*Init)(nil)
 
 // Serialize serializes the Init data.
 func (init *Init) Serialize() ([]byte, error) {
-	// Init serialization is orderid (32) + matchid (32) + txid (probably 64) +
+	// Init serialization is orderid (32) + matchid (32) + txid (probably 32) +
 	// vout (4) + timestamp (8) + contract (97 ish). Sum = 205
-	s := make([]byte, 0, 237)
+	s := make([]byte, 0, 205)
 
 	s = append(s, init.OrderID...)
 	s = append(s, init.MatchID...)
@@ -283,10 +309,10 @@ type Audit struct {
 
 var _ Signable = (*Audit)(nil)
 
-// Serialize serializes the AuditParams data.
+// Serialize serializes the Audit data.
 func (audit *Audit) Serialize() ([]byte, error) {
 	// Audit serialization is orderid (32) + matchid (32) + time (8) +
-	// contract (97 ish) = 145
+	// contract (97 ish) = 169
 	s := make([]byte, 0, 169)
 	s = append(s, audit.OrderID...)
 	s = append(s, audit.MatchID...)
@@ -298,8 +324,8 @@ func (audit *Audit) Serialize() ([]byte, error) {
 // RevokeMatch are the params for a DEX-originating RevokeMatchRoute request.
 type RevokeMatch struct {
 	signable
-	OrderID Bytes `json:""`
-	MatchID Bytes `json:""`
+	OrderID Bytes `json:"orderid"`
+	MatchID Bytes `json:"matchid"`
 }
 
 var _ Signable = (*RevokeMatch)(nil)
@@ -327,9 +353,9 @@ var _ Signable = (*Redeem)(nil)
 
 // Serialize serializes the RedeemParams data.
 func (redeem *Redeem) Serialize() ([]byte, error) {
-	// Init serialization is orderid (32) + matchid (32) + txid (probably 64) +
-	// vout (4) + timestamp (8) = 205
-	s := make([]byte, 0, 140)
+	// Init serialization is orderid (32) + matchid (32) + txid (32) + vout (4)
+	// + timestamp(8) = 108
+	s := make([]byte, 0, 108)
 	s = append(s, redeem.OrderID...)
 	s = append(s, redeem.MatchID...)
 	s = append(s, []byte(redeem.TxID)...)
