@@ -5,7 +5,7 @@
 // https://github.com/buck54321/dcrdex/blob/p2sh-swap/spec/README.mediawiki#Match_negotiation
 // DRAFT NOTE: Update this link ASAP.
 
-package rpc
+package msgjson
 
 import (
 	"encoding/binary"
@@ -220,8 +220,8 @@ func (msg *Message) Response() (*ResponsePayload, error) {
 // MatchNotification is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	signable
-	OrderID  Bytes `json:"orderid"`
-	MatchID  Bytes `json:"matchid"`
+	OrderID  Bytes  `json:"orderid"`
+	MatchID  Bytes  `json:"matchid"`
 	Quantity uint64 `json:"quantity"`
 	Rate     uint64 `json:"rate"`
 	Address  string `json:"address"`
@@ -247,12 +247,12 @@ func (m *Match) Serialize() ([]byte, error) {
 // Init is the payload for a client-originating InitRoute request.
 type Init struct {
 	signable
-	OrderID  Bytes `json:"orderid"`
-	MatchID  Bytes `json:"matchid"`
+	OrderID  Bytes  `json:"orderid"`
+	MatchID  Bytes  `json:"matchid"`
 	TxID     string `json:"txid"`
 	Vout     uint32 `json:"vout"`
 	Time     uint64 `json:"timestamp"`
-	Contract Bytes `json:"contract"`
+	Contract Bytes  `json:"contract"`
 }
 
 var _ Signable = (*Init)(nil)
@@ -275,10 +275,10 @@ func (init *Init) Serialize() ([]byte, error) {
 // Audit is the payload for a DEX-originating AuditRoute request.
 type Audit struct {
 	signable
-	OrderID  Bytes `json:"orderid"`
-	MatchID  Bytes `json:"matchid"`
+	OrderID  Bytes  `json:"orderid"`
+	MatchID  Bytes  `json:"matchid"`
 	Time     uint64 `json:"timestamp"`
-	Contract Bytes `json:"contract"`
+	Contract Bytes  `json:"contract"`
 }
 
 var _ Signable = (*Audit)(nil)
@@ -316,8 +316,8 @@ func (rev *RevokeMatch) Serialize() ([]byte, error) {
 // Redeem are the params for a client-originating RedeemRoute request.
 type Redeem struct {
 	signable
-	OrderID Bytes `json:"orderid"`
-	MatchID Bytes `json:"matchid"`
+	OrderID Bytes  `json:"orderid"`
+	MatchID Bytes  `json:"matchid"`
 	TxID    string `json:"txid"`
 	Vout    uint32 `json:"vout"`
 	Time    uint64 `json:"timestamp"`
