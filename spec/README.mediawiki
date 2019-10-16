@@ -459,7 +459,7 @@ pre-published for further validation.
 |-
 | pubkey    || string || hex-encoded public account key
 |-
-| timestamp || int    || UTC timestamp
+| timestamp || int    || UNIX timestamp
 |-
 | sig       || string || hex-encoded signature of serialized registration. serialization described below
 |}
@@ -469,7 +469,7 @@ pre-published for further validation.
 {|
 ! field     !! size (bytes) !! description
 |-
-| pubkey    || 32 || the user's public account key
+| pubkey    || 33 || the user's public account key
 |-
 | timestamp || 8  || the client's UNIX timestamp
 |}
@@ -495,15 +495,15 @@ pre-published for further validation.
 {|
 ! field      !! size (bytes) !! description
 |-
-| DEX pubkey || 32 || the server's public key
+| DEX pubkey || 33 || the server's public key
 |-
-| client pubkey || 32 || the client's public account  key
+| client pubkey || 33 || the client's public account  key
 |-
 | timestamp  || 8  || the server's UNIX timestamp
 |-
 | fee        || 8  || registration fee (atoms)
 |-
-| address    || varies || ASCII-encoded fee address
+| address    || varies || UTF-8 encoded fee address
 |}
 
 ===Step 2: Fee Notification===
@@ -817,7 +817,7 @@ The DEX will verify the UTXO sum before accepting the order.
 ====UTXO Preparation====
 
 All backing UTXOs must have a minimum number of confirmations. The exact number,
-<code>swapconf</code>, is an [#Exchange_Variables}|asset variable]] set by the
+<code>swapconf</code>, is an [[#Exchange_Variables|asset variable]] set by the
 DEX operator.
 
 With the exception of market buy orders, which are detailed below, for an order
@@ -861,7 +861,7 @@ UTXO's pubkey script (or corresponding redeem script).
 {|
 ! field   !! size (bytes) !! description
 |-
-| tx hash || 32 || the transaction hash
+| tx hash || asset-dependent || the transaction hash
 |-
 | vout    || 4  || the UTXO's transaction output index
 |}
@@ -920,7 +920,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | accountid   || string || client's account ID
 |-
-| timestamp   || int    || UTC timestamp generated at the time of order submission of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.
+| timestamp   || int    || UNIX timestamp generated at the time of order submission of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.
 |-
 | tradepair   || string || market. trading pair. e.g. DCR/BTC
 |-
@@ -992,7 +992,7 @@ the epoch match cycle) is left unfilled.
 |-
 | accountid || string || client's account ID
 |-
-| timestamp || int    || UTC timestamp. order broadcast time
+| timestamp || int    || UNIX timestamp. order broadcast time
 |-
 | tradepair || string || market. trading pair. e.g. DCR/BTC
 |-
@@ -1093,7 +1093,7 @@ This is by design and discourages certain types of spoofing.
 |-
 | accountid || string || client's account ID
 |-
-| timestamp || int    || UTC timestamp. order broadcast time
+| timestamp || int    || UNIX timestamp. order broadcast time
 |-
 | tradepair || string || market. trading pair. e.g. DCR/BTC
 |-
@@ -1122,45 +1122,52 @@ This is by design and discourages certain types of spoofing.
 | orderid    || 16 || the order ID
 |}
 
-===Match notifications===
+===Match negotiation===
+
+Swap negotiation details will be relayed through the DEX with a series of
+notifications or progress reports.
+Both the DEX and the clients will need to serialize and sign the notification
+data. The originator includes their signature with the JSON-RPC request
+<code>params</code>, while the recipient will return an
+'''acknowledgement object''', or a list of acknowledgement objects, as the
+<code>result</code> of their response.
+
+'''Acknowledgement object'''
+
+{|
+! field     !! type   !! description
+|-
+| matchid   ||  string  || the match ID
+|-
+| sig       ||  string || hex-encoded signature of the notification data.
+|}
 
 If the client's order has one or more matches at the end of a match cycle, the
-DEX will send a list of '''Match objects'''.
+DEX will send a list of '''match objects'''. The maker is the first to act, so
+after sending their acknowledgement, they should broadcast their initialization
+transaction and inform the server with an <code>init</code> notification
+(described after).
 
 '''JSON-RPC method:''' <code>match</code>, '''originator:''' DEX
+
+'''Match object'''
 
 {|
 ! field     !! type   !! description
 |-
 | orderid   || string || order ID
 |-
-| matchid   || int    || the match ID to use for progress notifications
+| matchid   || string    || the match ID to use for progress notifications
 |-
 | quantity  || int    || the matched amount, in atoms of the base asset
 |-
 | rate      || int    || the rate that the order matched at (as quote asset per unit base asset, atoms)
 |-
-| address   || string || the client's receiving address
+| timestamp || int    || server's UNIX timestamp
 |-
-| timestamp || int    || UTC timestamp. order broadcast time
+| address   || string || the counterparty's receiving address
 |-
-| sig       || string || server hex-encoded signature of the serialized notification data. serialization described below
-|}
-
-The client will be responsible for serializing the notification and checking
-the signature. In turn, the client should themselves sign the notification data
-and return an acknowledgement to the DEX.
-
-'''Client Acknowledgement'''
-
-The client will return a list of signed match acknowledgements.
-
-{|
-! field     !! type   !! description
-|-
-| matchid   ||  int  || the match ID
-|-
-| sig       ||  string || client hex-encoded signature of the serialized notification data.
+| sig       || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
 |}
 
 '''Match notification serialization'''
@@ -1170,69 +1177,178 @@ The client will return a list of signed match acknowledgements.
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |-
 | quantity   || 8  || the matched amount, in atoms of the base asset
 |-
 | rate       || 8  || the rate that the order matched at
 |-
-| address    || varies || ASCII encoded receiving address for the match
+| timestamp  || 8  || server's UNIX timestamp
+|-
+| address    || varies || UTF-8 encoded receiving address for the match
 |}
 
-===Progress Notifications===
+The client will respond with a list of signed match acknowledgements.
 
-After the client broadcasts both their initialization and redemption
-transactions, they are expected to report the transaction details to the server
-for verification and relay to the counterparty.
+After a client broadcasts their initialization transaction, they are
+expected to report the transaction details to the server for verification and
+relay to the matching party.
 
-'''JSON-RPC method:''' <code>progress</code>, '''originator:''' client
+'''JSON-RPC method:''' <code>init</code>, '''originator:''' client
 
 {|
 ! field      !! type   !! description
 |-
-| swap stage || string || one of "init" or "redeem"
+| orderid    || string || the order ID
 |-
-| matchid    || int    || the matchid, retrieved from the [[#Match_notifications|match notification]]
+| matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
 |-
 | txid       || string || the hex-encoded transaction ID
 |-
 | vout       || int    || the output index
 |-
-| timestamp  || int    || UTC timestamp. order broadcast time
+| timestamp  || int    || client's UNIX timestamp
 |-
-| sig        || string || client signature of the serialized progress notification. serialization described below
+| contract   || string || hex-encoded swap redeem script
+|-
+| sig        || string || client signature of the serialized notification. serialization described below
 |}
 
-'''DEX Acknowledgement'''
-
-{|
-! field      !! type   !! description
-|-
-| matchid    ||  int  || the match ID
-|-
-| swap stage || string || one of "init" or "redeem"
-|-
-| sig        ||  string || client hex-encoded signature of the serialized progress notification. serialization described below
-|}
-
-
-'''Progress notification serialization'''
+'''Init notification serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
 |-
-| orderid    || 16 || the order ID
+| orderid    || 32 || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |-
-| swap stage || 1  || 0 for initialization transaction, 1 for redemption
-|-
-| tx hash    || 32  || the transaction hash
+| tx hash    || asset-dependent  || the transaction hash
 |-
 | vout       || 4 || the output index
 |-
-| timestamp || 8  || the client's UNIX timestamp
+| timestamp  || 8  || the client's UNIX timestamp
+|-
+| contract   || asset-dependent || swap redeem script
 |}
+
+The DEX will respond with an acknowledgement.
+
+The DEX will send each client a notification when the counterparty has broadcast
+their initialization transaction.
+When the taker receives the <code>audit</code> notification, they will audit the
+contract and broadcast their own initialization.
+When the maker receives the <code>audit</code> notification, they will audit and
+contract and issue their redemption.
+
+'''JSON-RPC method:''' <code>audit</code>, '''originator:''' DEX
+
+{|
+! field     !! type   !! description
+|-
+| orderid   || string || order ID
+|-
+| matchid   || string || the match ID to use for progress notifications
+|-
+| timestamp || int  || server's UNIX timestamp
+|-
+| contract  || string || hex-encoded swap redeem script
+|-
+| sig       || string || DEX's signature of the serialized notification. serialization described below
+|}
+
+'''Audit notification serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the ID assigned to this match
+|-
+| timestamp  || 8  || server's UNIX timestamp
+|-
+| contract   || asset-dependent || swap redeem script
+|}
+
+The client responds with an acknowledgement.
+
+When a client has redeemed their contract, they will notify the server.
+
+'''JSON-RPC method:''' <code>redeem</code>, '''originator:''' client
+
+{|
+! field      !! type   !! description
+|-
+| orderid    || string || the order ID
+|-
+| matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
+|-
+| txid       || string || the hex-encoded transaction ID
+|-
+| vout       || int    || the output index
+|-
+| timestamp  || int    || client's UNIX timestamp
+|-
+| sig        || string || client signature of the serialized notification. serialization described below
+|}
+
+'''Redeem notification serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the ID assigned to this match
+|-
+| tx hash    || asset-dependent  || the transaction hash
+|-
+| vout       || 4 || the output index
+|-
+| timestamp  || 8  || the client's UNIX timestamp
+|}
+
+The DEX responds with an acknowledgement.
+
+The DEX informs the taker when the maker has redeemed. The taker will get the
+key from the maker's redemption and broadcast their own redemption.
+
+'''JSON-RPC method:''' <code>redemption</code>, '''originator:''' DEX
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the ID assigned to this match
+|-
+| tx hash    || asset-dependent  || the transaction hash
+|-
+| vout       || 4 || the output index
+|-
+| timestamp  || int    || server's UNIX timestamp
+|-
+| sig        || string || DEX's signature of the serialized notification. serialization described below
+|}
+
+'''Redemption notification serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the ID assigned to this match
+|-
+| tx hash    || asset-dependent  || the transaction hash
+|-
+| vout       || 4 || the output index
+|-
+| timestamp  || 8  || server's UNIX timestamp
+|}
+
+The client will respond with an acknowledgement.
 
 ===Match revocation===
 
@@ -1248,9 +1364,9 @@ The revoked match quantity is not added back to the order book in any form.
 |-
 | orderid  || string || order ID
 |-
-| matchid  ||  int  || the match ID
+| matchid  ||  string  || the match ID
 |-
-| sig      || string || server hex-encoded signature of serialized revocation. serialization described below
+| sig      || string || DEX's hex-encoded signature of serialized revocation. serialization described below
 |}
 
 '''Revocation serialization'''
@@ -1260,8 +1376,10 @@ The revoked match quantity is not added back to the order book in any form.
 |-
 | orderid    || 32  || the order ID
 |-
-| matchid    || 8  || the ID assigned to this match
+| matchid    || 32  || the ID assigned to this match
 |}
+
+The client will respond with an acknowledgement.
 
 ==Trade Suspension==
 
@@ -1298,7 +1416,7 @@ does not reconnect before the next [[#Session_Authentication|startepoch]].
 | epoch      || int    || the epoch in which the suspension will start
 |-
 | persist    || bool   || whether standing limit order's will persist through the suspension
- |}
+|}
 
 ==Atomic Settlement==
 
@@ -1366,25 +1484,25 @@ within a specified amount of time.
 
 Before Alice can '''prepare her initialization transaction''', she must generate
 a key known only to herself.
-From the key, Alice generates a “lock” and constructs an output script
+From the key, Alice generates a “lock” and constructs an swap contract
 such that if someone can provide both Alice’s key and the pubkey for Bob’s
 specified address, they can spend the output.
 In practice, the key is simply a random 32-byte number, and the lock is its
 hash.
 
-In addition, Alice constructs the output script with a second, alternative lock
+In addition, Alice constructs the contract with a second, alternative lock
 that allows her to spend the output herself, but only if the output remains
 unspent for a specified amount of time. Alice sets her timelock to 48 hours.
 
 '''Alice broadcasts her initialization transaction''' to the Decred network.
-She informs the DEX of the transaction details, which the DEX relays to Bob.
-Alice '''does not''' reveal the key that she created.
+She informs the DEX of the transaction details and sends the lock, which the
+DEX relays to Bob. Alice '''does not''' reveal the key that she created.
 
 <img src="images/alice-init.png">
 
-'''A5: Bob inspects Alice's transaction and retrieves the lock.
+'''A5: Bob inspects Alice's transaction.
 After the requisite number of confirmations, Bob prepares his initialization
-transaction'''. He uses Alice's lock here as well, and creates an output script
+transaction'''. He uses Alice's lock here as well, and creates a swap contract
 satisfied by Alice’s key and the pubkey for Alice’s address.
 
 Bob sets his timelock to 24 hours.
