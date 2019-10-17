@@ -72,11 +72,10 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 	// Each order type has different rules about status and lot size.
 	switch ot := ord.(type) {
 	case *order.MarketOrder:
-		// Market orders OK statuses: pending, matched, swapping, failed,
-		// executed, canceled (NOT booked or canceled).
+		// Market orders OK statuses: epoch and executed (NOT booked or
+		// canceled).
 		switch status {
-		case types.OrderStatusPending, types.OrderStatusMatched, types.OrderStatusSwapping,
-			types.OrderStatusFailed, types.OrderStatusExecuted:
+		case types.OrderStatusEpoch, types.OrderStatusExecuted: // Canceled OK if swap fails?
 		default:
 			return false
 		}
@@ -91,11 +90,10 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 		}
 
 	case *order.CancelOrder:
-		// Cancel order OK statuses: pending, matched, failed, executed
-		// (NOT booked, swapping, or canceled).
+		// Cancel order OK statuses: epoch, and executed (NOT booked or
+		// canceled).
 		switch status {
-		case types.OrderStatusPending, types.OrderStatusMatched, types.OrderStatusFailed,
-			types.OrderStatusExecuted:
+		case types.OrderStatusEpoch, types.OrderStatusExecuted:
 		default:
 			return false
 		}
@@ -110,11 +108,10 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 		}
 
 	case *order.LimitOrder:
-		// Limit order OK statuses: pending, matched, swapping, booked, failed,
-		// executed, canceled (same as market plus booked).
+		// Limit order OK statuses: epoch, booked, executed, and canceled (same
+		// as market plus booked).
 		switch status {
-		case types.OrderStatusPending, types.OrderStatusMatched, types.OrderStatusSwapping,
-			types.OrderStatusFailed, types.OrderStatusExecuted:
+		case types.OrderStatusEpoch, types.OrderStatusExecuted:
 		case types.OrderStatusBooked, types.OrderStatusCanceled:
 			// Immediate time in force limit orders may not be canceled, and may
 			// not be in the order book.

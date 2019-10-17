@@ -75,57 +75,68 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize uint64) (*MarketInfo, 
 	}, nil
 }
 
-// OrderStatus indicates how an order is presently being processed, or the final
-// state of the order if processing is completed.
+// OrderStatus indicates the state of an order.
 type OrderStatus uint16
 
+// There are two general classes of orders: ACTIVE and ARCHIVED. Orders with one
+// of the ACTIVE order statuses that follow are likely to be updated.
 const (
 	// OrderStatusUnknown is a sentinel value to be used when the status of an
 	// order cannot be determined.
 	OrderStatusUnknown OrderStatus = iota
 
-	// There are two general classes of orders: ACTIVE and ARCHIVED. Orders with
-	// one of the ACTIVE order statuses that follow are likely to be updated.
+	// OrderStatusEpoch is for orders that have been received and validated, but
+	// not processed yet by the epoch order matcher.
+	OrderStatusEpoch
 
-	// OrderStatusPending is for active orders that have been received and
-	// validated, but not processed by the epoch order matcher.
-	OrderStatusPending
-	// OrderStatusMatched is for active orders that have been matched with other
-	// orders, but for which an atomic swap has not been initiated.
-	OrderStatusMatched
-	// OrderStatusSwapping is for active orders that have begun the atomic swap
-	// process. Specifically, this is when the first swap initialization
-	// transaction has been broadcast by a client.
-	OrderStatusSwapping
-	// OrderStatusBooked is for active unmatched orders that have been put on
-	// the order book (standing time in force).
+	// OrderStatusBooked is for orders that have been put on the book
+	// ("standing" time in force). This includes partially filled orders. As
+	// such, when an order with this "booked" status is matched with another
+	// order, it should have its filled amount updated, and its status should
+	// only be changed to OrderStatusExecuted if the remaining quantity becomes
+	// less than the lot size, or perhaps to OrderStatusFailed if the swap has
+	// failed and DEX policy prevents it from re-entering the order book.
 	OrderStatusBooked
 
-	// Below are the ARCHIVED order statuses. These orders are unlikely to be
-	// updated. As such, they are suitable for archival.
-
-	// OrderStatusFailed is for archived unmatched orders that do not go on the
-	// order book, either because the time in force is immediate or the order is
-	// not a limit order.
-	OrderStatusFailed
-	// OrderStatusCanceled is for archived orders that have been explicitly
-	// canceled by a cancel order or administrative action such as conduct
-	// enforcement.
-	OrderStatusCanceled
-	// OrderStatus Executed is for archived orders that have been successfully
-	// processed.
+	// OrderStatusExecuted is for orders that have been successfully processed
+	// and taken off the book. An order may reach this state if it is (1)
+	// matched one or more times and removed from the books, or (2) unmatched in
+	// epoch processing and with a time-in-force that forbids the order from
+	// entering the books. Orders in the first category (matched and
+	// subsequently removed from the book) include: a matched cancel order, a
+	// completely filled limit or market order, or a partially filled market buy
+	// order. Market and limit orders in the second category necessarily will
+	// necessarily be completely unfilled. Partially filled orders that are
+	// still on the order book remain in OrderStatusBooked.
+	//
+	// QUESTION: How do we distinguish a CancelOrder that was not matched from
+	// one that was matched? With a limit or market order that was not matched,
+	// the filled amount shows this, but cancel orders have no meaningful filled
+	// amount. Having to search a matches table is undesirable, especially since
+	// it is a worst-case query returning zero rows.
 	OrderStatusExecuted
+
+	// OrderStatusCanceled is for orders that were on the book, but matched with
+	// a cancel order. This does not mean the order is completely unfilled.
+	OrderStatusCanceled
+
+	// QUESTION: What status is for standing limit orders that were matched, but
+	// have failed to swap, and do not re-enter the book? Are they forcibly
+	// canceled (OrderStatusCanceled) or are they considered executed
+	// (OrderStatusExecuted)? Does this also depend on DEX policy regarding the
+	// circumstances of swap failure?
+
+	// The above QUESTIONs suggest that a failed status may be needed, although
+	// perhaps just internal to the DB backend's implementation, to quickly
+	// identify orders that failed to match or failed in the swap stage.
 )
 
 var orderStatusNames = map[OrderStatus]string{
 	OrderStatusUnknown:  "unknown",
-	OrderStatusPending:  "pending",
-	OrderStatusMatched:  "matched",
-	OrderStatusSwapping: "swapping",
+	OrderStatusEpoch:    "epoch",
 	OrderStatusBooked:   "booked",
-	OrderStatusFailed:   "failed",
-	OrderStatusCanceled: "canceled",
 	OrderStatusExecuted: "executed",
+	OrderStatusCanceled: "canceled",
 }
 
 // String implements Stringer.
@@ -141,11 +152,9 @@ func (s OrderStatus) String() string {
 // live/active (true), or if the order is in a archived state (false).
 func (s OrderStatus) Active() bool {
 	switch s {
-	case OrderStatusPending, OrderStatusMatched, OrderStatusSwapping,
-		OrderStatusBooked:
+	case OrderStatusEpoch, OrderStatusBooked:
 		return true
-	case OrderStatusFailed, OrderStatusCanceled, OrderStatusExecuted,
-		OrderStatusUnknown:
+	case OrderStatusExecuted, OrderStatusCanceled, OrderStatusUnknown:
 		return false
 	default:
 		panic("unknown order status!") // programmer error
