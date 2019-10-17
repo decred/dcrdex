@@ -87,7 +87,7 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, ty
 			return nil, types.OrderStatusUnknown, err // includes ErrUnknownOrder
 		}
 		co.BaseAsset, co.QuoteAsset = base, quote
-		return co, status, err
+		return co, pgToMarketStatus(status), err
 		// no other order types to try presently
 	}
 	if err != nil {
@@ -101,13 +101,118 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, ty
 	// MarketOrder if necessary.
 	switch lo.OrderType {
 	case order.MarketOrderType:
-		return &lo.MarketOrder, status, nil
+		return &lo.MarketOrder, pgToMarketStatus(status), nil
 	case order.LimitOrderType:
-		return lo, status, nil
+		return lo, pgToMarketStatus(status), nil
 	}
 
 	return nil, types.OrderStatusUnknown,
 		fmt.Errorf("retrieved unsupported order type %d (%s)", lo.OrderType, lo.OrderType)
+}
+
+type pgOrderStatus uint16
+
+const (
+	orderStatusUnknown pgOrderStatus = iota
+	orderStatusEpoch
+	orderStatusBooked
+	orderStatusExecuted
+	orderStatusFailed // failed helps distinguish matched from unmatched executed cancel orders
+	orderStatusCanceled
+)
+
+func marketToPgStatus(status types.OrderStatus) pgOrderStatus {
+	switch status {
+	case types.OrderStatusEpoch:
+		return orderStatusEpoch
+	case types.OrderStatusBooked:
+		return orderStatusBooked
+	case types.OrderStatusExecuted:
+		return orderStatusExecuted
+	case types.OrderStatusCanceled:
+		return orderStatusCanceled
+	}
+	return orderStatusUnknown
+}
+
+func pgToMarketStatus(status pgOrderStatus) types.OrderStatus {
+	switch status {
+	case orderStatusEpoch:
+		return types.OrderStatusEpoch
+	case orderStatusBooked:
+		return types.OrderStatusBooked
+	case orderStatusExecuted, orderStatusFailed: // failed is executed as far as the market is concerned
+		return types.OrderStatusExecuted
+	case orderStatusCanceled:
+		return types.OrderStatusCanceled
+	}
+	return types.OrderStatusUnknown
+}
+
+func (status pgOrderStatus) String() string {
+	switch status {
+	case orderStatusFailed:
+		return "failed"
+	default:
+		return pgToMarketStatus(status).String()
+	}
+}
+
+func (status pgOrderStatus) active() bool {
+	switch status {
+	case orderStatusEpoch, orderStatusBooked:
+		return true
+	case orderStatusCanceled, orderStatusExecuted, orderStatusFailed, orderStatusUnknown:
+		return false
+	default:
+		panic("unknown order status!") // programmer error
+	}
+}
+
+// NewEpochOrder stores the given order with epoch status.
+func (a *Archiver) NewEpochOrder(ord order.Order) error {
+	return a.storeOrder(ord, orderStatusEpoch)
+}
+
+func (a *Archiver) insertOrUpdate(ord order.Order, status pgOrderStatus) error {
+	_, _, _, err := a.orderStatus(ord)
+	switch err {
+	case nil:
+		return a.updateOrderStatus(ord, status)
+	case ErrUnknownOrder:
+		return a.storeOrder(ord, status)
+	}
+	return err
+}
+
+// BookOrder updates or inserts the given LimitOrder with booked status.
+func (a *Archiver) BookOrder(lo *order.LimitOrder) error {
+	return a.insertOrUpdate(lo, orderStatusBooked)
+}
+
+// ExecuteOrder updates or inserts the given Order with executed status.
+func (a *Archiver) ExecuteOrder(ord order.Order) error {
+	return a.insertOrUpdate(ord, orderStatusExecuted)
+}
+
+// CancelOrder updates LimitOrder with canceled status. If the order does not
+// exit in the Archiver, CancelOrder returns ErrUnknownOrder. To store a new
+// limit order with canceled status, use StoreOrder.
+func (a *Archiver) CancelOrder(lo *order.LimitOrder) error {
+	return a.updateOrderStatus(lo, orderStatusCanceled)
+}
+
+// FailCancelOrder updates or inserts the given CancelOrder with failed status.
+// To update a CancelOrder with executed status, use ExecuteOrder.
+func (a *Archiver) FailCancelOrder(co *order.CancelOrder) error {
+	return a.updateOrderStatus(co, orderStatusFailed)
+}
+
+func validateOrder(ord order.Order, status pgOrderStatus, mkt *types.MarketInfo) bool {
+	if status == orderStatusFailed && ord.Type() != order.CancelOrderType {
+		return false
+	}
+	return db.ValidateOrder(ord, pgToMarketStatus(status), mkt)
 }
 
 // StoreOrder stores an order with the provided status. The market is determined
@@ -116,6 +221,10 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, ty
 // only sensible orders reach persistent storage. Updating orders should be done
 // via one of the update functions such as UpdateOrderStatus.
 func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
+	return a.storeOrder(ord, marketToPgStatus(status))
+}
+
+func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
 	marketSchema, err := types.MarketName(ord.Base(), ord.Quote())
 	if err != nil {
 		return err
@@ -126,7 +235,7 @@ func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
 			marketSchema, ord.UID())
 	}
 
-	if !db.ValidateOrder(ord, status, mkt) {
+	if !validateOrder(ord, status, mkt) {
 		return fmt.Errorf("invalid order %v for status %v and market %v",
 			ord.UID(), status, mkt.Name)
 	}
@@ -134,7 +243,7 @@ func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
 	// If enabled, search all tables for the order to ensure it is not already
 	// stored somewhere.
 	if a.checkedStores {
-		var foundStatus types.OrderStatus
+		var foundStatus pgOrderStatus
 		switch ord.Type() {
 		case order.MarketOrderType, order.LimitOrderType:
 			foundStatus, _, _, err = orderStatus(a.db, ord.ID(), a.dbName, marketSchema)
@@ -146,7 +255,7 @@ func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
 		case ErrUnknownOrder: // good
 		case nil: // found, bad
 			return fmt.Errorf("attempted to store a %s order while it exists "+
-				"in another table as %s", status, foundStatus)
+				"in another table as %s", pgToMarketStatus(status), pgToMarketStatus(foundStatus))
 		default: // err != nil, bad
 			return fmt.Errorf("findOrder failed: %v", err)
 		}
@@ -155,19 +264,19 @@ func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
 	var N int64
 	switch ot := ord.(type) {
 	case *order.CancelOrder:
-		tableName := fullCancelOrderTableName(a.dbName, marketSchema, status.Active())
+		tableName := fullCancelOrderTableName(a.dbName, marketSchema, status.active())
 		N, err = storeCancelOrder(a.db, tableName, ot, status)
 		if err != nil {
 			return fmt.Errorf("storeLimitOrder failed: %v", err)
 		}
 	case *order.MarketOrder:
-		tableName := fullOrderTableName(a.dbName, marketSchema, status.Active())
+		tableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 		N, err = storeMarketOrder(a.db, tableName, ot, status)
 		if err != nil {
 			return fmt.Errorf("storeLimitOrder failed: %v", err)
 		}
 	case *order.LimitOrder:
-		tableName := fullOrderTableName(a.dbName, marketSchema, status.Active())
+		tableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 		N, err = storeLimitOrder(a.db, tableName, ot, status)
 		if err != nil {
 			return fmt.Errorf("storeLimitOrder failed: %v", err)
@@ -189,15 +298,20 @@ func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
 // OrderStatus. If the order is not found, the error value is ErrUnknownOrder,
 // and the type is market/types.OrderStatusUnknown.
 func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (types.OrderStatus, order.OrderType, int64, error) {
+	pgStatus, orderType, filled, err := a.orderStatusByID(oid, base, quote)
+	return pgToMarketStatus(pgStatus), orderType, filled, err
+}
+
+func (a *Archiver) orderStatusByID(oid order.OrderID, base, quote uint32) (pgOrderStatus, order.OrderType, int64, error) {
 	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
-		return types.OrderStatusUnknown, order.UnknownOrderType, -1, err
+		return orderStatusUnknown, order.UnknownOrderType, -1, err
 	}
 	status, orderType, filled, err := orderStatus(a.db, oid, a.dbName, marketSchema)
 	if err == ErrUnknownOrder {
 		status, err = cancelOrderStatus(a.db, oid, a.dbName, marketSchema)
 		if err != nil {
-			return types.OrderStatusUnknown, order.UnknownOrderType, -1, err // includes ErrUnknownOrder
+			return orderStatusUnknown, order.UnknownOrderType, -1, err // includes ErrUnknownOrder
 		}
 		filled = -1
 		orderType = order.CancelOrderType
@@ -211,6 +325,10 @@ func (a *Archiver) OrderStatus(ord order.Order) (types.OrderStatus, order.OrderT
 	return a.OrderStatusByID(ord.ID(), ord.Base(), ord.Quote())
 }
 
+func (a *Archiver) orderStatus(ord order.Order) (pgOrderStatus, order.OrderType, int64, error) {
+	return a.orderStatusByID(ord.ID(), ord.Base(), ord.Quote())
+}
+
 // UpdateOrderStatusByID updates the status and filled amount of the order with
 // the given OrderID in the market specified by a base and quote asset. For
 // cancel orders, the filled amount is ignored. OrderStatusByID is used to
@@ -218,16 +336,20 @@ func (a *Archiver) OrderStatus(ord order.Order) (types.OrderStatus, order.OrderT
 // ErrUnknownOrder, and the type is market/types.OrderStatusUnknown. See also
 // UpdateOrderStatus.
 func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status types.OrderStatus, filled int64) error {
+	return a.updateOrderStatusByID(oid, base, quote, marketToPgStatus(status), filled)
+}
+
+func (a *Archiver) updateOrderStatusByID(oid order.OrderID, base, quote uint32, status pgOrderStatus, filled int64) error {
 	marketSchema, err := types.MarketName(base, quote)
 	if err != nil {
 		return err
 	}
 
-	initStatus, orderType, initFilled, err := a.OrderStatusByID(oid, base, quote)
+	initStatus, orderType, initFilled, err := a.orderStatusByID(oid, base, quote)
 	if err != nil {
 		return err
 	}
-	if initStatus == types.OrderStatusUnknown {
+	if initStatus == orderStatusUnknown {
 		return ErrUnknownOrder
 	}
 	if initStatus == status && filled == initFilled {
@@ -238,9 +360,9 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 		filled = initFilled
 	}
 
-	tableChange := status.Active() != initStatus.Active()
+	tableChange := status.active() != initStatus.active()
 
-	if initStatus.Archived() {
+	if !initStatus.active() {
 		if tableChange {
 			log.Warnf("Moving an order from an archived to active status: "+
 				"Order %s (%s -> %s)", oid, initStatus, status)
@@ -252,9 +374,9 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 
 	switch orderType {
 	case order.LimitOrderType, order.MarketOrderType:
-		srcTableName := fullOrderTableName(a.dbName, marketSchema, initStatus.Active())
+		srcTableName := fullOrderTableName(a.dbName, marketSchema, initStatus.active())
 		if tableChange {
-			dstTableName := fullOrderTableName(a.dbName, marketSchema, status.Active())
+			dstTableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 			return a.moveOrder(oid, srcTableName, dstTableName, status, filled)
 		}
 
@@ -262,9 +384,9 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 		return updateOrderStatusAndFilledAmt(a.db, srcTableName, oid, status, uint64(filled))
 
 	case order.CancelOrderType:
-		srcTableName := fullCancelOrderTableName(a.dbName, marketSchema, initStatus.Active())
+		srcTableName := fullCancelOrderTableName(a.dbName, marketSchema, initStatus.active())
 		if tableChange {
-			dstTableName := fullCancelOrderTableName(a.dbName, marketSchema, status.Active())
+			dstTableName := fullCancelOrderTableName(a.dbName, marketSchema, status.active())
 			return a.moveCancelOrder(oid, srcTableName, dstTableName, status)
 		}
 
@@ -280,13 +402,18 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 // OrderStatusByID is used to locate the existing order. See also
 // UpdateOrderStatusByID.
 func (a *Archiver) UpdateOrderStatus(ord order.Order, status types.OrderStatus) error {
-	filled := int64(ord.FilledAmt())
-	return a.UpdateOrderStatusByID(ord.ID(), ord.Base(), ord.Quote(), status, filled)
+	return a.updateOrderStatus(ord, marketToPgStatus(status))
 }
 
-func (a *Archiver) moveOrder(oid order.OrderID, srcTableName, dstTableName string, status types.OrderStatus, filled int64) error {
+func (a *Archiver) updateOrderStatus(ord order.Order, status pgOrderStatus) error {
+	filled := int64(ord.FilledAmt())
+	return a.updateOrderStatusByID(ord.ID(), ord.Base(), ord.Quote(), status, filled)
+}
+
+func (a *Archiver) moveOrder(oid order.OrderID, srcTableName, dstTableName string, status pgOrderStatus, filled int64) error {
 	// Move the order, updating status and filled amount.
-	moved, err := moveOrder(a.db, srcTableName, dstTableName, oid, status, uint64(filled))
+	moved, err := moveOrder(a.db, srcTableName, dstTableName, oid,
+		status, uint64(filled))
 	if err != nil {
 		return err
 	}
@@ -296,9 +423,10 @@ func (a *Archiver) moveOrder(oid order.OrderID, srcTableName, dstTableName strin
 	return nil
 }
 
-func (a *Archiver) moveCancelOrder(oid order.OrderID, srcTableName, dstTableName string, status types.OrderStatus) error {
+func (a *Archiver) moveCancelOrder(oid order.OrderID, srcTableName, dstTableName string, status pgOrderStatus) error {
 	// Move the order, updating status and filled amount.
-	moved, err := moveCancelOrder(a.db, srcTableName, dstTableName, oid, status)
+	moved, err := moveCancelOrder(a.db, srcTableName, dstTableName, oid,
+		status)
 	if err != nil {
 		return err
 	}
@@ -317,12 +445,12 @@ func (a *Archiver) moveCancelOrder(oid order.OrderID, srcTableName, dstTableName
 // UpdateOrderStatusByID or UpdateOrderStatus.
 func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, filled int64) error {
 	// Locate the order.
-	status, orderType, initFilled, err := a.OrderStatusByID(oid, base, quote)
+	status, orderType, initFilled, err := a.orderStatusByID(oid, base, quote)
 	//status, orderType, initFilled, err := orderStatus(a.db, oid, a.dbName, marketSchema) // only checks market and limit orders
 	if err != nil {
 		return err
 	}
-	if status == types.OrderStatusUnknown {
+	if status == orderStatusUnknown {
 		return ErrUnknownOrder
 	}
 
@@ -340,7 +468,7 @@ func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, 
 	if err != nil {
 		return err // should be caught already by a.OrderStatusByID
 	}
-	tableName := fullOrderTableName(a.dbName, marketSchema, status.Active())
+	tableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 	err = updateOrderFilledAmt(a.db, tableName, oid, uint64(filled))
 	return err
 }
@@ -367,17 +495,25 @@ func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, 
 		return nil, nil, err
 	}
 
-	return userOrders(ctx, a.db, a.dbName, marketSchema, aid)
+	orders, pgStatuses, err := userOrders(ctx, a.db, a.dbName, marketSchema, aid)
+	if err != nil {
+		return nil, nil, err
+	}
+	statuses := make([]types.OrderStatus, len(pgStatuses))
+	for i := range pgStatuses {
+		statuses[i] = pgToMarketStatus(pgStatuses[i])
+	}
+	return orders, statuses, err
 }
 
 // BEGIN regular order functions
 
-func orderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (types.OrderStatus, order.OrderType, int64, error) {
+func orderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (pgOrderStatus, order.OrderType, int64, error) {
 	// Search active orders first.
 	fullTable := fullOrderTableName(dbName, marketSchema, true)
 	found, status, orderType, filled, err := findOrder(dbe, oid, fullTable)
 	if err != nil {
-		return types.OrderStatusUnknown, order.UnknownOrderType, -1, err
+		return orderStatusUnknown, order.UnknownOrderType, -1, err
 	}
 	if found {
 		return status, orderType, filled, nil
@@ -387,33 +523,33 @@ func orderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (t
 	fullTable = fullOrderTableName(dbName, marketSchema, false)
 	found, status, orderType, filled, err = findOrder(dbe, oid, fullTable)
 	if err != nil {
-		return types.OrderStatusUnknown, order.UnknownOrderType, -1, err
+		return orderStatusUnknown, order.UnknownOrderType, -1, err
 	}
 	if found {
 		return status, orderType, filled, nil
 	}
 
 	// Order not found in either orders table.
-	return types.OrderStatusUnknown, order.UnknownOrderType, -1, ErrUnknownOrder
+	return orderStatusUnknown, order.UnknownOrderType, -1, ErrUnknownOrder
 }
 
-func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, types.OrderStatus, order.OrderType, int64, error) {
+func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderStatus, order.OrderType, int64, error) {
 	stmt := fmt.Sprintf(internal.OrderStatus, fullTable)
-	var status uint16
+	var status pgOrderStatus
 	var filled int64
 	var orderType order.OrderType
 	err := dbe.QueryRow(stmt, oid).Scan(&orderType, &status, &filled)
 	switch err {
 	case sql.ErrNoRows:
-		return false, types.OrderStatusUnknown, order.UnknownOrderType, -1, nil
+		return false, orderStatusUnknown, order.UnknownOrderType, -1, nil
 	case nil:
-		return true, types.OrderStatus(status), orderType, filled, nil
+		return true, status, orderType, filled, nil
 	default:
-		return false, types.OrderStatusUnknown, order.UnknownOrderType, -1, err
+		return false, orderStatusUnknown, order.UnknownOrderType, -1, err
 	}
 }
 
-func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (*order.LimitOrder, types.OrderStatus, error) {
+func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (*order.LimitOrder, pgOrderStatus, error) {
 	// Search active orders first.
 	fullTable := fullOrderTableName(dbName, marketSchema, false)
 	lo, status, err := loadLimitOrderFromTable(dbe, fullTable, oid)
@@ -425,7 +561,7 @@ func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID)
 		return lo, status, nil
 	default:
 		// query error
-		return lo, types.OrderStatusUnknown, err
+		return lo, orderStatusUnknown, err
 	}
 
 	// Search archived orders.
@@ -433,35 +569,35 @@ func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID)
 	lo, status, err = loadLimitOrderFromTable(dbe, fullTable, oid)
 	switch err {
 	case sql.ErrNoRows:
-		return nil, types.OrderStatusUnknown, ErrUnknownOrder
+		return nil, orderStatusUnknown, ErrUnknownOrder
 	case nil:
 		// found
 		return lo, status, nil
 	default:
 		// query error
-		return nil, types.OrderStatusUnknown, err
+		return nil, orderStatusUnknown, err
 	}
 }
 
-func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.LimitOrder, types.OrderStatus, error) {
+func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.LimitOrder, pgOrderStatus, error) {
 	stmt := fmt.Sprintf(internal.SelectOrder, fullTable)
 
 	var lo order.LimitOrder
 	var id order.OrderID
 	var utxos pq.StringArray
-	var status types.OrderStatus
+	var status pgOrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&id, &lo.OrderType, &lo.Sell,
 		&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, &utxos,
 		&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
 	if err != nil {
-		return nil, types.OrderStatusUnknown, err
+		return nil, orderStatusUnknown, err
 	}
 
 	lo.UTXOs = make([]order.UTXO, 0, len(utxos))
 	for i := range utxos {
 		utxo, err := newUtxoFromOutpoint(utxos[i])
 		if err != nil {
-			return nil, types.OrderStatusUnknown, fmt.Errorf("bad utxo %s: %v", utxos[i], err)
+			return nil, orderStatusUnknown, fmt.Errorf("bad utxo %s: %v", utxos[i], err)
 		}
 		lo.UTXOs = append(lo.UTXOs, utxo)
 	}
@@ -469,7 +605,7 @@ func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (
 	return &lo, status, nil
 }
 
-func userOrders(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, aid account.AccountID) ([]order.Order, []types.OrderStatus, error) {
+func userOrders(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, aid account.AccountID) ([]order.Order, []pgOrderStatus, error) {
 	// Active orders.
 	fullTable := fullOrderTableName(dbName, marketSchema, false)
 	orders, statuses, err := userOrdersFromTable(ctx, dbe, fullTable, aid)
@@ -489,7 +625,7 @@ func userOrders(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, a
 	return orders, statuses, nil
 }
 
-func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid account.AccountID) ([]order.Order, []types.OrderStatus, error) {
+func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid account.AccountID) ([]order.Order, []pgOrderStatus, error) {
 	stmt := fmt.Sprintf(internal.SelectUserOrders, fullTable)
 	rows, err := dbe.QueryContext(ctx, stmt, aid)
 	if err != nil {
@@ -497,13 +633,13 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 	}
 
 	var orders []order.Order
-	var statuses []types.OrderStatus
+	var statuses []pgOrderStatus
 
 	for rows.Next() {
 		var lo order.LimitOrder
 		var id order.OrderID
 		var utxos pq.StringArray
-		var status types.OrderStatus
+		var status pgOrderStatus
 		err = rows.Scan(&id, &lo.OrderType, &lo.Sell,
 			&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, &utxos,
 			&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
@@ -537,7 +673,7 @@ func marshalUTXOs(UTXOs []order.UTXO) (utxos []string) {
 	return
 }
 
-func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, status types.OrderStatus) (int64, error) {
+func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, status pgOrderStatus) (int64, error) {
 	utxos := marshalUTXOs(lo.UTXOs)
 	stmt := fmt.Sprintf(internal.InsertOrder, tableName)
 	return sqlExec(dbe, stmt, lo.ID(), lo.Type(), lo.Sell, lo.AccountID,
@@ -545,7 +681,7 @@ func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, st
 		lo.Quantity, lo.Rate, lo.Force, status, lo.Filled)
 }
 
-func storeMarketOrder(dbe sqlExecutor, tableName string, mo *order.MarketOrder, status types.OrderStatus) (int64, error) {
+func storeMarketOrder(dbe sqlExecutor, tableName string, mo *order.MarketOrder, status pgOrderStatus) (int64, error) {
 	utxos := marshalUTXOs(mo.UTXOs)
 	stmt := fmt.Sprintf(internal.InsertOrder, tableName)
 	return sqlExec(dbe, stmt, mo.ID(), mo.Type(), mo.Sell, mo.AccountID,
@@ -553,7 +689,7 @@ func storeMarketOrder(dbe sqlExecutor, tableName string, mo *order.MarketOrder, 
 		mo.Quantity, 0, order.ImmediateTiF, status, mo.Filled)
 }
 
-func updateOrderStatus(dbe sqlExecutor, tableName string, oid order.OrderID, status types.OrderStatus) error {
+func updateOrderStatus(dbe sqlExecutor, tableName string, oid order.OrderID, status pgOrderStatus) error {
 	stmt := fmt.Sprintf(internal.UpdateOrderStatus, tableName)
 	_, err := dbe.Exec(stmt, status, oid)
 	return err
@@ -565,13 +701,13 @@ func updateOrderFilledAmt(dbe sqlExecutor, tableName string, oid order.OrderID, 
 	return err
 }
 
-func updateOrderStatusAndFilledAmt(dbe sqlExecutor, tableName string, oid order.OrderID, status types.OrderStatus, filled uint64) error {
+func updateOrderStatusAndFilledAmt(dbe sqlExecutor, tableName string, oid order.OrderID, status pgOrderStatus, filled uint64) error {
 	stmt := fmt.Sprintf(internal.UpdateOrderStatusAndFilledAmt, tableName)
 	_, err := dbe.Exec(stmt, status, filled, oid)
 	return err
 }
 
-func moveOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.OrderID, newStatus types.OrderStatus, newFilled uint64) (bool, error) {
+func moveOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.OrderID, newStatus pgOrderStatus, newFilled uint64) (bool, error) {
 	stmt := fmt.Sprintf(internal.MoveOrder, oldTableName, newStatus, newFilled, newTableName)
 	moved, err := sqlExec(dbe, stmt, oid)
 	if err != nil {
@@ -587,22 +723,22 @@ func moveOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.Ord
 
 // BEGIN cancel order functions
 
-func storeCancelOrder(dbe sqlExecutor, tableName string, co *order.CancelOrder, status types.OrderStatus) (int64, error) {
+func storeCancelOrder(dbe sqlExecutor, tableName string, co *order.CancelOrder, status pgOrderStatus) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertCancelOrder, tableName)
 	return sqlExec(dbe, stmt, co.ID(), co.AccountID, co.ClientTime,
 		co.ServerTime, co.TargetOrderID, status)
 }
 
-func loadCancelOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.CancelOrder, types.OrderStatus, error) {
+func loadCancelOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.CancelOrder, pgOrderStatus, error) {
 	stmt := fmt.Sprintf(internal.SelectOrder, fullTable)
 
 	var co order.CancelOrder
 	var id order.OrderID
-	var status types.OrderStatus
+	var status pgOrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&id, &co.AccountID, &co.ClientTime,
 		&co.ServerTime, &co.TargetOrderID, &status)
 	if err != nil {
-		return nil, types.OrderStatusUnknown, err
+		return nil, orderStatusUnknown, err
 	}
 
 	co.OrderType = order.CancelOrderType
@@ -610,7 +746,7 @@ func loadCancelOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) 
 	return &co, status, nil
 }
 
-func loadCancelOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (*order.CancelOrder, types.OrderStatus, error) {
+func loadCancelOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (*order.CancelOrder, pgOrderStatus, error) {
 	// Search active orders first.
 	fullTable := fullCancelOrderTableName(dbName, marketSchema, true)
 	co, status, err := loadCancelOrderFromTable(dbe, fullTable, oid)
@@ -622,7 +758,7 @@ func loadCancelOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID
 		return co, status, nil
 	default:
 		// query error
-		return co, types.OrderStatusUnknown, err
+		return co, orderStatusUnknown, err
 	}
 
 	// Search archived orders.
@@ -630,21 +766,21 @@ func loadCancelOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID
 	co, status, err = loadCancelOrderFromTable(dbe, fullTable, oid)
 	switch err {
 	case sql.ErrNoRows:
-		return nil, types.OrderStatusUnknown, ErrUnknownOrder
+		return nil, orderStatusUnknown, ErrUnknownOrder
 	case nil:
 		// found
 		return co, status, nil
 	default:
 		// query error
-		return nil, types.OrderStatusUnknown, err
+		return nil, orderStatusUnknown, err
 	}
 }
 
-func cancelOrderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (types.OrderStatus, error) {
+func cancelOrderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (pgOrderStatus, error) {
 	// Search active orders first.
 	found, status, err := findCancelOrder(dbe, oid, dbName, marketSchema, true)
 	if err != nil {
-		return types.OrderStatusUnknown, err
+		return orderStatusUnknown, err
 	}
 	if found {
 		return status, nil
@@ -653,36 +789,36 @@ func cancelOrderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema stri
 	// Search archived orders.
 	found, status, err = findCancelOrder(dbe, oid, dbName, marketSchema, false)
 	if err != nil {
-		return types.OrderStatusUnknown, err
+		return orderStatusUnknown, err
 	}
 	if found {
 		return status, nil
 	}
 
 	// Order not found in either orders table.
-	return types.OrderStatusUnknown, ErrUnknownOrder
+	return orderStatusUnknown, ErrUnknownOrder
 }
 
-func findCancelOrder(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string, active bool) (bool, types.OrderStatus, error) {
+func findCancelOrder(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string, active bool) (bool, pgOrderStatus, error) {
 	fullTable := fullCancelOrderTableName(dbName, marketSchema, active)
 	stmt := fmt.Sprintf(internal.CancelOrderStatus, fullTable)
-	var status uint16
+	var status pgOrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&status)
 	switch err {
 	case sql.ErrNoRows:
-		return false, types.OrderStatusUnknown, nil
+		return false, orderStatusUnknown, nil
 	case nil:
-		return true, types.OrderStatus(status), nil
+		return true, status, nil
 	default:
-		return false, types.OrderStatusUnknown, err
+		return false, orderStatusUnknown, err
 	}
 }
 
-func updateCancelOrderStatus(dbe sqlExecutor, tableName string, oid order.OrderID, status types.OrderStatus) error {
+func updateCancelOrderStatus(dbe sqlExecutor, tableName string, oid order.OrderID, status pgOrderStatus) error {
 	return updateOrderStatus(dbe, tableName, oid, status)
 }
 
-func moveCancelOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.OrderID, newStatus types.OrderStatus) (bool, error) {
+func moveCancelOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.OrderID, newStatus pgOrderStatus) (bool, error) {
 	stmt := fmt.Sprintf(internal.MoveCancelOrder, oldTableName, newStatus, newTableName)
 	moved, err := sqlExec(dbe, stmt, oid)
 	if err != nil {

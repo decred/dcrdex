@@ -94,8 +94,9 @@ const (
 	// such, when an order with this "booked" status is matched with another
 	// order, it should have its filled amount updated, and its status should
 	// only be changed to OrderStatusExecuted if the remaining quantity becomes
-	// less than the lot size, or perhaps to OrderStatusFailed if the swap has
-	// failed and DEX policy prevents it from re-entering the order book.
+	// less than the lot size, or perhaps to OrderStatusCanceled if the swap has
+	// failed and DEX conduct policy requires that it be removed from the order
+	// book.
 	OrderStatusBooked
 
 	// OrderStatusExecuted is for orders that have been successfully processed
@@ -146,23 +147,4 @@ func (s OrderStatus) String() string {
 		panic("unknown order status!") // programmer error
 	}
 	return name
-}
-
-// Active indicates if the OrderStatus reflects an order that is still
-// live/active (true), or if the order is in a archived state (false).
-func (s OrderStatus) Active() bool {
-	switch s {
-	case OrderStatusEpoch, OrderStatusBooked:
-		return true
-	case OrderStatusExecuted, OrderStatusCanceled, OrderStatusUnknown:
-		return false
-	default:
-		panic("unknown order status!") // programmer error
-	}
-}
-
-// Archived indicates if the OrderStatus reflects an order that has reached a
-// archived state and is no longer being processed. Archived == !Active.
-func (s OrderStatus) Archived() bool {
-	return !s.Active()
 }

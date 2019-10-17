@@ -47,10 +47,10 @@ func TestStoreOrder(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "ok limit matched (active)",
+			name: "ok limit epoch (active)",
 			args: args{
 				ord:    newLimitOrder(false, 5000000, 1, order.StandingTiF, 0),
-				status: types.OrderStatusMatched,
+				status: types.OrderStatusEpoch,
 			},
 			wantErr: false,
 		},
@@ -71,18 +71,10 @@ func TestStoreOrder(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "ok limit failed (archived)",
-			args: args{
-				ord:    newLimitOrder(false, 4900000, 1, order.StandingTiF, 0),
-				status: types.OrderStatusFailed,
-			},
-			wantErr: false,
-		},
-		{
 			name: "limit duplicate",
 			args: args{
-				ord:    newLimitOrder(false, 4900000, 1, order.StandingTiF, 0),
-				status: types.OrderStatusFailed,
+				ord:    newLimitOrder(false, 4800000, 1, order.StandingTiF, 0),
+				status: types.OrderStatusExecuted,
 			},
 			wantErr: true,
 		},
@@ -90,7 +82,7 @@ func TestStoreOrder(t *testing.T) {
 			name: "limit bad quantity (lot size)",
 			args: args{
 				ord:    orderBadLotSize,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 			},
 			wantErr: true,
 		},
@@ -98,7 +90,7 @@ func TestStoreOrder(t *testing.T) {
 			name: "limit bad trading pair",
 			args: args{
 				ord:    orderBadMarket,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 			},
 			wantErr: true,
 		},
@@ -122,7 +114,7 @@ func TestStoreOrder(t *testing.T) {
 			name: "market sell - active",
 			args: args{
 				ord:    newMarketSellOrder(2, 0),
-				status: types.OrderStatusSwapping,
+				status: types.OrderStatusEpoch,
 			},
 			wantErr: false,
 		},
@@ -174,6 +166,96 @@ func TestStoreOrder(t *testing.T) {
 				t.Errorf("StoreOrder() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestBookOrder(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// BookOrder for new order
+	// Store order (epoch) for new order
+	// BookOrder for existing order
+
+	// Standing limit == OK
+	err := archie.BookOrder(newLimitOrder(false, 4800000, 1, order.StandingTiF, 0))
+	if err != nil {
+		t.Fatalf("BookOrder failed: %v", err)
+	}
+
+	// Immediate limit == bad
+	err = archie.BookOrder(newLimitOrder(false, 4800000, 1, order.ImmediateTiF, 0))
+	if err == nil {
+		t.Fatalf("BookOrder should have failed for immediate TiF limit order")
+	}
+
+	// Store standing limit order in epoch status.
+	lo := newLimitOrder(true, 4200000, 1, order.StandingTiF, 0)
+	err = archie.StoreOrder(lo, types.OrderStatusEpoch)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	// Book the same limit order.
+	err = archie.BookOrder(lo)
+	if err != nil {
+		t.Fatalf("BookOrder failed: %v", err)
+	}
+}
+
+func TestExecuteOrder(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// ExecuteOrder for new order
+	// Store order (executed) for new order
+	// ExecuteOrder for existing order
+
+	// Standing limit == OK
+	err := archie.ExecuteOrder(newLimitOrder(false, 4800000, 1, order.StandingTiF, 0))
+	if err != nil {
+		t.Fatalf("BookOrder failed: %v", err)
+	}
+
+	// Store standing limit order in epoch status.
+	lo := newLimitOrder(true, 4200000, 1, order.StandingTiF, 0)
+	err = archie.StoreOrder(lo, types.OrderStatusExecuted)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	// Execute the same limit order.
+	err = archie.ExecuteOrder(lo)
+	if err != nil {
+		t.Fatalf("BookOrder failed: %v", err)
+	}
+}
+
+func TestCancelOrder(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// Standing limit == OK
+	lo := newLimitOrder(false, 4800000, 1, order.StandingTiF, 0)
+	err := archie.BookOrder(lo)
+	if err != nil {
+		t.Fatalf("BookOrder failed: %v", err)
+	}
+
+	// Execute the same limit order.
+	err = archie.CancelOrder(lo)
+	if err != nil {
+		t.Fatalf("CancelOrder failed: %v", err)
+	}
+
+	// Cancel an order not in the tables yet
+	lo2 := newLimitOrder(true, 4600000, 1, order.StandingTiF, 0)
+	err = archie.CancelOrder(lo2)
+	if err != ErrUnknownOrder {
+		t.Fatalf("CancelOrder should have failed for unknown order.")
 	}
 }
 
@@ -276,9 +358,9 @@ func TestStoreLoadMarketOrderActive(t *testing.T) {
 		t.Fatalf("cleanTables: %v", err)
 	}
 
-	// Limit: buy, standing, booked
+	// Market: sell, epoch (active)
 	ordIn := newMarketSellOrder(1, 0)
-	statusIn := types.OrderStatusSwapping
+	statusIn := types.OrderStatusEpoch
 
 	// Do not use Stringers when dumping, and stop after 4 levels deep
 	spew.Config.MaxDepth = 4
@@ -319,9 +401,9 @@ func TestStoreLoadCancelOrder(t *testing.T) {
 	var targetOrderID order.OrderID
 	copy(targetOrderID[:], orderID0)
 
-	// Cancel: pending (active)
+	// Cancel: epoch (active)
 	ordIn := newCancelOrder(targetOrderID, AssetDCR, AssetBTC, 0)
-	statusIn := types.OrderStatusPending
+	statusIn := types.OrderStatusEpoch
 
 	// Do not use Stringers when dumping, and stop after 4 levels deep
 	spew.Config.MaxDepth = 4
@@ -375,19 +457,19 @@ func TestOrderStatus(t *testing.T) {
 		},
 		{
 			newMarketSellOrder(2, 0),
-			types.OrderStatusMatched, // active
+			types.OrderStatusEpoch, // active
 		},
 		{
 			newMarketSellOrder(1, 0),
-			types.OrderStatusFailed, // archived
+			types.OrderStatusExecuted, // archived
 		},
 		{
 			newMarketBuyOrder(2000000000, 0),
-			types.OrderStatusMatched, // active
+			types.OrderStatusEpoch, // active
 		},
 		{
 			newMarketBuyOrder(2100000000, 0),
-			types.OrderStatusFailed, // archived
+			types.OrderStatusExecuted, // archived
 		},
 	}
 
@@ -431,9 +513,9 @@ func TestCancelOrderStatus(t *testing.T) {
 	var targetOrderID order.OrderID
 	copy(targetOrderID[:], orderID0)
 
-	// Cancel: failed (archived)
+	// Cancel: executed (archived)
 	ordIn := newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 0)
-	statusIn := types.OrderStatusFailed
+	statusIn := types.OrderStatusExecuted
 
 	//oid, base, quote := ordIn.ID(), ordIn.BaseAsset, ordIn.QuoteAsset
 
@@ -481,14 +563,14 @@ func TestUpdateOrder(t *testing.T) {
 	}{
 		{
 			newLimitOrder(false, 4900000, 1, order.StandingTiF, 0),
-			types.OrderStatusBooked,   // active
-			types.OrderStatusSwapping, // active
+			types.OrderStatusEpoch,  // active
+			types.OrderStatusBooked, // active
 			0,
 		},
 		{
 			newLimitOrder(false, 4100000, 1, order.StandingTiF, 0),
-			types.OrderStatusSwapping, // active
 			types.OrderStatusBooked,   // active
+			types.OrderStatusExecuted, // archived
 			0,
 		},
 		{
@@ -499,32 +581,32 @@ func TestUpdateOrder(t *testing.T) {
 		},
 		{
 			newMarketSellOrder(2, 0),
-			types.OrderStatusMatched, // active
-			types.OrderStatusBooked,  // active, invalid for market
+			types.OrderStatusEpoch,  // active
+			types.OrderStatusBooked, // active, invalid for market
 			0,
 		},
 		{
 			newMarketSellOrder(1, 0),
-			types.OrderStatusFailed, // archived
-			types.OrderStatusFailed, // archived, no change
+			types.OrderStatusExecuted, // archived
+			types.OrderStatusExecuted, // archived, no change
 			0,
 		},
 		{
 			newMarketBuyOrder(2000000000, 0),
-			types.OrderStatusMatched,  // active
+			types.OrderStatusEpoch,    // active
 			types.OrderStatusExecuted, // archived
 			2000000000,
 		},
 		{
 			newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 1),
-			types.OrderStatusPending, // active
-			types.OrderStatusMatched, // active
+			types.OrderStatusEpoch,    // active
+			types.OrderStatusExecuted, // archived
 			0,
 		},
 		{
-			newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 0),
-			types.OrderStatusPending, // active
-			types.OrderStatusFailed,  // archived
+			newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 2),
+			types.OrderStatusExecuted, // archived
+			types.OrderStatusCanceled, // archived
 			0,
 		},
 	}
@@ -552,6 +634,36 @@ func TestUpdateOrder(t *testing.T) {
 	}
 }
 
+func TestFailCancelOrder(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// order ID for a cancel order
+	orderID0, _ := hex.DecodeString("dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d")
+	var targetOrderID order.OrderID
+	copy(targetOrderID[:], orderID0)
+
+	co := newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 1)
+	err := archie.StoreOrder(co, types.OrderStatusEpoch)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	err = archie.FailCancelOrder(co)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+	_, status, err := loadCancelOrder(archie.db, archie.dbName, mktInfo.Name, co.ID())
+	if err != nil {
+		t.Errorf("loadCancelOrder failed: %v", err)
+	}
+
+	if status != orderStatusFailed {
+		t.Errorf("cancel order should have been %s, got %s", orderStatusFailed, status)
+	}
+}
+
 func TestUpdateOrderFilled(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
@@ -576,7 +688,7 @@ func TestUpdateOrderFilled(t *testing.T) {
 		},
 		{
 			newLimitOrder(false, 4100000, 1, order.StandingTiF, 0),
-			types.OrderStatusSwapping, // active
+			types.OrderStatusBooked, // active
 			0,
 			false,
 		},
@@ -588,25 +700,25 @@ func TestUpdateOrderFilled(t *testing.T) {
 		},
 		{
 			newMarketSellOrder(2, 0),
-			types.OrderStatusMatched, // active
+			types.OrderStatusEpoch, // active
 			0,
 			false,
 		},
 		{
 			newMarketSellOrder(1, 0),
-			types.OrderStatusFailed, // archived
+			types.OrderStatusExecuted, // archived
 			0,
 			false,
 		},
 		{
 			newMarketBuyOrder(2000000000, 0),
-			types.OrderStatusMatched, // active
+			types.OrderStatusEpoch, // active
 			2000000000,
 			false,
 		},
 		{
 			newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 1),
-			types.OrderStatusPending, // active
+			types.OrderStatusEpoch, // active
 			0,
 			true, // cannot set filled amount for order type cancel
 		},
@@ -667,17 +779,17 @@ func TestUserOrders(t *testing.T) {
 		},
 		{
 			marketSell,
-			types.OrderStatusMatched, // active
+			types.OrderStatusEpoch, // active
 			false,
 		},
 		{
 			marketBuy,
-			types.OrderStatusMatched, // active
+			types.OrderStatusExecuted, // archived
 			false,
 		},
 		{
 			marketSellOtherGuy,
-			types.OrderStatusFailed, // archived
+			types.OrderStatusExecuted, // archived
 			false,
 		},
 	}
