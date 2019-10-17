@@ -1181,10 +1181,10 @@ Swap negotiation details will be relayed through the DEX with a series of
 notifications or progress reports.
 Both the DEX and the clients will need to serialize and sign the notification
 data. The originator includes their signature with the request, while the
-recipient will return an '''acknowledgement object''', or a list of
-acknowledgement objects, as the <code>result</code> of their response payload.
+recipient will return an '''acknowledgement''', or a list of
+acknowledgements, as the <code>result</code> of their response payload.
 
-'''Acknowledgement object'''
+'''Acknowledgement'''
 
 {|
 ! field     !! type   !! description
@@ -1221,7 +1221,7 @@ transaction and inform the server with an <code>init</code> notification
 | sig       || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
 |}
 
-'''Match notification serialization'''
+'''Match serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
@@ -1247,6 +1247,7 @@ relay to the matching party.
 
 '''Request route:''' <code>init</code>, '''originator:''' client
 
+<code>payload</code>
 {|
 ! field      !! type   !! description
 |-
@@ -1265,7 +1266,7 @@ relay to the matching party.
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
 
-'''Init notification serialization'''
+'''Init serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
@@ -1289,17 +1290,18 @@ The DEX will send each client a notification when the counterparty has broadcast
 their initialization transaction.
 When the taker receives the <code>audit</code> notification, they will audit the
 contract and broadcast their own initialization.
-When the maker receives the <code>audit</code> notification, they will audit and
+When the maker receives the <code>audit</code> notification, they will audit the
 contract and issue their redemption.
 
 '''Request route:''' <code>audit</code>, '''originator:''' DEX
 
+<code>payload</code>
 {|
 ! field     !! type   !! description
 |-
-| orderid   || string || order ID
+| orderid   || string || the order ID
 |-
-| matchid   || string || the match ID to use for progress notifications
+| matchid   || string || the match ID
 |-
 | timestamp || int  || server's UNIX timestamp
 |-
@@ -1308,14 +1310,14 @@ contract and issue their redemption.
 | sig       || string || DEX's signature of the serialized notification. serialization described below
 |}
 
-'''Audit notification serialization'''
+'''Audit serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |-
 | timestamp  || 8  || server's UNIX timestamp
 |-
@@ -1334,7 +1336,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | orderid    || string || the order ID
 |-
-| matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
+| matchid    || string    || the match ID
 |-
 | txid       || string || the hex-encoded transaction ID
 |-
@@ -1345,7 +1347,7 @@ When a client has redeemed their contract, they will notify the server.
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
 
-'''Redeem notification serialization'''
+'''Redeem serialization'''
 
 <code>result</code>
 {|
@@ -1353,7 +1355,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1364,17 +1366,17 @@ When a client has redeemed their contract, they will notify the server.
 
 The DEX responds with an acknowledgement.
 
-The DEX informs the taker when the maker has redeemed. The taker will get the
-key from the maker's redemption and broadcast their own redemption.
+The DEX informs the taker when the maker has redeemed.
 
 '''Request route:''' <code>redemption</code>, '''originator:''' DEX
 
+<code>payload</code>
 {|
 ! field      !! size (bytes)  !! description
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1385,14 +1387,14 @@ key from the maker's redemption and broadcast their own redemption.
 | sig        || string || DEX's signature of the serialized notification. serialization described below
 |}
 
-'''Redemption notification serialization'''
+'''Redemption serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1402,6 +1404,9 @@ key from the maker's redemption and broadcast their own redemption.
 |}
 
 The client will respond with an acknowledgement.
+
+The taker will get the key from the maker's redemption and broadcast their own
+redemption transaction.
 
 ===Match revocation===
 
@@ -1416,7 +1421,7 @@ The revoked match quantity is not added back to the order book in any form.
 {|
 ! field    !! type   !! description
 |-
-| orderid  || string || order ID
+| orderid  || string || the order ID
 |-
 | matchid  ||  string  || the match ID
 |-
@@ -1430,7 +1435,7 @@ The revoked match quantity is not added back to the order book in any form.
 |-
 | orderid    || 32  || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |}
 
 The client will respond with an acknowledgement.
