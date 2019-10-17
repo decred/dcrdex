@@ -19,34 +19,45 @@ type OrderArchiver interface {
 	// Order retrieves an order with the given OrderID, stored for the market
 	// specified by the given base and quote assets.
 	Order(oid order.OrderID, base, quote uint32) (order.Order, types.OrderStatus, error)
-	// StoreOrder stores an order with the provided status.
-	StoreOrder(ord order.Order, status types.OrderStatus) error
-
-	// OrderStatus gets the status, ID, and filled amount of the given order.
-	OrderStatus(order.Order) (types.OrderStatus, order.OrderType, int64, error)
-	// OrderStatusByID gets the status, ID, and filled amount of the order with
-	// the given OrderID in the market specified by a base and quote asset.
-	OrderStatusByID(oid order.OrderID, base, quote uint32) (types.OrderStatus, order.OrderType, int64, error)
-
-	// UpdateOrderFilled updates the filled amount of the given order. This
-	// function applies only to market and limit orders, not cancel orders.
-	UpdateOrderFilled(order.Order) error
-	// UpdateOrderFilledByID updates the filled amount of the order with the
-	// given OrderID in the market specified by a base and quote asset. This
-	// function applies only to market and limit orders, not cancel orders.
-	UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, filled int64) error
-
-	// UpdateOrderStatus updates the status and filled amount of the given
-	// order.
-	UpdateOrderStatus(order.Order, types.OrderStatus) error
-	// UpdateOrderStatusByID updates the status and filled amount of the order
-	// with the given OrderID in the market specified by a base and quote asset.
-	// For cancel orders, the filled amount is ignored.
-	UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status types.OrderStatus, filled int64) error
 
 	// UserOrders retrieves all orders for the given account in the market
 	// specified by a base and quote asset.
 	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []types.OrderStatus, error)
+
+	// OrderStatus gets the status, ID, and filled amount of the given order.
+	OrderStatus(order.Order) (types.OrderStatus, order.OrderType, int64, error)
+
+	// NewEpochOrder stores a new order with epoch status. Such orders are
+	// pending execution or insertion on a book (standing limit orders with a
+	// remaining unfilled amount).
+	NewEpochOrder(ord order.Order) error
+
+	// BookOrder books the given order. If the order was already stored (i.e.
+	// NewEpochOrder), it's status and filled amount are updated, otherwise it
+	// is inserted. See also UpdateOrderFilled.
+	BookOrder(*order.LimitOrder) error
+
+	// ExecuteOrder puts the order into the executed state, and sets the filled
+	// amount for market and limit orders. For unmatched cancel orders, use
+	// FailCancelOrder instead.
+	ExecuteOrder(ord order.Order) error
+
+	// FailCancelOrder puts an unmatched cancel order into the executed state.
+	// For matched cancel orders, use ExecuteOrder.
+	FailCancelOrder(*order.CancelOrder) error
+
+	// CancelOrder puts the given limit order into the canceled state. Market
+	// orders must use ExecuteOrder since they may not be canceled. Similarly,
+	// cancel orders must use ExecuteOrder or FailCancelOrder.
+	CancelOrder(*order.LimitOrder) error
+
+	// UpdateOrderFilled updates the filled amount of the given order. This
+	// function applies only to market and limit orders, not cancel orders.
+	UpdateOrderFilled(order.Order) error
+
+	// UpdateOrderStatus updates the status and filled amount of the given
+	// order.
+	UpdateOrderStatus(order.Order, types.OrderStatus) error
 }
 
 // ValidateOrder ensures that the order with the given status for the specified
