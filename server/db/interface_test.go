@@ -79,7 +79,7 @@ func TestValidateOrder(t *testing.T) {
 			name: "bad lot size",
 			args: args{
 				ord:    orderBadLotSize,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 				mkt:    mktInfo,
 			},
 			want: false,
@@ -88,7 +88,7 @@ func TestValidateOrder(t *testing.T) {
 			name: "bad order type",
 			args: args{
 				ord:    orderBadType,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 				mkt:    mktInfo,
 			},
 			want: false,
@@ -97,7 +97,7 @@ func TestValidateOrder(t *testing.T) {
 			name: "bad market",
 			args: args{
 				ord:    orderBadMarket,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 				mkt:    mktInfo,
 			},
 			want: false,
@@ -106,7 +106,7 @@ func TestValidateOrder(t *testing.T) {
 			name: "ok",
 			args: args{
 				ord:    newMarketSellOrder(1, 0),
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 				mkt:    mktInfo,
 			},
 			want: true,
@@ -133,7 +133,7 @@ func TestValidateOrder(t *testing.T) {
 			name: "market order bad type",
 			args: args{
 				ord:    marketOrderBadType,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 				mkt:    mktInfo,
 			},
 			want: false,
@@ -142,7 +142,7 @@ func TestValidateOrder(t *testing.T) {
 			name: "market order bad amount",
 			args: args{
 				ord:    marketOrderBadAmt,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 				mkt:    mktInfo,
 			},
 			want: false,
@@ -151,7 +151,7 @@ func TestValidateOrder(t *testing.T) {
 			name: "market order bad remaining",
 			args: args{
 				ord:    marketOrderBadRemaining,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 				mkt:    mktInfo,
 			},
 			want: false,
@@ -175,10 +175,10 @@ func TestValidateOrder(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "cancel bad status (swapping)",
+			name: "cancel bad status (booked)",
 			args: args{
 				ord:    newCancelOrder(targetOrderID, AssetDCR, AssetBTC, 0),
-				status: types.OrderStatusSwapping,
+				status: types.OrderStatusBooked,
 				mkt:    mktInfo,
 			},
 			want: false,
@@ -187,7 +187,7 @@ func TestValidateOrder(t *testing.T) {
 			name: "cancel bad type (limit)",
 			args: args{
 				ord:    cancelOrderBadType,
-				status: types.OrderStatusPending,
+				status: types.OrderStatusEpoch,
 				mkt:    mktInfo,
 			},
 			want: false,
