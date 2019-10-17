@@ -315,7 +315,7 @@ func resetMakers() {
 	}
 }
 
-func newMatch(taker order.Order, makers []*order.LimitOrder, lastPartialAmount ...uint64) *order.Match {
+func newMatchSet(taker order.Order, makers []*order.LimitOrder, lastPartialAmount ...uint64) *order.MatchSet {
 	amounts := make([]uint64, len(makers))
 	rates := make([]uint64, len(makers))
 	var total uint64
@@ -328,7 +328,7 @@ func newMatch(taker order.Order, makers []*order.LimitOrder, lastPartialAmount .
 		amounts[len(makers)-1] = lastPartialAmount[0]
 		total -= makers[len(makers)-1].Quantity - lastPartialAmount[0]
 	}
-	return &order.Match{
+	return &order.MatchSet{
 		Taker:   taker,
 		Makers:  makers,
 		Amounts: amounts,
@@ -365,7 +365,7 @@ func Test_matchLimitOrder(t *testing.T) {
 		name           string
 		args           args
 		doesMatch      bool
-		wantMatch      *order.Match
+		wantMatch      *order.MatchSet
 		takerRemaining uint64
 	}{
 		{
@@ -375,7 +375,7 @@ func Test_matchLimitOrder(t *testing.T) {
 				ord:  takers[0],
 			},
 			true,
-			newMatch(takers[0], []*order.LimitOrder{bookSellOrders[nSell-1]}),
+			newMatchSet(takers[0], []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			0,
 		},
 		{
@@ -385,7 +385,7 @@ func Test_matchLimitOrder(t *testing.T) {
 				ord:  takers[1],
 			},
 			true,
-			newMatch(takers[1], []*order.LimitOrder{bookBuyOrders[nBuy-1]}),
+			newMatchSet(takers[1], []*order.LimitOrder{bookBuyOrders[nBuy-1]}),
 			0,
 		},
 		{
@@ -395,7 +395,7 @@ func Test_matchLimitOrder(t *testing.T) {
 				ord:  takers[2],
 			},
 			true,
-			newMatch(takers[2], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}),
+			newMatchSet(takers[2], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}),
 			0,
 		},
 		{
@@ -405,7 +405,7 @@ func Test_matchLimitOrder(t *testing.T) {
 				ord:  takers[3],
 			},
 			true,
-			newMatch(takers[3], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}, 1*LotSize),
+			newMatchSet(takers[3], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}, 1*LotSize),
 			0,
 		},
 		{
@@ -415,7 +415,7 @@ func Test_matchLimitOrder(t *testing.T) {
 				ord:  takers[4],
 			},
 			true,
-			newMatch(takers[4], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2], bookBuyOrders[nBuy-3]}),
+			newMatchSet(takers[4], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2], bookBuyOrders[nBuy-3]}),
 			1 * LotSize,
 		},
 	}
@@ -473,7 +473,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 		name            string
 		args            args
 		doesMatch       bool
-		wantMatches     []*order.Match
+		wantMatches     []*order.MatchSet
 		wantNumPassed   int
 		wantNumFailed   int
 		wantNumPartial  int
@@ -486,7 +486,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 				queue: []order.Order{takers[0]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
+			wantMatches: []*order.MatchSet{
 				{Taker: takers[0], Makers: []*order.LimitOrder{bookBuyOrders[3]}},
 			},
 			wantNumPassed:   1,
@@ -597,7 +597,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 		name            string
 		args            args
 		doesMatch       bool
-		wantMatches     []*order.Match
+		wantMatches     []*order.MatchSet
 		wantNumPassed   int
 		wantNumFailed   int
 		wantNumPartial  int
@@ -610,8 +610,8 @@ func TestMatch_limitsOnly(t *testing.T) {
 				queue: []order.Order{takers[0]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[0], []*order.LimitOrder{bookSellOrders[nSell-1]}),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[0], []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
@@ -625,8 +625,8 @@ func TestMatch_limitsOnly(t *testing.T) {
 				queue: []order.Order{takers[1]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[1], []*order.LimitOrder{bookSellOrders[nSell-1]}),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[1], []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
@@ -640,8 +640,8 @@ func TestMatch_limitsOnly(t *testing.T) {
 				queue: []order.Order{takers[2]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[2], []*order.LimitOrder{bookSellOrders[nSell-1]}),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[2], []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
@@ -681,8 +681,8 @@ func TestMatch_limitsOnly(t *testing.T) {
 				queue: []order.Order{takers[1], takers[4]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[1], []*order.LimitOrder{bookSellOrders[nSell-1]}),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[1], []*order.LimitOrder{bookSellOrders[nSell-1]}),
 				{ // the maker is reduced by matching first item in the queue
 					Taker:   takers[4],
 					Makers:  []*order.LimitOrder{takers[1].(*order.LimitOrder)},
@@ -772,7 +772,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 		name            string
 		args            args
 		doesMatch       bool
-		wantMatches     []*order.Match
+		wantMatches     []*order.MatchSet
 		wantNumPassed   int
 		wantNumFailed   int
 		wantNumPartial  int
@@ -785,8 +785,8 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 				queue: []order.Order{takers[0]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[0], []*order.LimitOrder{bookBuyOrders[nBuy-1]}),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[0], []*order.LimitOrder{bookBuyOrders[nBuy-1]}),
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
@@ -800,8 +800,8 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 				queue: []order.Order{takers[1]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[1], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[1], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}),
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
@@ -815,8 +815,8 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 				queue: []order.Order{takers[2]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[2], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2], bookBuyOrders[nBuy-3]}, 3*LotSize),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[2], []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2], bookBuyOrders[nBuy-3]}, 3*LotSize),
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
@@ -948,7 +948,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 		name            string
 		args            args
 		doesMatch       bool
-		wantMatches     []*order.Match
+		wantMatches     []*order.MatchSet
 		remaining       []uint64
 		wantNumPassed   int
 		wantNumFailed   int
@@ -962,8 +962,8 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				queue: []order.Order{takers[0]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[0], []*order.LimitOrder{bookSellOrders[nSell-1]}),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[0], []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
 			remaining:       []uint64{quoteAmt(1) - marketBuyQuoteAmt(1)},
 			wantNumPassed:   1,
@@ -978,8 +978,8 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				queue: []order.Order{takers[1]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[1], []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}, 1*LotSize),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[1], []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}, 1*LotSize),
 			},
 			remaining:       []uint64{0},
 			wantNumPassed:   1,
@@ -994,8 +994,8 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				queue: []order.Order{takers[2]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[2], []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[2], []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}),
 			},
 			remaining:       []uint64{0},
 			wantNumPassed:   1,
@@ -1010,8 +1010,8 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				queue: []order.Order{takers[3]},
 			},
 			doesMatch: true,
-			wantMatches: []*order.Match{
-				newMatch(takers[3], bookSellOrdersReverse),
+			wantMatches: []*order.MatchSet{
+				newMatchSet(takers[3], bookSellOrdersReverse),
 			},
 			remaining:       []uint64{0},
 			wantNumPassed:   1,

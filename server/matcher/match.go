@@ -95,7 +95,7 @@ func CheckMarketBuyBuffer(book Booker, ord *order.MarketOrder, marketBuyBuffer f
 
 // Match matches orders given a standing order book and an epoch queue. Matched
 // orders from the book are removed from the book.
-func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Match, passed, failed, partial, inserted []order.Order) {
+func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.MatchSet, passed, failed, partial, inserted []order.Order) {
 	// Apply the deterministic pseudorandom shuffling.
 	shuffleQueue(queue)
 
@@ -120,16 +120,16 @@ func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Matc
 
 			passed = append(passed, q)
 			// CancelOrder Match has zero values for Amounts, Rates, and Total.
-			matches = append(matches, &order.Match{
+			matches = append(matches, &order.MatchSet{
 				Taker:  q,
 				Makers: []*order.LimitOrder{removed},
 			})
 
 		case *order.LimitOrder:
 			// limit-limit order matching
-			match := matchLimitOrder(book, o)
-			if match != nil {
-				matches = append(matches, match)
+			matchSet := matchLimitOrder(book, o)
+			if matchSet != nil {
+				matches = append(matches, matchSet)
 				passed = append(passed, q)
 			} else if o.Force == order.ImmediateTiF {
 				// There was no match and TiF is Immediate. Fail.
@@ -148,16 +148,16 @@ func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Matc
 
 		case *order.MarketOrder:
 			// market-limit order matching
-			var match *order.Match
+			var matchSet *order.MatchSet
 			if o.Sell {
-				match = matchMarketSellOrder(book, o)
+				matchSet = matchMarketSellOrder(book, o)
 			} else {
 				// Market buy order Quantity is denominated in the quote asset,
 				// and lot size multiples are not applicable.
-				match = matchMarketBuyOrder(book, o)
+				matchSet = matchMarketBuyOrder(book, o)
 			}
-			if match != nil {
-				matches = append(matches, match)
+			if matchSet != nil {
+				matches = append(matches, matchSet)
 				passed = append(passed, q)
 			} else {
 				// There was no match and this is a market order. Fail.
@@ -173,7 +173,7 @@ func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Matc
 }
 
 // limit-limit order matching
-func matchLimitOrder(book Booker, ord *order.LimitOrder) (match *order.Match) {
+func matchLimitOrder(book Booker, ord *order.LimitOrder) (matchSet *order.MatchSet) {
 	amtRemaining := ord.Remaining() // i.e. ord.Quantity - ord.Filled
 	if amtRemaining == 0 {
 		return
@@ -224,8 +224,8 @@ func matchLimitOrder(book Booker, ord *order.LimitOrder) (match *order.Match) {
 		ord.Filled += amt
 
 		// Add the matched maker order to the output.
-		if match == nil {
-			match = &order.Match{
+		if matchSet == nil {
+			matchSet = &order.MatchSet{
 				Taker:   ord,
 				Makers:  []*order.LimitOrder{best},
 				Amounts: []uint64{amt},
@@ -233,10 +233,10 @@ func matchLimitOrder(book Booker, ord *order.LimitOrder) (match *order.Match) {
 				Total:   amt,
 			}
 		} else {
-			match.Makers = append(match.Makers, best)
-			match.Amounts = append(match.Amounts, amt)
-			match.Rates = append(match.Rates, best.Rate)
-			match.Total += amt
+			matchSet.Makers = append(matchSet.Makers, best)
+			matchSet.Amounts = append(matchSet.Amounts, amt)
+			matchSet.Rates = append(matchSet.Rates, best.Rate)
+			matchSet.Total += amt
 		}
 	}
 
@@ -244,7 +244,7 @@ func matchLimitOrder(book Booker, ord *order.LimitOrder) (match *order.Match) {
 }
 
 // market(sell)-limit order matching
-func matchMarketSellOrder(book Booker, ord *order.MarketOrder) (match *order.Match) {
+func matchMarketSellOrder(book Booker, ord *order.MarketOrder) (matchSet *order.MatchSet) {
 	if !ord.Sell {
 		panic("matchMarketSellOrder: not a sell order")
 	}
@@ -256,17 +256,17 @@ func matchMarketSellOrder(book Booker, ord *order.MarketOrder) (match *order.Mat
 		Force:       order.ImmediateTiF,
 		Rate:        0,
 	}
-	match = matchLimitOrder(book, limOrd)
-	if match == nil {
+	matchSet = matchLimitOrder(book, limOrd)
+	if matchSet == nil {
 		return
 	}
 	// The Match.Taker must be the *MarketOrder, not the wrapped *LimitOrder.
-	match.Taker = ord
+	matchSet.Taker = ord
 	return
 }
 
 // market(buy)-limit order matching
-func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (match *order.Match) {
+func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (matchSet *order.MatchSet) {
 	if ord.Sell {
 		panic("matchMarketBuyOrder: not a buy order")
 	}
@@ -320,8 +320,8 @@ func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (match *order.Matc
 		ord.Filled += amtQuote   // quote asset filled
 
 		// Add the matched maker order to the output.
-		if match == nil {
-			match = &order.Match{
+		if matchSet == nil {
+			matchSet = &order.MatchSet{
 				Taker:   ord,
 				Makers:  []*order.LimitOrder{best},
 				Amounts: []uint64{amt},
@@ -329,10 +329,10 @@ func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (match *order.Matc
 				Total:   amt,
 			}
 		} else {
-			match.Makers = append(match.Makers, best)
-			match.Amounts = append(match.Amounts, amt)
-			match.Rates = append(match.Rates, best.Rate)
-			match.Total += amt
+			matchSet.Makers = append(matchSet.Makers, best)
+			matchSet.Amounts = append(matchSet.Amounts, amt)
+			matchSet.Rates = append(matchSet.Rates, best.Rate)
+			matchSet.Total += amt
 		}
 	}
 

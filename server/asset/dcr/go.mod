@@ -1,6 +1,6 @@
 module github.com/decred/dcrdex/server/asset/dcr
 
-go 1.12
+go 1.13
 
 require (
 	github.com/decred/dcrd/blockchain/stake/v2 v2.0.0

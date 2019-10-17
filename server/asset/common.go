@@ -97,3 +97,18 @@ type DEXTx interface {
 	// FeeRate returns the transaction fee rate, in atoms/byte equivalent.
 	FeeRate() uint64
 }
+
+// Type Asset combines the DEXAsset backend with the configurable asset
+// variables. The asset variables do not affect the backend operation, but are
+// grouped with the backend for convenience.
+type Asset struct {
+	Backend  DEXAsset
+	Symbol   string
+	LotSize  uint64
+	RateStep uint64
+	FeeRate  uint64
+	SwapSize uint64
+	SwapConf uint32
+	FundConf uint32
+	Scripts  []string // Not sure that we need this or not.
+}
