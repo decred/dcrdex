@@ -1,9 +1,6 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-// The specifications for the Serialize methods can be found at
-// https://github.com/decred/dcrdex/blob/master/spec/README.mediawiki#Match_negotiation
-
 package msgjson
 
 import (
@@ -15,8 +12,9 @@ import (
 
 // Error codes
 const (
-	RPCParseError = iota
-	RPCUnknownMethod
+	RPCErrorUnspecified = iota
+	RPCParseError
+	RPCUnknownRoute
 	RPCInternal
 	RPCQuarantineClient
 	RPCVersionUnsupported
@@ -32,6 +30,7 @@ const (
 	RedemptionError
 	IDTypeError
 	AckCountError
+	UnknownResponseID
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -126,8 +125,8 @@ type Acknowledgement struct {
 	Sig     string `json:"sig"`
 }
 
-// Error is returned as part of a response to indicate that an error occurred
-// during method execution.
+// Error is returned as part of the Response to indicate that an error
+// occurred during method execution.
 type Error struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
