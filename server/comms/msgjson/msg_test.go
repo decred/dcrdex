@@ -716,6 +716,55 @@ func TestCancel(t *testing.T) {
 	}
 }
 
+func TestConnect(t *testing.T) {
+	// serialization: account ID (32) + api version (2) + timestamp (8) = 42 bytes
+	acctID, _ := BytesFromHex("14ae3cbc703587122d68ac6fa9194dfdc8466fb5dec9f47d2805374adff3e016")
+	connect := &Connect{
+		AccountID:  acctID,
+		APIVersion: uint16(1),
+		Time:       uint64(1571575096),
+	}
+
+	exp := []byte{
+		0x14, 0xae, 0x3c, 0xbc, 0x70, 0x35, 0x87, 0x12, 0x2d, 0x68, 0xac, 0x6f,
+		0xa9, 0x19, 0x4d, 0xfd, 0xc8, 0x46, 0x6f, 0xb5, 0xde, 0xc9, 0xf4, 0x7d,
+		0x28, 0x05, 0x37, 0x4a, 0xdf, 0xf3, 0xe0, 0x16,
+		// API Version 2 bytes
+		0x00, 0x01,
+		// Time 8 bytes
+		0x00, 0x00, 0x00, 0x00, 0x5d, 0xac, 0x55, 0x38,
+	}
+
+	b, err := connect.Serialize()
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+	if !bytes.Equal(b, exp) {
+		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
+	}
+
+	connectB, err := json.Marshal(connect)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var connectBack Connect
+	err = json.Unmarshal(connectB, &connectBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(connectBack.AccountID, connect.AccountID) {
+		t.Fatal(connectBack.AccountID, connect.AccountID)
+	}
+	if connectBack.APIVersion != connect.APIVersion {
+		t.Fatal(connectBack.APIVersion, connect.APIVersion)
+	}
+	if connectBack.Time != connect.Time {
+		t.Fatal(connectBack.Time, connect.Time)
+	}
+}
+
 func TestSignable(t *testing.T) {
 	sig := []byte{
 		0x07, 0xad, 0x7f, 0x33, 0xc5, 0xb0, 0x13, 0xa1, 0xbb, 0xd6, 0xad, 0xc0,

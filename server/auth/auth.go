@@ -12,6 +12,10 @@ import (
 	"github.com/decred/dcrdex/server/comms/msgjson"
 )
 
+// reqExpiration is how long a response handler can will be saved before it is
+// eligible for clean up.
+const reqExpiration = time.Minute
+
 // Storage updates and fetches account-related data from what is presumably a
 // database.
 type Storage interface {
@@ -29,12 +33,12 @@ type Signer interface {
 // respHandler has a time associated with it so that old unused handlers can be
 // detected and deleted.
 type respHandler struct {
-	sent time.Time
-	f    func(*msgjson.Message)
+	expiration time.Time
+	f          func(*msgjson.Message)
 }
 
-// clientInfo represents a DEX client. A client is identified by their
-// account.AccountID, and is hopefully linked to a connected comms.Link.
+// clientInfo represents a DEX client, including account information and last
+// known comms.Link.
 type clientInfo struct {
 	mtx          sync.Mutex
 	acct         *account.Account
@@ -42,11 +46,30 @@ type clientInfo struct {
 	respHandlers map[uint64]*respHandler
 }
 
+// cleanUpHandlers scans the respHandlers for expired handlers and deletes them
+// from the map.
+func (client *clientInfo) cleanUpHandlers() {
+	client.mtx.Lock()
+	defer client.mtx.Unlock()
+	var expired []uint64
+	for id, handler := range client.respHandlers {
+		if time.Until(handler.expiration) < 0 {
+			expired = append(expired, id)
+		}
+	}
+	for _, id := range expired {
+		delete(client.respHandlers, id)
+	}
+}
+
 // logReq associates the specified response handler with the message ID.
 func (client *clientInfo) logReq(id uint64, handler *respHandler) {
 	client.mtx.Lock()
 	defer client.mtx.Unlock()
 	client.respHandlers[id] = handler
+	if len(client.respHandlers) > 1 {
+		go client.cleanUpHandlers()
+	}
 }
 
 // respHandler extracts the response handler from the respHandlers map. If the
@@ -61,7 +84,7 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 	return handler
 }
 
-// AuthManager handles authorization-related tasks, including validating client
+// AuthManager handles authentication-related tasks, including validating client
 // signatures, linking accounts to websocket connections, and signing messages
 // with the DEX's private key. AuthManager manages requests to the 'connect'
 // route.
@@ -84,7 +107,7 @@ type Config struct {
 	// satisfied by a secp256k1.PrivateKey.
 	Signer Signer
 	// When a client connects, trading may or may not be active. The AuthManager
-	// returns the StartEpoch as part of the resposne to a 'connect' request.
+	// returns the StartEpoch as part of the response to a 'connect' request.
 	StartEpoch uint64
 }
 
@@ -103,8 +126,8 @@ func NewAuthManager(cfg *Config) *AuthManager {
 }
 
 // Route wraps the comms.Route function, storing the response handler with the
-// associated clientInfo, and sending on the latest websocket connection for the
-// client.
+// associated clientInfo, and sending the message on the best known comms.Link
+// for the client.
 func (auth *AuthManager) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 	comms.Route(route, func(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 		client := auth.conn(conn)
@@ -143,8 +166,8 @@ func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
 	return nil
 }
 
-// Send sends the non-Request-type msgjson.Message to the client identified by the
-// specified account ID.
+// Send sends the non-Request-type msgjson.Message to the client identified by
+// the specified account ID.
 func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 	client := auth.user(user)
 	if client == nil {
@@ -154,8 +177,8 @@ func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 	client.conn.Send(msg)
 }
 
-// Request sends the Request-type msgjson.Message to the client identified by the
-// specified account ID.
+// Request sends the Request-type msgjson.Message to the client identified by
+// the specified account ID.
 func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(*msgjson.Message)) {
 	client := auth.user(user)
 	if client == nil {
@@ -163,8 +186,8 @@ func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f
 		return
 	}
 	client.logReq(msg.ID, &respHandler{
-		sent: time.Now(),
-		f:    f,
+		expiration: time.Now().Add(reqExpiration),
+		f:          f,
 	})
 	client.conn.Request(msg, auth.handleResponse)
 }
@@ -213,7 +236,7 @@ func (auth *AuthManager) removeClient(client *clientInfo) {
 }
 
 // handleConnect is the handler for the 'connect' route. The user is authorized,
-// a response is issued, and a clientInfo is created and stored.
+// a response is issued, and a clientInfo is created or updated.
 func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	connect := new(msgjson.Connect)
 	err := json.Unmarshal(msg.Payload, &connect)

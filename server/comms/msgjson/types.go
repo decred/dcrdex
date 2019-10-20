@@ -407,7 +407,7 @@ type Redeem struct {
 
 var _ Signable = (*Redeem)(nil)
 
-// Serialize serializes the RedeemParams data.
+// Serialize serializes the Redeem data.
 func (redeem *Redeem) Serialize() ([]byte, error) {
 	// Init serialization is orderid (32) + matchid (32) + txid (32) + vout (4)
 	// + timestamp(8) = 108
@@ -420,7 +420,7 @@ func (redeem *Redeem) Serialize() ([]byte, error) {
 	return s, nil
 }
 
-// Redemption are the params for a DEX-originating RedemptionRoute request.
+// Redemption is the payload for a DEX-originating RedemptionRoute request.
 // They are identical to the Redeem parameters, but Redeem is for the
 // client-originating RedeemRoute request.
 type Redemption = Redeem
@@ -623,11 +623,6 @@ type Connect struct {
 	Time       uint64 `json:"timestamp"`
 }
 
-type ConnectResponse struct {
-	StartEpoch uint64  `json:"startepoch"`
-	Matches    []Match `json:"matches"`
-}
-
 // Serialize serializes the Connect data.
 func (c *Connect) Serialize() ([]byte, error) {
 	// serialization: account ID (32) + api version (2) + timestamp (8) = 42 bytes
@@ -636,6 +631,12 @@ func (c *Connect) Serialize() ([]byte, error) {
 	s = append(s, uint16Bytes(c.APIVersion)...)
 	s = append(s, uint64Bytes(c.Time)...)
 	return s, nil
+}
+
+// Connect response is the response result for the ConnectRoute request.
+type ConnectResponse struct {
+	StartEpoch uint64  `json:"startepoch"`
+	Matches    []Match `json:"matches"`
 }
 
 // Convert uint64 to 8 bytes.

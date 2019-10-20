@@ -318,7 +318,9 @@ func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message)) {
 		f:          respHandler,
 	}
 	// clean up the response map.
-	go c.cleanUpExpired()
+	if len(c.respHandlers) > 1 {
+		go c.cleanUpExpired()
+	}
 }
 
 // respHandler extracts the response handler for the provided request ID if it

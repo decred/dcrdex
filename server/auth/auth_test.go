@@ -560,4 +560,32 @@ func TestHandleResponse(t *testing.T) {
 		t.Fatalf("wrong error code for unknown response. expected %d, got %d",
 			msgjson.UnknownResponseID, resp.Error.Code)
 	}
+
+	// Check that expired response handlers are removed from the map.
+	client := rig.mgr.user(user.acctID)
+	if client == nil {
+		t.Fatalf("client not found")
+	}
+	client.respHandlers = map[uint64]*respHandler{
+		comms.NextID(): &respHandler{
+			expiration: time.Now(),
+			f:          func(*msgjson.Message) {},
+		},
+	}
+	// After logging a new request, there should still only be one. A short
+	// sleep is added because the cleanup is run as a goroutine.
+	newID := comms.NextID()
+	client.logReq(newID, &respHandler{
+		expiration: time.Now().Add(reqExpiration),
+		f:          func(*msgjson.Message) {},
+	})
+	time.Sleep(time.Millisecond)
+	client.mtx.Lock()
+	defer client.mtx.Unlock()
+	if len(client.respHandlers) != 1 {
+		t.Fatalf("expected 1 response handler, found %d", len(client.respHandlers))
+	}
+	if client.respHandlers[newID] == nil {
+		t.Fatalf("wrong response handler left after cleanup cycle")
+	}
 }
