@@ -620,6 +620,7 @@ type EpochOrderNote struct {
 	Epoch     uint64 `json:"epoch"`
 }
 
+// Connect is the payload for a client-originating ConnectRoute request.
 type Connect struct {
 	signable
 	AccountID  Bytes  `json:"accountid"`

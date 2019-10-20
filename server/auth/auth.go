@@ -92,7 +92,7 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 }
 
 // AuthManager handles authentication-related tasks, including validating client
-// signatures, maintaining association between accounts to `comms.Link`s, and
+// signatures, maintaining association between accounts and `comms.Link`s, and
 // signing messages with the DEX's private key. AuthManager manages requests to
 // the 'connect' route.
 type AuthManager struct {
