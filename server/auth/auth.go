@@ -85,14 +85,13 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 }
 
 // AuthManager handles authentication-related tasks, including validating client
-// signatures, linking accounts to websocket connections, and signing messages
-// with the DEX's private key. AuthManager manages requests to the 'connect'
-// route.
+// signatures, maintaining association between accounts to `comms.Link`s, and
+// signing messages with the DEX's private key. AuthManager manages requests to
+// the 'connect' route.
 type AuthManager struct {
 	connMtx    sync.RWMutex
 	users      map[account.AccountID]*clientInfo
 	conns      map[uint64]*clientInfo
-	respMtx    sync.RWMutex
 	storage    Storage
 	signer     Signer
 	startEpoch uint64
@@ -106,8 +105,10 @@ type Config struct {
 	// Signer is an interface that signs messages. In practice, Signer is
 	// satisfied by a secp256k1.PrivateKey.
 	Signer Signer
-	// When a client connects, trading may or may not be active. The AuthManager
-	// returns the StartEpoch as part of the response to a 'connect' request.
+	// StartEpoch is the epoch at which the current DEX trading session
+	// began/begins. When a client connects, trading may or may not be active. The
+	// AuthManager returns the StartEpoch as part of the response to a 'connect'
+	// request.
 	StartEpoch uint64
 }
 
@@ -126,8 +127,8 @@ func NewAuthManager(cfg *Config) *AuthManager {
 }
 
 // Route wraps the comms.Route function, storing the response handler with the
-// associated clientInfo, and sending the message on the best known comms.Link
-// for the client.
+// associated clientInfo, and sending the message on the current comms.Link for
+// the client.
 func (auth *AuthManager) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 	comms.Route(route, func(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 		client := auth.conn(conn)
@@ -174,7 +175,10 @@ func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 		log.Errorf("Send requested for unknown user %x", user[:])
 		return
 	}
-	client.conn.Send(msg)
+	err := client.conn.Send(msg)
+	if err != nil {
+		log.Debugf("error sending on link: %v", err)
+	}
 }
 
 // Request sends the Request-type msgjson.Message to the client identified by
@@ -189,7 +193,10 @@ func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f
 		expiration: time.Now().Add(reqExpiration),
 		f:          f,
 	})
-	client.conn.Request(msg, auth.handleResponse)
+	err := client.conn.Request(msg, auth.handleResponse)
+	if err != nil {
+		log.Debugf("error sending request: %v", err)
+	}
 }
 
 // Penalize signals that a user has broken a rule of community conduct, and that
@@ -201,25 +208,25 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) {
 		return
 	}
 	auth.storage.CloseAccount(client.acct.ID, rule)
-	client.conn.Banish()
+	client.conn.Banish() // May not want to do this. Leaving it for now.
 	auth.removeClient(client)
 }
 
-// user gets the client by account ID.
+// user gets the clientInfo for the specified account ID.
 func (auth *AuthManager) user(user account.AccountID) *clientInfo {
 	auth.connMtx.RLock()
 	defer auth.connMtx.RUnlock()
 	return auth.users[user]
 }
 
-// conn gets the client by connection ID.
+// conn gets the clientInfo for the specified connection ID.
 func (auth *AuthManager) conn(conn comms.Link) *clientInfo {
 	auth.connMtx.RLock()
 	defer auth.connMtx.RUnlock()
 	return auth.conns[conn.ID()]
 }
 
-// addClient add the client to the users and conns maps.
+// addClient adds the client to the users and conns maps.
 func (auth *AuthManager) addClient(client *clientInfo) {
 	auth.connMtx.Lock()
 	defer auth.connMtx.Unlock()
@@ -303,6 +310,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			conn:         conn,
 			respHandlers: make(map[uint64]*respHandler),
 		}
+	} else {
+		client.conn = conn
 	}
 
 	auth.addClient(client)
@@ -310,7 +319,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 }
 
 // handleResponse handles all responses for AuthManager registered routes,
-// essentially wrapping response handlers and translating connection to account.
+// essentially wrapping response handlers and translating connection ID to
+// account ID.
 func (auth *AuthManager) handleResponse(conn comms.Link, msg *msgjson.Message) {
 	client := auth.conn(conn)
 	if client == nil {
@@ -324,7 +334,10 @@ func (auth *AuthManager) handleResponse(conn comms.Link, msg *msgjson.Message) {
 		if err != nil {
 			log.Errorf("failure creating unknown ID response error message: %v", err)
 		} else {
-			conn.Send(errMsg)
+			err := conn.Send(errMsg)
+			if err != nil {
+				log.Tracef("error sending response failure message: %v", err)
+			}
 		}
 		return
 	}

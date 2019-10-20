@@ -239,6 +239,22 @@ func TestConnect(t *testing.T) {
 	if !responded {
 		t.Fatalf("responded flag not set")
 	}
+
+	reuser := tNewUser(t)
+	reuser.acctID = user.acctID
+	reuser.privKey = user.privKey
+	connectUser(t, reuser)
+	reqID = comms.NextID()
+	a10 := &tPayload{A: 10}
+	msg, _ = msgjson.NewRequest(reqID, "request", a10)
+	rig.mgr.Request(reuser.acctID, msg, func(*msgjson.Message) {})
+	// The a10 message should be in the new connection
+	if user.conn.getReq() != nil {
+		t.Fatalf("old connection received a request after reconnection")
+	}
+	if reuser.conn.getReq() == nil {
+		t.Fatalf("new connection did not receive the request")
+	}
 }
 
 func TestRoute(t *testing.T) {
@@ -366,9 +382,9 @@ func TestSend(t *testing.T) {
 		A int
 	}
 	payload := &tA{A: 5}
-	resp, err := msgjson.NewResponse(comms.NextID(), payload, nil)
+	resp, _ := msgjson.NewResponse(comms.NextID(), payload, nil)
 	payload = &tA{A: 10}
-	req, err := msgjson.NewRequest(comms.NextID(), "testroute", payload)
+	req, _ := msgjson.NewRequest(comms.NextID(), "testroute", payload)
 
 	// Send a message to a foreigner
 	rig.mgr.Send(foreigner.acctID, resp)
@@ -387,7 +403,7 @@ func TestSend(t *testing.T) {
 	}
 	tr := new(tA)
 	r, _ := msg.Response()
-	err = json.Unmarshal(r.Result, tr)
+	err := json.Unmarshal(r.Result, tr)
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
