@@ -57,12 +57,14 @@ func NewMarketInfo(base, quote uint32, lotSize uint64) (*MarketInfo, error) {
 // are identified by their symbols as defined in the
 // github.com/decred/dcrdex/server/asset package.
 func NewMarketInfoFromSymbols(base, quote string, lotSize uint64) (*MarketInfo, error) {
-	baseID, found := asset.BipSymbolID(strings.ToLower(base))
+	base = strings.ToLower(base)
+	baseID, found := asset.BipSymbolID(base)
 	if !found {
 		return nil, fmt.Errorf(`base asset symbol "%s" unrecognized`, base)
 	}
 
-	quoteID, found := asset.BipSymbolID(strings.ToLower(quote))
+	quote = strings.ToLower(quote)
+	quoteID, found := asset.BipSymbolID(quote)
 	if !found {
 		return nil, fmt.Errorf(`quote asset symbol "%s" unrecognized`, quote)
 	}

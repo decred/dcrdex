@@ -21,4 +21,8 @@ const (
 
 	// SelectAllMarkets retrieves the active market information.
 	SelectAllMarkets = `SELECT * FROM %s;`
+
+	// InsertMarket inserts a new market in to the markets tables
+	InsertMarket = `INSERT INTO %s (name, base, quote, lot_size)
+		VALUES ($1, $2, $3, $4);`
 )

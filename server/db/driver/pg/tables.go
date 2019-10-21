@@ -112,8 +112,9 @@ func prepareMarkets(db *sql.DB, mktConfig []*types.MarketInfo) (map[string]*type
 	marketMap := make(map[string]*types.MarketInfo, len(mkts))
 	for _, mkt := range mkts {
 		if _, found := marketMap[mkt.Name]; found {
-			return nil, fmt.Errorf(`multiple markets with the same name "%s" found!`,
-				mkt.Name)
+			// should never happen since market name is (unique) primary key
+			panic(fmt.Sprintf(`multiple markets with the same name "%s" found!`,
+				mkt.Name))
 		}
 		marketMap[mkt.Name] = mkt
 	}
@@ -124,16 +125,21 @@ func prepareMarkets(db *sql.DB, mktConfig []*types.MarketInfo) (map[string]*type
 		existingMkt := marketMap[mkt.Name]
 		if existingMkt == nil {
 			log.Infof("New market specified in config: %s", mkt.Name)
-		}
-		err = createMarketTables(db, mkt.Name)
-		if err != nil {
-			return nil, err
-		}
-		if existingMkt != nil {
+			err = newMarket(db, marketsTableName, mkt)
+			if err != nil {
+				return nil, fmt.Errorf("newMarket failed: %v", err)
+			}
+		} else {
 			// TODO: check params, inc. lot size
 			if mkt.LotSize != existingMkt.LotSize {
 				panic("lot size change: unimplemented") // TODO
 			}
+		}
+
+		// Create the tables in the markets schema.
+		err = createMarketTables(db, mkt.Name)
+		if err != nil {
+			return nil, fmt.Errorf("createMarketTables failed: %v", err)
 		}
 	}
 

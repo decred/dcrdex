@@ -40,7 +40,11 @@ type Config struct {
 	QueryTimeout                   time.Duration
 
 	// MarketCfg specifies all of the markets that the Archiver should prepare.
-	MarketCfg     []*types.MarketInfo
+	MarketCfg []*types.MarketInfo
+
+	// CheckedStores checks the tables for existing identical entires before
+	// attempting to store new data. This will should not be needed if there are
+	// no bugs...
 	CheckedStores bool
 }
 

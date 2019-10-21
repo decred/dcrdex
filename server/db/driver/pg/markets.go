@@ -39,6 +39,22 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*types.MarketInfo, erro
 	return mkts, nil
 }
 
+func newMarket(db *sql.DB, marketsTableName string, mkt *types.MarketInfo) error {
+	stmt := fmt.Sprintf(internal.InsertMarket, marketsTableName)
+	res, err := db.Exec(stmt, mkt.Name, mkt.Base, mkt.Quote, mkt.LotSize)
+	if err != nil {
+		return err
+	}
+	N, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if N != 1 {
+		return fmt.Errorf("failed to insert market, %d rows affected", N)
+	}
+	return nil
+}
+
 func createMarketSchema(db *sql.DB, marketUID string) (bool, error) {
 	exists, err := schemaExists(db, marketUID)
 	if err != nil {
@@ -62,11 +78,11 @@ func createMarketSchema(db *sql.DB, marketUID string) (bool, error) {
 }
 
 func createMarketTables(db *sql.DB, marketUID string) error {
-	newMtk, err := createMarketSchema(db, marketUID)
+	created, err := createMarketSchema(db, marketUID)
 	if err != nil {
 		return err
 	}
-	if !newMtk {
+	if !created {
 		log.Debugf(`Market schema "%s" already exists.`, marketUID)
 	}
 
@@ -75,7 +91,7 @@ func createMarketTables(db *sql.DB, marketUID string) error {
 		if err != nil {
 			return err
 		}
-		if newTable && !newMtk {
+		if newTable && !created {
 			log.Warnf(`Created missing table "%s" for existing market %s.`,
 				c.name, marketUID)
 		}

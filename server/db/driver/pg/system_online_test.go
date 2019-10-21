@@ -65,13 +65,28 @@ func openDB() (func() error, error) {
 		MarketCfg:     []*types.MarketInfo{mktInfo},
 		CheckedStores: true,
 	}
+
+	closeFn := func() error { return nil }
+
+	// Low-level db connection to kill any leftover tables.
+	db, err := connect(dbi.Host, dbi.Port, dbi.User, dbi.Pass, dbi.DBName)
+	if err != nil {
+		return closeFn, err
+	}
+	if err := nukeAll(db); err != nil {
+		return closeFn, fmt.Errorf("nukeAll: %v", err)
+	}
+	if err = db.Close(); err != nil {
+		return closeFn, fmt.Errorf("failed to close DB: %v", err)
+	}
+
 	ctx := context.Background()
 	archie, err = NewArchiver(ctx, &dbi)
 	if archie == nil {
-		return func() error { return nil }, err
+		return closeFn, err
 	}
 
-	closeFn := func() error {
+	closeFn = func() error {
 		if err := nukeAll(archie.db); err != nil {
 			log.Errorf("nukeAll: %v", err)
 		}
