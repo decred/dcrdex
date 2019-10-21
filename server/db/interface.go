@@ -46,14 +46,21 @@ type OrderArchiver interface {
 	// FailCancelOrder instead.
 	ExecuteOrder(ord order.Order) error
 
+	// CancelOrder puts a limit order into the canceled state. Market orders
+	// must use ExecuteOrder since they may not be canceled. Similarly, cancel
+	// orders must use ExecuteOrder or FailCancelOrder. Orders that are
+	// terminated by the DEX rather than via a cancel order are considered
+	// "revoked", and RevokeOrder should be used to set this status.
+	CancelOrder(*order.LimitOrder) error
+
+	// RevokeOrder puts a limit order into the revoked state. Orders should be
+	// revoked by the DEX according to policy on failed orders. For canceling an
+	// order that was matched with a cancel order, use CancelOrder.
+	RevokeOrder(*order.LimitOrder) error
+
 	// FailCancelOrder puts an unmatched cancel order into the executed state.
 	// For matched cancel orders, use ExecuteOrder.
 	FailCancelOrder(*order.CancelOrder) error
-
-	// CancelOrder puts the given limit order into the canceled state. Market
-	// orders must use ExecuteOrder since they may not be canceled. Similarly,
-	// cancel orders must use ExecuteOrder or FailCancelOrder.
-	CancelOrder(*order.LimitOrder) error
 
 	// UpdateOrderFilled updates the filled amount of the given order. This
 	// function applies only to market and limit orders, not cancel orders.
@@ -90,7 +97,7 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 		// Market orders OK statuses: epoch and executed (NOT booked or
 		// canceled).
 		switch status {
-		case types.OrderStatusEpoch, types.OrderStatusExecuted: // Canceled OK if swap fails?
+		case types.OrderStatusEpoch, types.OrderStatusExecuted:
 		default:
 			return false
 		}
@@ -108,7 +115,7 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 		// Cancel order OK statuses: epoch, and executed (NOT booked or
 		// canceled).
 		switch status {
-		case types.OrderStatusEpoch, types.OrderStatusExecuted:
+		case types.OrderStatusEpoch, types.OrderStatusExecuted: // orderStatusFailed if we decide to export that
 		default:
 			return false
 		}
@@ -126,7 +133,7 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 		// Limit order OK statuses: epoch, booked, executed, and canceled (same
 		// as market plus booked).
 		switch status {
-		case types.OrderStatusEpoch, types.OrderStatusExecuted:
+		case types.OrderStatusEpoch, types.OrderStatusExecuted, types.OrderStatusRevoked:
 		case types.OrderStatusBooked, types.OrderStatusCanceled:
 			// Immediate time in force limit orders may not be canceled, and may
 			// not be in the order book.

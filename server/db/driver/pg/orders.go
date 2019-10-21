@@ -119,6 +119,7 @@ const (
 	orderStatusExecuted
 	orderStatusFailed // failed helps distinguish matched from unmatched executed cancel orders
 	orderStatusCanceled
+	orderStatusRevoked
 )
 
 func marketToPgStatus(status types.OrderStatus) pgOrderStatus {
@@ -131,6 +132,8 @@ func marketToPgStatus(status types.OrderStatus) pgOrderStatus {
 		return orderStatusExecuted
 	case types.OrderStatusCanceled:
 		return orderStatusCanceled
+	case types.OrderStatusRevoked:
+		return orderStatusRevoked
 	}
 	return orderStatusUnknown
 }
@@ -145,6 +148,8 @@ func pgToMarketStatus(status pgOrderStatus) types.OrderStatus {
 		return types.OrderStatusExecuted
 	case orderStatusCanceled:
 		return types.OrderStatusCanceled
+	case orderStatusRevoked:
+		return types.OrderStatusRevoked
 	}
 	return types.OrderStatusUnknown
 }
@@ -162,7 +167,8 @@ func (status pgOrderStatus) active() bool {
 	switch status {
 	case orderStatusEpoch, orderStatusBooked:
 		return true
-	case orderStatusCanceled, orderStatusExecuted, orderStatusFailed, orderStatusUnknown:
+	case orderStatusCanceled, orderStatusRevoked, orderStatusExecuted,
+		orderStatusFailed, orderStatusUnknown:
 		return false
 	default:
 		panic("unknown order status!") // programmer error
@@ -195,11 +201,19 @@ func (a *Archiver) ExecuteOrder(ord order.Order) error {
 	return a.insertOrUpdate(ord, orderStatusExecuted)
 }
 
-// CancelOrder updates LimitOrder with canceled status. If the order does not
+// CancelOrder updates a LimitOrder with canceled status. If the order does not
 // exit in the Archiver, CancelOrder returns ErrUnknownOrder. To store a new
 // limit order with canceled status, use StoreOrder.
 func (a *Archiver) CancelOrder(lo *order.LimitOrder) error {
 	return a.updateOrderStatus(lo, orderStatusCanceled)
+}
+
+// RevokeOrder updates a LimitOrder with revoked status, which is used for
+// DEX-revoked orders rather than orders matched with a user's CancelOrder. If
+// the order does not exit in the Archiver, RevokeOrder returns ErrUnknownOrder.
+// To store a new limit order with revoked status, use StoreOrder.
+func (a *Archiver) RevokeOrder(lo *order.LimitOrder) error {
+	return a.updateOrderStatus(lo, orderStatusRevoked)
 }
 
 // FailCancelOrder updates or inserts the given CancelOrder with failed status.

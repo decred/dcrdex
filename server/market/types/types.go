@@ -110,26 +110,23 @@ const (
 	// necessarily be completely unfilled. Partially filled orders that are
 	// still on the order book remain in OrderStatusBooked.
 	//
-	// QUESTION: How do we distinguish a CancelOrder that was not matched from
-	// one that was matched? With a limit or market order that was not matched,
-	// the filled amount shows this, but cancel orders have no meaningful filled
-	// amount. Having to search a matches table is undesirable, especially since
-	// it is a worst-case query returning zero rows.
+	// Note: The DB driver must be able to distinguish cancel orders that have
+	// not matched from those that were not matched, but OrderStatusExecuted
+	// will be returned for both such orders, although a new exported status may
+	// be added to the consumer can query this information (TODO). The DB knows
+	// the match status for cancel orders how the cancel order was finalized
+	// (ExecuteOrder for matched, and FailCancelOrder for unmatched).
 	OrderStatusExecuted
 
 	// OrderStatusCanceled is for orders that were on the book, but matched with
 	// a cancel order. This does not mean the order is completely unfilled.
 	OrderStatusCanceled
 
-	// QUESTION: What status is for standing limit orders that were matched, but
-	// have failed to swap, and do not re-enter the book? Are they forcibly
-	// canceled (OrderStatusCanceled) or are they considered executed
-	// (OrderStatusExecuted)? Does this also depend on DEX policy regarding the
-	// circumstances of swap failure?
-
-	// The above QUESTIONs suggest that a failed status may be needed, although
-	// perhaps just internal to the DB backend's implementation, to quickly
-	// identify orders that failed to match or failed in the swap stage.
+	// OrderStatusRevoked is DEX-revoked orders that were not canceled by
+	// matching with the client's cancel order but by DEX policy. This includes
+	// standing limit orders that were matched, but have failed to swap.
+	// (neither executed or canceled).
+	OrderStatusRevoked
 )
 
 var orderStatusNames = map[OrderStatus]string{
@@ -138,6 +135,7 @@ var orderStatusNames = map[OrderStatus]string{
 	OrderStatusBooked:   "booked",
 	OrderStatusExecuted: "executed",
 	OrderStatusCanceled: "canceled",
+	OrderStatusRevoked:  "revoked",
 }
 
 // String implements Stringer.
