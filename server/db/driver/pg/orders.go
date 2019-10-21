@@ -202,7 +202,7 @@ func (a *Archiver) ExecuteOrder(ord order.Order) error {
 }
 
 // CancelOrder updates a LimitOrder with canceled status. If the order does not
-// exit in the Archiver, CancelOrder returns ErrUnknownOrder. To store a new
+// exist in the Archiver, CancelOrder returns ErrUnknownOrder. To store a new
 // limit order with canceled status, use StoreOrder.
 func (a *Archiver) CancelOrder(lo *order.LimitOrder) error {
 	return a.updateOrderStatus(lo, orderStatusCanceled)
@@ -210,8 +210,9 @@ func (a *Archiver) CancelOrder(lo *order.LimitOrder) error {
 
 // RevokeOrder updates a LimitOrder with revoked status, which is used for
 // DEX-revoked orders rather than orders matched with a user's CancelOrder. If
-// the order does not exit in the Archiver, RevokeOrder returns ErrUnknownOrder.
-// To store a new limit order with revoked status, use StoreOrder.
+// the order does not exist in the Archiver, RevokeOrder returns
+// ErrUnknownOrder. To store a new limit order with revoked status, use
+// StoreOrder.
 func (a *Archiver) RevokeOrder(lo *order.LimitOrder) error {
 	return a.updateOrderStatus(lo, orderStatusRevoked)
 }
@@ -307,8 +308,8 @@ func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
 	return nil
 }
 
-// OrderStatusByID gets the status, ID, and filled amount of the order with the
-// given OrderID in the market specified by a base and quote asset. See also
+// OrderStatusByID gets the status, type, and filled amount of the order with
+// the given OrderID in the market specified by a base and quote asset. See also
 // OrderStatus. If the order is not found, the error value is ErrUnknownOrder,
 // and the type is market/types.OrderStatusUnknown.
 func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (types.OrderStatus, order.OrderType, int64, error) {
@@ -344,11 +345,11 @@ func (a *Archiver) orderStatus(ord order.Order) (pgOrderStatus, order.OrderType,
 }
 
 // UpdateOrderStatusByID updates the status and filled amount of the order with
-// the given OrderID in the market specified by a base and quote asset. For
-// cancel orders, the filled amount is ignored. OrderStatusByID is used to
-// locate the existing order. If the order is not found, the error value is
-// ErrUnknownOrder, and the type is market/types.OrderStatusUnknown. See also
-// UpdateOrderStatus.
+// the given OrderID in the market specified by a base and quote asset. If
+// filled is -1, the filled amount is unchanged. For cancel orders, the filled
+// amount is ignored. OrderStatusByID is used to locate the existing order. If
+// the order is not found, the error value is ErrUnknownOrder, and the type is
+// market/types.OrderStatusUnknown. See also UpdateOrderStatus.
 func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status types.OrderStatus, filled int64) error {
 	return a.updateOrderStatusByID(oid, base, quote, marketToPgStatus(status), filled)
 }
@@ -378,7 +379,7 @@ func (a *Archiver) updateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 
 	if !initStatus.active() {
 		if tableChange {
-			log.Warnf("Moving an order from an archived to active status: "+
+			return fmt.Errorf("Moving an order from an archived to active status: "+
 				"Order %s (%s -> %s)", oid, initStatus, status)
 		} else {
 			log.Infof("Archived order is changing status: "+

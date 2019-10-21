@@ -219,7 +219,7 @@ func TestExecuteOrder(t *testing.T) {
 		t.Fatalf("BookOrder failed: %v", err)
 	}
 
-	// Store standing limit order in epoch status.
+	// Store standing limit order in executed status.
 	lo := newLimitOrder(true, 4200000, 1, order.StandingTiF, 0)
 	err = archie.StoreOrder(lo, types.OrderStatusExecuted)
 	if err != nil {
@@ -560,54 +560,63 @@ func TestUpdateOrder(t *testing.T) {
 		status    types.OrderStatus
 		newStatus types.OrderStatus
 		newFilled uint64
+		wantErr   bool
 	}{
 		{
 			newLimitOrder(false, 4900000, 1, order.StandingTiF, 0),
 			types.OrderStatusEpoch,  // active
 			types.OrderStatusBooked, // active
 			0,
+			false,
 		},
 		{
 			newLimitOrder(false, 4100000, 1, order.StandingTiF, 0),
 			types.OrderStatusBooked,   // active
 			types.OrderStatusExecuted, // archived
 			0,
+			false,
 		},
 		{
 			newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
 			types.OrderStatusExecuted, // archived
-			types.OrderStatusBooked,   // active, should warn
+			types.OrderStatusBooked,   // active, should err
 			0,
+			true,
 		},
 		{
 			newMarketSellOrder(2, 0),
 			types.OrderStatusEpoch,  // active
 			types.OrderStatusBooked, // active, invalid for market
 			0,
+			false,
 		},
 		{
 			newMarketSellOrder(1, 0),
 			types.OrderStatusExecuted, // archived
 			types.OrderStatusExecuted, // archived, no change
 			0,
+			false,
 		},
 		{
 			newMarketBuyOrder(2000000000, 0),
 			types.OrderStatusEpoch,    // active
 			types.OrderStatusExecuted, // archived
 			2000000000,
+			false,
 		},
 		{
 			newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 1),
 			types.OrderStatusEpoch,    // active
 			types.OrderStatusExecuted, // archived
 			0,
+			false,
 		},
 		{
 			newCancelOrder(targetOrderID, mktInfo.Base, mktInfo.Quote, 2),
 			types.OrderStatusExecuted, // archived
 			types.OrderStatusCanceled, // archived
 			0,
+			false,
 		},
 	}
 
@@ -628,7 +637,7 @@ func TestUpdateOrder(t *testing.T) {
 
 		newStatus := orderStatuses[i].newStatus
 		err = archie.UpdateOrderStatus(ordIn, newStatus)
-		if err != nil {
+		if (err != nil) != orderStatuses[i].wantErr {
 			t.Fatalf("UpdateOrderStatus(%d:%v, %s) failed: %v", i, ordIn, newStatus, err)
 		}
 	}
