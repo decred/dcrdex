@@ -161,11 +161,10 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 }
 
 // Orders (only validated ones):
-//  1. The essential and immutable order.Order data
-//  2. PK: Computed public order UID
-//  3. Status (canceled, failed/not matched, matched, swap in progress, swap completed)
-//  4. Remaining/filled amount (or is this a book/market item?)
-//  5. Owner account ID
+//  1. PK: Computed public order UID
+//  2. All other essential and immutable order.Order data
+//  3. Status (epoch, booked, executed, canceled, revoked)
+//  4. Remaining/filled amount
 
 // Epochs:
 //  1. PK: epoch ID
@@ -176,17 +175,12 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 //  6. resulting book mods (insert, remove)
 //  refs: orders, matches
 
-// Matches:
-//  1. The order.Match data
-//  2. Status for each maker matched with the taker (failed, executed/swapped)
+// Matches (merged with Swaps):
+//  1. The order.Match data, one row per taker/maker pair
+//  2. Epoch ID
+//  3. Swap status (in-progress, failed, executed executed/swapped)
 // PK is ??? a unique ID used by the Market?
 //  refs: orders
-
-// Swaps:
-//  1. The swap.Swap data
-//  2. PK: Computed public swap ID
-//  3. Status (pending, in progress, failed, executed)
-//  refs: matches
 
 // Users:
 //  1. The account.{User,Account} data
