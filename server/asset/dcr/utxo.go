@@ -17,8 +17,8 @@ import (
 // satisfy the asset.UTXO interface to be DEX-compatible.
 type UTXO struct {
 	// Because a UTXO's validity and block info can change after creation, keep a
-	// dcrBackend around to query the state of the tx and update the block info.
-	dcr *dcrBackend
+	// DCRBackend around to query the state of the tx and update the block info.
+	dcr *DCRBackend
 	// The height and hash of the transaction's best known block.
 	height    uint32
 	blockHash chainhash.Hash

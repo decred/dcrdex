@@ -12,34 +12,36 @@ import (
 
 // Error codes
 const (
-	RPCErrorUnspecified = iota
-	RPCParseError
-	RPCUnknownRoute
-	RPCInternal
-	RPCQuarantineClient
-	RPCVersionUnsupported
-	RPCUnknownMatch
-	RPCInternalError
-	SignatureError
-	SerializationError
-	TransactionUndiscovered
-	ContractError
-	SettlementSequenceError
-	ResultLengthError
-	IDMismatchError
-	RedemptionError
-	IDTypeError
-	AckCountError
-	UnknownResponseID
-	OrderParameterError
-	UnknownMarketError
-	ClockRangeError
-	FundingError
-	UTXOAuthError
-	UnknownMarket
-	NotSubscribedError
-	UnauthorizedConnection
-	AuthenticationError
+	RPCErrorUnspecified     = iota // 0
+	RPCParseError                  // 1
+	RPCUnknownRoute                // 2
+	RPCInternal                    // 3
+	RPCQuarantineClient            // 4
+	RPCVersionUnsupported          // 5
+	RPCUnknownMatch                // 6
+	RPCInternalError               // 7
+	SignatureError                 // 8
+	SerializationError             // 9
+	TransactionUndiscovered        // 10
+	ContractError                  // 11
+	SettlementSequenceError        // 12
+	ResultLengthError              // 13
+	IDMismatchError                // 14
+	RedemptionError                // 15
+	IDTypeError                    // 16
+	AckCountError                  // 17
+	UnknownResponseID              // 18
+	OrderParameterError            // 19
+	UnknownMarketError             // 20
+	ClockRangeError                // 21
+	FundingError                   // 22
+	UTXOAuthError                  // 23
+	UnknownMarket                  // 24
+	NotSubscribedError             // 25
+	UnauthorizedConnection         // 26
+	AuthenticationError            // 27
+	PubKeyParseError               // 28
+	FeeError                       // 29
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -95,6 +97,13 @@ const (
 	// ConnectRoute is a client-originating request-type message seeking
 	// authentication so that the connection can be used for for trading.
 	ConnectRoute = "connect"
+	// RegisterRoute is the client-originating request-type message initiating a
+	// new client registration.
+	RegisterRoute = "register"
+	// NotifyFeeRoute is the client-originating request-type message informing the
+	// DEX that the fee has been paid and has the requisite number of
+	// confirmations.
+	NotifyFeeRoute = "notifyfee"
 )
 
 // Bytes is a byte slice that marshals to and unmarshals from a hexadecimal
@@ -638,10 +647,76 @@ func (c *Connect) Serialize() ([]byte, error) {
 	return s, nil
 }
 
-// Connect response is the response result for the ConnectRoute request.
+// Connect is the response result for the ConnectRoute request.
 type ConnectResponse struct {
 	StartEpoch uint64   `json:"startepoch"`
 	Matches    []*Match `json:"matches"`
+}
+
+// Register is the payload for the RegisterRoute request.
+type Register struct {
+	signable
+	PubKey Bytes  `json:"pubkey"`
+	Time   uint64 `json:"timestamp"`
+}
+
+// Serialize serializes the Register data.
+func (r *Register) Serialize() ([]byte, error) {
+	// serialization: pubkey (33) + time (8) = 41
+	s := make([]byte, 0, 41)
+	s = append(s, r.PubKey...)
+	s = append(s, uint64Bytes(r.Time)...)
+	return s, nil
+}
+
+// RegisterResult is the result for the response to Register.
+type RegisterResult struct {
+	signable
+	DEXPubKey    Bytes  `json:"pubkey"`
+	ClientPubKey Bytes  `json:"-"`
+	Address      string `json:"address"`
+	Fee          uint64 `json:"fee"`
+	Time         uint64 `json:"timestamp"`
+}
+
+// Serialize serializes the RegisterResult data.
+func (r *RegisterResult) Serialize() ([]byte, error) {
+	// serialization: pubkey (33) + client pubkey (33) + time (8) + fee (8) +
+	// address (35-ish) = 117
+	b := make([]byte, 0, 117)
+	b = append(b, r.DEXPubKey...)
+	b = append(b, r.ClientPubKey...)
+	b = append(b, uint64Bytes(r.Time)...)
+	b = append(b, uint64Bytes(r.Fee)...)
+	b = append(b, []byte(r.Address)...)
+	return b, nil
+}
+
+// NotifyFee is the payload for a client-originating NotifyFeeRoute request.
+type NotifyFee struct {
+	signable
+	AccountID Bytes  `json:"accountid"`
+	TxID      Bytes  `json:"txid"`
+	Vout      uint32 `json:"vout"`
+	Time      uint64 `json:"timestamp"`
+}
+
+// Serialize serializes the NotifyFee data.
+func (n *NotifyFee) Serialize() ([]byte, error) {
+	// serialization: account id (32) + txid (32) + vout (4) + time (8) = 76
+	b := make([]byte, 0, 68)
+	b = append(b, n.AccountID...)
+	b = append(b, n.TxID...)
+	b = append(b, uint32Bytes(n.Vout)...)
+	b = append(b, uint64Bytes(n.Time)...)
+	return b, nil
+}
+
+// NotifyFeeResult is the result for the response to NotifyFee. Though it embeds
+//signable, it does not satisfy the Signable interface, as it has no need for
+// serialization.
+type NotifyFeeResult struct {
+	signable
 }
 
 // Convert uint64 to 8 bytes.
