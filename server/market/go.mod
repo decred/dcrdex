@@ -12,10 +12,10 @@ replace (
 
 require (
 	github.com/decred/dcrd/dcrec/secp256k1 v1.0.3 // indirect
-	github.com/decred/dcrdex/server/account v0.0.0-20191007225918-c21cff4ecc64
-	github.com/decred/dcrdex/server/asset v0.0.0-20191007225918-c21cff4ecc64
-	github.com/decred/dcrdex/server/book v0.0.0-20191007225918-c21cff4ecc64
-	github.com/decred/dcrdex/server/matcher v0.0.0-20191007225918-c21cff4ecc64
-	github.com/decred/dcrdex/server/order v0.0.0-20191015161642-e29ca1b594a7
+	github.com/decred/dcrdex/server/account v0.0.0-20191021140456-dfb4ce4aeb06
+	github.com/decred/dcrdex/server/asset v0.0.0-20191021140456-dfb4ce4aeb06
+	github.com/decred/dcrdex/server/book v0.0.0-20191021140456-dfb4ce4aeb06
+	github.com/decred/dcrdex/server/matcher v0.0.0-20191021140456-dfb4ce4aeb06
+	github.com/decred/dcrdex/server/order v0.0.0-20191021140456-dfb4ce4aeb06
 	github.com/decred/slog v1.0.0
 )
