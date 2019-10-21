@@ -6,6 +6,7 @@ package pg
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -58,6 +59,62 @@ func newUtxoFromOutpoint(outpoint string) (*utxo, error) {
 		return nil, fmt.Errorf("invalid vout %s: %v", outParts[1], err)
 	}
 	return &utxo{hash, uint32(vout)}, nil
+}
+
+// Value implements the sql/driver.Valuer interface.
+func (u utxo) Value() (driver.Value, error) {
+	// UTXOs are stored as an array of strings like ["txid0:vout0", ...] despite
+	// this being less space efficient than a BYTEA because it significantly
+	// simplifies debugging.
+	return order.OutpointString(&u), nil
+}
+
+// Scan implements the sql.Scanner interface.
+func (u *utxo) Scan(src interface{}) error {
+	var opStr string
+	switch st := src.(type) {
+	case string:
+		opStr = st
+	case []byte: // via pq.GenericArray.Scan
+		opStr = string(st)
+	default:
+		return fmt.Errorf("cannot convert %T to utxo", src)
+	}
+
+	uNew, err := newUtxoFromOutpoint(opStr)
+	if err != nil {
+		return err
+	}
+	*u = *uNew
+	return nil
+}
+
+// Methods cannot be defined on an interface (order.Outpoint), so we define them
+// this way.
+type utxoSlice []order.Outpoint
+
+// Value implements the sql/driver.Valuer interface.
+func (us utxoSlice) Value() (driver.Value, error) {
+	return pq.GenericArray{us}.Value()
+}
+
+// Scan implements the sql.Scanner interface.
+func (us *utxoSlice) Scan(src interface{}) error {
+	// type utxo implements Scanner, not order.Outpoint.
+	var utxos []utxo
+	ga := pq.GenericArray{&utxos}
+	err := ga.Scan(src)
+	if err != nil {
+		return err
+	}
+
+	// Force the utxos into the utxoSlice.
+	newUtxos := make(utxoSlice, 0, len(utxos))
+	for i := range utxos {
+		newUtxos = append(newUtxos, &utxos[i])
+	}
+	*us = newUtxos
+	return nil
 }
 
 var _ db.OrderArchiver = (*Archiver)(nil)
@@ -599,22 +656,12 @@ func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (
 
 	var lo order.LimitOrder
 	var id order.OrderID
-	var utxos pq.StringArray
 	var status pgOrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&id, &lo.OrderType, &lo.Sell,
-		&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, &utxos,
+		&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, (*utxoSlice)(&lo.UTXOs),
 		&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
 	if err != nil {
 		return nil, orderStatusUnknown, err
-	}
-
-	lo.UTXOs = make([]order.Outpoint, 0, len(utxos))
-	for i := range utxos {
-		utxo, err := newUtxoFromOutpoint(utxos[i])
-		if err != nil {
-			return nil, orderStatusUnknown, fmt.Errorf("bad utxo %s: %v", utxos[i], err)
-		}
-		lo.UTXOs = append(lo.UTXOs, utxo)
 	}
 
 	return &lo, status, nil
@@ -653,22 +700,12 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 	for rows.Next() {
 		var lo order.LimitOrder
 		var id order.OrderID
-		var utxos pq.StringArray
 		var status pgOrderStatus
 		err = rows.Scan(&id, &lo.OrderType, &lo.Sell,
-			&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, &utxos,
+			&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, (*utxoSlice)(&lo.UTXOs),
 			&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
 		if err != nil {
 			return nil, nil, err
-		}
-
-		lo.UTXOs = make([]order.Outpoint, 0, len(utxos))
-		for i := range utxos {
-			utxo, err := newUtxoFromOutpoint(utxos[i])
-			if err != nil {
-				return nil, nil, fmt.Errorf("bad utxo %s: %v", utxos[i], err)
-			}
-			lo.UTXOs = append(lo.UTXOs, utxo)
 		}
 
 		orders = append(orders, &lo)
@@ -678,29 +715,17 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 	return orders, statuses, nil
 }
 
-func marshalUTXOs(UTXOs []order.Outpoint) (utxos []string) {
-	// UTXOs are stored as an array of strings like ["txid0:vout0", ...] despite
-	// this being less space efficient than a BYTEA because it significantly
-	// simplifies debugging.
-	for _, u := range UTXOs {
-		utxos = append(utxos, order.OutpointString(u))
-	}
-	return
-}
-
 func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, status pgOrderStatus) (int64, error) {
-	utxos := marshalUTXOs(lo.UTXOs)
 	stmt := fmt.Sprintf(internal.InsertOrder, tableName)
 	return sqlExec(dbe, stmt, lo.ID(), lo.Type(), lo.Sell, lo.AccountID,
-		lo.Address, lo.ClientTime, lo.ServerTime, pq.StringArray(utxos),
+		lo.Address, lo.ClientTime, lo.ServerTime, utxoSlice(lo.UTXOs),
 		lo.Quantity, lo.Rate, lo.Force, status, lo.Filled)
 }
 
 func storeMarketOrder(dbe sqlExecutor, tableName string, mo *order.MarketOrder, status pgOrderStatus) (int64, error) {
-	utxos := marshalUTXOs(mo.UTXOs)
 	stmt := fmt.Sprintf(internal.InsertOrder, tableName)
 	return sqlExec(dbe, stmt, mo.ID(), mo.Type(), mo.Sell, mo.AccountID,
-		mo.Address, mo.ClientTime, mo.ServerTime, pq.StringArray(utxos),
+		mo.Address, mo.ClientTime, mo.ServerTime, utxoSlice(mo.UTXOs),
 		mo.Quantity, 0, order.ImmediateTiF, status, mo.Filled)
 }
 
