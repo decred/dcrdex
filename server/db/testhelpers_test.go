@@ -31,7 +31,7 @@ var acct0 = account.AccountID{
 	0x46, 0x34, 0xe9, 0x1c, 0xec, 0x25, 0xd5, 0x40,
 }
 
-// utxo implements order.UTXO
+// utxo implements order.Outpoint
 type utxo struct {
 	txHash []byte
 	vout   uint32
@@ -63,7 +63,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 				ClientTime: time.Unix(1566497653+timeOffset, 0),
 				ServerTime: time.Unix(1566497656+timeOffset, 0),
 			},
-			UTXOs: []order.UTXO{
+			UTXOs: []order.Outpoint{
 				newUtxo("45b82138ca90e665a1c8793aa901aa232dd82be41b8e630dd621f24e717fc13a", 2),
 			},
 			Sell:     sell,
@@ -85,7 +85,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		UTXOs:    []order.UTXO{},
+		UTXOs:    []order.Outpoint{},
 		Sell:     true,
 		Quantity: quantityLots * LotSize,
 		Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
@@ -102,7 +102,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		UTXOs:    []order.UTXO{},
+		UTXOs:    []order.Outpoint{},
 		Sell:     false,
 		Quantity: quantityQuoteAsset,
 		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",

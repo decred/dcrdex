@@ -25,7 +25,7 @@ func TestMatchID(t *testing.T) {
 			ClientTime: time.Unix(1566497653, 0),
 			ServerTime: time.Unix(1566497656, 0),
 		},
-		UTXOs: []UTXO{
+		UTXOs: []Outpoint{
 			newUtxo("a985d8df97571b130ce30a049a76ffedaa79b6e69b173ff81b1bf9fc07f063c7", 1),
 		},
 		Sell:     true,
@@ -48,7 +48,7 @@ func TestMatchID(t *testing.T) {
 				ClientTime: time.Unix(1566497653, 0),
 				ServerTime: time.Unix(1566497656, 0),
 			},
-			UTXOs: []UTXO{
+			UTXOs: []Outpoint{
 				newUtxo("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
 			},
 			Sell:     false,

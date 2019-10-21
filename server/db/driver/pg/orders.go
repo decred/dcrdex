@@ -27,7 +27,7 @@ const (
 	ErrUnknownOrder = Error("unknown order")
 )
 
-// utxo implements order.UTXO
+// utxo implements order.Outpoint
 type utxo struct {
 	txHash []byte
 	vout   uint32
@@ -593,7 +593,7 @@ func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (
 		return nil, orderStatusUnknown, err
 	}
 
-	lo.UTXOs = make([]order.UTXO, 0, len(utxos))
+	lo.UTXOs = make([]order.Outpoint, 0, len(utxos))
 	for i := range utxos {
 		utxo, err := newUtxoFromOutpoint(utxos[i])
 		if err != nil {
@@ -647,7 +647,7 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 			return nil, nil, err
 		}
 
-		lo.UTXOs = make([]order.UTXO, 0, len(utxos))
+		lo.UTXOs = make([]order.Outpoint, 0, len(utxos))
 		for i := range utxos {
 			utxo, err := newUtxoFromOutpoint(utxos[i])
 			if err != nil {
@@ -663,12 +663,12 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 	return orders, statuses, nil
 }
 
-func marshalUTXOs(UTXOs []order.UTXO) (utxos []string) {
+func marshalUTXOs(UTXOs []order.Outpoint) (utxos []string) {
 	// UTXOs are stored as an array of strings like ["txid0:vout0", ...] despite
 	// this being less space efficient than a BYTEA because it significantly
 	// simplifies debugging.
 	for _, u := range UTXOs {
-		utxos = append(utxos, order.UTXOString(u))
+		utxos = append(utxos, order.OutpointString(u))
 	}
 	return
 }

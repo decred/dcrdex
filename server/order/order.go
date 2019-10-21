@@ -138,7 +138,7 @@ type Order interface {
 
 	// Remaining computes the unfilled amount of the order.
 	Remaining() uint64
-	
+
 	// SwapAddress returns the order's payment address. Will be empty string for
 	// CancelOrder.
 	SwapAddress() string
@@ -157,30 +157,30 @@ func calcOrderID(order Order) OrderID {
 	return blake256.Sum256(order.Serialize())
 }
 
-// UTXO is the interface required to be satisfied by any asset's implementation
-// of a UTXO type.
-type UTXO interface {
+// Outpoint is the interface required to be satisfied by any asset's
+// implementation of a UTXO type.
+type Outpoint interface {
 	TxHash() []byte
 	Vout() uint32
 }
 
-// UTXOString generates the hash:vout utxo string format for a UTXO. This is
-// used to store the UTXOs for an order in a database, but it may be used to
-// generate the canonical UTXO string format, txid:vout.
-func UTXOString(u UTXO) string {
-	return fmt.Sprintf("%x:%d", u.TxHash(), u.Vout())
+// OutpointString generates the hash:vout outpoint string format for an
+// Outpoint. This is used to store the outpoints for an order in a database, but
+// it may be used to generate the canonical outpoint string format, txid:vout.
+func OutpointString(op Outpoint) string {
+	return fmt.Sprintf("%x:%d", op.TxHash(), op.Vout())
 }
 
-func utxoSize(u UTXO) int {
-	return len(u.TxHash()) + 4
+func outpointSize(op Outpoint) int {
+	return len(op.TxHash()) + 4
 }
 
-func serializeUTXO(u UTXO) []byte {
-	b := make([]byte, utxoSize(u))
-	hash := u.TxHash()
+func serializeOutpoint(op Outpoint) []byte {
+	b := make([]byte, outpointSize(op))
+	hash := op.TxHash()
 	hashLen := len(hash)
 	copy(b, hash)
-	binary.BigEndian.PutUint32(b[hashLen:], u.Vout())
+	binary.BigEndian.PutUint32(b[hashLen:], op.Vout())
 	return b
 }
 
@@ -265,7 +265,7 @@ func (p *Prefix) Quote() uint32 {
 // quote asset and is not bound by integral lot size multiple constraints.
 type MarketOrder struct {
 	Prefix
-	UTXOs    []UTXO
+	UTXOs    []Outpoint
 	Sell     bool
 	Quantity uint64
 	Address  string
@@ -331,8 +331,8 @@ func (o *MarketOrder) Serialize() []byte {
 
 	// UTXO data
 	for _, u := range o.UTXOs {
-		utxoSz := utxoSize(u)
-		copy(b[offset:offset+utxoSz], serializeUTXO(u))
+		utxoSz := outpointSize(u)
+		copy(b[offset:offset+utxoSz], serializeOutpoint(u))
 		offset += utxoSz
 	}
 

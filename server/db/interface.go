@@ -11,10 +11,14 @@ import (
 	"github.com/decred/dcrdex/server/order"
 )
 
+// DEXArchivist will be composed of several different interfaces. Starting with
+// OrderArchiver.
 type DEXArchivist interface {
 	OrderArchiver
 }
 
+// OrderArchiver is the interface required for storage and retrieval of all
+// order data.
 type OrderArchiver interface {
 	// Order retrieves an order with the given OrderID, stored for the market
 	// specified by the given base and quote assets.

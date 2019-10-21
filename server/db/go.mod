@@ -10,6 +10,7 @@ require (
 	github.com/decred/slog v1.0.0
 	github.com/lib/pq v1.2.0
 )
+
 replace (
 	github.com/decred/dcrdex/server/account => ../account
 	github.com/decred/dcrdex/server/asset => ../asset

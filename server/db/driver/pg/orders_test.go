@@ -140,7 +140,7 @@ func Test_storeLimitOrder(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			N, err := storeLimitOrder(stub, "dcrdex", tt.args.lo, tt.args.status)
+			N, err := storeLimitOrder(stub, "dcrdex", tt.args.lo, marketToPgStatus(tt.args.status))
 			if (err != nil) != tt.wantErr {
 				t.Errorf("storeLimitOrder() error = %v, wantErr %v", err, tt.wantErr)
 			}

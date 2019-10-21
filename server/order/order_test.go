@@ -124,7 +124,7 @@ func TestPrefix_Serialize(t *testing.T) {
 func TestMarketOrder_Serialize_SerializeSize(t *testing.T) {
 	type fields struct {
 		Prefix   Prefix
-		UTXOs    []UTXO
+		UTXOs    []Outpoint
 		Sell     bool
 		Quantity uint64
 		Address  string
@@ -145,7 +145,7 @@ func TestMarketOrder_Serialize_SerializeSize(t *testing.T) {
 					ClientTime: time.Unix(1566497653, 0),
 					ServerTime: time.Unix(1566497656, 0),
 				},
-				UTXOs: []UTXO{
+				UTXOs: []Outpoint{
 					newUtxo("aed8e9b2b889bf0a78e559684796800144cd76dc8faac2aeac44fbd1c310124b", 1),
 					newUtxo("45b82138ca90e665a1c8793aa901aa232dd82be41b8e630dd621f24e717fc13a", 2),
 				},
@@ -237,7 +237,7 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 						ClientTime: time.Unix(1566497653, 0),
 						ServerTime: time.Unix(1566497656, 0),
 					},
-					UTXOs: []UTXO{
+					UTXOs: []Outpoint{
 						newUtxo("d186e4b6625c9c94797cc494f535fc150177e0619e2303887e0a677f29ef1bab", 0),
 						newUtxo("11d9580e19ad65a875a5bc558d600e96b2916062db9e8b65cbc2bb905207c1ad", 16),
 					},
@@ -386,7 +386,7 @@ func TestMarketOrder_ID(t *testing.T) {
 
 	type fields struct {
 		Prefix   Prefix
-		UTXOs    []UTXO
+		UTXOs    []Outpoint
 		Sell     bool
 		Quantity uint64
 		Address  string
@@ -407,7 +407,7 @@ func TestMarketOrder_ID(t *testing.T) {
 					ClientTime: time.Unix(1566497653, 0),
 					ServerTime: time.Unix(1566497656, 0),
 				},
-				UTXOs: []UTXO{
+				UTXOs: []Outpoint{
 					newUtxo("a985d8df97571b130ce30a049a76ffedaa79b6e69b173ff81b1bf9fc07f063c7", 1),
 				},
 				Sell:     true,
@@ -465,7 +465,7 @@ func TestLimitOrder_ID(t *testing.T) {
 						ClientTime: time.Unix(1566497653, 0),
 						ServerTime: time.Unix(1566497656, 0),
 					},
-					UTXOs: []UTXO{
+					UTXOs: []Outpoint{
 						newUtxo("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
 					},
 					Sell:     false,
@@ -580,8 +580,8 @@ func Test_serializeUTXO(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := serializeUTXO(tt.args.u); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("serializeUTXO() = %#v, want %v", got, tt.want)
+			if got := serializeOutpoint(tt.args.u); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("serializeOutpoint() = %#v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -590,7 +590,7 @@ func Test_serializeUTXO(t *testing.T) {
 func TestUTXOString(t *testing.T) {
 	tests := []struct {
 		name string
-		utxo UTXO
+		utxo Outpoint
 		want string
 	}{
 		{
@@ -601,8 +601,8 @@ func TestUTXOString(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := UTXOString(tt.utxo); got != tt.want {
-				t.Errorf("UTXOString() = %v, want %v", got, tt.want)
+			if got := OutpointString(tt.utxo); got != tt.want {
+				t.Errorf("OutpointString() = %v, want %v", got, tt.want)
 			}
 		})
 	}

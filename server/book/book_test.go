@@ -48,7 +48,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 				ClientTime: time.Unix(1566497653+timeOffset, 0),
 				ServerTime: time.Unix(1566497656+timeOffset, 0),
 			},
-			UTXOs:    []order.UTXO{},
+			UTXOs:    []order.Outpoint{},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,
 			Address:  addr,
