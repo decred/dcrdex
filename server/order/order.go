@@ -31,7 +31,8 @@ type OrderType uint8
 
 // The different OrderType values.
 const (
-	LimitOrderType OrderType = iota
+	UnknownOrderType OrderType = iota
+	LimitOrderType
 	MarketOrderType
 	CancelOrderType
 )
