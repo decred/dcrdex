@@ -5,20 +5,13 @@ package matcher
 
 import "github.com/decred/dcrdex/server/order"
 
-// TODO. PLACEHOLDER. There needs to be an interface satisfied by the order book
-// type provided to the matcher. This Booker is just a hint.
-
+// Booker should be implemented by the order book.
 type Booker interface {
 	LotSize() uint64
 	BuyCount() int
 	SellCount() int
 	BestSell() *order.LimitOrder
 	BestBuy() *order.LimitOrder
-	//Best(sell bool) *order.LimitOrder
 	Insert(*order.LimitOrder) bool
 	Remove(order.OrderID) (*order.LimitOrder, bool)
 }
-
-// type EpochQueuer interface {
-// 	Booker
-// }

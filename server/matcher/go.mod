@@ -1,6 +1,6 @@
 module github.com/decred/dcrdex/server/matcher
 
-go 1.12
+go 1.13
 
 replace (
 	github.com/decred/dcrdex/server/account => ../account

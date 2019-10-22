@@ -5,8 +5,11 @@
 package order
 
 import (
+	"database/sql"
+	"database/sql/driver"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/decred/dcrd/crypto/blake256"
@@ -25,6 +28,26 @@ func (oid OrderID) String() string {
 	return hex.EncodeToString(oid[:])
 }
 
+// Value implements the sql/driver.Valuer interface.
+func (oid OrderID) Value() (driver.Value, error) {
+	return oid[:], nil // []byte
+}
+
+// Scan implements the sql.Scanner interface.
+func (oid *OrderID) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		copy(oid[:], src)
+		return nil
+		//case string:
+		// case nil:
+		// 	*oid = nil
+		// 	return nil
+	}
+
+	return fmt.Errorf("cannot convert %T to OrderID", src)
+}
+
 // OrderType distinguishes the different kinds of orders (e.g. limit, market,
 // cancel).
 type OrderType uint8
@@ -36,6 +59,37 @@ const (
 	MarketOrderType
 	CancelOrderType
 )
+
+// Value implements the sql/driver.Valuer interface.
+func (ot OrderType) Value() (driver.Value, error) {
+	return int64(ot), nil
+}
+
+// Scan implements the sql.Scanner interface.
+func (ot *OrderType) Scan(src interface{}) error {
+	// Use sql.(NullInt32).Scan because it uses the unexported
+	// sql.convertAssignRows to coerce compatible types.
+	v := new(sql.NullInt32)
+	if err := v.Scan(src); err != nil {
+		return err
+	}
+	*ot = OrderType(v.Int32)
+	return nil
+}
+
+// String returns a string representation of the OrderType.
+func (ot OrderType) String() string {
+	switch ot {
+	case LimitOrderType:
+		return "limit"
+	case MarketOrderType:
+		return "market"
+	case CancelOrderType:
+		return "cancel"
+	default:
+		return "unknown"
+	}
+}
 
 // TimeInForce indicates how limit order execution is to be handled. That is,
 // when the order is not immediately matched during processing of the order's
@@ -79,12 +133,23 @@ type Order interface {
 	// Time returns the Order's server time, when it was received by the server.
 	Time() int64
 
+	// FilledAmt returns the filled amount of the order.
+	FilledAmt() uint64
+
 	// Remaining computes the unfilled amount of the order.
 	Remaining() uint64
 
 	// SwapAddress returns the order's payment address. Will be empty string for
 	// CancelOrder.
 	SwapAddress() string
+
+	// Base returns the unique integer identifier of the base asset as defined
+	// in the asset package.
+	Base() uint32
+
+	// Quote returns the unique integer identifier of the quote asset as defined
+	// in the asset package.
+	Quote() uint32
 }
 
 // An order's ID is computed as the Blake-256 hash of the serialized order.
@@ -92,23 +157,30 @@ func calcOrderID(order Order) OrderID {
 	return blake256.Sum256(order.Serialize())
 }
 
-// UTXO is the interface required to be satisfied by any asset's implementation
-// of a UTXO type.
-type UTXO interface {
+// Outpoint is the interface required to be satisfied by any asset's
+// implementation of a UTXO type.
+type Outpoint interface {
 	TxHash() []byte
 	Vout() uint32
 }
 
-func utxoSize(u UTXO) int {
-	return len(u.TxHash()) + 4
+// OutpointString generates the hash:vout outpoint string format for an
+// Outpoint. This is used to store the outpoints for an order in a database, but
+// it may be used to generate the canonical outpoint string format, txid:vout.
+func OutpointString(op Outpoint) string {
+	return fmt.Sprintf("%x:%d", op.TxHash(), op.Vout())
 }
 
-func serializeUTXO(u UTXO) []byte {
-	b := make([]byte, utxoSize(u))
-	hash := u.TxHash()
+func outpointSize(op Outpoint) int {
+	return len(op.TxHash()) + 4
+}
+
+func serializeOutpoint(op Outpoint) []byte {
+	b := make([]byte, outpointSize(op))
+	hash := op.TxHash()
 	hashLen := len(hash)
 	copy(b, hash)
-	binary.BigEndian.PutUint32(b[hashLen:], u.Vout())
+	binary.BigEndian.PutUint32(b[hashLen:], op.Vout())
 	return b
 }
 
@@ -175,6 +247,16 @@ func (p *Prefix) Serialize() []byte {
 	return b
 }
 
+// Base returns the base asset integer ID.
+func (p *Prefix) Base() uint32 {
+	return p.BaseAsset
+}
+
+// Base returns the  quote asset integer ID.
+func (p *Prefix) Quote() uint32 {
+	return p.QuoteAsset
+}
+
 // MarketOrder defines a market order in terms of a Prefix and the order
 // details, including the backing UTXOs, the order direction/side, order
 // quantity, and the address where the matched client will send funds. The order
@@ -183,7 +265,7 @@ func (p *Prefix) Serialize() []byte {
 // quote asset and is not bound by integral lot size multiple constraints.
 type MarketOrder struct {
 	Prefix
-	UTXOs    []UTXO
+	UTXOs    []Outpoint
 	Sell     bool
 	Quantity uint64
 	Address  string
@@ -217,6 +299,11 @@ func (o *MarketOrder) SwapAddress() string {
 	return o.Address
 }
 
+// String is the same as UID. It is defined to satisfy Stringer.
+func (o *MarketOrder) String() string {
+	return o.UID()
+}
+
 // SerializeSize returns the length of the serialized MarketOrder.
 func (o *MarketOrder) SerializeSize() int {
 	// Compute the size of the serialized UTXOs.
@@ -244,8 +331,8 @@ func (o *MarketOrder) Serialize() []byte {
 
 	// UTXO data
 	for _, u := range o.UTXOs {
-		utxoSz := utxoSize(u)
-		copy(b[offset:offset+utxoSz], serializeUTXO(u))
+		utxoSz := outpointSize(u)
+		copy(b[offset:offset+utxoSz], serializeOutpoint(u))
 		offset += utxoSz
 	}
 
@@ -269,6 +356,11 @@ func (o *MarketOrder) Serialize() []byte {
 // Type returns MarketOrderType for a MarketOrder.
 func (o *MarketOrder) Type() OrderType {
 	return MarketOrderType
+}
+
+// Filled returns the filled order amount.
+func (o *MarketOrder) FilledAmt() uint64 {
+	return o.Filled
 }
 
 // Remaining returns the remaining order amount.
@@ -305,6 +397,11 @@ func (o *LimitOrder) UID() string {
 	uid := o.ID().String()
 	o.uid = uid
 	return uid
+}
+
+// String is the same as UID. It is defined to satisfy Stringer.
+func (o *LimitOrder) String() string {
+	return o.UID()
 }
 
 // SerializeSize returns the length of the serialized LimitOrder.
@@ -373,6 +470,11 @@ func (o *CancelOrder) UID() string {
 	return uid
 }
 
+// String is the same as UID. It is defined to satisfy Stringer.
+func (o *CancelOrder) String() string {
+	return o.UID()
+}
+
 // SerializeSize returns the length of the serialized CancelOrder.
 func (o *CancelOrder) SerializeSize() int {
 	return o.Prefix.SerializeSize() + OrderIDSize
@@ -397,6 +499,11 @@ func (o *CancelOrder) Remaining() uint64 {
 // for a CancelOrder.
 func (o *CancelOrder) SwapAddress() string {
 	return ""
+}
+
+// Filled returns the filled order amount.
+func (o *CancelOrder) FilledAmt() uint64 {
+	return 0
 }
 
 // Ensure CancelOrder is an Order.
