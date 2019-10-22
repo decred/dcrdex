@@ -555,7 +555,10 @@ pre-published for further validation.
 
 The client pays the fee on-chain and notifies the DEX of the transaction detail.
 The fee is paid with a standard P2PKH output to the address received in step 1.
-The server immediately sends their receipt and then closes the connection.
+Once the transaction is mined and has the
+[[#Exchange_Variables|requisite number of confirmations (swapconf)]],
+the client should send their fee notification to complete
+the registration process.
 
 '''Request route:''' <code>notifyfee</code>, '''originator: ''' client
 
@@ -594,13 +597,8 @@ The server immediately sends their receipt and then closes the connection.
 | sig       || string || server hex-encoded signature of client's serialized notification
 |}
 
-===Step 3: Await Confirmation===
-
-Once the transaction is mined and has the
-[[#Exchange_Variables|requisite number of confirmations]], the client
-should [[#Session_Authentication|create a new authenticated connection]].
-If the client attempts to connect before <code>swapconf</code> confirmations,
-the DEX should reject the connection outright.
+The client can then authenticate their connection using the
+<code>connect</code> route and begin trading.
 
 ==Client Order Management==
 
