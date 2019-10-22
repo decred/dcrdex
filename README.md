@@ -50,7 +50,9 @@ dcrdex
 │   │   └── order      # the ubiquitous order type
 │   ├── matcher        # order matching engine
 │   └── swap           # the swap executor/coordinator
-└── spec
+├── spec
+└── testing
+    └── harness.sh    # tmux testing harness 
 ```
 
 Note that `dcrdex` is the name of both the repository and the DEX server process
