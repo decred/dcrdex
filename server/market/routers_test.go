@@ -2,6 +2,7 @@ package market
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -12,6 +13,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/asset"
+	"github.com/decred/dcrdex/server/comms"
 	"github.com/decred/dcrdex/server/comms/msgjson"
 	// dex "github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/matcher"
@@ -20,21 +22,61 @@ import (
 )
 
 const (
-	dummySize   = 50
-	btcLotSize  = 100_000
-	btcRateStep = 1_000
-	dcrLotSize  = 10_000_000
-	dcrRateStep = 100_000
-	btcID       = 0
-	dcrID       = 42
-	btcAddr     = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
-	dcrAddr     = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
+	dummySize    = 50
+	btcLotSize   = 100_000
+	btcRateStep  = 1_000
+	dcrLotSize   = 10_000_000
+	dcrRateStep  = 100_000
+	btcID        = 0
+	dcrID        = 42
+	btcAddr      = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
+	dcrAddr      = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
+	mktName1     = "btc_ltc"
+	mkt1BaseRate = 5e7
+	mktName2     = "dcr_doge"
+	mkt2BaseRate = 8e9
 )
 
 var (
 	oRig       *tOrderRig
 	dummyError = fmt.Errorf("test error")
 	clientTime = time.Now()
+	testCtx    context.Context
+	rig        *testRig
+	mkt1       = &ordertest.Market{
+		Base:    0, // BTC
+		Quote:   2, // LTC
+		LotSize: 1e5,
+	}
+	mkt2 = &ordertest.Market{
+		Base:    42, // DCR
+		Quote:   3,  // DOGE
+		LotSize: 1e6,
+	}
+	buyer1 = &ordertest.Writer{
+		Addr:   "LSdTvMHRm8sScqwCi6x9wzYQae8JeZhx6y", // LTC receiving address
+		Acct:   ordertest.NextAccount(),
+		Sell:   false,
+		Market: mkt1,
+	}
+	seller1 = &ordertest.Writer{
+		Addr:   "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", // BTC
+		Acct:   ordertest.NextAccount(),
+		Sell:   true,
+		Market: mkt1,
+	}
+	buyer2 = &ordertest.Writer{
+		Addr:   "DsaAKsMvZ6HrqhmbhLjV9qVbPkkzF5daowT", // DCR
+		Acct:   ordertest.NextAccount(),
+		Sell:   false,
+		Market: mkt2,
+	}
+	seller2 = &ordertest.Writer{
+		Addr:   "DE53BHmWWEi4G5a3REEJsjMpgNTnzKT98a", // DOGE
+		Acct:   ordertest.NextAccount(),
+		Sell:   true,
+		Market: mkt2,
+	}
 )
 
 // The AuthManager handles client-related actions, including authorization and
@@ -263,8 +305,37 @@ func TestMain(m *testing.M) {
 		Markets:         map[string]MarketTunnel{"dcr_btc": oRig.market},
 		MarketBuyBuffer: 1.5,
 	})
-	os.Exit(m.Run())
+	rig = newTestRig()
+	src1 := rig.source1
+	src2 := rig.source2
+	// Load up the order books up with 16 orders each.
+	for i := 0; i < 8; i++ {
+		src1.sells = append(src1.sells,
+			makeLO(seller1, mkRate1(1.0, 1.2), randLots(10), order.StandingTiF))
+		src1.buys = append(src1.buys,
+			makeLO(buyer1, mkRate1(0.8, 1.0), randLots(10), order.StandingTiF))
+		src2.sells = append(src2.sells,
+			makeLO(seller2, mkRate2(1.0, 1.2), randLots(10), order.StandingTiF))
+		src2.buys = append(src2.buys,
+			makeLO(buyer2, mkRate2(0.8, 1.0), randLots(10), order.StandingTiF))
+	}
+	tick(100)
+	doIt := func() int {
+		// Not counted as coverage, must test Archiver constructor explicitly.
+		var shutdown func()
+		testCtx, shutdown = context.WithCancel(context.Background())
+		defer shutdown()
+		rig.router = NewOrderBookRouter(&BookRouterConfig{
+			Ctx:           testCtx,
+			Sources:       rig.sources(),
+			EpochDuration: 60,
+		})
+		return m.Run()
+	}
+	os.Exit(doIt())
 }
+
+// Order router tests
 
 func TestLimit(t *testing.T) {
 	qty := uint64(dcrLotSize) * 10
@@ -758,4 +829,489 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 	receivingAsset.addrChecks = false
 	checkCode("bad address", msgjson.OrderParameterError)
 	receivingAsset.addrChecks = true
+}
+
+// Book Router Tests
+
+func randLots(max int) uint64 {
+	return uint64(rand.Intn(max))
+}
+
+func randRate(baseRate, lotSize uint64, min, max float64) uint64 {
+	multiplier := rand.Float64()*(max-min) + min
+	rate := uint64(multiplier * float64(baseRate))
+	return rate - rate%lotSize
+}
+
+func makeLO(writer *ordertest.Writer, rate, lots uint64, force order.TimeInForce) *order.LimitOrder {
+	return ordertest.WriteLimitOrder(writer, rate, lots, force, 0)
+}
+
+func makeMO(writer *ordertest.Writer, lots uint64) *order.MarketOrder {
+	return ordertest.WriteMarketOrder(writer, lots, 0)
+}
+
+func makeCO(writer *ordertest.Writer, targetID order.OrderID) *order.CancelOrder {
+	return ordertest.WriteCancelOrder(writer, targetID, 0)
+}
+
+type TBookSource struct {
+	buys  []*order.LimitOrder
+	sells []*order.LimitOrder
+	feed  chan *updateSignal
+}
+
+func tNewBookSource() *TBookSource {
+	return &TBookSource{
+		feed: make(chan *updateSignal, 16),
+	}
+}
+
+func (s *TBookSource) Book() (buys []*order.LimitOrder, sells []*order.LimitOrder) {
+	return s.buys, s.sells
+}
+func (s *TBookSource) OrderFeed() chan *updateSignal {
+	return s.feed
+}
+
+type TLink struct {
+	id       uint64
+	sends    []*msgjson.Message
+	sendErr  error
+	banished bool
+}
+
+var linkCounter uint64
+
+func tNewLink() *TLink {
+	linkCounter++
+	return &TLink{
+		id:    linkCounter,
+		sends: make([]*msgjson.Message, 0),
+	}
+}
+
+func (conn *TLink) ID() uint64 { return conn.id }
+func (conn *TLink) Send(msg *msgjson.Message) error {
+	// should probably lock Send and getSend
+	conn.sends = append(conn.sends, msg)
+	return conn.sendErr
+}
+
+func (conn *TLink) getSend() *msgjson.Message {
+	if len(conn.sends) == 0 {
+		return nil
+	}
+	s := conn.sends[0]
+	conn.sends = conn.sends[1:]
+	return s
+}
+
+// There are no requests in the routers.
+func (conn *TLink) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
+	return nil
+}
+func (conn *TLink) Banish() {
+	conn.banished = true
+}
+
+type testRig struct {
+	router  *OrderBookRouter
+	source1 *TBookSource
+	source2 *TBookSource
+}
+
+func newTestRig() *testRig {
+	src1 := tNewBookSource()
+	src2 := tNewBookSource()
+	return &testRig{
+		source1: src1,
+		source2: src2,
+	}
+}
+
+func (rig *testRig) sources() map[string]BookSource {
+	return map[string]BookSource{
+		mktName1: rig.source1,
+		mktName2: rig.source2,
+	}
+}
+
+func tick(d int) { time.Sleep(time.Duration(d) * time.Millisecond) }
+
+func newSubscription(mkt *ordertest.Market) *msgjson.Message {
+	msg, _ := msgjson.NewRequest(1, msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{
+		Base:  mkt.Base,
+		Quote: mkt.Quote,
+	})
+	return msg
+}
+
+func newSubscriber(mkt *ordertest.Market) (*TLink, *msgjson.Message) {
+	return tNewLink(), newSubscription(mkt)
+}
+
+func findOrder(id msgjson.Bytes, books ...[]*order.LimitOrder) *order.LimitOrder {
+	for _, book := range books {
+		for _, o := range book {
+			if o.ID().String() == id.String() {
+				return o
+			}
+		}
+	}
+	return nil
+}
+
+func getEpochNoteFromLink(t *testing.T, link *TLink) *msgjson.EpochOrderNote {
+	noteMsg := link.getSend()
+	if noteMsg == nil {
+		t.Fatalf("no epoch notification sent")
+	}
+	epochNote := new(msgjson.EpochOrderNote)
+	err := json.Unmarshal(noteMsg.Payload, epochNote)
+	if err != nil {
+		t.Fatalf("error unmarshaling epoch notification: %v", err)
+	}
+	return epochNote
+}
+
+func getBookNoteFromLink(t *testing.T, link *TLink) *msgjson.BookOrderNote {
+	noteMsg := link.getSend()
+	if noteMsg == nil {
+		t.Fatalf("no epoch notification sent")
+	}
+	bookNote := new(msgjson.BookOrderNote)
+	err := json.Unmarshal(noteMsg.Payload, bookNote)
+	if err != nil {
+		t.Fatalf("error unmarshaling epoch notification: %v", err)
+	}
+	return bookNote
+}
+
+func getUnbookNoteFromLink(t *testing.T, link *TLink) *msgjson.UnbookOrderNote {
+	noteMsg := link.getSend()
+	if noteMsg == nil {
+		t.Fatalf("no epoch notification sent")
+	}
+	unbookNote := new(msgjson.UnbookOrderNote)
+	err := json.Unmarshal(noteMsg.Payload, unbookNote)
+	if err != nil {
+		t.Fatalf("error unmarshaling epoch notification: %v", err)
+	}
+	return unbookNote
+}
+
+func mkRate1(min, max float64) uint64 {
+	return randRate(mkt1BaseRate, mkt1.LotSize, min, max)
+}
+
+func mkRate2(min, max float64) uint64 {
+	return randRate(mkt2BaseRate, mkt2.LotSize, min, max)
+}
+
+func TestRouter(t *testing.T) {
+	src1 := rig.source1
+	src2 := rig.source2
+	router := rig.router
+
+	checkResponse := func(tag, mktName string, msgID uint64, conn *TLink) []*msgjson.BookOrderNote {
+		respMsg := conn.getSend()
+		if respMsg == nil {
+			t.Fatalf("(%s): no response sent for subscription", tag)
+		}
+		if respMsg.ID != msgID {
+			t.Fatalf("(%s): wrong ID for response. wanted %d, got %d", tag, msgID, respMsg.ID)
+		}
+		resp, err := respMsg.Response()
+		if err != nil {
+			t.Fatalf("(%s): error parsing response: %v", tag, err)
+		}
+		book := new(msgjson.OrderBook)
+		err = json.Unmarshal(resp.Result, book)
+		if err != nil {
+			t.Fatalf("(%s): unmarshal error: %v", tag, err)
+		}
+		if len(book.Orders) != 16 {
+			t.Fatalf("(%s): expected 16 orders, received %d", tag, len(book.Orders))
+		}
+		if book.MarketID != mktName {
+			t.Fatalf("(%s): wrong market ID. expected %s, got %s", tag, mktName1, book.MarketID)
+		}
+		return book.Orders
+	}
+
+	findBookOrder := func(id msgjson.Bytes, src *TBookSource) *order.LimitOrder {
+		return findOrder(id, src.buys, src.sells)
+	}
+
+	compareMO := func(msgOrder *msgjson.BookOrderNote, mo *order.MarketOrder, tag string) {
+		if mo.Sell != (msgOrder.Side == msgjson.SellOrderNum) {
+			t.Fatalf("%s: message order has wrong side marked. sell = %t, side = '%d'", tag, mo.Sell, msgOrder.Side)
+		}
+		if msgOrder.Quantity != mo.Remaining() {
+			t.Fatalf("%s: message order quantity incorrect. expected %d, got %d", tag, mo.Quantity, msgOrder.Quantity)
+		}
+		if msgOrder.Time != uint64(mo.Time()) {
+			t.Fatalf("%s: wrong time. expected %d, got %d", tag, mo.Time(), msgOrder.Time)
+		}
+	}
+
+	compareLO := func(msgOrder *msgjson.BookOrderNote, lo *order.LimitOrder, tifFlag uint8, tag string) {
+		if msgOrder.Rate != lo.Rate {
+			t.Fatalf("%s: message order rate incorrect. expected %d, got %d", tag, lo.Rate, msgOrder.Rate)
+		}
+		if msgOrder.TiF != tifFlag {
+			t.Fatalf("%s: message order has wrong time-in-force flag. wanted %d, got %d", tag, tifFlag, msgOrder.TiF)
+		}
+		compareMO(msgOrder, &lo.MarketOrder, tag)
+	}
+
+	// A helper function to scan through the received msgjson.OrderBook.Orders and
+	// compare the orders to the order book.
+	checkBook := func(source *TBookSource, tifFlag uint8, tag string, msgOrders ...*msgjson.BookOrderNote) {
+		for i, msgOrder := range msgOrders {
+			lo := findBookOrder(msgOrder.OrderID, source)
+			if lo == nil {
+				t.Fatalf("%s(%d): order not found", tag, i)
+			}
+			compareLO(msgOrder, lo, tifFlag, tag)
+		}
+	}
+
+	// Have a subscriber connect and pull the orders from market 1.
+	// The format used here is link[market]_[count]
+	link1, sub := newSubscriber(mkt1)
+	router.handleOrderBook(link1, sub)
+	tick(5)
+	orders := checkResponse("first link, market 1", mktName1, sub.ID, link1)
+	checkBook(src1, msgjson.StandingOrderNum, "first link, market 1", orders...)
+
+	// Another subscriber to the same market should behave identically.
+	link2, sub := newSubscriber(mkt1)
+	router.handleOrderBook(link2, sub)
+	tick(5)
+	orders = checkResponse("second link, market 1", mktName1, sub.ID, link2)
+	checkBook(src1, msgjson.StandingOrderNum, "second link, market 1", orders...)
+
+	// An epoch notification sent on market 1's channel should arrive at both
+	// clients.
+	lo := makeLO(buyer1, mkRate1(0.8, 1.0), randLots(10), order.ImmediateTiF)
+	sig := &updateSignal{
+		action: epochAction,
+		order:  lo,
+	}
+	src1.feed <- sig
+	tick(5)
+
+	epochNote := getEpochNoteFromLink(t, link1)
+	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link1")
+	if epochNote.MarketID != mktName1 {
+		t.Fatalf("wrong market id. got %s, wanted %s", mktName1, epochNote.MarketID)
+	}
+
+	epochNote = getEpochNoteFromLink(t, link2)
+	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link2")
+
+	// just for kicks, checks the epoch is as expected.
+	tStamp := uint64(lo.Time())
+	epoch := tStamp - tStamp%router.epochLen
+	if epochNote.Epoch != epoch {
+		t.Fatalf("wrong epoch. wanted %d, got %d", epoch, epochNote.Epoch)
+	}
+
+	// Have both subscribers subscribe to market 2.
+	sub = newSubscription(mkt2)
+	router.handleOrderBook(link1, sub)
+	router.handleOrderBook(link2, sub)
+	tick(5)
+	orders = checkResponse("first link, market 2", mktName2, sub.ID, link1)
+	checkBook(src2, msgjson.StandingOrderNum, "first link, market 2", orders...)
+	orders = checkResponse("second link, market 2", mktName2, sub.ID, link2)
+	checkBook(src2, msgjson.StandingOrderNum, "second link, market 2", orders...)
+
+	// Send an epoch update for a market order.
+	mo := makeMO(buyer2, randLots(10))
+	sig = &updateSignal{
+		action: epochAction,
+		order:  mo,
+	}
+	src2.feed <- sig
+	tick(5)
+
+	epochNote = getEpochNoteFromLink(t, link1)
+	compareMO(&epochNote.BookOrderNote, mo, "link 1 market 2 epoch update (market order)")
+
+	epochNote = getEpochNoteFromLink(t, link2)
+	compareMO(&epochNote.BookOrderNote, mo, "link 2 market 2 epoch update (market order)")
+
+	// Grab a random order from the market 2 sell book. Fill 1 lot and send a
+	// bookAction update.
+	for _, o := range src2.sells {
+		lo = o
+		break
+	}
+
+	lo.Filled = mkt2.LotSize
+	sig = &updateSignal{
+		action: bookAction,
+		order:  lo,
+	}
+	src2.feed <- sig
+	tick(5)
+
+	bookNote := getBookNoteFromLink(t, link1)
+	compareLO(bookNote, lo, msgjson.StandingOrderNum, "book notification, link1, market 2")
+	if bookNote.MarketID != mktName2 {
+		t.Fatalf("wrong market id. wanted %s, got %s", mktName2, bookNote.MarketID)
+	}
+
+	bookNote = getBookNoteFromLink(t, link2)
+	compareLO(bookNote, lo, msgjson.StandingOrderNum, "book notification, link2, market 2")
+
+	if bookNote.Quantity != lo.Remaining() {
+		t.Fatalf("wrong quantity in book update. expected %d, got %d", lo.Remaining(), bookNote.Quantity)
+	}
+
+	// Now unbook the order.
+	sig = &updateSignal{
+		action: unbookAction,
+		order:  lo,
+	}
+	src2.feed <- sig
+	tick(5)
+
+	unbookNote := getUnbookNoteFromLink(t, link1)
+	if lo.ID().String() != unbookNote.OrderID.String() {
+		t.Fatalf("wrong cancel ID. expected %s, got %s", lo.ID(), unbookNote.OrderID)
+	}
+	if unbookNote.MarketID != mktName2 {
+		t.Fatalf("wrong market id. wanted %s, got %s", mktName2, unbookNote.MarketID)
+	}
+	// clear the send from client 2
+	link2.getSend()
+
+	// Make sure the order is no longer stored in the router's books
+	if router.books[mktName2].orders[lo.ID()] != nil {
+		t.Fatalf("order still in book after unbookAction")
+	}
+
+	// Now unsubscribe link 1 from market 1.
+	unsub, _ := msgjson.NewRequest(10, msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
+		MarketID: mktName1,
+	})
+	router.handleUnsubOrderBook(link1, unsub)
+	tick(5)
+
+	mo = makeMO(seller1, randLots(10))
+	sig = &updateSignal{
+		action: epochAction,
+		order:  mo,
+	}
+	src1.feed <- sig
+	tick(5)
+
+	// client 1 should not have a message, but client 2 should.
+	if link1.getSend() != nil {
+		t.Fatalf("client 1 received update after unsubbing")
+	}
+
+	if link2.getSend() == nil {
+		t.Fatalf("client 2 didn't receive an update after client 1 unsubbed")
+	}
+
+	// Now epoch a cancel order to client 2.
+	for _, o := range src1.buys {
+		lo = o
+		break
+	}
+	oid := lo.ID()
+	co := makeCO(buyer1, oid)
+	sig = &updateSignal{
+		action: epochAction,
+		order:  co,
+	}
+	src1.feed <- sig
+	tick(5)
+
+	epochNote = getEpochNoteFromLink(t, link2)
+	if epochNote.OrderType != msgjson.CancelOrderNum {
+		t.Fatalf("epoch cancel notification not of cancel type. expected %d, got %d",
+			msgjson.CancelOrderNum, epochNote.OrderType)
+	}
+
+	if epochNote.TargetID.String() != oid.String() {
+		t.Fatalf("epoch cancel notification has wrong order ID. expected %s, got %s",
+			oid, epochNote.TargetID)
+	}
+
+	// Send another, but err on the send. Check for unsubscribed
+	link2.sendErr = fmt.Errorf("test error")
+	src1.feed <- sig
+	tick(5)
+
+	l := router.books[mktName1].subs.conns[link2.ID()]
+	if l != nil {
+		t.Fatalf("client not removed from subscription list")
+	}
+}
+
+func TestBadMessages(t *testing.T) {
+	router := rig.router
+	link, sub := newSubscriber(mkt1)
+
+	checkErr := func(tag string, rpcErr *msgjson.Error, code int) {
+		if rpcErr == nil {
+			t.Fatalf("%s: no error", tag)
+		}
+		if rpcErr.Code != code {
+			t.Fatalf("%s: wrong code. wanted %d, got %d", tag, code, rpcErr.Code)
+		}
+	}
+
+	// Bad encoding
+	ogPayload := sub.Payload
+	sub.Payload = []byte(`?`)
+	rpcErr := router.handleOrderBook(link, sub)
+	tick(5)
+	checkErr("bad payload", rpcErr, msgjson.RPCParseError)
+	sub.Payload = ogPayload
+
+	// Use an unkown market
+	badMkt := &ordertest.Market{
+		Base:  400000,
+		Quote: 400001,
+	}
+	sub = newSubscription(badMkt)
+	rpcErr = router.handleOrderBook(link, sub)
+	tick(5)
+	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
+
+	// Valid asset IDs, but not an actual market on the DEX.
+	badMkt = &ordertest.Market{
+		Base:  15845,   // SDGO
+		Quote: 5264462, // PTN
+	}
+	sub = newSubscription(badMkt)
+	rpcErr = router.handleOrderBook(link, sub)
+	tick(5)
+	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
+
+	// Unsub with invalid payload
+	unsub, _ := msgjson.NewRequest(10, msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
+		MarketID: mktName1,
+	})
+	ogPayload = unsub.Payload
+	unsub.Payload = []byte(`?`)
+	rpcErr = router.handleUnsubOrderBook(link, unsub)
+	tick(5)
+	checkErr("bad payload", rpcErr, msgjson.RPCParseError)
+	unsub.Payload = ogPayload
+
+	// Try unsubscribing from an unknown market
+	unsub, _ = msgjson.NewRequest(10, msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
+		MarketID: "sdgo_ptn",
+	})
+	rpcErr = router.handleUnsubOrderBook(link, unsub)
+	tick(5)
+	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
 }
