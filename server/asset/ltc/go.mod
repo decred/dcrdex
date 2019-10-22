@@ -5,10 +5,10 @@ go 1.13
 replace (
 	github.com/decred/dcrdex/server/asset => ../
 	github.com/decred/dcrdex/server/asset/btc => ../btc
+	github.com/ltcsuite/ltcutil v0.0.0-20190507082654-23cdfa9fcc3d => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
 )
 
 require (
-	github.com/btcsuite/btcd v0.0.0-20190824003749-130ea5bddde3
 	github.com/decred/dcrdex/server/asset v0.0.0-00010101000000-000000000000
 	github.com/decred/dcrdex/server/asset/btc v0.0.0-00010101000000-000000000000
 	github.com/decred/slog v1.0.0
