@@ -5,6 +5,7 @@ go 1.12
 replace (
 	github.com/decred/dcrdex/server/asset => ../
 	github.com/decred/dcrdex/server/asset/btc => ../btc
+	github.com/ltcsuite/ltcutil v0.0.0-20190507082654-23cdfa9fcc3d => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
 )
 
 require (

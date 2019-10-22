@@ -60,6 +60,7 @@ github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23/go.mod h1:J+Gs4SYgM6
 github.com/ltcsuite/ltcd v0.0.0-20190519120615-e27ee083f08f h1:QLfBI57QxqemTi4k30gBqvIydMi0FS0tZfMxT2LpEn4=
 github.com/ltcsuite/ltcd v0.0.0-20190519120615-e27ee083f08f/go.mod h1:PPSOmqRCtob0mC9fTmLMlV2wfjPqEUNZFA/CiWxFC8w=
 github.com/ltcsuite/ltcutil v0.0.0-20190507082654-23cdfa9fcc3d/go.mod h1:8Vg/LTOO0KYa/vlHWJ6XZAevPQThGH5sufO0Hrou/lA=
+github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d/go.mod h1:8Vg/LTOO0KYa/vlHWJ6XZAevPQThGH5sufO0Hrou/lA=
 github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/ginkgo v1.7.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/gomega v1.4.1/go.mod h1:C1qb7wdrVGGVU+Z6iS04AVkA3Q65CEZX59MT0QO5uiA=
