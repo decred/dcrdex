@@ -156,7 +156,7 @@ spoofing, and other manipulative trading practices.
 
 ====Epoch Time====
 
-For a given epoch duration '''''d > 0''''' , and current UNIX epoch time stamp
+For a given epoch duration '''''d > 0''''' , and current UNIX epoch timestamp
 '''''t''''' (in seconds since Jan 01 00:00:00 1970 UTC), the current order
 matching epoch index, '''''i''''', and epoch range are computed as
 
