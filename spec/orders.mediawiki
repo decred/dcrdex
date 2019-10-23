@@ -51,68 +51,65 @@ The client is responsible for tracking the sequence ID to ensure all order
 updates are received. If an update appears to be missing, the client should
 re-subscribe to the market to synchronize the order book from scratch.
 
-<code>result</code>
-{|
-! field       !! type   !! description
-|-
-| book  || object || An OrderBook object
-|-
-| seq   || int    || A sequence ID
-|}
+'''Response'''
 
-'''JSON OrderBook object'''
-
+<code>payload</code>
 {|
 ! field    !! type !! description
 |-
-| marketid || int || the market ID. included with order book updates.
+| marketid || string || An identifier used to identify this market in notifications
+|-
+| seq      || int    || A sequence ID
 |-
 | epoch    || int  || the current epoch
 |-
-| orders   || &#91;object&#93; || A list of Order objects
+| orders   || &#91;object&#93; || A list of '''Order''' objects (described below)
 |}
 
 '''JSON Order object'''
 
 {|
-! field   !! type   !! description
+! field   !! type   !! description !! notes
 |-
-| oid     || string || the order ID
+| seq      || int   || A sequence ID || superceded in <code>orderbook</code> response
 |-
 | com     || string || the order commitment
 |-
-| otype   || string || "l" for ''limit'', "m" for ''market''
+| marketid || string || A unique market identifier ||
 |-
-| side    || string || "b" for ''buy'', "s" for ''sell''
+| oid     || string || the order ID ||
 |-
-| osize   || int    || order size (atoms)
+| otype   || string || "l" for ''limit'', "m" for ''market'', "c" for ''cancel'' || epoch_order only
+|-
+| side    || string || "b" for ''buy'', "s" for ''sell'' || epoch_order, book_order
+|-
+| qty     || int      || order size (atoms) || epoch_order, book_order
 |-
 | rate    || int    || price rate. [[#Rate_Encoding|message-rate encoding]]. only set on limit orders
 |-
 | tif     || string || time in force. one of "i" for ''immediate'' or "s" for ''standing''. only set on limit orders
 |-
-| epoch   || int    || the epoch in which the order was received
+| time    || int    || the order's UNIX timestamp || epoch_order, book_order
+|-
+| epoch   || int    || the order's epoch index || epoch_order only
+|-
+| target  || string || target order ID || only set on cancel orders
 |}
 
 '''Changes to the order book''' will be received from the DEX as a stream of
-updates.
-These updates use the notification message type, so omit an <code>id</code>
-attribute.
-
-'''Notification route:''' <code>remove_order</code>, '''originator: ''' DEX
-
-<code>payload</code>
+notifications. The action to be taken depends on the route according to the
+following table. The payload for all three routes is an '''Order''' object.
 {|
-! field   !! type !! description
+! route        !! action
 |-
-| marketid || int || the market ID
+| book_order   || add (or update) the order to the order book
 |-
-| orderid || string || hex-encoded order ID
+| epoch_order  || add the order to the epoch queue
 |-
-| seq   || int    || A sequence ID
+| unbook_order || remove the order from the order book
 |}
 
-'''Notification route:''' <code>add_limit</code> & <code>add_market</code>, '''originator: ''' DEX
+'''Request route:''' <code>match_data</code>, '''originator: ''' DEX
 
 <code>payload</code>
 {|
@@ -161,6 +158,8 @@ websocket connection.
 |-
 | marketid || int || the market ID
 |}
+
+<code>result</code>: boolean <code>true</code> on success.
 
 ===Order Preparation===
 

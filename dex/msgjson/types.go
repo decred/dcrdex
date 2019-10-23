@@ -524,6 +524,12 @@ type Cancel struct {
 	TargetID Bytes `json:"targetid"`
 }
 
+// Serialize serializes the Cancel data.
+func (c *Cancel) Serialize() ([]byte, error) {
+	// serialization: prefix (57) + target id (32) = 89
+	return append(c.Prefix.Serialize(), c.TargetID...), nil
+}
+
 // OrderResult is returned from the order-placing routes.
 type OrderResult struct {
 	Sig        Bytes  `json:"sig"`
@@ -531,12 +537,6 @@ type OrderResult struct {
 	OrderID    Bytes  `json:"orderid"`
 	EpochIdx   uint64 `json:"epochidx"`
 	EpochDur   uint64 `json:"epochdur"`
-}
-
-// Serialize serializes the Cancel data.
-func (c *Cancel) Serialize() ([]byte, error) {
-	// serialization: prefix (57) + target id (32) = 89
-	return append(c.Prefix.Serialize(), c.TargetID...), nil
 }
 
 // OrderBookSubscription is the payload for a client-originating request to the
