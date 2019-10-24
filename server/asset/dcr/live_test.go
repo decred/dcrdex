@@ -89,6 +89,7 @@ func TestLiveUTXO(t *testing.T) {
 		sp2sh          int
 		immatureBefore int
 		immatureAfter  int
+		utxoVal        uint64
 	}
 	stats := new(testStats)
 	var currentHeight, tipHeight int64
@@ -209,6 +210,7 @@ func TestLiveUTXO(t *testing.T) {
 					if confs != int64(expectedConfs) {
 						return fmt.Errorf("expected %d confirmations, found %d for %s:%d", expectedConfs, confs, txHash, vout)
 					}
+					stats.utxoVal += utxo.Value()
 					break
 				case scriptTypeOK && err != nil:
 					// This is only okay if output is being spent by another transaction.
@@ -297,6 +299,7 @@ func TestLiveUTXO(t *testing.T) {
 	t.Logf("%d stake P2SH scripts", stats.sp2sh)
 	t.Logf("%d immature transactions in the last %d blocks", stats.immatureBefore, maturity)
 	t.Logf("%d immature transactions before %d blocks ago", stats.immatureAfter, maturity)
+	t.Logf("total unspent value counted: %.2f DCR", float64(stats.utxoVal)/1e8)
 }
 
 // TestCacheAdvantage compares the speed of requesting blocks from the RPC vs.

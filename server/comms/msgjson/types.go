@@ -31,6 +31,11 @@ const (
 	IDTypeError
 	AckCountError
 	UnknownResponseID
+	OrderParameterError
+	UnknownMarketError
+	ClockRangeError
+	FundingError
+	UTXOAuthError
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -59,6 +64,15 @@ const (
 	// RevokeMatchRoute is a DEX-originating request-type message informing a
 	// client that a match has been revoked.
 	RevokeMatchRoute = "revoke_match"
+	// LimitRoute is the client-originating request-type message placing a limit
+	// order.
+	LimitRoute = "limit"
+	// MarketRoute is the client-originating request-type message placing a market
+	// order.
+	MarketRoute = "market"
+	// CancelRoute is the client-originating request-type message placing a cancel
+	// order.
+	CancelRoute = "cancel"
 )
 
 // Bytes is a byte slice that marshals to and unmarshals from a hexadecimal
@@ -287,7 +301,6 @@ func (init *Init) Serialize() ([]byte, error) {
 	// Init serialization is orderid (32) + matchid (32) + txid (probably 32) +
 	// vout (4) + timestamp (8) + contract (97 ish). Sum = 205
 	s := make([]byte, 0, 205)
-
 	s = append(s, init.OrderID...)
 	s = append(s, init.MatchID...)
 	s = append(s, []byte(init.TxID)...)
@@ -367,6 +380,132 @@ func (redeem *Redeem) Serialize() ([]byte, error) {
 // They are identical to the Redeem parameters, but Redeem is for the
 // client-originating RedeemRoute request.
 type Redemption = Redeem
+
+const (
+	BuyOrderNum       = 1
+	SellOrderNum      = 2
+	StandingOrderNum  = 1
+	ImmediateOrderNum = 2
+	LimitOrderNum     = 1
+	MarketOrderNum    = 2
+	CancelOrderNum    = 3
+)
+
+// UTXO is information for validating funding transactions. Some number of
+// UTXOs must be included with both Limit and Market payloads.
+type UTXO struct {
+	TxID    Bytes   `json:"txid"`
+	Vout    uint32  `json:"vout"`
+	PubKeys []Bytes `json:"pubkeys"`
+	Sigs    []Bytes `json:"sigs"`
+	Redeem  Bytes   `json:"redeem"`
+}
+
+// Serialize serializes the UTXO data.
+func (u *UTXO) Serialize() []byte {
+	// serialization: tx hash (32) + vout (4) = 36 bytes
+	return append(u.TxID, uint32Bytes(u.Vout)...)
+}
+
+// Prefix is a common structure shared among order type payloads.
+type Prefix struct {
+	signable
+	AccountID  Bytes  `json:"accountid"`
+	Base       uint32 `json:"base"`
+	Quote      uint32 `json:"quote"`
+	OrderType  uint8  `json:"ordertype"`
+	ClientTime uint64 `json:"tclient"`
+	ServerTime uint64 `json:"tserver"`
+}
+
+// Serialize serializes the Prefix data.
+func (p *Prefix) Serialize() []byte {
+	// serialization: account ID (32) + base asset (4) + quote asset (4) +
+	// order type (1), client time (8), server time (8) = 57 bytes
+	b := make([]byte, 0, 57)
+	b = append(b, p.AccountID...)
+	b = append(b, uint32Bytes(p.Base)...)
+	b = append(b, uint32Bytes(p.Quote)...)
+	b = append(b, byte(p.OrderType))
+	b = append(b, uint64Bytes(p.ClientTime)...)
+	return append(b, uint64Bytes(p.ServerTime)...)
+}
+
+// Trade is common to Limit and Market Payloads.
+type Trade struct {
+	Side     uint8   `json:"side"`
+	Quantity uint64  `json:"ordersize"`
+	UTXOs    []*UTXO `json:"utxos"`
+	Address  string  `json:"address"`
+}
+
+// Serialize serializes the Trade data.
+func (t *Trade) Serialize() []byte {
+	// serialization: utxo count (1), utxo data (36*count), side (1), qty (8)
+	// = 10 + 36*count
+	// Address is not serialized as part of the trade.
+	utxoCount := len(t.UTXOs)
+	b := make([]byte, 0, 10+36*utxoCount)
+	b = append(b, byte(utxoCount))
+	for _, utxo := range t.UTXOs {
+		b = append(b, utxo.Serialize()...)
+	}
+	b = append(b, t.Side)
+	return append(b, uint64Bytes(t.Quantity)...)
+}
+
+// Limit is the payload for the LimitRoute, which places a limit order.
+type Limit struct {
+	Prefix
+	Trade
+	Rate uint64 `json:"rate,omitempty"`
+	TiF  uint8  `json:"timeinforce"`
+}
+
+// Serialize serializes the Limit data.
+func (l *Limit) Serialize() ([]byte, error) {
+	// serialization: prefix (57) + trade (variable) + rate (8)
+	// + time-in-force (1) + address (~35) = 102 + len(trade)
+	trade := l.Trade.Serialize()
+	b := make([]byte, 0, 102+len(trade))
+	b = append(b, l.Prefix.Serialize()...)
+	b = append(b, trade...)
+	b = append(b, uint64Bytes(l.Rate)...)
+	b = append(b, l.TiF)
+	return append(b, []byte(l.Address)...), nil
+}
+
+// Market is the payload for the MarketRoute, which places a market order.
+type Market struct {
+	Prefix
+	Trade
+}
+
+// Serialize serializes the Market data.
+func (m *Market) Serialize() ([]byte, error) {
+	// seralization: prefix (57) + trade (varies) + address (35 ish)
+	b := append(m.Prefix.Serialize(), m.Trade.Serialize()...)
+	return append(b, []byte(m.Address)...), nil
+}
+
+// Cancel is the payload for the CancelRoute, which places a cancel order.
+type Cancel struct {
+	Prefix
+	TargetID Bytes `json:"targetid"`
+}
+
+// OrderResult is returned from the order-placing routes.
+type OrderResult struct {
+	Sig        Bytes  `json:"sig"`
+	ServerTime uint64 `json:"tserver"`
+	OrderID    Bytes  `json:"orderid"`
+}
+
+// Serialize serializes the Cancel data.
+func (c *Cancel) Serialize() ([]byte, error) {
+	// serialization: prefix (57) + target id (32) = 89
+	return append(c.Prefix.Serialize(), c.TargetID...), nil
+}
 
 // Convert uint64 to 8 bytes.
 func uint64Bytes(i uint64) []byte {

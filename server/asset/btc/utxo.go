@@ -39,6 +39,8 @@ type UTXO struct {
 	// spendSize stores the best estimate of the size (bytes) of the serialized
 	// transaction input that spends this UTXO.
 	spendSize uint32
+	// The output value.
+	value uint64
 	// While the utxo's tx is still in mempool, the tip hash will be stored.
 	// This enables an optimization in the Confirmations method to return zero
 	// without extraneous block lookups.
@@ -196,4 +198,9 @@ func (utxo *UTXO) TxID() string {
 // Vout is the output index of the UTXO.
 func (utxo *UTXO) Vout() uint32 {
 	return utxo.vout
+}
+
+// Value is the output value, in atoms.
+func (utxo *UTXO) Value() uint64 {
+	return utxo.value
 }

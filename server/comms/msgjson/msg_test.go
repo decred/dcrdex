@@ -3,6 +3,7 @@ package msgjson
 import (
 	"bytes"
 	"encoding/json"
+	"math/rand"
 	"testing"
 )
 
@@ -334,6 +335,387 @@ func TestRedeem(t *testing.T) {
 	}
 }
 
+func TestUTXO(t *testing.T) {
+	txid, _ := BytesFromHex("f72c201f11e7ee9b88d54ea9c6ae9c0da1a8dace622a019c6703e78b1c670aad")
+	pk, _ := BytesFromHex("cade497e8d881a3ea91f57dc56d29c316683ce4b3a995adc48b78c338f643263b6")
+	sig, _ := BytesFromHex("2a776b69f81473ddfd595a468173274f0984522186ffc09b79b116b7d17b23dd76c26a3be89fdd1ac65c88adee45bbfbc6088c840391111266b12b2b29fe3d088461b720e35c516328")
+	redeem, _ := BytesFromHex("0a745d9871f5b353a146ba311029479c05296c93b3806cd662")
+	utxo := &UTXO{
+		TxID: txid,
+		Vout: 256,
+		// the rest are not part of the serialized utxo.
+		PubKeys: []Bytes{pk},
+		Sigs:    []Bytes{sig},
+		Redeem:  redeem,
+	}
+
+	exp := []byte{
+		// TxID 32 bytes
+		0xf7, 0x2c, 0x20, 0x1f, 0x11, 0xe7, 0xee, 0x9b, 0x88, 0xd5, 0x4e, 0xa9,
+		0xc6, 0xae, 0x9c, 0x0d, 0xa1, 0xa8, 0xda, 0xce, 0x62, 0x2a, 0x01, 0x9c,
+		0x67, 0x03, 0xe7, 0x8b, 0x1c, 0x67, 0x0a, 0xad,
+		// Vout 4 bytes
+		0x00, 0x00, 0x01, 0x00,
+	}
+
+	b := utxo.Serialize()
+	if !bytes.Equal(b, exp) {
+		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
+	}
+
+	utxoB, err := json.Marshal(utxo)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var utxoBack UTXO
+	err = json.Unmarshal(utxoB, &utxoBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if !bytes.Equal(utxoBack.TxID, utxoBack.TxID) {
+		t.Fatal(utxoBack.TxID, utxoBack.TxID)
+	}
+	if utxoBack.Vout != utxo.Vout {
+		t.Fatalf("wrong vout. wanted %d, got %d", utxo.Vout, utxoBack.Vout)
+	}
+	if !bytes.Equal(utxoBack.PubKeys[0], utxoBack.PubKeys[0]) {
+		t.Fatal(utxoBack.PubKeys[0], utxoBack.PubKeys[0])
+	}
+	if !bytes.Equal(utxoBack.Sigs[0], utxoBack.Sigs[0]) {
+		t.Fatal(utxoBack.Sigs[0], utxoBack.Sigs[0])
+	}
+	if !bytes.Equal(utxoBack.Redeem, utxoBack.Redeem) {
+		t.Fatal(utxoBack.Redeem, utxoBack.Redeem)
+	}
+}
+
+func TestPrefix(t *testing.T) {
+	// serialization: account ID (32) + base asset (4) + quote asset (4) +
+	// order type (1), client time (8), server time (8) = 57 bytes
+	acctID, _ := BytesFromHex("05bf0f2b97fa551375b9c92687f7a948a8f4a4237653a04e6b00c6f14c72fd1e9c")
+	prefix := &Prefix{
+		AccountID:  acctID,
+		Base:       256,
+		Quote:      65536,
+		OrderType:  1,
+		ClientTime: 1571871297,
+		ServerTime: 1571871841,
+	}
+
+	exp := []byte{
+		// Account ID 32 bytes
+		0x05, 0xbf, 0x0f, 0x2b, 0x97, 0xfa, 0x55, 0x13, 0x75, 0xb9, 0xc9, 0x26,
+		0x87, 0xf7, 0xa9, 0x48, 0xa8, 0xf4, 0xa4, 0x23, 0x76, 0x53, 0xa0, 0x4e,
+		0x6b, 0x00, 0xc6, 0xf1, 0x4c, 0x72, 0xfd, 0x1e, 0x9c,
+		// Base Asset 4 bytes
+		0x00, 0x00, 0x01, 0x00,
+		// Quote Asset 4 bytes
+		0x00, 0x01, 0x00, 0x00,
+		// Order Type 1 bytes
+		0x01,
+		// Client Time 8 bytes
+		0x00, 0x00, 0x00, 0x00, 0x5d, 0xb0, 0xda, 0x41,
+		// Server Time 8 bytes (zeros for client signature)
+		0x00, 0x00, 0x00, 0x00, 0x5d, 0xb0, 0xdc, 0x61,
+	}
+
+	b := prefix.Serialize()
+	if !bytes.Equal(b, exp) {
+		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
+	}
+
+	prefixB, err := json.Marshal(prefix)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var prefixBack Prefix
+	err = json.Unmarshal(prefixB, &prefixBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if !bytes.Equal(prefixBack.AccountID, prefixBack.AccountID) {
+		t.Fatal(prefixBack.AccountID, prefixBack.AccountID)
+	}
+	if prefixBack.Base != prefix.Base {
+		t.Fatalf("wrong base asset. wanted %d, got %d", prefix.Base, prefixBack.Base)
+	}
+	if prefixBack.Quote != prefix.Quote {
+		t.Fatalf("wrong quote asset. wanted %d, got %d", prefix.Quote, prefixBack.Quote)
+	}
+	if prefixBack.OrderType != prefix.OrderType {
+		t.Fatalf("wrong order type. wanted %d, got %d", prefix.OrderType, prefixBack.OrderType)
+	}
+	if prefixBack.ClientTime != prefix.ClientTime {
+		t.Fatalf("wrong client time. wanted %d, got %d", prefix.ClientTime, prefixBack.ClientTime)
+	}
+	if prefixBack.ServerTime != prefix.ServerTime {
+		t.Fatalf("wrong server time. wanted %d, got %d", prefix.ServerTime, prefixBack.ServerTime)
+	}
+}
+
+func TestTrade(t *testing.T) {
+	// serialization: utxo count (1), utxo data (36*count), side (1), qty (8)
+	// = 10 + 36*count
+
+	addr := "13DePXLAKNsFCSmgfrEsYm8G1aCVZdYvP9"
+	utxo1 := randomUTXO()
+	utxo2 := randomUTXO()
+
+	trade := &Trade{
+		Side:     1,
+		Quantity: 600_000_000,
+		UTXOs:    []*UTXO{utxo1, utxo2},
+		Address:  addr,
+	}
+
+	// UTXO count
+	b := trade.Serialize()
+	if b[0] != 0x02 {
+		t.Fatalf("utxo count byte incorrect: %d", b[0])
+	}
+	b = b[1:]
+
+	// first utxo
+	u := utxo1.Serialize()
+	uLen := len(u)
+	if !bytes.Equal(b[:uLen], u) {
+		t.Fatal(b[:uLen], u)
+	}
+	b = b[uLen:]
+
+	// second utxo
+	u = utxo2.Serialize()
+	uLen = len(u)
+	if !bytes.Equal(b[:uLen], u) {
+		t.Fatal(b[:uLen], u)
+	}
+	b = b[uLen:]
+
+	// side
+	if b[0] != 0x01 {
+		t.Fatalf("wrong side. wanted 1, got %d", b[0])
+	}
+	b = b[1:]
+
+	qty := []byte{0x00, 0x00, 0x00, 0x00, 0x23, 0xc3, 0x46, 0x00}
+	if !bytes.Equal(b, qty) {
+		t.Fatal(b, qty)
+	}
+}
+
+func TestLimit(t *testing.T) {
+	// serialization: prefix (57) + trade (variable) + address (~35)
+	// = 92 + len(trade)
+	acctID := randomBytes(32)
+	prefix := &Prefix{
+		AccountID:  acctID,
+		Base:       256,
+		Quote:      65536,
+		OrderType:  1,
+		ClientTime: 1571874397,
+		ServerTime: 1571874405,
+	}
+	addr := "DsDePXLAKNsFCSmgfrEsYm8G1aCVZdYvP9"
+	utxo1 := randomUTXO()
+	utxo2 := randomUTXO()
+	trade := &Trade{
+		Side:     1,
+		Quantity: 600_000_000,
+		UTXOs:    []*UTXO{utxo1, utxo2},
+		Address:  addr,
+	}
+	limit := &Limit{
+		Prefix: *prefix,
+		Trade:  *trade,
+		Rate:   350_000_000,
+		TiF:    1,
+	}
+
+	b, err := limit.Serialize()
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+
+	// Compare the prefix byte-for-byte and pop it from the front.
+	x := prefix.Serialize()
+	xLen := len(x)
+	if !bytes.Equal(x[:xLen], x) {
+		t.Fatal(x, x[:xLen])
+	}
+	b = b[xLen:]
+
+	// Compare the trade byte-for-byte and pop it from the front.
+	x = trade.Serialize()
+	xLen = len(x)
+	if !bytes.Equal(x[:xLen], x) {
+		t.Fatal(x, x[:xLen])
+	}
+	b = b[xLen:]
+
+	exp := []byte{
+		// Rate 8 bytes
+		0x00, 0x00, 0x00, 0x00, 0x14, 0xdc, 0x93, 0x80,
+		// Time-in-force 1 byte
+		0x01,
+		// Address 35 bytes
+		0x44, 0x73, 0x44, 0x65, 0x50, 0x58, 0x4c, 0x41, 0x4b, 0x4e, 0x73, 0x46,
+		0x43, 0x53, 0x6d, 0x67, 0x66, 0x72, 0x45, 0x73, 0x59, 0x6d, 0x38, 0x47,
+		0x31, 0x61, 0x43, 0x56, 0x5a, 0x64, 0x59, 0x76, 0x50, 0x39,
+	}
+	if !bytes.Equal(exp, b) {
+		t.Fatal(exp, b)
+	}
+
+	limitB, err := json.Marshal(limit)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var limitBack Limit
+	err = json.Unmarshal(limitB, &limitBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	comparePrefix(t, &limitBack.Prefix, &limit.Prefix)
+	compareTrade(t, &limitBack.Trade, &limit.Trade)
+	if limitBack.Rate != limit.Rate {
+		t.Fatal(limitBack.Rate, limit.Rate)
+	}
+	if limitBack.TiF != limit.TiF {
+		t.Fatal(limitBack.TiF, limit.TiF)
+	}
+}
+
+func TestMarket(t *testing.T) {
+	// serialization: prefix (57) + trade (variable) + rate (8)
+	// + time-in-force (1) + address (~35) = 66 + len(trade)
+	acctID := randomBytes(32)
+	prefix := &Prefix{
+		AccountID:  acctID,
+		Base:       256,
+		Quote:      65536,
+		OrderType:  1,
+		ClientTime: 1571874397,
+		ServerTime: 1571874405,
+	}
+	addr := "16brznLu4ieZ6tToKfUgibD94UcqshGUE3"
+	utxo1 := randomUTXO()
+	utxo2 := randomUTXO()
+	trade := &Trade{
+		Side:     1,
+		Quantity: 600_000_000,
+		UTXOs:    []*UTXO{utxo1, utxo2},
+		Address:  addr,
+	}
+	market := &Market{
+		Prefix: *prefix,
+		Trade:  *trade,
+	}
+
+	b, err := market.Serialize()
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+
+	// Compare the prefix byte-for-byte and pop it from the front.
+	x := prefix.Serialize()
+	xLen := len(x)
+	if !bytes.Equal(x[:xLen], x) {
+		t.Fatal(x, x[:xLen])
+	}
+	b = b[xLen:]
+
+	// Compare the trade data byte-for-byte and pop it from the front.
+	x = trade.Serialize()
+	xLen = len(x)
+	if !bytes.Equal(x[:xLen], x) {
+		t.Fatal(x, x[:xLen])
+	}
+	b = b[xLen:]
+
+	// The only thing left should be the utf-8 encoded address.
+	addrBytes := []byte{
+		0x31, 0x36, 0x62, 0x72, 0x7a, 0x6e, 0x4c, 0x75, 0x34, 0x69, 0x65, 0x5a,
+		0x36, 0x74, 0x54, 0x6f, 0x4b, 0x66, 0x55, 0x67, 0x69, 0x62, 0x44, 0x39,
+		0x34, 0x55, 0x63, 0x71, 0x73, 0x68, 0x47, 0x55, 0x45, 0x33,
+	}
+	if !bytes.Equal(b, addrBytes) {
+		t.Fatal(b, addrBytes)
+	}
+
+	marketB, err := json.Marshal(market)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var marketBack Market
+	err = json.Unmarshal(marketB, &marketBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	comparePrefix(t, &marketBack.Prefix, &market.Prefix)
+	compareTrade(t, &marketBack.Trade, &market.Trade)
+}
+
+func TestCancel(t *testing.T) {
+	// serialization: prefix (57) + target id (32) = 89
+	acctID := randomBytes(32)
+	prefix := &Prefix{
+		AccountID:  acctID,
+		Base:       256,
+		Quote:      65536,
+		OrderType:  1,
+		ClientTime: 1571874397,
+		ServerTime: 1571874405,
+	}
+	targetID, _ := BytesFromHex("a1f1b66916353b58dbb65562eb19731953b2f1215987a9d9137f0df3458637b7")
+	cancel := &Cancel{
+		Prefix:   *prefix,
+		TargetID: targetID,
+	}
+
+	b, err := cancel.Serialize()
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+
+	// Compare the prefix byte-for-byte and pop it from the front.
+	x := prefix.Serialize()
+	xLen := len(x)
+	if !bytes.Equal(x, b[:xLen]) {
+		t.Fatal(x, b[:xLen])
+	}
+	b = b[xLen:]
+
+	target := []byte{
+		0xa1, 0xf1, 0xb6, 0x69, 0x16, 0x35, 0x3b, 0x58, 0xdb, 0xb6, 0x55, 0x62,
+		0xeb, 0x19, 0x73, 0x19, 0x53, 0xb2, 0xf1, 0x21, 0x59, 0x87, 0xa9, 0xd9,
+		0x13, 0x7f, 0x0d, 0xf3, 0x45, 0x86, 0x37, 0xb7,
+	}
+	if !bytes.Equal(b, target) {
+		t.Fatal(b, target)
+	}
+
+	cancelB, err := json.Marshal(cancel)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var cancelBack Cancel
+	err = json.Unmarshal(cancelB, &cancelBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	comparePrefix(t, &cancelBack.Prefix, &cancel.Prefix)
+	if !bytes.Equal(cancelBack.TargetID, cancel.TargetID) {
+		t.Fatal(cancelBack.TargetID, cancel.TargetID)
+	}
+}
+
 func TestSignable(t *testing.T) {
 	sig := []byte{
 		0x07, 0xad, 0x7f, 0x33, 0xc5, 0xb0, 0x13, 0xa1, 0xbb, 0xd6, 0xad, 0xc0,
@@ -468,5 +850,58 @@ func TestRespReq(t *testing.T) {
 	_, err = msg.Response()
 	if err == nil {
 		t.Fatalf("no error when retreiving response payload from request-type message")
+	}
+}
+
+func comparePrefix(t *testing.T, p1, p2 *Prefix) {
+	if !bytes.Equal(p1.AccountID, p2.AccountID) {
+		t.Fatal(p1.AccountID, p2.AccountID)
+	}
+	if p1.Base != p2.Base {
+		t.Fatal(p1.Base, p2.Base)
+	}
+	if p1.Quote != p2.Quote {
+		t.Fatal(p1.Quote, p2.Quote)
+	}
+	if p1.OrderType != p2.OrderType {
+		t.Fatal(p1.OrderType, p2.OrderType)
+	}
+	if p1.ClientTime != p2.ClientTime {
+		t.Fatal(p1.ClientTime, p2.ClientTime)
+	}
+	if p1.ServerTime != p2.ServerTime {
+		t.Fatal(p1.ServerTime, p2.ServerTime)
+	}
+}
+
+func compareTrade(t *testing.T, t1, t2 *Trade) {
+	if t1.Side != t2.Side {
+		t.Fatal(t1.Side, t2.Side)
+	}
+	if t1.Quantity != t2.Quantity {
+		t.Fatal(t1.Quantity, t2.Quantity)
+	}
+	if len(t1.UTXOs) != 2 {
+		t.Fatalf("wrong number of utxos. expected 2 got %d", len(t1.UTXOs))
+	}
+	if t1.Address != t2.Address {
+		t.Fatal(t1.Address, t2.Address)
+	}
+}
+
+func randomBytes(len int) []byte {
+	bytes := make([]byte, len)
+	rand.Read(bytes)
+	return bytes
+}
+
+func randomUTXO() *UTXO {
+	return &UTXO{
+		TxID: randomBytes(32),
+		Vout: rand.Uint32(),
+		// the rest are not part of the serialized utxo.
+		PubKeys: []Bytes{randomBytes(33)},
+		Sigs:    []Bytes{randomBytes(77)},
+		Redeem:  randomBytes(25),
 	}
 }

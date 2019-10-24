@@ -223,6 +223,7 @@ func LiveUTXOStats(btc *Backend, t *testing.T) {
 		found   int
 		checked int
 		utxoErr int
+		utxoVal uint64
 	}
 	var stats testStats
 	var unknowns [][]byte
@@ -274,12 +275,13 @@ out:
 					continue
 				}
 				stats.checked++
-				_, err = btc.utxo(txHash, uint32(vout), nil)
+				utxo, err := btc.utxo(txHash, uint32(vout), nil)
 				if err != nil {
 					stats.utxoErr++
 					continue
 				}
 				stats.found++
+				stats.utxoVal += utxo.Value()
 			}
 		}
 		prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
@@ -297,6 +299,7 @@ out:
 	t.Logf("%d P2WSH scripts", stats.p2wsh)
 	t.Logf("%d zero-valued outputs", stats.zeros)
 	t.Logf("%d P2(W)PKH UTXOs found of %d checked, %.1f%%", stats.found, stats.checked, float64(stats.found)/float64(stats.checked)*100)
+	t.Logf("total unspent value counted: %.2f", float64(stats.utxoVal)/1e8)
 	t.Logf("%d P2PKH UTXO retrieval errors (likely already spent, OK)", stats.utxoErr)
 	numUnknown := len(unknowns)
 	if numUnknown > 0 {
