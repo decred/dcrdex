@@ -22,7 +22,7 @@ type tableStmt struct {
 	stmt string
 }
 
-var createPublicTableStatements = []tableStmt{
+var createDEXTableStatements = []tableStmt{
 	{marketsTableName, internal.CreateMarketsTable},
 }
 
@@ -36,12 +36,13 @@ var createMarketTableStatements = []tableStmt{
 	{"orders_active", internal.CreateOrdersTable},
 	{"cancels_archived", internal.CreateCancelOrdersTable},
 	{"cancels_active", internal.CreateCancelOrdersTable},
+	{"matches", internal.CreateMatchesTable}, // just one matches table per market for now
 }
 
 var tableMap = func() map[string]string {
-	m := make(map[string]string, len(createPublicTableStatements)+
+	m := make(map[string]string, len(createDEXTableStatements)+
 		len(createMarketTableStatements)+len(createAccountTableStatements))
-	for _, pair := range createPublicTableStatements {
+	for _, pair := range createDEXTableStatements {
 		m[pair.name] = pair.stmt
 	}
 	for _, pair := range createMarketTableStatements {
@@ -73,6 +74,10 @@ func fullCancelOrderTableName(dbName, marketSchema string, active bool) string {
 	}
 
 	return fullTableName(dbName, marketSchema, orderTable)
+}
+
+func fullMatchesTableName(dbName, marketSchema string) string {
+	return dbName + "." + marketSchema + ".matches"
 }
 
 // CreateTable creates one of the known tables by name. The table will be

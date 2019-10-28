@@ -95,7 +95,7 @@ func CheckMarketBuyBuffer(book Booker, ord *order.MarketOrder, marketBuyBuffer f
 
 // Match matches orders given a standing order book and an epoch queue. Matched
 // orders from the book are removed from the book.
-func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.MatchSet, passed, failed, partial, inserted []order.Order) {
+func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.MatchSet, passed, failed, partial, booked, unbooked []order.Order) {
 	// Apply the deterministic pseudorandom shuffling.
 	shuffleQueue(queue)
 
@@ -121,20 +121,31 @@ func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Matc
 			passed = append(passed, q)
 			// CancelOrder Match has zero values for Amounts, Rates, and Total.
 			matches = append(matches, &order.MatchSet{
-				Taker:  q,
-				Makers: []*order.LimitOrder{removed},
+				Taker:   q,
+				Makers:  []*order.LimitOrder{removed},
+				Amounts: []uint64{removed.Remaining()},
+				Rates:   []uint64{removed.Rate},
 			})
+			unbooked = append(unbooked, removed)
 
 		case *order.LimitOrder:
 			// limit-limit order matching
+			var makers []*order.LimitOrder
 			matchSet := matchLimitOrder(book, o)
 			if matchSet != nil {
 				matches = append(matches, matchSet)
 				passed = append(passed, q)
+				makers = matchSet.Makers
 			} else if o.Force == order.ImmediateTiF {
 				// There was no match and TiF is Immediate. Fail.
 				failed = append(failed, q)
 				break
+			}
+
+			for _, maker := range makers {
+				if maker.Remaining() == 0 {
+					unbooked = append(unbooked, maker)
+				}
 			}
 
 			if o.Remaining() > 0 {
@@ -142,7 +153,7 @@ func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Matc
 				if o.Force == order.StandingTiF {
 					// Standing TiF orders go on the book.
 					book.Insert(o)
-					inserted = append(inserted, q)
+					booked = append(booked, q)
 				}
 			}
 
@@ -162,6 +173,13 @@ func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Matc
 			} else {
 				// There was no match and this is a market order. Fail.
 				failed = append(failed, q)
+				break
+			}
+
+			for _, maker := range matchSet.Makers {
+				if maker.Remaining() == 0 {
+					unbooked = append(unbooked, maker)
+				}
 			}
 
 			// Regardless of remaining amount, market orders never go on the book.

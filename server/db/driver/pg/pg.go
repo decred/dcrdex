@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/decred/dcrd/chaincfg/v2"
@@ -14,6 +15,7 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v2"
 	"github.com/decred/dcrdex/dex"
 	"github.com/decred/dcrdex/server/asset"
+	"github.com/decred/dcrdex/server/db"
 )
 
 // type Driver struct{}
@@ -69,6 +71,7 @@ type archiverTables struct {
 // So far: OrderArchiver, AccountArchiver.
 type Archiver struct {
 	ctx           context.Context
+	lastErr       atomic.Value
 	queryTimeout  time.Duration
 	db            *sql.DB
 	dbName        string
@@ -78,6 +81,18 @@ type Archiver struct {
 	keyHash       []byte // Store the hash to ref the counter table.
 	keyParams     *chaincfg.Params
 	tables        archiverTables
+}
+
+// LastErr returns any fatal or unexpected error encountered in a recent query.
+// This may be used to check if the database had an unrecoverable error
+// (disconnect, etc.).
+func (a *Archiver) LastErr() error {
+	err, _ := a.lastErr.Load().(error)
+	return err
+}
+
+func (a *Archiver) fatalBackendErr(err error) {
+	a.lastErr.Store(err)
 }
 
 // NewArchiver constructs a new Archiver. Use Close when done with the Archiver.
@@ -149,7 +164,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	case asset.Simnet:
 		archiver.keyParams = chaincfg.SimNetParams()
 	default:
-		return nil, fmt.Errorf("unkown network %d", cfg.Net)
+		return nil, fmt.Errorf("unknown network %d", cfg.Net)
 	}
 
 	// Get the master extended public key.
@@ -176,4 +191,19 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 // Close closes the underlying DB connection.
 func (a *Archiver) Close() error {
 	return a.db.Close()
+}
+
+func (a *Archiver) marketSchema(base, quote uint32) (string, error) {
+	marketSchema, err := dex.MarketName(base, quote)
+	if err != nil {
+		return "", err
+	}
+	_, found := a.markets[marketSchema]
+	if !found {
+		return "", db.ArchiveError{
+			Code:   db.ErrUnsupportedMarket,
+			Detail: fmt.Sprintf(`archiver does not support the market "%s"`, marketSchema),
+		}
+	}
+	return marketSchema, nil
 }

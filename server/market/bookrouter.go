@@ -150,7 +150,7 @@ type BookRouterConfig struct {
 }
 
 // NewBookRouter is a constructor for a BookRouter. Routes are registered with
-// comms and a monitoring goroutine is started for each BookSource speicified.
+// comms and a monitoring goroutine is started for each BookSource specified.
 func NewBookRouter(cfg *BookRouterConfig) *BookRouter {
 	router := &BookRouter{
 		ctx:      cfg.Ctx,

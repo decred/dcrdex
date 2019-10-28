@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/decred/dcrdex/server/book"
+	"github.com/decred/dcrdex/server/swap"
+	"github.com/decred/slog"
 	"math/rand"
 	"os"
 	"sync"
@@ -35,6 +38,8 @@ const (
 	mkt1BaseRate = 5e7
 	mktName2     = "dcr_doge"
 	mkt2BaseRate = 8e9
+	mktName3     = "dcr_btc"
+	mkt3BaseRate = 3e9
 )
 
 var (
@@ -46,12 +51,17 @@ var (
 	mkt1       = &ordertest.Market{
 		Base:    0, // BTC
 		Quote:   2, // LTC
-		LotSize: 1e5,
+		LotSize: btcLotSize,
 	}
 	mkt2 = &ordertest.Market{
 		Base:    42, // DCR
 		Quote:   3,  // DOGE
-		LotSize: 1e6,
+		LotSize: dcrLotSize,
+	}
+	mkt3 = &ordertest.Market{
+		Base:    42, // DCR
+		Quote:   0,  // BTC
+		LotSize: dcrLotSize,
 	}
 	buyer1 = &ordertest.Writer{
 		Addr:   "LSdTvMHRm8sScqwCi6x9wzYQae8JeZhx6y", // LTC receiving address
@@ -77,6 +87,18 @@ var (
 		Sell:   true,
 		Market: mkt2,
 	}
+	buyer3 = &ordertest.Writer{
+		Addr:   "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", // BTC
+		Acct:   ordertest.NextAccount(),
+		Sell:   false,
+		Market: mkt3,
+	}
+	seller3 = &ordertest.Writer{
+		Addr:   "DsaAKsMvZ6HrqhmbhLjV9qVbPkkzF5daowT", // DCR
+		Acct:   ordertest.NextAccount(),
+		Sell:   true,
+		Market: mkt2,
+	}
 )
 
 // The AuthManager handles client-related actions, including authorization and
@@ -87,12 +109,15 @@ type TAuth struct {
 }
 
 func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
+	log.Infof("Route for %s", route)
 }
 func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
+	log.Infof("Auth for user %v", user)
 	return a.authErr
 }
-func (a *TAuth) Sign(...msgjson.Signable) {}
-func (a *TAuth) Send(_ account.AccountID, msg *msgjson.Message) {
+func (a *TAuth) Sign(...msgjson.Signable) { log.Info("Sign") }
+func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) {
+	log.Infof("Send for user %v", user)
 	a.sends = append(a.sends, msg)
 }
 func (a *TAuth) getSend() *msgjson.Message {
@@ -103,17 +128,39 @@ func (a *TAuth) getSend() *msgjson.Message {
 	a.sends = a.sends[1:]
 	return msg
 }
+func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
+	log.Infof("Request for user %v", user)
+}
+func (a *TAuth) Penalize(user account.AccountID, match *order.Match, step order.MatchStatus) {
+	log.Infof("Penalize for user %v", user)
+}
 
 type TMarketTunnel struct {
 	adds       []*orderRecord
+	auth       *TAuth
 	midGap     uint64
 	locked     bool
 	watched    bool
 	cancelable bool
 }
 
-func (m *TMarketTunnel) SubmitOrderAsync(o *orderRecord) {
+func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
+	// set the server time
+	now := time.Now().Unix()
+	o.order.SetTime(now)
+
 	m.adds = append(m.adds, o)
+
+	// Send the order, but skip the signature
+	oid := o.order.ID()
+	resp, _ := msgjson.NewResponse(1, &msgjson.OrderResult{
+		Sig:        msgjson.Bytes{},
+		ServerTime: uint64(now),
+		OrderID:    oid[:],
+	}, nil)
+	m.auth.Send(account.AccountID{}, resp)
+
+	return nil
 }
 
 func (m *TMarketTunnel) MidGap() uint64 {
@@ -279,7 +326,16 @@ func makeEnsureErr(t *testing.T) func(tag string, rpcErr *msgjson.Error, code in
 }
 
 func TestMain(m *testing.M) {
+	logger := slog.NewBackend(os.Stdout).Logger("MARKETTEST")
+	logger.SetLevel(slog.LevelDebug)
+	UseLogger(logger)
+	book.UseLogger(logger)
+	matcher.UseLogger(logger)
+	swap.UseLogger(logger)
+	order.UseLogger(logger)
+
 	privKey, _ := secp256k1.GeneratePrivateKey()
+	auth := &TAuth{sends: make([]*msgjson.Message, 0)}
 	oRig = &tOrderRig{
 		btc: tNewBackend(),
 		dcr: tNewBackend(),
@@ -287,9 +343,10 @@ func TestMain(m *testing.M) {
 			acct:    ordertest.NextAccount(),
 			privKey: privKey,
 		},
-		auth: &TAuth{sends: make([]*msgjson.Message, 0)},
+		auth: auth,
 		market: &TMarketTunnel{
 			adds:       make([]*orderRecord, 0),
+			auth:       auth,
 			midGap:     dcrRateStep * 1000,
 			cancelable: true,
 		},
@@ -308,6 +365,7 @@ func TestMain(m *testing.M) {
 	rig = newTestRig()
 	src1 := rig.source1
 	src2 := rig.source2
+	src3 := rig.source3
 	// Load up the order books up with 16 orders each.
 	for i := 0; i < 8; i++ {
 		src1.sells = append(src1.sells,
@@ -318,6 +376,10 @@ func TestMain(m *testing.M) {
 			makeLO(seller2, mkRate2(1.0, 1.2), randLots(10), order.StandingTiF))
 		src2.buys = append(src2.buys,
 			makeLO(buyer2, mkRate2(0.8, 1.0), randLots(10), order.StandingTiF))
+		src3.sells = append(src3.sells,
+			makeLO(seller3, mkRate3(1.0, 1.2), randLots(10), order.StandingTiF))
+		src3.buys = append(src3.buys,
+			makeLO(buyer3, mkRate3(0.8, 1.0), randLots(10), order.StandingTiF))
 	}
 	tick(100)
 	doIt := func() int {
@@ -483,7 +545,7 @@ func TestLimit(t *testing.T) {
 	}
 }
 
-func TestMarket(t *testing.T) {
+func TestMarketStartProcessStop(t *testing.T) {
 	qty := uint64(dcrLotSize) * 10
 	user := oRig.user
 	mkt := msgjson.Market{
@@ -834,7 +896,7 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 // Book Router Tests
 
 func randLots(max int) uint64 {
-	return uint64(rand.Intn(max))
+	return uint64(rand.Intn(max) + 1)
 }
 
 func randRate(baseRate, lotSize uint64, min, max float64) uint64 {
@@ -921,16 +983,19 @@ func (conn *TLink) Banish() {
 
 type testRig struct {
 	router  *BookRouter
-	source1 *TBookSource
-	source2 *TBookSource
+	source1 *TBookSource // btc_ltc
+	source2 *TBookSource // dcr_doge
+	source3 *TBookSource // dcr_btc
 }
 
 func newTestRig() *testRig {
 	src1 := tNewBookSource()
 	src2 := tNewBookSource()
+	src3 := tNewBookSource()
 	return &testRig{
 		source1: src1,
 		source2: src2,
+		source3: src3,
 	}
 }
 
@@ -938,6 +1003,7 @@ func (rig *testRig) sources() map[string]BookSource {
 	return map[string]BookSource{
 		mktName1: rig.source1,
 		mktName2: rig.source2,
+		mktName3: rig.source3,
 	}
 }
 
@@ -1011,6 +1077,10 @@ func mkRate1(min, max float64) uint64 {
 
 func mkRate2(min, max float64) uint64 {
 	return randRate(mkt2BaseRate, mkt2.LotSize, min, max)
+}
+
+func mkRate3(min, max float64) uint64 {
+	return randRate(mkt3BaseRate, mkt3.LotSize, min, max)
 }
 
 func TestRouter(t *testing.T) {

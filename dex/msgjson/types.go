@@ -165,7 +165,7 @@ func (s *signable) SigBytes() []byte {
 // Stampable is an interface that supports timestamping and signing.
 type Stampable interface {
 	Signable
-	Stamp(uint64)
+	Stamp(serverTime, epochIndex, epochDuration uint64)
 }
 
 // Acknowledgement is the 'result' field in a response to a request that
@@ -467,30 +467,37 @@ func (u *UTXO) Serialize() []byte {
 // Prefix is a common structure shared among order type payloads.
 type Prefix struct {
 	signable
-	AccountID  Bytes  `json:"accountid"`
-	Base       uint32 `json:"base"`
-	Quote      uint32 `json:"quote"`
-	OrderType  uint8  `json:"ordertype"`
-	ClientTime uint64 `json:"tclient"`
-	ServerTime uint64 `json:"tserver"`
+	AccountID     Bytes  `json:"accountid"`
+	Base          uint32 `json:"base"`
+	Quote         uint32 `json:"quote"`
+	OrderType     uint8  `json:"ordertype"`
+	ClientTime    uint64 `json:"tclient"`
+	ServerTime    uint64 `json:"tserver"`
+	EpochIdx      uint64 `json:"epochidx"`
+	EpochDuration uint64 `json:"epochdur"`
 }
 
-// Stamp sets the server timestamp. Partially satisfies the Stampable interface.
-func (p *Prefix) Stamp(t uint64) {
+// Stamp sets the server timestamp and epoch ID. Partially satisfies the
+// Stampable interface.
+func (p *Prefix) Stamp(t, epochIdx, epochDur uint64) {
 	p.ServerTime = t
+	p.EpochIdx = epochIdx
+	p.EpochDuration = epochDur
 }
 
 // Serialize serializes the Prefix data.
 func (p *Prefix) Serialize() []byte {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
-	// order type (1), client time (8), server time (8) = 57 bytes
-	b := make([]byte, 0, 57)
+	// order type (1), client time (8), server time (8), epoch ID (8) = 65 bytes
+	b := make([]byte, 0, 65)
 	b = append(b, p.AccountID...)
 	b = append(b, uint32Bytes(p.Base)...)
 	b = append(b, uint32Bytes(p.Quote)...)
-	b = append(b, byte(p.OrderType))
+	b = append(b, p.OrderType)
 	b = append(b, uint64Bytes(p.ClientTime)...)
-	return append(b, uint64Bytes(p.ServerTime)...)
+	b = append(b, uint64Bytes(p.ServerTime)...)
+	b = append(b, uint64Bytes(p.EpochIdx)...)
+	return append(b, uint64Bytes(p.EpochDuration)...)
 }
 
 // Trade is common to Limit and Market Payloads.
@@ -526,10 +533,10 @@ type Limit struct {
 
 // Serialize serializes the Limit data.
 func (l *Limit) Serialize() ([]byte, error) {
-	// serialization: prefix (57) + trade (variable) + rate (8)
-	// + time-in-force (1) + address (~35) = 102 + len(trade)
+	// serialization: prefix (65) + trade (variable) + rate (8)
+	// + time-in-force (1) + address (~35) = 110 + len(trade)
 	trade := l.Trade.Serialize()
-	b := make([]byte, 0, 102+len(trade))
+	b := make([]byte, 0, 110+len(trade))
 	b = append(b, l.Prefix.Serialize()...)
 	b = append(b, trade...)
 	b = append(b, uint64Bytes(l.Rate)...)
@@ -545,7 +552,7 @@ type Market struct {
 
 // Serialize serializes the Market data.
 func (m *Market) Serialize() ([]byte, error) {
-	// serialization: prefix (57) + trade (varies) + address (35 ish)
+	// serialization: prefix (65) + trade (varies) + address (35 ish)
 	b := append(m.Prefix.Serialize(), m.Trade.Serialize()...)
 	return append(b, []byte(m.Address)...), nil
 }
@@ -561,6 +568,8 @@ type OrderResult struct {
 	Sig        Bytes  `json:"sig"`
 	ServerTime uint64 `json:"tserver"`
 	OrderID    Bytes  `json:"orderid"`
+	EpochIdx   uint64 `json:"epochidx"`
+	EpochDur   uint64 `json:"epochdur"`
 }
 
 // Serialize serializes the Cancel data.

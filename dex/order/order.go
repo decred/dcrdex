@@ -218,6 +218,9 @@ func (p *Prefix) Time() int64 {
 // Time returns the order prefix's server time as a UNIX epoch time.
 func (p *Prefix) SetTime(t int64) {
 	p.ServerTime = time.Unix(t, 0).UTC()
+	// Force recomputation of the OrderID.
+	p.id = nil
+	p.uid = ""
 }
 
 // User gives the user's account ID.

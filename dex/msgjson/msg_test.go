@@ -395,12 +395,14 @@ func TestPrefix(t *testing.T) {
 	// order type (1), client time (8), server time (8) = 57 bytes
 	acctID, _ := BytesFromHex("05bf0f2b97fa551375b9c92687f7a948a8f4a4237653a04e6b00c6f14c72fd1e9c")
 	prefix := &Prefix{
-		AccountID:  acctID,
-		Base:       256,
-		Quote:      65536,
-		OrderType:  1,
-		ClientTime: 1571871297,
-		ServerTime: 1571871841,
+		AccountID:     acctID,
+		Base:          256,
+		Quote:         65536,
+		OrderType:     1,
+		ClientTime:    1571871297,
+		ServerTime:    1571871841,
+		EpochIdx:      157187184,
+		EpochDuration: 10,
 	}
 
 	exp := []byte{
@@ -418,6 +420,10 @@ func TestPrefix(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0xb0, 0xda, 0x41,
 		// Server Time 8 bytes (zeros for client signature)
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0xb0, 0xdc, 0x61,
+		// Epoch Index
+		0x00, 0x00, 0x00, 0x00, 0x09, 0x5e, 0x7c, 0x70,
+		// Epoch Duration
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a,
 	}
 
 	b := prefix.Serialize()

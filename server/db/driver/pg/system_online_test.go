@@ -151,7 +151,7 @@ func nukeAll(db *sql.DB) error {
 		return nil
 	}
 
-	err = dropPublic(createPublicTableStatements)
+	err = dropPublic(createDEXTableStatements)
 	if err != nil {
 		return err
 	}

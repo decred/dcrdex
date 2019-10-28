@@ -1,6 +1,7 @@
 package pg
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
@@ -28,20 +29,23 @@ var (
 	AssetBTC uint32
 )
 
-var acct0 = account.AccountID{
-	0x22, 0x4c, 0xba, 0xaa, 0xfa, 0x80, 0xbf, 0x3b, 0xd1, 0xff, 0x73, 0x15,
-	0x90, 0xbc, 0xbd, 0xda, 0x5a, 0x76, 0xf9, 0x1e, 0x60, 0xa1, 0x56, 0x99,
-	0x46, 0x34, 0xe9, 0x1c, 0xec, 0x25, 0xd5, 0x40,
+func randomBytes(len int) []byte {
+	bytes := make([]byte, len)
+	rand.Read(bytes)
+	return bytes
+}
+
+func randomHashStr() string {
+	return hex.EncodeToString(randomBytes(32))
 }
 
 func randomAccountID() account.AccountID {
-	pk := make([]byte, pki.PubKeySize) // size is not important since it is going to be hashed
-	rand.Read(pk)
+	pk := randomBytes(pki.PubKeySize) // size is not important since it is going to be hashed
 	return account.NewID(pk)
 }
 
 func mktConfig() (markets []*dex.MarketInfo) {
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize)
 	if err != nil {
 		panic(fmt.Sprintf("you broke it: %v", err))
 	}
@@ -49,6 +53,18 @@ func mktConfig() (markets []*dex.MarketInfo) {
 	markets = append(markets, mktConfig)
 	// specify more here...
 	return
+}
+
+func newMatch(maker *order.LimitOrder, taker order.Order, quantity uint64, epochID order.EpochID) *order.Match {
+	return &order.Match{
+		Maker:    maker,
+		Taker:    taker,
+		Quantity: quantity,
+		Rate:     maker.Rate,
+		Status:   order.NewlyMatched,
+		Sigs:     order.Signatures{},
+		Epoch:    epochID,
+	}
 }
 
 func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
@@ -59,7 +75,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 	return &order.LimitOrder{
 		MarketOrder: order.MarketOrder{
 			Prefix: order.Prefix{
-				AccountID:  acct0,
+				AccountID:  randomAccountID(),
 				BaseAsset:  AssetDCR,
 				QuoteAsset: AssetBTC,
 				OrderType:  order.LimitOrderType,
@@ -67,7 +83,8 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 				ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 			},
 			UTXOs: []order.Outpoint{
-				newUtxo("45b82138ca90e665a1c8793aa901aa232dd82be41b8e630dd621f24e717fc13a", 2),
+				newUtxo(randomHashStr(), 2),
+				newUtxo(randomHashStr(), 0),
 			},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,
@@ -81,14 +98,14 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
 		Prefix: order.Prefix{
-			AccountID:  acct0,
+			AccountID:  randomAccountID(),
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
 			OrderType:  order.MarketOrderType,
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 		},
-		UTXOs:    []order.Outpoint{},
+		UTXOs:    []order.Outpoint{newUtxo(randomHashStr(), 4)},
 		Sell:     true,
 		Quantity: quantityLots * LotSize,
 		Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
@@ -98,14 +115,14 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
 		Prefix: order.Prefix{
-			AccountID:  acct0,
+			AccountID:  randomAccountID(),
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
 			OrderType:  order.MarketOrderType,
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 		},
-		UTXOs:    []order.Outpoint{},
+		UTXOs:    []order.Outpoint{newUtxo(randomHashStr(), 3)},
 		Sell:     false,
 		Quantity: quantityQuoteAsset,
 		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
@@ -115,7 +132,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 func newCancelOrder(targetOrderID order.OrderID, base, quote uint32, timeOffset int64) *order.CancelOrder {
 	return &order.CancelOrder{
 		Prefix: order.Prefix{
-			AccountID:  acct0,
+			AccountID:  randomAccountID(),
 			BaseAsset:  base,
 			QuoteAsset: quote,
 			OrderType:  order.CancelOrderType,

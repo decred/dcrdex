@@ -20,14 +20,6 @@ import (
 	"github.com/lib/pq"
 )
 
-type Error string
-
-func (err Error) Error() string { return string(err) }
-
-const (
-	ErrUnknownOrder = Error("unknown order")
-)
-
 // utxo implements order.Outpoint
 type utxo struct {
 	txHash []byte
@@ -122,11 +114,10 @@ var _ db.OrderArchiver = (*Archiver)(nil)
 // Order retrieves an order with the given OrderID, stored for the market
 // specified by the given base and quote assets. A non-nil error will be
 // returned if the market is not recognized. If the order is not found, the
-// error value is ErrUnknownOrder, and the type is
-// order.OrderStatusUnknown. The only recognized order types are market, limit,
-// and cancel.
+// error value is ErrUnknownOrder, and the type is order.OrderStatusUnknown. The
+// only recognized order types are market, limit, and cancel.
 func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error) {
-	marketSchema, err := dex.MarketName(base, quote)
+	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
 		return nil, order.OrderStatusUnknown, err
 	}
@@ -136,7 +127,10 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, or
 	// - if found, coerce into the correct order type and return
 	// - if not found, try loading a cancel order with this oid
 	lo, status, err := loadLimitOrder(a.db, a.dbName, marketSchema, oid)
-	if err == ErrUnknownOrder {
+	if errA, ok := err.(db.ArchiveError); ok {
+		if errA.Code != db.ErrUnknownOrder {
+			return nil, order.OrderStatusUnknown, err
+		}
 		// Try the cancel orders.
 		var co *order.CancelOrder
 		co, status, err = loadCancelOrder(a.db, a.dbName, marketSchema, oid)
@@ -239,13 +233,15 @@ func (a *Archiver) NewEpochOrder(ord order.Order) error {
 
 func (a *Archiver) insertOrUpdate(ord order.Order, status pgOrderStatus) error {
 	_, _, _, err := a.orderStatus(ord)
-	switch err {
-	case nil:
-		return a.updateOrderStatus(ord, status)
-	case ErrUnknownOrder:
+	if db.IsErrOrderUnknown(err) {
 		return a.storeOrder(ord, status)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+
+	return a.updateOrderStatus(ord, status)
+
 }
 
 // BookOrder updates or inserts the given LimitOrder with booked status.
@@ -297,19 +293,17 @@ func (a *Archiver) StoreOrder(ord order.Order, status order.OrderStatus) error {
 }
 
 func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
-	marketSchema, err := dex.MarketName(ord.Base(), ord.Quote())
+	marketSchema, err := a.marketSchema(ord.Base(), ord.Quote())
 	if err != nil {
 		return err
 	}
-	mkt, found := a.markets[marketSchema]
-	if !found {
-		return fmt.Errorf(`archiver does not support the market "%s" for order %v`,
-			marketSchema, ord.UID())
-	}
 
-	if !validateOrder(ord, status, mkt) {
-		return fmt.Errorf("invalid order %v for status %v and market %v",
-			ord.UID(), status, mkt.Name)
+	if !validateOrder(ord, status, a.markets[marketSchema]) {
+		return db.ArchiveError{
+			Code: db.ErrInvalidOrder,
+			Detail: fmt.Sprintf("invalid order %v for status %v and market %v",
+				ord.UID(), status, a.markets[marketSchema]),
+		}
 	}
 
 	// If enabled, search all tables for the order to ensure it is not already
@@ -323,12 +317,12 @@ func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
 			foundStatus, err = cancelOrderStatus(a.db, ord.ID(), a.dbName, marketSchema)
 		}
 
-		switch err {
-		case ErrUnknownOrder: // good
-		case nil: // found, bad
+		if err == nil {
 			return fmt.Errorf("attempted to store a %s order while it exists "+
 				"in another table as %s", pgToMarketStatus(status), pgToMarketStatus(foundStatus))
-		default: // err != nil, bad
+		}
+		if !db.IsErrOrderUnknown(err) {
+			a.fatalBackendErr(err)
 			return fmt.Errorf("findOrder failed: %v", err)
 		}
 	}
@@ -339,18 +333,21 @@ func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
 		tableName := fullCancelOrderTableName(a.dbName, marketSchema, status.active())
 		N, err = storeCancelOrder(a.db, tableName, ot, status)
 		if err != nil {
-			return fmt.Errorf("storeLimitOrder failed: %v", err)
+			a.fatalBackendErr(err)
+			return fmt.Errorf("storeCancelOrder failed: %v", err)
 		}
 	case *order.MarketOrder:
 		tableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 		N, err = storeMarketOrder(a.db, tableName, ot, status)
 		if err != nil {
-			return fmt.Errorf("storeLimitOrder failed: %v", err)
+			a.fatalBackendErr(err)
+			return fmt.Errorf("storeMarketOrder failed: %v", err)
 		}
 	case *order.LimitOrder:
 		tableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 		N, err = storeLimitOrder(a.db, tableName, ot, status)
 		if err != nil {
+			a.fatalBackendErr(err)
 			return fmt.Errorf("storeLimitOrder failed: %v", err)
 		}
 	default:
@@ -358,8 +355,10 @@ func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
 	}
 
 	if N != 1 {
-		return fmt.Errorf("failed to store order %v: %d rows affected, expected 1",
+		err = fmt.Errorf("failed to store order %v: %d rows affected, expected 1",
 			ord.UID(), N)
+		a.fatalBackendErr(err)
+		return err
 	}
 
 	return nil
@@ -375,14 +374,17 @@ func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (order
 }
 
 func (a *Archiver) orderStatusByID(oid order.OrderID, base, quote uint32) (pgOrderStatus, order.OrderType, int64, error) {
-	marketSchema, err := dex.MarketName(base, quote)
+	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
 		return orderStatusUnknown, order.UnknownOrderType, -1, err
 	}
 	status, orderType, filled, err := orderStatus(a.db, oid, a.dbName, marketSchema)
-	if err == ErrUnknownOrder {
+	if db.IsErrOrderUnknown(err) {
 		status, err = cancelOrderStatus(a.db, oid, a.dbName, marketSchema)
 		if err != nil {
+			if !db.IsErrOrderUnknown(err) {
+				a.fatalBackendErr(err)
+			}
 			return orderStatusUnknown, order.UnknownOrderType, -1, err // includes ErrUnknownOrder
 		}
 		filled = -1
@@ -412,7 +414,7 @@ func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 }
 
 func (a *Archiver) updateOrderStatusByID(oid order.OrderID, base, quote uint32, status pgOrderStatus, filled int64) error {
-	marketSchema, err := dex.MarketName(base, quote)
+	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
 		return err
 	}
@@ -421,9 +423,7 @@ func (a *Archiver) updateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 	if err != nil {
 		return err
 	}
-	if initStatus == orderStatusUnknown {
-		return ErrUnknownOrder
-	}
+
 	if initStatus == status && filled == initFilled {
 		log.Debugf("Not updating order with no status or filled amount change.")
 		return nil
@@ -487,6 +487,7 @@ func (a *Archiver) moveOrder(oid order.OrderID, srcTableName, dstTableName strin
 	moved, err := moveOrder(a.db, srcTableName, dstTableName, oid,
 		status, uint64(filled))
 	if err != nil {
+		a.fatalBackendErr(err)
 		return err
 	}
 	if !moved {
@@ -500,6 +501,7 @@ func (a *Archiver) moveCancelOrder(oid order.OrderID, srcTableName, dstTableName
 	moved, err := moveCancelOrder(a.db, srcTableName, dstTableName, oid,
 		status)
 	if err != nil {
+		a.fatalBackendErr(err)
 		return err
 	}
 	if !moved {
@@ -522,9 +524,6 @@ func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, 
 	if err != nil {
 		return err
 	}
-	if status == orderStatusUnknown {
-		return ErrUnknownOrder
-	}
 
 	switch orderType {
 	case order.MarketOrderType, order.LimitOrderType:
@@ -536,12 +535,15 @@ func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, 
 		return nil // nothing to do
 	}
 
-	marketSchema, err := dex.MarketName(base, quote)
+	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
 		return err // should be caught already by a.OrderStatusByID
 	}
 	tableName := fullOrderTableName(a.dbName, marketSchema, status.active())
 	err = updateOrderFilledAmt(a.db, tableName, oid, uint64(filled))
+	if err != nil {
+		a.fatalBackendErr(err) // TODO: it could have changed tables since this function is not atomic
+	}
 	return err
 }
 
@@ -562,13 +564,14 @@ func (a *Archiver) UpdateOrderFilled(ord order.Order) error {
 // UserOrders retrieves all orders for the given account in the market specified
 // by a base and quote asset.
 func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error) {
-	marketSchema, err := dex.MarketName(base, quote)
+	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	orders, pgStatuses, err := userOrders(ctx, a.db, a.dbName, marketSchema, aid)
 	if err != nil {
+		a.fatalBackendErr(err)
 		return nil, nil, err
 	}
 	statuses := make([]order.OrderStatus, len(pgStatuses))
@@ -602,7 +605,7 @@ func orderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string) (p
 	}
 
 	// Order not found in either orders table.
-	return orderStatusUnknown, order.UnknownOrderType, -1, ErrUnknownOrder
+	return orderStatusUnknown, order.UnknownOrderType, -1, db.ArchiveError{Code: db.ErrUnknownOrder}
 }
 
 func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderStatus, order.OrderType, int64, error) {
@@ -641,7 +644,7 @@ func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID)
 	lo, status, err = loadLimitOrderFromTable(dbe, fullTable, oid)
 	switch err {
 	case sql.ErrNoRows:
-		return nil, orderStatusUnknown, ErrUnknownOrder
+		return nil, orderStatusUnknown, db.ArchiveError{Code: db.ErrUnknownOrder}
 	case nil:
 		// found
 		return lo, status, nil
@@ -806,7 +809,7 @@ func loadCancelOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID
 	co, status, err = loadCancelOrderFromTable(dbe, fullTable, oid)
 	switch err {
 	case sql.ErrNoRows:
-		return nil, orderStatusUnknown, ErrUnknownOrder
+		return nil, orderStatusUnknown, db.ArchiveError{Code: db.ErrUnknownOrder}
 	case nil:
 		// found
 		return co, status, nil
@@ -836,7 +839,7 @@ func cancelOrderStatus(dbe *sql.DB, oid order.OrderID, dbName, marketSchema stri
 	}
 
 	// Order not found in either orders table.
-	return orderStatusUnknown, ErrUnknownOrder
+	return orderStatusUnknown, db.ArchiveError{Code: db.ErrUnknownOrder}
 }
 
 func findCancelOrder(dbe *sql.DB, oid order.OrderID, dbName, marketSchema string, active bool) (bool, pgOrderStatus, error) {

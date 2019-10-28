@@ -31,9 +31,9 @@ type AuthManager interface {
 // MarketTunnel is a connection to a market and information about existing
 // swaps.
 type MarketTunnel interface {
-	// SubmitOrderAsync submits the order to the market for insertion into the
-	// epoch queue.
-	SubmitOrderAsync(*orderRecord)
+	// SubmitOrder submits the order to the market for insertion into the epoch
+	// queue.
+	SubmitOrder(*orderRecord) error
 	// MidGap returns the mid-gap market rate, which is ths rate halfway between
 	// the best buy order and the best sell order in the order book.
 	MidGap() uint64
@@ -63,15 +63,6 @@ type orderRecord struct {
 	order order.Order
 	req   msgjson.Stampable
 	msgID uint64
-}
-
-// newOrderRecord is the constructor for an *orderRecord.
-func newOrderRecord(o order.Order, req msgjson.Stampable, msgID uint64) *orderRecord {
-	return &orderRecord{
-		order: o,
-		req:   req,
-		msgID: msgID,
-	}
 }
 
 // assetSet is pointers to two different assets, but with 4 ways of addressing
@@ -203,7 +194,6 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	}
 
 	// Create the limit order
-	serverTime := time.Now().UTC()
 	lo := &order.LimitOrder{
 		MarketOrder: order.MarketOrder{
 			Prefix: order.Prefix{
@@ -212,7 +202,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 				QuoteAsset: limit.Quote,
 				OrderType:  order.LimitOrderType,
 				ClientTime: time.Unix(int64(limit.ClientTime), 0).UTC(),
-				ServerTime: serverTime,
+				//ServerTime set in epoch queue processing pipeline.
 			},
 			UTXOs:    utxos,
 			Sell:     sell,
@@ -223,14 +213,20 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		Force: order.StandingTiF,
 	}
 
-	// Send the order to the epoch queue.
+	// NOTE: ServerTime is not yet set, so the order's ID, which is computed
+	// from the serialized order, is not yet valid. The Market will stamp the
+	// order on receipt, and the order ID will be valid.
+
+	// Send the order to the epoch queue where it will be time stamped.
 	oRecord := &orderRecord{
 		order: lo,
 		req:   limit,
 		msgID: msg.ID,
 	}
-	tunnel.SubmitOrderAsync(oRecord)
-	r.respondOrder(oRecord)
+	if err := tunnel.SubmitOrder(oRecord); err != nil {
+		log.Warnf("Market failed to SubmitOrder: %v", err)
+		return msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order")
+	}
 	return nil
 }
 
@@ -308,8 +304,10 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		req:   market,
 		msgID: msg.ID,
 	}
-	tunnel.SubmitOrderAsync(oRecord)
-	r.respondOrder(oRecord)
+	if err := tunnel.SubmitOrder(oRecord); err != nil {
+		log.Warnf("Market failed to SubmitOrder: %v", err)
+		return msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order")
+	}
 	return nil
 }
 
@@ -373,8 +371,10 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 		req:   cancel,
 		msgID: msg.ID,
 	}
-	tunnel.SubmitOrderAsync(oRecord)
-	r.respondOrder(oRecord)
+	if err := tunnel.SubmitOrder(oRecord); err != nil {
+		log.Warnf("Market failed to SubmitOrder: %v", err)
+		return msgjson.NewError(msgjson.UnknownMarketError, "failed to submit order")
+	}
 	return nil
 }
 
@@ -553,25 +553,4 @@ func msgBytesToBytes(msgBs []msgjson.Bytes) [][]byte {
 		b = append(b, msgB)
 	}
 	return b
-}
-
-// respondOrder signs the order data and sends the OrderResult to the client.
-func (r *OrderRouter) respondOrder(oRecord *orderRecord) {
-	// Add the server timestamp and get a signature of the serialized
-	// order request to send to the client.
-	stamp := uint64(oRecord.order.Time())
-	oRecord.req.Stamp(stamp)
-	oid := oRecord.order.ID()
-	r.auth.Sign(oRecord.req)
-	res := &msgjson.OrderResult{
-		Sig:        oRecord.req.SigBytes(),
-		ServerTime: stamp,
-		OrderID:    oid[:],
-	}
-	respMsg, err := msgjson.NewResponse(oRecord.msgID, res, nil)
-	if err != nil {
-		log.Errorf("failed to create msgjson.Message for order response: %v", err)
-		return
-	}
-	r.auth.Send(oRecord.order.User(), respMsg)
 }

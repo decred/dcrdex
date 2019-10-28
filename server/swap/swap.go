@@ -38,7 +38,7 @@ var (
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
-	RegisterMethod(string, func(account.AccountID, *msgjson.Message) *msgjson.Error)
+	Route(string, func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...msgjson.Signable)
 	Send(account.AccountID, *msgjson.Message)
@@ -48,8 +48,8 @@ type AuthManager interface {
 
 // Storage updates match data in what is presumably a database.
 type Storage interface {
-	UpdateMatch(match *order.Match)
-	CancelOrder(*order.LimitOrder)
+	UpdateMatch(match *order.Match) error
+	CancelOrder(*order.LimitOrder) error
 }
 
 // swapStatus is information related to the completion or incompletion of each
@@ -120,7 +120,7 @@ type stepActor struct {
 
 // stepInformation holds information about the current state of the swap
 // negotiation. A new stepInformation should be generated with (Swapper).step at
-// every step of the negotation process.
+// every step of the negotiation process.
 type stepInformation struct {
 	match *matchTracker
 	// The actor is the user info for the user who is expected to be broadcasting
@@ -160,7 +160,9 @@ type Config struct {
 // communications between clients, or 'users'. The Swapper authenticates users
 // (vua AuthManager) and validates transactions as they are reported.
 type Swapper struct {
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
 	coins map[uint32]*asset.Asset
@@ -188,8 +190,10 @@ type Swapper struct {
 // NewSwapper is a constructor for a Swapper.
 func NewSwapper(cfg *Config) *Swapper {
 	authMgr := cfg.AuthManager
+	ctx, cancel := context.WithCancel(cfg.Ctx)
 	swapper := &Swapper{
-		ctx:      cfg.Ctx,
+		ctx:      ctx,
+		cancel:   cancel,
 		coins:    cfg.Assets,
 		storage:  cfg.Storage,
 		authMgr:  authMgr,
@@ -200,11 +204,24 @@ func NewSwapper(cfg *Config) *Swapper {
 	}
 	// The swapper is only concerned with two types of client-originating
 	// method requests.
-	authMgr.RegisterMethod(msgjson.InitRoute, swapper.handleInit)
-	authMgr.RegisterMethod(msgjson.RedeemRoute, swapper.handleRedeem)
+	authMgr.Route(msgjson.InitRoute, swapper.handleInit)
+	authMgr.Route(msgjson.RedeemRoute, swapper.handleRedeem)
 
+	swapper.wg.Add(1)
 	go swapper.start()
 	return swapper
+}
+
+// Stop begins the Swapper's shutdown. Use WaitForShutdown after Stop to wait
+// for shutdown to complete.
+func (s *Swapper) Stop() {
+	log.Infof("Swapper shutting down...")
+	s.cancel()
+}
+
+// WaitForShutdown waits until the main swapper loop is finished.
+func (s *Swapper) WaitForShutdown() {
+	s.wg.Wait()
 }
 
 // waitMempool attempts to run the passed function. If the function returns
@@ -228,6 +245,8 @@ func (s *Swapper) waitMempool(params *waitSettings, f func() bool) {
 
 // start is the main Swapper loop, and must be run as a goroutine.
 func (s *Swapper) start() {
+	defer s.wg.Done()
+
 	// The latencyTicker triggers a check of all chainWaiter functions.
 	latencyTicker := time.NewTicker(recheckInterval)
 	defer latencyTicker.Stop()
@@ -456,9 +475,9 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			if match.takerStatus.swapAsset != assetID {
 				continue
 			}
-			// If the maker has redeeed, the taker can redeem immediately, so check
-			// the timeout against the time the Swapper received the maker's
-			// `redeem` request (and sent the taker's 'redemption').
+			// If the maker has redeemed, the taker can redeem immediately, so
+			// check the timeout against the time the Swapper received the
+			// maker's `redeem` request (and sent the taker's 'redemption').
 			if match.takerStatus.redeemTime == zeroTime &&
 				match.makerStatus.redeemTime != zeroTime &&
 				match.makerStatus.redeemTime.Before(oldestAllowed) {
@@ -576,7 +595,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 		if len(s) == 0 {
 			return nil, &msgjson.Error{
 				Code:    msgjson.SettlementSequenceError,
-				Message: "missing acknowlegment for " + ackType + " request",
+				Message: "missing acknowledgment for " + ackType + " request",
 			}
 		}
 	}
@@ -597,7 +616,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 		match: match,
 		actor: actor,
 		// By the time a match is created, the presence of the asset in the map
-		// has alredy been verified.
+		// has already been verified.
 		asset:        s.coins[actor.swapAsset],
 		counterParty: counterParty,
 		isBaseAsset:  isBaseAsset,
@@ -682,7 +701,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	sigMsg, err := acker.params.Serialize()
 	if err != nil {
 		s.respondError(msg.ID, acker.user, msgjson.SerializationError,
-			fmt.Sprintf("unable to serialize mathch params: %v", err))
+			fmt.Sprintf("unable to serialize match params: %v", err))
 		return
 	}
 	err = s.authMgr.Auth(acker.user, sigMsg, sigBytes)
@@ -709,6 +728,14 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 			acker.match.Sigs.TakerRedeem = sigBytes
 		}
 	}
+}
+
+func (s *Swapper) updateMatch(match *order.Match) {
+	go func() {
+		if err := s.storage.UpdateMatch(match); err != nil {
+			log.Errorf("UpdateMatch (id=%v) failed: %v", match.ID(), err)
+		}
+	}()
 }
 
 // processInit processes the `init` RPC request, which is used to inform the
@@ -753,10 +780,10 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	actor.status.swapVout = params.Vout
 	actor.status.swapTime = time.Now()
 	stepInfo.match.Status = stepInfo.nextStep
-	// NOTE: If UpdateMatch isn't non-blocking, this will need to be done
-	// differently.
-	s.storage.UpdateMatch(stepInfo.match.Match)
+	match := stepInfo.match.Match
 	s.matchMtx.Unlock()
+
+	s.updateMatch(match)
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
@@ -953,7 +980,7 @@ func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Mes
 func (s *Swapper) revoke(match *matchTracker) {
 	takerParams, takerReq, makerParams, makerReq, err := revocationRequests(match)
 	if err != nil {
-		log.Errorf("error creating revocation reqeusts: %v", err)
+		log.Errorf("error creating revocation requests: %v", err)
 		return
 	}
 	takerAck := &messageAcker{
@@ -1085,7 +1112,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		sigMsg, err := matchInfo.params.Serialize()
 		if err != nil {
 			s.respondError(msg.ID, user, msgjson.SerializationError,
-				fmt.Sprintf("unable to serialize mathch params: %v", err))
+				fmt.Sprintf("unable to serialize match params: %v", err))
 			return
 		}
 		err = s.authMgr.Auth(user, sigMsg, sigBytes)
@@ -1123,9 +1150,11 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 			// if this is a cancellation, there is nothing to track.
 			s.storage.CancelOrder(match.Maker)
 		} else {
-			s.storage.UpdateMatch(match.Match)
 			toMonitor = append(toMonitor, match)
 		}
+
+		// Record the match.
+		s.updateMatch(match.Match)
 	}
 	// Add the matches to the map.
 	s.matchMtx.Lock()
