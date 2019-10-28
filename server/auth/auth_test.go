@@ -30,6 +30,7 @@ func randBytes(l int) []byte {
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct     *account.Account
+	paid     bool
 	matches  []*order.UserMatch
 	closedID account.AccountID
 	acctAddr string
@@ -204,7 +205,7 @@ func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 	return msg
 }
 
-func connectUser(t *testing.T, user *tUser) {
+func connectUser(t *testing.T, user *tUser) *msgjson.Message {
 	connect := queueUser(t, user)
 	rig.mgr.handleConnect(user.conn, connect)
 
@@ -216,6 +217,7 @@ func connectUser(t *testing.T, user *tUser) {
 	if respMsg.ID != connect.ID {
 		t.Fatalf("'connect' response has wrong ID. expected %d, got %d", connect.ID, respMsg.ID)
 	}
+	return respMsg
 }
 
 func makeEnsureErr(t *testing.T) func(rpcErr *msgjson.Error, tag string, code int) {
@@ -273,8 +275,57 @@ func TestMain(m *testing.M) {
 }
 
 func TestConnect(t *testing.T) {
+	// Before connecting, put an activeMatch in storage.
+	anyID := newAccountID()
+	var mid order.MatchID
+	copy(mid[:], anyID[:])
+	anyID = newAccountID()
+	var oid order.OrderID
+	copy(oid[:], anyID[:])
+	userMatch := &order.UserMatch{
+		OrderID:  oid,
+		MatchID:  mid,
+		Quantity: 1,
+		Rate:     2,
+		Address:  "anyaddress",
+		Time:     123456,
+		Status:   3,
+		Side:     4,
+	}
+	rig.storage.matches = []*order.UserMatch{userMatch}
+	// Connect the user.
 	user := tNewUser(t)
-	connectUser(t, user)
+	respMsg := connectUser(t, user)
+	cResp := extractConnectResponse(t, respMsg)
+	if len(cResp.Matches) != 1 {
+		t.Fatalf("no active matches")
+	}
+	rig.storage.matches = nil
+	msgMatch := cResp.Matches[0]
+	if msgMatch.OrderID.String() != userMatch.OrderID.String() {
+		t.Fatal("active match OrderID mismatch: ", msgMatch.OrderID.String(), " != ", userMatch.OrderID.String())
+	}
+	if msgMatch.MatchID.String() != userMatch.MatchID.String() {
+		t.Fatal("active match MatchID mismatch: ", msgMatch.MatchID.String(), " != ", userMatch.MatchID.String())
+	}
+	if msgMatch.Quantity != userMatch.Quantity {
+		t.Fatal("active match Quantity mismatch: ", msgMatch.Quantity, " != ", userMatch.Quantity)
+	}
+	if msgMatch.Rate != userMatch.Rate {
+		t.Fatal("active match Rate mismatch: ", msgMatch.Rate, " != ", userMatch.Rate)
+	}
+	if msgMatch.Address != userMatch.Address {
+		t.Fatal("active match Address mismatch: ", msgMatch.Address, " != ", userMatch.Address)
+	}
+	if msgMatch.Time != userMatch.Time {
+		t.Fatal("active match Time mismatch: ", msgMatch.Time, " != ", userMatch.Time)
+	}
+	if msgMatch.Status != uint8(userMatch.Status) {
+		t.Fatal("active match Status mismatch: ", msgMatch.Status, " != ", userMatch.Status)
+	}
+	if msgMatch.Side != uint8(userMatch.Side) {
+		t.Fatal("active match Side mismatch: ", msgMatch.Side, " != ", userMatch.Side)
+	}
 
 	// Send a request to the client.
 	type tPayload struct {
