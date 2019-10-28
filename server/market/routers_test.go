@@ -325,7 +325,7 @@ func TestMain(m *testing.M) {
 		var shutdown func()
 		testCtx, shutdown = context.WithCancel(context.Background())
 		defer shutdown()
-		rig.router = NewOrderBookRouter(&BookRouterConfig{
+		rig.router = NewBookRouter(&BookRouterConfig{
 			Ctx:           testCtx,
 			Sources:       rig.sources(),
 			EpochDuration: 60,
@@ -858,19 +858,19 @@ func makeCO(writer *ordertest.Writer, targetID order.OrderID) *order.CancelOrder
 type TBookSource struct {
 	buys  []*order.LimitOrder
 	sells []*order.LimitOrder
-	feed  chan *updateSignal
+	feed  chan *bookUpdateSignal
 }
 
 func tNewBookSource() *TBookSource {
 	return &TBookSource{
-		feed: make(chan *updateSignal, 16),
+		feed: make(chan *bookUpdateSignal, 16),
 	}
 }
 
 func (s *TBookSource) Book() (buys []*order.LimitOrder, sells []*order.LimitOrder) {
 	return s.buys, s.sells
 }
-func (s *TBookSource) OrderFeed() chan *updateSignal {
+func (s *TBookSource) OrderFeed() <-chan *bookUpdateSignal {
 	return s.feed
 }
 
@@ -916,7 +916,7 @@ func (conn *TLink) Banish() {
 }
 
 type testRig struct {
-	router  *OrderBookRouter
+	router  *BookRouter
 	source1 *TBookSource
 	source2 *TBookSource
 }
@@ -1096,7 +1096,7 @@ func TestRouter(t *testing.T) {
 	// An epoch notification sent on market 1's channel should arrive at both
 	// clients.
 	lo := makeLO(buyer1, mkRate1(0.8, 1.0), randLots(10), order.ImmediateTiF)
-	sig := &updateSignal{
+	sig := &bookUpdateSignal{
 		action: epochAction,
 		order:  lo,
 	}
@@ -1131,7 +1131,7 @@ func TestRouter(t *testing.T) {
 
 	// Send an epoch update for a market order.
 	mo := makeMO(buyer2, randLots(10))
-	sig = &updateSignal{
+	sig = &bookUpdateSignal{
 		action: epochAction,
 		order:  mo,
 	}
@@ -1152,7 +1152,7 @@ func TestRouter(t *testing.T) {
 	}
 
 	lo.Filled = mkt2.LotSize
-	sig = &updateSignal{
+	sig = &bookUpdateSignal{
 		action: bookAction,
 		order:  lo,
 	}
@@ -1173,7 +1173,7 @@ func TestRouter(t *testing.T) {
 	}
 
 	// Now unbook the order.
-	sig = &updateSignal{
+	sig = &bookUpdateSignal{
 		action: unbookAction,
 		order:  lo,
 	}
@@ -1202,8 +1202,23 @@ func TestRouter(t *testing.T) {
 	router.handleUnsubOrderBook(link1, unsub)
 	tick(5)
 
+	// Client 1 should have an unsub response from the server.
+	respMsg := link1.getSend()
+	if respMsg == nil {
+		t.Fatalf("no response for unsub")
+	}
+	resp, _ := respMsg.Response()
+	var success bool
+	err := json.Unmarshal(resp.Result, &success)
+	if err != nil {
+		t.Fatalf("err unmarshaling unsub response")
+	}
+	if !success {
+		t.Fatalf("expected true for unsub result, got false")
+	}
+
 	mo = makeMO(seller1, randLots(10))
-	sig = &updateSignal{
+	sig = &bookUpdateSignal{
 		action: epochAction,
 		order:  mo,
 	}
@@ -1226,7 +1241,7 @@ func TestRouter(t *testing.T) {
 	}
 	oid := lo.ID()
 	co := makeCO(buyer1, oid)
-	sig = &updateSignal{
+	sig = &bookUpdateSignal{
 		action: epochAction,
 		order:  co,
 	}
@@ -1272,7 +1287,6 @@ func TestBadMessages(t *testing.T) {
 	ogPayload := sub.Payload
 	sub.Payload = []byte(`?`)
 	rpcErr := router.handleOrderBook(link, sub)
-	tick(5)
 	checkErr("bad payload", rpcErr, msgjson.RPCParseError)
 	sub.Payload = ogPayload
 
@@ -1283,7 +1297,6 @@ func TestBadMessages(t *testing.T) {
 	}
 	sub = newSubscription(badMkt)
 	rpcErr = router.handleOrderBook(link, sub)
-	tick(5)
 	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
 
 	// Valid asset IDs, but not an actual market on the DEX.
@@ -1293,7 +1306,6 @@ func TestBadMessages(t *testing.T) {
 	}
 	sub = newSubscription(badMkt)
 	rpcErr = router.handleOrderBook(link, sub)
-	tick(5)
 	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
 
 	// Unsub with invalid payload
@@ -1303,7 +1315,6 @@ func TestBadMessages(t *testing.T) {
 	ogPayload = unsub.Payload
 	unsub.Payload = []byte(`?`)
 	rpcErr = router.handleUnsubOrderBook(link, unsub)
-	tick(5)
 	checkErr("bad payload", rpcErr, msgjson.RPCParseError)
 	unsub.Payload = ogPayload
 
@@ -1312,6 +1323,12 @@ func TestBadMessages(t *testing.T) {
 		MarketID: "sdgo_ptn",
 	})
 	rpcErr = router.handleUnsubOrderBook(link, unsub)
-	tick(5)
 	checkErr("bad payload", rpcErr, msgjson.UnknownMarket)
+
+	// Unsub a user that's not subscribed.
+	unsub, _ = msgjson.NewRequest(10, msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
+		MarketID: mktName1,
+	})
+	rpcErr = router.handleUnsubOrderBook(link, unsub)
+	checkErr("bad payload", rpcErr, msgjson.NotSubscribedError)
 }

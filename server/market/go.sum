@@ -27,6 +27,9 @@ github.com/decred/dcrd/dcrec/secp256k1 v1.0.3/go.mod h1:eCL8H4MYYjRvsw2TuANvEOcV
 github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0 h1:3GIJYXQDAKpLEFriGFN8SbSffak10UXHGdIcFaMPykY=
 github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0/go.mod h1:3s92l0paYkZoIHuj4X93Teg/HB7eGM9x/zokGw+u4mY=
 github.com/decred/dcrdex v0.0.0-20191022190834-83c0cb22104f h1:pGoZcZlTHT7AjQZLXYYBOdEP0951juTkgfbFboi7+yY=
+github.com/decred/dcrdex v0.0.0-20191030182607-90a2131e2ab3 h1:GIdRyY31bxCrSsHL93sucDL0KMEFk4V2AtWsqDsvJTo=
+github.com/decred/dcrdex/server/comms v0.0.0-20191030182607-90a2131e2ab3 h1:zoyRlAO/4SfZ4Twpz9UXD286Xl+Cf/wTrH3B3bPBOFY=
+github.com/decred/dcrdex/server/comms v0.0.0-20191030182607-90a2131e2ab3/go.mod h1:iFoio46I4ZbJXHNDjVs0SWsrowiOp4UPU/QCDpi4c/o=
 github.com/decred/slog v1.0.0 h1:Dl+W8O6/JH6n2xIFN2p3DNjCmjYwvrXsjlSJTQQ4MhE=
 github.com/decred/slog v1.0.0/go.mod h1:zR98rEZHSnbZ4WHZtO0iqmSZjDLKhkXfrPTZQKtAonQ=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=

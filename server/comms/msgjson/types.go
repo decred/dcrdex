@@ -37,6 +37,7 @@ const (
 	FundingError
 	UTXOAuthError
 	UnknownMarket
+	NotSubscribedError
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -573,15 +574,15 @@ type TradeNote struct {
 	Time     uint64 `json:"time,omitempty"`
 }
 
-// BookNote is part of a notification about any type of order.
+// OrderNote is part of a notification about any type of order.
 type OrderNote struct {
-	Seq      uint64 `json:"seq,omitempty"` // May be empty when part of an orderbook.
-	MarketID string `json:"marketid"`
+	Seq      uint64 `json:"seq,omitempty"`      // May be empty when part of an OrderBook.
+	MarketID string `json:"marketid,omitempty"` // May be empty when part of an OrderBook.
 	OrderID  Bytes  `json:"oid"`
 }
 
-// BookOrderRoute is the DEX-originating notification-type message informing
-// the client to add the order to the order book.
+// BookOrderNote is the payload for a DEX-originating notification-type message
+// informing the client to add the order to the order book.
 type BookOrderNote struct {
 	OrderNote
 	TradeNote

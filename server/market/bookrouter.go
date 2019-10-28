@@ -14,14 +14,17 @@ import (
 	"github.com/decred/dcrdex/server/order"
 )
 
-// An update action classifies updates into how they affect the book or epoch
+// A bookUpdateAction classifies updates into how they affect the book or epoch
 // queue.
-type updateAction uint8
+type bookUpdateAction uint8
 
 const (
+	// invalidAction is the zero value action and should be considered programmer
+	// error if received.
+	invalidAction bookUpdateAction = iota
 	// epochAction means an order is being added to the epoch queue and will
 	// result in a msgjson.EpochOrderNote being sent to subscribers.
-	epochAction updateAction = iota
+	epochAction
 	// bookAction means an order is being added to the order book, and will result
 	// in a msgjson.BookOrderNote being sent to subscribers.
 	bookAction
@@ -30,22 +33,21 @@ const (
 	unbookAction
 )
 
-// updateSignal combines an updateAction with the order on which the action
-// applies.
-type updateSignal struct {
-	action updateAction
+// bookUpdateSignal combines a bookUpdateAction with the order on which the
+// action applies.
+type bookUpdateSignal struct {
+	action bookUpdateAction
 	order  order.Order
 }
 
-// BookSource is a source of a market's order book, as well as a feed of updates
-// to the order book and epoch queue.
+// BookSource is a source of a market's order book and a feed of updates to the
+// order book and epoch queue.
 type BookSource interface {
 	Book() (buys []*order.LimitOrder, sells []*order.LimitOrder)
-	OrderFeed() chan *updateSignal
+	OrderFeed() <-chan *bookUpdateSignal
 }
 
-// subscribers is a manager for a map of subscribers and maintains the sequence
-// counter.
+// subscribers is a manager for a map of subscribers and a sequence counter.
 type subscribers struct {
 	mtx   sync.RWMutex
 	conns map[uint64]comms.Link
@@ -57,6 +59,17 @@ func (s *subscribers) add(conn comms.Link) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	s.conns[conn.ID()] = conn
+}
+
+func (s *subscribers) remove(id uint64) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	_, found := s.conns[id]
+	if !found {
+		return false
+	}
+	delete(s.conns, id)
+	return true
 }
 
 // nextSeq gets the next sequence number by incrementing the counter.
@@ -102,10 +115,8 @@ func (book *msgBook) remove(lo *order.LimitOrder) {
 	delete(book.orders, lo.ID())
 }
 
-// addBulkOrders adds the lists of orders to the order book. If an order with
-// the same ID as one provided already exists in the book, it is overwritten
-// without warning. Such a case would be typical when an order's filled amount
-// changes.
+// addBulkOrders adds the lists of orders to the order book. Use this for the
+// initial sync of the orderbook.
 func (book *msgBook) addBulkOrders(orderSets ...[]*order.LimitOrder) {
 	book.mtx.Lock()
 	defer book.mtx.Unlock()
@@ -116,17 +127,17 @@ func (book *msgBook) addBulkOrders(orderSets ...[]*order.LimitOrder) {
 	}
 }
 
-// OrderBookRouter handles order book subscriptions, linking the market manager
-// with a group of subscribers, and maintaining an intermediate copy of the
-// orderbook in message payload format for quick syncing.
-type OrderBookRouter struct {
+// BookRouter handles order book subscriptions, syncing the market with a group
+// of subscribers, and maintaining an intermediate copy of the orderbook in
+// message payload format for quick, full-book syncing.
+type BookRouter struct {
 	ctx      context.Context
 	books    map[string]*msgBook
 	epochLen uint64
 }
 
-// BookRouterConfig is the configuration settings for an OrderBookRouter and the
-// only argument to its constructor.
+// BookRouterConfig is the configuration settings for a BookRouter and the only
+// argument to its constructor.
 type BookRouterConfig struct {
 	// Ctx is the application context. The monitoring goroutines will be shut down
 	// on context cancellation.
@@ -138,11 +149,10 @@ type BookRouterConfig struct {
 	EpochDuration uint64
 }
 
-// NewOrderBookRouter is a constructor for an OrderBookRouter. Routes are
-// registered with comms and a monitoring goroutine is started for each
-// BookSource speicified.
-func NewOrderBookRouter(cfg *BookRouterConfig) *OrderBookRouter {
-	router := &OrderBookRouter{
+// NewBookRouter is a constructor for a BookRouter. Routes are registered with
+// comms and a monitoring goroutine is started for each BookSource speicified.
+func NewBookRouter(cfg *BookRouterConfig) *BookRouter {
+	router := &BookRouter{
 		ctx:      cfg.Ctx,
 		books:    make(map[string]*msgBook),
 		epochLen: cfg.EpochDuration,
@@ -165,8 +175,8 @@ func NewOrderBookRouter(cfg *BookRouterConfig) *OrderBookRouter {
 	return router
 }
 
-// run is a montoring loop for the specified msgBook and source.
-func (r *OrderBookRouter) run(book *msgBook) {
+// run is a montoring loop for an order book.
+func (r *BookRouter) run(book *msgBook) {
 	// Get the initial book.
 	feed := book.source.OrderFeed()
 	book.addBulkOrders(book.source.Book())
@@ -231,7 +241,7 @@ out:
 }
 
 // sendBook encodes and sends the the entire order book to the specified client.
-func (r *OrderBookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
+func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
 	msgBook := make([]*msgjson.BookOrderNote, 0, len(book.orders))
 	seq := book.subs.lastSeq()
 	book.mtx.RLock()
@@ -254,11 +264,11 @@ func (r *OrderBookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64)
 	}
 }
 
-// handlerOrderBook is the handler for the non-autenticated 'orderbook' route.
+// handleOrderBook is the handler for the non-authenticated 'orderbook' route.
 // A client sends a request to this route to start an order book subscription,
 // downloading the existing order book and receiving updates as a feed of
-// notificaitons.
-func (r *OrderBookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+// notifications.
+func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	sub := new(msgjson.OrderBookSubscription)
 	err := json.Unmarshal(msg.Payload, sub)
 	if err != nil {
@@ -289,7 +299,7 @@ func (r *OrderBookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message)
 // handleUnsubOrderBook is the handler for the non-authenticated
 // 'unsub_orderbook' route. Clients use this route to unsubscribe from an
 // order book.
-func (r *OrderBookRouter) handleUnsubOrderBook(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+func (r *BookRouter) handleUnsubOrderBook(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	unsub := new(msgjson.UnsubOrderBook)
 	err := json.Unmarshal(msg.Payload, unsub)
 	if err != nil {
@@ -306,15 +316,28 @@ func (r *OrderBookRouter) handleUnsubOrderBook(conn comms.Link, msg *msgjson.Mes
 		}
 	}
 
-	book.subs.mtx.Lock()
-	delete(book.subs.conns, conn.ID())
-	book.subs.mtx.Unlock()
+	if !book.subs.remove(conn.ID()) {
+		return &msgjson.Error{
+			Code:    msgjson.NotSubscribedError,
+			Message: "not subscribed to " + unsub.MarketID,
+		}
+	}
+
+	ack, err := msgjson.NewResponse(msg.ID, true, nil)
+	if err != nil {
+		log.Errorf("failed to encode response payload = true?")
+	}
+
+	err = conn.Send(ack)
+	if err != nil {
+		log.Debugf("error sending unsub_orderbook response: %v", err)
+	}
 
 	return nil
 }
 
 // sendNote sends a notification to the specified subscribers.
-func (r *OrderBookRouter) sendNote(route string, subs *subscribers, note interface{}) {
+func (r *BookRouter) sendNote(route string, subs *subscribers, note interface{}) {
 	msg, err := msgjson.NewNotification(route, note)
 	if err != nil {
 		log.Errorf("error creating notification-type Message: %v", err)
@@ -367,7 +390,7 @@ func limitOrderToMsgOrder(o *order.LimitOrder, mkt string) *msgjson.BookOrderNot
 	}
 }
 
-// marketOrderToMsgOrder an *order.MarketOrder to a
+// marketOrderToMsgOrder converts an *order.MarketOrder to a
 // *msgjson.BookOrderNote.
 func marketOrderToMsgOrder(o *order.MarketOrder, mkt string) *msgjson.BookOrderNote {
 	oid := o.ID()
