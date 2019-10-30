@@ -57,7 +57,7 @@ func TestAccounts(t *testing.T) {
 	}
 
 	// Get the account. It should be unpaid.
-	acct, paid := archie.Account(tAcctID)
+	acct, paid, _ := archie.Account(tAcctID)
 	if paid {
 		t.Fatalf("account marked as paid before setting tx details")
 	}
@@ -69,19 +69,19 @@ func TestAccounts(t *testing.T) {
 	}
 
 	// The account should not be marked paid.
-	_, paid = archie.Account(tAcctID)
+	_, paid, open := archie.Account(tAcctID)
 	if !paid {
 		t.Fatalf("account not marked as paid after setting reg tx details")
+	}
+	if !open {
+		t.Fatalf("newly paid account marked as closed")
 	}
 
 	// Close the account for failure to complete a swap.
 	archie.CloseAccount(tAcctID, account.FailureToAct)
-	checkAcct, paid := archie.Account(tAcctID)
-	if checkAcct != nil {
-		t.Fatalf("non-nil account returned for closed account")
-	}
-	if paid {
-		t.Fatalf("paid marked as true for paid account")
+	_, _, open = archie.Account(tAcctID)
+	if open {
+		t.Fatalf("closed account still marked as open")
 	}
 }
 
@@ -97,12 +97,15 @@ func TestWrongAccount(t *testing.T) {
 		t.Fatalf("no error fetching registration address for unknown account")
 	}
 
-	acct, paid := archie.Account(tAcctID)
+	acct, paid, open := archie.Account(tAcctID)
 	if acct != nil {
 		t.Fatalf("account retreived for unknown account ID")
 	}
 	if paid {
 		t.Fatalf("unknown account marked as paid")
+	}
+	if open {
+		t.Fatalf("unknown account marked as open")
 	}
 
 	err = archie.PayAccount(tAcctID, tTxid, 5)

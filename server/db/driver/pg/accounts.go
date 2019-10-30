@@ -22,27 +22,19 @@ func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) {
 	}
 }
 
-// Account retreives the account pubkey, and a boolean value true if the account
-// has confirmed payment of the registration fee.
-func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool) {
+// Account retreives the account pubkey, whether the account is paid, and
+// whether their account is open, in that order.
+func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool) {
 	acct, isPaid, isOpen, err := getAccount(a.db, a.tables.accounts, aid)
 	switch err {
 	case sql.ErrNoRows:
-		return nil, false
+		return nil, false, false
 	case nil:
 	default:
 		log.Errorf("getAccount error: %v", err)
-		return nil, false
+		return nil, false, false
 	}
-	if !isPaid {
-		// account is
-		return acct, false
-	}
-	if !isOpen {
-		// Account is closed.
-		return nil, false
-	}
-	return acct, true
+	return acct, isPaid, isOpen
 }
 
 // CreateAccount creates an entry for a new account in the accounts table. .

@@ -164,13 +164,8 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 		return nil, fmt.Errorf("error creating external branch: %v", err)
 	}
 
-	// Get a hash of the serialized secp256k1.PublicKey to create an identifying
-	// hash of this key for the child counter DB table.
-	pubKey, err := archiver.feeKeyBranch.ECPubKey()
-	if err != nil {
-		return nil, fmt.Errorf("error getting pubkey from extended key: %v", err)
-	}
-	archiver.keyHash = dcrutil.Hash160(pubKey.Serialize())
+	// Get a unique ID to serve as an ID for this key in the child counter table.
+	archiver.keyHash = dcrutil.Hash160([]byte(cfg.FeeKey))
 	if err = archiver.CreateKeyEntry(archiver.keyHash); err != nil {
 		return nil, err
 	}
