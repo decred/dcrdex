@@ -114,7 +114,8 @@ Match notification via HTTP polling or other request interval-based methods are
 thus not suitable for the DEX system.
 Persistent, full-duplex communication is critical to minimizing communication
 latencies and wasted bandwidth.
-Websockets ([https://tools.ietf.org/html/rfc6455 &#91;4&#93;]) are chosen as the default and preferred communications protocol for
+Websockets ([https://tools.ietf.org/html/rfc6455 &#91;4&#93;]) are chosen as the
+default and preferred communications protocol for
 the DEX exchange API.
 In addition to fulfilling the aforementioned needs, Websockets are now a
 well-established technology with client software available for integration in
@@ -123,45 +124,84 @@ virtually all popular programming languages.
 Websocket messages are secured by encryption on Transport Layer
 Security (TLS) [https://tools.ietf.org/html/rfc8446 &#91;5&#93;] connections.
 
-===JSON-RPC===
+===Message Protocol===
 
-JavaScript Object Notation - Remote Procedure Call v2.0 (JSON-RPC 2.0) is a
-message formatting protocol for client-server communications
-[https://www.jsonrpc.org/specification &#91;6&#93;].
-The DEX API uses JSON-RPC exclusively for both inbound and outbound client
-communications.
-The JSON-RPC structure is simple and flexible.
+DEX messaging is JSON-formatted [https://tools.ietf.org/html/rfc8259 &#91;6&#93;].
+All messages, regardless of originating party, use a common top-level
+structure called a '''Message'''.
+
+'''JSON Message object'''
+
+{|
+! field    !! type !! description
+|-
+| type    || int || message type
+|-
+| payload || any || the data being transmitted
+|-
+| route   || string || the route identifier. requests and notifications only
+|-
+| id      || int > 0 || the request ID. requests and responses only
+|}
+
+There are three anticipated message types.
+
+'''Message types'''
+
+{|
+| type         || id || description
+|-
+| request      || 1 || a request is typically an uninitiated message the seeks a response
+|-
+| response     || 2 || a response to a request
+|-
+| notification || 3 || usually part of a data feed. requires no response
+|}
+
+'''Example request'''
+
+The payload for a request can be of any type.
 
 <pre>
-<nowiki>
 {
-	"method": "string",
-	"id": int,
-	"params": {} || [];
+	"type": 1,
+	"id": 123,
+	"route" "sendnum",
+	"payload": 5
 }
-</nowiki>
 </pre>
+
+'''Response payload'''
+
+The payload for a response has a structure that enables quick error checking.
+
+{|
+! field    !! type !! description
+|-
+| result || any || the result. field is missing or null if an error was encountered
+|-
+| error   || string or null || the error. field is null or missing if no error was encountered
+|}
+
+'''Example response'''
 
 <pre>
 {
-	"result": {...} || null,
-	"error": {...} || null,
-	"id": int
+	"type": 2,
+	"id": 123,
+	"payload": { "result": true }
 }
 </pre>
 
-The <code>method</code> is the "remote procedure" being called, analogous to
-calling a function.
-Most parameters are passed as part of a <code>params</code> object or array.
-Parameters will vary with method.
-The <code>id</code> field links a response to a request, and is optional for
-''notifications'' which require no response.
+'''Example notification'''
 
-JSON-RPC 2.0 specifies that in the case of an error, the response's
-<code>error</code>
-field will be non-<code>null</code> and the <code>result</code> field will be
-<code>null</code>.
-The opposite is true in the case of a success.
+<pre>
+{
+	"type": 3,
+	"route": "notifynums"
+	"payload": [1, 5, 3, 9]
+}
+</pre>
 
 ===HTTP===
 
@@ -232,8 +272,12 @@ its <code>swapconf</code><sup>th</sup> confirmation.
 
 Asset info should be requested by the user immediately after connecting.
 
-'''JSON-RPC method:''' <code>assets</code>, '''originator:''' client
+'''Request route:''' <code>config</code>, '''originator:''' client
 
+The <code>config</code> request <code>payload</code> can be null. The DEX will
+respond with its current configuration.
+
+<code>result</code>
 {|
 ! field     !! type !! description
 |-
@@ -442,7 +486,7 @@ directly.
 Instead, the account is identified by an '''account ID''', which is the
 double Blake-256 hash of the client's pubkey,
 '''''<code>blake256(blake256(pubkey))</code>''''', provided as a hex-encoded
-string in JSON-RPC calls.
+string in API messages.
 
 ===Step 1: Registration===
 
@@ -452,8 +496,9 @@ The message is signed with the corresponding private account key. The response
 includes the server's public key. The server's public key will also be
 pre-published for further validation.
 
-'''JSON-RPC method:''' <code>register</code>, '''originator: ''' client
+'''Request route:''' <code>register</code>, '''originator: ''' client
 
+<code>payload</code>
 {|
 ! field     !! type   !! description
 |-
@@ -474,8 +519,9 @@ pre-published for further validation.
 | timestamp || 8  || the client's UNIX timestamp
 |}
 
-'''Response parameters'''
+'''DEX response'''
 
+<code>result</code>
 {|
 ! field     !! type   !! description
 |-
@@ -512,8 +558,9 @@ The client pays the fee on-chain and notifies the DEX of the transaction detail.
 The fee is paid with a standard P2PKH output to the address received in step 1.
 The server immediately sends their receipt and then closes the connection.
 
-'''JSON-RPC method:''' <code>notifyfee</code>, '''originator: ''' client
+'''Request route:''' <code>notifyfee</code>, '''originator: ''' client
 
+<code>payload</code>
 {|
 ! field     !! type   !! description
 |-
@@ -540,7 +587,7 @@ The server immediately sends their receipt and then closes the connection.
 | vout       || 4  || transaction output index
 |}
 
-'''Response parameters'''
+<code>result</code>
 
 {|
 ! field     !! type   !! description
@@ -579,8 +626,9 @@ not completely filled or been cancelled. All other orders are only valid for one
 Orders must be placed on an authenticated connection. Once a websocket
 connection is established, the client will supply their account ID and signature.
 
-'''JSON-RPC method:''' <code>connect</code>, '''originator: ''' client
+'''Request route:''' <code>connect</code>, '''originator: ''' client
 
+<code>payload</code>
 {|
 ! field      !! type   !! description
 |-
@@ -614,6 +662,7 @@ response will indicate when trade did or will begin.
 If a client unexpectedly disconnects with active orders, the orders may match in
 the client's absence. A list of any pending matches is included in the response.
 
+<code>result</code>
 {|
 ! field      !! type   !! description
 |-
@@ -650,8 +699,9 @@ client will be expected to reconnect and complete settlement.
 
 An order book can be viewed and tracked by subscribing to a market.
 
-'''JSON-RPC method:''' <code>orderbook</code>, '''originator: ''' client
+'''Request route:''' <code>orderbook</code>, '''originator: ''' client
 
+<code>payload</code>
 {|
 ! field !! type   !! description
 |-
@@ -667,8 +717,7 @@ The client is responsible for tracking the sequence ID to ensure all order
 updates are received. If an update appears to be missing, the client should
 re-subscribe to the market to synchronize the order book from scratch.
 
-'''Response'''
-
+<code>result</code>
 {|
 ! field       !! type   !! description
 |-
@@ -711,11 +760,12 @@ re-subscribe to the market to synchronize the order book from scratch.
 
 '''Changes to the order book''' will be received from the DEX as a stream of
 updates.
-These updates take the JSON-RPC notification format, so omit an <code>id</code>
+These updates use the notification message type, so omit an <code>id</code>
 attribute.
 
-'''JSON-RPC method:''' <code>remove_order</code>, '''originator: ''' DEX
+'''Notification route:''' <code>remove_order</code>, '''originator: ''' DEX
 
+<code>payload</code>
 {|
 ! field   !! type !! description
 |-
@@ -726,8 +776,9 @@ attribute.
 | seq   || int    || A sequence ID
 |}
 
-'''JSON-RPC method:''' <code>add_limit</code> & <code>add_market</code>, '''originator: ''' DEX
+'''Notification route:''' <code>add_limit</code> & <code>add_market</code>, '''originator: ''' DEX
 
+<code>payload</code>
 {|
 ! field  !! type!! description
 |-
@@ -742,8 +793,9 @@ At the beginning of the matching cycle, the DEX will publish a list of order
 IDs and the seed hash used for
 [[#Pseudorandom_Order_Matching|order sequencing]].
 
-'''JSON-RPC method:''' <code>match_data</code>, '''originator: ''' DEX
+'''Notification route:''' <code>match_data</code>, '''originator: ''' DEX
 
+<code>payload</code>
 {|
 ! field    !! type !! description
 |-
@@ -759,8 +811,9 @@ IDs and the seed hash used for
 A client can '''unsubscribe''' from order book updates without closing the
 websocket connection.
 
-'''JSON-RPC method:''' <code>unsub_orderbook</code>, '''originator: ''' client
+'''Request route:''' <code>unsub_orderbook</code>, '''originator: ''' client
 
+<code>payload</code>
 {|
 ! field  !! type !! description
 |-
@@ -913,8 +966,9 @@ crosses the spread (i.e. a taker rather than a maker). The
 <code>ordersize</code> must be an integer multiple of the asset's
 [[#Exchange_Variables|lot size]].
 
-'''JSON-RPC method:''' <code>limit</code>, '''originator:''' client
+'''Request route:''' <code>limit</code>, '''originator:''' client
 
+<code>payload</code>
 {|
 ! field       !! type   !! description
 |-
@@ -943,16 +997,6 @@ crosses the spread (i.e. a taker rather than a maker). The
 | address     || string || address where the matched client will send funds
 |}
 
-'''Response parameters'''
-
-{|
-! field     !! type   !! description
-|-
-| sig       || string || server hex-encoded signature of the serialized order, after adding the DEX timestamp
-|-
-| server time || int  || the server's UNIX timestamp
-|}
-
 '''Limit order serialization'''
 
 {|
@@ -975,18 +1019,28 @@ crosses the spread (i.e. a taker rather than a maker). The
 | time in force || 1 || 0 for ''standing'', 1 for ''immediate''
 |}
 
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of the serialized order, after adding the DEX timestamp
+|-
+| server time || int  || the server's UNIX timestamp
+|}
+
 ===Market Order===
 
 A market order is an order to buy or sell an asset at the best available
-market price. The JSON-RPC <code>params</code> fields are similar to a limit
-order, but without the <code>rate</code> field.
+market price. The request payload fields are similar to a limit order, but
+without the <code>rate</code> field.
 
 Market orders cannot be cancelled.
 Any portion of the requested quantity that does not match immediately (during
 the epoch match cycle) is left unfilled.
 
-'''JSON-RPC method:''' <code>market</code>, '''originator: ''' client
+'''Request route:''' <code>market</code>, '''originator: ''' client
 
+<code>payload</code>
 {|
 ! field     !! type   !! description
 |-
@@ -1011,16 +1065,6 @@ the epoch match cycle) is left unfilled.
 | address   || string || address where the matched client will send funds
 |}
 
-'''Response parameters'''
-
-{|
-! field     !! type   !! description
-|-
-| sig       || string || server hex-encoded signature of the order by server, after adding the DEX timestamp
-|-
-| server time || int  || the server's UNIX timestamp
-|}
-
 '''Market order serialization'''
 
 {|
@@ -1037,6 +1081,15 @@ the epoch match cycle) is left unfilled.
 | quantity   || 8 || quantity to buy or sell (atoms)
 |-
 | address    || varies || client's receiving address
+|}
+
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of the order by server, after adding the DEX timestamp
+|-
+| server time || int  || the server's UNIX timestamp
 |}
 
 ====Market Buy Orders====
@@ -1086,8 +1139,9 @@ a 50% chance of being processed before the order it cancels, resulting in an
 error.
 This is by design and discourages certain types of spoofing.
 
-'''JSON-RPC method:''' <code>cancel</code>, '''originator:''' client
+'''Request route:''' <code>cancel</code>, '''originator:''' client
 
+<code>payload</code>
 {|
 ! field     !! type   !! description
 |-
@@ -1102,16 +1156,6 @@ This is by design and discourages certain types of spoofing.
 | sig       || string || client hex-encoded signature of the serialized order data. serialization described below
 |}
 
-'''Response parameters'''
-
-{|
-! field     !! type   !! description
-|-
-| sig       || string || server hex-encoded signature of the serialize order data, after adding the DEX timestamp
-|-
-| server time || int  || the server's UNIX timestamp
-|}
-
 '''Cancel order serialization'''
 
 {|
@@ -1122,17 +1166,25 @@ This is by design and discourages certain types of spoofing.
 | orderid    || 16 || the order ID
 |}
 
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of the serialize order data, after adding the DEX timestamp
+|-
+| server time || int  || the server's UNIX timestamp
+|}
+
 ===Match negotiation===
 
 Swap negotiation details will be relayed through the DEX with a series of
 notifications or progress reports.
 Both the DEX and the clients will need to serialize and sign the notification
-data. The originator includes their signature with the JSON-RPC request
-<code>params</code>, while the recipient will return an
-'''acknowledgement object''', or a list of acknowledgement objects, as the
-<code>result</code> of their response.
+data. The originator includes their signature with the request, while the
+recipient will return an '''acknowledgement''', or a list of
+acknowledgements, as the <code>result</code> of their response payload.
 
-'''Acknowledgement object'''
+'''Acknowledgement'''
 
 {|
 ! field     !! type   !! description
@@ -1148,10 +1200,9 @@ after sending their acknowledgement, they should broadcast their initialization
 transaction and inform the server with an <code>init</code> notification
 (described after).
 
-'''JSON-RPC method:''' <code>match</code>, '''originator:''' DEX
+'''Request route:''' <code>match</code>, '''originator:''' DEX
 
-'''Match object'''
-
+<code>payload</code> (array)
 {|
 ! field     !! type   !! description
 |-
@@ -1170,7 +1221,7 @@ transaction and inform the server with an <code>init</code> notification
 | sig       || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
 |}
 
-'''Match notification serialization'''
+'''Match serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
@@ -1194,8 +1245,9 @@ After a client broadcasts their initialization transaction, they are
 expected to report the transaction details to the server for verification and
 relay to the matching party.
 
-'''JSON-RPC method:''' <code>init</code>, '''originator:''' client
+'''Request route:''' <code>init</code>, '''originator:''' client
 
+<code>payload</code>
 {|
 ! field      !! type   !! description
 |-
@@ -1214,7 +1266,7 @@ relay to the matching party.
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
 
-'''Init notification serialization'''
+'''Init serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
@@ -1238,17 +1290,18 @@ The DEX will send each client a notification when the counterparty has broadcast
 their initialization transaction.
 When the taker receives the <code>audit</code> notification, they will audit the
 contract and broadcast their own initialization.
-When the maker receives the <code>audit</code> notification, they will audit and
+When the maker receives the <code>audit</code> notification, they will audit the
 contract and issue their redemption.
 
-'''JSON-RPC method:''' <code>audit</code>, '''originator:''' DEX
+'''Request route:''' <code>audit</code>, '''originator:''' DEX
 
+<code>payload</code>
 {|
 ! field     !! type   !! description
 |-
-| orderid   || string || order ID
+| orderid   || string || the order ID
 |-
-| matchid   || string || the match ID to use for progress notifications
+| matchid   || string || the match ID
 |-
 | timestamp || int  || server's UNIX timestamp
 |-
@@ -1257,14 +1310,14 @@ contract and issue their redemption.
 | sig       || string || DEX's signature of the serialized notification. serialization described below
 |}
 
-'''Audit notification serialization'''
+'''Audit serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |-
 | timestamp  || 8  || server's UNIX timestamp
 |-
@@ -1275,14 +1328,15 @@ The client responds with an acknowledgement.
 
 When a client has redeemed their contract, they will notify the server.
 
-'''JSON-RPC method:''' <code>redeem</code>, '''originator:''' client
+'''Request route:''' <code>redeem</code>, '''originator:''' client
 
+<code>payload</code>
 {|
 ! field      !! type   !! description
 |-
 | orderid    || string || the order ID
 |-
-| matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
+| matchid    || string    || the match ID
 |-
 | txid       || string || the hex-encoded transaction ID
 |-
@@ -1293,14 +1347,15 @@ When a client has redeemed their contract, they will notify the server.
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
 
-'''Redeem notification serialization'''
+'''Redeem serialization'''
 
+<code>result</code>
 {|
 ! field      !! size (bytes)  !! description
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1311,17 +1366,17 @@ When a client has redeemed their contract, they will notify the server.
 
 The DEX responds with an acknowledgement.
 
-The DEX informs the taker when the maker has redeemed. The taker will get the
-key from the maker's redemption and broadcast their own redemption.
+The DEX informs the taker when the maker has redeemed.
 
-'''JSON-RPC method:''' <code>redemption</code>, '''originator:''' DEX
+'''Request route:''' <code>redemption</code>, '''originator:''' DEX
 
+<code>payload</code>
 {|
 ! field      !! size (bytes)  !! description
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1332,14 +1387,14 @@ key from the maker's redemption and broadcast their own redemption.
 | sig        || string || DEX's signature of the serialized notification. serialization described below
 |}
 
-'''Redemption notification serialization'''
+'''Redemption serialization'''
 
 {|
 ! field      !! size (bytes)  !! description
 |-
 | orderid    || 32 || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |-
 | tx hash    || asset-dependent  || the transaction hash
 |-
@@ -1350,6 +1405,9 @@ key from the maker's redemption and broadcast their own redemption.
 
 The client will respond with an acknowledgement.
 
+The taker will get the key from the maker's redemption and broadcast their own
+redemption transaction.
+
 ===Match revocation===
 
 A match can be revoked by the server if a client fails to act within the
@@ -1357,12 +1415,13 @@ A match can be revoked by the server if a client fails to act within the
 penalties for the violating party only.
 The revoked match quantity is not added back to the order book in any form.
 
-'''JSON-RPC method:''' <code>revoke_match</code>, '''originator:''' DEX
+'''Request route:''' <code>revoke_match</code>, '''originator:''' DEX
 
+<code>payload</code>
 {|
 ! field    !! type   !! description
 |-
-| orderid  || string || order ID
+| orderid  || string || the order ID
 |-
 | matchid  ||  string  || the match ID
 |-
@@ -1376,7 +1435,7 @@ The revoked match quantity is not added back to the order book in any form.
 |-
 | orderid    || 32  || the order ID
 |-
-| matchid    || 32  || the ID assigned to this match
+| matchid    || 32  || the match ID
 |}
 
 The client will respond with an acknowledgement.
@@ -1408,14 +1467,15 @@ the lot size or minimum transaction fee rate.
 If standing limit orders are persisted, they will be auto-revoked if the client
 does not reconnect before the next [[#Session_Authentication|startepoch]].
 
-'''JSON-RPC method: ''' <code>suspension</code>, '''originator:''' DEX
+'''Request route: ''' <code>suspension</code>, '''originator:''' DEX
 
+<code>payload</code>
 {|
 ! field      !! type   !! description
 |-
 | epoch      || int    || the epoch in which the suspension will start
 |-
-| persist    || bool   || whether standing limit order's will persist through the suspension
+| persist    || bool   || whether standing limit orders will persist through the suspension
 |}
 
 ==Atomic Settlement==
@@ -1688,6 +1748,6 @@ See also [[#Exchange_Variables|Exchange Variables]].
 
 &#91;5&#93; [https://tools.ietf.org/html/rfc8446 Transport Layer Security 1.3]
 
-&#91;6&#93; [https://www.jsonrpc.org/specification JSON-RPC 2.0 Specification]
+&#91;6&#93; [https://tools.ietf.org/html/rfc8259 JSON]
 
 &#91;7&#93; [https://github.com/satoshilabs/slips/blob/master/slip-0044.md BIP-0044 Registered Coins]
