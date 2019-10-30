@@ -851,6 +851,20 @@ func TestRespReq(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error when retreiving response payload from request-type message")
 	}
+
+	// Test Notifications
+	_, err = NewNotification("testroute", make(chan int))
+	if err == nil {
+		t.Fatalf("no error for invalid json type notification payload")
+	}
+	_, err = NewNotification("", 10)
+	if err == nil {
+		t.Fatalf("no error for empty string route request")
+	}
+	msg, err = NewNotification("testroute", 10)
+	if err != nil {
+		t.Fatalf("error for valid request payload: %v", err)
+	}
 }
 
 func comparePrefix(t *testing.T, p1, p2 *Prefix) {

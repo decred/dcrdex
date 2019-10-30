@@ -36,6 +36,8 @@ const (
 	ClockRangeError
 	FundingError
 	UTXOAuthError
+	UnknownMarket
+	NotSubscribedError
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -73,6 +75,21 @@ const (
 	// CancelRoute is the client-originating request-type message placing a cancel
 	// order.
 	CancelRoute = "cancel"
+	// OrderBookRoute is the client-originating request-type message subscribing
+	// to an order book update notification feed.
+	OrderBookRoute = "orderbook"
+	// UnsubOrderBookRoute is client-originating request-type message cancelling
+	// an order book subscription.
+	UnsubOrderBookRoute = "unsub_orderbook"
+	// BookOrderRoute is the DEX-originating notification-type message informing
+	// the client to add the order to the order book.
+	BookOrderRoute = "book_order"
+	// UnbookOrderRoute is the DEX-originating notification-type message informing
+	// the client to remove an order from the order book.
+	UnbookOrderRoute = "unbook_order"
+	// EpochOrderRoute is the DEX-originating notification-type message informing
+	// the client about an order added to the epoch queue.
+	EpochOrderRoute = "epoch_order"
 )
 
 // Bytes is a byte slice that marshals to and unmarshals from a hexadecimal
@@ -260,6 +277,22 @@ func (msg *Message) Response() (*ResponsePayload, error) {
 		return nil, err
 	}
 	return resp, nil
+}
+
+// NewNotification encodes the payload and creates a Notification-type *Message.
+func NewNotification(route string, payload interface{}) (*Message, error) {
+	if route == "" {
+		return nil, fmt.Errorf("empty string not allowed for route of request-type message")
+	}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return &Message{
+		Type:    Notification,
+		Route:   route,
+		Payload: json.RawMessage(encPayload),
+	}, nil
 }
 
 // Match is the params for a DEX-originating MatchRoute request.
@@ -516,6 +549,66 @@ type OrderResult struct {
 func (c *Cancel) Serialize() ([]byte, error) {
 	// serialization: prefix (57) + target id (32) = 89
 	return append(c.Prefix.Serialize(), c.TargetID...), nil
+}
+
+// OrderBookSubscription is the payload for a client-originating request to the
+// OrderBookRoute, intializing an order book feed.
+type OrderBookSubscription struct {
+	Base  uint32 `json:"base"`
+	Quote uint32 `json:"quote"`
+}
+
+// UnsubOrderBook is the payload for a client-originating request to the
+// UnsubOrderBookRoute, terminating an order book subscription.
+type UnsubOrderBook struct {
+	MarketID string `json:"marketid"`
+}
+
+// TradeNote is part of a notification that includes information about a
+// limit or market order.
+type TradeNote struct {
+	Side     uint8  `json:"side,omitempty"`
+	Quantity uint64 `json:"osize,omitempty"`
+	Rate     uint64 `json:"rate,omitempty"`
+	TiF      uint8  `json:"tif,omitempty"`
+	Time     uint64 `json:"time,omitempty"`
+}
+
+// OrderNote is part of a notification about any type of order.
+type OrderNote struct {
+	Seq      uint64 `json:"seq,omitempty"`      // May be empty when part of an OrderBook.
+	MarketID string `json:"marketid,omitempty"` // May be empty when part of an OrderBook.
+	OrderID  Bytes  `json:"oid"`
+}
+
+// BookOrderNote is the payload for a DEX-originating notification-type message
+// informing the client to add the order to the order book.
+type BookOrderNote struct {
+	OrderNote
+	TradeNote
+}
+
+// OrderBook is the response to a successful OrderBookSubscription.
+type OrderBook struct {
+	Seq      uint64 `json:"seq,omitempty"`
+	MarketID string `json:"marketid"`
+	// DRAFT NOTE: We might want to use a different structure for bulk updates.
+	// Sending a struct of arrays rather than an array of structs could
+	// potentially cut the encoding effort and encoded size substantially.
+	Orders []*BookOrderNote `json:"orders"`
+}
+
+// UnbookOrderRoute is the DEX-originating notification-type message informing
+// the client to remove an order from the order book.
+type UnbookOrderNote OrderNote
+
+// EpochOrderRoute is the DEX-originating notification-type message informing
+// the client about an order added to the epoch queue.
+type EpochOrderNote struct {
+	BookOrderNote
+	OrderType uint8  `json:"otype"`
+	TargetID  Bytes  `json:"target,omitempty"`
+	Epoch     uint64 `json:"epoch"`
 }
 
 // Convert uint64 to 8 bytes.
