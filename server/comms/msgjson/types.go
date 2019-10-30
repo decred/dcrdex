@@ -309,6 +309,10 @@ type Match struct {
 	Rate     uint64 `json:"rate"`
 	Address  string `json:"address"`
 	Time     uint64 `json:"timestamp"`
+	// Status and Side are provided for convenience and are not part of the
+	// match serialization.
+	Status uint8 `json:"status"`
+	Side   uint8 `json:"side"`
 }
 
 var _ Signable = (*Match)(nil)
@@ -635,8 +639,8 @@ func (c *Connect) Serialize() ([]byte, error) {
 
 // Connect response is the response result for the ConnectRoute request.
 type ConnectResponse struct {
-	StartEpoch uint64  `json:"startepoch"`
-	Matches    []Match `json:"matches"`
+	StartEpoch uint64   `json:"startepoch"`
+	Matches    []*Match `json:"matches"`
 }
 
 // Convert uint64 to 8 bytes.

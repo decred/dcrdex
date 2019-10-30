@@ -18,6 +18,7 @@ import (
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/comms"
 	"github.com/decred/dcrdex/server/comms/msgjson"
+	"github.com/decred/dcrdex/server/order"
 )
 
 func randBytes(l int) []byte {
@@ -29,13 +30,17 @@ func randBytes(l int) []byte {
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct     *account.Account
-	matches  []msgjson.Match
+	matches  []*order.UserMatch
 	closedID account.AccountID
+	unpaid   bool
+	closed   bool
 }
 
 func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) { s.closedID = id }
-func (s *TStorage) Account(account.AccountID) *account.Account        { return s.acct }
-func (s *TStorage) ActiveMatches(account.AccountID) []msgjson.Match   { return s.matches }
+func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
+	return s.acct, !s.unpaid, !s.closed
+}
+func (s *TStorage) ActiveMatches(account.AccountID) []*order.UserMatch { return s.matches }
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
@@ -120,8 +125,6 @@ func tNewUser(t *testing.T) *tUser {
 	acctID := newAccountID()
 	privKey, err := secp256k1.GeneratePrivateKey()
 	if err != nil {
-		user := tNewUser(t)
-		connectUser(t, user)
 		t.Fatalf("error generating private key: %v", err)
 	}
 	return &tUser{
@@ -162,9 +165,21 @@ func tNewConnect(user *tUser) *msgjson.Connect {
 	}
 }
 
-func connectUser(t *testing.T, user *tUser) {
+func extractConnectResponse(t *testing.T, msg *msgjson.Message) *msgjson.ConnectResponse {
+	if msg == nil {
+		t.Fatalf("no response from 'connect' request")
+	}
+	resp, _ := msg.Response()
+	result := new(msgjson.ConnectResponse)
+	err := json.Unmarshal(resp.Result, result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	return result
+}
+
+func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
-	reqID := comms.NextID()
 	connect := tNewConnect(user)
 	sigMsg, err := connect.Serialize()
 	if err != nil {
@@ -175,16 +190,21 @@ func connectUser(t *testing.T, user *tUser) {
 		t.Fatalf("error signing message of length %d", len(sigMsg))
 	}
 	connect.SetSig(sig.Serialize())
-	msg, _ := msgjson.NewRequest(reqID, msgjson.ConnectRoute, connect)
-	rig.mgr.handleConnect(user.conn, msg)
+	msg, _ := msgjson.NewRequest(comms.NextID(), msgjson.ConnectRoute, connect)
+	return msg
+}
+
+func connectUser(t *testing.T, user *tUser) {
+	connect := queueUser(t, user)
+	rig.mgr.handleConnect(user.conn, connect)
 
 	// Check the response.
-	resp := user.conn.getSend()
-	if resp == nil {
+	respMsg := user.conn.getSend()
+	if respMsg == nil {
 		t.Fatalf("no response from 'connect' request")
 	}
-	if resp.ID != reqID {
-		t.Fatalf("'connect' response has wrong ID. expected %d, got %d", reqID, resp.ID)
+	if respMsg.ID != connect.ID {
+		t.Fatalf("'connect' response has wrong ID. expected %d, got %d", connect.ID, respMsg.ID)
 	}
 }
 
@@ -255,6 +275,86 @@ func TestConnect(t *testing.T) {
 	if reuser.conn.getReq() == nil {
 		t.Fatalf("new connection did not receive the request")
 	}
+}
+
+func TestAccountErrors(t *testing.T) {
+	user := tNewUser(t)
+	connect := queueUser(t, user)
+	// Put a match in storage
+	var oid order.OrderID
+	copy(oid[:], randBytes(32))
+	var mid order.MatchID
+	copy(mid[:], randBytes(32))
+	userMatch := &order.UserMatch{
+		OrderID:  oid,
+		MatchID:  mid,
+		Quantity: 123456,
+		Rate:     789123,
+		Address:  "anthing",
+		Time:     123456789,
+		Status:   order.NewlyMatched,
+		Side:     order.Maker,
+	}
+	rig.storage.matches = []*order.UserMatch{userMatch}
+	rig.mgr.handleConnect(user.conn, connect)
+	rig.storage.matches = nil
+
+	// Check the response.
+	respMsg := user.conn.getSend()
+	result := extractConnectResponse(t, respMsg)
+	if len(result.Matches) != 1 {
+		t.Fatalf("expected 1 match, received %d", len(result.Matches))
+	}
+	match := result.Matches[0]
+	if match.OrderID.String() != userMatch.OrderID.String() {
+		t.Fatal("wrong OrderID: ", match.OrderID, " != ", userMatch.OrderID)
+	}
+	if match.MatchID.String() != userMatch.MatchID.String() {
+		t.Fatal("wrong MatchID: ", match.MatchID, " != ", userMatch.OrderID)
+	}
+	if match.Quantity != userMatch.Quantity {
+		t.Fatal("wrong Quantity: ", match.Quantity, " != ", userMatch.OrderID)
+	}
+	if match.Rate != userMatch.Rate {
+		t.Fatal("wrong Rate: ", match.Rate, " != ", userMatch.OrderID)
+	}
+	if match.Address != userMatch.Address {
+		t.Fatal("wrong Address: ", match.Address, " != ", userMatch.OrderID)
+	}
+	if match.Time != userMatch.Time {
+		t.Fatal("wrong Time: ", match.Time, " != ", userMatch.OrderID)
+	}
+	if match.Status != uint8(userMatch.Status) {
+		t.Fatal("wrong Status: ", match.Status, " != ", userMatch.OrderID)
+	}
+	if match.Side != uint8(userMatch.Side) {
+		t.Fatal("wrong Side: ", match.Side, " != ", userMatch.OrderID)
+	}
+
+	// unpaid account.
+	rig.storage.unpaid = true
+	rpcErr := rig.mgr.handleConnect(user.conn, connect)
+	rig.storage.unpaid = false
+	if rpcErr == nil {
+		t.Fatalf("no error for unpaid account")
+	}
+	if rpcErr.Code != msgjson.AuthenticationError {
+		t.Fatalf("wrong error for unpaid account. wanted %d, got %d",
+			msgjson.AuthenticationError, rpcErr.Code)
+	}
+
+	// closed account
+	rig.storage.closed = true
+	rpcErr = rig.mgr.handleConnect(user.conn, connect)
+	rig.storage.closed = false
+	if rpcErr == nil {
+		t.Fatalf("no error for closed account")
+	}
+	if rpcErr.Code != msgjson.AuthenticationError {
+		t.Fatalf("wrong error for closed account. wanted %d, got %d",
+			msgjson.AuthenticationError, rpcErr.Code)
+	}
+
 }
 
 func TestRoute(t *testing.T) {

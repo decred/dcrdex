@@ -49,6 +49,16 @@ const (
 	MatchComplete // 4
 )
 
+// MatchSide is the client's side in a match. It will be one of Maker or Taker.
+type MatchSide uint8
+
+const (
+	// Maker is the order that matches out of the epoch queue.
+	Maker = iota
+	// Taker is the order from the order book.
+	Taker
+)
+
 // Signatures holds the acknowledgement signatures required for swap
 // negotiation.
 type Signatures struct {
@@ -69,6 +79,21 @@ type Match struct {
 	Status     MatchStatus
 	Sigs       Signatures
 	cachedHash MatchID
+}
+
+// A UserMatch is similar to a match, but contains less information about the
+// counter-party, and is clarifies which side the user is on. This is the
+// information that might be provided to the client when they are resyncing
+// their matches after a reconnect.
+type UserMatch struct {
+	OrderID  OrderID
+	MatchID  MatchID
+	Quantity uint64
+	Rate     uint64
+	Address  string
+	Time     uint64
+	Status   MatchStatus
+	Side     MatchSide
 }
 
 // A constructor for a Match with Status = NewlyMatched. This is the preferred

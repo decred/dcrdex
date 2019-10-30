@@ -13,18 +13,22 @@ import (
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/comms"
 	"github.com/decred/dcrdex/server/comms/msgjson"
+	"github.com/decred/dcrdex/server/order"
 )
 
-// reqExpiration is how long a response handler can will be saved before it is
+// reqExpiration is how long a response handler will be saved before it is
 // eligible for clean up.
 const reqExpiration = time.Minute
 
 // Storage updates and fetches account-related data from what is presumably a
 // database.
 type Storage interface {
+	// CloseAccount closes the account for violation of the specified rule.
 	CloseAccount(account.AccountID, account.Rule)
-	Account(account.AccountID) *account.Account
-	ActiveMatches(account.AccountID) []msgjson.Match
+	// Account retrieves account info for the specified account ID.
+	Account(account.AccountID) (acct *account.Account, paid, open bool)
+	// ActiveMatches fetches the account's active matches.
+	ActiveMatches(account.AccountID) []*order.UserMatch
 }
 
 // Signer signs messages. It is likely a secp256k1.PrivateKey.
@@ -264,11 +268,23 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 	var user account.AccountID
 	copy(user[:], connect.AccountID[:])
-	acctInfo := auth.storage.Account(user)
+	acctInfo, paid, open := auth.storage.Account(user)
 	if acctInfo == nil {
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
 			Message: "not account info found for account ID" + connect.AccountID.String(),
+		}
+	}
+	if !paid {
+		return &msgjson.Error{
+			Code:    msgjson.AuthenticationError,
+			Message: "unpaid account",
+		}
+	}
+	if !open {
+		return &msgjson.Error{
+			Code:    msgjson.AuthenticationError,
+			Message: "closed account",
 		}
 	}
 	// Authorize the account.
@@ -288,9 +304,23 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// Send the connect response, which includes a list of active matches.
+	matches := auth.storage.ActiveMatches(user)
+	msgMatches := make([]*msgjson.Match, 0, len(matches))
+	for _, match := range matches {
+		msgMatches = append(msgMatches, &msgjson.Match{
+			OrderID:  match.OrderID[:],
+			MatchID:  match.MatchID[:],
+			Quantity: match.Quantity,
+			Rate:     match.Rate,
+			Address:  match.Address,
+			Time:     match.Time,
+			Status:   uint8(match.Status),
+			Side:     uint8(match.Side),
+		})
+	}
 	resp := &msgjson.ConnectResponse{
 		StartEpoch: auth.startEpoch,
-		Matches:    auth.storage.ActiveMatches(user),
+		Matches:    msgMatches,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
 	if err != nil {
