@@ -738,16 +738,21 @@ func TestUTXOs(t *testing.T) {
 	msg := testMakeMsgTx(false)
 	// For a regular test tx, the output is at output index 0. Pass nil for the
 	// block hash and 0 for the block height and confirmations for a mempool tx.
-	testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
+	txout := testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
+	// Set the value for this one.
+	txout.Value = 5.0
 	// There is no block info to add, since this is a mempool transaction
 	utxo, err := btc.utxo(txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 1 - unexpected error: %v", err)
 	}
-	// While we're here, check the spend script size is correct.
+	// While we're here, check the spend script size and value are correct.
 	scriptSize := utxo.SpendSize()
 	if scriptSize != P2PKHSigScriptSize+txInOverhead {
 		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, scriptSize)
+	}
+	if utxo.Value() != 500_000_000 {
+		t.Fatalf("case 1 - unexpected output value. expected 500,000,000, got %d", utxo.Value())
 	}
 	// Now "mine" the transaction.
 	testAddBlockVerbose(blockHash, nil, 1, txHeight)
@@ -1211,5 +1216,33 @@ func TestAuxiliary(t *testing.T) {
 	}
 	if utxo.TxID() != txid {
 		t.Fatalf("utxo txid doesn't match")
+	}
+}
+
+// TestCheckAddress checks that addresses are parsing or not parsing as
+// expected.
+func TestCheckAddress(t *testing.T) {
+	btc := &Backend{
+		chainParams: &chaincfg.MainNetParams,
+	}
+	type test struct {
+		addr    string
+		wantErr bool
+	}
+	tests := []test{
+		{"", true},
+		{"18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7", false},                                 // p2pk
+		{"3GD2fSQxhkXDAW66i6JBwCqhLFSvhMNrtJ", false},                                 // p2pkh
+		{"03aab68960ac1cc2a4151e40c530fcf32284afaed0cebbaec98500c8f3c491d50b", false}, // p2sh
+		{"bc1qq3wc0u7x0nezw3hfjkh45ffk09gm4ghl0k7dwe", false},                         // p2wpkh
+		{"bc1qdn28r3yr790mjzadkd79sgdkm92jdfq6j5zxsz6w0j9hvwsmr4ys7yn244", false},     // p2wskh
+		{"28Zpft83eov56iESWuPpV8XFLJ1b8gMZy7", true},                                  // wrong network
+		{"3GD2fSQxhkXDAW66i6JBwCqhLFSvhMNrtO", true},                                  // capital letter O not base 58
+		{"3GD2fSQx", true},
+	}
+	for _, test := range tests {
+		if btc.CheckAddress(test.addr) != !test.wantErr {
+			t.Fatalf("wantErr = %t, address = %s", test.wantErr, test.addr)
+		}
 	}
 }

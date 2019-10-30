@@ -691,16 +691,21 @@ func TestUTXOs(t *testing.T) {
 	msg := testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	// For a regular test tx, the output is at output index 0. Pass nil for the
 	// block hash and 0 for the block height and confirmations for a mempool tx.
-	testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
+	txout := testAddTxOut(msg.tx, msg.vout, txHash, nil, 0, 0)
+	// Set the value of this one.
+	txout.Value = 2.0
 	// There is no block info to add, since this is a mempool transaction
 	utxo, err := dcr.utxo(txHash, msg.vout, nil)
 	if err != nil {
 		t.Fatalf("case 1 - unexpected error: %v", err)
 	}
-	// While we're here, check the spend size is correct.
+	// While we're here, check the spend size and value are correct.
 	spendSize := utxo.SpendSize()
 	if spendSize != P2PKHSigScriptSize+txInOverhead {
 		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, spendSize)
+	}
+	if utxo.Value() != 200_000_000 {
+		t.Fatalf("case 1 - unexpected output value. expected 200,000,000, got %d", utxo.Value())
 	}
 	// Now "mine" the transaction.
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
@@ -1245,5 +1250,31 @@ func TestAuxiliary(t *testing.T) {
 	}
 	if utxo.TxID() != txid {
 		t.Fatalf("utxo txid doesn't match")
+	}
+}
+
+// TestCheckAddress checks that addresses are parsing or not parsing as
+// expected.
+func TestCheckAddress(t *testing.T) {
+	dcr := &dcrBackend{}
+	type test struct {
+		addr    string
+		wantErr bool
+	}
+	tests := []test{
+		{"", true},
+		{"DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12", false},
+		{"DeZcGyCtPq7sTvACZupjT3BC1tsSEsKaYL4", false},
+		{"DSo9Qw4FZLTwFL6fg2T9XPoJA8sFoZ4idZ7", false},
+		{"DkM3W1518RharMSnqSiJCCGQ7RikMKCATeRvRwEW8vy1B2fjTd4Xi", false},
+		{"Dce4vLzzENaZT7D2Wq5crRZ4VwfYMDMWkD9", false},
+		{"TsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12", true},
+		{"Dce4vLzzENaZT7D2Wq5crRZ4VwfYMDMWkD0", true}, // capital letter O not base 58
+		{"Dce4vLzzE", true},
+	}
+	for _, test := range tests {
+		if dcr.CheckAddress(test.addr) != !test.wantErr {
+			t.Fatalf("wantErr = %t, address = %s", test.wantErr, test.addr)
+		}
 	}
 }

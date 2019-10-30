@@ -47,6 +47,8 @@ type DEXAsset interface {
 	// transaction with 1 input spending a P2PKH utxo, 1 swap contract output and
 	// 1 change output.
 	InitTxSize() uint32
+	// CheckAddress checks that the given address is parseable.
+	CheckAddress(string) bool
 }
 
 // UTXO provides data about an unspent transaction output.
@@ -73,6 +75,8 @@ type UTXO interface {
 	TxID() string
 	// Vout is the output index of the UTXO.
 	Vout() uint32
+	// Value is the output value.
+	Value() uint64
 }
 
 // DEXTx provides methods for verifying transaction data.
@@ -103,6 +107,7 @@ type DEXTx interface {
 // grouped with the backend for convenience.
 type Asset struct {
 	Backend  DEXAsset
+	ID       uint32
 	Symbol   string
 	LotSize  uint64
 	RateStep uint64

@@ -157,6 +157,12 @@ func (dcr *dcrBackend) Transaction(txid string) (asset.DEXTx, error) {
 	return dcr.transaction(txHash)
 }
 
+// CheckAddress checks that the given address is parseable.
+func (dcr *dcrBackend) CheckAddress(addr string) bool {
+	_, err := dcrutil.DecodeAddress(addr, chainParams)
+	return err == nil
+}
+
 // Get the Tx. Transaction info is not cached, so every call will result in a
 // GetRawTransactionVerbose RPC call.
 func (dcr *dcrBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
@@ -401,6 +407,7 @@ func (dcr *dcrBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		numSigs:      scriptAddrs.nRequired,
 		// The total size associated with the wire.TxIn.
 		spendSize:  uint32(sigScriptSize) + txInOverhead,
+		value:      uint64(txOut.Value * dcrToAtoms),
 		lastLookup: lastLookup,
 	}, nil
 }

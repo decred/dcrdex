@@ -240,6 +240,8 @@ func (a *TAsset) Transaction(txid string) (asset.DEXTx, error) {
 }
 func (a *TAsset) InitTxSize() uint32 { return 100 }
 
+func (a *TAsset) CheckAddress(string) bool { return true }
+
 func (a *TAsset) setTxErr(err error) {
 	a.mtx.Lock()
 	defer a.mtx.Unlock()

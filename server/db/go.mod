@@ -14,6 +14,7 @@ require (
 replace (
 	github.com/decred/dcrdex/server/account => ../account
 	github.com/decred/dcrdex/server/asset => ../asset
+	github.com/decred/dcrdex/server/comms/msgjson => ../comms/msgjson
 	github.com/decred/dcrdex/server/market => ../market
 	github.com/decred/dcrdex/server/order => ../order
 )

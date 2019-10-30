@@ -211,6 +211,12 @@ func (btc *Backend) InitTxSize() uint32 {
 	return initTxSize
 }
 
+// CheckAddress checks that the given address is parseable.
+func (btc *Backend) CheckAddress(addr string) bool {
+	_, err := btcutil.DecodeAddress(addr, btc.chainParams)
+	return err == nil
+}
+
 // Create a *Backend and start the block monitor loop.
 func newBTC(ctx context.Context, chainParams *chaincfg.Params, logger asset.Logger, node btcNode) *Backend {
 	btc := &Backend{
@@ -317,6 +323,7 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		redeemScript: redeemScript,
 		numSigs:      scriptAddrs.nRequired,
 		spendSize:    uint32(sigScriptSize) + txInOverhead,
+		value:        uint64(txOut.Value * btcToSatoshi),
 		lastLookup:   lastLookup,
 	}, nil
 }
