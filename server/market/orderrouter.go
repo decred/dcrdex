@@ -31,24 +31,70 @@ type AuthManager interface {
 // MarketTunnel is a connection to a market and information about existing
 // swaps.
 type MarketTunnel interface {
-	AddEpoch(order.Order) error
+	// SubmitOrderAsync submits the order to the market for insertion into the
+	// epoch queue.
+	SubmitOrderAsync(*orderRecord)
+	// MidGap returns the mid-gap market rate, which is ths rate halfway between
+	// the best buy order and the best sell order in the order book.
 	MidGap() uint64
+	// OutpointLocked should return true if the outpoint is currently a funding
+	// UTXO for an active DEX order. This is required for UTXO validation to
+	// prevent a user from submitting multiple orders spending the same UTXO. This
+	// method will likely need to check all orders currently in the epoch queue,
+	// the order book, and the swap monitor, since UTXOs will still be unspent
+	// according to the asset backends until the client broadcasts their
+	// initialization transaction.
+	// DRAFT NOTE: This function could also potentially be handled by persistent
+	// storage, since active orders and active matches are tracked there.
 	OutpointLocked(txid string, vout uint32) bool
+	// Cancelable determines whether an order is cancelable. A cancelable order
+	// is a limit order with time-in-force standing either in the epoch queue or
+	// in the order book.
 	Cancelable(order.OrderID) bool
-	// DRAFT NOTE: TxMonitored is probably best handled by the swap monitor.
-	// Currently, the swap monitor does not track matches by user, but by match
-	// ID, so some changes would need to be made to make sure that the information
-	// could be quickly retrieved.
+	// TxMonitored determines whether the transaction for the given user is
+	// involved in a DEX-monitored trade. Change outputs from DEX-monitored trades
+	// can be used in other orders without waiting for fundConf confirmations.
 	TxMonitored(user account.AccountID, txid string) bool
 }
 
-// assetSet is pointers to two differnt assets, but with 4 ways of addressing
+// orderRecord contains the information necessary to respond to an order
+// request.
+type orderRecord struct {
+	order order.Order
+	req   msgjson.Stampable
+	msgID uint64
+}
+
+// newOrderRecord is the constructor for an *orderRecord.
+func newOrderRecord(o order.Order, req msgjson.Stampable, msgID uint64) *orderRecord {
+	return &orderRecord{
+		order: o,
+		req:   req,
+		msgID: msgID,
+	}
+}
+
+// assetSet is pointers to two different assets, but with 4 ways of addressing
 // them.
 type assetSet struct {
 	funding   *asset.Asset
 	receiving *asset.Asset
 	base      *asset.Asset
 	quote     *asset.Asset
+}
+
+// newAssetSet is a constructor for an assetSet.
+func newAssetSet(base, quote *asset.Asset, sell bool) *assetSet {
+	coins := &assetSet{
+		quote:     quote,
+		base:      base,
+		funding:   quote,
+		receiving: base,
+	}
+	if sell {
+		coins.funding, coins.receiving = base, quote
+	}
+	return coins
 }
 
 // outpoint satisfies order.Outpoint.
@@ -157,7 +203,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	}
 
 	// Create the limit order
-	serverTime := time.Now()
+	serverTime := time.Now().UTC()
 	lo := &order.LimitOrder{
 		MarketOrder: order.MarketOrder{
 			Prefix: order.Prefix{
@@ -165,7 +211,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 				BaseAsset:  limit.Base,
 				QuoteAsset: limit.Quote,
 				OrderType:  order.LimitOrderType,
-				ClientTime: time.Unix(int64(limit.ClientTime), 0),
+				ClientTime: time.Unix(int64(limit.ClientTime), 0).UTC(),
 				ServerTime: serverTime,
 			},
 			UTXOs:    utxos,
@@ -178,25 +224,13 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	}
 
 	// Send the order to the epoch queue.
-	tunnel.AddEpoch(lo)
-
-	// Add the server timestamp and get a signature of the serialized
-	// msgjson.Limit to send to the client.
-	stamp := uint64(serverTime.Unix())
-	limit.ServerTime = stamp
-	r.auth.Sign(limit)
-	oid := lo.ID()
-	res := &msgjson.OrderResult{
-		Sig:        limit.Sig,
-		ServerTime: stamp,
-		OrderID:    oid[:],
+	oRecord := &orderRecord{
+		order: lo,
+		req:   limit,
+		msgID: msg.ID,
 	}
-	respMsg, err := msgjson.NewResponse(msg.ID, res, nil)
-	if err != nil {
-		log.Errorf("failed to create msgjson.Message for 'limit' response: %v", err)
-		return msgjson.NewError(msgjson.RPCInternalError, "error forming response")
-	}
-	r.auth.Send(user, respMsg)
+	tunnel.SubmitOrderAsync(oRecord)
+	r.respondOrder(oRecord)
 	return nil
 }
 
@@ -252,14 +286,14 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
 	}
 	// Create the market order
-	serverTime := time.Now()
+	serverTime := time.Now().UTC()
 	mo := &order.MarketOrder{
 		Prefix: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  market.Base,
 			QuoteAsset: market.Quote,
 			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(int64(market.ClientTime), 0),
+			ClientTime: time.Unix(int64(market.ClientTime), 0).UTC(),
 			ServerTime: serverTime,
 		},
 		UTXOs:    utxos,
@@ -269,25 +303,13 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	}
 
 	// Send the order to the epoch queue.
-	tunnel.AddEpoch(mo)
-
-	// Add the server timestamp and get a signature of the serialized
-	// msgjson.Market to send to the client.
-	stamp := uint64(serverTime.Unix())
-	market.ServerTime = stamp
-	r.auth.Sign(market)
-	oid := mo.ID()
-	res := &msgjson.OrderResult{
-		Sig:        market.Sig,
-		ServerTime: stamp,
-		OrderID:    oid[:],
+	oRecord := &orderRecord{
+		order: mo,
+		req:   market,
+		msgID: msg.ID,
 	}
-	respMsg, err := msgjson.NewResponse(msg.ID, res, nil)
-	if err != nil {
-		log.Errorf("failed to create msgjson.Message for 'market' response: %v", err)
-		return msgjson.NewError(msgjson.RPCInternalError, "error forming response")
-	}
-	r.auth.Send(user, respMsg)
+	tunnel.SubmitOrderAsync(oRecord)
+	r.respondOrder(oRecord)
 	return nil
 }
 
@@ -332,39 +354,27 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	}
 
 	// Create the cancel order
-	serverTime := time.Now()
+	serverTime := time.Now().UTC()
 	co := &order.CancelOrder{
 		Prefix: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,
 			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(int64(cancel.ClientTime), 0),
+			ClientTime: time.Unix(int64(cancel.ClientTime), 0).UTC(),
 			ServerTime: serverTime,
 		},
 		TargetOrderID: targetID,
 	}
 
 	// Send the order to the epoch queue.
-	tunnel.AddEpoch(co)
-
-	// Add the server timestamp and get a signature of the serialized
-	// msgjson.Cancel to send to the client.
-	stamp := uint64(serverTime.Unix())
-	cancel.ServerTime = stamp
-	r.auth.Sign(cancel)
-	oid := co.ID()
-	res := &msgjson.OrderResult{
-		Sig:        cancel.Sig,
-		ServerTime: stamp,
-		OrderID:    oid[:],
+	oRecord := &orderRecord{
+		order: co,
+		req:   cancel,
+		msgID: msg.ID,
 	}
-	respMsg, err := msgjson.NewResponse(msg.ID, res, nil)
-	if err != nil {
-		log.Errorf("failed to create msgjson.Message for 'cancel' response: %v", err)
-		return msgjson.NewError(msgjson.RPCInternalError, "error forming response")
-	}
-	r.auth.Send(user, respMsg)
+	tunnel.SubmitOrderAsync(oRecord)
+	r.respondOrder(oRecord)
 	return nil
 }
 
@@ -424,16 +434,7 @@ func (r *OrderRouter) extractMarketDetails(prefix *msgjson.Prefix, trade *msgjso
 	if !found {
 		panic("missing base asset for known market should be impossible")
 	}
-	coins := &assetSet{
-		quote:     quote,
-		base:      base,
-		funding:   quote,
-		receiving: base,
-	}
-	if sell {
-		coins.funding, coins.receiving = base, quote
-	}
-	return tunnel, coins, sell, nil
+	return tunnel, newAssetSet(base, quote, sell), sell, nil
 }
 
 // checkTimes validates the timestamps in an order prefix.
@@ -464,9 +465,12 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 	if rpcErr != nil {
 		return 0, 0, nil, rpcErr
 	}
-
 	errSet := func(code int, message string) (uint64, uint32, []order.Outpoint, *msgjson.Error) {
 		return 0, 0, nil, msgjson.NewError(code, message)
+	}
+	// Check that the address is valid.
+	if !coins.receiving.Backend.CheckAddress(trade.Address) {
+		return errSet(msgjson.OrderParameterError, "address doesn't check")
 	}
 	// Quantity cannot be zero, and must be an integral multiple of the lot size.
 	if trade.Quantity == 0 {
@@ -524,10 +528,6 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 			return errSet(msgjson.UTXOAuthError,
 				fmt.Sprintf("failed to authorize utxo %s:%d", utxo.TxID.String(), utxo.Vout))
 		}
-		// Check that the address is valid.
-		if !coins.receiving.Backend.CheckAddress(trade.Address) {
-			return errSet(msgjson.OrderParameterError, "address doesn't check")
-		}
 		utxos = append(utxos, newOutpoint(utxo.TxID, utxo.Vout))
 		valSum += dexUTXO.Value()
 		spendSize += dexUTXO.SpendSize()
@@ -553,4 +553,25 @@ func msgBytesToBytes(msgBs []msgjson.Bytes) [][]byte {
 		b = append(b, msgB)
 	}
 	return b
+}
+
+// respondOrder signs the order data and sends the OrderResult to the client.
+func (r *OrderRouter) respondOrder(oRecord *orderRecord) {
+	// Add the server timestamp and get a signature of the serialized
+	// order request to send to the client.
+	stamp := uint64(oRecord.order.Time())
+	oRecord.req.Stamp(stamp)
+	oid := oRecord.order.ID()
+	r.auth.Sign(oRecord.req)
+	res := &msgjson.OrderResult{
+		Sig:        oRecord.req.SigBytes(),
+		ServerTime: stamp,
+		OrderID:    oid[:],
+	}
+	respMsg, err := msgjson.NewResponse(oRecord.msgID, res, nil)
+	if err != nil {
+		log.Errorf("failed to create msgjson.Message for 'cancel' response: %v", err)
+		return
+	}
+	r.auth.Send(oRecord.order.User(), respMsg)
 }

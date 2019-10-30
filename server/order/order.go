@@ -133,6 +133,9 @@ type Order interface {
 	// Time returns the Order's server time, when it was received by the server.
 	Time() int64
 
+	// SetTime sets the ServerTime field of the prefix.
+	SetTime(int64)
+
 	// FilledAmt returns the filled amount of the order.
 	FilledAmt() uint64
 
@@ -210,6 +213,11 @@ func (p *Prefix) SerializeSize() int {
 // Time returns the order prefix's server time as a UNIX epoch time.
 func (p *Prefix) Time() int64 {
 	return p.ServerTime.Unix()
+}
+
+// Time returns the order prefix's server time as a UNIX epoch time.
+func (p *Prefix) SetTime(t int64) {
+	p.ServerTime = time.Unix(t, 0).UTC()
 }
 
 // User gives the user's account ID.

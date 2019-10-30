@@ -63,17 +63,15 @@ func (a *TAuth) getSend() *msgjson.Message {
 }
 
 type TMarketTunnel struct {
-	addErr     error
-	adds       []order.Order
+	adds       []*orderRecord
 	midGap     uint64
 	locked     bool
 	watched    bool
 	cancelable bool
 }
 
-func (m *TMarketTunnel) AddEpoch(o order.Order) error {
+func (m *TMarketTunnel) SubmitOrderAsync(o *orderRecord) {
 	m.adds = append(m.adds, o)
-	return m.addErr
 }
 
 func (m *TMarketTunnel) MidGap() uint64 {
@@ -88,7 +86,7 @@ func (m *TMarketTunnel) TxMonitored(user account.AccountID, txid string) bool {
 	return m.watched
 }
 
-func (m *TMarketTunnel) pop() order.Order {
+func (m *TMarketTunnel) pop() *orderRecord {
 	if len(m.adds) == 0 {
 		return nil
 	}
@@ -249,7 +247,7 @@ func TestMain(m *testing.M) {
 		},
 		auth: &TAuth{sends: make([]*msgjson.Message, 0)},
 		market: &TMarketTunnel{
-			adds:       make([]order.Order, 0),
+			adds:       make([]*orderRecord, 0),
 			midGap:     dcrRateStep * 1000,
 			cancelable: true,
 		},
@@ -304,8 +302,8 @@ func TestLimit(t *testing.T) {
 	// First just send it through and ensure there are no errors.
 	ensureErr("valid order", sendLimit(), -1)
 	// Make sure the order was submitted to the market
-	o := oRig.market.pop()
-	if o == nil {
+	oRecord := oRig.market.pop()
+	if oRecord == nil {
 		t.Fatalf("no order submitted to epoch")
 	}
 
@@ -374,13 +372,13 @@ func TestLimit(t *testing.T) {
 		Force: order.StandingTiF,
 	}
 	// Get the last order submitted to the epoch
-	o = oRig.market.pop()
-	if o == nil {
+	oRecord = oRig.market.pop()
+	if oRecord == nil {
 		t.Fatalf("no buy order submitted to epoch")
 	}
 
 	// Check the utxo
-	epochOrder := o.(*order.LimitOrder)
+	epochOrder := oRecord.order.(*order.LimitOrder)
 	if len(epochOrder.UTXOs) != 1 {
 		t.Fatalf("expected 1 order UTXO, got %d", len(epochOrder.UTXOs))
 	}
@@ -402,7 +400,10 @@ func TestLimit(t *testing.T) {
 	}
 	resp, _ := respMsg.Response()
 	result := new(msgjson.OrderResult)
-	json.Unmarshal(resp.Result, result)
+	err := json.Unmarshal(resp.Result, result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
 	lo.ServerTime = time.Unix(int64(result.ServerTime), 0)
 
 	// Check equivalence of IDs.
@@ -503,13 +504,13 @@ func TestMarket(t *testing.T) {
 		Address:  dcrAddr,
 	}
 	// Get the last order submitted to the epoch
-	o = oRig.market.pop()
-	if o == nil {
+	oRecord := oRig.market.pop()
+	if oRecord == nil {
 		t.Fatalf("no buy order submitted to epoch")
 	}
 
 	// Check the utxo
-	epochOrder := o.(*order.MarketOrder)
+	epochOrder := oRecord.order.(*order.MarketOrder)
 	if len(epochOrder.UTXOs) != 1 {
 		t.Fatalf("expected 1 order UTXO, got %d", len(epochOrder.UTXOs))
 	}
@@ -531,7 +532,10 @@ func TestMarket(t *testing.T) {
 	}
 	resp, _ := respMsg.Response()
 	result := new(msgjson.OrderResult)
-	json.Unmarshal(resp.Result, result)
+	err := json.Unmarshal(resp.Result, result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
 	mo.ServerTime = time.Unix(int64(result.ServerTime), 0)
 
 	// Check equivalence of IDs.
@@ -566,8 +570,8 @@ func TestCancel(t *testing.T) {
 	// First just send it through and ensure there are no errors.
 	ensureErr("valid order", sendCancel(), -1)
 	// Make sure the order was submitted to the market
-	o := oRig.market.pop()
-	if o == nil {
+	oRecord := oRig.market.pop()
+	if oRecord == nil {
 		t.Fatalf("no order submitted to epoch")
 	}
 
@@ -617,13 +621,13 @@ func TestCancel(t *testing.T) {
 	if rpcErr != nil {
 		t.Fatalf("error for valid order (after prefix testing): %s", rpcErr.Message)
 	}
-	o = oRig.market.pop()
-	if o == nil {
+	oRecord = oRig.market.pop()
+	if oRecord == nil {
 		t.Fatalf("no cancel order submitted to epoch")
 	}
 
 	// Check the utxo
-	epochOrder := o.(*order.CancelOrder)
+	epochOrder := oRecord.order.(*order.CancelOrder)
 
 	// Get the server time from the response.
 	respMsg := oRig.auth.getSend()
@@ -632,7 +636,10 @@ func TestCancel(t *testing.T) {
 	}
 	resp, _ := respMsg.Response()
 	result := new(msgjson.OrderResult)
-	json.Unmarshal(resp.Result, result)
+	err := json.Unmarshal(resp.Result, result)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
 	co.ServerTime = time.Unix(int64(result.ServerTime), 0)
 
 	// Check equivalence of IDs.

@@ -131,6 +131,12 @@ func (s *signable) SigBytes() []byte {
 	return s.Sig
 }
 
+// Stampable is an interface that supports timestamping and signing.
+type Stampable interface {
+	Signable
+	Stamp(uint64)
+}
+
 // Acknowledgement is the 'result' field in a response to a request that
 // requires an acknowledgement. It is typically a signature of some serialized
 // data associated with the request.
@@ -418,6 +424,11 @@ type Prefix struct {
 	ServerTime uint64 `json:"tserver"`
 }
 
+// Stamp sets the server timestamp. Partially satisfies the Stampable interface.
+func (p *Prefix) Stamp(t uint64) {
+	p.ServerTime = t
+}
+
 // Serialize serializes the Prefix data.
 func (p *Prefix) Serialize() []byte {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
@@ -458,7 +469,7 @@ func (t *Trade) Serialize() []byte {
 type Limit struct {
 	Prefix
 	Trade
-	Rate uint64 `json:"rate,omitempty"`
+	Rate uint64 `json:"rate"`
 	TiF  uint8  `json:"timeinforce"`
 }
 
@@ -483,7 +494,7 @@ type Market struct {
 
 // Serialize serializes the Market data.
 func (m *Market) Serialize() ([]byte, error) {
-	// seralization: prefix (57) + trade (varies) + address (35 ish)
+	// serialization: prefix (57) + trade (varies) + address (35 ish)
 	b := append(m.Prefix.Serialize(), m.Trade.Serialize()...)
 	return append(b, []byte(m.Address)...), nil
 }
