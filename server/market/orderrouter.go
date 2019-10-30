@@ -570,7 +570,7 @@ func (r *OrderRouter) respondOrder(oRecord *orderRecord) {
 	}
 	respMsg, err := msgjson.NewResponse(oRecord.msgID, res, nil)
 	if err != nil {
-		log.Errorf("failed to create msgjson.Message for 'cancel' response: %v", err)
+		log.Errorf("failed to create msgjson.Message for order response: %v", err)
 		return
 	}
 	r.auth.Send(oRecord.order.User(), respMsg)
