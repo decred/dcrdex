@@ -260,7 +260,7 @@ func (p *Prefix) Base() uint32 {
 	return p.BaseAsset
 }
 
-// Base returns the  quote asset integer ID.
+// Quote returns the  quote asset integer ID.
 func (p *Prefix) Quote() uint32 {
 	return p.QuoteAsset
 }
