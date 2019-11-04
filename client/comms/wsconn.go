@@ -50,6 +50,8 @@ type WsCfg struct {
 	// ReconnectSync runs the needed reconnection synchronisation after
 	// a disconnect.
 	ReconnectSync func()
+	// The context.
+	Ctx context.Context
 	// The context cancel func.
 	Cancel context.CancelFunc
 }
@@ -218,7 +220,7 @@ func (conn *WsConn) connect() error {
 
 // keepAlive maintains an active websocket connection by reconnecting when
 // the established connection is broken. This should be run as a goroutine.
-func (conn *WsConn) keepAlive(ctx context.Context) {
+func (conn *WsConn) keepAlive() {
 	ticker := time.NewTicker(time.Second)
 
 	for {
@@ -236,7 +238,7 @@ func (conn *WsConn) keepAlive(ctx context.Context) {
 				}
 			}
 
-		case <-ctx.Done():
+		case <-conn.cfg.Ctx.Done():
 			now := time.Now()
 			closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
 			conn.writeMtx.Lock()
@@ -308,7 +310,7 @@ func (conn *WsConn) read() {
 
 // send pushes outgoing messages over the websocket connection.
 // This should be run as a goroutine.
-func (conn *WsConn) send(ctx context.Context) {
+func (conn *WsConn) send() {
 	for {
 		select {
 		case msg := <-conn.sendCh:
@@ -329,7 +331,7 @@ func (conn *WsConn) send(ctx context.Context) {
 				continue
 			}
 
-		case <-ctx.Done():
+		case <-conn.cfg.Ctx.Done():
 			conn.wg.Done()
 			return
 		}
@@ -337,12 +339,12 @@ func (conn *WsConn) send(ctx context.Context) {
 }
 
 // Run starts all processes of the websocket connection.
-func (conn *WsConn) Run(ctx context.Context) {
+func (conn *WsConn) Run() {
 	go conn.read()
 
 	conn.wg.Add(2)
-	go conn.keepAlive(ctx)
-	go conn.send(ctx)
+	go conn.keepAlive()
+	go conn.send()
 }
 
 // WaitForShutdown waits for all monitored connection processes to terminate.

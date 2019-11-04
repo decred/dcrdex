@@ -160,6 +160,7 @@ func TestWsConn(t *testing.T) {
 		RpcCert:            certFile.Name(),
 		RpcKey:             keyFile.Name(),
 		InsecureSkipVerify: true,
+		Ctx:                ctx,
 		Cancel:             cancel,
 	}
 	wsc, err := NewWsConn(cfg)
@@ -167,7 +168,7 @@ func TestWsConn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wsc.Run(ctx)
+	wsc.Run()
 
 	go func() {
 		wsc.WaitForShutdown()
