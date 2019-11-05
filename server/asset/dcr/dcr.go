@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -67,7 +68,7 @@ type DCRBackend struct {
 	anyQ chan interface{}
 	// A logger will be provided by the DEX. All logging should use the provided
 	// logger.
-	log asset.Logger
+	log dex.Logger
 }
 
 // Check that DCRBackend satisfies the DEXAsset interface.
@@ -78,7 +79,7 @@ var _ asset.DEXAsset = (*DCRBackend)(nil)
 // application exits. If configPath is an empty string, the backend will
 // attempt to read the settings directly from the dcrd config file in its
 // default system location.
-func NewBackend(ctx context.Context, configPath string, logger asset.Logger, network asset.Network) (*DCRBackend, error) {
+func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (*DCRBackend, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
 	cfg, err := loadConfig(configPath, network)
@@ -261,7 +262,7 @@ func (dcr *DCRBackend) shutdown() {
 
 // unconnectedDCR returns a DCRBackend without a node. The node should be set
 // before use.
-func unconnectedDCR(ctx context.Context, logger asset.Logger) *DCRBackend {
+func unconnectedDCR(ctx context.Context, logger dex.Logger) *DCRBackend {
 	dcr := &DCRBackend{
 		ctx:        ctx,
 		blockChans: make([]chan uint32, 0),

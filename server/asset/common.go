@@ -3,7 +3,7 @@
 
 package asset
 
-import "github.com/decred/slog"
+import "decred.org/dcrdex/dex"
 
 type Error string
 
@@ -12,22 +12,6 @@ func (err Error) Error() string { return string(err) }
 const (
 	UnsupportedScriptError = Error("unsupported script type")
 )
-
-// Network flags passed to asset backends to signify which network to use.
-type Network uint8
-
-const (
-	Mainnet Network = iota
-	Testnet
-	Regtest
-)
-
-// The DEX recognizes only three networks. Simnet is a alias of Regtest.
-const Simnet = Regtest
-
-// Every backend constructor will accept a Logger. All logging should take place
-// through the provided logger.
-type Logger = slog.Logger
 
 // The DEXAsset interface is an interface for a blockchain backend.
 type DEXAsset interface {
@@ -80,18 +64,8 @@ type Coin interface {
 	Value() uint64
 }
 
-// Type Asset combines the DEXAsset backend with the configurable asset
-// variables. The asset variables do not affect the backend operation, but are
-// grouped with the backend for convenience.
-type Asset struct {
-	Backend  DEXAsset
-	ID       uint32
-	Symbol   string
-	LotSize  uint64
-	RateStep uint64
-	FeeRate  uint64
-	SwapSize uint64
-	SwapConf uint32
-	FundConf uint32
-	Scripts  []string // Not sure that we need this or not.
+// BackedAsset is a dex.Asset with a DEXAsset backend.
+type BackedAsset struct {
+	dex.Asset
+	Backend DEXAsset
 }

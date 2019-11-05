@@ -6,8 +6,6 @@ package dex
 import (
 	"fmt"
 	"strings"
-
-	"decred.org/dcrdex/server/asset"
 )
 
 // MarketInfo specifies a market that the Archiver must support.
@@ -25,15 +23,15 @@ func marketName(base, quote string) string {
 
 // MarketName creates the string representation of a DEX market (e.g. "dcr_btc")
 // given the base and quote asset indexes defined in BIP-0044. See also
-// decred.org/dcrdex/server/asset.BipIDSymbol.
+// BipIDSymbol.
 func MarketName(base, quote uint32) (string, error) {
-	baseSymbol := asset.BipIDSymbol(base)
+	baseSymbol := BipIDSymbol(base)
 	if baseSymbol == "" {
 		return "", fmt.Errorf("base asset %d not found", base)
 	}
 	baseSymbol = strings.ToLower(baseSymbol)
 
-	quoteSymbol := asset.BipIDSymbol(quote)
+	quoteSymbol := BipIDSymbol(quote)
 	if quoteSymbol == "" {
 		return "", fmt.Errorf("quote asset %d not found", quote)
 	}
@@ -64,13 +62,13 @@ func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64) (*MarketIn
 // decred.org/dcrdex/server/asset package.
 func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64) (*MarketInfo, error) {
 	base = strings.ToLower(base)
-	baseID, found := asset.BipSymbolID(base)
+	baseID, found := BipSymbolID(base)
 	if !found {
 		return nil, fmt.Errorf(`base asset symbol "%s" unrecognized`, base)
 	}
 
 	quote = strings.ToLower(quote)
-	quoteID, found := asset.BipSymbolID(quote)
+	quoteID, found := BipSymbolID(quote)
 	if !found {
 		return nil, fmt.Errorf(`quote asset symbol "%s" unrecognized`, quote)
 	}

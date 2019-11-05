@@ -24,7 +24,7 @@ import (
 	"os"
 	"testing"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset/btc"
 	"github.com/decred/slog"
 )
@@ -38,7 +38,7 @@ func TestMain(m *testing.M) {
 	ctx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 	var err error
-	dexAsset, err := NewBackend(ctx, "", logger, asset.Mainnet)
+	dexAsset, err := NewBackend(ctx, "", logger, dex.Mainnet)
 	if err != nil {
 		fmt.Printf("NewBackend error: %v\n", err)
 		return

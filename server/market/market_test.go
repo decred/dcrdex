@@ -36,12 +36,14 @@ func (a *TAsset) BlockChannel(size int) chan uint32 { return nil }
 func (a *TAsset) InitTxSize() uint32                { return 100 }
 func (a *TAsset) CheckAddress(string) bool          { return true }
 
-func newAsset(id uint32, lotSize uint64) *asset.Asset {
-	return &asset.Asset{
+func newAsset(id uint32, lotSize uint64) *asset.BackedAsset {
+	return &asset.BackedAsset{
 		Backend: &TAsset{},
-		ID:      id,
-		LotSize: lotSize,
-		Symbol:  asset.BipIDSymbol(id),
+		Asset: dex.Asset{
+			ID:      id,
+			LotSize: lotSize,
+			Symbol:  dex.BipIDSymbol(id),
+		},
 	}
 }
 
@@ -163,7 +165,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	ctx := context.Background()
 	swapperCfg := &swap.Config{
 		Ctx: ctx,
-		Assets: map[uint32]*asset.Asset{
+		Assets: map[uint32]*asset.BackedAsset{
 			assetDCR.ID: assetDCR,
 			assetBTC.ID: assetBTC,
 		},
@@ -267,7 +269,7 @@ func TestMarket_processEpoch(t *testing.T) {
 	authMgr := &TAuth{}
 	swapperCfg := &swap.Config{
 		Ctx: ctx,
-		Assets: map[uint32]*asset.Asset{
+		Assets: map[uint32]*asset.BackedAsset{
 			assetDCR.ID: assetDCR,
 			assetBTC.ID: assetBTC,
 		},
