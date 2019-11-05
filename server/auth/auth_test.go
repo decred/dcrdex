@@ -30,7 +30,6 @@ func randBytes(l int) []byte {
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct     *account.Account
-	paid     bool
 	matches  []*order.UserMatch
 	closedID account.AccountID
 	acctAddr string
@@ -245,8 +244,8 @@ func tCheckFee(txid string, vout uint32) (addr string, val uint64, confs int64, 
 
 const (
 	tRegFee       uint64 = 500_000_000
-	tDexPubKeyHex        = "032e3678f9889206dcea4fc281556c9e543c5d5ffa7efe8d11118b52e29c773f27"
-	tFeeAddr             = "Dcur2mcGjmENx4DhNqDctW5wJCVyT3Qeqkx"
+	tDexPubKeyHex string = "032e3678f9889206dcea4fc281556c9e543c5d5ffa7efe8d11118b52e29c773f27"
+	tFeeAddr      string = "Dcur2mcGjmENx4DhNqDctW5wJCVyT3Qeqkx"
 )
 
 var tDexPubKeyBytes = []byte{

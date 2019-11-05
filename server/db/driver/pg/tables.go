@@ -110,7 +110,7 @@ func PrepareTables(db *sql.DB, mktConfig []*types.MarketInfo) error {
 	}
 
 	// Prepare the account and registration key counter tables.
-	err = prepareAccounts(db)
+	err = createAccountTables(db)
 	if err != nil {
 		return err
 	}
@@ -160,13 +160,4 @@ func prepareMarkets(db *sql.DB, mktConfig []*types.MarketInfo) (map[string]*type
 	}
 
 	return marketMap, nil
-}
-
-// prepareAccounts prepares the account tables.
-func prepareAccounts(db *sql.DB) error {
-	err := createAccountTables(db)
-	if err != nil {
-		return err
-	}
-	return err
 }

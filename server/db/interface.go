@@ -77,6 +77,7 @@ type OrderArchiver interface {
 type AccountArchiver interface {
 	// CloseAccount closes an account for violating a rule of community conduct.
 	CloseAccount(account.AccountID, account.Rule)
+
 	// Account retreives the account information for the specified account ID.
 	// The registration fee payment status is returned as well. A nil pointer
 	// will be returned for unknown or closed accounts.
@@ -89,8 +90,10 @@ type AccountArchiver interface {
 	// CreateAccount stores a new account. The account is considered unpaid until
 	// PayAccount is used to set the payment details.
 	CreateAccount(*account.Account) (string, error)
+
 	// AccountRegAddr gets the registration fee address assigned to the account.
 	AccountRegAddr(account.AccountID) (string, error)
+
 	// PayAccount sets the registration fee payment transaction details for the
 	// account, completing the registration process.
 	PayAccount(account.AccountID, string, uint32) error

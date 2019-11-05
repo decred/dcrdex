@@ -8,7 +8,7 @@
 // -----------------------------------
 // This command will check the UTXO paths by iterating backwards through
 // the transactions in the mainchain, starting with mempool, and requesting
-// all found outputs through the dcrBackend.utxo method. All utxos must be
+// all found outputs through the DCRBackend.utxo method. All utxos must be
 // found or found to be spent.
 //
 // go test -v -tags dcrlive -run CacheAdvantage
@@ -46,7 +46,7 @@ import (
 
 var (
 	dcrdConfigPath = filepath.Join(dcrdHomeDir, "dcrd.conf")
-	dcr            *dcrBackend
+	dcr            *DCRBackend
 	testLogger     asset.Logger
 )
 
@@ -178,7 +178,7 @@ func TestLiveUTXO(t *testing.T) {
 				}
 				// Check if its an acceptable script type.
 				scriptTypeOK := scriptType != scriptUnsupported
-				// Now try to get the UXO with the dcrBackend
+				// Now try to get the UXO with the DCRBackend
 				utxo, err := dcr.utxo(txHash, uint32(vout), nil)
 				// Can't do stakebase or cainbase.
 				// ToDo: Use a custom error and check it.

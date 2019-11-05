@@ -23,7 +23,7 @@ func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) {
 }
 
 // Account retreives the account pubkey, whether the account is paid, and
-// whether their account is open, in that order.
+// whether the account is open, in that order.
 func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool) {
 	acct, isPaid, isOpen, err := getAccount(a.db, a.tables.accounts, aid)
 	switch err {
@@ -37,7 +37,8 @@ func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool)
 	return acct, isPaid, isOpen
 }
 
-// CreateAccount creates an entry for a new account in the accounts table. .
+// CreateAccount creates an entry for a new account in the accounts table. A
+// DCR registration fee address is created and returned.
 func (a *Archiver) CreateAccount(acct *account.Account) (string, error) {
 	regAddr, err := a.getNextAddress()
 	if err != nil {

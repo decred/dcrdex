@@ -18,6 +18,7 @@ github.com/dchest/blake256 v1.0.0/go.mod h1:xXNWCE1jsAP8DAjP+rKw2MbeqLczjI3TRx2V
 github.com/decred/base58 v1.0.0/go.mod h1:LLY1p5e3g91byL/UO1eiZaYd+uRoVRarybgcoymu9Ks=
 github.com/decred/base58 v1.0.1 h1:w5qTcb0hYpKuIBYIn4Ckirkj1aOWrSq8onPQpb3eGg8=
 github.com/decred/base58 v1.0.1/go.mod h1:H2ENcsJjye1G7CbRa67kV9OFaui0LGr56ntKKoY5g9c=
+github.com/decred/dcrd/certgen v1.1.0/go.mod h1:ivkPLChfjdAgFh7ZQOtl6kJRqVkfrCq67dlq3AbZBQE=
 github.com/decred/dcrd/chaincfg v1.1.1/go.mod h1:UlGtnp8Xx9YK+etBTybGjoFGoGXSw2bxZQuAnwfKv6I=
 github.com/decred/dcrd/chaincfg v1.2.0 h1:Vj0xr85wmqOdQDxKLkpP9TqwK1RykqY2eC0fWcCsl0k=
 github.com/decred/dcrd/chaincfg v1.2.0/go.mod h1:kpoGTMIriKn5hHRSu5b65+Q9LlGUdbQcMzGujac1BVs=
@@ -66,6 +67,7 @@ github.com/decred/dcrdex/server/account v0.0.0-20191021140456-dfb4ce4aeb06/go.mo
 github.com/decred/dcrdex/server/asset v0.0.0-20191021140456-dfb4ce4aeb06 h1:aayoBwKCt21tETPb/4/GCIu8ovkDroeqgpAps+yqfNI=
 github.com/decred/dcrdex/server/asset v0.0.0-20191021140456-dfb4ce4aeb06/go.mod h1:czgs70tZom418UPq+/1GVvj7dxIPzk4nM/zkMp6CQko=
 github.com/decred/dcrdex/server/book v0.0.0-20191021140456-dfb4ce4aeb06/go.mod h1:BRLp0yhGK7XTYmlKYr0v2919o/H+7LA6HXPRIgs2f84=
+github.com/decred/dcrdex/server/comms v0.0.0-20191030182607-90a2131e2ab3/go.mod h1:iFoio46I4ZbJXHNDjVs0SWsrowiOp4UPU/QCDpi4c/o=
 github.com/decred/dcrdex/server/matcher v0.0.0-20191021140456-dfb4ce4aeb06/go.mod h1:7xsAUOcOK7VeUmKN1qYhu+VB/psnhqOxuG84pIkcYaw=
 github.com/decred/dcrdex/server/order v0.0.0-20191015161642-e29ca1b594a7/go.mod h1:+bOjO6AlusnQuIFdR+zmO+YHmXt+Ea1/BnL6rbl52pc=
 github.com/decred/dcrdex/server/order v0.0.0-20191021140456-dfb4ce4aeb06 h1:bspYYj1+hKNtOSzKFhfMy/T+x65wjdKYF345iZfO/w4=
@@ -73,7 +75,9 @@ github.com/decred/dcrdex/server/order v0.0.0-20191021140456-dfb4ce4aeb06/go.mod 
 github.com/decred/slog v1.0.0 h1:Dl+W8O6/JH6n2xIFN2p3DNjCmjYwvrXsjlSJTQQ4MhE=
 github.com/decred/slog v1.0.0/go.mod h1:zR98rEZHSnbZ4WHZtO0iqmSZjDLKhkXfrPTZQKtAonQ=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
+github.com/go-chi/chi v4.0.2+incompatible/go.mod h1:eB3wogJHnLi3x/kFX2A+IbTBlXxmMeXJVKy9tTv1XzQ=
 github.com/golang/protobuf v1.2.0/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=
+github.com/gorilla/websocket v1.4.1/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/hpcloud/tail v1.0.0/go.mod h1:ab1qPbhIpdTxEkNHXyeSf5vhxWSCs/tWer42PpOxQnU=
 github.com/jessevdk/go-flags v0.0.0-20141203071132-1679536dcc89/go.mod h1:4FA24M0QyGHXBuZZK/XkWh8h0e1EYbRYJSGM75WSRxI=
 github.com/jrick/logrotate v1.0.0/go.mod h1:LNinyqDIJnpAur+b8yyulnQw/wDuN1+BYKlTRt3OuAQ=
