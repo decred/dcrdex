@@ -38,6 +38,8 @@ const (
 	UTXOAuthError
 	UnknownMarket
 	NotSubscribedError
+	UnauthorizedConnection
+	AuthenticationError
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -90,6 +92,9 @@ const (
 	// EpochOrderRoute is the DEX-originating notification-type message informing
 	// the client about an order added to the epoch queue.
 	EpochOrderRoute = "epoch_order"
+	// ConnectRoute is a client-originating request-type message seeking
+	// authentication so that the connection can be used for for trading.
+	ConnectRoute = "connect"
 )
 
 // Bytes is a byte slice that marshals to and unmarshals from a hexadecimal
@@ -304,6 +309,10 @@ type Match struct {
 	Rate     uint64 `json:"rate"`
 	Address  string `json:"address"`
 	Time     uint64 `json:"timestamp"`
+	// Status and Side are provided for convenience and are not part of the
+	// match serialization.
+	Status uint8 `json:"status"`
+	Side   uint8 `json:"side"`
 }
 
 var _ Signable = (*Match)(nil)
@@ -402,7 +411,7 @@ type Redeem struct {
 
 var _ Signable = (*Redeem)(nil)
 
-// Serialize serializes the RedeemParams data.
+// Serialize serializes the Redeem data.
 func (redeem *Redeem) Serialize() ([]byte, error) {
 	// Init serialization is orderid (32) + matchid (32) + txid (32) + vout (4)
 	// + timestamp(8) = 108
@@ -415,7 +424,7 @@ func (redeem *Redeem) Serialize() ([]byte, error) {
 	return s, nil
 }
 
-// Redemption are the params for a DEX-originating RedemptionRoute request.
+// Redemption is the payload for a DEX-originating RedemptionRoute request.
 // They are identical to the Redeem parameters, but Redeem is for the
 // client-originating RedeemRoute request.
 type Redemption = Redeem
@@ -611,6 +620,29 @@ type EpochOrderNote struct {
 	Epoch     uint64 `json:"epoch"`
 }
 
+type Connect struct {
+	signable
+	AccountID  Bytes  `json:"accountid"`
+	APIVersion uint16 `json:"apiver"`
+	Time       uint64 `json:"timestamp"`
+}
+
+// Serialize serializes the Connect data.
+func (c *Connect) Serialize() ([]byte, error) {
+	// serialization: account ID (32) + api version (2) + timestamp (8) = 42 bytes
+	s := make([]byte, 0, 42)
+	s = append(s, c.AccountID...)
+	s = append(s, uint16Bytes(c.APIVersion)...)
+	s = append(s, uint64Bytes(c.Time)...)
+	return s, nil
+}
+
+// Connect response is the response result for the ConnectRoute request.
+type ConnectResponse struct {
+	StartEpoch uint64   `json:"startepoch"`
+	Matches    []*Match `json:"matches"`
+}
+
 // Convert uint64 to 8 bytes.
 func uint64Bytes(i uint64) []byte {
 	b := make([]byte, 8)
@@ -622,5 +654,12 @@ func uint64Bytes(i uint64) []byte {
 func uint32Bytes(i uint32) []byte {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, i)
+	return b
+}
+
+// Convert uint32 to 4 bytes.
+func uint16Bytes(i uint16) []byte {
+	b := make([]byte, 2)
+	binary.BigEndian.PutUint16(b, i)
 	return b
 }

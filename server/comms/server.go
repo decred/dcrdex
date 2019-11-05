@@ -66,9 +66,9 @@ type rpcRoute func(Link, *msgjson.Message) *msgjson.Error
 // rpcRoutes maps message routes to the handlers.
 var rpcRoutes = make(map[string]rpcRoute)
 
-// Route registers a RPC handler for a specified route. The handler
-// map is global and has no mutex protection. All calls to Route
-// should be done before the Server is started.
+// Route registers a handler for a specified route. The handler map is global
+// and has no mutex protection. All calls to Route should be done before the
+// Server is started.
 func Route(route string, handler rpcRoute) {
 	if route == "" {
 		panic("Route: route is empty string")
@@ -78,6 +78,12 @@ func Route(route string, handler rpcRoute) {
 		panic(fmt.Sprintf("Route: double registration: %s", route))
 	}
 	rpcRoutes[route] = handler
+}
+
+// RouteHandler gets the handler registered to the specified route, if it
+// exists.
+func RouteHandler(route string) rpcRoute {
+	return rpcRoutes[route]
 }
 
 // The RPCConfig is the server configuration settings and the only argument

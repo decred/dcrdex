@@ -218,8 +218,8 @@ out:
 			}
 			// Look for a registered handler. Failure to find a handler results in an
 			// error response but not a disconnect.
-			handler, found := rpcRoutes[msg.Route]
-			if !found {
+			handler := RouteHandler(msg.Route)
+			if handler == nil {
 				c.sendError(msg.ID, msgjson.NewError(msgjson.RPCUnknownRoute,
 					"unknown route "+msg.Route))
 				continue
@@ -318,7 +318,9 @@ func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message)) {
 		f:          respHandler,
 	}
 	// clean up the response map.
-	go c.cleanUpExpired()
+	if len(c.respHandlers) > 1 {
+		go c.cleanUpExpired()
+	}
 }
 
 // respHandler extracts the response handler for the provided request ID if it

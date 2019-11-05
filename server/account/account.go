@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrd/dcrec/secp256k1"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/dcrdex/server/account/pki"
 )
 
@@ -76,3 +76,12 @@ func NewAccountFromPubKey(pk []byte) (*Account, error) {
 		PubKey: pubKey,
 	}, nil
 }
+
+// Rule represents a rule of community conduct.
+type Rule uint8
+
+const (
+	FailureToAct = iota
+	CancellationRatio
+	LowFees
+)
