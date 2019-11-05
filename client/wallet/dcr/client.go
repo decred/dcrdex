@@ -239,3 +239,51 @@ func (c *Client) generateNewAddresses(count uint64) ([]string, error) {
 	return addrs, nil
 }
 
+// Swap creates, signs and broadcasts a swap transaction using the provided
+// inputs and counterparty destinations and associated amounts.
+func (c *Client) Swap(inputs []types.ListUnspentResult, spends map[string]int64) (string, error) {
+	redeemAddrs, err := c.generateNewAddresses(uint64(len(spends)))
+	if err != nil {
+		return "", fmt.Errorf("unable to generate redeem addresses: %v", err)
+	}
+
+	ctpAddrs := make([]string, 0)
+	for addr := range spends {
+		ctpAddrs = append(ctpAddrs, addr)
+	}
+
+	locktime := uint32(time.Now().Add(48 * time.Hour).Unix())
+
+	contracts, err := generateContracts(redeemAddrs, ctpAddrs, locktime, c.params)
+	if err != nil {
+		return "", fmt.Errorf("unable to generate swap contracts: %v", err)
+	}
+
+	contractPkScripts, err := generateSwapPkScripts(spends, contracts, c.params)
+	if err != nil {
+		return "", fmt.Errorf("unable to generate contract pksripts: %v", err)
+	}
+
+	changeAddr, err := c.getNewAddress()
+	if err != nil {
+		return "", fmt.Errorf("unable to generate change address: %v", err)
+	}
+
+	tx, err := createTransaction(inputs, spends, contractPkScripts, locktime,
+		c.relayFeePerKb, changeAddr, c.params)
+	if err != nil {
+		return "", fmt.Errorf("unable to create swap transaction: %v", err)
+	}
+
+	signedTx, _, err := c.signRawTransaction(tx)
+	if err != nil {
+		return "", fmt.Errorf("unable to sign transaction: %v", err)
+	}
+
+	txHash, err := c.sendRawTransaction(signedTx)
+	if err != nil {
+		return "", fmt.Errorf("unable to send transaction: %v", err)
+	}
+
+	return txHash.String(), nil
+}
