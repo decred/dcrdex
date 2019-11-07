@@ -51,7 +51,6 @@ func (aid *AccountID) Scan(src interface{}) error {
 	return fmt.Errorf("cannot convert %T to AccountID", src)
 }
 
-
 // Account represents a dex client account.
 type Account struct {
 	ID     AccountID
@@ -81,7 +80,16 @@ func NewAccountFromPubKey(pk []byte) (*Account, error) {
 type Rule uint8
 
 const (
-	FailureToAct = iota
+	// NoRule indicates that no rules have been broken. This may be an invalid
+	// value in some contexts.
+	NoRule = iota
+	// FailureToAct means that an account has not followed through on one of their
+	// swap negotiation steps.
+	FailureToAct
+	// CancellationRatio means the account's cancellation ratio has dropped below
+	// the acceptable level.
 	CancellationRatio
+	// LowFees means an account made a transaction that didn't pay fees at the
+	// requisite level.
 	LowFees
 )

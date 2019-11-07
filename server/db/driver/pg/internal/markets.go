@@ -1,10 +1,6 @@
 package internal
 
 const (
-	// CreateMarketSchema creates a database schema used to organize tables from
-	// different markets (i.e. database.schema.table).
-	CreateMarketSchema = `CREATE SCHEMA IF NOT EXISTS %s;`
-
 	// CreateMarketsTable creates the DEX's "markets" table, which indicates
 	// which markets are currently recognized by the DEX, and their configured
 	// lot sizes. This tables should be created in the public schema. This

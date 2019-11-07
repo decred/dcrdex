@@ -122,13 +122,13 @@ func TestTidyConfig(t *testing.T) {
 
 // The remaining tests use the testBlockchain which is a stub for
 // rpcclient.Client. UTXOs, transactions and blocks are added to the blockchain
-// as jsonrpc types to be requested by the dcrBackend.
+// as jsonrpc types to be requested by the DCRBackend.
 //
 // General formula for testing
-// 1. Create a dcrBackend with the node field set to a testNode
+// 1. Create a DCRBackend with the node field set to a testNode
 // 2. Create a fake UTXO and all of the associated jsonrpc-type blocks and
 //    transactions and add the to the test blockchain.
-// 3. Verify the dcrBackend and UTXO methods are returning whatever is expected.
+// 3. Verify the DCRBackend and UTXO methods are returning whatever is expected.
 // 4. Optionally add more blocks and/or transactions to the blockchain and check
 //    return values again, as things near the top of the chain can change.
 
@@ -155,7 +155,7 @@ type testBlockChain struct {
 	hashes map[int64]*chainhash.Hash
 }
 
-// The testChain is a "blockchain" to store RPC responses for the dcrBackend
+// The testChain is a "blockchain" to store RPC responses for the DCRBackend
 // node stub to request.
 var testChain testBlockChain
 
@@ -426,7 +426,7 @@ func newStakeP2PKHScript(opcode byte) ([]byte, *testAuth) {
 
 // A MsgTx for a regular transaction with a single output. No inputs, so it's
 // not really a valid transaction, but that's okay on testBlockchain and
-// irrelevant to dcrBackend.
+// irrelevant to DCRBackend.
 func testMsgTxRegular(sigType dcrec.SignatureType) *testMsgTx {
 	pkScript, auth := newP2PKHScript(sigType)
 	msgTx := wire.NewMsgTx()
@@ -640,7 +640,7 @@ func testMsgTxRevocation() *testMsgTx {
 }
 
 // Make a backend that logs to stdout.
-func testBackend() (*dcrBackend, func()) {
+func testBackend() (*DCRBackend, func()) {
 	ctx, shutdown := context.WithCancel(context.Background())
 	dcr := unconnectedDCR(ctx, testLogger)
 	dcr.node = testNode{}
@@ -668,7 +668,7 @@ func TestUTXOs(t *testing.T) {
 	// 11. A UTXO with a pay-to-script-hash for a P2PKH redeem script.
 	// 12. A revocation.
 
-	// Create a dcrBackend with the test node.
+	// Create a DCRBackend with the test node.
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
@@ -1000,7 +1000,7 @@ func TestUTXOs(t *testing.T) {
 // TestReorg sends a reorganization-causing block through the anyQ channel, and
 // checks that the cache is responding as expected.
 func TestReorg(t *testing.T) {
-	// Create a dcrBackend with the test node.
+	// Create a DCRBackend with the test node.
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
@@ -1089,7 +1089,7 @@ func TestReorg(t *testing.T) {
 
 // TestTx checks the transaction-related methods and functions.
 func TestTx(t *testing.T) {
-	// Create a dcrBackend with the test node.
+	// Create a DCRBackend with the test node.
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
@@ -1225,7 +1225,7 @@ func TestTx(t *testing.T) {
 // TestAuxiliary checks the UTXO convenience functions like TxHash, Vout, and
 // TxID.
 func TestAuxiliary(t *testing.T) {
-	// Create a dcrBackend with the test node.
+	// Create a DCRBackend with the test node.
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
@@ -1251,12 +1251,35 @@ func TestAuxiliary(t *testing.T) {
 	if utxo.TxID() != txid {
 		t.Fatalf("utxo txid doesn't match")
 	}
+
+	// Check that values returned from UnspentDetails are as set.
+	cleanTestChain()
+	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
+	confs := int64(3)
+	txout := testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), confs)
+	txout.Value = 8
+	scriptAddrs, _ := extractScriptAddrs(msg.tx.TxOut[0].PkScript)
+	addr := scriptAddrs.pkHashes[0].String()
+	txAddr, v, confs, err := dcr.UnspentDetails(txid, 0)
+	if err != nil {
+		t.Fatalf("UnspentDetails error: %v", err)
+	}
+	if txAddr != addr {
+		t.Fatalf("expected address %s, got %s", addr, txAddr)
+	}
+	expVal := uint64(8 * dcrToAtoms)
+	if v != expVal {
+		t.Fatalf("expected value %d, got %d", expVal, v)
+	}
+	if confs != 3 {
+		t.Fatalf("expected 3 confirmations, got %d", confs)
+	}
 }
 
 // TestCheckAddress checks that addresses are parsing or not parsing as
 // expected.
 func TestCheckAddress(t *testing.T) {
-	dcr := &dcrBackend{}
+	dcr := &DCRBackend{}
 	type test struct {
 		addr    string
 		wantErr bool

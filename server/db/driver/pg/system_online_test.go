@@ -9,6 +9,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/dcrdex/server/market/types"
 )
 
@@ -64,6 +65,8 @@ func openDB() (func() error, error) {
 		QueryTimeout:  0, // zero to use the default
 		MarketCfg:     []*types.MarketInfo{mktInfo},
 		CheckedStores: true,
+		Net:           asset.Mainnet,
+		FeeKey:        "dprv3hCznBesA6jBu1MaSqEBewG76yGtnG6LWMtEXHQvh3MVo6rqesTk7FPMSrczDtEELReV4aGMcrDxc9htac5mBDUEbTi9rgCA8Ss5FkasKM3",
 	}
 
 	closeFn := func() error { return nil }
@@ -137,15 +140,23 @@ func nukeAll(db *sql.DB) error {
 	}
 
 	// Drop tables in public schema.
-	for i := range createPublicTableStatements {
-		tableName := "public." + createPublicTableStatements[i].name
-		log.Infof(`Dropping DEX table %s...`, tableName)
-		if err = dropTable(db, tableName); err != nil {
-			return err
+	dropPublic := func(stmts []tableStmt) error {
+		for i := range stmts {
+			tableName := "public." + stmts[i].name
+			log.Infof(`Dropping DEX table %s...`, tableName)
+			if err = dropTable(db, tableName); err != nil {
+				return err
+			}
 		}
+		return nil
 	}
 
-	return nil
+	err = dropPublic(createPublicTableStatements)
+	if err != nil {
+		return err
+	}
+
+	return dropPublic(createAccountTableStatements)
 }
 
 func cleanTables(db *sql.DB) error {
@@ -153,8 +164,12 @@ func cleanTables(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	err = PrepareTables(db, mktConfig())
+	if err != nil {
+		return err
+	}
 
-	return PrepareTables(db, mktConfig())
+	return archie.CreateKeyEntry(archie.keyHash)
 }
 
 func Test_checkCurrentTimeZone(t *testing.T) {

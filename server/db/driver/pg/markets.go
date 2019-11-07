@@ -55,30 +55,8 @@ func newMarket(db *sql.DB, marketsTableName string, mkt *types.MarketInfo) error
 	return nil
 }
 
-func createMarketSchema(db *sql.DB, marketUID string) (bool, error) {
-	exists, err := schemaExists(db, marketUID)
-	if err != nil {
-		return false, err
-	}
-
-	var created bool
-	if !exists {
-		log.Infof(`Creating the market namespace "%s".`, marketUID)
-		stmt := fmt.Sprintf(internal.CreateMarketSchema, marketUID)
-		_, err = db.Exec(stmt)
-		if err != nil {
-			return false, err
-		}
-		created = true
-	} else {
-		log.Tracef(`Schema "%s" exists.`, marketUID)
-	}
-
-	return created, err
-}
-
 func createMarketTables(db *sql.DB, marketUID string) error {
-	created, err := createMarketSchema(db, marketUID)
+	created, err := createSchema(db, marketUID)
 	if err != nil {
 		return err
 	}

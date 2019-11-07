@@ -15,6 +15,8 @@ import (
 	_ "github.com/lib/pq" // Start the PostgreSQL sql driver
 )
 
+const publicSchema = "public"
+
 // connect opens a connection to a PostgreSQL database. The caller is
 // responsible for calling Close() on the returned db when finished using it.
 // The input host may be an IP address for TCP connection, or an absolute path
@@ -92,7 +94,7 @@ func sqlExecStmt(stmt *sql.Stmt, args ...interface{}) (int64, error) {
 
 // namespacedTableExists checks if the specified table exists.
 func namespacedTableExists(db *sql.DB, schema, tableName string) (bool, error) {
-	rows, err := db.Query(`SELECT 1 
+	rows, err := db.Query(`SELECT 1
 		FROM   pg_tables
 		WHERE  schemaname = $1
 		AND    tablename = $2;`,
@@ -173,7 +175,7 @@ func dropTable(db sqlExecutor, tableName string) error {
 
 // existsIndex checks if the specified index name exists.
 func existsIndex(db *sql.DB, indexName string) (exists bool, err error) {
-	err = db.QueryRow(internal.IndexExists, indexName, "public").Scan(&exists)
+	err = db.QueryRow(internal.IndexExists, indexName, publicSchema).Scan(&exists)
 	if err == sql.ErrNoRows {
 		err = nil
 	}
@@ -182,7 +184,7 @@ func existsIndex(db *sql.DB, indexName string) (exists bool, err error) {
 
 // isUniqueIndex checks if the given index name is defined as UNIQUE.
 func isUniqueIndex(db *sql.DB, indexName string) (isUnique bool, err error) {
-	err = db.QueryRow(internal.IndexIsUnique, indexName, "public").Scan(&isUnique)
+	err = db.QueryRow(internal.IndexIsUnique, indexName, publicSchema).Scan(&isUnique)
 	return
 }
 
@@ -445,4 +447,32 @@ func (a *Archiver) checkPerfSettings(hidePGConfig bool) error {
 		}
 	}
 	return nil
+}
+
+// createSchema creates a new schema.
+func createSchema(db *sql.DB, schema string) (bool, error) {
+	exists, err := schemaExists(db, schema)
+	if err != nil {
+		return false, err
+	}
+
+	var created bool
+	if !exists {
+		log.Infof(`Creating schema "%s".`, schema)
+		stmt := fmt.Sprintf(internal.CreateSchema, schema)
+		_, err = db.Exec(stmt)
+		if err != nil {
+			return false, err
+		}
+		created = true
+	} else {
+		log.Tracef(`Schema "%s" exists.`, schema)
+	}
+
+	return created, err
+}
+
+// fullTableName creates a long-form table name of the form dbName.schema.table.
+func fullTableName(dbName, schema, table string) string {
+	return dbName + "." + schema + "." + table
 }

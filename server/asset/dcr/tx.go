@@ -16,8 +16,8 @@ import (
 // interface to be DEX-compatible.
 type Tx struct {
 	// Because a Tx's validity and block info can change after creation, keep a
-	// dcrBackend around to query the state of the tx and update the block info.
-	dcr *dcrBackend
+	// DCRBackend around to query the state of the tx and update the block info.
+	dcr *DCRBackend
 	// The height and hash of the transaction's best known block.
 	blockHash chainhash.Hash
 	height    int64
@@ -52,7 +52,7 @@ type txOut struct {
 }
 
 // A getter for a new Tx.
-func newTransaction(dcr *dcrBackend, txHash, blockHash, lastLookup *chainhash.Hash, blockHeight int64,
+func newTransaction(dcr *DCRBackend, txHash, blockHash, lastLookup *chainhash.Hash, blockHeight int64,
 	isStake bool, ins []txIn, outs []txOut, feeRate uint64) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash

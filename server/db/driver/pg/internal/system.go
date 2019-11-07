@@ -76,4 +76,7 @@ const (
 
 	// RetrievePGVersion retrieves the version string from the database process.
 	RetrievePGVersion = `SELECT version();`
+
+	// CreateSchema creates a database schema.
+	CreateSchema = `CREATE SCHEMA IF NOT EXISTS %s;`
 )

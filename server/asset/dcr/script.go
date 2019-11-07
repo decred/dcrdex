@@ -70,6 +70,10 @@ func (s dcrScriptType) isStake() bool {
 	return s&scriptStake != 0
 }
 
+func (s dcrScriptType) isP2PKH() bool {
+	return s&scriptP2PKH != 0
+}
+
 // func (s dcrScriptType) isMultiSig() bool {
 // 	return s&scriptMultiSig != 0
 // }

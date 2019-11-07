@@ -16,15 +16,15 @@ const MatchIDSize = blake256.Size
 // MatchID is the unique identifier for each match.
 type MatchID [MatchIDSize]byte
 
-var zeroID = MatchID{}
-
-// MatchStatus represents the current negotiation step for a match.
-type MatchStatus uint8
-
 // MatchID implements fmt.Stringer.
 func (id MatchID) String() string {
 	return hex.EncodeToString(id[:])
 }
+
+var zeroID = MatchID{}
+
+// MatchStatus represents the current negotiation step for a match.
+type MatchStatus uint8
 
 // The different states of order execution.
 const (

@@ -726,6 +726,7 @@ func TestConnect(t *testing.T) {
 	}
 
 	exp := []byte{
+		// Account ID 32 bytes
 		0x14, 0xae, 0x3c, 0xbc, 0x70, 0x35, 0x87, 0x12, 0x2d, 0x68, 0xac, 0x6f,
 		0xa9, 0x19, 0x4d, 0xfd, 0xc8, 0x46, 0x6f, 0xb5, 0xde, 0xc9, 0xf4, 0x7d,
 		0x28, 0x05, 0x37, 0x4a, 0xdf, 0xf3, 0xe0, 0x16,
@@ -762,6 +763,177 @@ func TestConnect(t *testing.T) {
 	}
 	if connectBack.Time != connect.Time {
 		t.Fatal(connectBack.Time, connect.Time)
+	}
+}
+
+func TestRegister(t *testing.T) {
+	// serialization: pubkey (33) + time (8) = 41
+	pk, _ := BytesFromHex("f06e5cf13fc6debb8b90776da6624991ba50a11e784efed53d0a81c3be98397982")
+	register := &Register{
+		PubKey: pk,
+		Time:   uint64(1571700077),
+	}
+
+	exp := []byte{
+		// PubKey 33 bytes
+		0xf0, 0x6e, 0x5c, 0xf1, 0x3f, 0xc6, 0xde, 0xbb, 0x8b, 0x90, 0x77, 0x6d,
+		0xa6, 0x62, 0x49, 0x91, 0xba, 0x50, 0xa1, 0x1e, 0x78, 0x4e, 0xfe, 0xd5,
+		0x3d, 0x0a, 0x81, 0xc3, 0xbe, 0x98, 0x39, 0x79, 0x82,
+		// Time 8 bytes
+		0x00, 0x00, 0x00, 0x00, 0x5d, 0xae, 0x3d, 0x6d,
+	}
+
+	b, err := register.Serialize()
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+	if !bytes.Equal(b, exp) {
+		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
+	}
+
+	registerB, err := json.Marshal(register)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var registerBack Register
+	err = json.Unmarshal(registerB, &registerBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(registerBack.PubKey, register.PubKey) {
+		t.Fatal(registerBack.PubKey, register.PubKey)
+	}
+	if registerBack.Time != register.Time {
+		t.Fatal(registerBack.Time, register.Time)
+	}
+}
+
+func TestRegisterResult(t *testing.T) {
+	// serialization: pubkey (33) + client pubkey (33) + time (8) + fee (8) +
+	// address (35-ish) = 117
+	dexPK, _ := BytesFromHex("511a26bd3db115fd63e4093471227532b7264b125b8cad596bf4f15ed57ef1564d")
+	clientPK, _ := BytesFromHex("405441ebff6608bdc59f2fbb5020d9b30ca1cb6e8b11ca597997b1e37cadb550b9")
+	address := "Dcur2mcGjmENx4DhNqDctW5wJCVyT3Qeqkx"
+	regRes := &RegisterResult{
+		DEXPubKey:    dexPK,
+		ClientPubKey: clientPK,
+		Address:      address,
+		Time:         1571701946,
+		Fee:          100_000_000,
+	}
+
+	exp := []byte{
+		// DEX PubKey 33 bytes
+		0x51, 0x1a, 0x26, 0xbd, 0x3d, 0xb1, 0x15, 0xfd, 0x63, 0xe4, 0x09, 0x34,
+		0x71, 0x22, 0x75, 0x32, 0xb7, 0x26, 0x4b, 0x12, 0x5b, 0x8c, 0xad, 0x59,
+		0x6b, 0xf4, 0xf1, 0x5e, 0xd5, 0x7e, 0xf1, 0x56, 0x4d,
+		// Client PubKey 33 bytes
+		0x40, 0x54, 0x41, 0xeb, 0xff, 0x66, 0x08, 0xbd, 0xc5, 0x9f, 0x2f, 0xbb,
+		0x50, 0x20, 0xd9, 0xb3, 0x0c, 0xa1, 0xcb, 0x6e, 0x8b, 0x11, 0xca, 0x59,
+		0x79, 0x97, 0xb1, 0xe3, 0x7c, 0xad, 0xb5, 0x50, 0xb9,
+		// Time 8 Bytes
+		0x00, 0x00, 0x00, 0x00, 0x5d, 0xae, 0x44, 0xba,
+		// Fee 8 bytes
+		0x00, 0x00, 0x00, 0x00, 0x05, 0xf5, 0xe1, 0x00,
+		// Address 35 bytes
+		0x44, 0x63, 0x75, 0x72, 0x32, 0x6d, 0x63, 0x47, 0x6a, 0x6d, 0x45, 0x4e,
+		0x78, 0x34, 0x44, 0x68, 0x4e, 0x71, 0x44, 0x63, 0x74, 0x57, 0x35, 0x77,
+		0x4a, 0x43, 0x56, 0x79, 0x54, 0x33, 0x51, 0x65, 0x71, 0x6b, 0x78,
+	}
+
+	b, err := regRes.Serialize()
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+	if !bytes.Equal(b, exp) {
+		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
+	}
+
+	regResB, err := json.Marshal(regRes)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var regResBack RegisterResult
+	err = json.Unmarshal(regResB, &regResBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(regResBack.DEXPubKey, regRes.DEXPubKey) {
+		t.Fatal(regResBack.DEXPubKey, regRes.DEXPubKey)
+	}
+	// We don't check the ClientPubKey, since it is not encoded in the JSON
+	// message. The client must add it themselves before serialization.
+	if regResBack.Address != regRes.Address {
+		t.Fatal(regResBack.Address, regRes.Address)
+	}
+	if regResBack.Time != regRes.Time {
+		t.Fatal(regResBack.Time, regRes.Time)
+	}
+	if regResBack.Fee != regRes.Fee {
+		t.Fatal(regResBack.Fee, regRes.Fee)
+	}
+}
+
+func TestNotifyFee(t *testing.T) {
+	// serialization: account id (32) + txid (32) + vout (4) = 68
+	acctID, _ := BytesFromHex("bd3faf7353b8fc40618527687b3ef99d00da480e354f2c4986479e2da626acf5")
+	txid, _ := BytesFromHex("51891f751b0dd987c0b8ff1703cd0dd3e2712847f4bdbc268c9656dc80d233c7")
+	notify := &NotifyFee{
+		AccountID: acctID,
+		TxID:      txid,
+		Vout:      5,
+		Time:      1571704611,
+	}
+
+	exp := []byte{
+		// Account ID 32 bytes
+		0xbd, 0x3f, 0xaf, 0x73, 0x53, 0xb8, 0xfc, 0x40, 0x61, 0x85, 0x27, 0x68,
+		0x7b, 0x3e, 0xf9, 0x9d, 0x00, 0xda, 0x48, 0x0e, 0x35, 0x4f, 0x2c, 0x49,
+		0x86, 0x47, 0x9e, 0x2d, 0xa6, 0x26, 0xac, 0xf5,
+		// Tx ID 32 bytes
+		0x51, 0x89, 0x1f, 0x75, 0x1b, 0x0d, 0xd9, 0x87, 0xc0, 0xb8, 0xff, 0x17,
+		0x03, 0xcd, 0x0d, 0xd3, 0xe2, 0x71, 0x28, 0x47, 0xf4, 0xbd, 0xbc, 0x26,
+		0x8c, 0x96, 0x56, 0xdc, 0x80, 0xd2, 0x33, 0xc7,
+		// Vout 4 bytes
+		0x00, 0x00, 0x00, 0x05,
+		// Time 8 bytes
+		0x00, 0x00, 0x00, 0x00, 0x5d, 0xae, 0x4f, 0x23,
+	}
+
+	b, err := notify.Serialize()
+	if err != nil {
+		t.Fatalf("serialization error: %v", err)
+	}
+	if !bytes.Equal(b, exp) {
+		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
+	}
+
+	notifyB, err := json.Marshal(notify)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var notifyBack NotifyFee
+	err = json.Unmarshal(notifyB, &notifyBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(notifyBack.AccountID, notify.AccountID) {
+		t.Fatal(notifyBack.AccountID, notify.AccountID)
+	}
+	if !bytes.Equal(notifyBack.TxID, notify.TxID) {
+		t.Fatal(notifyBack.TxID, notify.TxID)
+	}
+	if notifyBack.Vout != notifyBack.Vout {
+		t.Fatal(notifyBack.Vout, notifyBack.Vout)
+	}
+	if notifyBack.Time != notifyBack.Time {
+		t.Fatal(notifyBack.Time, notifyBack.Time)
 	}
 }
 

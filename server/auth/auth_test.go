@@ -32,6 +32,11 @@ type TStorage struct {
 	acct     *account.Account
 	matches  []*order.UserMatch
 	closedID account.AccountID
+	acctAddr string
+	acctErr  error
+	regAddr  string
+	regErr   error
+	payErr   error
 	unpaid   bool
 	closed   bool
 }
@@ -41,14 +46,19 @@ func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
 }
 func (s *TStorage) ActiveMatches(account.AccountID) []*order.UserMatch { return s.matches }
+func (s *TStorage) CreateAccount(*account.Account) (string, error)     { return s.acctAddr, s.acctErr }
+func (s *TStorage) AccountRegAddr(account.AccountID) (string, error)   { return s.regAddr, s.regErr }
+func (s *TStorage) PayAccount(account.AccountID, string, uint32) error { return s.payErr }
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
-	sig *secp256k1.Signature
-	err error
+	sig    *secp256k1.Signature
+	err    error
+	pubkey *secp256k1.PublicKey
 }
 
 func (s *TSigner) Sign(hash []byte) (*secp256k1.Signature, error) { return s.sig, s.err }
+func (s *TSigner) PubKey() *secp256k1.PublicKey                   { return s.pubkey }
 
 type tReq struct {
 	msg      *msgjson.Message
@@ -194,7 +204,7 @@ func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 	return msg
 }
 
-func connectUser(t *testing.T, user *tUser) {
+func connectUser(t *testing.T, user *tUser) *msgjson.Message {
 	connect := queueUser(t, user)
 	rig.mgr.handleConnect(user.conn, connect)
 
@@ -206,26 +216,115 @@ func connectUser(t *testing.T, user *tUser) {
 	if respMsg.ID != connect.ID {
 		t.Fatalf("'connect' response has wrong ID. expected %d, got %d", connect.ID, respMsg.ID)
 	}
+	return respMsg
+}
+
+func makeEnsureErr(t *testing.T) func(rpcErr *msgjson.Error, tag string, code int) {
+	return func(rpcErr *msgjson.Error, tag string, code int) {
+		if rpcErr == nil {
+			t.Fatalf("no error for %s ID", tag)
+		}
+		if rpcErr.Code != code {
+			t.Fatalf("wrong error code for %s. expected %d, got %d: %s",
+				tag, code, rpcErr.Code, rpcErr.Message)
+		}
+	}
+}
+
+var (
+	tCheckFeeAddr         = "DsaAKsMvZ6HrqhmbhLjV9qVbPkkzF5daowT"
+	tCheckFeeVal   uint64 = 500_000_000
+	tCheckFeeConfs int64  = 5
+	tCheckFeeErr   error
+)
+
+func tCheckFee(txid string, vout uint32) (addr string, val uint64, confs int64, err error) {
+	return tCheckFeeAddr, tCheckFeeVal, tCheckFeeConfs, tCheckFeeErr
+}
+
+const (
+	tRegFee       uint64 = 500_000_000
+	tDexPubKeyHex string = "032e3678f9889206dcea4fc281556c9e543c5d5ffa7efe8d11118b52e29c773f27"
+	tFeeAddr      string = "Dcur2mcGjmENx4DhNqDctW5wJCVyT3Qeqkx"
+)
+
+var tDexPubKeyBytes = []byte{
+	0x03, 0x2e, 0x36, 0x78, 0xf9, 0x88, 0x92, 0x06, 0xdc, 0xea, 0x4f, 0xc2,
+	0x81, 0x55, 0x6c, 0x9e, 0x54, 0x3c, 0x5d, 0x5f, 0xfa, 0x7e, 0xfe, 0x8d,
+	0x11, 0x11, 0x8b, 0x52, 0xe2, 0x9c, 0x77, 0x3f, 0x27,
 }
 
 func TestMain(m *testing.M) {
-	storage := &TStorage{}
-	signer := &TSigner{}
+	storage := &TStorage{acctAddr: tFeeAddr, regAddr: tCheckFeeAddr}
+	dexKey, _ := secp256k1.ParsePubKey(tDexPubKeyBytes)
+	signer := &TSigner{pubkey: dexKey}
 	rig = &testRig{
 		storage: storage,
 		signer:  signer,
 		mgr: NewAuthManager(&Config{
-			Storage:    storage,
-			Signer:     signer,
-			StartEpoch: 1,
+			Storage:         storage,
+			Signer:          signer,
+			StartEpoch:      1,
+			RegistrationFee: tRegFee,
+			FeeConfs:        tCheckFeeConfs,
+			FeeChecker:      tCheckFee,
 		}),
 	}
 	os.Exit(m.Run())
 }
 
 func TestConnect(t *testing.T) {
+	// Before connecting, put an activeMatch in storage.
+	anyID := newAccountID()
+	var mid order.MatchID
+	copy(mid[:], anyID[:])
+	anyID = newAccountID()
+	var oid order.OrderID
+	copy(oid[:], anyID[:])
+	userMatch := &order.UserMatch{
+		OrderID:  oid,
+		MatchID:  mid,
+		Quantity: 1,
+		Rate:     2,
+		Address:  "anyaddress",
+		Time:     123456,
+		Status:   3,
+		Side:     4,
+	}
+	rig.storage.matches = []*order.UserMatch{userMatch}
+	// Connect the user.
 	user := tNewUser(t)
-	connectUser(t, user)
+	respMsg := connectUser(t, user)
+	cResp := extractConnectResponse(t, respMsg)
+	if len(cResp.Matches) != 1 {
+		t.Fatalf("no active matches")
+	}
+	rig.storage.matches = nil
+	msgMatch := cResp.Matches[0]
+	if msgMatch.OrderID.String() != userMatch.OrderID.String() {
+		t.Fatal("active match OrderID mismatch: ", msgMatch.OrderID.String(), " != ", userMatch.OrderID.String())
+	}
+	if msgMatch.MatchID.String() != userMatch.MatchID.String() {
+		t.Fatal("active match MatchID mismatch: ", msgMatch.MatchID.String(), " != ", userMatch.MatchID.String())
+	}
+	if msgMatch.Quantity != userMatch.Quantity {
+		t.Fatal("active match Quantity mismatch: ", msgMatch.Quantity, " != ", userMatch.Quantity)
+	}
+	if msgMatch.Rate != userMatch.Rate {
+		t.Fatal("active match Rate mismatch: ", msgMatch.Rate, " != ", userMatch.Rate)
+	}
+	if msgMatch.Address != userMatch.Address {
+		t.Fatal("active match Address mismatch: ", msgMatch.Address, " != ", userMatch.Address)
+	}
+	if msgMatch.Time != userMatch.Time {
+		t.Fatal("active match Time mismatch: ", msgMatch.Time, " != ", userMatch.Time)
+	}
+	if msgMatch.Status != uint8(userMatch.Status) {
+		t.Fatal("active match Status mismatch: ", msgMatch.Status, " != ", userMatch.Status)
+	}
+	if msgMatch.Side != uint8(userMatch.Side) {
+		t.Fatal("active match Side mismatch: ", msgMatch.Side, " != ", userMatch.Side)
+	}
 
 	// Send a request to the client.
 	type tPayload struct {
@@ -566,15 +665,7 @@ func TestConnectErrors(t *testing.T) {
 	user := tNewUser(t)
 	rig.storage.acct = nil
 
-	ensureErr := func(rpcErr *msgjson.Error, tag string, code int) {
-		if rpcErr == nil {
-			t.Fatalf("no error for %s ID", tag)
-		}
-		if rpcErr.Code != code {
-			t.Fatalf("wrong error code for %s. expected %d, got %d",
-				tag, code, rpcErr.Code)
-		}
-	}
+	ensureErr := makeEnsureErr(t)
 
 	// Test an invalid json payload
 	msg, err := msgjson.NewRequest(comms.NextID(), "testreq", nil)
@@ -604,6 +695,13 @@ func TestConnectErrors(t *testing.T) {
 	rpcErr = rig.mgr.handleConnect(user.conn, msg)
 	ensureErr(rpcErr, "account unknown to storage", msgjson.AuthenticationError)
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
+
+	// User unpaid
+	encodeMsg()
+	rig.storage.unpaid = true
+	rpcErr = rig.mgr.handleConnect(user.conn, msg)
+	ensureErr(rpcErr, "account unpaid", msgjson.AuthenticationError)
+	rig.storage.unpaid = false
 
 	// bad signature
 	connect.SetSig([]byte{0x09, 0x08})
@@ -703,5 +801,193 @@ func TestHandleResponse(t *testing.T) {
 	}
 	if client.respHandlers[newID] == nil {
 		t.Fatalf("wrong response handler left after cleanup cycle")
+	}
+}
+
+func TestHandleRegister(t *testing.T) {
+	user := tNewUser(t)
+	dummyError := fmt.Errorf("test error")
+
+	newReg := func() *msgjson.Register {
+		reg := &msgjson.Register{
+			PubKey: user.privKey.PubKey().SerializeCompressed(),
+			Time:   uint64(time.Now().Unix()),
+		}
+		sigMsg, _ := reg.Serialize()
+		sig, _ := user.privKey.Sign(sigMsg)
+		reg.SetSig(sig.Serialize())
+		return reg
+	}
+
+	newMsg := func(reg *msgjson.Register) *msgjson.Message {
+		msg, err := msgjson.NewRequest(comms.NextID(), msgjson.RegisterRoute, reg)
+		if err != nil {
+			t.Fatalf("NewRequest error: %v", err)
+		}
+		return msg
+	}
+
+	do := func(msg *msgjson.Message) *msgjson.Error {
+		return rig.mgr.handleRegister(user.conn, msg)
+	}
+
+	ensureErr := makeEnsureErr(t)
+
+	msg := newMsg(newReg())
+	msg.Payload = []byte(`?`)
+	ensureErr(do(msg), "bad payload", msgjson.RPCParseError)
+
+	reg := newReg()
+	reg.PubKey = []byte(`abcd`)
+	ensureErr(do(newMsg(reg)), "bad pubkey", msgjson.PubKeyParseError)
+
+	// Signature error
+	reg = newReg()
+	reg.Sig = []byte{0x01, 0x02}
+	ensureErr(do(newMsg(reg)), "bad signature", msgjson.SignatureError)
+
+	// storage.CreateAccount error
+	msg = newMsg(newReg())
+	rig.storage.acctErr = dummyError
+	ensureErr(do(msg), "CreateAccount error", msgjson.RPCInternalError)
+	rig.storage.acctErr = nil
+
+	// Sign error
+	rig.signer.err = dummyError
+	ensureErr(do(msg), "DEX signature error", msgjson.RPCInternalError)
+	rig.signer.err = nil
+
+	// Send a valid registration and check the response.
+	// Before starting, make sure there are no responses in the queue.
+	respMsg := user.conn.getSend()
+	if respMsg != nil {
+		b, _ := json.Marshal(respMsg)
+		t.Fatalf("unexpected response: %s", string(b))
+	}
+	rpcErr := do(msg)
+	if rpcErr != nil {
+		t.Fatalf("error for valid registration: %s", rpcErr.Message)
+	}
+	respMsg = user.conn.getSend()
+	if respMsg == nil {
+		t.Fatalf("no register response")
+	}
+	resp, _ := respMsg.Response()
+	regRes := new(msgjson.RegisterResult)
+	err := json.Unmarshal(resp.Result, regRes)
+	if err != nil {
+		t.Fatalf("error unmarshaling payload")
+	}
+
+	if regRes.DEXPubKey.String() != tDexPubKeyHex {
+		t.Fatalf("wrong DEX pubkey. expected %s, got %s", tDexPubKeyHex, regRes.DEXPubKey.String())
+	}
+	if regRes.Address != tFeeAddr {
+		t.Fatalf("wrong fee address. expected %s, got %s", tFeeAddr, regRes.Address)
+	}
+	if regRes.Fee != tRegFee {
+		t.Fatalf("wrong fee. expected %d, got %d", tRegFee, regRes.Fee)
+	}
+}
+
+func TestHandleNotifyFee(t *testing.T) {
+	user := tNewUser(t)
+	userAcct := &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
+	rig.storage.acct = userAcct
+	dummyError := fmt.Errorf("test error")
+	txidb := []byte{
+		0xe2, 0x48, 0xd9, 0xea, 0xa1, 0xc4, 0x78, 0xd5, 0x31, 0xc2, 0x41, 0xb4,
+		0x5b, 0x7b, 0xd5, 0x8d, 0x7a, 0x06, 0x1a, 0xc6, 0x89, 0x0a, 0x86, 0x2b,
+		0x1e, 0x59, 0xb3, 0xc8, 0xf6, 0xad, 0xee, 0xc8,
+	}
+	// txid := "e248d9eaa1c478d531c241b45b7bd58d7a061ac6890a862b1e59b3c8f6adeec8"
+	vout := uint32(50)
+
+	newNotify := func() *msgjson.NotifyFee {
+		notify := &msgjson.NotifyFee{
+			AccountID: user.acctID[:],
+			TxID:      txidb,
+			Vout:      vout,
+			Time:      uint64(time.Now().Unix()),
+		}
+		sigMsg, _ := notify.Serialize()
+		sig, _ := user.privKey.Sign(sigMsg)
+		notify.SetSig(sig.Serialize())
+		return notify
+	}
+
+	newMsg := func(notify *msgjson.NotifyFee) *msgjson.Message {
+		msg, err := msgjson.NewRequest(comms.NextID(), msgjson.NotifyFeeRoute, notify)
+		if err != nil {
+			t.Fatalf("NewRequest error: %v", err)
+		}
+		return msg
+	}
+
+	do := func(msg *msgjson.Message) *msgjson.Error {
+		return rig.mgr.handleNotifyFee(user.conn, msg)
+	}
+
+	ensureErr := makeEnsureErr(t)
+
+	msg := newMsg(newNotify())
+	msg.Payload = []byte(`?`)
+	ensureErr(do(msg), "bad payload", msgjson.RPCParseError)
+
+	notify := newNotify()
+	notify.AccountID = []byte{0x01, 0x02}
+	msg = newMsg(notify)
+	ensureErr(do(msg), "bad account ID", msgjson.AuthenticationError)
+
+	// missing account
+	rig.storage.acct = nil
+	ensureErr(do(newMsg(newNotify())), "bad account ID", msgjson.AuthenticationError)
+	rig.storage.acct = userAcct
+
+	// account already paid
+	ensureErr(do(newMsg(newNotify())), "already paid", msgjson.AuthenticationError)
+	rig.storage.unpaid = true
+
+	// Signature error
+	notify = newNotify()
+	notify.Sig = []byte{0x01, 0x02}
+	ensureErr(do(newMsg(notify)), "bad signature", msgjson.SignatureError)
+
+	goodNotify := newNotify()
+	goodMsg := newMsg(goodNotify)
+	rig.storage.regErr = dummyError
+	ensureErr(do(goodMsg), "AccountRegAddr", msgjson.RPCInternalError)
+	rig.storage.regErr = nil
+
+	tCheckFeeErr = dummyError
+	ensureErr(do(goodMsg), "checkFee", msgjson.FeeError)
+	tCheckFeeErr = nil
+
+	tCheckFeeVal -= 1
+	ensureErr(do(goodMsg), "low fee", msgjson.FeeError)
+	tCheckFeeVal += 1
+
+	tCheckFeeConfs -= 1
+	ensureErr(do(goodMsg), "unconfirmed", msgjson.FeeError)
+	tCheckFeeConfs += 1
+
+	ogAddr := tCheckFeeAddr
+	tCheckFeeAddr = "dummy address"
+	ensureErr(do(goodMsg), "wrong address", msgjson.FeeError)
+	tCheckFeeAddr = ogAddr
+
+	rig.storage.payErr = dummyError
+	ensureErr(do(goodMsg), "PayAccount", msgjson.RPCInternalError)
+	rig.storage.payErr = nil
+
+	// Sign error
+	rig.signer.err = dummyError
+	ensureErr(do(goodMsg), "DEX signature", msgjson.RPCInternalError)
+	rig.signer.err = nil
+
+	// Send a valid notifyfee, and check the response.
+	rpcErr := do(goodMsg)
+	if rpcErr != nil {
+		t.Fatalf("error sending valid notifyfee: %s", rpcErr.Message)
 	}
 }

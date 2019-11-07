@@ -29,12 +29,20 @@ type Storage interface {
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
 	// ActiveMatches fetches the account's active matches.
 	ActiveMatches(account.AccountID) []*order.UserMatch
+	CreateAccount(*account.Account) (string, error)
+	AccountRegAddr(account.AccountID) (string, error)
+	PayAccount(account.AccountID, string, uint32) error
 }
 
 // Signer signs messages. It is likely a secp256k1.PrivateKey.
 type Signer interface {
 	Sign(hash []byte) (*secp256k1.Signature, error)
+	PubKey() *secp256k1.PublicKey
 }
+
+// FeeChecker is a function for retreiving the details for a fee payment. It
+// is satisfied by (dcr.DCRBackend).P2PKHDetails.
+type FeeChecker func(txid string, vout uint32) (addr string, val uint64, confs int64, err error)
 
 // A respHandler is the handler for the response to a DEX-originating request. A
 // respHandler has a time associated with it so that old unused handlers can be
@@ -92,7 +100,7 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 }
 
 // AuthManager handles authentication-related tasks, including validating client
-// signatures, maintaining association between accounts to `comms.Link`s, and
+// signatures, maintaining association between accounts and `comms.Link`s, and
 // signing messages with the DEX's private key. AuthManager manages requests to
 // the 'connect' route.
 type AuthManager struct {
@@ -102,6 +110,9 @@ type AuthManager struct {
 	storage    Storage
 	signer     Signer
 	startEpoch uint64
+	regFee     uint64
+	checkFee   FeeChecker
+	feeConfs   int64
 }
 
 // Config is the configuration settings for the AuthManager, and the only
@@ -117,6 +128,13 @@ type Config struct {
 	// AuthManager returns the StartEpoch as part of the response to a 'connect'
 	// request.
 	StartEpoch uint64
+	// RegistrationFee is the DEX registration fee, in atoms DCR
+	RegistrationFee uint64
+	// FeeConfs is the number of confirmations required on the registration fee
+	// before registration can be completed with notifyfee.
+	FeeConfs int64
+	// FeeChecker is a method for getting the registration fee output info.
+	FeeChecker FeeChecker
 }
 
 // NewAuthManager is the constructor for an AuthManager.
@@ -127,9 +145,14 @@ func NewAuthManager(cfg *Config) *AuthManager {
 		storage:    cfg.Storage,
 		signer:     cfg.Signer,
 		startEpoch: cfg.StartEpoch,
+		regFee:     cfg.RegistrationFee,
+		checkFee:   cfg.FeeChecker,
+		feeConfs:   cfg.FeeConfs,
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
+	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
+	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee)
 	return auth
 }
 
