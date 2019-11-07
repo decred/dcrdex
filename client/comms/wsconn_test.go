@@ -4,11 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/elliptic"
-	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -47,80 +46,69 @@ func genCertPair(certFile, keyFile string, altDNSNames []string) error {
 	return nil
 }
 
-func TestWsConn(t *testing.T) {
+func TestReconnect(t *testing.T) {
 	upgrader := websocket.Upgrader{}
+
 	pingCh := make(chan struct{})
-	readPumpCh := make(chan interface{})
-	writePumpCh := make(chan *msgjson.Message)
 	ctx, cancel := context.WithCancel(context.Background())
 
+	pingWait := time.Millisecond * 200
+	writeWait := time.Millisecond * 200
+
+	var wsc *WsConn
+
+	id := uint64(0)
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		hCtx, hCancel := context.WithCancel(context.Background())
+		atomic.AddUint64(&id, 1)
+
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			t.Fatalf("unable to upgrade http connection: %s", err)
 		}
 
-		defer c.Close()
+		c.SetPongHandler(func(string) error {
+			id := atomic.LoadUint64(&id)
+			t.Logf("handler #%d: pong received", id)
+			return nil
+		})
 
 		go func() {
 			for {
 				select {
 				case <-pingCh:
-					err = c.WriteControl(websocket.PingMessage, []byte{},
-						time.Time{})
+					err := c.WriteControl(websocket.PingMessage, []byte{},
+						time.Now().Add(writeWait))
 					if err != nil {
-						fmt.Printf("unable to write ping: %v", err)
+						t.Errorf("handler #%d: ping error: %v", id, err)
 						return
 					}
 
-				case msg := <-readPumpCh:
-					err := c.WriteJSON(msg)
-					if err != nil {
-						fmt.Printf("unable to write message: %v", err)
-						return
-					}
+					id := atomic.LoadUint64(&id)
+					t.Logf("handler #%d: ping sent", id)
 
-				case <-ctx.Done():
-					c.Close()
+				case <-hCtx.Done():
 					return
 				}
 			}
 		}()
 
 		for {
-			mType, message, err := c.ReadMessage()
+			_, _, err := c.ReadMessage()
 			if err != nil {
-				if opErr, ok := err.(*net.OpError); ok {
-					if opErr.Op == "read" {
-						return
-					}
-				}
+				c.Close()
+				hCancel()
 
-				if websocket.IsCloseError(err) {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+					// Terminate on a normal close message.
 					return
 				}
 
-				if nErr, ok := err.(net.Error); ok {
-					if nErr.Timeout() {
-						return
-					}
-				}
-
-				log.Errorf("unable to read message: %v", err)
+				t.Errorf("handler #%d: read error: %v", id, err)
 				return
 			}
 
-			if mType == websocket.TextMessage {
-				msg, err := msgjson.DecodeMessage(message)
-				if err != nil {
-					fmt.Printf("unable to decode msg: %v", err)
-					return
-				}
-
-				writePumpCh <- msg
-			}
 		}
-
 	}
 
 	certFile, err := ioutil.TempFile("", "certfile")
@@ -143,47 +131,211 @@ func TestWsConn(t *testing.T) {
 	}
 
 	host := "127.0.0.1:6060"
-	http.HandleFunc("/ws", handler)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", handler)
+
+	server := &http.Server{
+		WriteTimeout: time.Second * 5,
+		ReadTimeout:  time.Second * 5,
+		IdleTimeout:  time.Second * 5,
+		Addr:         host,
+		Handler:      mux,
+	}
+
+	defer server.Close()
 
 	go func() {
-		err = http.ListenAndServeTLS(host, certFile.Name(), keyFile.Name(), nil)
+		err = server.ListenAndServeTLS(certFile.Name(), keyFile.Name())
 		if err != nil {
-			fmt.Println(err)
+			t.Log(err)
 		}
 	}()
 
 	cfg := &WsCfg{
-		Host:               host,
-		Path:               "ws",
-		PingWait:           3 * time.Second,
-		WriteWait:          3 * time.Second,
-		RpcCert:            certFile.Name(),
-		RpcKey:             keyFile.Name(),
-		InsecureSkipVerify: true,
-		Ctx:                ctx,
-		Cancel:             cancel,
+		Host:      host,
+		Path:      "ws",
+		PingWait:  pingWait,
+		WriteWait: writeWait,
+		RpcCert:   certFile.Name(),
+		Ctx:       ctx,
+		Cancel:    cancel,
 	}
-	wsc, err := NewWsConn(cfg)
+	wsc, err = NewWsConn(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	wsc.Run()
+	for idx := 0; idx < 5; idx++ {
+		// Drop the connection and force a reconnect by waiting.
+		time.Sleep(time.Millisecond * 210)
 
-	go func() {
-		wsc.WaitForShutdown()
-	}()
+		// Wait for a reconnection.
+		for !wsc.isConnected() {
+			time.Sleep(time.Millisecond * 10)
+			continue
+		}
 
-	// Drop the connection and force a reconnect by waiting.
-	time.Sleep(time.Millisecond * 3500)
-
-	// Wait for a reconnection.
-	for !wsc.isConnected() {
-		continue
+		// Send a ping.
+		pingCh <- struct{}{}
 	}
 
-	// Send a ping.
-	pingCh <- struct{}{}
+	time.Sleep(time.Millisecond * 200)
+	cancel()
+	time.Sleep(time.Millisecond * 200)
+}
+
+func TestWsConn(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+
+	pingCh := make(chan struct{})
+	readPumpCh := make(chan interface{})
+	writePumpCh := make(chan *msgjson.Message)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	pingWait := time.Millisecond * 200
+	writeWait := time.Millisecond * 200
+
+	var wsc *WsConn
+
+	id := uint64(0)
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		hCtx, hCancel := context.WithCancel(context.Background())
+		atomic.AddUint64(&id, 1)
+
+		c, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatalf("unable to upgrade http connection: %s", err)
+		}
+
+		c.SetPongHandler(func(string) error {
+			id := atomic.LoadUint64(&id)
+			t.Logf("handler #%d: pong received", id)
+			return nil
+		})
+
+		go func() {
+			for {
+				select {
+				case <-pingCh:
+					err := c.WriteControl(websocket.PingMessage, []byte{},
+						time.Now().Add(writeWait))
+					if err != nil {
+						t.Errorf("handler #%d: ping error: %v", id, err)
+						return
+					}
+
+					id := atomic.LoadUint64(&id)
+					t.Logf("handler #%d: ping sent", id)
+
+				case msg := <-readPumpCh:
+					err := c.WriteJSON(msg)
+					if err != nil {
+						t.Errorf("handler #%d: write error: %v", id, err)
+						return
+					}
+
+				case <-hCtx.Done():
+					return
+				}
+			}
+		}()
+
+		for {
+			mType, message, err := c.ReadMessage()
+			if err != nil {
+				c.Close()
+				hCancel()
+
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+					// Terminate on a normal close message.
+					return
+				}
+
+				t.Errorf("handler #%d: read error: %v", id, err)
+				return
+			}
+
+			if mType == websocket.TextMessage {
+				msg, err := msgjson.DecodeMessage(message)
+				if err != nil {
+					t.Errorf("handler #%d: decode error: %v", id, err)
+					c.Close()
+					hCancel()
+					return
+				}
+
+				writePumpCh <- msg
+			}
+		}
+	}
+
+	certFile, err := ioutil.TempFile("", "certfile")
+	if err != nil {
+		t.Fatalf("unable to create temp certfile: %s", err)
+	}
+	certFile.Close()
+	defer os.Remove(certFile.Name())
+
+	keyFile, err := ioutil.TempFile("", "keyfile")
+	if err != nil {
+		t.Fatalf("unable to create temp keyfile: %s", err)
+	}
+	keyFile.Close()
+	defer os.Remove(keyFile.Name())
+
+	err = genCertPair(certFile.Name(), keyFile.Name(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	host := "127.0.0.1:6060"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", handler)
+
+	server := &http.Server{
+		WriteTimeout: time.Second * 5,
+		ReadTimeout:  time.Second * 5,
+		IdleTimeout:  time.Second * 5,
+		Addr:         host,
+		Handler:      mux,
+	}
+
+	defer server.Close()
+
+	go func() {
+		err = server.ListenAndServeTLS(certFile.Name(), keyFile.Name())
+		if err != nil {
+			t.Log(err)
+		}
+	}()
+
+	cfg := &WsCfg{
+		Host:      host,
+		Path:      "ws",
+		PingWait:  pingWait,
+		WriteWait: writeWait,
+		RpcCert:   certFile.Name(),
+		Ctx:       ctx,
+		Cancel:    cancel,
+	}
+	wsc, err = NewWsConn(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reconnectAndPing := func() {
+		// Drop the connection and force a reconnect by waiting.
+		time.Sleep(time.Millisecond * 210)
+
+		// Wait for a reconnection.
+		for !wsc.isConnected() {
+			time.Sleep(time.Millisecond * 10)
+			continue
+		}
+
+		// Send a ping.
+		pingCh <- struct{}{}
+	}
 
 	orderid, _ := msgjson.BytesFromHex("ceb09afa675cee31c0f858b94c81bd1a4c2af8c5947d13e544eef772381f2c8d")
 	matchid, _ := msgjson.BytesFromHex("7c6b44735e303585d644c713fe0e95897e7e8ba2b9bba98d6d61b70006d3d58c")
@@ -236,16 +388,7 @@ func TestWsConn(t *testing.T) {
 		t.Fatal("sent and received payload mismatch")
 	}
 
-	// Drop the connection and force a reconnect by waiting.
-	time.Sleep(time.Millisecond * 3500)
-
-	// Wait for a reconnection.
-	for !wsc.isConnected() {
-		continue
-	}
-
-	// Send a ping.
-	pingCh <- struct{}{}
+	reconnectAndPing()
 
 	contract, _ := msgjson.BytesFromHex("caf8d277f80f71e4")
 	init := &msgjson.Init{
@@ -258,9 +401,9 @@ func TestWsConn(t *testing.T) {
 	}
 
 	// Send a message from the client.
-	id := wsc.NextID()
-	sent = makeRequest(id, msgjson.InitRoute, init)
-	err = wsc.SendMessage(sent)
+	mId := wsc.NextID()
+	sent = makeRequest(mId, msgjson.InitRoute, init)
+	err = wsc.Send(sent)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -285,17 +428,6 @@ func TestWsConn(t *testing.T) {
 		t.Fatal("sent and received payload mismatch")
 	}
 
-	// Drop the connection and force a reconnect by waiting.
-	time.Sleep(time.Millisecond * 350)
-
-	// Wait for a reconnection.
-	for !wsc.isConnected() {
-		continue
-	}
-
-	// Send a ping.
-	pingCh <- struct{}{}
-
 	// Ensure the next id is as expected.
 	next := wsc.NextID()
 	if next != 2 {
@@ -303,7 +435,7 @@ func TestWsConn(t *testing.T) {
 	}
 
 	// Ensure the request sent got logged.
-	req, err := wsc.FetchRequest(id)
+	req, err := wsc.FetchRequest(mId)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -318,15 +450,14 @@ func TestWsConn(t *testing.T) {
 		t.Fatal("expected an error for unlogged id")
 	}
 
-	// Set the connected state to false and try sending a message.
-	wsc.setConnected(false)
+	reconnectAndPing()
 
-	err = wsc.SendMessage(sent)
+	time.Sleep(time.Millisecond * 200)
+	cancel()
+	time.Sleep(time.Millisecond * 200)
+
+	err = wsc.Send(sent)
 	if err == nil {
 		t.Fatalf("expected a connection state error")
 	}
-
-	// Terminate the connection and shutdown
-	cancel()
-	time.Sleep(time.Second * 2)
 }

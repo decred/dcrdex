@@ -3,9 +3,10 @@ package comms
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"net"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,14 +20,6 @@ import (
 )
 
 const (
-	// pingWait is the maximum time in seconds to wait for a ping from
-	// the server. The client can be reconnected after this threshold since
-	// the websocket connection to the server is assumed to broken.
-	pingWait = 60 * time.Second
-
-	// writeWait is the maximum time in seconds to write to the connection.
-	writeWait = 5 * time.Second
-
 	// bufferSize is buffer size for the websocket connection's read channel.
 	readBuffSize = 128
 )
@@ -43,34 +36,31 @@ type WsCfg struct {
 	WriteWait time.Duration
 	// The rpc certificate file path.
 	RpcCert string
-	// The rpc key file path.
-	RpcKey string
-	// Skip server cert verification, should only be used in testing.
-	InsecureSkipVerify bool
 	// ReconnectSync runs the needed reconnection synchronisation after
 	// a disconnect.
 	ReconnectSync func()
-	// The context.
+	// The dex client context.
 	Ctx context.Context
-	// The context cancel func.
+	// The dex client context cancel func.
 	Cancel context.CancelFunc
 }
 
 // WsConn represents a client websocket connection.
 type WsConn struct {
+	reconnects   uint64
 	rID          uint64
 	cfg          *WsCfg
 	ws           *websocket.Conn
+	wsMtx        sync.Mutex
 	tlsCfg       *tls.Config
 	readCh       chan *msgjson.Message
 	sendCh       chan *msgjson.Message
+	reconnectCh  chan struct{}
 	req          map[uint64]*msgjson.Message
 	reqMtx       sync.RWMutex
-	writeMtx     sync.Mutex
 	connected    bool
 	connectedMtx sync.RWMutex
 	once         sync.Once
-	wg           sync.WaitGroup
 }
 
 // filesExists reports whether the named file or directory exists.
@@ -81,52 +71,48 @@ func fileExists(name string) bool {
 
 // NewWsConn creates a client websocket connection.
 func NewWsConn(cfg *WsCfg) (*WsConn, error) {
-	if cfg.PingWait < time.Second {
-		return nil, fmt.Errorf("ping wait time should be a second or greater")
+	if cfg.PingWait < 0 {
+		return nil, fmt.Errorf("ping wait cannot be negative")
 	}
 
-	if cfg.WriteWait < time.Second {
-		return nil, fmt.Errorf("write wait time should be a second or greater")
+	if cfg.WriteWait < 0 {
+		return nil, fmt.Errorf("write wait cannot be negative")
 	}
 
 	var tlsConfig *tls.Config
-	if fileExists(cfg.RpcCert) && fileExists(cfg.RpcKey) {
-		keypair, err := tls.LoadX509KeyPair(cfg.RpcCert, cfg.RpcKey)
+	if fileExists(cfg.RpcCert) {
+		rootCAs, _ := x509.SystemCertPool()
+		if rootCAs == nil {
+			rootCAs = x509.NewCertPool()
+		}
+
+		certs, err := ioutil.ReadFile(cfg.RpcCert)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("file reading error: %v", err)
 		}
 
-		// Prepare the TLS configuration.
+		if ok := rootCAs.AppendCertsFromPEM(certs); !ok {
+			return nil, fmt.Errorf("unable to append cert")
+		}
+
 		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{keypair},
-			MinVersion:   tls.VersionTLS12,
-		}
-
-		if cfg.InsecureSkipVerify {
-			tlsConfig.InsecureSkipVerify = true
-		}
-	} else {
-		if cfg.RpcCert != "" {
-			log.Warn("the provided rpc cert does not exist")
-		}
-
-		if cfg.RpcKey != "" {
-			log.Warn("the provided rpc key does not exist")
+			RootCAs:            rootCAs,
+			InsecureSkipVerify: true,
+			MinVersion:         tls.VersionTLS12,
 		}
 	}
 
 	conn := &WsConn{
-		cfg:    cfg,
-		tlsCfg: tlsConfig,
-		readCh: make(chan *msgjson.Message, readBuffSize),
-		sendCh: make(chan *msgjson.Message),
-		req:    make(map[uint64]*msgjson.Message),
+		cfg:         cfg,
+		tlsCfg:      tlsConfig,
+		readCh:      make(chan *msgjson.Message, readBuffSize),
+		sendCh:      make(chan *msgjson.Message),
+		reconnectCh: make(chan struct{}),
+		req:         make(map[uint64]*msgjson.Message),
 	}
 
-	err := conn.connect()
-	if err != nil {
-		return nil, fmt.Errorf("unable to create websocket: %v", err)
-	}
+	go conn.keepAlive()
+	conn.reconnectCh <- struct{}{}
 
 	return conn, nil
 }
@@ -138,7 +124,7 @@ func (conn *WsConn) isConnected() bool {
 	return conn.connected
 }
 
-// setConnected updates the connection's connected state
+// setConnected updates the connection's connected state.
 func (conn *WsConn) setConnected(connected bool) {
 	conn.connectedMtx.Lock()
 	conn.connected = connected
@@ -172,16 +158,20 @@ func (conn *WsConn) NextID() uint64 {
 	return atomic.AddUint64(&conn.rID, 1)
 }
 
+// close terminates all websocket processes and closes the connection.
+func (conn *WsConn) close() {
+	conn.wsMtx.Lock()
+	defer conn.wsMtx.Unlock()
+	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
+	conn.ws.WriteControl(websocket.CloseMessage, msg,
+		time.Now().Add(conn.cfg.WriteWait))
+	conn.ws.Close()
+}
+
 // connect attempts to establish a websocket connection.
 func (conn *WsConn) connect() error {
-	scheme := "ws"
-
-	if conn.tlsCfg != nil {
-		scheme = "wss"
-	}
-
 	url := url.URL{
-		Scheme: scheme,
+		Scheme: "wss",
 		Host:   conn.cfg.Host,
 		Path:   conn.cfg.Path,
 	}
@@ -189,118 +179,68 @@ func (conn *WsConn) connect() error {
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: 10 * time.Second,
+		TLSClientConfig:  conn.tlsCfg,
 	}
 
-	if conn.tlsCfg != nil {
-		dialer.TLSClientConfig = conn.tlsCfg
-	}
-
-	var err error
-	conn.ws, _, err = dialer.Dial(url.String(), nil)
+	ws, _, err := dialer.Dial(url.String(), nil)
 	if err != nil {
 		return err
 	}
 
-	conn.setConnected(true)
-	conn.ws.SetPingHandler(func(string) error {
+	ws.SetPingHandler(func(string) error {
 		now := time.Now()
-		err := conn.ws.SetReadDeadline(now.Add(conn.cfg.PingWait))
+		err := ws.SetReadDeadline(now.Add(conn.cfg.PingWait))
 		if err != nil {
-			log.Errorf("unable to set read deadline: %v", err)
+			log.Errorf("read deadline error: %v", err)
 			return err
 		}
 
 		// Respond with a pong.
-		return conn.ws.WriteControl(websocket.PongMessage, []byte{},
+		err = ws.WriteControl(websocket.PongMessage, []byte{},
 			now.Add(conn.cfg.WriteWait))
+		if err != nil {
+			log.Errorf("pong error: %v", err)
+			return err
+		}
+
+		return nil
 	})
 
+	conn.wsMtx.Lock()
+	conn.ws = ws
+	conn.wsMtx.Unlock()
+
 	return nil
-}
-
-// keepAlive maintains an active websocket connection by reconnecting when
-// the established connection is broken. This should be run as a goroutine.
-func (conn *WsConn) keepAlive() {
-	ticker := time.NewTicker(time.Second)
-
-	for {
-		select {
-		case <-ticker.C:
-			if !conn.isConnected() {
-				err := conn.connect()
-				if err != nil {
-					log.Errorf("unable to establish a connection: %v", err)
-				}
-
-				// Run the reconnect sync after reestablishing a connection.
-				if conn.cfg.ReconnectSync != nil {
-					conn.cfg.ReconnectSync()
-				}
-			}
-
-		case <-conn.cfg.Ctx.Done():
-			now := time.Now()
-			closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
-			conn.writeMtx.Lock()
-			err := conn.ws.WriteControl(websocket.CloseMessage, closeMsg,
-				now.Add(conn.cfg.WriteWait))
-			conn.writeMtx.Unlock()
-			if err != nil {
-				log.Errorf("unable to close websocket connection: %v", err)
-			}
-			ticker.Stop()
-			conn.wg.Done()
-			return
-		}
-	}
 }
 
 // read fetches and parses incoming messages for processing. This should be
 // run as a goroutine.
 func (conn *WsConn) read() {
-	msg := new(msgjson.Message)
-
 	for {
-		err := conn.ws.ReadJSON(msg)
-		if err != nil {
-			if opErr, ok := err.(*net.OpError); ok {
-				if opErr.Op == "read" {
-					conn.setConnected(false)
+		msg := new(msgjson.Message)
 
-					// Log the read error and proceed for a reconnection.
-					log.Debugf("read op error: %v", opErr.Err)
-					time.Sleep(time.Millisecond * 500)
-					continue
-				}
+		conn.wsMtx.Lock()
+		ws := conn.ws
+		conn.wsMtx.Unlock()
+
+		err := ws.ReadJSON(msg)
+		if err != nil {
+			if _, ok := err.(*json.UnmarshalTypeError); ok {
+				// JSON decode errors are not fatal, log and proceed.
+				log.Errorf("json decode error: %v", err)
+				continue
 			}
 
 			if websocket.IsCloseError(err, websocket.CloseGoingAway,
 				websocket.CloseNormalClosure) ||
 				strings.Contains(err.Error(), "websocket: close sent") {
-				// Return on a normal close error message.
-				conn.cfg.Cancel()
+				// Terminate on a normal close message.
 				return
 			}
 
-			if nErr, ok := err.(net.Error); ok {
-				if nErr.Timeout() {
-					conn.setConnected(false)
-
-					// Proceed for a reconnection on a timeout error.
-					log.Debugf("read timeout: %v", nErr)
-					time.Sleep(time.Millisecond * 500)
-					continue
-				}
-			}
-
-			if _, ok := err.(*json.UnmarshalTypeError); ok {
-				// Log the JSON error and proceed.
-				log.Errorf("unable to decode JSON: %v", err)
-				continue
-			}
-
-			log.Errorf("unable to read JSON: %v", err)
-			conn.cfg.Cancel()
+			// Log all other errors and trigger a reconnection.
+			log.Debugf("read error: %v", err)
+			conn.reconnectCh <- struct{}{}
 			return
 		}
 
@@ -308,59 +248,62 @@ func (conn *WsConn) read() {
 	}
 }
 
-// send pushes outgoing messages over the websocket connection.
-// This should be run as a goroutine.
-func (conn *WsConn) send() {
+// keepAlive maintains an active websocket connection by reconnecting when
+// the established connection is broken. This should be run as a goroutine.
+func (conn *WsConn) keepAlive() {
 	for {
 		select {
-		case msg := <-conn.sendCh:
-			// Log the route if the message being sent is a request.
-			if msg.Type == msgjson.Request {
-				conn.logRequest(msg.ID, msg)
+		case <-conn.reconnectCh:
+			conn.setConnected(false)
+
+			reconnects := atomic.AddUint64(&conn.reconnects, 1)
+			if reconnects > 1 {
+				conn.close()
 			}
 
-			conn.writeMtx.Lock()
-			_ = conn.ws.SetWriteDeadline(time.Now().Add(conn.cfg.WriteWait))
-			err := conn.ws.WriteJSON(msg)
-			conn.writeMtx.Unlock()
+			err := conn.connect()
 			if err != nil {
-				conn.setConnected(false)
-
-				// Log the write error and proceed for a reconnection.
-				log.Errorf("unable to write message: %v", err)
-				continue
+				log.Errorf("connection error: %v", err)
 			}
+
+			go conn.read()
+
+			// Synchronize after a reconnection.
+			if conn.cfg.ReconnectSync != nil {
+				conn.cfg.ReconnectSync()
+			}
+
+			conn.setConnected(true)
 
 		case <-conn.cfg.Ctx.Done():
-			conn.wg.Done()
+			// Terminate the keepAlive process and read process when
+			/// the dex client signals a shutdown.
+			conn.setConnected(false)
+			conn.close()
 			return
 		}
 	}
 }
 
-// Run starts all processes of the websocket connection.
-func (conn *WsConn) Run() {
-	go conn.read()
-
-	conn.wg.Add(2)
-	go conn.keepAlive()
-	go conn.send()
-}
-
-// WaitForShutdown waits for all monitored connection processes to terminate.
-func (conn *WsConn) WaitForShutdown() {
-	conn.wg.Wait()
-}
-
-// SendMessage pushes an outgoing message to send channel.
-func (conn *WsConn) SendMessage(msg *msgjson.Message) error {
+// Send pushes outgoing messages over the websocket connection.
+func (conn *WsConn) Send(msg *msgjson.Message) error {
 	if !conn.isConnected() {
 		return fmt.Errorf("cannot send on a broken connection")
 	}
 
-	go func() {
-		conn.sendCh <- msg
-	}()
+	conn.wsMtx.Lock()
+	conn.ws.SetWriteDeadline(time.Now().Add(conn.cfg.WriteWait))
+	err := conn.ws.WriteJSON(msg)
+	conn.wsMtx.Unlock()
+	if err != nil {
+		log.Errorf("write error: %v", err)
+		return err
+	}
+
+	// Log the message sent if it is a request.
+	if msg.Type == msgjson.Request {
+		conn.logRequest(msg.ID, msg)
+	}
 
 	return nil
 }
