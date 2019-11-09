@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -39,6 +40,9 @@ type WsCfg struct {
 	// ReconnectSync runs the needed reconnection synchronisation after
 	// a disconnect.
 	ReconnectSync func()
+	// InsecureSkipVerify skips the tls cert verification by the client
+	// when set. Should only be used for tests.
+	InsecureSkipVerify bool
 	// The dex client context.
 	Ctx context.Context
 	// The dex client context cancel func.
@@ -61,6 +65,7 @@ type WsConn struct {
 	connected    bool
 	connectedMtx sync.RWMutex
 	once         sync.Once
+	wg           sync.WaitGroup
 }
 
 // filesExists reports whether the named file or directory exists.
@@ -96,9 +101,13 @@ func NewWsConn(cfg *WsCfg) (*WsConn, error) {
 		}
 
 		tlsConfig = &tls.Config{
-			RootCAs:            rootCAs,
-			InsecureSkipVerify: true,
-			MinVersion:         tls.VersionTLS12,
+			RootCAs:    rootCAs,
+			MinVersion: tls.VersionTLS12,
+		}
+
+		// Allow skipping server cert verification for testing purposes.
+		if cfg.InsecureSkipVerify {
+			tlsConfig.InsecureSkipVerify = true
 		}
 	}
 
@@ -111,6 +120,7 @@ func NewWsConn(cfg *WsCfg) (*WsConn, error) {
 		req:         make(map[uint64]*msgjson.Message),
 	}
 
+	conn.wg.Add(1)
 	go conn.keepAlive()
 	conn.reconnectCh <- struct{}{}
 
@@ -162,6 +172,11 @@ func (conn *WsConn) NextID() uint64 {
 func (conn *WsConn) close() {
 	conn.wsMtx.Lock()
 	defer conn.wsMtx.Unlock()
+
+	if conn.ws == nil {
+		return
+	}
+
 	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
 	conn.ws.WriteControl(websocket.CloseMessage, msg,
 		time.Now().Add(conn.cfg.WriteWait))
@@ -188,6 +203,9 @@ func (conn *WsConn) connect() error {
 	}
 
 	ws.SetPingHandler(func(string) error {
+		conn.wsMtx.Lock()
+		defer conn.wsMtx.Unlock()
+
 		now := time.Now()
 		err := ws.SetReadDeadline(now.Add(conn.cfg.PingWait))
 		if err != nil {
@@ -234,13 +252,24 @@ func (conn *WsConn) read() {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway,
 				websocket.CloseNormalClosure) ||
 				strings.Contains(err.Error(), "websocket: close sent") {
-				// Terminate on a normal close message.
+				conn.wg.Done()
 				return
 			}
 
+			if opErr, ok := err.(*net.OpError); ok {
+				if opErr.Op == "read" {
+					if strings.Contains(opErr.Err.Error(),
+						"use of closed network connection") {
+						conn.wg.Done()
+						return
+					}
+				}
+			}
+
 			// Log all other errors and trigger a reconnection.
-			log.Debugf("read error: %v", err)
+			log.Errorf("read error: %v", err)
 			conn.reconnectCh <- struct{}{}
+			conn.wg.Done()
 			return
 		}
 
@@ -264,8 +293,17 @@ func (conn *WsConn) keepAlive() {
 			err := conn.connect()
 			if err != nil {
 				log.Errorf("connection error: %v", err)
+
+				go func() {
+					// Attempt to reconnect.
+					time.Sleep(conn.cfg.PingWait)
+					conn.reconnectCh <- struct{}{}
+				}()
+
+				continue
 			}
 
+			conn.wg.Add(1)
 			go conn.read()
 
 			// Synchronize after a reconnection.
@@ -280,9 +318,15 @@ func (conn *WsConn) keepAlive() {
 			/// the dex client signals a shutdown.
 			conn.setConnected(false)
 			conn.close()
+			conn.wg.Done()
 			return
 		}
 	}
+}
+
+// WaitForShutdown blocks until the websocket's processes are stopped.
+func (conn *WsConn) WaitForShutdown() {
+	conn.wg.Wait()
 }
 
 // Send pushes outgoing messages over the websocket connection.

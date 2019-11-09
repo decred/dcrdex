@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/elliptic"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/dcrdex/server/comms/msgjson"
+	"github.com/decred/slog"
 	"github.com/gorilla/websocket"
 )
 
@@ -46,150 +48,13 @@ func genCertPair(certFile, keyFile string, altDNSNames []string) error {
 	return nil
 }
 
-func TestReconnect(t *testing.T) {
-	upgrader := websocket.Upgrader{}
-
-	pingCh := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
-
-	pingWait := time.Millisecond * 200
-	writeWait := time.Millisecond * 200
-
-	var wsc *WsConn
-
-	id := uint64(0)
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		hCtx, hCancel := context.WithCancel(context.Background())
-		atomic.AddUint64(&id, 1)
-
-		c, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			t.Fatalf("unable to upgrade http connection: %s", err)
-		}
-
-		c.SetPongHandler(func(string) error {
-			id := atomic.LoadUint64(&id)
-			t.Logf("handler #%d: pong received", id)
-			return nil
-		})
-
-		go func() {
-			for {
-				select {
-				case <-pingCh:
-					err := c.WriteControl(websocket.PingMessage, []byte{},
-						time.Now().Add(writeWait))
-					if err != nil {
-						t.Errorf("handler #%d: ping error: %v", id, err)
-						return
-					}
-
-					id := atomic.LoadUint64(&id)
-					t.Logf("handler #%d: ping sent", id)
-
-				case <-hCtx.Done():
-					return
-				}
-			}
-		}()
-
-		for {
-			_, _, err := c.ReadMessage()
-			if err != nil {
-				c.Close()
-				hCancel()
-
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-					// Terminate on a normal close message.
-					return
-				}
-
-				t.Errorf("handler #%d: read error: %v", id, err)
-				return
-			}
-
-		}
-	}
-
-	certFile, err := ioutil.TempFile("", "certfile")
-	if err != nil {
-		t.Fatalf("unable to create temp certfile: %s", err)
-	}
-	certFile.Close()
-	defer os.Remove(certFile.Name())
-
-	keyFile, err := ioutil.TempFile("", "keyfile")
-	if err != nil {
-		t.Fatalf("unable to create temp keyfile: %s", err)
-	}
-	keyFile.Close()
-	defer os.Remove(keyFile.Name())
-
-	err = genCertPair(certFile.Name(), keyFile.Name(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	host := "127.0.0.1:6060"
-	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", handler)
-
-	server := &http.Server{
-		WriteTimeout: time.Second * 5,
-		ReadTimeout:  time.Second * 5,
-		IdleTimeout:  time.Second * 5,
-		Addr:         host,
-		Handler:      mux,
-	}
-
-	defer server.Close()
-
-	go func() {
-		err = server.ListenAndServeTLS(certFile.Name(), keyFile.Name())
-		if err != nil {
-			t.Log(err)
-		}
-	}()
-
-	cfg := &WsCfg{
-		Host:      host,
-		Path:      "ws",
-		PingWait:  pingWait,
-		WriteWait: writeWait,
-		RpcCert:   certFile.Name(),
-		Ctx:       ctx,
-		Cancel:    cancel,
-	}
-	wsc, err = NewWsConn(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for idx := 0; idx < 5; idx++ {
-		// Drop the connection and force a reconnect by waiting.
-		time.Sleep(time.Millisecond * 210)
-
-		// Wait for a reconnection.
-		for !wsc.isConnected() {
-			time.Sleep(time.Millisecond * 10)
-			continue
-		}
-
-		// Send a ping.
-		pingCh <- struct{}{}
-	}
-
-	time.Sleep(time.Millisecond * 200)
-	cancel()
-	time.Sleep(time.Millisecond * 200)
-}
-
 func TestWsConn(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 
 	pingCh := make(chan struct{})
 	readPumpCh := make(chan interface{})
 	writePumpCh := make(chan *msgjson.Message)
+	shutdown := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pingWait := time.Millisecond * 200
@@ -303,9 +168,9 @@ func TestWsConn(t *testing.T) {
 	defer server.Close()
 
 	go func() {
-		err = server.ListenAndServeTLS(certFile.Name(), keyFile.Name())
+		err := server.ListenAndServeTLS(certFile.Name(), keyFile.Name())
 		if err != nil {
-			t.Log(err)
+			fmt.Println(err)
 		}
 	}()
 
@@ -322,6 +187,11 @@ func TestWsConn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	go func() {
+		wsc.WaitForShutdown()
+		shutdown <- struct{}{}
+	}()
 
 	reconnectAndPing := func() {
 		// Drop the connection and force a reconnect by waiting.
@@ -450,14 +320,96 @@ func TestWsConn(t *testing.T) {
 		t.Fatal("expected an error for unlogged id")
 	}
 
-	reconnectAndPing()
+	// Drop the connection and force a reconnect by waiting.
+	time.Sleep(time.Millisecond * 210)
 
-	time.Sleep(time.Millisecond * 200)
-	cancel()
-	time.Sleep(time.Millisecond * 200)
+	// Ensure the connection is disconnected.
+	for wsc.isConnected() {
+		time.Sleep(time.Millisecond * 10)
+		continue
+	}
 
+	// Try sending a message on a disconnected connection.
 	err = wsc.Send(sent)
 	if err == nil {
 		t.Fatalf("expected a connection state error")
 	}
+
+	cancel()
+	<-shutdown
+}
+
+func TestFailingConnection(t *testing.T) {
+	shutdown := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+
+	backendLogger := slog.NewBackend(os.Stdout)
+	defer os.Stdout.Sync()
+	log := backendLogger.Logger("Debug")
+	log.SetLevel(slog.LevelTrace)
+	UseLogger(log)
+
+	pingWait := time.Millisecond * 200
+	writeWait := time.Millisecond * 200
+
+	certFile, err := ioutil.TempFile("", "certfile")
+	if err != nil {
+		t.Fatalf("unable to create temp certfile: %s", err)
+	}
+	certFile.Close()
+	defer os.Remove(certFile.Name())
+
+	keyFile, err := ioutil.TempFile("", "keyfile")
+	if err != nil {
+		t.Fatalf("unable to create temp keyfile: %s", err)
+	}
+	keyFile.Close()
+	defer os.Remove(keyFile.Name())
+
+	err = genCertPair(certFile.Name(), keyFile.Name(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	host := "127.0.0.1:6060"
+	cfg := &WsCfg{
+		Host:      host,
+		Path:      "ws",
+		PingWait:  pingWait,
+		WriteWait: writeWait,
+		RpcCert:   certFile.Name(),
+		Ctx:       ctx,
+		Cancel:    cancel,
+	}
+	wsc, err := NewWsConn(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		wsc.WaitForShutdown()
+		shutdown <- struct{}{}
+	}()
+
+	oldCount := atomic.LoadUint64(&wsc.reconnects)
+	for idx := 0; idx < 5; idx++ {
+		time.Sleep(time.Millisecond * 210)
+
+		// Ensure the connection status is false and the number of
+		// reconnect attempts have increased.
+		if wsc.isConnected() {
+			t.Fatalf("expected the connection to be in a disconnected state")
+		}
+
+		updatedCount := atomic.LoadUint64(&wsc.reconnects)
+		if updatedCount == oldCount || updatedCount < oldCount {
+			t.Fatalf("expected the connection to have "+
+				"increased connection attempts, %v", updatedCount)
+		}
+
+		oldCount = updatedCount
+	}
+
+	cancel()
+	<-shutdown
 }
