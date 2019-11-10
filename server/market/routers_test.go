@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -875,6 +876,7 @@ func (s *TBookSource) OrderFeed() <-chan *bookUpdateSignal {
 }
 
 type TLink struct {
+	mtx      sync.Mutex
 	id       uint64
 	sends    []*msgjson.Message
 	sendErr  error
@@ -893,12 +895,15 @@ func tNewLink() *TLink {
 
 func (conn *TLink) ID() uint64 { return conn.id }
 func (conn *TLink) Send(msg *msgjson.Message) error {
-	// should probably lock Send and getSend
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
 	conn.sends = append(conn.sends, msg)
 	return conn.sendErr
 }
 
 func (conn *TLink) getSend() *msgjson.Message {
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
 	if len(conn.sends) == 0 {
 		return nil
 	}
@@ -1264,7 +1269,10 @@ func TestRouter(t *testing.T) {
 	src1.feed <- sig
 	tick(5)
 
-	l := router.books[mktName1].subs.conns[link2.ID()]
+	subs := router.books[mktName1].subs
+	subs.mtx.RLock()
+	l := subs.conns[link2.ID()]
+	subs.mtx.RUnlock()
 	if l != nil {
 		t.Fatalf("client not removed from subscription list")
 	}
