@@ -242,9 +242,9 @@ out:
 
 // sendBook encodes and sends the the entire order book to the specified client.
 func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
-	msgBook := make([]*msgjson.BookOrderNote, 0, len(book.orders))
 	seq := book.subs.lastSeq()
 	book.mtx.RLock()
+	msgBook := make([]*msgjson.BookOrderNote, 0, len(book.orders))
 	for _, o := range book.orders {
 		msgBook = append(msgBook, o)
 	}
