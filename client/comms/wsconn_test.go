@@ -58,7 +58,6 @@ func TestWsConn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pingWait := time.Millisecond * 200
-	writeWait := time.Millisecond * 200
 
 	var wsc *WsConn
 
@@ -175,13 +174,11 @@ func TestWsConn(t *testing.T) {
 	}()
 
 	cfg := &WsCfg{
-		Host:      host,
-		Path:      "ws",
-		PingWait:  pingWait,
-		WriteWait: writeWait,
-		RpcCert:   certFile.Name(),
-		Ctx:       ctx,
-		Cancel:    cancel,
+		Host:     host,
+		Path:     "ws",
+		PingWait: pingWait,
+		RpcCert:  certFile.Name(),
+		Ctx:      ctx,
 	}
 	wsc, err = NewWsConn(cfg)
 	if err != nil {
@@ -350,7 +347,6 @@ func TestFailingConnection(t *testing.T) {
 	UseLogger(log)
 
 	pingWait := time.Millisecond * 200
-	writeWait := time.Millisecond * 200
 
 	certFile, err := ioutil.TempFile("", "certfile")
 	if err != nil {
@@ -373,13 +369,11 @@ func TestFailingConnection(t *testing.T) {
 
 	host := "127.0.0.1:6060"
 	cfg := &WsCfg{
-		Host:      host,
-		Path:      "ws",
-		PingWait:  pingWait,
-		WriteWait: writeWait,
-		RpcCert:   certFile.Name(),
-		Ctx:       ctx,
-		Cancel:    cancel,
+		Host:     host,
+		Path:     "ws",
+		PingWait: pingWait,
+		RpcCert:  certFile.Name(),
+		Ctx:      ctx,
 	}
 	wsc, err := NewWsConn(cfg)
 	if err != nil {

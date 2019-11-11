@@ -21,8 +21,11 @@ import (
 )
 
 const (
-	// bufferSize is buffer size for the websocket connection's read channel.
+	// bufferSize is buffer size for a websocket connection's read channel.
 	readBuffSize = 128
+
+	// The maximum time in seconds to write to a connection.
+	writeWait = time.Second * 3
 )
 
 // WsCfg is the configuration struct for initializing a WsConn.
@@ -33,20 +36,13 @@ type WsCfg struct {
 	Path string
 	// The maximum time in seconds to wait for a ping from the server.
 	PingWait time.Duration
-	// The maximum time in seconds to write to the connection.
-	WriteWait time.Duration
 	// The rpc certificate file path.
 	RpcCert string
 	// ReconnectSync runs the needed reconnection synchronisation after
 	// a disconnect.
 	ReconnectSync func()
-	// InsecureSkipVerify skips the tls cert verification by the client
-	// when set. Should only be used for tests.
-	InsecureSkipVerify bool
 	// The dex client context.
 	Ctx context.Context
-	// The dex client context cancel func.
-	Cancel context.CancelFunc
 }
 
 // WsConn represents a client websocket connection.
@@ -80,12 +76,13 @@ func NewWsConn(cfg *WsCfg) (*WsConn, error) {
 		return nil, fmt.Errorf("ping wait cannot be negative")
 	}
 
-	if cfg.WriteWait < 0 {
-		return nil, fmt.Errorf("write wait cannot be negative")
-	}
-
 	var tlsConfig *tls.Config
-	if fileExists(cfg.RpcCert) {
+	if cfg.RpcCert != "" {
+		if !fileExists(cfg.RpcCert) {
+			return nil, fmt.Errorf("the rpc cert provided (%v) "+
+				"does not exist", cfg.RpcCert)
+		}
+
 		rootCAs, _ := x509.SystemCertPool()
 		if rootCAs == nil {
 			rootCAs = x509.NewCertPool()
@@ -101,9 +98,8 @@ func NewWsConn(cfg *WsCfg) (*WsConn, error) {
 		}
 
 		tlsConfig = &tls.Config{
-			RootCAs:            rootCAs,
-			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: cfg.InsecureSkipVerify,
+			RootCAs:    rootCAs,
+			MinVersion: tls.VersionTLS12,
 		}
 	}
 
@@ -175,7 +171,7 @@ func (conn *WsConn) close() {
 
 	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
 	conn.ws.WriteControl(websocket.CloseMessage, msg,
-		time.Now().Add(conn.cfg.WriteWait))
+		time.Now().Add(writeWait))
 	conn.ws.Close()
 }
 
@@ -210,8 +206,7 @@ func (conn *WsConn) connect() error {
 		}
 
 		// Respond with a pong.
-		err = ws.WriteControl(websocket.PongMessage, []byte{},
-			now.Add(conn.cfg.WriteWait))
+		err = ws.WriteControl(websocket.PongMessage, []byte{}, now.Add(writeWait))
 		if err != nil {
 			log.Errorf("pong error: %v", err)
 			return err
@@ -230,6 +225,8 @@ func (conn *WsConn) connect() error {
 // read fetches and parses incoming messages for processing. This should be
 // run as a goroutine.
 func (conn *WsConn) read() {
+	defer conn.wg.Done()
+
 	for {
 		msg := new(msgjson.Message)
 
@@ -248,7 +245,6 @@ func (conn *WsConn) read() {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway,
 				websocket.CloseNormalClosure) ||
 				strings.Contains(err.Error(), "websocket: close sent") {
-				conn.wg.Done()
 				return
 			}
 
@@ -256,7 +252,6 @@ func (conn *WsConn) read() {
 				if opErr.Op == "read" {
 					if strings.Contains(opErr.Err.Error(),
 						"use of closed network connection") {
-						conn.wg.Done()
 						return
 					}
 				}
@@ -265,7 +260,6 @@ func (conn *WsConn) read() {
 			// Log all other errors and trigger a reconnection.
 			log.Errorf("read error: %v", err)
 			conn.reconnectCh <- struct{}{}
-			conn.wg.Done()
 			return
 		}
 
@@ -332,7 +326,7 @@ func (conn *WsConn) Send(msg *msgjson.Message) error {
 	}
 
 	conn.wsMtx.Lock()
-	conn.ws.SetWriteDeadline(time.Now().Add(conn.cfg.WriteWait))
+	conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
 	err := conn.ws.WriteJSON(msg)
 	conn.wsMtx.Unlock()
 	if err != nil {
