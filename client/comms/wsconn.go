@@ -101,13 +101,9 @@ func NewWsConn(cfg *WsCfg) (*WsConn, error) {
 		}
 
 		tlsConfig = &tls.Config{
-			RootCAs:    rootCAs,
-			MinVersion: tls.VersionTLS12,
-		}
-
-		// Allow skipping server cert verification for testing purposes.
-		if cfg.InsecureSkipVerify {
-			tlsConfig.InsecureSkipVerify = true
+			RootCAs:            rootCAs,
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: cfg.InsecureSkipVerify,
 		}
 	}
 
