@@ -15,10 +15,10 @@ import (
 	"time"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrdex/dex/msgjson"
+	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/comms"
-	"github.com/decred/dcrdex/server/comms/msgjson"
-	"github.com/decred/dcrdex/server/order"
 )
 
 func randBytes(l int) []byte {

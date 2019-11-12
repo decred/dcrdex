@@ -5,7 +5,7 @@ package pg
 import (
 	"testing"
 
-	"github.com/decred/dcrdex/server/market/types"
+	"github.com/decred/dcrdex/dex"
 )
 
 func TestCheckCurrentTimeZone(t *testing.T) {
@@ -22,13 +22,13 @@ func TestPrepareTables(t *testing.T) {
 	}
 
 	// valid market
-	mktConfig, err := types.NewMarketInfoFromSymbols("DCR", "BTC", 1e9)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create new tables and schemas.
-	markets := []*types.MarketInfo{mktConfig}
+	markets := []*dex.MarketInfo{mktConfig}
 	err = PrepareTables(archie.db, markets)
 	if err != nil {
 		t.Error(err)
@@ -41,19 +41,19 @@ func TestPrepareTables(t *testing.T) {
 	}
 
 	// Mutated existing market (not supported, will panic).
-	mktConfig, _ = types.NewMarketInfoFromSymbols("DCR", "BTC", 1e8) // lot size change
+	mktConfig, _ = dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e8) // lot size change
 	func() {
 		defer func() {
 			if recover() == nil {
 				t.Error("PrepareTables should have paniced with lot size change.")
 			}
 		}()
-		_ = PrepareTables(archie.db, []*types.MarketInfo{mktConfig})
+		_ = PrepareTables(archie.db, []*dex.MarketInfo{mktConfig})
 	}()
 
 	// Add a new market.
-	mktConfig, _ = types.NewMarketInfoFromSymbols("dcr", "ltc", 1e9)
-	err = PrepareTables(archie.db, []*types.MarketInfo{mktConfig})
+	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9)
+	err = PrepareTables(archie.db, []*dex.MarketInfo{mktConfig})
 	if err != nil {
 		t.Error(err)
 	}

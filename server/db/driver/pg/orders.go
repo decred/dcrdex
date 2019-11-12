@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/decred/dcrdex/dex"
+	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/db"
 	"github.com/decred/dcrdex/server/db/driver/pg/internal"
-	"github.com/decred/dcrdex/server/market/types"
-	"github.com/decred/dcrdex/server/order"
 	"github.com/lib/pq"
 )
 
@@ -123,12 +123,12 @@ var _ db.OrderArchiver = (*Archiver)(nil)
 // specified by the given base and quote assets. A non-nil error will be
 // returned if the market is not recognized. If the order is not found, the
 // error value is ErrUnknownOrder, and the type is
-// market/types.OrderStatusUnknown. The only recognized order types are market,
-// limit, and cancel.
-func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, types.OrderStatus, error) {
-	marketSchema, err := types.MarketName(base, quote)
+// order.OrderStatusUnknown. The only recognized order types are market, limit,
+// and cancel.
+func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error) {
+	marketSchema, err := dex.MarketName(base, quote)
 	if err != nil {
-		return nil, types.OrderStatusUnknown, err
+		return nil, order.OrderStatusUnknown, err
 	}
 
 	// Since order type is unknown:
@@ -141,14 +141,14 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, ty
 		var co *order.CancelOrder
 		co, status, err = loadCancelOrder(a.db, a.dbName, marketSchema, oid)
 		if err != nil {
-			return nil, types.OrderStatusUnknown, err // includes ErrUnknownOrder
+			return nil, order.OrderStatusUnknown, err // includes ErrUnknownOrder
 		}
 		co.BaseAsset, co.QuoteAsset = base, quote
 		return co, pgToMarketStatus(status), err
 		// no other order types to try presently
 	}
 	if err != nil {
-		return nil, types.OrderStatusUnknown, err
+		return nil, order.OrderStatusUnknown, err
 	}
 
 	lo.BaseAsset, lo.QuoteAsset = base, quote
@@ -163,7 +163,7 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, ty
 		return lo, pgToMarketStatus(status), nil
 	}
 
-	return nil, types.OrderStatusUnknown,
+	return nil, order.OrderStatusUnknown,
 		fmt.Errorf("retrieved unsupported order type %d (%s)", lo.OrderType, lo.OrderType)
 }
 
@@ -179,36 +179,36 @@ const (
 	orderStatusRevoked
 )
 
-func marketToPgStatus(status types.OrderStatus) pgOrderStatus {
+func marketToPgStatus(status order.OrderStatus) pgOrderStatus {
 	switch status {
-	case types.OrderStatusEpoch:
+	case order.OrderStatusEpoch:
 		return orderStatusEpoch
-	case types.OrderStatusBooked:
+	case order.OrderStatusBooked:
 		return orderStatusBooked
-	case types.OrderStatusExecuted:
+	case order.OrderStatusExecuted:
 		return orderStatusExecuted
-	case types.OrderStatusCanceled:
+	case order.OrderStatusCanceled:
 		return orderStatusCanceled
-	case types.OrderStatusRevoked:
+	case order.OrderStatusRevoked:
 		return orderStatusRevoked
 	}
 	return orderStatusUnknown
 }
 
-func pgToMarketStatus(status pgOrderStatus) types.OrderStatus {
+func pgToMarketStatus(status pgOrderStatus) order.OrderStatus {
 	switch status {
 	case orderStatusEpoch:
-		return types.OrderStatusEpoch
+		return order.OrderStatusEpoch
 	case orderStatusBooked:
-		return types.OrderStatusBooked
+		return order.OrderStatusBooked
 	case orderStatusExecuted, orderStatusFailed: // failed is executed as far as the market is concerned
-		return types.OrderStatusExecuted
+		return order.OrderStatusExecuted
 	case orderStatusCanceled:
-		return types.OrderStatusCanceled
+		return order.OrderStatusCanceled
 	case orderStatusRevoked:
-		return types.OrderStatusRevoked
+		return order.OrderStatusRevoked
 	}
-	return types.OrderStatusUnknown
+	return order.OrderStatusUnknown
 }
 
 func (status pgOrderStatus) String() string {
@@ -280,7 +280,7 @@ func (a *Archiver) FailCancelOrder(co *order.CancelOrder) error {
 	return a.updateOrderStatus(co, orderStatusFailed)
 }
 
-func validateOrder(ord order.Order, status pgOrderStatus, mkt *types.MarketInfo) bool {
+func validateOrder(ord order.Order, status pgOrderStatus, mkt *dex.MarketInfo) bool {
 	if status == orderStatusFailed && ord.Type() != order.CancelOrderType {
 		return false
 	}
@@ -292,12 +292,12 @@ func validateOrder(ord order.Order, status pgOrderStatus, mkt *types.MarketInfo)
 // recognized. All orders are validated via server/db.ValidateOrder to ensure
 // only sensible orders reach persistent storage. Updating orders should be done
 // via one of the update functions such as UpdateOrderStatus.
-func (a *Archiver) StoreOrder(ord order.Order, status types.OrderStatus) error {
+func (a *Archiver) StoreOrder(ord order.Order, status order.OrderStatus) error {
 	return a.storeOrder(ord, marketToPgStatus(status))
 }
 
 func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
-	marketSchema, err := types.MarketName(ord.Base(), ord.Quote())
+	marketSchema, err := dex.MarketName(ord.Base(), ord.Quote())
 	if err != nil {
 		return err
 	}
@@ -368,14 +368,14 @@ func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
 // OrderStatusByID gets the status, type, and filled amount of the order with
 // the given OrderID in the market specified by a base and quote asset. See also
 // OrderStatus. If the order is not found, the error value is ErrUnknownOrder,
-// and the type is market/types.OrderStatusUnknown.
-func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (types.OrderStatus, order.OrderType, int64, error) {
+// and the type is order.OrderStatusUnknown.
+func (a *Archiver) OrderStatusByID(oid order.OrderID, base, quote uint32) (order.OrderStatus, order.OrderType, int64, error) {
 	pgStatus, orderType, filled, err := a.orderStatusByID(oid, base, quote)
 	return pgToMarketStatus(pgStatus), orderType, filled, err
 }
 
 func (a *Archiver) orderStatusByID(oid order.OrderID, base, quote uint32) (pgOrderStatus, order.OrderType, int64, error) {
-	marketSchema, err := types.MarketName(base, quote)
+	marketSchema, err := dex.MarketName(base, quote)
 	if err != nil {
 		return orderStatusUnknown, order.UnknownOrderType, -1, err
 	}
@@ -393,7 +393,7 @@ func (a *Archiver) orderStatusByID(oid order.OrderID, base, quote uint32) (pgOrd
 
 // OrderStatus gets the status, ID, and filled amount of the given order. See
 // also OrderStatusByID.
-func (a *Archiver) OrderStatus(ord order.Order) (types.OrderStatus, order.OrderType, int64, error) {
+func (a *Archiver) OrderStatus(ord order.Order) (order.OrderStatus, order.OrderType, int64, error) {
 	return a.OrderStatusByID(ord.ID(), ord.Base(), ord.Quote())
 }
 
@@ -406,13 +406,13 @@ func (a *Archiver) orderStatus(ord order.Order) (pgOrderStatus, order.OrderType,
 // filled is -1, the filled amount is unchanged. For cancel orders, the filled
 // amount is ignored. OrderStatusByID is used to locate the existing order. If
 // the order is not found, the error value is ErrUnknownOrder, and the type is
-// market/types.OrderStatusUnknown. See also UpdateOrderStatus.
-func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status types.OrderStatus, filled int64) error {
+// market/order.OrderStatusUnknown. See also UpdateOrderStatus.
+func (a *Archiver) UpdateOrderStatusByID(oid order.OrderID, base, quote uint32, status order.OrderStatus, filled int64) error {
 	return a.updateOrderStatusByID(oid, base, quote, marketToPgStatus(status), filled)
 }
 
 func (a *Archiver) updateOrderStatusByID(oid order.OrderID, base, quote uint32, status pgOrderStatus, filled int64) error {
-	marketSchema, err := types.MarketName(base, quote)
+	marketSchema, err := dex.MarketName(base, quote)
 	if err != nil {
 		return err
 	}
@@ -473,7 +473,7 @@ func (a *Archiver) updateOrderStatusByID(oid order.OrderID, base, quote uint32, 
 // Both the market and new filled amount are determined from the Order.
 // OrderStatusByID is used to locate the existing order. See also
 // UpdateOrderStatusByID.
-func (a *Archiver) UpdateOrderStatus(ord order.Order, status types.OrderStatus) error {
+func (a *Archiver) UpdateOrderStatus(ord order.Order, status order.OrderStatus) error {
 	return a.updateOrderStatus(ord, marketToPgStatus(status))
 }
 
@@ -512,9 +512,9 @@ func (a *Archiver) moveCancelOrder(oid order.OrderID, srcTableName, dstTableName
 // OrderID in the market specified by a base and quote asset. This function
 // applies only to market and limit orders, not cancel orders. OrderStatusByID
 // is used to locate the existing order. If the order is not found, the error
-// value is ErrUnknownOrder, and the type is market/types.OrderStatusUnknown.
-// See also UpdateOrderFilled. To also update the order status, use
-// UpdateOrderStatusByID or UpdateOrderStatus.
+// value is ErrUnknownOrder, and the type is order.OrderStatusUnknown. See also
+// UpdateOrderFilled. To also update the order status, use UpdateOrderStatusByID
+// or UpdateOrderStatus.
 func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, filled int64) error {
 	// Locate the order.
 	status, orderType, initFilled, err := a.orderStatusByID(oid, base, quote)
@@ -536,7 +536,7 @@ func (a *Archiver) UpdateOrderFilledByID(oid order.OrderID, base, quote uint32, 
 		return nil // nothing to do
 	}
 
-	marketSchema, err := types.MarketName(base, quote)
+	marketSchema, err := dex.MarketName(base, quote)
 	if err != nil {
 		return err // should be caught already by a.OrderStatusByID
 	}
@@ -561,8 +561,8 @@ func (a *Archiver) UpdateOrderFilled(ord order.Order) error {
 
 // UserOrders retrieves all orders for the given account in the market specified
 // by a base and quote asset.
-func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []types.OrderStatus, error) {
-	marketSchema, err := types.MarketName(base, quote)
+func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error) {
+	marketSchema, err := dex.MarketName(base, quote)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -571,7 +571,7 @@ func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, 
 	if err != nil {
 		return nil, nil, err
 	}
-	statuses := make([]types.OrderStatus, len(pgStatuses))
+	statuses := make([]order.OrderStatus, len(pgStatuses))
 	for i := range pgStatuses {
 		statuses[i] = pgToMarketStatus(pgStatuses[i])
 	}

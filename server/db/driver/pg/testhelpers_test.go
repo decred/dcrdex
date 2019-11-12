@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/decred/dcrdex/dex"
+	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/account/pki"
-	"github.com/decred/dcrdex/server/market/types"
-	"github.com/decred/dcrdex/server/order"
 	"github.com/decred/slog"
 )
 
@@ -40,8 +40,8 @@ func randomAccountID() account.AccountID {
 	return account.NewID(pk)
 }
 
-func mktConfig() (markets []*types.MarketInfo) {
-	mktConfig, err := types.NewMarketInfoFromSymbols("DCR", "BTC", 1e9)
+func mktConfig() (markets []*dex.MarketInfo) {
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9)
 	if err != nil {
 		panic(fmt.Sprintf("you broke it: %v", err))
 	}

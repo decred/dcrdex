@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/order"
 	"github.com/decred/slog"
 )
 

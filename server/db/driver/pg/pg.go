@@ -12,8 +12,8 @@ import (
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrd/hdkeychain/v2"
+	"github.com/decred/dcrdex/dex"
 	"github.com/decred/dcrdex/server/asset"
-	"github.com/decred/dcrdex/server/market/types"
 )
 
 // type Driver struct{}
@@ -44,7 +44,7 @@ type Config struct {
 	QueryTimeout                   time.Duration
 
 	// MarketCfg specifies all of the markets that the Archiver should prepare.
-	MarketCfg []*types.MarketInfo
+	MarketCfg []*dex.MarketInfo
 
 	// CheckedStores checks the tables for existing identical entires before
 	// attempting to store new data. This will should not be needed if there are
@@ -73,7 +73,7 @@ type Archiver struct {
 	db            *sql.DB
 	dbName        string
 	checkedStores bool
-	markets       map[string]*types.MarketInfo
+	markets       map[string]*dex.MarketInfo
 	feeKeyBranch  *hdkeychain.ExtendedKey
 	keyHash       []byte // Store the hash to ref the counter table.
 	keyParams     *chaincfg.Params
@@ -113,7 +113,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 		queryTimeout = defaultQueryTimeout
 	}
 
-	mktMap := make(map[string]*types.MarketInfo, len(cfg.MarketCfg))
+	mktMap := make(map[string]*dex.MarketInfo, len(cfg.MarketCfg))
 	for _, mkt := range cfg.MarketCfg {
 		mktMap[mkt.Name] = mkt
 	}

@@ -12,14 +12,13 @@ import (
 	"time"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrdex/dex/msgjson"
+	"github.com/decred/dcrdex/dex/order"
+	ordertest "github.com/decred/dcrdex/dex/order/test"
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/dcrdex/server/comms"
-	"github.com/decred/dcrdex/server/comms/msgjson"
-	// dex "github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/matcher"
-	"github.com/decred/dcrdex/server/order"
-	ordertest "github.com/decred/dcrdex/server/order/test"
 )
 
 const (
