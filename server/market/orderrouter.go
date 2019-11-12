@@ -9,12 +9,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/decred/dcrdex/dex"
+	"github.com/decred/dcrdex/dex/msgjson"
+	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/asset"
-	"github.com/decred/dcrdex/server/comms/msgjson"
-	dex "github.com/decred/dcrdex/server/market/types"
 	"github.com/decred/dcrdex/server/matcher"
-	"github.com/decred/dcrdex/server/order"
 )
 
 const maxClockOffset = 10 // seconds

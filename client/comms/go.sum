@@ -5,8 +5,6 @@ github.com/decred/dcrd/certgen v1.1.0 h1:lAPE2OLYdYeXDCaji/+KC53j7/s7wF7RVGeQbXK
 github.com/decred/dcrd/certgen v1.1.0/go.mod h1:ivkPLChfjdAgFh7ZQOtl6kJRqVkfrCq67dlq3AbZBQE=
 github.com/decred/dcrdex v0.0.0-20191017151723-32692e7cbf2a h1:dq7eoHzaYDf8A7R9t0hMGqMRgiyzFAK8BJ/DRtMrW2I=
 github.com/decred/dcrdex/server/comms v0.0.0-20191017151723-32692e7cbf2a h1:S5SI8dKcEBwWuzXFR/kVMIzhVZqGhhsBvj67zAwwAvE=
-github.com/decred/dcrdex/server/comms/msgjson v0.0.0-20191017151723-32692e7cbf2a h1:r4cAPQZgT465A04RXBVjW8ozBC7L3WwOpFkkCNv/0eE=
-github.com/decred/dcrdex/server/comms/msgjson v0.0.0-20191017151723-32692e7cbf2a/go.mod h1:g7w6FF2ZijSrSgFSnPsw7VU7q08rL/e9URV+PN3voRI=
 github.com/decred/slog v1.0.0 h1:Dl+W8O6/JH6n2xIFN2p3DNjCmjYwvrXsjlSJTQQ4MhE=
 github.com/decred/slog v1.0.0/go.mod h1:zR98rEZHSnbZ4WHZtO0iqmSZjDLKhkXfrPTZQKtAonQ=
 github.com/gorilla/websocket v1.4.1 h1:q7AeDBpnBk8AogcD4DSag/Ukw/KV+YhzLj2bP5HvKCM=

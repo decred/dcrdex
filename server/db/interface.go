@@ -6,9 +6,9 @@ package db
 import (
 	"context"
 
+	"github.com/decred/dcrdex/dex"
+	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/market/types"
-	"github.com/decred/dcrdex/server/order"
 )
 
 // DEXArchivist will be composed of several different interfaces. Starting with
@@ -23,14 +23,14 @@ type DEXArchivist interface {
 type OrderArchiver interface {
 	// Order retrieves an order with the given OrderID, stored for the market
 	// specified by the given base and quote assets.
-	Order(oid order.OrderID, base, quote uint32) (order.Order, types.OrderStatus, error)
+	Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error)
 
 	// UserOrders retrieves all orders for the given account in the market
 	// specified by a base and quote asset.
-	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []types.OrderStatus, error)
+	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
 
 	// OrderStatus gets the status, ID, and filled amount of the given order.
-	OrderStatus(order.Order) (types.OrderStatus, order.OrderType, int64, error)
+	OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error)
 
 	// NewEpochOrder stores a new order with epoch status. Such orders are
 	// pending execution or insertion on a book (standing limit orders with a
@@ -69,7 +69,7 @@ type OrderArchiver interface {
 
 	// UpdateOrderStatus updates the status and filled amount of the given
 	// order.
-	UpdateOrderStatus(order.Order, types.OrderStatus) error
+	UpdateOrderStatus(order.Order, order.OrderStatus) error
 }
 
 // AccountArchiver is the interface required for storage and retrieval of all
@@ -103,9 +103,9 @@ type AccountArchiver interface {
 // market is sensible. This function is in the database package because the
 // concept of a valid order-status-market state is dependent on the semantics of
 // order archival.
-func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketInfo) bool {
+func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInfo) bool {
 	// Orders with status OrderStatusUnknown should never reach the database.
-	if status == types.OrderStatusUnknown {
+	if status == order.OrderStatusUnknown {
 		return false
 	}
 
@@ -125,7 +125,7 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 		// Market orders OK statuses: epoch and executed (NOT booked or
 		// canceled).
 		switch status {
-		case types.OrderStatusEpoch, types.OrderStatusExecuted:
+		case order.OrderStatusEpoch, order.OrderStatusExecuted:
 		default:
 			return false
 		}
@@ -143,7 +143,7 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 		// Cancel order OK statuses: epoch, and executed (NOT booked or
 		// canceled).
 		switch status {
-		case types.OrderStatusEpoch, types.OrderStatusExecuted: // orderStatusFailed if we decide to export that
+		case order.OrderStatusEpoch, order.OrderStatusExecuted: // orderStatusFailed if we decide to export that
 		default:
 			return false
 		}
@@ -161,8 +161,8 @@ func ValidateOrder(ord order.Order, status types.OrderStatus, mkt *types.MarketI
 		// Limit order OK statuses: epoch, booked, executed, and canceled (same
 		// as market plus booked).
 		switch status {
-		case types.OrderStatusEpoch, types.OrderStatusExecuted, types.OrderStatusRevoked:
-		case types.OrderStatusBooked, types.OrderStatusCanceled:
+		case order.OrderStatusEpoch, order.OrderStatusExecuted, order.OrderStatusRevoked:
+		case order.OrderStatusBooked, order.OrderStatusCanceled:
 			// Immediate time in force limit orders may not be canceled, and may
 			// not be in the order book.
 			if ot.Force == order.ImmediateTiF {

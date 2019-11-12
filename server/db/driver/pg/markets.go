@@ -7,11 +7,11 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/decred/dcrdex/dex"
 	"github.com/decred/dcrdex/server/db/driver/pg/internal"
-	"github.com/decred/dcrdex/server/market/types"
 )
 
-func loadMarkets(db *sql.DB, marketsTableName string) ([]*types.MarketInfo, error) {
+func loadMarkets(db *sql.DB, marketsTableName string) ([]*dex.MarketInfo, error) {
 	stmt := fmt.Sprintf(internal.SelectAllMarkets, marketsTableName)
 	rows, err := db.Query(stmt)
 	if err != nil {
@@ -19,7 +19,7 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*types.MarketInfo, erro
 	}
 	defer rows.Close()
 
-	var mkts []*types.MarketInfo
+	var mkts []*dex.MarketInfo
 	for rows.Next() {
 		var name string
 		var base, quote uint32
@@ -28,7 +28,7 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*types.MarketInfo, erro
 		if err != nil {
 			return nil, err
 		}
-		mkts = append(mkts, &types.MarketInfo{
+		mkts = append(mkts, &dex.MarketInfo{
 			Name:    name,
 			Base:    base,
 			Quote:   quote,
@@ -39,7 +39,7 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*types.MarketInfo, erro
 	return mkts, nil
 }
 
-func newMarket(db *sql.DB, marketsTableName string, mkt *types.MarketInfo) error {
+func newMarket(db *sql.DB, marketsTableName string, mkt *dex.MarketInfo) error {
 	stmt := fmt.Sprintf(internal.InsertMarket, marketsTableName)
 	res, err := db.Exec(stmt, mkt.Name, mkt.Base, mkt.Quote, mkt.LotSize)
 	if err != nil {

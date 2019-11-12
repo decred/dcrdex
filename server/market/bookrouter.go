@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"sync"
 
+	"github.com/decred/dcrdex/dex"
+	"github.com/decred/dcrdex/dex/msgjson"
+	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/comms"
-	"github.com/decred/dcrdex/server/comms/msgjson"
-	"github.com/decred/dcrdex/server/market/types"
-	"github.com/decred/dcrdex/server/order"
 )
 
 // A bookUpdateAction classifies updates into how they affect the book or epoch
@@ -277,7 +277,7 @@ func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msg
 			Message: "parse error: " + err.Error(),
 		}
 	}
-	mkt, err := types.MarketName(sub.Base, sub.Quote)
+	mkt, err := dex.MarketName(sub.Base, sub.Quote)
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.UnknownMarket,

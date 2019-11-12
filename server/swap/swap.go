@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/decred/dcrdex/dex/msgjson"
+	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/dcrdex/server/comms"
-	"github.com/decred/dcrdex/server/comms/msgjson"
 	"github.com/decred/dcrdex/server/matcher"
-	"github.com/decred/dcrdex/server/order"
 )
 
 const (

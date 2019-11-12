@@ -28,6 +28,7 @@ github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0 h1:3GIJYXQDAKpLEFriGFN8SbSffak1
 github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0/go.mod h1:3s92l0paYkZoIHuj4X93Teg/HB7eGM9x/zokGw+u4mY=
 github.com/decred/dcrdex v0.0.0-20191022190834-83c0cb22104f h1:pGoZcZlTHT7AjQZLXYYBOdEP0951juTkgfbFboi7+yY=
 github.com/decred/dcrdex v0.0.0-20191030182607-90a2131e2ab3 h1:GIdRyY31bxCrSsHL93sucDL0KMEFk4V2AtWsqDsvJTo=
+github.com/decred/dcrdex v0.0.0-20191112195536-93fbcfa8146e h1:TjWYIwZPDMP2oCl9FT/1n4WcgxVfTnxOez5v8rrSHGE=
 github.com/decred/dcrdex/server/comms v0.0.0-20191030182607-90a2131e2ab3 h1:zoyRlAO/4SfZ4Twpz9UXD286Xl+Cf/wTrH3B3bPBOFY=
 github.com/decred/dcrdex/server/comms v0.0.0-20191030182607-90a2131e2ab3/go.mod h1:iFoio46I4ZbJXHNDjVs0SWsrowiOp4UPU/QCDpi4c/o=
 github.com/decred/slog v1.0.0 h1:Dl+W8O6/JH6n2xIFN2p3DNjCmjYwvrXsjlSJTQQ4MhE=

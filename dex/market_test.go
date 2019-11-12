@@ -1,4 +1,7 @@
-package types
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
+package dex
 
 import (
 	"os"
@@ -13,28 +16,6 @@ var (
 	AssetDCR uint32
 	AssetBTC uint32
 )
-
-func TestOrderStatus_String(t *testing.T) {
-	// spot check a valid status
-	bookedStatusStr := OrderStatusBooked.String()
-	if bookedStatusStr != "booked" {
-		t.Errorf(`OrderStatusBooked.String() = %s (!= "booked")`, bookedStatusStr)
-	}
-
-	unknownStatusStr := OrderStatusUnknown.String()
-	if unknownStatusStr != "unknown" {
-		t.Errorf(`OrderStatusBooked.String() = %s (!= "unknown")`, unknownStatusStr)
-	}
-
-	// Check a fake and invalid status.
-	os := OrderStatus(12345)
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("OrderStatus.String() should panic for invalid status")
-		}
-	}()
-	_ = os.String()
-}
 
 func TestMain(m *testing.M) {
 	var ok bool

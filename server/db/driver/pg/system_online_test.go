@@ -9,8 +9,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/decred/dcrdex/dex"
 	"github.com/decred/dcrdex/server/asset"
-	"github.com/decred/dcrdex/server/market/types"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 var (
 	archie  *Archiver
 	sqlDb   *sql.DB
-	mktInfo *types.MarketInfo
+	mktInfo *dex.MarketInfo
 )
 
 func TestMain(m *testing.M) {
@@ -47,7 +47,7 @@ func TestMain(m *testing.M) {
 
 func openDB() (func() error, error) {
 	var err error
-	mktInfo, err = types.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
+	mktInfo, err = dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
 	if err != nil {
 		return func() error { return nil }, fmt.Errorf("invalid market: %v", err)
 	}
@@ -63,7 +63,7 @@ func openDB() (func() error, error) {
 		DBName:        PGTestsDBName,
 		HidePGConfig:  true,
 		QueryTimeout:  0, // zero to use the default
-		MarketCfg:     []*types.MarketInfo{mktInfo},
+		MarketCfg:     []*dex.MarketInfo{mktInfo},
 		CheckedStores: true,
 		Net:           asset.Mainnet,
 		FeeKey:        "dprv3hCznBesA6jBu1MaSqEBewG76yGtnG6LWMtEXHQvh3MVo6rqesTk7FPMSrczDtEELReV4aGMcrDxc9htac5mBDUEbTi9rgCA8Ss5FkasKM3",

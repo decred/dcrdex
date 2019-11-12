@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/decred/dcrd/certgen"
-	"github.com/decred/dcrdex/server/comms/msgjson"
+	"github.com/decred/dcrdex/dex/msgjson"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/gorilla/websocket"

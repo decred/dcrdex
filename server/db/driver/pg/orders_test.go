@@ -13,14 +13,14 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/decred/dcrdex/server/market/types"
-	"github.com/decred/dcrdex/server/order"
+	"github.com/decred/dcrdex/dex"
+	"github.com/decred/dcrdex/dex/order"
 )
 
 func TestMain(m *testing.M) {
 	startLogger()
 
-	mktInfo, err := types.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
+	mktInfo, err := dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -122,7 +122,7 @@ func Test_storeLimitOrder(t *testing.T) {
 
 	type args struct {
 		lo     *order.LimitOrder
-		status types.OrderStatus
+		status order.OrderStatus
 	}
 	tests := []struct {
 		name    string
@@ -133,7 +133,7 @@ func Test_storeLimitOrder(t *testing.T) {
 			name: "ok",
 			args: args{
 				lo:     newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
-				status: types.OrderStatusBooked,
+				status: order.OrderStatusBooked,
 			},
 			wantErr: false,
 		},

@@ -61,6 +61,7 @@ github.com/decred/dcrd/wire v1.1.0/go.mod h1:/JKOsLInOJu6InN+/zH5AyCq3YDIOW/Eqcf
 github.com/decred/dcrd/wire v1.2.0/go.mod h1:/JKOsLInOJu6InN+/zH5AyCq3YDIOW/EqcffvU8fJHM=
 github.com/decred/dcrd/wire v1.3.0 h1:X76I2/a8esUmxXmFpJpAvXEi014IA4twgwcOBeIS8lE=
 github.com/decred/dcrd/wire v1.3.0/go.mod h1:fnKGlUY2IBuqnpxx5dYRU5Oiq392OBqAuVjRVSkIoXM=
+github.com/decred/dcrdex v0.0.0-20191112195536-93fbcfa8146e h1:TjWYIwZPDMP2oCl9FT/1n4WcgxVfTnxOez5v8rrSHGE=
 github.com/decred/dcrdex/server/account v0.0.0-20190907171020-c48f5b8f4bbc/go.mod h1:JLrghdqZ/Ho48JV1Np0qsPcC1nErNekEZd0jJ1QuISI=
 github.com/decred/dcrdex/server/account v0.0.0-20191021140456-dfb4ce4aeb06 h1:uWTNs393rgdR3t23wfNdUfBvqv0US8TlzZp49Hd2dIg=
 github.com/decred/dcrdex/server/account v0.0.0-20191021140456-dfb4ce4aeb06/go.mod h1:1HwQmJWp5dv0CiR01r4cAM4ohlOGRKfIxrr7xjCL6pQ=
@@ -70,8 +71,6 @@ github.com/decred/dcrdex/server/book v0.0.0-20191021140456-dfb4ce4aeb06/go.mod h
 github.com/decred/dcrdex/server/comms v0.0.0-20191030182607-90a2131e2ab3/go.mod h1:iFoio46I4ZbJXHNDjVs0SWsrowiOp4UPU/QCDpi4c/o=
 github.com/decred/dcrdex/server/matcher v0.0.0-20191021140456-dfb4ce4aeb06/go.mod h1:7xsAUOcOK7VeUmKN1qYhu+VB/psnhqOxuG84pIkcYaw=
 github.com/decred/dcrdex/server/order v0.0.0-20191015161642-e29ca1b594a7/go.mod h1:+bOjO6AlusnQuIFdR+zmO+YHmXt+Ea1/BnL6rbl52pc=
-github.com/decred/dcrdex/server/order v0.0.0-20191021140456-dfb4ce4aeb06 h1:bspYYj1+hKNtOSzKFhfMy/T+x65wjdKYF345iZfO/w4=
-github.com/decred/dcrdex/server/order v0.0.0-20191021140456-dfb4ce4aeb06/go.mod h1:+bOjO6AlusnQuIFdR+zmO+YHmXt+Ea1/BnL6rbl52pc=
 github.com/decred/slog v1.0.0 h1:Dl+W8O6/JH6n2xIFN2p3DNjCmjYwvrXsjlSJTQQ4MhE=
 github.com/decred/slog v1.0.0/go.mod h1:zR98rEZHSnbZ4WHZtO0iqmSZjDLKhkXfrPTZQKtAonQ=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=

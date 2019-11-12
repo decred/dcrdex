@@ -3,7 +3,7 @@
 
 package matcher
 
-import "github.com/decred/dcrdex/server/order"
+import "github.com/decred/dcrdex/dex/order"
 
 // Booker should be implemented by the order book.
 type Booker interface {
