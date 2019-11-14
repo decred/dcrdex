@@ -20,7 +20,10 @@ func startLogger() {
 	UseLogger(logger)
 }
 
-const LotSize = uint64(10_000_000_000)
+const (
+	LotSize       = uint64(10_000_000_000)
+	EpochDuration = uint64(10)
+)
 
 // The asset integer IDs should set in TestMain or other bring up function (e.g.
 // openDB()) prior to using them.
@@ -45,7 +48,7 @@ func randomAccountID() account.AccountID {
 }
 
 func mktConfig() (markets []*dex.MarketInfo) {
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize, EpochDuration)
 	if err != nil {
 		panic(fmt.Sprintf("you broke it: %v", err))
 	}

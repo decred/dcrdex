@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/decred/dcrdex/dex"
 	"github.com/decred/dcrdex/dex/msgjson"
 	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/account"
@@ -158,19 +159,25 @@ func TestMarket_runEpochs(t *testing.T) {
 		},
 		Storage:          storage,
 		AuthManager:      authMgr,
-		BroadcastTimeout: 10 * time.Second, // TODO: who sets this?
+		BroadcastTimeout: time.Second,
 	}
 	swapper := swap.NewSwapper(swapperCfg)
 
-	mkt, err := NewMarket(ctx, epochDurationSec, assetDCR.LotSize,
-		assetDCR.ID, assetBTC.ID, storage, swapper, authMgr)
+	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
+		assetDCR.LotSize, uint64(epochDurationSec))
 	if err != nil {
-		t.Errorf("NewMarket() failure: %v", err)
+		t.Fatalf("dex.NewMarketInfo() failure: %v", err)
+		return
+	}
+
+	mkt, err := NewMarket(ctx, mktInfo, storage, swapper, authMgr)
+	if err != nil {
+		t.Fatalf("NewMarket() failure: %v", err)
 		return
 	}
 	t.Log(mkt.marketInfo.Name)
 
-	startEpochIdx := 1 + (1+time.Now().Unix())/epochDurationSec
+	startEpochIdx := 1 + time.Now().Unix()/epochDurationSec
 	mkt.Start(startEpochIdx)
 
 	// Submit order before market starts running
@@ -197,12 +204,11 @@ func TestMarket_runEpochs(t *testing.T) {
 	mkt.WaitForShutdown()
 
 	// Test duplicate order with a new Market.
-	mkt, err = NewMarket(ctx, epochDurationSec, assetDCR.LotSize,
-		assetDCR.ID, assetBTC.ID, storage, swapper, authMgr)
+	mkt, err = NewMarket(ctx, mktInfo, storage, swapper, authMgr)
 	if err != nil {
 		t.Fatalf("NewMarket failed: %v", err)
 	}
-	startEpochIdx = 1 + (1+time.Now().Unix())/epochDurationSec
+	startEpochIdx = 1 + time.Now().Unix()/epochDurationSec
 	mkt.Start(startEpochIdx)
 	mkt.WaitForEpochOpen()
 
@@ -219,7 +225,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	}
 
 	// Send an order with a bad lot size.
-	lo.Quantity += mkt.lotSize / 2
+	lo.Quantity += mkt.marketInfo.LotSize / 2
 	err = mkt.SubmitOrder(&oRecord)
 	if err == nil {
 		t.Errorf("An invalid order was processed, but it should not have been.")
@@ -244,7 +250,7 @@ func TestMarket_processEpoch(t *testing.T) {
 	// to book subscribers registered via OrderFeed.
 
 	ctx := context.Background()
-	epochDurationSec := int64(2)
+	epochDurationSec := int64(1)
 	storage := &TArchivist{}
 	authMgr := &TAuth{}
 	swapperCfg := &swap.Config{
@@ -258,8 +264,15 @@ func TestMarket_processEpoch(t *testing.T) {
 		BroadcastTimeout: 10 * time.Second, // TODO: who sets this?
 	}
 	swapper := swap.NewSwapper(swapperCfg)
-	mkt, err := NewMarket(ctx, epochDurationSec, assetDCR.LotSize,
-		assetDCR.ID, assetBTC.ID, storage, swapper, authMgr)
+
+	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
+		assetDCR.LotSize, uint64(epochDurationSec))
+	if err != nil {
+		t.Fatalf("dex.NewMarketInfo() failure: %v", err)
+		return
+	}
+
+	mkt, err := NewMarket(ctx, mktInfo, storage, swapper, authMgr)
 	if err != nil {
 		t.Fatalf("Failed to create test market: %v", err)
 		return
@@ -291,12 +304,12 @@ func TestMarket_processEpoch(t *testing.T) {
 	eq := NewEpoch(123413513, 4)
 	lo := makeLO(seller3, bestBuyRate-dcrRateStep, bestBuyQuant, order.StandingTiF)
 	co := makeCO(buyer3, bestSellID)
-	eq.Orders[lo.ID()] = lo
-	eq.Orders[co.ID()] = co
+	eq.Insert(lo)
+	eq.Insert(co)
 
 	eq2 := NewEpoch(123413513, 4)
 	coMiss := makeCO(buyer3, randomOrderID())
-	eq2.Orders[coMiss.ID()] = coMiss
+	eq2.Insert(coMiss)
 
 	// These little helper functions are not thread safe.
 	var bookSignals []*bookUpdateSignal
@@ -338,7 +351,7 @@ func TestMarket_processEpoch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mkt.processEpoch(tt.epoch)
-			time.Sleep(50 * time.Millisecond) // let the test goroutine receive the signals, an easy race
+			time.Sleep(50 * time.Millisecond) // let the test goroutine receive the signals
 			mtx.Lock()
 			if len(bookSignals) != len(tt.expectedBookSignals) {
 				t.Errorf("expected %d book update signals, got %d",

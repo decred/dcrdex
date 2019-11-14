@@ -5,9 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/decred/dcrdex/server/book"
-	"github.com/decred/dcrdex/server/swap"
-	"github.com/decred/slog"
 	"math/rand"
 	"os"
 	"sync"
@@ -20,8 +17,11 @@ import (
 	ordertest "github.com/decred/dcrdex/dex/order/test"
 	"github.com/decred/dcrdex/server/account"
 	"github.com/decred/dcrdex/server/asset"
+	"github.com/decred/dcrdex/server/book"
 	"github.com/decred/dcrdex/server/comms"
 	"github.com/decred/dcrdex/server/matcher"
+	"github.com/decred/dcrdex/server/swap"
+	"github.com/decred/slog"
 )
 
 const (
@@ -112,12 +112,13 @@ func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Mes
 	log.Infof("Route for %s", route)
 }
 func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
-	log.Infof("Auth for user %v", user)
+	//log.Infof("Auth for user %v", user)
 	return a.authErr
 }
 func (a *TAuth) Sign(...msgjson.Signable) { log.Info("Sign") }
 func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) {
-	log.Infof("Send for user %v", user)
+	msgTxt, _ := json.Marshal(msg)
+	log.Infof("Send for user %v. Message: %v", user, string(msgTxt))
 	a.sends = append(a.sends, msg)
 }
 func (a *TAuth) getSend() *msgjson.Message {

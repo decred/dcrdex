@@ -5,16 +5,15 @@ package market
 
 import (
 	"context"
-	"github.com/decred/dcrdex/dex"
 	"sync"
 	"time"
 
+	"github.com/decred/dcrdex/dex"
 	"github.com/decred/dcrdex/dex/msgjson"
 	"github.com/decred/dcrdex/dex/order"
 	"github.com/decred/dcrdex/server/book"
 	"github.com/decred/dcrdex/server/db"
 	"github.com/decred/dcrdex/server/matcher"
-	"github.com/decred/dcrdex/server/swap"
 )
 
 // Error is just a basic error.
@@ -35,6 +34,11 @@ const (
 	ErrMalformedOrderResponse = Error("malformed order response")
 	ErrInternalServer         = Error("internal server error")
 )
+
+// Swapper coordinates atomic swaps for one or more matchsets.
+type Swapper interface {
+	Negotiate(matchSets []*order.MatchSet)
+}
 
 // The Market manager should not be overly involved with details of accounts and
 // authentication. Via the account package it should request account status with
@@ -71,12 +75,11 @@ type Market struct {
 	// Order handling: book, active epoch queues, order matcher, and swapper.
 	running       chan struct{}
 	marketInfo    *dex.MarketInfo
-	lotSize       uint64
 	bookMtx       sync.Mutex
 	book          *book.Book
 	epochDuration int64
 	matcher       *matcher.Matcher
-	swapper       *swap.Swapper
+	swapper       Swapper
 	auth          AuthManager
 
 	// Persistent data storage.
@@ -99,7 +102,8 @@ func newOrderUpdateSignal(ord *orderRecord) *orderUpdateSignal {
 	return &orderUpdateSignal{ord, make(chan error, 1)}
 }
 
-// SubmitOrder submits a new order for inclusion into the current epoch.
+// SubmitOrder submits a new order for inclusion into the current epoch. When
+// submission is completed. This is the synchronous version of SubmitOrderAsync.
 func (m *Market) SubmitOrder(rec *orderRecord) error {
 	return <-m.SubmitOrderAsync(rec)
 }
@@ -125,17 +129,10 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 
 // NewMarket creates a new Market for for the provided base and quote assets,
 // with an epoch cycling at given duration in seconds.
-func NewMarket(ctx context.Context, epochDurationSec int64, lotSize uint64, base, quote uint32, storage db.DEXArchivist,
-	swapper *swap.Swapper, authMgr AuthManager /* *auth.AuthManager */) (*Market, error) {
-	// NOTE: If the swapper can provide it's AuthManager, it doesn't not need to
-	// be a Market constructor param.
-
+func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchivist,
+	swapper Swapper, authMgr AuthManager) (*Market, error) {
+	// Make sure the DEXArchivist is healthy before taking orders.
 	if err := storage.LastErr(); err != nil {
-		return nil, err
-	}
-
-	mktInfo, err := dex.NewMarketInfo(base, quote, lotSize)
-	if err != nil {
 		return nil, err
 	}
 
@@ -149,10 +146,9 @@ func NewMarket(ctx context.Context, epochDurationSec int64, lotSize uint64, base
 		cancel:        cancel,
 		running:       make(chan struct{}),
 		marketInfo:    mktInfo,
-		lotSize:       lotSize,
-		epochDuration: epochDurationSec,
+		epochDuration: int64(mktInfo.EpochDuration),
 		orderRouter:   make(chan *orderUpdateSignal, 16),
-		book:          book.New(lotSize),
+		book:          book.New(mktInfo.LotSize),
 		matcher:       matcher.New(),
 		swapper:       swapper,
 		auth:          authMgr,
@@ -167,11 +163,10 @@ func (m *Market) Start(startEpochIdx int64) {
 }
 
 // Stop begins the Market's shutdown. Use WaitForShutdown after Stop to wait for
-// shutdown to complete.
+// shutdown to complete. The Swapper is NOT stopped.
 func (m *Market) Stop() {
 	log.Infof("Market shutting down...")
 	m.cancel()
-	m.swapper.Stop()
 	for _, s := range m.orderFeeds {
 		close(s)
 	}
@@ -180,7 +175,6 @@ func (m *Market) Stop() {
 // WaitForShutdown waits until the order processing is finished and the Market
 // is stopped.
 func (m *Market) WaitForShutdown() {
-	m.swapper.WaitForShutdown()
 	m.wg.Wait()
 }
 
@@ -216,10 +210,8 @@ func (m *Market) Book() (buys, sells []*order.LimitOrder) {
 	return
 }
 
-// runEpochs is the main order processing loop. The epochQueue field (the
-// pointer), should only be accessed in this loop. And EpochQueue's Orders map
-// should be done with queue's own orders mutex, or a thread safe EpochQueue
-// method (e.g. OrdersSlice).
+// runEpochs is the main order processing loop, which takes new orders, notifies
+// book subscribers, and cycles the epochs. This is to be run as a goroutine.
 func (m *Market) runEpochs(nextEpochIdx int64) {
 	nextEpoch := NewEpoch(nextEpochIdx, m.epochDuration)
 	epochCycle := time.After(time.Until(nextEpoch.Start))
@@ -229,15 +221,13 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 
 	var running bool
 	var currentEpoch *EpochQueue
-
 	cycleEpoch := func() {
 		if currentEpoch != nil {
 			go m.processEpoch(currentEpoch)
 		}
 		currentEpoch = nextEpoch
 
-		nextEpochIdx = currentEpoch.Epoch + 1
-		nextEpoch = NewEpoch(nextEpochIdx, m.epochDuration)
+		nextEpoch = NewEpoch(currentEpoch.Epoch+1, m.epochDuration)
 		epochCycle = time.After(time.Until(nextEpoch.Start))
 
 		if !running {
@@ -247,12 +237,12 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 	}
 
 	for {
+		if m.ctx.Err() != nil {
+			return
+		}
 		if err := m.storage.LastErr(); err != nil {
 			log.Criticalf("Archivist failing. Last unexpected error: %v", err)
 			m.cancel()
-			return
-		}
-		if m.ctx.Err() != nil {
 			return
 		}
 
@@ -275,21 +265,25 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 				continue
 			}
 
-			// Set the order's server time stamp.
+			// The order's server time stamp.
 			sTime := time.Now()
 
-			// Push the order into the next epoch if stamping it took too long.
+			// Push the order into the next epoch if receiving and stamping it
+			// took just a little too long.
 			var orderEpoch *EpochQueue
 			switch {
 			case currentEpoch.IncludesTime(sTime):
 				orderEpoch = currentEpoch
-			case !nextEpoch.IncludesTime(sTime):
+			case nextEpoch.IncludesTime(sTime):
+				log.Debugf("Order %v (sTime=%d) fell into the next epoch [%d,%d)",
+					s.rec.order, sTime.UnixNano(), nextEpoch.Start.Unix(), nextEpoch.End.Unix())
+				orderEpoch = nextEpoch
+			default:
 				log.Errorf("Time %d does not fit into current or next epoch!",
 					sTime.Unix())
-				// This should not happen! Force it into the next epoch.
+				// This should not happen! Force it into the next epoch and do
+				// some debuggin.
 				sTime = nextEpoch.Start
-				fallthrough
-			default: // nextEpoch.IncludesTime(sTime)
 				orderEpoch = nextEpoch
 			}
 
@@ -335,7 +329,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 	}
 
 	// Insert the order into the epoch queue.
-	epoch.Orders[ord.ID()] = ord
+	epoch.Insert(ord)
 	errChan <- nil
 
 	// Inform the client that the order has been received, stamped, signed, and
@@ -346,8 +340,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 	go m.notifyNewOrder(ord, epochAction)
 }
 
-// processEpoch performs the following operations for a closed epoch, which must
-// no longer be modified by another goroutine:
+// processEpoch performs the following operations for a closed epoch. The
+// EpochQueue's Orders map must not be modified by another goroutine:
 //  1. Perform matching with the order book.
 //  2. Send book and unbook notifications to the book subscribers.
 //  3. Initiate the swap negotiation via the Market's Swapper.
@@ -362,6 +356,12 @@ func (m *Market) processEpoch(epoch *EpochQueue) {
 		epoch.Epoch, len(matches), len(partial), len(booked), len(unbooked), len(failed),
 	)
 
+	// Set the EpochID for each MatchSet before initiating the swaps.
+	for i := range matches {
+		matches[i].Epoch.Idx = uint64(epoch.Epoch)
+		matches[i].Epoch.Dur = uint64(epoch.Duration)
+	}
+
 	// Send "book" notifications to order book subscribers.
 	for _, ord := range booked {
 		m.notifyNewOrder(ord, bookAction)
@@ -374,6 +374,8 @@ func (m *Market) processEpoch(epoch *EpochQueue) {
 
 	// Initiate the swap.
 	if len(matches) > 0 {
+		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
+			epoch.Epoch, epoch.Duration)
 		go m.swapper.Negotiate(matches)
 	}
 }

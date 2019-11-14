@@ -94,7 +94,8 @@ func CheckMarketBuyBuffer(book Booker, ord *order.MarketOrder, marketBuyBuffer f
 }
 
 // Match matches orders given a standing order book and an epoch queue. Matched
-// orders from the book are removed from the book.
+// orders from the book are removed from the book. The EpochID of the MatchSet
+// is not set.
 func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.MatchSet, passed, failed, partial, booked, unbooked []order.Order) {
 	// Apply the deterministic pseudorandom shuffling.
 	shuffleQueue(queue)

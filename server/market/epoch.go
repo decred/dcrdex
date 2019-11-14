@@ -39,6 +39,11 @@ func (eq *EpochQueue) OrderSlice() []order.Order {
 	return orders
 }
 
+// Stores an order in the Order slice, overwriting and pre-existing order.
+func (eq *EpochQueue) Insert(ord order.Order) {
+	eq.Orders[ord.ID()] = ord
+}
+
 // IncludesTime checks if the given time falls in the epoch.
 func (eq *EpochQueue) IncludesTime(t time.Time) bool {
 	// [Start,End): Check the inclusive lower bound.
