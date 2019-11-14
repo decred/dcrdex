@@ -170,7 +170,8 @@ func TestMarket_runEpochs(t *testing.T) {
 	}
 	t.Log(mkt.marketInfo.Name)
 
-	mkt.Start()
+	startEpochIdx := 1 + (1+time.Now().Unix())/epochDurationSec
+	mkt.Start(startEpochIdx)
 
 	// Submit order before market starts running
 	err = mkt.SubmitOrder(&oRecord)
@@ -195,77 +196,43 @@ func TestMarket_runEpochs(t *testing.T) {
 	mkt.Stop()
 	mkt.WaitForShutdown()
 
-	// Test an order for a past epoch somehow entering the loop.
-	sig := newOrderUpdateSignal(&oRecord)
-	ancient := time.Now().Add(-time.Hour)
-	sig.sTime = &ancient
-
+	// Test duplicate order with a new Market.
 	mkt, err = NewMarket(ctx, epochDurationSec, assetDCR.LotSize,
 		assetDCR.ID, assetBTC.ID, storage, swapper, authMgr)
 	if err != nil {
 		t.Fatalf("NewMarket failed: %v", err)
 	}
-	mkt.Start()
+	startEpochIdx = 1 + (1+time.Now().Unix())/epochDurationSec
+	mkt.Start(startEpochIdx)
 	mkt.WaitForEpochOpen()
 
-	// Manually insert the bad order into the main loop (runEpochs).
-	mkt.orderRouter <- sig
-	select {
-	case err = <-sig.errChan:
-		if err == nil {
-			t.Errorf("An old error was processed, but it should not have been.")
-		} else if err != ErrEpochMissed {
-			t.Errorf(`expected ErrEpochMissed ("%v"), got "%v"`, ErrEpochMissed, err)
-		}
-	case <-time.After(time.Second):
-		t.Errorf("Failed to receive an error value on sig.errChan")
+	err = mkt.SubmitOrder(&oRecord)
+	if err != nil {
+		t.Error(err)
 	}
 
-	// Test an order for a future epoch entering the loop.
-	next := mkt.epochQueue.End.Add(time.Millisecond)
-	sig.sTime = &next
-
-	// Manually insert the future epoch order into the main loop (runEpochs).
-	mkt.orderRouter <- sig
-	select {
-	case err = <-sig.errChan:
-		if err != nil {
-			t.Errorf("The order failed to process: %v", err)
-		}
-	case <-time.After(time.Duration(epochDurationSec)*time.Second + 10*time.Millisecond):
-		t.Errorf("Failed to receive an error value on sig.errChan")
+	err = mkt.SubmitOrder(&oRecord)
+	if err == nil {
+		t.Errorf("A duplicate order was processed, but it should not have been.")
+	} else if err != ErrDuplicateOrder {
+		t.Errorf(`expected ErrDuplicateOrder ("%v"), got "%v"`, ErrDuplicateOrder, err)
 	}
 
-	// Duplicate order
-	mkt.orderRouter <- sig
-	select {
-	case err = <-sig.errChan:
-		if err == nil {
-			t.Errorf("A duplicate error was processed, but it should not have been.")
-		} else if err != ErrDuplicateOrder {
-			t.Errorf(`expected ErrDuplicateOrder ("%v"), got "%v"`, ErrDuplicateOrder, err)
-		}
-	case <-time.After(time.Duration(epochDurationSec)*time.Second + 10*time.Millisecond):
-		t.Errorf("Failed to receive an error value on sig.errChan")
-	}
-	delete(mkt.epochQueue.Orders, lo.ID())
-
-	// invalidate order with a bad lot size
+	// Send an order with a bad lot size.
 	lo.Quantity += mkt.lotSize / 2
-	mkt.orderRouter <- sig
-	select {
-	case err = <-sig.errChan:
-		if err == nil {
-			t.Errorf("A duplicate error was processed, but it should not have been.")
-		} else if err != ErrInvalidOrder {
-			t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
-		}
-	case <-time.After(time.Duration(epochDurationSec)*time.Second + 10*time.Millisecond):
-		t.Errorf("Failed to receive an error value on sig.errChan")
+	err = mkt.SubmitOrder(&oRecord)
+	if err == nil {
+		t.Errorf("An invalid order was processed, but it should not have been.")
+	} else if err != ErrInvalidOrder {
+		t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
 	}
+
 	// restore quantity
 	lo.Quantity = qty
 
+	// Submit an order that breaks storage somehow.
+	// tweak the order so it's not a dup.
+	lo.Quantity *= 2
 	storage.failOnEpochOrder(lo)
 	if err = mkt.SubmitOrder(&oRecord); err != ErrInternalServer {
 		t.Errorf(`expected ErrInternalServer ("%v"), got "%v"`, ErrInternalServer, err)

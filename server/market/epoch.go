@@ -1,7 +1,6 @@
 package market
 
 import (
-	"sync"
 	"time"
 
 	"github.com/decred/dcrdex/dex/order"
@@ -16,8 +15,7 @@ type EpochQueue struct {
 	// Start and End define the time range of the epoch as [Start,End).
 	Start, End time.Time
 	// Orders holds the epoch queue orders in a map for quick lookups.
-	ordersMtx sync.RWMutex
-	Orders    map[order.OrderID]order.Order
+	Orders map[order.OrderID]order.Order
 }
 
 // NewEpoch creates an epoch with the given index and duration in seconds.
@@ -34,12 +32,10 @@ func NewEpoch(idx int64, duration int64) *EpochQueue {
 
 // OrderSlice extracts the orders in a slice. The slice ordering is random.
 func (eq *EpochQueue) OrderSlice() []order.Order {
-	eq.ordersMtx.RLock()
 	orders := make([]order.Order, 0, len(eq.Orders))
 	for _, ord := range eq.Orders {
 		orders = append(orders, ord)
 	}
-	eq.ordersMtx.RUnlock()
 	return orders
 }
 

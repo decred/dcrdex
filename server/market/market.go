@@ -75,7 +75,6 @@ type Market struct {
 	bookMtx       sync.Mutex
 	book          *book.Book
 	epochDuration int64
-	epochQueue    *EpochQueue
 	matcher       *matcher.Matcher
 	swapper       *swap.Swapper
 	auth          AuthManager
@@ -94,13 +93,10 @@ func (m *Market) OrderFeed() <-chan *bookUpdateSignal {
 type orderUpdateSignal struct {
 	rec     *orderRecord
 	errChan chan error // should be buffered
-
-	// sTime should not be set by the submitter
-	sTime *time.Time // initial time the order was received by the main runEpochs loop
 }
 
 func newOrderUpdateSignal(ord *orderRecord) *orderUpdateSignal {
-	return &orderUpdateSignal{ord, make(chan error, 1), nil}
+	return &orderUpdateSignal{ord, make(chan error, 1)}
 }
 
 // SubmitOrder submits a new order for inclusion into the current epoch.
@@ -112,6 +108,16 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 // When submission is completed, an error value will be sent on the channel.
 // This is the asynchronous version of SubmitOrder.
 func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
+	// Validate the order. The order router must do it's own validation, but do
+	// a second validation for (1) this Market and (2) epoch status, before
+	// putting it on the queue.
+	if !m.validateOrder(rec.order) {
+		log.Errorf("SubmitOrderAsync: Invalid order received: %v", rec.order)
+		errChan := make(chan error, 1)
+		errChan <- ErrInvalidOrder
+		return errChan
+	}
+
 	sig := newOrderUpdateSignal(rec)
 	m.orderRouter <- sig
 	return sig.errChan
@@ -155,9 +161,9 @@ func NewMarket(ctx context.Context, epochDurationSec int64, lotSize uint64, base
 }
 
 // Start beings order processing.
-func (m *Market) Start() {
+func (m *Market) Start(startEpochIdx int64) {
 	m.wg.Add(1)
-	go m.runEpochs()
+	go m.runEpochs(startEpochIdx)
 }
 
 // Stop begins the Market's shutdown. Use WaitForShutdown after Stop to wait for
@@ -214,18 +220,31 @@ func (m *Market) Book() (buys, sells []*order.LimitOrder) {
 // pointer), should only be accessed in this loop. And EpochQueue's Orders map
 // should be done with queue's own orders mutex, or a thread safe EpochQueue
 // method (e.g. OrdersSlice).
-func (m *Market) runEpochs() {
-	// Startup epoch is the epoch after the epoch one second in the future.
-	dur := m.epochDuration
-	nextEpochIdx := 1 + (1+time.Now().Unix())/dur
-	nextEpoch := NewEpoch(nextEpochIdx, dur)
+func (m *Market) runEpochs(nextEpochIdx int64) {
+	nextEpoch := NewEpoch(nextEpochIdx, m.epochDuration)
 	epochCycle := time.After(time.Until(nextEpoch.Start))
 
-	defer m.cancelEpoch()
-
+	//defer m.cancelEpoch() // TODO
 	defer m.wg.Done()
 
 	var running bool
+	var currentEpoch *EpochQueue
+
+	cycleEpoch := func() {
+		if currentEpoch != nil {
+			go m.processEpoch(currentEpoch)
+		}
+		currentEpoch = nextEpoch
+
+		nextEpochIdx = currentEpoch.Epoch + 1
+		nextEpoch = NewEpoch(nextEpochIdx, m.epochDuration)
+		epochCycle = time.After(time.Until(nextEpoch.Start))
+
+		if !running {
+			close(m.running)
+			running = true
+		}
+	}
 
 	for {
 		if err := m.storage.LastErr(); err != nil {
@@ -233,94 +252,64 @@ func (m *Market) runEpochs() {
 			m.cancel()
 			return
 		}
+		if m.ctx.Err() != nil {
+			return
+		}
 
+		// Prioritize the epoch cycle.
+		select {
+		case <-epochCycle:
+			cycleEpoch()
+		default:
+		}
+
+		// Wait for the next signal (cancel, new order, or epoch cycle).
 		select {
 		case <-m.ctx.Done():
 			return
 
-		case <-epochCycle:
-			if m.epochQueue != nil {
-				go m.processEpoch(m.epochQueue)
-			}
-			m.epochQueue = nextEpoch
-
-			nextEpochIdx = m.epochQueue.Epoch + 1
-			nextEpoch = NewEpoch(nextEpochIdx, dur)
-			tilStart := time.Until(nextEpoch.Start)
-			// DO THIS BETTER
-			epochCycle = time.After(tilStart)
-
-			if !running {
-				close(m.running)
-				running = true
-			}
-
 		case s := <-m.orderRouter:
-			if m.epochQueue == nil {
+			if currentEpoch == nil {
 				log.Debugf("Order %v received prior to market start.", s.rec.order)
 				s.errChan <- ErrMarketNotRunning
 				continue
 			}
 
-			// Ensure order's server time is in the current epoch, otherwise
-			// send it back and allow the epoch to cycle.
-			if s.sTime == nil {
-				now := time.Now().UTC()
-				// Retain the server time if it was sent back to the queue by a
-				// previous iteration of this loop.
-				s.sTime = &now
-			}
+			// Set the order's server time stamp.
+			sTime := time.Now()
 
-			// If the order's server time stamp is not in the current epoch,
-			// send it back to the queue.
+			// Push the order into the next epoch if stamping it took too long.
+			var orderEpoch *EpochQueue
 			switch {
-			case m.epochQueue.IncludesTime(*s.sTime): // good, keep going
-				log.Debugf("Order for current epoch received: %v", s.rec.order)
-			case s.sTime.Before(m.epochQueue.Start): // order for epoch in the past - should not happen!
-				log.Errorf("Dropping order %v stamped for epoch in the past: %v!",
-					s.rec.order.ID(), s.sTime)
-				s.errChan <- ErrEpochMissed
-				continue
-			default: // for future epoch
-				log.Warnf("Order not in current epoch [%d,%d): %d",
-					m.epochQueue.Start.UnixNano(), m.epochQueue.End.UnixNano(), s.sTime.UnixNano())
-				// Order's server time falls in next epoch. Resubmit.
-				go func(nextStart time.Time) {
-					time.Sleep(time.Until(nextStart) + time.Millisecond)
-					m.orderRouter <- s
-				}(nextEpoch.Start) // cannot be blocking
-				continue
+			case currentEpoch.IncludesTime(sTime):
+				orderEpoch = currentEpoch
+			case !nextEpoch.IncludesTime(sTime):
+				log.Errorf("Time %d does not fit into current or next epoch!",
+					sTime.Unix())
+				// This should not happen! Force it into the next epoch.
+				sTime = nextEpoch.Start
+				fallthrough
+			default: // nextEpoch.IncludesTime(sTime)
+				orderEpoch = nextEpoch
 			}
 
-			// Set the server time stamp, and process the order.
-			s.rec.order.SetTime(s.sTime.Unix())
-			go m.processOrder(s.rec, m.epochQueue, s.errChan)
+			s.rec.order.SetTime(sTime.Unix())
+			m.processOrder(s.rec, orderEpoch, s.errChan)
+
+		case <-epochCycle:
+			cycleEpoch()
 		}
 	}
 
 }
 
 func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<- error) {
-	// Hold the Orders map from duplicate check to insert (or return).
-	epoch.ordersMtx.Lock()
-	defer epoch.ordersMtx.Unlock()
-
 	// Verify that the order is not already in the epoch queue
 	ord := rec.order
 	if epoch.Orders[ord.ID()] != nil {
 		// TODO: remove this check when we are sure the order router is behaving
 		log.Errorf("Received duplicate order %v!", ord)
 		errChan <- ErrDuplicateOrder
-		return
-	}
-
-	// Validate the order. The order router must do it's own validation, but do
-	// a second validation for (1) this Market and (2) epoch status, before
-	// putting it on the queue.
-	if !m.validateOrder(ord) {
-		log.Errorf("(*Market).runEpochs: Invalid order received for epoch %d: %v",
-			epoch.Epoch, ord)
-		errChan <- ErrInvalidOrder
 		return
 	}
 
