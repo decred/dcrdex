@@ -140,6 +140,8 @@ type TMarketTunnel struct {
 	adds       []*orderRecord
 	auth       *TAuth
 	midGap     uint64
+	epochIdx   uint64
+	epochDur   uint64
 	locked     bool
 	watched    bool
 	cancelable bool
@@ -158,6 +160,8 @@ func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
 		Sig:        msgjson.Bytes{},
 		ServerTime: uint64(now),
 		OrderID:    oid[:],
+		EpochIdx:   m.epochIdx,
+		EpochDur:   m.epochDur,
 	}, nil)
 	m.auth.Send(account.AccountID{}, resp)
 
@@ -350,6 +354,8 @@ func TestMain(m *testing.M) {
 			auth:       auth,
 			midGap:     dcrRateStep * 1000,
 			cancelable: true,
+			epochIdx:   1573773894,
+			epochDur:   60,
 		},
 	}
 	assetDCR.Backend = oRig.dcr
@@ -391,7 +397,7 @@ func TestMain(m *testing.M) {
 		rig.router = NewBookRouter(&BookRouterConfig{
 			Ctx:           testCtx,
 			Sources:       rig.sources(),
-			EpochDuration: 60,
+			EpochDuration: oRig.market.epochDur,
 		})
 		return m.Run()
 	}
