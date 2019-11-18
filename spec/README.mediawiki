@@ -930,7 +930,7 @@ As an example of message-rate encoding, if someone wanted to purchase asset Z
 using asset Y on the Z/Y market, and the user wanted to pay 0.001 Y for each 1
 Z, the message-rate encoding would be
 
-'''''r<sub>msg</sub> = floor(1 x 10<sup>8</sup> x 0.001) = 100000'''''
+'''''r<sub>msg</sub> = 1 x 10<sup>8</sup> x 0.001 = 100000'''''
 
 with unit ''atoms Y / unit Z''.
 
