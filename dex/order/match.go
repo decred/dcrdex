@@ -130,12 +130,13 @@ type UserMatch struct {
 
 // A constructor for a Match with Status = NewlyMatched. This is the preferred
 // method of making a Match, since it pre-calculates and caches the match ID.
-func newMatch(taker Order, maker *LimitOrder, qty, rate uint64) *Match {
+func newMatch(taker Order, maker *LimitOrder, qty, rate uint64, epochID EpochID) *Match {
 	m := &Match{
 		Taker:    taker,
 		Maker:    maker,
 		Quantity: qty,
 		Rate:     rate,
+		Epoch:    epochID,
 	}
 	// Pre-cache the ID.
 	m.ID()
@@ -177,8 +178,7 @@ type MatchSet struct {
 func (set *MatchSet) Matches() []*Match {
 	matches := make([]*Match, 0, len(set.Makers))
 	for i, maker := range set.Makers {
-		match := newMatch(set.Taker, maker, set.Amounts[i], set.Rates[i])
-		match.Epoch = set.Epoch
+		match := newMatch(set.Taker, maker, set.Amounts[i], set.Rates[i], set.Epoch)
 		matches = append(matches, match)
 	}
 	return matches
