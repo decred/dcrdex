@@ -6,6 +6,7 @@ package market
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 
 	"decred.org/dcrdex/dex"
@@ -37,8 +38,9 @@ const (
 // bookUpdateSignal combines a bookUpdateAction with the order on which the
 // action applies.
 type bookUpdateSignal struct {
-	action bookUpdateAction
-	order  order.Order
+	action   bookUpdateAction
+	order    order.Order
+	epochIdx int64
 }
 
 // BookSource is a source of a market's order book and a feed of updates to the
@@ -81,7 +83,7 @@ func (s *subscribers) nextSeq() uint64 {
 	return s.seq
 }
 
-// lastSeq gets the last retreived sequence number.
+// lastSeq gets the last retrieved sequence number.
 func (s *subscribers) lastSeq() uint64 {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
@@ -132,33 +134,18 @@ func (book *msgBook) addBulkOrders(orderSets ...[]*order.LimitOrder) {
 // of subscribers, and maintaining an intermediate copy of the orderbook in
 // message payload format for quick, full-book syncing.
 type BookRouter struct {
-	ctx      context.Context
-	books    map[string]*msgBook
-	epochLen uint64
-}
-
-// BookRouterConfig is the configuration settings for a BookRouter and the only
-// argument to its constructor.
-type BookRouterConfig struct {
-	// Ctx is the application context. The monitoring goroutines will be shut down
-	// on context cancellation.
-	Ctx context.Context
-	// Sources is a mapping of market names to sources for order and epoch queue
-	// information.
-	Sources map[string]BookSource
-	// EpochDuration is the DEX's configured epoch duration in milliseconds.
-	EpochDuration uint64
+	books map[string]*msgBook
 }
 
 // NewBookRouter is a constructor for a BookRouter. Routes are registered with
 // comms and a monitoring goroutine is started for each BookSource specified.
-func NewBookRouter(cfg *BookRouterConfig) *BookRouter {
+// The input sources is a mapping of market names to sources for order and epoch
+// queue information.
+func NewBookRouter(sources map[string]BookSource) *BookRouter {
 	router := &BookRouter{
-		ctx:      cfg.Ctx,
-		books:    make(map[string]*msgBook),
-		epochLen: cfg.EpochDuration,
+		books: make(map[string]*msgBook),
 	}
-	for mkt, src := range cfg.Sources {
+	for mkt, src := range sources {
 		subs := &subscribers{
 			conns: make(map[uint64]comms.Link),
 		}
@@ -169,15 +156,27 @@ func NewBookRouter(cfg *BookRouterConfig) *BookRouter {
 			source: src,
 		}
 		router.books[mkt] = book
-		go router.run(book)
 	}
 	comms.Route(msgjson.OrderBookRoute, router.handleOrderBook)
 	comms.Route(msgjson.UnsubOrderBookRoute, router.handleUnsubOrderBook)
 	return router
 }
 
-// run is a monitoring loop for an order book.
-func (r *BookRouter) run(book *msgBook) {
+// Run implements dex.Runner, and is blocking.
+func (r *BookRouter) Run(ctx context.Context) {
+	var wg sync.WaitGroup
+	for _, b := range r.books {
+		wg.Add(1)
+		go func(b *msgBook) {
+			r.runBook(ctx, b)
+			wg.Done()
+		}(b)
+	}
+	wg.Wait()
+}
+
+// runBook is a monitoring loop for an order book.
+func (r *BookRouter) runBook(ctx context.Context, book *msgBook) {
 	// Get the initial book.
 	feed := book.source.OrderFeed()
 	book.addBulkOrders(book.source.Book())
@@ -186,7 +185,11 @@ func (r *BookRouter) run(book *msgBook) {
 out:
 	for {
 		select {
-		case u := <-feed:
+		case u, ok := <-feed:
+			if !ok {
+				log.Errorf("order feed closed before shutting down BookRouter")
+				break out
+			}
 			seq := subs.nextSeq()
 			var note interface{}
 			route := msgjson.BookOrderRoute
@@ -226,16 +229,16 @@ out:
 					epochNote.OrderType = msgjson.CancelOrderNum
 					epochNote.TargetID = o.TargetOrderID[:]
 				}
+
 				epochNote.Seq = seq
 				epochNote.MarketID = book.name
-				t := uint64(u.order.Time())
-				epochNote.Epoch = t - t%r.epochLen
+				epochNote.Epoch = uint64(u.epochIdx)
 				note = epochNote
 			default:
-				panic("unknown orderbook update action")
+				panic(fmt.Sprintf("unknown orderbook update action %d", u.action))
 			}
 			r.sendNote(route, subs, note)
-		case <-r.ctx.Done():
+		case <-ctx.Done():
 			break out
 		}
 	}

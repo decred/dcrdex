@@ -70,7 +70,7 @@ func TestConfig(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		parsedCfg, err = dexbtc.LoadConfig(filePath, dex.Mainnet, dexbtc.RPCPorts)
+		parsedCfg, err = dexbtc.LoadConfig(filePath, assetName, dex.Mainnet, dexbtc.RPCPorts)
 		return err
 	}
 
@@ -704,8 +704,18 @@ func testMsgTxP2SHMofN(m, n int, segwit bool) *testMsgTxP2SH {
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
 	logger := slog.NewBackend(os.Stdout).Logger("TEST")
-	ctx, shutdown := context.WithCancel(context.Background())
-	btc := newBTC(ctx, testParams, logger, testNode{})
+	btc := newBTC("btc", testParams, logger, testNode{})
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	shutdown := func() {
+		cancel()
+		wg.Wait()
+	}
+	wg.Add(1)
+	go func() {
+		btc.Run(ctx)
+		wg.Done()
+	}()
 	return btc, shutdown
 }
 

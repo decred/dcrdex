@@ -46,7 +46,7 @@ type Config struct {
 }
 
 // LoadConfig loads the configuration settings from the specified filepath.
-func LoadConfig(configPath string, network dex.Network, ports NetPorts) (*Config, error) {
+func LoadConfig(configPath string, name string, network dex.Network, ports NetPorts) (*Config, error) {
 	cfg := &Config{}
 	// Since we are not reading command-line arguments, and the Config fields
 	// share names with the bitcoind configuration options, passing just
@@ -55,19 +55,19 @@ func LoadConfig(configPath string, network dex.Network, ports NetPorts) (*Config
 	parser := flags.NewParser(cfg, flags.IgnoreUnknown)
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no BTC config file found at %s", configPath)
+		return nil, fmt.Errorf("no %q config file found at %s", name, configPath)
 	}
 	// The config file exists, so attempt to parse it.
 	err := flags.NewIniParser(parser).ParseFile(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing BTC ini file: %v", err)
+		return nil, fmt.Errorf("error parsing %q ini file %q: %v", name, configPath, err)
 	}
 
 	if cfg.RPCUser == "" {
-		return nil, fmt.Errorf("no rpcuser set in BTC config file")
+		return nil, fmt.Errorf("no rpcuser set in %q config file", name)
 	}
 	if cfg.RPCPass == "" {
-		return nil, fmt.Errorf("no rpcpassword set in BTC config file")
+		return nil, fmt.Errorf("no rpcpassword set in %q config file", name)
 	}
 
 	host := defaultHost

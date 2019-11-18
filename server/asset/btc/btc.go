@@ -24,6 +24,18 @@ import (
 	"github.com/btcsuite/btcutil"
 )
 
+// Driver implements asset.Driver.
+type Driver struct{}
+
+// Setup creates the BTC backend. Start the backend with its Run method.
+func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+	return NewBackend(configPath, logger, network)
+}
+
+func init() {
+	asset.Register(assetName, &Driver{})
+}
+
 var (
 	zeroHash chainhash.Hash
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
@@ -32,6 +44,7 @@ var (
 )
 
 const (
+	assetName                = "btc"
 	btcToSatoshi             = 1e8
 	immatureTransactionError = dex.Error("immature output")
 )
@@ -47,14 +60,13 @@ type btcNode interface {
 	GetBestBlockHash() (*chainhash.Hash, error)
 }
 
-// Backend is an dex backend for Bitcoin. It has methods for fetching UTXO
-// information and subscribing to block updates. It maintains a cache of block
-// data for quick lookups. Backend implements asset.Backend, so provides
-// exported methods for DEX-related blockchain info.
+// Backend is a dex backend for Bitcoin or a Bitcoin clone. It has methods for
+// fetching UTXO information and subscribing to block updates. It maintains a
+// cache of block data for quick lookups. Backend implements asset.Backend, so
+// provides exported methods for DEX-related blockchain info.
 type Backend struct {
-	// An application context provided as part of the constructor. The Backend
-	// will perform some cleanup when the context is cancelled.
-	ctx context.Context
+	// The asset name (e.g. btc), primarily for logging purposes.
+	name string
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result the (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -78,10 +90,9 @@ type Backend struct {
 var _ asset.Backend = (*Backend)(nil)
 
 // NewBackend is the exported constructor by which the DEX will import the
-// backend. The provided context.Context should be cancelled when the DEX
-// application exits. The configPath can be an empty string, in which case the
-// standard system location of the bitcoind config file is assumed.
-func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+// backend. The configPath can be an empty string, in which case the standard
+// system location of the bitcoind config file is assumed.
+func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
@@ -98,18 +109,18 @@ func NewBackend(ctx context.Context, configPath string, logger dex.Logger, netwo
 		configPath = dexbtc.SystemConfigPath("bitcoin")
 	}
 
-	return NewBTCClone(ctx, configPath, logger, network, params, dexbtc.RPCPorts)
+	return NewBTCClone(assetName, configPath, logger, network, params, dexbtc.RPCPorts)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
 // network ports. A BTC clone can use this method, possibly in conjunction with
 // ReadCloneParams, to create a Backend for other assets with minimal coding.
 // See ReadCloneParams and CompatibilityCheck for more info.
-func NewBTCClone(ctx context.Context, configPath string, logger dex.Logger,
-	network dex.Network, params *chaincfg.Params, ports dexbtc.NetPorts) (*Backend, error) {
+func NewBTCClone(name, configPath string, logger dex.Logger, network dex.Network,
+	params *chaincfg.Params, ports dexbtc.NetPorts) (*Backend, error) {
 
 	// Read the configuration parameters
-	cfg, err := dexbtc.LoadConfig(configPath, network, ports)
+	cfg, err := dexbtc.LoadConfig(configPath, name, network, ports)
 	if err != nil {
 		return nil, err
 	}
@@ -122,10 +133,10 @@ func NewBTCClone(ctx context.Context, configPath string, logger dex.Logger,
 		Pass:         cfg.RPCPass,
 	}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
+		return nil, fmt.Errorf("error creating %q RPC client: %v", name, err)
 	}
 
-	btc := newBTC(ctx, params, logger, client)
+	btc := newBTC(name, params, logger, client)
 	// Setting the client field will enable shutdown
 	btc.client = client
 
@@ -211,16 +222,15 @@ func (btc *Backend) CheckAddress(addr string) bool {
 }
 
 // Create a *Backend and start the block monitor loop.
-func newBTC(ctx context.Context, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
+func newBTC(name string, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
 	btc := &Backend{
-		ctx:         ctx,
+		name:        name,
 		blockCache:  newBlockCache(),
 		blockChans:  make([]chan uint32, 0),
 		chainParams: chainParams,
 		log:         logger,
 		node:        node,
 	}
-	go btc.loop()
 	return btc
 }
 
@@ -443,18 +453,21 @@ func (btc *Backend) getBtcBlock(blockHash *chainhash.Hash) (*cachedBlock, error)
 	return btc.blockCache.add(blockVerbose)
 }
 
-// loop should be run as a goroutine. This loop is responsible for best block
-// polling and checking the application context to trigger a clean shutdown.
-func (btc *Backend) loop() {
+// Run is responsible for best block polling and checking the application
+// context to trigger a clean shutdown.
+func (btc *Backend) Run(ctx context.Context) {
+	defer btc.shutdown()
+
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 	addBlock := func(block *btcjson.GetBlockVerboseResult) {
 		_, err := btc.blockCache.add(block)
 		if err != nil {
 			btc.log.Errorf("error adding new best block to cache: %v", err)
-			return
 		}
 		btc.signalMtx.RLock()
+		btc.log.Debugf("Notifying %d %s asset consumers of new block at height %d",
+			len(btc.blockChans), btc.name, block.Height)
 		for _, c := range btc.blockChans {
 			select {
 			case c <- uint32(block.Height):
@@ -464,6 +477,7 @@ func (btc *Backend) loop() {
 		}
 		btc.signalMtx.RUnlock()
 	}
+
 out:
 	for {
 		select {
@@ -491,10 +505,12 @@ out:
 			}
 			// If it builds on the best block or the cache is empty, it's good to add.
 			if *prevHash == tip.hash || tip.height == 0 {
+				btc.log.Debugf("Run: Processing new block %s", bestHash)
 				addBlock(block)
 				continue
 			}
-			// It must be a reorg. Crawl blocks backwards until finding a mainchain
+			// It is either a reorg, or the previous block is not the cached
+			// best block. Crawl blocks backwards until finding a mainchain
 			// block, flagging blocks from the cache as orphans along the way.
 			iHash := &tip.hash
 			reorgHeight := int64(0)
@@ -517,17 +533,23 @@ out:
 				reorgHeight = iBlock.Height
 				iHash, err = chainhash.NewHashFromStr(iBlock.PreviousHash)
 				if err != nil {
-					btc.log.Errorf("error decoding previous hash %s: %v", iBlock.PreviousHash, err)
+					btc.log.Errorf("error decoding previous hash %s for block %s: %v",
+						iBlock.PreviousHash, iHash.String(), err)
+					// Some blocks on the side chain may not be flagged as
+					// orphaned, but still proceed, flagging the ones we have
+					// identified and adding the new best block to the cache and
+					// setting it to the best block in the cache.
 					break
 				}
 			}
 			if reorgHeight > 0 {
+				btc.log.Infof("Reorg from %s (%d) to %s (%d) detected.",
+					tip.hash, tip.height, bestHash, block.Height)
 				btc.blockCache.reorg(reorgHeight)
 			}
 			// Now add the new block.
 			addBlock(block)
-		case <-btc.ctx.Done():
-			btc.shutdown()
+		case <-ctx.Done():
 			break out
 		}
 	}

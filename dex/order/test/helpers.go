@@ -236,7 +236,6 @@ func RandomUserMatch() *order.UserMatch {
 		Quantity: randUint64(),
 		Rate:     randUint64(),
 		Address:  RandomAddress(),
-		Time:     randUint64(),
 		Status:   order.MatchStatus(rand.Intn(5)),
 		Side:     order.MatchSide(rand.Intn(2)),
 	}
@@ -259,9 +258,6 @@ func CompareUserMatch(m1, m2 *order.UserMatch) error {
 	}
 	if m1.Address != m2.Address {
 		return fmt.Errorf("Address mismatch. %s != %s", m1.Address, m2.Address)
-	}
-	if m1.Time != m2.Time {
-		return fmt.Errorf("Time mismatch. %d != %d", m1.Time, m2.Time)
 	}
 	if m1.Status != m2.Status {
 		return fmt.Errorf("Status mismatch. %d != %d", m1.Status, m2.Status)

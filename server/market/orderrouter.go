@@ -26,7 +26,7 @@ const maxClockOffset = 10_000 // milliseconds
 type AuthManager interface {
 	Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
-	Sign(...msgjson.Signable)
+	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message)
 }
 
@@ -39,6 +39,9 @@ type MarketTunnel interface {
 	// MidGap returns the mid-gap market rate, which is ths rate halfway between
 	// the best buy order and the best sell order in the order book.
 	MidGap() uint64
+	// MarketBuyBuffer is a coefficient that when multiplied by the market's lot
+	// size specifies the minimum required amount for a market buy order.
+	MarketBuyBuffer() float64
 	// CoinLocked should return true if the CoinID is currently a funding Coin
 	// for an active DEX order. This is required for Coin validation to prevent
 	// a user from submitting multiple orders spending the same Coin. This
@@ -49,7 +52,7 @@ type MarketTunnel interface {
 	//
 	// DRAFT NOTE: This function could also potentially be handled by persistent
 	// storage, since active orders and active matches are tracked there.
-	CoinLocked(coinID order.CoinID, assetID uint32) bool
+	CoinLocked(assetID uint32, coinID order.CoinID) bool
 	// Cancelable determines whether an order is cancelable. A cancelable order
 	// is a limit order with time-in-force standing either in the epoch queue or
 	// in the order book.
@@ -114,27 +117,24 @@ func (o *outpoint) Vout() uint32 { return o.vout }
 // OrderRouter handles the 'limit', 'market', and 'cancel' DEX routes. These
 // are authenticated routes used for placing and canceling orders.
 type OrderRouter struct {
-	auth     AuthManager
-	assets   map[uint32]*asset.BackedAsset
-	tunnels  map[string]MarketTunnel
-	mbBuffer float64
+	auth    AuthManager
+	assets  map[uint32]*asset.BackedAsset
+	tunnels map[string]MarketTunnel
 }
 
 // OrderRouterConfig is the configuration settings for an OrderRouter.
 type OrderRouterConfig struct {
-	AuthManager     AuthManager
-	Assets          map[uint32]*asset.BackedAsset
-	Markets         map[string]MarketTunnel
-	MarketBuyBuffer float64
+	AuthManager AuthManager
+	Assets      map[uint32]*asset.BackedAsset
+	Markets     map[string]MarketTunnel
 }
 
 // NewOrderRouter is a constructor for an OrderRouter.
 func NewOrderRouter(cfg *OrderRouterConfig) *OrderRouter {
 	router := &OrderRouter{
-		auth:     cfg.AuthManager,
-		assets:   cfg.Assets,
-		tunnels:  cfg.Markets,
-		mbBuffer: cfg.MarketBuyBuffer,
+		auth:    cfg.AuthManager,
+		assets:  cfg.Assets,
+		tunnels: cfg.Markets,
 	}
 	cfg.AuthManager.Route(msgjson.LimitRoute, router.handleLimit)
 	cfg.AuthManager.Route(msgjson.MarketRoute, router.handleMarket)
@@ -273,9 +273,11 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		// This is a market buy order, so the quantity gets special handling.
 		// 1. The quantity is in units of the quote asset.
 		// 2. The quantity has to satisfy the market buy buffer.
-		reqVal = matcher.QuoteToBase(tunnel.MidGap(), market.Quantity)
-		lotWithBuffer := uint64(float64(assets.base.LotSize) * r.mbBuffer)
-		minReq := matcher.QuoteToBase(tunnel.MidGap(), lotWithBuffer)
+		midGap := tunnel.MidGap()
+		buyBuffer := tunnel.MarketBuyBuffer()
+		reqVal = matcher.QuoteToBase(midGap, market.Quantity)
+		lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
+		minReq := matcher.QuoteToBase(midGap, lotWithBuffer)
 		if reqVal < minReq {
 			return msgjson.NewError(msgjson.FundingError, "order quantity does not satisfy market buy buffer")
 		}
@@ -415,8 +417,8 @@ func (r *OrderRouter) extractMarket(prefix *msgjson.Prefix) (MarketTunnel, *msgj
 	return tunnel, nil
 }
 
-// extractMarketDetails finds the MarketTunnel, side, and an assetSet for the
-// provided prefix.
+// extractMarketDetails finds the MarketTunnel, an assetSet, and market side for
+// the provided prefix.
 func (r *OrderRouter) extractMarketDetails(prefix *msgjson.Prefix, trade *msgjson.Trade) (MarketTunnel, *assetSet, bool, *msgjson.Error) {
 	// Check that assets are for a valid market.
 	tunnel, rpcErr := r.extractMarket(prefix)
@@ -507,7 +509,7 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 			))
 		}
 		// Check that the outpoint isn't locked.
-		locked := tunnel.CoinLocked(order.CoinID(coin.ID), coinAssetID)
+		locked := tunnel.CoinLocked(coinAssetID, order.CoinID(coin.ID))
 		if locked {
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("coin %x is locked", coin.ID))

@@ -107,8 +107,7 @@ type TAuthManager struct {
 	resps   map[account.AccountID][]*msgjson.Message
 	penalty struct {
 		violator account.AccountID
-		match    *order.Match
-		step     order.MatchStatus
+		rule     account.Rule
 	}
 }
 
@@ -142,7 +141,7 @@ func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message, f f
 	}
 	m.reqs[user] = append(l, tReq)
 }
-func (m *TAuthManager) Sign(...msgjson.Signable) {}
+func (m *TAuthManager) Sign(...msgjson.Signable) error { return nil }
 func (m *TAuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	return m.authErr
 }
@@ -150,24 +149,21 @@ func (m *TAuthManager) Route(string,
 	func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 }
 
-func (m *TAuthManager) Penalize(id account.AccountID, match *order.Match, step order.MatchStatus) {
+func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.penalty.violator = id
-	m.penalty.match = match
-	m.penalty.step = step
+	m.penalty.rule = rule
 }
 
-func (m *TAuthManager) flushPenalty() (account.AccountID, *order.Match, order.MatchStatus) {
+func (m *TAuthManager) flushPenalty() (account.AccountID, account.Rule) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	user := m.penalty.violator
-	match := m.penalty.match
-	step := m.penalty.step
+	rule := m.penalty.rule
 	m.penalty.violator = account.AccountID{}
-	m.penalty.match = nil
-	m.penalty.step = 0
-	return user, match, step
+	m.penalty.rule = account.NoRule
+	return user, rule
 }
 
 func (m *TAuthManager) getReq(id account.AccountID) *TRequest {
@@ -236,6 +232,7 @@ func (a *TAsset) Coin(coinID, redeemScript []byte) (asset.Coin, error) {
 func (a *TAsset) BlockChannel(size int) chan uint32 { return a.bChan }
 func (a *TAsset) InitTxSize() uint32                { return 100 }
 func (a *TAsset) CheckAddress(string) bool          { return true }
+func (a *TAsset) Run(context.Context)               {}
 
 func (a *TAsset) setCoinErr(err error) {
 	a.mtx.Lock()
@@ -325,7 +322,7 @@ type testRig struct {
 	matchInfo *tMatch
 }
 
-func tNewTestRig(matchInfo *tMatch) *testRig {
+func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
 	abcBackend := newTAsset("abc")
 	abcAsset := TNewAsset(abcBackend)
 	abcCoinLocker := coinlock.NewAssetCoinLocker()
@@ -338,7 +335,6 @@ func tNewTestRig(matchInfo *tMatch) *testRig {
 	storage := &TStorage{}
 
 	swapper := NewSwapper(&Config{
-		Ctx: testCtx,
 		Assets: map[uint32]*LockableAsset{
 			ABCID: {abcAsset, abcCoinLocker},
 			XYZID: {xyzAsset, xyzCoinLocker},
@@ -348,6 +344,13 @@ func tNewTestRig(matchInfo *tMatch) *testRig {
 		BroadcastTimeout: txWaitExpiration * 5,
 	})
 
+	ssw := dex.NewStartStopWaiter(swapper)
+	ssw.Start(testCtx)
+	cleanup := func() {
+		ssw.Stop()
+		ssw.WaitForShutdown()
+	}
+
 	return &testRig{
 		abc:       abcAsset,
 		abcNode:   abcBackend,
@@ -356,7 +359,7 @@ func tNewTestRig(matchInfo *tMatch) *testRig {
 		auth:      authMgr,
 		swapper:   swapper,
 		matchInfo: matchInfo,
-	}
+	}, cleanup
 }
 
 func (rig *testRig) getTracker() *matchTracker {
@@ -1086,7 +1089,8 @@ func testSwap(t *testing.T, rig *testRig) {
 }
 
 func TestSwaps(t *testing.T) {
-	rig := tNewTestRig(nil)
+	rig, cleanup := tNewTestRig(nil)
+	defer cleanup()
 	for _, makerSell := range []bool{true, false} {
 		sellStr := " buy"
 		if makerSell {
@@ -1132,7 +1136,8 @@ func TestSwaps(t *testing.T) {
 func TestNoAck(t *testing.T) {
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 	matchInfo := set.matchInfos[0]
-	rig := tNewTestRig(matchInfo)
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	mustBeError := makeMustBeError(t)
@@ -1189,7 +1194,8 @@ func TestNoAck(t *testing.T) {
 func TestTxWaiters(t *testing.T) {
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 	matchInfo := set.matchInfos[0]
-	rig := tNewTestRig(matchInfo)
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	dummyError := fmt.Errorf("test error")
@@ -1292,7 +1298,8 @@ func TestTxWaiters(t *testing.T) {
 }
 
 func TestBroadcastTimeouts(t *testing.T) {
-	rig := tNewTestRig(nil)
+	rig, cleanup := tNewTestRig(nil)
+	defer cleanup()
 	ensureNilErr := makeEnsureNilErr(t)
 	sendBlock := func(node *TAsset) {
 		node.bChan <- 1
@@ -1328,15 +1335,12 @@ func TestBroadcastTimeouts(t *testing.T) {
 		// BroadcastTimeout.
 		sendBlock(node)
 		timeoutBroadcast()
-		user, match, lastStep := rig.auth.flushPenalty()
-		if match == nil {
-			t.Fatalf("no penalty at step %d", i)
+		user, rule := rig.auth.flushPenalty()
+		if rule == account.NoRule {
+			t.Fatalf("no penalty at step %d (status %v)", i, step)
 		}
 		if user != jerk.acct {
 			t.Fatalf("user mismatch at step %d", i)
-		}
-		if lastStep != step {
-			t.Fatalf("wrong match status at step %d. expected %d, got %d", i, step, lastStep)
 		}
 		// Make sure the specified user has a cancellation for this order
 		checkRevokeMatch(jerk, i)
@@ -1401,7 +1405,8 @@ func TestSigErrors(t *testing.T) {
 	dummyError := fmt.Errorf("test error")
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 	matchInfo := set.matchInfos[0]
-	rig := tNewTestRig(matchInfo)
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	// checkResp makes sure that the specified user has a signature error response
@@ -1455,7 +1460,8 @@ func TestSigErrors(t *testing.T) {
 func TestMalformedSwap(t *testing.T) {
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 	matchInfo := set.matchInfos[0]
-	rig := tNewTestRig(matchInfo)
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	checkContractErr := rpcErrorChecker(t, rig, msgjson.ContractError)
@@ -1484,7 +1490,8 @@ func TestMalformedSwap(t *testing.T) {
 func TestBadRedeems(t *testing.T) {
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 	matchInfo := set.matchInfos[0]
-	rig := tNewTestRig(matchInfo)
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	checkResp := rpcErrorChecker(t, rig, msgjson.RedemptionError)
@@ -1519,7 +1526,8 @@ func TestBadRedeems(t *testing.T) {
 func TestBadParams(t *testing.T) {
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 	matchInfo := set.matchInfos[0]
-	rig := tNewTestRig(matchInfo)
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	swapper := rig.swapper
 	match := rig.getTracker()
@@ -1587,7 +1595,8 @@ func TestBadParams(t *testing.T) {
 func TestCancel(t *testing.T) {
 	set := tCancelPair()
 	matchInfo := set.matchInfos[0]
-	rig := tNewTestRig(matchInfo)
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	// There should be no matchTracker
 	if rig.getTracker() != nil {
@@ -1625,7 +1634,8 @@ func TestTxMonitored(t *testing.T) {
 	makerSell := true
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
 	matchInfo := set.matchInfos[0]
-	rig := tNewTestRig(matchInfo)
+	rig, cleanup := tNewTestRig(matchInfo)
+	defer cleanup()
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
 	maker, taker := matchInfo.maker, matchInfo.taker

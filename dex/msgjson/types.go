@@ -305,7 +305,6 @@ type Match struct {
 	Quantity uint64 `json:"quantity"`
 	Rate     uint64 `json:"rate"`
 	Address  string `json:"address"`
-	Time     uint64 `json:"timestamp"`
 	// Status and Side are provided for convenience and are not part of the
 	// match serialization.
 	Status uint8 `json:"status"`
@@ -317,13 +316,12 @@ var _ Signable = (*Match)(nil)
 // Serialize serializes the Match data.
 func (m *Match) Serialize() ([]byte, error) {
 	// Match serialization is orderid (32) + matchid (32) + quantity (8) + rate (8)
-	// + time (8) + address (variable, guess 35). Sum = 123
-	s := make([]byte, 0, 123)
+	// + address (variable, guess 35). Sum = 115
+	s := make([]byte, 0, 115)
 	s = append(s, m.OrderID...)
 	s = append(s, m.MatchID...)
 	s = append(s, uint64Bytes(m.Quantity)...)
 	s = append(s, uint64Bytes(m.Rate)...)
-	s = append(s, uint64Bytes(m.Time)...)
 	s = append(s, []byte(m.Address)...)
 	return s, nil
 }
@@ -635,8 +633,7 @@ func (c *Connect) Serialize() ([]byte, error) {
 
 // Connect is the response result for the ConnectRoute request.
 type ConnectResponse struct {
-	StartEpoch uint64   `json:"startepoch"`
-	Matches    []*Match `json:"matches"`
+	Matches []*Match `json:"matches"`
 }
 
 // Register is the payload for the RegisterRoute request.

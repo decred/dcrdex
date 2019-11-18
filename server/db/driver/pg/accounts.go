@@ -22,7 +22,7 @@ func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) {
 	}
 }
 
-// Account retreives the account pubkey, whether the account is paid, and
+// Account retrieves the account pubkey, whether the account is paid, and
 // whether the account is open, in that order.
 func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool) {
 	acct, isPaid, isOpen, err := getAccount(a.db, a.tables.accounts, aid)

@@ -133,7 +133,6 @@ func EncodeMatch(match *UserMatch) []byte {
 		AddData(uint64B(match.Quantity)).
 		AddData(uint64B(match.Rate)).
 		AddData([]byte(match.Address)).
-		AddData(uint64B(match.Time)).
 		AddData([]byte{byte(match.Status)}).
 		AddData([]byte{byte(match.Side)})
 }
@@ -153,8 +152,8 @@ func DecodeMatch(b []byte) (match *UserMatch, err error) {
 
 // matchDecoder_v0 decodes the version 0 payload into a *UserMatch.
 func matchDecoder_v0(pushes [][]byte) (*UserMatch, error) {
-	if len(pushes) != 8 {
-		return nil, fmt.Errorf("matchDecoder_v0: expected 8 pushes, got %d", len(pushes))
+	if len(pushes) != 7 {
+		return nil, fmt.Errorf("matchDecoder_v0: expected 7 pushes, got %d", len(pushes))
 	}
 	oidB, midB := pushes[0], pushes[1]
 	if len(oidB) != OrderIDSize {
@@ -168,7 +167,7 @@ func matchDecoder_v0(pushes [][]byte) (*UserMatch, error) {
 	var mid MatchID
 	copy(mid[:], midB)
 
-	statusB, sideB := pushes[6], pushes[7]
+	statusB, sideB := pushes[5], pushes[6]
 	if len(statusB) != 1 || len(sideB) != 1 {
 		return nil, fmt.Errorf("matchDecoder_v0: status/side incorrect length %d/%d", len(statusB), len(sideB))
 	}
@@ -178,7 +177,6 @@ func matchDecoder_v0(pushes [][]byte) (*UserMatch, error) {
 		Quantity: intCoder.Uint64(pushes[2]),
 		Rate:     intCoder.Uint64(pushes[3]),
 		Address:  string(pushes[4]),
-		Time:     intCoder.Uint64(pushes[5]),
 		Status:   MatchStatus(statusB[0]),
 		Side:     MatchSide(sideB[0]),
 	}, nil

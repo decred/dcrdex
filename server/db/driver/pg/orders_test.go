@@ -20,7 +20,7 @@ import (
 func TestMain(m *testing.M) {
 	startLogger()
 
-	mktInfo, err := dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration)
+	mktInfo, err := dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

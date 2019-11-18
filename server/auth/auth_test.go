@@ -46,10 +46,10 @@ func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) { s.closed
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
 }
-func (s *TStorage) ActiveMatches(account.AccountID) []*order.UserMatch { return s.matches }
-func (s *TStorage) CreateAccount(*account.Account) (string, error)     { return s.acctAddr, s.acctErr }
-func (s *TStorage) AccountRegAddr(account.AccountID) (string, error)   { return s.regAddr, s.regErr }
-func (s *TStorage) PayAccount(account.AccountID, []byte) error         { return s.payErr }
+func (s *TStorage) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) { return s.matches, nil }
+func (s *TStorage) CreateAccount(*account.Account) (string, error)              { return s.acctAddr, s.acctErr }
+func (s *TStorage) AccountRegAddr(account.AccountID) (string, error)            { return s.regAddr, s.regErr }
+func (s *TStorage) PayAccount(account.AccountID, []byte) error                  { return s.payErr }
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
@@ -265,7 +265,6 @@ func TestMain(m *testing.M) {
 		mgr: NewAuthManager(&Config{
 			Storage:         storage,
 			Signer:          signer,
-			StartEpoch:      1,
 			RegistrationFee: tRegFee,
 			FeeConfs:        tCheckFeeConfs,
 			FeeChecker:      tCheckFee,
@@ -288,7 +287,6 @@ func TestConnect(t *testing.T) {
 		Quantity: 1,
 		Rate:     2,
 		Address:  "anyaddress",
-		Time:     123456,
 		Status:   3,
 		Side:     4,
 	}
@@ -317,9 +315,6 @@ func TestConnect(t *testing.T) {
 	if msgMatch.Address != userMatch.Address {
 		t.Fatal("active match Address mismatch: ", msgMatch.Address, " != ", userMatch.Address)
 	}
-	if msgMatch.Time != userMatch.Time {
-		t.Fatal("active match Time mismatch: ", msgMatch.Time, " != ", userMatch.Time)
-	}
 	if msgMatch.Status != uint8(userMatch.Status) {
 		t.Fatal("active match Status mismatch: ", msgMatch.Status, " != ", userMatch.Status)
 	}
@@ -338,7 +333,7 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("NewRequest error: %v", err)
 	}
 	var responded bool
-	rig.mgr.Request(user.acctID, msg, func(*msgjson.Message) {
+	rig.mgr.Request(user.acctID, msg, func(comms.Link, *msgjson.Message) {
 		responded = true
 	})
 	req := user.conn.getReq()
@@ -367,7 +362,7 @@ func TestConnect(t *testing.T) {
 	reqID = comms.NextID()
 	a10 := &tPayload{A: 10}
 	msg, _ = msgjson.NewRequest(reqID, "request", a10)
-	rig.mgr.Request(reuser.acctID, msg, func(*msgjson.Message) {})
+	rig.mgr.Request(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {})
 	// The a10 message should be in the new connection
 	if user.conn.getReq() != nil {
 		t.Fatalf("old connection received a request after reconnection")
@@ -391,7 +386,6 @@ func TestAccountErrors(t *testing.T) {
 		Quantity: 123456,
 		Rate:     789123,
 		Address:  "anthing",
-		Time:     123456789,
 		Status:   order.NewlyMatched,
 		Side:     order.Maker,
 	}
@@ -420,9 +414,6 @@ func TestAccountErrors(t *testing.T) {
 	}
 	if match.Address != userMatch.Address {
 		t.Fatal("wrong Address: ", match.Address, " != ", userMatch.OrderID)
-	}
-	if match.Time != userMatch.Time {
-		t.Fatal("wrong Time: ", match.Time, " != ", userMatch.OrderID)
 	}
 	if match.Status != uint8(userMatch.Status) {
 		t.Fatal("wrong Status: ", match.Status, " != ", userMatch.OrderID)
@@ -612,7 +603,7 @@ func TestSend(t *testing.T) {
 	}
 
 	// Send a request to a foreigner
-	rig.mgr.Request(foreigner.acctID, req, func(*msgjson.Message) {})
+	rig.mgr.Request(foreigner.acctID, req, func(comms.Link, *msgjson.Message) {})
 	if foreigner.conn.getReq() != nil {
 		t.Fatalf("request magically got through to foreigner")
 	}
@@ -621,7 +612,7 @@ func TestSend(t *testing.T) {
 	}
 
 	// Send a request to an authed user.
-	rig.mgr.Request(user.acctID, req, func(*msgjson.Message) {})
+	rig.mgr.Request(user.acctID, req, func(comms.Link, *msgjson.Message) {})
 	treq := user.conn.getReq()
 	if treq == nil {
 		t.Fatalf("no request for user")
@@ -784,7 +775,7 @@ func TestHandleResponse(t *testing.T) {
 	client.respHandlers = map[uint64]*respHandler{
 		comms.NextID(): {
 			expiration: time.Now().UTC(),
-			f:          func(*msgjson.Message) {},
+			f:          func(comms.Link, *msgjson.Message) {},
 		},
 	}
 	// After logging a new request, there should still only be one. A short
@@ -792,7 +783,7 @@ func TestHandleResponse(t *testing.T) {
 	newID := comms.NextID()
 	client.logReq(newID, &respHandler{
 		expiration: time.Now().Add(reqExpiration),
-		f:          func(*msgjson.Message) {},
+		f:          func(comms.Link, *msgjson.Message) {},
 	})
 	time.Sleep(time.Millisecond)
 	client.mtx.Lock()

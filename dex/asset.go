@@ -3,7 +3,12 @@
 
 package dex
 
-import "github.com/decred/slog"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/decred/slog"
+)
 
 type Error string
 
@@ -24,6 +29,32 @@ const (
 
 // The DEX recognizes only three networks. Simnet is a alias of Regtest.
 const Simnet = Regtest
+
+// String returns the string representation of a Network.
+func (n Network) String() string {
+	switch n {
+	case Mainnet:
+		return "mainnet"
+	case Testnet:
+		return "testnet"
+	case Simnet:
+		return "simnet"
+	}
+	return ""
+}
+
+// NetFromString returns the Network for the given network name.
+func NetFromString(net string) (Network, error) {
+	switch strings.ToLower(net) {
+	case "mainnet":
+		return Mainnet, nil
+	case "testnet":
+		return Testnet, nil
+	case "regtest", "regnet", "simnet":
+		return Simnet, nil
+	}
+	return 255, fmt.Errorf("unknown network %s", net)
+}
 
 // Every backend constructor will accept a Logger. All logging should take place
 // through the provided logger.

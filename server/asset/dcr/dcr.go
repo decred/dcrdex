@@ -25,11 +25,24 @@ import (
 	"github.com/decred/dcrd/wire"
 )
 
+// Driver implements asset.Driver.
+type Driver struct{}
+
+// Setup creates the DCR backend. Start the backend with its Run method.
+func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+	return NewBackend(configPath, logger, network)
+}
+
+func init() {
+	asset.Register(assetName, &Driver{})
+}
+
 var zeroHash chainhash.Hash
 
 type Error = dex.Error
 
 const (
+	assetName                = "dcr"
 	immatureTransactionError = Error("immature output")
 )
 
@@ -48,9 +61,6 @@ type dcrNode interface {
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
-	// An application context provided as part of the constructor. The Backend
-	// will perform some cleanup when the context is cancelled.
-	ctx context.Context
 	// If an rpcclient.Client is used for the node, keeping a reference at client
 	// will result in (Client).Shutdown() being called on context cancellation.
 	client *rpcclient.Client
@@ -80,14 +90,14 @@ var _ asset.Backend = (*Backend)(nil)
 // application exits. If configPath is an empty string, the backend will
 // attempt to read the settings directly from the dcrd config file in its
 // default system location.
-func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (*Backend, error) {
+func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Backend, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
 	cfg, err := loadConfig(configPath, network)
 	if err != nil {
 		return nil, err
 	}
-	dcr := unconnectedDCR(ctx, logger)
+	dcr := unconnectedDCR(logger)
 	notifications := &rpcclient.NotificationHandlers{
 		OnBlockConnected: dcr.onBlockConnected,
 	}
@@ -156,10 +166,22 @@ func (dcr *Backend) CheckAddress(addr string) bool {
 	return err == nil
 }
 
-// UnspentDetails gets the recipient address, value, and confs of an unspent
+// UnspentCoinDetails gets the recipient address, value, and confirmations of
+// unspent coins. For DCR, this corresponds to a UTXO. If the utxo does not
+// exist or has a pubkey script of the wrong type, an error will be returned.
+func (dcr *Backend) UnspentCoinDetails(coinID []byte) (addr string, val uint64, confs int64, err error) {
+	txHash, vout, errCoin := decodeCoinID(coinID)
+	if errCoin != nil {
+		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
+		return
+	}
+	return dcr.UTXODetails(txHash.String(), vout)
+}
+
+// UTXODetails gets the recipient address, value, and confs of an unspent
 // P2PKH transaction output. If the utxo does not exist or has a pubkey script
 // of the wrong type, an error will be returned.
-func (dcr *Backend) UnspentDetails(txid string, vout uint32) (string, uint64, int64, error) {
+func (dcr *Backend) UTXODetails(txid string, vout uint32) (string, uint64, int64, error) {
 	txHash, err := chainhash.NewHashFromStr(txid)
 	if err != nil {
 		return "", 0, -1, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
@@ -263,23 +285,20 @@ func (dcr *Backend) shutdown() {
 
 // unconnectedDCR returns a Backend without a node. The node should be set
 // before use.
-func unconnectedDCR(ctx context.Context, logger dex.Logger) *Backend {
-	dcr := &Backend{
-		ctx:        ctx,
+func unconnectedDCR(logger dex.Logger) *Backend {
+	return &Backend{
 		blockChans: make([]chan uint32, 0),
 		blockCache: newBlockCache(logger),
 		anyQ:       make(chan interface{}, 128), // way bigger than needed.
 		log:        logger,
 	}
-	go dcr.superQueue()
-	return dcr
 }
 
-// superQueue should be run as a goroutine. The dcrd-registered handlers should
-// perform any necessary type conversion and then deposit the payload into the
-// anyQ channel. superQueue processes the queue and monitors the application
-// context.
-func (dcr *Backend) superQueue() {
+// Run processes the queue and monitors the application context. The
+// dcrd-registered handlers should perform any necessary type conversion and
+// then deposit the payload into the anyQ channel.
+func (dcr *Backend) Run(ctx context.Context) {
+	defer dcr.shutdown()
 out:
 	for {
 		select {
@@ -288,7 +307,7 @@ out:
 			case *chainhash.Hash:
 				// This is a new block notification.
 				blockHash := msg
-				dcr.log.Debugf("superQueue: Processing new block %s", blockHash)
+				dcr.log.Debugf("Run: Processing new block %s", blockHash)
 				blockVerbose, err := dcr.node.GetBlockVerbose(blockHash, false)
 				if err != nil {
 					dcr.log.Errorf("onBlockConnected error retrieving block %s: %v", blockHash, err)
@@ -313,10 +332,9 @@ out:
 				}
 				dcr.signalMtx.RUnlock()
 			default:
-				dcr.log.Warn("unknown message type in superQueue: %T", rawMsg)
+				dcr.log.Warn("unknown message type in Run: %T", rawMsg)
 			}
-		case <-dcr.ctx.Done():
-			dcr.shutdown()
+		case <-ctx.Done():
 			break out
 		}
 	}

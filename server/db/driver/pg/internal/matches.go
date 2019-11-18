@@ -56,4 +56,10 @@ const (
 	RetrieveUserMatches = `SELECT matchid, takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress, epochID, quantity, rate, status
 	FROM %s WHERE takerAccount = $1 OR makerAccount = $1;`
+
+	RetrieveActiveUserMatches = `SELECT matchid, takerOrder, takerAccount, takerAddress,
+		makerOrder, makerAccount, makerAddress, epochID, quantity, rate, status
+	FROM %s
+	WHERE (takerAccount = $1 OR makerAccount = $1)
+		AND status <> $2;`  // $2 should the code for MatchComplete
 )

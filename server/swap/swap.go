@@ -45,10 +45,10 @@ func unixMsNow() time.Time {
 type AuthManager interface {
 	Route(string, func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
-	Sign(...msgjson.Signable)
+	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message)
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message))
-	Penalize(account.AccountID, *order.Match, order.MatchStatus)
+	Penalize(account.AccountID, account.Rule)
 }
 
 // Storage updates match data in what is presumably a database.
@@ -152,16 +152,15 @@ type LockableAsset struct {
 // Config is the swapper configuration settings. A Config instance is the only
 // argument to the Swapper constructor.
 type Config struct {
-	// Ctx is the application context. Swapper will attempt to shutdown cleanly if
-	// the application context is cancelled.
-	Ctx context.Context
 	// Assets is a map to all the asset information, including the asset backends,
 	// used by this Swapper.
 	Assets map[uint32]*LockableAsset
 	// Mgr is the AuthManager for client messaging and authentication.
 	AuthManager AuthManager
 	// A database backend.
-	Storage          Storage
+	Storage Storage
+	// BroadcastTimeout is how long the Swapper will wait for expected swap
+	// transactions following new blocks.
 	BroadcastTimeout time.Duration
 }
 
@@ -169,9 +168,6 @@ type Config struct {
 // communications between clients, or 'users'. The Swapper authenticates users
 // (vua AuthManager) and validates transactions as they are reported.
 type Swapper struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
 	coins map[uint32]*LockableAsset
@@ -199,10 +195,7 @@ type Swapper struct {
 // NewSwapper is a constructor for a Swapper.
 func NewSwapper(cfg *Config) *Swapper {
 	authMgr := cfg.AuthManager
-	ctx, cancel := context.WithCancel(cfg.Ctx)
 	swapper := &Swapper{
-		ctx:      ctx,
-		cancel:   cancel,
 		coins:    cfg.Assets,
 		storage:  cfg.Storage,
 		authMgr:  authMgr,
@@ -217,21 +210,7 @@ func NewSwapper(cfg *Config) *Swapper {
 	authMgr.Route(msgjson.InitRoute, swapper.handleInit)
 	authMgr.Route(msgjson.RedeemRoute, swapper.handleRedeem)
 
-	swapper.wg.Add(1)
-	go swapper.start()
 	return swapper
-}
-
-// Stop begins the Swapper's shutdown. Use WaitForShutdown after Stop to wait
-// for shutdown to complete.
-func (s *Swapper) Stop() {
-	log.Infof("Swapper shutting down...")
-	s.cancel()
-}
-
-// WaitForShutdown waits until the main swapper loop is finished.
-func (s *Swapper) WaitForShutdown() {
-	s.wg.Wait()
 }
 
 // waitMempool attempts to run the passed function. If the function returns
@@ -253,10 +232,8 @@ func (s *Swapper) waitMempool(params *waitSettings, f func() bool) {
 	s.waiterMtx.Unlock()
 }
 
-// start is the main Swapper loop, and must be run as a goroutine.
-func (s *Swapper) start() {
-	defer s.wg.Done()
-
+// Run is the main Swapper loop.
+func (s *Swapper) Run(ctx context.Context) {
 	// The latencyTicker triggers a check of all chainWaiter functions.
 	latencyTicker := time.NewTicker(recheckInterval)
 	defer latencyTicker.Stop()
@@ -311,7 +288,7 @@ func (s *Swapper) start() {
 						height:  h,
 						assetID: assetID,
 					}
-				case <-s.ctx.Done():
+				case <-ctx.Done():
 					break out
 				}
 			}
@@ -349,7 +326,7 @@ out:
 					setTimeout(bcastTriggers[0])
 				}
 			}
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			break out
 		}
 	}
@@ -531,7 +508,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// timeout.
 			if match.makerStatus.swapTime.IsZero() && match.time.Before(oldestAllowed) {
 				deletions = append(deletions, match.ID().String())
-				s.authMgr.Penalize(match.Maker.User(), match.Match, match.Status)
+				s.authMgr.Penalize(match.Maker.User(), account.FailureToAct)
 				s.revoke(match)
 			}
 		case order.MakerSwapCast:
@@ -545,7 +522,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 				match.makerStatus.swapConfirmed.Before(oldestAllowed) {
 
 				deletions = append(deletions, match.ID().String())
-				s.authMgr.Penalize(match.Taker.User(), match.Match, match.Status)
+				s.authMgr.Penalize(match.Taker.User(), account.FailureToAct)
 				s.revoke(match)
 			}
 		case order.TakerSwapCast:
@@ -560,7 +537,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 				match.takerStatus.swapConfirmed.Before(oldestAllowed) {
 
 				deletions = append(deletions, match.ID().String())
-				s.authMgr.Penalize(match.Maker.User(), match.Match, match.Status)
+				s.authMgr.Penalize(match.Maker.User(), account.FailureToAct)
 				s.revoke(match)
 			}
 		case order.MakerRedeemed:
@@ -575,7 +552,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 				match.makerStatus.redeemTime.Before(oldestAllowed) {
 
 				deletions = append(deletions, match.ID().String())
-				s.authMgr.Penalize(match.Taker.User(), match.Match, match.Status)
+				s.authMgr.Penalize(match.Taker.User(), account.FailureToAct)
 				s.revoke(match)
 			}
 		case order.MatchComplete:
@@ -1149,21 +1126,18 @@ func extractAddress(ord order.Order) string {
 // matchNotifications creates a pair of msgjson.MatchNotification from a
 // matchTracker.
 func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
-	unixMs := uint64(encode.UnixMilli(match.time))
 	return &msgjson.Match{
 			OrderID:  idToBytes(match.Maker.ID()),
 			MatchID:  idToBytes(match.ID()),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
 			Address:  extractAddress(match.Taker),
-			Time:     unixMs,
 		}, &msgjson.Match{
 			OrderID:  idToBytes(match.Taker.ID()),
 			MatchID:  idToBytes(match.ID()),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
 			Address:  extractAddress(match.Maker),
-			Time:     unixMs,
 		}
 }
 

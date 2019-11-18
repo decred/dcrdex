@@ -4,7 +4,6 @@
 package ltc
 
 import (
-	"context"
 	"fmt"
 
 	"decred.org/dcrdex/dex"
@@ -14,9 +13,23 @@ import (
 	"github.com/ltcsuite/ltcd/chaincfg"
 )
 
+// Driver implements asset.Driver.
+type Driver struct{}
+
+// Setup creates the LTC backend. Start the backend with its Run method.
+func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+	return NewBackend(configPath, logger, network)
+}
+
+func init() {
+	asset.Register(assetName, &Driver{})
+}
+
+const assetName = "ltc"
+
 // NewBackend generates the network parameters and creates a ltc backend as a
 // btc clone using an asset/btc helper function.
-func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
+func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
@@ -47,5 +60,5 @@ func NewBackend(ctx context.Context, configPath string, logger dex.Logger, netwo
 		configPath = dexbtc.SystemConfigPath("litecoin")
 	}
 
-	return btc.NewBTCClone(ctx, configPath, logger, network, btcParams, ports)
+	return btc.NewBTCClone(assetName, configPath, logger, network, btcParams, ports)
 }

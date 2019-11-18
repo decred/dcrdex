@@ -21,9 +21,9 @@ const (
 )
 
 var (
-	archie  *Archiver
-	sqlDb   *sql.DB
-	mktInfo *dex.MarketInfo
+	archie            *Archiver
+	sqlDb             *sql.DB
+	mktInfo, mktInfo2 *dex.MarketInfo
 )
 
 func TestMain(m *testing.M) {
@@ -46,13 +46,19 @@ func TestMain(m *testing.M) {
 
 func openDB() (func() error, error) {
 	var err error
-	mktInfo, err = dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration)
+	mktInfo, err = dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration, MarketBuyBuffer)
+	if err != nil {
+		return func() error { return nil }, fmt.Errorf("invalid market: %v", err)
+	}
+
+	mktInfo2, err = dex.NewMarketInfoFromSymbols("btc", "ltc", LotSize, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		return func() error { return nil }, fmt.Errorf("invalid market: %v", err)
 	}
 
 	AssetDCR = mktInfo.Base
 	AssetBTC = mktInfo.Quote
+	AssetLTC = mktInfo2.Quote
 
 	dbi := Config{
 		Host:          PGTestsHost,
@@ -62,7 +68,7 @@ func openDB() (func() error, error) {
 		DBName:        PGTestsDBName,
 		HidePGConfig:  true,
 		QueryTimeout:  0, // zero to use the default
-		MarketCfg:     []*dex.MarketInfo{mktInfo},
+		MarketCfg:     []*dex.MarketInfo{mktInfo, mktInfo2},
 		CheckedStores: true,
 		Net:           dex.Mainnet,
 		FeeKey:        "dprv3hCznBesA6jBu1MaSqEBewG76yGtnG6LWMtEXHQvh3MVo6rqesTk7FPMSrczDtEELReV4aGMcrDxc9htac5mBDUEbTi9rgCA8Ss5FkasKM3",

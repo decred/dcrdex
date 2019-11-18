@@ -192,7 +192,105 @@ func TestUserMatches(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(matchData) != tt.numExpected {
-				t.Errorf("Retrieves %d matches for user %v, expected %d.", len(matchData), tt.acctID, tt.numExpected)
+				t.Errorf("Retrieved %d matches for user %v, expected %d.", len(matchData), tt.acctID, tt.numExpected)
+			}
+		})
+	}
+}
+
+func TestActiveMatches(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// Make a perfect 1 lot match.
+	limitBuyStanding := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
+	limitSellImmediate := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
+
+	// Make it complete and store it.
+	epochID := order.EpochID{132412341, 10}
+	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
+	match.Status = order.MatchComplete // not an active order now
+	err := archie.UpdateMatch(match)
+	if err != nil {
+		t.Fatalf("UpdateMatch() failed: %v", err)
+	}
+
+	// Make a perfect 1 lot match, same parties.
+	limitBuyStanding2 := newLimitOrder(false, 4500000, 1, order.StandingTiF, 20)
+	limitBuyStanding2.AccountID = limitBuyStanding.AccountID
+	limitSellImmediate2 := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 30)
+	limitSellImmediate2.AccountID = limitSellImmediate.AccountID
+
+	// Store it.
+	epochID2 := order.EpochID{132412342, 10}
+	match2 := newMatch(limitBuyStanding2, limitSellImmediate2, limitSellImmediate2.Quantity, epochID2)
+	err = archie.UpdateMatch(match2)
+	if err != nil {
+		t.Fatalf("UpdateMatch() failed: %v", err)
+	}
+
+	// Make a perfect 1 lot BTC-LTC match.
+	limitBuyStanding3 := newLimitOrder(false, 4500000, 1, order.StandingTiF, 20)
+	limitBuyStanding3.BaseAsset = AssetBTC
+	limitBuyStanding3.QuoteAsset = AssetLTC
+	limitBuyStanding3.AccountID = limitBuyStanding.AccountID
+	limitSellImmediate3 := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 30)
+	limitSellImmediate3.BaseAsset = AssetBTC
+	limitSellImmediate3.QuoteAsset = AssetLTC
+	limitSellImmediate3.AccountID = limitSellImmediate.AccountID
+
+	// Store it.
+	epochID3 := order.EpochID{132412342, 10}
+	match3 := newMatch(limitBuyStanding3, limitSellImmediate3, limitSellImmediate3.Quantity, epochID3)
+	err = archie.UpdateMatch(match3)
+	if err != nil {
+		t.Fatalf("UpdateMatch() failed: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		acctID       account.AccountID
+		numExpected  int
+		wantMatchIDs []order.MatchID
+		wantedErr    error
+	}{
+		{
+			"ok maker",
+			limitBuyStanding.User(),
+			2,
+			[]order.MatchID{match2.ID(), match3.ID()},
+			nil,
+		},
+		{
+			"ok taker",
+			limitSellImmediate.User(),
+			2,
+			[]order.MatchID{match2.ID(), match3.ID()},
+			nil,
+		},
+		{
+			"nope",
+			randomAccountID(),
+			0,
+			nil,
+			nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			matchData, err := archie.ActiveMatches(tt.acctID)
+			if err != tt.wantedErr {
+				t.Fatal(err)
+			}
+			if len(matchData) != tt.numExpected {
+				t.Errorf("Retrieved %d matches for user %v, expected %d.", len(matchData), tt.acctID, tt.numExpected)
+			}
+			for i := range tt.wantMatchIDs {
+				if tt.wantMatchIDs[i] != matchData[i].MatchID {
+					t.Errorf("Incorrect match ID retrieved. Got %v, expected %v.", matchData[i].MatchID, tt.wantMatchIDs[i])
+				}
 			}
 		})
 	}

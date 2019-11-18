@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	LotSize       = uint64(10_000_000_000)
-	EpochDuration = uint64(10_000)
+	LotSize         = uint64(10_000_000_000)
+	EpochDuration   = uint64(10_000)
+	MarketBuyBuffer = 1.1
 )
 
 var (
@@ -43,7 +44,7 @@ func TestNewMarketName(t *testing.T) {
 
 func TestNewMarketInfo(t *testing.T) {
 	// ok
-	mktInfo, err := NewMarketInfo(AssetDCR, AssetBTC, LotSize, EpochDuration)
+	mktInfo, err := NewMarketInfo(AssetDCR, AssetBTC, LotSize, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		t.Errorf("NewMarketInfoFromSymbols failed: %v", err)
 	}
@@ -52,13 +53,13 @@ func TestNewMarketInfo(t *testing.T) {
 	}
 
 	// bad base
-	_, err = NewMarketInfo(8765678, AssetBTC, LotSize, EpochDuration)
+	_, err = NewMarketInfo(8765678, AssetBTC, LotSize, EpochDuration, MarketBuyBuffer)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent base asset")
 	}
 
 	// bad quote
-	_, err = NewMarketInfo(AssetDCR, 8765678, LotSize, EpochDuration)
+	_, err = NewMarketInfo(AssetDCR, 8765678, LotSize, EpochDuration, MarketBuyBuffer)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent quote asset")
 	}
@@ -66,7 +67,7 @@ func TestNewMarketInfo(t *testing.T) {
 
 func TestNewMarketInfoFromSymbols(t *testing.T) {
 	// ok
-	mktInfo, err := NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration)
+	mktInfo, err := NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		t.Errorf("NewMarketInfoFromSymbols failed: %v", err)
 	}
@@ -75,13 +76,13 @@ func TestNewMarketInfoFromSymbols(t *testing.T) {
 	}
 
 	// bad base
-	_, err = NewMarketInfoFromSymbols("super fake asset", "btc", LotSize, EpochDuration)
+	_, err = NewMarketInfoFromSymbols("super fake asset", "btc", LotSize, EpochDuration, MarketBuyBuffer)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent base asset")
 	}
 
 	// bad quote
-	_, err = NewMarketInfoFromSymbols("dcr", "btc not BTC or bTC", LotSize, EpochDuration)
+	_, err = NewMarketInfoFromSymbols("dcr", "btc not BTC or bTC", LotSize, EpochDuration, MarketBuyBuffer)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent quote asset")
 	}

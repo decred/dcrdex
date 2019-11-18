@@ -31,6 +31,7 @@ import (
 )
 
 const (
+	assetName = "btc"
 	// Use RawRequest to get the verbose block with verbose txs, as the btcd
 	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
@@ -230,7 +231,7 @@ func BTCCloneWallet(ctx context.Context, cfg *WalletConfig, logger dex.Logger,
 	network dex.Network, chainParams *chaincfg.Params, ports dexbtc.NetPorts) (*ExchangeWallet, error) {
 
 	// Read the configuration parameters
-	btcCfg, err := dexbtc.LoadConfig(cfg.INIPath, network, ports)
+	btcCfg, err := dexbtc.LoadConfig(cfg.INIPath, assetName, network, ports)
 	if err != nil {
 		return nil, err
 	}

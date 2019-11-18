@@ -7,9 +7,11 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -65,23 +67,17 @@ type Swapper interface {
 // - Cycle the epochs.
 // - Recording all events with the archivist
 type Market struct {
-	// ctx is provided to the Market as the first argument of the constructor
-	// and subsequently provided to internal (unexported) methods as a field of
-	// Market for the sole purpose of providing a cancellation mechanism.
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
 	// Communications.
-	orderRouter chan *orderUpdateSignal  // incoming orders
-	orderFeeds  []chan *bookUpdateSignal // outgoing notifications
+	orderRouter  chan *orderUpdateSignal  // incoming orders
+	orderFeeds   []chan *bookUpdateSignal // outgoing notifications
+	orderFeedMtx sync.RWMutex
 
 	// Order handling: book, active epoch queues, order matcher, and swapper.
 	running       chan struct{}
+	startEpochIdx int64
 	marketInfo    *dex.MarketInfo
 	bookMtx       sync.Mutex
 	book          *book.Book
-	epochDuration int64
 	epochMtx      sync.RWMutex
 	epochOrders   map[order.OrderID]order.Order
 	matcher       *matcher.Matcher
@@ -95,11 +91,79 @@ type Market struct {
 	storage db.DEXArchivist
 }
 
+// NewMarket creates a new Market for the provided base and quote assets, with
+// an epoch cycling at given duration in milliseconds.
+func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper, authMgr AuthManager,
+	coinLockerBase, coinLockerQuote coinlock.CoinLocker) (*Market, error) {
+	// Make sure the DEXArchivist is healthy before taking orders.
+	if err := storage.LastErr(); err != nil {
+		return nil, err
+	}
+
+	// Lock coins backing active orders.
+	baseCoins, quoteCoins, err := storage.ActiveOrderCoins(mktInfo.Base, mktInfo.Quote)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: first check that the coins aren't already locked by e.g. another market.
+	coinLockerBase.LockCoins(baseCoins)
+	coinLockerQuote.LockCoins(quoteCoins)
+
+	return &Market{
+		running:         make(chan struct{}),
+		marketInfo:      mktInfo,
+		orderRouter:     make(chan *orderUpdateSignal, 16),
+		book:            book.New(mktInfo.LotSize),
+		matcher:         matcher.New(),
+		epochOrders:     make(map[order.OrderID]order.Order),
+		swapper:         swapper,
+		auth:            authMgr,
+		storage:         storage,
+		coinLockerBase:  coinLockerBase,
+		coinLockerQuote: coinLockerQuote,
+	}, nil
+}
+
+// SetStartEpochIdx sets the starting epoch index. This should generally be
+// called before Run, or Start used to specify the index at the same time.
+func (m *Market) SetStartEpochIdx(startEpochIdx int64) {
+	atomic.StoreInt64(&m.startEpochIdx, startEpochIdx)
+}
+
+// StartEpochIdx gets the starting epoch index.
+func (m *Market) StartEpochIdx() int64 {
+	return atomic.LoadInt64(&m.startEpochIdx)
+}
+
+// Start begins order processing with a starting epoch index. See also
+// SetStartEpochIdx and Run. Stop the Market by cancelling the context.
+func (m *Market) Start(ctx context.Context, startEpochIdx int64) {
+	m.SetStartEpochIdx(startEpochIdx)
+	m.Run(ctx)
+}
+
+// waitForEpochOpen waits until the start of epoch processing.
+func (m *Market) waitForEpochOpen() {
+	<-m.running
+}
+
+// EpochDuration returns the Market's epoch duration in milliseconds.
+func (m *Market) EpochDuration() uint64 {
+	return m.marketInfo.EpochDuration
+}
+
+// MarketBuyBuffer returns the Market's market-buy buffer.
+func (m *Market) MarketBuyBuffer() float64 {
+	return m.marketInfo.MarketBuyBuffer
+}
+
 // OrderFeed provides a new order book update channel. This is not thread-safe,
 // and should not be called after calling Start.
 func (m *Market) OrderFeed() <-chan *bookUpdateSignal {
 	bookUpdates := make(chan *bookUpdateSignal, 1)
+	m.orderFeedMtx.Lock()
 	m.orderFeeds = append(m.orderFeeds, bookUpdates)
+	m.orderFeedMtx.Unlock()
 	return bookUpdates
 }
 
@@ -195,81 +259,18 @@ func (m *Market) Cancelable(oid order.OrderID) bool {
 	return false
 }
 
-// NewMarket creates a new Market for the provided base and quote assets, with
-// an epoch cycling at given duration in milliseconds.
-func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchivist,
-	swapper Swapper, authMgr AuthManager, coinLockerBase, coinLockerQuote coinlock.CoinLocker) (*Market, error) {
-	// Make sure the DEXArchivist is healthy before taking orders.
-	if err := storage.LastErr(); err != nil {
-		return nil, err
-	}
-
-	// Lock coins backing active orders.
-	baseCoins, quoteCoins, err := storage.ActiveOrderCoins(mktInfo.Base, mktInfo.Quote)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: first check that the coins aren't already locked by e.g. another market.
-	coinLockerBase.LockCoins(baseCoins)
-	coinLockerQuote.LockCoins(quoteCoins)
-
-	// Supplement the provided context with a cancel function. The Stop method
-	// may be used to stop the market, or the parent context itself may be
-	// canceled.
-	ctxInternal, cancel := context.WithCancel(ctx)
-
-	return &Market{
-		ctx:             ctxInternal,
-		cancel:          cancel,
-		running:         make(chan struct{}),
-		marketInfo:      mktInfo,
-		epochDuration:   int64(mktInfo.EpochDuration),
-		orderRouter:     make(chan *orderUpdateSignal, 16),
-		book:            book.New(mktInfo.LotSize),
-		matcher:         matcher.New(),
-		epochOrders:     make(map[order.OrderID]order.Order),
-		swapper:         swapper,
-		auth:            authMgr,
-		storage:         storage,
-		coinLockerBase:  coinLockerBase,
-		coinLockerQuote: coinLockerQuote,
-	}, nil
-}
-
-// Start beings order processing.
-func (m *Market) Start(startEpochIdx int64) {
-	m.wg.Add(1)
-	go m.runEpochs(startEpochIdx)
-}
-
-// Stop begins the Market's shutdown. Use WaitForShutdown after Stop to wait for
-// shutdown to complete. The Swapper is NOT stopped.
-func (m *Market) Stop() {
-	log.Infof("Market shutting down...")
-	m.cancel()
-	for _, s := range m.orderFeeds {
-		close(s)
-	}
-}
-
-// WaitForShutdown waits until the order processing is finished and the Market
-// is stopped.
-func (m *Market) WaitForShutdown() {
-	m.wg.Wait()
-}
-
-// WaitForEpochOpen waits until the start of epoch processing.
-func (m *Market) WaitForEpochOpen() {
-	<-m.running
-}
-
-func (m *Market) notifyNewOrder(order order.Order, action bookUpdateAction) {
+func (m *Market) notifyNewOrder(ctx context.Context, order order.Order, action bookUpdateAction, eidx int64) {
 	// send to each receiver
+	m.orderFeedMtx.RLock()
+	defer m.orderFeedMtx.RUnlock()
+	if ctx.Err() != nil {
+		return
+	}
 	for _, s := range m.orderFeeds {
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			return
-		case s <- &bookUpdateSignal{action, order}:
+		case s <- &bookUpdateSignal{action, order, eidx}:
 		}
 	}
 }
@@ -290,14 +291,31 @@ func (m *Market) Book() (buys, sells []*order.LimitOrder) {
 	return
 }
 
-// runEpochs is the main order processing loop, which takes new orders, notifies
-// book subscribers, and cycles the epochs. This is to be run as a goroutine.
-func (m *Market) runEpochs(nextEpochIdx int64) {
-	nextEpoch := NewEpoch(nextEpochIdx, m.epochDuration)
+// Run is the main order processing loop, which takes new orders, notifies book
+// subscribers, and cycles the epochs. The caller should cancel the provided
+// Context to stop the market. When Run returns, all book order feeds obtained
+// via OrderFeed are closed and invalidated. Clients must request a new feed to
+// receive updates when and if the Market restarts.
+func (m *Market) Run(ctx context.Context) {
+	nextEpochIdx := atomic.LoadInt64(&m.startEpochIdx)
+	if nextEpochIdx == 0 {
+		log.Warnf("Run: startEpochIdx not set. Starting at the next epoch.")
+		now := encode.UnixMilli(time.Now())
+		nextEpochIdx = 1 + now/int64(m.EpochDuration())
+	}
+	epochDuration := int64(m.marketInfo.EpochDuration)
+	nextEpoch := NewEpoch(nextEpochIdx, epochDuration)
 	epochCycle := time.After(time.Until(nextEpoch.Start))
 
-	//defer m.cancelEpoch() // TODO
-	defer m.wg.Done()
+	defer func() {
+		m.orderFeedMtx.Lock()
+		for _, s := range m.orderFeeds {
+			close(s)
+		}
+		m.orderFeeds = nil
+		m.orderFeedMtx.Unlock()
+		log.Debugf("Market %q stopped.", m.marketInfo.Name)
+	}()
 
 	var running bool
 	var currentEpoch *EpochQueue
@@ -305,11 +323,11 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 		if currentEpoch != nil {
 			// Process the epoch synchronously so the coin locks are up-to-date
 			// when the next order arrives.
-			m.processEpoch(currentEpoch)
+			m.processEpoch(ctx, currentEpoch)
 		}
 		currentEpoch = nextEpoch
 
-		nextEpoch = NewEpoch(currentEpoch.Epoch+1, m.epochDuration)
+		nextEpoch = NewEpoch(currentEpoch.Epoch+1, epochDuration)
 		epochCycle = time.After(time.Until(nextEpoch.Start))
 
 		if !running {
@@ -319,7 +337,7 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 	}
 
 	// In case the market is stopped before the first epoch, close the running
-	// channel so that WaitForShutdown does not hang.
+	// channel so that waitForEpochOpen does not hang.
 	defer func() {
 		if !running {
 			close(m.running)
@@ -327,12 +345,11 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 	}()
 
 	for {
-		if m.ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return
 		}
 		if err := m.storage.LastErr(); err != nil {
 			log.Criticalf("Archivist failing. Last unexpected error: %v", err)
-			m.cancel()
 			return
 		}
 
@@ -345,7 +362,7 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 
 		// Wait for the next signal (cancel, new order, or epoch cycle).
 		select {
-		case <-m.ctx.Done():
+		case <-ctx.Done():
 			return
 
 		case s := <-m.orderRouter:
@@ -379,7 +396,11 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 
 			// Stamp and process the order in the target epoch queue.
 			s.rec.order.SetTime(sTime)
-			m.processOrder(s.rec, orderEpoch, s.errChan)
+			err := m.processOrder(ctx, s.rec, orderEpoch, s.errChan)
+			if err != nil {
+				log.Errorf("Failed to process order %v: %v", s.rec.order, err)
+				return
+			}
 
 		case <-epochCycle:
 			cycleEpoch()
@@ -444,14 +465,14 @@ func (m *Market) unlockOrderCoins(o order.Order) {
 // 4. Insert the order into the EpochQueue.
 // 5. Respond to the client that placed the order.
 // 6. Notify epoch queue event subscribers.
-func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<- error) {
+func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *EpochQueue, errChan chan<- error) error {
 	// Verify that the order is not already in the epoch queue
 	ord := rec.order
 	if epoch.Orders[ord.ID()] != nil {
 		// TODO: remove this check when we are sure the order router is behaving
 		log.Errorf("Received duplicate order %v!", ord)
 		errChan <- ErrDuplicateOrder
-		return
+		return nil
 	}
 
 	// Sign the order and prepare the client response. Only after the archiver
@@ -462,16 +483,16 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 		log.Errorf("failed to create msgjson.Message for order %v, msgID %v response: %v",
 			rec.order, rec.msgID, err)
 		errChan <- ErrMalformedOrderResponse
-		return
+		return nil
 	}
 
 	// Ensure that the received order does not use locked coins.
 	lockedCoins := m.coinsLocked(ord)
 	if len(lockedCoins) > 0 {
-		log.Errorf("(*Market).runEpochs: Order %v submitted with already-locked coins: %v",
+		log.Errorf("processOrder: Order %v submitted with already-locked coins: %v",
 			ord, lockedCoins)
 		errChan <- ErrInvalidOrder
-		return
+		return nil
 	}
 
 	// For market and limit orders, lock the backing coins NOW so orders using
@@ -482,11 +503,9 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 	// Archive the new epoch order BEFORE inserting it into the epoch queue,
 	// initiating the swap, and notifying book subscribers.
 	if err := m.storage.NewEpochOrder(ord); err != nil {
-		log.Errorf("(*Market).runEpochs: Failed to store new epoch order %v: %v",
-			ord, err)
 		errChan <- ErrInternalServer
-		m.cancel()
-		return
+		return fmt.Errorf("processOrder: Failed to store new epoch order %v: %v",
+			ord, err)
 	}
 
 	// Insert the order into the epoch queue.
@@ -505,7 +524,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 	m.auth.Send(ord.User(), respMsg)
 
 	// Send epoch update to epoch queue subscribers.
-	go m.notifyNewOrder(ord, epochAction)
+	go m.notifyNewOrder(ctx, ord, epochAction, epoch.Epoch)
+	return nil
 }
 
 // processEpoch performs the following operations for a closed epoch:
@@ -515,7 +535,7 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 //  4. Lock coins with the swap lock.
 //  5. Initiate the swap negotiation via the Market's Swapper.
 // The EpochQueue's Orders map must not be modified by another goroutine.
-func (m *Market) processEpoch(epoch *EpochQueue) {
+func (m *Market) processEpoch(ctx context.Context, epoch *EpochQueue) {
 	// Perform the matching. The matcher updates the order book.
 	orders := epoch.OrderSlice()
 	m.epochMtx.Lock()
@@ -581,12 +601,12 @@ func (m *Market) processEpoch(epoch *EpochQueue) {
 
 	// Send "book" notifications to order book subscribers.
 	for _, ord := range booked {
-		m.notifyNewOrder(ord, bookAction)
+		m.notifyNewOrder(ctx, ord, bookAction, epoch.Epoch)
 	}
 
 	// Send "unbook" notifications to order book subscribers.
 	for _, ord := range unbooked {
-		m.notifyNewOrder(ord, unbookAction)
+		m.notifyNewOrder(ctx, ord, unbookAction, epoch.Epoch)
 	}
 
 	// Initiate the swap.
@@ -614,7 +634,10 @@ func (m *Market) orderResponse(oRecord *orderRecord, epochIndex, epochDuration u
 	oRecord.req.Stamp(stamp, epochIndex, epochDuration)
 
 	// Sign the serialized order request.
-	m.auth.Sign(oRecord.req)
+	err := m.auth.Sign(oRecord.req)
+	if err != nil {
+		return nil, err
+	}
 
 	// Prepare the OrderResult, including the server signature and time stamp.
 	oid := oRecord.order.ID()

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
 	"github.com/gorilla/websocket"
@@ -264,13 +265,20 @@ func TestClientRequests(t *testing.T) {
 
 	// A helper function to reconnect to the server and grab the server's
 	// link.
+	var wg sync.WaitGroup
 	reconnect := func() {
 		conn = newWsStub()
-		go server.websocketHandler(conn, stubAddr)
+		wg.Add(1)
+		go server.websocketHandler(&wg, conn, stubAddr)
 		time.Sleep(time.Millisecond * 10)
 		sendToServer("getclient", `{}`)
 	}
 	reconnect()
+
+	defer func() {
+		server.disconnectClients()
+		wg.Wait()
+	}()
 
 	sendToServer("getclient", `{}`)
 	lockedExe(func() {
@@ -449,13 +457,20 @@ func TestClientResponses(t *testing.T) {
 		time.Sleep(time.Millisecond * 10)
 	}
 
+	var wg sync.WaitGroup
 	reconnect := func() {
 		conn = newWsStub()
-		go server.websocketHandler(conn, stubAddr)
+		wg.Add(1)
+		go server.websocketHandler(&wg, conn, stubAddr)
 		time.Sleep(time.Millisecond * 10)
 		getClient()
 	}
 	reconnect()
+
+	defer func() {
+		server.disconnectClients()
+		wg.Wait()
+	}()
 
 	// Send a request from the server to the client, setting a flag when the
 	// client responds.
@@ -552,7 +567,6 @@ func TestOnline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("server constructor error: %v", err)
 	}
-	defer server.Stop()
 
 	// Register routes before starting server.
 	// No response simulates a route that returns no response.
@@ -586,7 +600,12 @@ func TestOnline(t *testing.T) {
 		return nil
 	})
 
-	server.Start()
+	ssw := dex.NewStartStopWaiter(server)
+	ssw.Start(testCtx)
+	defer func() {
+		ssw.Stop()
+		ssw.WaitForShutdown()
+	}()
 
 	// Get the SystemCertPool, continue with an empty pool on error
 	rootCAs, _ := x509.SystemCertPool()

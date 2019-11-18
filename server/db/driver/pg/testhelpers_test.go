@@ -20,8 +20,9 @@ func startLogger() {
 }
 
 const (
-	LotSize       = uint64(10_000_000_000)
-	EpochDuration = uint64(10_000)
+	LotSize         = uint64(10_000_000_000)
+	EpochDuration   = uint64(10_000)
+	MarketBuyBuffer = 1.1
 )
 
 // The asset integer IDs should set in TestMain or other bring up function (e.g.
@@ -29,6 +30,7 @@ const (
 var (
 	AssetDCR uint32
 	AssetBTC uint32
+	AssetLTC uint32
 )
 
 func randomBytes(len int) []byte {
@@ -43,12 +45,18 @@ func randomAccountID() account.AccountID {
 }
 
 func mktConfig() (markets []*dex.MarketInfo) {
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize, EpochDuration)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize, EpochDuration, MarketBuyBuffer)
 	if err != nil {
 		panic(fmt.Sprintf("you broke it: %v", err))
 	}
-
 	markets = append(markets, mktConfig)
+
+	mktConfig, err = dex.NewMarketInfoFromSymbols("BTC", "LTC", LotSize, EpochDuration, MarketBuyBuffer)
+	if err != nil {
+		panic(fmt.Sprintf("you broke it: %v", err))
+	}
+	markets = append(markets, mktConfig)
+
 	// specify more here...
 	return
 }

@@ -1,0 +1,74 @@
+{
+    "markets": [
+        {
+            "base": "DCR_mainnet",
+            "quote": "BTC_mainnet",
+            "epochDuration": 10000,
+            "marketBuyBuffer": 1.25
+        },
+        {
+            "base": "BTC_testnet",
+            "quote": "LTC_testnet",
+            "epochDuration": 6000,
+            "marketBuyBuffer": 1.25
+        }
+    ],
+    "assets": {
+        "DCR_mainnet": {
+            "bip44symbol": "dcr",
+            "network": "mainnet",
+            "lotSize": 100000000,
+            "rateStep": 100000000,
+            "feeRate": 10,
+            "swapConf": 4,
+            "fundConf": 4,
+            "configPath": "/home/dcrd/.dcrd/dcrd.conf"
+        }, 
+        "DCR_testnet": {
+            "bip44symbol": "dcr",
+            "network": "testnet",
+            "lotSize": 100000000,
+            "rateStep": 100000000,
+            "feeRate": 10,
+            "swapConf": 1,
+            "fundConf": 1,
+            "configPath": "/home/dcrd/.dcrd/dcrd.conf"
+        }, 
+        "BTC_mainnet": {
+            "bip44symbol": "btc",
+            "network": "mainnet",
+            "lotSize": 100000,
+            "rateStep": 100000,
+            "feeRate": 100,
+            "swapConf": 3,
+            "fundConf": 3
+        },
+        "BTC_testnet": {
+            "bip44symbol": "btc",
+            "network": "testnet",
+            "lotSize": 100000,
+            "rateStep": 100000,
+            "feeRate": 100,
+            "swapConf": 1,
+            "fundConf": 1
+        },
+        "LTC_mainnet": {
+            "bip44symbol": "ltc",
+            "network": "mainnet",
+            "lotSize": 1000000,
+            "rateStep": 1000000,
+            "feeRate": 20,
+            "swapConf": 6,
+            "fundConf": 6
+        },
+        "LTC_testnet": {
+            "bip44symbol": "ltc",
+            "network": "testnet",
+            "lotSize": 1000000,
+            "rateStep": 1000000,
+            "feeRate": 20,
+            "swapConf": 6,
+            "fundConf": 6
+        }
+    }
+}

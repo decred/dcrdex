@@ -12,6 +12,10 @@ debug
 *.pprof
 .DS_Store
 \.project
+dex*key
+server/cmd/genkey/genkey
+server/cmd/dcrdex/dcrdex
+markets.json
 dist/
 node_modules/
 package-lock.json

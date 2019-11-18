@@ -86,7 +86,7 @@ func testUserMatch(t *testing.T) {
 
 	reMatch, err := order.DecodeMatch(matchB)
 	if err != nil {
-		t.Fatalf("errror decoding UserMatch: %v", err)
+		t.Fatalf("error decoding UserMatch: %v", err)
 	}
 	MustCompareUserMatch(t, match, reMatch)
 }
