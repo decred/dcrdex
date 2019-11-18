@@ -488,8 +488,8 @@ func (p *Prefix) Stamp(t, epochIdx, epochDur uint64) {
 // Serialize serializes the Prefix data.
 func (p *Prefix) Serialize() []byte {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
-	// order type (1), client time (8), server time (8), epoch ID (8) = 65 bytes
-	b := make([]byte, 0, 65)
+	// order type (1), client time (8), server time (8), epoch ID (16) = 73 bytes
+	b := make([]byte, 0, 73)
 	b = append(b, p.AccountID...)
 	b = append(b, uint32Bytes(p.Base)...)
 	b = append(b, uint32Bytes(p.Quote)...)
