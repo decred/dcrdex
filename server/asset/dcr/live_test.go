@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -43,6 +44,7 @@ import (
 var (
 	dcrdConfigPath = filepath.Join(dcrdHomeDir, "dcrd.conf")
 	dcr            *Backend
+	ctx            context.Context
 	testLogger     dex.Logger
 )
 
@@ -52,21 +54,43 @@ type dcrdConfig struct {
 }
 
 func TestMain(m *testing.M) {
-	testLogger = slog.NewBackend(os.Stdout).Logger("TEST")
-	ctx, shutdown := context.WithCancel(context.Background())
-	defer shutdown()
-	cfg := new(dcrdConfig)
-	err := flags.NewIniParser(flags.NewParser(cfg, flags.Default|flags.IgnoreUnknown)).ParseFile(dcrdConfigPath)
-	if err != nil {
-		fmt.Printf("error reading dcrd config: %v\n", err)
-		return
+	// Wrap everything for defers.
+	doIt := func() int {
+		logger := slog.NewBackend(os.Stdout).Logger("DCRTEST")
+
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+		var wg sync.WaitGroup
+		defer func() {
+			logger.Infof("Shutting down...")
+			cancel()
+			wg.Wait()
+			logger.Infof("done.")
+		}()
+
+		cfg := new(dcrdConfig)
+		err := flags.NewIniParser(flags.NewParser(cfg, flags.Default|flags.IgnoreUnknown)).ParseFile(dcrdConfigPath)
+		if err != nil {
+			fmt.Printf("error reading dcrd config: %v\n", err)
+			return 1
+		}
+
+		dcr, err = NewBackend("", logger, dex.Mainnet)
+		if err != nil {
+			fmt.Printf("NewBackend error: %v\n", err)
+			return 1
+		}
+
+		wg.Add(1)
+		go func() {
+			dcr.Run(ctx)
+			wg.Done()
+		}()
+
+		return m.Run()
 	}
-	dcr, err = NewBackend(ctx, "", testLogger, dex.Mainnet)
-	if err != nil {
-		fmt.Printf("NewBackend error: %v\n", err)
-		return
-	}
-	os.Exit(m.Run())
+
+	os.Exit(doIt())
 }
 
 // TestLiveUTXO will iterate the blockchain backwards, starting with mempool,
@@ -393,7 +417,7 @@ out:
 			if err != nil {
 				t.Fatalf("error getting newly connected block at height %d", height)
 			}
-		case <-dcr.ctx.Done():
+		case <-ctx.Done():
 			break out
 		case <-expire:
 			break out

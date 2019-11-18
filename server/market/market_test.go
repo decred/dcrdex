@@ -38,6 +38,7 @@ func (a *TAsset) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error) {
 func (a *TAsset) BlockChannel(size int) chan uint32 { return nil }
 func (a *TAsset) InitTxSize() uint32                { return 100 }
 func (a *TAsset) CheckAddress(string) bool          { return true }
+func (a *TAsset) Run(context.Context)               {}
 
 func newAsset(id uint32, lotSize uint64) *asset.BackedAsset {
 	return &asset.BackedAsset{
@@ -88,11 +89,17 @@ func (ta *TArchivist) MatchByID(mid order.MatchID, base, quote uint32) (*db.Matc
 func (ta *TArchivist) UserMatches(aid account.AccountID, base, quote uint32) ([]*db.MatchData, error) {
 	return nil, nil
 }
-func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule)                 {}
-func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid bool) { return nil, false }
-func (ta *TArchivist) CreateAccount(*account.Account) (string, error)               { return "", nil }
-func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error)             { return "", nil }
-func (ta *TArchivist) PayAccount(account.AccountID, string, uint32) error           { return nil }
+func (ta *TArchivist) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) {
+	return nil, nil
+}
+func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule) {}
+func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
+	return nil, false, false
+}
+func (ta *TArchivist) CreateAccount(*account.Account) (string, error)   { return "", nil }
+func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error) { return "", nil }
+func (ta *TArchivist) PayAccount(account.AccountID, []byte) error       { return nil }
+func (ta *TArchivist) Close() error                                     { return nil }
 
 func randomOrderID() order.OrderID {
 	pk := randomBytes(order.OrderIDSize)
@@ -101,7 +108,7 @@ func randomOrderID() order.OrderID {
 	return id
 }
 
-func newTestMarket() (*Market, *TArchivist, error) {
+func newTestMarket() (*Market, *TArchivist, func(), error) {
 	// The DEX will make MasterCoinLockers for each asset.
 	masterLockerBase := coinlock.NewMasterCoinLocker()
 	bookLockerBase := masterLockerBase.Book()
@@ -111,12 +118,10 @@ func newTestMarket() (*Market, *TArchivist, error) {
 	bookLockerQuote := masterLockerQuote.Book()
 	swapLockerQuote := masterLockerQuote.Swap()
 
-	ctx := context.Background()
 	epochDurationMSec := uint64(500) // 0.5 sec epoch duration
 	storage := &TArchivist{}
 	authMgr := &TAuth{}
 	swapperCfg := &swap.Config{
-		Ctx: ctx,
 		Assets: map[uint32]*swap.LockableAsset{
 			assetDCR.ID: {BackedAsset: assetDCR, CoinLocker: swapLockerBase},
 			assetBTC.ID: {BackedAsset: assetBTC, CoinLocker: swapLockerQuote},
@@ -126,25 +131,34 @@ func newTestMarket() (*Market, *TArchivist, error) {
 		BroadcastTimeout: 10 * time.Second,
 	}
 	swapper := swap.NewSwapper(swapperCfg)
+	ssw := dex.NewStartStopWaiter(swapper)
+	ssw.Start(testCtx)
+	cleanup := func() {
+		ssw.Stop()
+		ssw.WaitForShutdown()
+	}
 
+	mbBuffer := 1.1
 	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
-		assetDCR.LotSize, epochDurationMSec)
+		assetDCR.LotSize, epochDurationMSec, mbBuffer)
 	if err != nil {
-		return nil, nil, fmt.Errorf("dex.NewMarketInfo() failure: %v", err)
+		return nil, nil, func() {}, fmt.Errorf("dex.NewMarketInfo() failure: %v", err)
 	}
 
-	mkt, err := NewMarket(ctx, mktInfo, storage, swapper, authMgr, bookLockerBase, bookLockerQuote)
+	mkt, err := NewMarket(mktInfo, storage, swapper, authMgr,
+		bookLockerBase, bookLockerQuote)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to create test market: %v", err)
+		return nil, nil, func() {}, fmt.Errorf("Failed to create test market: %v", err)
 	}
-	return mkt, storage, nil
+	return mkt, storage, cleanup, nil
 }
 
 func TestMarket_Book(t *testing.T) {
-	mkt, _, err := newTestMarket()
+	mkt, _, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 	}
+	defer cleanup()
 
 	rand.Seed(0)
 
@@ -189,16 +203,23 @@ func TestMarket_runEpochs(t *testing.T) {
 	// queues (or not) incoming orders.
 
 	// Create the market.
-	mkt, _, err := newTestMarket()
+	mkt, _, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
+		cleanup()
 		return
 	}
 	t.Log(mkt.marketInfo.Name)
-	epochDurationMSec := mkt.epochDuration
+	epochDurationMSec := int64(mkt.EpochDuration())
 
+	ctx, cancel := context.WithCancel(context.Background())
 	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-	mkt.Start(startEpochIdx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		mkt.Start(ctx, startEpochIdx)
+	}()
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
@@ -272,7 +293,7 @@ func TestMarket_runEpochs(t *testing.T) {
 		t.Errorf(`expected ErrMarketNotRunning ("%v"), got "%v"`, ErrMarketNotRunning, err)
 	}
 
-	mkt.WaitForEpochOpen()
+	mkt.waitForEpochOpen()
 
 	// Submit again
 	err = mkt.SubmitOrder(&oRecord)
@@ -283,17 +304,23 @@ func TestMarket_runEpochs(t *testing.T) {
 	//let the epoch cycle
 	time.Sleep(time.Duration(epochDurationMSec)*time.Millisecond + time.Duration(epochDurationMSec/20))
 
-	mkt.Stop()
-	mkt.WaitForShutdown()
+	cancel()
+	wg.Wait()
+	cleanup()
 
 	// Test duplicate order with a new Market.
-	mkt, storage, err := newTestMarket()
+	mkt, storage, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 	}
+	ctx, cancel = context.WithCancel(context.Background())
 	startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-	mkt.Start(startEpochIdx)
-	mkt.WaitForEpochOpen()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		mkt.Start(ctx, startEpochIdx)
+	}()
+	mkt.waitForEpochOpen()
 
 	err = mkt.SubmitOrder(&oRecord)
 	if err != nil {
@@ -328,17 +355,22 @@ func TestMarket_runEpochs(t *testing.T) {
 	if err = mkt.SubmitOrder(&oRecord); !errors.Is(err, ErrInternalServer) {
 		t.Errorf(`expected ErrInternalServer ("%v"), got "%v"`, ErrInternalServer, err)
 	}
+
+	cancel()
+	wg.Wait()
+	cleanup()
 }
 
 func TestMarket_processEpoch(t *testing.T) {
 	// This tests that processEpoch sends the expected book and unbook messages
 	// to book subscribers registered via OrderFeed.
 
-	mkt, _, err := newTestMarket()
+	mkt, _, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("Failed to create test market: %v", err)
 		return
 	}
+	defer cleanup()
 
 	rand.Seed(0)
 
@@ -363,13 +395,14 @@ func TestMarket_processEpoch(t *testing.T) {
 	bestBuyQuant := bestBuy.Quantity
 	bestSellID := bestSell.ID()
 
-	eq := NewEpoch(123413513, 4)
+	var epochIdx, epochDur int64 = 123413513, 4
+	eq := NewEpoch(epochIdx, epochDur)
 	lo := makeLO(seller3, bestBuyRate-dcrRateStep, bestBuyQuant, order.StandingTiF)
 	co := makeCO(buyer3, bestSellID)
 	eq.Insert(lo)
 	eq.Insert(co)
 
-	eq2 := NewEpoch(123413513, 4)
+	eq2 := NewEpoch(epochIdx, epochDur)
 	coMiss := makeCO(buyer3, randomOrderID())
 	eq2.Insert(coMiss)
 
@@ -385,6 +418,16 @@ func TestMarket_processEpoch(t *testing.T) {
 		}
 	}()
 
+	epochDurationMSec := int64(mkt.EpochDuration())
+	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		mkt.Start(ctx, startEpochIdx)
+	}()
+
 	tests := []struct {
 		name                string
 		epoch               *EpochQueue
@@ -394,9 +437,9 @@ func TestMarket_processEpoch(t *testing.T) {
 			"ok book unbook",
 			eq,
 			[]*bookUpdateSignal{
-				{bookAction, lo},
-				{unbookAction, bestBuy},
-				{unbookAction, bestSell},
+				{bookAction, lo, epochIdx},
+				{unbookAction, bestBuy, epochIdx},
+				{unbookAction, bestSell, epochIdx},
 			},
 		},
 		{
@@ -406,13 +449,13 @@ func TestMarket_processEpoch(t *testing.T) {
 		},
 		{
 			"ok empty queue",
-			NewEpoch(123413513, 4),
+			NewEpoch(epochIdx, epochDur),
 			[]*bookUpdateSignal{},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mkt.processEpoch(tt.epoch)
+			mkt.processEpoch(ctx, tt.epoch)
 			time.Sleep(50 * time.Millisecond) // let the test goroutine receive the signals
 			mtx.Lock()
 			if len(bookSignals) != len(tt.expectedBookSignals) {
@@ -428,27 +471,38 @@ func TestMarket_processEpoch(t *testing.T) {
 					t.Errorf("Book signal %d has order %v, expected %v",
 						i, s.order.ID(), tt.expectedBookSignals[i].order.ID())
 				}
+				if tt.expectedBookSignals[i].epochIdx != s.epochIdx {
+					t.Errorf("Book signal %d has epoch index %d, expected %d",
+						i, s.epochIdx, tt.expectedBookSignals[i].epochIdx)
+				}
 			}
 			bookSignals = []*bookUpdateSignal{}
 			mtx.Unlock()
 		})
 	}
 
-	mkt.Stop()
-	mkt.WaitForShutdown()
+	cancel()
+	wg.Wait()
 }
 
 func TestMarket_Cancelable(t *testing.T) {
 	// Create the market.
-	mkt, _, err := newTestMarket()
+	mkt, _, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 		return
 	}
+	defer cleanup()
 
-	epochDurationMSec := mkt.epochDuration
+	epochDurationMSec := int64(mkt.EpochDuration())
 	startEpochIdx := 1 + encode.UnixMilli(time.Now().Truncate(time.Millisecond))/epochDurationMSec
-	mkt.Start(startEpochIdx)
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		mkt.Start(ctx, startEpochIdx)
+	}()
 
 	// Make an order for the first epoch.
 	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
@@ -502,7 +556,7 @@ func TestMarket_Cancelable(t *testing.T) {
 	}
 
 	// Wait for the start of the epoch to submit the order.
-	mkt.WaitForEpochOpen()
+	mkt.waitForEpochOpen()
 
 	if mkt.Cancelable(order.OrderID{}) {
 		t.Errorf("Cancelable reported bogus order as is cancelable, " +
@@ -538,4 +592,7 @@ func TestMarket_Cancelable(t *testing.T) {
 		t.Errorf("Cancelable reported order %v as is cancelable, "+
 			"but it was removed from the Book.", lo)
 	}
+
+	cancel()
+	wg.Wait()
 }

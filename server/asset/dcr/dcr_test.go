@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -640,9 +641,20 @@ func testMsgTxRevocation() *testMsgTx {
 
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
-	ctx, shutdown := context.WithCancel(context.Background())
-	dcr := unconnectedDCR(ctx, testLogger)
+	dcr := unconnectedDCR(testLogger)
 	dcr.node = testNode{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	shutdown := func() {
+		cancel()
+		wg.Wait()
+	}
+	wg.Add(1)
+	go func() {
+		dcr.Run(ctx)
+		wg.Done()
+	}()
 	return dcr, shutdown
 }
 
@@ -1154,7 +1166,7 @@ func TestAuxiliary(t *testing.T) {
 		t.Fatalf("utxo txid doesn't match")
 	}
 
-	// Check that values returned from UnspentDetails are as set.
+	// Check that values returned from UnspentCoinDetails are as set.
 	cleanTestChain()
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
 	confs := int64(3)
@@ -1162,9 +1174,9 @@ func TestAuxiliary(t *testing.T) {
 	txout.Value = 8
 	scriptAddrs, _ := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].PkScript, chainParams)
 	addr := scriptAddrs.PkHashes[0].String()
-	txAddr, v, confs, err := dcr.UnspentDetails(txid, 0)
+	txAddr, v, confs, err := dcr.UnspentCoinDetails(toCoinID(txHash, 0))
 	if err != nil {
-		t.Fatalf("UnspentDetails error: %v", err)
+		t.Fatalf("UnspentCoinDetails error: %v", err)
 	}
 	if txAddr != addr {
 		t.Fatalf("expected address %s, got %s", addr, txAddr)

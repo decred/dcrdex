@@ -212,7 +212,6 @@ func TestWsConn(t *testing.T) {
 		Quantity: 20,
 		Rate:     2,
 		Address:  "DsiNAJCd2sSazZRU9ViDD334DaLgU1Kse3P",
-		Time:     1570704776,
 	}
 
 	// Ensure a malformed message to the client does not terminate

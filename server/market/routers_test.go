@@ -122,7 +122,7 @@ func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	//log.Infof("Auth for user %v", user)
 	return a.authErr
 }
-func (a *TAuth) Sign(...msgjson.Signable) { log.Info("Sign") }
+func (a *TAuth) Sign(...msgjson.Signable) error { log.Info("Sign"); return nil }
 func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) {
 	msgTxt, _ := json.Marshal(msg)
 	log.Infof("Send for user %v. Message: %v", user, string(msgTxt))
@@ -139,7 +139,7 @@ func (a *TAuth) getSend() *msgjson.Message {
 func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
 	log.Infof("Request for user %v", user)
 }
-func (a *TAuth) Penalize(user account.AccountID, match *order.Match, step order.MatchStatus) {
+func (a *TAuth) Penalize(user account.AccountID, rule account.Rule) {
 	log.Infof("Penalize for user %v", user)
 }
 
@@ -147,6 +147,7 @@ type TMarketTunnel struct {
 	adds       []*orderRecord
 	auth       *TAuth
 	midGap     uint64
+	mbBuffer   float64
 	epochIdx   uint64
 	epochDur   uint64
 	locked     bool
@@ -179,12 +180,16 @@ func (m *TMarketTunnel) MidGap() uint64 {
 	return m.midGap
 }
 
-func (m *TMarketTunnel) CoinLocked(coinid order.CoinID, assetID uint32) bool {
+func (m *TMarketTunnel) CoinLocked(assetID uint32, coinid order.CoinID) bool {
 	return m.locked
 }
 
 func (m *TMarketTunnel) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
 	return m.watched
+}
+
+func (m *TMarketTunnel) MarketBuyBuffer() float64 {
+	return m.mbBuffer
 }
 
 func (m *TMarketTunnel) pop() *orderRecord {
@@ -226,6 +231,7 @@ func (b *TBackend) CheckAddress(string) bool          { return b.addrChecks }
 func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
 }
+func (b *TBackend) Run(context.Context) {}
 
 type tUTXO struct {
 	val uint64
@@ -364,6 +370,7 @@ func TestMain(m *testing.M) {
 			adds:       make([]*orderRecord, 0),
 			auth:       auth,
 			midGap:     dcrRateStep * 1000,
+			mbBuffer:   1.5, // 150% of lot size
 			cancelable: true,
 			epochIdx:   1573773894,
 			epochDur:   60_000,
@@ -377,8 +384,7 @@ func TestMain(m *testing.M) {
 			0:  assetBTC,
 			42: assetDCR,
 		},
-		Markets:         map[string]MarketTunnel{"dcr_btc": oRig.market},
-		MarketBuyBuffer: 1.5,
+		Markets: map[string]MarketTunnel{"dcr_btc": oRig.market},
 	})
 	rig = newTestRig()
 	src1 := rig.source1
@@ -402,14 +408,19 @@ func TestMain(m *testing.M) {
 	tick(100)
 	doIt := func() int {
 		// Not counted as coverage, must test Archiver constructor explicitly.
-		var shutdown func()
+		var shutdown context.CancelFunc
 		testCtx, shutdown = context.WithCancel(context.Background())
-		defer shutdown()
-		rig.router = NewBookRouter(&BookRouterConfig{
-			Ctx:           testCtx,
-			Sources:       rig.sources(),
-			EpochDuration: oRig.market.epochDur,
-		})
+		rig.router = NewBookRouter(rig.sources())
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			rig.router.Run(testCtx)
+			wg.Done()
+		}()
+		defer func() {
+			shutdown()
+			wg.Wait()
+		}()
 		return m.Run()
 	}
 	os.Exit(doIt())
@@ -1185,8 +1196,9 @@ func TestRouter(t *testing.T) {
 	// clients.
 	lo := makeLO(buyer1, mkRate1(0.8, 1.0), randLots(10), order.ImmediateTiF)
 	sig := &bookUpdateSignal{
-		action: epochAction,
-		order:  lo,
+		action:   epochAction,
+		order:    lo,
+		epochIdx: 12345678,
 	}
 	src1.feed <- sig
 	tick(responseDelay)
@@ -1201,10 +1213,8 @@ func TestRouter(t *testing.T) {
 	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link2")
 
 	// just for kicks, checks the epoch is as expected.
-	tStamp := uint64(lo.Time())
-	epoch := tStamp - tStamp%router.epochLen
-	if epochNote.Epoch != epoch {
-		t.Fatalf("wrong epoch. wanted %d, got %d", epoch, epochNote.Epoch)
+	if epochNote.Epoch != uint64(sig.epochIdx) {
+		t.Fatalf("wrong epoch. wanted %d, got %d", sig.epochIdx, epochNote.Epoch)
 	}
 
 	// Have both subscribers subscribe to market 2.
@@ -1220,8 +1230,9 @@ func TestRouter(t *testing.T) {
 	// Send an epoch update for a market order.
 	mo := makeMO(buyer2, randLots(10))
 	sig = &bookUpdateSignal{
-		action: epochAction,
-		order:  mo,
+		action:   epochAction,
+		order:    mo,
+		epochIdx: 12345678,
 	}
 	src2.feed <- sig
 	tick(responseDelay)
@@ -1262,8 +1273,9 @@ func TestRouter(t *testing.T) {
 
 	// Now unbook the order.
 	sig = &bookUpdateSignal{
-		action: unbookAction,
-		order:  lo,
+		action:   unbookAction,
+		order:    lo,
+		epochIdx: 12345678,
 	}
 	src2.feed <- sig
 	tick(responseDelay)
@@ -1307,8 +1319,9 @@ func TestRouter(t *testing.T) {
 
 	mo = makeMO(seller1, randLots(10))
 	sig = &bookUpdateSignal{
-		action: epochAction,
-		order:  mo,
+		action:   epochAction,
+		order:    mo,
+		epochIdx: 12345678,
 	}
 	src1.feed <- sig
 	tick(responseDelay)
@@ -1330,8 +1343,9 @@ func TestRouter(t *testing.T) {
 	oid := lo.ID()
 	co := makeCO(buyer1, oid)
 	sig = &bookUpdateSignal{
-		action: epochAction,
-		order:  co,
+		action:   epochAction,
+		order:    co,
+		epochIdx: 12345678,
 	}
 	src1.feed <- sig
 	tick(responseDelay)

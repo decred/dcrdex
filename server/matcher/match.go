@@ -462,6 +462,11 @@ func ShuffleQueue(queue []order.Order) {
 // shuffleQueue deterministically shuffles the Orders using a Fisher-Yates
 // algorithm seeded with the hash of the concatenated order ID hashes.
 func shuffleQueue(queue []order.Order) {
+	// Nothing to do if there are less than 2 orders in the queue.
+	if len(queue) < 2 {
+		return
+	}
+
 	// The shuffling seed is derived from the sorted orders.
 	sortQueue(queue)
 

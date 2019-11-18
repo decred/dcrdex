@@ -7,6 +7,7 @@ import "decred.org/dcrdex/dex"
 
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
+	dex.Runner
 	// Coin should return a Coin only for outputs that would be spendable on the
 	// blockchain immediately. Pay-to-script-hash Coins require the redeem script
 	// in order to calculate sigScript length and verify pubkeys.

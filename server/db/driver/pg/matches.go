@@ -24,6 +24,7 @@ func (a *Archiver) matchTableName(match *order.Match) (string, error) {
 
 // UserMatches retrieves all matches involving a user on the given market.
 // TODO: consider a time limited version of this to retrieve recent matches.
+// TODO: load the Sigs.
 func (a *Archiver) UserMatches(aid account.AccountID, base, quote uint32) ([]*db.MatchData, error) {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
@@ -38,6 +39,7 @@ func (a *Archiver) UserMatches(aid account.AccountID, base, quote uint32) ([]*db
 	return userMatches(ctx, a.db, matchesTableName, aid)
 }
 
+// TODO: load the Sigs.
 func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) ([]*db.MatchData, error) {
 	stmt := fmt.Sprintf(internal.RetrieveUserMatches, tableName)
 	rows, err := dbe.QueryContext(ctx, stmt, aid)
@@ -62,6 +64,85 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 		}
 		m.Status = order.MatchStatus(status)
 		ms = append(ms, &m)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return ms, nil
+}
+
+// ActiveMatches retrieves a UserMatch slice for active matches involving the
+// given user. TODO: do we need an order.MatchStatus for swaps that have failed?
+func (a *Archiver) ActiveMatches(aid account.AccountID) ([]*order.UserMatch, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+	defer cancel()
+
+	var matches []*order.UserMatch
+	for m := range a.markets {
+		matchesTableName := fullMatchesTableName(a.dbName, m)
+		matchesM, err := activeUserMatches(ctx, a.db, matchesTableName, aid)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, matchesM...)
+	}
+
+	return matches, nil
+}
+
+func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) ([]*order.UserMatch, error) {
+	stmt := fmt.Sprintf(internal.RetrieveActiveUserMatches, tableName)
+	rows, err := dbe.QueryContext(ctx, stmt, aid, order.MatchComplete)
+	if err != nil {
+		return nil, err
+	}
+
+	var ms []*order.UserMatch
+	for rows.Next() {
+		var m db.MatchData
+		var status uint8
+		var epochID string
+		err := rows.Scan(&m.ID, &m.Taker, &m.TakerAcct, &m.TakerAddr,
+			&m.Maker, &m.MakerAcct, &m.MakerAddr,
+			&epochID, &m.Quantity, &m.Rate, &status)
+		if err != nil {
+			return nil, err
+		}
+		m.Epoch.Idx, m.Epoch.Dur, err = splitEpochID(epochID)
+		if err != nil {
+			return nil, err
+		}
+		m.Status = order.MatchStatus(status)
+
+		var addr string
+		var oid order.OrderID
+		var side order.MatchSide
+		switch aid {
+		case m.TakerAcct:
+			addr = m.TakerAddr
+			oid = m.Taker
+			side = order.Taker
+		case m.MakerAcct:
+			addr = m.MakerAddr
+			oid = m.Maker
+			side = order.Maker
+		default:
+			return nil, fmt.Errorf("loaded match %v not belonging to user %v", m.ID, aid)
+		}
+
+		um := &order.UserMatch{
+			OrderID:  oid,
+			MatchID:  m.ID,
+			Quantity: m.Quantity,
+			Rate:     m.Rate,
+			Address:  addr,
+			Side:     side,
+			Status:   m.Status,
+		}
+
+		ms = append(ms, um)
 	}
 
 	if err = rows.Err(); err != nil {

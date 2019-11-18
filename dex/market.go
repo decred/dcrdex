@@ -10,11 +10,12 @@ import (
 
 // MarketInfo specifies a market that the Archiver must support.
 type MarketInfo struct {
-	Name          string
-	Base          uint32
-	Quote         uint32
-	LotSize       uint64
-	EpochDuration uint64 // msec
+	Name            string
+	Base            uint32
+	Quote           uint32
+	LotSize         uint64
+	EpochDuration   uint64 // msec
+	MarketBuyBuffer float64
 }
 
 func marketName(base, quote string) string {
@@ -43,24 +44,25 @@ func MarketName(base, quote uint32) (string, error) {
 // NewMarketInfo creates a new market configuration (MarketInfo) from the given
 // base and quote asset indexes, order lot size, and epoch duration in
 // milliseconds. See also MarketName.
-func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64) (*MarketInfo, error) {
+func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64, marketBuyBuffer float64) (*MarketInfo, error) {
 	name, err := MarketName(base, quote)
 	if err != nil {
 		return nil, err
 	}
 	return &MarketInfo{
-		Name:          name,
-		Base:          base,
-		Quote:         quote,
-		LotSize:       lotSize,
-		EpochDuration: epochDuration,
+		Name:            name,
+		Base:            base,
+		Quote:           quote,
+		LotSize:         lotSize,
+		EpochDuration:   epochDuration,
+		MarketBuyBuffer: marketBuyBuffer,
 	}, nil
 }
 
 // NewMarketInfoFromSymbols is like NewMarketInfo, but the base and quote assets
 // are identified by their symbols as defined in the
 // decred.org/dcrdex/server/asset package.
-func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64) (*MarketInfo, error) {
+func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64, marketBuyBuffer float64) (*MarketInfo, error) {
 	base = strings.ToLower(base)
 	baseID, found := BipSymbolID(base)
 	if !found {
@@ -74,10 +76,11 @@ func NewMarketInfoFromSymbols(base, quote string, lotSize, epochDuration uint64)
 	}
 
 	return &MarketInfo{
-		Name:          marketName(base, quote),
-		Base:          baseID,
-		Quote:         quoteID,
-		LotSize:       lotSize,
-		EpochDuration: epochDuration,
+		Name:            marketName(base, quote),
+		Base:            baseID,
+		Quote:           quoteID,
+		LotSize:         lotSize,
+		EpochDuration:   epochDuration,
+		MarketBuyBuffer: marketBuyBuffer,
 	}, nil
 }

@@ -45,6 +45,9 @@ type DEXArchivist interface {
 	// unrecoverable error (disconnect, etc.).
 	LastErr() error
 
+	// Close should gracefully shutdown the backend, returning when complete.
+	Close() error
+
 	OrderArchiver
 	AccountArchiver
 	MatchArchiver
@@ -115,11 +118,7 @@ type AccountArchiver interface {
 	// Account retrieves the account information for the specified account ID.
 	// The registration fee payment status is returned as well. A nil pointer
 	// will be returned for unknown or closed accounts.
-	Account(account.AccountID) (acct *account.Account, paid bool)
-
-	// ActiveMatches will be needed, but does not belong in this archiver.
-	// // ActiveMatches retrieves the current active matches for an account.
-	// ActiveMatches(account.AccountID) []*order.UserMatch
+	Account(account.AccountID) (acct *account.Account, paid, open bool)
 
 	// CreateAccount stores a new account. The account is considered unpaid until
 	// PayAccount is used to set the payment details.
@@ -130,7 +129,7 @@ type AccountArchiver interface {
 
 	// PayAccount sets the registration fee payment transaction details for the
 	// account, completing the registration process.
-	PayAccount(account.AccountID, string, uint32) error
+	PayAccount(account.AccountID, []byte) error
 }
 
 // MatchData represents an order pair match, but with just the order IDs instead
@@ -157,6 +156,8 @@ type MatchArchiver interface {
 	UpdateMatch(match *order.Match) error
 	MatchByID(mid order.MatchID, base, quote uint32) (*MatchData, error)
 	UserMatches(aid account.AccountID, base, quote uint32) ([]*MatchData, error)
+	// ActiveMatches retrieves the current active matches for an account.
+	ActiveMatches(account.AccountID) ([]*order.UserMatch, error)
 }
 
 // ValidateOrder ensures that the order with the given status for the specified
@@ -195,7 +196,9 @@ func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInf
 			return false
 		}
 
-		// Market sell orders must respect lot size.
+		// Market sell orders must respect lot size. Market buy orders must be
+		// of an amount sufficiently buffered beyond the minimum standing sell
+		// order's lot cost, but that is enforced by the order router.
 		if ot.Sell && (ot.Quantity%mkt.LotSize != 0 || ot.Remaining()%mkt.LotSize != 0) {
 			return false
 		}

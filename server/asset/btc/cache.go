@@ -74,9 +74,10 @@ func (cache *blockCache) add(block *btcjson.GetBlockVerboseResult) (*cachedBlock
 	// Orphaned blocks will have -1 confirmations. Don't add them to mainchain.
 	if !blk.orphaned {
 		cache.mainchain[uint32(block.Height)] = blk
-		if block.Height > int64(cache.best.height) {
+		if block.Height >= int64(cache.best.height) {
 			cache.best.height = uint32(block.Height)
 			cache.best.hash = *hash
+			cache.best.orphaned = false // should not be needed, but be safe
 		}
 	}
 	return blk, nil

@@ -32,7 +32,7 @@ type Storage interface {
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
 	// ActiveMatches fetches the account's active matches.
-	ActiveMatches(account.AccountID) []*order.UserMatch
+	ActiveMatches(account.AccountID) ([]*order.UserMatch, error)
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
@@ -45,7 +45,7 @@ type Signer interface {
 }
 
 // FeeChecker is a function for retreiving the details for a fee payment. It
-// is satisfied by (dcr.Backend).P2PKHDetails.
+// is satisfied by (dcr.Backend).UnspentCoinDetails.
 type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
 
 // A respHandler is the handler for the response to a DEX-originating request. A
@@ -53,7 +53,7 @@ type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err e
 // detected and deleted.
 type respHandler struct {
 	expiration time.Time
-	f          func(*msgjson.Message)
+	f          func(comms.Link, *msgjson.Message)
 }
 
 // clientInfo represents a DEX client, including account information and last
@@ -108,15 +108,14 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // signing messages with the DEX's private key. AuthManager manages requests to
 // the 'connect' route.
 type AuthManager struct {
-	connMtx    sync.RWMutex
-	users      map[account.AccountID]*clientInfo
-	conns      map[uint64]*clientInfo
-	storage    Storage
-	signer     Signer
-	startEpoch uint64
-	regFee     uint64
-	checkFee   FeeChecker
-	feeConfs   int64
+	connMtx  sync.RWMutex
+	users    map[account.AccountID]*clientInfo
+	conns    map[uint64]*clientInfo
+	storage  Storage
+	signer   Signer
+	regFee   uint64
+	checkFee FeeChecker
+	feeConfs int64
 }
 
 // Config is the configuration settings for the AuthManager, and the only
@@ -127,11 +126,6 @@ type Config struct {
 	// Signer is an interface that signs messages. In practice, Signer is
 	// satisfied by a secp256k1.PrivateKey.
 	Signer Signer
-	// StartEpoch is the epoch at which the current DEX trading session
-	// began/begins. When a client connects, trading may or may not be active. The
-	// AuthManager returns the StartEpoch as part of the response to a 'connect'
-	// request.
-	StartEpoch uint64
 	// RegistrationFee is the DEX registration fee, in atoms DCR
 	RegistrationFee uint64
 	// FeeConfs is the number of confirmations required on the registration fee
@@ -144,14 +138,13 @@ type Config struct {
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
 	auth := &AuthManager{
-		users:      make(map[account.AccountID]*clientInfo),
-		conns:      make(map[uint64]*clientInfo),
-		storage:    cfg.Storage,
-		signer:     cfg.Signer,
-		startEpoch: cfg.StartEpoch,
-		regFee:     cfg.RegistrationFee,
-		checkFee:   cfg.FeeChecker,
-		feeConfs:   cfg.FeeConfs,
+		users:    make(map[account.AccountID]*clientInfo),
+		conns:    make(map[uint64]*clientInfo),
+		storage:  cfg.Storage,
+		signer:   cfg.Signer,
+		regFee:   cfg.RegistrationFee,
+		checkFee: cfg.FeeChecker,
+		feeConfs: cfg.FeeConfs,
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -217,7 +210,7 @@ func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 
 // Request sends the Request-type msgjson.Message to the client identified by
 // the specified account ID.
-func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(*msgjson.Message)) {
+func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
 	client := auth.user(user)
 	if client == nil {
 		log.Errorf("Send requested for unknown user %x", user[:])
@@ -331,7 +324,13 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// Send the connect response, which includes a list of active matches.
-	matches := auth.storage.ActiveMatches(user)
+	matches, err := auth.storage.ActiveMatches(user)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "DB error",
+		}
+	}
 	msgMatches := make([]*msgjson.Match, 0, len(matches))
 	for _, match := range matches {
 		msgMatches = append(msgMatches, &msgjson.Match{
@@ -340,14 +339,12 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
 			Address:  match.Address,
-			Time:     match.Time,
 			Status:   uint8(match.Status),
 			Side:     uint8(match.Side),
 		})
 	}
 	resp := &msgjson.ConnectResponse{
-		StartEpoch: auth.startEpoch,
-		Matches:    msgMatches,
+		Matches: msgMatches,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
 	if err != nil {
@@ -401,7 +398,7 @@ func (auth *AuthManager) handleResponse(conn comms.Link, msg *msgjson.Message) {
 		}
 		return
 	}
-	handler.f(msg)
+	handler.f(conn, msg)
 }
 
 // checkSigS256 checks that the message's signature was created with the

@@ -123,7 +123,6 @@ type UserMatch struct {
 	Quantity uint64
 	Rate     uint64
 	Address  string
-	Time     uint64
 	Status   MatchStatus
 	Side     MatchSide
 }

@@ -205,10 +205,13 @@ func (ac *AssetCoinLocker) LockOrdersCoins(orders []order.Order) {
 	ac.coinMtx.Unlock()
 }
 
+// DEXCoinLocker manages multiple MasterCoinLocker, one for each asset used by
+// the DEX.
 type DEXCoinLocker struct {
 	masterLocks map[uint32]*MasterCoinLocker
 }
 
+// NewDEXCoinLocker creates a new DEXCoinLocker for the given assets.
 func NewDEXCoinLocker(assets []uint32) *DEXCoinLocker {
 	masterLocks := make(map[uint32]*MasterCoinLocker, len(assets))
 	for _, asset := range assets {
@@ -218,6 +221,12 @@ func NewDEXCoinLocker(assets []uint32) *DEXCoinLocker {
 	return &DEXCoinLocker{masterLocks}
 }
 
+// AssetLocker retrieves the MasterCoinLocker for an asset.
+func (c *DEXCoinLocker) AssetLocker(asset uint32) *MasterCoinLocker {
+	return c.masterLocks[asset]
+}
+
+// CoinLocked checks if a coin belonging to an asset is locked.
 func (c *DEXCoinLocker) CoinLocked(asset uint32, coin string) bool {
 	locker := c.masterLocks[asset]
 	if locker == nil {
@@ -227,6 +236,7 @@ func (c *DEXCoinLocker) CoinLocked(asset uint32, coin string) bool {
 	return locker.CoinLocked(CoinID(coin))
 }
 
+// OrderCoinsLocked retrieves all locked coins for a given asset and user.
 func (c *DEXCoinLocker) OrderCoinsLocked(asset uint32, oid order.OrderID) []CoinID {
 	locker := c.masterLocks[asset]
 	if locker == nil {

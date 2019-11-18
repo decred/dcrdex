@@ -17,22 +17,29 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v2"
 )
 
-// type Driver struct{}
+// Driver implements db.Driver.
+type Driver struct{}
 
-// func (d *Driver) Open(ctx context.Context, cfg interface{}) (db.DEXArchivist, error) {
-// 	switch cfg.(type) {
-// 	case *Config:
-// 		return NewArchiver(ctx, cfg)
-// 	case Config:
-// 		return NewArchiver(ctx, &cfg)
-// 	default:
-// 		return nil, fmt.Errorf("invalid config type %t", cfg)
-// 	}
-// }
+// Open creates the DB backend, returning a DEXArchivist.
+func (d *Driver) Open(ctx context.Context, cfg interface{}) (db.DEXArchivist, error) {
+	switch c := cfg.(type) {
+	case *Config:
+		return NewArchiver(ctx, c)
+	case Config:
+		return NewArchiver(ctx, &c)
+	default:
+		return nil, fmt.Errorf("invalid config type %t", cfg)
+	}
+}
 
-// func init() {
-// 	db.Register("pg", &Driver{})
-// }
+// UseLogger sets the package-wide logger for the registered DB Driver.
+func (*Driver) UseLogger(logger dex.Logger) {
+	UseLogger(logger)
+}
+
+func init() {
+	db.Register("pg", &Driver{})
+}
 
 const (
 	defaultQueryTimeout = 20 * time.Minute
@@ -169,7 +176,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	// Get the master extended public key.
 	masterKey, err := hdkeychain.NewKeyFromString(cfg.FeeKey, archiver.keyParams)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing  master pubkey: %v", err)
+		return nil, fmt.Errorf("error parsing master pubkey: %v", err)
 	}
 
 	// Get the external branch (= child 0) of the extended pubkey.
