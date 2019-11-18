@@ -748,7 +748,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 |-
 | osize   || int    || order size (atoms)
 |-
-| rate    || int    || price rate (quote asset per unit base asset, atoms). only set on limit orders
+| rate    || int    || price rate. [[#Rate_Encoding|message-rate encoding]]. only set on limit orders
 |-
 | tif     || string || time in force. one of "i" for ''immediate'' or "s" for ''standing''. only set on limit orders
 |-
@@ -916,6 +916,24 @@ UTXO's pubkey script (or corresponding redeem script).
 | vout    || 4  || the UTXO's transaction output index
 |}
 
+====Rate Encoding====
+
+Because the rate assigned to a limit order is a quotient, the value is naturally
+expressed as a floating point number.
+To avoid floating-point error, rates in JSON API messages are encoded using a
+custom unit, '''atoms quote asset per unit base asset'''.
+This is called the '''message-rate format'''.
+This can alternatively be viewed as conventional rate multiplied by
+10<sup>8</sup> and floored to the nearest integer.
+
+As an example of message-rate encoding, if someone wanted to purchase asset Z
+using asset Y on the Z/Y market, and the user wanted to pay 0.001 Y for each 1
+Z, the message-rate encoding would be
+
+'''''r<sub>msg</sub> = 1 x 10<sup>8</sup> x 0.001 = 100000'''''
+
+with unit ''atoms Y / unit Z''.
+
 ====Order Signing====
 
 All orders must be signed by the client and the server.
@@ -926,30 +944,54 @@ The serialized data is then signed using the client's
 
 All integer encoding for all serialized structures is big endian.
 
-All order serializations have a common ''prefix structure''.
+All order serializations have common '''prefix''' fields.
 
-'''Prefix serialization'''
+'''Prefix fields and serialization'''
 {|
-! field       !! size (bytes)   !! description
+! field     !! size (bytes) !! description
 |-
-| account ID  || 16 || client account ID
+| accountid || 32 || client account ID
 |-
-| base asset  || 4  || the base asset ID
+| base      || 4  || the base asset ID
 |-
-| quote asset || 4  || the quote asset ID
+| quote     || 4  || the quote asset ID
 |-
-| order type  || 1  || the type of order. limit = 0, market=2, cancel=3
+| ordertype || 1  || the type of order. limit = 1, market=2, cancel=3
 |-
-| client time || 8  || the client's UNIX timestamp
+| tclient   || 8  || the client's UNIX timestamp
 |-
-| server time || 8  || the server's UNIX timestamp. zeros for client-size serialization
+| tserver   || 8  || the server's UNIX timestamp. zeros for client signature messages
 |}
 
 ====Order ID====
 
 The order serialization is used to create a unique order ID.
-The ID is defined as the Blake-256 hash of the serialized order.
-It is represented in messaging as a hex-encoded string.
+The ID is defined as the Blake-256 hash of the serialized order, including the
+non-zero server's timestamp. The client does not know the order ID when
+submitting, but should independently verify the ID after parsing the server's
+response.
+
+Because the order ID includes the server's timestamp, the order ID itself
+provides a checksum to ensure that order information is properly transmitted.
+The response to all order submissions is an '''order receipt''', which includes
+the timestamp.
+
+'''Order receipt'''
+
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of the serialized order, after adding the DEX timestamp
+|-
+| orderid   || string || the order ID
+|-
+| tserver || int  || the server's UNIX timestamp
+|}
+
+The client should use the server's timestamp to create a serialized order and
+independently verify the order ID. The serialized order is also the message for
+the server's signature.
 
 ===Limit Order===
 
@@ -969,29 +1011,21 @@ crosses the spread (i.e. a taker rather than a maker). The
 {|
 ! field       !! type   !! description
 |-
-| accountid   || string || client's account ID
+| colspan="3" align="center" | 6 prefix fields
 |-
-| timestamp   || int    || UNIX timestamp generated at the time of order submission of trades requires a fair amount of messaging between the 2 clients, via the DEX trade API.
+| side        || int || buy = 1, sell = 2
 |-
-| tradepair   || string || market. trading pair. e.g. DCR/BTC
+| ordersize   || int || order size (atoms)
 |-
-| ordertype   || string || "limit" for a limit order
+| rate        || int || price rate. [[#Rate_Encoding|message-rate encoding]]
 |-
-| side        || string || one of "buy" or "sell"
-|-
-| ordersize   || int    || order size (atoms)
-|-
-| rate        || int    || price rate (quote asset per unit base asset, atoms)
-|-
-| timeinforce || string || one of ''standing'' or ''immediate''
+| timeinforce || int || standing = 1, immediate = 2
 |-
 | utxos       ||  &#91;[[#UTXO_Preparation|UTXO]]&#93; || list of backing UTXOs
 |-
-| orderid     || string || hex-encoded order ID
-|-
-| sig         || string || client hex-encoded signature of the serialized order data. serialization described below
-|-
 | address     || string || address where the matched client will send funds
+|-
+| sig         || string || client hex-encoded signature of the serialized order, with tserver = 0
 |}
 
 '''Limit order serialization'''
@@ -999,21 +1033,21 @@ crosses the spread (i.e. a taker rather than a maker). The
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 65 || [[#utxo-preparation|the order prefix]]
+| prefix     || 57 || [[#utxo-preparation|the order prefix]]
 |-
 | UTXO count || 1  || The number of backing UTXOs
 |-
 | UTXO data  || 36 x count || [[#utxo-preparation|sequence of UTXO data]]
 |-
-| side       || 1 || 0 for buy, 1 for sell
+| side       || 1 || 1 for buy, 2 for sell
 |-
 | quantity   || 8 || quantity to buy or sell (atoms)
 |-
+| rate       || 8 || price rate. [[#Rate_Encoding|message-rate encoding]]
+|-
+| time in force || 1 || 1 for ''standing'', 2 for ''immediate''
+|-
 | address    || varies || client's receiving address
-|-
-| rate       || 8 || price rate
-|-
-| time in force || 1 || 0 for ''standing'', 1 for ''immediate''
 |}
 
 <code>result</code>
@@ -1029,9 +1063,9 @@ crosses the spread (i.e. a taker rather than a maker). The
 
 A market order is an order to buy or sell an asset at the best available
 market price. The request payload fields are similar to a limit order, but
-without the <code>rate</code> field.
+without the <code>rate</code> field or <code>timeinforce</code> fields.
 
-Market orders cannot be cancelled.
+Market orders cannot be canceled.
 Any portion of the requested quantity that does not match immediately (during
 the epoch match cycle) is left unfilled.
 
@@ -1039,27 +1073,19 @@ the epoch match cycle) is left unfilled.
 
 <code>payload</code>
 {|
-! field     !! type   !! description
+! field       !! type   !! description
 |-
-| accountid || string || client's account ID
+| colspan="3" align="center" | 6 prefix fields
 |-
-| timestamp || int    || UNIX timestamp. order broadcast time
+| side        || int || buy = 1, sell = 2
 |-
-| tradepair || string || market. trading pair. e.g. DCR/BTC
+| ordersize   || int || order size (atoms)
 |-
-| ordertype || string || "market" for a market order
+| utxos       ||  &#91;[[#UTXO_Preparation|UTXO]]&#93; || list of backing UTXOs
 |-
-| side      || string || one of "buy" or "sell"
+| address     || string || address where the matched client will send funds
 |-
-| ordersize || int    || order size, in atoms. See notes on market buy orders below.
-|-
-| utxos     || &#91;[[#UTXO_Preparation|UTXO]]&#93; || list of backing UTXOs
-|-
-| orderid   || string || hex-encoded order ID
-|-
-| sig       || string || client hex-encoded signature of the serialized order data. serialization described below
-|-
-| address   || string || address where the matched client will send funds
+| sig         || string || client hex-encoded signature of the serialized order, with tserver = 0
 |}
 
 '''Market order serialization'''
@@ -1067,13 +1093,13 @@ the epoch match cycle) is left unfilled.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 65 || [[#UTXO_Preparation|the order prefix]]
+| prefix     || 57 || [[#utxo-preparation|the order prefix]]
 |-
 | UTXO count || 1  || The number of backing UTXOs
 |-
 | UTXO data  || 36 x count || [[#utxo-preparation|sequence of UTXO data]]
 |-
-| side       || 1 || 0 for buy, 1 for sell
+| side       || 1 || 1 for buy, 2 for sell
 |-
 | quantity   || 8 || quantity to buy or sell (atoms)
 |-
@@ -1142,11 +1168,7 @@ This is by design and discourages certain types of spoofing.
 {|
 ! field     !! type   !! description
 |-
-| accountid || string || client's account ID
-|-
-| timestamp || int    || UNIX timestamp. order broadcast time
-|-
-| tradepair || string || market. trading pair. e.g. DCR/BTC
+| colspan="3" align="center" | 6 prefix fields
 |-
 | orderid   || string || hex-encoded order ID
 |-
@@ -1209,7 +1231,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | quantity  || int    || the matched amount, in atoms of the base asset
 |-
-| rate      || int    || the rate that the order matched at (as quote asset per unit base asset, atoms)
+| rate      || int    || the matched price rate. [[#Rate_Encoding|message-rate encoding]]
 |-
 | timestamp || int    || server's UNIX timestamp
 |-
@@ -1229,7 +1251,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | quantity   || 8  || the matched amount, in atoms of the base asset
 |-
-| rate       || 8  || the rate that the order matched at
+| rate       || 8  || the matched price rate. [[#Rate_Encoding|message-rate encoding]]
 |-
 | timestamp  || 8  || server's UNIX timestamp
 |-
@@ -1720,7 +1742,7 @@ possible.
 |-
 | lot&nbsp;size  || atoms ||  the minimum order quantity and the order quantity increment when an asset is the base asset
 |-
-| rate&nbsp;step || atoms || the minimum price rate and the price rate increment when an asset is the quote asset
+| rate&nbsp;step || atoms || The minimum price rate and the price rate increment when an asset is the quote asset. [[#Rate_Encoding|message-rate encoding]]
 |-
 | fee&nbsp;rate  || atoms/byte || the minimum fee rate for swap transactions
 |-
