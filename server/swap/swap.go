@@ -785,6 +785,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	match := stepInfo.match.Match
 	s.matchMtx.Unlock()
 
+	// TODO: decide if we can reasonably continue if the storage call fails.
 	s.saveMatch(match)
 
 	// Issue a positive response to the actor.
@@ -1145,19 +1146,29 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 	// cancels.
 	toMonitor := make([]*matchTracker, 0, len(matches))
 	for _, match := range matches {
-		makerAck, takerAck := newMatchAckers(match)
-		addUserMatch(makerAck)
-		addUserMatch(takerAck)
 		if match.Taker.Type() == order.CancelOrderType {
-			// if this is a cancellation, there is nothing to track.
-			s.storage.CancelOrder(match.Maker)
+			// If this is a cancellation, there is nothing to track.
+			err := s.storage.CancelOrder(match.Maker)
+			if err != nil {
+				log.Errorf("Failed to cancel order %v", match.Maker)
+				// If the maker failed to cancel in storage, we should NOT tell
+				// the users that the cancel order was executed.
+				// TODO: send a error message to the clients.
+				continue
+			}
 		} else {
 			toMonitor = append(toMonitor, match)
 		}
 
+		makerAck, takerAck := newMatchAckers(match)
+		addUserMatch(makerAck)
+		addUserMatch(takerAck)
+
 		// Record the match.
+		// TODO: decide if we can reasonably continue if the storage call fails.
 		s.saveMatch(match.Match)
 	}
+
 	// Add the matches to the map.
 	s.matchMtx.Lock()
 	for _, match := range toMonitor {

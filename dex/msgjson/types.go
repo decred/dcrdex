@@ -95,7 +95,7 @@ const (
 	// the client about an order added to the epoch queue.
 	EpochOrderRoute = "epoch_order"
 	// ConnectRoute is a client-originating request-type message seeking
-	// authentication so that the connection can be used for for trading.
+	// authentication so that the connection can be used for trading.
 	ConnectRoute = "connect"
 	// RegisterRoute is the client-originating request-type message initiating a
 	// new client registration.

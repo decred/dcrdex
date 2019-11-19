@@ -13,8 +13,8 @@ import (
 	"github.com/decred/dcrdex/dex"
 	"github.com/decred/dcrdex/dex/msgjson"
 	"github.com/decred/dcrdex/dex/order"
+	"github.com/decred/dcrdex/dex/order/test"
 	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/account/pki"
 	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/dcrdex/server/db"
 	"github.com/decred/dcrdex/server/swap"
@@ -86,11 +86,6 @@ func (ta *TArchivist) CreateAccount(*account.Account) (string, error)           
 func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error)             { return "", nil }
 func (ta *TArchivist) PayAccount(account.AccountID, string, uint32) error           { return nil }
 
-func randomAccountID() account.AccountID {
-	pk := randomBytes(pki.PubKeySize) // size is not important since it is going to be hashed
-	return account.NewID(pk)
-}
-
 func randomOrderID() order.OrderID {
 	pk := randomBytes(order.OrderIDSize)
 	var id order.OrderID
@@ -103,7 +98,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	// queues (or not) incoming orders.
 	qty := uint64(dcrLotSize) * 10
 	rate := uint64(1000) * dcrRateStep
-	aid := randomAccountID()
+	aid := test.NextAccount()
 	limit := &msgjson.Limit{
 		Prefix: msgjson.Prefix{
 			AccountID:  aid[:],

@@ -86,7 +86,8 @@ type Market struct {
 	storage db.DEXArchivist
 }
 
-// OrderFeed provides a new order book update channel.
+// OrderFeed provides a new order book update channel. This is not thread-safe,
+// and should not be called after calling Start.
 func (m *Market) OrderFeed() <-chan *bookUpdateSignal {
 	bookUpdates := make(chan *bookUpdateSignal, 1)
 	m.orderFeeds = append(m.orderFeeds, bookUpdates)
@@ -102,8 +103,8 @@ func newOrderUpdateSignal(ord *orderRecord) *orderUpdateSignal {
 	return &orderUpdateSignal{ord, make(chan error, 1)}
 }
 
-// SubmitOrder submits a new order for inclusion into the current epoch. When
-// submission is completed. This is the synchronous version of SubmitOrderAsync.
+// SubmitOrder submits a new order for inclusion into the current epoch. This is
+// the synchronous version of SubmitOrderAsync.
 func (m *Market) SubmitOrder(rec *orderRecord) error {
 	return <-m.SubmitOrderAsync(rec)
 }
@@ -127,8 +128,8 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	return sig.errChan
 }
 
-// NewMarket creates a new Market for for the provided base and quote assets,
-// with an epoch cycling at given duration in seconds.
+// NewMarket creates a new Market for the provided base and quote assets, with
+// an epoch cycling at given duration in seconds.
 func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchivist,
 	swapper Swapper, authMgr AuthManager) (*Market, error) {
 	// Make sure the DEXArchivist is healthy before taking orders.
@@ -136,7 +137,7 @@ func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchi
 		return nil, err
 	}
 
-	// Supplement the provided context with an cancel function. The Stop method
+	// Supplement the provided context with a cancel function. The Stop method
 	// may be used to stop the market, or the parent context itself may be
 	// canceled.
 	ctxInternal, cancel := context.WithCancel(ctx)
@@ -236,6 +237,14 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 		}
 	}
 
+	// In case the market is stopped before the first epoch, close the running
+	// channel so that WaitForShutdown does not hang.
+	defer func() {
+		if !running {
+			close(m.running)
+		}
+	}()
+
 	for {
 		if m.ctx.Err() != nil {
 			return
@@ -275,16 +284,15 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 			case currentEpoch.IncludesTime(sTime):
 				orderEpoch = currentEpoch
 			case nextEpoch.IncludesTime(sTime):
-				log.Debugf("Order %v (sTime=%d) fell into the next epoch [%d,%d)",
+				log.Warnf("Order %v (sTime=%d) fell into the next epoch [%d,%d)",
 					s.rec.order, sTime.UnixNano(), nextEpoch.Start.Unix(), nextEpoch.End.Unix())
 				orderEpoch = nextEpoch
 			default:
+				// This should not happen.
 				log.Errorf("Time %d does not fit into current or next epoch!",
 					sTime.Unix())
-				// This should not happen! Force it into the next epoch and do
-				// some debuggin.
-				sTime = nextEpoch.Start
-				orderEpoch = nextEpoch
+				s.errChan <- ErrEpochMissed
+				continue
 			}
 
 			s.rec.order.SetTime(sTime.Unix())

@@ -6,8 +6,8 @@ import (
 	"github.com/decred/dcrdex/dex/order"
 )
 
-// EpochQueue represents an epoch order queue. The method are NOT thread safe by
-// design.
+// EpochQueue represents an epoch order queue. The methods are NOT thread safe
+// by design.
 type EpochQueue struct {
 	// Epoch is the epoch index.
 	Epoch    int64
