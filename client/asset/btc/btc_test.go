@@ -362,15 +362,14 @@ func TestAvailableFund(t *testing.T) {
 
 // Since ReturnCoins takes the asset.Coin interface, make sure any interface
 // is acceptable.
-type tCoin struct{ id string }
+type tCoin struct{ id []byte }
 
-func (c *tCoin) ID() string {
-	if c.id != "" {
+func (c *tCoin) ID() dex.Bytes {
+	if len(c.id) > 0 {
 		return c.id
 	}
-	return tTxID
+	return make([]byte, 36)
 }
-func (c *tCoin) Index() uint32                  { return 0 }
 func (c *tCoin) Value() uint64                  { return 100 }
 func (c *tCoin) Confirmations() (uint32, error) { return 2, nil }
 func (c *tCoin) Redeem() dex.Bytes              { return nil }
@@ -852,7 +851,7 @@ func TestSignMessage(t *testing.T) {
 	node.rawErr[methodSignMessage] = nil
 
 	// bad coin
-	badCoin := &tCoin{id: "nonhex"}
+	badCoin := &tCoin{id: make([]byte, 15)}
 	_, _, err = wallet.SignMessage(badCoin, msg)
 	if err == nil {
 		t.Fatalf("no error for bad coin")
@@ -888,7 +887,7 @@ func TestAuditContract(t *testing.T) {
 		},
 	}
 
-	audit, err := wallet.AuditContract(tTxID, vout, contract)
+	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract)
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
@@ -903,14 +902,14 @@ func TestAuditContract(t *testing.T) {
 	}
 
 	// Invalid txid
-	_, err = wallet.AuditContract("nonhex", vout, contract)
+	_, err = wallet.AuditContract(make([]byte, 15), contract)
 	if err == nil {
 		t.Fatalf("no error for bad txid")
 	}
 
 	// GetTxOut error
 	node.txOutErr = tErr
-	_, err = wallet.AuditContract(tTxID, vout, contract)
+	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), contract)
 	if err == nil {
 		t.Fatalf("no error for unknown txout")
 	}
@@ -920,7 +919,7 @@ func TestAuditContract(t *testing.T) {
 	pkh, _ := hex.DecodeString("c6a704f11af6cbee8738ff19fc28cdc70aba0b82")
 	wrongAddr, _ := btcutil.NewAddressPubKeyHash(pkh, &chaincfg.MainNetParams)
 	badContract, _ := txscript.PayToAddrScript(wrongAddr)
-	_, err = wallet.AuditContract(tTxID, vout, badContract)
+	_, err = wallet.AuditContract(toCoinID(tTxHash, vout), badContract)
 	if err == nil {
 		t.Fatalf("no error for wrong contract")
 	}
@@ -941,8 +940,10 @@ func TestFindRedemption(t *testing.T) {
 
 	contractHeight := int64(5000)
 	contractTxid := "e1b7c47df70d7d8f4c9c26f8ba9a59102c10885bd49024d32fdef08242f0c26c"
+	contractTxHash, _ := chainhash.NewHashFromStr(contractTxid)
 	otherTxid := "7a7b3b5c3638516bc8e7f19b4a3dec00f052a599fed5036c2b89829de2367bb6"
 	contractVout := uint32(1)
+	coinID := toCoinID(contractTxHash, contractVout)
 
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
@@ -987,7 +988,7 @@ func TestFindRedemption(t *testing.T) {
 	_, redeemBlock := node.addRawTx(contractHeight+2, rawRedeem)
 	// Add the redeem transaction to the verbose block.
 
-	checkSecret, err := wallet.FindRedemption(tCtx, contractTxid, contractVout)
+	checkSecret, err := wallet.FindRedemption(tCtx, coinID)
 	if err != nil {
 		t.Fatalf("error finding redemption: %v", err)
 	}
@@ -997,7 +998,7 @@ func TestFindRedemption(t *testing.T) {
 
 	// gettransaction error
 	node.rawErr[methodGetTransaction] = tErr
-	_, err = wallet.FindRedemption(tCtx, contractTxid, contractVout)
+	_, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
@@ -1005,7 +1006,7 @@ func TestFindRedemption(t *testing.T) {
 
 	// missing redemption
 	redeemBlock.RawTx[0].Vin[1].Txid = otherTxid
-	k, err := wallet.FindRedemption(tCtx, contractTxid, contractVout)
+	k, err := wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for missing redemption rpc error: %s", k.String())
 	}
@@ -1014,14 +1015,14 @@ func TestFindRedemption(t *testing.T) {
 	// Canceled context
 	deadCtx, shutdown := context.WithCancel(context.Background())
 	shutdown()
-	_, err = wallet.FindRedemption(deadCtx, contractTxid, contractVout)
+	_, err = wallet.FindRedemption(deadCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for canceled context")
 	}
 
 	// Wrong redemption
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(randBytes(100))
-	_, err = wallet.FindRedemption(tCtx, contractTxid, contractVout)
+	_, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong redemption")
 	}
@@ -1029,14 +1030,14 @@ func TestFindRedemption(t *testing.T) {
 
 	// Wrong script type for output
 	contractBlock.RawTx[0].Vout[1].ScriptPubKey.Hex = hex.EncodeToString(otherScript)
-	_, err = wallet.FindRedemption(tCtx, contractTxid, contractVout)
+	_, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for wrong script type")
 	}
 	contractBlock.RawTx[0].Vout[1].ScriptPubKey.Hex = hex.EncodeToString(pkScript)
 
 	// Sanity check to make sure it passes again.
-	_, err = wallet.FindRedemption(tCtx, contractTxid, contractVout)
+	_, err = wallet.FindRedemption(tCtx, coinID)
 	if err != nil {
 		t.Fatalf("error after clearing errors: %v", err)
 	}
@@ -1078,7 +1079,7 @@ func TestRefund(t *testing.T) {
 
 	// Invalid coin
 	badReceipt := &tReceipt{
-		coin: &tCoin{id: "nonhex"},
+		coin: &tCoin{id: make([]byte, 15)},
 	}
 	err = wallet.Refund(badReceipt)
 	if err == nil {

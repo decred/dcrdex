@@ -135,7 +135,7 @@ func TestWallet(t *testing.T) {
 
 	inUTXOs := func(utxo asset.Coin, utxos []asset.Coin) bool {
 		for _, u := range utxos {
-			if u.ID() == utxo.ID() && u.Index() == utxo.Index() {
+			if bytes.Equal(u.ID(), utxo.ID()) {
 				return true
 			}
 		}
@@ -204,7 +204,7 @@ func TestWallet(t *testing.T) {
 
 	// Alpha should be able to redeem.
 	swapOutput := receipt.Coin()
-	ci, err := rig.alpha().AuditContract(swapOutput.ID(), swapOutput.Index(), swapOutput.Redeem())
+	ci, err := rig.alpha().AuditContract(swapOutput.ID(), swapOutput.Redeem())
 	if err != nil {
 		t.Fatalf("error auditing contract")
 	}
@@ -237,7 +237,7 @@ func TestWallet(t *testing.T) {
 
 	// Find the redemption
 	ctx, _ := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
-	checkKey, err := rig.gamma().FindRedemption(ctx, swapOutput.ID(), swapOutput.Index())
+	checkKey, err := rig.gamma().FindRedemption(ctx, swapOutput.ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestWallet(t *testing.T) {
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
-	_, err = rig.gamma().FindRedemption(ctx, swapOutput.ID(), swapOutput.Index())
+	_, err = rig.gamma().FindRedemption(ctx, swapOutput.ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}

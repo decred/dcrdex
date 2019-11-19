@@ -63,7 +63,7 @@ func (wc *walletClient) LockUnspent(unlock bool, ops []*output) error {
 	rpcops := make([]*RPCOutpoint, 0, len(ops))
 	for _, op := range ops {
 		rpcops = append(rpcops, &RPCOutpoint{
-			TxID: op.txid,
+			TxID: op.txHash.String(),
 			Vout: op.vout,
 		})
 	}

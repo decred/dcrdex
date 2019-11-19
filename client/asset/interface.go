@@ -36,7 +36,7 @@ type Wallet interface {
 	// AuditContract retrieves information about a swap contract on the
 	// blockchain. This would be used to verify the counter-party's contract
 	// during a swap.
-	AuditContract(string, uint32, dex.Bytes) (AuditInfo, error)
+	AuditContract(coinID, contract dex.Bytes) (AuditInfo, error)
 	// FindRedemption should attempt to find the input that spends the specified
 	// output, and returns the secret key if it does.
 	//
@@ -51,7 +51,7 @@ type Wallet interface {
 	// looking for the maker's redemption beginning at swapconf confirmations
 	// (at the latest) regardless of whether the server sends the 'redemption'
 	// message or not.
-	FindRedemption(ctx context.Context, txid string, vout uint32) (dex.Bytes, error)
+	FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired.
 	Refund(Receipt) error
@@ -66,10 +66,8 @@ type Wallet interface {
 // Coin is some amount of spendable asset. Coin provides the information needed
 // to locate the unspent value on the blockchain.
 type Coin interface {
-	// ID is a unique identifier for this output, likely a txid.
-	ID() string
-	// Index is a secondary identifier needed to locate this coin.
-	Index() uint32
+	// ID is a unique identifier for this coin.
+	ID() dex.Bytes
 	// Value is the available quantity, in atoms/satoshi.
 	Value() uint64
 	// Confirmations is the number of confirmations on this Coin's block. If the

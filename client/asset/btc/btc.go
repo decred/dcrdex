@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -54,7 +55,7 @@ func outpointID(txid string, vout uint32) string {
 
 // output is information about a transaction output.
 type output struct {
-	txid   string
+	txHash chainhash.Hash
 	vout   uint32
 	value  uint64
 	redeem dex.Bytes
@@ -64,7 +65,7 @@ type output struct {
 // newOutput is the constructor for an output.
 func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64, redeem dex.Bytes) *output {
 	return &output{
-		txid:   txHash.String(),
+		txHash: *txHash,
 		vout:   vout,
 		value:  value,
 		redeem: redeem,
@@ -82,7 +83,7 @@ func (output *output) Value() uint64 {
 // and will return an error if the output has been spent. Part of the
 // asset.Coin interface.
 func (output *output) Confirmations() (uint32, error) {
-	txOut, err := output.node.GetTxOut(output.txHash(), output.vout, true)
+	txOut, err := output.node.GetTxOut(&output.txHash, output.vout, true)
 	if err != nil {
 		return 0, fmt.Errorf("error finding unspent contract: %v", err)
 	}
@@ -93,28 +94,14 @@ func (output *output) Confirmations() (uint32, error) {
 }
 
 // ID is the output's transaction ID. Part of the asset.Coin interface.
-func (op *output) ID() string {
-	return op.txHash().String()
-}
-
-// Index is the vout index of this output in the transaction. Part of the
-// asset.Coin interface.
-func (op *output) Index() uint32 {
-	return op.vout
+func (op *output) ID() dex.Bytes {
+	return toCoinID(&op.txHash, op.vout)
 }
 
 // Redeem is any known redeem script required to spend this output. Part of the
 // asset.Coin interface.
 func (op *output) Redeem() dex.Bytes {
 	return op.redeem
-}
-
-// txHash creates a *chainhash.Hash from the output's transaction ID. It is
-// assumed that the output is created with newOutput, so there is no viable way
-// for enoding to fail and errors are ignored.
-func (op *output) txHash() *chainhash.Hash {
-	txHash, _ := chainhash.NewHashFromStr(op.txid)
-	return txHash
 }
 
 // contractInfo is information about a swap contract on that blockchain, not
@@ -405,7 +392,7 @@ func (btc *ExchangeWallet) Swap(swapTx *asset.SwapTx) ([]asset.Receipt, error) {
 			return nil, fmt.Errorf("error converting coin: %v", err)
 		}
 		totalIn += output.value
-		prevOut := wire.NewOutPoint(output.txHash(), output.vout)
+		prevOut := wire.NewOutPoint(&output.txHash, output.vout)
 		txIn := wire.NewTxIn(prevOut, []byte{}, nil)
 		txIn.Sequence = wire.MaxTxInSequenceNum - 1
 		baseTx.AddTxIn(txIn)
@@ -471,7 +458,7 @@ func (btc *ExchangeWallet) Redeem(redemption *asset.Redemption) error {
 		return fmt.Errorf("secret hash mismatch")
 	}
 	msgTx := wire.NewMsgTx(wire.TxVersion)
-	prevOut := wire.NewOutPoint(cinfo.output.txHash(), cinfo.output.vout)
+	prevOut := wire.NewOutPoint(&cinfo.output.txHash, cinfo.output.vout)
 	txIn := wire.NewTxIn(prevOut, []byte{}, nil)
 	txIn.Sequence = wire.MaxTxInSequenceNum - 1
 	msgTx.AddTxIn(txIn)
@@ -525,7 +512,7 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	if err != nil {
 		return nil, nil, fmt.Errorf("error converting coin: %v", err)
 	}
-	tx, err := btc.wallet.GetTransaction(output.txHash().String())
+	tx, err := btc.wallet.GetTransaction(output.txHash.String())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -551,10 +538,10 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // AuditContract retrieves information about a swap contract on the blockchain.
 // AuditContract would be used to audit the counter-party's contract during a
 // swap.
-func (btc *ExchangeWallet) AuditContract(txid string, vout uint32, contract dex.Bytes) (asset.AuditInfo, error) {
-	txHash, err := chainhash.NewHashFromStr(txid)
+func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (asset.AuditInfo, error) {
+	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding txid '%s': %v", txid, err)
+		return nil, err
 	}
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
@@ -600,24 +587,25 @@ func (btc *ExchangeWallet) AuditContract(txid string, vout uint32, contract dex.
 // and returns the secret key if it does. The inputs are the txid and vout of
 // the contract output that was redeemed. This method only works with contracts
 // sent from the wallet.
-func (btc *ExchangeWallet) FindRedemption(ctx context.Context, txid string, vout uint32) (dex.Bytes, error) {
-	tx, err := btc.wallet.GetTransaction(txid)
+func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error) {
+	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txid, err)
+		return nil, err
+	}
+	txid := txHash.String()
+	tx, err := btc.wallet.GetTransaction(txHash.String())
+	if err != nil {
+		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txHash, err)
 	}
 	if tx.BlockIndex == 0 {
 		// This is a mempool transaction, so we need to scan other mempool
 		// transactions.
-		txHash, err := chainhash.NewHashFromStr(txid)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding txid %s: %v", txid, err)
-		}
 		rawTx, err := btc.node.GetRawTransactionVerbose(txHash)
 		if err != nil {
 			return nil, fmt.Errorf("error getting contract details from mempool")
 		}
 		if int(vout) > len(rawTx.Vout)-1 {
-			return nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txid)
+			return nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
 		}
 		contractHash, err := extractContractHash(rawTx.Vout[vout].ScriptPubKey.Hex, btc.chainParams)
 		if err != nil {
@@ -718,12 +706,12 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, txid string, vout
 // expired.
 func (btc *ExchangeWallet) Refund(receipt asset.Receipt) error {
 	op := receipt.Coin()
-	txHash, err := chainhash.NewHashFromStr(op.ID())
+	txHash, vout, err := decodeCoinID(op.ID())
 	if err != nil {
-		return fmt.Errorf("error decoding txid: %v", err)
+		return err
 	}
 	// Grab the unspent output to make sure it's good and to get the value.
-	utxo, err := btc.node.GetTxOut(txHash, op.Index(), true)
+	utxo, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
 		return fmt.Errorf("error finding unspent contract: %v", err)
 	}
@@ -743,7 +731,7 @@ func (btc *ExchangeWallet) Refund(receipt asset.Receipt) error {
 
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.LockTime = uint32(lockTime)
-	prevOut := wire.NewOutPoint(txHash, op.Index())
+	prevOut := wire.NewOutPoint(txHash, vout)
 	txIn := wire.NewTxIn(prevOut, []byte{}, nil)
 	txIn.Sequence = wire.MaxTxInSequenceNum - 1
 	msgTx.AddTxIn(txIn)
@@ -811,7 +799,7 @@ func extractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte
 	contractAddr := scriptAddrs.PKHashes[0]
 	_, ok := contractAddr.(*btcutil.AddressScriptHash)
 	if !ok {
-		return nil, fmt.Errorf("wrong contract address type")
+		return nil, fmt.Errorf("wrong contract address type %s: %T", contractAddr, contractAddr)
 	}
 	return contractAddr.ScriptAddress(), nil
 }
@@ -852,11 +840,11 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	if op != nil {
 		return op, nil
 	}
-	txHash, err := chainhash.NewHashFromStr(coin.ID())
+	txHash, vout, err := decodeCoinID(coin.ID())
 	if err != nil {
 		return nil, err
 	}
-	return newOutput(btc.node, txHash, coin.Index(), coin.Value(), coin.Redeem()), nil
+	return newOutput(btc.node, txHash, vout, coin.Value(), coin.Redeem()), nil
 }
 
 // sendWithReturn sends the unsigned transaction with an added output (unless
@@ -1020,4 +1008,24 @@ func (btc *ExchangeWallet) getVerboseBlockTxs(blockID string) (*verboseBlockTxs,
 		return nil, err
 	}
 	return blk, nil
+}
+
+// toCoinID converts the tx hash and vout to a coin ID, as a []byte.
+func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
+	coinID := make([]byte, 36)
+	copy(coinID[:32], txHash[:])
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, vout)
+	copy(coinID[32:], b)
+	return coinID
+}
+
+// decodeCoinID decodes the coin ID into a tx hash and a vout.
+func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
+	if len(coinID) != 36 {
+		return nil, 0, fmt.Errorf("coin ID wrong length. expected 36, got %d", len(coinID))
+	}
+	var txHash chainhash.Hash
+	copy(txHash[:], coinID[:32])
+	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
 }
