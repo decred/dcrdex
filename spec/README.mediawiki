@@ -257,7 +257,7 @@ transactions.
 
 Each asset has two distinct '''minimum numbers of confirmations'''.
 The <code>fundconf</code> is the number of confirmations required for
-[[#Order_Preparation|backing UTXOs]]. The <code>swapconf</code> is the number
+[[#Order_Preparation|backing coins]]. The <code>swapconf</code> is the number
 of confirmations required during settlement on the first swap transaction,
 before the second swap transaction is broadcast.
 
@@ -311,9 +311,7 @@ respond with its current configuration.
 |-
 | swapconf || int || minimum confirmations for swap transactions
 |-
-| fundconf || int || minimum confirmations for backing UTXOs
-|-
-| scripts  || &#91;string&#93; || acceptable backing UTXO script types. minimum &#91;"P2PKH"&#93;
+| fundconf || int || minimum confirmations for funding coins
 |}
 
 ===Fees===
@@ -568,9 +566,7 @@ the registration process.
 |-
 | accountid || string || client's account ID
 |-
-| txid      || string || transaction ID
-|-
-| vout      || int    || the transaction output index which pays the fee
+| coinid    || string || hex-encoded coin ID
 |-
 | timestamp || int    || UNIX timestamp
 |-
@@ -584,9 +580,7 @@ the registration process.
 |-
 | account ID || 16 || client account ID
 |-
-| tx ID      || 32 || the transaction ID
-|-
-| vout       || 4  || transaction output index
+| coin ID    || asset-dependent || the coin ID
 |}
 
 <code>result</code>
@@ -820,10 +814,10 @@ websocket connection.
 ===Order Preparation===
 
 As part of the order, the client must demonstrate control of funds.
-This is accomplished by supplying information and a signature for each previous
-output (UTXO) that will be spent.
+This is accomplished by supplying information and a signature for each
+[[#Coin_ID|coin]] that will be spent.
 The client covers the ''backing fees'' associated with the inputs spending their
-own UTXOs.
+own coins.
 
 In addition, the client must show the ability to cover ''base fees'' for any
 initialization transactions that will be generated. The client must show that
@@ -840,8 +834,7 @@ initialization transactions for every match in the order.
 For asset '''Z''', a ''base fee ratio'', '''''R<sub>z</sub>''''' is calculated
 based on the ''lot size'', '''''l''''' (units ''Z''), a ''fee rate'',
 '''''r''''' (''Z/byte''), and a ''transaction size'', '''''s''''' (''bytes'').
-'''''s''''' is pre-calculated based on an initialization transaction with 1
-standard P2PKH input, 1 standard P2PKH output, and 1 swap output.
+'''''s''''' is pre-calculated based on a standard initialization transaction.
 
 <!--R_z = \frac{ s r }{ l }-->
 [[File:images/fee_max_ratio.png]]
@@ -860,61 +853,9 @@ the base fees, '''''f<sub>fin</sub>''''', can only be known to fall within a
 range '''''r s &#8804; f<sub>fin</sub> &#8804; f<sub>base</sub> '''''.
 
 The client also covers the '''backing fees''' associated with spending their
-backing UTXOs, '''''f<sub>utxo</sub>'''''.
+backing coins, '''''f<sub>coin</sub>'''''.
 The client must know how to calculate the script sizes to assess fees.
-The DEX will verify the UTXO sum before accepting the order.
-
-====UTXO Preparation====
-
-All backing UTXOs must have a minimum number of confirmations. The exact number,
-<code>swapconf</code>, is an [[#Exchange_Variables|asset variable]] set by the
-DEX operator.
-
-With the exception of market buy orders, which are detailed below, for an order
-of quantity '''''Q''''', the sum value of the selected UTXOs, '''''V''''',
-must satisfy the relation
-
-<!--V \ge Q + f_{base} + f_{utxo}-->
-[[File:images/utxo-sum.png]]
-
-There may be types of pubkey script which are not implemented.
-As a rule, P2PKH will always be available.
-
-As part of the order, the client will submit a list of ''UTXO objects''.
-
-'''JSON UTXO object'''
-
-{|
-! field     !! type   !! description
-|-
-| txid      || string || hex-encoded transaction ID
-|-
-| vout      || int    || the transaction output index
-|-
-| pubkeys   || [string] || array of hex-encoded pubkeys which satisfy the pubkey script
-|-
-| sigs      || [string] || array of signatures of Blake-256 hashes of the serialized UTXO. serialization described below
-|-
-| redeem    || string || hex-encoded redeem script for P2SH. empty for P2PKH
-|}
-
-In order to enable multi-signature support, more than one pubkey can be
-submitted. If more than one pubkey is submitted, there should be a signature
-for each one.
-The data is signed with the private key(s) corresponding to the
-<code>pubkeys</code>.
-The <code>pubkeys</code> themselves must correspond with addresses in the
-UTXO's pubkey script (or corresponding redeem script).
-
-'''UTXO serialization'''
-
-{|
-! field   !! size (bytes) !! description
-|-
-| tx hash || asset-dependent || the transaction hash
-|-
-| vout    || 4  || the UTXO's transaction output index
-|}
+The DEX will verify the coin sum before accepting the order.
 
 ====Rate Encoding====
 
@@ -933,6 +874,64 @@ Z, the message-rate encoding would be
 '''''r<sub>msg</sub> = 1 x 10<sup>8</sup> x 0.001 = 100000'''''
 
 with unit ''atoms Y / unit Z''.
+
+====Coin ID====
+
+In order to demonstrate control of unspent value on the blockchain, a user must
+provide its location. For Bitcoin-based blockchains, value is located by
+pointing to an unspent transaction output (UTXO), identified by its transaction
+ID and output index (vout).
+
+In an effort to stay blockchain-protocol agnostic, the DEX accepts
+and recognizes the locating information as a single byte-array called the
+'''''coin ID''''', with the term '''''coin''''' being defined here as a some
+amount of spendable value that is verifiable on the blockchain.
+It is up to backend and wallet developers to decide on how to properly encode the
+identifier as a coin ID. As an example, Bitcoin implements
+encoding as 36 bytes with the transaction hash being the first 32-bytes, and the
+big-endian encoded output index as the last 4 bytes.
+
+====Coin Preparation====
+
+All backing [[#Coin_ID|coins]] must have a minimum number of confirmations. The exact number,
+<code>swapconf</code>, is an [[#Exchange_Variables|asset variable]] set by the
+DEX operator.
+
+With the exception of market buy orders, which are detailed below, for an order
+of quantity '''''Q''''', the sum value of the selected coins, '''''V''''',
+must satisfy the relation
+(with [[#Calculating_Transaction_Fees|fees]])
+
+<!--V \ge Q + f_{base} + f_{coin}-->
+[[File:images/coin-sum.png]]
+
+There may be types of coins which are not supported by the asset's DEX
+implementation. Asset developers should make coin-spending limitations clear
+to wallet users.
+
+As part of the order, the client will submit a list of ''Coin objects''.
+
+'''JSON Coin object'''
+
+{|
+! field     !! type   !! description
+|-
+| coinid    || string || hex-encoded coin ID
+|-
+| pubkeys   || [string] || array of hex-encoded pubkeys which spend the coin
+|-
+| sigs      || [string] || array of signatures of Blake-256 hashes of the serialized coin IDs
+|-
+| redeem    || string || hex-encoded redeem script for P2SH. empty for P2PKH
+|}
+
+In order to enable multi-signature support, more than one pubkey can be
+submitted. If more than one pubkey is submitted, there should be a signature
+for each one.
+The data is signed with the private key(s) corresponding to the
+<code>pubkeys</code>.
+The <code>pubkeys</code> themselves must correspond with addresses payable by
+the coin's pubkey script (or corresponding redeem script).
 
 ====Order Signing====
 
@@ -1021,7 +1020,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | timeinforce || int || standing = 1, immediate = 2
 |-
-| utxos       ||  &#91;[[#UTXO_Preparation|UTXO]]&#93; || list of backing UTXOs
+| coins       ||  &#91;[[#Coin_Preparation|Coin]]&#93; || array of funding coins
 |-
 | address     || string || address where the matched client will send funds
 |-
@@ -1033,11 +1032,11 @@ crosses the spread (i.e. a taker rather than a maker). The
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 57 || [[#utxo-preparation|the order prefix]]
+| prefix     || 57 || [[#Order_Signing|the order prefix]]
 |-
-| UTXO count || 1  || The number of backing UTXOs
+| coin count || 1  || The number of funding coins
 |-
-| UTXO data  || 36 x count || [[#utxo-preparation|sequence of UTXO data]]
+| coin data  || coin length x count || [[#Coin_Preparation|sequence of coin IDs]]
 |-
 | side       || 1 || 1 for buy, 2 for sell
 |-
@@ -1081,7 +1080,7 @@ the epoch match cycle) is left unfilled.
 |-
 | ordersize   || int || order size (atoms)
 |-
-| utxos       ||  &#91;[[#UTXO_Preparation|UTXO]]&#93; || list of backing UTXOs
+| coins       ||  &#91;[[#Coin_Preparation|Coin]]&#93; || array of funding coins
 |-
 | address     || string || address where the matched client will send funds
 |-
@@ -1093,11 +1092,11 @@ the epoch match cycle) is left unfilled.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 57 || [[#utxo-preparation|the order prefix]]
+| prefix     || 57 || [[#Order_Signing|the order prefix]]
 |-
-| UTXO count || 1  || The number of backing UTXOs
+| coin count || 1  || The number of funding coins
 |-
-| UTXO data  || 36 x count || [[#utxo-preparation|sequence of UTXO data]]
+| coin data  || coin length x count || [[#Coin_Preparation|sequence of coin IDs]]
 |-
 | side       || 1 || 1 for buy, 2 for sell
 |-
@@ -1180,7 +1179,7 @@ This is by design and discourages certain types of spoofing.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 65 || [[#utxo-preparation|the order prefix]]
+| prefix     || 65 || [[#Order_Signing|the order prefix]]
 |-
 | orderid    || 16 || the order ID
 |}
@@ -1274,9 +1273,7 @@ relay to the matching party.
 |-
 | matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
 |-
-| txid       || string || the hex-encoded transaction ID
-|-
-| vout       || int    || the output index
+| coinid    || string || hex-encoded coin ID
 |-
 | timestamp  || int    || client's UNIX timestamp
 |-
@@ -1294,9 +1291,7 @@ relay to the matching party.
 |-
 | matchid    || 32  || the ID assigned to this match
 |-
-| tx hash    || asset-dependent  || the transaction hash
-|-
-| vout       || 4 || the output index
+| coin ID    || asset-dependent  || the coin ID
 |-
 | timestamp  || 8  || the client's UNIX timestamp
 |-
@@ -1357,9 +1352,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | matchid    || string    || the match ID
 |-
-| txid       || string || the hex-encoded transaction ID
-|-
-| vout       || int    || the output index
+| coinid    || string || hex-encoded coin ID
 |-
 | timestamp  || int    || client's UNIX timestamp
 |-
@@ -1376,9 +1369,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | matchid    || 32  || the match ID
 |-
-| tx hash    || asset-dependent  || the transaction hash
-|-
-| vout       || 4 || the output index
+| coin ID    || asset-dependent  || the coin ID
 |-
 | timestamp  || 8  || the client's UNIX timestamp
 |}
@@ -1397,9 +1388,7 @@ The DEX informs the taker when the maker has redeemed.
 |-
 | matchid    || 32  || the match ID
 |-
-| tx hash    || asset-dependent  || the transaction hash
-|-
-| vout       || 4 || the output index
+| coinid     || string || hex-encoded coin ID
 |-
 | timestamp  || int    || server's UNIX timestamp
 |-
@@ -1415,9 +1404,7 @@ The DEX informs the taker when the maker has redeemed.
 |-
 | matchid    || 32  || the match ID
 |-
-| tx hash    || asset-dependent  || the transaction hash
-|-
-| vout       || 4 || the output index
+| coin ID    || asset-dependent  || the coin ID
 |-
 | timestamp  || 8  || server's UNIX timestamp
 |}
@@ -1516,7 +1503,7 @@ simplifications are made.
 
 <img src="images/ab-profiles.png" align="right">
 # The lot size for the market is 1 DCR.
-# All backing funds for the orders are in the form of a single UTXO.
+# All backing funds for the orders are in the form of a single coin.
 # There are no fees.
 
 The examples involve a participant named Alice, who holds some DCR and would
@@ -1746,7 +1733,7 @@ possible.
 |-
 | fee&nbsp;rate  || atoms/byte || the minimum fee rate for swap transactions
 |-
-| utxo&nbsp;confirmations|| count || the Minimum confirmations for backing UTXOs
+| coin&nbsp;confirmations|| count || the Minimum confirmations for backing coins
 |-
 | swap&nbsp;confirmations|| count || the Minimum confirmations before acting on a swap transaction
 |}
