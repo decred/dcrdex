@@ -704,7 +704,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		return nil, fmt.Errorf("error decoding block hash: %v", err)
 	}
 	contractBlock := *blockHash
-	var secretHash []byte
+	var contractHash []byte
 	blockHeight := tx.BlockIndex
 	for {
 		select {
@@ -724,14 +724,14 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 					if len(vouts) < int(vout)+1 {
 						return nil, fmt.Errorf("vout %d not found in tx %s", vout, txid)
 					}
-					secretHash, err = dexbtc.ExtractContractHash(vouts[vout].ScriptPubKey.Hex, btc.chainParams)
+					contractHash, err = dexbtc.ExtractContractHash(vouts[vout].ScriptPubKey.Hex, btc.chainParams)
 					if err != nil {
 						return nil, err
 					}
 				}
 			}
 		}
-		if len(secretHash) == 0 {
+		if len(contractHash) == 0 {
 			return nil, fmt.Errorf("no secret hash found at %s:%d", txid, vout)
 		}
 		// Look at the previous outpoint of each input of each transaction in the
@@ -745,7 +745,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 					if err != nil {
 						return nil, fmt.Errorf("error decoding scriptSig '%s': %v", vin.ScriptSig.Hex, err)
 					}
-					key, err := dexbtc.FindKeyPush(sigScript, secretHash, btc.chainParams)
+					key, err := dexbtc.FindKeyPush(sigScript, contractHash, btc.chainParams)
 					if err != nil {
 						return nil, fmt.Errorf("error extracting key from '%s': %v", vin.ScriptSig.Hex, err)
 					}

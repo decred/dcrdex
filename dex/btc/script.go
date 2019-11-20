@@ -243,7 +243,7 @@ func ParseScriptType(pkScript, redeemScript []byte) BTCScriptType {
 	default:
 		return ScriptUnsupported
 	}
-	if scriptType.IsP2SH() {
+	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
 		scriptClass := txscript.GetScriptClass(redeemScript)
 		if scriptClass == txscript.MultiSigTy {
 			scriptType |= ScriptMultiSig
@@ -262,23 +262,17 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 	if err != nil {
 		return nil, fmt.Errorf("error decoding recipient address %s: %v", recipient, err)
 	}
-	if rAddr.(*btcutil.AddressPubKeyHash) == nil {
+	_, ok := rAddr.(*btcutil.AddressPubKeyHash)
+	if !ok {
 		return nil, fmt.Errorf("recipient address %s is not a pubkey-hash address", recipient)
-	}
-	rScriptAddr := rAddr.ScriptAddress()
-	if len(rScriptAddr) != ContractHashSize {
-		return nil, fmt.Errorf("recipient script addresses of length %d not supported", len(rScriptAddr))
 	}
 	sAddr, err := btcutil.DecodeAddress(sender, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding sender address %s: %v", sender, err)
 	}
-	if sAddr.(*btcutil.AddressPubKeyHash) == nil {
+	_, ok = sAddr.(*btcutil.AddressPubKeyHash)
+	if !ok {
 		return nil, fmt.Errorf("sender address %s is not a pubkey-hash address", recipient)
-	}
-	sScriptAddr := sAddr.ScriptAddress()
-	if len(sScriptAddr) != ContractHashSize {
-		return nil, fmt.Errorf("sender script addresses of length %d not supported", len(sScriptAddr))
 	}
 	if len(secretHash) != SecretHashSize {
 		return nil, fmt.Errorf("secret hash of length %d not supported", len(secretHash))
@@ -297,14 +291,14 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 			txscript.OP_EQUALVERIFY,
 			txscript.OP_DUP,
 			txscript.OP_HASH160,
-		}).AddData(rScriptAddr).
+		}).AddData(rAddr.ScriptAddress()).
 		AddOp(txscript.OP_ELSE).
 		AddInt64(lockTime).AddOps([]byte{
 		txscript.OP_CHECKLOCKTIMEVERIFY,
 		txscript.OP_DROP,
 		txscript.OP_DUP,
 		txscript.OP_HASH160,
-	}).AddData(sScriptAddr).
+	}).AddData(sAddr.ScriptAddress()).
 		AddOps([]byte{
 			txscript.OP_ENDIF,
 			txscript.OP_EQUALVERIFY,
@@ -373,7 +367,8 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScript
 // ExtractSwapDetails extacts the sender and receiver addresses from a swap
 // contract. If the provided script is not a swap contract, an error will be
 // returned.
-func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (btcutil.Address, btcutil.Address, uint64, []byte, error) {
+func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
+	sender btcutil.Address, receiver btcutil.Address, lockTime uint64, secretHash []byte, err error) {
 	// A swap redemption sigScript is <pubkey> <secret> and satisfies the
 	// following swap contract.
 	//
@@ -392,7 +387,7 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (btcutil.
 	// 1 + 4 + 1 + 1 + 1 + 1 + 1 + 20 = 30 bytes for refund block
 	// 5 + 62 + 30 = 97 bytes
 	if len(pkScript) != SwapContractSize {
-		return nil, nil, 0, nil, fmt.Errorf("incorrect swap contract length. found %d, expected %d", SwapContractSize, len(pkScript))
+		return nil, nil, 0, nil, fmt.Errorf("incorrect swap contract length. expected %d, got %d", SwapContractSize, len(pkScript))
 	}
 
 	if pkScript[0] == txscript.OP_IF &&
@@ -547,9 +542,13 @@ func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) (
 	// backwards to ensure it not hidden behind some non-standard script.
 	var keyHash []byte
 	for i := len(dataPushes) - 1; i >= 0; i-- {
-		h := btcutil.Hash160(dataPushes[i])
-		if len(keyHash) == 0 && bytes.Equal(h[:], contractHash) {
-			_, _, _, keyHash, err = ExtractSwapDetails(dataPushes[i], chainParams)
+		push := dataPushes[i]
+		if len(keyHash) == 0 && len(push) != SwapContractSize {
+			continue
+		}
+		h := btcutil.Hash160(push)
+		if bytes.Equal(h[:], contractHash) {
+			_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
 			if err != nil {
 				return nil, fmt.Errorf("error extracting atomic swap details: %v", err)
 			}
@@ -557,16 +556,19 @@ func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) (
 		}
 		// If we've found the keyhash, starting hashing the push to find the key.
 		if len(keyHash) > 0 {
-			h := sha256.Sum256(dataPushes[i])
+			if len(push) != SecretKeySize {
+				continue
+			}
+			h := sha256.Sum256(push)
 			if bytes.Equal(h[:], keyHash) {
-				return dataPushes[i], nil
+				return push, nil
 			}
 		}
 	}
 	return nil, fmt.Errorf("key not found")
 }
 
-// ExtractContractHash extracts the secret hash from the contract.
+// ExtractContractHash extracts the redeem script hash from the P2SH script.
 func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte, error) {
 	pkScript, err := hex.DecodeString(scriptHex)
 	if err != nil {
