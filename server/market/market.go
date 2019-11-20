@@ -269,7 +269,8 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 
 		case s := <-m.orderRouter:
 			if currentEpoch == nil {
-				log.Debugf("Order %v received prior to market start.", s.rec.order)
+				// The order is not time-stamped yet, so the ID cannot be computed.
+				log.Debugf("Order type %v received prior to market start.", s.rec.order.Type())
 				s.errChan <- ErrMarketNotRunning
 				continue
 			}

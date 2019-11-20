@@ -96,7 +96,8 @@ func randomOrderID() order.OrderID {
 func TestMarket_runEpochs(t *testing.T) {
 	// This test exercises the Market's main loop, which cycles the epochs and
 	// queues (or not) incoming orders.
-	qty := uint64(dcrLotSize) * 10
+	lots := 10
+	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
 	limit := &msgjson.Limit{
@@ -117,23 +118,38 @@ func TestMarket_runEpochs(t *testing.T) {
 		TiF:  msgjson.StandingOrderNum,
 	}
 
-	lo := &order.LimitOrder{
-		MarketOrder: order.MarketOrder{
-			Prefix: order.Prefix{
-				AccountID:  aid,
-				BaseAsset:  limit.Base,
-				QuoteAsset: limit.Quote,
-				OrderType:  order.LimitOrderType,
-				ClientTime: time.Unix(int64(limit.ClientTime), 0).UTC(),
+	newLimit := func() *order.LimitOrder {
+		return &order.LimitOrder{
+			MarketOrder: order.MarketOrder{
+				Prefix: order.Prefix{
+					AccountID:  aid,
+					BaseAsset:  limit.Base,
+					QuoteAsset: limit.Quote,
+					OrderType:  order.LimitOrderType,
+					ClientTime: time.Unix(int64(limit.ClientTime), 0).UTC(),
+				},
+				UTXOs:    []order.Outpoint{},
+				Sell:     true,
+				Quantity: limit.Quantity,
+				Address:  limit.Address,
 			},
-			UTXOs:    []order.Outpoint{},
-			Sell:     true,
-			Quantity: limit.Quantity,
-			Address:  limit.Address,
-		},
-		Rate:  limit.Rate,
-		Force: order.StandingTiF,
+			Rate:  limit.Rate,
+			Force: order.StandingTiF,
+		}
 	}
+	lo := newLimit()
+
+	// w := &test.Writer{
+	// 	Addr: limit.Address,
+	// 	Acct: aid,
+	// 	Sell: true,
+	// 	Market: &test.Market{
+	// 		Base:    assetDCR.ID,
+	// 		Quote:   assetBTC.ID,
+	// 		LotSize: assetDCR.LotSize,
+	// 	},
+	// }
+	// test.WriteLimitOrder(w, limit.Rate, lots, order.StandingTiF, 0 /* ! */)
 
 	oRecord := orderRecord{
 		msgID: 1,
@@ -141,7 +157,6 @@ func TestMarket_runEpochs(t *testing.T) {
 		order: lo,
 	}
 
-	epochDurationSec := int64(1)
 	storage := &TArchivist{}
 	authMgr := &TAuth{}
 
@@ -158,6 +173,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	}
 	swapper := swap.NewSwapper(swapperCfg)
 
+	epochDurationSec := int64(1)
 	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
 		assetDCR.LotSize, uint64(epochDurationSec))
 	if err != nil {
@@ -220,7 +236,9 @@ func TestMarket_runEpochs(t *testing.T) {
 	}
 
 	// Send an order with a bad lot size.
+	lo = newLimit()
 	lo.Quantity += mkt.marketInfo.LotSize / 2
+	oRecord.order = lo
 	err = mkt.SubmitOrder(&oRecord)
 	if err == nil {
 		t.Errorf("An invalid order was processed, but it should not have been.")
@@ -228,12 +246,11 @@ func TestMarket_runEpochs(t *testing.T) {
 		t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
 	}
 
-	// restore quantity
-	lo.Quantity = qty
-
 	// Submit an order that breaks storage somehow.
 	// tweak the order so it's not a dup.
+	lo = newLimit()
 	lo.Quantity *= 2
+	oRecord.order = lo
 	storage.failOnEpochOrder(lo)
 	if err = mkt.SubmitOrder(&oRecord); err != ErrInternalServer {
 		t.Errorf(`expected ErrInternalServer ("%v"), got "%v"`, ErrInternalServer, err)
