@@ -6,6 +6,7 @@ package market
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -289,6 +290,8 @@ func TestMarket_processEpoch(t *testing.T) {
 		t.Fatalf("Failed to create test market: %v", err)
 		return
 	}
+
+	rand.Seed(0)
 
 	for i := 0; i < 8; i++ {
 		// Buys
