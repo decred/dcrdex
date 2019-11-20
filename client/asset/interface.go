@@ -13,22 +13,23 @@ import (
 // Wallet is a common interface to be implemented by cryptocurrency wallet
 // software.
 type Wallet interface {
-	// Available should return the total available funds in the wallet.
-	// Note that after calling Fund, the amount returned by Available may change
+	// Balance should return the total available funds in the wallet.
+	// Note that after calling Fund, the amount returned by Balance may change
 	// by more than the value funded.
-	Available() (available, locked uint64, err error)
+	Balance() (available, locked uint64, err error)
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
 	Fund(uint64) (Coins, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
-	// canceled or partially filled order.
+	// canceled order.
 	ReturnCoins(Coins) error
-	// Swap sends the swap transaction. The Receipts returned can be used to
-	// refund a failed transaction.
-	Swap(*SwapTx) ([]Receipt, error)
-	// Redeem sends the redemption transaction.
-	Redeem(*Redemption) error
+	// Swap sends the swaps in a single transaction. The Receipts returned can be
+	// used to refund a failed transaction.
+	Swap([]*Swap) ([]Receipt, error)
+	// Redeem sends the redemption transaction, which may contain more than one
+	// redemption.
+	Redeem([]*Redemption) error
 	// SignMessage signs the message with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
@@ -38,19 +39,18 @@ type Wallet interface {
 	// during a swap.
 	AuditContract(coinID, contract dex.Bytes) (AuditInfo, error)
 	// FindRedemption should attempt to find the input that spends the specified
-	// output, and returns the secret key if it does.
+	// coin, and return the secret key if it does.
 	//
-	// DRAFT NOTE: FindRedemption is necessary to deal with the case of a maker
+	// NOTE: FindRedemption is necessary to deal with the case of a maker
 	// redeeming but not forwarding their redemption information. The DEX does not
 	// monitor for this case. While it will result in the counter-party being
 	// penalized, the input still needs to be found so the swap can be completed.
-	// For BTC-like blockchains, every input of every block starting at the
+	// For typical blockchains, every input of every block starting at the
 	// contract block will need to be scanned until the spending input is found.
 	// This could potentially be an expensive operation if performed long after
 	// the swap is broadcast. Realistically, though, the taker should start
 	// looking for the maker's redemption beginning at swapconf confirmations
-	// (at the latest) regardless of whether the server sends the 'redemption'
-	// message or not.
+	// regardless of whether the server sends the 'redemption' message or not.
 	FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired.
@@ -84,7 +84,7 @@ type Coins []Coin
 type Receipt interface {
 	// Expiration is the time lock expiration.
 	Expiration() time.Time
-	// Coin is the contract output.
+	// Coin is the contract's coin.
 	Coin() Coin
 }
 
@@ -95,7 +95,7 @@ type AuditInfo interface {
 	Recipient() string
 	// Expiration is the unix timestamp of the contract time lock expiration.
 	Expiration() time.Time
-	// Coin is the output that contains the contract.
+	// Coin is the coin that contains the contract.
 	Coin() Coin
 }
 
@@ -103,12 +103,12 @@ type AuditInfo interface {
 // The types below will be used by the client as inputs for the methods exposed
 // by the wallet.
 
-// SwapTx is the details needed to broadcast some number of swap contracts.
-type SwapTx struct {
+// Swap is the details needed to broadcast some a swap contract.
+type Swap struct {
 	// Inputs are the Coins being spent.
 	Inputs Coins
-	// Contracts are the SwapContracts to include in this SwapTx.
-	Contracts []*Contract
+	// Contract is the contract data.
+	Contract *Contract
 }
 
 // Contract is a swap contract.

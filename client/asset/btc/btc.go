@@ -31,9 +31,12 @@ import (
 )
 
 const (
+	// Use RawRequest to get the verbose block with verbose txs, as the btcd
+	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
 )
 
+// How often to check the tip hash.
 var blockTicker = time.Second * 5
 
 // rpcClient is a wallet RPC client. In production, rpcClient is satisfied by
@@ -53,7 +56,8 @@ func outpointID(txid string, vout uint32) string {
 	return txid + ":" + strconv.Itoa(int(vout))
 }
 
-// output is information about a transaction output.
+// output is information about a transaction output. output satisfies the
+// asset.Coin interface.
 type output struct {
 	txHash chainhash.Hash
 	vout   uint32
@@ -93,7 +97,8 @@ func (output *output) Confirmations() (uint32, error) {
 	return uint32(txOut.Confirmations), nil
 }
 
-// ID is the output's transaction ID. Part of the asset.Coin interface.
+// ID is the output's coin ID. Part of the asset.Coin interface. For BTC, the
+// coin ID is 36 bytes = 32 bytes tx hash + 4 bytes big-endian vout.
 func (op *output) ID() dex.Bytes {
 	return toCoinID(&op.txHash, op.vout)
 }
@@ -104,11 +109,10 @@ func (op *output) Redeem() dex.Bytes {
 	return op.redeem
 }
 
-// contractInfo is information about a swap contract on that blockchain, not
+// auditInfo is information about a swap contract on that blockchain, not
 // necessarily created by this wallet, as would be returned from AuditContract.
-// contractInfo satisfies the asset.AuditInfo interface.
-type contractInfo struct {
-	node       rpcClient
+// auditInfo satisfies the asset.AuditInfo interface.
+type auditInfo struct {
 	output     *output
 	recipient  btcutil.Address
 	expiration time.Time
@@ -116,20 +120,20 @@ type contractInfo struct {
 
 // Recipient returns a base58 string for the contract's receiving address. Part
 // of the asset.AuditInfo interface.
-func (ci *contractInfo) Recipient() string {
+func (ci *auditInfo) Recipient() string {
 	return ci.recipient.String()
 }
 
 // Expiration returns the expiration time of the contract, which is the earliest
 // time that a refund can be issued for an un-redeemed contract. Part of the
 // asset.AuditInfo interface.
-func (ci *contractInfo) Expiration() time.Time {
+func (ci *auditInfo) Expiration() time.Time {
 	return ci.expiration
 }
 
 // Coin returns the output as an asset.Coin. Part of the asset.AuditInfo
 // interface.
-func (ci *contractInfo) Coin() asset.Coin {
+func (ci *auditInfo) Coin() asset.Coin {
 	return ci.output
 }
 
@@ -147,7 +151,7 @@ func (r *swapReceipt) Expiration() time.Time {
 }
 
 // Coin is the output information as an asset.Coin. Part of the asset.Receipt
-// inteface.
+// interface.
 func (r *swapReceipt) Coin() asset.Coin {
 	return r.output
 }
@@ -190,8 +194,7 @@ type WalletConfig struct {
 	// loop detects a new block. If the error supplied is nil, the client should
 	// check the confirmations on any negotiating swaps to see if action is
 	// needed. If the error is non-nil, the wallet monitoring loop encountered an
-	// error while retreiving tip information, and steps should be taken to ensure
-	// a good node connection.
+	// error while retreiving tip information.
 	TipChange func(error)
 }
 
@@ -271,13 +274,13 @@ func newWallet(ctx context.Context, cfg *WalletConfig, logger dex.Logger,
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
-// Available should return the total available funds in the wallet.
-// Note that after calling Fund, the amount returned by Available may change
+// Balance should return the total available funds in the wallet.
+// Note that after calling Fund, the amount returned by Balance may change
 // by more than the value funded. Because of the DEX confirmation requirements,
 // a simple getbalance with a minconf argument is not sufficient to see all
 // balance available for the exchange. Instead, all wallet UTXOs are scanned
 // for those that match DEX requirements. Part of the asset.Wallet interface.
-func (btc *ExchangeWallet) Available() (uint64, uint64, error) {
+func (btc *ExchangeWallet) Balance() (uint64, uint64, error) {
 	unspents, err := btc.wallet.ListUnspent()
 	if err != nil {
 		return 0, 0, err
@@ -289,6 +292,9 @@ func (btc *ExchangeWallet) Available() (uint64, uint64, error) {
 // Fund selects utxos (as asset.Coin) for use in an order. Any Coins returned
 // will be locked. Part of the asset.Wallet interface.
 func (btc *ExchangeWallet) Fund(value uint64) (asset.Coins, error) {
+	if value == 0 {
+		return nil, fmt.Errorf("cannot fund value = 0")
+	}
 	unspents, err := btc.wallet.ListUnspent()
 	if err != nil {
 		return nil, err
@@ -357,8 +363,11 @@ out:
 }
 
 // ReturnCoins unlocks coins. This would be used in the case of a
-// cancelled or partially filled order. Part of the asset.Wallet interface.
+// canceled or partially filled order. Part of the asset.Wallet interface.
 func (btc *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
+	if len(unspents) == 0 {
+		return fmt.Errorf("cannot return zero coins")
+	}
 	ops := make([]*output, 0, len(unspents))
 	for _, unspent := range unspents {
 		op, err := btc.convertCoin(unspent)
@@ -381,34 +390,47 @@ func (btc *ExchangeWallet) Lock() error {
 	return btc.wallet.Lock()
 }
 
-// Swap sends the swap transactions. A list of Receipts is returned.
-func (btc *ExchangeWallet) Swap(swapTx *asset.SwapTx) ([]asset.Receipt, error) {
+// Swap sends the swap contracts and prepares the receipts.
+func (btc *ExchangeWallet) Swap(swaps []*asset.Swap) ([]asset.Receipt, error) {
 	var contracts [][]byte
 	var totalOut, totalIn uint64
+	// Start with an empty MsgTx.
 	baseTx := wire.NewMsgTx(wire.TxVersion)
-	for _, coin := range swapTx.Inputs {
-		output, err := btc.convertCoin(coin)
-		if err != nil {
-			return nil, fmt.Errorf("error converting coin: %v", err)
+	// Add the funding utxos.
+	for _, swap := range swaps {
+		for _, coin := range swap.Inputs {
+			output, err := btc.convertCoin(coin)
+			if err != nil {
+				return nil, fmt.Errorf("error converting coin: %v", err)
+			}
+			if output.value == 0 {
+				return nil, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
+			}
+			totalIn += output.value
+			prevOut := wire.NewOutPoint(&output.txHash, output.vout)
+			txIn := wire.NewTxIn(prevOut, []byte{}, nil)
+			txIn.Sequence = wire.MaxTxInSequenceNum - 1
+			baseTx.AddTxIn(txIn)
 		}
-		totalIn += output.value
-		prevOut := wire.NewOutPoint(&output.txHash, output.vout)
-		txIn := wire.NewTxIn(prevOut, []byte{}, nil)
-		txIn.Sequence = wire.MaxTxInSequenceNum - 1
-		baseTx.AddTxIn(txIn)
 	}
-	for _, contract := range swapTx.Contracts {
+	// Add the contract outputs.
+	for _, swap := range swaps {
+		contract := swap.Contract
 		totalOut += contract.Value
+		// revokeAddr is the address that will receive the refund if the contract is
+		// abandoned.
 		revokeAddr, err := btc.wallet.AddressPKH()
 		if err != nil {
 			return nil, fmt.Errorf("error creating revocation address: %v", err)
 		}
-		swapContract, err := dexbtc.MakeContract(contract.Address, revokeAddr.String(), contract.SecretHash, int64(contract.LockTime), btc.chainParams)
+		// Create the contract, a P2SH redeem script.
+		pkScript, err := dexbtc.MakeContract(contract.Address, revokeAddr.String(), contract.SecretHash, int64(contract.LockTime), btc.chainParams)
 		if err != nil {
 			return nil, fmt.Errorf("unable to create pubkey script for address %s", contract.Address)
 		}
-		contracts = append(contracts, swapContract)
-		scriptAddr, err := btcutil.NewAddressScriptHash(swapContract, btc.chainParams)
+		contracts = append(contracts, pkScript)
+		// Make the P2SH address and pubkey script.
+		scriptAddr, err := btcutil.NewAddressScriptHash(pkScript, btc.chainParams)
 		if err != nil {
 			return nil, fmt.Errorf("error encoding script address: %v", err)
 		}
@@ -416,6 +438,7 @@ func (btc *ExchangeWallet) Swap(swapTx *asset.SwapTx) ([]asset.Receipt, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error creating P2SH script: %v", err)
 		}
+		// Add the transaction output.
 		txOut := wire.NewTxOut(int64(contract.Value), p2shScript)
 		baseTx.AddTxOut(txOut)
 	}
@@ -427,14 +450,17 @@ func (btc *ExchangeWallet) Swap(swapTx *asset.SwapTx) ([]asset.Receipt, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating change address: %v", err)
 	}
+	// Sign, add change, and send the transaction.
 	msgTx, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut)
 	if err != nil {
 		return nil, err
 	}
-	swapCount := len(swapTx.Contracts)
+	// Prepare the receipts.
+	swapCount := len(swaps)
 	receipts := make([]asset.Receipt, 0, swapCount)
-	for i, cinfo := range swapTx.Contracts {
+	for i, swap := range swaps {
 		txHash := msgTx.TxHash()
+		cinfo := swap.Contract
 		receipts = append(receipts, &swapReceipt{
 			output:     newOutput(btc.node, &txHash, uint32(i), cinfo.Value, contracts[i]),
 			expiration: time.Unix(int64(cinfo.LockTime), 0).UTC(),
@@ -444,29 +470,49 @@ func (btc *ExchangeWallet) Swap(swapTx *asset.SwapTx) ([]asset.Receipt, error) {
 }
 
 // Redeem sends the redemption transaction, completing the atomic swap.
-func (btc *ExchangeWallet) Redeem(redemption *asset.Redemption) error {
-	cinfo, ok := redemption.Spends.(*contractInfo)
-	if !ok {
-		return fmt.Errorf("Redemption contract info of wrong type")
-	}
-	_, receiver, _, secretHash, err := dexbtc.ExtractSwapDetails(cinfo.output.redeem, btc.chainParams)
-	if err != nil {
-		return fmt.Errorf("error extracting swap addresses: %v", err)
-	}
-	checkSecretHash := sha256.Sum256(redemption.Secret)
-	if !bytes.Equal(checkSecretHash[:], secretHash) {
-		return fmt.Errorf("secret hash mismatch")
-	}
+func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) error {
+	// Normally, I would say that if the backend accepts an asset interface type
+	// or field, the backend should know how to handle it, but in this case, the
+	// client should always get the AuditInfo from AuditContract before using
+	// redeem, and so should never have a reason to construct a custom AuditInfo
+	// type.
+
+	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx(wire.TxVersion)
-	prevOut := wire.NewOutPoint(&cinfo.output.txHash, cinfo.output.vout)
-	txIn := wire.NewTxIn(prevOut, []byte{}, nil)
-	txIn.Sequence = wire.MaxTxInSequenceNum - 1
-	msgTx.AddTxIn(txIn)
-	size := msgTx.SerializeSize() + dexbtc.RedeemSwapContractSize + dexbtc.P2WPKHOutputSize
+	var totalIn uint64
+	var contracts [][]byte
+	var addresses []btcutil.Address
+	for _, r := range redemptions {
+		cinfo, ok := r.Spends.(*auditInfo)
+		if !ok {
+			return fmt.Errorf("Redemption contract info of wrong type")
+		}
+		// Extract the swap contract recipient and secret hash and chedck the secret
+		// hash against the hash of the provided secret.
+		_, receiver, _, secretHash, err := dexbtc.ExtractSwapDetails(cinfo.output.redeem, btc.chainParams)
+		if err != nil {
+			return fmt.Errorf("error extracting swap addresses: %v", err)
+		}
+		checkSecretHash := sha256.Sum256(r.Secret)
+		if !bytes.Equal(checkSecretHash[:], secretHash) {
+			return fmt.Errorf("secret hash mismatch")
+		}
+		addresses = append(addresses, receiver)
+		contracts = append(contracts, cinfo.output.redeem)
+		prevOut := wire.NewOutPoint(&cinfo.output.txHash, cinfo.output.vout)
+		txIn := wire.NewTxIn(prevOut, []byte{}, nil)
+		txIn.Sequence = wire.MaxTxInSequenceNum - 1
+		msgTx.AddTxIn(txIn)
+		totalIn += cinfo.output.value
+	}
+
+	// Calculate the size and the fees.
+	size := msgTx.SerializeSize() + dexbtc.RedeemSwapSigScriptSize*len(redemptions) + dexbtc.P2WPKHOutputSize
 	fee := btc.nfo.FeeRate * uint64(size)
-	if fee > cinfo.output.value {
+	if fee > totalIn {
 		return fmt.Errorf("redeem tx not worth the fees")
 	}
+	// Send the funds back to the exchange wallet.
 	redeemAddr, err := btc.wallet.ChangeAddress()
 	if err != nil {
 		return fmt.Errorf("error getting new address from the wallet: %v", err)
@@ -475,22 +521,26 @@ func (btc *ExchangeWallet) Redeem(redemption *asset.Redemption) error {
 	if err != nil {
 		return fmt.Errorf("error creating change script: %v", err)
 	}
-	txOut := wire.NewTxOut(int64(cinfo.output.value-fee), pkScript)
+	txOut := wire.NewTxOut(int64(totalIn-fee), pkScript)
+	// One last check for dust.
 	if dexbtc.IsDust(txOut, btc.nfo.FeeRate) {
 		return fmt.Errorf("redeem output is dust")
 	}
 	msgTx.AddTxOut(txOut)
-
-	redeemSig, redeemPubKey, err := btc.createSig(msgTx, 0, cinfo.output.redeem, receiver)
-	if err != nil {
-		return err
+	// Sign the inputs.
+	for i, r := range redemptions {
+		contract := contracts[i]
+		redeemSig, redeemPubKey, err := btc.createSig(msgTx, i, contract, addresses[i])
+		if err != nil {
+			return err
+		}
+		redeemSigScript, err := dexbtc.RedeemP2SHContract(contract, redeemSig, redeemPubKey, r.Secret)
+		if err != nil {
+			return err
+		}
+		msgTx.TxIn[i].SignatureScript = redeemSigScript
 	}
-	redeemSigScript, err := dexbtc.RedeemP2SHContract(cinfo.output.redeem, redeemSig, redeemPubKey, redemption.Secret)
-	if err != nil {
-		return err
-	}
-	txIn.SignatureScript = redeemSigScript
-
+	// Send the transaction.
 	checkHash := msgTx.TxHash()
 	txHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {
@@ -500,6 +550,7 @@ func (btc *ExchangeWallet) Redeem(redemption *asset.Redemption) error {
 		return fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", *txHash, checkHash)
 	}
+	// Log the change output.
 	btc.addChange(txHash.String(), 0)
 	return nil
 }
@@ -543,6 +594,7 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 	if err != nil {
 		return nil, err
 	}
+	// Get the contracts P2SH address from the tx output's pubkey script.
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
 		return nil, fmt.Errorf("error finding unspent contract: %v", err)
@@ -552,31 +604,34 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %v",
 			txOut.ScriptPubKey.Hex, err)
 	}
+	// Check for standard P2SH.
 	scriptClass, addrs, numReq, err := txscript.ExtractPkScriptAddrs(pkScript, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting script addresses from '%x': %v", pkScript, err)
 	}
+	if scriptClass != txscript.ScriptHashTy {
+		return nil, fmt.Errorf("unexpected script class %d", scriptClass)
+	}
+	// These last two checks are probably overkill.
 	if numReq != 1 {
 		return nil, fmt.Errorf("unexpected number of signatures expected for P2SH script: %d", numReq)
 	}
 	if len(addrs) != 1 {
 		return nil, fmt.Errorf("unexpected number of addresses for P2SH script: %d", len(addrs))
 	}
-	if scriptClass != txscript.ScriptHashTy {
-		return nil, fmt.Errorf("unexpected script class %d", scriptClass)
-	}
+	// Compare the contract hash to the P2SH address.
 	contractHash := btcutil.Hash160(contract)
 	addr := addrs[0]
 	if !bytes.Equal(contractHash, addr.ScriptAddress()) {
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addr.ScriptAddress())
 	}
+	// Get the receiving address.
 	_, receiver, stamp, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %v", err)
 	}
-	return &contractInfo{
-		node:       btc.node,
+	return &auditInfo{
 		output:     newOutput(btc.node, txHash, vout, toSatoshi(txOut.Value), contract),
 		recipient:  receiver,
 		expiration: time.Unix(int64(stamp), 0).UTC(),
@@ -593,13 +648,14 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		return nil, err
 	}
 	txid := txHash.String()
+	// Get the wallet transaction.
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
 		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txHash, err)
 	}
 	if tx.BlockIndex == 0 {
-		// This is a mempool transaction, so we need to scan other mempool
-		// transactions.
+		// This is a mempool transaction, GetRawTransactionVerbose works on mempool
+		// transactions, so grab the contract from there and prepare a hash.
 		rawTx, err := btc.node.GetRawTransactionVerbose(txHash)
 		if err != nil {
 			return nil, fmt.Errorf("error getting contract details from mempool")
@@ -607,18 +663,20 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		if int(vout) > len(rawTx.Vout)-1 {
 			return nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
 		}
-		contractHash, err := extractContractHash(rawTx.Vout[vout].ScriptPubKey.Hex, btc.chainParams)
+		contractHash, err := dexbtc.ExtractContractHash(rawTx.Vout[vout].ScriptPubKey.Hex, btc.chainParams)
 		if err != nil {
 			return nil, err
 		}
+		// Only need to look at other mempool transactions. For each txid, get the
+		// verbose transaction and check each input's previous outpoint.
 		txs, err := btc.node.GetRawMempool()
 		if err != nil {
 			return nil, fmt.Errorf("error retreiving mempool transactions")
 		}
-		for _, h := range txs {
-			tx, err := btc.node.GetRawTransactionVerbose(h)
+		for _, txHash := range txs {
+			tx, err := btc.node.GetRawTransactionVerbose(txHash)
 			if err != nil {
-				return nil, fmt.Errorf("error encountered retreving mempool transaction %s: %v", h, err)
+				return nil, fmt.Errorf("error encountered retreving mempool transaction %s: %v", txHash, err)
 			}
 			for i := range tx.Vin {
 				if tx.Vin[i].Txid == txid && tx.Vin[i].Vout == vout {
@@ -630,7 +688,8 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 					}
 					key, err := dexbtc.FindKeyPush(sigScript, contractHash, btc.chainParams)
 					if err != nil {
-						return nil, fmt.Errorf("error extracting key from '%s': %v", vin.ScriptSig.Hex, err)
+						return nil, fmt.Errorf("found spending input at %s:%d, but error extracting key from '%s': %v",
+							txHash, i, vin.ScriptSig.Hex, err)
 					}
 					return key, nil
 				}
@@ -638,14 +697,14 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		}
 		return nil, fmt.Errorf("no key found")
 	}
-	// It's not a mempool transaction.
-	// Start scanning the blockchain at the height of the swap.
+	// Since it's not a mempool transaction, start scanning blocks at the height
+	// of the swap.
 	blockHash, err := chainhash.NewHashFromStr(tx.BlockHash)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding block hash: %v", err)
 	}
 	contractBlock := *blockHash
-	var contractHash []byte
+	var secretHash []byte
 	blockHeight := tx.BlockIndex
 	for {
 		select {
@@ -657,7 +716,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		if err != nil {
 			return nil, fmt.Errorf("error fetching verbose block '%s': %v", blockHash, err)
 		}
-		// If this is the swap contract's block, find the contract hash.
+		// If this is the swap contract's block, grab the contract hash.
 		if *blockHash == contractBlock {
 			for i := range block.Tx {
 				if block.Tx[i].Txid == txid {
@@ -665,16 +724,18 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 					if len(vouts) < int(vout)+1 {
 						return nil, fmt.Errorf("vout %d not found in tx %s", vout, txid)
 					}
-					contractHash, err = extractContractHash(vouts[vout].ScriptPubKey.Hex, btc.chainParams)
+					secretHash, err = dexbtc.ExtractContractHash(vouts[vout].ScriptPubKey.Hex, btc.chainParams)
 					if err != nil {
 						return nil, err
 					}
 				}
 			}
 		}
-		if len(contractHash) == 0 {
+		if len(secretHash) == 0 {
 			return nil, fmt.Errorf("no secret hash found at %s:%d", txid, vout)
 		}
+		// Look at the previous outpoint of each input of each transaction in the
+		// block.
 		for i := range block.Tx {
 			for j := range block.Tx[i].Vin {
 				if block.Tx[i].Vin[j].Txid == txid && block.Tx[i].Vin[j].Vout == vout {
@@ -684,7 +745,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 					if err != nil {
 						return nil, fmt.Errorf("error decoding scriptSig '%s': %v", vin.ScriptSig.Hex, err)
 					}
-					key, err := dexbtc.FindKeyPush(sigScript, contractHash, btc.chainParams)
+					key, err := dexbtc.FindKeyPush(sigScript, secretHash, btc.chainParams)
 					if err != nil {
 						return nil, fmt.Errorf("error extracting key from '%s': %v", vin.ScriptSig.Hex, err)
 					}
@@ -696,7 +757,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		blockHeight++
 		blockHash, err = btc.node.GetBlockHash(blockHeight)
 		if err != nil {
-			return nil, fmt.Errorf("spending input not found")
+			return nil, fmt.Errorf("spending transaction not found")
 		}
 	}
 	// No viable way to get here.
@@ -717,24 +778,26 @@ func (btc *ExchangeWallet) Refund(receipt asset.Receipt) error {
 	}
 	val := toSatoshi(utxo.Value)
 	// DRAFT NOTE: The wallet does not store this contract, even though it was
-	// known when the init transaction was created. The DEX should take store this
+	// known when the init transaction was created. The DEX should store this
 	// information for persistence across sessions. Care has been taken to ensure
 	// that any type satisfying asset.Coin can be passed to the Wallet's methods,
 	// so the DEX can create it's own asset.Coin to issue a redeem or refund
-	// after a restart, for example, but the redeem script (the swap contract
-	// itself, including the counter-party's pubkey) must be included.
-	redeem := receipt.Coin().Redeem()
+	// after a restart, for example, but the (asset.Coin).Redeem script
+	// (the swap contract itself, including the counter-party's pubkey) must be
+	// included.
+	redeem := op.Redeem()
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(redeem, btc.chainParams)
 	if err != nil {
 		return fmt.Errorf("error extracting swap addresses: %v", err)
 	}
-
+	// Create the transaction that spends the contract.
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout)
 	txIn := wire.NewTxIn(prevOut, []byte{}, nil)
 	txIn.Sequence = wire.MaxTxInSequenceNum - 1
 	msgTx.AddTxIn(txIn)
+	// Calculate fees and add the change output.
 	size := msgTx.SerializeSize() + dexbtc.RefundSigScriptSize + dexbtc.P2WPKHOutputSize
 	fee := btc.nfo.FeeRate * uint64(size)
 	if fee > val {
@@ -749,10 +812,12 @@ func (btc *ExchangeWallet) Refund(receipt asset.Receipt) error {
 		return fmt.Errorf("error creating change script: %v", err)
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
+	// One last check for dust.
 	if dexbtc.IsDust(txOut, btc.nfo.FeeRate) {
 		return fmt.Errorf("refund output is dust")
 	}
 	msgTx.AddTxOut(txOut)
+	// Sign it.
 	refundSig, refundPubKey, err := btc.createSig(msgTx, 0, redeem, sender)
 	if err != nil {
 		return err
@@ -762,7 +827,7 @@ func (btc *ExchangeWallet) Refund(receipt asset.Receipt) error {
 		return err
 	}
 	txIn.SignatureScript = redeemSigScript
-
+	// Send it.
 	checkHash := msgTx.TxHash()
 	refundHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {
@@ -781,33 +846,14 @@ func (btc *ExchangeWallet) Address() (string, error) {
 	return addr.String(), err
 }
 
-// extractContractHash extracts the secret hash from the contract.
-func extractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte, error) {
-	pkScript, err := hex.DecodeString(scriptHex)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %v",
-			scriptHex, err)
-	}
-	scriptAddrs, err := dexbtc.ExtractScriptAddrs(pkScript, chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error extracting contract address: %v", err)
-	}
-	if scriptAddrs.NRequired != 1 || scriptAddrs.NumPKH != 1 {
-		return nil, fmt.Errorf("contract output has wrong number of required sigs(%d) or addresses(%d)",
-			scriptAddrs.NRequired, scriptAddrs.NumPKH)
-	}
-	contractAddr := scriptAddrs.PKHashes[0]
-	_, ok := contractAddr.(*btcutil.AddressScriptHash)
-	if !ok {
-		return nil, fmt.Errorf("wrong contract address type %s: %T", contractAddr, contractAddr)
-	}
-	return contractAddr.ScriptAddress(), nil
-}
-
 // run pings for new blocks and runs the tipChange callback function when the
 // block changes.
 func (btc *ExchangeWallet) run() {
-	var tipHash chainhash.Hash
+	h, err := btc.node.GetBestBlockHash()
+	if err != nil {
+		btc.tipChange(fmt.Errorf("error initializing best block for %s: %v", btc.nfo.Symbol, err))
+	}
+	tipHash := *h
 	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
 	for {

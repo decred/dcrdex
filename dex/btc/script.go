@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 
 	"decred.org/dcrdex/server/asset"
@@ -45,8 +46,8 @@ const (
 	// DERSigLength is the maximum length of a DER encoded signature.
 	DERSigLength = 73
 
-	// RedeemSwapContractSize is the worst case (largest) serialize size
-	// of a transaction input script that redeems atomic swap output contract.
+	// RedeemSwapSigScriptSize is the worst case (largest) serialize size
+	// of a transaction signature script that redeems atomic swap output contract.
 	// It is calculated as:
 	//
 	//   - OP_DATA_73
@@ -58,7 +59,7 @@ const (
 	//   - OP_1
 	//   - varint 97
 	//   - 97 bytes secret key
-	RedeemSwapContractSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 1 + 97
+	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 1 + 97
 
 	// RefundSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that refunds a compressed P2PKH output.
@@ -261,6 +262,9 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 	if err != nil {
 		return nil, fmt.Errorf("error decoding recipient address %s: %v", recipient, err)
 	}
+	if rAddr.(*btcutil.AddressPubKeyHash) == nil {
+		return nil, fmt.Errorf("recipient address %s is not a pubkey-hash address", recipient)
+	}
 	rScriptAddr := rAddr.ScriptAddress()
 	if len(rScriptAddr) != ContractHashSize {
 		return nil, fmt.Errorf("recipient script addresses of length %d not supported", len(rScriptAddr))
@@ -268,6 +272,9 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 	sAddr, err := btcutil.DecodeAddress(sender, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding sender address %s: %v", sender, err)
+	}
+	if sAddr.(*btcutil.AddressPubKeyHash) == nil {
+		return nil, fmt.Errorf("sender address %s is not a pubkey-hash address", recipient)
 	}
 	sScriptAddr := sAddr.ScriptAddress()
 	if len(sScriptAddr) != ContractHashSize {
@@ -557,4 +564,27 @@ func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) (
 		}
 	}
 	return nil, fmt.Errorf("key not found")
+}
+
+// ExtractContractHash extracts the secret hash from the contract.
+func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte, error) {
+	pkScript, err := hex.DecodeString(scriptHex)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %v",
+			scriptHex, err)
+	}
+	scriptAddrs, err := ExtractScriptAddrs(pkScript, chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error extracting contract address: %v", err)
+	}
+	if scriptAddrs.NRequired != 1 || scriptAddrs.NumPKH != 1 {
+		return nil, fmt.Errorf("contract output has wrong number of required sigs(%d) or addresses(%d)",
+			scriptAddrs.NRequired, scriptAddrs.NumPKH)
+	}
+	contractAddr := scriptAddrs.PKHashes[0]
+	_, ok := contractAddr.(*btcutil.AddressScriptHash)
+	if !ok {
+		return nil, fmt.Errorf("wrong contract address type %s: %T", contractAddr, contractAddr)
+	}
+	return contractAddr.ScriptAddress(), nil
 }

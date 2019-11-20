@@ -144,7 +144,7 @@ func TestWallet(t *testing.T) {
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		available, unconf, err := wallet.Available()
+		available, unconf, err := wallet.Balance()
 		tLogger.Debugf("%s %f available, %f unconfirmed", name, float64(available)/1e8, float64(unconf)/1e8)
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
@@ -152,23 +152,35 @@ func TestWallet(t *testing.T) {
 	}
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only
 	// return 1 utxo.
-	utxos, err := rig.gamma().Fund(contractValue)
+	utxos, err := rig.gamma().Fund(contractValue * 3)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// UTXOs should be locked
-	utxos, _ = rig.gamma().Fund(contractValue)
+	utxos, _ = rig.gamma().Fund(contractValue * 3)
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
 	// Now unlock, and see if we get the first one back.
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
-	utxos, _ = rig.gamma().Fund(contractValue)
+	utxos, _ = rig.gamma().Fund(contractValue * 3)
 	if !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
+	}
+	rig.gamma().ReturnCoins(utxos)
+
+	// Get a separate set of UTXOs for each contract.
+	utxos1, err := rig.gamma().Fund(contractValue)
+	if err != nil {
+		t.Fatalf("error funding first contract: %v", err)
+	}
+	// Get a separate set of UTXOs for each contract.
+	utxos2, err := rig.gamma().Fund(contractValue * 2)
+	if err != nil {
+		t.Fatalf("error funding second contract: %v", err)
 	}
 
 	// Unlock the wallet for use.
@@ -177,72 +189,92 @@ func TestWallet(t *testing.T) {
 		t.Fatalf("error unlocking gamma wallet: %v", err)
 	}
 
-	secretKey := randBytes(32)
-	keyHash := sha256.Sum256(secretKey)
+	secretKey1 := randBytes(32)
+	keyHash1 := sha256.Sum256(secretKey1)
+	secretKey2 := randBytes(32)
+	keyHash2 := sha256.Sum256(secretKey2)
 	lockTime := time.Now().Add(time.Hour * 24).UTC()
 	// Have gamma send a swap contract to the alpha address.
-	contract := &asset.Contract{
+	contract1 := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,
-		SecretHash: keyHash[:],
+		SecretHash: keyHash1[:],
 		LockTime:   uint64(lockTime.Unix()),
 	}
-	swapTx := &asset.SwapTx{
-		Inputs:    utxos,
-		Contracts: []*asset.Contract{contract},
+	contract2 := &asset.Contract{
+		Address:    alphaAddress,
+		Value:      contractValue * 2,
+		SecretHash: keyHash2[:],
+		LockTime:   uint64(lockTime.Unix()),
 	}
+	swap1 := &asset.Swap{
+		Inputs:   utxos1,
+		Contract: contract1,
+	}
+	swap2 := &asset.Swap{
+		Inputs:   utxos2,
+		Contract: contract2,
+	}
+	swaps := []*asset.Swap{swap1, swap2}
 
-	receipts, err := rig.gamma().Swap(swapTx)
+	receipts, err := rig.gamma().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
 
-	if len(receipts) != 1 {
+	if len(receipts) != 2 {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
 	}
-	receipt := receipts[0]
 
-	// Alpha should be able to redeem.
-	swapOutput := receipt.Coin()
-	ci, err := rig.alpha().AuditContract(swapOutput.ID(), swapOutput.Redeem())
-	if err != nil {
-		t.Fatalf("error auditing contract")
-	}
-	swapOutput = ci.Coin()
-	if ci.Recipient() != alphaAddress {
-		t.Fatalf("wrong address. %s != %s", ci.Recipient(), alphaAddress)
-	}
-	if swapOutput.Value() != contractValue {
-		t.Fatalf("wrong contract value. wanted %d, got %d", contractValue, swapOutput.Value())
-	}
-	confs, err := swapOutput.Confirmations()
-	if err != nil {
-		t.Fatalf("error getting confirmations: %v", err)
-	}
-	if confs != 0 {
-		t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)
-	}
-	if ci.Expiration().Equal(lockTime) {
-		t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration())
+	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
+		// Alpha should be able to redeem.
+		swapOutput := receipt.Coin()
+		ci, err := rig.alpha().AuditContract(swapOutput.ID(), swapOutput.Redeem())
+		if err != nil {
+			t.Fatalf("error auditing contract")
+		}
+		swapOutput = ci.Coin()
+		if ci.Recipient() != alphaAddress {
+			t.Fatalf("wrong address. %s != %s", ci.Recipient(), alphaAddress)
+		}
+		if swapOutput.Value() != swapVal {
+			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
+		}
+		confs, err := swapOutput.Confirmations()
+		if err != nil {
+			t.Fatalf("error getting confirmations: %v", err)
+		}
+		if confs != 0 {
+			t.Fatalf("unexpected number of confirmations. wanted 0, got %d", confs)
+		}
+		if ci.Expiration().Equal(lockTime) {
+			t.Fatalf("wrong lock time. wanted %s, got %s", lockTime, ci.Expiration())
+		}
+		return &asset.Redemption{
+			Spends: ci,
+			Secret: secret,
+		}
 	}
 
-	redemption := &asset.Redemption{
-		Spends: ci,
-		Secret: secretKey,
+	redemptions := []*asset.Redemption{
+		makeRedemption(contractValue, receipts[0], secretKey1),
+		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
-	err = rig.alpha().Redeem(redemption)
+
+	err = rig.alpha().Redeem(redemptions)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
 
 	// Find the redemption
+	receipt := receipts[0]
 	ctx, _ := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
-	checkKey, err := rig.gamma().FindRedemption(ctx, swapOutput.ID())
+	checkKey, err := rig.gamma().FindRedemption(ctx, receipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
-	if !bytes.Equal(checkKey, secretKey) {
-		t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", checkKey, secretKey)
+	if !bytes.Equal(checkKey, secretKey1) {
+		t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", checkKey, secretKey1)
 	}
 
 	// Mine a block and find the redemption again.
@@ -251,36 +283,37 @@ func TestWallet(t *testing.T) {
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
-	_, err = rig.gamma().FindRedemption(ctx, swapOutput.ID())
+	_, err = rig.gamma().FindRedemption(ctx, receipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
 
 	// Confirmations should now be an error, since the swap output has been spent.
-	confs, err = swapOutput.Confirmations()
+	_, err = receipt.Coin().Confirmations()
 	if err == nil {
 		t.Fatalf("error getting confirmations. has swap output been spent?")
 	}
 
 	// Now send another one with lockTime = now and try to refund it.
-	secretKey = randBytes(32)
-	keyHash = sha256.Sum256(secretKey)
+	secretKey := randBytes(32)
+	keyHash := sha256.Sum256(secretKey)
 	lockTime = time.Now().Add(-24 * time.Hour)
 
 	// Have gamma send a swap contract to the alpha address.
 	utxos, _ = rig.gamma().Fund(contractValue)
-	contract = &asset.Contract{
+	contract := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,
 		SecretHash: keyHash[:],
 		LockTime:   uint64(lockTime.Unix()),
 	}
-	swapTx = &asset.SwapTx{
-		Inputs:    utxos,
-		Contracts: []*asset.Contract{contract},
+	swap := &asset.Swap{
+		Inputs:   utxos,
+		Contract: contract,
 	}
+	swaps = []*asset.Swap{swap}
 
-	receipts, err = rig.gamma().Swap(swapTx)
+	receipts, err = rig.gamma().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
