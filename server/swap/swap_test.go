@@ -22,6 +22,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 )
@@ -216,7 +217,6 @@ type TAsset struct {
 	coin    asset.Coin
 	coinErr error
 	bChan   chan uint32
-	txErr   error
 	lbl     string
 }
 
@@ -327,15 +327,20 @@ type testRig struct {
 func tNewTestRig(matchInfo *tMatch) *testRig {
 	abcBackend := newTAsset("abc")
 	abcAsset := TNewAsset(abcBackend)
+	abcCoinLocker := coinlock.NewAssetCoinLocker()
+
 	xyzBackend := newTAsset("xyz")
 	xyzAsset := TNewAsset(xyzBackend)
+	xyzCoinLocker := coinlock.NewAssetCoinLocker()
+
 	authMgr := newTAuthManager()
 	storage := &TStorage{}
+
 	swapper := NewSwapper(&Config{
 		Ctx: testCtx,
-		Assets: map[uint32]*asset.BackedAsset{
-			ABCID: abcAsset,
-			XYZID: xyzAsset,
+		Assets: map[uint32]*LockableAsset{
+			ABCID: {abcAsset, abcCoinLocker},
+			XYZID: {xyzAsset, xyzCoinLocker},
 		},
 		Storage:          storage,
 		AuthManager:      authMgr,
@@ -988,7 +993,6 @@ func randBytes(len int) []byte {
 type tRedeem struct {
 	req  *msgjson.Message
 	coin *TCoin
-	txid string
 }
 
 func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {

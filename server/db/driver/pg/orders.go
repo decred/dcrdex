@@ -197,7 +197,52 @@ func (a *Archiver) insertOrUpdate(ord order.Order, status pgOrderStatus) error {
 	}
 
 	return a.updateOrderStatus(ord, status)
+}
 
+func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
+	var marketSchema string
+	marketSchema, err = a.marketSchema(base, quote)
+	if err != nil {
+		return
+	}
+
+	tableName := fullOrderTableName(a.dbName, marketSchema, true) // active (true)
+	stmt := fmt.Sprintf(internal.SelectActiveOrderCoinIDs, tableName,
+		order.LimitOrderType, order.StandingTiF)
+
+	var rows *sql.Rows
+	rows, err = a.db.Query(stmt)
+	switch err {
+	case sql.ErrNoRows:
+		err = nil
+		fallthrough
+	case nil:
+		baseCoins = make(map[order.OrderID][]order.CoinID)
+		quoteCoins = make(map[order.OrderID][]order.CoinID)
+	default:
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var oid order.OrderID
+		var coins dbCoins
+		var sell bool
+		err = rows.Scan(&oid, &sell, &coins)
+		if err != nil {
+			return
+		}
+
+		// Sell orders lock base asset coins.
+		if sell {
+			baseCoins[oid] = coins
+		} else {
+			// Buy orders lock quote asset coins.
+			quoteCoins[oid] = coins
+		}
+	}
+
+	return
 }
 
 // BookOrder updates or inserts the given LimitOrder with booked status.

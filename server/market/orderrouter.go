@@ -38,17 +38,17 @@ type MarketTunnel interface {
 	// MidGap returns the mid-gap market rate, which is ths rate halfway between
 	// the best buy order and the best sell order in the order book.
 	MidGap() uint64
-	// OutpointLocked should return true if the outpoint is currently a funding
-	// Coin for an active DEX order. This is required for Coin validation to
-	// prevent a user from submitting multiple orders spending the same Coin. This
+	// CoinLocked should return true if the CoinID is currently a funding Coin
+	// for an active DEX order. This is required for Coin validation to prevent
+	// a user from submitting multiple orders spending the same Coin. This
 	// method will likely need to check all orders currently in the epoch queue,
 	// the order book, and the swap monitor, since UTXOs will still be unspent
 	// according to the asset backends until the client broadcasts their
 	// initialization transaction.
 	//
-	// NOTE: This function could also potentially be handled by persistent
+	// DRAFT NOTE: This function could also potentially be handled by persistent
 	// storage, since active orders and active matches are tracked there.
-	OutpointLocked([]byte) bool
+	CoinLocked(coinID order.CoinID, assetID uint32) bool
 	// Cancelable determines whether an order is cancelable. A cancelable order
 	// is a limit order with time-in-force standing either in the epoch queue or
 	// in the order book.
@@ -56,7 +56,7 @@ type MarketTunnel interface {
 	// TxMonitored determines whether the transaction for the given user is
 	// involved in a DEX-monitored trade. Change outputs from DEX-monitored trades
 	// can be used in other orders without waiting for fundConf confirmations.
-	TxMonitored(user account.AccountID, txid string) bool
+	TxMonitored(user account.AccountID, txid string) bool // TODO specify asset?
 }
 
 // orderRecord contains the information necessary to respond to an order
@@ -489,6 +489,7 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 	var valSum uint64
 	var spendSize uint32
 	var coinIDs []order.CoinID
+	coinAssetID := assets.funding.ID
 	for i, coin := range trade.Coins {
 		sigCount := len(coin.Sigs)
 		if sigCount == 0 {
@@ -501,7 +502,7 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 			))
 		}
 		// Check that the outpoint isn't locked.
-		locked := tunnel.OutpointLocked(coin.ID)
+		locked := tunnel.CoinLocked(order.CoinID(coin.ID), coinAssetID)
 		if locked {
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("coin %x is locked", coin.ID))

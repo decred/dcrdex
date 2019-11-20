@@ -48,6 +48,9 @@ const (
 	// 	sigTakerRedeem = $8, sigMakerRedeem = $9
 	// WHERE matchid = $1;`
 
+	SelectActiveMatches = `SELECT makerOrder, takerOrder
+		FROM %s WHERE status = %d;`
+
 	RetrieveMatchByID = `SELECT * from %s WHERE matchid = $1;`
 
 	RetrieveUserMatches = `SELECT matchid, takerOrder, takerAccount, takerAddress,

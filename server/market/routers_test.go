@@ -173,7 +173,7 @@ func (m *TMarketTunnel) MidGap() uint64 {
 	return m.midGap
 }
 
-func (m *TMarketTunnel) OutpointLocked([]byte) bool {
+func (m *TMarketTunnel) CoinLocked(coinid order.CoinID, assetID uint32) bool {
 	return m.locked
 }
 
