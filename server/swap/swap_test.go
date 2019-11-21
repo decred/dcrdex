@@ -142,7 +142,7 @@ func (m *TAuthManager) Sign(...msgjson.Signable) {}
 func (m *TAuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	return m.authErr
 }
-func (m *TAuthManager) RegisterMethod(string,
+func (m *TAuthManager) Route(string,
 	func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 }
 
@@ -205,8 +205,8 @@ func (m *TAuthManager) getResp(id account.AccountID) (*msgjson.Message, *msgjson
 
 type TStorage struct{}
 
-func (s *TStorage) UpdateMatch(match *order.Match) {}
-func (s *TStorage) CancelOrder(*order.LimitOrder)  {}
+func (s *TStorage) UpdateMatch(match *order.Match) error { return nil }
+func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
 
 // This stub satisfies asset.DEXAsset.
 type TAsset struct {
@@ -1521,7 +1521,7 @@ func TestBadParams(t *testing.T) {
 	}
 	ackArr := make([]*msgjson.Acknowledgement, 0)
 	matches := []*messageAcker{
-		&messageAcker{match: rig.getTracker()},
+		{match: rig.getTracker()},
 	}
 
 	encodedAck := func() json.RawMessage {

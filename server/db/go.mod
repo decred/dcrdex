@@ -25,6 +25,9 @@ replace (
 	github.com/decred/dcrdex/dex/order => ../../dex/order
 	github.com/decred/dcrdex/server/account => ../account
 	github.com/decred/dcrdex/server/asset => ../asset
+	github.com/decred/dcrdex/server/auth => ../auth
 	github.com/decred/dcrdex/server/comms => ../comms
 	github.com/decred/dcrdex/server/market => ../market
+	github.com/decred/dcrdex/server/matcher => ../matcher
+	github.com/decred/dcrdex/server/swap => ../swap
 )

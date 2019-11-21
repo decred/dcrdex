@@ -3,6 +3,32 @@
 
 package db
 
+// TODO
+//
+// Epochs:
+//  1. PK: epoch ID
+//  2. list of order IDs and order hashes (ref orders table)
+//  3. resulting shuffle order
+//  4. resulting matches (ref matches table)
+//  5. resulting order mods (change filled amount)
+//  6. resulting book mods (insert, remove)
+//  refs: orders, matches
+//
+// Books are in-memory, but on shutdown or other maintenance events, the books
+// can be stored to facilitate restart without clearing the books.
+//  1. buy and sell orders (two differnet lists)
+//
+// For dex/market activity, consider a noSQL DB for structured logging. Market
+// activity with *timestamped* events, possibly including:
+//  1. order receipt
+//  2. order validation
+//  3. order entry into an epoch
+//  4. matches made
+//  5. book mods (insert, update, remove)
+//  6. swap events (announce, init, etc.)
+//
+// NOTE: all other events can go to the logger
+
 import (
 	"context"
 
@@ -14,8 +40,14 @@ import (
 // DEXArchivist will be composed of several different interfaces. Starting with
 // OrderArchiver.
 type DEXArchivist interface {
+	// LastErr should returns any fatal or unexpected error encountered by the
+	// archivist backend. This may be used to check if the database had an
+	// unrecoverable error (disconnect, etc.).
+	LastErr() error
+
 	OrderArchiver
 	AccountArchiver
+	MatchArchiver
 }
 
 // OrderArchiver is the interface required for storage and retrieval of all
@@ -78,13 +110,13 @@ type AccountArchiver interface {
 	// CloseAccount closes an account for violating a rule of community conduct.
 	CloseAccount(account.AccountID, account.Rule)
 
-	// Account retreives the account information for the specified account ID.
+	// Account retrieves the account information for the specified account ID.
 	// The registration fee payment status is returned as well. A nil pointer
 	// will be returned for unknown or closed accounts.
 	Account(account.AccountID) (acct *account.Account, paid bool)
 
 	// ActiveMatches will be needed, but does not belong in this archiver.
-	// // ActiveMatches retreives the current active matches for an account.
+	// // ActiveMatches retrieves the current active matches for an account.
 	// ActiveMatches(account.AccountID) []*order.UserMatch
 
 	// CreateAccount stores a new account. The account is considered unpaid until
@@ -97,6 +129,32 @@ type AccountArchiver interface {
 	// PayAccount sets the registration fee payment transaction details for the
 	// account, completing the registration process.
 	PayAccount(account.AccountID, string, uint32) error
+}
+
+// MatchData represents an order pair match, but with just the order IDs instead
+// of the full orders. The actual orders may be retrieved by ID.
+type MatchData struct {
+	ID         order.MatchID
+	Taker      order.OrderID
+	TakerAcct  account.AccountID
+	TakerAddr  string
+	Maker      order.OrderID
+	MakerAcct  account.AccountID
+	MakerAddr  string
+	Epoch      order.EpochID
+	Quantity   uint64
+	Rate       uint64
+	Status     order.MatchStatus
+	Sigs       order.Signatures
+	cachedHash order.MatchID
+}
+
+// MatchArchiver is the interface required for storage and retrieval of all
+// match data.
+type MatchArchiver interface {
+	UpdateMatch(match *order.Match) error
+	MatchByID(mid order.MatchID, base, quote uint32) (*MatchData, error)
+	UserMatches(aid account.AccountID, base, quote uint32) ([]*MatchData, error)
 }
 
 // ValidateOrder ensures that the order with the given status for the specified
@@ -187,43 +245,3 @@ func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInf
 
 	return true
 }
-
-// Orders (only validated ones):
-//  1. PK: Computed public order UID
-//  2. All other essential and immutable order.Order data
-//  3. Status (epoch, booked, executed, canceled, revoked)
-//  4. Remaining/filled amount
-
-// Epochs:
-//  1. PK: epoch ID
-//  2. list of order IDs and order hashes (ref orders table)
-//  3. resulting shuffle order
-//  4. resulting matches (ref matches table)
-//  5. resulting order mods (change filled amount)
-//  6. resulting book mods (insert, remove)
-//  refs: orders, matches
-
-// Matches (merged with Swaps):
-//  1. The order.Match data, one row per taker/maker pair
-//  2. Epoch ID
-//  3. Swap status (in-progress, failed, executed executed/swapped)
-// PK is ??? a unique ID used by the Market?
-//  refs: orders
-
-// Users:
-//  1. The account.{User,Account} data
-//  2. PK: Unique user ID (server generated)
-//  3. Order IDs (or maybe just join with Orders table by UserID to get these)
-
-// Books are in-memory, but on shutdown or other maintenance events, the books can be stored.
-//  1. buy and sell orders (two differnet lists)
-
-// Market history with *timestamped* events including:
-//  1. order receipt (ref to: users table)
-//  2. order validation (ref to: orders table)
-//  3. order entry into an epoch (ref to: orders and epochs tables)
-//  4. epoch matches made (ref to: epochs table)
-//  5. book mods (insert, update, remove) (ref to: orders and epochs tables)
-//  6. swap events (announce, init, etc.) (ref to: swaps table)
-//
-// NOTE: all other events can go to the logger

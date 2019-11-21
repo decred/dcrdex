@@ -155,8 +155,15 @@ type Order interface {
 	Quote() uint32
 }
 
+// zeroTime is the Unix time for a Time where IsZero() == true.
+var zeroTime = time.Time{}.Unix()
+
 // An order's ID is computed as the Blake-256 hash of the serialized order.
 func calcOrderID(order Order) OrderID {
+	stime := order.Time()
+	if stime == zeroTime {
+		panic("Order's ServerTime is unset")
+	}
 	return blake256.Sum256(order.Serialize())
 }
 

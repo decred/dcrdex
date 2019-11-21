@@ -47,7 +47,7 @@ func TestMain(m *testing.M) {
 
 func openDB() (func() error, error) {
 	var err error
-	mktInfo, err = dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize)
+	mktInfo, err = dex.NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration)
 	if err != nil {
 		return func() error { return nil }, fmt.Errorf("invalid market: %v", err)
 	}
@@ -151,7 +151,7 @@ func nukeAll(db *sql.DB) error {
 		return nil
 	}
 
-	err = dropPublic(createPublicTableStatements)
+	err = dropPublic(createDEXTableStatements)
 	if err != nil {
 		return err
 	}

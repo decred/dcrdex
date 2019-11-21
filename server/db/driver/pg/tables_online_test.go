@@ -22,7 +22,7 @@ func TestPrepareTables(t *testing.T) {
 	}
 
 	// valid market
-	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9)
+	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e9, EpochDuration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestPrepareTables(t *testing.T) {
 	}
 
 	// Mutated existing market (not supported, will panic).
-	mktConfig, _ = dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e8) // lot size change
+	mktConfig, _ = dex.NewMarketInfoFromSymbols("DCR", "BTC", 1e8, EpochDuration) // lot size change
 	func() {
 		defer func() {
 			if recover() == nil {
@@ -52,7 +52,7 @@ func TestPrepareTables(t *testing.T) {
 	}()
 
 	// Add a new market.
-	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9)
+	mktConfig, _ = dex.NewMarketInfoFromSymbols("dcr", "ltc", 1e9, EpochDuration)
 	err = PrepareTables(archie.db, []*dex.MarketInfo{mktConfig})
 	if err != nil {
 		t.Error(err)

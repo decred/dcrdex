@@ -10,7 +10,10 @@ import (
 	"github.com/decred/dcrdex/server/asset"
 )
 
-const LotSize = uint64(10_000_000_000)
+const (
+	LotSize       = uint64(10_000_000_000)
+	EpochDuration = uint64(10)
+)
 
 var (
 	AssetDCR uint32
@@ -42,7 +45,7 @@ func TestNewMarketName(t *testing.T) {
 
 func TestNewMarketInfo(t *testing.T) {
 	// ok
-	mktInfo, err := NewMarketInfo(AssetDCR, AssetBTC, LotSize)
+	mktInfo, err := NewMarketInfo(AssetDCR, AssetBTC, LotSize, EpochDuration)
 	if err != nil {
 		t.Errorf("NewMarketInfoFromSymbols failed: %v", err)
 	}
@@ -51,13 +54,13 @@ func TestNewMarketInfo(t *testing.T) {
 	}
 
 	// bad base
-	_, err = NewMarketInfo(8765678, AssetBTC, LotSize)
+	_, err = NewMarketInfo(8765678, AssetBTC, LotSize, EpochDuration)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent base asset")
 	}
 
 	// bad quote
-	_, err = NewMarketInfo(AssetDCR, 8765678, LotSize)
+	_, err = NewMarketInfo(AssetDCR, 8765678, LotSize, EpochDuration)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent quote asset")
 	}
@@ -65,7 +68,7 @@ func TestNewMarketInfo(t *testing.T) {
 
 func TestNewMarketInfoFromSymbols(t *testing.T) {
 	// ok
-	mktInfo, err := NewMarketInfoFromSymbols("dcr", "btc", LotSize)
+	mktInfo, err := NewMarketInfoFromSymbols("dcr", "btc", LotSize, EpochDuration)
 	if err != nil {
 		t.Errorf("NewMarketInfoFromSymbols failed: %v", err)
 	}
@@ -74,13 +77,13 @@ func TestNewMarketInfoFromSymbols(t *testing.T) {
 	}
 
 	// bad base
-	_, err = NewMarketInfoFromSymbols("super fake asset", "btc", LotSize)
+	_, err = NewMarketInfoFromSymbols("super fake asset", "btc", LotSize, EpochDuration)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent base asset")
 	}
 
 	// bad quote
-	_, err = NewMarketInfoFromSymbols("dcr", "btc not BTC or bTC", LotSize)
+	_, err = NewMarketInfoFromSymbols("dcr", "btc not BTC or bTC", LotSize, EpochDuration)
 	if err == nil {
 		t.Errorf("NewMarketInfoFromSymbols succeeded for non-existent quote asset")
 	}

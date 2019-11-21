@@ -56,6 +56,16 @@ func newUtxo(txid string, vout uint32) *utxo {
 	return &utxo{hash, vout}
 }
 
+func Test_calcOrderID(t *testing.T) {
+	mo := &MarketOrder{}
+	defer func() {
+		if recover() == nil {
+			t.Error("MarketOrder.ID should have paniced with ServerTime unset.")
+		}
+	}()
+	_ = calcOrderID(mo)
+}
+
 func TestPrefix_Serialize(t *testing.T) {
 	type fields struct {
 		AccountID  account.AccountID

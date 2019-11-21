@@ -5,10 +5,11 @@ package pg
 import (
 	"context"
 	"encoding/hex"
-	"github.com/davecgh/go-spew/spew"
 	"testing"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrdex/dex/order"
+	"github.com/decred/dcrdex/server/db"
 )
 
 func TestStoreOrder(t *testing.T) {
@@ -27,6 +28,11 @@ func TestStoreOrder(t *testing.T) {
 	orderID0, _ := hex.DecodeString("dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d")
 	var targetOrderID order.OrderID
 	copy(targetOrderID[:], orderID0)
+
+	limitA := newLimitOrder(false, 4800000, 1, order.StandingTiF, 0)
+	marketSellA := newMarketSellOrder(2, 1)
+	marketSellB := newMarketSellOrder(2, 0)
+	cancelA := newCancelOrder(targetOrderID, AssetDCR, AssetBTC, 0)
 
 	type args struct {
 		ord    order.Order
@@ -64,7 +70,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "ok limit executed (archived)",
 			args: args{
-				ord:    newLimitOrder(false, 4800000, 1, order.StandingTiF, 0),
+				ord:    limitA,
 				status: order.OrderStatusExecuted,
 			},
 			wantErr: false,
@@ -72,7 +78,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "limit duplicate",
 			args: args{
-				ord:    newLimitOrder(false, 4800000, 1, order.StandingTiF, 0),
+				ord:    limitA,
 				status: order.OrderStatusExecuted,
 			},
 			wantErr: true,
@@ -96,7 +102,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "market sell - bad status (booked)",
 			args: args{
-				ord:    newMarketSellOrder(2, 0),
+				ord:    marketSellB,
 				status: order.OrderStatusBooked,
 			},
 			wantErr: true,
@@ -104,7 +110,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "market sell - bad status (canceled)",
 			args: args{
-				ord:    newMarketSellOrder(2, 0),
+				ord:    marketSellB,
 				status: order.OrderStatusCanceled,
 			},
 			wantErr: true,
@@ -112,7 +118,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "market sell - active",
 			args: args{
-				ord:    newMarketSellOrder(2, 0),
+				ord:    marketSellB,
 				status: order.OrderStatusEpoch,
 			},
 			wantErr: false,
@@ -120,7 +126,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "market sell - archived",
 			args: args{
-				ord:    newMarketSellOrder(2, 1),
+				ord:    marketSellA,
 				status: order.OrderStatusExecuted,
 			},
 			wantErr: false,
@@ -128,7 +134,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "market sell - already in other table",
 			args: args{
-				ord:    newMarketSellOrder(2, 1),
+				ord:    marketSellA,
 				status: order.OrderStatusExecuted,
 			},
 			wantErr: true,
@@ -136,7 +142,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "market sell - duplicate archived order",
 			args: args{
-				ord:    newMarketSellOrder(2, 0), // dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d
+				ord:    marketSellB, // dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d
 				status: order.OrderStatusExecuted,
 			},
 			wantErr: true,
@@ -144,7 +150,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "cancel order",
 			args: args{
-				ord:    newCancelOrder(targetOrderID, AssetDCR, AssetBTC, 0),
+				ord:    cancelA,
 				status: order.OrderStatusExecuted,
 			},
 			wantErr: false,
@@ -152,7 +158,7 @@ func TestStoreOrder(t *testing.T) {
 		{
 			name: "cancel order - duplicate archived order",
 			args: args{
-				ord:    newCancelOrder(targetOrderID, AssetDCR, AssetBTC, 0),
+				ord:    cancelA,
 				status: order.OrderStatusExecuted,
 			},
 			wantErr: true,
@@ -253,7 +259,7 @@ func TestCancelOrder(t *testing.T) {
 	// Cancel an order not in the tables yet
 	lo2 := newLimitOrder(true, 4600000, 1, order.StandingTiF, 0)
 	err = archie.CancelOrder(lo2)
-	if err != ErrUnknownOrder {
+	if !db.IsErrOrderUnknown(err) {
 		t.Fatalf("CancelOrder should have failed for unknown order.")
 	}
 }
@@ -433,6 +439,24 @@ func TestStoreLoadCancelOrder(t *testing.T) {
 	}
 }
 
+func TestOrderStatusUnknown(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	ord := newLimitOrder(false, 4900000, 1, order.StandingTiF, 0) // not stored
+	_, _, _, err := archie.OrderStatus(ord)
+	if err == nil {
+		t.Fatalf("OrderStatus succeeded to find nonexistent order!")
+	}
+	if !db.SameErrorTypes(err, db.ArchiveError{Code: db.ErrUnknownOrder}) {
+		if errA, ok := err.(db.ArchiveError); ok {
+			t.Fatalf("Expected ArchiveError with code ErrUnknownOrder, got %d", errA.Code)
+		}
+		t.Fatalf("Expected ArchiveError with code ErrUnknownOrder, got %v", err)
+	}
+}
+
 func TestOrderStatus(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
@@ -541,6 +565,25 @@ func TestCancelOrderStatus(t *testing.T) {
 	if filledOut != -1 {
 		t.Errorf("Incorrect FilledAmt for retrieved order. Got %v, expected %v.",
 			filledOut, -1)
+	}
+}
+
+func TestUpdateOrderUnknown(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	ord := newLimitOrder(false, 4900000, 1, order.StandingTiF, 0) // not stored
+
+	err := archie.UpdateOrderStatus(ord, order.OrderStatusExecuted)
+	if err == nil {
+		t.Fatalf("UpdateOrder succeeded to update nonexistent order!")
+	}
+	if !db.SameErrorTypes(err, db.ArchiveError{Code: db.ErrUnknownOrder}) {
+		if errA, ok := err.(db.ArchiveError); ok {
+			t.Fatalf("Expected ArchiveError with code ErrUnknownOrder, got %d", errA.Code)
+		}
+		t.Fatalf("Expected ArchiveError with code ErrUnknownOrder, got %v", err)
 	}
 }
 
@@ -764,10 +807,14 @@ func TestUserOrders(t *testing.T) {
 	marketSell := newMarketSellOrder(2, 0)
 	marketBuy := newMarketBuyOrder(2000000000, 0)
 
+	// Make all of the above orders belong to the same user.
 	aid := limitSell.AccountID
+	limitBuy.AccountID = aid
+	limitBuy.AccountID = aid
+	marketSell.AccountID = aid
+	marketBuy.AccountID = aid
 
 	marketSellOtherGuy := newMarketSellOrder(2, 0)
-	marketSellOtherGuy.AccountID = randomAccountID()
 	marketSellOtherGuy.Address = "1MUz4VMYui5qY1mxUiG8BQ1Luv6tqkvaiL"
 
 	orderStatuses := []struct {

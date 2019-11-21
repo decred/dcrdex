@@ -1,4 +1,4 @@
-module github.com/decred/server/auth
+module github.com/decred/dcrdex/server/auth
 
 go 1.13
 

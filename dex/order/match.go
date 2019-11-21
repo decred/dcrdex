@@ -4,8 +4,10 @@
 package order
 
 import (
+	"database/sql/driver"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 
 	"github.com/decred/dcrd/crypto/blake256"
 )
@@ -19,6 +21,26 @@ type MatchID [MatchIDSize]byte
 // MatchID implements fmt.Stringer.
 func (id MatchID) String() string {
 	return hex.EncodeToString(id[:])
+}
+
+// Value implements the sql/driver.Valuer interface.
+func (mid MatchID) Value() (driver.Value, error) {
+	return mid[:], nil // []byte
+}
+
+// Scan implements the sql.Scanner interface.
+func (mid *MatchID) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		copy(mid[:], src)
+		return nil
+		//case string:
+		// case nil:
+		// 	*oid = nil
+		// 	return nil
+	}
+
+	return fmt.Errorf("cannot convert %T to OrderID", src)
 }
 
 var zeroID = MatchID{}
@@ -70,12 +92,22 @@ type Signatures struct {
 	MakerRedeem []byte
 }
 
+// EpochID contains the uniquely-identifying information for an epoch: index and
+// duration.
+type EpochID struct {
+	Idx uint64
+	Dur uint64
+}
+
 // Match represents a match between two orders.
 type Match struct {
-	Taker      Order
-	Maker      *LimitOrder
-	Quantity   uint64
-	Rate       uint64
+	Taker    Order
+	Maker    *LimitOrder
+	Quantity uint64
+	Rate     uint64
+
+	// The following fields are not part of the serialization of Match.
+	Epoch      EpochID
 	Status     MatchStatus
 	Sigs       Signatures
 	cachedHash MatchID
@@ -98,19 +130,20 @@ type UserMatch struct {
 
 // A constructor for a Match with Status = NewlyMatched. This is the preferred
 // method of making a Match, since it pre-calculates and caches the match ID.
-func newMatch(taker Order, maker *LimitOrder, qty, rate uint64) *Match {
+func newMatch(taker Order, maker *LimitOrder, qty, rate uint64, epochID EpochID) *Match {
 	m := &Match{
 		Taker:    taker,
 		Maker:    maker,
 		Quantity: qty,
 		Rate:     rate,
+		Epoch:    epochID,
 	}
 	// Pre-cache the ID.
 	m.ID()
 	return m
 }
 
-// The match ID.
+// ID computes the match ID and stores it for future calls.
 // BLAKE256([maker order id] + [taker order id] + [match qty] + [match rate])
 func (match *Match) ID() MatchID {
 	if match.cachedHash != zeroID {
@@ -133,6 +166,7 @@ func (match *Match) ID() MatchID {
 // corresponding Maker order, indicating a partial fill of the Maker. The sum
 // of the amounts, Total, is provided for convenience.
 type MatchSet struct {
+	Epoch   EpochID
 	Taker   Order
 	Makers  []*LimitOrder
 	Amounts []uint64
@@ -144,7 +178,8 @@ type MatchSet struct {
 func (set *MatchSet) Matches() []*Match {
 	matches := make([]*Match, 0, len(set.Makers))
 	for i, maker := range set.Makers {
-		matches = append(matches, newMatch(set.Taker, maker, set.Amounts[i], set.Rates[i]))
+		match := newMatch(set.Taker, maker, set.Amounts[i], set.Rates[i], set.Epoch)
+		matches = append(matches, match)
 	}
 	return matches
 }
