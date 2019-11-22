@@ -26,7 +26,7 @@ import (
 
 var zeroHash chainhash.Hash
 
-type Error = asset.Error
+type Error = dex.Error
 
 const (
 	immatureTransactionError = Error("immature output")
@@ -169,10 +169,10 @@ func (dcr *DCRBackend) UnspentDetails(txid string, vout uint32) (string, uint64,
 	}
 	scriptType := parseScriptType(currentScriptVersion, pkScript, nil)
 	if scriptType == scriptUnsupported {
-		return "", 0, -1, asset.UnsupportedScriptError
+		return "", 0, -1, dex.UnsupportedScriptError
 	}
 	if !scriptType.isP2PKH() {
-		return "", 0, -1, asset.UnsupportedScriptError
+		return "", 0, -1, dex.UnsupportedScriptError
 	}
 
 	scriptAddrs, err := extractScriptAddrs(pkScript)
@@ -343,7 +343,7 @@ func (dcr *DCRBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 	}
 	scriptType := parseScriptType(currentScriptVersion, pkScript, redeemScript)
 	if scriptType == scriptUnsupported {
-		return nil, asset.UnsupportedScriptError
+		return nil, dex.UnsupportedScriptError
 	}
 
 	// If it's a pay-to-script-hash, extract the script hash and check it against

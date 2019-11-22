@@ -196,7 +196,7 @@ func TestLiveUTXO(t *testing.T) {
 				//    unless output is spent in mempool.
 				// 3. script is of unacceptable type, and is found. Error.
 				// 4. script is of unacceptable type, and is not found. Should receive an
-				//    assets.UnsupportedScriptError.
+				//    dex.UnsupportedScriptError.
 				switch true {
 				case scriptTypeOK && err == nil:
 					if !fee {

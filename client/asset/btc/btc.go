@@ -185,7 +185,7 @@ type WalletConfig struct {
 	WalletName string
 	// INIPath is the path of a bitcoind-like configuration file. RPC credentials
 	// such as rpcuser, rpcpassword, rpcbind, rpcport will be pulled from the
-	// file. You can give the path to your actual bitcoind file too.
+	// file. You can provide the path to your actual bitcoind configuration file.
 	INIPath string
 	// AssetInfo is a set of asset information such as would be returned from the
 	// DEX's `config` endpoint.
@@ -471,12 +471,6 @@ func (btc *ExchangeWallet) Swap(swaps []*asset.Swap) ([]asset.Receipt, error) {
 
 // Redeem sends the redemption transaction, completing the atomic swap.
 func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) error {
-	// Normally, I would say that if the backend accepts an asset interface type
-	// or field, the backend should know how to handle it, but in this case, the
-	// client should always get the AuditInfo from AuditContract before using
-	// redeem, and so should never have a reason to construct a custom AuditInfo
-	// type.
-
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	var totalIn uint64
@@ -487,7 +481,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) error {
 		if !ok {
 			return fmt.Errorf("Redemption contract info of wrong type")
 		}
-		// Extract the swap contract recipient and secret hash and chedck the secret
+		// Extract the swap contract recipient and secret hash and check the secret
 		// hash against the hash of the provided secret.
 		_, receiver, _, secretHash, err := dexbtc.ExtractSwapDetails(cinfo.output.redeem, btc.chainParams)
 		if err != nil {

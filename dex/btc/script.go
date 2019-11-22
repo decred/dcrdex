@@ -10,7 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/txscript"
@@ -477,7 +477,7 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 	// Get information about the signatures and pubkeys needed to spend the utxo.
 	scriptType := ParseScriptType(pkScript, redeemScript)
 	if scriptType == ScriptUnsupported {
-		return nil, asset.UnsupportedScriptError
+		return nil, dex.UnsupportedScriptError
 	}
 	evalScript := pkScript
 	if scriptType.IsP2SH() || scriptType.IsP2WSH() {

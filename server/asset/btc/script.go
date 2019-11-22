@@ -71,6 +71,9 @@ func extractWitnessScriptHash(script []byte) []byte {
 // returned.
 func extractSwapAddresses(pkScript []byte, chainParams *chaincfg.Params) (string, string, error) {
 	s, r, _, _, err := dexbtc.ExtractSwapDetails(pkScript, chainParams)
+	if err != nil {
+		return "", "", err
+	}
 	return s.String(), r.String(), err
 }
 

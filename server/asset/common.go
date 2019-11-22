@@ -5,14 +5,6 @@ package asset
 
 import "decred.org/dcrdex/dex"
 
-type Error string
-
-func (err Error) Error() string { return string(err) }
-
-const (
-	UnsupportedScriptError = Error("unsupported script type")
-)
-
 // The DEXAsset interface is an interface for a blockchain backend.
 type DEXAsset interface {
 	// Coin should return a Coin only for outputs that would be spendable on the

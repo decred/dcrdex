@@ -5,6 +5,14 @@ package dex
 
 import "github.com/decred/slog"
 
+type Error string
+
+func (err Error) Error() string { return string(err) }
+
+const (
+	UnsupportedScriptError = Error("unsupported script type")
+)
+
 // Network flags passed to asset backends to signify which network to use.
 type Network uint8
 

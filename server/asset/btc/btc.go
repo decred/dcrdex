@@ -33,7 +33,7 @@ var (
 
 const (
 	btcToSatoshi             = 1e8
-	immatureTransactionError = asset.Error("immature output")
+	immatureTransactionError = dex.Error("immature output")
 )
 
 // btcNode represents a blockchain information fetcher. In practice, it is
@@ -230,10 +230,12 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 	if err != nil {
 		return nil, err
 	}
-	scriptType := dexbtc.ParseScriptType(pkScript, redeemScript)
-	if scriptType == dexbtc.ScriptUnsupported {
-		return nil, asset.UnsupportedScriptError
+
+	inputNfo, err := dexbtc.InputInfo(pkScript, redeemScript, btc.chainParams)
+	if err != nil {
+		return nil, err
 	}
+	scriptType := inputNfo.ScriptType
 
 	// If it's a pay-to-script-hash, extract the script hash and check it against
 	// the hash of the user-supplied redeem script.
@@ -250,11 +252,6 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 			}
 		}
-	}
-
-	inputNfo, err := dexbtc.InputInfo(pkScript, redeemScript, btc.chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error getting spending info for %s: %v", txHash, err)
 	}
 
 	// Get block information.
