@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex"
+	dexdcr "decred.org/dcrdex/dex/dcr"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -119,7 +120,7 @@ func NewBackend(ctx context.Context, configPath string, logger dex.Logger, netwo
 // InitTxSize is an asset.DEXAsset method that must produce the max size of a
 // standardized atomic swap initialization transaction.
 func (btc *DCRBackend) InitTxSize() uint32 {
-	return initTxSize
+	return dexdcr.InitTxSize
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -167,25 +168,25 @@ func (dcr *DCRBackend) UnspentDetails(txid string, vout uint32) (string, uint64,
 	if err != nil {
 		return "", 0, -1, err
 	}
-	scriptType := parseScriptType(currentScriptVersion, pkScript, nil)
-	if scriptType == scriptUnsupported {
+	scriptType := dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, pkScript, nil)
+	if scriptType == dexdcr.ScriptUnsupported {
 		return "", 0, -1, dex.UnsupportedScriptError
 	}
-	if !scriptType.isP2PKH() {
+	if !scriptType.IsP2PKH() {
 		return "", 0, -1, dex.UnsupportedScriptError
 	}
 
-	scriptAddrs, err := extractScriptAddrs(pkScript)
+	scriptAddrs, err := dexdcr.ExtractScriptAddrs(pkScript, chainParams)
 	if err != nil {
 		return "", 0, -1, fmt.Errorf("error parsing utxo script addresses")
 	}
-	if scriptAddrs.numPK != 0 {
+	if scriptAddrs.NumPK != 0 {
 		return "", 0, -1, fmt.Errorf("pubkey addresses not supported for P2PKHDetails")
 	}
-	if scriptAddrs.numPKH != 1 {
+	if scriptAddrs.NumPKH != 1 {
 		return "", 0, -1, fmt.Errorf("multi-sig not supported for P2PKHDetails")
 	}
-	return scriptAddrs.pkHashes[0].String(), toAtoms(txOut.Value), txOut.Confirmations, nil
+	return scriptAddrs.PkHashes[0].String(), toAtoms(txOut.Value), txOut.Confirmations, nil
 }
 
 // Get the Tx. Transaction info is not cached, so every call will result in a
@@ -341,45 +342,23 @@ func (dcr *DCRBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 	if err != nil {
 		return nil, err
 	}
-	scriptType := parseScriptType(currentScriptVersion, pkScript, redeemScript)
-	if scriptType == scriptUnsupported {
-		return nil, dex.UnsupportedScriptError
+
+	inputNfo, err := dexdcr.InputInfo(pkScript, redeemScript, chainParams)
+	if err != nil {
+		return nil, err
 	}
+	scriptType := inputNfo.ScriptType
 
 	// If it's a pay-to-script-hash, extract the script hash and check it against
 	// the hash of the user-supplied redeem script.
-	if scriptType.isP2SH() {
-		scriptHash, err := extractScriptHashByType(scriptType, pkScript)
+	if scriptType.IsP2SH() {
+		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
 		if err != nil {
 			return nil, fmt.Errorf("utxo error: %v", err)
 		}
 		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
 			return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 		}
-	}
-
-	// Get information about the signatures and pubkeys needed to spend the utxo.
-	evalScript := pkScript
-	if scriptType.isP2SH() {
-		evalScript = redeemScript
-	}
-	scriptAddrs, err := extractScriptAddrs(evalScript)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing utxo script addresses")
-	}
-
-	// Get the size of the signature script.
-	sigScriptSize := P2PKHSigScriptSize
-	// If it's a P2SH, the size must be calculated based on other factors.
-	if scriptType.isP2SH() {
-		// Start with the signatures.
-		sigScriptSize = 74 * scriptAddrs.nRequired // 73 max for sig, 1 for push code
-		// If there are pubkey-hash addresses, they'll need pubkeys.
-		if scriptAddrs.numPKH > 0 {
-			sigScriptSize += scriptAddrs.nRequired * (pubkeyLength + 1)
-		}
-		// Then add the length of the script and another push opcode byte.
-		sigScriptSize += len(redeemScript) + 1
 	}
 
 	blockHeight := uint32(verboseTx.BlockHeight)
@@ -408,7 +387,7 @@ func (dcr *DCRBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 	// Coinbase, vote, and revocation transactions all must mature before
 	// spending.
 	var maturity int64
-	if scriptType.isStake() || txOut.Coinbase {
+	if scriptType.IsStake() || txOut.Coinbase {
 		maturity = int64(chainParams.CoinbaseMaturity)
 	}
 	if txOut.Confirmations < maturity {
@@ -430,9 +409,9 @@ func (dcr *DCRBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		scriptType:   scriptType,
 		pkScript:     pkScript,
 		redeemScript: redeemScript,
-		numSigs:      scriptAddrs.nRequired,
+		numSigs:      inputNfo.ScriptAddrs.NRequired,
 		// The total size associated with the wire.TxIn.
-		spendSize:  uint32(sigScriptSize) + txInOverhead,
+		spendSize:  inputNfo.SigScriptSize + dexdcr.TxInOverhead,
 		value:      toAtoms(txOut.Value),
 		lastLookup: lastLookup,
 	}, nil

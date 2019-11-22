@@ -22,7 +22,7 @@ const (
 )
 
 var (
-	// A global *chaincfg.Params will be set if tidyConfig completes without
+	// A global *chaincfg.Params will be set if loadConfig completes without
 	// error.
 	chainParams       *chaincfg.Params
 	dcrdHomeDir       = dcrutil.AppDataDir("dcrd", false)
