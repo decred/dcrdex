@@ -120,19 +120,19 @@ func TestCheckVersionInfo(t *testing.T) {
 	}{
 		{
 			info: map[string]dcrdtypes.VersionResult{
-				"dcrd": dcrdtypes.VersionResult{
+				"dcrd": {
 					VersionString: "1.5.0",
 					Major:         1,
 					Minor:         5,
 					Patch:         0,
 				},
-				"dcrdjsonrpcapi": dcrdtypes.VersionResult{
+				"dcrdjsonrpcapi": {
 					VersionString: "6.1.0",
 					Major:         6,
 					Minor:         1,
 					Patch:         0,
 				},
-				"dcrwalletjsonrpcapi": dcrdtypes.VersionResult{
+				"dcrwalletjsonrpcapi": {
 					VersionString: "6.2.0",
 					Major:         6,
 					Minor:         2,
@@ -143,19 +143,19 @@ func TestCheckVersionInfo(t *testing.T) {
 		},
 		{
 			info: map[string]dcrdtypes.VersionResult{
-				"wrongid": dcrdtypes.VersionResult{
+				"wrongid": {
 					VersionString: "1.5.0",
 					Major:         1,
 					Minor:         5,
 					Patch:         0,
 				},
-				"dcrdjsonrpcapi": dcrdtypes.VersionResult{
+				"dcrdjsonrpcapi": {
 					VersionString: "6.1.0",
 					Major:         6,
 					Minor:         1,
 					Patch:         0,
 				},
-				"dcrwalletjsonrpcapi": dcrdtypes.VersionResult{
+				"dcrwalletjsonrpcapi": {
 					VersionString: "6.2.0",
 					Major:         6,
 					Minor:         2,
@@ -166,19 +166,19 @@ func TestCheckVersionInfo(t *testing.T) {
 		},
 		{
 			info: map[string]dcrdtypes.VersionResult{
-				"dcrd": dcrdtypes.VersionResult{
+				"dcrd": {
 					VersionString: "1.4.0",
 					Major:         1,
 					Minor:         4,
 					Patch:         0,
 				},
-				"dcrdjsonrpcapi": dcrdtypes.VersionResult{
+				"dcrdjsonrpcapi": {
 					VersionString: "6.1.0",
 					Major:         6,
 					Minor:         1,
 					Patch:         0,
 				},
-				"dcrwalletjsonrpcapi": dcrdtypes.VersionResult{
+				"dcrwalletjsonrpcapi": {
 					VersionString: "6.2.0",
 					Major:         6,
 					Minor:         2,
@@ -189,13 +189,13 @@ func TestCheckVersionInfo(t *testing.T) {
 		},
 		{
 			info: map[string]dcrdtypes.VersionResult{
-				"dcrd": dcrdtypes.VersionResult{
+				"dcrd": {
 					VersionString: "1.5.0",
 					Major:         1,
 					Minor:         5,
 					Patch:         0,
 				},
-				"dcrwalletjsonrpcapi": dcrdtypes.VersionResult{
+				"dcrwalletjsonrpcapi": {
 					VersionString: "6.2.0",
 					Major:         6,
 					Minor:         2,

@@ -14,11 +14,11 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/swap"
-	"decred.org/dcrdex/dex/order/test"
 )
 
 const (
