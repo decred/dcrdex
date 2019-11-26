@@ -110,10 +110,8 @@ func (b *Book) SellOrders() []*order.LimitOrder {
 // SellOrdersN copies out the N best sell orders in the book, sorted.
 func (b *Book) SellOrdersN(N int) []*order.LimitOrder {
 	orders := b.sells.OrdersN(N) // N = len(orders)
-	limits := make([]*order.LimitOrder, 0, len(orders))
-	for _, o := range orders {
-		limits = append(limits, o)
-	}
+	limits := make([]*order.LimitOrder, len(orders))
+	copy(limits, orders)
 	return limits
 }
 
@@ -125,9 +123,7 @@ func (b *Book) BuyOrders() []*order.LimitOrder {
 // BuyOrdersN copies out the N best buy orders in the book, sorted.
 func (b *Book) BuyOrdersN(N int) []*order.LimitOrder {
 	orders := b.buys.OrdersN(N) // N = len(orders)
-	limits := make([]*order.LimitOrder, 0, len(orders))
-	for _, o := range orders {
-		limits = append(limits, o)
-	}
+	limits := make([]*order.LimitOrder, len(orders))
+	copy(limits, orders)
 	return limits
 }
