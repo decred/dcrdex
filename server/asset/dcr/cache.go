@@ -118,7 +118,7 @@ func (cache *blockCache) reorg(newTip *chainjson.GetBlockVerboseResult) {
 			continue
 		}
 		// Delete the block from mainchain.
-		delete(cache.mainchain, uint32(block.height))
+		delete(cache.mainchain, block.height)
 		// Store an orphaned block in the blocks cache.
 		cache.blocks[block.hash] = &dcrBlock{
 			hash:     block.hash,

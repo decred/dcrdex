@@ -79,7 +79,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 				if err != nil {
 					return -1, err
 				}
-				utxo.height = uint32(blk.height)
+				utxo.height = blk.height
 				utxo.blockHash = blk.hash
 			}
 		}

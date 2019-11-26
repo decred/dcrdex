@@ -919,7 +919,7 @@ func tMultiMatchSet(matchQtys, rates []uint64, makerSell bool, isMarket bool) *t
 	}
 	set := new(tMatchSet)
 	for i, v := range matchQtys {
-		maker := tNewUser("maker" + strconv.Itoa(int(i)))
+		maker := tNewUser("maker" + strconv.Itoa(i))
 		// Alternate market and limit orders
 		makerOrder := makeLimitOrder(v, rates[i], maker, makerSell)
 		matchInfo := tMatchInfo(maker, taker, v, rates[i], makerOrder, takerOrder)
