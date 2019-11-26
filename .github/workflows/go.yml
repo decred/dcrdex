@@ -20,13 +20,13 @@ jobs:
         env:
           GO111MODULE: "on"
         run: go build ./...
-      - name: Test
-        env:
-          GO111MODULE: "on"
-        run: go test -v ./...
       - name: Lint
         env:
           GO111MODULE: "on"
         run: |
           export PATH=${PATH}:$(go env GOPATH)/bin
           golangci-lint run --disable-all --deadline=10m --enable=gofmt
+      - name: Test
+        env:
+          GO111MODULE: "on"
+        run: go test -v ./...
