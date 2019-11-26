@@ -5,7 +5,7 @@ package pg
 import (
 	"testing"
 
-	"github.com/decred/dcrdex/server/account"
+	"decred.org/dcrdex/server/account"
 )
 
 var tPubKey = []byte{

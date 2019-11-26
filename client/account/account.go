@@ -3,9 +3,9 @@ package account
 import (
 	"fmt"
 
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/account/pki"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/account/pki"
 )
 
 // Account represents a dex account.

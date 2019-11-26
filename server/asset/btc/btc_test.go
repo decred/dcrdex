@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -28,7 +29,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"
 )

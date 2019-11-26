@@ -5,7 +5,7 @@
 package book
 
 import (
-	"github.com/decred/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order"
 )
 
 const (

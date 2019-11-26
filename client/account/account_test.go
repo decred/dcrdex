@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/decred/dcrdex/server/account"
+	"decred.org/dcrdex/server/account"
 )
 
 func TestNew(t *testing.T) {

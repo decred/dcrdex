@@ -7,10 +7,10 @@ import (
 	"bytes"
 	"fmt"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrutil/v2"
-	"github.com/decred/dcrdex/server/asset"
 )
 
 // A UTXO is information regarding an unspent transaction output. It must

@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"sync"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
-	"github.com/decred/dcrdex/server/asset"
 )
 
 // The dcrBlock structure should hold a minimal amount of information about a

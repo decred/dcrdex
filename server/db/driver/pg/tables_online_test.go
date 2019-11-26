@@ -5,7 +5,7 @@ package pg
 import (
 	"testing"
 
-	"github.com/decred/dcrdex/dex"
+	"decred.org/dcrdex/dex"
 )
 
 func TestCheckCurrentTimeZone(t *testing.T) {

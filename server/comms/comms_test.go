@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decred/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/msgjson"
 	// "github.com/decred/slog"
 	"github.com/gorilla/websocket"
 )

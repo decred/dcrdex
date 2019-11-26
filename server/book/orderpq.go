@@ -9,7 +9,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/decred/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order"
 )
 
 type orderEntry struct {

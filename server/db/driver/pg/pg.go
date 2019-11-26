@@ -10,12 +10,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/db"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrd/hdkeychain/v2"
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/server/asset"
-	"github.com/decred/dcrdex/server/db"
 )
 
 // type Driver struct{}

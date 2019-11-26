@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/decred/dcrdex/dex/msgjson"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/comms"
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/comms"
 )
 
 // handleRegister handles requests to the 'register' route.

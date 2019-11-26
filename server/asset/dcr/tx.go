@@ -7,9 +7,9 @@ import (
 	"bytes"
 	"fmt"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v2"
-	"github.com/decred/dcrdex/server/asset"
 )
 
 // Tx is information about a transaction. It must satisfy the asset.DEXTx

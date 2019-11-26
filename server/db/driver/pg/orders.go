@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/db"
-	"github.com/decred/dcrdex/server/db/driver/pg/internal"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/db"
+	"decred.org/dcrdex/server/db/driver/pg/internal"
 	"github.com/lib/pq"
 )
 

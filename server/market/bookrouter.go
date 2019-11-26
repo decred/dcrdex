@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/dex/msgjson"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/comms"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/comms"
 )
 
 // A bookUpdateAction classifies updates into how they affect the book or epoch

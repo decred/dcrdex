@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/dex/order"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
 )
 
 func TestValidateOrder(t *testing.T) {

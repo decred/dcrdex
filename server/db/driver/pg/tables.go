@@ -7,8 +7,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/server/db/driver/pg/internal"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/db/driver/pg/internal"
 )
 
 const (

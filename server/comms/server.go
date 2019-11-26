@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/dcrd/certgen"
-	"github.com/decred/dcrdex/dex/msgjson"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 	"github.com/gorilla/websocket"

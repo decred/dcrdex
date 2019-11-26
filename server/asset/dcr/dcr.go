@@ -12,13 +12,13 @@ import (
 	"strings"
 	"sync"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/rpcclient/v4"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrdex/server/asset"
 )
 
 var zeroHash chainhash.Hash

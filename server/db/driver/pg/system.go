@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/decred/dcrdex/server/db/driver/pg/internal"
+	"decred.org/dcrdex/server/db/driver/pg/internal"
 	_ "github.com/lib/pq" // Start the PostgreSQL sql driver
 )
 
