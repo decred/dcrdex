@@ -87,14 +87,14 @@ type utxoSlice []order.Outpoint
 
 // Value implements the sql/driver.Valuer interface.
 func (us utxoSlice) Value() (driver.Value, error) {
-	return pq.GenericArray{us}.Value()
+	return pq.GenericArray{A: us}.Value()
 }
 
 // Scan implements the sql.Scanner interface.
 func (us *utxoSlice) Scan(src interface{}) error {
 	// type utxo implements Scanner, not order.Outpoint.
 	var utxos []utxo
-	ga := pq.GenericArray{&utxos}
+	ga := pq.GenericArray{A: &utxos}
 	err := ga.Scan(src)
 	if err != nil {
 		return err
