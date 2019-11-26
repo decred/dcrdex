@@ -9,6 +9,7 @@ require (
 	github.com/decred/dcrdex/server/account v0.0.0-20191007225918-c21cff4ecc64
 	github.com/decred/dcrdex/server/comms v0.0.0-20191017151723-32692e7cbf2a
 	github.com/decred/slog v1.0.0
+	golang.org/x/net v0.0.0-20191125084936-ffdde1057850 // indirect
 )
 
 replace (

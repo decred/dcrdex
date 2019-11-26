@@ -781,7 +781,7 @@ func TestHandleResponse(t *testing.T) {
 		t.Fatalf("client not found")
 	}
 	client.respHandlers = map[uint64]*respHandler{
-		comms.NextID(): &respHandler{
+		comms.NextID(): {
 			expiration: time.Now(),
 			f:          func(*msgjson.Message) {},
 		},

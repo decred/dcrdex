@@ -18,14 +18,12 @@ replace (
 )
 
 require (
-	github.com/decred/dcrd/dcrec/secp256k1 v1.0.3 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0
 	github.com/decred/dcrdex/dex v0.0.0-00010101000000-000000000000
 	github.com/decred/dcrdex/dex/msgjson v0.0.0-00010101000000-000000000000
 	github.com/decred/dcrdex/dex/order v0.0.0-00010101000000-000000000000
 	github.com/decred/dcrdex/server/account v0.0.0-20191021140456-dfb4ce4aeb06
 	github.com/decred/dcrdex/server/asset v0.0.0-20191112195536-93fbcfa8146e
-	github.com/decred/dcrdex/server/auth v0.0.0-00010101000000-000000000000
 	github.com/decred/dcrdex/server/book v0.0.0-20191021140456-dfb4ce4aeb06
 	github.com/decred/dcrdex/server/comms v0.0.0-20191030182607-90a2131e2ab3
 	github.com/decred/dcrdex/server/db v0.0.0-20191022190834-83c0cb22104f
