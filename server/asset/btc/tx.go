@@ -8,9 +8,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/dcrdex/server/asset"
 )
 
 // Tx is information about a transaction. It must satisfy the asset.DEXTx

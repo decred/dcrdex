@@ -42,7 +42,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decred/dcrdex/server/asset"
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/slog"
 )
 

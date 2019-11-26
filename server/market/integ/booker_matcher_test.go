@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/book"
-	"github.com/decred/dcrdex/server/matcher"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/book"
+	"decred.org/dcrdex/server/matcher"
 	"github.com/decred/slog"
 )
 

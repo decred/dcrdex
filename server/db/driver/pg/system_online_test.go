@@ -9,8 +9,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/asset"
 )
 
 const (

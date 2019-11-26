@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/dcrdex/server/asset"
 )
 
 var (

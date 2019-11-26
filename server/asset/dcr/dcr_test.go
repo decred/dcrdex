@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrec"
@@ -28,7 +29,6 @@ import (
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrdex/server/asset"
 	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"
 )

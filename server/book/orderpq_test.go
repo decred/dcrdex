@@ -5,7 +5,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/decred/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order"
 )
 
 type Order = order.LimitOrder

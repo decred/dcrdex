@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/comms"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/dcrdex/dex/msgjson"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/comms"
 )
 
 // reqExpiration is how long a response handler will be saved before it is

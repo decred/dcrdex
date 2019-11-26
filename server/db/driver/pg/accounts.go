@@ -7,11 +7,11 @@ import (
 	"database/sql"
 	"fmt"
 
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/db/driver/pg/internal"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrd/hdkeychain/v2"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/db/driver/pg/internal"
 )
 
 // CloseAccount closes the account by setting the value of the rule column.

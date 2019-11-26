@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/decred/dcrdex/server/asset"
-	"github.com/decred/dcrdex/server/asset/btc"
+	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/asset/btc"
 	"github.com/ltcsuite/ltcd/chaincfg"
 )
 

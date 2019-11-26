@@ -14,11 +14,11 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/comms"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/dcrdex/dex/msgjson"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/comms"
 )
 
 func randBytes(l int) []byte {
@@ -781,7 +781,7 @@ func TestHandleResponse(t *testing.T) {
 		t.Fatalf("client not found")
 	}
 	client.respHandlers = map[uint64]*respHandler{
-		comms.NextID(): &respHandler{
+		comms.NextID(): {
 			expiration: time.Now(),
 			f:          func(*msgjson.Message) {},
 		},

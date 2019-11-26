@@ -148,7 +148,7 @@ type Contract struct {
 
 // newContract creates a swap contract from the provided address and lock time.
 func newContract(redeemAddr string, counterpartyAddr string, lockTime uint32, params *chaincfg.Params) (*Contract, error) {
-	if uint32(lockTime) > wire.MaxTxInSequenceNum {
+	if lockTime > wire.MaxTxInSequenceNum {
 		return nil, fmt.Errorf("lockTime out of range")
 	}
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decred/dcrdex/server/account"
+	"decred.org/dcrdex/server/account"
 )
 
 // func randomAccount() (acct account.AccountID) {

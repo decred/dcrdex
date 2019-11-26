@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
-	"github.com/decred/dcrdex/server/asset"
 	flags "github.com/jessevdk/go-flags"
 )
 

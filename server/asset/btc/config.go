@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/dcrdex/server/asset"
 	flags "github.com/jessevdk/go-flags"
 )
 

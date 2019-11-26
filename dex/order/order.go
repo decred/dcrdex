@@ -12,8 +12,8 @@ import (
 	"fmt"
 	"time"
 
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrdex/server/account"
 )
 
 // OrderIDSize defines the length in bytes of an OrderID.

@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"decred.org/dcrdex/server/account/pki"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/dcrdex/server/account/pki"
 )
 
 var HashFunc = blake256.Sum256

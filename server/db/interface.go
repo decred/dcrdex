@@ -32,9 +32,9 @@ package db
 import (
 	"context"
 
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/account"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 )
 
 // DEXArchivist will be composed of several different interfaces. Starting with

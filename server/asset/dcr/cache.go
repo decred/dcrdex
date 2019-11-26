@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"sync"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
-	"github.com/decred/dcrdex/server/asset"
 )
 
 // The dcrBlock structure should hold a minimal amount of information about a
@@ -118,7 +118,7 @@ func (cache *blockCache) reorg(newTip *chainjson.GetBlockVerboseResult) {
 			continue
 		}
 		// Delete the block from mainchain.
-		delete(cache.mainchain, uint32(block.height))
+		delete(cache.mainchain, block.height)
 		// Store an orphaned block in the blocks cache.
 		cache.blocks[block.hash] = &dcrBlock{
 			hash:     block.hash,

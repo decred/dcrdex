@@ -12,13 +12,13 @@ import (
 	"strings"
 	"sync"
 
+	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/rpcclient/v4"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/dcrdex/server/asset"
 )
 
 var zeroHash chainhash.Hash
@@ -317,7 +317,7 @@ out:
 				dcr.signalMtx.RLock()
 				for _, c := range dcr.blockChans {
 					select {
-					case c <- uint32(block.height):
+					case c <- block.height:
 					default:
 						dcr.log.Errorf("tried sending block update on blocking channel")
 					}
@@ -407,7 +407,7 @@ func (dcr *DCRBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		if err != nil {
 			return nil, err
 		}
-		blockHeight = uint32(blk.height)
+		blockHeight = blk.height
 		blockHash = blk.hash
 	} else {
 		// Set the lastLookup to the current tip.

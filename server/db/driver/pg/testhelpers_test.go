@@ -7,10 +7,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/account/pki"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/account/pki"
 	"github.com/decred/slog"
 )
 

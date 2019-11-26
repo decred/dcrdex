@@ -11,8 +11,8 @@ import (
 	"math/rand"
 	"sort"
 
+	"decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/crypto/blake256"
-	"github.com/decred/dcrdex/dex/order"
 )
 
 // HashFunc is the hash function used to generate the shuffling seed.

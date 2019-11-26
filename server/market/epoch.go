@@ -3,7 +3,7 @@ package market
 import (
 	"time"
 
-	"github.com/decred/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order"
 )
 
 // EpochQueue represents an epoch order queue. The methods are NOT thread safe

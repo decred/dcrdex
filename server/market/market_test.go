@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decred/dcrdex/dex"
-	"github.com/decred/dcrdex/dex/msgjson"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/dex/order/test"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/asset"
-	"github.com/decred/dcrdex/server/db"
-	"github.com/decred/dcrdex/server/swap"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order/test"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/db"
+	"decred.org/dcrdex/server/swap"
 )
 
 const (

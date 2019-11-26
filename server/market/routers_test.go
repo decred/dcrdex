@@ -11,16 +11,16 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
+	ordertest "decred.org/dcrdex/dex/order/test"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/book"
+	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/matcher"
+	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/dcrdex/dex/msgjson"
-	"github.com/decred/dcrdex/dex/order"
-	ordertest "github.com/decred/dcrdex/dex/order/test"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/asset"
-	"github.com/decred/dcrdex/server/book"
-	"github.com/decred/dcrdex/server/comms"
-	"github.com/decred/dcrdex/server/matcher"
-	"github.com/decred/dcrdex/server/swap"
 	"github.com/decred/slog"
 )
 
@@ -1374,7 +1374,7 @@ func TestBadMessages(t *testing.T) {
 	checkErr("bad payload", rpcErr, msgjson.RPCParseError)
 	sub.Payload = ogPayload
 
-	// Use an unkown market
+	// Use an unknown market
 	badMkt := &ordertest.Market{
 		Base:  400000,
 		Quote: 400001,

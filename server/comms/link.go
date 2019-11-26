@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/decred/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/msgjson"
 	"github.com/gorilla/websocket"
 )
 

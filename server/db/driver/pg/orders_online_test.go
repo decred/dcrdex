@@ -7,9 +7,9 @@ import (
 	"encoding/hex"
 	"testing"
 
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/db"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/db"
 )
 
 func TestStoreOrder(t *testing.T) {

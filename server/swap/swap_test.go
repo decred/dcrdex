@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/decred/dcrdex/dex/msgjson"
-	"github.com/decred/dcrdex/dex/order"
-	"github.com/decred/dcrdex/server/account"
-	"github.com/decred/dcrdex/server/asset"
-	"github.com/decred/dcrdex/server/comms"
-	"github.com/decred/dcrdex/server/matcher"
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/matcher"
 )
 
 const (
@@ -919,7 +919,7 @@ func tMultiMatchSet(matchQtys, rates []uint64, makerSell bool, isMarket bool) *t
 	}
 	set := new(tMatchSet)
 	for i, v := range matchQtys {
-		maker := tNewUser("maker" + strconv.Itoa(int(i)))
+		maker := tNewUser("maker" + strconv.Itoa(i))
 		// Alternate market and limit orders
 		makerOrder := makeLimitOrder(v, rates[i], maker, makerSell)
 		matchInfo := tMatchInfo(maker, taker, v, rates[i], makerOrder, takerOrder)
@@ -1144,7 +1144,7 @@ func TestNoAck(t *testing.T) {
 	mustBeError(rig.sendSwap_taker(true), "no match-ack taker swap send")
 	checkSeqError(taker)
 	ensureNilErr(rig.ackMatch_taker(true))
-	// Try to send the swap without acknowleding the 'audit'.
+	// Try to send the swap without acknowledging the 'audit'.
 	mustBeError(rig.sendSwap_taker(true), "no audit-ack taker swap send")
 	checkSeqError(taker)
 	ensureNilErr(rig.auditSwap_taker())
