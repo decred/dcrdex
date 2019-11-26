@@ -1374,7 +1374,7 @@ func TestBadMessages(t *testing.T) {
 	checkErr("bad payload", rpcErr, msgjson.RPCParseError)
 	sub.Payload = ogPayload
 
-	// Use an unkown market
+	// Use an unknown market
 	badMkt := &ordertest.Market{
 		Base:  400000,
 		Quote: 400001,

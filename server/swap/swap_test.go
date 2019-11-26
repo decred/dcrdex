@@ -1144,7 +1144,7 @@ func TestNoAck(t *testing.T) {
 	mustBeError(rig.sendSwap_taker(true), "no match-ack taker swap send")
 	checkSeqError(taker)
 	ensureNilErr(rig.ackMatch_taker(true))
-	// Try to send the swap without acknowleding the 'audit'.
+	// Try to send the swap without acknowledging the 'audit'.
 	mustBeError(rig.sendSwap_taker(true), "no audit-ack taker swap send")
 	checkSeqError(taker)
 	ensureNilErr(rig.auditSwap_taker())

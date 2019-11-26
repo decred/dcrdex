@@ -175,7 +175,7 @@ func NewBookRouter(cfg *BookRouterConfig) *BookRouter {
 	return router
 }
 
-// run is a montoring loop for an order book.
+// run is a monitoring loop for an order book.
 func (r *BookRouter) run(book *msgBook) {
 	// Get the initial book.
 	feed := book.source.OrderFeed()

@@ -1072,7 +1072,7 @@ func TestRespReq(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error for valid request payload: %v", err)
 	}
-	// A Request-type Message should error if trying to retreive the
+	// A Request-type Message should error if trying to retrieve the
 	// ResponsePayload
 	_, err = msg.Response()
 	if err == nil {
