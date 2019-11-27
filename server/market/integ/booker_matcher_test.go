@@ -3,7 +3,6 @@
 package integ_test
 
 import (
-	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -1104,24 +1103,24 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	epochQueueInit := make([]order.Order, len(epochQueue))
 	copy(epochQueueInit, epochQueue)
 
-	var shuf []int
-	matcher.ShuffleQueue(epochQueue)
-	for i := range epochQueue {
-		for j := range epochQueueInit {
-			if epochQueue[i].ID() == epochQueueInit[j].ID() {
-				shuf = append(shuf, j)
-				t.Logf("%d: %p", j, epochQueueInit[j])
-				continue
-			}
-		}
-	}
-	t.Logf("%#v", shuf)
+	// var shuf []int
+	// matcher.ShuffleQueue(epochQueue)
+	// for i := range epochQueue {
+	// 	for j := range epochQueueInit {
+	// 		if epochQueue[i].ID() == epochQueueInit[j].ID() {
+	// 			shuf = append(shuf, j)
+	// 			t.Logf("%d: %p", j, epochQueueInit[j])
+	// 			continue
+	// 		}
+	// 	}
+	// }
+	// t.Logf("%#v", shuf)
 
 	// Apply the shuffling to determine matching order that will be used.
-	matcher.ShuffleQueue(epochQueue)
-	for i := range epochQueue {
-		t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
-	}
+	// matcher.ShuffleQueue(epochQueue)
+	// for i := range epochQueue {
+	// 	t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
+	// }
 	// Shuffles to [7, 1, 12, 11, 2, 14, 3, 17, 15, 13, 10, 5, 0, 6, 9, 4, 16, 8]
 
 	expectedNumMatches := 10
@@ -1151,35 +1150,35 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 
 	matches, passed, failed, partial, booked, unbooked := me.Match(b, epochQueue)
 	//t.Log("Matches:", matches)
-	s := "Passed: "
-	for _, o := range passed {
-		s += fmt.Sprintf("%p ", o)
-	}
-	t.Log(s)
-	s = "Failed: "
-	for _, o := range failed {
-		s += fmt.Sprintf("%p ", o)
-	}
-	t.Log(s)
-	s = "Partial: "
-	for _, o := range partial {
-		s += fmt.Sprintf("%p ", o)
-	}
-	t.Log(s)
-	s = "Booked: "
-	for _, o := range booked {
-		s += fmt.Sprintf("%p ", o)
-	}
-	t.Log(s)
-	s = "Unbooked: "
-	for _, o := range unbooked {
-		s += fmt.Sprintf("%p ", o)
-	}
-	t.Log(s)
+	// s := "Passed: "
+	// for _, o := range passed {
+	// 	s += fmt.Sprintf("%p ", o)
+	// }
+	// t.Log(s)
+	// s = "Failed: "
+	// for _, o := range failed {
+	// 	s += fmt.Sprintf("%p ", o)
+	// }
+	// t.Log(s)
+	// s = "Partial: "
+	// for _, o := range partial {
+	// 	s += fmt.Sprintf("%p ", o)
+	// }
+	// t.Log(s)
+	// s = "Booked: "
+	// for _, o := range booked {
+	// 	s += fmt.Sprintf("%p ", o)
+	// }
+	// t.Log(s)
+	// s = "Unbooked: "
+	// for _, o := range unbooked {
+	// 	s += fmt.Sprintf("%p ", o)
+	// }
+	// t.Log(s)
 
-	for i := range matches {
-		t.Logf("Match %d: %p, [%p, ...]", i, matches[i].Taker, matches[i].Makers[0])
-	}
+	// for i := range matches {
+	// 	t.Logf("Match %d: %p, [%p, ...]", i, matches[i].Taker, matches[i].Makers[0])
+	// }
 
 	// PASSED orders
 
