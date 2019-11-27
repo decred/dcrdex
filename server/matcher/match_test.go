@@ -441,8 +441,9 @@ func Test_matchLimitOrder(t *testing.T) {
 	}
 }
 
-func newCancelOrder(targetOrderID order.OrderID) *order.CancelOrder {
+func newCancelOrder(targetOrderID order.OrderID, serverTime time.Time) *order.CancelOrder {
 	return &order.CancelOrder{
+		Prefix:        order.Prefix{ServerTime: serverTime},
 		TargetOrderID: targetOrderID,
 	}
 }
@@ -455,11 +456,12 @@ func TestMatch_cancelOnly(t *testing.T) {
 	me := New()
 
 	fakeOrder := newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0)
+	fakeOrder.ServerTime = time.Now()
 
 	// takers is heterogenous w.r.t. type
 	takers := []order.Order{
-		newCancelOrder(bookBuyOrders[3].ID()),
-		newCancelOrder(fakeOrder.ID()),
+		newCancelOrder(bookBuyOrders[3].ID(), fakeOrder.ServerTime.Add(time.Second)),
+		newCancelOrder(fakeOrder.ID(), fakeOrder.ServerTime.Add(time.Second)),
 	}
 
 	//nSell := len(bookSellOrders)
