@@ -1,7 +1,6 @@
 package db
 
 import (
-	"encoding/hex"
 	"os"
 	"time"
 
@@ -34,23 +33,6 @@ var acct0 = account.AccountID{
 	0x46, 0x34, 0xe9, 0x1c, 0xec, 0x25, 0xd5, 0x40,
 }
 
-// utxo implements order.Outpoint
-type utxo struct {
-	txHash []byte
-	vout   uint32
-}
-
-func (u *utxo) TxHash() []byte { return u.txHash }
-func (u *utxo) Vout() uint32   { return u.vout }
-
-func newUtxo(txid string, vout uint32) *utxo {
-	hash, err := hex.DecodeString(txid)
-	if err != nil {
-		panic(err)
-	}
-	return &utxo{hash, vout}
-}
-
 func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
 	addr := "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui"
 	if sell {
@@ -66,8 +48,12 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 				ClientTime: time.Unix(1566497653+timeOffset, 0),
 				ServerTime: time.Unix(1566497656+timeOffset, 0),
 			},
-			UTXOs: []order.Outpoint{
-				newUtxo("45b82138ca90e665a1c8793aa901aa232dd82be41b8e630dd621f24e717fc13a", 2),
+			Coins: []order.CoinID{
+				{
+					0x45, 0xb8, 0x21, 0x38, 0xca, 0x90, 0xe6, 0x65, 0xa1, 0xc8, 0x79, 0x3a,
+					0xa9, 0x01, 0xaa, 0x23, 0x2d, 0xd8, 0x2b, 0xe4, 0x1b, 0x8e, 0x63, 0x0d,
+					0xd6, 0x21, 0xf2, 0x4e, 0x71, 0x7f, 0xc1, 0x3a, 0x00, 0x00, 0x00, 0x02,
+				},
 			},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,
@@ -88,7 +74,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		UTXOs:    []order.Outpoint{},
+		Coins:    []order.CoinID{},
 		Sell:     true,
 		Quantity: quantityLots * LotSize,
 		Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
@@ -105,7 +91,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		UTXOs:    []order.Outpoint{},
+		Coins:    []order.CoinID{},
 		Sell:     false,
 		Quantity: quantityQuoteAsset,
 		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",

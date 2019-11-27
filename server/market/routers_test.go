@@ -3,6 +3,7 @@ package market
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -45,7 +46,6 @@ const (
 var (
 	oRig       *tOrderRig
 	dummyError = fmt.Errorf("test error")
-	clientTime = time.Now()
 	testCtx    context.Context
 	rig        *testRig
 	mkt1       = &ordertest.Market{
@@ -172,7 +172,7 @@ func (m *TMarketTunnel) MidGap() uint64 {
 	return m.midGap
 }
 
-func (m *TMarketTunnel) OutpointLocked(txid string, vout uint32) bool {
+func (m *TMarketTunnel) OutpointLocked([]byte) bool {
 	return m.locked
 }
 
@@ -206,21 +206,18 @@ func tNewBackend() *TBackend {
 	}
 }
 
-func (b *TBackend) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
-	op := fmt.Sprintf("%s:%d", txid, vout)
-	v := b.utxos[op]
+func (b *TBackend) Coin(coinID, redeemScript []byte) (asset.Coin, error) {
+	v := b.utxos[hex.EncodeToString(coinID)]
 	if v == 0 {
 		return nil, fmt.Errorf("no utxo")
 	}
 	return &tUTXO{val: v}, b.utxoErr
 }
-func (b *TBackend) BlockChannel(size int) chan uint32            { return nil }
-func (b *TBackend) Transaction(txid string) (asset.DEXTx, error) { return nil, nil }
-func (b *TBackend) InitTxSize() uint32                           { return dummySize }
-func (b *TBackend) CheckAddress(string) bool                     { return b.addrChecks }
-func (b *TBackend) addUTXO(utxo *msgjson.UTXO, val uint64) {
-	op := fmt.Sprintf("%s:%d", utxo.TxID, utxo.Vout)
-	b.utxos[op] = val
+func (b *TBackend) BlockChannel(size int) chan uint32 { return nil }
+func (b *TBackend) InitTxSize() uint32                { return dummySize }
+func (b *TBackend) CheckAddress(string) bool          { return b.addrChecks }
+func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
+	b.utxos[hex.EncodeToString(coin.ID)] = val
 }
 
 type tUTXO struct {
@@ -236,11 +233,13 @@ func (u *tUTXO) Auth(pubkeys,
 	sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
-func (u *tUTXO) SpendSize() uint32 { return dummySize }
-func (u *tUTXO) TxHash() []byte    { return nil }
-func (u *tUTXO) TxID() string      { return "" }
-func (u *tUTXO) Vout() uint32      { return 0 }
-func (u *tUTXO) Value() uint64     { return u.val }
+func (u *tUTXO) AuditContract() (string, uint64, error) { return "", 0, nil }
+func (u *tUTXO) SpendSize() uint32                      { return dummySize }
+func (u *tUTXO) ID() []byte                             { return nil }
+func (u *tUTXO) TxID() string                           { return "" }
+func (u *tUTXO) SpendsCoin([]byte) (bool, error)        { return true, nil }
+func (u *tUTXO) Value() uint64                          { return u.val }
+func (u *tUTXO) FeeRate() uint64                        { return 0 }
 
 type tUser struct {
 	acct    account.AccountID
@@ -256,25 +255,24 @@ type tOrderRig struct {
 	router *OrderRouter
 }
 
-func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.UTXO {
+func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin {
 	u := rig.user
-	utxo := &msgjson.UTXO{
-		TxID: randomBytes(32),
-		Vout: rand.Uint32(),
+	coin := &msgjson.Coin{
+		ID: randomBytes(36),
 	}
 	pk := u.privKey.PubKey().SerializeCompressed()
 	for i := 0; i < numSigs; i++ {
-		sig, _ := u.privKey.Sign(utxo.Serialize())
-		utxo.Sigs = append(utxo.Sigs, sig.Serialize())
-		utxo.PubKeys = append(utxo.PubKeys, pk)
+		sig, _ := u.privKey.Sign(coin.ID)
+		coin.Sigs = append(coin.Sigs, sig.Serialize())
+		coin.PubKeys = append(coin.PubKeys, pk)
 	}
 	switch id {
 	case btcID:
-		rig.btc.addUTXO(utxo, val)
+		rig.btc.addUTXO(coin, val)
 	case dcrID:
-		rig.dcr.addUTXO(utxo, val)
+		rig.dcr.addUTXO(coin, val)
 	}
-	return utxo
+	return coin
 }
 
 var assetBTC = &asset.Asset{
@@ -325,7 +323,7 @@ func makeEnsureErr(t *testing.T) func(tag string, rpcErr *msgjson.Error, code in
 			t.Fatalf("%s: no rpc error", tag)
 		}
 		if rpcErr.Code != code {
-			t.Fatalf("%s: wrong error code. expected %d, got %d", tag, code, rpcErr.Code)
+			t.Fatalf("%s: wrong error code. expected %d, got %d: %s", tag, code, rpcErr.Code, rpcErr.Message)
 		}
 	}
 }
@@ -410,6 +408,7 @@ func TestLimit(t *testing.T) {
 	qty := uint64(dcrLotSize) * 10
 	rate := uint64(1000) * dcrRateStep
 	user := oRig.user
+	clientTime := time.Now()
 	limit := msgjson.Limit{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
@@ -421,7 +420,7 @@ func TestLimit(t *testing.T) {
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
 			Quantity: qty,
-			UTXOs: []*msgjson.UTXO{
+			Coins: []*msgjson.Coin{
 				oRig.signedUTXO(dcrID, qty-dcrLotSize, 1),
 				oRig.signedUTXO(dcrID, 2*dcrLotSize, 2),
 			},
@@ -482,7 +481,7 @@ func TestLimit(t *testing.T) {
 	oRig.auth.sends = nil
 	limit.Side = msgjson.BuyOrderNum
 	buyUTXO := oRig.signedUTXO(btcID, matcher.BaseToQuote(rate, qty*2), 1)
-	limit.UTXOs = []*msgjson.UTXO{
+	limit.Coins = []*msgjson.Coin{
 		buyUTXO,
 	}
 	limit.Address = dcrAddr
@@ -519,19 +518,16 @@ func TestLimit(t *testing.T) {
 
 	// Check the utxo
 	epochOrder := oRecord.order.(*order.LimitOrder)
-	if len(epochOrder.UTXOs) != 1 {
-		t.Fatalf("expected 1 order UTXO, got %d", len(epochOrder.UTXOs))
+	if len(epochOrder.Coins) != 1 {
+		t.Fatalf("expected 1 order UTXO, got %d", len(epochOrder.Coins))
 	}
-	epochUTXO := epochOrder.UTXOs[0]
-	if !bytes.Equal(epochUTXO.TxHash(), buyUTXO.TxID) {
+	epochUTXO := epochOrder.Coins[0]
+	if !bytes.Equal(epochUTXO, buyUTXO.ID) {
 		t.Fatalf("utxo reporting wrong txid")
 	}
-	if epochUTXO.Vout() != buyUTXO.Vout {
-		t.Fatalf("utxo reporting wrong vout")
-	}
 
-	// Now steal the UTXO
-	lo.UTXOs = epochOrder.UTXOs
+	// Now steal the Coins
+	lo.Coins = epochOrder.Coins
 
 	// Get the server time from the response.
 	respMsg := oRig.auth.getSend()
@@ -555,6 +551,7 @@ func TestLimit(t *testing.T) {
 func TestMarketStartProcessStop(t *testing.T) {
 	qty := uint64(dcrLotSize) * 10
 	user := oRig.user
+	clientTime := time.Now()
 	mkt := msgjson.Market{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
@@ -566,7 +563,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
 			Quantity: qty,
-			UTXOs: []*msgjson.UTXO{
+			Coins: []*msgjson.Coin{
 				oRig.signedUTXO(dcrID, qty-dcrLotSize, 1),
 				oRig.signedUTXO(dcrID, 2*dcrLotSize, 2),
 			},
@@ -613,7 +610,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 
 	midGap := oRig.market.MidGap()
 	buyUTXO := oRig.signedUTXO(btcID, matcher.BaseToQuote(midGap, qty), 1)
-	mkt.UTXOs = []*msgjson.UTXO{
+	mkt.Coins = []*msgjson.Coin{
 		buyUTXO,
 	}
 	mkt.Address = dcrAddr
@@ -651,19 +648,16 @@ func TestMarketStartProcessStop(t *testing.T) {
 
 	// Check the utxo
 	epochOrder := oRecord.order.(*order.MarketOrder)
-	if len(epochOrder.UTXOs) != 1 {
-		t.Fatalf("expected 1 order UTXO, got %d", len(epochOrder.UTXOs))
+	if len(epochOrder.Coins) != 1 {
+		t.Fatalf("expected 1 order UTXO, got %d", len(epochOrder.Coins))
 	}
-	epochUTXO := epochOrder.UTXOs[0]
-	if !bytes.Equal(epochUTXO.TxHash(), buyUTXO.TxID) {
+	epochUTXO := epochOrder.Coins[0]
+	if !bytes.Equal(epochUTXO, buyUTXO.ID) {
 		t.Fatalf("utxo reporting wrong txid")
 	}
-	if epochUTXO.Vout() != buyUTXO.Vout {
-		t.Fatalf("utxo reporting wrong vout")
-	}
 
-	// Now steal the UTXO
-	mo.UTXOs = epochOrder.UTXOs
+	// Now steal the Coins
+	mo.Coins = epochOrder.Coins
 
 	// Get the server time from the response.
 	respMsg := oRig.auth.getSend()
@@ -688,6 +682,7 @@ func TestCancel(t *testing.T) {
 	user := oRig.user
 	var targetID order.OrderID
 	targetID[0] = 244
+	clientTime := time.Now()
 	cancel := msgjson.Cancel{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
@@ -811,9 +806,10 @@ func testPrefix(prefix *msgjson.Prefix, checkCode func(string, int)) {
 	prefix.Base = assetDCR.ID
 
 	// Too old
-	prefix.ClientTime = uint64(clientTime.Add(-time.Second * maxClockOffset).Unix())
+	ct := prefix.ClientTime
+	prefix.ClientTime = ct - maxClockOffset
 	checkCode("too old", msgjson.ClockRangeError)
-	prefix.ClientTime = uint64(clientTime.Unix())
+	prefix.ClientTime = ct
 
 	// Set server time = bad
 	prefix.ServerTime = 1
@@ -841,13 +837,13 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 	trade.Quantity = qty
 
 	// No utxos
-	ogUTXOs := trade.UTXOs
-	trade.UTXOs = nil
+	ogUTXOs := trade.Coins
+	trade.Coins = nil
 	checkCode("no utxos", msgjson.FundingError)
-	trade.UTXOs = ogUTXOs
+	trade.Coins = ogUTXOs
 
 	// No signatures
-	utxo1 := trade.UTXOs[1]
+	utxo1 := trade.Coins[1]
 	ogSigs := utxo1.Sigs
 	utxo1.Sigs = nil
 	checkCode("no utxo sigs", msgjson.SignatureError)
@@ -869,7 +865,7 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 
 	// UTXO Auth error
 	utxoAuthErr = dummyError
-	checkCode("utxo auth error", msgjson.UTXOAuthError)
+	checkCode("utxo auth error", msgjson.CoinAuthError)
 	utxoAuthErr = nil
 
 	// UTXO Confirmations error
@@ -890,9 +886,9 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 	oRig.market.pop()
 
 	// Not enough funding
-	trade.UTXOs = ogUTXOs[:1]
+	trade.Coins = ogUTXOs[:1]
 	checkCode("unfunded", msgjson.FundingError)
-	trade.UTXOs = ogUTXOs
+	trade.Coins = ogUTXOs
 
 	// Invalid address
 	receivingAsset.addrChecks = false

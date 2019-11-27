@@ -30,19 +30,16 @@ const Simnet = Regtest
 type Logger = slog.Logger
 
 // The DEXAsset interface is an interface for a blockchain backend. The DEX
-// primarily needs to track UTXOs and transactions to validate orders, and
-// to monitor community conduct.
+// primarily needs to track Coins and to validate orders, and to monitor
+// community conduct.
 type DEXAsset interface {
-	// UTXO should return a UTXO only for outputs that would be spendable on the
-	// blockchain immediately. Pay-to-script-hash UTXOs require the redeem script
+	// Coin should return a Coin only for outputs that would be spendable on the
+	// blockchain immediately. Pay-to-script-hash Coins require the redeem script
 	// in order to calculate sigScript length and verify pubkeys.
-	UTXO(txid string, vout uint32, redeemScript []byte) (UTXO, error)
+	Coin(coinID []byte, redeemScript []byte) (Coin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) chan uint32
-	// Transaction returns a DEXTx, which has methods for checking UTXO spending
-	// and swap contract info.
-	Transaction(txid string) (DEXTx, error)
 	// InitTxSize is the size of a serialized atomic swap initialization
 	// transaction with 1 input spending a P2PKH utxo, 1 swap contract output and
 	// 1 change output.
@@ -51,55 +48,38 @@ type DEXAsset interface {
 	CheckAddress(string) bool
 }
 
-// UTXO provides data about an unspent transaction output.
-type UTXO interface {
-	// Confirmations returns the number of confirmations for a UTXO's transaction.
-	// Because a UTXO can become invalid after once being considered valid, this
+// Coin provides data about an unspent transaction output.
+type Coin interface {
+	// Confirmations returns the number of confirmations for a Coin's transaction.
+	// Because a Coin can become invalid after once being considered valid, this
 	// condition should be checked for during confirmation counting and an error
-	// returned if this UTXO is no longer ready to spend. An unmined transaction
+	// returned if this Coin is no longer ready to spend. An unmined transaction
 	// should have zero confirmations. A transaction in the current best block
 	// should have one confirmation. A negative number can be returned if error
 	// is not nil.
 	Confirmations() (int64, error)
-	// Auth checks that the owner of the provided pubkeys can spend the UTXO.
+	// Auth checks that the owner of the provided pubkeys can spend the Coin.
 	// The signatures (sigs) generated with the private keys corresponding
 	// to pubkeys must validate against the pubkeys and signing message (msg).
 	Auth(pubkeys, sigs [][]byte, msg []byte) error
-	// SpendSize returns the size of the serialized input that spends this UTXO.
-	SpendSize() uint32
-	// TxHash is a byte-slice of the UTXO's transaction hash.
-	TxHash() []byte
-	// TxID is a string identifier for the transaction, typically a hexadecimal
-	// representation of the byte-reversed transaction hash. Should always return
-	// the same value as the txid argument passed to (DEXAsset).UTXO.
-	TxID() string
-	// Vout is the output index of the UTXO.
-	Vout() uint32
-	// Value is the output value.
-	Value() uint64
-}
-
-// DEXTx provides methods for verifying transaction data.
-type DEXTx interface {
-	// Confirmations returns the number of confirmations for a transaction.
-	// Because a transaction can become invalid after once being considered valid,
-	// this condition should be checked for during confirmation counting and an
-	// error returned if this transactcion is no longer valid. An unmined
-	// transaction should have zero confirmations. A transaction in the current
-	// best block should have one transaction. A negative number can be returned
-	// if error is not nil.
-	Confirmations() (int64, error)
-	// SpendsUTXO checks if the transaction spends a specified previous output.
-	// An error will be returned if the input is not parseable. If the UTXO is not
-	// spent in this transaction, the boolean return value will be false, but no
+	// AuditContract checks that coin is a swap contract and extracts the
+	// receiving address and contract value on success.
+	AuditContract() (string, uint64, error)
+	// SpendsCoin checks if the coin spends a specified previous coin.
+	// An error will be returned if the input is not parseable. If the Coin is not
+	// spent by this coin, the boolean return value will be false, but no
 	// error is returned.
-	SpendsUTXO(txid string, vout uint32) (bool, error)
-	// AuditContract checks that the provided swap contract hashes to the script
-	// hash specified in the output at the indicated vout. The receiving address
-	// and output value (in atoms) are returned if no error is encountered.
-	AuditContract(vout uint32, contract []byte) (string, uint64, error)
+	SpendsCoin(coinID []byte) (bool, error)
 	// FeeRate returns the transaction fee rate, in atoms/byte equivalent.
 	FeeRate() uint64
+	// SpendSize returns the size of the serialized input that spends this Coin.
+	SpendSize() uint32
+	// ID is the coin ID.
+	ID() []byte
+	// TxID is a transaction identifier for the coin.
+	TxID() string
+	// Value is the output value.
+	Value() uint64
 }
 
 // Type Asset combines the DEXAsset backend with the configurable asset

@@ -593,7 +593,7 @@ func testSwapContract() ([]byte, btcutil.Address) {
 	return contract, receiverAddr
 }
 
-func testMsgTxSwapInit() *testMsgTxSwap {
+func testMsgTxSwapInit(val int64) *testMsgTxSwap {
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	contract, recipient := testSwapContract()
 	scriptHash := btcutil.Hash160(contract)
@@ -605,7 +605,7 @@ func testMsgTxSwapInit() *testMsgTxSwap {
 	if err != nil {
 		fmt.Printf("script building error in testMsgTxSwapInit: %v", err)
 	}
-	msgTx.AddTxOut(wire.NewTxOut(1, pkScript))
+	msgTx.AddTxOut(wire.NewTxOut(val, pkScript))
 	return &testMsgTxSwap{
 		tx:        msgTx,
 		contract:  contract,
@@ -962,6 +962,50 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 10 - unexpected error after maturing: %v", err)
 	}
+
+	// CASE 11: A swap contract
+	cleanTestChain()
+	txHash = randomHash()
+	blockHash = randomHash()
+	swap := testMsgTxSwapInit(5)
+	testAddBlockVerbose(blockHash, nil, 1, txHeight)
+	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1)
+	verboseTx := testChain.txRaws[*txHash]
+
+	spentTxHash := randomHash()
+	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTxHash, 0))
+	// We need to add that transaction to the blockchain too, because it will
+	// be requested for the previous outpoint value.
+	spentMsg := testMakeMsgTx(false)
+	spentTx := testAddTxVerbose(spentMsg.tx, spentTxHash, blockHash, 2)
+	spentTx.Vout = []btcjson.Vout{testVout(1, nil)}
+	swapOut := swap.tx.TxOut[0]
+	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(swapOut.Value)/btcToSatoshi, swapOut.PkScript))
+	utxo, err = btc.utxo(txHash, 0, swap.contract)
+	if err != nil {
+		t.Fatalf("case 11 - received error for utxo: %v", err)
+	}
+
+	// Check that the spent tx is in dexTx.
+	spentID := toCoinID(spentTxHash, 0)
+	spent, err := utxo.SpendsCoin(spentID)
+	if err != nil {
+		t.Fatalf("case 11 - SpendsUTXO error: %v", err)
+	}
+	if !spent {
+		t.Fatalf("case 11 - transaction not confirming spent utxo")
+	}
+	// Now try again with the correct vout.
+	recipient, swapVal, err := utxo.AuditContract()
+	if err != nil {
+		t.Fatalf("case 11 - unexpected error auditing contract: %v", err)
+	}
+	if recipient != swap.recipient.String() {
+		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", recipient, swap.recipient.String())
+	}
+	if swapVal != 5 {
+		t.Fatalf("case 11 - unexpected output value. wanted 5, got %d", swapVal)
+	}
 }
 
 // TestReorg tests various reorg paths. Because bitcoind doesn't support
@@ -1066,128 +1110,6 @@ func TestReorg(t *testing.T) {
 	}
 }
 
-// TestTx checks the transaction-related methods and functions.
-func TestTx(t *testing.T) {
-	// Create a Backend with the test node.
-	btc, shutdown := testBackend()
-	defer shutdown()
-
-	// Test 1: Test different states of validity.
-	cleanTestChain()
-	blockHeight := uint32(500)
-	txHash := randomHash()
-	blockHash := randomHash()
-	msg := testMakeMsgTx(false)
-	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, 2)
-	// Mine the transaction and an approving block.
-	testAddBlockVerbose(blockHash, nil, 1, blockHeight)
-	testAddBlockVerbose(randomHash(), nil, 1, blockHeight+1)
-	time.Sleep(blockPollDelay)
-	// Add some random output at index 0.
-	verboseTx.Vout = append(verboseTx.Vout, testVout(1, randomBytes(20)))
-	// Add a swap output at index 1.
-	swap := testMsgTxSwapInit()
-	swapTxOut := swap.tx.TxOut[swap.vout]
-	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(swapTxOut.Value)/btcToSatoshi, swapTxOut.PkScript))
-	// Make an input spending some random utxo.
-	spentTxHash := randomHash()
-	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTxHash, 0))
-	// We need to add that transaction to the blockchain too, because it will
-	// be requested for the previous outpoint value.
-	spentMsg := testMakeMsgTx(false)
-	spentTx := testAddTxVerbose(spentMsg.tx, spentTxHash, blockHash, 2)
-	spentTx.Vout = []btcjson.Vout{testVout(1, nil)}
-	// Get the transaction from the backend.
-	dexTx, err := btc.transaction(txHash)
-	if err != nil {
-		t.Fatalf("error getting dex tx: %v", err)
-	}
-	// Check that there are 2 confirmations.
-	confs, err := dexTx.Confirmations()
-	if err != nil {
-		t.Fatalf("unexpected error getting confirmation count: %v", err)
-	}
-	if confs != 2 {
-		t.Fatalf("expected 2 confirmations, but %d were reported", confs)
-	}
-	// Check that the spent tx is in dexTx.
-	spent, err := dexTx.SpendsUTXO(spentTxHash.String(), 0)
-	if err != nil {
-		t.Fatalf("SpendsUTXO error: %v", err)
-	}
-	if !spent {
-		t.Fatalf("transaction not confirming spent utxo")
-	}
-
-	// Check that the swap contract doesn't match the first input.
-	_, _, err = dexTx.AuditContract(0, swap.contract)
-	if err == nil {
-		t.Fatalf("no error for contract audit on non-swap output")
-	}
-	// Now try again with the correct vout.
-	recipient, swapVal, err := dexTx.AuditContract(1, swap.contract)
-	if err != nil {
-		t.Fatalf("unexpected error auditing contract: %v", err)
-	}
-	if recipient != swap.recipient.String() {
-		t.Fatalf("wrong recipient. wanted '%s' got '%s'", recipient, swap.recipient.String())
-	}
-	if swapVal != uint64(swapTxOut.Value) {
-		t.Fatalf("unexpected output value. wanted %d, got %d", swapVal, swapTxOut.Value)
-	}
-
-	// Now do an invalidating reorg, and check that Confirmations returns an
-	// error.
-	testClearBestBlock()
-	testAddBlockVerbose(nil, nil, 1, blockHeight)
-	// Wait for the reorg to be seen by the Backend.loop.
-	time.Sleep(blockPollDelay)
-	_, err = dexTx.Confirmations()
-	if err == nil {
-		t.Fatalf("no error when checking confirmations on an invalidated tx")
-	}
-
-	// Test 2: Before and after mining.
-	cleanTestChain()
-	btc.blockCache = newBlockCache()
-	txHash = randomHash()
-	// Add a transaction to mempool.
-	msg = testMakeMsgTx(false)
-	testAddTxVerbose(msg.tx, txHash, nil, 0)
-	// Get the transaction data through the backend and make sure it has zero
-	// confirmations.
-	dexTx, err = btc.transaction(txHash)
-	if err != nil {
-		t.Fatalf("unexpected error retrieving transaction through backend: %v", err)
-	}
-	confs, err = dexTx.Confirmations()
-	if err != nil {
-		t.Fatalf("unexpected error getting confirmations on mempool transaction: %v", err)
-	}
-	if confs != 0 {
-		t.Fatalf("expected 0 confirmations for mempool transaction, got %d", confs)
-	}
-	// Now mine the transaction
-	blockHash = testAddBlockVerbose(nil, nil, 1, blockHeight)
-	time.Sleep(blockPollDelay)
-	// Update the verbose tx data
-	testAddTxVerbose(msg.tx, txHash, blockHash, 1)
-	// Check Confirmations
-	confs, err = dexTx.Confirmations()
-	if err != nil {
-		t.Fatalf("unexpected error getting confirmations on mined transaction: %v", err)
-	}
-	if confs != 1 {
-		t.Fatalf("expected 1 confirmation for mined transaction, got %d", confs)
-	}
-	if dexTx.blockHash != *blockHash {
-		t.Fatalf("unexpected block hash on a mined transaction. expected %s, got %s", blockHash, dexTx.blockHash)
-	}
-	if dexTx.height != int64(blockHeight) {
-		t.Fatalf("unexpected block height on a mined transaction. expected %d, got %d", blockHeight, dexTx.height)
-	}
-}
-
 // TestAuxiliary checks the UTXO convenience functions like TxHash, Vout, and
 // TxID.
 func TestAuxiliary(t *testing.T) {
@@ -1204,15 +1126,10 @@ func TestAuxiliary(t *testing.T) {
 	txHeight := rand.Uint32()
 	blockHash := testAddBlockVerbose(nil, nil, 1, txHeight)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
-	utxo, err := btc.UTXO(txid, msg.vout, nil)
+	coinID := toCoinID(txHash, msg.vout)
+	utxo, err := btc.Coin(coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if !bytes.Equal(txHash.CloneBytes(), utxo.TxHash()) {
-		t.Fatalf("utxo tx hash doesn't match")
-	}
-	if utxo.Vout() != msg.vout {
-		t.Fatalf("utxo vout doesn't match")
 	}
 	if utxo.TxID() != txid {
 		t.Fatalf("utxo txid doesn't match")

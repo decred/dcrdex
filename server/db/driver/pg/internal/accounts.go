@@ -13,8 +13,7 @@ const (
 		account_id BYTEA PRIMARY KEY,  -- UNIQUE INDEX
 		pubkey BYTEA,
 		fee_address TEXT,
-		fee_tx BYTEA,
-		fee_vout INT4,
+		fee_coin BYTEA,
 		broken_rule INT2 DEFAULT 0
 		);`
 
@@ -37,7 +36,7 @@ const (
 	// SelectAccount gathers account details for the specified accound ID. The
 	// details returned from this query are sufficient to determine 1) whether the
 	// registration fee has been paid, or 2) whether the account has been closed.
-	SelectAccount = `SELECT pubkey, fee_tx, broken_rule
+	SelectAccount = `SELECT pubkey, fee_coin, broken_rule
 		FROM %s
 		WHERE account_id = $1;`
 
@@ -51,7 +50,6 @@ const (
 	// SetRegOutput sets the registration fee payment transaction details for the
 	// account.
 	SetRegOutput = `UPDATE %s SET
-		fee_tx = $1,
-		fee_vout = $2
-		WHERE account_id = $3;`
+		fee_coin = $1
+		WHERE account_id = $2;`
 )

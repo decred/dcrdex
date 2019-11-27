@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -174,24 +175,14 @@ func ReadCloneParams(cloneParams interface{}) (*chaincfg.Params, error) {
 	return p, nil
 }
 
-// UTXO is part of the asset.UTXO interface. See the unexported Backend.utxo
+// Coin is part of the asset.DEXAsset interface. See the unexported Backend.utxo
 // method for the full implementation.
-func (btc *Backend) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
-	txHash, err := chainhash.NewHashFromStr(txid)
+func (btc *Backend) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error) {
+	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
+		return nil, fmt.Errorf("error decoding tx ID %x: %v", coinID, err)
 	}
 	return btc.utxo(txHash, vout, redeemScript)
-}
-
-// Transaction is part of the asset.DEXTx interface. See the unexported
-// Backend.transaction method for the full implementation.
-func (btc *Backend) Transaction(txid string) (asset.DEXTx, error) {
-	txHash, err := chainhash.NewHashFromStr(txid)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
-	}
-	return btc.transaction(txHash)
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -311,8 +302,14 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		return nil, immatureTransactionError
 	}
 
+	tx, err := btc.transaction(txHash, verboseTx)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
+	}
+
 	return &UTXO{
 		btc:          btc,
+		tx:           tx,
 		height:       blockHeight,
 		blockHash:    blockHash,
 		txHash:       *txHash,
@@ -348,12 +345,7 @@ func (btc *Backend) prevOutputValue(txid string, vout int) (uint64, error) {
 
 // Get the Tx. Transaction info is not cached, so every call will result in a
 // GetRawTransactionVerbose RPC call.
-func (btc *Backend) transaction(txHash *chainhash.Hash) (*Tx, error) {
-	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
-	if err != nil {
-		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
-	}
-
+func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRawResult) (*Tx, error) {
 	// If it's not a mempool transaction, get and cache the block data.
 	var blockHash *chainhash.Hash
 	var lastLookup *chainhash.Hash
@@ -364,6 +356,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 			lastLookup = &tipHash
 		}
 	} else {
+		var err error
 		blockHash, err = chainhash.NewHashFromStr(verboseTx.BlockHash)
 		if err != nil {
 			return nil, fmt.Errorf("error decoding block hash %s for tx %s: %v", verboseTx.BlockHash, txHash, err)
@@ -383,6 +376,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 		if input.Coinbase != "" {
 			valIn = uint64(verboseTx.Vout[0].Value * btcToSatoshi)
 		} else {
+			var err error
 			valIn, err = btc.prevOutputValue(input.Txid, int(input.Vout))
 			if err != nil {
 				return nil, fmt.Errorf("error fetching previous output value for %s:%d: %v", txHash, vin, err)
@@ -420,8 +414,8 @@ func (btc *Backend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 		})
 	}
 	var feeRate uint64
-	if verboseTx.Size > 0 {
-		feeRate = (sumIn - sumOut) / uint64(verboseTx.Size)
+	if verboseTx.Vsize > 0 {
+		feeRate = (sumIn - sumOut) / uint64(verboseTx.Vsize)
 	}
 	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, inputs, outputs, feeRate), nil
 }
@@ -564,4 +558,23 @@ func (btc *Backend) shutdown() {
 		btc.client.Shutdown()
 		btc.client.WaitForShutdown()
 	}
+}
+
+// decodeCoinID decodes the coin ID into a tx hash and a vout.
+func decodeCoinID(coinID []byte) (*chainhash.Hash, uint32, error) {
+	if len(coinID) != 36 {
+		return nil, 0, fmt.Errorf("coin ID wrong length. expected 36, got %d", len(coinID))
+	}
+	var txHash chainhash.Hash
+	copy(txHash[:], coinID[:32])
+	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
+}
+
+// toCoinID converts the outpoint to a coin ID.
+func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
+	hashLen := len(txHash)
+	b := make([]byte, hashLen+4)
+	copy(b[:hashLen], txHash[:])
+	binary.BigEndian.PutUint32(b[hashLen:], vout)
+	return b
 }

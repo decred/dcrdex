@@ -167,32 +167,8 @@ func calcOrderID(order Order) OrderID {
 	return blake256.Sum256(order.Serialize())
 }
 
-// Outpoint is the interface required to be satisfied by any asset's
-// implementation of a UTXO type.
-type Outpoint interface {
-	TxHash() []byte
-	Vout() uint32
-}
-
-// OutpointString generates the hash:vout outpoint string format for an
-// Outpoint. This is used to store the outpoints for an order in a database, but
-// it may be used to generate the canonical outpoint string format, txid:vout.
-func OutpointString(op Outpoint) string {
-	return fmt.Sprintf("%x:%d", op.TxHash(), op.Vout())
-}
-
-func outpointSize(op Outpoint) int {
-	return len(op.TxHash()) + 4
-}
-
-func serializeOutpoint(op Outpoint) []byte {
-	b := make([]byte, outpointSize(op))
-	hash := op.TxHash()
-	hashLen := len(hash)
-	copy(b, hash)
-	binary.BigEndian.PutUint32(b[hashLen:], op.Vout())
-	return b
-}
+// CoinID identifies value on the blockchain.
+type CoinID []byte
 
 // Prefix is the order prefix containing data fields common to all orders.
 type Prefix struct {
@@ -273,14 +249,14 @@ func (p *Prefix) Quote() uint32 {
 }
 
 // MarketOrder defines a market order in terms of a Prefix and the order
-// details, including the backing UTXOs, the order direction/side, order
+// details, including the backing Coins, the order direction/side, order
 // quantity, and the address where the matched client will send funds. The order
 // quantity is in atoms of the base asset, and must be an integral multiple of
 // the asset's lot size, except for Market buy orders when it is in units of the
 // quote asset and is not bound by integral lot size multiple constraints.
 type MarketOrder struct {
 	Prefix
-	UTXOs    []Outpoint
+	Coins    []CoinID
 	Sell     bool
 	Quantity uint64
 	Address  string
@@ -321,15 +297,15 @@ func (o *MarketOrder) String() string {
 
 // SerializeSize returns the length of the serialized MarketOrder.
 func (o *MarketOrder) SerializeSize() int {
-	// Compute the size of the serialized UTXOs.
-	var utxosSize int
-	for _, u := range o.UTXOs {
-		utxosSize += len(u.TxHash()) + 4
-		// TODO: ensure all UTXOs have the same size, indicating the same asset?
+	// Compute the size of the serialized Coin IDs.
+	var coinSz int
+	for _, coinID := range o.Coins {
+		coinSz += len(coinID)
+		// TODO: ensure all Coin IDs have the same size, indicating the same asset?
 	}
-	// The serialized order includes a byte for UTXO count, but this is implicit
-	// in UTXO slice length.
-	return o.Prefix.SerializeSize() + 1 + utxosSize + 1 + 8 + len(o.Address)
+	// The serialized order includes a byte for coin count, but this is implicit
+	// in coin slice length.
+	return o.Prefix.SerializeSize() + 1 + coinSz + 1 + 8 + len(o.Address)
 }
 
 // Serialize marshals the MarketOrder into a []byte.
@@ -340,15 +316,15 @@ func (o *MarketOrder) Serialize() []byte {
 	copy(b[:PrefixLen], o.Prefix.Serialize())
 	offset := PrefixLen
 
-	// UTXO count
-	b[offset] = uint8(len(o.UTXOs))
+	// Coin count
+	b[offset] = uint8(len(o.Coins))
 	offset++
 
-	// UTXO data
-	for _, u := range o.UTXOs {
-		utxoSz := outpointSize(u)
-		copy(b[offset:offset+utxoSz], serializeOutpoint(u))
-		offset += utxoSz
+	// Coins
+	for _, coinID := range o.Coins {
+		coinSz := len(coinID)
+		copy(b[offset:offset+coinSz], coinID)
+		offset += coinSz
 	}
 
 	// order side

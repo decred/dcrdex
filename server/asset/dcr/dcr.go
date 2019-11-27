@@ -6,6 +6,7 @@ package dcr
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
@@ -131,30 +132,20 @@ func (dcr *DCRBackend) BlockChannel(size int) chan uint32 {
 	return c
 }
 
-// UTXO is part of the asset.UTXO interface, so returns the asset.UTXO type.
-// Only spendable UTXOs with known types of pubkey script will be successfully
-// retrieved. A spendable UTXO is one that can be spent in the next block. Every
+// Coin is part of the asset.DEXAsset interface, so returns the asset.Coin type.
+// Only spendable utxos with known types of pubkey script will be successfully
+// retrieved. A spendable utxo is one that can be spent in the next block. Every
 // regular-tree output from a non-coinbase transaction is spendable immediately.
 // Coinbase and stake tree outputs are only spendable after CoinbaseMaturity
 // confirmations. Pubkey scripts can be P2PKH or P2SH in either regular- or
 // stake-tree flavor. P2PKH supports two alternative signatures, Schnorr and
 // Edwards. Multi-sig P2SH redeem scripts are supported as well.
-func (dcr *DCRBackend) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
-	txHash, err := chainhash.NewHashFromStr(txid)
+func (dcr *DCRBackend) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error) {
+	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
+		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
 	return dcr.utxo(txHash, vout, redeemScript)
-}
-
-// Transaction is part of the asset.DEXTx interface. The returned DEXTx has
-// methods for checking spent outputs and validating swap contracts.
-func (dcr *DCRBackend) Transaction(txid string) (asset.DEXTx, error) {
-	txHash, err := chainhash.NewHashFromStr(txid)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
-	}
-	return dcr.transaction(txHash)
 }
 
 // CheckAddress checks that the given address is parseable.
@@ -198,12 +189,7 @@ func (dcr *DCRBackend) UnspentDetails(txid string, vout uint32) (string, uint64,
 
 // Get the Tx. Transaction info is not cached, so every call will result in a
 // GetRawTransactionVerbose RPC call.
-func (dcr *DCRBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
-	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
-	if err != nil {
-		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
-	}
-
+func (dcr *DCRBackend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxRawResult) (*Tx, error) {
 	// Figure out if it's a stake transaction
 	msgTx, err := msgTxFromHex(verboseTx.Hex)
 	if err != nil {
@@ -234,10 +220,10 @@ func (dcr *DCRBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 	var sumIn, sumOut uint64
 	// Parse inputs and outputs, grabbing only what's needed.
 	inputs := make([]txIn, 0, len(verboseTx.Vin))
-	for _, input := range verboseTx.Vin {
-		if input.Txid == "" {
-			inputs = append(inputs, txIn{vout: input.Vout})
-			continue
+	isCoinbase := false
+	for vin, input := range verboseTx.Vin {
+		if vin == 0 && input.Coinbase != "" || input.Stakebase != "" {
+			isCoinbase = true
 		}
 		sumIn += uint64(input.AmountIn * dcrToAtoms)
 		hash, err := chainhash.NewHashFromStr(input.Txid)
@@ -261,6 +247,9 @@ func (dcr *DCRBackend) transaction(txHash *chainhash.Hash) (*Tx, error) {
 		})
 	}
 	feeRate := (sumIn - sumOut) / uint64(len(verboseTx.Hex)/2)
+	if isCoinbase {
+		feeRate = 0
+	}
 	return newTransaction(dcr, txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, inputs, outputs, feeRate), nil
 }
 
@@ -427,11 +416,16 @@ func (dcr *DCRBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		return nil, immatureTransactionError
 	}
 
+	tx, err := dcr.transaction(txHash, verboseTx)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
+	}
+
 	return &UTXO{
 		dcr:          dcr,
+		tx:           tx,
 		height:       blockHeight,
 		blockHash:    blockHash,
-		txHash:       *txHash,
 		vout:         vout,
 		maturity:     int32(maturity),
 		scriptType:   scriptType,
@@ -545,4 +539,23 @@ func connectNodeRPC(host, user, pass, cert string,
 	}
 
 	return dcrdClient, nil
+}
+
+// decodeCoinID decodes the coin ID into a tx hash and a vout.
+func decodeCoinID(coinID []byte) (*chainhash.Hash, uint32, error) {
+	if len(coinID) != 36 {
+		return nil, 0, fmt.Errorf("coin ID wrong length. expected 36, got %d", len(coinID))
+	}
+	var txHash chainhash.Hash
+	copy(txHash[:], coinID[:32])
+	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
+}
+
+// toCoinID converts the outpoint to a coin ID.
+func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
+	hashLen := len(txHash)
+	b := make([]byte, hashLen+4)
+	copy(b[:hashLen], txHash[:])
+	binary.BigEndian.PutUint32(b[hashLen:], vout)
+	return b
 }

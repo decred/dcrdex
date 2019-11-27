@@ -29,13 +29,12 @@ const (
 // This stub satisfies asset.DEXAsset.
 type TAsset struct{}
 
-func (a *TAsset) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
+func (a *TAsset) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error) {
 	return nil, nil
 }
-func (a *TAsset) BlockChannel(size int) chan uint32            { return nil }
-func (a *TAsset) Transaction(txid string) (asset.DEXTx, error) { return nil, nil }
-func (a *TAsset) InitTxSize() uint32                           { return 100 }
-func (a *TAsset) CheckAddress(string) bool                     { return true }
+func (a *TAsset) BlockChannel(size int) chan uint32 { return nil }
+func (a *TAsset) InitTxSize() uint32                { return 100 }
+func (a *TAsset) CheckAddress(string) bool          { return true }
 
 func newAsset(id uint32, lotSize uint64) *asset.Asset {
 	return &asset.Asset{
@@ -112,7 +111,7 @@ func TestMarket_runEpochs(t *testing.T) {
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
 			Quantity: qty,
-			UTXOs:    []*msgjson.UTXO{},
+			Coins:    []*msgjson.Coin{},
 			Address:  btcAddr,
 		},
 		Rate: rate,
@@ -129,7 +128,7 @@ func TestMarket_runEpochs(t *testing.T) {
 					OrderType:  order.LimitOrderType,
 					ClientTime: time.Unix(int64(limit.ClientTime), 0).UTC(),
 				},
-				UTXOs:    []order.Outpoint{},
+				Coins:    []order.CoinID{},
 				Sell:     true,
 				Quantity: limit.Quantity,
 				Address:  limit.Address,

@@ -85,12 +85,12 @@ func TestInit(t *testing.T) {
 	// + timestamp (8) + contract (97 ish)
 	oid, _ := BytesFromHex("ceb09afa675cee31c0f858b94c81bd1a4c2af8c5947d13e544eef772381f2c8d")
 	mid, _ := BytesFromHex("7c6b44735e303585d644c713fe0e95897e7e8ba2b9bba98d6d61b70006d3d58c")
+	coinid, _ := BytesFromHex("c3161033de096fd74d9051ff0bd99e359de35080a3511081ed035f541b850d4300000005")
 	contract, _ := BytesFromHex("caf8d277f80f71e4")
 	init := &Init{
 		OrderID:  oid,
 		MatchID:  mid,
-		TxID:     "c3161033de096fd74d9051ff0bd99e359de35080a3511081ed035f541b850d43",
-		Vout:     10,
+		CoinID:   coinid,
 		Time:     1570704776,
 		Contract: contract,
 	}
@@ -104,15 +104,10 @@ func TestInit(t *testing.T) {
 		0x7c, 0x6b, 0x44, 0x73, 0x5e, 0x30, 0x35, 0x85, 0xd6, 0x44, 0xc7, 0x13,
 		0xfe, 0x0e, 0x95, 0x89, 0x7e, 0x7e, 0x8b, 0xa2, 0xb9, 0xbb, 0xa9, 0x8d,
 		0x6d, 0x61, 0xb7, 0x00, 0x06, 0xd3, 0xd5, 0x8c,
-		// Transaction ID 64 bytes utf-8
-		0x63, 0x33, 0x31, 0x36, 0x31, 0x30, 0x33, 0x33, 0x64, 0x65, 0x30, 0x39,
-		0x36, 0x66, 0x64, 0x37, 0x34, 0x64, 0x39, 0x30, 0x35, 0x31, 0x66, 0x66,
-		0x30, 0x62, 0x64, 0x39, 0x39, 0x65, 0x33, 0x35, 0x39, 0x64, 0x65, 0x33,
-		0x35, 0x30, 0x38, 0x30, 0x61, 0x33, 0x35, 0x31, 0x31, 0x30, 0x38, 0x31,
-		0x65, 0x64, 0x30, 0x33, 0x35, 0x66, 0x35, 0x34, 0x31, 0x62, 0x38, 0x35,
-		0x30, 0x64, 0x34, 0x33,
-		// Vout 4 bytes
-		0x00, 0x00, 0x00, 0x0a,
+		// Coin ID 36 bytes
+		0xc3, 0x16, 0x10, 0x33, 0xde, 0x09, 0x6f, 0xd7, 0x4d, 0x90, 0x51, 0xff,
+		0x0b, 0xd9, 0x9e, 0x35, 0x9d, 0xe3, 0x50, 0x80, 0xa3, 0x51, 0x10, 0x81,
+		0xed, 0x03, 0x5f, 0x54, 0x1b, 0x85, 0x0d, 0x43, 0x00, 0x00, 0x00, 0x05,
 		// Timestamp 8 bytes
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0x9f, 0x0d, 0x88,
 		// Contract 8 bytes (shortened for testing)
@@ -143,11 +138,8 @@ func TestInit(t *testing.T) {
 	if !bytes.Equal(initBack.OrderID, init.OrderID) {
 		t.Fatal(initBack.OrderID, init.OrderID)
 	}
-	if initBack.TxID != init.TxID {
-		t.Fatal(initBack.TxID, init.TxID)
-	}
-	if initBack.Vout != init.Vout {
-		t.Fatal(initBack.Vout, init.Vout)
+	if !bytes.Equal(initBack.CoinID, init.CoinID) {
+		t.Fatal(initBack.CoinID, init.CoinID)
 	}
 	if initBack.Time != init.Time {
 		t.Fatal(initBack.Time, init.Time)
@@ -269,11 +261,11 @@ func TestRedeem(t *testing.T) {
 	// + timestamp (8)
 	oid, _ := BytesFromHex("ee17139af2d86bd6052829389c0531f71042ed0b0539e617213a9a7151215a1b")
 	mid, _ := BytesFromHex("6ea1227b03d7bf05ce1e23f3edf57368f69ba9ee0cc069f09ab0952a36d964c5")
+	coinid, _ := BytesFromHex("28cb86e678f647cc88da734eed11286dab18b8483feb04580e3cbc90555a004700000005")
 	redeem := &Redeem{
 		OrderID: oid,
 		MatchID: mid,
-		TxID:    "28cb86e678f647cc88da734eed11286dab18b8483feb04580e3cbc90555a0047",
-		Vout:    155,
+		CoinID:  coinid,
 		Time:    1570706834,
 	}
 
@@ -286,15 +278,10 @@ func TestRedeem(t *testing.T) {
 		0x6e, 0xa1, 0x22, 0x7b, 0x03, 0xd7, 0xbf, 0x05, 0xce, 0x1e, 0x23, 0xf3,
 		0xed, 0xf5, 0x73, 0x68, 0xf6, 0x9b, 0xa9, 0xee, 0x0c, 0xc0, 0x69, 0xf0,
 		0x9a, 0xb0, 0x95, 0x2a, 0x36, 0xd9, 0x64, 0xc5,
-		// Trancaction ID 64 bytes
-		0x32, 0x38, 0x63, 0x62, 0x38, 0x36, 0x65, 0x36, 0x37, 0x38, 0x66, 0x36,
-		0x34, 0x37, 0x63, 0x63, 0x38, 0x38, 0x64, 0x61, 0x37, 0x33, 0x34, 0x65,
-		0x65, 0x64, 0x31, 0x31, 0x32, 0x38, 0x36, 0x64, 0x61, 0x62, 0x31, 0x38,
-		0x62, 0x38, 0x34, 0x38, 0x33, 0x66, 0x65, 0x62, 0x30, 0x34, 0x35, 0x38,
-		0x30, 0x65, 0x33, 0x63, 0x62, 0x63, 0x39, 0x30, 0x35, 0x35, 0x35, 0x61,
-		0x30, 0x30, 0x34, 0x37,
-		// Vout 4 bytes
-		0x00, 0x00, 0x00, 0x9b,
+		// Coin ID, 36 Bytes
+		0x28, 0xcb, 0x86, 0xe6, 0x78, 0xf6, 0x47, 0xcc, 0x88, 0xda, 0x73, 0x4e,
+		0xed, 0x11, 0x28, 0x6d, 0xab, 0x18, 0xb8, 0x48, 0x3f, 0xeb, 0x04, 0x58,
+		0x0e, 0x3c, 0xbc, 0x90, 0x55, 0x5a, 0x00, 0x47, 0x00, 0x00, 0x00, 0x05,
 		// Timestamp 8 bytes
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0x9f, 0x15, 0x92,
 	}
@@ -324,69 +311,11 @@ func TestRedeem(t *testing.T) {
 	if !bytes.Equal(redeemBack.OrderID, redeem.OrderID) {
 		t.Fatal(redeemBack.OrderID, redeem.OrderID)
 	}
-	if redeemBack.TxID != redeem.TxID {
-		t.Fatal(redeemBack.TxID, redeem.TxID)
-	}
-	if redeemBack.Vout != redeem.Vout {
-		t.Fatal(redeemBack.Vout, redeem.Vout)
+	if !bytes.Equal(redeemBack.CoinID, redeem.CoinID) {
+		t.Fatal(redeemBack.CoinID, redeem.CoinID)
 	}
 	if redeemBack.Time != redeem.Time {
 		t.Fatal(redeemBack.Time, redeem.Time)
-	}
-}
-
-func TestUTXO(t *testing.T) {
-	txid, _ := BytesFromHex("f72c201f11e7ee9b88d54ea9c6ae9c0da1a8dace622a019c6703e78b1c670aad")
-	pk, _ := BytesFromHex("cade497e8d881a3ea91f57dc56d29c316683ce4b3a995adc48b78c338f643263b6")
-	sig, _ := BytesFromHex("2a776b69f81473ddfd595a468173274f0984522186ffc09b79b116b7d17b23dd76c26a3be89fdd1ac65c88adee45bbfbc6088c840391111266b12b2b29fe3d088461b720e35c516328")
-	redeem, _ := BytesFromHex("0a745d9871f5b353a146ba311029479c05296c93b3806cd662")
-	utxo := &UTXO{
-		TxID: txid,
-		Vout: 256,
-		// the rest are not part of the serialized utxo.
-		PubKeys: []Bytes{pk},
-		Sigs:    []Bytes{sig},
-		Redeem:  redeem,
-	}
-
-	exp := []byte{
-		// TxID 32 bytes
-		0xf7, 0x2c, 0x20, 0x1f, 0x11, 0xe7, 0xee, 0x9b, 0x88, 0xd5, 0x4e, 0xa9,
-		0xc6, 0xae, 0x9c, 0x0d, 0xa1, 0xa8, 0xda, 0xce, 0x62, 0x2a, 0x01, 0x9c,
-		0x67, 0x03, 0xe7, 0x8b, 0x1c, 0x67, 0x0a, 0xad,
-		// Vout 4 bytes
-		0x00, 0x00, 0x01, 0x00,
-	}
-
-	b := utxo.Serialize()
-	if !bytes.Equal(b, exp) {
-		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
-	}
-
-	utxoB, err := json.Marshal(utxo)
-	if err != nil {
-		t.Fatalf("marshal error: %v", err)
-	}
-
-	var utxoBack UTXO
-	err = json.Unmarshal(utxoB, &utxoBack)
-	if err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-	if !bytes.Equal(utxoBack.TxID, utxoBack.TxID) {
-		t.Fatal(utxoBack.TxID, utxoBack.TxID)
-	}
-	if utxoBack.Vout != utxo.Vout {
-		t.Fatalf("wrong vout. wanted %d, got %d", utxo.Vout, utxoBack.Vout)
-	}
-	if !bytes.Equal(utxoBack.PubKeys[0], utxoBack.PubKeys[0]) {
-		t.Fatal(utxoBack.PubKeys[0], utxoBack.PubKeys[0])
-	}
-	if !bytes.Equal(utxoBack.Sigs[0], utxoBack.Sigs[0]) {
-		t.Fatal(utxoBack.Sigs[0], utxoBack.Sigs[0])
-	}
-	if !bytes.Equal(utxoBack.Redeem, utxoBack.Redeem) {
-		t.Fatal(utxoBack.Redeem, utxoBack.Redeem)
 	}
 }
 
@@ -462,42 +391,40 @@ func TestPrefix(t *testing.T) {
 }
 
 func TestTrade(t *testing.T) {
-	// serialization: utxo count (1), utxo data (36*count), side (1), qty (8)
+	// serialization: coin count (1), coin IDs (36*count), side (1), qty (8)
 	// = 10 + 36*count
 
 	addr := "13DePXLAKNsFCSmgfrEsYm8G1aCVZdYvP9"
-	utxo1 := randomUTXO()
-	utxo2 := randomUTXO()
+	coin1 := randomCoin()
+	coin2 := randomCoin()
 
 	trade := &Trade{
 		Side:     1,
 		Quantity: 600_000_000,
-		UTXOs:    []*UTXO{utxo1, utxo2},
+		Coins:    []*Coin{coin1, coin2},
 		Address:  addr,
 	}
 
-	// UTXO count
+	// Coin count
 	b := trade.Serialize()
 	if b[0] != 0x02 {
-		t.Fatalf("utxo count byte incorrect: %d", b[0])
+		t.Fatalf("coin count byte incorrect: %d", b[0])
 	}
 	b = b[1:]
 
-	// first utxo
-	u := utxo1.Serialize()
-	uLen := len(u)
-	if !bytes.Equal(b[:uLen], u) {
-		t.Fatal(b[:uLen], u)
+	// first coin
+	cLen := len(coin1.ID)
+	if !bytes.Equal(b[:cLen], coin1.ID) {
+		t.Fatal(b[:cLen], coin1.ID)
 	}
-	b = b[uLen:]
+	b = b[cLen:]
 
-	// second utxo
-	u = utxo2.Serialize()
-	uLen = len(u)
-	if !bytes.Equal(b[:uLen], u) {
-		t.Fatal(b[:uLen], u)
+	// second coin
+	cLen = len(coin2.ID)
+	if !bytes.Equal(b[:cLen], coin2.ID) {
+		t.Fatal(b[:cLen], coin2.ID)
 	}
-	b = b[uLen:]
+	b = b[cLen:]
 
 	// side
 	if b[0] != 0x01 {
@@ -524,12 +451,12 @@ func TestLimit(t *testing.T) {
 		ServerTime: 1571874405,
 	}
 	addr := "DsDePXLAKNsFCSmgfrEsYm8G1aCVZdYvP9"
-	utxo1 := randomUTXO()
-	utxo2 := randomUTXO()
+	coin1 := randomCoin()
+	coin2 := randomCoin()
 	trade := &Trade{
 		Side:     1,
 		Quantity: 600_000_000,
-		UTXOs:    []*UTXO{utxo1, utxo2},
+		Coins:    []*Coin{coin1, coin2},
 		Address:  addr,
 	}
 	limit := &Limit{
@@ -607,12 +534,12 @@ func TestMarket(t *testing.T) {
 		ServerTime: 1571874405,
 	}
 	addr := "16brznLu4ieZ6tToKfUgibD94UcqshGUE3"
-	utxo1 := randomUTXO()
-	utxo2 := randomUTXO()
+	coin1 := randomCoin()
+	coin2 := randomCoin()
 	trade := &Trade{
 		Side:     1,
 		Quantity: 600_000_000,
-		UTXOs:    []*UTXO{utxo1, utxo2},
+		Coins:    []*Coin{coin1, coin2},
 		Address:  addr,
 	}
 	market := &Market{
@@ -887,10 +814,10 @@ func TestRegisterResult(t *testing.T) {
 func TestNotifyFee(t *testing.T) {
 	// serialization: account id (32) + txid (32) + vout (4) = 68
 	acctID, _ := BytesFromHex("bd3faf7353b8fc40618527687b3ef99d00da480e354f2c4986479e2da626acf5")
-	txid, _ := BytesFromHex("51891f751b0dd987c0b8ff1703cd0dd3e2712847f4bdbc268c9656dc80d233c7")
+	coinid, _ := BytesFromHex("51891f751b0dd987c0b8ff1703cd0dd3e2712847f4bdbc268c9656dc80d233c7")
 	notify := &NotifyFee{
 		AccountID: acctID,
-		TxID:      txid,
+		CoinID:    coinid,
 		Vout:      5,
 		Time:      1571704611,
 	}
@@ -932,8 +859,8 @@ func TestNotifyFee(t *testing.T) {
 	if !bytes.Equal(notifyBack.AccountID, notify.AccountID) {
 		t.Fatal(notifyBack.AccountID, notify.AccountID)
 	}
-	if !bytes.Equal(notifyBack.TxID, notify.TxID) {
-		t.Fatal(notifyBack.TxID, notify.TxID)
+	if !bytes.Equal(notifyBack.CoinID, notify.CoinID) {
+		t.Fatal(notifyBack.CoinID, notify.CoinID)
 	}
 	if notifyBack.Vout != notifyBack.Vout {
 		t.Fatal(notifyBack.Vout, notifyBack.Vout)
@@ -1122,8 +1049,8 @@ func compareTrade(t *testing.T, t1, t2 *Trade) {
 	if t1.Quantity != t2.Quantity {
 		t.Fatal(t1.Quantity, t2.Quantity)
 	}
-	if len(t1.UTXOs) != 2 {
-		t.Fatalf("wrong number of utxos. expected 2 got %d", len(t1.UTXOs))
+	if len(t1.Coins) != 2 {
+		t.Fatalf("wrong number of coins. expected 2 got %d", len(t1.Coins))
 	}
 	if t1.Address != t2.Address {
 		t.Fatal(t1.Address, t2.Address)
@@ -1136,11 +1063,10 @@ func randomBytes(len int) []byte {
 	return bytes
 }
 
-func randomUTXO() *UTXO {
-	return &UTXO{
-		TxID: randomBytes(32),
-		Vout: rand.Uint32(),
-		// the rest are not part of the serialized utxo.
+func randomCoin() *Coin {
+	return &Coin{
+		ID: randomBytes(36),
+		// the rest are not part of the serialized coins.
 		PubKeys: []Bytes{randomBytes(33)},
 		Sigs:    []Bytes{randomBytes(77)},
 		Redeem:  randomBytes(25),

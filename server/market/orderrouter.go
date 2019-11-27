@@ -38,15 +38,16 @@ type MarketTunnel interface {
 	// the best buy order and the best sell order in the order book.
 	MidGap() uint64
 	// OutpointLocked should return true if the outpoint is currently a funding
-	// UTXO for an active DEX order. This is required for UTXO validation to
-	// prevent a user from submitting multiple orders spending the same UTXO. This
+	// Coin for an active DEX order. This is required for Coin validation to
+	// prevent a user from submitting multiple orders spending the same Coin. This
 	// method will likely need to check all orders currently in the epoch queue,
 	// the order book, and the swap monitor, since UTXOs will still be unspent
 	// according to the asset backends until the client broadcasts their
 	// initialization transaction.
-	// DRAFT NOTE: This function could also potentially be handled by persistent
+	//
+	// NOTE: This function could also potentially be handled by persistent
 	// storage, since active orders and active matches are tracked there.
-	OutpointLocked(txid string, vout uint32) bool
+	OutpointLocked([]byte) bool
 	// Cancelable determines whether an order is cancelable. A cancelable order
 	// is a limit order with time-in-force standing either in the epoch queue or
 	// in the order book.
@@ -204,7 +205,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 				ClientTime: time.Unix(int64(limit.ClientTime), 0).UTC(),
 				//ServerTime set in epoch queue processing pipeline.
 			},
-			UTXOs:    utxos,
+			Coins:    utxos,
 			Sell:     sell,
 			Quantity: limit.Quantity,
 			Address:  limit.Address,
@@ -245,7 +246,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
-	tunnel, coins, sell, rpcErr := r.extractMarketDetails(&market.Prefix, &market.Trade)
+	tunnel, assets, sell, rpcErr := r.extractMarketDetails(&market.Prefix, &market.Trade)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -257,7 +258,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 
 	// Passing sell as the checkLot parameter causes the lot size check to be
 	// ignored for market buy orders.
-	valSum, spendSize, utxos, rpcErr := r.checkPrefixTrade(user, tunnel, coins, &market.Prefix, &market.Trade, sell)
+	valSum, spendSize, coins, rpcErr := r.checkPrefixTrade(user, tunnel, assets, &market.Prefix, &market.Trade, sell)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -265,13 +266,13 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	// Calculate the fees and check that the utxo sum is enough.
 	var reqVal uint64
 	if sell {
-		reqVal = requiredFunds(market.Quantity, spendSize, coins.funding)
+		reqVal = requiredFunds(market.Quantity, spendSize, assets.funding)
 	} else {
 		// This is a market buy order, so the quantity gets special handling.
 		// 1. The quantity is in units of the quote asset.
 		// 2. The quantity has to satisfy the market buy buffer.
 		reqVal = matcher.QuoteToBase(tunnel.MidGap(), market.Quantity)
-		lotWithBuffer := uint64(float64(coins.base.LotSize) * r.mbBuffer)
+		lotWithBuffer := uint64(float64(assets.base.LotSize) * r.mbBuffer)
 		minReq := matcher.QuoteToBase(tunnel.MidGap(), lotWithBuffer)
 		if reqVal < minReq {
 			return msgjson.NewError(msgjson.FundingError, "order quantity does not satisfy market buy buffer")
@@ -292,7 +293,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			ClientTime: time.Unix(int64(market.ClientTime), 0).UTC(),
 			ServerTime: serverTime,
 		},
-		UTXOs:    utxos,
+		Coins:    coins,
 		Sell:     sell,
 		Quantity: market.Quantity,
 		Address:  market.Address,
@@ -458,92 +459,91 @@ func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
 
 // checkPrefixTrade validates the information in the prefix and trade portions
 // of an order.
-func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunnel, coins *assetSet, prefix *msgjson.Prefix,
-	trade *msgjson.Trade, checkLot bool) (uint64, uint32, []order.Outpoint, *msgjson.Error) {
+func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunnel, assets *assetSet, prefix *msgjson.Prefix,
+	trade *msgjson.Trade, checkLot bool) (uint64, uint32, []order.CoinID, *msgjson.Error) {
 	// Check that the client's timestamp is still valid.
 	rpcErr := checkTimes(prefix)
 	if rpcErr != nil {
 		return 0, 0, nil, rpcErr
 	}
-	errSet := func(code int, message string) (uint64, uint32, []order.Outpoint, *msgjson.Error) {
+	errSet := func(code int, message string) (uint64, uint32, []order.CoinID, *msgjson.Error) {
 		return 0, 0, nil, msgjson.NewError(code, message)
 	}
 	// Check that the address is valid.
-	if !coins.receiving.Backend.CheckAddress(trade.Address) {
+	if !assets.receiving.Backend.CheckAddress(trade.Address) {
 		return errSet(msgjson.OrderParameterError, "address doesn't check")
 	}
 	// Quantity cannot be zero, and must be an integral multiple of the lot size.
 	if trade.Quantity == 0 {
 		return errSet(msgjson.OrderParameterError, "zero quantity not allowed")
 	}
-	if checkLot && trade.Quantity%coins.base.LotSize != 0 {
+	if checkLot && trade.Quantity%assets.base.LotSize != 0 {
 		return errSet(msgjson.OrderParameterError, "order quantity not a multiple of lot size")
 	}
 	// Validate UTXOs
 	// Check that all required arrays are of equal length.
-	if len(trade.UTXOs) == 0 {
+	if len(trade.Coins) == 0 {
 		return errSet(msgjson.FundingError, "order must specify utxos")
 	}
 	var valSum uint64
 	var spendSize uint32
-	var utxos []order.Outpoint
-	for i, utxo := range trade.UTXOs {
-		sigCount := len(utxo.Sigs)
+	var coinIDs []order.CoinID
+	for i, coin := range trade.Coins {
+		sigCount := len(coin.Sigs)
 		if sigCount == 0 {
-			return errSet(msgjson.SignatureError, fmt.Sprintf("no signature for utxo %d", i))
+			return errSet(msgjson.SignatureError, fmt.Sprintf("no signature for coin %d", i))
 		}
-		if len(utxo.PubKeys) != sigCount {
+		if len(coin.PubKeys) != sigCount {
 			return errSet(msgjson.OrderParameterError, fmt.Sprintf(
-				"pubkey count %d not equal to signature count %d for utxo %d",
-				len(utxo.PubKeys), sigCount, i,
+				"pubkey count %d not equal to signature count %d for coin %d",
+				len(coin.PubKeys), sigCount, i,
 			))
 		}
-		txid := utxo.TxID.String()
 		// Check that the outpoint isn't locked.
-		locked := tunnel.OutpointLocked(txid, utxo.Vout)
+		locked := tunnel.OutpointLocked(coin.ID)
 		if locked {
 			return errSet(msgjson.FundingError,
-				fmt.Sprintf("utxo %s:%d is locked", utxo.TxID.String(), utxo.Vout))
+				fmt.Sprintf("coin %x is locked", coin.ID))
 		}
-		// Get the utxo from the backend and validate it.
-		dexUTXO, err := coins.funding.Backend.UTXO(txid, utxo.Vout, utxo.Redeem)
+		// Get the coin from the backend and validate it.
+		dexCoin, err := assets.funding.Backend.Coin(coin.ID, coin.Redeem)
 		if err != nil {
 			return errSet(msgjson.FundingError,
-				fmt.Sprintf("error retreiving utxo %s:%d", utxo.TxID.String(), utxo.Vout))
+				fmt.Sprintf("error retreiving coin %x", coin.ID))
 		}
 		// Make sure the UTXO has the requisite number of confirmations.
-		confs, err := dexUTXO.Confirmations()
+		confs, err := dexCoin.Confirmations()
 		if err != nil {
 			return errSet(msgjson.FundingError,
-				fmt.Sprintf("utxo confirmations error for %s:%d: %v", utxo.TxID.String(), utxo.Vout, err))
+				fmt.Sprintf("coin confirmations error for %x: %v", coin.ID, err))
 		}
-		if confs < int64(coins.funding.FundConf) && !tunnel.TxMonitored(user, txid) {
+		if confs < int64(assets.funding.FundConf) && !tunnel.TxMonitored(user, dexCoin.TxID()) {
 			return errSet(msgjson.FundingError,
-				fmt.Sprintf("not enough confirmations for %s:%d. require %d, have %d",
-					utxo.TxID.String(), utxo.Vout, coins.funding.FundConf, confs))
+				fmt.Sprintf("not enough confirmations for %x. require %d, have %d",
+					coin.ID, assets.funding.FundConf, confs))
 		}
-		sigMsg := utxo.Serialize()
-		err = dexUTXO.Auth(msgBytesToBytes(utxo.PubKeys), msgBytesToBytes(utxo.Sigs), sigMsg)
+		err = dexCoin.Auth(msgBytesToBytes(coin.PubKeys), msgBytesToBytes(coin.Sigs), coin.ID)
 		if err != nil {
-			return errSet(msgjson.UTXOAuthError,
-				fmt.Sprintf("failed to authorize utxo %s:%d", utxo.TxID.String(), utxo.Vout))
+			return errSet(msgjson.CoinAuthError,
+				fmt.Sprintf("failed to authorize coin %x", coin.ID))
 		}
-		utxos = append(utxos, newOutpoint(utxo.TxID, utxo.Vout))
-		valSum += dexUTXO.Value()
-		spendSize += dexUTXO.SpendSize()
+		var id []byte = coin.ID
+		coinIDs = append(coinIDs, id)
+		valSum += dexCoin.Value()
+		spendSize += dexCoin.SpendSize()
 	}
-	return valSum, spendSize, utxos, nil
+	return valSum, spendSize, coinIDs, nil
 }
 
 // requiredFunds calculates the minimum amount needed to fulfill the swap amount
 // and pay transaction fees. The spendSize is the sum of the serialized inputs
-// associated with a set of UTXOs to be spent. The swapVal is the total quantity
+// associated with a set of coins to be spent. The swapVal is the total quantity
 // needed to fulfill an order.
 func requiredFunds(swapVal uint64, spendSize uint32, coin *asset.Asset) uint64 {
 	R := float64(coin.SwapSize) * float64(coin.FeeRate) / float64(coin.LotSize)
 	fBase := uint64(float64(swapVal) * R)
-	fUtxo := uint64(spendSize) * coin.FeeRate
-	return swapVal + fBase + fUtxo
+	fCoin := uint64(spendSize) * coin.FeeRate
+	return swapVal + fBase + fCoin
 }
 
 // msgBytesToBytes converts a []msgjson.Byte to a [][]byte.

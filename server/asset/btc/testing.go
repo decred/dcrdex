@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -204,7 +203,7 @@ out:
 // blockchain literacy. Ideally, the stats will show no scripts which were
 // unparseable by the backend, but the presence of unknowns is not an error.
 func LiveUTXOStats(btc *Backend, t *testing.T) {
-	numToDo := 10000
+	numToDo := 1000
 	hash, err := btc.node.GetBestBlockHash()
 	if err != nil {
 		t.Fatalf("error getting best block hash: %v", err)
@@ -214,16 +213,17 @@ func LiveUTXOStats(btc *Backend, t *testing.T) {
 		t.Fatalf("error getting best block verbose: %v", err)
 	}
 	type testStats struct {
-		p2pkh   int
-		p2wpkh  int
-		p2sh    int
-		p2wsh   int
-		zeros   int
-		unknown int
-		found   int
-		checked int
-		utxoErr int
-		utxoVal uint64
+		p2pkh    int
+		p2wpkh   int
+		p2sh     int
+		p2wsh    int
+		zeros    int
+		unknown  int
+		found    int
+		checked  int
+		utxoErr  int
+		utxoVal  uint64
+		feeRates []uint64
 	}
 	var stats testStats
 	var unknowns [][]byte
@@ -280,6 +280,7 @@ out:
 					stats.utxoErr++
 					continue
 				}
+				stats.feeRates = append(stats.feeRates, utxo.FeeRate())
 				stats.found++
 				stats.utxoVal += utxo.Value()
 			}
@@ -317,69 +318,37 @@ out:
 	} else {
 		t.Logf("no unknown script types")
 	}
+	// Fees
+	feeCount := len(stats.feeRates)
+	if feeCount > 0 {
+		var feeSum uint64
+		for _, r := range stats.feeRates {
+			feeSum += r
+		}
+		t.Logf("%d fees, avg rate %d", feeCount, feeSum/uint64(feeCount))
+	}
 }
 
-// LiveFeeRates scans block by block backwards, grabbing the Tx from the
-// backend for each transaction and taking stats on the fees. A mapping of
-// txid -> fee rate can be provided, and those will be checked for equivalence.
+// LiveFeeRates scans a mapping of txid -> fee rate checking that the backend
+// returns the expected fee rate.
 func LiveFeeRates(btc *Backend, t *testing.T, standards map[string]uint64) {
-	type testStats struct {
-		count int
-		sum   int
-		start time.Time
-	}
-	stats := testStats{start: time.Now()}
-	numToDo := 100
-	hash, err := btc.node.GetBestBlockHash()
-	if err != nil {
-		t.Fatalf("error getting best block hash: %v", err)
-	}
-	block, err := btc.node.GetBlockVerbose(hash)
-	if err != nil {
-		t.Fatalf("error getting best block verbose: %v", err)
-	}
-out:
-	for {
-		for _, txid := range block.Tx {
-			txHash, err := chainhash.NewHashFromStr(txid)
-			if err != nil {
-				t.Fatalf("error parsing transaction hash from %s: %v", txid, err)
-			}
-			tx, err := btc.transaction(txHash)
-			if err != nil {
-				t.Fatalf("error retreiving transaction %s: %v", txid, err)
-			}
-			stats.count++
-			stats.sum += int(tx.FeeRate())
-			if stats.count >= numToDo {
-				break out
-			}
-			prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
-			if err != nil {
-				t.Fatalf("error retrieving block %s: %v", block.PreviousHash, err)
-			}
-			block, err = btc.node.GetBlockVerbose(prevHash)
-			if err != nil {
-				t.Fatalf("error getting block verbose %s: %v", txHash, err)
-			}
-		}
-	}
 	for txid, expRate := range standards {
 		txHash, err := chainhash.NewHashFromStr(txid)
 		if err != nil {
 			t.Fatalf("error parsing transaction hash from %s: %v", txid, err)
 		}
-		tx, err := btc.transaction(txHash)
+		verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
+		if err != nil {
+			t.Fatalf("error getting raw transaction: %v", err)
+		}
+		tx, err := btc.transaction(txHash, verboseTx)
 		if err != nil {
 			t.Fatalf("error retreiving transaction %s", txid)
 		}
-		feeRate := tx.FeeRate()
-		if feeRate != expRate {
-			t.Fatalf("unexpected fee rate for %s. expected %d, got %d", txid, expRate, feeRate)
+		if tx.feeRate != expRate {
+			t.Fatalf("unexpected fee rate for %s. expected %d, got %d", txid, expRate, tx.feeRate)
 		}
 	}
-	t.Logf("average per-tx fee rate: %d satoshi/byte", stats.sum/stats.count)
-	t.Logf("time per tx: %d ms", time.Since(stats.start).Milliseconds())
 }
 
 // This is an unsupported type of script, but one of the few that is fairly

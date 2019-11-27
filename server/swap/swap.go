@@ -60,14 +60,12 @@ type swapStatus struct {
 	swapAsset uint32
 	// The time that the swap coordinator sees the transaction.
 	swapTime time.Time
-	swapTxid string
-	swapVout uint32
-	swapTx   asset.DEXTx
+	swap     asset.Coin
 	// The time that the transaction receives its SwapConf'th confirmation.
 	swapConfirmed time.Time
 	// The time that the swap coordinator sees the user's redemption transaction.
 	redeemTime time.Time
-	redemption asset.DEXTx
+	redemption asset.Coin
 }
 
 // matchTracker embeds an order.Match and adds some data necessary for tracking
@@ -346,7 +344,7 @@ out:
 
 func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 	if status.swapTime != zeroTime && status.swapConfirmed == zeroTime {
-		confs, err := status.swapTx.Confirmations()
+		confs, err := status.swap.Confirmations()
 		if err != nil {
 			// The transaction has become invalid. No reason to do anything.
 			return
@@ -647,11 +645,11 @@ func (s *Swapper) authUser(user account.AccountID, params msgjson.Signable) *msg
 	return nil
 }
 
-// txWaitRules is a constructor for a waitSettings with a 1-minute timeout and
+// coinWaitRules is a constructor for a waitSettings with a 1-minute timeout and
 // a standardized error message.
 // NOTE: 1 minute is pretty arbitrary. Consider making this a DEX variable, or
 // smarter in some way.
-func txWaitRules(user account.AccountID, msg *msgjson.Message, txid string) *waitSettings {
+func coinWaitRules(user account.AccountID, msg *msgjson.Message, coinID []byte) *waitSettings {
 	return &waitSettings{
 		// must smarten up this expiration value before merge. Where should this
 		// come from?
@@ -660,7 +658,7 @@ func txWaitRules(user account.AccountID, msg *msgjson.Message, txid string) *wai
 		request:    msg,
 		timeoutErr: &msgjson.Error{
 			Code:    msgjson.TransactionUndiscovered,
-			Message: fmt.Sprintf("failed to find transaction %s", txid),
+			Message: fmt.Sprintf("failed to find transaction %x", coinID),
 		},
 	}
 }
@@ -748,7 +746,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
-	tx, err := chain.Transaction(params.TxID)
+	coin, err := chain.Coin(params.CoinID, params.Contract)
 	if err != nil {
 		// If there is an error, don't give up yet, since it could be due to network
 		// latency. Check again on the next tick.
@@ -758,7 +756,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		return tryAgain
 	}
 	// Decode the contract and audit the contract.
-	recipient, val, err := tx.AuditContract(params.Vout, params.Contract)
+	recipient, val, err := coin.AuditContract()
 	if err != nil {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError, fmt.Sprintf("error auditing contract: %v", err))
 		return dontTryAgain
@@ -777,9 +775,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Update the match.
 	s.matchMtx.Lock()
 	matchID := stepInfo.match.ID()
-	actor.status.swapTx = tx
-	actor.status.swapTxid = params.TxID
-	actor.status.swapVout = params.Vout
+	actor.status.swap = coin
 	actor.status.swapTime = time.Now()
 	stepInfo.match.Status = stepInfo.nextStep
 	match := stepInfo.match.Match
@@ -830,7 +826,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Get the transaction
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	chain := stepInfo.asset.Backend
-	tx, err := chain.Transaction(params.TxID)
+	coin, err := chain.Coin(params.CoinID, nil)
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
 	if err != nil {
@@ -838,15 +834,15 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	}
 	// Make sure that the expected output is being spent.
 	status := counterParty.status
-	spends, err := tx.SpendsUTXO(status.swapTxid, status.swapVout)
+	spends, err := coin.SpendsCoin(status.swap.ID())
 	if err != nil {
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
-			fmt.Sprintf("error checking redemption %s:%d: %v", status.swapTxid, status.swapVout, err))
+			fmt.Sprintf("error checking redemption %x: %v", status.swap.ID(), err))
 		return dontTryAgain
 	}
 	if !spends {
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
-			fmt.Sprintf("redemption does not spend %s:%d", status.swapTxid, status.swapVout))
+			fmt.Sprintf("redemption does not spend %x", status.swap.ID()))
 		return dontTryAgain
 	}
 
@@ -854,7 +850,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	s.matchMtx.Lock()
 	matchID := stepInfo.match.ID()
 	// Update the match.
-	actor.status.redemption = tx
+	actor.status.redemption = coin
 	actor.status.redeemTime = time.Now()
 	stepInfo.match.Status = stepInfo.nextStep
 	s.matchMtx.Unlock()
@@ -870,8 +866,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	rParams := &msgjson.Redemption{
 		OrderID: idToBytes(counterParty.order.ID()),
 		MatchID: matchID[:],
-		TxID:    params.TxID,
-		Vout:    params.Vout,
+		CoinID:  params.CoinID,
 		Time:    uint64(time.Now().Unix()),
 	}
 
@@ -918,7 +913,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	}
 
 	// Since we have to consider latency, run this as a chainWaiter.
-	s.waitMempool(txWaitRules(user, msg, params.TxID), func() bool {
+	s.waitMempool(coinWaitRules(user, msg, params.CoinID), func() bool {
 		return s.processInit(msg, params, stepInfo)
 	})
 	return nil
@@ -949,7 +944,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	}
 
 	// Since we have to consider latency, run this as a chainWaiter.
-	s.waitMempool(txWaitRules(user, msg, params.TxID), func() bool {
+	s.waitMempool(coinWaitRules(user, msg, params.CoinID), func() bool {
 		return s.processRedeem(msg, params, stepInfo)
 	})
 	return nil

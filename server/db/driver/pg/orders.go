@@ -7,105 +7,55 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/hex"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
-	"github.com/lib/pq"
 )
 
-// utxo implements order.Outpoint
-type utxo struct {
-	txHash []byte
-	vout   uint32
-}
-
-func (u *utxo) TxHash() []byte { return u.txHash }
-func (u *utxo) Vout() uint32   { return u.vout }
-
-func newUtxo(txid string, vout uint32) *utxo {
-	hash, err := hex.DecodeString(txid)
-	if err != nil {
-		panic(err)
-	}
-	return &utxo{hash, vout}
-}
-
-func newUtxoFromOutpoint(outpoint string) (*utxo, error) {
-	outParts := strings.Split(outpoint, ":")
-	if len(outParts) != 2 {
-		return nil, fmt.Errorf("invalid outpoint %s", outpoint)
-	}
-	hash, err := hex.DecodeString(outParts[0])
-	if err != nil {
-		panic(err)
-	}
-	vout, err := strconv.ParseUint(outParts[1], 10, 32)
-	if err != nil {
-		return nil, fmt.Errorf("invalid vout %s: %v", outParts[1], err)
-	}
-	return &utxo{hash, uint32(vout)}, nil
-}
+// Wrap the CoinID slice to implement custom Scanner and Valuer.
+type dbCoins []order.CoinID
 
 // Value implements the sql/driver.Valuer interface.
-func (u utxo) Value() (driver.Value, error) {
-	// UTXOs are stored as an array of strings like ["txid0:vout0", ...] despite
-	// this being less space efficient than a BYTEA because it significantly
-	// simplifies debugging.
-	return order.OutpointString(&u), nil
+func (coins dbCoins) Value() (driver.Value, error) {
+	if len(coins) == 0 {
+		return []byte{}, nil
+	}
+	b := make([]byte, 0, len(coins)*(len(coins[0])+1))
+	for _, coin := range coins {
+		b = append(b, byte(len(coin)))
+		b = append(b, coin...)
+	}
+	return b, nil
 }
 
 // Scan implements the sql.Scanner interface.
-func (u *utxo) Scan(src interface{}) error {
-	var opStr string
-	switch st := src.(type) {
-	case string:
-		opStr = st
-	case []byte: // via pq.GenericArray.Scan
-		opStr = string(st)
-	default:
-		return fmt.Errorf("cannot convert %T to utxo", src)
+func (coins *dbCoins) Scan(src interface{}) error {
+	b := src.([]byte)
+	if len(b) == 0 {
+		return nil
+	}
+	lenGuess := int(b[0])
+	if lenGuess == 0 {
+		return fmt.Errorf("zero-length coin ID indicated")
+	}
+	c := make(dbCoins, 0, len(b)/(lenGuess+1))
+	for len(b) > 0 {
+		cLen := int(b[0])
+		if cLen == 0 {
+			return fmt.Errorf("zero-length coin ID indicated")
+		}
+		if len(b) < cLen+1 {
+			return fmt.Errorf("too many bytes indicated")
+		}
+		c = append(c, b[1:cLen+1])
+		b = b[cLen+1:]
 	}
 
-	uNew, err := newUtxoFromOutpoint(opStr)
-	if err != nil {
-		return err
-	}
-	*u = *uNew
-	return nil
-}
-
-// Methods cannot be defined on an interface (order.Outpoint), so we define them
-// this way.
-type utxoSlice []order.Outpoint
-
-// Value implements the sql/driver.Valuer interface.
-func (us utxoSlice) Value() (driver.Value, error) {
-	return pq.GenericArray{A: us}.Value()
-}
-
-// Scan implements the sql.Scanner interface.
-func (us *utxoSlice) Scan(src interface{}) error {
-	// type utxo implements Scanner, not order.Outpoint.
-	var utxos []utxo
-	ga := pq.GenericArray{A: &utxos}
-	err := ga.Scan(src)
-	if err != nil {
-		return err
-	}
-
-	// Force the utxos into the utxoSlice.
-	newUtxos := make(utxoSlice, 0, len(utxos))
-	for i := range utxos {
-		newUtxos = append(newUtxos, &utxos[i])
-	}
-	*us = newUtxos
+	*coins = c
 	return nil
 }
 
@@ -661,7 +611,7 @@ func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (
 	var id order.OrderID
 	var status pgOrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&id, &lo.OrderType, &lo.Sell,
-		&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, (*utxoSlice)(&lo.UTXOs),
+		&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, (*dbCoins)(&lo.Coins),
 		&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
 	if err != nil {
 		return nil, orderStatusUnknown, err
@@ -705,7 +655,7 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 		var id order.OrderID
 		var status pgOrderStatus
 		err = rows.Scan(&id, &lo.OrderType, &lo.Sell,
-			&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, (*utxoSlice)(&lo.UTXOs),
+			&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, (*dbCoins)(&lo.Coins),
 			&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
 		if err != nil {
 			return nil, nil, err
@@ -721,14 +671,14 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, status pgOrderStatus) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertOrder, tableName)
 	return sqlExec(dbe, stmt, lo.ID(), lo.Type(), lo.Sell, lo.AccountID,
-		lo.Address, lo.ClientTime, lo.ServerTime, utxoSlice(lo.UTXOs),
+		lo.Address, lo.ClientTime, lo.ServerTime, dbCoins(lo.Coins),
 		lo.Quantity, lo.Rate, lo.Force, status, lo.Filled)
 }
 
 func storeMarketOrder(dbe sqlExecutor, tableName string, mo *order.MarketOrder, status pgOrderStatus) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertOrder, tableName)
 	return sqlExec(dbe, stmt, mo.ID(), mo.Type(), mo.Sell, mo.AccountID,
-		mo.Address, mo.ClientTime, mo.ServerTime, utxoSlice(mo.UTXOs),
+		mo.Address, mo.ClientTime, mo.ServerTime, dbCoins(mo.Coins),
 		mo.Quantity, 0, order.ImmediateTiF, status, mo.Filled)
 }
 

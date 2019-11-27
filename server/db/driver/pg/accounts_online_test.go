@@ -3,6 +3,7 @@
 package pg
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"decred.org/dcrdex/server/account"
@@ -20,8 +21,6 @@ var tAcctID = account.AccountID{
 	0xba, 0xd7, 0x63, 0xf1, 0x02, 0xcc,
 }
 
-var tTxid = "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed"
-
 func tNewAccount(t *testing.T) *account.Account {
 	acct, err := account.NewAccountFromPubKey(tPubKey)
 	if err != nil {
@@ -34,6 +33,7 @@ func tNewAccount(t *testing.T) *account.Account {
 }
 
 func TestAccounts(t *testing.T) {
+	tCoinID, _ := hex.DecodeString("6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005")
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestAccounts(t *testing.T) {
 	}
 
 	// Pay the registration fee.
-	err = archie.PayAccount(tAcctID, tTxid, 5)
+	err = archie.PayAccount(tAcctID, tCoinID)
 	if err != nil {
 		t.Fatalf("error setting registration fee payment details: %v", err)
 	}
@@ -86,6 +86,7 @@ func TestAccounts(t *testing.T) {
 }
 
 func TestWrongAccount(t *testing.T) {
+	tCoinID, _ := hex.DecodeString("6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005")
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestWrongAccount(t *testing.T) {
 		t.Fatalf("unknown account marked as open")
 	}
 
-	err = archie.PayAccount(tAcctID, tTxid, 5)
+	err = archie.PayAccount(tAcctID, tCoinID)
 	if err == nil {
 		t.Fatalf("no error paying registration fee for unknown account")
 	}
