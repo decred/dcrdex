@@ -3,6 +3,7 @@
 package integ_test
 
 import (
+	"fmt"
 	"os"
 	"reflect"
 	"testing"
@@ -591,8 +592,9 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	}
 }
 
-func newCancelOrder(targetOrderID order.OrderID) *order.CancelOrder {
+func newCancelOrder(targetOrderID order.OrderID, serverTime time.Time) *order.CancelOrder {
 	return &order.CancelOrder{
+		Prefix:        order.Prefix{ServerTime: serverTime},
 		TargetOrderID: targetOrderID,
 	}
 }
@@ -605,11 +607,12 @@ func TestMatch_cancelOnly(t *testing.T) {
 	me := matcher.New()
 
 	fakeOrder := newLimitOrder(false, 4550000, 1, order.ImmediateTiF, 0)
+	fakeOrder.ServerTime = time.Unix(1566497654, 0)
 
 	// takers is heterogenous w.r.t. type
 	takers := []order.Order{
-		newCancelOrder(bookBuyOrders[3].ID()),
-		newCancelOrder(fakeOrder.ID()),
+		newCancelOrder(bookBuyOrders[3].ID(), fakeOrder.ServerTime.Add(time.Second)),
+		newCancelOrder(fakeOrder.ID(), fakeOrder.ServerTime.Add(time.Second)),
 	}
 
 	//nSell := len(bookSellOrders)
@@ -1069,6 +1072,7 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 
 	nSell := len(bookSellOrders)
 	nBuy := len(bookBuyOrders)
+	cancelTime := time.Unix(1566497656, 0)
 
 	// epochQueue is heterogenous w.r.t. type
 	epochQueue := []order.Order{
@@ -1088,61 +1092,43 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 		newMarketBuyOrder(quoteAmt(1), 0), // 10
 		newMarketBuyOrder(quoteAmt(2), 0), // 11
 		// cancel
-		newCancelOrder(bookSellOrders[6].ID()),       // 12
-		newCancelOrder(bookBuyOrders[8].ID()),        // 13
-		newCancelOrder(bookBuyOrders[nBuy-1].ID()),   // 14
-		newCancelOrder(bookSellOrders[nSell-1].ID()), // 15
+		newCancelOrder(bookSellOrders[6].ID(), cancelTime),       // 12
+		newCancelOrder(bookBuyOrders[8].ID(), cancelTime),        // 13
+		newCancelOrder(bookBuyOrders[nBuy-1].ID(), cancelTime),   // 14
+		newCancelOrder(bookSellOrders[nSell-1].ID(), cancelTime), // 15
 	}
 	// cancel some the epoch queue orders too
-	epochQueue = append(epochQueue, newCancelOrder(epochQueue[7].ID())) // 16 misses
-	epochQueue = append(epochQueue, newCancelOrder(epochQueue[5].ID())) // 17 hits
+	epochQueue = append(epochQueue, newCancelOrder(epochQueue[7].ID(), cancelTime)) // 16
+	epochQueue = append(epochQueue, newCancelOrder(epochQueue[5].ID(), cancelTime)) // 17
 
 	epochQueueInit := make([]order.Order, len(epochQueue))
 	copy(epochQueueInit, epochQueue)
 
-	// var shuf []int
-	// matcher.ShuffleQueue(epochQueue)
-	// for i := range epochQueue {
-	// 	for j := range epochQueueInit {
-	// 		if epochQueue[i].ID() == epochQueueInit[j].ID() {
-	// 			shuf = append(shuf, j)
-	// 			t.Logf("%d: %p", j, epochQueueInit[j])
-	// 			continue
-	// 		}
-	// 	}
-	// }
-	// t.Logf("%#v", shuf)
+	var shuf []int
+	matcher.ShuffleQueue(epochQueue)
+	for i := range epochQueue {
+		for j := range epochQueueInit {
+			if epochQueue[i].ID() == epochQueueInit[j].ID() {
+				shuf = append(shuf, j)
+				t.Logf("%d: %p", j, epochQueueInit[j])
+				continue
+			}
+		}
+	}
+	t.Logf("%#v", shuf)
 
 	// Apply the shuffling to determine matching order that will be used.
-	// matcher.ShuffleQueue(epochQueue)
-	// for i := range epochQueue {
-	// 	t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
-	// }
-	// Shuffles to [9, 5, 6, 2, 7, 17, 14, 10, 0, 3, 8, 13, 12, 15, 11, 4, 1, 16]
-	// 9  market sell 4 lots matches 1 @ 450, 3 @ 430 (passed)
-	// 5  limit sell unfilled insert (insert, partial)
-	// 6  limit sell 3 lots matches 3 @ 430 (partial)
-	// 2  limit buy 1 lot matches 1 @ 455 (partial)
-	// 7  limit sell unfilled insert (insert, partial)
-	// 17 cancel order for epoch order 5 just inserted hits (passed)
-	// 14 cancel misses because that order matched epoch order 6 already (failed)
-	// 10 market buy 1 lot fills 1 @ 460 (passed)
-	// 0  limit buy misses (failed)
-	// 3  limit buy misses (failed)
-	// 8  market sell 2 lots matches 2 @ 400 (passed)
-	// 13 cancel order misses because it's order matched already (failed)
-	// 12 cancel order matches (passed)
-	// 15 cancel order misses because it's order matched already (failed)
-	// 11 market buy 2 lots matches 1 @ 455, 1 @ 460 (passed)
-	// 4  limit sell 1 misses (failed)
-	// 1  limit buy 1 insert unfilled (partial, inserted)
-	// 16 cancels limit order order 7 (failed)
+	matcher.ShuffleQueue(epochQueue)
+	for i := range epochQueue {
+		t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
+	}
+	// Shuffles to [7, 1, 12, 11, 2, 14, 3, 17, 15, 13, 10, 5, 0, 6, 9, 4, 16, 8]
 
-	expectedNumMatches := 9
-	expectedPassed := []int{9, 6, 2, 17, 10, 8, 12, 11, 16}
-	expectedFailed := []int{14, 0, 3, 13, 15, 4}
-	expectedPartial := []int{5, 6, 2, 7, 1}
-	expectedBooked := []int{5, 7, 1} // all StandingTiF
+	expectedNumMatches := 10
+	expectedPassed := []int{1, 12, 11, 14, 13, 10, 6, 9, 16, 8}
+	expectedFailed := []int{2, 3, 17, 15, 0, 4}
+	expectedPartial := []int{7, 1, 5, 6}
+	expectedBooked := []int{7, 1, 5} // all StandingTiF
 	expectedUnbooked := []int{}
 
 	// order book from bookBuyOrders and bookSellOrders
@@ -1164,14 +1150,35 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	resetMakers()
 
 	matches, passed, failed, partial, booked, unbooked := me.Match(b, epochQueue)
-	t.Log("Matches:", matches)
-	t.Log("Passed:", passed)
-	t.Log("Failed:", failed)
-	t.Log("Partial:", partial)
-	t.Log("Booked:", booked)
-	t.Log("Unbooked:", unbooked)
+	//t.Log("Matches:", matches)
+	s := "Passed: "
+	for _, o := range passed {
+		s += fmt.Sprintf("%p ", o)
+	}
+	t.Log(s)
+	s = "Failed: "
+	for _, o := range failed {
+		s += fmt.Sprintf("%p ", o)
+	}
+	t.Log(s)
+	s = "Partial: "
+	for _, o := range partial {
+		s += fmt.Sprintf("%p ", o)
+	}
+	t.Log(s)
+	s = "Booked: "
+	for _, o := range booked {
+		s += fmt.Sprintf("%p ", o)
+	}
+	t.Log(s)
+	s = "Unbooked: "
+	for _, o := range unbooked {
+		s += fmt.Sprintf("%p ", o)
+	}
+	t.Log(s)
+
 	for i := range matches {
-		t.Log("Match", i, ":", matches[i])
+		t.Logf("Match %d: %p, [%p, ...]", i, matches[i].Taker, matches[i].Makers[0])
 	}
 
 	// PASSED orders
@@ -1215,13 +1222,13 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 		t.Errorf("Incorrect number of matches. Got %d, expected %d", len(matches), expectedNumMatches)
 	}
 
-	// match 3 (epoch order 17) cancels epoch order 5
-	if matches[3].Taker.ID() != epochQueueInit[17].ID() {
+	// match 3 (epoch order 14) cancels a book order
+	if matches[3].Taker.ID() != epochQueueInit[14].ID() {
 		t.Errorf("Taker order ID expected %v, got %v",
-			epochQueueInit[17].UID(), matches[3].Taker.UID())
+			epochQueueInit[14].UID(), matches[3].Taker.UID())
 	}
-	if matches[4].Taker.ID() != epochQueueInit[10].ID() {
-		t.Errorf("Fourth match take was expected to be %v, got %v",
-			epochQueueInit[10], matches[4].Taker.ID())
+	if matches[8].Taker.ID() != epochQueueInit[16].ID() {
+		t.Errorf("8th match take was expected to be %v, got %v",
+			epochQueueInit[16], matches[8].Taker.ID())
 	}
 }
