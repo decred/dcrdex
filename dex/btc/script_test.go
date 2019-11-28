@@ -406,6 +406,9 @@ func TestFindKeyPush(t *testing.T) {
 	// Random but valid contract won't work.
 	contract, _ = MakeContract(recipient, sender, randBytes(32), tStamp, tParams)
 	sigScript, err = RedeemP2SHContract(contract, randBytes(73), randBytes(33), secret)
+	if err != nil {
+		t.Fatalf("error creating contract: %v", err)
+	}
 	_, err = FindKeyPush(sigScript, contractHash[:], tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")

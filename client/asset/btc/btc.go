@@ -37,7 +37,7 @@ const (
 )
 
 // How often to check the tip hash.
-var blockTicker = time.Second * 5
+var blockTicker = time.Second
 
 // rpcClient is a wallet RPC client. In production, rpcClient is satisfied by
 // rpcclient.Client. A stub can be used for testing.
@@ -89,7 +89,7 @@ func (output *output) Value() uint64 {
 func (output *output) Confirmations() (uint32, error) {
 	txOut, err := output.node.GetTxOut(&output.txHash, output.vout, true)
 	if err != nil {
-		return 0, fmt.Errorf("error finding unspent contract: %v", err)
+		return 0, fmt.Errorf("error finding coin: %v", err)
 	}
 	if txOut == nil {
 		return 0, fmt.Errorf("tx output not found")
@@ -304,6 +304,9 @@ func (btc *ExchangeWallet) Fund(value uint64) (asset.Coins, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
+	if len(utxos) == 0 {
+		return nil, fmt.Errorf("no funds ready to spend")
+	}
 	var sum uint64
 	var size uint32
 	var coins asset.Coins
@@ -409,7 +412,6 @@ func (btc *ExchangeWallet) Swap(swaps []*asset.Swap) ([]asset.Receipt, error) {
 			totalIn += output.value
 			prevOut := wire.NewOutPoint(&output.txHash, output.vout)
 			txIn := wire.NewTxIn(prevOut, []byte{}, nil)
-			txIn.Sequence = wire.MaxTxInSequenceNum - 1
 			baseTx.AddTxIn(txIn)
 		}
 	}
@@ -450,16 +452,19 @@ func (btc *ExchangeWallet) Swap(swaps []*asset.Swap) ([]asset.Receipt, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error creating change address: %v", err)
 	}
+	// Prepare the receipts.
+	swapCount := len(swaps)
+	if len(baseTx.TxOut) < swapCount {
+		return nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
+	}
 	// Sign, add change, and send the transaction.
 	msgTx, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut)
 	if err != nil {
 		return nil, err
 	}
-	// Prepare the receipts.
-	swapCount := len(swaps)
 	receipts := make([]asset.Receipt, 0, swapCount)
+	txHash := msgTx.TxHash()
 	for i, swap := range swaps {
-		txHash := msgTx.TxHash()
 		cinfo := swap.Contract
 		receipts = append(receipts, &swapReceipt{
 			output:     newOutput(btc.node, &txHash, uint32(i), cinfo.Value, contracts[i]),
@@ -495,6 +500,8 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) error {
 		contracts = append(contracts, cinfo.output.redeem)
 		prevOut := wire.NewOutPoint(&cinfo.output.txHash, cinfo.output.vout)
 		txIn := wire.NewTxIn(prevOut, []byte{}, nil)
+		// Enable locktime
+		// https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#Spending_wallet_policy
 		txIn.Sequence = wire.MaxTxInSequenceNum - 1
 		msgTx.AddTxIn(txIn)
 		totalIn += cinfo.output.value
@@ -588,6 +595,11 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 	if err != nil {
 		return nil, err
 	}
+	// Get the receiving address.
+	_, receiver, stamp, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error extracting swap addresses: %v", err)
+	}
 	// Get the contracts P2SH address from the tx output's pubkey script.
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
@@ -619,11 +631,6 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 	if !bytes.Equal(contractHash, addr.ScriptAddress()) {
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addr.ScriptAddress())
-	}
-	// Get the receiving address.
-	_, receiver, stamp, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error extracting swap addresses: %v", err)
 	}
 	return &auditInfo{
 		output:     newOutput(btc.node, txHash, vout, toSatoshi(txOut.Value), contract),
@@ -908,10 +915,9 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 		return nil, fmt.Errorf("error creating change script: %v", err)
 	}
 	changeIdx := len(baseTx.TxOut)
-	changeOutput := wire.NewTxOut(1, changeScript)
-	changeOutput.Value = int64(remaining - minFee)
+	changeOutput := wire.NewTxOut(int64(remaining-minFee), changeScript)
 	isDust := dexbtc.IsDust(changeOutput, btc.nfo.FeeRate)
-	sigCycles := 0
+	sigCycles := 1
 	if !isDust {
 		// Add the change output with a recalculated fees
 		size = size + dexbtc.P2WPKHOutputSize
@@ -935,26 +941,36 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 					totalIn, totalOut, reqFee, fee)
 				return nil, fmt.Errorf("change error")
 			}
-			if fee == reqFee || tried[reqFee] == 0 {
-				// If we've already tried it, we're on our way back up, so this fee is
-				// likely as good as it gets.
+			if fee == reqFee || (reqFee < fee && tried[reqFee] == 1) {
+				// If a lower fee appears available, but it's already been attempted and
+				// had a longer serialized size, the current fee is likely as good as
+				// it gets.
 				break
 			}
 			// We must have some room for improvement
 			tried[fee] = 1
 			fee = reqFee
 			changeOutput.Value = int64(remaining - fee)
+			if dexbtc.IsDust(changeOutput, btc.nfo.FeeRate) {
+				// Another condition that should be impossible, but check anyway in case
+				// the maximum fee was underestimated causing the first check to be
+				// missed.
+				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
+					totalIn, totalOut, reqFee, fee)
+				return nil, fmt.Errorf("dust error")
+			}
 			continue
 		}
 	}
 	checkHash := msgTx.TxHash()
+	btc.log.Debugf("%d signature cycles to converge on fees for tx %s", sigCycles, checkHash)
 	txHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return nil, err
 	}
 	if *txHash != checkHash {
 		return nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *txHash, checkHash)
+			"expected %s, got %s", checkHash, *txHash)
 	}
 	if !isDust {
 		btc.addChange(txHash.String(), uint32(changeIdx))
@@ -1014,12 +1030,12 @@ func (btc *ExchangeWallet) addChange(txid string, vout uint32) {
 	btc.tradeChange[outpointID(txid, vout)] = time.Now()
 }
 
-// isDEXCange checks whether the specified output is a change output from a
+// isDEXChange checks whether the specified output is a change output from a
 // DEX trade.
 func (btc *ExchangeWallet) isDEXChange(txid string, vout uint32) bool {
 	btc.changeMtx.RLock()
-	defer btc.changeMtx.RUnlock()
 	_, found := btc.tradeChange[outpointID(txid, vout)]
+	btc.changeMtx.RUnlock()
 	return found
 }
 
@@ -1052,11 +1068,9 @@ func (btc *ExchangeWallet) getVerboseBlockTxs(blockID string) (*verboseBlockTxs,
 
 // toCoinID converts the tx hash and vout to a coin ID, as a []byte.
 func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
-	coinID := make([]byte, 36)
-	copy(coinID[:32], txHash[:])
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, vout)
-	copy(coinID[32:], b)
+	coinID := make([]byte, chainhash.HashSize+4)
+	copy(coinID[:chainhash.HashSize], txHash[:])
+	binary.BigEndian.PutUint32(coinID[chainhash.HashSize:], vout)
 	return coinID
 }
 

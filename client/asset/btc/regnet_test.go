@@ -66,7 +66,7 @@ func tBackend(t *testing.T, conf, name string, blkFunc func(string, error)) *Exc
 		t.Fatalf("error getting current user: %v", err)
 	}
 	walletCfg := &WalletConfig{
-		INIPath:    filepath.Join(user.HomeDir, "btc-harness", "harness-ctl", conf+".conf"),
+		INIPath:    filepath.Join(user.HomeDir, "dextest", "btc", "harness-ctl", conf+".conf"),
 		WalletName: name,
 		AssetInfo:  tBTC,
 		TipChange: func(err error) {

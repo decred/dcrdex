@@ -136,7 +136,7 @@ func (wc *walletClient) SignTx(inTx *wire.MsgTx) (*wire.MsgTx, error) {
 	return outTx, nil
 }
 
-// PrivKeyForAddress retreives the private key associated with the specified
+// PrivKeyForAddress retrieves the private key associated with the specified
 // address.
 func (wc *walletClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error) {
 	var keyHex string

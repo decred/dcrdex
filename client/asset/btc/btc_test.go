@@ -573,6 +573,8 @@ func TestSwap(t *testing.T) {
 		Complete: true,
 	}
 
+	// Aim for 3 signature cycles.
+	sigSizer := 0
 	node.signFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		var msgHex string
 		err := json.Unmarshal(params[0], &msgHex)
@@ -588,8 +590,13 @@ func TestSwap(t *testing.T) {
 		}
 		// Set the sigScripts to random bytes of the correct length for spending a
 		// p2pkh output.
+		scriptSize := dexbtc.RedeemP2PKHSigScriptSize
+		if sigSizer%2 == 0 {
+			scriptSize -= 2
+		}
+		sigSizer++
 		for i := range msgTx.TxIn {
-			msgTx.TxIn[i].SignatureScript = randBytes(dexbtc.RedeemP2PKHSigScriptSize)
+			msgTx.TxIn[i].SignatureScript = randBytes(scriptSize)
 		}
 		buf := new(bytes.Buffer)
 		err = msgTx.Serialize(buf)
