@@ -5,7 +5,6 @@
 package dcr
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -486,7 +485,7 @@ func testSwapContract() ([]byte, dcrutil.Address) {
 }
 
 // Create a transaction with a P2SH swap output at vout 0.
-func testMsgTxSwapInit() *testMsgTxSwap {
+func testMsgTxSwapInit(val int64) *testMsgTxSwap {
 	msgTx := wire.NewMsgTx()
 	contract, recipient := testSwapContract()
 	scriptHash := dcrutil.Hash160(contract)
@@ -498,7 +497,7 @@ func testMsgTxSwapInit() *testMsgTxSwap {
 	if err != nil {
 		fmt.Printf("script building error in testMsgTxSwapInit: %v", err)
 	}
-	msgTx.AddTxOut(wire.NewTxOut(1, pkScript))
+	msgTx.AddTxOut(wire.NewTxOut(val, pkScript))
 	return &testMsgTxSwap{
 		tx:        msgTx,
 		contract:  contract,
@@ -995,6 +994,46 @@ func TestUTXOs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 12 - Auth error: %v", err)
 	}
+
+	// CASE 13: A swap contract
+	cleanTestChain()
+	txHash = randomHash()
+	blockHash = randomHash()
+	swap := testMsgTxSwapInit(5)
+	testAddBlockVerbose(blockHash, 1, txHeight, 1)
+	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1)
+	verboseTx := testChain.txRaws[*txHash]
+	spentTx := randomHash()
+	spentVout := rand.Uint32()
+	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTx, spentVout))
+	txOut := swap.tx.TxOut[0]
+	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(txOut.Value)/1e8, txOut.PkScript))
+	utxo, err = dcr.utxo(txHash, 0, swap.contract)
+	if err != nil {
+		t.Fatalf("case 13 - received error for utxo: %v", err)
+	}
+
+	// Check that the spent tx is in the Tx's input record.
+	spentID := toCoinID(spentTx, spentVout)
+	spent, err := utxo.SpendsCoin(spentID)
+	if err != nil {
+		t.Fatalf("case 13 - SpendsUTXO error: %v", err)
+	}
+	if !spent {
+		t.Fatalf("case 13 - transaction not confirming spent utxo")
+	}
+	// Now try again with the correct vout.
+	recipient, swapVal, err := utxo.AuditContract()
+	if err != nil {
+		t.Fatalf("case 13 - unexpected error auditing contract: %v", err)
+	}
+	if recipient != swap.recipient.String() {
+		t.Fatalf("case 13 - wrong recipient. wanted '%s' got '%s'", recipient, swap.recipient.String())
+	}
+	if swapVal != 5 {
+		t.Fatalf("case 13 - unexpected output value. wanted 5, got %d", swapVal)
+	}
+
 }
 
 // TestReorg sends a reorganization-causing block through the anyQ channel, and
@@ -1087,141 +1126,6 @@ func TestReorg(t *testing.T) {
 	}
 }
 
-// TestTx checks the transaction-related methods and functions.
-func TestTx(t *testing.T) {
-	// Create a DCRBackend with the test node.
-	dcr, shutdown := testBackend()
-	defer shutdown()
-
-	// Test 1: Test different states of validity.
-	cleanTestChain()
-	blockHeight := uint32(500)
-	txHash := randomHash()
-	blockHash := randomHash()
-	msg := testMsgTxRegular(dcrec.STEcdsaSecp256k1)
-	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 2)
-	// Mine the transaction and an approving block.
-	testAddBlockVerbose(blockHash, 1, blockHeight, 1)
-	testAddBlockVerbose(randomHash(), 1, blockHeight+1, 1)
-	// Add some random transaction at index 0.
-	verboseTx.Vout = append(verboseTx.Vout, testVout(1, randomBytes(20)))
-	// Add a swap output at index 1.
-	swap := testMsgTxSwapInit()
-	swapTxOut := swap.tx.TxOut[swap.vout]
-	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(swapTxOut.Value)/dcrToAtoms, swapTxOut.PkScript))
-	// Make a transaction input spending some random utxo.
-	spentTx := randomHash()
-	spentVout := rand.Uint32()
-	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTx, spentVout))
-	// Get the transaction through the backend.
-	dexTx, err := dcr.transaction(txHash)
-	if err != nil {
-		t.Fatalf("error getting dex tx: %v", err)
-	}
-	// Check that there are 2 confirmations.
-	confs, err := dexTx.Confirmations()
-	if err != nil {
-		t.Fatalf("unexpected error getting confirmation count: %v", err)
-	}
-	if confs != 2 {
-		t.Fatalf("expected 2 confirmations, but %d were reported", confs)
-	}
-	// Check that the spent tx is in dexTx.
-	spent, err := dexTx.SpendsUTXO(spentTx.String(), spentVout)
-	if err != nil {
-		t.Fatalf("SpendsUTXO error: %v", err)
-	}
-	if !spent {
-		t.Fatalf("transaction not confirming spent utxo")
-	}
-
-	// Check that the swap contract doesn't match the first input.
-	_, _, err = dexTx.AuditContract(0, swap.contract)
-	if err == nil {
-		t.Fatalf("no error for contract audit on non-swap output")
-	}
-	// Now try again with the correct vout.
-	recipient, swapVal, err := dexTx.AuditContract(1, swap.contract)
-	if err != nil {
-		t.Fatalf("unexpected error auditing contract: %v", err)
-	}
-	if recipient != swap.recipient.String() {
-		t.Fatalf("wrong recipient. wanted '%s' got '%s'", recipient, swap.recipient.String())
-	}
-	if swapVal != uint64(swapTxOut.Value) {
-		t.Fatalf("unexpected output value. wanted %d, got %d", swapVal, swapTxOut.Value)
-	}
-
-	// Now do an 1-deep invalidating reorg, and check that Confirmations returns
-	// an error.
-	newHash := testAddBlockVerbose(nil, 1, blockHeight, 0)
-	// Passing the hash to anyQ triggers the reorganization.
-	dcr.anyQ <- newHash
-	time.Sleep(time.Millisecond * 50)
-	_, err = dexTx.Confirmations()
-	if err == nil {
-		t.Fatalf("no error when checking confirmations on an invalidated tx")
-	}
-
-	// Undo the reorg
-	dcr.anyQ <- blockHash
-	time.Sleep(time.Millisecond * 50)
-
-	// Now do a 2-deep invalidating reorg, and check that Confirmations returns
-	// an error.
-	newHash = testAddBlockVerbose(nil, 1, blockHeight+1, 0)
-	dcr.anyQ <- newHash
-	time.Sleep(time.Millisecond * 50)
-	_, err = dexTx.Confirmations()
-	if err == nil {
-		t.Fatalf("no error when checking confirmations on an invalidated tx")
-	}
-
-	// Test 2: Before and after mining.
-	cleanTestChain()
-	dcr.blockCache = newBlockCache(dcr.log)
-	txHash = randomHash()
-	// Add a transaction to mempool.
-	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
-	testAddTxVerbose(msg.tx, txHash, nil, 0, 0)
-	// Get the transaction data through the backend and make sure it has zero
-	// confirmations.
-	dexTx, err = dcr.transaction(txHash)
-	if err != nil {
-		t.Fatalf("unexpected error retrieving transaction through backend: %v", err)
-	}
-	confs, err = dexTx.Confirmations()
-	if err != nil {
-		t.Fatalf("unexpected error getting confirmations on mempool transaction: %v", err)
-	}
-	if confs != 0 {
-		t.Fatalf("expected 0 confirmations for mempool transaction, got %d", confs)
-	}
-	// Now mine the transaction
-	blockHash = testAddBlockVerbose(nil, 1, blockHeight, 0)
-	verboseBlock := testChain.blocks[*blockHash]
-	_, err = dcr.blockCache.add(verboseBlock)
-	if err != nil {
-		t.Fatalf("error adding block to blockCache: %v", err)
-	}
-	// Update the verbose tx data
-	testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 1)
-	// Check Confirmations
-	confs, err = dexTx.Confirmations()
-	if err != nil {
-		t.Fatalf("unexpected error getting confirmations on mined transaction: %v", err)
-	}
-	if confs != 1 {
-		t.Fatalf("expected 1 confirmation for mined transaction, got %d", confs)
-	}
-	if dexTx.blockHash != *blockHash {
-		t.Fatalf("unexpected block hash on a mined transaction. expected %s, got %s", blockHash, dexTx.blockHash)
-	}
-	if dexTx.height != int64(blockHeight) {
-		t.Fatalf("unexpected block height on a mined transaction. expected %d, got %d", blockHeight, dexTx.height)
-	}
-}
-
 // TestAuxiliary checks the UTXO convenience functions like TxHash, Vout, and
 // TxID.
 func TestAuxiliary(t *testing.T) {
@@ -1238,15 +1142,13 @@ func TestAuxiliary(t *testing.T) {
 	txHeight := rand.Uint32()
 	blockHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
-	utxo, err := dcr.UTXO(txid, msg.vout, nil)
+	coinID := toCoinID(txHash, msg.vout)
+	utxo, err := dcr.Coin(coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !bytes.Equal(txHash.CloneBytes(), utxo.TxHash()) {
+	if txHash.String() != utxo.TxID() {
 		t.Fatalf("utxo tx hash doesn't match")
-	}
-	if utxo.Vout() != msg.vout {
-		t.Fatalf("utxo vout doesn't match")
 	}
 	if utxo.TxID() != txid {
 		t.Fatalf("utxo txid doesn't match")
@@ -1267,7 +1169,7 @@ func TestAuxiliary(t *testing.T) {
 	if txAddr != addr {
 		t.Fatalf("expected address %s, got %s", addr, txAddr)
 	}
-	expVal := uint64(8 * dcrToAtoms)
+	expVal := toAtoms(8)
 	if v != expVal {
 		t.Fatalf("expected value %d, got %d", expVal, v)
 	}

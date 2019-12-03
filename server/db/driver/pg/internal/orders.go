@@ -14,7 +14,7 @@ const (
 		address TEXT,          -- INDEX
 		client_time TIMESTAMPTZ,
 		server_time TIMESTAMPTZ,
-		utxos TEXT[],
+		coins BYTEA,
 		quantity INT8,
 		rate INT8,
 		force INT2,
@@ -24,7 +24,7 @@ const (
 
 	// InsertOrder inserts a market or limit order into the specified table.
 	InsertOrder = `INSERT INTO %s (oid, type, sell, account_id, address,
-			client_time, server_time, utxos, quantity,
+			client_time, server_time, coins, quantity,
 			rate, force, status, filled)
 		VALUES ($1, $2, $3, $4, $5,
 			$6, $7, $8, $9,
@@ -69,7 +69,7 @@ const (
 	//			address,
 	//			client_time,
 	//			server_time,
-	//			utxos,
+	//			coins,
 	//			quantity,
 	//			rate,
 	//			force,
@@ -82,7 +82,7 @@ const (
 		DELETE FROM %s
 		WHERE oid = $1
 		RETURNING oid, type, sell, account_id, address,
-			client_time, server_time, utxos, quantity,
+			client_time, server_time, coins, quantity,
 			rate, force, %d, %d
 	)
 	INSERT INTO %s

@@ -35,7 +35,7 @@ const (
 	UnknownMarketError             // 20
 	ClockRangeError                // 21
 	FundingError                   // 22
-	UTXOAuthError                  // 23
+	CoinAuthError                  // 23
 	UnknownMarket                  // 24
 	NotSubscribedError             // 25
 	UnauthorizedConnection         // 26
@@ -345,8 +345,7 @@ type Init struct {
 	signable
 	OrderID  Bytes  `json:"orderid"`
 	MatchID  Bytes  `json:"matchid"`
-	TxID     string `json:"txid"`
-	Vout     uint32 `json:"vout"`
+	CoinID   Bytes  `json:"coinid"`
 	Time     uint64 `json:"timestamp"`
 	Contract Bytes  `json:"contract"`
 }
@@ -360,8 +359,7 @@ func (init *Init) Serialize() ([]byte, error) {
 	s := make([]byte, 0, 205)
 	s = append(s, init.OrderID...)
 	s = append(s, init.MatchID...)
-	s = append(s, []byte(init.TxID)...)
-	s = append(s, uint32Bytes(init.Vout)...)
+	s = append(s, init.CoinID...)
 	s = append(s, uint64Bytes(init.Time)...)
 	s = append(s, init.Contract...)
 	return s, nil
@@ -413,8 +411,7 @@ type Redeem struct {
 	signable
 	OrderID Bytes  `json:"orderid"`
 	MatchID Bytes  `json:"matchid"`
-	TxID    string `json:"txid"`
-	Vout    uint32 `json:"vout"`
+	CoinID  Bytes  `json:"coinid"`
 	Time    uint64 `json:"timestamp"`
 }
 
@@ -427,8 +424,7 @@ func (redeem *Redeem) Serialize() ([]byte, error) {
 	s := make([]byte, 0, 108)
 	s = append(s, redeem.OrderID...)
 	s = append(s, redeem.MatchID...)
-	s = append(s, []byte(redeem.TxID)...)
-	s = append(s, uint32Bytes(redeem.Vout)...)
+	s = append(s, []byte(redeem.CoinID)...)
 	s = append(s, uint64Bytes(redeem.Time)...)
 	return s, nil
 }
@@ -448,20 +444,13 @@ const (
 	CancelOrderNum    = 3
 )
 
-// UTXO is information for validating funding transactions. Some number of
-// UTXOs must be included with both Limit and Market payloads.
-type UTXO struct {
-	TxID    Bytes   `json:"txid"`
-	Vout    uint32  `json:"vout"`
+// Coin is information for validating funding coins. Some number of
+// Coins must be included with both Limit and Market payloads.
+type Coin struct {
+	ID      Bytes   `json:"coinid"`
 	PubKeys []Bytes `json:"pubkeys"`
 	Sigs    []Bytes `json:"sigs"`
 	Redeem  Bytes   `json:"redeem"`
-}
-
-// Serialize serializes the UTXO data.
-func (u *UTXO) Serialize() []byte {
-	// serialization: tx hash (32) + vout (4) = 36 bytes
-	return append(u.TxID, uint32Bytes(u.Vout)...)
 }
 
 // Prefix is a common structure shared among order type payloads.
@@ -504,20 +493,20 @@ func (p *Prefix) Serialize() []byte {
 type Trade struct {
 	Side     uint8   `json:"side"`
 	Quantity uint64  `json:"ordersize"`
-	UTXOs    []*UTXO `json:"utxos"`
+	Coins    []*Coin `json:"coins"`
 	Address  string  `json:"address"`
 }
 
 // Serialize serializes the Trade data.
 func (t *Trade) Serialize() []byte {
-	// serialization: utxo count (1), utxo data (36*count), side (1), qty (8)
+	// serialization: coin count (1), coin data (36*count), side (1), qty (8)
 	// = 10 + 36*count
 	// Address is not serialized as part of the trade.
-	utxoCount := len(t.UTXOs)
-	b := make([]byte, 0, 10+36*utxoCount)
-	b = append(b, byte(utxoCount))
-	for _, utxo := range t.UTXOs {
-		b = append(b, utxo.Serialize()...)
+	coinCount := len(t.Coins)
+	b := make([]byte, 0, 10+36*coinCount)
+	b = append(b, byte(coinCount))
+	for _, coin := range t.Coins {
+		b = append(b, coin.ID...)
 	}
 	b = append(b, t.Side)
 	return append(b, uint64Bytes(t.Quantity)...)
@@ -705,7 +694,7 @@ func (r *RegisterResult) Serialize() ([]byte, error) {
 type NotifyFee struct {
 	signable
 	AccountID Bytes  `json:"accountid"`
-	TxID      Bytes  `json:"txid"`
+	CoinID    Bytes  `json:"coinid"`
 	Vout      uint32 `json:"vout"`
 	Time      uint64 `json:"timestamp"`
 }
@@ -715,7 +704,7 @@ func (n *NotifyFee) Serialize() ([]byte, error) {
 	// serialization: account id (32) + txid (32) + vout (4) + time (8) = 76
 	b := make([]byte, 0, 68)
 	b = append(b, n.AccountID...)
-	b = append(b, n.TxID...)
+	b = append(b, n.CoinID...)
 	b = append(b, uint32Bytes(n.Vout)...)
 	b = append(b, uint64Bytes(n.Time)...)
 	return b, nil

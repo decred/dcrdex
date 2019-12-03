@@ -5,6 +5,7 @@ package btc
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -17,6 +18,7 @@ type UTXO struct {
 	// Because a UTXO's validity and block info can change after creation, keep a
 	// Backend around to query the state of the tx and update the block info.
 	btc *Backend
+	tx  *Tx
 	// The height and hash of the transaction's best known block.
 	height    uint32
 	blockHash chainhash.Hash
@@ -177,15 +179,73 @@ func pkMatches(pubkeys [][]byte, addrs []btcutil.Address, hasher func([]byte) []
 	return matches
 }
 
+// AuditContract checks that UTXO is a swap contract and extracts the
+// receiving address and contract value on success.
+func (utxo *UTXO) AuditContract() (string, uint64, error) {
+	tx := utxo.tx
+	if len(tx.outs) <= int(utxo.vout) {
+		return "", 0, fmt.Errorf("invalid index %d for transaction %s", utxo.vout, tx.hash)
+	}
+	output := tx.outs[int(utxo.vout)]
+
+	// If it's a pay-to-script-hash, extract the script hash and check it against
+	// the hash of the user-supplied redeem script.
+	scriptType := parseScriptType(output.pkScript, utxo.redeemScript)
+	if scriptType == scriptUnsupported {
+		return "", 0, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, utxo.vout)
+	}
+	var scriptHash, hashed []byte
+	if scriptType.isP2SH() {
+		if scriptType.isSegwit() {
+			scriptHash = extractWitnessScriptHash(output.pkScript)
+			shash := sha256.Sum256(utxo.redeemScript)
+			hashed = shash[:]
+		} else {
+			scriptHash = extractScriptHash(output.pkScript)
+			hashed = btcutil.Hash160(utxo.redeemScript)
+		}
+	}
+	if scriptHash == nil {
+		return "", 0, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, utxo.vout)
+	}
+	if !bytes.Equal(hashed, scriptHash) {
+		return "", 0, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, utxo.vout)
+	}
+	_, receiver, err := extractSwapAddresses(utxo.redeemScript, utxo.btc.chainParams)
+	if err != nil {
+		return "", 0, fmt.Errorf("error extracting address from swap contract for %s:%d: %v", tx.hash, utxo.redeemScript, err)
+	}
+	return receiver, output.value, nil
+}
+
+// SpendsUTXO checks whether a particular coin is spent in this coin's tx.
+func (utxo *UTXO) SpendsCoin(coinID []byte) (bool, error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return false, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+	}
+	for _, txIn := range utxo.tx.ins {
+		if txIn.prevTx == *txHash && txIn.vout == vout {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// FeeRate returns the transaction fee rate, in satoshi/vbyte.
+func (utxo *UTXO) FeeRate() uint64 {
+	return utxo.tx.feeRate
+}
+
 // SpendSize returns the maximum size of the serialized TxIn that spends this
 // UTXO, in bytes. This is a method of the asset.UTXO interface.
 func (utxo *UTXO) SpendSize() uint32 {
 	return utxo.spendSize
 }
 
-// TxHash is a byte-slice of the UTXO's transaction hash.
-func (utxo *UTXO) TxHash() []byte {
-	return utxo.txHash.CloneBytes()
+// ID returns the coin ID.
+func (utxo *UTXO) ID() []byte {
+	return toCoinID(&utxo.tx.hash, utxo.vout)
 }
 
 // TxID is a string identifier for the transaction, typically a hexadecimal
@@ -193,11 +253,6 @@ func (utxo *UTXO) TxHash() []byte {
 // the same value as the txid argument passed to (DEXAsset).UTXO.
 func (utxo *UTXO) TxID() string {
 	return utxo.txHash.String()
-}
-
-// Vout is the output index of the UTXO.
-func (utxo *UTXO) Vout() uint32 {
-	return utxo.vout
 }
 
 // Value is the output value, in atoms.

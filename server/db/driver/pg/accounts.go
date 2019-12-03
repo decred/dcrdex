@@ -65,19 +65,21 @@ func (a *Archiver) AccountRegAddr(aid account.AccountID) (string, error) {
 
 // PayAccount sets the registration fee payment details for the account,
 // effectively completing the registration process.
-func (a *Archiver) PayAccount(aid account.AccountID, txid string, vout uint32) error {
-	if len(txid) != chainhash.MaxHashStringSize {
-		return fmt.Errorf("incorrect length transaction ID %s", txid)
+func (a *Archiver) PayAccount(aid account.AccountID, coinID []byte) error {
+	// This check is fine for now. If support for an asset with a longer coin ID
+	// is implemented, this restriction would need to be loosened.
+	if len(coinID) != chainhash.HashSize+4 {
+		return fmt.Errorf("incorrect length transaction ID %x. wanted %d, got %d",
+			coinID, chainhash.MaxHashStringSize+4, len(coinID))
 	}
-	txHash, err := chainhash.NewHashFromStr(txid)
+	ok, err := payAccount(a.db, a.tables.accounts, aid, coinID)
 	if err != nil {
 		return err
 	}
-	ok, err := payAccount(a.db, a.tables.accounts, aid, txHash, vout)
 	if !ok {
 		return fmt.Errorf("no accounts updated")
 	}
-	return err
+	return nil
 }
 
 // Get the next address for the current master pubkey.
@@ -140,15 +142,15 @@ func closeAccount(dbe sqlExecutor, tableName string, aid account.AccountID, rule
 // getAccount gets the account pubkey, whether the account has been
 // registered, and whether the account is still open, in that order.
 func getAccount(dbe *sql.DB, tableName string, aid account.AccountID) (*account.Account, bool, bool, error) {
-	var txid, pubkey []byte
+	var coinID, pubkey []byte
 	var rule uint8
 	stmt := fmt.Sprintf(internal.SelectAccount, tableName)
-	err := dbe.QueryRow(stmt, aid).Scan(&pubkey, &txid, &rule)
+	err := dbe.QueryRow(stmt, aid).Scan(&pubkey, &coinID, &rule)
 	if err != nil {
 		return nil, false, false, err
 	}
 	acct, err := account.NewAccountFromPubKey(pubkey)
-	return acct, len(txid) > 1, rule == 0, err
+	return acct, len(coinID) > 1, rule == 0, err
 }
 
 // createAccount creates an entry for the account in the accounts table.
@@ -171,9 +173,9 @@ func accountRegAddr(dbe *sql.DB, tableName string, aid account.AccountID) (strin
 }
 
 // payAccount sets the registration fee payment details.
-func payAccount(dbe *sql.DB, tableName string, aid account.AccountID, txHash *chainhash.Hash, vout uint32) (bool, error) {
+func payAccount(dbe *sql.DB, tableName string, aid account.AccountID, coinID []byte) (bool, error) {
 	stmt := fmt.Sprintf(internal.SetRegOutput, tableName)
-	res, err := dbe.Exec(stmt, txHash[:], vout, aid)
+	res, err := dbe.Exec(stmt, coinID, aid)
 	if err != nil {
 		return false, err
 	}

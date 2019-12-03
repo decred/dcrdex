@@ -48,7 +48,7 @@ func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 func (s *TStorage) ActiveMatches(account.AccountID) []*order.UserMatch { return s.matches }
 func (s *TStorage) CreateAccount(*account.Account) (string, error)     { return s.acctAddr, s.acctErr }
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error)   { return s.regAddr, s.regErr }
-func (s *TStorage) PayAccount(account.AccountID, string, uint32) error { return s.payErr }
+func (s *TStorage) PayAccount(account.AccountID, []byte) error         { return s.payErr }
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
@@ -238,7 +238,7 @@ var (
 	tCheckFeeErr   error
 )
 
-func tCheckFee(txid string, vout uint32) (addr string, val uint64, confs int64, err error) {
+func tCheckFee([]byte) (addr string, val uint64, confs int64, err error) {
 	return tCheckFeeAddr, tCheckFeeVal, tCheckFeeConfs, tCheckFeeErr
 }
 
@@ -895,19 +895,16 @@ func TestHandleNotifyFee(t *testing.T) {
 	userAcct := &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 	rig.storage.acct = userAcct
 	dummyError := fmt.Errorf("test error")
-	txidb := []byte{
+	coinid := []byte{
 		0xe2, 0x48, 0xd9, 0xea, 0xa1, 0xc4, 0x78, 0xd5, 0x31, 0xc2, 0x41, 0xb4,
 		0x5b, 0x7b, 0xd5, 0x8d, 0x7a, 0x06, 0x1a, 0xc6, 0x89, 0x0a, 0x86, 0x2b,
-		0x1e, 0x59, 0xb3, 0xc8, 0xf6, 0xad, 0xee, 0xc8,
+		0x1e, 0x59, 0xb3, 0xc8, 0xf6, 0xad, 0xee, 0xc8, 0x00, 0x00, 0x00, 0x32,
 	}
-	// txid := "e248d9eaa1c478d531c241b45b7bd58d7a061ac6890a862b1e59b3c8f6adeec8"
-	vout := uint32(50)
 
 	newNotify := func() *msgjson.NotifyFee {
 		notify := &msgjson.NotifyFee{
 			AccountID: user.acctID[:],
-			TxID:      txidb,
-			Vout:      vout,
+			CoinID:    coinid,
 			Time:      uint64(time.Now().Unix()),
 		}
 		sigMsg, _ := notify.Serialize()

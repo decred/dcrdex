@@ -31,7 +31,7 @@ type Storage interface {
 	ActiveMatches(account.AccountID) []*order.UserMatch
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
-	PayAccount(account.AccountID, string, uint32) error
+	PayAccount(account.AccountID, []byte) error
 }
 
 // Signer signs messages. It is likely a secp256k1.PrivateKey.
@@ -42,7 +42,7 @@ type Signer interface {
 
 // FeeChecker is a function for retreiving the details for a fee payment. It
 // is satisfied by (dcr.DCRBackend).P2PKHDetails.
-type FeeChecker func(txid string, vout uint32) (addr string, val uint64, confs int64, err error)
+type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
 
 // A respHandler is the handler for the response to a DEX-originating request. A
 // respHandler has a time associated with it so that old unused handlers can be

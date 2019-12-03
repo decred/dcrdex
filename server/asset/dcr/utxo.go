@@ -19,10 +19,10 @@ type UTXO struct {
 	// Because a UTXO's validity and block info can change after creation, keep a
 	// DCRBackend around to query the state of the tx and update the block info.
 	dcr *DCRBackend
+	tx  *Tx
 	// The height and hash of the transaction's best known block.
 	height    uint32
 	blockHash chainhash.Hash
-	txHash    chainhash.Hash
 	vout      uint32
 	// The number of confirmations needed for maturity. For outputs of a coinbase
 	// transactions and stake-related transactions, this will be set to
@@ -51,7 +51,7 @@ type UTXO struct {
 }
 
 // Check that UTXO satisfies the asset.UTXO interface
-var _ asset.UTXO = (*UTXO)(nil)
+var _ asset.Coin = (*UTXO)(nil)
 
 // Confirmations is an asset.DEXAsset method that returns the number of
 // confirmations for a UTXO. Because it is possible for a UTXO that was once
@@ -68,7 +68,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 		// If the tip hasn't changed, don't do anything here.
 		if utxo.lastLookup == nil || *utxo.lastLookup != tipHash {
 			utxo.lastLookup = &tipHash
-			txOut, verboseTx, _, err := dcr.getTxOutInfo(&utxo.txHash, utxo.vout)
+			txOut, verboseTx, _, err := dcr.getTxOutInfo(&utxo.tx.hash, utxo.vout)
 			if err != nil {
 				return -1, err
 			}
@@ -88,12 +88,12 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 		// not been orphaned or voted as invalid.
 		mainchainBlock, found := dcr.blockCache.atHeight(utxo.height)
 		if !found {
-			return -1, fmt.Errorf("no mainchain block for tx %s at height %d", utxo.txHash.String(), utxo.height)
+			return -1, fmt.Errorf("no mainchain block for tx %s at height %d", utxo.tx.hash.String(), utxo.height)
 		}
 		// If the UTXO's block has been orphaned, check for a new containing block.
 		if mainchainBlock.hash != utxo.blockHash {
 			// See if we can find the utxo in another block.
-			newUtxo, err := dcr.utxo(&utxo.txHash, utxo.vout, utxo.redeemScript)
+			newUtxo, err := dcr.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
 			if err != nil {
 				return -1, fmt.Errorf("utxo block is not mainchain")
 			}
@@ -112,7 +112,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 		if mainchainBlock != nil && !utxo.scriptType.isStake() {
 			nextBlock, err := dcr.getMainchainDcrBlock(utxo.height + 1)
 			if err != nil {
-				return -1, fmt.Errorf("error retreiving approving block for utxo %s:%d: %v", utxo.txHash, utxo.vout, err)
+				return -1, fmt.Errorf("error retreiving approving block for utxo %s:%d: %v", utxo.tx.hash, utxo.vout, err)
 			}
 			if nextBlock != nil && !nextBlock.vote {
 				return -1, fmt.Errorf("utxo's block has been voted as invalid")
@@ -127,7 +127,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 	// output immature. This would be exceedingly rare (impossible?).
 	confs := int32(dcr.blockCache.tipHeight()) - int32(utxo.height) + 1
 	if confs < utxo.maturity {
-		return -1, fmt.Errorf("transaction %s became immature", utxo.txHash)
+		return -1, fmt.Errorf("transaction %s became immature", utxo.tx.hash)
 	}
 	return int64(confs), nil
 }
@@ -136,7 +136,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 // asset.DEXAsset method.
 func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	if len(pubkeys) < utxo.numSigs {
-		return fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(pubkeys))
+		return fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.tx.hash, utxo.vout, utxo.numSigs, len(pubkeys))
 	}
 	evalScript := utxo.pkScript
 	if utxo.scriptType.isP2SH() {
@@ -147,7 +147,7 @@ func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 		return err
 	}
 	if scriptAddrs.nRequired != utxo.numSigs {
-		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.txHash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
+		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.tx.hash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
 	}
 	matches, err := pkMatches(pubkeys, scriptAddrs.pubkeys, nil)
 	if err != nil {
@@ -159,7 +159,7 @@ func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	}
 	matches = append(matches, m...)
 	if len(matches) < utxo.numSigs {
-		return fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d", utxo.txHash, utxo.vout, utxo.numSigs, len(matches))
+		return fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d", utxo.tx.hash, utxo.vout, utxo.numSigs, len(matches))
 	}
 	for _, match := range matches {
 		err := checkSig(msg, match.pubkey, sigs[match.idx], match.sigType)
@@ -219,28 +219,63 @@ func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []
 	return matches, nil
 }
 
+// AuditContract checks that UTXO is a swap contract and extracts the
+// receiving address and contract value on success.
+func (utxo *UTXO) AuditContract() (string, uint64, error) {
+	tx := utxo.tx
+	if len(tx.outs) <= int(utxo.vout) {
+		return "", 0, fmt.Errorf("invalid index %d for transaction %s", utxo.vout, tx.hash)
+	}
+	output := tx.outs[int(utxo.vout)]
+	scriptHash := extractScriptHash(output.pkScript)
+	if scriptHash == nil {
+		return "", 0, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, utxo.vout)
+	}
+	if !bytes.Equal(dcrutil.Hash160(utxo.redeemScript), scriptHash) {
+		return "", 0, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, utxo.vout)
+	}
+	_, receiver, err := extractSwapAddresses(utxo.redeemScript)
+	if err != nil {
+		return "", 0, fmt.Errorf("error extracting address from swap contract for %s:%d", tx.hash, utxo.vout)
+	}
+	return receiver, output.value, nil
+}
+
+// SpendsUTXO checks whether a particular coin is spent in this coin's tx.
+func (utxo *UTXO) SpendsCoin(coinID []byte) (bool, error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return false, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+	}
+	for _, txIn := range utxo.tx.ins {
+		if txIn.prevTx == *txHash && txIn.vout == vout {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// FeeRate returns the transaction fee rate, in atoms/byte.
+func (utxo *UTXO) FeeRate() uint64 {
+	return utxo.tx.feeRate
+}
+
 // SpendSize returns the maximum size of the serialized TxIn that spends this
 // UTXO, in bytes. This is a method of the asset.UTXO interface.
 func (utxo *UTXO) SpendSize() uint32 {
 	return utxo.spendSize
 }
 
-// TxHash is the transaction hash. TxHash is a method of the asset.UTXO
-// interface.
-func (utxo *UTXO) TxHash() []byte {
-	return utxo.txHash.CloneBytes()
-}
-
-// Vout is the output index. Vout is a method of the asset.UTXO interface.
-func (utxo *UTXO) Vout() uint32 {
-	return utxo.vout
+// ID returns the coin ID.
+func (utxo *UTXO) ID() []byte {
+	return toCoinID(&utxo.tx.hash, utxo.vout)
 }
 
 // TxID is a string identifier for the transaction, typically a hexadecimal
 // representation of the byte-reversed transaction hash. Should always return
 // the same value as the txid argument passed to (DEXAsset).UTXO.
 func (utxo *UTXO) TxID() string {
-	return utxo.txHash.String()
+	return utxo.tx.hash.String()
 }
 
 // Value is the output value, in atoms.

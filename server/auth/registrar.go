@@ -160,8 +160,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	}
 
 	// Validate fee.
-	txid := notifyFee.TxID.String()
-	addr, val, confs, err := auth.checkFee(txid, notifyFee.Vout)
+	addr, val, confs, err := auth.checkFee(notifyFee.CoinID)
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.FeeError,
@@ -188,7 +187,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	}
 
 	// Mark the account as paid
-	err = auth.storage.PayAccount(acctID, txid, notifyFee.Vout)
+	err = auth.storage.PayAccount(acctID, notifyFee.CoinID)
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,

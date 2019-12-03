@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"sync"
@@ -211,10 +212,9 @@ func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
 // This stub satisfies asset.DEXAsset.
 type TAsset struct {
 	mtx     sync.RWMutex
-	utxo    asset.UTXO
-	utxoErr error
+	coin    asset.Coin
+	coinErr error
 	bChan   chan uint32
-	tx      asset.DEXTx
 	txErr   error
 	lbl     string
 }
@@ -226,47 +226,41 @@ func newTAsset(lbl string) *TAsset {
 	}
 }
 
-func (a *TAsset) UTXO(txid string, vout uint32, redeemScript []byte) (asset.UTXO, error) {
-	return a.utxo, a.utxoErr
-}
-func (a *TAsset) BlockChannel(size int) chan uint32 { return a.bChan }
-func (a *TAsset) Transaction(txid string) (asset.DEXTx, error) {
+func (a *TAsset) Coin(coinID, redeemScript []byte) (asset.Coin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
-	if a.txErr != nil {
-		return nil, a.txErr
-	}
-	return a.tx, nil
+	return a.coin, a.coinErr
 }
-func (a *TAsset) InitTxSize() uint32 { return 100 }
+func (a *TAsset) BlockChannel(size int) chan uint32 { return a.bChan }
+func (a *TAsset) InitTxSize() uint32                { return 100 }
+func (a *TAsset) CheckAddress(string) bool          { return true }
 
-func (a *TAsset) CheckAddress(string) bool { return true }
-
-func (a *TAsset) setTxErr(err error) {
+func (a *TAsset) setCoinErr(err error) {
 	a.mtx.Lock()
 	defer a.mtx.Unlock()
-	a.txErr = err
+	a.coinErr = err
 }
 
 // This stub satisfies asset.Transaction, used by asset.DEXAsset.
-type TTransaction struct {
+type TCoin struct {
 	mtx       sync.RWMutex
+	id        []byte
 	confs     int64
 	confsErr  error
 	auditAddr string
 	auditVal  uint64
 }
 
-func (tx *TTransaction) Confirmations() (int64, error) {
-	tx.mtx.RLock()
-	defer tx.mtx.RUnlock()
-	return tx.confs, tx.confsErr
+func (coin *TCoin) Confirmations() (int64, error) {
+	coin.mtx.RLock()
+	defer coin.mtx.RUnlock()
+	return coin.confs, coin.confsErr
 }
 
-func (tx *TTransaction) setConfs(confs int64) {
-	tx.mtx.Lock()
-	defer tx.mtx.Unlock()
-	tx.confs = confs
+func (coin *TCoin) setConfs(confs int64) {
+	coin.mtx.Lock()
+	defer coin.mtx.Unlock()
+	coin.confs = confs
 }
 
 const (
@@ -277,7 +271,7 @@ const (
 
 var tSpoofSpendsUTXO = tNoSpoofSpendsUTXO
 
-func (tx *TTransaction) SpendsUTXO(txid string, vout uint32) (bool, error) {
+func (coin *TCoin) SpendsCoin(coinID []byte) (bool, error) {
 	if tSpoofSpendsUTXO == tSpoofSpendsUTXOErr {
 		return false, fmt.Errorf("test error")
 	} else if tSpoofSpendsUTXO == tSpoofSpendsUTXONotFound {
@@ -288,14 +282,20 @@ func (tx *TTransaction) SpendsUTXO(txid string, vout uint32) (bool, error) {
 
 var tAuditContractErr error = nil
 
-func (tx *TTransaction) AuditContract(vout uint32, contract []byte) (string, uint64, error) {
+func (coin *TCoin) AuditContract() (string, uint64, error) {
 	if tAuditContractErr != nil {
 		return "", 0, tAuditContractErr
 	}
-	return tx.auditAddr, tx.auditVal, nil
+	return coin.auditAddr, coin.auditVal, nil
 }
 
-func (tx *TTransaction) FeeRate() uint64 {
+func (coin *TCoin) Auth(pubkeys, sigs [][]byte, msg []byte) error { return nil }
+func (coin *TCoin) ID() []byte                                    { return coin.id }
+func (coin *TCoin) TxID() string                                  { return "" }
+func (coin *TCoin) Value() uint64                                 { return 0 }
+func (coin *TCoin) SpendSize() uint32                             { return 0 }
+
+func (coin *TCoin) FeeRate() uint64 {
 	return 1
 }
 
@@ -506,9 +506,9 @@ func (rig *testRig) sendSwap(user *tUser, oid, recipient string) (*tSwap, error)
 	matchInfo := rig.matchInfo
 	swap := tNewSwap(matchInfo, oid, recipient, user)
 	if isQuoteSwap(user, matchInfo.match) {
-		rig.xyzNode.tx = swap.tx
+		rig.xyzNode.coin = swap.coin
 	} else {
-		rig.abcNode.tx = swap.tx
+		rig.abcNode.coin = swap.coin
 	}
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
 	if rpcErr != nil {
@@ -649,9 +649,9 @@ func (rig *testRig) redeem(user *tUser, oid string) *tRedeem {
 	matchInfo := rig.matchInfo
 	redeem := tNewRedeem(matchInfo, oid, user)
 	if isQuoteSwap(user, matchInfo.match) {
-		rig.abcNode.tx = redeem.tx
+		rig.abcNode.coin = redeem.coin
 	} else {
-		rig.xyzNode.tx = redeem.tx
+		rig.xyzNode.coin = redeem.coin
 	}
 	rpcErr := rig.swapper.handleRedeem(user.acct, redeem.req)
 	if rpcErr != nil {
@@ -701,7 +701,7 @@ func (rig *testRig) ackRedemption(user *tUser, oid string, redeem *tRedeem) erro
 	if req == nil {
 		return fmt.Errorf("failed to find audit request for %s after counterparty's init", user.lbl)
 	}
-	err := rig.checkRedeem(req.req, oid, redeem.txid, user.lbl)
+	err := rig.checkRedeem(req.req, oid, redeem.coin.ID(), user.lbl)
 	if err != nil {
 		return err
 	}
@@ -709,7 +709,7 @@ func (rig *testRig) ackRedemption(user *tUser, oid string, redeem *tRedeem) erro
 	return nil
 }
 
-func (rig *testRig) checkRedeem(msg *msgjson.Message, oid, txid, tag string) error {
+func (rig *testRig) checkRedeem(msg *msgjson.Message, oid string, coinID []byte, tag string) error {
 	var params *msgjson.Redemption
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
@@ -722,8 +722,8 @@ func (rig *testRig) checkRedeem(msg *msgjson.Message, oid, txid, tag string) err
 	if params.MatchID.String() != matchID {
 		return fmt.Errorf("%s : incorrect match ID in checkRedeem, expected '%s', got '%s'", tag, matchID, params.MatchID)
 	}
-	if params.TxID != txid {
-		return fmt.Errorf("%s : incorrect txid in checkRedeem. expected '%s', got '%s'", tag, txid, params.TxID)
+	if !bytes.Equal(params.CoinID, coinID) {
+		return fmt.Errorf("%s : incorrect coinID in checkRedeem. expected '%x', got '%x'", tag, coinID, params.CoinID)
 	}
 	return nil
 }
@@ -934,7 +934,7 @@ func tMultiMatchSet(matchQtys, rates []uint64, makerSell bool, isMarket bool) *t
 
 // tSwap is the information needed for spoofing a swap transaction.
 type tSwap struct {
-	tx       *TTransaction
+	coin     *TCoin
 	req      *msgjson.Message
 	contract string
 }
@@ -947,23 +947,25 @@ func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
 	if isQuoteSwap(user, matchInfo.match) {
 		auditVal = matcher.BaseToQuote(matchInfo.rate, matchInfo.qty)
 	}
-	makerSwap := &TTransaction{
+	coinID := randBytes(36)
+	makerSwap := &TCoin{
 		confs:     0,
 		auditAddr: recipient + tRecipientSpoofer,
 		auditVal:  auditVal * tValSpoofer,
+		id:        coinID,
 	}
 	contract := "01234567" + user.sigHex
 	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Init{
 		OrderID: dirtyEncode(oid),
 		MatchID: dirtyEncode(matchInfo.matchID),
 		// We control what the backend returns, so the txid doesn't matter right now.
-		TxID:     "swapabc",
+		CoinID:   coinID,
 		Time:     uint64(time.Now().Unix()),
 		Contract: dirtyEncode(contract),
 	})
 
 	return &tSwap{
-		tx:       makerSwap,
+		coin:     makerSwap,
 		req:      req,
 		contract: contract,
 	}
@@ -975,25 +977,30 @@ func isQuoteSwap(user *tUser, match *order.Match) bool {
 	return (isMaker && !makerSell) || (!isMaker && makerSell)
 }
 
+func randBytes(len int) []byte {
+	bytes := make([]byte, len)
+	rand.Read(bytes)
+	return bytes
+}
+
 // tRedeem is the information needed to spoof a redemption transaction.
 type tRedeem struct {
 	req  *msgjson.Message
-	tx   *TTransaction
+	coin *TCoin
 	txid string
 }
 
 func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {
-	txid := "987654" + user.sigHex
+	coinID := randBytes(36)
 	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Redeem{
 		OrderID: dirtyEncode(oid),
 		MatchID: dirtyEncode(matchInfo.matchID),
-		TxID:    txid,
+		CoinID:  coinID,
 		Time:    uint64(time.Now().Unix()),
 	})
 	return &tRedeem{
 		req:  req,
-		tx:   &TTransaction{},
-		txid: txid,
+		coin: &TCoin{id: coinID},
 	}
 }
 
@@ -1182,7 +1189,7 @@ func TestTxWaiters(t *testing.T) {
 	ensureNilErr(rig.ackMatch_maker(true))
 	ensureNilErr(rig.ackMatch_taker(true))
 	// Set an error for the maker's swap asset
-	rig.abcNode.setTxErr(dummyError)
+	rig.abcNode.setCoinErr(dummyError)
 	// The error will be generated by the chainWaiter thread, so will need to
 	// check the response.
 	ensureNilErr(rig.sendSwap_maker(false))
@@ -1196,13 +1203,13 @@ func TestTxWaiters(t *testing.T) {
 		t.Fatalf("no rpc error for erroneous maker swap")
 	}
 
-	rig.abcNode.setTxErr(nil)
+	rig.abcNode.setCoinErr(nil)
 	// Everything should work now.
 	ensureNilErr(rig.sendSwap_maker(true))
 	ensureNilErr(rig.auditSwap_taker())
 	ensureNilErr(rig.ackAudit_taker(true))
 	// For the taker swap, simulate latency.
-	rig.xyzNode.setTxErr(dummyError)
+	rig.xyzNode.setCoinErr(dummyError)
 	ensureNilErr(rig.sendSwap_taker(false))
 	// Wait a tick
 	tickMempool()
@@ -1212,7 +1219,7 @@ func TestTxWaiters(t *testing.T) {
 		t.Fatalf("unexpected response for latent taker swap")
 	}
 	// Clear the error.
-	rig.xyzNode.setTxErr(nil)
+	rig.xyzNode.setCoinErr(nil)
 	tickMempool()
 	msg, resp = rig.auth.getResp(matchInfo.taker.acct)
 	if msg == nil {
@@ -1226,7 +1233,7 @@ func TestTxWaiters(t *testing.T) {
 	ensureNilErr(rig.ackAudit_maker(true))
 
 	// Set a transaction error for the maker's redemption.
-	rig.xyzNode.setTxErr(dummyError)
+	rig.xyzNode.setCoinErr(dummyError)
 	ensureNilErr(rig.redeem_maker(false))
 	tickMempool()
 	tickMempool()
@@ -1235,7 +1242,7 @@ func TestTxWaiters(t *testing.T) {
 		t.Fatalf("unexpected response for latent maker redeem")
 	}
 	// Clear the error.
-	rig.xyzNode.setTxErr(nil)
+	rig.xyzNode.setCoinErr(nil)
 	tickMempool()
 	msg, resp = rig.auth.getResp(matchInfo.maker.acct)
 	if msg == nil {
@@ -1250,18 +1257,18 @@ func TestTxWaiters(t *testing.T) {
 	// everything goes right
 	tracker := rig.getTracker()
 	ensureNilErr(rig.ackRedemption_taker(true))
-	rig.abcNode.setTxErr(dummyError)
+	rig.abcNode.setCoinErr(dummyError)
 	ensureNilErr(rig.redeem_taker(false))
 	timeOutMempool()
 	msg, _ = rig.auth.getResp(matchInfo.taker.acct)
 	if msg == nil {
 		t.Fatalf("no response for erroneous taker redeem")
 	}
-	rig.abcNode.setTxErr(nil)
+	rig.abcNode.setCoinErr(nil)
 	ensureNilErr(rig.redeem_taker(true))
 	// Set the number of confirmations on the redemptions.
-	matchInfo.db.makerRedeem.tx.setConfs(int64(rig.xyz.SwapConf))
-	matchInfo.db.takerRedeem.tx.setConfs(int64(rig.abc.SwapConf))
+	matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
+	matchInfo.db.takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
 	// send a block through for either chain to trigger a completion check.
 	rig.xyzNode.bChan <- 1
 	tickMempool()
@@ -1342,7 +1349,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 			continue
 		}
 		ensureNilErr(rig.sendSwap_maker(true))
-		matchInfo.db.makerSwap.tx.setConfs(int64(rig.abc.SwapConf))
+		matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
 		// Do the audit here to clear the 'audit' request from the comms queue.
 		ensureNilErr(rig.auditSwap_taker())
 		sendBlock(rig.abcNode)
@@ -1354,7 +1361,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 			continue
 		}
 		ensureNilErr(rig.sendSwap_taker(true))
-		matchInfo.db.takerSwap.tx.setConfs(int64(rig.xyz.SwapConf))
+		matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
 		// Do the audit here to clear the 'audit' request from the comms queue.
 		ensureNilErr(rig.auditSwap_maker())
 		sendBlock(rig.xyzNode)
@@ -1366,7 +1373,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 			continue
 		}
 		ensureNilErr(rig.redeem_maker(true))
-		matchInfo.db.makerRedeem.tx.setConfs(int64(rig.xyz.SwapConf))
+		matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 		// Ack the redemption here to clear the 'audit' request from the comms queue.
 		ensureNilErr(rig.ackRedemption_taker(true))
 		sendBlock(rig.xyzNode)

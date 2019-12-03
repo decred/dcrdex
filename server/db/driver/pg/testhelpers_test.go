@@ -1,7 +1,6 @@
 package pg
 
 import (
-	"encoding/hex"
 	"fmt"
 	"math/rand"
 	"os"
@@ -36,10 +35,6 @@ func randomBytes(len int) []byte {
 	bytes := make([]byte, len)
 	rand.Read(bytes)
 	return bytes
-}
-
-func randomHashStr() string {
-	return hex.EncodeToString(randomBytes(32))
 }
 
 func randomAccountID() account.AccountID {
@@ -85,9 +80,9 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 				ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 				ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 			},
-			UTXOs: []order.Outpoint{
-				newUtxo(randomHashStr(), 2),
-				newUtxo(randomHashStr(), 0),
+			Coins: []order.CoinID{
+				randomBytes(36),
+				randomBytes(36),
 			},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,
@@ -108,7 +103,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 		},
-		UTXOs:    []order.Outpoint{newUtxo(randomHashStr(), 4)},
+		Coins:    []order.CoinID{randomBytes(36)},
 		Sell:     true,
 		Quantity: quantityLots * LotSize,
 		Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
@@ -125,7 +120,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 		},
-		UTXOs:    []order.Outpoint{newUtxo(randomHashStr(), 3)},
+		Coins:    []order.CoinID{randomBytes(36)},
 		Sell:     false,
 		Quantity: quantityQuoteAsset,
 		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
