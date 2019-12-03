@@ -19,12 +19,17 @@ import (
 // Wrap the CoinID slice to implement custom Scanner and Valuer.
 type dbCoins []order.CoinID
 
-// Value implements the sql/driver.Valuer interface.
+// Value implements the sql/driver.Valuer interface. The coin IDs are encoded as
+// L0|ID0|L1|ID1|... where | is simple concatentation, Ln is the length
+// of the nth coin ID, and IDn is the bytes of the nth coinID.
 func (coins dbCoins) Value() (driver.Value, error) {
 	if len(coins) == 0 {
 		return []byte{}, nil
 	}
-	b := make([]byte, 0, len(coins)*(len(coins[0])+1))
+	// As an initial guess that's likely accurate for most coins, allocate as if
+	// each coin ID is the same length.
+	lenGuess := len(coins[0])
+	b := make([]byte, 0, len(coins)*(lenGuess+1))
 	for _, coin := range coins {
 		b = append(b, byte(len(coin)))
 		b = append(b, coin...)
@@ -36,6 +41,7 @@ func (coins dbCoins) Value() (driver.Value, error) {
 func (coins *dbCoins) Scan(src interface{}) error {
 	b := src.([]byte)
 	if len(b) == 0 {
+		*coins = dbCoins{}
 		return nil
 	}
 	lenGuess := int(b[0])

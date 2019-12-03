@@ -29,9 +29,7 @@ const Simnet = Regtest
 // through the provided logger.
 type Logger = slog.Logger
 
-// The DEXAsset interface is an interface for a blockchain backend. The DEX
-// primarily needs to track Coins and to validate orders, and to monitor
-// community conduct.
+// The DEXAsset interface is an interface for a blockchain backend.
 type DEXAsset interface {
 	// Coin should return a Coin only for outputs that would be spendable on the
 	// blockchain immediately. Pay-to-script-hash Coins require the redeem script

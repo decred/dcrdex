@@ -1007,13 +1007,13 @@ func TestUTXOs(t *testing.T) {
 	spentVout := rand.Uint32()
 	verboseTx.Vin = append(verboseTx.Vin, testVin(spentTx, spentVout))
 	txOut := swap.tx.TxOut[0]
-	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(txOut.Value)/dcrToAtoms, txOut.PkScript))
+	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(txOut.Value)/1e8, txOut.PkScript))
 	utxo, err = dcr.utxo(txHash, 0, swap.contract)
 	if err != nil {
 		t.Fatalf("case 13 - received error for utxo: %v", err)
 	}
 
-	// Check that the spent tx is in dexTx.
+	// Check that the spent tx is in the Tx's input record.
 	spentID := toCoinID(spentTx, spentVout)
 	spent, err := utxo.SpendsCoin(spentID)
 	if err != nil {
@@ -1169,7 +1169,7 @@ func TestAuxiliary(t *testing.T) {
 	if txAddr != addr {
 		t.Fatalf("expected address %s, got %s", addr, txAddr)
 	}
-	expVal := uint64(8 * dcrToAtoms)
+	expVal := toAtoms(8)
 	if v != expVal {
 		t.Fatalf("expected value %d, got %d", expVal, v)
 	}

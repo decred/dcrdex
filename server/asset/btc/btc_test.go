@@ -986,7 +986,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
 	}
 
-	// Check that the spent tx is in dexTx.
+	// Check that the spent tx is in the Tx's input record.
 	spentID := toCoinID(spentTxHash, 0)
 	spent, err := utxo.SpendsCoin(spentID)
 	if err != nil {

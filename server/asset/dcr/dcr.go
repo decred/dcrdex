@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"strings"
 	"sync"
 
@@ -27,7 +28,6 @@ var zeroHash chainhash.Hash
 type Error = asset.Error
 
 const (
-	dcrToAtoms               = 1e8
 	immatureTransactionError = Error("immature output")
 )
 
@@ -184,7 +184,7 @@ func (dcr *DCRBackend) UnspentDetails(txid string, vout uint32) (string, uint64,
 	if scriptAddrs.numPKH != 1 {
 		return "", 0, -1, fmt.Errorf("multi-sig not supported for P2PKHDetails")
 	}
-	return scriptAddrs.pkHashes[0].String(), uint64(txOut.Value * dcrToAtoms), txOut.Confirmations, nil
+	return scriptAddrs.pkHashes[0].String(), toAtoms(txOut.Value), txOut.Confirmations, nil
 }
 
 // Get the Tx. Transaction info is not cached, so every call will result in a
@@ -220,12 +220,10 @@ func (dcr *DCRBackend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.
 	var sumIn, sumOut uint64
 	// Parse inputs and outputs, grabbing only what's needed.
 	inputs := make([]txIn, 0, len(verboseTx.Vin))
-	isCoinbase := false
-	for vin, input := range verboseTx.Vin {
-		if vin == 0 && input.Coinbase != "" || input.Stakebase != "" {
-			isCoinbase = true
-		}
-		sumIn += uint64(input.AmountIn * dcrToAtoms)
+	var isCoinbase bool
+	for _, input := range verboseTx.Vin {
+		isCoinbase = input.Coinbase != ""
+		sumIn += toAtoms(input.AmountIn)
 		hash, err := chainhash.NewHashFromStr(input.Txid)
 		if err != nil {
 			return nil, fmt.Errorf("error decoding previous tx hash %sfor tx %s: %v", input.Txid, txHash, err)
@@ -240,9 +238,9 @@ func (dcr *DCRBackend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.
 			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %v",
 				output.ScriptPubKey.Hex, txHash, vout, err)
 		}
-		sumOut += uint64(output.Value * dcrToAtoms)
+		sumOut += toAtoms(output.Value)
 		outputs = append(outputs, txOut{
-			value:    uint64(output.Value * dcrToAtoms),
+			value:    toAtoms(output.Value),
 			pkScript: pkScript,
 		})
 	}
@@ -434,7 +432,7 @@ func (dcr *DCRBackend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []
 		numSigs:      scriptAddrs.nRequired,
 		// The total size associated with the wire.TxIn.
 		spendSize:  uint32(sigScriptSize) + txInOverhead,
-		value:      uint64(txOut.Value * dcrToAtoms),
+		value:      toAtoms(txOut.Value),
 		lastLookup: lastLookup,
 	}, nil
 }
@@ -558,4 +556,9 @@ func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 	copy(b[:hashLen], txHash[:])
 	binary.BigEndian.PutUint32(b[hashLen:], vout)
 	return b
+}
+
+// Convert the DCR value to atoms.
+func toAtoms(v float64) uint64 {
+	return uint64(math.Round(v * 1e8))
 }
