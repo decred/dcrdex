@@ -432,6 +432,46 @@ func (s *Swapper) processBlock(block *blockNotification) {
 	}
 }
 
+// TxMonitored determines whether the transaction for the given user is involved
+// in a DEX-monitored trade.
+func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
+	s.matchMtx.RLock()
+	defer s.matchMtx.RUnlock()
+
+	for _, match := range s.matches {
+		// The swap contract of either the maker or taker must correspond to
+		// specified asset to be of interest.
+		switch asset {
+		case match.makerStatus.swapAsset:
+			// Maker's swap transaction is the asset of interest.
+			if user == match.Maker.User() && match.makerStatus.swap.TxID() == txid &&
+				match.makerStatus.swapConfirmed.IsZero() {
+				return true
+			}
+			// Taker's redemption transaction is the asset of interest.
+			if user == match.Taker.User() && match.takerStatus.redemption.TxID() == txid &&
+				match.takerStatus.redeemTime.IsZero() {
+				return true
+			}
+		case match.takerStatus.swapAsset:
+			// Maker's redemption transaction is the asset of interest.
+			if user == match.Maker.User() && match.makerStatus.redemption.TxID() == txid &&
+				match.makerStatus.redeemTime.IsZero() {
+				return true
+			}
+			// Taker's swap transaction is the asset of interest.
+			if user == match.Taker.User() && match.takerStatus.swap.TxID() == txid &&
+				match.takerStatus.swapConfirmed.IsZero() {
+				return true
+			}
+		default:
+			continue
+		}
+	}
+
+	return false
+}
+
 // checkInaction scans the swapStatus structures relevant to the specified
 // asset. If a client is found to have not acted when required, a match may be
 // revoked and a penalty assigned to the user.

@@ -181,7 +181,7 @@ func (m *TMarketTunnel) CoinLocked(coinid order.CoinID, assetID uint32) bool {
 	return m.locked
 }
 
-func (m *TMarketTunnel) TxMonitored(user account.AccountID, txid string) bool {
+func (m *TMarketTunnel) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
 	return m.watched
 }
 
