@@ -12,3 +12,4 @@ debug
 *.pprof
 .DS_Store
 \.project
+/client/cmd/dexclient/dexclient
