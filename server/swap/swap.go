@@ -29,7 +29,6 @@ const (
 var (
 	// The chainWaiters will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
-	zeroTime        = time.Time{}
 	// txWaitExpiration is the longest the Swapper will wait for a chainWaiter.
 	// This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = time.Minute
@@ -229,7 +228,7 @@ func (s *Swapper) WaitForShutdown() {
 // waitSettings.
 func (s *Swapper) waitMempool(params *waitSettings, f func() bool) {
 	if time.Now().After(params.expiration) {
-		log.Error("Swapper.meter given expiration before present")
+		log.Error("Swapper.waitMempool: waitSettings given expiration before present")
 		return
 	}
 	// Check to see if it passes right away.
@@ -237,8 +236,8 @@ func (s *Swapper) waitMempool(params *waitSettings, f func() bool) {
 		return
 	}
 	s.waiterMtx.Lock()
-	defer s.waiterMtx.Unlock()
 	s.waiters = append(s.waiters, &chainWaiter{params: params, f: f})
+	s.waiterMtx.Unlock()
 }
 
 // start is the main Swapper loop, and must be run as a goroutine.
@@ -289,7 +288,7 @@ func (s *Swapper) start() {
 
 	// Start a listen loop for each asset's block channel.
 	for assetID, asset := range s.coins {
-		go func(assetID uint32, blockSource chan uint32) {
+		go func(assetID uint32, blockSource <-chan uint32) {
 		out:
 			for {
 				select {
@@ -343,18 +342,20 @@ out:
 }
 
 func (s *Swapper) tryConfirmSwap(status *swapStatus) {
-	if status.swapTime != zeroTime && status.swapConfirmed == zeroTime {
-		confs, err := status.swap.Confirmations()
-		if err != nil {
-			// The transaction has become invalid. No reason to do anything.
-			return
-		}
-		// If a swapStatus was created, the asset.Asset is already known to be in
-		// the map.
-		if confs >= int64(s.coins[status.swapAsset].SwapConf) {
-			status.swapConfirmed = time.Now()
-		}
+	if status.swapTime.IsZero() || !status.swapConfirmed.IsZero() {
+		return
 	}
+	confs, err := status.swap.Confirmations()
+	if err != nil {
+		// The transaction has become invalid. No reason to do anything.
+		return
+	}
+	// If a swapStatus was created, the asset.Asset is already known to be in
+	// the map.
+	if confs >= int64(s.coins[status.swapAsset].SwapConf) {
+		status.swapConfirmed = time.Now()
+	}
+
 }
 
 // processBlock scans the matches and updates match status based on number of
@@ -397,11 +398,11 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			// order is complete.
 			var makerRedeemed, takerRedeemed bool
 			mStatus, tStatus := match.makerStatus, match.takerStatus
-			if mStatus.redeemTime != zeroTime {
+			if !mStatus.redeemTime.IsZero() {
 				confs, err := mStatus.redemption.Confirmations()
 				makerRedeemed = err == nil && confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
 			}
-			if makerRedeemed && tStatus.redeemTime != zeroTime {
+			if makerRedeemed && !tStatus.redeemTime.IsZero() {
 				confs, err := tStatus.redemption.Confirmations()
 				takerRedeemed = err == nil && confs >= int64(s.coins[mStatus.swapAsset].SwapConf)
 			}
@@ -435,7 +436,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// If the maker is not acting, the swapTime won't be set. Check against
 			// the time the match notification was sent (match.time) for the broadcast
 			// timeout.
-			if match.makerStatus.swapTime == zeroTime && match.time.Before(oldestAllowed) {
+			if match.makerStatus.swapTime.IsZero() && match.time.Before(oldestAllowed) {
 				deletions = append(deletions, match.ID().String())
 				s.authMgr.Penalize(match.Maker.User(), match.Match, match.Status)
 				s.revoke(match)
@@ -446,8 +447,8 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			}
 			// If the maker has sent their swap tx, check the taker's broadcast
 			// timeout against the time of the swap's SwapConf'th confirmation.
-			if match.takerStatus.swapTime == zeroTime &&
-				match.makerStatus.swapConfirmed != zeroTime &&
+			if match.takerStatus.swapTime.IsZero() &&
+				!match.makerStatus.swapConfirmed.IsZero() &&
 				match.makerStatus.swapConfirmed.Before(oldestAllowed) {
 
 				deletions = append(deletions, match.ID().String())
@@ -461,8 +462,8 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// If the taker has sent their swap tx, check the maker's broadcast
 			// timeout (for redemption) against the time of the swap's SwapConf'th
 			// confirmation.
-			if match.makerStatus.redeemTime == zeroTime &&
-				match.takerStatus.swapConfirmed != zeroTime &&
+			if match.makerStatus.redeemTime.IsZero() &&
+				!match.takerStatus.swapConfirmed.IsZero() &&
 				match.takerStatus.swapConfirmed.Before(oldestAllowed) {
 
 				deletions = append(deletions, match.ID().String())
@@ -476,8 +477,8 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// If the maker has redeemed, the taker can redeem immediately, so
 			// check the timeout against the time the Swapper received the
 			// maker's `redeem` request (and sent the taker's 'redemption').
-			if match.takerStatus.redeemTime == zeroTime &&
-				match.makerStatus.redeemTime != zeroTime &&
+			if match.takerStatus.redeemTime.IsZero() &&
+				!match.makerStatus.redeemTime.IsZero() &&
 				match.makerStatus.redeemTime.Before(oldestAllowed) {
 
 				deletions = append(deletions, match.ID().String())
