@@ -145,7 +145,7 @@ type BookRouterConfig struct {
 	// Sources is a mapping of market names to sources for order and epoch queue
 	// information.
 	Sources map[string]BookSource
-	// EpochDuration is the DEX's configured epoch duration.
+	// EpochDuration is the DEX's configured epoch duration in milliseconds.
 	EpochDuration uint64
 }
 
@@ -381,7 +381,7 @@ func limitOrderToMsgOrder(o *order.LimitOrder, mkt string) *msgjson.BookOrderNot
 			Quantity: o.Remaining(),
 			Rate:     o.Rate,
 			TiF:      tif,
-			Time:     uint64(o.ServerTime.Unix()),
+			Time:     uint64(order.UnixMilli(o.ServerTime)),
 		},
 		OrderNote: msgjson.OrderNote{
 			MarketID: mkt,
@@ -406,7 +406,7 @@ func marketOrderToMsgOrder(o *order.MarketOrder, mkt string) *msgjson.BookOrderN
 		TradeNote: msgjson.TradeNote{
 			Side:     oSide,
 			Quantity: o.Remaining(),
-			Time:     uint64(o.ServerTime.Unix()),
+			Time:     uint64(order.UnixMilli(o.ServerTime)),
 		},
 	}
 }

@@ -18,7 +18,7 @@ import (
 	"decred.org/dcrdex/server/matcher"
 )
 
-const maxClockOffset = 10 // seconds
+const maxClockOffset = 10_000 // milliseconds
 
 // The AuthManager handles client-related actions, including authorization and
 // communications.
@@ -203,7 +203,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 				BaseAsset:  limit.Base,
 				QuoteAsset: limit.Quote,
 				OrderType:  order.LimitOrderType,
-				ClientTime: time.Unix(int64(limit.ClientTime), 0).UTC(),
+				ClientTime: order.UnixTimeMilli(int64(limit.ClientTime)),
 				//ServerTime set in epoch queue processing pipeline.
 			},
 			Coins:    utxos,
@@ -284,14 +284,15 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
 	}
 	// Create the market order
-	serverTime := time.Now().UTC()
+	clientTime := order.UnixTimeMilli(int64(market.ClientTime))
+	serverTime := time.Now().Round(time.Millisecond).UTC()
 	mo := &order.MarketOrder{
 		Prefix: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  market.Base,
 			QuoteAsset: market.Quote,
 			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(int64(market.ClientTime), 0).UTC(),
+			ClientTime: clientTime,
 			ServerTime: serverTime,
 		},
 		Coins:    coins,
@@ -354,14 +355,15 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	}
 
 	// Create the cancel order
-	serverTime := time.Now().UTC()
+	clientTime := order.UnixTimeMilli(int64(cancel.ClientTime))
+	serverTime := time.Now().Round(time.Millisecond).UTC()
 	co := &order.CancelOrder{
 		Prefix: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,
 			OrderType:  order.MarketOrderType,
-			ClientTime: time.Unix(int64(cancel.ClientTime), 0).UTC(),
+			ClientTime: clientTime,
 			ServerTime: serverTime,
 		},
 		TargetOrderID: targetID,
@@ -441,13 +443,13 @@ func (r *OrderRouter) extractMarketDetails(prefix *msgjson.Prefix, trade *msgjso
 
 // checkTimes validates the timestamps in an order prefix.
 func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
-	offset := time.Now().Unix() - int64(prefix.ClientTime)
+	offset := order.UnixMilli(time.Now()) - int64(prefix.ClientTime)
 	if offset < 0 {
-		offset *= -1
+		offset *= -1 // not an error?
 	}
 	if offset >= maxClockOffset {
 		return msgjson.NewError(msgjson.ClockRangeError, fmt.Sprintf(
-			"clock offset of %d seconds is larger than maximum allowed, %d seconds",
+			"clock offset of %d ms is larger than maximum allowed, %d ms",
 			offset, maxClockOffset,
 		))
 	}

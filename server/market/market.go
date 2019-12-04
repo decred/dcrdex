@@ -167,7 +167,7 @@ func (m *Market) CoinLocked(asset uint32, coin coinlock.CoinID) bool {
 }
 
 // NewMarket creates a new Market for the provided base and quote assets, with
-// an epoch cycling at given duration in seconds.
+// an epoch cycling at given duration in milliseconds.
 func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchivist,
 	swapper Swapper, authMgr AuthManager, coinLockerBase, coinLockerQuote coinlock.CoinLocker) (*Market, error) {
 	// Make sure the DEXArchivist is healthy before taking orders.
@@ -327,7 +327,7 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 			}
 
 			// The order's server time stamp.
-			sTime := time.Now()
+			sTime := time.Now().Round(time.Millisecond).UTC()
 
 			// Push the order into the next epoch if receiving and stamping it
 			// took just a little too long.
@@ -342,13 +342,13 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 			default:
 				// This should not happen.
 				log.Errorf("Time %d does not fit into current or next epoch!",
-					sTime.Unix())
+					sTime.UnixNano())
 				s.errChan <- ErrEpochMissed
 				continue
 			}
 
 			// Stamp and process the order in the target epoch queue.
-			s.rec.order.SetTime(sTime.Unix())
+			s.rec.order.SetTime(sTime)
 			m.processOrder(s.rec, orderEpoch, s.errChan)
 
 		case <-epochCycle:

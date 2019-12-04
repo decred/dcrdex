@@ -130,11 +130,11 @@ type Order interface {
 	// Type indicates the Order's type (e.g. LimitOrder, MarketOrder, etc.).
 	Type() OrderType
 
-	// Time returns the Order's server time, when it was received by the server.
+	// Time returns the Order's server time in milliseconds, when it was received by the server.
 	Time() int64
 
 	// SetTime sets the ServerTime field of the prefix.
-	SetTime(int64)
+	SetTime(time.Time)
 
 	// FilledAmt returns the filled amount of the order.
 	FilledAmt() uint64
@@ -170,7 +170,7 @@ type Order interface {
 }
 
 // zeroTime is the Unix time for a Time where IsZero() == true.
-var zeroTime = time.Time{}.Unix()
+var zeroTime = UnixMilli(time.Time{})
 
 // An order's ID is computed as the Blake-256 hash of the serialized order.
 func calcOrderID(order Order) OrderID {
@@ -211,14 +211,29 @@ func (p *Prefix) SerializeSize() int {
 	return PrefixLen
 }
 
-// Time returns the order prefix's server time as a UNIX epoch time.
-func (p *Prefix) Time() int64 {
-	return p.ServerTime.Unix()
+// UnixMilli returns the elapsed time in milliseconds since the Unix Epoch for
+// the given time. The Location does not matter.
+func UnixMilli(t time.Time) int64 {
+	return t.Unix()*1e3 + int64(t.Nanosecond())/1e6
 }
 
-// Time returns the order prefix's server time as a UNIX epoch time.
-func (p *Prefix) SetTime(t int64) {
-	p.ServerTime = time.Unix(t, 0).UTC()
+// UnixTimeMilli returns a Time for an elapsed time in milliseconds since the
+// Unix Epoch. The time will have Location set to UTC.
+func UnixTimeMilli(msEpoch int64) time.Time {
+	sec := msEpoch / 1000
+	msec := msEpoch % 1000
+	return time.Unix(sec, msec*1e6).UTC()
+}
+
+// Time returns the order prefix's server time as a UNIX epoch time in
+// milliseconds.
+func (p *Prefix) Time() int64 {
+	return UnixMilli(p.ServerTime)
+}
+
+// SetTime sets the order prefix's server time.
+func (p *Prefix) SetTime(t time.Time) {
+	p.ServerTime = t.UTC()
 }
 
 // User gives the user's account ID.
@@ -248,11 +263,11 @@ func (p *Prefix) Serialize() []byte {
 	offset++
 
 	// client time
-	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(p.ClientTime.Unix()))
+	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(UnixMilli(p.ClientTime)))
 	offset += 8
 
 	// server time
-	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(p.ServerTime.Unix()))
+	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(UnixMilli(p.ServerTime)))
 	return b
 }
 

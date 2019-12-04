@@ -11,7 +11,7 @@ import (
 
 const (
 	LotSize       = uint64(10_000_000_000)
-	EpochDuration = uint64(10)
+	EpochDuration = uint64(10_000)
 )
 
 // The asset integer IDs should set in TestMain or other bring up function (e.g.
