@@ -60,31 +60,23 @@ func (b *Book) LotSize() uint64 {
 
 // BuyCount returns the number of buy orders.
 func (b *Book) BuyCount() int {
-	b.mtx.RLock()
-	defer b.mtx.RUnlock()
 	return b.buys.Count()
 }
 
 // SellCount returns the number of sell orders.
 func (b *Book) SellCount() int {
-	b.mtx.RLock()
-	defer b.mtx.RUnlock()
 	return b.sells.Count()
 }
 
 // BestSell returns a pointer to the best sell order in the order book. The
 // order is NOT removed from the book.
 func (b *Book) BestSell() *order.LimitOrder {
-	b.mtx.RLock()
-	defer b.mtx.RUnlock()
 	return b.sells.PeekBest()
 }
 
 // BestBuy returns a pointer to the best buy order in the order book. The
 // order is NOT removed from the book.
 func (b *Book) BestBuy() *order.LimitOrder {
-	b.mtx.RLock()
-	defer b.mtx.RUnlock()
 	return b.buys.PeekBest()
 }
 
@@ -134,11 +126,6 @@ func (b *Book) SellOrders() []*order.LimitOrder {
 	return b.sells.Orders()
 }
 
-// sellOrdersN copies out the N best sell orders in the book, sorted.
-func (b *Book) sellOrdersN(N int) []*order.LimitOrder {
-	return b.sells.OrdersN(N)
-}
-
 // SellOrdersN copies out the N best sell orders in the book, sorted.
 func (b *Book) SellOrdersN(N int) []*order.LimitOrder {
 	return b.sells.OrdersN(N)
@@ -147,11 +134,6 @@ func (b *Book) SellOrdersN(N int) []*order.LimitOrder {
 // BuyOrders copies out all buy orders in the book, sorted.
 func (b *Book) BuyOrders() []*order.LimitOrder {
 	return b.buys.Orders()
-}
-
-// buyOrdersN copies out the N best buy orders in the book, sorted.
-func (b *Book) buyOrdersN(N int) []*order.LimitOrder {
-	return b.buys.OrdersN(N)
 }
 
 // BuyOrdersN copies out the N best buy orders in the book, sorted.
