@@ -320,7 +320,7 @@ func makeEnsureErr(t *testing.T) func(tag string, rpcErr *msgjson.Error, code in
 			if code == -1 {
 				return
 			}
-			t.Fatalf("%s: no rpc error", tag)
+			t.Fatalf("%s: no rpc error for code %d", tag, code)
 		}
 		if rpcErr.Code != code {
 			t.Fatalf("%s: wrong error code. expected %d, got %d: %s", tag, code, rpcErr.Code, rpcErr.Message)
@@ -680,8 +680,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 
 func TestCancel(t *testing.T) {
 	user := oRig.user
-	var targetID order.OrderID
-	targetID[0] = 244
+	targetID := order.OrderID{244}
 	clientTime := time.Now()
 	cancel := msgjson.Cancel{
 		Prefix: msgjson.Prefix{
@@ -779,7 +778,7 @@ func TestCancel(t *testing.T) {
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != co.ID() {
-		t.Fatalf("failed to duplicate ID")
+		t.Fatalf("failed to duplicate ID: %v != %v", epochOrder.ID(), co.ID())
 	}
 }
 
@@ -807,7 +806,7 @@ func testPrefix(prefix *msgjson.Prefix, checkCode func(string, int)) {
 
 	// Too old
 	ct := prefix.ClientTime
-	prefix.ClientTime = ct - maxClockOffset
+	prefix.ClientTime = ct - maxClockOffset - 1 // offset >= maxClockOffset!  OK?
 	checkCode("too old", msgjson.ClockRangeError)
 	prefix.ClientTime = ct
 
