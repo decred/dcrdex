@@ -4,6 +4,7 @@
 package book
 
 import (
+	"bytes"
 	"container/heap"
 	"fmt"
 	"sort"
@@ -257,19 +258,35 @@ func GreaterByPrice(bi, bj *order.LimitOrder) bool {
 }
 
 // LessByPriceThenTime defines a higher priority as having a lower price rate,
-// with older orders breaking any tie.
+// with older orders breaking any tie, then OrderID as a last tie breaker.
 func LessByPriceThenTime(bi, bj *order.LimitOrder) bool {
 	if bi.Price() == bj.Price() {
-		return bi.Time() < bj.Time()
+		ti, tj := bi.Time(), bj.Time()
+		if ti == tj {
+			// Lexicographical comparison of the OrderIDs requires a slice. This
+			// comparison should be exceedingly rare, so the required memory
+			// allocations are acceptable.
+			idi, idj := bi.ID(), bj.ID()
+			return bytes.Compare(idi[:], idj[:]) < 0
+		}
+		return ti < tj
 	}
 	return LessByPrice(bi, bj)
 }
 
 // GreaterByPriceThenTime defines a higher priority as having a higher price
-// rate, with older orders breaking any tie.
+// rate, with older orders breaking any tie, then OrderID as a last tie breaker.
 func GreaterByPriceThenTime(bi, bj *order.LimitOrder) bool {
 	if bi.Price() == bj.Price() {
-		return bi.Time() < bj.Time()
+		ti, tj := bi.Time(), bj.Time()
+		if ti == tj {
+			// Lexicographical comparison of the OrderIDs requires a slice. This
+			// comparison should be exceedingly rare, so the required memory
+			// allocations are acceptable.
+			idi, idj := bi.ID(), bj.ID()
+			return bytes.Compare(idi[:], idj[:]) < 0
+		}
+		return ti < tj
 	}
 	return GreaterByPrice(bi, bj)
 }

@@ -15,8 +15,9 @@ var (
 	orders  = []*Order{
 		newLimitOrder(false, 42000000, 2, order.StandingTiF, 0),
 		newLimitOrder(false, 10000, 2, order.StandingTiF, 0),
-		newLimitOrder(false, 42000000, 2, order.StandingTiF, -1000),
+		newLimitOrder(false, 42000000, 2, order.StandingTiF, -1000), // rate dup, different time
 		newLimitOrder(false, 123000000, 2, order.StandingTiF, 0),
+		newLimitOrder(false, 42000000, 1, order.StandingTiF, 0), // rate and time dup, different OrderID
 	}
 )
 
@@ -347,7 +348,7 @@ func TestLargeOrderMaxPriorityQueue_Realloc(t *testing.T) {
 func TestMinOrderPriorityQueue(t *testing.T) {
 	startLogger()
 
-	pq := NewMinOrderPQ(4)
+	pq := NewMinOrderPQ(5)
 
 	for _, o := range orders {
 		ok := pq.Insert(o)
@@ -366,7 +367,7 @@ func TestMinOrderPriorityQueue(t *testing.T) {
 func TestMaxOrderPriorityQueue(t *testing.T) {
 	startLogger()
 
-	pq := NewMaxOrderPQ(4)
+	pq := NewMaxOrderPQ(5)
 
 	for _, o := range orders {
 		ok := pq.Insert(o)
@@ -397,6 +398,31 @@ func TestMaxOrderPriorityQueue_TieRate(t *testing.T) {
 	best := pq.ExtractBest()
 	//t.Log(best.String()) // the older order
 	if best.UID() != orders[2].UID() {
+		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
+			best.Price(), best.UID())
+	}
+}
+
+func TestMaxOrderPriorityQueue_TieRateAndTime(t *testing.T) {
+	startLogger()
+
+	pq := NewMaxOrderPQ(4)
+
+	// 56f8a350751dbbb0922cdacf38ca3808528dfb2a6c84c1b1f763e092cd3febab
+	ok := pq.Insert(orders[0])
+	if !ok {
+		t.Errorf("Failed to insert order %v", orders[0])
+	}
+
+	// 5fb4654696522b10168f85dc242812fee8fb8471e5c4f6c3655ed76c1c296621 ** lower priority
+	ok = pq.Insert(orders[4])
+	if !ok {
+		t.Errorf("Failed to insert order %v", orders[4])
+	}
+
+	best := pq.ExtractBest()
+	// 56f8a350751dbbb0922cdacf38ca3808528dfb2a6c84c1b1f763e092cd3febab < 5fb4654696522b10168f85dc242812fee8fb8471e5c4f6c3655ed76c1c296621
+	if best.UID() != orders[0].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
