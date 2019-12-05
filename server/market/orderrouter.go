@@ -445,7 +445,7 @@ func (r *OrderRouter) extractMarketDetails(prefix *msgjson.Prefix, trade *msgjso
 func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
 	offset := order.UnixMilli(time.Now()) - int64(prefix.ClientTime)
 	if offset < 0 {
-		offset *= -1 // not an error?
+		offset *= -1
 	}
 	if offset >= maxClockOffset {
 		return msgjson.NewError(msgjson.ClockRangeError, fmt.Sprintf(
