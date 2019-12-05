@@ -199,6 +199,7 @@ func (a *Archiver) insertOrUpdate(ord order.Order, status pgOrderStatus) error {
 	return a.updateOrderStatus(ord, status)
 }
 
+// ActiveOrderCoins retrieves a CoinID slice for each active order.
 func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
 	var marketSchema string
 	marketSchema, err = a.marketSchema(base, quote)
@@ -207,8 +208,7 @@ func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins m
 	}
 
 	tableName := fullOrderTableName(a.dbName, marketSchema, true) // active (true)
-	stmt := fmt.Sprintf(internal.SelectActiveOrderCoinIDs, tableName,
-		order.LimitOrderType, order.StandingTiF)
+	stmt := fmt.Sprintf(internal.SelectActiveOrderCoinIDs, tableName)
 
 	var rows *sql.Rows
 	rows, err = a.db.Query(stmt)
