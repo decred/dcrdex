@@ -136,9 +136,19 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 }
 
 // MidGap returns the mid-gap market rate, which is ths rate halfway between the
-// best buy order and the best sell order in the order book.
+// best buy order and the best sell order in the order book. If one side has no
+// orders, the best order rate on other side is returned. If both sides have no
+// orders, 0 is returned.
 func (m *Market) MidGap() uint64 {
 	bestBuy, bestSell := m.book.Best()
+	if bestBuy == nil {
+		if bestSell == nil {
+			return 0 // ?
+		}
+		return bestSell.Rate
+	} else if bestSell == nil {
+		return bestBuy.Rate
+	}
 	return (bestBuy.Rate + bestSell.Rate) / 2
 }
 
