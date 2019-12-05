@@ -367,6 +367,10 @@ func retrieveSysSettings(stmt string, db *sql.DB) (PGSettings, error) {
 		}
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return settings, nil
 }
 

@@ -104,6 +104,7 @@ func detectMarkets(db *sql.DB) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var markets []string
 	for rows.Next() {
@@ -114,7 +115,10 @@ func detectMarkets(db *sql.DB) ([]string, error) {
 		}
 		markets = append(markets, market)
 	}
-	rows.Close()
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return markets, nil
 }

@@ -242,6 +242,10 @@ func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins m
 		}
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
 	return
 }
 
@@ -714,6 +718,10 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 
 		orders = append(orders, &lo)
 		statuses = append(statuses, status)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
 	}
 
 	return orders, statuses, nil
