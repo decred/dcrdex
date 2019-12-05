@@ -104,26 +104,20 @@ func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 
 // SellOrders copies out all sell orders in the book, sorted.
 func (b *Book) SellOrders() []*order.LimitOrder {
-	return b.SellOrdersN(b.SellCount())
+	return b.sells.Orders()
 }
 
 // SellOrdersN copies out the N best sell orders in the book, sorted.
 func (b *Book) SellOrdersN(N int) []*order.LimitOrder {
-	orders := b.sells.OrdersN(N) // N = len(orders)
-	limits := make([]*order.LimitOrder, len(orders))
-	copy(limits, orders)
-	return limits
+	return b.sells.OrdersN(N)
 }
 
 // BuyOrders copies out all buy orders in the book, sorted.
 func (b *Book) BuyOrders() []*order.LimitOrder {
-	return b.BuyOrdersN(b.BuyCount())
+	return b.buys.Orders()
 }
 
 // BuyOrdersN copies out the N best buy orders in the book, sorted.
 func (b *Book) BuyOrdersN(N int) []*order.LimitOrder {
-	orders := b.buys.OrdersN(N) // N = len(orders)
-	limits := make([]*order.LimitOrder, len(orders))
-	copy(limits, orders)
-	return limits
+	return b.buys.OrdersN(N)
 }

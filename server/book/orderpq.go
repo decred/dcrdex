@@ -82,35 +82,22 @@ func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
 	return newPQ
 }
 
-// Orders copies all orders, sorted with the lessFn. To avoid modifying the
-// OrderPQ or any of the data fields, a deep copy of the OrderPQ is made and
-// ExtractBest is called until all entries are extracted.
+// Orders copies all orders, sorted with the lessFn. The OrderPQ is unmodified.
 func (pq *OrderPQ) Orders() []*order.LimitOrder {
+	// Deep copy the orders.
 	pq.mtx.RLock()
-
-	// To use the configured lessFn, make a temporary OrderPQ with just the
-	// lessFn and orderHeap set. Do not use the constructor since we do not care
-	// about the orders map or capacity.
-	pqTmp := OrderPQ{
-		lessFn: pq.lessFn,
-		oh:     make(orderHeap, len(pq.oh)),
+	orders := make([]*order.LimitOrder, len(pq.oh))
+	for i, oe := range pq.oh {
+		orders[i] = oe.order
 	}
-	copy(pqTmp.oh, pq.oh)
 	pq.mtx.RUnlock()
 
-	// Sort the orderHeap, which implements sort.Interface with the configured
-	// lessFn.
-	sort.Sort(&pqTmp)
+	// Sort the orders with pq.lessFn.
+	sort.Slice(orders, func(i, j int) bool {
+		return pq.lessFn(orders[i], orders[j])
+	})
 
-	// Extract the LimitOrder from each orderEntry in heap.
-	orders := make([]*order.LimitOrder, len(pqTmp.oh))
-	for i := range pqTmp.oh {
-		orders[i] = pqTmp.oh[i].order
-	}
 	return orders
-
-	// Copy heap and extract N.
-	//return pq.OrdersN(len(pq.oh))
 }
 
 // OrdersN copies the N best orders, sorted with the lessFn. To avoid modifying
@@ -459,8 +446,7 @@ func (pq *OrderPQ) removeOrder(o *orderEntry) (*order.LimitOrder, bool) {
 			pq.removeIndex(o.heapIdx)
 			return removed, true
 		}
-		log.Warnf("Tried to remove an order that was NOT in the PQ. ID: %s",
-			o.order.UID())
+		log.Warnf("Tried to remove an order that was NOT in the PQ. ID: %s", uid)
 	}
 	return nil, false
 }
