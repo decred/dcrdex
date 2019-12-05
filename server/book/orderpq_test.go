@@ -408,21 +408,21 @@ func TestMaxOrderPriorityQueue_TieRateAndTime(t *testing.T) {
 
 	pq := NewMaxOrderPQ(4)
 
-	// 56f8a350751dbbb0922cdacf38ca3808528dfb2a6c84c1b1f763e092cd3febab
+	// a5480a80e60232e5c95d379f121b110b91a261f7b3a1c7f8e21401c7987ee5d4
 	ok := pq.Insert(orders[0])
 	if !ok {
 		t.Errorf("Failed to insert order %v", orders[0])
 	}
 
-	// 5fb4654696522b10168f85dc242812fee8fb8471e5c4f6c3655ed76c1c296621 ** lower priority
+	// 5c616ba31195de85c04a85f958ea5e9706e9a404f844dc789d9b7cd4cbbd259f ** higher priority
 	ok = pq.Insert(orders[4])
 	if !ok {
 		t.Errorf("Failed to insert order %v", orders[4])
 	}
 
 	best := pq.ExtractBest()
-	// 56f8a350751dbbb0922cdacf38ca3808528dfb2a6c84c1b1f763e092cd3febab < 5fb4654696522b10168f85dc242812fee8fb8471e5c4f6c3655ed76c1c296621
-	if best.UID() != orders[0].UID() {
+	// 5c616ba31195de85c04a85f958ea5e9706e9a404f844dc789d9b7cd4cbbd259f < a5480a80e60232e5c95d379f121b110b91a261f7b3a1c7f8e21401c7987ee5d4
+	if best.UID() != orders[4].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
