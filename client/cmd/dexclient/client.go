@@ -44,8 +44,10 @@ type position struct {
 }
 
 var (
-	wg                = new(sync.WaitGroup)
-	currentPosition   = &position{0, 0}
+	wg = new(sync.WaitGroup)
+	// currentPosition holds the current position in relation to the possible positions.
+	currentPosition = &position{0, 0}
+	// possiblePositions holds all possible positions for this screen.
 	possiblePositions = [][]layout{}
 )
 
@@ -67,14 +69,18 @@ func main() {
 func run() error {
 	log := slog.NewBackend(os.Stderr).Logger("tui")
 	log.SetLevel(slog.LevelTrace)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	tb, err := termbox.New(termbox.ColorMode(terminalapi.ColorMode256))
 	if err != nil {
 		return err
 	}
 	defer tb.Close()
+
 	populatePossiblePositions()
+
 	c, err := container.New(tb, container.ID(rootID))
 	if err != nil {
 		return err
@@ -94,7 +100,8 @@ func run() error {
 		return err
 	}
 
-	quitter := func(k *terminalapi.Keyboard) {
+	// keys performs actions on specific keys being pushed.
+	keys := func(k *terminalapi.Keyboard) {
 		var err error
 		switch k.Key {
 		case keyboard.KeyEsc, keyboard.KeyCtrlC:
@@ -112,11 +119,12 @@ func run() error {
 			panic(err)
 		}
 	}
-	termdash.Run(ctx, tb, c, termdash.KeyboardSubscriber(quitter), termdash.RedrawInterval(redrawInterval))
+	termdash.Run(ctx, tb, c, termdash.KeyboardSubscriber(keys), termdash.RedrawInterval(redrawInterval))
 	wg.Wait()
 	return nil
 }
 
+// upArrow moves our position up by one.
 func upArrow() layout {
 	cp := currentPosition
 	if cp.Y > 0 {
@@ -125,6 +133,7 @@ func upArrow() layout {
 	return possiblePositions[cp.Y][cp.X]
 }
 
+// downArrow moves our position down by one.
 func downArrow() layout {
 	cp := currentPosition
 	pp := possiblePositions
@@ -134,6 +143,7 @@ func downArrow() layout {
 	return pp[cp.Y][cp.X]
 }
 
+// leftArrow moves our position left by one.
 func leftArrow() layout {
 	cp := currentPosition
 	if cp.X > 0 {
@@ -142,6 +152,7 @@ func leftArrow() layout {
 	return possiblePositions[cp.Y][cp.X]
 }
 
+// rightArrow moves our position right by one.
 func rightArrow() layout {
 	cp := currentPosition
 	pp := possiblePositions
@@ -151,6 +162,7 @@ func rightArrow() layout {
 	return pp[cp.Y][cp.X]
 }
 
+// populatePossiblePositions creates our current screen layout.
 func populatePossiblePositions() {
 	possiblePositions = [][]layout{
 		{menuID, chartsID, tablesID},
@@ -190,6 +202,7 @@ func newWidgets(ctx context.Context, cancel context.CancelFunc, c *container.Con
 	}, nil
 }
 
+// gridLayouts creats the proportions of layouts and placement of them on the screen.
 func gridLayout(w *widgets) ([]container.Option, error) {
 	charts := []grid.Element{
 		grid.ColWidthPerc(20,
@@ -237,6 +250,7 @@ func gridLayout(w *widgets) ([]container.Option, error) {
 	return gridOpts, nil
 }
 
+// newTextWgt creates a new text widget. Used as a placeholder.
 func newTextWgt(ctx context.Context, s string) (*text.Text, error) {
 	wgt, err := text.New()
 	if err != nil {
@@ -249,6 +263,7 @@ func newTextWgt(ctx context.Context, s string) (*text.Text, error) {
 
 }
 
+// newMenuWgt creates the menu.
 func newMenuWgt(ctx context.Context, s string) (*menu.Menu, error) {
 	wgt, err := menu.New()
 	if err != nil {
@@ -261,6 +276,7 @@ func newMenuWgt(ctx context.Context, s string) (*menu.Menu, error) {
 
 }
 
+// newConsoleWgt creates the console.
 func newConsoleWgt(ctx context.Context, wg *sync.WaitGroup, ch <-chan *response) (*text.Text, error) {
 	wgt, err := text.New(
 		text.RollContent(),
@@ -291,6 +307,7 @@ func newConsoleWgt(ctx context.Context, wg *sync.WaitGroup, ch <-chan *response)
 	return wgt, nil
 }
 
+// newInputWgt creates the input field.
 func newInputWgt(ctx context.Context, ch chan<- string) (*textinput.TextInput, error) {
 	wgt, err := textinput.New(
 		textinput.Label("$", cell.FgColor(cell.ColorBlue)),
