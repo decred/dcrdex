@@ -28,7 +28,26 @@ const (
 	redrawInterval = 250 * time.Millisecond
 )
 
-var wg = new(sync.WaitGroup)
+type layout string
+
+const (
+	menuID    layout = "menu"
+	chartsID  layout = "charts"
+	tablesID  layout = "tables"
+	consoleID layout = "console"
+	inputID   layout = "input"
+)
+
+type position struct {
+	X int
+	Y int
+}
+
+var (
+	wg                = new(sync.WaitGroup)
+	currentPosition   = &position{0, 0}
+	possiblePositions = [][]layout{}
+)
 
 // widgets holds all widgets used by the client.
 type widgets struct {
@@ -55,6 +74,7 @@ func run() error {
 		return err
 	}
 	defer tb.Close()
+	populatePossiblePositions()
 	c, err := container.New(tb, container.ID(rootID))
 	if err != nil {
 		return err
@@ -75,13 +95,68 @@ func run() error {
 	}
 
 	quitter := func(k *terminalapi.Keyboard) {
-		if k.Key == keyboard.KeyEsc || k.Key == keyboard.KeyCtrlC {
+		var err error
+		switch k.Key {
+		case keyboard.KeyEsc, keyboard.KeyCtrlC:
 			cancel()
+		case keyboard.KeyArrowUp:
+			err = c.FocusID(string(upArrow()))
+		case keyboard.KeyArrowDown:
+			err = c.FocusID(string(downArrow()))
+		case keyboard.KeyArrowLeft:
+			err = c.FocusID(string(leftArrow()))
+		case keyboard.KeyArrowRight:
+			err = c.FocusID(string(rightArrow()))
+		}
+		if err != nil {
+			panic(err)
 		}
 	}
 	termdash.Run(ctx, tb, c, termdash.KeyboardSubscriber(quitter), termdash.RedrawInterval(redrawInterval))
 	wg.Wait()
 	return nil
+}
+
+func upArrow() layout {
+	cp := currentPosition
+	if cp.Y > 0 {
+		cp.Y -= 1
+	}
+	return possiblePositions[cp.Y][cp.X]
+}
+
+func downArrow() layout {
+	cp := currentPosition
+	pp := possiblePositions
+	if cp.Y < len(pp)-1 {
+		cp.Y += 1
+	}
+	return pp[cp.Y][cp.X]
+}
+
+func leftArrow() layout {
+	cp := currentPosition
+	if cp.X > 0 {
+		cp.X -= 1
+	}
+	return possiblePositions[cp.Y][cp.X]
+}
+
+func rightArrow() layout {
+	cp := currentPosition
+	pp := possiblePositions
+	if cp.X < len(pp[0])-1 {
+		cp.X += 1
+	}
+	return pp[cp.Y][cp.X]
+}
+
+func populatePossiblePositions() {
+	possiblePositions = [][]layout{
+		{menuID, chartsID, tablesID},
+		{consoleID, consoleID, consoleID},
+		{inputID, inputID, inputID},
+	}
 }
 
 // newWidgets creates all widgets used by the client.
@@ -121,23 +196,34 @@ func gridLayout(w *widgets) ([]container.Option, error) {
 			grid.Widget(w.menu,
 				container.Border(linestyle.Light),
 				container.BorderTitle("menu"),
+				container.ID(string(menuID)),
 			),
 		),
 		grid.ColWidthPerc(40,
 			grid.Widget(w.text,
 				container.Border(linestyle.Light),
 				container.BorderTitle("charts"),
+				container.ID(string(chartsID)),
 			),
 		),
 		grid.ColWidthPerc(40,
 			grid.Widget(w.text,
 				container.Border(linestyle.Light),
 				container.BorderTitle("tables"),
+				container.ID(string(tablesID)),
 			),
 		),
 	}
-	cosole := grid.Widget(w.console, container.Border(linestyle.Light), container.BorderTitle("console"))
-	input := grid.Widget(w.input, container.BorderTitle("input"))
+	cosole := grid.Widget(
+		w.console, container.Border(linestyle.Light),
+		container.BorderTitle("console"),
+		container.ID(string(consoleID)),
+	)
+	input := grid.Widget(
+		w.input,
+		container.BorderTitle("input"),
+		container.ID(string(inputID)),
+	)
 	builder := grid.New()
 	builder.Add(
 		grid.RowHeightPerc(60, charts...),
@@ -204,6 +290,7 @@ func newConsoleWgt(ctx context.Context, wg *sync.WaitGroup, ch <-chan *response)
 
 	return wgt, nil
 }
+
 func newInputWgt(ctx context.Context, ch chan<- string) (*textinput.TextInput, error) {
 	wgt, err := textinput.New(
 		textinput.Label("$", cell.FgColor(cell.ColorBlue)),

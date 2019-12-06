@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 )
 
 var (
@@ -75,7 +74,6 @@ func cmdListener(ctx context.Context, wg *sync.WaitGroup, cancel context.CancelF
 			}
 		}
 		out <- &response{"exiting...", nil}
-		time.Sleep(1)
 	}()
 	return in, out
 }
