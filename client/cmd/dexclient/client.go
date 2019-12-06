@@ -8,17 +8,17 @@ import (
 	"time"
 
 	"github.com/decred/slog"
-	"github.com/mum4k/termdash"
-	"github.com/mum4k/termdash/cell"
-	"github.com/mum4k/termdash/container"
-	"github.com/mum4k/termdash/container/grid"
-	"github.com/mum4k/termdash/keyboard"
-	"github.com/mum4k/termdash/linestyle"
-	"github.com/mum4k/termdash/terminal/termbox"
-	"github.com/mum4k/termdash/terminal/terminalapi"
-	"github.com/mum4k/termdash/widgets/button"
-	"github.com/mum4k/termdash/widgets/text"
-	"github.com/mum4k/termdash/widgets/textinput"
+	"github.com/joegruffins/termdash"
+	"github.com/joegruffins/termdash/cell"
+	"github.com/joegruffins/termdash/container"
+	"github.com/joegruffins/termdash/container/grid"
+	"github.com/joegruffins/termdash/keyboard"
+	"github.com/joegruffins/termdash/linestyle"
+	"github.com/joegruffins/termdash/terminal/termbox"
+	"github.com/joegruffins/termdash/terminal/terminalapi"
+	"github.com/joegruffins/termdash/widgets/menu"
+	"github.com/joegruffins/termdash/widgets/text"
+	"github.com/joegruffins/termdash/widgets/textinput"
 )
 
 const (
@@ -35,11 +35,7 @@ type widgets struct {
 	text    *text.Text
 	input   *textinput.TextInput
 	console *text.Text
-	tOne    *button.Button
-	tTwo    *button.Button
-	tThree  *button.Button
-	tFour   *button.Button
-	tFive   *button.Button
+	menu    *menu.Menu
 }
 
 func main() {
@@ -106,59 +102,34 @@ func newWidgets(ctx context.Context, cancel context.CancelFunc, c *container.Con
 		return nil, err
 	}
 
-	tOne, err := newTabWgt(consoleInput, "one")
-	if err != nil {
-		return nil, err
-	}
-
-	tTwo, err := newTabWgt(consoleInput, "two")
-	if err != nil {
-		return nil, err
-	}
-
-	tThree, err := newTabWgt(consoleInput, "three")
-	if err != nil {
-		return nil, err
-	}
-
-	tFour, err := newTabWgt(consoleInput, "four")
-	if err != nil {
-		return nil, err
-	}
-
-	tFive, err := newTabWgt(consoleInput, "five")
+	menu, err := newMenuWgt(ctx, "menuItemOne\nmenuItemTwo\nmenuItemThree\nmenuItemFour\nmenuItemFive")
 	if err != nil {
 		return nil, err
 	}
 
 	return &widgets{
 		text:    text,
-		console: console,
 		input:   input,
-		tOne:    tOne,
-		tTwo:    tTwo,
-		tThree:  tThree,
-		tFour:   tFour,
-		tFive:   tFive,
+		console: console,
+		menu:    menu,
 	}, nil
 }
 
 func gridLayout(w *widgets) ([]container.Option, error) {
-	tabs := []grid.Element{
-		grid.ColWidthPerc(20, grid.Widget(w.tOne)),
-		grid.ColWidthPerc(20, grid.Widget(w.tTwo)),
-		grid.ColWidthPerc(20, grid.Widget(w.tThree)),
-		grid.ColWidthPerc(20, grid.Widget(w.tFour)),
-		grid.ColWidthPerc(20, grid.Widget(w.tFive)),
-	}
 	charts := []grid.Element{
-		grid.ColWidthPerc(50,
+		grid.ColWidthPerc(20,
+			grid.Widget(w.menu,
+				container.Border(linestyle.Light),
+				container.BorderTitle("menu"),
+			),
+		),
+		grid.ColWidthPerc(40,
 			grid.Widget(w.text,
 				container.Border(linestyle.Light),
 				container.BorderTitle("charts"),
 			),
 		),
-		grid.ColWidthPerc(50,
+		grid.ColWidthPerc(40,
 			grid.Widget(w.text,
 				container.Border(linestyle.Light),
 				container.BorderTitle("tables"),
@@ -169,8 +140,7 @@ func gridLayout(w *widgets) ([]container.Option, error) {
 	input := grid.Widget(w.input, container.BorderTitle("input"))
 	builder := grid.New()
 	builder.Add(
-		grid.RowHeightPerc(10, tabs...),
-		grid.RowHeightPerc(50, charts...),
+		grid.RowHeightPerc(60, charts...),
 		grid.RowHeightPerc(30, cosole),
 		grid.RowHeightPerc(10, input),
 	)
@@ -183,6 +153,18 @@ func gridLayout(w *widgets) ([]container.Option, error) {
 
 func newTextWgt(ctx context.Context, s string) (*text.Text, error) {
 	wgt, err := text.New()
+	if err != nil {
+		return nil, err
+	}
+	if err = wgt.Write(s); err != nil {
+		return nil, err
+	}
+	return wgt, nil
+
+}
+
+func newMenuWgt(ctx context.Context, s string) (*menu.Menu, error) {
+	wgt, err := menu.New()
 	if err != nil {
 		return nil, err
 	}
@@ -232,22 +214,6 @@ func newInputWgt(ctx context.Context, ch chan<- string) (*textinput.TextInput, e
 			return nil
 		}),
 		textinput.ClearOnSubmit(),
-	)
-	if err != nil {
-		return nil, err
-	}
-	return wgt, nil
-}
-
-func newTabWgt(ch chan<- string, name string) (*button.Button, error) {
-	wgt, err := button.New(name, func() error {
-		ch <- fmt.Sprintf("%v pressed", name)
-		return nil
-	},
-		button.FillColor(cell.ColorNumber(220)),
-		button.TextColor(cell.ColorNumber(27)),
-		button.Height(1),
-		button.Width(15),
 	)
 	if err != nil {
 		return nil, err
