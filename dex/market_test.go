@@ -6,8 +6,6 @@ package dex
 import (
 	"os"
 	"testing"
-
-	"decred.org/dcrdex/server/asset"
 )
 
 const (
@@ -22,11 +20,11 @@ var (
 
 func TestMain(m *testing.M) {
 	var ok bool
-	AssetDCR, ok = asset.BipSymbolID("dcr")
+	AssetDCR, ok = BipSymbolID("dcr")
 	if !ok {
 		os.Exit(1)
 	}
-	AssetBTC, ok = asset.BipSymbolID("btc")
+	AssetBTC, ok = BipSymbolID("btc")
 	if !ok {
 		os.Exit(1)
 	}

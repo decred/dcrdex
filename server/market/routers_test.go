@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
@@ -275,37 +276,43 @@ func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin 
 	return coin
 }
 
-var assetBTC = &asset.Asset{
-	ID:       0,
-	Symbol:   "btc",
-	LotSize:  btcLotSize,
-	RateStep: btcRateStep,
-	FeeRate:  4,
-	SwapSize: dummySize,
-	SwapConf: 2,
-	FundConf: 2,
+var assetBTC = &asset.BackedAsset{
+	Asset: dex.Asset{
+		ID:       0,
+		Symbol:   "btc",
+		LotSize:  btcLotSize,
+		RateStep: btcRateStep,
+		FeeRate:  4,
+		SwapSize: dummySize,
+		SwapConf: 2,
+		FundConf: 2,
+	},
 }
 
-var assetDCR = &asset.Asset{
-	ID:       42,
-	Symbol:   "dcr",
-	LotSize:  dcrLotSize,
-	RateStep: dcrRateStep,
-	FeeRate:  10,
-	SwapSize: dummySize,
-	SwapConf: 2,
-	FundConf: 2,
+var assetDCR = &asset.BackedAsset{
+	Asset: dex.Asset{
+		ID:       42,
+		Symbol:   "dcr",
+		LotSize:  dcrLotSize,
+		RateStep: dcrRateStep,
+		FeeRate:  10,
+		SwapSize: dummySize,
+		SwapConf: 2,
+		FundConf: 2,
+	},
 }
 
-var assetUnknown = &asset.Asset{
-	ID:       54321,
-	Symbol:   "buk",
-	LotSize:  1000,
-	RateStep: 100,
-	FeeRate:  10,
-	SwapSize: 1,
-	SwapConf: 0,
-	FundConf: 0,
+var assetUnknown = &asset.BackedAsset{
+	Asset: dex.Asset{
+		ID:       54321,
+		Symbol:   "buk",
+		LotSize:  1000,
+		RateStep: 100,
+		FeeRate:  10,
+		SwapSize: 1,
+		SwapConf: 0,
+		FundConf: 0,
+	},
 }
 
 func randomBytes(len int) []byte {
@@ -360,7 +367,7 @@ func TestMain(m *testing.M) {
 	assetBTC.Backend = oRig.btc
 	oRig.router = NewOrderRouter(&OrderRouterConfig{
 		AuthManager: oRig.auth,
-		Assets: map[uint32]*asset.Asset{
+		Assets: map[uint32]*asset.BackedAsset{
 			0:  assetBTC,
 			42: assetDCR,
 		},

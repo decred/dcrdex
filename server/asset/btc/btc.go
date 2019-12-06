@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex"
+	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -31,7 +33,7 @@ var (
 
 const (
 	btcToSatoshi             = 1e8
-	immatureTransactionError = asset.Error("immature output")
+	immatureTransactionError = dex.Error("immature output")
 )
 
 // btcNode represents a blockchain information fetcher. In practice, it is
@@ -69,7 +71,7 @@ type Backend struct {
 	chainParams *chaincfg.Params
 	// A logger will be provided by the dex for this backend. All logging should
 	// use the provided logger.
-	log asset.Logger
+	log dex.Logger
 }
 
 // Check that Backend satisfies the DEXAsset interface.
@@ -79,35 +81,35 @@ var _ asset.DEXAsset = (*Backend)(nil)
 // backend. The provided context.Context should be cancelled when the DEX
 // application exits. The configPath can be an empty string, in which case the
 // standard system location of the bitcoind config file is assumed.
-func NewBackend(ctx context.Context, configPath string, logger asset.Logger, network asset.Network) (asset.DEXAsset, error) {
+func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.DEXAsset, error) {
 	var params *chaincfg.Params
 	switch network {
-	case asset.Mainnet:
+	case dex.Mainnet:
 		params = &chaincfg.MainNetParams
-	case asset.Testnet:
+	case dex.Testnet:
 		params = &chaincfg.TestNet3Params
-	case asset.Regtest:
+	case dex.Regtest:
 		params = &chaincfg.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
 	if configPath == "" {
-		configPath = SystemConfigPath("bitcoin")
+		configPath = dexbtc.SystemConfigPath("bitcoin")
 	}
 
-	return NewBTCClone(ctx, configPath, logger, network, params, btcPorts)
+	return NewBTCClone(ctx, configPath, logger, network, params, dexbtc.RPCPorts)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
 // network ports. A BTC clone can use this method, possibly in conjunction with
 // ReadCloneParams, to create a Backend for other assets with minimal coding.
 // See ReadCloneParams and CompatibilityCheck for more info.
-func NewBTCClone(ctx context.Context, configPath string, logger asset.Logger,
-	network asset.Network, params *chaincfg.Params, ports NetPorts) (*Backend, error) {
+func NewBTCClone(ctx context.Context, configPath string, logger dex.Logger,
+	network dex.Network, params *chaincfg.Params, ports dexbtc.NetPorts) (*Backend, error) {
 
 	// Read the configuration parameters
-	cfg, err := LoadConfig(configPath, network, ports)
+	cfg, err := dexbtc.LoadConfig(configPath, network, ports)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +201,7 @@ func (btc *Backend) BlockChannel(size int) chan uint32 {
 // InitTxSize is an asset.DEXAsset method that must produce the max size of a
 // standardized atomic swap initialization transaction.
 func (btc *Backend) InitTxSize() uint32 {
-	return initTxSize
+	return dexbtc.InitTxSize
 }
 
 // CheckAddress checks that the given address is parseable.
@@ -209,7 +211,7 @@ func (btc *Backend) CheckAddress(addr string) bool {
 }
 
 // Create a *Backend and start the block monitor loop.
-func newBTC(ctx context.Context, chainParams *chaincfg.Params, logger asset.Logger, node btcNode) *Backend {
+func newBTC(ctx context.Context, chainParams *chaincfg.Params, logger dex.Logger, node btcNode) *Backend {
 	btc := &Backend{
 		ctx:         ctx,
 		blockCache:  newBlockCache(),
@@ -228,15 +230,17 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 	if err != nil {
 		return nil, err
 	}
-	scriptType := parseScriptType(pkScript, redeemScript)
-	if scriptType == scriptUnsupported {
-		return nil, asset.UnsupportedScriptError
+
+	inputNfo, err := dexbtc.InputInfo(pkScript, redeemScript, btc.chainParams)
+	if err != nil {
+		return nil, err
 	}
+	scriptType := inputNfo.ScriptType
 
 	// If it's a pay-to-script-hash, extract the script hash and check it against
 	// the hash of the user-supplied redeem script.
-	if scriptType.isP2SH() {
-		if scriptType.isSegwit() {
+	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
+		if scriptType.IsSegwit() {
 			scriptHash := extractWitnessScriptHash(pkScript)
 			shash := sha256.Sum256(redeemScript)
 			if !bytes.Equal(shash[:], scriptHash) {
@@ -248,30 +252,6 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 			}
 		}
-	}
-
-	// Get information about the signatures and pubkeys needed to spend the utxo.
-	evalScript := pkScript
-	if scriptType.isP2SH() {
-		evalScript = redeemScript
-	}
-	scriptAddrs, err := extractScriptAddrs(evalScript, btc.chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing utxo script addresses")
-	}
-
-	// Start with standard P2PKH.
-	sigScriptSize := P2PKHSigScriptSize
-	// If it's a P2SH, the size must be calculated based on other factors.
-	if scriptType.isP2SH() {
-		// Start with the signatures.
-		sigScriptSize = (derSigLength + 1) * scriptAddrs.nRequired // 73 max for sig, 1 for push code
-		// If there are pubkey-hash addresses, they'll need pubkeys.
-		if scriptAddrs.numPKH > 0 {
-			sigScriptSize += scriptAddrs.nRequired * (pubkeyLength + 1)
-		}
-		// Then add the length of the script and another push opcode byte.
-		sigScriptSize += len(redeemScript) + 1
 	}
 
 	// Get block information.
@@ -318,8 +298,8 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		scriptType:   scriptType,
 		pkScript:     pkScript,
 		redeemScript: redeemScript,
-		numSigs:      scriptAddrs.nRequired,
-		spendSize:    uint32(sigScriptSize) + txInOverhead,
+		numSigs:      inputNfo.ScriptAddrs.NRequired,
+		spendSize:    inputNfo.VBytes(),
 		value:        uint64(txOut.Value * btcToSatoshi),
 		lastLookup:   lastLookup,
 	}, nil

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -299,10 +300,10 @@ func (coin *TCoin) FeeRate() uint64 {
 	return 1
 }
 
-func TNewAsset(backend asset.DEXAsset) *asset.Asset {
-	return &asset.Asset{
-		Backend:  backend,
-		SwapConf: 2,
+func TNewAsset(backend asset.DEXAsset) *asset.BackedAsset {
+	return &asset.BackedAsset{
+		Backend: backend,
+		Asset:   dex.Asset{SwapConf: 2},
 	}
 }
 
@@ -313,9 +314,9 @@ func tNewResponse(id uint64, resp []byte) *msgjson.Message {
 
 // testRig is the primary test data structure.
 type testRig struct {
-	abc       *asset.Asset
+	abc       *asset.BackedAsset
 	abcNode   *TAsset
-	xyz       *asset.Asset
+	xyz       *asset.BackedAsset
 	xyzNode   *TAsset
 	auth      *TAuthManager
 	swapper   *Swapper
@@ -332,7 +333,7 @@ func tNewTestRig(matchInfo *tMatch) *testRig {
 	storage := &TStorage{}
 	swapper := NewSwapper(&Config{
 		Ctx: testCtx,
-		Assets: map[uint32]*asset.Asset{
+		Assets: map[uint32]*asset.BackedAsset{
 			ABCID: abcAsset,
 			XYZID: xyzAsset,
 		},

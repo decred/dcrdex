@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"testing"
 
+	dexbtc "decred.org/dcrdex/dex/btc"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
@@ -78,14 +79,14 @@ out:
 				if err != nil {
 					t.Fatalf("error decoding script from hex %s: %v", prevOutpoint.ScriptPubKey.Hex, err)
 				}
-				scriptType := parseScriptType(pkScript, nil)
-				if scriptType.isP2SH() {
+				scriptType := dexbtc.ParseScriptType(pkScript, nil)
+				if scriptType.IsP2SH() {
 					stats.found++
 					if stats.found > numToDo {
 						break out
 					}
 					var redeemScript []byte
-					if scriptType.isSegwit() {
+					if scriptType.IsSegwit() {
 						// if it's segwit, the script is the last input witness data.
 						redeemHex := txIn.Witness[len(txIn.Witness)-1]
 						redeemScript, err = hex.DecodeString(redeemHex)
@@ -109,11 +110,11 @@ out:
 						}
 						redeemScript = pushed[len(pushed)-1]
 					}
-					scriptType := parseScriptType(pkScript, redeemScript)
+					scriptType := dexbtc.ParseScriptType(pkScript, redeemScript)
 					scriptClass := txscript.GetScriptClass(redeemScript)
 					switch scriptClass {
 					case txscript.MultiSigTy:
-						if !scriptType.isMultiSig() {
+						if !scriptType.IsMultiSig() {
 							t.Fatalf("multi-sig script class but not parsed as multi-sig")
 						}
 						stats.multisig++
@@ -142,15 +143,15 @@ out:
 						stats.unknown++
 					}
 					evalScript := pkScript
-					if scriptType.isP2SH() {
+					if scriptType.IsP2SH() {
 						evalScript = redeemScript
 					}
-					scriptAddrs, err := extractScriptAddrs(evalScript, btc.chainParams)
+					scriptAddrs, err := dexbtc.ExtractScriptAddrs(evalScript, btc.chainParams)
 					if err != nil {
 						stats.addrErr++
 						continue
 					}
-					if scriptAddrs.nRequired == 0 {
+					if scriptAddrs.NRequired == 0 {
 						stats.noSigs++
 					}
 				}
@@ -248,8 +249,8 @@ out:
 				if err != nil {
 					t.Fatalf("error decoding script from hex %s: %v", txOut.ScriptPubKey.Hex, err)
 				}
-				scriptType := parseScriptType(pkScript, nil)
-				if scriptType == scriptUnsupported {
+				scriptType := dexbtc.ParseScriptType(pkScript, nil)
+				if scriptType == dexbtc.ScriptUnsupported {
 					unknowns = append(unknowns, pkScript)
 					stats.unknown++
 					continue
@@ -258,20 +259,20 @@ out:
 				if processed >= numToDo {
 					break out
 				}
-				if scriptType.isP2PKH() {
-					if scriptType.isSegwit() {
+				if scriptType.IsP2PKH() {
+					if scriptType.IsSegwit() {
 						stats.p2wpkh++
 					} else {
 						stats.p2pkh++
 					}
 				} else {
-					if scriptType.isSegwit() {
+					if scriptType.IsSegwit() {
 						stats.p2wsh++
 					} else {
 						stats.p2sh++
 					}
 				}
-				if scriptType.isP2SH() {
+				if scriptType.IsP2SH() {
 					continue
 				}
 				stats.checked++

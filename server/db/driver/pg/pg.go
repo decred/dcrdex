@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/db"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
@@ -54,7 +53,7 @@ type Config struct {
 	CheckedStores bool
 
 	// Net is the current network, and can be one of mainnet, testnet, or simnet.
-	Net asset.Network
+	Net dex.Network
 
 	// FeeKey is base58-encoded extended public key that will be used for
 	// generating fee payment addresses.
@@ -157,11 +156,11 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	}
 
 	switch cfg.Net {
-	case asset.Mainnet:
+	case dex.Mainnet:
 		archiver.keyParams = chaincfg.MainNetParams()
-	case asset.Testnet:
+	case dex.Testnet:
 		archiver.keyParams = chaincfg.TestNet3Params()
-	case asset.Simnet:
+	case dex.Simnet:
 		archiver.keyParams = chaincfg.SimNetParams()
 	default:
 		return nil, fmt.Errorf("unknown network %d", cfg.Net)

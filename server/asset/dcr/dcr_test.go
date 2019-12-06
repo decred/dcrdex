@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrec"
@@ -61,7 +61,7 @@ func TestTidyConfig(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		parsedCfg, err = loadConfig(filePath, asset.Mainnet)
+		parsedCfg, err = loadConfig(filePath, dex.Mainnet)
 		return err
 	}
 

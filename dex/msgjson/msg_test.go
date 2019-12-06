@@ -2,6 +2,7 @@ package msgjson
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"math/rand"
 	"testing"
@@ -10,8 +11,8 @@ import (
 func TestMatch(t *testing.T) {
 	// serialization: orderid (32) + matchid (8) + qty (8) + rate (8)
 	// + address (varies)
-	oid, _ := BytesFromHex("2219c5f3a03407c87211748c884404e2f466cba19616faca1cda0010ca5db0d3")
-	mid, _ := BytesFromHex("4969784b00a59dd0340952c9b8f52840fbb32e9b51d4f6e18cbec7f50c8a3ed7")
+	oid, _ := hex.DecodeString("2219c5f3a03407c87211748c884404e2f466cba19616faca1cda0010ca5db0d3")
+	mid, _ := hex.DecodeString("4969784b00a59dd0340952c9b8f52840fbb32e9b51d4f6e18cbec7f50c8a3ed7")
 	match := &Match{
 		OrderID:  oid,
 		MatchID:  mid,
@@ -83,10 +84,10 @@ func TestMatch(t *testing.T) {
 func TestInit(t *testing.T) {
 	// serialization: orderid (32) + matchid (32) + txid (probably 64) + vout (4)
 	// + timestamp (8) + contract (97 ish)
-	oid, _ := BytesFromHex("ceb09afa675cee31c0f858b94c81bd1a4c2af8c5947d13e544eef772381f2c8d")
-	mid, _ := BytesFromHex("7c6b44735e303585d644c713fe0e95897e7e8ba2b9bba98d6d61b70006d3d58c")
-	coinid, _ := BytesFromHex("c3161033de096fd74d9051ff0bd99e359de35080a3511081ed035f541b850d4300000005")
-	contract, _ := BytesFromHex("caf8d277f80f71e4")
+	oid, _ := hex.DecodeString("ceb09afa675cee31c0f858b94c81bd1a4c2af8c5947d13e544eef772381f2c8d")
+	mid, _ := hex.DecodeString("7c6b44735e303585d644c713fe0e95897e7e8ba2b9bba98d6d61b70006d3d58c")
+	coinid, _ := hex.DecodeString("c3161033de096fd74d9051ff0bd99e359de35080a3511081ed035f541b850d4300000005")
+	contract, _ := hex.DecodeString("caf8d277f80f71e4")
 	init := &Init{
 		OrderID:  oid,
 		MatchID:  mid,
@@ -151,9 +152,9 @@ func TestInit(t *testing.T) {
 
 func TestAudit(t *testing.T) {
 	// serialization: orderid (32) + matchid (32) + time (8) + contract (97 ish)
-	oid, _ := BytesFromHex("d6c752bb34d833b6e0eb4d114d690d044f8ab3f6de9defa08e9d7d237f670fe4")
-	mid, _ := BytesFromHex("79f84ef6c60e72edd305047c015d7b7ade64525a301fdac136976f05edb6172b")
-	contract, _ := BytesFromHex("fc99f576f8e0e5dc")
+	oid, _ := hex.DecodeString("d6c752bb34d833b6e0eb4d114d690d044f8ab3f6de9defa08e9d7d237f670fe4")
+	mid, _ := hex.DecodeString("79f84ef6c60e72edd305047c015d7b7ade64525a301fdac136976f05edb6172b")
+	contract, _ := hex.DecodeString("fc99f576f8e0e5dc")
 	audit := &Audit{
 		OrderID:  oid,
 		MatchID:  mid,
@@ -211,8 +212,8 @@ func TestAudit(t *testing.T) {
 
 func TestRevokeMatch(t *testing.T) {
 	// serialization: order id (32) + match id (32)
-	oid, _ := BytesFromHex("47b903b6e71a1fff3ec1be25b23228bf2e8682b1502dc451f7a9aa32556123f2")
-	mid, _ := BytesFromHex("be218305e71b07a11c59c1b6c3ad3cf6ad4ed7582da8c639b87188aa95795c16")
+	oid, _ := hex.DecodeString("47b903b6e71a1fff3ec1be25b23228bf2e8682b1502dc451f7a9aa32556123f2")
+	mid, _ := hex.DecodeString("be218305e71b07a11c59c1b6c3ad3cf6ad4ed7582da8c639b87188aa95795c16")
 	revoke := &RevokeMatch{
 		OrderID: oid,
 		MatchID: mid,
@@ -259,9 +260,9 @@ func TestRevokeMatch(t *testing.T) {
 func TestRedeem(t *testing.T) {
 	// serialization: orderid (32) + matchid (32) + txid (probably 64) + vout (4)
 	// + timestamp (8)
-	oid, _ := BytesFromHex("ee17139af2d86bd6052829389c0531f71042ed0b0539e617213a9a7151215a1b")
-	mid, _ := BytesFromHex("6ea1227b03d7bf05ce1e23f3edf57368f69ba9ee0cc069f09ab0952a36d964c5")
-	coinid, _ := BytesFromHex("28cb86e678f647cc88da734eed11286dab18b8483feb04580e3cbc90555a004700000005")
+	oid, _ := hex.DecodeString("ee17139af2d86bd6052829389c0531f71042ed0b0539e617213a9a7151215a1b")
+	mid, _ := hex.DecodeString("6ea1227b03d7bf05ce1e23f3edf57368f69ba9ee0cc069f09ab0952a36d964c5")
+	coinid, _ := hex.DecodeString("28cb86e678f647cc88da734eed11286dab18b8483feb04580e3cbc90555a004700000005")
 	redeem := &Redeem{
 		OrderID: oid,
 		MatchID: mid,
@@ -322,7 +323,7 @@ func TestRedeem(t *testing.T) {
 func TestPrefix(t *testing.T) {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
 	// order type (1), client time (8), server time (8) = 57 bytes
-	acctID, _ := BytesFromHex("05bf0f2b97fa551375b9c92687f7a948a8f4a4237653a04e6b00c6f14c72fd1e9c")
+	acctID, _ := hex.DecodeString("05bf0f2b97fa551375b9c92687f7a948a8f4a4237653a04e6b00c6f14c72fd1e9c")
 	prefix := &Prefix{
 		AccountID:     acctID,
 		Base:          256,
@@ -604,7 +605,7 @@ func TestCancel(t *testing.T) {
 		ClientTime: 1571874397,
 		ServerTime: 1571874405,
 	}
-	targetID, _ := BytesFromHex("a1f1b66916353b58dbb65562eb19731953b2f1215987a9d9137f0df3458637b7")
+	targetID, _ := hex.DecodeString("a1f1b66916353b58dbb65562eb19731953b2f1215987a9d9137f0df3458637b7")
 	cancel := &Cancel{
 		Prefix:   *prefix,
 		TargetID: targetID,
@@ -651,7 +652,7 @@ func TestCancel(t *testing.T) {
 
 func TestConnect(t *testing.T) {
 	// serialization: account ID (32) + api version (2) + timestamp (8) = 42 bytes
-	acctID, _ := BytesFromHex("14ae3cbc703587122d68ac6fa9194dfdc8466fb5dec9f47d2805374adff3e016")
+	acctID, _ := hex.DecodeString("14ae3cbc703587122d68ac6fa9194dfdc8466fb5dec9f47d2805374adff3e016")
 	connect := &Connect{
 		AccountID:  acctID,
 		APIVersion: uint16(1),
@@ -701,7 +702,7 @@ func TestConnect(t *testing.T) {
 
 func TestRegister(t *testing.T) {
 	// serialization: pubkey (33) + time (8) = 41
-	pk, _ := BytesFromHex("f06e5cf13fc6debb8b90776da6624991ba50a11e784efed53d0a81c3be98397982")
+	pk, _ := hex.DecodeString("f06e5cf13fc6debb8b90776da6624991ba50a11e784efed53d0a81c3be98397982")
 	register := &Register{
 		PubKey: pk,
 		Time:   uint64(1571700077),
@@ -746,8 +747,8 @@ func TestRegister(t *testing.T) {
 func TestRegisterResult(t *testing.T) {
 	// serialization: pubkey (33) + client pubkey (33) + time (8) + fee (8) +
 	// address (35-ish) = 117
-	dexPK, _ := BytesFromHex("511a26bd3db115fd63e4093471227532b7264b125b8cad596bf4f15ed57ef1564d")
-	clientPK, _ := BytesFromHex("405441ebff6608bdc59f2fbb5020d9b30ca1cb6e8b11ca597997b1e37cadb550b9")
+	dexPK, _ := hex.DecodeString("511a26bd3db115fd63e4093471227532b7264b125b8cad596bf4f15ed57ef1564d")
+	clientPK, _ := hex.DecodeString("405441ebff6608bdc59f2fbb5020d9b30ca1cb6e8b11ca597997b1e37cadb550b9")
 	address := "Dcur2mcGjmENx4DhNqDctW5wJCVyT3Qeqkx"
 	regRes := &RegisterResult{
 		DEXPubKey:    dexPK,
@@ -813,8 +814,8 @@ func TestRegisterResult(t *testing.T) {
 
 func TestNotifyFee(t *testing.T) {
 	// serialization: account id (32) + txid (32) + vout (4) = 68
-	acctID, _ := BytesFromHex("bd3faf7353b8fc40618527687b3ef99d00da480e354f2c4986479e2da626acf5")
-	coinid, _ := BytesFromHex("51891f751b0dd987c0b8ff1703cd0dd3e2712847f4bdbc268c9656dc80d233c7")
+	acctID, _ := hex.DecodeString("bd3faf7353b8fc40618527687b3ef99d00da480e354f2c4986479e2da626acf5")
+	coinid, _ := hex.DecodeString("51891f751b0dd987c0b8ff1703cd0dd3e2712847f4bdbc268c9656dc80d233c7")
 	notify := &NotifyFee{
 		AccountID: acctID,
 		CoinID:    coinid,
@@ -913,7 +914,7 @@ func TestBytes(t *testing.T) {
 		t.Fatalf("marshalled Bytes not correct. wanted %s, got %s", js, string(marshalled))
 	}
 
-	fromHex, _ := BytesFromHex(hexB)
+	fromHex, _ := hex.DecodeString(hexB)
 	if !bytes.Equal(rawB, fromHex) {
 		t.Fatalf("hex-constructed Bytes not correct. wanted %x, got %x.", rawB, fromHex)
 	}

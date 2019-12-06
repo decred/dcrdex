@@ -42,7 +42,7 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 )
 
@@ -55,7 +55,7 @@ func TestMain(m *testing.M) {
 	ctx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 	var err error
-	dexAsset, err := NewBackend(ctx, "", logger, asset.Mainnet)
+	dexAsset, err := NewBackend(ctx, "", logger, dex.Mainnet)
 	if err != nil {
 		fmt.Printf("NewBackend error: %v\n", err)
 		return
@@ -156,7 +156,7 @@ func TestLiveFees(t *testing.T) {
 // 	logger := slog.NewBackend(os.Stdout).Logger("PLUGIN")
 // 	ctx, shutdown := context.WithCancel(context.Background())
 // 	defer shutdown()
-// 	dexAsset, err := constructor(ctx, SystemConfigPath("bitcoin"), logger, asset.Mainnet)
+// 	dexAsset, err := constructor(ctx, SystemConfigPath("bitcoin"), logger, dex.Mainnet)
 // 	if err != nil {
 // 		t.Fatalf("error creating DEXAsset from imported constructor: %v", err)
 // 	}

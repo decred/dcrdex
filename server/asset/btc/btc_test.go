@@ -21,7 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
+	dexbtc "decred.org/dcrdex/dex/btc"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -37,6 +38,7 @@ var (
 	testParams     = &chaincfg.MainNetParams
 	mainnetPort    = 8332
 	blockPollDelay time.Duration
+	defaultHost    = "localhost"
 )
 
 func TestMain(m *testing.M) {
@@ -49,8 +51,8 @@ func TestMain(m *testing.M) {
 
 // TestConfig tests the LoadConfig function.
 func TestConfig(t *testing.T) {
-	cfg := &Config{}
-	parsedCfg := &Config{}
+	cfg := &dexbtc.Config{}
+	parsedCfg := &dexbtc.Config{}
 
 	tempDir, err := ioutil.TempDir("", "btctest")
 	if err != nil {
@@ -61,13 +63,13 @@ func TestConfig(t *testing.T) {
 	rootParser := flags.NewParser(cfg, flags.None)
 	iniParser := flags.NewIniParser(rootParser)
 
-	runCfg := func(config *Config) error {
+	runCfg := func(config *dexbtc.Config) error {
 		*cfg = *config
 		err := iniParser.WriteFile(filePath, flags.IniNone)
 		if err != nil {
 			return err
 		}
-		parsedCfg, err = LoadConfig(filePath, asset.Mainnet, btcPorts)
+		parsedCfg, err = dexbtc.LoadConfig(filePath, dex.Mainnet, dexbtc.RPCPorts)
 		return err
 	}
 
@@ -78,7 +80,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Try with just the name. Error expected.
-	err = runCfg(&Config{
+	err = runCfg(&dexbtc.Config{
 		RPCUser: "somename",
 	})
 	if err == nil {
@@ -86,7 +88,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Try with just the password. Error expected.
-	err = runCfg(&Config{
+	err = runCfg(&dexbtc.Config{
 		RPCPass: "somepass",
 	})
 	if err == nil {
@@ -94,7 +96,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Give both name and password. This should not be an error.
-	err = runCfg(&Config{
+	err = runCfg(&dexbtc.Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 	})
@@ -120,7 +122,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with a designated port, but no host specified.
-	err = runCfg(&Config{
+	err = runCfg(&dexbtc.Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCPort: 1234,
@@ -141,7 +143,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with rpcbind set (without designated port) and custom rpcport.
-	err = runCfg(&Config{
+	err = runCfg(&dexbtc.Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "127.0.0.2",
@@ -163,7 +165,7 @@ func TestConfig(t *testing.T) {
 
 	// Check with a port set with both rpcbind and rpcport. The rpcbind port
 	// should take precedence.
-	err = runCfg(&Config{
+	err = runCfg(&dexbtc.Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "127.0.0.2:1234",
@@ -184,7 +186,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// Check with just a port for rpcbind and make sure it gets parsed.
-	err = runCfg(&Config{
+	err = runCfg(&dexbtc.Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: ":1234",
@@ -204,7 +206,7 @@ func TestConfig(t *testing.T) {
 	}
 
 	// IPv6
-	err = runCfg(&Config{
+	err = runCfg(&dexbtc.Config{
 		RPCUser: "somename",
 		RPCPass: "somepass",
 		RPCBind: "[24c2:2865:4c7e:fd9b:76ea:4aa0:263d:6377]:1234",
@@ -557,7 +559,7 @@ type testMsgTxSwap struct {
 // pubkey script and addresses.
 func testSwapContract() ([]byte, btcutil.Address) {
 	lockTime := time.Now().Add(time.Hour * 24).Unix()
-	secretKey := randomBytes(32)
+	secretHash := randomBytes(32)
 	_, receiverPKH := genPubkey()
 	_, senderPKH := genPubkey()
 	contract, err := txscript.NewScriptBuilder().
@@ -568,7 +570,7 @@ func testSwapContract() ([]byte, btcutil.Address) {
 		AddOps([]byte{
 			txscript.OP_EQUALVERIFY,
 			txscript.OP_SHA256,
-		}).AddData(secretKey).
+		}).AddData(secretHash).
 		AddOps([]byte{
 			txscript.OP_EQUALVERIFY,
 			txscript.OP_DUP,
@@ -630,7 +632,7 @@ type testMsgTxP2SH struct {
 	m      int
 }
 
-// An M-of-N mutli-sig script.
+// An M-of-N multi-sig script.
 func testMultiSigScriptMofN(m, n int) ([]byte, *testMultiSigAuth) {
 	// serialized compressed pubkey used for multisig
 	addrs := make([]*btcutil.AddressPubKey, 0, n)
@@ -638,11 +640,13 @@ func testMultiSigScriptMofN(m, n int) ([]byte, *testMultiSigAuth) {
 		msg: randomBytes(32),
 	}
 
-	for i := 0; i < m; i++ {
+	for i := 0; i < n; i++ {
 		a := s256Auth(auth.msg)
-		auth.pubkeys = append(auth.pubkeys, a.pubkey)
-		auth.pkHashes = append(auth.pkHashes, a.pkHash)
-		auth.sigs = append(auth.sigs, a.sig)
+		if i < m {
+			auth.pubkeys = append(auth.pubkeys, a.pubkey)
+			auth.pkHashes = append(auth.pkHashes, a.pkHash)
+			auth.sigs = append(auth.sigs, a.sig)
+		}
 		addr, err := btcutil.NewAddressPubKey(a.pubkey, testParams)
 		if err != nil {
 			fmt.Printf("error creating AddressSecpPubKey: %v\n", err)
@@ -748,8 +752,8 @@ func TestUTXOs(t *testing.T) {
 	}
 	// While we're here, check the spend script size and value are correct.
 	scriptSize := utxo.SpendSize()
-	if scriptSize != P2PKHSigScriptSize+txInOverhead {
-		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, scriptSize)
+	if scriptSize != dexbtc.RedeemP2PKHSigScriptSize+dexbtc.TxInOverhead {
+		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", dexbtc.RedeemP2PKHSigScriptSize, scriptSize)
 	}
 	if utxo.Value() != 500_000_000 {
 		t.Fatalf("case 1 - unexpected output value. expected 500,000,000, got %d", utxo.Value())
@@ -905,7 +909,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 8 - unexpected error: %v", err)
 	}
 	// Check that the segwit flag is set.
-	if !utxo.scriptType.isSegwit() {
+	if !utxo.scriptType.IsSegwit() {
 		t.Fatalf("case 8 - script type parsed as non-segwit")
 	}
 	err = utxo.Auth([][]byte{msg.auth.pubkey}, [][]byte{msg.auth.sig}, msg.auth.msg)
@@ -925,7 +929,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 9 - received error for utxo: %v", err)
 	}
 	// Check that the script is flagged segwit
-	if !utxo.scriptType.isSegwit() {
+	if !utxo.scriptType.IsSegwit() {
 		t.Fatalf("case 9 - script type parsed as non-segwit")
 	}
 	// Try to get by with just one of the pubkeys.

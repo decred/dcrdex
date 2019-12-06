@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -69,14 +70,14 @@ type orderRecord struct {
 // assetSet is pointers to two different assets, but with 4 ways of addressing
 // them.
 type assetSet struct {
-	funding   *asset.Asset
-	receiving *asset.Asset
-	base      *asset.Asset
-	quote     *asset.Asset
+	funding   *asset.BackedAsset
+	receiving *asset.BackedAsset
+	base      *asset.BackedAsset
+	quote     *asset.BackedAsset
 }
 
 // newAssetSet is a constructor for an assetSet.
-func newAssetSet(base, quote *asset.Asset, sell bool) *assetSet {
+func newAssetSet(base, quote *asset.BackedAsset, sell bool) *assetSet {
 	coins := &assetSet{
 		quote:     quote,
 		base:      base,
@@ -113,7 +114,7 @@ func (o *outpoint) Vout() uint32 { return o.vout }
 // are authenticated routes used for placing and canceling orders.
 type OrderRouter struct {
 	auth     AuthManager
-	assets   map[uint32]*asset.Asset
+	assets   map[uint32]*asset.BackedAsset
 	tunnels  map[string]MarketTunnel
 	mbBuffer float64
 }
@@ -121,7 +122,7 @@ type OrderRouter struct {
 // OrderRouterConfig is the configuration settings for an OrderRouter.
 type OrderRouterConfig struct {
 	AuthManager     AuthManager
-	Assets          map[uint32]*asset.Asset
+	Assets          map[uint32]*asset.BackedAsset
 	Markets         map[string]MarketTunnel
 	MarketBuyBuffer float64
 }
@@ -183,7 +184,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	if !sell {
 		swapVal = matcher.BaseToQuote(limit.Rate, limit.Quantity)
 	}
-	reqVal := requiredFunds(swapVal, spendSize, coins.funding)
+	reqVal := calc.RequiredFunds(swapVal, spendSize, &coins.funding.Asset)
 	if valSum < reqVal {
 		return msgjson.NewError(msgjson.FundingError,
 			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
@@ -266,7 +267,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	// Calculate the fees and check that the utxo sum is enough.
 	var reqVal uint64
 	if sell {
-		reqVal = requiredFunds(market.Quantity, spendSize, assets.funding)
+		reqVal = calc.RequiredFunds(market.Quantity, spendSize, &assets.funding.Asset)
 	} else {
 		// This is a market buy order, so the quantity gets special handling.
 		// 1. The quantity is in units of the quote asset.
@@ -533,17 +534,6 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 		spendSize += dexCoin.SpendSize()
 	}
 	return valSum, spendSize, coinIDs, nil
-}
-
-// requiredFunds calculates the minimum amount needed to fulfill the swap amount
-// and pay transaction fees. The spendSize is the sum of the serialized inputs
-// associated with a set of coins to be spent. The swapVal is the total quantity
-// needed to fulfill an order.
-func requiredFunds(swapVal uint64, spendSize uint32, coin *asset.Asset) uint64 {
-	R := float64(coin.SwapSize) * float64(coin.FeeRate) / float64(coin.LotSize)
-	fBase := uint64(float64(swapVal) * R)
-	fCoin := uint64(spendSize) * coin.FeeRate
-	return swapVal + fBase + fCoin
 }
 
 // msgBytesToBytes converts a []msgjson.Byte to a [][]byte.

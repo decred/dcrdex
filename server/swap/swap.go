@@ -126,7 +126,7 @@ type stepInformation struct {
 	// counterParty is the user that is not expected to be acting next.
 	counterParty stepActor
 	// asset is the asset backend for swapAsset.
-	asset *asset.Asset
+	asset *asset.BackedAsset
 	// isBaseAsset will be true if the current step involves a transaction on the
 	// match market's base asset blockchain, false if on quote asset's blockchain.
 	isBaseAsset bool
@@ -145,7 +145,7 @@ type Config struct {
 	Ctx context.Context
 	// Assets is a map to all the asset information, including the asset backends,
 	// used by this Swapper.
-	Assets map[uint32]*asset.Asset
+	Assets map[uint32]*asset.BackedAsset
 	// Mgr is the AuthManager for client messaging and authentication.
 	AuthManager AuthManager
 	// A database backend.
@@ -162,7 +162,7 @@ type Swapper struct {
 	wg     sync.WaitGroup
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
-	coins map[uint32]*asset.Asset
+	coins map[uint32]*asset.BackedAsset
 	// storage is a Database backend.
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.

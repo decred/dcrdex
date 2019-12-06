@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
+	dexbtc "decred.org/dcrdex/dex/btc"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
 )
@@ -29,7 +30,7 @@ type UTXO struct {
 	// BTC). For other supported script types, this will be zero.
 	maturity int32
 	// A bitmask for script type information.
-	scriptType btcScriptType
+	scriptType dexbtc.BTCScriptType
 	// The output's scriptPubkey.
 	pkScript []byte
 	// If the pubkey script is P2SH or P2WSH, the UTXO will only be generated if
@@ -118,21 +119,21 @@ func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	}
 	// Extract the addresses from the pubkey scripts and redeem scripts.
 	evalScript := utxo.pkScript
-	if utxo.scriptType.isP2SH() {
+	if utxo.scriptType.IsP2SH() || utxo.scriptType.IsP2WSH() {
 		evalScript = utxo.redeemScript
 	}
-	scriptAddrs, err := extractScriptAddrs(evalScript, utxo.btc.chainParams)
+	scriptAddrs, err := dexbtc.ExtractScriptAddrs(evalScript, utxo.btc.chainParams)
 	if err != nil {
 		return err
 	}
 	// Sanity check that the required signature count matches the count parsed
 	// during UTXO initialization.
-	if scriptAddrs.nRequired != utxo.numSigs {
-		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d",
-			utxo.txHash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
+	if scriptAddrs.NRequired != utxo.numSigs {
+		return fmt.Errorf("signature requirement mismatch. required: %d, matched: %d",
+			scriptAddrs.NRequired, utxo.numSigs)
 	}
-	matches := append(pkMatches(pubkeys, scriptAddrs.pubkeys, nil),
-		pkMatches(pubkeys, scriptAddrs.pkHashes, btcutil.Hash160)...)
+	matches := append(pkMatches(pubkeys, scriptAddrs.PubKeys, nil),
+		pkMatches(pubkeys, scriptAddrs.PKHashes, btcutil.Hash160)...)
 	if len(matches) < utxo.numSigs {
 		return fmt.Errorf("not enough pubkey matches to satisfy the script for utxo %s:%d. expected %d, got %d",
 			utxo.txHash, utxo.vout, utxo.numSigs, len(matches))
@@ -190,13 +191,13 @@ func (utxo *UTXO) AuditContract() (string, uint64, error) {
 
 	// If it's a pay-to-script-hash, extract the script hash and check it against
 	// the hash of the user-supplied redeem script.
-	scriptType := parseScriptType(output.pkScript, utxo.redeemScript)
-	if scriptType == scriptUnsupported {
+	scriptType := dexbtc.ParseScriptType(output.pkScript, utxo.redeemScript)
+	if scriptType == dexbtc.ScriptUnsupported {
 		return "", 0, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, utxo.vout)
 	}
 	var scriptHash, hashed []byte
-	if scriptType.isP2SH() {
-		if scriptType.isSegwit() {
+	if scriptType.IsP2SH() {
+		if scriptType.IsSegwit() {
 			scriptHash = extractWitnessScriptHash(output.pkScript)
 			shash := sha256.Sum256(utxo.redeemScript)
 			hashed = shash[:]
