@@ -806,7 +806,7 @@ func testPrefix(prefix *msgjson.Prefix, checkCode func(string, int)) {
 
 	// Too old
 	ct := prefix.ClientTime
-	prefix.ClientTime = ct - maxClockOffset - 1 // offset >= maxClockOffset!  OK?
+	prefix.ClientTime = ct - maxClockOffset - 1 // offset >= maxClockOffset
 	checkCode("too old", msgjson.ClockRangeError)
 	prefix.ClientTime = ct
 
