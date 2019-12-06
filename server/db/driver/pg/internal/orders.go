@@ -39,8 +39,12 @@ const (
 	// account ID.
 	SelectUserOrders = `SELECT * FROM %s WHERE account_id = $1;`
 
-	SelectActiveOrderCoinIDs = `SELECT oid, sell, coins
-		FROM %s -- the active orders table for the market;`
+	// SelectOrderCoinIDs retrieves the order id, sell flag, and coins for all
+	// orders in a table with one of the given statuses. Note that this includes
+	// all order statuses.
+	SelectOrderCoinIDs = `SELECT oid, sell, coins
+		FROM %s
+		WHERE type = ANY($1);`
 
 	// UpdateOrderStatus sets the status of an order with the given order ID.
 	UpdateOrderStatus = `UPDATE %s SET status = $1 WHERE oid = $2;`

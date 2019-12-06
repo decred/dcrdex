@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
+	"github.com/lib/pq"
 )
 
 // Wrap the CoinID slice to implement custom Scanner and Valuer.
@@ -57,7 +58,13 @@ func (coins *dbCoins) Scan(src interface{}) error {
 		if len(b) < cLen+1 {
 			return fmt.Errorf("too many bytes indicated")
 		}
-		c = append(c, b[1:cLen+1])
+
+		// Deep copy the coin ID (a slice) since the backing buffer may be
+		// reused.
+		bc := make([]byte, cLen)
+		copy(bc, b[1:cLen+1])
+		c = append(c, bc)
+
 		b = b[cLen+1:]
 	}
 
@@ -208,10 +215,15 @@ func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins m
 	}
 
 	tableName := fullOrderTableName(a.dbName, marketSchema, true) // active (true)
-	stmt := fmt.Sprintf(internal.SelectActiveOrderCoinIDs, tableName)
+	stmt := fmt.Sprintf(internal.SelectOrderCoinIDs, tableName)
+
+	orderTypes := []int64{
+		int64(order.MarketOrderType),
+		int64(order.LimitOrderType),
+	} // i.e. NOT cancel
 
 	var rows *sql.Rows
-	rows, err = a.db.Query(stmt)
+	rows, err = a.db.Query(stmt, pq.Int64Array(orderTypes))
 	switch err {
 	case sql.ErrNoRows:
 		err = nil
@@ -230,7 +242,7 @@ func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins m
 		var sell bool
 		err = rows.Scan(&oid, &sell, &coins)
 		if err != nil {
-			return
+			return nil, nil, err
 		}
 
 		// Sell orders lock base asset coins.
