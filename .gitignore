@@ -19,3 +19,4 @@ markets.json
 dist/
 node_modules/
 package-lock.json
+client/cmd/dexc/dexc
