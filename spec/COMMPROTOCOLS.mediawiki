@@ -1,0 +1,116 @@
+==Communication Protocols==
+
+===WebSockets===
+
+Trustless negotiation of trades requires considerable messaging.
+Transaction details must be reported and relayed at appropriate times, sometimes
+with substantial delays between subsequent actions.
+Match notification via HTTP polling or other request interval-based methods are
+thus not suitable for the DEX system.
+Persistent, full-duplex communication is critical to minimizing communication
+latencies and wasted bandwidth.
+Websockets ([https://tools.ietf.org/html/rfc6455 &#91;4&#93;]) are chosen as the
+default and preferred communications protocol for
+the DEX exchange API.
+In addition to fulfilling the aforementioned needs, Websockets are now a
+well-established technology with client software available for integration in
+virtually all popular programming languages.
+
+Websocket messages are secured by encryption on Transport Layer
+Security (TLS) [https://tools.ietf.org/html/rfc8446 &#91;5&#93;] connections.
+
+===Message Protocol===
+
+DEX messaging is JSON-formatted [https://tools.ietf.org/html/rfc8259 &#91;6&#93;].
+All messages, regardless of originating party, use a common top-level
+structure called a '''Message'''.
+
+'''JSON Message object'''
+
+{|
+! field    !! type !! description
+|-
+| type    || int || message type
+|-
+| payload || any || the data being transmitted
+|-
+| route   || string || the route identifier. requests and notifications only
+|-
+| id      || int > 0 || the request ID. requests and responses only
+|}
+
+There are three anticipated message types.
+
+'''Message types'''
+
+{|
+| type         || id || description
+|-
+| request      || 1 || a request is typically an uninitiated message that seeks a response
+|-
+| response     || 2 || a response to a request
+|-
+| notification || 3 || usually part of a data feed. requires no response
+|}
+
+'''Example request'''
+
+The payload for a request can be of any type.
+
+<pre>
+{
+	"type": 1,
+	"id": 123,
+	"route" "sendnum",
+	"payload": 5
+}
+</pre>
+
+'''Response payload'''
+
+The payload for a response has a structure that enables quick error checking.
+
+{|
+! field    !! type !! description
+|-
+| result || any || the result. field is missing or null if an error was encountered
+|-
+| error   || string or null || the error. field is null or missing if no error was encountered
+|}
+
+'''Example response'''
+
+<pre>
+{
+	"type": 2,
+	"id": 123,
+	"payload": { "result": true }
+}
+</pre>
+
+'''Example notification'''
+
+<pre>
+{
+	"type": 3,
+	"route": "notifynums"
+	"payload": [1, 5, 3, 9]
+}
+</pre>
+
+===HTTP===
+
+An API using HTTP for message transport may be provided for basic account
+management and server status queries, however websocket connections are to be
+the sole means for
+[[#Client_Order_Management|placing, monitoring, and executing orders]].
+The primary reason for limiting the scope of the HTTP API is to eliminate client
+polling for rapidly changing resources, such as order status API endpoints.
+
+==References==
+
+&#91;4&#93; [https://tools.ietf.org/html/rfc6455 The WebSocket Protocol]
+
+&#91;5&#93; [https://tools.ietf.org/html/rfc8446 Transport Layer Security 1.3]
+
+&#91;6&#93; [https://tools.ietf.org/html/rfc8259 JSON]

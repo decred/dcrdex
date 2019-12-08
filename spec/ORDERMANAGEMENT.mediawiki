@@ -1,0 +1,889 @@
+==Client Order Management==
+
+This section describes the steps required of the client to place an order, and
+the interactions between the client and server to execute an order once a match
+has been found.
+See the [[#atomic-settlement|atomic settlement]] section for a high-level
+overview of the settlement process.
+
+There are three available types of order.
+
+* [[#Limit_Order|Limit orders]] are used to buy or sell a specified amount of an asset at a rate no higher (buy) or lower (sell) than a specified price.
+* [[#Market_Order|Market orders]] are used to buy or sell a specified amount of an asset at the best price available.
+* [[#Cancel_Order|Cancel orders]] are used to remove standing limit orders from the order book.
+
+The order book holds only limit orders with time in force ''standing'' that have
+not completely filled or been cancelled. All other orders are only valid for one
+[[#Epochbased_Order_Matching|epoch match cycle]].
+
+===Session Authentication===
+
+Orders must be placed on an authenticated connection. Once a websocket
+connection is established, the client will supply their account ID and signature.
+
+'''Request route:''' <code>connect</code>, '''originator: ''' client
+
+<code>payload</code>
+{|
+! field      !! type   !! description
+|-
+| accountid || string || account ID
+|-
+| apiver    || int    || requested API version
+|-
+| timestamp || int    || UNIX timestamp
+|-
+| sig       || string || hex-encoded signature of serialized connection data. serialization described below
+|}
+
+'''Connect serialization'''
+
+{|
+! field   !! size (bytes) !! description
+|-
+| account ID || 16 || client [[#Step_1_Registration|account ID]]
+|-
+| API version || 2 || requested API version
+|-
+| timestamp || 8  || the client's UNIX timestamp
+|}
+
+'''Connect response'''
+
+If the client connects shortly after a [[#Trade_Suspension|trade suspension]],
+it's possible that trading will not commence until a future epoch. The DEX
+response will indicate when trade did or will begin.
+
+If a client unexpectedly disconnects with active orders, the orders may match in
+the client's absence. A list of any pending matches is included in the response.
+
+<code>result</code>
+{|
+! field      !! type   !! description
+|-
+| startepoch || int   || the epoch at which trading did or will commence. May be in the future e.g. [[#Trade_Suspension|after maintenance]]
+|-
+| matches    || &#91;object&#93; || list of [[#Match_notifications|Match objects]]
+|}
+
+===Connection Persistence===
+
+If a connection is lost after placing an order, the client must reconnect and
+complete settlement on any matches made in their absence.
+Regardless of connection status, once a match is made, a client is always
+subject to violation of [[#Rule_1_Every_match_must_be_fully_settled|rule 1]] via
+the [[#Exchange_Variables|broadcast timeout]].
+This is true regardless of connection status.
+
+If a client is disconnected for a full epoch duration, any standing limit orders
+may be auto-cancelled by the server.
+These cancellations will count toward the client's
+[[#Rules_of_Community_Conduct|cancellation ratio]], so could potentially result
+in penalties.
+The client should manage their orders carefully to ensure that this doesn't
+occur.
+
+Market orders, and limit orders with time in force ''immediate'', are not
+cancelled under disconnection. Once submitted, these orders will always go
+through a single match cycle.
+
+If a client is in the settlement phase when a connection is dropped, the
+client will be expected to reconnect and complete settlement.
+
+===Order Book Subscriptions===
+
+An order book can be viewed and tracked by subscribing to a market.
+
+'''Request route:''' <code>orderbook</code>, '''originator: ''' client
+
+<code>payload</code>
+{|
+! field !! type   !! description
+|-
+| base  || string || currency code for the market's base asset
+|-
+| quote || string || currency code for the market's quote asset
+|}
+
+The response will contain the complete market order book.
+The order book and all updates include a '''sequence ID''', which increments by
++1 whenever the DEX accepts, removes, or modifies an order.
+The client is responsible for tracking the sequence ID to ensure all order
+updates are received. If an update appears to be missing, the client should
+re-subscribe to the market to synchronize the order book from scratch.
+
+<code>result</code>
+{|
+! field       !! type   !! description
+|-
+| book  || object || An OrderBook object
+|-
+| seq   || int    || A sequence ID
+|}
+
+'''JSON OrderBook object'''
+
+{|
+! field    !! type !! description
+|-
+| marketid || int || the market ID. included with order book updates.
+|-
+| epoch    || int  || the current epoch
+|-
+| orders   || &#91;object&#93; || A list of Order objects
+|}
+
+'''JSON Order object'''
+
+{|
+! field   !! type   !! description
+|-
+| oid     || string || the order ID
+|-
+| otype   || string || "l" for ''limit'', "m" for ''market''
+|-
+| side    || string || "b" for ''buy'', "s" for ''sell''
+|-
+| osize   || int    || order size (atoms)
+|-
+| rate    || int    || price rate. [[#Rate_Encoding|message-rate encoding]]. only set on limit orders
+|-
+| tif     || string || time in force. one of "i" for ''immediate'' or "s" for ''standing''. only set on limit orders
+|-
+| epoch   || int    || the epoch in which the order was received
+|}
+
+'''Changes to the order book''' will be received from the DEX as a stream of
+updates.
+These updates use the notification message type, so omit an <code>id</code>
+attribute.
+
+'''Notification route:''' <code>remove_order</code>, '''originator: ''' DEX
+
+<code>payload</code>
+{|
+! field   !! type !! description
+|-
+| marketid || int || the market ID
+|-
+| orderid || string || hex-encoded order ID
+|-
+| seq   || int    || A sequence ID
+|}
+
+'''Notification route:''' <code>add_limit</code> & <code>add_market</code>, '''originator: ''' DEX
+
+<code>payload</code>
+{|
+! field  !! type!! description
+|-
+| marketid || int || the market ID
+|-
+| order  || object || the Order object
+|-
+| seq    || int    || A sequence ID
+|}
+
+At the beginning of the matching cycle, the DEX will publish a list of order
+IDs and the seed hash used for
+[[#Pseudorandom_Order_Matching|order sequencing]].
+
+'''Notification route:''' <code>match_data</code>, '''originator: ''' DEX
+
+<code>payload</code>
+{|
+! field    !! type !! description
+|-
+| marketid || int || the market ID
+|-
+| epoch    || int || the epoch for which the cycle occurs
+|-
+| orderids || &#91;string&#93; || list of order IDs for the epoch
+|-
+| seed     || string || hex-encoded sorting key
+|}
+
+A client can '''unsubscribe''' from order book updates without closing the
+websocket connection.
+
+'''Request route:''' <code>unsub_orderbook</code>, '''originator: ''' client
+
+<code>payload</code>
+{|
+! field  !! type !! description
+|-
+| marketid || int || the market ID
+|}
+
+===Order Preparation===
+
+As part of the order, the client must demonstrate control of funds.
+This is accomplished by supplying information and a signature for each
+[[#Coin_ID|coin]] that will be spent.
+The client covers the ''backing fees'' associated with the inputs spending their
+own coins.
+
+In addition, the client must show the ability to cover ''base fees'' for any
+initialization transactions that will be generated. The client must show that
+they have the funds to cover all fees for the worst-case scenario, which is
+single-lot matches for the entire order.
+In practice, large orders will rarely pay the total of the base fees because
+many of the matches will be more than a single-lot.
+
+====Calculating Transaction Fees====
+
+The '''base fees''' cover transaction fees associated with making
+initialization transactions for every match in the order.
+
+For asset '''Z''', a ''base fee ratio'', '''''R<sub>z</sub>''''' is calculated
+based on the ''lot size'', '''''l''''' (units ''Z''), a ''fee rate'',
+'''''r''''' (''Z/byte''), and a ''transaction size'', '''''s''''' (''bytes'').
+'''''s''''' is pre-calculated based on a standard initialization transaction.
+
+<!--R_z = \frac{ s r }{ l }-->
+[[File:images/fee_max_ratio.png]]
+
+The ''base fee ratio'' is a constant until the DEX operator changes one of its
+factors.
+
+The ''base fees'', '''''f<sub>base</sub>''''' (units ''Z'') can be calculated
+from '''''R<sub>z</sub>''''' and the ''order quantity'', '''''Q'''''.
+
+<!--f_{base} = Q R_z-->
+[[File:images/base_fees.png]]
+
+The base fees scale linearly with order size, but the actual realized portion of
+the base fees, '''''f<sub>fin</sub>''''', can only be known to fall within a
+range '''''r s &#8804; f<sub>fin</sub> &#8804; f<sub>base</sub> '''''.
+
+The client also covers the '''backing fees''' associated with spending their
+backing coins, '''''f<sub>coin</sub>'''''.
+The client must know how to calculate the script sizes to assess fees.
+The DEX will verify the coin sum before accepting the order.
+
+====Rate Encoding====
+
+Because the rate assigned to a limit order is a quotient, the value is naturally
+expressed as a floating point number.
+To avoid floating-point error, rates in JSON API messages are encoded using a
+custom unit, '''atoms quote asset per unit base asset'''.
+This is called the '''message-rate format'''.
+This can alternatively be viewed as conventional rate multiplied by
+10<sup>8</sup> and floored to the nearest integer.
+
+As an example of message-rate encoding, if someone wanted to purchase asset Z
+using asset Y on the Z/Y market, and the user wanted to pay 0.001 Y for each 1
+Z, the message-rate encoding would be
+
+'''''r<sub>msg</sub> = 1 x 10<sup>8</sup> x 0.001 = 100000'''''
+
+with unit ''atoms Y / unit Z''.
+
+====Coin ID====
+
+In order to demonstrate control of unspent value on the blockchain, a user must
+provide its location. For Bitcoin-based blockchains, value is located by
+pointing to an unspent transaction output (UTXO), identified by its transaction
+ID and output index (vout).
+
+In an effort to stay blockchain-protocol agnostic, the DEX accepts
+and recognizes the locating information as a single byte-array called the
+'''''coin ID''''', with the term '''''coin''''' being defined here as a some
+amount of spendable value that is verifiable on the blockchain.
+It is up to backend and wallet developers to decide on how to properly encode the
+identifier as a coin ID. As an example, Bitcoin implements
+encoding as 36 bytes with the transaction hash being the first 32-bytes, and the
+big-endian encoded output index as the last 4 bytes.
+
+====Coin Preparation====
+
+All backing [[#Coin_ID|coins]] must have a minimum number of confirmations. The exact number,
+<code>swapconf</code>, is an [[#Exchange_Variables|asset variable]] set by the
+DEX operator.
+
+With the exception of market buy orders, which are detailed below, for an order
+of quantity '''''Q''''', the sum value of the selected coins, '''''V''''',
+must satisfy the relation
+(with [[#Calculating_Transaction_Fees|fees]])
+
+<!--V \ge Q + f_{base} + f_{coin}-->
+[[File:images/coin-sum.png]]
+
+There may be types of coins which are not supported by the asset's DEX
+implementation. Asset developers should make coin-spending limitations clear
+to wallet users.
+
+As part of the order, the client will submit a list of ''Coin objects''.
+
+'''JSON Coin object'''
+
+{|
+! field     !! type   !! description
+|-
+| coinid    || string || hex-encoded coin ID
+|-
+| pubkeys   || [string] || array of hex-encoded pubkeys which spend the coin
+|-
+| sigs      || [string] || array of signatures of Blake-256 hashes of the serialized coin IDs
+|-
+| redeem    || string || hex-encoded redeem script for P2SH. empty for P2PKH
+|}
+
+In order to enable multi-signature support, more than one pubkey can be
+submitted. If more than one pubkey is submitted, there should be a signature
+for each one.
+The data is signed with the private key(s) corresponding to the
+<code>pubkeys</code>.
+The <code>pubkeys</code> themselves must correspond with addresses payable by
+the coin's pubkey script (or corresponding redeem script).
+
+====Order Signing====
+
+All orders must be signed by the client and the server.
+The basic signing procedure will involve serializing order data into a byte array
+following a specific procedure that can be replicated on the server.
+The serialized data is then signed using the client's
+[[#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|private account key]].
+
+All integer encoding for all serialized structures is big endian.
+
+All order serializations have common '''prefix''' fields.
+
+'''Prefix fields and serialization'''
+{|
+! field     !! size (bytes) !! description
+|-
+| accountid || 32 || client account ID
+|-
+| base      || 4  || the base asset ID
+|-
+| quote     || 4  || the quote asset ID
+|-
+| ordertype || 1  || the type of order. limit = 1, market=2, cancel=3
+|-
+| tclient   || 8  || the client's UNIX timestamp
+|-
+| tserver   || 8  || the server's UNIX timestamp. zeros for client signature messages
+|}
+
+====Order ID====
+
+The order serialization is used to create a unique order ID.
+The ID is defined as the Blake-256 hash of the serialized order, including the
+non-zero server's timestamp. The client does not know the order ID when
+submitting, but should independently verify the ID after parsing the server's
+response.
+
+Because the order ID includes the server's timestamp, the order ID itself
+provides a checksum to ensure that order information is properly transmitted.
+The response to all order submissions is an '''order receipt''', which includes
+the timestamp.
+
+'''Order receipt'''
+
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of the serialized order, after adding the DEX timestamp
+|-
+| orderid   || string || the order ID
+|-
+| tserver || int  || the server's UNIX timestamp
+|}
+
+The client should use the server's timestamp to create a serialized order and
+independently verify the order ID. The serialized order is also the message for
+the server's signature.
+
+===Limit Order===
+
+Limit orders are for the trade of assets at a rate no higher (buy) or lower
+(sell) than a specified price.
+The client may specify the ''time in force'' of a limit order as one of: (a)
+''standing'', which remains on the books until filled or cancelled, or (b)
+''immediate'', which can complete execution wholly or partially unfilled. As
+such, the ''immediate'' option is intended for limit orders with a price that
+crosses the spread (i.e. a taker rather than a maker). The
+<code>ordersize</code> must be an integer multiple of the asset's
+[[#Exchange_Variables|lot size]].
+
+'''Request route:''' <code>limit</code>, '''originator:''' client
+
+<code>payload</code>
+{|
+! field       !! type   !! description
+|-
+| colspan="3" align="center" | 6 prefix fields
+|-
+| side        || int || buy = 1, sell = 2
+|-
+| ordersize   || int || order size (atoms)
+|-
+| rate        || int || price rate. [[#Rate_Encoding|message-rate encoding]]
+|-
+| timeinforce || int || standing = 1, immediate = 2
+|-
+| coins       ||  &#91;[[#Coin_Preparation|Coin]]&#93; || array of funding coins
+|-
+| address     || string || address where the matched client will send funds
+|-
+| sig         || string || client hex-encoded signature of the serialized order, with tserver = 0
+|}
+
+'''Limit order serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| prefix     || 57 || [[#Order_Signing|the order prefix]]
+|-
+| coin count || 1  || The number of funding coins
+|-
+| coin data  || coin length x count || [[#Coin_Preparation|sequence of coin IDs]]
+|-
+| side       || 1 || 1 for buy, 2 for sell
+|-
+| quantity   || 8 || quantity to buy or sell (atoms)
+|-
+| rate       || 8 || price rate. [[#Rate_Encoding|message-rate encoding]]
+|-
+| time in force || 1 || 1 for ''standing'', 2 for ''immediate''
+|-
+| address    || varies || client's receiving address
+|}
+
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of the serialized order, after adding the DEX timestamp
+|-
+| server time || int  || the server's UNIX timestamp
+|}
+
+===Market Order===
+
+A market order is an order to buy or sell an asset at the best available
+market price. The request payload fields are similar to a limit order, but
+without the <code>rate</code> field or <code>timeinforce</code> fields.
+
+Market orders cannot be canceled.
+Any portion of the requested quantity that does not match immediately (during
+the epoch match cycle) is left unfilled.
+
+'''Request route:''' <code>market</code>, '''originator: ''' client
+
+<code>payload</code>
+{|
+! field       !! type   !! description
+|-
+| colspan="3" align="center" | 6 prefix fields
+|-
+| side        || int || buy = 1, sell = 2
+|-
+| ordersize   || int || order size (atoms)
+|-
+| coins       ||  &#91;[[#Coin_Preparation|Coin]]&#93; || array of funding coins
+|-
+| address     || string || address where the matched client will send funds
+|-
+| sig         || string || client hex-encoded signature of the serialized order, with tserver = 0
+|}
+
+'''Market order serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| prefix     || 57 || [[#Order_Signing|the order prefix]]
+|-
+| coin count || 1  || The number of funding coins
+|-
+| coin data  || coin length x count || [[#Coin_Preparation|sequence of coin IDs]]
+|-
+| side       || 1 || 1 for buy, 2 for sell
+|-
+| quantity   || 8 || quantity to buy or sell (atoms)
+|-
+| address    || varies || client's receiving address
+|}
+
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of the order by server, after adding the DEX timestamp
+|-
+| server time || int  || the server's UNIX timestamp
+|}
+
+====Market Buy Orders====
+
+Market buy orders have a slightly different ruleset than market sell orders or
+limit orders.
+First, the <code>ordersize</code> is not denominated in the base asset, but in
+the quote asset.
+As an example, on the DCR/BTC market, where DCR is the base asset, market sell
+orders and both types of limit orders' <code>ordersize</code> are quantified in
+the base asset, DCR, but the market buy order's <code>ordersize</code> is in BTC.
+The order is essentially a statement of "buy as much DCR as you can with this
+much BTC".
+
+The <code>ordersize</code> is also not bound to the integral lot size
+constraints of other types of orders.
+
+Since the market may move before the order is matched, at the time of submission
+it is not known with certainty how many lots will match.
+For orders that are nearly 1 lot, it is possible for no matching to occur
+because by the time the order is matched it cannot afford a single lot.
+The DEX server maintains an interest in ensuring that only valid orders that
+can match are accepted, so market buy orders must be handled carefully to make
+sure they remain valid.
+
+To prevent orders becoming invalid (too small to match) due to a price increase,
+the DEX operator chooses a ''market buy buffer'', '''''b<sub>m</sub> > 1'''''.
+For a market with lot size '''''l''''', and for which there is a best known
+standing sell order price rate, '''''r''''', the <code>ordersize</code>,
+'''''Q''''' must satisfy the relation '''''Q > b<sub>m</sub> l r'''''.
+If the best rate increases before the order is matched, the order will still
+result in a fill as long as the price does not surpass
+~'''''b<sub>m</sub> r'''''.
+If the ''market buy buffer'' is set too low or the market is particularly
+volatile and the price exceeds '''''b<sub>m</sub> r''''', an order that was
+accepted but is now too small to match is considered executed but unfilled and
+there is no change to the account's
+[[#Rules_of_Community_Conduct|cancellation statistics]].
+
+===Cancel Order===
+
+Cancel orders remove standing limit orders from the order book.
+A client cannot cancel a market order or a limit order with time in force
+''immediate''. Further, due to the epoch-based pseudorandom matching process, a
+cancel order submitted in the same epoch as it's corresponding limit order has
+a 50% chance of being processed before the order it cancels, resulting in an
+error.
+This is by design and discourages certain types of spoofing.
+
+'''Request route:''' <code>cancel</code>, '''originator:''' client
+
+<code>payload</code>
+{|
+! field     !! type   !! description
+|-
+| colspan="3" align="center" | 6 prefix fields
+|-
+| orderid   || string || hex-encoded order ID
+|-
+| sig       || string || client hex-encoded signature of the serialized order data. serialization described below
+|}
+
+'''Cancel order serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| prefix     || 65 || [[#Order_Signing|the order prefix]]
+|-
+| orderid    || 16 || the order ID
+|}
+
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of the serialize order data, after adding the DEX timestamp
+|-
+| server time || int  || the server's UNIX timestamp
+|}
+
+===Match negotiation===
+
+Swap negotiation details will be relayed through the DEX with a series of
+notifications or progress reports.
+Both the DEX and the clients will need to serialize and sign the notification
+data. The originator includes their signature with the request, while the
+recipient will return an '''acknowledgement''', or a list of
+acknowledgements, as the <code>result</code> of their response payload.
+
+'''Acknowledgement'''
+
+{|
+! field     !! type   !! description
+|-
+| matchid   ||  string  || the match ID
+|-
+| sig       ||  string || hex-encoded signature of the notification data
+|}
+
+If the client's order has one or more matches at the end of a match cycle, the
+DEX will send a list of '''match objects'''. The maker is the first to act, so
+after sending their acknowledgement, they should broadcast their initialization
+transaction and inform the server with an <code>init</code> notification
+(described after).
+
+'''Request route:''' <code>match</code>, '''originator:''' DEX
+
+<code>payload</code> (array)
+{|
+! field     !! type   !! description
+|-
+| orderid   || string || order ID
+|-
+| matchid   || string    || the match ID to use for progress notifications
+|-
+| quantity  || int    || the matched amount, in atoms of the base asset
+|-
+| rate      || int    || the matched price rate. [[#Rate_Encoding|message-rate encoding]]
+|-
+| timestamp || int    || server's UNIX timestamp
+|-
+| address   || string || the counterparty's receiving address
+|-
+| sig       || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
+|}
+
+'''Match serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the ID assigned to this match
+|-
+| quantity   || 8  || the matched amount, in atoms of the base asset
+|-
+| rate       || 8  || the matched price rate. [[#Rate_Encoding|message-rate encoding]]
+|-
+| timestamp  || 8  || server's UNIX timestamp
+|-
+| address    || varies || UTF-8 encoded receiving address for the match
+|}
+
+The client will respond with a list of signed match acknowledgements.
+
+After a client broadcasts their initialization transaction, they are
+expected to report the transaction details to the server for verification and
+relay to the matching party.
+
+'''Request route:''' <code>init</code>, '''originator:''' client
+
+<code>payload</code>
+{|
+! field      !! type   !! description
+|-
+| orderid    || string || the order ID
+|-
+| matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
+|-
+| coinid    || string || hex-encoded coin ID
+|-
+| timestamp  || int    || client's UNIX timestamp
+|-
+| contract   || string || hex-encoded swap redeem script
+|-
+| sig        || string || client signature of the serialized notification. serialization described below
+|}
+
+'''Init serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the ID assigned to this match
+|-
+| coin ID    || asset-dependent  || the coin ID
+|-
+| timestamp  || 8  || the client's UNIX timestamp
+|-
+| contract   || asset-dependent || swap redeem script
+|}
+
+The DEX will respond with an acknowledgement.
+
+The DEX will send each client a notification when the counterparty has broadcast
+their initialization transaction.
+When the taker receives the <code>audit</code> notification, they will audit the
+contract and broadcast their own initialization.
+When the maker receives the <code>audit</code> notification, they will audit the
+contract and issue their redemption.
+
+'''Request route:''' <code>audit</code>, '''originator:''' DEX
+
+<code>payload</code>
+{|
+! field     !! type   !! description
+|-
+| orderid   || string || the order ID
+|-
+| matchid   || string || the match ID
+|-
+| timestamp || int  || server's UNIX timestamp
+|-
+| contract  || string || hex-encoded swap redeem script
+|-
+| sig       || string || DEX's signature of the serialized notification. serialization described below
+|}
+
+'''Audit serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the match ID
+|-
+| timestamp  || 8  || server's UNIX timestamp
+|-
+| contract   || asset-dependent || swap redeem script
+|}
+
+The client responds with an acknowledgement.
+
+When a client has redeemed their contract, they will notify the server.
+
+'''Request route:''' <code>redeem</code>, '''originator:''' client
+
+<code>payload</code>
+{|
+! field      !! type   !! description
+|-
+| orderid    || string || the order ID
+|-
+| matchid    || string    || the match ID
+|-
+| coinid    || string || hex-encoded coin ID
+|-
+| timestamp  || int    || client's UNIX timestamp
+|-
+| sig        || string || client signature of the serialized notification. serialization described below
+|}
+
+'''Redeem serialization'''
+
+<code>result</code>
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the match ID
+|-
+| coin ID    || asset-dependent  || the coin ID
+|-
+| timestamp  || 8  || the client's UNIX timestamp
+|}
+
+The DEX responds with an acknowledgement.
+
+The DEX informs the taker when the maker has redeemed.
+
+'''Request route:''' <code>redemption</code>, '''originator:''' DEX
+
+<code>payload</code>
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the match ID
+|-
+| coinid     || string || hex-encoded coin ID
+|-
+| timestamp  || int    || server's UNIX timestamp
+|-
+| sig        || string || DEX's signature of the serialized notification. serialization described below
+|}
+
+'''Redemption serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32 || the order ID
+|-
+| matchid    || 32  || the match ID
+|-
+| coin ID    || asset-dependent  || the coin ID
+|-
+| timestamp  || 8  || server's UNIX timestamp
+|}
+
+The client will respond with an acknowledgement.
+
+The taker will get the key from the maker's redemption and broadcast their own
+redemption transaction.
+
+===Match revocation===
+
+A match can be revoked by the server if a client fails to act within the
+[[#Exchange_Variables|broadcast timeout]]. A match revocation will result in
+penalties for the violating party only.
+The revoked match quantity is not added back to the order book in any form.
+
+'''Request route:''' <code>revoke_match</code>, '''originator:''' DEX
+
+<code>payload</code>
+{|
+! field    !! type   !! description
+|-
+| orderid  || string || the order ID
+|-
+| matchid  ||  string  || the match ID
+|-
+| sig      || string || DEX's hex-encoded signature of serialized revocation. serialization described below
+|}
+
+'''Revocation serialization'''
+
+{|
+! field      !! size (bytes)  !! description
+|-
+| orderid    || 32  || the order ID
+|-
+| matchid    || 32  || the match ID
+|}
+
+The client will respond with an acknowledgement.
+
+==Trade Suspension==
+
+There are a number of scenarios where the server may suspend operations,
+intentionally or not.
+During trade suspension, standing limit orders are not necessarily revoked.
+
+If the server intentionally suspends operations, they should provide a
+notification to connected clients as early as possible, ideally with several
+epochs for the client to get their orders situated before matching ceases.
+The epoch specified in the suspension notification is the first epoch for which
+orders will no longer be accepted. Users should expect to lose connection
+during suspension. When possible, the server should settle all existing matches
+before closing connections. If that is not possible, clients will need to
+reconnect and complete settlement when the server comes back online.
+
+If the server disconnects without notice, it is expected that orders placed
+during the current epoch are revoked at no penalty to the client and that
+standing limit orders are persisted.
+
+The suspension notification may indicate that standing limit orders will not be
+persisted.
+This would be the case if the DEX needs to change an asset variable such as
+the lot size or minimum transaction fee rate.
+
+If standing limit orders are persisted, they will be auto-revoked if the client
+does not reconnect before the next [[#Session_Authentication|start epoch]].
+
+'''Request route: ''' <code>suspension</code>, '''originator:''' DEX
+
+<code>payload</code>
+{|
+! field      !! type   !! description
+|-
+| epoch      || int    || the epoch in which the suspension will start
+|-
+| persist    || bool   || whether standing limit orders will persist through the suspension
+|}

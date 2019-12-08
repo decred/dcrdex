@@ -1,0 +1,119 @@
+==Account Creation==
+
+An account is uniquely identified by the client's public account key (pubkey),
+which the client provides during registration.
+After registration, the client does not identify themselves with their pubkey
+directly.
+Instead, the account is identified by an '''account ID''', which is the
+double Blake-256 hash of the client's pubkey,
+'''''<code>blake256(blake256(pubkey))</code>''''', provided as a hex-encoded
+string in API messages.
+
+===Step 1: Registration===
+
+The user creates a websocket connection and sends their
+[[#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|public account key]].
+The message is signed with the corresponding private account key. The response
+includes the server's public key. The server's public key will also be
+pre-published for further validation.
+
+'''Request route:''' <code>register</code>, '''originator: ''' client
+
+<code>payload</code>
+{|
+! field     !! type   !! description
+|-
+| pubkey    || string || hex-encoded public account key
+|-
+| timestamp || int    || UNIX timestamp
+|-
+| sig       || string || hex-encoded signature of serialized registration. serialization described below
+|}
+
+'''Registration serialization'''
+
+{|
+! field     !! size (bytes) !! description
+|-
+| pubkey    || 33 || the user's public account key
+|-
+| timestamp || 8  || the client's UNIX timestamp
+|}
+
+'''DEX response'''
+
+<code>result</code>
+{|
+! field     !! type   !! description
+|-
+| pubkey    || string || hex-encoded server public key
+|-
+| address   || string || fee address
+|-
+| fee       || int    || fee (atoms)
+|-
+| timestamp || int    || UNIX timestamp
+|-
+| sig       || string || hex-encoded signature of the serialized response. serialization described below
+|}
+
+'''Response serialization'''
+
+{|
+! field      !! size (bytes) !! description
+|-
+| DEX pubkey || 33 || the server's public key
+|-
+| client pubkey || 33 || the client's public account  key
+|-
+| timestamp  || 8  || the server's UNIX timestamp
+|-
+| fee        || 8  || registration fee (atoms)
+|-
+| address    || varies || UTF-8 encoded fee address
+|}
+
+===Step 2: Fee Notification===
+
+The client pays the fee on-chain and notifies the DEX of the transaction detail.
+The fee is paid with a standard P2PKH output to the address received in step 1.
+Once the transaction is mined and has the
+[[#Exchange_Variables|requisite number of confirmations (swapconf)]],
+the client should send their fee notification to complete
+the registration process.
+
+'''Request route:''' <code>notifyfee</code>, '''originator: ''' client
+
+<code>payload</code>
+{|
+! field     !! type   !! description
+|-
+| accountid || string || client's account ID
+|-
+| coinid    || string || hex-encoded coin ID
+|-
+| timestamp || int    || UNIX timestamp
+|-
+| sig       || string || hex-encoded signature of serialized fee notification. serialization described below
+|}
+
+'''Notification serialization'''
+
+{|
+! field      !! size (bytes) !! description
+|-
+| account ID || 16 || client account ID
+|-
+| coin ID    || asset-dependent || the coin ID
+|}
+
+<code>result</code>
+
+{|
+! field     !! type   !! description
+|-
+| sig       || string || server hex-encoded signature of client's serialized notification
+|}
+
+The client can then authenticate their connection using the
+<code>connect</code> route and begin trading.

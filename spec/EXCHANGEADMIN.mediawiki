@@ -1,0 +1,44 @@
+==Exchange Administration==
+
+Operation of the DEX will require a non-trivial amount of administrative labor.
+Clients will expect near-perfect uptime and long-term operation.
+
+Operators must manage exchange settings properly to keep markets liquid and to
+balance fees and settlement speed.
+That said, changes to exchange or asset variables will often entail revocation
+of all existing orders on a market, so should be done as infrequently as
+possible.
+
+'''Exchange Variables'''
+
+{|
+! variable !! relevant section !! units || default
+|-
+| epoch&nbsp;duration || [[#Epochbased_Order_Matching|Epoch-based Order Matching]] || seconds || 60
+|-
+| market&nbsp;buy&nbsp;buffer || [[#Market_Buy_Orders|Market Buy Orders]] || unitless ratio || 1.25
+|-
+| registration&nbsp;fees || [[#Fees|Fees]] || atoms || 1e8 (1 DCR)
+|-
+| cancellation&nbsp;threshold || [[Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 2]] || unitless ratio || 0.6
+|}
+
+'''Per-asset Variables'''
+
+{|
+! variable !! units !! description
+|-
+| lot&nbsp;size  || atoms ||  the minimum order quantity and the order quantity increment when an asset is the base asset
+|-
+| rate&nbsp;step || atoms || The minimum price rate and the price rate increment when an asset is the quote asset. [[#Rate_Encoding|message-rate encoding]]
+|-
+| fee&nbsp;rate  || atoms/byte || the minimum fee rate for swap transactions
+|-
+| coin&nbsp;confirmations|| count || the Minimum confirmations for backing coins
+|-
+| swap&nbsp;confirmations|| count || the Minimum confirmations before acting on a swap transaction
+|}
+
+See also [[#Exchange_Variables|Exchange Variables]].
+
+...

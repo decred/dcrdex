@@ -1,0 +1,265 @@
+==Distributed Exchange Design Fundamentals==
+
+There are several notable aspects of the DEX design that were chosen to permit
+peer-to-peer trades with the mechanics of order execution existing entirely on
+the separate blockchains via atomic swaps.
+These are:
+* Asset-specific order quantity increments and transaction fee rates
+* Epoch-based pseudorandom order matching
+* Client identities based on public key infrastructure (PKI)
+* An open and rigidly-defined interface for integration of arbitrary assets
+
+This section describes each of these design aspects.
+
+===Exchange Variables===
+
+There are a number of asset-specific variables that must be known by the client.
+
+The '''lot size''' for an asset serves as both the minimum order quantity and
+the order quantity increment for limit orders and market buy orders, which are
+quantified in the market's base asset.
+In particular, for ''lot size''  '''''l''''', the requested ''order quantity'',
+'''''Q''''', must satisfy
+
+<!--Q = n l, n \in \{1, 2, 3, ...\}-->
+[[File:images/lot-sizes.png]]
+
+Every asset is assigned a unique integer ID that will be used to identify the
+asset in serialized structures. Whenever possible, the ID is the same as the
+BIP-0044 registered coin type index
+[https://github.com/satoshilabs/slips/blob/master/slip-0044.md &#91;7&#93;].
+
+When the asset is the quote asset, a '''price increment''' is enforced.
+The '''rate''', '''''r''''', of a limit order must be an integer multiple of the
+''price increment'', '''''p'''''.
+
+<!--r = n p, n \in \{1, 2, 3, ...\}-->
+[[File:images/price-increment.png]]
+
+The DEX operator specifies an on-chain transaction '''fee rate'''
+(units ''atoms/byte'') used when
+[[#Calculating_Transaction_Fees|calculating the fees]] for initialization
+transactions.
+
+Each asset has two distinct '''minimum numbers of confirmations'''.
+The <code>fundconf</code> is the number of confirmations required for
+[[#Order_Preparation|backing coins]]. The <code>swapconf</code> is the number
+of confirmations required during settlement on the first swap transaction,
+before the second swap transaction is broadcast.
+
+The minimum confirmation rule is waived for a change output from a transaction
+involved in a DEX-monitored trade.
+
+The '''broadcast timeout''' is the amount of time a client has to broadcast a
+transaction. For the maker, the broadcast time is measured from the time of
+match notification.
+For the taker, timeout is measured from  the time when the maker's swap receives
+its <code>swapconf</code><sup>th</sup> confirmation.
+
+Asset info should be requested by the user immediately after connecting.
+
+'''Request route:''' <code>config</code>, '''originator:''' client
+
+The <code>config</code> request <code>payload</code> can be null. The DEX will
+respond with its current configuration.
+
+<code>result</code>
+{|
+! field     !! type !! description
+|-
+| epochlen  || int   || the [[#Epochbased_Order_Matching|epoch duration]] (seconds)
+|-
+| buybuffer || float || the [[#Market_Buy_Orders|market buy buffer]]
+|-
+| cancelmax || float || the [[Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
+|-
+| assets    || &#91;object&#93; || list of Asset objects (definition below)
+|-
+| btimeout  || int   || the broadcast timeout
+|}
+
+'''Asset object'''
+
+{|
+! field    !! type !! description
+|-
+| symbol   || string || ticker symbol
+|-
+| id       || int || a unique per-asset ID
+|-
+| lotsize  || int || lot size (atoms)
+|-
+| ratestep || int || the price rate increment (atoms)
+|-
+| feerate  || int || the fee rate for transactions (atoms/byte)
+|-
+| swapsize || int || the size of the initialization transaction (bytes)
+|-
+| swapconf || int || minimum confirmations for swap transactions
+|-
+| fundconf || int || minimum confirmations for funding coins
+|}
+
+===Fees===
+
+The DEX collects no trading fees.
+Collecting fees from trades executed via atomic swaps (where the server
+is never in control of funds and settlement occurs directly on-chain) would
+add considerable complexity to the swap process and incentivize DEX operators to
+facilitate wash trading.
+Instead, a one-time fee is collected by the pool during registration.
+Registration fees discourage certain spam attacks, enable punitive actions when
+[[#Rules_of_Community_Conduct|conduct rules]] are violated, and help to cover
+DEX operating expenses.
+Registration fees will be configurable by the exchange operator.
+
+====Transaction Fees====
+
+The clients will cover on-chain transaction fees at a minimum fee rate set by
+the DEX operator.
+Failure to provide the specified fee rate in a transaction will result in a
+conduct violation.
+
+As part of any submitted order, a client is required to demonstrate control of
+funds that will back the atomic swap, and ensure that the backing funds are
+sufficient to create the swap contract transactions transferring the full order
+quantity as well as covering the network's transaction fees at the specified
+rate.
+
+Total on-chain fees associated with an order will increase as the number of swap
+transactions required to settle the order increases. Maximum fees paid
+[[#Calculating_Transaction_Fees|vary linearly with order size]], but the actual
+fees realized can be significantly less than the maximum.
+See the [[#Atomic_Settlement|atomic settlement]] section for examples of simple
+and complex matches and how that affects the swap transaction sizes.
+
+Fee rates can vary greatly between assets.
+For many assets, low fees are possible without increasing the time until mined.
+Transaction fees tend to rise as an asset pushes the limits of on-chain scaling.
+For high-fee assets, the DEX operator must find a balance between lower fees,
+which are preferable from an accounting standpoint, and higher fees, which can
+decrease settlement time by increasing the speed at which transactions are
+mined.
+
+See also: [[#Calculating_Transaction_Fees|Calculating Transaction Fees]]
+
+===Epoch-based Order Matching===
+
+In order to devalue predatory behavior exhibited by certain high-frequency
+trading algorithms, received orders are not processed continuously, but rather
+after a shuffling step with all other orders received in a fixed duration period
+called an ''epoch''.
+The goal of this algorithm is to ensure that an individual client cannot obtain
+a deterministic latency advantage over other clients when executing trades.
+Limiting this possibility mitigates advantages gained from front-running,
+spoofing, and other manipulative trading practices.
+
+====Epoch Time====
+
+For a given epoch duration '''''d > 0''''' , and current UNIX epoch time stamp
+'''''t''''' (in seconds since Jan 01 00:00:00 1970 UTC), the current order
+matching epoch index, '''''i''''', and epoch range are computed as
+
+<!--i = t / d, i d \leq t_i < d (i + 1)-->
+[[File:images/epoch-index.png]]
+
+where '''''/''''' is integer division. For example, at the time of writing,
+'''''t = 1562008475''''' , which for '''''d = 60''''' corresponds to epoch
+number '''''i = 26033474''''' spanning '''''&#91;1562008440, 1562008500)'''''.
+This convention allows epoch times to be known without querying the server.
+
+A clock synchronization protocol such as NTP will be used to ensure server and
+client clocks are synchronized within acceptable tolerances.
+
+====Pseudorandom Order Matching====
+
+When the epoch ends, a match cycle begins.
+
+First, the order pool is shuffled.
+Shuffling is deterministic, using the Fisher-Yates algorithm where the
+random number generator seed is derived from the hash of the concatenated order
+[[#Order_ID|ID hashes]].
+Specifically for hash function '''''f''''', the seed is the 64-bit integer
+corresponding to the little-endian byte order interpretation of the first 8
+bytes of the hash.
+The hash is computed as
+
+<!--H_{seed} = f(f(order_1) || f(order_2) || ... || f(order_N))-->
+[[File:images/seed-eq.png]]
+
+where '''''order<sub>i</sub>''''' represents the order ID of the
+'''''i<sup>th</sup>''''' order in a lexicographically sorted list of
+[[#Order_ID|order IDs]] and '''''||''''' indicates concatenation.
+
+The order IDs and final hash are published at the start of the matching process.
+This is done so that the shuffling may be independently computed for external
+verification and to facilitate server mesh operation.
+
+Orders are processed one at a time. Each order is matched according to its type.
+
+1. If the order is a '''cancel order''', any corresponding standing limit order is removed from the list and the cancel order is considered filled. If a cancellation is processed before the order that it cancels, the cancellation will fail, and will need to be re-submitted. That is, cancel orders do not affect down-queue orders, only standing orders.
+
+2. If the order is a limit order with time in force ''standing'' that cannot match immediately (a '''maker'''), it is added to the standing orders. It is immediately able to match orders further down the queue.
+
+3. If the order is a '''taker''', it is matched against the best available standing order. Clients for both orders are notified and the settlement process begins. The orders are set aside for monitoring. If a limit order with time in force ''standing'' on either side of the match is only partially filled, it is added to the standing orders with the appropriate modifications and is immediately available for matching again.
+
+Any unmatched quantity on a limit order with time in force ''immediate'' is
+left unfilled.
+Market orders and immediate limit orders cannot match orders further down the
+queue.
+
+When a limit order from the queue matches a standing limit order on the book,
+the match is assigned the price rate of the maker's order (the standing order's
+price rate).
+
+The process continues with the next order in the list and iterates until all
+orders have been processed.
+
+===Identities based on Public Key Infrastructure (PKI) Key Pairs===
+
+The server and the clients are identified and authenticated using public keys,
+with matching private keys used to sign and authorize orders and other messages.
+Establishing client identity with public keys keeps the notion of client
+identity to a minimum, while providing a number of other security benefits
+throughout the order placement and execution processes.
+
+All data submitted to the exchange server from a client must be signed with the
+client's private key and authenticated by the server using the corresponding
+public key, so using client public keys directly for identity purposes is a
+natural simplification that obviates the need for client user names and
+passwords.
+
+Further, since Politeia, Decred's governance platform, also employs PKI, the
+same identities may be used on both services to facilitate time-stamping
+exchange data via Politeia. For example, given common identities between the DEX
+and Politeia, anchoring data related to DEX client and server conduct on the
+Decred blockchain may be useful for establishing a reputation system.
+
+===Blockchain Interaction===
+
+'''Clients''' need wallets that support atomic swaps and the ability to
+broadcast transactions to each of the blockchain networks involved in
+[[#Atomic_Settlement|the swap]].
+
+'''DEX operators''' need access to trusted full nodes for each of the
+assets supported.
+While operation via a surrogate blockchain data service such as a block explorer
+is potentially feasible, it would entail significant security risks.
+Initial development will require a direct connection to full nodes of each
+asset's blockchain.
+
+Adding support for an asset is accomplished by implementing a particular
+[https://golang.org/ Go] interface.
+The interface is exported and compiled with <code>-buildmode=plugin</code> to enable
+dynamic importing by the exchange operator.
+The operator will decide which plugins to import via configuration file.
+As the interface is expected to evolve greatly during initial implementation,
+the specifics of the interface structure will be released at a later time.
+
+With the exception of Decred and Bitcoin, which will be implemented during
+initial phases of DEX development, it is expected that development communities
+will release their own appropriately vetted plugins.
+
+==References==
+
+&#91;7&#93; [https://github.com/satoshilabs/slips/blob/master/slip-0044.md BIP-0044 Registered Coins

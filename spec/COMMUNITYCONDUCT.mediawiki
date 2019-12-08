@@ -1,0 +1,50 @@
+==Community Conduct==
+
+By registering, clients agree to abide by the rules described here. These rules
+are designed to ensure that clients are acting in good faith and maintaining
+behaviors that contribute to a smooth DEX experience for other users.
+
+===Rules of Community Conduct===
+
+====Rule 1: Every match must be fully settled====
+
+Swap transactions must be created at the correct times (see
+[[#Exchange_Variables|broadcast timeout]]).
+
+In the event that the maker fails to start the atomic swap process with their
+initialization transaction, the taker will be notified that order execution is
+terminated due to failure of the maker to accept the order. The Maker's limit
+order will not go back on the order book, but they may be given the option to
+replace the order.
+
+In the event that the taker fails to respond to the maker's initialization
+transaction, the maker will incur no violation.
+
+====Rule 2: An account's cancellation ratio must remain below the threshold====
+
+The cancellation ratio is the ratio of the count of cancelled orders to the
+count of completed orders.
+The cancellation threshold is set by the DEX operator.
+An order is considered completed when all matches have fully settled.
+An order is considered cancelled when a cancel order is matched to a standing
+limit order. The server may also cancel an order if the client's connection is
+dropped and the client fails to reconnect for more than 1 epoch duration.
+Cancellation of a partially filled order is counted as a full cancellation.
+The cancellation ratio is evaluated on a 25-order rolling window.
+
+====Rule 3: Transaction outputs must be properly sized====
+
+The swap output value must be sized to exactly the matched amount. The fee rate
+must be at least the minimum value set by the DEX. It is the client's
+responsibility to ensure that fees on a partial fill are not overpaid to a
+level that results in a violation of rules 1 or 3 when the remaining portion is
+matched.
+
+===Penalties===
+
+The primary penalty for breaches of conduct is a '''ban''', which includes loss
+of trading privileges, forfeiture of registration fee, and immediate revocation
+of any unfilled orders.
+
+Less drastic punitive measures such as a cool-down period may be considered
+for minor, first-time or infrequent conduct violations.
