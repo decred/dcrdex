@@ -48,6 +48,7 @@ var (
 // For brevity, a commonly used tview callback.
 type inputCapture func(event *tcell.EventKey) *tcell.EventKey
 
+// Run the TUI app.
 func Run(ctx context.Context) {
 	appCtx = ctx
 	// Initialize logging to a widget

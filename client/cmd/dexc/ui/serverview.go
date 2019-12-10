@@ -12,7 +12,7 @@ import (
 	"github.com/rivo/tview"
 )
 
-// serverView is a view with a simple for for starting a server and a journal
+// serverView is a view with a simple UI for starting a server and a journal
 // to view its log output.
 type serverView struct {
 	*tview.Flex
@@ -58,7 +58,7 @@ func newServerView(tag, addr string, runFunc func(context.Context, string, slog.
 		}
 	}
 
-	// Crate a method to toggle the state of the server. Will be available as
+	// Create a method to toggle the state of the server. Will be available as
 	// (*serverView).toggle.
 	var form *tview.Form
 	var serverToggle func()

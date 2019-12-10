@@ -40,8 +40,8 @@ func newJournal(title string, keyFunc inputCapture) *journal {
 }
 
 // The TextView's performance begins to lag after too many entries are added.
-// Maintain an buffer that lops some log messages off of the end when the
-// buffer gets too long.
+// Maintain a buffer that drops some log messages off of the front when the
+// it gets too long.
 func (j *journal) Write(p []byte) {
 	j.mtx.Lock()
 	defer j.mtx.Unlock()

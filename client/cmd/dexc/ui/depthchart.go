@@ -158,7 +158,7 @@ type edgePoint struct {
 	ch rune
 }
 
-// Translate the x,y chart data into a width edgePoints, each edgePoint with
+// Translate the x,y chart data into width edgePoints, each edgePoint with
 // 0 < y < height, and an appropriate character.
 //
 // The algorithm projects the line graph onto the width x height grid, and finds

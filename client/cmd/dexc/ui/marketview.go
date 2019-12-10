@@ -12,7 +12,7 @@ var (
 	marketChartHeight = 10
 )
 
-// marketViewer is the market view, which includes the ability to view market
+// marketViewer is the market view, which offers the ability to view market
 // info and place orders.
 type marketViewer struct {
 	*tview.Flex
