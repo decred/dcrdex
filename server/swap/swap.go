@@ -35,6 +35,10 @@ var (
 	txWaitExpiration = time.Minute
 )
 
+func unixMsNow() time.Time {
+	return time.Now().Round(time.Millisecond).UTC()
+}
+
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
@@ -304,7 +308,7 @@ func (s *Swapper) start() {
 				select {
 				case h := <-blockSource:
 					s.block <- &blockNotification{
-						time:    time.Now(),
+						time:    time.Now().UTC(),
 						height:  h,
 						assetID: assetID,
 					}
@@ -364,7 +368,7 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 	// If a swapStatus was created, the asset.Asset is already known to be in
 	// the map.
 	if confs >= int64(s.coins[status.swapAsset].SwapConf) {
-		status.swapConfirmed = time.Now()
+		status.swapConfirmed = time.Now().UTC()
 	}
 
 }
@@ -434,7 +438,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 // asset. If a client is found to have not acted when required, a match may be
 // revoked and a penalty assigned to the user.
 func (s *Swapper) checkInaction(assetID uint32) {
-	oldestAllowed := time.Now().Add(-s.bTimeout)
+	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
 	deletions := make([]string, 0)
 	s.matchMtx.RLock()
 	defer s.matchMtx.RUnlock()
@@ -788,10 +792,11 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	}
 
 	// Update the match.
+	swapTime := unixMsNow()
 	s.matchMtx.Lock()
 	matchID := stepInfo.match.ID()
 	actor.status.swap = coin
-	actor.status.swapTime = time.Now()
+	actor.status.swapTime = swapTime
 	stepInfo.match.Status = stepInfo.nextStep
 	match := stepInfo.match.Match
 	s.matchMtx.Unlock()
@@ -810,7 +815,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	auditParams := &msgjson.Audit{
 		OrderID:  idToBytes(counterParty.order.ID()),
 		MatchID:  matchID[:],
-		Time:     uint64(time.Now().Unix()),
+		Time:     uint64(order.UnixMilli(swapTime)),
 		Contract: params.Contract,
 	}
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)
@@ -862,11 +867,12 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	}
 
 	// Modify the match's swapStatuses.
+	swapTime := unixMsNow()
 	s.matchMtx.Lock()
 	matchID := stepInfo.match.ID()
 	// Update the match.
 	actor.status.redemption = coin
-	actor.status.redeemTime = time.Now()
+	actor.status.redeemTime = swapTime
 	stepInfo.match.Status = stepInfo.nextStep
 	s.matchMtx.Unlock()
 
@@ -882,7 +888,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		OrderID: idToBytes(counterParty.order.ID()),
 		MatchID: matchID[:],
 		CoinID:  params.CoinID,
-		Time:    uint64(time.Now().Unix()),
+		Time:    uint64(order.UnixMilli(swapTime)),
 	}
 
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
@@ -1025,6 +1031,7 @@ func (s *Swapper) revoke(match *matchTracker) {
 func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
 	// The initial capacity guess here is a minimum, but will avoid a few
 	// reallocs.
+	nowMs := unixMsNow()
 	matches := make([]*matchTracker, 0, len(matchSets))
 	for _, matchSet := range matchSets {
 		for _, match := range matchSet.Matches() {
@@ -1037,10 +1044,10 @@ func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
 				makerSwapAsset = maker.QuoteAsset
 				takerSwapAsset = maker.BaseAsset
 			}
-			tNow := time.Now()
+
 			matches = append(matches, &matchTracker{
 				Match: match,
-				time:  tNow,
+				time:  nowMs,
 				makerStatus: &swapStatus{
 					swapAsset: makerSwapAsset,
 				},
@@ -1056,20 +1063,21 @@ func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
 // matchNotifications creates a pair of msgjson.MatchNotification from a
 // matchTracker.
 func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
+	unixMs := uint64(order.UnixMilli(match.time))
 	return &msgjson.Match{
 			OrderID:  idToBytes(match.Maker.ID()),
 			MatchID:  idToBytes(match.ID()),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
 			Address:  match.Taker.SwapAddress(),
-			Time:     uint64(match.time.Unix()),
+			Time:     unixMs,
 		}, &msgjson.Match{
 			OrderID:  idToBytes(match.Taker.ID()),
 			MatchID:  idToBytes(match.ID()),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
 			Address:  match.Maker.SwapAddress(),
-			Time:     uint64(match.time.Unix()),
+			Time:     unixMs,
 		}
 }
 

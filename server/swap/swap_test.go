@@ -741,8 +741,8 @@ func makeCancelOrder(limitOrder *order.LimitOrder, user *tUser) *order.CancelOrd
 			BaseAsset:  limitOrder.BaseAsset,
 			QuoteAsset: limitOrder.QuoteAsset,
 			OrderType:  order.CancelOrderType,
-			ClientTime: time.Now(),
-			ServerTime: time.Now(),
+			ClientTime: unixMsNow(),
+			ServerTime: unixMsNow(),
 		},
 		TargetOrderID: limitOrder.ID(),
 	}
@@ -756,8 +756,8 @@ func makeLimitOrder(qty, rate uint64, user *tUser, makerSell bool) *order.LimitO
 				BaseAsset:  ABCID,
 				QuoteAsset: XYZID,
 				OrderType:  order.LimitOrderType,
-				ClientTime: time.Unix(1566497654, 0),
-				ServerTime: time.Unix(1566497655, 0),
+				ClientTime: order.UnixTimeMilli(1566497654000),
+				ServerTime: order.UnixTimeMilli(1566497655000),
 			},
 			Sell:     makerSell,
 			Quantity: qty,
@@ -774,8 +774,8 @@ func makeMarketOrder(qty uint64, user *tUser, makerSell bool) *order.MarketOrder
 			BaseAsset:  ABCID,
 			QuoteAsset: XYZID,
 			OrderType:  order.LimitOrderType,
-			ClientTime: time.Unix(1566497654, 0),
-			ServerTime: time.Unix(1566497655, 0),
+			ClientTime: order.UnixTimeMilli(1566497654000),
+			ServerTime: order.UnixTimeMilli(1566497655000),
 		},
 		Sell:     makerSell,
 		Quantity: qty,
@@ -966,7 +966,7 @@ func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
 		MatchID: dirtyEncode(matchInfo.matchID),
 		// We control what the backend returns, so the txid doesn't matter right now.
 		CoinID:   coinID,
-		Time:     uint64(time.Now().Unix()),
+		Time:     uint64(order.UnixMilli(unixMsNow())),
 		Contract: dirtyEncode(contract),
 	})
 
@@ -1001,7 +1001,7 @@ func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {
 		OrderID: dirtyEncode(oid),
 		MatchID: dirtyEncode(matchInfo.matchID),
 		CoinID:  coinID,
-		Time:    uint64(time.Now().Unix()),
+		Time:    uint64(order.UnixMilli(unixMsNow())),
 	})
 	return &tRedeem{
 		req:  req,
