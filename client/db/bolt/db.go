@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	dexdb "decred.org/dcrdex/client/db"
@@ -25,6 +26,8 @@ var (
 	bCopy       = encode.CopySlice
 )
 
+// Bolt works on []byte keys and values. These are some commonly used key and
+// value encodings.
 var (
 	accountsBucket = []byte("accounts")
 	ordersBucket   = []byte("orders")
@@ -71,12 +74,7 @@ func NewDB(ctx context.Context, dbPath string) (dexdb.DB, error) {
 		DB: db,
 	}
 
-	err = bdb.makeTopLevelBuckets([][]byte{accountsBucket, ordersBucket, matchesBucket})
-	if err != nil {
-		return nil, err
-	}
-
-	return bdb, nil
+	return bdb, bdb.makeTopLevelBuckets([][]byte{accountsBucket, ordersBucket, matchesBucket})
 }
 
 // ListAccounts returns a list of DEX URLs. The DB is designed to have a single
@@ -185,7 +183,7 @@ func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 		oBkt.Put(quoteKey, uint32Bytes(ord.Quote()))
 		oBkt.Put(statusKey, uint16Bytes(uint16(md.Status)))
 		oBkt.Put(dexKey, []byte(md.DEX))
-		oBkt.Put(updateTimeKey, uint64Bytes(uint64(time.Now().Unix())))
+		oBkt.Put(updateTimeKey, uint64Bytes(timeNow()))
 		oBkt.Put(proofKey, md.Proof.Encode())
 		oBkt.Put(orderKey, encode.EncodeOrder(ord))
 		return err
@@ -203,22 +201,94 @@ func (db *boltDB) ActiveOrders() ([]*dexdb.MetaOrder, error) {
 }
 
 // AccountOrders retrieves all orders associated with the specified DEX.
-func (db *boltDB) AccountOrders(dex string) ([]*dexdb.MetaOrder, error) {
+func (db *boltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
-	return db.filteredOrders(func(oBkt *bolt.Bucket) bool {
-		return bEqual(dexB, oBkt.Get(dexKey))
+	if n == 0 && since == 0 {
+		return db.filteredOrders(func(oBkt *bolt.Bucket) bool {
+			return bEqual(dexB, oBkt.Get(dexKey))
+		})
+	}
+	sinceB := uint64Bytes(since)
+	return db.newestOrders(n, func(oBkt *bolt.Bucket) bool {
+		timeB := oBkt.Get(updateTimeKey)
+		return bEqual(dexB, oBkt.Get(dexKey)) && bytes.Compare(timeB, sinceB) >= 0
 	})
 }
 
 // MarketOrders retrieves all orders for the specified DEX and market.
-func (db *boltDB) MarketOrders(dex string, base, quote uint32) ([]*dexdb.MetaOrder, error) {
+func (db *boltDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	baseB := uint32Bytes(base)
 	quoteB := uint32Bytes(quote)
+	if n == 0 && since == 0 {
+		return db.marketOrdersAll(dexB, baseB, quoteB)
+	}
+	return db.marketOrdersSince(dexB, baseB, quoteB, n, since)
+}
+
+// marketOrdersAll retrieves all orders for the specified DEX and market.
+func (db *boltDB) marketOrdersAll(dexB, baseB, quoteB []byte) ([]*dexdb.MetaOrder, error) {
 	return db.filteredOrders(func(oBkt *bolt.Bucket) bool {
 		return bEqual(dexB, oBkt.Get(dexKey)) && bEqual(baseB, oBkt.Get(baseKey)) &&
 			bEqual(quoteB, oBkt.Get(quoteKey))
 	})
+}
+
+// marketOrdersSince grabs market orders with optional filters for maximum count
+// and age. The sort order is always newest first. If n is 0, there is no limit
+// to the number of orders returned. If using with both n = 0, and since = 0,
+// use marketOrdersAll instead.
+func (db *boltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uint64) ([]*dexdb.MetaOrder, error) {
+	sinceB := uint64Bytes(since)
+	return db.newestOrders(n, func(oBkt *bolt.Bucket) bool {
+		timeB := oBkt.Get(updateTimeKey)
+		return bEqual(dexB, oBkt.Get(dexKey)) && bEqual(baseB, oBkt.Get(baseKey)) &&
+			bEqual(quoteB, oBkt.Get(quoteKey)) && bytes.Compare(timeB, sinceB) >= 0
+	})
+}
+
+// orderTimePair is used to build an on-the-fly index to sort orders by time.
+type orderTimePair struct {
+	oid []byte
+	t   uint64
+}
+
+// newestOrders returns the n newest orders, filtered with a supplied filter
+// function. Each order's bucket is provided to the filter, and a boolean true
+// return value indicates the order should is eligible to be decoded and
+// returned.
+func (db *boltDB) newestOrders(n int, filter func(*bolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
+	var orders []*dexdb.MetaOrder
+	db.ordersView(func(master *bolt.Bucket) error {
+		pairs := make([]*orderTimePair, 0, n)
+		master.ForEach(func(oid, _ []byte) error {
+			oBkt := master.Bucket(oid)
+			timeB := oBkt.Get(updateTimeKey)
+			if filter(oBkt) {
+				pairs = append(pairs, &orderTimePair{
+					oid: oid,
+					t:   intCoder.Uint64(timeB),
+				})
+			}
+			return nil
+		})
+		// Sort the pairs newest first.
+		sort.Slice(pairs, func(i, j int) bool { return pairs[i].t > pairs[j].t })
+		if n > 0 && len(pairs) > n {
+			pairs = pairs[:n]
+		}
+
+		for _, pair := range pairs {
+			oBkt := master.Bucket(pair.oid)
+			o, err := decodeOrderBucket(pair.oid, oBkt)
+			if err != nil {
+				return err
+			}
+			orders = append(orders, o)
+		}
+		return nil
+	})
+	return orders, nil
 }
 
 // filteredOrders gets all orders that pass the provided filter function. Each
@@ -228,43 +298,67 @@ func (db *boltDB) filteredOrders(filter func(*bolt.Bucket) bool) ([]*dexdb.MetaO
 	var orders []*dexdb.MetaOrder
 	var err error
 	db.ordersView(func(master *bolt.Bucket) error {
-		master.ForEach(func(k, _ []byte) error {
-			oBkt := master.Bucket(k)
+		master.ForEach(func(oid, _ []byte) error {
+			oBkt := master.Bucket(oid)
 			if oBkt == nil {
-				return fmt.Errorf("order %x bucket is not a bucket", k)
+				return fmt.Errorf("order %x bucket is not a bucket", oid)
 			}
 			if filter(oBkt) {
-				var ord order.Order
-				orderB := oBkt.Get(orderKey)
-				if orderB == nil {
-					return fmt.Errorf("nil order bytes for order %x", k)
-				}
-				ord, err = encode.DecodeOrder(bCopy(orderB))
+				o, err := decodeOrderBucket(oid, oBkt)
 				if err != nil {
-					return fmt.Errorf("error decoding order %x: %v", k, err)
+					return err
 				}
-				proofB := oBkt.Get(proofKey)
-				if proofB == nil {
-					return fmt.Errorf("nil proof for order %x", k)
-				}
-				proof, err := dexdb.DecodeOrderProof(bCopy(proofB))
-				if err != nil {
-					return fmt.Errorf("error decoding order proof for %x: %v", k, err)
-				}
-				orders = append(orders, &dexdb.MetaOrder{
-					MetaData: &dexdb.OrderMetaData{
-						Proof:  *proof,
-						Status: order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
-						DEX:    string(oBkt.Get(dexKey)),
-					},
-					Order: ord,
-				})
+				orders = append(orders, o)
 			}
 			return nil
 		})
 		return nil
 	})
 	return orders, err
+}
+
+// Order fetches a MetaOrder by order ID.
+func (db *boltDB) Order(oid order.OrderID) (mord *dexdb.MetaOrder, err error) {
+	oidB := oid[:]
+	err = db.ordersView(func(master *bolt.Bucket) error {
+		oBkt := master.Bucket(oidB)
+		if oBkt == nil {
+			return fmt.Errorf("order %s not found", oid)
+		}
+		var err error
+		mord, err = decodeOrderBucket(oidB, oBkt)
+		return err
+	})
+	return mord, err
+}
+
+// decodeOrderBucket decodes the order's *bolt.Bucket into a *MetaOrder.
+func decodeOrderBucket(oid []byte, oBkt *bolt.Bucket) (*dexdb.MetaOrder, error) {
+	var ord order.Order
+	orderB := oBkt.Get(orderKey)
+	if orderB == nil {
+		return nil, fmt.Errorf("nil order bytes for order %x", oid)
+	}
+	ord, err := encode.DecodeOrder(bCopy(orderB))
+	if err != nil {
+		return nil, fmt.Errorf("error decoding order %x: %v", oid, err)
+	}
+	proofB := oBkt.Get(proofKey)
+	if proofB == nil {
+		return nil, fmt.Errorf("nil proof for order %x", oid)
+	}
+	proof, err := dexdb.DecodeOrderProof(bCopy(proofB))
+	if err != nil {
+		return nil, fmt.Errorf("error decoding order proof for %x: %v", oid, err)
+	}
+	return &dexdb.MetaOrder{
+		MetaData: &dexdb.OrderMetaData{
+			Proof:  *proof,
+			Status: order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
+			DEX:    string(oBkt.Get(dexKey)),
+		},
+		Order: ord,
+	}, nil
 }
 
 // ordersView is a convenience function for reading from the order bucket.
@@ -297,7 +391,7 @@ func (db *boltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 		mBkt.Put(quoteKey, uint32Bytes(md.Quote))
 		mBkt.Put(statusKey, []byte{byte(md.Status)})
 		mBkt.Put(dexKey, []byte(md.DEX))
-		mBkt.Put(updateTimeKey, uint64Bytes(uint64(time.Now().Unix())))
+		mBkt.Put(updateTimeKey, uint64Bytes(timeNow()))
 		mBkt.Put(proofKey, md.Proof.Encode())
 		mBkt.Put(matchKey, encode.EncodeMatch(match))
 		return err
@@ -407,6 +501,12 @@ func (db *boltDB) withBucket(bkt []byte, viewer txFunc, f bucketFunc) error {
 		return err
 	})
 	return err
+}
+
+// timeNow is the current unix timestamp in milliseconds.
+func timeNow() uint64 {
+	t := time.Now()
+	return uint64(t.Unix()*1e3) + uint64(t.Nanosecond())/1e6
 }
 
 // A couple of common bbolt functions.

@@ -40,6 +40,7 @@ func randBool() bool {
 	return rand.Intn(2) == 1
 }
 
+// A random base-58 string.
 func RandomAddress() string {
 	b := make([]byte, addressLength)
 	for i := range b {
@@ -59,12 +60,14 @@ func NextAccount() account.AccountID {
 	return acctID
 }
 
+// RandomOrderID creates a random order ID.
 func RandomOrderID() order.OrderID {
 	var oid order.OrderID
 	copy(oid[:], randBytes(order.OrderIDSize))
 	return oid
 }
 
+// RandomMatchID creates a random match ID.
 func RandomMatchID() order.MatchID {
 	var mid order.MatchID
 	copy(mid[:], randBytes(order.MatchIDSize))
@@ -79,6 +82,7 @@ type Writer struct {
 	Market *Market
 }
 
+// RandomWriter creates a random Writer.
 func RandomWriter() *Writer {
 	return &Writer{
 		Addr: RandomAddress(),
@@ -122,6 +126,7 @@ func WriteLimitOrder(writer *Writer, rate, lots uint64, force order.TimeInForce,
 	}
 }
 
+// RandomLimitOrder creates a random limit order with a random writer.
 func RandomLimitOrder() *order.LimitOrder {
 	return WriteLimitOrder(RandomWriter(), randUint64(), randUint64(), order.TimeInForce(rand.Intn(2)), 0)
 }
@@ -150,6 +155,7 @@ func WriteMarketOrder(writer *Writer, lots uint64, timeOffset int64) *order.Mark
 	}
 }
 
+// RandomMarketOrder creates a random market order with a random writer.
 func RandomMarketOrder() *order.MarketOrder {
 	return WriteMarketOrder(RandomWriter(), randUint64(), 0)
 }
@@ -169,10 +175,13 @@ func WriteCancelOrder(writer *Writer, targetOrderID order.OrderID, timeOffset in
 	}
 }
 
+// RandomCancelOrder creates a random cancel order with a random writer.
 func RandomCancelOrder() *order.CancelOrder {
 	return WriteCancelOrder(RandomWriter(), RandomOrderID(), 0)
 }
 
+// ComparePrefix compares the prefixes field-by-field and returns an error if a
+// mismatch is found.
 func ComparePrefix(p1, p2 *order.Prefix) error {
 	if !bytes.Equal(p1.AccountID[:], p2.AccountID[:]) {
 		return fmt.Errorf("account ID mismatch. %x != %x", p1.AccountID[:], p2.AccountID[:])
@@ -195,6 +204,8 @@ func ComparePrefix(p1, p2 *order.Prefix) error {
 	return nil
 }
 
+// CompareTrade compares the MarketOrders field-by-field and returns an error if
+// a mismatch is found.
 func CompareTrade(t1, t2 *order.MarketOrder) error {
 	if len(t1.Coins) != len(t2.Coins) {
 		return fmt.Errorf("coin length mismatch. %d != %d", len(t1.Coins), len(t2.Coins))
@@ -217,6 +228,7 @@ func CompareTrade(t1, t2 *order.MarketOrder) error {
 	return nil
 }
 
+// RandomUserMatch creates a random UserMatch.
 func RandomUserMatch() *order.UserMatch {
 	return &order.UserMatch{
 		OrderID:  RandomOrderID(),
@@ -230,6 +242,8 @@ func RandomUserMatch() *order.UserMatch {
 	}
 }
 
+// CompareUserMatch compares the UserMatches field-by-field and returns an error
+// if a mismatch is found.
 func CompareUserMatch(m1, m2 *order.UserMatch) error {
 	if !bytes.Equal(m1.OrderID[:], m2.OrderID[:]) {
 		return fmt.Errorf("OrderID mismatch. %s != %s", m1.OrderID, m2.OrderID)
@@ -262,6 +276,8 @@ type testKiller interface {
 	Fatalf(string, ...interface{})
 }
 
+// MustComparePrefix compares the Prefix field-by-field and calls the Fatalf
+// method on the supplied testKiller if a mismatch is encountered.
 func MustComparePrefix(t testKiller, p1, p2 *order.Prefix) {
 	err := ComparePrefix(p1, p2)
 	if err != nil {
@@ -269,6 +285,8 @@ func MustComparePrefix(t testKiller, p1, p2 *order.Prefix) {
 	}
 }
 
+// MustCompareTrade compares the MarketOrders field-by-field and calls the
+// Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareTrade(t testKiller, t1, t2 *order.MarketOrder) {
 	err := CompareTrade(t1, t2)
 	if err != nil {
@@ -276,6 +294,8 @@ func MustCompareTrade(t testKiller, t1, t2 *order.MarketOrder) {
 	}
 }
 
+// MustCompareUserMatch compares the UserMatches field-by-field and calls the
+// Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareUserMatch(t testKiller, m1, m2 *order.UserMatch) {
 	err := CompareUserMatch(m1, m2)
 	if err != nil {
@@ -283,6 +303,8 @@ func MustCompareUserMatch(t testKiller, m1, m2 *order.UserMatch) {
 	}
 }
 
+// MustCompareUserMatch compares the LimitOrders field-by-field and calls the
+// Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareLimitOrders(t testKiller, l1, l2 *order.LimitOrder) {
 	MustComparePrefix(t, &l1.Prefix, &l2.Prefix)
 	MustCompareTrade(t, &l1.MarketOrder, &l2.MarketOrder)
@@ -294,11 +316,15 @@ func MustCompareLimitOrders(t testKiller, l1, l2 *order.LimitOrder) {
 	}
 }
 
+// MustCompareMarketOrders compares the MarketOrders field-by-field and calls
+// the Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareMarketOrders(t testKiller, m1, m2 *order.MarketOrder) {
 	MustComparePrefix(t, &m1.Prefix, &m2.Prefix)
 	MustCompareTrade(t, m1, m2)
 }
 
+// MustCompareCancelOrders compares the CancelOrders field-by-field and calls
+// the Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareCancelOrders(t testKiller, c1, c2 *order.CancelOrder) {
 	MustComparePrefix(t, &c1.Prefix, &c2.Prefix)
 	if !bytes.Equal(c1.TargetOrderID[:], c2.TargetOrderID[:]) {
@@ -306,6 +332,8 @@ func MustCompareCancelOrders(t testKiller, c1, c2 *order.CancelOrder) {
 	}
 }
 
+// MustCompareOrders compares the Orders field-by-field and calls
+// the Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareOrders(t testKiller, o1, o2 order.Order) {
 	switch ord1 := o1.(type) {
 	case *order.LimitOrder:

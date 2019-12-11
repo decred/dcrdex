@@ -131,7 +131,17 @@ func randOrderForMarket(base, quote uint32) order.Order {
 		o.QuoteAsset = quote
 		return o
 	}
+}
 
+func mustContainOrder(t *testing.T, os []*db.MetaOrder, o *db.MetaOrder) {
+	oid := o.Order.ID()
+	for _, mord := range os {
+		if mord.Order.ID() == oid {
+			ordertest.MustCompareOrders(t, mord.Order, o.Order)
+			return
+		}
+	}
+	t.Fatalf("order %x not contained in list", oid[:])
 }
 
 func TestOrders(t *testing.T) {
@@ -147,7 +157,7 @@ func TestOrders(t *testing.T) {
 	base1, quote1 := randU32(), randU32()
 	base2, quote2 := randU32(), randU32()
 
-	numToDo := 1000 // must be even
+	numToDo := 1000 // must be a multiple of 4
 	numActive := 100
 	orders := make(map[int]*db.MetaOrder, numToDo)
 	orderIndex := make(map[order.OrderID]order.Order)
@@ -179,15 +189,33 @@ func TestOrders(t *testing.T) {
 		}
 		orderIndex[ord.ID()] = ord
 	})
+
 	tStart := time.Now()
+	// Grab a timestamp halfway through.
+	var tMid uint64
+	iMid := numToDo / 2
 	nTimes(numToDo, func(i int) {
+		time.Sleep(time.Millisecond)
+		if i == iMid {
+			tMid = timeNow()
+		}
 		err := boltdb.UpdateOrder(orders[i])
 		if err != nil {
 			t.Fatalf("error inserting order: %v", err)
 		}
 	})
-	t.Logf("%d millseconds to insert %d MetaOrder", time.Since(tStart)/time.Millisecond, numToDo)
+	t.Logf("~ %d milliseconds to insert %d MetaOrder", int(time.Since(tStart)/time.Millisecond)-numToDo, numToDo)
 	tStart = time.Now()
+
+	// Grab an order by ID.
+	firstOrd := orders[0].Order
+	mord, err := boltdb.Order(firstOrd.ID())
+	if err != nil {
+		t.Fatalf("unable to retrieve order by id")
+	}
+	ordertest.MustCompareOrders(t, firstOrd, mord.Order)
+
+	// Check the active orders.
 	activeOrders, err := boltdb.ActiveOrders()
 	if err != nil {
 		t.Fatalf("error retrieving active orders: %v", err)
@@ -203,7 +231,7 @@ func TestOrders(t *testing.T) {
 
 	// Get the orders for account 1.
 	tStart = time.Now()
-	acctOrders, err := boltdb.AccountOrders(acct1.URL)
+	acctOrders, err := boltdb.AccountOrders(acct1.URL, 0, 0)
 	if err != nil {
 		t.Fatalf("error fetching account orders: %v", err)
 	}
@@ -216,9 +244,23 @@ func TestOrders(t *testing.T) {
 	}
 	t.Logf("%d millseconds to read and compare %d account MetaOrder", time.Since(tStart)/time.Millisecond, numToDo/2)
 
+	// Filter the account's first half of orders by timestamp.
+	tStart = time.Now()
+	sinceOrders, err := boltdb.AccountOrders(acct1.URL, 0, tMid)
+	if err != nil {
+		t.Fatalf("error retreiving account's since orders: %v", err)
+	}
+	if len(sinceOrders) != numToDo/4 {
+		t.Fatalf("expected %d orders for account with since time, got %d", numToDo/4, len(sinceOrders))
+	}
+	for _, mord := range sinceOrders {
+		mustContainOrder(t, acctOrders, mord)
+	}
+	t.Logf("%d millseconds to read %d time-filtered MetaOrders for account", time.Since(tStart)/time.Millisecond, numToDo/4)
+
 	// Get the orders for the specified market.
 	tStart = time.Now()
-	mktOrders, err := boltdb.MarketOrders(acct1.URL, base1, quote1)
+	mktOrders, err := boltdb.MarketOrders(acct1.URL, base1, quote1, 0, 0)
 	if err != nil {
 		t.Fatalf("error retrieving orders for market: %v", err)
 	}
@@ -227,6 +269,35 @@ func TestOrders(t *testing.T) {
 	}
 	t.Logf("%d millseconds to read and compare %d MetaOrder for market", time.Since(tStart)/time.Millisecond, numToDo/2)
 
+	// Filter the market's first half out by timestamp.
+	tStart = time.Now()
+	sinceOrders, err = boltdb.MarketOrders(acct1.URL, base1, quote1, 0, tMid)
+	if err != nil {
+		t.Fatalf("error retreiving market's since orders: %v", err)
+	}
+	if len(sinceOrders) != numToDo/4 {
+		t.Fatalf("expected %d orders for market with since time, got %d", numToDo/4, len(sinceOrders))
+	}
+	for _, mord := range sinceOrders {
+		mustContainOrder(t, acctOrders, mord)
+	}
+	t.Logf("%d millseconds to read %d time-filtered MetaOrders for market", time.Since(tStart)/time.Millisecond, numToDo/4)
+
+	// Same thing, but only last half
+	halfSince := len(sinceOrders) / 2
+	nOrders, err := boltdb.MarketOrders(acct1.URL, base1, quote1, halfSince, tMid)
+	if err != nil {
+		t.Fatalf("error returning n orders: %v", err)
+	}
+	if len(nOrders) != halfSince {
+		t.Fatalf("requested %d orders, got %d", halfSince, len(nOrders))
+	}
+	// Should match exactly with first half of sinceOrders.
+	for i := 0; i < halfSince; i++ {
+		ordertest.MustCompareOrders(t, nOrders[i].Order, sinceOrders[i].Order)
+	}
+
+	// Make a MetaOrder and check insertion errors.
 	m := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusExecuted,
@@ -260,8 +331,6 @@ func TestOrders(t *testing.T) {
 
 func TestMatches(t *testing.T) {
 	boltdb := newTestDB(t)
-	ordertest.RandomUserMatch()
-	dbtest.RandomMatchProof(0.5)
 	base, quote := randU32(), randU32()
 	acct := dbtest.RandomAccountInfo()
 

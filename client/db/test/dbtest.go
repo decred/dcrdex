@@ -18,6 +18,7 @@ func randomPubKey() *secp256k1.PublicKey {
 	return pub
 }
 
+// RandomAccountInfo creates an AccountInfo with random values.
 func RandomAccountInfo() *db.AccountInfo {
 	return &db.AccountInfo{
 		URL:       ordertest.RandomAddress(),
@@ -33,9 +34,27 @@ func randBytes(l int) []byte {
 	return b
 }
 
+// RandomMatchProof creates a match proof with random values. Set the sparsity
+// to change how many fields are populated, with some variation around the ratio
+// supplied. 0 < sparsity < 1.
 func RandomMatchProof(sparsity float64) *db.MatchProof {
 	proof := new(db.MatchProof)
 	doZero := func() bool { return rand.Intn(1000) < int(sparsity*1000) }
+	if !doZero() {
+		proof.CounterScript = randBytes(75)
+	}
+	if !doZero() {
+		proof.SecretHash = randBytes(32)
+	}
+	if !doZero() {
+		proof.SecretKey = randBytes(32)
+	}
+	if !doZero() {
+		proof.InitStamp = rand.Uint64()
+	}
+	if !doZero() {
+		proof.RedeemStamp = rand.Uint64()
+	}
 	if !doZero() {
 		proof.MakerSwap = randBytes(36)
 	}
@@ -49,19 +68,34 @@ func RandomMatchProof(sparsity float64) *db.MatchProof {
 		proof.TakerRedeem = randBytes(36)
 	}
 	if !doZero() {
-		proof.Sigs.Match = randBytes(73)
+		proof.Auth.MatchSig = randBytes(73)
 	}
 	if !doZero() {
-		proof.Sigs.Init = randBytes(73)
+		proof.Auth.MatchStamp = rand.Uint64()
 	}
 	if !doZero() {
-		proof.Sigs.Audit = randBytes(73)
+		proof.Auth.InitSig = randBytes(73)
 	}
 	if !doZero() {
-		proof.Sigs.Redeem = randBytes(73)
+		proof.Auth.InitStamp = rand.Uint64()
 	}
 	if !doZero() {
-		proof.Sigs.Redemption = randBytes(73)
+		proof.Auth.AuditSig = randBytes(73)
+	}
+	if !doZero() {
+		proof.Auth.AuditStamp = rand.Uint64()
+	}
+	if !doZero() {
+		proof.Auth.RedeemSig = randBytes(73)
+	}
+	if !doZero() {
+		proof.Auth.RedeemStamp = rand.Uint64()
+	}
+	if !doZero() {
+		proof.Auth.RedemptionSig = randBytes(73)
+	}
+	if !doZero() {
+		proof.Auth.RedemptionStamp = rand.Uint64()
 	}
 	return proof
 }
@@ -70,25 +104,53 @@ type testKiller interface {
 	Fatalf(string, ...interface{})
 }
 
-func MustCompareMatchSigs(t testKiller, s1, s2 *db.MatchSignatures) {
-	if !bytes.Equal(s1.Match, s2.Match) {
-		t.Fatalf("Match mismatch. %x != %x", s1.Match, s2.Match)
+// Ensure the two MatchAuth are identical, calling the Fatalf method of the
+// testKiller if not.
+func MustCompareMatchAuth(t testKiller, a1, a2 *db.MatchAuth) {
+	if !bytes.Equal(a1.MatchSig, a2.MatchSig) {
+		t.Fatalf("MatchSig mismatch. %x != %x", a1.MatchSig, a2.MatchSig)
 	}
-	if !bytes.Equal(s1.Init, s2.Init) {
-		t.Fatalf("Init mismatch. %x != %x", s1.Init, s2.Init)
+	if a1.MatchStamp != a2.MatchStamp {
+		t.Fatalf("MatchStamp mismatch. %d != %d", a1.MatchStamp, a2.MatchStamp)
 	}
-	if !bytes.Equal(s1.Audit, s2.Audit) {
-		t.Fatalf("Audit mismatch. %x != %x", s1.Audit, s2.Audit)
+	if !bytes.Equal(a1.InitSig, a2.InitSig) {
+		t.Fatalf("InitSig mismatch. %x != %x", a1.InitSig, a2.InitSig)
 	}
-	if !bytes.Equal(s1.Redeem, s2.Redeem) {
-		t.Fatalf("Redeem mismatch. %x != %x", s1.Redeem, s2.Redeem)
+	if a1.InitStamp != a2.InitStamp {
+		t.Fatalf("InitStamp mismatch. %d != %d", a1.InitStamp, a2.InitStamp)
 	}
-	if !bytes.Equal(s1.Redemption, s2.Redemption) {
-		t.Fatalf("Redemption mismatch. %x != %x", s1.Redemption, s2.Redemption)
+	if !bytes.Equal(a1.AuditSig, a2.AuditSig) {
+		t.Fatalf("AuditSig mismatch. %x != %x", a1.AuditSig, a2.AuditSig)
+	}
+	if a1.AuditStamp != a2.AuditStamp {
+		t.Fatalf("AuditStamp mismatch. %d != %d", a1.AuditStamp, a2.AuditStamp)
+	}
+	if !bytes.Equal(a1.RedeemSig, a2.RedeemSig) {
+		t.Fatalf("RedeemSig mismatch. %x != %x", a1.RedeemSig, a2.RedeemSig)
+	}
+	if a1.RedeemStamp != a2.RedeemStamp {
+		t.Fatalf("RedeemStamp mismatch. %d != %d", a1.RedeemStamp, a2.RedeemStamp)
+	}
+	if !bytes.Equal(a1.RedemptionSig, a2.RedemptionSig) {
+		t.Fatalf("RedemptionSig mismatch. %x != %x", a1.RedemptionSig, a2.RedemptionSig)
+	}
+	if a1.RedemptionStamp != a2.RedemptionStamp {
+		t.Fatalf("RedemptionStamp mismatch. %d != %d", a1.RedemptionStamp, a2.RedemptionStamp)
 	}
 }
 
+// Ensure the two MustCompareMatchProof are identical, calling the Fatalf method
+// of the  testKiller if not.
 func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
+	if !bytes.Equal(m1.CounterScript, m2.CounterScript) {
+		t.Fatalf("CounterScript mismatch. %x != %x", m1.CounterScript, m2.CounterScript)
+	}
+	if !bytes.Equal(m1.SecretHash, m2.SecretHash) {
+		t.Fatalf("SecretHash mismatch. %x != %x", m1.SecretHash, m2.SecretHash)
+	}
+	if !bytes.Equal(m1.SecretKey, m2.SecretKey) {
+		t.Fatalf("SecretKey mismatch. %x != %x", m1.SecretKey, m2.SecretKey)
+	}
 	if !bytes.Equal(m1.MakerSwap, m2.MakerSwap) {
 		t.Fatalf("MakerSwap mismatch. %x != %x", m1.MakerSwap, m2.MakerSwap)
 	}
@@ -101,9 +163,11 @@ func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 	if !bytes.Equal(m1.TakerRedeem, m2.TakerRedeem) {
 		t.Fatalf("TakerRedeem mismatch. %x != %x", m1.TakerRedeem, m2.TakerRedeem)
 	}
-	MustCompareMatchSigs(t, &m1.Sigs, &m2.Sigs)
+	MustCompareMatchAuth(t, &m1.Auth, &m2.Auth)
 }
 
+// Ensure the two MustCompareAccountInfo are identical, calling the Fatalf
+// method of the  testKiller if not.
 func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 	if a1.URL != a2.URL {
 		t.Fatalf("URL mismatch. %s != %s", a1.URL, a2.URL)

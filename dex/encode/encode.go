@@ -25,10 +25,6 @@ var (
 	bEqual    = bytes.Equal
 )
 
-// ByteDecoder is a function that decodes a 2D byte-slice into a struct. Used
-// with VersionedDecode.
-type ByteDecoder func([][]byte) error
-
 // Uint64Bytes converts the uint16 to a length-2, big-endian encoded byte slice.
 func Uint16Bytes(i uint16) []byte {
 	b := make([]byte, 2)
@@ -103,13 +99,15 @@ func EncodePrefix(p *order.Prefix) []byte {
 
 // DecodePrefix decodes the versioned blob to a *Prefix.
 func DecodePrefix(b []byte) (prefix *order.Prefix, err error) {
-	err = VersionedDecode("DecodePrefix", b, map[byte]ByteDecoder{
-		0: func(p [][]byte) error {
-			prefix, err = decodePrefix_v0(p)
-			return err
-		},
-	})
-	return prefix, err
+	ver, pushes, err := DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodePrefix_v0(pushes)
+	}
+	return nil, fmt.Errorf("unkown Prefix version %d", ver)
 }
 
 // decodePrefix_v0 decodes the v0 payload into a *Prefix.
@@ -156,13 +154,15 @@ func EncodeTrade(ord *order.MarketOrder) []byte {
 // DecodeTrade decodes the versioned-blob market order, but does not populate
 // the embedded Prefix.
 func DecodeTrade(b []byte) (mrkt *order.MarketOrder, err error) {
-	err = VersionedDecode("DecodeTrade", b, map[byte]ByteDecoder{
-		0: func(p [][]byte) error {
-			mrkt, err = decodeTrade_v0(p)
-			return err
-		},
-	})
-	return mrkt, err
+	ver, pushes, err := DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeTrade_v0(pushes)
+	}
+	return nil, fmt.Errorf("unkown MarketOrder version %d", ver)
 }
 
 // decodeTrade_v0 decodes the version 0 payload into a MarketOrder, but
@@ -209,13 +209,15 @@ func EncodeMatch(match *order.UserMatch) []byte {
 
 // DecodeMatch decodes the versioned blob into a UserMatch.
 func DecodeMatch(b []byte) (match *order.UserMatch, err error) {
-	err = VersionedDecode("decodeMatch", b, map[byte]ByteDecoder{
-		0: func(pushes [][]byte) error {
-			match, err = matchDecoder_v0(pushes)
-			return err
-		},
-	})
-	return match, err
+	ver, pushes, err := DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return matchDecoder_v0(pushes)
+	}
+	return nil, fmt.Errorf("unkown UserMatch version %d", ver)
 }
 
 // matchDecoder_v0 decodes the version 0 payload into a *UserMatch.
@@ -251,7 +253,7 @@ func matchDecoder_v0(pushes [][]byte) (*order.UserMatch, error) {
 	}, nil
 }
 
-// Single-length byte slices used as a flag to indicate common order constants.
+// Length-1 byte slices used as flags to indicate common order constants.
 var (
 	orderTypeLimit    = []byte{'l'}
 	orderTypeMarket   = []byte{'m'}
@@ -296,13 +298,15 @@ func EncodeOrder(ord order.Order) []byte {
 // DecodeOrder decodes the byte-encoded order. DecodeOrder accepts any type of
 // order.
 func DecodeOrder(b []byte) (ord order.Order, err error) {
-	err = VersionedDecode("decodeOrder", b, map[byte]ByteDecoder{
-		0: func(p [][]byte) error {
-			ord, err = decodeOrder_v0(p)
-			return err
-		},
-	})
-	return ord, err
+	ver, pushes, err := DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeOrder_v0(pushes)
+	}
+	return nil, fmt.Errorf("unkown Order version %d", ver)
 }
 
 // decodeOrder_v0 decodes the version 0 payload into an Order.
@@ -386,23 +390,8 @@ func decodeOrder_v0(pushes [][]byte) (order.Order, error) {
 	}
 }
 
-// VersionedDecode will decode the versioned blob based on its version and the
-// decoders available in the provided decoder map. If a decoder is not available
-// for the version, an error is returned. Errors returned from the decoder are
-// directly returned from VersionedDecode.
-func VersionedDecode(tag string, b []byte, decoders map[byte]ByteDecoder) error {
-	ver, pushes, err := DecodeBlob(b)
-	if err != nil {
-		return err
-	}
-	decoder, found := decoders[ver]
-	if !found {
-		return fmt.Errorf("%s: unknown AccountInfo version %d", tag, ver)
-	}
-	return decoder(pushes)
-}
-
-// DecodeBlob decodes a versioned blob into its version and payload.
+// DecodeBlob decodes a versioned blob into its version and the pushes extracted
+// from its data.
 func DecodeBlob(b []byte) (byte, [][]byte, error) {
 	if len(b) == 0 {
 		return 0, nil, fmt.Errorf("zero length blob not allowed")

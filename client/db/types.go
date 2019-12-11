@@ -33,27 +33,32 @@ func (ai *AccountInfo) Encode() []byte {
 
 // DecodeAccountInfo decodes the versioned blob into an *AccountInfo.
 func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
-	var acctInfo *AccountInfo
-	err := encode.VersionedDecode("decodeAccountInfo", b, map[byte]encode.ByteDecoder{
-		0: func(pushes [][]byte) error {
-			if len(pushes) != 4 {
-				return fmt.Errorf("decodeAccountInfo: expected 3 data pushes, got %d", len(pushes))
-			}
-			urlB, keyB, dexB, coinB := pushes[0], pushes[1], pushes[2], pushes[3]
-			pk, err := secp256k1.ParsePubKey(dexB)
-			if err != nil {
-				return err
-			}
-			acctInfo = &AccountInfo{
-				URL:       string(urlB),
-				EncKey:    keyB,
-				DEXPubKey: pk,
-				FeeCoin:   coinB,
-			}
-			return nil
-		},
-	})
-	return acctInfo, err
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeAccountInfo_v0(pushes)
+	}
+	return nil, fmt.Errorf("unkown AccountInfo version %d", ver)
+}
+
+func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
+	if len(pushes) != 4 {
+		return nil, fmt.Errorf("decodeAccountInfo: expected 3 data pushes, got %d", len(pushes))
+	}
+	urlB, keyB, dexB, coinB := pushes[0], pushes[1], pushes[2], pushes[3]
+	pk, err := secp256k1.ParsePubKey(dexB)
+	if err != nil {
+		return nil, err
+	}
+	return &AccountInfo{
+		URL:       string(urlB),
+		EncKey:    keyB,
+		DEXPubKey: pk,
+		FeeCoin:   coinB,
+	}, nil
 }
 
 // MetaOrder is an order and its metadata.
@@ -96,66 +101,97 @@ type MatchMetaData struct {
 	Quote uint32
 }
 
-// MatchSignatures holds the DEX signatures associated with each step of the
-// swap negotiation process.
-type MatchSignatures struct {
-	Match      []byte
-	Init       []byte
-	Audit      []byte
-	Redeem     []byte
-	Redemption []byte
+// MatchSignatures holds the DEX signatures and timestamps associated with
+// the messages in the negotiation process.
+type MatchAuth struct {
+	MatchSig        []byte
+	MatchStamp      uint64
+	InitSig         []byte
+	InitStamp       uint64
+	AuditSig        []byte
+	AuditStamp      uint64
+	RedeemSig       []byte
+	RedeemStamp     uint64
+	RedemptionSig   []byte
+	RedemptionStamp uint64
 }
 
 // MatchProof is information related to the progression of the swap negotiation
 // process.
 type MatchProof struct {
-	MakerSwap   order.CoinID
-	MakerRedeem order.CoinID
-	TakerSwap   order.CoinID
-	TakerRedeem order.CoinID
-	Sigs        MatchSignatures
+	CounterScript []byte
+	SecretHash    []byte
+	SecretKey     []byte
+	InitStamp     uint64
+	RedeemStamp   uint64
+	MakerSwap     order.CoinID
+	MakerRedeem   order.CoinID
+	TakerSwap     order.CoinID
+	TakerRedeem   order.CoinID
+	Auth          MatchAuth
 }
 
 // Encode encodes the MatchProof to a versioned blob.
 func (p *MatchProof) Encode() []byte {
-	sigs := p.Sigs
+	auth := p.Auth
 	return dbBytes{0}.
+		AddData(p.CounterScript).
+		AddData(p.SecretHash).
+		AddData(p.SecretKey).
 		AddData(p.MakerSwap).
 		AddData(p.MakerRedeem).
 		AddData(p.TakerSwap).
 		AddData(p.TakerRedeem).
-		AddData(sigs.Match).
-		AddData(sigs.Init).
-		AddData(sigs.Audit).
-		AddData(sigs.Redeem).
-		AddData(sigs.Redemption)
+		AddData(auth.MatchSig).
+		AddData(uint64Bytes(auth.MatchStamp)).
+		AddData(auth.InitSig).
+		AddData(uint64Bytes(auth.InitStamp)).
+		AddData(auth.AuditSig).
+		AddData(uint64Bytes(auth.AuditStamp)).
+		AddData(auth.RedeemSig).
+		AddData(uint64Bytes(auth.RedeemStamp)).
+		AddData(auth.RedemptionSig).
+		AddData(uint64Bytes(auth.RedemptionStamp))
 }
 
 // DecodeMatchProof decodes the versioned blob to a *MatchProof.
 func DecodeMatchProof(b []byte) (*MatchProof, error) {
-	var proof *MatchProof
-	err := encode.VersionedDecode("decodeMatchProof", b, map[byte]encode.ByteDecoder{
-		0: func(pushes [][]byte) error {
-			if len(pushes) != 9 {
-				return fmt.Errorf("decodeMatchProof: expected 9 pushes, got %d", len(pushes))
-			}
-			proof = &MatchProof{
-				MakerSwap:   pushes[0],
-				MakerRedeem: pushes[1],
-				TakerSwap:   pushes[2],
-				TakerRedeem: pushes[3],
-				Sigs: MatchSignatures{
-					Match:      pushes[4],
-					Init:       pushes[5],
-					Audit:      pushes[6],
-					Redeem:     pushes[7],
-					Redemption: pushes[8],
-				},
-			}
-			return nil
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeMatchProof_v0(pushes)
+	}
+	return nil, fmt.Errorf("unkown MatchProof version %d", ver)
+}
+
+func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
+	if len(pushes) != 17 {
+		return nil, fmt.Errorf("DecodeMatchProof: expected 17 pushes, got %d", len(pushes))
+	}
+	return &MatchProof{
+		CounterScript: pushes[0],
+		SecretHash:    pushes[1],
+		SecretKey:     pushes[2],
+		MakerSwap:     pushes[3],
+		MakerRedeem:   pushes[4],
+		TakerSwap:     pushes[5],
+		TakerRedeem:   pushes[6],
+		Auth: MatchAuth{
+			MatchSig:        pushes[7],
+			MatchStamp:      intCoder.Uint64(pushes[8]),
+			InitSig:         pushes[9],
+			InitStamp:       intCoder.Uint64(pushes[10]),
+			AuditSig:        pushes[11],
+			AuditStamp:      intCoder.Uint64(pushes[12]),
+			RedeemSig:       pushes[13],
+			RedeemStamp:     intCoder.Uint64(pushes[14]),
+			RedemptionSig:   pushes[15],
+			RedemptionStamp: intCoder.Uint64(pushes[16]),
 		},
-	})
-	return proof, err
+	}, nil
 }
 
 // OrderProof is information related to order authentication and matching.
@@ -171,19 +207,27 @@ func (p *OrderProof) Encode() []byte {
 
 // DecodeOrderProof decodes the versioned blob to an *OrderProof.
 func DecodeOrderProof(b []byte) (*OrderProof, error) {
-	var proof *OrderProof
-	err := encode.VersionedDecode("decodeOrderProof", b, map[byte]encode.ByteDecoder{
-		0: func(pushes [][]byte) error {
-			if len(pushes) != 1 {
-				return fmt.Errorf("decodeMatchProof: expected 1 push, got %d", len(pushes))
-			}
-			proof = &OrderProof{
-				DEXSig: pushes[0],
-			}
-			return nil
-		},
-	})
-	return proof, err
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeOrderProof_v0(pushes)
+	}
+	return nil, fmt.Errorf("unkown OrderProof version %d", ver)
+}
+
+func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
+	if len(pushes) != 1 {
+		return nil, fmt.Errorf("decodeMatchProof: expected 1 push, got %d", len(pushes))
+	}
+	return &OrderProof{
+		DEXSig: pushes[0],
+	}, nil
 }
 
 type dbBytes = encode.BuildyBytes
+
+var uint64Bytes = encode.Uint64Bytes
+var intCoder = encode.IntCoder
