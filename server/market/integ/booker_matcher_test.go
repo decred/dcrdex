@@ -500,7 +500,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	resetMakers()
 
 	matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(b, epochQueue)
-	t.Log(matches, passed, failed, doneOK, partial, booked, unbooked)
+	//t.Log(matches, passed, failed, doneOK, partial, booked, unbooked)
 
 	// PASSED orders
 
@@ -520,7 +520,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 		t.Errorf("Order not at expected location in passed slice: %d", loc)
 	}
 
-	t.Log(doneOK)
+	//t.Log(doneOK)
 
 	// FAILED orders
 
@@ -546,6 +546,14 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 		t.Errorf("Order not in failed slice.")
 	} else if loc != expectedLoc {
 		t.Errorf("Order not at expected location in failed slice: %d", loc)
+	}
+
+	// Done OK
+	expectedLoc = 1
+	if loc := orderInSlice(epochQueueInit[5], doneOK); loc == -1 {
+		t.Errorf("Order not in doneOK slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in doneOK slice: %d", loc)
 	}
 
 	// PARTIAL fills
@@ -1152,9 +1160,10 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	// Shuffles to [13, 9, 3, 7, 8, 5, 17, 4, 15, 10, 1, 2, 6, 12, 14, 16, 0, 11]
 
 	expectedNumMatches := 10
-	expectedPassed := []int{13, 9, 8, 17, 15, 10, 6, 12, 16, 11}
+	expectedPassed := []int{13, 9, 7, 8, 5, 17, 15, 10, 1, 6, 12, 16, 11}
 	expectedFailed := []int{3, 4, 2, 14, 0}
-	expectedPartial := []int{7, 5, 1, 6}
+	expectedDoneOK := []int{13, 9, 8, 17, 15, 10, 6, 12, 16, 11}
+	expectedPartial := []int{6}
 	expectedBooked := []int{7, 5, 1} // all StandingTiF
 	expectedNumUnbooked := 9
 
