@@ -16,56 +16,6 @@ The order book holds only limit orders with time in force ''standing'' that have
 not completely filled or been cancelled. All other orders are only valid for one
 [[#Epochbased_Order_Matching|epoch match cycle]].
 
-===Session Authentication===
-
-Orders must be placed on an authenticated connection. Once a websocket
-connection is established, the client will supply their account ID and signature.
-
-'''Request route:''' <code>connect</code>, '''originator: ''' client
-
-<code>payload</code>
-{|
-! field      !! type   !! description
-|-
-| accountid || string || account ID
-|-
-| apiver    || int    || requested API version
-|-
-| timestamp || int    || UNIX timestamp
-|-
-| sig       || string || hex-encoded signature of serialized connection data. serialization described below
-|}
-
-'''Connect serialization'''
-
-{|
-! field   !! size (bytes) !! description
-|-
-| account ID || 16 || client [[#Step_1_Registration|account ID]]
-|-
-| API version || 2 || requested API version
-|-
-| timestamp || 8  || the client's UNIX timestamp
-|}
-
-'''Connect response'''
-
-If the client connects shortly after a [[#Trade_Suspension|trade suspension]],
-it's possible that trading will not commence until a future epoch. The DEX
-response will indicate when trade did or will begin.
-
-If a client unexpectedly disconnects with active orders, the orders may match in
-the client's absence. A list of any pending matches is included in the response.
-
-<code>result</code>
-{|
-! field      !! type   !! description
-|-
-| startepoch || int   || the epoch at which trading did or will commence. May be in the future e.g. [[#Trade_Suspension|after maintenance]]
-|-
-| matches    || &#91;object&#93; || list of [[#Match_notifications|Match objects]]
-|}
-
 ===Connection Persistence===
 
 If a connection is lost after placing an order, the client must reconnect and

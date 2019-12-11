@@ -22,8 +22,8 @@ simplifications are made.
 
 The examples involve a participant named Alice, who holds some DCR and would
 like to exchange it for some BTC.
-The market is a DCR/BTC market, where DCR is the “base asset” and BTC is the
-“quote asset”.
+The market is a DCR/BTC market, where DCR is the &#x201C;base asset&#x201D; and BTC is the
+&#x201C;quote asset&#x201D;.
 Order quantities are in units of DCR, and the rate offered in a limit order is
 denominated in BTC.
 
@@ -44,8 +44,8 @@ through on a trade.
 <img src="images/bob-order.png" align="right">
 '''A2''': During some later epoch, '''Bob places a market order''' to buy DCR
 with BTC at the best available price.
-Bob’s order will contain both an address and a signature.
-As a market order, Bob’s order must match in this epoch. Any unfilled portion
+Bob&#x2019;s order will contain both an address and a signature.
+As a market order, Bob&#x2019;s order must match in this epoch. Any unfilled portion
 is immediately cancelled.
 
 '''A3''': At the end of the epoch, the '''DEX performs a match cycle''',
@@ -53,7 +53,7 @@ recognizes the match, and informs both Alice and Bob that a match has occurred.
 Because the order quantities are identical, the orders are simply removed from
 the book and set aside for monitoring.
 The DEX informs both clients that a match has been made and provides Bob with
-Alice’s address.
+Alice&#x2019;s address.
 
 <img src="images/ab-match.png">
 
@@ -64,8 +64,8 @@ within a specified amount of time.
 
 Before Alice can '''prepare her initialization transaction''', she must generate
 a key known only to herself.
-From the key, Alice generates a “lock” and constructs an swap contract
-such that if someone can provide both Alice’s key and the pubkey for Bob’s
+From the key, Alice generates a &#x201C;lock&#x201D; and constructs an swap contract
+such that if someone can provide both Alice&#x2019;s key and the pubkey for Bob&#x2019;s
 specified address, they can spend the output.
 In practice, the key is simply a random 32-byte number, and the lock is its
 hash.
@@ -83,12 +83,12 @@ DEX relays to Bob. Alice '''does not''' reveal the key that she created.
 '''A5: Bob inspects Alice's transaction.
 After the requisite number of confirmations, Bob prepares his initialization
 transaction'''. He uses Alice's lock here as well, and creates a swap contract
-satisfied by Alice’s key and the pubkey for Alice’s address.
+satisfied by Alice&#x2019;s key and the pubkey for Alice&#x2019;s address.
 
 Bob sets his timelock to 24 hours.
 Bob should also check that the timelock in Alice's initialization is set to 48
 hours.
-If Alice’s timelock duration is set near or below Bob’s timelock duration, Alice
+If Alice&#x2019;s timelock duration is set near or below Bob&#x2019;s timelock duration, Alice
 could potentially spend the DCR output before Bob.
 
 '''Bob broadcasts his initialization transaction''' to the Bitcoin network.
@@ -98,8 +98,8 @@ information to Alice.
 <img src="images/bob-init.png">
 
 '''A6: Alice prepares a redemption transaction''' that spends the output from
-Bob’s initialization transaction to her own address.
-In order to spend the Bitcoin from Bob’s transaction, she needs to provide the
+Bob&#x2019;s initialization transaction to her own address.
+In order to spend the Bitcoin from Bob&#x2019;s transaction, she needs to provide the
 key created in step 4.
 
 '''Alice broadcasts her redemption transaction''' to the Bitcoin network.
@@ -110,7 +110,7 @@ The DEX server will notify Bob of the details.
 <img src="images/alice-redeem.png">
 
 '''A7: Bob prepares his redemption transaction''' using the key gleaned from
-Alice’s redemption transaction and the output from Alice’s initialization
+Alice&#x2019;s redemption transaction and the output from Alice&#x2019;s initialization
 transaction.
 
 '''Bob broadcasts his redemption transaction to the Decred network, completing
@@ -132,7 +132,7 @@ A new client, Carl, places an identical market order for 0.1 BTC worth of DCR.
 
 '''B3''': The DEX finds the match and informs all parties, providing Alice with
 Bob and Carl's addresses.
-The DEX cannot simply remove Alice’s order, because it is only partially filled.
+The DEX cannot simply remove Alice&#x2019;s order, because it is only partially filled.
 In this case, the DEX does not remove the order from the order book, instead
 just marking it partially filled and calculating the remaining quantity. The
 order is returned to the order book and is immediately able to match again.
@@ -155,7 +155,3 @@ transaction. They broadcast their transactions.
 '''B6 and B7''' follow naturally from case A, with Alice creating two redemption
 transactions, one for Bob and one for Carl.
 Bob and Carl then follow up with their own redemptions.
-
-==References==
-
-&#91;3&#93; [https://github.com/decred/atomicswap Atomic Swaps]

@@ -98,6 +98,56 @@ The payload for a response has a structure that enables quick error checking.
 }
 </pre>
 
+===Session Authentication===
+
+Many DEX messages must be sent on an authenticated connection. Once a websocket
+connection is established, the client will supply their account ID and signature.
+
+'''Request route:''' <code>connect</code>, '''originator: ''' client
+
+<code>payload</code>
+{|
+! field      !! type   !! description
+|-
+| accountid || string || account ID
+|-
+| apiver    || int    || requested API version
+|-
+| timestamp || int    || UNIX timestamp
+|-
+| sig       || string || hex-encoded signature of serialized connection data. serialization described below
+|}
+
+'''Connect serialization'''
+
+{|
+! field   !! size (bytes) !! description
+|-
+| account ID || 16 || client [[#Step_1_Registration|account ID]]
+|-
+| API version || 2 || requested API version
+|-
+| timestamp || 8  || the client's UNIX timestamp
+|}
+
+'''Connect response'''
+
+If the client connects shortly after a [[#Trade_Suspension|trade suspension]],
+it's possible that trading will not commence until a future epoch. The DEX
+response will indicate when trade did or will begin.
+
+If a client unexpectedly disconnects with active orders, the orders may match in
+the client's absence. A list of any pending matches is included in the response.
+
+<code>result</code>
+{|
+! field      !! type   !! description
+|-
+| startepoch || int   || the epoch at which trading did or will commence. May be in the future e.g. [[#Trade_Suspension|after maintenance]]
+|-
+| matches    || &#91;object&#93; || list of [[#Match_notifications|Match objects]]
+|}
+
 ===HTTP===
 
 An API using HTTP for message transport may be provided for basic account
@@ -106,11 +156,3 @@ the sole means for
 [[#Client_Order_Management|placing, monitoring, and executing orders]].
 The primary reason for limiting the scope of the HTTP API is to eliminate client
 polling for rapidly changing resources, such as order status API endpoints.
-
-==References==
-
-&#91;4&#93; [https://tools.ietf.org/html/rfc6455 The WebSocket Protocol]
-
-&#91;5&#93; [https://tools.ietf.org/html/rfc8446 Transport Layer Security 1.3]
-
-&#91;6&#93; [https://tools.ietf.org/html/rfc8259 JSON]

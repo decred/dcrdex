@@ -87,34 +87,31 @@ Continuing client-server interoperability will likely depend on subtle aspects
 of the specification laid out in this document, especially the following
 critical sections.
 
-'''[[COMMPROTOCOLS.mediawiki|Communication Protocols]]''' describes the
+'''&#91;1&#93; [[COMMPROTOCOLS.mediawiki|Communication Protocols]]''' describes the
 messaging protocols and communication layer technologies that are to be used
 for the DEX API.
 
-'''[[EXCHANGEFUNDAMENTALS.mediawiki|Distributed Exchange Design Fundamentals]]'''
+'''&#91;2&#93; [[EXCHANGEFUNDAMENTALS.mediawiki|Distributed Exchange Design Fundamentals]]'''
 describes the notable design aspects that facilitate an exchange service with
 the features described above.
 
-'''[[EXCHANGEADMIN.mediawiki|Distributed Exchange Administration]]''' describes
+'''&#91;3&#93; [[EXCHANGEADMIN.mediawiki|Distributed Exchange Administration]]''' describes
 the tasks required to administer the exchange.
 
-'''[[ACCOUNTS.mediawiki|Client Accounts]]''' details account creation.
+'''&#91;4&#93; [[ACCOUNTS.mediawiki|Client Accounts]]''' details account creation.
 
-'''[[ORDERMANAGEMENT.mediawiki|Client Order Management]]''' details the different
+'''&#91;5&#93; [[ORDERMANAGEMENT.mediawiki|Client Order Management]]''' details the different
 order types and the client/server workflows required to synchronize the order
 book and place orders.
 
-'''[[DATAAPI.mediawiki| Data API]]''' defines http and websocket APIs to browse
+'''&#91;6&#93; [[DATAAPI.mediawiki| Data API]]''' defines http and websocket APIs to browse
 trade history.
 
-'''[[ATOMICSETTLEMENT.mediawiki|Atomic Settlement]]''' walks through the settlement
+'''&#91;7&#93; [[ATOMICSETTLEMENT.mediawiki|Atomic Settlement]]''' walks through the settlement
 process with a couple of examples to provide a high-level overview.
 
-'''[[COMMUNITYCONDUCT.mediawiki|Community Conduct]]''' describes the system of rules
+'''&#91;8&#93; [[COMMUNITYCONDUCT.mediawiki|Community Conduct]]''' describes the system of rules
 to which clients interacting with the DEX must adhere.
 
-==References==
-
-&#91;1&#93; Teall, John L., Financial Trading and Investing, p. 336 (2013)
-
-&#91;2&#93; [https://www.sec.gov/comments/sr-nysearca-2019-01/srnysearca201901-5164833-183434.pdf Bitwise Presentation to the U.S. Securities and Exchange Commission] (2019)
+'''&#91;9&#93; [[REFERENCES.mediawiki|References]]''' lists references used in the development
+of the specification.

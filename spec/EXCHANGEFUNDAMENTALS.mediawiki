@@ -259,7 +259,3 @@ the specifics of the interface structure will be released at a later time.
 With the exception of Decred and Bitcoin, which will be implemented during
 initial phases of DEX development, it is expected that development communities
 will release their own appropriately vetted plugins.
-
-==References==
-
-&#91;7&#93; [https://github.com/satoshilabs/slips/blob/master/slip-0044.md BIP-0044 Registered Coins
