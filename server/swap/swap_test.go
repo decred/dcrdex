@@ -1614,6 +1614,11 @@ func TestCancel(t *testing.T) {
 }
 
 func TestTxMonitored(t *testing.T) {
+	sendBlock := func(node *TAsset) {
+		node.bChan <- 1
+		tickMempool()
+	}
+
 	makerSell := true
 	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
 	matchInfo := set.matchInfos[0]
@@ -1632,6 +1637,11 @@ func TestTxMonitored(t *testing.T) {
 		takerLockedAsset = matchInfo.match.Taker.Base()  // taker buy locks quote asset
 	}
 
+	tracker := rig.getTracker()
+	if tracker.Status != order.NewlyMatched {
+		t.Fatalf("match not marked as NewlyMatched: %d", tracker.Status)
+	}
+
 	// Maker acks match and sends swap tx.
 	ensureNilErr(rig.ackMatch_maker(true))
 	ensureNilErr(rig.sendSwap_maker(true))
@@ -1640,6 +1650,12 @@ func TestTxMonitored(t *testing.T) {
 		t.Errorf("maker contract %s (asset %d) was not monitored",
 			makerContractTx, makerLockedAsset)
 	}
+
+	if tracker.Status != order.MakerSwapCast {
+		t.Fatalf("match not marked as MakerSwapCast: %d", tracker.Status)
+	}
+	sendBlock(rig.abcNode)
+	sendBlock(rig.xyzNode)
 
 	// For the taker, there must be two acknowledgements before broadcasting the
 	// swap transaction, the match ack and the audit ack.
@@ -1654,14 +1670,51 @@ func TestTxMonitored(t *testing.T) {
 			takerContractTx, takerLockedAsset)
 	}
 
+	if tracker.Status != order.TakerSwapCast {
+		t.Fatalf("match not marked as TakerSwapCast: %d", tracker.Status)
+	}
+	sendBlock(rig.abcNode)
+	sendBlock(rig.xyzNode)
+
 	ensureNilErr(rig.auditSwap_maker())
 	ensureNilErr(rig.ackAudit_maker(true))
+
+	// Set the number of confirmations on the contracts.
+	//tracker.makerStatus.swapTime
+	// tracker.makerStatus.swapConfirmed = time.Now()
+	// tracker.takerStatus.swapConfirmed = time.Now()
+	matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
+	matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
+
+	// send a block through for either chain to trigger a swap check.
+	sendBlock(rig.abcNode)
+	sendBlock(rig.xyzNode)
+
+	if rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
+		t.Errorf("maker contract %s (asset %d) was still monitored",
+			makerContractTx, makerLockedAsset)
+	}
+
+	sendBlock(rig.abcNode)
+	sendBlock(rig.xyzNode)
+
+	if rig.swapper.TxMonitored(taker.acct, takerLockedAsset, takerContractTx) {
+		t.Errorf("taker contract %s (asset %d) was still monitored",
+			takerContractTx, takerLockedAsset)
+	}
+
+	// Now redeem
+
 	ensureNilErr(rig.redeem_maker(true))
 
 	makerRedeemTx := rig.matchInfo.db.makerRedeem.coin.TxID()
 	if !rig.swapper.TxMonitored(maker.acct, takerLockedAsset, makerRedeemTx) {
 		t.Errorf("maker redeem %s (asset %d) was not monitored",
 			makerRedeemTx, takerLockedAsset)
+	}
+
+	if tracker.Status != order.MakerRedeemed {
+		t.Fatalf("match not marked as MakerRedeemed: %d", tracker.Status)
 	}
 
 	ensureNilErr(rig.ackRedemption_taker(true))
@@ -1671,6 +1724,10 @@ func TestTxMonitored(t *testing.T) {
 	if !rig.swapper.TxMonitored(taker.acct, makerLockedAsset, takerRedeemTx) {
 		t.Errorf("taker redeem %s (asset %d) was not monitored",
 			takerRedeemTx, makerLockedAsset)
+	}
+
+	if tracker.Status != order.MatchComplete {
+		t.Fatalf("match not marked as MatchComplete: %d", tracker.Status)
 	}
 
 	ensureNilErr(rig.ackRedemption_maker(true))

@@ -409,16 +409,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 		case order.MatchComplete:
 			// Once both redemption transactions have SwapConf confirmations, the
 			// order is complete.
-			var makerRedeemed, takerRedeemed bool
-			mStatus, tStatus := match.makerStatus, match.takerStatus
-			if !mStatus.redeemTime.IsZero() {
-				confs, err := mStatus.redemption.Confirmations()
-				makerRedeemed = err == nil && confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
-			}
-			if makerRedeemed && !tStatus.redeemTime.IsZero() {
-				confs, err := tStatus.redemption.Confirmations()
-				takerRedeemed = err == nil && confs >= int64(s.coins[mStatus.swapAsset].SwapConf)
-			}
+			makerRedeemed, takerRedeemed := s.redeemStatus(match)
 			// TODO: Can coins be unlocked now regardless of redemption?
 			if makerRedeemed && takerRedeemed {
 				completions = append(completions, match)
@@ -430,6 +421,30 @@ func (s *Swapper) processBlock(block *blockNotification) {
 		s.unlockOrderCoins(match.Maker)
 		delete(s.matches, match.ID().String())
 	}
+}
+
+func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerRedeemComplete bool) {
+	mStatus, tStatus := match.makerStatus, match.takerStatus
+	if !mStatus.redeemTime.IsZero() {
+		confs, err := mStatus.redemption.Confirmations()
+		if err != nil {
+			log.Errorf("Confirmations failed for maker redemption %v: err",
+				mStatus.redemption.TxID(), err) // Severity?
+			return
+		}
+		makerRedeemComplete = confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
+	}
+	// !!! Why makerRedeemComplete && ?
+	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
+		confs, err := tStatus.redemption.Confirmations()
+		if err != nil {
+			log.Errorf("Confirmations failed for taker redemption %v: err",
+				tStatus.redemption.TxID(), err)
+			return
+		}
+		takerRedeemComplete = confs >= int64(s.coins[mStatus.swapAsset].SwapConf)
+	}
+	return
 }
 
 // TxMonitored determines whether the transaction for the given user is involved
@@ -448,20 +463,24 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 				match.makerStatus.swapConfirmed.IsZero() {
 				return true
 			}
+
 			// Taker's redemption transaction is the asset of interest.
-			if user == match.Taker.User() && match.takerStatus.redemption.TxID() == txid &&
-				match.takerStatus.redeemTime.IsZero() {
+			_, takerRedeemDone := s.redeemStatus(match)
+			if !takerRedeemDone && user == match.Taker.User() &&
+				match.takerStatus.redemption.TxID() == txid {
 				return true
 			}
 		case match.takerStatus.swapAsset:
-			// Maker's redemption transaction is the asset of interest.
-			if user == match.Maker.User() && match.makerStatus.redemption.TxID() == txid &&
-				match.makerStatus.redeemTime.IsZero() {
-				return true
-			}
 			// Taker's swap transaction is the asset of interest.
 			if user == match.Taker.User() && match.takerStatus.swap.TxID() == txid &&
 				match.takerStatus.swapConfirmed.IsZero() {
+				return true
+			}
+
+			// Maker's redemption transaction is the asset of interest.
+			makerRedeemDone, _ := s.redeemStatus(match)
+			if !makerRedeemDone && user == match.Maker.User() &&
+				match.makerStatus.redemption.TxID() == txid {
 				return true
 			}
 		default:
