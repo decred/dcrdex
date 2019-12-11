@@ -292,7 +292,7 @@ func (coin *TCoin) AuditContract() (string, uint64, error) {
 
 func (coin *TCoin) Auth(pubkeys, sigs [][]byte, msg []byte) error { return nil }
 func (coin *TCoin) ID() []byte                                    { return coin.id }
-func (coin *TCoin) TxID() string                                  { return "" }
+func (coin *TCoin) TxID() string                                  { return hex.EncodeToString(coin.id) }
 func (coin *TCoin) Value() uint64                                 { return 0 }
 func (coin *TCoin) SpendSize() uint32                             { return 0 }
 
@@ -1611,4 +1611,67 @@ func TestCancel(t *testing.T) {
 	if makerNote.MatchID.String() != takerNote.MatchID.String() {
 		t.Fatalf("match ID mismatch. %s != %s", makerNote.MatchID, takerNote.MatchID)
 	}
+}
+
+func TestTxMonitored(t *testing.T) {
+	makerSell := true
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
+	matchInfo := set.matchInfos[0]
+	rig := tNewTestRig(matchInfo)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	ensureNilErr := makeEnsureNilErr(t)
+	//mustBeError := makeMustBeError(t)
+	maker, taker := matchInfo.maker, matchInfo.taker
+
+	var makerLockedAsset, takerLockedAsset uint32
+	if makerSell {
+		makerLockedAsset = matchInfo.match.Maker.Base()  // maker sell locks base asset
+		takerLockedAsset = matchInfo.match.Taker.Quote() // taker buy locks quote asset
+	} else {
+		makerLockedAsset = matchInfo.match.Maker.Quote() // maker sell locks base asset
+		takerLockedAsset = matchInfo.match.Taker.Base()  // taker buy locks quote asset
+	}
+
+	// Maker acks match and sends swap tx.
+	ensureNilErr(rig.ackMatch_maker(true))
+	ensureNilErr(rig.sendSwap_maker(true))
+	makerContractTx := rig.matchInfo.db.makerSwap.coin.TxID()
+	if !rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
+		t.Errorf("maker contract %s (asset %d) was not monitored",
+			makerContractTx, makerLockedAsset)
+	}
+
+	// For the taker, there must be two acknowledgements before broadcasting the
+	// swap transaction, the match ack and the audit ack.
+	ensureNilErr(rig.ackMatch_taker(true))
+	ensureNilErr(rig.auditSwap_taker())
+	ensureNilErr(rig.ackAudit_taker(true))
+	ensureNilErr(rig.sendSwap_taker(true))
+
+	takerContractTx := rig.matchInfo.db.takerSwap.coin.TxID()
+	if !rig.swapper.TxMonitored(taker.acct, takerLockedAsset, takerContractTx) {
+		t.Errorf("taker contract %s (asset %d) was not monitored",
+			takerContractTx, takerLockedAsset)
+	}
+
+	ensureNilErr(rig.auditSwap_maker())
+	ensureNilErr(rig.ackAudit_maker(true))
+	ensureNilErr(rig.redeem_maker(true))
+
+	makerRedeemTx := rig.matchInfo.db.makerRedeem.coin.TxID()
+	if !rig.swapper.TxMonitored(maker.acct, takerLockedAsset, makerRedeemTx) {
+		t.Errorf("maker redeem %s (asset %d) was not monitored",
+			makerRedeemTx, takerLockedAsset)
+	}
+
+	ensureNilErr(rig.ackRedemption_taker(true))
+	ensureNilErr(rig.redeem_taker(true))
+
+	takerRedeemTx := rig.matchInfo.db.takerRedeem.coin.TxID()
+	if !rig.swapper.TxMonitored(taker.acct, makerLockedAsset, takerRedeemTx) {
+		t.Errorf("taker redeem %s (asset %d) was not monitored",
+			takerRedeemTx, makerLockedAsset)
+	}
+
+	ensureNilErr(rig.ackRedemption_maker(true))
 }

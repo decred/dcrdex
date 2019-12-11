@@ -120,7 +120,7 @@ func (m *Market) SubmitOrder(rec *orderRecord) error {
 	return <-m.SubmitOrderAsync(rec)
 }
 
-// TxMonitored checks a user's transaction for a certain asset is being
+// TxMonitored checks if a user's transaction for a certain asset is being
 // monitored by the Swapper.
 func (m *Market) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
 	return m.swapper.TxMonitored(user, asset, txid)
