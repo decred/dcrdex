@@ -261,7 +261,9 @@ func (s *Swapper) start() {
 	bcastTicker := time.NewTimer(s.bTimeout)
 	minTimeout := s.bTimeout / 10
 	setTimeout := func(block *blockNotification) {
-		timeTil := time.Until(block.time.Add(s.bTimeout))
+		// The extra millisecond resolves some issues with timer innacuracy that
+		// were affecting unit tests.
+		timeTil := time.Until(block.time.Add(s.bTimeout + time.Millisecond))
 		if timeTil < minTimeout {
 			timeTil = minTimeout
 		}
@@ -339,6 +341,7 @@ out:
 				s.checkInaction(block.assetID)
 				if len(bcastTriggers) == 0 {
 					bcastTicker = time.NewTimer(s.bTimeout)
+					break
 				} else {
 					setTimeout(bcastTriggers[0])
 				}
