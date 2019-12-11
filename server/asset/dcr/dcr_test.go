@@ -439,7 +439,6 @@ func testMsgTxRegular(sigType dcrec.SignatureType) *testMsgTx {
 // Information about a swap contract.
 type testMsgTxSwap struct {
 	tx        *wire.MsgTx
-	vout      uint32
 	contract  []byte
 	recipient dcrutil.Address
 }

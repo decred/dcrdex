@@ -25,7 +25,7 @@ jobs:
           GO111MODULE: "on"
         run: |
           export PATH=${PATH}:$(go env GOPATH)/bin
-          golangci-lint run --disable-all --deadline=10m --enable=gofmt --enable=gosimple --enable=unconvert --enable=ineffassign --enable=govet
+          golangci-lint run --disable-all --deadline=10m --enable=goimports --enable=gosimple --enable=unconvert --enable=ineffassign --enable=govet --enable=structcheck
       - name: Test
         env:
           GO111MODULE: "on"

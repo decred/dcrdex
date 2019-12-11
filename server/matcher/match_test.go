@@ -478,6 +478,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 		wantMatches     []*order.MatchSet
 		wantNumPassed   int
 		wantNumFailed   int
+		wantDoneOK      int
 		wantNumPartial  int
 		wantNumInserted int
 		wantNumUnbooked int
@@ -500,6 +501,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 1,
@@ -514,6 +516,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 			wantMatches:     nil,
 			wantNumPassed:   0,
 			wantNumFailed:   1,
+			wantDoneOK:      0,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 0,
@@ -533,7 +536,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 
 			numBuys0 := tt.args.book.BuyCount()
 
-			matches, passed, failed, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -551,6 +554,9 @@ func TestMatch_cancelOnly(t *testing.T) {
 			}
 			if len(failed) != tt.wantNumFailed {
 				t.Errorf("number failed %d, expected %d", len(failed), tt.wantNumFailed)
+			}
+			if len(doneOK) != tt.wantDoneOK {
+				t.Errorf("number doneOK %d, expected %d", len(doneOK), tt.wantDoneOK)
 			}
 			if len(partial) != tt.wantNumPartial {
 				t.Errorf("number partial %d, expected %d", len(partial), tt.wantNumPartial)
@@ -614,6 +620,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 		wantMatches     []*order.MatchSet
 		wantNumPassed   int
 		wantNumFailed   int
+		wantDoneOK      int
 		wantNumPartial  int
 		wantNumInserted int
 		wantNumUnbooked int
@@ -630,6 +637,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 1,
@@ -646,6 +654,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      0,
 			wantNumPartial:  1,
 			wantNumInserted: 1,
 			wantNumUnbooked: 1,
@@ -662,6 +671,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  1,
 			wantNumInserted: 0,
 			wantNumUnbooked: 1,
@@ -676,6 +686,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantMatches:     nil,
 			wantNumPassed:   0,
 			wantNumFailed:   1,
+			wantDoneOK:      0,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 0,
@@ -690,6 +701,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantMatches:     nil,
 			wantNumPassed:   0,
 			wantNumFailed:   1,
+			wantDoneOK:      0,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 0,
@@ -713,6 +725,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			},
 			wantNumPassed:   2,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  1,
 			wantNumInserted: 1,
 			wantNumUnbooked: 2,
@@ -724,7 +737,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			resetTakers()
 			resetMakers()
 
-			matches, passed, failed, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -742,6 +755,9 @@ func TestMatch_limitsOnly(t *testing.T) {
 			}
 			if len(failed) != tt.wantNumFailed {
 				t.Errorf("number failed %d, expected %d", len(failed), tt.wantNumFailed)
+			}
+			if len(doneOK) != tt.wantDoneOK {
+				t.Errorf("number doneOK %d, expected %d", len(doneOK), tt.wantDoneOK)
 			}
 			if len(partial) != tt.wantNumPartial {
 				t.Errorf("number partial %d, expected %d", len(partial), tt.wantNumPartial)
@@ -799,6 +815,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 		wantMatches     []*order.MatchSet
 		wantNumPassed   int
 		wantNumFailed   int
+		wantDoneOK      int
 		wantNumPartial  int
 		wantNumInserted int
 		wantNumUnbooked int
@@ -815,6 +832,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 1,
@@ -831,6 +849,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 2,
@@ -847,6 +866,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 2,
@@ -861,6 +881,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			wantMatches:     nil,
 			wantNumPassed:   0,
 			wantNumFailed:   1,
+			wantDoneOK:      0,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 0,
@@ -874,7 +895,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 
 			fmt.Printf("%v\n", takers)
 
-			matches, passed, failed, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -892,6 +913,9 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			}
 			if len(failed) != tt.wantNumFailed {
 				t.Errorf("number failed %d, expected %d", len(failed), tt.wantNumFailed)
+			}
+			if len(doneOK) != tt.wantDoneOK {
+				t.Errorf("number doneOK %d, expected %d", len(doneOK), tt.wantDoneOK)
 			}
 			if len(partial) != tt.wantNumPartial {
 				t.Errorf("number partial %d, expected %d", len(partial), tt.wantNumPartial)
@@ -984,6 +1008,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 		remaining       []uint64
 		wantNumPassed   int
 		wantNumFailed   int
+		wantDoneOK      int
 		wantNumPartial  int
 		wantNumInserted int
 		wantNumUnbooked int
@@ -1001,6 +1026,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			remaining:       []uint64{quoteAmt(1) - marketBuyQuoteAmt(1)},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 1,
@@ -1018,6 +1044,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			remaining:       []uint64{0},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 1,
@@ -1035,6 +1062,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			remaining:       []uint64{0},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 2,
@@ -1052,6 +1080,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			remaining:       []uint64{0},
 			wantNumPassed:   1,
 			wantNumFailed:   0,
+			wantDoneOK:      1,
 			wantNumPartial:  0,
 			wantNumInserted: 0,
 			wantNumUnbooked: 11,
@@ -1063,7 +1092,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			resetTakers()
 			resetMakers()
 
-			matches, passed, failed, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -1085,6 +1114,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			}
 			if len(failed) != tt.wantNumFailed {
 				t.Errorf("number failed %d, expected %d", len(failed), tt.wantNumFailed)
+			}
+			if len(doneOK) != tt.wantDoneOK {
+				t.Errorf("number doneOK %d, expected %d", len(doneOK), tt.wantDoneOK)
 			}
 			if len(partial) != tt.wantNumPartial {
 				t.Errorf("number partial %d, expected %d", len(partial), tt.wantNumPartial)

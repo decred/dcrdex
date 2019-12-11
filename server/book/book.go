@@ -5,6 +5,8 @@
 package book
 
 import (
+	"sync"
+
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -21,6 +23,7 @@ const (
 // allow constant time access to the best orders, and log time insertion and
 // removal of orders.
 type Book struct {
+	mtx     sync.RWMutex
 	lotSize uint64
 	buys    *OrderPQ
 	sells   *OrderPQ
@@ -44,8 +47,10 @@ func New(lotSize uint64, halfCapacity ...uint32) *Book {
 // Realloc changes the capacity of the order book given the specified capacity
 // of both buy and sell sides of the book.
 func (b *Book) Realloc(newHalfCap uint32) {
+	b.mtx.Lock()
 	b.buys.Realloc(newHalfCap)
 	b.sells.Realloc(newHalfCap)
+	b.mtx.Unlock()
 }
 
 // LotSize returns the Book's configured lot size in atoms of the base asset.
@@ -75,6 +80,16 @@ func (b *Book) BestBuy() *order.LimitOrder {
 	return b.buys.PeekBest()
 }
 
+// Best returns pointers to the best buy and sell order in the order book. The
+// orders are NOT removed from the book.
+func (b *Book) Best() (bestBuy, bestSell *order.LimitOrder) {
+	b.mtx.RLock()
+	bestBuy = b.buys.PeekBest()
+	bestSell = b.sells.PeekBest()
+	b.mtx.RUnlock()
+	return
+}
+
 // Insert attempts to insert the provided order into the order book, returning a
 // boolean indicating if the insertion was successful. If the order is not an
 // integer multiple of the Book's lot size, the order will not be inserted.
@@ -84,6 +99,8 @@ func (b *Book) Insert(o *order.LimitOrder) bool {
 			"quantity that is not a multiple of lot size.")
 		return false
 	}
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
 	if o.Sell {
 		return b.sells.Insert(o)
 	}
@@ -93,6 +110,8 @@ func (b *Book) Insert(o *order.LimitOrder) bool {
 // Remove attempts to remove the order with the given OrderID from the book.
 func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 	uid := oid.String()
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
 	if removed, ok := b.sells.RemoveOrderUID(uid); ok {
 		return removed, true
 	}

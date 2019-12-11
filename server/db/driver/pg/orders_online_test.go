@@ -3,6 +3,7 @@
 package pg
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"testing"
@@ -454,6 +455,95 @@ func TestOrderStatusUnknown(t *testing.T) {
 			t.Fatalf("Expected ArchiveError with code ErrUnknownOrder, got %d", errA.Code)
 		}
 		t.Fatalf("Expected ArchiveError with code ErrUnknownOrder, got %v", err)
+	}
+}
+
+func TestActiveOrderCoins(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// Do not use Stringers when dumping, and stop after 4 levels deep
+	spew.Config.MaxDepth = 4
+	spew.Config.DisableMethods = true
+
+	multiCoinLO := newLimitOrder(false, 4900000, 1, order.StandingTiF, 0)
+	multiCoinLO.Coins = append(multiCoinLO.Coins, order.CoinID{0x22, 0x23})
+
+	orderStatuses := []struct {
+		ord         order.Order
+		status      order.OrderStatus
+		activeCoins int
+	}{
+		{
+			multiCoinLO,
+			order.OrderStatusBooked, // active, buy, booked
+			-1,
+		},
+		{
+			newLimitOrder(false, 4500000, 1, order.StandingTiF, 0),
+			order.OrderStatusExecuted, // archived, buy
+			0,
+		},
+		{
+			newMarketSellOrder(2, 0),
+			order.OrderStatusEpoch, // active, sell, epoch
+			1,
+		},
+		{
+			newMarketSellOrder(1, 0),
+			order.OrderStatusExecuted, // archived, sell
+			0,
+		},
+		{
+			newMarketBuyOrder(2000000000, 0),
+			order.OrderStatusEpoch, // active, buy
+			-1,
+		},
+		{
+			newMarketBuyOrder(2100000000, 0),
+			order.OrderStatusExecuted, // archived, buy
+			0,
+		},
+	}
+
+	for i := range orderStatuses {
+		ordIn := orderStatuses[i].ord
+		statusIn := orderStatuses[i].status
+		err := archie.StoreOrder(ordIn, statusIn)
+		if err != nil {
+			t.Fatalf("StoreOrder failed: %v", err)
+		}
+	}
+
+	baseCoins, quoteCoins, err := archie.ActiveOrderCoins(mktInfo.Base, mktInfo.Quote)
+	if err != nil {
+		t.Fatalf("ActiveOrderCoins failed: %v", err)
+	}
+
+	for _, os := range orderStatuses {
+		var coins, wantCoins []order.CoinID
+		switch os.activeCoins {
+		case 0: // no active
+		case 1: // active base coins (sell order)
+			coins = baseCoins[os.ord.ID()]
+			wantCoins = os.ord.CoinIDs()
+		case -1: // active quote coins (buy order)
+			coins = quoteCoins[os.ord.ID()]
+			wantCoins = os.ord.CoinIDs()
+		}
+
+		if len(coins) != len(wantCoins) {
+			t.Errorf("Order %v has %d coins, expected %d", os.ord.ID(),
+				len(coins), len(wantCoins))
+			continue
+		}
+		for i := range coins {
+			if !bytes.Equal(coins[i], wantCoins[i]) {
+				t.Errorf("Order %v coin %d mismatch:\n\tgot %v\n\texpected %v",
+					os.ord.ID(), i, coins[i], wantCoins[i])
+			}
+		}
 	}
 }
 

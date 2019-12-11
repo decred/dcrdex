@@ -57,6 +57,8 @@ type OrderArchiver interface {
 	// specified by the given base and quote assets.
 	Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error)
 
+	ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error)
+
 	// UserOrders retrieves all orders for the given account in the market
 	// specified by a base and quote asset.
 	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
@@ -134,19 +136,19 @@ type AccountArchiver interface {
 // MatchData represents an order pair match, but with just the order IDs instead
 // of the full orders. The actual orders may be retrieved by ID.
 type MatchData struct {
-	ID         order.MatchID
-	Taker      order.OrderID
-	TakerAcct  account.AccountID
-	TakerAddr  string
-	Maker      order.OrderID
-	MakerAcct  account.AccountID
-	MakerAddr  string
-	Epoch      order.EpochID
-	Quantity   uint64
-	Rate       uint64
-	Status     order.MatchStatus
-	Sigs       order.Signatures
-	cachedHash order.MatchID
+	ID        order.MatchID
+	Taker     order.OrderID
+	TakerAcct account.AccountID
+	TakerAddr string
+	Maker     order.OrderID
+	MakerAcct account.AccountID
+	MakerAddr string
+	Epoch     order.EpochID
+	Quantity  uint64
+	Rate      uint64
+	Status    order.MatchStatus
+	Sigs      order.Signatures
+	// cachedHash order.MatchID // TODO
 }
 
 // MatchArchiver is the interface required for storage and retrieval of all

@@ -550,7 +550,6 @@ func testMakeMsgTx(segwit bool) *testMsgTx {
 
 type testMsgTxSwap struct {
 	tx        *wire.MsgTx
-	vout      uint32
 	contract  []byte
 	recipient btcutil.Address
 }
