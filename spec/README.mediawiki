@@ -87,31 +87,31 @@ Continuing client-server interoperability will likely depend on subtle aspects
 of the specification laid out in this document, especially the following
 critical sections.
 
-'''&#91;1&#93; [[COMMPROTOCOLS.mediawiki|Communication Protocols]]''' describes the
+'''&#91;1&#93; [[comm.mediawiki|Communication Protocols]]''' describes the
 messaging protocols and communication layer technologies that are to be used
 for the DEX API.
 
-'''&#91;2&#93; [[EXCHANGEFUNDAMENTALS.mediawiki|Distributed Exchange Design Fundamentals]]'''
+'''&#91;2&#93; [[fundamentals.mediawiki|Distributed Exchange Design Fundamentals]]'''
 describes the notable design aspects that facilitate an exchange service with
 the features described above.
 
-'''&#91;3&#93; [[EXCHANGEADMIN.mediawiki|Distributed Exchange Administration]]''' describes
+'''&#91;3&#93; [[admin.mediawiki|Distributed Exchange Administration]]''' describes
 the tasks required to administer the exchange.
 
-'''&#91;4&#93; [[ACCOUNTS.mediawiki|Client Accounts]]''' details account creation.
+'''&#91;4&#93; [[accounts.mediawiki|Client Accounts]]''' details account creation.
 
-'''&#91;5&#93; [[ORDERMANAGEMENT.mediawiki|Client Order Management]]''' details the different
+'''&#91;5&#93; [[orders.mediawiki|Client Order Management]]''' details the different
 order types and the client/server workflows required to synchronize the order
 book and place orders.
 
-'''&#91;6&#93; [[DATAAPI.mediawiki| Data API]]''' defines http and websocket APIs to browse
+'''&#91;6&#93; [[api.mediawiki| Data API]]''' defines http and websocket APIs to browse
 trade history.
 
-'''&#91;7&#93; [[ATOMICSETTLEMENT.mediawiki|Atomic Settlement]]''' walks through the settlement
+'''&#91;7&#93; [[atomic.mediawiki|Atomic Settlement]]''' walks through the settlement
 process with a couple of examples to provide a high-level overview.
 
-'''&#91;8&#93; [[COMMUNITYCONDUCT.mediawiki|Community Conduct]]''' describes the system of rules
+'''&#91;8&#93; [[community.mediawiki|Community Conduct]]''' describes the system of rules
 to which clients interacting with the DEX must adhere.
 
-'''&#91;9&#93; [[REFERENCES.mediawiki|References]]''' lists references used in the development
+'''&#91;9&#93; [[references.mediawiki|References]]''' lists references used in the development
 of the specification.
