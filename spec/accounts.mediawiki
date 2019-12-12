@@ -12,7 +12,7 @@ string in API messages.
 ===Step 1: Registration===
 
 The user creates a websocket connection and sends their
-[[#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|public account key]].
+[[fundamentals.mediawiki/#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|public account key]].
 The message is signed with the corresponding private account key. The response
 includes the server's public key. The server's public key will also be
 pre-published for further validation.
@@ -78,7 +78,7 @@ pre-published for further validation.
 The client pays the fee on-chain and notifies the DEX of the transaction detail.
 The fee is paid with a standard P2PKH output to the address received in step 1.
 Once the transaction is mined and has the
-[[#Exchange_Variables|requisite number of confirmations (swapconf)]],
+[[fundamentals.mediawiki/#Exchange_Variables|requisite number of confirmations (swapconf)]],
 the client should send their fee notification to complete
 the registration process.
 

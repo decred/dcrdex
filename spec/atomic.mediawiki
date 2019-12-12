@@ -8,7 +8,7 @@ messages between the two clients.
 Additionally, the DEX performs some trade monitoring to ensure that parties are
 acting in good faith.
 Clients who fail to act on their trades appropriately will be issued a penalty
-in accordance with the [[#community-conduct|rules of community conduct]].
+in accordance with the [[community.mediawiki/#community-conduct|rules of community conduct]].
 
 The following cases are meant to provide a high-level overview of the trade
 process, and to illustrate how to handle a perfect match, a partial fill, and

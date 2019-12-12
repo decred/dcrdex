@@ -14,13 +14,13 @@ possible.
 {|
 ! variable !! relevant section !! units || default
 |-
-| epoch&nbsp;duration || [[#Epochbased_Order_Matching|Epoch-based Order Matching]] || seconds || 60
+| epoch&nbsp;duration || [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]] || seconds || 60
 |-
-| market&nbsp;buy&nbsp;buffer || [[#Market_Buy_Orders|Market Buy Orders]] || unitless ratio || 1.25
+| market&nbsp;buy&nbsp;buffer || [[orders.mediawiki/#Market_Buy_Orders|Market Buy Orders]] || unitless ratio || 1.25
 |-
-| registration&nbsp;fees || [[#Fees|Fees]] || atoms || 1e8 (1 DCR)
+| registration&nbsp;fees || [[fundamentals.mediawiki/#Fees|Fees]] || atoms || 1e8 (1 DCR)
 |-
-| cancellation&nbsp;threshold || [[Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 2]] || unitless ratio || 0.6
+| cancellation&nbsp;threshold || [[community.mediawiki/#Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 2]] || unitless ratio || 0.6
 |}
 
 '''Per-asset Variables'''
@@ -30,7 +30,7 @@ possible.
 |-
 | lot&nbsp;size  || atoms ||  the minimum order quantity and the order quantity increment when an asset is the base asset
 |-
-| rate&nbsp;step || atoms || The minimum price rate and the price rate increment when an asset is the quote asset. [[#Rate_Encoding|message-rate encoding]]
+| rate&nbsp;step || atoms || The minimum price rate and the price rate increment when an asset is the quote asset. [[orders.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
 | fee&nbsp;rate  || atoms/byte || the minimum fee rate for swap transactions
 |-
@@ -39,6 +39,6 @@ possible.
 | swap&nbsp;confirmations|| count || the Minimum confirmations before acting on a swap transaction
 |}
 
-See also [[#Exchange_Variables|Exchange Variables]].
+See also [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]].
 
 ...

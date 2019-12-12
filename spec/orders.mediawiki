@@ -3,7 +3,7 @@
 This section describes the steps required of the client to place an order, and
 the interactions between the client and server to execute an order once a match
 has been found.
-See the [[#atomic-settlement|atomic settlement]] section for a high-level
+See the [[atomic.mediawiki/#Atomic_Settlement|atomic settlement]] section for a high-level
 overview of the settlement process.
 
 There are three available types of order.
@@ -14,21 +14,21 @@ There are three available types of order.
 
 The order book holds only limit orders with time in force ''standing'' that have
 not completely filled or been cancelled. All other orders are only valid for one
-[[#Epochbased_Order_Matching|epoch match cycle]].
+[[fundamentals.mediawiki/#Epochbased_Order_Matching|epoch match cycle]].
 
 ===Connection Persistence===
 
 If a connection is lost after placing an order, the client must reconnect and
 complete settlement on any matches made in their absence.
 Regardless of connection status, once a match is made, a client is always
-subject to violation of [[#Rule_1_Every_match_must_be_fully_settled|rule 1]] via
-the [[#Exchange_Variables|broadcast timeout]].
+subject to violation of [[community.mediawiki/#Rule_1_Every_match_must_be_fully_settled|rule 1]] via
+the [[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]].
 This is true regardless of connection status.
 
 If a client is disconnected for a full epoch duration, any standing limit orders
 may be auto-cancelled by the server.
 These cancellations will count toward the client's
-[[#Rules_of_Community_Conduct|cancellation ratio]], so could potentially result
+[[community.mediawiki/#Rules_of_Community_Conduct|cancellation ratio]], so could potentially result
 in penalties.
 The client should manage their orders carefully to ensure that this doesn't
 occur.
@@ -136,7 +136,7 @@ attribute.
 
 At the beginning of the matching cycle, the DEX will publish a list of order
 IDs and the seed hash used for
-[[#Pseudorandom_Order_Matching|order sequencing]].
+[[fundamentals.mediawiki/#Pseudorandom_Order_Matching|order sequencing]].
 
 '''Notification route:''' <code>match_data</code>, '''originator: ''' DEX
 
@@ -248,7 +248,7 @@ big-endian encoded output index as the last 4 bytes.
 ====Coin Preparation====
 
 All backing [[#Coin_ID|coins]] must have a minimum number of confirmations. The exact number,
-<code>swapconf</code>, is an [[#Exchange_Variables|asset variable]] set by the
+<code>swapconf</code>, is an [[fundamentals.mediawiki/#Exchange_Variables|asset variable]] set by the
 DEX operator.
 
 With the exception of market buy orders, which are detailed below, for an order
@@ -293,7 +293,7 @@ All orders must be signed by the client and the server.
 The basic signing procedure will involve serializing order data into a byte array
 following a specific procedure that can be replicated on the server.
 The serialized data is then signed using the client's
-[[#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|private account key]].
+[[fundamentals.mediawiki/#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|private account key]].
 
 All integer encoding for all serialized structures is big endian.
 
@@ -356,7 +356,7 @@ The client may specify the ''time in force'' of a limit order as one of: (a)
 such, the ''immediate'' option is intended for limit orders with a price that
 crosses the spread (i.e. a taker rather than a maker). The
 <code>ordersize</code> must be an integer multiple of the asset's
-[[#Exchange_Variables|lot size]].
+[[fundamentals.mediawiki/#Exchange_Variables|lot size]].
 
 '''Request route:''' <code>limit</code>, '''originator:''' client
 
@@ -503,7 +503,7 @@ If the ''market buy buffer'' is set too low or the market is particularly
 volatile and the price exceeds '''''b<sub>m</sub> r''''', an order that was
 accepted but is now too small to match is considered executed but unfilled and
 there is no change to the account's
-[[#Rules_of_Community_Conduct|cancellation statistics]].
+[[community.mediawiki/#Rules_of_Community_Conduct|cancellation statistics]].
 
 ===Cancel Order===
 
@@ -771,7 +771,7 @@ redemption transaction.
 ===Match revocation===
 
 A match can be revoked by the server if a client fails to act within the
-[[#Exchange_Variables|broadcast timeout]]. A match revocation will result in
+[[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]]. A match revocation will result in
 penalties for the violating party only.
 The revoked match quantity is not added back to the order book in any form.
 
@@ -825,7 +825,7 @@ This would be the case if the DEX needs to change an asset variable such as
 the lot size or minimum transaction fee rate.
 
 If standing limit orders are persisted, they will be auto-revoked if the client
-does not reconnect before the next [[#Session_Authentication|start epoch]].
+does not reconnect before the next [[comm.mediawiki/#Session_Authentication|start epoch]].
 
 '''Request route: ''' <code>suspension</code>, '''originator:''' DEX
 

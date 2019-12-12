@@ -123,7 +123,7 @@ connection is established, the client will supply their account ID and signature
 {|
 ! field   !! size (bytes) !! description
 |-
-| account ID || 16 || client [[#Step_1_Registration|account ID]]
+| account ID || 16 || client [[accounts.mediawiki/#Step_1_Registration|account ID]]
 |-
 | API version || 2 || requested API version
 |-
@@ -132,7 +132,7 @@ connection is established, the client will supply their account ID and signature
 
 '''Connect response'''
 
-If the client connects shortly after a [[#Trade_Suspension|trade suspension]],
+If the client connects shortly after a [[orders.mediawiki/#Trade_Suspension|trade suspension]],
 it's possible that trading will not commence until a future epoch. The DEX
 response will indicate when trade did or will begin.
 
@@ -143,7 +143,7 @@ the client's absence. A list of any pending matches is included in the response.
 {|
 ! field      !! type   !! description
 |-
-| startepoch || int   || the epoch at which trading did or will commence. May be in the future e.g. [[#Trade_Suspension|after maintenance]]
+| startepoch || int   || the epoch at which trading did or will commence. May be in the future e.g. [[orders.mediawiki/#Trade_Suspension|after maintenance]]
 |-
 | matches    || &#91;object&#93; || list of [[#Match_notifications|Match objects]]
 |}
@@ -153,6 +153,6 @@ the client's absence. A list of any pending matches is included in the response.
 An API using HTTP for message transport may be provided for basic account
 management and server status queries, however websocket connections are to be
 the sole means for
-[[#Client_Order_Management|placing, monitoring, and executing orders]].
+[[orders.mediawiki/#Client_Order_Management|placing, monitoring, and executing orders]].
 The primary reason for limiting the scope of the HTTP API is to eliminate client
 polling for rapidly changing resources, such as order status API endpoints.

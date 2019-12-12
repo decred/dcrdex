@@ -38,12 +38,12 @@ The '''rate''', '''''r''''', of a limit order must be an integer multiple of the
 
 The DEX operator specifies an on-chain transaction '''fee rate'''
 (units ''atoms/byte'') used when
-[[#Calculating_Transaction_Fees|calculating the fees]] for initialization
+[[orders.mediawiki/#Calculating_Transaction_Fees|calculating the fees]] for initialization
 transactions.
 
 Each asset has two distinct '''minimum numbers of confirmations'''.
 The <code>fundconf</code> is the number of confirmations required for
-[[#Order_Preparation|backing coins]]. The <code>swapconf</code> is the number
+[[orders.mediawiki/#Order_Preparation|backing coins]]. The <code>swapconf</code> is the number
 of confirmations required during settlement on the first swap transaction,
 before the second swap transaction is broadcast.
 
@@ -69,9 +69,9 @@ respond with its current configuration.
 |-
 | epochlen  || int   || the [[#Epochbased_Order_Matching|epoch duration]] (seconds)
 |-
-| buybuffer || float || the [[#Market_Buy_Orders|market buy buffer]]
+| buybuffer || float || the [[orders.mediawiki/#Market_Buy_Orders|market buy buffer]]
 |-
-| cancelmax || float || the [[Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
+| cancelmax || float || the [[community.mediawiki/#Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
 |-
 | assets    || &#91;object&#93; || list of Asset objects (definition below)
 |-
@@ -109,7 +109,7 @@ add considerable complexity to the swap process and incentivize DEX operators to
 facilitate wash trading.
 Instead, a one-time fee is collected by the pool during registration.
 Registration fees discourage certain spam attacks, enable punitive actions when
-[[#Rules_of_Community_Conduct|conduct rules]] are violated, and help to cover
+[[community.mediawiki/#Rules_of_Community_Conduct|conduct rules]] are violated, and help to cover
 DEX operating expenses.
 Registration fees will be configurable by the exchange operator.
 
@@ -128,9 +128,9 @@ rate.
 
 Total on-chain fees associated with an order will increase as the number of swap
 transactions required to settle the order increases. Maximum fees paid
-[[#Calculating_Transaction_Fees|vary linearly with order size]], but the actual
+[[orders.mediawiki/#Calculating_Transaction_Fees|vary linearly with order size]], but the actual
 fees realized can be significantly less than the maximum.
-See the [[#Atomic_Settlement|atomic settlement]] section for examples of simple
+See the [[atomic.mediawiki/#Atomic_Settlement|atomic settlement]] section for examples of simple
 and complex matches and how that affects the swap transaction sizes.
 
 Fee rates can vary greatly between assets.
@@ -141,7 +141,7 @@ which are preferable from an accounting standpoint, and higher fees, which can
 decrease settlement time by increasing the speed at which transactions are
 mined.
 
-See also: [[#Calculating_Transaction_Fees|Calculating Transaction Fees]]
+See also: [[orders.mediawiki/#Calculating_Transaction_Fees|Calculating Transaction Fees]]
 
 ===Epoch-based Order Matching===
 
@@ -178,7 +178,7 @@ When the epoch ends, a match cycle begins.
 First, the order pool is shuffled.
 Shuffling is deterministic, using the Fisher-Yates algorithm where the
 random number generator seed is derived from the hash of the concatenated order
-[[#Order_ID|ID hashes]].
+[[orders.mediawiki/#Order_ID|ID hashes]].
 Specifically for hash function '''''f''''', the seed is the 64-bit integer
 corresponding to the little-endian byte order interpretation of the first 8
 bytes of the hash.
@@ -189,7 +189,7 @@ The hash is computed as
 
 where '''''order<sub>i</sub>''''' represents the order ID of the
 '''''i<sup>th</sup>''''' order in a lexicographically sorted list of
-[[#Order_ID|order IDs]] and '''''||''''' indicates concatenation.
+[[orders.mediawiki/#Order_ID|order IDs]] and '''''||''''' indicates concatenation.
 
 The order IDs and final hash are published at the start of the matching process.
 This is done so that the shuffling may be independently computed for external
@@ -239,7 +239,7 @@ Decred blockchain may be useful for establishing a reputation system.
 
 '''Clients''' need wallets that support atomic swaps and the ability to
 broadcast transactions to each of the blockchain networks involved in
-[[#Atomic_Settlement|the swap]].
+[[atomic.mediawiki/#Atomic_Settlement|the swap]].
 
 '''DEX operators''' need access to trusted full nodes for each of the
 assets supported.

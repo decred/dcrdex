@@ -9,7 +9,7 @@ behaviors that contribute to a smooth DEX experience for other users.
 ====Rule 1: Every match must be fully settled====
 
 Swap transactions must be created at the correct times (see
-[[#Exchange_Variables|broadcast timeout]]).
+[[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]]).
 
 In the event that the maker fails to start the atomic swap process with their
 initialization transaction, the taker will be notified that order execution is
