@@ -82,6 +82,8 @@ type Market struct {
 	bookMtx       sync.Mutex
 	book          *book.Book
 	epochDuration int64
+	epochMtx      sync.RWMutex
+	epochOrders   map[order.OrderID]order.Order
 	matcher       *matcher.Matcher
 	swapper       Swapper
 	auth          AuthManager
@@ -166,6 +168,26 @@ func (m *Market) CoinLocked(asset uint32, coin coinlock.CoinID) bool {
 	}
 }
 
+// Cancelable determines if an order is a limit order with time-in-force
+// standing that is in either the epoch queue or in the order book.
+func (m *Market) Cancelable(oid order.OrderID) bool {
+	// All book orders are standing limit orders.
+	if m.book.HaveOrder(oid) {
+		return true
+	}
+
+	// Check the active epochs (includes current and next).
+	m.epochMtx.RLock()
+	ord := m.epochOrders[oid]
+	m.epochMtx.RUnlock()
+
+	switch o := ord.(type) {
+	case *order.LimitOrder:
+		return o.Force == order.StandingTiF
+	}
+	return false
+}
+
 // NewMarket creates a new Market for the provided base and quote assets, with
 // an epoch cycling at given duration in milliseconds.
 func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchivist,
@@ -198,6 +220,7 @@ func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchi
 		orderRouter:     make(chan *orderUpdateSignal, 16),
 		book:            book.New(mktInfo.LotSize),
 		matcher:         matcher.New(),
+		epochOrders:     make(map[order.OrderID]order.Order),
 		swapper:         swapper,
 		auth:            authMgr,
 		storage:         storage,
@@ -463,6 +486,10 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 	epoch.Insert(ord)
 	errChan <- nil
 
+	m.epochMtx.Lock()
+	m.epochOrders[ord.ID()] = ord
+	m.epochMtx.Unlock()
+
 	// Inform the client that the order has been received, stamped, signed, and
 	// inserted into the current epoch queue.
 	m.auth.Send(ord.User(), respMsg)
@@ -481,6 +508,12 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 func (m *Market) processEpoch(epoch *EpochQueue) {
 	// Perform the matching. The matcher updates the order book.
 	orders := epoch.OrderSlice()
+	m.epochMtx.Lock()
+	for _, ord := range orders {
+		delete(m.epochOrders, ord.ID())
+	}
+	m.epochMtx.Unlock()
+
 	m.bookMtx.Lock()
 	matches, _, failed, doneOK, partial, booked, unbooked := m.matcher.Match(m.book, orders)
 	m.bookMtx.Unlock()

@@ -588,12 +588,12 @@ func TestOrderPriorityQueue_Remove(t *testing.T) {
 	if pq.Len() != 1 {
 		t.Errorf("Queue length expected %d, got %d", 1, pq.Len())
 	}
-	remainingUID := pq.PeekBest().UID()
-	if remainingUID != orders[0].UID() {
-		t.Errorf("Remaining element expected %s, got %s", orders[0].UID(),
-			remainingUID)
+	remainingID := pq.PeekBest().ID()
+	if remainingID != orders[0].ID() {
+		t.Errorf("Remaining element expected %s, got %s", orders[0].ID(),
+			remainingID)
 	}
-	pq.RemoveOrderUID(remainingUID)
+	pq.RemoveOrderID(remainingID)
 	if pq.Len() != 0 {
 		t.Errorf("Expected empty queue, got %d", pq.Len())
 	}

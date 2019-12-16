@@ -109,16 +109,22 @@ func (b *Book) Insert(o *order.LimitOrder) bool {
 
 // Remove attempts to remove the order with the given OrderID from the book.
 func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
-	uid := oid.String()
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
-	if removed, ok := b.sells.RemoveOrderUID(uid); ok {
+	if removed, ok := b.sells.RemoveOrderID(oid); ok {
 		return removed, true
 	}
-	if removed, ok := b.buys.RemoveOrderUID(uid); ok {
+	if removed, ok := b.buys.RemoveOrderID(oid); ok {
 		return removed, true
 	}
 	return nil, false
+}
+
+// HaveOrder checks if an order is in either the buy or sell side of the book.
+func (b *Book) HaveOrder(oid order.OrderID) bool {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	return b.buys.HaveOrder(oid) || b.sells.HaveOrder(oid)
 }
 
 // SellOrders copies out all sell orders in the book, sorted.
