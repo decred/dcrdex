@@ -432,3 +432,102 @@ func TestMarket_processEpoch(t *testing.T) {
 	mkt.Stop()
 	mkt.WaitForShutdown()
 }
+
+func TestMarket_Cancelable(t *testing.T) {
+	lots := 10
+	qty := uint64(dcrLotSize * lots)
+	rate := uint64(1000) * dcrRateStep
+	aid := test.NextAccount()
+	now := time.Now().Round(time.Millisecond).UTC()
+	limitMsg := &msgjson.Limit{
+		Prefix: msgjson.Prefix{
+			AccountID:  aid[:],
+			Base:       dcrID,
+			Quote:      btcID,
+			OrderType:  msgjson.LimitOrderNum,
+			ClientTime: uint64(order.UnixMilli(now)),
+		},
+		Trade: msgjson.Trade{
+			Side:     msgjson.SellOrderNum,
+			Quantity: qty,
+			Coins:    []*msgjson.Coin{},
+			Address:  btcAddr,
+		},
+		Rate: rate,
+		TiF:  msgjson.StandingOrderNum,
+	}
+
+	newLimit := func() *order.LimitOrder {
+		return &order.LimitOrder{
+			MarketOrder: order.MarketOrder{
+				Prefix: order.Prefix{
+					AccountID:  aid,
+					BaseAsset:  limitMsg.Base,
+					QuoteAsset: limitMsg.Quote,
+					OrderType:  order.LimitOrderType,
+					ClientTime: now,
+				},
+				Coins:    []order.CoinID{},
+				Sell:     true,
+				Quantity: limitMsg.Quantity,
+				Address:  limitMsg.Address,
+			},
+			Rate:  limitMsg.Rate,
+			Force: order.StandingTiF,
+		}
+	}
+	lo := newLimit()
+
+	oRecord := orderRecord{
+		msgID: 1,
+		req:   limitMsg,
+		order: lo,
+	}
+
+	mkt, _, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+		return
+	}
+
+	epochDurationMSec := mkt.epochDuration
+	startEpochIdx := 1 + order.UnixMilli(time.Now())/epochDurationMSec
+	mkt.Start(startEpochIdx)
+
+	mkt.WaitForEpochOpen()
+
+	if mkt.Cancelable(order.OrderID{}) {
+		t.Errorf("Cancelable reported bogus order as is cancelable, " +
+			"but it wasn't even submitted.")
+	}
+
+	// Submit the standing limit order into the current epoch.
+	err = mkt.SubmitOrder(&oRecord)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if !mkt.Cancelable(lo.ID()) {
+		t.Errorf("Cancelable failed to report order %v as cancelable, "+
+			"but it was in the epoch queue", lo)
+	}
+
+	// Let the epoch cycle.
+	time.Sleep(time.Duration(epochDurationMSec)*time.Millisecond + time.Duration(epochDurationMSec/20))
+	if !mkt.Cancelable(lo.ID()) {
+		t.Errorf("Cancelable failed to report order %v as cancelable, "+
+			"but it should have been booked.", lo)
+	}
+
+	mkt.bookMtx.Lock()
+	_, ok := mkt.book.Remove(lo.ID())
+	mkt.bookMtx.Unlock()
+	if !ok {
+		t.Errorf("Failed to remove order %v from the book.", lo)
+	}
+
+	if mkt.Cancelable(lo.ID()) {
+		t.Errorf("Cancelable reported order %v as is cancelable, "+
+			"but it was removed from the Book.", lo)
+	}
+}
