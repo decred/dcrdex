@@ -9,7 +9,7 @@ import (
 
 func TestMatchID(t *testing.T) {
 	// taker
-	marketID0, _ := hex.DecodeString("a347a8b9b9204e7626ed9f03e6a3a49f16a527451fb42c4d6c9494b136e85d50")
+	marketID0, _ := hex.DecodeString("6258988bdb7cc6def56635b3089b8a3f9f7cb4ef4517573b3fb2d086fd62b6f7")
 	var marketID OrderID
 	copy(marketID[:], marketID0)
 
@@ -34,7 +34,7 @@ func TestMatchID(t *testing.T) {
 	}
 
 	// maker
-	limitID0, _ := hex.DecodeString("1bd2250771efa587e2b076bc59b93ee56bcbfd8b8d534a362127d23ce4766f51")
+	limitID0, _ := hex.DecodeString("b89cb353ebe077e21ad35e024a6154d0a37e9e091a380357f82b277c694f3d64")
 	var limitID OrderID
 	copy(limitID[:], limitID0)
 
@@ -76,7 +76,7 @@ func TestMatchID(t *testing.T) {
 		t.Fatalf("identical matches has different IDs. %s != %s", match.ID(), match2.ID())
 	}
 
-	expIDStr := "29b431b631b34405d3298418bf084d525cbd66eba9f4bc7f00a1dbe4808642e6"
+	expIDStr := "a8998eb09346c49c7ad1d15c5cbc2c65a733ac0d630262564ec09756f1818e6f"
 	expID, _ := hex.DecodeString(expIDStr)
 	matchID := match.ID()
 	if !bytes.Equal(expID, matchID[:]) {

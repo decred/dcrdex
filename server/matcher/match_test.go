@@ -1185,8 +1185,8 @@ func Test_shuffleQueue(t *testing.T) {
 	}
 
 	q2Shuffled := []order.Order{
-		marketOrders[0],
 		limitOrders[0],
+		marketOrders[0],
 	}
 
 	tests := []struct {
@@ -1275,8 +1275,8 @@ func Test_sortQueue(t *testing.T) {
 
 	// q3Sorted is the expected result of sorting q3_1 and q3_2
 	q3Sorted := []order.Order{
-		marketOrders[0],
 		marketOrders[1],
+		marketOrders[0],
 		limitOrders[0],
 	}
 

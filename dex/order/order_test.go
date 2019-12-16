@@ -94,9 +94,9 @@ func TestPrefix_Serialize(t *testing.T) {
 				// OrderType 1 byte
 				0x1,
 				// ClientTime 8 bytes
-				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x75,
+				0x0, 0x0, 0x1, 0x6c, 0xba, 0x89, 0x41, 0x8,
 				// ServerTime 8 bytes
-				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x78,
+				0x0, 0x0, 0x1, 0x6c, 0xba, 0x89, 0x4c, 0xc0,
 			},
 		},
 	}
@@ -167,9 +167,9 @@ func TestMarketOrder_Serialize_SerializeSize(t *testing.T) {
 				// Prefix - OrderType 1 byte
 				0x2,
 				// Prefix - ClientTime 8 bytes
-				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x75,
+				0x0, 0x0, 0x1, 0x6c, 0xba, 0x89, 0x41, 0x8,
 				// Prefix - ServerTime 8 bytes
-				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x78,
+				0x0, 0x0, 0x1, 0x6c, 0xba, 0x89, 0x4c, 0xc0,
 				// UTXO count 1 byte
 				0x2,
 				// UTXO 1 hash 32 bytes
@@ -262,9 +262,9 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 				// Prefix - OrderType 1 byte
 				0x1,
 				// Prefix - ClientTime 8 bytes
-				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x75,
+				0x0, 0x0, 0x1, 0x6c, 0xba, 0x89, 0x41, 0x8,
 				// Prefix - ServerTime 8 bytes
-				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x78,
+				0x0, 0x0, 0x1, 0x6c, 0xba, 0x89, 0x4c, 0xc0,
 				// UTXO count 1 byte
 				0x2,
 				// UTXO 1 hash 32 bytes
@@ -352,9 +352,9 @@ func TestCancelOrder_Serialize(t *testing.T) {
 				// Prefix - OrderType 1 byte
 				0x3,
 				// Prefix - ClientTime 8 bytes
-				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0x9d,
+				0x0, 0x0, 0x1, 0x6c, 0xba, 0x89, 0xdd, 0x48,
 				// Prefix - ServerTime 8 bytes
-				0x0, 0x0, 0x0, 0x0, 0x5d, 0x5e, 0xdb, 0xa0,
+				0x0, 0x0, 0x1, 0x6c, 0xba, 0x89, 0xe9, 0x0,
 				// Order ID - 32 bytes
 				0xce, 0x8c, 0xc8, 0xd, 0xda, 0x9a, 0x40, 0xbb, 0x43, 0xba, 0x58,
 				0x9, 0x75, 0xfd, 0x23, 0x85, 0x4c, 0x4, 0x4d, 0x8, 0x12, 0x54,
@@ -382,7 +382,7 @@ func TestCancelOrder_Serialize(t *testing.T) {
 }
 
 func TestMarketOrder_ID(t *testing.T) {
-	orderID0, _ := hex.DecodeString("a347a8b9b9204e7626ed9f03e6a3a49f16a527451fb42c4d6c9494b136e85d50")
+	orderID0, _ := hex.DecodeString("6258988bdb7cc6def56635b3089b8a3f9f7cb4ef4517573b3fb2d086fd62b6f7")
 	var orderID OrderID
 	copy(orderID[:], orderID0)
 
@@ -433,7 +433,7 @@ func TestMarketOrder_ID(t *testing.T) {
 				t.Errorf("MarketOrder.Remaining incorrect, got %d, expected %d",
 					remaining, o.Quantity-o.Filled)
 			}
-			if got := o.ID(); !reflect.DeepEqual(got, tt.want) {
+			if got := o.ID(); got != tt.want {
 				t.Errorf("MarketOrder.ID() = %v, want %v", got, tt.want)
 			}
 		})
@@ -441,7 +441,7 @@ func TestMarketOrder_ID(t *testing.T) {
 }
 
 func TestLimitOrder_ID(t *testing.T) {
-	orderID0, _ := hex.DecodeString("1bd2250771efa587e2b076bc59b93ee56bcbfd8b8d534a362127d23ce4766f51")
+	orderID0, _ := hex.DecodeString("b89cb353ebe077e21ad35e024a6154d0a37e9e091a380357f82b277c694f3d64")
 	var orderID OrderID
 	copy(orderID[:], orderID0)
 
@@ -492,7 +492,7 @@ func TestLimitOrder_ID(t *testing.T) {
 				t.Errorf("LimitOrder.Remaining incorrect, got %d, expected %d",
 					remaining, o.Quantity-o.Filled)
 			}
-			if got := o.ID(); !reflect.DeepEqual(got, tt.want) {
+			if got := o.ID(); got != tt.want {
 				t.Errorf("LimitOrder.ID() = %v, want %v", got, tt.want)
 			}
 		})
@@ -504,7 +504,7 @@ func TestCancelOrder_ID(t *testing.T) {
 	var limitOrderID OrderID
 	copy(limitOrderID[:], limitOrderID0)
 
-	orderID0, _ := hex.DecodeString("c051a262af8bd781e1464e72b3c24c2774989eca44d08ef088d82122ce669750")
+	orderID0, _ := hex.DecodeString("0966df1c7e72f1b0da8b92c5eed4c94f7c435c731fd0b4d63050109a07c3dfae")
 	var cancelOrderID OrderID
 	copy(cancelOrderID[:], orderID0)
 
@@ -543,7 +543,7 @@ func TestCancelOrder_ID(t *testing.T) {
 			if remaining != 0 {
 				t.Errorf("CancelOrder.Remaining should be 0, got %d", remaining)
 			}
-			if got := o.ID(); !reflect.DeepEqual(got, tt.want) {
+			if got := o.ID(); got != tt.want {
 				t.Errorf("CancelOrder.ID() = %v, want %v", got, tt.want)
 			}
 		})
@@ -583,6 +583,84 @@ func Test_UTXOtoCoinID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if !bytes.Equal(tt.args.id, tt.want) {
 				t.Errorf("serializeOutpoint() = %#v, want %v", tt.args.id, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnixMilli(t *testing.T) {
+	tests := []struct {
+		name string
+		t    time.Time
+		want int64
+	}{
+		{
+			"ok",
+			time.Unix(1575556096, int64(12*time.Millisecond)),
+			1575556096012,
+		},
+		{
+			"ok",
+			time.Unix(1575556096, 12*1e6),
+			1575556096012,
+		},
+		{
+			"ok",
+			time.Unix(1575556096, 0), // local, ok
+			1575556096 * 1000,
+		},
+		{
+			"ok",
+			time.Unix(1575556096, 0).UTC(), // utc
+			1575556096 * 1000,
+		},
+		{
+			"ok",
+			time.Unix(0, 12*1e6),
+			12,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := UnixMilli(tt.t); got != tt.want {
+				t.Errorf("UnixMilli() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnixTimeMilli(t *testing.T) {
+	tests := []struct {
+		name    string
+		msEpoch int64
+		want    time.Time
+	}{
+		{
+			"ok",
+			1575556096012,
+			time.Unix(1575556096, 12*1e6).UTC(), // UTC
+		},
+		{
+			"ok",
+			1575556096012,
+			time.Unix(1575556096, 12*1e6), // local, still OK
+		},
+		{
+			"ok",
+			1575556096000,
+			time.Unix(1575556096, 0),
+		},
+		{
+			"ok",
+			12,
+			time.Unix(0, 12*1e6),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := UnixTimeMilli(tt.msEpoch)
+			if !got.Equal(tt.want) {
+				t.Errorf("UnixTimeMilli() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -111,7 +111,7 @@ func newTestMarket() (*Market, *TArchivist, error) {
 	swapLockerQuote := masterLockerQuote.Swap()
 
 	ctx := context.Background()
-	epochDurationSec := int64(1)
+	epochDurationMSec := uint64(500) // 0.5 sec epoch duration
 	storage := &TArchivist{}
 	authMgr := &TAuth{}
 	swapperCfg := &swap.Config{
@@ -127,7 +127,7 @@ func newTestMarket() (*Market, *TArchivist, error) {
 	swapper := swap.NewSwapper(swapperCfg)
 
 	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
-		assetDCR.LotSize, uint64(epochDurationSec))
+		assetDCR.LotSize, epochDurationMSec)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dex.NewMarketInfo() failure: %v", err)
 	}
@@ -190,13 +190,14 @@ func TestMarket_runEpochs(t *testing.T) {
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
+	now := time.Now().Round(time.Millisecond).UTC()
 	limit := &msgjson.Limit{
 		Prefix: msgjson.Prefix{
 			AccountID:  aid[:],
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.LimitOrderNum,
-			ClientTime: uint64(time.Now().Unix()),
+			ClientTime: uint64(order.UnixMilli(now)),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -216,7 +217,7 @@ func TestMarket_runEpochs(t *testing.T) {
 					BaseAsset:  limit.Base,
 					QuoteAsset: limit.Quote,
 					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(int64(limit.ClientTime), 0).UTC(),
+					ClientTime: now,
 				},
 				Coins:    []order.CoinID{},
 				Sell:     true,
@@ -253,9 +254,9 @@ func TestMarket_runEpochs(t *testing.T) {
 		return
 	}
 	t.Log(mkt.marketInfo.Name)
-	epochDurationSec := mkt.epochDuration
+	epochDurationMSec := mkt.epochDuration
 
-	startEpochIdx := 1 + time.Now().Unix()/epochDurationSec
+	startEpochIdx := 1 + order.UnixMilli(time.Now())/epochDurationMSec
 	mkt.Start(startEpochIdx)
 
 	// Submit order before market starts running
@@ -276,7 +277,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	}
 
 	//let the epoch cycle
-	time.Sleep(time.Duration(epochDurationSec)*time.Second + time.Millisecond*50)
+	time.Sleep(time.Duration(epochDurationMSec)*time.Millisecond + time.Duration(epochDurationMSec/20))
 
 	mkt.Stop()
 	mkt.WaitForShutdown()
@@ -286,7 +287,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 	}
-	startEpochIdx = 1 + time.Now().Unix()/epochDurationSec
+	startEpochIdx = 1 + order.UnixMilli(time.Now())/epochDurationMSec
 	mkt.Start(startEpochIdx)
 	mkt.WaitForEpochOpen()
 

@@ -422,14 +422,14 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 		// sells
 		newLimitOrder(true, 4540000, 1, order.ImmediateTiF, 0),              // 4: sell, 1 lot, immediate
 		newLimitOrder(true, 4300000, 4, order.ImmediateTiF, 0),              // 5: sell, 4 lot, immediate
-		newLimitOrder(true, 4720000, 40, order.StandingTiF, 4726 /*nonce*/), // 6: sell, 40 lot, standing, unfilled insert
+		newLimitOrder(true, 4720000, 40, order.StandingTiF, 3237 /*nonce*/), // 6: sell, 40 lot, standing, unfilled insert
 	}
 	epochQueueInit := make([]order.Order, len(epochQueue))
 	copy(epochQueueInit, epochQueue)
 
-	/* brute force a nonce to make changing the test less horrible
-	// t.Log(epochQueue)
-	// matcher.ShuffleQueue(epochQueue)
+	/* //brute force a nonce to make changing the test less horrible
+	t.Log(epochQueue)
+	matcher.ShuffleQueue(epochQueue)
 
 	// Apply the shuffling to determine matching order that will be used.
 	wantOrder := []int{1, 6, 0, 3, 4, 5, 2}
@@ -454,6 +454,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	}
 
 	lo6 := epochQueueInit[6].(*order.LimitOrder)
+	var nonce int
 	for !queuesEqual(wantQueue, epochQueue) {
 		lo6.ClientTime = lo6.ClientTime.Add(time.Second)
 		lo6.ServerTime = lo6.ServerTime.Add(time.Second)
@@ -499,7 +500,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	resetMakers()
 
 	matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(b, epochQueue)
-	t.Log(matches, passed, failed, doneOK, partial, booked, unbooked)
+	//t.Log(matches, passed, failed, doneOK, partial, booked, unbooked)
 
 	// PASSED orders
 
@@ -519,7 +520,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 		t.Errorf("Order not at expected location in passed slice: %d", loc)
 	}
 
-	t.Log(doneOK)
+	//t.Log(doneOK)
 
 	// FAILED orders
 
@@ -545,6 +546,14 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 		t.Errorf("Order not in failed slice.")
 	} else if loc != expectedLoc {
 		t.Errorf("Order not at expected location in failed slice: %d", loc)
+	}
+
+	// Done OK
+	expectedLoc = 1
+	if loc := orderInSlice(epochQueueInit[5], doneOK); loc == -1 {
+		t.Errorf("Order not in doneOK slice.")
+	} else if loc != expectedLoc {
+		t.Errorf("Order not at expected location in doneOK slice: %d", loc)
 	}
 
 	// PARTIAL fills
@@ -1098,7 +1107,7 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 
 	nSell := len(bookSellOrders)
 	nBuy := len(bookBuyOrders)
-	cancelTime := time.Unix(1566497656, 0)
+	cancelTime := time.Unix(1566497655, 0)
 
 	// epochQueue is heterogenous w.r.t. type
 	epochQueue := []order.Order{
@@ -1148,15 +1157,15 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	// for i := range epochQueue {
 	// 	t.Logf("%d: %p, %p", i, epochQueueInit[i], epochQueue[i])
 	// }
-	// Shuffles to [7, 1, 12, 11, 2, 14, 3, 17, 15, 13, 10, 5, 0, 6, 9, 4, 16, 8]
+	// Shuffles to [13, 9, 3, 7, 8, 5, 17, 4, 15, 10, 1, 2, 6, 12, 14, 16, 0, 11]
 
 	expectedNumMatches := 10
-	expectedPassed := []int{7, 1, 12, 11, 14, 13, 10, 5, 6, 9, 16, 8}
-	expectedFailed := []int{2, 3, 17, 15, 0, 4}
-	expectedDoneOK := []int{12, 11, 14, 13, 10, 6, 9, 16, 8}
-	expectedPartial := []int{1, 6}
-	expectedBooked := []int{7, 1, 5} // all StandingTiF
-	expectedUnbooked := []int{}
+	expectedPassed := []int{13, 9, 7, 8, 5, 17, 15, 10, 1, 6, 12, 16, 11}
+	expectedFailed := []int{3, 4, 2, 14, 0}
+	expectedDoneOK := []int{13, 9, 8, 17, 15, 10, 6, 12, 16, 11}
+	expectedPartial := []int{6}
+	expectedBooked := []int{7, 5, 1} // all StandingTiF
+	expectedNumUnbooked := 9
 
 	// order book from bookBuyOrders and bookSellOrders
 	b := newBook(t)
@@ -1250,11 +1259,8 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 		}
 	}
 
-	for i, qi := range expectedUnbooked {
-		if oi := orderInSlice(epochQueueInit[qi], unbooked); oi != i {
-			t.Errorf("Order not at expected location in unbooked slice. Got %d, expected %d",
-				oi, i)
-		}
+	if len(unbooked) != expectedNumUnbooked {
+		t.Errorf("Incorrect number of unbooked orders. Got %d, expected %d", len(unbooked), expectedNumUnbooked)
 	}
 
 	if len(matches) != expectedNumMatches {
@@ -1262,12 +1268,12 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	}
 
 	// match 3 (epoch order 14) cancels a book order
-	if matches[3].Taker.ID() != epochQueueInit[14].ID() {
+	if matches[3].Taker.ID() != epochQueueInit[17].ID() {
 		t.Errorf("Taker order ID expected %v, got %v",
-			epochQueueInit[14].UID(), matches[3].Taker.UID())
+			epochQueueInit[17].UID(), matches[3].Taker.UID())
 	}
-	if matches[8].Taker.ID() != epochQueueInit[16].ID() {
+	if matches[3].Makers[0].ID() != epochQueueInit[5].ID() {
 		t.Errorf("8th match take was expected to be %v, got %v",
-			epochQueueInit[16], matches[8].Taker.ID())
+			epochQueueInit[5], matches[3].Makers[0].ID())
 	}
 }

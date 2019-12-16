@@ -14,7 +14,7 @@ type MarketInfo struct {
 	Base          uint32
 	Quote         uint32
 	LotSize       uint64
-	EpochDuration uint64
+	EpochDuration uint64 // msec
 }
 
 func marketName(base, quote string) string {
@@ -41,8 +41,8 @@ func MarketName(base, quote uint32) (string, error) {
 }
 
 // NewMarketInfo creates a new market configuration (MarketInfo) from the given
-// base and quote asset indexes, order lot size, and epochDuration. See also
-// MarketName.
+// base and quote asset indexes, order lot size, and epoch duration in
+// milliseconds. See also MarketName.
 func NewMarketInfo(base, quote uint32, lotSize, epochDuration uint64) (*MarketInfo, error) {
 	name, err := MarketName(base, quote)
 	if err != nil {

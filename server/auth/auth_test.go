@@ -171,7 +171,7 @@ func tNewConnect(user *tUser) *msgjson.Connect {
 	return &msgjson.Connect{
 		AccountID:  user.acctID[:],
 		APIVersion: 0,
-		Time:       uint64(time.Now().Unix()),
+		Time:       uint64(order.UnixMilli(unixMsNow())),
 	}
 }
 
@@ -782,7 +782,7 @@ func TestHandleResponse(t *testing.T) {
 	}
 	client.respHandlers = map[uint64]*respHandler{
 		comms.NextID(): {
-			expiration: time.Now(),
+			expiration: time.Now().UTC(),
 			f:          func(*msgjson.Message) {},
 		},
 	}
@@ -811,7 +811,7 @@ func TestHandleRegister(t *testing.T) {
 	newReg := func() *msgjson.Register {
 		reg := &msgjson.Register{
 			PubKey: user.privKey.PubKey().SerializeCompressed(),
-			Time:   uint64(time.Now().Unix()),
+			Time:   uint64(order.UnixMilli(unixMsNow())),
 		}
 		sigMsg, _ := reg.Serialize()
 		sig, _ := user.privKey.Sign(sigMsg)
@@ -905,7 +905,7 @@ func TestHandleNotifyFee(t *testing.T) {
 		notify := &msgjson.NotifyFee{
 			AccountID: user.acctID[:],
 			CoinID:    coinid,
-			Time:      uint64(time.Now().Unix()),
+			Time:      uint64(order.UnixMilli(unixMsNow())),
 		}
 		sigMsg, _ := notify.Serialize()
 		sig, _ := user.privKey.Sign(sigMsg)

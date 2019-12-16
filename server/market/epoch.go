@@ -18,14 +18,14 @@ type EpochQueue struct {
 	Orders map[order.OrderID]order.Order
 }
 
-// NewEpoch creates an epoch with the given index and duration in seconds.
+// NewEpoch creates an epoch with the given index and duration in milliseconds.
 func NewEpoch(idx int64, duration int64) *EpochQueue {
-	startTime := time.Unix(idx*duration, 0).UTC()
+	startTime := order.UnixTimeMilli(idx * duration)
 	return &EpochQueue{
 		Epoch:    idx,
 		Duration: duration,
 		Start:    startTime,
-		End:      startTime.Add(time.Duration(duration) * time.Second),
+		End:      startTime.Add(time.Duration(duration) * time.Millisecond),
 		Orders:   make(map[order.OrderID]order.Order),
 	}
 }
@@ -47,7 +47,7 @@ func (eq *EpochQueue) Insert(ord order.Order) {
 // IncludesTime checks if the given time falls in the epoch.
 func (eq *EpochQueue) IncludesTime(t time.Time) bool {
 	// [Start,End): Check the inclusive lower bound.
-	if t.Unix() == eq.Start.Unix() {
+	if t.Equal(eq.Start) {
 		return true
 	}
 	// Check (Start,End).

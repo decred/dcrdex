@@ -102,6 +102,10 @@ var (
 	}
 )
 
+func nowMs() time.Time {
+	return time.Now().Round(time.Millisecond).UTC()
+}
+
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type TAuth struct {
@@ -150,7 +154,7 @@ type TMarketTunnel struct {
 
 func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
 	// set the server time
-	now := time.Now().Unix()
+	now := nowMs()
 	o.order.SetTime(now)
 
 	m.adds = append(m.adds, o)
@@ -159,7 +163,7 @@ func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
 	oid := o.order.ID()
 	resp, _ := msgjson.NewResponse(1, &msgjson.OrderResult{
 		Sig:        msgjson.Bytes{},
-		ServerTime: uint64(now),
+		ServerTime: uint64(order.UnixMilli(now)),
 		OrderID:    oid[:],
 		EpochIdx:   m.epochIdx,
 		EpochDur:   m.epochDur,
@@ -360,7 +364,7 @@ func TestMain(m *testing.M) {
 			midGap:     dcrRateStep * 1000,
 			cancelable: true,
 			epochIdx:   1573773894,
-			epochDur:   60,
+			epochDur:   60_000,
 		},
 	}
 	assetDCR.Backend = oRig.dcr
@@ -415,14 +419,14 @@ func TestLimit(t *testing.T) {
 	qty := uint64(dcrLotSize) * 10
 	rate := uint64(1000) * dcrRateStep
 	user := oRig.user
-	clientTime := time.Now()
+	clientTime := nowMs()
 	limit := msgjson.Limit{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.LimitOrderNum,
-			ClientTime: uint64(clientTime.Unix()),
+			ClientTime: uint64(order.UnixMilli(clientTime)),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -547,7 +551,7 @@ func TestLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	lo.ServerTime = time.Unix(int64(result.ServerTime), 0)
+	lo.ServerTime = order.UnixTimeMilli(int64(result.ServerTime))
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != lo.ID() {
@@ -558,14 +562,14 @@ func TestLimit(t *testing.T) {
 func TestMarketStartProcessStop(t *testing.T) {
 	qty := uint64(dcrLotSize) * 10
 	user := oRig.user
-	clientTime := time.Now()
+	clientTime := nowMs()
 	mkt := msgjson.Market{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.MarketOrderNum,
-			ClientTime: uint64(clientTime.Unix()),
+			ClientTime: uint64(order.UnixMilli(clientTime)),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -677,7 +681,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	mo.ServerTime = time.Unix(int64(result.ServerTime), 0)
+	mo.ServerTime = order.UnixTimeMilli(int64(result.ServerTime))
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != mo.ID() {
@@ -688,14 +692,14 @@ func TestMarketStartProcessStop(t *testing.T) {
 func TestCancel(t *testing.T) {
 	user := oRig.user
 	targetID := order.OrderID{244}
-	clientTime := time.Now()
+	clientTime := nowMs()
 	cancel := msgjson.Cancel{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.CancelOrderNum,
-			ClientTime: uint64(clientTime.Unix()),
+			ClientTime: uint64(order.UnixMilli(clientTime)),
 		},
 		TargetID: targetID[:],
 	}
@@ -781,7 +785,7 @@ func TestCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	co.ServerTime = time.Unix(int64(result.ServerTime), 0)
+	co.ServerTime = order.UnixTimeMilli(int64(result.ServerTime))
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != co.ID() {
