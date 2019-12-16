@@ -285,7 +285,7 @@ respond with its current configuration.
 |-
 | buybuffer || float || the [[#Market_Buy_Orders|market buy buffer]]
 |-
-| cancelmax || float || the [[Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
+| cancelmax || float || the [[Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
 |-
 | assets    || &#91;object&#93; || list of Asset objects (definition below)
 |-
@@ -391,21 +391,22 @@ When the epoch ends, a match cycle begins.
 
 First, the order pool is shuffled.
 Shuffling is deterministic, using the Fisher-Yates algorithm where the
-random number generator seed is derived from the hash of the concatenated order
-[[#Order_ID|ID hashes]].
+random number generator seed is derived from the hash of the concatenated
+[[#Order_Commitment|order commitments]].
 Specifically for hash function '''''f''''', the seed is the 64-bit integer
 corresponding to the little-endian byte order interpretation of the first 8
 bytes of the hash.
 The hash is computed as
 
-<!--H_{seed} = f(f(order_1) || f(order_2) || ... || f(order_N))-->
+<!--H_{seed} = f(p_1 || p_2 || ... || p_N)-->
 [[File:images/seed-eq.png]]
 
-where '''''order<sub>i</sub>''''' represents the order ID of the
-'''''i<sup>th</sup>''''' order in a lexicographically sorted list of
-[[#Order_ID|order IDs]] and '''''||''''' indicates concatenation.
+where '''''||''''' indicates concatenation.
+'''''p<sub>i</sub>''''' is the commitment preimage of the
+'''''i<sup>th</sup>''''' order in the list of epoch orders sorted
+lexicographically by their [[#Order_ID|order IDs]].
 
-The order IDs and final hash are published at the start of the matching process.
+The preimages and seed are published at the start of the matching process.
 This is done so that the shuffling may be independently computed for external
 verification and to facilitate server mesh operation.
 
@@ -609,7 +610,7 @@ There are three available types of order.
 * [[#Cancel_Order|Cancel orders]] are used to remove standing limit orders from the order book.
 
 The order book holds only limit orders with time in force ''standing'' that have
-not completely filled or been cancelled. All other orders are only valid for one
+not completely filled or been canceled. All other orders are only valid for one
 [[#Epochbased_Order_Matching|epoch match cycle]].
 
 ===Session Authentication===
@@ -664,27 +665,16 @@ the client's absence. A list of any pending matches is included in the response.
 
 ===Connection Persistence===
 
-If a connection is lost after placing an order, the client must reconnect and
-complete settlement on any matches made in their absence.
-Regardless of connection status, once a match is made, a client is always
-subject to violation of [[#Rule_1_Every_match_must_be_fully_settled|rule 1]] via
-the [[#Exchange_Variables|broadcast timeout]].
-This is true regardless of connection status.
+Regardless of connection status, if a client does not respond to their
+<code>preimage</code> request, they are in violation of
+[[#Rule_1_Clients_must_respond_to_all_preimage_requests|rule 1]] and subject to
+penalty.
 
-If a client is disconnected for a full epoch duration, any standing limit orders
-may be auto-cancelled by the server.
-These cancellations will count toward the client's
-[[#Rules_of_Community_Conduct|cancellation ratio]], so could potentially result
-in penalties.
-The client should manage their orders carefully to ensure that this doesn't
-occur.
-
-Market orders, and limit orders with time in force ''immediate'', are not
-cancelled under disconnection. Once submitted, these orders will always go
-through a single match cycle.
-
-If a client is in the settlement phase when a connection is dropped, the
-client will be expected to reconnect and complete settlement.
+If a client's connection is lost during match negotiation, the client is
+expected to reconnect and complete settlement.
+Once a match is made, a client is always subject to violation of
+[[#Rule_2_Every_match_must_be_fully_settled|rule 2]] via the
+[[#Exchange_Variables|broadcast timeout]].
 
 ===Order Book Subscriptions===
 
@@ -736,6 +726,8 @@ re-subscribe to the market to synchronize the order book from scratch.
 |-
 | oid     || string || the order ID
 |-
+| com     || string || the order commitment
+|-
 | otype   || string || "l" for ''limit'', "m" for ''market''
 |-
 | side    || string || "b" for ''buy'', "s" for ''sell''
@@ -781,22 +773,28 @@ attribute.
 |}
 
 At the beginning of the matching cycle, the DEX will publish a list of order
-IDs and the seed hash used for
-[[#Pseudorandom_Order_Matching|order sequencing]].
+preimages, the seed hash used for
+[[#Pseudorandom_Order_Matching|order sequencing]], and the
+[[#Preimage_Reveal|commitment checksum]], which together can be used to
+independently verify matching.
 
-'''Notification route:''' <code>match_data</code>, '''originator: ''' DEX
+'''Notification route:''' <code>match_proof</code>, '''originator: ''' DEX
 
 <code>payload</code>
 {|
-! field    !! type !! description
+! field     !! type !! description
 |-
-| marketid || int || the market ID
+| marketid  || int || the market ID
 |-
-| epoch    || int || the epoch for which the cycle occurs
+| epoch     || int || the epoch for which the cycle occurs
 |-
-| orderids || &#91;string&#93; || list of order IDs for the epoch
+| preimages || &#91;string&#93; || list of order preimages for the epoch
 |-
-| seed     || string || hex-encoded sorting key
+| misses    || &#91;string&#93; || list of order IDs for which preimages were not received, so were not included in sorting or matching
+|-
+| csum      || string || the commitment checksum
+|-
+| seed      || int || sorting seed
 |}
 
 A client can '''unsubscribe''' from order book updates without closing the
@@ -918,9 +916,9 @@ As part of the order, the client will submit a list of ''Coin objects''.
 |-
 | coinid    || string || hex-encoded coin ID
 |-
-| pubkeys   || [string] || array of hex-encoded pubkeys which spend the coin
+| pubkeys   || &#91;string&#93; || array of hex-encoded pubkeys which spend the coin
 |-
-| sigs      || [string] || array of signatures of Blake-256 hashes of the serialized coin IDs
+| sigs      || &#91;string&#93; || array of signatures of Blake-256 hashes of the serialized coin IDs
 |-
 | redeem    || string || hex-encoded redeem script for P2SH. empty for P2PKH
 |}
@@ -932,6 +930,29 @@ The data is signed with the private key(s) corresponding to the
 <code>pubkeys</code>.
 The <code>pubkeys</code> themselves must correspond with addresses payable by
 the coin's pubkey script (or corresponding redeem script).
+
+====Order Commitment====
+
+As part of every submitted order, the client should submit a cryptographic
+'''commitment'''.
+To generate a commitment, the client creates a random 32-byte number,
+the ''preimage''. The commitment is the Blake-256 hash of the
+preimage. Every order must be assigned a unique commitment, therefore preimages
+cannot be reused. They should be generated with a cryptographically secure
+pseudo-random number generator.
+
+At the expiration of the epoch, the server sends a <code>preimage</code> request
+for each order that is eligible for matching.
+The client responds with their preimage(s). If the client fails to respond to
+their <code>preimage</code> requests, or if their <code>preimage</code> response
+does not hash to their order commitment, the order is not matched and the client
+is considered in violation of
+[[#Rule_1_Clients_must_respond_to_all_preimage_requests|rule 1]].
+
+The preimages are used as the inputs to
+[[#Pseudorandom_Order_Matching|the shuffling algorithm]] to determine
+matching order. Before matching commences, the preimages are broadcast
+in the <code>match_proof</code> message.
 
 ====Order Signing====
 
@@ -947,19 +968,25 @@ All order serializations have common '''prefix''' fields.
 
 '''Prefix fields and serialization'''
 {|
-! field     !! size (bytes) !! description
+! field      !! size (bytes) !! JSON type !! description
 |-
-| accountid || 32 || client account ID
+| accountid  || 32 || string || hex-encoded client account ID
 |-
-| base      || 4  || the base asset ID
+| commitment || 32 || string || hex-encoded cryptographic commitment
 |-
-| quote     || 4  || the quote asset ID
+| base       || 4  || int || the base asset ID
 |-
-| ordertype || 1  || the type of order. limit = 1, market=2, cancel=3
+| quote      || 4  || int || the quote asset ID
 |-
-| tclient   || 8  || the client's UNIX timestamp
+| ordertype  || 1  || int || the type of order. limit = 1, market=2, cancel=3
 |-
-| tserver   || 8  || the server's UNIX timestamp. zeros for client signature messages
+| tclient    || 8  || int || the client's UNIX timestamp
+|-
+| tserver    || 8  || int || the server's UNIX timestamp. zero for client signature
+|-
+| epochidx   || 8  || int || the epoch index assigned by the server. zero for client signature
+|-
+| epochdur   || 2  || int || the current DEX epoch duration, in seconds
 |}
 
 ====Order ID====
@@ -997,7 +1024,7 @@ the server's signature.
 Limit orders are for the trade of assets at a rate no higher (buy) or lower
 (sell) than a specified price.
 The client may specify the ''time in force'' of a limit order as one of: (a)
-''standing'', which remains on the books until filled or cancelled, or (b)
+''standing'', which remains on the books until filled or canceled, or (b)
 ''immediate'', which can complete execution wholly or partially unfilled. As
 such, the ''immediate'' option is intended for limit orders with a price that
 crosses the spread (i.e. a taker rather than a maker). The
@@ -1010,7 +1037,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 {|
 ! field       !! type   !! description
 |-
-| colspan="3" align="center" | 6 prefix fields
+| colspan="3" align="center" | 9 prefix fields
 |-
 | side        || int || buy = 1, sell = 2
 |-
@@ -1032,7 +1059,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 57 || [[#Order_Signing|the order prefix]]
+| prefix     || 99 || [[#Order_Signing|the order prefix]]
 |-
 | coin count || 1  || The number of funding coins
 |-
@@ -1074,7 +1101,7 @@ the epoch match cycle) is left unfilled.
 {|
 ! field       !! type   !! description
 |-
-| colspan="3" align="center" | 6 prefix fields
+| colspan="3" align="center" | 9 prefix fields
 |-
 | side        || int || buy = 1, sell = 2
 |-
@@ -1092,7 +1119,7 @@ the epoch match cycle) is left unfilled.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 57 || [[#Order_Signing|the order prefix]]
+| prefix     || 99 || [[#Order_Signing|the order prefix]]
 |-
 | coin count || 1  || The number of funding coins
 |-
@@ -1167,7 +1194,7 @@ This is by design and discourages certain types of spoofing.
 {|
 ! field     !! type   !! description
 |-
-| colspan="3" align="center" | 6 prefix fields
+| colspan="3" align="center" | 9 prefix fields
 |-
 | orderid   || string || hex-encoded order ID
 |-
@@ -1179,7 +1206,7 @@ This is by design and discourages certain types of spoofing.
 {|
 ! field      !! size (bytes)  !! description
 |-
-| prefix     || 65 || [[#Order_Signing|the order prefix]]
+| prefix     || 99 || [[#Order_Signing|the order prefix]]
 |-
 | orderid    || 16 || the order ID
 |}
@@ -1191,6 +1218,40 @@ This is by design and discourages certain types of spoofing.
 | sig       || string || server hex-encoded signature of the serialize order data, after adding the DEX timestamp
 |-
 | server time || int  || the server's UNIX timestamp
+|}
+
+===Preimage Reveal===
+
+At the expiration of the epoch, the DEX sends out a <code>preimage</code>
+request for each order in the epoch queue. The match cycle begins 5 seconds
+after the last <code>preimage</code> request is sent by the server, so clients
+must respond before then.
+
+A '''''commitment checksum''''' is included as part of the
+<code>preimage</code> request.
+The checksum is the Blake-256 hash of the concatenated, lexicographically-sorted
+commitments for every order in the epoch. For clients subscribed to the order
+book for the entire duration of the epoch, the checksum can be validated against
+the checksum generated from their local copy of the epoch queue.
+
+'''Request route:''' <code>preimage</code>, '''originator:''' DEX
+
+<code>payload</code>
+{|
+! field   !! type   !! description
+|-
+| orderid || string || order ID
+|-
+| csum    || string || the commitment checksum
+|}
+
+'''Preimage response'''
+
+<code>result</code>
+{|
+! field   !! size (bytes)  !! description
+|-
+| pimg    || string || hex-encoded preimage for the order's commitment
 |}
 
 ===Match negotiation===
@@ -1358,8 +1419,6 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
-
-'''Redeem serialization'''
 
 <code>result</code>
 {|
@@ -1532,7 +1591,7 @@ through on a trade.
 with BTC at the best available price.
 Bob’s order will contain both an address and a signature.
 As a market order, Bob’s order must match in this epoch. Any unfilled portion
-is immediately cancelled.
+is immediately canceled.
 
 '''A3''': At the end of the epoch, the '''DEX performs a match cycle''',
 recognizes the match, and informs both Alice and Bob that a match has occurred.
@@ -1650,7 +1709,12 @@ behaviors that contribute to a smooth DEX experience for other users.
 
 ===Rules of Community Conduct===
 
-====Rule 1: Every match must be fully settled====
+====Rule 1: Clients must respond to all preimage requests====
+
+At the expiration of the epoch, every client with an order will receive a
+<code>preimage</code> request. The client has 5 seconds to respond.
+
+====Rule 2: Every match must be fully settled====
 
 Swap transactions must be created at the correct times (see
 [[#Exchange_Variables|broadcast timeout]]).
@@ -1664,19 +1728,19 @@ replace the order.
 In the event that the taker fails to respond to the maker's initialization
 transaction, the maker will incur no violation.
 
-====Rule 2: An account's cancellation ratio must remain below the threshold====
+====Rule 3: An account's cancellation ratio must remain below the threshold====
 
-The cancellation ratio is the ratio of the count of cancelled orders to the
+The cancellation ratio is the ratio of the count of canceled orders to the
 count of completed orders.
 The cancellation threshold is set by the DEX operator.
 An order is considered completed when all matches have fully settled.
-An order is considered cancelled when a cancel order is matched to a standing
+An order is considered canceled when a cancel order is matched to a standing
 limit order. The server may also cancel an order if the client's connection is
 dropped and the client fails to reconnect for more than 1 epoch duration.
 Cancellation of a partially filled order is counted as a full cancellation.
 The cancellation ratio is evaluated on a 25-order rolling window.
 
-====Rule 3: Transaction outputs must be properly sized====
+====Rule 4: Transaction outputs must be properly sized====
 
 The swap output value must be sized to exactly the matched amount. The fee rate
 must be at least the minimum value set by the DEX. It is the client's
@@ -1719,7 +1783,7 @@ possible.
 |-
 | registration&nbsp;fees || [[#Fees|Fees]] || atoms || 1e8 (1 DCR)
 |-
-| cancellation&nbsp;threshold || [[Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 2]] || unitless ratio || 0.6
+| cancellation&nbsp;threshold || [[Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 3]] || unitless ratio || 0.6
 |}
 
 '''Per-asset Variables'''
