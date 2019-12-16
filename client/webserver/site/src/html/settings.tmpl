@@ -1,0 +1,14 @@
+{{define "settings"}}
+{{template "top" .}}
+<div id="main" data-handler="settings" class="main align-items-center justify-content-center flex-column">
+
+  <div class="form-check">
+    <input class="form-check-input" type="checkbox" value="" id="darkMode"{{if .UserInfo.DarkMode}} checked{{end}}>
+    <label class="form-check-label" for="darkMode">
+      Dark Mode
+    </label>
+  </div>
+
+</div>
+{{template "bottom"}}
+{{end}}

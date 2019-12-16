@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/msgjson"
-	// "github.com/decred/slog"
+	"decred.org/dcrdex/dex/ws"
 	"github.com/gorilla/websocket"
 )
 
@@ -205,7 +205,7 @@ func TestClientRequests(t *testing.T) {
 	clientOn := func() bool {
 		var on bool
 		lockedExe(func() {
-			on = !client.off()
+			on = !client.Off()
 		})
 		return on
 	}
@@ -320,13 +320,13 @@ func TestClientRequests(t *testing.T) {
 
 	// Shut the client down. Check the on flag.
 	reconnect()
-	lockedExe(func() { client.disconnect() })
+	lockedExe(func() { client.Disconnect() })
 	time.Sleep(time.Millisecond)
 	if clientOn() {
 		t.Fatalf("shutdown client has on flag set")
 	}
 	// Shut down again.
-	lockedExe(func() { client.disconnect() })
+	lockedExe(func() { client.Disconnect() })
 
 	// Reconnect and try shutting down with non-EOF error.
 	reconnect()
@@ -368,7 +368,7 @@ func TestClientRequests(t *testing.T) {
 	}
 	// A call to Send should return ErrClientDisconnected
 	lockedExe(func() {
-		if !errors.Is(client.Send(nil), ErrClientDisconnected) {
+		if !errors.Is(client.Send(nil), ws.ErrClientDisconnected) {
 			t.Fatalf("incorrect error for disconnected client")
 		}
 	})

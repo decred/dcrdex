@@ -1,0 +1,64 @@
+body.dark {
+  background-color: #060c12;
+  color: $font-color-dark;
+
+  header.maintop {
+    background-color: black;
+    border-bottom-style: none;
+  }
+
+  .offwhite {
+    color: #a1a1a1;
+  }
+
+  div.mainlinks > span {
+    color: #a8a8a8;
+  }
+
+  div.mainlinks > span:hover {
+    color: #c5c5c5;
+  }
+
+  div.logo {
+    background-image: url('/img/logo_wide_dark_v0.png');
+  }
+
+  .bg0 {
+    background-color: black;
+  }
+
+  .bg1 {
+    background-color: #0d0d0d;
+  }
+
+  .bg2 {
+    background-color: #1a1a1a;
+  }
+
+  .bg3 {
+    background-color: #272727;
+  }
+
+  button.selected {
+    background-color: #0b5831;
+  }
+
+  select,
+  select:focus,
+  input,
+  input:focus {
+    border: none;
+    outline: none;
+    color: $font-color-dark;
+    background-color: black;
+  }
+
+  form.auth button,
+  form.auth label {
+    text-shadow: 0 0 4px black;
+  }
+
+  form.auth button:hover {
+    color: #dde9ff;
+  }
+}

@@ -1,0 +1,22 @@
+
+> dexclient@1.0.0 build /home/buck/programs/dcrdex/client/webserver/site
+> webpack --config webpack/prod.js --progress --colors
+
+Hash: [1mda50555f97ee4aaa1d56[39m[22m
+Version: webpack [1m4.41.2[39m[22m
+Time: [1m5251[39m[22mms
+Built at: 12/13/2019 [1m12:30:19 PM[39m[22m
+            [1mAsset[39m[22m      [1mSize[39m[22m  [1mChunks[39m[22m  [1m[39m[22m                 [1m[39m[22m[1mChunk Names[39m[22m
+[1m[32m../dist/style.css[39m[22m  93.3 KiB       [1m0[39m[22m  [1m[32m[emitted][39m[22m        app
+         [1m[32mentry.js[39m[22m  2.04 KiB       [1m0[39m[22m  [1m[32m[emitted][39m[22m        app
+     [1m[32mentry.js.map[39m[22m  7.08 KiB       [1m0[39m[22m  [1m[32m[emitted] [dev][39m[22m  app
+Entrypoint [1mapp[39m[22m = [1m[32m../dist/style.css[39m[22m [1m[32mentry.js[39m[22m [1m[32mentry.js.map[39m[22m
+[0] [1m./src/css/application.scss[39m[22m 39 bytes {[1m[33m0[39m[22m}[1m[32m [built][39m[22m
+[1] [1m./src/index.js + 1 modules[39m[22m 2.06 KiB {[1m[33m0[39m[22m}[1m[32m [built][39m[22m
+    | [1m./src/index.js[39m[22m 1.93 KiB[1m[32m [built][39m[22m
+    | [1m./src/js/doc.js[39m[22m 123 bytes[1m[32m [built][39m[22m
+    + 1 hidden module
+Child [1mmini-css-extract-plugin node_modules/css-loader/dist/cjs.js??ref--4-1!node_modules/sass-loader/dist/cjs.js??ref--4-2!src/css/application.scss[39m[22m:
+    Entrypoint [1mmini-css-extract-plugin[39m[22m = [1m[32m*[39m[22m
+    [0] [1m./node_modules/css-loader/dist/cjs.js??ref--4-1!./node_modules/sass-loader/dist/cjs.js??ref--4-2!./src/css/application.scss[39m[22m 280 KiB {[1m[33m0[39m[22m}[1m[32m [built][39m[22m
+        + 1 hidden module
