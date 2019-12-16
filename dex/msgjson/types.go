@@ -5,9 +5,10 @@ package msgjson
 
 import (
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
+
+	"decred.org/dcrdex/dex"
 )
 
 // Error codes
@@ -106,36 +107,7 @@ const (
 	NotifyFeeRoute = "notifyfee"
 )
 
-// Bytes is a byte slice that marshals to and unmarshals from a hexadecimal
-// string. The default go behavior is to marshal []byte to a base-64 string.
-type Bytes []byte
-
-// BytesFromHex is a Bytes constructor that accepts a hex string.
-func BytesFromHex(s string) (Bytes, error) {
-	b, err := hex.DecodeString(s)
-	return Bytes(b), err
-}
-
-// String return the hex encoding of the Bytes.
-func (b Bytes) String() string {
-	return hex.EncodeToString(b)
-}
-
-// MarshalJSON satisfies the json.Marshaller interface, and will marshal the
-// bytes to a hex string.
-func (b Bytes) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hex.EncodeToString(b))
-}
-
-// UnmarshalJSON satisfies the json.Unmarshaler interface, and expects a UTF-8
-// encoding of a hex string.
-func (b *Bytes) UnmarshalJSON(encHex []byte) (err error) {
-	if len(encHex) < 2 {
-		return fmt.Errorf("marshalled Bytes, '%s', not valid", string(encHex))
-	}
-	*b, err = hex.DecodeString(string(encHex[1 : len(encHex)-1]))
-	return err
-}
+type Bytes = dex.Bytes
 
 // Signable allows for serialization and signing.
 type Signable interface {

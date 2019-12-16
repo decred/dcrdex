@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
 	flags "github.com/jessevdk/go-flags"
@@ -55,7 +55,7 @@ type DCRConfig struct {
 // If configPath is an empty string, loadConfig will attempt to read settings
 // directly from the default dcrd.conf filpath. If there is no error, the
 // module-level chainParams variable will be set appropriately for the network.
-func loadConfig(configPath string, network asset.Network) (*DCRConfig, error) {
+func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
 	// Check for missing credentials. The user and password must be set.
 	cfg := new(DCRConfig)
 
@@ -95,13 +95,13 @@ func loadConfig(configPath string, network asset.Network) (*DCRConfig, error) {
 	// non-empty cfg.Net is an error.
 	var defaultServer string
 	switch network {
-	case asset.Simnet:
+	case dex.Simnet:
 		chainParams = chaincfg.SimNetParams()
 		defaultServer = defaultSimnet
-	case asset.Testnet:
+	case dex.Testnet:
 		chainParams = chaincfg.TestNet3Params()
 		defaultServer = defaultTestnet3
-	case asset.Mainnet:
+	case dex.Mainnet:
 		chainParams = chaincfg.MainNetParams()
 		defaultServer = defaultMainnet
 	default:

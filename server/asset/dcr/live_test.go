@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 	"github.com/decred/dcrd/wire"
@@ -42,7 +42,7 @@ import (
 var (
 	dcrdConfigPath = filepath.Join(dcrdHomeDir, "dcrd.conf")
 	dcr            *DCRBackend
-	testLogger     asset.Logger
+	testLogger     dex.Logger
 )
 
 type dcrdConfig struct {
@@ -60,7 +60,7 @@ func TestMain(m *testing.M) {
 		fmt.Printf("error reading dcrd config: %v\n", err)
 		return
 	}
-	dcr, err = NewBackend(ctx, "", testLogger, asset.Mainnet)
+	dcr, err = NewBackend(ctx, "", testLogger, dex.Mainnet)
 	if err != nil {
 		fmt.Printf("NewBackend error: %v\n", err)
 		return
@@ -196,7 +196,7 @@ func TestLiveUTXO(t *testing.T) {
 				//    unless output is spent in mempool.
 				// 3. script is of unacceptable type, and is found. Error.
 				// 4. script is of unacceptable type, and is not found. Should receive an
-				//    assets.UnsupportedScriptError.
+				//    dex.UnsupportedScriptError.
 				switch true {
 				case scriptTypeOK && err == nil:
 					if !fee {

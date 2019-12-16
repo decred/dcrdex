@@ -198,7 +198,7 @@ func TestBook(t *testing.T) {
 	// Remove not the best buy order.
 	removed, ok = b.Remove(bookBuyOrders[3].ID())
 	if !ok {
-		t.Fatalf("Failed to remove existing buy order %v", bestBuyOrder.ID())
+		t.Fatalf("Failed to remove existing buy order %v", bookBuyOrders[3].ID())
 	}
 	if removed.ID() != bookBuyOrders[3].ID() {
 		t.Errorf("Failed to remove existing buy order. Got %v, wanted %v",

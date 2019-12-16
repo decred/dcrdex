@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -545,7 +544,6 @@ func TestCancelOrder_ID(t *testing.T) {
 				t.Errorf("CancelOrder.Remaining should be 0, got %d", remaining)
 			}
 			if got := o.ID(); !reflect.DeepEqual(got, tt.want) {
-				fmt.Printf("--cancel order serialization: %x\n", o.Serialize())
 				t.Errorf("CancelOrder.ID() = %v, want %v", got, tt.want)
 			}
 		})

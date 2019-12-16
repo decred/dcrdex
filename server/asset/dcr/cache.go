@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"sync"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
 )
@@ -28,11 +28,11 @@ type blockCache struct {
 	blocks    map[chainhash.Hash]*dcrBlock
 	mainchain map[uint32]*dcrBlock
 	best      dcrBlock
-	log       asset.Logger
+	log       dex.Logger
 }
 
 // Constructor for a blockCache.
-func newBlockCache(logger asset.Logger) *blockCache {
+func newBlockCache(logger dex.Logger) *blockCache {
 	return &blockCache{
 		blocks:    make(map[chainhash.Hash]*dcrBlock),
 		mainchain: make(map[uint32]*dcrBlock),

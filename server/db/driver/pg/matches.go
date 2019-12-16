@@ -62,6 +62,11 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 		m.Status = order.MatchStatus(status)
 		ms = append(ms, &m)
 	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return ms, nil
 }
 

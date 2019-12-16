@@ -5,6 +5,7 @@ package market
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/book"
+	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 )
@@ -38,14 +40,16 @@ const (
 // Swapper coordinates atomic swaps for one or more matchsets.
 type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet)
+	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
+	LockOrdersCoins(orders []order.Order)
 }
 
-// The Market manager should not be overly involved with details of accounts and
-// authentication. Via the account package it should request account status with
-// new orders, verification of order signatures. The Market should also perform
-// various account package callbacks such as order status updates so that the
-// account package code can keep various data up-to-date, including order
-// status, history, cancellation statistics, etc.
+// Market is the market manager. It should not be overly involved with details
+// of accounts and authentication. Via the account package it should request
+// account status with new orders, verification of order signatures. The Market
+// should also perform various account package callbacks such as order status
+// updates so that the account package code can keep various data up-to-date,
+// including order status, history, cancellation statistics, etc.
 //
 // The Market performs the following:
 // - Receiving and validating new order data (amounts vs. lot size, check fees,
@@ -81,6 +85,9 @@ type Market struct {
 	matcher       *matcher.Matcher
 	swapper       Swapper
 	auth          AuthManager
+
+	coinLockerBase  coinlock.CoinLocker
+	coinLockerQuote coinlock.CoinLocker
 
 	// Persistent data storage.
 	storage db.DEXArchivist
@@ -128,14 +135,54 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	return sig.errChan
 }
 
+// MidGap returns the mid-gap market rate, which is ths rate halfway between the
+// best buy order and the best sell order in the order book. If one side has no
+// orders, the best order rate on other side is returned. If both sides have no
+// orders, 0 is returned.
+func (m *Market) MidGap() uint64 {
+	bestBuy, bestSell := m.book.Best()
+	if bestBuy == nil {
+		if bestSell == nil {
+			return 0 // ?
+		}
+		return bestSell.Rate
+	} else if bestSell == nil {
+		return bestBuy.Rate
+	}
+	return (bestBuy.Rate + bestSell.Rate) / 2
+}
+
+// CoinLocked checks if a coin is locked. The asset is specified since we should
+// not assume that a CoinID for one asset cannot be made to match another
+// asset's CoinID.
+func (m *Market) CoinLocked(asset uint32, coin coinlock.CoinID) bool {
+	switch asset {
+	case m.marketInfo.Base:
+		return m.coinLockerBase.CoinLocked(coin)
+	case m.marketInfo.Quote:
+		return m.coinLockerQuote.CoinLocked(coin)
+	default:
+		panic(fmt.Sprintf("invalid asset %d for market %s", asset, m.marketInfo.Name))
+	}
+}
+
 // NewMarket creates a new Market for the provided base and quote assets, with
 // an epoch cycling at given duration in seconds.
 func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchivist,
-	swapper Swapper, authMgr AuthManager) (*Market, error) {
+	swapper Swapper, authMgr AuthManager, coinLockerBase, coinLockerQuote coinlock.CoinLocker) (*Market, error) {
 	// Make sure the DEXArchivist is healthy before taking orders.
 	if err := storage.LastErr(); err != nil {
 		return nil, err
 	}
+
+	// Lock coins backing active orders.
+	baseCoins, quoteCoins, err := storage.ActiveOrderCoins(mktInfo.Base, mktInfo.Quote)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: first check that the coins aren't already locked by e.g. another market.
+	coinLockerBase.LockCoins(baseCoins)
+	coinLockerQuote.LockCoins(quoteCoins)
 
 	// Supplement the provided context with a cancel function. The Stop method
 	// may be used to stop the market, or the parent context itself may be
@@ -143,17 +190,19 @@ func NewMarket(ctx context.Context, mktInfo *dex.MarketInfo, storage db.DEXArchi
 	ctxInternal, cancel := context.WithCancel(ctx)
 
 	return &Market{
-		ctx:           ctxInternal,
-		cancel:        cancel,
-		running:       make(chan struct{}),
-		marketInfo:    mktInfo,
-		epochDuration: int64(mktInfo.EpochDuration),
-		orderRouter:   make(chan *orderUpdateSignal, 16),
-		book:          book.New(mktInfo.LotSize),
-		matcher:       matcher.New(),
-		swapper:       swapper,
-		auth:          authMgr,
-		storage:       storage,
+		ctx:             ctxInternal,
+		cancel:          cancel,
+		running:         make(chan struct{}),
+		marketInfo:      mktInfo,
+		epochDuration:   int64(mktInfo.EpochDuration),
+		orderRouter:     make(chan *orderUpdateSignal, 16),
+		book:            book.New(mktInfo.LotSize),
+		matcher:         matcher.New(),
+		swapper:         swapper,
+		auth:            authMgr,
+		storage:         storage,
+		coinLockerBase:  coinLockerBase,
+		coinLockerQuote: coinLockerQuote,
 	}, nil
 }
 
@@ -224,7 +273,9 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 	var currentEpoch *EpochQueue
 	cycleEpoch := func() {
 		if currentEpoch != nil {
-			go m.processEpoch(currentEpoch)
+			// Process the epoch synchronously so the coin locks are up-to-date
+			// when the next order arrives.
+			m.processEpoch(currentEpoch)
 		}
 		currentEpoch = nextEpoch
 
@@ -296,6 +347,7 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 				continue
 			}
 
+			// Stamp and process the order in the target epoch queue.
 			s.rec.order.SetTime(sTime.Unix())
 			m.processOrder(s.rec, orderEpoch, s.errChan)
 
@@ -306,6 +358,62 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 
 }
 
+func (m *Market) coinsLocked(o order.Order) []order.CoinID {
+	if o.Type() == order.CancelOrderType {
+		return nil
+	}
+
+	locker := m.coinLockerQuote
+	if o.IsSell() {
+		locker = m.coinLockerBase
+	}
+
+	// Check if this order is known by the locker.
+	lockedCoins := locker.OrderCoinsLocked(o.ID())
+	if len(lockedCoins) > 0 {
+		return lockedCoins
+	}
+
+	// Check the individual coins.
+	for _, coin := range o.CoinIDs() {
+		if locker.CoinLocked(coin) {
+			lockedCoins = append(lockedCoins, coin)
+		}
+	}
+	return lockedCoins
+}
+
+func (m *Market) lockOrderCoins(o order.Order) {
+	if o.Type() == order.CancelOrderType {
+		return
+	}
+
+	if o.IsSell() {
+		m.coinLockerBase.LockOrdersCoins([]order.Order{o})
+	} else {
+		m.coinLockerQuote.LockOrdersCoins([]order.Order{o})
+	}
+}
+
+func (m *Market) unlockOrderCoins(o order.Order) {
+	if o.Type() == order.CancelOrderType {
+		return
+	}
+
+	if o.IsSell() {
+		m.coinLockerBase.UnlockOrderCoins(o.ID())
+	} else {
+		m.coinLockerQuote.UnlockOrderCoins(o.ID())
+	}
+}
+
+// processOrder performs the following actions:
+// 1. Verify the order is new and that none of the backing coins are locked.
+// 2. Lock the order's coins.
+// 3. Store the order in the DB.
+// 4. Insert the order into the EpochQueue.
+// 5. Respond to the client that placed the order.
+// 6. Notify epoch queue event subscribers.
 func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<- error) {
 	// Verify that the order is not already in the epoch queue
 	ord := rec.order
@@ -327,6 +435,20 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 		return
 	}
 
+	// Ensure that the received order does not use locked coins.
+	lockedCoins := m.coinsLocked(ord)
+	if len(lockedCoins) > 0 {
+		log.Errorf("(*Market).runEpochs: Order %v submitted with already-locked coins: %v",
+			ord, lockedCoins)
+		errChan <- ErrInvalidOrder
+		return
+	}
+
+	// For market and limit orders, lock the backing coins NOW so orders using
+	// locked coins cannot get into the epoch queue. Later, in processEpoch or
+	// the Swapper, release these coins when the swap is completed.
+	m.lockOrderCoins(ord)
+
 	// Archive the new epoch order BEFORE inserting it into the epoch queue,
 	// initiating the swap, and notifying book subscribers.
 	if err := m.storage.NewEpochOrder(ord); err != nil {
@@ -345,30 +467,73 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 	// inserted into the current epoch queue.
 	m.auth.Send(ord.User(), respMsg)
 
-	// Send epoch update to order book subscribers.
+	// Send epoch update to epoch queue subscribers.
 	go m.notifyNewOrder(ord, epochAction)
 }
 
-// processEpoch performs the following operations for a closed epoch. The
-// EpochQueue's Orders map must not be modified by another goroutine:
+// processEpoch performs the following operations for a closed epoch:
 //  1. Perform matching with the order book.
 //  2. Send book and unbook notifications to the book subscribers.
-//  3. Initiate the swap negotiation via the Market's Swapper.
+//  3. Unlock coins with the book lock for unbooked and failed orders.
+//  4. Lock coins with the swap lock.
+//  5. Initiate the swap negotiation via the Market's Swapper.
+// The EpochQueue's Orders map must not be modified by another goroutine.
 func (m *Market) processEpoch(epoch *EpochQueue) {
 	// Perform the matching. The matcher updates the order book.
 	orders := epoch.OrderSlice()
 	m.bookMtx.Lock()
-	matches, _, failed, partial, booked, unbooked := m.matcher.Match(m.book, orders)
+	matches, _, failed, doneOK, partial, booked, unbooked := m.matcher.Match(m.book, orders)
 	m.bookMtx.Unlock()
 	log.Debugf("Matching complete for epoch %d:"+
-		" %d matches (%d partial fills), %d booked, %d unbooked, %d failed",
-		epoch.Epoch, len(matches), len(partial), len(booked), len(unbooked), len(failed),
+		" %d matches (%d partial fills), %d completed OK (not booked),"+
+		" %d booked, %d unbooked, %d failed",
+		epoch.Epoch,
+		len(matches), len(partial), len(doneOK),
+		len(booked), len(unbooked), len(failed),
 	)
 
-	// Set the EpochID for each MatchSet before initiating the swaps.
-	for i := range matches {
-		matches[i].Epoch.Idx = uint64(epoch.Epoch)
-		matches[i].Epoch.Dur = uint64(epoch.Duration)
+	// Pre-process the matches:
+	// - Set the EpochID for each MatchSet.
+	// - Identify taker orders with backing coins that the swapper will need to
+	//   lock and unlock.
+	swapOrders := make([]order.Order, 0, 2*len(matches)) // size guess
+	for _, match := range matches {
+		// Set the epoch ID.
+		match.Epoch.Idx = uint64(epoch.Epoch)
+		match.Epoch.Dur = uint64(epoch.Duration)
+
+		// The order targeted by a matched cancel order will be in the unbooked
+		// slice. These coins are unlocked next in the book locker.
+		if match.Taker.Type() == order.CancelOrderType {
+			continue
+		}
+		swapOrders = append(swapOrders, match.Taker)
+
+		for _, maker := range match.Makers {
+			swapOrders = append(swapOrders, maker)
+		}
+	}
+
+	// Unlock passed but not booked order (e.g. matched market and immediate
+	// orders) coins were locked upon order receipt in processOrder and must be
+	// unlocked now since they do not go on the book.
+	for _, k := range doneOK {
+		m.unlockOrderCoins(k)
+	}
+
+	// Unlock unmatched (failed) order coins.
+	for _, fo := range failed {
+		m.unlockOrderCoins(fo)
+	}
+
+	// Booked order coins were locked upon receipt by processOrder, and remain
+	// locked until they are either: unbooked by a future match that completely
+	// fills the order, unbooked by a matched cancel order, or (unimplemented)
+	// unbooked by another Market mechanism such as client disconnect or ban.
+
+	// Unlock unbooked order coins.
+	for _, ubo := range unbooked {
+		m.unlockOrderCoins(ubo)
 	}
 
 	// Send "book" notifications to order book subscribers.
@@ -385,11 +550,14 @@ func (m *Market) processEpoch(epoch *EpochQueue) {
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
+		// Since Swapper.Negotiate is called asynchronously, we must lock coins
+		// with the Swapper first. The swapper will unlock the coins.
+		m.swapper.LockOrdersCoins(swapOrders)
 		go m.swapper.Negotiate(matches)
 	}
 }
 
-// validateOrder used db.ValidateOrder to ensure that the provided order is
+// validateOrder uses db.ValidateOrder to ensure that the provided order is
 // valid for the current market with epoch order status.
 func (m *Market) validateOrder(ord order.Order) bool {
 	return db.ValidateOrder(ord, order.OrderStatusEpoch, m.marketInfo)

@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/server/asset"
 )
 
 const (
@@ -65,7 +64,7 @@ func openDB() (func() error, error) {
 		QueryTimeout:  0, // zero to use the default
 		MarketCfg:     []*dex.MarketInfo{mktInfo},
 		CheckedStores: true,
-		Net:           asset.Mainnet,
+		Net:           dex.Mainnet,
 		FeeKey:        "dprv3hCznBesA6jBu1MaSqEBewG76yGtnG6LWMtEXHQvh3MVo6rqesTk7FPMSrczDtEELReV4aGMcrDxc9htac5mBDUEbTi9rgCA8Ss5FkasKM3",
 	}
 
@@ -105,6 +104,7 @@ func detectMarkets(db *sql.DB) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var markets []string
 	for rows.Next() {
@@ -115,7 +115,10 @@ func detectMarkets(db *sql.DB) ([]string, error) {
 		}
 		markets = append(markets, market)
 	}
-	rows.Close()
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return markets, nil
 }

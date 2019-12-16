@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/elliptic"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -204,8 +205,8 @@ func TestWsConn(t *testing.T) {
 		pingCh <- struct{}{}
 	}
 
-	orderid, _ := msgjson.BytesFromHex("ceb09afa675cee31c0f858b94c81bd1a4c2af8c5947d13e544eef772381f2c8d")
-	matchid, _ := msgjson.BytesFromHex("7c6b44735e303585d644c713fe0e95897e7e8ba2b9bba98d6d61b70006d3d58c")
+	orderid, _ := hex.DecodeString("ceb09afa675cee31c0f858b94c81bd1a4c2af8c5947d13e544eef772381f2c8d")
+	matchid, _ := hex.DecodeString("7c6b44735e303585d644c713fe0e95897e7e8ba2b9bba98d6d61b70006d3d58c")
 	match := &msgjson.Match{
 		OrderID:  orderid,
 		MatchID:  matchid,
@@ -263,7 +264,7 @@ func TestWsConn(t *testing.T) {
 		0xed, 0x03, 0x5f, 0x54, 0x1b, 0x85, 0x0d, 0x43, 0x00, 0x00, 0x00, 0x0a,
 	}
 
-	contract, _ := msgjson.BytesFromHex("caf8d277f80f71e4")
+	contract, _ := hex.DecodeString("caf8d277f80f71e4")
 	init := &msgjson.Init{
 		OrderID:  orderid,
 		MatchID:  matchid,

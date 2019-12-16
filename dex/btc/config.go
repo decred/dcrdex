@@ -10,18 +10,20 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcutil"
 	flags "github.com/jessevdk/go-flags"
 )
 
+// NetPorts are a set of port to use with the different networks.
 type NetPorts struct {
 	Mainnet string
 	Testnet string
 	Simnet  string
 }
 
-var btcPorts = NetPorts{
+// RPCPorts are the default BTC ports.
+var RPCPorts = NetPorts{
 	Mainnet: "8332",
 	Testnet: "18332",
 	Simnet:  "18443",
@@ -31,6 +33,11 @@ const (
 	defaultHost = "localhost"
 )
 
+// Config is a partial bitcoind configuration file, with only the parameters
+// needed to initialize the RPC connection. Because we have no need to read
+// command line arguments, we can use the IgnoreUnkown flag to allow pulling
+// the needed confiruration settings directly from the bitcoin.conf, if the user
+// chooses.
 type Config struct {
 	RPCUser string `long:"rpcuser" description:"JSON-RPC user"`
 	RPCPass string `long:"rpcpassword" description:"JSON-RPC password"`
@@ -38,7 +45,8 @@ type Config struct {
 	RPCPort int    `long:"rpcport" description:"JSON-RPC port"`
 }
 
-func LoadConfig(configPath string, network asset.Network, ports NetPorts) (*Config, error) {
+// LoadConfig loads the configuration settings from the specified filepath.
+func LoadConfig(configPath string, network dex.Network, ports NetPorts) (*Config, error) {
 	cfg := &Config{}
 	// Since we are not reading command-line arguments, and the Config fields
 	// share names with the bitcoind configuration options, passing just
@@ -65,11 +73,11 @@ func LoadConfig(configPath string, network asset.Network, ports NetPorts) (*Conf
 	host := defaultHost
 	var port string
 	switch network {
-	case asset.Mainnet:
+	case dex.Mainnet:
 		port = ports.Mainnet
-	case asset.Testnet:
+	case dex.Testnet:
 		port = ports.Testnet
-	case asset.Regtest:
+	case dex.Regtest:
 		port = ports.Simnet
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
@@ -102,6 +110,8 @@ func LoadConfig(configPath string, network asset.Network, ports NetPorts) (*Conf
 	return cfg, nil
 }
 
+// SystemConfigPath will return the default config file path for bitcoin-like
+// assets.
 func SystemConfigPath(asset string) string {
 	homeDir := btcutil.AppDataDir(asset, false)
 	return filepath.Join(homeDir, fmt.Sprintf("%s.conf", asset))

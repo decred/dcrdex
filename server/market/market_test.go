@@ -6,6 +6,7 @@ package market
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/swap"
 )
@@ -36,12 +38,14 @@ func (a *TAsset) BlockChannel(size int) chan uint32 { return nil }
 func (a *TAsset) InitTxSize() uint32                { return 100 }
 func (a *TAsset) CheckAddress(string) bool          { return true }
 
-func newAsset(id uint32, lotSize uint64) *asset.Asset {
-	return &asset.Asset{
+func newAsset(id uint32, lotSize uint64) *asset.BackedAsset {
+	return &asset.BackedAsset{
 		Backend: &TAsset{},
-		ID:      id,
-		LotSize: lotSize,
-		Symbol:  asset.BipIDSymbol(id),
+		Asset: dex.Asset{
+			ID:      id,
+			LotSize: lotSize,
+			Symbol:  dex.BipIDSymbol(id),
+		},
 	}
 }
 
@@ -52,6 +56,9 @@ type TArchivist struct {
 func (ta *TArchivist) LastErr() error { return nil }
 func (ta *TArchivist) Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error) {
 	return nil, order.OrderStatusUnknown, errors.New("boom")
+}
+func (ta *TArchivist) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
+	return make(map[order.OrderID][]order.CoinID), make(map[order.OrderID][]order.CoinID), nil
 }
 func (ta *TArchivist) UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error) {
 	return nil, nil, errors.New("boom")
@@ -91,6 +98,89 @@ func randomOrderID() order.OrderID {
 	var id order.OrderID
 	copy(id[:], pk)
 	return id
+}
+
+func newTestMarket() (*Market, *TArchivist, error) {
+	// The DEX will make MasterCoinLockers for each asset.
+	masterLockerBase := coinlock.NewMasterCoinLocker()
+	bookLockerBase := masterLockerBase.Book()
+	swapLockerBase := masterLockerBase.Swap()
+
+	masterLockerQuote := coinlock.NewMasterCoinLocker()
+	bookLockerQuote := masterLockerQuote.Book()
+	swapLockerQuote := masterLockerQuote.Swap()
+
+	ctx := context.Background()
+	epochDurationSec := int64(1)
+	storage := &TArchivist{}
+	authMgr := &TAuth{}
+	swapperCfg := &swap.Config{
+		Ctx: ctx,
+		Assets: map[uint32]*swap.LockableAsset{
+			assetDCR.ID: {BackedAsset: assetDCR, CoinLocker: swapLockerBase},
+			assetBTC.ID: {BackedAsset: assetBTC, CoinLocker: swapLockerQuote},
+		},
+		Storage:          storage,
+		AuthManager:      authMgr,
+		BroadcastTimeout: 10 * time.Second,
+	}
+	swapper := swap.NewSwapper(swapperCfg)
+
+	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
+		assetDCR.LotSize, uint64(epochDurationSec))
+	if err != nil {
+		return nil, nil, fmt.Errorf("dex.NewMarketInfo() failure: %v", err)
+	}
+
+	mkt, err := NewMarket(ctx, mktInfo, storage, swapper, authMgr, bookLockerBase, bookLockerQuote)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Failed to create test market: %v", err)
+	}
+	return mkt, storage, nil
+}
+
+func TestMarket_Book(t *testing.T) {
+	mkt, _, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+
+	rand.Seed(0)
+
+	// Fill the book.
+	for i := 0; i < 8; i++ {
+		// Buys
+		lo := makeLO(buyer3, mkRate3(0.8, 1.0), randLots(10), order.StandingTiF)
+		if !mkt.book.Insert(lo) {
+			t.Fatalf("Failed to Insert order into book.")
+		}
+		//t.Logf("Inserted buy order  (rate=%10d, quantity=%d) onto book.", lo.Rate, lo.Quantity)
+
+		// Sells
+		lo = makeLO(seller3, mkRate3(1.0, 1.2), randLots(10), order.StandingTiF)
+		if !mkt.book.Insert(lo) {
+			t.Fatalf("Failed to Insert order into book.")
+		}
+		//t.Logf("Inserted sell order (rate=%10d, quantity=%d) onto book.", lo.Rate, lo.Quantity)
+	}
+
+	bestBuy, bestSell := mkt.book.Best()
+
+	marketRate := mkt.MidGap()
+	mktRateWant := (bestBuy.Rate + bestSell.Rate) / 2
+	if marketRate != mktRateWant {
+		t.Errorf("Market rate expected %d, got %d", mktRateWant, mktRateWant)
+	}
+
+	buys, sells := mkt.Book()
+	if buys[0] != bestBuy {
+		t.Errorf("Incorrect best buy order. Got %v, expected %v",
+			buys[0], bestBuy)
+	}
+	if sells[0] != bestSell {
+		t.Errorf("Incorrect best sell order. Got %v, expected %v",
+			sells[0], bestSell)
+	}
 }
 
 func TestMarket_runEpochs(t *testing.T) {
@@ -157,36 +247,13 @@ func TestMarket_runEpochs(t *testing.T) {
 		order: lo,
 	}
 
-	storage := &TArchivist{}
-	authMgr := &TAuth{}
-
-	ctx := context.Background()
-	swapperCfg := &swap.Config{
-		Ctx: ctx,
-		Assets: map[uint32]*asset.Asset{
-			assetDCR.ID: assetDCR,
-			assetBTC.ID: assetBTC,
-		},
-		Storage:          storage,
-		AuthManager:      authMgr,
-		BroadcastTimeout: time.Second,
-	}
-	swapper := swap.NewSwapper(swapperCfg)
-
-	epochDurationSec := int64(1)
-	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
-		assetDCR.LotSize, uint64(epochDurationSec))
+	mkt, _, err := newTestMarket()
 	if err != nil {
-		t.Fatalf("dex.NewMarketInfo() failure: %v", err)
-		return
-	}
-
-	mkt, err := NewMarket(ctx, mktInfo, storage, swapper, authMgr)
-	if err != nil {
-		t.Fatalf("NewMarket() failure: %v", err)
+		t.Fatalf("newTestMarket failure: %v", err)
 		return
 	}
 	t.Log(mkt.marketInfo.Name)
+	epochDurationSec := mkt.epochDuration
 
 	startEpochIdx := 1 + time.Now().Unix()/epochDurationSec
 	mkt.Start(startEpochIdx)
@@ -215,9 +282,9 @@ func TestMarket_runEpochs(t *testing.T) {
 	mkt.WaitForShutdown()
 
 	// Test duplicate order with a new Market.
-	mkt, err = NewMarket(ctx, mktInfo, storage, swapper, authMgr)
+	mkt, storage, err := newTestMarket()
 	if err != nil {
-		t.Fatalf("NewMarket failed: %v", err)
+		t.Fatalf("newTestMarket failure: %v", err)
 	}
 	startEpochIdx = 1 + time.Now().Unix()/epochDurationSec
 	mkt.Start(startEpochIdx)
@@ -261,30 +328,7 @@ func TestMarket_processEpoch(t *testing.T) {
 	// This tests that processEpoch sends the expected book and unbook messages
 	// to book subscribers registered via OrderFeed.
 
-	ctx := context.Background()
-	epochDurationSec := int64(1)
-	storage := &TArchivist{}
-	authMgr := &TAuth{}
-	swapperCfg := &swap.Config{
-		Ctx: ctx,
-		Assets: map[uint32]*asset.Asset{
-			assetDCR.ID: assetDCR,
-			assetBTC.ID: assetBTC,
-		},
-		Storage:          storage,
-		AuthManager:      authMgr,
-		BroadcastTimeout: 10 * time.Second, // TODO: who sets this?
-	}
-	swapper := swap.NewSwapper(swapperCfg)
-
-	mktInfo, err := dex.NewMarketInfo(assetDCR.ID, assetBTC.ID,
-		assetDCR.LotSize, uint64(epochDurationSec))
-	if err != nil {
-		t.Fatalf("dex.NewMarketInfo() failure: %v", err)
-		return
-	}
-
-	mkt, err := NewMarket(ctx, mktInfo, storage, swapper, authMgr)
+	mkt, _, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("Failed to create test market: %v", err)
 		return
@@ -308,11 +352,9 @@ func TestMarket_processEpoch(t *testing.T) {
 		//t.Logf("Inserted sell order (rate=%10d, quantity=%d) onto book.", lo.Rate, lo.Quantity)
 	}
 
-	bestBuy := mkt.book.BestBuy()
+	bestBuy, bestSell := mkt.book.Best()
 	bestBuyRate := bestBuy.Rate
 	bestBuyQuant := bestBuy.Quantity
-
-	bestSell := mkt.book.BestSell()
 	bestSellID := bestSell.ID()
 
 	eq := NewEpoch(123413513, 4)

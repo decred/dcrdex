@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 
+	"decred.org/dcrdex/dex"
+	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
 	"github.com/ltcsuite/ltcd/chaincfg"
@@ -14,14 +16,14 @@ import (
 
 // NewBackend generates the network parameters and creates a ltc backend as a
 // btc clone using an asset/btc helper function.
-func NewBackend(ctx context.Context, configPath string, logger asset.Logger, network asset.Network) (asset.DEXAsset, error) {
+func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.DEXAsset, error) {
 	var params *chaincfg.Params
 	switch network {
-	case asset.Mainnet:
+	case dex.Mainnet:
 		params = &chaincfg.MainNetParams
-	case asset.Testnet:
+	case dex.Testnet:
 		params = &chaincfg.TestNet4Params
-	case asset.Regtest:
+	case dex.Regtest:
 		params = &chaincfg.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
@@ -35,14 +37,14 @@ func NewBackend(ctx context.Context, configPath string, logger asset.Logger, net
 
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
-	ports := btc.NetPorts{
+	ports := dexbtc.NetPorts{
 		Mainnet: "9332",
 		Testnet: "19332",
 		Simnet:  "19443",
 	}
 
 	if configPath == "" {
-		configPath = btc.SystemConfigPath("litecoin")
+		configPath = dexbtc.SystemConfigPath("litecoin")
 	}
 
 	return btc.NewBTCClone(ctx, configPath, logger, network, btcParams, ports)

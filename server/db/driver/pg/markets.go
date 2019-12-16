@@ -36,6 +36,10 @@ func loadMarkets(db *sql.DB, marketsTableName string) ([]*dex.MarketInfo, error)
 		})
 	}
 
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
 	return mkts, nil
 }
 

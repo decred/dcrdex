@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
+	"github.com/lib/pq"
 )
 
 // Wrap the CoinID slice to implement custom Scanner and Valuer.
@@ -57,7 +58,13 @@ func (coins *dbCoins) Scan(src interface{}) error {
 		if len(b) < cLen+1 {
 			return fmt.Errorf("too many bytes indicated")
 		}
-		c = append(c, b[1:cLen+1])
+
+		// Deep copy the coin ID (a slice) since the backing buffer may be
+		// reused.
+		bc := make([]byte, cLen)
+		copy(bc, b[1:cLen+1])
+		c = append(c, bc)
+
 		b = b[cLen+1:]
 	}
 
@@ -197,7 +204,61 @@ func (a *Archiver) insertOrUpdate(ord order.Order, status pgOrderStatus) error {
 	}
 
 	return a.updateOrderStatus(ord, status)
+}
 
+// ActiveOrderCoins retrieves a CoinID slice for each active order.
+func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
+	var marketSchema string
+	marketSchema, err = a.marketSchema(base, quote)
+	if err != nil {
+		return
+	}
+
+	tableName := fullOrderTableName(a.dbName, marketSchema, true) // active (true)
+	stmt := fmt.Sprintf(internal.SelectOrderCoinIDs, tableName)
+
+	orderTypes := []int64{
+		int64(order.MarketOrderType),
+		int64(order.LimitOrderType),
+	} // i.e. NOT cancel
+
+	var rows *sql.Rows
+	rows, err = a.db.Query(stmt, pq.Int64Array(orderTypes))
+	switch err {
+	case sql.ErrNoRows:
+		err = nil
+		fallthrough
+	case nil:
+		baseCoins = make(map[order.OrderID][]order.CoinID)
+		quoteCoins = make(map[order.OrderID][]order.CoinID)
+	default:
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var oid order.OrderID
+		var coins dbCoins
+		var sell bool
+		err = rows.Scan(&oid, &sell, &coins)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Sell orders lock base asset coins.
+		if sell {
+			baseCoins[oid] = coins
+		} else {
+			// Buy orders lock quote asset coins.
+			quoteCoins[oid] = coins
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	return
 }
 
 // BookOrder updates or inserts the given LimitOrder with booked status.
@@ -669,6 +730,10 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 
 		orders = append(orders, &lo)
 		statuses = append(statuses, status)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, nil, err
 	}
 
 	return orders, statuses, nil

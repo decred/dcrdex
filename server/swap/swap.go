@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 )
@@ -126,7 +127,7 @@ type stepInformation struct {
 	// counterParty is the user that is not expected to be acting next.
 	counterParty stepActor
 	// asset is the asset backend for swapAsset.
-	asset *asset.Asset
+	asset *asset.BackedAsset
 	// isBaseAsset will be true if the current step involves a transaction on the
 	// match market's base asset blockchain, false if on quote asset's blockchain.
 	isBaseAsset bool
@@ -137,6 +138,12 @@ type stepInformation struct {
 	checkVal uint64
 }
 
+// LockableAsset pairs an Asset with a CoinLocker.
+type LockableAsset struct {
+	*asset.BackedAsset
+	coinlock.CoinLocker // should be *coinlock.AssetCoinLocker
+}
+
 // Config is the swapper configuration settings. A Config instance is the only
 // argument to the Swapper constructor.
 type Config struct {
@@ -145,7 +152,7 @@ type Config struct {
 	Ctx context.Context
 	// Assets is a map to all the asset information, including the asset backends,
 	// used by this Swapper.
-	Assets map[uint32]*asset.Asset
+	Assets map[uint32]*LockableAsset
 	// Mgr is the AuthManager for client messaging and authentication.
 	AuthManager AuthManager
 	// A database backend.
@@ -162,7 +169,7 @@ type Swapper struct {
 	wg     sync.WaitGroup
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
-	coins map[uint32]*asset.Asset
+	coins map[uint32]*LockableAsset
 	// storage is a Database backend.
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.
@@ -199,6 +206,7 @@ func NewSwapper(cfg *Config) *Swapper {
 		block:    make(chan *blockNotification, 8),
 		bTimeout: cfg.BroadcastTimeout,
 	}
+
 	// The swapper is only concerned with two types of client-originating
 	// method requests.
 	authMgr.Route(msgjson.InitRoute, swapper.handleInit)
@@ -253,7 +261,9 @@ func (s *Swapper) start() {
 	bcastTicker := time.NewTimer(s.bTimeout)
 	minTimeout := s.bTimeout / 10
 	setTimeout := func(block *blockNotification) {
-		timeTil := time.Until(block.time.Add(s.bTimeout))
+		// The extra millisecond resolves some issues with timer innacuracy that
+		// were affecting unit tests.
+		timeTil := time.Until(block.time.Add(s.bTimeout + time.Millisecond))
 		if timeTil < minTimeout {
 			timeTil = minTimeout
 		}
@@ -331,6 +341,7 @@ out:
 				s.checkInaction(block.assetID)
 				if len(bcastTriggers) == 0 {
 					bcastTicker = time.NewTimer(s.bTimeout)
+					break
 				} else {
 					setTimeout(bcastTriggers[0])
 				}
@@ -406,12 +417,15 @@ func (s *Swapper) processBlock(block *blockNotification) {
 				confs, err := tStatus.redemption.Confirmations()
 				takerRedeemed = err == nil && confs >= int64(s.coins[mStatus.swapAsset].SwapConf)
 			}
+			// TODO: Can coins be unlocked now regardless of redemption?
 			if makerRedeemed && takerRedeemed {
 				completions = append(completions, match)
 			}
 		}
 	}
 	for _, match := range completions {
+		s.unlockOrderCoins(match.Taker)
+		s.unlockOrderCoins(match.Maker)
 		delete(s.matches, match.ID().String())
 	}
 }
@@ -616,7 +630,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 		actor: actor,
 		// By the time a match is created, the presence of the asset in the map
 		// has already been verified.
-		asset:        s.coins[actor.swapAsset],
+		asset:        s.coins[actor.swapAsset].BackedAsset,
 		counterParty: counterParty,
 		isBaseAsset:  isBaseAsset,
 		step:         match.Status,
@@ -977,6 +991,10 @@ func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Mes
 // revoke revokes the match, sending the 'revoke_match' request to each client
 // and processing the acknowledgement. This method is not thread-safe.
 func (s *Swapper) revoke(match *matchTracker) {
+	// Unlock the maker and taker order coins.
+	s.unlockOrderCoins(match.Taker)
+	s.unlockOrderCoins(match.Maker)
+
 	takerParams, takerReq, makerParams, makerReq, err := revocationRequests(match)
 	if err != nil {
 		log.Errorf("error creating revocation requests: %v", err)
@@ -1126,6 +1144,65 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			matchInfo.match.Sigs.TakerMatch = sigBytes
 		}
 	}
+}
+
+// LockOrdersCoins locks the backing coins for the provided orders.
+func (s *Swapper) LockOrdersCoins(orders []order.Order) {
+	// Separate orders according to the asset of their locked coins.
+	assetCoinOrders := make(map[uint32][]order.Order)
+	for _, ord := range orders {
+		// Identify the asset of the locked coins.
+		asset := ord.Quote()
+		if ord.IsSell() {
+			asset = ord.Base()
+		}
+		assetCoinOrders[asset] = append(assetCoinOrders[asset], ord)
+	}
+
+	for asset, orders := range assetCoinOrders {
+		s.lockOrdersCoins(asset, orders)
+	}
+}
+
+func (s *Swapper) lockOrdersCoins(asset uint32, orders []order.Order) {
+	assetLock := s.coins[asset]
+	if assetLock == nil {
+		panic(fmt.Sprintf("Unable to lock coins for asset %d", asset))
+	}
+
+	assetLock.LockOrdersCoins(orders)
+}
+
+// LockCoins locks coins of a given asset. The OrderID is used for tracking.
+func (s *Swapper) LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID) {
+	assetLock := s.coins[asset]
+	if assetLock == nil {
+		panic(fmt.Sprintf("Unable to lock coins for asset %d", asset))
+	}
+
+	assetLock.LockCoins(coins)
+}
+
+// unlockOrderCoins is not exported since only the Swapper knows when to unlock
+// coins (when swaps are completed).
+func (s *Swapper) unlockOrderCoins(ord order.Order) {
+	asset := ord.Quote()
+	if ord.IsSell() {
+		asset = ord.Base()
+	}
+
+	s.unlockOrderIDCoins(asset, ord.ID())
+}
+
+// unlockOrderIDCoins is not exported since only the Swapper knows when to unlock
+// coins (when swaps are completed).
+func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
+	assetLock := s.coins[asset]
+	if assetLock == nil {
+		panic(fmt.Sprintf("Unable to lock coins for asset %d", asset))
+	}
+
+	assetLock.UnlockOrderCoins(oid)
 }
 
 // Negotiate takes ownership of the matches and begins swap negotiation.

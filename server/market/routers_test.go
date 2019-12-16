@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
@@ -172,7 +173,7 @@ func (m *TMarketTunnel) MidGap() uint64 {
 	return m.midGap
 }
 
-func (m *TMarketTunnel) OutpointLocked([]byte) bool {
+func (m *TMarketTunnel) CoinLocked(coinid order.CoinID, assetID uint32) bool {
 	return m.locked
 }
 
@@ -275,37 +276,43 @@ func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin 
 	return coin
 }
 
-var assetBTC = &asset.Asset{
-	ID:       0,
-	Symbol:   "btc",
-	LotSize:  btcLotSize,
-	RateStep: btcRateStep,
-	FeeRate:  4,
-	SwapSize: dummySize,
-	SwapConf: 2,
-	FundConf: 2,
+var assetBTC = &asset.BackedAsset{
+	Asset: dex.Asset{
+		ID:       0,
+		Symbol:   "btc",
+		LotSize:  btcLotSize,
+		RateStep: btcRateStep,
+		FeeRate:  4,
+		SwapSize: dummySize,
+		SwapConf: 2,
+		FundConf: 2,
+	},
 }
 
-var assetDCR = &asset.Asset{
-	ID:       42,
-	Symbol:   "dcr",
-	LotSize:  dcrLotSize,
-	RateStep: dcrRateStep,
-	FeeRate:  10,
-	SwapSize: dummySize,
-	SwapConf: 2,
-	FundConf: 2,
+var assetDCR = &asset.BackedAsset{
+	Asset: dex.Asset{
+		ID:       42,
+		Symbol:   "dcr",
+		LotSize:  dcrLotSize,
+		RateStep: dcrRateStep,
+		FeeRate:  10,
+		SwapSize: dummySize,
+		SwapConf: 2,
+		FundConf: 2,
+	},
 }
 
-var assetUnknown = &asset.Asset{
-	ID:       54321,
-	Symbol:   "buk",
-	LotSize:  1000,
-	RateStep: 100,
-	FeeRate:  10,
-	SwapSize: 1,
-	SwapConf: 0,
-	FundConf: 0,
+var assetUnknown = &asset.BackedAsset{
+	Asset: dex.Asset{
+		ID:       54321,
+		Symbol:   "buk",
+		LotSize:  1000,
+		RateStep: 100,
+		FeeRate:  10,
+		SwapSize: 1,
+		SwapConf: 0,
+		FundConf: 0,
+	},
 }
 
 func randomBytes(len int) []byte {
@@ -320,7 +327,7 @@ func makeEnsureErr(t *testing.T) func(tag string, rpcErr *msgjson.Error, code in
 			if code == -1 {
 				return
 			}
-			t.Fatalf("%s: no rpc error", tag)
+			t.Fatalf("%s: no rpc error for code %d", tag, code)
 		}
 		if rpcErr.Code != code {
 			t.Fatalf("%s: wrong error code. expected %d, got %d: %s", tag, code, rpcErr.Code, rpcErr.Message)
@@ -360,7 +367,7 @@ func TestMain(m *testing.M) {
 	assetBTC.Backend = oRig.btc
 	oRig.router = NewOrderRouter(&OrderRouterConfig{
 		AuthManager: oRig.auth,
-		Assets: map[uint32]*asset.Asset{
+		Assets: map[uint32]*asset.BackedAsset{
 			0:  assetBTC,
 			42: assetDCR,
 		},
@@ -680,8 +687,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 
 func TestCancel(t *testing.T) {
 	user := oRig.user
-	var targetID order.OrderID
-	targetID[0] = 244
+	targetID := order.OrderID{244}
 	clientTime := time.Now()
 	cancel := msgjson.Cancel{
 		Prefix: msgjson.Prefix{
@@ -779,7 +785,7 @@ func TestCancel(t *testing.T) {
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != co.ID() {
-		t.Fatalf("failed to duplicate ID")
+		t.Fatalf("failed to duplicate ID: %v != %v", epochOrder.ID(), co.ID())
 	}
 }
 
@@ -807,7 +813,7 @@ func testPrefix(prefix *msgjson.Prefix, checkCode func(string, int)) {
 
 	// Too old
 	ct := prefix.ClientTime
-	prefix.ClientTime = ct - maxClockOffset
+	prefix.ClientTime = ct - maxClockOffset - 1 // offset >= maxClockOffset
 	checkCode("too old", msgjson.ClockRangeError)
 	prefix.ClientTime = ct
 

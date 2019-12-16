@@ -4,6 +4,7 @@
 package book
 
 import (
+	"bytes"
 	"container/heap"
 	"fmt"
 	"sort"
@@ -81,35 +82,22 @@ func (pq *OrderPQ) copy(newCap uint32) *OrderPQ {
 	return newPQ
 }
 
-// Orders copies all orders, sorted with the lessFn. To avoid modifying the
-// OrderPQ or any of the data fields, a deep copy of the OrderPQ is made and
-// ExtractBest is called until all entries are extracted.
+// Orders copies all orders, sorted with the lessFn. The OrderPQ is unmodified.
 func (pq *OrderPQ) Orders() []*order.LimitOrder {
+	// Deep copy the orders.
 	pq.mtx.RLock()
-
-	// To use the configured lessFn, make a temporary OrderPQ with just the
-	// lessFn and orderHeap set. Do not use the constructor since we do not care
-	// about the orders map or capacity.
-	pqTmp := OrderPQ{
-		lessFn: pq.lessFn,
-		oh:     make(orderHeap, len(pq.oh)),
+	orders := make([]*order.LimitOrder, len(pq.oh))
+	for i, oe := range pq.oh {
+		orders[i] = oe.order
 	}
-	copy(pqTmp.oh, pq.oh)
 	pq.mtx.RUnlock()
 
-	// Sort the orderHeap, which implements sort.Interface with the configured
-	// lessFn.
-	sort.Sort(&pqTmp)
+	// Sort the orders with pq.lessFn.
+	sort.Slice(orders, func(i, j int) bool {
+		return pq.lessFn(orders[i], orders[j])
+	})
 
-	// Extract the LimitOrder from each orderEntry in heap.
-	orders := make([]*order.LimitOrder, len(pqTmp.oh))
-	for i := range pqTmp.oh {
-		orders[i] = pqTmp.oh[i].order
-	}
 	return orders
-
-	// Copy heap and extract N.
-	//return pq.OrdersN(len(pq.oh))
 }
 
 // OrdersN copies the N best orders, sorted with the lessFn. To avoid modifying
@@ -257,19 +245,35 @@ func GreaterByPrice(bi, bj *order.LimitOrder) bool {
 }
 
 // LessByPriceThenTime defines a higher priority as having a lower price rate,
-// with older orders breaking any tie.
+// with older orders breaking any tie, then OrderID as a last tie breaker.
 func LessByPriceThenTime(bi, bj *order.LimitOrder) bool {
 	if bi.Price() == bj.Price() {
-		return bi.Time() < bj.Time()
+		ti, tj := bi.Time(), bj.Time()
+		if ti == tj {
+			// Lexicographical comparison of the OrderIDs requires a slice. This
+			// comparison should be exceedingly rare, so the required memory
+			// allocations are acceptable.
+			idi, idj := bi.ID(), bj.ID()
+			return bytes.Compare(idi[:], idj[:]) < 0
+		}
+		return ti < tj
 	}
 	return LessByPrice(bi, bj)
 }
 
 // GreaterByPriceThenTime defines a higher priority as having a higher price
-// rate, with older orders breaking any tie.
+// rate, with older orders breaking any tie, then OrderID as a last tie breaker.
 func GreaterByPriceThenTime(bi, bj *order.LimitOrder) bool {
 	if bi.Price() == bj.Price() {
-		return bi.Time() < bj.Time()
+		ti, tj := bi.Time(), bj.Time()
+		if ti == tj {
+			// Lexicographical comparison of the OrderIDs requires a slice. This
+			// comparison should be exceedingly rare, so the required memory
+			// allocations are acceptable.
+			idi, idj := bi.ID(), bj.ID()
+			return bytes.Compare(idi[:], idj[:]) < 0
+		}
+		return ti < tj
 	}
 	return GreaterByPrice(bi, bj)
 }
@@ -442,8 +446,7 @@ func (pq *OrderPQ) removeOrder(o *orderEntry) (*order.LimitOrder, bool) {
 			pq.removeIndex(o.heapIdx)
 			return removed, true
 		}
-		log.Warnf("Tried to remove an order that was NOT in the PQ. ID: %s",
-			o.order.UID())
+		log.Warnf("Tried to remove an order that was NOT in the PQ. ID: %s", uid)
 	}
 	return nil, false
 }

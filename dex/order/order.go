@@ -153,6 +153,20 @@ type Order interface {
 	// Quote returns the unique integer identifier of the quote asset as defined
 	// in the asset package.
 	Quote() uint32
+
+	// IsSell indicates if the order is selling the base asset (false indicates
+	// selling the quote asset). This helps identify the asset of the backing
+	// coins returned by CoinIDs(). Note that a cancel order will return false.
+	IsSell() bool
+
+	// Coins returns the backing coins of either base or quote asset depending
+	// on IsSell.
+	//
+	// TODO!!! The orders must be updated to track the current backing coins,
+	// not just the original backing coins. This is critical for partially
+	// filled orders where each fill creates change that must then be tracked as
+	// the new backing coins.
+	CoinIDs() []CoinID
 }
 
 // zeroTime is the Unix time for a Time where IsZero() == true.
@@ -160,15 +174,19 @@ var zeroTime = time.Time{}.Unix()
 
 // An order's ID is computed as the Blake-256 hash of the serialized order.
 func calcOrderID(order Order) OrderID {
-	stime := order.Time()
-	if stime == zeroTime {
+	sTime := order.Time()
+	if sTime == zeroTime {
 		panic("Order's ServerTime is unset")
 	}
 	return blake256.Sum256(order.Serialize())
 }
 
-// CoinID identifies value on the blockchain.
+// CoinID should be used to wrap a []byte so that it may be used as a map key.
 type CoinID []byte
+
+func (c CoinID) String() string {
+	return hex.EncodeToString(c)
+}
 
 // Prefix is the order prefix containing data fields common to all orders.
 type Prefix struct {
@@ -359,6 +377,16 @@ func (o *MarketOrder) Remaining() uint64 {
 	return o.Quantity - o.Filled
 }
 
+// IsSell indicates if the order is selling the base asset.
+func (o *MarketOrder) IsSell() bool {
+	return o.Sell
+}
+
+// CoinIDs returns the order's backing coins.
+func (o *MarketOrder) CoinIDs() []CoinID {
+	return o.Coins
+}
+
 // Ensure MarketOrder is an Order.
 var _ Order = (*MarketOrder)(nil)
 
@@ -434,6 +462,11 @@ func (o *LimitOrder) Price() uint64 {
 	return o.Rate
 }
 
+// IsSell indicates if the order is selling the base asset.
+func (o *LimitOrder) IsSell() bool {
+	return o.Sell
+}
+
 // CancelOrder defines a cancel order in terms of an order Prefix and the ID of
 // the order to be canceled.
 type CancelOrder struct {
@@ -495,6 +528,16 @@ func (o *CancelOrder) SwapAddress() string {
 // Filled returns the filled order amount.
 func (o *CancelOrder) FilledAmt() uint64 {
 	return 0
+}
+
+// IsSell is always false for a CancelOrder.
+func (o *CancelOrder) IsSell() bool {
+	return false
+}
+
+// CoinIDs always returns a nil slice for a CancelOrder.
+func (o *CancelOrder) CoinIDs() []CoinID {
+	return nil
 }
 
 // Ensure CancelOrder is an Order.
