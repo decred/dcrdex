@@ -20,7 +20,7 @@ possible.
 |-
 | registration&nbsp;fees || [[fundamentals.mediawiki/#Fees|Fees]] || atoms || 1e8 (1 DCR)
 |-
-| cancellation&nbsp;threshold || [[community.mediawiki/#Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 2]] || unitless ratio || 0.6
+| cancellation&nbsp;threshold || [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 3]] || unitless ratio || 0.6
 |}
 
 '''Per-asset Variables'''

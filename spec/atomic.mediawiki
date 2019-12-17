@@ -46,7 +46,7 @@ through on a trade.
 with BTC at the best available price.
 Bob&#x2019;s order will contain both an address and a signature.
 As a market order, Bob&#x2019;s order must match in this epoch. Any unfilled portion
-is immediately cancelled.
+is immediately canceled.
 
 '''A3''': At the end of the epoch, the '''DEX performs a match cycle''',
 recognizes the match, and informs both Alice and Bob that a match has occurred.

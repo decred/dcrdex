@@ -71,7 +71,7 @@ respond with its current configuration.
 |-
 | buybuffer || float || the [[orders.mediawiki/#Market_Buy_Orders|market buy buffer]]
 |-
-| cancelmax || float || the [[community.mediawiki/#Rule_2_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
+| cancelmax || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
 |-
 | assets    || &#91;object&#93; || list of Asset objects (definition below)
 |-
@@ -177,21 +177,22 @@ When the epoch ends, a match cycle begins.
 
 First, the order pool is shuffled.
 Shuffling is deterministic, using the Fisher-Yates algorithm where the
-random number generator seed is derived from the hash of the concatenated order
-[[orders.mediawiki/#Order_ID|ID hashes]].
+random number generator seed is derived from the hash of the concatenated
+[[orders.mediawiki/#Order_Commitment|order commitments]].
 Specifically for hash function '''''f''''', the seed is the 64-bit integer
 corresponding to the little-endian byte order interpretation of the first 8
 bytes of the hash.
 The hash is computed as
 
-<!--H_{seed} = f(f(order_1) || f(order_2) || ... || f(order_N))-->
+<!--H_{seed} = f(p_1 || p_2 || ... || p_N)-->
 [[File:images/seed-eq.png]]
 
-where '''''order<sub>i</sub>''''' represents the order ID of the
-'''''i<sup>th</sup>''''' order in a lexicographically sorted list of
-[[orders.mediawiki/#Order_ID|order IDs]] and '''''||''''' indicates concatenation.
+where '''''||''''' indicates concatenation.
+'''''p<sub>i</sub>''''' is the commitment preimage of the
+'''''i<sup>th</sup>''''' order in the list of epoch orders sorted
+lexicographically by their [[orders.mediawiki/#Order_ID|order IDs]].
 
-The order IDs and final hash are published at the start of the matching process.
+The preimages and seed are published at the start of the matching process.
 This is done so that the shuffling may be independently computed for external
 verification and to facilitate server mesh operation.
 
