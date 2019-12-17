@@ -145,7 +145,7 @@ the client's absence. A list of any pending matches is included in the response.
 |-
 | startepoch || int   || the epoch at which trading did or will commence. May be in the future e.g. [[orders.mediawiki/#Trade_Suspension|after maintenance]]
 |-
-| matches    || &#91;object&#93; || list of [[#Match_notifications|Match objects]]
+| matches    || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
 |}
 
 ===HTTP===

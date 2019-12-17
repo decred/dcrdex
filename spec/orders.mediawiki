@@ -625,7 +625,7 @@ relay to the matching party.
 |-
 | orderid    || string || the order ID
 |-
-| matchid    || string    || the matchid, retrieved from the [[#Match_notifications|match notification]]
+| matchid    || string    || the matchid, retrieved from the [[#Match_negotiation|match notification]]
 |-
 | coinid    || string || hex-encoded coin ID
 |-
