@@ -34,7 +34,7 @@ import (
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"

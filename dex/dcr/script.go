@@ -10,12 +10,9 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/decred/dcrd/dcrec"
-	// "github.com/decred/dcrd/dcrec/edwards/v2"
-	// "github.com/decred/dcrd/dcrec/secp256k1/v2"
-	// "github.com/decred/dcrd/dcrec/secp256k1/v2/schnorr"
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/v2"
+	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
@@ -136,7 +133,7 @@ const (
 	ScriptUnsupported
 )
 
-// ParseScriptType creates a dcrScriptType bitmap for the script type. A script
+// ParseScriptType creates a dcrScriptType bitmask for the script type. A script
 // type will be some combination of pay-to-pubkey-hash, pay-to-script-hash,
 // and stake. If a script type is P2SH, it may or may not be mutli-sig.
 func ParseScriptType(scriptVersion uint16, pkScript, redeemScript []byte) DCRScriptType {
@@ -390,12 +387,13 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 			txscript.OP_HASH160,
 		}).AddData(rAddr.ScriptAddress()).
 		AddOp(txscript.OP_ELSE).
-		AddInt64(lockTime).AddOps([]byte{
-		txscript.OP_CHECKLOCKTIMEVERIFY,
-		txscript.OP_DROP,
-		txscript.OP_DUP,
-		txscript.OP_HASH160,
-	}).AddData(sAddr.ScriptAddress()).
+		AddInt64(lockTime).
+		AddOps([]byte{
+			txscript.OP_CHECKLOCKTIMEVERIFY,
+			txscript.OP_DROP,
+			txscript.OP_DUP,
+			txscript.OP_HASH160,
+		}).AddData(sAddr.ScriptAddress()).
 		AddOps([]byte{
 			txscript.OP_ENDIF,
 			txscript.OP_EQUALVERIFY,
@@ -407,25 +405,25 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 // using the redeemer's signature and the initiator's secret.  This function
 // assumes P2SH and appends the contract as the final data push.
 func RedeemP2SHContract(contract, sig, pubkey, secret []byte) ([]byte, error) {
-	b := txscript.NewScriptBuilder()
-	b.AddData(sig)
-	b.AddData(pubkey)
-	b.AddData(secret)
-	b.AddInt64(1)
-	b.AddData(contract)
-	return b.Script()
+	return txscript.NewScriptBuilder().
+		AddData(sig).
+		AddData(pubkey).
+		AddData(secret).
+		AddInt64(1).
+		AddData(contract).
+		Script()
 }
 
 // RefundP2SHContract returns the signature script to refund a contract output
 // using the contract author's signature after the locktime has been reached.
 // This function assumes P2SH and appends the contract as the final data push.
 func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
-	b := txscript.NewScriptBuilder()
-	b.AddData(sig)
-	b.AddData(pubkey)
-	b.AddInt64(0)
-	b.AddData(contract)
-	return b.Script()
+	return txscript.NewScriptBuilder().
+		AddData(sig).
+		AddData(pubkey).
+		AddInt64(0).
+		AddData(contract).
+		Script()
 }
 
 // ExtractSwapDetails extacts the sender and receiver addresses from a swap
@@ -558,6 +556,10 @@ func ExtractScriptHashByType(scriptType DCRScriptType, pkScript []byte) ([]byte,
 	return redeemScript, nil
 }
 
+// DCRScriptAddrs is information about the pubkeys or pubkey hashes present in
+// a scriptPubKey (and the redeem script, for p2sh). This information can be
+// used to estimate the spend script size, e.g. pubkeys in a redeem script don't
+// require pubkeys in the scriptSig, but pubkey hashes do.
 type DCRScriptAddrs struct {
 	PubKeys   []dcrutil.Address
 	NumPK     int

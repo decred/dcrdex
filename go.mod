@@ -8,22 +8,18 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/blockchain/stake/v2 v2.0.2
 	github.com/decred/dcrd/certgen v1.1.0
-	github.com/decred/dcrd/chaincfg v1.5.2
 	github.com/decred/dcrd/chaincfg/chainhash v1.0.2
 	github.com/decred/dcrd/chaincfg/v2 v2.3.0
 	github.com/decred/dcrd/crypto/blake256 v1.0.0
 	github.com/decred/dcrd/dcrec v1.0.0
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.0
 	github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0
-	github.com/decred/dcrd/dcrutil v1.4.0
 	github.com/decred/dcrd/dcrutil/v2 v2.0.1
-	github.com/decred/dcrd/dcrutil/v3 v3.0.0-20191123101755-b50cadcb136c
+	github.com/decred/dcrd/dcrutil/v3 v3.0.0-20191206034640-4da12163dcbe
 	github.com/decred/dcrd/hdkeychain/v2 v2.1.0
 	github.com/decred/dcrd/rpc/jsonrpc/types v1.0.1
 	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.0
-	github.com/decred/dcrd/rpcclient/v4 v4.0.0
 	github.com/decred/dcrd/rpcclient/v5 v5.0.0
-	github.com/decred/dcrd/txscript v1.1.0
 	github.com/decred/dcrd/txscript/v2 v2.1.0
 	github.com/decred/dcrd/wire v1.3.0
 	github.com/decred/dcrwallet/rpc/jsonrpc/types v1.4.0
