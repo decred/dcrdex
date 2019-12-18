@@ -25,7 +25,7 @@ pre-published for further validation.
 |-
 | pubkey    || string || hex-encoded public account key
 |-
-| timestamp || int    || UNIX timestamp
+| timestamp || int    || UNIX timestamp (milliseconds)
 |-
 | sig       || string || hex-encoded signature of serialized registration. serialization described below
 |}
@@ -37,7 +37,7 @@ pre-published for further validation.
 |-
 | pubkey    || 33 || the user's public account key
 |-
-| timestamp || 8  || the client's UNIX timestamp
+| timestamp || 8  || the client's UNIX timestamp (milliseconds)
 |}
 
 '''DEX response'''
@@ -52,7 +52,7 @@ pre-published for further validation.
 |-
 | fee       || int    || fee (atoms)
 |-
-| timestamp || int    || UNIX timestamp
+| timestamp || int    || UNIX timestamp (milliseconds)
 |-
 | sig       || string || hex-encoded signature of the serialized response. serialization described below
 |}
@@ -66,7 +66,7 @@ pre-published for further validation.
 |-
 | client pubkey || 33 || the client's public account  key
 |-
-| timestamp  || 8  || the server's UNIX timestamp
+| timestamp  || 8  || the server's UNIX timestamp (milliseconds)
 |-
 | fee        || 8  || registration fee (atoms)
 |-
@@ -92,7 +92,7 @@ the registration process.
 |-
 | coinid    || string || hex-encoded coin ID
 |-
-| timestamp || int    || UNIX timestamp
+| timestamp || int    || UNIX timestamp (milliseconds)
 |-
 | sig       || string || hex-encoded signature of serialized fee notification. serialization described below
 |}

@@ -19,6 +19,13 @@ virtually all popular programming languages.
 Websocket messages are secured by encryption on Transport Layer
 Security (TLS) [https://tools.ietf.org/html/rfc8446 &#91;5&#93;] connections.
 
+===Timestamps===
+
+In all client-server messages that include a timestamp or duration field, the
+units of time are milliseconds unless otherwise specified. Location-independent
+timestamps are encoded as milliseconds since the UNIX epoch (Jan 01 00:00:00
+1970 UTC).
+
 ===Message Protocol===
 
 DEX messaging is JSON-formatted [https://tools.ietf.org/html/rfc8259 &#91;6&#93;].
@@ -113,7 +120,7 @@ connection is established, the client will supply their account ID and signature
 |-
 | apiver    || int    || requested API version
 |-
-| timestamp || int    || UNIX timestamp
+| timestamp || int    || UNIX timestamp (milliseconds)
 |-
 | sig       || string || hex-encoded signature of serialized connection data. serialization described below
 |}
@@ -127,7 +134,7 @@ connection is established, the client will supply their account ID and signature
 |-
 | API version || 2 || requested API version
 |-
-| timestamp || 8  || the client's UNIX timestamp
+| timestamp || 8  || the client's UNIX timestamp (milliseconds)
 |}
 
 '''Connect response'''

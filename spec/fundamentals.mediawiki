@@ -67,7 +67,7 @@ respond with its current configuration.
 {|
 ! field     !! type !! description
 |-
-| epochlen  || int   || the [[#Epochbased_Order_Matching|epoch duration]] (seconds)
+| epochlen  || int   || the [[#Epochbased_Order_Matching|epoch duration]] (milliseconds)
 |-
 | buybuffer || float || the [[orders.mediawiki/#Market_Buy_Orders|market buy buffer]]
 |-
@@ -156,17 +156,19 @@ spoofing, and other manipulative trading practices.
 
 ====Epoch Time====
 
-For a given epoch duration '''''d > 0''''' , and current UNIX epoch timestamp
-'''''t''''' (in seconds since Jan 01 00:00:00 1970 UTC), the current order
-matching epoch index, '''''i''''', and epoch range are computed as
+For a given epoch duration '''''d > 0''''' in milliseconds, and current UNIX
+epoch timestamp '''''t''''' (in milliseconds since Jan 01 00:00:00 1970 UTC),
+the current order matching epoch index, '''''i''''', and epoch range are
+computed as
 
 <!--i = t / d, i d \leq t_i < d (i + 1)-->
 [[File:images/epoch-index.png]]
 
 where '''''/''''' is integer division. For example, at the time of writing,
-'''''t = 1562008475''''' , which for '''''d = 60''''' corresponds to epoch
-number '''''i = 26033474''''' spanning '''''&#91;1562008440, 1562008500)'''''.
-This convention allows epoch times to be known without querying the server.
+'''''t = 1562008475123''''' , which for '''''d = 8000''''' (8 seconds)
+corresponds to epoch number '''''i = 195251059''''' spanning
+'''''&#91;1562008472000, 1562008480000)'''''. This convention allows epoch start
+and end times for any epoch duration to be known without querying the server.
 
 A clock synchronization protocol such as NTP will be used to ensure server and
 client clocks are synchronized within acceptable tolerances.

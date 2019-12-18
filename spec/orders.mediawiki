@@ -332,9 +332,9 @@ All order serializations have common '''prefix''' fields.
 |-
 | ordertype  || 1  || int || the type of order. limit = 1, market=2, cancel=3
 |-
-| tclient    || 8  || int || the client's UNIX timestamp
+| tclient    || 8  || int || the client's UNIX timestamp (milliseconds)
 |-
-| tserver    || 8  || int || the server's UNIX timestamp. zero for client signature
+| tserver    || 8  || int || the server's UNIX timestamp (milliseconds). zero for client signature
 |-
 | epochidx   || 8  || int || the epoch index assigned by the server. zero for client signature
 |-
@@ -364,7 +364,7 @@ the timestamp.
 |-
 | orderid   || string || the order ID
 |-
-| tserver || int  || the server's UNIX timestamp
+| tserver || int  || the server's UNIX timestamp (milliseconds)
 |}
 
 The client should use the server's timestamp to create a serialized order and
@@ -434,7 +434,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | sig       || string || server hex-encoded signature of the serialized order, after adding the DEX timestamp
 |-
-| server time || int  || the server's UNIX timestamp
+| server time || int  || the server's UNIX timestamp (milliseconds)
 |}
 
 ===Market Order===
@@ -490,7 +490,7 @@ the epoch match cycle) is left unfilled.
 |-
 | sig       || string || server hex-encoded signature of the order by server, after adding the DEX timestamp
 |-
-| server time || int  || the server's UNIX timestamp
+| server time || int  || the server's UNIX timestamp (milliseconds)
 |}
 
 ====Market Buy Orders====
@@ -569,7 +569,7 @@ This is by design and discourages certain types of spoofing.
 |-
 | sig       || string || server hex-encoded signature of the serialize order data, after adding the DEX timestamp
 |-
-| server time || int  || the server's UNIX timestamp
+| server time || int  || the server's UNIX timestamp (milliseconds)
 |}
 
 ===Preimage Reveal===
@@ -645,7 +645,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | rate      || int    || the matched price rate. [[#Rate_Encoding|message-rate encoding]]
 |-
-| timestamp || int    || server's UNIX timestamp
+| timestamp || int    || server's UNIX timestamp (milliseconds)
 |-
 | address   || string || the counterparty's receiving address
 |-
@@ -665,7 +665,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | rate       || 8  || the matched price rate. [[#Rate_Encoding|message-rate encoding]]
 |-
-| timestamp  || 8  || server's UNIX timestamp
+| timestamp  || 8  || server's UNIX timestamp (milliseconds)
 |-
 | address    || varies || UTF-8 encoded receiving address for the match
 |}
@@ -688,7 +688,7 @@ relay to the matching party.
 |-
 | coinid    || string || hex-encoded coin ID
 |-
-| timestamp  || int    || client's UNIX timestamp
+| timestamp  || int    || client's UNIX timestamp (milliseconds)
 |-
 | contract   || string || hex-encoded swap redeem script
 |-
@@ -706,7 +706,7 @@ relay to the matching party.
 |-
 | coin ID    || asset-dependent  || the coin ID
 |-
-| timestamp  || 8  || the client's UNIX timestamp
+| timestamp  || 8  || the client's UNIX timestamp (milliseconds)
 |-
 | contract   || asset-dependent || swap redeem script
 |}
@@ -730,7 +730,7 @@ contract and issue their redemption.
 |-
 | matchid   || string || the match ID
 |-
-| timestamp || int  || server's UNIX timestamp
+| timestamp || int  || server's UNIX timestamp (milliseconds)
 |-
 | contract  || string || hex-encoded swap redeem script
 |-
@@ -746,7 +746,7 @@ contract and issue their redemption.
 |-
 | matchid    || 32  || the match ID
 |-
-| timestamp  || 8  || server's UNIX timestamp
+| timestamp  || 8  || server's UNIX timestamp (milliseconds)
 |-
 | contract   || asset-dependent || swap redeem script
 |}
@@ -767,7 +767,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | coinid    || string || hex-encoded coin ID
 |-
-| timestamp  || int    || client's UNIX timestamp
+| timestamp  || int    || client's UNIX timestamp (milliseconds)
 |-
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
@@ -782,7 +782,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | coin ID    || asset-dependent  || the coin ID
 |-
-| timestamp  || 8  || the client's UNIX timestamp
+| timestamp  || 8  || the client's UNIX timestamp (milliseconds)
 |}
 
 The DEX responds with an acknowledgement.
@@ -801,7 +801,7 @@ The DEX informs the taker when the maker has redeemed.
 |-
 | coinid     || string || hex-encoded coin ID
 |-
-| timestamp  || int    || server's UNIX timestamp
+| timestamp  || int    || server's UNIX timestamp (milliseconds)
 |-
 | sig        || string || DEX's signature of the serialized notification. serialization described below
 |}
@@ -817,7 +817,7 @@ The DEX informs the taker when the maker has redeemed.
 |-
 | coin ID    || asset-dependent  || the coin ID
 |-
-| timestamp  || 8  || server's UNIX timestamp
+| timestamp  || 8  || server's UNIX timestamp (milliseconds)
 |}
 
 The client will respond with an acknowledgement.

@@ -14,7 +14,7 @@ possible.
 {|
 ! variable !! relevant section !! units || default
 |-
-| epoch&nbsp;duration || [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]] || seconds || 60
+| epoch&nbsp;duration || [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]] || milliseconds || 60000
 |-
 | market&nbsp;buy&nbsp;buffer || [[orders.mediawiki/#Market_Buy_Orders|Market Buy Orders]] || unitless ratio || 1.25
 |-
