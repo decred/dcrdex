@@ -1,0 +1,3 @@
+==Data API==
+
+Trade history will be made available to both websocket and HTTP clients.

@@ -1,0 +1,15 @@
+==References==
+
+&#91;1&#93; Teall, John L., Financial Trading and Investing, p. 336 (2013)
+
+&#91;2&#93; [https://www.sec.gov/comments/sr-nysearca-2019-01/srnysearca201901-5164833-183434.pdf Bitwise Presentation to the U.S. Securities and Exchange Commission] (2019)
+
+&#91;3&#93; [https://github.com/decred/atomicswap Atomic Swaps]
+
+&#91;4&#93; [https://tools.ietf.org/html/rfc6455 The WebSocket Protocol]
+
+&#91;5&#93; [https://tools.ietf.org/html/rfc8446 Transport Layer Security 1.3]
+
+&#91;6&#93; [https://tools.ietf.org/html/rfc8259 JSON]
+
+&#91;7&#93; [https://github.com/satoshilabs/slips/blob/master/slip-0044.md BIP-0044 Registered Coins]
