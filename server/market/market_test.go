@@ -264,7 +264,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	if err == nil {
 		t.Error("order submitted to stopped market")
 	}
-	if err != ErrMarketNotRunning {
+	if !errors.Is(err, ErrMarketNotRunning) {
 		t.Errorf(`expected ErrMarketNotRunning ("%v"), got "%v"`, ErrMarketNotRunning, err)
 	}
 
@@ -299,7 +299,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	err = mkt.SubmitOrder(&oRecord)
 	if err == nil {
 		t.Errorf("A duplicate order was processed, but it should not have been.")
-	} else if err != ErrDuplicateOrder {
+	} else if !errors.Is(err, ErrDuplicateOrder) {
 		t.Errorf(`expected ErrDuplicateOrder ("%v"), got "%v"`, ErrDuplicateOrder, err)
 	}
 
@@ -310,7 +310,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	err = mkt.SubmitOrder(&oRecord)
 	if err == nil {
 		t.Errorf("An invalid order was processed, but it should not have been.")
-	} else if err != ErrInvalidOrder {
+	} else if !errors.Is(err, ErrInvalidOrder) {
 		t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
 	}
 
@@ -320,7 +320,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	lo.Quantity *= 2
 	oRecord.order = lo
 	storage.failOnEpochOrder(lo)
-	if err = mkt.SubmitOrder(&oRecord); err != ErrInternalServer {
+	if err = mkt.SubmitOrder(&oRecord); !errors.Is(err, ErrInternalServer) {
 		t.Errorf(`expected ErrInternalServer ("%v"), got "%v"`, ErrInternalServer, err)
 	}
 }

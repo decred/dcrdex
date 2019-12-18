@@ -1,5 +1,7 @@
 package db
 
+import "errors"
+
 // ArchiveError is the error type used by archivist for certain recognized
 // errors. Not all returned errors will be of this type.
 type ArchiveError struct {
@@ -40,11 +42,13 @@ func (ae ArchiveError) Error() string {
 // SameErrorTypes checks for error equality or ArchiveError.Code equality if
 // both errors are of type ArchiveError.
 func SameErrorTypes(errA, errB error) bool {
-	if errA == errB {
+	if errors.Is(errA, errB) {
 		return true
 	}
-	if arA, ok := errA.(ArchiveError); ok {
-		if arB, ok := errB.(ArchiveError); ok && arA.Code == arB.Code {
+	var arA ArchiveError
+	if errors.As(errA, &arA) {
+		var arB ArchiveError
+		if errors.As(errB, &arB) && arA.Code == arB.Code {
 			return true
 		}
 	}
@@ -54,27 +58,39 @@ func SameErrorTypes(errA, errB error) bool {
 // IsErrOrderUnknown returns true if the error is of type ArchiveError and has
 // code ErrUnknownOrder.
 func IsErrOrderUnknown(err error) bool {
-	errA, ok := err.(ArchiveError)
-	return ok && errA.Code == ErrUnknownOrder
+	var errA ArchiveError
+	if errors.As(err, &errA) {
+		return errA.Code == ErrUnknownOrder
+	}
+	return false
 }
 
 // IsErrMatchUnknown returns true if the error is of type ArchiveError and has
 // code ErrUnknownMatch.
 func IsErrMatchUnknown(err error) bool {
-	errA, ok := err.(ArchiveError)
-	return ok && errA.Code == ErrUnknownMatch
+	var errA ArchiveError
+	if errors.As(err, &errA) {
+		return errA.Code == ErrUnknownMatch
+	}
+	return false
 }
 
 // IsErrMatchUnsupported returns true if the error is of type ArchiveError and
 // has code ErrUnsupportedMarket.
 func IsErrMatchUnsupported(err error) bool {
-	errA, ok := err.(ArchiveError)
-	return ok && errA.Code == ErrUnsupportedMarket
+	var errA ArchiveError
+	if errors.As(err, &errA) {
+		return errA.Code == ErrUnsupportedMarket
+	}
+	return false
 }
 
 // IsErrInvalidOrder returns true if the error is of type ArchiveError and has
 // code ErrInvalidOrder.
 func IsErrInvalidOrder(err error) bool {
-	errA, ok := err.(ArchiveError)
-	return ok && errA.Code == ErrInvalidOrder
+	var errA ArchiveError
+	if errors.As(err, &errA) {
+		return errA.Code == ErrInvalidOrder
+	}
+	return false
 }

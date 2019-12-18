@@ -6,6 +6,7 @@ package comms
 import (
 	"crypto/elliptic"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -216,7 +217,8 @@ func (s *Server) Start() {
 		}
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			if _, ok := err.(websocket.HandshakeError); !ok {
+			var hsErr websocket.HandshakeError
+			if errors.As(err, &hsErr) {
 				log.Errorf("Unexpected websocket error: %v",
 					err)
 			}
@@ -241,7 +243,7 @@ func (s *Server) Start() {
 		go func(listener net.Listener) {
 			log.Infof("RPC server listening on %s", listener.Addr())
 			err := httpServer.Serve(listener)
-			if err != http.ErrServerClosed {
+			if !errors.Is(err, http.ErrServerClosed) {
 				log.Warnf("unexpected (http.Server).Serve error: %v", err)
 			}
 			log.Tracef("RPC listener done for %s", listener.Addr())

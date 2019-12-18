@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/dex"
@@ -89,8 +90,9 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, or
 	// - try to load from orders table, which includes market and limit orders
 	// - if found, coerce into the correct order type and return
 	// - if not found, try loading a cancel order with this oid
+	var errA db.ArchiveError
 	ord, status, err := loadTrade(a.db, a.dbName, marketSchema, oid)
-	if errA, ok := err.(db.ArchiveError); ok {
+	if errors.As(err, &errA) {
 		if errA.Code != db.ErrUnknownOrder {
 			return nil, order.OrderStatusUnknown, err
 		}
@@ -698,14 +700,14 @@ func userOrders(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, a
 	// Active orders.
 	fullTable := fullOrderTableName(dbName, marketSchema, false)
 	orders, statuses, err := userOrdersFromTable(ctx, dbe, fullTable, aid)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, err
 	}
 
 	// Archived Orders.
 	fullTable = fullOrderTableName(dbName, marketSchema, true)
 	ordersArchived, statusesArchived, err := userOrdersFromTable(ctx, dbe, fullTable, aid)
-	if err != nil && err != sql.ErrNoRows {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, err
 	}
 

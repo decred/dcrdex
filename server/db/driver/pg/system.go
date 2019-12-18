@@ -5,6 +5,7 @@ package pg
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -176,7 +177,7 @@ func dropTable(db sqlExecutor, tableName string) error {
 // existsIndex checks if the specified index name exists.
 func existsIndex(db *sql.DB, indexName string) (exists bool, err error) {
 	err = db.QueryRow(internal.IndexExists, indexName, publicSchema).Scan(&exists)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
 	return
