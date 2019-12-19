@@ -17,9 +17,11 @@ type accountsViewer struct {
 	form  *tview.Grid
 }
 
+// newAccountsView is the constructor for an accountsViewer.
 func newAccountsView() *accountsViewer {
 	// A journal for logging account-related messages.
 	acctsJournal := newJournal("Accounts Journal", nil)
+	// acctsLog is global.
 	acctsLog = NewLogger("ACCTS", acctsJournal.Write)
 	formBox := tview.NewGrid()
 	formBox.SetBackgroundColor(colorBlack)
@@ -106,12 +108,16 @@ func newAccountsView() *accountsViewer {
 	return av
 }
 
+// AddFocus is part of the focuser interface. Since the accountsViewer supports
+// sub-focus, this method simply passes focus to the focus chain and sets the
+// view's border color.
 func (v *accountsViewer) AddFocus() {
 	// Pass control to the focusChain, but keep the border color on the view.
 	v.chain.focus()
 	v.SetBorderColor(focusColor)
 }
 
+// RemoveFocus is part of the focuser interface.
 func (v *accountsViewer) RemoveFocus() {
 	v.SetBorderColor(blurColor)
 }

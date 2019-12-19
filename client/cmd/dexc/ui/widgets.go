@@ -25,7 +25,7 @@ var (
 	// The core DEX client application. Used by both the RPC server and the
 	// web server.
 	clientCore *core.Core
-	// These are the main view widgets and loggers attached to their journals.
+	// These are the main view widgets and the loggers attached to their journals.
 	screen            *Screen
 	mainMenu          *chooser
 	appJournal        *journal
@@ -64,7 +64,8 @@ func Run(ctx context.Context) {
 }
 
 // A focuser is satisfied by anything that embeds *tview.Box and implements
-// AddFocus and RemoveFocus methods. The two additional methods
+// AddFocus and RemoveFocus methods. The two additional methods are not from
+// tview, and are used to help with focus control and chaining.
 type focuser interface {
 	tview.Primitive
 	SetInputCapture(capture func(event *tcell.EventKey) *tcell.EventKey) *tview.Box
@@ -151,14 +152,18 @@ func createWidgets() {
 	mainMenu = newMainMenu()
 }
 
+// handleAppLogKey filters key presses when the application log view has focus.
 func handleAppLogKey(e *tcell.EventKey) *tcell.EventKey {
 	return handleRightBox(e)
 }
 
+// handleNotificationLog filters key presses when the notification log view has
+// focus.
 func handleNotificationLog(e *tcell.EventKey) *tcell.EventKey {
 	return handleRightBox(e)
 }
 
+// handleRightBox provides a base set of key events for simple views.
 func handleRightBox(e *tcell.EventKey) *tcell.EventKey {
 	switch e.Key() {
 	case tcell.KeyEscape:
@@ -188,6 +193,7 @@ var (
 	rpcEntryIdx  int
 )
 
+// newMainMenu is a constructor for main menu, which is just a *chooser.
 func newMainMenu() *chooser {
 	c := newChooser("", handleMainMenuKey)
 	c.addEntry(entryAppLog, func() { setRightBox(appJournal) }).
@@ -207,6 +213,7 @@ func newMainMenu() *chooser {
 	return c
 }
 
+// handleMainMenuKey processes key presses from the main menu.
 func handleMainMenuKey(e *tcell.EventKey) *tcell.EventKey {
 	entry, _ := mainMenu.GetItemText(mainMenu.GetCurrentItem())
 	match := strings.HasPrefix
@@ -235,6 +242,8 @@ func handleMainMenuKey(e *tcell.EventKey) *tcell.EventKey {
 	return e
 }
 
+// setRightBox set the currently displayed view, which is everything but the
+// main menu.
 func setRightBox(box focuser) {
 	screen.RemoveItem(screen.right)
 	screen.right = box
@@ -242,12 +251,15 @@ func setRightBox(box focuser) {
 	setFocus(box)
 }
 
+// setFocus adds focus to the focuser and removes focus from the last focuser.
 func setFocus(wgt focuser) {
 	screen.focused.RemoveFocus()
 	screen.focused = wgt
 	wgt.AddFocus()
 }
 
+// setWebLabelOn sets whether the main menu entry for the web server is
+// appended with an indicator to show that the server is running.
 func setWebLabelOn(on bool) {
 	if on {
 		mainMenu.SetItemText(webEntryIdx, "Web Server (on)", "")
@@ -256,6 +268,8 @@ func setWebLabelOn(on bool) {
 	mainMenu.SetItemText(webEntryIdx, "Web Server", "")
 }
 
+// setWebLabelOn sets whether the main menu entry for the RPC server is
+// appended with an indicator to show that the server is running.
 func setRPCLabelOn(on bool) {
 	if on {
 		mainMenu.SetItemText(rpcEntryIdx, "RPC Server (on)", "")
@@ -264,6 +278,8 @@ func setRPCLabelOn(on bool) {
 	mainMenu.SetItemText(rpcEntryIdx, "RPC Server", "")
 }
 
+// setNotificationCount sets the notification count next to the notification
+// entry in the main menu.
 func setNotificationCount(n int) {
 	suffix := fmt.Sprintf(" [#fc8c03](%d)[white]", n)
 	if n == 0 {
@@ -279,6 +295,8 @@ type chooser struct {
 	*tview.List
 }
 
+// newChooser is a constructor for a *chooser. The provided key filter
+// will be applied on key presses.
 func newChooser(title string, keyFunc inputCapture) *chooser {
 	list := tview.NewList()
 	list.SetBorder(true).
@@ -292,24 +310,33 @@ func newChooser(title string, keyFunc inputCapture) *chooser {
 	}
 }
 
+// addEntry adds the entry to the list, with a callback function to be invoked
+// when the entry is chosen.
 func (c *chooser) addEntry(name string, f func()) *chooser {
 	c.AddItem(name, "", 0, f)
 	return c
 }
 
+// AddFocus is part of the focuser interface, and will be called when this
+// element receives focus.
 func (c *chooser) AddFocus() {
 	c.SetBorderColor(focusColor)
 	app.SetFocus(c)
 }
 
+// RemoveFocus is part of the focuser interface, and will be called when this
+// element loses focus.
 func (c *chooser) RemoveFocus() {
 	c.SetBorderColor(blurColor)
 }
 
+// A simple button is a TextView that is used as a button.
 type simpleButton struct {
 	*tview.TextView
 }
 
+// newSimpleButton is a constructor for a *simpleButton. The provided callback
+// function will be invoked when the button is "clicked".
 func newSimpleButton(lbl string, f func()) *simpleButton {
 	bttn := tview.NewTextView().
 		SetText(lbl).
@@ -327,11 +354,15 @@ func newSimpleButton(lbl string, f func()) *simpleButton {
 	return &simpleButton{TextView: bttn}
 }
 
+// AddFocus is part of the focuser interface, and will be called when this
+// element receives focus.
 func (b *simpleButton) AddFocus() {
 	b.SetBorderColor(focusColor)
 	app.SetFocus(b)
 }
 
+// RemoveFocus is part of the focuser interface, and will be called when this
+// element loses focus.
 func (b *simpleButton) RemoveFocus() {
 	b.SetBorderColor(blurColor)
 }
@@ -346,16 +377,17 @@ type focusChain struct {
 	curIdx int
 }
 
+// newFocusChain is a constructor for a *focusChain.
 func newFocusChain(parent focuser, prims ...focuser) *focusChain {
 	c := &focusChain{
 		parent: parent,
 		chain:  prims,
 	}
-	// DRAFT NOTE: This is a little sloppy. Since the wrapped handler is being
+	// TO DO: This is a little sloppy. Since the wrapped handler is being
 	// re-assigned with SetInputCapture, this means an element should only be
-	// added to a single focus chain for its lifetime. Ideally, we could
-	// re-assign the element to a new focus chain if a new element is added or
-	// an element is removed.
+	// added to a single focus chain for its lifetime. Ideally, we could re-assign
+	// the element to a new focus chain if a new element is added or an element is
+	// removed.
 	for _, prim := range prims {
 		ogCapture := prim.GetInputCapture()
 		prim.SetInputCapture(func(e *tcell.EventKey) *tcell.EventKey {

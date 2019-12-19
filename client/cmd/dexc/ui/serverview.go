@@ -118,6 +118,8 @@ func newServerView(tag, addr string, runFunc func(context.Context, string, slog.
 	}
 }
 
+// AddFocus is part of the focuser interface, and will be called when this
+// element receives focus.
 func (w *serverView) AddFocus() {
 	w.SetBorderColor(focusColor)
 	w.form.SetBorderColor(focusColor)
@@ -125,6 +127,8 @@ func (w *serverView) AddFocus() {
 	app.SetFocus(w.form)
 }
 
+// RemoveFocus is part of the focuser interface, and will be called when this
+// element loses focus.
 func (w *serverView) RemoveFocus() {
 	w.SetBorderColor(blurColor)
 }

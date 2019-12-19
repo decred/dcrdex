@@ -112,6 +112,8 @@ func (c *depthChart) refresh() {
 	c.runeRows = runeRows
 }
 
+// Focus is to the tview.Box Focus method, wrapped here to force a redraw of
+// the chart.
 func (c *depthChart) Focus(delegate func(p tview.Primitive)) {
 	c.focus = true
 	// Have to increment the seqID on focus to force redraw.
@@ -122,6 +124,7 @@ func (c *depthChart) Focus(delegate func(p tview.Primitive)) {
 	c.Box.Focus(delegate)
 }
 
+// Blur is to the tview.Box Focus method. Used to set the focus field.
 func (c *depthChart) Blur() {
 	c.focus = false
 	c.Box.Blur()
@@ -152,7 +155,7 @@ const (
 	// shadedBlock      rune = '\u2593'
 )
 
-// An edge point is a character and it's in
+// An edge point is a character and it's height on the grid..
 type edgePoint struct {
 	y  int
 	ch rune
@@ -202,8 +205,8 @@ func interpolate(pts []depthPoint, width, height int) ([]edgePoint, error) {
 	return roughEdge(intersections)
 }
 
-// Rough edge translates the intersections into 1 of 9 characters of appropriate
-// character height.
+// Rough edge translates the intersections into edgePoints with 1 of 9
+// characters of appropriate character height.
 func roughEdge(intersections []float64) ([]edgePoint, error) {
 	edge := make([]edgePoint, 0, len(intersections)-1)
 	for i := 0; i < len(intersections)-1; i++ {

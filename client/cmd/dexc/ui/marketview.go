@@ -20,6 +20,7 @@ type marketViewer struct {
 	chain  *focusChain
 }
 
+// newMarketView is the constructor for a *marketViewer.
 func newMarketView() *marketViewer {
 	marketJournal := newJournal("Market Journal", nil)
 	marketLog = NewLogger("MRKT", marketJournal.Write)
@@ -35,6 +36,7 @@ func newMarketView() *marketViewer {
 	// the marketWindow is the main window on the market view.
 	marketWindow := newMarketWindow()
 
+	// The marketColumn holds the marketWindow and the amrketJournal.
 	marketColumn := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(marketWindow, 0, 3, false).
@@ -54,6 +56,8 @@ func newMarketView() *marketViewer {
 	return mv
 }
 
+// AddFocus is part of the focuser interface, and will be called when this
+// element receives focus.
 func (v *marketViewer) AddFocus() {
 	// Pass control to the focusChain when the view receives focus.
 	v.chain.focus()
@@ -61,6 +65,8 @@ func (v *marketViewer) AddFocus() {
 	v.SetBorderColor(focusColor)
 }
 
+// RemoveFocus is part of the focuser interface, and will be called when this
+// element loses focus.
 func (v *marketViewer) RemoveFocus() {
 	v.window.chart.Blur()
 	v.SetBorderColor(blurColor)
@@ -72,6 +78,7 @@ type marketWindow struct {
 	chart *depthChart
 }
 
+// newMarketWindow is the constructor for a *marketWindow.
 func newMarketWindow() *marketWindow {
 	chart := newDepthChart()
 	chart.SetBorderPadding(1, 1, 1, 1)
@@ -87,10 +94,14 @@ func newMarketWindow() *marketWindow {
 	}
 }
 
+// AddFocus is part of the focuser interface, and will be called when this
+// element receives focus.
 func (w *marketWindow) AddFocus() {
 	w.SetBorderColor(focusColor)
 }
 
+// RemoveFocus is part of the focuser interface, and will be called when this
+// element loses focus.
 func (w *marketWindow) RemoveFocus() {
 	w.SetBorderColor(blurColor)
 }
