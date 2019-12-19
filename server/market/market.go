@@ -350,7 +350,7 @@ func (m *Market) runEpochs(nextEpochIdx int64) {
 			}
 
 			// The order's server time stamp.
-			sTime := time.Now().Round(time.Millisecond).UTC()
+			sTime := time.Now().Truncate(time.Millisecond).UTC()
 
 			// Push the order into the next epoch if receiving and stamping it
 			// took just a little too long.

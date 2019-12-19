@@ -285,7 +285,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	}
 	// Create the market order
 	clientTime := order.UnixTimeMilli(int64(market.ClientTime))
-	serverTime := time.Now().Round(time.Millisecond).UTC()
+	serverTime := time.Now().Truncate(time.Millisecond).UTC()
 	mo := &order.MarketOrder{
 		Prefix: order.Prefix{
 			AccountID:  user,
@@ -356,7 +356,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 
 	// Create the cancel order
 	clientTime := order.UnixTimeMilli(int64(cancel.ClientTime))
-	serverTime := time.Now().Round(time.Millisecond).UTC()
+	serverTime := time.Now().Truncate(time.Millisecond).UTC()
 	co := &order.CancelOrder{
 		Prefix: order.Prefix{
 			AccountID:  user,

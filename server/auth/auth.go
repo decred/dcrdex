@@ -17,7 +17,7 @@ import (
 )
 
 func unixMsNow() time.Time {
-	return time.Now().Round(time.Millisecond).UTC()
+	return time.Now().Truncate(time.Millisecond).UTC()
 }
 
 // reqExpiration is how long a response handler will be saved before it is
