@@ -36,7 +36,7 @@ var (
 )
 
 func unixMsNow() time.Time {
-	return time.Now().Round(time.Millisecond).UTC()
+	return time.Now().Truncate(time.Millisecond).UTC()
 }
 
 // The AuthManager handles client-related actions, including authorization and
@@ -265,9 +265,7 @@ func (s *Swapper) start() {
 	bcastTicker := time.NewTimer(s.bTimeout)
 	minTimeout := s.bTimeout / 10
 	setTimeout := func(block *blockNotification) {
-		// The extra millisecond resolves some issues with timer innacuracy that
-		// were affecting unit tests.
-		timeTil := time.Until(block.time.Add(s.bTimeout + time.Millisecond))
+		timeTil := time.Until(block.time.Add(s.bTimeout))
 		if timeTil < minTimeout {
 			timeTil = minTimeout
 		}
