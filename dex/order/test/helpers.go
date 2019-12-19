@@ -206,14 +206,14 @@ func ComparePrefix(p1, p2 *order.Prefix) error {
 
 // CompareTrade compares the MarketOrders field-by-field and returns an error if
 // a mismatch is found.
-func CompareTrade(t1, t2 *order.MarketOrder) error {
+func CompareTrade(t1, t2 *order.Trade) error {
 	if len(t1.Coins) != len(t2.Coins) {
 		return fmt.Errorf("coin length mismatch. %d != %d", len(t1.Coins), len(t2.Coins))
 	}
 	for i, coin := range t2.Coins {
 		reCoin := t1.Coins[i]
 		if !bytes.Equal(reCoin, coin) {
-			return fmt.Errorf("coins %d not equal. %x != %x", i, coin, t1)
+			return fmt.Errorf("coins %d not equal. %x != %x", i, coin, reCoin)
 		}
 	}
 	if t1.Sell != t2.Sell {
@@ -287,7 +287,7 @@ func MustComparePrefix(t testKiller, p1, p2 *order.Prefix) {
 
 // MustCompareTrade compares the MarketOrders field-by-field and calls the
 // Fatalf method on the supplied testKiller if a mismatch is encountered.
-func MustCompareTrade(t testKiller, t1, t2 *order.MarketOrder) {
+func MustCompareTrade(t testKiller, t1, t2 *order.Trade) {
 	err := CompareTrade(t1, t2)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -306,8 +306,8 @@ func MustCompareUserMatch(t testKiller, m1, m2 *order.UserMatch) {
 // MustCompareUserMatch compares the LimitOrders field-by-field and calls the
 // Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareLimitOrders(t testKiller, l1, l2 *order.LimitOrder) {
-	MustComparePrefix(t, &l1.Prefix, &l2.Prefix)
-	MustCompareTrade(t, &l1.MarketOrder, &l2.MarketOrder)
+	MustComparePrefix(t, &l1.P, &l2.P)
+	MustCompareTrade(t, &l1.T, &l2.T)
 	if l1.Rate != l2.Rate {
 		t.Fatalf("rate mismatch. %d != %d", l1.Rate, l2.Rate)
 	}
@@ -319,14 +319,14 @@ func MustCompareLimitOrders(t testKiller, l1, l2 *order.LimitOrder) {
 // MustCompareMarketOrders compares the MarketOrders field-by-field and calls
 // the Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareMarketOrders(t testKiller, m1, m2 *order.MarketOrder) {
-	MustComparePrefix(t, &m1.Prefix, &m2.Prefix)
-	MustCompareTrade(t, m1, m2)
+	MustComparePrefix(t, &m1.P, &m2.P)
+	MustCompareTrade(t, &m1.T, &m2.T)
 }
 
 // MustCompareCancelOrders compares the CancelOrders field-by-field and calls
 // the Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareCancelOrders(t testKiller, c1, c2 *order.CancelOrder) {
-	MustComparePrefix(t, &c1.Prefix, &c2.Prefix)
+	MustComparePrefix(t, &c1.P, &c2.P)
 	if !bytes.Equal(c1.TargetOrderID[:], c2.TargetOrderID[:]) {
 		t.Fatalf("wrong target order ID. wanted %s, got %s", c1.TargetOrderID, c2.TargetOrderID)
 	}

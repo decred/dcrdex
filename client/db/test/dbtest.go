@@ -139,8 +139,8 @@ func MustCompareMatchAuth(t testKiller, a1, a2 *db.MatchAuth) {
 	}
 }
 
-// Ensure the two MustCompareMatchProof are identical, calling the Fatalf method
-// of the  testKiller if not.
+// Ensure the two MatchProof are identical, calling the Fatalf method of the
+// testKiller if not.
 func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 	if !bytes.Equal(m1.CounterScript, m2.CounterScript) {
 		t.Fatalf("CounterScript mismatch. %x != %x", m1.CounterScript, m2.CounterScript)
@@ -166,8 +166,8 @@ func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 	MustCompareMatchAuth(t, &m1.Auth, &m2.Auth)
 }
 
-// Ensure the two MustCompareAccountInfo are identical, calling the Fatalf
-// method of the  testKiller if not.
+// Ensure the two AccountInfo are identical, calling the Fatalf method of the
+// testKiller if not.
 func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 	if a1.URL != a2.URL {
 		t.Fatalf("URL mismatch. %s != %s", a1.URL, a2.URL)
@@ -184,6 +184,8 @@ func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 	}
 }
 
+// Ensure the two OrderProof are identical, calling the Fatalf method of the
+// testKiller if not.
 func MustCompareOrderProof(t testKiller, p1, p2 *db.OrderProof) {
 	if !bytes.Equal(p1.DEXSig, p2.DEXSig) {
 		t.Fatalf("DEXSig mismatch. %x != %x", p1.DEXSig, p2.DEXSig)

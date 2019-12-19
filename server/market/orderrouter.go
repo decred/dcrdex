@@ -11,6 +11,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -202,7 +203,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			BaseAsset:  limit.Base,
 			QuoteAsset: limit.Quote,
 			OrderType:  order.LimitOrderType,
-			ClientTime: order.UnixTimeMilli(int64(limit.ClientTime)),
+			ClientTime: encode.UnixTimeMilli(int64(limit.ClientTime)),
 			//ServerTime set in epoch queue processing pipeline.
 		},
 		T: order.Trade{
@@ -284,7 +285,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
 	}
 	// Create the market order
-	clientTime := order.UnixTimeMilli(int64(market.ClientTime))
+	clientTime := encode.UnixTimeMilli(int64(market.ClientTime))
 	serverTime := time.Now().Truncate(time.Millisecond).UTC()
 	mo := &order.MarketOrder{
 		P: order.Prefix{
@@ -357,7 +358,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	}
 
 	// Create the cancel order
-	clientTime := order.UnixTimeMilli(int64(cancel.ClientTime))
+	clientTime := encode.UnixTimeMilli(int64(cancel.ClientTime))
 	serverTime := time.Now().Truncate(time.Millisecond).UTC()
 	co := &order.CancelOrder{
 		P: order.Prefix{
@@ -445,7 +446,7 @@ func (r *OrderRouter) extractMarketDetails(prefix *msgjson.Prefix, trade *msgjso
 
 // checkTimes validates the timestamps in an order prefix.
 func checkTimes(prefix *msgjson.Prefix) *msgjson.Error {
-	offset := order.UnixMilli(time.Now()) - int64(prefix.ClientTime)
+	offset := encode.UnixMilli(time.Now()) - int64(prefix.ClientTime)
 	if offset < 0 {
 		offset *= -1
 	}

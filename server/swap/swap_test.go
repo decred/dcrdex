@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -757,8 +758,8 @@ func makeLimitOrder(qty, rate uint64, user *tUser, makerSell bool) *order.LimitO
 			BaseAsset:  ABCID,
 			QuoteAsset: XYZID,
 			OrderType:  order.LimitOrderType,
-			ClientTime: order.UnixTimeMilli(1566497654000),
-			ServerTime: order.UnixTimeMilli(1566497655000),
+			ClientTime: encode.UnixTimeMilli(1566497654000),
+			ServerTime: encode.UnixTimeMilli(1566497655000),
 		},
 		T: order.Trade{
 			Sell:     makerSell,
@@ -776,8 +777,8 @@ func makeMarketOrder(qty uint64, user *tUser, makerSell bool) *order.MarketOrder
 			BaseAsset:  ABCID,
 			QuoteAsset: XYZID,
 			OrderType:  order.LimitOrderType,
-			ClientTime: order.UnixTimeMilli(1566497654000),
-			ServerTime: order.UnixTimeMilli(1566497655000),
+			ClientTime: encode.UnixTimeMilli(1566497654000),
+			ServerTime: encode.UnixTimeMilli(1566497655000),
 		},
 		T: order.Trade{
 			Sell:     makerSell,
@@ -970,7 +971,7 @@ func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
 		MatchID: dirtyEncode(matchInfo.matchID),
 		// We control what the backend returns, so the txid doesn't matter right now.
 		CoinID:   coinID,
-		Time:     uint64(order.UnixMilli(unixMsNow())),
+		Time:     encode.UnixMilliU(unixMsNow()),
 		Contract: dirtyEncode(contract),
 	})
 
@@ -1005,7 +1006,7 @@ func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {
 		OrderID: dirtyEncode(oid),
 		MatchID: dirtyEncode(matchInfo.matchID),
 		CoinID:  coinID,
-		Time:    uint64(order.UnixMilli(unixMsNow())),
+		Time:    encode.UnixMilliU(unixMsNow()),
 	})
 	return &tRedeem{
 		req:  req,

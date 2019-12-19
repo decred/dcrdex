@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/comms"
@@ -381,7 +382,7 @@ func limitOrderToMsgOrder(o *order.LimitOrder, mkt string) *msgjson.BookOrderNot
 			Quantity: o.Remaining(),
 			Rate:     o.Rate,
 			TiF:      tif,
-			Time:     uint64(order.UnixMilli(o.ServerTime)),
+			Time:     encode.UnixMilliU(o.ServerTime),
 		},
 		OrderNote: msgjson.OrderNote{
 			MarketID: mkt,
@@ -406,7 +407,7 @@ func marketOrderToMsgOrder(o *order.MarketOrder, mkt string) *msgjson.BookOrderN
 		TradeNote: msgjson.TradeNote{
 			Side:     oSide,
 			Quantity: o.Remaining(),
-			Time:     uint64(order.UnixMilli(o.ServerTime)),
+			Time:     encode.UnixMilliU(o.ServerTime),
 		},
 	}
 }

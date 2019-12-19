@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -171,7 +172,7 @@ func tNewConnect(user *tUser) *msgjson.Connect {
 	return &msgjson.Connect{
 		AccountID:  user.acctID[:],
 		APIVersion: 0,
-		Time:       uint64(order.UnixMilli(unixMsNow())),
+		Time:       encode.UnixMilliU(unixMsNow()),
 	}
 }
 
@@ -811,7 +812,7 @@ func TestHandleRegister(t *testing.T) {
 	newReg := func() *msgjson.Register {
 		reg := &msgjson.Register{
 			PubKey: user.privKey.PubKey().SerializeCompressed(),
-			Time:   uint64(order.UnixMilli(unixMsNow())),
+			Time:   encode.UnixMilliU(unixMsNow()),
 		}
 		sigMsg, _ := reg.Serialize()
 		sig, _ := user.privKey.Sign(sigMsg)
@@ -905,7 +906,7 @@ func TestHandleNotifyFee(t *testing.T) {
 		notify := &msgjson.NotifyFee{
 			AccountID: user.acctID[:],
 			CoinID:    coinid,
-			Time:      uint64(order.UnixMilli(unixMsNow())),
+			Time:      encode.UnixMilliU(unixMsNow()),
 		}
 		sigMsg, _ := notify.Serialize()
 		sig, _ := user.privKey.Sign(sigMsg)

@@ -103,6 +103,8 @@ github.com/decred/dcrwallet/rpc/jsonrpc/types v1.4.0/go.mod h1:Xvekb43GtfMiRbyIY
 github.com/decred/dcrwallet/validate v1.1.1/go.mod h1:T++tlVcCOh2oSrEq4r5CKCvmftaQdq9uZwO7jSNYZaw=
 github.com/decred/dcrwallet/wallet/v3 v3.1.0 h1:qPbkX7ut3nosCRxM21KiPOpx51OuczlwVthtm0ZpkWw=
 github.com/decred/dcrwallet/wallet/v3 v3.1.0/go.mod h1:SJ+++gtMdcUeqMv6iIO3gVGlGJfM+4iY2QSaAakhbUw=
+github.com/decred/dcrwallet/wallet/v3 v3.1.1-0.20191230143837-6a86dc4676f0 h1:3EmiYMEAM6oDa/UKA3MAqdEZew3/+QPGAlRyPNhNO54=
+github.com/decred/dcrwallet/wallet/v3 v3.1.1-0.20191230143837-6a86dc4676f0/go.mod h1:SJ+++gtMdcUeqMv6iIO3gVGlGJfM+4iY2QSaAakhbUw=
 github.com/decred/go-socks v1.0.0/go.mod h1:sDhHqkZH0X4JjSa02oYOGhcGHYp12FsY1jQ/meV8md0=
 github.com/decred/go-socks v1.1.0 h1:dnENcc0KIqQo3HSXdgboXAHgqsCIutkqq6ntQjYtm2U=
 github.com/decred/go-socks v1.1.0/go.mod h1:sDhHqkZH0X4JjSa02oYOGhcGHYp12FsY1jQ/meV8md0=

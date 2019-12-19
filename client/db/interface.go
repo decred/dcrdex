@@ -26,7 +26,9 @@ type DB interface {
 	// order count can be limited by supplying a non-zero n value. In that case
 	// the newest n orders will be returned. The orders can be additionally
 	// filtered by supplying a non-zero since value, corresponding to a UNIX
-	// timestamp, in milliseconds.
+	// timestamp, in milliseconds. n = 0 applies no limit on number of orders
+	// returned. since = 0 is equivalent to disabling the time filter, since
+	// no orders were created before before 1970.
 	AccountOrders(dex string, n int, since uint64) ([]*MetaOrder, error)
 	// Order fetches a MetaOrder by order ID.
 	Order(order.OrderID) (*MetaOrder, error)
@@ -34,7 +36,9 @@ type DB interface {
 	// order count can be limited by supplying a non-zero n value. In that case
 	// the newest n orders will be returned. The orders can be additionally
 	// filtered by supplying a non-zero since value, corresponding to a UNIX
-	// timestamp, in milliseconds.
+	// timestamp, in milliseconds. n = 0 applies no limit on number of orders
+	// returned. since = 0 is equivalent to disabling the time filter, since
+	// no orders were created before before 1970.
 	MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*MetaOrder, error)
 	// UpdateMatch updates the match information in the database. Any existing
 	// entry for the match will be overwritten without indication.

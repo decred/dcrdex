@@ -3,6 +3,7 @@ package market
 import (
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -20,7 +21,7 @@ type EpochQueue struct {
 
 // NewEpoch creates an epoch with the given index and duration in milliseconds.
 func NewEpoch(idx int64, duration int64) *EpochQueue {
-	startTime := order.UnixTimeMilli(idx * duration)
+	startTime := encode.UnixTimeMilli(idx * duration)
 	return &EpochQueue{
 		Epoch:    idx,
 		Duration: duration,

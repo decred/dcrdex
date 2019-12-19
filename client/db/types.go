@@ -41,7 +41,7 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 	case 0:
 		return decodeAccountInfo_v0(pushes)
 	}
-	return nil, fmt.Errorf("unkown AccountInfo version %d", ver)
+	return nil, fmt.Errorf("unknown AccountInfo version %d", ver)
 }
 
 func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
@@ -164,7 +164,7 @@ func DecodeMatchProof(b []byte) (*MatchProof, error) {
 	case 0:
 		return decodeMatchProof_v0(pushes)
 	}
-	return nil, fmt.Errorf("unkown MatchProof version %d", ver)
+	return nil, fmt.Errorf("unknown MatchProof version %d", ver)
 }
 
 func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
@@ -201,8 +201,7 @@ type OrderProof struct {
 
 // Encode encodes the OrderProof to a versioned blob.
 func (p *OrderProof) Encode() []byte {
-	return dbBytes{0}.
-		AddData(p.DEXSig)
+	return dbBytes{0}.AddData(p.DEXSig)
 }
 
 // DecodeOrderProof decodes the versioned blob to an *OrderProof.
@@ -215,7 +214,7 @@ func DecodeOrderProof(b []byte) (*OrderProof, error) {
 	case 0:
 		return decodeOrderProof_v0(pushes)
 	}
-	return nil, fmt.Errorf("unkown OrderProof version %d", ver)
+	return nil, fmt.Errorf("unknown OrderProof version %d", ver)
 }
 
 func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {

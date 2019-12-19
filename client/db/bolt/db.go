@@ -100,10 +100,9 @@ func (db *boltDB) ListAccounts() []string {
 
 // Account gets the AccountInfo associated with the specified DEX address.
 func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
-	var err error
 	var acctInfo *dexdb.AccountInfo
 	acctKey := []byte(url)
-	db.acctsView(func(accts *bolt.Bucket) error {
+	err := db.acctsView(func(accts *bolt.Bucket) error {
 		acct := accts.Bucket(acctKey)
 		if acct == nil {
 			return fmt.Errorf("account not found for %s", url)
@@ -112,10 +111,8 @@ func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 		if acct == nil {
 			return fmt.Errorf("empty account found for %s", url)
 		}
+		var err error
 		acctInfo, err = dexdb.DecodeAccountInfo(bCopy(acctB))
-		if err != nil {
-			return err
-		}
 		return err
 	})
 	return acctInfo, err
@@ -133,8 +130,7 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	if len(ai.EncKey) == 0 {
 		return fmt.Errorf("zero-length EncKey not allowed")
 	}
-	var err error
-	db.acctsUpdate(func(accts *bolt.Bucket) error {
+	return db.acctsUpdate(func(accts *bolt.Bucket) error {
 		acct, err := accts.CreateBucketIfNotExists([]byte(ai.URL))
 		if err != nil {
 			return fmt.Errorf("failed to create account bucket")
@@ -147,9 +143,8 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		if err != nil {
 			return fmt.Errorf("activeKey put error: %v", err)
 		}
-		return err
+		return nil
 	})
-	return err
 }
 
 // acctsView is a convenience function for reading from the account bucket.
@@ -172,23 +167,22 @@ func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 	if len(md.Proof.DEXSig) == 0 {
 		return fmt.Errorf("cannot save order without DEX signature")
 	}
-	var err error
-	db.ordersUpdate(func(master *bolt.Bucket) error {
+	return db.ordersUpdate(func(master *bolt.Bucket) error {
 		oid := ord.ID()
 		oBkt, err := master.CreateBucketIfNotExists(oid[:])
 		if err != nil {
 			return fmt.Errorf("order bucket error: %v", err)
 		}
-		oBkt.Put(baseKey, uint32Bytes(ord.Base()))
-		oBkt.Put(quoteKey, uint32Bytes(ord.Quote()))
-		oBkt.Put(statusKey, uint16Bytes(uint16(md.Status)))
-		oBkt.Put(dexKey, []byte(md.DEX))
-		oBkt.Put(updateTimeKey, uint64Bytes(timeNow()))
-		oBkt.Put(proofKey, md.Proof.Encode())
-		oBkt.Put(orderKey, encode.EncodeOrder(ord))
-		return err
+		return newBucketPutter(oBkt).
+			put(baseKey, uint32Bytes(ord.Base())).
+			put(quoteKey, uint32Bytes(ord.Quote())).
+			put(statusKey, uint16Bytes(uint16(md.Status))).
+			put(dexKey, []byte(md.DEX)).
+			put(updateTimeKey, uint64Bytes(timeNow())).
+			put(proofKey, md.Proof.Encode()).
+			put(orderKey, order.EncodeOrder(ord)).
+			err()
 	})
-	return err
 }
 
 // ActiveOrders retrieves all orders which appear to be in an active state,
@@ -200,7 +194,9 @@ func (db *boltDB) ActiveOrders() ([]*dexdb.MetaOrder, error) {
 	})
 }
 
-// AccountOrders retrieves all orders associated with the specified DEX.
+// AccountOrders retrieves all orders associated with the specified DEX. n = 0
+// applies no limit on number of orders returned. since = 0 is equivalent to
+// disabling the time filter, since no orders were created before before 1970.
 func (db *boltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	if n == 0 && since == 0 {
@@ -215,7 +211,9 @@ func (db *boltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaO
 	})
 }
 
-// MarketOrders retrieves all orders for the specified DEX and market.
+// MarketOrders retrieves all orders for the specified DEX and market. n = 0
+// applies no limit on number of orders returned. since = 0 is equivalent to
+// disabling the time filter, since no orders were created before before 1970.
 func (db *boltDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	baseB := uint32Bytes(base)
@@ -334,12 +332,11 @@ func (db *boltDB) Order(oid order.OrderID) (mord *dexdb.MetaOrder, err error) {
 
 // decodeOrderBucket decodes the order's *bolt.Bucket into a *MetaOrder.
 func decodeOrderBucket(oid []byte, oBkt *bolt.Bucket) (*dexdb.MetaOrder, error) {
-	var ord order.Order
 	orderB := oBkt.Get(orderKey)
 	if orderB == nil {
 		return nil, fmt.Errorf("nil order bytes for order %x", oid)
 	}
-	ord, err := encode.DecodeOrder(bCopy(orderB))
+	ord, err := order.DecodeOrder(bCopy(orderB))
 	if err != nil {
 		return nil, fmt.Errorf("error decoding order %x: %v", oid, err)
 	}
@@ -375,28 +372,27 @@ func (db *boltDB) ordersUpdate(f bucketFunc) error {
 // entry for the same match ID will be overwritten without indication.
 func (db *boltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 	match, md := m.Match, m.MetaData
-	if md.Quote == 0 && md.Base == 0 {
+	if md.Quote == md.Base {
 		return fmt.Errorf("only one of base or quote asset can be asset ID 0 = bitcoin")
 	}
 	if md.DEX == "" {
 		return fmt.Errorf("empty DEX not allowed")
 	}
-	var err error
-	db.matchesUpdate(func(master *bolt.Bucket) error {
+	return db.matchesUpdate(func(master *bolt.Bucket) error {
 		mBkt, err := master.CreateBucketIfNotExists(match.MatchID[:])
 		if err != nil {
 			return fmt.Errorf("order bucket error: %v", err)
 		}
-		mBkt.Put(baseKey, uint32Bytes(md.Base))
-		mBkt.Put(quoteKey, uint32Bytes(md.Quote))
-		mBkt.Put(statusKey, []byte{byte(md.Status)})
-		mBkt.Put(dexKey, []byte(md.DEX))
-		mBkt.Put(updateTimeKey, uint64Bytes(timeNow()))
-		mBkt.Put(proofKey, md.Proof.Encode())
-		mBkt.Put(matchKey, encode.EncodeMatch(match))
-		return err
+		return newBucketPutter(mBkt).
+			put(baseKey, uint32Bytes(md.Base)).
+			put(quoteKey, uint32Bytes(md.Quote)).
+			put(statusKey, []byte{byte(md.Status)}).
+			put(dexKey, []byte(md.DEX)).
+			put(updateTimeKey, uint64Bytes(timeNow())).
+			put(proofKey, md.Proof.Encode()).
+			put(matchKey, order.EncodeMatch(match)).
+			err()
 	})
-	return err
 }
 
 // ActiveMatches retrieves the matches that are in an active state, which is
@@ -427,7 +423,7 @@ func (db *boltDB) filteredMatches(filter func(*bolt.Bucket) bool) ([]*dexdb.Meta
 				if matchB == nil {
 					return fmt.Errorf("nil match bytes for %x", k)
 				}
-				match, err = encode.DecodeMatch(bCopy(matchB))
+				match, err = order.DecodeMatch(bCopy(matchB))
 				if err != nil {
 					return fmt.Errorf("error decoding match %x: %v", k, err)
 				}
@@ -491,16 +487,41 @@ func (db *boltDB) makeTopLevelBuckets(buckets [][]byte) error {
 // can be read-only (db.View), or read-write (db.Update). The provided
 // bucketFunc will be called with the requested bucket as its only argument.
 func (db *boltDB) withBucket(bkt []byte, viewer txFunc, f bucketFunc) error {
-	var err error
-	viewer(func(tx *bolt.Tx) error {
+	return viewer(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(bkt)
 		if bucket == nil {
 			return fmt.Errorf("failed to open %s bucket", string(bkt))
 		}
-		err = f(bucket)
-		return err
+		return f(bucket)
 	})
-	return err
+}
+
+// bucketPutter enables chained calls to (*bolt.Bucket).Put with error
+// deferment.
+type bucketPutter struct {
+	bucket *bolt.Bucket
+	putErr error
+}
+
+// newBucketPutter is a constructor for a bucketPutter.
+func newBucketPutter(bkt *bolt.Bucket) *bucketPutter {
+	return &bucketPutter{bucket: bkt}
+}
+
+// put calls Put on the underlying bucket. If an error has been encountered in a
+// previous call to push, nothing is done. put enables the *bucketPutter to
+// enable chaining.
+func (bp *bucketPutter) put(k, v []byte) *bucketPutter {
+	if bp.putErr != nil {
+		return bp
+	}
+	bp.putErr = bp.bucket.Put(k, v)
+	return bp
+}
+
+// Return any push error encountered.
+func (bp *bucketPutter) err() error {
+	return bp.putErr
 }
 
 // timeNow is the current unix timestamp in milliseconds.
