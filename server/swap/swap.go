@@ -434,7 +434,8 @@ func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerR
 		}
 		makerRedeemComplete = confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
 	}
-	// !!! Why makerRedeemComplete && ?
+	// Taker is only complete if the maker is complete because
+	// order.MatchComplete follows order.MakerRedeemed.
 	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
 		confs, err := tStatus.redemption.Confirmations()
 		if err != nil {

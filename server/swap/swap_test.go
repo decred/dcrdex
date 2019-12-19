@@ -1625,7 +1625,6 @@ func TestTxMonitored(t *testing.T) {
 	rig := tNewTestRig(matchInfo)
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
 	ensureNilErr := makeEnsureNilErr(t)
-	//mustBeError := makeMustBeError(t)
 	maker, taker := matchInfo.maker, matchInfo.taker
 
 	var makerLockedAsset, takerLockedAsset uint32
@@ -1654,6 +1653,7 @@ func TestTxMonitored(t *testing.T) {
 	if tracker.Status != order.MakerSwapCast {
 		t.Fatalf("match not marked as MakerSwapCast: %d", tracker.Status)
 	}
+	matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
 	sendBlock(rig.abcNode)
 	sendBlock(rig.xyzNode)
 
@@ -1683,7 +1683,6 @@ func TestTxMonitored(t *testing.T) {
 	//tracker.makerStatus.swapTime
 	// tracker.makerStatus.swapConfirmed = time.Now()
 	// tracker.takerStatus.swapConfirmed = time.Now()
-	matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
 	matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
 
 	// send a block through for either chain to trigger a swap check.
@@ -1731,4 +1730,19 @@ func TestTxMonitored(t *testing.T) {
 	}
 
 	ensureNilErr(rig.ackRedemption_maker(true))
+
+	// Confirm both redeem txns up to SwapConf so they are no longer monitored.
+	matchInfo.db.makerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
+	matchInfo.db.takerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
+
+	if rig.swapper.TxMonitored(taker.acct, makerLockedAsset, takerRedeemTx) {
+		t.Errorf("taker redeem %s (asset %d) was still monitored",
+			takerRedeemTx, makerLockedAsset)
+	}
+
+	if rig.swapper.TxMonitored(maker.acct, takerLockedAsset, makerRedeemTx) {
+		t.Errorf("maker redeem %s (asset %d) was still monitored",
+			makerRedeemTx, takerLockedAsset)
+	}
+
 }
