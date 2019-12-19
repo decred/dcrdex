@@ -190,7 +190,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
-	now := time.Now().Round(time.Millisecond).UTC()
+	now := time.Now().Truncate(time.Millisecond).UTC()
 	limit := &msgjson.Limit{
 		Prefix: msgjson.Prefix{
 			AccountID:  aid[:],

@@ -103,7 +103,7 @@ var (
 )
 
 func nowMs() time.Time {
-	return time.Now().Round(time.Millisecond).UTC()
+	return time.Now().Truncate(time.Millisecond).UTC()
 }
 
 // The AuthManager handles client-related actions, including authorization and
