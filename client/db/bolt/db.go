@@ -373,7 +373,7 @@ func (db *boltDB) ordersUpdate(f bucketFunc) error {
 func (db *boltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 	match, md := m.Match, m.MetaData
 	if md.Quote == md.Base {
-		return fmt.Errorf("only one of base or quote asset can be asset ID 0 = bitcoin")
+		return fmt.Errorf("quote and base asset cannot be the same")
 	}
 	if md.DEX == "" {
 		return fmt.Errorf("empty DEX not allowed")
