@@ -1689,19 +1689,6 @@ func TestTxMonitored(t *testing.T) {
 	sendBlock(rig.abcNode)
 	sendBlock(rig.xyzNode)
 
-	if rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
-		t.Errorf("maker contract %s (asset %d) was still monitored",
-			makerContractTx, makerLockedAsset)
-	}
-
-	sendBlock(rig.abcNode)
-	sendBlock(rig.xyzNode)
-
-	if rig.swapper.TxMonitored(taker.acct, takerLockedAsset, takerContractTx) {
-		t.Errorf("taker contract %s (asset %d) was still monitored",
-			takerContractTx, takerLockedAsset)
-	}
-
 	// Now redeem
 
 	ensureNilErr(rig.redeem_maker(true))
@@ -1743,6 +1730,21 @@ func TestTxMonitored(t *testing.T) {
 	if rig.swapper.TxMonitored(maker.acct, takerLockedAsset, makerRedeemTx) {
 		t.Errorf("maker redeem %s (asset %d) was still monitored",
 			makerRedeemTx, takerLockedAsset)
+	}
+
+	// The match should also be gone from matchTracker, so the contracts should
+	// no longer be monitored either.
+
+	sendBlock(rig.abcNode)
+
+	if rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
+		t.Errorf("maker contract %s (asset %d) was still monitored",
+			makerContractTx, makerLockedAsset)
+	}
+
+	if rig.swapper.TxMonitored(taker.acct, takerLockedAsset, takerContractTx) {
+		t.Errorf("taker contract %s (asset %d) was still monitored",
+			takerContractTx, takerLockedAsset)
 	}
 
 }

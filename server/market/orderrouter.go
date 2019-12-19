@@ -521,6 +521,8 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("coin confirmations error for %x: %v", coin.ID, err))
 		}
+		// Valid coins have either confs >= FundConf, or come from a
+		// DEX-monitored transaction.
 		if confs < int64(assets.funding.FundConf) &&
 			!tunnel.TxMonitored(user, assets.funding.ID, dexCoin.TxID()) {
 			return errSet(msgjson.FundingError,

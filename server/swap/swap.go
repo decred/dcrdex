@@ -449,7 +449,11 @@ func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerR
 }
 
 // TxMonitored determines whether the transaction for the given user is involved
-// in a DEX-monitored trade.
+// in a DEX-monitored trade. Note that the swap contract tx is considered
+// monitored until the swap is complete, regardless of confirms. This allows
+// change outputs from a dex-monitored swap contract to be used to fund
+// additional swaps prior to FundConf. e.g. OrderRouter may allow coins to fund
+// orders where: (coins.confs >= FundConf) OR TxMonitored(coins.tx).
 func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
 	s.matchMtx.RLock()
 	defer s.matchMtx.RUnlock()
@@ -460,8 +464,9 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 		switch asset {
 		case match.makerStatus.swapAsset:
 			// Maker's swap transaction is the asset of interest.
-			if user == match.Maker.User() && match.makerStatus.swap.TxID() == txid &&
-				match.makerStatus.swapConfirmed.IsZero() {
+			if user == match.Maker.User() && match.makerStatus.swap.TxID() == txid {
+				// The swap contract tx is considered monitored until the swap
+				// is complete, regardless of confirms.
 				return true
 			}
 
@@ -473,8 +478,9 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 			}
 		case match.takerStatus.swapAsset:
 			// Taker's swap transaction is the asset of interest.
-			if user == match.Taker.User() && match.takerStatus.swap.TxID() == txid &&
-				match.takerStatus.swapConfirmed.IsZero() {
+			if user == match.Taker.User() && match.takerStatus.swap.TxID() == txid {
+				// The swap contract tx is considered monitored until the swap
+				// is complete, regardless of confirms.
 				return true
 			}
 
