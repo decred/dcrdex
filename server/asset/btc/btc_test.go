@@ -730,8 +730,13 @@ func TestUTXOs(t *testing.T) {
 
 	// A general reset function that clears the testBlockchain and the blockCache.
 	reset := func() {
+		btc.blockCache.mtx.Lock()
+		defer btc.blockCache.mtx.Unlock()
 		cleanTestChain()
-		btc.blockCache = newBlockCache()
+		newBC := newBlockCache()
+		btc.blockCache.blocks = newBC.blocks
+		btc.blockCache.mainchain = newBC.mainchain
+		btc.blockCache.best = newBC.best
 	}
 
 	// CASE 1: A valid UTXO in a mempool transaction
@@ -1025,8 +1030,13 @@ func TestReorg(t *testing.T) {
 	// Clear the blockchain and set the provided chain to build on the ancestor
 	// block.
 	reset := func() {
+		btc.blockCache.mtx.Lock()
+		defer btc.blockCache.mtx.Unlock()
 		cleanTestChain()
-		btc.blockCache = newBlockCache()
+		newBC := newBlockCache()
+		btc.blockCache.blocks = newBC.blocks
+		btc.blockCache.mainchain = newBC.mainchain
+		btc.blockCache.best = newBC.best
 	}
 	reset()
 
