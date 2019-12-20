@@ -56,6 +56,8 @@ func Run(ctx context.Context) {
 	InitLogging(func(p []byte) {
 		appJournal.Write(p)
 	})
+	// Close closes the log rotator.
+	defer Close()
 	// Create the UI and start the app.
 	createApp()
 	if err := app.SetRoot(screen, true).SetFocus(mainMenu).Run(); err != nil {

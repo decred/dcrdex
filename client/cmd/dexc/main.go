@@ -32,7 +32,7 @@ func main() {
 	// Parse configuration and set up initial logging.
 	//
 	// DRAFT NOTE: It's a little odd that the Configure function is from the ui
-	// package. The ui.Config struct is used both here and in ui. Could create  a
+	// package. The ui.Config struct is used both here and in ui. Could create a
 	// types package used by both, but doing it this way works for now.
 	cfg, err := ui.Configure()
 	if err != nil {
@@ -46,13 +46,13 @@ func main() {
 		logStdout := func(msg []byte) {
 			os.Stdout.Write(msg)
 		}
-		clientCore := core.New(appCtx, ui.NewLogger("CORE", nil))
-		ui.InitLogging(logStdout)
 		// At least one of --rpc or --web must be specified.
 		if !cfg.RPCOn && !cfg.WebOn {
 			fmt.Println("Cannot run without TUI unless --rpc and/or --web is specified")
 			return
 		}
+		clientCore := core.New(appCtx, ui.NewLogger("CORE", logStdout))
+		ui.InitLogging(logStdout)
 		var wg sync.WaitGroup
 		if cfg.RPCOn {
 			wg.Add(1)
@@ -69,6 +69,8 @@ func main() {
 			}()
 		}
 		wg.Wait()
+		// Close closes the log rotator.
+		ui.Close()
 		return
 	}
 	// Run in TUI mode.
