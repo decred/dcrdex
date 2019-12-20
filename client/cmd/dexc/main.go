@@ -51,21 +51,21 @@ func main() {
 			fmt.Println("Cannot run without TUI unless --rpc and/or --web is specified")
 			return
 		}
-		clientCore := core.New(appCtx, ui.NewLogger("CORE", logStdout))
 		ui.InitLogging(logStdout)
+		clientCore := core.New(appCtx, ui.NewLogger("CORE", nil))
 		var wg sync.WaitGroup
 		if cfg.RPCOn {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				rpcserver.Run(appCtx, clientCore, cfg.RPCAddr, ui.NewLogger("RPC", logStdout))
+				rpcserver.Run(appCtx, clientCore, cfg.RPCAddr, ui.NewLogger("RPC", nil))
 			}()
 		}
 		if cfg.WebOn {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				webserver.Run(appCtx, clientCore, cfg.WebAddr, ui.NewLogger("WEB", logStdout))
+				webserver.Run(appCtx, clientCore, cfg.WebAddr, ui.NewLogger("WEB", nil))
 			}()
 		}
 		wg.Wait()

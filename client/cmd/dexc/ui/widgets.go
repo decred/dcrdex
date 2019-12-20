@@ -51,7 +51,7 @@ type inputCapture func(event *tcell.EventKey) *tcell.EventKey
 // Run the TUI app.
 func Run(ctx context.Context) {
 	appCtx = ctx
-	// Initialize logging to a widget
+	// Initialize logging to the main application log view.
 	appJournal = newJournal("Application Log", handleAppLogKey)
 	InitLogging(func(p []byte) {
 		appJournal.Write(p)
@@ -136,12 +136,16 @@ func createWidgets() {
 	app = tview.NewApplication()
 	acctsView = newAccountsView()
 	marketView = newMarketView()
-	webView = newServerView("Web", cfg.WebAddr, func(ctx context.Context, addr string, logger slog.Logger) {
+	webView = newServerView("Web", cfg.WebAddr, func(ctx context.Context,
+		addr string, logger slog.Logger) {
+
 		setWebLabelOn(true)
 		webserver.Run(ctx, clientCore, addr, logger)
 		setWebLabelOn(false)
 	})
-	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context, addr string, logger slog.Logger) {
+	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context,
+		addr string, logger slog.Logger) {
+
 		setRPCLabelOn(true)
 		rpcserver.Run(ctx, clientCore, addr, logger)
 		setRPCLabelOn(false)
@@ -185,6 +189,7 @@ const (
 	entryNotifications = "Notifications"
 	entryWebServer     = "Web Server"
 	entryRPCServer     = "RPC Server"
+	entryQuit          = "Quit"
 )
 
 // To modify the main menu text, you have to access the entry by index. These
@@ -198,17 +203,15 @@ var (
 // newMainMenu is a constructor for main menu, which is just a *chooser.
 func newMainMenu() *chooser {
 	c := newChooser("", handleMainMenuKey)
-	c.addEntry(entryAppLog, func() { setRightBox(appJournal) }).
-		addEntry(entryAccounts, func() { setRightBox(acctsView) }).
-		addEntry(entryMarkets, func() { setRightBox(marketView) }).
-		addEntry(entryNotifications, func() {
-			setRightBox(noteJournal)
-		}).
-		addEntry(entryWebServer, func() { setRightBox(webView) }).
-		addEntry(entryRPCServer, func() { setRightBox(rpcView) }).
-		addEntry("Quit", func() {
-			app.Stop()
-		})
+	// Don't supply handlers to the chooser entries. KeyEnter will be handled in
+	// handleMainMenuKey.
+	c.addEntry(entryAppLog, nil).
+		addEntry(entryAccounts, nil).
+		addEntry(entryMarkets, nil).
+		addEntry(entryNotifications, nil).
+		addEntry(entryWebServer, nil).
+		addEntry(entryRPCServer, nil).
+		addEntry(entryQuit, nil)
 	noteEntryIdx = 3
 	webEntryIdx = 4
 	rpcEntryIdx = 5
@@ -220,6 +223,7 @@ func handleMainMenuKey(e *tcell.EventKey) *tcell.EventKey {
 	entry, _ := mainMenu.GetItemText(mainMenu.GetCurrentItem())
 	match := strings.HasPrefix
 	switch e.Key() {
+	// KeyEnter is already handled by the chooser.
 	case tcell.KeyBacktab, tcell.KeyTab, tcell.KeyEscape, tcell.KeyEnter:
 		switch {
 		case match(entry, entryAppLog):
@@ -236,6 +240,8 @@ func handleMainMenuKey(e *tcell.EventKey) *tcell.EventKey {
 			setRightBox(webView)
 		case match(entry, entryRPCServer):
 			setRightBox(rpcView)
+		case match(entry, entryQuit):
+			app.Stop()
 		default:
 			setRightBox(screen.right)
 		}
@@ -264,20 +270,20 @@ func setFocus(wgt focuser) {
 // appended with an indicator to show that the server is running.
 func setWebLabelOn(on bool) {
 	if on {
-		mainMenu.SetItemText(webEntryIdx, "Web Server (on)", "")
+		mainMenu.SetItemText(webEntryIdx, entryWebServer+" (on)", "")
 		return
 	}
-	mainMenu.SetItemText(webEntryIdx, "Web Server", "")
+	mainMenu.SetItemText(webEntryIdx, entryWebServer, "")
 }
 
 // setWebLabelOn sets whether the main menu entry for the RPC server is
 // appended with an indicator to show that the server is running.
 func setRPCLabelOn(on bool) {
 	if on {
-		mainMenu.SetItemText(rpcEntryIdx, "RPC Server (on)", "")
+		mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+" (on)", "")
 		return
 	}
-	mainMenu.SetItemText(rpcEntryIdx, "RPC Server", "")
+	mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+"", "")
 }
 
 // setNotificationCount sets the notification count next to the notification
@@ -287,7 +293,7 @@ func setNotificationCount(n int) {
 	if n == 0 {
 		suffix = ""
 	}
-	mainMenu.SetItemText(noteEntryIdx, "Notifications"+suffix, "")
+	mainMenu.SetItemText(noteEntryIdx, entryNotifications+suffix, "")
 }
 
 // CHOOSER
@@ -313,7 +319,7 @@ func newChooser(title string, keyFunc inputCapture) *chooser {
 }
 
 // addEntry adds the entry to the list, with a callback function to be invoked
-// when the entry is chosen.
+// when the entry is chosen. nil handler is OK.
 func (c *chooser) addEntry(name string, f func()) *chooser {
 	c.AddItem(name, "", 0, f)
 	return c

@@ -174,10 +174,10 @@ func interpolate(pts []depthPoint, width, height int) ([]edgePoint, error) {
 		return nil, err
 	}
 	numPts := len(pts)
-	yRange := float64(yMax - yMin)
-	xRange := float64(xMax - xMin)
+	yRange := yMax - yMin
+	xRange := xMax - xMin
 	yScaler, xScaler := yRange/float64(height), xRange/float64(width)
-	lastY := float64(pts[0].y) / yScaler
+	lastY := pts[0].y / yScaler
 	intersections := append(make([]float64, 0, numPts+1), lastY-yMin/yScaler)
 	lastX := int(float64(pts[0].x) / xScaler)
 	for i := 0; i < len(pts)-1; i++ {
