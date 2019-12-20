@@ -359,6 +359,8 @@ func tNewTestRig(matchInfo *tMatch) *testRig {
 }
 
 func (rig *testRig) getTracker() *matchTracker {
+	rig.swapper.matchMtx.Lock()
+	defer rig.swapper.matchMtx.Unlock()
 	return rig.swapper.matches[rig.matchInfo.matchID]
 }
 
