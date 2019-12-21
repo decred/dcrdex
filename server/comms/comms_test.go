@@ -429,11 +429,13 @@ func TestClientResponses(t *testing.T) {
 
 	sendToClient := func(route, payload string, f func(Link, *msgjson.Message)) uint64 {
 		req := makeReq(route, payload)
-		err := client.Request(req, f)
-		if err != nil {
-			t.Logf("sendToClient error: %v", err)
-		}
-		time.Sleep(time.Millisecond * 10)
+		lockedExe(func() {
+			err := client.Request(req, f)
+			if err != nil {
+				t.Logf("sendToClient error: %v", err)
+			}
+			time.Sleep(time.Millisecond * 10)
+		})
 		return req.ID
 	}
 
@@ -456,17 +458,19 @@ func TestClientResponses(t *testing.T) {
 
 	// Send a request from the server to the client, setting a flag when the
 	// client responds.
-	responded := false
+	responded := make(chan struct{}, 1)
 	id := sendToClient("looptest", `{}`, func(_ Link, _ *msgjson.Message) {
-		responded = true
+		responded <- struct{}{}
 	})
 	// Respond to the server
 	respondToServer(id, `{}`)
-	lockedExe(func() {
-		if !responded {
-			t.Fatalf("no response for looptest")
-		}
-	})
+	select {
+	case <-responded:
+		// Response received, no problem.
+	default:
+		// No response falls through.
+		t.Fatalf("no response for looptest")
+	}
 
 	checkParseError := func(tag string) {
 		lockedExe(func() {
@@ -514,6 +518,8 @@ func TestClientResponses(t *testing.T) {
 	// handler is pruned.
 	sendToClient("expiration", `{}`, func(_ Link, _ *msgjson.Message) {})
 	lockedExe(func() {
+		client.reqMtx.Lock()
+		defer client.reqMtx.Unlock()
 		if len(client.respHandlers) != 1 {
 			t.Fatalf("expired response handler not pruned")
 		}
