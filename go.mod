@@ -15,7 +15,6 @@ require (
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.0
 	github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0
 	github.com/decred/dcrd/dcrutil/v2 v2.0.1
-	github.com/decred/dcrd/dcrutil/v3 v3.0.0-20191206034640-4da12163dcbe
 	github.com/decred/dcrd/hdkeychain/v2 v2.1.0
 	github.com/decred/dcrd/rpc/jsonrpc/types v1.0.1
 	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.0

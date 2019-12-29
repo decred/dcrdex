@@ -77,8 +77,6 @@ github.com/decred/dcrd/dcrutil v1.4.0/go.mod h1:Bs74gm1jQ9ZAbmEh9FWOEZ1HQzlMg5iP
 github.com/decred/dcrd/dcrutil/v2 v2.0.0/go.mod h1:gUshVAXpd51DlcEhr51QfWL2HJGkMDM1U8chY+9VvQg=
 github.com/decred/dcrd/dcrutil/v2 v2.0.1 h1:aL+c7o7Q66HV1gIif+XkNYo9DeorN3l01Vns8mh0mqs=
 github.com/decred/dcrd/dcrutil/v2 v2.0.1/go.mod h1:JdEgF6eh0TTohPeiqDxqDSikTSvAczq0J7tFMyyeD+k=
-github.com/decred/dcrd/dcrutil/v3 v3.0.0-20191206034640-4da12163dcbe h1:/GNHhxgNguto/NKc83Ud5fKZ5uyc3N6PNh5jWnlH64Y=
-github.com/decred/dcrd/dcrutil/v3 v3.0.0-20191206034640-4da12163dcbe/go.mod h1:4/YL+e1ncKg50erd0PLp7vjZq1PcMftm6IU4rxzP6RA=
 github.com/decred/dcrd/gcs v1.1.0 h1:djuYzaFUzUTJR+6ulMSRZOQ+P9rxtIyuxQeViAEfB8s=
 github.com/decred/dcrd/gcs v1.1.0/go.mod h1:yBjhj217Vw5lw3aKnCdHip7fYb9zwMos8bCy5s79M9w=
 github.com/decred/dcrd/gcs/v2 v2.0.0 h1:nCc3q9iIwIpF0khTSiC7xYgojKoKnPrqrgVjboOBXDE=

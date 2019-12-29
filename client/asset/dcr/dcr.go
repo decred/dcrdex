@@ -699,7 +699,7 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		}
 		// Only need to look at other mempool transactions. For each txid, get the
 		// verbose transaction and check each input's previous outpoint.
-		txs, err := dcr.node.GetRawMempool(chainjson.GRMRegular)
+		txs, err := dcr.node.GetRawMempool(chainjson.GRMAll)
 		if err != nil {
 			return nil, fmt.Errorf("error retreiving mempool transactions")
 		}
