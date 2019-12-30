@@ -37,24 +37,24 @@ type DCRConfig struct {
 	RPCUser string `long:"username" description:"Username for RPC connections"`
 	// RPCPass is the RPC password provided to dcrwallet configuration.
 	RPCPass string `long:"password" description:"Password for RPC connections"`
-	// RPCListen is the RPC network address provided to dcrd configuration. If the
-	// value is an empty string, it will be set to a default value for the network.
+	// RPCListen is the RPC network address provided to dcrwallet configuration.
+	// If the value is an empty string, it will be set to a default value for the
+	// network.
 	RPCListen string `long:"rpclisten" description:"dcrd interface/port for RPC connections (default port: 9109, testnet: 19109)"`
 	// RPCCert is the filepath to the dcrwallet TLS certificate. If it is not
 	// provided, the default dcrwallet location will be assumed.
 	RPCCert string `long:"cafile" description:"File containing the certificate file"`
-	// Context should be cancelled when the program exits. This will cause some
-	// cleanup to be performed during shutdown.
+	// Context should be cancelled when the application exits. This will cause
+	// some cleanup to be performed during shutdown.
 	Context context.Context
 }
 
 // loadConfig loads the DCRConfig from file. If no values are found for
 // RPCListen or RPCCert in the specified file, default values will be used.
 // If configPath is an empty string, loadConfig will attempt to read settings
-// directly from the default dcrwallet.conf filpath. If there is no error, the
+// directly from the default dcrwallet.conf filepath. If there is no error, the
 // module-level chainParams variable will be set appropriately for the network.
 func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
-	// Check for missing credentials. The user and password must be set.
 	cfg := new(DCRConfig)
 
 	// Since we are not reading command-line arguments, and the DCRConfig fields

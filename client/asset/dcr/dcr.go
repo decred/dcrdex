@@ -199,8 +199,8 @@ type WalletConfig struct {
 }
 
 // NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet. The provided context.Context should be canceled when the
-// DEX application exits.
+// exchange wallet. The wallet will shut down when the provided context is
+// cancelled.
 func NewWallet(ctx context.Context, cfg *WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
@@ -807,14 +807,13 @@ func (dcr *ExchangeWallet) Refund(receipt asset.Receipt) error {
 		return fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	val := toAtoms(utxo.Value)
-	// DRAFT NOTE: The wallet does not store this contract, even though it was
-	// known when the init transaction was created. The DEX should store this
+	// NOTE: The wallet does not store this contract, even though it was known
+	// when the init transaction was created. The DEX should store this
 	// information for persistence across sessions. Care has been taken to ensure
 	// that any type satisfying asset.Coin can be passed to the Wallet's methods,
-	// so the DEX can create it's own asset.Coin to issue a redeem or refund
-	// after a restart, for example, but the (asset.Coin).Redeem script
-	// (the swap contract itself, including the counter-party's pubkey) must be
-	// included.
+	// so the DEX can create it's own asset.Coin to issue a redeem or refund after
+	// a restart, for example, but the (asset.Coin).Redeem script (the swap
+	// contract itself, including the counter-party's pubkey) must be included.
 	redeem := op.Redeem()
 	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(redeem, chainParams)
 	if err != nil {
