@@ -379,8 +379,8 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 // the appropriate flags in the swapStatus structures.
 func (s *Swapper) processBlock(block *blockNotification) {
 	completions := make([]*matchTracker, 0)
-	s.matchMtx.RLock()
-	defer s.matchMtx.RUnlock()
+	s.matchMtx.Lock()
+	defer s.matchMtx.Unlock()
 	for _, match := range s.matches {
 		// If it's neither of the match assets, nothing to do.
 		if match.makerStatus.swapAsset != block.assetID && match.takerStatus.swapAsset != block.assetID {
@@ -416,9 +416,13 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			}
 		}
 	}
+
 	for _, match := range completions {
 		s.unlockOrderCoins(match.Taker)
 		s.unlockOrderCoins(match.Maker)
+		// Remove the completed match. Note that checkInaction may also remove
+		// matches, so this entire function must lock even if there are no
+		// completions.
 		delete(s.matches, match.ID().String())
 	}
 }
@@ -504,8 +508,8 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 func (s *Swapper) checkInaction(assetID uint32) {
 	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
 	deletions := make([]string, 0)
-	s.matchMtx.RLock()
-	defer s.matchMtx.RUnlock()
+	s.matchMtx.Lock()
+	defer s.matchMtx.Unlock()
 	for _, match := range s.matches {
 		if match.makerStatus.swapAsset != assetID && match.takerStatus.swapAsset != assetID {
 			continue
@@ -571,6 +575,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// Nothing to do here right now.
 		}
 	}
+
 	for _, matchID := range deletions {
 		delete(s.matches, matchID)
 	}
