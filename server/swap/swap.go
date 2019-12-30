@@ -428,16 +428,8 @@ func (s *Swapper) processBlock(block *blockNotification) {
 }
 
 func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerRedeemComplete bool) {
-	mStatus, tStatus := match.makerStatus, match.takerStatus
-	if !mStatus.redeemTime.IsZero() {
-		confs, err := mStatus.redemption.Confirmations()
-		if err != nil {
-			log.Errorf("Confirmations failed for maker redemption %v: err",
-				mStatus.redemption.TxID(), err) // Severity?
-			return
-		}
-		makerRedeemComplete = confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
-	}
+	makerRedeemComplete = s.makerRedeemStatus(match)
+	tStatus := match.takerStatus
 	// Taker is only complete if the maker is complete because
 	// order.MatchComplete follows order.MakerRedeemed.
 	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
@@ -447,7 +439,21 @@ func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerR
 				tStatus.redemption.TxID(), err)
 			return
 		}
-		takerRedeemComplete = confs >= int64(s.coins[mStatus.swapAsset].SwapConf)
+		takerRedeemComplete = confs >= int64(s.coins[match.makerStatus.swapAsset].SwapConf)
+	}
+	return
+}
+
+func (s *Swapper) makerRedeemStatus(match *matchTracker) (makerRedeemComplete bool) {
+	mStatus, tStatus := match.makerStatus, match.takerStatus
+	if !mStatus.redeemTime.IsZero() {
+		confs, err := mStatus.redemption.Confirmations()
+		if err != nil {
+			log.Errorf("Confirmations failed for maker redemption %v: err",
+				mStatus.redemption.TxID(), err) // Severity?
+			return
+		}
+		makerRedeemComplete = confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
 	}
 	return
 }
@@ -489,7 +495,7 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 			}
 
 			// Maker's redemption transaction is the asset of interest.
-			makerRedeemDone, _ := s.redeemStatus(match)
+			makerRedeemDone := s.makerRedeemStatus(match)
 			if !makerRedeemDone && user == match.Maker.User() &&
 				match.makerStatus.redemption.TxID() == txid {
 				return true
