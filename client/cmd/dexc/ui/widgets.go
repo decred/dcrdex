@@ -45,7 +45,7 @@ var (
 	notificationCount uint32
 )
 
-// For brevity, a commonly used tview callback.
+// Alias for brevity. A commonly used tview callback.
 type inputCapture func(event *tcell.EventKey) *tcell.EventKey
 
 // Run the TUI app.
@@ -72,8 +72,7 @@ type focuser interface {
 	tview.Primitive
 	SetInputCapture(capture func(event *tcell.EventKey) *tcell.EventKey) *tview.Box
 	GetInputCapture() func(event *tcell.EventKey) *tcell.EventKey
-	// AddFocus and RemoveFocus enable additional control over of focus
-	// navigation.
+	// AddFocus and RemoveFocus enable additional control over navigation.
 	AddFocus()
 	RemoveFocus()
 }
@@ -270,7 +269,7 @@ func setFocus(wgt focuser) {
 // appended with an indicator to show that the server is running.
 func setWebLabelOn(on bool) {
 	if on {
-		mainMenu.SetItemText(webEntryIdx, entryWebServer+" (on)", "")
+		mainMenu.SetItemText(webEntryIdx, entryWebServer+" [green](on)", "")
 		return
 	}
 	mainMenu.SetItemText(webEntryIdx, entryWebServer, "")
@@ -280,7 +279,7 @@ func setWebLabelOn(on bool) {
 // appended with an indicator to show that the server is running.
 func setRPCLabelOn(on bool) {
 	if on {
-		mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+" (on)", "")
+		mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+" [green](on)", "")
 		return
 	}
 	mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+"", "")

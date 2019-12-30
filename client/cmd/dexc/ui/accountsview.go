@@ -56,7 +56,7 @@ func newAccountsView() *accountsViewer {
 	// the bottom
 	thirdColumn := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(fullyCentered(formBox, 60, 13), 0, 3, false).
+		AddItem(fullyCentered(formBox, 60, 17), 0, 3, false).
 		AddItem(acctsJournal, 0, 1, false)
 
 	// The main view.
@@ -71,24 +71,31 @@ func newAccountsView() *accountsViewer {
 	// them using tview.Grid, but this is a start. A major downside is that
 	// tview.Form hijacks tab and arrow keys, making for some unintuitive
 	// navigation behavior.
-	var acctURL, dcrAcctName, dcrwAddr, dcrwPW string
+	var acctURL, dcrAcctName, dcrwAddr, dcrwPW, dcrwRPCUser, dcrwRPCPass string
 	acctForm = tview.NewForm().
 		AddInputField("DEX URL", "", 0, nil, func(url string) {
 			acctURL = url
 		}).
-		AddInputField("dcrwallet Account Name", "", 0, nil, func(name string) {
+		AddInputField("Account Name", "", 0, nil, func(name string) {
 			dcrAcctName = name
 		}).
 		AddInputField("dcrwallet RPC Address", "", 0, nil, func(name string) {
 			dcrwAddr = name
 		}).
-		AddPasswordField("dcrwallet Password", "", 0, 0, func(pw string) {
+		AddInputField("RPC Username", "", 0, nil, func(name string) {
+			dcrwRPCUser = name
+		}).
+		AddPasswordField("RPC Password", "", 0, 0, func(name string) {
+			dcrwRPCPass = name
+		}).
+		AddPasswordField("Wallet Password", "", 0, 0, func(pw string) {
 			dcrwPW = pw
 		}).
 		AddButton("register", func() {
 			// Obviously the password won't be echoed. Just this way for
 			// demonstration.
-			acctsLog.Infof("registering acct %s with password %s and wallet node %s for DEX %s", dcrAcctName, dcrwPW, dcrwAddr, acctURL)
+			acctsLog.Infof("registering acct %s with password %s and wallet node %s for DEX %s, using RPC username %s and RPC password %s",
+				dcrAcctName, dcrwPW, dcrwAddr, acctURL, dcrwRPCUser, dcrwRPCPass)
 		}).
 		SetButtonsAlign(tview.AlignRight).
 		SetFieldBackgroundColor(tcell.GetColor("#072938")).

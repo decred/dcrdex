@@ -126,13 +126,14 @@ func Configure() (*Config, error) {
 
 // netFromConfig parses the dex.Network from the configuration.
 func netFromConfig(c *Config) dex.Network {
-	if c.Testnet {
+	switch {
+	case c.Testnet:
 		return dex.Testnet
-	}
-	if c.Simnet {
+	case c.Simnet:
 		return dex.Simnet
+	default:
+		return dex.Mainnet
 	}
-	return dex.Mainnet
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed

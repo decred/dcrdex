@@ -9,6 +9,11 @@ import (
 	"github.com/rivo/tview"
 )
 
+const (
+	maxJournalLines = 150
+	journalTrimSize = 50
+)
+
 // A journal is a TextView with concurrency protection and buffer maintenance.
 // It can be passed directly as an io.Writer for logging purposes.
 type journal struct {
@@ -49,8 +54,8 @@ func (j *journal) Write(p []byte) {
 	defer j.mtx.Unlock()
 	j.history = append(j.history, p)
 	var err error
-	if len(j.history) >= 150 {
-		j.history = j.history[50:]
+	if len(j.history) >= maxJournalLines {
+		j.history = j.history[journalTrimSize:]
 		j.Clear()
 		for _, entry := range j.history {
 			_, err = j.TextView.Write(entry)
