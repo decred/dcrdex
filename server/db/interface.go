@@ -195,7 +195,7 @@ func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInf
 		}
 
 		// Market sell orders must respect lot size.
-		if ot.Sell && (ot.Quantity%mkt.LotSize != 0 || ord.Remaining()%mkt.LotSize != 0) {
+		if ot.Sell && (ot.Quantity%mkt.LotSize != 0 || ot.Remaining()%mkt.LotSize != 0) {
 			return false
 		}
 
@@ -210,11 +210,6 @@ func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInf
 
 		if ot.OrderType != order.CancelOrderType {
 			return false
-		}
-
-		// All cancel orders must have zero and filled remaining amounts.
-		if ord.Remaining() != 0 || ord.FilledAmt() != 0 {
-			panic("a CancelOrder should always return 0 Remaining and FilledAmt")
 		}
 
 	case *order.LimitOrder:
@@ -237,7 +232,7 @@ func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInf
 		}
 
 		// All limit orders must respect lot size.
-		if ot.Quantity%mkt.LotSize != 0 || ord.Remaining()%mkt.LotSize != 0 {
+		if ot.Quantity%mkt.LotSize != 0 || ot.Remaining()%mkt.LotSize != 0 {
 			return false
 		}
 	default:

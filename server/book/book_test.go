@@ -39,7 +39,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 		addr = "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm"
 	}
 	return &order.LimitOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  acct0,
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -47,7 +47,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins:    []order.CoinID{},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,

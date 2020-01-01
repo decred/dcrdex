@@ -90,8 +90,8 @@ func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, 
 	stmt := fmt.Sprintf(internal.UpsertMatch, tableName)
 	epochID := fmt.Sprintf("%d:%d", match.Epoch.Idx, match.Epoch.Dur)
 	return sqlExec(dbe, stmt, match.ID(),
-		match.Taker.ID(), match.Taker.User(), match.Taker.SwapAddress(),
-		match.Maker.ID(), match.Maker.User(), match.Maker.SwapAddress(),
+		match.Taker.ID(), match.Taker.User(), match.Taker.Trade().SwapAddress(),
+		match.Maker.ID(), match.Maker.User(), match.Maker.Trade().SwapAddress(),
 		epochID, int64(match.Quantity), int64(match.Rate), int8(match.Status),
 		match.Sigs.TakerMatch, match.Sigs.MakerMatch,
 		match.Sigs.TakerAudit, match.Sigs.MakerAudit,

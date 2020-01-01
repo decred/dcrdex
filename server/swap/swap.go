@@ -855,9 +855,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		s.respondError(msg.ID, actor.user, msgjson.ContractError, fmt.Sprintf("error auditing contract: %v", err))
 		return dontTryAgain
 	}
-	if recipient != counterParty.order.SwapAddress() {
+	if recipient != counterParty.order.Trade().SwapAddress() {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			fmt.Sprintf("incorrect recipient. expected %s. got %s", recipient, counterParty.order.SwapAddress()))
+			fmt.Sprintf("incorrect recipient. expected %s. got %s", recipient, counterParty.order.Trade().SwapAddress()))
 		return dontTryAgain
 	}
 	if val != stepInfo.checkVal {
@@ -1135,6 +1135,16 @@ func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
 	return matches
 }
 
+// extractAddress extracts the address from the order. If the order is a cancel
+// order, an empty string is returned.
+func extractAddress(ord order.Order) string {
+	trade := ord.Trade()
+	if trade == nil {
+		return ""
+	}
+	return trade.Address
+}
+
 // matchNotifications creates a pair of msgjson.MatchNotification from a
 // matchTracker.
 func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
@@ -1144,14 +1154,14 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 			MatchID:  idToBytes(match.ID()),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
-			Address:  match.Taker.SwapAddress(),
+			Address:  extractAddress(match.Taker),
 			Time:     unixMs,
 		}, &msgjson.Match{
 			OrderID:  idToBytes(match.Taker.ID()),
 			MatchID:  idToBytes(match.ID()),
 			Quantity: match.Quantity,
 			Rate:     match.Rate,
-			Address:  match.Maker.SwapAddress(),
+			Address:  extractAddress(match.Maker),
 			Time:     unixMs,
 		}
 }
@@ -1236,7 +1246,7 @@ func (s *Swapper) LockOrdersCoins(orders []order.Order) {
 	for _, ord := range orders {
 		// Identify the asset of the locked coins.
 		asset := ord.Quote()
-		if ord.IsSell() {
+		if ord.Trade().Sell {
 			asset = ord.Base()
 		}
 		assetCoinOrders[asset] = append(assetCoinOrders[asset], ord)
@@ -1270,7 +1280,7 @@ func (s *Swapper) LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID
 // coins (when swaps are completed).
 func (s *Swapper) unlockOrderCoins(ord order.Order) {
 	asset := ord.Quote()
-	if ord.IsSell() {
+	if ord.Trade().Sell {
 		asset = ord.Base()
 	}
 

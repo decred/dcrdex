@@ -504,14 +504,14 @@ func TestLimit(t *testing.T) {
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
 	lo := &order.LimitOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  user.acct,
 			BaseAsset:  limit.Base,
 			QuoteAsset: limit.Quote,
 			OrderType:  order.LimitOrderType,
 			ClientTime: clientTime,
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Sell:     false,
 			Quantity: qty,
 			Address:  dcrAddr,
@@ -636,14 +636,14 @@ func TestMarketStartProcessStop(t *testing.T) {
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
 	mo := &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  user.acct,
 			BaseAsset:  mkt.Base,
 			QuoteAsset: mkt.Quote,
 			OrderType:  order.MarketOrderType,
 			ClientTime: clientTime,
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Sell:     false,
 			Quantity: qty,
 			Address:  dcrAddr,
@@ -750,7 +750,7 @@ func TestCancel(t *testing.T) {
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
 	co := &order.CancelOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  user.acct,
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,
@@ -1130,7 +1130,7 @@ func TestRouter(t *testing.T) {
 	}
 
 	compareTrade := func(msgOrder *msgjson.BookOrderNote, ord order.Order, tag string) {
-		prefix, trade := ord.Parts()
+		prefix, trade := ord.Prefix(), ord.Trade()
 		if trade.Sell != (msgOrder.Side == msgjson.SellOrderNum) {
 			t.Fatalf("%s: message order has wrong side marked. sell = %t, side = '%d'", tag, trade.Sell, msgOrder.Side)
 		}

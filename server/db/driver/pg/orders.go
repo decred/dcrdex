@@ -107,7 +107,7 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, or
 	if err != nil {
 		return nil, order.OrderStatusUnknown, err
 	}
-	prefix, _ := ord.Parts()
+	prefix := ord.Prefix()
 	prefix.BaseAsset, prefix.QuoteAsset = base, quote
 	return ord, pgToMarketStatus(status), nil
 }
@@ -483,7 +483,10 @@ func (a *Archiver) UpdateOrderStatus(ord order.Order, status order.OrderStatus) 
 }
 
 func (a *Archiver) updateOrderStatus(ord order.Order, status pgOrderStatus) error {
-	filled := int64(ord.FilledAmt())
+	var filled int64
+	if ord.Type() != order.CancelOrderType {
+		filled = int64(ord.Trade().Filled)
+	}
 	return a.updateOrderStatusByID(ord.ID(), ord.Base(), ord.Quote(), status, filled)
 }
 
@@ -562,8 +565,7 @@ func (a *Archiver) UpdateOrderFilled(ord order.Order) error {
 	default:
 		return fmt.Errorf("cannot set filled amount for order type %v", orderType)
 	}
-	filled := int64(ord.FilledAmt())
-	return a.UpdateOrderFilledByID(ord.ID(), ord.Base(), ord.Quote(), filled)
+	return a.UpdateOrderFilledByID(ord.ID(), ord.Base(), ord.Quote(), int64(ord.Trade().Filled))
 }
 
 // UserOrders retrieves all orders for the given account in the market specified
@@ -677,15 +679,15 @@ func loadTradeFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (order
 	switch prefix.OrderType {
 	case order.LimitOrderType:
 		return &order.LimitOrder{
-			Trade:  trade,
-			Prefix: prefix,
-			Rate:   rate,
-			Force:  tif,
+			T:     trade,
+			P:     prefix,
+			Rate:  rate,
+			Force: tif,
 		}, status, nil
 	case order.MarketOrderType:
 		return &order.MarketOrder{
-			Trade:  trade,
-			Prefix: prefix,
+			T: trade,
+			P: prefix,
 		}, status, nil
 
 	}

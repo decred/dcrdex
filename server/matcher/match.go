@@ -37,15 +37,20 @@ func New() *Matcher {
 // lot size, unless the order is a market buy order, which is not subject to
 // this constraint.
 func orderLotSizeOK(ord order.Order, lotSize uint64) bool {
-	if mo, ok := ord.(*order.MarketOrder); ok {
-		// Market buy orders are not subject to lot size constraints.
-		if !mo.Sell {
+	var remaining uint64
+	switch o := ord.(type) {
+	case *order.CancelOrder:
+		// NOTE: Cancel orders have 0 remaining by definition.
+		return true
+	case *order.MarketOrder:
+		if !o.Sell {
 			return true
 		}
+		remaining = o.Remaining()
+	case *order.LimitOrder:
+		remaining = o.Remaining()
 	}
-
-	// NOTE: Cancel orders have 0 remaining by definition.
-	return ord.Remaining()%lotSize == 0
+	return remaining%lotSize == 0
 }
 
 // assertOrderLotSize will panic if the remaining Order quantity is not a
@@ -54,9 +59,13 @@ func assertOrderLotSize(ord order.Order, lotSize uint64) {
 	if orderLotSizeOK(ord, lotSize) {
 		return
 	}
+	var remaining uint64
+	if ord.Trade() != nil {
+		remaining = ord.Trade().Remaining()
+	}
 	panic(fmt.Sprintf(
 		"order %v has remaining quantity %d that is not a multiple of lot size %d",
-		ord.ID(), ord.Remaining(), lotSize))
+		ord.ID(), remaining, lotSize))
 }
 
 // BaseToQuote computes a quote asset amount based on a base asset amount
@@ -285,10 +294,10 @@ func matchMarketSellOrder(book Booker, ord *order.MarketOrder) (matchSet *order.
 	// A market sell order is a special case of a limit order with time-in-force
 	// immediate and no minimum rate (a rate of 0).
 	limOrd := &order.LimitOrder{
-		Prefix: ord.Prefix,
-		Trade:  ord.Trade,
-		Force:  order.ImmediateTiF,
-		Rate:   0,
+		P:     ord.P,
+		T:     ord.T,
+		Force: order.ImmediateTiF,
+		Rate:  0,
 	}
 	matchSet = matchLimitOrder(book, limOrd)
 	if matchSet == nil {

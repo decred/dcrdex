@@ -71,7 +71,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 		addr = "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm"
 	}
 	return &order.LimitOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  randomAccountID(),
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -79,7 +79,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins: []order.CoinID{
 				randomBytes(36),
 				randomBytes(36),
@@ -95,7 +95,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 
 func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  randomAccountID(),
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -103,7 +103,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins:    []order.CoinID{randomBytes(36)},
 			Sell:     true,
 			Quantity: quantityLots * LotSize,
@@ -114,7 +114,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 
 func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  randomAccountID(),
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -122,7 +122,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins:    []order.CoinID{randomBytes(36)},
 			Sell:     false,
 			Quantity: quantityQuoteAsset,
@@ -133,7 +133,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 
 func newCancelOrder(targetOrderID order.OrderID, base, quote uint32, timeOffset int64) *order.CancelOrder {
 	return &order.CancelOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  randomAccountID(),
 			BaseAsset:  base,
 			QuoteAsset: quote,

@@ -197,7 +197,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 
 	// Create the limit order
 	lo := &order.LimitOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  limit.Base,
 			QuoteAsset: limit.Quote,
@@ -205,7 +205,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			ClientTime: order.UnixTimeMilli(int64(limit.ClientTime)),
 			//ServerTime set in epoch queue processing pipeline.
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins:    utxos,
 			Sell:     sell,
 			Quantity: limit.Quantity,
@@ -287,7 +287,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	clientTime := order.UnixTimeMilli(int64(market.ClientTime))
 	serverTime := time.Now().Truncate(time.Millisecond).UTC()
 	mo := &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  market.Base,
 			QuoteAsset: market.Quote,
@@ -295,7 +295,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			ClientTime: clientTime,
 			ServerTime: serverTime,
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins:    coins,
 			Sell:     sell,
 			Quantity: market.Quantity,
@@ -360,7 +360,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	clientTime := order.UnixTimeMilli(int64(cancel.ClientTime))
 	serverTime := time.Now().Truncate(time.Millisecond).UTC()
 	co := &order.CancelOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,

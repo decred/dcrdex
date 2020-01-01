@@ -49,7 +49,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 		addr = "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm"
 	}
 	return &order.LimitOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  acct0,
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -57,7 +57,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins:    []order.CoinID{},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,
@@ -70,7 +70,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 
 func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  acct0,
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -78,7 +78,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins:    []order.CoinID{},
 			Sell:     true,
 			Quantity: quantityLots * LotSize,
@@ -89,7 +89,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 
 func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  acct0,
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -97,7 +97,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		Trade: order.Trade{
+		T: order.Trade{
 			Coins:    []order.CoinID{},
 			Sell:     false,
 			Quantity: quantityQuoteAsset,
@@ -611,7 +611,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 
 func newCancelOrder(targetOrderID order.OrderID, serverTime time.Time) *order.CancelOrder {
 	return &order.CancelOrder{
-		Prefix:        order.Prefix{ServerTime: serverTime},
+		P:             order.Prefix{ServerTime: serverTime},
 		TargetOrderID: targetOrderID,
 	}
 }
@@ -1075,9 +1075,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				if !reflect.DeepEqual(matches[i], tt.wantMatches[i]) {
 					t.Errorf("matches[%d] = %v, want %v", i, matches[i], tt.wantMatches[i])
 				}
-				if matches[i].Taker.Remaining() != tt.remaining[i] {
+				if matches[i].Taker.Trade().Remaining() != tt.remaining[i] {
 					t.Errorf("Incorrect taker order amount remaining. Expected %d, got %d",
-						tt.remaining[i], matches[i].Taker.Remaining())
+						tt.remaining[i], matches[i].Taker.Trade().Remaining())
 				}
 			}
 			if len(passed) != tt.wantNumPassed {
