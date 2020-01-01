@@ -379,8 +379,8 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 // the appropriate flags in the swapStatus structures.
 func (s *Swapper) processBlock(block *blockNotification) {
 	completions := make([]*matchTracker, 0)
-	s.matchMtx.RLock()
-	defer s.matchMtx.RUnlock()
+	s.matchMtx.Lock()
+	defer s.matchMtx.Unlock()
 	for _, match := range s.matches {
 		// If it's neither of the match assets, nothing to do.
 		if match.makerStatus.swapAsset != block.assetID && match.takerStatus.swapAsset != block.assetID {
@@ -409,27 +409,103 @@ func (s *Swapper) processBlock(block *blockNotification) {
 		case order.MatchComplete:
 			// Once both redemption transactions have SwapConf confirmations, the
 			// order is complete.
-			var makerRedeemed, takerRedeemed bool
-			mStatus, tStatus := match.makerStatus, match.takerStatus
-			if !mStatus.redeemTime.IsZero() {
-				confs, err := mStatus.redemption.Confirmations()
-				makerRedeemed = err == nil && confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
-			}
-			if makerRedeemed && !tStatus.redeemTime.IsZero() {
-				confs, err := tStatus.redemption.Confirmations()
-				takerRedeemed = err == nil && confs >= int64(s.coins[mStatus.swapAsset].SwapConf)
-			}
+			makerRedeemed, takerRedeemed := s.redeemStatus(match)
 			// TODO: Can coins be unlocked now regardless of redemption?
 			if makerRedeemed && takerRedeemed {
 				completions = append(completions, match)
 			}
 		}
 	}
+
 	for _, match := range completions {
 		s.unlockOrderCoins(match.Taker)
 		s.unlockOrderCoins(match.Maker)
+		// Remove the completed match. Note that checkInaction may also remove
+		// matches, so this entire function must lock even if there are no
+		// completions.
 		delete(s.matches, match.ID().String())
 	}
+}
+
+func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerRedeemComplete bool) {
+	makerRedeemComplete = s.makerRedeemStatus(match)
+	tStatus := match.takerStatus
+	// Taker is only complete if the maker is complete because
+	// order.MatchComplete follows order.MakerRedeemed.
+	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
+		confs, err := tStatus.redemption.Confirmations()
+		if err != nil {
+			log.Errorf("Confirmations failed for taker redemption %v: err",
+				tStatus.redemption.TxID(), err)
+			return
+		}
+		takerRedeemComplete = confs >= int64(s.coins[match.makerStatus.swapAsset].SwapConf)
+	}
+	return
+}
+
+func (s *Swapper) makerRedeemStatus(match *matchTracker) (makerRedeemComplete bool) {
+	mStatus, tStatus := match.makerStatus, match.takerStatus
+	if !mStatus.redeemTime.IsZero() {
+		confs, err := mStatus.redemption.Confirmations()
+		if err != nil {
+			log.Errorf("Confirmations failed for maker redemption %v: err",
+				mStatus.redemption.TxID(), err) // Severity?
+			return
+		}
+		makerRedeemComplete = confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
+	}
+	return
+}
+
+// TxMonitored determines whether the transaction for the given user is involved
+// in a DEX-monitored trade. Note that the swap contract tx is considered
+// monitored until the swap is complete, regardless of confirms. This allows
+// change outputs from a dex-monitored swap contract to be used to fund
+// additional swaps prior to FundConf. e.g. OrderRouter may allow coins to fund
+// orders where: (coins.confs >= FundConf) OR TxMonitored(coins.tx).
+func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
+	s.matchMtx.RLock()
+	defer s.matchMtx.RUnlock()
+
+	for _, match := range s.matches {
+		// The swap contract of either the maker or taker must correspond to
+		// specified asset to be of interest.
+		switch asset {
+		case match.makerStatus.swapAsset:
+			// Maker's swap transaction is the asset of interest.
+			if user == match.Maker.User() && match.makerStatus.swap.TxID() == txid {
+				// The swap contract tx is considered monitored until the swap
+				// is complete, regardless of confirms.
+				return true
+			}
+
+			// Taker's redemption transaction is the asset of interest.
+			_, takerRedeemDone := s.redeemStatus(match)
+			if !takerRedeemDone && user == match.Taker.User() &&
+				match.takerStatus.redemption.TxID() == txid {
+				return true
+			}
+		case match.takerStatus.swapAsset:
+			// Taker's swap transaction is the asset of interest.
+			if user == match.Taker.User() && match.takerStatus.swap.TxID() == txid {
+				// The swap contract tx is considered monitored until the swap
+				// is complete, regardless of confirms.
+				return true
+			}
+
+			// Maker's redemption transaction is the asset of interest.
+			makerRedeemDone := s.makerRedeemStatus(match)
+			if !makerRedeemDone && user == match.Maker.User() &&
+				match.makerStatus.redemption.TxID() == txid {
+				return true
+			}
+		default:
+			continue
+		}
+	}
+
+	return false
 }
 
 // checkInaction scans the swapStatus structures relevant to the specified
@@ -438,8 +514,8 @@ func (s *Swapper) processBlock(block *blockNotification) {
 func (s *Swapper) checkInaction(assetID uint32) {
 	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
 	deletions := make([]string, 0)
-	s.matchMtx.RLock()
-	defer s.matchMtx.RUnlock()
+	s.matchMtx.Lock()
+	defer s.matchMtx.Unlock()
 	for _, match := range s.matches {
 		if match.makerStatus.swapAsset != assetID && match.takerStatus.swapAsset != assetID {
 			continue
@@ -505,6 +581,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// Nothing to do here right now.
 		}
 	}
+
 	for _, matchID := range deletions {
 		delete(s.matches, matchID)
 	}

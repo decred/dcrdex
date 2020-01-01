@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/db"
@@ -42,6 +43,7 @@ type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet)
 	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
 	LockOrdersCoins(orders []order.Order)
+	TxMonitored(user account.AccountID, asset uint32, txid string) bool
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -116,6 +118,12 @@ func newOrderUpdateSignal(ord *orderRecord) *orderUpdateSignal {
 // the synchronous version of SubmitOrderAsync.
 func (m *Market) SubmitOrder(rec *orderRecord) error {
 	return <-m.SubmitOrderAsync(rec)
+}
+
+// TxMonitored checks if a user's transaction for a certain asset is being
+// monitored by the Swapper.
+func (m *Market) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
+	return m.swapper.TxMonitored(user, asset, txid)
 }
 
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.
