@@ -285,9 +285,10 @@ func matchMarketSellOrder(book Booker, ord *order.MarketOrder) (matchSet *order.
 	// A market sell order is a special case of a limit order with time-in-force
 	// immediate and no minimum rate (a rate of 0).
 	limOrd := &order.LimitOrder{
-		MarketOrder: *ord,
-		Force:       order.ImmediateTiF,
-		Rate:        0,
+		Prefix: ord.Prefix,
+		Trade:  ord.Trade,
+		Force:  order.ImmediateTiF,
+		Rate:   0,
 	}
 	matchSet = matchLimitOrder(book, limOrd)
 	if matchSet == nil {

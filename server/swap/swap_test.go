@@ -752,15 +752,15 @@ func makeCancelOrder(limitOrder *order.LimitOrder, user *tUser) *order.CancelOrd
 
 func makeLimitOrder(qty, rate uint64, user *tUser, makerSell bool) *order.LimitOrder {
 	return &order.LimitOrder{
-		MarketOrder: order.MarketOrder{
-			Prefix: order.Prefix{
-				AccountID:  user.acct,
-				BaseAsset:  ABCID,
-				QuoteAsset: XYZID,
-				OrderType:  order.LimitOrderType,
-				ClientTime: order.UnixTimeMilli(1566497654000),
-				ServerTime: order.UnixTimeMilli(1566497655000),
-			},
+		Prefix: order.Prefix{
+			AccountID:  user.acct,
+			BaseAsset:  ABCID,
+			QuoteAsset: XYZID,
+			OrderType:  order.LimitOrderType,
+			ClientTime: order.UnixTimeMilli(1566497654000),
+			ServerTime: order.UnixTimeMilli(1566497655000),
+		},
+		Trade: order.Trade{
 			Sell:     makerSell,
 			Quantity: qty,
 			Address:  user.addr,
@@ -779,9 +779,11 @@ func makeMarketOrder(qty uint64, user *tUser, makerSell bool) *order.MarketOrder
 			ClientTime: order.UnixTimeMilli(1566497654000),
 			ServerTime: order.UnixTimeMilli(1566497655000),
 		},
-		Sell:     makerSell,
-		Quantity: qty,
-		Address:  user.addr,
+		Trade: order.Trade{
+			Sell:     makerSell,
+			Quantity: qty,
+			Address:  user.addr,
+		},
 	}
 }
 

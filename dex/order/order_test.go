@@ -197,11 +197,13 @@ func TestMarketOrder_Serialize_SerializeSize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &MarketOrder{
-				Prefix:   tt.fields.Prefix,
-				Coins:    tt.fields.Coins,
-				Sell:     tt.fields.Sell,
-				Quantity: tt.fields.Quantity,
-				Address:  tt.fields.Address,
+				Prefix: tt.fields.Prefix,
+				Trade: Trade{
+					Coins:    tt.fields.Coins,
+					Sell:     tt.fields.Sell,
+					Quantity: tt.fields.Quantity,
+					Address:  tt.fields.Address,
+				},
 			}
 			got := o.Serialize()
 			if !reflect.DeepEqual(got, tt.want) {
@@ -239,13 +241,15 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 						ClientTime: time.Unix(1566497653, 0),
 						ServerTime: time.Unix(1566497656, 0),
 					},
-					Coins: []CoinID{
-						utxoCoinID("d186e4b6625c9c94797cc494f535fc150177e0619e2303887e0a677f29ef1bab", 0),
-						utxoCoinID("11d9580e19ad65a875a5bc558d600e96b2916062db9e8b65cbc2bb905207c1ad", 16),
+					Trade: Trade{
+						Coins: []CoinID{
+							utxoCoinID("d186e4b6625c9c94797cc494f535fc150177e0619e2303887e0a677f29ef1bab", 0),
+							utxoCoinID("11d9580e19ad65a875a5bc558d600e96b2916062db9e8b65cbc2bb905207c1ad", 16),
+						},
+						Sell:     false,
+						Quantity: 132413241324,
+						Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 					},
-					Sell:     false,
-					Quantity: 132413241324,
-					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
 				Rate:  13241324,
 				Force: StandingTiF,
@@ -298,9 +302,10 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &LimitOrder{
-				MarketOrder: tt.fields.MarketOrder,
-				Rate:        tt.fields.Rate,
-				Force:       tt.fields.Force,
+				Prefix: tt.fields.MarketOrder.Prefix,
+				Trade:  tt.fields.MarketOrder.Trade,
+				Rate:   tt.fields.Rate,
+				Force:  tt.fields.Force,
 			}
 			got := o.Serialize()
 			if !reflect.DeepEqual(got, tt.want) {
@@ -422,11 +427,13 @@ func TestMarketOrder_ID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &MarketOrder{
-				Prefix:   tt.fields.Prefix,
-				Coins:    tt.fields.Coins,
-				Sell:     tt.fields.Sell,
-				Quantity: tt.fields.Quantity,
-				Address:  tt.fields.Address,
+				Prefix: tt.fields.Prefix,
+				Trade: Trade{
+					Coins:    tt.fields.Coins,
+					Sell:     tt.fields.Sell,
+					Quantity: tt.fields.Quantity,
+					Address:  tt.fields.Address,
+				},
 			}
 			remaining := o.Remaining()
 			if remaining != o.Quantity-o.Filled {
@@ -467,12 +474,14 @@ func TestLimitOrder_ID(t *testing.T) {
 						ClientTime: time.Unix(1566497653, 0),
 						ServerTime: time.Unix(1566497656, 0),
 					},
-					Coins: []CoinID{
-						utxoCoinID("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
+					Trade: Trade{
+						Coins: []CoinID{
+							utxoCoinID("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
+						},
+						Sell:     false,
+						Quantity: 132413241324,
+						Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 					},
-					Sell:     false,
-					Quantity: 132413241324,
-					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
 				Rate:  13241324,
 				Force: StandingTiF,
@@ -483,9 +492,10 @@ func TestLimitOrder_ID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &LimitOrder{
-				MarketOrder: tt.fields.MarketOrder,
-				Rate:        tt.fields.Rate,
-				Force:       tt.fields.Force,
+				Trade:  tt.fields.MarketOrder.Trade,
+				Prefix: tt.fields.MarketOrder.Prefix,
+				Rate:   tt.fields.Rate,
+				Force:  tt.fields.Force,
 			}
 			remaining := o.Remaining()
 			if remaining != o.Quantity-o.Filled {

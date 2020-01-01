@@ -43,10 +43,12 @@ var (
 				ClientTime: time.Unix(1566497653, 0),
 				ServerTime: time.Unix(1566497656, 0),
 			},
-			Coins:    []order.CoinID{},
-			Sell:     false,
-			Quantity: 4 * LotSize,
-			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+			Trade: order.Trade{
+				Coins:    []order.CoinID{},
+				Sell:     false,
+				Quantity: 4 * LotSize,
+				Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+			},
 		},
 		{ // market SELL of 2 lots
 			Prefix: order.Prefix{
@@ -57,24 +59,26 @@ var (
 				ClientTime: time.Unix(1566497654, 0),
 				ServerTime: time.Unix(1566497656, 0),
 			},
-			Coins:    []order.CoinID{},
-			Sell:     true,
-			Quantity: 2 * LotSize,
-			Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+			Trade: order.Trade{
+				Coins:    []order.CoinID{},
+				Sell:     true,
+				Quantity: 2 * LotSize,
+				Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+			},
 		},
 	}
 
 	limitOrders = []*order.LimitOrder{
 		{ // limit BUY of 2 lots at 0.043
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  acct0,
-					BaseAsset:  AssetDCR,
-					QuoteAsset: AssetBTC,
-					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(1566497653, 0),
-					ServerTime: time.Unix(1566497656, 0),
-				},
+			Prefix: order.Prefix{
+				AccountID:  acct0,
+				BaseAsset:  AssetDCR,
+				QuoteAsset: AssetBTC,
+				OrderType:  order.LimitOrderType,
+				ClientTime: time.Unix(1566497653, 0),
+				ServerTime: time.Unix(1566497656, 0),
+			},
+			Trade: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     false,
 				Quantity: 2 * LotSize,
@@ -84,15 +88,15 @@ var (
 			Force: order.StandingTiF,
 		},
 		{ // limit SELL of 3 lots at 0.045
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  acct0,
-					BaseAsset:  AssetDCR,
-					QuoteAsset: AssetBTC,
-					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(1566497651, 0),
-					ServerTime: time.Unix(1566497652, 0),
-				},
+			Prefix: order.Prefix{
+				AccountID:  acct0,
+				BaseAsset:  AssetDCR,
+				QuoteAsset: AssetBTC,
+				OrderType:  order.LimitOrderType,
+				ClientTime: time.Unix(1566497651, 0),
+				ServerTime: time.Unix(1566497652, 0),
+			},
+			Trade: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     true,
 				Quantity: 3 * LotSize,
@@ -102,15 +106,15 @@ var (
 			Force: order.StandingTiF,
 		},
 		{ // limit BUY of 1 lot at 0.046
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  acct0,
-					BaseAsset:  AssetDCR,
-					QuoteAsset: AssetBTC,
-					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(1566497655, 0),
-					ServerTime: time.Unix(1566497656, 0),
-				},
+			Prefix: order.Prefix{
+				AccountID:  acct0,
+				BaseAsset:  AssetDCR,
+				QuoteAsset: AssetBTC,
+				OrderType:  order.LimitOrderType,
+				ClientTime: time.Unix(1566497655, 0),
+				ServerTime: time.Unix(1566497656, 0),
+			},
+			Trade: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     false,
 				Quantity: 1 * LotSize,
@@ -120,15 +124,15 @@ var (
 			Force: order.StandingTiF,
 		},
 		{ // limit BUY of 1 lot at 0.045
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  acct0,
-					BaseAsset:  AssetDCR,
-					QuoteAsset: AssetBTC,
-					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(1566497649, 0),
-					ServerTime: time.Unix(1566497651, 0),
-				},
+			Prefix: order.Prefix{
+				AccountID:  acct0,
+				BaseAsset:  AssetDCR,
+				QuoteAsset: AssetBTC,
+				OrderType:  order.LimitOrderType,
+				ClientTime: time.Unix(1566497649, 0),
+				ServerTime: time.Unix(1566497651, 0),
+			},
+			Trade: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     false,
 				Quantity: 1 * LotSize,
@@ -210,15 +214,15 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 		addr = "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm"
 	}
 	return &order.LimitOrder{
-		MarketOrder: order.MarketOrder{
-			Prefix: order.Prefix{
-				AccountID:  acct0,
-				BaseAsset:  AssetDCR,
-				QuoteAsset: AssetBTC,
-				OrderType:  order.LimitOrderType,
-				ClientTime: time.Unix(1566497653+timeOffset, 0),
-				ServerTime: time.Unix(1566497656+timeOffset, 0),
-			},
+		Prefix: order.Prefix{
+			AccountID:  acct0,
+			BaseAsset:  AssetDCR,
+			QuoteAsset: AssetBTC,
+			OrderType:  order.LimitOrderType,
+			ClientTime: time.Unix(1566497653+timeOffset, 0),
+			ServerTime: time.Unix(1566497656+timeOffset, 0),
+		},
+		Trade: order.Trade{
 			Coins:    []order.CoinID{},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,
@@ -239,10 +243,12 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		Coins:    []order.CoinID{},
-		Sell:     true,
-		Quantity: quantityLots * LotSize,
-		Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+		Trade: order.Trade{
+			Coins:    []order.CoinID{},
+			Sell:     true,
+			Quantity: quantityLots * LotSize,
+			Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+		},
 	}
 }
 
@@ -256,10 +262,12 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		Coins:    []order.CoinID{},
-		Sell:     false,
-		Quantity: quantityQuoteAsset,
-		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+		Trade: order.Trade{
+			Coins:    []order.CoinID{},
+			Sell:     false,
+			Quantity: quantityQuoteAsset,
+			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+		},
 	}
 }
 

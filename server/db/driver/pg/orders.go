@@ -89,7 +89,7 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, or
 	// - try to load from orders table, which includes market and limit orders
 	// - if found, coerce into the correct order type and return
 	// - if not found, try loading a cancel order with this oid
-	lo, status, err := loadLimitOrder(a.db, a.dbName, marketSchema, oid)
+	ord, status, err := loadTrade(a.db, a.dbName, marketSchema, oid)
 	if errA, ok := err.(db.ArchiveError); ok {
 		if errA.Code != db.ErrUnknownOrder {
 			return nil, order.OrderStatusUnknown, err
@@ -107,21 +107,9 @@ func (a *Archiver) Order(oid order.OrderID, base, quote uint32) (order.Order, or
 	if err != nil {
 		return nil, order.OrderStatusUnknown, err
 	}
-
-	lo.BaseAsset, lo.QuoteAsset = base, quote
-
-	// Since loadLimitOrder returns both market and limit orders in a
-	// *LimitOrder, identify the real type via the OrderType field. Extract the
-	// MarketOrder if necessary.
-	switch lo.OrderType {
-	case order.MarketOrderType:
-		return &lo.MarketOrder, pgToMarketStatus(status), nil
-	case order.LimitOrderType:
-		return lo, pgToMarketStatus(status), nil
-	}
-
-	return nil, order.OrderStatusUnknown,
-		fmt.Errorf("retrieved unsupported order type %d (%s)", lo.OrderType, lo.OrderType)
+	prefix, _ := ord.Parts()
+	prefix.BaseAsset, prefix.QuoteAsset = base, quote
+	return ord, pgToMarketStatus(status), nil
 }
 
 type pgOrderStatus uint16
@@ -641,50 +629,67 @@ func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderS
 	}
 }
 
-func loadLimitOrder(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (*order.LimitOrder, pgOrderStatus, error) {
+func loadTrade(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (order.Order, pgOrderStatus, error) {
 	// Search active orders first.
 	fullTable := fullOrderTableName(dbName, marketSchema, false)
-	lo, status, err := loadLimitOrderFromTable(dbe, fullTable, oid)
+	ord, status, err := loadTradeFromTable(dbe, fullTable, oid)
 	switch err {
 	case sql.ErrNoRows:
 		// try archived orders next
 	case nil:
 		// found
-		return lo, status, nil
+		return ord, status, nil
 	default:
 		// query error
-		return lo, orderStatusUnknown, err
+		return ord, orderStatusUnknown, err
 	}
 
 	// Search archived orders.
 	fullTable = fullOrderTableName(dbName, marketSchema, true)
-	lo, status, err = loadLimitOrderFromTable(dbe, fullTable, oid)
+	ord, status, err = loadTradeFromTable(dbe, fullTable, oid)
 	switch err {
 	case sql.ErrNoRows:
 		return nil, orderStatusUnknown, db.ArchiveError{Code: db.ErrUnknownOrder}
 	case nil:
 		// found
-		return lo, status, nil
+		return ord, status, nil
 	default:
 		// query error
 		return nil, orderStatusUnknown, err
 	}
 }
 
-func loadLimitOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.LimitOrder, pgOrderStatus, error) {
+func loadTradeFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (order.Order, pgOrderStatus, error) {
 	stmt := fmt.Sprintf(internal.SelectOrder, fullTable)
 
-	var lo order.LimitOrder
+	var prefix order.Prefix
+	var trade order.Trade
 	var id order.OrderID
+	var tif order.TimeInForce
+	var rate uint64
 	var status pgOrderStatus
-	err := dbe.QueryRow(stmt, oid).Scan(&id, &lo.OrderType, &lo.Sell,
-		&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, (*dbCoins)(&lo.Coins),
-		&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
+	err := dbe.QueryRow(stmt, oid).Scan(&id, &prefix.OrderType, &trade.Sell,
+		&prefix.AccountID, &trade.Address, &prefix.ClientTime, &prefix.ServerTime, (*dbCoins)(&trade.Coins),
+		&trade.Quantity, &rate, &tif, &status, &trade.Filled)
 	if err != nil {
 		return nil, orderStatusUnknown, err
 	}
+	switch prefix.OrderType {
+	case order.LimitOrderType:
+		return &order.LimitOrder{
+			Trade:  trade,
+			Prefix: prefix,
+			Rate:   rate,
+			Force:  tif,
+		}, status, nil
+	case order.MarketOrderType:
+		return &order.MarketOrder{
+			Trade:  trade,
+			Prefix: prefix,
+		}, status, nil
 
-	return &lo, status, nil
+	}
+	return nil, 0, fmt.Errorf("unknown order type %d retreived", prefix.OrderType)
 }
 
 func userOrders(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, aid account.AccountID) ([]order.Order, []pgOrderStatus, error) {

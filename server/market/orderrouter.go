@@ -197,15 +197,15 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 
 	// Create the limit order
 	lo := &order.LimitOrder{
-		MarketOrder: order.MarketOrder{
-			Prefix: order.Prefix{
-				AccountID:  user,
-				BaseAsset:  limit.Base,
-				QuoteAsset: limit.Quote,
-				OrderType:  order.LimitOrderType,
-				ClientTime: order.UnixTimeMilli(int64(limit.ClientTime)),
-				//ServerTime set in epoch queue processing pipeline.
-			},
+		Prefix: order.Prefix{
+			AccountID:  user,
+			BaseAsset:  limit.Base,
+			QuoteAsset: limit.Quote,
+			OrderType:  order.LimitOrderType,
+			ClientTime: order.UnixTimeMilli(int64(limit.ClientTime)),
+			//ServerTime set in epoch queue processing pipeline.
+		},
+		Trade: order.Trade{
 			Coins:    utxos,
 			Sell:     sell,
 			Quantity: limit.Quantity,
@@ -295,10 +295,12 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 			ClientTime: clientTime,
 			ServerTime: serverTime,
 		},
-		Coins:    coins,
-		Sell:     sell,
-		Quantity: market.Quantity,
-		Address:  market.Address,
+		Trade: order.Trade{
+			Coins:    coins,
+			Sell:     sell,
+			Quantity: market.Quantity,
+			Address:  market.Address,
+		},
 	}
 
 	// Send the order to the epoch queue.

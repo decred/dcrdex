@@ -52,15 +52,15 @@ type Market struct {
 // values.
 func WriteLimitOrder(writer *Writer, rate, lots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
 	return &order.LimitOrder{
-		MarketOrder: order.MarketOrder{
-			Prefix: order.Prefix{
-				AccountID:  writer.Acct,
-				BaseAsset:  writer.Market.Base,
-				QuoteAsset: writer.Market.Quote,
-				OrderType:  order.LimitOrderType,
-				ClientTime: time.Unix(baseClientTime+timeOffset, 0),
-				ServerTime: time.Unix(baseServerTime+timeOffset, 0),
-			},
+		Prefix: order.Prefix{
+			AccountID:  writer.Acct,
+			BaseAsset:  writer.Market.Base,
+			QuoteAsset: writer.Market.Quote,
+			OrderType:  order.LimitOrderType,
+			ClientTime: time.Unix(baseClientTime+timeOffset, 0),
+			ServerTime: time.Unix(baseServerTime+timeOffset, 0),
+		},
+		Trade: order.Trade{
 			Coins:    []order.CoinID{},
 			Sell:     writer.Sell,
 			Quantity: lots * writer.Market.LotSize,
@@ -86,10 +86,12 @@ func WriteMarketOrder(writer *Writer, lots uint64, timeOffset int64) *order.Mark
 			ClientTime: time.Unix(baseClientTime+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(baseServerTime+timeOffset, 0).UTC(),
 		},
-		Coins:    []order.CoinID{},
-		Sell:     writer.Sell,
-		Quantity: lots,
-		Address:  writer.Addr,
+		Trade: order.Trade{
+			Coins:    []order.CoinID{},
+			Sell:     writer.Sell,
+			Quantity: lots,
+			Address:  writer.Addr,
+		},
 	}
 }
 

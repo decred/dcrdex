@@ -167,6 +167,8 @@ type Order interface {
 	// filled orders where each fill creates change that must then be tracked as
 	// the new backing coins.
 	CoinIDs() []CoinID
+
+	Parts() (*Prefix, *Trade)
 }
 
 // zeroTime is the Unix time for a Time where IsZero() == true.
@@ -281,14 +283,12 @@ func (p *Prefix) Quote() uint32 {
 	return p.QuoteAsset
 }
 
-// MarketOrder defines a market order in terms of a Prefix and the order
-// details, including the backing Coins, the order direction/side, order
-// quantity, and the address where the matched client will send funds. The order
-// quantity is in atoms of the base asset, and must be an integral multiple of
-// the asset's lot size, except for Market buy orders when it is in units of the
-// quote asset and is not bound by integral lot size multiple constraints.
-type MarketOrder struct {
-	Prefix
+// Type returns MarketOrderType for a MarketOrder.
+func (o *Prefix) Type() OrderType {
+	return o.OrderType
+}
+
+type Trade struct {
 	Coins    []CoinID
 	Sell     bool
 	Quantity uint64
@@ -298,38 +298,33 @@ type MarketOrder struct {
 	Filled uint64
 }
 
-// ID computes the order ID.
-func (o *MarketOrder) ID() OrderID {
-	if o.id != nil {
-		return *o.id
-	}
-	id := calcOrderID(o)
-	o.id = &id
-	return id
+// Filled returns the filled order amount.
+func (o *Trade) FilledAmt() uint64 {
+	return o.Filled
 }
 
-// UID computes the order ID, returning the string representation.
-func (o *MarketOrder) UID() string {
-	if o.uid != "" {
-		return o.uid
-	}
-	uid := o.ID().String()
-	o.uid = uid
-	return uid
+// Remaining returns the remaining order amount.
+func (o *Trade) Remaining() uint64 {
+	return o.Quantity - o.Filled
+}
+
+// IsSell indicates if the order is selling the base asset.
+func (o *Trade) IsSell() bool {
+	return o.Sell
+}
+
+// CoinIDs returns the order's backing coins.
+func (o *Trade) CoinIDs() []CoinID {
+	return o.Coins
 }
 
 // SwapAddress returns the order's payment address.
-func (o *MarketOrder) SwapAddress() string {
+func (o *Trade) SwapAddress() string {
 	return o.Address
 }
 
-// String is the same as UID. It is defined to satisfy Stringer.
-func (o *MarketOrder) String() string {
-	return o.UID()
-}
-
 // SerializeSize returns the length of the serialized MarketOrder.
-func (o *MarketOrder) SerializeSize() int {
+func (o *Trade) SerializeSize() int {
 	// Compute the size of the serialized Coin IDs.
 	var coinSz int
 	for _, coinID := range o.Coins {
@@ -338,16 +333,13 @@ func (o *MarketOrder) SerializeSize() int {
 	}
 	// The serialized order includes a byte for coin count, but this is implicit
 	// in coin slice length.
-	return o.Prefix.SerializeSize() + 1 + coinSz + 1 + 8 + len(o.Address)
+	return 1 + coinSz + 1 + 8 + len(o.Address)
 }
 
 // Serialize marshals the MarketOrder into a []byte.
-func (o *MarketOrder) Serialize() []byte {
+func (o *Trade) Serialize() []byte {
 	b := make([]byte, o.SerializeSize())
-
-	// Prefix
-	copy(b[:PrefixLen], o.Prefix.Serialize())
-	offset := PrefixLen
+	offset := 0
 
 	// Coin count
 	b[offset] = uint8(len(o.Coins))
@@ -377,29 +369,68 @@ func (o *MarketOrder) Serialize() []byte {
 	return b
 }
 
-// Type returns MarketOrderType for a MarketOrder.
-func (o *MarketOrder) Type() OrderType {
-	return MarketOrderType
+// MarketOrder defines a market order in terms of a Prefix and the order
+// details, including the backing Coins, the order direction/side, order
+// quantity, and the address where the matched client will send funds. The order
+// quantity is in atoms of the base asset, and must be an integral multiple of
+// the asset's lot size, except for Market buy orders when it is in units of the
+// quote asset and is not bound by integral lot size multiple constraints.
+type MarketOrder struct {
+	Prefix
+	Trade
 }
 
-// Filled returns the filled order amount.
-func (o *MarketOrder) FilledAmt() uint64 {
-	return o.Filled
+// ID computes the order ID.
+func (o *MarketOrder) ID() OrderID {
+	if o.id != nil {
+		return *o.id
+	}
+	id := calcOrderID(o)
+	o.id = &id
+	return id
 }
 
-// Remaining returns the remaining order amount.
-func (o *MarketOrder) Remaining() uint64 {
-	return o.Quantity - o.Filled
+// UID computes the order ID, returning the string representation.
+func (o *MarketOrder) UID() string {
+	if o.uid != "" {
+		return o.uid
+	}
+	uid := o.ID().String()
+	o.uid = uid
+	return uid
 }
 
-// IsSell indicates if the order is selling the base asset.
-func (o *MarketOrder) IsSell() bool {
-	return o.Sell
+// String is the same as UID. It is defined to satisfy Stringer.
+func (o *MarketOrder) String() string {
+	return o.UID()
 }
 
-// CoinIDs returns the order's backing coins.
-func (o *MarketOrder) CoinIDs() []CoinID {
-	return o.Coins
+func (o *MarketOrder) Parts() (*Prefix, *Trade) {
+	return &o.Prefix, &o.Trade
+}
+
+// SerializeSize returns the length of the serialized MarketOrder.
+func (o *MarketOrder) SerializeSize() int {
+	// Compute the size of the serialized Coin IDs.
+	var coinSz int
+	for _, coinID := range o.Coins {
+		coinSz += len(coinID)
+		// TODO: ensure all Coin IDs have the same size, indicating the same asset?
+	}
+	// The serialized order includes a byte for coin count, but this is implicit
+	// in coin slice length.
+	return o.Prefix.SerializeSize() + o.Trade.SerializeSize()
+}
+
+// Serialize marshals the LimitOrder into a []byte.
+func (o *MarketOrder) Serialize() []byte {
+	b := make([]byte, o.SerializeSize())
+	// Prefix and data common with MarketOrder
+	offset := o.Prefix.SerializeSize()
+	copy(b[:offset], o.Prefix.Serialize())
+	tradeLen := o.Trade.SerializeSize()
+	copy(b[offset:offset+tradeLen], o.Trade.Serialize())
+	return b
 }
 
 // Ensure MarketOrder is an Order.
@@ -408,9 +439,10 @@ var _ Order = (*MarketOrder)(nil)
 // LimitOrder defines a limit order in terms of a MarketOrder and limit-specific
 // data including rate (price) and time in force.
 type LimitOrder struct {
-	MarketOrder        // order type in the prefix is the only difference
-	Rate        uint64 // price as atoms of quote asset, applied per 1e8 units of the base asset
-	Force       TimeInForce
+	Prefix
+	Trade
+	Rate  uint64 // price as atoms of quote asset, applied per 1e8 units of the base asset
+	Force TimeInForce
 }
 
 // ID computes the order ID.
@@ -433,6 +465,10 @@ func (o *LimitOrder) UID() string {
 	return uid
 }
 
+func (o *LimitOrder) Parts() (*Prefix, *Trade) {
+	return &o.Prefix, &o.Trade
+}
+
 // String is the same as UID. It is defined to satisfy Stringer.
 func (o *LimitOrder) String() string {
 	return o.UID()
@@ -440,15 +476,18 @@ func (o *LimitOrder) String() string {
 
 // SerializeSize returns the length of the serialized LimitOrder.
 func (o *LimitOrder) SerializeSize() int {
-	return o.MarketOrder.SerializeSize() + 8 + 1
+	return o.Prefix.SerializeSize() + o.Trade.SerializeSize() + 8 + 1
 }
 
 // Serialize marshals the LimitOrder into a []byte.
 func (o *LimitOrder) Serialize() []byte {
 	b := make([]byte, o.SerializeSize())
 	// Prefix and data common with MarketOrder
-	offset := o.MarketOrder.SerializeSize()
-	copy(b[:offset], o.MarketOrder.Serialize())
+	offset := o.Prefix.SerializeSize()
+	copy(b[:offset], o.Prefix.Serialize())
+	tradeLen := o.Trade.SerializeSize()
+	copy(b[offset:offset+tradeLen], o.Trade.Serialize())
+	offset += tradeLen
 
 	// Price rate
 	// var fb bytes.Buffer
@@ -507,6 +546,10 @@ func (o *CancelOrder) UID() string {
 	uid := o.ID().String()
 	o.uid = uid
 	return uid
+}
+
+func (o *CancelOrder) Parts() (*Prefix, *Trade) {
+	return &o.Prefix, nil
 }
 
 // String is the same as UID. It is defined to satisfy Stringer.
