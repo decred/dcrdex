@@ -59,15 +59,18 @@ func TestAccounts(t *testing.T) {
 	if len(dexURLs) != 0 {
 		t.Fatalf("unexpected non-empty accounts in fresh DB")
 	}
-	// Create and insert 10,000 accounts.
+	// Create and insert 1,000 accounts.
 	numToDo := 1000
+	if testing.Short() {
+		numToDo /= 4
+	}
 	accts := make([]*db.AccountInfo, 0, numToDo)
 	nTimes(numToDo, func(int) { accts = append(accts, dbtest.RandomAccountInfo()) })
 	tStart := time.Now()
 	nTimes(numToDo, func(i int) {
 		boltdb.CreateAccount(accts[i])
 	})
-	t.Logf("%d millseconds to insert %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
+	t.Logf("%d milliseconds to insert %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
 	tStart = time.Now()
 	nTimes(numToDo, func(i int) {
 		ai := accts[i]
@@ -77,7 +80,7 @@ func TestAccounts(t *testing.T) {
 		}
 		dbtest.MustCompareAccountInfo(t, ai, reAI)
 	})
-	t.Logf("%d millseconds to read and compare %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
+	t.Logf("%d milliseconds to read and compare %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
 
 	dexURLs = boltdb.ListAccounts()
 	if len(dexURLs) != numToDo {
@@ -157,8 +160,12 @@ func TestOrders(t *testing.T) {
 	base1, quote1 := randU32(), randU32()
 	base2, quote2 := randU32(), randU32()
 
-	numToDo := 1000 // must be a multiple of 4
+	numToDo := 1008 // must be a multiple of 16
 	numActive := 100
+	if testing.Short() {
+		numToDo /= 4
+		numActive /= 4
+	}
 	orders := make(map[int]*db.MetaOrder, numToDo)
 	orderIndex := make(map[order.OrderID]order.Order)
 	nTimes(numToDo, func(i int) {
@@ -227,7 +234,7 @@ func TestOrders(t *testing.T) {
 		ord := orderIndex[m.Order.ID()]
 		ordertest.MustCompareOrders(t, m.Order, ord)
 	}
-	t.Logf("%d millseconds to read and compare %d active MetaOrder", time.Since(tStart)/time.Millisecond, numActive)
+	t.Logf("%d milliseconds to read and compare %d active MetaOrder", time.Since(tStart)/time.Millisecond, numActive)
 
 	// Get the orders for account 1.
 	tStart = time.Now()
@@ -242,7 +249,7 @@ func TestOrders(t *testing.T) {
 		ord := orderIndex[m.Order.ID()]
 		ordertest.MustCompareOrders(t, m.Order, ord)
 	}
-	t.Logf("%d millseconds to read and compare %d account MetaOrder", time.Since(tStart)/time.Millisecond, numToDo/2)
+	t.Logf("%d milliseconds to read and compare %d account MetaOrder", time.Since(tStart)/time.Millisecond, numToDo/2)
 
 	// Filter the account's first half of orders by timestamp.
 	tStart = time.Now()
@@ -256,7 +263,7 @@ func TestOrders(t *testing.T) {
 	for _, mord := range sinceOrders {
 		mustContainOrder(t, acctOrders, mord)
 	}
-	t.Logf("%d millseconds to read %d time-filtered MetaOrders for account", time.Since(tStart)/time.Millisecond, numToDo/4)
+	t.Logf("%d milliseconds to read %d time-filtered MetaOrders for account", time.Since(tStart)/time.Millisecond, numToDo/4)
 
 	// Get the orders for the specified market.
 	tStart = time.Now()
@@ -267,7 +274,7 @@ func TestOrders(t *testing.T) {
 	if len(mktOrders) != numToDo/2 {
 		t.Fatalf("expected %d orders for market, got %d", numToDo/2, len(mktOrders))
 	}
-	t.Logf("%d millseconds to read and compare %d MetaOrder for market", time.Since(tStart)/time.Millisecond, numToDo/2)
+	t.Logf("%d milliseconds to read and compare %d MetaOrder for market", time.Since(tStart)/time.Millisecond, numToDo/2)
 
 	// Filter the market's first half out by timestamp.
 	tStart = time.Now()
@@ -281,7 +288,7 @@ func TestOrders(t *testing.T) {
 	for _, mord := range sinceOrders {
 		mustContainOrder(t, acctOrders, mord)
 	}
-	t.Logf("%d millseconds to read %d time-filtered MetaOrders for market", time.Since(tStart)/time.Millisecond, numToDo/4)
+	t.Logf("%d milliseconds to read %d time-filtered MetaOrders for market", time.Since(tStart)/time.Millisecond, numToDo/4)
 
 	// Same thing, but only last half
 	halfSince := len(sinceOrders) / 2
@@ -334,8 +341,12 @@ func TestMatches(t *testing.T) {
 	base, quote := randU32(), randU32()
 	acct := dbtest.RandomAccountInfo()
 
-	numToDo := 1000 // must be even
+	numToDo := 1000 // must be quadruply even e.g. numToDo/4 is even.
 	numActive := 100
+	if testing.Short() {
+		numToDo /= 4
+		numActive /= 4
+	}
 	metaMatches := make([]*db.MetaMatch, 0, numToDo)
 	matchIndex := make(map[order.MatchID]*db.MetaMatch, numToDo)
 	nTimes(numToDo, func(i int) {
@@ -363,7 +374,7 @@ func TestMatches(t *testing.T) {
 			t.Fatalf("update error: %v", err)
 		}
 	})
-	t.Logf("%d millseconds to insert %d account MetaMatch", time.Since(tStart)/time.Millisecond, numToDo)
+	t.Logf("%d milliseconds to insert %d account MetaMatch", time.Since(tStart)/time.Millisecond, numToDo)
 
 	tStart = time.Now()
 	activeMatches, err := boltdb.ActiveMatches()
@@ -378,7 +389,7 @@ func TestMatches(t *testing.T) {
 		ordertest.MustCompareUserMatch(t, m1.Match, m2.Match)
 		dbtest.MustCompareMatchProof(t, &m1.MetaData.Proof, &m2.MetaData.Proof)
 	}
-	t.Logf("%d millseconds to retrieve and compare %d active MetaMatch", time.Since(tStart)/time.Millisecond, numActive)
+	t.Logf("%d milliseconds to retrieve and compare %d active MetaMatch", time.Since(tStart)/time.Millisecond, numActive)
 
 	m := &db.MetaMatch{
 		MetaData: &db.MatchMetaData{
