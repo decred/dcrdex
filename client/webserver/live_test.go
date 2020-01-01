@@ -88,11 +88,12 @@ func (c *TCore) Balance(string) (float64, error) {
 
 func TestServer(t *testing.T) {
 	ctx, shutdown := context.WithCancel(context.Background())
+	time.AfterFunc(time.Minute*59, func() { shutdown() })
 	logger := slog.NewBackend(os.Stdout).Logger("TEST")
 	logger.SetLevel(slog.LevelTrace)
 	time.AfterFunc(time.Minute*60, func() { shutdown() })
 	go func() {
-		Run(ctx, &TCore{}, ":54321", logger)
+		Run(ctx, &TCore{}, ":54321", logger, true)
 	}()
 	<-ctx.Done()
 }

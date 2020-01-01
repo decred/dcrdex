@@ -236,7 +236,7 @@ func TestAPIRegister(t *testing.T) {
 
 	// Registration error
 	tCore.regErr = tErr
-	ensure(`{"msg":"registration error: test error","ok":false}`)
+	ensure(`{"ok":false,"msg":"registration error: test error"}`)
 	tCore.regErr = nil
 }
 
@@ -260,7 +260,7 @@ func TestAPILogin(t *testing.T) {
 
 	// Login error
 	tCore.loginErr = tErr
-	ensure(`{"msg":"login error: test error","ok":false}`)
+	ensure(`{"ok":false,"msg":"login error: test error"}`)
 	tCore.loginErr = nil
 }
 

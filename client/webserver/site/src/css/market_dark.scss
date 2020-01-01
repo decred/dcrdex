@@ -49,11 +49,11 @@ body.dark {
 
   .markettab.selected,
   .mktbalancelbl {
-    background-color: #0d0d0d;
+    background-color: $dark_bg_1;
   }
 
   .market-header {
-    background-color: #272727;
+    background-color: $dark_bg_3;
     color: inherit;
   }
 

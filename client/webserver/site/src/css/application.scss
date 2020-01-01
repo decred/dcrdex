@@ -1,6 +1,15 @@
 // Variables
 $grid-columns: 24;
 $font-color-dark: #dfe2e1;
+$buycolor_dark: #05a35a;
+$sellcolor_dark: #ae3333;
+$buycolor_light: #207a46;
+$sellcolor_light: #99302b;
+$light_bg_1: #eaeaea;
+$light_bg_2: #d5d5d5;
+$dark_bg_1: #0d0d0d;
+$dark_bg_2: #1a1a1a;
+$dark_bg_3: #272727;
 
 // Bootstrap
 @import "~bootstrap/scss/_functions.scss";

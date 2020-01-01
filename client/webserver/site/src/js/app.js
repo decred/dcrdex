@@ -254,12 +254,12 @@ function setMarket (main, dex, mkt) {
 function handleBook (main, chart, data, builder) {
   chart.set(data)
   const book = data.book
-  loadTable(book.buys, builder.buys, builder)
-  loadTable(book.sells, builder.sells, builder)
+  loadTable(book.buys, builder.buys, builder, 'buycolor')
+  loadTable(book.sells, builder.sells, builder, 'sellcolor')
 }
 
 // loadTables loads the order book side into the specified table.
-function loadTable (bookSide, table, builder) {
+function loadTable (bookSide, table, builder, cssClass) {
   while (table.firstChild) table.removeChild(table.firstChild)
   const check = document.createElement('span')
   check.classList.add('ico-check')
@@ -276,6 +276,7 @@ function loadTable (bookSide, table, builder) {
           break
         case 'rate':
           td.innerText = order.rate.toFixed(8)
+          td.classList.add(cssClass)
           break
         case 'epoch':
           if (order.epoch) td.appendChild(check.cloneNode())

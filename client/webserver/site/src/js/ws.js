@@ -1,5 +1,5 @@
-// MessageSocket is a WebSocket manager with that uses the Decred DEX
-// Mesage format for communications.
+// MessageSocket is a WebSocket manager that uses the Decred DEX Mesage format
+// for communications.
 //
 // Message request format:
 // {

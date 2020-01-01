@@ -28,15 +28,15 @@ body.dark {
   }
 
   .bg1 {
-    background-color: #0d0d0d;
+    background-color: $dark_bg_1;
   }
 
   .bg2 {
-    background-color: #1a1a1a;
+    background-color: $dark_bg_2;
   }
 
   .bg3 {
-    background-color: #272727;
+    background-color: $dark_bg_3;
   }
 
   button.selected {
@@ -60,5 +60,13 @@ body.dark {
 
   form.auth button:hover {
     color: #dde9ff;
+  }
+
+  .buycolor {
+    color: $buycolor_dark;
+  }
+
+  .sellcolor {
+    color: $sellcolor_dark;
   }
 }

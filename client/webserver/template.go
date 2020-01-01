@@ -136,6 +136,7 @@ func marketLogoPath(mktPath string, idx int) string {
 	return "/img/coins/" + strings.ToLower(pair[idx]) + ".png"
 }
 
+// templateFuncs are able to be called during template execution.
 var templateFuncs = template.FuncMap{
 	// baseLogoPath gets the logo image path for the base asset of the specified
 	// market.

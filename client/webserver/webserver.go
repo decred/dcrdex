@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
@@ -21,8 +20,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/dex/msgjson"
-	"decred.org/dcrdex/dex/ws"
 	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -47,14 +44,6 @@ var (
 	// websocket.Upgrader is the preferred method of upgrading a request to a
 	// websocket connection.
 	upgrader = websocket.Upgrader{}
-	// Time allowed to read the next pong message from the peer. The
-	// default is intended for production, but leaving as a var instead of const
-	// to facilitate testing.
-	pongWait = 60 * time.Second
-	// Send pings to peer with this period. Must be less than pongWait. The
-	// default is intended for production, but leaving as a var instead of const
-	// to facilitate testing.
-	pingPeriod = (pongWait * 9) / 10
 )
 
 // clientCore is satisfied by core.Core.
@@ -67,6 +56,7 @@ type clientCore interface {
 	Balance(string) (float64, error)
 }
 
+// marketSyncer is used internally to synchronize market subscriptions.
 type marketSyncer struct {
 	market string
 	kill   func()
@@ -86,7 +76,7 @@ type webServer struct {
 
 // Run is the single exported function of webserver. Run the server, listening
 // on the provided network address until the context is canceled.
-func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger) {
+func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger, reloadHTML bool) {
 	log = logger
 
 	folderExists := func(fp string) bool {
@@ -108,7 +98,7 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger) 
 
 	// Prepare the templates.
 	bb := "bodybuilder"
-	tmpl := newTemplates(fp(root, "src/html"), true).
+	tmpl := newTemplates(fp(root, "src/html"), reloadHTML).
 		addTemplate("login", bb).
 		addTemplate("register", bb).
 		addTemplate("markets", bb).
@@ -120,7 +110,7 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger) 
 		return
 	}
 
-	// Create an HTTP router, putting a couple of useful middlewares in place.
+	// Create an HTTP router.
 	mux := chi.NewRouter()
 	httpServer := &http.Server{
 		Handler:      mux,
@@ -180,40 +170,6 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger) 
 	log.Infof("Web server off")
 }
 
-func (s *webServer) handleWS(w http.ResponseWriter, r *http.Request) {
-	// If the IP address includes a port, remove it.
-	ip := r.RemoteAddr
-	// If a host:port can be parsed, the IP is only the host portion.
-	host, _, err := net.SplitHostPort(ip)
-	if err == nil && host != "" {
-		ip = host
-	}
-	wsConn, err := ws.NewConnection(w, r, pingPeriod+pongWait)
-	if err != nil {
-		log.Errorf("ws connection error: %v", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-	go s.websocketHandler(wsConn, ip)
-}
-
-// websocketHandler handles a new websocket client by creating a new wsClient,
-// starting it, and blocking until the connection closes. This method should be
-// run as a goroutine.
-func (s *webServer) websocketHandler(conn ws.Connection, ip string) {
-	log.Tracef("New websocket client %s", ip)
-	// Create a new websocket client to handle the new websocket connection
-	// and wait for it to shutdown.  Once it has shutdown (and hence
-	// disconnected), remove it.
-	var wsLink *ws.WSLink
-	wsLink = ws.NewWSLink(ip, conn, pingPeriod, func(msg *msgjson.Message) *msgjson.Error {
-		return s.handleMessage(wsLink, msg)
-	})
-	wsLink.Start()
-	wsLink.WaitForShutdown()
-	log.Tracef("Disconnected websocket client %s", ip)
-}
-
 // auth creates, stores, and returns a new auth token.
 func (s *webServer) auth() string {
 	// Create a token to identify the user. Only one token can be active at
@@ -269,7 +225,7 @@ func (s *webServer) watchMarket(dex, mkt string) (*core.OrderBook, error) {
 	return book, nil
 }
 
-// unmarket kills unsubscribed from any market being monitored.
+// unmarket unsubscribes from any market being monitored.
 func (s *webServer) unmarket() {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -278,232 +234,6 @@ func (s *webServer) unmarket() {
 		s.openMarket.kill()
 	}
 	s.openMarket = nil
-}
-
-// handleMessage handles the websocket message, applying the right handler for the
-// route.
-func (s *webServer) handleMessage(conn *ws.WSLink, msg *msgjson.Message) *msgjson.Error {
-	log.Tracef("message of type %d received for route %s", msg.Type, msg.Route)
-	if msg.Type == msgjson.Request {
-		handler, found := wsHandlers[msg.Route]
-		if !found {
-			return msgjson.NewError(msgjson.UnknownMessageType, "unknown route '"+msg.Route+"'")
-		}
-		return handler(s, conn, msg)
-	}
-	// Web server doesn't send requests, only responses and notifications, so
-	// a response-type message from a client is an error.
-	return msgjson.NewError(msgjson.UnknownMessageType, "web server only handles requests")
-}
-
-// wsHandlers is the map used by the server to locate the router handler for a
-// request.
-var wsHandlers = map[string]func(*webServer, *ws.WSLink, *msgjson.Message) *msgjson.Error{
-	"loadmarket": wsLoadMarket,
-	"unmarket":   wsUnmarket,
-}
-
-// marketLoad is sent by websocket clients to subscribe to a market and request
-// the order book.
-type marketLoad struct {
-	DEX    string `json:"dex"`
-	Market string `json:"market"`
-}
-
-// wsLoadMarket is the handler for the 'loadmarket' websocket endpoint. Sets the
-// currently monitored markets and starts the notification feed with the order
-// book.
-func wsLoadMarket(s *webServer, conn *ws.WSLink, msg *msgjson.Message) *msgjson.Error {
-	// The user has loaded the markets page. Get the last known market for the
-	// user and send the page information.
-	market := new(marketLoad)
-	err := json.Unmarshal(msg.Payload, market)
-	if err != nil {
-		log.Errorf("error unmarshaling marketload payload: %v", err)
-		return msgjson.NewError(msgjson.RPCInternal, "error unmarshaling marketload payload: "+err.Error())
-	}
-	base, quote, err := decodeMarket(market.Market)
-	if err != nil {
-		return msgjson.NewError(msgjson.UnknownMarketError, err.Error())
-	}
-	baseBalance, err := s.core.Balance(base)
-	if err != nil {
-		log.Errorf("unable to get balance for %s", base)
-		return msgjson.NewError(msgjson.RPCInternal, "error getting balance for "+base+": "+err.Error())
-	}
-	quoteBalance, err := s.core.Balance(quote)
-	if err != nil {
-		log.Errorf("unable to get balance for %s", quote)
-		return msgjson.NewError(msgjson.RPCInternal, "error getting balance for "+quote+": "+err.Error())
-	}
-
-	// Switch current market.
-	book, err := s.watchMarket(market.DEX, market.Market)
-	if err != nil {
-		log.Errorf("error watching market %s @ %s: %v", market.Market, market.DEX, err)
-		return msgjson.NewError(msgjson.RPCInternal, "error watching "+market.Market)
-	}
-
-	note, err := msgjson.NewNotification("book", map[string]interface{}{
-		"book":         book,
-		"market":       market.Market,
-		"dex":          market.DEX,
-		"base":         base,
-		"quote":        quote,
-		"baseBalance":  baseBalance,
-		"quoteBalance": quoteBalance,
-	})
-	if err != nil {
-		log.Errorf("error encoding loadmarkets response: %v", err)
-		return msgjson.NewError(msgjson.RPCInternal, "error encoding order book: "+err.Error())
-	}
-	conn.Send(note)
-	return nil
-}
-
-// wsUnmarket is the handler for the 'unmarket' websocket endpoint. This empty
-// message is sent when the user leaves the markets page. Unsubscribed from the
-// current market.
-func wsUnmarket(s *webServer, conn *ws.WSLink, _ *msgjson.Message) *msgjson.Error {
-	s.unmarket()
-	return nil
-}
-
-// sendTemplate processes the template and sends the result.
-func (s *webServer) sendTemplate(w http.ResponseWriter, r *http.Request, tmplID string, data interface{}) {
-	page, err := s.html.exec(tmplID, data)
-	if err != nil {
-		log.Errorf("template exec error for %s: %v", tmplID, err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html")
-	w.WriteHeader(http.StatusOK)
-	io.WriteString(w, page)
-}
-
-func (s *webServer) handleHome(w http.ResponseWriter, r *http.Request) {
-	userInfo := extractUserInfo(r)
-	var tmplID string
-	var data interface{}
-	switch {
-	case !userInfo.authed:
-		tmplID = "login"
-		data = commonArgs(r, "Login | Decred DEX")
-	default:
-		tmplID = "markets"
-		data = s.marketResult(r)
-	}
-	s.sendTemplate(w, r, tmplID, data)
-}
-
-// CommonArguments are common page arguments that must be supplied to every
-// page to populate the <title> and <header> elements.
-type CommonArguments struct {
-	UserInfo *userInfo
-	Title    string
-}
-
-func commonArgs(r *http.Request, title string) *CommonArguments {
-	return &CommonArguments{
-		UserInfo: extractUserInfo(r),
-		Title:    title,
-	}
-}
-
-// handleLogin
-func (s *webServer) handleLogin(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "login", commonArgs(r, "Login | Decred DEX"))
-}
-
-func (s *webServer) handleRegister(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "register", commonArgs(r, "Register | Decred DEX"))
-}
-
-type marketResult struct {
-	CommonArguments
-	DEXes []*core.MarketInfo
-}
-
-// marketResult returns a *marketResult, which is needed to process the
-// 'markets' template.
-func (s *webServer) marketResult(r *http.Request) *marketResult {
-	return &marketResult{
-		CommonArguments: *commonArgs(r, "Markets | Decred DEX"),
-		DEXes:           s.core.ListMarkets(),
-	}
-}
-
-// handleMarkets handles the 'markets' page request.
-func (s *webServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "markets", s.marketResult(r))
-}
-
-// handleWallets handles the 'wallets' page request.
-func (s *webServer) handleWallets(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "wallets", commonArgs(r, "Wallets | Decred DEX"))
-}
-
-// handlhandleSettingseWallets handles the 'settings' page request.
-func (s *webServer) handleSettings(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "settings", commonArgs(r, "Settings | Decred DEX"))
-}
-
-// apiRegister handles the 'register' page request.
-func (s *webServer) apiRegister(w http.ResponseWriter, r *http.Request) {
-	reg := new(core.Registration)
-	if !readPost(w, r, reg) {
-		return
-	}
-	var resp interface{}
-	err := s.core.Register(reg)
-	if err != nil {
-		resp = map[string]interface{}{
-			"ok":  false,
-			"msg": fmt.Sprintf("registration error: %v", err),
-		}
-	} else {
-		resp = map[string]interface{}{
-			"ok": true,
-		}
-	}
-	writeJSON(w, resp, s.indent)
-}
-
-// The loginForm is sent by the client to log in to a DEX.
-type loginForm struct {
-	DEX  string `json:"dex"`
-	Pass string `json:"pass"`
-}
-
-// apiLogin handles the 'login' page request.
-func (s *webServer) apiLogin(w http.ResponseWriter, r *http.Request) {
-	login := new(loginForm)
-	if !readPost(w, r, login) {
-		return
-	}
-	var resp interface{}
-	err := s.core.Login(login.DEX, login.Pass)
-	if err != nil {
-		resp = map[string]interface{}{
-			"ok":  false,
-			"msg": fmt.Sprintf("login error: %v", err),
-		}
-	} else {
-		ai, found := r.Context().Value(authCV).(*userInfo)
-		if !found || !ai.authed {
-			cval := s.auth()
-			http.SetCookie(w, &http.Cookie{
-				Name:  authCK,
-				Path:  "/",
-				Value: cval,
-			})
-		}
-		resp = map[string]interface{}{
-			"ok": true,
-		}
-	}
-	writeJSON(w, resp, s.indent)
 }
 
 // decodeMarket decodes the market string into its two tickers.

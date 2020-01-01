@@ -88,12 +88,12 @@ form.auth {
 
   input,
   select {
-    background-color: #d3d3d3;
+    background-color: $light_bg_2;
   }
 
   input:focus,
   select:focus {
-    background-color: #d5d5d5;
+    background-color: $light_bg_2;
   }
 }
 
@@ -110,7 +110,7 @@ div.mainlinks > span {
 }
 
 div.mainlinks > span:hover {
-  color: #252525;
+  color: $dark_bg_3;
 }
 
 form.auth button:hover {
@@ -154,9 +154,17 @@ input[type=number] {
 }
 
 .bg1 {
-  background-color: #eaeaea;
+  background-color: $light_bg_1;
 }
 
 .bg2 {
-  background-color: #d5d5d5;
+  background-color: $light_bg_2;
+}
+
+.buycolor {
+  color: $buycolor_light;
+}
+
+.sellcolor {
+  color: $sellcolor_light;
 }
