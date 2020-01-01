@@ -82,7 +82,7 @@ type matchTracker struct {
 	takerStatus *swapStatus
 }
 
-// A blockNotification is used internally when an asset.DEXAsset reports a new
+// A blockNotification is used internally when an asset.Backend reports a new
 // block.
 type blockNotification struct {
 	time    time.Time

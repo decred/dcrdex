@@ -29,7 +29,7 @@ const (
 	AssetBTC = 0
 )
 
-// This stub satisfies asset.DEXAsset.
+// This stub satisfies asset.Backend.
 type TAsset struct{}
 
 func (a *TAsset) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error) {

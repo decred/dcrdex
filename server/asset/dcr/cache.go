@@ -50,7 +50,7 @@ func (cache *blockCache) block(h *chainhash.Hash) (*dcrBlock, bool) {
 
 // Getter for a mainchain block by its height. This method does not attempt
 // to load the block from the blockchain if it is not found. If that is required
-// use (*DCRBackend).getMainchainDcrBlock.
+// use (*Backend).getMainchainDcrBlock.
 func (cache *blockCache) atHeight(height uint32) (*dcrBlock, bool) {
 	cache.mtx.RLock()
 	defer cache.mtx.RUnlock()

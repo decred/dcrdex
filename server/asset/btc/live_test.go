@@ -63,7 +63,7 @@ func TestMain(m *testing.M) {
 	var ok bool
 	btc, ok = dexAsset.(*Backend)
 	if !ok {
-		fmt.Printf("Could not cast DEXAsset to *Backend")
+		fmt.Printf("Could not cast asset.Backend to *Backend")
 		return
 	}
 	os.Exit(m.Run())
@@ -127,7 +127,7 @@ func TestLiveFees(t *testing.T) {
 }
 
 // This test does not pass yet.
-// type backendConstructor func(context.Context, string, asset.Logger, asset.Network) (asset.DEXAsset, error)
+// type backendConstructor func(context.Context, string, asset.Logger, asset.Network) (asset.Backend, error)
 //
 // // TestPlugin checks for a plugin file with the default name in the current
 // // directory.
@@ -158,11 +158,11 @@ func TestLiveFees(t *testing.T) {
 // 	defer shutdown()
 // 	dexAsset, err := constructor(ctx, SystemConfigPath("bitcoin"), logger, dex.Mainnet)
 // 	if err != nil {
-// 		t.Fatalf("error creating DEXAsset from imported constructor: %v", err)
+// 		t.Fatalf("error creating Backend from imported constructor: %v", err)
 // 	}
 // 	btc, ok := dexAsset.(*Backend)
 // 	if !ok {
-// 		t.Fatalf("failed to cast plugin DEXAsset to *Backend")
+// 		t.Fatalf("failed to cast plugin Backend to *Backend")
 // 	}
 // 	_, err = btc.node.GetBestBlockHash()
 // 	if err != nil {

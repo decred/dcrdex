@@ -16,7 +16,7 @@ import (
 
 // NewBackend generates the network parameters and creates a ltc backend as a
 // btc clone using an asset/btc helper function.
-func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.DEXAsset, error) {
+func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:

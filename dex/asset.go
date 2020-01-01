@@ -29,7 +29,7 @@ const Simnet = Regtest
 // through the provided logger.
 type Logger = slog.Logger
 
-// Type Asset combines the DEXAsset backend with the configurable asset
+// Type Asset combines the Backend with the configurable asset
 // variables. The asset variables do not affect the backend operation, but are
 // grouped with the backend for convenience.
 type Asset struct {
