@@ -42,27 +42,21 @@ func (ae ArchiveError) Error() string {
 // SameErrorTypes checks for error equality or ArchiveError.Code equality if
 // both errors are of type ArchiveError.
 func SameErrorTypes(errA, errB error) bool {
-	if errors.Is(errA, errB) {
-		return true
+	var arA, arB ArchiveError
+
+	if errors.As(errA, &arA) && errors.As(errB, &arB) {
+		return arA.Code == arB.Code
 	}
-	var arA ArchiveError
-	if errors.As(errA, &arA) {
-		var arB ArchiveError
-		if errors.As(errB, &arB) && arA.Code == arB.Code {
-			return true
-		}
-	}
-	return false
+
+	return errors.Is(errA, errB)
 }
 
 // IsErrOrderUnknown returns true if the error is of type ArchiveError and has
 // code ErrUnknownOrder.
 func IsErrOrderUnknown(err error) bool {
 	var errA ArchiveError
-	if errors.As(err, &errA) {
-		return errA.Code == ErrUnknownOrder
-	}
-	return false
+
+	return errors.As(err, &errA) && errA.Code == ErrUnknownOrder
 }
 
 // IsErrMatchUnknown returns true if the error is of type ArchiveError and has

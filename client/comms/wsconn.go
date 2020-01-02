@@ -240,7 +240,7 @@ func (conn *WsConn) read() {
 			var mErr *json.UnmarshalTypeError
 			if errors.As(err, &mErr) {
 				// JSON decode errors are not fatal, log and proceed.
-				log.Errorf("json decode error: %v", err)
+				log.Errorf("json decode error: %v", mErr)
 				continue
 			}
 
