@@ -16,6 +16,7 @@ import (
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/dcrwallet/rpc/jsonrpc/types"
 	"github.com/decred/dcrwallet/wallet/v3/txrules"
+	"github.com/decred/dcrwallet/wallet/v3/txsizes"
 )
 
 // sumOutputValues returns the total output amount of the provided output set.
@@ -83,10 +84,10 @@ func createTransaction(inputs []types.ListUnspentResult, amounts map[string]int6
 
 		switch scriptClass {
 		case txscript.PubKeyHashTy:
-			inputSizes[idx] = RedeemP2PKHSigScriptSize
+			inputSizes[idx] = txsizes.RedeemP2PKHSigScriptSize
 
 		case txscript.PubKeyTy:
-			inputSizes[idx] = RedeemP2PKSigScriptSize
+			inputSizes[idx] = txsizes.RedeemP2PKSigScriptSize
 
 		case txscript.StakeRevocationTy, txscript.StakeSubChangeTy, txscript.StakeGenTy:
 			scriptClass, err = txscript.GetStakeOutSubclass(pkScript)
@@ -103,7 +104,7 @@ func createTransaction(inputs []types.ListUnspentResult, amounts map[string]int6
 					" for input #%d sourced from txid %s", idx, input.TxID)
 			}
 
-			inputSizes[idx] = RedeemP2PKHSigScriptSize
+			inputSizes[idx] = txsizes.RedeemP2PKHSigScriptSize
 
 		default:
 			return nil, fmt.Errorf("unexpected script class (%v) for "+
@@ -150,7 +151,7 @@ func createTransaction(inputs []types.ListUnspentResult, amounts map[string]int6
 				return nil, err
 			}
 
-			outputSizes = append(outputSizes, P2PKHPkScriptSize)
+			outputSizes = append(outputSizes, txsizes.P2PKHPkScriptSize)
 			txOut = wire.NewTxOut(amt, pkScript)
 		} else {
 			// Fetch the associated script for the provided address.
@@ -160,7 +161,7 @@ func createTransaction(inputs []types.ListUnspentResult, amounts map[string]int6
 					encodedAddr)
 			}
 
-			outputSizes = append(outputSizes, P2SHPkScriptSize)
+			outputSizes = append(outputSizes, txsizes.P2SHPkScriptSize)
 			txOut = wire.NewTxOut(amt, pkScript)
 		}
 
@@ -178,7 +179,7 @@ func createTransaction(inputs []types.ListUnspentResult, amounts map[string]int6
 	}
 
 	changeScriptSize := len(changeScript)
-	estSignedSize := EstimateSerializeSizeFromScriptSizes(inputSizes, outputSizes, changeScriptSize)
+	estSignedSize := txsizes.EstimateSerializeSizeFromScriptSizes(inputSizes, outputSizes, changeScriptSize)
 	txFee := txrules.FeeForSerializeSize(relayFee, estSignedSize)
 	changeAmt := totalIn - totalOut - txFee
 
