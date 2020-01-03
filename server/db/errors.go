@@ -43,7 +43,6 @@ func (ae ArchiveError) Error() string {
 // both errors are of type ArchiveError.
 func SameErrorTypes(errA, errB error) bool {
 	var arA, arB ArchiveError
-
 	if errors.As(errA, &arA) && errors.As(errB, &arB) {
 		return arA.Code == arB.Code
 	}
@@ -55,7 +54,6 @@ func SameErrorTypes(errA, errB error) bool {
 // code ErrUnknownOrder.
 func IsErrOrderUnknown(err error) bool {
 	var errA ArchiveError
-
 	return errors.As(err, &errA) && errA.Code == ErrUnknownOrder
 }
 
@@ -63,28 +61,19 @@ func IsErrOrderUnknown(err error) bool {
 // code ErrUnknownMatch.
 func IsErrMatchUnknown(err error) bool {
 	var errA ArchiveError
-	if errors.As(err, &errA) {
-		return errA.Code == ErrUnknownMatch
-	}
-	return false
+	return errors.As(err, &errA) && errA.Code == ErrUnknownMatch
 }
 
 // IsErrMatchUnsupported returns true if the error is of type ArchiveError and
 // has code ErrUnsupportedMarket.
 func IsErrMatchUnsupported(err error) bool {
 	var errA ArchiveError
-	if errors.As(err, &errA) {
-		return errA.Code == ErrUnsupportedMarket
-	}
-	return false
+	return errors.As(err, &errA) && errA.Code == ErrUnsupportedMarket
 }
 
 // IsErrInvalidOrder returns true if the error is of type ArchiveError and has
 // code ErrInvalidOrder.
 func IsErrInvalidOrder(err error) bool {
 	var errA ArchiveError
-	if errors.As(err, &errA) {
-		return errA.Code == ErrInvalidOrder
-	}
-	return false
+	return errors.As(err, &errA) && errA.Code == ErrInvalidOrder
 }
