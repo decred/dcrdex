@@ -17,7 +17,7 @@ func TestMatchID(t *testing.T) {
 	qty := uint64(132413241324)
 
 	mo := &MarketOrder{
-		Prefix: Prefix{
+		P: Prefix{
 			AccountID:  acct0,
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -25,12 +25,14 @@ func TestMatchID(t *testing.T) {
 			ClientTime: time.Unix(1566497653, 0),
 			ServerTime: time.Unix(1566497656, 0),
 		},
-		Coins: []CoinID{
-			utxoCoinID("a985d8df97571b130ce30a049a76ffedaa79b6e69b173ff81b1bf9fc07f063c7", 1),
+		T: Trade{
+			Coins: []CoinID{
+				utxoCoinID("a985d8df97571b130ce30a049a76ffedaa79b6e69b173ff81b1bf9fc07f063c7", 1),
+			},
+			Sell:     true,
+			Quantity: qty,
+			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 		},
-		Sell:     true,
-		Quantity: qty,
-		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 	}
 
 	// maker
@@ -39,15 +41,15 @@ func TestMatchID(t *testing.T) {
 	copy(limitID[:], limitID0)
 
 	lo := &LimitOrder{
-		MarketOrder: MarketOrder{
-			Prefix: Prefix{
-				AccountID:  acct0,
-				BaseAsset:  AssetDCR,
-				QuoteAsset: AssetBTC,
-				OrderType:  LimitOrderType,
-				ClientTime: time.Unix(1566497653, 0),
-				ServerTime: time.Unix(1566497656, 0),
-			},
+		P: Prefix{
+			AccountID:  acct0,
+			BaseAsset:  AssetDCR,
+			QuoteAsset: AssetBTC,
+			OrderType:  LimitOrderType,
+			ClientTime: time.Unix(1566497653, 0),
+			ServerTime: time.Unix(1566497656, 0),
+		},
+		T: Trade{
 			Coins: []CoinID{
 				utxoCoinID("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
 			},

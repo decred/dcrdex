@@ -114,16 +114,16 @@ func TestPrefix_Serialize(t *testing.T) {
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("Prefix.Serialize() = %#v, want %#v", got, tt.want)
 			}
-			sz := p.SerializeSize()
+			sz := p.serializeSize()
 			wantSz := len(got)
 			if sz != wantSz {
-				t.Errorf("Prefix.SerializeSize() = %d,\n want %d", sz, wantSz)
+				t.Errorf("Prefix.serializeSize() = %d,\n want %d", sz, wantSz)
 			}
 		})
 	}
 }
 
-func TestMarketOrder_Serialize_SerializeSize(t *testing.T) {
+func TestMarketOrder_Serialize_serializeSize(t *testing.T) {
 	type fields struct {
 		Prefix   Prefix
 		Coins    []CoinID
@@ -197,26 +197,28 @@ func TestMarketOrder_Serialize_SerializeSize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &MarketOrder{
-				Prefix:   tt.fields.Prefix,
-				Coins:    tt.fields.Coins,
-				Sell:     tt.fields.Sell,
-				Quantity: tt.fields.Quantity,
-				Address:  tt.fields.Address,
+				P: tt.fields.Prefix,
+				T: Trade{
+					Coins:    tt.fields.Coins,
+					Sell:     tt.fields.Sell,
+					Quantity: tt.fields.Quantity,
+					Address:  tt.fields.Address,
+				},
 			}
 			got := o.Serialize()
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("MarketOrder.Serialize() = %#v,\n want %#v", got, tt.want)
 			}
-			sz := o.SerializeSize()
+			sz := o.serializeSize()
 			wantSz := len(got)
 			if sz != wantSz {
-				t.Errorf("MarketOrder.SerializeSize() = %d,\n want %d", sz, wantSz)
+				t.Errorf("MarketOrder.serializeSize() = %d,\n want %d", sz, wantSz)
 			}
 		})
 	}
 }
 
-func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
+func TestLimitOrder_Serialize_serializeSize(t *testing.T) {
 	type fields struct {
 		MarketOrder MarketOrder
 		Rate        uint64
@@ -231,7 +233,7 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 			"ok acct0",
 			fields{
 				MarketOrder: MarketOrder{
-					Prefix: Prefix{
+					P: Prefix{
 						AccountID:  acct0,
 						BaseAsset:  AssetDCR,
 						QuoteAsset: AssetBTC,
@@ -239,13 +241,15 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 						ClientTime: time.Unix(1566497653, 0),
 						ServerTime: time.Unix(1566497656, 0),
 					},
-					Coins: []CoinID{
-						utxoCoinID("d186e4b6625c9c94797cc494f535fc150177e0619e2303887e0a677f29ef1bab", 0),
-						utxoCoinID("11d9580e19ad65a875a5bc558d600e96b2916062db9e8b65cbc2bb905207c1ad", 16),
+					T: Trade{
+						Coins: []CoinID{
+							utxoCoinID("d186e4b6625c9c94797cc494f535fc150177e0619e2303887e0a677f29ef1bab", 0),
+							utxoCoinID("11d9580e19ad65a875a5bc558d600e96b2916062db9e8b65cbc2bb905207c1ad", 16),
+						},
+						Sell:     false,
+						Quantity: 132413241324,
+						Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 					},
-					Sell:     false,
-					Quantity: 132413241324,
-					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
 				Rate:  13241324,
 				Force: StandingTiF,
@@ -298,18 +302,19 @@ func TestLimitOrder_Serialize_SerializeSize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &LimitOrder{
-				MarketOrder: tt.fields.MarketOrder,
-				Rate:        tt.fields.Rate,
-				Force:       tt.fields.Force,
+				P:     tt.fields.MarketOrder.P,
+				T:     tt.fields.MarketOrder.T,
+				Rate:  tt.fields.Rate,
+				Force: tt.fields.Force,
 			}
 			got := o.Serialize()
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("LimitOrder.Serialize() = %#v, want %#v", got, tt.want)
 			}
-			sz := o.SerializeSize()
+			sz := o.serializeSize()
 			wantSz := len(got)
 			if sz != wantSz {
-				t.Errorf("LimitOrder.SerializeSize() = %d,\n want %d", sz, wantSz)
+				t.Errorf("LimitOrder.serializeSize() = %d,\n want %d", sz, wantSz)
 			}
 		})
 	}
@@ -365,17 +370,17 @@ func TestCancelOrder_Serialize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &CancelOrder{
-				Prefix:        tt.fields.Prefix,
+				P:             tt.fields.Prefix,
 				TargetOrderID: tt.fields.TargetOrderID,
 			}
 			got := o.Serialize()
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("CancelOrder.Serialize() = %#v, want %v", got, tt.want)
 			}
-			sz := o.SerializeSize()
+			sz := o.serializeSize()
 			wantSz := len(got)
 			if sz != wantSz {
-				t.Errorf("CancelOrder.SerializeSize() = %d,\n want %d", sz, wantSz)
+				t.Errorf("CancelOrder.serializeSize() = %d,\n want %d", sz, wantSz)
 			}
 		})
 	}
@@ -422,11 +427,13 @@ func TestMarketOrder_ID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &MarketOrder{
-				Prefix:   tt.fields.Prefix,
-				Coins:    tt.fields.Coins,
-				Sell:     tt.fields.Sell,
-				Quantity: tt.fields.Quantity,
-				Address:  tt.fields.Address,
+				P: tt.fields.Prefix,
+				T: Trade{
+					Coins:    tt.fields.Coins,
+					Sell:     tt.fields.Sell,
+					Quantity: tt.fields.Quantity,
+					Address:  tt.fields.Address,
+				},
 			}
 			remaining := o.Remaining()
 			if remaining != o.Quantity-o.Filled {
@@ -459,7 +466,7 @@ func TestLimitOrder_ID(t *testing.T) {
 			"ok",
 			fields{
 				MarketOrder: MarketOrder{
-					Prefix: Prefix{
+					P: Prefix{
 						AccountID:  acct0,
 						BaseAsset:  AssetDCR,
 						QuoteAsset: AssetBTC,
@@ -467,12 +474,14 @@ func TestLimitOrder_ID(t *testing.T) {
 						ClientTime: time.Unix(1566497653, 0),
 						ServerTime: time.Unix(1566497656, 0),
 					},
-					Coins: []CoinID{
-						utxoCoinID("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
+					T: Trade{
+						Coins: []CoinID{
+							utxoCoinID("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
+						},
+						Sell:     false,
+						Quantity: 132413241324,
+						Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 					},
-					Sell:     false,
-					Quantity: 132413241324,
-					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
 				Rate:  13241324,
 				Force: StandingTiF,
@@ -483,9 +492,10 @@ func TestLimitOrder_ID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &LimitOrder{
-				MarketOrder: tt.fields.MarketOrder,
-				Rate:        tt.fields.Rate,
-				Force:       tt.fields.Force,
+				T:     tt.fields.MarketOrder.T,
+				P:     tt.fields.MarketOrder.P,
+				Rate:  tt.fields.Rate,
+				Force: tt.fields.Force,
 			}
 			remaining := o.Remaining()
 			if remaining != o.Quantity-o.Filled {
@@ -536,12 +546,8 @@ func TestCancelOrder_ID(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := &CancelOrder{
-				Prefix:        tt.fields.Prefix,
+				P:             tt.fields.Prefix,
 				TargetOrderID: tt.fields.TargetOrderID,
-			}
-			remaining := o.Remaining()
-			if remaining != 0 {
-				t.Errorf("CancelOrder.Remaining should be 0, got %d", remaining)
 			}
 			if got := o.ID(); got != tt.want {
 				t.Errorf("CancelOrder.ID() = %v, want %v", got, tt.want)

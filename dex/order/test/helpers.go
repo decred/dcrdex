@@ -52,15 +52,15 @@ type Market struct {
 // values.
 func WriteLimitOrder(writer *Writer, rate, lots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
 	return &order.LimitOrder{
-		MarketOrder: order.MarketOrder{
-			Prefix: order.Prefix{
-				AccountID:  writer.Acct,
-				BaseAsset:  writer.Market.Base,
-				QuoteAsset: writer.Market.Quote,
-				OrderType:  order.LimitOrderType,
-				ClientTime: time.Unix(baseClientTime+timeOffset, 0),
-				ServerTime: time.Unix(baseServerTime+timeOffset, 0),
-			},
+		P: order.Prefix{
+			AccountID:  writer.Acct,
+			BaseAsset:  writer.Market.Base,
+			QuoteAsset: writer.Market.Quote,
+			OrderType:  order.LimitOrderType,
+			ClientTime: time.Unix(baseClientTime+timeOffset, 0),
+			ServerTime: time.Unix(baseServerTime+timeOffset, 0),
+		},
+		T: order.Trade{
 			Coins:    []order.CoinID{},
 			Sell:     writer.Sell,
 			Quantity: lots * writer.Market.LotSize,
@@ -78,7 +78,7 @@ func WriteMarketOrder(writer *Writer, lots uint64, timeOffset int64) *order.Mark
 		lots *= writer.Market.LotSize
 	}
 	return &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  writer.Acct,
 			BaseAsset:  writer.Market.Base,
 			QuoteAsset: writer.Market.Quote,
@@ -86,17 +86,19 @@ func WriteMarketOrder(writer *Writer, lots uint64, timeOffset int64) *order.Mark
 			ClientTime: time.Unix(baseClientTime+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(baseServerTime+timeOffset, 0).UTC(),
 		},
-		Coins:    []order.CoinID{},
-		Sell:     writer.Sell,
-		Quantity: lots,
-		Address:  writer.Addr,
+		T: order.Trade{
+			Coins:    []order.CoinID{},
+			Sell:     writer.Sell,
+			Quantity: lots,
+			Address:  writer.Addr,
+		},
 	}
 }
 
 // WriteCancelOrder creates a cancel order with the specified order ID.
 func WriteCancelOrder(writer *Writer, targetOrderID order.OrderID, timeOffset int64) *order.CancelOrder {
 	return &order.CancelOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  writer.Acct,
 			BaseAsset:  writer.Market.Base,
 			QuoteAsset: writer.Market.Quote,

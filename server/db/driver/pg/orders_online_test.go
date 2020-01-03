@@ -527,10 +527,10 @@ func TestActiveOrderCoins(t *testing.T) {
 		case 0: // no active
 		case 1: // active base coins (sell order)
 			coins = baseCoins[os.ord.ID()]
-			wantCoins = os.ord.CoinIDs()
+			wantCoins = os.ord.Trade().Coins
 		case -1: // active quote coins (buy order)
 			coins = quoteCoins[os.ord.ID()]
-			wantCoins = os.ord.CoinIDs()
+			wantCoins = os.ord.Trade().Coins
 		}
 
 		if len(coins) != len(wantCoins) {
@@ -588,6 +588,7 @@ func TestOrderStatus(t *testing.T) {
 
 	for i := range orderStatuses {
 		ordIn := orderStatuses[i].ord
+		trade := ordIn.Trade()
 		statusIn := orderStatuses[i].status
 		err := archie.StoreOrder(ordIn, statusIn)
 		if err != nil {
@@ -609,9 +610,9 @@ func TestOrderStatus(t *testing.T) {
 				typeOut, ordIn.Type())
 		}
 
-		if filledOut != int64(ordIn.FilledAmt()) {
+		if filledOut != int64(trade.Filled) {
 			t.Errorf("Incorrect FilledAmt for retrieved order. Got %v, expected %v.",
-				filledOut, ordIn.FilledAmt())
+				filledOut, trade.Filled)
 		}
 	}
 }

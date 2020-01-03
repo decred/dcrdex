@@ -504,16 +504,14 @@ func TestLimit(t *testing.T) {
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
 	lo := &order.LimitOrder{
-		MarketOrder: order.MarketOrder{
-			Prefix: order.Prefix{
-				AccountID:  user.acct,
-				BaseAsset:  limit.Base,
-				QuoteAsset: limit.Quote,
-				OrderType:  order.LimitOrderType,
-				ClientTime: clientTime,
-				// ServerTime: sTime,
-			},
-			// UTXOs:    []order.Outpoint{},
+		P: order.Prefix{
+			AccountID:  user.acct,
+			BaseAsset:  limit.Base,
+			QuoteAsset: limit.Quote,
+			OrderType:  order.LimitOrderType,
+			ClientTime: clientTime,
+		},
+		T: order.Trade{
 			Sell:     false,
 			Quantity: qty,
 			Address:  dcrAddr,
@@ -638,18 +636,18 @@ func TestMarketStartProcessStop(t *testing.T) {
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
 	mo := &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  user.acct,
 			BaseAsset:  mkt.Base,
 			QuoteAsset: mkt.Quote,
 			OrderType:  order.MarketOrderType,
 			ClientTime: clientTime,
-			// ServerTime: sTime,
 		},
-		// UTXOs:    []order.Outpoint{},
-		Sell:     false,
-		Quantity: qty,
-		Address:  dcrAddr,
+		T: order.Trade{
+			Sell:     false,
+			Quantity: qty,
+			Address:  dcrAddr,
+		},
 	}
 	// Get the last order submitted to the epoch
 	oRecord := oRig.market.pop()
@@ -752,7 +750,7 @@ func TestCancel(t *testing.T) {
 	// Create the order manually, so that we can compare the IDs as another check
 	// of equivalence.
 	co := &order.CancelOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  user.acct,
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,
@@ -1131,15 +1129,16 @@ func TestRouter(t *testing.T) {
 		return findOrder(id, src.buys, src.sells)
 	}
 
-	compareMO := func(msgOrder *msgjson.BookOrderNote, mo *order.MarketOrder, tag string) {
-		if mo.Sell != (msgOrder.Side == msgjson.SellOrderNum) {
-			t.Fatalf("%s: message order has wrong side marked. sell = %t, side = '%d'", tag, mo.Sell, msgOrder.Side)
+	compareTrade := func(msgOrder *msgjson.BookOrderNote, ord order.Order, tag string) {
+		prefix, trade := ord.Prefix(), ord.Trade()
+		if trade.Sell != (msgOrder.Side == msgjson.SellOrderNum) {
+			t.Fatalf("%s: message order has wrong side marked. sell = %t, side = '%d'", tag, trade.Sell, msgOrder.Side)
 		}
-		if msgOrder.Quantity != mo.Remaining() {
-			t.Fatalf("%s: message order quantity incorrect. expected %d, got %d", tag, mo.Quantity, msgOrder.Quantity)
+		if msgOrder.Quantity != trade.Remaining() {
+			t.Fatalf("%s: message order quantity incorrect. expected %d, got %d", tag, trade.Quantity, msgOrder.Quantity)
 		}
-		if msgOrder.Time != uint64(mo.Time()) {
-			t.Fatalf("%s: wrong time. expected %d, got %d", tag, mo.Time(), msgOrder.Time)
+		if msgOrder.Time != uint64(prefix.Time()) {
+			t.Fatalf("%s: wrong time. expected %d, got %d", tag, prefix.Time(), msgOrder.Time)
 		}
 	}
 
@@ -1150,7 +1149,7 @@ func TestRouter(t *testing.T) {
 		if msgOrder.TiF != tifFlag {
 			t.Fatalf("%s: message order has wrong time-in-force flag. wanted %d, got %d", tag, tifFlag, msgOrder.TiF)
 		}
-		compareMO(msgOrder, &lo.MarketOrder, tag)
+		compareTrade(msgOrder, lo, tag)
 	}
 
 	// A helper function to scan through the received msgjson.OrderBook.Orders and
@@ -1226,10 +1225,10 @@ func TestRouter(t *testing.T) {
 	tick(5)
 
 	epochNote = getEpochNoteFromLink(t, link1)
-	compareMO(&epochNote.BookOrderNote, mo, "link 1 market 2 epoch update (market order)")
+	compareTrade(&epochNote.BookOrderNote, mo, "link 1 market 2 epoch update (market order)")
 
 	epochNote = getEpochNoteFromLink(t, link2)
-	compareMO(&epochNote.BookOrderNote, mo, "link 2 market 2 epoch update (market order)")
+	compareTrade(&epochNote.BookOrderNote, mo, "link 2 market 2 epoch update (market order)")
 
 	// Grab a random order from the market 2 sell book. Fill 1 lot and send a
 	// bookAction update.

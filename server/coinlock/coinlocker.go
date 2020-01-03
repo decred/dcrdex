@@ -187,7 +187,7 @@ func (ac *AssetCoinLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) {
 func (ac *AssetCoinLocker) LockOrdersCoins(orders []order.Order) {
 	ac.coinMtx.Lock()
 	for _, ord := range orders {
-		coinIDs := ord.CoinIDs()
+		coinIDs := ord.Trade().Coins
 		if len(coinIDs) == 0 {
 			continue // e.g. CancelOrder
 		}

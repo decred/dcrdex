@@ -211,14 +211,14 @@ func TestMarket_runEpochs(t *testing.T) {
 
 	newLimit := func() *order.LimitOrder {
 		return &order.LimitOrder{
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  aid,
-					BaseAsset:  limit.Base,
-					QuoteAsset: limit.Quote,
-					OrderType:  order.LimitOrderType,
-					ClientTime: now,
-				},
+			P: order.Prefix{
+				AccountID:  aid,
+				BaseAsset:  limit.Base,
+				QuoteAsset: limit.Quote,
+				OrderType:  order.LimitOrderType,
+				ClientTime: now,
+			},
+			T: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     true,
 				Quantity: limit.Quantity,
@@ -459,14 +459,14 @@ func TestMarket_Cancelable(t *testing.T) {
 
 	newLimit := func() *order.LimitOrder {
 		return &order.LimitOrder{
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  aid,
-					BaseAsset:  limitMsg.Base,
-					QuoteAsset: limitMsg.Quote,
-					OrderType:  order.LimitOrderType,
-					ClientTime: now,
-				},
+			P: order.Prefix{
+				AccountID:  aid,
+				BaseAsset:  limitMsg.Base,
+				QuoteAsset: limitMsg.Quote,
+				OrderType:  order.LimitOrderType,
+				ClientTime: now,
+			},
+			T: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     true,
 				Quantity: limitMsg.Quantity,

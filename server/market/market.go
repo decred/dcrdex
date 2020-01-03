@@ -395,7 +395,7 @@ func (m *Market) coinsLocked(o order.Order) []order.CoinID {
 	}
 
 	locker := m.coinLockerQuote
-	if o.IsSell() {
+	if o.Trade().Trade().Sell {
 		locker = m.coinLockerBase
 	}
 
@@ -406,7 +406,7 @@ func (m *Market) coinsLocked(o order.Order) []order.CoinID {
 	}
 
 	// Check the individual coins.
-	for _, coin := range o.CoinIDs() {
+	for _, coin := range o.Trade().Coins {
 		if locker.CoinLocked(coin) {
 			lockedCoins = append(lockedCoins, coin)
 		}
@@ -419,7 +419,7 @@ func (m *Market) lockOrderCoins(o order.Order) {
 		return
 	}
 
-	if o.IsSell() {
+	if o.Trade().Sell {
 		m.coinLockerBase.LockOrdersCoins([]order.Order{o})
 	} else {
 		m.coinLockerQuote.LockOrdersCoins([]order.Order{o})
@@ -431,7 +431,7 @@ func (m *Market) unlockOrderCoins(o order.Order) {
 		return
 	}
 
-	if o.IsSell() {
+	if o.Trade().Sell {
 		m.coinLockerBase.UnlockOrderCoins(o.ID())
 	} else {
 		m.coinLockerQuote.UnlockOrderCoins(o.ID())

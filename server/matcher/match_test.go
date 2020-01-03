@@ -35,7 +35,7 @@ func startLogger() {
 var (
 	marketOrders = []*order.MarketOrder{
 		{ // market BUY of 4 lots
-			Prefix: order.Prefix{
+			P: order.Prefix{
 				AccountID:  acct0,
 				BaseAsset:  AssetDCR,
 				QuoteAsset: AssetBTC,
@@ -43,13 +43,15 @@ var (
 				ClientTime: time.Unix(1566497653, 0),
 				ServerTime: time.Unix(1566497656, 0),
 			},
-			Coins:    []order.CoinID{},
-			Sell:     false,
-			Quantity: 4 * LotSize,
-			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+			T: order.Trade{
+				Coins:    []order.CoinID{},
+				Sell:     false,
+				Quantity: 4 * LotSize,
+				Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+			},
 		},
 		{ // market SELL of 2 lots
-			Prefix: order.Prefix{
+			P: order.Prefix{
 				AccountID:  acct0,
 				BaseAsset:  AssetDCR,
 				QuoteAsset: AssetBTC,
@@ -57,24 +59,26 @@ var (
 				ClientTime: time.Unix(1566497654, 0),
 				ServerTime: time.Unix(1566497656, 0),
 			},
-			Coins:    []order.CoinID{},
-			Sell:     true,
-			Quantity: 2 * LotSize,
-			Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+			T: order.Trade{
+				Coins:    []order.CoinID{},
+				Sell:     true,
+				Quantity: 2 * LotSize,
+				Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+			},
 		},
 	}
 
 	limitOrders = []*order.LimitOrder{
 		{ // limit BUY of 2 lots at 0.043
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  acct0,
-					BaseAsset:  AssetDCR,
-					QuoteAsset: AssetBTC,
-					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(1566497653, 0),
-					ServerTime: time.Unix(1566497656, 0),
-				},
+			P: order.Prefix{
+				AccountID:  acct0,
+				BaseAsset:  AssetDCR,
+				QuoteAsset: AssetBTC,
+				OrderType:  order.LimitOrderType,
+				ClientTime: time.Unix(1566497653, 0),
+				ServerTime: time.Unix(1566497656, 0),
+			},
+			T: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     false,
 				Quantity: 2 * LotSize,
@@ -84,15 +88,15 @@ var (
 			Force: order.StandingTiF,
 		},
 		{ // limit SELL of 3 lots at 0.045
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  acct0,
-					BaseAsset:  AssetDCR,
-					QuoteAsset: AssetBTC,
-					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(1566497651, 0),
-					ServerTime: time.Unix(1566497652, 0),
-				},
+			P: order.Prefix{
+				AccountID:  acct0,
+				BaseAsset:  AssetDCR,
+				QuoteAsset: AssetBTC,
+				OrderType:  order.LimitOrderType,
+				ClientTime: time.Unix(1566497651, 0),
+				ServerTime: time.Unix(1566497652, 0),
+			},
+			T: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     true,
 				Quantity: 3 * LotSize,
@@ -102,15 +106,15 @@ var (
 			Force: order.StandingTiF,
 		},
 		{ // limit BUY of 1 lot at 0.046
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  acct0,
-					BaseAsset:  AssetDCR,
-					QuoteAsset: AssetBTC,
-					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(1566497655, 0),
-					ServerTime: time.Unix(1566497656, 0),
-				},
+			P: order.Prefix{
+				AccountID:  acct0,
+				BaseAsset:  AssetDCR,
+				QuoteAsset: AssetBTC,
+				OrderType:  order.LimitOrderType,
+				ClientTime: time.Unix(1566497655, 0),
+				ServerTime: time.Unix(1566497656, 0),
+			},
+			T: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     false,
 				Quantity: 1 * LotSize,
@@ -120,15 +124,15 @@ var (
 			Force: order.StandingTiF,
 		},
 		{ // limit BUY of 1 lot at 0.045
-			MarketOrder: order.MarketOrder{
-				Prefix: order.Prefix{
-					AccountID:  acct0,
-					BaseAsset:  AssetDCR,
-					QuoteAsset: AssetBTC,
-					OrderType:  order.LimitOrderType,
-					ClientTime: time.Unix(1566497649, 0),
-					ServerTime: time.Unix(1566497651, 0),
-				},
+			P: order.Prefix{
+				AccountID:  acct0,
+				BaseAsset:  AssetDCR,
+				QuoteAsset: AssetBTC,
+				OrderType:  order.LimitOrderType,
+				ClientTime: time.Unix(1566497649, 0),
+				ServerTime: time.Unix(1566497651, 0),
+			},
+			T: order.Trade{
 				Coins:    []order.CoinID{},
 				Sell:     false,
 				Quantity: 1 * LotSize,
@@ -210,15 +214,15 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 		addr = "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm"
 	}
 	return &order.LimitOrder{
-		MarketOrder: order.MarketOrder{
-			Prefix: order.Prefix{
-				AccountID:  acct0,
-				BaseAsset:  AssetDCR,
-				QuoteAsset: AssetBTC,
-				OrderType:  order.LimitOrderType,
-				ClientTime: time.Unix(1566497653+timeOffset, 0),
-				ServerTime: time.Unix(1566497656+timeOffset, 0),
-			},
+		P: order.Prefix{
+			AccountID:  acct0,
+			BaseAsset:  AssetDCR,
+			QuoteAsset: AssetBTC,
+			OrderType:  order.LimitOrderType,
+			ClientTime: time.Unix(1566497653+timeOffset, 0),
+			ServerTime: time.Unix(1566497656+timeOffset, 0),
+		},
+		T: order.Trade{
 			Coins:    []order.CoinID{},
 			Sell:     sell,
 			Quantity: quantityLots * LotSize,
@@ -231,7 +235,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 
 func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  acct0,
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -239,16 +243,18 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		Coins:    []order.CoinID{},
-		Sell:     true,
-		Quantity: quantityLots * LotSize,
-		Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+		T: order.Trade{
+			Coins:    []order.CoinID{},
+			Sell:     true,
+			Quantity: quantityLots * LotSize,
+			Address:  "149RQGLaHf2gGiL4NXZdH7aA8nYEuLLrgm",
+		},
 	}
 }
 
 func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.MarketOrder {
 	return &order.MarketOrder{
-		Prefix: order.Prefix{
+		P: order.Prefix{
 			AccountID:  acct0,
 			BaseAsset:  AssetDCR,
 			QuoteAsset: AssetBTC,
@@ -256,10 +262,12 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 			ClientTime: time.Unix(1566497653+timeOffset, 0),
 			ServerTime: time.Unix(1566497656+timeOffset, 0),
 		},
-		Coins:    []order.CoinID{},
-		Sell:     false,
-		Quantity: quantityQuoteAsset,
-		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+		T: order.Trade{
+			Coins:    []order.CoinID{},
+			Sell:     false,
+			Quantity: quantityQuoteAsset,
+			Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+		},
 	}
 }
 
@@ -443,7 +451,7 @@ func Test_matchLimitOrder(t *testing.T) {
 
 func newCancelOrder(targetOrderID order.OrderID, serverTime time.Time) *order.CancelOrder {
 	return &order.CancelOrder{
-		Prefix:        order.Prefix{ServerTime: serverTime},
+		P:             order.Prefix{ServerTime: serverTime},
 		TargetOrderID: targetOrderID,
 	}
 }
@@ -1104,9 +1112,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 				if !reflect.DeepEqual(matches[i], tt.wantMatches[i]) {
 					t.Errorf("matches[%d] = %v, want %v", i, matches[i], tt.wantMatches[i])
 				}
-				if matches[i].Taker.Remaining() != tt.remaining[i] {
+				if matches[i].Taker.Trade().Remaining() != tt.remaining[i] {
 					t.Errorf("Incorrect taker order amount remaining. Expected %d, got %d",
-						tt.remaining[i], matches[i].Taker.Remaining())
+						tt.remaining[i], matches[i].Taker.Trade().Remaining())
 				}
 			}
 			if len(passed) != tt.wantNumPassed {
