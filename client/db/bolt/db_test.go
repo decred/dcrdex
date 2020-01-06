@@ -55,7 +55,10 @@ func TestMain(m *testing.M) {
 
 func TestAccounts(t *testing.T) {
 	boltdb := newTestDB(t)
-	dexURLs := boltdb.ListAccounts()
+	dexURLs, err := boltdb.ListAccounts()
+	if err != nil {
+		t.Fatalf("error listing accounts: %v", err)
+	}
 	if len(dexURLs) != 0 {
 		t.Fatalf("unexpected non-empty accounts in fresh DB")
 	}
@@ -82,7 +85,10 @@ func TestAccounts(t *testing.T) {
 	})
 	t.Logf("%d milliseconds to read and compare %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
 
-	dexURLs = boltdb.ListAccounts()
+	dexURLs, err = boltdb.ListAccounts()
+	if err != nil {
+		t.Fatalf("error listing accounts: %v", err)
+	}
 	if len(dexURLs) != numToDo {
 		t.Fatalf("expected %d accounts, found %d", numToDo, len(dexURLs))
 	}
@@ -110,7 +116,7 @@ func TestAccounts(t *testing.T) {
 	ensureErr("private key")
 	acct.EncKey = encKey
 
-	err := boltdb.CreateAccount(acct)
+	err = boltdb.CreateAccount(acct)
 	if err != nil {
 		t.Fatalf("failed to create account after fixing")
 	}

@@ -79,9 +79,9 @@ func NewDB(ctx context.Context, dbPath string) (dexdb.DB, error) {
 
 // ListAccounts returns a list of DEX URLs. The DB is designed to have a single
 // account per DEX, so the account itself is identified by the DEX URL.
-func (db *boltDB) ListAccounts() []string {
+func (db *boltDB) ListAccounts() ([]string, error) {
 	var urls []string
-	db.acctsView(func(accts *bolt.Bucket) error {
+	return urls, db.acctsView(func(accts *bolt.Bucket) error {
 		c := accts.Cursor()
 		// key, _ := c.First()
 		for acct, _ := c.First(); acct != nil; acct, _ = c.Next() {
@@ -95,14 +95,13 @@ func (db *boltDB) ListAccounts() []string {
 		}
 		return nil
 	})
-	return urls
 }
 
 // Account gets the AccountInfo associated with the specified DEX address.
 func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 	var acctInfo *dexdb.AccountInfo
 	acctKey := []byte(url)
-	err := db.acctsView(func(accts *bolt.Bucket) error {
+	return acctInfo, db.acctsView(func(accts *bolt.Bucket) error {
 		acct := accts.Bucket(acctKey)
 		if acct == nil {
 			return fmt.Errorf("account not found for %s", url)
@@ -115,7 +114,6 @@ func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 		acctInfo, err = dexdb.DecodeAccountInfo(bCopy(acctB))
 		return err
 	})
-	return acctInfo, err
 }
 
 // CreateAccount saves the AccountInfo. If an account already exists for this
@@ -257,7 +255,7 @@ type orderTimePair struct {
 // returned.
 func (db *boltDB) newestOrders(n int, filter func(*bolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
-	db.ordersView(func(master *bolt.Bucket) error {
+	return orders, db.ordersView(func(master *bolt.Bucket) error {
 		pairs := make([]*orderTimePair, 0, n)
 		master.ForEach(func(oid, _ []byte) error {
 			oBkt := master.Bucket(oid)
@@ -286,7 +284,6 @@ func (db *boltDB) newestOrders(n int, filter func(*bolt.Bucket) bool) ([]*dexdb.
 		}
 		return nil
 	})
-	return orders, nil
 }
 
 // filteredOrders gets all orders that pass the provided filter function. Each
@@ -294,8 +291,7 @@ func (db *boltDB) newestOrders(n int, filter func(*bolt.Bucket) bool) ([]*dexdb.
 // indicates the order should be decoded and returned.
 func (db *boltDB) filteredOrders(filter func(*bolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
-	var err error
-	db.ordersView(func(master *bolt.Bucket) error {
+	return orders, db.ordersView(func(master *bolt.Bucket) error {
 		master.ForEach(func(oid, _ []byte) error {
 			oBkt := master.Bucket(oid)
 			if oBkt == nil {
@@ -312,7 +308,6 @@ func (db *boltDB) filteredOrders(filter func(*bolt.Bucket) bool) ([]*dexdb.MetaO
 		})
 		return nil
 	})
-	return orders, err
 }
 
 // Order fetches a MetaOrder by order ID.
@@ -409,21 +404,19 @@ func (db *boltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 // indicates the match should be decoded and returned.
 func (db *boltDB) filteredMatches(filter func(*bolt.Bucket) bool) ([]*dexdb.MetaMatch, error) {
 	var matches []*dexdb.MetaMatch
-	var err error
-	db.matchesView(func(master *bolt.Bucket) error {
+	return matches, db.matchesView(func(master *bolt.Bucket) error {
 		master.ForEach(func(k, _ []byte) error {
 			mBkt := master.Bucket(k)
 			if mBkt == nil {
 				return fmt.Errorf("match %x bucket is not a bucket", k)
 			}
 			if filter(mBkt) {
-				var match *order.UserMatch
 				var proof *dexdb.MatchProof
 				matchB := mBkt.Get(matchKey)
 				if matchB == nil {
 					return fmt.Errorf("nil match bytes for %x", k)
 				}
-				match, err = order.DecodeMatch(bCopy(matchB))
+				match, err := order.DecodeMatch(bCopy(matchB))
 				if err != nil {
 					return fmt.Errorf("error decoding match %x: %v", k, err)
 				}
@@ -454,7 +447,6 @@ func (db *boltDB) filteredMatches(filter func(*bolt.Bucket) bool) ([]*dexdb.Meta
 		})
 		return nil
 	})
-	return matches, err
 }
 
 // matchesView is a convenience function for reading from the match bucket.
@@ -470,17 +462,15 @@ func (db *boltDB) matchesUpdate(f bucketFunc) error {
 // makeTopLevelBuckets creates a top-level bucket for each of the provided keys,
 // if the bucket doesn't already exist.
 func (db *boltDB) makeTopLevelBuckets(buckets [][]byte) error {
-	var err error
-	db.Update(func(tx *bolt.Tx) error {
+	return db.Update(func(tx *bolt.Tx) error {
 		for _, bucket := range buckets {
-			_, err = tx.CreateBucketIfNotExists(bucket)
+			_, err := tx.CreateBucketIfNotExists(bucket)
 			if err != nil {
 				return err
 			}
 		}
 		return nil
 	})
-	return err
 }
 
 // withBucket is a creates a view into a (probably nested) bucket. The viewer

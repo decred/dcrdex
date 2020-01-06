@@ -11,7 +11,7 @@ type DB interface {
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
 	// URL.
-	ListAccounts() []string
+	ListAccounts() ([]string, error)
 	// Account gets the AccountInfo associated with the specified DEX node.
 	Account(url string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
