@@ -461,7 +461,7 @@ func TestFundEdges(t *testing.T) {
 	// swap_value: 1e8
 	// base fees = swap_size * fee_rate * swap_value / lot_size = 25300 satoshi
 
-	// P2PKH input size: dexdcr.RedeemP2PKHInputSize = 166 bytes
+	// P2PKH input size: txsizes.RedeemP2PKHInputSize = 166 bytes
 	// backing fees: 166 * fee_rate(10 atoms/byte) = 1660 satoshi
 	// total: 25300 + 1660 = 26960 satoshi
 	fees := uint64(26960)

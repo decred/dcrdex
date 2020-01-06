@@ -16,9 +16,13 @@ import (
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
+	"github.com/decred/dcrwallet/wallet/v3/txsizes"
 )
 
 const (
+	P2PKHSigScriptSize = txsizes.RedeemP2PKHSigScriptSize
+	P2PKHOutputSize    = txsizes.P2PKHOutputSize
+
 	// SecretHashSize is the byte-length of the hash of the secret key used in an
 	// atomic swap.
 	SecretHashSize = 32
@@ -34,33 +38,6 @@ const (
 	// transaction as used in execution of an atomic swap.
 	// See ExtractSwapDetails for a breakdown of the bytes.
 	SwapContractSize = 97
-
-	// P2PKHSigScriptSize is the worst case (largest) serialize size
-	// of a transaction input script that redeems a compressed P2PKH output.
-	// It is calculated as:
-	//
-	//   - OP_DATA_73
-	//   - 72 bytes DER signature + 1 byte sighash
-	//   - OP_DATA_33
-	//   - 33 bytes serialized compressed pubkey
-	P2PKHSigScriptSize = 1 + DERSigLength + 1 + 33
-
-	// P2PKHPkScriptSize is the size of a transaction output script that
-	// pays to a compressed pubkey hash.  It is calculated as:
-	//
-	//   - OP_DUP
-	//   - OP_HASH160
-	//   - OP_DATA_20
-	//   - 20 bytes pubkey hash
-	//   - OP_EQUALVERIFY
-	//   - OP_CHECKSIG
-	P2PKHPkScriptSize = 1 + 1 + 1 + 20 + 1 + 1
-
-	// P2PKHOutputSize is the size of the serialized P2PKH output.
-	P2PKHOutputSize = TxOutOverhead + P2PKHPkScriptSize
-
-	// RedeemP2PKHInputSize
-	RedeemP2PKHInputSize = TxInOverhead + P2PKHSigScriptSize
 
 	// All pubkey scripts are assumed to be version 0.
 	CurrentScriptVersion = 0
@@ -85,7 +62,8 @@ const (
 	// TxOut is 8 bytes value + 2 bytes version + 1 byte serialized varint length
 	// pubkey script + length of pubkey script. There is one P2SH outputs and one
 	// change output
-	InitTxSize = 4 + 4 + 4 + 3 + TxInOverhead + P2PKHSigScriptSize + 2*(TxOutOverhead+P2PKHPkScriptSize)
+	InitTxSize = 4 + 4 + 4 + 3 + TxInOverhead + P2PKHSigScriptSize +
+		2*(TxOutOverhead+txsizes.P2PKHPkScriptSize)
 
 	// DERSigLength is the maximum length of a DER encoded signature.
 	DERSigLength = 73
