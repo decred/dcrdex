@@ -5,16 +5,17 @@ package webserver
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +24,6 @@ import (
 	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
-	"github.com/gorilla/websocket"
 )
 
 const (
@@ -39,44 +39,43 @@ const (
 	authCV = "authctx"
 )
 
-var (
-	log slog.Logger
-	// websocket.Upgrader is the preferred method of upgrading a request to a
-	// websocket connection.
-	upgrader = websocket.Upgrader{}
-)
+var log slog.Logger
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	ListMarkets() []*core.MarketInfo
 	Register(*core.Registration) error
 	Login(dex, pw string) error
-	Sync(dex, mkt string) (*core.OrderBook, chan *core.BookUpdate, error)
-	Unsync(dex, mkt string)
-	Balance(string) (float64, error)
+	Sync(dex string, base, quote uint32) (*core.OrderBook, chan *core.BookUpdate, error)
+	Unsync(dex string, base, quote uint32)
+	Balance(uint32) (uint64, error)
 }
 
 // marketSyncer is used internally to synchronize market subscriptions.
 type marketSyncer struct {
-	market string
-	kill   func()
+	dex   string
+	base  uint32
+	quote uint32
+	kill  func()
 }
 
-// webServer is a single-client http and websocket server enabling a browser
+// WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
-type webServer struct {
-	ctx        context.Context
-	core       clientCore
-	html       *templates
-	indent     bool
-	mtx        sync.RWMutex
-	authToken  string
-	openMarket *marketSyncer
+type WebServer struct {
+	ctx       context.Context
+	core      clientCore
+	listener  net.Listener
+	srv       *http.Server
+	html      *templates
+	indent    bool
+	mtx       sync.RWMutex
+	authToken string
+	watchers  map[string]int
+	clients   map[int32]*wsClient
 }
 
-// Run is the single exported function of webserver. Run the server, listening
-// on the provided network address until the context is canceled.
-func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger, reloadHTML bool) {
+// New is the constructor for a new WebServer.
+func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*WebServer, error) {
 	log = logger
 
 	folderExists := func(fp string) bool {
@@ -86,13 +85,12 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger, 
 	fp := filepath.Join
 
 	// Right now, it is expected that the working directory
-	// is either the dcrdex root directory, or the webserver directory itself.
+	// is either the dcrdex root directory, or the WebServer directory itself.
 	root := "client/webserver/site"
 	if !folderExists(root) {
 		root = "site"
 		if !folderExists(root) {
-			log.Errorf("no HTML template files found")
-			return
+			return nil, fmt.Errorf("no HTML template files found")
 		}
 	}
 
@@ -106,8 +104,7 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger, 
 		addTemplate("settings", bb)
 	err := tmpl.buildErr()
 	if err != nil {
-		log.Errorf(err.Error())
-		return
+		return nil, err
 	}
 
 	// Create an HTTP router.
@@ -118,11 +115,20 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger, 
 		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
 	}
 
+	// Start serving.
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %v", addr, err)
+	}
+
 	// Make the server here so its methods can be registered.
-	s := &webServer{
-		ctx:  ctx,
-		core: core,
-		html: tmpl,
+	s := &WebServer{
+		core:     core,
+		listener: listener,
+		srv:      httpServer,
+		html:     tmpl,
+		watchers: make(map[string]int),
+		clients:  make(map[int32]*wsClient),
 	}
 
 	// Middleware
@@ -148,22 +154,27 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger, 
 	fileServer(mux, "/img", fp(root, "src/img"))
 	fileServer(mux, "/font", fp(root, "src/font"))
 
-	// Start serving.
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Errorf("Can't listen on %s. web server quitting: %v", addr, err)
-		return
-	}
+	return s, nil
+}
+
+// Run starts the web server. Satisfies the runner.Runner interface.
+func (s *WebServer) Run(ctx context.Context) {
+	s.ctx = ctx
 	// Close the listener on context cancellation.
 	go func() {
 		<-ctx.Done()
-		err := listener.Close()
+		err := s.listener.Close()
 		if err != nil {
 			log.Errorf("Problem shutting down rpc: %v", err)
 		}
+		s.mtx.Lock()
+		defer s.mtx.Unlock()
+		for _, cl := range s.clients {
+			cl.Disconnect()
+		}
 	}()
-	log.Infof("Web server listening on %s", listener.Addr())
-	err = httpServer.Serve(listener)
+	log.Infof("Web server listening on %s", s.listener.Addr())
+	err := s.srv.Serve(s.listener)
 	if err != http.ErrServerClosed {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
@@ -171,7 +182,7 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger, 
 }
 
 // auth creates, stores, and returns a new auth token.
-func (s *webServer) auth() string {
+func (s *WebServer) auth() string {
 	// Create a token to identify the user. Only one token can be active at
 	// a time = only 1 authorized device at a time.
 	b := make([]byte, 32)
@@ -184,7 +195,7 @@ func (s *webServer) auth() string {
 }
 
 // token returns the current auth token.
-func (s *webServer) token() string {
+func (s *WebServer) token() string {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return s.authToken
@@ -192,21 +203,19 @@ func (s *webServer) token() string {
 
 // watchMarket watches the specified market, cancelling any other market
 // subscriptions.
-func (s *webServer) watchMarket(dex, mkt string) (*core.OrderBook, error) {
+func (s *WebServer) watchMarket(dex string, base, quote uint32) (*core.OrderBook, *marketSyncer, error) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	old := s.openMarket
-	if old != nil {
-		log.Tracef("ending monitoring of market %s", old.market)
-		old.kill()
-	}
-	book, updates, err := s.core.Sync(dex, mkt)
+	mktID := marketID(base, quote)
+
+	book, updates, err := s.core.Sync(dex, base, quote)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	s.watchers[mktID]++
 	ctx, shutdown := context.WithCancel(s.ctx)
 	go func() {
-		log.Debugf("monitoring market %s @ %s", mkt, dex)
+		log.Debugf("monitoring market %d-%d @ %s", base, quote, dex)
 	out:
 		for {
 			select {
@@ -216,33 +225,21 @@ func (s *webServer) watchMarket(dex, mkt string) (*core.OrderBook, error) {
 				break out
 			}
 		}
-		s.core.Unsync(dex, mkt)
+		// Decrement the watchers, and unsync the book if there are none left.
+		s.mtx.Lock()
+		defer s.mtx.Unlock()
+		s.watchers[mktID]--
+		if s.watchers[mktID] == 0 {
+			s.core.Unsync(dex, base, quote)
+		}
 	}()
-	s.openMarket = &marketSyncer{
-		market: mkt,
-		kill:   shutdown,
+	syncer := &marketSyncer{
+		dex:   dex,
+		base:  base,
+		quote: quote,
+		kill:  shutdown,
 	}
-	return book, nil
-}
-
-// unmarket unsubscribes from any market being monitored.
-func (s *webServer) unmarket() {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	if s.openMarket != nil {
-		log.Tracef("ending monitoring of market %s", s.openMarket.market)
-		s.openMarket.kill()
-	}
-	s.openMarket = nil
-}
-
-// decodeMarket decodes the market string into its two tickers.
-func decodeMarket(mkt string) (string, string, error) {
-	mkts := strings.Split(mkt, "-")
-	if len(mkts) != 2 {
-		return "", "", fmt.Errorf("unable to decode markets from %s", mkt)
-	}
-	return mkts[0], mkts[1], nil
+	return book, syncer, nil
 }
 
 // readPost unmarshals the request body into the provided interface.
@@ -282,7 +279,7 @@ func extractUserInfo(r *http.Request) *userInfo {
 
 // authMiddleware checks incoming requests for cookie-based information
 // including the auth token.
-func (s *webServer) authMiddleware(next http.Handler) http.Handler {
+func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var authToken string
 		cookie, err := r.Cookie(authCK)
@@ -398,4 +395,8 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int, ind
 func fileExists(name string) bool {
 	_, err := os.Stat(name)
 	return !os.IsNotExist(err)
+}
+
+func marketID(base, quote uint32) string {
+	return strconv.Itoa(int(base)) + "_" + strconv.Itoa(int(quote))
 }

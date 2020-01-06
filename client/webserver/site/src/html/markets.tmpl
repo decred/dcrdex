@@ -8,10 +8,10 @@
       {{$mkt := .DEX}}
       <div class="fs16 py-1 pl-2 bg1">{{urlBase $mkt}}</div>
       {{range .Markets}}
-        <div class="marketrow" data-dex="{{$mkt}}" data-mkt="{{.}}">
-          <img src="{{baseLogoPath .}}" class="mini-icon mr-1">
-          <img src="{{quoteLogoPath .}}" class="mini-icon mr-1">
-          {{.}}
+        <div class="marketrow" data-dex="{{$mkt}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
+          <img src="{{logoPath .BaseSymbol}}" class="mini-icon mr-1">
+          <img src="{{logoPath .QuoteSymbol}}" class="mini-icon mr-1">
+          {{.Display}}
         </div>
       {{end}}
     {{end}}

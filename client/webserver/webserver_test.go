@@ -13,12 +13,16 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
-	"decred.org/dcrdex/dex/ws"
 	"github.com/decred/slog"
 )
 
-var tErr = fmt.Errorf("test error")
+var (
+	tErr    = fmt.Errorf("test error")
+	tLogger dex.Logger
+	tCtx    context.Context
+)
 
 type TCore struct {
 	balanceErr error
@@ -30,11 +34,11 @@ type TCore struct {
 func (c *TCore) ListMarkets() []*core.MarketInfo     { return nil }
 func (c *TCore) Register(r *core.Registration) error { return c.regErr }
 func (c *TCore) Login(dex, pw string) error          { return c.loginErr }
-func (c *TCore) Sync(dex, mkt string) (*core.OrderBook, chan *core.BookUpdate, error) {
+func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, chan *core.BookUpdate, error) {
 	return nil, nil, c.syncErr
 }
-func (c *TCore) Unsync(dex, mkt string)          {}
-func (c *TCore) Balance(string) (float64, error) { return 0, c.balanceErr }
+func (c *TCore) Unsync(dex string, base, quote uint32) {}
+func (c *TCore) Balance(uint32) (uint64, error)        { return 0, c.balanceErr }
 
 type TWriter struct {
 	b []byte
@@ -91,13 +95,13 @@ func (c *TConn) WriteMessage(_ int, msg []byte) error {
 }
 
 type tLink struct {
-	link *ws.WSLink
+	link *wsClient
 	conn *TConn
 }
 
 func newLink() *tLink {
 	conn := new(TConn)
-	link := ws.NewWSLink("", conn, time.Hour, func(*msgjson.Message) *msgjson.Error { return nil })
+	link := newWSClient("", conn, func(*msgjson.Message) *msgjson.Error { return nil })
 	return &tLink{
 		link: link,
 		conn: conn,
@@ -113,15 +117,25 @@ func (c *TConn) Close() error {
 	return nil
 }
 
-func newTServer() (*webServer, *TCore) {
+var tPort int = 5142
+
+func newTServer(t *testing.T, start bool) (*WebServer, *TCore, context.CancelFunc) {
+	tPort++
 	c := &TCore{}
-	return &webServer{
-		ctx:  context.Background(),
-		core: c,
-	}, c
+	ctx, shutdown := context.WithCancel(tCtx)
+	s, err := New(c, fmt.Sprintf("localhost:%d", tPort), tLogger, false)
+	if err != nil {
+		t.Fatalf("error creating server: %v", err)
+	}
+	if start {
+		go s.Run(ctx)
+	} else {
+		s.ctx = ctx
+	}
+	return s, c, shutdown
 }
 
-func ensureResponse(t *testing.T, s *webServer, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
+func ensureResponse(t *testing.T, s *WebServer, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
 	reader.msg, _ = json.Marshal(body)
 	req, err := http.NewRequest("GET", "/", reader)
 	if err != nil {
@@ -139,15 +153,47 @@ func ensureResponse(t *testing.T, s *webServer, f func(w http.ResponseWriter, r 
 	writer.b = nil
 }
 
+func TestMain(m *testing.M) {
+	tLogger = slog.NewBackend(os.Stdout).Logger("TEST")
+	tLogger.SetLevel(slog.LevelTrace)
+	var shutdown func()
+	tCtx, shutdown = context.WithCancel(context.Background())
+	doIt := func() int {
+		// Not counted as coverage, must test Archiver constructor explicitly.
+		defer shutdown()
+		return m.Run()
+	}
+	os.Exit(doIt())
+}
+
 func TestLoadMarket(t *testing.T) {
 	enableLogging()
 	link := newLink()
-	s, tCore := newTServer()
-	tMkt := "DEF-GHI"
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+	tBase := uint32(1)
+	tQuote := uint32(2)
+	tDEX := "abc"
 	params := &marketLoad{
-		DEX:    "abc",
-		Market: tMkt,
+		DEX:   tDEX,
+		Base:  tBase,
+		Quote: tQuote,
 	}
+
+	getWatched := func() *marketSyncer {
+		link.link.mtx.Lock()
+		defer link.link.mtx.Unlock()
+		return link.link.watchMkt
+	}
+	getWatchCount := func(base, quote uint32) int {
+		mktID := marketID(base, quote)
+		// Add a tiny delay to allow the watchMarket loop to exit.
+		time.Sleep(time.Millisecond)
+		s.mtx.Lock()
+		defer s.mtx.Unlock()
+		return s.watchers[mktID]
+	}
+
 	msg, _ := msgjson.NewRequest(1, "a", params)
 	rpcErr := wsLoadMarket(s, link.link, msg)
 	if rpcErr != nil {
@@ -155,22 +201,49 @@ func TestLoadMarket(t *testing.T) {
 	}
 
 	// Get the current marketSyncer
-	currentMkt := s.openMarket
-	if currentMkt.market != tMkt {
-		t.Fatalf("wrong market stored. expected %s, got %s", tMkt, currentMkt.market)
+	currentMkt := getWatched()
+	if currentMkt.base != tBase || currentMkt.quote != tQuote {
+		t.Fatalf("wrong market stored. expected %d-%d, got %d-%d", tBase, tQuote, currentMkt.base, currentMkt.quote)
+	}
+	watchCount := getWatchCount(tBase, tQuote)
+	if watchCount != 1 {
+		t.Fatalf("expected 1 watcher after subscribing, found %d", watchCount)
 	}
 
 	// Load a new market, and make sure the old market was unloaded.
-	newMkt := "JKL-MNO"
-	params.Market = newMkt
+	newBase := uint32(3)
+	newQuote := uint32(4)
+	params.Base = newBase
+	params.Quote = newQuote
 	msg, _ = msgjson.NewRequest(2, "a", params)
 	rpcErr = wsLoadMarket(s, link.link, msg)
 	if rpcErr != nil {
 		t.Fatalf("error loading market: %v", rpcErr)
 	}
-	currentMkt = s.openMarket
-	if currentMkt.market != newMkt {
-		t.Fatalf("wrong market stored when replacing. expected %s, got %s", newMkt, currentMkt.market)
+	currentMkt = getWatched()
+	if currentMkt.base != newBase || currentMkt.quote != newQuote {
+		t.Fatalf("wrong market stored when replacing. expected %d-%d, got %d-%d", newBase, newQuote, currentMkt.base, currentMkt.quote)
+	}
+	// New market watch count should be 1.
+	watchCount = getWatchCount(newBase, newQuote)
+	if watchCount != 1 {
+		t.Fatalf("expected 1 watcher for new market, found %d", watchCount)
+	}
+	// Old market watch count should be 0.
+	watchCount = getWatchCount(tBase, tQuote)
+	if watchCount != 0 {
+		t.Fatalf("expected 0 watchers for old market, found %d", watchCount)
+	}
+
+	// Unsubscribe
+	wsUnmarket(nil, link.link, nil)
+	watchCount = getWatchCount(newBase, newQuote)
+	if watchCount != 0 {
+		t.Fatalf("expected no watchers after unsubscribing, found %d", watchCount)
+	}
+	currentMkt = getWatched()
+	if currentMkt != nil {
+		t.Fatalf("failed to shutdown market")
 	}
 
 	ensureErr := func(name string, wantCode int) {
@@ -183,13 +256,6 @@ func TestLoadMarket(t *testing.T) {
 		}
 	}
 
-	// Pass a bad market name.
-	params.Market = "ABC"
-	msg, _ = msgjson.NewRequest(3, "a", params)
-	ensureErr("market name", msgjson.UnknownMarketError)
-	params.Market = newMkt
-	msg, _ = msgjson.NewRequest(3, "a", params)
-
 	// Balance error.
 	tCore.balanceErr = tErr
 	ensureErr("balance", msgjson.RPCInternal)
@@ -199,7 +265,6 @@ func TestLoadMarket(t *testing.T) {
 	tCore.syncErr = tErr
 	ensureErr("balance", msgjson.RPCInternal)
 	tCore.syncErr = nil
-
 }
 
 func TestAPIRegister(t *testing.T) {
@@ -207,7 +272,8 @@ func TestAPIRegister(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore := newTServer()
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
 
 	ensure := func(want string) {
 		ensureResponse(t, s, s.apiRegister, want, reader, writer, body)
@@ -245,7 +311,8 @@ func TestAPILogin(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore := newTServer()
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
 
 	ensure := func(want string) {
 		ensureResponse(t, s, s.apiLogin, want, reader, writer, body)
@@ -266,7 +333,8 @@ func TestAPILogin(t *testing.T) {
 
 func TestHandleMessage(t *testing.T) {
 	link := newLink()
-	s, _ := newTServer()
+	s, _, shutdown := newTServer(t, false)
+	defer shutdown()
 	var msg *msgjson.Message
 
 	ensureErr := func(name string, wantCode int) {
@@ -288,12 +356,40 @@ func TestHandleMessage(t *testing.T) {
 	ensureErr("bad route", msgjson.UnknownMessageType)
 
 	// Set the route correctly.
-	wsHandlers["123"] = func(*webServer, *ws.WSLink, *msgjson.Message) *msgjson.Error {
+	wsHandlers["123"] = func(*WebServer, *wsClient, *msgjson.Message) *msgjson.Error {
 		return nil
 	}
 
 	rpcErr := s.handleMessage(link.link, msg)
 	if rpcErr != nil {
 		t.Fatalf("error for good message: %d: %s", rpcErr.Code, rpcErr.Message)
+	}
+}
+
+func TestClientMap(t *testing.T) {
+	s, _, shutdown := newTServer(t, true)
+	conn := new(TConn)
+
+	go s.websocketHandler(conn, "someip")
+	time.Sleep(time.Millisecond)
+
+	// While we're here, check that the client is properly mapped.
+	var cl *wsClient
+	s.mtx.Lock()
+	i := len(s.clients)
+	if i != 1 {
+		t.Fatalf("expected 1 client in server map, found %d", i)
+	}
+	for _, c := range s.clients {
+		cl = c
+		break
+	}
+	s.mtx.Unlock()
+
+	// Close the server and make sure the connection is closed.
+	shutdown()
+	time.Sleep(time.Millisecond)
+	if !cl.Off() {
+		t.Fatalf("connection not closed on server shutdown")
 	}
 }

@@ -15,17 +15,29 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 )
+
+func mkMrkt(base, quote string) core.Market {
+	baseID, _ := dex.BipSymbolID(base)
+	quoteID, _ := dex.BipSymbolID(quote)
+	return core.Market{
+		BaseID:      baseID,
+		BaseSymbol:  base,
+		QuoteID:     quoteID,
+		QuoteSymbol: quote,
+	}
+}
 
 var tMarkets = []*core.MarketInfo{
 	{
 		DEX:     "https://somedex.com",
-		Markets: []string{"DCR-BTC", "DCR-LTC", "DOGE-MONA"},
+		Markets: []core.Market{mkMrkt("dcr", "btc"), mkMrkt("dcr", "ltc"), mkMrkt("doge", "mona")},
 	},
 	{
 		DEX:     "https://thisdexwithalongname.com",
-		Markets: []string{"DCR-VTC", "BTC-LTC", "MONA-LTC"},
+		Markets: []core.Market{mkMrkt("dcr", "vtc"), mkMrkt("btc", "ltc"), mkMrkt("mona", "ltc")},
 	},
 }
 
@@ -40,8 +52,8 @@ func (c *TCore) Register(r *core.Registration) error {
 }
 func (c *TCore) Login(dex, pw string) error { return nil }
 
-// Sync syncs order book data. The test implementation Just randomizes the data.
-func (c *TCore) Sync(dex, mkt string) (*core.OrderBook, chan *core.BookUpdate, error) {
+// Sync syncs order book data. The test implementation just randomizes the data.
+func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, chan *core.BookUpdate, error) {
 	// Pick an order of magnitude for the midGap price between -2 and 3
 	rateMagnitude := rand.Intn(6)     // Don't subtract yet
 	qtyMagnitude := 3 - rateMagnitude // larger rate -> smaller qty
@@ -86,10 +98,10 @@ func (c *TCore) Sync(dex, mkt string) (*core.OrderBook, chan *core.BookUpdate, e
 	}, make(chan *core.BookUpdate), nil
 }
 
-func (c *TCore) Unsync(dex, mkt string) {}
+func (c *TCore) Unsync(dex string, base, quote uint32) {}
 
-func (c *TCore) Balance(string) (float64, error) {
-	return rand.Float64() * 10 * math.Pow10(rand.Intn(6)-2), nil
+func (c *TCore) Balance(uint32) (uint64, error) {
+	return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6)), nil
 }
 
 func TestServer(t *testing.T) {
@@ -98,8 +110,10 @@ func TestServer(t *testing.T) {
 	logger := slog.NewBackend(os.Stdout).Logger("TEST")
 	logger.SetLevel(slog.LevelTrace)
 	time.AfterFunc(time.Minute*60, func() { shutdown() })
-	go func() {
-		Run(ctx, &TCore{}, ":54321", logger, true)
-	}()
+	s, err := New(&TCore{}, ":54321", logger, true)
+	if err != nil {
+		t.Fatalf("error creating server: %v", err)
+	}
+	go s.Run(ctx)
 	<-ctx.Done()
 }

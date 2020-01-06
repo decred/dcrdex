@@ -76,39 +76,32 @@ func (c *wsLink) ID() uint64 {
 func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 	switch msg.Type {
 	case msgjson.Request:
+		if msg.ID == 0 {
+			return msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero")
+		}
 		// Look for a registered handler. Failure to find a handler results in an
 		// error response but not a disconnect.
 		handler := RouteHandler(msg.Route)
 		if handler == nil {
 			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route "+msg.Route)
 		}
-		switch msg.Type {
-		case msgjson.Request:
-			if msg.ID == 0 {
-				return msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero")
-			}
-			// Look for a registered handler. Failure to find a handler results in an
-			// error response but not a disconnect.
-			handler := RouteHandler(msg.Route)
-			if handler == nil {
-				return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route "+msg.Route)
-			}
-			// Handle the request.
-			rpcError := handler(c, msg)
-			if rpcError != nil {
-				return rpcError
-			}
-		case msgjson.Response:
-			if msg.ID == 0 {
-				return msgjson.NewError(msgjson.RPCParseError, "response id cannot be 0")
-			}
-			cb := c.respHandler(msg.ID)
-			if cb == nil {
-				return msgjson.NewError(msgjson.UnknownResponseID,
-					"unknown response ID")
-			}
-			cb.f(c, msg)
+		// Handle the request.
+		rpcError := handler(c, msg)
+		if rpcError != nil {
+			return rpcError
 		}
+		return nil
+	case msgjson.Response:
+		if msg.ID == 0 {
+			return msgjson.NewError(msgjson.RPCParseError, "response id cannot be 0")
+		}
+		cb := c.respHandler(msg.ID)
+		if cb == nil {
+			return msgjson.NewError(msgjson.UnknownResponseID,
+				"unknown response ID")
+		}
+		cb.f(c, msg)
+		return nil
 	}
 	return msgjson.NewError(msgjson.UnknownMessageType, "unknown message type")
 }

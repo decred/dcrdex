@@ -11,7 +11,7 @@ import (
 )
 
 // sendTemplate processes the template and sends the result.
-func (s *webServer) sendTemplate(w http.ResponseWriter, r *http.Request, tmplID string, data interface{}) {
+func (s *WebServer) sendTemplate(w http.ResponseWriter, r *http.Request, tmplID string, data interface{}) {
 	page, err := s.html.exec(tmplID, data)
 	if err != nil {
 		log.Errorf("template exec error for %s: %v", tmplID, err)
@@ -25,7 +25,7 @@ func (s *webServer) sendTemplate(w http.ResponseWriter, r *http.Request, tmplID 
 
 // handleHome is the handler for the '/' page request. The response depends on
 // whether the user is authenticated or not.
-func (s *webServer) handleHome(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
 	userInfo := extractUserInfo(r)
 	var tmplID string
 	var data interface{}
@@ -56,12 +56,12 @@ func commonArgs(r *http.Request, title string) *CommonArguments {
 }
 
 // handleLogin is the handler for the '/login' page request.
-func (s *webServer) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, r, "login", commonArgs(r, "Login | Decred DEX"))
 }
 
 // handleRegister is the handler for the '/register' page request.
-func (s *webServer) handleRegister(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, r, "register", commonArgs(r, "Register | Decred DEX"))
 }
 
@@ -73,7 +73,7 @@ type marketResult struct {
 
 // marketResult returns a *marketResult, which is needed to process the
 // 'markets' template.
-func (s *webServer) marketResult(r *http.Request) *marketResult {
+func (s *WebServer) marketResult(r *http.Request) *marketResult {
 	return &marketResult{
 		CommonArguments: *commonArgs(r, "Markets | Decred DEX"),
 		DEXes:           s.core.ListMarkets(),
@@ -81,16 +81,16 @@ func (s *webServer) marketResult(r *http.Request) *marketResult {
 }
 
 // handleMarkets is the handler for the '/markets' page request.
-func (s *webServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, r, "markets", s.marketResult(r))
 }
 
 // handleWallets is the handler for the '/wallets' page request.
-func (s *webServer) handleWallets(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, r, "wallets", commonArgs(r, "Wallets | Decred DEX"))
 }
 
 // handleSettings is the handler for the '/settings' page request.
-func (s *webServer) handleSettings(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, r, "settings", commonArgs(r, "Settings | Decred DEX"))
 }

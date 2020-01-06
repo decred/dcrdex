@@ -125,28 +125,12 @@ func (t *templates) execWithReload(name string, data interface{}) (string, error
 	return t.execTemplateToString(name, data)
 }
 
-// marketLogoPath takes a logo image path for the specified index 0 or 1 of the
-// market formatted like ABC-DEF.
-func marketLogoPath(mktPath string, idx int) string {
-	pair := strings.Split(mktPath, "-")
-	if len(pair) != 2 || idx > 1 || idx < 0 {
-		log.Errorf("marketLogoPath called with invalid parameters. %d, %d", len(pair), idx)
-		return ""
-	}
-	return "/img/coins/" + strings.ToLower(pair[idx]) + ".png"
-}
-
 // templateFuncs are able to be called during template execution.
 var templateFuncs = template.FuncMap{
-	// baseLogoPath gets the logo image path for the base asset of the specified
+	// logoPath gets the logo image path for the base asset of the specified
 	// market.
-	"baseLogoPath": func(mkt string) string {
-		return marketLogoPath(mkt, 0)
-	},
-	// quoteLogoPath gets the logo image path for the quote asset of the specified
-	// market.
-	"quoteLogoPath": func(mkt string) string {
-		return marketLogoPath(mkt, 1)
+	"logoPath": func(symbol string) string {
+		return "/img/coins/" + strings.ToLower(symbol) + ".png"
 	},
 	// urlBase attempts to get the domain name without the TLD.
 	"urlBase": func(uri string) string {

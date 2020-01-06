@@ -17,7 +17,7 @@ type standardResponse struct {
 }
 
 // apiRegister is the handler for the '/register' page request.
-func (s *webServer) apiRegister(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	reg := new(core.Registration)
 	if !readPost(w, r, reg) {
 		return
@@ -44,7 +44,7 @@ type loginForm struct {
 }
 
 // apiLogin handles the 'login' page request.
-func (s *webServer) apiLogin(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
 	if !readPost(w, r, login) {
 		return

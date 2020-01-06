@@ -57,7 +57,7 @@ export default class Application {
   // attachCommon scans the provided node and handles some common bindings.
   attachCommon (node) {
     node.querySelectorAll('[data-pagelink]').forEach(link => {
-      let page = link.dataset.pagelink
+      const page = link.dataset.pagelink
       bind(link, 'click', async () => {
         var res = await this.loadPage(page)
         if (res) {
@@ -135,7 +135,7 @@ function handleRegister (main) {
 
 // handleLogin is the 'markets' page main element handler.
 function handleMarkets (main) {
-  var market = ''
+  var market
   const get = s => idel(main, s)
   const marketLoader = get('marketloader')
   const priceBox = get('priceBox')
@@ -181,16 +181,18 @@ function handleMarkets (main) {
   var lastMarket = State.fetch('selectedMarket')
   var mktFound = false
   marketRows.forEach(div => {
-    let mkt = div.dataset.mkt
-    let dex = div.dataset.dex
+    const base = parseInt(div.dataset.base)
+    const quote = parseInt(div.dataset.quote)
+    const dex = div.dataset.dex
     mktFound = mktFound || (lastMarket && lastMarket.dex === dex &&
-      lastMarket.market === mkt)
+      lastMarket.base === base && lastMarket.quote === quote)
     bind(div, 'click', () => {
       marketLoader.classList.remove('d-none')
-      setMarket(main, dex, mkt)
+      setMarket(main, dex, base, quote)
     })
     markets.push({
-      market: mkt,
+      base: base,
+      quote: quote,
       dex: dex
     })
   })
@@ -212,7 +214,7 @@ function handleMarkets (main) {
     market = data.market
     marketLoader.classList.add('d-none')
     marketRows.forEach(row => {
-      if (row.dataset.dex === data.dex && row.dataset.mkt === market) {
+      if (row.dataset.dex === data.dex && row.dataset.base === data.base && row.dataset.quote === data.quote) {
         row.classList.add('selected')
       } else {
         row.classList.remove('selected')
@@ -220,24 +222,25 @@ function handleMarkets (main) {
     })
     State.store('selectedMarket', {
       dex: data.dex,
-      market: market
+      base: data.base,
+      quote: data.quote
     })
     baseUnits.forEach(el => { el.textContent = data.base })
     quoteUnits.forEach(el => { el.textContent = data.quote })
-    baseImg.src = `/img/coins/${data.base.toLowerCase()}.png`
-    quoteImg.src = `/img/coins/${data.quote.toLowerCase()}.png`
-    baseBalance.textContent = formatCoinValue(data.baseBalance)
-    quoteBalance.textContent = formatCoinValue(data.quoteBalance)
+    baseImg.src = `/img/coins/${data.baseSymbol.toLowerCase()}.png`
+    quoteImg.src = `/img/coins/${data.quoteSymbol.toLowerCase()}.png`
+    baseBalance.textContent = formatCoinValue(data.baseBalance/1e8)
+    quoteBalance.textContent = formatCoinValue(data.quoteBalance/1e8)
   })
   ws.registerEvtHandler('bookupdate', e => {
-    if (e.market !== market && e.market !== '') return
+    if (market && (e.market.dex !== market.dex || e.market.base !== market.base || e.market.quote !== market.quote)) return
     handleBookUpdate(main, e)
   })
 
   // Fetch the first market in the list, or the users last selected market, if
   // it was found.
   const firstEntry = mktFound ? lastMarket : markets[0]
-  setMarket(main, firstEntry.dex, firstEntry.market)
+  setMarket(main, firstEntry.dex, firstEntry.base, firstEntry.quote)
 
   unattach(() => {
     ws.request('unmarket', {})
@@ -247,10 +250,11 @@ function handleMarkets (main) {
 }
 
 // setMarkets sets a new market by sending the 'loadmarket' API request.
-function setMarket (main, dex, mkt) {
+function setMarket (main, dex, base, quote) {
   ws.request('loadmarket', {
     dex: dex,
-    market: mkt
+    base: base,
+    quote: quote
   })
 }
 
@@ -270,7 +274,7 @@ function loadTable (bookSide, table, builder, cssClass) {
   check.classList.add('ico-check')
   bookSide.forEach(order => {
     const tr = builder.row.cloneNode(true)
-    let rate = order.rate
+    const rate = order.rate
     bind(tr, 'click', () => {
       builder.reporters.price(rate)
     })

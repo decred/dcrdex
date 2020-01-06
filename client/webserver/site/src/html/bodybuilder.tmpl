@@ -1,11 +1,11 @@
 {{define "header"}}
 <header id=header class="maintop">
-	<div data-pagelink="" class="logo"></div>
-	<div class="mainlinks fs18 offwhite">
-		<span data-pagelink="markets">Markets</span>
-		<span data-pagelink="wallets">Wallets</span>
-		<span data-pagelink="settings" class="ico-settings fs24"></span>
-	</div>
+  <div data-pagelink="" class="logo"></div>
+  <div class="mainlinks fs18 offwhite">
+  <span data-pagelink="markets">Markets</span>
+  <span data-pagelink="wallets">Wallets</span>
+  <span data-pagelink="settings" class="ico-settings fs24"></span>
+  </div>
 </header>
 {{end}}
 
@@ -13,20 +13,20 @@
 <!DOCTYPE html>
 <html lang="en">
 <head data-turbolinks-eval="false">
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
-	<!-- The above 2 meta tags *must* come first in the head; any other head content must come *after* these tags -->
-	<link rel="icon" href="/img/favicon.png?v=yHh3NF">
-	<meta name="description" content="Decred DEX Client Web Portal">
-	<title>{{.Title}}</title>
-	<link href="/css/style.css" rel="stylesheet">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- The above 2 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+  <link rel="icon" href="/img/favicon.png?v=yHh3NF">
+  <meta name="description" content="Decred DEX Client Web Portal">
+  <title>{{.Title}}</title>
+  <link href="/css/style.css?v=0" rel="stylesheet">
 </head>
 <body data-handler="home"{{if .UserInfo.DarkMode}} class="dark"{{end}}>
 {{template "header" .}}
 {{end}}
 
 {{define "bottom"}}
-<script src="/css/entry.js"></script>
+<script src="/css/entry.js?v=0"></script>
 </body>
 </html>
 {{end}}

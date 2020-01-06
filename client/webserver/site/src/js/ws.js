@@ -24,7 +24,7 @@ const typeRequest = 1
 
 function forward (route, payload, handlers) {
   if (!route && payload.error) {
-    let err = payload.error
+    const err = payload.error
     console.error(`websocket error (code ${err.code}): ${err.message}`)
     return
   }
@@ -97,8 +97,7 @@ class MessageSocket {
     this.connection.onopen = () => {
       forward('open', null, this.handlers)
       while (this.queue.length) {
-        let route, message
-        [route, message] = this.queue.shift()
+        const [route, message] = this.queue.shift()
         this.request(route, message)
       }
     }
@@ -108,5 +107,5 @@ class MessageSocket {
   }
 }
 
-let ws = new MessageSocket()
+var ws = new MessageSocket()
 export default ws

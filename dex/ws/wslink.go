@@ -36,7 +36,7 @@ func (e Error) Error() string {
 // disconnected link.
 const ErrClientDisconnected = Error("client disconnected")
 
-// WSConnection represents a websocket connection to the client. In practice,
+// Connection represents a websocket connection to the client. In practice,
 // it is satisfied by *websocket.Conn. For testing, a stub can be used.
 type Connection interface {
 	ReadMessage() (int, []byte, error)

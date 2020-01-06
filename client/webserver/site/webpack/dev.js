@@ -15,7 +15,7 @@ module.exports = merge(common, {
         exclude: /node_modules/,
         loader: 'eslint-loader',
         options: {
-          formatter: require('eslint/lib/formatters/stylish')
+          formatter: require('eslint/lib/cli-engine/formatters/stylish')
         }
       }
     ]

@@ -133,12 +133,11 @@ export class DepthChart {
 
   // click_ is the canvas 'click' event handler.
   click_ (e) {
-    let x = e.clientX - this.rect.left
-    let y = e.clientY - this.rect.y
+    const x = e.clientX - this.rect.left
+    const y = e.clientY - this.rect.y
     if (this.zoomInBttn.contains(x, y)) { this.zoom(true); return }
     if (this.zoomOutBttn.contains(x, y)) { this.zoom(false); return }
     const translator = this.plotRegion.translator(this.dataExtents)
-    console.log(translator.unx(x))
     this.reporters.price(translator.unx(x))
   }
 
@@ -151,7 +150,7 @@ export class DepthChart {
   set (data) {
     this.buys = data.book.buys
     this.sells = data.book.sells
-    let mkts = data.market.split('-')
+    const mkts = data.market.split('-')
     this.base = mkts[0]
     this.quote = mkts[1]
     this.zoomState = {}
@@ -195,7 +194,7 @@ export class DepthChart {
     const buyDepth = []
     const sellDepth = []
     for (let i = 0; i < buys.length; i++) {
-      let pt = buys[i]
+      const pt = buys[i]
       sum += pt.qty
       buyDepth.push([pt.rate, sum])
       if (pt.rate < leftEdge) break
@@ -205,7 +204,7 @@ export class DepthChart {
     buyDepth.push([last(buyDepth)[0] - xPad, last(buyDepth)[1]])
     sum = 0
     for (let i = 0; i < sells.length; i++) {
-      let pt = sells[i]
+      const pt = sells[i]
       sum += pt.qty
       sellDepth.push([pt.rate, sum])
       if (pt.rate > rightEdge) break
@@ -217,7 +216,7 @@ export class DepthChart {
     this.dataExtents = dataExtents
 
     // Draw the axis tick labels.
-    this.ctx.font = `12px 'sans', sans-serif`
+    this.ctx.font = '12px \'sans\', sans-serif'
     this.ctx.fillStyle = this.theme.axisLabel
 
     const yLabels = makeLabels(this.ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50)
@@ -261,11 +260,11 @@ export class DepthChart {
       ctx.strokeStyle = this.theme.gapLine
       line(ctx, tools.x(midGap), tools.y(0), tools.x(midGap), tools.y(0.3 * extY.max))
 
-      ctx.font = `30px 'demi-sans', sans-serif`
+      ctx.font = '30px \'demi-sans\', sans-serif'
       ctx.fillStyle = this.theme.value
-      let y = 0.5 * extY.max
+      const y = 0.5 * extY.max
       ctx.fillText(formatLabelValue(midGap), tools.x(midGap), tools.y(y))
-      ctx.font = `12px 'sans', sans-serif`
+      ctx.font = '12px \'sans\', sans-serif'
       // ctx.fillText('mid-market price', tools.x(midGap), tools.y(y) + 24)
       ctx.fillText(`${(gapWidth / midGap * 100).toFixed(2)}% spread`,
         tools.x(midGap), tools.y(y) + 24)
@@ -276,7 +275,7 @@ export class DepthChart {
       const zoomPct = dataExtents.xRange / midGap * 100
       const zoomText = `${zoomPct.toFixed(1)}%`
       const w = ctx.measureText(zoomText).width
-      ctx.font = `13px 'sans', sans-serif`
+      ctx.font = '13px \'sans\', sans-serif'
       ctx.fillText(zoomText, topCenterX, topCenterY + 1)
       // define the region for the zoom button
       const bttnSize = 20
@@ -291,11 +290,11 @@ export class DepthChart {
       )
       let hover = mousePos && this.zoomOutBttn.contains(mousePos.x, mousePos.y)
       this.zoomOutBttn.plot(new Extents(0, 1, 0, 1), (ctx, tools) => {
-        ctx.font = `12px 'icomoon'`
+        ctx.font = '12px \'icomoon\''
         ctx.fillStyle = this.theme.zoom
         if (hover) {
           ctx.fillStyle = this.theme.zoomHover
-          ctx.font = `13px 'icomoon'`
+          ctx.font = '13px \'icomoon\''
         }
         ctx.fillText(minusChar, this.zoomOutBttn.extents.midX, this.zoomOutBttn.extents.midY)
       })
@@ -308,11 +307,11 @@ export class DepthChart {
       )
       hover = mousePos && this.zoomInBttn.contains(mousePos.x, mousePos.y)
       this.zoomInBttn.plot(new Extents(0, 1, 0, 1), (ctx, tools) => {
-        ctx.font = `12px 'icomoon'`
+        ctx.font = '12px \'icomoon\''
         ctx.fillStyle = this.theme.zoom
         if (hover) {
           ctx.fillStyle = this.theme.zoomHover
-          ctx.font = `14px 'icomoon'`
+          ctx.font = '14px \'icomoon\''
         }
         ctx.fillText(plusChar, this.zoomInBttn.extents.midX, this.zoomInBttn.extents.midY)
       })
@@ -334,7 +333,7 @@ export class DepthChart {
       }
       let bestDepth = evalSide[0]
       for (let i = 0; i < evalSide.length; i++) {
-        let pt = evalSide[i]
+        const pt = evalSide[i]
         if (trigger(pt[0])) break
         bestDepth = pt
       }
@@ -375,24 +374,24 @@ export class DepthChart {
     // If there is legend data to display, run that now.
     // dot(ctx, tools.x(dataX), tools.y(bestDepth[1]), dotColor, 5)
     if (legendData) {
-      let dataX = legendData.dataX
+      const dataX = legendData.dataX
       this.plotRegion.plot(dataExtents, (ctx, tools) => {
-        let screenX = tools.x(dataX)
+        const screenX = tools.x(dataX)
         dot(ctx, screenX, tools.y(legendData.depth), legendData.dotColor, 5)
         // Create the strings and measure them to check how wide our legend needs
         // to be.
         const price = `price: ${formatLabelValue(dataX)} ${this.quote}`
         const volume = `depth: ${formatLabelValue(legendData.depth)} ${this.base}`
-        ctx.font = `14px 'sans', sans-serif`
+        ctx.font = '14px \'sans\', sans-serif'
         const boxWidth = widest(ctx, price, volume) * 1.3
 
         // Draw the little black semi-transparent background.
         const rectH = 60
         let rectTop = tools.y(legendData.depth) - rectH / 2
-        let extY = this.plotRegion.extents.y
+        const extY = this.plotRegion.extents.y
         rectTop = rectTop <= extY.min + 5 ? extY.min + 5 : rectTop
         rectTop = rectTop > extY.max - rectH - 5 ? extY.max - rectH - 5 : rectTop
-        let left = dataX < midGap ? screenX + 10 : screenX - 10 - boxWidth
+        const left = dataX < midGap ? screenX + 10 : screenX - 10 - boxWidth
         ctx.fillStyle = this.theme.legendFill
         ctx.globalAlpha = 0.85
         ctx.fillRect(left, rectTop, boxWidth, rectH)
@@ -554,15 +553,15 @@ class Region {
     // with this transform in place using data coordinates, and remove the
     // transform before stroking. The dataCoords method of the supplied tool
     // provides this functionality.
-    let yRange = dataExtents.yRange
-    let xFactor = region.xRange / dataExtents.xRange
-    let yFactor = region.yRange / yRange
-    let xMin = dataExtents.x.min
-    let yMin = dataExtents.y.min
+    const yRange = dataExtents.yRange
+    const xFactor = region.xRange / dataExtents.xRange
+    const yFactor = region.yRange / yRange
+    const xMin = dataExtents.x.min
+    const yMin = dataExtents.y.min
     // These translation factors are complicated because the (0, 0) of the
     // region is not necessarily the (0, 0) of the canvas.
-    let tx = (region.x.min + xMin) - xMin * xFactor
-    let ty = -region.y.min - (yRange - yMin) * yFactor
+    const tx = (region.x.min + xMin) - xMin * xFactor
+    const ty = -region.y.min - (yRange - yMin) * yFactor
     const setTransform = () => {
       // Data coordinates are flipped about y. Flip the coordinates and
       // translate top left corner to canvas (0, 0).
@@ -599,7 +598,7 @@ function makeLabels (ctx, screenW, min, max, spacingGuess) {
   var widest = 0
   while (x < max) {
     x = Number(x.toPrecision(sigFigs))
-    let lbl = formatLabelValue(x)
+    const lbl = formatLabelValue(x)
     widest = Math.max(widest, ctx.measureText(lbl).width)
     pts.push({
       val: x,
