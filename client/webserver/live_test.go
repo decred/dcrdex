@@ -39,17 +39,21 @@ func (c *TCore) Register(r *core.Registration) error {
 	return nil
 }
 func (c *TCore) Login(dex, pw string) error { return nil }
+
+// Sync syncs order book data. The test implementation Just randomizes the data.
 func (c *TCore) Sync(dex, mkt string) (*core.OrderBook, chan *core.BookUpdate, error) {
 	// Pick an order of magnitude for the midGap price between -2 and 3
-	rateMagnitude := rand.Intn(6)         // Don't subtract yet
-	qtyMagnitude := 5 - rateMagnitude - 2 // larger rate -> smaller qty
+	rateMagnitude := rand.Intn(6)     // Don't subtract yet
+	qtyMagnitude := 3 - rateMagnitude // larger rate -> smaller qty
 	rateMagnitude -= 2
 
+	// Randomize mid-gap.
 	mantissa := rand.Float64() * 10
 	midGap := mantissa * math.Pow10(rateMagnitude)
+	// Randomize a depth factor.
 	mantissa = rand.Float64() * 10
 	maxQty := mantissa * math.Pow10(qtyMagnitude) * 10
-	// Set the market width to about 5% of midGap
+	// Set the market width to about 5% of midGap.
 	marketWidth := 0.05 * midGap
 	numPerSide := 80
 	sells := make([]*core.MiniOrder, 0, numPerSide)
@@ -58,8 +62,10 @@ func (c *TCore) Sync(dex, mkt string) (*core.OrderBook, chan *core.BookUpdate, e
 		// For sells the rate must be larger than midGap.
 		rate := midGap + rand.Float64()*marketWidth
 		sells = append(sells, &core.MiniOrder{
-			Rate:  rate,
-			Qty:   math.Exp(-rand.Float64()*10) * maxQty,
+			Rate: rate,
+			// Find a random quantity on an exponential curve with a minimum of
+			// e^-5 * maxQty ~= .0067 * maxQty
+			Qty:   math.Exp(-rand.Float64()*5) * maxQty,
 			Epoch: rand.Float32() > 0.8, // 1 in 5 are epoch orders.
 		})
 	}
@@ -68,7 +74,7 @@ func (c *TCore) Sync(dex, mkt string) (*core.OrderBook, chan *core.BookUpdate, e
 		rate := midGap - rand.Float64()*marketWidth
 		buys = append(buys, &core.MiniOrder{
 			Rate:  rate,
-			Qty:   math.Exp(-rand.Float64()*10) * maxQty,
+			Qty:   math.Exp(-rand.Float64()*5) * maxQty,
 			Epoch: rand.Float32() > 0.8, // 1 in 5 are epoch orders.
 		})
 	}

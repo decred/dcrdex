@@ -151,7 +151,7 @@ func Run(ctx context.Context, core clientCore, addr string, logger slog.Logger, 
 	// Start serving.
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Errorf("Can't listen on %s: %v. web server quitting", addr, err)
+		log.Errorf("Can't listen on %s. web server quitting: %v", addr, err)
 		return
 	}
 	// Close the listener on context cancellation.
@@ -264,13 +264,13 @@ func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
 }
 
 // userInfo is information about the connected user. Some fields are exported
-// for template building.
+// for template use.
 type userInfo struct {
 	authed   bool
 	DarkMode bool
 }
 
-// extract the userInfo from the request context.
+// Extract the userInfo from the request context.
 func extractUserInfo(r *http.Request) *userInfo {
 	ai, ok := r.Context().Value(authCV).(*userInfo)
 	if !ok {
@@ -280,8 +280,8 @@ func extractUserInfo(r *http.Request) *userInfo {
 	return ai
 }
 
-// authMiddleware checks incoming requests for authentication cookie-based
-// information including the auth token.
+// authMiddleware checks incoming requests for cookie-based information
+// including the auth token.
 func (s *webServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var authToken string
@@ -372,14 +372,14 @@ func fileServer(r chi.Router, pathRoot, fsRoot string) {
 	r.Get(muxRoot, hf)
 }
 
-// writeJSON writes marshals the provided interface and writes the bytes to the
+// writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
 func writeJSON(w http.ResponseWriter, thing interface{}, indent bool) {
 	writeJSONWithStatus(w, thing, http.StatusOK, indent)
 }
 
 // writeJSON writes marshals the provided interface and writes the bytes to the
-// ResponseWriter with the provided response code.
+// ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int, indent bool) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)

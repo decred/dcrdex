@@ -20,7 +20,7 @@ export default class Application {
     window.history.replaceState({ page: this.main.dataset.handler }, '', window.location.href)
     this.attachCommon(idel(document, 'header'))
     this.attach()
-    ws.connect(`ws://${window.location.host}/ws`)
+    ws.connect(getSocketURI())
   }
 
   // Load the page from the server. Insert and bind to the HTML.
@@ -68,6 +68,11 @@ export default class Application {
   }
 }
 
+function getSocketURI () {
+  var protocol = (window.location.protocol === 'https:') ? 'wss' : 'ws'
+  return `${protocol}://${window.location.host}/ws`
+}
+
 // postJSON encodes the object and sends the JSON to the specified address.
 async function postJSON (addr, data) {
   const response = await window.fetch(addr, {
@@ -81,7 +86,7 @@ async function postJSON (addr, data) {
 // unattachers are handlers to be run when a page is unloaded.
 var unattachers = []
 
-// unnatach adds an unnatacher to the array.
+// unattach adds an unattacher to the array.
 function unattach (f) {
   unattachers.push(f)
 }

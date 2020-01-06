@@ -104,8 +104,8 @@ type marketResponse struct {
 }
 
 // wsLoadMarket is the handler for the 'loadmarket' websocket endpoint. Sets the
-// currently monitored markets and starts the notification feed with the order
-// book.
+// currently monitored markets and starts the notification feed by sending the
+// order book.
 func wsLoadMarket(s *webServer, conn *ws.WSLink, msg *msgjson.Message) *msgjson.Error {
 	market := new(marketLoad)
 	err := json.Unmarshal(msg.Payload, market)

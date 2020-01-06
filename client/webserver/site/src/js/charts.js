@@ -159,8 +159,9 @@ export class DepthChart {
   }
 
   // Draw the chart.
-  // 1. Calculate the data extents and translate the data to a cumulative form.
-  // 2. Draw axis ticks and grid, mid-gap line and figure, zoom buttons, mouse
+  // 1. Calculate the data extents and translate the order book data to a
+  //    cumulative form.
+  // 2. Draw axis ticks and grid, mid-gap line and value, zoom buttons, mouse
   //    position indicator...
   // 4. Tick labels.
   // 5. Data.
@@ -210,7 +211,7 @@ export class DepthChart {
       if (pt.rate > rightEdge) break
     }
     sellDepth.push([last(sellDepth)[0] + xPad, last(sellDepth)[1]])
-    // *1.05 = Add 5% padding to the top of the chart.
+    // Add 5% padding to the top of the chart.
     const maxY = Math.max(last(buyDepth)[1], last(sellDepth)[1]) * 1.05
     const dataExtents = new Extents(leftEdge, rightEdge, 0, maxY)
     this.dataExtents = dataExtents
@@ -233,11 +234,11 @@ export class DepthChart {
     // Draw the grid.
     this.ctx.lineWidth = 1
     this.plotRegion.plot(dataExtents, (ctx, tools) => {
+      // first, a square around the plot area.
       ctx.strokeStyle = this.theme.gridBorder
       const extX = dataExtents.x
       const extY = dataExtents.y
       ctx.beginPath()
-      // first, a square around the plot area.
       tools.dataCoords(() => {
         ctx.moveTo(extX.min, extY.min)
         ctx.lineTo(extX.min, extY.max)
@@ -493,25 +494,26 @@ class Region {
   }
 
   contains (x, y) {
-    return (x < this.extents.x.max && x > this.extents.x.min &&
-      y < this.extents.y.max && y > this.extents.y.min)
+    const ext = this.extents
+    return (x < ext.x.max && x > ext.x.min &&
+      y < ext.y.max && y > ext.y.min)
   }
 
   // A translator provides 4 function for coordinate transformations. x and y
   // translate data coordinates to canvas coordinates for the specified data
   // Extents. unx and uny translate canvas coordinates to data coordinates.
   translator (dataExtents) {
+    const region = this.extents
     const xMin = dataExtents.x.min
     // const xMax = dataExtents.x.max
     const yMin = dataExtents.y.min
     // const yMax = dataExtents.y.max
     const yRange = dataExtents.yRange
     const xRange = dataExtents.xRange
-    const screenMinX = this.extents.x.min
-    const screenW = this.extents.x.max - screenMinX
-    const screenMinY = this.extents.y.min
-    const screenMaxY = this.extents.y.max
-    const screenH = screenMaxY - screenMinY
+    const screenMinX = region.x.min
+    const screenW = region.x.max - screenMinX
+    const screenMaxY = region.y.max
+    const screenH = screenMaxY - region.y.min
     const xFactor = screenW / xRange
     const yFactor = screenH / yRange
     return {
@@ -534,16 +536,16 @@ class Region {
   // are fine.
   plot (dataExtents, drawFunc, skipMask) {
     const ctx = this.context
-    const ext = this.extents
+    const region = this.extents
     ctx.save() // Save the original state
     if (!skipMask) {
       ctx.beginPath()
-      ctx.rect(ext.x.min, ext.y.min, ext.xRange, ext.yRange)
+      ctx.rect(region.x.min, region.y.min, region.xRange, region.yRange)
       ctx.clip()
     }
 
-    // The drawFunc will be passed a set of tool with which to ease drawing.
-    // The first tool is just the transformation functions.
+    // The drawFunc will be passed a set of tool that can be used to assist
+    // drawing. The tools start with the transformation functions.
     const tools = this.translator(dataExtents)
 
     // Create a tranformation that allows drawing in data coordinates. It's
@@ -552,18 +554,22 @@ class Region {
     // with this transform in place using data coordinates, and remove the
     // transform before stroking. The dataCoords method of the supplied tool
     // provides this functionality.
+    let yRange = dataExtents.yRange
+    let xFactor = region.xRange / dataExtents.xRange
+    let yFactor = region.yRange / yRange
+    let xMin = dataExtents.x.min
+    let yMin = dataExtents.y.min
+    // These translation factors are complicated because the (0, 0) of the
+    // region is not necessarily the (0, 0) of the canvas.
+    let tx = (region.x.min + xMin) - xMin * xFactor
+    let ty = -region.y.min - (yRange - yMin) * yFactor
     const setTransform = () => {
-      // Data coordinates are flipped about y.
-      ctx.scale(1, -1)
+      // Data coordinates are flipped about y. Flip the coordinates and
       // translate top left corner to canvas (0, 0).
-      ctx.translate(-dataExtents.x.min, dataExtents.y.min) // + dataExtents.yRange)
-      // scale
-      let xFactor = ext.xRange / dataExtents.xRange
-      let yFactor = ext.yRange / dataExtents.yRange
-      ctx.scale(xFactor, yFactor)
-      // Shift into place for the region's offset on the canvas.
-      let xMin = dataExtents.x.min
-      ctx.translate((ext.x.min + xMin) / xFactor - xMin, -ext.y.min / yFactor - dataExtents.yRange - dataExtents.y.min)
+      ctx.transform(1, 0, 0, -1, -xMin, yMin)
+      // Scale to data coordinates and shift into place for the region's offset
+      // on the canvas.
+      ctx.transform(xFactor, 0, 0, yFactor, tx, ty)
     }
     // Provide drawCoords as a tool to enable inline drawing.
     tools.dataCoords = f => {
