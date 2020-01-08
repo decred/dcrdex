@@ -18,7 +18,6 @@ require (
 	github.com/decred/dcrd/hdkeychain/v2 v2.1.0
 	github.com/decred/dcrd/rpc/jsonrpc/types v1.0.1
 	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.0
-	github.com/decred/dcrd/rpcclient/v4 v4.0.0
 	github.com/decred/dcrd/rpcclient/v5 v5.0.0
 	github.com/decred/dcrd/txscript/v2 v2.1.0
 	github.com/decred/dcrd/wire v1.3.0
@@ -34,4 +33,8 @@ require (
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
 )
 
-replace github.com/ltcsuite/ltcutil => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
+replace (
+	decred.org/dcrdex/client/asset/dcr => ./client/asset/dcr
+	decred.org/dcrdex/dex/btc => ./dex/btc
+	github.com/ltcsuite/ltcutil => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
+)

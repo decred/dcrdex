@@ -32,8 +32,9 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	dexdcr "decred.org/dcrdex/dex/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"
@@ -147,35 +148,35 @@ func TestLiveUTXO(t *testing.T) {
 				if out.Value == 0 {
 					continue
 				}
-				if out.Version != currentScriptVersion {
+				if out.Version != dexdcr.CurrentScriptVersion {
 					continue
 				}
-				scriptType := parseScriptType(currentScriptVersion, out.PkScript, nil)
+				scriptType := dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, out.PkScript, nil)
 				// We can't do P2SH during live testing, because we don't have the
 				// scripts. Just count them for now.
-				if scriptType.isP2SH() {
+				if scriptType.IsP2SH() {
 					switch {
-					case scriptType.isStake():
+					case scriptType.IsStake():
 						stats.sp2sh++
 					default:
 						stats.p2sh++
 					}
 					continue
-				} else if scriptType&scriptP2PKH != 0 {
+				} else if scriptType&dexdcr.ScriptP2PKH != 0 {
 					switch {
-					case scriptType&scriptSigEdwards != 0:
+					case scriptType&dexdcr.ScriptSigEdwards != 0:
 						stats.p2pkhEdwards++
-					case scriptType&scriptSigSchnorr != 0:
+					case scriptType&dexdcr.ScriptSigSchnorr != 0:
 						stats.p2pkhSchnorr++
-					case scriptType.isStake():
+					case scriptType.IsStake():
 						stats.sp2pkh++
 					default:
 						stats.p2pkh++
 					}
 				}
 				// Check if its an acceptable script type.
-				scriptTypeOK := scriptType != scriptUnsupported
-				// Now try to get the UTXO with the DCRBackend
+				scriptTypeOK := scriptType != dexdcr.ScriptUnsupported
+				// Now try to get the UXO with the DCRBackend
 				utxo, err := dcr.utxo(txHash, uint32(vout), nil)
 				// Can't do stakebase or cainbase.
 				// ToDo: Use a custom error and check it.

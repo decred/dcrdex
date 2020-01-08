@@ -199,9 +199,9 @@ type WalletConfig struct {
 }
 
 // NewWallet is the exported constructor by which the DEX will import the
-// exchange wallet. The provided context.Context should be cancelled when the
-// DEX application exits. The configPath can be an empty string, in which case
-// the standard system location of the bitcoind config file is assumed.
+// exchange wallet. The wallet will shut down when the provided context is
+// cancelled. The configPath can be an empty string, in which case the standard
+// system location of the bitcoind config file is assumed.
 func NewWallet(ctx context.Context, cfg *WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var params *chaincfg.Params
 	switch network {

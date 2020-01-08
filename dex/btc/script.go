@@ -434,25 +434,25 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 // using the redeemer's signature and the initiator's secret.  This function
 // assumes P2SH and appends the contract as the final data push.
 func RedeemP2SHContract(contract, sig, pubkey, secret []byte) ([]byte, error) {
-	b := txscript.NewScriptBuilder()
-	b.AddData(sig)
-	b.AddData(pubkey)
-	b.AddData(secret)
-	b.AddInt64(1)
-	b.AddData(contract)
-	return b.Script()
+	return txscript.NewScriptBuilder().
+		AddData(sig).
+		AddData(pubkey).
+		AddData(secret).
+		AddInt64(1).
+		AddData(contract).
+		Script()
 }
 
 // refundP2SHContract returns the signature script to refund a contract output
 // using the contract author's signature after the locktime has been reached.
 // This function assumes P2SH and appends the contract as the final data push.
 func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
-	b := txscript.NewScriptBuilder()
-	b.AddData(sig)
-	b.AddData(pubkey)
-	b.AddInt64(0)
-	b.AddData(contract)
-	return b.Script()
+	return txscript.NewScriptBuilder().
+		AddData(sig).
+		AddData(pubkey).
+		AddInt64(0).
+		AddData(contract).
+		Script()
 }
 
 type SpendInfo struct {

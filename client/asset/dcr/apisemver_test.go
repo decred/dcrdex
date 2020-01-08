@@ -1,3 +1,5 @@
+// +build !harness
+
 package dcr
 
 import (
@@ -127,10 +129,10 @@ func TestCheckVersionInfo(t *testing.T) {
 					Patch:         0,
 				},
 				"dcrdjsonrpcapi": {
-					VersionString: "6.1.0",
+					VersionString: "6.1.1",
 					Major:         6,
 					Minor:         1,
-					Patch:         0,
+					Patch:         1,
 				},
 				"dcrwalletjsonrpcapi": {
 					VersionString: "6.2.0",
@@ -150,10 +152,10 @@ func TestCheckVersionInfo(t *testing.T) {
 					Patch:         0,
 				},
 				"dcrdjsonrpcapi": {
-					VersionString: "6.1.0",
+					VersionString: "6.1.1",
 					Major:         6,
 					Minor:         1,
-					Patch:         0,
+					Patch:         1,
 				},
 				"dcrwalletjsonrpcapi": {
 					VersionString: "6.2.0",
@@ -173,27 +175,10 @@ func TestCheckVersionInfo(t *testing.T) {
 					Patch:         0,
 				},
 				"dcrdjsonrpcapi": {
-					VersionString: "6.1.0",
+					VersionString: "6.1.1",
 					Major:         6,
 					Minor:         1,
-					Patch:         0,
-				},
-				"dcrwalletjsonrpcapi": {
-					VersionString: "6.2.0",
-					Major:         6,
-					Minor:         2,
-					Patch:         0,
-				},
-			},
-			wantErr: true,
-		},
-		{
-			info: map[string]dcrdtypes.VersionResult{
-				"dcrd": {
-					VersionString: "1.5.0",
-					Major:         1,
-					Minor:         5,
-					Patch:         0,
+					Patch:         1,
 				},
 				"dcrwalletjsonrpcapi": {
 					VersionString: "6.2.0",
@@ -207,7 +192,7 @@ func TestCheckVersionInfo(t *testing.T) {
 	}
 
 	for idx, tc := range tests {
-		err := checkVersionInfo(tc.info, "dcrd", "dcrdjsonrpcapi", "dcrwalletjsonrpcapi")
+		err := checkVersionInfo(tc.info)
 		if (err != nil) != tc.wantErr {
 			t.Errorf("[checkVersionInfo] #%d: error: %v, wantErr: %v",
 				idx+1, err, tc.wantErr)

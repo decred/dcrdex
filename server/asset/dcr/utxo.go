@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 
+	dexdcr "decred.org/dcrdex/dex/dcr"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
@@ -30,7 +31,7 @@ type UTXO struct {
 	// script types, this will be zero.
 	maturity int32
 	// A bitmask for script type information.
-	scriptType dcrScriptType
+	scriptType dexdcr.DCRScriptType
 	// The output's scriptPubkey.
 	pkScript []byte
 	// If the pubkey script is P2SH, the UTXO will only be generated if
@@ -109,7 +110,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 		}
 		// If the block is set, check for stakeholder invalidation. Stakeholders
 		// can only invalidate a regular-tree transaction.
-		if mainchainBlock != nil && !utxo.scriptType.isStake() {
+		if mainchainBlock != nil && !utxo.scriptType.IsStake() {
 			nextBlock, err := dcr.getMainchainDcrBlock(utxo.height + 1)
 			if err != nil {
 				return -1, fmt.Errorf("error retreiving approving block for utxo %s:%d: %v", utxo.tx.hash, utxo.vout, err)
@@ -139,21 +140,21 @@ func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 		return fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.tx.hash, utxo.vout, utxo.numSigs, len(pubkeys))
 	}
 	evalScript := utxo.pkScript
-	if utxo.scriptType.isP2SH() {
+	if utxo.scriptType.IsP2SH() {
 		evalScript = utxo.redeemScript
 	}
-	scriptAddrs, err := extractScriptAddrs(evalScript)
+	scriptAddrs, err := dexdcr.ExtractScriptAddrs(evalScript, chainParams)
 	if err != nil {
 		return err
 	}
-	if scriptAddrs.nRequired != utxo.numSigs {
-		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.tx.hash, utxo.vout, scriptAddrs.nRequired, utxo.numSigs)
+	if scriptAddrs.NRequired != utxo.numSigs {
+		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.tx.hash, utxo.vout, scriptAddrs.NRequired, utxo.numSigs)
 	}
-	matches, err := pkMatches(pubkeys, scriptAddrs.pubkeys, nil)
+	matches, err := pkMatches(pubkeys, scriptAddrs.PubKeys, nil)
 	if err != nil {
 		return fmt.Errorf("error during pubkey matching: %v", err)
 	}
-	m, err := pkMatches(pubkeys, scriptAddrs.pkHashes, dcrutil.Hash160)
+	m, err := pkMatches(pubkeys, scriptAddrs.PkHashes, dcrutil.Hash160)
 	if err != nil {
 		return fmt.Errorf("error during pubkey hash matching: %v", err)
 	}
@@ -227,7 +228,7 @@ func (utxo *UTXO) AuditContract() (string, uint64, error) {
 		return "", 0, fmt.Errorf("invalid index %d for transaction %s", utxo.vout, tx.hash)
 	}
 	output := tx.outs[int(utxo.vout)]
-	scriptHash := extractScriptHash(output.pkScript)
+	scriptHash := dexdcr.ExtractScriptHash(output.pkScript)
 	if scriptHash == nil {
 		return "", 0, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, utxo.vout)
 	}

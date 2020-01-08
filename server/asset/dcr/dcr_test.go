@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	dexdcr "decred.org/dcrdex/dex/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrec"
@@ -25,7 +26,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2/schnorr"
 	"github.com/decred/dcrd/dcrutil/v2"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/slog"
@@ -35,14 +36,14 @@ import (
 var testLogger slog.Logger
 
 func TestMain(m *testing.M) {
-	// Call tidyConfig to set the global chainParams.
+	// Set the global chainParams.
 	chainParams = chaincfg.MainNetParams()
 	testLogger = slog.NewBackend(os.Stdout).Logger("TEST")
 	os.Exit(m.Run())
 }
 
-// TestTidyConfig checks that configuration parsing works as expected.
-func TestTidyConfig(t *testing.T) {
+// TestLoadConfig checks that configuration parsing works as expected.
+func TestLoadConfig(t *testing.T) {
 	cfg := &DCRConfig{}
 	parsedCfg := &DCRConfig{}
 
@@ -699,8 +700,8 @@ func TestUTXOs(t *testing.T) {
 	}
 	// While we're here, check the spend size and value are correct.
 	spendSize := utxo.SpendSize()
-	if spendSize != P2PKHSigScriptSize+txInOverhead {
-		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", P2PKHSigScriptSize, spendSize)
+	if spendSize != dexdcr.P2PKHSigScriptSize+dexdcr.TxInOverhead {
+		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", dexdcr.P2PKHSigScriptSize, spendSize)
 	}
 	if utxo.Value() != 200_000_000 {
 		t.Fatalf("case 1 - unexpected output value. expected 200,000,000, got %d", utxo.Value())
@@ -958,7 +959,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
 	}
 	// Make sure it's marked as stake.
-	if !utxo.scriptType.isStake() {
+	if !utxo.scriptType.IsStake() {
 		t.Fatalf("case 11 - stake p2sh not marked as stake")
 	}
 	// Give it nonsense.
@@ -985,7 +986,7 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 12 - received error for utxo: %v", err)
 	}
 	// Make sure it's marked as stake.
-	if !utxo.scriptType.isStake() {
+	if !utxo.scriptType.IsStake() {
 		t.Fatalf("case 12 - stake p2sh not marked as stake")
 	}
 	// Check the pubkey.
@@ -1159,8 +1160,8 @@ func TestAuxiliary(t *testing.T) {
 	confs := int64(3)
 	txout := testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), confs)
 	txout.Value = 8
-	scriptAddrs, _ := extractScriptAddrs(msg.tx.TxOut[0].PkScript)
-	addr := scriptAddrs.pkHashes[0].String()
+	scriptAddrs, _ := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].PkScript, chainParams)
+	addr := scriptAddrs.PkHashes[0].String()
 	txAddr, v, confs, err := dcr.UnspentDetails(txid, 0)
 	if err != nil {
 		t.Fatalf("UnspentDetails error: %v", err)

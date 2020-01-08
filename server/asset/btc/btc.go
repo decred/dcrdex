@@ -47,7 +47,7 @@ type btcNode interface {
 	GetBestBlockHash() (*chainhash.Hash, error)
 }
 
-// Backend is an asset backend for Bitcoin. It has methods for fetching UTXO
+// Backend is an dex backend for Bitcoin. It has methods for fetching UTXO
 // information and subscribing to block updates. It maintains a cache of block
 // data for quick lookups. Backend implements asset.DEXAsset, so provides
 // exported methods for DEX-related blockchain info.

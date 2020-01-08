@@ -9,7 +9,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types"
+	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 )
 
 // The dcrBlock structure should hold a minimal amount of information about a

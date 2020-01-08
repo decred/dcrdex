@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	// Expected api and daemon versions. Currently placeholders.
+	// Minimum api and daemon versions.
 	dcrd = &dcrdtypes.VersionResult{
 		VersionString: "1.5.0",
 		Major:         1,
@@ -19,10 +19,10 @@ var (
 	}
 
 	dcrdjsonrpcapi = &dcrdtypes.VersionResult{
-		VersionString: "6.1.0",
+		VersionString: "6.1.1",
 		Major:         6,
 		Minor:         1,
-		Patch:         0,
+		Patch:         1,
 	}
 
 	dcrwalletjsonrpcapi = &dcrdtypes.VersionResult{
@@ -63,13 +63,8 @@ func checkSemVer(id string, expected *dcrdtypes.VersionResult, provided *dcrdtyp
 
 // checkVersionInfo ensures the provided api version info are at least
 // the expected or better.
-func checkVersionInfo(versionInfo map[string]dcrdtypes.VersionResult, api ...string) error {
-	for _, id := range api {
-		semver, ok := versionInfo[id]
-		if !ok {
-			return fmt.Errorf("no version info found for %s", id)
-		}
-
+func checkVersionInfo(versionInfo map[string]dcrdtypes.VersionResult) error {
+	for id, semver := range versionInfo {
 		var expected *dcrdtypes.VersionResult
 		switch id {
 		case "dcrd":
