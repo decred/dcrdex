@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/order/test"
@@ -197,7 +198,7 @@ func TestMarket_runEpochs(t *testing.T) {
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.LimitOrderNum,
-			ClientTime: uint64(order.UnixMilli(now)),
+			ClientTime: encode.UnixMilliU(now),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -256,7 +257,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	t.Log(mkt.marketInfo.Name)
 	epochDurationMSec := mkt.epochDuration
 
-	startEpochIdx := 1 + order.UnixMilli(time.Now())/epochDurationMSec
+	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
 	mkt.Start(startEpochIdx)
 
 	// Submit order before market starts running
@@ -287,7 +288,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 	}
-	startEpochIdx = 1 + order.UnixMilli(time.Now())/epochDurationMSec
+	startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
 	mkt.Start(startEpochIdx)
 	mkt.WaitForEpochOpen()
 
@@ -445,7 +446,7 @@ func TestMarket_Cancelable(t *testing.T) {
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.LimitOrderNum,
-			ClientTime: uint64(order.UnixMilli(now)),
+			ClientTime: uint64(encode.UnixMilli(now)),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -491,7 +492,7 @@ func TestMarket_Cancelable(t *testing.T) {
 	}
 
 	epochDurationMSec := mkt.epochDuration
-	startEpochIdx := 1 + order.UnixMilli(time.Now())/epochDurationMSec
+	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
 	mkt.Start(startEpochIdx)
 
 	mkt.WaitForEpochOpen()

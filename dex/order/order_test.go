@@ -628,7 +628,7 @@ func TestUnixMilli(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := UnixMilli(tt.t); got != tt.want {
+			if got := unixMilli(tt.t); got != tt.want {
 				t.Errorf("UnixMilli() = %v, want %v", got, tt.want)
 			}
 		})
@@ -664,7 +664,7 @@ func TestUnixTimeMilli(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := UnixTimeMilli(tt.msEpoch)
+			got := unixTimeMilli(tt.msEpoch)
 			if !got.Equal(tt.want) {
 				t.Errorf("UnixTimeMilli() = %v, want %v", got, tt.want)
 			}

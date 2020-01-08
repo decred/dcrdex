@@ -35,7 +35,7 @@ const (
 
 // Config is a partial bitcoind configuration file, with only the parameters
 // needed to initialize the RPC connection. Because we have no need to read
-// command line arguments, we can use the IgnoreUnkown flag to allow pulling
+// command line arguments, we can use the IgnoreUnknown flag to allow pulling
 // the needed confiruration settings directly from the bitcoin.conf, if the user
 // chooses.
 type Config struct {

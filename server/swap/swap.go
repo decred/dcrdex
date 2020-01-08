@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -890,7 +891,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	auditParams := &msgjson.Audit{
 		OrderID:  idToBytes(counterParty.order.ID()),
 		MatchID:  matchID[:],
-		Time:     uint64(order.UnixMilli(swapTime)),
+		Time:     uint64(encode.UnixMilli(swapTime)),
 		Contract: params.Contract,
 	}
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)
@@ -963,7 +964,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		OrderID: idToBytes(counterParty.order.ID()),
 		MatchID: matchID[:],
 		CoinID:  params.CoinID,
-		Time:    uint64(order.UnixMilli(swapTime)),
+		Time:    uint64(encode.UnixMilli(swapTime)),
 	}
 
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
@@ -1148,7 +1149,7 @@ func extractAddress(ord order.Order) string {
 // matchNotifications creates a pair of msgjson.MatchNotification from a
 // matchTracker.
 func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
-	unixMs := uint64(order.UnixMilli(match.time))
+	unixMs := uint64(encode.UnixMilli(match.time))
 	return &msgjson.Match{
 			OrderID:  idToBytes(match.Maker.ID()),
 			MatchID:  idToBytes(match.ID()),

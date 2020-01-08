@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/crypto/blake256"
 )
@@ -149,7 +150,7 @@ type Order interface {
 }
 
 // zeroTime is the Unix time for a Time where IsZero() == true.
-var zeroTime = UnixMilli(time.Time{})
+var zeroTime = unixMilli(time.Time{})
 
 // An order's ID is computed as the Blake-256 hash of the serialized order.
 func calcOrderID(order Order) OrderID {
@@ -198,24 +199,10 @@ func (p *Prefix) serializeSize() int {
 	return PrefixLen
 }
 
-// UnixMilli returns the elapsed time in milliseconds since the Unix Epoch for
-// the given time. The Location does not matter.
-func UnixMilli(t time.Time) int64 {
-	return t.Unix()*1e3 + int64(t.Nanosecond())/1e6
-}
-
-// UnixTimeMilli returns a Time for an elapsed time in milliseconds since the
-// Unix Epoch. The time will have Location set to UTC.
-func UnixTimeMilli(msEpoch int64) time.Time {
-	sec := msEpoch / 1000
-	msec := msEpoch % 1000
-	return time.Unix(sec, msec*1e6).UTC()
-}
-
 // Time returns the order prefix's server time as a UNIX epoch time in
 // milliseconds.
 func (p *Prefix) Time() int64 {
-	return UnixMilli(p.ServerTime)
+	return unixMilli(p.ServerTime)
 }
 
 // SetTime sets the order prefix's server time.
@@ -250,11 +237,11 @@ func (p *Prefix) Serialize() []byte {
 	offset++
 
 	// client time
-	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(UnixMilli(p.ClientTime)))
+	binary.BigEndian.PutUint64(b[offset:offset+8], unixMilliU(p.ClientTime))
 	offset += 8
 
 	// server time
-	binary.BigEndian.PutUint64(b[offset:offset+8], uint64(UnixMilli(p.ServerTime)))
+	binary.BigEndian.PutUint64(b[offset:offset+8], unixMilliU(p.ServerTime))
 	return b
 }
 
@@ -533,3 +520,8 @@ func (o *CancelOrder) Serialize() []byte {
 
 // Ensure CancelOrder is an Order.
 var _ Order = (*CancelOrder)(nil)
+
+// Some commonly used time transformations.
+var unixMilli = encode.UnixMilli
+var unixMilliU = encode.UnixMilliU
+var unixTimeMilli = encode.UnixTimeMilli

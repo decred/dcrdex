@@ -6,8 +6,8 @@ package auth
 import (
 	"encoding/json"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
-	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
 )
@@ -64,7 +64,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		ClientPubKey: register.PubKey,
 		Address:      feeAddr,
 		Fee:          auth.regFee,
-		Time:         uint64(order.UnixMilli(unixMsNow())),
+		Time:         encode.UnixMilliU((unixMsNow())),
 	}
 
 	err = auth.Sign(regRes)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
@@ -163,7 +164,7 @@ func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
 	oid := o.order.ID()
 	resp, _ := msgjson.NewResponse(1, &msgjson.OrderResult{
 		Sig:        msgjson.Bytes{},
-		ServerTime: uint64(order.UnixMilli(now)),
+		ServerTime: encode.UnixMilliU(now),
 		OrderID:    oid[:],
 		EpochIdx:   m.epochIdx,
 		EpochDur:   m.epochDur,
@@ -426,7 +427,7 @@ func TestLimit(t *testing.T) {
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.LimitOrderNum,
-			ClientTime: uint64(order.UnixMilli(clientTime)),
+			ClientTime: encode.UnixMilliU(clientTime),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -549,7 +550,7 @@ func TestLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	lo.ServerTime = order.UnixTimeMilli(int64(result.ServerTime))
+	lo.ServerTime = encode.UnixTimeMilli(int64(result.ServerTime))
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != lo.ID() {
@@ -567,7 +568,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.MarketOrderNum,
-			ClientTime: uint64(order.UnixMilli(clientTime)),
+			ClientTime: encode.UnixMilliU(clientTime),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -679,7 +680,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	mo.ServerTime = order.UnixTimeMilli(int64(result.ServerTime))
+	mo.ServerTime = encode.UnixTimeMilli(int64(result.ServerTime))
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != mo.ID() {
@@ -697,7 +698,7 @@ func TestCancel(t *testing.T) {
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.CancelOrderNum,
-			ClientTime: uint64(order.UnixMilli(clientTime)),
+			ClientTime: encode.UnixMilliU(clientTime),
 		},
 		TargetID: targetID[:],
 	}
@@ -783,7 +784,7 @@ func TestCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	co.ServerTime = order.UnixTimeMilli(int64(result.ServerTime))
+	co.ServerTime = encode.UnixTimeMilli(int64(result.ServerTime))
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != co.ID() {
