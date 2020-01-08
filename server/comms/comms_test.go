@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -367,7 +368,7 @@ func TestClientRequests(t *testing.T) {
 	}
 	// A call to Send should return ErrClientDisconnected
 	lockedExe(func() {
-		if client.Send(nil) != ErrClientDisconnected {
+		if !errors.Is(client.Send(nil), ErrClientDisconnected) {
 			t.Fatalf("incorrect error for disconnected client")
 		}
 	})

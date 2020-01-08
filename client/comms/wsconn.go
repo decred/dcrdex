@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -236,9 +237,10 @@ func (conn *WsConn) read() {
 
 		err := ws.ReadJSON(msg)
 		if err != nil {
-			if _, ok := err.(*json.UnmarshalTypeError); ok {
+			var mErr *json.UnmarshalTypeError
+			if errors.As(err, &mErr) {
 				// JSON decode errors are not fatal, log and proceed.
-				log.Errorf("json decode error: %v", err)
+				log.Errorf("json decode error: %v", mErr)
 				continue
 			}
 
@@ -248,7 +250,8 @@ func (conn *WsConn) read() {
 				return
 			}
 
-			if opErr, ok := err.(*net.OpError); ok {
+			var opErr *net.OpError
+			if errors.As(err, &opErr) {
 				if opErr.Op == "read" {
 					if strings.Contains(opErr.Err.Error(),
 						"use of closed network connection") {

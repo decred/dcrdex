@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -123,7 +124,7 @@ func (a *Archiver) MatchByID(mid order.MatchID, base, quote uint32) (*db.MatchDa
 
 	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
 	matchData, err := matchByID(a.db, matchesTableName, mid)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		err = db.ArchiveError{Code: db.ErrUnknownMatch}
 	}
 	return matchData, err

@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -958,7 +959,7 @@ func TestUTXOs(t *testing.T) {
 	if err == nil {
 		t.Fatalf("case 10 - no error for immature transaction")
 	}
-	if err != immatureTransactionError {
+	if !errors.Is(err, immatureTransactionError) {
 		t.Fatalf("case 10 - expected immatureTransactionError, got: %v", err)
 	}
 	// Mature the transaction
