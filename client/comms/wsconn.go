@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -29,12 +28,17 @@ const (
 	writeWait = time.Second * 3
 )
 
+// When the DEX sends a request to the client, a responseHandler is created
+// to wait for the response.
+type responseHandler struct {
+	expiration time.Time
+	f          func(*msgjson.Message)
+}
+
 // WsCfg is the configuration struct for initializing a WsConn.
 type WsCfg struct {
-	// The websocket host.
-	Host string
-	// The websocket api path.
-	Path string
+	// URL is the websocket endpoint URL.
+	URL string
 	// The maximum time in seconds to wait for a ping from the server.
 	PingWait time.Duration
 	// The rpc certificate file path.
@@ -57,12 +61,12 @@ type WsConn struct {
 	readCh       chan *msgjson.Message
 	sendCh       chan *msgjson.Message
 	reconnectCh  chan struct{}
-	req          map[uint64]*msgjson.Message
 	reqMtx       sync.RWMutex
 	connected    bool
 	connectedMtx sync.RWMutex
 	once         sync.Once
 	wg           sync.WaitGroup
+	respHandlers map[uint64]*responseHandler
 }
 
 // filesExists reports whether the named file or directory exists.
@@ -105,12 +109,12 @@ func NewWsConn(cfg *WsCfg) (*WsConn, error) {
 	}
 
 	conn := &WsConn{
-		cfg:         cfg,
-		tlsCfg:      tlsConfig,
-		readCh:      make(chan *msgjson.Message, readBuffSize),
-		sendCh:      make(chan *msgjson.Message),
-		reconnectCh: make(chan struct{}),
-		req:         make(map[uint64]*msgjson.Message),
+		cfg:          cfg,
+		tlsCfg:       tlsConfig,
+		readCh:       make(chan *msgjson.Message, readBuffSize),
+		sendCh:       make(chan *msgjson.Message),
+		reconnectCh:  make(chan struct{}),
+		respHandlers: make(map[uint64]*responseHandler),
 	}
 
 	conn.wg.Add(1)
@@ -132,28 +136,6 @@ func (conn *WsConn) setConnected(connected bool) {
 	conn.connectedMtx.Lock()
 	conn.connected = connected
 	conn.connectedMtx.Unlock()
-}
-
-// logRoute logs a request keyed by its id.
-func (conn *WsConn) logRequest(id uint64, req *msgjson.Message) {
-	conn.reqMtx.Lock()
-	conn.req[id] = req
-	conn.reqMtx.Unlock()
-}
-
-// FetchRequest fetches the request associated with the id. The returned
-// request is removed from the cache.
-func (conn *WsConn) FetchRequest(id uint64) (*msgjson.Message, error) {
-	conn.reqMtx.Lock()
-	defer conn.reqMtx.Unlock()
-	req := conn.req[id]
-	if req == nil {
-		return nil, fmt.Errorf("no request found for id %d", id)
-	}
-
-	delete(conn.req, id)
-
-	return req, nil
 }
 
 // NextID returns the next request id.
@@ -178,19 +160,13 @@ func (conn *WsConn) close() {
 
 // connect attempts to establish a websocket connection.
 func (conn *WsConn) connect() error {
-	url := url.URL{
-		Scheme: "wss",
-		Host:   conn.cfg.Host,
-		Path:   conn.cfg.Path,
-	}
-
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: 10 * time.Second,
 		TLSClientConfig:  conn.tlsCfg,
 	}
 
-	ws, _, err := dialer.Dial(url.String(), nil)
+	ws, _, err := dialer.Dial(conn.cfg.URL, nil)
 	if err != nil {
 		return err
 	}
@@ -266,6 +242,17 @@ func (conn *WsConn) read() {
 			return
 		}
 
+		// If the message is a response, find the handler.
+		if msg.Type == msgjson.Response {
+			handler := conn.respHandler(msg.ID)
+			if handler == nil {
+				b, _ := json.Marshal(msg)
+				log.Errorf("no handler found for response", string(b))
+			}
+			handler.f(msg)
+			continue
+		}
+
 		conn.readCh <- msg
 	}
 }
@@ -336,17 +323,65 @@ func (conn *WsConn) Send(msg *msgjson.Message) error {
 		log.Errorf("write error: %v", err)
 		return err
 	}
-
-	// Log the message sent if it is a request.
-	if msg.Type == msgjson.Request {
-		conn.logRequest(msg.ID, msg)
-	}
-
 	return nil
 }
 
-// FetchReadSource returns the connection's read source only once.
-func (conn *WsConn) FetchReadSource() <-chan *msgjson.Message {
+// Request sends the message with Send, but keeps a record of the callback
+// function to run when a response is recieved.
+func (conn *WsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) error {
+	// Log the message sent if it is a request.
+	if msg.Type == msgjson.Request {
+		conn.logReq(msg.ID, f)
+	}
+	return conn.Send(msg)
+}
+
+// logReq stores the response handler in the respHandlers map. Requests to the
+// client are associated with a response handler.
+func (conn *WsConn) logReq(id uint64, respHandler func(*msgjson.Message)) {
+	conn.reqMtx.Lock()
+	defer conn.reqMtx.Unlock()
+	conn.respHandlers[id] = &responseHandler{
+		expiration: time.Now().Add(time.Minute * 5),
+		f:          respHandler,
+	}
+	// clean up the response map.
+	if len(conn.respHandlers) > 1 {
+		go conn.cleanUpExpired()
+	}
+}
+
+// cleanUpExpired cleans up the response handler map.
+func (conn *WsConn) cleanUpExpired() {
+	conn.reqMtx.Lock()
+	defer conn.reqMtx.Unlock()
+	var expired []uint64
+	for id, cb := range conn.respHandlers {
+		if time.Until(cb.expiration) < 0 {
+			expired = append(expired, id)
+		}
+	}
+	for _, id := range expired {
+		delete(conn.respHandlers, id)
+	}
+}
+
+// respHandler extracts the response handler for the provided request ID if it
+// exists, else nil. If the handler exists, it will be deleted from the map.
+func (conn *WsConn) respHandler(id uint64) *responseHandler {
+	conn.reqMtx.Lock()
+	defer conn.reqMtx.Unlock()
+	cb, ok := conn.respHandlers[id]
+	if ok {
+		delete(conn.respHandlers, id)
+	}
+	return cb
+}
+
+// MessageSource returns the connection's read source only once. The returned
+// chan will receive requests and notifications from the server, but not
+// responses, which have handlers associated with their request.
+func (conn *WsConn) MessageSource() <-chan *msgjson.Message {
 	var ch <-chan *msgjson.Message
 
 	conn.once.Do(func() {

@@ -175,8 +175,7 @@ func TestWsConn(t *testing.T) {
 	}()
 
 	cfg := &WsCfg{
-		Host:     host,
-		Path:     "ws",
+		URL:      "wss://" + host + "/ws",
 		PingWait: pingWait,
 		RpcCert:  certFile.Name(),
 		Ctx:      ctx,
@@ -225,13 +224,13 @@ func TestWsConn(t *testing.T) {
 	readPumpCh <- sent
 
 	// Fetch the read source.
-	readSource := wsc.FetchReadSource()
+	readSource := wsc.MessageSource()
 	if readSource == nil {
 		t.Fatal("expected a non-nil read source")
 	}
 
 	// Ensure th read source can be fetched once.
-	rSource := wsc.FetchReadSource()
+	rSource := wsc.MessageSource()
 	if rSource != nil {
 		t.Fatal("expected a nil read source")
 	}
@@ -276,7 +275,10 @@ func TestWsConn(t *testing.T) {
 	// Send a message from the client.
 	mId := wsc.NextID()
 	sent = makeRequest(mId, msgjson.InitRoute, init)
-	err = wsc.Send(sent)
+	handlerRun := false
+	err = wsc.Request(sent, func(*msgjson.Message) {
+		handlerRun = true
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -307,19 +309,19 @@ func TestWsConn(t *testing.T) {
 		t.Fatalf("expected next id to be %d, got %d", 2, next)
 	}
 
-	// Ensure the request sent got logged.
-	req, err := wsc.FetchRequest(mId)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Ensure the request got logged.
+	h := wsc.respHandler(mId)
+	if h == nil {
+		t.Fatalf("no handler found")
 	}
-
-	if req.Route != sent.Route {
-		t.Fatalf("expected %s route, got %s", sent.Route, req.Route)
+	h.f(nil)
+	if !handlerRun {
+		t.Fatalf("wrong handler retrieved")
 	}
 
 	// Lookup an unlogged request id.
-	_, err = wsc.FetchRequest(next)
-	if err == nil {
+	h = wsc.respHandler(next)
+	if h != nil {
 		t.Fatal("expected an error for unlogged id")
 	}
 
@@ -375,8 +377,7 @@ func TestFailingConnection(t *testing.T) {
 
 	host := "127.0.0.1:6060"
 	cfg := &WsCfg{
-		Host:     host,
-		Path:     "ws",
+		URL:      "wss://" + host + "/ws",
 		PingWait: pingWait,
 		RpcCert:  certFile.Name(),
 		Ctx:      ctx,
