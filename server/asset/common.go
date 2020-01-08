@@ -56,7 +56,7 @@ type Coin interface {
 	Value() uint64
 }
 
-// BackedAsset is a dex.Asset with a Backend backend.
+// BackedAsset is a dex.Asset with a Backend.
 type BackedAsset struct {
 	dex.Asset
 	Backend Backend
