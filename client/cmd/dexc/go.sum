@@ -78,6 +78,7 @@ github.com/decred/dcrwallet/rpc/jsonrpc/types v1.3.0/go.mod h1:Xvekb43GtfMiRbyIY
 github.com/decred/dcrwallet/rpc/jsonrpc/types v1.4.0/go.mod h1:Xvekb43GtfMiRbyIY4ZJ9Uhd9HRIAcnp46f3q2eIExU=
 github.com/decred/dcrwallet/validate v1.1.1/go.mod h1:T++tlVcCOh2oSrEq4r5CKCvmftaQdq9uZwO7jSNYZaw=
 github.com/decred/dcrwallet/wallet/v3 v3.1.0/go.mod h1:SJ+++gtMdcUeqMv6iIO3gVGlGJfM+4iY2QSaAakhbUw=
+github.com/decred/dcrwallet/wallet/v3 v3.1.1-0.20191230143837-6a86dc4676f0/go.mod h1:SJ+++gtMdcUeqMv6iIO3gVGlGJfM+4iY2QSaAakhbUw=
 github.com/decred/go-socks v1.0.0/go.mod h1:sDhHqkZH0X4JjSa02oYOGhcGHYp12FsY1jQ/meV8md0=
 github.com/decred/go-socks v1.1.0/go.mod h1:sDhHqkZH0X4JjSa02oYOGhcGHYp12FsY1jQ/meV8md0=
 github.com/decred/slog v1.0.0 h1:Dl+W8O6/JH6n2xIFN2p3DNjCmjYwvrXsjlSJTQQ4MhE=
@@ -116,6 +117,8 @@ github.com/onsi/ginkgo v1.6.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+W
 github.com/onsi/ginkgo v1.7.0/go.mod h1:lLunBs/Ym6LB5Z9jYTR76FiuTmxDTDusOGeTQH+WWjE=
 github.com/onsi/gomega v1.4.1/go.mod h1:C1qb7wdrVGGVU+Z6iS04AVkA3Q65CEZX59MT0QO5uiA=
 github.com/onsi/gomega v1.4.3/go.mod h1:ex+gbHU/CVuBBDIJjb2X0qEXbFg53c61hWP/1CpauHY=
+github.com/rivo/tcell v1.0.0 h1:F96ly3DXu+1JBxBhq3lXWcSViRtKryhUOoe8LfA3K4c=
+github.com/rivo/tcell v1.0.0/go.mod h1:HgVUF0Hx28QKFz0VWVJ0d2jZNOsZAgl4pcp15zNf2tM=
 github.com/rivo/tview v0.0.0-20191129065140-82b05c9fb329 h1:MubHhHJ4mB0A5wMcc2am0/51RydztIDoumyOd0r0yBw=
 github.com/rivo/tview v0.0.0-20191129065140-82b05c9fb329/go.mod h1:/rBeY22VG2QprWnEqG57IBC8biVu3i0DOIjRLc9I8H0=
 github.com/rivo/uniseg v0.1.0 h1:+2KBaVoUmb9XzDsrx/Ct0W/EYOSFf/nWTauy++DprtY=

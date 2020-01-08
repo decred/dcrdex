@@ -25,7 +25,10 @@ type depthPoint struct {
 // works for a fixed chart size which cannot be changed.
 type depthChart struct {
 	*tview.Box
-	focus    bool
+	focus bool
+	// The chart data is protected by a mutex since more than one thread could be
+	// accessing simultaneously. That is not the case for focus, which is only
+	// accessed during calls initiated by tview, so assumed to be sequenced.
 	mtx      sync.RWMutex
 	seq      uint64
 	drawID   uint64
@@ -38,7 +41,7 @@ func newDepthChart() *depthChart {
 		seq: 1,
 	}
 	dc.SetBorder(true)
-	dc.refresh()
+	dc.runeRows = dc.calcRows()
 	return dc
 }
 
@@ -53,7 +56,7 @@ func (c *depthChart) newScreenRows() []string {
 		// Nothing to redraw.
 		return nil
 	}
-	c.refresh()
+	c.runeRows = c.calcRows()
 	c.seq = c.drawID
 	return c.runeRows
 }
@@ -68,7 +71,10 @@ func (c *depthChart) Draw(screen tcell.Screen) {
 }
 
 // refresh recalculates the chart rune rows.
-func (c *depthChart) refresh() {
+//
+// DRAFT NOTE: This method is currently just a demo of charting. It will need to
+// be a lot smarter when real data is plotted.
+func (c *depthChart) calcRows() []string {
 	rotations := float64(2.5)
 	numPts := 400
 	amp := float64(5)
@@ -82,13 +88,14 @@ func (c *depthChart) refresh() {
 	}
 	width, height := marketChartWidth, marketChartHeight
 	if width == 0 || height == 0 {
-		return
+		return nil
 	}
 	runeRows := make([]string, 0, height)
 	edge, err := interpolate(pts, width, height)
 	if err != nil {
-		// Don't update the UI from a Draw method.
-		return
+		// Don't update the UI from a Draw method, so we won't print an error here.
+		// TODO: Add a file-only logger for logging these errors?
+		return nil
 	}
 
 	for iy := 0; iy < height; iy++ {
@@ -108,8 +115,7 @@ func (c *depthChart) refresh() {
 		}
 		runeRows = append(runeRows, string(row))
 	}
-	c.seq++
-	c.runeRows = runeRows
+	return runeRows
 }
 
 // Focus is to the tview.Box Focus method, wrapped here to force a redraw of

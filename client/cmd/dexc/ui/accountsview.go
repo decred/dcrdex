@@ -4,7 +4,6 @@
 package ui
 
 import (
-	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
 )
 
@@ -98,8 +97,8 @@ func newAccountsView() *accountsViewer {
 				dcrAcctName, dcrwPW, dcrwAddr, acctURL, dcrwRPCUser, dcrwRPCPass)
 		}).
 		SetButtonsAlign(tview.AlignRight).
-		SetFieldBackgroundColor(tcell.GetColor("#072938")).
-		SetButtonBackgroundColor(tcell.GetColor("#0d4254"))
+		SetFieldBackgroundColor(metalBlue).
+		SetButtonBackgroundColor(metalBlue)
 	acctForm.SetCancelFunc(func() {
 		acctForm.SetBorderColor(blurColor)
 		acctsView.setForm(dummyFormBox)

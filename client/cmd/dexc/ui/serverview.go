@@ -92,8 +92,8 @@ func newServerView(tag, addr string, runFunc func(context.Context, string, slog.
 		AddInputField(addrInput()).
 		AddButton("start", serverToggle).
 		SetButtonsAlign(tview.AlignRight).
-		SetFieldBackgroundColor(tcell.GetColor("#072938")).
-		SetButtonBackgroundColor(tcell.GetColor("#0d4254"))
+		SetFieldBackgroundColor(metalBlue).
+		SetButtonBackgroundColor(metalBlue)
 	form.SetBorderColor(blurColor).SetBorder(true)
 	form.SetCancelFunc(func() {
 		form.SetBorderColor(blurColor)

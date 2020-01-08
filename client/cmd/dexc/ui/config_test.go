@@ -8,7 +8,7 @@ import (
 )
 
 func TestConfig(t *testing.T) {
-	// // Command line arguments
+	// Command line arguments
 	oldArgs := os.Args
 	cmd := oldArgs[0]
 	defer func() { os.Args = oldArgs }()

@@ -40,6 +40,8 @@ var (
 	focusColor        = tcell.GetColor("#dedeff")
 	blurColor         = tcell.GetColor("grey")
 	onColor           = tcell.GetColor("green")
+	metalBlue         = tcell.GetColor("#072938")
+	backgroundColor   = tcell.GetColor("#3f3f3f")
 	offColor          = blurColor
 	colorBlack        = tcell.GetColor("black")
 	notificationCount uint32
@@ -100,7 +102,7 @@ func createApp() {
 	createWidgets()
 	// Create the Screen, which is the top-level layout manager.
 	flex := tview.NewFlex().
-		AddItem(mainMenu, 0, 15, false)
+		AddItem(mainMenu, 25, 0, false)
 	screen = &Screen{
 		Flex:    flex,
 		right:   appJournal,
@@ -268,21 +270,25 @@ func setFocus(wgt focuser) {
 // setWebLabelOn sets whether the main menu entry for the web server is
 // appended with an indicator to show that the server is running.
 func setWebLabelOn(on bool) {
-	if on {
-		mainMenu.SetItemText(webEntryIdx, entryWebServer+" [green](on)", "")
-		return
-	}
-	mainMenu.SetItemText(webEntryIdx, entryWebServer, "")
+	app.QueueUpdateDraw(func() {
+		if on {
+			mainMenu.SetItemText(webEntryIdx, entryWebServer+" [green](on)", "")
+			return
+		}
+		mainMenu.SetItemText(webEntryIdx, entryWebServer, "")
+	})
 }
 
 // setWebLabelOn sets whether the main menu entry for the RPC server is
 // appended with an indicator to show that the server is running.
 func setRPCLabelOn(on bool) {
-	if on {
-		mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+" [green](on)", "")
-		return
-	}
-	mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+"", "")
+	app.QueueUpdateDraw(func() {
+		if on {
+			mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+" [green](on)", "")
+			return
+		}
+		mainMenu.SetItemText(rpcEntryIdx, entryRPCServer+"", "")
+	})
 }
 
 // setNotificationCount sets the notification count next to the notification
@@ -461,4 +467,8 @@ func horizontallyCentered(prim tview.Primitive, w int) *tview.Flex {
 func fullyCentered(prim tview.Primitive, w, h int) *tview.Flex {
 	flex := horizontallyCentered(prim, w)
 	return verticallyCentered(flex, h)
+}
+
+func init() {
+	tview.Styles.PrimitiveBackgroundColor = backgroundColor
 }

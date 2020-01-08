@@ -32,7 +32,6 @@ var (
 	logDirectory, logFilename string
 	defaultConfigPath         string
 	cfg                       *Config
-	net                       = dex.Mainnet
 )
 
 // setSubPaths sets the log file path and default configuration file path based
@@ -119,7 +118,6 @@ func Configure() (*Config, error) {
 	if iniCfg.Simnet && iniCfg.Testnet {
 		return nil, fmt.Errorf("simnet and testnet cannot both be specified")
 	}
-	net = netFromConfig(&iniCfg)
 	cfg = &iniCfg
 	return cfg, nil
 }

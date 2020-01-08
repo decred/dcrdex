@@ -36,7 +36,7 @@ func newMarketView() *marketViewer {
 	// the marketWindow is the main window on the market view.
 	marketWindow := newMarketWindow()
 
-	// The marketColumn holds the marketWindow and the amrketJournal.
+	// The marketColumn holds the marketWindow and the marketJournal.
 	marketColumn := tview.NewFlex().
 		SetDirection(tview.FlexRow).
 		AddItem(marketWindow, 0, 3, false).
@@ -82,7 +82,6 @@ type marketWindow struct {
 func newMarketWindow() *marketWindow {
 	chart := newDepthChart()
 	chart.SetBorderPadding(1, 1, 1, 1)
-	// tmpBox := tview.NewBox()
 	chartBox := tview.NewFlex().
 		AddItem(chart, 0, 1, false)
 	chartBox.SetBorder(true).SetBorderColor(colorBlack).SetTitle("A Chart")

@@ -17,7 +17,6 @@ import (
 )
 
 func main() {
-	var cancel func()
 	appCtx, cancel := context.WithCancel(context.Background())
 	// Catch ctrl+c. This will need to be smarter eventually, probably displaying
 	// a modal dialog to confirm closing, especially if servers are running or if
@@ -36,7 +35,7 @@ func main() {
 	// types package used by both, but doing it this way works for now.
 	cfg, err := ui.Configure()
 	if err != nil {
-		fmt.Println("configration error: ", err)
+		fmt.Fprintf(os.Stderr, "configration error: ", err)
 		return
 	}
 
@@ -48,7 +47,7 @@ func main() {
 		}
 		// At least one of --rpc or --web must be specified.
 		if !cfg.RPCOn && !cfg.WebOn {
-			fmt.Println("Cannot run without TUI unless --rpc and/or --web is specified")
+			fmt.Fprintf(os.Stderr, "Cannot run without TUI unless --rpc and/or --web is specified")
 			return
 		}
 		ui.InitLogging(logStdout)
