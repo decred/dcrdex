@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"strings"
 
-	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/dcrutil/v2"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -31,7 +30,6 @@ var (
 	logFilename, netDirectory string
 	logDirectory              string
 	cfg                       *Config
-	net                       = dex.Mainnet
 )
 
 // setNet sets the filepath for the network directory and some network specific
@@ -138,13 +136,10 @@ func Configure() (*Config, error) {
 	var defaultDBPath string
 	switch {
 	case cfg.Testnet:
-		net = dex.Testnet
 		defaultDBPath = setNet("testnet")
 	case cfg.Simnet:
-		net = dex.Simnet
 		defaultDBPath = setNet("simnet")
 	default:
-		net = dex.Simnet
 		defaultDBPath = setNet("mainnet")
 	}
 

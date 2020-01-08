@@ -15,12 +15,14 @@ var (
 )
 
 // A journal is a TextView with concurrency protection and buffer maintenance.
+// It can be passed directly as an io.Writer for logging purposes.
 type journal struct {
 	*tview.TextView
 	history [][]byte
 	mtx     sync.Mutex
 }
 
+// newJournal is a constructor for a *journal.
 func newJournal(title string, keyFunc inputCapture) *journal {
 	txtView := tview.NewTextView().
 		SetScrollable(true).
@@ -45,8 +47,8 @@ func newJournal(title string, keyFunc inputCapture) *journal {
 }
 
 // The TextView's performance begins to lag after too many entries are added.
-// Maintain an buffer that lops some log messages off of the end when the
-// buffer gets too long.
+// Maintain a buffer that drops some log messages off of the front when the
+// it gets too long.
 func (j *journal) Write(p []byte) {
 	j.mtx.Lock()
 	defer j.mtx.Unlock()
@@ -69,11 +71,15 @@ func (j *journal) Write(p []byte) {
 	}
 }
 
+// AddFocus is part of the focuser interface, and will be called when this
+// element receives focus.
 func (j *journal) AddFocus() {
 	j.SetBorderColor(focusColor)
 	app.SetFocus(j)
 }
 
+// RemoveFocus is part of the focuser interface, and will be called when this
+// element loses focus.
 func (j *journal) RemoveFocus() {
 	j.SetBorderColor(blurColor)
 }
