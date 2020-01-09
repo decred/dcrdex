@@ -14,6 +14,5 @@ require (
 	github.com/gdamore/tcell v1.3.0
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0
-	github.com/rivo/tcell v1.0.0
 	github.com/rivo/tview v0.0.0-20191129065140-82b05c9fb329
 )

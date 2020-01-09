@@ -32,7 +32,7 @@ type Market struct {
 	MarketBuyBuffer float32 `json:"buybuffer"`
 }
 
-// Display returns a ID string suitable for displaying in a UI.
+// Display returns an ID string suitable for displaying in a UI.
 func (m *Market) Display() string {
 	return strings.ToUpper(m.BaseSymbol) + "-" + strings.ToUpper(m.QuoteSymbol)
 }

@@ -25,10 +25,7 @@ type depthPoint struct {
 // works for a fixed chart size which cannot be changed.
 type depthChart struct {
 	*tview.Box
-	focus bool
-	// The chart data is protected by a mutex since more than one thread could be
-	// accessing simultaneously. That is not the case for focus, which is only
-	// accessed during calls initiated by tview, so assumed to be sequenced.
+	focus    bool
 	mtx      sync.RWMutex
 	seq      uint64
 	drawID   uint64
@@ -41,7 +38,7 @@ func newDepthChart() *depthChart {
 		seq: 1,
 	}
 	dc.SetBorder(true)
-	dc.runeRows = dc.calcRows()
+	dc.refresh()
 	return dc
 }
 
@@ -56,7 +53,7 @@ func (c *depthChart) newScreenRows() []string {
 		// Nothing to redraw.
 		return nil
 	}
-	c.runeRows = c.calcRows()
+	c.refresh()
 	c.seq = c.drawID
 	return c.runeRows
 }
@@ -71,10 +68,7 @@ func (c *depthChart) Draw(screen tcell.Screen) {
 }
 
 // refresh recalculates the chart rune rows.
-//
-// DRAFT NOTE: This method is currently just a demo of charting. It will need to
-// be a lot smarter when real data is plotted.
-func (c *depthChart) calcRows() []string {
+func (c *depthChart) refresh() {
 	rotations := float64(2.5)
 	numPts := 400
 	amp := float64(5)
@@ -88,14 +82,13 @@ func (c *depthChart) calcRows() []string {
 	}
 	width, height := marketChartWidth, marketChartHeight
 	if width == 0 || height == 0 {
-		return nil
+		return
 	}
 	runeRows := make([]string, 0, height)
 	edge, err := interpolate(pts, width, height)
 	if err != nil {
-		// Don't update the UI from a Draw method, so we won't print an error here.
-		// TODO: Add a file-only logger for logging these errors?
-		return nil
+		// Don't update the UI from a Draw method.
+		return
 	}
 
 	for iy := 0; iy < height; iy++ {
@@ -115,11 +108,10 @@ func (c *depthChart) calcRows() []string {
 		}
 		runeRows = append(runeRows, string(row))
 	}
-	return runeRows
+	c.seq++
+	c.runeRows = runeRows
 }
 
-// Focus is to the tview.Box Focus method, wrapped here to force a redraw of
-// the chart.
 func (c *depthChart) Focus(delegate func(p tview.Primitive)) {
 	c.focus = true
 	// Have to increment the seqID on focus to force redraw.
@@ -130,7 +122,6 @@ func (c *depthChart) Focus(delegate func(p tview.Primitive)) {
 	c.Box.Focus(delegate)
 }
 
-// Blur is to the tview.Box Focus method. Used to set the focus field.
 func (c *depthChart) Blur() {
 	c.focus = false
 	c.Box.Blur()
@@ -161,13 +152,13 @@ const (
 	// shadedBlock      rune = '\u2593'
 )
 
-// An edge point is a character and it's height on the grid..
+// An edge point is a character and it's in
 type edgePoint struct {
 	y  int
 	ch rune
 }
 
-// Translate the x,y chart data into width edgePoints, each edgePoint with
+// Translate the x,y chart data into a width edgePoints, each edgePoint with
 // 0 < y < height, and an appropriate character.
 //
 // The algorithm projects the line graph onto the width x height grid, and finds
@@ -180,10 +171,10 @@ func interpolate(pts []depthPoint, width, height int) ([]edgePoint, error) {
 		return nil, err
 	}
 	numPts := len(pts)
-	yRange := yMax - yMin
-	xRange := xMax - xMin
+	yRange := float64(yMax - yMin)
+	xRange := float64(xMax - xMin)
 	yScaler, xScaler := yRange/float64(height), xRange/float64(width)
-	lastY := pts[0].y / yScaler
+	lastY := float64(pts[0].y) / yScaler
 	intersections := append(make([]float64, 0, numPts+1), lastY-yMin/yScaler)
 	lastX := int(float64(pts[0].x) / xScaler)
 	for i := 0; i < len(pts)-1; i++ {
@@ -211,8 +202,8 @@ func interpolate(pts []depthPoint, width, height int) ([]edgePoint, error) {
 	return roughEdge(intersections)
 }
 
-// Rough edge translates the intersections into edgePoints with 1 of 9
-// characters of appropriate character height.
+// Rough edge translates the intersections into 1 of 9 characters of appropriate
+// character height.
 func roughEdge(intersections []float64) ([]edgePoint, error) {
 	edge := make([]edgePoint, 0, len(intersections)-1)
 	for i := 0; i < len(intersections)-1; i++ {

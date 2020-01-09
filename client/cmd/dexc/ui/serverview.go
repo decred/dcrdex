@@ -12,7 +12,7 @@ import (
 	"github.com/rivo/tview"
 )
 
-// serverView is a view with a simple UI for starting a server and a journal
+// serverView is a view with a simple for for starting a server and a journal
 // to view its log output.
 type serverView struct {
 	*tview.Flex
@@ -58,7 +58,7 @@ func newServerView(tag, addr string, runFunc func(context.Context, string, slog.
 		}
 	}
 
-	// Create a method to toggle the state of the server. Will be available as
+	// Crate a method to toggle the state of the server. Will be available as
 	// (*serverView).toggle.
 	var form *tview.Form
 	var serverToggle func()
@@ -92,8 +92,8 @@ func newServerView(tag, addr string, runFunc func(context.Context, string, slog.
 		AddInputField(addrInput()).
 		AddButton("start", serverToggle).
 		SetButtonsAlign(tview.AlignRight).
-		SetFieldBackgroundColor(metalBlue).
-		SetButtonBackgroundColor(metalBlue)
+		SetFieldBackgroundColor(tcell.GetColor("#072938")).
+		SetButtonBackgroundColor(tcell.GetColor("#0d4254"))
 	form.SetBorderColor(blurColor).SetBorder(true)
 	form.SetCancelFunc(func() {
 		form.SetBorderColor(blurColor)
@@ -118,8 +118,6 @@ func newServerView(tag, addr string, runFunc func(context.Context, string, slog.
 	}
 }
 
-// AddFocus is part of the focuser interface, and will be called when this
-// element receives focus.
 func (w *serverView) AddFocus() {
 	w.SetBorderColor(focusColor)
 	w.form.SetBorderColor(focusColor)
@@ -127,8 +125,6 @@ func (w *serverView) AddFocus() {
 	app.SetFocus(w.form)
 }
 
-// RemoveFocus is part of the focuser interface, and will be called when this
-// element loses focus.
 func (w *serverView) RemoveFocus() {
 	w.SetBorderColor(blurColor)
 }

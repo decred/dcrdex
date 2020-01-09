@@ -4,7 +4,9 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -20,52 +22,63 @@ const (
 	maxLogRolls    = 16
 	defaultRPCAddr = "http://localhost:5757"
 	defaultWebAddr = "http://localhost:5758"
-	// The default config filename. The {netname} will be replaced by the string
-	// representation of the network specified on the command line.
-	configFilename = "dexc_{netname}.conf"
-	defaultLogDir  = "logs"
-	defaultLogName = "dex.log"
+	configFilename = "dexc_mainnet.conf"
 )
 
 var (
 	applicationDirectory      = dcrutil.AppDataDir("dexclient", false)
-	logDirectory, logFilename string
-	defaultConfigPath         string
+	defaultConfigPath         = filepath.Join(applicationDirectory, configFilename)
+	logFilename, netDirectory string
+	logDirectory              string
 	cfg                       *Config
+	net                       = dex.Mainnet
 )
 
-// setSubPaths sets the log file path and default configuration file path based
-// on the supplied application directory path.
-func setSubPaths(appDir string) {
-	logDirectory = filepath.Join(appDir, defaultLogDir)
-	logFilename = filepath.Join(logDirectory, defaultLogName)
-	defaultConfigPath = filepath.Join(appDir, configFilename)
+// setNet sets the filepath for the network directory and some network specific
+// files. It returns a suggested path for the database file.
+func setNet(net string) string {
+	netDirectory = filepath.Join(applicationDirectory, net)
+	logDirectory = filepath.Join(netDirectory, "logs")
+	logFilename = filepath.Join(logDirectory, "dex.log")
+	err := os.MkdirAll(netDirectory, 0700)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create net directory: %v\n", err)
+		os.Exit(1)
+	}
+	err = os.MkdirAll(logDirectory, 0700)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create log directory: %v\n", err)
+		os.Exit(1)
+	}
+	return filepath.Join(netDirectory, "dexc.db")
 }
 
-// Config is the application configuration. Arguments can be supplied by
-// command line, or by INI configuration file.
+// Config is the configuration for the DEX client application.
 type Config struct {
-	DataDir string `long:"dir" description:"Path to application directory"`
-	Config  string `long:"config" description:"Path to an INI configuration file. default: [home]/dexc_{network}.conf"`
-	RPCOn   bool   `long:"rpc" description:"turn on the rpc server"`
-	RPCAddr string `long:"rpcaddr" description:"RPCServer listen address"`
-	WebOn   bool   `long:"web" description:"turn on the web server"`
-	WebAddr string `long:"webaddr" description:"HTTP server address"`
-	NoTUI   bool   `long:"notui" description:"disable the terminal-based user interface. must be used with --rpc or --web"`
-	// Testnet OR Simnet should be specified at the command line if the {network}
-	// tag is used to version the configuration filename.
-	Testnet bool `long:"testnet" description:"use testnet"`
-	Simnet  bool `long:"simnet" description:"use simnet"`
+	DataDir   string `long:"dir" description:"Path to application directory"`
+	Config    string `long:"config" description:"Path to an INI configuration file." default:"[home]/dexc_mainnet.conf"`
+	DBPath    string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
+	CertsPath string `long:"certs" description:"Path to a JSON-formatted file linking DEX URL keys to TLS certificate filepaths."`
+	RPCOn     bool   `long:"rpc" description:"turn on the rpc server"`
+	RPCAddr   string `long:"rpcaddr" description:"RPCServer listen address"`
+	WebOn     bool   `long:"web" description:"turn on the web server"`
+	WebAddr   string `long:"webaddr" description:"HTTP server address"`
+	NoTUI     bool   `long:"notui" description:"disable the terminal-based user interface. must be used with --rpc or --web"`
+	Testnet   bool   `long:"testnet" description:"use testnet"`
+	Simnet    bool   `long:"simnet" description:"use simnet"`
+	// Certs is not set by the client. It is parsed from the JSON file at the
+	// Certs path.
+	Certs map[string]string
 }
 
 var defaultConfig = Config{
 	DataDir: applicationDirectory,
+	Config:  defaultConfigPath,
 	RPCAddr: defaultRPCAddr,
 	WebAddr: defaultWebAddr,
 }
 
-// Configure creates and returns the application configuration struct. The
-// global cfg variable is also set.
+// Configure processes the application configuration.
 func Configure() (*Config, error) {
 	// Pre-parse the command line options to see if an alternative config file
 	// or the version flag was specified. Override any environment variables
@@ -87,12 +100,12 @@ func Configure() (*Config, error) {
 		return nil, flagerr
 	}
 
-	setSubPaths(preCfg.DataDir)
-	if preCfg.Config == "" {
+	// If the app directory has been changed, but the config file path hasn't,
+	// reform the config file path with the new directory.
+	if preCfg.DataDir != applicationDirectory && preCfg.Config == defaultConfigPath {
 		preCfg.Config = filepath.Join(preCfg.DataDir, configFilename)
 	}
 	cfgPath := cleanAndExpandPath(preCfg.Config)
-	cfgPath = strings.Replace(cfgPath, "{netname}", netFromConfig(&preCfg).String(), -1)
 
 	// Load additional config from file.
 	parser := flags.NewParser(&iniCfg, flags.Default)
@@ -115,23 +128,41 @@ func Configure() (*Config, error) {
 		return nil, err
 	}
 
-	if iniCfg.Simnet && iniCfg.Testnet {
+	// Set the global *Config.
+	cfg = &iniCfg
+
+	if cfg.Simnet && cfg.Testnet {
 		return nil, fmt.Errorf("simnet and testnet cannot both be specified")
 	}
-	cfg = &iniCfg
-	return cfg, nil
-}
-
-// netFromConfig parses the dex.Network from the configuration.
-func netFromConfig(c *Config) dex.Network {
+	var defaultDBPath string
 	switch {
-	case c.Testnet:
-		return dex.Testnet
-	case c.Simnet:
-		return dex.Simnet
+	case cfg.Testnet:
+		net = dex.Testnet
+		defaultDBPath = setNet("testnet")
+	case cfg.Simnet:
+		net = dex.Simnet
+		defaultDBPath = setNet("simnet")
 	default:
-		return dex.Mainnet
+		net = dex.Simnet
+		defaultDBPath = setNet("mainnet")
 	}
+
+	if cfg.CertsPath != "" {
+		b, err := ioutil.ReadFile(cfg.CertsPath)
+		if err != nil {
+			return nil, fmt.Errorf("error reading certificates file: %v", err)
+		}
+		err = json.Unmarshal(b, cfg.Certs)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing certificates file: %v", err)
+		}
+	}
+
+	if cfg.DBPath == "" {
+		cfg.DBPath = defaultDBPath
+	}
+
+	return cfg, nil
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed
