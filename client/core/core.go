@@ -44,8 +44,7 @@ type Config struct {
 	// enables creating custom loggers for use in a GUI interface.
 	Logger dex.Logger
 	// Certs is a mapping of URL to filepaths of TLS Certificates for the server.
-	// This is intended for accomodating self-signed certificates, mostly for
-	// testing.
+	// This is intended for accommodating self-signed certificates.
 	Certs map[string]string
 }
 
@@ -89,7 +88,7 @@ func (c *Core) Run(ctx context.Context) {
 func (c *Core) ListMarkets() []*MarketInfo {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	var infos []*MarketInfo
+	infos := make([]*MarketInfo, 0, len(c.conns))
 	for uri, dc := range c.conns {
 		mi := &MarketInfo{DEX: uri}
 		for _, bq := range dc.cfg.Markets {
@@ -209,7 +208,7 @@ func (c *Core) handleReconnect(uri string) {
 	log.Infof("DEX at %s has reconnected", uri)
 }
 
-// listen monitors the DEX webscocket connection for server requests and
+// listen monitors the DEX websocket connection for server requests and
 // notifications.
 func (c *Core) listen(dc *dexConnection) {
 	msgs := dc.conn.MessageSource()
@@ -218,31 +217,37 @@ out:
 	for {
 		select {
 		case msg := <-msgs:
-			switch msg.Route {
-			// Requests
-			case msgjson.MatchDataRoute:
-				log.Info("match_data message received")
-			case msgjson.MatchProofRoute:
-				log.Info("match_proof message received")
-			case msgjson.PreimageRoute:
-				log.Info("preimage message received")
-			case msgjson.MatchRoute:
-				log.Info("match message received")
-			case msgjson.AuditRoute:
-				log.Info("audit message received")
-			case msgjson.RedemptionRoute:
-				log.Info("redemption message received")
-			case msgjson.RevokeMatchRoute:
-				log.Info("revoke_match message received")
-			case msgjson.SuspensionRoute:
-				log.Info("suspension message received")
-			// Notifications
-			case msgjson.BookOrderRoute:
-				log.Info("book_order message received")
-			case msgjson.EpochOrderRoute:
-				log.Info("epoch_order message received")
-			case msgjson.UnbookOrderRoute:
-				log.Info("unbook_order message received")
+			switch msg.Type {
+			case msgjson.Request:
+				switch msg.Route {
+				case msgjson.MatchDataRoute:
+					log.Info("match_data message received")
+				case msgjson.MatchProofRoute:
+					log.Info("match_proof message received")
+				case msgjson.PreimageRoute:
+					log.Info("preimage message received")
+				case msgjson.MatchRoute:
+					log.Info("match message received")
+				case msgjson.AuditRoute:
+					log.Info("audit message received")
+				case msgjson.RedemptionRoute:
+					log.Info("redemption message received")
+				case msgjson.RevokeMatchRoute:
+					log.Info("revoke_match message received")
+				case msgjson.SuspensionRoute:
+					log.Info("suspension message received")
+				}
+			case msgjson.Notification:
+				switch msg.Route {
+				case msgjson.BookOrderRoute:
+					log.Info("book_order message received")
+				case msgjson.EpochOrderRoute:
+					log.Info("epoch_order message received")
+				case msgjson.UnbookOrderRoute:
+					log.Info("unbook_order message received")
+				}
+			default:
+				log.Errorf("invalid message type %d from MessageSource", msg.Type)
 			}
 		case <-c.ctx.Done():
 			break out

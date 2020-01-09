@@ -229,7 +229,7 @@ func TestWsConn(t *testing.T) {
 		t.Fatal("expected a non-nil read source")
 	}
 
-	// Ensure th read source can be fetched once.
+	// Ensure the read source can be fetched once.
 	rSource := wsc.MessageSource()
 	if rSource != nil {
 		t.Fatal("expected a nil read source")
@@ -310,18 +310,18 @@ func TestWsConn(t *testing.T) {
 	}
 
 	// Ensure the request got logged.
-	h := wsc.respHandler(mId)
-	if h == nil {
+	hndlr := wsc.respHandler(mId)
+	if hndlr == nil {
 		t.Fatalf("no handler found")
 	}
-	h.f(nil)
+	hndlr.f(nil)
 	if !handlerRun {
 		t.Fatalf("wrong handler retrieved")
 	}
 
 	// Lookup an unlogged request id.
-	h = wsc.respHandler(next)
-	if h != nil {
+	hndlr = wsc.respHandler(next)
+	if hndlr != nil {
 		t.Fatal("expected an error for unlogged id")
 	}
 

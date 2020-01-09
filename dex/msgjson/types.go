@@ -713,8 +713,8 @@ type ConfigResult struct {
 	Markets          [][2]uint32 `json:"markets"`
 }
 
-// Asset is included with the DEX configuration, and describes an asset
-// available for trading.
+// Asset describes and asset and its variables, and is returned as part of a
+// ConfigResult.
 type Asset struct {
 	Symbol          string  `json:"symbol"`
 	ID              uint32  `json:"id"`

@@ -13,7 +13,7 @@ type Registration struct {
 	RPCPass    string `json:"rpcpass"`
 }
 
-// MarketInfo contains information about a particular market.
+// MarketInfo contains information about the markets for a DEX server.
 type MarketInfo struct {
 	DEX     string   `json:"dex"`
 	Markets []Market `json:"markets"`

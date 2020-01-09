@@ -43,7 +43,7 @@ type WsCfg struct {
 	PingWait time.Duration
 	// The rpc certificate file path.
 	RpcCert string
-	// ReconnectSync runs the needed reconnection synchronisation after
+	// ReconnectSync runs the needed reconnection synchronization after
 	// a disconnect.
 	ReconnectSync func()
 	// The dex client context.
@@ -327,7 +327,7 @@ func (conn *WsConn) Send(msg *msgjson.Message) error {
 }
 
 // Request sends the message with Send, but keeps a record of the callback
-// function to run when a response is recieved.
+// function to run when a response is received.
 func (conn *WsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) error {
 	// Log the message sent if it is a request.
 	if msg.Type == msgjson.Request {
