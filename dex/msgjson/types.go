@@ -105,6 +105,21 @@ const (
 	// DEX that the fee has been paid and has the requisite number of
 	// confirmations.
 	NotifyFeeRoute = "notifyfee"
+	// ConfigRoute is the client-originating request-type message requesting the
+	// DEX configuration information.
+	ConfigRoute = "config"
+	// MatchDataRoute is the DEX-originating request-type message delivering
+	// match cycle info to the client.
+	MatchDataRoute = "match_data"
+	// MatchProofRoute is the DEX-originating request-type message delivering
+	// match cycle results to the client.
+	MatchProofRoute = "match_proof"
+	// PreimageRoute is the DEX-originating request-type message requesting the
+	// preimages for the client's epoch orders.
+	PreimageRoute = "preimage"
+	// SuspensionRoute is the DEX-originating request-type message informing the
+	// client of an upcoming trade suspension.
+	SuspensionRoute = "suspension"
 )
 
 type Bytes = dex.Bytes
@@ -687,6 +702,29 @@ func (n *NotifyFee) Serialize() ([]byte, error) {
 // serialization.
 type NotifyFeeResult struct {
 	signable
+}
+
+// ConfigResult is the successful result from the 'config' route.
+type ConfigResult struct {
+	EpochDuration    uint64      `json:"epochlen"`
+	CancelMax        float32     `json:"cancelmax"`
+	BroadcastTimeout uint64      `json:"btimeout"`
+	Assets           []Asset     `json:"assets"`
+	Markets          [][2]uint32 `json:"markets"`
+}
+
+// Asset describes and asset and its variables, and is returned as part of a
+// ConfigResult.
+type Asset struct {
+	Symbol          string  `json:"symbol"`
+	ID              uint32  `json:"id"`
+	LotSize         uint64  `json:"lotsize"`
+	RateStep        uint64  `json:"ratestep"`
+	FeeRate         uint64  `json:"feerate"`
+	SwapSize        uint64  `json:"swapsize"`
+	SwapConf        uint16  `json:"swapconf"`
+	FundConf        uint16  `json:"fundconf"`
+	MarketBuyBuffer float32 `json:"buybuffer"`
 }
 
 // Convert uint64 to 8 bytes.
