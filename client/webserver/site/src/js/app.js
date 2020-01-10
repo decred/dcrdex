@@ -229,8 +229,8 @@ function handleMarkets (main) {
     quoteUnits.forEach(el => { el.textContent = data.quote })
     baseImg.src = `/img/coins/${data.baseSymbol.toLowerCase()}.png`
     quoteImg.src = `/img/coins/${data.quoteSymbol.toLowerCase()}.png`
-    baseBalance.textContent = formatCoinValue(data.baseBalance/1e8)
-    quoteBalance.textContent = formatCoinValue(data.quoteBalance/1e8)
+    baseBalance.textContent = formatCoinValue(data.baseBalance / 1e8)
+    quoteBalance.textContent = formatCoinValue(data.quoteBalance / 1e8)
   })
   ws.registerEvtHandler('bookupdate', e => {
     if (market && (e.market.dex !== market.dex || e.market.base !== market.base || e.market.quote !== market.quote)) return
