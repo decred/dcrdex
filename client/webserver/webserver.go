@@ -46,17 +46,73 @@ type clientCore interface {
 	ListMarkets() []*core.MarketInfo
 	Register(*core.Registration) error
 	Login(dex, pw string) error
-	Sync(dex string, base, quote uint32) (*core.OrderBook, chan *core.BookUpdate, error)
+	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
+	Book(dex string, base, quote uint32) *core.OrderBook
 	Unsync(dex string, base, quote uint32)
 	Balance(uint32) (uint64, error)
 }
 
-// marketSyncer is used internally to synchronize market subscriptions.
+// marketSyncer is used to synchronize market subscriptions. The marketSyncer
+// manages a map of clients who are subscribed to the market, and distributes
+// order book updates when received.
 type marketSyncer struct {
-	dex   string
-	base  uint32
-	quote uint32
-	kill  func()
+	mtx     sync.Mutex
+	core    clientCore
+	dex     string
+	base    uint32
+	quote   uint32
+	clients map[int32]*wsClient
+}
+
+// newMarketSyncer is the constructor for a marketSyncer.
+func newMarketSyncer(ctx context.Context, core clientCore, dex string, base, quote uint32) (*marketSyncer, error) {
+	m := &marketSyncer{
+		core:    core,
+		dex:     dex,
+		base:    base,
+		quote:   quote,
+		clients: make(map[int32]*wsClient),
+	}
+
+	// Get an updates channel, and begin syncing the book.
+	updates, err := core.Sync(dex, base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		log.Debugf("monitoring market %d-%d @ %s", base, quote, dex)
+	out:
+		for {
+			select {
+			case update := <-updates:
+				// Distribute the book the subscribed clients.
+				log.Tracef("order book update received for " + update.Market)
+			case <-ctx.Done():
+				break out
+			}
+		}
+	}()
+	return m, nil
+}
+
+// add adds a client to the client map, and returns a fresh orderbook.
+func (m *marketSyncer) add(cl *wsClient) *core.OrderBook {
+	m.mtx.Lock()
+	m.clients[cl.cid] = cl
+	m.mtx.Unlock()
+	return m.core.Book(m.dex, m.base, m.quote)
+}
+
+// remove removes a client from the client map. If this is the last client,
+// the market will be "unsynced".
+func (m *marketSyncer) remove(cl *wsClient) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	delete(m.clients, cl.cid)
+	if len(m.clients) == 0 {
+		m.core.Unsync(m.dex, m.base, m.quote)
+	}
 }
 
 // WebServer is a single-client http and websocket server enabling a browser
@@ -70,7 +126,7 @@ type WebServer struct {
 	indent    bool
 	mtx       sync.RWMutex
 	authToken string
-	watchers  map[string]int
+	syncers   map[string]*marketSyncer
 	clients   map[int32]*wsClient
 }
 
@@ -127,7 +183,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		listener: listener,
 		srv:      httpServer,
 		html:     tmpl,
-		watchers: make(map[string]int),
+		syncers:  make(map[string]*marketSyncer),
 		clients:  make(map[int32]*wsClient),
 	}
 
@@ -201,45 +257,25 @@ func (s *WebServer) token() string {
 	return s.authToken
 }
 
-// watchMarket watches the specified market, cancelling any other market
-// subscriptions.
-func (s *WebServer) watchMarket(dex string, base, quote uint32) (*core.OrderBook, *marketSyncer, error) {
+// watchMarket watches the specified market. A fresh order book and a quit
+// function are returned on success. The quit function should be called to
+// unsubsribe the client from the market.
+func (s *WebServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (book *core.OrderBook, quit func(), err error) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	mktID := marketID(base, quote)
-
-	book, updates, err := s.core.Sync(dex, base, quote)
-	if err != nil {
-		return nil, nil, err
-	}
-	s.watchers[mktID]++
-	ctx, shutdown := context.WithCancel(s.ctx)
-	go func() {
-		log.Debugf("monitoring market %d-%d @ %s", base, quote, dex)
-	out:
-		for {
-			select {
-			case update := <-updates:
-				log.Tracef("order book update received for " + update.Market)
-			case <-ctx.Done():
-				break out
-			}
+	syncer, found := s.syncers[mktID]
+	if !found {
+		syncer, err = newMarketSyncer(s.ctx, s.core, dex, base, quote)
+		if err != nil {
+			return
 		}
-		// Decrement the watchers, and unsync the book if there are none left.
-		s.mtx.Lock()
-		defer s.mtx.Unlock()
-		s.watchers[mktID]--
-		if s.watchers[mktID] == 0 {
-			s.core.Unsync(dex, base, quote)
-		}
-	}()
-	syncer := &marketSyncer{
-		dex:   dex,
-		base:  base,
-		quote: quote,
-		kill:  shutdown,
+		s.syncers[mktID] = syncer
 	}
-	return book, syncer, nil
+	book = syncer.add(cl)
+	return book, func() {
+		syncer.remove(cl)
+	}, nil
 }
 
 // readPost unmarshals the request body into the provided interface.
@@ -399,6 +435,7 @@ func fileExists(name string) bool {
 	return !os.IsNotExist(err)
 }
 
+// Create a unique ID for a market.
 func marketID(base, quote uint32) string {
 	return strconv.Itoa(int(base)) + "_" + strconv.Itoa(int(quote))
 }

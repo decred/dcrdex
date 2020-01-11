@@ -29,17 +29,20 @@ var (
 	pingPeriod = (pongWait * 9) / 10
 	// A client id counter.
 	cidCounter int32
+	unbip      = dex.BipIDSymbol
 )
 
 type wsClient struct {
 	*ws.WSLink
-	mtx      sync.Mutex
-	watchMkt *marketSyncer
+	mtx  sync.Mutex
+	cid  int32
+	quit func()
 }
 
 func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error) *wsClient {
 	return &wsClient{
 		WSLink: ws.NewWSLink(ip, conn, pingPeriod, hndlr),
+		cid:    atomic.AddInt32(&cidCounter, 1),
 	}
 }
 
@@ -66,7 +69,6 @@ func (s *WebServer) handleWS(w http.ResponseWriter, r *http.Request) {
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
 func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
-	cid := atomic.AddInt32(&cidCounter, 1)
 	log.Debugf("New websocket client %s", ip)
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
@@ -76,14 +78,14 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 		return s.handleMessage(cl, msg)
 	})
 	s.mtx.Lock()
-	s.clients[cid] = cl
+	s.clients[cl.cid] = cl
 	s.mtx.Unlock()
 	defer func() {
 		cl.mtx.Lock()
-		if cl.watchMkt != nil {
-			cl.watchMkt.kill()
+		if cl.quit != nil {
+			cl.quit()
 		}
-		delete(s.clients, cid)
+		delete(s.clients, cl.cid)
 		cl.mtx.Unlock()
 	}()
 	cl.Start()
@@ -136,53 +138,53 @@ type marketResponse struct {
 	QuoteBalance uint64          `json:"quoteBalance"`
 }
 
-// wsLoadMarket is the handler for the 'loadmarket' websocket endpoint. Sets the
-// currently monitored markets and starts the notification feed by sending the
-// order book.
-func wsLoadMarket(s *WebServer, conn *wsClient, msg *msgjson.Message) *msgjson.Error {
+// wsLoadMarket is the handler for the 'loadmarket' websocket endpoint.
+// Subscribes the client to the notification feed by sends the order book.
+func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
 	market := new(marketLoad)
 	err := json.Unmarshal(msg.Payload, market)
 	if err != nil {
-		log.Errorf("error unmarshaling marketload payload: %v", err)
-		return msgjson.NewError(msgjson.RPCInternal, "error unmarshaling marketload payload: "+err.Error())
+		errMsg := fmt.Sprintf("error unmarshaling marketload payload: %v", err)
+		log.Errorf(errMsg)
+		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 	base, quote := market.Base, market.Quote
 	baseBalance, err := s.core.Balance(base)
 	if err != nil {
-		errStr := fmt.Sprintf("unable to get balance for %d", base)
-		log.Errorf(errStr)
-		return msgjson.NewError(msgjson.RPCInternal, errStr+": "+err.Error())
+		errMsg := fmt.Sprintf("unable to get balance for %s", unbip(base))
+		log.Errorf(errMsg)
+		return msgjson.NewError(msgjson.RPCInternal, errMsg+": "+err.Error())
 	}
 	quoteBalance, err := s.core.Balance(quote)
 	if err != nil {
-		errStr := fmt.Sprintf("unable to get balance for %d", quote)
-		return msgjson.NewError(msgjson.RPCInternal, errStr+": "+err.Error())
+		errMsg := fmt.Sprintf("unable to get balance for %s", unbip(quote))
+		log.Errorf(errMsg)
+		return msgjson.NewError(msgjson.RPCInternal, errMsg+": "+err.Error())
 	}
 
 	// Switch current market.
-	book, syncer, err := s.watchMarket(market.DEX, market.Base, market.Quote)
+	book, quit, err := s.watchMarket(cl, market.DEX, market.Base, market.Quote)
 	if err != nil {
-		errMsg := fmt.Sprintf("error watching market %d-%d @ %s", market.Base, market.Quote, market.DEX)
+		errMsg := fmt.Sprintf("error watching market %s-%s @ %s",
+			unbip(market.Base), unbip(market.Quote), market.DEX)
 		log.Errorf(errMsg + ": " + err.Error())
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
-	conn.mtx.Lock()
-	old := conn.watchMkt
-	conn.watchMkt = syncer
-	conn.mtx.Unlock()
-
-	if old != nil {
-		old.kill()
+	cl.mtx.Lock()
+	if cl.quit != nil {
+		cl.quit()
 	}
+	cl.quit = quit
+	cl.mtx.Unlock()
 
 	note, err := msgjson.NewNotification("book", &marketResponse{
 		Book:         book,
 		DEX:          market.DEX,
 		Base:         base,
-		BaseSymbol:   dex.BipIDSymbol(base),
+		BaseSymbol:   unbip(base),
 		Quote:        quote,
-		QuoteSymbol:  dex.BipIDSymbol(quote),
+		QuoteSymbol:  unbip(quote),
 		BaseBalance:  baseBalance,
 		QuoteBalance: quoteBalance,
 	})
@@ -191,19 +193,19 @@ func wsLoadMarket(s *WebServer, conn *wsClient, msg *msgjson.Message) *msgjson.E
 		log.Errorf("error encoding loadmarkets response: %v", err)
 		return msgjson.NewError(msgjson.RPCInternal, "error encoding order book: "+err.Error())
 	}
-	conn.Send(note)
+	cl.Send(note)
 	return nil
 }
 
 // wsUnmarket is the handler for the 'unmarket' websocket endpoint. This empty
 // message is sent when the user leaves the markets page. Unsubscribes from the
 // current market.
-func wsUnmarket(_ *WebServer, conn *wsClient, _ *msgjson.Message) *msgjson.Error {
-	conn.mtx.Lock()
-	defer conn.mtx.Unlock()
-	if conn.watchMkt != nil {
-		conn.watchMkt.kill()
-		conn.watchMkt = nil
+func wsUnmarket(_ *WebServer, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
+	cl.mtx.Lock()
+	defer cl.mtx.Unlock()
+	if cl.quit != nil {
+		cl.quit()
+		cl.quit = nil
 	}
 	return nil
 }

@@ -52,8 +52,12 @@ func (c *TCore) Register(r *core.Registration) error {
 }
 func (c *TCore) Login(dex, pw string) error { return nil }
 
-// Sync syncs order book data. The test implementation just randomizes the data.
-func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, chan *core.BookUpdate, error) {
+func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
+	return make(chan *core.BookUpdate), nil
+}
+
+// Book randomizes an order book.
+func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook {
 	// Pick an order of magnitude for the midGap price between -2 and 3
 	rateMagnitude := rand.Intn(6)     // Don't subtract yet
 	qtyMagnitude := 3 - rateMagnitude // larger rate -> smaller qty
@@ -95,7 +99,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, chan *cor
 	return &core.OrderBook{
 		Buys:  buys,
 		Sells: sells,
-	}, make(chan *core.BookUpdate), nil
+	}
 }
 
 func (c *TCore) Unsync(dex string, base, quote uint32) {}

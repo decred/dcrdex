@@ -29,6 +29,7 @@ type Market struct {
 	QuoteSymbol string `json:"quotesymbol"`
 }
 
+// Display returns a ID string suitable for displaying in a UI.
 func (m *Market) Display() string {
 	return strings.ToUpper(m.BaseSymbol) + "-" + strings.ToUpper(m.QuoteSymbol)
 }

@@ -34,11 +34,12 @@ type TCore struct {
 func (c *TCore) ListMarkets() []*core.MarketInfo     { return nil }
 func (c *TCore) Register(r *core.Registration) error { return c.regErr }
 func (c *TCore) Login(dex, pw string) error          { return c.loginErr }
-func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, chan *core.BookUpdate, error) {
-	return nil, nil, c.syncErr
+func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
+	return nil, c.syncErr
 }
-func (c *TCore) Unsync(dex string, base, quote uint32) {}
-func (c *TCore) Balance(uint32) (uint64, error)        { return 0, c.balanceErr }
+func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook { return nil }
+func (c *TCore) Unsync(dex string, base, quote uint32)               {}
+func (c *TCore) Balance(uint32) (uint64, error)                      { return 0, c.balanceErr }
 
 type TWriter struct {
 	b []byte
@@ -95,15 +96,15 @@ func (c *TConn) WriteMessage(_ int, msg []byte) error {
 }
 
 type tLink struct {
-	link *wsClient
+	cl   *wsClient
 	conn *TConn
 }
 
 func newLink() *tLink {
 	conn := new(TConn)
-	link := newWSClient("", conn, func(*msgjson.Message) *msgjson.Error { return nil })
+	cl := newWSClient("", conn, func(*msgjson.Message) *msgjson.Error { return nil })
 	return &tLink{
-		link: link,
+		cl:   cl,
 		conn: conn,
 	}
 }
@@ -180,74 +181,41 @@ func TestLoadMarket(t *testing.T) {
 		Quote: tQuote,
 	}
 
-	getWatched := func() *marketSyncer {
-		link.link.mtx.Lock()
-		defer link.link.mtx.Unlock()
-		return link.link.watchMkt
-	}
-	getWatchCount := func(base, quote uint32) int {
-		mktID := marketID(base, quote)
-		// Add a tiny delay to allow the watchMarket loop to exit.
+	ensureWatching := func(base, quote uint32) {
+		// Add a tiny delay here because because it's convenient and this function
+		// is typically called right after ...
+
 		time.Sleep(time.Millisecond)
+		mktID := marketID(base, quote)
+		clientCount := 0
 		s.mtx.Lock()
-		defer s.mtx.Unlock()
-		return s.watchers[mktID]
+		// Make sure there is only one client total
+		for _, syncer := range s.syncers {
+			clientCount += len(syncer.clients)
+		}
+		syncer, found := s.syncers[mktID]
+		s.mtx.Unlock()
+
+		if clientCount != 1 {
+			t.Fatalf("expected 1 client, found %d", clientCount)
+		}
+
+		if !found {
+			t.Fatalf("no syncer found for market %s", mktID)
+		}
+
+		syncer.mtx.Lock()
+		_, found = syncer.clients[link.cl.cid]
+		syncer.mtx.Unlock()
+
+		if !found {
+			t.Fatalf("client not found in syncer list")
+		}
 	}
 
 	msg, _ := msgjson.NewRequest(1, "a", params)
-	rpcErr := wsLoadMarket(s, link.link, msg)
-	if rpcErr != nil {
-		t.Fatalf("error loading market: %v", rpcErr)
-	}
-
-	// Get the current marketSyncer
-	currentMkt := getWatched()
-	if currentMkt.base != tBase || currentMkt.quote != tQuote {
-		t.Fatalf("wrong market stored. expected %d-%d, got %d-%d", tBase, tQuote, currentMkt.base, currentMkt.quote)
-	}
-	watchCount := getWatchCount(tBase, tQuote)
-	if watchCount != 1 {
-		t.Fatalf("expected 1 watcher after subscribing, found %d", watchCount)
-	}
-
-	// Load a new market, and make sure the old market was unloaded.
-	newBase := uint32(3)
-	newQuote := uint32(4)
-	params.Base = newBase
-	params.Quote = newQuote
-	msg, _ = msgjson.NewRequest(2, "a", params)
-	rpcErr = wsLoadMarket(s, link.link, msg)
-	if rpcErr != nil {
-		t.Fatalf("error loading market: %v", rpcErr)
-	}
-	currentMkt = getWatched()
-	if currentMkt.base != newBase || currentMkt.quote != newQuote {
-		t.Fatalf("wrong market stored when replacing. expected %d-%d, got %d-%d", newBase, newQuote, currentMkt.base, currentMkt.quote)
-	}
-	// New market watch count should be 1.
-	watchCount = getWatchCount(newBase, newQuote)
-	if watchCount != 1 {
-		t.Fatalf("expected 1 watcher for new market, found %d", watchCount)
-	}
-	// Old market watch count should be 0.
-	watchCount = getWatchCount(tBase, tQuote)
-	if watchCount != 0 {
-		t.Fatalf("expected 0 watchers for old market, found %d", watchCount)
-	}
-
-	// Unsubscribe
-	wsUnmarket(nil, link.link, nil)
-	watchCount = getWatchCount(newBase, newQuote)
-	if watchCount != 0 {
-		t.Fatalf("expected no watchers after unsubscribing, found %d", watchCount)
-	}
-	currentMkt = getWatched()
-	if currentMkt != nil {
-		t.Fatalf("failed to shutdown market")
-	}
-
 	ensureErr := func(name string, wantCode int) {
-		got := wsLoadMarket(s, link.link, msg)
+		got := wsLoadMarket(s, link.cl, msg)
 		if got == nil {
 			t.Fatalf("%s: no error", name)
 		}
@@ -256,15 +224,49 @@ func TestLoadMarket(t *testing.T) {
 		}
 	}
 
+	// Sync error from core is an error.
+	tCore.syncErr = tErr
+	ensureErr("sync", msgjson.RPCInternal)
+	tCore.syncErr = nil
+
+	rpcErr := wsLoadMarket(s, link.cl, msg)
+	if rpcErr != nil {
+		t.Fatalf("error loading market: %v", rpcErr)
+	}
+
+	// Ensure the client is watching.
+	ensureWatching(tBase, tQuote)
+
+	// Load a new market, and make sure the old market was unloaded.
+	newBase := uint32(3)
+	newQuote := uint32(4)
+	params.Base = newBase
+	params.Quote = newQuote
+	msg, _ = msgjson.NewRequest(2, "a", params)
+	rpcErr = wsLoadMarket(s, link.cl, msg)
+	if rpcErr != nil {
+		t.Fatalf("error loading market: %v", rpcErr)
+	}
+	ensureWatching(newBase, newQuote)
+
+	// Unsubscribe
+	wsUnmarket(nil, link.cl, nil)
+
+	// Ensure there are no clients watching any markets.
+	s.mtx.Lock()
+	for _, syncer := range s.syncers {
+		syncer.mtx.Lock()
+		if len(syncer.clients) != 0 {
+			t.Fatalf("Syncer for market %d-%d still has %d clients after unMarket", syncer.base, syncer.quote, len(syncer.clients))
+		}
+		syncer.mtx.Unlock()
+	}
+	s.mtx.Unlock()
+
 	// Balance error.
 	tCore.balanceErr = tErr
 	ensureErr("balance", msgjson.RPCInternal)
 	tCore.balanceErr = nil
-
-	// Sync error from core is an error.
-	tCore.syncErr = tErr
-	ensureErr("balance", msgjson.RPCInternal)
-	tCore.syncErr = nil
 }
 
 func TestAPIRegister(t *testing.T) {
@@ -338,7 +340,7 @@ func TestHandleMessage(t *testing.T) {
 	var msg *msgjson.Message
 
 	ensureErr := func(name string, wantCode int) {
-		got := s.handleMessage(link.link, msg)
+		got := s.handleMessage(link.cl, msg)
 		if got == nil {
 			t.Fatalf("%s: no error", name)
 		}
@@ -360,7 +362,7 @@ func TestHandleMessage(t *testing.T) {
 		return nil
 	}
 
-	rpcErr := s.handleMessage(link.link, msg)
+	rpcErr := s.handleMessage(link.cl, msg)
 	if rpcErr != nil {
 		t.Fatalf("error for good message: %d: %s", rpcErr.Code, rpcErr.Message)
 	}
