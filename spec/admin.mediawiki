@@ -1,4 +1,6 @@
-==Exchange Administration==
+=Exchange Administration=
+
+__TOC__
 
 Operation of the DEX will require a non-trivial amount of administrative labor.
 Clients will expect near-perfect uptime and long-term operation.

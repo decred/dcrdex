@@ -1,4 +1,6 @@
-==Client Order Management==
+=Client Order Management=
+
+__TOC__
 
 This section describes the steps required of the client to place an order, and
 the interactions between the client and server to execute an order once a match
@@ -16,7 +18,7 @@ The order book holds only limit orders with time in force ''standing'' that have
 not completely filled or been canceled. All other orders are only valid for one
 [[fundamentals.mediawiki/#Epochbased_Order_Matching|epoch match cycle]].
 
-===Connection Persistence===
+==Connection Persistence==
 
 Regardless of connection status, if a client does not respond to their
 <code>preimage</code> request, they are in violation of
@@ -29,7 +31,7 @@ Once a match is made, a client is always subject to violation of
 [[community.mediawiki/#Rule_2_Every_match_must_be_fully_settled|rule 2]] via the
 [[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]].
 
-===Order Book Subscriptions===
+==Order Book Subscriptions==
 
 An order book can be viewed and tracked by subscribing to a market.
 
@@ -161,7 +163,7 @@ websocket connection.
 
 <code>result</code>: boolean <code>true</code> on success.
 
-===Order Preparation===
+==Order Preparation==
 
 As part of the order, the client must demonstrate control of funds.
 This is accomplished by supplying information and a signature for each
@@ -176,7 +178,7 @@ single-lot matches for the entire order.
 In practice, large orders will rarely pay the total of the base fees because
 many of the matches will be more than a single-lot.
 
-====Calculating Transaction Fees====
+===Calculating Transaction Fees===
 
 The '''base fees''' cover transaction fees associated with making
 initialization transactions for every match in the order.
@@ -207,7 +209,7 @@ backing coins, '''''f<sub>coin</sub>'''''.
 The client must know how to calculate the script sizes to assess fees.
 The DEX will verify the coin sum before accepting the order.
 
-====Rate Encoding====
+===Rate Encoding===
 
 Because the rate assigned to a limit order is a quotient, the value is naturally
 expressed as a floating point number.
@@ -225,7 +227,7 @@ Z, the message-rate encoding would be
 
 with unit ''atoms Y / unit Z''.
 
-====Coin ID====
+===Coin ID===
 
 In order to demonstrate control of unspent value on the blockchain, a user must
 provide its location. For Bitcoin-based blockchains, value is located by
@@ -241,7 +243,7 @@ identifier as a coin ID. As an example, Bitcoin implements
 encoding as 36 bytes with the transaction hash being the first 32-bytes, and the
 big-endian encoded output index as the last 4 bytes.
 
-====Coin Preparation====
+===Coin Preparation===
 
 All backing [[#Coin_ID|coins]] must have a minimum number of confirmations. The exact number,
 <code>swapconf</code>, is an [[fundamentals.mediawiki/#Exchange_Variables|asset variable]] set by the
@@ -283,7 +285,7 @@ The data is signed with the private key(s) corresponding to the
 The <code>pubkeys</code> themselves must correspond with addresses payable by
 the coin's pubkey script (or corresponding redeem script).
 
-====Order Commitment====
+===Order Commitment===
 
 As part of every submitted order, the client should submit a cryptographic
 '''commitment'''.
@@ -306,7 +308,7 @@ The preimages are used as the inputs to
 matching order. Before matching commences, the preimages are broadcast
 in the <code>match_proof</code> message.
 
-====Order Signing====
+===Order Signing===
 
 All orders must be signed by the client and the server.
 The basic signing procedure will involve serializing order data into a byte array
@@ -341,7 +343,7 @@ All order serializations have common '''prefix''' fields.
 | epochdur   || 2  || int || the current DEX epoch duration, in seconds
 |}
 
-====Order ID====
+===Order ID===
 
 The order serialization is used to create a unique order ID.
 The ID is defined as the Blake-256 hash of the serialized order, including the
@@ -371,7 +373,7 @@ The client should use the server's timestamp to create a serialized order and
 independently verify the order ID. The serialized order is also the message for
 the server's signature.
 
-===Limit Order===
+==Limit Order==
 
 Limit orders are for the trade of assets at a rate no higher (buy) or lower
 (sell) than a specified price.
@@ -437,7 +439,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 | server time || int  || the server's UNIX timestamp (milliseconds)
 |}
 
-===Market Order===
+==Market Order==
 
 A market order is an order to buy or sell an asset at the best available
 market price. The request payload fields are similar to a limit order, but
@@ -493,7 +495,7 @@ the epoch match cycle) is left unfilled.
 | server time || int  || the server's UNIX timestamp (milliseconds)
 |}
 
-====Market Buy Orders====
+===Market Buy Orders===
 
 Market buy orders have a slightly different ruleset than market sell orders or
 limit orders.
@@ -530,7 +532,7 @@ accepted but is now too small to match is considered executed but unfilled and
 there is no change to the account's
 [[community.mediawiki/#Rules_of_Community_Conduct|cancellation statistics]].
 
-===Cancel Order===
+==Cancel Order==
 
 Cancel orders remove standing limit orders from the order book.
 A client cannot cancel a market order or a limit order with time in force
@@ -572,7 +574,7 @@ This is by design and discourages certain types of spoofing.
 | server time || int  || the server's UNIX timestamp (milliseconds)
 |}
 
-===Preimage Reveal===
+==Preimage Reveal==
 
 At the expiration of the epoch, the DEX sends out a <code>preimage</code>
 request for each order in the epoch queue. The match cycle begins 5 seconds
@@ -606,7 +608,7 @@ the checksum generated from their local copy of the epoch queue.
 | pimg    || string || hex-encoded preimage for the order's commitment
 |}
 
-===Match negotiation===
+==Match negotiation==
 
 Swap negotiation details will be relayed through the DEX with a series of
 notifications or progress reports.
@@ -825,7 +827,7 @@ The client will respond with an acknowledgement.
 The taker will get the key from the maker's redemption and broadcast their own
 redemption transaction.
 
-===Match revocation===
+==Match revocation==
 
 A match can be revoked by the server if a client fails to act within the
 [[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]]. A match revocation will result in

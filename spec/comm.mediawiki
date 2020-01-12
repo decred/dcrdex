@@ -1,6 +1,8 @@
-==Communication Protocols==
+=Communication Protocols=
 
-===WebSockets===
+__TOC__
+
+==WebSockets==
 
 Trustless negotiation of trades requires considerable messaging.
 Transaction details must be reported and relayed at appropriate times, sometimes
@@ -19,14 +21,14 @@ virtually all popular programming languages.
 Websocket messages are secured by encryption on Transport Layer
 Security (TLS) [https://tools.ietf.org/html/rfc8446 &#91;5&#93;] connections.
 
-===Timestamps===
+==Timestamps==
 
 In all client-server messages that include a timestamp or duration field, the
 units of time are milliseconds unless otherwise specified. Location-independent
 timestamps are encoded as milliseconds since the UNIX epoch (Jan 01 00:00:00
 1970 UTC).
 
-===Message Protocol===
+==Message Protocol==
 
 DEX messaging is JSON-formatted [https://tools.ietf.org/html/rfc8259 &#91;6&#93;].
 All messages, regardless of originating party, use a common top-level
@@ -105,7 +107,7 @@ The payload for a response has a structure that enables quick error checking.
 }
 </pre>
 
-===Session Authentication===
+==Session Authentication==
 
 Many DEX messages must be sent on an authenticated connection. Once a websocket
 connection is established, the client will supply their account ID and signature.
@@ -155,7 +157,7 @@ the client's absence. A list of any pending matches is included in the response.
 | matches    || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
 |}
 
-===HTTP===
+==HTTP==
 
 An API using HTTP for message transport may be provided for basic account
 management and server status queries, however websocket connections are to be

@@ -1,4 +1,6 @@
-==Distributed Exchange Design Fundamentals==
+=Distributed Exchange Design Fundamentals=
+
+__TOC__
 
 There are several notable aspects of the DEX design that were chosen to permit
 peer-to-peer trades with the mechanics of order execution existing entirely on
@@ -11,7 +13,7 @@ These are:
 
 This section describes each of these design aspects.
 
-===Exchange Variables===
+==Exchange Variables==
 
 There are a number of asset-specific variables that must be known by the client.
 
@@ -100,7 +102,7 @@ respond with its current configuration.
 | fundconf || int || minimum confirmations for funding coins
 |}
 
-===Fees===
+==Fees==
 
 The DEX collects no trading fees.
 Collecting fees from trades executed via atomic swaps (where the server
@@ -113,7 +115,7 @@ Registration fees discourage certain spam attacks, enable punitive actions when
 DEX operating expenses.
 Registration fees will be configurable by the exchange operator.
 
-====Transaction Fees====
+===Transaction Fees===
 
 The clients will cover on-chain transaction fees at a minimum fee rate set by
 the DEX operator.
@@ -143,7 +145,7 @@ mined.
 
 See also: [[orders.mediawiki/#Calculating_Transaction_Fees|Calculating Transaction Fees]]
 
-===Epoch-based Order Matching===
+==Epoch-based Order Matching==
 
 In order to devalue predatory behavior exhibited by certain high-frequency
 trading algorithms, received orders are not processed continuously, but rather
@@ -154,7 +156,7 @@ a deterministic latency advantage over other clients when executing trades.
 Limiting this possibility mitigates advantages gained from front-running,
 spoofing, and other manipulative trading practices.
 
-====Epoch Time====
+===Epoch Time===
 
 For a given epoch duration '''''d > 0''''' in milliseconds, and current UNIX
 epoch timestamp '''''t''''' (in milliseconds since Jan 01 00:00:00 1970 UTC),
@@ -173,7 +175,7 @@ and end times for any epoch duration to be known without querying the server.
 A clock synchronization protocol such as NTP will be used to ensure server and
 client clocks are synchronized within acceptable tolerances.
 
-====Pseudorandom Order Matching====
+===Pseudorandom Order Matching===
 
 When the epoch ends, a match cycle begins.
 
@@ -218,7 +220,7 @@ price rate).
 The process continues with the next order in the list and iterates until all
 orders have been processed.
 
-===Identities based on Public Key Infrastructure (PKI) Key Pairs===
+==Identities based on Public Key Infrastructure (PKI) Key Pairs==
 
 The server and the clients are identified and authenticated using public keys,
 with matching private keys used to sign and authorize orders and other messages.
@@ -238,7 +240,7 @@ exchange data via Politeia. For example, given common identities between the DEX
 and Politeia, anchoring data related to DEX client and server conduct on the
 Decred blockchain may be useful for establishing a reputation system.
 
-===Blockchain Interaction===
+==Blockchain Interaction==
 
 '''Clients''' need wallets that support atomic swaps and the ability to
 broadcast transactions to each of the blockchain networks involved in

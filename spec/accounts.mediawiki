@@ -1,4 +1,6 @@
-==Account Creation==
+=Account Creation=
+
+__TOC__
 
 An account is uniquely identified by the client's public account key (pubkey),
 which the client provides during registration.
@@ -9,7 +11,7 @@ double Blake-256 hash of the client's pubkey,
 '''''<code>blake256(blake256(pubkey))</code>''''', provided as a hex-encoded
 string in API messages.
 
-===Step 1: Registration===
+==Step 1: Registration==
 
 The user creates a websocket connection and sends their
 [[fundamentals.mediawiki/#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|public account key]].
@@ -73,7 +75,7 @@ pre-published for further validation.
 | address    || varies || UTF-8 encoded fee address
 |}
 
-===Step 2: Fee Notification===
+==Step 2: Fee Notification==
 
 The client pays the fee on-chain and notifies the DEX of the transaction detail.
 The fee is paid with a standard P2PKH output to the address received in step 1.
