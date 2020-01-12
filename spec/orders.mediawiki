@@ -87,7 +87,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 |-
 | qty     || int      || order size (atoms) || epoch_order, book_order
 |-
-| rate    || int    || price rate. [[#Rate_Encoding|message-rate encoding]]. only set on limit orders
+| rate    || int    || price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]. only set on limit orders
 |-
 | tif     || string || time in force. one of "i" for ''immediate'' or "s" for ''standing''. only set on limit orders
 |-
@@ -167,7 +167,7 @@ websocket connection.
 
 As part of the order, the client must demonstrate control of funds.
 This is accomplished by supplying information and a signature for each
-[[#Coin_ID|coin]] that will be spent.
+[[comm.mediawiki/#Coin_ID|coin]] that will be spent.
 The client covers the ''backing fees'' associated with the inputs spending their
 own coins.
 
@@ -209,43 +209,9 @@ backing coins, '''''f<sub>coin</sub>'''''.
 The client must know how to calculate the script sizes to assess fees.
 The DEX will verify the coin sum before accepting the order.
 
-===Rate Encoding===
-
-Because the rate assigned to a limit order is a quotient, the value is naturally
-expressed as a floating point number.
-To avoid floating-point error, rates in JSON API messages are encoded using a
-custom unit, '''atoms quote asset per unit base asset'''.
-This is called the '''message-rate format'''.
-This can alternatively be viewed as conventional rate multiplied by
-10<sup>8</sup> and floored to the nearest integer.
-
-As an example of message-rate encoding, if someone wanted to purchase asset Z
-using asset Y on the Z/Y market, and the user wanted to pay 0.001 Y for each 1
-Z, the message-rate encoding would be
-
-'''''r<sub>msg</sub> = 1 x 10<sup>8</sup> x 0.001 = 100000'''''
-
-with unit ''atoms Y / unit Z''.
-
-===Coin ID===
-
-In order to demonstrate control of unspent value on the blockchain, a user must
-provide its location. For Bitcoin-based blockchains, value is located by
-pointing to an unspent transaction output (UTXO), identified by its transaction
-ID and output index (vout).
-
-In an effort to stay blockchain-protocol agnostic, the DEX accepts
-and recognizes the locating information as a single byte-array called the
-'''''coin ID''''', with the term '''''coin''''' being defined here as a some
-amount of spendable value that is verifiable on the blockchain.
-It is up to backend and wallet developers to decide on how to properly encode the
-identifier as a coin ID. As an example, Bitcoin implements
-encoding as 36 bytes with the transaction hash being the first 32-bytes, and the
-big-endian encoded output index as the last 4 bytes.
-
 ===Coin Preparation===
 
-All backing [[#Coin_ID|coins]] must have a minimum number of confirmations. The exact number,
+All backing [[comm.mediawiki/#Coin_ID|coins]] must have a minimum number of confirmations. The exact number,
 <code>swapconf</code>, is an [[fundamentals.mediawiki/#Exchange_Variables|asset variable]] set by the
 DEX operator.
 
@@ -373,7 +339,9 @@ The client should use the server's timestamp to create a serialized order and
 independently verify the order ID. The serialized order is also the message for
 the server's signature.
 
-==Limit Order==
+==Order Types==
+
+===Limit Order===
 
 Limit orders are for the trade of assets at a rate no higher (buy) or lower
 (sell) than a specified price.
@@ -397,7 +365,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | ordersize   || int || order size (atoms)
 |-
-| rate        || int || price rate. [[#Rate_Encoding|message-rate encoding]]
+| rate        || int || price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
 | timeinforce || int || standing = 1, immediate = 2
 |-
@@ -423,7 +391,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 |-
 | quantity   || 8 || quantity to buy or sell (atoms)
 |-
-| rate       || 8 || price rate. [[#Rate_Encoding|message-rate encoding]]
+| rate       || 8 || price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
 | time in force || 1 || 1 for ''standing'', 2 for ''immediate''
 |-
@@ -439,7 +407,7 @@ crosses the spread (i.e. a taker rather than a maker). The
 | server time || int  || the server's UNIX timestamp (milliseconds)
 |}
 
-==Market Order==
+===Market Order===
 
 A market order is an order to buy or sell an asset at the best available
 market price. The request payload fields are similar to a limit order, but
@@ -495,7 +463,7 @@ the epoch match cycle) is left unfilled.
 | server time || int  || the server's UNIX timestamp (milliseconds)
 |}
 
-===Market Buy Orders===
+====Market Buy Orders====
 
 Market buy orders have a slightly different ruleset than market sell orders or
 limit orders.
@@ -532,7 +500,7 @@ accepted but is now too small to match is considered executed but unfilled and
 there is no change to the account's
 [[community.mediawiki/#Rules_of_Community_Conduct|cancellation statistics]].
 
-==Cancel Order==
+===Cancel Order===
 
 Cancel orders remove standing limit orders from the order book.
 A client cannot cancel a market order or a limit order with time in force
@@ -645,7 +613,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | quantity  || int    || the matched amount, in atoms of the base asset
 |-
-| rate      || int    || the matched price rate. [[#Rate_Encoding|message-rate encoding]]
+| rate      || int    || the matched price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
 | timestamp || int    || server's UNIX timestamp (milliseconds)
 |-
@@ -665,7 +633,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | quantity   || 8  || the matched amount, in atoms of the base asset
 |-
-| rate       || 8  || the matched price rate. [[#Rate_Encoding|message-rate encoding]]
+| rate       || 8  || the matched price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
 | timestamp  || 8  || server's UNIX timestamp (milliseconds)
 |-
