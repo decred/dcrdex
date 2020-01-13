@@ -58,16 +58,16 @@ func NextID() uint64 {
 	return atomic.AddUint64(&idCounter, 1)
 }
 
-// rpcRoute describes a handler for a specific message route.
-type rpcRoute func(Link, *msgjson.Message) *msgjson.Error
+// MsgHandler describes a handler for a specific message route.
+type MsgHandler func(Link, *msgjson.Message) *msgjson.Error
 
 // rpcRoutes maps message routes to the handlers.
-var rpcRoutes = make(map[string]rpcRoute)
+var rpcRoutes = make(map[string]MsgHandler)
 
 // Route registers a handler for a specified route. The handler map is global
 // and has no mutex protection. All calls to Route should be done before the
 // Server is started.
-func Route(route string, handler rpcRoute) {
+func Route(route string, handler MsgHandler) {
 	if route == "" {
 		panic("Route: route is empty string")
 	}
@@ -80,7 +80,7 @@ func Route(route string, handler rpcRoute) {
 
 // RouteHandler gets the handler registered to the specified route, if it
 // exists.
-func RouteHandler(route string) rpcRoute {
+func RouteHandler(route string) MsgHandler {
 	return rpcRoutes[route]
 }
 
