@@ -91,9 +91,16 @@ critical sections.
 messaging protocols and communication layer technologies that are to be used
 for the DEX API.
 
+* [[comm.mediawiki/#Encoding|Data Encodings]]
+* [[comm.mediawiki/#Message_Protocol|Message Protocol]]
+
 '''&#91;2&#93; [[fundamentals.mediawiki|Distributed Exchange Design Fundamentals]]'''
 describes the notable design aspects that facilitate an exchange service with
 the features described above.
+
+* [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]]
+* [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]]
+* [[fundamentals.mediawiki/#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|Identification]]
 
 '''&#91;3&#93; [[admin.mediawiki|Distributed Exchange Administration]]''' describes
 the tasks required to administer the exchange.
@@ -103,6 +110,12 @@ the tasks required to administer the exchange.
 '''&#91;5&#93; [[orders.mediawiki|Client Order Management]]''' details the different
 order types and the client/server workflows required to synchronize the order
 book and place orders.
+
+* [[orders.mediawiki/#Connection_Persistence|Connection Persistence]]
+* [[orders.mediawiki/#Order_Book_Subscriptions|Order Book Subscriptions]]
+* [[orders.mediawiki/#Order_Type|Order Types]]
+* [[orders.mediawiki/#Preimage_Reveal|Preimage Handling]]
+* [[orders.mediawiki/#Match_negotiation|Match Negotiation]]
 
 '''&#91;6&#93; [[api.mediawiki| Data API]]''' defines http and websocket APIs to browse
 trade history.

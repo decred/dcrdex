@@ -1,4 +1,6 @@
-==Atomic Settlement==
+=Atomic Settlement=
+
+__TOC__
 
 In order to facilitate trustless, non-custodial exchange, the DEX leverages an
 atomic swap process that enables all parties to maintain full control over their
@@ -27,7 +29,7 @@ The market is a DCR/BTC market, where DCR is the &#x201C;base asset&#x201D; and 
 Order quantities are in units of DCR, and the rate offered in a limit order is
 denominated in BTC.
 
-===Case A: Perfect match===
+==Case A: Perfect match==
 
 In the most basic case, Alice and a trader named Bob are the only participants
 and their orders match perfectly.
@@ -118,7 +120,7 @@ the atomic swap.'''
 
 <img src="images/bob-redeem.png">
 
-===Case B: Multi-taker with partial fill===
+==Case B: Multi-taker with partial fill==
 
 In case B, Alice is similarly trying to sell 3 DCR for 0.3 BTC, but the match
 found by the DEX is not perfect this time.

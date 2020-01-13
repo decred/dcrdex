@@ -1,3 +1,5 @@
-==Data API==
+=Data API=
+
+__TOC__
 
 Trade history will be made available to both websocket and HTTP clients.

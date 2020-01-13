@@ -1,6 +1,8 @@
-==Communication Protocols==
+=Communication Protocols=
 
-===WebSockets===
+__TOC__
+
+==WebSockets==
 
 Trustless negotiation of trades requires considerable messaging.
 Transaction details must be reported and relayed at appropriate times, sometimes
@@ -19,6 +21,8 @@ virtually all popular programming languages.
 Websocket messages are secured by encryption on Transport Layer
 Security (TLS) [https://tools.ietf.org/html/rfc8446 &#91;5&#93;] connections.
 
+==Encoding==
+
 ===Timestamps===
 
 In all client-server messages that include a timestamp or duration field, the
@@ -26,7 +30,41 @@ units of time are milliseconds unless otherwise specified. Location-independent
 timestamps are encoded as milliseconds since the UNIX epoch (Jan 01 00:00:00
 1970 UTC).
 
-===Message Protocol===
+===Rate Encoding===
+
+Because the rate assigned to a limit order is a quotient, the value is naturally
+expressed as a floating point number.
+To avoid floating-point error, rates in API messages are encoded using a
+custom unit, '''atoms quote asset per unit base asset'''.
+This is called the '''message-rate format'''.
+This can alternatively be viewed as conventional rate multiplied by
+10<sup>8</sup> and floored to the nearest integer.
+
+As an example of message-rate encoding, if someone wanted to purchase asset Z
+using asset Y on the Z/Y market, and the user wanted to pay 0.001 Y for each 1
+Z, the message-rate encoding would be
+
+'''''r<sub>msg</sub> = 1 x 10<sup>8</sup> x 0.001 = 100000'''''
+
+with unit ''atoms Y / unit Z''.
+
+===Coin ID===
+
+In order to demonstrate control of unspent value on the blockchain, a user must
+provide its location. For Bitcoin-based blockchains, value is located by
+pointing to an unspent transaction output (UTXO), identified by its transaction
+ID and output index (vout).
+
+In an effort to stay blockchain-protocol agnostic, the DEX accepts
+and recognizes the locating information as a single byte-array called the
+'''''coin ID''''', with the term '''''coin''''' being defined here as a some
+amount of spendable value that is verifiable on the blockchain.
+It is up to backend and wallet developers to decide on how to properly encode the
+identifier as a coin ID. As an example, Bitcoin implements
+encoding as 36 bytes with the transaction hash being the first 32-bytes, and the
+big-endian encoded output index as the last 4 bytes.
+
+==Message Protocol==
 
 DEX messaging is JSON-formatted [https://tools.ietf.org/html/rfc8259 &#91;6&#93;].
 All messages, regardless of originating party, use a common top-level
@@ -105,7 +143,7 @@ The payload for a response has a structure that enables quick error checking.
 }
 </pre>
 
-===Session Authentication===
+==Session Authentication==
 
 Many DEX messages must be sent on an authenticated connection. Once a websocket
 connection is established, the client will supply their account ID and signature.
@@ -155,7 +193,7 @@ the client's absence. A list of any pending matches is included in the response.
 | matches    || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
 |}
 
-===HTTP===
+==HTTP==
 
 An API using HTTP for message transport may be provided for basic account
 management and server status queries, however websocket connections are to be
