@@ -74,13 +74,20 @@ func TestListMarkets(t *testing.T) {
 	tCore := testCore()
 	// Simulate 10 markets.
 	marketIDs := make(map[string]struct{})
-	var markets [][2]uint32
+	var markets []msgjson.Market
 	assets := make(map[uint32]*msgjson.Asset)
 	for i := 0; i < 10; i++ {
 		base, quote := randomMsgMarket()
 		mkt := [2]uint32{base.ID, quote.ID}
 		marketIDs[tMarketID(mkt)] = struct{}{}
-		markets = append(markets, mkt)
+		markets = append(markets, msgjson.Market{
+			Name:            base.Symbol + "_" + quote.Symbol,
+			Base:            base.ID,
+			Quote:           quote.ID,
+			EpochLen:        5000,
+			StartEpoch:      1234,
+			MarketBuyBuffer: 1.4,
+		})
 		assets[base.ID] = base
 		assets[quote.ID] = quote
 	}
@@ -94,7 +101,7 @@ func TestListMarkets(t *testing.T) {
 	// Just check that the information is coming through correctly.
 	dexes := tCore.ListMarkets()
 	if len(dexes) != 1 {
-		t.Fatalf("expected 1 MarketConfig, got %d", len(dexes))
+		t.Fatalf("expected 1 MarketInfo, got %d", len(dexes))
 	}
 	mktCfg := dexes[0]
 	if len(mktCfg.Markets) != 10 {
