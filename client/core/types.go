@@ -3,6 +3,8 @@
 
 package core
 
+import "strings"
+
 // Registration is used to register a new DEX account.
 type Registration struct {
 	DEX        string `json:"dex"`
@@ -27,6 +29,11 @@ type Market struct {
 	QuoteSymbol string `json:"quotesymbol"`
 }
 
+// Display returns a ID string suitable for displaying in a UI.
+func (m *Market) Display() string {
+	return strings.ToUpper(m.BaseSymbol) + "-" + strings.ToUpper(m.QuoteSymbol)
+}
+
 // MiniOrder is minimal information about an order in a market's order book.
 type MiniOrder struct {
 	Qty   float64 `json:"qty"`
@@ -38,4 +45,9 @@ type MiniOrder struct {
 type OrderBook struct {
 	Sells []*MiniOrder `json:"sells"`
 	Buys  []*MiniOrder `json:"buys"`
+}
+
+// BookUpdate is an order book update.
+type BookUpdate struct {
+	Market string
 }

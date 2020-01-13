@@ -43,6 +43,7 @@ const (
 	AuthenticationError            // 27
 	PubKeyParseError               // 28
 	FeeError                       // 29
+	UnknownMessageType             // 30
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

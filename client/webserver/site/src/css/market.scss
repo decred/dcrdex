@@ -1,0 +1,156 @@
+div.marketlist {
+  width: 200px;
+  border-right: 1px solid #626262;
+  z-index: 99;
+  background-color: #dbdbdb;
+
+  .selected {
+    border-style: solid none solid none;
+    border-width: 1px;
+    border-color: #aaa;
+  }
+}
+
+div.marketrow {
+  font-size: 17px;
+  padding: 0.5em;
+  font-family: 'demi-sans', sans-serif;
+  cursor: pointer;
+}
+
+div.marketrow:hover,
+div.marketrow.selected {
+  background-color: #f0f7f7;
+}
+
+#marketchart {
+  position: relative;
+  background-color: white;
+  flex: 0 0 45%;
+  min-height: 250px;
+  max-height: 100%;
+  border-bottom: 1px solid #626262;
+}
+
+#marketloader {
+  z-index: 50;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+#marketloader > div {
+  width: 40px;
+  height: 40px;
+  font-size: 40px;
+}
+
+.marketorders {
+  display: block;
+  min-height: 375px;
+  overflow: hidden;
+}
+
+table.ordertable {
+  border-collapse: collapse;
+  border: none;
+  background-color: white;
+  width: 100%;
+
+  th {
+    font-size: 13px;
+    font-family: 'demi-sans', sans-serif;
+  }
+
+  td {
+    font-size: 14px;
+  }
+
+  td,
+  th {
+    font-size: 14px;
+    padding: 2px 0;
+  }
+
+  tr {
+    border-bottom: 1px solid #b3b3b3;
+  }
+
+  tbody > tr:hover {
+    background-color: $light_bg_1;
+  }
+
+  .ico-check {
+    color: #9b8c09;
+  }
+}
+
+.market-header {
+  height: 30px;
+  background-color: $light_bg_2;
+  color: black;
+}
+
+.markettab {
+  background-color: transparent;
+  border-right: 1px solid black;
+  border-radius: 4px 4px 0 0;
+}
+
+.markettab.selected {
+  background-color: #f9f9f9;
+}
+
+.brdrleft {
+  border-left: 1px solid #6a6a6a;
+}
+
+.brdrright {
+  border-right: 1px solid #6a6a6a;
+}
+
+.market-bal {
+  border: 1px solid #6a6a6a;
+  border-radius: 3px;
+}
+
+.mktbalancelbl {
+  display: block;
+  position: absolute;
+  left: 10px;
+  top: -11px;
+  padding: 0 3px;
+  font-size: 14px;
+  font-family: 'demi-sans', sans-serif;
+  background-color: $light_bg_1;
+}
+
+#orderform {
+  min-height: 375px;
+
+  input[type=number] {
+    height: 30px;
+    border: 1px solid #6a6a6a;
+    border-radius: 0;
+    font-size: 15px;
+  }
+
+  input:focus {
+    outline: none;
+  }
+
+  span.unit {
+    position: absolute;
+    font-size: 14px;
+    font-family: 'demi-sans', sans-serif;
+    right: 5px;
+    top: 48%; // Looks better than 50 for some reason.
+    transform: translateY(-50%);
+  }
+
+  button.submit {
+    background-color: #5cba8b;
+  }
+
+  button.selected {
+    background-color: #7e9ad9;
+  }
+}

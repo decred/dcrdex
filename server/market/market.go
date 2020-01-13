@@ -27,8 +27,6 @@ func (e Error) Error() string {
 	return string(e)
 }
 
-// ErrClientDisconnected will be returned if Send or Request is called on a
-// disconnected link.
 const (
 	ErrMarketNotRunning       = Error("market not running")
 	ErrInvalidOrder           = Error("order failed validation")

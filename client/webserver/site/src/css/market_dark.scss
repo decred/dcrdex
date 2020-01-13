@@ -1,0 +1,76 @@
+body.dark {
+  #marketchart {
+    background-color: #131313;
+    border-bottom-color: black;
+  }
+
+  #orderform {
+    color: #a1a1a1;
+
+    button.selected {
+      background-color: #152171;
+    }
+
+    button.submit {
+      background-color: #0b5831;
+    }
+  }
+
+  .marketorders {
+    background-color: black;
+  }
+
+  input[type=number] {
+    border-color: #444;
+  }
+
+  table.ordertable {
+    background-color: black;
+    color: #a1a1a1;
+
+    tr {
+      border-bottom: 1px solid #222;
+    }
+
+    tbody > tr:hover {
+      background-color: #1d2936;
+    }
+  }
+
+  div.marketlist {
+    background-color: #232428;
+    border-right-color: black;
+  }
+
+  div.marketrow:hover,
+  div.marketrow.selected {
+    background-color: #1d2936;
+  }
+
+  .markettab.selected,
+  .mktbalancelbl {
+    background-color: $dark_bg_1;
+  }
+
+  .market-header {
+    background-color: $dark_bg_3;
+    color: inherit;
+  }
+
+  .market-bal {
+    border: 1px solid #3a3a3a;
+    border-radius: 3px;
+  }
+
+  .selected {
+    border-style: none;
+  }
+
+  .brdrleft {
+    border-left: 1px solid black;
+  }
+
+  .brdrright {
+    border-right: 1px solid black;
+  }
+}

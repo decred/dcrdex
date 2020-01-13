@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/ws"
 	"github.com/decred/dcrd/certgen"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
-	"github.com/gorilla/websocket"
 )
 
 const (
@@ -39,10 +39,6 @@ const (
 )
 
 var (
-	// websocket.Upgrader is the preferred method of upgrading a request to a
-	// websocket connection.
-	upgrader = websocket.Upgrader{}
-
 	// Time allowed to read the next pong message from the peer. The
 	// default is intended for production, but leaving as a var instead of const
 	// to facilitate testing.
@@ -215,26 +211,13 @@ func (s *Server) Start() {
 			http.Error(w, "server at maximum capacity", http.StatusServiceUnavailable)
 			return
 		}
-		ws, err := upgrader.Upgrade(w, r, nil)
+		wsConn, err := ws.NewConnection(w, r, pingPeriod+pongWait)
 		if err != nil {
-			var hsErr websocket.HandshakeError
-			if errors.As(err, &hsErr) {
-				log.Errorf("Unexpected websocket error: %v",
-					err)
-			}
-			http.Error(w, "400 Bad Request.", http.StatusBadRequest)
-			return
-		}
-		pongHandler := func(string) error {
-			return ws.SetReadDeadline(time.Now().Add(pingPeriod + pongWait))
-		}
-		err = pongHandler("")
-		if err != nil {
+			log.Errorf("ws connection error: %v", err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
-		ws.SetPongHandler(pongHandler)
-		go s.websocketHandler(ws, ip)
+		go s.websocketHandler(wsConn, ip)
 	})
 
 	// Start serving.
@@ -292,7 +275,7 @@ func (s *Server) banish(ip string) {
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) websocketHandler(conn wsConnection, ip string) {
+func (s *Server) websocketHandler(conn ws.Connection, ip string) {
 	log.Tracef("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
@@ -300,12 +283,12 @@ func (s *Server) websocketHandler(conn wsConnection, ip string) {
 	// disconnected), remove it.
 	client := newWSLink(ip, conn)
 	s.addClient(client)
-	client.start()
-	client.waitForShutdown()
+	client.Start()
+	client.WaitForShutdown()
 	s.removeClient(client.id)
 	// If the ban flag is set, quarantine the client's IP address.
 	if client.ban {
-		s.banish(client.ip)
+		s.banish(client.IP())
 	}
 	log.Tracef("Disconnected websocket client %s", ip)
 }
