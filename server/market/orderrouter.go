@@ -146,7 +146,7 @@ func NewOrderRouter(cfg *OrderRouterConfig) *OrderRouter {
 // msgjson.Limit payload, validates the information, constructs an
 // order.LimitOrder and submits it to the epoch queue.
 func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
-	limit := new(msgjson.Limit)
+	limit := new(msgjson.LimitOrder)
 	err := json.Unmarshal(msg.Payload, limit)
 	if err != nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error decoding 'limit' payload")
@@ -234,10 +234,10 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 }
 
 // handleMarket is the handler for the 'market' route. This route accepts a
-// msgjson.Market payload, validates the information, constructs an
+// msgjson.MarketOrder payload, validates the information, constructs an
 // order.MarketOrder and submits it to the epoch queue.
 func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
-	market := new(msgjson.Market)
+	market := new(msgjson.MarketOrder)
 	err := json.Unmarshal(msg.Payload, market)
 	if err != nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error decoding 'market' payload")
@@ -323,7 +323,7 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 // msgjson.Cancel payload, validates the information, constructs an
 // order.CancelOrder and submits it to the epoch queue.
 func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
-	cancel := new(msgjson.Cancel)
+	cancel := new(msgjson.CancelOrder)
 	err := json.Unmarshal(msg.Payload, cancel)
 	if err != nil {
 		return msgjson.NewError(msgjson.RPCParseError, "error decoding 'cancel' payload")

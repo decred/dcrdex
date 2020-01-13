@@ -433,7 +433,7 @@ func TestLimit(t *testing.T) {
 	rate := uint64(1000) * dcrRateStep
 	user := oRig.user
 	clientTime := nowMs()
-	limit := msgjson.Limit{
+	limit := msgjson.LimitOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
 			Base:       dcrID,
@@ -574,7 +574,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 	qty := uint64(dcrLotSize) * 10
 	user := oRig.user
 	clientTime := nowMs()
-	mkt := msgjson.Market{
+	mkt := msgjson.MarketOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
 			Base:       dcrID,
@@ -704,7 +704,7 @@ func TestCancel(t *testing.T) {
 	user := oRig.user
 	targetID := order.OrderID{244}
 	clientTime := nowMs()
-	cancel := msgjson.Cancel{
+	cancel := msgjson.CancelOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
 			Base:       dcrID,

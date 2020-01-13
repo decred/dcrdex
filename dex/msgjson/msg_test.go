@@ -454,7 +454,7 @@ func TestLimit(t *testing.T) {
 		Coins:    []*Coin{coin1, coin2},
 		Address:  addr,
 	}
-	limit := &Limit{
+	limit := &LimitOrder{
 		Prefix: *prefix,
 		Trade:  *trade,
 		Rate:   350_000_000,
@@ -501,7 +501,7 @@ func TestLimit(t *testing.T) {
 		t.Fatalf("marshal error: %v", err)
 	}
 
-	var limitBack Limit
+	var limitBack LimitOrder
 	err = json.Unmarshal(limitB, &limitBack)
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
@@ -537,7 +537,7 @@ func TestMarket(t *testing.T) {
 		Coins:    []*Coin{coin1, coin2},
 		Address:  addr,
 	}
-	market := &Market{
+	market := &MarketOrder{
 		Prefix: *prefix,
 		Trade:  *trade,
 	}
@@ -578,7 +578,7 @@ func TestMarket(t *testing.T) {
 		t.Fatalf("marshal error: %v", err)
 	}
 
-	var marketBack Market
+	var marketBack MarketOrder
 	err = json.Unmarshal(marketB, &marketBack)
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
@@ -600,7 +600,7 @@ func TestCancel(t *testing.T) {
 		ServerTime: 1571874405,
 	}
 	targetID, _ := hex.DecodeString("a1f1b66916353b58dbb65562eb19731953b2f1215987a9d9137f0df3458637b7")
-	cancel := &Cancel{
+	cancel := &CancelOrder{
 		Prefix:   *prefix,
 		TargetID: targetID,
 	}
@@ -632,7 +632,7 @@ func TestCancel(t *testing.T) {
 		t.Fatalf("marshal error: %v", err)
 	}
 
-	var cancelBack Cancel
+	var cancelBack CancelOrder
 	err = json.Unmarshal(cancelB, &cancelBack)
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
