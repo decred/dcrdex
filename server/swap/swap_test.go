@@ -212,7 +212,7 @@ type TStorage struct{}
 func (s *TStorage) UpdateMatch(match *order.Match) error { return nil }
 func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
 
-// This stub satisfies asset.DEXAsset.
+// This stub satisfies asset.Backend.
 type TAsset struct {
 	mtx     sync.RWMutex
 	coin    asset.Coin
@@ -243,7 +243,7 @@ func (a *TAsset) setCoinErr(err error) {
 	a.coinErr = err
 }
 
-// This stub satisfies asset.Transaction, used by asset.DEXAsset.
+// This stub satisfies asset.Transaction, used by asset.Backend.
 type TCoin struct {
 	mtx       sync.RWMutex
 	id        []byte
@@ -301,7 +301,7 @@ func (coin *TCoin) FeeRate() uint64 {
 	return 1
 }
 
-func TNewAsset(backend asset.DEXAsset) *asset.BackedAsset {
+func TNewAsset(backend asset.Backend) *asset.BackedAsset {
 	return &asset.BackedAsset{
 		Backend: backend,
 		Asset:   dex.Asset{SwapConf: 2},

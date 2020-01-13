@@ -46,7 +46,7 @@ func TestMain(m *testing.M) {
 	var ok bool
 	ltc, ok = dexAsset.(*btc.Backend)
 	if !ok {
-		fmt.Printf("Could not cast DEXAsset to *Backend")
+		fmt.Printf("Could not cast asset.Backend to *Backend")
 		return
 	}
 	os.Exit(m.Run())

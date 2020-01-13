@@ -5,8 +5,8 @@ package asset
 
 import "decred.org/dcrdex/dex"
 
-// The DEXAsset interface is an interface for a blockchain backend.
-type DEXAsset interface {
+// The Backend interface is an interface for a blockchain backend.
+type Backend interface {
 	// Coin should return a Coin only for outputs that would be spendable on the
 	// blockchain immediately. Pay-to-script-hash Coins require the redeem script
 	// in order to calculate sigScript length and verify pubkeys.
@@ -56,8 +56,8 @@ type Coin interface {
 	Value() uint64
 }
 
-// BackedAsset is a dex.Asset with a DEXAsset backend.
+// BackedAsset is a dex.Asset with a Backend.
 type BackedAsset struct {
 	dex.Asset
-	Backend DEXAsset
+	Backend Backend
 }

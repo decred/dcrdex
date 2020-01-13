@@ -45,7 +45,7 @@ type Signer interface {
 }
 
 // FeeChecker is a function for retreiving the details for a fee payment. It
-// is satisfied by (dcr.DCRBackend).P2PKHDetails.
+// is satisfied by (dcr.Backend).P2PKHDetails.
 type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
 
 // A respHandler is the handler for the response to a DEX-originating request. A

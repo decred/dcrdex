@@ -110,7 +110,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 }
 
 // Auth verifies that the utxo pays to the supplied public key(s). This is an
-// asset.DEXAsset method.
+// asset.Backend method.
 func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	// If there are not enough pubkeys, no reason to check anything.
 	if len(pubkeys) < utxo.numSigs {
@@ -251,7 +251,7 @@ func (utxo *UTXO) ID() []byte {
 
 // TxID is a string identifier for the transaction, typically a hexadecimal
 // representation of the byte-reversed transaction hash. Should always return
-// the same value as the txid argument passed to (DEXAsset).UTXO.
+// the same value as the txid argument passed to (Backend).UTXO.
 func (utxo *UTXO) TxID() string {
 	return utxo.txHash.String()
 }

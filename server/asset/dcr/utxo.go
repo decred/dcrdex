@@ -18,8 +18,8 @@ import (
 // satisfy the asset.UTXO interface to be DEX-compatible.
 type UTXO struct {
 	// Because a UTXO's validity and block info can change after creation, keep a
-	// DCRBackend around to query the state of the tx and update the block info.
-	dcr *DCRBackend
+	// Backend around to query the state of the tx and update the block info.
+	dcr *Backend
 	tx  *Tx
 	// The height and hash of the transaction's best known block.
 	height    uint32
@@ -54,7 +54,7 @@ type UTXO struct {
 // Check that UTXO satisfies the asset.UTXO interface
 var _ asset.Coin = (*UTXO)(nil)
 
-// Confirmations is an asset.DEXAsset method that returns the number of
+// Confirmations is an asset.Backend method that returns the number of
 // confirmations for a UTXO. Because it is possible for a UTXO that was once
 // considered valid to later be considered invalid, this method can return
 // an error to indicate the UTXO is no longer valid. The definition of UTXO
@@ -134,7 +134,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 }
 
 // Auth verifies that the utxo pays to the supplied public key(s). This is an
-// asset.DEXAsset method.
+// asset.Backend method.
 func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	if len(pubkeys) < utxo.numSigs {
 		return fmt.Errorf("not enough signatures for utxo %s:%d. expected %d, got %d", utxo.tx.hash, utxo.vout, utxo.numSigs, len(pubkeys))
@@ -274,7 +274,7 @@ func (utxo *UTXO) ID() []byte {
 
 // TxID is a string identifier for the transaction, typically a hexadecimal
 // representation of the byte-reversed transaction hash. Should always return
-// the same value as the txid argument passed to (DEXAsset).UTXO.
+// the same value as the txid argument passed to (Backend).UTXO.
 func (utxo *UTXO) TxID() string {
 	return utxo.tx.hash.String()
 }

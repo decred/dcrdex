@@ -122,13 +122,13 @@ func TestLoadConfig(t *testing.T) {
 
 // The remaining tests use the testBlockchain which is a stub for
 // rpcclient.Client. UTXOs, transactions and blocks are added to the blockchain
-// as jsonrpc types to be requested by the DCRBackend.
+// as jsonrpc types to be requested by the Backend.
 //
 // General formula for testing
-// 1. Create a DCRBackend with the node field set to a testNode
+// 1. Create a Backend with the node field set to a testNode
 // 2. Create a fake UTXO and all of the associated jsonrpc-type blocks and
 //    transactions and add the to the test blockchain.
-// 3. Verify the DCRBackend and UTXO methods are returning whatever is expected.
+// 3. Verify the Backend and UTXO methods are returning whatever is expected.
 // 4. Optionally add more blocks and/or transactions to the blockchain and check
 //    return values again, as things near the top of the chain can change.
 
@@ -155,7 +155,7 @@ type testBlockChain struct {
 	hashes map[int64]*chainhash.Hash
 }
 
-// The testChain is a "blockchain" to store RPC responses for the DCRBackend
+// The testChain is a "blockchain" to store RPC responses for the Backend
 // node stub to request.
 var testChain testBlockChain
 
@@ -426,7 +426,7 @@ func newStakeP2PKHScript(opcode byte) ([]byte, *testAuth) {
 
 // A MsgTx for a regular transaction with a single output. No inputs, so it's
 // not really a valid transaction, but that's okay on testBlockchain and
-// irrelevant to DCRBackend.
+// irrelevant to Backend.
 func testMsgTxRegular(sigType dcrec.SignatureType) *testMsgTx {
 	pkScript, auth := newP2PKHScript(sigType)
 	msgTx := wire.NewMsgTx()
@@ -639,7 +639,7 @@ func testMsgTxRevocation() *testMsgTx {
 }
 
 // Make a backend that logs to stdout.
-func testBackend() (*DCRBackend, func()) {
+func testBackend() (*Backend, func()) {
 	ctx, shutdown := context.WithCancel(context.Background())
 	dcr := unconnectedDCR(ctx, testLogger)
 	dcr.node = testNode{}
@@ -667,7 +667,7 @@ func TestUTXOs(t *testing.T) {
 	// 11. A UTXO with a pay-to-script-hash for a P2PKH redeem script.
 	// 12. A revocation.
 
-	// Create a DCRBackend with the test node.
+	// Create a Backend with the test node.
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
@@ -1039,7 +1039,7 @@ func TestUTXOs(t *testing.T) {
 // TestReorg sends a reorganization-causing block through the anyQ channel, and
 // checks that the cache is responding as expected.
 func TestReorg(t *testing.T) {
-	// Create a DCRBackend with the test node.
+	// Create a Backend with the test node.
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
@@ -1129,7 +1129,7 @@ func TestReorg(t *testing.T) {
 // TestAuxiliary checks the UTXO convenience functions like TxHash, Vout, and
 // TxID.
 func TestAuxiliary(t *testing.T) {
-	// Create a DCRBackend with the test node.
+	// Create a Backend with the test node.
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
@@ -1181,7 +1181,7 @@ func TestAuxiliary(t *testing.T) {
 // TestCheckAddress checks that addresses are parsing or not parsing as
 // expected.
 func TestCheckAddress(t *testing.T) {
-	dcr := &DCRBackend{}
+	dcr := &Backend{}
 	type test struct {
 		addr    string
 		wantErr bool

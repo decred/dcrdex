@@ -49,7 +49,7 @@ type btcNode interface {
 
 // Backend is an dex backend for Bitcoin. It has methods for fetching UTXO
 // information and subscribing to block updates. It maintains a cache of block
-// data for quick lookups. Backend implements asset.DEXAsset, so provides
+// data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
 type Backend struct {
 	// An application context provided as part of the constructor. The Backend
@@ -74,14 +74,14 @@ type Backend struct {
 	log dex.Logger
 }
 
-// Check that Backend satisfies the DEXAsset interface.
-var _ asset.DEXAsset = (*Backend)(nil)
+// Check that Backend satisfies the Backend interface.
+var _ asset.Backend = (*Backend)(nil)
 
 // NewBackend is the exported constructor by which the DEX will import the
 // backend. The provided context.Context should be cancelled when the DEX
 // application exits. The configPath can be an empty string, in which case the
 // standard system location of the bitcoind config file is assumed.
-func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.DEXAsset, error) {
+func NewBackend(ctx context.Context, configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
 	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
@@ -177,7 +177,7 @@ func ReadCloneParams(cloneParams interface{}) (*chaincfg.Params, error) {
 	return p, nil
 }
 
-// Coin is part of the asset.DEXAsset interface. See the unexported Backend.utxo
+// Coin is part of the asset.Backend interface. See the unexported Backend.utxo
 // method for the full implementation.
 func (btc *Backend) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error) {
 	txHash, vout, err := decodeCoinID(coinID)
@@ -189,7 +189,7 @@ func (btc *Backend) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error)
 
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
-// logged from the btc package. Part of the asset.DEXAsset interface.
+// logged from the btc package. Part of the asset.Backend interface.
 func (btc *Backend) BlockChannel(size int) chan uint32 {
 	c := make(chan uint32, size)
 	btc.signalMtx.Lock()
@@ -198,7 +198,7 @@ func (btc *Backend) BlockChannel(size int) chan uint32 {
 	return c
 }
 
-// InitTxSize is an asset.DEXAsset method that must produce the max size of a
+// InitTxSize is an asset.Backend method that must produce the max size of a
 // standardized atomic swap initialization transaction.
 func (btc *Backend) InitTxSize() uint32 {
 	return dexbtc.InitTxSize
