@@ -498,8 +498,8 @@ func (t *Trade) Serialize() []byte {
 	return append(b, uint64Bytes(t.Quantity)...)
 }
 
-// Limit is the payload for the LimitRoute, which places a limit order.
-type Limit struct {
+// LimitOrder is the payload for the LimitRoute, which places a limit order.
+type LimitOrder struct {
 	Prefix
 	Trade
 	Rate uint64 `json:"rate"`
@@ -507,7 +507,7 @@ type Limit struct {
 }
 
 // Serialize serializes the Limit data.
-func (l *Limit) Serialize() ([]byte, error) {
+func (l *LimitOrder) Serialize() ([]byte, error) {
 	// serialization: prefix (65) + trade (variable) + rate (8)
 	// + time-in-force (1) + address (~35) = 110 + len(trade)
 	trade := l.Trade.Serialize()
@@ -519,27 +519,27 @@ func (l *Limit) Serialize() ([]byte, error) {
 	return append(b, []byte(l.Address)...), nil
 }
 
-// Market is the payload for the MarketRoute, which places a market order.
-type Market struct {
+// MarketOrder is the payload for the MarketRoute, which places a market order.
+type MarketOrder struct {
 	Prefix
 	Trade
 }
 
-// Serialize serializes the Market data.
-func (m *Market) Serialize() ([]byte, error) {
+// Serialize serializes the MarketOrder data.
+func (m *MarketOrder) Serialize() ([]byte, error) {
 	// serialization: prefix (65) + trade (varies) + address (35 ish)
 	b := append(m.Prefix.Serialize(), m.Trade.Serialize()...)
 	return append(b, []byte(m.Address)...), nil
 }
 
-// Cancel is the payload for the CancelRoute, which places a cancel order.
-type Cancel struct {
+// CancelOrder is the payload for the CancelRoute, which places a cancel order.
+type CancelOrder struct {
 	Prefix
 	TargetID Bytes `json:"targetid"`
 }
 
-// Serialize serializes the Cancel data.
-func (c *Cancel) Serialize() ([]byte, error) {
+// Serialize serializes the CancelOrder data.
+func (c *CancelOrder) Serialize() ([]byte, error) {
 	// serialization: prefix (57) + target id (32) = 89
 	return append(c.Prefix.Serialize(), c.TargetID...), nil
 }
@@ -704,25 +704,34 @@ type NotifyFeeResult struct {
 
 // ConfigResult is the successful result from the 'config' route.
 type ConfigResult struct {
-	EpochDuration    uint64      `json:"epochlen"`
-	CancelMax        float32     `json:"cancelmax"`
-	BroadcastTimeout uint64      `json:"btimeout"`
-	Assets           []Asset     `json:"assets"`
-	Markets          [][2]uint32 `json:"markets"`
+	CancelMax        float32  `json:"cancelmax"`
+	BroadcastTimeout uint64   `json:"btimeout"`
+	Assets           []Asset  `json:"assets"`
+	Markets          []Market `json:"markets"`
 }
 
-// Asset describes and asset and its variables, and is returned as part of a
+// Market describes a market and its variables, and is returned as part of a
+// ConfigResult.
+type Market struct {
+	Name            string  `json:"name"`
+	Base            uint32  `json:"base"`
+	Quote           uint32  `json:"quote"`
+	EpochLen        uint64  `json:"epochlen"`
+	StartEpoch      uint64  `json:"startepoch"`
+	MarketBuyBuffer float32 `json:"buybuffer"`
+}
+
+// Asset describes an asset and its variables, and is returned as part of a
 // ConfigResult.
 type Asset struct {
-	Symbol          string  `json:"symbol"`
-	ID              uint32  `json:"id"`
-	LotSize         uint64  `json:"lotsize"`
-	RateStep        uint64  `json:"ratestep"`
-	FeeRate         uint64  `json:"feerate"`
-	SwapSize        uint64  `json:"swapsize"`
-	SwapConf        uint16  `json:"swapconf"`
-	FundConf        uint16  `json:"fundconf"`
-	MarketBuyBuffer float32 `json:"buybuffer"`
+	Symbol   string `json:"symbol"`
+	ID       uint32 `json:"id"`
+	LotSize  uint64 `json:"lotsize"`
+	RateStep uint64 `json:"ratestep"`
+	FeeRate  uint64 `json:"feerate"`
+	SwapSize uint64 `json:"swapsize"`
+	SwapConf uint16 `json:"swapconf"`
+	FundConf uint16 `json:"fundconf"`
 }
 
 // Convert uint64 to 8 bytes.

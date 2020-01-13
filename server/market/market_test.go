@@ -227,7 +227,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
-	limit := &msgjson.Limit{
+	limit := &msgjson.LimitOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  aid[:],
 			Base:       dcrID,
@@ -510,7 +510,7 @@ func TestMarket_Cancelable(t *testing.T) {
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
-	limitMsg := &msgjson.Limit{
+	limitMsg := &msgjson.LimitOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  aid[:],
 			Base:       dcrID,
