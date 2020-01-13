@@ -23,10 +23,13 @@ type MarketInfo struct {
 
 // Market is market info.
 type Market struct {
-	BaseID      uint32 `json:"baseid"`
-	BaseSymbol  string `json:"basesymbol"`
-	QuoteID     uint32 `json:"quoteid"`
-	QuoteSymbol string `json:"quotesymbol"`
+	BaseID          uint32  `json:"baseid"`
+	BaseSymbol      string  `json:"basesymbol"`
+	QuoteID         uint32  `json:"quoteid"`
+	QuoteSymbol     string  `json:"quotesymbol"`
+	EpochLen        uint64  `json:"epochlen"`
+	StartEpoch      uint64  `json:"startepoch"`
+	MarketBuyBuffer float32 `json:"buybuffer"`
 }
 
 // Display returns a ID string suitable for displaying in a UI.

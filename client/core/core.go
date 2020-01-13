@@ -91,13 +91,16 @@ func (c *Core) ListMarkets() []*MarketInfo {
 	infos := make([]*MarketInfo, 0, len(c.conns))
 	for uri, dc := range c.conns {
 		mi := &MarketInfo{DEX: uri}
-		for _, bq := range dc.cfg.Markets {
-			base, quote := dc.assets[bq[0]], dc.assets[bq[1]]
+		for _, mkt := range dc.cfg.Markets {
+			base, quote := dc.assets[mkt.Base], dc.assets[mkt.Quote]
 			mi.Markets = append(mi.Markets, Market{
-				BaseID:      base.ID,
-				BaseSymbol:  base.Symbol,
-				QuoteID:     quote.ID,
-				QuoteSymbol: quote.Symbol,
+				BaseID:          base.ID,
+				BaseSymbol:      base.Symbol,
+				QuoteID:         quote.ID,
+				QuoteSymbol:     quote.Symbol,
+				EpochLen:        mkt.EpochLen,
+				StartEpoch:      mkt.StartEpoch,
+				MarketBuyBuffer: mkt.MarketBuyBuffer,
 			})
 		}
 		infos = append(infos, mi)
@@ -177,14 +180,14 @@ func (c *Core) addDex(uri string) {
 			assets[asset.ID] = &asset
 		}
 		// Validate the markets so we don't have to check every time later.
-		for _, bq := range dexCfg.Markets {
-			_, ok := assets[bq[0]]
+		for _, mkt := range dexCfg.Markets {
+			_, ok := assets[mkt.Base]
 			if !ok {
-				log.Errorf("%s reported a market with base asset %d, but did not provide the asset info.", uri, bq[0])
+				log.Errorf("%s reported a market with base asset %d, but did not provide the asset info.", uri, mkt.Base)
 			}
-			_, ok = assets[bq[1]]
+			_, ok = assets[mkt.Quote]
 			if !ok {
-				log.Errorf("%s reported a market with quote asset %d, but did not provide the asset info.", uri, bq[1])
+				log.Errorf("%s reported a market with quote asset %d, but did not provide the asset info.", uri, mkt.Quote)
 			}
 		}
 		// Create the dexConnection and add it to the map.
