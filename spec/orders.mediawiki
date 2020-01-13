@@ -469,11 +469,13 @@ The DEX server maintains an interest in ensuring that only valid orders that
 can match are accepted, so market buy orders must be handled carefully to make
 sure they remain valid.
 
-To prevent orders becoming invalid (too small to match) due to a price increase,
-the DEX operator chooses a ''market buy buffer'', '''''b<sub>m</sub> > 1'''''.
-For a market with lot size '''''l''''', and for which there is a best known
-standing sell order price rate, '''''r''''', the <code>ordersize</code>,
-'''''Q''''' must satisfy the relation '''''Q > b<sub>m</sub> l r'''''.
+To reduce the possibility of market buy orders becoming invalid (too small to
+match) due to a price increase, the DEX operator sets a ''market buy buffer'',
+'''''b<sub>m</sub> > 1''''' for each market.
+For a market where the base asset has lot size '''''l''''', and for which there
+is a best known standing sell order price rate, '''''r''''', the
+<code>ordersize</code>, '''''Q''''' must satisfy the relation
+'''''Q > b<sub>m</sub> l r'''''.
 If the best rate increases before the order is matched, the order will still
 result in a fill as long as the price does not surpass
 ~'''''b<sub>m</sub> r'''''.
