@@ -100,9 +100,8 @@ func (c *depthChart) calcRows() []string {
 
 	for iy := 0; iy < height; iy++ {
 		y := height - iy - 1
-		row := make([]rune, width)
-		for ix := 0; ix < width; ix++ {
-			pt := edge[ix]
+		row := make([]rune, 0, width)
+		for _, pt := range edge {
 			switch {
 			case pt.y < y:
 				row = append(row, uniSpace)
