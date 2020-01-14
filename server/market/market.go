@@ -132,7 +132,8 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	// a second validation for (1) this Market and (2) epoch status, before
 	// putting it on the queue.
 	if !m.validateOrder(rec.order) {
-		log.Errorf("SubmitOrderAsync: Invalid order received: %v", rec.order)
+		// Order ID may not be computed since ServerTime has not been set.
+		log.Debugf("SubmitOrderAsync: Invalid order received: %x", rec.order.Serialize())
 		errChan := make(chan error, 1)
 		errChan <- ErrInvalidOrder
 		return errChan
@@ -490,11 +491,14 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, errChan chan<
 
 	// Insert the order into the epoch queue.
 	epoch.Insert(ord)
-	errChan <- nil
 
 	m.epochMtx.Lock()
 	m.epochOrders[ord.ID()] = ord
 	m.epochMtx.Unlock()
+
+	// Respond to the order router only after updating epochOrders so that
+	// Cancelable will reflect that the order is now in the epoch queue.
+	errChan <- nil
 
 	// Inform the client that the order has been received, stamped, signed, and
 	// inserted into the current epoch queue.

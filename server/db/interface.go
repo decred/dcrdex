@@ -162,7 +162,8 @@ type MatchArchiver interface {
 // ValidateOrder ensures that the order with the given status for the specified
 // market is sensible. This function is in the database package because the
 // concept of a valid order-status-market state is dependent on the semantics of
-// order archival.
+// order archival. The ServerTime may not be set yet, so the OrderID cannot be
+// computed.
 func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInfo) bool {
 	// Orders with status OrderStatusUnknown should never reach the database.
 	if status == order.OrderStatusUnknown {

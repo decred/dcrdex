@@ -187,18 +187,32 @@ func TestMarket_Book(t *testing.T) {
 func TestMarket_runEpochs(t *testing.T) {
 	// This test exercises the Market's main loop, which cycles the epochs and
 	// queues (or not) incoming orders.
+
+	// Create the market.
+	mkt, _, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+		return
+	}
+	t.Log(mkt.marketInfo.Name)
+	epochDurationMSec := mkt.epochDuration
+
+	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
+	mkt.Start(startEpochIdx)
+
+	// Make an order for the first epoch.
+	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
 	lots := 10
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
-	now := time.Now().Truncate(time.Millisecond).UTC()
 	limit := &msgjson.Limit{
 		Prefix: msgjson.Prefix{
 			AccountID:  aid[:],
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.LimitOrderNum,
-			ClientTime: encode.UnixMilliU(now),
+			ClientTime: uint64(clientTimeMSec),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -217,7 +231,7 @@ func TestMarket_runEpochs(t *testing.T) {
 				BaseAsset:  limit.Base,
 				QuoteAsset: limit.Quote,
 				OrderType:  order.LimitOrderType,
-				ClientTime: now,
+				ClientTime: encode.UnixTimeMilli(clientTimeMSec),
 			},
 			T: order.Trade{
 				Coins:    []order.CoinID{},
@@ -248,17 +262,6 @@ func TestMarket_runEpochs(t *testing.T) {
 		req:   limit,
 		order: lo,
 	}
-
-	mkt, _, err := newTestMarket()
-	if err != nil {
-		t.Fatalf("newTestMarket failure: %v", err)
-		return
-	}
-	t.Log(mkt.marketInfo.Name)
-	epochDurationMSec := mkt.epochDuration
-
-	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-	mkt.Start(startEpochIdx)
 
 	// Submit order before market starts running
 	err = mkt.SubmitOrder(&oRecord)
@@ -314,6 +317,7 @@ func TestMarket_runEpochs(t *testing.T) {
 	} else if !errors.Is(err, ErrInvalidOrder) {
 		t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
 	}
+	t.Log(err)
 
 	// Submit an order that breaks storage somehow.
 	// tweak the order so it's not a dup.
@@ -435,18 +439,30 @@ func TestMarket_processEpoch(t *testing.T) {
 }
 
 func TestMarket_Cancelable(t *testing.T) {
+	// Create the market.
+	mkt, _, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+		return
+	}
+
+	epochDurationMSec := mkt.epochDuration
+	startEpochIdx := 1 + encode.UnixMilli(time.Now().Truncate(time.Millisecond))/epochDurationMSec
+	mkt.Start(startEpochIdx)
+
+	// Make an order for the first epoch.
+	clientTimeMSec := startEpochIdx*epochDurationMSec + 10 // 10 ms after epoch start
 	lots := 10
 	qty := uint64(dcrLotSize * lots)
 	rate := uint64(1000) * dcrRateStep
 	aid := test.NextAccount()
-	now := time.Now().Round(time.Millisecond).UTC()
 	limitMsg := &msgjson.Limit{
 		Prefix: msgjson.Prefix{
 			AccountID:  aid[:],
 			Base:       dcrID,
 			Quote:      btcID,
 			OrderType:  msgjson.LimitOrderNum,
-			ClientTime: uint64(encode.UnixMilli(now)),
+			ClientTime: uint64(clientTimeMSec),
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -465,7 +481,7 @@ func TestMarket_Cancelable(t *testing.T) {
 				BaseAsset:  limitMsg.Base,
 				QuoteAsset: limitMsg.Quote,
 				OrderType:  order.LimitOrderType,
-				ClientTime: now,
+				ClientTime: encode.UnixTimeMilli(clientTimeMSec),
 			},
 			T: order.Trade{
 				Coins:    []order.CoinID{},
@@ -485,16 +501,7 @@ func TestMarket_Cancelable(t *testing.T) {
 		order: lo,
 	}
 
-	mkt, _, err := newTestMarket()
-	if err != nil {
-		t.Fatalf("newTestMarket failure: %v", err)
-		return
-	}
-
-	epochDurationMSec := mkt.epochDuration
-	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-	mkt.Start(startEpochIdx)
-
+	// Wait for the start of the epoch to submit the order.
 	mkt.WaitForEpochOpen()
 
 	if mkt.Cancelable(order.OrderID{}) {
