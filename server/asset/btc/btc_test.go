@@ -276,6 +276,8 @@ var testBestBlock testBlock
 
 // This must be called before using the testNode.
 func cleanTestChain() {
+	testChainMtx.Lock()
+	defer testChainMtx.Unlock()
 	testBestBlock = testBlock{
 		hash:   zeroHash,
 		height: 0,
