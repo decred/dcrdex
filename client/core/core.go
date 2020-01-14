@@ -6,6 +6,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/db/bolt"
+	"decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -30,9 +32,11 @@ type websocket interface {
 
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
-	conn   websocket
-	assets map[uint32]*msgjson.Asset
-	cfg    *msgjson.ConfigResult
+	conn     websocket
+	assets   map[uint32]*msgjson.Asset
+	booksMtx sync.RWMutex
+	books    map[string]*order.OrderBook
+	cfg      *msgjson.ConfigResult
 }
 
 // Config is the configuration for the Core.
@@ -150,7 +154,8 @@ func (c *Core) initialize() {
 	}
 	if len(dexs) > 0 {
 		c.connMtx.RLock()
-		log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(dexs))
+		log.Infof("Successfully connected to %d out of %d "+
+			"DEX servers", len(c.conns), len(dexs))
 		c.connMtx.RUnlock()
 	}
 }
@@ -217,6 +222,7 @@ func (c *Core) addDex(uri string) {
 		dc := &dexConnection{
 			conn:   conn,
 			assets: assets,
+			books:  make(map[string]*order.OrderBook),
 			cfg:    dexCfg,
 		}
 		c.connMtx.Lock()
@@ -232,6 +238,82 @@ func (c *Core) addDex(uri string) {
 // been re-established.
 func (c *Core) handleReconnect(uri string) {
 	log.Infof("DEX at %s has reconnected", uri)
+}
+
+// handleOrderBookMsg is called when an orderbook request is received.
+func (c *Core) handleOrderBookMsg(dc *dexConnection, msg *msgjson.Message) error {
+	resp, err := msg.Response()
+	if err != nil {
+		return err
+	}
+
+	var snapshot msgjson.OrderBook
+	err = json.Unmarshal(resp.Result, &snapshot)
+	if err != nil {
+		return fmt.Errorf("order book unmarshal error: %v", err)
+	}
+
+	ob := order.NewOrderBook()
+	err = ob.Sync(&snapshot)
+	if err != nil {
+		return err
+	}
+
+	dc.booksMtx.Lock()
+	dc.books[snapshot.MarketID] = ob
+	dc.booksMtx.Unlock()
+
+	return nil
+}
+
+// handleBookOrderMsg is called when a book_order notification is received.
+func (c *Core) handleBookOrderMsg(dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.BookOrderNote
+	err := json.Unmarshal(msg.Payload, &note)
+	if err != nil {
+		return fmt.Errorf("book order note unmarshal error: %v", err)
+	}
+
+	dc.booksMtx.Lock()
+	defer dc.booksMtx.Unlock()
+
+	ob, ok := dc.books[note.MarketID]
+	if !ok {
+		return fmt.Errorf("no order book found with market id '%v'",
+			note.MarketID)
+	}
+
+	err = ob.Book(&note)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// handleUnbookOrderMsg is called when an unbook_order notification is
+// received.
+func (c *Core) handleUnbookOrderMsg(dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.UnbookOrderNote
+	err := json.Unmarshal(msg.Payload, &note)
+	if err != nil {
+		return fmt.Errorf("unbook order note unmarshal error: %v", err)
+	}
+
+	dc.booksMtx.Lock()
+	defer dc.booksMtx.Unlock()
+
+	ob, ok := dc.books[note.MarketID]
+	if !ok {
+		return fmt.Errorf("no order book found with market id '%v'", note.MarketID)
+	}
+
+	err = ob.Unbook(&note)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -263,15 +345,34 @@ out:
 				case msgjson.SuspensionRoute:
 					log.Info("suspension message received")
 				}
+
 			case msgjson.Notification:
 				switch msg.Route {
 				case msgjson.BookOrderRoute:
-					log.Info("book_order message received")
+					err := c.handleBookOrderMsg(dc, msg)
+					if err != nil {
+						log.Error(err)
+					}
+
 				case msgjson.EpochOrderRoute:
 					log.Info("epoch_order message received")
+
 				case msgjson.UnbookOrderRoute:
-					log.Info("unbook_order message received")
+					err := c.handleUnbookOrderMsg(dc, msg)
+					if err != nil {
+						log.Error(err)
+					}
 				}
+
+			case msgjson.Response:
+				switch msg.Route {
+				case msgjson.OrderBookRoute:
+					err := c.handleOrderBookMsg(dc, msg)
+					if err != nil {
+						log.Error(err)
+					}
+				}
+
 			default:
 				log.Errorf("invalid message type %d from MessageSource", msg.Type)
 			}

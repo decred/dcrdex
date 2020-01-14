@@ -221,7 +221,7 @@ func (ob *OrderBook) book(note *msgjson.BookOrderNote, cached bool) error {
 	}
 
 	if len(note.OrderID) != order.OrderIDSize {
-		return fmt.Errorf("order id length is not %d", len(note.OrderID))
+		return fmt.Errorf("order id length is not %d", order.OrderIDSize)
 	}
 
 	var oid order.OrderID
@@ -283,7 +283,7 @@ func (ob *OrderBook) unbook(note *msgjson.UnbookOrderNote, cached bool) error {
 	}
 
 	if len(note.OrderID) != order.OrderIDSize {
-		return fmt.Errorf("order id length is not %d", len(note.OrderID))
+		return fmt.Errorf("order id length is not %d", order.OrderIDSize)
 	}
 
 	var oid order.OrderID
