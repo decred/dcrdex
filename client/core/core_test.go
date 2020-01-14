@@ -50,7 +50,6 @@ func randomMsgMarket() (baseAsset, quoteAsset *msgjson.Asset) {
 
 func testCore() *Core {
 	return &Core{
-		ctx:   tCtx,
 		conns: make(map[string]*dexConnection),
 	}
 }

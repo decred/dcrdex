@@ -35,7 +35,7 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // InitLogging initializes the logging rotater to write logs to logFile and
 // create roll files in the same directory.  It must be called before the
 // package-global log rotater variables are used.
-func InitLogging(masterLog func([]byte)) {
+func InitLogging(masterLog func([]byte)) slog.Logger {
 	var err error
 	logRotator, err = rotator.New(logFilename, 32*1024, false, maxLogRolls)
 	if err != nil {
@@ -44,6 +44,7 @@ func InitLogging(masterLog func([]byte)) {
 	}
 	masterLogger = masterLog
 	log = NewLogger("APP", nil)
+	return log
 }
 
 // NewLogger creates a new logger which logs to the log file and to the provided

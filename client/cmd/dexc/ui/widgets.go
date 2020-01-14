@@ -139,7 +139,12 @@ func createWidgets() {
 	marketView = newMarketView()
 	webView = newServerView("Web", cfg.WebAddr, func(ctx context.Context, addr string, logger slog.Logger) {
 		setWebLabelOn(true)
-		webserver.Run(ctx, clientCore, addr, logger)
+		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logger, cfg.ReloadHTML)
+		if err != nil {
+			log.Errorf("Error starting web server: %v", err)
+			return
+		}
+		webSrv.Run(ctx)
 		setWebLabelOn(false)
 	})
 	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context, addr string, logger slog.Logger) {

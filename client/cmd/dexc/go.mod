@@ -9,7 +9,15 @@ replace (
 
 require (
 	decred.org/dcrdex v0.0.0-00010101000000-000000000000
+	github.com/decred/dcrd/chaincfg/chainhash v1.0.2
 	github.com/decred/dcrd/dcrutil/v2 v2.0.1
+	github.com/decred/dcrd/gcs v1.1.0
+	github.com/decred/dcrd/txscript/v2 v2.1.0
+	github.com/decred/dcrd/wire v1.3.0
+	github.com/decred/dcrwallet/errors/v2 v2.0.0
+	github.com/decred/dcrwallet/p2p/v2 v2.0.0
+	github.com/decred/dcrwallet/validate v1.1.1
+	github.com/decred/dcrwallet/wallet/v3 v3.1.1-0.20191230143837-6a86dc4676f0
 	github.com/decred/slog v1.0.0
 	github.com/gdamore/tcell v1.3.0
 	github.com/jessevdk/go-flags v1.4.0

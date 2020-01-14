@@ -142,7 +142,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 
 	// Right now, it is expected that the working directory
 	// is either the dcrdex root directory, or the WebServer directory itself.
-	root := "client/webserver/site"
+	root := "../../webserver/site"
 	if !folderExists(root) {
 		root = "site"
 		if !folderExists(root) {

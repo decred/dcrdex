@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestConfig(t *testing.T) {
+func TestConfigure(t *testing.T) {
 	// Command line arguments
 	oldArgs := os.Args
 	cmd := oldArgs[0]
@@ -30,17 +30,17 @@ func TestConfig(t *testing.T) {
 		}
 	}
 
-	createFile(filepath.Join(dir, "dexc_mainnet.conf"),
-		"webaddr=:9876")
+	mainFP := filepath.Join(dir, "dexc_mainnet.conf")
+	createFile(mainFP, "webaddr=:9876")
 
-	createFile(filepath.Join(dir, "dexc_testnet.conf"),
-		"notui=1\ntestnet=1\nrpc=1")
+	testFP := filepath.Join(dir, "dexc_testnet.conf")
+	createFile(testFP, "notui=1\ntestnet=1\nrpc=1")
 
-	createFile(filepath.Join(dir, "dexc_simnet.conf"),
-		"webaddr=:1234\nsimnet=1\nweb=1")
+	simFP := filepath.Join(dir, "dexc_simnet.conf")
+	createFile(simFP, "webaddr=:1234\nsimnet=1\nweb=1")
 
 	// Check the mainnet configuration.
-	os.Args = []string{cmd, "--dir", dir}
+	os.Args = []string{cmd, "--dir", dir, "--config", mainFP}
 	_, err := Configure()
 	if err != nil {
 		t.Fatalf("mainnet Configure error: %v", err)
@@ -52,8 +52,8 @@ func TestConfig(t *testing.T) {
 	check("mainnet web", cfg.WebOn == false)
 	check("mainnet webaddr", cfg.WebAddr == ":9876")
 
-	// Check the mainnet configuration.
-	os.Args = []string{cmd, "--dir", dir, "--testnet"}
+	// Check the testnet configuration.
+	os.Args = []string{cmd, "--dir", dir, "--testnet", "--config", testFP}
 	_, err = Configure()
 	if err != nil {
 		t.Fatalf("simnet Configure error: %v", err)
@@ -65,8 +65,8 @@ func TestConfig(t *testing.T) {
 	check("testnet web", cfg.WebOn == false)
 	check("testnet webaddr", cfg.WebAddr == defaultWebAddr)
 
-	// Check the mainnet configuration.
-	os.Args = []string{cmd, "--dir", dir, "--simnet"}
+	// Check the simnet configuration.
+	os.Args = []string{cmd, "--dir", dir, "--simnet", "--config", simFP}
 	_, err = Configure()
 	if err != nil {
 		t.Fatalf("simnet Configure error: %v", err)

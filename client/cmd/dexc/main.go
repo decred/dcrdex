@@ -14,7 +14,10 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
+	"decred.org/dcrdex/dex"
 )
+
+var log dex.Logger
 
 func main() {
 	var cancel func()
@@ -53,7 +56,7 @@ func main() {
 		})
 		go clientCore.Run(appCtx)
 
-		ui.InitLogging(logStdout)
+		log = ui.InitLogging(logStdout)
 		// At least one of --rpc or --web must be specified.
 		if !cfg.RPCOn && !cfg.WebOn {
 			fmt.Println("Cannot run without TUI unless --rpc and/or --web is specified")
@@ -71,7 +74,12 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				webserver.Run(appCtx, clientCore, cfg.WebAddr, ui.NewLogger("WEB", logStdout))
+				webSrv, err := webserver.New(clientCore, cfg.WebAddr, ui.NewLogger("WEB", logStdout), cfg.ReloadHTML)
+				if err != nil {
+					log.Errorf("Error starting web server: %v", err)
+					return
+				}
+				webSrv.Run(appCtx)
 			}()
 		}
 		wg.Wait()
