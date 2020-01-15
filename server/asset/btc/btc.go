@@ -477,9 +477,10 @@ out:
 			if *bestHash == tip.hash {
 				continue
 			}
+			best := bestHash.String()
 			block, err := btc.node.GetBlockVerbose(bestHash)
 			if err != nil {
-				btc.log.Errorf("error retrieving block %s: %v", bestHash, err)
+				btc.log.Errorf("error retrieving block %s: %v", best, err)
 				continue
 			}
 			// If this doesn't build on the best known block, look for a reorg.

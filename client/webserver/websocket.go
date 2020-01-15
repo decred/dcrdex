@@ -85,8 +85,11 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 		if cl.quit != nil {
 			cl.quit()
 		}
-		delete(s.clients, cl.cid)
 		cl.mtx.Unlock()
+
+		s.mtx.Lock()
+		delete(s.clients, cl.cid)
+		s.mtx.Unlock()
 	}()
 	cl.Start()
 	cl.WaitForShutdown()
