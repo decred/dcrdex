@@ -79,6 +79,9 @@ func (c *depthChart) calcRows() []string {
 	numPts := 400
 	amp := float64(5)
 	pts := make([]depthPoint, 0, numPts)
+	if numPts < 2 {
+		return nil
+	}
 	for i := 0; i < numPts; i++ {
 		x := float64(i) / float64(numPts) * rotations * 2 * math.Pi
 		pts = append(pts, depthPoint{
@@ -95,7 +98,9 @@ func (c *depthChart) calcRows() []string {
 	if err != nil {
 		// Don't update the UI from a Draw method, so we won't print an error here.
 		// TODO: Add a file-only logger for logging these errors?
-		return nil
+		app.QueueUpdate(func() {
+			log.Errorf("interpolate error: %v", err)
+		})
 	}
 
 	for iy := 0; iy < height; iy++ {
@@ -160,7 +165,8 @@ const (
 	// shadedBlock      rune = '\u2593'
 )
 
-// Blur is to the tview.Box Focus method. Used to set the focus field.
+// edgePoint is a point on the console grid, composed of a character and a row
+// number.
 type edgePoint struct {
 	y  int
 	ch rune
