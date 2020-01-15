@@ -1052,8 +1052,8 @@ func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 }
 
 func TestMain(m *testing.M) {
-	recheckInterval = time.Millisecond * 5
-	txWaitExpiration = time.Millisecond * 50
+	recheckInterval = time.Millisecond * 20
+	txWaitExpiration = recheckInterval * 10
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
