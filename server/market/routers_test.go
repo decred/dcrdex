@@ -28,21 +28,22 @@ import (
 )
 
 const (
-	dummySize    = 50
-	btcLotSize   = 100_000
-	btcRateStep  = 1_000
-	dcrLotSize   = 10_000_000
-	dcrRateStep  = 100_000
-	btcID        = 0
-	dcrID        = 42
-	btcAddr      = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
-	dcrAddr      = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
-	mktName1     = "btc_ltc"
-	mkt1BaseRate = 5e7
-	mktName2     = "dcr_doge"
-	mkt2BaseRate = 8e9
-	mktName3     = "dcr_btc"
-	mkt3BaseRate = 3e9
+	dummySize     = 50
+	btcLotSize    = 100_000
+	btcRateStep   = 1_000
+	dcrLotSize    = 10_000_000
+	dcrRateStep   = 100_000
+	btcID         = 0
+	dcrID         = 42
+	btcAddr       = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
+	dcrAddr       = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
+	mktName1      = "btc_ltc"
+	mkt1BaseRate  = 5e7
+	mktName2      = "dcr_doge"
+	mkt2BaseRate  = 8e9
+	mktName3      = "dcr_btc"
+	mkt3BaseRate  = 3e9
+	responseDelay = 10 // milliseconds
 )
 
 var (
@@ -1169,14 +1170,14 @@ func TestRouter(t *testing.T) {
 	// The format used here is link[market]_[count]
 	link1, sub := newSubscriber(mkt1)
 	router.handleOrderBook(link1, sub)
-	tick(5)
+	tick(responseDelay)
 	orders := checkResponse("first link, market 1", mktName1, sub.ID, link1)
 	checkBook(src1, msgjson.StandingOrderNum, "first link, market 1", orders...)
 
 	// Another subscriber to the same market should behave identically.
 	link2, sub := newSubscriber(mkt1)
 	router.handleOrderBook(link2, sub)
-	tick(5)
+	tick(responseDelay)
 	orders = checkResponse("second link, market 1", mktName1, sub.ID, link2)
 	checkBook(src1, msgjson.StandingOrderNum, "second link, market 1", orders...)
 
@@ -1188,7 +1189,7 @@ func TestRouter(t *testing.T) {
 		order:  lo,
 	}
 	src1.feed <- sig
-	tick(5)
+	tick(responseDelay)
 
 	epochNote := getEpochNoteFromLink(t, link1)
 	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link1")
@@ -1210,7 +1211,7 @@ func TestRouter(t *testing.T) {
 	sub = newSubscription(mkt2)
 	router.handleOrderBook(link1, sub)
 	router.handleOrderBook(link2, sub)
-	tick(5)
+	tick(responseDelay)
 	orders = checkResponse("first link, market 2", mktName2, sub.ID, link1)
 	checkBook(src2, msgjson.StandingOrderNum, "first link, market 2", orders...)
 	orders = checkResponse("second link, market 2", mktName2, sub.ID, link2)
@@ -1223,7 +1224,7 @@ func TestRouter(t *testing.T) {
 		order:  mo,
 	}
 	src2.feed <- sig
-	tick(5)
+	tick(responseDelay)
 
 	epochNote = getEpochNoteFromLink(t, link1)
 	compareTrade(&epochNote.BookOrderNote, mo, "link 1 market 2 epoch update (market order)")
@@ -1244,7 +1245,7 @@ func TestRouter(t *testing.T) {
 		order:  lo,
 	}
 	src2.feed <- sig
-	tick(5)
+	tick(responseDelay)
 
 	bookNote := getBookNoteFromLink(t, link1)
 	compareLO(bookNote, lo, msgjson.StandingOrderNum, "book notification, link1, market 2")
@@ -1265,7 +1266,7 @@ func TestRouter(t *testing.T) {
 		order:  lo,
 	}
 	src2.feed <- sig
-	tick(5)
+	tick(responseDelay)
 
 	unbookNote := getUnbookNoteFromLink(t, link1)
 	if lo.ID().String() != unbookNote.OrderID.String() {
@@ -1287,7 +1288,7 @@ func TestRouter(t *testing.T) {
 		MarketID: mktName1,
 	})
 	router.handleUnsubOrderBook(link1, unsub)
-	tick(5)
+	tick(responseDelay)
 
 	// Client 1 should have an unsub response from the server.
 	respMsg := link1.getSend()
@@ -1310,7 +1311,7 @@ func TestRouter(t *testing.T) {
 		order:  mo,
 	}
 	src1.feed <- sig
-	tick(5)
+	tick(responseDelay)
 
 	// client 1 should not have a message, but client 2 should.
 	if link1.getSend() != nil {
@@ -1333,7 +1334,7 @@ func TestRouter(t *testing.T) {
 		order:  co,
 	}
 	src1.feed <- sig
-	tick(5)
+	tick(responseDelay)
 
 	epochNote = getEpochNoteFromLink(t, link2)
 	if epochNote.OrderType != msgjson.CancelOrderNum {
@@ -1349,7 +1350,7 @@ func TestRouter(t *testing.T) {
 	// Send another, but err on the send. Check for unsubscribed
 	link2.sendErr = fmt.Errorf("test error")
 	src1.feed <- sig
-	tick(5)
+	tick(responseDelay)
 
 	subs := router.books[mktName1].subs
 	subs.mtx.RLock()
