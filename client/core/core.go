@@ -83,12 +83,8 @@ func (c *Core) Run(ctx context.Context) {
 	c.ctx = ctx
 	// Have one thread just wait on context cancellation, since if there are no
 	// DEX accounts yet, there would be nothing else on the WaitGroup.
-	c.wg.Add(1)
-	go func() {
-		<-ctx.Done()
-		c.wg.Done()
-	}()
 	c.initialize()
+	<-ctx.Done()
 	c.wg.Wait()
 	log.Infof("DEX client core off")
 }
