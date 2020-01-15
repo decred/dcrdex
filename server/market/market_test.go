@@ -521,7 +521,7 @@ func TestMarket_Cancelable(t *testing.T) {
 	}
 
 	// Let the epoch cycle.
-	time.Sleep(time.Duration(epochDurationMSec)*time.Millisecond + time.Duration(epochDurationMSec/20))
+	time.Sleep(time.Duration(epochDurationMSec+epochDurationMSec/20) * time.Millisecond)
 	if !mkt.Cancelable(lo.ID()) {
 		t.Errorf("Cancelable failed to report order %v as cancelable, "+
 			"but it should have been booked.", lo)
