@@ -77,9 +77,14 @@ func (c *Core) Run(ctx context.Context) {
 		log.Errorf("database initialization error: %v", err)
 		return
 	}
-	c.ctx = ctx
 	c.db = db
-	go c.initialize()
+	// Store the context as a field for now, since we will need to spawn new
+	// DEX threads when new accounts are registered.
+	c.ctx = ctx
+	// Have one thread just wait on context cancellation, since if there are no
+	// DEX accounts yet, there would be nothing else on the WaitGroup.
+	c.initialize()
+	<-ctx.Done()
 	c.wg.Wait()
 	log.Infof("DEX client core off")
 }
@@ -108,6 +113,28 @@ func (c *Core) ListMarkets() []*MarketInfo {
 	return infos
 }
 
+func (c *Core) Register(*Registration) error {
+	return nil
+}
+
+func (c *Core) Login(dex, pw string) error {
+	return nil
+}
+
+func (c *Core) Sync(dex string, base, quote uint32) (chan *BookUpdate, error) {
+	return make(chan *BookUpdate), nil
+}
+
+func (c *Core) Book(dex string, base, quote uint32) *OrderBook {
+	return nil
+}
+
+func (c *Core) Unsync(dex string, base, quote uint32) {}
+
+func (c *Core) Balance(uint32) (uint64, error) {
+	return 0, nil
+}
+
 // initialize pulls the known DEX URLs from the database and attempts to
 // connect and retreive the DEX configuration.
 func (c *Core) initialize() {
@@ -115,16 +142,12 @@ func (c *Core) initialize() {
 	if err != nil {
 		log.Errorf("Error retreiving accounts from database: %v", err)
 	}
-	var wg sync.WaitGroup
 	for _, uri := range dexs {
-		wg.Add(1)
 		u := uri
 		go func() {
 			c.addDex(u)
-			wg.Done()
 		}()
 	}
-	wg.Wait()
 	if len(dexs) > 0 {
 		c.connMtx.RLock()
 		log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(dexs))
