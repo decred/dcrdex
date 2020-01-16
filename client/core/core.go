@@ -211,11 +211,13 @@ func (c *Core) addDex(uri string) {
 		for _, mkt := range dexCfg.Markets {
 			_, ok := assets[mkt.Base]
 			if !ok {
-				log.Errorf("%s reported a market with base asset %d, but did not provide the asset info.", uri, mkt.Base)
+				log.Errorf("%s reported a market with base asset %d, "+
+					"but did not provide the asset info.", uri, mkt.Base)
 			}
 			_, ok = assets[mkt.Quote]
 			if !ok {
-				log.Errorf("%s reported a market with quote asset %d, but did not provide the asset info.", uri, mkt.Quote)
+				log.Errorf("%s reported a market with quote asset %d, "+
+					"but did not provide the asset info.", uri, mkt.Quote)
 			}
 		}
 		// Create the dexConnection and add it to the map.
@@ -253,6 +255,10 @@ func (c *Core) handleOrderBookMsg(dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("order book unmarshal error: %v", err)
 	}
 
+	if snapshot.MarketID == "" {
+		return fmt.Errorf("snapshot market id cannot be an empty string")
+	}
+
 	ob := order.NewOrderBook()
 	err = ob.Sync(&snapshot)
 	if err != nil {
@@ -275,20 +281,14 @@ func (c *Core) handleBookOrderMsg(dc *dexConnection, msg *msgjson.Message) error
 	}
 
 	dc.booksMtx.Lock()
-	defer dc.booksMtx.Unlock()
-
 	ob, ok := dc.books[note.MarketID]
+	dc.booksMtx.Unlock()
 	if !ok {
 		return fmt.Errorf("no order book found with market id '%v'",
 			note.MarketID)
 	}
 
-	err = ob.Book(&note)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return ob.Book(&note)
 }
 
 // handleUnbookOrderMsg is called when an unbook_order notification is
@@ -305,15 +305,11 @@ func (c *Core) handleUnbookOrderMsg(dc *dexConnection, msg *msgjson.Message) err
 
 	ob, ok := dc.books[note.MarketID]
 	if !ok {
-		return fmt.Errorf("no order book found with market id '%v'", note.MarketID)
+		return fmt.Errorf("no order book found with market id %q",
+			note.MarketID)
 	}
 
-	err = ob.Unbook(&note)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return ob.Unbook(&note)
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -344,6 +340,9 @@ out:
 					log.Info("revoke_match message received")
 				case msgjson.SuspensionRoute:
 					log.Info("suspension message received")
+				default:
+					log.Errorf("request with unknown route (%v) received",
+						msg.Route)
 				}
 
 			case msgjson.Notification:
@@ -362,6 +361,9 @@ out:
 					if err != nil {
 						log.Error(err)
 					}
+				default:
+					log.Errorf("notification with unknown route (%v) received",
+						msg.Route)
 				}
 
 			case msgjson.Response:
@@ -371,6 +373,9 @@ out:
 					if err != nil {
 						log.Error(err)
 					}
+				default:
+					log.Errorf("response mesage with unknown route "+
+						"(%v) received", msg.Route)
 				}
 
 			default:
