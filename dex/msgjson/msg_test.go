@@ -365,8 +365,8 @@ func TestPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
 	}
-	if !bytes.Equal(prefixBack.AccountID, prefixBack.AccountID) {
-		t.Fatal(prefixBack.AccountID, prefixBack.AccountID)
+	if !bytes.Equal(prefixBack.AccountID, prefix.AccountID) {
+		t.Fatal(prefixBack.AccountID, prefix.AccountID)
 	}
 	if prefixBack.Base != prefix.Base {
 		t.Fatalf("wrong base asset. wanted %d, got %d", prefix.Base, prefixBack.Base)
@@ -857,11 +857,11 @@ func TestNotifyFee(t *testing.T) {
 	if !bytes.Equal(notifyBack.CoinID, notify.CoinID) {
 		t.Fatal(notifyBack.CoinID, notify.CoinID)
 	}
-	if notifyBack.Vout != notifyBack.Vout {
-		t.Fatal(notifyBack.Vout, notifyBack.Vout)
+	if notifyBack.Vout != notify.Vout {
+		t.Fatal(notifyBack.Vout, notify.Vout)
 	}
-	if notifyBack.Time != notifyBack.Time {
-		t.Fatal(notifyBack.Time, notifyBack.Time)
+	if notifyBack.Time != notify.Time {
+		t.Fatal(notifyBack.Time, notify.Time)
 	}
 }
 
@@ -1010,7 +1010,7 @@ func TestRespReq(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for empty string route request")
 	}
-	msg, err = NewNotification("testroute", 10)
+	_, err = NewNotification("testroute", 10)
 	if err != nil {
 		t.Fatalf("error for valid request payload: %v", err)
 	}

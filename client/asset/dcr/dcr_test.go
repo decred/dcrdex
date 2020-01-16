@@ -813,7 +813,7 @@ func TestAuditContract(t *testing.T) {
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
 	addrStr := tPKHAddr.String()
-	contract, err := dexdcr.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), chainParams)
+	contract, err := dexdcr.MakeContract(addrStr, addrStr, secretHash, lockTime.Unix(), chainParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}

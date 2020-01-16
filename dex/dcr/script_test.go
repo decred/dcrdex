@@ -373,7 +373,7 @@ func TestFindKeyPush(t *testing.T) {
 		t.Fatalf("error creating redeem script: %v", err)
 	}
 
-	key, err := FindKeyPush(sigScript, contractHash[:], tParams)
+	key, err := FindKeyPush(sigScript, contractHash, tParams)
 	if err != nil {
 		t.Fatalf("findKeyPush error: %v", err)
 	}
@@ -382,13 +382,13 @@ func TestFindKeyPush(t *testing.T) {
 	}
 
 	// Empty script is an error.
-	_, err = FindKeyPush([]byte{}, contractHash[:], tParams)
+	_, err = FindKeyPush([]byte{}, contractHash, tParams)
 	if err == nil {
 		t.Fatalf("no error for empty script")
 	}
 
 	// Bad script
-	_, err = FindKeyPush(invalidScript, contractHash[:], tParams)
+	_, err = FindKeyPush(invalidScript, contractHash, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")
 	}
@@ -399,7 +399,7 @@ func TestFindKeyPush(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating contract: %v", err)
 	}
-	_, err = FindKeyPush(sigScript, contractHash[:], tParams)
+	_, err = FindKeyPush(sigScript, contractHash, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")
 	}

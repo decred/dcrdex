@@ -891,7 +891,7 @@ func TestAuditContract(t *testing.T) {
 	swapVal := toSatoshi(5)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
-	contract, err := dexbtc.MakeContract(tP2PKHAddr, tP2PKHAddr, secretHash[:], lockTime.Unix(), &chaincfg.MainNetParams)
+	contract, err := dexbtc.MakeContract(tP2PKHAddr, tP2PKHAddr, secretHash, lockTime.Unix(), &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}

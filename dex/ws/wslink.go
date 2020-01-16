@@ -159,7 +159,7 @@ out:
 		_, msgBytes, err := c.conn.ReadMessage()
 		if err != nil {
 			// Log the error if it's not due to disconnecting.
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				log.Errorf("Websocket receive error from %s: %v", c.ip, err)
 			}
 			break out

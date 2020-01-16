@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -936,7 +937,7 @@ func (dcr *ExchangeWallet) spendableUTXOs(unspents []walletjson.ListUnspentResul
 
 			nfo, err := dexdcr.InputInfo(scriptPK, redeemScript, chainParams)
 			if err != nil {
-				if err == dex.UnsupportedScriptError {
+				if errors.Is(err, dex.UnsupportedScriptError) {
 					continue
 				}
 				return nil, 0, 0, fmt.Errorf("error reading asset info: %v", err)
@@ -1034,7 +1035,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 	sigCycles := 0
 	if !isDust {
 		// Add the change output with recalculated fees
-		size = size + dexdcr.P2PKHOutputSize
+		size += dexdcr.P2PKHOutputSize
 		fee := dcr.nfo.FeeRate * uint64(size)
 		changeOutput.Value = int64(remaining - fee)
 		baseTx.AddTxOut(changeOutput)
