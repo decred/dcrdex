@@ -921,7 +921,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 	sigCycles := 1
 	if !isDust {
 		// Add the change output with a recalculated fees
-		size = size + dexbtc.P2WPKHOutputSize
+		size += dexbtc.P2WPKHOutputSize
 		fee := btc.nfo.FeeRate * uint64(size)
 		changeOutput.Value = int64(remaining - fee)
 		baseTx.AddTxOut(changeOutput)

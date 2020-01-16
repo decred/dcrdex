@@ -673,7 +673,7 @@ func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) (
 			continue
 		}
 		h := dcrutil.Hash160(push)
-		if bytes.Equal(h[:], contractHash) {
+		if bytes.Equal(h, contractHash) {
 			_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
 			if err != nil {
 				return nil, fmt.Errorf("error extracting atomic swap details: %v", err)

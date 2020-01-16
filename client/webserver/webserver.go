@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
@@ -231,7 +232,7 @@ func (s *WebServer) Run(ctx context.Context) {
 	}()
 	log.Infof("Web server listening on %s", s.listener.Addr())
 	err := s.srv.Serve(s.listener)
-	if err != http.ErrServerClosed {
+	if !errors.Is(err, http.ErrServerClosed) {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
 	log.Infof("Web server off")
