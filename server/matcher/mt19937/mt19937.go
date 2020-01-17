@@ -55,6 +55,8 @@ func (s *Source) Seed(seed int64) {
 	s.index = n
 }
 
+// SeedBytes seeds the mt19937 engine with up to 2496 bytes from a slice. Only
+// the first 2496 bytes of the slice are used. Additional elements are unused.
 func (s *Source) SeedBytes(b []byte) {
 	// Pad the slice to a multiple of 8 elements if not already.
 	numVals := len(b) / 8
@@ -75,6 +77,8 @@ func (s *Source) SeedBytes(b []byte) {
 	s.SeedVals(vals)
 }
 
+// SeedVals seeds the mt19937 engine with up to 312 uint64 values. Only the
+// first 312 values of the slice are used. Additional elements are unused.
 func (s *Source) SeedVals(v []uint64) {
 	s.Seed(sliceSeed)
 
@@ -88,7 +92,7 @@ func (s *Source) SeedVals(v []uint64) {
 	}
 
 	i := n // iterator
-	if len(v) > i {
+	if len(v) > n {
 		i = len(v) // TODO: test this case
 	}
 
