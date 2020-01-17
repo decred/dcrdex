@@ -99,11 +99,17 @@ var welcomeMessage = "Welcome to Decred DEX. Use [#838ac7]Up[white] and " +
 
 // createApp creates the Screen and adds the menu and the initial view.
 func createApp() {
-	clientCore = core.New(&core.Config{
-		DBPath: cfg.DBPath, // global set in config.go
-		Logger: NewLogger("CORE", nil),
-		Certs:  cfg.Certs,
+	var err error
+	clientCore, err = core.New(&core.Config{
+		DBPath:      cfg.DBPath, // global set in config.go
+		LoggerMaker: NewLoggerMaker(nil),
+		Certs:       cfg.Certs,
+		Net:         cfg.Net,
 	})
+	if err != nil {
+		log.Errorf("error creating client core: %v", err)
+		return
+	}
 	go clientCore.Run(appCtx)
 	createWidgets()
 	// Create the Screen, which is the top-level layout manager.
@@ -159,10 +165,10 @@ func createWidgets() {
 		setRPCLabelOn(false)
 	})
 	noteJournal = newJournal("Notifications", handleNotificationLog)
-	noteLog = NewLogger("NOTIFICATION", func(msg []byte) {
+	noteLog = NewLoggerMaker(func(msg []byte) {
 		setNotificationCount(int(atomic.AddUint32(&notificationCount, 1)))
 		noteJournal.Write(msg)
-	})
+	}).Logger("NOTIFICATION")
 	mainMenu = newMainMenu()
 }
 

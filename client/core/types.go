@@ -3,16 +3,32 @@
 
 package core
 
-import "strings"
+import (
+	"strings"
 
-// Registration is used to register a new DEX account.
+	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/dex"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+)
+
+// WalletForm is information necessary to create a new exchange wallet.
+type WalletForm struct {
+	AssetID uint32
+	Account string
+	INIPath string
+}
+
+// Wallet is a wallet.
+type Wallet struct {
+	asset.Wallet
+	waiter  *dex.StartStopWaiter
+	AssetID uint32
+}
+
+// Registration is information necessary to register an account on a DEX.
 type Registration struct {
-	DEX        string `json:"dex"`
-	Wallet     string `json:"wallet"`
-	WalletPass string `json:"walletpass"`
-	RPCAddr    string `json:"rpcaddr"`
-	RPCUser    string `json:"rpcuser"`
-	RPCPass    string `json:"rpcpass"`
+	DEX      string
+	Password string
 }
 
 // MarketInfo contains information about the markets for a DEX server.
@@ -53,4 +69,12 @@ type OrderBook struct {
 // BookUpdate is an order book update.
 type BookUpdate struct {
 	Market string
+}
+
+type account struct {
+	url       string
+	encKey    []byte
+	privKey   *secp256k1.PrivateKey
+	dexPubKey *secp256k1.PublicKey
+	feeCoin   []byte
 }

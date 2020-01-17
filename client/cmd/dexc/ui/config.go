@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/dcrutil/v2"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -68,6 +69,7 @@ type Config struct {
 	// Certs is not set by the client. It is parsed from the JSON file at the
 	// Certs path.
 	Certs map[string]string
+	Net   dex.Network
 }
 
 var defaultConfig = Config{
@@ -136,10 +138,13 @@ func Configure() (*Config, error) {
 	var defaultDBPath string
 	switch {
 	case cfg.Testnet:
+		cfg.Net = dex.Testnet
 		defaultDBPath = setNet("testnet")
 	case cfg.Simnet:
+		cfg.Net = dex.Simnet
 		defaultDBPath = setNet("simnet")
 	default:
+		cfg.Net = dex.Mainnet
 		defaultDBPath = setNet("mainnet")
 	}
 

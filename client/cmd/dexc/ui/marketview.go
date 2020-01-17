@@ -22,7 +22,7 @@ type marketViewer struct {
 
 func newMarketView() *marketViewer {
 	marketJournal := newJournal("Market Journal", nil)
-	marketLog = NewLogger("MRKT", marketJournal.Write)
+	marketLog = NewLoggerMaker(marketJournal.Write).Logger("MRKT")
 	marketList := newChooser("Markets", nil)
 	markets := clientCore.ListMarkets()
 	for _, mktInfo := range markets {

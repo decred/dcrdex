@@ -126,7 +126,8 @@ function handleRegister (main) {
       rpcaddr: idel(main, 'rpcAddr').value,
       rpcuser: idel(main, 'rpcUser').value,
       rpcpass: idel(main, 'rpcPw').value,
-      walletpass: idel(main, 'walletPw').value
+      walletpass: idel(main, 'walletPw').value,
+      savewallet: idel(main, 'saveWallet').checked
     }
     var res = await postJSON('/api/register', registration)
     console.log(res)
@@ -214,7 +215,7 @@ function handleMarkets (main) {
     market = data.market
     marketLoader.classList.add('d-none')
     marketRows.forEach(row => {
-      if (row.dataset.dex === data.dex && row.dataset.base === data.base && row.dataset.quote === data.quote) {
+      if (row.dataset.dex === data.dex && parseInt(row.dataset.base) === data.base && parseInt(row.dataset.quote) === data.quote) {
         row.classList.add('selected')
       } else {
         row.classList.remove('selected')
@@ -225,8 +226,8 @@ function handleMarkets (main) {
       base: data.base,
       quote: data.quote
     })
-    baseUnits.forEach(el => { el.textContent = data.base })
-    quoteUnits.forEach(el => { el.textContent = data.quote })
+    baseUnits.forEach(el => { el.textContent = data.baseSymbol.toUpperCase() })
+    quoteUnits.forEach(el => { el.textContent = data.quoteSymbol.toUpperCase() })
     baseImg.src = `/img/coins/${data.baseSymbol.toLowerCase()}.png`
     quoteImg.src = `/img/coins/${data.quoteSymbol.toLowerCase()}.png`
     baseBalance.textContent = formatCoinValue(data.baseBalance / 1e8)

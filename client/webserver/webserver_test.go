@@ -282,12 +282,8 @@ func TestAPIRegister(t *testing.T) {
 	}
 
 	goodBody := &core.Registration{
-		DEX:        "test",
-		Wallet:     "test",
-		WalletPass: "test",
-		RPCAddr:    "test",
-		RPCUser:    "test",
-		RPCPass:    "test",
+		DEX:      "test",
+		Password: "pass",
 	}
 	body = goodBody
 	ensure(`{"ok":true}`)

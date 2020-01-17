@@ -32,6 +32,7 @@ var (
 	accountsBucket = []byte("accounts")
 	ordersBucket   = []byte("orders")
 	matchesBucket  = []byte("matches")
+	walletsBucket  = []byte("wallets")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
 	quoteKey       = []byte("quote")
@@ -58,23 +59,24 @@ type boltDB struct {
 var _ dexdb.DB = (*boltDB)(nil)
 
 // NewDB is a constructor for a *boltDB.
-func NewDB(ctx context.Context, dbPath string) (dexdb.DB, error) {
+func NewDB(dbPath string) (dexdb.DB, error) {
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, err
 	}
 
 	// Release the file lock on exit.
-	go func() {
-		<-ctx.Done()
-		db.Close()
-	}()
-
 	bdb := &boltDB{
 		DB: db,
 	}
 
-	return bdb, bdb.makeTopLevelBuckets([][]byte{accountsBucket, ordersBucket, matchesBucket})
+	return bdb, bdb.makeTopLevelBuckets([][]byte{accountsBucket, ordersBucket, matchesBucket, walletsBucket})
+}
+
+// Run waits for context cancellation and closes the database.
+func (db *boltDB) Run(ctx context.Context) {
+	<-ctx.Done()
+	db.Close()
 }
 
 // ListAccounts returns a list of DEX URLs. The DB is designed to have a single
@@ -92,6 +94,32 @@ func (db *boltDB) ListAccounts() ([]string, error) {
 			if bEqual(acctBkt.Get(activeKey), byteTrue) {
 				urls = append(urls, string(acct))
 			}
+		}
+		return nil
+	})
+}
+
+// Accounts returns a list of DEX Accounts. The DB is designed to have a single
+// account per DEX, so the account itself is identified by the DEX URL.
+func (db *boltDB) Accounts() ([]*dexdb.AccountInfo, error) {
+	var accounts []*dexdb.AccountInfo
+	return accounts, db.acctsView(func(accts *bbolt.Bucket) error {
+		c := accts.Cursor()
+		// key, _ := c.First()
+		for acctKey, _ := c.First(); acctKey != nil; acctKey, _ = c.Next() {
+			acct := accts.Bucket(acctKey)
+			if acct == nil {
+				return fmt.Errorf("account bucket %s value not a nested bucket", string(acctKey))
+			}
+			acctB := acct.Get(accountKey)
+			if acct == nil {
+				return fmt.Errorf("empty account found for %s", string(acctKey))
+			}
+			acctInfo, err := dexdb.DecodeAccountInfo(bCopy(acctB))
+			if err != nil {
+				return err
+			}
+			accounts = append(accounts, acctInfo)
 		}
 		return nil
 	})
@@ -457,6 +485,38 @@ func (db *boltDB) matchesView(f bucketFunc) error {
 // matchesUpdate is a convenience function for updating the match bucket.
 func (db *boltDB) matchesUpdate(f bucketFunc) error {
 	return db.withBucket(matchesBucket, db.Update, f)
+}
+
+// UpdateWallet adds a wallet to the database.
+func (db *boltDB) UpdateWallet(wallet *dexdb.Wallet) error {
+	return db.walletsUpdate(func(wBkt *bbolt.Bucket) error {
+		return wBkt.Put(wallet.ID(), wallet.Encode())
+	})
+}
+
+// Wallets loads all wallets from the database.
+func (db *boltDB) Wallets() ([]*dexdb.Wallet, error) {
+	var wallets []*dexdb.Wallet
+	return wallets, db.walletsView(func(wBkt *bbolt.Bucket) error {
+		return wBkt.ForEach(func(_, v []byte) error {
+			w, err := dexdb.DecodeWallet(v)
+			if err != nil {
+				return err
+			}
+			wallets = append(wallets, w)
+			return nil
+		})
+	})
+}
+
+// wallets is a convenience function for reading from the wallets bucket.
+func (db *boltDB) walletsView(f bucketFunc) error {
+	return db.withBucket(walletsBucket, db.View, f)
+}
+
+// walletUpdate is a convenience function for updating the wallets bucket.
+func (db *boltDB) walletsUpdate(f bucketFunc) error {
+	return db.withBucket(walletsBucket, db.Update, f)
 }
 
 // makeTopLevelBuckets creates a top-level bucket for each of the provided keys,

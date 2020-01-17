@@ -16,14 +16,35 @@ type standardResponse struct {
 	Msg string `json:"msg,omitempty"`
 }
 
+// registration is used to register a new DEX account.
+type registration struct {
+	DEX        string `json:"dex"`
+	Password   string `json:"dexpass"`
+	Wallet     string `json:"wallet"`
+	WalletPass string `json:"walletpass"`
+	RPCAddr    string `json:"rpcaddr"`
+	RPCUser    string `json:"rpcuser"`
+	RPCPass    string `json:"rpcpass"`
+	SaveWallet bool   `json:"savewallet"`
+}
+
 // apiRegister is the handler for the '/register' page request.
 func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
-	reg := new(core.Registration)
+	reg := new(registration)
 	if !readPost(w, r, reg) {
 		return
 	}
+
+	// Check if it's a manual registration, and create the wallet first if it is.
+	if reg.RPCAddr != "" {
+
+	}
+
 	var resp interface{}
-	err := s.core.Register(reg)
+	err := s.core.Register(&core.Registration{
+		DEX:      reg.DEX,
+		Password: reg.Password,
+	})
 	if err != nil {
 		resp = &standardResponse{
 			OK:  false,

@@ -28,6 +28,14 @@ func RandomAccountInfo() *db.AccountInfo {
 	}
 }
 
+func RandomWallet() *db.Wallet {
+	return &db.Wallet{
+		AssetID: rand.Uint32(),
+		Account: ordertest.RandomAddress(),
+		INIPath: ordertest.RandomAddress(),
+	}
+}
+
 func randBytes(l int) []byte {
 	b := make([]byte, l)
 	rand.Read(b)
@@ -104,8 +112,8 @@ type testKiller interface {
 	Fatalf(string, ...interface{})
 }
 
-// Ensure the two MatchAuth are identical, calling the Fatalf method of the
-// testKiller if not.
+// MustCompareMatchAuth ensures the two MatchAuth are identical, calling the
+// Fatalf method of the testKiller if not.
 func MustCompareMatchAuth(t testKiller, a1, a2 *db.MatchAuth) {
 	if !bytes.Equal(a1.MatchSig, a2.MatchSig) {
 		t.Fatalf("MatchSig mismatch. %x != %x", a1.MatchSig, a2.MatchSig)
@@ -139,8 +147,8 @@ func MustCompareMatchAuth(t testKiller, a1, a2 *db.MatchAuth) {
 	}
 }
 
-// Ensure the two MatchProof are identical, calling the Fatalf method of the
-// testKiller if not.
+// MustCompareMatchProof ensures the two MatchProof are identical, calling the
+// Fatalf method of the testKiller if not.
 func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 	if !bytes.Equal(m1.CounterScript, m2.CounterScript) {
 		t.Fatalf("CounterScript mismatch. %x != %x", m1.CounterScript, m2.CounterScript)
@@ -166,8 +174,8 @@ func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 	MustCompareMatchAuth(t, &m1.Auth, &m2.Auth)
 }
 
-// Ensure the two AccountInfo are identical, calling the Fatalf method of the
-// testKiller if not.
+// MustCompareAccountInfo ensures the two AccountInfo are identical, calling the
+// Fatalf method of the testKiller if not.
 func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 	if a1.URL != a2.URL {
 		t.Fatalf("URL mismatch. %s != %s", a1.URL, a2.URL)
@@ -184,10 +192,24 @@ func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
 	}
 }
 
-// Ensure the two OrderProof are identical, calling the Fatalf method of the
-// testKiller if not.
+// MustCompareOrderProof ensures the two OrderProof are identical, calling the
+// Fatalf method of the testKiller if not.
 func MustCompareOrderProof(t testKiller, p1, p2 *db.OrderProof) {
 	if !bytes.Equal(p1.DEXSig, p2.DEXSig) {
 		t.Fatalf("DEXSig mismatch. %x != %x", p1.DEXSig, p2.DEXSig)
+	}
+}
+
+// MustCompareWallets esnures the two Wallet are identical, calling the Fatalf
+// method of the testKiller if not.
+func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
+	if w1.AssetID != w2.AssetID {
+		t.Fatalf("AssetID mismatch. %d != %d", w1.AssetID, w2.AssetID)
+	}
+	if w1.Account != w2.Account {
+		t.Fatalf("Account mismatch. %s != %s", w1.Account, w2.Account)
+	}
+	if w1.INIPath != w2.INIPath {
+		t.Fatalf("INIPath mismatch. %s != %s", w1.INIPath, w2.INIPath)
 	}
 }

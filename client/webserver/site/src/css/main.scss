@@ -79,8 +79,9 @@ button:focus {
 }
 
 form.auth {
-  width: 350px;
+  width: 400px;
   border: 1px solid #222;
+  border-radius: 3px;
 
   button {
     padding: 6px 0;
@@ -94,6 +95,11 @@ form.auth {
   input:focus,
   select:focus {
     background-color: $light_bg_2;
+  }
+
+  // bootstrap override
+  .form-check-input {
+    margin-top: 0.4em;
   }
 }
 

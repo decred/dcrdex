@@ -25,10 +25,11 @@ var (
 func newTestDB(t *testing.T) *boltDB {
 	tCounter++
 	dbPath := filepath.Join(tDir, fmt.Sprintf("db%d.db", tCounter))
-	dbi, err := NewDB(tCtx, dbPath)
+	dbi, err := NewDB(dbPath)
 	if err != nil {
 		t.Fatalf("error creating dB: %v", err)
 	}
+	go dbi.Run(tCtx)
 	db, ok := dbi.(*boltDB)
 	if !ok {
 		t.Fatalf("DB is not a *boltDB")
@@ -120,6 +121,51 @@ func TestAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create account after fixing")
 	}
+}
+
+func TestWallets(t *testing.T) {
+	boltdb := newTestDB(t)
+	wallets, err := boltdb.Wallets()
+	if err != nil {
+		t.Fatalf("error listing wallets from empty DB: %v", err)
+	}
+	if len(wallets) != 0 {
+		t.Fatalf("unexpected non-empty wallets in fresh DB")
+	}
+	// Create and insert 1,000 wallets.
+	numToDo := 1000
+	if testing.Short() {
+		numToDo /= 4
+	}
+	wallets = make([]*db.Wallet, 0, numToDo)
+	walletMap := make(map[string]*db.Wallet)
+	tStart := time.Now()
+	nTimes(numToDo, func(int) {
+		w := dbtest.RandomWallet()
+		wallets = append(wallets, w)
+		walletMap[w.SID()] = w
+		boltdb.UpdateWallet(w)
+	})
+	t.Logf("%d milliseconds to insert %d Wallet", time.Since(tStart)/time.Millisecond, numToDo)
+
+	tStart = time.Now()
+	reWallets, err := boltdb.Wallets()
+	if err != nil {
+		t.Fatalf("wallets retrieval error: %v", err)
+	}
+	if len(reWallets) != numToDo {
+		t.Fatalf("expected %d wallets, got %d", numToDo, len(reWallets))
+	}
+	for _, reW := range reWallets {
+		wid := reW.SID()
+		ogWallet, found := walletMap[wid]
+		if !found {
+			t.Fatalf("wallet %s not found after retrieval", wid)
+		}
+		dbtest.MustCompareWallets(t, reW, ogWallet)
+	}
+	t.Logf("%d milliseconds to read and compare %d Wallet", time.Since(tStart)/time.Millisecond, numToDo)
+
 }
 
 func randOrderForMarket(base, quote uint32) order.Order {

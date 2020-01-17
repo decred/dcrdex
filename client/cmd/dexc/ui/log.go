@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 )
@@ -49,17 +50,19 @@ func InitLogging(masterLog func([]byte)) {
 		os.Exit(1)
 	}
 	masterLogger = masterLog
-	log = NewLogger("APP", nil)
+	log = NewLoggerMaker(nil).Logger("APP")
 }
 
-// NewLogger creates a new logger that writes to the central rotating log file
-// and also the provided function.
-func NewLogger(tag string, f func(p []byte)) slog.Logger {
+// NewLoggerMaker creates a new logger backend that writes to the central
+// rotating log file and also the provided function.
+func NewLoggerMaker(f func(p []byte)) *dex.LoggerMaker {
 	if f == nil {
 		f = func([]byte) {}
 	}
 	backendLog := slog.NewBackend(logWriter{f: f})
-	return backendLog.Logger(tag)
+	return &dex.LoggerMaker{
+		Backend: backendLog,
+	}
 }
 
 // Close closes the log rotator.
