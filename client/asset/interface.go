@@ -31,6 +31,8 @@ type WalletConfig struct {
 // software.
 type Wallet interface {
 	dex.Runner
+	// Connect connects the wallet to the RPC server.
+	Connect() error
 	// Balance should return the total available funds in the wallet.
 	// Note that after calling Fund, the amount returned by Balance may change
 	// by more than the value funded.

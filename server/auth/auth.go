@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
@@ -116,6 +118,8 @@ type AuthManager struct {
 	regFee   uint64
 	checkFee FeeChecker
 	feeConfs int64
+	// coinWaiter is a coin waiter to deal with latency.
+	coinWaiter *coinwaiter.Waiter
 }
 
 // Config is the configuration settings for the AuthManager, and the only
@@ -137,20 +141,27 @@ type Config struct {
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
-	auth := &AuthManager{
-		users:    make(map[account.AccountID]*clientInfo),
-		conns:    make(map[uint64]*clientInfo),
-		storage:  cfg.Storage,
-		signer:   cfg.Signer,
-		regFee:   cfg.RegistrationFee,
-		checkFee: cfg.FeeChecker,
-		feeConfs: cfg.FeeConfs,
+	var auth *AuthManager
+	auth = &AuthManager{
+		users:      make(map[account.AccountID]*clientInfo),
+		conns:      make(map[uint64]*clientInfo),
+		storage:    cfg.Storage,
+		signer:     cfg.Signer,
+		regFee:     cfg.RegistrationFee,
+		checkFee:   cfg.FeeChecker,
+		feeConfs:   cfg.FeeConfs,
+		coinWaiter: coinwaiter.New(recheckInterval, auth.Send),
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
 	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee)
 	return auth
+}
+
+func (auth *AuthManager) Run(ctx context.Context) {
+	go auth.coinWaiter.Run(ctx)
+	<-ctx.Done()
 }
 
 // Route wraps the comms.Route function, storing the response handler with the

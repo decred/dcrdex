@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"sync"
 
+	_ "decred.org/dcrdex/client/asset/btc" // register btc asset
+	_ "decred.org/dcrdex/client/asset/dcr" // register dcr asset
 	"decred.org/dcrdex/client/cmd/dexc/ui"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
@@ -58,9 +60,8 @@ func main() {
 			fmt.Fprint(os.Stderr, "error creating client core: ", err)
 			return
 		}
-		go clientCore.Run(appCtx)
-
 		ui.InitLogging(logStdout)
+		go clientCore.Run(appCtx)
 		// At least one of --rpc or --web must be specified.
 		if !cfg.RPCOn && !cfg.WebOn {
 			fmt.Fprintf(os.Stderr, "Cannot run without TUI unless --rpc and/or --web is specified")
@@ -71,14 +72,14 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				rpcserver.Run(appCtx, clientCore, cfg.RPCAddr, ui.NewLoggerMaker(logStdout).Logger("RPC"))
+				rpcserver.Run(appCtx, clientCore, cfg.RPCAddr, ui.NewLoggerMaker(nil).Logger("RPC"))
 			}()
 		}
 		if cfg.WebOn {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				webSrv, err := webserver.New(clientCore, cfg.WebAddr, ui.NewLoggerMaker(logStdout).Logger("WEB"), cfg.ReloadHTML)
+				webSrv, err := webserver.New(clientCore, cfg.WebAddr, ui.NewLoggerMaker(nil).Logger("WEB"), cfg.ReloadHTML)
 				if err != nil {
 					log.Errorf("Error starting web server: %v", err)
 					return

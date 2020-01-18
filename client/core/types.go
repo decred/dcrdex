@@ -5,6 +5,8 @@ package core
 
 import (
 	"strings"
+	"sync"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
@@ -18,11 +20,43 @@ type WalletForm struct {
 	INIPath string
 }
 
-// Wallet is a wallet.
-type Wallet struct {
-	asset.Wallet
-	waiter  *dex.StartStopWaiter
+type WalletStatus struct {
+	Symbol  string
 	AssetID uint32
+	Open    bool
+	Running bool
+}
+
+// xcWallet is a wallet.
+type xcWallet struct {
+	asset.Wallet
+	waiter   *dex.StartStopWaiter
+	AssetID  uint32
+	mtx      sync.Mutex
+	lockTime time.Time
+}
+
+func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
+	err := w.Wallet.Unlock(pw, dur)
+	if err != nil {
+		return err
+	}
+	w.mtx.Lock()
+	w.lockTime = time.Now().Add(dur)
+	w.mtx.Unlock()
+	return nil
+}
+
+// status returns whether the wallet is open as well as whether it is unlocked.
+func (w *xcWallet) status() (on, open bool) {
+	return w.waiter.On(), w.unlocked()
+}
+
+// locked returns true if the wallet is locked
+func (w *xcWallet) unlocked() bool {
+	w.mtx.Lock()
+	defer w.mtx.Unlock()
+	return w.lockTime.After(time.Now())
 }
 
 // Registration is information necessary to register an account on a DEX.
@@ -71,7 +105,7 @@ type BookUpdate struct {
 	Market string
 }
 
-type account struct {
+type dexAccount struct {
 	url       string
 	encKey    []byte
 	privKey   *secp256k1.PrivateKey

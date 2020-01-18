@@ -31,15 +31,19 @@ type TCore struct {
 	loginErr   error
 }
 
-func (c *TCore) ListMarkets() []*core.MarketInfo     { return nil }
-func (c *TCore) Register(r *core.Registration) error { return c.regErr }
-func (c *TCore) Login(dex, pw string) error          { return c.loginErr }
+func (c *TCore) ListMarkets() []*core.MarketInfo                     { return nil }
+func (c *TCore) Register(r *core.Registration) (error, <-chan error) { return c.regErr, nil }
+func (c *TCore) Login(dex, pw string) error                          { return c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return nil, c.syncErr
 }
-func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook { return nil }
-func (c *TCore) Unsync(dex string, base, quote uint32)               {}
-func (c *TCore) Balance(uint32) (uint64, error)                      { return 0, c.balanceErr }
+func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook   { return nil }
+func (c *TCore) Unsync(dex string, base, quote uint32)                 {}
+func (c *TCore) Balance(uint32) (uint64, error)                        { return 0, c.balanceErr }
+func (c *TCore) WalletStatus(assetID uint32) (has, running, open bool) { return true, true, true }
+func (c *TCore) CreateWallet(form *core.WalletForm) error              { return nil }
+func (c *TCore) OpenWallet(assetID uint32, pw string) error            { return nil }
+func (c *TCore) Wallets() []*core.WalletStatus                         { return nil }
 
 type TWriter struct {
 	b []byte

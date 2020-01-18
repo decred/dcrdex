@@ -108,7 +108,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	wallet := unconnectedWallet(walletCfg, tLogger)
-	go wallet.monitorConnection(walletCtx)
+	go wallet.monitorBlocks(walletCtx)
 	wallet.node = client
 
 	return wallet, client, shutdown
@@ -152,6 +152,7 @@ func newTRPCClient() *tRPCClient {
 		verboseBlocks: make(map[string]*chainjson.GetBlockVerboseResult),
 		mainchain:     make(map[int64]*chainhash.Hash),
 		bestHash:      chainhash.Hash{},
+		bestBlockHash: &chainhash.Hash{},
 	}
 }
 

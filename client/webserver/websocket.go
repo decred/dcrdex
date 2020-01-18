@@ -34,7 +34,7 @@ var (
 
 type wsClient struct {
 	*ws.WSLink
-	mtx  sync.Mutex
+	mtx  sync.RWMutex
 	cid  int32
 	quit func()
 }
@@ -94,6 +94,19 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 	cl.Start()
 	cl.WaitForShutdown()
 	log.Tracef("Disconnected websocket client %s", ip)
+}
+
+func (s *WebServer) notify(route string, payload interface{}) {
+	msg, err := msgjson.NewNotification(route, payload)
+	if err != nil {
+		log.Errorf("notification encoding error: %v", err)
+		return
+	}
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	for _, cl := range s.clients {
+		cl.Send(msg)
+	}
 }
 
 // handleMessage handles the websocket message, calling the right handler for

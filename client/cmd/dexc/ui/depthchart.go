@@ -111,7 +111,6 @@ func (c *depthChart) calcRows() []string {
 			case pt.y < y:
 				row = append(row, uniSpace)
 			case pt.y == y:
-				// fmt.Printf("-- drawing at %d\n", y)
 				row = append(row, pt.ch)
 			default:
 				row = append(row, fullBlock)

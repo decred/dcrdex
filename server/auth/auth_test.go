@@ -5,6 +5,7 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -256,21 +257,29 @@ var tDexPubKeyBytes = []byte{
 }
 
 func TestMain(m *testing.M) {
-	storage := &TStorage{acctAddr: tFeeAddr, regAddr: tCheckFeeAddr}
-	dexKey, _ := secp256k1.ParsePubKey(tDexPubKeyBytes)
-	signer := &TSigner{pubkey: dexKey}
-	rig = &testRig{
-		storage: storage,
-		signer:  signer,
-		mgr: NewAuthManager(&Config{
+	doIt := func() int {
+		ctx, shutdown := context.WithCancel(context.Background())
+		defer shutdown()
+		storage := &TStorage{acctAddr: tFeeAddr, regAddr: tCheckFeeAddr}
+		dexKey, _ := secp256k1.ParsePubKey(tDexPubKeyBytes)
+		signer := &TSigner{pubkey: dexKey}
+		authMgr := NewAuthManager(&Config{
 			Storage:         storage,
 			Signer:          signer,
 			RegistrationFee: tRegFee,
 			FeeConfs:        tCheckFeeConfs,
 			FeeChecker:      tCheckFee,
-		}),
+		})
+		go authMgr.Run(ctx)
+		rig = &testRig{
+			storage: storage,
+			signer:  signer,
+			mgr:     authMgr,
+		}
+		return m.Run()
 	}
-	os.Exit(m.Run())
+
+	os.Exit(doIt())
 }
 
 func TestConnect(t *testing.T) {
@@ -917,6 +926,26 @@ func TestHandleNotifyFee(t *testing.T) {
 		return rig.mgr.handleNotifyFee(user.conn, msg)
 	}
 
+	// When the process makes it to the chainwaiter, it needs to be handled by
+	// getting the Send message. While the chainwaiter can run asynchronously,
+	// the first attempt is actually synchronous, so not need for synchronization
+	// as long as there is no PayFee error.
+	doWaiter := func(msg *msgjson.Message) *msgjson.Error {
+		msgErr := rig.mgr.handleNotifyFee(user.conn, msg)
+		if msgErr != nil {
+			t.Fatal("never made it to the waiter", msgErr.Code, msgErr.Message)
+		}
+		sent := user.conn.getSend()
+		if sent == nil {
+			return nil
+		}
+		resp, err := sent.Response()
+		if err != nil {
+			t.Fatalf("non-response found")
+		}
+		return resp.Error
+	}
+
 	ensureErr := makeEnsureErr(t)
 
 	msg := newMsg(newNotify())
@@ -948,34 +977,34 @@ func TestHandleNotifyFee(t *testing.T) {
 	ensureErr(do(goodMsg), "AccountRegAddr", msgjson.RPCInternalError)
 	rig.storage.regErr = nil
 
-	tCheckFeeErr = dummyError
-	ensureErr(do(goodMsg), "checkFee", msgjson.FeeError)
-	tCheckFeeErr = nil
+	// tCheckFeeErr = dummyError
+	// ensureErr(do(goodMsg), "checkFee", msgjson.FeeError)
+	// tCheckFeeErr = nil
 
 	tCheckFeeVal -= 1
-	ensureErr(do(goodMsg), "low fee", msgjson.FeeError)
+	ensureErr(doWaiter(goodMsg), "low fee", msgjson.FeeError)
 	tCheckFeeVal += 1
 
-	tCheckFeeConfs -= 1
-	ensureErr(do(goodMsg), "unconfirmed", msgjson.FeeError)
-	tCheckFeeConfs += 1
+	// tCheckFeeConfs -= 1
+	// ensureErr(doWaiter(goodMsg), "unconfirmed", msgjson.FeeError)
+	// tCheckFeeConfs += 1
 
 	ogAddr := tCheckFeeAddr
 	tCheckFeeAddr = "dummy address"
-	ensureErr(do(goodMsg), "wrong address", msgjson.FeeError)
+	ensureErr(doWaiter(goodMsg), "wrong address", msgjson.FeeError)
 	tCheckFeeAddr = ogAddr
 
 	rig.storage.payErr = dummyError
-	ensureErr(do(goodMsg), "PayAccount", msgjson.RPCInternalError)
+	ensureErr(doWaiter(goodMsg), "PayAccount", msgjson.RPCInternalError)
 	rig.storage.payErr = nil
 
 	// Sign error
 	rig.signer.err = dummyError
-	ensureErr(do(goodMsg), "DEX signature", msgjson.RPCInternalError)
+	ensureErr(doWaiter(goodMsg), "DEX signature", msgjson.RPCInternalError)
 	rig.signer.err = nil
 
 	// Send a valid notifyfee, and check the response.
-	rpcErr := do(goodMsg)
+	rpcErr := doWaiter(goodMsg)
 	if rpcErr != nil {
 		t.Fatalf("error sending valid notifyfee: %s", rpcErr.Message)
 	}

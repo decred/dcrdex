@@ -78,6 +78,10 @@ func tBackend(t *testing.T, conf, name string, blkFunc func(string, error)) *Exc
 		t.Fatalf("error creating backend: %v", err)
 	}
 	go backend.Run(tCtx)
+	err = backend.Connect()
+	if err != nil {
+		t.Fatalf("error connecting backend: %v", err)
+	}
 	return backend.(*ExchangeWallet)
 }
 

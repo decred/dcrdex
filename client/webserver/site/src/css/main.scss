@@ -97,6 +97,11 @@ form.auth {
     background-color: $light_bg_2;
   }
 
+  form.auth label {
+    font-size: 15px;
+    font-family: $demi-sans;
+  }
+
   // bootstrap override
   .form-check-input {
     margin-top: 0.4em;
@@ -108,7 +113,7 @@ body.dark button {
 }
 
 div.mainlinks > span {
-  font-family: 'demi-sans', sans-serif;
+  font-family: $demi-sans;
   font-weight: bolder;
   padding-right: 1.7em;
   color: #4a4949;

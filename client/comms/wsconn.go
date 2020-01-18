@@ -119,9 +119,8 @@ func NewWsConn(cfg *WsCfg) (*WsConn, error) {
 
 	conn.wg.Add(1)
 	go conn.keepAlive()
-	conn.reconnectCh <- struct{}{}
 
-	return conn, nil
+	return conn, conn.connect()
 }
 
 // isConnected returns the connection connected state.
@@ -168,6 +167,7 @@ func (conn *WsConn) connect() error {
 
 	ws, _, err := dialer.Dial(conn.cfg.URL, nil)
 	if err != nil {
+		conn.queueReconnect()
 		return err
 	}
 
@@ -195,6 +195,10 @@ func (conn *WsConn) connect() error {
 	conn.wsMtx.Lock()
 	conn.ws = ws
 	conn.wsMtx.Unlock()
+
+	conn.wg.Add(1)
+	go conn.read()
+	conn.setConnected(true)
 
 	return nil
 }
@@ -248,6 +252,7 @@ func (conn *WsConn) read() {
 			if handler == nil {
 				b, _ := json.Marshal(msg)
 				log.Errorf("no handler found for response", string(b))
+				continue
 			}
 			handler.f(msg)
 			continue
@@ -273,25 +278,14 @@ func (conn *WsConn) keepAlive() {
 			err := conn.connect()
 			if err != nil {
 				log.Errorf("connection error: %v", err)
-
-				go func() {
-					// Attempt to reconnect.
-					time.Sleep(conn.cfg.PingWait)
-					conn.reconnectCh <- struct{}{}
-				}()
-
+				conn.queueReconnect()
 				continue
 			}
-
-			conn.wg.Add(1)
-			go conn.read()
 
 			// Synchronize after a reconnection.
 			if conn.cfg.ReconnectSync != nil {
 				conn.cfg.ReconnectSync()
 			}
-
-			conn.setConnected(true)
 
 		case <-conn.cfg.Ctx.Done():
 			// Terminate the keepAlive process and read process when
@@ -302,6 +296,11 @@ func (conn *WsConn) keepAlive() {
 			return
 		}
 	}
+}
+
+func (conn *WsConn) queueReconnect() {
+	conn.setConnected(false)
+	time.AfterFunc(conn.cfg.PingWait, func() { conn.reconnectCh <- struct{}{} })
 }
 
 // WaitForShutdown blocks until the websocket's processes are stopped.
@@ -317,6 +316,7 @@ func (conn *WsConn) Send(msg *msgjson.Message) error {
 
 	conn.wsMtx.Lock()
 	conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
+
 	err := conn.ws.WriteJSON(msg)
 	conn.wsMtx.Unlock()
 	if err != nil {

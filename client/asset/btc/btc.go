@@ -265,10 +265,16 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
+// Connect connects the wallet to the RPC server.
+func (btc *ExchangeWallet) Connect() error {
+	go btc.run(btc.ctx)
+	return nil
+}
+
 // Run starts the wallet by connecting the rpcclient.Client and starting a
 // block monitoring loop.
 func (btc *ExchangeWallet) Run(ctx context.Context) {
-	go btc.run(ctx)
+	btc.ctx = ctx
 	<-ctx.Done()
 }
 

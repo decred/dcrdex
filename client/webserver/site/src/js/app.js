@@ -7,6 +7,8 @@ const idel = Doc.idel // = element by id
 const bind = Doc.bind // = addEventHandler
 var app
 
+const updateWalletRoute = 'update_wallet'
+
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
   start () {
@@ -21,6 +23,19 @@ export default class Application {
     this.attachCommon(idel(document, 'header'))
     this.attach()
     ws.connect(getSocketURI())
+    ws.registerRoute(updateWalletRoute, msg => {
+      console.log('updating wallet', msg)
+    })
+    this.fetchWallets()
+  }
+
+  async fetchWallets () {
+    const wallets = await getJSON('/api/walletstatus')
+    if (!wallets.isOK) {
+      console.error('error fetching wallets status', wallets.errMsg)
+      return
+    }
+    this.wallets = wallets
   }
 
   // Load the page from the server. Insert and bind to the HTML.
@@ -73,14 +88,31 @@ function getSocketURI () {
   return `${protocol}://${window.location.host}/ws`
 }
 
-// postJSON encodes the object and sends the JSON to the specified address.
+// requestJSON encodes the object and sends the JSON to the specified address.
+async function requestJSON (method, addr, reqBody) {
+  try {
+    const response = await window.fetch(addr, {
+      method: method,
+      headers: new window.Headers({ 'content-type': 'application/json' }),
+      body: reqBody
+    })
+    if (response.status !== 200) { throw response }
+    const obj = await response.json()
+    obj.isOK = true
+    return obj
+  } catch (response) {
+    response.isOK = false
+    response.errMsg = await response.text()
+    return response
+  }
+}
+
 async function postJSON (addr, data) {
-  const response = await window.fetch(addr, {
-    method: 'POST',
-    headers: new window.Headers({ 'content-type': 'application/json' }),
-    body: JSON.stringify(data)
-  })
-  return response.json()
+  return requestJSON('POST', addr, JSON.stringify(data))
+}
+
+async function getJSON (addr) {
+  return requestJSON('GET', addr)
 }
 
 // unattachers are handlers to be run when a page is unloaded.
@@ -110,27 +142,27 @@ function handleLogin (main) {
       pass: idel(main, 'pw').value
     }
     var res = await postJSON('/api/login', login)
-    if (res.ok) app.loadPage('markets')
+    if (res.isOK) app.loadPage('markets')
   })
 }
 
 // handleRegister is the 'register' page main element handler.
 function handleRegister (main) {
-  const submitBttn = idel(main, 'submit')
-  const dexAddr = idel(main, 'dex')
-  const wallet = idel(main, 'feeWallet')
-  bind(submitBttn, 'click', async () => {
+  bind(idel(main, 'submit'), 'click', async () => {
     const registration = {
-      dex: dexAddr.value,
-      wallet: wallet.value,
-      rpcaddr: idel(main, 'rpcAddr').value,
-      rpcuser: idel(main, 'rpcUser').value,
-      rpcpass: idel(main, 'rpcPw').value,
-      walletpass: idel(main, 'walletPw').value,
-      savewallet: idel(main, 'saveWallet').checked
+      dex: idel(main, 'dex').value,
+      password: idel(main, 'dexPass').value,
+      walletpass: idel(main, 'walletPass').value,
+      account: idel(main, 'acct').value,
+      inipath: idel(main, 'iniPath').value
     }
     var res = await postJSON('/api/register', registration)
     console.log(res)
+    if (!res.isOK) {
+      console.log('registration error:', res.errMsg)
+      // return
+    }
+    // app.loadPage('markets')
   })
 }
 
@@ -209,7 +241,7 @@ function handleMarkets (main) {
     reporters: reporters
   }
 
-  ws.registerEvtHandler('book', data => {
+  ws.registerRoute('book', data => {
     // if (e.market !== market && e.market !== '') return
     handleBook(main, chart, data, tableBuilder)
     market = data.market
@@ -233,7 +265,7 @@ function handleMarkets (main) {
     baseBalance.textContent = formatCoinValue(data.baseBalance / 1e8)
     quoteBalance.textContent = formatCoinValue(data.quoteBalance / 1e8)
   })
-  ws.registerEvtHandler('bookupdate', e => {
+  ws.registerRoute('bookupdate', e => {
     if (market && (e.market.dex !== market.dex || e.market.base !== market.base || e.market.quote !== market.quote)) return
     handleBookUpdate(main, e)
   })
@@ -245,7 +277,7 @@ function handleMarkets (main) {
 
   unattach(() => {
     ws.request('unmarket', {})
-    ws.deregisterEvtHandlers('book')
+    ws.deregisterRoute('book')
     chart.unattach()
   })
 }

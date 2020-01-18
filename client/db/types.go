@@ -232,8 +232,6 @@ type Wallet struct {
 	AssetID uint32
 	Account string
 	INIPath string
-	id      []byte
-	sid     string
 }
 
 // Encode encodes the Wallet to a versioned blob.

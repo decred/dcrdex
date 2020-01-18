@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 )
 
 // sendTemplate processes the template and sends the result.
@@ -60,21 +61,34 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, r, "login", commonArgs(r, "Login | Decred DEX"))
 }
 
+type registerTmplData struct {
+	CommonArguments
+	WalletExists bool
+	WalletOpen   bool
+}
+
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "register", commonArgs(r, "Register | Decred DEX"))
+	dcrID, _ := dex.BipSymbolID("dcr")
+	exists, _, open := s.core.WalletStatus(dcrID)
+	data := &registerTmplData{
+		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
+		WalletOpen:      open,
+		WalletExists:    exists,
+	}
+	s.sendTemplate(w, r, "register", data)
 }
 
 // marketResult is the template data for the `/markets` page request.
-type marketResult struct {
+type marketTmplData struct {
 	CommonArguments
 	DEXes []*core.MarketInfo
 }
 
 // marketResult returns a *marketResult, which is needed to process the
 // 'markets' template.
-func (s *WebServer) marketResult(r *http.Request) *marketResult {
-	return &marketResult{
+func (s *WebServer) marketResult(r *http.Request) *marketTmplData {
+	return &marketTmplData{
 		CommonArguments: *commonArgs(r, "Markets | Decred DEX"),
 		DEXes:           s.core.ListMarkets(),
 	}

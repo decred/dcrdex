@@ -23,6 +23,7 @@ const (
 	defaultRPCAddr = "localhost:5757"
 	defaultWebAddr = "localhost:5758"
 	configFilename = "dexc_mainnet.conf"
+	certsFilename  = "certs.json"
 )
 
 var (
@@ -74,7 +75,6 @@ type Config struct {
 
 var defaultConfig = Config{
 	DataDir: applicationDirectory,
-	Config:  defaultConfigPath,
 	RPCAddr: defaultRPCAddr,
 	WebAddr: defaultWebAddr,
 }
@@ -148,12 +148,19 @@ func Configure() (*Config, error) {
 		defaultDBPath = setNet("mainnet")
 	}
 
-	if cfg.CertsPath != "" {
-		b, err := ioutil.ReadFile(cfg.CertsPath)
-		if err != nil {
+	defaultCertsPath := filepath.Join(preCfg.DataDir, certsFilename)
+	if cfg.CertsPath == "" {
+		cfg.CertsPath = defaultCertsPath
+	}
+	b, err := ioutil.ReadFile(cfg.CertsPath)
+	if err != nil {
+		// If the certificate path is the default path, assume the error is for a
+		// missing file and ignore it.
+		if cfg.CertsPath != defaultCertsPath {
 			return nil, fmt.Errorf("error reading certificates file: %v", err)
 		}
-		err = json.Unmarshal(b, cfg.Certs)
+	} else {
+		err = json.Unmarshal(b, &cfg.Certs)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing certificates file: %v", err)
 		}

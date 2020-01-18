@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 )
 
 // standardResponse is a basic API response when no data needs to be returned.
@@ -18,14 +19,14 @@ type standardResponse struct {
 
 // registration is used to register a new DEX account.
 type registration struct {
-	DEX        string `json:"dex"`
-	Password   string `json:"dexpass"`
-	Wallet     string `json:"wallet"`
+	DEX      string `json:"dex"`
+	Password string `json:"dexpass"`
+	// WalletPass will be ignored if the wallet is already open.
 	WalletPass string `json:"walletpass"`
-	RPCAddr    string `json:"rpcaddr"`
-	RPCUser    string `json:"rpcuser"`
-	RPCPass    string `json:"rpcpass"`
-	SaveWallet bool   `json:"savewallet"`
+	// These are only used if the Decred wallet does not already exist. In that
+	// case, these parameters will be used to create the wallet.
+	Account string `json:"account"`
+	INIPath string `json:"inipath"`
 }
 
 // apiRegister is the handler for the '/register' page request.
@@ -35,16 +36,46 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if it's a manual registration, and create the wallet first if it is.
-	if reg.RPCAddr != "" {
+	dcrID, _ := dex.BipSymbolID("dcr")
+	has, on, open := s.core.WalletStatus(dcrID)
+	if !has {
+		// Wallet does not exist yet. Try to create it.
+		err := s.core.CreateWallet(&core.WalletForm{
+			AssetID: dcrID,
+			Account: reg.Account,
+			INIPath: reg.INIPath,
+		})
+		if err != nil {
+			errMsg := fmt.Sprintf("error creating wallet: %v", err)
+			http.Error(w, errMsg, http.StatusBadRequest)
+			return
+		}
+	}
+	walletUpdate := &walletStatus{
+		Symbol:  "dcr",
+		AssetID: dcrID,
+		Open:    open,
+		Running: on,
+	}
+	s.notify(updateWalletRoute, walletUpdate)
 
+	if !open {
+		err := s.core.OpenWallet(dcrID, reg.WalletPass)
+		if err != nil {
+			errMsg := fmt.Sprintf("error opening wallet: %v", err)
+			http.Error(w, errMsg, http.StatusBadRequest)
+			return
+		}
+		walletUpdate.Open = true
+		s.notify(updateWalletRoute, walletUpdate)
 	}
 
 	var resp interface{}
-	err := s.core.Register(&core.Registration{
+	err, payFeeErr := s.core.Register(&core.Registration{
 		DEX:      reg.DEX,
 		Password: reg.Password,
 	})
+
 	if err != nil {
 		resp = &standardResponse{
 			OK:  false,
@@ -54,6 +85,17 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		resp = &standardResponse{
 			OK: true,
 		}
+		// There was no error paying the fee, but we must wait on confirmations
+		// before informing the DEX of the fee payment. Those results will come
+		// through on the error channel returned by Register
+		go func() {
+			feeErr := <-payFeeErr
+			if feeErr != nil {
+				s.notify(errorMsgRoute, fmt.Sprintf("Error encountered while notifying DEX of registration fee: %v", err))
+			} else {
+				s.notify(successMsgRoute, fmt.Sprintf("Registration complete. You may now trade at %s.", reg.DEX))
+			}
+		}()
 	}
 	writeJSON(w, resp, s.indent)
 }
@@ -64,7 +106,7 @@ type loginForm struct {
 	Pass string `json:"pass"`
 }
 
-// apiLogin handles the 'login' page request.
+// apiLogin handles the 'login' API request.
 func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
 	if !readPost(w, r, login) {
@@ -90,6 +132,21 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 		resp = &standardResponse{
 			OK: true,
 		}
+	}
+	writeJSON(w, resp, s.indent)
+}
+
+// apiWalletStatus handles the 'walletstatus' API request.
+func (s *WebServer) apiWalletStatus(w http.ResponseWriter, r *http.Request) {
+	stats := s.core.Wallets()
+	resp := make([]*walletStatus, 0, len(stats))
+	for _, status := range stats {
+		resp = append(resp, &walletStatus{
+			Symbol:  status.Symbol,
+			AssetID: status.AssetID,
+			Open:    status.Open,
+			Running: status.Running,
+		})
 	}
 	writeJSON(w, resp, s.indent)
 }

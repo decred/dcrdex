@@ -35,6 +35,9 @@ import (
 
 const BipID = 42
 
+// How often to check the tip hash.
+var blockTicker = time.Second
+
 // rpcClient is an rpcclient.Client, or a stub for testing.
 type rpcClient interface {
 	SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
@@ -181,6 +184,7 @@ func init() {
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
 	client *rpcclient.Client
+	ctx    context.Context
 	node   rpcClient
 	log    dex.Logger
 	acct   string
@@ -210,13 +214,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 	dcr := unconnectedWallet(cfg, logger)
 
-	notifications := &rpcclient.NotificationHandlers{
-		OnBlockConnected:  dcr.onBlockConnected,
-		OnClientConnected: dcr.onClientConnected,
-	}
-
 	dcr.client, err = newClient(walletCfg.RPCListen, walletCfg.RPCUser,
-		walletCfg.RPCPass, walletCfg.RPCCert, notifications)
+		walletCfg.RPCPass, walletCfg.RPCCert)
 	if err != nil {
 		return nil, fmt.Errorf("DCR ExchangeWallet.Run error: %v", err)
 	}
@@ -239,8 +238,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, logger dex.Logger) *ExchangeWall
 
 // newClient attempts to create a new websocket connection to a dcrwallet
 // instance with the given credentials and notification handlers.
-func newClient(host, user, pass, cert string,
-	notifications *rpcclient.NotificationHandlers) (*rpcclient.Client, error) {
+func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 
 	dcrdCerts, err := ioutil.ReadFile(cert)
 	if err != nil {
@@ -256,7 +254,7 @@ func newClient(host, user, pass, cert string,
 		DisableConnectOnNew: true,
 	}
 
-	dcrdClient, err := rpcclient.New(config, notifications)
+	dcrdClient, err := rpcclient.New(config, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start dcrd RPC client: %v", err)
 	}
@@ -264,33 +262,29 @@ func newClient(host, user, pass, cert string,
 	return dcrdClient, nil
 }
 
-// Run starts the wallet by connecting the rpcclient.Client and starting a
-// block monitoring loop.
-func (dcr *ExchangeWallet) Run(ctx context.Context) {
-	log := dcr.log
-	err := dcr.client.Connect(ctx, true)
+// Connect connects the wallet to the RPC server.
+func (dcr *ExchangeWallet) Connect() error {
+	err := dcr.client.Connect(dcr.ctx, true)
 	if err != nil {
-		log.Errorf("error connect")
+		return fmt.Errorf("Decred Wallet connect error: %v", err)
 	}
-	go dcr.monitorConnection(ctx)
-
 	// Check the min api versions.
 	versions, err := dcr.client.Version()
 	if err != nil {
-		log.Errorf("DCR ExchangeWallet version fetch error: %v", err)
-		return
+		return fmt.Errorf("DCR ExchangeWallet version fetch error: %v", err)
 	}
 	err = checkVersionInfo(versions)
 	if err != nil {
-		log.Errorf("DCR ExchangeWallet version check failed: %v", err)
-		return
+		return fmt.Errorf("DCR ExchangeWallet version check failed: %v", err)
 	}
-	// Subscribe to block updates.
-	err = dcr.client.NotifyBlocks()
-	if err != nil {
-		log.Errorf("error registering for DCR block notifications")
-		return
-	}
+	go dcr.monitorBlocks(dcr.ctx)
+	return nil
+}
+
+// Run starts the wallet by connecting the rpcclient.Client and starting a
+// block monitoring loop.
+func (dcr *ExchangeWallet) Run(ctx context.Context) {
+	dcr.ctx = ctx
 	<-ctx.Done()
 	dcr.shutdown()
 }
@@ -903,22 +897,45 @@ func (dcr *ExchangeWallet) Lock() error {
 	return dcr.node.WalletLock()
 }
 
+// PayFee pays the registration fee to the DEX.
+func (dcr *ExchangeWallet) PayFee(fee uint64, address string) (asset.Coin, error) {
+	addr, err := dcrutil.DecodeAddress(address, chainParams)
+	if err != nil {
+		return nil, err
+	}
+	txHash, err := dcr.node.SendToAddress(addr, dcrutil.Amount(fee))
+	if err != nil {
+		return nil, err
+	}
+	tx, err := dcr.node.GetTransaction(txHash)
+	if err != nil {
+		dcr.log.Errorf("error getting transaction for successful fee: %v", err)
+		return nil, fmt.Errorf("fee appears to have been paid, but transaction"+
+			"could not be retreived: %v", err)
+	}
+	var vout uint32
+	var found bool
+	for i := range tx.Details {
+		details := &tx.Details[i]
+		if toAtoms(details.Amount) == fee && details.Address == address {
+			found = true
+			vout = details.Vout
+		}
+	}
+	if !found {
+		dcr.log.Errorf("error getting transaction vout for successful fee: %v", err)
+		return nil, fmt.Errorf("fee appears to have been paid, but transaction"+
+			"index could not be found: %v", err)
+	}
+	return newOutput(dcr.node, txHash, vout, fee, wire.TxTreeRegular, nil), nil
+}
+
 // Shutdown down the rpcclient.Client.
 func (dcr *ExchangeWallet) shutdown() {
 	if dcr.client != nil {
 		dcr.client.Shutdown()
 		dcr.client.WaitForShutdown()
 	}
-}
-
-// Signal a tip change when a new block is connected.
-func (dcr *ExchangeWallet) onBlockConnected(blockHeader []byte, transactions [][]byte) {
-	dcr.tipChange(nil)
-}
-
-// Signal a tip change when the client reconnects.
-func (dcr *ExchangeWallet) onClientConnected() {
-	dcr.tipChange(nil)
 }
 
 // Combines the RPC type with the spending input information.
@@ -1152,54 +1169,32 @@ func (dcr *ExchangeWallet) getKeys(addr dcrutil.Address) (*secp256k1.PrivateKey,
 	return priv, pub, nil
 }
 
-// monitorConnection monitors the dcrwallet connection, sending an error via the
-// tipChange function when a disconnect is detected.
-func (dcr *ExchangeWallet) monitorConnection(ctx context.Context) {
-	ticker := time.NewTicker(time.Second * 10)
-out:
+// monitorBlocks pings for new blocks and runs the tipChange callback function
+// when the block changes.
+func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
+	h, _, err := dcr.node.GetBestBlock()
+	if err != nil {
+		dcr.tipChange(fmt.Errorf("error initializing best block for DCR: %v", err))
+	}
+	tipHash := *h
+	ticker := time.NewTicker(blockTicker)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			if dcr.node.Disconnected() {
-				dcr.tipChange(fmt.Errorf("node disconnected"))
+			h, _, err := dcr.node.GetBestBlock()
+			if err != nil {
+				dcr.tipChange(fmt.Errorf("failed to get best block hash from DCR node"))
+				continue
+			}
+			if *h != tipHash {
+				tipHash = *h
+				dcr.tipChange(nil)
 			}
 		case <-ctx.Done():
-			break out
+			return
 		}
 	}
-}
-
-// PayFee pays the registration fee to the DEX.
-func (dcr *ExchangeWallet) PayFee(fee uint64, address string) (asset.Coin, error) {
-	addr, err := dcrutil.DecodeAddress(address, chainParams)
-	if err != nil {
-		return nil, err
-	}
-	txHash, err := dcr.node.SendToAddress(addr, dcrutil.Amount(fee))
-	if err != nil {
-		return nil, err
-	}
-	tx, err := dcr.node.GetTransaction(txHash)
-	if err != nil {
-		dcr.log.Errorf("error getting transaction for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction"+
-			"could not be retreived: %v", err)
-	}
-	var vout uint32
-	var found bool
-	for i := range tx.Details {
-		details := &tx.Details[i]
-		if toAtoms(details.Amount) == fee && details.Address == address {
-			found = true
-			vout = details.Vout
-		}
-	}
-	if !found {
-		dcr.log.Errorf("error getting transaction vout for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction"+
-			"index could not be found: %v", err)
-	}
-	return newOutput(dcr.node, txHash, vout, fee, wire.TxTreeRegular, nil), nil
 }
 
 // Convert the DCR value to atoms.

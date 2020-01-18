@@ -45,12 +45,16 @@ var log slog.Logger
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	ListMarkets() []*core.MarketInfo
-	Register(*core.Registration) error
+	Register(*core.Registration) (error, <-chan error)
 	Login(dex, pw string) error
 	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
 	Book(dex string, base, quote uint32) *core.OrderBook
 	Unsync(dex string, base, quote uint32)
 	Balance(uint32) (uint64, error)
+	WalletStatus(assetID uint32) (has, running, open bool)
+	CreateWallet(form *core.WalletForm) error
+	OpenWallet(assetID uint32, pw string) error
+	Wallets() []*core.WalletStatus
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -204,6 +208,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/register", s.apiRegister)
 		r.Post("/login", s.apiLogin)
+		r.Get("/walletstatus", s.apiWalletStatus)
 	})
 	// Files
 	fileServer(mux, "/js", fp(root, "dist"))
