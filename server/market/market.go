@@ -568,6 +568,7 @@ func (m *Market) processEpoch(ctx context.Context, epoch *EpochQueue) {
 		// The order targeted by a matched cancel order will be in the unbooked
 		// slice. These coins are unlocked next in the book locker.
 		if match.Taker.Type() == order.CancelOrderType {
+			//m.auth.RecordCancel(match.Taker.User())
 			continue
 		}
 		swapOrders = append(swapOrders, match.Taker)

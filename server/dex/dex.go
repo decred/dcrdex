@@ -2,6 +2,7 @@ package dex
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/asset"
 	dcrasset "decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
@@ -92,6 +94,7 @@ type DexConf struct {
 	RegFeeConfirms   int64
 	RegFeeAmount     uint64
 	BroadcastTimeout time.Duration
+	CancelThreshold  float32
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
 }
@@ -113,6 +116,36 @@ type DEX struct {
 	bookRouter  *market.BookRouter
 	stopWaiters []subsystem
 	server      *comms.Server
+	config      *configResponse
+}
+
+type configResponse struct {
+	configMsg *msgjson.ConfigResult // constant for now
+	configEnc json.RawMessage
+}
+
+func newConfigResponse(cfg *DexConf) (*configResponse, error) {
+	configMsg := &msgjson.ConfigResult{
+		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Seconds()),
+		CancelMax:        cfg.CancelThreshold,
+	}
+
+	encResult, err := json.Marshal(configMsg)
+	if err != nil {
+		return nil, err
+	}
+	payload := &msgjson.ResponsePayload{
+		Result: encResult,
+	}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return &configResponse{
+		configMsg: configMsg,
+		configEnc: encPayload,
+	}, nil
 }
 
 // Stop shuts down the DEX. Stop returns only after all components have
@@ -129,8 +162,19 @@ func (dm *DEX) Stop() {
 	}
 }
 
-// TODO
-//func (dm *DEX) handleDEXConfig (conn comms.Link, msg *msgjson.Message) *msgjson.Error { }
+func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	ack := &msgjson.Message{
+		Type:    msgjson.Response,
+		ID:      msg.ID,
+		Payload: dm.config.configEnc,
+	}
+
+	if err := conn.Send(ack); err != nil {
+		log.Debugf("error sending config response: %v", err)
+	}
+
+	return nil
+}
 
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
 // shutdown cleanly.
@@ -144,6 +188,11 @@ func (dm *DEX) Stop() {
 //  8. Create and start the book router, and create the order router.
 //  9. Create and start the comms server.
 func NewDEX(cfg *DexConf) (*DEX, error) {
+	cfgResp, err := newConfigResponse(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	var stopWaiters []subsystem
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -335,10 +384,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		bookRouter:  bookRouter,
 		stopWaiters: stopWaiters,
 		server:      server,
+		config:      cfgResp,
 	}
 
-	// TODO:
-	//comms.Route(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
+	comms.Route(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
 
 	return dexMgr, nil
 }
