@@ -4,7 +4,19 @@
   <div class="mainlinks fs18 offwhite">
   <span data-pagelink="markets">Markets</span>
   <span data-pagelink="wallets">Wallets</span>
-  <span data-pagelink="settings" class="ico-settings fs24"></span>
+  <span class="d-inline-block position-relative" id="noteMenuEntry">
+    <div class="note-indicator" id="noteIndicator"></div>
+    <div id="noteBox">
+      <div id="noteList">
+        <div id="noteTemplate" class="note fs14">
+          <div class="note-indicator d-inline-block mr-2"></div>
+          <span class="note-msg"></span>
+        </div>
+      </div>
+    </div>
+    <span class="ico-bell fs20" id="noteBell"></span>
+  </span>
+  <span class="ico-settings fs24" data-pagelink="settings"></span>
   </div>
 </header>
 {{end}}

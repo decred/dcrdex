@@ -4,13 +4,26 @@ import { DepthChart } from './charts'
 import ws from './ws'
 
 const idel = Doc.idel // = element by id
-const bind = Doc.bind // = addEventHandler
+const bind = Doc.bind
+const unbind = Doc.unbind
 var app
 
+const SUCCESS = 'success'
+const ERROR = 'error'
+
 const updateWalletRoute = 'update_wallet'
+const errorMsgRoute = 'error_message'
+const successMsgRoute = 'success_message'
+
+// window.logit = function (lvl, msg) { app.notify(lvl, msg) }
 
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
+  constructor () {
+    this.notes = []
+    this.wallets = {}
+  }
+
   start () {
     app = this
     bind(window, 'popstate', (e) => {
@@ -20,11 +33,18 @@ export default class Application {
     })
     this.main = idel(document, 'main')
     window.history.replaceState({ page: this.main.dataset.handler }, '', window.location.href)
-    this.attachCommon(idel(document, 'header'))
+    this.attachHeader(idel(document, 'header'))
+    this.attachCommon(this.header)
     this.attach()
     ws.connect(getSocketURI())
-    ws.registerRoute(updateWalletRoute, msg => {
-      console.log('updating wallet', msg)
+    ws.registerRoute(updateWalletRoute, wallet => {
+      this.wallets[wallet.symbol] = wallet
+    })
+    ws.registerRoute(errorMsgRoute, msg => {
+      this.notify(ERROR, msg)
+    })
+    ws.registerRoute(successMsgRoute, msg => {
+      this.notify(SUCCESS, msg)
     })
     this.fetchWallets()
   }
@@ -69,6 +89,32 @@ export default class Application {
     handler(this.main)
   }
 
+  attachHeader (header) {
+    this.header = header
+    this.noteIndicator = idel(header, 'noteIndicator')
+    this.noteIndicator.style.display = 'none'
+    this.noteBox = idel(header, 'noteBox')
+    this.noteList = idel(header, 'noteList')
+    this.noteTemplate = idel(header, 'noteTemplate')
+    this.noteTemplate.id = undefined
+    this.noteTemplate.remove()
+    var hide
+    hide = e => {
+      if (!Doc.mouseInElement(e, this.noteBox)) {
+        this.noteBox.style.display = 'none'
+        unbind(document, hide)
+      }
+    }
+    bind(idel(header, 'noteMenuEntry'), 'click', e => {
+      bind(document, 'click', hide)
+      this.noteBox.style.display = 'block'
+      this.noteIndicator.style.display = 'none'
+    })
+    if (this.notes.length === 0) {
+      this.noteList.textContent = 'no notifications'
+    }
+  }
+
   // attachCommon scans the provided node and handles some common bindings.
   attachCommon (node) {
     node.querySelectorAll('[data-pagelink]').forEach(link => {
@@ -80,6 +126,59 @@ export default class Application {
         }
       })
     })
+  }
+
+  notify (level, msg) {
+    var found = false
+    for (let i = 0; i < this.notes.length; i++) {
+      if (this.notes[i].msg === msg) {
+        this.notes[i].count++
+        found = true
+        break
+      }
+    }
+    if (!found) {
+      this.notes.push({
+        level: level,
+        msg: msg,
+        count: 1
+      })
+    }
+    Doc.empty(this.noteList)
+    for (let i = this.notes.length - 1; i >= 0; i--) {
+      if (i < this.notes.length - 10) return
+      const note = this.notes[i]
+      const noteEl = this.makeNote(note.level, note.msg)
+      this.noteList.appendChild(noteEl)
+    }
+    this.notifyUI()
+  }
+
+  notifyUI () {
+    const ni = this.noteIndicator
+    ni.style.display = 'block'
+    ni.classList.remove('bad')
+    ni.classList.remove('good')
+    const noteLevel = this.notes.reduce((a, v) => {
+      if (v.level === ERROR) return ERROR
+      if (v.level === SUCCESS && a !== ERROR) return SUCCESS
+      return a
+    }, 0)
+    switch (noteLevel) {
+      case ERROR:
+        ni.classList.add('bad')
+        break
+      case SUCCESS:
+        ni.classList.add('good')
+        break
+    }
+  }
+
+  makeNote (level, msg) {
+    const note = this.noteTemplate.cloneNode(true)
+    note.querySelector('div').classList.add(level === ERROR ? 'bad' : 'good')
+    note.querySelector('span').textContent = msg
+    return note
   }
 }
 
@@ -149,20 +248,25 @@ function handleLogin (main) {
 // handleRegister is the 'register' page main element handler.
 function handleRegister (main) {
   bind(idel(main, 'submit'), 'click', async () => {
+    const dex = idel(main, 'dex').value
     const registration = {
-      dex: idel(main, 'dex').value,
+      dex: dex,
       password: idel(main, 'dexPass').value,
       walletpass: idel(main, 'walletPass').value,
       account: idel(main, 'acct').value,
       inipath: idel(main, 'iniPath').value
     }
     var res = await postJSON('/api/register', registration)
-    console.log(res)
     if (!res.isOK) {
-      console.log('registration error:', res.errMsg)
-      // return
+      app.notify(ERROR, res.errMsg)
+      return
     }
-    // app.loadPage('markets')
+    // server responded, but response may still indicate an error.
+    if (!res.ok) {
+      app.notify(ERROR, res.msg)
+    }
+    app.notify(SUCCESS, `Account registered for ${dex}. Waiting for confirmations.`)
+    app.loadPage('markets')
   })
 }
 
@@ -242,7 +346,6 @@ function handleMarkets (main) {
   }
 
   ws.registerRoute('book', data => {
-    // if (e.market !== market && e.market !== '') return
     handleBook(main, chart, data, tableBuilder)
     market = data.market
     marketLoader.classList.add('d-none')
@@ -294,15 +397,21 @@ function setMarket (main, dex, base, quote) {
 // handleBook is the handler for the 'book' notification from the server.
 // Updates the charts, order tables, etc.
 function handleBook (main, chart, data, builder) {
-  chart.set(data)
   const book = data.book
+  if (!book) {
+    chart.clear()
+    Doc.empty(builder.buys)
+    Doc.empty(builder.sells)
+    return
+  }
+  chart.set(data)
   loadTable(book.buys, builder.buys, builder, 'buycolor')
   loadTable(book.sells, builder.sells, builder, 'sellcolor')
 }
 
 // loadTables loads the order book side into the specified table.
 function loadTable (bookSide, table, builder, cssClass) {
-  while (table.firstChild) table.removeChild(table.firstChild)
+  Doc.empty(table)
   const check = document.createElement('span')
   check.classList.add('ico-check')
   bookSide.forEach(order => {
@@ -350,7 +459,6 @@ function handleSettings (main) {
       document.body.classList.remove('dark')
     }
   })
-  console.log('settings loaded')
 }
 
 // Parameters for printing asset values.

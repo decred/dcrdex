@@ -41,9 +41,9 @@ BETA_CLI_CFG="-rpcwallet= -rpcport=${BETA_RPC_PORT} -regtest=1 -rpcuser=user -rp
 
 GAMMA_CLI_CFG="-rpcwallet=gamma -rpcport=${ALPHA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
 
-# WAIT can be used in a send-keys call along with a `wait-for done` command to
+# WAIT can be used in a send-keys call along with a `wait-for donebtc` command to
 # wait for process termination.
-WAIT="; tmux wait-for -S done"
+WAIT="; tmux wait-for -S donebtc"
 
 cd ${NODES_ROOT} && tmux new-session -d -s $SESSION
 
@@ -83,7 +83,7 @@ tmux send-keys "cd ${ALPHA_DIR}" C-m
 echo "Starting simnet alpha node"
 tmux send-keys "bitcoind -rpcuser=user -rpcpassword=pass \
   -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
-  -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT}; tmux wait-for -S alpha" C-m
+  -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT}; tmux wait-for -S alphabtc" C-m
 sleep 3
 
 ################################################################################
@@ -96,7 +96,7 @@ tmux send-keys "cd ${BETA_DIR}" C-m
 echo "Starting simnet beta node"
 tmux send-keys "bitcoind -rpcuser=user -rpcpassword=pass \
   -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
-  -port=${BETA_LISTEN_PORT}; tmux wait-for -S beta" C-m
+  -port=${BETA_LISTEN_PORT}; tmux wait-for -S betabtc" C-m
 sleep 3
 
 ################################################################################
@@ -161,19 +161,19 @@ cat > "${HARNESS_DIR}/quit" <<EOF
 #!/bin/sh
 tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
-tmux wait-for alpha
-tmux wait-for beta
+tmux wait-for alphabtc
+tmux wait-for betabtc
 # seppuku
 tmux kill-session
 EOF
 chmod +x "${HARNESS_DIR}/quit"
 
-tmux send-keys "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${WAIT}" C-m\; wait-for done
+tmux send-keys "./beta addnode 127.0.0.1:${ALPHA_LISTEN_PORT} add${WAIT}" C-m\; wait-for donebtc
 # This timeout is apparently critical. Give the nodes time to sync.
 sleep 1
 
 echo "Generating the genesis block"
-tmux send-keys "./alpha generatetoaddress 1 ${ALPHA_MINING_ADDR}${WAIT}" C-m\; wait-for done
+tmux send-keys "./alpha generatetoaddress 1 ${ALPHA_MINING_ADDR}${WAIT}" C-m\; wait-for donebtc
 sleep 1
 
 #################################################################################
@@ -181,22 +181,22 @@ sleep 1
 ################################################################################
 
 echo "Setting private key for alpha"
-tmux send-keys "./alpha sethdseed true ${ALPHA_WALLET_SEED}${WAIT}" C-m\; wait-for done
-tmux send-keys "./alpha getnewaddress${WAIT}" C-m\; wait-for done
-tmux send-keys "./alpha getnewaddress \"\" \"legacy\"${WAIT}" C-m\; wait-for done
+tmux send-keys "./alpha sethdseed true ${ALPHA_WALLET_SEED}${WAIT}" C-m\; wait-for donebtc
+tmux send-keys "./alpha getnewaddress${WAIT}" C-m\; wait-for donebtc
+tmux send-keys "./alpha getnewaddress \"\" \"legacy\"${WAIT}" C-m\; wait-for donebtc
 echo "Generating 30 blocks for alpha"
-tmux send-keys "./alpha generatetoaddress 30 ${ALPHA_MINING_ADDR}${WAIT}" C-m\; wait-for done
+tmux send-keys "./alpha generatetoaddress 30 ${ALPHA_MINING_ADDR}${WAIT}" C-m\; wait-for donebtc
 
 #################################################################################
 # Setup the beta wallet
 ################################################################################
 
 echo "Setting private key for beta"
-tmux send-keys "./beta sethdseed true ${BETA_WALLET_SEED}${WAIT}" C-m\; wait-for done
-tmux send-keys "./beta getnewaddress${WAIT}" C-m\; wait-for done
-tmux send-keys "./beta getnewaddress \"\" \"legacy\"${WAIT}" C-m\; wait-for done
+tmux send-keys "./beta sethdseed true ${BETA_WALLET_SEED}${WAIT}" C-m\; wait-for donebtc
+tmux send-keys "./beta getnewaddress${WAIT}" C-m\; wait-for donebtc
+tmux send-keys "./beta getnewaddress \"\" \"legacy\"${WAIT}" C-m\; wait-for donebtc
 echo "Generating 110 blocks for beta"
-tmux send-keys "./beta generatetoaddress 110 ${BETA_MINING_ADDR}${WAIT}" C-m\; wait-for done
+tmux send-keys "./beta generatetoaddress 110 ${BETA_MINING_ADDR}${WAIT}" C-m\; wait-for donebtc
 
 ################################################################################
 # Setup the gamma wallet
@@ -204,17 +204,17 @@ tmux send-keys "./beta generatetoaddress 110 ${BETA_MINING_ADDR}${WAIT}" C-m\; w
 
 # Create  wallet, encrypt it, and send it some bitcoin, mining some blocks too.
 echo "Creating the gamma wallet"
-tmux send-keys "./alpha createwallet gamma${WAIT}" C-m\; wait-for done
-tmux send-keys "./gamma sethdseed true ${GAMMA_WALLET_SEED}${WAIT}" C-m\; wait-for done
-tmux send-keys "./gamma getnewaddress${WAIT}" C-m\; wait-for done
-tmux send-keys "./gamma getnewaddress \"\" \"legacy\"${WAIT}" C-m\; wait-for done
+tmux send-keys "./alpha createwallet gamma${WAIT}" C-m\; wait-for donebtc
+tmux send-keys "./gamma sethdseed true ${GAMMA_WALLET_SEED}${WAIT}" C-m\; wait-for donebtc
+tmux send-keys "./gamma getnewaddress${WAIT}" C-m\; wait-for donebtc
+tmux send-keys "./gamma getnewaddress \"\" \"legacy\"${WAIT}" C-m\; wait-for donebtc
 echo "Encrypting the gamma wallet (may take a minute)"
-tmux send-keys "./gamma encryptwallet ${GAMMA_WALLET_PASSWORD}${WAIT}" C-m\; wait-for done
+tmux send-keys "./gamma encryptwallet ${GAMMA_WALLET_PASSWORD}${WAIT}" C-m\; wait-for donebtc
 echo "Sending 84 BTC to gamma in 8 blocks"
 for i in 10 18 5 7 1 15 3 25
 do
-  tmux send-keys "./alpha sendtoaddress ${GAMMA_ADDRESS} ${i}${WAIT}" C-m\; wait-for done
-  tmux send-keys "./mine-alpha 1${WAIT}" C-m\; wait-for done
+  tmux send-keys "./alpha sendtoaddress ${GAMMA_ADDRESS} ${i}${WAIT}" C-m\; wait-for donebtc
+  tmux send-keys "./mine-alpha 1${WAIT}" C-m\; wait-for donebtc
 done
 
 tmux attach-session -t $SESSION

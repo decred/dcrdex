@@ -250,13 +250,6 @@ func (c *tRPCClient) Disconnected() bool {
 	return c.disconnected
 }
 
-func (c *tRPCClient) SendToAddress(address dcrutil.Address, amount dcrutil.Amount) (*chainhash.Hash, error) {
-	txB := randBytes(32)
-	var txHash chainhash.Hash
-	copy(txHash[:], txB)
-	return &txHash, nil
-}
-
 func TestMain(m *testing.M) {
 	chainParams = chaincfg.MainNetParams()
 	tPKHAddr, _ = dcrutil.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", chainParams)

@@ -151,6 +151,52 @@ input[type=number] {
   right: 0;
 }
 
+div.note-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+}
+
+#noteIndicator {
+  position: absolute;
+  top: 0;
+  left: 20px;
+  z-index: 2;
+}
+
+div.note-indicator.good {
+  display: block;
+  background-color: green;
+}
+
+div.note-indicator.bad {
+  display: block;
+  background-color: red;
+}
+
+#noteBox {
+  position: absolute;
+  display: none;
+  top: -10px;
+  right: 10px;
+  width: 375px;
+  padding: 10px;
+  background-color: white;
+  border: 1px solid black;
+  z-index: 1;
+  cursor: default;
+}
+
+div.note {
+  padding: 5px 0;
+}
+
+div.note:not(:last-child) {
+  border-bottom-style: solid;
+  border-width: 1px;
+  border-color: #777;
+}
+
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }

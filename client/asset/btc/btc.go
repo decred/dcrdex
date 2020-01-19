@@ -852,7 +852,7 @@ func (btc *ExchangeWallet) Address() (string, error) {
 }
 
 // PayFee pays the registration fee to the DEX.
-func (btc *ExchangeWallet) PayFee(fee uint64, address string) (asset.Coin, error) {
+func (btc *ExchangeWallet) PayFee(fee uint64, address string, _ *dex.Asset) (asset.Coin, error) {
 	txHash, err := btc.wallet.SendToAddress(address, fee)
 	if err != nil {
 		return nil, err

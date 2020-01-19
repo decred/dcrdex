@@ -17,9 +17,9 @@ ALPHA_RPC_PORT="19570"
 BETA_RPC_PORT="19569"
 ALPHA_PORT="19571"
 
-# WAIT can be used in a send-keys call along with a `wait-for done` command to
+# WAIT can be used in a send-keys call along with a `wait-for donedcr` command to
 # wait for process termination.
-WAIT="; tmux wait-for -S done"
+WAIT="; tmux wait-for -S donedcr"
 
 if [ -d "${NODES_ROOT}" ]; then
   rm -R "${NODES_ROOT}"
@@ -152,8 +152,8 @@ cat > "${NODES_ROOT}/harness-ctl/quit" <<EOF
 #!/bin/sh
 tmux send-keys -t $SESSION:0 C-c
 tmux send-keys -t $SESSION:1 C-c
-tmux wait-for alpha
-tmux wait-for beta
+tmux wait-for alphadcr
+tmux wait-for betadcr
 tmux kill-session
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/quit"
@@ -173,7 +173,7 @@ tmux send-keys "dcrd --appdata=${NODES_ROOT}/alpha \
 --miningaddr=${ALPHA_MINING_ADDR} --rpclisten=127.0.0.1:${ALPHA_RPC_PORT} \
 --txindex --listen=127.0.0.1:${ALPHA_PORT} \
 --debuglevel=debug \
---simnet; tmux wait-for -S alpha" C-m
+--simnet; tmux wait-for -S alphadcr" C-m
 
 tmux new-window -t $SESSION:1 -n 'beta'
 tmux send-keys "cd ${NODES_ROOT}/beta" C-m
@@ -185,7 +185,7 @@ tmux send-keys "dcrd --appdata=${NODES_ROOT}/beta \
 --miningaddr=${BETA_MINING_ADDR} \
 --txindex --connect=127.0.0.1:${ALPHA_PORT} \
 --debuglevel=debug \
---simnet; tmux wait-for -S beta" C-m
+--simnet; tmux wait-for -S betadcr" C-m
 
 sleep 3
 
@@ -222,21 +222,21 @@ sleep 30
 tmux new-window -t $SESSION:4 -n 'harness-ctl'
 tmux send-keys "cd ${NODES_ROOT}/harness-ctl" C-m
 
-tmux send-keys "./alpha getnewaddress${WAIT}" C-m\; wait-for done
-tmux send-keys "./alpha getnewaddress${WAIT}" C-m\; wait-for done
-tmux send-keys "./beta getnewaddress${WAIT}" C-m\; wait-for done
-tmux send-keys "./beta getnewaddress${WAIT}" C-m\; wait-for done
+tmux send-keys "./alpha getnewaddress${WAIT}" C-m\; wait-for donedcr
+tmux send-keys "./alpha getnewaddress${WAIT}" C-m\; wait-for donedcr
+tmux send-keys "./beta getnewaddress${WAIT}" C-m\; wait-for donedcr
+tmux send-keys "./beta getnewaddress${WAIT}" C-m\; wait-for donedcr
 
 echo "Mining 160 blocks on alpha"
-tmux send-keys "./mine-alpha 160${WAIT}" C-m\; wait-for done
+tmux send-keys "./mine-alpha 160${WAIT}" C-m\; wait-for donedcr
 
 sleep 5
 
 # Have beta send some credits to alpha
 for i in 10 18 5 7 1 15 3 25
 do
-  tmux send-keys "./alpha sendtoaddress ${BETA_MINING_ADDR} ${i}${WAIT}" C-m\; wait-for done
-  tmux send-keys "./mine-alpha 1${WAIT}" C-m\; wait-for done
+  tmux send-keys "./alpha sendtoaddress ${BETA_MINING_ADDR} ${i}${WAIT}" C-m\; wait-for donedcr
+  tmux send-keys "./mine-alpha 1${WAIT}" C-m\; wait-for donedcr
 done
 
 tmux attach-session -t $SESSION

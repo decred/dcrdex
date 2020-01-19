@@ -371,7 +371,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		return fmt.Errorf("zero registration fees not supported"), nil
 	}
 	// Pay the registration fee.
-	coin, err := wallet.PayFee(regRes.Fee, regRes.Address)
+	coin, err := wallet.PayFee(regRes.Fee, regRes.Address, regAsset)
 	if err != nil {
 		return fmt.Errorf("error paying registration fee: %v", err), nil
 	}
@@ -571,6 +571,7 @@ func (c *Core) addDex(acct *db.AccountInfo) <-chan *dexConnection {
 					"but did not provide the asset info.", uri, mkt.Quote)
 			}
 		}
+
 		// Create the dexConnection and add it to the map.
 		dc := &dexConnection{
 			websocket: conn,

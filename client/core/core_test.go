@@ -302,7 +302,7 @@ func (w *TXCWallet) Lock() error {
 	return nil
 }
 
-func (w *TXCWallet) PayFee(fee uint64, address string) (asset.Coin, error) {
+func (w *TXCWallet) PayFee(fee uint64, address string, _ *dex.Asset) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
 }
 

@@ -57,7 +57,6 @@ type rpcClient interface {
 	WalletLock() error
 	WalletPassphrase(passphrase string, timeoutSecs int64) error
 	Disconnected() bool
-	SendToAddress(dcrutil.Address, dcrutil.Amount) (*chainhash.Hash, error)
 }
 
 // outpointID creates a unique string for a transaction output.
@@ -409,19 +408,11 @@ func (dcr *ExchangeWallet) Swap(swaps []*asset.Swap, nfo *dex.Asset) ([]asset.Re
 	baseTx := wire.NewMsgTx()
 	// Add the funding utxos.
 	for _, swap := range swaps {
-		for _, coin := range swap.Inputs {
-			output, err := dcr.convertCoin(coin)
-			if err != nil {
-				return nil, fmt.Errorf("error converting coin: %v", err)
-			}
-			if output.value == 0 {
-				return nil, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
-			}
-			totalIn += output.value
-			prevOut := wire.NewOutPoint(&output.txHash, output.vout, wire.TxTreeRegular)
-			txIn := wire.NewTxIn(prevOut, int64(output.value), []byte{})
-			baseTx.AddTxIn(txIn)
+		in, err := dcr.addInputCoins(baseTx, swap.Inputs)
+		if err != nil {
+			return nil, err
 		}
+		totalIn += in
 	}
 	// Add the contract outputs.
 	for _, swap := range swaps {
@@ -898,36 +889,34 @@ func (dcr *ExchangeWallet) Lock() error {
 }
 
 // PayFee pays the registration fee to the DEX.
-func (dcr *ExchangeWallet) PayFee(fee uint64, address string) (asset.Coin, error) {
+func (dcr *ExchangeWallet) PayFee(fee uint64, address string, nfo *dex.Asset) (asset.Coin, error) {
 	addr, err := dcrutil.DecodeAddress(address, chainParams)
 	if err != nil {
 		return nil, err
 	}
-	txHash, err := dcr.node.SendToAddress(addr, dcrutil.Amount(fee))
+	msgTx, err := dcr.sendToAddress(addr, fee, nfo)
 	if err != nil {
 		return nil, err
 	}
-	tx, err := dcr.node.GetTransaction(txHash)
-	if err != nil {
-		dcr.log.Errorf("error getting transaction for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction"+
-			"could not be retreived: %v", err)
-	}
-	var vout uint32
-	var found bool
-	for i := range tx.Details {
-		details := &tx.Details[i]
-		if toAtoms(details.Amount) == fee && details.Address == address {
-			found = true
-			vout = details.Vout
+	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, fee, wire.TxTreeRegular, nil), nil
+}
+
+func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (uint64, error) {
+	var totalIn uint64
+	for _, coin := range coins {
+		output, err := dcr.convertCoin(coin)
+		if err != nil {
+			return 0, err
 		}
+		if output.value == 0 {
+			return 0, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
+		}
+		totalIn += output.value
+		prevOut := wire.NewOutPoint(&output.txHash, output.vout, output.tree)
+		txIn := wire.NewTxIn(prevOut, int64(output.value), []byte{})
+		msgTx.AddTxIn(txIn)
 	}
-	if !found {
-		dcr.log.Errorf("error getting transaction vout for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction"+
-			"index could not be found: %v", err)
-	}
-	return newOutput(dcr.node, txHash, vout, fee, wire.TxTreeRegular, nil), nil
+	return totalIn, nil
 }
 
 // Shutdown down the rpcclient.Client.
@@ -1034,6 +1023,30 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 		tree = wire.TxTreeStake
 	}
 	return newOutput(dcr.node, txHash, vout, coin.Value(), tree, coin.Redeem()), nil
+}
+
+func (dcr *ExchangeWallet) sendToAddress(addr dcrutil.Address, val uint64, nfo *dex.Asset) (*wire.MsgTx, error) {
+	coins, err := dcr.Fund(val, nfo)
+	if err != nil {
+		return nil, err
+	}
+	baseTx := wire.NewMsgTx()
+	totalIn, err := dcr.addInputCoins(baseTx, coins)
+	if err != nil {
+		return nil, err
+	}
+	payScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, fmt.Errorf("error creating P2SH script: %v", err)
+	}
+	txOut := wire.NewTxOut(int64(val), payScript)
+	baseTx.AddTxOut(txOut)
+	// Grab a change address.
+	changeAddr, err := dcr.node.GetRawChangeAddress(dcr.acct, chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error creating change address: %v", err)
+	}
+	return dcr.sendWithReturn(baseTx, changeAddr, totalIn, val, nfo)
 }
 
 // sendWithReturn sends the unsigned transaction with an added output (unless
