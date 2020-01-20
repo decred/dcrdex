@@ -34,17 +34,25 @@ const (
 	ivSlice1 uint64 = 2862933555777941757
 )
 
+// Source is a pseudo-random number generator that satisfies both
+// math/rand.Source and math/rand.Source64.
 type Source struct {
 	state [n]uint64
 	index int
 }
 
+// NewSource creates a new unseeded Source.
 func NewSource() *Source {
 	return &Source{
 		index: n + 1, // not seeded
 	}
 }
 
+// Seed initializes the source with the provided value. Note that SeedBytes or
+// SeedValues should be preferred since Mersenne Twister suffers from a
+// "zero-excess" initial state defect where seeds with many zero bits can result
+// in similar/"shifted" sequences. The authors describe the issues:
+// http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/MT2002/emt19937ar.html
 func (s *Source) Seed(seed int64) {
 	s.state[0] = uint64(seed)
 	prev := s.state[0]
@@ -131,6 +139,8 @@ func (s *Source) newState() {
 	s.index = 0
 }
 
+// Uint64 returns the next pseudo-random integer on [0, 2^64-1] in the sequence.
+// Uint64 satisfies math/rand.Source.
 func (s *Source) Uint64() uint64 {
 	if s.index >= n {
 		if s.index == n+1 {
@@ -149,6 +159,9 @@ func (s *Source) Uint64() uint64 {
 	return x
 }
 
+// Int63 returns the next pseudo-random integer on [0, 2^63-1) in the sequence.
+// Both Uint64 and Int63 advance the sequence. Int63 satisfies
+// math/rand.Source64.
 func (s *Source) Int63() int64 {
 	// TODO: shift or mask?
 	//return int64(s.Uint64() & 0x7fffffffffffffff)

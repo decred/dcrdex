@@ -479,8 +479,8 @@ func shuffleQueue(queue []order.Order) {
 		copy(hashCat[HashSize*i:HashSize*(i+1)], h[:])
 	}
 
-	// Shuffle the slice using MT19937 seeded with the hash of the concatenated
-	// order ID hashes.
+	// Fisher-Yates shuffle the slice using MT19937 seeded with the hash of the
+	// concatenated order ID hashes.
 	seedHash := HashFunc(hashCat)
 	mtSrc := mt19937.NewSource()
 	mtSrc.SeedBytes(seedHash[:])
