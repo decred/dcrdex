@@ -718,7 +718,7 @@ type Market struct {
 	Quote           uint32  `json:"quote"`
 	EpochLen        uint64  `json:"epochlen"`
 	StartEpoch      uint64  `json:"startepoch"`
-	MarketBuyBuffer float32 `json:"buybuffer"`
+	MarketBuyBuffer float64 `json:"buybuffer"`
 }
 
 // Asset describes an asset and its variables, and is returned as part of a

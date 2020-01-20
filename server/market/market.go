@@ -157,6 +157,16 @@ func (m *Market) MarketBuyBuffer() float64 {
 	return m.marketInfo.MarketBuyBuffer
 }
 
+// Base is the base asset ID.
+func (m *Market) Base() uint32 {
+	return m.marketInfo.Base
+}
+
+// Quote is the quote asset ID.
+func (m *Market) Quote() uint32 {
+	return m.marketInfo.Quote
+}
+
 // OrderFeed provides a new order book update channel. This is not thread-safe,
 // and should not be called after calling Start.
 func (m *Market) OrderFeed() <-chan *bookUpdateSignal {

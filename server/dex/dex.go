@@ -119,15 +119,20 @@ type DEX struct {
 	config      *configResponse
 }
 
+// configResponse is defined here to leave open the possibility for hot
+// adjustable parameters while storing a pre-encoded config response message. An
+// update method will need to be defined in the future for this purpose.
 type configResponse struct {
 	configMsg *msgjson.ConfigResult // constant for now
 	configEnc json.RawMessage
 }
 
-func newConfigResponse(cfg *DexConf) (*configResponse, error) {
+func newConfigResponse(cfg *DexConf, cfgAssets []msgjson.Asset, cfgMarkets []msgjson.Market) (*configResponse, error) {
 	configMsg := &msgjson.ConfigResult{
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Seconds()),
 		CancelMax:        cfg.CancelThreshold,
+		Assets:           cfgAssets,
+		Markets:          cfgMarkets,
 	}
 
 	encResult, err := json.Marshal(configMsg)
@@ -188,11 +193,6 @@ func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.E
 //  8. Create and start the book router, and create the order router.
 //  9. Create and start the comms server.
 func NewDEX(cfg *DexConf) (*DEX, error) {
-	cfgResp, err := newConfigResponse(cfg)
-	if err != nil {
-		return nil, err
-	}
-
 	var stopWaiters []subsystem
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -243,6 +243,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	var dcrBackend *dcrasset.Backend
 	lockableAssets := make(map[uint32]*swap.LockableAsset, len(cfg.Assets))
 	backedAssets := make(map[uint32]*asset.BackedAsset, len(cfg.Assets))
+	cfgAssets := make([]msgjson.Asset, 0, len(cfg.Assets))
 	for i, assetConf := range cfg.Assets {
 		symbol := strings.ToLower(assetConf.Symbol)
 		ID := assetIDs[i]
@@ -286,6 +287,17 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			BackedAsset: ba,
 			CoinLocker:  dexCoinLocker.AssetLocker(ID).Swap(),
 		}
+
+		cfgAssets = append(cfgAssets, msgjson.Asset{
+			Symbol:   assetConf.Symbol,
+			ID:       ID,
+			LotSize:  assetConf.LotSize,
+			RateStep: assetConf.RateStep,
+			FeeRate:  assetConf.FeeRate,
+			SwapSize: uint64(be.InitTxSize()),
+			SwapConf: uint16(assetConf.SwapConf),
+			FundConf: uint16(assetConf.FundConf),
+		})
 	}
 
 	// Create DEXArchivist with the pg DB driver.
@@ -347,12 +359,21 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	now := encode.UnixMilli(time.Now())
 	bookSources := make(map[string]market.BookSource, len(cfg.Markets))
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
+	cfgMarkets := make([]msgjson.Market, 0, len(cfg.Markets))
 	for name, mkt := range markets {
 		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
 		mkt.SetStartEpochIdx(startEpochIdx)
 		startSubSys(fmt.Sprintf("Market[%s]", name), mkt)
 		bookSources[name] = mkt
 		marketTunnels[name] = mkt
+		cfgMarkets = append(cfgMarkets, msgjson.Market{
+			Name:            name,
+			Base:            mkt.Base(),
+			Quote:           mkt.Quote(),
+			EpochLen:        mkt.EpochDuration(),
+			StartEpoch:      uint64(startEpochIdx),
+			MarketBuyBuffer: mkt.MarketBuyBuffer(),
+		})
 	}
 
 	// Book router
@@ -373,6 +394,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("NewServer failed: %v", err)
 	}
 	startSubSys("Comms Server", server)
+
+	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets)
+	if err != nil {
+		return nil, err
+	}
 
 	dexMgr := &DEX{
 		network:     cfg.Network,
