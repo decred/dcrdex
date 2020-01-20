@@ -438,8 +438,8 @@ func TestMarket_processEpoch(t *testing.T) {
 			eq,
 			[]*bookUpdateSignal{
 				{bookAction, lo, epochIdx},
-				{unbookAction, bestBuy, epochIdx},
 				{unbookAction, bestSell, epochIdx},
+				{unbookAction, bestBuy, epochIdx},
 			},
 		},
 		{

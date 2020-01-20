@@ -208,6 +208,9 @@ func (p *Prefix) Time() int64 {
 // SetTime sets the order prefix's server time.
 func (p *Prefix) SetTime(t time.Time) {
 	p.ServerTime = t.UTC()
+	// SetTime should only ever be called once in practice, but in case it is
+	// necessary to restamp the ServerTime, clear any computed OrderID.
+	p.id, p.uid = nil, ""
 }
 
 // User gives the user's account ID.
