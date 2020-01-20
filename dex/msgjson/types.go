@@ -706,6 +706,7 @@ type NotifyFeeResult struct {
 type ConfigResult struct {
 	CancelMax        float32  `json:"cancelmax"`
 	BroadcastTimeout uint64   `json:"btimeout"`
+	RegFeeConfirms   uint16   `json:"regfeeconfirms"`
 	Assets           []Asset  `json:"assets"`
 	Markets          []Market `json:"markets"`
 }

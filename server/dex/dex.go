@@ -131,6 +131,7 @@ func newConfigResponse(cfg *DexConf, cfgAssets []msgjson.Asset, cfgMarkets []msg
 	configMsg := &msgjson.ConfigResult{
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Seconds()),
 		CancelMax:        cfg.CancelThreshold,
+		RegFeeConfirms:   uint16(cfg.RegFeeConfirms),
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
 	}
