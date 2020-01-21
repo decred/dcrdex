@@ -340,9 +340,9 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 		switch err {
 		// Dark mode is the default
 		case nil:
-			darkMode = true
-		case http.ErrNoCookie:
 			darkMode = cookie.Value == "1"
+		case http.ErrNoCookie:
+			darkMode = true
 		default:
 			log.Errorf("Cookie dcrdataDarkBG retrieval error: %v", err)
 		}

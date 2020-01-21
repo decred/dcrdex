@@ -406,10 +406,12 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	errChan := make(chan error, 1)
 	c.waiterMtx.Lock()
 	c.waiters[form.DEX] = coinWaiter{
-		conn:    dc,
-		asset:   regAsset,
-		coin:    coin,
-		confs:   regAsset.FundConf,
+		conn:  dc,
+		asset: regAsset,
+		coin:  coin,
+		// DRAFT NOTE: Hard-coded to 1 for testing and until the 'config' response
+		// structure includes the reg fee confirmation requirements.
+		confs:   1,
 		route:   msgjson.NotifyFeeRoute,
 		privKey: privKey,
 		req:     req,

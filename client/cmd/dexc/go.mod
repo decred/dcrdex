@@ -4,7 +4,6 @@ go 1.13
 
 replace (
 	decred.org/dcrdex => ../../../
-	github.com/decred/dcrd/rpcclient/v5 => ../../../../rpcclient-temp
 	github.com/ltcsuite/ltcutil => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
 )
 
