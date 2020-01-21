@@ -1158,9 +1158,9 @@ func Test_shuffleQueue(t *testing.T) {
 
 	// q3Shuffled is the expected result of sorting q3_1 and q3_2
 	q3Shuffled := []order.Order{
-		marketOrders[1],
-		marketOrders[0],
 		limitOrders[0],
+		marketOrders[0],
+		marketOrders[1],
 	}
 
 	// shuffleQueue should work with nil slice

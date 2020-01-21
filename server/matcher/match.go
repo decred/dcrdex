@@ -5,13 +5,13 @@ package matcher
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"math/big"
 	"math/rand"
 	"sort"
 
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/matcher/mt19937"
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
@@ -479,11 +479,12 @@ func shuffleQueue(queue []order.Order) {
 		copy(hashCat[HashSize*i:HashSize*(i+1)], h[:])
 	}
 
-	// Fisher-Yates shuffle the slice using a seed derived from the hash of the
+	// Fisher-Yates shuffle the slice using MT19937 seeded with the hash of the
 	// concatenated order ID hashes.
 	seedHash := HashFunc(hashCat)
-	seed := int64(binary.LittleEndian.Uint64(seedHash[:8]))
-	prng := rand.New(rand.NewSource(seed))
+	mtSrc := mt19937.NewSource()
+	mtSrc.SeedBytes(seedHash[:])
+	prng := rand.New(mtSrc)
 	for i := range queue {
 		j := prng.Intn(qLen-i) + i
 		queue[i], queue[j] = queue[j], queue[i]

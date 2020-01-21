@@ -32,8 +32,4 @@ require (
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c // indirect
 )
 
-replace (
-	decred.org/dcrdex/client/asset/dcr => ./client/asset/dcr
-	decred.org/dcrdex/dex/btc => ./dex/btc
-	github.com/ltcsuite/ltcutil => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
-)
+replace github.com/ltcsuite/ltcutil => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
