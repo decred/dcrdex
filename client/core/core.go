@@ -6,6 +6,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/db/bolt"
+	"decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -30,9 +32,11 @@ type websocket interface {
 
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
-	conn   websocket
-	assets map[uint32]*msgjson.Asset
-	cfg    *msgjson.ConfigResult
+	conn     websocket
+	assets   map[uint32]*msgjson.Asset
+	booksMtx sync.RWMutex
+	books    map[string]*order.OrderBook
+	cfg      *msgjson.ConfigResult
 }
 
 // Config is the configuration for the Core.
@@ -150,7 +154,8 @@ func (c *Core) initialize() {
 	}
 	if len(dexs) > 0 {
 		c.connMtx.RLock()
-		log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(dexs))
+		log.Infof("Successfully connected to %d out of %d "+
+			"DEX servers", len(c.conns), len(dexs))
 		c.connMtx.RUnlock()
 	}
 }
@@ -206,17 +211,20 @@ func (c *Core) addDex(uri string) {
 		for _, mkt := range dexCfg.Markets {
 			_, ok := assets[mkt.Base]
 			if !ok {
-				log.Errorf("%s reported a market with base asset %d, but did not provide the asset info.", uri, mkt.Base)
+				log.Errorf("%s reported a market with base asset %d, "+
+					"but did not provide the asset info.", uri, mkt.Base)
 			}
 			_, ok = assets[mkt.Quote]
 			if !ok {
-				log.Errorf("%s reported a market with quote asset %d, but did not provide the asset info.", uri, mkt.Quote)
+				log.Errorf("%s reported a market with quote asset %d, "+
+					"but did not provide the asset info.", uri, mkt.Quote)
 			}
 		}
 		// Create the dexConnection and add it to the map.
 		dc := &dexConnection{
 			conn:   conn,
 			assets: assets,
+			books:  make(map[string]*order.OrderBook),
 			cfg:    dexCfg,
 		}
 		c.connMtx.Lock()
@@ -232,6 +240,76 @@ func (c *Core) addDex(uri string) {
 // been re-established.
 func (c *Core) handleReconnect(uri string) {
 	log.Infof("DEX at %s has reconnected", uri)
+}
+
+// handleOrderBookMsg is called when an orderbook response is received.
+func (c *Core) handleOrderBookMsg(dc *dexConnection, msg *msgjson.Message) error {
+	resp, err := msg.Response()
+	if err != nil {
+		return err
+	}
+
+	var snapshot msgjson.OrderBook
+	err = json.Unmarshal(resp.Result, &snapshot)
+	if err != nil {
+		return fmt.Errorf("order book unmarshal error: %v", err)
+	}
+
+	if snapshot.MarketID == "" {
+		return fmt.Errorf("snapshot market id cannot be an empty string")
+	}
+
+	ob := order.NewOrderBook()
+	err = ob.Sync(&snapshot)
+	if err != nil {
+		return err
+	}
+
+	dc.booksMtx.Lock()
+	dc.books[snapshot.MarketID] = ob
+	dc.booksMtx.Unlock()
+
+	return nil
+}
+
+// handleBookOrderMsg is called when a book_order notification is received.
+func (c *Core) handleBookOrderMsg(dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.BookOrderNote
+	err := json.Unmarshal(msg.Payload, &note)
+	if err != nil {
+		return fmt.Errorf("book order note unmarshal error: %v", err)
+	}
+
+	dc.booksMtx.Lock()
+	ob, ok := dc.books[note.MarketID]
+	dc.booksMtx.Unlock()
+	if !ok {
+		return fmt.Errorf("no order book found with market id '%v'",
+			note.MarketID)
+	}
+
+	return ob.Book(&note)
+}
+
+// handleUnbookOrderMsg is called when an unbook_order notification is
+// received.
+func (c *Core) handleUnbookOrderMsg(dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.UnbookOrderNote
+	err := json.Unmarshal(msg.Payload, &note)
+	if err != nil {
+		return fmt.Errorf("unbook order note unmarshal error: %v", err)
+	}
+
+	dc.booksMtx.Lock()
+	defer dc.booksMtx.Unlock()
+
+	ob, ok := dc.books[note.MarketID]
+	if !ok {
+		return fmt.Errorf("no order book found with market id %q",
+			note.MarketID)
+	}
+
+	return ob.Unbook(&note)
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -262,16 +340,41 @@ out:
 					log.Info("revoke_match message received")
 				case msgjson.SuspensionRoute:
 					log.Info("suspension message received")
+				default:
+					log.Errorf("request with unknown route (%v) received",
+						msg.Route)
 				}
+
 			case msgjson.Notification:
+				var err error
 				switch msg.Route {
 				case msgjson.BookOrderRoute:
-					log.Info("book_order message received")
+					err = c.handleBookOrderMsg(dc, msg)
 				case msgjson.EpochOrderRoute:
 					log.Info("epoch_order message received")
 				case msgjson.UnbookOrderRoute:
-					log.Info("unbook_order message received")
+					err = c.handleUnbookOrderMsg(dc, msg)
+				default:
+					err = fmt.Errorf("notification with unknown route "+
+						"(%v) received", msg.Route)
 				}
+				if err != nil {
+					log.Error(err)
+				}
+
+			case msgjson.Response:
+				var err error
+				switch msg.Route {
+				case msgjson.OrderBookRoute:
+					err = c.handleOrderBookMsg(dc, msg)
+				default:
+					err = fmt.Errorf("response mesage with unknown route "+
+						"(%v) received", msg.Route)
+				}
+				if err != nil {
+					log.Error(err)
+				}
+
 			default:
 				log.Errorf("invalid message type %d from MessageSource", msg.Type)
 			}

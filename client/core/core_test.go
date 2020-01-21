@@ -2,10 +2,12 @@ package core
 
 import (
 	"context"
+	"encoding/hex"
 	"os"
 	"strconv"
 	"testing"
 
+	"decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex/msgjson"
 )
 
@@ -118,5 +120,109 @@ func TestListMarkets(t *testing.T) {
 		if assets[market.QuoteID].Symbol != market.QuoteSymbol {
 			t.Fatalf("quote symbol mismatch. %s != %s", assets[market.QuoteID].Symbol, market.QuoteSymbol)
 		}
+	}
+}
+
+func TestDexConnectionOrderBook(t *testing.T) {
+	tCore := testCore()
+	mid := "ob"
+	dc := &dexConnection{
+		books: make(map[string]*order.OrderBook),
+	}
+
+	// Ensure handleOrderBookMsg creates an order book as expected.
+	oid, err := hex.DecodeString("1d6c8998e93898f872fa43f35ede17c3196c6a1a2054cb8d91f2e184e8ca0316")
+	if err != nil {
+		t.Fatalf("[DecodeString]: unexpected err: %v", err)
+	}
+	msg, err := msgjson.NewResponse(1, &msgjson.OrderBook{
+		Seq:      1,
+		MarketID: "ob",
+		Orders: []*msgjson.BookOrderNote{
+			{
+				TradeNote: msgjson.TradeNote{
+					Side:     msgjson.BuyOrderNum,
+					Quantity: 10,
+					Rate:     2,
+				},
+				OrderNote: msgjson.OrderNote{
+					Seq:      1,
+					MarketID: mid,
+					OrderID:  oid,
+				},
+			},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("[NewResponse]: unexpected err: %v", err)
+	}
+
+	err = tCore.handleOrderBookMsg(dc, msg)
+	if err != nil {
+		t.Fatalf("[handleOrderBookMsg]: unexpected err: %v", err)
+	}
+	if len(dc.books) != 1 {
+		t.Fatalf("expected %v order book created, got %v", 1, len(dc.books))
+	}
+	_, ok := dc.books[mid]
+	if !ok {
+		t.Fatalf("expected order book with market id %s", mid)
+	}
+
+	// Ensure handleBookOrderMsg creates a book order for the associated
+	// order book as expected.
+	oid, err = hex.DecodeString("d445ab685f5cf54dfebdaa05232892b4cfa453a566b5e85f62627dd6834c5c02")
+	if err != nil {
+		t.Fatalf("[DecodeString]: unexpected err: %v", err)
+	}
+	bookSeq := uint64(2)
+	msg, err = msgjson.NewNotification(msgjson.BookOrderRoute, &msgjson.BookOrderNote{
+		TradeNote: msgjson.TradeNote{
+			Side:     msgjson.BuyOrderNum,
+			Quantity: 10,
+			Rate:     2,
+		},
+		OrderNote: msgjson.OrderNote{
+			Seq:      bookSeq,
+			MarketID: mid,
+			OrderID:  oid,
+		},
+	})
+	if err != nil {
+		t.Fatalf("[NewNotification]: unexpected err: %v", err)
+	}
+
+	err = tCore.handleBookOrderMsg(dc, msg)
+	if err != nil {
+		t.Fatalf("[handleBookOrderMsg]: unexpected err: %v", err)
+	}
+	_, ok = dc.books[mid]
+	if !ok {
+		t.Fatalf("expected order book with market id %s", mid)
+	}
+
+	// Ensure handleUnbookOrderMsg removes a book order from an associated
+	// order book as expected.
+	oid, err = hex.DecodeString("d445ab685f5cf54dfebdaa05232892b4cfa453a566b5e85f62627dd6834c5c02")
+	if err != nil {
+		t.Fatalf("[DecodeString]: unexpected err: %v", err)
+	}
+	unbookSeq := uint64(3)
+	msg, err = msgjson.NewNotification(msgjson.UnbookOrderRoute, &msgjson.UnbookOrderNote{
+		Seq:      unbookSeq,
+		MarketID: mid,
+		OrderID:  oid,
+	})
+	if err != nil {
+		t.Fatalf("[NewNotification]: unexpected err: %v", err)
+	}
+
+	err = tCore.handleUnbookOrderMsg(dc, msg)
+	if err != nil {
+		t.Fatalf("[handleUnbookOrderMsg]: unexpected err: %v", err)
+	}
+	_, ok = dc.books[mid]
+	if !ok {
+		t.Fatalf("expected order book with market id %s", mid)
 	}
 }
