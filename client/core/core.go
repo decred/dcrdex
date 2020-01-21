@@ -242,7 +242,7 @@ func (c *Core) handleReconnect(uri string) {
 	log.Infof("DEX at %s has reconnected", uri)
 }
 
-// handleOrderBookMsg is called when an orderbook request is received.
+// handleOrderBookMsg is called when an orderbook response is received.
 func (c *Core) handleOrderBookMsg(dc *dexConnection, msg *msgjson.Message) error {
 	resp, err := msg.Response()
 	if err != nil {
@@ -346,36 +346,33 @@ out:
 				}
 
 			case msgjson.Notification:
+				var err error
 				switch msg.Route {
 				case msgjson.BookOrderRoute:
-					err := c.handleBookOrderMsg(dc, msg)
-					if err != nil {
-						log.Error(err)
-					}
-
+					err = c.handleBookOrderMsg(dc, msg)
 				case msgjson.EpochOrderRoute:
 					log.Info("epoch_order message received")
-
 				case msgjson.UnbookOrderRoute:
-					err := c.handleUnbookOrderMsg(dc, msg)
-					if err != nil {
-						log.Error(err)
-					}
+					err = c.handleUnbookOrderMsg(dc, msg)
 				default:
-					log.Errorf("notification with unknown route (%v) received",
-						msg.Route)
+					err = fmt.Errorf("notification with unknown route "+
+						"(%v) received", msg.Route)
+				}
+				if err != nil {
+					log.Error(err)
 				}
 
 			case msgjson.Response:
+				var err error
 				switch msg.Route {
 				case msgjson.OrderBookRoute:
-					err := c.handleOrderBookMsg(dc, msg)
-					if err != nil {
-						log.Error(err)
-					}
+					err = c.handleOrderBookMsg(dc, msg)
 				default:
-					log.Errorf("response mesage with unknown route "+
+					err = fmt.Errorf("response mesage with unknown route "+
 						"(%v) received", msg.Route)
+				}
+				if err != nil {
+					log.Error(err)
 				}
 
 			default:

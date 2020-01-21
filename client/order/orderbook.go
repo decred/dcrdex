@@ -155,7 +155,8 @@ func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 
 	for _, o := range snapshot.Orders {
 		if len(o.OrderID) != order.OrderIDSize {
-			return fmt.Errorf("order id length is not %v", order.OrderIDSize)
+			return fmt.Errorf("expected order id length of %d, got %d",
+				order.OrderIDSize, len(o.OrderID))
 		}
 
 		var oid order.OrderID
@@ -284,7 +285,8 @@ func (ob *OrderBook) unbook(note *msgjson.UnbookOrderNote, cached bool) error {
 	}
 
 	if len(note.OrderID) != order.OrderIDSize {
-		return fmt.Errorf("order id length is not %d", order.OrderIDSize)
+		return fmt.Errorf("expected order id length of %d, got %d",
+			order.OrderIDSize, len(note.OrderID))
 	}
 
 	var oid order.OrderID
