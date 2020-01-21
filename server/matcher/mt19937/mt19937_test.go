@@ -1,6 +1,20 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
+// Package mt19937 implements the 64-bit version of the Mersenne Twister (MT)
+// pseudo-random number generator (PRNG) with a period of 2^19937-1, also known
+// as mt19937_64, according to the reference implementation by Matsumoto and
+// Nishimura at http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/emt64.html
+//
+// MT is not cryptographically secure. Given a sufficiently long sequence of the
+// generated values, one may predict additional values without knowing the seed.
+// A secure hashing algorithm should be used with MT if a CSPRNG is required.
+//
+// When possible, the MT generator should be seeded with a slice of bytes or
+// uint64 values to address known "zero-excess" seed initialization issues where
+// "shifted" sequences may be generated for seeds with only a few non-zero bits.
+// For more information, see
+// http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/MT2002/emt19937ar.html
 package mt19937
 
 import (
