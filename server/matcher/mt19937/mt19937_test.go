@@ -56,6 +56,7 @@ func TestSource_Uint64_default(t *testing.T) {
 		refUint64 = append(refUint64, val)
 	}
 
+	// Default seed, automatically seeded on first generate.
 	s := NewSource()
 	for i, want := range refUint64 {
 		got := s.Uint64()
@@ -65,14 +66,36 @@ func TestSource_Uint64_default(t *testing.T) {
 	}
 
 	s = NewSource()
-	got := s.Int63()
-	want := int64(7257142393139058515)
-	if got != want {
-		t.Errorf("incorrect value: got %d want %d", got, want)
+	got63 := s.Int63()
+	want63 := int64(7257142393139058515)
+	if got63 != want63 {
+		t.Errorf("incorrect value: got %d want %d", got63, want63)
+	}
+
+	// Int63 and Uint64 both affect the state and advance the sequence.
+	got64 := s.Uint64()
+	want64 := uint64(4620546740167642908)
+	if got64 != want64 {
+		t.Errorf("incorrect value: got %d want %d", got64, want64)
+	}
+
+	// Check the 10000th value as per
+	// https://en.cppreference.com/w/cpp/numeric/random/mersenne_twister_engine
+	for i := 3; i < 10000; i++ {
+		_ = s.Uint64()
+	}
+	tenThou := s.Uint64()
+	wantTenThou := uint64(9981545732273789042)
+	if tenThou != wantTenThou {
+		t.Errorf("10000th value should be %d, got %d", wantTenThou, tenThou)
 	}
 }
 
 func TestSource_Uint64_SliceSeed(t *testing.T) {
+	// The authors gold standard for the array initialization tests uses the
+	// following seedValues to generate the sequence at
+	// http://www.math.sci.hiroshima-u.ac.jp/~m-mat/MT/mt19937-64.out.txt
+	seedVals := []uint64{0x12345, 0x23456, 0x34567, 0x45678}
 	file, err := os.Open("refuint64_sliceseed.dat")
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +115,7 @@ func TestSource_Uint64_SliceSeed(t *testing.T) {
 	}
 
 	s := NewSource()
-	s.SeedVals([]uint64{0x12345, 0x23456, 0x34567, 0x45678})
+	s.SeedVals(seedVals)
 	for i, want := range refUint64 {
 		got := s.Uint64()
 		if got != want {
