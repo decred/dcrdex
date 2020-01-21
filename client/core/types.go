@@ -29,7 +29,7 @@ type Market struct {
 	QuoteSymbol     string  `json:"quotesymbol"`
 	EpochLen        uint64  `json:"epochlen"`
 	StartEpoch      uint64  `json:"startepoch"`
-	MarketBuyBuffer float32 `json:"buybuffer"`
+	MarketBuyBuffer float64 `json:"buybuffer"`
 }
 
 // Display returns an ID string suitable for displaying in a UI.

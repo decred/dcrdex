@@ -157,6 +157,16 @@ func (m *Market) MarketBuyBuffer() float64 {
 	return m.marketInfo.MarketBuyBuffer
 }
 
+// Base is the base asset ID.
+func (m *Market) Base() uint32 {
+	return m.marketInfo.Base
+}
+
+// Quote is the quote asset ID.
+func (m *Market) Quote() uint32 {
+	return m.marketInfo.Quote
+}
+
 // OrderFeed provides a new order book update channel. This is not thread-safe,
 // and should not be called after calling Start.
 func (m *Market) OrderFeed() <-chan *bookUpdateSignal {
@@ -568,6 +578,7 @@ func (m *Market) processEpoch(ctx context.Context, epoch *EpochQueue) {
 		// The order targeted by a matched cancel order will be in the unbooked
 		// slice. These coins are unlocked next in the book locker.
 		if match.Taker.Type() == order.CancelOrderType {
+			//m.auth.RecordCancel(match.Taker.User())
 			continue
 		}
 		swapOrders = append(swapOrders, match.Taker)

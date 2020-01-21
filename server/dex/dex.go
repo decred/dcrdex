@@ -2,6 +2,7 @@ package dex
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/asset"
 	dcrasset "decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
@@ -92,6 +94,7 @@ type DexConf struct {
 	RegFeeConfirms   int64
 	RegFeeAmount     uint64
 	BroadcastTimeout time.Duration
+	CancelThreshold  float32
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
 }
@@ -113,6 +116,42 @@ type DEX struct {
 	bookRouter  *market.BookRouter
 	stopWaiters []subsystem
 	server      *comms.Server
+	config      *configResponse
+}
+
+// configResponse is defined here to leave open the possibility for hot
+// adjustable parameters while storing a pre-encoded config response message. An
+// update method will need to be defined in the future for this purpose.
+type configResponse struct {
+	configMsg *msgjson.ConfigResult // constant for now
+	configEnc json.RawMessage
+}
+
+func newConfigResponse(cfg *DexConf, cfgAssets []msgjson.Asset, cfgMarkets []msgjson.Market) (*configResponse, error) {
+	configMsg := &msgjson.ConfigResult{
+		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Seconds()),
+		CancelMax:        cfg.CancelThreshold,
+		RegFeeConfirms:   uint16(cfg.RegFeeConfirms),
+		Assets:           cfgAssets,
+		Markets:          cfgMarkets,
+	}
+
+	encResult, err := json.Marshal(configMsg)
+	if err != nil {
+		return nil, err
+	}
+	payload := &msgjson.ResponsePayload{
+		Result: encResult,
+	}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	return &configResponse{
+		configMsg: configMsg,
+		configEnc: encPayload,
+	}, nil
 }
 
 // Stop shuts down the DEX. Stop returns only after all components have
@@ -129,8 +168,19 @@ func (dm *DEX) Stop() {
 	}
 }
 
-// TODO
-//func (dm *DEX) handleDEXConfig (conn comms.Link, msg *msgjson.Message) *msgjson.Error { }
+func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	ack := &msgjson.Message{
+		Type:    msgjson.Response,
+		ID:      msg.ID,
+		Payload: dm.config.configEnc,
+	}
+
+	if err := conn.Send(ack); err != nil {
+		log.Debugf("error sending config response: %v", err)
+	}
+
+	return nil
+}
 
 // NewDEX creates the dex manager and starts all subsystems. Use Stop to
 // shutdown cleanly.
@@ -194,6 +244,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	var dcrBackend *dcrasset.Backend
 	lockableAssets := make(map[uint32]*swap.LockableAsset, len(cfg.Assets))
 	backedAssets := make(map[uint32]*asset.BackedAsset, len(cfg.Assets))
+	cfgAssets := make([]msgjson.Asset, 0, len(cfg.Assets))
 	for i, assetConf := range cfg.Assets {
 		symbol := strings.ToLower(assetConf.Symbol)
 		ID := assetIDs[i]
@@ -237,6 +288,17 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			BackedAsset: ba,
 			CoinLocker:  dexCoinLocker.AssetLocker(ID).Swap(),
 		}
+
+		cfgAssets = append(cfgAssets, msgjson.Asset{
+			Symbol:   assetConf.Symbol,
+			ID:       ID,
+			LotSize:  assetConf.LotSize,
+			RateStep: assetConf.RateStep,
+			FeeRate:  assetConf.FeeRate,
+			SwapSize: uint64(be.InitTxSize()),
+			SwapConf: uint16(assetConf.SwapConf),
+			FundConf: uint16(assetConf.FundConf),
+		})
 	}
 
 	// Create DEXArchivist with the pg DB driver.
@@ -298,12 +360,21 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	now := encode.UnixMilli(time.Now())
 	bookSources := make(map[string]market.BookSource, len(cfg.Markets))
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
+	cfgMarkets := make([]msgjson.Market, 0, len(cfg.Markets))
 	for name, mkt := range markets {
 		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
 		mkt.SetStartEpochIdx(startEpochIdx)
 		startSubSys(fmt.Sprintf("Market[%s]", name), mkt)
 		bookSources[name] = mkt
 		marketTunnels[name] = mkt
+		cfgMarkets = append(cfgMarkets, msgjson.Market{
+			Name:            name,
+			Base:            mkt.Base(),
+			Quote:           mkt.Quote(),
+			EpochLen:        mkt.EpochDuration(),
+			StartEpoch:      uint64(startEpochIdx),
+			MarketBuyBuffer: mkt.MarketBuyBuffer(),
+		})
 	}
 
 	// Book router
@@ -325,6 +396,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 	startSubSys("Comms Server", server)
 
+	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets)
+	if err != nil {
+		return nil, err
+	}
+
 	dexMgr := &DEX{
 		network:     cfg.Network,
 		markets:     markets,
@@ -335,10 +411,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		bookRouter:  bookRouter,
 		stopWaiters: stopWaiters,
 		server:      server,
+		config:      cfgResp,
 	}
 
-	// TODO:
-	//comms.Route(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
+	comms.Route(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
 
 	return dexMgr, nil
 }
