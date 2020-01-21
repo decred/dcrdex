@@ -153,7 +153,7 @@ func (s *Source) newState() {
 	s.index = 0
 }
 
-// Uint64 returns the next pseudo-random integer on [0, 2^64-1] in the sequence.
+// Uint64 returns the next pseudo-random integer on [0, 2^64-1) in the sequence.
 // Uint64 satisfies math/rand.Source.
 func (s *Source) Uint64() uint64 {
 	if s.index >= n {
