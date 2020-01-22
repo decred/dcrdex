@@ -230,17 +230,17 @@ func TestWallets(t *testing.T) {
 func randOrderForMarket(base, quote uint32) order.Order {
 	switch rand.Intn(3) {
 	case 0:
-		o := ordertest.RandomCancelOrder()
+		o, _ := ordertest.RandomCancelOrder()
 		o.BaseAsset = base
 		o.QuoteAsset = quote
 		return o
 	case 1:
-		o := ordertest.RandomMarketOrder()
+		o, _ := ordertest.RandomMarketOrder()
 		o.BaseAsset = base
 		o.QuoteAsset = quote
 		return o
 	default:
-		o := ordertest.RandomLimitOrder()
+		o, _ := ordertest.RandomLimitOrder()
 		o.BaseAsset = base
 		o.QuoteAsset = quote
 		return o

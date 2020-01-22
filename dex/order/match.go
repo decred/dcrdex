@@ -193,3 +193,12 @@ func appendOrderID(b []byte, order Order) []byte {
 	oid := order.ID()
 	return append(b, oid[:]...)
 }
+
+// MatchProof contains the key results of an epoch's order matching.
+type MatchProof struct {
+	Epoch     EpochID
+	Preimages []Preimage
+	Misses    []Order
+	CSum      []byte
+	Seed      []byte
+}

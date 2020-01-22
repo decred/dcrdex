@@ -21,6 +21,7 @@ var HashFunc = blake256.Sum256
 const (
 	HashSize = blake256.Size
 
+	peSize              = order.PreimageSize
 	atomsPerCoin uint64 = 1e8
 )
 
@@ -102,23 +103,29 @@ func CheckMarketBuyBuffer(book Booker, ord *order.MarketOrder, marketBuyBuffer f
 	return ord.Remaining() >= BaseToQuote(book.BestSell().Rate, minBaseAsset)
 }
 
+// OrderRevealed combines an Order interface with a Preimage.
+type OrderRevealed struct {
+	Order    order.Order // Do not embed so OrderRevealed is not an order.Order.
+	Preimage order.Preimage
+}
+
 // Match matches orders given a standing order book and an epoch queue. Matched
 // orders from the book are removed from the book. The EpochID of the MatchSet
 // is not set. passed = booked + doneOK. queue = passed + failed. unbooked may
 // include orders that are not in the queue. Each of partial are in passed.
-func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.MatchSet, passed, failed, doneOK, partial, booked, unbooked []order.Order) {
+func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, matches []*order.MatchSet, passed, failed, doneOK, partial, booked []*OrderRevealed, unbooked []*order.LimitOrder) {
 	// Apply the deterministic pseudorandom shuffling.
-	shuffleQueue(queue)
+	seed = shuffleQueue(queue)
 
 	// For each order in the queue, find the best match in the book.
 	for _, q := range queue {
-		if !orderLotSizeOK(q, book.LotSize()) {
-			log.Warnf("Order with bad lot size in the queue: %v!", q.ID())
+		if !orderLotSizeOK(q.Order, book.LotSize()) {
+			log.Warnf("Order with bad lot size in the queue: %v!", q.Order.ID())
 			failed = append(failed, q)
 			continue
 		}
 
-		switch o := q.(type) {
+		switch o := q.Order.(type) {
 		case *order.CancelOrder:
 			removed, ok := book.Remove(o.TargetOrderID)
 			if !ok {
@@ -133,7 +140,7 @@ func (m *Matcher) Match(book Booker, queue []order.Order) (matches []*order.Matc
 			doneOK = append(doneOK, q)
 			// CancelOrder Match has zero values for Amounts, Rates, and Total.
 			matches = append(matches, &order.MatchSet{
-				Taker:   q,
+				Taker:   q.Order,
 				Makers:  []*order.LimitOrder{removed},
 				Amounts: []uint64{removed.Remaining()},
 				Rates:   []uint64{removed.Rate},
@@ -447,46 +454,85 @@ func orderData(o order.Order) (orderType order.OrderType, sell bool, amount, rat
 	return
 }
 
-// sortQueue lexicographically sorts the Orders by their IDs.
-func sortQueue(queue []order.Order) {
+// sortQueueByCommit lexicographically sorts the Orders by their commitments.
+// This is used to compute the commitment checksum, which is sent to the clients
+// in the preimage requests prior to queue shuffling. There must not be
+// duplicated commitments.
+func sortQueueByCommit(queue []order.Order) {
 	sort.Slice(queue, func(i, j int) bool {
-		ii, ij := queue[i].ID(), queue[j].ID()
-		return bytes.Compare(ii[:], ij[:]) >= 0
+		ii, ij := queue[i].Commitment(), queue[j].Commitment()
+		return bytes.Compare(ii[:], ij[:]) < 0
 	})
 }
 
-func ShuffleQueue(queue []order.Order) {
+// CSum computes the commitment checksum for the order queue. For an empty
+// queue, the result is a nil slice instead of the initial hash state.
+func CSum(queue []order.Order) []byte {
+	if len(queue) == 0 {
+		return nil
+	}
+	sortQueueByCommit(queue)
+	hasher := blake256.New()
+	for _, ord := range queue {
+		commit := ord.Commitment()
+		hasher.Write(commit[:]) // err is always nil and n is always len(s)
+	}
+	return hasher.Sum(nil)
+}
+
+// sortQueueByID lexicographically sorts the Orders by their IDs. Note that
+// while sorting is done with the order ID, the preimage is still used to
+// specify the shuffle order. The result is undefined if the slice contains
+// duplicated order IDs.
+func sortQueueByID(queue []*OrderRevealed) {
+	sort.Slice(queue, func(i, j int) bool {
+		ii, ij := queue[i].Order.ID(), queue[j].Order.ID()
+		return bytes.Compare(ii[:], ij[:]) < 0
+	})
+}
+
+func ShuffleQueue(queue []*OrderRevealed) {
 	shuffleQueue(queue)
 }
 
 // shuffleQueue deterministically shuffles the Orders using a Fisher-Yates
-// algorithm seeded with the hash of the concatenated order ID hashes.
-func shuffleQueue(queue []order.Order) {
-	// Nothing to do if there are less than 2 orders in the queue.
-	if len(queue) < 2 {
+// algorithm seeded with the hash of the concatenated order commitment
+// preimages. If any orders in the queue are repeated, the order sorting
+// behavior is undefined.
+func shuffleQueue(queue []*OrderRevealed) (seed []byte) {
+	// Nothing to do if there are no orders. For one order, the seed must still
+	// be computed.
+	if len(queue) == 0 {
 		return
 	}
 
-	// The shuffling seed is derived from the sorted orders.
-	sortQueue(queue)
+	// The shuffling seed is derived from the concatenation of the order
+	// preimages, lexicographically sorted by order ID.
+	sortQueueByID(queue)
 
-	// Compute and concatenate the hashes of the order IDs.
+	// Hash the concatenation of the preimages.
 	qLen := len(queue)
-	hashCat := make([]byte, HashSize*qLen)
-	for i, o := range queue {
-		id := o.ID()
-		h := HashFunc(id[:])
-		copy(hashCat[HashSize*i:HashSize*(i+1)], h[:])
+	hasher := blake256.New()
+	//peCat := make([]byte, peSize*qLen)
+	for _, o := range queue {
+		hasher.Write(o.Preimage[:]) // err is always nil and n is always len(s)
+		//copy(peCat[peSize*i:peSize*(i+1)], o.Preimage[:])
 	}
 
-	// Fisher-Yates shuffle the slice using MT19937 seeded with the hash of the
-	// concatenated order ID hashes.
-	seedHash := HashFunc(hashCat)
+	// Fisher-Yates shuffle the slice using MT19937 seeded with the hash.
+	seed = hasher.Sum(nil)
+	// seed = HashFunc(hashCat)
+
+	// This seeded random number generator is used to generate one sequence, and
+	// the seed is revealed then revealed. It need not be cryptographically
+	// secure.
 	mtSrc := mt19937.NewSource()
-	mtSrc.SeedBytes(seedHash[:])
+	mtSrc.SeedBytes(seed[:])
 	prng := rand.New(mtSrc)
 	for i := range queue {
 		j := prng.Intn(qLen-i) + i
 		queue[i], queue[j] = queue[j], queue[i]
 	}
+
+	return
 }

@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 )
 
@@ -28,6 +29,9 @@ type AuthManager interface {
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message)
+	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
+	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
+	Penalize(user account.AccountID, rule account.Rule)
 }
 
 // MarketTunnel is a connection to a market and information about existing
@@ -196,6 +200,13 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		return msgjson.NewError(msgjson.OrderParameterError, "unknown time-in-force")
 	}
 
+	// Commitment.
+	if len(limit.Commit) != order.CommitmentSize {
+		return msgjson.NewError(msgjson.OrderParameterError, "invalid commitment")
+	}
+	var commit order.Commitment
+	copy(commit[:], limit.Commit)
+
 	// Create the limit order
 	lo := &order.LimitOrder{
 		P: order.Prefix{
@@ -205,6 +216,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			OrderType:  order.LimitOrderType,
 			ClientTime: encode.UnixTimeMilli(int64(limit.ClientTime)),
 			//ServerTime set in epoch queue processing pipeline.
+			Commit: commit,
 		},
 		T: order.Trade{
 			Coins:    utxos,
@@ -286,17 +298,24 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		return msgjson.NewError(msgjson.FundingError,
 			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
 	}
+
+	// Commitment.
+	if len(market.Commit) != order.CommitmentSize {
+		return msgjson.NewError(msgjson.OrderParameterError, "invalid commitment")
+	}
+	var commit order.Commitment
+	copy(commit[:], market.Commit)
+
 	// Create the market order
-	clientTime := encode.UnixTimeMilli(int64(market.ClientTime))
-	serverTime := time.Now().Truncate(time.Millisecond).UTC()
 	mo := &order.MarketOrder{
 		P: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  market.Base,
 			QuoteAsset: market.Quote,
 			OrderType:  order.MarketOrderType,
-			ClientTime: clientTime,
-			ServerTime: serverTime,
+			ClientTime: encode.UnixTimeMilli(int64(market.ClientTime)),
+			//ServerTime set in epoch queue processing pipeline.
+			Commit: commit,
 		},
 		T: order.Trade{
 			Coins:    coins,
@@ -359,17 +378,23 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
+	// Commitment.
+	if len(cancel.Commit) != order.CommitmentSize {
+		return msgjson.NewError(msgjson.OrderParameterError, "invalid commitment")
+	}
+	var commit order.Commitment
+	copy(commit[:], cancel.Commit)
+
 	// Create the cancel order
-	clientTime := encode.UnixTimeMilli(int64(cancel.ClientTime))
-	serverTime := time.Now().Truncate(time.Millisecond).UTC()
 	co := &order.CancelOrder{
 		P: order.Prefix{
 			AccountID:  user,
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,
 			OrderType:  order.MarketOrderType,
-			ClientTime: clientTime,
-			ServerTime: serverTime,
+			ClientTime: encode.UnixTimeMilli(int64(cancel.ClientTime)),
+			//ServerTime set in epoch queue processing pipeline.
+			Commit: commit,
 		},
 		TargetOrderID: targetID,
 	}

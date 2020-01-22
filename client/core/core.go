@@ -387,13 +387,13 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	}
 
 	// Make sure the account doesn't already exist.
-	ai, err := c.db.Account(form.DEX)
+	_, err = c.db.Account(form.DEX)
 	if err == nil {
 		return fmt.Errorf("account already exists for %s", form.DEX), nil
 	}
 
 	// Get a connection to the dex.
-	ai = &db.AccountInfo{
+	ai := &db.AccountInfo{
 		URL: form.DEX,
 	}
 	c.connMtx.Lock()
@@ -1077,8 +1077,6 @@ out:
 			switch msg.Type {
 			case msgjson.Request:
 				switch msg.Route {
-				case msgjson.MatchDataRoute:
-					log.Info("match_data message received")
 				case msgjson.MatchProofRoute:
 					log.Info("match_proof message received")
 				case msgjson.PreimageRoute:

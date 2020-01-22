@@ -304,17 +304,17 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 	// Create DEXArchivist with the pg DB driver.
 	pgCfg := &pg.Config{
-		Host:          cfg.DBConf.Host,
-		Port:          strconv.Itoa(int(cfg.DBConf.Port)),
-		User:          cfg.DBConf.User,
-		Pass:          cfg.DBConf.Pass,
-		DBName:        cfg.DBConf.DBName,
-		HidePGConfig:  false,
-		QueryTimeout:  20 * time.Minute,
-		MarketCfg:     cfg.Markets,
-		CheckedStores: true,
-		Net:           cfg.Network,
-		FeeKey:        cfg.RegFeeXPub,
+		Host:         cfg.DBConf.Host,
+		Port:         strconv.Itoa(int(cfg.DBConf.Port)),
+		User:         cfg.DBConf.User,
+		Pass:         cfg.DBConf.Pass,
+		DBName:       cfg.DBConf.DBName,
+		HidePGConfig: false,
+		QueryTimeout: 20 * time.Minute,
+		MarketCfg:    cfg.Markets,
+		//CheckedStores: true,
+		Net:    cfg.Network,
+		FeeKey: cfg.RegFeeXPub,
 	}
 	storage, err := db.Open(ctx, "pg", pgCfg)
 	if err != nil {

@@ -272,7 +272,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	if isCoinbase {
 		feeRate = 0
 	}
-	return newTransaction(dcr, txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, inputs, outputs, feeRate), nil
+	return newTransaction(txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, inputs, outputs, feeRate), nil
 }
 
 // Shutdown down the rpcclient.Client.

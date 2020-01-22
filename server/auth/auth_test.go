@@ -23,6 +23,8 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
+func noop() {}
+
 func randBytes(l int) []byte {
 	b := make([]byte, l)
 	rand.Read(b)
@@ -82,7 +84,7 @@ func (c *TRPCClient) Send(msg *msgjson.Message) error {
 	c.sends = append(c.sends, msg)
 	return c.sendErr
 }
-func (c *TRPCClient) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
+func (c *TRPCClient) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Message), _ time.Duration, _ func()) error {
 	c.reqs = append(c.reqs, &tReq{
 		msg:      msg,
 		respFunc: f,
@@ -781,28 +783,33 @@ func TestHandleResponse(t *testing.T) {
 	if client == nil {
 		t.Fatalf("client not found")
 	}
-	client.respHandlers = map[uint64]*respHandler{
-		comms.NextID(): {
-			expiration: time.Now().UTC(),
-			f:          func(comms.Link, *msgjson.Message) {},
-		},
+
+	newID := comms.NextID()
+	client.logReq(newID, func(comms.Link, *msgjson.Message) {},
+		0, func() { t.Log("expired (ok)") })
+	time.Sleep(time.Millisecond) // expire Timer func run in goroutine
+	client.mtx.Lock()
+	if len(client.respHandlers) != 0 {
+		t.Fatalf("expected 0 response handlers, found %d", len(client.respHandlers))
 	}
+	if client.respHandlers[newID] != nil {
+		t.Fatalf("response handler should have been expired")
+	}
+	client.mtx.Unlock()
+
 	// After logging a new request, there should still only be one. A short
 	// sleep is added because the cleanup is run as a goroutine.
-	newID := comms.NextID()
-	client.logReq(newID, &respHandler{
-		expiration: time.Now().Add(reqExpiration),
-		f:          func(comms.Link, *msgjson.Message) {},
-	})
-	time.Sleep(time.Millisecond)
+	newID = comms.NextID()
+	client.logReq(newID, func(comms.Link, *msgjson.Message) {}, time.Hour, noop)
+	time.Sleep(time.Millisecond) // expire Timer func run in goroutine
 	client.mtx.Lock()
-	defer client.mtx.Unlock()
 	if len(client.respHandlers) != 1 {
 		t.Fatalf("expected 1 response handler, found %d", len(client.respHandlers))
 	}
 	if client.respHandlers[newID] == nil {
 		t.Fatalf("wrong response handler left after cleanup cycle")
 	}
+	client.mtx.Unlock()
 }
 
 func TestHandleRegister(t *testing.T) {

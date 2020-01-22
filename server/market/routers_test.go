@@ -44,6 +44,8 @@ const (
 	mktName3      = "dcr_btc"
 	mkt3BaseRate  = 3e9
 	responseDelay = 10 // milliseconds
+
+	clientPreimageDelay = 125 * time.Millisecond
 )
 
 var (
@@ -111,8 +113,11 @@ func nowMs() time.Time {
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type TAuth struct {
-	authErr error
-	sends   []*msgjson.Message
+	authErr          error
+	sends            []*msgjson.Message
+	piMtx            sync.Mutex
+	preimagesByMsgID map[uint64]order.Preimage
+	preimagesByOrdID map[string]order.Preimage
 }
 
 func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
@@ -127,6 +132,29 @@ func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) {
 	msgTxt, _ := json.Marshal(msg)
 	log.Infof("Send for user %v. Message: %v", user, string(msgTxt))
 	a.sends = append(a.sends, msg)
+
+	a.piMtx.Lock()
+	defer a.piMtx.Unlock()
+	preimage, ok := a.preimagesByMsgID[msg.ID]
+	if ok && msg.Type == msgjson.Response {
+		log.Infof("preimage found for msg id %v: %x", msg.ID, preimage)
+		payload, err := msg.Response()
+		if err != nil {
+			log.Errorf("Failed to unmarshal message ResponsePayload: %v", err)
+			return
+		}
+		if payload.Error != nil {
+			log.Errorf("invalid response: %v", payload.Error.Message)
+		}
+		ordRes := new(msgjson.OrderResult)
+		err = json.Unmarshal(payload.Result, ordRes)
+		if err != nil {
+			log.Errorf("Failed to unmarshal message Payload into OrderResult: %v", err)
+			return
+		}
+		log.Debugf("setting preimage for order %v", ordRes.OrderID)
+		a.preimagesByOrdID[ordRes.OrderID.String()] = preimage
+	}
 }
 func (a *TAuth) getSend() *msgjson.Message {
 	if len(a.sends) == 0 {
@@ -136,8 +164,38 @@ func (a *TAuth) getSend() *msgjson.Message {
 	a.sends = a.sends[1:]
 	return msg
 }
-func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
+func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
+	return a.RequestWithTimeout(user, msg, f, time.Hour, func() {})
+}
+func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message), expDur time.Duration, exp func()) error {
 	log.Infof("Request for user %v", user)
+	// Emulate the client.
+	if msg.Route == msgjson.PreimageRoute {
+		// Respond with the preimage for the referenced order id in the
+		// PreimageRequest.
+		var piReq msgjson.PreimageRequest
+		json.Unmarshal(msg.Payload, &piReq)
+		log.Info("order id:", piReq.OrderID.String())
+		a.piMtx.Lock()
+		pi, found := a.preimagesByOrdID[piReq.OrderID.String()]
+		a.piMtx.Unlock()
+		if !found {
+			// If we have no preimage for this order, then we've decided to
+			// expire the response after the expire duration.
+			go func() { <-time.AfterFunc(expDur, exp).C }()
+		}
+		log.Infof("found preimage: %x", pi)
+		piMsg := &msgjson.PreimageResponse{
+			Preimage: pi[:],
+		}
+		resp, _ := msgjson.NewResponse(5, piMsg, nil)
+		go func() {
+			// Simulate network latency before handling the response.
+			time.Sleep(clientPreimageDelay)
+			f(nil, resp)
+		}()
+	}
+	return nil
 }
 func (a *TAuth) Penalize(user account.AccountID, rule account.Rule) {
 	log.Infof("Penalize for user %v", user)
@@ -357,7 +415,11 @@ func TestMain(m *testing.M) {
 	order.UseLogger(logger)
 
 	privKey, _ := secp256k1.GeneratePrivateKey()
-	auth := &TAuth{sends: make([]*msgjson.Message, 0)}
+	auth := &TAuth{
+		sends:            make([]*msgjson.Message, 0),
+		preimagesByMsgID: make(map[uint64]order.Preimage),
+		preimagesByOrdID: make(map[string]order.Preimage),
+	}
 	oRig = &tOrderRig{
 		btc: tNewBackend(),
 		dcr: tNewBackend(),
@@ -433,6 +495,8 @@ func TestLimit(t *testing.T) {
 	rate := uint64(1000) * dcrRateStep
 	user := oRig.user
 	clientTime := nowMs()
+	pi := ordertest.RandomPreimage()
+	commit := pi.Commit()
 	limit := msgjson.LimitOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
@@ -440,6 +504,7 @@ func TestLimit(t *testing.T) {
 			Quote:      btcID,
 			OrderType:  msgjson.LimitOrderNum,
 			ClientTime: encode.UnixMilliU(clientTime),
+			Commit:     commit[:],
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -523,6 +588,7 @@ func TestLimit(t *testing.T) {
 			QuoteAsset: limit.Quote,
 			OrderType:  order.LimitOrderType,
 			ClientTime: clientTime,
+			Commit:     commit,
 		},
 		T: order.Trade{
 			Sell:     false,
@@ -566,7 +632,7 @@ func TestLimit(t *testing.T) {
 
 	// Check equivalence of IDs.
 	if epochOrder.ID() != lo.ID() {
-		t.Fatalf("failed to duplicate ID")
+		t.Fatalf("failed to duplicate ID, got %v, wanted %v", lo.UID(), epochOrder.UID())
 	}
 }
 
@@ -574,6 +640,8 @@ func TestMarketStartProcessStop(t *testing.T) {
 	qty := uint64(dcrLotSize) * 10
 	user := oRig.user
 	clientTime := nowMs()
+	pi := ordertest.RandomPreimage()
+	commit := pi.Commit()
 	mkt := msgjson.MarketOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
@@ -581,6 +649,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 			Quote:      btcID,
 			OrderType:  msgjson.MarketOrderNum,
 			ClientTime: encode.UnixMilliU(clientTime),
+			Commit:     commit[:],
 		},
 		Trade: msgjson.Trade{
 			Side:     msgjson.SellOrderNum,
@@ -655,6 +724,7 @@ func TestMarketStartProcessStop(t *testing.T) {
 			QuoteAsset: mkt.Quote,
 			OrderType:  order.MarketOrderType,
 			ClientTime: clientTime,
+			Commit:     commit,
 		},
 		T: order.Trade{
 			Sell:     false,
@@ -704,6 +774,8 @@ func TestCancel(t *testing.T) {
 	user := oRig.user
 	targetID := order.OrderID{244}
 	clientTime := nowMs()
+	pi := ordertest.RandomPreimage()
+	commit := pi.Commit()
 	cancel := msgjson.CancelOrder{
 		Prefix: msgjson.Prefix{
 			AccountID:  user.acct[:],
@@ -711,6 +783,7 @@ func TestCancel(t *testing.T) {
 			Quote:      btcID,
 			OrderType:  msgjson.CancelOrderNum,
 			ClientTime: encode.UnixMilliU(clientTime),
+			Commit:     commit[:],
 		},
 		TargetID: targetID[:],
 	}
@@ -769,6 +842,7 @@ func TestCancel(t *testing.T) {
 			QuoteAsset: cancel.Quote,
 			OrderType:  order.MarketOrderType,
 			ClientTime: clientTime,
+			Commit:     commit,
 		},
 		TargetOrderID: targetID,
 	}
@@ -930,14 +1004,29 @@ func randRate(baseRate, lotSize uint64, min, max float64) uint64 {
 }
 
 func makeLO(writer *ordertest.Writer, rate, lots uint64, force order.TimeInForce) *order.LimitOrder {
+	lo, _ := ordertest.WriteLimitOrder(writer, rate, lots, force, 0)
+	return lo
+}
+
+func makeLORevealed(writer *ordertest.Writer, rate, lots uint64, force order.TimeInForce) (*order.LimitOrder, order.Preimage) {
 	return ordertest.WriteLimitOrder(writer, rate, lots, force, 0)
 }
 
 func makeMO(writer *ordertest.Writer, lots uint64) *order.MarketOrder {
+	mo, _ := ordertest.WriteMarketOrder(writer, lots, 0)
+	return mo
+}
+
+func makeMORevealed(writer *ordertest.Writer, lots uint64) (*order.MarketOrder, order.Preimage) {
 	return ordertest.WriteMarketOrder(writer, lots, 0)
 }
 
 func makeCO(writer *ordertest.Writer, targetID order.OrderID) *order.CancelOrder {
+	co, _ := ordertest.WriteCancelOrder(writer, targetID, 0)
+	return co
+}
+
+func makeCORevealed(writer *ordertest.Writer, targetID order.OrderID) (*order.CancelOrder, order.Preimage) {
 	return ordertest.WriteCancelOrder(writer, targetID, 0)
 }
 
@@ -953,8 +1042,8 @@ func tNewBookSource() *TBookSource {
 	}
 }
 
-func (s *TBookSource) Book() (buys []*order.LimitOrder, sells []*order.LimitOrder) {
-	return s.buys, s.sells
+func (s *TBookSource) Book() (eidx int64, buys []*order.LimitOrder, sells []*order.LimitOrder) {
+	return 13241324, s.buys, s.sells
 }
 func (s *TBookSource) OrderFeed() <-chan *bookUpdateSignal {
 	return s.feed
@@ -998,7 +1087,7 @@ func (conn *TLink) getSend() *msgjson.Message {
 }
 
 // There are no requests in the routers.
-func (conn *TLink) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
+func (conn *TLink) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Message), expDur time.Duration, exp func()) error {
 	return nil
 }
 func (conn *TLink) Banish() {

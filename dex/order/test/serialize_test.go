@@ -24,7 +24,7 @@ func TestOrders(t *testing.T) {
 }
 
 func testOrders(t *testing.T) {
-	lo := RandomLimitOrder()
+	lo, _ := RandomLimitOrder()
 	lo.Coins = []order.CoinID{randB(36), randB(36)}
 	// Truncate time to pass time.Equal testing after decoding.
 	lo.SetTime(time.Now().Truncate(time.Millisecond))
@@ -41,7 +41,7 @@ func testOrders(t *testing.T) {
 
 	MustCompareLimitOrders(t, lo, reLO)
 
-	mo := RandomMarketOrder()
+	mo, _ := RandomMarketOrder()
 	mo.Coins = []order.CoinID{randB(36), randB(36), randB(38)}
 	// Not setting the server time on this one.
 
@@ -56,7 +56,7 @@ func testOrders(t *testing.T) {
 	}
 	MustCompareMarketOrders(t, mo, reMO)
 
-	co := RandomCancelOrder()
+	co, _ := RandomCancelOrder()
 	co.SetTime(time.Now().Truncate(time.Millisecond))
 
 	coB := order.EncodeOrder(co)

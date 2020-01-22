@@ -317,7 +317,12 @@ func TestRedeem(t *testing.T) {
 func TestPrefix(t *testing.T) {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
 	// order type (1), client time (8), server time (8) = 57 bytes
-	acctID, _ := hex.DecodeString("05bf0f2b97fa551375b9c92687f7a948a8f4a4237653a04e6b00c6f14c72fd1e9c")
+	acctID, _ := hex.DecodeString("05bf0f2b97fa551375b9c92687f7a948a8f4a4237653a04e6b00c6f14c72fd1e")
+	commit := []byte{
+		0xd9, 0x83, 0xec, 0xdf, 0x34, 0x0f, 0xd9, 0xaf, 0xda, 0xb8, 0x81,
+		0x8d, 0x5a, 0x29, 0x36, 0xe0, 0x71, 0xaf, 0x3c, 0xbb, 0x3d, 0xa8,
+		0xac, 0xf4, 0x38, 0xb6, 0xc2, 0x91, 0x65, 0xf2, 0x0d, 0x8d,
+	}
 	prefix := &Prefix{
 		AccountID:     acctID,
 		Base:          256,
@@ -325,6 +330,7 @@ func TestPrefix(t *testing.T) {
 		OrderType:     1,
 		ClientTime:    1571871297,
 		ServerTime:    1571871841,
+		Commit:        commit,
 		EpochIdx:      157187184,
 		EpochDuration: 10000,
 	}
@@ -333,7 +339,7 @@ func TestPrefix(t *testing.T) {
 		// Account ID 32 bytes
 		0x05, 0xbf, 0x0f, 0x2b, 0x97, 0xfa, 0x55, 0x13, 0x75, 0xb9, 0xc9, 0x26,
 		0x87, 0xf7, 0xa9, 0x48, 0xa8, 0xf4, 0xa4, 0x23, 0x76, 0x53, 0xa0, 0x4e,
-		0x6b, 0x00, 0xc6, 0xf1, 0x4c, 0x72, 0xfd, 0x1e, 0x9c,
+		0x6b, 0x00, 0xc6, 0xf1, 0x4c, 0x72, 0xfd, 0x1e,
 		// Base Asset 4 bytes
 		0x00, 0x00, 0x01, 0x00,
 		// Quote Asset 4 bytes
@@ -344,6 +350,10 @@ func TestPrefix(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0xb0, 0xda, 0x41,
 		// Server Time 8 bytes (zeros for client signature)
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0xb0, 0xdc, 0x61,
+		// Commitment
+		0xd9, 0x83, 0xec, 0xdf, 0x34, 0x0f, 0xd9, 0xaf, 0xda, 0xb8, 0x81,
+		0x8d, 0x5a, 0x29, 0x36, 0xe0, 0x71, 0xaf, 0x3c, 0xbb, 0x3d, 0xa8,
+		0xac, 0xf4, 0x38, 0xb6, 0xc2, 0x91, 0x65, 0xf2, 0x0d, 0x8d,
 		// Epoch Index
 		0x00, 0x00, 0x00, 0x00, 0x09, 0x5e, 0x7c, 0x70,
 		// Epoch Duration (msec)
@@ -366,7 +376,7 @@ func TestPrefix(t *testing.T) {
 		t.Fatalf("unmarshal error: %v", err)
 	}
 	if !bytes.Equal(prefixBack.AccountID, prefix.AccountID) {
-		t.Fatal(prefixBack.AccountID, prefix.AccountID)
+		t.Fatalf("wrong account id. wanted %d, got %d", prefix.AccountID, prefixBack.AccountID)
 	}
 	if prefixBack.Base != prefix.Base {
 		t.Fatalf("wrong base asset. wanted %d, got %d", prefix.Base, prefixBack.Base)
@@ -382,6 +392,15 @@ func TestPrefix(t *testing.T) {
 	}
 	if prefixBack.ServerTime != prefix.ServerTime {
 		t.Fatalf("wrong server time. wanted %d, got %d", prefix.ServerTime, prefixBack.ServerTime)
+	}
+	if !bytes.Equal(prefixBack.Commit, prefix.Commit) {
+		t.Fatalf("wrong commitment. wanted %d, got %d", prefix.Commit, prefixBack.Commit)
+	}
+	if prefixBack.EpochIdx != prefix.EpochIdx {
+		t.Fatalf("wrong epoch index. wanted %d, got %d", prefix.EpochIdx, prefixBack.EpochIdx)
+	}
+	if prefixBack.EpochDuration != prefix.EpochDuration {
+		t.Fatalf("wrong epoch duration. wanted %d, got %d", prefix.EpochDuration, prefixBack.EpochDuration)
 	}
 }
 
@@ -434,16 +453,18 @@ func TestTrade(t *testing.T) {
 }
 
 func TestLimit(t *testing.T) {
-	// serialization: prefix (57) + trade (variable) + address (~35)
-	// = 92 + len(trade)
-	acctID := randomBytes(32)
+	// serialization: prefix (105) + trade (variable) + address (~35)
+	// = 140 + len(trade)
 	prefix := &Prefix{
-		AccountID:  acctID,
-		Base:       256,
-		Quote:      65536,
-		OrderType:  1,
-		ClientTime: 1571874397,
-		ServerTime: 1571874405,
+		AccountID:     randomBytes(32),
+		Base:          256,
+		Quote:         65536,
+		OrderType:     1,
+		ClientTime:    1571874397,
+		ServerTime:    1571874405,
+		Commit:        randomBytes(32),
+		EpochIdx:      12341324,
+		EpochDuration: 3_000,
 	}
 	addr := "DsDePXLAKNsFCSmgfrEsYm8G1aCVZdYvP9"
 	coin1 := randomCoin()
@@ -469,16 +490,16 @@ func TestLimit(t *testing.T) {
 	// Compare the prefix byte-for-byte and pop it from the front.
 	x := prefix.Serialize()
 	xLen := len(x)
-	if !bytes.Equal(x[:xLen], x) {
-		t.Fatal(x, x[:xLen])
+	if !bytes.Equal(b[:xLen], x) {
+		t.Fatal(x, b[:xLen])
 	}
 	b = b[xLen:]
 
 	// Compare the trade byte-for-byte and pop it from the front.
 	x = trade.Serialize()
 	xLen = len(x)
-	if !bytes.Equal(x[:xLen], x) {
-		t.Fatal(x, x[:xLen])
+	if !bytes.Equal(b[:xLen], x) {
+		t.Fatal(x, b[:xLen])
 	}
 	b = b[xLen:]
 
@@ -517,16 +538,18 @@ func TestLimit(t *testing.T) {
 }
 
 func TestMarket(t *testing.T) {
-	// serialization: prefix (57) + trade (variable) + rate (8)
-	// + time-in-force (1) + address (~35) = 66 + len(trade)
-	acctID := randomBytes(32)
+	// serialization: prefix (105) + trade (variable) + rate (8)
+	// + time-in-force (1) + address (~35) = 149 + len(trade)
 	prefix := &Prefix{
-		AccountID:  acctID,
-		Base:       256,
-		Quote:      65536,
-		OrderType:  1,
-		ClientTime: 1571874397,
-		ServerTime: 1571874405,
+		AccountID:     randomBytes(32),
+		Base:          256,
+		Quote:         65536,
+		OrderType:     1,
+		ClientTime:    1571874397,
+		ServerTime:    1571874405,
+		Commit:        randomBytes(32),
+		EpochIdx:      12341324,
+		EpochDuration: 3_000,
 	}
 	addr := "16brznLu4ieZ6tToKfUgibD94UcqshGUE3"
 	coin1 := randomCoin()
@@ -550,16 +573,16 @@ func TestMarket(t *testing.T) {
 	// Compare the prefix byte-for-byte and pop it from the front.
 	x := prefix.Serialize()
 	xLen := len(x)
-	if !bytes.Equal(x[:xLen], x) {
-		t.Fatal(x, x[:xLen])
+	if !bytes.Equal(b[:xLen], x) {
+		t.Fatal(x, b[:xLen])
 	}
 	b = b[xLen:]
 
 	// Compare the trade data byte-for-byte and pop it from the front.
 	x = trade.Serialize()
 	xLen = len(x)
-	if !bytes.Equal(x[:xLen], x) {
-		t.Fatal(x, x[:xLen])
+	if !bytes.Equal(b[:xLen], x) {
+		t.Fatal(x, b[:xLen])
 	}
 	b = b[xLen:]
 
@@ -589,15 +612,17 @@ func TestMarket(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
-	// serialization: prefix (57) + target id (32) = 89
-	acctID := randomBytes(32)
+	// serialization: prefix (105) + target id (32) = 137
 	prefix := &Prefix{
-		AccountID:  acctID,
-		Base:       256,
-		Quote:      65536,
-		OrderType:  1,
-		ClientTime: 1571874397,
-		ServerTime: 1571874405,
+		AccountID:     randomBytes(32),
+		Base:          256,
+		Quote:         65536,
+		OrderType:     1,
+		ClientTime:    1571874397,
+		ServerTime:    1571874405,
+		Commit:        randomBytes(32),
+		EpochIdx:      12341324,
+		EpochDuration: 3_000,
 	}
 	targetID, _ := hex.DecodeString("a1f1b66916353b58dbb65562eb19731953b2f1215987a9d9137f0df3458637b7")
 	cancel := &CancelOrder{

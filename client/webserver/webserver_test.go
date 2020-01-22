@@ -106,6 +106,10 @@ func (c *TConn) ReadMessage() (int, []byte, error) {
 	return 0, nil, nil
 }
 
+func (c *TConn) SetWriteDeadline(t time.Time) error {
+	return nil
+}
+
 func (c *TConn) WriteMessage(_ int, msg []byte) error {
 	c.msg = msg
 	return nil

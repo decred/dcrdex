@@ -13,7 +13,7 @@ import (
 
 func makeEpochOrderNote(mid string, oid order.OrderID, side uint8, rate uint64, qty uint64, commitment order.Commitment) *msgjson.EpochOrderNote {
 	return &msgjson.EpochOrderNote{
-		Commitment: commitment[:],
+		Commit: commitment[:],
 		BookOrderNote: msgjson.BookOrderNote{
 			OrderNote: msgjson.OrderNote{
 				MarketID: mid,
@@ -249,7 +249,7 @@ func benchmarkGenerateMatchProof(c int, b *testing.B) {
 		// Remove the missed preimage.
 		for idx := 0; idx < len(preimages); idx++ {
 			commit := blake256.Sum256(preimages[idx][:])
-			if bytes.Equal(commit[:], notes[in].Commitment[:]) {
+			if bytes.Equal(commit[:], notes[in].Commit[:]) {
 				if idx < len(preimages)-1 {
 					copy(preimages[idx:], preimages[idx+1:])
 				}

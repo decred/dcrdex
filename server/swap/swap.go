@@ -28,6 +28,11 @@ var (
 	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
 	// This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = time.Minute
+
+	requestExpiration = 30 * time.Second
+
+	// nop is a dummy expire callback function.
+	nop = func() {}
 )
 
 func unixMsNow() time.Time {
@@ -41,7 +46,8 @@ type AuthManager interface {
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message)
-	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message))
+	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
+	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
 	Penalize(account.AccountID, account.Rule)
 }
 

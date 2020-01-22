@@ -7,13 +7,14 @@ const (
 	// CreateOrdersTable creates a table specified via the %s printf specifier
 	// for market and limit orders.
 	CreateOrdersTable = `CREATE TABLE IF NOT EXISTS %s (
-		oid BYTEA PRIMARY KEY, -- UNIQUE INDEX
+		oid BYTEA PRIMARY KEY, -- UNIQUE
 		type INT2,
-		sell BOOLEAN,          -- ANALYZE or INDEX?
-		account_id BYTEA,      -- INDEX
-		address TEXT,          -- INDEX
+		sell BOOLEAN,          -- TODO: ANALYZE or INDEX?
+		account_id BYTEA,      -- TODO: INDEX
+		address TEXT,          -- TODO:INDEX
 		client_time TIMESTAMPTZ,
 		server_time TIMESTAMPTZ,
+		commit BYTEA UNIQUE,
 		coins BYTEA,
 		quantity INT8,
 		rate INT8,
@@ -24,11 +25,11 @@ const (
 
 	// InsertOrder inserts a market or limit order into the specified table.
 	InsertOrder = `INSERT INTO %s (oid, type, sell, account_id, address,
-			client_time, server_time, coins, quantity,
+			client_time, server_time, commit, coins, quantity,
 			rate, force, status, filled)
 		VALUES ($1, $2, $3, $4, $5,
-			$6, $7, $8, $9,
-			$10, $11, $12, $13);`
+			$6, $7, $8, $9, $10,
+			$11, $12, $13, $14);`
 
 	// SelectOrder retrieves all columns with the given order ID. This may be
 	// used for any table with an "oid" column (orders_active, cancels_archived,
@@ -38,6 +39,10 @@ const (
 	// SelectUserOrders retrieves all columns of all orders for the given
 	// account ID.
 	SelectUserOrders = `SELECT * FROM %s WHERE account_id = $1;`
+
+	// SelectOrderByCommit retrieves the order ID for any order with the given
+	// commitment value. This applies to the cancel order tables as well.
+	SelectOrderByCommit = `SELECT oid FROM %s WHERE commit = $1;`
 
 	// SelectOrderCoinIDs retrieves the order id, sell flag, and coins for all
 	// orders in a table with one of the given statuses. Note that this includes
@@ -76,6 +81,7 @@ const (
 	//			address,
 	//			client_time,
 	//			server_time,
+	//			commit,
 	//			coins,
 	//			quantity,
 	//			rate,
@@ -89,7 +95,7 @@ const (
 		DELETE FROM %s
 		WHERE oid = $1
 		RETURNING oid, type, sell, account_id, address,
-			client_time, server_time, coins, quantity,
+			client_time, server_time, commit, coins, quantity,
 			rate, force, %d, %d
 	)
 	INSERT INTO %s
@@ -100,16 +106,17 @@ const (
 	// specifier for cancel orders.
 	CreateCancelOrdersTable = `CREATE TABLE IF NOT EXISTS %s (
 		oid BYTEA PRIMARY KEY, -- UNIQUE INDEX
-		account_id BYTEA,      -- INDEX
+		account_id BYTEA,      -- TODO: INDEX
 		client_time TIMESTAMPTZ,
 		server_time TIMESTAMPTZ,
+		commit BYTEA UNIQUE,
 		target_order BYTEA,    -- cancel orders ref another order
 		status INT2
 	);`
 
 	// InsertCancelOrder inserts a cancel order row into the specified table.
-	InsertCancelOrder = `INSERT INTO %s (oid, account_id, client_time, server_time, target_order, status)
-		VALUES ($1, $2, $3, $4, $5, $6);`
+	InsertCancelOrder = `INSERT INTO %s (oid, account_id, client_time, server_time, commit, target_order, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7);`
 
 	// CancelOrderStatus retrieves an order's status
 	CancelOrderStatus = `SELECT status FROM %s WHERE oid = $1;`
@@ -119,7 +126,7 @@ const (
 	MoveCancelOrder = `WITH moved AS (
 		DELETE FROM %s
 		WHERE oid = $1
-		RETURNING oid, account_id, client_time, server_time, target_order, %d
+		RETURNING oid, account_id, client_time, server_time, commit, target_order, %d
 	)
 	INSERT INTO %s
 	SELECT * FROM moved;`

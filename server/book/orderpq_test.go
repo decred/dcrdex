@@ -429,7 +429,6 @@ func TestMaxOrderPriorityQueue_TieRate(t *testing.T) {
 	}
 
 	best := pq.ExtractBest()
-	//t.Log(best.String()) // the older order
 	if best.UID() != orders[2].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
@@ -441,21 +440,20 @@ func TestMaxOrderPriorityQueue_TieRateAndTime(t *testing.T) {
 
 	pq := NewMaxOrderPQ(4)
 
-	// 56f8a350751dbbb0922cdacf38ca3808528dfb2a6c84c1b1f763e092cd3febab
+	// 7f9200eedcf2fa868173cdfc2101ee4d71ec024c1c052589b3371442aaa26c2d
 	ok := pq.Insert(orders[0])
 	if !ok {
 		t.Errorf("Failed to insert order %v", orders[0])
 	}
 
-	// 5fb4654696522b10168f85dc242812fee8fb8471e5c4f6c3655ed76c1c296621 ** higher priority
+	// 2eb563f255b0a9484bbbee718b2cdce3a31bd5ea8649b579b3184a4bd60d1703 ** higher priority
 	ok = pq.Insert(orders[4])
 	if !ok {
 		t.Errorf("Failed to insert order %v", orders[4])
 	}
 
 	best := pq.ExtractBest()
-	// 56f8a350751dbbb0922cdacf38ca3808528dfb2a6c84c1b1f763e092cd3febab < 5fb4654696522b10168f85dc242812fee8fb8471e5c4f6c3655ed76c1c296621
-	if best.UID() != orders[0].UID() {
+	if best.UID() != orders[4].UID() {
 		t.Errorf("Incorrect highest rate order returned: rate = %d, UID = %s",
 			best.Price(), best.UID())
 	}
@@ -679,7 +677,7 @@ func TestOrderPQMax_Worst(t *testing.T) {
 		return bigList[i].Price() < bigList[j].Price()
 	})
 
-	t.Log(bigList[0].Price(), bigList[len(bigList)-1].Price(), pq.PeekBest().Price())
+	//t.Log(bigList[0].Price(), bigList[len(bigList)-1].Price(), pq.PeekBest().Price())
 
 	// Worst for a min queue is highest rate.
 	worst := pq.Worst()

@@ -66,6 +66,8 @@ type OrderArchiver interface {
 	// specified by a base and quote asset.
 	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
 
+	OrderWithCommit(ctx context.Context, commit order.Commitment) (found bool, oid order.OrderID, err error)
+
 	// OrderStatus gets the status, ID, and filled amount of the given order.
 	OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error)
 

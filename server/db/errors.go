@@ -2,6 +2,38 @@ package db
 
 import "errors"
 
+// TODO: Consider changing error types to Error and DetailedError for direct
+// errors package unwrapping and tests with Is/As:
+
+// Error is just a basic error.
+//type Error string
+
+// Error satisfies the error interface.
+// func (e Error) Error() string {
+// 	return string(e)
+// }
+
+// DetailedError pairs an Error with details.
+// type DetailedError struct {
+// 	wrapped Error
+// 	detail  string
+// }
+
+// Error satisfies the error interface, combining the wrapped error message with
+// the details.
+// func (e DetailedError) Error() string {
+// 	return e.wrapped.Error() + ": " + e.detail
+// }
+
+// NewDetailedError wraps the provided Error with details in a DetailedError,
+// facilitating the use of errors.Is and errors.As via errors.Unwrap.
+// func NewDetailedError(err Error, detail string) DetailedError {
+// 	return DetailedError{
+// 		wrapped: err,
+// 		detail:  detail,
+// 	}
+// }
+
 // ArchiveError is the error type used by archivist for certain recognized
 // errors. Not all returned errors will be of this type.
 type ArchiveError struct {
@@ -16,6 +48,7 @@ const (
 	ErrUnknownOrder
 	ErrUnsupportedMarket
 	ErrInvalidOrder
+	ErrReusedCommit
 )
 
 func (ae ArchiveError) Error() string {
@@ -31,6 +64,8 @@ func (ae ArchiveError) Error() string {
 		desc = "unsupported market"
 	case ErrInvalidOrder:
 		desc = "invalid order"
+	case ErrReusedCommit:
+		desc = "order commit reused"
 	}
 
 	if ae.Detail == "" {
@@ -76,4 +111,11 @@ func IsErrMatchUnsupported(err error) bool {
 func IsErrInvalidOrder(err error) bool {
 	var errA ArchiveError
 	return errors.As(err, &errA) && errA.Code == ErrInvalidOrder
+}
+
+// IsErrReusedCommit returns true if the error is of type ArchiveError and has
+// code ErrReusedCommit.
+func IsErrReusedCommit(err error) bool {
+	var errA ArchiveError
+	return errors.As(err, &errA) && errA.Code == ErrReusedCommit
 }

@@ -111,9 +111,9 @@ func (dbs *dbStubResult) Values() []driver.Value {
 }
 
 // Test_storeLimitOrder simply exercises the Valuers (OrderID, AccountID,
-// OrderType). Since the DB is a stub, there should never be an error with
-// storeLimitOrder. The Valuers may be tested independently in the order and
-// account packages.
+// OrderType, Commitment). Since the DB is a stub, there should never be an
+// error with storeLimitOrder in this test. The Valuers may be tested
+// independently in the order and account packages.
 func Test_storeLimitOrder(t *testing.T) {
 	stub, err := sql.Open("stub", "discardedConnectString")
 	if err != nil {
