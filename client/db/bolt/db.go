@@ -33,6 +33,7 @@ var (
 	ordersBucket   = []byte("orders")
 	matchesBucket  = []byte("matches")
 	walletsBucket  = []byte("wallets")
+	feeProofKey    = []byte("feecoin")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
 	quoteKey       = []byte("quote")
@@ -119,6 +120,7 @@ func (db *boltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 			if err != nil {
 				return err
 			}
+			acctInfo.Paid = len(acct.Get(feeProofKey)) > 0
 			accounts = append(accounts, acctInfo)
 		}
 		return nil
@@ -140,7 +142,11 @@ func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 		}
 		var err error
 		acctInfo, err = dexdb.DecodeAccountInfo(bCopy(acctB))
-		return err
+		if err != nil {
+			return err
+		}
+		acctInfo.Paid = len(acct.Get(feeProofKey)) > 0
+		return nil
 	})
 }
 
@@ -170,6 +176,18 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 			return fmt.Errorf("activeKey put error: %v", err)
 		}
 		return nil
+	})
+}
+
+// AccountPaid marks the account as paid by setting the "fee proof".
+func (db *boltDB) AccountPaid(proof *dexdb.AccountProof) error {
+	acctKey := []byte(proof.URL)
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(acctKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", proof.URL)
+		}
+		return acct.Put(feeProofKey, proof.Encode())
 	})
 }
 

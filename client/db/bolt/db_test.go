@@ -142,6 +142,22 @@ func TestAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create account after fixing")
 	}
+
+	// Test account proofs.
+	zerothURL := accts[0].URL
+	zerothAcct, _ := boltdb.Account(zerothURL)
+	if zerothAcct.Paid {
+		t.Fatalf("Account marked as paid before account proof set")
+	}
+	boltdb.AccountPaid(&db.AccountProof{
+		URL:   zerothAcct.URL,
+		Stamp: 123456789,
+		Sig:   []byte("some signature here"),
+	})
+	reAcct, _ := boltdb.Account(zerothURL)
+	if !reAcct.Paid {
+		t.Fatalf("Account not marked as paid after account proof set")
+	}
 }
 
 func TestWallets(t *testing.T) {

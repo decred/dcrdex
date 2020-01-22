@@ -213,6 +213,10 @@ func (db *TDB) Wallets() ([]*db.Wallet, error) {
 	return nil, nil
 }
 
+func (db *TDB) AccountPaid(proof *db.AccountProof) error {
+	return nil
+}
+
 type tCoin struct {
 	id       []byte
 	confs    uint32

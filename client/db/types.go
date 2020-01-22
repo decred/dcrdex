@@ -21,6 +21,8 @@ type AccountInfo struct {
 	EncKey    []byte
 	DEXPubKey *secp256k1.PublicKey
 	FeeCoin   []byte
+	// Paid will be set on retrieval based on whether there is a fee proof set.
+	Paid bool
 }
 
 // Encode the AccountInfo as bytes.
@@ -59,6 +61,48 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 		EncKey:    keyB,
 		DEXPubKey: pk,
 		FeeCoin:   coinB,
+	}, nil
+}
+
+// Account proof is information necessary to prove that the DEX server accepted
+// the account's fee payment. The fee coin is not part of the proof, since it
+// is already stored as part of the AccountInfo blob.
+type AccountProof struct {
+	URL   string
+	Stamp uint64
+	Sig   []byte
+}
+
+// Encode encodes the AccountProof to a versioned blob.
+func (p *AccountProof) Encode() []byte {
+	return dbBytes{0}.
+		AddData([]byte(p.URL)).
+		AddData(uint64Bytes(p.Stamp)).
+		AddData(p.Sig)
+}
+
+// DecodeAccountProof decodes the versioned blob to a *MatchProof.
+func DecodeAccountProof(b []byte) (*AccountProof, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeAccountProof_v0(pushes)
+	}
+	return nil, fmt.Errorf("unknown AccountProof version %d", ver)
+}
+
+func decodeAccountProof_v0(pushes [][]byte) (*AccountProof, error) {
+	if len(pushes) != 3 {
+		return nil, fmt.Errorf("decodeAccountProof_v0: expected 3 pushes, got %d", len(pushes))
+	}
+	urlB, stampB := pushes[0], pushes[1]
+	return &AccountProof{
+		URL:   string(urlB),
+		Stamp: intCoder.Uint64(stampB),
+		Sig:   pushes[2],
 	}, nil
 }
 

@@ -458,10 +458,12 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 			}
 			// If there was a serialization error, validation is skipped. A warning
 			// message was already logged.
+			sig := []byte{}
 			if len(reqB) > 0 {
 				// redefining err here, since these errors won't be sent over the
 				// response channel.
-				sig, err := hex.DecodeString(ack.Sig)
+				var err error
+				sig, err = hex.DecodeString(ack.Sig)
 				if err != nil {
 					log.Warnf("account was registered, but server's signature could not be decoded: %v", err)
 					return
@@ -470,7 +472,15 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 				if err != nil {
 					log.Warnf("account was registered, but DEX signature could not be verified: %v", err)
 				}
+			} else {
+				log.Warnf("Marking account as paid, even though the server's signature could not be validated.")
 			}
+			c.db.AccountPaid(&db.AccountProof{
+				URL:   form.DEX,
+				Stamp: req.Time,
+				Sig:   sig,
+			})
+
 		},
 	}
 	c.waiterMtx.Unlock()

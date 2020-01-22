@@ -22,6 +22,8 @@ type DB interface {
 	Account(url string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
+	// AccountPaid marks the account as paid.
+	AccountPaid(proof *AccountProof) error
 	// UpdateOrder saves the order information in the database. Any existing
 	// order info will be overwritten without indication.
 	UpdateOrder(m *MetaOrder) error
