@@ -42,8 +42,8 @@ const (
 
 var log slog.Logger
 
-// clientCore is satisfied by core.Core.
-type clientCore interface {
+// ClientCore is satisfied by core.Core.
+type ClientCore interface {
 	ListMarkets() []*core.MarketInfo
 	Register(*core.Registration) error
 	Login(dex, pw string) error
@@ -58,7 +58,7 @@ type clientCore interface {
 // order book updates when received.
 type marketSyncer struct {
 	mtx     sync.Mutex
-	core    clientCore
+	core    ClientCore
 	dex     string
 	base    uint32
 	quote   uint32
@@ -66,7 +66,7 @@ type marketSyncer struct {
 }
 
 // newMarketSyncer is the constructor for a marketSyncer.
-func newMarketSyncer(ctx context.Context, core clientCore, dex string, base, quote uint32) (*marketSyncer, error) {
+func newMarketSyncer(ctx context.Context, wg *sync.WaitGroup, core ClientCore, dex string, base, quote uint32) (*marketSyncer, error) {
 	m := &marketSyncer{
 		core:    core,
 		dex:     dex,
@@ -81,7 +81,9 @@ func newMarketSyncer(ctx context.Context, core clientCore, dex string, base, quo
 		return nil, err
 	}
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		log.Debugf("monitoring market %d-%d @ %s", base, quote, dex)
 	out:
 		for {
@@ -120,13 +122,14 @@ func (m *marketSyncer) remove(cl *wsClient) {
 // interface to the DEX client.
 type RPCServer struct {
 	ctx      context.Context
-	core     clientCore
+	core     ClientCore
 	listener net.Listener
 	srv      *http.Server
 	authsha  [32]byte
 	mtx      sync.RWMutex
 	syncers  map[string]*marketSyncer
 	clients  map[int32]*wsClient
+	wg       sync.WaitGroup
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -155,7 +158,7 @@ func genCertPair(certFile, keyFile string) error {
 }
 
 // handler is the type for functions that handle RPC requests.
-type handler func(s *RPCServer, ws *wsClient, msg *msgjson.Message) *msgjson.Error
+type handler func(*RPCServer, *msgjson.Message) *msgjson.ResponsePayload
 
 // routes maps routes to their handler.
 var routes = map[string]handler{
@@ -169,14 +172,14 @@ func writeJSON(w http.ResponseWriter, thing interface{}) {
 	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
-// writeJSON writes marshals the provided interface and writes the bytes to the
+// writeJSONWitStatus marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	encoder := json.NewEncoder(w)
 	if err := encoder.Encode(thing); err != nil {
-		log.Infof("JSON encode error: %v", err)
+		log.Errorf("JSON encode error: %v", err)
 	}
 }
 
@@ -184,29 +187,38 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 func (s *RPCServer) handleJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "close")
 	w.Header().Set("Content-Type", "application/json")
-	r.Close = true
 
 	msg := s.parseHTTPRequest(r)
 	writeJSON(w, msg)
 }
 
-// New is the constructor for a new RPCServer.
-func New(core clientCore, addr, user, pass, cert, key string, logger slog.Logger) (*RPCServer, error) {
+// Config holds variables neede to create a new RPC Server.
+type Config struct {
+	Core                        ClientCore
+	Addr, User, Pass, Cert, Key string
+}
+
+// SetLogger sets the logger for the RPCServer.
+func (s *RPCServer) SetLogger(logger slog.Logger) {
 	log = logger
+}
+
+// New is the constructor for an RPCServer.
+func New(cfg *Config) (*RPCServer, error) {
 
 	// Find or create the key pair.
-	keyExists := fileExists(key)
-	certExists := fileExists(cert)
+	keyExists := fileExists(cfg.Key)
+	certExists := fileExists(cfg.Cert)
 	if certExists == !keyExists {
 		return nil, fmt.Errorf("missing cert pair file")
 	}
 	if !keyExists && !certExists {
-		err := genCertPair(cert, key)
+		err := genCertPair(cfg.Cert, cfg.Key)
 		if err != nil {
 			return nil, err
 		}
 	}
-	keypair, err := tls.LoadX509KeyPair(cert, key)
+	keypair, err := tls.LoadX509KeyPair(cfg.Cert, cfg.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -218,9 +230,9 @@ func New(core clientCore, addr, user, pass, cert, key string, logger slog.Logger
 	}
 
 	// Create listener.
-	listener, err := tls.Listen("tcp4", addr, &tlsConfig)
+	listener, err := tls.Listen("tcp", cfg.Addr, &tlsConfig)
 	if err != nil {
-		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %v", addr, err)
+		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %v", cfg.Addr, err)
 	}
 
 	// Create an HTTP router.
@@ -233,7 +245,7 @@ func New(core clientCore, addr, user, pass, cert, key string, logger slog.Logger
 
 	// Make the server.
 	s := &RPCServer{
-		core:     core,
+		core:     cfg.Core,
 		listener: listener,
 		srv:      httpServer,
 		syncers:  make(map[string]*marketSyncer),
@@ -241,8 +253,8 @@ func New(core clientCore, addr, user, pass, cert, key string, logger slog.Logger
 	}
 
 	// Create authsha to verify requests against.
-	if user != "" && pass != "" {
-		login := user + ":" + pass
+	if cfg.User != "" && cfg.Pass != "" {
+		login := cfg.User + ":" + cfg.Pass
 		auth := "Basic " +
 			base64.StdEncoding.EncodeToString([]byte(login))
 		s.authsha = sha256.Sum256([]byte(auth))
@@ -262,40 +274,45 @@ func New(core clientCore, addr, user, pass, cert, key string, logger slog.Logger
 	return s, nil
 }
 
-// Run starts the web server. Satisfies the runner.Runner interface.
+// Run starts the web server. Satisfies the dex.Runner interface. ctx
+// passed to newMarketSyncer when making new market syncers.
 func (s *RPCServer) Run(ctx context.Context) {
 	s.ctx = ctx
 	// Close the listener on context cancellation.
 	go func() {
 		<-ctx.Done()
-		err := s.listener.Close()
-		if err != nil {
-			log.Errorf("Problem shutting down rpc: %v", err)
-		}
-		s.mtx.Lock()
-		defer s.mtx.Unlock()
-		for _, cl := range s.clients {
-			cl.Disconnect()
+
+		if err := s.srv.Shutdown(context.Background()); err != nil {
+			// Error from closing listeners:
+			err = fmt.Errorf("HTTP server Shutdown: %v", err)
+			fmt.Fprintln(os.Stderr, err)
 		}
 	}()
 	log.Infof("RPC server listening on %s", s.listener.Addr())
-	err := s.srv.Serve(s.listener)
-	if err != http.ErrServerClosed {
+	if err := s.srv.Serve(s.listener); err != http.ErrServerClosed {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	for _, cl := range s.clients {
+		cl.Disconnect()
+	}
+
+	// Wait for market syncers to finish.
+	s.wg.Wait()
 	log.Infof("RPC server off")
 }
 
-// watchMarket watches the specified market. A fresh order book and a quit
-// function are returned on success. The quit function should be called to
-// unsubsribe the client from the market.
+// watchMarket watches the specified market for changes in orders. A fresh order
+// book and a quit function are returned on success. The quit function should be
+// called to unsubscribe the client from the market.
 func (s *RPCServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (book *core.OrderBook, quit func(), err error) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	mktID := marketID(base, quote)
 	syncer, found := s.syncers[mktID]
 	if !found {
-		syncer, err = newMarketSyncer(s.ctx, s.core, dex, base, quote)
+		syncer, err = newMarketSyncer(s.ctx, &s.wg, s.core, dex, base, quote)
 		if err != nil {
 			return
 		}
@@ -308,52 +325,40 @@ func (s *RPCServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (b
 }
 
 // handleRequest sends the request to the correct handler function if able.
-func (s *RPCServer) handleRequest(cl *wsClient, req *msgjson.Message) *msgjson.Error {
+func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload {
+	payload := new(msgjson.ResponsePayload)
 	if req.Route == "" {
 		log.Debugf("received empty request")
-		return msgjson.NewError(msgjson.RPCErrorUnspecified, "no route was supplied")
+		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "no route was supplied")
+		return payload
 	}
 
 	// Find the correct handler for this route.
 	h, ok := routes[req.Route]
 
-	// If this is a ws request, check ws routes.
-	if !ok && cl != nil {
-		h, ok = wsHandlers[req.Route]
-	}
-
 	if !ok {
 		log.Debugf("could not find route: %v", req.Route)
-		return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
+		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
+		return payload
 	}
 
-	// req will be populated with a response after this.
-	return h(s, cl, req)
+	return h(s, req)
 }
 
-// parseRequest parses the msgjson message in the request body and creates a
+// parseHTTPRequest parses the msgjson message in the request body and creates a
 // response message.
-func (s *RPCServer) parseHTTPRequest(r *http.Request) (msg *msgjson.Message) {
-	msg = &msgjson.Message{Type: msgjson.Response}
+func (s *RPCServer) parseHTTPRequest(r *http.Request) *msgjson.Message {
+	msg := &msgjson.Message{Type: msgjson.Response}
 	payload := new(msgjson.ResponsePayload)
 
-	// This will be filled with the msgjson request.
-	req := new(msgjson.Message)
-
 	defer func() {
-		// If an error was encountered, marshal the payload, otherwise
-		// the handler will take care of it.
-		if payload.Error != nil {
-			p, err := encode(req.Route, payload)
-			if err != nil {
-				msg.Payload = encodingFailurePayload
-			}
-			msg.Payload = p
-		} else {
-			// If no error was encountered, req has been filled with
-			// a response.
-			*msg = *req
+		// Encode payload to bytes and append to the msg.
+		encodedPayload, err := json.Marshal(payload)
+		if err != nil {
+			err := fmt.Errorf("unable to encode payload: %v", err)
+			panic(err)
 		}
+		msg.Payload = encodedPayload
 	}()
 
 	// Read the request.
@@ -362,13 +367,14 @@ func (s *RPCServer) parseHTTPRequest(r *http.Request) (msg *msgjson.Message) {
 	if err != nil {
 		log.Debugf("Error reading request body: %v", err)
 		payload.Error = msgjson.NewError(msgjson.RPCParseError, "unable to parse request")
-		return
+		return msg
 	}
+	req := new(msgjson.Message)
 	err = json.Unmarshal(body, req)
 	if err != nil {
 		log.Debugf("failed to unmarshal JSON request: %v", err)
 		payload.Error = msgjson.NewError(msgjson.RPCParseError, "unable to parse request")
-		return
+		return msg
 	}
 	log.Tracef("message received for route: %s", req.Route)
 
@@ -378,10 +384,10 @@ func (s *RPCServer) parseHTTPRequest(r *http.Request) (msg *msgjson.Message) {
 		log.Debugf("wrong type: %d", req.Type)
 		errMsg := fmt.Sprintf("wrong or unknown message type specified, must be %d for requests", msgjson.Request)
 		payload.Error = msgjson.NewError(msgjson.UnknownMessageType, errMsg)
-		return
+		return msg
 	}
-	payload.Error = s.handleRequest(nil, req)
-	return
+	payload = s.handleRequest(req)
+	return msg
 }
 
 // authMiddleware checks incoming requests for authentication.

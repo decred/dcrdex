@@ -11,18 +11,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 )
 
-func verifyResponse(m *msgjson.Message, res interface{}, wantErrCode int) error {
-	// using 1337 for all requests
-	if m.ID != 1337 {
-		return errors.New("wrong ID")
-	}
-	if m.Type != msgjson.Response {
-		return errors.New("wrong Type")
-	}
-	payload := &msgjson.ResponsePayload{}
-	if err := json.Unmarshal(m.Payload, payload); err != nil {
-		return errors.New("unable to unmarshal payload")
-	}
+func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCode int) error {
 	if wantErrCode != 0 {
 		if payload.Error.Code != wantErrCode {
 			return errors.New("wrong error code")
@@ -61,8 +50,8 @@ func TestCreateResponse(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		msg, _ := createResponse(test.op, &test.res, test.resErr, 1337)
-		if err := verifyResponse(&msg, &test.res, test.wantErrCode); err != nil {
+		payload := createResponse(test.op, &test.res, test.resErr)
+		if err := verifyResponse(payload, &test.res, test.wantErrCode); err != nil {
 			t.Error(err)
 			return
 		}
@@ -70,28 +59,21 @@ func TestCreateResponse(t *testing.T) {
 	}
 }
 
-func newRequest() *msgjson.Message {
-	return &msgjson.Message{
-		ID:   1337,
-		Type: msgjson.Request,
-	}
-}
+var msg = new(msgjson.Message)
 
 func TestHelp(t *testing.T) {
-	msg := newRequest()
-	handleHelp(nil, nil, msg)
+	payload := handleHelp(nil, msg)
 	res := ""
-	if err := verifyResponse(msg, &res, 0); err != nil {
+	if err := verifyResponse(payload, &res, 0); err != nil {
 		t.Error(err)
 		return
 	}
 }
 
 func TestVersion(t *testing.T) {
-	msg := newRequest()
-	handleVersion(nil, nil, msg)
+	payload := handleVersion(nil, msg)
 	res := &VersionResult{}
-	if err := verifyResponse(msg, res, 0); err != nil {
+	if err := verifyResponse(payload, res, 0); err != nil {
 		t.Error(err)
 		return
 	}

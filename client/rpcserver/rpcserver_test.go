@@ -134,10 +134,12 @@ func newTServer(t *testing.T, start bool) (*RPCServer, *TCore, context.CancelFun
 	cert, key := tmp+"cert.cert", tmp+"key.key"
 	defer os.Remove(cert)
 	defer os.Remove(key)
-	s, err := New(c, fmt.Sprintf("localhost:%d", tPort), "", "", cert, key, tLogger)
+	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), "", "", cert, key}
+	s, err := New(cfg)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
+	s.SetLogger(tLogger)
 	if start {
 		go s.Run(ctx)
 	} else {
@@ -348,7 +350,7 @@ func TestParseHTTPRequest(t *testing.T) {
 	ensureErr("bad route", msgjson.RPCUnknownRoute)
 
 	// Set the route correctly.
-	routes["123"] = func(r *RPCServer, _ *wsClient, m *msgjson.Message) *msgjson.Error {
+	routes["123"] = func(r *RPCServer, m *msgjson.Message) *msgjson.ResponsePayload {
 		return nil
 	}
 

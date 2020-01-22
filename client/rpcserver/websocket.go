@@ -98,7 +98,17 @@ func (s *RPCServer) websocketHandler(conn ws.Connection, ip string) {
 func (s *RPCServer) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson.Error {
 	log.Tracef("message of type %d received for route %s", msg.Type, msg.Route)
 	if msg.Type == msgjson.Request {
-		return s.handleRequest(conn, msg)
+		handler, found := wsHandlers[msg.Route]
+		if !found {
+			// If a this request exits in routes, call it.
+			if _, found := routes[msg.Route]; found {
+				handler = wsHandleRequest
+			}
+		}
+		if !found {
+			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route '"+msg.Route+"'")
+		}
+		return handler(s, conn, msg)
 	}
 	// Web server doesn't send requests, only responses and notifications, so
 	// a response-type message from a client is an error.
@@ -132,6 +142,24 @@ type marketResponse struct {
 	QuoteSymbol  string          `json:"quoteSymbol"`
 	BaseBalance  uint64          `json:"baseBalance"`
 	QuoteBalance uint64          `json:"quoteBalance"`
+}
+
+// wsHandleRequest handles requests found in the routes map for a websocket client.
+func wsHandleRequest(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
+	handler := routes[msg.Route]
+	payload := handler(s, msg)
+	encodedPayload, err := json.Marshal(payload)
+	if err != nil {
+		err := fmt.Errorf("unable to encode payload: %v", err)
+		panic(err)
+	}
+	res := &msgjson.Message{
+		ID:      msg.ID,
+		Type:    msgjson.Response,
+		Payload: encodedPayload,
+	}
+	cl.Send(res)
+	return payload.Error
 }
 
 // wsLoadMarket is the handler for the 'loadmarket' websocket endpoint.
