@@ -21,7 +21,10 @@ const successMsgRoute = 'success_message'
 export default class Application {
   constructor () {
     this.notes = []
-    this.wallets = {}
+    this.user = {
+      accounts: {},
+      wallets: {}
+    }
   }
 
   start () {
@@ -38,7 +41,7 @@ export default class Application {
     this.attach()
     ws.connect(getSocketURI())
     ws.registerRoute(updateWalletRoute, wallet => {
-      this.wallets[wallet.symbol] = wallet
+      this.user.wallets[wallet.symbol] = wallet
     })
     ws.registerRoute(errorMsgRoute, msg => {
       this.notify(ERROR, msg)
@@ -46,16 +49,16 @@ export default class Application {
     ws.registerRoute(successMsgRoute, msg => {
       this.notify(SUCCESS, msg)
     })
-    this.fetchWallets()
+    this.fetchUser()
   }
 
-  async fetchWallets () {
-    const wallets = await getJSON('/api/walletstatus')
-    if (!wallets.isOK) {
-      console.error('error fetching wallets status', wallets.errMsg)
+  async fetchUser () {
+    const user = await getJSON('/api/user')
+    if (!user.isOK) {
+      console.error('error fetching user status', user.errMsg)
       return
     }
-    this.wallets = wallets
+    this.user = user
   }
 
   // Load the page from the server. Insert and bind to the HTML.

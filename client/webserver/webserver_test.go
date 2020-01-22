@@ -31,7 +31,7 @@ type TCore struct {
 	loginErr   error
 }
 
-func (c *TCore) ListMarkets() []*core.MarketInfo                     { return nil }
+func (c *TCore) Markets() map[string][]*core.Market                  { return nil }
 func (c *TCore) Register(r *core.Registration) (error, <-chan error) { return c.regErr, nil }
 func (c *TCore) Login(dex, pw string) error                          { return c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
@@ -44,6 +44,7 @@ func (c *TCore) WalletStatus(assetID uint32) (has, running, open bool) { return 
 func (c *TCore) CreateWallet(form *core.WalletForm) error              { return nil }
 func (c *TCore) OpenWallet(assetID uint32, pw string) error            { return nil }
 func (c *TCore) Wallets() []*core.WalletStatus                         { return nil }
+func (c *TCore) User() *core.User                                      { return nil }
 
 type TWriter struct {
 	b []byte

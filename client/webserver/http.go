@@ -83,7 +83,7 @@ func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 // marketResult is the template data for the `/markets` page request.
 type marketTmplData struct {
 	CommonArguments
-	DEXes []*core.MarketInfo
+	Markets map[string][]*core.Market
 }
 
 // marketResult returns a *marketResult, which is needed to process the
@@ -91,7 +91,7 @@ type marketTmplData struct {
 func (s *WebServer) marketResult(r *http.Request) *marketTmplData {
 	return &marketTmplData{
 		CommonArguments: *commonArgs(r, "Markets | Decred DEX"),
-		DEXes:           s.core.ListMarkets(),
+		Markets:         s.core.Markets(),
 	}
 }
 

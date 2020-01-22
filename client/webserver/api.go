@@ -52,7 +52,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	walletUpdate := &walletStatus{
+	walletUpdate := &core.WalletStatus{
 		Symbol:  "dcr",
 		AssetID: dcrID,
 		Open:    open,
@@ -140,17 +140,7 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
-// apiWalletStatus handles the 'walletstatus' API request.
-func (s *WebServer) apiWalletStatus(w http.ResponseWriter, r *http.Request) {
-	stats := s.core.Wallets()
-	resp := make([]*walletStatus, 0, len(stats))
-	for _, status := range stats {
-		resp = append(resp, &walletStatus{
-			Symbol:  status.Symbol,
-			AssetID: status.AssetID,
-			Open:    status.Open,
-			Running: status.Running,
-		})
-	}
-	writeJSON(w, resp, s.indent)
+// apiUser handles the 'user' API request.
+func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.core.User(), s.indent)
 }

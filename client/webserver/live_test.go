@@ -45,7 +45,6 @@ type TCore struct {
 	reg *core.Registration
 }
 
-func (c *TCore) ListMarkets() []*core.MarketInfo { return tMarkets }
 func (c *TCore) Register(r *core.Registration) error {
 	c.reg = r
 	return nil

@@ -124,6 +124,16 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 				},
 			},
 		},
+		markets: []*Market{
+			&Market{
+				BaseID:          tDCR.ID,
+				BaseSymbol:      tDCR.Symbol,
+				QuoteID:         tBTC.ID,
+				QuoteSymbol:     tBTC.Symbol,
+				EpochLen:        60000,
+				MarketBuyBuffer: 1.1,
+			},
+		},
 	}, conn, acct
 }
 
@@ -356,15 +366,17 @@ func newTestRig() *testRig {
 	}
 }
 
-func tMarketID(bq [2]uint32) string {
-	return strconv.Itoa(int(bq[0])) + "-" + strconv.Itoa(int(bq[1]))
+func tMarketID(base, quote uint32) string {
+	return strconv.Itoa(int(base)) + "-" + strconv.Itoa(int(quote))
 }
 
 func TestMain(m *testing.M) {
+	log = slog.NewBackend(os.Stdout).Logger("TEST")
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tDexPriv, _ = secp256k1.GeneratePrivateKey()
 	tDexKey = tDexPriv.PubKey()
+
 	doIt := func() int {
 		// Not counted as coverage, must test Archiver constructor explicitly.
 		defer shutdown()
@@ -373,20 +385,21 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
-func TestListMarkets(t *testing.T) {
+func TestMarkets(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	// Simulate 10 markets.
 	marketIDs := make(map[string]struct{})
 	rig.dexConn.cfg.Markets = nil
+	rig.dexConn.markets = nil
 	for i := 0; i < 10; i++ {
 		base, quote := randomMsgMarket()
-		mkt := [2]uint32{base.ID, quote.ID}
-		marketIDs[tMarketID(mkt)] = struct{}{}
-		rig.dexConn.cfg.Markets = append(rig.dexConn.cfg.Markets, msgjson.Market{
-			Name:            base.Symbol + "_" + quote.Symbol,
-			Base:            base.ID,
-			Quote:           quote.ID,
+		marketIDs[tMarketID(base.ID, quote.ID)] = struct{}{}
+		rig.dexConn.markets = append(rig.dexConn.markets, &Market{
+			BaseID:          base.ID,
+			BaseSymbol:      base.Symbol,
+			QuoteID:         quote.ID,
+			QuoteSymbol:     quote.Symbol,
 			EpochLen:        5000,
 			StartEpoch:      1234,
 			MarketBuyBuffer: 1.4,
@@ -396,26 +409,24 @@ func TestListMarkets(t *testing.T) {
 	}
 
 	// Just check that the information is coming through correctly.
-	dexes := tCore.ListMarkets()
-	if len(dexes) != 1 {
-		t.Fatalf("expected 1 MarketInfo, got %d", len(dexes))
-	}
-	mktCfg := dexes[0]
-	if len(mktCfg.Markets) != 10 {
-		t.Fatalf("expected 10 Markets, got %d", len(mktCfg.Markets))
+	mktMap := tCore.Markets()
+	if len(mktMap) != 1 {
+		t.Fatalf("expected 1 MarketInfo, got %d", len(mktMap))
 	}
 	assets := rig.dexConn.assets
-	for _, market := range mktCfg.Markets {
-		mkt := tMarketID([2]uint32{market.BaseID, market.QuoteID})
-		_, found := marketIDs[mkt]
-		if !found {
-			t.Fatalf("market %s not found", mkt)
-		}
-		if assets[market.BaseID].Symbol != market.BaseSymbol {
-			t.Fatalf("base symbol mismatch. %s != %s", assets[market.BaseID].Symbol, market.BaseSymbol)
-		}
-		if assets[market.QuoteID].Symbol != market.QuoteSymbol {
-			t.Fatalf("quote symbol mismatch. %s != %s", assets[market.QuoteID].Symbol, market.QuoteSymbol)
+	for _, markets := range mktMap {
+		for _, market := range markets {
+			mkt := tMarketID(market.BaseID, market.QuoteID)
+			_, found := marketIDs[mkt]
+			if !found {
+				t.Fatalf("market %s not found", mkt)
+			}
+			if assets[market.BaseID].Symbol != market.BaseSymbol {
+				t.Fatalf("base symbol mismatch. %s != %s", assets[market.BaseID].Symbol, market.BaseSymbol)
+			}
+			if assets[market.QuoteID].Symbol != market.QuoteSymbol {
+				t.Fatalf("quote symbol mismatch. %s != %s", assets[market.QuoteID].Symbol, market.QuoteSymbol)
+			}
 		}
 	}
 }
@@ -578,6 +589,7 @@ func TestCreateWallet(t *testing.T) {
 	rig.db.updateWalletErr = nil
 
 	// Success
+	delete(tCore.wallets, tILT.ID)
 	err = tCore.CreateWallet(form)
 	if err != nil {
 		t.Fatalf("error when should be no error: %v", err)

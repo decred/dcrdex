@@ -61,6 +61,7 @@ type dexConnection struct {
 	acct     *dexAccount
 	booksMtx sync.RWMutex
 	books    map[string]*order.OrderBook
+	markets  []*Market
 }
 
 // coinWaiter is a message waiting to be stamped, signed, and sent once a
@@ -143,26 +144,13 @@ func (c *Core) Run(ctx context.Context) {
 	log.Infof("DEX client core off")
 }
 
-// ListMarkets returns a list of known markets.
-func (c *Core) ListMarkets() []*MarketInfo {
+// Markets returns a slice of known markets.
+func (c *Core) Markets() map[string][]*Market {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	infos := make([]*MarketInfo, 0, len(c.conns))
+	infos := make(map[string][]*Market, len(c.conns))
 	for uri, dc := range c.conns {
-		mi := &MarketInfo{DEX: uri}
-		for _, mkt := range dc.cfg.Markets {
-			base, quote := dc.assets[mkt.Base], dc.assets[mkt.Quote]
-			mi.Markets = append(mi.Markets, Market{
-				BaseID:          base.ID,
-				BaseSymbol:      base.Symbol,
-				QuoteID:         quote.ID,
-				QuoteSymbol:     quote.Symbol,
-				EpochLen:        mkt.EpochLen,
-				StartEpoch:      mkt.StartEpoch,
-				MarketBuyBuffer: mkt.MarketBuyBuffer,
-			})
-		}
-		infos = append(infos, mi)
+		infos[uri] = dc.markets
 	}
 	return infos
 }
@@ -173,6 +161,23 @@ func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 	defer c.walletMtx.RUnlock()
 	w, found := c.wallets[assetID]
 	return w, found
+}
+
+// connectedWallet fetches a wallet and will connect the wallet if it is not
+// already connected.
+func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
+	wallet, exists := c.wallet(assetID)
+	if !exists {
+		return nil, fmt.Errorf("no wallet found for %d -> %s", assetID, unbip(assetID))
+	}
+	if !wallet.connected() {
+		log.Infof("connecting wallet for %s", unbip(assetID))
+		err := wallet.Connect()
+		if err != nil {
+			return nil, fmt.Errorf("Connect error: %v", err)
+		}
+	}
+	return wallet, nil
 }
 
 // Wallets creates a slice of WalletStatus for all known wallets.
@@ -192,6 +197,15 @@ func (c *Core) Wallets() []*WalletStatus {
 	return stats
 }
 
+// User returns information about the client, including its known markets and
+// DEX accounts.
+func (c *Core) User() *User {
+	return &User{
+		Wallets:  c.Wallets(),
+		Accounts: c.Markets(),
+	}
+}
+
 // CreateWallet creates a new exchange wallet.
 func (c *Core) CreateWallet(form *WalletForm) error {
 	dbWallet := &db.Wallet{
@@ -201,26 +215,14 @@ func (c *Core) CreateWallet(form *WalletForm) error {
 	}
 	_, exists := c.wallet(form.AssetID)
 	if exists {
-		return fmt.Errorf("%s wallet does not exist yet", unbip(dbWallet.AssetID))
-	}
-	wallet := &xcWallet{AssetID: form.AssetID}
-
-	walletCfg := &asset.WalletConfig{
-		Account: dbWallet.Account,
-		INIPath: dbWallet.INIPath,
-		TipChange: func(err error) {
-			c.tipChange(form.AssetID, err)
-		},
+		return fmt.Errorf("%s wallet already exists", unbip(dbWallet.AssetID))
 	}
 
-	logger := c.loggerMaker.SubLogger("CORE", unbip(dbWallet.AssetID))
-	w, err := asset.Setup(dbWallet.AssetID, walletCfg, logger, c.net)
+	wallet, err := c.loadWallet(dbWallet)
 	if err != nil {
-		return fmt.Errorf("error creating wallet: %v", err)
+		return fmt.Errorf("error loading wallet for %d -> %s: %v", dbWallet.AssetID, unbip(dbWallet.AssetID), err)
 	}
-	wallet.Wallet = w
-	wallet.waiter = dex.NewStartStopWaiter(w)
-	wallet.waiter.Start(c.ctx)
+
 	err = wallet.Connect()
 	if err != nil {
 		return fmt.Errorf("Error connecting wallet: %v", err)
@@ -233,11 +235,33 @@ func (c *Core) CreateWallet(form *WalletForm) error {
 		return fmt.Errorf("error storing wallet credentials: %v", err)
 	}
 
-	c.walletMtx.Lock()
-	c.wallets[form.AssetID] = wallet
-	c.walletMtx.Unlock()
-
 	return nil
+}
+
+// loadWallet uses the data from the database to construct a new exchange
+// wallet. The returned wallet is running but not connected.
+func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
+	wallet := &xcWallet{AssetID: dbWallet.AssetID}
+	walletCfg := &asset.WalletConfig{
+		Account: dbWallet.Account,
+		INIPath: dbWallet.INIPath,
+		TipChange: func(err error) {
+			c.tipChange(dbWallet.AssetID, err)
+		},
+	}
+	logger := c.loggerMaker.SubLogger("CORE", unbip(dbWallet.AssetID))
+	w, err := asset.Setup(dbWallet.AssetID, walletCfg, logger, c.net)
+	if err != nil {
+		return nil, fmt.Errorf("error creating wallet: %v", err)
+	}
+	wallet.Wallet = w
+	wallet.waiter = dex.NewStartStopWaiter(w)
+	wallet.waiter.Start(c.ctx)
+
+	c.walletMtx.Lock()
+	c.wallets[dbWallet.AssetID] = wallet
+	c.walletMtx.Unlock()
+	return wallet, nil
 }
 
 // WalletStatus returns 1) whether the wallet exists, 2) if it's currently
@@ -247,7 +271,7 @@ func (c *Core) WalletStatus(assetID uint32) (has, running, open bool) {
 	defer c.walletMtx.Unlock()
 	wallet, has := c.wallets[assetID]
 	if !has {
-		log.Tracef("Wallet status requested for unknown asset %d -> %s", assetID, unbip(assetID))
+		log.Tracef("wallet status requested for unknown asset %d -> %s", assetID, unbip(assetID))
 		return
 	}
 	running, open = wallet.status()
@@ -256,9 +280,9 @@ func (c *Core) WalletStatus(assetID uint32) (has, running, open bool) {
 
 // OpenWallet opens the wallet for use.
 func (c *Core) OpenWallet(assetID uint32, pw string) error {
-	wallet, found := c.wallet(assetID)
-	if !found {
-		return fmt.Errorf("no wallet for %d -> %s", assetID, unbip(assetID))
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return fmt.Errorf("wallet error for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
 	return wallet.Unlock(pw, aYear)
 }
@@ -274,9 +298,9 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	if form.DEX == "" {
 		return fmt.Errorf("no dex url specified"), nil
 	}
-	wallet, found := c.wallet(assetID)
-	if !found {
-		return fmt.Errorf("no wallet found for %s", unbip(assetID)), nil
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return fmt.Errorf("Register: wallet error for %d -> %s: %v", assetID, unbip(assetID), err), nil
 	}
 
 	// Make sure the account doesn't already exist.
@@ -512,18 +536,45 @@ func (c *Core) initialize() {
 	if err != nil {
 		log.Errorf("Error retreiving accounts from database: %v", err)
 	}
+	var wg sync.WaitGroup
 	for _, acct := range accts {
 		a := acct
+		wg.Add(1)
 		go func() {
-			c.addDex(a)
+			_, err := c.addDex(a)
+			if err != nil {
+				log.Errorf("error adding DEX %s: %v", a, err)
+			}
+			wg.Done()
 		}()
 	}
 	if len(accts) > 0 {
-		c.connMtx.RLock()
-		log.Infof("Successfully connected to %d out of %d "+
-			"DEX servers", len(c.conns), len(accts))
-		c.connMtx.RUnlock()
+		go func() {
+			wg.Wait()
+			c.connMtx.RLock()
+			log.Infof("Successfully connected to %d out of %d "+
+				"DEX servers", len(c.conns), len(accts))
+			c.connMtx.RUnlock()
+		}()
 	}
+	dbWallets, err := c.db.Wallets()
+	if err != nil {
+		log.Errorf("error loading wallets from database: %v", err)
+	}
+	for _, dbWallet := range dbWallets {
+		_, err := c.loadWallet(dbWallet)
+		if err != nil {
+			aid := dbWallet.AssetID
+			log.Errorf("error loading %d -> %s wallet: %v", aid, unbip(aid), err)
+		}
+	}
+	if len(dbWallets) > 0 {
+		c.walletMtx.RLock()
+		numWallets := len(c.wallets)
+		c.walletMtx.RUnlock()
+		log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
+	}
+
 }
 
 // addDex adds a dexConnection to the conns map if a connection can be made
@@ -597,6 +648,20 @@ func (c *Core) addDex(acct *db.AccountInfo) (*dexConnection, error) {
 			}
 		}
 
+		markets := make([]*Market, 0, len(dexCfg.Markets))
+		for _, mkt := range dexCfg.Markets {
+			base, quote := assets[mkt.Base], assets[mkt.Quote]
+			markets = append(markets, &Market{
+				BaseID:          base.ID,
+				BaseSymbol:      base.Symbol,
+				QuoteID:         quote.ID,
+				QuoteSymbol:     quote.Symbol,
+				EpochLen:        mkt.EpochLen,
+				StartEpoch:      mkt.StartEpoch,
+				MarketBuyBuffer: mkt.MarketBuyBuffer,
+			})
+		}
+
 		// Create the dexConnection and add it to the map.
 		dc := &dexConnection{
 			websocket: conn,
@@ -609,6 +674,7 @@ func (c *Core) addDex(acct *db.AccountInfo) (*dexConnection, error) {
 				dexPubKey: acct.DEXPubKey,
 				feeCoin:   acct.FeeCoin,
 			},
+			markets: markets,
 		}
 		c.connMtx.Lock()
 		c.conns[uri] = dc
@@ -773,12 +839,15 @@ out:
 	}
 }
 
-// tipChange is called by a wallet backend when the tip block changes.
+// tipChange is called by a wallet backend when the tip block changes, or when
+// a connection error is encountered such that tip change reporting may be
+// adversely affected.
 func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	if nodeErr != nil {
 		log.Errorf("%s wallet is reporting a failed state: %v", nodeErr)
 		return
 	}
+	log.Tracef("processing tip change for %s", unbip(assetID))
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
 	for _, w := range c.waiters {
