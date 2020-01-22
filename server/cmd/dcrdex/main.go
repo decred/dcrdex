@@ -13,7 +13,6 @@ import (
 	"runtime/pprof"
 	"strings"
 
-	dex "decred.org/dcrdex/dex"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
@@ -70,7 +69,7 @@ func mainCore(ctx context.Context) error {
 
 	// Create the DEX manager.
 	dexConf := &dexsrv.DexConf{
-		LogBackend: &dex.LoggerMaker{backendLog, cfg.DefaultLogLevel, cfg.LogLevels},
+		LogBackend: cfg.LogMaker,
 		Markets:    markets,
 		Assets:     assets,
 		Network:    cfg.Network,

@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	maxLogRolls    = 16
-	defaultRPCAddr = "localhost:5757"
-	defaultWebAddr = "localhost:5758"
-	configFilename = "dexc_mainnet.conf"
-	certsFilename  = "certs.json"
+	maxLogRolls     = 16
+	defaultRPCAddr  = "localhost:5757"
+	defaultWebAddr  = "localhost:5758"
+	configFilename  = "dexc_mainnet.conf"
+	certsFilename   = "certs.json"
+	defaultLogLevel = "info"
 )
 
 var (
@@ -67,6 +68,7 @@ type Config struct {
 	Testnet    bool   `long:"testnet" description:"use testnet"`
 	Simnet     bool   `long:"simnet" description:"use simnet"`
 	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
+	DebugLevel string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
 	// Certs is not set by the client. It is parsed from the JSON file at the
 	// Certs path.
 	Certs map[string]string
@@ -74,9 +76,10 @@ type Config struct {
 }
 
 var defaultConfig = Config{
-	DataDir: applicationDirectory,
-	RPCAddr: defaultRPCAddr,
-	WebAddr: defaultWebAddr,
+	DataDir:    applicationDirectory,
+	DebugLevel: defaultLogLevel,
+	RPCAddr:    defaultRPCAddr,
+	WebAddr:    defaultWebAddr,
 }
 
 // Configure processes the application configuration.

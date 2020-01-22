@@ -21,7 +21,7 @@ func newAccountsView() *accountsViewer {
 	// A journal for logging account-related messages.
 	acctsJournal := newJournal("Accounts Journal", nil)
 	// acctsLog is global.
-	acctsLog = NewLoggerMaker(acctsJournal.Write).Logger("ACCTS")
+	acctsLog = mustLogger("ACCTS", acctsJournal.Write)
 	formBox := tview.NewGrid()
 	formBox.SetBackgroundColor(colorBlack)
 	var acctForm *tview.Form

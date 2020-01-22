@@ -19,7 +19,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
-	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -74,8 +73,7 @@ type dexConf struct {
 	RPCListen        []string
 	BroadcastTimeout time.Duration
 	AltDNSNames      []string
-	DefaultLogLevel  slog.Level
-	LogLevels        map[string]slog.Level
+	LogMaker         *dex.LoggerMaker
 }
 
 type flagsData struct {
@@ -183,57 +181,21 @@ func supportedSubsystems() []string {
 // parseAndSetDebugLevels attempts to parse the specified debug level and set
 // the levels accordingly.  An appropriate error is returned if anything is
 // invalid.
-func parseAndSetDebugLevels(debugLevel string) (slog.Level, map[string]slog.Level, error) {
-	// When the specified string doesn't have any delimiters, treat it as
-	// the log level for all subsystems.
-	if !strings.Contains(debugLevel, ",") && !strings.Contains(debugLevel, "=") {
-		// Validate debug log level.
-		lvl, ok := slog.LevelFromString(debugLevel)
-		if !ok {
-			str := "The specified debug level [%v] is invalid"
-			return slog.LevelDebug, nil, fmt.Errorf(str, debugLevel)
-		}
-
-		// Change the logging level for all subsystems.
-		setLogLevels(lvl)
-
-		return lvl, nil, nil
+func parseAndSetDebugLevels(debugLevel string) (*dex.LoggerMaker, error) {
+	lm, err := dex.NewLoggerMaker(backendLog, debugLevel)
+	if err != nil {
+		return nil, err
 	}
-
-	// Split the specified string into subsystem/level pairs while detecting
-	// issues and update the log levels accordingly.
-	levelPairs := strings.Split(debugLevel, ",")
-	levels := make(map[string]slog.Level, len(levelPairs))
-	for _, logLevelPair := range levelPairs {
-		if !strings.Contains(logLevelPair, "=") {
-			str := "The specified debug level contains an invalid " +
-				"subsystem/level pair [%v]"
-			return slog.LevelDebug, nil, fmt.Errorf(str, logLevelPair)
-		}
-
-		// Extract the specified subsystem and log level.
-		fields := strings.Split(logLevelPair, "=")
-		subsysID, logLevel := fields[0], fields[1]
-
-		// Validate subsystem.
+	setLogLevels(lm.DefaultLevel)
+	for subsysID, lvl := range lm.Levels {
 		if _, exists := subsystemLoggers[subsysID]; !exists {
 			str := "The specified subsystem [%v] is invalid -- " +
 				"supported subsystems %v"
-			return slog.LevelDebug, nil, fmt.Errorf(str, subsysID, supportedSubsystems())
+			return nil, fmt.Errorf(str, subsysID, supportedSubsystems())
 		}
-
-		// Validate log level.
-		lvl, ok := slog.LevelFromString(logLevel)
-		if !ok {
-			str := "The specified debug level [%v] is invalid"
-			return slog.LevelDebug, nil, fmt.Errorf(str, logLevel)
-		}
-		levels[subsysID] = lvl
-
 		setLogLevel(subsysID, lvl)
 	}
-
-	return slog.LevelInfo, levels, nil
+	return lm, nil
 }
 
 // normalizeNetworkAddress checks for a valid local network address format and
@@ -502,7 +464,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	log.Infof("Config file:     %s", configFile)
 
 	// Parse, validate, and set debug log level(s).
-	singleLogLevel, logLevels, err := parseAndSetDebugLevels(cfg.DebugLevel)
+	logMaker, err := parseAndSetDebugLevels(cfg.DebugLevel)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		parser.WriteHelp(os.Stderr)
@@ -550,8 +512,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RPCListen:        RPCListen,
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		AltDNSNames:      cfg.AltDNSNames,
-		DefaultLogLevel:  singleLogLevel,
-		LogLevels:        logLevels,
+		LogMaker:         logMaker,
 	}
 
 	opts := &procOpts{

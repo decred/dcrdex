@@ -47,6 +47,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			errMsg := fmt.Sprintf("error creating wallet: %v", err)
+			log.Errorf(errMsg)
 			http.Error(w, errMsg, http.StatusBadRequest)
 			return
 		}
@@ -63,6 +64,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		err := s.core.OpenWallet(dcrID, reg.WalletPass)
 		if err != nil {
 			errMsg := fmt.Sprintf("error opening wallet: %v", err)
+			log.Error(errMsg)
 			http.Error(w, errMsg, http.StatusBadRequest)
 			return
 		}
@@ -77,9 +79,11 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if err != nil {
+		errMsg := fmt.Sprintf("registration error: %v", err)
+		log.Error(errMsg)
 		resp = &standardResponse{
 			OK:  false,
-			Msg: fmt.Sprintf("registration error: %v", err),
+			Msg: errMsg,
 		}
 	} else {
 		resp = &standardResponse{

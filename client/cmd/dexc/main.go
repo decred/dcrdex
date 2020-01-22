@@ -50,9 +50,10 @@ func main() {
 		logStdout := func(msg []byte) {
 			os.Stdout.Write(msg)
 		}
+		logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
 		clientCore, err := core.New(&core.Config{
 			DBPath:      cfg.DBPath, // global set in config.go
-			LoggerMaker: ui.NewLoggerMaker(nil),
+			LoggerMaker: logMaker,
 			Certs:       cfg.Certs,
 			Net:         cfg.Net,
 		})
@@ -60,7 +61,6 @@ func main() {
 			fmt.Fprint(os.Stderr, "error creating client core: ", err)
 			return
 		}
-		ui.InitLogging(logStdout)
 		go clientCore.Run(appCtx)
 		// At least one of --rpc or --web must be specified.
 		if !cfg.RPCOn && !cfg.WebOn {
@@ -72,14 +72,14 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				rpcserver.Run(appCtx, clientCore, cfg.RPCAddr, ui.NewLoggerMaker(nil).Logger("RPC"))
+				rpcserver.Run(appCtx, clientCore, cfg.RPCAddr, logMaker.Logger("RPC"))
 			}()
 		}
 		if cfg.WebOn {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				webSrv, err := webserver.New(clientCore, cfg.WebAddr, ui.NewLoggerMaker(nil).Logger("WEB"), cfg.ReloadHTML)
+				webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
 				if err != nil {
 					log.Errorf("Error starting web server: %v", err)
 					return

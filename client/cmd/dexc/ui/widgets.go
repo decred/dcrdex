@@ -57,7 +57,7 @@ func Run(ctx context.Context) {
 	appJournal = newJournal("Application Log", handleAppLogKey)
 	InitLogging(func(p []byte) {
 		appJournal.Write(p)
-	})
+	}, cfg.DebugLevel)
 	// Close closes the log rotator.
 	defer Close()
 	// Create the UI and start the app.
@@ -100,9 +100,14 @@ var welcomeMessage = "Welcome to Decred DEX. Use [#838ac7]Up[white] and " +
 // createApp creates the Screen and adds the menu and the initial view.
 func createApp() {
 	var err error
+	lm, err := CustomLogMaker(nil)
+	if err != nil {
+		log.Errorf("error creating core logger")
+	}
+
 	clientCore, err = core.New(&core.Config{
 		DBPath:      cfg.DBPath, // global set in config.go
-		LoggerMaker: NewLoggerMaker(nil),
+		LoggerMaker: lm,
 		Certs:       cfg.Certs,
 		Net:         cfg.Net,
 	})
@@ -165,10 +170,10 @@ func createWidgets() {
 		setRPCLabelOn(false)
 	})
 	noteJournal = newJournal("Notifications", handleNotificationLog)
-	noteLog = NewLoggerMaker(func(msg []byte) {
+	noteLog = mustLogger("NOTE", func(msg []byte) {
 		setNotificationCount(int(atomic.AddUint32(&notificationCount, 1)))
 		noteJournal.Write(msg)
-	}).Logger("NOTE")
+	})
 	mainMenu = newMainMenu()
 }
 

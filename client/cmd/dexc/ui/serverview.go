@@ -37,9 +37,13 @@ func newServerView(tag, addr string, runFunc func(context.Context, string, slog.
 
 	// Get a logger for the server.
 	logTag := strings.ToUpper(tag) + "SVR"
-	serverLogger := NewLoggerMaker(func(p []byte) {
+	lm, err := CustomLogMaker(func(p []byte) {
 		serverJournal.Write(p)
-	}).Logger(logTag)
+	})
+	if err != nil {
+		log.Errorf("error creating " + logTag + " logger")
+	}
+	serverLogger := lm.Logger(logTag)
 
 	onMsg := " " + tag + " server is on"
 	offMsg := " " + tag + " server is off"

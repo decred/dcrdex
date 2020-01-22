@@ -81,8 +81,8 @@ type Config struct {
 	// DBPath is a filepath to use for the client database. If the database does
 	// not already exist, it will be created.
 	DBPath string
-	// LogMaker is a logger for the core to use. Having the logger as an argument
-	// enables creating custom loggers for use in a GUI interface.
+	// LoggerMaker is a logger for the core to use. Having the logger as an
+	// argument enables creating custom loggers for use in a GUI interface.
 	LoggerMaker *dex.LoggerMaker
 	// Certs is a mapping of URL to filepaths of TLS Certificates for the server.
 	// This is intended for accommodating self-signed certificates.
@@ -110,7 +110,7 @@ type Core struct {
 
 // New is the constructor for a new Core.
 func New(cfg *Config) (*Core, error) {
-	log = cfg.LoggerMaker.NewLogger("CORE")
+	log = cfg.LoggerMaker.Logger("CORE")
 	db, err := bolt.NewDB(cfg.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("database initialization error: %v", err)
@@ -125,6 +125,7 @@ func New(cfg *Config) (*Core, error) {
 		loggerMaker: cfg.LoggerMaker,
 		waiters:     make(map[string]coinWaiter),
 	}
+	log.Tracef("new client core created")
 	return core, nil
 }
 
@@ -200,7 +201,7 @@ func (c *Core) CreateWallet(form *WalletForm) error {
 	}
 	_, exists := c.wallet(form.AssetID)
 	if exists {
-		return fmt.Errorf("%s wallet", unbip(dbWallet.AssetID))
+		return fmt.Errorf("%s wallet does not exist yet", unbip(dbWallet.AssetID))
 	}
 	wallet := &xcWallet{AssetID: form.AssetID}
 
@@ -246,6 +247,7 @@ func (c *Core) WalletStatus(assetID uint32) (has, running, open bool) {
 	defer c.walletMtx.Unlock()
 	wallet, has := c.wallets[assetID]
 	if !has {
+		log.Tracef("Wallet status requested for unknown asset %d -> %s", assetID, unbip(assetID))
 		return
 	}
 	running, open = wallet.status()
@@ -416,6 +418,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	reqB, err := req.Serialize()
 	if err != nil {
 		log.Warnf("fee paid with coin %x, but unable to serialize notifyfee request so server signature cannot be verified")
+		// Dont quit. The fee is already paid, so follow through if possible.
 	}
 
 	// Set up the coin waiter.
