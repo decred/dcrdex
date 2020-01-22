@@ -69,12 +69,18 @@ func TestAccounts(t *testing.T) {
 		numToDo /= 4
 	}
 	accts := make([]*db.AccountInfo, 0, numToDo)
-	nTimes(numToDo, func(int) { accts = append(accts, dbtest.RandomAccountInfo()) })
+	acctMap := make(map[string]*db.AccountInfo)
+	nTimes(numToDo, func(int) {
+		acct := dbtest.RandomAccountInfo()
+		accts = append(accts, acct)
+		acctMap[acct.URL] = acct
+	})
 	tStart := time.Now()
 	nTimes(numToDo, func(i int) {
 		boltdb.CreateAccount(accts[i])
 	})
 	t.Logf("%d milliseconds to insert %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
+
 	tStart = time.Now()
 	nTimes(numToDo, func(i int) {
 		ai := accts[i]
@@ -84,7 +90,22 @@ func TestAccounts(t *testing.T) {
 		}
 		dbtest.MustCompareAccountInfo(t, ai, reAI)
 	})
-	t.Logf("%d milliseconds to read and compare %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
+	t.Logf("%d milliseconds to read and compare %d account names", time.Since(tStart)/time.Millisecond, numToDo)
+
+	tStart = time.Now()
+	readAccts, err := boltdb.Accounts()
+	if err != nil {
+		t.Fatalf("Accounts error: %v", err)
+	}
+	nTimes(numToDo, func(i int) {
+		reAI := readAccts[i]
+		ai, found := acctMap[reAI.URL]
+		if !found {
+			t.Fatalf("no account found in map for %s", reAI.URL)
+		}
+		dbtest.MustCompareAccountInfo(t, ai, reAI)
+	})
+	t.Logf("%d milliseconds to batch read and compare %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
 
 	dexURLs, err = boltdb.ListAccounts()
 	if err != nil {
