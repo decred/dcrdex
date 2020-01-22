@@ -162,6 +162,7 @@ func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 	return w, found
 }
 
+// Wallets creates a slice of WalletStatus for all known wallets.
 func (c *Core) Wallets() []*WalletStatus {
 	c.walletMtx.RLock()
 	defer c.walletMtx.RUnlock()
@@ -226,8 +227,8 @@ func (c *Core) CreateWallet(form *WalletForm) error {
 	return nil
 }
 
-// WalletStatus returns 1) whether the wallet exists and 2) if it's currently
-// running.
+// WalletStatus returns 1) whether the wallet exists, 2) if it's currently
+// running, and 3) whether it's currently open.
 func (c *Core) WalletStatus(assetID uint32) (has, running, open bool) {
 	c.walletMtx.Lock()
 	defer c.walletMtx.Unlock()
@@ -248,8 +249,11 @@ func (c *Core) OpenWallet(assetID uint32, pw string) error {
 	return wallet.Unlock(pw, aYear)
 }
 
-// Register registers an account with a new DEX. Register will block for the
-// entire process, including waiting for confirmations.
+// Register registers an account with a new DEX. If an error occurs while
+// fetching the DEX configuration or creating the fee transaction, it will be
+// returned immediately as the first argument. A thread will be started to wait
+// for the requisite confirmations and send the fee notification to the server.
+// Any error returned from that thread will be sent over the returned channel.
 func (c *Core) Register(form *Registration) (error, <-chan error) {
 	// For now, asset ID is hard-coded to Decred for registration fees.
 	assetID, _ := dex.BipSymbolID("dcr")
@@ -275,10 +279,9 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	dc := c.conns[form.DEX]
 	c.connMtx.RUnlock()
 	if dc == nil {
-		c := c.addDex(ai)
-		dc = <-c
-		if dc == nil {
-			return fmt.Errorf("failed to connect to DEX at %s", form.DEX), nil
+		dc, err = c.addDex(ai)
+		if err != nil {
+			return err, nil
 		}
 	}
 
@@ -325,24 +328,24 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	if err != nil {
 		return fmt.Errorf("error encoding message: %v", err), nil
 	}
-
 	regRes := new(msgjson.RegisterResult)
 	var wg sync.WaitGroup
 	wg.Add(1)
+	var regErr error
 	err = dc.Request(regMsg, func(msg *msgjson.Message) {
 		defer wg.Done()
 		var resp *msgjson.ResponsePayload
-		resp, err = msg.Response()
-		if err != nil {
+		resp, regErr = msg.Response()
+		if regErr != nil {
 			return
 		}
 		if resp.Error != nil {
-			err = fmt.Errorf("'register' request error: %d: %s", resp.Error.Code, resp.Error.Message)
+			regErr = fmt.Errorf("'register' request error: %d: %s", resp.Error.Code, resp.Error.Message)
 			return
 		}
-		err = json.Unmarshal(resp.Result, regRes)
-		if err != nil {
-			err = fmt.Errorf("Error unmarshaling 'register' response: %v", err)
+		regErr = json.Unmarshal(resp.Result, regRes)
+		if regErr != nil {
+			regErr = fmt.Errorf("Error unmarshaling 'register' response: %v", regErr)
 			return
 		}
 	})
@@ -351,8 +354,8 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	}
 
 	wg.Wait()
-	if err != nil {
-		return err, nil
+	if regErr != nil {
+		return regErr, nil
 	}
 
 	// Check the server's signature.
@@ -361,6 +364,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		return fmt.Errorf("error serializing RegisterResult for signature check: %v", err), nil
 	}
 
+	// Create a public key for this account.
 	dexPubKey, err := checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
 	if err != nil {
 		return fmt.Errorf("DEX signature validation error: %v", err), nil
@@ -403,6 +407,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		log.Warnf("fee paid with coin %x, but unable to serialize notifyfee request so server signature cannot be verified")
 	}
 
+	// Set up the coin waiter.
 	errChan := make(chan error, 1)
 	c.waiterMtx.Lock()
 	c.waiters[form.DEX] = coinWaiter{
@@ -411,7 +416,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		coin:  coin,
 		// DRAFT NOTE: Hard-coded to 1 for testing and until the 'config' response
 		// structure includes the reg fee confirmation requirements.
-		confs:   1,
+		confs:   uint32(dc.cfg.RegFeeConfirms),
 		route:   msgjson.NotifyFeeRoute,
 		privKey: privKey,
 		req:     req,
@@ -501,18 +506,12 @@ func (c *Core) initialize() {
 // and the DEX configuration is successfully retrieved. The connection is
 // unauthenticated until the `connect` request is sent and accepted by the
 // server.
-func (c *Core) addDex(acct *db.AccountInfo) <-chan *dexConnection {
+func (c *Core) addDex(acct *db.AccountInfo) (*dexConnection, error) {
 	// Get the host from the DEX URL.
-	connChan := make(chan *dexConnection, 1)
-	makeErr := func() <-chan *dexConnection {
-		connChan <- nil
-		return connChan
-	}
 	uri := acct.URL
 	parsedURL, err := url.Parse(uri)
 	if err != nil {
-		log.Errorf("error parsing account URL %s: %v", uri, err)
-		return makeErr()
+		return nil, fmt.Errorf("error parsing account URL %s: %v", uri, err)
 	}
 	// Create a websocket connection to the server.
 	conn, err := comms.NewWsConn(&comms.WsCfg{
@@ -525,8 +524,7 @@ func (c *Core) addDex(acct *db.AccountInfo) <-chan *dexConnection {
 		Ctx: c.ctx,
 	})
 	if err != nil {
-		log.Errorf("Error creating websocket connection for %s: %v", uri, err)
-		return makeErr()
+		return nil, fmt.Errorf("Error creating websocket connection for %s: %v", uri, err)
 	}
 	// Request the market configuration. The DEX is only added when the DEX
 	// configuration is successfully retrieved.
@@ -534,23 +532,24 @@ func (c *Core) addDex(acct *db.AccountInfo) <-chan *dexConnection {
 	if err != nil {
 		log.Errorf("error creating 'config' request: %v", err)
 	}
+	connChan := make(chan *dexConnection, 1)
+	var reqErr error
 	err = conn.Request(reqMsg, func(msg *msgjson.Message) {
-
 		resp, err := msg.Response()
 		if err != nil {
-			log.Errorf("failed to parse 'config' response message: %v", err)
+			reqErr = fmt.Errorf("failed to parse 'config' response message: %v", err)
 			connChan <- nil
 			return
 		}
 		if resp.Error != nil {
-			log.Errorf("config request error: %d: %s", resp.Error.Code, resp.Error.Message)
+			reqErr = fmt.Errorf("config request error: %d: %s", resp.Error.Code, resp.Error.Message)
 			connChan <- nil
 			return
 		}
 		dexCfg := new(msgjson.ConfigResult)
 		err = json.Unmarshal(resp.Result, dexCfg)
 		if err != nil {
-			log.Errorf("failed to parse config response '%s': %v", string(resp.Result), err)
+			reqErr = fmt.Errorf("failed to parse config response '%s': %v", string(resp.Result), err)
 			connChan <- nil
 			return
 		}
@@ -599,7 +598,7 @@ func (c *Core) addDex(acct *db.AccountInfo) <-chan *dexConnection {
 		log.Errorf("error sending 'config' request: %v", err)
 		connChan <- nil
 	}
-	return connChan
+	return <-connChan, reqErr
 }
 
 // handleReconnect is called when a WsConn indicates that a lost connection has
@@ -785,7 +784,6 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 				waiter.conn.Request(msg, func(msg *msgjson.Message) {
 					waiter.f(msg, nil)
 				})
-
 			}
 		}()
 	}

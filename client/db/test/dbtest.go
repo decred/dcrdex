@@ -28,6 +28,7 @@ func RandomAccountInfo() *db.AccountInfo {
 	}
 }
 
+// RandomWallet creates a random wallet.
 func RandomWallet() *db.Wallet {
 	return &db.Wallet{
 		AssetID: rand.Uint32(),

@@ -9,8 +9,7 @@ import (
 	"github.com/decred/slog"
 )
 
-// Every backend constructor will accept a Logger. All logging should take place
-// through the provided logger.
+// Many dcrdex types will take a logger as an argument.
 type Logger = slog.Logger
 
 // LoggerMaker allows creation of new log subsystems with predefined levels.

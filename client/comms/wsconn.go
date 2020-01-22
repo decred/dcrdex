@@ -298,6 +298,7 @@ func (conn *WsConn) keepAlive() {
 	}
 }
 
+// queueReconnect queues a reconnection attempt.
 func (conn *WsConn) queueReconnect() {
 	conn.setConnected(false)
 	time.AfterFunc(conn.cfg.PingWait, func() { conn.reconnectCh <- struct{}{} })

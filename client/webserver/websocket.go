@@ -96,6 +96,7 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 	log.Tracef("Disconnected websocket client %s", ip)
 }
 
+// notify sends a notification to the websocket client.
 func (s *WebServer) notify(route string, payload interface{}) {
 	msg, err := msgjson.NewNotification(route, payload)
 	if err != nil {

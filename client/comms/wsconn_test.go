@@ -395,9 +395,8 @@ func TestFailingConnection(t *testing.T) {
 	}()
 
 	oldCount := atomic.LoadUint64(&wsc.reconnects)
-	tick := func() { time.Sleep(time.Millisecond * 210) }
 	for idx := 0; idx < 5; idx++ {
-		tick()
+		time.Sleep(time.Millisecond * 210)
 
 		// Ensure the connection status is false and the number of
 		// reconnect attempts have increased.

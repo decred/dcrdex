@@ -169,7 +169,7 @@ func (r *swapReceipt) Coin() asset.Coin {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Setup creates the DCR backend. Start the backend with its Run method.
+// Setup creates the DCR exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
 }
@@ -239,7 +239,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, logger dex.Logger) *ExchangeWall
 // instance with the given credentials and notification handlers.
 func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 
-	dcrdCerts, err := ioutil.ReadFile(cert)
+	certs, err := ioutil.ReadFile(cert)
 	if err != nil {
 		return nil, fmt.Errorf("TLS certificate read error: %v", err)
 	}
@@ -249,16 +249,16 @@ func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 		Endpoint:            "ws",
 		User:                user,
 		Pass:                pass,
-		Certificates:        dcrdCerts,
+		Certificates:        certs,
 		DisableConnectOnNew: true,
 	}
 
-	dcrdClient, err := rpcclient.New(config, nil)
+	cl, err := rpcclient.New(config, nil)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to start dcrd RPC client: %v", err)
+		return nil, fmt.Errorf("Failed to start dcrwallet RPC client: %v", err)
 	}
 
-	return dcrdClient, nil
+	return cl, nil
 }
 
 // Connect connects the wallet to the RPC server.
@@ -280,8 +280,8 @@ func (dcr *ExchangeWallet) Connect() error {
 	return nil
 }
 
-// Run starts the wallet by connecting the rpcclient.Client and starting a
-// block monitoring loop.
+// Run stores the wallet context, waits for cancellation, and performs a clean
+// shutdown.
 func (dcr *ExchangeWallet) Run(ctx context.Context) {
 	dcr.ctx = ctx
 	<-ctx.Done()
@@ -901,6 +901,7 @@ func (dcr *ExchangeWallet) PayFee(fee uint64, address string, nfo *dex.Asset) (a
 	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, fee, wire.TxTreeRegular, nil), nil
 }
 
+// addInputCoins adds inputs to the MsgTx to spend the specified outputs.
 func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (uint64, error) {
 	var totalIn uint64
 	for _, coin := range coins {
@@ -1025,6 +1026,7 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	return newOutput(dcr.node, txHash, vout, coin.Value(), tree, coin.Redeem()), nil
 }
 
+// sendToAddress sends the amount to the address as the zeroth output.
 func (dcr *ExchangeWallet) sendToAddress(addr dcrutil.Address, val uint64, nfo *dex.Asset) (*wire.MsgTx, error) {
 	coins, err := dcr.Fund(val, nfo)
 	if err != nil {

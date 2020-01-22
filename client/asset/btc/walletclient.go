@@ -198,7 +198,7 @@ func (wc *walletClient) Lock() error {
 	return wc.call(methodLock, nil, nil)
 }
 
-// SendToAddress locks the wallet.
+// SendToAddress sends the amount to the address.
 func (wc *walletClient) SendToAddress(address string, amount uint64) (*chainhash.Hash, error) {
 	var txid string
 	err := wc.call(methodSendToAddress, anylist{address, amount}, &txid)

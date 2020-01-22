@@ -20,9 +20,6 @@ var (
 	// txWaitExpiration is the longest the AuthManager will wait for a coin
 	// waiter. This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = time.Minute
-	// regFeeConfirms is the number of confirmations required on the registration
-	// fee coin before submitting the notifyfee.
-	regFeeConfirms = 1
 )
 
 // handleRegister handles requests to the 'register' route.

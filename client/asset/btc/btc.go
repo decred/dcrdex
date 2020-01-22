@@ -161,7 +161,7 @@ func (r *swapReceipt) Coin() asset.Coin {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Setup creates the BTC backend. Start the backend with its Run method.
+// Setup creates the BTC exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
 }
@@ -271,8 +271,7 @@ func (btc *ExchangeWallet) Connect() error {
 	return nil
 }
 
-// Run starts the wallet by connecting the rpcclient.Client and starting a
-// block monitoring loop.
+// Run stores the wallet context and waits for cancellation.
 func (btc *ExchangeWallet) Run(ctx context.Context) {
 	btc.ctx = ctx
 	<-ctx.Done()

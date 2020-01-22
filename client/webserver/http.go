@@ -61,6 +61,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, r, "login", commonArgs(r, "Login | Decred DEX"))
 }
 
+// registerTmplData is template data for the /register page.
 type registerTmplData struct {
 	CommonArguments
 	WalletExists bool

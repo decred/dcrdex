@@ -20,6 +20,7 @@ type WalletForm struct {
 	INIPath string
 }
 
+// WalletStatus is the current status of an exchange wallet.
 type WalletStatus struct {
 	Symbol  string
 	AssetID uint32
@@ -36,6 +37,7 @@ type xcWallet struct {
 	lockTime time.Time
 }
 
+// Unlock unlocks the wallet.
 func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 	err := w.Wallet.Unlock(pw, dur)
 	if err != nil {
@@ -47,12 +49,13 @@ func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 	return nil
 }
 
-// status returns whether the wallet is open as well as whether it is unlocked.
+// status returns whether the wallet is running as well as whether it is
+// unlocked.
 func (w *xcWallet) status() (on, open bool) {
 	return w.waiter.On(), w.unlocked()
 }
 
-// locked returns true if the wallet is locked
+// unlocked returns true if the wallet is unlocked
 func (w *xcWallet) unlocked() bool {
 	w.mtx.Lock()
 	defer w.mtx.Unlock()
@@ -105,6 +108,8 @@ type BookUpdate struct {
 	Market string
 }
 
+// dexAccount is the core type to represent the client's account information for
+// a DEX.
 type dexAccount struct {
 	url       string
 	encKey    []byte

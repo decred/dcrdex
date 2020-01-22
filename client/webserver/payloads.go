@@ -13,6 +13,7 @@ var (
 	successMsgRoute = "success_message"
 )
 
+// walletStatus is JSON-encodable wallet status information.
 type walletStatus struct {
 	Symbol  string `json:"symbol"`
 	AssetID uint32 `json:"asset"`

@@ -187,8 +187,7 @@ func TestLoadMarket(t *testing.T) {
 
 	ensureWatching := func(base, quote uint32) {
 		// Add a tiny delay here because because it's convenient and this function
-		// is typically called right after ...
-
+		// is called right after a monitoring goroutine is started.
 		time.Sleep(time.Millisecond)
 		mktID := marketID(base, quote)
 		clientCount := 0

@@ -265,7 +265,7 @@ func (s *WebServer) token() string {
 
 // watchMarket watches the specified market. A fresh order book and a quit
 // function are returned on success. The quit function should be called to
-// unsubsribe the client from the market.
+// unsubscribe the client from the market.
 func (s *WebServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (book *core.OrderBook, quit func(), err error) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()

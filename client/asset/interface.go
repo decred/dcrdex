@@ -12,12 +12,10 @@ import (
 
 // WalletConfig is the configuration settings for the wallet.
 type WalletConfig struct {
-	// Account is the name of the dcrwallet account. The account and wallet must
+	// Account is the name of the wallet account. The account and wallet must
 	// already exist.
 	Account string
-	// INIPath is the path of a dcrwallet-like configuration file. RPC credentials
-	// will be read from the file. You can provide the path to your actual
-	// dcrwallet configuration file.
+	// INIPath is the path of a configuration file.
 	INIPath string
 	// TipChange is a function that will be called when the blockchain monitoring
 	// loop detects a new block. If the error supplied is nil, the client should

@@ -29,7 +29,7 @@ type registration struct {
 	INIPath string `json:"inipath"`
 }
 
-// apiRegister is the handler for the '/register' page request.
+// apiRegister is the handler for the '/register' API request.
 func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	reg := new(registration)
 	if !readPost(w, r, reg) {

@@ -266,8 +266,7 @@ func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
 	}, nil
 }
 
-// ID creates a unique ID for this wallet. ID is unique on (asset ID, acct ID)
-// pair.
+// ID is the byte-encoded asset ID for this wallet.
 func (w *Wallet) ID() []byte {
 	return uint32Bytes(w.AssetID)
 }

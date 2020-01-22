@@ -28,10 +28,8 @@ type Settings struct {
 	TimeoutErr *msgjson.Error
 }
 
-// NewSettings is a constructor for a waitSettings with a 1-minute timeout and
-// a standardized error message.
-// NOTE: 1 minute is pretty arbitrary. Consider making this a DEX variable, or
-// smarter in some way.
+// NewSettings is a constructor for a waitSettings with a timeout and a
+// standardized error message.
 func NewSettings(user account.AccountID, msg *msgjson.Message, coinID []byte, txWaitExpiration time.Duration) *Settings {
 	return &Settings{
 		// must smarten up this expiration value before merge. Where should this
@@ -54,19 +52,18 @@ type waitFunc struct {
 	f      func() bool
 }
 
+// Sender is probably a ws.WsLink.
 type Sender func(account.AccountID, *msgjson.Message)
 
+// Waiter is a waitFunc manager. Waiter is used to deal with network latency.
 type Waiter struct {
-	// To accommodate network latency, when transaction data is being drawn from
-	// the backend, the function may run repeatedly on some interval until either
-	// the transaction data is successfully retrieved, or a timeout is surpassed.
-	// These waitFuncs are added to the monitor loop via the waiters channel.
 	waiterMtx       sync.RWMutex
 	waiters         []*waitFunc
 	recheckInterval time.Duration
 	send            Sender
 }
 
+// New is the constructor for a new Waiter.
 func New(recheckInterval time.Duration, sender Sender) *Waiter {
 	return &Waiter{
 		recheckInterval: recheckInterval,
@@ -94,6 +91,7 @@ func (w *Waiter) Wait(params *Settings, f func() bool) {
 	w.waiterMtx.Unlock()
 }
 
+// Run runs the waiter loop until the context is canceled.
 func (w *Waiter) Run(ctx context.Context) {
 	// The latencyTicker triggers a check of all waitFunc functions.
 	latencyTicker := time.NewTicker(w.recheckInterval)

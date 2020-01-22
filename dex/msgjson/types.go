@@ -693,6 +693,7 @@ func (n *NotifyFee) Serialize() ([]byte, error) {
 	return b, nil
 }
 
+// Stamp rounds out the Stampable interface.
 func (n *NotifyFee) Stamp(t, _, _ uint64) {
 	n.Time = t
 }

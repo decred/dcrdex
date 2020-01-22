@@ -159,6 +159,8 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	return auth
 }
 
+// Run runs the AuthManager until the context is canceled. Satisfies the
+// dex.Runner interface.
 func (auth *AuthManager) Run(ctx context.Context) {
 	go auth.coinWaiter.Run(ctx)
 	<-ctx.Done()

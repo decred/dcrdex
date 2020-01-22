@@ -21,8 +21,10 @@ var (
 	intCoder = encode.IntCoder
 )
 
+// Error is used for constant errors.
 type Error string
 
+// Error implements the error interface.
 func (e Error) Error() string {
 	return string(e)
 }
@@ -135,14 +137,6 @@ func (sk *SecretKey) deriveKey(password *[]byte) error {
 	// since the first GB probably hasn't been released yet.
 	debug.FreeOSMemory()
 
-	// I'm not a fan of forced garbage collections, but scrypt allocates a
-	// ton of memory and calling it back to back without a GC cycle in
-	// between means you end up needing twice the amount of memory.  For
-	// example, if your scrypt parameters are such that you require 1GB and
-	// you call it twice in a row, without this you end up allocating 2GB
-	// since the first GB probably hasn't been released yet.
-	debug.FreeOSMemory()
-
 	return nil
 }
 
@@ -242,7 +236,7 @@ func (sk *SecretKey) Decrypt(in []byte) ([]byte, error) {
 	return out, nil
 }
 
-// NewSecretKey returns a SecretKey structure based on the passed parameters.
+// NewSecretKey returns a SecretKey structure using default scrypt parameters.
 func NewSecretKey(password *[]byte) (*SecretKey, error) {
 	sk := SecretKey{
 		Key: (*CryptoKey)(&[KeySize]byte{}),

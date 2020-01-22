@@ -539,13 +539,6 @@ func TestCreateWallet(t *testing.T) {
 	tILT.Symbol = "ilt"
 	tILT.ID, _ = dex.BipSymbolID(tILT.Symbol)
 
-	// // Get a wallet ID.
-	// dbWallet := db.Wallet{
-	// 	AssetID: tILT.ID,
-	// 	Account: "default",
-	// }
-	// wid := dbWallet.SID()
-
 	// Create registration form.
 	form := &WalletForm{
 		AssetID: tILT.ID,

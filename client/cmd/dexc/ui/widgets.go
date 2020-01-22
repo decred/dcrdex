@@ -168,7 +168,7 @@ func createWidgets() {
 	noteLog = NewLoggerMaker(func(msg []byte) {
 		setNotificationCount(int(atomic.AddUint32(&notificationCount, 1)))
 		noteJournal.Write(msg)
-	}).Logger("NOTIFICATION")
+	}).Logger("NOTE")
 	mainMenu = newMainMenu()
 }
 
