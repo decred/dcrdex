@@ -13,37 +13,39 @@ import (
 
 // Error codes
 const (
-	RPCErrorUnspecified     = iota // 0
-	RPCParseError                  // 1
-	RPCUnknownRoute                // 2
-	RPCInternal                    // 3
-	RPCQuarantineClient            // 4
-	RPCVersionUnsupported          // 5
-	RPCUnknownMatch                // 6
-	RPCInternalError               // 7
-	SignatureError                 // 8
-	SerializationError             // 9
-	TransactionUndiscovered        // 10
-	ContractError                  // 11
-	SettlementSequenceError        // 12
-	ResultLengthError              // 13
-	IDMismatchError                // 14
-	RedemptionError                // 15
-	IDTypeError                    // 16
-	AckCountError                  // 17
-	UnknownResponseID              // 18
-	OrderParameterError            // 19
-	UnknownMarketError             // 20
-	ClockRangeError                // 21
-	FundingError                   // 22
-	CoinAuthError                  // 23
-	UnknownMarket                  // 24
-	NotSubscribedError             // 25
-	UnauthorizedConnection         // 26
-	AuthenticationError            // 27
-	PubKeyParseError               // 28
-	FeeError                       // 29
-	UnknownMessageType             // 30
+	RPCErrorUnspecified        = iota // 0
+	RPCParseError                     // 1
+	RPCUnknownRoute                   // 2
+	RPCInternal                       // 3
+	RPCQuarantineClient               // 4
+	RPCVersionUnsupported             // 5
+	RPCUnknownMatch                   // 6
+	RPCInternalError                  // 7
+	SignatureError                    // 8
+	SerializationError                // 9
+	TransactionUndiscovered           // 10
+	ContractError                     // 11
+	SettlementSequenceError           // 12
+	ResultLengthError                 // 13
+	IDMismatchError                   // 14
+	RedemptionError                   // 15
+	IDTypeError                       // 16
+	AckCountError                     // 17
+	UnknownResponseID                 // 18
+	OrderParameterError               // 19
+	UnknownMarketError                // 20
+	ClockRangeError                   // 21
+	FundingError                      // 22
+	CoinAuthError                     // 23
+	UnknownMarket                     // 24
+	NotSubscribedError                // 25
+	UnauthorizedConnection            // 26
+	AuthenticationError               // 27
+	PubKeyParseError                  // 28
+	FeeError                          // 29
+	InvalidPreimage                   // 30
+	PreimageCommitmentMismatch        // 31
+	UnknownMessageType                // 32
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -109,11 +111,8 @@ const (
 	// ConfigRoute is the client-originating request-type message requesting the
 	// DEX configuration information.
 	ConfigRoute = "config"
-	// MatchDataRoute is the DEX-originating request-type message delivering
-	// match cycle info to the client.
-	MatchDataRoute = "match_data"
-	// MatchProofRoute is the DEX-originating request-type message delivering
-	// match cycle results to the client.
+	// MatchProofRoute is the DEX-originating notification-type message
+	// delivering match cycle results to the client.
 	MatchProofRoute = "match_proof"
 	// PreimageRoute is the DEX-originating request-type message requesting the
 	// preimages for the client's epoch orders.
@@ -475,6 +474,7 @@ type Prefix struct {
 	OrderType     uint8  `json:"ordertype"`
 	ClientTime    uint64 `json:"tclient"`
 	ServerTime    uint64 `json:"tserver"`
+	Commit        Bytes  `json:"com"`
 	EpochIdx      uint64 `json:"epochidx"`
 	EpochDuration uint64 `json:"epochdur"`
 }
@@ -492,14 +492,16 @@ func (p *Prefix) Stamp(t, epochIdx, epochDur uint64) {
 // Serialize serializes the Prefix data.
 func (p *Prefix) Serialize() []byte {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
-	// order type (1), client time (8), server time (8), epoch ID (16) = 73 bytes
-	b := make([]byte, 0, 73)
+	// order type (1) + client time (8) + server time (8) + epoch index (8) +
+	// epoch duration (8) + commitment (32) = 105 bytes
+	b := make([]byte, 0, 105)
 	b = append(b, p.AccountID...)
 	b = append(b, uint32Bytes(p.Base)...)
 	b = append(b, uint32Bytes(p.Quote)...)
 	b = append(b, p.OrderType)
 	b = append(b, uint64Bytes(p.ClientTime)...)
 	b = append(b, uint64Bytes(p.ServerTime)...)
+	b = append(b, p.Commit...)
 	b = append(b, uint64Bytes(p.EpochIdx)...)
 	return append(b, uint64Bytes(p.EpochDuration)...)
 }
@@ -525,6 +527,7 @@ func (t *Trade) Serialize() []byte {
 	}
 	b = append(b, t.Side)
 	return append(b, uint64Bytes(t.Quantity)...)
+	// Note that Address is part of LimitOrder and MarketOrder serialization.
 }
 
 // LimitOrder is the payload for the LimitRoute, which places a limit order.
@@ -545,7 +548,7 @@ func (l *LimitOrder) Serialize() ([]byte, error) {
 	b = append(b, trade...)
 	b = append(b, uint64Bytes(l.Rate)...)
 	b = append(b, l.TiF)
-	return append(b, []byte(l.Address)...), nil
+	return append(b, []byte(l.Trade.Address)...), nil
 }
 
 // MarketOrder is the payload for the MarketRoute, which places a market order.
@@ -558,7 +561,7 @@ type MarketOrder struct {
 func (m *MarketOrder) Serialize() ([]byte, error) {
 	// serialization: prefix (65) + trade (varies) + address (35 ish)
 	b := append(m.Prefix.Serialize(), m.Trade.Serialize()...)
-	return append(b, []byte(m.Address)...), nil
+	return append(b, []byte(m.Trade.Address)...), nil
 }
 
 // CancelOrder is the payload for the CancelRoute, which places a cancel order.
@@ -595,6 +598,16 @@ type UnsubOrderBook struct {
 	MarketID string `json:"marketid"`
 }
 
+// orderbook subscription notification payloads include: BookOrderNote,
+// UnbookOrderNote, EpochOrderNote, and MatchProofNote.
+
+// OrderNote is part of a notification about any type of order.
+type OrderNote struct {
+	Seq      uint64 `json:"seq,omitempty"`      // May be empty when part of an OrderBook.
+	MarketID string `json:"marketid,omitempty"` // May be empty when part of an OrderBook.
+	OrderID  Bytes  `json:"oid"`
+}
+
 // TradeNote is part of a notification that includes information about a
 // limit or market order.
 type TradeNote struct {
@@ -605,29 +618,11 @@ type TradeNote struct {
 	Time     uint64 `json:"time,omitempty"`
 }
 
-// OrderNote is part of a notification about any type of order.
-type OrderNote struct {
-	Seq        uint64 `json:"seq,omitempty"`      // May be empty when part of an OrderBook.
-	MarketID   string `json:"marketid,omitempty"` // May be empty when part of an OrderBook.
-	OrderID    Bytes  `json:"oid"`
-	Commitment Bytes  `json:"com"`
-}
-
 // BookOrderNote is the payload for a DEX-originating notification-type message
 // informing the client to add the order to the order book.
 type BookOrderNote struct {
 	OrderNote
 	TradeNote
-}
-
-// OrderBook is the response to a successful OrderBookSubscription.
-type OrderBook struct {
-	Seq      uint64 `json:"seq,omitempty"`
-	MarketID string `json:"marketid"`
-	// DRAFT NOTE: We might want to use a different structure for bulk updates.
-	// Sending a struct of arrays rather than an array of structs could
-	// potentially cut the encoding effort and encoded size substantially.
-	Orders []*BookOrderNote `json:"orders"`
 }
 
 // UnbookOrderRoute is the DEX-originating notification-type message informing
@@ -638,10 +633,42 @@ type UnbookOrderNote OrderNote
 // the client about an order added to the epoch queue.
 type EpochOrderNote struct {
 	BookOrderNote
-	Commitment Bytes  `json:"com"`
-	OrderType  uint8  `json:"otype"`
-	TargetID   Bytes  `json:"target,omitempty"`
-	Epoch      uint64 `json:"epoch"`
+	Commit    Bytes  `json:"com"`
+	OrderType uint8  `json:"otype"`
+	Epoch     uint64 `json:"epoch"`
+	TargetID  Bytes  `json:"target,omitempty"` // omit for cancel orders
+}
+
+// OrderBook is the response to a successful OrderBookSubscription.
+type OrderBook struct {
+	MarketID string `json:"marketid"`
+	Seq      uint64 `json:"seq"`
+	Epoch    uint64 `json:"epoch"`
+	// DRAFT NOTE: We might want to use a different structure for bulk updates.
+	// Sending a struct of arrays rather than an array of structs could
+	// potentially cut the encoding effort and encoded size substantially.
+	Orders []*BookOrderNote `json:"orders"`
+}
+
+// MatchProofNote is the match_proof notification payload.
+type MatchProofNote struct {
+	MarketID  string  `json:"marketid"`
+	Epoch     uint64  `json:"epoch"`
+	Preimages []Bytes `json:"preimages"`
+	Misses    []Bytes `json:"misses"`
+	CSum      Bytes   `json:"csum"`
+	Seed      Bytes   `json:"seed"`
+}
+
+// PreimageRequest is the server-originating preimage request payload.
+type PreimageRequest struct {
+	OrderID        Bytes `json:"orderid"`
+	CommitChecksum Bytes `json:"csum"`
+}
+
+// PreimageResponse is the client-originating preimage response payload.
+type PreimageResponse struct {
+	Preimage Bytes `json:"pimg"`
 }
 
 // Connect is the payload for a client-originating ConnectRoute request.
@@ -716,7 +743,8 @@ type NotifyFee struct {
 
 // Serialize serializes the NotifyFee data.
 func (n *NotifyFee) Serialize() ([]byte, error) {
-	// serialization: account id (32) + txid (32) + vout (4) + time (8) = 76
+	// serialization: account id (32) + coinID (variable, ~32+2) + vout (4) +
+	// time (8) = 78
 	b := make([]byte, 0, 68)
 	b = append(b, n.AccountID...)
 	b = append(b, n.CoinID...)

@@ -107,6 +107,10 @@ func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
 	return err
 }
 
+func (conn *wsConnStub) SetWriteDeadline(t time.Time) error {
+	return nil // TODO implement and test write timeouts
+}
+
 func (conn *wsConnStub) Close() error {
 	select {
 	case <-conn.quit:
@@ -445,10 +449,10 @@ func TestClientResponses(t *testing.T) {
 		time.Sleep(time.Millisecond * 10)
 	}
 
-	sendToClient := func(route, payload string, f func(Link, *msgjson.Message)) uint64 {
+	sendToClient := func(route, payload string, f func(Link, *msgjson.Message), expiration time.Duration, expire func()) uint64 {
 		req := makeReq(route, payload)
 		lockedExe(func() {
-			err := client.Request(req, f)
+			err := client.Request(req, f, expiration, expire)
 			if err != nil {
 				t.Logf("sendToClient error: %v", err)
 			}
@@ -486,7 +490,8 @@ func TestClientResponses(t *testing.T) {
 	responded := make(chan struct{}, 1)
 	id := sendToClient("looptest", `{}`, func(_ Link, _ *msgjson.Message) {
 		responded <- struct{}{}
-	})
+	}, time.Hour, func() {})
+
 	// Respond to the server
 	respondToServer(id, `{}`)
 	select {
@@ -527,28 +532,43 @@ func TestClientResponses(t *testing.T) {
 	lockedExe(func() {
 		client.respHandlers = make(map[uint64]*responseHandler)
 	})
-	id = sendToClient("expiration", `{}`, func(_ Link, _ *msgjson.Message) {})
-	// Set the expiration to now
+	expiredID := sendToClient("expiration", `{}`, func(_ Link, _ *msgjson.Message) {},
+		200*time.Millisecond, func() { t.Log("Expired (good).") })
+	// The responseHandler map should contain the ntfn ID since expiry has not
+	// yet arrived.
 	lockedExe(func() {
-		handler, found := client.respHandlers[id]
+		_, found := client.respHandlers[expiredID]
 		if !found {
 			t.Fatalf("response handler not found")
 		}
 		if len(client.respHandlers) != 1 {
 			t.Fatalf("expected 1 response handler, found %d", len(client.respHandlers))
 		}
-		handler.expiration = time.Now()
 	})
-	// If we send another, the length should still be one, because the expired
-	// handler is pruned.
-	sendToClient("expiration", `{}`, func(_ Link, _ *msgjson.Message) {})
+
+	time.Sleep(250 * time.Millisecond) // >> 200ms - 10ms
 	lockedExe(func() {
 		client.reqMtx.Lock()
 		defer client.reqMtx.Unlock()
-		if len(client.respHandlers) != 1 {
+		if len(client.respHandlers) != 0 {
 			t.Fatalf("expired response handler not pruned")
 		}
-		_, found := client.respHandlers[id]
+		_, found := client.respHandlers[expiredID]
+		if found {
+			t.Fatalf("expired response handler still in map")
+		}
+	})
+
+	// immediate expiration
+	expiredID = sendToClient("expiration", `{}`, func(_ Link, _ *msgjson.Message) {},
+		0, func() { t.Log("Expired (good).") })
+	lockedExe(func() {
+		client.reqMtx.Lock()
+		defer client.reqMtx.Unlock()
+		if len(client.respHandlers) != 0 {
+			t.Fatalf("expired response handler not pruned")
+		}
+		_, found := client.respHandlers[expiredID]
 		if found {
 			t.Fatalf("expired response handler still in map")
 		}

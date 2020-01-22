@@ -61,17 +61,17 @@ func openDB() (func() error, error) {
 	AssetLTC = mktInfo2.Quote
 
 	dbi := Config{
-		Host:          PGTestsHost,
-		Port:          PGTestsPort,
-		User:          PGTestsUser,
-		Pass:          PGTestsPass,
-		DBName:        PGTestsDBName,
-		HidePGConfig:  true,
-		QueryTimeout:  0, // zero to use the default
-		MarketCfg:     []*dex.MarketInfo{mktInfo, mktInfo2},
-		CheckedStores: true,
-		Net:           dex.Mainnet,
-		FeeKey:        "dprv3hCznBesA6jBu1MaSqEBewG76yGtnG6LWMtEXHQvh3MVo6rqesTk7FPMSrczDtEELReV4aGMcrDxc9htac5mBDUEbTi9rgCA8Ss5FkasKM3",
+		Host:         PGTestsHost,
+		Port:         PGTestsPort,
+		User:         PGTestsUser,
+		Pass:         PGTestsPass,
+		DBName:       PGTestsDBName,
+		HidePGConfig: true,
+		QueryTimeout: 0, // zero to use the default
+		MarketCfg:    []*dex.MarketInfo{mktInfo, mktInfo2},
+		//CheckedStores: true,
+		Net:    dex.Mainnet,
+		FeeKey: "dprv3hCznBesA6jBu1MaSqEBewG76yGtnG6LWMtEXHQvh3MVo6rqesTk7FPMSrczDtEELReV4aGMcrDxc9htac5mBDUEbTi9rgCA8Ss5FkasKM3",
 	}
 
 	closeFn := func() error { return nil }

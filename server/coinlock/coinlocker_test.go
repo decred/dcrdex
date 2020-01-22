@@ -63,9 +63,9 @@ func Test_swapLocker_LockOrderCoins(t *testing.T) {
 		},
 	}
 
-	lo0 := test.WriteLimitOrder(w, 1000, 1, order.StandingTiF, 0)
+	lo0, _ := test.WriteLimitOrder(w, 1000, 1, order.StandingTiF, 0)
 	lo0.Coins = []order.CoinID{randcomCoinID(), randcomCoinID()}
-	lo1 := test.WriteLimitOrder(w, 1000, 2, order.StandingTiF, 0)
+	lo1, _ := test.WriteLimitOrder(w, 1000, 2, order.StandingTiF, 0)
 	lo1.Coins = []order.CoinID{randcomCoinID(), randcomCoinID(), randcomCoinID()}
 
 	orders := []order.Order{lo0, lo1}

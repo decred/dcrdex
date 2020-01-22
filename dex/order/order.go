@@ -1,5 +1,5 @@
-// Copyright (c) 2019, The Decred developers
-// See LICENSE for details.
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
 
 // Package order defines the Order and Match types used throughout the DEX.
 package order
@@ -17,11 +17,17 @@ import (
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
-// OrderIDSize defines the length in bytes of an OrderID.
-const OrderIDSize = blake256.Size // 32
+// Several types including OrderID and Commitment are defined as a Blake256
+// hash. Define an internal hash type and hashSize for convenience.
+const hashSize = blake256.Size // 32
+type hash = [hashSize]byte
 
-// OrderID is the unique identifier for each order.
-type OrderID [OrderIDSize]byte
+// OrderIDSize defines the length in bytes of an OrderID.
+const OrderIDSize = hashSize
+
+// OrderID is the unique identifier for each order. It is defined as the
+// Blake256 hash of the serialized order.
+type OrderID hash
 
 // String returns a hexadecimal representation of the OrderID. String implements
 // fmt.Stringer.
@@ -147,6 +153,9 @@ type Order interface {
 	// Quote returns the unique integer identifier of the quote asset as defined
 	// in the asset package.
 	Quote() uint32
+
+	// Commitment returns the order's preimage commitment.
+	Commitment() Commitment
 }
 
 // zeroTime is the Unix time for a Time where IsZero() == true.
@@ -168,17 +177,51 @@ func (c CoinID) String() string {
 	return hex.EncodeToString(c)
 }
 
-// PreimageSize defines the length in bytes of a Preimage.
+// CommitmentSize is the length of the Commitment, a 32-byte Blake-256 hash
+// according to the DEX specification.
+const CommitmentSize = hashSize
+
+// Commitment is the Blake-256 hash of the Preimage.
+type Commitment hash
+
+// Value implements the sql/driver.Valuer interface.
+func (c Commitment) Value() (driver.Value, error) {
+	return c[:], nil // []byte
+}
+
+// Scan implements the sql.Scanner interface.
+func (c *Commitment) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		copy(c[:], src)
+		return nil
+		//case string:
+		// case nil:
+		// 	*oid = nil
+		// 	return nil
+	}
+
+	return fmt.Errorf("cannot convert %T to Commitment", src)
+}
+
+// String returns a hexadecimal representation of the Commitment. String
+// implements fmt.Stringer.
+func (c Commitment) String() string {
+	return hex.EncodeToString(c[:])
+}
+
+// PreimageSize defines the length of the preimage, which is a 32-byte value
+// according to the DEX specification.
 const PreimageSize = 32
 
-// Preimage is a 32-byte ramdom number used in generating an order commitment.
+// Preimage represents the 32-byte preimage as a byte slice.
 type Preimage [PreimageSize]byte
 
-// CommitmntSize defines the length in bytes of a Commitment.
-const CommitmentSize = blake256.Size // 32
-
-// Commitment is the hash of a preimage.
-type Commitment [CommitmentSize]byte
+// Commit computes the preimage commitment as the Blake-256 hash of the
+// Preimage.
+func (pi *Preimage) Commit() Commitment {
+	return blake256.Sum256(pi[:])
+}
 
 // Prefix is the order prefix containing data fields common to all orders.
 type Prefix struct {
@@ -188,14 +231,11 @@ type Prefix struct {
 	OrderType  OrderType
 	ClientTime time.Time
 	ServerTime time.Time
+	Commit     Commitment
 
-	//nolint:structcheck
-	id *OrderID // cache of the order's OrderID
-	//nolint:structcheck
-	uid string // cache of the order's UID
+	id  *OrderID // cache of the order's OrderID
+	uid string   // cache of the order's UID
 }
-
-// TODO: Update Prefix serialization with commitment.
 
 // P is an alias for Prefix. Embedding with the alias allows us to define a
 // method on the interface called Prefix that returns the *Prefix.
@@ -206,7 +246,7 @@ func (p *Prefix) Prefix() *Prefix {
 }
 
 // PrefixLen is the length in bytes of the serialized order Prefix.
-const PrefixLen = account.HashSize + 4 + 4 + 1 + 8 + 8
+const PrefixLen = account.HashSize + 4 + 4 + 1 + 8 + 8 + CommitmentSize
 
 // serializeSize returns the length of the serialized order Prefix.
 func (p *Prefix) serializeSize() int {
@@ -233,7 +273,6 @@ func (p *Prefix) User() account.AccountID {
 }
 
 // Serialize marshals the Prefix into a []byte.
-// TODO: Deserialize.
 func (p *Prefix) Serialize() []byte {
 	b := make([]byte, PrefixLen)
 
@@ -259,6 +298,11 @@ func (p *Prefix) Serialize() []byte {
 
 	// server time
 	binary.BigEndian.PutUint64(b[offset:offset+8], unixMilliU(p.ServerTime))
+	offset += 8
+
+	// commitment
+	copy(b[offset:offset+CommitmentSize], p.Commit[:])
+
 	return b
 }
 
@@ -275,6 +319,11 @@ func (p *Prefix) Quote() uint32 {
 // Type returns the order type.
 func (p *Prefix) Type() OrderType {
 	return p.OrderType
+}
+
+// Commitment returns the order Commitment.
+func (p *Prefix) Commitment() Commitment {
+	return p.Commit
 }
 
 // Trade is information about a trade-type order. Both limit and market orders
@@ -466,11 +515,6 @@ func (o *LimitOrder) Serialize() []byte {
 	copy(b[offset:offset+tradeLen], o.T.Serialize())
 	offset += tradeLen
 
-	// Price rate
-	// var fb bytes.Buffer
-	// _ = binary.Write(&fb, binary.BigEndian, o.Rate)
-	// copy(b[mSz:], fb.Bytes())
-	//binary.BigEndian.PutUint64(b[offset:offset+8], math.Float64bits(o.Rate))
 	// Price rate in atoms of quote asset
 	binary.BigEndian.PutUint64(b[offset:offset+8], o.Rate)
 	offset += 8

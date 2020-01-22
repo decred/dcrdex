@@ -11,7 +11,8 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
-// sendTemplate processes the template and sends the result.
+// sendTemplate processes the template and sends the result. NOTE: http.Request
+// arg is unused. Remove if there is no foreseeable reason.
 func (s *WebServer) sendTemplate(w http.ResponseWriter, r *http.Request, tmplID string, data interface{}) {
 	page, err := s.html.exec(tmplID, data)
 	if err != nil {

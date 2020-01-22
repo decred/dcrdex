@@ -74,6 +74,19 @@ func RandomMatchID() order.MatchID {
 	return mid
 }
 
+// RandomPreimage creates a random order preimage.
+func RandomPreimage() (pi order.Preimage) {
+	rand.Read(pi[:])
+	return
+}
+
+// RandomCommitment creates a random order commitment. Use RandomPreimage
+// followed by Preimage.Commit() if you require a matching commitment.
+func RandomCommitment() (com order.Commitment) {
+	rand.Read(com[:])
+	return
+}
+
 // Writer represents a client that places orders on one side of a market.
 type Writer struct {
 	Addr   string
@@ -105,7 +118,8 @@ type Market struct {
 
 // WriteLimitOrder creates a limit order with the specified writer and order
 // values.
-func WriteLimitOrder(writer *Writer, rate, lots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {
+func WriteLimitOrder(writer *Writer, rate, lots uint64, force order.TimeInForce, timeOffset int64) (*order.LimitOrder, order.Preimage) {
+	pi := RandomPreimage()
 	return &order.LimitOrder{
 		P: order.Prefix{
 			AccountID:  writer.Acct,
@@ -114,6 +128,7 @@ func WriteLimitOrder(writer *Writer, rate, lots uint64, force order.TimeInForce,
 			OrderType:  order.LimitOrderType,
 			ClientTime: time.Unix(baseClientTime+timeOffset, 0),
 			ServerTime: time.Unix(baseServerTime+timeOffset, 0),
+			Commit:     pi.Commit(),
 		},
 		T: order.Trade{
 			Coins:    []order.CoinID{},
@@ -123,20 +138,21 @@ func WriteLimitOrder(writer *Writer, rate, lots uint64, force order.TimeInForce,
 		},
 		Rate:  rate,
 		Force: force,
-	}
+	}, pi
 }
 
 // RandomLimitOrder creates a random limit order with a random writer.
-func RandomLimitOrder() *order.LimitOrder {
+func RandomLimitOrder() (*order.LimitOrder, order.Preimage) {
 	return WriteLimitOrder(RandomWriter(), randUint64(), randUint64(), order.TimeInForce(rand.Intn(2)), 0)
 }
 
 // WriteMarketOrder creates a market order with the specified writer and
 // quantity.
-func WriteMarketOrder(writer *Writer, lots uint64, timeOffset int64) *order.MarketOrder {
+func WriteMarketOrder(writer *Writer, lots uint64, timeOffset int64) (*order.MarketOrder, order.Preimage) {
 	if writer.Sell {
 		lots *= writer.Market.LotSize
 	}
+	pi := RandomPreimage()
 	return &order.MarketOrder{
 		P: order.Prefix{
 			AccountID:  writer.Acct,
@@ -145,6 +161,7 @@ func WriteMarketOrder(writer *Writer, lots uint64, timeOffset int64) *order.Mark
 			OrderType:  order.MarketOrderType,
 			ClientTime: time.Unix(baseClientTime+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(baseServerTime+timeOffset, 0).UTC(),
+			Commit:     pi.Commit(),
 		},
 		T: order.Trade{
 			Coins:    []order.CoinID{},
@@ -152,16 +169,17 @@ func WriteMarketOrder(writer *Writer, lots uint64, timeOffset int64) *order.Mark
 			Quantity: lots,
 			Address:  writer.Addr,
 		},
-	}
+	}, pi
 }
 
 // RandomMarketOrder creates a random market order with a random writer.
-func RandomMarketOrder() *order.MarketOrder {
+func RandomMarketOrder() (*order.MarketOrder, order.Preimage) {
 	return WriteMarketOrder(RandomWriter(), randUint64(), 0)
 }
 
 // WriteCancelOrder creates a cancel order with the specified order ID.
-func WriteCancelOrder(writer *Writer, targetOrderID order.OrderID, timeOffset int64) *order.CancelOrder {
+func WriteCancelOrder(writer *Writer, targetOrderID order.OrderID, timeOffset int64) (*order.CancelOrder, order.Preimage) {
+	pi := RandomPreimage()
 	return &order.CancelOrder{
 		P: order.Prefix{
 			AccountID:  writer.Acct,
@@ -170,13 +188,14 @@ func WriteCancelOrder(writer *Writer, targetOrderID order.OrderID, timeOffset in
 			OrderType:  order.CancelOrderType,
 			ClientTime: time.Unix(baseClientTime+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(baseServerTime+timeOffset, 0).UTC(),
+			Commit:     pi.Commit(),
 		},
 		TargetOrderID: targetOrderID,
-	}
+	}, pi
 }
 
 // RandomCancelOrder creates a random cancel order with a random writer.
-func RandomCancelOrder() *order.CancelOrder {
+func RandomCancelOrder() (*order.CancelOrder, order.Preimage) {
 	return WriteCancelOrder(RandomWriter(), RandomOrderID(), 0)
 }
 

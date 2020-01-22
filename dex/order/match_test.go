@@ -3,13 +3,21 @@ package order
 import (
 	"bytes"
 	"encoding/hex"
+	"math/rand"
 	"testing"
 	"time"
 )
 
+// randomCommitment creates a random order commitment. If you require a matching
+// commitment, generate a Preimage, then Preimage.Commit().
+func randomCommitment() (com Commitment) {
+	rand.Read(com[:])
+	return
+}
+
 func TestMatchID(t *testing.T) {
 	// taker
-	marketID0, _ := hex.DecodeString("6258988bdb7cc6def56635b3089b8a3f9f7cb4ef4517573b3fb2d086fd62b6f7")
+	marketID0, _ := hex.DecodeString("f1f4fb29235f5eeef55b27d909aac860828f6cf45f0b0fab92c6265844c50e54")
 	var marketID OrderID
 	copy(marketID[:], marketID0)
 
@@ -24,6 +32,7 @@ func TestMatchID(t *testing.T) {
 			OrderType:  MarketOrderType,
 			ClientTime: time.Unix(1566497653, 0),
 			ServerTime: time.Unix(1566497656, 0),
+			Commit:     randomCommitment(),
 		},
 		T: Trade{
 			Coins: []CoinID{
@@ -36,7 +45,7 @@ func TestMatchID(t *testing.T) {
 	}
 
 	// maker
-	limitID0, _ := hex.DecodeString("b89cb353ebe077e21ad35e024a6154d0a37e9e091a380357f82b277c694f3d64")
+	limitID0, _ := hex.DecodeString("f215571e8eec872b0bc6e14c989f217b4fe6fd68a0db07f0ffe75f18d28c28e3")
 	var limitID OrderID
 	copy(limitID[:], limitID0)
 
@@ -48,6 +57,7 @@ func TestMatchID(t *testing.T) {
 			OrderType:  LimitOrderType,
 			ClientTime: time.Unix(1566497653, 0),
 			ServerTime: time.Unix(1566497656, 0),
+			Commit:     randomCommitment(),
 		},
 		T: Trade{
 			Coins: []CoinID{
@@ -78,7 +88,7 @@ func TestMatchID(t *testing.T) {
 		t.Fatalf("identical matches has different IDs. %s != %s", match.ID(), match2.ID())
 	}
 
-	expIDStr := "a8998eb09346c49c7ad1d15c5cbc2c65a733ac0d630262564ec09756f1818e6f"
+	expIDStr := "e80341f82c7b1187c8480f7ebbb179925e62358773429d396e624d30e15a7727"
 	expID, _ := hex.DecodeString(expIDStr)
 	matchID := match.ID()
 	if !bytes.Equal(expID, matchID[:]) {

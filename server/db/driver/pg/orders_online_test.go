@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"testing"
+	"time"
 
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/db"
@@ -35,14 +36,20 @@ func TestStoreOrder(t *testing.T) {
 	marketSellB := newMarketSellOrder(2, 0)
 	cancelA := newCancelOrder(targetOrderID, AssetDCR, AssetBTC, 0)
 
+	// Order with the same commitment as limitA, but different order id.
+	limitAx := new(order.LimitOrder)
+	*limitAx = *limitA
+	limitAx.SetTime(time.Now())
+
 	type args struct {
 		ord    order.Order
 		status order.OrderStatus
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
+		name        string
+		args        args
+		wantErr     bool
+		wantErrType error
 	}{
 		{
 			name: "ok limit booked (active)",
@@ -82,7 +89,17 @@ func TestStoreOrder(t *testing.T) {
 				ord:    limitA,
 				status: order.OrderStatusExecuted,
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrReusedCommit},
+		},
+		{
+			name: "limit duplicate by commit only",
+			args: args{
+				ord:    limitAx,
+				status: order.OrderStatusExecuted,
+			},
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrReusedCommit},
 		},
 		{
 			name: "limit bad quantity (lot size)",
@@ -90,7 +107,8 @@ func TestStoreOrder(t *testing.T) {
 				ord:    orderBadLotSize,
 				status: order.OrderStatusEpoch,
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrInvalidOrder},
 		},
 		{
 			name: "limit bad trading pair",
@@ -98,7 +116,8 @@ func TestStoreOrder(t *testing.T) {
 				ord:    orderBadMarket,
 				status: order.OrderStatusEpoch,
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrUnsupportedMarket},
 		},
 		{
 			name: "market sell - bad status (booked)",
@@ -106,7 +125,8 @@ func TestStoreOrder(t *testing.T) {
 				ord:    marketSellB,
 				status: order.OrderStatusBooked,
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrInvalidOrder},
 		},
 		{
 			name: "market sell - bad status (canceled)",
@@ -114,7 +134,8 @@ func TestStoreOrder(t *testing.T) {
 				ord:    marketSellB,
 				status: order.OrderStatusCanceled,
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrInvalidOrder},
 		},
 		{
 			name: "market sell - active",
@@ -138,7 +159,8 @@ func TestStoreOrder(t *testing.T) {
 				ord:    marketSellA,
 				status: order.OrderStatusExecuted,
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrReusedCommit},
 		},
 		{
 			name: "market sell - duplicate archived order",
@@ -146,7 +168,8 @@ func TestStoreOrder(t *testing.T) {
 				ord:    marketSellB, // dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d
 				status: order.OrderStatusExecuted,
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrReusedCommit},
 		},
 		{
 			name: "cancel order",
@@ -162,7 +185,8 @@ func TestStoreOrder(t *testing.T) {
 				ord:    cancelA,
 				status: order.OrderStatusExecuted,
 			},
-			wantErr: true,
+			wantErr:     true,
+			wantErrType: db.ArchiveError{Code: db.ErrReusedCommit},
 		},
 	}
 	for _, tt := range tests {
@@ -170,6 +194,12 @@ func TestStoreOrder(t *testing.T) {
 			err := archie.StoreOrder(tt.args.ord, tt.args.status)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("StoreOrder() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				t.Logf("%s: %v", tt.name, err)
+				if !db.SameErrorTypes(err, tt.wantErrType) {
+					t.Errorf("Wrong error. Got %v, expected %v", err, tt.wantErrType)
+				}
 			}
 		})
 	}

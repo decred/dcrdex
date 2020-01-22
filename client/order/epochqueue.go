@@ -59,7 +59,7 @@ func (eq *EpochQueue) Enqueue(note *msgjson.EpochOrderNote) error {
 	}
 
 	var commitment order.Commitment
-	copy(commitment[:], note.Commitment)
+	copy(commitment[:], note.Commit)
 
 	order := &epochOrder{
 		Commitment: commitment,

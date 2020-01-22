@@ -41,7 +41,7 @@ type txOut struct {
 }
 
 // A getter for a new Tx.
-func newTransaction(dcr *Backend, txHash, blockHash, lastLookup *chainhash.Hash, blockHeight int64,
+func newTransaction(txHash, blockHash, lastLookup *chainhash.Hash, blockHeight int64,
 	isStake bool, ins []txIn, outs []txOut, feeRate uint64) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash

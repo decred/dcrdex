@@ -254,7 +254,7 @@ func LessByPriceThenTime(bi, bj *order.LimitOrder) bool {
 			// comparison should be exceedingly rare, so the required memory
 			// allocations are acceptable.
 			idi, idj := bi.ID(), bj.ID()
-			return bytes.Compare(idi[:], idj[:]) < 0
+			return bytes.Compare(idi[:], idj[:]) < 0 // idi < idj
 		}
 		return ti < tj
 	}
@@ -271,7 +271,7 @@ func GreaterByPriceThenTime(bi, bj *order.LimitOrder) bool {
 			// comparison should be exceedingly rare, so the required memory
 			// allocations are acceptable.
 			idi, idj := bi.ID(), bj.ID()
-			return bytes.Compare(idi[:], idj[:]) < 0
+			return bytes.Compare(idi[:], idj[:]) < 0 // idi < idj
 		}
 		return ti < tj
 	}

@@ -57,7 +57,7 @@ type Config struct {
 	// CheckedStores checks the tables for existing identical entires before
 	// attempting to store new data. This will should not be needed if there are
 	// no bugs...
-	CheckedStores bool
+	//CheckedStores bool
 
 	// Net is the current network, and can be one of mainnet, testnet, or simnet.
 	Net dex.Network
@@ -76,17 +76,17 @@ type archiverTables struct {
 // Archiver must implement server/db.DEXArchivist.
 // So far: OrderArchiver, AccountArchiver.
 type Archiver struct {
-	ctx           context.Context
-	lastErr       atomic.Value
-	queryTimeout  time.Duration
-	db            *sql.DB
-	dbName        string
-	checkedStores bool
-	markets       map[string]*dex.MarketInfo
-	feeKeyBranch  *hdkeychain.ExtendedKey
-	keyHash       []byte // Store the hash to ref the counter table.
-	keyParams     *chaincfg.Params
-	tables        archiverTables
+	ctx          context.Context
+	lastErr      atomic.Value
+	queryTimeout time.Duration
+	db           *sql.DB
+	dbName       string
+	//checkedStores bool
+	markets      map[string]*dex.MarketInfo
+	feeKeyBranch *hdkeychain.ExtendedKey
+	keyHash      []byte // Store the hash to ref the counter table.
+	keyParams    *chaincfg.Params
+	tables       archiverTables
 }
 
 // LastErr returns any fatal or unexpected error encountered in a recent query.
@@ -140,12 +140,12 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	}
 
 	archiver := &Archiver{
-		ctx:           ctx,
-		db:            db,
-		dbName:        cfg.DBName,
-		queryTimeout:  queryTimeout,
-		markets:       mktMap,
-		checkedStores: cfg.CheckedStores,
+		ctx:          ctx,
+		db:           db,
+		dbName:       cfg.DBName,
+		queryTimeout: queryTimeout,
+		markets:      mktMap,
+		//checkedStores: cfg.CheckedStores,
 		tables: archiverTables{
 			feeKeys:  fullTableName(cfg.DBName, publicSchema, feeKeysTableName),
 			accounts: fullTableName(cfg.DBName, publicSchema, accountsTableName),

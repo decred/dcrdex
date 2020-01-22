@@ -44,7 +44,7 @@ func TestParseUnit(t *testing.T) {
 		if base != ti.base {
 			t.Errorf("parseUnit(%s) returned base %s, expected %s", ti.in, base, ti.base)
 		}
-		t.Logf("multiple=%f, base=%s", mult, base)
+		//t.Logf("multiple=%f, base=%s", mult, base)
 	}
 
 }

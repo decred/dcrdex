@@ -128,7 +128,13 @@ func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 	m.resps[user] = append(l, msg)
 }
 
-func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
+func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message,
+	f func(comms.Link, *msgjson.Message)) error {
+	return m.RequestWithTimeout(user, msg, f, time.Hour, func() {})
+}
+
+func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
+	f func(comms.Link, *msgjson.Message), _ time.Duration, _ func()) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	tReq := &TRequest{
@@ -140,6 +146,7 @@ func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message, f f
 		l = make([]*TRequest, 0, 1)
 	}
 	m.reqs[user] = append(l, tReq)
+	return nil
 }
 func (m *TAuthManager) Sign(...msgjson.Signable) error { return nil }
 func (m *TAuthManager) Auth(user account.AccountID, msg, sig []byte) error {

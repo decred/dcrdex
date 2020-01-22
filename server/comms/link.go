@@ -25,7 +25,7 @@ type Link interface {
 	Send(msg *msgjson.Message) error
 	// Request sends the Request-type msgjson.Message to the client and registers
 	// a handler for the response.
-	Request(msg *msgjson.Message, f func(Link, *msgjson.Message)) error
+	Request(msg *msgjson.Message, f func(Link, *msgjson.Message), expireTime time.Duration, expire func()) error
 	// Banish closes the link and quarantines the client.
 	Banish()
 }
@@ -33,8 +33,8 @@ type Link interface {
 // When the DEX sends a request to the client, a responseHandler is created
 // to wait for the response.
 type responseHandler struct {
-	expiration time.Time
-	f          func(Link, *msgjson.Message)
+	f      func(Link, *msgjson.Message)
+	expire *time.Timer
 }
 
 // wsLink is the local, per-connection representation of a DEX client.
@@ -106,50 +106,56 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 	return msgjson.NewError(msgjson.UnknownMessageType, "unknown message type")
 }
 
-// cleanUpExpired cleans up the response handler map.
-func (c *wsLink) cleanUpExpired() {
+func (c *wsLink) expire(id uint64) bool {
 	c.reqMtx.Lock()
 	defer c.reqMtx.Unlock()
-	var expired []uint64
-	for id, cb := range c.respHandlers {
-		if time.Until(cb.expiration) < 0 {
-			expired = append(expired, id)
-		}
-	}
-	for _, id := range expired {
-		delete(c.respHandlers, id)
-	}
+	_, removed := c.respHandlers[id]
+	delete(c.respHandlers, id)
+	return removed
 }
 
 // logReq stores the response handler in the respHandlers map. Requests to the
 // client are associated with a response handler.
-func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message)) {
+func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message), expireTime time.Duration, expire func()) {
 	c.reqMtx.Lock()
 	defer c.reqMtx.Unlock()
-	c.respHandlers[id] = &responseHandler{
-		expiration: time.Now().Add(time.Minute * 5),
-		f:          respHandler,
+	doExpire := func() {
+		// Delete the response handler, and call the provided expire function if
+		// (*wsLink).respHandler has not already retrieved the handler function
+		// for execution.
+		if c.expire(id) {
+			expire()
+		}
 	}
-	// clean up the response map.
-	if len(c.respHandlers) > 1 {
-		go c.cleanUpExpired()
+	c.respHandlers[id] = &responseHandler{
+		f:      respHandler,
+		expire: time.AfterFunc(expireTime, doExpire),
 	}
 }
 
 // Request sends the message to the client and tracks the response handler.
-func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Message)) error {
-	c.logReq(msg.ID, f)
+func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Message), expireTime time.Duration, expire func()) error {
+	c.logReq(msg.ID, f, expireTime, expire)
 	return c.Send(msg)
 }
 
 // respHandler extracts the response handler for the provided request ID if it
-// exists, else nil. If the handler exists, it will be deleted from the map.
+// exists, else nil. If the handler exists, it will be deleted from the map and
+// the expire Timer stopped.
 func (c *wsLink) respHandler(id uint64) *responseHandler {
 	c.reqMtx.Lock()
 	defer c.reqMtx.Unlock()
 	cb, ok := c.respHandlers[id]
 	if ok {
 		delete(c.respHandlers, id)
+		// Stop the expiration Timer. If the Timer fired after respHandler was
+		// called, but we found the response handler in the map, wsLink.expire
+		// is waiting for the reqMtx lock and will return false, thus preventing
+		// the registered expire func from executing.
+		if !cb.expire.Stop() {
+			// Drain the Timer channel if Timer had fired as described above.
+			<-cb.expire.C
+		}
 	}
 	return cb
 }

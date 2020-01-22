@@ -92,4 +92,7 @@ const (
 	// LowFees means an account made a transaction that didn't pay fees at the
 	// requisite level.
 	LowFees
+	// PreimageReveal means an account failed to respond with a valid preimage
+	// for their order during epoch processing.
+	PreimageReveal
 )

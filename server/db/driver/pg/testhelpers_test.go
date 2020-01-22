@@ -44,6 +44,11 @@ func randomAccountID() account.AccountID {
 	return account.NewID(pk)
 }
 
+func randomCommitment() (com order.Commitment) {
+	rand.Read(com[:])
+	return
+}
+
 func mktConfig() (markets []*dex.MarketInfo) {
 	mktConfig, err := dex.NewMarketInfoFromSymbols("DCR", "BTC", LotSize, EpochDuration, MarketBuyBuffer)
 	if err != nil {
@@ -86,6 +91,7 @@ func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce
 			OrderType:  order.LimitOrderType,
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
+			Commit:     randomCommitment(),
 		},
 		T: order.Trade{
 			Coins: []order.CoinID{
@@ -110,6 +116,7 @@ func newMarketSellOrder(quantityLots uint64, timeOffset int64) *order.MarketOrde
 			OrderType:  order.MarketOrderType,
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
+			Commit:     randomCommitment(),
 		},
 		T: order.Trade{
 			Coins:    []order.CoinID{randomBytes(36)},
@@ -129,6 +136,7 @@ func newMarketBuyOrder(quantityQuoteAsset uint64, timeOffset int64) *order.Marke
 			OrderType:  order.MarketOrderType,
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
+			Commit:     randomCommitment(),
 		},
 		T: order.Trade{
 			Coins:    []order.CoinID{randomBytes(36)},
@@ -148,6 +156,7 @@ func newCancelOrder(targetOrderID order.OrderID, base, quote uint32, timeOffset 
 			OrderType:  order.CancelOrderType,
 			ClientTime: time.Unix(1566497653+timeOffset, 0).UTC(),
 			ServerTime: time.Unix(1566497656+timeOffset, 0).UTC(),
+			Commit:     randomCommitment(),
 		},
 		TargetOrderID: targetOrderID,
 	}

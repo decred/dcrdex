@@ -5,6 +5,8 @@ package market
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -14,9 +16,11 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/coinlock"
+	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 )
@@ -32,8 +36,9 @@ func (e Error) Error() string {
 const (
 	ErrMarketNotRunning       = Error("market not running")
 	ErrInvalidOrder           = Error("order failed validation")
+	ErrInvalidCommitment      = Error("order commitment invalid")
 	ErrEpochMissed            = Error("order unexpectedly missed its intended epoch")
-	ErrDuplicateOrder         = Error("order already in epoch")
+	ErrDuplicateOrder         = Error("order already in epoch") // maybe remove since this is ill defined
 	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
 	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
 	ErrMalformedOrderResponse = Error("malformed order response")
@@ -69,27 +74,32 @@ type Swapper interface {
 // - Cycle the epochs.
 // - Recording all events with the archivist
 type Market struct {
+	marketInfo *dex.MarketInfo
+
 	// Communications.
 	orderRouter  chan *orderUpdateSignal  // incoming orders
+	orderFeedMtx sync.RWMutex             // guards orderFeeds and running
 	orderFeeds   []chan *bookUpdateSignal // outgoing notifications
-	orderFeedMtx sync.RWMutex
+	running      chan struct{}
 
-	// Order handling: book, active epoch queues, order matcher, and swapper.
-	running       chan struct{}
-	startEpochIdx int64
-	marketInfo    *dex.MarketInfo
-	bookMtx       sync.Mutex
-	book          *book.Book
-	epochMtx      sync.RWMutex
-	epochOrders   map[order.OrderID]order.Order
-	matcher       *matcher.Matcher
-	swapper       Swapper
-	auth          AuthManager
+	startEpochIdx int64 // atomic access only
+
+	bookMtx  sync.Mutex // guards book and epochIdx
+	book     *book.Book
+	epochIdx int64 // next epoch from the point of view of the book
+
+	epochMtx         sync.RWMutex
+	epochCommitments map[order.Commitment]order.OrderID
+	epochOrders      map[order.OrderID]order.Order
+
+	matcher *matcher.Matcher
+	swapper Swapper
+	auth    AuthManager
 
 	coinLockerBase  coinlock.CoinLocker
 	coinLockerQuote coinlock.CoinLocker
 
-	// Persistent data storage.
+	// Persistent data storage
 	storage db.DEXArchivist
 }
 
@@ -112,17 +122,18 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 	coinLockerQuote.LockCoins(quoteCoins)
 
 	return &Market{
-		running:         make(chan struct{}),
-		marketInfo:      mktInfo,
-		orderRouter:     make(chan *orderUpdateSignal, 16),
-		book:            book.New(mktInfo.LotSize),
-		matcher:         matcher.New(),
-		epochOrders:     make(map[order.OrderID]order.Order),
-		swapper:         swapper,
-		auth:            authMgr,
-		storage:         storage,
-		coinLockerBase:  coinLockerBase,
-		coinLockerQuote: coinLockerQuote,
+		running:          make(chan struct{}),
+		marketInfo:       mktInfo,
+		orderRouter:      make(chan *orderUpdateSignal, 16),
+		book:             book.New(mktInfo.LotSize),
+		matcher:          matcher.New(),
+		epochCommitments: make(map[order.Commitment]order.OrderID),
+		epochOrders:      make(map[order.OrderID]order.Order),
+		swapper:          swapper,
+		auth:             authMgr,
+		storage:          storage,
+		coinLockerBase:   coinLockerBase,
+		coinLockerQuote:  coinLockerQuote,
 	}, nil
 }
 
@@ -146,7 +157,10 @@ func (m *Market) Start(ctx context.Context, startEpochIdx int64) {
 
 // waitForEpochOpen waits until the start of epoch processing.
 func (m *Market) waitForEpochOpen() {
-	<-m.running
+	m.orderFeedMtx.RLock()
+	c := m.running
+	m.orderFeedMtx.RUnlock()
+	<-c
 }
 
 // EpochDuration returns the Market's epoch duration in milliseconds.
@@ -169,8 +183,10 @@ func (m *Market) Quote() uint32 {
 	return m.marketInfo.Quote
 }
 
-// OrderFeed provides a new order book update channel. This is not thread-safe,
-// and should not be called after calling Start.
+// OrderFeed provides a new order book update channel. Channels provided before
+// the market starts and while a market is running are both valid. When the
+// market stops, channels are closed (invalidated), and new channels should be
+// requested if the market starts again.
 func (m *Market) OrderFeed() <-chan *bookUpdateSignal {
 	bookUpdates := make(chan *bookUpdateSignal, 1)
 	m.orderFeedMtx.Lock()
@@ -207,11 +223,11 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	// Validate the order. The order router must do it's own validation, but do
 	// a second validation for (1) this Market and (2) epoch status, before
 	// putting it on the queue.
-	if !m.validateOrder(rec.order) {
+	if err := m.validateOrder(rec.order); err != nil {
 		// Order ID may not be computed since ServerTime has not been set.
 		log.Debugf("SubmitOrderAsync: Invalid order received: %x", rec.order.Serialize())
 		errChan := make(chan error, 1)
-		errChan <- ErrInvalidOrder
+		errChan <- err // i.e. ErrInvalidOrder, ErrInvalidCommitment
 		return errChan
 	}
 
@@ -228,13 +244,13 @@ func (m *Market) MidGap() uint64 {
 	bestBuy, bestSell := m.book.Best()
 	if bestBuy == nil {
 		if bestSell == nil {
-			return 0 // ?
+			return 0
 		}
 		return bestSell.Rate
 	} else if bestSell == nil {
 		return bestBuy.Rate
 	}
-	return (bestBuy.Rate + bestSell.Rate) / 2
+	return (bestBuy.Rate + bestSell.Rate) / 2 // note downward bias on truncate
 }
 
 // CoinLocked checks if a coin is locked. The asset is specified since we should
@@ -293,10 +309,11 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) bool {
 	return false
 }
 
-func (m *Market) notifyNewOrder(ctx context.Context, order order.Order, action bookUpdateAction, eidx int64) {
+func (m *Market) notify(ctx context.Context, sig *bookUpdateSignal) {
 	// send to each receiver
 	m.orderFeedMtx.RLock()
 	defer m.orderFeedMtx.RUnlock()
+	// The market may have shut down while waiting for the lock.
 	if ctx.Err() != nil {
 		return
 	}
@@ -304,17 +321,20 @@ func (m *Market) notifyNewOrder(ctx context.Context, order order.Order, action b
 		select {
 		case <-ctx.Done():
 			return
-		case s <- &bookUpdateSignal{action, order, eidx}:
+		case s <- sig:
 		}
 	}
 }
 
-// Book retrieves the market's current order book.
-func (m *Market) Book() (buys, sells []*order.LimitOrder) {
+// Book retrieves the market's current order book and the current epoch index.
+// If the Market is not yet running or the start epoch has not yet begun, the
+// epoch index will be zero.
+func (m *Market) Book() (epoch int64, buys, sells []*order.LimitOrder) {
 	// NOTE: it may be desirable to cache the response.
 	m.bookMtx.Lock()
 	buys = m.book.BuyOrders()
 	sells = m.book.SellOrders()
+	epoch = m.epochIdx
 	m.bookMtx.Unlock()
 	return
 }
@@ -325,6 +345,38 @@ func (m *Market) Book() (buys, sells []*order.LimitOrder) {
 // via OrderFeed are closed and invalidated. Clients must request a new feed to
 // receive updates when and if the Market restarts.
 func (m *Market) Run(ctx context.Context) {
+	ctxRun, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Start the closed epoch pump, which drives preimage collection and orderly
+	// epoch processing.
+	eq := newEpochPump()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		eq.Run(ctxRun)
+	}()
+
+	// Start the closed epoch processing pipeline.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case ep, ok := <-eq.ready:
+				if !ok {
+					return
+				}
+
+				// epochStart has completed preimage collection.
+				m.processReadyEpoch(ctxRun, ep)
+			case <-ctxRun.Done():
+				return
+			}
+		}
+	}()
+
 	nextEpochIdx := atomic.LoadInt64(&m.startEpochIdx)
 	if nextEpochIdx == 0 {
 		log.Warnf("Run: startEpochIdx not set. Starting at the next epoch.")
@@ -335,23 +387,20 @@ func (m *Market) Run(ctx context.Context) {
 	nextEpoch := NewEpoch(nextEpochIdx, epochDuration)
 	epochCycle := time.After(time.Until(nextEpoch.Start))
 
-	defer func() {
-		m.orderFeedMtx.Lock()
-		for _, s := range m.orderFeeds {
-			close(s)
-		}
-		m.orderFeeds = nil
-		m.orderFeedMtx.Unlock()
-		log.Debugf("Market %q stopped.", m.marketInfo.Name)
-	}()
-
 	var running bool
 	var currentEpoch *EpochQueue
 	cycleEpoch := func() {
 		if currentEpoch != nil {
-			// Process the epoch synchronously so the coin locks are up-to-date
-			// when the next order arrives.
-			m.processEpoch(ctx, currentEpoch)
+			// Process the epoch asynchronously since there is a delay while the
+			// preimages are requested and clients respond with their preimages.
+			m.enqueueEpoch(eq, currentEpoch)
+
+			// The epoch is closed, long live the epoch.
+			sig := &bookUpdateSignal{
+				action:   newEpochAction,
+				epochIdx: nextEpoch.Epoch,
+			}
+			m.notify(ctxRun, sig)
 		}
 		currentEpoch = nextEpoch
 
@@ -359,21 +408,33 @@ func (m *Market) Run(ctx context.Context) {
 		epochCycle = time.After(time.Until(nextEpoch.Start))
 
 		if !running {
-			close(m.running)
+			close(m.running) // no lock, this field is not set in another goroutine
 			running = true
 		}
 	}
 
-	// In case the market is stopped before the first epoch, close the running
-	// channel so that waitForEpochOpen does not hang.
 	defer func() {
+		m.orderFeedMtx.Lock()
+		for _, s := range m.orderFeeds {
+			close(s)
+		}
+		m.orderFeeds = nil
+		// In case the market is stopped before the first epoch, close the
+		// running channel so that waitForEpochOpen does not hang.
 		if !running {
 			close(m.running)
 		}
+		// Make a new running channel for any future Run.
+		m.running = make(chan struct{}) // also guarded in OrderFeed and waitForEpochOpen
+		m.orderFeedMtx.Unlock()
+
+		wg.Wait()
+
+		log.Debugf("Market %q stopped.", m.marketInfo.Name)
 	}()
 
 	for {
-		if ctx.Err() != nil {
+		if ctxRun.Err() != nil {
 			return
 		}
 		if err := m.storage.LastErr(); err != nil {
@@ -390,7 +451,7 @@ func (m *Market) Run(ctx context.Context) {
 
 		// Wait for the next signal (cancel, new order, or epoch cycle).
 		select {
-		case <-ctx.Done():
+		case <-ctxRun.Done():
 			return
 
 		case s := <-m.orderRouter:
@@ -424,9 +485,14 @@ func (m *Market) Run(ctx context.Context) {
 
 			// Stamp and process the order in the target epoch queue.
 			s.rec.order.SetTime(sTime)
-			err := m.processOrder(ctx, s.rec, orderEpoch, s.errChan)
+			err := m.processOrder(ctxRun, s.rec, orderEpoch, s.errChan)
 			if err != nil {
-				log.Errorf("Failed to process order %v: %v", s.rec.order, err)
+				if ctxRun.Err() == nil {
+					// This was not context cancelation.
+					log.Errorf("Failed to process order %v: %v", s.rec.order, err)
+					// Signal to the other Run goroutines to return.
+					cancel()
+				}
 				return
 			}
 
@@ -494,14 +560,20 @@ func (m *Market) unlockOrderCoins(o order.Order) {
 // 5. Respond to the client that placed the order.
 // 6. Notify epoch queue event subscribers.
 func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *EpochQueue, errChan chan<- error) error {
-	// Verify that an order with the same ID is not already in the epoch queue.
+	// Verify that an order with the same commitment is not already in the epoch
+	// queue. Since commitment is part of the order serialization and thus order
+	// ID, this also prevents orders with the same ID.
+	// TODO: Prevent commitment reuse in general, without expensive DB queries.
 	ord := rec.order
-	if epoch.Orders[ord.ID()] != nil {
-		log.Errorf("Received duplicate order %v!", ord)
-		errChan <- ErrDuplicateOrder
-		return nil
+	commit := ord.Commitment()
+	m.epochMtx.RLock()
+	otherOid, found := m.epochCommitments[commit]
+	m.epochMtx.RUnlock()
+	if found {
+		log.Debugf("Received order %v with commitment %x also used in previous order %v!",
+			ord, commit, otherOid)
+		errChan <- ErrInvalidCommitment
 	}
-	// TODO: also check the commitment is not reused
 
 	// Verify that another cancel order targeting the same order is not already
 	// in the epoch queue. Market and limit orders using the same coin IDs as
@@ -539,7 +611,7 @@ func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *Epoc
 	// Ensure that the received order does not use locked coins.
 	lockedCoins := m.coinsLocked(ord)
 	if len(lockedCoins) > 0 {
-		log.Errorf("processOrder: Order %v submitted with already-locked coins: %v",
+		log.Debugf("processOrder: Order %v submitted with already-locked coins: %v",
 			ord, lockedCoins)
 		errChan <- ErrInvalidOrder
 		return nil
@@ -549,6 +621,25 @@ func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *Epoc
 	// locked coins cannot get into the epoch queue. Later, in processEpoch or
 	// the Swapper, release these coins when the swap is completed.
 	m.lockOrderCoins(ord)
+
+	// Check for known orders in the DB with the same Commitment.
+	//
+	// NOTE: This is disabled since (1) it may not scale as order history grows,
+	// and (2) it is hard to see how this can be done by new servers in a mesh.
+	// NOTE 2: Perhaps a better check would be commits with revealed preimages,
+	// since a dedicated commit->preimage map or DB is conceivable.
+	//
+	// commitFound, prevOrderID, err := m.storage.OrderWithCommit(ctx, commit)
+	// if err != nil {
+	// 	errChan <- ErrInternalServer
+	// 	return fmt.Errorf("processOrder: Failed to query for orders by commitment: %v", err)
+	// }
+	// if commitFound {
+	// 	log.Debugf("processOrder: Order %v submitted with reused commitment %v "+
+	// 		"from previous order %v", ord, commit, prevOrderID)
+	// 	errChan <- ErrInvalidCommitment
+	// 	return nil
+	// }
 
 	// Archive the new epoch order BEFORE inserting it into the epoch queue,
 	// initiating the swap, and notifying book subscribers.
@@ -561,8 +652,10 @@ func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *Epoc
 	// Insert the order into the epoch queue.
 	epoch.Insert(ord)
 
+	oid := ord.ID()
 	m.epochMtx.Lock()
-	m.epochOrders[ord.ID()] = ord
+	m.epochOrders[oid] = ord
+	m.epochCommitments[commit] = oid
 	m.epochMtx.Unlock()
 
 	// Respond to the order router only after updating epochOrders so that
@@ -574,28 +667,338 @@ func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *Epoc
 	m.auth.Send(ord.User(), respMsg)
 
 	// Send epoch update to epoch queue subscribers.
-	go m.notifyNewOrder(ctx, ord, epochAction, epoch.Epoch)
+	sig := &bookUpdateSignal{
+		action:   epochAction,
+		order:    ord,
+		epochIdx: epoch.Epoch,
+	}
+	go m.notify(ctx, sig)
 	return nil
 }
 
-// processEpoch performs the following operations for a closed epoch:
+func idToBytes(id [order.OrderIDSize]byte) []byte {
+	return id[:]
+}
+
+// respondError sends an rpcError to a user.
+func (m *Market) respondError(id uint64, user account.AccountID, code int, errMsg string) {
+	log.Debugf("error going to user %x, code: %d, msg: %s", user, code, errMsg)
+	msg, err := msgjson.NewResponse(id, nil, &msgjson.Error{
+		Code:    code,
+		Message: errMsg,
+	})
+	if err != nil {
+		log.Errorf("error creating error response with message '%s': %v", msg, err)
+	}
+	m.auth.Send(user, msg)
+}
+
+// preimage request-response handling data
+type piData struct {
+	user     account.AccountID
+	id       order.OrderID
+	commit   order.Commitment
+	preimage chan *order.Preimage
+}
+
+// handlePreimageResp is to be used in the response callback function provided
+// to AuthManager.Request for the preimage route.
+func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
+	sendPI := func(pi *order.Preimage) {
+		reqData.preimage <- pi
+	}
+
+	var piResp msgjson.PreimageResponse
+	resp, err := msg.Response()
+	if err != nil {
+		sendPI(nil)
+		m.respondError(msg.ID, reqData.user, msgjson.RPCParseError,
+			fmt.Sprintf("error parsing preimage notification response: %v", err))
+		return
+	}
+	err = json.Unmarshal(resp.Result, &piResp)
+	if err != nil {
+		sendPI(nil)
+		m.respondError(msg.ID, reqData.user, msgjson.RPCParseError,
+			fmt.Sprintf("error parsing preimage notification response payload result: %v", err))
+		return
+	}
+
+	// Validate preimage length.
+	if len(piResp.Preimage) != order.PreimageSize {
+		sendPI(nil)
+		m.respondError(msg.ID, reqData.user, msgjson.InvalidPreimage,
+			fmt.Sprintf("invalid preimage length (%d byes)", len(piResp.Preimage)))
+		return
+	}
+
+	// Check that the preimage is the hash of the order commitment.
+	var pi order.Preimage
+	copy(pi[:], piResp.Preimage)
+	piCommit := pi.Commit()
+	if reqData.commit != piCommit {
+		sendPI(nil)
+		m.respondError(msg.ID, reqData.user, msgjson.PreimageCommitmentMismatch,
+			fmt.Sprintf("preimage hash %x does not match order commitment %x",
+				piCommit, reqData.commit))
+		return
+	}
+
+	// The preimage is good.
+	log.Tracef("Good preimage received for order %v: %x", reqData.id, pi)
+	sendPI(&pi)
+}
+
+// collectPreimages solicits preimages from the owners of each of the orders in
+// the provided queue with a 'preimage' ntfn/request via AuthManager.Request,
+// and returns the preimages contained in the client responses. This function
+// can block for up to 5 seconds (piTimeout) to allow clients time to respond.
+// Clients that fail to respond, or respond with invalid data (see
+// handlePreimageResp), are counted as misses.
+func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersRevealed []*matcher.OrderRevealed, misses []order.Order) {
+	// Compute the commitment checksum for the order queue.
+	cSum = matcher.CSum(orders)
+
+	// Request preimages from the clients.
+	piTimeout := 5 * time.Second
+	preimages := make(map[order.Order]chan *order.Preimage, len(orders))
+	for _, ord := range orders {
+		// Make the 'preimage' request.
+		piReqParams := &msgjson.PreimageRequest{
+			OrderID:        idToBytes(ord.ID()),
+			CommitChecksum: cSum,
+		}
+		req, err := msgjson.NewRequest(comms.NextID(), msgjson.PreimageRoute, piReqParams)
+		if err != nil {
+			// This is likely an impossible condition, but it's not the client's
+			// fault.
+			log.Errorf("error creating preimage request: %v", err)
+			// TODO: respond to client with server error.
+			continue
+		}
+
+		// The clients preimage response comes back via a channel, where nil
+		// indicates client failure to respond, either due to disconnection or
+		// no action.
+		piChan := make(chan *order.Preimage)
+
+		reqData := &piData{
+			user:     ord.User(),
+			id:       ord.ID(), // maybe remove
+			commit:   ord.Commitment(),
+			preimage: piChan,
+		}
+
+		// Failure to respond in time is a miss, signalled by a nil pointer.
+		miss := func() {
+			piChan <- nil
+		}
+
+		// Send the preimage request to the order's owner.
+		err = m.auth.RequestWithTimeout(ord.User(), req, func(_ comms.Link, msg *msgjson.Message) {
+			m.handlePreimageResp(msg, reqData)
+		}, piTimeout, miss)
+		if err != nil {
+			if errors.Is(err, ws.ErrClientDisconnected) {
+				misses = append(misses, ord)
+				log.Debug("Preimage request failed: client gone.")
+			} else {
+				// Server error should not count as a miss. We may need a way to
+				// identify server connectivity problems to clients are not
+				// penalized when it is not their fault.
+				log.Warnf("Preimage request failed: %v", err) // maybe Debugf if there is nothing unexpected
+			}
+			continue
+		}
+
+		log.Tracef("Preimage request sent for order %v", ord)
+		preimages[ord] = piChan
+	}
+
+	// Receive preimages from response channels.
+	for ord, pic := range preimages {
+		pi := <-pic
+		if pi == nil {
+			misses = append(misses, ord)
+		} else {
+			ordersRevealed = append(ordersRevealed, &matcher.OrderRevealed{
+				Order:    ord,
+				Preimage: *pi,
+			})
+		}
+	}
+
+	return
+}
+
+type readyEpoch struct {
+	*EpochQueue
+	ready          chan struct{}
+	cSum           []byte
+	ordersRevealed []*matcher.OrderRevealed
+	misses         []order.Order
+}
+
+type epochPump struct {
+	ready chan *readyEpoch // consumer receives from this
+
+	mtx  sync.RWMutex
+	q    []*readyEpoch
+	head chan *readyEpoch // internal
+}
+
+func newEpochPump() *epochPump {
+	return &epochPump{
+		ready: make(chan *readyEpoch, 1),
+		head:  make(chan *readyEpoch, 1),
+	}
+}
+
+func (ep *epochPump) Run(ctx context.Context) {
+	defer close(ep.ready)
+	for {
+		rq, ok := <-ep.next(ctx)
+		if !ok {
+			return
+		}
+		select {
+		case ep.ready <- rq: // consumer should receive this
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// Insert enqueues an EpochQueue and start's preimage collection immediately.
+// Access epoch queues in order and when they have completed preimage collection
+// by receiving from the epochPump.ready channel.
+func (ep *epochPump) Insert(epoch *EpochQueue) *readyEpoch {
+	rq := &readyEpoch{
+		EpochQueue: epoch,
+		ready:      make(chan struct{}),
+	}
+	ep.mtx.Lock()
+	select {
+	case ep.head <- rq: // buffered, so non-blocking when empty and no receiver
+	default:
+		ep.push(rq)
+	}
+	ep.mtx.Unlock()
+	return rq
+}
+
+// push appends a new readyEpoch to the closed epoch queue, q. It is not
+// thread-safe. push is only used in Insert.
+func (ep *epochPump) push(rq *readyEpoch) {
+	ep.q = append(ep.q, rq)
+}
+
+// popFront removes the next readyEpoch from the closed epoch queue, q. It is
+// not thread-safe. pop is only used in next to advance the head of the pump.
+func (ep *epochPump) popFront() *readyEpoch {
+	if len(ep.q) == 0 {
+		return nil
+	}
+	x := ep.q[0]
+	ep.q = ep.q[1:]
+	return x
+}
+
+// next provides a channel for receiving the next readyEpoch when it completes
+// preimage collection. next blocks until there is an epoch to send.
+func (ep *epochPump) next(ctx context.Context) <-chan *readyEpoch {
+	var next *readyEpoch
+	ready := make(chan *readyEpoch)
+	select {
+	case <-ctx.Done():
+		close(ready)
+		return ready
+	case next = <-ep.head: // block if their is no next yet
+	}
+
+	ep.mtx.Lock()
+	defer ep.mtx.Unlock()
+
+	// If the queue is not empty, set new head.
+	x := ep.popFront()
+	if x != nil {
+		ep.head <- x // non-blocking
+	}
+
+	// Send next on the returned channel when it becomes ready. If the process
+	// dies before goroutine completion, the Market is down anyway.
+	go func() {
+		<-next.ready // block until preimage collection is complete
+		ready <- next
+	}()
+	return ready
+}
+
+func (m *Market) enqueueEpoch(eq *epochPump, epoch *EpochQueue) {
+	// Enqueue the epoch for matching when preimage collection is completed and
+	// it is this epoch's turn.
+	rq := eq.Insert(epoch)
+
+	orders := epoch.OrderSlice()
+	m.epochMtx.Lock()
+	for _, ord := range orders {
+		delete(m.epochOrders, ord.ID())
+		delete(m.epochCommitments, ord.Commitment())
+	}
+	m.epochMtx.Unlock()
+
+	// Start preimage collection.
+	go func() {
+		rq.cSum, rq.ordersRevealed, rq.misses = m.epochStart(orders)
+		close(rq.ready)
+	}()
+}
+
+// epochStart collects order preimages, and penalizes users who fail to respond.
+func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed []*matcher.OrderRevealed, misses []order.Order) {
+	// TODO: consider storing the epoch order IDs in an epochs table.
+
+	// Solicit the preimages for each order.
+	cSum, ordersRevealed, misses = m.collectPreimages(orders)
+	log.Debugf("Collected %d valid order preimages, missed %d. Commit checksum: %x",
+		len(ordersRevealed), len(misses), cSum)
+
+	// Penalize accounts with misses. TODO: consider if Penalize can be an async
+	// function call.
+	for _, ord := range misses {
+		m.auth.Penalize(ord.User(), account.PreimageReveal)
+	}
+
+	return
+}
+
+// processReadyEpoch performs the following operations for a closed epoch that
+// has finished preimage collection via collectPreimages:
 //  1. Perform matching with the order book.
 //  2. Send book and unbook notifications to the book subscribers.
 //  3. Unlock coins with the book lock for unbooked and failed orders.
 //  4. Lock coins with the swap lock.
 //  5. Initiate the swap negotiation via the Market's Swapper.
 // The EpochQueue's Orders map must not be modified by another goroutine.
-func (m *Market) processEpoch(ctx context.Context, epoch *EpochQueue) {
-	// Perform the matching. The matcher updates the order book.
-	orders := epoch.OrderSlice()
-	m.epochMtx.Lock()
-	for _, ord := range orders {
-		delete(m.epochOrders, ord.ID())
+func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
+	// Ensure the epoch has actually completed preimage collection. This can
+	// only fail if the epochPump malfunctioned. Remove this check eventually.
+	select {
+	case <-epoch.ready:
+	default:
+		log.Criticalf("preimages not yet collected for epoch %d!", epoch.Epoch)
+		return // maybe panic
 	}
-	m.epochMtx.Unlock()
 
+	// Data from preimage collection
+	ordersRevealed := epoch.ordersRevealed
+	cSum := epoch.cSum
+	misses := epoch.misses
+
+	// Perform order matching using the preimages to shuffle the queue.
 	m.bookMtx.Lock()
-	matches, _, failed, doneOK, partial, booked, unbooked := m.matcher.Match(m.book, orders)
+	seed, matches, _, failed, doneOK, partial, booked, unbooked := m.matcher.Match(m.book, ordersRevealed)
+	m.epochIdx = epoch.Epoch + 1
 	m.bookMtx.Unlock()
 	log.Debugf("Matching complete for epoch %d:"+
 		" %d matches (%d partial fills), %d completed OK (not booked),"+
@@ -604,6 +1007,27 @@ func (m *Market) processEpoch(ctx context.Context, epoch *EpochQueue) {
 		len(matches), len(partial), len(doneOK),
 		len(booked), len(unbooked), len(failed),
 	)
+
+	// Signal the match_proof to the orderbook subscribers.
+	preimages := make([]order.Preimage, len(ordersRevealed))
+	for i := range ordersRevealed {
+		preimages[i] = ordersRevealed[i].Preimage
+	}
+	sig := &bookUpdateSignal{
+		action: matchProofAction,
+		matchProof: &order.MatchProof{
+			Epoch: order.EpochID{
+				Idx: uint64(epoch.Epoch),
+				Dur: m.EpochDuration(),
+			},
+			Preimages: preimages,
+			Misses:    misses,
+			CSum:      cSum,
+			Seed:      seed,
+		},
+		epochIdx: epoch.Epoch,
+	}
+	m.notify(ctx, sig)
 
 	// Pre-process the matches:
 	// - Set the EpochID for each MatchSet.
@@ -632,12 +1056,12 @@ func (m *Market) processEpoch(ctx context.Context, epoch *EpochQueue) {
 	// orders) coins were locked upon order receipt in processOrder and must be
 	// unlocked now since they do not go on the book.
 	for _, k := range doneOK {
-		m.unlockOrderCoins(k)
+		m.unlockOrderCoins(k.Order)
 	}
 
 	// Unlock unmatched (failed) order coins.
 	for _, fo := range failed {
-		m.unlockOrderCoins(fo)
+		m.unlockOrderCoins(fo.Order)
 	}
 
 	// Booked order coins were locked upon receipt by processOrder, and remain
@@ -652,29 +1076,47 @@ func (m *Market) processEpoch(ctx context.Context, epoch *EpochQueue) {
 
 	// Send "book" notifications to order book subscribers.
 	for _, ord := range booked {
-		m.notifyNewOrder(ctx, ord, bookAction, epoch.Epoch)
+		sig := &bookUpdateSignal{
+			action:   bookAction,
+			order:    ord.Order,
+			epochIdx: epoch.Epoch,
+		}
+		m.notify(ctx, sig)
 	}
 
 	// Send "unbook" notifications to order book subscribers.
 	for _, ord := range unbooked {
-		m.notifyNewOrder(ctx, ord, unbookAction, epoch.Epoch)
+		sig := &bookUpdateSignal{
+			action:   unbookAction,
+			order:    ord,
+			epochIdx: epoch.Epoch,
+		}
+		m.notify(ctx, sig)
 	}
 
-	// Initiate the swap.
+	// Initiate the swaps.
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
-		// Since Swapper.Negotiate is called asynchronously, we must lock coins
-		// with the Swapper first. The swapper will unlock the coins.
-		m.swapper.LockOrdersCoins(swapOrders)
-		go m.swapper.Negotiate(matches)
+		m.swapper.LockOrdersCoins(swapOrders) // TODO: lock in swapper now (this is in another PR)
+		m.swapper.Negotiate(matches)
 	}
 }
 
 // validateOrder uses db.ValidateOrder to ensure that the provided order is
 // valid for the current market with epoch order status.
-func (m *Market) validateOrder(ord order.Order) bool {
-	return db.ValidateOrder(ord, order.OrderStatusEpoch, m.marketInfo)
+func (m *Market) validateOrder(ord order.Order) error {
+	// First check the order commitment before bothering the Market's run loop.
+	c0 := order.Commitment{}
+	if ord.Commitment() == c0 {
+		log.Debugf("Received order %v with zero-value Commitment. Rejecting.", ord)
+		return ErrInvalidCommitment
+	}
+
+	if !db.ValidateOrder(ord, order.OrderStatusEpoch, m.marketInfo) {
+		return ErrInvalidOrder // non-specific
+	}
+	return nil
 }
 
 // orderResponse signs the order data and prepares the OrderResult to be sent to

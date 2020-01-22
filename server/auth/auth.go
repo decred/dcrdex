@@ -22,10 +22,6 @@ func unixMsNow() time.Time {
 	return time.Now().Truncate(time.Millisecond).UTC()
 }
 
-// reqExpiration is how long a response handler will be saved before it is
-// eligible for clean up.
-const reqExpiration = time.Minute
-
 // Storage updates and fetches account-related data from what is presumably a
 // database.
 type Storage interface {
@@ -54,8 +50,8 @@ type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err e
 // respHandler has a time associated with it so that old unused handlers can be
 // detected and deleted.
 type respHandler struct {
-	expiration time.Time
-	f          func(comms.Link, *msgjson.Message)
+	f      func(comms.Link, *msgjson.Message)
+	expire *time.Timer
 }
 
 // clientInfo represents a DEX client, including account information and last
@@ -67,29 +63,29 @@ type clientInfo struct {
 	respHandlers map[uint64]*respHandler
 }
 
-// cleanUpHandlers scans the respHandlers for expired handlers and deletes them
-// from the map.
-func (client *clientInfo) cleanUpHandlers() {
+func (client *clientInfo) expire(id uint64) bool {
 	client.mtx.Lock()
 	defer client.mtx.Unlock()
-	var expired []uint64
-	for id, handler := range client.respHandlers {
-		if time.Until(handler.expiration) < 0 {
-			expired = append(expired, id)
-		}
-	}
-	for _, id := range expired {
-		delete(client.respHandlers, id)
-	}
+	_, removed := client.respHandlers[id]
+	delete(client.respHandlers, id)
+	return removed
 }
 
 // logReq associates the specified response handler with the message ID.
-func (client *clientInfo) logReq(id uint64, handler *respHandler) {
+func (client *clientInfo) logReq(id uint64, f func(comms.Link, *msgjson.Message), expireTime time.Duration, expire func()) {
 	client.mtx.Lock()
 	defer client.mtx.Unlock()
-	client.respHandlers[id] = handler
-	if len(client.respHandlers) > 1 {
-		go client.cleanUpHandlers()
+	doExpire := func() {
+		// Delete the response handler, and call the provided expire function if
+		// (*clientInfo).respHandler has not already retrieved the handler
+		// function for execution.
+		if client.expire(id) {
+			expire()
+		}
+	}
+	client.respHandlers[id] = &respHandler{
+		f:      f,
+		expire: time.AfterFunc(expireTime, doExpire),
 	}
 }
 
@@ -101,6 +97,14 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 	handler, found := client.respHandlers[id]
 	if found {
 		delete(client.respHandlers, id)
+		// Stop the expiration Timer. If the Timer fired after respHandler was
+		// called, but we found the response handler in the map,
+		// clientInfo.expire is waiting for the reqMtx lock and will return
+		// false, thus preventing the registered expire func from executing.
+		if !handler.expire.Stop() {
+			// Drain the Timer channel if Timer had fired as described above.
+			<-handler.expire.C
+		}
 	}
 	return handler
 }
@@ -221,22 +225,32 @@ func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 	}
 }
 
+const DefaultRequestTimeout = 30 * time.Second
+
 // Request sends the Request-type msgjson.Message to the client identified by
-// the specified account ID.
-func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) {
+// the specified account ID. The user must respond within DefaultRequestTimeout
+// of the request. Late responses are not handled.
+func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
+	return auth.RequestWithTimeout(user, msg, f, DefaultRequestTimeout, func() {})
+}
+
+// RequestWithTimeout sends the Request-type msgjson.Message to the client
+// identified by the specified account ID. If the user responds within
+// expireTime of the request, the response handler is called, otherwise the
+// expire function is called.
+func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
+	expireTime time.Duration, expire func()) error {
 	client := auth.user(user)
 	if client == nil {
 		log.Errorf("Send requested for unknown user %x", user[:])
-		return
+		return fmt.Errorf("unknown user %x", user[:])
 	}
-	client.logReq(msg.ID, &respHandler{
-		expiration: time.Now().Add(reqExpiration),
-		f:          f,
-	})
-	err := client.conn.Request(msg, auth.handleResponse)
+	client.logReq(msg.ID, f, expireTime, expire)
+	err := client.conn.Request(msg, auth.handleResponse, expireTime, func() {})
 	if err != nil {
 		log.Debugf("error sending request: %v", err)
 	}
+	return err
 }
 
 // Penalize signals that a user has broken a rule of community conduct, and that

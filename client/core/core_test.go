@@ -131,7 +131,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			Fee: tFee,
 		},
 		markets: []*Market{
-			&Market{
+			{
 				BaseID:          tDCR.ID,
 				BaseSymbol:      tDCR.Symbol,
 				QuoteID:         tBTC.ID,
@@ -624,7 +624,7 @@ func TestCreateWallet(t *testing.T) {
 	}
 	delete(tCore.wallets, tILT.ID)
 
-	// Try an unkown wallet (not yet asset.Register'ed).
+	// Try an unknown wallet (not yet asset.Register'ed).
 	err = tCore.CreateWallet(form)
 	if err == nil {
 		t.Fatalf("no error for unknown asset")
@@ -666,10 +666,11 @@ func TestRegister(t *testing.T) {
 	rig.db.acctErr = tErr
 
 	regRes := &msgjson.RegisterResult{
-		DEXPubKey: acct.dexPubKey.Serialize(),
-		Address:   "someaddr",
-		Fee:       tFee,
-		Time:      encode.UnixMilliU(time.Now()),
+		DEXPubKey:    acct.dexPubKey.Serialize(),
+		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
+		Address:      "someaddr",
+		Fee:          tFee,
+		Time:         encode.UnixMilliU(time.Now()),
 	}
 	sign(tDexPriv, regRes)
 

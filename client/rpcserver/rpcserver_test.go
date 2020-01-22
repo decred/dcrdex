@@ -100,6 +100,10 @@ func (c *TConn) WriteMessage(_ int, msg []byte) error {
 	return nil
 }
 
+func (c *TConn) SetWriteDeadline(_ time.Time) error {
+	return nil
+}
+
 type tLink struct {
 	cl   *wsClient
 	conn *TConn

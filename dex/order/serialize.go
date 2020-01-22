@@ -25,7 +25,8 @@ func EncodePrefix(p *Prefix) []byte {
 		AddData(uint32B(p.QuoteAsset)).
 		AddData([]byte{byte(p.OrderType)}).
 		AddData(uint64B(unixMilliU(p.ClientTime))).
-		AddData(uint64B(unixMilliU(p.ServerTime)))
+		AddData(uint64B(unixMilliU(p.ServerTime))).
+		AddData(p.Commit[:])
 }
 
 // DecodePrefix decodes the versioned blob to a *Prefix.
@@ -43,16 +44,27 @@ func DecodePrefix(b []byte) (prefix *Prefix, err error) {
 
 // decodePrefix_v0 decodes the v0 payload into a *Prefix.
 func decodePrefix_v0(pushes [][]byte) (prefix *Prefix, err error) {
-	if len(pushes) != 6 {
+	if len(pushes) != 7 {
 		return nil, fmt.Errorf("expected 6 prefix parts, got %d", len(pushes))
 	}
 	acctB, baseB, quoteB := pushes[0], pushes[1], pushes[2]
 	oTypeB, cTimeB, sTimeB := pushes[3], pushes[4], pushes[5]
+	commitB := pushes[6]
+
 	if len(acctB) != account.HashSize {
-		return nil, fmt.Errorf("expected account ID length %d, got %d", account.HashSize, len(acctB))
+		return nil, fmt.Errorf("expected account ID length %d, got %d",
+			account.HashSize, len(acctB))
 	}
 	var acctID account.AccountID
 	copy(acctID[:], acctB)
+
+	if len(commitB) != CommitmentSize {
+		return nil, fmt.Errorf("expected commitment length %d, got %d",
+			CommitmentSize, len(commitB))
+	}
+	var commit Commitment
+	copy(commit[:], commitB)
+
 	return &Prefix{
 		AccountID:  acctID,
 		BaseAsset:  intCoder.Uint32(baseB),
@@ -60,6 +72,7 @@ func decodePrefix_v0(pushes [][]byte) (prefix *Prefix, err error) {
 		OrderType:  OrderType(oTypeB[0]),
 		ClientTime: encode.DecodeUTime(cTimeB),
 		ServerTime: encode.DecodeUTime(sTimeB),
+		Commit:     commit,
 	}, nil
 }
 

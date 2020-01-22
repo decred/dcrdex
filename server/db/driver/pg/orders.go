@@ -22,8 +22,8 @@ import (
 type dbCoins []order.CoinID
 
 // Value implements the sql/driver.Valuer interface. The coin IDs are encoded as
-// L0|ID0|L1|ID1|... where | is simple concatentation, Ln is the length
-// of the nth coin ID, and IDn is the bytes of the nth coinID.
+// L0|ID0|L1|ID1|... where | is simple concatenation, Ln is the length of the
+// nth coin ID, and IDn is the bytes of the nth coinID.
 func (coins dbCoins) Value() (driver.Value, error) {
 	if len(coins) == 0 {
 		return []byte{}, nil
@@ -315,22 +315,42 @@ func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
 
 	// If enabled, search all tables for the order to ensure it is not already
 	// stored somewhere.
-	if a.checkedStores {
-		var foundStatus pgOrderStatus
-		switch ord.Type() {
-		case order.MarketOrderType, order.LimitOrderType:
-			foundStatus, _, _, err = orderStatus(a.db, ord.ID(), a.dbName, marketSchema)
-		case order.CancelOrderType:
-			foundStatus, err = cancelOrderStatus(a.db, ord.ID(), a.dbName, marketSchema)
-		}
+	// if a.checkedStores {
+	// 	var foundStatus pgOrderStatus
+	// 	switch ord.Type() {
+	// 	case order.MarketOrderType, order.LimitOrderType:
+	// 		foundStatus, _, _, err = orderStatus(a.db, ord.ID(), a.dbName, marketSchema)
+	// 	case order.CancelOrderType:
+	// 		foundStatus, err = cancelOrderStatus(a.db, ord.ID(), a.dbName, marketSchema)
+	// 	}
+	//
+	// 	if err == nil {
+	// 		return fmt.Errorf("attempted to store a %s order while it exists "+
+	// 			"in another table as %s", pgToMarketStatus(status), pgToMarketStatus(foundStatus))
+	// 	}
+	// 	if !db.IsErrOrderUnknown(err) {
+	// 		a.fatalBackendErr(err)
+	// 		return fmt.Errorf("findOrder failed: %v", err)
+	// 	}
+	// }
 
-		if err == nil {
-			return fmt.Errorf("attempted to store a %s order while it exists "+
-				"in another table as %s", pgToMarketStatus(status), pgToMarketStatus(foundStatus))
-		}
-		if !db.IsErrOrderUnknown(err) {
-			a.fatalBackendErr(err)
-			return fmt.Errorf("findOrder failed: %v", err)
+	// Check for order commitment duplicates. This also covers order ID since
+	// commitment is part of order serialization. Note that it checks ALL
+	// markets, so this may be excessive. This check may be more appropriate in
+	// the caller, or may be removed in favor of a different check depending on
+	// where preimages are stored. If we allow reused commitments if the
+	// preimages are only revealed once, then the unique constraint on the
+	// commit column in the orders tables would need to be removed.
+	commit := ord.Commitment()
+	found, prevOid, err := a.OrderWithCommit(a.ctx, commit) // no query timeouts in storeOrder, only explicit cancellation
+	if err != nil {
+		return err
+	}
+	if found {
+		return db.ArchiveError{
+			Code: db.ErrReusedCommit,
+			Detail: fmt.Sprintf("order %v reuses commit %v from previous order %v",
+				ord.UID(), commit, prevOid),
 		}
 	}
 
@@ -581,6 +601,8 @@ func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, 
 	orders, pgStatuses, err := userOrders(ctx, a.db, a.dbName, marketSchema, aid)
 	if err != nil {
 		a.fatalBackendErr(err)
+		log.Errorf("Failed to query for orders by user for market %v and account %v",
+			marketSchema, aid)
 		return nil, nil, err
 	}
 	statuses := make([]order.OrderStatus, len(pgStatuses))
@@ -588,6 +610,25 @@ func (a *Archiver) UserOrders(ctx context.Context, aid account.AccountID, base, 
 		statuses[i] = pgToMarketStatus(pgStatuses[i])
 	}
 	return orders, statuses, err
+}
+
+// OrderWithCommit searches all markets' trade and cancel orders, both active
+// and archived, for an order with the given Commitment.
+func (a *Archiver) OrderWithCommit(ctx context.Context, commit order.Commitment) (found bool, oid order.OrderID, err error) {
+	// Check all markets.
+	for marketSchema := range a.markets {
+		found, oid, err = orderForCommit(ctx, a.db, a.dbName, marketSchema, commit)
+		if err != nil {
+			a.fatalBackendErr(err)
+			log.Errorf("Failed to query for orders by commit for market %v and commit %v",
+				marketSchema, commit)
+			return
+		}
+		if found {
+			return
+		}
+	}
+	return // false, zero, nil
 }
 
 // BEGIN regular order functions
@@ -635,7 +676,7 @@ func findOrder(dbe *sql.DB, oid order.OrderID, fullTable string) (bool, pgOrderS
 
 func loadTrade(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (order.Order, pgOrderStatus, error) {
 	// Search active orders first.
-	fullTable := fullOrderTableName(dbName, marketSchema, false)
+	fullTable := fullOrderTableName(dbName, marketSchema, true)
 	ord, status, err := loadTradeFromTable(dbe, fullTable, oid)
 	switch err {
 	case sql.ErrNoRows:
@@ -649,7 +690,7 @@ func loadTrade(dbe *sql.DB, dbName, marketSchema string, oid order.OrderID) (ord
 	}
 
 	// Search archived orders.
-	fullTable = fullOrderTableName(dbName, marketSchema, true)
+	fullTable = fullOrderTableName(dbName, marketSchema, false)
 	ord, status, err = loadTradeFromTable(dbe, fullTable, oid)
 	switch err {
 	case sql.ErrNoRows:
@@ -673,7 +714,8 @@ func loadTradeFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (order
 	var rate uint64
 	var status pgOrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&id, &prefix.OrderType, &trade.Sell,
-		&prefix.AccountID, &trade.Address, &prefix.ClientTime, &prefix.ServerTime, (*dbCoins)(&trade.Coins),
+		&prefix.AccountID, &trade.Address, &prefix.ClientTime, &prefix.ServerTime,
+		&prefix.Commit, (*dbCoins)(&trade.Coins),
 		&trade.Quantity, &rate, &tif, &status, &trade.Filled)
 	if err != nil {
 		return nil, orderStatusUnknown, err
@@ -698,14 +740,14 @@ func loadTradeFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (order
 
 func userOrders(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, aid account.AccountID) ([]order.Order, []pgOrderStatus, error) {
 	// Active orders.
-	fullTable := fullOrderTableName(dbName, marketSchema, false)
+	fullTable := fullOrderTableName(dbName, marketSchema, true)
 	orders, statuses, err := userOrdersFromTable(ctx, dbe, fullTable, aid)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, err
 	}
 
 	// Archived Orders.
-	fullTable = fullOrderTableName(dbName, marketSchema, true)
+	fullTable = fullOrderTableName(dbName, marketSchema, false)
 	ordersArchived, statusesArchived, err := userOrdersFromTable(ctx, dbe, fullTable, aid)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, err
@@ -731,7 +773,8 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 		var id order.OrderID
 		var status pgOrderStatus
 		err = rows.Scan(&id, &lo.OrderType, &lo.Sell,
-			&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, (*dbCoins)(&lo.Coins),
+			&lo.AccountID, &lo.Address, &lo.ClientTime, &lo.ServerTime, &lo.Commit,
+			(*dbCoins)(&lo.Coins),
 			&lo.Quantity, &lo.Rate, &lo.Force, &status, &lo.Filled)
 		if err != nil {
 			return nil, nil, err
@@ -748,17 +791,61 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, aid
 	return orders, statuses, nil
 }
 
+func orderForCommit(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, commit order.Commitment) (bool, order.OrderID, error) {
+	var zeroOrderID order.OrderID
+
+	execCheckOrderStmt := func(stmt string) (bool, order.OrderID, error) {
+		var oid order.OrderID
+		err := dbe.QueryRowContext(ctx, stmt, commit).Scan(&oid)
+		if err == nil {
+			return true, oid, nil
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return false, zeroOrderID, err
+		}
+		// sql.ErrNoRows
+		return false, zeroOrderID, nil
+	}
+
+	checkTradeOrders := func(active bool) (bool, order.OrderID, error) {
+		fullTable := fullOrderTableName(dbName, marketSchema, active)
+		stmt := fmt.Sprintf(internal.SelectOrderByCommit, fullTable)
+		return execCheckOrderStmt(stmt)
+	}
+
+	checkCancelOrders := func(active bool) (bool, order.OrderID, error) {
+		fullTable := fullCancelOrderTableName(dbName, marketSchema, active)
+		stmt := fmt.Sprintf(internal.SelectOrderByCommit, fullTable)
+		return execCheckOrderStmt(stmt)
+	}
+
+	// Check active then archived cancel and trade orders.
+	for _, active := range []bool{true, false} {
+		// Trade orders.
+		found, oid, err := checkTradeOrders(active)
+		if found || err != nil {
+			return found, oid, err
+		}
+
+		// Cancel orders.
+		found, oid, err = checkCancelOrders(active)
+		if found || err != nil {
+			return found, oid, err
+		}
+	}
+	return false, zeroOrderID, nil
+}
+
 func storeLimitOrder(dbe sqlExecutor, tableName string, lo *order.LimitOrder, status pgOrderStatus) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertOrder, tableName)
 	return sqlExec(dbe, stmt, lo.ID(), lo.Type(), lo.Sell, lo.AccountID,
-		lo.Address, lo.ClientTime, lo.ServerTime, dbCoins(lo.Coins),
+		lo.Address, lo.ClientTime, lo.ServerTime, lo.Commit, dbCoins(lo.Coins),
 		lo.Quantity, lo.Rate, lo.Force, status, lo.Filled)
 }
 
 func storeMarketOrder(dbe sqlExecutor, tableName string, mo *order.MarketOrder, status pgOrderStatus) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertOrder, tableName)
 	return sqlExec(dbe, stmt, mo.ID(), mo.Type(), mo.Sell, mo.AccountID,
-		mo.Address, mo.ClientTime, mo.ServerTime, dbCoins(mo.Coins),
+		mo.Address, mo.ClientTime, mo.ServerTime, mo.Commit, dbCoins(mo.Coins),
 		mo.Quantity, 0, order.ImmediateTiF, status, mo.Filled)
 }
 
@@ -799,7 +886,7 @@ func moveOrder(dbe sqlExecutor, oldTableName, newTableName string, oid order.Ord
 func storeCancelOrder(dbe sqlExecutor, tableName string, co *order.CancelOrder, status pgOrderStatus) (int64, error) {
 	stmt := fmt.Sprintf(internal.InsertCancelOrder, tableName)
 	return sqlExec(dbe, stmt, co.ID(), co.AccountID, co.ClientTime,
-		co.ServerTime, co.TargetOrderID, status)
+		co.ServerTime, co.Commit, co.TargetOrderID, status)
 }
 
 func loadCancelOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (*order.CancelOrder, pgOrderStatus, error) {
@@ -809,7 +896,7 @@ func loadCancelOrderFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) 
 	var id order.OrderID
 	var status pgOrderStatus
 	err := dbe.QueryRow(stmt, oid).Scan(&id, &co.AccountID, &co.ClientTime,
-		&co.ServerTime, &co.TargetOrderID, &status)
+		&co.ServerTime, &co.Commit, &co.TargetOrderID, &status)
 	if err != nil {
 		return nil, orderStatusUnknown, err
 	}
