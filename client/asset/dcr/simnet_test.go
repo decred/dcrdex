@@ -330,6 +330,12 @@ func TestWallet(t *testing.T) {
 		t.Fatalf("refund error: %v", err)
 	}
 
+	// Test PayFee
+	_, err = rig.beta().PayFee(alphaAddress, 1e8, tDCR)
+	if err != nil {
+		t.Fatalf("error paying fees: %v", err)
+	}
+
 	// Lock the wallet
 	err = rig.beta().Lock()
 	if err != nil {

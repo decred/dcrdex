@@ -187,6 +187,7 @@ type ExchangeWallet struct {
 	changeMtx   sync.RWMutex
 	tradeChange map[string]time.Time
 	tipChange   func(error)
+	started     chan struct{}
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -258,6 +259,7 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 		log:         logger,
 		tradeChange: make(map[string]time.Time),
 		tipChange:   cfg.TipChange,
+		started:     make(chan struct{}),
 	}
 
 	return wallet
@@ -267,6 +269,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // Connect connects the wallet to the RPC server.
 func (btc *ExchangeWallet) Connect() error {
+	<-btc.started
 	go btc.run(btc.ctx)
 	return nil
 }
@@ -274,6 +277,7 @@ func (btc *ExchangeWallet) Connect() error {
 // Run stores the wallet context and waits for cancellation.
 func (btc *ExchangeWallet) Run(ctx context.Context) {
 	btc.ctx = ctx
+	close(btc.started)
 	<-ctx.Done()
 }
 
@@ -851,15 +855,15 @@ func (btc *ExchangeWallet) Address() (string, error) {
 }
 
 // PayFee pays the registration fee to the DEX.
-func (btc *ExchangeWallet) PayFee(fee uint64, address string, _ *dex.Asset) (asset.Coin, error) {
+func (btc *ExchangeWallet) PayFee(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
 	txHash, err := btc.wallet.SendToAddress(address, fee)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SendToAddress error: %v", err)
 	}
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
 		btc.log.Errorf("error getting transaction for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction"+
+		return nil, fmt.Errorf("fee appears to have been paid, but transaction "+
 			"could not be retreived: %v", err)
 	}
 	var vout uint32
@@ -872,7 +876,7 @@ func (btc *ExchangeWallet) PayFee(fee uint64, address string, _ *dex.Asset) (ass
 	}
 	if !found {
 		btc.log.Errorf("error getting transaction vout for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction"+
+		return nil, fmt.Errorf("fee appears to have been paid, but transaction "+
 			"index could not be found: %v", err)
 	}
 	return newOutput(btc.node, txHash, vout, fee, nil), nil

@@ -1198,3 +1198,59 @@ func TestLockUnlock(t *testing.T) {
 		t.Fatalf("no error for walletlock rpc error")
 	}
 }
+
+func TestPayFee(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+	addr := tP2PKHAddr
+	fee := float64(1) // BTC
+	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2PKHAddr)
+	node.rawRes[methodSendToAddress] = mustMarshal(t, tTxID)
+	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{
+		Details: []*WalletTxDetails{
+			{
+				Address:  tP2PKHAddr,
+				Category: TxCatReceive,
+				Vout:     1,
+				Amount:   fee,
+			},
+		},
+	})
+
+	unspents := []*ListUnspentResult{&ListUnspentResult{
+		TxID:          tTxID,
+		Address:       "1Bggq7Vu5oaoLFV1NNp5KhAzcku83qQhgi",
+		Amount:        100e8,
+		Confirmations: 1,
+		Vout:          1,
+		ScriptPubKey:  tP2PKH,
+	}}
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+
+	_, err := wallet.PayFee(addr, toSatoshi(fee), tBTC)
+	if err != nil {
+		t.Fatalf("PayFee error: %v", err)
+	}
+
+	// SendToAddress error
+	node.rawErr[methodSendToAddress] = tErr
+	_, err = wallet.PayFee(addr, 1e8, tBTC)
+	if err == nil {
+		t.Fatalf("no error for bad address: %v", err)
+	}
+	node.rawErr[methodSendToAddress] = nil
+
+	// GetTransaction error
+	node.rawErr[methodGetTransaction] = tErr
+	_, err = wallet.PayFee(addr, 1e8, tBTC)
+	if err == nil {
+		t.Fatalf("no error for gettransaction error: %v", err)
+	}
+	node.rawErr[methodGetTransaction] = nil
+
+	// good again
+	_, err = wallet.PayFee(addr, toSatoshi(fee), tBTC)
+	if err != nil {
+		t.Fatalf("PayFee error afterwards: %v", err)
+	}
+}

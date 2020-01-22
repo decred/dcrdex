@@ -193,6 +193,7 @@ type ExchangeWallet struct {
 	changeMtx   sync.RWMutex
 	tradeChange map[string]time.Time
 	tipChange   func(error)
+	started     chan struct{}
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -232,6 +233,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, logger dex.Logger) *ExchangeWall
 		acct:        cfg.Account,
 		tradeChange: make(map[string]time.Time),
 		tipChange:   cfg.TipChange,
+		started:     make(chan struct{}),
 	}
 }
 
@@ -263,6 +265,7 @@ func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 
 // Connect connects the wallet to the RPC server.
 func (dcr *ExchangeWallet) Connect() error {
+	<-dcr.started
 	err := dcr.client.Connect(dcr.ctx, true)
 	if err != nil {
 		return fmt.Errorf("Decred Wallet connect error: %v", err)
@@ -284,6 +287,7 @@ func (dcr *ExchangeWallet) Connect() error {
 // shutdown.
 func (dcr *ExchangeWallet) Run(ctx context.Context) {
 	dcr.ctx = ctx
+	close(dcr.started)
 	<-ctx.Done()
 	dcr.shutdown()
 }
@@ -522,7 +526,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 	}
 	pkScript, err := txscript.PayToAddrScript(redeemAddr)
 	if err != nil {
-		return fmt.Errorf("error creating change script: %v", err)
+		return fmt.Errorf("error creating redemption script for address '%s': %v", redeemAddr, err)
 	}
 	txOut := wire.NewTxOut(int64(totalIn-fee), pkScript)
 	// One last check for dust.
@@ -838,7 +842,7 @@ func (dcr *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
 	}
 	pkScript, err := txscript.PayToAddrScript(refundAddr)
 	if err != nil {
-		return fmt.Errorf("error creating change script: %v", err)
+		return fmt.Errorf("error creating refund script for address '%s': %v", refundAddr, err)
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
 	// One last check for dust.
@@ -889,7 +893,7 @@ func (dcr *ExchangeWallet) Lock() error {
 }
 
 // PayFee pays the registration fee to the DEX.
-func (dcr *ExchangeWallet) PayFee(fee uint64, address string, nfo *dex.Asset) (asset.Coin, error) {
+func (dcr *ExchangeWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (asset.Coin, error) {
 	addr, err := dcrutil.DecodeAddress(address, chainParams)
 	if err != nil {
 		return nil, err
@@ -1072,7 +1076,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 	}
 	changeScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
-		return nil, fmt.Errorf("error creating change script: %v", err)
+		return nil, fmt.Errorf("error creating change script for address '%s': %v", addr, err)
 	}
 	changeIdx := len(baseTx.TxOut)
 	changeOutput := wire.NewTxOut(int64(remaining-minFee), changeScript)

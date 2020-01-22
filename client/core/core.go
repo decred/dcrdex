@@ -388,7 +388,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		return fmt.Errorf("zero registration fees not supported"), nil
 	}
 	// Pay the registration fee.
-	coin, err := wallet.PayFee(regRes.Fee, regRes.Address, regAsset)
+	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, regAsset)
 	if err != nil {
 		return fmt.Errorf("error paying registration fee: %v", err), nil
 	}

@@ -153,6 +153,7 @@ func newTRPCClient() *tRPCClient {
 		mainchain:     make(map[int64]*chainhash.Hash),
 		bestHash:      chainhash.Hash{},
 		bestBlockHash: &chainhash.Hash{},
+		signFunc:      func(tx *wire.MsgTx) (*wire.MsgTx, bool, error) { return tx, true, nil },
 	}
 }
 
@@ -1083,5 +1084,45 @@ func TestRefund(t *testing.T) {
 	err = wallet.Refund(receipt, tDCR)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
+	}
+}
+
+func TestPayFee(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+	addr := tPKHAddr.String()
+	node.changeAddr = tPKHAddr
+
+	node.unspent = []walletjson.ListUnspentResult{walletjson.ListUnspentResult{
+		TxID:          tTxID,
+		Address:       tPKHAddr.String(),
+		Amount:        100e8,
+		Confirmations: 5,
+		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+	}}
+
+	_, err := wallet.PayFee(addr, 1e8, tDCR)
+	if err != nil {
+		t.Fatalf("PayFee error: %v", err)
+	}
+
+	// invalid address
+	_, err = wallet.PayFee("badaddr", 1e8, tDCR)
+	if err == nil {
+		t.Fatalf("no error for bad address: %v", err)
+	}
+
+	// GetRawChangeAddress error
+	node.changeAddrErr = tErr
+	_, err = wallet.PayFee(addr, 1e8, tDCR)
+	if err == nil {
+		t.Fatalf("no error for rawchangeaddress: %v", err)
+	}
+	node.changeAddrErr = nil
+
+	// good again
+	_, err = wallet.PayFee(addr, 1e8, tDCR)
+	if err != nil {
+		t.Fatalf("PayFee error afterwards: %v", err)
 	}
 }
