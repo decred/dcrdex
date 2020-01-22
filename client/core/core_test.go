@@ -17,7 +17,6 @@ import (
 	dexbtc "decred.org/dcrdex/dex/btc"
 	dexdcr "decred.org/dcrdex/dex/dcr"
 	"decred.org/dcrdex/dex/encode"
-	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	dexorder "decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
@@ -49,7 +48,7 @@ var (
 	}
 	tDexPriv *secp256k1.PrivateKey
 	tDexKey  *secp256k1.PublicKey
-	tPW      = []byte("dexpw")
+	tPW      = "dexpw"
 	tDexUrl  = "somedex.tld"
 	tErr     = fmt.Errorf("test error")
 )
@@ -87,7 +86,7 @@ func newTWebsocket() *TWebsocket {
 
 func tNewAccount() *dexAccount {
 	privKey, _ := secp256k1.GeneratePrivateKey()
-	secretKey, _ := encrypt.NewSecretKey(&tPW)
+	secretKey, _ := KeyFromPassword(tPW)
 	encPW, _ := secretKey.Encrypt(privKey.Serialize())
 	return &dexAccount{
 		url:       tDexUrl,
@@ -639,7 +638,7 @@ func TestRegister(t *testing.T) {
 
 	form := &Registration{
 		DEX:      tDexUrl,
-		Password: string(tPW),
+		Password: tPW,
 	}
 
 	tWallet.payFeeCoin = &tCoin{id: []byte("abcdef")}

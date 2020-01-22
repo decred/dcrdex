@@ -19,11 +19,23 @@ import (
 	"decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
-	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	srvacct "decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
+
+// Encrypter is a placeholder until proper symmetric encryption algorithm is
+// chosen. This iinitial
+type Encrypter struct{}
+
+// KeyFromPassword derives an encryption key from a password string.
+func KeyFromPassword(pw string) (*Encrypter, error) { return &Encrypter{}, nil }
+
+// Encrypt encrypts the message.
+func (e *Encrypter) Encrypt(b []byte) ([]byte, error) { return b, nil }
+
+// Decrypt decrypts the ciphertext created by Encrypt.
+func (e *Encrypter) Decrypt(b []byte) ([]byte, error) { return b, nil }
 
 var (
 	// log is a logger generated with the LogMaker provided with Config.
@@ -297,8 +309,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	}
 
 	// Create an encryption key.
-	pw := []byte(form.Password)
-	secretKey, err := encrypt.NewSecretKey(&pw)
+	secretKey, err := KeyFromPassword(form.Password)
 	if err != nil {
 		return fmt.Errorf("error creating encryption key: %v", err), nil
 	}
