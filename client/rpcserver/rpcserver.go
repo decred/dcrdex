@@ -185,8 +185,12 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 
 // handleJSON handles all https json requests.
 func (s *RPCServer) handleJSON(w http.ResponseWriter, r *http.Request) {
+	// All http routes are available over websocket too, so do not support
+	// persistent http connections. Inform the user and close the connection
+	// when response handling is completed.
 	w.Header().Set("Connection", "close")
 	w.Header().Set("Content-Type", "application/json")
+	r.Close = true
 
 	msg := s.parseHTTPRequest(r)
 	writeJSON(w, msg)
