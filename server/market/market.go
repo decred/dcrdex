@@ -34,6 +34,8 @@ const (
 	ErrInvalidOrder           = Error("order failed validation")
 	ErrEpochMissed            = Error("order unexpectedly missed its intended epoch")
 	ErrDuplicateOrder         = Error("order already in epoch")
+	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
+	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
 	ErrMalformedOrderResponse = Error("malformed order response")
 	ErrInternalServer         = Error("internal server error")
 )
@@ -269,6 +271,28 @@ func (m *Market) Cancelable(oid order.OrderID) bool {
 	return false
 }
 
+// CancelableBy determines if an order is cancelable by a certain account. This
+// means: (1) an order in the book or epoch queue, (2) type limit with
+// time-in-force standing (implied for book orders), and (3) AccountID field
+// matching the provided account ID.
+func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) bool {
+	// All book orders are standing limit orders.
+	if lo := m.book.Order(oid); lo != nil {
+		return lo.AccountID == aid
+	}
+
+	// Check the active epochs (includes current and next).
+	m.epochMtx.RLock()
+	ord := m.epochOrders[oid]
+	m.epochMtx.RUnlock()
+
+	switch o := ord.(type) {
+	case *order.LimitOrder:
+		return o.Force == order.StandingTiF && o.AccountID == aid
+	}
+	return false
+}
+
 func (m *Market) notifyNewOrder(ctx context.Context, order order.Order, action bookUpdateAction, eidx int64) {
 	// send to each receiver
 	m.orderFeedMtx.RLock()
@@ -283,12 +307,6 @@ func (m *Market) notifyNewOrder(ctx context.Context, order order.Order, action b
 		case s <- &bookUpdateSignal{action, order, eidx}:
 		}
 	}
-}
-
-// Cancel the active epoch, signalling to the clients that their orders have
-// failed due to server shutdown.
-func (m *Market) cancelEpoch() {
-	//TODO
 }
 
 // Book retrieves the market's current order book.
@@ -476,13 +494,35 @@ func (m *Market) unlockOrderCoins(o order.Order) {
 // 5. Respond to the client that placed the order.
 // 6. Notify epoch queue event subscribers.
 func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *EpochQueue, errChan chan<- error) error {
-	// Verify that the order is not already in the epoch queue
+	// Verify that an order with the same ID is not already in the epoch queue.
 	ord := rec.order
 	if epoch.Orders[ord.ID()] != nil {
-		// TODO: remove this check when we are sure the order router is behaving
 		log.Errorf("Received duplicate order %v!", ord)
 		errChan <- ErrDuplicateOrder
 		return nil
+	}
+	// TODO: also check the commitment is not reused
+
+	// Verify that another cancel order targeting the same order is not already
+	// in the epoch queue. Market and limit orders using the same coin IDs as
+	// other orders is prevented by the coinlocker.
+	if co, ok := ord.(*order.CancelOrder); ok {
+		if eco := epoch.CancelTargets[co.TargetOrderID]; eco != nil {
+			log.Debugf("Received cancel order %v targeting %v, but already have %v.",
+				co, co.TargetOrderID, eco)
+			errChan <- ErrDuplicateCancelOrder
+			return nil
+		}
+
+		// Verify that the target order is on the books or in the epoch queue,
+		// and that the account of the CancelOrder is the same as the account of
+		// the target order.
+		if !m.CancelableBy(co.TargetOrderID, co.AccountID) {
+			log.Debugf("Cancel order %v (account=%v) does not own target order %v.",
+				co, co.AccountID, co.TargetOrderID)
+			errChan <- ErrInvalidCancelOrder
+			return nil
+		}
 	}
 
 	// Sign the order and prepare the client response. Only after the archiver

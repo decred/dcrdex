@@ -17,17 +17,20 @@ type EpochQueue struct {
 	Start, End time.Time
 	// Orders holds the epoch queue orders in a map for quick lookups.
 	Orders map[order.OrderID]order.Order
+	// CancelTargets maps known targeted order IDs with the CancelOrder
+	CancelTargets map[order.OrderID]*order.CancelOrder
 }
 
 // NewEpoch creates an epoch with the given index and duration in milliseconds.
 func NewEpoch(idx int64, duration int64) *EpochQueue {
 	startTime := encode.UnixTimeMilli(idx * duration)
 	return &EpochQueue{
-		Epoch:    idx,
-		Duration: duration,
-		Start:    startTime,
-		End:      startTime.Add(time.Duration(duration) * time.Millisecond),
-		Orders:   make(map[order.OrderID]order.Order),
+		Epoch:         idx,
+		Duration:      duration,
+		Start:         startTime,
+		End:           startTime.Add(time.Duration(duration) * time.Millisecond),
+		Orders:        make(map[order.OrderID]order.Order),
+		CancelTargets: make(map[order.OrderID]*order.CancelOrder),
 	}
 }
 
@@ -43,6 +46,9 @@ func (eq *EpochQueue) OrderSlice() []order.Order {
 // Stores an order in the Order slice, overwriting and pre-existing order.
 func (eq *EpochQueue) Insert(ord order.Order) {
 	eq.Orders[ord.ID()] = ord
+	if co, ok := ord.(*order.CancelOrder); ok {
+		eq.CancelTargets[co.TargetOrderID] = co
+	}
 }
 
 // IncludesTime checks if the given time falls in the epoch.

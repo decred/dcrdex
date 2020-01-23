@@ -203,13 +203,12 @@ func TestMarket_runEpochs(t *testing.T) {
 	// queues (or not) incoming orders.
 
 	// Create the market.
-	mkt, _, cleanup, err := newTestMarket()
+	mkt, storage, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 		cleanup()
 		return
 	}
-	t.Log(mkt.marketInfo.Name)
 	epochDurationMSec := int64(mkt.EpochDuration())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -266,18 +265,6 @@ func TestMarket_runEpochs(t *testing.T) {
 	}
 	lo := newLimit()
 
-	// w := &test.Writer{
-	// 	Addr: limit.Address,
-	// 	Acct: aid,
-	// 	Sell: true,
-	// 	Market: &test.Market{
-	// 		Base:    assetDCR.ID,
-	// 		Quote:   assetBTC.ID,
-	// 		LotSize: assetDCR.LotSize,
-	// 	},
-	// }
-	// test.WriteLimitOrder(w, limit.Rate, lots, order.StandingTiF, 0 /* ! */)
-
 	oRecord := orderRecord{
 		msgID: 1,
 		req:   limit,
@@ -301,40 +288,91 @@ func TestMarket_runEpochs(t *testing.T) {
 		t.Error(err)
 	}
 
-	//let the epoch cycle
-	time.Sleep(time.Duration(epochDurationMSec)*time.Millisecond + time.Duration(epochDurationMSec/20))
+	// Let the epoch cycle.
+	time.Sleep(time.Duration(epochDurationMSec+epochDurationMSec/20) * time.Millisecond)
 
-	cancel()
-	wg.Wait()
-	cleanup()
-
-	// Test duplicate order with a new Market.
-	mkt, storage, cleanup, err := newTestMarket()
-	if err != nil {
-		t.Fatalf("newTestMarket failure: %v", err)
-	}
-	ctx, cancel = context.WithCancel(context.Background())
-	startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		mkt.Start(ctx, startEpochIdx)
-	}()
-	mkt.waitForEpochOpen()
-
-	err = mkt.SubmitOrder(&oRecord)
-	if err != nil {
-		t.Error(err)
+	// Submit a valid cancel order.
+	loID := lo.ID()
+	cancelTime := encode.UnixMilli(time.Now())
+	cancelMsg := &msgjson.CancelOrder{
+		Prefix: msgjson.Prefix{
+			AccountID:  aid[:],
+			Base:       dcrID,
+			Quote:      btcID,
+			OrderType:  msgjson.CancelOrderNum,
+			ClientTime: uint64(cancelTime),
+		},
+		TargetID: loID[:],
 	}
 
-	err = mkt.SubmitOrder(&oRecord)
+	newCancel := func() *order.CancelOrder {
+		return &order.CancelOrder{
+			P: order.Prefix{
+				AccountID:  aid,
+				BaseAsset:  limit.Base,
+				QuoteAsset: limit.Quote,
+				OrderType:  order.CancelOrderType,
+				ClientTime: encode.UnixTimeMilli(cancelTime),
+			},
+			TargetOrderID: loID,
+		}
+	}
+	co := newCancel()
+
+	coRecord := orderRecord{
+		msgID: 1,
+		req:   cancelMsg,
+		order: co,
+	}
+
+	// Cancel order w/o permission to cancel target order (the limit order from
+	// above that is now booked)
+	cancelTime++
+	otherAccount := test.NextAccount()
+	cancelMsg.ClientTime = uint64(cancelTime)
+	cancelMsg.AccountID = otherAccount[:]
+	coWrongAccount := newCancel()
+	coWrongAccount.AccountID = otherAccount
+	coWrongAccount.ClientTime = encode.UnixTimeMilli(cancelTime)
+	coRecordWrongAccount := orderRecord{
+		msgID: 1,
+		req:   cancelMsg,
+		order: coWrongAccount,
+	}
+
+	// Submit the invalid cancel order first because it would be caught by the
+	// duplicate check if we do it after the valid one is submitted.
+	err = mkt.SubmitOrder(&coRecordWrongAccount)
 	if err == nil {
-		t.Errorf("A duplicate order was processed, but it should not have been.")
-	} else if !errors.Is(err, ErrDuplicateOrder) {
-		t.Errorf(`expected ErrDuplicateOrder ("%v"), got "%v"`, ErrDuplicateOrder, err)
+		t.Errorf("An invalid order was processed, but it should not have been.")
+	} else if !errors.Is(err, ErrInvalidCancelOrder) {
+		t.Errorf(`expected ErrInvalidCancelOrder ("%v"), got "%v"`, ErrInvalidCancelOrder, err)
 	}
 
-	// Send an order with a bad lot size.
+	// Valid the cancel order.
+	err = mkt.SubmitOrder(&coRecord)
+	if err != nil {
+		t.Errorf("Failed to submit order: %v", err)
+	}
+
+	// duplicate cancel order
+	cancelTime++
+	cancelMsg.ClientTime = uint64(cancelTime)
+	coDup := newCancel()
+	coDup.ClientTime = encode.UnixTimeMilli(cancelTime)
+	coRecordDup := orderRecord{
+		msgID: 1,
+		req:   cancelMsg,
+		order: coDup,
+	}
+	err = mkt.SubmitOrder(&coRecordDup)
+	if err == nil {
+		t.Errorf("An duplicate cancel order was processed, but it should not have been.")
+	} else if !errors.Is(err, ErrDuplicateCancelOrder) {
+		t.Errorf(`expected ErrDuplicateCancelOrder ("%v"), got "%v"`, ErrDuplicateCancelOrder, err)
+	}
+
+	// order with a bad lot size
 	lo = newLimit()
 	lo.Quantity += mkt.marketInfo.LotSize / 2
 	oRecord.order = lo
@@ -344,7 +382,6 @@ func TestMarket_runEpochs(t *testing.T) {
 	} else if !errors.Is(err, ErrInvalidOrder) {
 		t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
 	}
-	t.Log(err)
 
 	// Submit an order that breaks storage somehow.
 	// tweak the order so it's not a dup.

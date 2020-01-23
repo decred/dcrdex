@@ -122,9 +122,20 @@ func (b *Book) Remove(oid order.OrderID) (*order.LimitOrder, bool) {
 
 // HaveOrder checks if an order is in either the buy or sell side of the book.
 func (b *Book) HaveOrder(oid order.OrderID) bool {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
 	return b.buys.HaveOrder(oid) || b.sells.HaveOrder(oid)
+}
+
+// Order attempts to retrieve an order from either the buy or sell side of the
+// book. If the order data is not required, consider using HaveOrder.
+func (b *Book) Order(oid order.OrderID) *order.LimitOrder {
+	b.mtx.RLock()
+	defer b.mtx.RUnlock()
+	if lo := b.buys.Order(oid); lo != nil {
+		return lo
+	}
+	return b.sells.Order(oid)
 }
 
 // SellOrders copies out all sell orders in the book, sorted.
