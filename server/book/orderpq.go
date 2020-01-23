@@ -441,6 +441,16 @@ func (pq *OrderPQ) HaveOrder(oid order.OrderID) bool {
 	return pq.orders[oid] != nil
 }
 
+// Order retrieves any existing order in the queue with the given ID.
+func (pq *OrderPQ) Order(oid order.OrderID) *order.LimitOrder {
+	pq.mtx.Lock()
+	defer pq.mtx.Unlock()
+	if oe := pq.orders[oid]; oe != nil {
+		return oe.order
+	}
+	return nil
+}
+
 // removeOrder removes the specified orderEntry from the queue. This function is
 // NOT thread-safe.
 func (pq *OrderPQ) removeOrder(o *orderEntry) (*order.LimitOrder, bool) {
