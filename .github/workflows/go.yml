@@ -20,13 +20,9 @@ jobs:
         env:
           GO111MODULE: "on"
         run: go build ./...
-      - name: Lint
+      - name: Test
         env:
           GO111MODULE: "on"
         run: |
           export PATH=${PATH}:$(go env GOPATH)/bin
-          golangci-lint run --disable-all --deadline=10m --enable=goimports --enable=gosimple --enable=unconvert --enable=ineffassign --enable=govet --enable=structcheck
-      - name: Test
-        env:
-          GO111MODULE: "on"
-        run: go test -v -short ./...
+          ./run_tests.sh
