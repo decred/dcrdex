@@ -201,7 +201,7 @@ func (wc *walletClient) Lock() error {
 // SendToAddress sends the amount to the address.
 func (wc *walletClient) SendToAddress(address string, amount uint64) (*chainhash.Hash, error) {
 	var txid string
-	err := wc.call(methodSendToAddress, anylist{address, amount / 1e8}, &txid)
+	err := wc.call(methodSendToAddress, anylist{address, float64(amount) / 1e8}, &txid)
 	if err != nil {
 		return nil, err
 	}
