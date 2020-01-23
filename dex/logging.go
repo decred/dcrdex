@@ -10,7 +10,7 @@ import (
 	"github.com/decred/slog"
 )
 
-// Many dcrdex types will take a logger as an argument.
+// Logger is a logger. Many dcrdex types will take a logger as an argument.
 type Logger = slog.Logger
 
 // LoggerMaker allows creation of new log subsystems with predefined levels.
@@ -21,12 +21,12 @@ type LoggerMaker struct {
 }
 
 // NewLoggerMaker parses the debug level string into a new *LoggerMaker. The
-// debugLevel string can specify a single verbosity for the entire system: "trace",
-// "debug", "info", "warn", "error", "critical", "off".
+// debugLevel string can specify a single verbosity for the entire system:
+// "trace", "debug", "info", "warn", "error", "critical", "off".
 //
-// Or the verbosity can be specified for individual subsystems, separating each
-// system by commas and assigning each specifically, A command line might look
-// like `--degublevel=CORE=debug,SWAP=trace`.
+// Or the verbosity can be specified for individual subsystems, separating
+// subsystems by commas and assigning each specifically, A command line might
+// look like `--degublevel=CORE=debug,SWAP=trace`.
 func NewLoggerMaker(be *slog.Backend, debugLevel string) (*LoggerMaker, error) {
 	lm := &LoggerMaker{
 		Backend:      be,
@@ -77,7 +77,7 @@ func NewLoggerMaker(be *slog.Backend, debugLevel string) (*LoggerMaker, error) {
 // the parent does not have an explicitly set level.
 func (lm *LoggerMaker) SubLogger(parent, name string) Logger {
 	logger := lm.Backend.Logger(fmt.Sprintf("%s[%s]", parent, name))
-	logger.SetLevel(lm.bestLevel(name))
+	logger.SetLevel(lm.bestLevel(parent, name))
 	return logger
 }
 
@@ -94,9 +94,9 @@ func (lm *LoggerMaker) NewLogger(name string, level ...slog.Level) Logger {
 	return logger
 }
 
-// Logger creates a logger with the provided name, using the log level for that name
-// if it was set, otherwise the default log level. This differs from NewLogger, which
-// does not look in the Level map for the name.
+// Logger creates a logger with the provided name, using the log level for that
+// name if it was set, otherwise the default log level. This differs from
+// NewLogger, which does not look in the Level map for the name.
 func (lm *LoggerMaker) Logger(name string) Logger {
 	logger := lm.Backend.Logger(name)
 	logger.SetLevel(lm.bestLevel(name))
@@ -104,7 +104,8 @@ func (lm *LoggerMaker) Logger(name string) Logger {
 }
 
 // bestLevel takes a hierarchical list of logger names, least important to most
-// important, and returns the best log level found in the Levels map, else the default.
+// important, and returns the best log level found in the Levels map, else the
+// default.
 func (lm *LoggerMaker) bestLevel(lvls ...string) slog.Level {
 	lvl := lm.DefaultLevel
 	for _, l := range lvls {

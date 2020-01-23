@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -125,7 +124,6 @@ func TestMain(m *testing.M) {
 	doIt := func() int {
 		// Not counted as coverage, must test Archiver constructor explicitly.
 		defer shutdown()
-		fmt.Println("--a.0", tCtx)
 		return m.Run()
 	}
 	os.Exit(doIt())
@@ -334,11 +332,11 @@ func TestWallet(t *testing.T) {
 		t.Fatalf("refund error: %v", err)
 	}
 
-	// // Test PayFee
-	// _, err = rig.gamma().PayFee(alphaAddress, 1e8, tBTC)
-	// if err != nil {
-	// 	t.Fatalf("error paying fees: %v", err)
-	// }
+	// Test PayFee
+	_, err = rig.gamma().PayFee(alphaAddress, 1e8, tBTC)
+	if err != nil {
+		t.Fatalf("error paying fees: %v", err)
+	}
 
 	// Lock the wallet
 	err = rig.gamma().Lock()

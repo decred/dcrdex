@@ -518,7 +518,7 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 		dexCoin, err := assets.funding.Backend.Coin(coin.ID, coin.Redeem)
 		if err != nil {
 			return errSet(msgjson.FundingError,
-				fmt.Sprintf("error retreiving coin %x", coin.ID))
+				fmt.Sprintf("error retrieving coin %x", coin.ID))
 		}
 		// Make sure the UTXO has the requisite number of confirmations.
 		confs, err := dexCoin.Confirmations()

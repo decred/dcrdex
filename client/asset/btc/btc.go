@@ -195,7 +195,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet. The wallet will shut down when the provided context is
-// cancelled. The configPath can be an empty string, in which case the standard
+// canceled. The configPath can be an empty string, in which case the standard
 // system location of the bitcoind config file is assumed.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var params *chaincfg.Params
@@ -267,14 +267,16 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
-// Connect connects the wallet to the RPC server.
+// Connect connects the wallet to the RPC server. Run must be called before
+// Connect.
 func (btc *ExchangeWallet) Connect() error {
 	<-btc.started
 	go btc.run(btc.ctx)
 	return nil
 }
 
-// Run stores the wallet context and waits for cancellation.
+// Run stores the wallet context, waits for cancellation. Calling Run more than
+// once will result in a panic.
 func (btc *ExchangeWallet) Run(ctx context.Context) {
 	btc.ctx = ctx
 	close(btc.started)
@@ -679,7 +681,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		// verbose transaction and check each input's previous outpoint.
 		txs, err := btc.node.GetRawMempool()
 		if err != nil {
-			return nil, fmt.Errorf("error retreiving mempool transactions")
+			return nil, fmt.Errorf("error retrieve mempool transactions")
 		}
 		for _, txHash := range txs {
 			tx, err := btc.node.GetRawTransactionVerbose(txHash)
@@ -717,7 +719,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("redemption search cancelled")
+			return nil, fmt.Errorf("redemption search canceled")
 		default:
 		}
 		block, err := btc.getVerboseBlockTxs(blockHash.String())
@@ -864,12 +866,12 @@ func (btc *ExchangeWallet) PayFee(address string, fee uint64, _ *dex.Asset) (ass
 	if err != nil {
 		btc.log.Errorf("error getting transaction for successful fee: %v", err)
 		return nil, fmt.Errorf("fee appears to have been paid, but transaction "+
-			"could not be retreived: %v", err)
+			"could not be retrieved: %v", err)
 	}
 	var vout uint32
 	var found bool
 	for _, details := range tx.Details {
-		if toSatoshi(details.Amount) == fee && details.Address == address {
+		if toSatoshi(-details.Amount) == fee && details.Address == address {
 			found = true
 			vout = details.Vout
 		}

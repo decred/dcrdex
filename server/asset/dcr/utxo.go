@@ -113,7 +113,7 @@ func (utxo *UTXO) Confirmations() (int64, error) {
 		if mainchainBlock != nil && !utxo.scriptType.IsStake() {
 			nextBlock, err := dcr.getMainchainDcrBlock(utxo.height + 1)
 			if err != nil {
-				return -1, fmt.Errorf("error retreiving approving block for utxo %s:%d: %v", utxo.tx.hash, utxo.vout, err)
+				return -1, fmt.Errorf("error retrieving approving block for utxo %s:%d: %v", utxo.tx.hash, utxo.vout, err)
 			}
 			if nextBlock != nil && !nextBlock.vote {
 				return -1, fmt.Errorf("utxo's block has been voted as invalid")

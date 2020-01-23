@@ -46,7 +46,7 @@ type Signer interface {
 	PubKey() *secp256k1.PublicKey
 }
 
-// FeeChecker is a function for retreiving the details for a fee payment. It
+// FeeChecker is a function for retrieving the details for a fee payment. It
 // is satisfied by (dcr.Backend).UnspentCoinDetails.
 type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
 
@@ -125,7 +125,7 @@ type AuthManager struct {
 // Config is the configuration settings for the AuthManager, and the only
 // argument to its constructor.
 type Config struct {
-	// Storage is an interface for storing and retreiving account-related info.
+	// Storage is an interface for storing and retrieving account-related info.
 	Storage Storage
 	// Signer is an interface that signs messages. In practice, Signer is
 	// satisfied by a secp256k1.PrivateKey.

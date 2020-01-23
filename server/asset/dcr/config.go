@@ -45,7 +45,7 @@ type DCRConfig struct {
 	// RPCCert is the filepath to the dcrd TLS certificate. If it is not
 	// provided, the default dcrd location will be assumed.
 	RPCCert string `long:"rpccert" description:"File containing the certificate file"`
-	// Context should be cancelled when the program exits. This will cause some
+	// Context should be canceled when the program exits. This will cause some
 	// cleanup to be performed during shutdown.
 	Context context.Context
 }

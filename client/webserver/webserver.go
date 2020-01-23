@@ -40,7 +40,16 @@ const (
 	authCV = "authctx"
 )
 
-var log slog.Logger
+var (
+	log slog.Logger
+	// updateWalletRoute is a notification route that updates the state of a
+	// wallet.
+	updateWalletRoute = "update_wallet"
+	// errMsgRoute is used to send a simple error message .
+	errorMsgRoute = "error_message"
+	// successMsgRoute is used to send a simple success message.
+	successMsgRoute = "success_message"
+)
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {

@@ -28,8 +28,8 @@ type Settings struct {
 	TimeoutErr *msgjson.Error
 }
 
-// NewSettings is a constructor for a waitSettings with a timeout and a
-// standardized error message.
+// NewSettings is a constructor for a SEttings with a timeout and a standard
+// error message.
 func NewSettings(user account.AccountID, msg *msgjson.Message, coinID []byte, txWaitExpiration time.Duration) *Settings {
 	return &Settings{
 		// must smarten up this expiration value before merge. Where should this
@@ -45,7 +45,7 @@ func NewSettings(user account.AccountID, msg *msgjson.Message, coinID []byte, tx
 }
 
 // A waitFunc is a function that is repeated periodically until a boolean
-// true is returned, or the expiration time is surpassed. In the latter case a
+// true is returned or the expiration time is surpassed. In the latter case a
 // timeout error is sent to the client.
 type waitFunc struct {
 	params *Settings
@@ -73,10 +73,10 @@ func New(recheckInterval time.Duration, sender Sender) *Waiter {
 }
 
 // waitMempool attempts to run the passed function. If the function returns
-// the value dontTryAgain, nothing else is done. If the function returns the
-// value tryAgain, the function is queued to run on an interval until it returns
-// dontTryAgain, or until an expiration time is exceeded, as specified in the
-// waitSettings.
+// the value DontTryAgain, nothing else is done. If the function returns the
+// value TryAgain, the function is queued to run on an interval until it returns
+// DontTryAgain, or until an expiration time is exceeded, as specified in the
+// Settings.
 func (w *Waiter) Wait(params *Settings, f func() bool) {
 	if time.Now().After(params.Expiration) {
 		log.Error("Swapper.waitMempool: waitSettings given expiration before present")
@@ -91,7 +91,7 @@ func (w *Waiter) Wait(params *Settings, f func() bool) {
 	w.waiterMtx.Unlock()
 }
 
-// Run runs the waiter loop until the context is canceled.
+// Run runs the primary wait loop until the context is canceled.
 func (w *Waiter) Run(ctx context.Context) {
 	// The latencyTicker triggers a check of all waitFunc functions.
 	latencyTicker := time.NewTicker(w.recheckInterval)

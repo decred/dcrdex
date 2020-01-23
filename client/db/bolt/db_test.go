@@ -344,7 +344,7 @@ func TestOrders(t *testing.T) {
 	tStart = time.Now()
 	sinceOrders, err := boltdb.AccountOrders(acct1.URL, 0, tMid)
 	if err != nil {
-		t.Fatalf("error retreiving account's since orders: %v", err)
+		t.Fatalf("error retrieve account's since orders: %v", err)
 	}
 	if len(sinceOrders) != numToDo/4 {
 		t.Fatalf("expected %d orders for account with since time, got %d", numToDo/4, len(sinceOrders))
@@ -369,7 +369,7 @@ func TestOrders(t *testing.T) {
 	tStart = time.Now()
 	sinceOrders, err = boltdb.MarketOrders(acct1.URL, base1, quote1, 0, tMid)
 	if err != nil {
-		t.Fatalf("error retreiving market's since orders: %v", err)
+		t.Fatalf("error retrieving market's since orders: %v", err)
 	}
 	if len(sinceOrders) != numToDo/4 {
 		t.Fatalf("expected %d orders for market with since time, got %d", numToDo/4, len(sinceOrders))

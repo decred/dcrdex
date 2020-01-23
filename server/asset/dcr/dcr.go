@@ -86,7 +86,7 @@ type Backend struct {
 var _ asset.Backend = (*Backend)(nil)
 
 // NewBackend is the exported constructor by which the DEX will import the
-// Backend. The provided context.Context should be cancelled when the DEX
+// Backend. The provided context.Context should be canceled when the DEX
 // application exits. If configPath is an empty string, the backend will
 // attempt to read the settings directly from the dcrd config file in its
 // default system location.

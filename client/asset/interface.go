@@ -21,7 +21,7 @@ type WalletConfig struct {
 	// loop detects a new block. If the error supplied is nil, the client should
 	// check the confirmations on any negotiating swaps to see if action is
 	// needed. If the error is non-nil, the wallet monitoring loop encountered an
-	// error while retreiving tip information.
+	// error while retrieving tip information.
 	TipChange func(error)
 }
 

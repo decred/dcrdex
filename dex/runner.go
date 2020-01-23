@@ -45,7 +45,7 @@ func (ssw *StartStopWaiter) Stop() {
 	ssw.cancel()
 }
 
-// On will be true until the Runner Context is cancelled.
+// On will be true until the Runner Context is canceled.
 func (ssw *StartStopWaiter) On() bool {
 	return ssw.ctx.Err() == nil
 }

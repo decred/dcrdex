@@ -977,17 +977,9 @@ func TestHandleNotifyFee(t *testing.T) {
 	ensureErr(do(goodMsg), "AccountRegAddr", msgjson.RPCInternalError)
 	rig.storage.regErr = nil
 
-	// tCheckFeeErr = dummyError
-	// ensureErr(do(goodMsg), "checkFee", msgjson.FeeError)
-	// tCheckFeeErr = nil
-
 	tCheckFeeVal -= 1
 	ensureErr(doWaiter(goodMsg), "low fee", msgjson.FeeError)
 	tCheckFeeVal += 1
-
-	// tCheckFeeConfs -= 1
-	// ensureErr(doWaiter(goodMsg), "unconfirmed", msgjson.FeeError)
-	// tCheckFeeConfs += 1
 
 	ogAddr := tCheckFeeAddr
 	tCheckFeeAddr = "dummy address"

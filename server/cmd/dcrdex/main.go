@@ -108,7 +108,7 @@ func mainCore(ctx context.Context) error {
 }
 
 func main() {
-	// Create a context that is cancelled when a shutdown request is received
+	// Create a context that is canceled when a shutdown request is received
 	// via requestShutdown.
 	ctx := withShutdownCancel(context.Background())
 	// Listen for both interrupt signals (e.g. CTRL+C) and shutdown requests

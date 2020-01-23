@@ -129,7 +129,7 @@ func TestLiveUTXO(t *testing.T) {
 		for _, h := range hashes {
 			newTx, err := dcr.client.GetRawTransaction(h)
 			if err != nil {
-				t.Fatalf("error retreiving MsgTx: %v", err)
+				t.Fatalf("error retrieving MsgTx: %v", err)
 				outTxs = append(outTxs, newTx.MsgTx())
 			}
 		}
@@ -297,7 +297,7 @@ func TestLiveUTXO(t *testing.T) {
 		prevHash = bestHash
 		tipHeight = currentHeight
 		if err != nil {
-			t.Fatalf("error retreiving best block: %v", err)
+			t.Fatalf("error retrieving best block: %v", err)
 		}
 		refreshMempool()
 		if scanUtxos(0, mempool) {
@@ -342,7 +342,7 @@ func TestCacheAdvantage(t *testing.T) {
 	client := dcr.client
 	nextHash, _, err := client.GetBestBlock()
 	if err != nil {
-		t.Fatalf("error retreiving best block info")
+		t.Fatalf("error retrieving best block info")
 	}
 	numBlocks := 10000
 	blocks := make([]*chainjson.GetBlockVerboseResult, 0, numBlocks)
@@ -388,7 +388,7 @@ func TestCacheAdvantage(t *testing.T) {
 		}
 		_ = b
 	}
-	t.Logf("%d cached blocks retreived in %.3f ms", numBlocks, float64(time.Since(start).Nanoseconds())/1e6)
+	t.Logf("%d cached blocks retrieved in %.3f ms", numBlocks, float64(time.Since(start).Nanoseconds())/1e6)
 }
 
 // TestBlockMonitor is a live test that connects to dcrd and listens for block

@@ -693,7 +693,7 @@ func loadTradeFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (order
 		}, status, nil
 
 	}
-	return nil, 0, fmt.Errorf("unknown order type %d retreived", prefix.OrderType)
+	return nil, 0, fmt.Errorf("unknown order type %d retrieved", prefix.OrderType)
 }
 
 func userOrders(ctx context.Context, dbe *sql.DB, dbName, marketSchema string, aid account.AccountID) ([]order.Order, []pgOrderStatus, error) {

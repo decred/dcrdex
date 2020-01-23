@@ -201,7 +201,7 @@ func MustCompareOrderProof(t testKiller, p1, p2 *db.OrderProof) {
 	}
 }
 
-// MustCompareWallets esnures the two Wallet are identical, calling the Fatalf
+// MustCompareWallets ensures the two Wallet are identical, calling the Fatalf
 // method of the testKiller if not.
 func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 	if w1.AssetID != w2.AssetID {

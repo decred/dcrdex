@@ -992,7 +992,7 @@ func TestRespReq(t *testing.T) {
 	// ResponsePayload
 	_, err = msg.Response()
 	if err == nil {
-		t.Fatalf("no error when retreiving response payload from request-type message")
+		t.Fatalf("no error when retrieving response payload from request-type message")
 	}
 
 	// Test Notifications

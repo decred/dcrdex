@@ -108,7 +108,7 @@ func randBytes(l int) []byte {
 }
 
 func waitNetwork() {
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 3 / 2)
 }
 
 func TestMain(m *testing.M) {

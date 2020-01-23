@@ -201,7 +201,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet. The wallet will shut down when the provided context is
-// cancelled.
+// canceled.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
@@ -263,7 +263,8 @@ func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 	return cl, nil
 }
 
-// Connect connects the wallet to the RPC server.
+// Connect connects the wallet to the RPC server. Run must be called before
+// Connect.
 func (dcr *ExchangeWallet) Connect() error {
 	<-dcr.started
 	err := dcr.client.Connect(dcr.ctx, true)
@@ -284,7 +285,7 @@ func (dcr *ExchangeWallet) Connect() error {
 }
 
 // Run stores the wallet context, waits for cancellation, and performs a clean
-// shutdown.
+// shutdown. Calling Run more than once will result in a panic.
 func (dcr *ExchangeWallet) Run(ctx context.Context) {
 	dcr.ctx = ctx
 	close(dcr.started)
@@ -704,7 +705,7 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		// verbose transaction and check each input's previous outpoint.
 		txs, err := dcr.node.GetRawMempool(chainjson.GRMAll)
 		if err != nil {
-			return nil, fmt.Errorf("error retreiving mempool transactions")
+			return nil, fmt.Errorf("error retrieve mempool transactions")
 		}
 		for _, txHash := range txs {
 			tx, err := dcr.node.GetRawTransactionVerbose(txHash)
@@ -741,7 +742,7 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("redemption search cancelled")
+			return nil, fmt.Errorf("redemption search canceled")
 		default:
 		}
 		block, err := dcr.node.GetBlockVerbose(blockHash, true)

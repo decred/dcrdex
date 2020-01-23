@@ -344,7 +344,7 @@ func LiveFeeRates(btc *Backend, t *testing.T, standards map[string]uint64) {
 		}
 		tx, err := btc.transaction(txHash, verboseTx)
 		if err != nil {
-			t.Fatalf("error retreiving transaction %s", txid)
+			t.Fatalf("error retrieving transaction %s", txid)
 		}
 		if tx.feeRate != expRate {
 			t.Fatalf("unexpected fee rate for %s. expected %d, got %d", txid, expRate, tx.feeRate)

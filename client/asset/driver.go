@@ -12,7 +12,7 @@ var (
 	drivers    = make(map[uint32]Driver)
 )
 
-// Driver is the interface required of all exchange wallets..
+// Driver is the interface required of all exchange wallets.
 type Driver interface {
 	Setup(*WalletConfig, dex.Logger, dex.Network) (Wallet, error)
 }

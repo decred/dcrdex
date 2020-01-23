@@ -24,7 +24,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
-// Encrypter is a placeholder until proper symmetric encryption algorithm is
+// Encrypter is a placeholder until a proper symmetric encryption algorithm is
 // chosen. This iinitial
 type Encrypter struct{}
 
@@ -65,7 +65,9 @@ type dexConnection struct {
 }
 
 // coinWaiter is a message waiting to be stamped, signed, and sent once a
-// specified coin has the requisite confirmations.
+// specified coin has the requisite confirmations. This type is similar to
+// dcrdex/server/coinwaiter.Waiter, but is different enough to warrant a
+// separate type.
 type coinWaiter struct {
 	conn    *dexConnection
 	coin    asset.Coin
@@ -92,7 +94,8 @@ type Config struct {
 	Net dex.Network
 }
 
-// Core is the core client application.
+// Core is the core client application. Core manages DEX connections, wallets,
+// database access, match negotiation and more.
 type Core struct {
 	ctx         context.Context
 	wg          sync.WaitGroup
@@ -144,7 +147,7 @@ func (c *Core) Run(ctx context.Context) {
 	log.Infof("DEX client core off")
 }
 
-// Markets returns a slice of known markets.
+// Markets returns a map of known markets.
 func (c *Core) Markets() map[string][]*Market {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
@@ -265,7 +268,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 }
 
 // WalletStatus returns 1) whether the wallet exists, 2) if it's currently
-// running, and 3) whether it's currently open.
+// running, and 3) whether it's currently open (unlocked).
 func (c *Core) WalletStatus(assetID uint32) (has, running, open bool) {
 	c.walletMtx.Lock()
 	defer c.walletMtx.Unlock()
@@ -278,7 +281,7 @@ func (c *Core) WalletStatus(assetID uint32) (has, running, open bool) {
 	return
 }
 
-// OpenWallet opens the wallet for use.
+// OpenWallet opens (unlocks) the wallet for use.
 func (c *Core) OpenWallet(assetID uint32, pw string) error {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
@@ -530,11 +533,11 @@ func (c *Core) Balance(uint32) (uint64, error) {
 }
 
 // initialize pulls the known DEX URLs from the database and attempts to
-// connect and retreive the DEX configuration.
+// connect and retrieve the DEX configuration.
 func (c *Core) initialize() {
 	accts, err := c.db.Accounts()
 	if err != nil {
-		log.Errorf("Error retreiving accounts from database: %v", err)
+		log.Errorf("Error retrieve accounts from database: %v", err)
 	}
 	var wg sync.WaitGroup
 	for _, acct := range accts {
@@ -548,6 +551,7 @@ func (c *Core) initialize() {
 			wg.Done()
 		}()
 	}
+	// If there were accounts, wait until they are loaded and log a messsage.
 	if len(accts) > 0 {
 		go func() {
 			wg.Wait()

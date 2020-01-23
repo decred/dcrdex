@@ -1212,7 +1212,7 @@ func TestPayFee(t *testing.T) {
 				Address:  tP2PKHAddr,
 				Category: TxCatReceive,
 				Vout:     1,
-				Amount:   fee,
+				Amount:   -fee,
 			},
 		},
 	})
@@ -1220,7 +1220,7 @@ func TestPayFee(t *testing.T) {
 	unspents := []*ListUnspentResult{&ListUnspentResult{
 		TxID:          tTxID,
 		Address:       "1Bggq7Vu5oaoLFV1NNp5KhAzcku83qQhgi",
-		Amount:        100e8,
+		Amount:        100,
 		Confirmations: 1,
 		Vout:          1,
 		ScriptPubKey:  tP2PKH,
@@ -1236,7 +1236,7 @@ func TestPayFee(t *testing.T) {
 	node.rawErr[methodSendToAddress] = tErr
 	_, err = wallet.PayFee(addr, 1e8, tBTC)
 	if err == nil {
-		t.Fatalf("no error for bad address: %v", err)
+		t.Fatalf("no error for SendToAddress error: %v", err)
 	}
 	node.rawErr[methodSendToAddress] = nil
 
