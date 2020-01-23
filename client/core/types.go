@@ -71,8 +71,8 @@ func (w *xcWallet) unlocked() bool {
 
 // connected is true if the wallet has already been connected.
 func (w *xcWallet) connected() bool {
-	w.mtx.Lock()
-	defer w.mtx.Unlock()
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
 	return w.hookedUp
 }
 
@@ -82,8 +82,8 @@ func (w *xcWallet) Connect() error {
 	if err != nil {
 		return err
 	}
-	w.mtx.RLock()
-	defer w.mtx.RUnlock()
+	w.mtx.Lock()
+	defer w.mtx.Unlock()
 	w.hookedUp = true
 	return nil
 }

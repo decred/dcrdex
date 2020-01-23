@@ -39,8 +39,6 @@ const (
 	defaultRPCHost             = "127.0.0.1"
 	defaultRPCPort             = "7232"
 
-	// NOTE: If we are not using an asset variable here, we need to add this to
-	// the config response and update the spec.
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
 	defaultBroadcastTimeout = 10 * time.Second

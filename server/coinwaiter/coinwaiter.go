@@ -28,7 +28,7 @@ type Settings struct {
 	TimeoutErr *msgjson.Error
 }
 
-// NewSettings is a constructor for a SEttings with a timeout and a standard
+// NewSettings is a constructor for a Settings with a timeout and a standard
 // error message.
 func NewSettings(user account.AccountID, msg *msgjson.Message, coinID []byte, txWaitExpiration time.Duration) *Settings {
 	return &Settings{
