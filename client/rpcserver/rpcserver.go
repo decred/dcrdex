@@ -192,8 +192,23 @@ func (s *RPCServer) handleJSON(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	r.Close = true
 
-	msg := s.parseHTTPRequest(r)
-	writeJSON(w, msg)
+	body, err := ioutil.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		http.Error(w, "error reading request body", http.StatusBadRequest)
+		return
+	}
+	req := new(msgjson.Message)
+	err = json.Unmarshal(body, req)
+	if err != nil {
+		http.Error(w, "JSON decode error", http.StatusUnprocessableEntity)
+		return
+	}
+	if req.Type != msgjson.Request {
+		http.Error(w, "Responses not accepted", http.StatusMethodNotAllowed)
+		return
+	}
+	s.parseHTTPRequest(w, req)
 }
 
 // Config holds variables neede to create a new RPC Server.
@@ -351,47 +366,14 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 
 // parseHTTPRequest parses the msgjson message in the request body and creates a
 // response message.
-func (s *RPCServer) parseHTTPRequest(r *http.Request) *msgjson.Message {
-	msg := &msgjson.Message{Type: msgjson.Response}
-	payload := new(msgjson.ResponsePayload)
-
-	defer func() {
-		// Encode payload to bytes and append to the msg.
-		encodedPayload, err := json.Marshal(payload)
-		if err != nil {
-			err := fmt.Errorf("unable to encode payload: %v", err)
-			panic(err)
-		}
-		msg.Payload = encodedPayload
-	}()
-
-	// Read the request.
-	body, err := ioutil.ReadAll(r.Body)
-	r.Body.Close()
+func (s *RPCServer) parseHTTPRequest(w http.ResponseWriter, req *msgjson.Message) {
+	payload := s.handleRequest(req)
+	resp, err := msgjson.NewResponse(req.ID, payload.Result, payload.Error)
 	if err != nil {
-		log.Debugf("Error reading request body: %v", err)
-		payload.Error = msgjson.NewError(msgjson.RPCParseError, "unable to parse request")
-		return msg
+		http.Error(w, "error encoding response", http.StatusInternalServerError)
+		return
 	}
-	req := new(msgjson.Message)
-	err = json.Unmarshal(body, req)
-	if err != nil {
-		log.Debugf("failed to unmarshal JSON request: %v", err)
-		payload.Error = msgjson.NewError(msgjson.RPCParseError, "unable to parse request")
-		return msg
-	}
-	log.Tracef("message received for route: %s", req.Route)
-
-	// Send back the same ID.
-	msg.ID = req.ID
-	if req.Type != msgjson.Request {
-		log.Debugf("wrong type: %d", req.Type)
-		errMsg := fmt.Sprintf("wrong or unknown message type specified, must be %d for requests", msgjson.Request)
-		payload.Error = msgjson.NewError(msgjson.UnknownMessageType, errMsg)
-		return msg
-	}
-	payload = s.handleRequest(req)
-	return msg
+	writeJSON(w, resp)
 }
 
 // authMiddleware checks incoming requests for authentication.
