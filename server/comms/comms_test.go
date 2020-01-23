@@ -80,7 +80,10 @@ func (conn *wsConnStub) ReadMessage() (int, []byte, error) {
 	return 0, b, nil
 }
 
-var writeErr = ""
+var (
+	writeErr    string
+	writeErrMtx sync.Mutex
+)
 
 func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
 	testMtx.Lock()
@@ -94,6 +97,8 @@ func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
 	}
 	conn.lastMsg = msg
 	conn.write++
+	writeErrMtx.Lock()
+	defer writeErrMtx.Unlock()
 	if writeErr == "" {
 		return nil
 	}
@@ -317,7 +322,9 @@ func TestClientRequests(t *testing.T) {
 
 	// Send the invalid message again, but error out on the server's WriteMessage
 	// attempt. The server should disconnect the client in this case.
+	writeErrMtx.Lock()
 	writeErr = "basic error"
+	writeErrMtx.Unlock()
 	ensureReplaceFails(`{"a":"b"}`, "?")
 	if clientOn() {
 		t.Fatalf("client connected after WriteMessage error")
@@ -353,7 +360,9 @@ func TestClientRequests(t *testing.T) {
 
 	// Again, but with an WriteMessage error when sending error to client. This
 	// should result in a disconnection.
+	writeErrMtx.Lock()
 	writeErr = "basic error"
+	writeErrMtx.Unlock()
 	sendToServer("nonexistent", "{}")
 	if clientOn() {
 		t.Fatalf("client still connected after WriteMessage error for invalid method")
