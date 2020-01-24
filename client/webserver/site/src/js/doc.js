@@ -1,4 +1,6 @@
-var parser = new window.DOMParser()
+const parser = new window.DOMParser()
+
+const FPS = 60
 
 // Helpers for working with the DOM.
 export default class Doc {
@@ -27,4 +29,40 @@ export default class Doc {
   static empty (el) {
     while (el.firstChild) el.removeChild(el.firstChild)
   }
+
+  static hide (el) {
+    el.classList.add('d-hide')
+  }
+
+  static show (el) {
+    el.classList.remove('d-hide')
+  }
+
+  static async animate (duration, f, easingAlgo) {
+    const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
+    // key is a string referencing any property of Meter.data.
+    const start = new Date().getTime()
+    const end = start + duration
+    const range = end - start
+    const frameDuration = 1000 / FPS
+    var now = start
+    while (now < end) {
+      f(easer((now - start) / range))
+      await sleep(frameDuration)
+      now = new Date().getTime()
+    }
+    f(1)
+  }
+}
+
+var Easing = {
+  linear: t => t,
+  easeIn: t => t * t,
+  easeOut: t => t * (2 - t),
+  easeInHard: t => t * t * t,
+  easeOutHard: t => (--t) * t * t + 1
+}
+
+function sleep (ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }

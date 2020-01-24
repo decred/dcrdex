@@ -29,10 +29,12 @@ var (
 // Bolt works on []byte keys and values. These are some commonly used key and
 // value encodings.
 var (
+	appBucket      = []byte("appBucket")
 	accountsBucket = []byte("accounts")
 	ordersBucket   = []byte("orders")
 	matchesBucket  = []byte("matches")
 	walletsBucket  = []byte("wallets")
+	encKeyKey      = []byte("enckey")
 	feeProofKey    = []byte("feecoin")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
@@ -71,13 +73,41 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 		DB: db,
 	}
 
-	return bdb, bdb.makeTopLevelBuckets([][]byte{accountsBucket, ordersBucket, matchesBucket, walletsBucket})
+	return bdb, bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket,
+		ordersBucket, matchesBucket, walletsBucket})
 }
 
 // Run waits for context cancellation and closes the database.
 func (db *boltDB) Run(ctx context.Context) {
 	<-ctx.Done()
 	db.Close()
+}
+
+// StoreEncryptedKey stores the encrypted key.
+func (db *boltDB) StoreEncryptedKey(k []byte) error {
+	return db.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists(appBucket)
+		if err != nil {
+			return fmt.Errorf("failed to create key bucket")
+		}
+		return bucket.Put(encKeyKey, k)
+	})
+}
+
+// EncryptedKey retrieves the currently stored encrypted key.
+func (db *boltDB) EncryptedKey() ([]byte, error) {
+	var encKey []byte
+	return encKey, db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(appBucket)
+		if bucket == nil {
+			return fmt.Errorf("app bucket not found")
+		}
+		encKey = bucket.Get(encKeyKey)
+		if encKey == nil {
+			return fmt.Errorf("no key found")
+		}
+		return nil
+	})
 }
 
 // ListAccounts returns a list of DEX URLs. The DB is designed to have a single

@@ -60,7 +60,7 @@ func TestWsConn(t *testing.T) {
 
 	pingWait := time.Millisecond * 200
 
-	var wsc *WsConn
+	var wsc *wsConn
 
 	id := uint64(0)
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -183,12 +183,13 @@ func TestWsConn(t *testing.T) {
 		URL:      "wss://" + host + "/ws",
 		PingWait: pingWait,
 		RpcCert:  certFile.Name(),
-		Ctx:      ctx,
 	}
-	wsc, err = NewWsConn(cfg)
+	conn, err := NewWsConn(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+	wsc = conn.(*wsConn)
+	wsc.Connect(ctx)
 
 	go func() {
 		wsc.WaitForShutdown()
@@ -384,10 +385,14 @@ func TestFailingConnection(t *testing.T) {
 		URL:      "wss://" + host + "/ws",
 		PingWait: pingWait,
 		RpcCert:  certFile.Name(),
-		Ctx:      ctx,
 	}
 	// Initial connection will fail immediately
-	wsc, err := NewWsConn(cfg)
+	conn, err := NewWsConn(cfg)
+	if err != nil {
+		t.Fatalf("constructor error: %v", err)
+	}
+	wsc := conn.(*wsConn)
+	err = wsc.Connect(ctx)
 	if err == nil {
 		t.Fatal("no error for non-existent server")
 	}

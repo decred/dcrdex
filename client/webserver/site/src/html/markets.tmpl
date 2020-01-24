@@ -15,14 +15,18 @@
       {{end}}
     {{end}}
   </div>
+
+  {{- /* RIGHT COLUMN */ -}}
   <div class="d-flex flex-column flex-grow-1">
 
     {{- /* CHART */ -}}
-    <div id="marketchart" class="w-100">
-      <div id="marketloader" class="fill-abs flex-center">
+    <div id="marketChart" class="w-100">
+      <div id="marketLoader" class="fill-abs flex-center">
         <div class="ico-spinner spinner"></div>
       </div>
     </div>
+
+    {{- /* ORDERS */ -}}
     <div id="orders" class="overflow-auto w-100 d-flex flex-grow-1 bg1">
       <div class="col-14 d-flex justify-content-around align-items-stretch p-0">
 
@@ -41,7 +45,7 @@
             {{end}}
             <tbody id="buyRows">
               {{- /* This row is used by the app as a template. */ -}}
-              <tr id="orderRow">
+              <tr id="rowTemplate">
                 <td class="text-left pl-2" data-type="qty">-</td>
                 <td class="text-right pr-2" data-type="rate">-</td>
                 <td class="text-right pr-3" data-type="epoch"></td>
@@ -56,7 +60,7 @@
             <button id="limitBttn" type="button" class="flex-center px-2 py-0 markettab brdrleft selected">Limit Order</button>
             <button id="marketBttn" type="button" class="flex-center px-2 py-0 markettab brdrleft brdrright">Market Order</button>
           </div>
-          <form id="orderform" class="px-5 bg1">
+          <form id="orderForm" class="px-5 bg1">
             <div class="market-bal px-3 py-2 my-4 position-relative">
               <span class="mktbalancelbl">Balances</span>
               <div class="d-flex mt-1 fs15 justify-content-between">

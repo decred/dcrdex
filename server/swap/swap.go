@@ -656,14 +656,8 @@ type messageAcker struct {
 // processAck processes a single msgjson.AcknowledgementResult, validating the
 // signature and updating the (order.Match).Sigs record.
 func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
-	var ack msgjson.Acknowledgement
-	resp, err := msg.Response()
-	if err != nil {
-		s.respondError(msg.ID, acker.user, msgjson.RPCParseError,
-			fmt.Sprintf("error parsing audit notification result: %v", err))
-		return
-	}
-	err = json.Unmarshal(resp.Result, &ack)
+	ack := new(msgjson.Acknowledgement)
+	err := msg.UnmarshalResult(ack)
 	if err != nil {
 		s.respondError(msg.ID, acker.user, msgjson.RPCParseError,
 			fmt.Sprintf("error parsing audit notification acknowledgment: %v", err))
@@ -1070,13 +1064,7 @@ func newMatchAckers(match *matchTracker) (*messageAcker, *messageAcker) {
 // an array of signatures, one for each match sent.
 func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message, matches []*messageAcker) {
 	var acks []msgjson.Acknowledgement
-	resp, err := msg.Response()
-	if err != nil {
-		s.respondError(msg.ID, user, msgjson.RPCParseError,
-			fmt.Sprintf("error parsing match acknowledgment response: %v", err))
-		return
-	}
-	err = json.Unmarshal(resp.Result, &acks)
+	err := msg.UnmarshalResult(&acks)
 	if err != nil {
 		s.respondError(msg.ID, user, msgjson.RPCParseError,
 			fmt.Sprintf("error parsing match notification acknowledgment: %v", err))

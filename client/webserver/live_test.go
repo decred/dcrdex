@@ -19,10 +19,16 @@ import (
 	"github.com/decred/slog"
 )
 
-func mkMrkt(base, quote string) core.Market {
+var maxDelay = time.Second * 2
+
+func randomDelay() {
+	time.Sleep(time.Duration(rand.Float64() * float64(maxDelay)))
+}
+
+func mkMrkt(base, quote string) *core.Market {
 	baseID, _ := dex.BipSymbolID(base)
 	quoteID, _ := dex.BipSymbolID(quote)
-	return core.Market{
+	return &core.Market{
 		BaseID:      baseID,
 		BaseSymbol:  base,
 		QuoteID:     quoteID,
@@ -30,26 +36,40 @@ func mkMrkt(base, quote string) core.Market {
 	}
 }
 
-var tMarkets = []*core.MarketInfo{
-	{
-		DEX:     "https://somedex.com",
-		Markets: []core.Market{mkMrkt("dcr", "btc"), mkMrkt("dcr", "ltc"), mkMrkt("doge", "mona")},
+var tMarkets = map[string][]*core.Market{
+	"https://somedex.com": []*core.Market{
+		mkMrkt("dcr", "btc"), mkMrkt("dcr", "ltc"), mkMrkt("doge", "mona"),
 	},
-	{
-		DEX:     "https://thisdexwithalongname.com",
-		Markets: []core.Market{mkMrkt("dcr", "vtc"), mkMrkt("btc", "ltc"), mkMrkt("mona", "ltc")},
+	"https://thisdexwithalongname.com": []*core.Market{
+		mkMrkt("dcr", "vtc"), mkMrkt("btc", "ltc"), mkMrkt("mona", "ltc"),
 	},
 }
 
 type TCore struct {
-	reg *core.Registration
+	reg     *core.Registration
+	inited  bool
+	has     bool
+	running bool
+	open    bool
 }
 
-func (c *TCore) Register(r *core.Registration) error {
-	c.reg = r
+func (c *TCore) Markets() map[string][]*core.Market { return tMarkets }
+
+func (c *TCore) InitializeClient(pw string) error {
+	randomDelay()
+	c.inited = true
 	return nil
 }
-func (c *TCore) Login(dex, pw string) error { return nil }
+func (c *TCore) PreRegister(dex string) (uint64, error) { return 1e8, nil }
+
+func (c *TCore) Register(r *core.Registration) (error, <-chan error) {
+	randomDelay()
+	c.reg = r
+	errChan := make(chan error, 1)
+	errChan <- nil
+	return nil, errChan
+}
+func (c *TCore) Login(pw string) error { return nil }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return make(chan *core.BookUpdate), nil
@@ -108,24 +128,51 @@ func (c *TCore) Balance(uint32) (uint64, error) {
 }
 
 func (c *TCore) WalletStatus(assetID uint32) (has, running, open bool) {
-	has = rand.Float32() > 0.33
-	if has {
-		open = rand.Float32() > 0.5
-		running = open
-	}
-	return
+	return c.has, c.running, c.open
 }
-func (c *TCore) CreateWallet(form *core.WalletForm) error   { return nil }
-func (c *TCore) OpenWallet(assetID uint32, pw string) error { return nil }
+
+func (c *TCore) CreateWallet(form *core.WalletForm) error {
+	randomDelay()
+	c.has = true
+	c.running = true
+	c.open = true
+	return nil
+}
+
+func (c *TCore) OpenWallet(assetID uint32, pw string) error {
+	return nil
+}
+
 func (c *TCore) Wallets() []*core.WalletStatus {
-	return []*core.WalletStatus{
-		{
-			Symbol:  "dcr",
-			AssetID: 42,
-			Open:    true,
-			Running: true,
-		},
+	if c.has {
+		return []*core.WalletStatus{
+			{
+				Symbol:  "dcr",
+				AssetID: 42,
+				Open:    true,
+				Running: true,
+			},
+		}
 	}
+	return nil
+}
+
+func (c *TCore) User() *core.User {
+	user := &core.User{
+		Markets:     tMarkets,
+		Initialized: c.inited,
+	}
+	if c.has {
+		user.Wallets = []*core.WalletStatus{
+			{
+				Symbol:  "dcr",
+				AssetID: 42,
+				Open:    true,
+				Running: true,
+			},
+		}
+	}
+	return user
 }
 
 func TestServer(t *testing.T) {

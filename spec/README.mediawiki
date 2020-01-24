@@ -93,6 +93,7 @@ for the DEX API.
 
 * [[comm.mediawiki/#Encoding|Data Encodings]]
 * [[comm.mediawiki/#Message_Protocol|Message Protocol]]
+* [[comm.mediawiki/#Session_Authentication|Session Authentication]]
 
 '''&#91;2&#93; [[fundamentals.mediawiki|Distributed Exchange Design Fundamentals]]'''
 describes the notable design aspects that facilitate an exchange service with

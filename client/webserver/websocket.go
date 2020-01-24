@@ -110,6 +110,16 @@ func (s *WebServer) notify(route string, payload interface{}) {
 	}
 }
 
+func (s *WebServer) notifyWalletUpdate(assetID uint32, on, open bool) {
+	walletUpdate := &core.WalletStatus{
+		Symbol:  unbip(assetID),
+		AssetID: assetID,
+		Running: on,
+		Open:    open,
+	}
+	s.notify(updateWalletRoute, walletUpdate)
+}
+
 // handleMessage handles the websocket message, calling the right handler for
 // the route.
 func (s *WebServer) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson.Error {

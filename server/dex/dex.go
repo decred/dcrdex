@@ -134,6 +134,7 @@ func newConfigResponse(cfg *DexConf, cfgAssets []msgjson.Asset, cfgMarkets []msg
 		RegFeeConfirms:   uint16(cfg.RegFeeConfirms),
 		Assets:           cfgAssets,
 		Markets:          cfgMarkets,
+		Fee:              cfg.RegFeeAmount,
 	}
 
 	encResult, err := json.Marshal(configMsg)

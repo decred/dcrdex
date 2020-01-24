@@ -4,12 +4,18 @@
 package core
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encrypt"
+	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
@@ -23,15 +29,16 @@ type WalletForm struct {
 // WalletStatus is the current status of an exchange wallet.
 type WalletStatus struct {
 	Symbol  string `json:"symbol"`
-	AssetID uint32 `json:"asset"`
+	AssetID uint32 `json:"assetID"`
 	Open    bool   `json:"open"`
 	Running bool   `json:"running"`
 }
 
 // User is information about the user's wallets and DEX accounts.
 type User struct {
-	Accounts map[string][]*Market `json:"accounts"`
-	Wallets  []*WalletStatus      `json:"wallets"`
+	Markets     map[string][]*Market `json:"markets"`
+	Wallets     []*WalletStatus      `json:"wallets"`
+	Initialized bool                 `json:"inited"`
 }
 
 // xcWallet is a wallet.
@@ -45,7 +52,7 @@ type xcWallet struct {
 }
 
 // Unlock unlocks the wallet.
-func (w *xcWallet) unlock(pw string, dur time.Duration) error {
+func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 	err := w.Wallet.Unlock(pw, dur)
 	if err != nil {
 		return err
@@ -92,12 +99,6 @@ func (w *xcWallet) Connect() error {
 type Registration struct {
 	DEX      string
 	Password string
-}
-
-// MarketInfo contains information about the markets for a DEX server.
-type MarketInfo struct {
-	DEX     string            `json:"dex"`
-	Markets map[string]Market `json:"markets"`
 }
 
 // Market is market info.
@@ -150,7 +151,155 @@ type BookUpdate struct {
 type dexAccount struct {
 	url       string
 	encKey    []byte
+	keyMtx    sync.RWMutex
 	privKey   *secp256k1.PrivateKey
+	id        account.AccountID
 	dexPubKey *secp256k1.PublicKey
 	feeCoin   []byte
+	authMtx   sync.RWMutex
+	isAuthed  bool
+}
+
+// newDEXAccount is a constructor for a new *dexAccount.
+func newDEXAccount(url string, encKey []byte, dexPubKey *secp256k1.PublicKey) *dexAccount {
+	return &dexAccount{
+		url:       url,
+		encKey:    encKey,
+		dexPubKey: dexPubKey,
+	}
+}
+
+// ID returns the account ID.
+func (a *dexAccount) ID() account.AccountID {
+	a.keyMtx.RLock()
+	defer a.keyMtx.RUnlock()
+	return a.id
+}
+
+// unlock decrypts the account private key.
+func (a *dexAccount) unlock(crypter encrypt.Crypter) error {
+	keyB, err := crypter.Decrypt(a.encKey)
+	if err != nil {
+		return err
+	}
+	privKey, pubKey := secp256k1.PrivKeyFromBytes(keyB)
+	a.keyMtx.Lock()
+	a.privKey = privKey
+	a.id = account.NewID(pubKey.SerializeCompressed())
+	a.keyMtx.Unlock()
+	return nil
+}
+
+// lock clears the account private key.
+func (a *dexAccount) lock() {
+	a.keyMtx.Lock()
+	a.privKey = nil
+	a.keyMtx.Unlock()
+}
+
+// locked will be true if the account private key is currently decrypted.
+func (a *dexAccount) locked() bool {
+	a.keyMtx.RLock()
+	defer a.keyMtx.RUnlock()
+	return a.privKey == nil
+}
+
+// authed will be true if the account has been authenticated i.e. the 'connect'
+// request has been succesfully sent.
+func (a *dexAccount) authed() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	return a.isAuthed
+}
+
+// auth sets the account as authenticated.
+func (a *dexAccount) auth() {
+	a.authMtx.Lock()
+	a.isAuthed = true
+	a.authMtx.Unlock()
+}
+
+// unauth sets the account as un-authenticated.
+func (a *dexAccount) unauth() {
+	a.authMtx.Lock()
+	a.isAuthed = false
+	a.authMtx.Unlock()
+}
+
+// sign uses the account private key to sign the message. If the account is
+// locked, an error will be returned.
+func (a *dexAccount) sign(msg []byte) ([]byte, error) {
+	a.keyMtx.RLock()
+	defer a.keyMtx.RUnlock()
+	if a.privKey == nil {
+		return nil, fmt.Errorf("account locked")
+	}
+	sig, err := a.privKey.Sign(msg)
+	if err != nil {
+		return nil, err
+	}
+	return sig.Serialize(), nil
+}
+
+// MatchUpdate will be delivered from the negotiation feed.
+type MatchUpdate struct{}
+
+// A Negotiation represents an active match negotiation.
+type Negotiation interface {
+	// Feed is a MatchUpdate channel. Feed always returns the same channel and
+	// does not support multiple clients. The channel will be closed when the
+	// Negotiation process has completed or encountered an unrecoverable error.
+	Feed() <-chan *MatchUpdate
+}
+
+// A matchNegotiator negotiates a match. matchNegotiator satisfies the
+// Negotiation interface.
+type matchNegotiator struct {
+	orderID  order.OrderID
+	matchID  order.MatchID
+	quantity uint64
+	rate     uint64
+	address  string
+	status   order.MatchStatus
+	side     order.MatchSide
+	update   chan *MatchUpdate
+}
+
+// negotiate creates a matchNegotiator and starts the negotiation thread.
+func negotiate(ctx context.Context, msgMatch *msgjson.Match) (*matchNegotiator, error) {
+	if len(msgMatch.OrderID) != order.OrderIDSize {
+		return nil, fmt.Errorf("order id of incorrect length. expected %d, got %d",
+			order.OrderIDSize, len(msgMatch.OrderID))
+	}
+	if len(msgMatch.MatchID) != order.MatchIDSize {
+		return nil, fmt.Errorf("match id of incorrect length. expected %d, got %d",
+			order.MatchIDSize, len(msgMatch.MatchID))
+	}
+	var oid order.OrderID
+	copy(oid[:], msgMatch.OrderID)
+	var mid order.MatchID
+	copy(mid[:], msgMatch.MatchID)
+	n := &matchNegotiator{
+		orderID:  oid,
+		matchID:  mid,
+		quantity: msgMatch.Quantity,
+		rate:     msgMatch.Rate,
+		address:  msgMatch.Address,
+		status:   order.MatchStatus(msgMatch.Status),
+		side:     order.MatchSide(msgMatch.Side),
+		update:   make(chan *MatchUpdate, 1),
+	}
+	go n.runMatch(ctx)
+	return n, nil
+}
+
+// Feed returns the MatchUpdate channel. Part of the Negotiator interface.
+func (m *matchNegotiator) Feed() <-chan *MatchUpdate {
+	return m.update
+}
+
+// runMatch is the match negotiation thread.
+func (m *matchNegotiator) runMatch(ctx context.Context) {
+	// do match stuff
+	<-ctx.Done()
 }

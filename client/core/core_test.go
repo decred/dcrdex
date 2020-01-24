@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/btc"
 	dexdcr "decred.org/dcrdex/dex/dcr"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	dexorder "decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
@@ -71,12 +73,13 @@ func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 }
 
 type TWebsocket struct {
-	mtx      sync.RWMutex
-	id       uint64
-	sendErr  error
-	reqErr   error
-	msgs     <-chan *msgjson.Message
-	handlers map[string][]func(*msgjson.Message, msgFunc) error
+	mtx        sync.RWMutex
+	id         uint64
+	sendErr    error
+	reqErr     error
+	connectErr error
+	msgs       <-chan *msgjson.Message
+	handlers   map[string][]func(*msgjson.Message, msgFunc) error
 }
 
 func newTWebsocket() *TWebsocket {
@@ -88,12 +91,11 @@ func newTWebsocket() *TWebsocket {
 
 func tNewAccount() *dexAccount {
 	privKey, _ := secp256k1.GeneratePrivateKey()
-	secretKey, _ := KeyFromPassword(tPW)
+	secretKey := encrypt.NewCrypter(tPW)
 	encPW, _ := secretKey.Encrypt(privKey.Serialize())
 	return &dexAccount{
 		url:       tDexUrl,
 		encKey:    encPW,
-		privKey:   privKey,
 		dexPubKey: tDexKey,
 		feeCoin:   []byte("somecoin"),
 	}
@@ -103,8 +105,8 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 	conn := newTWebsocket()
 	acct := tNewAccount()
 	return &dexConnection{
-		websocket: conn,
-		acct:      acct,
+		WsConn: conn,
+		acct:   acct,
 		assets: map[uint32]*dex.Asset{
 			tDCR.ID: tDCR,
 			tBTC.ID: tBTC,
@@ -174,11 +176,16 @@ func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.reqErr
 }
 func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
+func (conn *TWebsocket) Connect(context.Context) error          { return conn.connectErr }
+func (conn *TWebsocket) Close()                                 {}
 
 type TDB struct {
 	updateWalletErr error
 	acct            *db.AccountInfo
 	acctErr         error
+	encKeyErr       error
+	storeKeyErr     error
+	accts           []*db.AccountInfo
 }
 
 func (db *TDB) Run(context.Context) {}
@@ -188,7 +195,7 @@ func (db *TDB) ListAccounts() ([]string, error) {
 }
 
 func (db *TDB) Accounts() ([]*db.AccountInfo, error) {
-	return nil, nil
+	return db.accts, nil
 }
 
 func (db *TDB) Account(url string) (*db.AccountInfo, error) {
@@ -239,6 +246,14 @@ func (db *TDB) AccountPaid(proof *db.AccountProof) error {
 	return nil
 }
 
+func (db *TDB) StoreEncryptedKey([]byte) error {
+	return db.storeKeyErr
+}
+
+func (db *TDB) EncryptedKey() ([]byte, error) {
+	return nil, db.encKeyErr
+}
+
 type tCoin struct {
 	id       []byte
 	confs    uint32
@@ -278,7 +293,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 
 func (w *TXCWallet) Connect() error { return nil }
 
-func (w *TXCWallet) Run(context.Context) {}
+func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
 func (w *TXCWallet) Balance(*dex.Asset) (available, locked uint64, err error) {
 	return 0, 0, nil
@@ -379,6 +394,9 @@ func newTestRig() *testRig {
 			},
 			wallets: make(map[uint32]*xcWallet),
 			waiters: make(map[string]coinWaiter),
+			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
+				return conn, nil
+			},
 		},
 		db:      db,
 		ws:      conn,
@@ -682,10 +700,20 @@ func TestRegister(t *testing.T) {
 		}()
 	}
 
+	queueConnect := func() {
+		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
+			result := &msgjson.ConnectResult{}
+			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+			f(resp)
+			return nil
+		})
+	}
+
 	queueResponses := func() {
 		queueRegister()
 		queueTipChange()
 		queueNotifyFee()
+		queueConnect()
 	}
 
 	form := &Registration{
@@ -820,5 +848,153 @@ func TestRegister(t *testing.T) {
 	runWithWait()
 	if err != nil {
 		t.Fatalf("error after regaining valid state: %v", err)
+	}
+}
+
+func TestLogin(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	queueSuccess := func() {
+		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
+			result := &msgjson.ConnectResult{}
+			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+			f(resp)
+			return nil
+		})
+	}
+
+	queueSuccess()
+	_, err := tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("initial Login error: %v", err)
+	}
+
+	// No encryption key.
+	rig.acct.unauth()
+	rig.db.encKeyErr = tErr
+	_, err = tCore.Login(tPW)
+	if err == nil {
+		t.Fatalf("no error for missing app key")
+	}
+	rig.db.encKeyErr = nil
+
+	// 'connect' route error.
+	rig.acct.unauth()
+	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(1, "test error"))
+		f(resp)
+		return nil
+	})
+	_, err = tCore.Login(tPW)
+	if err == nil {
+		t.Fatalf("no error for 'connect' route error")
+	}
+
+	// Success again.
+	rig.acct.unauth()
+	queueSuccess()
+	_, err = tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("final Login error: %v", err)
+	}
+}
+
+func TestConnectDEX(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	ai := &db.AccountInfo{
+		URL: "https://somedex.com",
+	}
+
+	queueConfig := func() {
+		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+			result := &msgjson.ConfigResult{}
+			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+			f(resp)
+			return nil
+		})
+	}
+
+	queueConfig()
+	_, err := tCore.connectDEX(ai)
+	if err != nil {
+		t.Fatalf("initial connectDEX error: %v", err)
+	}
+
+	// Bad URL.
+	ai.URL = ":::"
+	_, err = tCore.connectDEX(ai)
+	if err == nil {
+		t.Fatalf("no error for bad URL")
+	}
+	ai.URL = "https://someotherdex.org"
+
+	// Constructor error.
+	ogConstructor := tCore.wsConstructor
+	tCore.wsConstructor = func(*comms.WsCfg) (comms.WsConn, error) {
+		return nil, tErr
+	}
+	_, err = tCore.connectDEX(ai)
+	if err == nil {
+		t.Fatalf("no error for WsConn constructor error")
+	}
+	tCore.wsConstructor = ogConstructor
+
+	// WsConn.Connect error.
+	rig.ws.connectErr = tErr
+	_, err = tCore.connectDEX(ai)
+	if err == nil {
+		t.Fatalf("no error for WsConn.Connect error")
+	}
+	rig.ws.connectErr = nil
+
+	// 'config' route error.
+	rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(1, "test error"))
+		f(resp)
+		return nil
+	})
+	_, err = tCore.connectDEX(ai)
+	if err == nil {
+		t.Fatalf("no error for 'config' route error")
+	}
+
+	// Success again.
+	queueConfig()
+	_, err = tCore.connectDEX(ai)
+	if err != nil {
+		t.Fatalf("final connectDEX error: %v", err)
+	}
+}
+
+func TestInitializeClient(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	err := tCore.InitializeClient(tPW)
+	if err != nil {
+		t.Fatalf("InitializeClient error: %v", err)
+	}
+
+	// Empty password.
+	err = tCore.InitializeClient("")
+	if err == nil {
+		t.Fatalf("no error for empty password")
+	}
+
+	// StoreEncryptedKey error
+	rig.db.storeKeyErr = tErr
+	err = tCore.InitializeClient("")
+	if err == nil {
+		t.Fatalf("no error for StoreEncryptedKey error")
+	}
+	rig.db.storeKeyErr = nil
+
+	// Success again
+	err = tCore.InitializeClient(tPW)
+	if err != nil {
+		t.Fatalf("final InitializeClient error: %v", err)
 	}
 }

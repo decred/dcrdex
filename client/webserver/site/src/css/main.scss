@@ -82,6 +82,7 @@ form.auth {
   width: 400px;
   border: 1px solid #222;
   border-radius: 3px;
+  position: relative;
 
   button {
     padding: 6px 0;
@@ -224,4 +225,18 @@ div.note:not(:last-child) {
 
 .sellcolor {
   color: $sellcolor_light;
+}
+
+.errcolor {
+  color: #e61c00;
+}
+
+hr.dashed {
+  border-top: 1px dashed #777;
+}
+
+.vscroll {
+  max-width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
 }

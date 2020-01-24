@@ -215,6 +215,8 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 			return coinwaiter.DontTryAgain
 		}
 
+		log.Info("new user registered")
+
 		// Create, sign, and send the the response.
 		err = auth.Sign(notifyFee)
 		if err != nil {
