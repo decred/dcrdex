@@ -217,8 +217,8 @@ type Config struct {
 	Addr, User, Pass, Cert, Key string
 }
 
-// SetLogger sets the logger for the RPCServer.
-func (s *RPCServer) SetLogger(logger slog.Logger) {
+// SetLogger sets the logger for the RPCServer package.
+func SetLogger(logger slog.Logger) {
 	log = logger
 }
 

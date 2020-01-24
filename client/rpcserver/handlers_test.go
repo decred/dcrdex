@@ -52,8 +52,7 @@ func TestCreateResponse(t *testing.T) {
 	for _, test := range tests {
 		payload := createResponse(test.op, &test.res, test.resErr)
 		if err := verifyResponse(payload, &test.res, test.wantErrCode); err != nil {
-			t.Error(err)
-			return
+			t.Fatal(err)
 		}
 
 	}
@@ -65,8 +64,7 @@ func TestHelp(t *testing.T) {
 	payload := handleHelp(nil, msg)
 	res := ""
 	if err := verifyResponse(payload, &res, 0); err != nil {
-		t.Error(err)
-		return
+		t.Fatal(err)
 	}
 }
 
@@ -74,7 +72,6 @@ func TestVersion(t *testing.T) {
 	payload := handleVersion(nil, msg)
 	res := &VersionResult{}
 	if err := verifyResponse(payload, res, 0); err != nil {
-		t.Error(err)
-		return
+		t.Fatal(err)
 	}
 }

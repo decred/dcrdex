@@ -139,7 +139,7 @@ func newTServer(t *testing.T, start bool) (*RPCServer, *TCore, context.CancelFun
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
-	s.SetLogger(tLogger)
+	SetLogger(tLogger)
 	if start {
 		go s.Run(ctx)
 	} else {
@@ -366,6 +366,24 @@ func TestParseHTTPRequest(t *testing.T) {
 			t.Fatalf("%s, wanted %d, got %d", name, wantCode, payload.Error.Code)
 		}
 	}
+	ensureNoErr := func(name string) {
+		w := &tResponseWriter{}
+		s.handleJSON(w, r)
+		if w.code != 200 {
+			t.Fatalf("HTTP error when expecting no error")
+		}
+		resp := new(msgjson.Message)
+		if err := json.Unmarshal(w.b, resp); err != nil {
+			t.Fatalf("unable to unmarshal response: %v", err)
+		}
+		payload := new(msgjson.ResponsePayload)
+		if err := json.Unmarshal(resp.Payload, payload); err != nil {
+			t.Fatalf("unable to unmarshal payload: %v", err)
+		}
+		if payload.Error != nil {
+			t.Fatalf("%s: errored", name)
+		}
+	}
 
 	// Send a response, which is unsupported on the server.
 	msg, _ := msgjson.NewResponse(1, nil, nil)
@@ -383,20 +401,13 @@ func TestParseHTTPRequest(t *testing.T) {
 
 	// Set the route correctly.
 	routes["123"] = func(r *RPCServer, m *msgjson.Message) *msgjson.ResponsePayload {
-		return nil
+		return new(msgjson.ResponsePayload)
 	}
 
-	// // Try again for no error.
-	// bbuff = bytes.NewBuffer(b)
-	// r, _ = http.NewRequest("GET", "", bbuff)
-	// msg = s.parseHTTPRequest(r)
-	// payload := new(msgjson.ResponsePayload)
-	// if err := json.Unmarshal(msg.Payload, payload); err != nil {
-	// 	t.Fatalf("unable to marshal payload: %v", err)
-	// }
-	// if payload.Error != nil {
-	// 	t.Fatalf("error for good message: %d: %s", payload.Error.Code, payload.Error.Message)
-	// }
+	// Try again for no error.
+	bbuff = bytes.NewBuffer(b)
+	r, _ = http.NewRequest("GET", "", bbuff)
+	ensureNoErr("good request")
 }
 
 func TestClientMap(t *testing.T) {
