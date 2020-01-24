@@ -102,13 +102,13 @@ func newTxOutResult(script []byte, value uint64, confs int64) *chainjson.GetTxOu
 
 func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	client := newTRPCClient()
-	walletCfg := &WalletConfig{
+	walletCfg := &asset.WalletConfig{
 		Account:   "default",
-		AssetInfo: tDCR,
 		TipChange: func(error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	wallet := unconnectedWallet(walletCtx, walletCfg, tLogger)
+	wallet := unconnectedWallet(walletCfg, tLogger)
+	go wallet.monitorBlocks(walletCtx)
 	wallet.node = client
 
 	return wallet, client, shutdown
@@ -152,6 +152,8 @@ func newTRPCClient() *tRPCClient {
 		verboseBlocks: make(map[string]*chainjson.GetBlockVerboseResult),
 		mainchain:     make(map[int64]*chainhash.Hash),
 		bestHash:      chainhash.Hash{},
+		bestBlockHash: &chainhash.Hash{},
+		signFunc:      func(tx *wire.MsgTx) (*wire.MsgTx, bool, error) { return tx, true, nil },
 	}
 }
 
@@ -275,7 +277,7 @@ func TestAvailableFund(t *testing.T) {
 	// should be returned.
 	unspents := make([]walletjson.ListUnspentResult, 0)
 	node.unspent = unspents
-	available, unconf, err := wallet.Balance()
+	available, unconf, err := wallet.Balance(tDCR)
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
 	}
@@ -296,7 +298,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	node.unspent = []walletjson.ListUnspentResult{littleUnspent}
-	available, unconf, err = wallet.Balance()
+	available, unconf, err = wallet.Balance(tDCR)
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
@@ -318,7 +320,7 @@ func TestAvailableFund(t *testing.T) {
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
 	}}
 	node.unspent = unspents
-	available, unconf, err = wallet.Balance()
+	available, unconf, err = wallet.Balance(tDCR)
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
@@ -330,14 +332,14 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	// Zero value
-	_, err = wallet.Fund(0)
+	_, err = wallet.Fund(0, tDCR)
 	if err == nil {
 		t.Fatalf("no funding error for zero value")
 	}
 
 	// RPC error
 	node.unspentErr = tErr
-	_, err = wallet.Fund(littleBit - 5000)
+	_, err = wallet.Fund(littleBit-5000, tDCR)
 	if err == nil {
 		t.Fatalf("no funding error for rpc error")
 	}
@@ -345,14 +347,14 @@ func TestAvailableFund(t *testing.T) {
 
 	// Negative response when locking outputs.
 	node.lockUnspentErr = tErr
-	_, err = wallet.Fund(littleBit - 5000)
+	_, err = wallet.Fund(littleBit-5000, tDCR)
 	if err == nil {
 		t.Fatalf("no error for lockunspent result = false: %v", err)
 	}
 	node.lockUnspentErr = nil
 
 	// Fund a little bit.
-	spendables, err := wallet.Fund(littleBit - 5000)
+	spendables, err := wallet.Fund(littleBit-5000, tDCR)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
 	}
@@ -365,7 +367,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	// Fund a lotta bit.
-	spendables, err = wallet.Fund(lottaBit - 3e6)
+	spendables, err = wallet.Fund(lottaBit-3e6, tDCR)
 	if err != nil {
 		t.Fatalf("error funding large amount: %v", err)
 	}
@@ -377,7 +379,7 @@ func TestAvailableFund(t *testing.T) {
 		t.Fatalf("expected spendable of value %d, got %d", lottaBit, v)
 	}
 	// Not enough to cover transaction fees.
-	_, err = wallet.Fund(lottaBit + littleBit - 1)
+	_, err = wallet.Fund(lottaBit+littleBit-1, tDCR)
 	if err == nil {
 		t.Fatalf("no error when not enough to cover tx fees")
 	}
@@ -474,14 +476,14 @@ func TestFundEdges(t *testing.T) {
 	}
 
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
-	_, err := wallet.Fund(swapVal)
+	_, err := wallet.Fund(swapVal, tDCR)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in single p2pkh utxo")
 	}
 	// Now add the needed satoshi and try again.
 	p2pkhUnspent.Amount = float64(swapVal+fees) / 1e8
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent}
-	_, err = wallet.Fund(swapVal)
+	_, err = wallet.Fund(swapVal, tDCR)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in single p2pkh utxo: %v", err)
 	}
@@ -507,13 +509,13 @@ func TestFundEdges(t *testing.T) {
 	}
 	p2pkhUnspent.Amount = float64(halfSwap+fees-1) / 1e8
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent, p2shUnspent}
-	_, err = wallet.Fund(swapVal)
+	_, err = wallet.Fund(swapVal, tDCR)
 	if err == nil {
 		t.Fatalf("no error when not enough funds in two utxos")
 	}
 	p2pkhUnspent.Amount = float64(halfSwap+fees) / 1e8
 	node.unspent = []walletjson.ListUnspentResult{p2pkhUnspent, p2shUnspent}
-	_, err = wallet.Fund(swapVal)
+	_, err = wallet.Fund(swapVal, tDCR)
 	if err != nil {
 		t.Fatalf("error when should be enough funding in two utxos: %v", err)
 	}
@@ -565,14 +567,14 @@ func TestSwap(t *testing.T) {
 	node.signFunc = signFunc
 
 	// This time should succeed.
-	_, err := wallet.Swap(swaps)
+	_, err := wallet.Swap(swaps, tDCR)
 	if err != nil {
 		t.Fatalf("swap error: %v", err)
 	}
 
 	// Not enough funds
 	swap.Inputs = coins[:1]
-	_, err = wallet.Swap(swaps)
+	_, err = wallet.Swap(swaps, tDCR)
 	if err == nil {
 		t.Fatalf("no error for listunspent not enough funds")
 	}
@@ -580,7 +582,7 @@ func TestSwap(t *testing.T) {
 
 	// AddressPKH error
 	node.newAddrErr = tErr
-	_, err = wallet.Swap(swaps)
+	_, err = wallet.Swap(swaps, tDCR)
 	if err == nil {
 		t.Fatalf("no error for getnewaddress rpc error")
 	}
@@ -588,7 +590,7 @@ func TestSwap(t *testing.T) {
 
 	// ChangeAddress error
 	node.changeAddrErr = tErr
-	_, err = wallet.Swap(swaps)
+	_, err = wallet.Swap(swaps, tDCR)
 	if err == nil {
 		t.Fatalf("no error for getrawchangeaddress rpc error")
 	}
@@ -598,7 +600,7 @@ func TestSwap(t *testing.T) {
 	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
 		return nil, false, tErr
 	}
-	_, err = wallet.Swap(swaps)
+	_, err = wallet.Swap(swaps, tDCR)
 	if err == nil {
 		t.Fatalf("no error for signrawtransactionwithwallet rpc error")
 	}
@@ -607,14 +609,14 @@ func TestSwap(t *testing.T) {
 	node.signFunc = func(msgTx *wire.MsgTx) (*wire.MsgTx, bool, error) {
 		return msgTx, false, nil
 	}
-	_, err = wallet.Swap(swaps)
+	_, err = wallet.Swap(swaps, tDCR)
 	if err == nil {
 		t.Fatalf("no error for incomplete signature rpc error")
 	}
 	node.signFunc = signFunc
 
 	// Make sure we can succeed again.
-	_, err = wallet.Swap(swaps)
+	_, err = wallet.Swap(swaps, tDCR)
 	if err != nil {
 		t.Fatalf("re-swap error: %v", err)
 	}
@@ -657,14 +659,14 @@ func TestRedeem(t *testing.T) {
 	node.changeAddr = tPKHAddr
 	node.privWIF = dcrutil.NewWIF(privKey, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err != nil {
 		t.Fatalf("redeem error: %v", err)
 	}
 
 	// No audit info
 	redemption.Spends = nil
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for nil AuditInfo")
 	}
@@ -672,7 +674,7 @@ func TestRedeem(t *testing.T) {
 
 	// Spoofing AuditInfo is not allowed.
 	redemption.Spends = &TAuditInfo{}
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for spoofed AuditInfo")
 	}
@@ -680,7 +682,7 @@ func TestRedeem(t *testing.T) {
 
 	// Wrong secret hash
 	redemption.Secret = randBytes(32)
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for wrong secret")
 	}
@@ -688,7 +690,7 @@ func TestRedeem(t *testing.T) {
 
 	// too low of value
 	ci.output.value = 200
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
@@ -696,7 +698,7 @@ func TestRedeem(t *testing.T) {
 
 	// Change address error
 	node.changeAddrErr = tErr
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for change address error")
 	}
@@ -704,7 +706,7 @@ func TestRedeem(t *testing.T) {
 
 	// Missing priv key error
 	node.privWIFErr = tErr
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for missing private key")
 	}
@@ -712,7 +714,7 @@ func TestRedeem(t *testing.T) {
 
 	// Send error
 	node.sendRawErr = tErr
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for send error")
 	}
@@ -722,7 +724,7 @@ func TestRedeem(t *testing.T) {
 	var h chainhash.Hash
 	h[0] = 0x01
 	node.sendRawHash = &h
-	err = wallet.Redeem([]*asset.Redemption{redemption})
+	err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for wrong return hash")
 	}
@@ -1006,7 +1008,7 @@ func TestRefund(t *testing.T) {
 		output:     contractOutput,
 		expiration: time.Now().Add(time.Hour * 24).UTC(),
 	}
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -1015,14 +1017,14 @@ func TestRefund(t *testing.T) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	err = wallet.Refund(badReceipt)
+	err = wallet.Refund(badReceipt, tDCR)
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
 	// gettxout error
 	node.txOutErr = tErr
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err == nil {
 		t.Fatalf("no error for missing utxo")
 	}
@@ -1030,7 +1032,7 @@ func TestRefund(t *testing.T) {
 
 	// bad contract
 	receipt.output = newOutput(node, tTxHash, 0, 1e8, wire.TxTreeRegular, randBytes(50))
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
@@ -1038,7 +1040,7 @@ func TestRefund(t *testing.T) {
 
 	// Too small.
 	node.txOutRes[bigOutID] = newTxOutResult(nil, 100, 2)
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err == nil {
 		t.Fatalf("no error for value < fees")
 	}
@@ -1046,7 +1048,7 @@ func TestRefund(t *testing.T) {
 
 	// getrawchangeaddress error
 	node.changeAddrErr = tErr
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err == nil {
 		t.Fatalf("no error for getrawchangeaddress rpc error")
 	}
@@ -1054,7 +1056,7 @@ func TestRefund(t *testing.T) {
 
 	// signature error
 	node.privWIFErr = tErr
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
@@ -1062,7 +1064,7 @@ func TestRefund(t *testing.T) {
 
 	// send error
 	node.sendRawErr = tErr
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err == nil {
 		t.Fatalf("no error for sendrawtransaction rpc error")
 	}
@@ -1072,15 +1074,55 @@ func TestRefund(t *testing.T) {
 	var badHash chainhash.Hash
 	badHash[0] = 0x05
 	node.sendRawHash = &badHash
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err == nil {
 		t.Fatalf("no error for tx hash")
 	}
 	node.sendRawHash = nil
 
 	// Sanity check that we can succeed again.
-	err = wallet.Refund(receipt)
+	err = wallet.Refund(receipt, tDCR)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
+	}
+}
+
+func TestPayFee(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+	addr := tPKHAddr.String()
+	node.changeAddr = tPKHAddr
+
+	node.unspent = []walletjson.ListUnspentResult{walletjson.ListUnspentResult{
+		TxID:          tTxID,
+		Address:       tPKHAddr.String(),
+		Amount:        100e8,
+		Confirmations: 5,
+		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
+	}}
+
+	_, err := wallet.PayFee(addr, 1e8, tDCR)
+	if err != nil {
+		t.Fatalf("PayFee error: %v", err)
+	}
+
+	// invalid address
+	_, err = wallet.PayFee("badaddr", 1e8, tDCR)
+	if err == nil {
+		t.Fatalf("no error for bad address: %v", err)
+	}
+
+	// GetRawChangeAddress error
+	node.changeAddrErr = tErr
+	_, err = wallet.PayFee(addr, 1e8, tDCR)
+	if err == nil {
+		t.Fatalf("no error for rawchangeaddress: %v", err)
+	}
+	node.changeAddrErr = nil
+
+	// good again
+	_, err = wallet.PayFee(addr, 1e8, tDCR)
+	if err != nil {
+		t.Fatalf("PayFee error afterwards: %v", err)
 	}
 }

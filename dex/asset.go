@@ -6,8 +6,6 @@ package dex
 import (
 	"fmt"
 	"strings"
-
-	"github.com/decred/slog"
 )
 
 type Error string
@@ -55,10 +53,6 @@ func NetFromString(net string) (Network, error) {
 	}
 	return 255, fmt.Errorf("unknown network %s", net)
 }
-
-// Every backend constructor will accept a Logger. All logging should take place
-// through the provided logger.
-type Logger = slog.Logger
 
 // Asset is the configurable asset variables.
 type Asset struct {

@@ -155,7 +155,7 @@ func TestLiveFees(t *testing.T) {
 // func TestPlugin(t *testing.T) {
 // 	dir, err := os.Getwd()
 // 	if err != nil {
-// 		t.Fatalf("error retreiving working directory: %v", err)
+// 		t.Fatalf("error retrieving working directory: %v", err)
 // 	}
 // 	pluginPath := filepath.Join(dir, "btc.so")
 // 	if _, err = os.Stat(pluginPath); os.IsNotExist(err) {

@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
@@ -44,7 +46,7 @@ type Signer interface {
 	PubKey() *secp256k1.PublicKey
 }
 
-// FeeChecker is a function for retreiving the details for a fee payment. It
+// FeeChecker is a function for retrieving the details for a fee payment. It
 // is satisfied by (dcr.Backend).UnspentCoinDetails.
 type FeeChecker func(coinID []byte) (addr string, val uint64, confs int64, err error)
 
@@ -116,12 +118,14 @@ type AuthManager struct {
 	regFee   uint64
 	checkFee FeeChecker
 	feeConfs int64
+	// coinWaiter is a coin waiter to deal with latency.
+	coinWaiter *coinwaiter.Waiter
 }
 
 // Config is the configuration settings for the AuthManager, and the only
 // argument to its constructor.
 type Config struct {
-	// Storage is an interface for storing and retreiving account-related info.
+	// Storage is an interface for storing and retrieving account-related info.
 	Storage Storage
 	// Signer is an interface that signs messages. In practice, Signer is
 	// satisfied by a secp256k1.PrivateKey.
@@ -137,20 +141,29 @@ type Config struct {
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
-	auth := &AuthManager{
-		users:    make(map[account.AccountID]*clientInfo),
-		conns:    make(map[uint64]*clientInfo),
-		storage:  cfg.Storage,
-		signer:   cfg.Signer,
-		regFee:   cfg.RegistrationFee,
-		checkFee: cfg.FeeChecker,
-		feeConfs: cfg.FeeConfs,
+	var auth *AuthManager
+	auth = &AuthManager{
+		users:      make(map[account.AccountID]*clientInfo),
+		conns:      make(map[uint64]*clientInfo),
+		storage:    cfg.Storage,
+		signer:     cfg.Signer,
+		regFee:     cfg.RegistrationFee,
+		checkFee:   cfg.FeeChecker,
+		feeConfs:   cfg.FeeConfs,
+		coinWaiter: coinwaiter.New(recheckInterval, auth.Send),
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
 	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee)
 	return auth
+}
+
+// Run runs the AuthManager until the context is canceled. Satisfies the
+// dex.Runner interface.
+func (auth *AuthManager) Run(ctx context.Context) {
+	go auth.coinWaiter.Run(ctx)
+	<-ctx.Done()
 }
 
 // Route wraps the comms.Route function, storing the response handler with the

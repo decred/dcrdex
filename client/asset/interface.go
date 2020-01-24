@@ -10,26 +10,44 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
+// WalletConfig is the configuration settings for the wallet.
+type WalletConfig struct {
+	// Account is the name of the wallet account. The account and wallet must
+	// already exist.
+	Account string
+	// INIPath is the path of a configuration file.
+	INIPath string
+	// TipChange is a function that will be called when the blockchain monitoring
+	// loop detects a new block. If the error supplied is nil, the client should
+	// check the confirmations on any negotiating swaps to see if action is
+	// needed. If the error is non-nil, the wallet monitoring loop encountered an
+	// error while retrieving tip information.
+	TipChange func(error)
+}
+
 // Wallet is a common interface to be implemented by cryptocurrency wallet
 // software.
 type Wallet interface {
+	dex.Runner
+	// Connect connects the wallet to the RPC server.
+	Connect() error
 	// Balance should return the total available funds in the wallet.
 	// Note that after calling Fund, the amount returned by Balance may change
 	// by more than the value funded.
-	Balance() (available, locked uint64, err error)
+	Balance(*dex.Asset) (available, locked uint64, err error)
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
-	Fund(uint64) (Coins, error)
+	Fund(uint64, *dex.Asset) (Coins, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
 	// Swap sends the swaps in a single transaction. The Receipts returned can be
 	// used to refund a failed transaction.
-	Swap([]*Swap) ([]Receipt, error)
+	Swap([]*Swap, *dex.Asset) ([]Receipt, error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption.
-	Redeem([]*Redemption) error
+	Redeem([]*Redemption, *dex.Asset) error
 	// SignMessage signs the message with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
@@ -54,13 +72,15 @@ type Wallet interface {
 	FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired.
-	Refund(Receipt) error
+	Refund(Receipt, *dex.Asset) error
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
 	// Unlock unlocks the exchange wallet.
 	Unlock(pw string, dur time.Duration) error
 	// Lock locks the exchange wallet.
 	Lock() error
+	// PayFee pays a registration fee to the DEX.
+	PayFee(address string, fee uint64, nfo *dex.Asset) (Coin, error)
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed

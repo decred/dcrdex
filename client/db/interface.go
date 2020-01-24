@@ -3,19 +3,27 @@
 
 package db
 
-import "decred.org/dcrdex/dex/order"
+import (
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
+)
 
 // DB is an interface that must be satisfied by a DEX client persistent storage
 // manager.
 type DB interface {
+	dex.Runner
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
 	// URL.
 	ListAccounts() ([]string, error)
+	// Accounts retrieves all accounts.
+	Accounts() ([]*AccountInfo, error)
 	// Account gets the AccountInfo associated with the specified DEX node.
 	Account(url string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
+	// AccountPaid marks the account as paid.
+	AccountPaid(proof *AccountProof) error
 	// UpdateOrder saves the order information in the database. Any existing
 	// order info will be overwritten without indication.
 	UpdateOrder(m *MetaOrder) error
@@ -46,4 +54,10 @@ type DB interface {
 	// ActiveMatches retrieves the matches that are in an active state, which is
 	// any state except order.MatchComplete.
 	ActiveMatches() ([]*MetaMatch, error)
+	// Update wallets adds a wallet to the database, or updates the wallet
+	// credentials if the wallet already exists. A wallet is specified by the
+	// pair (asset ID, account name).
+	UpdateWallet(wallet *Wallet) error
+	// Wallets lists all saved wallets.
+	Wallets() ([]*Wallet, error)
 }

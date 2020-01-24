@@ -680,7 +680,6 @@ type NotifyFee struct {
 	signable
 	AccountID Bytes  `json:"accountid"`
 	CoinID    Bytes  `json:"coinid"`
-	Vout      uint32 `json:"vout"`
 	Time      uint64 `json:"timestamp"`
 }
 
@@ -690,9 +689,13 @@ func (n *NotifyFee) Serialize() ([]byte, error) {
 	b := make([]byte, 0, 68)
 	b = append(b, n.AccountID...)
 	b = append(b, n.CoinID...)
-	b = append(b, uint32Bytes(n.Vout)...)
 	b = append(b, uint64Bytes(n.Time)...)
 	return b, nil
+}
+
+// Stamp satisfies the Stampable interface.
+func (n *NotifyFee) Stamp(t, _, _ uint64) {
+	n.Time = t
 }
 
 // NotifyFeeResult is the result for the response to NotifyFee. Though it embeds

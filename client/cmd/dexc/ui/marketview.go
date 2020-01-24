@@ -22,13 +22,13 @@ type marketViewer struct {
 
 func newMarketView() *marketViewer {
 	marketJournal := newJournal("Market Journal", nil)
-	marketLog = NewLogger("MRKT", marketJournal.Write)
+	marketLog = mustLogger("MRKT", marketJournal.Write)
 	marketList := newChooser("Markets", nil)
-	markets := clientCore.ListMarkets()
-	for _, mktInfo := range markets {
-		for _, market := range mktInfo.Markets {
+	marketMap := clientCore.Markets()
+	for url, markets := range marketMap {
+		for _, market := range markets {
 			m := market
-			marketList.addEntry(m.Display(), func() {
+			marketList.addEntry(url+":"+m.Display(), func() {
 				marketLog.Infof("%s selected", m.Display())
 			})
 		}

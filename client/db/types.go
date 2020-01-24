@@ -5,6 +5,7 @@ package db
 
 import (
 	"fmt"
+	"strconv"
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -20,6 +21,8 @@ type AccountInfo struct {
 	EncKey    []byte
 	DEXPubKey *secp256k1.PublicKey
 	FeeCoin   []byte
+	// Paid will be set on retrieval based on whether there is a fee proof set.
+	Paid bool
 }
 
 // Encode the AccountInfo as bytes.
@@ -46,7 +49,7 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 
 func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 	if len(pushes) != 4 {
-		return nil, fmt.Errorf("decodeAccountInfo: expected 3 data pushes, got %d", len(pushes))
+		return nil, fmt.Errorf("decodeAccountInfo: expected 4 data pushes, got %d", len(pushes))
 	}
 	urlB, keyB, dexB, coinB := pushes[0], pushes[1], pushes[2], pushes[3]
 	pk, err := secp256k1.ParsePubKey(dexB)
@@ -58,6 +61,48 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 		EncKey:    keyB,
 		DEXPubKey: pk,
 		FeeCoin:   coinB,
+	}, nil
+}
+
+// Account proof is information necessary to prove that the DEX server accepted
+// the account's fee payment. The fee coin is not part of the proof, since it
+// is already stored as part of the AccountInfo blob.
+type AccountProof struct {
+	URL   string
+	Stamp uint64
+	Sig   []byte
+}
+
+// Encode encodes the AccountProof to a versioned blob.
+func (p *AccountProof) Encode() []byte {
+	return dbBytes{0}.
+		AddData([]byte(p.URL)).
+		AddData(uint64Bytes(p.Stamp)).
+		AddData(p.Sig)
+}
+
+// DecodeAccountProof decodes the versioned blob to a *MatchProof.
+func DecodeAccountProof(b []byte) (*AccountProof, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeAccountProof_v0(pushes)
+	}
+	return nil, fmt.Errorf("unknown AccountProof version %d", ver)
+}
+
+func decodeAccountProof_v0(pushes [][]byte) (*AccountProof, error) {
+	if len(pushes) != 3 {
+		return nil, fmt.Errorf("decodeAccountProof_v0: expected 3 pushes, got %d", len(pushes))
+	}
+	urlB, stampB := pushes[0], pushes[1]
+	return &AccountProof{
+		URL:   string(urlB),
+		Stamp: intCoder.Uint64(stampB),
+		Sig:   pushes[2],
 	}, nil
 }
 
@@ -226,7 +271,57 @@ func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
 	}, nil
 }
 
+// Wallet is information necessary to create an asset.Wallet.
+type Wallet struct {
+	AssetID uint32
+	Account string
+	INIPath string
+}
+
+// Encode encodes the Wallet to a versioned blob.
+func (w *Wallet) Encode() []byte {
+	return dbBytes{0}.
+		AddData(uint32Bytes(w.AssetID)).
+		AddData([]byte(w.Account)).
+		AddData([]byte(w.INIPath))
+}
+
+// DecodeWallet decodes the versioned blob to a *Wallet.
+func DecodeWallet(b []byte) (*Wallet, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeWallet_v0(pushes)
+	}
+	return nil, fmt.Errorf("unknown DecodeWallet version %d", ver)
+}
+
+func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
+	if len(pushes) != 3 {
+		return nil, fmt.Errorf("decodeWallet_v0: expected 3 pushes, got %d", len(pushes))
+	}
+	return &Wallet{
+		AssetID: intCoder.Uint32(pushes[0]),
+		Account: string(pushes[1]),
+		INIPath: string(pushes[2]),
+	}, nil
+}
+
+// ID is the byte-encoded asset ID for this wallet.
+func (w *Wallet) ID() []byte {
+	return uint32Bytes(w.AssetID)
+}
+
+// SID is a string respresentation of the wallet's asset ID.
+func (w *Wallet) SID() string {
+	return strconv.Itoa(int(w.AssetID))
+}
+
 type dbBytes = encode.BuildyBytes
 
 var uint64Bytes = encode.Uint64Bytes
+var uint32Bytes = encode.Uint32Bytes
 var intCoder = encode.IntCoder

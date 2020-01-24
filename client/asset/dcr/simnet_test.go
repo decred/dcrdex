@@ -42,7 +42,7 @@ var (
 	tCtx    context.Context
 	tDCR    = &dex.Asset{
 		ID:       42,
-		Symbol:   "ltc",
+		Symbol:   "dcr",
 		SwapSize: dexdcr.InitTxSize,
 		FeeRate:  10,
 		LotSize:  1e7,
@@ -61,18 +61,22 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) *ExchangeW
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
 	}
-	walletCfg := &WalletConfig{
-		INIPath:   filepath.Join(user.HomeDir, "dextest", "dcr", name, "w-"+name+".conf"),
-		Account:   "default",
-		AssetInfo: tDCR,
+	walletCfg := &asset.WalletConfig{
+		INIPath: filepath.Join(user.HomeDir, "dextest", "dcr", name, "w-"+name+".conf"),
+		Account: "default",
 		TipChange: func(err error) {
 			blkFunc(name, err)
 		},
 	}
 	var backend asset.Wallet
-	backend, err = NewWallet(tCtx, walletCfg, tLogger, dex.Simnet)
+	backend, err = NewWallet(walletCfg, tLogger, dex.Simnet)
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
+	}
+	go backend.Run(tCtx)
+	err = backend.Connect()
+	if err != nil {
+		t.Fatalf("error connecting backend: %v", err)
 	}
 	return backend.(*ExchangeWallet)
 }
@@ -104,7 +108,7 @@ func randBytes(l int) []byte {
 }
 
 func waitNetwork() {
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 3 / 2)
 }
 
 func TestMain(m *testing.M) {
@@ -139,40 +143,40 @@ func TestWallet(t *testing.T) {
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		available, unconf, err := wallet.Balance()
+		available, unconf, err := wallet.Balance(tDCR)
 		tLogger.Debugf("%s %f available, %f unconfirmed", name, float64(available)/1e8, float64(unconf)/1e8)
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
 		}
 	}
 	// Grab some coins.
-	utxos, err := rig.beta().Fund(contractValue * 3)
+	utxos, err := rig.beta().Fund(contractValue*3, tDCR)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// Coins should be locked
-	utxos, _ = rig.beta().Fund(contractValue * 3)
+	utxos, _ = rig.beta().Fund(contractValue*3, tDCR)
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
 	// Now unlock, and see if we get the first one back.
 	rig.beta().ReturnCoins([]asset.Coin{utxo})
 	rig.beta().ReturnCoins(utxos)
-	utxos, _ = rig.beta().Fund(contractValue * 3)
+	utxos, _ = rig.beta().Fund(contractValue*3, tDCR)
 	if !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.beta().ReturnCoins(utxos)
 
 	// Get a separate set of UTXOs for each contract.
-	utxos1, err := rig.beta().Fund(contractValue)
+	utxos1, err := rig.beta().Fund(contractValue, tDCR)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
-	utxos2, err := rig.beta().Fund(contractValue * 2)
+	utxos2, err := rig.beta().Fund(contractValue*2, tDCR)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -211,7 +215,7 @@ func TestWallet(t *testing.T) {
 	}
 	swaps := []*asset.Swap{swap1, swap2}
 
-	receipts, err := rig.beta().Swap(swaps)
+	receipts, err := rig.beta().Swap(swaps, tDCR)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -257,7 +261,7 @@ func TestWallet(t *testing.T) {
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	err = rig.alpha().Redeem(redemptions)
+	err = rig.alpha().Redeem(redemptions, tDCR)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
@@ -297,7 +301,7 @@ func TestWallet(t *testing.T) {
 	lockTime = time.Now().Add(-24 * time.Hour)
 
 	// Have beta send a swap contract to the alpha address.
-	utxos, _ = rig.beta().Fund(contractValue)
+	utxos, _ = rig.beta().Fund(contractValue, tDCR)
 	contract := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,
@@ -310,7 +314,7 @@ func TestWallet(t *testing.T) {
 	}
 	swaps = []*asset.Swap{swap}
 
-	receipts, err = rig.beta().Swap(swaps)
+	receipts, err = rig.beta().Swap(swaps, tDCR)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -321,9 +325,15 @@ func TestWallet(t *testing.T) {
 	receipt = receipts[0]
 
 	waitNetwork()
-	err = rig.beta().Refund(receipt)
+	err = rig.beta().Refund(receipt, tDCR)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
+	}
+
+	// Test PayFee
+	_, err = rig.beta().PayFee(alphaAddress, 1e8, tDCR)
+	if err != nil {
+		t.Fatalf("error paying fees: %v", err)
 	}
 
 	// Lock the wallet

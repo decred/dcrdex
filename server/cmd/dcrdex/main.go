@@ -69,7 +69,7 @@ func mainCore(ctx context.Context) error {
 
 	// Create the DEX manager.
 	dexConf := &dexsrv.DexConf{
-		LogBackend: &dexsrv.LoggerMaker{backendLog, cfg.DefaultLogLevel, cfg.LogLevels},
+		LogBackend: cfg.LogMaker,
 		Markets:    markets,
 		Assets:     assets,
 		Network:    cfg.Network,
@@ -108,7 +108,7 @@ func mainCore(ctx context.Context) error {
 }
 
 func main() {
-	// Create a context that is cancelled when a shutdown request is received
+	// Create a context that is canceled when a shutdown request is received
 	// via requestShutdown.
 	ctx := withShutdownCancel(context.Background())
 	// Listen for both interrupt signals (e.g. CTRL+C) and shutdown requests

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 )
@@ -15,6 +16,7 @@ var (
 	// logRotator is one of the logging outputs. It should be closed on
 	// application shutdown.
 	logRotator   *rotator.Rotator
+	debugLevel   string
 	log          slog.Logger
 	masterLogger = func([]byte) {}
 )
@@ -37,7 +39,8 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // create roll files in the same directory. All output will also be provided to
 // the provided function. It must be called before the package-global log
 // rotator variables are used.
-func InitLogging(masterLog func([]byte)) {
+func InitLogging(masterLog func([]byte), lvl string) *dex.LoggerMaker {
+	debugLevel = lvl
 	err := os.MkdirAll(logDirectory, 0700)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create log directory: %v\n", err)
@@ -49,17 +52,23 @@ func InitLogging(masterLog func([]byte)) {
 		os.Exit(1)
 	}
 	masterLogger = masterLog
-	log = NewLogger("APP", nil)
+	lm, err := CustomLogMaker(nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create custom logger: %v\n", err)
+		os.Exit(1)
+	}
+	log = lm.Logger("APP")
+	return lm
 }
 
-// NewLogger creates a new logger that writes to the central rotating log file
-// and also the provided function.
-func NewLogger(tag string, f func(p []byte)) slog.Logger {
+// CustomLogger creates a new logger backend that writes to the central rotating
+// log file and also the provided function.
+func CustomLogMaker(f func(p []byte)) (*dex.LoggerMaker, error) {
 	if f == nil {
 		f = func([]byte) {}
 	}
 	backendLog := slog.NewBackend(logWriter{f: f})
-	return backendLog.Logger(tag)
+	return dex.NewLoggerMaker(backendLog, debugLevel)
 }
 
 // Close closes the log rotator.
@@ -67,4 +76,15 @@ func Close() {
 	if logRotator != nil {
 		logRotator.Close()
 	}
+}
+
+// mustLogger panics if there is an error creating the LoggerMaker. mustLogger should
+// only be used during start up, and not, for example, when creating a new server from
+// the TUI.
+func mustLogger(name string, f func(p []byte)) dex.Logger {
+	lm, err := CustomLogMaker(f)
+	if err != nil {
+		panic("error creating logger " + name)
+	}
+	return lm.Logger(name)
 }

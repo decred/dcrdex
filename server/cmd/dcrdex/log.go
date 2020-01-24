@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
+	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	dexsrv "decred.org/dcrdex/server/dex"
@@ -57,6 +58,7 @@ var (
 	marketLogger  = backendLog.Logger("MKT")
 	bookLogger    = backendLog.Logger("BOOK")
 	matcherLogger = backendLog.Logger("MTCH")
+	waiterLogger  = backendLog.Logger("CHWT")
 )
 
 func init() {
@@ -68,6 +70,7 @@ func init() {
 	swap.UseLogger(swapLogger)
 	book.UseLogger(bookLogger)
 	matcher.UseLogger(matcherLogger)
+	coinwaiter.UseLogger(waiterLogger)
 }
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.

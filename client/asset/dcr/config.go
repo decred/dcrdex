@@ -44,7 +44,7 @@ type DCRConfig struct {
 	// RPCCert is the filepath to the dcrwallet TLS certificate. If it is not
 	// provided, the default dcrwallet location will be assumed.
 	RPCCert string `long:"cafile" description:"File containing the certificate file"`
-	// Context should be cancelled when the application exits. This will cause
+	// Context should be canceled when the application exits. This will cause
 	// some cleanup to be performed during shutdown.
 	Context context.Context
 }

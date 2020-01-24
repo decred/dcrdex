@@ -52,7 +52,7 @@ func TestAccounts(t *testing.T) {
 	}
 
 	if checkAddr != regAddr {
-		t.Fatalf("unexpected address retreived from the DB. wanted %s, got %s",
+		t.Fatalf("unexpected address retrieved from the DB. wanted %s, got %s",
 			regAddr, checkAddr)
 	}
 
@@ -100,7 +100,7 @@ func TestWrongAccount(t *testing.T) {
 
 	acct, paid, open := archie.Account(tAcctID)
 	if acct != nil {
-		t.Fatalf("account retreived for unknown account ID")
+		t.Fatalf("account retrieved for unknown account ID")
 	}
 	if paid {
 		t.Fatalf("unknown account marked as paid")

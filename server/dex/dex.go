@@ -85,7 +85,7 @@ func (lm *LoggerMaker) NewLogger(name string, level ...slog.Level) dex.Logger {
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
-	LogBackend       *LoggerMaker
+	LogBackend       *dex.LoggerMaker
 	Markets          []*dex.MarketInfo
 	Assets           []*AssetConf
 	Network          dex.Network
@@ -330,6 +330,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
+	go authMgr.Run(ctx)
 
 	// Create the swapper.
 	swapperCfg := &swap.Config{

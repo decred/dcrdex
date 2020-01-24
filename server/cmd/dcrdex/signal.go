@@ -30,11 +30,11 @@ var (
 	shutdownRequest = make(chan struct{})
 	// shutdownSignal is closed whenever shutdown is invoked through an
 	// interrupt signal or via requestShutdown. Any contexts created using
-	// withShutdownChannel are cancelled when this is closed.
+	// withShutdownChannel are canceled when this is closed.
 	shutdownSignal = make(chan struct{})
 )
 
-// withShutdownCancel creates a copy of a context that is cancelled whenever
+// withShutdownCancel creates a copy of a context that is canceled whenever
 // shutdown is invoked through an interrupt signal or from an JSON-RPC stop
 // request.
 func withShutdownCancel(ctx context.Context) context.Context {

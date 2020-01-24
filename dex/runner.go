@@ -45,6 +45,11 @@ func (ssw *StartStopWaiter) Stop() {
 	ssw.cancel()
 }
 
+// On will be true until the Runner Context is canceled.
+func (ssw *StartStopWaiter) On() bool {
+	return ssw.ctx.Err() == nil
+}
+
 // WaitForShutdown blocks until the Runner has returned in response to Stop.
 func (ssw *StartStopWaiter) WaitForShutdown() {
 	ssw.wg.Wait()

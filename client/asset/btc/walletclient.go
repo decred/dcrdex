@@ -14,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 )
@@ -29,6 +30,7 @@ const (
 	methodPrivKeyForAddress = "dumpprivkey"
 	methodSignMessage       = "signmessagewithprivkey"
 	methodGetTransaction    = "gettransaction"
+	methodSendToAddress     = "sendtoaddress"
 )
 
 // walletClient is a bitcoind wallet RPC client that uses rpcclient.Client's
@@ -50,7 +52,7 @@ func newWalletClient(node rpcClient, chainParams *chaincfg.Params) *walletClient
 // sent via RawRequest.
 type anylist []interface{}
 
-// ListUnspent retreives a list of the wallet's UTXOs.
+// ListUnspent retrieves a list of the wallet's UTXOs.
 func (wc *walletClient) ListUnspent() ([]*ListUnspentResult, error) {
 	unspents := make([]*ListUnspentResult, 0)
 	return unspents, wc.call(methodListUnspent, nil, &unspents)
@@ -176,7 +178,7 @@ func (wc *walletClient) SignMessage(addr string, msg dex.Bytes) (pubkey, sig dex
 	return pubkey, sig, nil
 }
 
-// GetTransaction retreives the specified wallet-related transaction.
+// GetTransaction retrieves the specified wallet-related transaction.
 func (wc *walletClient) GetTransaction(txid string) (*GetTransactionResult, error) {
 	res := new(GetTransactionResult)
 	err := wc.call(methodGetTransaction, anylist{txid}, res)
@@ -194,6 +196,16 @@ func (wc *walletClient) Unlock(pass string, dur time.Duration) error {
 // Lock locks the wallet.
 func (wc *walletClient) Lock() error {
 	return wc.call(methodLock, nil, nil)
+}
+
+// SendToAddress sends the amount to the address.
+func (wc *walletClient) SendToAddress(address string, amount uint64) (*chainhash.Hash, error) {
+	var txid string
+	err := wc.call(methodSendToAddress, anylist{address, float64(amount) / 1e8}, &txid)
+	if err != nil {
+		return nil, err
+	}
+	return chainhash.NewHashFromStr(txid)
 }
 
 // call is used internally to  marshal parmeters and send requests to  the RPC

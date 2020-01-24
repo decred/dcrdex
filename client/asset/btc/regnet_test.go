@@ -65,18 +65,22 @@ func tBackend(t *testing.T, conf, name string, blkFunc func(string, error)) *Exc
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
 	}
-	walletCfg := &WalletConfig{
-		INIPath:    filepath.Join(user.HomeDir, "dextest", "btc", "harness-ctl", conf+".conf"),
-		WalletName: name,
-		AssetInfo:  tBTC,
+	walletCfg := &asset.WalletConfig{
+		INIPath: filepath.Join(user.HomeDir, "dextest", "btc", "harness-ctl", conf+".conf"),
+		Account: name,
 		TipChange: func(err error) {
 			blkFunc(conf, err)
 		},
 	}
 	var backend asset.Wallet
-	backend, err = NewWallet(tCtx, walletCfg, tLogger, dex.Regtest)
+	backend, err = NewWallet(walletCfg, tLogger, dex.Regtest)
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
+	}
+	go backend.Run(tCtx)
+	err = backend.Connect()
+	if err != nil {
+		t.Fatalf("error connecting backend: %v", err)
 	}
 	return backend.(*ExchangeWallet)
 }
@@ -144,7 +148,7 @@ func TestWallet(t *testing.T) {
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		available, unconf, err := wallet.Balance()
+		available, unconf, err := wallet.Balance(tBTC)
 		tLogger.Debugf("%s %f available, %f unconfirmed", name, float64(available)/1e8, float64(unconf)/1e8)
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
@@ -152,33 +156,33 @@ func TestWallet(t *testing.T) {
 	}
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only
 	// return 1 utxo.
-	utxos, err := rig.gamma().Fund(contractValue * 3)
+	utxos, err := rig.gamma().Fund(contractValue*3, tBTC)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// UTXOs should be locked
-	utxos, _ = rig.gamma().Fund(contractValue * 3)
+	utxos, _ = rig.gamma().Fund(contractValue*3, tBTC)
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
 	// Now unlock, and see if we get the first one back.
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
-	utxos, _ = rig.gamma().Fund(contractValue * 3)
+	utxos, _ = rig.gamma().Fund(contractValue*3, tBTC)
 	if !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.gamma().ReturnCoins(utxos)
 
 	// Get a separate set of UTXOs for each contract.
-	utxos1, err := rig.gamma().Fund(contractValue)
+	utxos1, err := rig.gamma().Fund(contractValue, tBTC)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
-	utxos2, err := rig.gamma().Fund(contractValue * 2)
+	utxos2, err := rig.gamma().Fund(contractValue*2, tBTC)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -217,7 +221,7 @@ func TestWallet(t *testing.T) {
 	}
 	swaps := []*asset.Swap{swap1, swap2}
 
-	receipts, err := rig.gamma().Swap(swaps)
+	receipts, err := rig.gamma().Swap(swaps, tBTC)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -261,7 +265,7 @@ func TestWallet(t *testing.T) {
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	err = rig.alpha().Redeem(redemptions)
+	err = rig.alpha().Redeem(redemptions, tBTC)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
@@ -300,7 +304,7 @@ func TestWallet(t *testing.T) {
 	lockTime = time.Now().Add(-24 * time.Hour)
 
 	// Have gamma send a swap contract to the alpha address.
-	utxos, _ = rig.gamma().Fund(contractValue)
+	utxos, _ = rig.gamma().Fund(contractValue, tBTC)
 	contract := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,
@@ -313,7 +317,7 @@ func TestWallet(t *testing.T) {
 	}
 	swaps = []*asset.Swap{swap}
 
-	receipts, err = rig.gamma().Swap(swaps)
+	receipts, err = rig.gamma().Swap(swaps, tBTC)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -323,9 +327,15 @@ func TestWallet(t *testing.T) {
 	}
 	receipt = receipts[0]
 
-	err = rig.gamma().Refund(receipt)
+	err = rig.gamma().Refund(receipt, tBTC)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
+	}
+
+	// Test PayFee
+	_, err = rig.gamma().PayFee(alphaAddress, 1e8, tBTC)
+	if err != nil {
+		t.Fatalf("error paying fees: %v", err)
 	}
 
 	// Lock the wallet

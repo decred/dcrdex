@@ -17,21 +17,15 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/coinlock"
+	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 )
 
-const (
-	// These constants are used for a chainWaiter to inform the caller whether
-	// the waiter should be run again.
-	tryAgain     = false
-	dontTryAgain = true
-)
-
 var (
-	// The chainWaiters will query for transaction data every recheckInterval.
+	// The coin waiter will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
-	// txWaitExpiration is the longest the Swapper will wait for a chainWaiter.
+	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
 	// This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = time.Minute
 )
@@ -88,22 +82,6 @@ type blockNotification struct {
 	time    time.Time
 	height  uint32
 	assetID uint32
-}
-
-// waitSettings is used to define the lifecycle of a chainWaiter.
-type waitSettings struct {
-	expiration time.Time
-	accountID  account.AccountID
-	request    *msgjson.Message
-	timeoutErr *msgjson.Error
-}
-
-// A chainWaiter is a function that is repeated periodically until a boolean
-// true is returned, or the expiration time is surpassed. In the latter case a
-// timeout error is sent to the client.
-type chainWaiter struct {
-	params *waitSettings
-	f      func() bool
 }
 
 // A stepActor is a structure holding information about one party of a match.
@@ -178,31 +156,27 @@ type Swapper struct {
 	// The matches map and the contained matches are protected by the matchMtx.
 	matchMtx sync.RWMutex
 	matches  map[string]*matchTracker
-	// To accommodate network latency, when transaction data is being drawn from
-	// the backend, the function may run repeatedly on some interval until either
-	// the transaction data is successfully retrieved, or a timeout is surpassed.
-	// These chainWaiters are added to the monitor loop via the waiters channel.
-	waiterMtx sync.RWMutex
-	waiters   []*chainWaiter
 	// Each asset backend gets a goroutine to monitor for new blocks. When a new
 	// block is received, it is passed to the start loop through the block
 	// channel.
 	block chan *blockNotification
 	// The broadcast timeout.
 	bTimeout time.Duration
+	// coinWaiter is a coinwaiter.Waiter to deal with latency.
+	coinWaiter *coinwaiter.Waiter
 }
 
 // NewSwapper is a constructor for a Swapper.
 func NewSwapper(cfg *Config) *Swapper {
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		coins:    cfg.Assets,
-		storage:  cfg.Storage,
-		authMgr:  authMgr,
-		matches:  make(map[string]*matchTracker),
-		waiters:  make([]*chainWaiter, 0, 256),
-		block:    make(chan *blockNotification, 8),
-		bTimeout: cfg.BroadcastTimeout,
+		coins:      cfg.Assets,
+		storage:    cfg.Storage,
+		authMgr:    authMgr,
+		coinWaiter: coinwaiter.New(recheckInterval, authMgr.Send),
+		matches:    make(map[string]*matchTracker),
+		block:      make(chan *blockNotification, 8),
+		bTimeout:   cfg.BroadcastTimeout,
 	}
 
 	// The swapper is only concerned with two types of client-originating
@@ -213,30 +187,8 @@ func NewSwapper(cfg *Config) *Swapper {
 	return swapper
 }
 
-// waitMempool attempts to run the passed function. If the function returns
-// the value dontTryAgain, nothing else is done. If the function returns the
-// value tryAgain, the function is queued to run on an interval until it returns
-// dontTryAgain, or until an expiration time is exceeded, as specified in the
-// waitSettings.
-func (s *Swapper) waitMempool(params *waitSettings, f func() bool) {
-	if time.Now().After(params.expiration) {
-		log.Error("Swapper.waitMempool: waitSettings given expiration before present")
-		return
-	}
-	// Check to see if it passes right away.
-	if f() {
-		return
-	}
-	s.waiterMtx.Lock()
-	s.waiters = append(s.waiters, &chainWaiter{params: params, f: f})
-	s.waiterMtx.Unlock()
-}
-
 // Run is the main Swapper loop.
 func (s *Swapper) Run(ctx context.Context) {
-	// The latencyTicker triggers a check of all chainWaiter functions.
-	latencyTicker := time.NewTicker(recheckInterval)
-	defer latencyTicker.Stop()
 	// bcastTriggers is used to sequence an examination of an asset's related
 	// matches some time (bTimeout) after a block notification is received.
 	bcastTriggers := make([]*blockNotification, 0, 16)
@@ -248,32 +200,6 @@ func (s *Swapper) Run(ctx context.Context) {
 			timeTil = minTimeout
 		}
 		bcastTicker = time.NewTimer(timeTil)
-	}
-
-	runWaiters := func() {
-		s.waiterMtx.Lock()
-		defer s.waiterMtx.Unlock()
-		agains := make([]*chainWaiter, 0)
-		// Grab new waiters
-		tNow := time.Now()
-		for _, mFunc := range s.waiters {
-			if !mFunc.f() {
-				// If this waiter has expired, issue the timeout error to the client
-				// and do not append to the agains slice.
-				if mFunc.params.expiration.Before(tNow) {
-					p := mFunc.params
-					resp, err := msgjson.NewResponse(p.request.ID, nil, p.timeoutErr)
-					if err != nil {
-						log.Error("NewResponse error in (Swapper).loop: %v", err)
-						continue
-					}
-					s.authMgr.Send(p.accountID, resp)
-					continue
-				}
-				agains = append(agains, mFunc)
-			} // End if !mFunc.f(). nothing to do if mFunc returned dontTryAgain=true
-		}
-		s.waiters = agains
 	}
 
 	// Start a listen loop for each asset's block channel.
@@ -295,11 +221,11 @@ func (s *Swapper) Run(ctx context.Context) {
 		}(assetID, asset.Backend.BlockChannel(5))
 	}
 
+	go s.coinWaiter.Run(ctx)
+
 out:
 	for {
 		select {
-		case <-latencyTicker.C:
-			runWaiters()
 		case block := <-s.block:
 			// Schedule a check of matches with one side equal to this block's asset
 			// by appending the block to the bcastTriggers.
@@ -717,24 +643,6 @@ func (s *Swapper) authUser(user account.AccountID, params msgjson.Signable) *msg
 	return nil
 }
 
-// coinWaitRules is a constructor for a waitSettings with a 1-minute timeout and
-// a standardized error message.
-// NOTE: 1 minute is pretty arbitrary. Consider making this a DEX variable, or
-// smarter in some way.
-func coinWaitRules(user account.AccountID, msg *msgjson.Message, coinID []byte) *waitSettings {
-	return &waitSettings{
-		// must smarten up this expiration value before merge. Where should this
-		// come from?
-		expiration: time.Now().Add(txWaitExpiration),
-		accountID:  user,
-		request:    msg,
-		timeoutErr: &msgjson.Error{
-			Code:    msgjson.TransactionUndiscovered,
-			Message: fmt.Sprintf("failed to find transaction %x", coinID),
-		},
-	}
-}
-
 // messageAcker is information needed to process the user's
 // msgjson.AcknowledgementResult.
 type messageAcker struct {
@@ -813,7 +721,7 @@ func (s *Swapper) saveMatch(match *order.Match) {
 // processInit processes the `init` RPC request, which is used to inform the
 // DEX of a newly broadcast swap transaction. Once the transaction is seen and
 // and audited by the Swapper, the counter-party is informed with an 'audit'
-// request. This method is run as a chainWaiter.
+// request. This method is run as a coin waiter.
 func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) bool {
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
@@ -825,23 +733,23 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		// NOTE: Could get a little smarter here by using go 1.13 (Error).Is to
 		// check that the transaction was not found, and not some other less
 		// recoverable state. Should require minimal modification of backends.
-		return tryAgain
+		return coinwaiter.TryAgain
 	}
 	// Decode the contract and audit the contract.
 	recipient, val, err := coin.AuditContract()
 	if err != nil {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError, fmt.Sprintf("error auditing contract: %v", err))
-		return dontTryAgain
+		return coinwaiter.DontTryAgain
 	}
 	if recipient != counterParty.order.Trade().SwapAddress() {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("incorrect recipient. expected %s. got %s", recipient, counterParty.order.Trade().SwapAddress()))
-		return dontTryAgain
+		return coinwaiter.DontTryAgain
 	}
 	if val != stepInfo.checkVal {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("contract error. expected contract value to be %d, got %d", stepInfo.checkVal, val))
-		return dontTryAgain
+		return coinwaiter.DontTryAgain
 	}
 
 	// Update the match.
@@ -875,7 +783,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if err != nil {
 		// This is likely an impossibly condition.
 		log.Errorf("error creating audit request: %v", err)
-		return dontTryAgain
+		return coinwaiter.DontTryAgain
 	}
 	// Set up the acknowledgement for the callback.
 	ack := &messageAcker{
@@ -889,12 +797,12 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, ack)
 	})
-	return dontTryAgain
+	return coinwaiter.DontTryAgain
 }
 
 // processRedeem processes a 'redeem' request from a client. processRedeem does
 // not perform user authentication, which is handled in handleRedeem before
-// processRedeem is invoked. This method is run as a chainWaiter.
+// processRedeem is invoked. This method is run as a coin waiter.
 func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) bool {
 	// Get the transaction
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
@@ -903,7 +811,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
 	if err != nil {
-		return tryAgain
+		return coinwaiter.TryAgain
 	}
 	// Make sure that the expected output is being spent.
 	status := counterParty.status
@@ -911,12 +819,12 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if err != nil {
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
 			fmt.Sprintf("error checking redemption %x: %v", status.swap.ID(), err))
-		return dontTryAgain
+		return coinwaiter.DontTryAgain
 	}
 	if !spends {
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
 			fmt.Sprintf("redemption does not spend %x", status.swap.ID()))
-		return dontTryAgain
+		return coinwaiter.DontTryAgain
 	}
 
 	// Modify the match's swapStatuses.
@@ -947,7 +855,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
 	if err != nil {
 		log.Errorf("error creating redemption request: %v", err)
-		return dontTryAgain
+		return coinwaiter.DontTryAgain
 	}
 	// Set up the acknowledgement callback.
 	ack := &messageAcker{
@@ -959,7 +867,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, ack)
 	})
-	return dontTryAgain
+	return coinwaiter.DontTryAgain
 
 }
 
@@ -986,8 +894,8 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 		return rpcErr
 	}
 
-	// Since we have to consider latency, run this as a chainWaiter.
-	s.waitMempool(coinWaitRules(user, msg, params.CoinID), func() bool {
+	// Since we have to consider latency, run this as a coin waiter.
+	s.coinWaiter.Wait(coinwaiter.NewSettings(user, msg, params.CoinID, txWaitExpiration), func() bool {
 		return s.processInit(msg, params, stepInfo)
 	})
 	return nil
@@ -1017,8 +925,8 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 		return rpcErr
 	}
 
-	// Since we have to consider latency, run this as a chainWaiter.
-	s.waitMempool(coinWaitRules(user, msg, params.CoinID), func() bool {
+	// Since we have to consider latency, run this as a coin waiter.
+	s.coinWaiter.Wait(coinwaiter.NewSettings(user, msg, params.CoinID, txWaitExpiration), func() bool {
 		return s.processRedeem(msg, params, stepInfo)
 	})
 	return nil

@@ -17,4 +17,14 @@ export default class Doc {
   static noderize (html) {
     return parser.parseFromString(html, 'text/html')
   }
+
+  static mouseInElement (e, el) {
+    const rect = el.getBoundingClientRect()
+    return e.pageX >= rect.left && e.pageX <= rect.right &&
+      e.pageY >= rect.top && e.pageY <= rect.bottom
+  }
+
+  static empty (el) {
+    while (el.firstChild) el.removeChild(el.firstChild)
+  }
 }

@@ -25,10 +25,11 @@ var (
 func newTestDB(t *testing.T) *boltDB {
 	tCounter++
 	dbPath := filepath.Join(tDir, fmt.Sprintf("db%d.db", tCounter))
-	dbi, err := NewDB(tCtx, dbPath)
+	dbi, err := NewDB(dbPath)
 	if err != nil {
 		t.Fatalf("error creating dB: %v", err)
 	}
+	go dbi.Run(tCtx)
 	db, ok := dbi.(*boltDB)
 	if !ok {
 		t.Fatalf("DB is not a *boltDB")
@@ -68,12 +69,18 @@ func TestAccounts(t *testing.T) {
 		numToDo /= 4
 	}
 	accts := make([]*db.AccountInfo, 0, numToDo)
-	nTimes(numToDo, func(int) { accts = append(accts, dbtest.RandomAccountInfo()) })
+	acctMap := make(map[string]*db.AccountInfo)
+	nTimes(numToDo, func(int) {
+		acct := dbtest.RandomAccountInfo()
+		accts = append(accts, acct)
+		acctMap[acct.URL] = acct
+	})
 	tStart := time.Now()
 	nTimes(numToDo, func(i int) {
 		boltdb.CreateAccount(accts[i])
 	})
 	t.Logf("%d milliseconds to insert %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
+
 	tStart = time.Now()
 	nTimes(numToDo, func(i int) {
 		ai := accts[i]
@@ -83,7 +90,22 @@ func TestAccounts(t *testing.T) {
 		}
 		dbtest.MustCompareAccountInfo(t, ai, reAI)
 	})
-	t.Logf("%d milliseconds to read and compare %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
+	t.Logf("%d milliseconds to read and compare %d account names", time.Since(tStart)/time.Millisecond, numToDo)
+
+	tStart = time.Now()
+	readAccts, err := boltdb.Accounts()
+	if err != nil {
+		t.Fatalf("Accounts error: %v", err)
+	}
+	nTimes(numToDo, func(i int) {
+		reAI := readAccts[i]
+		ai, found := acctMap[reAI.URL]
+		if !found {
+			t.Fatalf("no account found in map for %s", reAI.URL)
+		}
+		dbtest.MustCompareAccountInfo(t, ai, reAI)
+	})
+	t.Logf("%d milliseconds to batch read and compare %d AccountInfo", time.Since(tStart)/time.Millisecond, numToDo)
 
 	dexURLs, err = boltdb.ListAccounts()
 	if err != nil {
@@ -120,6 +142,67 @@ func TestAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create account after fixing")
 	}
+
+	// Test account proofs.
+	zerothURL := accts[0].URL
+	zerothAcct, _ := boltdb.Account(zerothURL)
+	if zerothAcct.Paid {
+		t.Fatalf("Account marked as paid before account proof set")
+	}
+	boltdb.AccountPaid(&db.AccountProof{
+		URL:   zerothAcct.URL,
+		Stamp: 123456789,
+		Sig:   []byte("some signature here"),
+	})
+	reAcct, _ := boltdb.Account(zerothURL)
+	if !reAcct.Paid {
+		t.Fatalf("Account not marked as paid after account proof set")
+	}
+}
+
+func TestWallets(t *testing.T) {
+	boltdb := newTestDB(t)
+	wallets, err := boltdb.Wallets()
+	if err != nil {
+		t.Fatalf("error listing wallets from empty DB: %v", err)
+	}
+	if len(wallets) != 0 {
+		t.Fatalf("unexpected non-empty wallets in fresh DB")
+	}
+	// Create and insert 1,000 wallets.
+	numToDo := 1000
+	if testing.Short() {
+		numToDo /= 4
+	}
+	wallets = make([]*db.Wallet, 0, numToDo)
+	walletMap := make(map[string]*db.Wallet)
+	tStart := time.Now()
+	nTimes(numToDo, func(int) {
+		w := dbtest.RandomWallet()
+		wallets = append(wallets, w)
+		walletMap[w.SID()] = w
+		boltdb.UpdateWallet(w)
+	})
+	t.Logf("%d milliseconds to insert %d Wallet", time.Since(tStart)/time.Millisecond, numToDo)
+
+	tStart = time.Now()
+	reWallets, err := boltdb.Wallets()
+	if err != nil {
+		t.Fatalf("wallets retrieval error: %v", err)
+	}
+	if len(reWallets) != numToDo {
+		t.Fatalf("expected %d wallets, got %d", numToDo, len(reWallets))
+	}
+	for _, reW := range reWallets {
+		wid := reW.SID()
+		ogWallet, found := walletMap[wid]
+		if !found {
+			t.Fatalf("wallet %s not found after retrieval", wid)
+		}
+		dbtest.MustCompareWallets(t, reW, ogWallet)
+	}
+	t.Logf("%d milliseconds to read and compare %d Wallet", time.Since(tStart)/time.Millisecond, numToDo)
+
 }
 
 func randOrderForMarket(base, quote uint32) order.Order {
@@ -261,7 +344,7 @@ func TestOrders(t *testing.T) {
 	tStart = time.Now()
 	sinceOrders, err := boltdb.AccountOrders(acct1.URL, 0, tMid)
 	if err != nil {
-		t.Fatalf("error retreiving account's since orders: %v", err)
+		t.Fatalf("error retrieve account's since orders: %v", err)
 	}
 	if len(sinceOrders) != numToDo/4 {
 		t.Fatalf("expected %d orders for account with since time, got %d", numToDo/4, len(sinceOrders))
@@ -286,7 +369,7 @@ func TestOrders(t *testing.T) {
 	tStart = time.Now()
 	sinceOrders, err = boltdb.MarketOrders(acct1.URL, base1, quote1, 0, tMid)
 	if err != nil {
-		t.Fatalf("error retreiving market's since orders: %v", err)
+		t.Fatalf("error retrieving market's since orders: %v", err)
 	}
 	if len(sinceOrders) != numToDo/4 {
 		t.Fatalf("expected %d orders for market with since time, got %d", numToDo/4, len(sinceOrders))

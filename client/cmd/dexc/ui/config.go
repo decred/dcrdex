@@ -13,15 +13,18 @@ import (
 	"runtime"
 	"strings"
 
+	"decred.org/dcrdex/dex"
 	"github.com/decred/dcrd/dcrutil/v2"
 	flags "github.com/jessevdk/go-flags"
 )
 
 const (
-	maxLogRolls    = 16
-	defaultRPCAddr = "localhost:5757"
-	defaultWebAddr = "localhost:5758"
-	configFilename = "dexc_mainnet.conf"
+	maxLogRolls     = 16
+	defaultRPCAddr  = "localhost:5757"
+	defaultWebAddr  = "localhost:5758"
+	configFilename  = "dexc_mainnet.conf"
+	certsFilename   = "certs.json"
+	defaultLogLevel = "info"
 )
 
 var (
@@ -65,16 +68,18 @@ type Config struct {
 	Testnet    bool   `long:"testnet" description:"use testnet"`
 	Simnet     bool   `long:"simnet" description:"use simnet"`
 	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
+	DebugLevel string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
 	// Certs is not set by the client. It is parsed from the JSON file at the
 	// Certs path.
 	Certs map[string]string
+	Net   dex.Network
 }
 
 var defaultConfig = Config{
-	DataDir: applicationDirectory,
-	Config:  defaultConfigPath,
-	RPCAddr: defaultRPCAddr,
-	WebAddr: defaultWebAddr,
+	DataDir:    applicationDirectory,
+	DebugLevel: defaultLogLevel,
+	RPCAddr:    defaultRPCAddr,
+	WebAddr:    defaultWebAddr,
 }
 
 // Configure processes the application configuration.
@@ -136,19 +141,29 @@ func Configure() (*Config, error) {
 	var defaultDBPath string
 	switch {
 	case cfg.Testnet:
+		cfg.Net = dex.Testnet
 		defaultDBPath = setNet("testnet")
 	case cfg.Simnet:
+		cfg.Net = dex.Simnet
 		defaultDBPath = setNet("simnet")
 	default:
+		cfg.Net = dex.Mainnet
 		defaultDBPath = setNet("mainnet")
 	}
 
-	if cfg.CertsPath != "" {
-		b, err := ioutil.ReadFile(cfg.CertsPath)
-		if err != nil {
+	defaultCertsPath := filepath.Join(preCfg.DataDir, certsFilename)
+	if cfg.CertsPath == "" {
+		cfg.CertsPath = defaultCertsPath
+	}
+	b, err := ioutil.ReadFile(cfg.CertsPath)
+	if err != nil {
+		// If the certificate path is the default path, assume the error is for a
+		// missing file and ignore it.
+		if cfg.CertsPath != defaultCertsPath {
 			return nil, fmt.Errorf("error reading certificates file: %v", err)
 		}
-		err = json.Unmarshal(b, cfg.Certs)
+	} else {
+		err = json.Unmarshal(b, &cfg.Certs)
 		if err != nil {
 			return nil, fmt.Errorf("error parsing certificates file: %v", err)
 		}

@@ -271,7 +271,7 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 	if txOut.Confirmations > 0 {
 		blk, err := btc.getBlockInfo(verboseTx.BlockHash)
 		if err != nil {
-			return nil, fmt.Errorf("error retreiving block for hash %s", verboseTx.BlockHash)
+			return nil, fmt.Errorf("error retrieving block for hash %s", verboseTx.BlockHash)
 		}
 		blockHeight = blk.height
 		blockHash = blk.hash
@@ -520,7 +520,7 @@ out:
 				}
 				iBlock, err := btc.node.GetBlockVerbose(iHash)
 				if err != nil {
-					btc.log.Errorf("error retreiving block %s: %v", iHash, err)
+					btc.log.Errorf("error retrieving block %s: %v", iHash, err)
 					break
 				}
 				if iBlock.Confirmations > -1 {

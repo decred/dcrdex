@@ -64,7 +64,7 @@ func TestWsConn(t *testing.T) {
 
 	id := uint64(0)
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		hCtx, hCancel := context.WithCancel(context.Background())
+		hCtx, hCancel := context.WithCancel(ctx)
 		atomic.AddUint64(&id, 1)
 
 		c, err := upgrader.Upgrade(w, r, nil)
@@ -111,12 +111,17 @@ func TestWsConn(t *testing.T) {
 				c.Close()
 				hCancel()
 
+				// If the context has been canceled, don't do anything.
+				if hCtx.Err() != nil {
+					return
+				}
+
 				if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 					// Terminate on a normal close message.
 					return
 				}
 
-				t.Errorf("handler #%d: read error: %v", id, err)
+				t.Fatalf("handler #%d: read error: %v\n", id, err)
 				return
 			}
 
@@ -381,9 +386,10 @@ func TestFailingConnection(t *testing.T) {
 		RpcCert:  certFile.Name(),
 		Ctx:      ctx,
 	}
+	// Initial connection will fail immediately
 	wsc, err := NewWsConn(cfg)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("no error for non-existent server")
 	}
 
 	go func() {

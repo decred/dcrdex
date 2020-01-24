@@ -45,7 +45,6 @@ type TCore struct {
 	reg *core.Registration
 }
 
-func (c *TCore) ListMarkets() []*core.MarketInfo { return tMarkets }
 func (c *TCore) Register(r *core.Registration) error {
 	c.reg = r
 	return nil
@@ -106,6 +105,27 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {}
 
 func (c *TCore) Balance(uint32) (uint64, error) {
 	return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6)), nil
+}
+
+func (c *TCore) WalletStatus(assetID uint32) (has, running, open bool) {
+	has = rand.Float32() > 0.33
+	if has {
+		open = rand.Float32() > 0.5
+		running = open
+	}
+	return
+}
+func (c *TCore) CreateWallet(form *core.WalletForm) error   { return nil }
+func (c *TCore) OpenWallet(assetID uint32, pw string) error { return nil }
+func (c *TCore) Wallets() []*core.WalletStatus {
+	return []*core.WalletStatus{
+		{
+			Symbol:  "dcr",
+			AssetID: 42,
+			Open:    true,
+			Running: true,
+		},
+	}
 }
 
 func TestServer(t *testing.T) {

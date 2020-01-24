@@ -5,11 +5,21 @@ package auth
 
 import (
 	"encoding/json"
+	"time"
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
+)
+
+var (
+	// The coin waiters will query for transaction data every recheckInterval.
+	recheckInterval = time.Second * 5
+	// txWaitExpiration is the longest the AuthManager will wait for a coin
+	// waiter. This could be thought of as the maximum allowable backend latency.
+	txWaitExpiration = time.Minute
 )
 
 // handleRegister handles requests to the 'register' route.
@@ -76,7 +86,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		}
 	}
 
-	resp, err := msgjson.NewResponse(comms.NextID(), regRes, nil)
+	resp, err := msgjson.NewResponse(msg.ID, regRes, nil)
 	if err != nil {
 		log.Errorf("error creating new response for registration result: %v", err)
 		return &msgjson.Error{
@@ -112,6 +122,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 			Message: "invalid account ID: " + notifyFee.AccountID.String(),
 		}
 	}
+
 	var acctID account.AccountID
 	copy(acctID[:], notifyFee.AccountID)
 	acct, paid, open := auth.storage.Account(acctID)
@@ -159,63 +170,75 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 		}
 	}
 
-	// Validate fee.
-	addr, val, confs, err := auth.checkFee(notifyFee.CoinID)
-	if err != nil {
-		return &msgjson.Error{
-			Code:    msgjson.FeeError,
-			Message: "error getting fee info: " + err.Error(),
+	auth.coinWaiter.Wait(coinwaiter.NewSettings(acctID, msg, notifyFee.CoinID, txWaitExpiration), func() bool {
+		// Validate fee.
+		addr, val, confs, err := auth.checkFee(notifyFee.CoinID)
+		if err != nil || confs < auth.feeConfs {
+			return coinwaiter.TryAgain
 		}
-	}
-	if val < auth.regFee {
-		return &msgjson.Error{
-			Code:    msgjson.FeeError,
-			Message: "fee too low",
+		var msgErr *msgjson.Error
+		defer func() {
+			if msgErr != nil {
+				resp, err := msgjson.NewResponse(msg.ID, nil, msgErr)
+				if err != nil {
+					log.Errorf("error encoding notifyfee error response: %v", err)
+					return
+				}
+				err = conn.Send(resp)
+				if err != nil {
+					log.Warnf("error sending notifyfee result to link: %v", err)
+				}
+			}
+		}()
+		if val < auth.regFee {
+			msgErr = &msgjson.Error{
+				Code:    msgjson.FeeError,
+				Message: "fee too low",
+			}
+			return coinwaiter.DontTryAgain
 		}
-	}
-	if confs < auth.feeConfs {
-		return &msgjson.Error{
-			Code:    msgjson.FeeError,
-			Message: "too few confirmations",
+		if addr != regAddr {
+			msgErr = &msgjson.Error{
+				Code:    msgjson.FeeError,
+				Message: "wrong fee address. wanted " + regAddr + " got " + addr,
+			}
+			return coinwaiter.DontTryAgain
 		}
-	}
-	if addr != regAddr {
-		return &msgjson.Error{
-			Code:    msgjson.FeeError,
-			Message: "wrong fee address. wanted " + regAddr + " got " + addr,
-		}
-	}
 
-	// Mark the account as paid
-	err = auth.storage.PayAccount(acctID, notifyFee.CoinID)
-	if err != nil {
-		return &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "wrong fee address. wanted " + regAddr + " got " + addr,
+		// Mark the account as paid
+		err = auth.storage.PayAccount(acctID, notifyFee.CoinID)
+		if err != nil {
+			msgErr = &msgjson.Error{
+				Code:    msgjson.RPCInternalError,
+				Message: "wrong fee address. wanted " + regAddr + " got " + addr,
+			}
+			return coinwaiter.DontTryAgain
 		}
-	}
 
-	// Create, sign, and send the the response.
-	err = auth.Sign(notifyFee)
-	if err != nil {
-		return &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "internal signature error",
+		// Create, sign, and send the the response.
+		err = auth.Sign(notifyFee)
+		if err != nil {
+			msgErr = &msgjson.Error{
+				Code:    msgjson.RPCInternalError,
+				Message: "internal signature error",
+			}
+			return coinwaiter.DontTryAgain
 		}
-	}
-	notifyRes := new(msgjson.NotifyFeeResult)
-	notifyRes.SetSig(notifyFee.SigBytes())
-	resp, err := msgjson.NewResponse(msg.ID, notifyRes, nil)
-	if err != nil {
-		return &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "internal encoding error",
+		notifyRes := new(msgjson.NotifyFeeResult)
+		notifyRes.SetSig(notifyFee.SigBytes())
+		resp, err := msgjson.NewResponse(msg.ID, notifyRes, nil)
+		if err != nil {
+			msgErr = &msgjson.Error{
+				Code:    msgjson.RPCInternalError,
+				Message: "internal encoding error",
+			}
+			return coinwaiter.DontTryAgain
 		}
-	}
-	err = conn.Send(resp)
-	if err != nil {
-		log.Warnf("error sending notifyfee result to link: %v", err)
-	}
-
+		err = conn.Send(resp)
+		if err != nil {
+			log.Warnf("error sending notifyfee result to link: %v", err)
+		}
+		return coinwaiter.DontTryAgain
+	})
 	return nil
 }

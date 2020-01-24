@@ -2,39 +2,33 @@
 {{template "top" .}}
 <div id="main" data-handler="register" class="main align-items-center justify-content-center flex-column">
   <div class="d-flex flex-column overflow-auto w-100">
-    <form class="auth mx-auto my-5 p-4 bg1">
+    <form class="auth mx-auto my-5 p-5 bg1">
       <div class="d-flex">
         <button type="button" data-pagelink="login" class="col-12 justify-content-center fs15 bg2">Log In</button>
         <button type="button" class="col-12 justify-content-center fs15 bg2 selected">Register</button>
       </div>
       <div>
-        <label for="dex" class="fs17 pt-3 pl-1 mb-0">DEX Address</label>
+        <label for="dex" class="pt-3 pl-1 mb-0">DEX Address</label>
         <input type="text" class="form-control select" id="dex">
       </div>
-      <div class="pb-3">
-        <label for="feeWallet" class="fs17 pt-3 pl-1 mb-0">Fee Wallet</label>
-        <select class="form-control select" id="feeWallet">
-          <option value="dcrw-manual">dcrwallet (manual configuration)</option>
-        </select>
+      <div>
+        <label for="dexPass" class="pt-3 pl-1 mb-0">Create DEX Password</label>
+        <input type="password" class="form-control select" id="dexPass">
       </div>
-      <div class="d-flex pb-3 pt-2">
-        <div class="col-12 pl-0 pr-2">
-          <label for="rpcAddr" class="fs17 mb-0">RPC Address</label>
-          <input type="text" class="form-control select" id="rpcAddr">
+      <div{{if .WalletExists}} class="d-hide"{{end}}>
+        <div>
+          <label for="iniPath" class="pt-3 pl-1 mb-0">Decred Wallet Configuration Filepath</label>
+          <input type="text" class="form-control select" id="iniPath">
         </div>
-        <div class="col-12 pl-2 pr-0">
-          <label for="rpcUser" class="fs17 mb-0">RPC Username</label>
-          <input type="text" class="form-control select" id="rpcUser">
+        <div>
+          <label for="acct" class="pt-3 pl-1 mb-0">Decred Wallet Account Name</label>
+          <input type="text" class="form-control select" id="acct">
         </div>
       </div>
-      <div class="d-flex pb-3">
-        <div class="col-12 pl-0 pr-2">
-          <label for="rpcPw" class="fs17 mb-0">RPC Password</label>
-          <input type="password" class="form-control select" id="rpcPw" autocomplete="new-password">
-        </div>
-        <div class="col-12 pl-2 pr-0">
-          <label for="walletPw" class="fs17 mb-0">Wallet Password</label>
-          <input type="password" class="form-control select" id="walletPw" autocomplete="new-password">
+      <div{{if .WalletOpen}} class="d-hide"{{end}}>
+        <div>
+          <label for="walletPass" class="pt-3 pl-1 mb-0">Decred Wallet Password</label>
+          <input type="password" class="form-control select" id="walletPass">
         </div>
       </div>
       <div class="d-flex justify-content-end mt-3">

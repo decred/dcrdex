@@ -40,17 +40,31 @@ const (
 	authCV = "authctx"
 )
 
-var log slog.Logger
+var (
+	log slog.Logger
+	// updateWalletRoute is a notification route that updates the state of a
+	// wallet.
+	updateWalletRoute = "update_wallet"
+	// errMsgRoute is used to send a simple error message .
+	errorMsgRoute = "error_message"
+	// successMsgRoute is used to send a simple success message.
+	successMsgRoute = "success_message"
+)
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {
-	ListMarkets() []*core.MarketInfo
-	Register(*core.Registration) error
+	Markets() map[string][]*core.Market
+	Register(*core.Registration) (error, <-chan error)
 	Login(dex, pw string) error
 	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
 	Book(dex string, base, quote uint32) *core.OrderBook
 	Unsync(dex string, base, quote uint32)
 	Balance(uint32) (uint64, error)
+	WalletStatus(assetID uint32) (has, running, open bool)
+	CreateWallet(form *core.WalletForm) error
+	OpenWallet(assetID uint32, pw string) error
+	Wallets() []*core.WalletStatus
+	User() *core.User
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -204,6 +218,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/register", s.apiRegister)
 		r.Post("/login", s.apiLogin)
+		r.Get("/user", s.apiUser)
 	})
 	// Files
 	fileServer(mux, "/js", fp(root, "dist"))
@@ -260,7 +275,7 @@ func (s *WebServer) token() string {
 
 // watchMarket watches the specified market. A fresh order book and a quit
 // function are returned on success. The quit function should be called to
-// unsubsribe the client from the market.
+// unsubscribe the client from the market.
 func (s *WebServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (book *core.OrderBook, quit func(), err error) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -335,9 +350,9 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 		switch err {
 		// Dark mode is the default
 		case nil:
-			darkMode = true
-		case http.ErrNoCookie:
 			darkMode = cookie.Value == "1"
+		case http.ErrNoCookie:
+			darkMode = true
 		default:
 			log.Errorf("Cookie dcrdataDarkBG retrieval error: %v", err)
 		}

@@ -12,7 +12,7 @@
 // field or an 'error' field
 //
 // Functions for external use:
-// registerEvtHandler (route, handler) -- register a function to handle events
+// registerRoute (route, handler) -- register a function to handle events
 // of the given type
 // request (route, payload) -- create a JSON message in the above format and
 // send it
@@ -46,12 +46,12 @@ class MessageSocket {
     this.maxQlength = 5
   }
 
-  registerEvtHandler (route, handler) {
+  registerRoute (route, handler) {
     this.handlers[route] = this.handlers[route] || []
     this.handlers[route].push(handler)
   }
 
-  deregisterEvtHandlers (route) {
+  deregisterRoute (route) {
     this.handlers[route] = []
   }
 
