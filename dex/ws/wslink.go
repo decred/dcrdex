@@ -20,6 +20,8 @@ import (
 // messages.
 const outBufferSize = 128
 
+const writeWait = 5 * time.Second
+
 // websocket.Upgrader is the preferred method of upgrading a request to a
 // websocket connection.
 var upgrader = websocket.Upgrader{}
@@ -41,6 +43,7 @@ const ErrClientDisconnected = Error("client disconnected")
 type Connection interface {
 	ReadMessage() (int, []byte, error)
 	WriteMessage(int, []byte) error
+	SetWriteDeadline(t time.Time) error
 	Close() error
 }
 
@@ -85,7 +88,7 @@ func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler f
 }
 
 // Send sends the passed Message to the websocket client. If the client's
-// channel if blocking (outBufferSize pending messages), the client is
+// channel is blocking (outBufferSize pending messages), the client is
 // disconnected.
 func (c *WSLink) Send(msg *msgjson.Message) error {
 	if c.Off() {
@@ -200,12 +203,14 @@ out:
 		// closed.
 		select {
 		case b := <-c.outChan:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			err := c.conn.WriteMessage(websocket.TextMessage, b)
 			if err != nil {
 				c.Disconnect()
 				break out
 			}
 		case <-ticker.C:
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			err := c.conn.WriteMessage(websocket.PingMessage, ping)
 			if err != nil {
 				c.Disconnect()
