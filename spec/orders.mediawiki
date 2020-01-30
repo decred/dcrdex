@@ -316,10 +316,6 @@ the timestamp.
 | orderid   || string || the order ID
 |-
 | tserver   || int  || the server's UNIX timestamp (milliseconds)
-|-
-| epochidx  || 8  || int || the epoch index assigned by the server. zero for client signature
-|-
-| epochdur  || 8  || int || the current DEX epoch duration, in milliseconds
 |}
 
 The client should use the server's timestamp to create a serialized order and
