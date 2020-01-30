@@ -5,9 +5,9 @@ package encode
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"time"
 )
 
@@ -53,7 +53,10 @@ func CopySlice(b []byte) []byte {
 // RandomBytes returns a byte slice with the specified length of random bytes.
 func RandomBytes(len int) []byte {
 	bytes := make([]byte, len)
-	rand.Read(bytes)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		panic("error reading random bytes: " + err.Error())
+	}
 	return bytes
 }
 
