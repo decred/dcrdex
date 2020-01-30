@@ -122,8 +122,7 @@ func (c *argonPolyCrypter) Encrypt(plainText []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aead error: %v", err)
 	}
-	nonceSize := boxer.NonceSize()
-	nonce := make([]byte, nonceSize)
+	nonce := make([]byte, boxer.NonceSize())
 	_, err = rand.Read(nonce)
 	if err != nil {
 		return nil, fmt.Errorf("nonce generation error: %v", err)
