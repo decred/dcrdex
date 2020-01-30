@@ -61,19 +61,6 @@ func TestDecrypt(t *testing.T) {
 		t.Fatalf("no error for extended nonce")
 	}
 	reCheck()
-
-	// bad additional data (key hash)
-	c, _ := crypter.(*argonPolyCrypter)
-	ogKey := c.key
-	var k Key
-	k[0] = 1
-	c.key = k
-	_, err = crypter.Decrypt(encThing)
-	if err == nil {
-		t.Fatalf("no error for changed key")
-	}
-	c.key = ogKey
-	reCheck()
 }
 
 func TestSerialize(t *testing.T) {
@@ -94,21 +81,17 @@ func TestSerialize(t *testing.T) {
 		}
 	}
 	check("begin", crypter)
-	serializedCrypter, err := crypter.Serialize()
-	if err != nil {
-		t.Fatalf("crypter.Serialize error: %v", err)
-	}
+	serializedCrypter := crypter.Serialize()
 	reCrypter, err := Deserialize(pw, serializedCrypter)
 	if err != nil {
 		t.Fatalf("Deserialize error: %v", err)
 	}
 	check("end", reCrypter)
 
-	// Won't serialize zeroed key.
-	crypter.Close()
-	_, err = crypter.Serialize()
+	// Can't deserialize with wrong password.
+	_, err = Deserialize("wrong password", serializedCrypter)
 	if err == nil {
-		t.Fatalf("no error when serializing closed Crypter")
+		t.Fatalf("no Deserialize error for wrong password")
 	}
 }
 
