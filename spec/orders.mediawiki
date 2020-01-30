@@ -279,8 +279,6 @@ All order serializations have common '''prefix''' fields.
 |-
 | accountid  || 32 || string || hex-encoded client account ID
 |-
-| commitment || 32 || string || hex-encoded cryptographic commitment
-|-
 | base       || 4  || int || the base asset ID
 |-
 | quote      || 4  || int || the quote asset ID
@@ -291,9 +289,7 @@ All order serializations have common '''prefix''' fields.
 |-
 | tserver    || 8  || int || the server's UNIX timestamp (milliseconds). zero for client signature
 |-
-| epochidx   || 8  || int || the epoch index assigned by the server. zero for client signature
-|-
-| epochdur   || 2  || int || the current DEX epoch duration, in seconds
+| commitment || 32 || string || hex-encoded cryptographic commitment
 |}
 
 ===Order ID===
@@ -319,7 +315,11 @@ the timestamp.
 |-
 | orderid   || string || the order ID
 |-
-| tserver || int  || the server's UNIX timestamp (milliseconds)
+| tserver   || int  || the server's UNIX timestamp (milliseconds)
+|-
+| epochidx  || 8  || int || the epoch index assigned by the server. zero for client signature
+|-
+| epochdur  || 8  || int || the current DEX epoch duration, in milliseconds
 |}
 
 The client should use the server's timestamp to create a serialized order and
