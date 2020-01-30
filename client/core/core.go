@@ -1219,7 +1219,7 @@ func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
 
 // stamp adds a timestamp and signature to the msgjson.Stampable.
 func stamp(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) error {
-	payload.Stamp(encode.UnixMilliU(time.Now()), 0, 0)
+	payload.Stamp(encode.UnixMilliU(time.Now()))
 	return sign(privKey, payload)
 }
 

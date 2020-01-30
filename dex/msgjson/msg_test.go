@@ -324,15 +324,13 @@ func TestPrefix(t *testing.T) {
 		0xac, 0xf4, 0x38, 0xb6, 0xc2, 0x91, 0x65, 0xf2, 0x0d, 0x8d,
 	}
 	prefix := &Prefix{
-		AccountID:     acctID,
-		Base:          256,
-		Quote:         65536,
-		OrderType:     1,
-		ClientTime:    1571871297,
-		ServerTime:    1571871841,
-		Commit:        commit,
-		EpochIdx:      157187184,
-		EpochDuration: 10000,
+		AccountID:  acctID,
+		Base:       256,
+		Quote:      65536,
+		OrderType:  1,
+		ClientTime: 1571871297,
+		ServerTime: 1571871841,
+		Commit:     commit,
 	}
 
 	exp := []byte{
@@ -354,10 +352,6 @@ func TestPrefix(t *testing.T) {
 		0xd9, 0x83, 0xec, 0xdf, 0x34, 0x0f, 0xd9, 0xaf, 0xda, 0xb8, 0x81,
 		0x8d, 0x5a, 0x29, 0x36, 0xe0, 0x71, 0xaf, 0x3c, 0xbb, 0x3d, 0xa8,
 		0xac, 0xf4, 0x38, 0xb6, 0xc2, 0x91, 0x65, 0xf2, 0x0d, 0x8d,
-		// Epoch Index
-		0x00, 0x00, 0x00, 0x00, 0x09, 0x5e, 0x7c, 0x70,
-		// Epoch Duration (msec)
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x27, 0x10,
 	}
 
 	b := prefix.Serialize()
@@ -395,12 +389,6 @@ func TestPrefix(t *testing.T) {
 	}
 	if !bytes.Equal(prefixBack.Commit, prefix.Commit) {
 		t.Fatalf("wrong commitment. wanted %d, got %d", prefix.Commit, prefixBack.Commit)
-	}
-	if prefixBack.EpochIdx != prefix.EpochIdx {
-		t.Fatalf("wrong epoch index. wanted %d, got %d", prefix.EpochIdx, prefixBack.EpochIdx)
-	}
-	if prefixBack.EpochDuration != prefix.EpochDuration {
-		t.Fatalf("wrong epoch duration. wanted %d, got %d", prefix.EpochDuration, prefixBack.EpochDuration)
 	}
 }
 
@@ -456,15 +444,13 @@ func TestLimit(t *testing.T) {
 	// serialization: prefix (105) + trade (variable) + address (~35)
 	// = 140 + len(trade)
 	prefix := &Prefix{
-		AccountID:     randomBytes(32),
-		Base:          256,
-		Quote:         65536,
-		OrderType:     1,
-		ClientTime:    1571874397,
-		ServerTime:    1571874405,
-		Commit:        randomBytes(32),
-		EpochIdx:      12341324,
-		EpochDuration: 3_000,
+		AccountID:  randomBytes(32),
+		Base:       256,
+		Quote:      65536,
+		OrderType:  1,
+		ClientTime: 1571874397,
+		ServerTime: 1571874405,
+		Commit:     randomBytes(32),
 	}
 	addr := "DsDePXLAKNsFCSmgfrEsYm8G1aCVZdYvP9"
 	coin1 := randomCoin()
@@ -541,15 +527,13 @@ func TestMarket(t *testing.T) {
 	// serialization: prefix (105) + trade (variable) + rate (8)
 	// + time-in-force (1) + address (~35) = 149 + len(trade)
 	prefix := &Prefix{
-		AccountID:     randomBytes(32),
-		Base:          256,
-		Quote:         65536,
-		OrderType:     1,
-		ClientTime:    1571874397,
-		ServerTime:    1571874405,
-		Commit:        randomBytes(32),
-		EpochIdx:      12341324,
-		EpochDuration: 3_000,
+		AccountID:  randomBytes(32),
+		Base:       256,
+		Quote:      65536,
+		OrderType:  1,
+		ClientTime: 1571874397,
+		ServerTime: 1571874405,
+		Commit:     randomBytes(32),
 	}
 	addr := "16brznLu4ieZ6tToKfUgibD94UcqshGUE3"
 	coin1 := randomCoin()
@@ -614,15 +598,13 @@ func TestMarket(t *testing.T) {
 func TestCancel(t *testing.T) {
 	// serialization: prefix (105) + target id (32) = 137
 	prefix := &Prefix{
-		AccountID:     randomBytes(32),
-		Base:          256,
-		Quote:         65536,
-		OrderType:     1,
-		ClientTime:    1571874397,
-		ServerTime:    1571874405,
-		Commit:        randomBytes(32),
-		EpochIdx:      12341324,
-		EpochDuration: 3_000,
+		AccountID:  randomBytes(32),
+		Base:       256,
+		Quote:      65536,
+		OrderType:  1,
+		ClientTime: 1571874397,
+		ServerTime: 1571874405,
+		Commit:     randomBytes(32),
 	}
 	targetID, _ := hex.DecodeString("a1f1b66916353b58dbb65562eb19731953b2f1215987a9d9137f0df3458637b7")
 	cancel := &CancelOrder{

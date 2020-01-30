@@ -229,10 +229,8 @@ func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
 	oid := o.order.ID()
 	resp, _ := msgjson.NewResponse(1, &msgjson.OrderResult{
 		Sig:        msgjson.Bytes{},
-		ServerTime: encode.UnixMilliU(now),
 		OrderID:    oid[:],
-		EpochIdx:   m.epochIdx,
-		EpochDur:   m.epochDur,
+		ServerTime: encode.UnixMilliU(now),
 	}, nil)
 	m.auth.Send(account.AccountID{}, resp)
 

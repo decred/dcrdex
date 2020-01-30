@@ -600,7 +600,7 @@ func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *Epoc
 	// Sign the order and prepare the client response. Only after the archiver
 	// has successfully stored the new epoch order should the order be committed
 	// for processing.
-	respMsg, err := m.orderResponse(rec, uint64(epoch.Epoch), uint64(epoch.Duration))
+	respMsg, err := m.orderResponse(rec)
 	if err != nil {
 		log.Errorf("failed to create msgjson.Message for order %v, msgID %v response: %v",
 			rec.order, rec.msgID, err)
@@ -1121,10 +1121,10 @@ func (m *Market) validateOrder(ord order.Order) error {
 
 // orderResponse signs the order data and prepares the OrderResult to be sent to
 // the client.
-func (m *Market) orderResponse(oRecord *orderRecord, epochIndex, epochDuration uint64) (*msgjson.Message, error) {
+func (m *Market) orderResponse(oRecord *orderRecord) (*msgjson.Message, error) {
 	// Add the server timestamp.
 	stamp := uint64(oRecord.order.Time())
-	oRecord.req.Stamp(stamp, epochIndex, epochDuration)
+	oRecord.req.Stamp(stamp)
 
 	// Sign the serialized order request.
 	err := m.auth.Sign(oRecord.req)
@@ -1136,10 +1136,8 @@ func (m *Market) orderResponse(oRecord *orderRecord, epochIndex, epochDuration u
 	oid := oRecord.order.ID()
 	res := &msgjson.OrderResult{
 		Sig:        oRecord.req.SigBytes(),
-		ServerTime: stamp,
 		OrderID:    oid[:],
-		EpochIdx:   epochIndex,
-		EpochDur:   epochDuration,
+		ServerTime: stamp,
 	}
 
 	// Encode the order response as a message for the client.

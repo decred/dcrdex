@@ -152,7 +152,7 @@ func (s *signable) SigBytes() []byte {
 // Stampable is an interface that supports timestamping and signing.
 type Stampable interface {
 	Signable
-	Stamp(serverTime, epochIndex, epochDuration uint64)
+	Stamp(serverTime uint64)
 }
 
 // Acknowledgement is the 'result' field in a response to a request that
@@ -468,23 +468,19 @@ type Coin struct {
 // Prefix is a common structure shared among order type payloads.
 type Prefix struct {
 	signable
-	AccountID     Bytes  `json:"accountid"`
-	Base          uint32 `json:"base"`
-	Quote         uint32 `json:"quote"`
-	OrderType     uint8  `json:"ordertype"`
-	ClientTime    uint64 `json:"tclient"`
-	ServerTime    uint64 `json:"tserver"`
-	Commit        Bytes  `json:"com"`
-	EpochIdx      uint64 `json:"epochidx"`
-	EpochDuration uint64 `json:"epochdur"`
+	AccountID  Bytes  `json:"accountid"`
+	Base       uint32 `json:"base"`
+	Quote      uint32 `json:"quote"`
+	OrderType  uint8  `json:"ordertype"`
+	ClientTime uint64 `json:"tclient"`
+	ServerTime uint64 `json:"tserver"`
+	Commit     Bytes  `json:"com"`
 }
 
 // Stamp sets the server timestamp and epoch ID. Partially satisfies the
 // Stampable interface.
-func (p *Prefix) Stamp(t, epochIdx, epochDur uint64) {
+func (p *Prefix) Stamp(t uint64) {
 	p.ServerTime = t
-	p.EpochIdx = epochIdx
-	p.EpochDuration = epochDur
 }
 
 // TODO: Update prefix serialization with commitment.
@@ -492,18 +488,16 @@ func (p *Prefix) Stamp(t, epochIdx, epochDur uint64) {
 // Serialize serializes the Prefix data.
 func (p *Prefix) Serialize() []byte {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
-	// order type (1) + client time (8) + server time (8) + epoch index (8) +
-	// epoch duration (8) + commitment (32) = 105 bytes
-	b := make([]byte, 0, 105)
+	// order type (1) + client time (8) + server time (8) + commitment (32)
+	// = 89 bytes
+	b := make([]byte, 0, 89)
 	b = append(b, p.AccountID...)
 	b = append(b, uint32Bytes(p.Base)...)
 	b = append(b, uint32Bytes(p.Quote)...)
 	b = append(b, p.OrderType)
 	b = append(b, uint64Bytes(p.ClientTime)...)
 	b = append(b, uint64Bytes(p.ServerTime)...)
-	b = append(b, p.Commit...)
-	b = append(b, uint64Bytes(p.EpochIdx)...)
-	return append(b, uint64Bytes(p.EpochDuration)...)
+	return append(b, p.Commit...)
 }
 
 // Trade is common to Limit and Market Payloads.
@@ -540,10 +534,10 @@ type LimitOrder struct {
 
 // Serialize serializes the Limit data.
 func (l *LimitOrder) Serialize() ([]byte, error) {
-	// serialization: prefix (65) + trade (variable) + rate (8)
-	// + time-in-force (1) + address (~35) = 110 + len(trade)
+	// serialization: prefix (89) + trade (variable) + rate (8)
+	// + time-in-force (1) + address (~35) = 133 + len(trade)
 	trade := l.Trade.Serialize()
-	b := make([]byte, 0, 110+len(trade))
+	b := make([]byte, 0, 133+len(trade))
 	b = append(b, l.Prefix.Serialize()...)
 	b = append(b, trade...)
 	b = append(b, uint64Bytes(l.Rate)...)
@@ -559,7 +553,7 @@ type MarketOrder struct {
 
 // Serialize serializes the MarketOrder data.
 func (m *MarketOrder) Serialize() ([]byte, error) {
-	// serialization: prefix (65) + trade (varies) + address (35 ish)
+	// serialization: prefix (89) + trade (varies) + address (35 ish)
 	b := append(m.Prefix.Serialize(), m.Trade.Serialize()...)
 	return append(b, []byte(m.Trade.Address)...), nil
 }
@@ -572,17 +566,15 @@ type CancelOrder struct {
 
 // Serialize serializes the CancelOrder data.
 func (c *CancelOrder) Serialize() ([]byte, error) {
-	// serialization: prefix (57) + target id (32) = 89
+	// serialization: prefix (89) + target id (32) = 121
 	return append(c.Prefix.Serialize(), c.TargetID...), nil
 }
 
 // OrderResult is returned from the order-placing routes.
 type OrderResult struct {
 	Sig        Bytes  `json:"sig"`
-	ServerTime uint64 `json:"tserver"`
 	OrderID    Bytes  `json:"orderid"`
-	EpochIdx   uint64 `json:"epochidx"`
-	EpochDur   uint64 `json:"epochdur"`
+	ServerTime uint64 `json:"tserver"`
 }
 
 // OrderBookSubscription is the payload for a client-originating request to the
@@ -753,7 +745,7 @@ func (n *NotifyFee) Serialize() ([]byte, error) {
 }
 
 // Stamp satisfies the Stampable interface.
-func (n *NotifyFee) Stamp(t, _, _ uint64) {
+func (n *NotifyFee) Stamp(t uint64) {
 	n.Time = t
 }
 
