@@ -8,6 +8,8 @@ package rpcserver
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -123,7 +125,7 @@ func (c *TConn) Close() error {
 
 var tPort = 5142
 
-func newTServer(t *testing.T, start bool) (*RPCServer, *TCore, context.CancelFunc) {
+func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore, context.CancelFunc) {
 	tPort++
 	c := &TCore{}
 	ctx, shutdown := context.WithCancel(tCtx)
@@ -134,7 +136,7 @@ func newTServer(t *testing.T, start bool) (*RPCServer, *TCore, context.CancelFun
 	cert, key := tmp+"cert.cert", tmp+"key.key"
 	defer os.Remove(cert)
 	defer os.Remove(key)
-	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), "", "", cert, key}
+	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), user, pass, cert, key}
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
@@ -172,7 +174,6 @@ func TestMain(m *testing.M) {
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	doIt := func() int {
-		// Not counted as coverage, must test Archiver constructor explicitly.
 		defer shutdown()
 		return m.Run()
 	}
@@ -182,7 +183,7 @@ func TestMain(m *testing.M) {
 func TestLoadMarket(t *testing.T) {
 	enableLogging()
 	link := newLink()
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown := newTServer(t, false, "", "")
 	defer shutdown()
 	tBase := uint32(1)
 	tQuote := uint32(2)
@@ -283,7 +284,7 @@ func TestLoadMarket(t *testing.T) {
 
 func TestHandleMessage(t *testing.T) {
 	link := newLink()
-	s, _, shutdown := newTServer(t, false)
+	s, _, shutdown := newTServer(t, false, "", "")
 	defer shutdown()
 	var msg *msgjson.Message
 
@@ -333,7 +334,7 @@ func (w *tResponseWriter) WriteHeader(statusCode int) {
 }
 
 func TestParseHTTPRequest(t *testing.T) {
-	s, _, shutdown := newTServer(t, false)
+	s, _, shutdown := newTServer(t, false, "", "")
 	defer shutdown()
 	var r *http.Request
 
@@ -410,8 +411,81 @@ func TestParseHTTPRequest(t *testing.T) {
 	ensureNoErr("good request")
 }
 
+type authMiddlewareTest struct {
+	name, user, pass, header string
+	hasAuth, wantErr         bool
+}
+
+func TestNew(t *testing.T) {
+	authTests := [][]string{
+		{"user", "pass", "AK+rg3mIGeouojwZwNRMjBjZouASr4mu4FWMTXQQcD0="},
+		{"", "", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
+		{`&!"#$%&'()~=`, `+<>*?,:.;/][{}`, "Te4g4+Ke9Q07MYo3iT1OCqq5qXX2ZcB47FBiVaT41hQ="},
+	}
+	for _, test := range authTests {
+		s, _, shutdown := newTServer(t, false, test[0], test[1])
+		auth := base64.StdEncoding.EncodeToString((s.authsha[:]))
+		if auth != test[2] {
+			t.Fatalf("expected auth %s but got %s", test[2], auth)
+		}
+		shutdown()
+	}
+}
+
+func TestAuthMiddleware(t *testing.T) {
+	s, _, shutdown := newTServer(t, false, "", "")
+	defer shutdown()
+	am := s.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	r, _ := http.NewRequest("GET", "", nil)
+
+	wantAuthError := func(name string, want bool) {
+		w := &tResponseWriter{}
+		am.ServeHTTP(w, r)
+		if w.code != http.StatusUnauthorized && w.code != http.StatusOK {
+			t.Fatalf("unexpected HTTP error %d for test \"%s\"", w.code, name)
+		}
+		switch want {
+		case true:
+			if w.code != http.StatusUnauthorized {
+				t.Fatalf("Expected unauthorized HTTP error for test \"%s\"", name)
+			}
+		case false:
+			if w.code == http.StatusUnauthorized {
+				t.Fatalf("Expected OK HTTP status for test \"%s\"", name)
+			}
+
+		}
+	}
+
+	user, pass := "Which one is it?", "It's the one that says bmf on it"
+	login := user + ":" + pass
+	h := "Basic "
+	auth := h + base64.StdEncoding.EncodeToString([]byte(login))
+	s.authsha = sha256.Sum256([]byte(auth))
+
+	tests := []authMiddlewareTest{
+		{"auth ok", user, pass, h, true, false},
+		{"wrong pass", user, "password123", h, true, true},
+		{"unknown user", "Jules", pass, h, true, true},
+		{"no header", user, pass, h, false, true},
+		{"malformed header", user, pass, "basic ", true, true},
+	}
+	for _, test := range tests {
+		login = test.user + ":" + test.pass
+		auth = test.header + base64.StdEncoding.EncodeToString([]byte(login))
+		requestHeader := make(http.Header)
+		if test.hasAuth {
+			requestHeader.Add("Authorization", auth)
+		}
+		r.Header = requestHeader
+		wantAuthError(test.name, test.wantErr)
+	}
+}
+
 func TestClientMap(t *testing.T) {
-	s, _, shutdown := newTServer(t, true)
+	s, _, shutdown := newTServer(t, true, "", "")
 	conn := new(TConn)
 
 	go s.websocketHandler(conn, "someip")

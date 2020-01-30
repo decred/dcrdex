@@ -172,7 +172,7 @@ func writeJSON(w http.ResponseWriter, thing interface{}) {
 	writeJSONWithStatus(w, thing, http.StatusOK)
 }
 
-// writeJSONWitStatus marshals the provided interface and writes the bytes to the
+// writeJSONWithStatus marshals the provided interface and writes the bytes to the
 // ResponseWriter with the specified response code.
 func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -312,10 +312,10 @@ func (s *RPCServer) Run(ctx context.Context) {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
 	s.mtx.Lock()
-	defer s.mtx.Unlock()
 	for _, cl := range s.clients {
 		cl.Disconnect()
 	}
+	s.mtx.Unlock()
 
 	// Wait for market syncers to finish.
 	s.wg.Wait()
@@ -347,7 +347,7 @@ func (s *RPCServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (b
 func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload {
 	payload := new(msgjson.ResponsePayload)
 	if req.Route == "" {
-		log.Debugf("received empty request")
+		log.Debugf("route not specified")
 		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "no route was supplied")
 		return payload
 	}
@@ -370,7 +370,9 @@ func (s *RPCServer) parseHTTPRequest(w http.ResponseWriter, req *msgjson.Message
 	payload := s.handleRequest(req)
 	resp, err := msgjson.NewResponse(req.ID, payload.Result, payload.Error)
 	if err != nil {
-		http.Error(w, "error encoding response", http.StatusInternalServerError)
+		err = fmt.Errorf("error encoding response: %v", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Error(err)
 		return
 	}
 	writeJSON(w, resp)
