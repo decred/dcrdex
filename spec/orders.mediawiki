@@ -474,7 +474,7 @@ match) due to a price increase, the DEX operator sets a ''market buy buffer'',
 '''''b<sub>m</sub> > 1''''' for each market.
 For a market where the base asset has lot size '''''l''''', and for which there
 is a best known standing sell order price rate, '''''r''''', the
-<code>ordersize</code>, '''''Q''''' must satisfy the relation
+<code>ordersize</code>, '''''Q''''', must satisfy the relation
 '''''Q > b<sub>m</sub> l r'''''.
 If the best rate increases before the order is matched, the order will still
 result in a fill as long as the price does not surpass

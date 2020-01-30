@@ -31,10 +31,10 @@ The '''broadcast timeout''' (<code>btimeout</code>) is the amount of time a
 client has to broadcast a transaction. For the maker, the broadcast time is
 measured from the time of match notification. For the taker, timeout is measured
 from the time when the maker's swap receives its
-<code>swapconf</code><sup>th</sup> confirmation (see [[#Asset_Variables]]).
+<code>swapconf</code><sup>th</sup> confirmation (see [[#Asset_Variables|Asset Variables]]).
 
 The user's transaction that pays the registration fee specified by the
-<code>register</code> response during [[accounts.mediawiki/#Account_Creation|Account Creation]]
+<code>register</code> response during [[accounts.mediawiki/#Account_Creation|account creation]]
 must have <code>regfeeconfirms</code> confirmations to be considered paid.
 
 ===Asset Variables===
@@ -96,17 +96,19 @@ respond with its current configuration.
 
 <code>result</code>
 {|
-! field     !! type !! description
+! field          !! type  !! description
 |-
-| cancelmax || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
+| cancelmax      || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
 |-
-| btimeout  || int   || the broadcast timeout
+| btimeout       || int   || the broadcast timeout
 |-
-| regfeeconfirms || int || required confirmations for the registration fee payment transaction
+| regfee         || int   || registration fee (Decred atoms)
 |-
-| assets    || &#91;object&#93; || list of Asset objects (definition below)
+| regfeeconfirms || int   || required confirmations for the registration fee payment transaction
 |-
-| markets   || &#91;object&#93; || list of Market objects (definition below)
+| assets         || &#91;object&#93; || list of Asset objects (definition below)
+|-
+| markets        || &#91;object&#93; || list of Market objects (definition below)
 |}
 
 '''Asset object'''
@@ -202,7 +204,6 @@ The goal of this algorithm is to ensure that an individual client cannot obtain
 a deterministic latency advantage over other clients when executing trades.
 Limiting this possibility mitigates advantages gained from front-running,
 spoofing, and other manipulative trading practices.
-Each market will have an epoch duration set by the operator.
 
 ===Epoch Time===
 
