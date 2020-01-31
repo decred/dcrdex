@@ -129,7 +129,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 	tPort++
 	c := &TCore{}
 	var shutdown func()
-	ctx, shutdown := context.WithCancel(tCtx)
+	ctx, killCtx := context.WithCancel(tCtx)
 	s, err := New(c, fmt.Sprintf("localhost:%d", tPort), tLogger, false)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
@@ -138,12 +138,12 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 	if start {
 		waiter := dex.NewStartStopWaiter(s)
 		waiter.Start(ctx)
-		killCtx := shutdown
 		shutdown = func() {
 			killCtx()
 			waiter.WaitForShutdown()
 		}
 	} else {
+		shutdown = killCtx
 		s.ctx = ctx
 	}
 	return s, c, shutdown
