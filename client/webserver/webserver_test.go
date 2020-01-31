@@ -390,7 +390,7 @@ func TestClientMap(t *testing.T) {
 
 	// Close the server and make sure the connection is closed.
 	shutdown()
-	time.Sleep(time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	if !cl.Off() {
 		t.Fatalf("connection not closed on server shutdown")
 	}
