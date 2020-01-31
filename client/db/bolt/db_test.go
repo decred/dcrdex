@@ -66,7 +66,7 @@ func TestAccounts(t *testing.T) {
 	// Create and insert 1,000 accounts.
 	numToDo := 1000
 	if testing.Short() {
-		numToDo /= 4
+		numToDo = 50
 	}
 	accts := make([]*db.AccountInfo, 0, numToDo)
 	acctMap := make(map[string]*db.AccountInfo)
@@ -172,7 +172,7 @@ func TestWallets(t *testing.T) {
 	// Create and insert 1,000 wallets.
 	numToDo := 1000
 	if testing.Short() {
-		numToDo /= 4
+		numToDo = 50
 	}
 	wallets = make([]*db.Wallet, 0, numToDo)
 	walletMap := make(map[string]*db.Wallet)
@@ -252,8 +252,8 @@ func TestOrders(t *testing.T) {
 	numToDo := 1008 // must be a multiple of 16
 	numActive := 100
 	if testing.Short() {
-		numToDo /= 4
-		numActive /= 4
+		numToDo = 48
+		numActive = 10
 	}
 	orders := make(map[int]*db.MetaOrder, numToDo)
 	orderIndex := make(map[order.OrderID]order.Order)
@@ -430,11 +430,11 @@ func TestMatches(t *testing.T) {
 	base, quote := randU32(), randU32()
 	acct := dbtest.RandomAccountInfo()
 
-	numToDo := 1000 // must be quadruply even e.g. numToDo/4 is even.
+	numToDo := 1000 // must be quadruply a multiple of 8.
 	numActive := 100
 	if testing.Short() {
-		numToDo /= 4
-		numActive /= 4
+		numToDo = 24
+		numActive = 8
 	}
 	metaMatches := make([]*db.MetaMatch, 0, numToDo)
 	matchIndex := make(map[order.MatchID]*db.MetaMatch, numToDo)
