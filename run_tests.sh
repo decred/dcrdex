@@ -3,7 +3,7 @@
 set -ex
 
 # run tests
-env GORACE="halt_on_error=1" go test -short ./...
+env GORACE="halt_on_error=1" go test -race -short ./...
 
 # golangci-lint (github.com/golangci/golangci-lint) is used to run each
 # static checker.
