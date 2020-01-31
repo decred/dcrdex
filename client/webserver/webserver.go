@@ -239,11 +239,6 @@ func (s *WebServer) Run(ctx context.Context) {
 		if err != nil {
 			log.Errorf("Problem shutting down rpc: %v", err)
 		}
-		s.mtx.Lock()
-		defer s.mtx.Unlock()
-		for _, cl := range s.clients {
-			cl.Disconnect()
-		}
 	}()
 	log.Infof("Web server listening on %s", s.listener.Addr())
 	err := s.srv.Serve(s.listener)
@@ -251,6 +246,12 @@ func (s *WebServer) Run(ctx context.Context) {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
 	log.Infof("Web server off")
+	<-ctx.Done()
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	for _, cl := range s.clients {
+		cl.Disconnect()
+	}
 }
 
 // auth creates, stores, and returns a new auth token.
