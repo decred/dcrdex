@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +71,7 @@ func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 }
 
 type TWebsocket struct {
+	mtx      sync.RWMutex
 	id       uint64
 	sendErr  error
 	reqErr   error
@@ -137,15 +139,25 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 	}, conn, acct
 }
 
+func (conn *TWebsocket) getHandlers(route string) []func(*msgjson.Message, msgFunc) error {
+	conn.mtx.RLock()
+	defer conn.mtx.RUnlock()
+	return conn.handlers[route]
+}
+
 func (conn *TWebsocket) queueResponse(route string, handler func(*msgjson.Message, msgFunc) error) {
-	handlers := conn.handlers[route]
+	handlers := conn.getHandlers(route)
 	if handlers == nil {
 		handlers = make([]func(*msgjson.Message, msgFunc) error, 0, 1)
 	}
+	conn.mtx.Lock()
 	conn.handlers[route] = append(handlers, handler)
+	conn.mtx.Unlock()
 }
 
 func (conn *TWebsocket) NextID() uint64 {
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
 	conn.id++
 	return conn.id
 }
@@ -153,7 +165,7 @@ func (conn *TWebsocket) NextID() uint64 {
 func (conn *TWebsocket) WaitForShutdown()                {}
 func (conn *TWebsocket) Send(msg *msgjson.Message) error { return conn.sendErr }
 func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
-	handlers := conn.handlers[msg.Route]
+	handlers := conn.getHandlers(msg.Route)
 	if len(handlers) > 0 {
 		handler := handlers[0]
 		conn.handlers[msg.Route] = handlers[1:]
@@ -250,6 +262,7 @@ func (c *tCoin) Redeem() dex.Bytes {
 }
 
 type TXCWallet struct {
+	mtx        sync.RWMutex
 	payFeeCoin *tCoin
 	payFeeErr  error
 }
@@ -316,7 +329,15 @@ func (w *TXCWallet) Lock() error {
 }
 
 func (w *TXCWallet) PayFee(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
 	return w.payFeeCoin, w.payFeeErr
+}
+
+func (w *TXCWallet) setConfs(confs uint32) {
+	w.mtx.Lock()
+	w.payFeeCoin.confs = confs
+	w.mtx.Unlock()
 }
 
 var tAssetID uint32
@@ -622,13 +643,6 @@ func TestRegister(t *testing.T) {
 		rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
 			f(resp)
-			// This is a good time to schedule a tip change, because the user's
-			// password-based encryption key has been created, which is by far the
-			// longest part.
-			timer = time.AfterFunc(time.Millisecond*5, func() {
-				tWallet.payFeeCoin.confs = tDCR.FundConf
-				tCore.tipChange(tDCR.ID, nil)
-			})
 			return nil
 		})
 	}
@@ -647,8 +661,30 @@ func TestRegister(t *testing.T) {
 		})
 	}
 
+	queueTipChange := func() {
+		go func() {
+			timeout := time.NewTimer(time.Second * 2)
+			for {
+				select {
+				case <-time.NewTimer(time.Millisecond).C:
+					tCore.waiterMtx.Lock()
+					waiterCount := len(tCore.waiters)
+					tCore.waiterMtx.Unlock()
+					if waiterCount > 0 {
+						tWallet.setConfs(tDCR.FundConf)
+						tCore.tipChange(tDCR.ID, nil)
+						return
+					}
+				case <-timeout.C:
+					t.Fatalf("failed to find waiter before timeout")
+				}
+			}
+		}()
+	}
+
 	queueResponses := func() {
 		queueRegister()
+		queueTipChange()
 		queueNotifyFee()
 	}
 
@@ -664,7 +700,7 @@ func TestRegister(t *testing.T) {
 		if timer != nil {
 			timer.Stop()
 		}
-		tWallet.payFeeCoin.confs = tDCR.FundConf
+		tWallet.setConfs(tDCR.FundConf)
 		// No errors
 		var errChan <-chan error
 		err, errChan = tCore.Register(form)
@@ -768,6 +804,7 @@ func TestRegister(t *testing.T) {
 
 	// notifyfee response error
 	queueRegister()
+	queueTipChange()
 	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
 		m, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(1, "test error message"))
 		f(m)
