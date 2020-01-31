@@ -450,6 +450,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 
 	// Set up the coin waiter.
 	errChan := make(chan error, 1)
+
 	c.waiterMtx.Lock()
 	c.waiters[form.DEX] = coinWaiter{
 		conn:  dc,
@@ -843,6 +844,13 @@ out:
 	}
 }
 
+// removeWaiter removes a coinWaiter from the map.
+func (c *Core) removeWaiter(dex string) {
+	c.waiterMtx.Lock()
+	delete(c.waiters, dex)
+	c.waiterMtx.Unlock()
+}
+
 // tipChange is called by a wallet backend when the tip block changes, or when
 // a connection error is encountered such that tip change reporting may be
 // adversely affected.
@@ -854,18 +862,21 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	log.Tracef("processing tip change for %s", unbip(assetID))
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
-	for _, w := range c.waiters {
+	for d, w := range c.waiters {
 		waiter := w
 		if waiter.asset.ID != assetID {
 			continue
 		}
+		dex := d
 		go func() {
 			confs, err := waiter.coin.Confirmations()
 			if err != nil {
 				waiter.f(nil, fmt.Errorf("Error getting confirmations for %x: %v", waiter.coin.ID(), err))
+				c.removeWaiter(dex)
 				return
 			}
 			if confs >= waiter.confs {
+				defer c.removeWaiter(dex)
 				// Sign the request and send it.
 				req := waiter.req
 				err := stamp(waiter.privKey, req)
@@ -878,9 +889,12 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 					waiter.f(nil, fmt.Errorf("failed to create notifyfee request: %v", err))
 					return
 				}
-				waiter.conn.Request(msg, func(msg *msgjson.Message) {
+				err = waiter.conn.Request(msg, func(msg *msgjson.Message) {
 					waiter.f(msg, nil)
 				})
+				if err != nil {
+					waiter.f(nil, fmt.Errorf("'notifyfee' request error: %v", err))
+				}
 			}
 		}()
 	}
