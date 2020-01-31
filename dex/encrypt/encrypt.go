@@ -94,11 +94,14 @@ func newArgonPolyCrypter(pw string) *argonPolyCrypter {
 	pwB := []byte(pw)
 	salt := newSalt()
 	threads := uint8(runtime.NumCPU())
-	keyB := argon2.IDKey(pwB, salt[:], defaultTime, defaultMem, threads, KeySize*2)
 
+	keyB := argon2.IDKey(pwB, salt[:], defaultTime, defaultMem, threads, KeySize*2)
+	// The argon2id key is split into two keys, The encryption key is the first 32
+	// bytes.
 	encKeyB := keyB[:KeySize]
 	var encKey Key
 	copy(encKey[:], encKeyB)
+	// MAC key is the second 32 bytes.
 	polyKeyB := keyB[KeySize:]
 	var polyKey [KeySize]byte
 	copy(polyKey[:], polyKeyB)
@@ -112,6 +115,7 @@ func newArgonPolyCrypter(pw string) *argonPolyCrypter {
 			threads: threads,
 		},
 	}
+	// Use the mac key and the serialized parameters to generate the autheticator.
 	poly1305.Sum(&c.tag, c.serializeParams(), &polyKey)
 	return c
 }
@@ -200,7 +204,7 @@ func decodeArgonPoly_v0(pw string, pushes [][]byte) (*argonPolyCrypter, error) {
 	}
 
 	if len(tagB) != poly1305.TagSize {
-		return nil, fmt.Errorf("mac code of incorrect length. wanted %d, got %d", poly1305.TagSize, len(tagB))
+		return nil, fmt.Errorf("mac authenticator of incorrect length. wanted %d, got %d", poly1305.TagSize, len(tagB))
 	}
 	var polyTag [poly1305.TagSize]byte
 	copy(polyTag[:], tagB)

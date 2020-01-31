@@ -61,6 +61,15 @@ func TestDecrypt(t *testing.T) {
 		t.Fatalf("no error for extended nonce")
 	}
 	reCheck()
+
+	// Corrupted blob
+	badThing = append(copyB(encThing), 123)
+	_, err = crypter.Decrypt(badThing)
+	if err == nil {
+		t.Fatalf("no error for corrupted blob")
+	}
+	reCheck()
+
 }
 
 func TestSerialize(t *testing.T) {
@@ -71,28 +80,69 @@ func TestSerialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encrypt error: %v", err)
 	}
-	check := func(tag string, c Crypter) {
-		reThing, err := c.Decrypt(encThing)
-		if err != nil {
-			t.Fatalf("%s: Decrypt error: %v", tag, err)
-		}
-		if !bytes.Equal(thing, reThing) {
-			t.Fatalf("%s: %x != %x", tag, thing, reThing)
-		}
-	}
-	check("begin", crypter)
 	serializedCrypter := crypter.Serialize()
-	reCrypter, err := Deserialize(pw, serializedCrypter)
-	if err != nil {
-		t.Fatalf("Deserialize error: %v", err)
+	reCheck := func(tag string) {
+		reCrypter, err := Deserialize(pw, serializedCrypter)
+		if err != nil {
+			t.Fatalf("%s: reCheck deserialization error: %v", tag, err)
+		}
+		reThing, err := reCrypter.Decrypt(encThing)
+		if err != nil {
+			t.Fatalf("%s: reCrypter failed to decrypt thing: %v", tag, err)
+		}
+		if !bytes.Equal(reThing, thing) {
+			t.Fatalf("%s: reCrypter's decoded thing is messed up: %x != %x", tag, reThing, thing)
+		}
 	}
-	check("end", reCrypter)
+	reCheck("first")
 
 	// Can't deserialize with wrong password.
 	_, err = Deserialize("wrong password", serializedCrypter)
 	if err == nil {
 		t.Fatalf("no Deserialize error for wrong password")
 	}
+	reCheck("after wrong password")
+
+	// Adding a random bytes should fail at DecodeBlob
+	badCrypter := append(copyB(serializedCrypter), 5)
+	_, err = Deserialize(pw, badCrypter)
+	if err == nil {
+		t.Fatalf("no Deserialize error for corrupted blob")
+	}
+	reCheck("after corrupted blob")
+
+	// Version 1 not known.
+	badCrypter = copyB(serializedCrypter)
+	badCrypter[0] = 1
+	_, err = Deserialize(pw, badCrypter)
+	if err == nil {
+		t.Fatalf("no Deserialize error for blob from the future")
+	}
+	reCheck("after wrong password")
+
+	// Trim the salt, which is push 0 and normally 16 bytes.
+	badCrypter = trimPush(copyB(serializedCrypter), 0, 15)
+	_, err = Deserialize(pw, badCrypter)
+	if err == nil {
+		t.Fatalf("no Deserialize error trimmed salt")
+	}
+	reCheck("after trimmed salt")
+
+	// Trim the threads parameter, which is push 3 and normally 1 byte.
+	badCrypter = trimPush(copyB(serializedCrypter), 3, 0)
+	_, err = Deserialize(pw, badCrypter)
+	if err == nil {
+		t.Fatalf("no Deserialize error zero-length threads")
+	}
+	reCheck("after zero-length threads")
+
+	// Trim the tag parameter, which is push 4 and normally 16 bytes.
+	badCrypter = trimPush(copyB(serializedCrypter), 4, 15)
+	_, err = Deserialize(pw, badCrypter)
+	if err == nil {
+		t.Fatalf("no Deserialize error trimmed tag")
+	}
+	reCheck("after trimmed tag")
 }
 
 func TestRandomness(t *testing.T) {
@@ -116,4 +166,17 @@ func TestRandomness(t *testing.T) {
 			t.Fatalf("decrypted %x is different that encrypted %x with password %x", reThing, thing, []byte(pw))
 		}
 	}
+}
+
+func trimPush(b []byte, idx, newLen int) []byte {
+	ver, pushes, _ := encode.DecodeBlob(b)
+	newB := encode.BuildyBytes{ver}
+	for i := range pushes {
+		if i == idx {
+			newB = newB.AddData(pushes[i][:newLen])
+		} else {
+			newB = newB.AddData(pushes[i])
+		}
+	}
+	return newB
 }
