@@ -168,9 +168,22 @@ func (c CoinID) String() string {
 	return hex.EncodeToString(c)
 }
 
+// PreimageSize defines the length in bytes of a Preimage.
+const PreimageSize = 32
+
+// Preimage is a 32-byte ramdom number used in generating an order commitment.
+type Preimage [PreimageSize]byte
+
+// CommitmntSize defines the length in bytes of a Commitment.
+const CommitmentSize = blake256.Size // 32
+
+// Commitment is the hash of a preimage.
+type Commitment [CommitmentSize]byte
+
 // Prefix is the order prefix containing data fields common to all orders.
 type Prefix struct {
 	AccountID  account.AccountID
+	Commitment Commitment
 	BaseAsset  uint32
 	QuoteAsset uint32
 	OrderType  OrderType
@@ -182,6 +195,8 @@ type Prefix struct {
 	//nolint:structcheck
 	uid string // cache of the order's UID
 }
+
+// TODO: Update Prefix serialization with commitment.
 
 // P is an alias for Prefix. Embedding with the alias allows us to define a
 // method on the interface called Prefix that returns the *Prefix.

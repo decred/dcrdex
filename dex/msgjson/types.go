@@ -443,6 +443,7 @@ type Coin struct {
 type Prefix struct {
 	signable
 	AccountID     Bytes  `json:"accountid"`
+	Commitment    Bytes  `json:"com"`
 	Base          uint32 `json:"base"`
 	Quote         uint32 `json:"quote"`
 	OrderType     uint8  `json:"ordertype"`
@@ -459,6 +460,8 @@ func (p *Prefix) Stamp(t, epochIdx, epochDur uint64) {
 	p.EpochIdx = epochIdx
 	p.EpochDuration = epochDur
 }
+
+// TODO: Update prefix serialization with commitment.
 
 // Serialize serializes the Prefix data.
 func (p *Prefix) Serialize() []byte {
@@ -578,9 +581,10 @@ type TradeNote struct {
 
 // OrderNote is part of a notification about any type of order.
 type OrderNote struct {
-	Seq      uint64 `json:"seq,omitempty"`      // May be empty when part of an OrderBook.
-	MarketID string `json:"marketid,omitempty"` // May be empty when part of an OrderBook.
-	OrderID  Bytes  `json:"oid"`
+	Seq        uint64 `json:"seq,omitempty"`      // May be empty when part of an OrderBook.
+	MarketID   string `json:"marketid,omitempty"` // May be empty when part of an OrderBook.
+	OrderID    Bytes  `json:"oid"`
+	Commitment Bytes  `json:"com"`
 }
 
 // BookOrderNote is the payload for a DEX-originating notification-type message
