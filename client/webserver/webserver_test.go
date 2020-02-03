@@ -125,17 +125,25 @@ func (c *TConn) Close() error {
 
 var tPort int = 5142
 
-func newTServer(t *testing.T, start bool) (*WebServer, *TCore, context.CancelFunc) {
+func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 	tPort++
 	c := &TCore{}
-	ctx, shutdown := context.WithCancel(tCtx)
+	var shutdown func()
+	ctx, killCtx := context.WithCancel(tCtx)
 	s, err := New(c, fmt.Sprintf("localhost:%d", tPort), tLogger, false)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
+
 	if start {
-		go s.Run(ctx)
+		waiter := dex.NewStartStopWaiter(s)
+		waiter.Start(ctx)
+		shutdown = func() {
+			killCtx()
+			waiter.WaitForShutdown()
+		}
 	} else {
+		shutdown = killCtx
 		s.ctx = ctx
 	}
 	return s, c, shutdown
@@ -390,7 +398,6 @@ func TestClientMap(t *testing.T) {
 
 	// Close the server and make sure the connection is closed.
 	shutdown()
-	time.Sleep(time.Millisecond)
 	if !cl.Off() {
 		t.Fatalf("connection not closed on server shutdown")
 	}
