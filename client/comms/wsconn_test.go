@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
@@ -49,13 +50,21 @@ func genCertPair(certFile, keyFile string, altDNSNames []string) error {
 	return nil
 }
 
+func TestMain(m *testing.M) {
+	backendLogger := slog.NewBackend(os.Stdout)
+	defer os.Stdout.Sync()
+	log := backendLogger.Logger("Debug")
+	log.SetLevel(slog.LevelTrace)
+	UseLogger(log)
+	os.Exit(m.Run())
+}
+
 func TestWsConn(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 
 	pingCh := make(chan struct{})
 	readPumpCh := make(chan interface{})
 	writePumpCh := make(chan *msgjson.Message)
-	shutdown := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pingWait := time.Millisecond * 200
@@ -189,12 +198,8 @@ func TestWsConn(t *testing.T) {
 		t.Fatal(err)
 	}
 	wsc = conn.(*wsConn)
-	wsc.Connect(ctx)
-
-	go func() {
-		wsc.WaitForShutdown()
-		shutdown <- struct{}{}
-	}()
+	waiter := dex.NewConnectionMaster(wsc)
+	waiter.Connect(ctx)
 
 	reconnectAndPing := func() {
 		// Drop the connection and force a reconnect by waiting.
@@ -346,18 +351,11 @@ func TestWsConn(t *testing.T) {
 	}
 
 	cancel()
-	<-shutdown
+	waiter.Disconnect()
 }
 
 func TestFailingConnection(t *testing.T) {
-	shutdown := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
-
-	backendLogger := slog.NewBackend(os.Stdout)
-	defer os.Stdout.Sync()
-	log := backendLogger.Logger("Debug")
-	log.SetLevel(slog.LevelTrace)
-	UseLogger(log)
 
 	pingWait := time.Millisecond * 200
 
@@ -392,15 +390,11 @@ func TestFailingConnection(t *testing.T) {
 		t.Fatalf("constructor error: %v", err)
 	}
 	wsc := conn.(*wsConn)
-	err = wsc.Connect(ctx)
+	waiter := dex.NewConnectionMaster(wsc)
+	err = waiter.Connect(ctx)
 	if err == nil {
 		t.Fatal("no error for non-existent server")
 	}
-
-	go func() {
-		wsc.WaitForShutdown()
-		shutdown <- struct{}{}
-	}()
 
 	oldCount := atomic.LoadUint64(&wsc.reconnects)
 	for idx := 0; idx < 5; idx++ {
@@ -422,5 +416,5 @@ func TestFailingConnection(t *testing.T) {
 	}
 
 	cancel()
-	<-shutdown
+	waiter.Disconnect()
 }

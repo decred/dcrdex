@@ -31,11 +31,9 @@ const (
 // WsConn is an interface for a websocket client.
 type WsConn interface {
 	NextID() uint64
-	WaitForShutdown()
 	Send(msg *msgjson.Message) error
 	Request(msg *msgjson.Message, f func(*msgjson.Message)) error
-	Connect(context.Context) error
-	Close()
+	Connect(ctx context.Context) (error, *sync.WaitGroup)
 	MessageSource() <-chan *msgjson.Message
 }
 
@@ -74,7 +72,6 @@ type wsConn struct {
 	connected    bool
 	connectedMtx sync.RWMutex
 	once         sync.Once
-	wg           sync.WaitGroup
 	respHandlers map[uint64]*responseHandler
 }
 
@@ -180,7 +177,6 @@ func (conn *wsConn) connect() error {
 	conn.ws = ws
 	conn.wsMtx.Unlock()
 
-	conn.wg.Add(1)
 	go conn.read()
 	conn.setConnected(true)
 
@@ -190,8 +186,6 @@ func (conn *wsConn) connect() error {
 // read fetches and parses incoming messages for processing. This should be
 // run as a goroutine.
 func (conn *wsConn) read() {
-	defer conn.wg.Done()
-
 	for {
 		msg := new(msgjson.Message)
 
@@ -256,7 +250,7 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 
 			reconnects := atomic.AddUint64(&conn.reconnects, 1)
 			if reconnects > 1 {
-				conn.Close()
+				conn.close()
 			}
 
 			err := conn.connect()
@@ -275,8 +269,7 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 			// Terminate the keepAlive process and read process when
 			/// the dex client signals a shutdown.
 			conn.setConnected(false)
-			conn.Close()
-			conn.wg.Done()
+			conn.close()
 			return
 		}
 	}
@@ -297,14 +290,23 @@ func (conn *wsConn) NextID() uint64 {
 // encountered during the initial connection will be returned. The reconnect
 // loop will continue to try connecting, even if an error is returned. To
 // shutdown auto-reconnect, use Close().
-func (conn *wsConn) Connect(ctx context.Context) error {
-	conn.wg.Add(1)
+func (conn *wsConn) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+
 	go conn.keepAlive(ctx)
-	return conn.connect()
+
+	go func() {
+		<-ctx.Done()
+		conn.close()
+		wg.Done()
+	}()
+
+	return conn.connect(), &wg
 }
 
 // Close terminates all websocket processes and closes the connection.
-func (conn *wsConn) Close() {
+func (conn *wsConn) close() {
 	conn.wsMtx.Lock()
 	defer conn.wsMtx.Unlock()
 
@@ -316,11 +318,6 @@ func (conn *wsConn) Close() {
 	conn.ws.WriteControl(websocket.CloseMessage, msg,
 		time.Now().Add(writeWait))
 	conn.ws.Close()
-}
-
-// WaitForShutdown blocks until the websocket's processes are stopped.
-func (conn *wsConn) WaitForShutdown() {
-	conn.wg.Wait()
 }
 
 // Send pushes outgoing messages over the websocket connection.

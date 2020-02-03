@@ -163,8 +163,6 @@ func (conn *TWebsocket) NextID() uint64 {
 	conn.id++
 	return conn.id
 }
-
-func (conn *TWebsocket) WaitForShutdown()                {}
 func (conn *TWebsocket) Send(msg *msgjson.Message) error { return conn.sendErr }
 func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	handlers := conn.getHandlers(msg.Route)
@@ -176,8 +174,9 @@ func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.reqErr
 }
 func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
-func (conn *TWebsocket) Connect(context.Context) error          { return conn.connectErr }
-func (conn *TWebsocket) Close()                                 {}
+func (conn *TWebsocket) Connect(context.Context) (error, *sync.WaitGroup) {
+	return conn.connectErr, &sync.WaitGroup{}
+}
 
 type TDB struct {
 	updateWalletErr error

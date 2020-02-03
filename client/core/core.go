@@ -38,6 +38,7 @@ var (
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
 	comms.WsConn
+	connMaster  *dex.ConnectionMaster
 	assets      map[uint32]*dex.Asset
 	cfg         *msgjson.ConfigResult
 	acct        *dexAccount
@@ -325,13 +326,15 @@ func (c *Core) PreRegister(dex string) (uint64, error) {
 	c.connMtx.Lock()
 	c.pendingReg = dc
 	c.connMtx.Unlock()
+	// After a while, if the registration hasn't been completed, disconnect from
+	// the DEX. The Register loop will form a new connection if pendingReg is nil.
 	if c.pendingTimer == nil {
 		c.pendingTimer = time.AfterFunc(time.Minute*5, func() {
 			c.connMtx.Lock()
 			defer c.connMtx.Unlock()
 			pendingDEX := c.pendingReg
 			if pendingDEX != nil && pendingDEX.acct.url == dc.acct.url {
-				pendingDEX.Close()
+				pendingDEX.connMaster.Disconnect()
 				c.pendingReg = nil
 			}
 		})
@@ -763,11 +766,12 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Error creating websocket connection for %s: %v", uri, err)
 	}
-	err = conn.Connect(c.ctx)
+	connMaster := dex.NewConnectionMaster(conn)
+	err = connMaster.Connect(c.ctx)
 	// If the initial connection returned an error, shut it down to kill the
 	// auto-reconnect cycle.
 	if err != nil {
-		conn.Close()
+		connMaster.Disconnect()
 		return nil, fmt.Errorf("Error initalizing websocket connection: %v", err)
 	}
 	// Request the market configuration. The DEX is only added when the DEX
@@ -822,12 +826,13 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 
 		// Create the dexConnection and add it to the map.
 		dc := &dexConnection{
-			WsConn:  conn,
-			assets:  assets,
-			cfg:     dexCfg,
-			books:   make(map[string]*book.OrderBook),
-			acct:    newDEXAccount(acctInfo.URL, acctInfo.EncKey, acctInfo.DEXPubKey),
-			markets: markets,
+			WsConn:     conn,
+			connMaster: connMaster,
+			assets:     assets,
+			cfg:        dexCfg,
+			books:      make(map[string]*book.OrderBook),
+			acct:       newDEXAccount(acctInfo.URL, acctInfo.EncKey, acctInfo.DEXPubKey),
+			markets:    markets,
 		}
 		connChan <- dc
 		c.wg.Add(1)
