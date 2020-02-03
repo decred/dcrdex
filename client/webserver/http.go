@@ -58,11 +58,6 @@ func commonArgs(r *http.Request, title string) *CommonArguments {
 	}
 }
 
-type initTmplData struct {
-	CommonArguments
-	User *core.User
-}
-
 // handleLogin is the handler for the '/login' page request.
 func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 	user := extractUserInfo(r)

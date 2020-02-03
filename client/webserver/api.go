@@ -24,6 +24,7 @@ func simpleAck() *standardResponse {
 	}
 }
 
+// preRegisterForm is the information necessary to pre-register a DEX.
 type preRegisterForm struct {
 	DEX string `json:"dex"`
 }
@@ -101,6 +102,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
 	AssetID uint32 `json:"assetID"`
 	// These are only used if the Decred wallet does not already exist. In that
@@ -152,6 +154,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	AssetID uint32 `json:"assetID"`
 	Pass    string `json:"pass"`
