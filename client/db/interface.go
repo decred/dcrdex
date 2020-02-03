@@ -12,10 +12,10 @@ import (
 // manager.
 type DB interface {
 	dex.Runner
-	// StoreEncryptedKey stores the encrypted key.
-	StoreEncryptedKey([]byte) error
-	// EncryptedKey retrieves the currently stored encrypted key.
-	EncryptedKey() ([]byte, error)
+	// Store allows the storage of arbitrary data.
+	Store(string, []byte) error
+	// Get retreives values stored with Store.
+	Get(string) ([]byte, error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
 	// URL.

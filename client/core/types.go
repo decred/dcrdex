@@ -51,8 +51,8 @@ type xcWallet struct {
 	hookedUp bool
 }
 
-// Unlock unlocks the wallet.
-func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
+// unlock unlocks the wallet.
+func (w *xcWallet) unlock(pw string, dur time.Duration) error {
 	err := w.Wallet.Unlock(pw, dur)
 	if err != nil {
 		return err

@@ -245,11 +245,11 @@ func (db *TDB) AccountPaid(proof *db.AccountProof) error {
 	return nil
 }
 
-func (db *TDB) StoreEncryptedKey([]byte) error {
+func (db *TDB) Store(k string, b []byte) error {
 	return db.storeKeyErr
 }
 
-func (db *TDB) EncryptedKey() ([]byte, error) {
+func (db *TDB) Get(k string) ([]byte, error) {
 	return nil, db.encKeyErr
 }
 

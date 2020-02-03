@@ -27,6 +27,11 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
+const (
+	keyParamsKey = "keyParams"
+	encKeyKey    = "encKey"
+)
+
 var (
 	// log is a logger generated with the LogMaker provided with Config.
 	log            dex.Logger
@@ -156,8 +161,10 @@ func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 	return w, found
 }
 
+// encryptionKey retrieves the application encryption key. The key itself is
+// encrypted using an encryption key derived from the user's password.
 func (c *Core) encryptionKey(pw string) (encrypt.Crypter, error) {
-	keyParams, err := c.db.EncryptedKey()
+	keyParams, err := c.db.Get(keyParamsKey)
 	if err != nil {
 		return nil, fmt.Errorf("key retrieval error: %v", err)
 	}
@@ -212,7 +219,7 @@ func (c *Core) User() *User {
 // refreshUser is a thread-safe way to update the current User. This method
 // should be called after adding wallets and DEXes.
 func (c *Core) refreshUser() {
-	k, _ := c.db.EncryptedKey()
+	k, _ := c.db.Get(keyParamsKey)
 	u := &User{
 		Wallets:     c.Wallets(),
 		Markets:     c.Markets(),
@@ -305,7 +312,7 @@ func (c *Core) OpenWallet(assetID uint32, pw string) error {
 	}
 	err = wallet.Unlock(pw, aYear)
 	if err != nil {
-		return fmt.Errorf("OpenWallet: %v", err)
+		return fmt.Errorf("wallet unlock error: %v", err)
 	}
 	return nil
 }
@@ -567,13 +574,18 @@ func (c *Core) InitializeClient(pw string) error {
 	if err != nil {
 		return fmt.Errorf("error generating new private key: %v", err)
 	}
-	encKey, err := encrypt.NewCrypter(pw).Encrypt(privKey.Serialize())
+	crypter := encrypt.NewCrypter(pw)
+	encKey, err := crypter.Encrypt(privKey.Serialize())
 	if err != nil {
 		return fmt.Errorf("key encryption error: %v", err)
 	}
-	err = c.db.StoreEncryptedKey(encKey)
+	err = c.db.Store(encKeyKey, encKey)
 	if err != nil {
-		return fmt.Errorf("error storing encrypted key: %v", err)
+		return fmt.Errorf("key storage error: %v", err)
+	}
+	err = c.db.Store(keyParamsKey, crypter.Serialize())
+	if err != nil {
+		return fmt.Errorf("error storing key parameters: %v", err)
 	}
 	c.refreshUser()
 	return nil

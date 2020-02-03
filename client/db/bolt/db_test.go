@@ -54,24 +54,25 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
-func TestEncryptedKey(t *testing.T) {
+func TestStore(t *testing.T) {
+	k := "some random key"
 	boltdb := newTestDB(t)
 	// Check no key
-	_, err := boltdb.EncryptedKey()
+	_, err := boltdb.Get(k)
 	if err == nil {
 		t.Fatalf("no error for missing key")
 	}
-	key := randBytes(50)
-	err = boltdb.StoreEncryptedKey(key)
+	v := randBytes(50)
+	err = boltdb.Store(k, v)
 	if err != nil {
-		t.Fatalf("error storing key: %v", err)
+		t.Fatalf("error storing value: %v", err)
 	}
-	reKey, err := boltdb.EncryptedKey()
+	reV, err := boltdb.Get(k)
 	if err != nil {
-		t.Fatalf("error storing key: %v", err)
+		t.Fatalf("error storing value: %v", err)
 	}
-	if !bEqual(key, reKey) {
-		t.Fatalf("key mismatch %x != %x", key, reKey)
+	if !bEqual(v, reV) {
+		t.Fatalf("value mismatch %x != %x", v, reV)
 	}
 }
 

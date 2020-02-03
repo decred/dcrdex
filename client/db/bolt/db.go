@@ -34,7 +34,6 @@ var (
 	ordersBucket   = []byte("orders")
 	matchesBucket  = []byte("matches")
 	walletsBucket  = []byte("wallets")
-	encKeyKey      = []byte("enckey")
 	feeProofKey    = []byte("feecoin")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
@@ -83,28 +82,34 @@ func (db *boltDB) Run(ctx context.Context) {
 	db.Close()
 }
 
-// StoreEncryptedKey stores the encrypted key.
-func (db *boltDB) StoreEncryptedKey(k []byte) error {
+// StoreKeyParams stores the serialized key derivation parameters for an
+// encryption key.
+func (db *boltDB) Store(k string, v []byte) error {
+	if len(k) == 0 {
+		return fmt.Errorf("cannot store with empty key")
+	}
+	keyB := []byte(k)
 	return db.Update(func(tx *bbolt.Tx) error {
 		bucket, err := tx.CreateBucketIfNotExists(appBucket)
 		if err != nil {
 			return fmt.Errorf("failed to create key bucket")
 		}
-		return bucket.Put(encKeyKey, k)
+		return bucket.Put(keyB, v)
 	})
 }
 
-// EncryptedKey retrieves the currently stored encrypted key.
-func (db *boltDB) EncryptedKey() ([]byte, error) {
-	var encKey []byte
-	return encKey, db.View(func(tx *bbolt.Tx) error {
+// KeyParams retrieves the currently stored key derivation parameters.
+func (db *boltDB) Get(k string) ([]byte, error) {
+	var v []byte
+	keyB := []byte(k)
+	return v, db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(appBucket)
 		if bucket == nil {
 			return fmt.Errorf("app bucket not found")
 		}
-		encKey = bucket.Get(encKeyKey)
-		if encKey == nil {
-			return fmt.Errorf("no key found")
+		v = bucket.Get(keyB)
+		if v == nil {
+			return fmt.Errorf("no value found for %s", k)
 		}
 		return nil
 	})
