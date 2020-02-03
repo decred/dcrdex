@@ -110,14 +110,15 @@ func New(cfg *Config) (*Core, error) {
 		return nil, fmt.Errorf("database initialization error: %v", err)
 	}
 	core := &Core{
-		cfg:           cfg,
-		db:            db,
-		certs:         cfg.Certs,
-		conns:         make(map[string]*dexConnection),
-		wallets:       make(map[uint32]*xcWallet),
-		net:           cfg.Net,
-		loggerMaker:   cfg.LoggerMaker,
-		waiters:       make(map[string]coinWaiter),
+		cfg:         cfg,
+		db:          db,
+		certs:       cfg.Certs,
+		conns:       make(map[string]*dexConnection),
+		wallets:     make(map[uint32]*xcWallet),
+		net:         cfg.Net,
+		loggerMaker: cfg.LoggerMaker,
+		waiters:     make(map[string]coinWaiter),
+		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 	}
 	log.Tracef("new client core created")

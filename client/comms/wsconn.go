@@ -40,7 +40,7 @@ type WsConn interface {
 // When the DEX sends a request to the client, a responseHandler is created
 // to wait for the response.
 type responseHandler struct {
-	expiration time.Time
+	expiration *time.Timer
 	f          func(*msgjson.Message)
 }
 
@@ -354,27 +354,12 @@ func (conn *wsConn) logReq(id uint64, respHandler func(*msgjson.Message)) {
 	conn.reqMtx.Lock()
 	defer conn.reqMtx.Unlock()
 	conn.respHandlers[id] = &responseHandler{
-		expiration: time.Now().Add(time.Minute * 5),
-		f:          respHandler,
-	}
-	// clean up the response map.
-	if len(conn.respHandlers) > 1 {
-		go conn.cleanUpExpired()
-	}
-}
-
-// cleanUpExpired cleans up the response handler map.
-func (conn *wsConn) cleanUpExpired() {
-	conn.reqMtx.Lock()
-	defer conn.reqMtx.Unlock()
-	var expired []uint64
-	for id, cb := range conn.respHandlers {
-		if time.Until(cb.expiration) < 0 {
-			expired = append(expired, id)
-		}
-	}
-	for _, id := range expired {
-		delete(conn.respHandlers, id)
+		expiration: time.AfterFunc(time.Minute*5, func() {
+			conn.reqMtx.Lock()
+			delete(conn.respHandlers, id)
+			conn.reqMtx.Unlock()
+		}),
+		f: respHandler,
 	}
 }
 
@@ -385,6 +370,7 @@ func (conn *wsConn) respHandler(id uint64) *responseHandler {
 	defer conn.reqMtx.Unlock()
 	cb, ok := conn.respHandlers[id]
 	if ok {
+		cb.expiration.Stop()
 		delete(conn.respHandlers, id)
 	}
 	return cb
