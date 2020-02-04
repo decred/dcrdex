@@ -443,7 +443,6 @@ type Coin struct {
 type Prefix struct {
 	signable
 	AccountID     Bytes  `json:"accountid"`
-	Commitment    Bytes  `json:"com"`
 	Base          uint32 `json:"base"`
 	Quote         uint32 `json:"quote"`
 	OrderType     uint8  `json:"ordertype"`
@@ -612,9 +611,10 @@ type UnbookOrderNote OrderNote
 // the client about an order added to the epoch queue.
 type EpochOrderNote struct {
 	BookOrderNote
-	OrderType uint8  `json:"otype"`
-	TargetID  Bytes  `json:"target,omitempty"`
-	Epoch     uint64 `json:"epoch"`
+	Commitment Bytes  `json:"com"`
+	OrderType  uint8  `json:"otype"`
+	TargetID   Bytes  `json:"target,omitempty"`
+	Epoch      uint64 `json:"epoch"`
 }
 
 // Connect is the payload for a client-originating ConnectRoute request.

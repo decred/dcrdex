@@ -183,7 +183,6 @@ type Commitment [CommitmentSize]byte
 // Prefix is the order prefix containing data fields common to all orders.
 type Prefix struct {
 	AccountID  account.AccountID
-	Commitment Commitment
 	BaseAsset  uint32
 	QuoteAsset uint32
 	OrderType  OrderType
