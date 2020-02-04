@@ -452,14 +452,13 @@ func TestAuthMiddleware(t *testing.T) {
 				t.Fatalf("Expected unauthorized HTTP error for test \"%s\"", name)
 			}
 		case false:
-			if w.code == http.StatusUnauthorized {
+			if w.code != http.StatusOK {
 				t.Fatalf("Expected OK HTTP status for test \"%s\"", name)
 			}
-
 		}
 	}
 
-	user, pass := "Which one is it?", "It's the one that says bmf on it"
+	user, pass := "Which one is it?", "It's the one that says bmf on it."
 	login := user + ":" + pass
 	h := "Basic "
 	auth := h + base64.StdEncoding.EncodeToString([]byte(login))

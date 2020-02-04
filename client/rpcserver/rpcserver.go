@@ -293,12 +293,14 @@ func New(cfg *Config) (*RPCServer, error) {
 	return s, nil
 }
 
-// Run starts the web server. Satisfies the dex.Runner interface. ctx
-// passed to newMarketSyncer when making new market syncers.
+// Run starts the web server. Satisfies the dex.Runner interface.
 func (s *RPCServer) Run(ctx context.Context) {
+	// ctx passed to newMarketSyncer when making new market syncers.
 	s.ctx = ctx
 	// Close the listener on context cancellation.
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		<-ctx.Done()
 
 		if err := s.srv.Shutdown(context.Background()); err != nil {
@@ -317,7 +319,7 @@ func (s *RPCServer) Run(ctx context.Context) {
 	}
 	s.mtx.Unlock()
 
-	// Wait for market syncers to finish.
+	// Wait for market syncers to finish and Shutdown.
 	s.wg.Wait()
 	log.Infof("RPC server off")
 }
@@ -354,7 +356,6 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 
 	// Find the correct handler for this route.
 	h, ok := routes[req.Route]
-
 	if !ok {
 		log.Debugf("could not find route: %v", req.Route)
 		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
@@ -364,15 +365,15 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	return h(s, req)
 }
 
-// parseHTTPRequest parses the msgjson message in the request body and creates a
-// response message.
+// parseHTTPRequest parses the msgjson message in the request body, creates a
+// response message, and writes it to the http.ResponseWriter.
 func (s *RPCServer) parseHTTPRequest(w http.ResponseWriter, req *msgjson.Message) {
 	payload := s.handleRequest(req)
 	resp, err := msgjson.NewResponse(req.ID, payload.Result, payload.Error)
 	if err != nil {
-		err = fmt.Errorf("error encoding response: %v", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		log.Error(err)
+		msg := fmt.Sprintf("error encoding response: %v", err)
+		http.Error(w, msg, http.StatusInternalServerError)
+		log.Errorf("parseHTTPRequest: NewResponse failed: %s", msg)
 		return
 	}
 	writeJSON(w, resp)
@@ -385,10 +386,10 @@ func (s *RPCServer) authMiddleware(next http.Handler) http.Handler {
 		if len(auth) == 0 || s.authsha != sha256.Sum256([]byte(auth[0])) {
 			log.Warnf("authentication failure from ip: %s with auth: %s", r.RemoteAddr, auth)
 			w.Header().Add("WWW-Authenticate", `Basic realm="dex RPC"`)
-			http.Error(w, "401 Unauthorized.", http.StatusUnauthorized)
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
-		log.Tracef("authenticated user with ip: %s", r.RemoteAddr)
+		log.Debugf("authenticated user with ip: %s", r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
 }

@@ -85,8 +85,10 @@ func (s *RPCServer) websocketHandler(conn ws.Connection, ip string) {
 		if cl.quit != nil {
 			cl.quit()
 		}
-		delete(s.clients, cl.cid)
 		cl.mtx.Unlock()
+		s.mtx.Lock()
+		delete(s.clients, cl.cid)
+		s.mtx.Unlock()
 	}()
 	cl.Start()
 	cl.WaitForShutdown()
@@ -100,13 +102,11 @@ func (s *RPCServer) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson
 	if msg.Type == msgjson.Request {
 		handler, found := wsHandlers[msg.Route]
 		if !found {
-			// If a this request exits in routes, call it.
-			if _, found := routes[msg.Route]; found {
-				handler = wsHandleRequest
+			// If a this request exists in routes, call it.
+			if _, found = routes[msg.Route]; !found {
+				return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route '"+msg.Route+"'")
 			}
-		}
-		if !found {
-			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route '"+msg.Route+"'")
+			handler = wsHandleRequest
 		}
 		return handler(s, conn, msg)
 	}

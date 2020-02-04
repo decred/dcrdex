@@ -4,7 +4,6 @@
 package rpcserver
 
 import (
-	//"decred.org/dcrdex/client/core"
 	"encoding/json"
 	"fmt"
 
