@@ -110,13 +110,8 @@ func (s *WebServer) notify(route string, payload interface{}) {
 	}
 }
 
-func (s *WebServer) notifyWalletUpdate(assetID uint32, on, open bool) {
-	walletUpdate := &core.WalletStatus{
-		Symbol:  unbip(assetID),
-		AssetID: assetID,
-		Running: on,
-		Open:    open,
-	}
+func (s *WebServer) notifyWalletUpdate(assetID uint32) {
+	walletUpdate := s.core.WalletState(assetID)
 	s.notify(updateWalletRoute, walletUpdate)
 }
 

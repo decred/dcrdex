@@ -31,6 +31,7 @@ const (
 	methodSignMessage       = "signmessagewithprivkey"
 	methodGetTransaction    = "gettransaction"
 	methodSendToAddress     = "sendtoaddress"
+	methodSetTxFee          = "settxfee"
 )
 
 // walletClient is a bitcoind wallet RPC client that uses rpcclient.Client's
@@ -199,9 +200,19 @@ func (wc *walletClient) Lock() error {
 }
 
 // SendToAddress sends the amount to the address.
-func (wc *walletClient) SendToAddress(address string, amount uint64) (*chainhash.Hash, error) {
+func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
+	var success bool
+	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
+	err := wc.call(methodSetTxFee, anylist{float64(feeRate) / 1e5}, &success)
+	if err != nil {
+		return nil, fmt.Errorf("error setting transaction fee")
+	}
+	if !success {
+		return nil, fmt.Errorf("failed to set transaction fee")
+	}
 	var txid string
-	err := wc.call(methodSendToAddress, anylist{address, float64(amount) / 1e8}, &txid)
+	// Last boolean argument is to subtract the fee from the amount.
+	err = wc.call(methodSendToAddress, anylist{address, float64(value) / 1e8, "dcrdex", "", subtract}, &txid)
 	if err != nil {
 		return nil, err
 	}

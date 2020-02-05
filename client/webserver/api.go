@@ -64,16 +64,16 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dcrID, _ := dex.BipSymbolID("dcr")
-	has, on, open := s.core.WalletStatus(dcrID)
-	if !has {
+	status := s.core.WalletState(dcrID)
+	if status == nil {
 		s.writeAPIError(w, "No Decred wallet")
 		return
 	}
-	if !on {
+	if !status.Running {
 		s.writeAPIError(w, "Decred wallet not running")
 		return
 	}
-	if !open {
+	if !status.Open {
 		s.writeAPIError(w, "Decred wallet is locked")
 		return
 	}
@@ -120,7 +120,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	has, _, _ := s.core.WalletStatus(form.AssetID)
+	has := s.core.WalletState(form.AssetID) != nil
 	if has {
 		s.writeAPIError(w, "already have a wallet for %s", unbip(form.AssetID))
 		return
@@ -135,7 +135,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "error creating %s wallet: %v", unbip(form.AssetID), err)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID, true, false)
+	s.notifyWalletUpdate(form.AssetID)
 	type response struct {
 		OK     bool   `json:"ok"`
 		Locked bool   `json:"locked"`
@@ -152,7 +152,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, resp, s.indent)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID, true, true)
+	s.notifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -168,12 +168,12 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	has, on, _ := s.core.WalletStatus(form.AssetID)
-	if !has {
+	status := s.core.WalletState(form.AssetID)
+	if status == nil {
 		s.writeAPIError(w, "No wallet for %d -> %s", form.AssetID, unbip(form.AssetID))
 		return
 	}
-	if !on {
+	if !status.Running {
 		s.writeAPIError(w, "%s wallet not connected", unbip(form.AssetID))
 		return
 	}
@@ -182,7 +182,27 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "error unlocking %s wallet: %v", unbip(form.AssetID), err)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID, true, true)
+	s.notifyWalletUpdate(form.AssetID)
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+// closeWalletForm is information necessary to close a wallet.
+type closeWalletForm struct {
+	AssetID uint32 `json:"assetID"`
+}
+
+// apiCloseWallet is the handler for the '/closewallet' API request.
+func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
+	form := new(closeWalletForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.CloseWallet(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, "error locking %s wallet: %v", unbip(form.AssetID), err)
+		return
+	}
+	s.notifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -191,7 +211,7 @@ type loginForm struct {
 	Pass string `json:"pass"`
 }
 
-// apiOpenWallet is the handler for the '/init' API request.
+// apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
 	if !readPost(w, r, login) {
@@ -212,6 +232,40 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.actuallyLogin(w, r, login)
+}
+
+// withdrawForm is sent to initiate a withdraw.
+type withdrawForm struct {
+	AssetID uint32 `json:"assetID"`
+	Value   uint64 `json:"value"`
+	Address string `json:"address"`
+	Pass    string `json:"pw"`
+}
+
+// apiWithdraw handles the 'withdraw' API request.
+func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
+	form := new(withdrawForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	state := s.core.WalletState(form.AssetID)
+	if state == nil {
+		s.writeAPIError(w, "no wallet found for %s", unbip(form.AssetID))
+		return
+	}
+	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value)
+	if err != nil {
+		s.writeAPIError(w, "withdraw error: %v", err)
+		return
+	}
+	resp := struct {
+		OK   bool   `json:"ok"`
+		Coin string `json:"coin"`
+	}{
+		OK:   true,
+		Coin: coin.String(),
+	}
+	writeJSON(w, resp, s.indent)
 }
 
 // apiActuallyLogin logs the user in.

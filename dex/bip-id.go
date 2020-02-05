@@ -5,6 +5,10 @@ package dex
 
 var symbolBipIDs map[string]uint32
 
+// BipSymbolID returns the asset ID associated with a given ticker symbol.
+// While there are a number of duplicate ticker symbols in the BIP ID list
+// (cpc, cmt, xrd, dst, one, ask, ...), those are disambiguated in the bipIDs
+// map here, so must be referenced with their bracketed suffix.
 func BipSymbolID(symbol string) (uint32, bool) {
 	if symbolBipIDs == nil {
 		symbolBipIDs = make(map[string]uint32)
@@ -17,8 +21,9 @@ func BipSymbolID(symbol string) (uint32, bool) {
 	return idx, found
 }
 
-func BipIDSymbol(idx uint32) string {
-	return bipIDs[idx]
+// BipIDSymbol returns the BIP ID for a given symbol.
+func BipIDSymbol(id uint32) string {
+	return bipIDs[id]
 }
 
 var bipIDs = map[uint32]string{

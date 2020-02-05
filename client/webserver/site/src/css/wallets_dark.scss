@@ -1,0 +1,16 @@
+body.dark {
+  table.wallets {
+    tbody tr {
+      background-color: $dark_bg_2;
+    }
+
+    button {
+      background-color: black;
+      color: $font-color-dark;
+    }
+
+    td {
+      border-color: #333;
+    }
+  }
+}

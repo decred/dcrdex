@@ -7,10 +7,11 @@ $buycolor_light: #207a46;
 $sellcolor_light: #99302b;
 $light_bg_1: #eaeaea;
 $light_bg_2: #d5d5d5;
-$dark_bg_1: #0d0d0d;
-$dark_bg_2: #1a1a1a;
-$dark_bg_3: #272727;
+$dark_bg_1: #111;
+$dark_bg_2: #1e1e1e;
+$dark_bg_3: #292929;
 $demi-sans: 'demi-sans', sans-serif;
+$mono: 'mono', monospace;
 
 // Bootstrap
 @import "~bootstrap/scss/_functions.scss";
@@ -56,3 +57,5 @@ $demi-sans: 'demi-sans', sans-serif;
 @import "./icons.scss";
 @import "./market.scss";
 @import "./market_dark.scss";
+@import "./wallets.scss";
+@import "./wallets_dark.scss";

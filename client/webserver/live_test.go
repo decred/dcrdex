@@ -7,15 +7,20 @@ package webserver
 
 import (
 	"context"
+	"encoding/hex"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/slog"
 )
 
@@ -23,6 +28,13 @@ var maxDelay = time.Second * 2
 
 func randomDelay() {
 	time.Sleep(time.Duration(rand.Float64() * float64(maxDelay)))
+}
+
+// A random number with a random order of magnitude.
+func randomMagnitude(low, high int) float64 {
+	exponent := rand.Intn(high-low) + low
+	mantissa := rand.Float64() * 10
+	return mantissa * math.Pow10(exponent)
 }
 
 func mkMrkt(base, quote string) *core.Market {
@@ -36,6 +48,29 @@ func mkMrkt(base, quote string) *core.Market {
 	}
 }
 
+func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.SupportedAsset {
+	assetID, _ := dex.BipSymbolID(symbol)
+	var wallet *core.WalletState
+	if state != nil {
+		wallet = &core.WalletState{
+			Symbol:  unbip(assetID),
+			AssetID: assetID,
+			Open:    state.open,
+			Running: state.running,
+			Address: ordertest.RandomAddress(),
+			Balance: bal,
+			FeeRate: winfos[assetID].FeeRate,
+			Units:   winfos[assetID].Units,
+		}
+	}
+	return &core.SupportedAsset{
+		ID:     assetID,
+		Symbol: symbol,
+		Wallet: wallet,
+		Name:   winfos[assetID].Name,
+	}
+}
+
 var tMarkets = map[string][]*core.Market{
 	"https://somedex.com": []*core.Market{
 		mkMrkt("dcr", "btc"), mkMrkt("dcr", "ltc"), mkMrkt("doge", "mona"),
@@ -45,12 +80,54 @@ var tMarkets = map[string][]*core.Market{
 	},
 }
 
-type TCore struct {
-	reg     *core.Registration
-	inited  bool
-	has     bool
-	running bool
+type tCoin struct {
+	id       []byte
+	confs    uint32
+	confsErr error
+}
+
+func (c *tCoin) ID() dex.Bytes {
+	return c.id
+}
+
+func (c *tCoin) String() string {
+	return hex.EncodeToString(c.id)
+}
+
+func (c *tCoin) Value() uint64 {
+	return 0
+}
+
+func (c *tCoin) Confirmations() (uint32, error) {
+	return c.confs, c.confsErr
+}
+
+func (c *tCoin) Redeem() dex.Bytes {
+	return nil
+}
+
+type tWalletState struct {
 	open    bool
+	running bool
+}
+
+type TCore struct {
+	reg      *core.Registration
+	inited   bool
+	mtx      sync.RWMutex
+	wallets  map[uint32]*tWalletState
+	balances map[uint32]uint64
+}
+
+func newTCore() *TCore {
+	return &TCore{
+		wallets: make(map[uint32]*tWalletState),
+		balances: map[uint32]uint64{
+			0:  uint64(randomMagnitude(7, 11)),
+			2:  uint64(randomMagnitude(7, 11)),
+			42: uint64(randomMagnitude(7, 11)),
+		},
+	}
 }
 
 func (c *TCore) Markets() map[string][]*core.Market { return tMarkets }
@@ -77,17 +154,8 @@ func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, err
 
 // Book randomizes an order book.
 func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook {
-	// Pick an order of magnitude for the midGap price between -2 and 3
-	rateMagnitude := rand.Intn(6)     // Don't subtract yet
-	qtyMagnitude := 3 - rateMagnitude // larger rate -> smaller qty
-	rateMagnitude -= 2
-
-	// Randomize mid-gap.
-	mantissa := rand.Float64() * 10
-	midGap := mantissa * math.Pow10(rateMagnitude)
-	// Randomize a depth factor.
-	mantissa = rand.Float64() * 10
-	maxQty := mantissa * math.Pow10(qtyMagnitude) * 10
+	midGap := randomMagnitude(0, 6)
+	maxQty := randomMagnitude(-2, 4)
 	// Set the market width to about 5% of midGap.
 	marketWidth := 0.05 * midGap
 	numPerSide := 80
@@ -127,52 +195,116 @@ func (c *TCore) Balance(uint32) (uint64, error) {
 	return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6)), nil
 }
 
-func (c *TCore) WalletStatus(assetID uint32) (has, running, open bool) {
-	return c.has, c.running, c.open
+var winfos = map[uint32]*asset.WalletInfo{
+	0: &asset.WalletInfo{
+		FeeRate: 2,
+		Units:   "Satoshis",
+		Name:    "Bitcoin",
+	},
+	2: &asset.WalletInfo{
+		FeeRate: 100,
+		Units:   "litoshi", // Plural seemingly has no 's'.
+		Name:    "Litecoin",
+	},
+	42: &asset.WalletInfo{
+		FeeRate: 10,
+		Units:   "atoms",
+		Name:    "Decred",
+	},
+}
+
+func (c *TCore) WalletState(assetID uint32) *core.WalletState {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	if c.wallets[assetID] == nil {
+		return nil
+	}
+	return &core.WalletState{
+		Symbol:  unbip(assetID),
+		AssetID: assetID,
+
+		Open:    true,
+		Running: true,
+		Address: ordertest.RandomAddress(),
+		Balance: c.balances[assetID],
+		FeeRate: winfos[assetID].FeeRate,
+		Units:   winfos[assetID].Units,
+	}
 }
 
 func (c *TCore) CreateWallet(form *core.WalletForm) error {
 	randomDelay()
-	c.has = true
-	c.running = true
-	c.open = true
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	c.wallets[form.AssetID] = &tWalletState{
+		running: true,
+	}
 	return nil
 }
 
 func (c *TCore) OpenWallet(assetID uint32, pw string) error {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	wallet := c.wallets[assetID]
+	if wallet == nil {
+		return fmt.Errorf("attempting to open non-existent test wallet")
+	}
+	wallet.running = true
+	wallet.open = true
 	return nil
 }
 
-func (c *TCore) Wallets() []*core.WalletStatus {
-	if c.has {
-		return []*core.WalletStatus{
-			{
-				Symbol:  "dcr",
-				AssetID: 42,
-				Open:    true,
-				Running: true,
-			},
-		}
+func (c *TCore) CloseWallet(assetID uint32) error {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	wallet := c.wallets[assetID]
+	if wallet == nil {
+		return fmt.Errorf("attempting to close non-existent test wallet")
 	}
+	wallet.open = false
 	return nil
+}
+
+func (c *TCore) Wallets() []*core.WalletState {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	stats := make([]*core.WalletState, 0, len(c.wallets))
+	for assetID, wallet := range c.wallets {
+		stats = append(stats, &core.WalletState{
+			Symbol:  unbip(assetID),
+			AssetID: assetID,
+			Open:    wallet.open,
+			Running: wallet.running,
+			Address: ordertest.RandomAddress(),
+			Balance: c.balances[assetID],
+			FeeRate: winfos[assetID].FeeRate,
+			Units:   winfos[assetID].Units,
+		})
+	}
+	return stats
 }
 
 func (c *TCore) User() *core.User {
 	user := &core.User{
 		Markets:     tMarkets,
 		Initialized: c.inited,
-	}
-	if c.has {
-		user.Wallets = []*core.WalletStatus{
-			{
-				Symbol:  "dcr",
-				AssetID: 42,
-				Open:    true,
-				Running: true,
-			},
-		}
+		Wallets:     c.Wallets(),
 	}
 	return user
+}
+
+func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	return map[uint32]*core.SupportedAsset{
+		0:  mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
+		42: mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
+		2:  mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+	}
+}
+
+func (c *TCore) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error) {
+	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, nil
 }
 
 func TestServer(t *testing.T) {
@@ -181,7 +313,7 @@ func TestServer(t *testing.T) {
 	logger := slog.NewBackend(os.Stdout).Logger("TEST")
 	logger.SetLevel(slog.LevelTrace)
 	time.AfterFunc(time.Minute*60, func() { shutdown() })
-	s, err := New(&TCore{}, ":54321", logger, true)
+	s, err := New(newTCore(), ":54321", logger, true)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}

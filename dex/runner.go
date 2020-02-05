@@ -73,8 +73,7 @@ func (ssw *StartStopWaiter) Stop() {
 }
 
 // Connector is any type that implements the Connect method, which will return
-// a connection error, and a channel that can be used to wait on shutdown after
-// context cancellation.
+// a connection error, and a WaitGroup that can be waited on at Disconnection.
 type Connector interface {
 	Connect(ctx context.Context) (error, *sync.WaitGroup)
 }

@@ -4,7 +4,7 @@
   <div class="d-flex flex-column vscroll w-100">
 
     {{- /* Set up the initial application password. Only shown on first visit. */ -}}
-    <form class="auth mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
+    <form class="card mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
       <div class="bg2 px-2 py-1 text-center fs18">Set Password</div>
       <div class="p-4">
         <div class="fs16">Set your client password. This password will protect your DEX account keys, but not your wallets.</div>
@@ -25,7 +25,7 @@
     </form>
 
     {{- /* Set up the Decred wallet. Only shown on first visit. */ -}}
-    <form class="auth mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="walletForm">
+    <form class="card mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="walletForm">
       <div class="bg2 px-2 py-1 text-center fs18">Decred Wallet</div>
       <div class="p-4">
         <div class="fs16">You haven't connected a Decred wallet yet. Connect to your wallet now.</div>
@@ -50,7 +50,7 @@
     </form>
 
     {{- /* Open Decred wallet. Only shown if now already open. */ -}}
-    <form class="auth mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="openForm">
+    <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="openForm">
       <div class="bg2 px-2 py-1 text-center fs18">Decred Wallet</div>
       <div class="p-4">
         <div class="fs16">Unlock your Decred wallet to pay registration fees.</div>
@@ -67,7 +67,7 @@
     </form>
 
     {{- /* DEX URL */ -}}
-    <form class="auth mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="urlForm">
+    <form class="card mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="urlForm">
       <div class="bg2 px-2 py-1 text-center fs18">Add a DEX</div>
       <div class="p-4">
         <div>
@@ -82,7 +82,7 @@
     </form>
 
     {{- /* Confirm registration with app password. */ -}}
-    <form class="auth mx-auto my-5 bg1 d-hide" id="pwForm">
+    <form class="card mx-auto my-5 bg1 d-hide" id="pwForm">
       <div class="bg2 px-2 py-1 text-center fs18">Confirm Password</div>
       <div class="p-4">
         <div class="fs16">

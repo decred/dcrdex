@@ -10,7 +10,37 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
-// WalletConfig is the configuration settings for the wallet.
+// ConfigType is the type of configuration file that the wallet uses.
+type ConfigType uint8
+
+const (
+	ConfigTypeUndefined ConfigType = iota
+	ConfigTypeINI
+	ConfigTypeJSON
+)
+
+// WalletInfo is auxiliary information about an ExchangeWallet.
+type WalletInfo struct {
+	// ConfigPath is the default ConfigPath that the wallet will search for its
+	// configuration file.
+	ConfigPath string
+	// ConfigType is the type of configuration file. Currently unused, the
+	// intention is to allow user configuration via GUI.
+	ConfigType ConfigType
+	// ConfigOpts is a list mapping a field name to a description. This will be
+	// used to dynamically generate GUI configuration forms.
+	ConfigOpts map[string]string
+	// Name is the display name for the currency, e.g. "Decred"
+	Name string
+	// FeeRate is the default fee rate used for withdraws.
+	FeeRate uint64
+	// Units is the unit used for the smallest (integer) denomination of the
+	// currency, in plural form e.g. atoms, Satoshis.
+	Units string
+}
+
+// WalletConfig is the configuration settings for the wallet. WalletConfig
+// is passed to the wallet constructor.
 type WalletConfig struct {
 	// Account is the name of the wallet account. The account and wallet must
 	// already exist.
@@ -28,13 +58,13 @@ type WalletConfig struct {
 // Wallet is a common interface to be implemented by cryptocurrency wallet
 // software.
 type Wallet interface {
-	dex.Runner
-	// Connect connects the wallet to the RPC server.
-	Connect() error
+	dex.Connector
+	// Info returns a set of basic information about the wallet.
+	Info() *WalletInfo
 	// Balance should return the total available funds in the wallet.
 	// Note that after calling Fund, the amount returned by Balance may change
 	// by more than the value funded.
-	Balance(*dex.Asset) (available, locked uint64, err error)
+	Balance(uint32) (available, locked uint64, err error)
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
@@ -79,12 +109,17 @@ type Wallet interface {
 	Unlock(pw string, dur time.Duration) error
 	// Lock locks the exchange wallet.
 	Lock() error
-	// PayFee pays a registration fee to the DEX.
+	// PayFee sends the dex registration fee. Transaction fees are in addition
+	// to the transaction fee, and the fee rate is taken from the DEX
+	// configuration.
 	PayFee(address string, fee uint64, nfo *dex.Asset) (Coin, error)
 	// Coin gets a wallet Coin for a coin ID. Note that a Coin, by definition, is
 	// unspent. Attempting to retrieve a spent coin should result in an error. The
 	// coin will not be locked.
 	Coin(id dex.Bytes) (Coin, error)
+	// Withdraw withdraws funds to the specified address. Fees are subtracted from
+	// the value.
+	Withdraw(address string, value, feeRate uint64) (Coin, error)
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed
@@ -92,6 +127,8 @@ type Wallet interface {
 type Coin interface {
 	// ID is a unique identifier for this coin.
 	ID() dex.Bytes
+	// String is a string representation of the coin.
+	String() string
 	// Value is the available quantity, in atoms/satoshi.
 	Value() uint64
 	// Confirmations is the number of confirmations on this Coin's block. If the

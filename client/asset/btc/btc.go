@@ -36,10 +36,26 @@ const (
 	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
 	BipID                   = 0
+	defaultWithdrawalFee    = 2
 )
 
 // How often to check the tip hash.
-var blockTicker = time.Second
+var (
+	blockTicker = time.Second
+	walletInfo  = &asset.WalletInfo{
+		ConfigPath: dexbtc.SystemConfigPath("bitcoin"),
+		ConfigType: asset.ConfigTypeINI,
+		ConfigOpts: map[string]string{
+			"rpcuser":     "JSON-RPC user",
+			"rpcpassword": "JSON-RPC password",
+			"rpcbind":     "RPC address. Can be <addr> or <addr>:<port>, which would override rpcport",
+			"rpcport":     "JSON-RPC port",
+		},
+		Name:    "Bitcoin",
+		FeeRate: defaultWithdrawalFee,
+		Units:   "Satoshis",
+	}
+)
 
 // rpcClient is a wallet RPC client. In production, rpcClient is satisfied by
 // rpcclient.Client. A stub can be used for testing.
@@ -105,6 +121,11 @@ func (op *output) ID() dex.Bytes {
 	return toCoinID(&op.txHash, op.vout)
 }
 
+// String is a string representation of the coin.
+func (op *output) String() string {
+	return fmt.Sprintf("%s:%v", op.txHash, op.vout)
+}
+
 // Redeem is any known redeem script required to spend this output. Part of the
 // asset.Coin interface.
 func (op *output) Redeem() dex.Bytes {
@@ -166,6 +187,11 @@ func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.N
 	return NewWallet(cfg, logger, network)
 }
 
+// Info returns basic information about the wallet and asset.
+func (d *Driver) Info() *asset.WalletInfo {
+	return walletInfo
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
 }
@@ -174,7 +200,6 @@ func init() {
 // client app communicates with the BTC blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	ctx         context.Context
 	client      *rpcclient.Client
 	node        rpcClient
 	wallet      *walletClient
@@ -187,7 +212,6 @@ type ExchangeWallet struct {
 	changeMtx   sync.RWMutex
 	tradeChange map[string]time.Time
 	tipChange   func(error)
-	started     chan struct{}
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -259,7 +283,6 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 		log:         logger,
 		tradeChange: make(map[string]time.Time),
 		tipChange:   cfg.TipChange,
-		started:     make(chan struct{}),
 	}
 
 	return wallet
@@ -267,20 +290,20 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
-// Connect connects the wallet to the RPC server. Run must be called before
-// Connect.
-func (btc *ExchangeWallet) Connect() error {
-	<-btc.started
-	go btc.run(btc.ctx)
-	return nil
+// Info returns basic information about the wallet and asset.
+func (d *ExchangeWallet) Info() *asset.WalletInfo {
+	return walletInfo
 }
 
-// Run stores the wallet context, waits for cancellation. Calling Run more than
-// once will result in a panic.
-func (btc *ExchangeWallet) Run(ctx context.Context) {
-	btc.ctx = ctx
-	close(btc.started)
-	<-ctx.Done()
+// Connect connects the wallet to the RPC server.
+func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		btc.run(ctx)
+	}()
+	return nil, &wg
 }
 
 // Balance should return the total available funds in the wallet.
@@ -289,12 +312,12 @@ func (btc *ExchangeWallet) Run(ctx context.Context) {
 // a simple getbalance with a minconf argument is not sufficient to see all
 // balance available for the exchange. Instead, all wallet UTXOs are scanned
 // for those that match DEX requirements. Part of the asset.Wallet interface.
-func (btc *ExchangeWallet) Balance(nfo *dex.Asset) (uint64, uint64, error) {
+func (btc *ExchangeWallet) Balance(confs uint32) (uint64, uint64, error) {
 	unspents, err := btc.wallet.ListUnspent()
 	if err != nil {
 		return 0, 0, err
 	}
-	_, sum, unconf, err := btc.spendableUTXOs(unspents, nfo)
+	_, sum, unconf, err := btc.spendableUTXOs(unspents, confs)
 	return sum, unconf, err
 }
 
@@ -309,7 +332,7 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 		return nil, err
 	}
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
-	utxos, _, unconf, err := btc.spendableUTXOs(unspents, nfo)
+	utxos, _, unconf, err := btc.spendableUTXOs(unspents, nfo.FundConf)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
@@ -856,32 +879,56 @@ func (btc *ExchangeWallet) Address() (string, error) {
 	return addr.String(), err
 }
 
-// PayFee pays the registration fee to the DEX.
-func (btc *ExchangeWallet) PayFee(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
-	txHash, err := btc.wallet.SendToAddress(address, fee)
+// PayFee sends the dex registration fee. Transaction fees are in addition
+// to the transaction fee, and the fee rate is taken from the DEX
+// configuration.
+func (btc *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, regFee, nfo.FeeRate, false)
 	if err != nil {
-		return nil, fmt.Errorf("SendToAddress error: %v", err)
+		btc.log.Errorf("PayFee error address = '%s', fee = %d: %v", address, regFee, err)
+		return nil, err
+	}
+	return newOutput(btc.node, txHash, vout, sent, nil), nil
+}
+
+// Withdraw withdraws funds to the specified address. Fees are subtracted from
+// the value.
+func (btc *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, value, feeRate, true)
+	if err != nil {
+		btc.log.Errorf("Withdraw error address = '%s', fee = %d: %v", address, value, err)
+		return nil, err
+	}
+	return newOutput(btc.node, txHash, vout, sent, nil), nil
+}
+
+// Send the value to the address, with the given fee rate. If subtract is true,
+// the fees will be subtracted from the value. If false, the fees in addition
+// to the value.
+func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subtract bool) (*chainhash.Hash, uint32, uint64, error) {
+	txHash, err := btc.wallet.SendToAddress(address, val, feeRate, subtract)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("SendToAddress error: %v", err)
 	}
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
-		btc.log.Errorf("error getting transaction for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction "+
-			"could not be retrieved: %v", err)
+		// btc.log.Errorf("error getting transaction for successful fee: %v", err)
+		return nil, 0, 0, fmt.Errorf("failed to fetch transaction after send: %v", err)
 	}
-	var vout uint32
-	var found bool
-	for _, details := range tx.Details {
-		if toSatoshi(-details.Amount) == fee && details.Address == address {
-			found = true
-			vout = details.Vout
+	adder := func(details *WalletTxDetails) uint64 {
+		return toSatoshi(-details.Amount)
+	}
+	if subtract {
+		adder = func(details *WalletTxDetails) uint64 {
+			return toSatoshi(-details.Amount - details.Fee)
 		}
 	}
-	if !found {
-		btc.log.Errorf("error getting transaction vout for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction "+
-			"index could not be found: %v", err)
+	for _, details := range tx.Details {
+		if adder(details) == val && details.Address == address {
+			return txHash, details.Vout, toSatoshi(details.Amount), nil
+		}
 	}
-	return newOutput(btc.node, txHash, vout, fee, nil), nil
+	return txHash, 0, 0, fmt.Errorf("error getting transaction vout for successful fee: %v", err)
 }
 
 // Coin gets a wallet Coin for a coin ID. Note that a Coin, by definition, is
@@ -1060,11 +1107,11 @@ type compositeUTXO struct {
 
 // spendableUTXOs filters the RPC utxos for those that are spendable with
 // with regards to the DEX's configuration.
-func (btc *ExchangeWallet) spendableUTXOs(unspents []*ListUnspentResult, nfo *dex.Asset) ([]*compositeUTXO, uint64, uint64, error) {
+func (btc *ExchangeWallet) spendableUTXOs(unspents []*ListUnspentResult, confs uint32) ([]*compositeUTXO, uint64, uint64, error) {
 	var sum, unconf uint64
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	for _, txout := range unspents {
-		if txout.Confirmations >= nfo.FundConf || btc.isDEXChange(txout.TxID, txout.Vout) {
+		if txout.Confirmations >= confs || btc.isDEXChange(txout.TxID, txout.Vout) {
 			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, btc.chainParams)
 			if err != nil {
 				return nil, 0, 0, fmt.Errorf("error reading asset info: %v", err)

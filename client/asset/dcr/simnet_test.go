@@ -56,7 +56,7 @@ func mineAlpha() error {
 	return exec.Command("tmux", "send-keys", "-t", "dcr-harness:4", "./mine-alpha 1", "C-m").Run()
 }
 
-func tBackend(t *testing.T, name string, blkFunc func(string, error)) *ExchangeWallet {
+func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
@@ -73,16 +73,27 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) *ExchangeW
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
-	go backend.Run(tCtx)
-	err = backend.Connect()
+	cm := dex.NewConnectionMaster(backend)
+	err = cm.Connect(tCtx)
 	if err != nil {
 		t.Fatalf("error connecting backend: %v", err)
 	}
-	return backend.(*ExchangeWallet)
+	return backend.(*ExchangeWallet), cm
 }
 
 type testRig struct {
-	backends map[string]*ExchangeWallet
+	backends          map[string]*ExchangeWallet
+	connectionMasters map[string]*dex.ConnectionMaster
+}
+
+func newTestRig(t *testing.T, blkFunc func(string, error)) *testRig {
+	rig := &testRig{
+		backends:          make(map[string]*ExchangeWallet),
+		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
+	}
+	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, "alpha", blkFunc)
+	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(t, "beta", blkFunc)
+	return rig
 }
 
 func (rig *testRig) alpha() *ExchangeWallet {
@@ -91,14 +102,19 @@ func (rig *testRig) alpha() *ExchangeWallet {
 func (rig *testRig) beta() *ExchangeWallet {
 	return rig.backends["beta"]
 }
-
-func newTestRig(t *testing.T, blkFunc func(string, error)) *testRig {
-	rig := &testRig{
-		backends: make(map[string]*ExchangeWallet),
+func (rig *testRig) close(t *testing.T) {
+	for name, cm := range rig.connectionMasters {
+		closed := make(chan struct{})
+		go func() {
+			cm.Disconnect()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.NewTimer(time.Second).C:
+			t.Fatalf("failed to disconnect from %s", name)
+		}
 	}
-	rig.backends["alpha"] = tBackend(t, "alpha", blkFunc)
-	rig.backends["beta"] = tBackend(t, "beta", blkFunc)
-	return rig
 }
 
 func randBytes(l int) []byte {
@@ -130,6 +146,7 @@ func TestWallet(t *testing.T) {
 		blockReported = true
 		tLogger.Infof("%s has reported a new block, error = %v", name, err)
 	})
+	defer rig.close(t)
 	contractValue := toAtoms(2)
 
 	inUTXOs := func(utxo asset.Coin, utxos []asset.Coin) bool {
@@ -143,7 +160,7 @@ func TestWallet(t *testing.T) {
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		available, unconf, err := wallet.Balance(tDCR)
+		available, unconf, err := wallet.Balance(tDCR.FundConf)
 		tLogger.Debugf("%s %f available, %f unconfirmed", name, float64(available)/1e8, float64(unconf)/1e8)
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
@@ -337,10 +354,18 @@ func TestWallet(t *testing.T) {
 	}
 
 	// Test PayFee
-	_, err = rig.beta().PayFee(alphaAddress, 1e8, tDCR)
+	coin, err := rig.beta().PayFee(alphaAddress, 1e8, tDCR)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}
+	tLogger.Infof("fee paid with tx %s", coin.String())
+
+	// Test Withdraw
+	coin, err = rig.beta().Withdraw(alphaAddress, 5e7, 10)
+	if err != nil {
+		t.Fatalf("error withdrawing: %v", err)
+	}
+	tLogger.Infof("withdrew with tx %s", coin.String())
 
 	// Lock the wallet
 	err = rig.beta().Lock()

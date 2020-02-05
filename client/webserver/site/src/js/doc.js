@@ -1,6 +1,6 @@
 const parser = new window.DOMParser()
 
-const FPS = 60
+const FPS = 30
 
 // Helpers for working with the DOM.
 export default class Doc {
@@ -30,12 +30,12 @@ export default class Doc {
     while (el.firstChild) el.removeChild(el.firstChild)
   }
 
-  static hide (el) {
-    el.classList.add('d-hide')
+  static hide (...els) {
+    for (const el of els) el.classList.add('d-hide')
   }
 
-  static show (el) {
-    el.classList.remove('d-hide')
+  static show (...els) {
+    for (const el of els) el.classList.remove('d-hide')
   }
 
   static async animate (duration, f, easingAlgo) {

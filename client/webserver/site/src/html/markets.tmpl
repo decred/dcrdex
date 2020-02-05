@@ -8,8 +8,8 @@
       <div class="fs16 py-1 pl-2 bg1">{{urlBase $url}}</div>
       {{range $markets}}
         <div class="marketrow" data-dex="{{$url}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
-          <img src="{{logoPath .BaseSymbol}}" class="mini-icon mr-1">
-          <img src="{{logoPath .QuoteSymbol}}" class="mini-icon mr-1">
+          <img src="{{logoPath .BaseSymbol}}" class="micro-icon mr-1">
+          <img src="{{logoPath .QuoteSymbol}}" class="micro-icon mr-1">
           {{.Display}}
         </div>
       {{end}}
@@ -65,12 +65,12 @@
               <span class="mktbalancelbl">Balances</span>
               <div class="d-flex mt-1 fs15 justify-content-between">
                 <div class="p-0 d-flex align-items-center justify-content-start">
-                  <img id="baseImg" class="mini-icon mr-1">
+                  <img id="baseImg" class="micro-icon mr-1">
                   <span class="mx-1" id="baseBalance"></span>
                   <span data-unit="base"></span>
                 </div>
                 <div class="p-0 d-flex align-items-center justify-content-start">
-                  <img id="quoteImg" class="mini-icon mr-1">
+                  <img id="quoteImg" class="micro-icon mr-1">
                   <span class="mx-1" id="quoteBalance"></span>
                   <span data-unit="quote"></span>
                 </div>

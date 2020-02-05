@@ -86,11 +86,20 @@
   font-size: 28px;
 }
 
-.mini-icon {
+.micro-icon {
   width: 15px;
   height: 15px;
 }
 
+.mini-icon {
+  width: 20px;
+  height: 20px;
+}
+
 .demi {
-  font-family: 'demi-sans', sans-serif;
+  font-family: $demi-sans;
+}
+
+.mono {
+  font-family: $mono;
 }

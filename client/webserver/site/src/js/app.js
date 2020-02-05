@@ -30,6 +30,7 @@ export default class Application {
 
   start () {
     app = this
+    this.userPromise = this.fetchUser()
     bind(window, 'popstate', (e) => {
       const page = e.state.page
       if (!page && page !== '') return
@@ -51,6 +52,8 @@ export default class Application {
       if (i > -1) walletList[i] = wallet
       else walletList.push(wallet)
       this.walletMap[wallet.assetID] = wallet
+      const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
+      balances.forEach(el => { el.textContent = (wallet.balance / 1e8).toFixed(8) })
     })
     ws.registerRoute(errorMsgRoute, msg => {
       this.notify(ERROR, msg)
@@ -58,7 +61,6 @@ export default class Application {
     ws.registerRoute(successMsgRoute, msg => {
       this.notify(SUCCESS, msg)
     })
-    this.userPromise = this.fetchUser()
   }
 
   async fetchUser () {
@@ -74,7 +76,7 @@ export default class Application {
   }
 
   // Load the page from the server. Insert and bind to the HTML.
-  async loadPage (page) {
+  async loadPage (page, data) {
     const response = await window.fetch(`/${page}`)
     if (!response.ok) return false
     const html = await response.text()
@@ -85,12 +87,12 @@ export default class Application {
     document.title = doc.title
     this.main.replaceWith(main)
     this.main = main
-    this.attach()
+    this.attach(data)
     return true
   }
 
   // attach binds the common and specific handlers to the current main element.
-  attach () {
+  attach (data) {
     var handlerID = this.main.dataset.handler
     if (!handlerID) {
       console.error('cannot attach to content with no specified handler')
@@ -103,7 +105,7 @@ export default class Application {
     if (!handler) {
       console.error(`no handler for ${handlerID}`)
     }
-    handler(this.main)
+    handler(this.main, data)
   }
 
   attachHeader (header) {
@@ -143,13 +145,11 @@ export default class Application {
   // better to trigger a hard reload.
   setLogged (logged) {
     if (logged) {
-      Doc.show(this.noteMenuEntry)
-      Doc.show(this.settingsIcon)
+      Doc.show(this.noteMenuEntry, this.settingsIcon)
       Doc.hide(this.loginLink)
       return
     }
-    Doc.hide(this.noteMenuEntry)
-    Doc.hide(this.settingsIcon)
+    Doc.hide(this.noteMenuEntry, this.settingsIcon)
     Doc.show(this.loginLink)
   }
 
@@ -301,8 +301,7 @@ function handleRegister (main) {
     // Form 1: Set the application password
     'appPWForm', 'appPWSubmit', 'appErrMsg', 'appPW', 'appPWAgain',
     // Form 2: Create Decred wallet
-    'walletForm', 'iniPath', 'acctName', 'newWalletPass', 'submitCreate',
-    'walletErr',
+    'walletForm',
     // Form 3: Open Decred wallet
     'openForm', 'walletPass', 'submitOpen', 'openErr',
     // Form 4: DEX address
@@ -368,44 +367,16 @@ function handleRegister (main) {
     changeForm(page.appPWForm, page.urlForm)
   })
 
-  // CREATE DCR WALLET
-  // This form is only shown the first time the user visits the /register page.
-  bindForm(page.walletForm, page.submitCreate, async () => {
-    Doc.hide(page.walletErr)
-    const create = {
-      assetID: DCR_ID,
-      pass: page.newWalletPass.value,
-      account: page.acctName.value,
-      inipath: page.iniPath.value
-    }
-    app.loading(page.walletForm)
-    var res = await postJSON('/api/newwallet', create)
-    app.loaded()
-    if (!checkResponse(res)) {
-      page.walletErr.textContent = res.msg
-      Doc.show(page.walletErr)
-      return
-    }
-    await changeForm(page.walletForm, page.urlForm)
+  page.walletForm.dataset.assetID = DCR_ID
+  bindNewWalletForm(page.walletForm, () => {
+    changeForm(page.walletForm, page.urlForm)
   })
 
   // OPEN DCR WALLET
   // This form is only show if the wallet is not already open.
-  bindForm(page.openForm, page.submitOpen, async () => {
-    Doc.hide(page.openErr)
-    const open = {
-      assetID: DCR_ID,
-      pass: page.walletPass.value
-    }
-    app.loading(page.openForm)
-    var res = await postJSON('/api/openwallet', open)
-    app.loaded()
-    if (!checkResponse(res)) {
-      page.openErr.textContent = res.msg
-      Doc.show(page.openErr)
-      return
-    }
-    await changeForm(page.openForm, page.urlForm)
+  page.openForm.dataset.assetID = DCR_ID
+  bindOpenWalletForm(page.openForm, () => {
+    changeForm(page.openForm, page.urlForm)
   })
 
   // ENTER NEW DEX URL
@@ -461,13 +432,16 @@ function handleRegister (main) {
       Doc.show(page.regErr)
       return
     }
+    // Need to get a fresh market list. May consider handling this with a
+    // websocket update instead.
+    await app.fetchUser()
     app.notify(SUCCESS, `Account registered for ${dex}. Waiting for confirmations.`)
     app.loadPage('markets')
   })
 }
 
 // handleMarkets is the 'markets' page main element handler.
-function handleMarkets (main) {
+function handleMarkets (main, data) {
   var market
   const page = parsePage(main, [
     'marketLoader', 'priceBox', 'buyBttn', 'sellBttn', 'baseImg', 'quoteImg',
@@ -476,7 +450,7 @@ function handleMarkets (main) {
   ])
 
   page.rowTemplate.remove()
-  delete page.rowTemplate.id
+  page.rowTemplate.removeAttribute('id')
   const priceField = page.priceBox.querySelector('input[type=number]')
   const quoteUnits = main.querySelectorAll('[data-unit=quote]')
   const baseUnits = main.querySelectorAll('[data-unit=base]')
@@ -505,8 +479,8 @@ function handleMarkets (main) {
   const marketRows = page.marketList.querySelectorAll('.marketrow')
   const markets = []
 
-  // Check if there is a market saved for the user.
-  var lastMarket = State.fetch('selectedMarket')
+  // If no data was passed in, check if there is a market saved for the user.
+  var lastMarket = (data && data.market) ? data.market : State.fetch('selectedMarket')
   var mktFound = false
   marketRows.forEach(div => {
     const base = parseInt(div.dataset.base)
@@ -574,11 +548,15 @@ function handleMarkets (main) {
 
 // setMarkets sets a new market by sending the 'loadmarket' API request.
 function setMarket (main, dex, base, quote) {
-  ws.request('loadmarket', {
+  ws.request('loadmarket', makeMarket(dex, base, quote))
+}
+
+function makeMarket (dex, base, quote) {
+  return {
     dex: dex,
     base: base,
     quote: quote
-  })
+  }
 }
 
 // handleBook is the handler for the 'book' notification from the server.
@@ -632,7 +610,299 @@ function handleBookUpdate (main, update) {
 
 // handleWallets is the 'wallets' page main element handler.
 function handleWallets (main) {
-  console.log('wallets loaded')
+  const page = parsePage(main, [
+    'rightBox',
+    // Table Rows
+    'assetArrow', 'balanceArrow', 'statusArrow', 'walletTable', 'txtStatus',
+    // Available markets
+    'markets', 'dexTitle', 'marketsBox', 'oneMarket', 'marketsFor',
+    'marketsCard',
+    // New wallet form
+    'walletForm', 'acctName', 'newWalletPass', 'iniPath', 'walletErr',
+    'newWalletLogo', 'newWalletName',
+    // Unlock wallet form
+    'openForm', 'unlockLogo', 'unlockName', 'walletPass', 'submitOpen',
+    'openErr',
+    // Deposit
+    'deposit', 'depositName', 'depositAddress',
+    // Withdraw
+    'withdrawForm', 'withdrawLogo', 'withdrawName', 'withdrawAddr',
+    'withdrawAmt', 'withdrawAvail', 'submitWithdraw', 'withdrawFee',
+    'withdrawUnit', 'withdrawPW', 'withdrawErr'
+  ])
+
+  // Read the document.
+  const stateIcon = (row, name) => row.querySelector(`[data-state=${name}]`)
+  const getAction = (row, name) => row.querySelector(`[data-action=${name}]`)
+  const assets = {}
+  const rows = page.walletTable.querySelectorAll('tr')
+  var firstAsset
+  for (const tr of rows) {
+    const assetID = parseInt(tr.dataset.assetID)
+    const asset = assets[assetID] = {}
+    if (!firstAsset) firstAsset = asset
+    asset.ID = assetID
+    asset.tr = tr
+    asset.symbol = tr.dataset.symbol
+    asset.name = tr.dataset.name
+    asset.stateIcons = {
+      sleeping: stateIcon(tr, 'sleeping'),
+      locked: stateIcon(tr, 'locked'),
+      unlocked: stateIcon(tr, 'unlocked'),
+      nowallet: stateIcon(tr, 'nowallet')
+    }
+    asset.actions = {
+      connect: getAction(tr, 'connect'),
+      unlock: getAction(tr, 'unlock'),
+      withdraw: getAction(tr, 'withdraw'),
+      deposit: getAction(tr, 'deposit'),
+      create: getAction(tr, 'create'),
+      lock: getAction(tr, 'lock')
+    }
+  }
+
+  // Prepare asset markets template
+  page.dexTitle.removeAttribute('id')
+  page.dexTitle.remove()
+  page.oneMarket.removeAttribute('id')
+  page.oneMarket.remove()
+  page.markets.removeAttribute('id')
+  page.markets.remove()
+
+  // Methods to switch the item displayed on the right side, with a little
+  // fade-in animation.
+  var displayed, animation
+  const animationLength = 300
+
+  const hideBox = async () => {
+    if (animation) await animation
+    if (!displayed) return
+    displayed.classList.add('d-hide')
+  }
+
+  const showBox = async (box, focuser) => {
+    box.style.opacity = '0'
+    box.classList.remove('d-hide')
+    if (focuser) focuser.focus()
+    await Doc.animate(animationLength, progress => {
+      box.style.opacity = `${progress}`
+    }, 'easeOut')
+    box.style.opacity = '1'
+    displayed = box
+  }
+
+  // Show the markets box, which lists the markets available for a selected
+  // asset.
+  const showMarkets = async assetID => {
+    await app.userPromise
+    const box = page.marketsBox
+    const card = page.marketsCard
+    const asset = assets[assetID]
+    await hideBox()
+    Doc.empty(card)
+    page.marketsFor.textContent = asset.name
+    for (const [url, markets] of Object.entries(app.user.markets)) {
+      const count = markets.reduce((a, market) => {
+        if (market.baseid === assetID || market.quoteid === assetID) a++
+        return a
+      }, 0)
+      if (count === 0) continue
+      const header = page.dexTitle.cloneNode(true)
+      header.textContent = new URL(url).host
+      card.appendChild(header)
+      const marketsBox = page.markets.cloneNode(true)
+      card.appendChild(marketsBox)
+      for (const market of markets) {
+        // Only show markets where this is the base or quote asset.
+        if (market.baseid !== assetID && market.quoteid !== assetID) continue
+        const mBox = page.oneMarket.cloneNode(true)
+        mBox.querySelector('span').textContent = prettyMarketName(market)
+        let counterSymbol = market.basesymbol
+        if (market.baseid === assetID) counterSymbol = market.quotesymbol
+        mBox.querySelector('img').src = logoPath(counterSymbol)
+        // Bind the click to a load of the markets page.
+        const pageData = { market: makeMarket(url, market.baseid, market.quoteid) }
+        bind(mBox, 'click', () => { app.loadPage('markets', pageData) })
+        marketsBox.appendChild(mBox)
+      }
+    }
+    animation = showBox(box)
+  }
+
+  // Show the new wallet form.
+  const showNewWallet = async assetID => {
+    const box = page.walletForm
+    const asset = assets[assetID]
+    await hideBox()
+    if (assetID !== walletAsset) {
+      page.acctName.value = ''
+      page.newWalletPass.value = ''
+      page.iniPath.value = ''
+      page.walletErr.classList.add('d-hide')
+      page.newWalletName.textContent = asset.name
+    }
+    walletAsset = assetID
+    page.walletForm.dataset.assetID = assetID
+    page.newWalletLogo.src = logoPath(asset.symbol)
+    page.newWalletName.textContent = asset.name
+    animation = showBox(box, page.acctName)
+  }
+
+  // Show the form used to unlock a wallet.
+  var openAsset
+  const showOpen = async assetID => {
+    const box = page.openForm
+    const asset = assets[assetID]
+    await hideBox()
+    page.openErr.classList.add('d-hide')
+    page.unlockLogo.src = logoPath(asset.symbol)
+    page.unlockName.textContent = asset.name
+    page.walletPass.value = ''
+    openAsset = assetID
+    box.dataset.assetID = assetID
+    animation = showBox(box, page.walletPass)
+  }
+
+  // Display a deposit address.
+  const showDeposit = async assetID => {
+    const box = page.deposit
+    const asset = assets[assetID]
+    await app.userPromise
+    const wallet = app.walletMap[assetID]
+    if (!wallet) {
+      app.notify(ERROR, `No wallet found for ${asset.name}. Cannot retrieve deposit address.`)
+      return
+    }
+    await hideBox()
+    page.depositName.textContent = asset.name
+    page.depositAddress.textContent = wallet.address
+    animation = showBox(box, page.walletPass)
+  }
+
+  // Show the form to withdraw funds.
+  const showWithdraw = async assetID => {
+    const box = page.withdrawForm
+    const asset = assets[assetID]
+    await app.userPromise
+    const wallet = app.walletMap[assetID]
+    if (!wallet) {
+      app.notify(ERROR, `No wallet found for ${asset.name}. Cannot withdraw.`)
+    }
+    await hideBox()
+    page.withdrawAddr.value = ''
+    page.withdrawAmt.value = ''
+    page.withdrawAvail.textContent = (wallet.balance / 1e8).toFixed(8)
+    page.withdrawLogo.src = logoPath(asset.symbol)
+    page.withdrawName.textContent = asset.name
+    page.withdrawFee.textContent = wallet.feerate
+    page.withdrawUnit.textContent = wallet.units
+    box.dataset.assetID = assetID
+    animation = showBox(box, page.walletPass)
+  }
+
+  // Bind the new wallet form.
+  var walletAsset
+  bindNewWalletForm(page.walletForm, () => {
+    const asset = assets[walletAsset]
+    showMarkets(asset.ID)
+    const [a, i] = [asset.actions, asset.stateIcons]
+    Doc.hide(a.create, i.nowallet)
+    Doc.show(a.withdraw, a.deposit, a.lock, i.unlocked)
+  })
+
+  // Bind the wallet unlock form.
+  bindOpenWalletForm(page.openForm, async () => {
+    app.loading(page.openForm)
+    const asset = assets[openAsset]
+    var res = await postJSON('/api/openwallet', {
+      assetID: openAsset,
+      pass: page.walletPass.value
+    })
+    app.loaded()
+    if (!checkResponse(res)) {
+      page.openErr.textContext = res.msg
+      page.openErr.classList.remove('d-hide')
+      return
+    }
+    const [a, i] = [asset.actions, asset.stateIcons]
+    Doc.show(i.unlocked, a.lock, a.withdraw, a.deposit)
+    Doc.hide(i.locked, a.unlock)
+    showMarkets(openAsset)
+  })
+
+  // Bind the withdraw form.
+  const wForm = page.withdrawForm
+  bindForm(wForm, page.submitWithdraw, async () => {
+    Doc.hide(page.withdrawErr)
+    const assetID = parseInt(wForm.dataset.assetID)
+    const open = {
+      assetID: assetID,
+      address: page.withdrawAddr.value,
+      value: parseInt(page.withdrawAmt.value * 1e8),
+      pw: page.withdrawPW.value
+    }
+    app.loading(page.withdrawForm)
+    var res = await postJSON('/api/withdraw', open)
+    app.loaded()
+    if (!checkResponse(res)) {
+      page.withdrawErr.textContent = res.msg
+      Doc.show(page.withdrawErr)
+      return
+    }
+    app.notify(SUCCESS, `Withdraw initiated. Coin ID ${res.coin}.`)
+    showMarkets(assetID)
+  })
+
+  // Bind the row clicks, which shows the available markets for the asset.
+  for (const asset of Object.values(assets)) {
+    bind(asset.tr, 'click', () => {
+      showMarkets(asset.ID)
+    })
+  }
+
+  // Bind buttons
+  for (const [k, asset] of Object.entries(assets)) {
+    const assetID = parseInt(k) // keys are string asset ID.
+    const a = asset.actions
+    const show = (e, f) => {
+      e.stopPropagation()
+      f(assetID)
+    }
+    bind(a.connect, 'click', () => {
+      console.log('connect clicked for', assetID)
+    })
+    bind(a.withdraw, 'click', e => {
+      show(e, showWithdraw)
+    })
+    bind(a.deposit, 'click', e => {
+      show(e, showDeposit)
+    })
+    bind(a.create, 'click', e => {
+      show(e, showNewWallet)
+    })
+    bind(a.unlock, 'click', e => {
+      show(e, showOpen)
+    })
+    bind(a.lock, 'click', async e => {
+      e.stopPropagation()
+      app.loading(page.walletForm)
+      var res = await postJSON('/api/closewallet', { assetID: assetID })
+      app.loaded()
+      if (!checkResponse(res)) return
+      const [a, i] = [asset.actions, asset.stateIcons]
+      Doc.hide(i.unlocked, a.lock, a.withdraw, a.deposit)
+      Doc.show(i.locked, a.unlock)
+    })
+  }
+
+  // Clicking on the avaailable amount on the withdraw form populates the
+  // amount field.
+  bind(page.withdrawAvail, 'click', () => {
+    page.withdrawAmt.value = page.withdrawAvail.textContent
+  })
+
+  if (!firstAsset) return
+  showMarkets(firstAsset.ID)
 }
 
 // handleSettings is the 'settings' page main element handler.
@@ -686,4 +956,60 @@ function bindForm (form, submitBttn, handler) {
   }
   bind(submitBttn, 'click', wrapper)
   bind(form, 'submit', wrapper)
+}
+
+function prettyMarketName (market) {
+  return `${market.basesymbol.toUpperCase()}-${market.quotesymbol.toUpperCase()}`
+}
+
+function logoPath (symbol) {
+  return `/img/coins/${symbol}.png`
+}
+
+function bindNewWalletForm (form, success) {
+  // CREATE DCR WALLET
+  // This form is only shown the first time the user visits the /register page.
+  const fields = parsePage(form, [
+    'iniPath', 'acctName', 'newWalletPass', 'submitCreate', 'walletErr'
+  ])
+  bindForm(form, fields.submitCreate, async () => {
+    Doc.hide(fields.walletErr)
+    const create = {
+      assetID: parseInt(form.dataset.assetID),
+      pass: fields.newWalletPass.value,
+      account: fields.acctName.value,
+      inipath: fields.iniPath.value
+    }
+    app.loading(form)
+    var res = await postJSON('/api/newwallet', create)
+    app.loaded()
+    if (!checkResponse(res)) {
+      fields.walletErr.textContent = res.msg
+      Doc.show(fields.walletErr)
+      return
+    }
+    success()
+  })
+}
+
+function bindOpenWalletForm (form, success) {
+  const fields = parsePage(form, [
+    'submitOpen', 'openErr', 'walletPass'
+  ])
+  bindForm(form, fields.submitOpen, async () => {
+    Doc.hide(fields.openErr)
+    const open = {
+      assetID: parseInt(form.dataset.assetID),
+      pass: fields.walletPass.value
+    }
+    app.loading(form)
+    var res = await postJSON('/api/openwallet', open)
+    app.loaded()
+    if (!checkResponse(res)) {
+      fields.openErr.textContent = res.msg
+      Doc.show(fields.openErr)
+      return
+    }
+    success()
+  })
 }

@@ -30,7 +30,6 @@ import (
 
 const (
 	keyParamsKey = "keyParams"
-	encKeyKey    = "encKey"
 )
 
 var (
@@ -190,7 +189,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	}
 	if !wallet.connected() {
 		log.Infof("connecting wallet for %s", unbip(assetID))
-		err := wallet.Connect()
+		err := wallet.Connect(c.ctx)
 		if err != nil {
 			return nil, fmt.Errorf("Connect error: %v", err)
 		}
@@ -198,21 +197,38 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	return wallet, nil
 }
 
-// Wallets creates a slice of WalletStatus for all known wallets.
-func (c *Core) Wallets() []*WalletStatus {
+// Wallets creates a slice of WalletState for all known wallets.
+func (c *Core) Wallets() []*WalletState {
 	c.walletMtx.RLock()
 	defer c.walletMtx.RUnlock()
-	stats := make([]*WalletStatus, 0, len(c.wallets))
-	for assetID, wallet := range c.wallets {
-		on, open := wallet.status()
-		stats = append(stats, &WalletStatus{
-			AssetID: assetID,
-			Symbol:  unbip(assetID),
-			Open:    open,
-			Running: on,
-		})
+	state := make([]*WalletState, 0, len(c.wallets))
+	for _, wallet := range c.wallets {
+		state = append(state, wallet.state())
 	}
-	return stats
+	return state
+}
+
+// SupportedAssets returns a list of asset information for supported assets that
+// may or may not have a wallet yet.
+func (c *Core) SupportedAssets() map[uint32]*SupportedAsset {
+	supported := asset.Assets()
+	assets := make(map[uint32]*SupportedAsset, len(supported))
+	c.walletMtx.RLock()
+	defer c.walletMtx.RUnlock()
+	for assetID, asset := range supported {
+		var wallet *WalletState
+		w, found := c.wallets[assetID]
+		if found {
+			wallet = w.state()
+		}
+		assets[assetID] = &SupportedAsset{
+			ID:     assetID,
+			Symbol: asset.Symbol,
+			Name:   asset.Info.Name,
+			Wallet: wallet,
+		}
+	}
+	return assets
 }
 
 // User is a thread-safe getter for the User.
@@ -253,27 +269,47 @@ func (c *Core) CreateWallet(form *WalletForm) error {
 		return fmt.Errorf("error loading wallet for %d -> %s: %v", dbWallet.AssetID, unbip(dbWallet.AssetID), err)
 	}
 
-	err = wallet.Connect()
+	err = wallet.Connect(c.ctx)
 	if err != nil {
 		return fmt.Errorf("Error connecting wallet: %v", err)
 	}
 
+	initErr := func(s string, a ...interface{}) error {
+		wallet.connector.Disconnect()
+		return fmt.Errorf(s, a...)
+	}
+
+	dbWallet.Balance, _, err = wallet.Balance(0)
+	if err != nil {
+		return initErr("error getting balance for %s: %v", unbip(form.AssetID), err)
+	}
+	wallet.setBalance(dbWallet.Balance)
+
+	dbWallet.Address, err = wallet.Address()
+	if err != nil {
+		return initErr("error getting deposit address for %s: %v", unbip(form.AssetID), err)
+	}
+	wallet.setAddress(dbWallet.Address)
+
 	// Store the wallet in the database.
 	err = c.db.UpdateWallet(dbWallet)
 	if err != nil {
-		wallet.waiter.Stop()
-		return fmt.Errorf("error storing wallet credentials: %v", err)
+		return initErr("error storing wallet credentials: %v", err)
 	}
 
 	c.refreshUser()
-
 	return nil
 }
 
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
-	wallet := &xcWallet{AssetID: dbWallet.AssetID}
+	wallet := &xcWallet{
+		AssetID: dbWallet.AssetID,
+		balance: dbWallet.Balance,
+		updated: dbWallet.Updated,
+		address: dbWallet.Address,
+	}
 	walletCfg := &asset.WalletConfig{
 		Account: dbWallet.Account,
 		INIPath: dbWallet.INIPath,
@@ -287,8 +323,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		return nil, fmt.Errorf("error creating wallet: %v", err)
 	}
 	wallet.Wallet = w
-	wallet.waiter = dex.NewStartStopWaiter(w)
-	wallet.waiter.Start(c.ctx)
+	wallet.connector = dex.NewConnectionMaster(w)
 
 	c.walletMtx.Lock()
 	c.wallets[dbWallet.AssetID] = wallet
@@ -296,25 +331,23 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	return wallet, nil
 }
 
-// WalletStatus returns 1) whether the wallet exists, 2) if it's currently
-// running, and 3) whether it's currently open (unlocked).
-func (c *Core) WalletStatus(assetID uint32) (has, running, open bool) {
+// WalletState returns the *WalletState for the asset ID.
+func (c *Core) WalletState(assetID uint32) *WalletState {
 	c.walletMtx.Lock()
 	defer c.walletMtx.Unlock()
 	wallet, has := c.wallets[assetID]
 	if !has {
 		log.Tracef("wallet status requested for unknown asset %d -> %s", assetID, unbip(assetID))
-		return
+		return nil
 	}
-	running, open = wallet.status()
-	return
+	return wallet.state()
 }
 
 // OpenWallet opens (unlocks) the wallet for use.
 func (c *Core) OpenWallet(assetID uint32, pw string) error {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return fmt.Errorf("wallet error for %d -> %s: %v", assetID, unbip(assetID), err)
+		return fmt.Errorf("OpenWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
 	err = wallet.Unlock(pw, aYear)
 	if err != nil {
@@ -324,7 +357,27 @@ func (c *Core) OpenWallet(assetID uint32, pw string) error {
 	if assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
 	}
+	c.refreshUser()
 	return nil
+}
+
+// CloseWallet closes the wallet for the specified asset.
+func (c *Core) CloseWallet(assetID uint32) error {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return fmt.Errorf("CloseWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
+	}
+	for _, dc := range c.conns {
+		dc.matchMtx.RLock()
+		defer dc.matchMtx.RUnlock()
+		for _, neg := range dc.negotiators {
+			prefix := neg.Order().Prefix()
+			if prefix.BaseAsset == assetID || prefix.QuoteAsset == assetID {
+				return fmt.Errorf("cannot lock %s wallet with active negotiations", unbip(assetID))
+			}
+		}
+	}
+	return wallet.lock()
 }
 
 // PreRegister creates a connection to the specified DEX and fetches the
@@ -525,6 +578,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		_, err = c.authDEX(crypter, dc)
 		errChan <- err
 	})
+	c.refreshUser()
 	return nil, errChan
 }
 
@@ -533,20 +587,8 @@ func (c *Core) InitializeClient(pw string) error {
 	if pw == "" {
 		return fmt.Errorf("empty password not allowed")
 	}
-	privKey, err := secp256k1.GeneratePrivateKey()
-	if err != nil {
-		return fmt.Errorf("error generating new private key: %v", err)
-	}
 	crypter := encrypt.NewCrypter(pw)
-	encKey, err := crypter.Encrypt(privKey.Serialize())
-	if err != nil {
-		return fmt.Errorf("key encryption error: %v", err)
-	}
-	err = c.db.Store(encKeyKey, encKey)
-	if err != nil {
-		return fmt.Errorf("key storage error: %v", err)
-	}
-	err = c.db.Store(keyParamsKey, crypter.Serialize())
+	err := c.db.Store(keyParamsKey, crypter.Serialize())
 	if err != nil {
 		return fmt.Errorf("error storing key parameters: %v", err)
 	}
@@ -666,6 +708,23 @@ func (c *Core) notifyFee(dc *dexConnection, coin asset.Coin) error {
 	return extractError(errChan, requestTimeout)
 }
 
+// Withdraw initiates a withdraw from an exchange wallet. The client password
+// must be provided as an additional verification.
+func (c *Core) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error) {
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return nil, fmt.Errorf("Withdraw password error: %v", err)
+	}
+	if value == 0 {
+		return nil, fmt.Errorf("%s zero withdraw", unbip(assetID))
+	}
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, fmt.Errorf("%s wallet not found", unbip(assetID))
+	}
+	return wallet.Withdraw(wallet.address, value, wallet.Info().FeeRate)
+}
+
 // authDEX authenticates the connection for a DEX.
 func (c *Core) authDEX(crypter encrypt.Crypter, dc *dexConnection) ([]Negotiation, error) {
 	// Decrypt the account private key.
@@ -717,7 +776,8 @@ func (c *Core) authDEX(crypter encrypt.Crypter, dc *dexConnection) ([]Negotiatio
 	dc.matchMtx.Lock()
 	defer dc.matchMtx.Unlock()
 	for _, msgMatch := range result.Matches {
-		negotiator, err := negotiate(c.ctx, msgMatch)
+		// TODO: Re-create the order.
+		negotiator, err := negotiate(c.ctx, msgMatch, &order.LimitOrder{})
 		if err != nil {
 			errs = append(errs, msgMatch.MatchID.String()+": "+err.Error())
 			continue

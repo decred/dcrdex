@@ -213,7 +213,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	wallet := newWallet(walletCfg, "btc", tLogger, &chaincfg.MainNetParams, client)
-	go wallet.Run(walletCtx)
+	go wallet.run(walletCtx)
 
 	return wallet, client, shutdown
 }
@@ -250,7 +250,7 @@ func TestAvailableFund(t *testing.T) {
 	// should be returned.
 	unspents := make([]*ListUnspentResult, 0)
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err := wallet.Balance(tBTC)
+	available, unconf, err := wallet.Balance(tBTC.FundConf)
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	node.rawErr[methodListUnspent] = tErr
-	_, _, err = wallet.Balance(tBTC)
+	_, _, err = wallet.Balance(tBTC.FundConf)
 	if err == nil {
 		t.Fatalf("no wallet error for rpc error")
 	}
@@ -279,7 +279,7 @@ func TestAvailableFund(t *testing.T) {
 	unspents = append(unspents, littleUnspent)
 
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err = wallet.Balance(tBTC)
+	available, unconf, err = wallet.Balance(tBTC.FundConf)
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestAvailableFund(t *testing.T) {
 	})
 	littleUnspent.Confirmations = 1
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err = wallet.Balance(tBTC)
+	available, unconf, err = wallet.Balance(tBTC.FundConf)
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
@@ -376,6 +376,7 @@ func (c *tCoin) ID() dex.Bytes {
 	}
 	return make([]byte, 36)
 }
+func (c *tCoin) String() string                 { return hex.EncodeToString(c.id) }
 func (c *tCoin) Value() uint64                  { return 100 }
 func (c *tCoin) Confirmations() (uint32, error) { return 2, nil }
 func (c *tCoin) Redeem() dex.Bytes              { return nil }
@@ -1204,6 +1205,7 @@ func TestPayFee(t *testing.T) {
 	defer shutdown()
 	addr := tP2PKHAddr
 	fee := float64(1) // BTC
+	node.rawRes[methodSetTxFee] = mustMarshal(t, true)
 	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2PKHAddr)
 	node.rawRes[methodSendToAddress] = mustMarshal(t, tTxID)
 	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{
@@ -1229,7 +1231,7 @@ func TestPayFee(t *testing.T) {
 
 	_, err := wallet.PayFee(addr, toSatoshi(fee), tBTC)
 	if err != nil {
-		t.Fatalf("PayFee error: %v", err)
+		t.Fatalf("Send error: %v", err)
 	}
 
 	// SendToAddress error
@@ -1251,7 +1253,7 @@ func TestPayFee(t *testing.T) {
 	// good again
 	_, err = wallet.PayFee(addr, toSatoshi(fee), tBTC)
 	if err != nil {
-		t.Fatalf("PayFee error afterwards: %v", err)
+		t.Fatalf("Send error afterwards: %v", err)
 	}
 }
 

@@ -12,6 +12,14 @@ export default class State {
     document.cookie = cname + '=' + cvalue + ';' + expires + ';path=/'
   }
 
+  static getCookie (cname) {
+    for (const cstr of document.cookie.split(';')) {
+      const [k, v] = cstr.split('=')
+      if (k.trim() === cname) return v
+    }
+    return null
+  }
+
   static dark (dark) {
     this.setCookie(darkModeCK, dark ? '1' : '0')
     if (dark) {
@@ -37,3 +45,6 @@ export default class State {
     return null
   }
 }
+
+// If the dark-mode cookie is not set, set it to dark mode on.
+if (State.getCookie(darkModeCK) === null) State.setCookie(darkModeCK, '1')

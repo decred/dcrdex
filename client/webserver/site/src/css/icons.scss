@@ -39,3 +39,15 @@
 .ico-bell::before {
   content: "\e900";
 }
+
+.ico-locked::before {
+  content: "\e98f";
+}
+
+.ico-unlocked::before {
+  content: "\e990";
+}
+
+.ico-sleeping::before {
+  content: "\e901";
+}

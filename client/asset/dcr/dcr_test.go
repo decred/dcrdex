@@ -277,7 +277,7 @@ func TestAvailableFund(t *testing.T) {
 	// should be returned.
 	unspents := make([]walletjson.ListUnspentResult, 0)
 	node.unspent = unspents
-	available, unconf, err := wallet.Balance(tDCR)
+	available, unconf, err := wallet.Balance(tDCR.FundConf)
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	node.unspent = []walletjson.ListUnspentResult{littleUnspent}
-	available, unconf, err = wallet.Balance(tDCR)
+	available, unconf, err = wallet.Balance(tDCR.FundConf)
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestAvailableFund(t *testing.T) {
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
 	}}
 	node.unspent = unspents
-	available, unconf, err = wallet.Balance(tDCR)
+	available, unconf, err = wallet.Balance(tDCR.FundConf)
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
@@ -395,6 +395,7 @@ func (c *tCoin) ID() dex.Bytes {
 	}
 	return make([]byte, 36)
 }
+func (c *tCoin) String() string                 { return hex.EncodeToString(c.id) }
 func (c *tCoin) Value() uint64                  { return 100 }
 func (c *tCoin) Confirmations() (uint32, error) { return 2, nil }
 func (c *tCoin) Redeem() dex.Bytes              { return nil }
@@ -1103,7 +1104,7 @@ func TestPayFee(t *testing.T) {
 
 	_, err := wallet.PayFee(addr, 1e8, tDCR)
 	if err != nil {
-		t.Fatalf("PayFee error: %v", err)
+		t.Fatalf("Send error: %v", err)
 	}
 
 	// invalid address
@@ -1123,7 +1124,7 @@ func TestPayFee(t *testing.T) {
 	// good again
 	_, err = wallet.PayFee(addr, 1e8, tDCR)
 	if err != nil {
-		t.Fatalf("PayFee error afterwards: %v", err)
+		t.Fatalf("Send error afterwards: %v", err)
 	}
 }
 

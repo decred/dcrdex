@@ -273,6 +273,10 @@ func (c *tCoin) ID() dex.Bytes {
 	return c.id
 }
 
+func (c *tCoin) String() string {
+	return hex.EncodeToString(c.id)
+}
+
 func (c *tCoin) Value() uint64 {
 	return 0
 }
@@ -295,17 +299,23 @@ type TXCWallet struct {
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := new(TXCWallet)
 	return &xcWallet{
-		Wallet:  w,
-		waiter:  dex.NewStartStopWaiter(w),
-		AssetID: assetID,
+		Wallet:    w,
+		connector: dex.NewConnectionMaster(w),
+		AssetID:   assetID,
 	}, w
 }
 
-func (w *TXCWallet) Connect() error { return nil }
+func (w *TXCWallet) Info() *asset.WalletInfo {
+	return &asset.WalletInfo{}
+}
+
+func (w *TXCWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+	return nil, &sync.WaitGroup{}
+}
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
-func (w *TXCWallet) Balance(*dex.Asset) (available, locked uint64, err error) {
+func (w *TXCWallet) Balance(uint32) (available, locked uint64, err error) {
 	return 0, 0, nil
 }
 
@@ -353,7 +363,7 @@ func (w *TXCWallet) Lock() error {
 	return nil
 }
 
-func (w *TXCWallet) PayFee(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
+func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
 	return w.payFeeCoin, w.payFeeErr
@@ -361,6 +371,14 @@ func (w *TXCWallet) PayFee(address string, fee uint64, _ *dex.Asset) (asset.Coin
 
 func (w *TXCWallet) Coin(id dex.Bytes) (asset.Coin, error) {
 	return w.coinCoin, nil
+}
+
+func (w *TXCWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (asset.Coin, error) {
+	return w.payFeeCoin, w.payFeeErr
+}
+
+func (w *TXCWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
+	return w.payFeeCoin, w.payFeeErr
 }
 
 func (w *TXCWallet) setConfs(confs uint32) {
@@ -396,6 +414,8 @@ func newTestRig() *testRig {
 
 	db.storedKey = tCrypter.Serialize()
 	dc, conn, acct := testDexConnection()
+
+	// Store the
 
 	return &testRig{
 		core: &Core{
@@ -592,11 +612,16 @@ func TestDexConnectionOrderBook(t *testing.T) {
 }
 
 type tDriver struct {
-	f func(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error)
+	f     func(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error)
+	winfo *asset.WalletInfo
 }
 
 func (drv *tDriver) Setup(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
 	return drv.f(cfg, logger, net)
+}
+
+func (drv *tDriver) Info() *asset.WalletInfo {
+	return drv.winfo
 }
 
 func TestCreateWallet(t *testing.T) {
@@ -631,10 +656,13 @@ func TestCreateWallet(t *testing.T) {
 	}
 
 	// Register the asset.
-	asset.Register(tILT.ID, &tDriver{f: func(wCfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
-		w, _ := newTWallet(tILT.ID)
-		return w.Wallet, nil
-	}})
+	asset.Register(tILT.ID, &tDriver{
+		f: func(wCfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
+			w, _ := newTWallet(tILT.ID)
+			return w.Wallet, nil
+		},
+		winfo: &asset.WalletInfo{},
+	})
 
 	// Database error.
 	rig.db.updateWalletErr = tErr
@@ -757,7 +785,7 @@ func TestRegister(t *testing.T) {
 	runWithWait := func() {
 		errChan := run()
 		if err != nil {
-			t.Fatalf("unexpected error before waiter: %v", err)
+			t.Fatalf("runWithWait error: %v", err)
 		}
 		err = <-errChan
 	}
@@ -1003,7 +1031,7 @@ func TestInitializeClient(t *testing.T) {
 		t.Fatalf("no error for empty password")
 	}
 
-	// StoreEncryptedKey error
+	// Store error
 	rig.db.storeErr = tErr
 	err = tCore.InitializeClient("")
 	if err == nil {
@@ -1015,5 +1043,50 @@ func TestInitializeClient(t *testing.T) {
 	err = tCore.InitializeClient(tPW)
 	if err != nil {
 		t.Fatalf("final InitializeClient error: %v", err)
+	}
+}
+
+func TestWithdraw(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	wallet, xcWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = wallet
+	wallet.address = "addr"
+
+	// Successful
+	_, err := tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	if err != nil {
+		t.Fatalf("withdraw error: %v", err)
+	}
+
+	// 0 value
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 0)
+	if err == nil {
+		t.Fatalf("no error for zero value withdraw")
+	}
+
+	// no wallet
+	_, err = tCore.Withdraw(tPW, 12345, 1e8)
+	if err == nil {
+		t.Fatalf("no error for unknown wallet")
+	}
+
+	// Send error
+	xcWallet.payFeeErr = tErr
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	if err == nil {
+		t.Fatalf("no error for wallet Send error")
+	}
+	xcWallet.payFeeErr = nil
+
+	// Check the coin.
+	xcWallet.payFeeCoin = &tCoin{id: []byte{'a'}}
+	coin, err := tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	if err != nil {
+		t.Fatalf("coin check error: %v", err)
+	}
+	coinID := coin.ID()
+	if len(coinID) != 1 || coinID[0] != 'a' {
+		t.Fatalf("coin ID not propagated")
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+
+	"decred.org/dcrdex/client/core"
 )
 
 // pageTemplate holds the information necessary to process a template. Also
@@ -129,6 +131,7 @@ func (t *templates) execWithReload(name string, data interface{}) (string, error
 var templateFuncs = template.FuncMap{
 	// logoPath gets the logo image path for the base asset of the specified
 	// market.
+	"toUpper": strings.ToUpper,
 	"logoPath": func(symbol string) string {
 		return "/img/coins/" + strings.ToLower(symbol) + ".png"
 	},
@@ -138,6 +141,19 @@ var templateFuncs = template.FuncMap{
 		if err != nil {
 			log.Errorf("failed to parse URL: %s", uri)
 		}
-		return strings.TrimSuffix(u.Host, filepath.Ext(u.Host))
+		return u.Host
+	},
+	"fromAtoms": func(v uint64) float64 {
+		return float64(v) / 1e8
+	},
+	"walletStatusString": func(status *core.WalletState) string {
+		switch {
+		case status.Open:
+			return "ready"
+		case status.Running:
+			return "locked"
+		default:
+			return "off"
+		}
 	},
 }

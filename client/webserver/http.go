@@ -6,6 +6,7 @@ package webserver
 import (
 	"io"
 	"net/http"
+	"sort"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
@@ -81,7 +82,9 @@ type registerTmplData struct {
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	user := extractUserInfo(r)
 	dcrID, _ := dex.BipSymbolID("dcr")
-	exists, _, open := s.core.WalletStatus(dcrID)
+	status := s.core.WalletState(dcrID)
+	exists := status != nil
+	open := exists && status.Open
 	needsInit := !user.Initialized
 	data := &registerTmplData{
 		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
@@ -113,9 +116,36 @@ func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "markets", s.marketResult(r))
 }
 
+type walletsTmplData struct {
+	CommonArguments
+	Assets []*core.SupportedAsset
+}
+
 // handleWallets is the handler for the '/wallets' page request.
 func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, "wallets", commonArgs(r, "Wallets | Decred DEX"))
+	assetMap := s.core.SupportedAssets()
+	// Sort assets by 1. wallet vs no wallet, and 2) alphabetically.
+	assets := make([]*core.SupportedAsset, 0, len(assetMap))
+	// over-allocating, but assuming user will not have set up most wallets.
+	nowallets := make([]*core.SupportedAsset, 0, len(assetMap))
+	for _, asset := range assetMap {
+		if asset.Wallet == nil {
+			nowallets = append(nowallets, asset)
+		} else {
+			assets = append(assets, asset)
+		}
+	}
+	sort.Slice(assets, func(i, j int) bool {
+		return assets[i].Name < assets[j].Name
+	})
+	sort.Slice(nowallets, func(i, j int) bool {
+		return nowallets[i].Name < nowallets[j].Name
+	})
+	data := &walletsTmplData{
+		CommonArguments: *commonArgs(r, "Wallets | Decred DEX"),
+		Assets:          append(assets, nowallets...),
+	}
+	s.sendTemplate(w, "wallets", data)
 }
 
 // handleSettings is the handler for the '/settings' page request.
