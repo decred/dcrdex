@@ -14,12 +14,18 @@ import (
 	"golang.org/x/crypto/poly1305"
 )
 
-// Crypter is an encryption algorithm. Both key deriviation and encryption are
-// handled by the Crypter.
+// Crypter is an interface for an encryption key and encryption/decryption
+// algorithms. Create a Crypter with the NewCrypter function.
 type Crypter interface {
+	// Encrypt encrypts the plaintext.
 	Encrypt(b []byte) ([]byte, error)
+	// Decrypt decrypts the ciphertext created by Encrypt.
 	Decrypt(b []byte) ([]byte, error)
+	// Serialize serializes the Crypter. Use the Deserialize function to create
+	// a Crypter from the resulting bytes. Deserializing requires the password
+	// used to create the Crypter.
 	Serialize() []byte
+	// Close zeros the encryption key. The Crypter is useless after closing.
 	Close()
 }
 
@@ -115,7 +121,8 @@ func newArgonPolyCrypter(pw string) *argonPolyCrypter {
 			threads: threads,
 		},
 	}
-	// Use the mac key and the serialized parameters to generate the autheticator.
+	// Use the mac key and the serialized parameters to generate the
+	// authenticator.
 	poly1305.Sum(&c.tag, c.serializeParams(), &polyKey)
 	return c
 }
@@ -230,7 +237,7 @@ func decodeArgonPoly_v0(pw string, pushes [][]byte) (*argonPolyCrypter, error) {
 	var polyKey [KeySize]byte
 	copy(polyKey[:], polyKeyB)
 	if !poly1305.Verify(&c.tag, c.serializeParams(), &polyKey) {
-		return nil, fmt.Errorf("stream: incorrect passphrase")
+		return nil, fmt.Errorf("incorrect password")
 	}
 
 	// Copy the key.
