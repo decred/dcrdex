@@ -2,7 +2,6 @@ package order
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -12,13 +11,18 @@ import (
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
-func makeEpochOrderNote(mid string, oid order.OrderID, commitment order.Commitment) *msgjson.EpochOrderNote {
+func makeEpochOrderNote(mid string, oid order.OrderID, side uint8, rate uint64, qty uint64, commitment order.Commitment) *msgjson.EpochOrderNote {
 	return &msgjson.EpochOrderNote{
 		Commitment: commitment[:],
 		BookOrderNote: msgjson.BookOrderNote{
 			OrderNote: msgjson.OrderNote{
 				MarketID: mid,
 				OrderID:  oid[:],
+			},
+			TradeNote: msgjson.TradeNote{
+				Side:     side,
+				Rate:     rate,
+				Quantity: qty,
 			},
 		},
 	}
@@ -30,9 +34,9 @@ func makeCommitment(pimg order.Preimage) order.Commitment {
 
 // makeMatchProof generates the sorting seed and commmitment checksum from the
 // provided ordered set of preimages and commitments.
-func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) (int64, msgjson.Bytes, error) {
+func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) (msgjson.Bytes, msgjson.Bytes, error) {
 	if len(preimages) != len(commitments) {
-		return 0, nil, fmt.Errorf("expected equal number of preimages and commitments")
+		return nil, nil, fmt.Errorf("expected equal number of preimages and commitments")
 	}
 
 	sbuff := make([]byte, 0, len(preimages)*order.PreimageSize)
@@ -41,10 +45,9 @@ func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) 
 		sbuff = append(sbuff, preimages[i][:]...)
 		cbuff = append(cbuff, commitments[i][:]...)
 	}
-	sum := blake256.Sum256(sbuff)
-	seed := int64(binary.LittleEndian.Uint64(sum[:8]))
+	seed := blake256.Sum256(sbuff)
 	csum := blake256.Sum256(cbuff)
-	return seed, msgjson.Bytes(csum[:]), nil
+	return seed[:], csum[:], nil
 }
 
 func TestEpochQueue(t *testing.T) {
@@ -53,17 +56,17 @@ func TestEpochQueue(t *testing.T) {
 	n1Pimg := [32]byte{'1'}
 	n1Commitment := makeCommitment(n1Pimg)
 	n1OrderID := [32]byte{'a'}
-	n1 := makeEpochOrderNote(mid, n1OrderID, n1Commitment)
+	n1 := makeEpochOrderNote(mid, n1OrderID, msgjson.BuyOrderNum, 1, 2, n1Commitment)
 
 	n2Pimg := [32]byte{'2'}
 	n2Commitment := makeCommitment(n2Pimg)
 	n2OrderID := [32]byte{'b'}
-	n2 := makeEpochOrderNote(mid, n2OrderID, n2Commitment)
+	n2 := makeEpochOrderNote(mid, n2OrderID, msgjson.BuyOrderNum, 1, 2, n2Commitment)
 
 	n3Pimg := [32]byte{'3'}
 	n3Commitment := makeCommitment(n3Pimg)
 	n3OrderID := [32]byte{'c'}
-	n3 := makeEpochOrderNote(mid, n3OrderID, n3Commitment)
+	n3 := makeEpochOrderNote(mid, n3OrderID, msgjson.BuyOrderNum, 1, 2, n3Commitment)
 
 	err := eq.Enqueue(n1)
 	if err != nil {
@@ -147,8 +150,8 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[GenerateMatchProof] unexpected error: %v", err)
 	}
 
-	if expectedSeed != seed {
-		t.Fatalf("expected seed %d, got %d", expectedSeed, seed)
+	if !bytes.Equal(expectedSeed, seed) {
+		t.Fatalf("expected seed %x, got %x", expectedSeed, seed)
 	}
 
 	if !bytes.Equal(expectedCmtChecksum, cmtChecksum) {
@@ -192,8 +195,8 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[GenerateMatchProof] unexpected error: %v", err)
 	}
 
-	if expectedSeed != seed {
-		t.Fatalf("expected seed %d, got %d", expectedSeed, seed)
+	if !bytes.Equal(expectedSeed, seed) {
+		t.Fatalf("expected seed %x, got %x", expectedSeed, seed)
 	}
 
 	if !bytes.Equal(expectedCmtChecksum, cmtChecksum) {
@@ -233,7 +236,7 @@ func benchmarkGenerateMatchProof(c int, b *testing.B) {
 	preimages := make([]order.Preimage, 0, c)
 	for i := range notes {
 		pi := randPreimage()
-		notes[i] = makeEpochOrderNote("mkt", randOrderID(), blake256.Sum256(pi[:]))
+		notes[i] = makeEpochOrderNote("mkt", randOrderID(), msgjson.BuyOrderNum, 1, 2, blake256.Sum256(pi[:]))
 		preimages = append(preimages, pi)
 	}
 

@@ -5,7 +5,6 @@ package order
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"sort"
 	"sync"
@@ -15,23 +14,31 @@ import (
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
+// epochOrder represents a compact EpochOrderNote.
+type epochOrder struct {
+	Side       uint8
+	Quantity   uint64
+	Rate       uint64
+	Commitment order.Commitment
+}
+
 // EpochQueue represents a client epoch queue.
 type EpochQueue struct {
-	orders map[order.OrderID]order.Commitment
+	orders map[order.OrderID]*epochOrder
 	mtx    sync.Mutex
 }
 
 // NewEpochQueue creates a client epoch queue.
 func NewEpochQueue() *EpochQueue {
 	return &EpochQueue{
-		orders: make(map[order.OrderID]order.Commitment),
+		orders: make(map[order.OrderID]*epochOrder),
 	}
 }
 
 // Reset clears the epoch queue. This should be called when a new epoch begins.
 func (eq *EpochQueue) Reset() {
 	eq.mtx.Lock()
-	eq.orders = make(map[order.OrderID]order.Commitment)
+	eq.orders = make(map[order.OrderID]*epochOrder)
 	eq.mtx.Unlock()
 }
 
@@ -54,8 +61,15 @@ func (eq *EpochQueue) Enqueue(note *msgjson.EpochOrderNote) error {
 	var commitment order.Commitment
 	copy(commitment[:], note.Commitment)
 
+	order := &epochOrder{
+		Commitment: commitment,
+		Quantity:   note.Quantity,
+		Rate:       note.Rate,
+		Side:       note.Side,
+	}
+
 	eq.mtx.Lock()
-	eq.orders[oid] = commitment
+	eq.orders[oid] = order
 	eq.mtx.Unlock()
 
 	return nil
@@ -83,12 +97,12 @@ func (eq *EpochQueue) Exists(oid order.OrderID) bool {
 //
 // The epoch queue needs to be reset if there are preimage mismatches or
 // non-existent orders for preimage errors.
-func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []order.OrderID) (int64, msgjson.Bytes, error) {
+func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []order.OrderID) (msgjson.Bytes, msgjson.Bytes, error) {
 	eq.mtx.Lock()
 	defer eq.mtx.Unlock()
 
 	if len(eq.orders) == 0 {
-		return 0, nil,
+		return nil, nil,
 			fmt.Errorf("cannot generate match proof with an empty epoch queue")
 	}
 
@@ -98,7 +112,7 @@ func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []or
 	}
 
 	if len(eq.orders) != len(preimages) {
-		return 0, nil, fmt.Errorf("expected same length for epoch queue (%v) "+
+		return nil, nil, fmt.Errorf("expected same length for epoch queue (%v) "+
 			"preimages (%v)", len(eq.orders), len(preimages))
 	}
 
@@ -106,9 +120,9 @@ func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []or
 	matches := make(map[order.OrderID]order.Preimage, len(eq.orders))
 	for i := range preimages {
 		var match bool
-		for oid, commit := range eq.orders {
+		for oid, order := range eq.orders {
 			commitment := blake256.Sum256(preimages[i][:])
-			if bytes.Equal(commit[:], commitment[:]) {
+			if bytes.Equal(order.Commitment[:], commitment[:]) {
 				matches[oid] = preimages[i]
 				match = true
 				break
@@ -116,22 +130,22 @@ func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []or
 		}
 
 		if !match {
-			return 0, nil,
+			return nil, nil,
 				fmt.Errorf("no order match found for preimage %x", preimages[i])
 		}
 	}
 
 	// Ensure all remaining epoch orders matched to a preimage.
 	if len(matches) != len(eq.orders) {
-		return 0, nil, fmt.Errorf("expected all remaining epoch orders (%v) "+
+		return nil, nil, fmt.Errorf("expected all remaining epoch orders (%v) "+
 			"matched to a preimage (%v)", len(matches), len(eq.orders))
 	}
 
 	oids := make([]order.OrderID, 0, len(eq.orders))
 	commitments := make([]order.Commitment, 0, len(eq.orders))
-	for oid, commit := range eq.orders {
+	for oid, order := range eq.orders {
 		oids = append(oids, oid)
-		commitments = append(commitments, commit)
+		commitments = append(commitments, order.Commitment)
 	}
 
 	sort.Slice(oids, func(i, j int) bool {
@@ -149,9 +163,7 @@ func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []or
 		pimg := matches[oid]
 		sbuff = append(sbuff, pimg[:]...)
 	}
-
-	sum := blake256.Sum256(sbuff)
-	seed := int64(binary.LittleEndian.Uint64(sum[:8]))
+	seed := blake256.Sum256(sbuff)
 
 	// Concatenate the sorted order commitments and generate the
 	// commitment checksum.
@@ -161,5 +173,5 @@ func (eq *EpochQueue) GenerateMatchProof(preimages []order.Preimage, misses []or
 	}
 	csum := blake256.Sum256(cbuff)
 
-	return seed, msgjson.Bytes(csum[:]), nil
+	return seed[:], msgjson.Bytes(csum[:]), nil
 }
