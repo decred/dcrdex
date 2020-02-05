@@ -537,6 +537,8 @@ func TestClientResponses(t *testing.T) {
 	// The responseHandler map should contain the ntfn ID since expiry has not
 	// yet arrived.
 	lockedExe(func() {
+		client.reqMtx.Lock()
+		defer client.reqMtx.Unlock()
 		_, found := client.respHandlers[expiredID]
 		if !found {
 			t.Fatalf("response handler not found")
