@@ -51,8 +51,8 @@ type xcWallet struct {
 	hookedUp bool
 }
 
-// unlock unlocks the wallet.
-func (w *xcWallet) unlock(pw string, dur time.Duration) error {
+// Unlock unlocks the wallet.
+func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 	err := w.Wallet.Unlock(pw, dur)
 	if err != nil {
 		return err
@@ -99,6 +99,7 @@ func (w *xcWallet) Connect() error {
 type Registration struct {
 	DEX      string
 	Password string
+	Fee      uint64
 }
 
 // Market is market info.

@@ -51,9 +51,10 @@ var (
 	}
 	tDexPriv *secp256k1.PrivateKey
 	tDexKey  *secp256k1.PublicKey
-	tPW      = "dexpw"
-	tDexUrl  = "somedex.tld"
-	tErr     = fmt.Errorf("test error")
+	tPW             = "dexpw"
+	tDexUrl         = "somedex.tld"
+	tErr            = fmt.Errorf("test error")
+	tFee     uint64 = 1e8
 )
 
 type tMsg = *msgjson.Message
@@ -127,6 +128,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 					MarketBuyBuffer: 1.1,
 				},
 			},
+			Fee: tFee,
 		},
 		markets: []*Market{
 			&Market{
@@ -650,7 +652,7 @@ func TestRegister(t *testing.T) {
 	regRes := &msgjson.RegisterResult{
 		DEXPubKey: acct.dexPubKey.Serialize(),
 		Address:   "someaddr",
-		Fee:       1e8,
+		Fee:       tFee,
 		Time:      encode.UnixMilliU(time.Now()),
 	}
 	sign(tDexPriv, regRes)
@@ -718,6 +720,7 @@ func TestRegister(t *testing.T) {
 	form := &Registration{
 		DEX:      tDexUrl,
 		Password: tPW,
+		Fee:      tFee,
 	}
 
 	tWallet.payFeeCoin = &tCoin{id: []byte("abcdef")}

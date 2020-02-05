@@ -289,7 +289,7 @@ func (conn *wsConn) NextID() uint64 {
 // Connect connects the client and starts an auto-reconnect loop. Any error
 // encountered during the initial connection will be returned. The reconnect
 // loop will continue to try connecting, even if an error is returned. To
-// shutdown auto-reconnect, use Close().
+// shutdown auto-reconnect, use close().
 func (conn *wsConn) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 	var wg sync.WaitGroup
 	wg.Add(1)

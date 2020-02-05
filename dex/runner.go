@@ -20,13 +20,6 @@ func (cm *contextManager) init(ctx context.Context) {
 	cm.ctx, cm.cancel = context.WithCancel(ctx)
 }
 
-// Stop cancels the context.
-func (cm *contextManager) Stop() {
-	cm.mtx.RLock()
-	cm.cancel()
-	cm.mtx.RUnlock()
-}
-
 // On will be true until the context is canceled.
 func (cm *contextManager) On() bool {
 	cm.mtx.RLock()
@@ -72,6 +65,13 @@ func (ssw *StartStopWaiter) WaitForShutdown() {
 	ssw.wg.Wait()
 }
 
+// Stop cancels the context.
+func (ssw *StartStopWaiter) Stop() {
+	ssw.mtx.RLock()
+	ssw.cancel()
+	ssw.mtx.RUnlock()
+}
+
 // Connector is any type that implements the Connect method, which will return
 // a connection error, and a channel that can be used to wait on shutdown after
 // context cancellation.
@@ -105,8 +105,8 @@ func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 
 // Disconnect closes the connection and waits for shutdown.
 func (c *ConnectionMaster) Disconnect() {
-	c.Stop()
 	c.mtx.RLock()
+	c.cancel()
 	defer c.mtx.RUnlock()
 	c.wg.Wait()
 }

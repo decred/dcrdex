@@ -209,7 +209,7 @@ func (c *Core) Wallets() []*WalletStatus {
 	return stats
 }
 
-// user is a thread-safe getter for the User.
+// User is a thread-safe getter for the User.
 func (c *Core) User() *User {
 	c.userMtx.RLock()
 	defer c.userMtx.RUnlock()
@@ -322,7 +322,7 @@ func (c *Core) OpenWallet(assetID uint32, pw string) error {
 // registration is completed.
 func (c *Core) PreRegister(dex string) (uint64, error) {
 	c.connMtx.RLock()
-	dc, found := c.conns[dex]
+	_, found := c.conns[dex]
 	c.connMtx.RUnlock()
 	if found {
 		return 0, fmt.Errorf("already registered at %s", dex)
@@ -347,7 +347,9 @@ func (c *Core) PreRegister(dex string) (uint64, error) {
 			}
 		})
 	} else {
-		c.pendingTimer.Stop()
+		if !c.pendingTimer.Stop() {
+			<-c.pendingTimer.C
+		}
 		c.pendingTimer.Reset(time.Minute * 5)
 	}
 	return dc.cfg.Fee, nil
@@ -385,7 +387,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		URL: form.DEX,
 	}
 	c.connMtx.Lock()
-	dc, found := c.conns[form.DEX]
+	dc, found := c.conns[ai.URL]
 	// If it's not already in the map, see if there is a pre-registration pending.
 	if !found && c.pendingReg != nil && c.pendingReg.acct.url == form.DEX {
 		dc = c.pendingReg
@@ -396,6 +398,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	if !found {
 		dc, err = c.connectDEX(ai)
 		if err != nil {
+			c.connMtx.Unlock()
 			return err, nil
 		}
 		c.conns[ai.URL] = dc
@@ -467,6 +470,12 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	// Check that the fee is non-zero.
 	if regRes.Fee == 0 {
 		return fmt.Errorf("zero registration fees not supported"), nil
+	}
+	if regRes.Fee != dc.cfg.Fee {
+		return fmt.Errorf("DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dc.cfg.Fee), nil
+	}
+	if regRes.Fee != form.Fee {
+		return fmt.Errorf("registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee), nil
 	}
 	// Pay the registration fee.
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, regAsset)
@@ -601,26 +610,27 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 	var errs []string
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	for _, dexConn := range c.conns {
-		dc := dexConn
+	for _, dc := range c.conns {
+		// Copy the iterator for use in the authDEX goroutine.
 		if dc.acct.authed() {
 			continue
 		}
 		wg.Add(1)
-		go func() {
+		go func(dc *dexConnection) {
 			defer wg.Done()
 			n, err := c.authDEX(crypter, dc)
+			// Using the matchMtx here to synchronize access to the errs slice too.
+			dc.matchMtx.Lock()
+			defer dc.matchMtx.Unlock()
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("%s: %v", dc.acct.url, err))
 				return
 			}
-			dc.matchMtx.Lock()
 			negotiations = append(negotiations, n...)
-			dc.matchMtx.Unlock()
-		}()
+		}(dc)
 	}
 	wg.Wait()
-	if errs != nil {
+	if len(errs) > 0 {
 		err = fmt.Errorf("authorization errors: %s", strings.Join(errs, ", "))
 	}
 	return negotiations, err

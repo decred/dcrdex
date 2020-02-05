@@ -54,6 +54,7 @@ func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
 type registration struct {
 	DEX      string `json:"dex"`
 	Password string `json:"pass"`
+	Fee      uint64 `json:"fee"`
 }
 
 // apiRegister is the handler for the '/register' API request.
@@ -80,6 +81,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	err, payFeeErr := s.core.Register(&core.Registration{
 		DEX:      reg.DEX,
 		Password: reg.Password,
+		Fee:      reg.Fee,
 	})
 	if err != nil {
 		s.writeAPIError(w, "registration error: %v", err)

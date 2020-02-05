@@ -82,8 +82,7 @@ func (db *boltDB) Run(ctx context.Context) {
 	db.Close()
 }
 
-// StoreKeyParams stores the serialized key derivation parameters for an
-// encryption key.
+// Store stores a value at the specified key in a general-use bucket.
 func (db *boltDB) Store(k string, v []byte) error {
 	if len(k) == 0 {
 		return fmt.Errorf("cannot store with empty key")
@@ -98,7 +97,7 @@ func (db *boltDB) Store(k string, v []byte) error {
 	})
 }
 
-// KeyParams retrieves the currently stored key derivation parameters.
+// Get retrieves value previously stored with Store.
 func (db *boltDB) Get(k string) ([]byte, error) {
 	var v []byte
 	keyB := []byte(k)

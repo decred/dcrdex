@@ -409,6 +409,7 @@ function handleRegister (main) {
   })
 
   // ENTER NEW DEX URL
+  var fee
   bindForm(page.urlForm, page.submitAddr, async () => {
     Doc.hide(page.addrErr)
     const dex = page.addrInput.value
@@ -426,6 +427,7 @@ function handleRegister (main) {
       return
     }
     page.feeDisplay.textContent = formatCoinValue(res.fee / 1e8)
+    fee = res.fee
     await app.userPromise
     const dcrWallet = app.walletMap[DCR_ID]
     if (!dcrWallet) {
@@ -448,7 +450,8 @@ function handleRegister (main) {
     const dex = page.addrInput.value
     const registration = {
       dex: page.addrInput.value,
-      pass: page.clientPass.value
+      pass: page.clientPass.value,
+      fee: fee
     }
     app.loading(page.pwForm)
     var res = await postJSON('/api/register', registration)
