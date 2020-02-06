@@ -55,6 +55,7 @@ var (
 	tDexUrl         = "somedex.tld"
 	tErr            = fmt.Errorf("test error")
 	tFee     uint64 = 1e8
+	tCrypter encrypt.Crypter
 )
 
 type tMsg = *msgjson.Message
@@ -92,8 +93,7 @@ func newTWebsocket() *TWebsocket {
 
 func tNewAccount() *dexAccount {
 	privKey, _ := secp256k1.GeneratePrivateKey()
-	secretKey := encrypt.NewCrypter(tPW)
-	encPW, _ := secretKey.Encrypt(privKey.Serialize())
+	encPW, _ := tCrypter.Encrypt(privKey.Serialize())
 	return &dexAccount{
 		url:       tDexUrl,
 		encKey:    encPW,
@@ -184,8 +184,10 @@ type TDB struct {
 	updateWalletErr error
 	acct            *db.AccountInfo
 	acctErr         error
+	getErr          error
+	storeErr        error
 	encKeyErr       error
-	storeKeyErr     error
+	storedKey       []byte
 	accts           []*db.AccountInfo
 }
 
@@ -248,11 +250,17 @@ func (db *TDB) AccountPaid(proof *db.AccountProof) error {
 }
 
 func (db *TDB) Store(k string, b []byte) error {
-	return db.storeKeyErr
+	if k == keyParamsKey {
+		db.storedKey = b
+	}
+	return db.storeErr
 }
 
 func (db *TDB) Get(k string) ([]byte, error) {
-	return nil, db.encKeyErr
+	if k == keyParamsKey {
+		return db.storedKey, db.encKeyErr
+	}
+	return nil, db.getErr
 }
 
 type tCoin struct {
@@ -281,6 +289,7 @@ type TXCWallet struct {
 	mtx        sync.RWMutex
 	payFeeCoin *tCoin
 	payFeeErr  error
+	coinCoin   *tCoin
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -350,6 +359,10 @@ func (w *TXCWallet) PayFee(address string, fee uint64, _ *dex.Asset) (asset.Coin
 	return w.payFeeCoin, w.payFeeErr
 }
 
+func (w *TXCWallet) Coin(id dex.Bytes) (asset.Coin, error) {
+	return w.coinCoin, nil
+}
+
 func (w *TXCWallet) setConfs(confs uint32) {
 	w.mtx.Lock()
 	w.payFeeCoin.confs = confs
@@ -380,6 +393,8 @@ type testRig struct {
 
 func newTestRig() *testRig {
 	db := new(TDB)
+
+	db.storedKey = tCrypter.Serialize()
 	dc, conn, acct := testDexConnection()
 
 	return &testRig{
@@ -394,7 +409,7 @@ func newTestRig() *testRig {
 				DefaultLevel: slog.LevelTrace,
 			},
 			wallets: make(map[uint32]*xcWallet),
-			waiters: make(map[string]coinWaiter),
+			waiters: make(map[uint64]*coinWaiter),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
@@ -411,6 +426,7 @@ func tMarketID(base, quote uint32) string {
 }
 
 func TestMain(m *testing.M) {
+	tCrypter = encrypt.NewCrypter(tPW)
 	log = slog.NewBackend(os.Stdout).Logger("TEST")
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -987,12 +1003,12 @@ func TestInitializeClient(t *testing.T) {
 	}
 
 	// StoreEncryptedKey error
-	rig.db.storeKeyErr = tErr
+	rig.db.storeErr = tErr
 	err = tCore.InitializeClient("")
 	if err == nil {
 		t.Fatalf("no error for StoreEncryptedKey error")
 	}
-	rig.db.storeKeyErr = nil
+	rig.db.storeErr = nil
 
 	// Success again
 	err = tCore.InitializeClient(tPW)

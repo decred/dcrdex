@@ -55,7 +55,7 @@ type anylist []interface{}
 // ListUnspent retrieves a list of the wallet's UTXOs.
 func (wc *walletClient) ListUnspent() ([]*ListUnspentResult, error) {
 	unspents := make([]*ListUnspentResult, 0)
-	return unspents, wc.call(methodListUnspent, nil, &unspents)
+	return unspents, wc.call(methodListUnspent, anylist{uint8(0)}, &unspents)
 }
 
 // LockUnspent locks and unlocks outputs for spending. An output that is part of

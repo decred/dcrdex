@@ -4,6 +4,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -23,7 +25,6 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
-	srvacct "decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
@@ -59,14 +60,19 @@ type dexConnection struct {
 // dcrdex/server/coinwaiter.Waiter, but is different enough to warrant a
 // separate type.
 type coinWaiter struct {
-	conn    *dexConnection
-	coin    asset.Coin
-	confs   uint32
-	asset   *dex.Asset
-	route   string
-	privKey *secp256k1.PrivateKey
-	req     msgjson.Stampable
-	f       func(*msgjson.Message, error)
+	assetID uint32
+	trigger func() (bool, error)
+	action  func(error)
+}
+
+func coinConfirmationTrigger(coin asset.Coin, reqConfs uint32) func() (bool, error) {
+	return func() (bool, error) {
+		confs, err := coin.Confirmations()
+		if err != nil {
+			return false, fmt.Errorf("Error getting confirmations for %x: %v", coin.ID(), err)
+		}
+		return confs >= reqConfs, nil
+	}
 }
 
 // Config is the configuration for the Core.
@@ -101,7 +107,7 @@ type Core struct {
 	loggerMaker   *dex.LoggerMaker
 	net           dex.Network
 	waiterMtx     sync.Mutex
-	waiters       map[string]coinWaiter
+	waiters       map[uint64]*coinWaiter
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
 	userMtx       sync.RWMutex
 	user          *User
@@ -122,7 +128,7 @@ func New(cfg *Config) (*Core, error) {
 		wallets:     make(map[uint32]*xcWallet),
 		net:         cfg.Net,
 		loggerMaker: cfg.LoggerMaker,
-		waiters:     make(map[string]coinWaiter),
+		waiters:     make(map[uint64]*coinWaiter),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 	}
@@ -314,6 +320,10 @@ func (c *Core) OpenWallet(assetID uint32, pw string) error {
 	if err != nil {
 		return fmt.Errorf("wallet unlock error: %v", err)
 	}
+	dcrID, _ := dex.BipSymbolID("dcr")
+	if assetID == dcrID {
+		go c.checkUnpaidFees(wallet)
+	}
 	return nil
 }
 
@@ -425,7 +435,6 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 
 	// The account ID is generated from the public key.
 	pubKey := privKey.PubKey()
-	acctID := srvacct.NewID(pubKey.SerializeCompressed())
 
 	// Prepare and sign the registration payload.
 	dexReg := &msgjson.Register{
@@ -499,78 +508,23 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		// Don't abandon registration. The fee is already paid.
 	}
 
-	// Notify the server of the fee coin once there are enough confirmations.
-	req := &msgjson.NotifyFee{
-		AccountID: acctID[:],
-		CoinID:    coin.ID(),
-	}
-	// We'll need this to validate the server's acknowledgement.
-	reqB, err := req.Serialize()
-	if err != nil {
-		log.Warnf("fee paid with coin %x, but unable to serialize notifyfee request so server signature cannot be verified")
-		// Dont quit. The fee is already paid, so follow through if possible.
-	}
-
+	trigger := coinConfirmationTrigger(coin, uint32(dc.cfg.RegFeeConfirms))
 	// Set up the coin waiter.
 	errChan = make(chan error, 1)
-	c.waiterMtx.Lock()
-	c.waiters[form.DEX] = coinWaiter{
-		conn:  dc,
-		asset: regAsset,
-		coin:  coin,
-		// DRAFT NOTE: Hard-coded to 1 for testing and until the 'config' response
-		// structure includes the reg fee confirmation requirements.
-		confs:   uint32(dc.cfg.RegFeeConfirms),
-		route:   msgjson.NotifyFeeRoute,
-		privKey: privKey,
-		req:     req,
-		f: func(msg *msgjson.Message, waiterErr error) {
-			var err error
-			if waiterErr != nil {
-				errChan <- waiterErr
-				return
-			}
-			ack := new(msgjson.Acknowledgement)
-			err = msg.UnmarshalResult(ack)
-			if err != nil {
-				errChan <- fmt.Errorf("notify fee result json decode error: %v", err)
-				return
-			}
-			// If there was a serialization error, validation is skipped. A warning
-			// message was already logged.
-			sig := []byte{}
-			if len(reqB) > 0 {
-				// redefining err here, since these errors won't be sent over the
-				// response channel.
-				var err error
-				sig, err = hex.DecodeString(ack.Sig)
-				if err != nil {
-					log.Warnf("account was registered, but server's signature could not be decoded: %v", err)
-					return
-				}
-				_, err = checkSigS256(reqB, regRes.DEXPubKey, sig)
-				if err != nil {
-					log.Warnf("account was registered, but DEX signature could not be verified: %v", err)
-				}
-			} else {
-				log.Warnf("Marking account as paid, even though the server's signature could not be validated.")
-			}
-			err = c.db.AccountPaid(&db.AccountProof{
-				URL:   form.DEX,
-				Stamp: req.Time,
-				Sig:   sig,
-			})
-			if err != nil {
-				errChan <- err
-				return
-			}
-			// New account won't have any active negotiations, so OK to discard first
-			// first return value.
-			_, err = c.authDEX(crypter, dc)
+	c.wait(assetID, trigger, func(err error) {
+		if err != nil {
 			errChan <- err
-		},
-	}
-	c.waiterMtx.Unlock()
+		}
+		err = c.notifyFee(dc, coin)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		// New account won't have any active negotiations, so OK to discard first
+		// first return value from authDEX.
+		_, err = c.authDEX(crypter, dc)
+		errChan <- err
+	})
 	return nil, errChan
 }
 
@@ -634,6 +588,82 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 		err = fmt.Errorf("authorization errors: %s", strings.Join(errs, ", "))
 	}
 	return negotiations, err
+}
+
+var waiterID uint64
+
+func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(error)) {
+	c.waiterMtx.Lock()
+	defer c.waiterMtx.Unlock()
+	c.waiters[atomic.AddUint64(&waiterID, 1)] = &coinWaiter{
+		assetID: assetID,
+		trigger: trigger,
+		action:  action,
+	}
+}
+
+func (c *Core) notifyFee(dc *dexConnection, coin asset.Coin) error {
+	if dc.acct.locked() {
+		return fmt.Errorf("%s account locked. cannot notify fee.", dc.acct.url)
+	}
+	// Notify the server of the fee coin once there are enough confirmations.
+	req := &msgjson.NotifyFee{
+		AccountID: dc.acct.id[:],
+		CoinID:    coin.ID(),
+	}
+	// We'll need this to validate the server's acknowledgement.
+	reqB, err := req.Serialize()
+	if err != nil {
+		log.Warnf("fee paid with coin %x, but unable to serialize notifyfee request so server signature cannot be verified")
+		// Dont quit. The fee is already paid, so follow through if possible.
+	}
+	// Sign the request and send it.
+	err = stamp(dc.acct.privKey, req)
+	if err != nil {
+		return err
+	}
+	msg, err := msgjson.NewRequest(dc.NextID(), msgjson.NotifyFeeRoute, req)
+	if err != nil {
+		return fmt.Errorf("failed to create notifyfee request: %v", err)
+	}
+
+	errChan := make(chan error, 1)
+	err = dc.Request(msg, func(resp *msgjson.Message) {
+		ack := new(msgjson.Acknowledgement)
+		err = resp.UnmarshalResult(ack)
+		if err != nil {
+			errChan <- fmt.Errorf("notify fee result json decode error: %v", err)
+			return
+		}
+		// If there was a serialization error, validation is skipped. A warning
+		// message was already logged.
+		sig := []byte{}
+		if len(reqB) > 0 {
+			// redefining err here, since these errors won't be sent over the
+			// response channel.
+			var err error
+			sig, err = hex.DecodeString(ack.Sig)
+			if err != nil {
+				log.Warnf("account was registered, but server's signature could not be decoded: %v", err)
+				return
+			}
+			_, err = checkSigS256(reqB, dc.acct.dexPubKey.Serialize(), sig)
+			if err != nil {
+				log.Warnf("account was registered, but DEX signature could not be verified: %v", err)
+			}
+		} else {
+			log.Warnf("Marking account as paid, even though the server's signature could not be validated.")
+		}
+		errChan <- c.db.AccountPaid(&db.AccountProof{
+			URL:   dc.acct.url,
+			Stamp: req.Time,
+			Sig:   sig,
+		})
+	})
+	if err != nil {
+		return fmt.Errorf("'notifyfee' request error: %v", err)
+	}
+	return extractError(errChan, requestTimeout)
 }
 
 // authDEX authenticates the connection for a DEX.
@@ -724,19 +754,26 @@ func (c *Core) initialize() {
 	}
 	var wg sync.WaitGroup
 	for _, acct := range accts {
-		a := acct
 		wg.Add(1)
-		go func() {
+		go func(acct *db.AccountInfo) {
 			defer wg.Done()
-			dc, err := c.connectDEX(a)
+			dc, err := c.connectDEX(acct)
 			if err != nil {
-				log.Errorf("error adding DEX %s: %v", a, err)
+				log.Errorf("error adding DEX %s: %v", acct.URL, err)
 				return
 			}
+			if !acct.Paid {
+				if len(acct.FeeCoin) == 0 {
+					log.Warnf("incomplete registration without fee payment detected for %s. Discarding account.", acct.URL)
+					return
+				}
+				log.Infof("Incomplete registration detected for %s. " +
+					"Registration will be completed when the Decred wallet is unlocked.")
+			}
 			c.connMtx.Lock()
-			c.conns[a.URL] = dc
+			c.conns[acct.URL] = dc
 			c.connMtx.Unlock()
-		}()
+		}(acct)
 	}
 	// If there were accounts, wait until they are loaded and log a messsage.
 	if len(accts) > 0 {
@@ -766,6 +803,93 @@ func (c *Core) initialize() {
 		log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
 	}
 	c.refreshUser()
+}
+
+// feeLock is used to ensure that no more than one reFee check is running at a
+// time.
+var feeLock uint32
+
+// checkUnpaidFees checks whether the registration fee info has an acceptable
+// state, and tries to rectify any inconsistencies.
+func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	if !atomic.CompareAndSwapUint32(&feeLock, 0, 1) {
+		return
+	}
+	var wg sync.WaitGroup
+	for _, dc := range c.conns {
+		if dc.acct.paid {
+			continue
+		}
+		if len(dc.acct.feeCoin) == 0 {
+			log.Errorf("empty fee coin found for unpaid account")
+			continue
+		}
+		wg.Add(1)
+		go func(dc *dexConnection) {
+			c.reFee(dcrWallet, dc)
+			wg.Done()
+		}(dc)
+	}
+	wg.Wait()
+	atomic.StoreUint32(&feeLock, 0)
+}
+
+// reFee attempts to finish the fee payment process for a DEX. reFee might be
+// called if the client was shutdown after a fee was paid, but before it had the
+// requisite confirmations for the 'notifyfee' message to be sent to the server.
+func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
+	// Get the database account info.
+	acctInfo, err := c.db.Account(dc.acct.url)
+	if err != nil {
+		log.Errorf("reFee %s - error retrieving account info: %v", dc.acct.url, err)
+		return
+	}
+	// A couple sanity checks.
+	if !bytes.Equal(acctInfo.FeeCoin, dc.acct.feeCoin) {
+		log.Errorf("reFee %s - fee coin mismatch. %x != %x", dc.acct.url, acctInfo.FeeCoin, dc.acct.feeCoin)
+		return
+	}
+	if acctInfo.Paid {
+		log.Errorf("reFee %s - account for %s already marked paid", dc.acct.url, dc.acct.feeCoin)
+		return
+	}
+	// Get the coin for the fee.
+	coin, err := dcrWallet.Coin(acctInfo.FeeCoin)
+	if err != nil {
+		log.Errorf("reFee %s- error getting fee coin: %v", dc.acct.url, err)
+		return
+	}
+	confs, err := coin.Confirmations()
+	if err != nil {
+		log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.url, err)
+		return
+	}
+	if confs >= uint32(dc.cfg.RegFeeConfirms) {
+		err := c.notifyFee(dc, coin)
+		if err != nil {
+			log.Errorf("reFee %s - notifyfee error: %v", err)
+		}
+		log.Infof("Fee paid at %s", dc.acct.url)
+		return
+	}
+
+	trigger := coinConfirmationTrigger(coin, uint32(dc.cfg.RegFeeConfirms))
+	// Set up the coin waiter.
+	dcrID, _ := dex.BipSymbolID("dcr")
+	c.wait(dcrID, trigger, func(err error) {
+		if err != nil {
+			log.Errorf("reFee %s - waiter error: %v", dc.acct.url, err)
+			return
+		}
+		err = c.notifyFee(dc, coin)
+		if err != nil {
+			log.Errorf("reFee %s - notifyfee error: %v", dc.acct.url, err)
+			return
+		}
+		log.Infof("Fee paid at %s", dc.acct.url)
+	})
 }
 
 // connectDEX creates and connects a *dexConnection, but does not authenticate the
@@ -854,7 +978,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 			assets:     assets,
 			cfg:        dexCfg,
 			books:      make(map[string]*book.OrderBook),
-			acct:       newDEXAccount(acctInfo.URL, acctInfo.EncKey, acctInfo.DEXPubKey),
+			acct:       newDEXAccount(acctInfo),
 			markets:    markets,
 		}
 		connChan <- dc
@@ -864,6 +988,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	})
 	if err != nil {
 		log.Errorf("error sending 'config' request: %v", err)
+		reqErr = err
 		connChan <- nil
 	}
 	return <-connChan, reqErr
@@ -1013,9 +1138,9 @@ out:
 }
 
 // removeWaiter removes a coinWaiter from the map.
-func (c *Core) removeWaiter(dex string) {
+func (c *Core) removeWaiter(id uint64) {
 	c.waiterMtx.Lock()
-	delete(c.waiters, dex)
+	delete(c.waiters, id)
 	c.waiterMtx.Unlock()
 }
 
@@ -1030,41 +1155,21 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	log.Tracef("processing tip change for %s", unbip(assetID))
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
-	for d, w := range c.waiters {
-		waiter := w
-		if waiter.asset.ID != assetID {
+	for id, waiter := range c.waiters {
+		if waiter.assetID != assetID {
 			continue
 		}
-		dex := d
-		go func() {
-			confs, err := waiter.coin.Confirmations()
+		go func(id uint64, waiter *coinWaiter) {
+			ok, err := waiter.trigger()
 			if err != nil {
-				waiter.f(nil, fmt.Errorf("Error getting confirmations for %x: %v", waiter.coin.ID(), err))
-				c.removeWaiter(dex)
-				return
+				waiter.action(err)
+				c.removeWaiter(id)
 			}
-			if confs >= waiter.confs {
-				defer c.removeWaiter(dex)
-				// Sign the request and send it.
-				req := waiter.req
-				err := stamp(waiter.privKey, req)
-				if err != nil {
-					waiter.f(nil, err)
-					return
-				}
-				msg, err := msgjson.NewRequest(waiter.conn.NextID(), waiter.route, req)
-				if err != nil {
-					waiter.f(nil, fmt.Errorf("failed to create notifyfee request: %v", err))
-					return
-				}
-				err = waiter.conn.Request(msg, func(msg *msgjson.Message) {
-					waiter.f(msg, nil)
-				})
-				if err != nil {
-					waiter.f(nil, fmt.Errorf("'notifyfee' request error: %v", err))
-				}
+			if ok {
+				waiter.action(nil)
+				c.removeWaiter(id)
 			}
-		}()
+		}(id, waiter)
 	}
 }
 

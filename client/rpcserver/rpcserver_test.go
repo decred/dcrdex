@@ -37,7 +37,7 @@ type TCore struct {
 	loginErr   error
 }
 
-func (c *TCore) ListMarkets() []*core.MarketInfo     { return nil }
+func (c *TCore) ListMarkets() []*core.Market         { return nil }
 func (c *TCore) Register(r *core.Registration) error { return c.regErr }
 func (c *TCore) Login(dex, pw string) error          { return c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {

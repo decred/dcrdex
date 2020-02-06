@@ -161,9 +161,15 @@ func TestWallet(t *testing.T) {
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
-	// Now unlock, and see if we get the first one back.
+	// Unlock
 	rig.beta().ReturnCoins([]asset.Coin{utxo})
 	rig.beta().ReturnCoins(utxos)
+	// Check that we can get the coin with Coin.
+	_, err = rig.beta().Coin(utxo.ID())
+	if err != nil {
+		t.Fatalf("Coin error: %v", err)
+	}
+	// Make sure we get the first utxo back with Fund.
 	utxos, _ = rig.beta().Fund(contractValue*3, tDCR)
 	if !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")

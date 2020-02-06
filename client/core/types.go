@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -157,16 +158,18 @@ type dexAccount struct {
 	id        account.AccountID
 	dexPubKey *secp256k1.PublicKey
 	feeCoin   []byte
+	paid      bool
 	authMtx   sync.RWMutex
 	isAuthed  bool
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
-func newDEXAccount(url string, encKey []byte, dexPubKey *secp256k1.PublicKey) *dexAccount {
+func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
-		url:       url,
-		encKey:    encKey,
-		dexPubKey: dexPubKey,
+		url:       acctInfo.URL,
+		encKey:    acctInfo.EncKey,
+		dexPubKey: acctInfo.DEXPubKey,
+		paid:      acctInfo.Paid,
 	}
 }
 
