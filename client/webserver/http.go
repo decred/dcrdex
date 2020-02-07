@@ -11,9 +11,8 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
-// sendTemplate processes the template and sends the result. NOTE: http.Request
-// arg is unused. Remove if there is no foreseeable reason.
-func (s *WebServer) sendTemplate(w http.ResponseWriter, r *http.Request, tmplID string, data interface{}) {
+// sendTemplate processes the template and sends the result.
+func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data interface{}) {
 	page, err := s.html.exec(tmplID, data)
 	if err != nil {
 		log.Errorf("template exec error for %s: %v", tmplID, err)
@@ -66,7 +65,7 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.handleRegister(w, r)
 		return
 	}
-	s.sendTemplate(w, r, "login", commonArgs(r, "Login | Decred DEX"))
+	s.sendTemplate(w, "login", commonArgs(r, "Login | Decred DEX"))
 }
 
 // registerTmplData is template data for the /register page.
@@ -91,7 +90,7 @@ func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		OpenStep:        exists && !open,
 		DEXStep:         exists && open,
 	}
-	s.sendTemplate(w, r, "register", data)
+	s.sendTemplate(w, "register", data)
 }
 
 // marketResult is the template data for the `/markets` page request.
@@ -111,15 +110,15 @@ func (s *WebServer) marketResult(r *http.Request) *marketTmplData {
 
 // handleMarkets is the handler for the '/markets' page request.
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "markets", s.marketResult(r))
+	s.sendTemplate(w, "markets", s.marketResult(r))
 }
 
 // handleWallets is the handler for the '/wallets' page request.
 func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "wallets", commonArgs(r, "Wallets | Decred DEX"))
+	s.sendTemplate(w, "wallets", commonArgs(r, "Wallets | Decred DEX"))
 }
 
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
-	s.sendTemplate(w, r, "settings", commonArgs(r, "Settings | Decred DEX"))
+	s.sendTemplate(w, "settings", commonArgs(r, "Settings | Decred DEX"))
 }
