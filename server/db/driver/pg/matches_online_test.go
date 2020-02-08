@@ -278,6 +278,15 @@ func TestActiveMatches(t *testing.T) {
 		},
 	}
 
+	idInSlice := func(mid order.MatchID, mids []order.MatchID) bool {
+		for i := range mids {
+			if mids[i] == mid {
+				return true
+			}
+		}
+		return false
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			matchData, err := archie.ActiveMatches(tt.acctID)
@@ -287,8 +296,8 @@ func TestActiveMatches(t *testing.T) {
 			if len(matchData) != tt.numExpected {
 				t.Errorf("Retrieved %d matches for user %v, expected %d.", len(matchData), tt.acctID, tt.numExpected)
 			}
-			for i := range tt.wantMatchIDs {
-				if tt.wantMatchIDs[i] != matchData[i].MatchID {
+			for i := range matchData {
+				if !idInSlice(matchData[i].MatchID, tt.wantMatchIDs) {
 					t.Errorf("Incorrect match ID retrieved. Got %v, expected %v.", matchData[i].MatchID, tt.wantMatchIDs[i])
 				}
 			}
