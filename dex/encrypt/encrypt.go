@@ -104,13 +104,11 @@ func newArgonPolyCrypter(pw string) *argonPolyCrypter {
 	keyB := argon2.IDKey(pwB, salt[:], defaultTime, defaultMem, threads, KeySize*2)
 	// The argon2id key is split into two keys, The encryption key is the first 32
 	// bytes.
-	encKeyB := keyB[:KeySize]
 	var encKey Key
-	copy(encKey[:], encKeyB)
+	copy(encKey[:], keyB[:KeySize])
 	// MAC key is the second 32 bytes.
-	polyKeyB := keyB[KeySize:]
 	var polyKey [KeySize]byte
-	copy(polyKey[:], polyKeyB)
+	copy(polyKey[:], keyB[KeySize:])
 
 	c := &argonPolyCrypter{
 		key:  encKey,
