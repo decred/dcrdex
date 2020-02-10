@@ -114,6 +114,7 @@ func nowMs() time.Time {
 // communications.
 type TAuth struct {
 	authErr          error
+	sendsMtx         sync.Mutex
 	sends            []*msgjson.Message
 	piMtx            sync.Mutex
 	preimagesByMsgID map[uint64]order.Preimage
@@ -131,7 +132,9 @@ func (a *TAuth) Sign(...msgjson.Signable) error { log.Info("Sign"); return nil }
 func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) {
 	msgTxt, _ := json.Marshal(msg)
 	log.Infof("Send for user %v. Message: %v", user, string(msgTxt))
+	a.sendsMtx.Lock()
 	a.sends = append(a.sends, msg)
+	a.sendsMtx.Unlock()
 
 	a.piMtx.Lock()
 	defer a.piMtx.Unlock()
@@ -157,6 +160,8 @@ func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) {
 	}
 }
 func (a *TAuth) getSend() *msgjson.Message {
+	a.sendsMtx.Lock()
+	defer a.sendsMtx.Unlock()
 	if len(a.sends) == 0 {
 		return nil
 	}
