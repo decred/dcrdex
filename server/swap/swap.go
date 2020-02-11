@@ -53,6 +53,7 @@ type AuthManager interface {
 
 // Storage updates match data in what is presumably a database.
 type Storage interface {
+	LastErr() error
 	UpdateMatch(match *order.Match) error
 	CancelOrder(*order.LimitOrder) error
 }
@@ -195,6 +196,9 @@ func NewSwapper(cfg *Config) *Swapper {
 
 // Run is the main Swapper loop.
 func (s *Swapper) Run(ctx context.Context) {
+	ctxSwap, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// bcastTriggers is used to sequence an examination of an asset's related
 	// matches some time (bTimeout) after a block notification is received.
 	bcastTriggers := make([]*blockNotification, 0, 16)
@@ -209,8 +213,11 @@ func (s *Swapper) Run(ctx context.Context) {
 	}
 
 	// Start a listen loop for each asset's block channel.
+	var wg sync.WaitGroup
 	for assetID, asset := range s.coins {
+		wg.Add(1)
 		go func(assetID uint32, blockSource <-chan uint32) {
+			defer wg.Done()
 		out:
 			for {
 				select {
@@ -220,14 +227,18 @@ func (s *Swapper) Run(ctx context.Context) {
 						height:  h,
 						assetID: assetID,
 					}
-				case <-ctx.Done():
+				case <-ctxSwap.Done():
 					break out
 				}
 			}
 		}(assetID, asset.Backend.BlockChannel(5))
 	}
 
-	go s.coinWaiter.Run(ctx)
+	wg.Add(1)
+	go func() {
+		s.coinWaiter.Run(ctxSwap)
+		wg.Done()
+	}()
 
 out:
 	for {
@@ -240,6 +251,15 @@ out:
 			s.processBlock(block)
 		case <-bcastTicker.C:
 			for {
+				// checkInaction will fail if the DB is failing. TODO: Consider
+				// a mechanism to complete existing swaps and then quit.
+				// Presently Negotiate denies new swaps and processInit responds
+				// with an error to clients attempting to start a swap.
+				if err := s.storage.LastErr(); err != nil {
+					cancel()
+					break out
+				}
+
 				if len(bcastTriggers) == 0 {
 					bcastTicker = time.NewTimer(s.bTimeout)
 					break
@@ -258,10 +278,12 @@ out:
 					setTimeout(bcastTriggers[0])
 				}
 			}
-		case <-ctx.Done():
+		case <-ctxSwap.Done():
 			break out
 		}
 	}
+
+	wg.Wait()
 }
 
 func (s *Swapper) tryConfirmSwap(status *swapStatus) {
@@ -422,8 +444,14 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 // asset. If a client is found to have not acted when required, a match may be
 // revoked and a penalty assigned to the user.
 func (s *Swapper) checkInaction(assetID uint32) {
+	// If the DB is failing, do not penalize or attempt to start revocations.
+	if err := s.storage.LastErr(); err != nil {
+		log.Errorf("DB in failing state.")
+		return
+	}
+
 	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
-	deletions := make([]string, 0)
+	var deletions []string
 	s.matchMtx.Lock()
 	defer s.matchMtx.Unlock()
 	for _, match := range s.matches {
@@ -708,16 +736,6 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	}
 }
 
-// saveMatch stores or updates the match in the Swapper's storage backend. The
-// update is asynchronous, and any errors are logged but otherwise ignored.
-func (s *Swapper) saveMatch(match *order.Match) {
-	go func() {
-		if err := s.storage.UpdateMatch(match); err != nil {
-			log.Errorf("UpdateMatch (id=%v) failed: %v", match.ID(), err)
-		}
-	}()
-}
-
 // processInit processes the `init` RPC request, which is used to inform the
 // DEX of a newly broadcast swap transaction. Once the transaction is seen and
 // and audited by the Swapper, the counter-party is informed with an 'audit'
@@ -762,8 +780,16 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	match := stepInfo.match.Match
 	s.matchMtx.Unlock()
 
-	// TODO: decide if we can reasonably continue if the storage call fails.
-	s.saveMatch(match)
+	// Store or update the match in the Swapper's storage backend. Failure to
+	// update match status is a fatal DB error. If we continue, the swap may
+	// succeed, but there will be no way to recover or retrospectively determine
+	// the swap outcome. Abort.
+	if err := s.storage.UpdateMatch(match); err != nil {
+		log.Errorf("UpdateMatch (id=%v) failed: %v", match.ID(), err)
+		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
+			fmt.Sprintf("internal server error"))
+		return coinwaiter.DontTryAgain // fatal
+	}
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
@@ -1177,27 +1203,46 @@ func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
 
 // Negotiate takes ownership of the matches and begins swap negotiation.
 func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
+	// Set up the matchTrackers, which includes a slice of Matches.
 	matches := s.readMatches(matchSets)
+
+	// Record the matches. If any DB updates fail, no swaps proceed. We could
+	// let the others proceed, but that could seem selective trickery to the
+	// clients.
+	for _, match := range matches {
+		if err := s.storage.UpdateMatch(match.Match); err != nil {
+			log.Errorf("UpdateMatch (match id=%v) failed: %v", match.ID(), err)
+			// TODO: notify clients (notification or response to what?)
+			// abortAll()
+			return
+		}
+	}
+
 	userMatches := make(map[account.AccountID][]*messageAcker)
-	// A helper method for adding to the userMatches map.
+	// addUserMatch signs a match notification message, and add the data
+	// required to process the acknowledgment to the userMatches map.
 	addUserMatch := func(acker *messageAcker) {
 		s.authMgr.Sign(acker.params)
 		l := userMatches[acker.user]
 		userMatches[acker.user] = append(l, acker)
 	}
+
 	// Setting length to max possible, which is over-allocating by the number of
 	// cancels.
 	toMonitor := make([]*matchTracker, 0, len(matches))
 	for _, match := range matches {
 		if match.Taker.Type() == order.CancelOrderType {
-			// If this is a cancellation, there is nothing to track.
+			// If this is a cancellation, there is nothing to track. Just cancel
+			// the target order by removing it from the DB. It is already
+			// removed from book by the Market.
 			err := s.storage.CancelOrder(match.Maker)
 			if err != nil {
 				log.Errorf("Failed to cancel order %v", match.Maker)
-				// If the maker failed to cancel in storage, we should NOT tell
-				// the users that the cancel order was executed.
-				// TODO: send a error message to the clients.
-				continue
+				// If the DB update failed, the target order status was not
+				// updated, but removed from the in-memory book. This is
+				// potentially a critical failure since the dex will restore the
+				// book from the DB. TODO: Notify clients.
+				return
 			}
 		} else {
 			toMonitor = append(toMonitor, match)
@@ -1206,10 +1251,6 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 		makerAck, takerAck := newMatchAckers(match)
 		addUserMatch(makerAck)
 		addUserMatch(takerAck)
-
-		// Record the match.
-		// TODO: decide if we can reasonably continue if the storage call fails.
-		s.saveMatch(match.Match)
 	}
 
 	// Add the matches to the map.
