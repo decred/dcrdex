@@ -409,6 +409,7 @@ func (a *Archiver) orderStatusByID(oid order.OrderID, base, quote uint32) (pgOrd
 	if db.IsErrOrderUnknown(err) {
 		status, err = cancelOrderStatus(a.db, oid, a.dbName, marketSchema)
 		if err != nil {
+			// The severity of an unknown order is up to the caller.
 			if !db.IsErrOrderUnknown(err) {
 				a.fatalBackendErr(err)
 			}

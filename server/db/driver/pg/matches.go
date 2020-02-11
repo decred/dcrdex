@@ -188,6 +188,7 @@ func (a *Archiver) UpdateMatch(match *order.Match) error {
 	}
 	N, err := upsertMatch(a.db, matchesTableName, match)
 	if err != nil {
+		a.fatalBackendErr(err)
 		return fmt.Errorf("updateMatch: %v", err)
 	}
 	if N != 1 {
