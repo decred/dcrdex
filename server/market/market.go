@@ -1029,27 +1029,16 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 	}
 	m.notify(ctx, sig)
 
-	// Pre-process the matches:
-	// - Set the EpochID for each MatchSet.
-	// - Identify taker orders with backing coins that the swapper will need to
-	//   lock and unlock.
-	swapOrders := make([]order.Order, 0, 2*len(matches)) // size guess
+	// Set the EpochID for each MatchSet, and record executed cancels.
 	for _, match := range matches {
 		// Set the epoch ID.
 		match.Epoch.Idx = uint64(epoch.Epoch)
 		match.Epoch.Dur = uint64(epoch.Duration)
 
-		// The order targeted by a matched cancel order will be in the unbooked
-		// slice. These coins are unlocked next in the book locker.
-		if match.Taker.Type() == order.CancelOrderType {
-			//m.auth.RecordCancel(match.Taker.User())
-			continue
-		}
-		swapOrders = append(swapOrders, match.Taker)
-
-		for _, maker := range match.Makers {
-			swapOrders = append(swapOrders, maker)
-		}
+		// TODO: record the cancel in the auth manager.
+		// if match.Taker.Type() == order.CancelOrderType {
+		// 	m.auth.RecordCancel(match.Taker.User())
+		// }
 	}
 
 	// Unlock passed but not booked order (e.g. matched market and immediate
@@ -1098,7 +1087,6 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
-		m.swapper.LockOrdersCoins(swapOrders) // TODO: lock in swapper now (this is in another PR)
 		m.swapper.Negotiate(matches)
 	}
 }

@@ -1203,6 +1203,21 @@ func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
 
 // Negotiate takes ownership of the matches and begins swap negotiation.
 func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
+	// Lock trade order coins.
+	swapOrders := make([]order.Order, 0, 2*len(matchSets)) // size guess, with the single maker case
+	for _, match := range matchSets {
+		if match.Taker.Type() == order.CancelOrderType {
+			continue
+		}
+
+		swapOrders = append(swapOrders, match.Taker)
+		for _, maker := range match.Makers {
+			swapOrders = append(swapOrders, maker)
+		}
+	}
+
+	s.LockOrdersCoins(swapOrders)
+
 	// Set up the matchTrackers, which includes a slice of Matches.
 	matches := s.readMatches(matchSets)
 
