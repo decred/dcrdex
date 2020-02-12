@@ -582,6 +582,80 @@ func (o *CancelOrder) Serialize() []byte {
 // Ensure CancelOrder is an Order.
 var _ Order = (*CancelOrder)(nil)
 
+// ValidateOrder ensures that the order with the given status for the specified
+// market is sensible. The ServerTime may not be set yet, so the OrderID cannot
+// be computed.
+func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
+	if ord.Base() == ord.Quote() {
+		return fmt.Errorf("same asset specified for base and quote")
+	}
+
+	// Each order type has different rules about status and lot size.
+	switch ot := ord.(type) {
+	case *MarketOrder:
+		// Market orders OK statuses: epoch and executed (NOT booked or
+		// canceled).
+		switch status {
+		case OrderStatusEpoch, OrderStatusExecuted:
+		default:
+			return fmt.Errorf("invalid market order status %d -> %s", status, status)
+		}
+
+		if ot.OrderType != MarketOrderType {
+			return fmt.Errorf("market order has wrong order type %d -> %s", ot.OrderType, ot.OrderType)
+		}
+
+		// Market sell orders must respect lot size. Market buy orders must be
+		// of an amount sufficiently buffered beyond the minimum standing sell
+		// order's lot cost, but that is enforced by the order router.
+		if ot.Sell && (ot.Quantity%lotSize != 0 || ot.Remaining()%lotSize != 0) {
+			return fmt.Errorf("market sell order fails lot size requirement %d %% %d = %d", ot.Quantity, lotSize, ot.Quantity%lotSize)
+		}
+
+	case *CancelOrder:
+		// Cancel order OK statuses: epoch, and executed (NOT booked or
+		// canceled).
+		switch status {
+		case OrderStatusEpoch, OrderStatusExecuted: // orderStatusFailed if we decide to export that
+		default:
+			return fmt.Errorf("invalid cancel order status %d -> %s", status, status)
+		}
+
+		if ot.OrderType != CancelOrderType {
+			return fmt.Errorf("cancel order has wrong order type %d -> %s", ot.OrderType, ot.OrderType)
+		}
+
+	case *LimitOrder:
+		// Limit order OK statuses: epoch, booked, executed, and canceled (same
+		// as market plus booked).
+		switch status {
+		case OrderStatusEpoch, OrderStatusExecuted, OrderStatusRevoked:
+		case OrderStatusBooked, OrderStatusCanceled:
+			// Immediate time in force limit orders may not be canceled, and may
+			// not be in the order book.
+			if ot.Force == ImmediateTiF {
+				return fmt.Errorf("invalid immediate limit order status %d -> %s", status, status)
+			}
+		default:
+			return fmt.Errorf("invalid limit order status %d -> %s", status, status)
+		}
+
+		if ot.OrderType != LimitOrderType {
+			return fmt.Errorf("limit order has wrong order type %d -> %s", ot.OrderType, ot.OrderType)
+		}
+
+		// All limit orders must respect lot size.
+		if ot.Quantity%lotSize != 0 || ot.Remaining()%lotSize != 0 {
+			return fmt.Errorf("limit order fails lot size requirement %d %% %d = %d", ot.Quantity, lotSize, ot.Quantity%lotSize)
+		}
+	default:
+		// cannot validate an unknown order type
+		return fmt.Errorf("unkown order type")
+	}
+
+	return nil
+}
+
 // Some commonly used time transformations.
 var unixMilli = encode.UnixMilli
 var unixMilliU = encode.UnixMilliU

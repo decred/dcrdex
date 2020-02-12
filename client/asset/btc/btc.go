@@ -342,6 +342,7 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 		return nil, err
 	}
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
+	fmt.Println("--", len(unspents), "unspents", nfo.FundConf)
 	utxos, _, unconf, err := btc.spendableUTXOs(unspents, nfo.FundConf)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
@@ -599,8 +600,8 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 }
 
 // SignMessage signs the message with the private key associated with the
-// specified unspent coin. A slice of pubkeys required to spend the
-// coin and a signature for each pubkey are returned.
+// specified unspent coin. A slice of pubkeys required to spend the coin and a
+// signature for each pubkey are returned.
 func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	output, err := btc.convertCoin(coin)
 	if err != nil {
@@ -615,12 +616,17 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 			(txDetails.Category == TxCatReceive ||
 				txDetails.Category == TxCatGenerate) {
 
-			pk, sig, err := btc.wallet.SignMessage(txDetails.Address, msg)
+			privKey, err := btc.wallet.PrivKeyForAddress(txDetails.Address)
 			if err != nil {
-				return nil, nil, fmt.Errorf("error signing message with pubkey for address %s: %v", txDetails.Address, err)
+				return nil, nil, err
 			}
-			pubkeys = append(pubkeys, pk)
-			sigs = append(sigs, sig)
+			pk := privKey.PubKey()
+			sig, err := privKey.Sign(msg)
+			if err != nil {
+				return nil, nil, err
+			}
+			pubkeys = append(pubkeys, pk.SerializeCompressed())
+			sigs = append(sigs, sig.Serialize())
 		}
 	}
 	if len(pubkeys) == 0 {

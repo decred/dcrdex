@@ -6,26 +6,27 @@ package matcher
 import (
 	"bytes"
 	"fmt"
-	"math/big"
 	"math/rand"
 	"sort"
 
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/matcher/mt19937"
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
 // HashFunc is the hash function used to generate the shuffling seed.
-var HashFunc = blake256.Sum256
+var (
+	HashFunc    = blake256.Sum256
+	BaseToQuote = calc.BaseToQuote
+	QuoteToBase = calc.QuoteToBase
+)
 
 const (
 	HashSize = blake256.Size
 
-	peSize              = order.PreimageSize
-	atomsPerCoin uint64 = 1e8
+	peSize = order.PreimageSize
 )
-
-var bigAtomsPerCoin = big.NewInt(int64(atomsPerCoin))
 
 type Matcher struct{}
 
@@ -67,28 +68,6 @@ func assertOrderLotSize(ord order.Order, lotSize uint64) {
 	panic(fmt.Sprintf(
 		"order %v has remaining quantity %d that is not a multiple of lot size %d",
 		ord.ID(), remaining, lotSize))
-}
-
-// BaseToQuote computes a quote asset amount based on a base asset amount
-// and an integer representation of the price rate. That is,
-//    quoteAmt = rate * baseAmt / atomsPerCoin
-func BaseToQuote(rate uint64, base uint64) (quote uint64) {
-	bigRate := big.NewInt(int64(rate))
-	bigBase := big.NewInt(int64(base))
-	bigBase.Mul(bigBase, bigRate)
-	bigBase.Div(bigBase, bigAtomsPerCoin)
-	return bigBase.Uint64()
-}
-
-// QuoteToBase computes a base asset amount based on a quote asset amount
-// and an integer representation of the price rate. That is,
-//    baseAmt = quoteAmt * atomsPerCoin / rate
-func QuoteToBase(rate uint64, quote uint64) (base uint64) {
-	bigRate := big.NewInt(int64(rate))
-	bigQuote := big.NewInt(int64(quote))
-	bigQuote.Mul(bigQuote, bigAtomsPerCoin)
-	bigQuote.Div(bigQuote, bigRate)
-	return bigQuote.Uint64()
 }
 
 // CheckMarketBuyBuffer verifies that the given market buy order's quantity

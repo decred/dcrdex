@@ -378,7 +378,7 @@ func (a *Archiver) storeOrder(ord order.Order, status pgOrderStatus) error {
 			return fmt.Errorf("storeLimitOrder failed: %v", err)
 		}
 	default:
-		panic("db.ValidateOrder should have caught this")
+		panic("ValidateOrder should have caught this")
 	}
 
 	if N != 1 {

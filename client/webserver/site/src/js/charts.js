@@ -151,7 +151,7 @@ export class DepthChart {
     this.buys = data.book.buys
     this.sells = data.book.sells
     this.baseTicker = data.baseSymbol.toUpperCase()
-    this.quote = data.quoteSymbol.toUpperCase()
+    this.quoteTicker = data.quoteSymbol.toUpperCase()
     this.zoomState = {}
     this.draw()
   }
@@ -379,8 +379,8 @@ export class DepthChart {
         dot(ctx, screenX, tools.y(legendData.depth), legendData.dotColor, 5)
         // Create the strings and measure them to check how wide our legend needs
         // to be.
-        const price = `price: ${formatLabelValue(dataX)} ${this.quote}`
-        const volume = `depth: ${formatLabelValue(legendData.depth)} ${this.base}`
+        const price = `price: ${formatLabelValue(dataX)} ${this.quoteTicker}`
+        const volume = `depth: ${formatLabelValue(legendData.depth)} ${this.baseTicker}`
         ctx.font = '14px \'sans\', sans-serif'
         const boxWidth = widest(ctx, price, volume) * 1.3
 

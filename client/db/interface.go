@@ -44,6 +44,9 @@ type DB interface {
 	AccountOrders(dex string, n int, since uint64) ([]*MetaOrder, error)
 	// Order fetches a MetaOrder by order ID.
 	Order(order.OrderID) (*MetaOrder, error)
+	// ActiveDEXOrders retrieves orders for a particular dex, specified by its
+	// URL.
+	ActiveDEXOrders(dex string) ([]*MetaOrder, error)
 	// MarketOrders retrieves all orders for the specified DEX and market. The
 	// order count can be limited by supplying a non-zero n value. In that case
 	// the newest n orders will be returned. The orders can be additionally

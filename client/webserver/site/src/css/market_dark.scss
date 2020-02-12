@@ -25,7 +25,6 @@ body.dark {
   }
 
   table.ordertable {
-    background-color: black;
     color: #a1a1a1;
 
     tr {
@@ -48,7 +47,7 @@ body.dark {
   }
 
   .markettab.selected,
-  .mktbalancelbl {
+  .market-bal-lbl {
     background-color: $dark_bg_1;
   }
 

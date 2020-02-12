@@ -42,7 +42,7 @@
 
   {{- /* LEFT SIDE */ -}}
   <div class="col-14">
-    <h3 class="p-3">Wallets</h3>
+    <h3 class="p-3">Wallets {{len .Assets}}</h3>
     <table class="wallets">
       <thead>
         <tr>
@@ -98,54 +98,12 @@
 
     {{- /* NEW WALLET */ -}}
     <form class="card bg1 d-hide" id="walletForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center fs18">
-        Create a
-        <img id="newWalletLogo" class="micro-icon mx-1">
-        <span id="newWalletName"></span>
-        Wallet
-      </div>
-      <div class="p-4">
-        <div>
-          <label for="acctName" class="pl-1 mb-1">Account Name</label>
-          <input type="text" class="form-control select" id="acctName">
-        </div>
-        <div>
-          <label for="newWalletPass" class="pt-3 pl-1 mb-1">Wallet Password</label>
-          <input type="password" autocomplete="off" class="form-control select" id="newWalletPass">
-        </div>
-        <div>
-          <label for="iniPath" class="pt-3 pl-1 mb-1">Configuration Filepath</label>
-          <input type="text" class="form-control select" placeholder="leave empty to use default path" id="iniPath">
-        </div>
-        <div>
-          <label for="wClientPass" class="pt-3 pl-1 mb-1">Client Password</label>
-          <input type="password" class="form-control select" id="wClientPass" autocomplete="off">
-        </div>
-        <div class="d-flex justify-content-end mt-4">
-          <button id="submitCreate" type="button" class="col-8 justify-content-center fs15 bg2 selected">Create</button>
-        </div>
-        <div class="fs15 pt-3 text-center d-hide errcolor" id="walletErr"></div>
-      </div>
+      {{template "newWalletForm"}}
     </form>
 
     {{- /* UNLOCK WALLET */ -}}
-    <form class="card bg1 d-hide" id="openForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center fs18">
-        Unlock
-        <img id="unlockLogo" class="micro-icon mx-1">
-        <span id="unlockName"></span>
-        Wallet
-      </div>
-      <div class="p-4">
-        <div>
-          <label for="walletPass" class="pl-1 mb-1">Password</label>
-          <input type="password" autocomplete="off" class="form-control select" id="walletPass">
-        </div>
-        <div class="d-flex justify-content-end mt-4">
-          <button id="submitOpen" type="button" class="col-8 justify-content-center fs15 bg2 selected">Open</button>
-        </div>
-        <div class="fs15 pt-3 text-center d-hide errcolor" id="openErr"></div>
-      </div>
+    <form class="card bg1 position-relative d-hide" id="openForm" autocomplete="off">
+      {{template "unlockWalletForm"}}
     </form>
 
     {{- /* DEPOSIT ADDRESS */ -}}

@@ -1,12 +1,19 @@
+{{define "walletIcons"}}
+<span data-state="sleeping" class="ico-sleeping grey d-hide"></span>
+<span data-state="locked" class="ico-locked grey d-hide"></span>
+<span data-state="unlocked" class="ico-unlocked d-hide"></span>
+<span data-state="nowallet"></span> {{/* not showing ico-cross */}}
+{{end}}
+
 {{define "markets"}}
 {{template "top" .}}
 <div id="main" data-handler="markets" class="main align-items-stretch justify-content-center">
 
   {{- /* MARKET LIST */ -}}
   <div id="marketList" class="marketlist">
-    {{range $url, $markets := .Markets}}
+    {{range $url, $xc := .Exchanges}}
       <div class="fs16 py-1 pl-2 bg1">{{urlBase $url}}</div>
-      {{range $markets}}
+      {{range $xc.SortedMarkets}}
         <div class="marketrow" data-dex="{{$url}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
           <img src="{{logoPath .BaseSymbol}}" class="micro-icon mr-1">
           <img src="{{logoPath .QuoteSymbol}}" class="micro-icon mr-1">
@@ -23,17 +30,19 @@
     <div id="marketChart" class="w-100">
       <div id="marketLoader" class="fill-abs flex-center">
         <div class="ico-spinner spinner"></div>
+
       </div>
     </div>
 
     {{- /* ORDERS */ -}}
     <div id="orders" class="overflow-auto w-100 d-flex flex-grow-1 bg1">
+
       <div class="col-14 d-flex justify-content-around align-items-stretch p-0">
 
         {{- /* BUY ORDER LIST */ -}}
         <div class="marketorders col-7 p-0 bg1">
           <div class="market-header text-center fs14 py-1">Buy Orders</div>
-          <table class="ordertable bg1">
+          <table class="ordertable bg0">
             {{block "thead" .}}
             <thead>
               <tr>
@@ -54,83 +63,226 @@
           </table>
         </div>
 
-        {{- /* ORDER FORM */ -}}
+        {{- /* ORDER PANEL */ -}}
         <div class="col-10 p-0 brdrleft brdrright">
           <div class="market-header fs14 d-flex justify-content-center align-items-stretch">
             <button id="limitBttn" type="button" class="flex-center px-2 py-0 markettab brdrleft selected">Limit Order</button>
             <button id="marketBttn" type="button" class="flex-center px-2 py-0 markettab brdrleft brdrright">Market Order</button>
           </div>
-          <form id="orderForm" class="px-5 bg1">
-            <div class="market-bal px-3 py-2 my-4 position-relative">
-              <span class="mktbalancelbl">Balances</span>
+
+          <div class="px-5">
+
+            {{- /* BALANCES */ -}}
+            <div class="market-bal pt-2 pb-1 mt-4 position-relative">
+              <span class="market-bal-lbl">Balances</span>
               <div class="d-flex mt-1 fs15 justify-content-between">
-                <div class="p-0 d-flex align-items-center justify-content-start">
-                  <img id="baseImg" class="micro-icon mr-1">
-                  <span class="mx-1" id="baseBalance"></span>
-                  <span data-unit="base"></span>
+                <div class="col-12 p-0 text-center" id="baseBox">
+                  <div class="fs13">
+                    <img id="baseImg" class="micro-icon mr-2">
+                    {{template "walletIcons"}}
+                  </div>
+                  <div class="fs16 my-1 text-center" id="baseBalSpan">
+                    <span id="baseBalance"></span>
+                    <span data-unit="base"></span>
+                  </div>
+                  <button id="baseNewButton" type="button" class="newwallet bg1 d-hide">Add a <span data-unit="base"></span> wallet</button>
                 </div>
-                <div class="p-0 d-flex align-items-center justify-content-start">
-                  <img id="quoteImg" class="micro-icon mr-1">
-                  <span class="mx-1" id="quoteBalance"></span>
-                  <span data-unit="quote"></span>
+                <div class="col-12 p-0 text-center" id="quoteBox">
+                  <div class="fs13">
+                    <img id="quoteImg" class="micro-icon mr-2">
+                    {{template "walletIcons"}}
+                  </div>
+                  <div class="fs16 my-1 text-center" id="quoteBalSpan">
+                    <span class="mx-1" id="quoteBalance"></span>
+                    <span data-unit="quote"></span>
+                  </div>
+                  <button id="quoteNewButton" type="button" class="newwallet bg1 d-hide">Add a <span data-unit="quote"></span> wallet</button>
                 </div>
                 <span></span> {{- /* flex spacer */ -}}
               </div>
             </div>
-            <div class="p-0 w-100">
-              <div class="d-flex">
-                <button id="buyBttn" type="button" class="col-12 justify-content-center fs15 bg2 selected py-1">
-                  Buy
-                  <span data-unit="base"></span>
-                </button>
-                <button id="sellBttn" type="button" class="col-12 justify-content-center fs15 bg2 py-1">
-                  Sell
-                  <span data-unit="base"></span>
-                </button>
+
+            {{- /* MARKET CONFIG */ -}}
+            <div class="d-flex justify-content-between my-3 fs14">
+              <div>
+                Lot Size:
+                <span id="lotSize"></span>
+                <span data-unit="base"></span>
               </div>
-              <div class="d-flex mt-4" id="priceBox">
-                <label for="priceField" class="col-8 d-flex align-items-center p-0">Price</label>
-                <div class="col-16 p-0 position-relative">
-                  <input type="number" class="form-control select bg1">
-                  <span class="unit" data-unit="quote"></span>
-                </div>
-              </div>
-              <div class="d-flex mt-4">
-                <label for="qtyField" class="col-8 d-flex align-items-center p-0">Quantity</label>
-                <div class="col-16 p-0 position-relative">
-                  <input type="number" class="form-control select bg1" id="qtyField">
-                  <span class="unit" data-unit="base"></span>
-                </div>
-              </div>
-              <div class="mt-3 text-left pl-4" id="tifBox">
-                <input class="form-check-input" type="checkbox" value="">
-                <label class="form-check-label" for="tifNow">
-                  Match for one epoch only
-                </label>
-              </div>
-              <div class="text-right">
-                <button id="submitBttn" type="button" class="w-50 py-1 mt-4 fs15 submit text-center">Submit Order</button>
+              <div>
+                Rate Step:
+                <span id="rateStep"></span>
+                <span data-unit="quote"></span>
               </div>
             </div>
-          </form>
+
+
+            {{- /* ORDER FORM */ -}}
+            <form id="orderForm" class="bg1">
+              <div class="p-0 w-100">
+                <div class="d-flex">
+                  <button id="buyBttn" type="button" class="col-12 justify-content-center fs15 bg2 selected py-1">
+                    Buy
+                    <span data-unit="base"></span>
+                  </button>
+                  <button id="sellBttn" type="button" class="col-12 justify-content-center fs15 bg2 py-1">
+                    Sell
+                    <span data-unit="base"></span>
+                  </button>
+                </div>
+                <div class="d-flex mt-4" id="priceBox">
+                  <label for="rateField" class="col-6 d-flex align-items-center p-0">Price</label>
+                  <div class="col-18 p-0 position-relative">
+                    <input type="number" class="form-control select bg1" id="rateField">
+                    <span class="unit" data-unit="quote"></span>
+                  </div>
+                </div>
+                <div class="d-flex mt-4" id="qtyBox">
+                  <label for="qtyField" class="col-6 d-flex align-items-center p-0">Quantity</label>
+                  <div class="col-6 p-0 position-relative">
+                    <input type="number" class="form-control select bg1" id="lotField">
+                    <span class="unit">Lots</span>
+                  </div>
+                  <div class="col-1 p-0"></div> {{/* spacer */}}
+                  <div class="col-11 p-0">
+                    <input type="number" class="form-control select bg1" id="qtyField">
+                    <span class="unit" data-unit="base"></span>
+                  </div>
+                </div>
+                <div id="mktBuyBox" class="d-hide">
+                  <div class="text-center mt-2 fs15">
+                    min trade is about <span id="minMktBuy"></span> <span data-unit="quote"></span>
+                  </div>
+                  <div class="d-flex justify-content-center mt-2">
+                    <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
+                    <div class="col-12 p-0 position-relative">
+                      <input type="number" class="form-control select bg1" id="mktBuyField">
+                      <span class="unit" data-unit="quote"></span>
+                    </div>
+                  </div>
+                  <div class="p-0 fs14 flex-center mt-1">
+                    <span>
+                      ~ <span id="mktBuyScore">0</span> <span data-unit="base"></span>
+                      @ <span id="mktBuyLots">0</span> <span >Lots</span><br>
+
+                    </span>
+                  </div>
+                </div>
+                <div class="mt-3 text-left pl-4" id="tifBox">
+                  <input id="tifNow" class="form-check-input" type="checkbox" value="">
+                  <label class="form-check-label" for="tifNow">
+                    Match for one epoch only
+                  </label>
+                </div>
+                <div class="text-right">
+                  <button id="submitBttn" type="button" class="w-50 py-1 mt-4 fs15 submit text-center">Submit Order</button>
+                </div>
+              </div>
+              <div class="fs15 pt-3 text-center d-hide errcolor" id="orderErr"></div>
+            </form>
+
+          </div>
         </div>
 
         {{- /* SELL ORDER LIST */ -}}
         <div class="marketorders col-7 p-0 bg1">
           <div class="market-header text-center fs14 py-1">Sell Orders</div>
-          <table class="ordertable bg1">
+          <table class="ordertable bg0">
             {{template "thead"}}
             <tbody id="sellRows"></tbody>
           </table>
         </div>
+
       </div>
 
       {{- /* USER ORDERS: TODO */ -}}
       <div class="bg0 p-0 col-10 d-flex flex-column align-items-stretch">
         <div class="market-header text-center fs14 py-1 brdrleft">Your Orders</div>
-        <div class="brdrleft flex-grow-1 bg1"></div>
+        <div class="brdrleft flex-grow-1 bg1">
+          <table id="liveTable" class="ordertable">
+            <thead>
+              <tr>
+                <th>Side</th>
+                <th>Age</th>
+                <th>Rate</th>
+                <th>Quantity</th>
+                <th>Filled</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="liveList">
+              <tr id="liveTemplate">
+                <td data-col="side"></td>
+                <td data-col="age"></td>
+                <td data-col="rate"></td>
+                <td data-col="qty"></td>
+                <td data-col="filled"></td>
+                <td data-col="swapping"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
+
+  </div>
+
+  {{- /* POP-UP FORMS */ -}}
+  <div id="forms" class="marketforms d-flex justify-content-center align-items-center d-hide">
+
+    {{- /* UNLOCK WALLET */ -}}
+    <form class="card bg1 position-relative d-hide" id="openForm" autocomplete="off">
+      {{template "unlockWalletForm"}}
+    </form>
+
+    {{- /* NEW WALLET */ -}}
+    <form class="card bg1 d-hide" id="walletForm" autocomplete="off">
+      {{template "newWalletForm"}}
+    </form>
+
+    {{- /* VERIFY ORDER */ -}}
+    <form class="card bg1 p-4 position-relative fs16 text-center d-hide" id="verifyForm" autocomplete="off">
+      You are submitting an order to
+      <div class="fs20 demi py-1">
+        <span id="vSide"></span>
+        <span id="vQty"></span>
+        <span id="vBase"></span>
+      </div>
+      <div id="verifyLimit">
+        at a rate of
+        <div class="fs20 demi py-1">
+          <span id="vRate"></span>
+          <sup data-unit="quote"></sup>/<sub data-unit="base"></sub>
+        </div>
+        for a total of
+        <div class="fs20 demi py-1">
+          <span id="vTotal"></span>
+          <span id="vQuote"></span>
+        </div>
+      </div>
+      <div id="verifyMarket">
+        This is a market order and will match the best available order(s) on the
+        book. Based on the current market mid-gap rate, you might receive about
+        <div class="fs20 demi py-1">
+          <span id="vmTotal"></span>
+          <span id="vmAsset"></span>
+          <span class="fs15">(<div class="d-inline" id="vmLots"></div class="d-inline"> lots)</span>
+        </div>
+      </div>
+      <hr class="dashed my-4 mx-4">
+      <div class="fs16 text-center">Authorize this order with your client password.</div>
+      <div class="d-flex mt-3">
+        <div class="col-12 p-0 text-left">
+          <label for="vPass" class="pl-1 mb-1">Password</label>
+          <input type="password" class="form-control select" id="vPass">
+        </div>
+        <div class="col-12 p-0 text-right">
+          <div>&nbsp;</div>
+          <button id="vSubmit" type="button" class="w-75 mt-1 justify-content-center fs15 bg2 selected">Submit</button>
+        </div>
+      </div>
+    </form>
+
   </div>
 
 </div>

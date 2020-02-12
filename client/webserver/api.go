@@ -199,6 +199,32 @@ func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+type tradeForm struct {
+	Pass  string          `json:"pw"`
+	Order *core.TradeForm `json:"order"`
+}
+
+// apiTrade is the handler for the '/trade' API request.
+func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
+	form := new(tradeForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	ord, err := s.core.Trade(form.Pass, form.Order)
+	if err != nil {
+		s.writeAPIError(w, "error placing order: %v", err)
+		return
+	}
+	resp := &struct {
+		OK    bool        `json:"ok"`
+		Order *core.Order `json:"order"`
+	}{
+		OK:    true,
+		Order: ord,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
 // apiCloseWallet is the handler for the '/closewallet' API request.
 func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 	form := &struct {

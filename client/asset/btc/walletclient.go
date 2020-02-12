@@ -5,7 +5,6 @@ package btc
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -152,31 +151,6 @@ func (wc *walletClient) PrivKeyForAddress(addr string) (*btcec.PrivateKey, error
 		return nil, err
 	}
 	return wif.PrivKey, nil
-}
-
-// SignMessage attempts to have the wallet sign the message with the private key
-// associated with the specified address.
-func (wc *walletClient) SignMessage(addr string, msg dex.Bytes) (pubkey, sig dex.Bytes, err error) {
-	var keyHex string
-	err = wc.call(methodPrivKeyForAddress, anylist{addr}, &keyHex)
-	if err != nil {
-		return nil, nil, err
-	}
-	wif, err := btcutil.DecodeWIF(keyHex)
-	if err != nil {
-		return nil, nil, err
-	}
-	pubkey = wif.PrivKey.PubKey().SerializeCompressed()
-	var b64Sig string
-	err = wc.call(methodSignMessage, anylist{keyHex, msg.String()}, &b64Sig)
-	if err != nil {
-		return nil, nil, err
-	}
-	sig, err = base64.StdEncoding.DecodeString(b64Sig)
-	if err != nil {
-		return nil, nil, err
-	}
-	return pubkey, sig, nil
 }
 
 // GetTransaction retrieves the specified wallet-related transaction.

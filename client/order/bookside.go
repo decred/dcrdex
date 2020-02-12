@@ -107,7 +107,7 @@ func (d *bookSide) Remove(order *Order) error {
 }
 
 // BestNOrders returns the best N orders of the book side.
-func (d *bookSide) BestNOrders(n uint64) ([]*Order, error) {
+func (d *bookSide) BestNOrders(n int) ([]*Order, bool) {
 	count := n
 	best := make([]*Order, 0)
 
@@ -150,10 +150,10 @@ func (d *bookSide) BestNOrders(n uint64) ([]*Order, error) {
 		}
 
 	default:
-		return nil, fmt.Errorf("unknown order preference %v", d.orderPref)
+		panic(fmt.Sprintf("unknown order preference %v", d.orderPref))
 	}
 
-	return best, nil
+	return best, len(best) == n
 }
 
 // BestFill returns the best fill for the provided quantity.

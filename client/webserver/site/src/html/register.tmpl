@@ -26,7 +26,12 @@
 
     {{- /* Set up the Decred wallet. Only shown on first visit. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="walletForm">
-      <div class="bg2 px-2 py-1 flex-center fs18"><img src="/img/coins/dcr.png" class="micro-icon mr-2"> Decred Wallet</div>
+      <div class="bg2 px-2 py-1 text-center fs18">
+        Create a
+        <img id="newWalletLogo" class="micro-icon mx-1">
+        <span id="newWalletName"></span>
+        Wallet
+      </div>
       <div class="p-4">
         <div class="fs16">You haven't connected a Decred wallet yet. Connect to your wallet now.</div>
         <hr class="dashed my-4">
@@ -57,19 +62,7 @@
 
     {{- /* Open Decred wallet. Only shown if now already open. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="openForm">
-      <div class="bg2 px-2 py-1 text-center fs18">Decred Wallet</div>
-      <div class="p-4">
-        <div class="fs16">Unlock your Decred wallet to pay registration fees.</div>
-        <hr class="dashed my-4">
-        <div>
-          <label for="walletPass" class="pl-1 mb-1">Decred Wallet Password</label>
-          <input type="password" class="form-control select" id="walletPass" autocomplete="off">
-        </div>
-        <div class="d-flex justify-content-end mt-4">
-          <button id="submitOpen" type="button" class="col-8 justify-content-center fs15 bg2 selected">Open</button>
-        </div>
-        <div class="fs15 pt-3 text-center d-hide errcolor" id="openErr"></div>
-      </div>
+      {{template "unlockWalletForm" "Unlock your Decred wallet to pay registration fees."}}
     </form>
 
     {{- /* DEX URL */ -}}

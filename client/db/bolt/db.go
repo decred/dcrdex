@@ -311,6 +311,15 @@ func (db *boltDB) MarketOrders(dex string, base, quote uint32, n int, since uint
 	return db.marketOrdersSince(dexB, baseB, quoteB, n, since)
 }
 
+// ActiveDEXOrders retrieves all orders for the specified DEX.
+func (db *boltDB) ActiveDEXOrders(dex string) ([]*dexdb.MetaOrder, error) {
+	dexB := []byte(dex)
+	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
+		status := oBkt.Get(statusKey)
+		return bEqual(dexB, oBkt.Get(dexKey)) && (bEqual(status, byteEpoch) || bEqual(status, byteBooked))
+	})
+}
+
 // marketOrdersAll retrieves all orders for the specified DEX and market.
 func (db *boltDB) marketOrdersAll(dexB, baseB, quoteB []byte) ([]*dexdb.MetaOrder, error) {
 	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
