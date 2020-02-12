@@ -168,7 +168,7 @@ connection is established, the client will supply their account ID and signature
 {|
 ! field   !! size (bytes) !! description
 |-
-| account ID || 16 || client [[accounts.mediawiki/#Step_1_Registration|account ID]]
+| account ID || 32 || client [[accounts.mediawiki/#Step_1_Registration|account ID]]
 |-
 | API version || 2 || requested API version
 |-
