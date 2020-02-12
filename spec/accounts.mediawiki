@@ -104,7 +104,7 @@ the registration process.
 {|
 ! field      !! size (bytes) !! description
 |-
-| account ID || 16 || client account ID
+| account ID || 32 || client account ID
 |-
 | coin ID    || asset-dependent || the coin ID
 |}
