@@ -5,6 +5,7 @@ package pg
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/server/account"
@@ -18,6 +19,11 @@ import (
 func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) {
 	err := closeAccount(a.db, a.tables.accounts, aid, rule)
 	if err != nil {
+		// fatal unless 0 matching rows found because that means at least the
+		// targeted account is not still open.
+		if !errors.Is(err, errNoRows) {
+			a.fatalBackendErr(err)
+		}
 		log.Errorf("error closing account %s (rule %d): %v", aid, rule, err)
 	}
 }
@@ -135,8 +141,18 @@ func createAccountTables(db *sql.DB) error {
 // closeAccount closes the account by setting the rule column value.
 func closeAccount(dbe sqlExecutor, tableName string, aid account.AccountID, rule account.Rule) error {
 	stmt := fmt.Sprintf(internal.CloseAccount, tableName)
-	_, err := dbe.Exec(stmt, rule, aid)
-	return err
+	N, err := sqlExec(dbe, stmt, rule, aid)
+	if err != nil {
+		return err
+	}
+	switch N {
+	case 0:
+		return errNoRows
+	case 1:
+		return nil
+	default:
+		return NewDetailedError(errTooManyRows, fmt.Sprint(N, "rows updated instead of 1"))
+	}
 }
 
 // getAccount gets the account pubkey, whether the account has been
