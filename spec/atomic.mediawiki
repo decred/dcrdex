@@ -69,7 +69,7 @@ a key known only to herself.
 From the key, Alice generates a &#x201C;lock&#x201D; and constructs an swap contract
 such that if someone can provide both Alice&#x2019;s key and the pubkey for Bob&#x2019;s
 specified address, they can spend the output.
-In practice, the key is simply a random 32-byte number, and the lock is its
+In practice, the key is simply a random 32-byte sequence, and the lock is its
 hash.
 
 In addition, Alice constructs the contract with a second, alternative lock

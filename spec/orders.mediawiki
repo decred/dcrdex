@@ -75,27 +75,27 @@ re-subscribe to the market to synchronize the order book from scratch.
 |-
 | seq      || int   || A sequence ID || superceded in <code>orderbook</code> response
 |-
-| com     || string || the order commitment
-|-
 | marketid || string || A unique market identifier ||
 |-
 | oid     || string || the order ID ||
-|-
-| otype   || string || "l" for ''limit'', "m" for ''market'', "c" for ''cancel'' || epoch_order only
 |-
 | side    || string || "b" for ''buy'', "s" for ''sell'' || epoch_order, book_order
 |-
 | qty     || int      || order size (atoms) || epoch_order, book_order
 |-
-| rate    || int    || price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]. only set on limit orders
+| rate    || int    || price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]] || only set on limit orders
 |-
-| tif     || string || time in force. one of "i" for ''immediate'' or "s" for ''standing''. only set on limit orders
+| tif     || string || time in force. one of "i" for ''immediate'' or "s" for ''standing'' || only set on limit orders
 |-
 | time    || int    || the order's UNIX timestamp || epoch_order, book_order
 |-
+| com     || string || the order commitment || epoch_order only
+|-
+| otype   || string || "l" for ''limit'', "m" for ''market'', "c" for ''cancel'' || epoch_order only
+|-
 | epoch   || int    || the order's epoch index || epoch_order only
 |-
-| target  || string || target order ID || only set on cancel orders
+| target  || string || target order ID || only set on cancel orders (epoch_order only)
 |}
 
 '''Changes to the order book''' will be received from the DEX as a stream of
@@ -111,19 +111,6 @@ following table. The payload for all three routes is an '''Order''' object.
 | unbook_order || remove the order from the order book
 |}
 
-'''Request route:''' <code>match_data</code>, '''originator: ''' DEX
-
-<code>payload</code>
-{|
-! field  !! type!! description
-|-
-| marketid || int || the market ID
-|-
-| order  || object || the Order object
-|-
-| seq    || int    || A sequence ID
-|}
-
 At the beginning of the matching cycle, the DEX will publish a list of order
 preimages, the seed hash used for
 [[fundamentals.mediawiki/#Pseudorandom_Order_Matching|order sequencing]], and the
@@ -136,9 +123,9 @@ independently verify matching.
 {|
 ! field     !! type !! description
 |-
-| marketid  || int || the market ID
+| marketid  || string || the market ID
 |-
-| epoch     || int || the epoch for which the cycle occurs
+| epoch     || int || the epoch index for which the cycle occurs
 |-
 | preimages || &#91;string&#93; || list of order preimages for the epoch
 |-
@@ -146,7 +133,7 @@ independently verify matching.
 |-
 | csum      || string || the commitment checksum
 |-
-| seed      || int || sorting seed
+| seed      || string || epoch queue shuffling seed
 |}
 
 A client can '''unsubscribe''' from order book updates without closing the
@@ -158,7 +145,7 @@ websocket connection.
 {|
 ! field  !! type !! description
 |-
-| marketid || int || the market ID
+| marketid || string || the market ID
 |}
 
 <code>result</code>: boolean <code>true</code> on success.
@@ -255,7 +242,7 @@ the coin's pubkey script (or corresponding redeem script).
 
 As part of every submitted order, the client should submit a cryptographic
 '''commitment'''.
-To generate a commitment, the client creates a random 32-byte number,
+To generate a commitment, the client creates a random 32-byte sequence,
 the ''preimage''. The commitment is the Blake-256 hash of the
 preimage. Every order must be assigned a unique commitment, therefore preimages
 cannot be reused. They should be generated with a cryptographically secure
@@ -292,8 +279,6 @@ All order serializations have common '''prefix''' fields.
 |-
 | accountid  || 32 || string || hex-encoded client account ID
 |-
-| commitment || 32 || string || hex-encoded cryptographic commitment
-|-
 | base       || 4  || int || the base asset ID
 |-
 | quote      || 4  || int || the quote asset ID
@@ -304,9 +289,7 @@ All order serializations have common '''prefix''' fields.
 |-
 | tserver    || 8  || int || the server's UNIX timestamp (milliseconds). zero for client signature
 |-
-| epochidx   || 8  || int || the epoch index assigned by the server. zero for client signature
-|-
-| epochdur   || 2  || int || the current DEX epoch duration, in seconds
+| commitment || 32 || string || hex-encoded cryptographic commitment
 |}
 
 ===Order ID===
@@ -332,7 +315,7 @@ the timestamp.
 |-
 | orderid   || string || the order ID
 |-
-| tserver || int  || the server's UNIX timestamp (milliseconds)
+| tserver   || int  || the server's UNIX timestamp (milliseconds)
 |}
 
 The client should use the server's timestamp to create a serialized order and
@@ -530,7 +513,7 @@ This is by design and discourages certain types of spoofing.
 |-
 | prefix     || 99 || [[#Order_Signing|the order prefix]]
 |-
-| orderid    || 16 || the order ID
+| orderid    || 32 || the order ID
 |}
 
 <code>result</code>
