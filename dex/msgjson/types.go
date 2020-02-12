@@ -460,6 +460,8 @@ func (p *Prefix) Stamp(t, epochIdx, epochDur uint64) {
 	p.EpochDuration = epochDur
 }
 
+// TODO: Update prefix serialization with commitment.
+
 // Serialize serializes the Prefix data.
 func (p *Prefix) Serialize() []byte {
 	// serialization: account ID (32) + base asset (4) + quote asset (4) +
@@ -578,9 +580,10 @@ type TradeNote struct {
 
 // OrderNote is part of a notification about any type of order.
 type OrderNote struct {
-	Seq      uint64 `json:"seq,omitempty"`      // May be empty when part of an OrderBook.
-	MarketID string `json:"marketid,omitempty"` // May be empty when part of an OrderBook.
-	OrderID  Bytes  `json:"oid"`
+	Seq        uint64 `json:"seq,omitempty"`      // May be empty when part of an OrderBook.
+	MarketID   string `json:"marketid,omitempty"` // May be empty when part of an OrderBook.
+	OrderID    Bytes  `json:"oid"`
+	Commitment Bytes  `json:"com"`
 }
 
 // BookOrderNote is the payload for a DEX-originating notification-type message
@@ -608,9 +611,10 @@ type UnbookOrderNote OrderNote
 // the client about an order added to the epoch queue.
 type EpochOrderNote struct {
 	BookOrderNote
-	OrderType uint8  `json:"otype"`
-	TargetID  Bytes  `json:"target,omitempty"`
-	Epoch     uint64 `json:"epoch"`
+	Commitment Bytes  `json:"com"`
+	OrderType  uint8  `json:"otype"`
+	TargetID   Bytes  `json:"target,omitempty"`
+	Epoch      uint64 `json:"epoch"`
 }
 
 // Connect is the payload for a client-originating ConnectRoute request.
