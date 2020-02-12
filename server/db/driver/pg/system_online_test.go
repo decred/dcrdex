@@ -24,6 +24,7 @@ var (
 	archie            *Archiver
 	sqlDb             *sql.DB
 	mktInfo, mktInfo2 *dex.MarketInfo
+	numMarkets        int
 )
 
 func TestMain(m *testing.M) {
@@ -73,6 +74,8 @@ func openDB() (func() error, error) {
 		Net:    dex.Mainnet,
 		FeeKey: "dprv3hCznBesA6jBu1MaSqEBewG76yGtnG6LWMtEXHQvh3MVo6rqesTk7FPMSrczDtEELReV4aGMcrDxc9htac5mBDUEbTi9rgCA8Ss5FkasKM3",
 	}
+
+	numMarkets = len(dbi.MarketCfg)
 
 	closeFn := func() error { return nil }
 
@@ -179,6 +182,40 @@ func cleanTables(db *sql.DB) error {
 	}
 
 	return archie.CreateKeyEntry(archie.keyHash)
+}
+
+func Test_sqlExec(t *testing.T) {
+	// Expect to update 0 rows.
+	stmt := fmt.Sprintf(`UPDATE %s SET lot_size=1234 WHERE name='definitely not a market';`, marketsTableName)
+	N, err := sqlExec(archie.db, stmt)
+	if err != nil {
+		t.Fatal("sqlExec:", err)
+	}
+	if N != 0 {
+		t.Errorf("Should have updated 0 rows without error, got %d", N)
+	}
+
+	// Expect to update 1 rows.
+	stmt = fmt.Sprintf(`UPDATE %s SET lot_size=lot_size WHERE name=$1;`,
+		marketsTableName)
+	N, err = sqlExec(archie.db, stmt, mktInfo.Name)
+	if err != nil {
+		t.Fatal("sqlExec:", err)
+	}
+	if N != 1 {
+		t.Errorf("Should have updated 1 rows without error, got %d", N)
+	}
+
+	// Expect to update N=numMarkets rows.
+	stmt = fmt.Sprintf(`UPDATE %s SET lot_size=lot_size;`,
+		marketsTableName)
+	N, err = sqlExec(archie.db, stmt)
+	if err != nil {
+		t.Fatal("sqlExec:", err)
+	}
+	if N != int64(numMarkets) {
+		t.Errorf("Should have updated %d rows without error, got %d", numMarkets, N)
+	}
 }
 
 func Test_checkCurrentTimeZone(t *testing.T) {

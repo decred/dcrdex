@@ -62,9 +62,6 @@ func sqlExec(db sqlExecutor, stmt string, args ...interface{}) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if res == nil {
-		return 0, nil
-	}
 
 	var N int64
 	N, err = res.RowsAffected()
