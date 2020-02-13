@@ -19,12 +19,14 @@ import (
 )
 
 const (
-	maxLogRolls     = 16
-	defaultRPCAddr  = "localhost:5757"
-	defaultWebAddr  = "localhost:5758"
-	configFilename  = "dexc_mainnet.conf"
-	certsFilename   = "certs.json"
-	defaultLogLevel = "info"
+	maxLogRolls        = 16
+	defaultRPCAddr     = "localhost:5757"
+	defaultRPCCertFile = "dexc_rpc.cert"
+	defaultRPCKeyFile  = "dexc_rpc.key"
+	defaultWebAddr     = "localhost:5758"
+	configFilename     = "dexc_mainnet.conf"
+	certsFilename      = "certs.json"
+	defaultLogLevel    = "info"
 )
 
 var (
@@ -56,19 +58,23 @@ func setNet(net string) string {
 
 // Config is the configuration for the DEX client application.
 type Config struct {
-	DataDir    string `long:"dir" description:"Path to application directory"`
-	Config     string `long:"config" description:"Path to an INI configuration file. default:[home]/dexc_mainnet.conf"`
-	DBPath     string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
-	CertsPath  string `long:"certs" description:"Path to a JSON-formatted file linking DEX URL keys to TLS certificate filepaths."`
-	RPCOn      bool   `long:"rpc" description:"turn on the rpc server"`
-	RPCAddr    string `long:"rpcaddr" description:"RPCServer listen address"`
-	WebOn      bool   `long:"web" description:"turn on the web server"`
-	WebAddr    string `long:"webaddr" description:"HTTP server address"`
-	NoTUI      bool   `long:"notui" description:"disable the terminal-based user interface. must be used with --rpc or --web"`
-	Testnet    bool   `long:"testnet" description:"use testnet"`
-	Simnet     bool   `long:"simnet" description:"use simnet"`
-	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
-	DebugLevel string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
+	DataDir     string `long:"dir" description:"Path to application directory"`
+	Config      string `long:"config" description:"Path to an INI configuration file. default:[home]/dexc_mainnet.conf"`
+	DBPath      string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
+	CertsPath   string `long:"certs" description:"Path to a JSON-formatted file linking DEX URL keys to TLS certificate filepaths."`
+	RPCOn       bool   `long:"rpc" description:"turn on the rpc server"`
+	RPCAddr     string `long:"rpcaddr" description:"RPCServer listen address"`
+	RPCUser     string `long:"rpcuser" description:"RPCServer user name"`
+	RPCPassword string `long:"rpcpassword" description:"RPCServer password"`
+	RPCCert     string `long:"rpccert" description:"RPCServer certificate file location"`
+	RPCKey      string `long:"rpckey" description:"RPCServer key file location"`
+	WebOn       bool   `long:"web" description:"turn on the web server"`
+	WebAddr     string `long:"webaddr" description:"HTTP server address"`
+	NoTUI       bool   `long:"notui" description:"disable the terminal-based user interface. must be used with --rpc or --web"`
+	Testnet     bool   `long:"testnet" description:"use testnet"`
+	Simnet      bool   `long:"simnet" description:"use simnet"`
+	ReloadHTML  bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
+	DebugLevel  string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
 	// Certs is not set by the client. It is parsed from the JSON file at the
 	// Certs path.
 	Certs map[string]string
@@ -149,6 +155,14 @@ func Configure() (*Config, error) {
 	default:
 		cfg.Net = dex.Mainnet
 		defaultDBPath = setNet("mainnet")
+	}
+
+	if cfg.RPCCert == "" {
+		cfg.RPCCert = filepath.Join(preCfg.DataDir, defaultRPCCertFile)
+	}
+
+	if cfg.RPCKey == "" {
+		cfg.RPCKey = filepath.Join(preCfg.DataDir, defaultRPCKeyFile)
 	}
 
 	defaultCertsPath := filepath.Join(preCfg.DataDir, certsFilename)

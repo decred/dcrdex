@@ -40,13 +40,14 @@ const (
 	rpcSemverPatch = 0
 )
 
-var log slog.Logger
+var (
+	// Check that core.Core satifies ClientCore.
+	_   ClientCore = (*core.Core)(nil)
+	log slog.Logger
+)
 
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
-	ListMarkets() []*core.Market
-	Register(*core.Registration) error
-	Login(dex, pw string) error
 	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
 	Book(dex string, base, quote uint32) *core.OrderBook
 	Unsync(dex string, base, quote uint32)

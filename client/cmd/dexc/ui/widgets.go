@@ -164,9 +164,16 @@ func createWidgets() {
 		webSrv.Run(ctx)
 		setWebLabelOn(false)
 	})
-	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context, addr string, logger slog.Logger) {
+	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context, _ string, logger slog.Logger) {
 		setRPCLabelOn(true)
-		rpcserver.Run(ctx, clientCore, addr, logger)
+		rpcserver.SetLogger(logger)
+		rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPassword, cfg.RPCCert, cfg.RPCKey}
+		rpcSrv, err := rpcserver.New(rpcCfg)
+		if err != nil {
+			log.Errorf("Error starting rpc server: %v", err)
+			return
+		}
+		rpcSrv.Run(ctx)
 		setRPCLabelOn(false)
 	})
 	noteJournal = newJournal("Notifications", handleNotificationLog)

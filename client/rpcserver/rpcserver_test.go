@@ -33,13 +33,8 @@ var (
 type TCore struct {
 	balanceErr error
 	syncErr    error
-	regErr     error
-	loginErr   error
 }
 
-func (c *TCore) ListMarkets() []*core.Market         { return nil }
-func (c *TCore) Register(r *core.Registration) error { return c.regErr }
-func (c *TCore) Login(dex, pw string) error          { return c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return nil, c.syncErr
 }
@@ -127,7 +122,7 @@ func (c *TConn) Close() error {
 	return nil
 }
 
-var tPort = 5142
+var tPort = 5555
 
 func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore, func()) {
 	tPort++
