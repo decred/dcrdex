@@ -93,7 +93,7 @@ func NewConnectionMaster(c Connector) *ConnectionMaster {
 	}
 }
 
-// Start connects the Connector, and returns any initial connection error. Use
+// Connect connects the Connector, and returns any initial connection error. Use
 // Disconnect to shut down the Connector.
 func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 	c.init(ctx)
