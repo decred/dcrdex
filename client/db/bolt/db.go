@@ -29,6 +29,7 @@ var (
 // Bolt works on []byte keys and values. These are some commonly used key and
 // value encodings.
 var (
+	appBucket      = []byte("appBucket")
 	accountsBucket = []byte("accounts")
 	ordersBucket   = []byte("orders")
 	matchesBucket  = []byte("matches")
@@ -71,13 +72,46 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 		DB: db,
 	}
 
-	return bdb, bdb.makeTopLevelBuckets([][]byte{accountsBucket, ordersBucket, matchesBucket, walletsBucket})
+	return bdb, bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket,
+		ordersBucket, matchesBucket, walletsBucket})
 }
 
 // Run waits for context cancellation and closes the database.
 func (db *boltDB) Run(ctx context.Context) {
 	<-ctx.Done()
 	db.Close()
+}
+
+// Store stores a value at the specified key in a general-use bucket.
+func (db *boltDB) Store(k string, v []byte) error {
+	if len(k) == 0 {
+		return fmt.Errorf("cannot store with empty key")
+	}
+	keyB := []byte(k)
+	return db.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists(appBucket)
+		if err != nil {
+			return fmt.Errorf("failed to create key bucket")
+		}
+		return bucket.Put(keyB, v)
+	})
+}
+
+// Get retrieves value previously stored with Store.
+func (db *boltDB) Get(k string) ([]byte, error) {
+	var v []byte
+	keyB := []byte(k)
+	return v, db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(appBucket)
+		if bucket == nil {
+			return fmt.Errorf("app bucket not found")
+		}
+		v = bucket.Get(keyB)
+		if v == nil {
+			return fmt.Errorf("no value found for %s", k)
+		}
+		return nil
+	})
 }
 
 // ListAccounts returns a list of DEX URLs. The DB is designed to have a single

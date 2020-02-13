@@ -81,6 +81,10 @@ type Wallet interface {
 	Lock() error
 	// PayFee pays a registration fee to the DEX.
 	PayFee(address string, fee uint64, nfo *dex.Asset) (Coin, error)
+	// Coin gets a wallet Coin for a coin ID. Note that a Coin, by definition, is
+	// unspent. Attempting to retrieve a spent coin should result in an error. The
+	// coin will not be locked.
+	Coin(id dex.Bytes) (Coin, error)
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed

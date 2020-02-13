@@ -177,12 +177,12 @@ func tNewConnect(user *tUser) *msgjson.Connect {
 	}
 }
 
-func extractConnectResponse(t *testing.T, msg *msgjson.Message) *msgjson.ConnectResponse {
+func extractConnectResult(t *testing.T, msg *msgjson.Message) *msgjson.ConnectResult {
 	if msg == nil {
 		t.Fatalf("no response from 'connect' request")
 	}
 	resp, _ := msg.Response()
-	result := new(msgjson.ConnectResponse)
+	result := new(msgjson.ConnectResult)
 	err := json.Unmarshal(resp.Result, result)
 	if err != nil {
 		t.Fatalf("unmarshal error: %v", err)
@@ -303,7 +303,7 @@ func TestConnect(t *testing.T) {
 	// Connect the user.
 	user := tNewUser(t)
 	respMsg := connectUser(t, user)
-	cResp := extractConnectResponse(t, respMsg)
+	cResp := extractConnectResult(t, respMsg)
 	if len(cResp.Matches) != 1 {
 		t.Fatalf("no active matches")
 	}
@@ -404,7 +404,7 @@ func TestAccountErrors(t *testing.T) {
 
 	// Check the response.
 	respMsg := user.conn.getSend()
-	result := extractConnectResponse(t, respMsg)
+	result := extractConnectResult(t, respMsg)
 	if len(result.Matches) != 1 {
 		t.Fatalf("expected 1 match, received %d", len(result.Matches))
 	}

@@ -27,18 +27,20 @@ func (s *WebServer) sendTemplate(w http.ResponseWriter, r *http.Request, tmplID 
 // handleHome is the handler for the '/' page request. The response depends on
 // whether the user is authenticated or not.
 func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
-	userInfo := extractUserInfo(r)
-	var tmplID string
-	var data interface{}
+	user := extractUserInfo(r)
 	switch {
-	case !userInfo.authed:
-		tmplID = "login"
-		data = commonArgs(r, "Login | Decred DEX")
+	// The registration page also walks the user through setting up their app
+	// password and connecting the Decred wallet, if not already done.
+	case !user.Initialized || (user.Authed && len(user.Markets) == 0):
+		s.handleRegister(w, r)
+		return
+	case !user.Authed:
+		s.handleLogin(w, r)
+		return
 	default:
-		tmplID = "markets"
-		data = s.marketResult(r)
+		s.handleMarkets(w, r)
+		return
 	}
-	s.sendTemplate(w, r, tmplID, data)
 }
 
 // CommonArguments are common page arguments that must be supplied to every
@@ -58,24 +60,35 @@ func commonArgs(r *http.Request, title string) *CommonArguments {
 
 // handleLogin is the handler for the '/login' page request.
 func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
+	user := extractUserInfo(r)
+	if !user.Initialized {
+		s.handleRegister(w, r)
+		return
+	}
 	s.sendTemplate(w, r, "login", commonArgs(r, "Login | Decred DEX"))
 }
 
 // registerTmplData is template data for the /register page.
 type registerTmplData struct {
 	CommonArguments
-	WalletExists bool
-	WalletOpen   bool
+	InitStep   bool
+	WalletStep bool
+	OpenStep   bool
+	DEXStep    bool
 }
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
+	user := extractUserInfo(r)
 	dcrID, _ := dex.BipSymbolID("dcr")
 	exists, _, open := s.core.WalletStatus(dcrID)
+	needsInit := !user.Initialized
 	data := &registerTmplData{
 		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
-		WalletOpen:      open,
-		WalletExists:    exists,
+		InitStep:        needsInit,
+		WalletStep:      !needsInit && !exists,
+		OpenStep:        exists && !open,
+		DEXStep:         exists && open,
 	}
 	s.sendTemplate(w, r, "register", data)
 }

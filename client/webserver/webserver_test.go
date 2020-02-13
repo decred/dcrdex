@@ -25,26 +25,37 @@ var (
 )
 
 type TCore struct {
-	balanceErr error
-	syncErr    error
-	regErr     error
-	loginErr   error
+	balanceErr      error
+	syncErr         error
+	regErr          error
+	loginErr        error
+	initErr         error
+	preRegErr       error
+	createWalletErr error
+	openWalletErr   error
+	notHas          bool
+	notRunning      bool
+	notOpen         bool
 }
 
 func (c *TCore) Markets() map[string][]*core.Market                  { return nil }
+func (c *TCore) PreRegister(dex string) (uint64, error)              { return 1e8, c.preRegErr }
 func (c *TCore) Register(r *core.Registration) (error, <-chan error) { return c.regErr, nil }
-func (c *TCore) Login(dex, pw string) error                          { return c.loginErr }
+func (c *TCore) InitializeClient(pw string) error                    { return c.initErr }
+func (c *TCore) Login(pw string) ([]core.Negotiation, error)         { return nil, c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return nil, c.syncErr
 }
-func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook   { return nil }
-func (c *TCore) Unsync(dex string, base, quote uint32)                 {}
-func (c *TCore) Balance(uint32) (uint64, error)                        { return 0, c.balanceErr }
-func (c *TCore) WalletStatus(assetID uint32) (has, running, open bool) { return true, true, true }
-func (c *TCore) CreateWallet(form *core.WalletForm) error              { return nil }
-func (c *TCore) OpenWallet(assetID uint32, pw string) error            { return nil }
-func (c *TCore) Wallets() []*core.WalletStatus                         { return nil }
-func (c *TCore) User() *core.User                                      { return nil }
+func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook { return nil }
+func (c *TCore) Unsync(dex string, base, quote uint32)               {}
+func (c *TCore) Balance(uint32) (uint64, error)                      { return 0, c.balanceErr }
+func (c *TCore) WalletStatus(assetID uint32) (has, running, open bool) {
+	return !c.notHas, !c.notRunning, !c.notOpen
+}
+func (c *TCore) CreateWallet(form *core.WalletForm) error   { return c.createWalletErr }
+func (c *TCore) OpenWallet(assetID uint32, pw string) error { return c.openWalletErr }
+func (c *TCore) Wallets() []*core.WalletStatus              { return nil }
+func (c *TCore) User() *core.User                           { return nil }
 
 type TWriter struct {
 	b []byte
@@ -317,7 +328,7 @@ func TestAPIRegister(t *testing.T) {
 }
 
 func TestAPILogin(t *testing.T) {
-	enableLogging()
+	// enableLogging()
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
@@ -329,7 +340,6 @@ func TestAPILogin(t *testing.T) {
 	}
 
 	goodBody := &loginForm{
-		DEX:  "abc",
 		Pass: "def",
 	}
 	body = goodBody
@@ -339,6 +349,83 @@ func TestAPILogin(t *testing.T) {
 	tCore.loginErr = tErr
 	ensure(`{"ok":false,"msg":"login error: test error"}`)
 	tCore.loginErr = nil
+}
+
+func TestAPIInit(t *testing.T) {
+	writer := new(TWriter)
+	var body interface{}
+	reader := new(TReader)
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	ensure := func(want string) {
+		ensureResponse(t, s, s.apiInit, want, reader, writer, body)
+	}
+
+	goodBody := &loginForm{
+		Pass: "def",
+	}
+	body = goodBody
+	ensure(`{"ok":true}`)
+
+	// Initialization error
+	tCore.initErr = tErr
+	ensure(`{"ok":false,"msg":"initialization error: test error"}`)
+	tCore.initErr = nil
+}
+
+func TestAPIPreRegister(t *testing.T) {
+	writer := new(TWriter)
+	var body interface{}
+	reader := new(TReader)
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	ensure := func(want string) {
+		ensureResponse(t, s, s.apiPreRegister, want, reader, writer, body)
+	}
+
+	body = &preRegisterForm{"somedexaddress.org"}
+	ensure(`{"ok":true,"fee":100000000}`)
+
+	// Preregister error
+	tCore.preRegErr = tErr
+	ensure(`{"ok":false,"msg":"preregister error: test error"}`)
+	tCore.preRegErr = nil
+}
+
+func TestAPINewWallet(t *testing.T) {
+	writer := new(TWriter)
+	var body interface{}
+	reader := new(TReader)
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	ensure := func(want string) {
+		ensureResponse(t, s, s.apiNewWallet, want, reader, writer, body)
+	}
+
+	body = &newWalletForm{
+		Account: "account",
+		INIPath: "/path/to/somewhere",
+		Pass:    "123",
+	}
+	tCore.notHas = true
+	ensure(`{"ok":true}`)
+
+	tCore.notHas = false
+	ensure(`{"ok":false,"msg":"already have a wallet for btc"}`)
+	tCore.notHas = true
+
+	tCore.createWalletErr = tErr
+	ensure(`{"ok":false,"msg":"error creating btc wallet: test error"}`)
+	tCore.createWalletErr = nil
+
+	tCore.openWalletErr = tErr
+	ensure(`{"ok":false,"locked":true,"msg":"wallet connected, but failed to open with provided password: test error"}`)
+	tCore.openWalletErr = nil
+
+	tCore.notHas = false
 }
 
 func TestHandleMessage(t *testing.T) {

@@ -1,10 +1,11 @@
 {{define "header"}}
 <header id=header class="maintop">
+  {{$authed := .UserInfo.Authed}}
   <div data-pagelink="" class="logo"></div>
   <div class="mainlinks fs18 offwhite">
   <span data-pagelink="markets">Markets</span>
   <span data-pagelink="wallets">Wallets</span>
-  <span class="d-inline-block position-relative" id="noteMenuEntry">
+  <span class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="noteMenuEntry">
     <div class="note-indicator" id="noteIndicator"></div>
     <div id="noteBox">
       <div id="noteList">
@@ -16,7 +17,11 @@
     </div>
     <span class="ico-bell fs20" id="noteBell"></span>
   </span>
-  <span class="ico-settings fs24" data-pagelink="settings"></span>
+  <span class="ico-settings fs24{{if not $authed}} d-hide{{end}}" data-pagelink="settings" id="settingsIcon"></span>
+  <span data-pagelink="login"{{if $authed}} class="d-hide"{{end}} id="loginLink">Sign In</span>
+  </div>
+  <div id="loader" class="fill-abs flex-center d-hide">
+    <div class="ico-spinner spinner"></div>
   </div>
 </header>
 {{end}}

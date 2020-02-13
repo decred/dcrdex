@@ -309,12 +309,12 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 		return nil, err
 	}
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
-	utxos, _, _, err := btc.spendableUTXOs(unspents, nfo)
+	utxos, _, unconf, err := btc.spendableUTXOs(unspents, nfo)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
 	if len(utxos) == 0 {
-		return nil, fmt.Errorf("no funds ready to spend")
+		return nil, fmt.Errorf("no funds ready to spend. %.8f unconfirmed", float64(unconf)/1e8)
 	}
 	var sum uint64
 	var size uint32
@@ -882,6 +882,29 @@ func (btc *ExchangeWallet) PayFee(address string, fee uint64, _ *dex.Asset) (ass
 			"index could not be found: %v", err)
 	}
 	return newOutput(btc.node, txHash, vout, fee, nil), nil
+}
+
+// Coin gets a wallet Coin for a coin ID. Note that a Coin, by definition, is
+// unspent. Attempting to retrieve a spent coin should result in an error.
+func (btc *ExchangeWallet) Coin(id dex.Bytes) (asset.Coin, error) {
+	txHash, vout, err := decodeCoinID(id)
+	if err != nil {
+		return nil, err
+	}
+	unspents, err := btc.wallet.ListUnspent()
+	if err != nil {
+		return nil, err
+	}
+	txid := txHash.String()
+	for _, u := range unspents {
+		if u.TxID == txid && u.Vout == vout {
+			if err != nil {
+				return nil, fmt.Errorf("redeem script decode error: %v", err)
+			}
+			return newOutput(btc.node, txHash, vout, toSatoshi(u.Amount), u.RedeemScript), nil
+		}
+	}
+	return nil, fmt.Errorf("coin not found")
 }
 
 // run pings for new blocks and runs the tipChange callback function when the

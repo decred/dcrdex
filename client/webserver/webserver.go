@@ -55,7 +55,8 @@ var (
 type clientCore interface {
 	Markets() map[string][]*core.Market
 	Register(*core.Registration) (error, <-chan error)
-	Login(dex, pw string) error
+	Login(pw string) ([]core.Negotiation, error)
+	InitializeClient(pw string) error
 	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
 	Book(dex string, base, quote uint32) *core.OrderBook
 	Unsync(dex string, base, quote uint32)
@@ -65,6 +66,7 @@ type clientCore interface {
 	OpenWallet(assetID uint32, pw string) error
 	Wallets() []*core.WalletStatus
 	User() *core.User
+	PreRegister(dex string) (uint64, error)
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -216,7 +218,11 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	mux.Get("/settings", s.handleSettings)
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
+		r.Post("/preregister", s.apiPreRegister)
+		r.Post("/newwallet", s.apiNewWallet)
+		r.Post("/openwallet", s.apiOpenWallet)
 		r.Post("/register", s.apiRegister)
+		r.Post("/init", s.apiInit)
 		r.Post("/login", s.apiLogin)
 		r.Get("/user", s.apiUser)
 	})
@@ -229,7 +235,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	return s, nil
 }
 
-// Run starts the web server. Satisfies the runner.Runner interface.
+// Run starts the web server. Satisfies the dex.Runner interface.
 func (s *WebServer) Run(ctx context.Context) {
 	s.ctx = ctx
 	// Close the listener on context cancellation.
@@ -313,10 +319,12 @@ func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
 	return true
 }
 
-// userInfo is information about the connected user. Some fields are exported
-// for template use.
+// userInfo is information about the connected user. This type embeds the
+// core.User type, adding fields specific to the users server authentication
+// and cookies.
 type userInfo struct {
-	authed   bool
+	*core.User
+	Authed   bool
 	DarkMode bool
 }
 
@@ -358,7 +366,8 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 			log.Errorf("Cookie dcrdataDarkBG retrieval error: %v", err)
 		}
 		ctx := context.WithValue(r.Context(), authCV, &userInfo{
-			authed:   authed,
+			User:     s.core.User(),
+			Authed:   authed,
 			DarkMode: darkMode,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))

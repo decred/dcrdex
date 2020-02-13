@@ -1254,3 +1254,43 @@ func TestPayFee(t *testing.T) {
 		t.Fatalf("PayFee error afterwards: %v", err)
 	}
 }
+
+func TestCoin(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	coinID := make([]byte, 36)
+	copy(coinID[:32], tTxHash[:])
+
+	// Bad coin idea
+	_, err := wallet.Coin(randBytes(35))
+	if err == nil {
+		t.Fatalf("no error for bad coin ID")
+	}
+
+	// listunspent error
+	node.rawErr[methodListUnspent] = tErr
+	_, err = wallet.Coin(randBytes(35))
+	if err == nil {
+		t.Fatalf("no error for listunspent error")
+	}
+	node.rawErr[methodListUnspent] = nil
+
+	// Try to get non-existent coin.
+	unspents := make([]*ListUnspentResult, 0)
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	_, err = wallet.Coin(randBytes(36))
+	if err == nil {
+		t.Fatalf("no error for missing coin")
+	}
+
+	littleUnspent := &ListUnspentResult{
+		TxID: tTxID,
+	}
+	unspents = append(unspents, littleUnspent)
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	_, err = wallet.Coin(coinID)
+	if err != nil {
+		t.Fatalf("coin error: %v", err)
+	}
+}

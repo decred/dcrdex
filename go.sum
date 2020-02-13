@@ -87,6 +87,7 @@ github.com/decred/dcrd/txscript/v2 v2.1.0/go.mod h1:XaJAVrZU4NWRx4UEzTiDAs86op1m
 github.com/decred/dcrd/wire v1.2.0/go.mod h1:/JKOsLInOJu6InN+/zH5AyCq3YDIOW/EqcffvU8fJHM=
 github.com/decred/dcrd/wire v1.3.0 h1:X76I2/a8esUmxXmFpJpAvXEi014IA4twgwcOBeIS8lE=
 github.com/decred/dcrd/wire v1.3.0/go.mod h1:fnKGlUY2IBuqnpxx5dYRU5Oiq392OBqAuVjRVSkIoXM=
+github.com/decred/dcrwallet v1.5.0 h1:9upGfaogh6Xl4cdbICgN0xH81rmOIGMZvM8U//5Tgug=
 github.com/decred/dcrwallet/deployments/v2 v2.0.0/go.mod h1:fY1HV1vIeeY5bHjrMknUhB/ZOVIfthBiUlSgRqFFKrg=
 github.com/decred/dcrwallet/errors/v2 v2.0.0 h1:b3QHoQNjKkrcO0GSpueeHvFKp5eqtRv9aw649MDyejA=
 github.com/decred/dcrwallet/errors/v2 v2.0.0/go.mod h1:2HYvtRuCE9XqDNCWhKmBuzLG364xUgcUIsJu02r0F5Q=

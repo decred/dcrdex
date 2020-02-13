@@ -28,10 +28,19 @@ const (
 	writeWait = time.Second * 3
 )
 
+// WsConn is an interface for a websocket client.
+type WsConn interface {
+	NextID() uint64
+	Send(msg *msgjson.Message) error
+	Request(msg *msgjson.Message, f func(*msgjson.Message)) error
+	Connect(ctx context.Context) (error, *sync.WaitGroup)
+	MessageSource() <-chan *msgjson.Message
+}
+
 // When the DEX sends a request to the client, a responseHandler is created
 // to wait for the response.
 type responseHandler struct {
-	expiration time.Time
+	expiration *time.Timer
 	f          func(*msgjson.Message)
 }
 
@@ -46,12 +55,10 @@ type WsCfg struct {
 	// ReconnectSync runs the needed reconnection synchronization after
 	// a disconnect.
 	ReconnectSync func()
-	// The dex client context.
-	Ctx context.Context
 }
 
-// WsConn represents a client websocket connection.
-type WsConn struct {
+// wsConn represents a client websocket connection.
+type wsConn struct {
 	reconnects   uint64
 	rID          uint64
 	cfg          *WsCfg
@@ -65,7 +72,6 @@ type WsConn struct {
 	connected    bool
 	connectedMtx sync.RWMutex
 	once         sync.Once
-	wg           sync.WaitGroup
 	respHandlers map[uint64]*responseHandler
 }
 
@@ -76,7 +82,7 @@ func fileExists(name string) bool {
 }
 
 // NewWsConn creates a client websocket connection.
-func NewWsConn(cfg *WsCfg) (*WsConn, error) {
+func NewWsConn(cfg *WsCfg) (WsConn, error) {
 	if cfg.PingWait < 0 {
 		return nil, fmt.Errorf("ping wait cannot be negative")
 	}
@@ -108,57 +114,32 @@ func NewWsConn(cfg *WsCfg) (*WsConn, error) {
 		}
 	}
 
-	conn := &WsConn{
+	return &wsConn{
 		cfg:          cfg,
 		tlsCfg:       tlsConfig,
 		readCh:       make(chan *msgjson.Message, readBuffSize),
 		sendCh:       make(chan *msgjson.Message),
 		reconnectCh:  make(chan struct{}),
 		respHandlers: make(map[uint64]*responseHandler),
-	}
-
-	conn.wg.Add(1)
-	go conn.keepAlive()
-
-	return conn, conn.connect()
+	}, nil
 }
 
 // isConnected returns the connection connected state.
-func (conn *WsConn) isConnected() bool {
+func (conn *wsConn) isConnected() bool {
 	conn.connectedMtx.RLock()
 	defer conn.connectedMtx.RUnlock()
 	return conn.connected
 }
 
 // setConnected updates the connection's connected state.
-func (conn *WsConn) setConnected(connected bool) {
+func (conn *wsConn) setConnected(connected bool) {
 	conn.connectedMtx.Lock()
 	conn.connected = connected
 	conn.connectedMtx.Unlock()
 }
 
-// NextID returns the next request id.
-func (conn *WsConn) NextID() uint64 {
-	return atomic.AddUint64(&conn.rID, 1)
-}
-
-// close terminates all websocket processes and closes the connection.
-func (conn *WsConn) close() {
-	conn.wsMtx.Lock()
-	defer conn.wsMtx.Unlock()
-
-	if conn.ws == nil {
-		return
-	}
-
-	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
-	conn.ws.WriteControl(websocket.CloseMessage, msg,
-		time.Now().Add(writeWait))
-	conn.ws.Close()
-}
-
 // connect attempts to establish a websocket connection.
-func (conn *WsConn) connect() error {
+func (conn *wsConn) connect() error {
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: 10 * time.Second,
@@ -196,7 +177,6 @@ func (conn *WsConn) connect() error {
 	conn.ws = ws
 	conn.wsMtx.Unlock()
 
-	conn.wg.Add(1)
 	go conn.read()
 	conn.setConnected(true)
 
@@ -205,9 +185,7 @@ func (conn *WsConn) connect() error {
 
 // read fetches and parses incoming messages for processing. This should be
 // run as a goroutine.
-func (conn *WsConn) read() {
-	defer conn.wg.Done()
-
+func (conn *wsConn) read() {
 	for {
 		msg := new(msgjson.Message)
 
@@ -254,17 +232,17 @@ func (conn *WsConn) read() {
 				log.Errorf("no handler found for response", string(b))
 				continue
 			}
-			handler.f(msg)
+			// Run handlers in a goroutine so that other messages can be recieved.
+			go handler.f(msg)
 			continue
 		}
-
 		conn.readCh <- msg
 	}
 }
 
 // keepAlive maintains an active websocket connection by reconnecting when
 // the established connection is broken. This should be run as a goroutine.
-func (conn *WsConn) keepAlive() {
+func (conn *wsConn) keepAlive(ctx context.Context) {
 	for {
 		select {
 		case <-conn.reconnectCh:
@@ -287,30 +265,63 @@ func (conn *WsConn) keepAlive() {
 				conn.cfg.ReconnectSync()
 			}
 
-		case <-conn.cfg.Ctx.Done():
+		case <-ctx.Done():
 			// Terminate the keepAlive process and read process when
 			/// the dex client signals a shutdown.
 			conn.setConnected(false)
 			conn.close()
-			conn.wg.Done()
 			return
 		}
 	}
 }
 
 // queueReconnect queues a reconnection attempt.
-func (conn *WsConn) queueReconnect() {
+func (conn *wsConn) queueReconnect() {
 	conn.setConnected(false)
 	time.AfterFunc(conn.cfg.PingWait, func() { conn.reconnectCh <- struct{}{} })
 }
 
-// WaitForShutdown blocks until the websocket's processes are stopped.
-func (conn *WsConn) WaitForShutdown() {
-	conn.wg.Wait()
+// NextID returns the next request id.
+func (conn *wsConn) NextID() uint64 {
+	return atomic.AddUint64(&conn.rID, 1)
+}
+
+// Connect connects the client and starts an auto-reconnect loop. Any error
+// encountered during the initial connection will be returned. The reconnect
+// loop will continue to try connecting, even if an error is returned. To
+// shutdown auto-reconnect, use close().
+func (conn *wsConn) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go conn.keepAlive(ctx)
+
+	go func() {
+		<-ctx.Done()
+		conn.close()
+		wg.Done()
+	}()
+
+	return conn.connect(), &wg
+}
+
+// Close terminates all websocket processes and closes the connection.
+func (conn *wsConn) close() {
+	conn.wsMtx.Lock()
+	defer conn.wsMtx.Unlock()
+
+	if conn.ws == nil {
+		return
+	}
+
+	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
+	conn.ws.WriteControl(websocket.CloseMessage, msg,
+		time.Now().Add(writeWait))
+	conn.ws.Close()
 }
 
 // Send pushes outgoing messages over the websocket connection.
-func (conn *WsConn) Send(msg *msgjson.Message) error {
+func (conn *wsConn) Send(msg *msgjson.Message) error {
 	if !conn.isConnected() {
 		return fmt.Errorf("cannot send on a broken connection")
 	}
@@ -329,7 +340,7 @@ func (conn *WsConn) Send(msg *msgjson.Message) error {
 
 // Request sends the message with Send, but keeps a record of the callback
 // function to run when a response is received.
-func (conn *WsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) error {
+func (conn *wsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) error {
 	// Log the message sent if it is a request.
 	if msg.Type == msgjson.Request {
 		conn.logReq(msg.ID, f)
@@ -339,41 +350,27 @@ func (conn *WsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) erro
 
 // logReq stores the response handler in the respHandlers map. Requests to the
 // client are associated with a response handler.
-func (conn *WsConn) logReq(id uint64, respHandler func(*msgjson.Message)) {
+func (conn *wsConn) logReq(id uint64, respHandler func(*msgjson.Message)) {
 	conn.reqMtx.Lock()
 	defer conn.reqMtx.Unlock()
 	conn.respHandlers[id] = &responseHandler{
-		expiration: time.Now().Add(time.Minute * 5),
-		f:          respHandler,
-	}
-	// clean up the response map.
-	if len(conn.respHandlers) > 1 {
-		go conn.cleanUpExpired()
-	}
-}
-
-// cleanUpExpired cleans up the response handler map.
-func (conn *WsConn) cleanUpExpired() {
-	conn.reqMtx.Lock()
-	defer conn.reqMtx.Unlock()
-	var expired []uint64
-	for id, cb := range conn.respHandlers {
-		if time.Until(cb.expiration) < 0 {
-			expired = append(expired, id)
-		}
-	}
-	for _, id := range expired {
-		delete(conn.respHandlers, id)
+		expiration: time.AfterFunc(time.Minute*5, func() {
+			conn.reqMtx.Lock()
+			delete(conn.respHandlers, id)
+			conn.reqMtx.Unlock()
+		}),
+		f: respHandler,
 	}
 }
 
 // respHandler extracts the response handler for the provided request ID if it
 // exists, else nil. If the handler exists, it will be deleted from the map.
-func (conn *WsConn) respHandler(id uint64) *responseHandler {
+func (conn *wsConn) respHandler(id uint64) *responseHandler {
 	conn.reqMtx.Lock()
 	defer conn.reqMtx.Unlock()
 	cb, ok := conn.respHandlers[id]
 	if ok {
+		cb.expiration.Stop()
 		delete(conn.respHandlers, id)
 	}
 	return cb
@@ -382,7 +379,7 @@ func (conn *WsConn) respHandler(id uint64) *responseHandler {
 // MessageSource returns the connection's read source only once. The returned
 // chan will receive requests and notifications from the server, but not
 // responses, which have handlers associated with their request.
-func (conn *WsConn) MessageSource() <-chan *msgjson.Message {
+func (conn *wsConn) MessageSource() <-chan *msgjson.Message {
 	var ch <-chan *msgjson.Message
 
 	conn.once.Do(func() {

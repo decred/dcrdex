@@ -54,6 +54,28 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
+func TestStore(t *testing.T) {
+	k := "some random key"
+	boltdb := newTestDB(t)
+	// Check no key
+	_, err := boltdb.Get(k)
+	if err == nil {
+		t.Fatalf("no error for missing key")
+	}
+	v := randBytes(50)
+	err = boltdb.Store(k, v)
+	if err != nil {
+		t.Fatalf("error storing value: %v", err)
+	}
+	reV, err := boltdb.Get(k)
+	if err != nil {
+		t.Fatalf("error storing value: %v", err)
+	}
+	if !bEqual(v, reV) {
+		t.Fatalf("value mismatch %x != %x", v, reV)
+	}
+}
+
 func TestAccounts(t *testing.T) {
 	boltdb := newTestDB(t)
 	dexURLs, err := boltdb.ListAccounts()

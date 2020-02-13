@@ -356,7 +356,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Side:     uint8(match.Side),
 		})
 	}
-	resp := &msgjson.ConnectResponse{
+	resp := &msgjson.ConnectResult{
 		Matches: msgMatches,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
@@ -385,6 +385,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	auth.addClient(client)
+	log.Tracef("user %x connected", acctInfo.ID[:])
 	return nil
 }
 

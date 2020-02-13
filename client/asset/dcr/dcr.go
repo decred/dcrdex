@@ -906,6 +906,34 @@ func (dcr *ExchangeWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (a
 	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, fee, wire.TxTreeRegular, nil), nil
 }
 
+// Coin gets a wallet Coin for a coin ID. Note that a Coin, by definition, is
+// unspent. Attempting to retrieve a spent coin should result in an error.
+func (dcr *ExchangeWallet) Coin(id dex.Bytes) (asset.Coin, error) {
+	// Could check with gettransaction first, figure out the tree, and look for a
+	// redeem script with listscripts, but the listunspent entry has all the
+	// necessary fields already.
+	txHash, vout, err := decodeCoinID(id)
+	if err != nil {
+		return nil, err
+	}
+	unspents, err := dcr.node.ListUnspentMin(0)
+	if err != nil {
+		return nil, err
+	}
+	txid := txHash.String()
+	for i := range unspents {
+		u := &unspents[i]
+		if u.TxID == txid && u.Vout == vout {
+			redeemScript, err := hex.DecodeString(u.RedeemScript)
+			if err != nil {
+				return nil, fmt.Errorf("redeem script decode error: %v", err)
+			}
+			return newOutput(dcr.node, txHash, vout, toAtoms(u.Amount), u.Tree, redeemScript), nil
+		}
+	}
+	return nil, fmt.Errorf("coin not found")
+}
+
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.
 func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (uint64, error) {
 	var totalIn uint64

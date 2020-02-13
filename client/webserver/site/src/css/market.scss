@@ -23,21 +23,19 @@ div.marketrow.selected {
   background-color: #f0f7f7;
 }
 
-#marketchart {
+#marketChart {
   position: relative;
   background-color: white;
-  flex: 0 0 45%;
-  min-height: 250px;
-  max-height: 100%;
+  height: 250px;
   border-bottom: 1px solid #626262;
 }
 
-#marketloader {
+#marketLoader {
   z-index: 50;
   background-color: rgba(0, 0, 0, 0.5);
 }
 
-#marketloader > div {
+#marketLoader > div {
   width: 40px;
   height: 40px;
   font-size: 40px;
@@ -123,7 +121,7 @@ table.ordertable {
   background-color: $light_bg_1;
 }
 
-#orderform {
+#orderForm {
   min-height: 375px;
 
   input[type=number] {

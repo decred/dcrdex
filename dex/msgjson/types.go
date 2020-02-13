@@ -297,6 +297,33 @@ func NewNotification(route string, payload interface{}) (*Message, error) {
 	}, nil
 }
 
+// Unmarshal unmarshals the Payload field into the provided interface.
+func (msg *Message) Unmarshal(payload interface{}) error {
+	return json.Unmarshal(msg.Payload, payload)
+}
+
+// UnmarshalResult is a convenience method for decoding the Result field of a
+// ResponsePayload.
+func (msg *Message) UnmarshalResult(result interface{}) error {
+	resp, err := msg.Response()
+	if err != nil {
+		return err
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("rpc error: %d: %s", resp.Error.Code, resp.Error.Message)
+	}
+	return json.Unmarshal(resp.Result, result)
+}
+
+// String prints the message as a JSON-encoded string.
+func (msg *Message) String() string {
+	b, err := json.Marshal(msg)
+	if err != nil {
+		return "[Message decode error]"
+	}
+	return string(b)
+}
+
 // Match is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	signable
@@ -635,8 +662,8 @@ func (c *Connect) Serialize() ([]byte, error) {
 	return s, nil
 }
 
-// Connect is the response result for the ConnectRoute request.
-type ConnectResponse struct {
+// ConnectResult is the result result for the ConnectRoute request.
+type ConnectResult struct {
 	Matches []*Match `json:"matches"`
 }
 
@@ -716,6 +743,7 @@ type ConfigResult struct {
 	RegFeeConfirms   uint16   `json:"regfeeconfirms"`
 	Assets           []Asset  `json:"assets"`
 	Markets          []Market `json:"markets"`
+	Fee              uint64   `json:"fee"`
 }
 
 // Market describes a market and its variables, and is returned as part of a

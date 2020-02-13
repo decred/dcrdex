@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
@@ -49,18 +50,26 @@ func genCertPair(certFile, keyFile string, altDNSNames []string) error {
 	return nil
 }
 
+func TestMain(m *testing.M) {
+	backendLogger := slog.NewBackend(os.Stdout)
+	defer os.Stdout.Sync()
+	log := backendLogger.Logger("Debug")
+	log.SetLevel(slog.LevelTrace)
+	UseLogger(log)
+	os.Exit(m.Run())
+}
+
 func TestWsConn(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 
 	pingCh := make(chan struct{})
 	readPumpCh := make(chan interface{})
 	writePumpCh := make(chan *msgjson.Message)
-	shutdown := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pingWait := time.Millisecond * 200
 
-	var wsc *WsConn
+	var wsc *wsConn
 
 	id := uint64(0)
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -183,17 +192,14 @@ func TestWsConn(t *testing.T) {
 		URL:      "wss://" + host + "/ws",
 		PingWait: pingWait,
 		RpcCert:  certFile.Name(),
-		Ctx:      ctx,
 	}
-	wsc, err = NewWsConn(cfg)
+	conn, err := NewWsConn(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	go func() {
-		wsc.WaitForShutdown()
-		shutdown <- struct{}{}
-	}()
+	wsc = conn.(*wsConn)
+	waiter := dex.NewConnectionMaster(wsc)
+	waiter.Connect(ctx)
 
 	reconnectAndPing := func() {
 		// Drop the connection and force a reconnect by waiting.
@@ -345,18 +351,11 @@ func TestWsConn(t *testing.T) {
 	}
 
 	cancel()
-	<-shutdown
+	waiter.Disconnect()
 }
 
 func TestFailingConnection(t *testing.T) {
-	shutdown := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
-
-	backendLogger := slog.NewBackend(os.Stdout)
-	defer os.Stdout.Sync()
-	log := backendLogger.Logger("Debug")
-	log.SetLevel(slog.LevelTrace)
-	UseLogger(log)
 
 	pingWait := time.Millisecond * 200
 
@@ -384,18 +383,18 @@ func TestFailingConnection(t *testing.T) {
 		URL:      "wss://" + host + "/ws",
 		PingWait: pingWait,
 		RpcCert:  certFile.Name(),
-		Ctx:      ctx,
 	}
 	// Initial connection will fail immediately
-	wsc, err := NewWsConn(cfg)
+	conn, err := NewWsConn(cfg)
+	if err != nil {
+		t.Fatalf("constructor error: %v", err)
+	}
+	wsc := conn.(*wsConn)
+	waiter := dex.NewConnectionMaster(wsc)
+	err = waiter.Connect(ctx)
 	if err == nil {
 		t.Fatal("no error for non-existent server")
 	}
-
-	go func() {
-		wsc.WaitForShutdown()
-		shutdown <- struct{}{}
-	}()
 
 	oldCount := atomic.LoadUint64(&wsc.reconnects)
 	for idx := 0; idx < 5; idx++ {
@@ -417,5 +416,5 @@ func TestFailingConnection(t *testing.T) {
 	}
 
 	cancel()
-	<-shutdown
+	waiter.Disconnect()
 }

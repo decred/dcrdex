@@ -21,7 +21,8 @@ type AccountInfo struct {
 	EncKey    []byte
 	DEXPubKey *secp256k1.PublicKey
 	FeeCoin   []byte
-	// Paid will be set on retrieval based on whether there is a fee proof set.
+	// Paid will be set on retrieval based on whether there is an AccountProof
+	// set.
 	Paid bool
 }
 

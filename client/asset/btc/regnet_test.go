@@ -167,9 +167,15 @@ func TestWallet(t *testing.T) {
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
-	// Now unlock, and see if we get the first one back.
+	// Unlock
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
+	// Check that we can get the coin with Coin.
+	_, err = rig.gamma().Coin(utxo.ID())
+	if err != nil {
+		t.Fatalf("Coin error: %v", err)
+	}
+	// Make sure we get the first utxo back with Fund.
 	utxos, _ = rig.gamma().Fund(contractValue*3, tBTC)
 	if !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
@@ -316,6 +322,8 @@ func TestWallet(t *testing.T) {
 		Contract: contract,
 	}
 	swaps = []*asset.Swap{swap}
+
+	time.Sleep(time.Second)
 
 	receipts, err = rig.gamma().Swap(swaps, tBTC)
 	if err != nil {
