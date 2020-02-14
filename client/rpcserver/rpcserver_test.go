@@ -494,7 +494,7 @@ func TestClientMap(t *testing.T) {
 	conn := new(TConn)
 
 	go s.websocketHandler(conn, "someip")
-	time.Sleep(time.Millisecond)
+	time.Sleep(time.Millisecond * 5)
 
 	// While we're here, check that the client is properly mapped.
 	var cl *wsClient
