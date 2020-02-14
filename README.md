@@ -30,7 +30,7 @@ testnet.
 
 1. Linux
 2. [Go >= 1.13](https://golang.org/doc/install)
-3. [PostgreSQL](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
+3. [PostgreSQL 11+](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
 
 **Create the database** in a PostgreSQL `psql` terminal.
 
@@ -98,12 +98,12 @@ are listed for development purposes.
 ### Dependencies
 
 1. [Go >= 1.13](https://golang.org/doc/install)
-2. [Node](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface.
+2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface.
 
 Assuming you're pointing your client to a testnet DEX server without a TLS
 certificate from a recognized CA, you'll need to provide the location of a
 copy of the server's TLS certificate. The current solution is to point to the
-certificate in a JSON configured file.
+certificate in a JSON formatted file mapping URL to file path.
 
 **~/.dexclient/certs.json**
 ```
