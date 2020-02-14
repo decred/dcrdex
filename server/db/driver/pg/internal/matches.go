@@ -1,18 +1,39 @@
 package internal
 
 const (
+	// CreateMatchesTable creates the matches table for storing data related to
+	// a match and the related swap. This only includes trade matches, not
+	// cancel order matches that just remove one order from the book (and change
+	// the target order status in the orders table).
+	//
+	// The takerSell column indicates the asset of the address and coinID
+	// columns for both maker and taker. Sell refers to sell of the base asset,
+	// and the opposite is implied for the counterparty (makerSell = !takerSell)
+	//
+	//   takerSell   | takerAddress | coinIDTakerFund | coinIDTakerRecv ||  (makerSell)  | makerAddress | coinIDMakerFund | coinIDMakerRecv
+	// -------------------------------------------------------------------------------------------------------------------------------------
+	//  true (B->Q)  |    quote     |      base       |      quote      ||  false (Q->B) |     base     |      quote      |     base
+	//  false (Q->B) |    base      |      quote      |      base       ||  true (B->Q)  |     quote    |      base       |     quote
 	CreateMatchesTable = `CREATE TABLE IF NOT EXISTS %s (
 		matchid BYTEA PRIMARY KEY,
+		takerSell BOOL,        -- to identify asset of address and coinIDs
 		takerOrder BYTEA,      -- INDEX this
 		takerAccount BYTEA,    -- INDEX this
 		takerAddress TEXT,
 		makerOrder BYTEA,      -- INDEX this
 		makerAccount BYTEA,    -- INDEX this
 		makerAddress TEXT,
-		epochID TEXT,          -- maybe split this into two INT columns
+		epochIdx INT8,          -- maybe split this into two INT columns
+		epochDur INT8,
 		quantity INT8,
 		rate INT8,
 		status INT2,
+        swapContract BYTEA,
+		secretHash BYTEA,
+		coinIDTakerFund BYTEA,
+		coinIDMakerFund BYTEA,
+		coinIDTakerRecv BYTEA,
+		coinIDMakerRecv BYTEA,
 		sigTakerMatch BYTEA,
 		sigMakerMatch BYTEA,
 		sigTakerAudit BYTEA,
