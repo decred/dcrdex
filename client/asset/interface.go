@@ -23,20 +23,20 @@ const (
 type WalletInfo struct {
 	// ConfigPath is the default ConfigPath that the wallet will search for its
 	// configuration file.
-	ConfigPath string
+	ConfigPath string `json:"configpath"`
 	// ConfigType is the type of configuration file. Currently unused, the
 	// intention is to allow user configuration via GUI.
-	ConfigType ConfigType
+	ConfigType ConfigType `json:"configtype"`
 	// ConfigOpts is a list mapping a field name to a description. This will be
 	// used to dynamically generate GUI configuration forms.
-	ConfigOpts map[string]string
+	ConfigOpts map[string]string `json:"opts"`
 	// Name is the display name for the currency, e.g. "Decred"
-	Name string
+	Name string `json:"name"`
 	// FeeRate is the default fee rate used for withdraws.
-	FeeRate uint64
+	FeeRate uint64 `json:"feerate"`
 	// Units is the unit used for the smallest (integer) denomination of the
 	// currency, in plural form e.g. atoms, Satoshis.
-	Units string
+	Units string `json:"units"`
 }
 
 // WalletConfig is the configuration settings for the wallet. WalletConfig

@@ -293,7 +293,8 @@ func (d *ExchangeWallet) Info() *asset.WalletInfo {
 	return walletInfo
 }
 
-// Connect connects the wallet to the RPC server.
+// Connect connects the wallet to the RPC server. Satisfies the dex.Connector
+// interface.
 func (dcr *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 	err := dcr.client.Connect(ctx, true)
 	if err != nil {

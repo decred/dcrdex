@@ -93,6 +93,7 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 func (c *TCore) CreateWallet(form *core.WalletForm) error   { return c.createWalletErr }
 func (c *TCore) OpenWallet(assetID uint32, pw string) error { return c.openWalletErr }
 func (c *TCore) CloseWallet(assetID uint32) error           { return c.closeWalletErr }
+func (c *TCore) ConnectWallet(assetID uint32) error         { return nil }
 func (c *TCore) Wallets() []*core.WalletState               { return nil }
 func (c *TCore) User() *core.User                           { return nil }
 func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
@@ -333,11 +334,6 @@ func TestLoadMarket(t *testing.T) {
 		syncer.mtx.Unlock()
 	}
 	s.mtx.Unlock()
-
-	// Balance error.
-	tCore.balanceErr = tErr
-	ensureErr("balance", msgjson.RPCInternal)
-	tCore.balanceErr = nil
 }
 
 func TestAPIRegister(t *testing.T) {

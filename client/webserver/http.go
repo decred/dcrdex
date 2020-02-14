@@ -136,10 +136,10 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Slice(assets, func(i, j int) bool {
-		return assets[i].Name < assets[j].Name
+		return assets[i].Info.Name < assets[j].Info.Name
 	})
 	sort.Slice(nowallets, func(i, j int) bool {
-		return nowallets[i].Name < nowallets[j].Name
+		return nowallets[i].Info.Name < nowallets[j].Info.Name
 	})
 	data := &walletsTmplData{
 		CommonArguments: *commonArgs(r, "Wallets | Decred DEX"),

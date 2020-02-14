@@ -1200,8 +1200,23 @@ func TestLockUnlock(t *testing.T) {
 	}
 }
 
-func TestPayFee(t *testing.T) {
+type tSenderType byte
+
+const (
+	tPayFeeSender tSenderType = iota
+	tWithdrawSender
+)
+
+func testSender(t *testing.T, senderType tSenderType) {
 	wallet, node, shutdown := tNewWallet()
+	sender := func(addr string, val uint64) (asset.Coin, error) {
+		return wallet.PayFee(addr, val, tBTC)
+	}
+	if senderType == tWithdrawSender {
+		sender = func(addr string, val uint64) (asset.Coin, error) {
+			return wallet.Withdraw(addr, val, walletInfo.FeeRate)
+		}
+	}
 	defer shutdown()
 	addr := tP2PKHAddr
 	fee := float64(1) // BTC
@@ -1229,14 +1244,14 @@ func TestPayFee(t *testing.T) {
 	}}
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 
-	_, err := wallet.PayFee(addr, toSatoshi(fee), tBTC)
+	_, err := sender(addr, toSatoshi(fee))
 	if err != nil {
-		t.Fatalf("Send error: %v", err)
+		t.Fatalf("PayFee error: %v", err)
 	}
 
 	// SendToAddress error
 	node.rawErr[methodSendToAddress] = tErr
-	_, err = wallet.PayFee(addr, 1e8, tBTC)
+	_, err = sender(addr, 1e8)
 	if err == nil {
 		t.Fatalf("no error for SendToAddress error: %v", err)
 	}
@@ -1244,17 +1259,25 @@ func TestPayFee(t *testing.T) {
 
 	// GetTransaction error
 	node.rawErr[methodGetTransaction] = tErr
-	_, err = wallet.PayFee(addr, 1e8, tBTC)
+	_, err = sender(addr, 1e8)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error: %v", err)
 	}
 	node.rawErr[methodGetTransaction] = nil
 
 	// good again
-	_, err = wallet.PayFee(addr, toSatoshi(fee), tBTC)
+	_, err = sender(addr, toSatoshi(fee))
 	if err != nil {
-		t.Fatalf("Send error afterwards: %v", err)
+		t.Fatalf("PayFee error afterwards: %v", err)
 	}
+}
+
+func TestPayFee(t *testing.T) {
+	testSender(t, tPayFeeSender)
+}
+
+func TestWithdraw(t *testing.T) {
+	testSender(t, tWithdrawSender)
 }
 
 func TestCoin(t *testing.T) {

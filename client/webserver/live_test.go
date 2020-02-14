@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -63,11 +64,16 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.Supp
 			Units:   winfos[assetID].Units,
 		}
 	}
+	name := winfos[assetID].Name
+	lower := strings.ToLower(name)
 	return &core.SupportedAsset{
 		ID:     assetID,
 		Symbol: symbol,
 		Wallet: wallet,
-		Name:   winfos[assetID].Name,
+		Info: &asset.WalletInfo{
+			Name:       name,
+			ConfigPath: "/home/you/." + lower + "/" + lower + ".conf",
+		},
 	}
 }
 
@@ -254,6 +260,17 @@ func (c *TCore) OpenWallet(assetID uint32, pw string) error {
 	return nil
 }
 
+func (c *TCore) ConnectWallet(assetID uint32) error {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+	wallet := c.wallets[assetID]
+	if wallet == nil {
+		return fmt.Errorf("attempting to open non-existent test wallet")
+	}
+	wallet.running = true
+	return nil
+}
+
 func (c *TCore) CloseWallet(assetID uint32) error {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
@@ -288,7 +305,7 @@ func (c *TCore) User() *core.User {
 	user := &core.User{
 		Markets:     tMarkets,
 		Initialized: c.inited,
-		Wallets:     c.Wallets(),
+		Assets:      c.SupportedAssets(),
 	}
 	return user
 }

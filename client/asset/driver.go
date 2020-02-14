@@ -64,15 +64,3 @@ func Assets() map[uint32]RegisteredAsset {
 	}
 	return assets
 }
-
-// Info retrieves the asset's *WalletInfo. A nil value will be returned for an
-// unknown asset.
-func Info(assetID uint32) *WalletInfo {
-	driversMtx.RLock()
-	defer driversMtx.RUnlock()
-	driver := drivers[assetID]
-	if driver == nil {
-		return nil
-	}
-	return driver.Info()
-}

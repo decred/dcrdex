@@ -5,13 +5,13 @@
     <span data-state="sleeping" class="ico-sleeping fs17 grey{{if $w.Running}} d-hide{{end}}"></span>
     <span data-state="locked" class="ico-locked grey{{if or $ready (not $w.Running)}} d-hide{{end}}"></span>
     <span data-state="unlocked" class="ico-unlocked{{if not $ready}} d-hide{{end}}"></span>
-    <span data-state="nowallet" class="d-hide demi red">X</span>
+    <span data-state="nowallet" class="ico-cross fs12 red d-hide"></span>
     <span class="txt-status" id="txtStatus">{{walletStatusString $w}}</span>
   {{else}}
     <span data-state="sleeping" class="ico-sleeping fs17 grey d-hide"></span>
     <span data-state="locked" class="ico-locked grey d-hide"></span>
     <span data-state="unlocked" class="ico-unlocked d-hide"></span>
-    <span data-state="nowallet" class="demi red">X</span>
+    <span data-state="nowallet" class="ico-cross fs12 red"></span>
     <span class="txt-status">no wallet</span>
   {{end}}
 {{end}}
@@ -25,14 +25,14 @@
     <button data-action="withdraw"{{if not $ready}} class="d-hide"{{end}}>Withdraw</button>
     <button data-action="deposit"{{if not $ready}} class="d-hide"{{end}}>Deposit</button>
     <button data-action="lock"{{if not $ready}} class="d-hide"{{end}}>Lock</button>
-    <button data-action="create" class="d-hide">Create a {{.Name}} Wallet</button>
+    <button data-action="create" class="d-hide">Create a {{.Info.Name}} Wallet</button>
   {{else}}
     <button data-action="connect" class="d-hide">Connect</button>
     <button data-action="unlock" class="d-hide">Unlock</button>
     <button data-action="withdraw" class="d-hide">Withdraw</button>
     <button data-action="deposit" class="d-hide">Deposit</button>
     <button data-action="lock" class="d-hide">Lock</button>
-    <button data-action="create">Create a {{.Name}} Wallet</button>
+    <button data-action="create">Create a {{.Info.Name}} Wallet</button>
   {{end}}
 {{end}}
 
@@ -54,10 +54,10 @@
       </thead>
       <tbody id="walletTable">
         {{range .Assets}}
-        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Name}}">
+        <tr data-asset-i-d="{{.ID}}" data-symbol="{{.Symbol}}" data-name="{{.Info.Name}}">
           <td>
             <img src="{{logoPath .Symbol}}" class="mini-icon">
-            <span class="fs20">{{.Name}}</span>
+            <span class="fs20">{{.Info.Name}}</span>
             <span class="fs15">({{toUpper .Symbol}})</span>
           </td>
           <td data-col="balance" data-balance-target="{{.ID}}">
@@ -67,7 +67,7 @@
               0.00000000
             {{end}}
           </td>
-          <td data-col="status" class="status-col">
+          <td data-col="status" class="status-col fs16">
             {{template "stateIcons" .}}
           </td>
           <td data-col="actions">
@@ -168,7 +168,7 @@
         </div>
         <div class="col-14 px-0 py-1 flex-center flex-column fs15 justify-content-between">
           <div class="d-inline pt-3"><span class="pointer" id="withdrawAvail"></span> available</div>
-          <div class="d-inline">&minus; tx fee: <span id="withdrawFee"></span> <span id="withdrawUnit"></span>/byte</div>
+          <div class="d-inline">tx fees: <span id="withdrawFee"></span> <span id="withdrawUnit"></span>/byte</div>
         </div>
       </div>
       <hr class="dashed my-4 mx-4">

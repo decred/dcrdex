@@ -149,15 +149,9 @@ type marketLoad struct {
 // marketResponse is the websocket update sent when the client requests a
 // market via the 'loadmarket' route.
 type marketResponse struct {
-	Book         *core.OrderBook `json:"book"`
-	Market       string          `json:"market"`
-	DEX          string          `json:"dex"`
-	Base         uint32          `json:"base"`
-	BaseSymbol   string          `json:"baseSymbol"`
-	Quote        uint32          `json:"quote"`
-	QuoteSymbol  string          `json:"quoteSymbol"`
-	BaseBalance  uint64          `json:"baseBalance"`
-	QuoteBalance uint64          `json:"quoteBalance"`
+	Book  *core.OrderBook `json:"book"`
+	Base  uint32          `json:"base"`
+	Quote uint32          `json:"quote"`
 }
 
 // wsLoadMarket is the handler for the 'loadmarket' websocket endpoint.
@@ -170,20 +164,6 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
-	base, quote := market.Base, market.Quote
-	baseBalance, err := s.core.Balance(base)
-	if err != nil {
-		errMsg := fmt.Sprintf("unable to get balance for %s", unbip(base))
-		log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.RPCInternal, errMsg+": "+err.Error())
-	}
-	quoteBalance, err := s.core.Balance(quote)
-	if err != nil {
-		errMsg := fmt.Sprintf("unable to get balance for %s", unbip(quote))
-		log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.RPCInternal, errMsg+": "+err.Error())
-	}
-
 	// Switch current market.
 	book, quit, err := s.watchMarket(cl, market.DEX, market.Base, market.Quote)
 	if err != nil {
@@ -201,14 +181,9 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 	cl.mtx.Unlock()
 
 	note, err := msgjson.NewNotification("book", &marketResponse{
-		Book:         book,
-		DEX:          market.DEX,
-		Base:         base,
-		BaseSymbol:   unbip(base),
-		Quote:        quote,
-		QuoteSymbol:  unbip(quote),
-		BaseBalance:  baseBalance,
-		QuoteBalance: quoteBalance,
+		Book:  book,
+		Base:  market.Base,
+		Quote: market.Quote,
 	})
 
 	if err != nil {

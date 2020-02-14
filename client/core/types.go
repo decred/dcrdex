@@ -42,18 +42,19 @@ type WalletState struct {
 
 // User is information about the user's wallets and DEX accounts.
 type User struct {
-	Markets     map[string][]*Market `json:"markets"`
-	Wallets     []*WalletState       `json:"wallets"`
-	Initialized bool                 `json:"inited"`
+	Markets map[string][]*Market `json:"markets"`
+	// Wallets     []*WalletState       `json:"wallets"`
+	Initialized bool                       `json:"inited"`
+	Assets      map[uint32]*SupportedAsset `json:"assets"`
 }
 
 // SupportedAsset is data about an asset and possibly the wallet associated
 // with it.
 type SupportedAsset struct {
-	ID     uint32       `json:"id"`
-	Symbol string       `json:"symbol"`
-	Name   string       `json:"name"`
-	Wallet *WalletState `json:"wallet"`
+	ID     uint32            `json:"id"`
+	Symbol string            `json:"symbol"`
+	Wallet *WalletState      `json:"wallet"`
+	Info   *asset.WalletInfo `json:"info"`
 }
 
 // xcWallet is a wallet.
@@ -88,8 +89,7 @@ func (w *xcWallet) lock() error {
 	return w.Lock()
 }
 
-// state returns whether the wallet is running as well as whether it is
-// unlocked.
+// state returns the current WalletState.
 func (w *xcWallet) state() *WalletState {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
@@ -128,7 +128,8 @@ func (w *xcWallet) connected() bool {
 	return w.hookedUp
 }
 
-// Connect wraps the asset.Wallet method and sets the xcWallet.hookedUp flag.
+// Connect wraps the embedded (asset.ExchangeWallet).Connect method and sets the
+// xcWallet.hookedUp flag.
 func (w *xcWallet) Connect(ctx context.Context) error {
 	err := w.connector.Connect(ctx)
 	if err != nil {

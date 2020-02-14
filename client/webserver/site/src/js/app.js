@@ -44,13 +44,7 @@ export default class Application {
     this.attach()
     ws.connect(getSocketURI())
     ws.registerRoute(updateWalletRoute, wallet => {
-      var i = -1
-      var walletList = this.user.wallets
-      walletList.forEach((w, j) => {
-        if (w.symbol === wallet.symbol) i = j
-      })
-      if (i > -1) walletList[i] = wallet
-      else walletList.push(wallet)
+      this.assets[wallet.assetID].wallet = wallet
       this.walletMap[wallet.assetID] = wallet
       const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
       balances.forEach(el => { el.textContent = (wallet.balance / 1e8).toFixed(8) })
@@ -67,11 +61,13 @@ export default class Application {
     const user = await getJSON('/api/user')
     if (!checkResponse(user)) return
     this.user = user
-    user.wallets = user.wallets || []
-    this.walletMap = user.wallets.reduce((a, v) => {
-      a[v.assetID] = v
-      return a
-    }, {}) || {}
+    this.assets = user.assets
+    this.walletMap = {}
+    for (const [assetID, asset] of Object.entries(user.assets)) {
+      if (asset.wallet) {
+        this.walletMap[assetID] = asset.wallet
+      }
+    }
     return user
   }
 
@@ -471,6 +467,17 @@ function handleMarkets (main, data) {
     page.tifBox.classList.add('d-hide')
     swapBttns(page.limitBttn, page.marketBttn)
   })
+
+  var selected = {}
+  const reqMarket = async (dex, base, quote) => {
+    await app.userPromise
+    selected = {
+      base: app.assets[base],
+      quote: app.assets[quote]
+    }
+    ws.request('loadmarket', makeMarket(dex, base, quote))
+  }
+
   const reportPrice = p => { priceField.value = p.toFixed(8) }
   const reporters = {
     price: reportPrice
@@ -490,7 +497,7 @@ function handleMarkets (main, data) {
       lastMarket.base === base && lastMarket.quote === quote)
     bind(div, 'click', () => {
       page.marketLoader.classList.remove('d-none')
-      setMarket(main, dex, base, quote)
+      reqMarket(dex, base, quote)
     })
     markets.push({
       base: base,
@@ -506,8 +513,30 @@ function handleMarkets (main, data) {
     reporters: reporters
   }
 
+  // handleBook is the handler for the 'book' notification from the server.
+  // Updates the charts, order tables, etc.
+  const handleBook = (data) => {
+    const book = data.book
+    const b = tableBuilder
+    if (!book) {
+      chart.clear()
+      Doc.empty(b.buys)
+      Doc.empty(b.sells)
+      return
+    }
+    chart.set({
+      book: data.book,
+      quoteSymbol: selected.quote.symbol,
+      baseSymbol: selected.base.symbol
+    })
+    loadTable(book.buys, b.buys, b, 'buycolor')
+    loadTable(book.sells, b.sells, b, 'sellcolor')
+  }
+
   ws.registerRoute('book', data => {
-    handleBook(main, chart, data, tableBuilder)
+    const [b, q] = [selected.base, selected.quote]
+    if (data.base !== b.id || data.quote !== q.id) return
+    handleBook(data)
     market = data.market
     page.marketLoader.classList.add('d-none')
     marketRows.forEach(row => {
@@ -522,12 +551,14 @@ function handleMarkets (main, data) {
       base: data.base,
       quote: data.quote
     })
-    baseUnits.forEach(el => { el.textContent = data.baseSymbol.toUpperCase() })
-    quoteUnits.forEach(el => { el.textContent = data.quoteSymbol.toUpperCase() })
-    page.baseImg.src = `/img/coins/${data.baseSymbol.toLowerCase()}.png`
-    page.quoteImg.src = `/img/coins/${data.quoteSymbol.toLowerCase()}.png`
-    page.baseBalance.textContent = formatCoinValue(data.baseBalance / 1e8)
-    page.quoteBalance.textContent = formatCoinValue(data.quoteBalance / 1e8)
+    baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
+    quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
+    page.baseImg.src = `/img/coins/${b.symbol.toLowerCase()}.png`
+    page.quoteImg.src = `/img/coins/${q.symbol.toLowerCase()}.png`
+    var bal = b.wallet ? b.wallet.balance / 1e8 : 0
+    page.baseBalance.textContent = formatCoinValue(bal)
+    bal = q.wallet ? q.wallet.balance / 1e8 : 0
+    page.quoteBalance.textContent = formatCoinValue(bal)
   })
   ws.registerRoute('bookupdate', e => {
     if (market && (e.market.dex !== market.dex || e.market.base !== market.base || e.market.quote !== market.quote)) return
@@ -537,7 +568,7 @@ function handleMarkets (main, data) {
   // Fetch the first market in the list, or the users last selected market, if
   // it was found.
   const firstEntry = mktFound ? lastMarket : markets[0]
-  setMarket(main, firstEntry.dex, firstEntry.base, firstEntry.quote)
+  reqMarket(firstEntry.dex, firstEntry.base, firstEntry.quote)
 
   unattach(() => {
     ws.request('unmarket', {})
@@ -546,32 +577,12 @@ function handleMarkets (main, data) {
   })
 }
 
-// setMarkets sets a new market by sending the 'loadmarket' API request.
-function setMarket (main, dex, base, quote) {
-  ws.request('loadmarket', makeMarket(dex, base, quote))
-}
-
 function makeMarket (dex, base, quote) {
   return {
     dex: dex,
     base: base,
     quote: quote
   }
-}
-
-// handleBook is the handler for the 'book' notification from the server.
-// Updates the charts, order tables, etc.
-function handleBook (main, chart, data, builder) {
-  const book = data.book
-  if (!book) {
-    chart.clear()
-    Doc.empty(builder.buys)
-    Doc.empty(builder.sells)
-    return
-  }
-  chart.set(data)
-  loadTable(book.buys, builder.buys, builder, 'buycolor')
-  loadTable(book.sells, builder.sells, builder, 'sellcolor')
 }
 
 // loadTables loads the order book side into the specified table.
@@ -634,24 +645,24 @@ function handleWallets (main) {
   // Read the document.
   const stateIcon = (row, name) => row.querySelector(`[data-state=${name}]`)
   const getAction = (row, name) => row.querySelector(`[data-action=${name}]`)
-  const assets = {}
+  const rowInfos = {}
   const rows = page.walletTable.querySelectorAll('tr')
-  var firstAsset
+  var firstRow
   for (const tr of rows) {
     const assetID = parseInt(tr.dataset.assetID)
-    const asset = assets[assetID] = {}
-    if (!firstAsset) firstAsset = asset
-    asset.ID = assetID
-    asset.tr = tr
-    asset.symbol = tr.dataset.symbol
-    asset.name = tr.dataset.name
-    asset.stateIcons = {
+    const rowInfo = rowInfos[assetID] = {}
+    if (!firstRow) firstRow = rowInfo
+    rowInfo.ID = assetID
+    rowInfo.tr = tr
+    rowInfo.symbol = tr.dataset.symbol
+    rowInfo.name = tr.dataset.name
+    rowInfo.stateIcons = {
       sleeping: stateIcon(tr, 'sleeping'),
       locked: stateIcon(tr, 'locked'),
       unlocked: stateIcon(tr, 'unlocked'),
       nowallet: stateIcon(tr, 'nowallet')
     }
-    asset.actions = {
+    rowInfo.actions = {
       connect: getAction(tr, 'connect'),
       unlock: getAction(tr, 'unlock'),
       withdraw: getAction(tr, 'withdraw'),
@@ -697,10 +708,10 @@ function handleWallets (main) {
     await app.userPromise
     const box = page.marketsBox
     const card = page.marketsCard
-    const asset = assets[assetID]
+    const rowInfo = rowInfos[assetID]
     await hideBox()
     Doc.empty(card)
-    page.marketsFor.textContent = asset.name
+    page.marketsFor.textContent = rowInfo.name
     for (const [url, markets] of Object.entries(app.user.markets)) {
       const count = markets.reduce((a, market) => {
         if (market.baseid === assetID || market.quoteid === assetID) a++
@@ -732,19 +743,20 @@ function handleWallets (main) {
   // Show the new wallet form.
   const showNewWallet = async assetID => {
     const box = page.walletForm
-    const asset = assets[assetID]
+    const asset = app.assets[assetID]
     await hideBox()
     if (assetID !== walletAsset) {
       page.acctName.value = ''
       page.newWalletPass.value = ''
       page.iniPath.value = ''
+      page.iniPath.placeholder = asset.info.configpath
       page.walletErr.classList.add('d-hide')
-      page.newWalletName.textContent = asset.name
+      page.newWalletName.textContent = asset.info.name
     }
     walletAsset = assetID
     page.walletForm.dataset.assetID = assetID
     page.newWalletLogo.src = logoPath(asset.symbol)
-    page.newWalletName.textContent = asset.name
+    page.newWalletName.textContent = asset.info.name
     animation = showBox(box, page.acctName)
   }
 
@@ -752,11 +764,11 @@ function handleWallets (main) {
   var openAsset
   const showOpen = async assetID => {
     const box = page.openForm
-    const asset = assets[assetID]
+    const asset = app.assets[assetID]
     await hideBox()
     page.openErr.classList.add('d-hide')
     page.unlockLogo.src = logoPath(asset.symbol)
-    page.unlockName.textContent = asset.name
+    page.unlockName.textContent = asset.info.name
     page.walletPass.value = ''
     openAsset = assetID
     box.dataset.assetID = assetID
@@ -766,15 +778,15 @@ function handleWallets (main) {
   // Display a deposit address.
   const showDeposit = async assetID => {
     const box = page.deposit
-    const asset = assets[assetID]
+    const asset = app.assets[assetID]
     await app.userPromise
     const wallet = app.walletMap[assetID]
     if (!wallet) {
-      app.notify(ERROR, `No wallet found for ${asset.name}. Cannot retrieve deposit address.`)
+      app.notify(ERROR, `No wallet found for ${asset.info.name}. Cannot retrieve deposit address.`)
       return
     }
     await hideBox()
-    page.depositName.textContent = asset.name
+    page.depositName.textContent = asset.info.name
     page.depositAddress.textContent = wallet.address
     animation = showBox(box, page.walletPass)
   }
@@ -782,30 +794,43 @@ function handleWallets (main) {
   // Show the form to withdraw funds.
   const showWithdraw = async assetID => {
     const box = page.withdrawForm
-    const asset = assets[assetID]
+    const asset = app.assets[assetID]
     await app.userPromise
     const wallet = app.walletMap[assetID]
     if (!wallet) {
-      app.notify(ERROR, `No wallet found for ${asset.name}. Cannot withdraw.`)
+      app.notify(ERROR, `No wallet found for ${asset.info.name}. Cannot withdraw.`)
     }
     await hideBox()
     page.withdrawAddr.value = ''
     page.withdrawAmt.value = ''
     page.withdrawAvail.textContent = (wallet.balance / 1e8).toFixed(8)
     page.withdrawLogo.src = logoPath(asset.symbol)
-    page.withdrawName.textContent = asset.name
+    page.withdrawName.textContent = asset.info.name
     page.withdrawFee.textContent = wallet.feerate
     page.withdrawUnit.textContent = wallet.units
     box.dataset.assetID = assetID
     animation = showBox(box, page.walletPass)
   }
 
+  const doConnect = async assetID => {
+    app.loading(main)
+    var res = await postJSON('/api/connectwallet', {
+      assetID: assetID
+    })
+    app.loaded()
+    if (!checkResponse(res)) return
+    const rowInfo = rowInfos[assetID]
+    const [a, i] = [rowInfo.actions, rowInfo.stateIcons]
+    Doc.hide(a.connect, i.sleeping)
+    Doc.show(i.locked)
+  }
+
   // Bind the new wallet form.
   var walletAsset
   bindNewWalletForm(page.walletForm, () => {
-    const asset = assets[walletAsset]
-    showMarkets(asset.ID)
-    const [a, i] = [asset.actions, asset.stateIcons]
+    const rowInfo = rowInfos[walletAsset]
+    showMarkets(rowInfo.ID)
+    const [a, i] = [rowInfo.actions, rowInfo.stateIcons]
     Doc.hide(a.create, i.nowallet)
     Doc.show(a.withdraw, a.deposit, a.lock, i.unlocked)
   })
@@ -813,7 +838,7 @@ function handleWallets (main) {
   // Bind the wallet unlock form.
   bindOpenWalletForm(page.openForm, async () => {
     app.loading(page.openForm)
-    const asset = assets[openAsset]
+    const rowInfo = rowInfos[openAsset]
     var res = await postJSON('/api/openwallet', {
       assetID: openAsset,
       pass: page.walletPass.value
@@ -824,9 +849,9 @@ function handleWallets (main) {
       page.openErr.classList.remove('d-hide')
       return
     }
-    const [a, i] = [asset.actions, asset.stateIcons]
+    const [a, i] = [rowInfo.actions, rowInfo.stateIcons]
     Doc.show(i.unlocked, a.lock, a.withdraw, a.deposit)
-    Doc.hide(i.locked, a.unlock)
+    Doc.hide(i.sleeping, i.locked, a.unlock, a.connect)
     showMarkets(openAsset)
   })
 
@@ -854,14 +879,14 @@ function handleWallets (main) {
   })
 
   // Bind the row clicks, which shows the available markets for the asset.
-  for (const asset of Object.values(assets)) {
+  for (const asset of Object.values(rowInfos)) {
     bind(asset.tr, 'click', () => {
       showMarkets(asset.ID)
     })
   }
 
   // Bind buttons
-  for (const [k, asset] of Object.entries(assets)) {
+  for (const [k, asset] of Object.entries(rowInfos)) {
     const assetID = parseInt(k) // keys are string asset ID.
     const a = asset.actions
     const show = (e, f) => {
@@ -869,7 +894,7 @@ function handleWallets (main) {
       f(assetID)
     }
     bind(a.connect, 'click', () => {
-      console.log('connect clicked for', assetID)
+      doConnect(assetID)
     })
     bind(a.withdraw, 'click', e => {
       show(e, showWithdraw)
@@ -901,8 +926,8 @@ function handleWallets (main) {
     page.withdrawAmt.value = page.withdrawAvail.textContent
   })
 
-  if (!firstAsset) return
-  showMarkets(firstAsset.ID)
+  if (!firstRow) return
+  showMarkets(firstRow.ID)
 }
 
 // handleSettings is the 'settings' page main element handler.

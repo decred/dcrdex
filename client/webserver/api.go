@@ -173,10 +173,6 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "No wallet for %d -> %s", form.AssetID, unbip(form.AssetID))
 		return
 	}
-	if !status.Running {
-		s.writeAPIError(w, "%s wallet not connected", unbip(form.AssetID))
-		return
-	}
 	err := s.core.OpenWallet(form.AssetID, form.Pass)
 	if err != nil {
 		s.writeAPIError(w, "error unlocking %s wallet: %v", unbip(form.AssetID), err)
@@ -186,14 +182,24 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-// closeWalletForm is information necessary to close a wallet.
-type closeWalletForm struct {
-	AssetID uint32 `json:"assetID"`
+func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
+	err := s.core.ConnectWallet(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(form.AssetID), err)
+		return
+	}
+	s.notifyWalletUpdate(form.AssetID)
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 // apiCloseWallet is the handler for the '/closewallet' API request.
 func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
-	form := new(closeWalletForm)
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
 	if !readPost(w, r, form) {
 		return
 	}

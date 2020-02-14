@@ -66,6 +66,7 @@ type clientCore interface {
 	CreateWallet(form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw string) error
 	CloseWallet(assetID uint32) error
+	ConnectWallet(assetID uint32) error
 	Wallets() []*core.WalletState
 	User() *core.User
 	PreRegister(dex string) (uint64, error)
@@ -225,7 +226,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/login", s.apiLogin)
 		r.Post("/withdraw", s.apiWithdraw)
 		r.Get("/user", s.apiUser)
-
+		r.Post("/connectwallet", s.apiConnect)
 	})
 	// Files
 	fileServer(mux, "/js", fp(root, "dist"))

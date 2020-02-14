@@ -155,6 +155,7 @@ func (c *Core) Markets() map[string][]*Market {
 	for uri, dc := range c.conns {
 		infos[uri] = dc.markets
 	}
+
 	return infos
 }
 
@@ -193,6 +194,13 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Connect error: %v", err)
 		}
+		// If first connecting the wallet, try to get the balance. Ignore errors
+		// here with the assumption that some wallets may not reveal balance until
+		// unlocked.
+		balance, _, err := wallet.Balance(0)
+		if err == nil {
+			wallet.setBalance(balance)
+		}
 	}
 	return wallet, nil
 }
@@ -224,8 +232,8 @@ func (c *Core) SupportedAssets() map[uint32]*SupportedAsset {
 		assets[assetID] = &SupportedAsset{
 			ID:     assetID,
 			Symbol: asset.Symbol,
-			Name:   asset.Info.Name,
 			Wallet: wallet,
+			Info:   asset.Info,
 		}
 	}
 	return assets
@@ -243,7 +251,7 @@ func (c *Core) User() *User {
 func (c *Core) refreshUser() {
 	k, _ := c.db.Get(keyParamsKey)
 	u := &User{
-		Wallets:     c.Wallets(),
+		Assets:      c.SupportedAssets(),
 		Markets:     c.Markets(),
 		Initialized: len(k) > 0,
 	}
@@ -271,6 +279,11 @@ func (c *Core) CreateWallet(form *WalletForm) error {
 
 	err = wallet.Connect(c.ctx)
 	if err != nil {
+		// Assume that the wallet form values are invalid, and drop the wallet from
+		// the wallets map.
+		c.walletMtx.Lock()
+		delete(c.wallets, dbWallet.AssetID)
+		c.walletMtx.Unlock()
 		return fmt.Errorf("Error connecting wallet: %v", err)
 	}
 
@@ -347,7 +360,7 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 func (c *Core) OpenWallet(assetID uint32, pw string) error {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return fmt.Errorf("OpenWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
+		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
 	err = wallet.Unlock(pw, aYear)
 	if err != nil {
@@ -361,7 +374,8 @@ func (c *Core) OpenWallet(assetID uint32, pw string) error {
 	return nil
 }
 
-// CloseWallet closes the wallet for the specified asset.
+// CloseWallet closes the wallet for the specified asset. The wallet cannot be
+// closed if there are active negotiations for the asset.
 func (c *Core) CloseWallet(assetID uint32) error {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
@@ -378,6 +392,12 @@ func (c *Core) CloseWallet(assetID uint32) error {
 		}
 	}
 	return wallet.lock()
+}
+
+// ConnectWallet connects to the wallet without unlocking.
+func (c *Core) ConnectWallet(assetID uint32) error {
+	_, err := c.connectedWallet(assetID)
+	return err
 }
 
 // PreRegister creates a connection to the specified DEX and fetches the
@@ -801,8 +821,12 @@ func (c *Core) Book(dex string, base, quote uint32) *OrderBook {
 
 func (c *Core) Unsync(dex string, base, quote uint32) {}
 
-func (c *Core) Balance(uint32) (uint64, error) {
-	return 0, nil
+func (c *Core) Balance(assetID uint32) (uint64, error) {
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return 0, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
+	}
+	return wallet.balance, nil
 }
 
 // initialize pulls the known DEX URLs from the database and attempts to
@@ -843,6 +867,7 @@ func (c *Core) initialize() {
 			log.Infof("Successfully connected to %d out of %d "+
 				"DEX servers", len(c.conns), len(accts))
 			c.connMtx.RUnlock()
+			c.refreshUser()
 		}()
 	}
 	dbWallets, err := c.db.Wallets()

@@ -35,8 +35,13 @@ const (
 	// Use RawRequest to get the verbose block with verbose txs, as the btcd
 	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
+	methodGetNetworkInfo    = "getnetworkinfo"
 	BipID                   = 0
-	defaultWithdrawalFee    = 2
+	// The default fee is passed to the user as part of the asset.WalletInfo
+	// structure.
+	defaultWithdrawalFee = 2
+	minNetworkVersion    = 180100
+	minProtocolVersion   = 70015
 )
 
 // How often to check the tip hash.
@@ -295,8 +300,20 @@ func (d *ExchangeWallet) Info() *asset.WalletInfo {
 	return walletInfo
 }
 
-// Connect connects the wallet to the RPC server.
+// Connect connects the wallet to the RPC server. Satisfies the dex.Connector
+// interface.
 func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+	// Check the version. Do it here, so we can also diagnose a bad connection.
+	netVer, codeVer, err := btc.getVersion()
+	if err != nil {
+		return fmt.Errorf("error getting version: %v", err), nil
+	}
+	if netVer < minNetworkVersion {
+		return fmt.Errorf("reported node version %d is less than minimum %d", netVer, minNetworkVersion), nil
+	}
+	if codeVer < minProtocolVersion {
+		return fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion), nil
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -903,8 +920,8 @@ func (btc *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asse
 }
 
 // Send the value to the address, with the given fee rate. If subtract is true,
-// the fees will be subtracted from the value. If false, the fees in addition
-// to the value.
+// the fees will be subtracted from the value. If false, the fees are in
+// addition to the value.
 func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subtract bool) (*chainhash.Hash, uint32, uint64, error) {
 	txHash, err := btc.wallet.SendToAddress(address, val, feeRate, subtract)
 	if err != nil {
@@ -1171,6 +1188,19 @@ func (btc *ExchangeWallet) getVerboseBlockTxs(blockID string) (*verboseBlockTxs,
 		return nil, err
 	}
 	return blk, nil
+}
+
+// getVersion gets the current BTC network version.
+func (btc *ExchangeWallet) getVersion() (uint64, uint64, error) {
+	r := &struct {
+		Version         uint64 `json:"version"`
+		ProtocolVersion uint64 `json:"protocolversion"`
+	}{}
+	err := btc.wallet.call(methodGetNetworkInfo, nil, r)
+	if err != nil {
+		return 0, 0, err
+	}
+	return r.Version, r.ProtocolVersion, nil
 }
 
 // toCoinID converts the tx hash and vout to a coin ID, as a []byte.
