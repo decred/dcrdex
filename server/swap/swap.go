@@ -78,7 +78,9 @@ type swapStatus struct {
 // the match negotiation.
 type matchTracker struct {
 	*order.Match
-	time        time.Time
+	time time.Time
+
+	mtx         sync.RWMutex
 	makerStatus *swapStatus
 	takerStatus *swapStatus
 }
@@ -286,6 +288,8 @@ out:
 	wg.Wait()
 }
 
+// tryConfirmSwap is not thread safe with respect to swapStatus. The caller must
+// guard against concurrent reads or writes.
 func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 	if status.swapTime.IsZero() || !status.swapConfirmed.IsZero() {
 		return
@@ -310,26 +314,32 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 // not evaluated here, but in (Swapper).checkInaction. This method simply sets
 // the appropriate flags in the swapStatus structures.
 func (s *Swapper) processBlock(block *blockNotification) {
-	completions := make([]*matchTracker, 0)
+	var completions []*matchTracker
 	s.matchMtx.Lock()
 	defer s.matchMtx.Unlock()
 	for _, match := range s.matches {
+		// Full write lock on the matchTracker so that tryConfirmSwap may update
+		// maker or taker status.
+		match.mtx.Lock()
 		// If it's neither of the match assets, nothing to do.
 		if match.makerStatus.swapAsset != block.assetID && match.takerStatus.swapAsset != block.assetID {
+			match.mtx.Unlock()
 			continue
 		}
+
+	statusSwitch:
 		switch match.Status {
 		case order.NewlyMatched:
 		case order.MakerSwapCast:
 			if match.makerStatus.swapAsset != block.assetID {
-				continue
+				break statusSwitch
 			}
 			// If the maker has broadcast their transaction, the taker's broadcast
 			// timeout starts once the maker's swap has SwapConf confs.
 			s.tryConfirmSwap(match.makerStatus)
 		case order.TakerSwapCast:
 			if match.takerStatus.swapAsset != block.assetID {
-				continue
+				break statusSwitch
 			}
 			// If the taker has broadcast their transaction, the maker's broadcast
 			// timeout (for redemption) starts once the maker's swap has SwapConf
@@ -337,7 +347,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			s.tryConfirmSwap(match.takerStatus)
 		case order.MakerRedeemed:
 			// It's the taker's turn to redeem. Nothing to do here.
-			continue
+			break statusSwitch
 		case order.MatchComplete:
 			// Once both redemption transactions have SwapConf confirmations, the
 			// order is complete.
@@ -347,6 +357,8 @@ func (s *Swapper) processBlock(block *blockNotification) {
 				completions = append(completions, match)
 			}
 		}
+
+		match.mtx.Unlock()
 	}
 
 	for _, match := range completions {
@@ -359,6 +371,8 @@ func (s *Swapper) processBlock(block *blockNotification) {
 	}
 }
 
+// redeemStatus is not thread-safe with respect to the matchTracker. The caller
+// must lock the matchTracker to guard concurrent status access.
 func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerRedeemComplete bool) {
 	makerRedeemComplete = s.makerRedeemStatus(match)
 	tStatus := match.takerStatus
@@ -376,6 +390,8 @@ func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerR
 	return
 }
 
+// makerRedeemStatus is not thread-safe with respect to the matchTracker. The
+// caller must lock the matchTracker to guard concurrent status access.
 func (s *Swapper) makerRedeemStatus(match *matchTracker) (makerRedeemComplete bool) {
 	mStatus, tStatus := match.makerStatus, match.takerStatus
 	if !mStatus.redeemTime.IsZero() {
@@ -397,10 +413,11 @@ func (s *Swapper) makerRedeemStatus(match *matchTracker) (makerRedeemComplete bo
 // additional swaps prior to FundConf. e.g. OrderRouter may allow coins to fund
 // orders where: (coins.confs >= FundConf) OR TxMonitored(coins.tx).
 func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
-	s.matchMtx.RLock()
-	defer s.matchMtx.RUnlock()
 
-	for _, match := range s.matches {
+	checkMatch := func(match *matchTracker) bool {
+		match.mtx.RLock()
+		defer match.mtx.RUnlock()
+
 		// The swap contract of either the maker or taker must correspond to
 		// specified asset to be of interest.
 		switch asset {
@@ -432,8 +449,17 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 				match.makerStatus.redemption.TxID() == txid {
 				return true
 			}
-		default:
-			continue
+		}
+
+		return false
+	}
+
+	s.matchMtx.RLock()
+	defer s.matchMtx.RUnlock()
+
+	for _, match := range s.matches {
+		if checkMatch(match) {
+			return true
 		}
 	}
 
@@ -450,18 +476,21 @@ func (s *Swapper) checkInaction(assetID uint32) {
 		return
 	}
 
-	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
 	var deletions []string
-	s.matchMtx.Lock()
-	defer s.matchMtx.Unlock()
-	for _, match := range s.matches {
+	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
+
+	checkMatch := func(match *matchTracker) {
+		match.mtx.Lock()
+		defer match.mtx.Unlock()
+
 		if match.makerStatus.swapAsset != assetID && match.takerStatus.swapAsset != assetID {
-			continue
+			return
 		}
+
 		switch match.Status {
 		case order.NewlyMatched:
 			if match.makerStatus.swapAsset != assetID {
-				continue
+				return
 			}
 			// If the maker is not acting, the swapTime won't be set. Check against
 			// the time the match notification was sent (match.time) for the broadcast
@@ -473,7 +502,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			}
 		case order.MakerSwapCast:
 			if match.takerStatus.swapAsset != assetID {
-				continue
+				return
 			}
 			// If the maker has sent their swap tx, check the taker's broadcast
 			// timeout against the time of the swap's SwapConf'th confirmation.
@@ -487,7 +516,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			}
 		case order.TakerSwapCast:
 			if match.takerStatus.swapAsset != assetID {
-				continue
+				return
 			}
 			// If the taker has sent their swap tx, check the maker's broadcast
 			// timeout (for redemption) against the time of the swap's SwapConf'th
@@ -502,7 +531,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			}
 		case order.MakerRedeemed:
 			if match.takerStatus.swapAsset != assetID {
-				continue
+				return
 			}
 			// If the maker has redeemed, the taker can redeem immediately, so
 			// check the timeout against the time the Swapper received the
@@ -518,6 +547,13 @@ func (s *Swapper) checkInaction(assetID uint32) {
 		case order.MatchComplete:
 			// Nothing to do here right now.
 		}
+	}
+
+	s.matchMtx.Lock()
+	defer s.matchMtx.Unlock()
+
+	for _, match := range s.matches {
+		checkMatch(match)
 	}
 
 	for _, matchID := range deletions {
@@ -553,14 +589,17 @@ func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result inter
 // acknowledged their previous DEX requests.
 func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation, *msgjson.Error) {
 	s.matchMtx.RLock()
-	defer s.matchMtx.RUnlock()
 	match, found := s.matches[matchID]
+	s.matchMtx.RUnlock()
 	if !found {
 		return nil, &msgjson.Error{
 			Code:    msgjson.RPCUnknownMatch,
 			Message: "unknown match ID",
 		}
 	}
+
+	match.mtx.Lock() // RLock OK?
+	defer match.mtx.Unlock()
 
 	// Get the step-related information for both parties.
 	var isBaseAsset bool
@@ -656,8 +695,9 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 	}, nil
 }
 
-// authUser verifies that the msgjson.Signable is signed by the user. This method
-// relies on the AuthManager to validate the signature.
+// authUser verifies that the msgjson.Signable is signed by the user. This
+// method relies on the AuthManager to validate the signature of the serialized
+// data. nil is returned for successful signature verification.
 func (s *Swapper) authUser(user account.AccountID, params msgjson.Signable) *msgjson.Error {
 	// Authorize the user.
 	msg, err := params.Serialize()
@@ -678,7 +718,7 @@ func (s *Swapper) authUser(user account.AccountID, params msgjson.Signable) *msg
 }
 
 // messageAcker is information needed to process the user's
-// msgjson.AcknowledgementResult.
+// msgjson.Acknowledgement.
 type messageAcker struct {
 	user    account.AccountID
 	match   *matchTracker
@@ -687,8 +727,9 @@ type messageAcker struct {
 	isAudit bool
 }
 
-// processAck processes a single msgjson.AcknowledgementResult, validating the
-// signature and updating the (order.Match).Sigs record.
+// processAck processes a match msgjson.Acknowledgement, validating the
+// signature and updating the (order.Match).Sigs record. This is required by
+// processInit, processRedeem, and revoke.
 func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	ack := new(msgjson.Acknowledgement)
 	err := msg.UnmarshalResult(ack)
@@ -716,11 +757,10 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 			fmt.Sprintf("signature validation error: %v", err))
 		return
 	}
+
 	// Set the appropriate signature, based on the current step and actor.
-	// NOTE: Using the matchMtx like this is not ideal. It might be better to have
-	// individual locks on the matchTrackers.
-	s.matchMtx.Lock()
-	defer s.matchMtx.Unlock()
+	acker.match.mtx.Lock()
+	defer acker.match.mtx.Unlock()
 	if acker.isAudit {
 		if acker.isMaker {
 			acker.match.Sigs.MakerAudit = sigBytes
@@ -772,13 +812,13 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 
 	// Update the match.
 	swapTime := unixMsNow()
-	s.matchMtx.Lock()
+	stepInfo.match.mtx.Lock()
 	matchID := stepInfo.match.ID()
-	actor.status.swap = coin
+	actor.status.swap = coin // locking really needed swapStatus instead?
 	actor.status.swapTime = swapTime
 	stepInfo.match.Status = stepInfo.nextStep
 	match := stepInfo.match.Match
-	s.matchMtx.Unlock()
+	stepInfo.match.mtx.Unlock()
 
 	// Store or update the match in the Swapper's storage backend. Failure to
 	// update match status is a fatal DB error. If we continue, the swap may
@@ -855,13 +895,13 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	// Modify the match's swapStatuses.
 	swapTime := unixMsNow()
-	s.matchMtx.Lock()
+	stepInfo.match.mtx.Lock()
 	matchID := stepInfo.match.ID()
 	// Update the match.
-	actor.status.redemption = coin
+	actor.status.redemption = coin // TODO: swapStatus lock?
 	actor.status.redeemTime = swapTime
 	stepInfo.match.Status = stepInfo.nextStep
-	s.matchMtx.Unlock()
+	stepInfo.match.mtx.Unlock()
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
@@ -889,6 +929,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		match:   stepInfo.match,
 		params:  rParams,
 		isMaker: counterParty.isMaker,
+		// isAudit: false,
 	}
 	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, ack)
@@ -982,7 +1023,8 @@ func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Mes
 }
 
 // revoke revokes the match, sending the 'revoke_match' request to each client
-// and processing the acknowledgement. This method is not thread-safe.
+// and processing the acknowledgement. This method is not thread-safe with
+// respect to the matchTracker.
 func (s *Swapper) revoke(match *matchTracker) {
 	// Unlock the maker and taker order coins.
 	s.unlockOrderCoins(match.Taker)
@@ -998,6 +1040,7 @@ func (s *Swapper) revoke(match *matchTracker) {
 		match:   match,
 		params:  takerParams,
 		isMaker: false,
+		// isAudit: false,
 	}
 	s.authMgr.Request(match.Taker.User(), takerReq, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, takerAck)
@@ -1007,6 +1050,7 @@ func (s *Swapper) revoke(match *matchTracker) {
 		match:   match,
 		params:  makerParams,
 		isMaker: true,
+		// isAudit: false,
 	}
 	s.authMgr.Request(match.Maker.User(), makerReq, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, makerAck)
@@ -1076,24 +1120,27 @@ func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg 
 }
 
 // newMatchAckers creates a pair of matchAckers, which are used to validate each
-// user's msgjson.AcknowledgementResult response.
+// user's msgjson.Acknowledgement response.
 func newMatchAckers(match *matchTracker) (*messageAcker, *messageAcker) {
 	makerMsg, takerMsg := matchNotifications(match)
 	return &messageAcker{
 			user:    match.Maker.User(),
-			isMaker: true,
 			match:   match,
 			params:  makerMsg,
+			isMaker: true,
+			// isAudit: false,
 		}, &messageAcker{
 			user:    match.Taker.User(),
-			isMaker: false,
 			match:   match,
 			params:  takerMsg,
+			isMaker: false,
+			// isAudit: false,
 		}
 }
 
-// For the 'match' request, the user returns msgjson.AcknowledgementResult with
-// an array of signatures, one for each match sent.
+// For the 'match' request, the user returns a msgjson.Acknowledgement array
+// with signatures for each match ID. The match acknowledgements were requested
+// from each matched user in Negotiate.
 func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message, matches []*messageAcker) {
 	var acks []msgjson.Acknowledgement
 	err := msg.UnmarshalResult(&acks)
@@ -1107,8 +1154,11 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			fmt.Sprintf("expected %d acknowledgements, got %d", len(acks), len(matches)))
 		return
 	}
-	s.matchMtx.Lock()
-	defer s.matchMtx.Unlock()
+
+	// Verify the signature of each Acknowledgement, and store the signatures in
+	// the matchTracker of each match (messageAcker). The signature will be
+	// either a MakerMatch or TakerMatch signature depending on whether the
+	// responding user is the maker or taker.
 	for i, matchInfo := range matches {
 		ack := acks[i]
 		if ack.MatchID != matchInfo.match.ID().String() {
@@ -1134,11 +1184,15 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 				fmt.Sprintf("signature validation error: %v", err))
 			return
 		}
+
+		// Store the signature in the matchTracker.
+		matchInfo.match.mtx.Lock()
 		if matchInfo.isMaker {
 			matchInfo.match.Sigs.MakerMatch = sigBytes
 		} else {
 			matchInfo.match.Sigs.TakerMatch = sigBytes
 		}
+		matchInfo.match.mtx.Unlock()
 	}
 }
 
@@ -1284,6 +1338,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 		req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
 		if err != nil {
 			log.Errorf("error creating match notification request: %v", err)
+			// TODO: prevent user penalty
 			continue
 		}
 		{

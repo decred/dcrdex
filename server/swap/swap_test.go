@@ -214,6 +214,7 @@ type TStorage struct{}
 
 func (s *TStorage) UpdateMatch(match *order.Match) error { return nil }
 func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
+func (s *TStorage) LastErr() error                       { return nil }
 
 // This stub satisfies asset.Backend.
 type TAsset struct {
