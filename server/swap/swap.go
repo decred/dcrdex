@@ -30,9 +30,6 @@ var (
 	txWaitExpiration = time.Minute
 
 	requestExpiration = 30 * time.Second
-
-	// nop is a dummy expire callback function.
-	nop = func() {}
 )
 
 func unixMsNow() time.Time {
@@ -64,12 +61,15 @@ type Storage interface {
 type swapStatus struct {
 	// The asset to which the user broadcasts their swap transaction.
 	swapAsset uint32
+
+	mtx sync.RWMutex
 	// The time that the swap coordinator sees the transaction.
 	swapTime time.Time
 	swap     asset.Coin
 	// The time that the transaction receives its SwapConf'th confirmation.
 	swapConfirmed time.Time
-	// The time that the swap coordinator sees the user's redemption transaction.
+	// The time that the swap coordinator sees the user's redemption
+	// transaction.
 	redeemTime time.Time
 	redemption asset.Coin
 }
@@ -77,10 +77,9 @@ type swapStatus struct {
 // matchTracker embeds an order.Match and adds some data necessary for tracking
 // the match negotiation.
 type matchTracker struct {
+	mtx sync.RWMutex // Match.Sigs and Match.Status
 	*order.Match
-	time time.Time
-
-	mtx         sync.RWMutex
+	time        time.Time
 	makerStatus *swapStatus
 	takerStatus *swapStatus
 }
@@ -288,9 +287,9 @@ out:
 	wg.Wait()
 }
 
-// tryConfirmSwap is not thread safe with respect to swapStatus. The caller must
-// guard against concurrent reads or writes.
 func (s *Swapper) tryConfirmSwap(status *swapStatus) {
+	status.mtx.Lock()
+	defer status.mtx.Unlock()
 	if status.swapTime.IsZero() || !status.swapConfirmed.IsZero() {
 		return
 	}
@@ -304,7 +303,6 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 	if confs >= int64(s.coins[status.swapAsset].SwapConf) {
 		status.swapConfirmed = time.Now().UTC()
 	}
-
 }
 
 // processBlock scans the matches and updates match status based on number of
@@ -318,14 +316,14 @@ func (s *Swapper) processBlock(block *blockNotification) {
 	s.matchMtx.Lock()
 	defer s.matchMtx.Unlock()
 	for _, match := range s.matches {
-		// Full write lock on the matchTracker so that tryConfirmSwap may update
-		// maker or taker status.
-		match.mtx.Lock()
 		// If it's neither of the match assets, nothing to do.
 		if match.makerStatus.swapAsset != block.assetID && match.takerStatus.swapAsset != block.assetID {
-			match.mtx.Unlock()
 			continue
 		}
+
+		// Lock the matchTracker so the following checks and updates are atomic
+		// with respect to Status.
+		match.mtx.RLock()
 
 	statusSwitch:
 		switch match.Status {
@@ -351,14 +349,14 @@ func (s *Swapper) processBlock(block *blockNotification) {
 		case order.MatchComplete:
 			// Once both redemption transactions have SwapConf confirmations, the
 			// order is complete.
-			makerRedeemed, takerRedeemed := s.redeemStatus(match)
+			makerRedeemed, takerRedeemed := s.RedeemStatus(match.makerStatus, match.takerStatus)
 			// TODO: Can coins be unlocked now regardless of redemption?
 			if makerRedeemed && takerRedeemed {
 				completions = append(completions, match)
 			}
 		}
 
-		match.mtx.Unlock()
+		match.mtx.RUnlock()
 	}
 
 	for _, match := range completions {
@@ -371,11 +369,20 @@ func (s *Swapper) processBlock(block *blockNotification) {
 	}
 }
 
-// redeemStatus is not thread-safe with respect to the matchTracker. The caller
-// must lock the matchTracker to guard concurrent status access.
-func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerRedeemComplete bool) {
-	makerRedeemComplete = s.makerRedeemStatus(match)
-	tStatus := match.takerStatus
+// RedeemStatus checks maker and taker redemption completion status.
+func (s *Swapper) RedeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
+	mStatus.mtx.RLock()
+	defer mStatus.mtx.RUnlock()
+	tStatus.mtx.RLock()
+	defer tStatus.mtx.RUnlock()
+
+	return s.redeemStatus(mStatus, tStatus)
+}
+
+// redeemStatus is not thread-safe with respect to the swapStatuses. The caller
+// must lock each swapStatus to guard concurrent status access.
+func (s *Swapper) redeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
+	makerRedeemComplete = s.makerRedeemStatus(mStatus, tStatus.swapAsset)
 	// Taker is only complete if the maker is complete because
 	// order.MatchComplete follows order.MakerRedeemed.
 	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
@@ -385,15 +392,23 @@ func (s *Swapper) redeemStatus(match *matchTracker) (makerRedeemComplete, takerR
 				tStatus.redemption.TxID(), err)
 			return
 		}
-		takerRedeemComplete = confs >= int64(s.coins[match.makerStatus.swapAsset].SwapConf)
+		takerRedeemComplete = confs >= int64(s.coins[mStatus.swapAsset].SwapConf)
 	}
 	return
 }
 
-// makerRedeemStatus is not thread-safe with respect to the matchTracker. The
-// caller must lock the matchTracker to guard concurrent status access.
-func (s *Swapper) makerRedeemStatus(match *matchTracker) (makerRedeemComplete bool) {
-	mStatus, tStatus := match.makerStatus, match.takerStatus
+// MakerRedeemStatus checks maker redemption completion status The taker asset
+// is required to check the confirmation requirement.
+func (s *Swapper) MakerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRedeemComplete bool) {
+	mStatus.mtx.RLock()
+	defer mStatus.mtx.RUnlock()
+
+	return s.makerRedeemStatus(mStatus, tAsset)
+}
+
+// makerRedeemStatus is not thread-safe with respect to the swapStatus. The
+// caller must lock the swapStatus to guard concurrent status access.
+func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRedeemComplete bool) {
 	if !mStatus.redeemTime.IsZero() {
 		confs, err := mStatus.redemption.Confirmations()
 		if err != nil {
@@ -401,7 +416,7 @@ func (s *Swapper) makerRedeemStatus(match *matchTracker) (makerRedeemComplete bo
 				mStatus.redemption.TxID(), err) // Severity?
 			return
 		}
-		makerRedeemComplete = confs >= int64(s.coins[tStatus.swapAsset].SwapConf)
+		makerRedeemComplete = confs >= int64(s.coins[tAsset].SwapConf)
 	}
 	return
 }
@@ -415,8 +430,12 @@ func (s *Swapper) makerRedeemStatus(match *matchTracker) (makerRedeemComplete bo
 func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
 
 	checkMatch := func(match *matchTracker) bool {
-		match.mtx.RLock()
-		defer match.mtx.RUnlock()
+		// Both maker and taker statuses must be locked to check redeem status
+		// and swap tx id.
+		match.makerStatus.mtx.RLock()
+		defer match.makerStatus.mtx.RUnlock()
+		match.takerStatus.mtx.RLock()
+		defer match.takerStatus.mtx.RUnlock()
 
 		// The swap contract of either the maker or taker must correspond to
 		// specified asset to be of interest.
@@ -430,7 +449,7 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 			}
 
 			// Taker's redemption transaction is the asset of interest.
-			_, takerRedeemDone := s.redeemStatus(match)
+			_, takerRedeemDone := s.redeemStatus(match.makerStatus, match.takerStatus)
 			if !takerRedeemDone && user == match.Taker.User() &&
 				match.takerStatus.redemption.TxID() == txid {
 				return true
@@ -444,7 +463,7 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 			}
 
 			// Maker's redemption transaction is the asset of interest.
-			makerRedeemDone := s.makerRedeemStatus(match)
+			makerRedeemDone := s.makerRedeemStatus(match.makerStatus, match.takerStatus.swapAsset)
 			if !makerRedeemDone && user == match.Maker.User() &&
 				match.makerStatus.redemption.TxID() == txid {
 				return true
@@ -480,12 +499,19 @@ func (s *Swapper) checkInaction(assetID uint32) {
 	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
 
 	checkMatch := func(match *matchTracker) {
-		match.mtx.Lock()
-		defer match.mtx.Unlock()
+		// Lock entire matchTracker so the following is atomic with respect to
+		// Status.
+		match.mtx.RLock()
+		defer match.mtx.RUnlock()
 
 		if match.makerStatus.swapAsset != assetID && match.takerStatus.swapAsset != assetID {
 			return
 		}
+
+		match.makerStatus.mtx.RLock()
+		defer match.makerStatus.mtx.RUnlock()
+		match.takerStatus.mtx.RLock()
+		defer match.takerStatus.mtx.RUnlock()
 
 		switch match.Status {
 		case order.NewlyMatched:
@@ -598,9 +624,6 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 		}
 	}
 
-	match.mtx.Lock() // RLock OK?
-	defer match.mtx.Unlock()
-
 	// Get the step-related information for both parties.
 	var isBaseAsset bool
 	var actor, counterParty stepActor
@@ -608,6 +631,11 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 	maker, taker := match.Maker, match.Taker
 	var reqSigs [][]byte
 	ackType := msgjson.MatchRoute
+
+	// Lock for Status and Sigs.
+	match.mtx.RLock()
+	defer match.mtx.RUnlock()
+
 	switch match.Status {
 	case order.NewlyMatched, order.TakerSwapCast:
 		counterParty.order, actor.order = taker, maker
@@ -793,6 +821,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		// recoverable state. Should require minimal modification of backends.
 		return coinwaiter.TryAgain
 	}
+
 	// Decode the contract and audit the contract.
 	recipient, val, err := coin.AuditContract()
 	if err != nil {
@@ -812,20 +841,24 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 
 	// Update the match.
 	swapTime := unixMsNow()
-	stepInfo.match.mtx.Lock()
-	matchID := stepInfo.match.ID()
-	actor.status.swap = coin // locking really needed swapStatus instead?
+
+	actor.status.mtx.Lock()
+	actor.status.swap = coin
 	actor.status.swapTime = swapTime
+	actor.status.mtx.Unlock()
+
+	stepInfo.match.mtx.Lock()
 	stepInfo.match.Status = stepInfo.nextStep
-	match := stepInfo.match.Match
-	stepInfo.match.mtx.Unlock()
+	matchID := stepInfo.match.Match.ID()
 
 	// Store or update the match in the Swapper's storage backend. Failure to
 	// update match status is a fatal DB error. If we continue, the swap may
 	// succeed, but there will be no way to recover or retrospectively determine
 	// the swap outcome. Abort.
-	if err := s.storage.UpdateMatch(match); err != nil {
-		log.Errorf("UpdateMatch (id=%v) failed: %v", match.ID(), err)
+	err = s.storage.UpdateMatch(stepInfo.match.Match)
+	stepInfo.match.mtx.Unlock()
+	if err != nil {
+		log.Errorf("UpdateMatch (id=%v) failed: %v", matchID, err)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
 			fmt.Sprintf("internal server error"))
 		return coinwaiter.DontTryAgain // fatal
@@ -871,7 +904,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 // processRedeem is invoked. This method is run as a coin waiter.
 func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) bool {
 	// Get the transaction
-	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	chain := stepInfo.asset.Backend
 	coin, err := chain.Coin(params.CoinID, nil)
 	// If there is an error, don't return an error yet, since it could be due to
@@ -879,31 +911,37 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if err != nil {
 		return coinwaiter.TryAgain
 	}
+
 	// Make sure that the expected output is being spent.
-	status := counterParty.status
-	spends, err := coin.SpendsCoin(status.swap.ID())
+	actor, counterParty := stepInfo.actor, stepInfo.counterParty
+	counterParty.status.mtx.RLock()
+	cpSwapCoin := counterParty.status.swap.ID()
+	counterParty.status.mtx.RUnlock()
+	spends, err := coin.SpendsCoin(cpSwapCoin)
 	if err != nil {
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
-			fmt.Sprintf("error checking redemption %x: %v", status.swap.ID(), err))
+			fmt.Sprintf("error checking redemption %x: %v", cpSwapCoin, err))
 		return coinwaiter.DontTryAgain
 	}
 	if !spends {
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
-			fmt.Sprintf("redemption does not spend %x", status.swap.ID()))
+			fmt.Sprintf("redemption does not spend %x", cpSwapCoin))
 		return coinwaiter.DontTryAgain
 	}
 
 	// Modify the match's swapStatuses.
 	swapTime := unixMsNow()
-	stepInfo.match.mtx.Lock()
-	matchID := stepInfo.match.ID()
-	// Update the match.
-	actor.status.redemption = coin // TODO: swapStatus lock?
+	actor.status.mtx.Lock()
+	actor.status.redemption = coin
 	actor.status.redeemTime = swapTime
+	actor.status.mtx.Unlock()
+
+	stepInfo.match.mtx.Lock()
 	stepInfo.match.Status = stepInfo.nextStep
 	stepInfo.match.mtx.Unlock()
 
 	// Issue a positive response to the actor.
+	matchID := stepInfo.match.ID()
 	s.authMgr.Sign(params)
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
 		MatchID: matchID.String(),
@@ -923,6 +961,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		log.Errorf("error creating redemption request: %v", err)
 		return coinwaiter.DontTryAgain
 	}
+
 	// Set up the acknowledgement callback.
 	ack := &messageAcker{
 		user:    counterParty.user,
@@ -1023,8 +1062,7 @@ func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Mes
 }
 
 // revoke revokes the match, sending the 'revoke_match' request to each client
-// and processing the acknowledgement. This method is not thread-safe with
-// respect to the matchTracker.
+// and processing the acknowledgement. Match Sigs and Status are not accessed.
 func (s *Swapper) revoke(match *matchTracker) {
 	// Unlock the maker and taker order coins.
 	s.unlockOrderCoins(match.Taker)
@@ -1199,7 +1237,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 // LockOrdersCoins locks the backing coins for the provided orders.
 func (s *Swapper) LockOrdersCoins(orders []order.Order) {
 	// Separate orders according to the asset of their locked coins.
-	assetCoinOrders := make(map[uint32][]order.Order)
+	assetCoinOrders := make(map[uint32][]order.Order, len(orders))
 	for _, ord := range orders {
 		// Identify the asset of the locked coins.
 		asset := ord.Quote()
