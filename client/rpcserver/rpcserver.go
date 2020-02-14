@@ -167,6 +167,12 @@ var routes = map[string]handler{
 	"version": handleVersion,
 }
 
+// RouteExists returns whether route exists in the routes map.
+func RouteExists(route string) bool {
+	_, exists := routes[route]
+	return exists
+}
+
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
 func writeJSON(w http.ResponseWriter, thing interface{}) {

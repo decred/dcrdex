@@ -162,7 +162,7 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore
 	if err != nil {
 		t.Error(err)
 	}
-	cert, key := tmp+"cert.cert", tmp+"key.key"
+	cert, key := tmp+"/cert.cert", tmp+"/key.key"
 	defer os.Remove(cert)
 	defer os.Remove(key)
 	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), user, pass, cert, key}
