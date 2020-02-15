@@ -4,7 +4,7 @@
   <div data-pagelink="" class="logo"></div>
   <div class="mainlinks fs18 offwhite">
   <span data-pagelink="markets">Markets</span>
-  <span data-pagelink="wallets">Wallets</span>
+  <span data-pagelink="wallets"{{if not $authed}} class="d-hide"{{end}} id="walletsMenuEntry">Wallets</span>
   <span class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="noteMenuEntry">
     <div class="note-indicator" id="noteIndicator"></div>
     <div id="noteBox">

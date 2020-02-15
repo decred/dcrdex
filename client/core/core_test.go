@@ -293,7 +293,6 @@ type TXCWallet struct {
 	mtx        sync.RWMutex
 	payFeeCoin *tCoin
 	payFeeErr  error
-	coinCoin   *tCoin
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -369,8 +368,8 @@ func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, 
 	return w.payFeeCoin, w.payFeeErr
 }
 
-func (w *TXCWallet) Coin(id dex.Bytes) (asset.Coin, error) {
-	return w.coinCoin, nil
+func (w *TXCWallet) Confirmations(id dex.Bytes) (uint32, error) {
+	return 0, nil
 }
 
 func (w *TXCWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (asset.Coin, error) {
@@ -681,6 +680,8 @@ func TestCreateWallet(t *testing.T) {
 }
 
 func TestRegister(t *testing.T) {
+	// This test takes a little longer because the key is decrypted every time
+	// Register is called.
 	rig := newTestRig()
 	tCore := rig.core
 	dc := rig.dexConn
@@ -901,6 +902,7 @@ func TestRegister(t *testing.T) {
 func TestLogin(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
+	rig.acct.pay()
 
 	queueSuccess := func() {
 		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -925,6 +927,17 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("no error for missing app key")
 	}
 	rig.db.encKeyErr = nil
+
+	// Account not Paid. No error, and account should be unlocked.
+	rig.acct.isPaid = false
+	_, err = tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("error for unpaid account: %v", err)
+	}
+	if rig.acct.locked() {
+		t.Fatalf("unpaid account is locked")
+	}
+	rig.acct.pay()
 
 	// 'connect' route error.
 	rig.acct.unauth()

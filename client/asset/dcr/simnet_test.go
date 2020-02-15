@@ -181,11 +181,6 @@ func TestWallet(t *testing.T) {
 	// Unlock
 	rig.beta().ReturnCoins([]asset.Coin{utxo})
 	rig.beta().ReturnCoins(utxos)
-	// Check that we can get the coin with Coin.
-	_, err = rig.beta().Coin(utxo.ID())
-	if err != nil {
-		t.Fatalf("Coin error: %v", err)
-	}
 	// Make sure we get the first utxo back with Fund.
 	utxos, _ = rig.beta().Fund(contractValue*3, tDCR)
 	if !inUTXOs(utxo, utxos) {
@@ -247,8 +242,20 @@ func TestWallet(t *testing.T) {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
 	}
 
+	confCoin := receipts[0].Coin()
+	checkConfs := func(n uint32) {
+		confs, err := rig.beta().Confirmations(confCoin.ID())
+		if err != nil {
+			t.Fatalf("error getting %d confs: %v", n, err)
+		}
+		if confs != n {
+			t.Fatalf("expected %d confs, got %d", n, confs)
+		}
+	}
 	// Let alpha get and process that transaction.
 	waitNetwork()
+	// Check that there are 0 confirmations.
+	checkConfs(0)
 
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		swapOutput := receipt.Coin()
@@ -304,6 +311,8 @@ func TestWallet(t *testing.T) {
 	// Mine a block and find the redemption again.
 	mineAlpha()
 	waitNetwork()
+	// Check that the swap has one confirmation.
+	checkConfs(1)
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}

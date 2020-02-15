@@ -203,7 +203,7 @@ type dexAccount struct {
 	id        account.AccountID
 	dexPubKey *secp256k1.PublicKey
 	feeCoin   []byte
-	paid      bool
+	isPaid    bool
 	authMtx   sync.RWMutex
 	isAuthed  bool
 }
@@ -214,7 +214,8 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 		url:       acctInfo.URL,
 		encKey:    acctInfo.EncKey,
 		dexPubKey: acctInfo.DEXPubKey,
-		paid:      acctInfo.Paid,
+		isPaid:    acctInfo.Paid,
+		feeCoin:   acctInfo.FeeCoin,
 	}
 }
 
@@ -272,6 +273,21 @@ func (a *dexAccount) auth() {
 func (a *dexAccount) unauth() {
 	a.authMtx.Lock()
 	a.isAuthed = false
+	a.authMtx.Unlock()
+}
+
+// paid will be true if the account regisration fee has been accepted by the
+// DEX.
+func (a *dexAccount) paid() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	return a.isPaid
+}
+
+// pay sets the account paid flag.
+func (a *dexAccount) pay() {
+	a.authMtx.Lock()
+	a.isPaid = true
 	a.authMtx.Unlock()
 }
 

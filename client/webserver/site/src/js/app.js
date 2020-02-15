@@ -42,7 +42,7 @@ export default class Application {
     this.attachHeader(idel(document, 'header'))
     this.attachCommon(this.header)
     this.attach()
-    ws.connect(getSocketURI())
+    ws.connect(getSocketURI(), this.reconnected)
     ws.registerRoute(updateWalletRoute, wallet => {
       this.assets[wallet.assetID].wallet = wallet
       this.walletMap[wallet.assetID] = wallet
@@ -55,6 +55,10 @@ export default class Application {
     ws.registerRoute(successMsgRoute, msg => {
       this.notify(SUCCESS, msg)
     })
+  }
+
+  reconnected () {
+    window.location.reload()
   }
 
   async fetchUser () {
@@ -106,47 +110,44 @@ export default class Application {
 
   attachHeader (header) {
     this.header = header
-    this.noteIndicator = idel(header, 'noteIndicator')
-    this.noteIndicator.style.display = 'none'
-    this.noteBox = idel(header, 'noteBox')
-    this.noteList = idel(header, 'noteList')
-    this.noteTemplate = idel(header, 'noteTemplate')
-    this.noteTemplate.id = undefined
-    this.noteTemplate.remove()
-    this.noteMenuEntry = idel(header, 'noteMenuEntry')
-    this.settingsIcon = idel(header, 'settingsIcon')
-    this.loginLink = idel(header, 'loginLink')
-    this.loader = idel(header, 'loader')
-    this.loader.remove()
-    this.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
-    Doc.show(this.loader)
+    const pg = this.page = parsePage(header, [
+      'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
+      'walletsMenuEntry', 'noteMenuEntry', 'settingsIcon', 'loginLink', 'loader'
+    ])
+    pg.noteIndicator.style.display = 'none'
+    pg.noteTemplate.id = undefined
+    pg.noteTemplate.remove()
+    pg.loader.remove()
+    pg.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
+    Doc.show(pg.loader)
     var hide
     hide = e => {
-      if (!Doc.mouseInElement(e, this.noteBox)) {
-        this.noteBox.style.display = 'none'
+      if (!Doc.mouseInElement(e, pg.noteBox)) {
+        pg.noteBox.style.display = 'none'
         unbind(document, hide)
       }
     }
-    bind(this.noteMenuEntry, 'click', e => {
+    bind(pg.noteMenuEntry, 'click', e => {
       bind(document, 'click', hide)
-      this.noteBox.style.display = 'block'
-      this.noteIndicator.style.display = 'none'
+      pg.noteBox.style.display = 'block'
+      pg.noteIndicator.style.display = 'none'
     })
     if (this.notes.length === 0) {
-      this.noteList.textContent = 'no notifications'
+      pg.noteList.textContent = 'no notifications'
     }
   }
 
   // Use setLogged when user has signed in or out. For logging out, it may be
   // better to trigger a hard reload.
   setLogged (logged) {
+    const pg = this.page
     if (logged) {
-      Doc.show(this.noteMenuEntry, this.settingsIcon)
-      Doc.hide(this.loginLink)
+      Doc.show(pg.noteMenuEntry, pg.settingsIcon, pg.walletsMenuEntry)
+      Doc.hide(pg.loginLink)
       return
     }
-    Doc.hide(this.noteMenuEntry, this.settingsIcon)
-    Doc.show(this.loginLink)
+    Doc.hide(pg.noteMenuEntry, pg.settingsIcon)
+    Doc.show(pg.loginLink)
   }
 
   // attachCommon scans the provided node and handles some common bindings.
@@ -175,18 +176,19 @@ export default class Application {
         count: 1
       })
     }
-    Doc.empty(this.noteList)
+    const notes = this.page.noteList
+    Doc.empty(notes)
     for (let i = this.notes.length - 1; i >= 0; i--) {
       if (i < this.notes.length - 10) return
       const note = this.notes[i]
       const noteEl = this.makeNote(note.level, note.msg)
-      this.noteList.appendChild(noteEl)
+      notes.appendChild(noteEl)
     }
     this.notifyUI()
   }
 
   notifyUI () {
-    const ni = this.noteIndicator
+    const ni = this.page.noteIndicator
     ni.style.display = 'block'
     ni.classList.remove('bad')
     ni.classList.remove('good')
@@ -206,18 +208,18 @@ export default class Application {
   }
 
   makeNote (level, msg) {
-    const note = this.noteTemplate.cloneNode(true)
+    const note = this.page.noteTemplate.cloneNode(true)
     note.querySelector('div').classList.add(level === ERROR ? 'bad' : 'good')
     note.querySelector('span').textContent = msg
     return note
   }
 
   loading (el) {
-    el.appendChild(this.loader)
+    el.appendChild(this.page.loader)
   }
 
   loaded () {
-    this.loader.remove()
+    this.page.loader.remove()
   }
 }
 
@@ -276,7 +278,7 @@ function handleLogin (main) {
     'submit', 'errMsg', 'loginForm', 'pw'
   ])
   bindForm(page.loginForm, page.submit, async (e) => {
-    if (e.preventDefault) e.preventDefault()
+    app.loading(page.loginForm)
     page.errMsg.classList.add('d-hide')
     const pw = page.pw.value
     if (pw === '') {
@@ -284,11 +286,13 @@ function handleLogin (main) {
       page.errMsg.classList.remove('d-hide')
       return
     }
+    app.loaded()
     var res = await postJSON('/api/login', { pass: pw })
     if (!checkResponse(res)) return
     app.setLogged(true)
     app.loadPage('markets')
   })
+  page.pw.focus()
 }
 
 // handleRegister is the 'register' page main element handler.
@@ -837,18 +841,7 @@ function handleWallets (main) {
 
   // Bind the wallet unlock form.
   bindOpenWalletForm(page.openForm, async () => {
-    app.loading(page.openForm)
     const rowInfo = rowInfos[openAsset]
-    var res = await postJSON('/api/openwallet', {
-      assetID: openAsset,
-      pass: page.walletPass.value
-    })
-    app.loaded()
-    if (!checkResponse(res)) {
-      page.openErr.textContext = res.msg
-      page.openErr.classList.remove('d-hide')
-      return
-    }
     const [a, i] = [rowInfo.actions, rowInfo.stateIcons]
     Doc.show(i.unlocked, a.lock, a.withdraw, a.deposit)
     Doc.hide(i.sleeping, i.locked, a.unlock, a.connect)

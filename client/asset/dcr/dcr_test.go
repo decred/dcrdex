@@ -1151,7 +1151,7 @@ func TestWithdraw(t *testing.T) {
 	testSender(t, tWithdrawSender)
 }
 
-func TestCoin(t *testing.T) {
+func TestConfirmations(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
 
@@ -1159,30 +1159,21 @@ func TestCoin(t *testing.T) {
 	copy(coinID[:32], tTxHash[:])
 
 	// Bad coin idea
-	_, err := wallet.Coin(randBytes(35))
+	_, err := wallet.Confirmations(randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
 
 	// listunspent error
-	node.unspentErr = tErr
-	_, err = wallet.Coin(randBytes(35))
+	node.walletTxErr = tErr
+	_, err = wallet.Confirmations(coinID)
 	if err == nil {
 		t.Fatalf("no error for listunspent error")
 	}
-	node.unspentErr = nil
+	node.walletTxErr = nil
 
-	// Try to get non-existent coin.
-	node.unspent = []walletjson.ListUnspentResult{}
-	_, err = wallet.Coin(randBytes(36))
-	if err == nil {
-		t.Fatalf("no error for missing coin")
-	}
-
-	node.unspent = []walletjson.ListUnspentResult{walletjson.ListUnspentResult{
-		TxID: tTxID,
-	}}
-	_, err = wallet.Coin(coinID)
+	node.walletTx = &walletjson.GetTransactionResult{}
+	_, err = wallet.Confirmations(coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
 	}

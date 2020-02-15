@@ -948,27 +948,18 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 	return txHash, 0, 0, fmt.Errorf("error getting transaction vout for successful fee: %v", err)
 }
 
-// Coin gets a wallet Coin for a coin ID. Note that a Coin, by definition, is
-// unspent. Attempting to retrieve a spent coin should result in an error.
-func (btc *ExchangeWallet) Coin(id dex.Bytes) (asset.Coin, error) {
-	txHash, vout, err := decodeCoinID(id)
+// Confirmations gets the number of confirmations for the specified coin ID.
+// The coin must be known to the wallet, but need not be unspent.
+func (btc *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
+	txHash, _, err := decodeCoinID(id)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	unspents, err := btc.wallet.ListUnspent()
+	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	txid := txHash.String()
-	for _, u := range unspents {
-		if u.TxID == txid && u.Vout == vout {
-			if err != nil {
-				return nil, fmt.Errorf("redeem script decode error: %v", err)
-			}
-			return newOutput(btc.node, txHash, vout, toSatoshi(u.Amount), u.RedeemScript), nil
-		}
-	}
-	return nil, fmt.Errorf("coin not found")
+	return uint32(tx.Confirmations), nil
 }
 
 // run pings for new blocks and runs the tipChange callback function when the

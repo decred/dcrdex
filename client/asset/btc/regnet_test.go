@@ -187,11 +187,6 @@ func TestWallet(t *testing.T) {
 	// Unlock
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
-	// Check that we can get the coin with Coin.
-	_, err = rig.gamma().Coin(utxo.ID())
-	if err != nil {
-		t.Fatalf("Coin error: %v", err)
-	}
 	// Make sure we get the first utxo back with Fund.
 	utxos, _ = rig.gamma().Fund(contractValue*3, tBTC)
 	if !inUTXOs(utxo, utxos) {
@@ -253,6 +248,19 @@ func TestWallet(t *testing.T) {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
 	}
 
+	confCoin := receipts[0].Coin()
+	checkConfs := func(n uint32) {
+		confs, err := rig.gamma().Confirmations(confCoin.ID())
+		if err != nil {
+			t.Fatalf("error getting %d confs: %v", n, err)
+		}
+		if confs != n {
+			t.Fatalf("expected %d confs, got %d", n, confs)
+		}
+	}
+	// Check that there are 0 confirmations.
+	checkConfs(0)
+
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		// Alpha should be able to redeem.
 		swapOutput := receipt.Coin()
@@ -310,6 +318,8 @@ func TestWallet(t *testing.T) {
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
+	// Check that there is 1 confirmation on the swap
+	checkConfs(1)
 	_, err = rig.gamma().FindRedemption(ctx, receipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)

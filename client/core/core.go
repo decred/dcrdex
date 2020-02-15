@@ -79,7 +79,7 @@ type Config struct {
 	// DBPath is a filepath to use for the client database. If the database does
 	// not already exist, it will be created.
 	DBPath string
-	// LoggerMaker is a logger for the core to use. Having the logger as an
+	// LoggerMaker is a LoggerMaker for the core to use. Having the logger as an
 	// argument enables creating custom loggers for use in a GUI interface.
 	LoggerMaker *dex.LoggerMaker
 	// Certs is a mapping of URL to filepaths of TLS Certificates for the server.
@@ -581,21 +581,28 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		// Don't abandon registration. The fee is already paid.
 	}
 
-	trigger := coinConfirmationTrigger(coin, uint32(dc.cfg.RegFeeConfirms))
+	trigger := func() (bool, error) {
+		confs, err := coin.Confirmations()
+		if err != nil {
+			return false, fmt.Errorf("Error getting confirmations for %x: %v", coin.ID(), err)
+		}
+		return confs >= uint32(dc.cfg.RegFeeConfirms), nil
+	}
 	// Set up the coin waiter.
 	errChan = make(chan error, 1)
 	c.wait(assetID, trigger, func(err error) {
 		if err != nil {
 			errChan <- err
 		}
-		err = c.notifyFee(dc, coin)
+		err = c.notifyFee(dc, coin.ID())
 		if err != nil {
 			errChan <- err
 			return
 		}
+		dc.acct.pay()
 		// New account won't have any active negotiations, so OK to discard first
 		// first return value from authDEX.
-		_, err = c.authDEX(crypter, dc)
+		_, err = c.authDEX(dc)
 		errChan <- err
 	})
 	c.refreshUser()
@@ -631,10 +638,21 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 		if dc.acct.authed() {
 			continue
 		}
+		err := dc.acct.unlock(crypter)
+		if err != nil {
+			log.Errorf("error unlocking account for %s: %v", dc.acct.url, err)
+			continue
+		}
+		if !dc.acct.paid() {
+			// Unlock the account, but don't authorize. Registration will be completed
+			// when the user unlocks the Decred password.
+			log.Infof("skipping authorization for unpaid account %s", dc.acct.url)
+			continue
+		}
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
-			n, err := c.authDEX(crypter, dc)
+			n, err := c.authDEX(dc)
 			// Using the matchMtx here to synchronize access to the errs slice too.
 			dc.matchMtx.Lock()
 			defer dc.matchMtx.Unlock()
@@ -664,14 +682,14 @@ func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(er
 	}
 }
 
-func (c *Core) notifyFee(dc *dexConnection, coin asset.Coin) error {
+func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	if dc.acct.locked() {
 		return fmt.Errorf("%s account locked. cannot notify fee.", dc.acct.url)
 	}
 	// Notify the server of the fee coin once there are enough confirmations.
 	req := &msgjson.NotifyFee{
 		AccountID: dc.acct.id[:],
-		CoinID:    coin.ID(),
+		CoinID:    coinID,
 	}
 	// We'll need this to validate the server's acknowledgement.
 	reqB, err := req.Serialize()
@@ -746,12 +764,7 @@ func (c *Core) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, er
 }
 
 // authDEX authenticates the connection for a DEX.
-func (c *Core) authDEX(crypter encrypt.Crypter, dc *dexConnection) ([]Negotiation, error) {
-	// Decrypt the account private key.
-	err := dc.acct.unlock(crypter)
-	if err != nil {
-		return nil, fmt.Errorf("error unlocking account for %s: %v", dc.acct.url, err)
-	}
+func (c *Core) authDEX(dc *dexConnection) ([]Negotiation, error) {
 	// Prepare and sign the message for the 'connect' route.
 	acctID := dc.acct.ID()
 	payload := &msgjson.Connect{
@@ -843,7 +856,7 @@ func (c *Core) initialize() {
 			defer wg.Done()
 			dc, err := c.connectDEX(acct)
 			if err != nil {
-				log.Errorf("error adding DEX %s: %v", acct.URL, err)
+				log.Errorf("error connecting to DEX %s: %v", acct.URL, err)
 				return
 			}
 			if !acct.Paid {
@@ -851,8 +864,8 @@ func (c *Core) initialize() {
 					log.Warnf("incomplete registration without fee payment detected for %s. Discarding account.", acct.URL)
 					return
 				}
-				log.Infof("Incomplete registration detected for %s. " +
-					"Registration will be completed when the Decred wallet is unlocked.")
+				log.Infof("Incomplete registration detected for %s. Registration will be"+
+					" completed when the Decred wallet is unlocked.", acct.URL)
 			}
 			c.connMtx.Lock()
 			c.conns[acct.URL] = dc
@@ -904,7 +917,7 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 	}
 	var wg sync.WaitGroup
 	for _, dc := range c.conns {
-		if dc.acct.paid {
+		if dc.acct.paid() {
 			continue
 		}
 		if len(dc.acct.feeCoin) == 0 {
@@ -937,22 +950,17 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	if acctInfo.Paid {
-		log.Errorf("reFee %s - account for %s already marked paid", dc.acct.url, dc.acct.feeCoin)
+		log.Errorf("reFee %s - account for %x already marked paid", dc.acct.url, dc.acct.feeCoin)
 		return
 	}
 	// Get the coin for the fee.
-	coin, err := dcrWallet.Coin(acctInfo.FeeCoin)
-	if err != nil {
-		log.Errorf("reFee %s- error getting fee coin: %v", dc.acct.url, err)
-		return
-	}
-	confs, err := coin.Confirmations()
+	confs, err := dcrWallet.Confirmations(acctInfo.FeeCoin)
 	if err != nil {
 		log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.url, err)
 		return
 	}
 	if confs >= uint32(dc.cfg.RegFeeConfirms) {
-		err := c.notifyFee(dc, coin)
+		err := c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
 			log.Errorf("reFee %s - notifyfee error: %v", err)
 		}
@@ -960,7 +968,13 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		return
 	}
 
-	trigger := coinConfirmationTrigger(coin, uint32(dc.cfg.RegFeeConfirms))
+	trigger := func() (bool, error) {
+		confs, err := dcrWallet.Confirmations(acctInfo.FeeCoin)
+		if err != nil {
+			return false, fmt.Errorf("Error getting confirmations for %x: %v", acctInfo.FeeCoin, err)
+		}
+		return confs >= uint32(dc.cfg.RegFeeConfirms), nil
+	}
 	// Set up the coin waiter.
 	dcrID, _ := dex.BipSymbolID("dcr")
 	c.wait(dcrID, trigger, func(err error) {
@@ -968,11 +982,12 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 			log.Errorf("reFee %s - waiter error: %v", dc.acct.url, err)
 			return
 		}
-		err = c.notifyFee(dc, coin)
+		err = c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
 			log.Errorf("reFee %s - notifyfee error: %v", dc.acct.url, err)
 			return
 		}
+		dc.acct.pay()
 		log.Infof("Fee paid at %s", dc.acct.url)
 	})
 }

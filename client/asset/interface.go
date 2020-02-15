@@ -113,10 +113,10 @@ type Wallet interface {
 	// to the transaction fee, and the fee rate is taken from the DEX
 	// configuration.
 	PayFee(address string, fee uint64, nfo *dex.Asset) (Coin, error)
-	// Coin gets a wallet Coin for a coin ID. Note that a Coin, by definition, is
-	// unspent. Attempting to retrieve a spent coin should result in an error. The
-	// coin will not be locked.
-	Coin(id dex.Bytes) (Coin, error)
+	// Confirmations gets the number of confirmations for the specified coin ID.
+	// The ID need not represent an unspent coin, but coin IDs unknown to this
+	// wallet may return an error.
+	Confirmations(id dex.Bytes) (uint32, error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
 	Withdraw(address string, value, feeRate uint64) (Coin, error)

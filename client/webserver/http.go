@@ -123,6 +123,17 @@ type walletsTmplData struct {
 
 // handleWallets is the handler for the '/wallets' page request.
 func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
+	user := extractUserInfo(r)
+	switch {
+	// The registration page also walks the user through setting up their app
+	// password and connecting the Decred wallet, if not already done.
+	case !user.Initialized:
+		s.handleRegister(w, r)
+		return
+	case !user.Authed:
+		s.handleLogin(w, r)
+		return
+	}
 	assetMap := s.core.SupportedAssets()
 	// Sort assets by 1. wallet vs no wallet, and 2) alphabetically.
 	assets := make([]*core.SupportedAsset, 0, len(assetMap))
