@@ -989,6 +989,12 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		dc.acct.pay()
 		log.Infof("Fee paid at %s", dc.acct.url)
+		// New account won't have any active negotiations, so OK to discard first
+		// first return value from authDEX.
+		_, err = c.authDEX(dc)
+		if err != nil {
+			log.Errorf("fee paid, but failed to authenticate connection to %s", dc.acct.url)
+		}
 	})
 }
 
