@@ -64,16 +64,16 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dcrID, _ := dex.BipSymbolID("dcr")
-	status := s.core.WalletState(dcrID)
-	if status == nil {
+	wallet := s.core.WalletState(dcrID)
+	if wallet == nil {
 		s.writeAPIError(w, "No Decred wallet")
 		return
 	}
-	if !status.Running {
+	if !wallet.Running {
 		s.writeAPIError(w, "Decred wallet not running")
 		return
 	}
-	if !status.Open {
+	if !wallet.Open {
 		s.writeAPIError(w, "Decred wallet is locked")
 		return
 	}
@@ -96,7 +96,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		feeErr := <-payFeeErr
 		if feeErr != nil {
 			log.Errorf("Fee payment error: %v", feeErr)
-			s.notify(errorMsgRoute, fmt.Sprintf("Error encountered while notifying DEX of registration fee: %v", err))
+			s.notify(errorMsgRoute, fmt.Sprintf("Error encountered while notifying DEX of registration fee: %v", feeErr))
 		} else {
 			s.notify(successMsgRoute, fmt.Sprintf("Registration complete. You may now trade at %s.", reg.DEX))
 		}
@@ -182,6 +182,7 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiOpenWallet conencts to a wallet backend.
 func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		AssetID uint32 `json:"assetID"`

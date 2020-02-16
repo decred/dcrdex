@@ -49,16 +49,9 @@ var (
 	blockTicker = time.Second
 	walletInfo  = &asset.WalletInfo{
 		ConfigPath: dexbtc.SystemConfigPath("bitcoin"),
-		ConfigType: asset.ConfigTypeINI,
-		ConfigOpts: map[string]string{
-			"rpcuser":     "JSON-RPC user",
-			"rpcpassword": "JSON-RPC password",
-			"rpcbind":     "RPC address. Can be <addr> or <addr>:<port>, which would override rpcport",
-			"rpcport":     "JSON-RPC port",
-		},
-		Name:    "Bitcoin",
-		FeeRate: defaultWithdrawalFee,
-		Units:   "Satoshis",
+		Name:       "Bitcoin",
+		FeeRate:    defaultWithdrawalFee,
+		Units:      "Satoshis",
 	}
 )
 
@@ -945,7 +938,7 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 			return txHash, details.Vout, toSatoshi(details.Amount), nil
 		}
 	}
-	return txHash, 0, 0, fmt.Errorf("error getting transaction vout for successful fee: %v", err)
+	return nil, 0, 0, fmt.Errorf("failed to locate transaction vout")
 }
 
 // Confirmations gets the number of confirmations for the specified coin ID.
@@ -1181,7 +1174,7 @@ func (btc *ExchangeWallet) getVerboseBlockTxs(blockID string) (*verboseBlockTxs,
 	return blk, nil
 }
 
-// getVersion gets the current BTC network version.
+// getVersion gets the current BTC network and protocol versions.
 func (btc *ExchangeWallet) getVersion() (uint64, uint64, error) {
 	r := &struct {
 		Version         uint64 `json:"version"`

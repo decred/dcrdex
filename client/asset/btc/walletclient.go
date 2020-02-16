@@ -205,7 +205,7 @@ func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, sub
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
 	err := wc.call(methodSetTxFee, anylist{float64(feeRate) / 1e5}, &success)
 	if err != nil {
-		return nil, fmt.Errorf("error setting transaction fee")
+		return nil, fmt.Errorf("error setting transaction fee: %v", err)
 	}
 	if !success {
 		return nil, fmt.Errorf("failed to set transaction fee")

@@ -128,7 +128,7 @@ func (w *xcWallet) connected() bool {
 	return w.hookedUp
 }
 
-// Connect wraps the embedded (asset.ExchangeWallet).Connect method and sets the
+// Connect calls the dex.Connector's Connect method and sets the
 // xcWallet.hookedUp flag.
 func (w *xcWallet) Connect(ctx context.Context) error {
 	err := w.connector.Connect(ctx)
@@ -136,8 +136,8 @@ func (w *xcWallet) Connect(ctx context.Context) error {
 		return err
 	}
 	w.mtx.Lock()
-	defer w.mtx.Unlock()
 	w.hookedUp = true
+	w.mtx.Unlock()
 	return nil
 }
 

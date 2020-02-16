@@ -43,16 +43,9 @@ var (
 	blockTicker = time.Second
 	walletInfo  = &asset.WalletInfo{
 		ConfigPath: defaultConfigPath,
-		ConfigType: asset.ConfigTypeINI,
-		ConfigOpts: map[string]string{
-			"username":  "Username for RPC connections",
-			"password":  "Password for RPC connections",
-			"rpclisten": "dcrd interface/port for RPC connections (default port: 9109, testnet: 19109)",
-			"cafile":    "File containing the TLS certificate",
-		},
-		Name:    "Decred",
-		FeeRate: defaultWithdrawalFee,
-		Units:   "atoms",
+		Name:       "Decred",
+		FeeRate:    defaultWithdrawalFee,
+		Units:      "atoms",
 	}
 )
 

@@ -10,26 +10,11 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
-// ConfigType is the type of configuration file that the wallet uses.
-type ConfigType uint8
-
-const (
-	ConfigTypeUndefined ConfigType = iota
-	ConfigTypeINI
-	ConfigTypeJSON
-)
-
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
 	// ConfigPath is the default ConfigPath that the wallet will search for its
 	// configuration file.
 	ConfigPath string `json:"configpath"`
-	// ConfigType is the type of configuration file. Currently unused, the
-	// intention is to allow user configuration via GUI.
-	ConfigType ConfigType `json:"configtype"`
-	// ConfigOpts is a list mapping a field name to a description. This will be
-	// used to dynamically generate GUI configuration forms.
-	ConfigOpts map[string]string `json:"opts"`
 	// Name is the display name for the currency, e.g. "Decred"
 	Name string `json:"name"`
 	// FeeRate is the default fee rate used for withdraws.

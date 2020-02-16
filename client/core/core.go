@@ -644,8 +644,8 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 			continue
 		}
 		if !dc.acct.paid() {
-			// Unlock the account, but don't authorize. Registration will be completed
-			// when the user unlocks the Decred password.
+			// Unlock the account, but don't authenticate. Registration will be
+			// completed when the user unlocks the Decred password.
 			log.Infof("skipping authorization for unpaid account %s", dc.acct.url)
 			continue
 		}
@@ -712,7 +712,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		ack := new(msgjson.Acknowledgement)
 		err = resp.UnmarshalResult(ack)
 		if err != nil {
-			errChan <- fmt.Errorf("notify fee result json decode error: %v", err)
+			errChan <- fmt.Errorf("notify fee result error: %v", err)
 			return
 		}
 		// If there was a serialization error, validation is skipped. A warning
@@ -834,6 +834,7 @@ func (c *Core) Book(dex string, base, quote uint32) *OrderBook {
 
 func (c *Core) Unsync(dex string, base, quote uint32) {}
 
+// Balance retreives the current wallet balance.
 func (c *Core) Balance(assetID uint32) (uint64, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
@@ -960,6 +961,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	if confs >= uint32(dc.cfg.RegFeeConfirms) {
+		fmt.Println("--notifyFee")
 		err := c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
 			log.Errorf("reFee %s - notifyfee error: %v", err)
