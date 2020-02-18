@@ -43,6 +43,15 @@ func (a *TAsset) BlockChannel(size int) chan uint32 { return nil }
 func (a *TAsset) InitTxSize() uint32                { return 100 }
 func (a *TAsset) CheckAddress(string) bool          { return true }
 func (a *TAsset) Run(context.Context)               {}
+func (a *TAsset) ValidateCoinID(coinID []byte) error {
+	return nil
+}
+func (a *TAsset) VerifyCoin(coinID []byte, redeemScript []byte) error {
+	return nil
+}
+func (a *TAsset) ValidateContract(contract []byte) error {
+	return nil
+}
 
 func newAsset(id uint32, lotSize uint64) *asset.BackedAsset {
 	return &asset.BackedAsset{
@@ -119,7 +128,29 @@ func (ta *TArchivist) UserMatches(aid account.AccountID, base, quote uint32) ([]
 func (ta *TArchivist) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) {
 	return nil, nil
 }
-func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule) {}
+func (ta *TArchivist) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ta *TArchivist) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+
+// Contract data.
+func (ta *TArchivist) SaveContractA(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
+	return nil
+}
+func (ta *TArchivist) SaveAuditAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ta *TArchivist) SaveContractB(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
+	return nil
+}
+func (ta *TArchivist) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
+
+// Redeem data.
+func (ta *TArchivist) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+	return nil
+}
+func (ta *TArchivist) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ta *TArchivist) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+	return nil
+}
+func (ta *TArchivist) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule)             {}
 func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
 	return nil, false, false
 }

@@ -551,9 +551,9 @@ type DCRScriptAddrs struct {
 	NRequired int
 }
 
-// ExtractScriptAddrs extracts the addresses from the pubkey script, or the
-// redeem script if the pubkey script is P2SH. Addresses can be of several
-// types, but the types suppported will be pubkey
+// ExtractScriptAddrs extracts the addresses from script. Addresses are
+// separated into pubkey and pubkey hash, where the pkh addresses are actually a
+// catch all that incluses P2SH addresss (TODO: revise DCRScriptAddrs?).
 func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScriptAddrs, error) {
 	pubkeys := make([]dcrutil.Address, 0)
 	pkHashes := make([]dcrutil.Address, 0)
@@ -609,6 +609,7 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 			return nil, fmt.Errorf("no redeem script provided for P2SH pubkey script")
 		}
 		evalScript = redeemScript
+		// TODO: check p2sh address from the pkScript == address(hash(redeemScript))
 	}
 	scriptAddrs, err := ExtractScriptAddrs(evalScript, chainParams)
 	if err != nil {
@@ -635,7 +636,9 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 	}, nil
 }
 
-// ExtractContractHash extracts the redeem script hash from the P2SH script.
+// ExtractContractHash extracts the contract P2SH address from a pkScript. If
+// the pkScript does not require only 1 signature, or pay to just 1 address, it
+// is an error. TODO: consider a more general function name.
 func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte, error) {
 	pkScript, err := hex.DecodeString(scriptHex)
 	if err != nil {

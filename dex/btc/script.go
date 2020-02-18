@@ -575,6 +575,13 @@ func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte
 		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %v",
 			scriptHex, err)
 	}
+	return ExtractScriptHash(pkScript, chainParams)
+}
+
+// ExtractContractHash attempts to extract the redeem script hash from pkScript.
+// The pkScript must be a a P2SH script, requiring only 1 pkh address, which
+// must be a script hash address.
+func ExtractScriptHash(pkScript []byte, chainParams *chaincfg.Params) ([]byte, error) {
 	scriptAddrs, err := ExtractScriptAddrs(pkScript, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting contract address: %v", err)
@@ -588,5 +595,6 @@ func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte
 	if !ok {
 		return nil, fmt.Errorf("wrong contract address type %s: %T", contractAddr, contractAddr)
 	}
+	// ScriptAddress is really a.hash[:], not the encoded address.
 	return contractAddr.ScriptAddress(), nil
 }

@@ -198,6 +198,31 @@ func (btc *Backend) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error)
 	return btc.utxo(txHash, vout, redeemScript)
 }
 
+// ValidateCoinID attempts to decode the coinID.
+func (btc *Backend) ValidateCoinID(coinID []byte) error {
+	_, _, err := decodeCoinID(coinID)
+	return err
+}
+
+// VerifyCoin decodes the coinID, and then attempts to retrieve details on the
+// transaction output from the blockchain. If the redeemScript is provided, the
+// coinID must be a P2SH output with a script hash corresponding to the provided
+// redeem script.
+func (btc *Backend) VerifyCoin(coinID []byte, redeemScript []byte) error {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+	}
+	return btc.validateTxOut(txHash, vout, redeemScript)
+}
+
+// ValidateContract ensures that the swap contract is constructed properly, and
+// contains valid sender and receiver addresses.
+func (btc *Backend) ValidateContract(contract []byte) error {
+	_, _, _, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
+	return err
+}
+
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the btc package. Part of the asset.Backend interface.
@@ -232,6 +257,43 @@ func newBTC(name string, chainParams *chaincfg.Params, logger dex.Logger, node b
 		node:        node,
 	}
 	return btc
+}
+
+// validateTxOut validates an outpoint (txHash:out) by retrieving the associated
+// output's pkScript, and if the provided redeemScript is not empty, verifying
+// that the pkScript is a P2SH with a script hash to which the redeem script
+// hashes. This also screens out multi-sig scripts.
+func (btc *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScript []byte) error {
+	_, _, pkScript, err := btc.getTxOutInfo(txHash, vout)
+	if err != nil {
+		return err
+	}
+
+	scriptType := dexbtc.ParseScriptType(pkScript, redeemScript)
+	if scriptType == dexbtc.ScriptUnsupported {
+		return dex.UnsupportedScriptError
+	}
+
+	switch {
+	case scriptType.IsMultiSig(): // includes p2sh for a multisig redeem script
+		return fmt.Errorf("multi-sig not allowed")
+	case scriptType.IsP2SH(): // regular or stake (vsp vote) p2sh
+		if len(redeemScript) == 0 {
+			return fmt.Errorf("no redeem script provided for P2SH pkScript")
+		}
+		scriptHash, err := dexbtc.ExtractScriptHash(pkScript, btc.chainParams)
+		if err != nil {
+			return fmt.Errorf("failed to extract script hash for P2SH pkScript: %v", err)
+		}
+		// Check the script hash against the hash of the redeem script.
+		if !bytes.Equal(btcutil.Hash160(redeemScript), scriptHash) {
+			return fmt.Errorf("redeem script does not match script hash from P2SH pkScript")
+		}
+	case len(redeemScript) > 0:
+		return fmt.Errorf("redeem script provided for non P2SH pubkey script")
+	}
+
+	return nil
 }
 
 // Get the UTXO data and perform some checks for script support.

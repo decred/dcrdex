@@ -21,6 +21,16 @@ type Backend interface {
 	InitTxSize() uint32
 	// CheckAddress checks that the given address is parseable.
 	CheckAddress(string) bool
+	// ValidateCoinID checks the coinID to ensure it can be decoded.
+	ValidateCoinID(coinID []byte) error
+	// VerifyCoin decodes the coinID, and then attempts to retrieve details from
+	// the blockchain. The redeemScript is verified to correspond with the
+	// coinID. e.g. The coinID refers to a P2SH transaction output with a script
+	// hash corresponding to the provided redeem script.
+	VerifyCoin(coinID []byte, redeemScript []byte) error
+	// ValidateContract ensures that the swap contract is constructed properly
+	// for the asset.
+	ValidateContract(contract []byte) error
 }
 
 // Coin provides data about an unspent transaction output.
