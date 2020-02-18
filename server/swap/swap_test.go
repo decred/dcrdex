@@ -25,6 +25,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 )
 
@@ -212,9 +213,27 @@ func (m *TAuthManager) getResp(id account.AccountID) (*msgjson.Message, *msgjson
 
 type TStorage struct{}
 
-func (s *TStorage) UpdateMatch(match *order.Match) error { return nil }
-func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
-func (s *TStorage) LastErr() error                       { return nil }
+func (s *TStorage) UpdateMatch(match *order.Match) error                    { return nil }
+func (s *TStorage) CancelOrder(*order.LimitOrder) error                     { return nil }
+func (s *TStorage) LastErr() error                                          { return nil }
+func (s *TStorage) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
+func (s *TStorage) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+
+// Contract data.
+func (s *TStorage) SaveContractA(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
+	return nil
+}
+func (s *TStorage) SaveAuditAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (s *TStorage) SaveContractB(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
+	return nil
+}
+func (s *TStorage) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
+
+// Redeem data.
+func (s *TStorage) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error { return nil }
+func (s *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error               { return nil }
+func (s *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error { return nil }
+func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error               { return nil }
 
 // This stub satisfies asset.Backend.
 type TAsset struct {
@@ -236,6 +255,15 @@ func (a *TAsset) Coin(coinID, redeemScript []byte) (asset.Coin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	return a.coin, a.coinErr
+}
+func (a *TAsset) ValidateCoinID(coinID []byte) error {
+	return nil
+}
+func (a *TAsset) VerifyCoin(coinID []byte, redeemScript []byte) error {
+	return nil
+}
+func (a *TAsset) ValidateContract(contract []byte) error {
+	return nil
 }
 func (a *TAsset) BlockChannel(size int) chan uint32 { return a.bChan }
 func (a *TAsset) InitTxSize() uint32                { return 100 }
@@ -981,8 +1009,8 @@ func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
 		OrderID: dirtyEncode(oid),
 		MatchID: dirtyEncode(matchInfo.matchID),
 		// We control what the backend returns, so the txid doesn't matter right now.
-		CoinID:   coinID,
-		Time:     encode.UnixMilliU(unixMsNow()),
+		CoinID: coinID,
+		//Time:     encode.UnixMilliU(unixMsNow()),
 		Contract: dirtyEncode(contract),
 	})
 
@@ -1017,7 +1045,7 @@ func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {
 		OrderID: dirtyEncode(oid),
 		MatchID: dirtyEncode(matchInfo.matchID),
 		CoinID:  coinID,
-		Time:    encode.UnixMilliU(unixMsNow()),
+		//Time:    encode.UnixMilliU(unixMsNow()),
 	})
 	return &tRedeem{
 		req:  req,

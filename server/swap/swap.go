@@ -19,6 +19,7 @@ import (
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 )
 
@@ -50,6 +51,7 @@ type AuthManager interface {
 
 // Storage updates match data in what is presumably a database.
 type Storage interface {
+	db.SwapArchiver
 	LastErr() error
 	UpdateMatch(match *order.Match) error
 	CancelOrder(*order.LimitOrder) error
@@ -636,6 +638,9 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 	match.mtx.RLock()
 	defer match.mtx.RUnlock()
 
+	// Maker broadcasts the swap contract. Sequence: NewlyMatched ->
+	// MakerSwapCast -> TakerSwapCast -> MakerRedeemed -> MatchComplete
+
 	switch match.Status {
 	case order.NewlyMatched, order.TakerSwapCast:
 		counterParty.order, actor.order = taker, maker
@@ -648,7 +653,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 			nextStep = order.MakerSwapCast
 			isBaseAsset = maker.Sell
 			reqSigs = [][]byte{match.Sigs.MakerMatch}
-		} else {
+		} else /* TakerSwapCast */ {
 			nextStep = order.MakerRedeemed
 			isBaseAsset = !maker.Sell
 			reqSigs = [][]byte{match.Sigs.MakerAudit}
@@ -666,7 +671,7 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 			isBaseAsset = !maker.Sell
 			reqSigs = [][]byte{match.Sigs.TakerMatch, match.Sigs.TakerAudit}
 			ackType = msgjson.AuditRoute
-		} else {
+		} else /* MakerRedeemed */ {
 			nextStep = order.MatchComplete
 			isBaseAsset = maker.Sell
 			reqSigs = [][]byte{match.Sigs.TakerRedeem}
@@ -766,6 +771,8 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 			fmt.Sprintf("error parsing audit notification acknowledgment: %v", err))
 		return
 	}
+	// Note: ack.MatchID unused, but could be checked against acker.match.ID().
+
 	// Check the signature.
 	sigBytes, err := hex.DecodeString(ack.Sig)
 	if err != nil {
@@ -786,28 +793,41 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 		return
 	}
 
-	// Set the appropriate signature, based on the current step and actor.
+	// Set and store the appropriate signature, based on the current step and
+	// actor.
+	mktMatch := db.MarketMatchID{
+		MatchID: acker.match.ID(),
+		Base:    acker.match.Maker.BaseAsset, // same for taker's init as BaseAsset refers to the market
+		Quote:   acker.match.Maker.QuoteAsset,
+	}
+
 	acker.match.mtx.Lock()
 	defer acker.match.mtx.Unlock()
+	// ack of either contract audit or redeem receipt
 	if acker.isAudit {
 		if acker.isMaker {
-			acker.match.Sigs.MakerAudit = sigBytes
+			acker.match.Sigs.MakerAudit = sigBytes         // i.e. audited taker's contract
+			s.storage.SaveAuditAckSigA(mktMatch, sigBytes) // TODO: check err and/or make the backend go fatal
 		} else {
 			acker.match.Sigs.TakerAudit = sigBytes
+			s.storage.SaveAuditAckSigB(mktMatch, sigBytes)
 		}
 	} else {
 		if acker.isMaker {
 			acker.match.Sigs.MakerRedeem = sigBytes
+			s.storage.SaveRedeemAckSigA(mktMatch, sigBytes)
 		} else {
 			acker.match.Sigs.TakerRedeem = sigBytes
+			s.storage.SaveRedeemAckSigB(mktMatch, sigBytes)
 		}
 	}
 }
 
-// processInit processes the `init` RPC request, which is used to inform the
-// DEX of a newly broadcast swap transaction. Once the transaction is seen and
-// and audited by the Swapper, the counter-party is informed with an 'audit'
-// request. This method is run as a coin waiter.
+// processInit processes the `init` RPC request, which is used to inform the DEX
+// of a newly broadcast swap transaction. Once the transaction is seen and and
+// audited by the Swapper, the counter-party is informed with an 'audit'
+// request. This method is run as a coin waiter, hence the return value
+// indicates if future attempts should be made to check coin status.
 func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepInfo *stepInformation) bool {
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
@@ -841,6 +861,34 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 
 	// Update the match.
 	swapTime := unixMsNow()
+	matchID := stepInfo.match.Match.ID()
+
+	// Store the swap contract and the coinID (e.g. txid:vout) containing the
+	// contract script hash. Maker is party A, the initiator. Taker is party B,
+	// the participant.
+	//
+	// Failure to update match status is a fatal DB error. If we continue, the
+	// swap may succeed, but there will be no way to recover or retrospectively
+	// determine the swap outcome. Abort.
+	storFn := s.storage.SaveContractB
+	if stepInfo.actor.isMaker {
+		storFn = s.storage.SaveContractA
+	}
+	match := stepInfo.match
+	mktMatch := db.MarketMatchID{
+		MatchID: match.ID(),
+		Base:    match.Maker.BaseAsset, // same for taker's init as BaseAsset refers to the market
+		Quote:   match.Maker.QuoteAsset,
+	}
+	swapTimeMs := encode.UnixMilli(swapTime)
+	err = storFn(mktMatch, params.Contract, params.CoinID, swapTimeMs)
+	if err != nil {
+		log.Errorf("saving swap contract (match id=%v, maker=%v) failed: %v",
+			matchID, actor.isMaker, err)
+		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
+			fmt.Sprintf("internal server error"))
+		return coinwaiter.TryAgain
+	}
 
 	actor.status.mtx.Lock()
 	actor.status.swap = coin
@@ -849,20 +897,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 
 	stepInfo.match.mtx.Lock()
 	stepInfo.match.Status = stepInfo.nextStep
-	matchID := stepInfo.match.Match.ID()
-
-	// Store or update the match in the Swapper's storage backend. Failure to
-	// update match status is a fatal DB error. If we continue, the swap may
-	// succeed, but there will be no way to recover or retrospectively determine
-	// the swap outcome. Abort.
-	err = s.storage.UpdateMatch(stepInfo.match.Match)
 	stepInfo.match.mtx.Unlock()
-	if err != nil {
-		log.Errorf("UpdateMatch (id=%v) failed: %v", matchID, err)
-		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
-			fmt.Sprintf("internal server error"))
-		return coinwaiter.DontTryAgain // fatal
-	}
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
@@ -875,7 +910,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	auditParams := &msgjson.Audit{
 		OrderID:  idToBytes(counterParty.order.ID()),
 		MatchID:  matchID[:],
-		Time:     uint64(encode.UnixMilli(swapTime)),
+		Time:     uint64(swapTimeMs),
 		Contract: params.Contract,
 	}
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)
@@ -912,6 +947,14 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		return coinwaiter.TryAgain
 	}
 
+	// TODO(consider): Extract secret from initiator's (maker's) redemption
+	// transaction. The Backend would need a method identify the component of
+	// the redemption transaction that contains the secret and extract it. In a
+	// UTXO-based asset, this means finding the input that spends the output of
+	// the counterparty's contract, and process that input's signature script
+	// with FindKeyPush. Presently this is up to the clients and not stored with
+	// the server.
+
 	// Make sure that the expected output is being spent.
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	counterParty.status.mtx.RLock()
@@ -929,19 +972,42 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		return coinwaiter.DontTryAgain
 	}
 
-	// Modify the match's swapStatuses.
+	// Store the swap contract and the coinID (e.g. txid:vout) containing the
+	// contract script hash. Maker is party A, the initiator. Taker is party B,
+	// the participant.
+	storFn := s.storage.SaveRedeemB
+	if stepInfo.actor.isMaker {
+		storFn = s.storage.SaveRedeemA
+	}
+	match := stepInfo.match
+	matchID := match.ID()
+	mktMatch := db.MarketMatchID{
+		MatchID: matchID,
+		Base:    match.Maker.BaseAsset, // same for taker's redeem as BaseAsset refers to the market
+		Quote:   match.Maker.QuoteAsset,
+	}
 	swapTime := unixMsNow()
+	swapTimeMs := encode.UnixMilli(swapTime)
+	err = storFn(mktMatch, params.CoinID, swapTimeMs)
+	if err != nil {
+		log.Errorf("saving redeem transaction (match id=%v, maker=%v) failed: %v",
+			matchID, actor.isMaker, err)
+		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
+			fmt.Sprintf("internal server error"))
+		return coinwaiter.TryAgain // why not, the DB might come alive
+	}
+
+	// Modify the match's swapStatuses.
 	actor.status.mtx.Lock()
 	actor.status.redemption = coin
 	actor.status.redeemTime = swapTime
 	actor.status.mtx.Unlock()
 
-	stepInfo.match.mtx.Lock()
-	stepInfo.match.Status = stepInfo.nextStep
-	stepInfo.match.mtx.Unlock()
+	match.mtx.Lock()
+	match.Status = stepInfo.nextStep
+	match.mtx.Unlock()
 
 	// Issue a positive response to the actor.
-	matchID := stepInfo.match.ID()
 	s.authMgr.Sign(params)
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
 		MatchID: matchID.String(),
@@ -950,10 +1016,12 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	// Inform the counterparty.
 	rParams := &msgjson.Redemption{
-		OrderID: idToBytes(counterParty.order.ID()),
-		MatchID: matchID[:],
-		CoinID:  params.CoinID,
-		Time:    uint64(encode.UnixMilli(swapTime)),
+		Redeem: msgjson.Redeem{
+			OrderID: idToBytes(counterParty.order.ID()),
+			MatchID: matchID[:],
+			CoinID:  params.CoinID,
+		},
+		Time: uint64(encode.UnixMilli(swapTime)),
 	}
 
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
@@ -965,7 +1033,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Set up the acknowledgement callback.
 	ack := &messageAcker{
 		user:    counterParty.user,
-		match:   stepInfo.match,
+		match:   match,
 		params:  rParams,
 		isMaker: counterParty.isMaker,
 		// isAudit: false,
@@ -974,12 +1042,13 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		s.processAck(msg, ack)
 	})
 	return coinwaiter.DontTryAgain
-
 }
 
 // handleInit handles the 'init' request from a user, which is used to inform
-// the DEX of a newly broadcast swap transaction. Most of the work is performed
-// by processInit, but the request is parsed and user is authenticated first.
+// the DEX of a newly broadcast swap transaction. The Init message includes the
+// swap contract script and the CoinID of contract. Most of the work is
+// performed by processInit, but the request is parsed and user is authenticated
+// first.
 func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
 	params := new(msgjson.Init)
 	err := json.Unmarshal(msg.Payload, &params)
@@ -1000,10 +1069,57 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 		return rpcErr
 	}
 
-	// Since we have to consider latency, run this as a coin waiter.
-	s.coinWaiter.Wait(coinwaiter.NewSettings(user, msg, params.CoinID, txWaitExpiration), func() bool {
-		return s.processInit(msg, params, stepInfo)
-	})
+	// init requests should only be sent when contracts are still required, in
+	// the correct sequence, and by the correct party.
+	switch stepInfo.match.Status {
+	case order.NewlyMatched:
+		if !stepInfo.actor.isMaker {
+			// s.step should have returned an error of code SettlementSequenceError.
+			panic("handleInit: this stepInformation should be for the maker!")
+		}
+	case order.MakerSwapCast:
+		if stepInfo.actor.isMaker {
+			// s.step should have returned an error of code SettlementSequenceError.
+			panic("handleInit: this stepInformation should be for the taker!")
+		}
+	default:
+		fmt.Println("Swap status:", stepInfo.match.Status)
+		return &msgjson.Error{
+			Code:    msgjson.SettlementSequenceError,
+			Message: "swap contract already provided",
+		}
+	}
+
+	// Validate the coinID and contract script before starting a coinWaiter.
+	err = stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
+	if err != nil {
+		// TODO: ensure Backends provide sanitized errors or type information to
+		// provide more details to the client.
+		return &msgjson.Error{
+			Code:    msgjson.ContractError,
+			Message: "invalid contract coinID or script",
+		}
+	}
+	err = stepInfo.asset.Backend.ValidateContract(params.Contract)
+	if err != nil {
+		// TODO: ensure Backends provide sanitized errors or type information to
+		// provide more details to the client.
+		return &msgjson.Error{
+			Code:    msgjson.ContractError,
+			Message: "invalid swap contract",
+		}
+	}
+	// TODO: consider also checking recipient of contract here, but it is also
+	// checked in processInit. Note that value cannot be checked as transaction
+	// details, which includes the coin/output value, are not yet retrieved.
+
+	// Since we have to consider broadcast latency of the asset's network, run
+	// this as a coin waiter.
+	s.coinWaiter.Wait(
+		coinwaiter.NewSettings(user, msg /* just for msg.ID */, params.CoinID /* just for error message */, txWaitExpiration),
+		func() bool {
+			return s.processInit(msg, params, stepInfo)
+		})
 	return nil
 }
 
@@ -1029,6 +1145,19 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	stepInfo, rpcErr := s.step(user, params.MatchID.String())
 	if rpcErr != nil {
 		return rpcErr
+	}
+
+	// Validate the redeem coin ID before starting a coinWaiter. This does not
+	// check the blockchain, but does ensure the CoinID can be decoded for the
+	// asset before starting up a coin Waiter.
+	err = stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
+	if err != nil {
+		// TODO: ensure Backends provide sanitized errors or type information to
+		// provide more details to the client.
+		return &msgjson.Error{
+			Code:    msgjson.ContractError,
+			Message: "invalid 'redeem' parameters",
+		}
 	}
 
 	// Since we have to consider latency, run this as a coin waiter.
@@ -1199,7 +1328,8 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	// responding user is the maker or taker.
 	for i, matchInfo := range matches {
 		ack := acks[i]
-		if ack.MatchID != matchInfo.match.ID().String() {
+		matchID := matchInfo.match.ID()
+		if ack.MatchID != matchID.String() {
 			s.respondError(msg.ID, user, msgjson.IDMismatchError,
 				fmt.Sprintf("unexpected match ID at acknowledgment index %d", i))
 			return
@@ -1223,7 +1353,27 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			return
 		}
 
-		// Store the signature in the matchTracker.
+		// Store the signature in the DB.
+		storFn := s.storage.SaveMatchAckSigB
+		if matchInfo.isMaker {
+			storFn = s.storage.SaveMatchAckSigA
+		}
+		mid := db.MarketMatchID{
+			MatchID: matchID,
+			Base:    matchInfo.match.Maker.BaseAsset, // same for taker's redeem as BaseAsset refers to the market
+			Quote:   matchInfo.match.Maker.QuoteAsset,
+		}
+		err = storFn(mid, sigBytes)
+		if err != nil {
+			log.Errorf("saving match ack signature (match id=%v, maker=%v) failed: %v",
+				mid, matchInfo.isMaker, err)
+			s.respondError(msg.ID, matchInfo.user, msgjson.UnknownMarketError,
+				fmt.Sprintf("internal server error"))
+			return
+		}
+
+		// Store the signature in the matchTracker. These must be collected
+		// before the init steps begin and swap contracts are broadcasted.
 		matchInfo.match.mtx.Lock()
 		if matchInfo.isMaker {
 			matchInfo.match.Sigs.MakerMatch = sigBytes
@@ -1231,6 +1381,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			matchInfo.match.Sigs.TakerMatch = sigBytes
 		}
 		matchInfo.match.mtx.Unlock()
+
 	}
 }
 
@@ -1355,6 +1506,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 			toMonitor = append(toMonitor, match)
 		}
 
+		// Create an acker for maker and taker, sharing the same matchTracker.
 		makerAck, takerAck := newMatchAckers(match)
 		addUserMatch(makerAck)
 		addUserMatch(takerAck)
@@ -1367,25 +1519,29 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 	}
 	s.matchMtx.Unlock()
 
-	// Send the user notifications.
+	// Send the user match notifications.
 	for user, matches := range userMatches {
+		// msgs is a slice of msgjson.Match created by newMatchAckers
+		// (matchNotifications) for all makers and takers.
 		msgs := make([]msgjson.Signable, 0, len(matches))
 		for _, m := range matches {
 			msgs = append(msgs, m.params)
 		}
+
+		// Solicit match acknowledgments.
 		req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
 		if err != nil {
 			log.Errorf("error creating match notification request: %v", err)
 			// TODO: prevent user penalty
 			continue
 		}
-		{
-			m := matches
-			u := user
-			s.authMgr.Request(user, req, func(_ comms.Link, msg *msgjson.Message) {
-				s.processMatchAcks(u, msg, m)
-			})
-		}
+
+		// Copy the loop variables for capture by the match acknowledgement
+		// response handler.
+		u, m := user, matches
+		s.authMgr.Request(user, req, func(_ comms.Link, msg *msgjson.Message) {
+			s.processMatchAcks(u, msg, m)
+		})
 	}
 }
 
