@@ -32,8 +32,6 @@ type Settings struct {
 // error message.
 func NewSettings(user account.AccountID, msg *msgjson.Message, coinID []byte, txWaitExpiration time.Duration) *Settings {
 	return &Settings{
-		// must smarten up this expiration value before merge. Where should this
-		// come from?
 		Expiration: time.Now().Add(txWaitExpiration),
 		AccountID:  user,
 		Request:    msg,
@@ -104,6 +102,7 @@ func (w *Waiter) Run(ctx context.Context) {
 		// Grab new waiters
 		tNow := time.Now()
 		for _, mFunc := range w.waiters {
+			// TODO: deal with ctx.Err() != nil a.k.a. shutdown
 			if !mFunc.f() {
 				// If this waiter has expired, issue the timeout error to the client
 				// and do not append to the agains slice.
@@ -118,7 +117,7 @@ func (w *Waiter) Run(ctx context.Context) {
 					continue
 				}
 				agains = append(agains, mFunc)
-			} // End if !mFunc.f(). nothing to do if mFunc returned dontTryAgain=true
+			} // End if !mFunc.f(). Nothing to do if mFunc returned dontTryAgain=true.
 		}
 		w.waiters = agains
 	}
