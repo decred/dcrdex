@@ -21,16 +21,16 @@ import (
 const (
 	maxLogRolls        = 16
 	defaultRPCAddr     = "localhost:5757"
-	defaultRPCCertFile = "dexc_rpc.cert"
-	defaultRPCKeyFile  = "dexc_rpc.key"
+	defaultRPCCertFile = "rpc.cert"
+	defaultRPCKeyFile  = "rpc.key"
 	defaultWebAddr     = "localhost:5758"
-	configFilename     = "dexc_mainnet.conf"
+	configFilename     = "dexc.conf"
 	certsFilename      = "certs.json"
 	defaultLogLevel    = "info"
 )
 
 var (
-	applicationDirectory      = dcrutil.AppDataDir("dexclient", false)
+	applicationDirectory      = dcrutil.AppDataDir("dexc", false)
 	defaultConfigPath         = filepath.Join(applicationDirectory, configFilename)
 	logFilename, netDirectory string
 	logDirectory              string
@@ -58,23 +58,23 @@ func setNet(net string) string {
 
 // Config is the configuration for the DEX client application.
 type Config struct {
-	DataDir     string `long:"dir" description:"Path to application directory"`
-	Config      string `long:"config" description:"Path to an INI configuration file. default:[home]/dexc_mainnet.conf"`
-	DBPath      string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
-	CertsPath   string `long:"certs" description:"Path to a JSON-formatted file linking DEX URL keys to TLS certificate filepaths."`
-	RPCOn       bool   `long:"rpc" description:"turn on the rpc server"`
-	RPCAddr     string `long:"rpcaddr" description:"RPCServer listen address"`
-	RPCUser     string `long:"rpcuser" description:"RPCServer user name"`
-	RPCPassword string `long:"rpcpassword" description:"RPCServer password"`
-	RPCCert     string `long:"rpccert" description:"RPCServer certificate file location"`
-	RPCKey      string `long:"rpckey" description:"RPCServer key file location"`
-	WebOn       bool   `long:"web" description:"turn on the web server"`
-	WebAddr     string `long:"webaddr" description:"HTTP server address"`
-	NoTUI       bool   `long:"notui" description:"disable the terminal-based user interface. must be used with --rpc or --web"`
-	Testnet     bool   `long:"testnet" description:"use testnet"`
-	Simnet      bool   `long:"simnet" description:"use simnet"`
-	ReloadHTML  bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
-	DebugLevel  string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
+	AppData    string `long:"appdata" description:"Path to application directory"`
+	Config     string `long:"config" description:"Path to an INI configuration file. default:[home]/dexc_mainnet.conf"`
+	DBPath     string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
+	CertsPath  string `long:"certs" description:"Path to a JSON-formatted file linking DEX URL keys to TLS certificate filepaths."`
+	RPCOn      bool   `long:"rpc" description:"turn on the rpc server"`
+	RPCAddr    string `long:"rpcaddr" description:"RPC server listen address"`
+	RPCUser    string `long:"rpcuser" description:"RPC server user name"`
+	RPCPass    string `long:"rpcpass" description:"RPC server password"`
+	RPCCert    string `long:"rpccert" description:"RPC server certificate file location"`
+	RPCKey     string `long:"rpckey" description:"RPC server key file location"`
+	WebOn      bool   `long:"web" description:"turn on the web server"`
+	WebAddr    string `long:"webaddr" description:"HTTP server address"`
+	NoTUI      bool   `long:"notui" description:"disable the terminal-based user interface. must be used with --rpc or --web"`
+	Testnet    bool   `long:"testnet" description:"use testnet"`
+	Simnet     bool   `long:"simnet" description:"use simnet"`
+	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
+	DebugLevel string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
 	// Certs is not set by the client. It is parsed from the JSON file at the
 	// Certs path.
 	Certs map[string]string
@@ -82,7 +82,7 @@ type Config struct {
 }
 
 var defaultConfig = Config{
-	DataDir:    applicationDirectory,
+	AppData:    applicationDirectory,
 	DebugLevel: defaultLogLevel,
 	RPCAddr:    defaultRPCAddr,
 	WebAddr:    defaultWebAddr,
@@ -112,8 +112,8 @@ func Configure() (*Config, error) {
 
 	// If the app directory has been changed, but the config file path hasn't,
 	// reform the config file path with the new directory.
-	if preCfg.DataDir != applicationDirectory && preCfg.Config == defaultConfigPath {
-		preCfg.Config = filepath.Join(preCfg.DataDir, configFilename)
+	if preCfg.AppData != applicationDirectory && preCfg.Config == defaultConfigPath {
+		preCfg.Config = filepath.Join(preCfg.AppData, configFilename)
 	}
 	cfgPath := cleanAndExpandPath(preCfg.Config)
 
@@ -158,14 +158,14 @@ func Configure() (*Config, error) {
 	}
 
 	if cfg.RPCCert == "" {
-		cfg.RPCCert = filepath.Join(preCfg.DataDir, defaultRPCCertFile)
+		cfg.RPCCert = filepath.Join(preCfg.AppData, defaultRPCCertFile)
 	}
 
 	if cfg.RPCKey == "" {
-		cfg.RPCKey = filepath.Join(preCfg.DataDir, defaultRPCKeyFile)
+		cfg.RPCKey = filepath.Join(preCfg.AppData, defaultRPCKeyFile)
 	}
 
-	defaultCertsPath := filepath.Join(preCfg.DataDir, certsFilename)
+	defaultCertsPath := filepath.Join(preCfg.AppData, certsFilename)
 	if cfg.CertsPath == "" {
 		cfg.CertsPath = defaultCertsPath
 	}

@@ -42,7 +42,9 @@ const (
 
 var (
 	// Check that core.Core satifies ClientCore.
-	_   ClientCore = (*core.Core)(nil)
+	_ ClientCore = (*core.Core)(nil)
+	// Check that sync.Mutex satisfies rwLocker.
+	_   rwLocker = (*sync.RWMutex)(nil)
 	log slog.Logger
 )
 
@@ -52,6 +54,15 @@ type ClientCore interface {
 	Book(dex string, base, quote uint32) *core.OrderBook
 	Unsync(dex string, base, quote uint32)
 	Balance(uint32) (uint64, error)
+}
+
+// rwLocker is satisfied by sync.RWMutex and is used in tests.
+type rwLocker interface {
+	Lock()
+	RLock()
+	RLocker() sync.Locker
+	RUnlock()
+	Unlock()
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -127,7 +138,7 @@ type RPCServer struct {
 	listener net.Listener
 	srv      *http.Server
 	authsha  [32]byte
-	mtx      sync.RWMutex
+	mtx      rwLocker
 	syncers  map[string]*marketSyncer
 	clients  map[int32]*wsClient
 	wg       sync.WaitGroup
@@ -268,6 +279,7 @@ func New(cfg *Config) (*RPCServer, error) {
 		core:     cfg.Core,
 		listener: listener,
 		srv:      httpServer,
+		mtx:      new(sync.RWMutex),
 		syncers:  make(map[string]*marketSyncer),
 		clients:  make(map[int32]*wsClient),
 	}

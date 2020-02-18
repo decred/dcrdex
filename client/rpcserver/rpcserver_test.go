@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +29,38 @@ var (
 	errT    = fmt.Errorf("test error")
 	tLogger dex.Logger
 	tCtx    context.Context
+	_       rwLocker = (*tRWMutex)(nil)
 )
+
+type tRWMutex struct {
+	m      *sync.RWMutex
+	locked chan struct{}
+}
+
+// Lock will wait until it can send on mtx.locked if mtx.lock is not nil.
+func (mtx *tRWMutex) Lock() {
+	mtx.m.Lock()
+	if mtx.locked != nil {
+		mtx.locked <- struct{}{}
+		mtx.locked = nil
+	}
+}
+
+func (mtx *tRWMutex) RLock() {
+	mtx.m.RLock()
+}
+
+func (mtx *tRWMutex) RLocker() sync.Locker {
+	return mtx.m.RLocker()
+}
+
+func (mtx *tRWMutex) RUnlock() {
+	mtx.m.RUnlock()
+}
+
+func (mtx *tRWMutex) Unlock() {
+	mtx.m.Unlock()
+}
 
 type TCore struct {
 	balanceErr error
@@ -141,6 +173,8 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
+	mtx := &tRWMutex{m: new(sync.RWMutex)}
+	s.mtx = mtx
 	SetLogger(tLogger)
 	if start {
 		waiter := dex.NewStartStopWaiter(s)
@@ -493,8 +527,9 @@ func TestClientMap(t *testing.T) {
 	s, _, shutdown := newTServer(t, true, "", "")
 	conn := new(TConn)
 
+	s.mtx.(*tRWMutex).locked = make(chan struct{})
 	go s.websocketHandler(conn, "someip")
-	time.Sleep(time.Millisecond * 5)
+	<-s.mtx.(*tRWMutex).locked
 
 	// While we're here, check that the client is properly mapped.
 	var cl *wsClient

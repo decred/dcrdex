@@ -40,7 +40,7 @@ func TestConfigure(t *testing.T) {
 	createFile(simFP, "webaddr=:1234\nsimnet=1\nweb=1")
 
 	// Check the mainnet configuration.
-	os.Args = []string{cmd, "--dir", dir, "--config", mainFP}
+	os.Args = []string{cmd, "--appdata", dir, "--config", mainFP}
 	_, err := Configure()
 	if err != nil {
 		t.Fatalf("mainnet Configure error: %v", err)
@@ -53,7 +53,7 @@ func TestConfigure(t *testing.T) {
 	check("mainnet webaddr", cfg.WebAddr == ":9876")
 
 	// Check the testnet configuration.
-	os.Args = []string{cmd, "--dir", dir, "--testnet", "--config", testFP}
+	os.Args = []string{cmd, "--appdata", dir, "--testnet", "--config", testFP}
 	_, err = Configure()
 	if err != nil {
 		t.Fatalf("simnet Configure error: %v", err)
@@ -66,7 +66,7 @@ func TestConfigure(t *testing.T) {
 	check("testnet webaddr", cfg.WebAddr == defaultWebAddr)
 
 	// Check the simnet configuration.
-	os.Args = []string{cmd, "--dir", dir, "--simnet", "--config", simFP}
+	os.Args = []string{cmd, "--appdata", dir, "--simnet", "--config", simFP}
 	_, err = Configure()
 	if err != nil {
 		t.Fatalf("simnet Configure error: %v", err)
