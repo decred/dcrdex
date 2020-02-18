@@ -56,6 +56,13 @@ const (
 		aSigAckOfBRedeem BYTEA    -- counterparty's (initiator) sig with ack of participant REDEEM data
 	)`
 
+	RetrieveSwapData = `SELECT status, sigMatchAckMaker, sigMatchAckTaker,
+		aContractCoinID, aContract, aContractTime, bSigAckOfAContract,
+		bContractCoinID, bContract, bContractTime, aSigAckOfBContract,
+		aRedeemCoinID, aRedeemTime, bSigAckOfARedeem,
+		bRedeemCoinID, bRedeemTime, aSigAckOfBRedeem
+	FROM %s WHERE matchid = $1;`
+
 	InsertMatch = `INSERT INTO %s (matchid,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
@@ -94,7 +101,7 @@ const (
 		aContractCoinID = $3, aContract = $4, aContractTime = $5
 	WHERE matchid = $1;`
 	SetParticipantSwapData = `UPDATE %s SET status = $2,
-		bContractCoinID = $3, bContract = $4, bContractTime = $5;
+		bContractCoinID = $3, bContract = $4, bContractTime = $5
 	WHERE matchid = $1;`
 
 	SetParticipantContractAuditSig = `UPDATE %s SET bSigAckOfAContract = $2 WHERE matchid = $1;`
@@ -104,9 +111,9 @@ const (
 		aRedeemCoinID = $3, aRedeemTime = $4
 	WHERE matchid = $1;`
 	SetParticipantRedeemData = `UPDATE %s SET status = $2,
-		bRedeemCoinID = $3, bRedeemTime = $4;
+		bRedeemCoinID = $3, bRedeemTime = $4
 	WHERE matchid = $1;`
 
 	SetParticipantRedeemAckSig = `UPDATE %s SET bSigAckOfARedeem = $2 WHERE matchid = $1;`
-	SetInitiatorRedeemAckSig   = `UPDATE %s SET aSigAckOfARedeem = $2 WHERE matchid = $1;`
+	SetInitiatorRedeemAckSig   = `UPDATE %s SET aSigAckOfBRedeem = $2 WHERE matchid = $1;`
 )

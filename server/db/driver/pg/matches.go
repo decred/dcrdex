@@ -22,7 +22,6 @@ func (a *Archiver) matchTableName(match *order.Match) (string, error) {
 
 // UserMatches retrieves all matches involving a user on the given market.
 // TODO: consider a time limited version of this to retrieve recent matches.
-// TODO: load the Sigs.
 func (a *Archiver) UserMatches(aid account.AccountID, base, quote uint32) ([]*db.MatchData, error) {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
@@ -37,7 +36,6 @@ func (a *Archiver) UserMatches(aid account.AccountID, base, quote uint32) ([]*db
 	return userMatches(ctx, a.db, matchesTableName, aid)
 }
 
-// This does not swap data like the contract or coinIDs.
 func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) ([]*db.MatchData, error) {
 	stmt := fmt.Sprintf(internal.RetrieveUserMatches, tableName)
 	rows, err := dbe.QueryContext(ctx, stmt, aid)
@@ -149,8 +147,8 @@ func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, 
 		int64(match.Quantity), int64(match.Rate), int8(match.Status))
 }
 
-// UpdateMatch updates an existing match.
-func (a *Archiver) UpdateMatch(match *order.Match) error {
+// InsertMatch updates an existing match.
+func (a *Archiver) InsertMatch(match *order.Match) error {
 	matchesTableName, err := a.matchTableName(match)
 	if err != nil {
 		return err
@@ -158,10 +156,10 @@ func (a *Archiver) UpdateMatch(match *order.Match) error {
 	N, err := upsertMatch(a.db, matchesTableName, match)
 	if err != nil {
 		a.fatalBackendErr(err)
-		return fmt.Errorf("updateMatch: %v", err)
+		return err
 	}
 	if N != 1 {
-		return fmt.Errorf("updateMatch: updated %d rows, expected 1", N)
+		return fmt.Errorf("upsertMatch: updated %d rows, expected 1", N)
 	}
 	return nil
 }
@@ -196,6 +194,44 @@ func matchByID(dbe *sql.DB, tableName string, mid order.MatchID) (*db.MatchData,
 	return &m, nil
 }
 
+// SwapData retrieves the match status and all the SwapData for a match.
+func (a *Archiver) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
+	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+	stmt := fmt.Sprintf(internal.RetrieveSwapData, matchesTableName)
+
+	var sd db.SwapData
+	var status uint8
+	var contractATime, contractBTime, redeemATime, redeemBTime sql.NullInt64
+	err = a.db.QueryRow(stmt, mid).
+		Scan(&status,
+			&sd.SigMatchAckMaker, &sd.SigMatchAckTaker,
+			&sd.ContractACoinID, &sd.ContractA, &contractATime,
+			&sd.ContractAAckSig,
+			&sd.ContractBCoinID, &sd.ContractB, &contractBTime,
+			&sd.ContractBAckSig,
+			&sd.RedeemACoinID, &redeemATime,
+			&sd.RedeemAAckSig,
+			&sd.RedeemBCoinID, &redeemBTime,
+			&sd.RedeemBAckSig)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	sd.ContractATime = contractATime.Int64
+	sd.ContractBTime = contractBTime.Int64
+	sd.RedeemATime = redeemATime.Int64
+	sd.RedeemBTime = redeemBTime.Int64
+
+	return order.MatchStatus(status), &sd, nil
+}
+
+// Swap Data
+//
 // In the swap process, the counterparties are:
 // - Initiator or party A on chain X. This is the maker in the DEX.
 // - Participant or party B on chain Y. This is the taker in the DEX.
@@ -248,7 +284,7 @@ func (a *Archiver) saveContract(mid db.MarketMatchID, contract []byte, coinID []
 
 	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
 	stmt := fmt.Sprintf(contractStmt, matchesTableName)
-	_, err = a.db.Exec(stmt, status, mid.MatchID, coinID, contract, timestamp)
+	_, err = a.db.Exec(stmt, mid.MatchID, status, coinID, contract, timestamp)
 	return err
 }
 
@@ -287,7 +323,7 @@ func (a *Archiver) saveRedeem(mid db.MarketMatchID, coinID []byte, timestamp int
 
 	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
 	stmt := fmt.Sprintf(redeemStmt, matchesTableName)
-	_, err = a.db.Exec(stmt, mid.MatchID, coinID, timestamp)
+	_, err = a.db.Exec(stmt, mid.MatchID, status, coinID, timestamp)
 	return err
 }
 

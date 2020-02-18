@@ -118,7 +118,7 @@ func (ta *TArchivist) RevokeOrder(*order.LimitOrder) error                    { 
 func (ta *TArchivist) FailCancelOrder(*order.CancelOrder) error               { return nil }
 func (ta *TArchivist) UpdateOrderFilled(order.Order) error                    { return nil }
 func (ta *TArchivist) UpdateOrderStatus(order.Order, order.OrderStatus) error { return nil }
-func (ta *TArchivist) UpdateMatch(match *order.Match) error                   { return nil }
+func (ta *TArchivist) InsertMatch(match *order.Match) error                   { return nil }
 func (ta *TArchivist) MatchByID(mid order.MatchID, base, quote uint32) (*db.MatchData, error) {
 	return nil, nil
 }
@@ -127,6 +127,9 @@ func (ta *TArchivist) UserMatches(aid account.AccountID, base, quote uint32) ([]
 }
 func (ta *TArchivist) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) {
 	return nil, nil
+}
+func (ta *TArchivist) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
+	return 0, nil, nil
 }
 func (ta *TArchivist) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
 func (ta *TArchivist) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }

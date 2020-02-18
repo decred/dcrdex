@@ -53,7 +53,7 @@ type AuthManager interface {
 type Storage interface {
 	db.SwapArchiver
 	LastErr() error
-	UpdateMatch(match *order.Match) error
+	InsertMatch(match *order.Match) error
 	CancelOrder(*order.LimitOrder) error
 }
 
@@ -1468,8 +1468,8 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 	// let the others proceed, but that could seem selective trickery to the
 	// clients.
 	for _, match := range matches {
-		if err := s.storage.UpdateMatch(match.Match); err != nil {
-			log.Errorf("UpdateMatch (match id=%v) failed: %v", match.ID(), err)
+		if err := s.storage.InsertMatch(match.Match); err != nil {
+			log.Errorf("InsertMatch (match id=%v) failed: %v", match.ID(), err)
 			// TODO: notify clients (notification or response to what?)
 			// abortAll()
 			return

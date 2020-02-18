@@ -213,9 +213,12 @@ func (m *TAuthManager) getResp(id account.AccountID) (*msgjson.Message, *msgjson
 
 type TStorage struct{}
 
-func (s *TStorage) UpdateMatch(match *order.Match) error                    { return nil }
-func (s *TStorage) CancelOrder(*order.LimitOrder) error                     { return nil }
-func (s *TStorage) LastErr() error                                          { return nil }
+func (s *TStorage) InsertMatch(match *order.Match) error { return nil }
+func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
+func (s *TStorage) LastErr() error                       { return nil }
+func (s *TStorage) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
+	return 0, nil, nil
+}
 func (s *TStorage) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
 func (s *TStorage) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
 
