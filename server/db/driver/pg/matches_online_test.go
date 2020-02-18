@@ -3,7 +3,6 @@
 package pg
 
 import (
-	"bytes"
 	"testing"
 
 	"decred.org/dcrdex/dex/order"
@@ -26,8 +25,9 @@ func TestUpdateMatch(t *testing.T) {
 	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
 
 	matchAUpdated := matchA
-	matchAUpdated.Status = order.MakerSwapCast
-	matchAUpdated.Sigs.MakerMatch = randomBytes(73)
+	matchAUpdated.Status = order.NewlyMatched
+	// matchAUpdated.Status = order.MakerSwapCast
+	// matchAUpdated.Sigs.MakerMatch = randomBytes(73)
 
 	tests := []struct {
 		name    string
@@ -73,10 +73,6 @@ func TestUpdateMatch(t *testing.T) {
 			if matchData.Status != tt.match.Status {
 				t.Errorf("Incorrect match status, got %d, expected %d",
 					matchData.Status, tt.match.Status)
-			}
-			if !bytes.Equal(tt.match.Sigs.MakerMatch, matchData.Sigs.MakerMatch) {
-				t.Errorf("incorrect MakerMatch sig. got %v, expected %v",
-					matchData.Sigs.MakerMatch, tt.match.Sigs.MakerMatch)
 			}
 		})
 	}
