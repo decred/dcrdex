@@ -15,7 +15,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sync"
 	"testing"
 	"time"
 
@@ -25,42 +24,16 @@ import (
 	"github.com/decred/slog"
 )
 
+func init() {
+	log = slog.NewBackend(os.Stdout).Logger("TEST")
+	log.SetLevel(slog.LevelTrace)
+}
+
 var (
 	errT    = fmt.Errorf("test error")
 	tLogger dex.Logger
 	tCtx    context.Context
-	_       rwLocker = (*tRWMutex)(nil)
 )
-
-type tRWMutex struct {
-	m      *sync.RWMutex
-	locked chan struct{}
-}
-
-// Lock will wait until it can send on mtx.locked if mtx.lock is not nil.
-func (mtx *tRWMutex) Lock() {
-	mtx.m.Lock()
-	if mtx.locked != nil {
-		mtx.locked <- struct{}{}
-		mtx.locked = nil
-	}
-}
-
-func (mtx *tRWMutex) RLock() {
-	mtx.m.RLock()
-}
-
-func (mtx *tRWMutex) RLocker() sync.Locker {
-	return mtx.m.RLocker()
-}
-
-func (mtx *tRWMutex) RUnlock() {
-	mtx.m.RUnlock()
-}
-
-func (mtx *tRWMutex) Unlock() {
-	mtx.m.Unlock()
-}
 
 type TCore struct {
 	balanceErr error
@@ -115,15 +88,44 @@ func (r *TReader) Read(p []byte) (n int, err error) {
 func (r *TReader) Close() error { return nil }
 
 type TConn struct {
-	msg []byte
+	msg       []byte
+	reads     [][]byte      // data for ReadMessage
+	respReady chan []byte   // signal from WriteMessage
+	close     chan struct{} // Close tells ReadMessage to return with error
 }
 
+var readTimeout = 10 * time.Second // ReadMessage must not return constantly with nothing
+
 func (c *TConn) ReadMessage() (int, []byte, error) {
-	return 0, nil, nil
+	if len(c.reads) > 0 {
+		fmt.Println("Reading dummy message from TConn.")
+		var read []byte
+		// pop front
+		read, c.reads = c.reads[0], c.reads[1:]
+		return len(read), read, nil
+	}
+
+	select {
+	case <-c.close: // receive from nil channel blocks, closed receives immediately
+		fmt.Println("Close called, ReadMessage returning with error.")
+		return 0, nil, fmt.Errorf("closed")
+	case <-time.After(readTimeout):
+		return 0, nil, fmt.Errorf("read timeout")
+	}
+}
+
+func (c *TConn) addRead(read []byte) {
+	// push back
+	c.reads = append(c.reads, read)
 }
 
 func (c *TConn) WriteMessage(_ int, msg []byte) error {
+	fmt.Println("Writing dummy response to TConn.")
 	c.msg = msg
+	select {
+	case c.respReady <- msg:
+	default:
+	}
 	return nil
 }
 
@@ -143,11 +145,6 @@ func newLink() *tLink {
 		cl:   cl,
 		conn: conn,
 	}
-}
-
-func enableLogging() {
-	log = slog.NewBackend(os.Stdout).Logger("TEST")
-	log.SetLevel(slog.LevelTrace)
 }
 
 func (c *TConn) Close() error {
@@ -173,9 +170,6 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
-	mtx := &tRWMutex{m: new(sync.RWMutex)}
-	s.mtx = mtx
-	SetLogger(tLogger)
 	if start {
 		waiter := dex.NewStartStopWaiter(s)
 		waiter.Start(ctx)
@@ -221,7 +215,6 @@ func TestMain(m *testing.M) {
 }
 
 func TestLoadMarket(t *testing.T) {
-	enableLogging()
 	link := newLink()
 	s, tCore, shutdown := newTServer(t, false, "", "")
 	defer shutdown()
@@ -525,11 +518,19 @@ func TestAuthMiddleware(t *testing.T) {
 
 func TestClientMap(t *testing.T) {
 	s, _, shutdown := newTServer(t, true, "", "")
-	conn := new(TConn)
+	resp := make(chan []byte, 1)
+	conn := &TConn{respReady: resp}
+	// msg.ID == 0 gets an error response, which can be discarded.
+	read, _ := json.Marshal(msgjson.Message{ID: 0})
+	fmt.Println(string(read))
+	conn.addRead(read)
 
-	s.mtx.(*tRWMutex).locked = make(chan struct{})
 	go s.websocketHandler(conn, "someip")
-	<-s.mtx.(*tRWMutex).locked
+
+	// When a response to our dummy message is received, the client should be in
+	// RPCServer's client map.
+	msg := <-resp
+	fmt.Println("Response to dummy message received from server:", string(msg))
 
 	// While we're here, check that the client is properly mapped.
 	var cl *wsClient
