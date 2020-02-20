@@ -249,6 +249,8 @@ func (c *Core) User() *User {
 // refreshUser is a thread-safe way to update the current User. This method
 // should be called after adding wallets and DEXes.
 func (c *Core) refreshUser() {
+	// An unititialized user would not have this key/value stored yet, so would
+	// be an error. This is likely the only error possible here.
 	k, _ := c.db.Get(keyParamsKey)
 	u := &User{
 		Assets:      c.SupportedAssets(),
@@ -318,10 +320,10 @@ func (c *Core) CreateWallet(form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
-		AssetID: dbWallet.AssetID,
-		balance: dbWallet.Balance,
-		updated: dbWallet.Updated,
-		address: dbWallet.Address,
+		AssetID:   dbWallet.AssetID,
+		balance:   dbWallet.Balance,
+		balUpdate: dbWallet.Updated,
+		address:   dbWallet.Address,
 	}
 	walletCfg := &asset.WalletConfig{
 		Account: dbWallet.Account,
@@ -381,6 +383,8 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	if err != nil {
 		return fmt.Errorf("CloseWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
+	c.connMtx.Lock()
+	defer c.connMtx.RUnlock()
 	for _, dc := range c.conns {
 		dc.matchMtx.RLock()
 		defer dc.matchMtx.RUnlock()
@@ -834,7 +838,7 @@ func (c *Core) Book(dex string, base, quote uint32) *OrderBook {
 
 func (c *Core) Unsync(dex string, base, quote uint32) {}
 
-// Balance retreives the current wallet balance.
+// Balance retrieves the current wallet balance.
 func (c *Core) Balance(assetID uint32) (uint64, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {

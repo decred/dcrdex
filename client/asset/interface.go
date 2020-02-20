@@ -49,7 +49,7 @@ type Wallet interface {
 	// Balance should return the total available funds in the wallet.
 	// Note that after calling Fund, the amount returned by Balance may change
 	// by more than the value funded.
-	Balance(uint32) (available, locked uint64, err error)
+	Balance(confs uint32) (available, locked uint64, err error)
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
@@ -94,9 +94,8 @@ type Wallet interface {
 	Unlock(pw string, dur time.Duration) error
 	// Lock locks the exchange wallet.
 	Lock() error
-	// PayFee sends the dex registration fee. Transaction fees are in addition
-	// to the transaction fee, and the fee rate is taken from the DEX
-	// configuration.
+	// PayFee sends the dex registration fee. Transaction fees are in addition to
+	// the registration fee, and the fee rate is taken from the DEX configuration.
 	PayFee(address string, fee uint64, nfo *dex.Asset) (Coin, error)
 	// Confirmations gets the number of confirmations for the specified coin ID.
 	// The ID need not represent an unspent coin, but coin IDs unknown to this

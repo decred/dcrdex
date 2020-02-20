@@ -889,9 +889,8 @@ func (btc *ExchangeWallet) Address() (string, error) {
 	return addr.String(), err
 }
 
-// PayFee sends the dex registration fee. Transaction fees are in addition
-// to the transaction fee, and the fee rate is taken from the DEX
-// configuration.
+// PayFee sends the dex registration fee. Transaction fees are in addition to
+// the registartion fee, and the fee rate is taken from the DEX configuration.
 func (btc *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset) (asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, regFee, nfo.FeeRate, false)
 	if err != nil {
@@ -902,7 +901,7 @@ func (btc *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset)
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
-// the value.
+// the value. feeRate is in units of atoms/byte.
 func (btc *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, value, feeRate, true)
 	if err != nil {
@@ -914,7 +913,7 @@ func (btc *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asse
 
 // Send the value to the address, with the given fee rate. If subtract is true,
 // the fees will be subtracted from the value. If false, the fees are in
-// addition to the value.
+// addition to the value. feeRate is in units of atoms/byte.
 func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subtract bool) (*chainhash.Hash, uint32, uint64, error) {
 	txHash, err := btc.wallet.SendToAddress(address, val, feeRate, subtract)
 	if err != nil {
@@ -925,16 +924,8 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 		// btc.log.Errorf("error getting transaction for successful fee: %v", err)
 		return nil, 0, 0, fmt.Errorf("failed to fetch transaction after send: %v", err)
 	}
-	adder := func(details *WalletTxDetails) uint64 {
-		return toSatoshi(-details.Amount)
-	}
-	if subtract {
-		adder = func(details *WalletTxDetails) uint64 {
-			return toSatoshi(-details.Amount - details.Fee)
-		}
-	}
 	for _, details := range tx.Details {
-		if adder(details) == val && details.Address == address {
+		if details.Address == address {
 			return txHash, details.Vout, toSatoshi(details.Amount), nil
 		}
 	}

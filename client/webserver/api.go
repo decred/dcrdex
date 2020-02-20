@@ -162,7 +162,8 @@ type openWalletForm struct {
 	Pass    string `json:"pass"`
 }
 
-// apiOpenWallet is the handler for the '/openwallet' API request.
+// apiOpenWallet is the handler for the '/openwallet' API request. Unlocks the
+// specified wallet.
 func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	form := new(openWalletForm)
 	if !readPost(w, r, form) {
@@ -182,7 +183,8 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-// apiOpenWallet conencts to a wallet backend.
+// apiConnect is the handler for the '/connectwallet' API request. Connects to
+// a specified wallet, but does not unlock it.
 func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		AssetID uint32 `json:"assetID"`

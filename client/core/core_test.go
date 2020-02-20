@@ -314,7 +314,7 @@ func (w *TXCWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
-func (w *TXCWallet) Balance(uint32) (available, locked uint64, err error) {
+func (w *TXCWallet) Balance(confs uint32) (available, locked uint64, err error) {
 	return 0, 0, nil
 }
 

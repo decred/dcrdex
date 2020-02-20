@@ -42,8 +42,7 @@ type WalletState struct {
 
 // User is information about the user's wallets and DEX accounts.
 type User struct {
-	Markets map[string][]*Market `json:"markets"`
-	// Wallets     []*WalletState       `json:"wallets"`
+	Markets     map[string][]*Market       `json:"markets"`
 	Initialized bool                       `json:"inited"`
 	Assets      map[uint32]*SupportedAsset `json:"assets"`
 }
@@ -66,7 +65,7 @@ type xcWallet struct {
 	lockTime  time.Time
 	hookedUp  bool
 	balance   uint64
-	updated   time.Time
+	balUpdate time.Time
 	address   string
 }
 
@@ -110,7 +109,7 @@ func (w *xcWallet) state() *WalletState {
 func (w *xcWallet) setBalance(bal uint64) {
 	w.mtx.Lock()
 	w.balance = bal
-	w.updated = time.Now()
+	w.balUpdate = time.Now()
 	w.mtx.Unlock()
 }
 

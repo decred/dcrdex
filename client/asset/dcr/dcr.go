@@ -484,7 +484,7 @@ func (dcr *ExchangeWallet) Swap(swaps []*asset.Swap, nfo *dex.Asset) ([]asset.Re
 		return nil, fmt.Errorf("error creating change address: %v", err)
 	}
 	// Add change, sign, and send the transaction.
-	msgTx, err := dcr.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, nfo.FeeRate)
+	msgTx, err := dcr.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, nfo.FeeRate, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -920,17 +920,20 @@ func (dcr *ExchangeWallet) Lock() error {
 	return dcr.node.WalletLock()
 }
 
-// PayFee sends the dex registration fee. Transaction fees are in addition
-// to the transaction fee, and the fee rate is taken from the DEX
-// configuration.
+// PayFee sends the dex registration fee. Transaction fees are in addition to
+// the registration fee, and the fee rate is taken from the DEX configuration.
 func (dcr *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset) (asset.Coin, error) {
 	addr, err := dcrutil.DecodeAddress(address, chainParams)
 	if err != nil {
 		return nil, err
 	}
-	msgTx, err := dcr.sendRegFee(addr, regFee, nfo)
+	msgTx, sent, err := dcr.sendRegFee(addr, regFee, nfo)
 	if err != nil {
 		return nil, err
+	}
+	if sent != regFee {
+		return nil, fmt.Errorf("transaction %s was sent, but the reported value sent was unexpcted. "+
+			"expected %d, but %d was reported", msgTx.CachedTxHash(), regFee, sent)
 	}
 	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular, nil), nil
 }
@@ -1100,58 +1103,67 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		return sum+toAtoms(unspent.rpc.Amount) >= val
 	}
-	coins, _, inputSize, err := dcr.fund(0, enough)
+	coins, _, _, err := dcr.fund(0, enough)
 	if err != nil {
 		return nil, 0, err
 	}
-	size := inputSize + dexdcr.P2PKHOutputSize + dexdcr.MsgTxOverhead
-	fees := feeRate * uint64(size)
-	if fees > val {
-		return nil, 0, fmt.Errorf("cannot send with feeRate %d. Fees %d > value %d", feeRate, fees, val)
+	tx, sent, err := dcr.sendCoins(addr, coins, val, feeRate, true)
+	if err != nil {
+		return nil, 0, err
 	}
-	netSend := val - fees
-	tx, err := dcr.sendCoins(addr, coins, netSend, feeRate)
-	return tx, netSend, err
+	return tx, sent, nil
 }
 
 // sendRegFee sends the registration fee to the address. Transaction fees will
 // be in addition to the registration fee and the output will be the zeroth
 // output.
-func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regfee uint64, nfo *dex.Asset) (*wire.MsgTx, error) {
+func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regfee uint64, nfo *dex.Asset) (*wire.MsgTx, uint64, error) {
 	coins, err := dcr.Fund(regfee, nfo)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return dcr.sendCoins(addr, coins, regfee, nfo.FeeRate)
+	return dcr.sendCoins(addr, coins, regfee, nfo.FeeRate, false)
 }
 
 // sendCoins sends the amount to the address as the zeroth output, spending the
-// specified coins.
-func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, val, feeRate uint64) (*wire.MsgTx, error) {
+// specified coins. If subtract is true, the transaction fees will be taken from
+// the sent value, otherwise it will taken from the change output.
+func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, val, feeRate uint64, subtract bool) (*wire.MsgTx, uint64, error) {
 	baseTx := wire.NewMsgTx()
 	totalIn, err := dcr.addInputCoins(baseTx, coins)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	payScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
-		return nil, fmt.Errorf("error creating P2SH script: %v", err)
+		return nil, 0, fmt.Errorf("error creating P2SH script: %v", err)
 	}
 	txOut := wire.NewTxOut(int64(val), payScript)
 	baseTx.AddTxOut(txOut)
 	// Grab a change address.
 	changeAddr, err := dcr.node.GetRawChangeAddress(dcr.acct, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error creating change address: %v", err)
+		return nil, 0, fmt.Errorf("error creating change address: %v", err)
 	}
-	return dcr.sendWithReturn(baseTx, changeAddr, totalIn, val, feeRate)
+	// A nil subtractee indicates that fees should be taken from the change
+	// output.
+	var subtractee *wire.TxOut
+	if subtract {
+		subtractee = txOut
+	}
+	tx, err := dcr.sendWithReturn(baseTx, changeAddr, totalIn, val, feeRate, subtractee)
+	return tx, uint64(txOut.Value), err
 }
 
 // sendWithReturn sends the unsigned transaction with an added output (unless
-// dust) for the change.
+// dust) for the change. If a subtractee output is specified, fees will be
+// subtracted from that output, otherwise they will be subtracted from the
+// change output.
 func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
-	addr dcrutil.Address, totalIn, totalOut, feeRate uint64) (*wire.MsgTx, error) {
+	addr dcrutil.Address, totalIn, totalOut, feeRate uint64, subtractee *wire.TxOut) (*wire.MsgTx, error) {
 
+	// Sign the transaction to get an initial size estimate and calculate whether
+	// a change output would be dust.
 	msgTx, signed, err := dcr.node.SignRawTransaction(baseTx)
 	if err != nil {
 		return nil, fmt.Errorf("signing error: %v", err)
@@ -1166,24 +1178,38 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 		return nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
 			totalIn, minFee+totalOut)
 	}
+	lastFee := remaining
+	// Create the change output.
 	changeScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
 		return nil, fmt.Errorf("error creating change script for address '%s': %v", addr, err)
 	}
 	changeIdx := len(baseTx.TxOut)
-	changeOutput := wire.NewTxOut(int64(remaining-minFee), changeScript)
+	changeOutput := wire.NewTxOut(int64(remaining), changeScript)
+	// The reservoir indicates the amount available to draw upon for fees.
+	reservoir := remaining
+	// If no subtractee was provided, subtract fees from the change output. Its
+	// value depends on whether a subtractee is provided or not.
+	if subtractee == nil {
+		subtractee = changeOutput
+		changeOutput.Value -= int64(minFee)
+	} else {
+		reservoir = uint64(subtractee.Value)
+	}
 	isDust := dexdcr.IsDust(changeOutput, feeRate)
 	sigCycles := 0
 	if !isDust {
-		// Add the change output with recalculated fees
+		// Add the change output.
 		size += dexdcr.P2PKHOutputSize
-		fee := feeRate * uint64(size)
-		changeOutput.Value = int64(remaining - fee)
+		lastFee = feeRate * uint64(size)
+		subtractee.Value = int64(reservoir - lastFee)
 		baseTx.AddTxOut(changeOutput)
 		// Find the best fee rate by closing in on it in a loop.
 		tried := map[uint64]uint8{}
 		for {
 			sigCycles++
+			// Each cycle, sign the transaction and see if there appears to be any
+			// room to lower the total fees.
 			msgTx, signed, err = dcr.node.SignRawTransaction(baseTx)
 			if err != nil {
 				return nil, fmt.Errorf("signing error: %v", err)
@@ -1191,36 +1217,61 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 			if !signed {
 				return nil, fmt.Errorf("incomplete raw tx signature")
 			}
-			size := msgTx.SerializeSize()
-			reqFee := feeRate * uint64(size)
-			if reqFee > remaining {
+			size = msgTx.SerializeSize()
+			// minFee is the lowest acceptable fee for a transaction of this size.
+			minFee := feeRate * uint64(size)
+			if minFee > reservoir {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
-					totalIn, totalOut, reqFee, fee)
+				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, minFee = %d, lastFee = %d",
+					totalIn, totalOut, minFee, lastFee)
 				return nil, fmt.Errorf("change error")
 			}
-			if fee == reqFee || (reqFee < fee && tried[reqFee] == 1) {
-				// If we've already tried it, we're on our way back up, so this fee is
-				// likely as good as it gets.
+			// If 1) fee == minFee, nothing changed since the last cycle. And there is
+			// likely no room for improvment. If 2) The fee required for a transaction
+			// of this size is less than the currently signed transaction fees, but
+			// we've already tried it, then it must have a larger serialize size, so
+			// the current fee is as good as it gets.
+			if lastFee == minFee || (minFee < lastFee && tried[minFee] == 1) {
 				break
 			}
-			// We must have some room for improvement
-			tried[fee] = 1
-			fee = reqFee
-			changeOutput.Value = int64(remaining - fee)
-			if dexdcr.IsDust(changeOutput, feeRate) {
+			// The minimum fee for a transaction of this size is either higher or
+			// lower than the fee in the currently signed transaction, and it hasn't
+			// been tried yet, so try it now.
+			tried[lastFee] = 1
+			subtractee.Value = int64(reservoir - minFee)
+			lastFee = minFee
+			if dexdcr.IsDust(subtractee, feeRate) {
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
-					totalIn, totalOut, reqFee, fee)
+				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, minFee = %d, lastFee = %d",
+					totalIn, totalOut, minFee, lastFee)
 				return nil, fmt.Errorf("dust error")
 			}
 			continue
 		}
 	}
-
+	// A couple of additional checks on the fee rate.
+	checkFee, checkRate := fees(msgTx)
+	if checkFee != lastFee {
+		return nil, fmt.Errorf("fee mismatch! %d != %d", checkFee, lastFee)
+	}
+	// If the integer truncated fee rate is not the same as the fee rate provided,
+	// log a warning.
+	if checkRate < float64(feeRate) {
+		return nil, fmt.Errorf("final fee rate for %s, %f, is lower than expected, %d",
+			msgTx.CachedTxHash(), checkRate, feeRate)
+	}
+	// This is a last ditch effort to catch ridiculously high fees. Right now,
+	// it's just erroring for fees more than double the expected rate, which is
+	// admittedly un-scientific. This should account for any signature length
+	// related variation as well as a potential dust change output with no
+	// subtractee specified, in which case the dust goes to the miner.
+	if checkRate > float64(feeRate*uint64(size)*2) {
+		return nil, fmt.Errorf("final fee rate for %s, %f, is seemingly outrageous, %d",
+			msgTx.CachedTxHash(), checkRate, feeRate)
+	}
 	checkHash := msgTx.TxHash()
 	dcr.log.Debugf("%d signature cycles to converge on fees for tx %s", sigCycles, checkHash)
 	txHash, err := dcr.node.SendRawTransaction(msgTx, false)
@@ -1329,4 +1380,16 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 	var txHash chainhash.Hash
 	copy(txHash[:], coinID[:32])
 	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
+}
+
+func fees(tx *wire.MsgTx) (uint64, float64) {
+	var in, out int64
+	for _, txIn := range tx.TxIn {
+		in += txIn.ValueIn
+	}
+	for _, txOut := range tx.TxOut {
+		out += txOut.Value
+	}
+	fees := in - out
+	return uint64(fees), float64(fees) / float64(tx.SerializeSize())
 }

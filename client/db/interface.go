@@ -14,7 +14,7 @@ type DB interface {
 	dex.Runner
 	// Store allows the storage of arbitrary data.
 	Store(string, []byte) error
-	// Get retreives values stored with Store.
+	// Get retrieves values stored with Store.
 	Get(string) ([]byte, error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX

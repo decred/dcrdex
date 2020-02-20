@@ -68,7 +68,7 @@ const (
 	// pubkey script + length of pubkey script. There is one P2SH outputs and one
 	// change output
 	InitTxSize = MsgTxOverhead + TxInOverhead + P2PKHSigScriptSize +
-		2*(TxOutOverhead+txsizes.P2PKHPkScriptSize)
+		2*(P2PKHOutputSize)
 
 	// DERSigLength is the maximum length of a DER encoded signature.
 	DERSigLength = 73

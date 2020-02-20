@@ -199,7 +199,8 @@ func (wc *walletClient) Lock() error {
 	return wc.call(methodLock, nil, nil)
 }
 
-// SendToAddress sends the amount to the address.
+// SendToAddress sends the amount to the address. feeRate is in units of
+// atoms/byte.
 func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
 	var success bool
 	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
@@ -223,9 +224,6 @@ func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, sub
 // server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
 // will be marshaled into `thing`.
 func (wc *walletClient) call(method string, args anylist, thing interface{}) error {
-	if args == nil {
-		args = anylist{}
-	}
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])
