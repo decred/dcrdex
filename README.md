@@ -105,7 +105,7 @@ certificate from a recognized CA, you'll need to provide the location of a
 copy of the server's TLS certificate. The current solution is to point to the
 certificate in a JSON formatted file mapping URL to file path.
 
-**~/.dexclient/certs.json**
+**~/.dexc/certs.json**
 ```
 {
 	"https://127.0.0.1:7232": "/path/to/.dcrdex/rpc.cert"
