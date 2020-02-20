@@ -263,11 +263,21 @@ func (c *Core) refreshUser() {
 }
 
 // CreateWallet creates a new exchange wallet.
-func (c *Core) CreateWallet(form *WalletForm) error {
+func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return err
+	}
+	encPW, err := crypter.Encrypt([]byte(walletPW))
+	if err != nil {
+		return fmt.Errorf("wallet password encryption error: %v", err)
+	}
+
 	dbWallet := &db.Wallet{
-		AssetID: form.AssetID,
-		Account: form.Account,
-		INIPath: form.INIPath,
+		AssetID:     form.AssetID,
+		Account:     form.Account,
+		INIPath:     form.INIPath,
+		EncryptedPW: encPW,
 	}
 	_, exists := c.wallet(form.AssetID)
 	if exists {
@@ -322,7 +332,8 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
 		AssetID:   dbWallet.AssetID,
 		balance:   dbWallet.Balance,
-		balUpdate: dbWallet.Updated,
+		balUpdate: dbWallet.BalUpdate,
+		encPW:     dbWallet.EncryptedPW,
 		address:   dbWallet.Address,
 	}
 	walletCfg := &asset.WalletConfig{
@@ -359,12 +370,20 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 }
 
 // OpenWallet opens (unlocks) the wallet for use.
-func (c *Core) OpenWallet(assetID uint32, pw string) error {
+func (c *Core) OpenWallet(assetID uint32, appPW string) error {
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return err
+	}
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return fmt.Errorf("OpenWallet: wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
-	err = wallet.Unlock(pw, aYear)
+	pwB, err := crypter.Decrypt(wallet.encPW)
+	if err != nil {
+		return fmt.Errorf("OpenWallet: decryption error: %v", err)
+	}
+	err = wallet.Unlock(string(pwB), aYear)
 	if err != nil {
 		return fmt.Errorf("wallet unlock error: %v", err)
 	}
@@ -383,7 +402,7 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	if err != nil {
 		return fmt.Errorf("CloseWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
-	c.connMtx.Lock()
+	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	for _, dc := range c.conns {
 		dc.matchMtx.RLock()
@@ -965,7 +984,6 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		return
 	}
 	if confs >= uint32(dc.cfg.RegFeeConfirms) {
-		fmt.Println("--notifyFee")
 		err := c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
 			log.Errorf("reFee %s - notifyfee error: %v", err)

@@ -275,12 +275,13 @@ func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
 
 // Wallet is information necessary to create an asset.Wallet.
 type Wallet struct {
-	AssetID uint32
-	Account string
-	INIPath string
-	Balance uint64
-	Updated time.Time
-	Address string
+	AssetID     uint32
+	Account     string
+	INIPath     string
+	Balance     uint64
+	BalUpdate   time.Time
+	EncryptedPW []byte
+	Address     string
 }
 
 // Encode encodes the Wallet to a versioned blob.
@@ -289,8 +290,7 @@ func (w *Wallet) Encode() []byte {
 		AddData(uint32Bytes(w.AssetID)).
 		AddData([]byte(w.Account)).
 		AddData([]byte(w.INIPath)).
-		AddData(uint64Bytes(w.Balance)).
-		AddData(uint64Bytes(uint64(w.Updated.Unix()))).
+		AddData(w.EncryptedPW).
 		AddData([]byte(w.Address))
 }
 
@@ -308,18 +308,17 @@ func DecodeWallet(b []byte) (*Wallet, error) {
 }
 
 func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
-	if len(pushes) != 6 {
-		return nil, fmt.Errorf("decodeWallet_v0: expected 3 pushes, got %d", len(pushes))
+	if len(pushes) != 5 {
+		return nil, fmt.Errorf("decodeWallet_v0: expected 5 pushes, got %d", len(pushes))
 	}
 	idB, acctB, iniB := pushes[0], pushes[1], pushes[2]
-	balanceB, updateB, addressB := pushes[3], pushes[4], pushes[5]
+	keyB, addressB := pushes[3], pushes[4]
 	return &Wallet{
-		AssetID: intCoder.Uint32(idB),
-		Account: string(acctB),
-		INIPath: string(iniB),
-		Balance: intCoder.Uint64(balanceB),
-		Updated: time.Unix(int64(intCoder.Uint64(updateB)), 0),
-		Address: string(addressB),
+		AssetID:     intCoder.Uint32(idB),
+		Account:     string(acctB),
+		INIPath:     string(iniB),
+		EncryptedPW: keyB,
+		Address:     string(addressB),
 	}, nil
 }
 

@@ -281,6 +281,7 @@ function handleLogin (main) {
     app.loading(page.loginForm)
     page.errMsg.classList.add('d-hide')
     const pw = page.pw.value
+    page.pw.value = ''
     if (pw === '') {
       page.errMsg.textContent = 'password cannot be empty'
       page.errMsg.classList.remove('d-hide')
@@ -333,6 +334,7 @@ function handleRegister (main) {
   bindForm(page.appPWForm, page.appPWSubmit, async () => {
     Doc.hide(page.appErrMsg)
     const pw = page.appPW.value
+    page.appPW.value = ''
     const pwAgain = page.appPWAgain.value
     if (pw === '') {
       page.errMsg.textContent = 'password cannot be empty'
@@ -424,6 +426,7 @@ function handleRegister (main) {
       pass: page.clientPass.value,
       fee: fee
     }
+    page.clientPass.value = ''
     app.loading(page.pwForm)
     var res = await postJSON('/api/register', registration)
     app.loaded()
@@ -988,7 +991,8 @@ function bindNewWalletForm (form, success) {
   // CREATE DCR WALLET
   // This form is only shown the first time the user visits the /register page.
   const fields = parsePage(form, [
-    'iniPath', 'acctName', 'newWalletPass', 'submitCreate', 'walletErr'
+    'iniPath', 'acctName', 'newWalletPass', 'submitCreate', 'walletErr',
+    'wClientPass'
   ])
   bindForm(form, fields.submitCreate, async () => {
     Doc.hide(fields.walletErr)
@@ -996,8 +1000,10 @@ function bindNewWalletForm (form, success) {
       assetID: parseInt(form.dataset.assetID),
       pass: fields.newWalletPass.value,
       account: fields.acctName.value,
-      inipath: fields.iniPath.value
+      inipath: fields.iniPath.value,
+      appPass: fields.wClientPass.value
     }
+    fields.wClientPass.value = ''
     app.loading(form)
     var res = await postJSON('/api/newwallet', create)
     app.loaded()
@@ -1006,6 +1012,7 @@ function bindNewWalletForm (form, success) {
       Doc.show(fields.walletErr)
       return
     }
+    fields.newWalletPass.value = ''
     success()
   })
 }
@@ -1020,6 +1027,7 @@ function bindOpenWalletForm (form, success) {
       assetID: parseInt(form.dataset.assetID),
       pass: fields.walletPass.value
     }
+    fields.walletPass.value = ''
     app.loading(form)
     var res = await postJSON('/api/openwallet', open)
     app.loaded()

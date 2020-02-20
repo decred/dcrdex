@@ -5,9 +5,9 @@
 
     {{- /* Set up the initial application password. Only shown on first visit. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
-      <div class="bg2 px-2 py-1 text-center fs18">Set Password</div>
+      <div class="bg2 px-2 py-1 text-center fs18">Set Client Password</div>
       <div class="p-4">
-        <div class="fs16">Set your client password. This password will protect your DEX account keys, but not your wallets.</div>
+        <div class="fs16">Set your client password. This password will protect your DEX account keys and connected wallets.</div>
         <hr class="dashed my-4">
         <div class="pb-3">
           <label for="pw" class="pl-1 mb-1">Password</label>
@@ -35,12 +35,18 @@
           <input type="text" class="form-control select" id="acctName">
         </div>
         <div>
-          <label for="newWalletPass" class="pt-3 pl-1 mb-1">Password</label>
+          <label for="newWalletPass" class="pt-3 pl-1 mb-0">Wallet Password</label>
+          <div class="fs14 px-1 mb-1">This is the password you have configured with your wallet backend.</div>
           <input type="password" class="form-control select" id="newWalletPass" autocomplete="off">
         </div>
         <div>
           <label for="iniPath" class="pt-3 pl-1 mb-1">Configuration Filepath</label>
           <input type="text" class="form-control select" placeholder="leave empty to use default path" id="iniPath">
+        </div>
+        <div>
+          <label for="wClientPass" class="pt-3 pl-1 mb-0">Client Password</label>
+          <div class="fs14 px-1 mb-1">Your client password is always required when performing sensitive wallet operations.</div>
+          <input type="password" class="form-control select" id="wClientPass" autocomplete="off">
         </div>
         <div class="d-flex justify-content-end mt-4">
           <button id="submitCreate" type="button" class="col-8 justify-content-center fs15 bg2 selected">Create</button>

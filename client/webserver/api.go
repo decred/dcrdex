@@ -112,6 +112,7 @@ type newWalletForm struct {
 	Account string `json:"account"`
 	INIPath string `json:"inipath"`
 	Pass    string `json:"pass"`
+	AppPW   string `json:"appPass"`
 }
 
 // apiNewWallet is the handler for the '/newwallet' API request.
@@ -126,7 +127,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Wallet does not exist yet. Try to create it.
-	err := s.core.CreateWallet(&core.WalletForm{
+	err := s.core.CreateWallet(form.AppPW, form.Pass, &core.WalletForm{
 		AssetID: form.AssetID,
 		Account: form.Account,
 		INIPath: form.INIPath,
@@ -141,7 +142,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		Locked bool   `json:"locked"`
 		Msg    string `json:"msg"`
 	}
-	err = s.core.OpenWallet(form.AssetID, form.Pass)
+	err = s.core.OpenWallet(form.AssetID, form.AppPW)
 	if err != nil {
 		errMsg := fmt.Sprintf("wallet connected, but failed to open with provided password: %v", err)
 		log.Errorf(errMsg)
@@ -159,7 +160,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	AssetID uint32 `json:"assetID"`
-	Pass    string `json:"pass"`
+	Pass    string `json:"pass"` // Application password.
 }
 
 // apiOpenWallet is the handler for the '/openwallet' API request. Unlocks the

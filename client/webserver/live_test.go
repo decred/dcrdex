@@ -238,7 +238,7 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	}
 }
 
-func (c *TCore) CreateWallet(form *core.WalletForm) error {
+func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
 	randomDelay()
 	c.mtx.Lock()
 	defer c.mtx.Unlock()

@@ -66,6 +66,7 @@ type xcWallet struct {
 	hookedUp  bool
 	balance   uint64
 	balUpdate time.Time
+	encPW     []byte
 	address   string
 }
 

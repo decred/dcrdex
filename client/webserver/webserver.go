@@ -63,7 +63,7 @@ type clientCore interface {
 	Unsync(dex string, base, quote uint32)
 	Balance(uint32) (uint64, error)
 	WalletState(assetID uint32) *core.WalletState
-	CreateWallet(form *core.WalletForm) error
+	CreateWallet(appPW, walletPW string, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw string) error
 	CloseWallet(assetID uint32) error
 	ConnectWallet(assetID uint32) error

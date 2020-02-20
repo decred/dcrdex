@@ -52,6 +52,7 @@ var (
 	tDexPriv *secp256k1.PrivateKey
 	tDexKey  *secp256k1.PublicKey
 	tPW             = "dexpw"
+	wPW             = "walletpw"
 	tDexUrl         = "somedex.tld"
 	tErr            = fmt.Errorf("test error")
 	tFee     uint64 = 1e8
@@ -642,14 +643,14 @@ func TestCreateWallet(t *testing.T) {
 	// Try to add an existing wallet.
 	wallet, _ := newTWallet(tILT.ID)
 	tCore.wallets[tILT.ID] = wallet
-	err := tCore.CreateWallet(form)
+	err := tCore.CreateWallet(tPW, wPW, form)
 	if err == nil {
 		t.Fatalf("no error for existing wallet")
 	}
 	delete(tCore.wallets, tILT.ID)
 
 	// Try an unknown wallet (not yet asset.Register'ed).
-	err = tCore.CreateWallet(form)
+	err = tCore.CreateWallet(tPW, wPW, form)
 	if err == nil {
 		t.Fatalf("no error for unknown asset")
 	}
@@ -665,7 +666,7 @@ func TestCreateWallet(t *testing.T) {
 
 	// Database error.
 	rig.db.updateWalletErr = tErr
-	err = tCore.CreateWallet(form)
+	err = tCore.CreateWallet(tPW, wPW, form)
 	if err == nil {
 		t.Fatalf("no error for database error")
 	}
@@ -673,7 +674,7 @@ func TestCreateWallet(t *testing.T) {
 
 	// Success
 	delete(tCore.wallets, tILT.ID)
-	err = tCore.CreateWallet(form)
+	err = tCore.CreateWallet(tPW, wPW, form)
 	if err != nil {
 		t.Fatalf("error when should be no error: %v", err)
 	}

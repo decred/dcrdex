@@ -90,7 +90,9 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 		Running: !c.notRunning,
 	}
 }
-func (c *TCore) CreateWallet(form *core.WalletForm) error   { return c.createWalletErr }
+func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
+	return c.createWalletErr
+}
 func (c *TCore) OpenWallet(assetID uint32, pw string) error { return c.openWalletErr }
 func (c *TCore) CloseWallet(assetID uint32) error           { return c.closeWalletErr }
 func (c *TCore) ConnectWallet(assetID uint32) error         { return nil }
