@@ -1188,8 +1188,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 	changeOutput := wire.NewTxOut(int64(remaining), changeScript)
 	// The reservoir indicates the amount available to draw upon for fees.
 	reservoir := remaining
-	// If no subtractee was provided, subtract fees from the change output. Its
-	// value depends on whether a subtractee is provided or not.
+	// If no subtractee was provided, subtract fees from the change output.
 	if subtractee == nil {
 		subtractee = changeOutput
 		changeOutput.Value -= int64(minFee)
@@ -1227,11 +1226,11 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 					totalIn, totalOut, minFee, lastFee)
 				return nil, fmt.Errorf("change error")
 			}
-			// If 1) fee == minFee, nothing changed since the last cycle. And there is
-			// likely no room for improvment. If 2) The fee required for a transaction
-			// of this size is less than the currently signed transaction fees, but
-			// we've already tried it, then it must have a larger serialize size, so
-			// the current fee is as good as it gets.
+			// If 1) lastFee == minFee, nothing changed since the last cycle. And
+			// there is likely no room for improvment. If 2) The minFee required for a
+			// transaction of this size is less than the currently signed transaction
+			// fees, but we've already tried it, then it must have a larger serialize
+			// size, so the current fee is as good as it gets.
 			if lastFee == minFee || (minFee < lastFee && tried[minFee] == 1) {
 				break
 			}
@@ -1382,6 +1381,7 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
 }
 
+// Fees extracts the transaction fees and fee rate from the MsgTx.
 func fees(tx *wire.MsgTx) (uint64, float64) {
 	var in, out int64
 	for _, txIn := range tx.TxIn {
