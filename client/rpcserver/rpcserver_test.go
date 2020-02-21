@@ -72,7 +72,6 @@ func (r *TReader) Read(p []byte) (n int, err error) {
 		return 0, r.err
 	}
 	if len(r.msg) == 0 {
-		fmt.Println("here")
 		return 0, io.EOF
 	}
 	copy(p, r.msg)
@@ -98,7 +97,6 @@ var readTimeout = 10 * time.Second // ReadMessage must not return constantly wit
 
 func (c *TConn) ReadMessage() (int, []byte, error) {
 	if len(c.reads) > 0 {
-		fmt.Println("Reading dummy message from TConn.")
 		var read []byte
 		// pop front
 		read, c.reads = c.reads[0], c.reads[1:]
@@ -107,7 +105,6 @@ func (c *TConn) ReadMessage() (int, []byte, error) {
 
 	select {
 	case <-c.close: // receive from nil channel blocks, closed receives immediately
-		fmt.Println("Close called, ReadMessage returning with error.")
 		return 0, nil, fmt.Errorf("closed")
 	case <-time.After(readTimeout):
 		return 0, nil, fmt.Errorf("read timeout")
@@ -120,7 +117,6 @@ func (c *TConn) addRead(read []byte) {
 }
 
 func (c *TConn) WriteMessage(_ int, msg []byte) error {
-	fmt.Println("Writing dummy response to TConn.")
 	c.msg = msg
 	select {
 	case c.respReady <- msg:
@@ -522,15 +518,13 @@ func TestClientMap(t *testing.T) {
 	conn := &TConn{respReady: resp}
 	// msg.ID == 0 gets an error response, which can be discarded.
 	read, _ := json.Marshal(msgjson.Message{ID: 0})
-	fmt.Println(string(read))
 	conn.addRead(read)
 
 	go s.websocketHandler(conn, "someip")
 
 	// When a response to our dummy message is received, the client should be in
 	// RPCServer's client map.
-	msg := <-resp
-	fmt.Println("Response to dummy message received from server:", string(msg))
+	<-resp
 
 	// While we're here, check that the client is properly mapped.
 	var cl *wsClient
