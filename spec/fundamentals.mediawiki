@@ -7,7 +7,7 @@ peer-to-peer trades with the mechanics of order execution existing entirely on
 the separate blockchains via atomic swaps.
 These are:
 * Asset-specific order quantity increments and transaction fee rates
-* Epoch-based pseudorandom order matching, with epoch duration configure per-market
+* Epoch-based pseudorandom order matching, with epoch duration configured per-market
 * Client identities based on public key infrastructure (PKI)
 * An open and rigidly-defined interface for integration of arbitrary assets
 
@@ -35,7 +35,9 @@ from the time when the maker's swap receives its
 
 The user's transaction that pays the registration fee specified by the
 <code>register</code> response during [[accounts.mediawiki/#Account_Creation|account creation]]
-must have <code>regfeeconfirms</code> confirmations to be considered paid.
+must have <code>regfeeconfirms</code> confirmations before the server will
+accept the user's [[accounts.mediawiki/#Step_2_Fee_Notification|fee payment notification]]
+and complete the registration process.
 
 ===Asset Variables===
 
