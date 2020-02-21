@@ -141,7 +141,6 @@ func (c *TConn) Close() error {
 var tPort int = 5142
 
 func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
-	tPort++
 	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
