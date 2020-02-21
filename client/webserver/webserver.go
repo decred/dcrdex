@@ -137,7 +137,7 @@ func (m *marketSyncer) remove(cl *wsClient) {
 type WebServer struct {
 	ctx       context.Context
 	core      clientCore
-	listener  net.Listener
+	addr      string
 	srv       *http.Server
 	html      *templates
 	indent    bool
@@ -188,20 +188,14 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
 	}
 
-	// Start serving.
-	listener, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %v", addr, err)
-	}
-
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
-		core:     core,
-		listener: listener,
-		srv:      httpServer,
-		html:     tmpl,
-		syncers:  make(map[string]*marketSyncer),
-		clients:  make(map[int32]*wsClient),
+		core:    core,
+		srv:     httpServer,
+		addr:    addr,
+		html:    tmpl,
+		syncers: make(map[string]*marketSyncer),
+		clients: make(map[int32]*wsClient),
 	}
 
 	// Middleware
@@ -238,16 +232,24 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 // Run starts the web server. Satisfies the dex.Runner interface.
 func (s *WebServer) Run(ctx context.Context) {
 	s.ctx = ctx
+
+	// Start serving.
+	listener, err := net.Listen("tcp", s.addr)
+	if err != nil {
+		log.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
+		return
+	}
+
 	// Close the listener on context cancellation.
 	go func() {
 		<-ctx.Done()
-		err := s.listener.Close()
+		err := listener.Close()
 		if err != nil {
 			log.Errorf("Problem shutting down rpc: %v", err)
 		}
 	}()
-	log.Infof("Web server listening on %s", s.listener.Addr())
-	err := s.srv.Serve(s.listener)
+	log.Infof("Web server listening on %s", s.addr)
+	err = s.srv.Serve(listener)
 	if !errors.Is(err, http.ErrServerClosed) {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
