@@ -13,7 +13,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -121,15 +120,16 @@ func (m *marketSyncer) remove(cl *wsClient) {
 // RPCServer is a single-client http and websocket server enabling a JSON
 // interface to the DEX client.
 type RPCServer struct {
-	ctx      context.Context
-	core     ClientCore
-	listener net.Listener
-	srv      *http.Server
-	authsha  [32]byte
-	mtx      sync.RWMutex
-	syncers  map[string]*marketSyncer
-	clients  map[int32]*wsClient
-	wg       sync.WaitGroup
+	ctx       context.Context
+	core      ClientCore
+	addr      string
+	tlsConfig *tls.Config
+	srv       *http.Server
+	authsha   [32]byte
+	mtx       sync.RWMutex
+	syncers   map[string]*marketSyncer
+	clients   map[int32]*wsClient
+	wg        sync.WaitGroup
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -243,15 +243,9 @@ func New(cfg *Config) (*RPCServer, error) {
 	}
 
 	// Prepare the TLS configuration.
-	tlsConfig := tls.Config{
+	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{keypair},
 		MinVersion:   tls.VersionTLS12,
-	}
-
-	// Create listener.
-	listener, err := tls.Listen("tcp", cfg.Addr, &tlsConfig)
-	if err != nil {
-		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %v", cfg.Addr, err)
 	}
 
 	// Create an HTTP router.
@@ -264,11 +258,12 @@ func New(cfg *Config) (*RPCServer, error) {
 
 	// Make the server.
 	s := &RPCServer{
-		core:     cfg.Core,
-		listener: listener,
-		srv:      httpServer,
-		syncers:  make(map[string]*marketSyncer),
-		clients:  make(map[int32]*wsClient),
+		core:      cfg.Core,
+		srv:       httpServer,
+		addr:      cfg.Addr,
+		tlsConfig: tlsConfig,
+		syncers:   make(map[string]*marketSyncer),
+		clients:   make(map[int32]*wsClient),
 	}
 
 	// Create authsha to verify requests against.
@@ -297,6 +292,14 @@ func New(cfg *Config) (*RPCServer, error) {
 func (s *RPCServer) Run(ctx context.Context) {
 	// ctx passed to newMarketSyncer when making new market syncers.
 	s.ctx = ctx
+
+	// Create listener.
+	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
+	if err != nil {
+		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
+		return
+	}
+
 	// Close the listener on context cancellation.
 	s.wg.Add(1)
 	go func() {
@@ -305,12 +308,11 @@ func (s *RPCServer) Run(ctx context.Context) {
 
 		if err := s.srv.Shutdown(context.Background()); err != nil {
 			// Error from closing listeners:
-			err = fmt.Errorf("HTTP server Shutdown: %v", err)
-			fmt.Fprintln(os.Stderr, err)
+			log.Errorf("HTTP server Shutdown: %v", err)
 		}
 	}()
-	log.Infof("RPC server listening on %s", s.listener.Addr())
-	if err := s.srv.Serve(s.listener); err != http.ErrServerClosed {
+	log.Infof("RPC server listening on %s", s.addr)
+	if err := s.srv.Serve(listener); err != http.ErrServerClosed {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
 	s.mtx.Lock()
