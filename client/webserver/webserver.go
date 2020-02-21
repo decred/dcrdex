@@ -239,6 +239,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 
 // Run starts the web server. Satisfies the dex.Runner interface.
 func (s *WebServer) Run(ctx context.Context) {
+	// Use the context for market syncers created by watchMarket.
 	s.ctx = ctx
 
 	// Start serving.
@@ -248,26 +249,34 @@ func (s *WebServer) Run(ctx context.Context) {
 		return
 	}
 
-	// Close the listener on context cancellation.
+	// Shutdown the server on context cancellation.
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		<-ctx.Done()
-		err := listener.Close()
+		err := s.srv.Shutdown(context.Background())
 		if err != nil {
 			log.Errorf("Problem shutting down rpc: %v", err)
 		}
 	}()
+
 	log.Infof("Web server listening on %s", s.addr)
 	err = s.srv.Serve(listener)
 	if !errors.Is(err, http.ErrServerClosed) {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
 	log.Infof("Web server off")
-	<-ctx.Done()
+
+	// Disconnect the websocket clients since Shutdown does not deal with
+	// hijacked websocket connections.
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	for _, cl := range s.clients {
 		cl.Disconnect()
 	}
+
+	wg.Wait()
 }
 
 // auth creates, stores, and returns a new auth token.
