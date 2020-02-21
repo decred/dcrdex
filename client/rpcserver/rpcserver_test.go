@@ -104,7 +104,7 @@ func (c *TConn) ReadMessage() (int, []byte, error) {
 	}
 
 	select {
-	case <-c.close: // receive from nil channel blocks, closed receives immediately
+	case <-c.close: // receive from nil channel blocks
 		return 0, nil, fmt.Errorf("closed")
 	case <-time.After(readTimeout):
 		return 0, nil, fmt.Errorf("read timeout")
@@ -129,6 +129,15 @@ func (c *TConn) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
 
+func (c *TConn) Close() error {
+	// If the test has a non-nil close channel, signal close.
+	select {
+	case c.close <- struct{}{}:
+	default:
+	}
+	return nil
+}
+
 type tLink struct {
 	cl   *wsClient
 	conn *TConn
@@ -141,10 +150,6 @@ func newLink() *tLink {
 		cl:   cl,
 		conn: conn,
 	}
-}
-
-func (c *TConn) Close() error {
-	return nil
 }
 
 var tPort = 5555
@@ -514,7 +519,10 @@ func TestAuthMiddleware(t *testing.T) {
 func TestClientMap(t *testing.T) {
 	s, _, shutdown := newTServer(t, true, "", "")
 	resp := make(chan []byte, 1)
-	conn := &TConn{respReady: resp}
+	conn := &TConn{
+		respReady: resp,
+		close:     make(chan struct{}, 1),
+	}
 	// msg.ID == 0 gets an error response, which can be discarded.
 	read, _ := json.Marshal(msgjson.Message{ID: 0})
 	conn.addRead(read)
