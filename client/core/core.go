@@ -142,7 +142,7 @@ func (c *Core) Run(ctx context.Context) {
 	// when new accounts are registered.
 	c.ctx = ctx
 	c.initialize()
-	<-ctx.Done()
+	c.db.Run(ctx)
 	c.wg.Wait()
 	log.Infof("DEX client core off")
 }
