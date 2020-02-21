@@ -24,6 +24,11 @@ import (
 	"github.com/decred/slog"
 )
 
+func init() {
+	log = slog.NewBackend(os.Stdout).Logger("TEST")
+	log.SetLevel(slog.LevelTrace)
+}
+
 var (
 	errT    = fmt.Errorf("test error")
 	tLogger dex.Logger
@@ -33,13 +38,8 @@ var (
 type TCore struct {
 	balanceErr error
 	syncErr    error
-	regErr     error
-	loginErr   error
 }
 
-func (c *TCore) ListMarkets() []*core.Market         { return nil }
-func (c *TCore) Register(r *core.Registration) error { return c.regErr }
-func (c *TCore) Login(dex, pw string) error          { return c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return nil, c.syncErr
 }
@@ -72,7 +72,6 @@ func (r *TReader) Read(p []byte) (n int, err error) {
 		return 0, r.err
 	}
 	if len(r.msg) == 0 {
-		fmt.Println("here")
 		return 0, io.EOF
 	}
 	copy(p, r.msg)
@@ -88,15 +87,41 @@ func (r *TReader) Read(p []byte) (n int, err error) {
 func (r *TReader) Close() error { return nil }
 
 type TConn struct {
-	msg []byte
+	msg       []byte
+	reads     [][]byte      // data for ReadMessage
+	respReady chan []byte   // signal from WriteMessage
+	close     chan struct{} // Close tells ReadMessage to return with error
 }
 
+var readTimeout = 10 * time.Second // ReadMessage must not return constantly with nothing
+
 func (c *TConn) ReadMessage() (int, []byte, error) {
-	return 0, nil, nil
+	if len(c.reads) > 0 {
+		var read []byte
+		// pop front
+		read, c.reads = c.reads[0], c.reads[1:]
+		return len(read), read, nil
+	}
+
+	select {
+	case <-c.close: // receive from nil channel blocks, closed receives immediately
+		return 0, nil, fmt.Errorf("closed")
+	case <-time.After(readTimeout):
+		return 0, nil, fmt.Errorf("read timeout")
+	}
+}
+
+func (c *TConn) addRead(read []byte) {
+	// push back
+	c.reads = append(c.reads, read)
 }
 
 func (c *TConn) WriteMessage(_ int, msg []byte) error {
 	c.msg = msg
+	select {
+	case c.respReady <- msg:
+	default:
+	}
 	return nil
 }
 
@@ -118,16 +143,11 @@ func newLink() *tLink {
 	}
 }
 
-func enableLogging() {
-	log = slog.NewBackend(os.Stdout).Logger("TEST")
-	log.SetLevel(slog.LevelTrace)
-}
-
 func (c *TConn) Close() error {
 	return nil
 }
 
-var tPort = 5142
+var tPort = 5555
 
 func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore, func()) {
 	c := &TCore{}
@@ -145,7 +165,6 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
-	SetLogger(tLogger)
 	if start {
 		waiter := dex.NewStartStopWaiter(s)
 		waiter.Start(ctx)
@@ -191,7 +210,6 @@ func TestMain(m *testing.M) {
 }
 
 func TestLoadMarket(t *testing.T) {
-	enableLogging()
 	link := newLink()
 	s, tCore, shutdown := newTServer(t, false, "", "")
 	defer shutdown()
@@ -495,10 +513,17 @@ func TestAuthMiddleware(t *testing.T) {
 
 func TestClientMap(t *testing.T) {
 	s, _, shutdown := newTServer(t, true, "", "")
-	conn := new(TConn)
+	resp := make(chan []byte, 1)
+	conn := &TConn{respReady: resp}
+	// msg.ID == 0 gets an error response, which can be discarded.
+	read, _ := json.Marshal(msgjson.Message{ID: 0})
+	conn.addRead(read)
 
 	go s.websocketHandler(conn, "someip")
-	time.Sleep(time.Millisecond)
+
+	// When a response to our dummy message is received, the client should be in
+	// RPCServer's client map.
+	<-resp
 
 	// While we're here, check that the client is properly mapped.
 	var cl *wsClient
