@@ -329,7 +329,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 func (btc *ExchangeWallet) Balance(confs uint32) (uint64, uint64, error) {
 	unspents, err := btc.wallet.ListUnspent()
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("listunspent: %v", err)
 	}
 	_, sum, unconf, err := btc.spendableUTXOs(unspents, confs)
 	return sum, unconf, err

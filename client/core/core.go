@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
@@ -403,6 +404,16 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 
 	c.refreshUser()
 	return nil
+}
+
+func (c *Core) DEXConn(dex string) (ws comms.WsConn, aid account.AccountID, dexPk *secp256k1.PublicKey, signer func(msg []byte) ([]byte, error)) {
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	dc, ok := c.conns[dex]
+	if !ok {
+		return
+	}
+	return dc.WsConn, dc.acct.ID(), dc.acct.dexPubKey, dc.acct.sign
 }
 
 // loadWallet uses the data from the database to construct a new exchange
