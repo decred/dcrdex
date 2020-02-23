@@ -7,7 +7,7 @@ peer-to-peer trades with the mechanics of order execution existing entirely on
 the separate blockchains via atomic swaps.
 These are:
 * Asset-specific order quantity increments and transaction fee rates
-* Epoch-based pseudorandom order matching
+* Epoch-based pseudorandom order matching, with epoch duration configured per-market
 * Client identities based on public key infrastructure (PKI)
 * An open and rigidly-defined interface for integration of arbitrary assets
 
@@ -15,7 +15,31 @@ This section describes each of these design aspects.
 
 ==Exchange Variables==
 
-There are a number of asset-specific variables that must be known by the client.
+There are a number of exchange-wide, market-specific, and asset-specific
+variables that must be known by the client. These settings should be requested
+by the user immediately after connecting via the
+[[#Configuration_Data_Request|<code>config</code> request]].
+
+===Global Variables===
+
+The cancellation ratio for a user is the ratio of their canceled order count to
+completed order count. A user's cancellation ratio must remain below the configured
+[[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|'''cancellation threshold''']]
+(<code>cancelmax</code>) to avoid penalty.
+
+The '''broadcast timeout''' (<code>btimeout</code>) is the amount of time a
+client has to broadcast a transaction. For the maker, the broadcast time is
+measured from the time of match notification. For the taker, timeout is measured
+from the time when the maker's swap receives its
+<code>swapconf</code><sup>th</sup> confirmation (see [[#Asset_Variables|Asset Variables]]).
+
+The user's transaction that pays the registration fee specified by the
+<code>register</code> response during [[accounts.mediawiki/#Account_Creation|account creation]]
+must have <code>regfeeconfirms</code> confirmations before the server will
+accept the user's [[accounts.mediawiki/#Step_2_Fee_Notification|fee payment notification]]
+and complete the registration process.
+
+===Asset Variables===
 
 The '''lot size''' for an asset serves as both the minimum order quantity and
 the order quantity increment for limit orders and market buy orders, which are
@@ -40,25 +64,32 @@ The '''rate''', '''''r''''', of a limit order must be an integer multiple of the
 
 The DEX operator specifies an on-chain transaction '''fee rate'''
 (units ''atoms/byte'') used when
-[[orders.mediawiki/#Calculating_Transaction_Fees|calculating the fees]] for initialization
-transactions.
+[[orders.mediawiki/#Calculating_Transaction_Fees|calculating the fees]] for
+initialization transactions.
 
-Each asset has two distinct '''minimum numbers of confirmations'''.
-The <code>fundconf</code> is the number of confirmations required for
-[[orders.mediawiki/#Order_Preparation|backing coins]]. The <code>swapconf</code> is the number
-of confirmations required during settlement on the first swap transaction,
-before the second swap transaction is broadcast.
+Each asset has two distinct '''minimum numbers of confirmations'''. The
+<code>fundconf</code> is the number of confirmations required for
+[[orders.mediawiki/#Order_Preparation|coins to fund an order]]. The
+<code>swapconf</code> is the number of confirmations required during settlement
+on the first swap transaction, before the second swap transaction is broadcast.
 
 The minimum confirmation rule is waived for a change output from a transaction
 involved in a DEX-monitored trade.
 
-The '''broadcast timeout''' is the amount of time a client has to broadcast a
-transaction. For the maker, the broadcast time is measured from the time of
-match notification.
-For the taker, timeout is measured from  the time when the maker's swap receives
-its <code>swapconf</code><sup>th</sup> confirmation.
+===Market Variables===
 
-Asset info should be requested by the user immediately after connecting.
+If the client connects shortly after a
+[[orders.mediawiki/#Trade_Suspension|trade suspension]], it's possible that
+trading will not commence until a future epoch. The DEX's <code>config</code>
+response will indicate for each market at which epoch index trading did or will
+begin (<code>startepoch</code>), along with the epoch duration in milliseconds
+(<code>epochlen</code>), for each market.
+
+The [[orders.mediawiki/#Market_Buy_Orders|market buy buffer]], which defines the
+minimum order size for a market buy order, is also in the market configuration
+returned in the server's response as <code>buybuffer</code>.
+
+===Configuration Data Request===
 
 '''Request route:''' <code>config</code>, '''originator:''' client
 
@@ -67,17 +98,19 @@ respond with its current configuration.
 
 <code>result</code>
 {|
-! field     !! type !! description
+! field          !! type  !! description
 |-
-| epochlen  || int   || the [[#Epochbased_Order_Matching|epoch duration]] (milliseconds)
+| cancelmax      || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
 |-
-| buybuffer || float || the [[orders.mediawiki/#Market_Buy_Orders|market buy buffer]]
+| btimeout       || int   || the broadcast timeout
 |-
-| cancelmax || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
+| regfee         || int   || registration fee (Decred atoms)
 |-
-| assets    || &#91;object&#93; || list of Asset objects (definition below)
+| regfeeconfirms || int   || required confirmations for the registration fee payment transaction
 |-
-| btimeout  || int   || the broadcast timeout
+| assets         || &#91;object&#93; || list of Asset objects (definition below)
+|-
+| markets        || &#91;object&#93; || list of Market objects (definition below)
 |}
 
 '''Asset object'''
@@ -100,6 +133,24 @@ respond with its current configuration.
 | swapconf || int || minimum confirmations for swap transactions
 |-
 | fundconf || int || minimum confirmations for funding coins
+|}
+
+'''Market object'''
+
+{|
+! field      !! type   !! description
+|-
+| name       || string || market name
+|-
+| base       || int    || base asset ID
+|-
+| quote      || int    || quote asset ID
+|-
+| epochlen   || int    || the [[#Epochbased_Order_Matching|epoch duration]] (milliseconds)
+|-
+| startepoch || int    || the epoch number at which trading did or will commence. May be in the future e.g. [[orders.mediawiki/#Trade_Suspension|after maintenance]]
+|-
+| buybuffer  || float  || the [[orders.mediawiki/#Market_Buy_Orders|market buy buffer]]
 |}
 
 ==Fees==
