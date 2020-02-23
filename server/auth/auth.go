@@ -145,17 +145,18 @@ type Config struct {
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
-	var auth *AuthManager
-	auth = &AuthManager{
-		users:      make(map[account.AccountID]*clientInfo),
-		conns:      make(map[uint64]*clientInfo),
-		storage:    cfg.Storage,
-		signer:     cfg.Signer,
-		regFee:     cfg.RegistrationFee,
-		checkFee:   cfg.FeeChecker,
-		feeConfs:   cfg.FeeConfs,
-		coinWaiter: coinwaiter.New(recheckInterval, auth.Send),
+	auth := &AuthManager{
+		users:    make(map[account.AccountID]*clientInfo),
+		conns:    make(map[uint64]*clientInfo),
+		storage:  cfg.Storage,
+		signer:   cfg.Signer,
+		regFee:   cfg.RegistrationFee,
+		checkFee: cfg.FeeChecker,
+		feeConfs: cfg.FeeConfs,
 	}
+	// Referring to auth.Send in the construction above would create a function
+	// with a nil receiver, so do it after auth is set.
+	auth.coinWaiter = coinwaiter.New(recheckInterval, auth.Send)
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
