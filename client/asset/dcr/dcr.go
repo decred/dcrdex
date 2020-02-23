@@ -289,7 +289,7 @@ func (d *ExchangeWallet) Info() *asset.WalletInfo {
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface.
 func (dcr *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
-	err := dcr.client.Connect(ctx, true)
+	err := dcr.client.Connect(ctx, false)
 	if err != nil {
 		return fmt.Errorf("Decred Wallet connect error: %v", err), nil
 	}
