@@ -553,9 +553,9 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		errChan <- msg.UnmarshalResult(regRes)
 	})
 	if err != nil {
-		return fmt.Errorf("'register' requst error: %v", err), nil
+		return fmt.Errorf("'register' request error: %v", err), nil
 	}
-	err = extractError(errChan, requestTimeout)
+	err = extractError(errChan, requestTimeout, "register")
 	if err != nil {
 		return fmt.Errorf("'register' result decode error: %v", err), nil
 	}
@@ -583,6 +583,8 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		return fmt.Errorf("registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee), nil
 	}
 	// Pay the registration fee.
+	log.Infof("Attempting registration fee payment for %s of %d units of %s", regRes.Address,
+		regRes.Fee, regAsset.Symbol)
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, regAsset)
 	if err != nil {
 		return fmt.Errorf("error paying registration fee: %v", err), nil
@@ -614,9 +616,11 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	// Set up the coin waiter.
 	errChan = make(chan error, 1)
 	c.wait(assetID, trigger, func(err error) {
+		log.Debugf("Registration fee txn %x now has %d confirmations.", coin.ID(), dc.cfg.RegFeeConfirms)
 		if err != nil {
 			errChan <- err
 		}
+		log.Infof("Notifying dex %s of fee payment.", dc.acct.url)
 		err = c.notifyFee(dc, coin.ID())
 		if err != nil {
 			errChan <- err
@@ -718,7 +722,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	reqB, err := req.Serialize()
 	if err != nil {
 		log.Warnf("fee paid with coin %x, but unable to serialize notifyfee request so server signature cannot be verified")
-		// Dont quit. The fee is already paid, so follow through if possible.
+		// Don't quit. The fee is already paid, so follow through if possible.
 	}
 	// Sign the request and send it.
 	err = stamp(dc.acct.privKey, req)
@@ -766,7 +770,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	if err != nil {
 		return fmt.Errorf("'notifyfee' request error: %v", err)
 	}
-	return extractError(errChan, requestTimeout)
+	return extractError(errChan, requestTimeout, "notifyfee")
 }
 
 // Withdraw initiates a withdraw from an exchange wallet. The client password
@@ -819,7 +823,7 @@ func (c *Core) authDEX(dc *dexConnection) ([]Negotiation, error) {
 		return nil, err
 	}
 	// Check the response error.
-	err = extractError(errChan, requestTimeout)
+	err = extractError(errChan, requestTimeout, "connect")
 	if err != nil {
 		return nil, fmt.Errorf("'connect' error: %v", err)
 	}
@@ -883,17 +887,24 @@ func (c *Core) initialize() {
 				log.Errorf("error connecting to DEX %s: %v", acct.URL, err)
 				return
 			}
+			log.Debugf("connectDEX for %s completed, checking account...", acct.URL)
 			if !acct.Paid {
 				if len(acct.FeeCoin) == 0 {
-					log.Warnf("incomplete registration without fee payment detected for %s. Discarding account.", acct.URL)
+					// Register should have set this when creating the account
+					// that was obtained via db.Accounts.
+					log.Warnf("Incomplete registration without fee payment detected for DEX %s. "+
+						"Discarding account.", acct.URL)
 					return
 				}
-				log.Infof("Incomplete registration detected for %s. Registration will be"+
-					" completed when the Decred wallet is unlocked.", acct.URL)
+				log.Infof("Incomplete registration detected for DEX %s. "+
+					"Registration will be completed when the Decred wallet is unlocked.",
+					acct.URL)
+				// checkUnpaidFees will pay the fees if the wallet is unlocked
 			}
 			c.connMtx.Lock()
 			c.conns[acct.URL] = dc
 			c.connMtx.Unlock()
+			log.Debugf("dex connection to %s ready", acct.URL)
 		}(acct)
 	}
 	// If there were accounts, wait until they are loaded and log a messsage.
@@ -1114,6 +1125,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		connChan <- dc
 		c.wg.Add(1)
 		// Listen for incoming messages.
+		log.Infof("Connected to DEX %s and listening for messages.", uri)
 		go c.listen(dc)
 	})
 	if err != nil {
@@ -1354,11 +1366,11 @@ func stamp(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) error {
 }
 
 // extractError extracts the error from the channel with a timeout.
-func extractError(errChan <-chan error, delay time.Duration) error {
+func extractError(errChan <-chan error, delay time.Duration, route string) error {
 	select {
 	case err := <-errChan:
 		return err
 	case <-time.NewTimer(delay).C:
-		return fmt.Errorf("timed out waiting for 'connect' response.")
+		return fmt.Errorf("timed out waiting for '%s' response.", route)
 	}
 }
