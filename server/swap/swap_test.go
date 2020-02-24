@@ -262,9 +262,6 @@ func (a *TAsset) Coin(coinID, redeemScript []byte) (asset.Coin, error) {
 func (a *TAsset) ValidateCoinID(coinID []byte) error {
 	return nil
 }
-func (a *TAsset) VerifyCoin(coinID []byte, redeemScript []byte) error {
-	return nil
-}
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil
 }

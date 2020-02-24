@@ -449,7 +449,7 @@ type Redemption struct {
 
 // Serialize serializes the Redemption data.
 func (r *Redemption) Serialize() ([]byte, error) {
-	// Init serialization is Redeem (100) + timestamp (8) = 108
+	// Redemption serialization is Redeem (100) + timestamp (8) = 108
 	s, _ := r.Redeem.Serialize()
 	return append(s, uint64Bytes(r.Time)...), nil
 }

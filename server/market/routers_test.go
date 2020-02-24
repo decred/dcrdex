@@ -296,9 +296,6 @@ func (b *TBackend) Run(context.Context) {}
 func (b *TBackend) ValidateCoinID(coinID []byte) error {
 	return nil
 }
-func (b *TBackend) VerifyCoin(coinID []byte, redeemScript []byte) error {
-	return nil
-}
 func (b *TBackend) ValidateContract(contract []byte) error {
 	return nil
 }

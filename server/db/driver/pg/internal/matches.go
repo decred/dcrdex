@@ -10,10 +10,10 @@ const (
 	// columns for both maker and taker. Sell refers to sell of the base asset,
 	// and the opposite is implied for the counterparty (makerSell = !takerSell)
 	//
-	//   takerSell   | takerAddress | coinIDTakerFund | coinIDTakerRecv ||  (makerSell)  | makerAddress | coinIDMakerFund | coinIDMakerRecv
-	// -------------------------------------------------------------------------------------------------------------------------------------
-	//  true (B->Q)  |    quote     |      base       |      quote      ||  false (Q->B) |     base     |      quote      |     base
-	//  false (Q->B) |    base      |      quote      |      base       ||  true (B->Q)  |     quote    |      base       |     quote
+	//   takerSell   | takerAddress | aContractCoinID | aRedeemCoinID ||  (makerSell)  | makerAddress | bContractCoinID | bRedeemCoinID
+	// ---------------------------------------------------------------------------------------------------------------------------------
+	//  true (B->Q)  |    quote     |      base       |     quote     ||  false (Q->B) |     base     |      quote      |     base
+	//  false (Q->B) |    base      |      quote      |     base      ||  true (B->Q)  |     quote    |      base       |     quote
 	CreateMatchesTable = `CREATE TABLE IF NOT EXISTS %s (
 		matchid BYTEA PRIMARY KEY,
 		takerSell BOOL,        -- to identify asset of address and coinIDs

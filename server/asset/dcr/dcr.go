@@ -166,18 +166,6 @@ func (dcr *Backend) ValidateCoinID(coinID []byte) error {
 	return err
 }
 
-// VerifyCoin decodes the coinID, and then attempts to retrieve details on the
-// transaction output from the blockchain. If the redeemScript is provided, the
-// coinID must be a P2SH output with a script hash corresponding to the provided
-// redeem script.
-func (dcr *Backend) VerifyCoin(coinID []byte, redeemScript []byte) error {
-	txHash, vout, err := decodeCoinID(coinID)
-	if err != nil {
-		return fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
-	}
-	return dcr.validateTxOut(txHash, vout, redeemScript)
-}
-
 // ValidateContract ensures that the swap contract is constructed properly, and
 // contains valid sender and receiver addresses.
 func (dcr *Backend) ValidateContract(contract []byte) error {
@@ -379,7 +367,8 @@ func (dcr *Backend) onBlockConnected(serializedHeader []byte, _ [][]byte) {
 	// TODO: Instead of a buffered channel, anyQ, make a queue with a slice so
 	// the buffer size has no role in correctness i.e. the ability of this
 	// function to work when previous blocks require RPC calls to complete their
-	// processing.
+	// processing. That is, if the channel buffer is full there is likely to be
+	// deadlock waiting for other RPCs.
 	dcr.anyQ <- &h
 }
 
@@ -399,8 +388,6 @@ func (dcr *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScr
 	}
 
 	switch {
-	case scriptType.IsMultiSig(): // includes p2sh for a multisig redeem script
-		return fmt.Errorf("multi-sig not allowed")
 	case scriptType.IsP2SH(): // regular or stake (vsp vote) p2sh
 		if len(redeemScript) == 0 {
 			return fmt.Errorf("no redeem script provided for P2SH pkScript")

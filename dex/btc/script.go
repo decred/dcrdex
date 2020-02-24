@@ -578,7 +578,7 @@ func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte
 	return ExtractScriptHash(pkScript, chainParams)
 }
 
-// ExtractContractHash attempts to extract the redeem script hash from pkScript.
+// ExtractScriptHash attempts to extract the redeem script hash from pkScript.
 // The pkScript must be a a P2SH script, requiring only 1 pkh address, which
 // must be a script hash address.
 func ExtractScriptHash(pkScript []byte, chainParams *chaincfg.Params) ([]byte, error) {

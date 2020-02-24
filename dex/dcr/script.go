@@ -553,7 +553,9 @@ type DCRScriptAddrs struct {
 
 // ExtractScriptAddrs extracts the addresses from script. Addresses are
 // separated into pubkey and pubkey hash, where the pkh addresses are actually a
-// catch all that incluses P2SH addresss (TODO: revise DCRScriptAddrs?).
+// catch all for non-P2PK addresses. As such, this function is not intended for
+// use on P2SH pkScripts. Rather, the corresponding redeem script should be
+// processed with ExtractScriptAddrs.
 func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScriptAddrs, error) {
 	pubkeys := make([]dcrutil.Address, 0)
 	pkHashes := make([]dcrutil.Address, 0)
@@ -609,7 +611,6 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 			return nil, fmt.Errorf("no redeem script provided for P2SH pubkey script")
 		}
 		evalScript = redeemScript
-		// TODO: check p2sh address from the pkScript == address(hash(redeemScript))
 	}
 	scriptAddrs, err := ExtractScriptAddrs(evalScript, chainParams)
 	if err != nil {

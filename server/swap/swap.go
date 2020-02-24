@@ -1072,6 +1072,9 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// init requests should only be sent when contracts are still required, in
 	// the correct sequence, and by the correct party.
 	switch stepInfo.match.Status {
+	// These cases can eventually reduced to:
+	// case order.NewlyMatched, order.MakerSwapCast: // just continue
+	// default: // respond with settlement sequence error
 	case order.NewlyMatched:
 		if !stepInfo.actor.isMaker {
 			// s.step should have returned an error of code SettlementSequenceError.
@@ -1083,7 +1086,6 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 			panic("handleInit: this stepInformation should be for the taker!")
 		}
 	default:
-		fmt.Println("Swap status:", stepInfo.match.Status)
 		return &msgjson.Error{
 			Code:    msgjson.SettlementSequenceError,
 			Message: "swap contract already provided",
