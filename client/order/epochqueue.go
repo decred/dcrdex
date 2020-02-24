@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -24,6 +25,7 @@ type epochOrder struct {
 
 // EpochQueue represents a client epoch queue.
 type EpochQueue struct {
+	epoch  uint64 // update atomically.
 	orders map[order.OrderID]*epochOrder
 	mtx    sync.Mutex
 }
@@ -37,6 +39,8 @@ func NewEpochQueue() *EpochQueue {
 
 // Reset clears the epoch queue. This should be called when a new epoch begins.
 func (eq *EpochQueue) Reset() {
+	atomic.StoreUint64(&eq.epoch, 0)
+
 	eq.mtx.Lock()
 	eq.orders = make(map[order.OrderID]*epochOrder)
 	eq.mtx.Unlock()
@@ -44,6 +48,14 @@ func (eq *EpochQueue) Reset() {
 
 // Enqueue appends the provided order note to the epoch queue.
 func (eq *EpochQueue) Enqueue(note *msgjson.EpochOrderNote) error {
+	epoch := atomic.LoadUint64(&eq.epoch)
+
+	// Ensure the order received is of the current epoch.
+	if epoch != 0 && note.Epoch != epoch {
+		return fmt.Errorf("epoch mismatch: expected %d, got %d",
+			epoch, note.Epoch)
+	}
+
 	if len(note.OrderID) != order.OrderIDSize {
 		return fmt.Errorf("expected order id length of %d, got %d",
 			order.OrderIDSize, len(note.OrderID))
@@ -68,6 +80,11 @@ func (eq *EpochQueue) Enqueue(note *msgjson.EpochOrderNote) error {
 		Side:       note.Side,
 	}
 
+	// Set the epoch if the order note received is the first to be queue.
+	if epoch == 0 {
+		atomic.StoreUint64(&eq.epoch, note.Epoch)
+	}
+
 	eq.mtx.Lock()
 	eq.orders[oid] = order
 	eq.mtx.Unlock()
@@ -89,6 +106,11 @@ func (eq *EpochQueue) Exists(oid order.OrderID) bool {
 	_, ok := eq.orders[oid]
 	eq.mtx.Unlock()
 	return ok
+}
+
+// Epoch returns the current epoch being tracked by the queue.
+func (eq *EpochQueue) Epoch() uint64 {
+	return atomic.LoadUint64(&eq.epoch)
 }
 
 // GenerateMatchProof calculates the sorting seed used in order matching

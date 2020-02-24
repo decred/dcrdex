@@ -49,6 +49,8 @@ type dexConnection struct {
 	acct        *dexAccount
 	booksMtx    sync.RWMutex
 	books       map[string]*book.OrderBook
+	epochsMtx   sync.RWMutex
+	epochs      map[string]*book.EpochQueue
 	markets     []*Market
 	matchMtx    sync.RWMutex
 	negotiators map[order.MatchID]*matchNegotiator
@@ -1119,6 +1121,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 			assets:     assets,
 			cfg:        dexCfg,
 			books:      make(map[string]*book.OrderBook),
+			epochs:     make(map[string]*book.EpochQueue),
 			acct:       newDEXAccount(acctInfo),
 			markets:    markets,
 		}
@@ -1207,6 +1210,28 @@ func (c *Core) handleUnbookOrderMsg(dc *dexConnection, msg *msgjson.Message) err
 	return ob.Unbook(&note)
 }
 
+// handleEpochOrderMsg is called when an epoch_order notification is
+// received.
+func (c *Core) handleEpochOrderMsg(dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.EpochOrderNote
+	err := json.Unmarshal(msg.Payload, &note)
+	if err != nil {
+		return fmt.Errorf("epoch order note unmarshal error: %v", err)
+	}
+
+	dc.epochsMtx.Lock()
+	eq, ok := dc.epochs[note.MarketID]
+	if !ok {
+		// Create the associated epoch queue for the order note if it
+		// does not exist.
+		eq = book.NewEpochQueue()
+		dc.epochs[note.MarketID] = eq
+	}
+	dc.epochsMtx.Unlock()
+
+	return eq.Enqueue(&note)
+}
+
 // listen monitors the DEX websocket connection for server requests and
 // notifications.
 func (c *Core) listen(dc *dexConnection) {
@@ -1244,7 +1269,7 @@ out:
 				case msgjson.BookOrderRoute:
 					err = c.handleBookOrderMsg(dc, msg)
 				case msgjson.EpochOrderRoute:
-					log.Info("epoch_order message received")
+					err = c.handleEpochOrderMsg(dc, msg)
 				case msgjson.UnbookOrderRoute:
 					err = c.handleUnbookOrderMsg(dc, msg)
 				default:
