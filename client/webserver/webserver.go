@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"github.com/decred/slog"
 	"github.com/go-chi/chi"
@@ -61,12 +62,16 @@ type clientCore interface {
 	Book(dex string, base, quote uint32) *core.OrderBook
 	Unsync(dex string, base, quote uint32)
 	Balance(uint32) (uint64, error)
-	WalletStatus(assetID uint32) (has, running, open bool)
-	CreateWallet(form *core.WalletForm) error
+	WalletState(assetID uint32) *core.WalletState
+	CreateWallet(appPW, walletPW string, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw string) error
-	Wallets() []*core.WalletStatus
+	CloseWallet(assetID uint32) error
+	ConnectWallet(assetID uint32) error
+	Wallets() []*core.WalletState
 	User() *core.User
 	PreRegister(dex string) (uint64, error)
+	SupportedAssets() map[uint32]*core.SupportedAsset
+	Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error)
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -215,10 +220,13 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/preregister", s.apiPreRegister)
 		r.Post("/newwallet", s.apiNewWallet)
 		r.Post("/openwallet", s.apiOpenWallet)
+		r.Post("/closewallet", s.apiCloseWallet)
 		r.Post("/register", s.apiRegister)
 		r.Post("/init", s.apiInit)
 		r.Post("/login", s.apiLogin)
+		r.Post("/withdraw", s.apiWithdraw)
 		r.Get("/user", s.apiUser)
+		r.Post("/connectwallet", s.apiConnect)
 	})
 	// Files
 	fileServer(mux, "/js", fp(root, "dist"))

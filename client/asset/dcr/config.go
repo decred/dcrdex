@@ -43,7 +43,7 @@ type DCRConfig struct {
 	RPCListen string `long:"rpclisten" description:"dcrd interface/port for RPC connections (default port: 9109, testnet: 19109)"`
 	// RPCCert is the filepath to the dcrwallet TLS certificate. If it is not
 	// provided, the default dcrwallet location will be assumed.
-	RPCCert string `long:"cafile" description:"File containing the certificate file"`
+	RPCCert string `long:"cafile" description:"File containing the TLS certificate"`
 	// Context should be canceled when the application exits. This will cause
 	// some cleanup to be performed during shutdown.
 	Context context.Context

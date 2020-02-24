@@ -60,7 +60,7 @@ func mineAlpha() error {
 	return exec.Command("tmux", "send-keys", "-t", "btc-harness:2", "./mine-alpha 1", "C-m").Run()
 }
 
-func tBackend(t *testing.T, conf, name string, blkFunc func(string, error)) *ExchangeWallet {
+func tBackend(t *testing.T, conf, name string, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
@@ -77,16 +77,17 @@ func tBackend(t *testing.T, conf, name string, blkFunc func(string, error)) *Exc
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
-	go backend.Run(tCtx)
-	err = backend.Connect()
+	cm := dex.NewConnectionMaster(backend)
+	err = cm.Connect(tCtx)
 	if err != nil {
 		t.Fatalf("error connecting backend: %v", err)
 	}
-	return backend.(*ExchangeWallet)
+	return backend.(*ExchangeWallet), cm
 }
 
 type testRig struct {
-	backends map[string]*ExchangeWallet
+	backends          map[string]*ExchangeWallet
+	connectionMasters map[string]*dex.ConnectionMaster
 }
 
 func (rig *testRig) alpha() *ExchangeWallet {
@@ -98,14 +99,29 @@ func (rig *testRig) beta() *ExchangeWallet {
 func (rig *testRig) gamma() *ExchangeWallet {
 	return rig.backends["gamma"]
 }
+func (rig *testRig) close(t *testing.T) {
+	for name, cm := range rig.connectionMasters {
+		closed := make(chan struct{})
+		go func() {
+			cm.Disconnect()
+			close(closed)
+		}()
+		select {
+		case <-closed:
+		case <-time.NewTimer(time.Second).C:
+			t.Fatalf("failed to disconnect from %s", name)
+		}
+	}
+}
 
 func newTestRig(t *testing.T, blkFunc func(string, error)) *testRig {
 	rig := &testRig{
-		backends: make(map[string]*ExchangeWallet),
+		backends:          make(map[string]*ExchangeWallet),
+		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
 	}
-	rig.backends["alpha"] = tBackend(t, "alpha", "", blkFunc)
-	rig.backends["beta"] = tBackend(t, "beta", "", blkFunc)
-	rig.backends["gamma"] = tBackend(t, "alpha", "gamma", blkFunc)
+	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, "alpha", "", blkFunc)
+	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(t, "beta", "", blkFunc)
+	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(t, "alpha", "gamma", blkFunc)
 	return rig
 }
 
@@ -135,6 +151,7 @@ func TestWallet(t *testing.T) {
 		blockReported = true
 		tLogger.Infof("%s has reported a new block, error = %v", name, err)
 	})
+	defer rig.close(t)
 	contractValue := toSatoshi(2)
 
 	inUTXOs := func(utxo asset.Coin, utxos []asset.Coin) bool {
@@ -148,7 +165,7 @@ func TestWallet(t *testing.T) {
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		available, unconf, err := wallet.Balance(tBTC)
+		available, unconf, err := wallet.Balance(tBTC.FundConf)
 		tLogger.Debugf("%s %f available, %f unconfirmed", name, float64(available)/1e8, float64(unconf)/1e8)
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
@@ -170,11 +187,6 @@ func TestWallet(t *testing.T) {
 	// Unlock
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
-	// Check that we can get the coin with Coin.
-	_, err = rig.gamma().Coin(utxo.ID())
-	if err != nil {
-		t.Fatalf("Coin error: %v", err)
-	}
 	// Make sure we get the first utxo back with Fund.
 	utxos, _ = rig.gamma().Fund(contractValue*3, tBTC)
 	if !inUTXOs(utxo, utxos) {
@@ -236,6 +248,19 @@ func TestWallet(t *testing.T) {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
 	}
 
+	confCoin := receipts[0].Coin()
+	checkConfs := func(n uint32) {
+		confs, err := rig.gamma().Confirmations(confCoin.ID())
+		if err != nil {
+			t.Fatalf("error getting %d confs: %v", n, err)
+		}
+		if confs != n {
+			t.Fatalf("expected %d confs, got %d", n, confs)
+		}
+	}
+	// Check that there are 0 confirmations.
+	checkConfs(0)
+
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		// Alpha should be able to redeem.
 		swapOutput := receipt.Coin()
@@ -293,6 +318,8 @@ func TestWallet(t *testing.T) {
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
+	// Check that there is 1 confirmation on the swap
+	checkConfs(1)
 	_, err = rig.gamma().FindRedemption(ctx, receipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
@@ -341,10 +368,18 @@ func TestWallet(t *testing.T) {
 	}
 
 	// Test PayFee
-	_, err = rig.gamma().PayFee(alphaAddress, 1e8, tBTC)
+	coin, err := rig.gamma().PayFee(alphaAddress, 1e8, tBTC)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}
+	tLogger.Infof("fee paid with tx %s", coin.String())
+
+	// Test Withdraw
+	coin, err = rig.gamma().Withdraw(alphaAddress, 5e7, 10)
+	if err != nil {
+		t.Fatalf("error withdrawing: %v", err)
+	}
+	tLogger.Infof("withdrew with tx %s", coin.String())
 
 	// Lock the wallet
 	err = rig.gamma().Lock()

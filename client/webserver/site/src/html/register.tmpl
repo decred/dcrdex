@@ -4,10 +4,10 @@
   <div class="d-flex flex-column vscroll w-100">
 
     {{- /* Set up the initial application password. Only shown on first visit. */ -}}
-    <form class="auth mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
-      <div class="bg2 px-2 py-1 text-center fs18">Set Password</div>
+    <form class="card mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
+      <div class="bg2 px-2 py-1 text-center fs18">Set Client Password</div>
       <div class="p-4">
-        <div class="fs16">Set your client password. This password will protect your DEX account keys, but not your wallets.</div>
+        <div class="fs16">Set your client password. This password will protect your DEX account keys and connected wallets.</div>
         <hr class="dashed my-4">
         <div class="pb-3">
           <label for="pw" class="pl-1 mb-1">Password</label>
@@ -25,8 +25,8 @@
     </form>
 
     {{- /* Set up the Decred wallet. Only shown on first visit. */ -}}
-    <form class="auth mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="walletForm">
-      <div class="bg2 px-2 py-1 text-center fs18">Decred Wallet</div>
+    <form class="card mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="walletForm">
+      <div class="bg2 px-2 py-1 flex-center fs18"><img src="/img/coins/dcr.png" class="micro-icon mr-2"> Decred Wallet</div>
       <div class="p-4">
         <div class="fs16">You haven't connected a Decred wallet yet. Connect to your wallet now.</div>
         <hr class="dashed my-4">
@@ -35,12 +35,18 @@
           <input type="text" class="form-control select" id="acctName">
         </div>
         <div>
-          <label for="newWalletPass" class="pt-3 pl-1 mb-1">Password</label>
-          <input type="password" class="form-control select" id="newWalletPass">
+          <label for="newWalletPass" class="pt-3 pl-1 mb-0">Wallet Password</label>
+          <div class="fs14 px-1 mb-1">This is the password you have configured with your wallet backend.</div>
+          <input type="password" class="form-control select" id="newWalletPass" autocomplete="off">
         </div>
         <div>
           <label for="iniPath" class="pt-3 pl-1 mb-1">Configuration Filepath</label>
           <input type="text" class="form-control select" placeholder="leave empty to use default path" id="iniPath">
+        </div>
+        <div>
+          <label for="wClientPass" class="pt-3 pl-1 mb-0">Client Password</label>
+          <div class="fs14 px-1 mb-1">Your client password is always required when performing sensitive wallet operations.</div>
+          <input type="password" class="form-control select" id="wClientPass" autocomplete="off">
         </div>
         <div class="d-flex justify-content-end mt-4">
           <button id="submitCreate" type="button" class="col-8 justify-content-center fs15 bg2 selected">Create</button>
@@ -50,14 +56,14 @@
     </form>
 
     {{- /* Open Decred wallet. Only shown if now already open. */ -}}
-    <form class="auth mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="openForm">
+    <form class="card mx-auto my-5 bg1{{if not .OpenStep}} d-hide{{end}}" id="openForm">
       <div class="bg2 px-2 py-1 text-center fs18">Decred Wallet</div>
       <div class="p-4">
         <div class="fs16">Unlock your Decred wallet to pay registration fees.</div>
         <hr class="dashed my-4">
         <div>
           <label for="walletPass" class="pl-1 mb-1">Decred Wallet Password</label>
-          <input type="password" class="form-control select" id="walletPass">
+          <input type="password" class="form-control select" id="walletPass" autocomplete="off">
         </div>
         <div class="d-flex justify-content-end mt-4">
           <button id="submitOpen" type="button" class="col-8 justify-content-center fs15 bg2 selected">Open</button>
@@ -67,7 +73,7 @@
     </form>
 
     {{- /* DEX URL */ -}}
-    <form class="auth mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="urlForm">
+    <form class="card mx-auto my-5 bg1{{if not .DEXStep}} d-hide{{end}}" id="urlForm">
       <div class="bg2 px-2 py-1 text-center fs18">Add a DEX</div>
       <div class="p-4">
         <div>
@@ -82,7 +88,7 @@
     </form>
 
     {{- /* Confirm registration with app password. */ -}}
-    <form class="auth mx-auto my-5 bg1 d-hide" id="pwForm">
+    <form class="card mx-auto my-5 bg1 d-hide" id="pwForm">
       <div class="bg2 px-2 py-1 text-center fs18">Confirm Password</div>
       <div class="p-4">
         <div class="fs16">
@@ -92,7 +98,7 @@
         <hr class="dashed my-4">
         <div>
           <label for="clientPass" class="pl-1 mb-1">Password</label>
-          <input type="password" class="form-control select" id="clientPass">
+          <input type="password" class="form-control select" id="clientPass" autocomplete="current-password">
         </div>
         <div class="d-flex justify-content-end mt-4">
           <button id="submitPW" type="button" class="col-8 justify-content-center fs15 bg2 selected">Register</button>

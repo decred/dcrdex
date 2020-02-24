@@ -6,6 +6,7 @@ package dbtest
 import (
 	"bytes"
 	"math/rand"
+	"time"
 
 	"decred.org/dcrdex/client/db"
 	ordertest "decred.org/dcrdex/dex/order/test"
@@ -31,9 +32,12 @@ func RandomAccountInfo() *db.AccountInfo {
 // RandomWallet creates a random wallet.
 func RandomWallet() *db.Wallet {
 	return &db.Wallet{
-		AssetID: rand.Uint32(),
-		Account: ordertest.RandomAddress(),
-		INIPath: ordertest.RandomAddress(),
+		AssetID:   rand.Uint32(),
+		Account:   ordertest.RandomAddress(),
+		INIPath:   ordertest.RandomAddress(),
+		Balance:   rand.Uint64(),
+		BalUpdate: time.Unix(int64(rand.Uint64()), 0),
+		Address:   ordertest.RandomAddress(),
 	}
 }
 
@@ -212,5 +216,17 @@ func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 	}
 	if w1.INIPath != w2.INIPath {
 		t.Fatalf("INIPath mismatch. %s != %s", w1.INIPath, w2.INIPath)
+	}
+	if w1.Balance != w2.Balance {
+		t.Fatalf("Balance mismatch. %d != %d", w1.Balance, w2.Balance)
+	}
+	if !w1.BalUpdate.Equal(w2.BalUpdate) {
+		t.Fatalf("BalUpdate mismatch. %s != %s", w1.BalUpdate, w2.BalUpdate)
+	}
+	if w1.Address != w2.Address {
+		t.Fatalf("Address mismatch. %s != %s", w1.Address, w2.Address)
+	}
+	if !bytes.Equal(w1.EncryptedPW, w2.EncryptedPW) {
+		t.Fatalf("EncryptedPW mismatch. %x != %x", w1.EncryptedPW, w2.EncryptedPW)
 	}
 }

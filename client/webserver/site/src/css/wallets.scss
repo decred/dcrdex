@@ -1,0 +1,101 @@
+table.wallets {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 3px;
+  font-size: 16px;
+
+  tbody tr {
+    background-color: $light_bg_1;
+  }
+
+  th {
+    padding: 5px 10px;
+  }
+
+  td {
+    border-width: 1px;
+    border-color: #aaa;
+    border-style: solid none solid none;
+    padding: 7px 10px;
+  }
+
+  td:last-child {
+    border-style: solid solid solid none;
+  }
+
+  td:first-child {
+    border-style: solid none solid solid;
+  }
+
+  th:last-child,
+  td:last-child {
+    text-align: right;
+  }
+
+  span,
+  img {
+    vertical-align: middle;
+    margin-right: 5px;
+  }
+
+  button {
+    background-color: white;
+    border-radius: 3px;
+    font-size: 14px;
+    border: 1px solid #7776;
+  }
+
+  button:not(:last-child) {
+    margin-right: 5px;
+  }
+
+  td.status-col {
+    text-align: left;
+
+    span {
+      margin-right: 10px;
+    }
+
+    span.txt-status {
+      font-size: 15px;
+    }
+
+    .red {
+      color: #bd4646;
+    }
+
+    .grey {
+      color: #999;
+    }
+  }
+
+  .ico-unlocked {
+    color: green;
+  }
+}
+
+div.asset-market {
+  font-size: 15px;
+  font-family: $demi-sans;
+  text-align: center;
+  margin: 5px;
+  width: 90px;
+  cursor: pointer;
+
+  img {
+    margin-bottom: 5px;
+  }
+}
+
+div.asset-market:hover {
+  background-color: $dark_bg_2;
+}
+
+#marketBox {
+  position: relative;
+  max-width: 80%;
+}
+
+#depositAddress {
+  user-select: all;
+}

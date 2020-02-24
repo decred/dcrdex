@@ -213,7 +213,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	wallet := newWallet(walletCfg, "btc", tLogger, &chaincfg.MainNetParams, client)
-	go wallet.Run(walletCtx)
+	go wallet.run(walletCtx)
 
 	return wallet, client, shutdown
 }
@@ -250,7 +250,7 @@ func TestAvailableFund(t *testing.T) {
 	// should be returned.
 	unspents := make([]*ListUnspentResult, 0)
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err := wallet.Balance(tBTC)
+	available, unconf, err := wallet.Balance(tBTC.FundConf)
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 
 	node.rawErr[methodListUnspent] = tErr
-	_, _, err = wallet.Balance(tBTC)
+	_, _, err = wallet.Balance(tBTC.FundConf)
 	if err == nil {
 		t.Fatalf("no wallet error for rpc error")
 	}
@@ -279,7 +279,7 @@ func TestAvailableFund(t *testing.T) {
 	unspents = append(unspents, littleUnspent)
 
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err = wallet.Balance(tBTC)
+	available, unconf, err = wallet.Balance(tBTC.FundConf)
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestAvailableFund(t *testing.T) {
 	})
 	littleUnspent.Confirmations = 1
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err = wallet.Balance(tBTC)
+	available, unconf, err = wallet.Balance(tBTC.FundConf)
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
@@ -376,6 +376,7 @@ func (c *tCoin) ID() dex.Bytes {
 	}
 	return make([]byte, 36)
 }
+func (c *tCoin) String() string                 { return hex.EncodeToString(c.id) }
 func (c *tCoin) Value() uint64                  { return 100 }
 func (c *tCoin) Confirmations() (uint32, error) { return 2, nil }
 func (c *tCoin) Redeem() dex.Bytes              { return nil }
@@ -1199,11 +1200,27 @@ func TestLockUnlock(t *testing.T) {
 	}
 }
 
-func TestPayFee(t *testing.T) {
+type tSenderType byte
+
+const (
+	tPayFeeSender tSenderType = iota
+	tWithdrawSender
+)
+
+func testSender(t *testing.T, senderType tSenderType) {
 	wallet, node, shutdown := tNewWallet()
+	sender := func(addr string, val uint64) (asset.Coin, error) {
+		return wallet.PayFee(addr, val, tBTC)
+	}
+	if senderType == tWithdrawSender {
+		sender = func(addr string, val uint64) (asset.Coin, error) {
+			return wallet.Withdraw(addr, val, walletInfo.FeeRate)
+		}
+	}
 	defer shutdown()
 	addr := tP2PKHAddr
 	fee := float64(1) // BTC
+	node.rawRes[methodSetTxFee] = mustMarshal(t, true)
 	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2PKHAddr)
 	node.rawRes[methodSendToAddress] = mustMarshal(t, tTxID)
 	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{
@@ -1227,14 +1244,14 @@ func TestPayFee(t *testing.T) {
 	}}
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 
-	_, err := wallet.PayFee(addr, toSatoshi(fee), tBTC)
+	_, err := sender(addr, toSatoshi(fee))
 	if err != nil {
 		t.Fatalf("PayFee error: %v", err)
 	}
 
 	// SendToAddress error
 	node.rawErr[methodSendToAddress] = tErr
-	_, err = wallet.PayFee(addr, 1e8, tBTC)
+	_, err = sender(addr, 1e8)
 	if err == nil {
 		t.Fatalf("no error for SendToAddress error: %v", err)
 	}
@@ -1242,54 +1259,50 @@ func TestPayFee(t *testing.T) {
 
 	// GetTransaction error
 	node.rawErr[methodGetTransaction] = tErr
-	_, err = wallet.PayFee(addr, 1e8, tBTC)
+	_, err = sender(addr, 1e8)
 	if err == nil {
 		t.Fatalf("no error for gettransaction error: %v", err)
 	}
 	node.rawErr[methodGetTransaction] = nil
 
 	// good again
-	_, err = wallet.PayFee(addr, toSatoshi(fee), tBTC)
+	_, err = sender(addr, toSatoshi(fee))
 	if err != nil {
 		t.Fatalf("PayFee error afterwards: %v", err)
 	}
 }
 
-func TestCoin(t *testing.T) {
+func TestPayFee(t *testing.T) {
+	testSender(t, tPayFeeSender)
+}
+
+func TestWithdraw(t *testing.T) {
+	testSender(t, tWithdrawSender)
+}
+
+func TestConfirmations(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
 
 	coinID := make([]byte, 36)
 	copy(coinID[:32], tTxHash[:])
 
-	// Bad coin idea
-	_, err := wallet.Coin(randBytes(35))
+	// Bad coin id
+	_, err := wallet.Confirmations(randBytes(35))
 	if err == nil {
 		t.Fatalf("no error for bad coin ID")
 	}
 
 	// listunspent error
-	node.rawErr[methodListUnspent] = tErr
-	_, err = wallet.Coin(randBytes(35))
+	node.rawErr[methodGetTransaction] = tErr
+	_, err = wallet.Confirmations(coinID)
 	if err == nil {
 		t.Fatalf("no error for listunspent error")
 	}
-	node.rawErr[methodListUnspent] = nil
+	node.rawErr[methodGetTransaction] = nil
 
-	// Try to get non-existent coin.
-	unspents := make([]*ListUnspentResult, 0)
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	_, err = wallet.Coin(randBytes(36))
-	if err == nil {
-		t.Fatalf("no error for missing coin")
-	}
-
-	littleUnspent := &ListUnspentResult{
-		TxID: tTxID,
-	}
-	unspents = append(unspents, littleUnspent)
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	_, err = wallet.Coin(coinID)
+	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{})
+	_, err = wallet.Confirmations(coinID)
 	if err != nil {
 		t.Fatalf("coin error: %v", err)
 	}

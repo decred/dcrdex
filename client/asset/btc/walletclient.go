@@ -31,6 +31,7 @@ const (
 	methodSignMessage       = "signmessagewithprivkey"
 	methodGetTransaction    = "gettransaction"
 	methodSendToAddress     = "sendtoaddress"
+	methodSetTxFee          = "settxfee"
 )
 
 // walletClient is a bitcoind wallet RPC client that uses rpcclient.Client's
@@ -198,10 +199,21 @@ func (wc *walletClient) Lock() error {
 	return wc.call(methodLock, nil, nil)
 }
 
-// SendToAddress sends the amount to the address.
-func (wc *walletClient) SendToAddress(address string, amount uint64) (*chainhash.Hash, error) {
+// SendToAddress sends the amount to the address. feeRate is in units of
+// atoms/byte.
+func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, subtract bool) (*chainhash.Hash, error) {
+	var success bool
+	// 1e-5 = 1e-8 for satoshis * 1000 for kB.
+	err := wc.call(methodSetTxFee, anylist{float64(feeRate) / 1e5}, &success)
+	if err != nil {
+		return nil, fmt.Errorf("error setting transaction fee: %v", err)
+	}
+	if !success {
+		return nil, fmt.Errorf("failed to set transaction fee")
+	}
 	var txid string
-	err := wc.call(methodSendToAddress, anylist{address, float64(amount) / 1e8}, &txid)
+	// Last boolean argument is to subtract the fee from the amount.
+	err = wc.call(methodSendToAddress, anylist{address, float64(value) / 1e8, "dcrdex", "", subtract}, &txid)
 	if err != nil {
 		return nil, err
 	}
@@ -212,9 +224,6 @@ func (wc *walletClient) SendToAddress(address string, amount uint64) (*chainhash
 // server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
 // will be marshaled into `thing`.
 func (wc *walletClient) call(method string, args anylist, thing interface{}) error {
-	if args == nil {
-		args = anylist{}
-	}
 	params := make([]json.RawMessage, 0, len(args))
 	for i := range args {
 		p, err := json.Marshal(args[i])

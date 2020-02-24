@@ -35,11 +35,25 @@ const (
 	// Use RawRequest to get the verbose block with verbose txs, as the btcd
 	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
+	methodGetNetworkInfo    = "getnetworkinfo"
 	BipID                   = 0
+	// The default fee is passed to the user as part of the asset.WalletInfo
+	// structure.
+	defaultWithdrawalFee = 2
+	minNetworkVersion    = 180100
+	minProtocolVersion   = 70015
 )
 
 // How often to check the tip hash.
-var blockTicker = time.Second
+var (
+	blockTicker = time.Second
+	walletInfo  = &asset.WalletInfo{
+		ConfigPath: dexbtc.SystemConfigPath("bitcoin"),
+		Name:       "Bitcoin",
+		FeeRate:    defaultWithdrawalFee,
+		Units:      "Satoshis",
+	}
+)
 
 // rpcClient is a wallet RPC client. In production, rpcClient is satisfied by
 // rpcclient.Client. A stub can be used for testing.
@@ -105,6 +119,11 @@ func (op *output) ID() dex.Bytes {
 	return toCoinID(&op.txHash, op.vout)
 }
 
+// String is a string representation of the coin.
+func (op *output) String() string {
+	return fmt.Sprintf("%s:%v", op.txHash, op.vout)
+}
+
 // Redeem is any known redeem script required to spend this output. Part of the
 // asset.Coin interface.
 func (op *output) Redeem() dex.Bytes {
@@ -166,6 +185,11 @@ func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.N
 	return NewWallet(cfg, logger, network)
 }
 
+// Info returns basic information about the wallet and asset.
+func (d *Driver) Info() *asset.WalletInfo {
+	return walletInfo
+}
+
 func init() {
 	asset.Register(BipID, &Driver{})
 }
@@ -174,7 +198,6 @@ func init() {
 // client app communicates with the BTC blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	ctx         context.Context
 	client      *rpcclient.Client
 	node        rpcClient
 	wallet      *walletClient
@@ -187,7 +210,6 @@ type ExchangeWallet struct {
 	changeMtx   sync.RWMutex
 	tradeChange map[string]time.Time
 	tipChange   func(error)
-	started     chan struct{}
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -259,7 +281,6 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 		log:         logger,
 		tradeChange: make(map[string]time.Time),
 		tipChange:   cfg.TipChange,
-		started:     make(chan struct{}),
 	}
 
 	return wallet
@@ -267,20 +288,32 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
-// Connect connects the wallet to the RPC server. Run must be called before
-// Connect.
-func (btc *ExchangeWallet) Connect() error {
-	<-btc.started
-	go btc.run(btc.ctx)
-	return nil
+// Info returns basic information about the wallet and asset.
+func (d *ExchangeWallet) Info() *asset.WalletInfo {
+	return walletInfo
 }
 
-// Run stores the wallet context, waits for cancellation. Calling Run more than
-// once will result in a panic.
-func (btc *ExchangeWallet) Run(ctx context.Context) {
-	btc.ctx = ctx
-	close(btc.started)
-	<-ctx.Done()
+// Connect connects the wallet to the RPC server. Satisfies the dex.Connector
+// interface.
+func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+	// Check the version. Do it here, so we can also diagnose a bad connection.
+	netVer, codeVer, err := btc.getVersion()
+	if err != nil {
+		return fmt.Errorf("error getting version: %v", err), nil
+	}
+	if netVer < minNetworkVersion {
+		return fmt.Errorf("reported node version %d is less than minimum %d", netVer, minNetworkVersion), nil
+	}
+	if codeVer < minProtocolVersion {
+		return fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion), nil
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		btc.run(ctx)
+	}()
+	return nil, &wg
 }
 
 // Balance should return the total available funds in the wallet.
@@ -289,12 +322,12 @@ func (btc *ExchangeWallet) Run(ctx context.Context) {
 // a simple getbalance with a minconf argument is not sufficient to see all
 // balance available for the exchange. Instead, all wallet UTXOs are scanned
 // for those that match DEX requirements. Part of the asset.Wallet interface.
-func (btc *ExchangeWallet) Balance(nfo *dex.Asset) (uint64, uint64, error) {
+func (btc *ExchangeWallet) Balance(confs uint32) (uint64, uint64, error) {
 	unspents, err := btc.wallet.ListUnspent()
 	if err != nil {
 		return 0, 0, err
 	}
-	_, sum, unconf, err := btc.spendableUTXOs(unspents, nfo)
+	_, sum, unconf, err := btc.spendableUTXOs(unspents, confs)
 	return sum, unconf, err
 }
 
@@ -309,7 +342,7 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 		return nil, err
 	}
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
-	utxos, _, unconf, err := btc.spendableUTXOs(unspents, nfo)
+	utxos, _, unconf, err := btc.spendableUTXOs(unspents, nfo.FundConf)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
@@ -856,55 +889,61 @@ func (btc *ExchangeWallet) Address() (string, error) {
 	return addr.String(), err
 }
 
-// PayFee pays the registration fee to the DEX.
-func (btc *ExchangeWallet) PayFee(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
-	txHash, err := btc.wallet.SendToAddress(address, fee)
+// PayFee sends the dex registration fee. Transaction fees are in addition to
+// the registartion fee, and the fee rate is taken from the DEX configuration.
+func (btc *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, regFee, nfo.FeeRate, false)
 	if err != nil {
-		return nil, fmt.Errorf("SendToAddress error: %v", err)
+		btc.log.Errorf("PayFee error address = '%s', fee = %d: %v", address, regFee, err)
+		return nil, err
+	}
+	return newOutput(btc.node, txHash, vout, sent, nil), nil
+}
+
+// Withdraw withdraws funds to the specified address. Fees are subtracted from
+// the value. feeRate is in units of atoms/byte.
+func (btc *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, value, feeRate, true)
+	if err != nil {
+		btc.log.Errorf("Withdraw error address = '%s', fee = %d: %v", address, value, err)
+		return nil, err
+	}
+	return newOutput(btc.node, txHash, vout, sent, nil), nil
+}
+
+// Send the value to the address, with the given fee rate. If subtract is true,
+// the fees will be subtracted from the value. If false, the fees are in
+// addition to the value. feeRate is in units of atoms/byte.
+func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subtract bool) (*chainhash.Hash, uint32, uint64, error) {
+	txHash, err := btc.wallet.SendToAddress(address, val, feeRate, subtract)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("SendToAddress error: %v", err)
 	}
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
-		btc.log.Errorf("error getting transaction for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction "+
-			"could not be retrieved: %v", err)
+		// btc.log.Errorf("error getting transaction for successful fee: %v", err)
+		return nil, 0, 0, fmt.Errorf("failed to fetch transaction after send: %v", err)
 	}
-	var vout uint32
-	var found bool
 	for _, details := range tx.Details {
-		if toSatoshi(-details.Amount) == fee && details.Address == address {
-			found = true
-			vout = details.Vout
+		if details.Address == address {
+			return txHash, details.Vout, toSatoshi(details.Amount), nil
 		}
 	}
-	if !found {
-		btc.log.Errorf("error getting transaction vout for successful fee: %v", err)
-		return nil, fmt.Errorf("fee appears to have been paid, but transaction "+
-			"index could not be found: %v", err)
-	}
-	return newOutput(btc.node, txHash, vout, fee, nil), nil
+	return nil, 0, 0, fmt.Errorf("failed to locate transaction vout")
 }
 
-// Coin gets a wallet Coin for a coin ID. Note that a Coin, by definition, is
-// unspent. Attempting to retrieve a spent coin should result in an error.
-func (btc *ExchangeWallet) Coin(id dex.Bytes) (asset.Coin, error) {
-	txHash, vout, err := decodeCoinID(id)
+// Confirmations gets the number of confirmations for the specified coin ID.
+// The coin must be known to the wallet, but need not be unspent.
+func (btc *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
+	txHash, _, err := decodeCoinID(id)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	unspents, err := btc.wallet.ListUnspent()
+	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	txid := txHash.String()
-	for _, u := range unspents {
-		if u.TxID == txid && u.Vout == vout {
-			if err != nil {
-				return nil, fmt.Errorf("redeem script decode error: %v", err)
-			}
-			return newOutput(btc.node, txHash, vout, toSatoshi(u.Amount), u.RedeemScript), nil
-		}
-	}
-	return nil, fmt.Errorf("coin not found")
+	return uint32(tx.Confirmations), nil
 }
 
 // run pings for new blocks and runs the tipChange callback function when the
@@ -1060,11 +1099,11 @@ type compositeUTXO struct {
 
 // spendableUTXOs filters the RPC utxos for those that are spendable with
 // with regards to the DEX's configuration.
-func (btc *ExchangeWallet) spendableUTXOs(unspents []*ListUnspentResult, nfo *dex.Asset) ([]*compositeUTXO, uint64, uint64, error) {
+func (btc *ExchangeWallet) spendableUTXOs(unspents []*ListUnspentResult, confs uint32) ([]*compositeUTXO, uint64, uint64, error) {
 	var sum, unconf uint64
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	for _, txout := range unspents {
-		if txout.Confirmations >= nfo.FundConf || btc.isDEXChange(txout.TxID, txout.Vout) {
+		if txout.Confirmations >= confs || btc.isDEXChange(txout.TxID, txout.Vout) {
 			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, btc.chainParams)
 			if err != nil {
 				return nil, 0, 0, fmt.Errorf("error reading asset info: %v", err)
@@ -1124,6 +1163,19 @@ func (btc *ExchangeWallet) getVerboseBlockTxs(blockID string) (*verboseBlockTxs,
 		return nil, err
 	}
 	return blk, nil
+}
+
+// getVersion gets the current BTC network and protocol versions.
+func (btc *ExchangeWallet) getVersion() (uint64, uint64, error) {
+	r := &struct {
+		Version         uint64 `json:"version"`
+		ProtocolVersion uint64 `json:"protocolversion"`
+	}{}
+	err := btc.wallet.call(methodGetNetworkInfo, nil, r)
+	if err != nil {
+		return 0, 0, err
+	}
+	return r.Version, r.ProtocolVersion, nil
 }
 
 // toCoinID converts the tx hash and vout to a coin ID, as a []byte.

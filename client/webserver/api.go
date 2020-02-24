@@ -64,16 +64,16 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dcrID, _ := dex.BipSymbolID("dcr")
-	has, on, open := s.core.WalletStatus(dcrID)
-	if !has {
+	wallet := s.core.WalletState(dcrID)
+	if wallet == nil {
 		s.writeAPIError(w, "No Decred wallet")
 		return
 	}
-	if !on {
+	if !wallet.Running {
 		s.writeAPIError(w, "Decred wallet not running")
 		return
 	}
-	if !open {
+	if !wallet.Open {
 		s.writeAPIError(w, "Decred wallet is locked")
 		return
 	}
@@ -96,7 +96,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		feeErr := <-payFeeErr
 		if feeErr != nil {
 			log.Errorf("Fee payment error: %v", feeErr)
-			s.notify(errorMsgRoute, fmt.Sprintf("Error encountered while notifying DEX of registration fee: %v", err))
+			s.notify(errorMsgRoute, fmt.Sprintf("Error encountered while notifying DEX of registration fee: %v", feeErr))
 		} else {
 			s.notify(successMsgRoute, fmt.Sprintf("Registration complete. You may now trade at %s.", reg.DEX))
 		}
@@ -112,6 +112,7 @@ type newWalletForm struct {
 	Account string `json:"account"`
 	INIPath string `json:"inipath"`
 	Pass    string `json:"pass"`
+	AppPW   string `json:"appPass"`
 }
 
 // apiNewWallet is the handler for the '/newwallet' API request.
@@ -120,13 +121,13 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	has, _, _ := s.core.WalletStatus(form.AssetID)
+	has := s.core.WalletState(form.AssetID) != nil
 	if has {
 		s.writeAPIError(w, "already have a wallet for %s", unbip(form.AssetID))
 		return
 	}
 	// Wallet does not exist yet. Try to create it.
-	err := s.core.CreateWallet(&core.WalletForm{
+	err := s.core.CreateWallet(form.AppPW, form.Pass, &core.WalletForm{
 		AssetID: form.AssetID,
 		Account: form.Account,
 		INIPath: form.INIPath,
@@ -135,13 +136,13 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "error creating %s wallet: %v", unbip(form.AssetID), err)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID, true, false)
+	s.notifyWalletUpdate(form.AssetID)
 	type response struct {
 		OK     bool   `json:"ok"`
 		Locked bool   `json:"locked"`
 		Msg    string `json:"msg"`
 	}
-	err = s.core.OpenWallet(form.AssetID, form.Pass)
+	err = s.core.OpenWallet(form.AssetID, form.AppPW)
 	if err != nil {
 		errMsg := fmt.Sprintf("wallet connected, but failed to open with provided password: %v", err)
 		log.Errorf(errMsg)
@@ -152,29 +153,26 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, resp, s.indent)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID, true, true)
+	s.notifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	AssetID uint32 `json:"assetID"`
-	Pass    string `json:"pass"`
+	Pass    string `json:"pass"` // Application password.
 }
 
-// apiOpenWallet is the handler for the '/openwallet' API request.
+// apiOpenWallet is the handler for the '/openwallet' API request. Unlocks the
+// specified wallet.
 func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	form := new(openWalletForm)
 	if !readPost(w, r, form) {
 		return
 	}
-	has, on, _ := s.core.WalletStatus(form.AssetID)
-	if !has {
+	status := s.core.WalletState(form.AssetID)
+	if status == nil {
 		s.writeAPIError(w, "No wallet for %d -> %s", form.AssetID, unbip(form.AssetID))
-		return
-	}
-	if !on {
-		s.writeAPIError(w, "%s wallet not connected", unbip(form.AssetID))
 		return
 	}
 	err := s.core.OpenWallet(form.AssetID, form.Pass)
@@ -182,7 +180,39 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "error unlocking %s wallet: %v", unbip(form.AssetID), err)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID, true, true)
+	s.notifyWalletUpdate(form.AssetID)
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+// apiConnect is the handler for the '/connectwallet' API request. Connects to
+// a specified wallet, but does not unlock it.
+func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
+	err := s.core.ConnectWallet(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(form.AssetID), err)
+		return
+	}
+	s.notifyWalletUpdate(form.AssetID)
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+// apiCloseWallet is the handler for the '/closewallet' API request.
+func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.CloseWallet(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, "error locking %s wallet: %v", unbip(form.AssetID), err)
+		return
+	}
+	s.notifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -191,7 +221,7 @@ type loginForm struct {
 	Pass string `json:"pass"`
 }
 
-// apiOpenWallet is the handler for the '/init' API request.
+// apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
 	if !readPost(w, r, login) {
@@ -212,6 +242,40 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.actuallyLogin(w, r, login)
+}
+
+// withdrawForm is sent to initiate a withdraw.
+type withdrawForm struct {
+	AssetID uint32 `json:"assetID"`
+	Value   uint64 `json:"value"`
+	Address string `json:"address"`
+	Pass    string `json:"pw"`
+}
+
+// apiWithdraw handles the 'withdraw' API request.
+func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
+	form := new(withdrawForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	state := s.core.WalletState(form.AssetID)
+	if state == nil {
+		s.writeAPIError(w, "no wallet found for %s", unbip(form.AssetID))
+		return
+	}
+	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value)
+	if err != nil {
+		s.writeAPIError(w, "withdraw error: %v", err)
+		return
+	}
+	resp := struct {
+		OK   bool   `json:"ok"`
+		Coin string `json:"coin"`
+	}{
+		OK:   true,
+		Coin: coin.String(),
+	}
+	writeJSON(w, resp, s.indent)
 }
 
 // apiActuallyLogin logs the user in.

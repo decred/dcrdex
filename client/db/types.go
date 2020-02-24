@@ -6,6 +6,7 @@ package db
 import (
 	"fmt"
 	"strconv"
+	"time"
 
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -274,9 +275,13 @@ func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
 
 // Wallet is information necessary to create an asset.Wallet.
 type Wallet struct {
-	AssetID uint32
-	Account string
-	INIPath string
+	AssetID     uint32
+	Account     string
+	INIPath     string
+	Balance     uint64
+	BalUpdate   time.Time
+	EncryptedPW []byte
+	Address     string
 }
 
 // Encode encodes the Wallet to a versioned blob.
@@ -284,7 +289,9 @@ func (w *Wallet) Encode() []byte {
 	return dbBytes{0}.
 		AddData(uint32Bytes(w.AssetID)).
 		AddData([]byte(w.Account)).
-		AddData([]byte(w.INIPath))
+		AddData([]byte(w.INIPath)).
+		AddData(w.EncryptedPW).
+		AddData([]byte(w.Address))
 }
 
 // DecodeWallet decodes the versioned blob to a *Wallet.
@@ -301,13 +308,17 @@ func DecodeWallet(b []byte) (*Wallet, error) {
 }
 
 func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
-	if len(pushes) != 3 {
-		return nil, fmt.Errorf("decodeWallet_v0: expected 3 pushes, got %d", len(pushes))
+	if len(pushes) != 5 {
+		return nil, fmt.Errorf("decodeWallet_v0: expected 5 pushes, got %d", len(pushes))
 	}
+	idB, acctB, iniB := pushes[0], pushes[1], pushes[2]
+	keyB, addressB := pushes[3], pushes[4]
 	return &Wallet{
-		AssetID: intCoder.Uint32(pushes[0]),
-		Account: string(pushes[1]),
-		INIPath: string(pushes[2]),
+		AssetID:     intCoder.Uint32(idB),
+		Account:     string(acctB),
+		INIPath:     string(iniB),
+		EncryptedPW: keyB,
+		Address:     string(addressB),
 	}, nil
 }
 

@@ -8,13 +8,14 @@ import (
 )
 
 var (
-	driversMtx sync.Mutex
+	driversMtx sync.RWMutex
 	drivers    = make(map[uint32]Driver)
 )
 
 // Driver is the interface required of all exchange wallets.
 type Driver interface {
 	Setup(*WalletConfig, dex.Logger, dex.Network) (Wallet, error)
+	Info() *WalletInfo
 }
 
 // Register should be called by the init function of an asset's package.
@@ -40,4 +41,26 @@ func Setup(assetID uint32, cfg *WalletConfig, logger dex.Logger, network dex.Net
 		return nil, fmt.Errorf("asset: unknown asset driver %d", assetID)
 	}
 	return drv.Setup(cfg, logger, network)
+}
+
+// A registered asset is information about a supported asset.
+type RegisteredAsset struct {
+	ID     uint32
+	Symbol string
+	Info   *WalletInfo
+}
+
+// Assets returns a list of information about supported assets.
+func Assets() map[uint32]RegisteredAsset {
+	driversMtx.RLock()
+	defer driversMtx.RUnlock()
+	assets := make(map[uint32]RegisteredAsset, len(drivers))
+	for assetID, driver := range drivers {
+		assets[assetID] = RegisteredAsset{
+			ID:     assetID,
+			Symbol: dex.BipIDSymbol(assetID),
+			Info:   driver.Info(),
+		}
+	}
+	return assets
 }

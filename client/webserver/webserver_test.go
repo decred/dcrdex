@@ -4,6 +4,7 @@ package webserver
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -24,6 +26,32 @@ var (
 	tCtx    context.Context
 )
 
+type tCoin struct {
+	id       []byte
+	confs    uint32
+	confsErr error
+}
+
+func (c *tCoin) ID() dex.Bytes {
+	return c.id
+}
+
+func (c *tCoin) String() string {
+	return hex.EncodeToString(c.id)
+}
+
+func (c *tCoin) Value() uint64 {
+	return 0
+}
+
+func (c *tCoin) Confirmations() (uint32, error) {
+	return c.confs, c.confsErr
+}
+
+func (c *tCoin) Redeem() dex.Bytes {
+	return nil
+}
+
 type TCore struct {
 	balanceErr      error
 	syncErr         error
@@ -33,6 +61,8 @@ type TCore struct {
 	preRegErr       error
 	createWalletErr error
 	openWalletErr   error
+	closeWalletErr  error
+	withdrawErr     error
 	notHas          bool
 	notRunning      bool
 	notOpen         bool
@@ -49,13 +79,31 @@ func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, err
 func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook { return nil }
 func (c *TCore) Unsync(dex string, base, quote uint32)               {}
 func (c *TCore) Balance(uint32) (uint64, error)                      { return 0, c.balanceErr }
-func (c *TCore) WalletStatus(assetID uint32) (has, running, open bool) {
-	return !c.notHas, !c.notRunning, !c.notOpen
+func (c *TCore) WalletState(assetID uint32) *core.WalletState {
+	if c.notHas {
+		return nil
+	}
+	return &core.WalletState{
+		Symbol:  unbip(assetID),
+		AssetID: assetID,
+		Open:    !c.notOpen,
+		Running: !c.notRunning,
+	}
 }
-func (c *TCore) CreateWallet(form *core.WalletForm) error   { return c.createWalletErr }
+func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
+	return c.createWalletErr
+}
 func (c *TCore) OpenWallet(assetID uint32, pw string) error { return c.openWalletErr }
-func (c *TCore) Wallets() []*core.WalletStatus              { return nil }
+func (c *TCore) CloseWallet(assetID uint32) error           { return c.closeWalletErr }
+func (c *TCore) ConnectWallet(assetID uint32) error         { return nil }
+func (c *TCore) Wallets() []*core.WalletState               { return nil }
 func (c *TCore) User() *core.User                           { return nil }
+func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
+	return make(map[uint32]*core.SupportedAsset)
+}
+func (c *TCore) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error) {
+	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.withdrawErr
+}
 
 type TWriter struct {
 	b []byte
@@ -288,11 +336,6 @@ func TestLoadMarket(t *testing.T) {
 		syncer.mtx.Unlock()
 	}
 	s.mtx.Unlock()
-
-	// Balance error.
-	tCore.balanceErr = tErr
-	ensureErr("balance", msgjson.RPCInternal)
-	tCore.balanceErr = nil
 }
 
 func TestAPIRegister(t *testing.T) {
@@ -352,6 +395,58 @@ func TestAPILogin(t *testing.T) {
 	tCore.loginErr = tErr
 	ensure(`{"ok":false,"msg":"login error: test error"}`)
 	tCore.loginErr = nil
+}
+
+func TestWithdraw(t *testing.T) {
+	writer := new(TWriter)
+	var body interface{}
+	reader := new(TReader)
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	isOK := func() bool {
+		reader.msg, _ = json.Marshal(body)
+		req, err := http.NewRequest("GET", "/", reader)
+		if err != nil {
+			t.Fatalf("error creating request: %v", err)
+		}
+		s.apiWithdraw(writer, req)
+		if len(writer.b) == 0 {
+			t.Fatalf("no response")
+		}
+		resp := &standardResponse{}
+		err = json.Unmarshal(writer.b, resp)
+		if err != nil {
+			t.Fatalf("json unmarshal error: %v", err)
+		}
+		return resp.OK
+	}
+
+	body = &withdrawForm{}
+
+	// initial success
+	if !isOK() {
+		t.Fatalf("not ok: %s", string(writer.b))
+	}
+
+	// no wallet
+	tCore.notHas = true
+	if isOK() {
+		t.Fatalf("no error for missing wallet")
+	}
+	tCore.notHas = false
+
+	// withdraw error
+	tCore.withdrawErr = tErr
+	if isOK() {
+		t.Fatalf("no error for Withdraw error")
+	}
+	tCore.withdrawErr = nil
+
+	// re-success
+	if !isOK() {
+		t.Fatalf("not ok afterwards: %s", string(writer.b))
+	}
 }
 
 func TestAPIInit(t *testing.T) {

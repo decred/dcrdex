@@ -1,6 +1,11 @@
 body.dark {
-  background-color: #060c12;
+  background-color: #13202b;
   color: $font-color-dark;
+
+  .card {
+    background-color: $dark_bg_1;
+    border-color: #333;
+  }
 
   header.maintop {
     background-color: black;
@@ -53,12 +58,12 @@ body.dark {
     background-color: black;
   }
 
-  form.auth button,
-  form.auth label {
+  form.card button,
+  form.card label {
     text-shadow: 0 0 4px black;
   }
 
-  form.auth button:hover {
+  form.card button:hover {
     color: #dde9ff;
   }
 

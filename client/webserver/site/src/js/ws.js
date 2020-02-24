@@ -74,36 +74,55 @@ class MessageSocket {
     this.connection.send(message)
   }
 
-  connect (uri) {
+  close (reason) {
+    console.log('close, reason:', reason, this.handlers)
+    this.handlers = {}
+    this.connection.close()
+  }
+
+  connect (uri, reloader) {
     this.uri = uri
-    this.connection = new window.WebSocket(uri)
+    this.reloader = reloader
+    var retrys = 0
+    const go = () => {
+      const conn = this.connection = new window.WebSocket(uri)
 
-    this.close = (reason) => {
-      console.log('close, reason:', reason, this.handlers)
-      this.handlers = {}
-      this.connection.close()
-    }
+      // unmarshal message, and forward the message to registered handlers
+      conn.onmessage = (evt) => {
+        var message = JSON.parse(evt.data)
+        forward(message.route, message.payload, this.handlers)
+      }
 
-    // unmarshal message, and forward the message to registered handlers
-    this.connection.onmessage = (evt) => {
-      var message = JSON.parse(evt.data)
-      forward(message.route, message.payload, this.handlers)
-    }
+      // Stub out standard functions
+      conn.onclose = () => {
+        forward('close', null, this.handlers)
+        retrys++
+        // 1.2, 1.6, 2.0, 2.4, 3.1, 3.8, 4.8, 6.0, 7.5, 9.3, 11.6, 14.6, 18.2,
+        // 22.7, 28.4, 30, 30 ...
+        const delay = Math.min(Math.pow(1.25, retrys), 30)
+        console.log(`websocket disconnected, trying again in ${delay.toFixed(1)} seconds`)
+        setTimeout(() => {
+          go()
+        }, delay * 1000)
+      }
 
-    // Stub out standard functions
-    this.connection.onclose = () => {
-      forward('close', null, this.handlers)
-    }
-    this.connection.onopen = () => {
-      forward('open', null, this.handlers)
-      while (this.queue.length) {
-        const [route, message] = this.queue.shift()
-        this.request(route, message)
+      conn.onopen = () => {
+        if (retrys > 0) {
+          retrys = 0
+          reloader()
+        }
+        forward('open', null, this.handlers)
+        while (this.queue.length) {
+          const [route, message] = this.queue.shift()
+          this.request(route, message)
+        }
+      }
+
+      conn.onerror = (evt) => {
+        forward('error', evt, this.handlers)
       }
     }
-    this.connection.onerror = (evt) => {
-      forward('error', evt, this.handlers)
-    }
+    go()
   }
 }
 

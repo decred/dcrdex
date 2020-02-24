@@ -150,9 +150,8 @@ export class DepthChart {
   set (data) {
     this.buys = data.book.buys
     this.sells = data.book.sells
-    const mkts = data.market.split('-')
-    this.base = mkts[0]
-    this.quote = mkts[1]
+    this.baseTicker = data.baseSymbol.toUpperCase()
+    this.quote = data.quoteSymbol.toUpperCase()
     this.zoomState = {}
     this.draw()
   }

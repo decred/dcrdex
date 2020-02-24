@@ -78,9 +78,10 @@ button:focus {
   outline: none;
 }
 
-form.auth {
+.card {
   width: 400px;
-  border: 1px solid #222;
+  background-color: $light_bg_1;
+  border: 1px solid #aaa;
   border-radius: 3px;
   position: relative;
 
@@ -98,7 +99,7 @@ form.auth {
     background-color: $light_bg_2;
   }
 
-  form.auth label {
+  form label {
     font-size: 15px;
     font-family: $demi-sans;
   }
@@ -125,7 +126,7 @@ div.mainlinks > span:hover {
   color: $dark_bg_3;
 }
 
-form.auth button:hover {
+form.card button:hover {
   color: black;
 }
 
@@ -189,6 +190,7 @@ div.note-indicator.bad {
 }
 
 div.note {
+  overflow-wrap: break-word;
   padding: 5px 0;
 }
 
@@ -239,4 +241,8 @@ hr.dashed {
   max-width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.pointer {
+  cursor: pointer;
 }

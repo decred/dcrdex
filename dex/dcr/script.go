@@ -51,6 +51,11 @@ const (
 	// 8 bytes value + 2 bytes version + at least 1 byte varint script size
 	TxOutOverhead = 8 + 2 + 1
 
+	// MsgTx overhead is 4 bytes version + 4 bytes locktime + 4 bytes expiry 3
+	// bytes of varints for the number of transaction inputs (x2 for witness and
+	// prefix) and outputs
+	MsgTxOverhead = 4 + 4 + 4 + 3
+
 	// initTxSize is the size of a standard serialized atomic swap initialization
 	// transaction with one change output.
 	// MsgTx overhead is 4 bytes version + 4 bytes locktime + 4 bytes expiry 3
@@ -62,8 +67,8 @@ const (
 	// TxOut is 8 bytes value + 2 bytes version + 1 byte serialized varint length
 	// pubkey script + length of pubkey script. There is one P2SH outputs and one
 	// change output
-	InitTxSize = 4 + 4 + 4 + 3 + TxInOverhead + P2PKHSigScriptSize +
-		2*(TxOutOverhead+txsizes.P2PKHPkScriptSize)
+	InitTxSize = MsgTxOverhead + TxInOverhead + P2PKHSigScriptSize +
+		2*(P2PKHOutputSize)
 
 	// DERSigLength is the maximum length of a DER encoded signature.
 	DERSigLength = 73

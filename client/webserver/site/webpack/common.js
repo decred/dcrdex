@@ -45,5 +45,10 @@ module.exports = {
     filename: 'entry.js',
     path: path.resolve(__dirname, '../dist'),
     publicPath: '/dist/'
+  },
+  // Fixes weird issue with watch script. See
+  // https://github.com/webpack/webpack/issues/2297#issuecomment-289291324
+  watchOptions: {
+    poll: true
   }
 }

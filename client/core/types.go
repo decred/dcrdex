@@ -27,29 +27,47 @@ type WalletForm struct {
 	INIPath string
 }
 
-// WalletStatus is the current status of an exchange wallet.
-type WalletStatus struct {
+// WalletState is the current status of an exchange wallet.
+type WalletState struct {
 	Symbol  string `json:"symbol"`
 	AssetID uint32 `json:"assetID"`
 	Open    bool   `json:"open"`
 	Running bool   `json:"running"`
+	Updated uint64 `json:"updated"`
+	Balance uint64 `json:"balance"`
+	Address string `json:"address"`
+	FeeRate uint64 `json:"feerate"`
+	Units   string `json:"units"`
 }
 
 // User is information about the user's wallets and DEX accounts.
 type User struct {
-	Markets     map[string][]*Market `json:"markets"`
-	Wallets     []*WalletStatus      `json:"wallets"`
-	Initialized bool                 `json:"inited"`
+	Markets     map[string][]*Market       `json:"markets"`
+	Initialized bool                       `json:"inited"`
+	Assets      map[uint32]*SupportedAsset `json:"assets"`
+}
+
+// SupportedAsset is data about an asset and possibly the wallet associated
+// with it.
+type SupportedAsset struct {
+	ID     uint32            `json:"id"`
+	Symbol string            `json:"symbol"`
+	Wallet *WalletState      `json:"wallet"`
+	Info   *asset.WalletInfo `json:"info"`
 }
 
 // xcWallet is a wallet.
 type xcWallet struct {
 	asset.Wallet
-	waiter   *dex.StartStopWaiter
-	AssetID  uint32
-	mtx      sync.RWMutex
-	lockTime time.Time
-	hookedUp bool
+	connector *dex.ConnectionMaster
+	AssetID   uint32
+	mtx       sync.RWMutex
+	lockTime  time.Time
+	hookedUp  bool
+	balance   uint64
+	balUpdate time.Time
+	encPW     []byte
+	address   string
 }
 
 // Unlock unlocks the wallet.
@@ -64,17 +82,43 @@ func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 	return nil
 }
 
-// status returns whether the wallet is running as well as whether it is
-// unlocked.
-func (w *xcWallet) status() (on, open bool) {
-	return w.waiter.On(), w.unlocked()
+func (w *xcWallet) lock() error {
+	w.mtx.Lock()
+	w.lockTime = time.Time{}
+	w.mtx.Unlock()
+	return w.Lock()
 }
 
-// unlocked returns true if the wallet is unlocked
-func (w *xcWallet) unlocked() bool {
+// state returns the current WalletState.
+func (w *xcWallet) state() *WalletState {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
-	return w.lockTime.After(time.Now())
+	winfo := w.Info()
+	return &WalletState{
+		Symbol:  unbip(w.AssetID),
+		AssetID: w.AssetID,
+		Open:    w.lockTime.After(time.Now()),
+		Running: w.connector.On(),
+		Balance: w.balance,
+		Address: w.address,
+		FeeRate: winfo.FeeRate, // Withdraw fee, not swap.
+		Units:   winfo.Units,
+	}
+}
+
+// setBalance sets the wallet balance.
+func (w *xcWallet) setBalance(bal uint64) {
+	w.mtx.Lock()
+	w.balance = bal
+	w.balUpdate = time.Now()
+	w.mtx.Unlock()
+}
+
+// setAddress sets the wallet's deposit address.
+func (w *xcWallet) setAddress(addr string) {
+	w.mtx.Lock()
+	w.address = addr
+	w.mtx.Unlock()
 }
 
 // connected is true if the wallet has already been connected.
@@ -84,15 +128,16 @@ func (w *xcWallet) connected() bool {
 	return w.hookedUp
 }
 
-// Connect wraps the asset.Wallet method and sets the xcWallet.hookedUp flag.
-func (w *xcWallet) Connect() error {
-	err := w.Wallet.Connect()
+// Connect calls the dex.Connector's Connect method and sets the
+// xcWallet.hookedUp flag.
+func (w *xcWallet) Connect(ctx context.Context) error {
+	err := w.connector.Connect(ctx)
 	if err != nil {
 		return err
 	}
 	w.mtx.Lock()
-	defer w.mtx.Unlock()
 	w.hookedUp = true
+	w.mtx.Unlock()
 	return nil
 }
 
@@ -158,7 +203,7 @@ type dexAccount struct {
 	id        account.AccountID
 	dexPubKey *secp256k1.PublicKey
 	feeCoin   []byte
-	paid      bool
+	isPaid    bool
 	authMtx   sync.RWMutex
 	isAuthed  bool
 }
@@ -169,7 +214,8 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 		url:       acctInfo.URL,
 		encKey:    acctInfo.EncKey,
 		dexPubKey: acctInfo.DEXPubKey,
-		paid:      acctInfo.Paid,
+		isPaid:    acctInfo.Paid,
+		feeCoin:   acctInfo.FeeCoin,
 	}
 }
 
@@ -230,6 +276,21 @@ func (a *dexAccount) unauth() {
 	a.authMtx.Unlock()
 }
 
+// paid will be true if the account regisration fee has been accepted by the
+// DEX.
+func (a *dexAccount) paid() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	return a.isPaid
+}
+
+// pay sets the account paid flag.
+func (a *dexAccount) pay() {
+	a.authMtx.Lock()
+	a.isPaid = true
+	a.authMtx.Unlock()
+}
+
 // sign uses the account private key to sign the message. If the account is
 // locked, an error will be returned.
 func (a *dexAccount) sign(msg []byte) ([]byte, error) {
@@ -254,6 +315,7 @@ type Negotiation interface {
 	// does not support multiple clients. The channel will be closed when the
 	// Negotiation process has completed or encountered an unrecoverable error.
 	Feed() <-chan *MatchUpdate
+	Order() order.Order
 }
 
 // A matchNegotiator negotiates a match. matchNegotiator satisfies the
@@ -267,10 +329,11 @@ type matchNegotiator struct {
 	status   order.MatchStatus
 	side     order.MatchSide
 	update   chan *MatchUpdate
+	order    order.Order
 }
 
 // negotiate creates a matchNegotiator and starts the negotiation thread.
-func negotiate(ctx context.Context, msgMatch *msgjson.Match) (*matchNegotiator, error) {
+func negotiate(ctx context.Context, msgMatch *msgjson.Match, ord order.Order) (*matchNegotiator, error) {
 	if len(msgMatch.OrderID) != order.OrderIDSize {
 		return nil, fmt.Errorf("order id of incorrect length. expected %d, got %d",
 			order.OrderIDSize, len(msgMatch.OrderID))
@@ -292,6 +355,7 @@ func negotiate(ctx context.Context, msgMatch *msgjson.Match) (*matchNegotiator, 
 		status:   order.MatchStatus(msgMatch.Status),
 		side:     order.MatchSide(msgMatch.Side),
 		update:   make(chan *MatchUpdate, 1),
+		order:    ord,
 	}
 	go n.runMatch(ctx)
 	return n, nil
@@ -300,6 +364,11 @@ func negotiate(ctx context.Context, msgMatch *msgjson.Match) (*matchNegotiator, 
 // Feed returns the MatchUpdate channel. Part of the Negotiator interface.
 func (m *matchNegotiator) Feed() <-chan *MatchUpdate {
 	return m.update
+}
+
+// Order returns the order associated with the match.
+func (m *matchNegotiator) Order() order.Order {
+	return m.order
 }
 
 // runMatch is the match negotiation thread.
