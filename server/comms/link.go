@@ -76,6 +76,7 @@ func (c *wsLink) ID() uint64 {
 func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 	switch msg.Type {
 	case msgjson.Request:
+		log.Debugf("New Request from %d (%s): %v", c.ID(), c.IP(), msg.String())
 		if msg.ID == 0 {
 			return msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero")
 		}
@@ -92,6 +93,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		}
 		return nil
 	case msgjson.Response:
+		log.Debugf("New Response from %d (%s): %v", c.ID(), c.IP(), msg.String())
 		if msg.ID == 0 {
 			return msgjson.NewError(msgjson.RPCParseError, "response id cannot be 0")
 		}
@@ -103,6 +105,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		cb.f(c, msg)
 		return nil
 	}
+	log.Debugf("Unknown message type %d from %d (%s).", msg.Type, c.ID(), c.IP())
 	return msgjson.NewError(msgjson.UnknownMessageType, "unknown message type")
 }
 

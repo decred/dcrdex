@@ -115,6 +115,8 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 		}
 	}
 
+	log.Debugf("notifyfee payload: %x, %x, %x, %d", notifyFee.AccountID, notifyFee.CoinID, notifyFee.Sig, notifyFee.Time)
+
 	// Get account information.
 	if len(notifyFee.AccountID) != account.HashSize {
 		return &msgjson.Error{
@@ -126,6 +128,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	var acctID account.AccountID
 	copy(acctID[:], notifyFee.AccountID)
 	acct, paid, open := auth.storage.Account(acctID)
+	log.Debugf("Account %x status: found=%v, paid=%v, open=%v", acctID, acct != nil, paid, open)
 	if acct == nil {
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
@@ -133,12 +136,14 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 		}
 	}
 	if !open {
+		log.Debugf("Account %x closed", acctID)
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
 			Message: "account closed and cannot be reopen",
 		}
 	}
 	if paid {
+		log.Debugf("Account %x already paid", acctID)
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
 			Message: "'notifyfee' send for paid account",
@@ -155,6 +160,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	}
 	err = checkSigS256(sigMsg, notifyFee.SigBytes(), acct.PubKey)
 	if err != nil {
+		log.Debugf("Account %x invalid notifyfee signature: %v", acctID, err)
 		return &msgjson.Error{
 			Code:    msgjson.SignatureError,
 			Message: "signature error: " + err.Error(),
@@ -163,6 +169,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 
 	// Get the registration fee address assigned to the client's account.
 	regAddr, err := auth.storage.AccountRegAddr(acctID)
+	log.Debugf("Account %x registration fee address: %v", acctID, regAddr)
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
@@ -172,13 +179,16 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 
 	auth.coinWaiter.Wait(coinwaiter.NewSettings(acctID, msg, notifyFee.CoinID, txWaitExpiration), func() bool {
 		// Validate fee.
+		log.Debugf("checking fee from coin %x", notifyFee.CoinID)
 		addr, val, confs, err := auth.checkFee(notifyFee.CoinID)
 		if err != nil || confs < auth.feeConfs {
+			log.Debugf("Failed to check fee: confs=%d, err=%v", confs, err)
 			return coinwaiter.TryAgain
 		}
 		var msgErr *msgjson.Error
 		defer func() {
 			if msgErr != nil {
+				log.Debugf("Sending notifyfee response ERROR: %v", msgErr.Message)
 				resp, err := msgjson.NewResponse(msg.ID, nil, msgErr)
 				if err != nil {
 					log.Errorf("error encoding notifyfee error response: %v", err)
@@ -210,12 +220,12 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 		if err != nil {
 			msgErr = &msgjson.Error{
 				Code:    msgjson.RPCInternalError,
-				Message: "wrong fee address. wanted " + regAddr + " got " + addr,
+				Message: "storage.PayAccount failed: " + err.Error(),
 			}
 			return coinwaiter.DontTryAgain
 		}
 
-		log.Info("new user registered")
+		log.Infof("New user registered: %v", acctID)
 
 		// Create, sign, and send the the response.
 		err = auth.Sign(notifyFee)
@@ -236,6 +246,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 			}
 			return coinwaiter.DontTryAgain
 		}
+		log.Debugf("Sending successful notifyfee response: %v", resp.String())
 		err = conn.Send(resp)
 		if err != nil {
 			log.Warnf("error sending notifyfee result to link: %v", err)
