@@ -131,7 +131,8 @@ func New(cfg *Config) (*Core, error) {
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 	}
-	log.Tracef("new client core created")
+	core.refreshUser()
+	log.Debugf("new client core created")
 	return core, nil
 }
 
@@ -997,9 +998,16 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 	if confs >= uint32(dc.cfg.RegFeeConfirms) {
 		err := c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
-			log.Errorf("reFee %s - notifyfee error: %v", err)
+			log.Errorf("reFee %s - notifyfee error: %v", dc.acct.url, err)
+		} else {
+			log.Infof("Fee paid at %s", dc.acct.url)
+			// dc.acct.pay() and c.authDEX????
+			dc.acct.pay()
+			_, err = c.authDEX(dc)
+			if err != nil {
+				log.Errorf("fee paid, but failed to authenticate connection to %s", dc.acct.url)
+			}
 		}
-		log.Infof("Fee paid at %s", dc.acct.url)
 		return
 	}
 
@@ -1023,7 +1031,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 			return
 		}
 		dc.acct.pay()
-		log.Infof("Fee paid at %s", dc.acct.url)
+		log.Infof("waiter: Fee paid at %s", dc.acct.url)
 		// New account won't have any active negotiations, so OK to discard first
 		// first return value from authDEX.
 		_, err = c.authDEX(dc)
