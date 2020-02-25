@@ -263,6 +263,10 @@ func (db *TDB) Get(k string) ([]byte, error) {
 	return nil, db.getErr
 }
 
+func (db *TDB) Backup() error {
+	return nil
+}
+
 type tCoin struct {
 	id       []byte
 	confs    uint32
