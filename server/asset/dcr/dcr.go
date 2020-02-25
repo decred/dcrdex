@@ -109,6 +109,26 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 	if err != nil {
 		return nil, err
 	}
+
+	// Ensure the network of the connected node is correct for the expected
+	// dex.Network.
+	net, err := dcr.client.GetCurrentNet()
+	if err != nil {
+		return nil, fmt.Errorf("getcurrentnet failure: %v", err)
+	}
+	var wantCurrencyNet wire.CurrencyNet
+	switch network {
+	case dex.Testnet:
+		wantCurrencyNet = wire.TestNet3
+	case dex.Mainnet:
+		wantCurrencyNet = wire.MainNet
+	case dex.Regtest: // dex.Simnet
+		wantCurrencyNet = wire.SimNet
+	}
+	if net != wantCurrencyNet {
+		return nil, fmt.Errorf("wrong net %v", net.String())
+	}
+
 	err = dcr.client.NotifyBlocks()
 	if err != nil {
 		return nil, fmt.Errorf("error registering for block notifications")
