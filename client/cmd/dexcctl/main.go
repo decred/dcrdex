@@ -61,11 +61,6 @@ func run() error {
 		return fmt.Errorf("no command specified\n%s", listCmdMessage)
 	}
 
-	methodStr := args[0]
-	if !rpcserver.RouteExists(methodStr) {
-		return fmt.Errorf("Unrecognized command %q\n%s", methodStr, listCmdMessage)
-	}
-
 	// Convert remaining command line args to a slice of interface values
 	// to be passed along as parameters to new command creation function.
 	//
@@ -91,13 +86,13 @@ func run() error {
 	}
 
 	// Parse the arguments and convert into a type the server accepts.
-	parsedArgs, err := rpcserver.ParseCmdArgs(methodStr, params)
+	payload, err := rpcserver.ParseCmdArgs(args[0], params)
 	if err != nil {
 		return fmt.Errorf("unable to parse parameters: %v", err)
 	}
 
 	// Create a request using the parsedArgs.
-	msg, err := msgjson.NewRequest(1, methodStr, parsedArgs)
+	msg, err := msgjson.NewRequest(1, args[0], payload)
 	if err != nil {
 		return fmt.Errorf("unable to create request: %v", err)
 	}
@@ -111,32 +106,32 @@ func run() error {
 
 	// Send the JSON-RPC request to the server using the user-specified
 	// connection configuration.
-	msg, err = sendPostRequest(marshalledJSON, cfg)
+	respMsg, err := sendPostRequest(marshalledJSON, cfg)
 	if err != nil {
 		return fmt.Errorf("unable to send request: %v", err)
 	}
 
 	// Retrieve the payload from the response.
-	payload, err := msg.Response()
+	resp, err := respMsg.Response()
 	if err != nil {
-		return fmt.Errorf("unable to unmarshal payload: %v", err)
+		return fmt.Errorf("unable to unmarshal response payload: %v", err)
 	}
 
-	if payload.Error != nil {
-		return errors.New(payload.Error.Message)
+	if resp.Error != nil {
+		return errors.New(resp.Error.Message)
 	}
 
 	// Choose how to display the result based on its type.
-	strResult := string(payload.Result)
+	strResult := string(resp.Result)
 	if strings.HasPrefix(strResult, "{") || strings.HasPrefix(strResult, "[") {
 		var dst bytes.Buffer
-		if err := json.Indent(&dst, payload.Result, "", "  "); err != nil {
+		if err := json.Indent(&dst, resp.Result, "", "  "); err != nil {
 			return fmt.Errorf("failed to format result: %v", err)
 		}
 		fmt.Println(dst.String())
 	} else if strings.HasPrefix(strResult, `"`) {
 		var str string
-		if err := json.Unmarshal(payload.Result, &str); err != nil {
+		if err := json.Unmarshal(resp.Result, &str); err != nil {
 			return fmt.Errorf("failed to unmarshal result: %v", err)
 		}
 		fmt.Println(str)

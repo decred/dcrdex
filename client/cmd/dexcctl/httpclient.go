@@ -39,26 +39,18 @@ func newHTTPClient(cfg *config) (*http.Client, error) {
 		}
 	}
 
-	// Configure TLS if needed.
-	var tlsConfig *tls.Config
-	if !cfg.NoTLS {
-		tlsConfig = &tls.Config{
-			InsecureSkipVerify: cfg.TLSSkipVerify,
-		}
-		if !cfg.TLSSkipVerify && cfg.RPCCert != "" {
-			pem, err := ioutil.ReadFile(cfg.RPCCert)
-			if err != nil {
-				return nil, err
-			}
-
-			pool := x509.NewCertPool()
-			if ok := pool.AppendCertsFromPEM(pem); !ok {
-				return nil, fmt.Errorf("invalid certificate file: %v",
-					cfg.RPCCert)
-			}
-			tlsConfig.RootCAs = pool
-		}
+	// Configure TLS.
+	pem, err := ioutil.ReadFile(cfg.RPCCert)
+	if err != nil {
+		return nil, err
 	}
+
+	pool := x509.NewCertPool()
+	if ok := pool.AppendCertsFromPEM(pem); !ok {
+		return nil, fmt.Errorf("invalid certificate file: %v",
+			cfg.RPCCert)
+	}
+	tlsConfig := &tls.Config{RootCAs: pool}
 
 	// Create and return the new HTTP client potentially configured with a
 	// proxy and TLS.
@@ -77,11 +69,7 @@ func newHTTPClient(cfg *config) (*http.Client, error) {
 // response or error.
 func sendPostRequest(marshalledJSON []byte, cfg *config) (*msgjson.Message, error) {
 	// Generate a request to the configured RPC server.
-	protocol := "http"
-	if !cfg.NoTLS {
-		protocol = "https"
-	}
-	url := protocol + "://" + cfg.RPCAddr
+	url := "https://" + cfg.RPCAddr
 	if cfg.PrintJSON {
 		fmt.Println(string(marshalledJSON))
 	}

@@ -88,9 +88,8 @@ func (r *TReader) Close() error { return nil }
 
 type TConn struct {
 	msg       []byte
-	reads     [][]byte      // data for ReadMessage
-	respReady chan []byte   // signal from WriteMessage
-	close     chan struct{} // Close tells ReadMessage to return with error
+	reads     [][]byte    // data for ReadMessage
+	respReady chan []byte // signal from WriteMessage
 }
 
 var readTimeout = 10 * time.Second // ReadMessage must not return constantly with nothing
@@ -103,12 +102,8 @@ func (c *TConn) ReadMessage() (int, []byte, error) {
 		return len(read), read, nil
 	}
 
-	select {
-	case <-c.close: // receive from nil channel blocks
-		return 0, nil, fmt.Errorf("closed")
-	case <-time.After(readTimeout):
-		return 0, nil, fmt.Errorf("read timeout")
-	}
+	<-time.After(readTimeout)
+	return 0, nil, fmt.Errorf("read timeout")
 }
 
 func (c *TConn) addRead(read []byte) {
@@ -130,11 +125,6 @@ func (c *TConn) SetWriteDeadline(_ time.Time) error {
 }
 
 func (c *TConn) Close() error {
-	// If the test has a non-nil close channel, signal close.
-	select {
-	case c.close <- struct{}{}:
-	default:
-	}
 	return nil
 }
 
@@ -521,7 +511,6 @@ func TestClientMap(t *testing.T) {
 	resp := make(chan []byte, 1)
 	conn := &TConn{
 		respReady: resp,
-		close:     make(chan struct{}, 1),
 	}
 	// msg.ID == 0 gets an error response, which can be discarded.
 	read, _ := json.Marshal(msgjson.Message{ID: 0})

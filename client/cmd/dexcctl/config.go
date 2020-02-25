@@ -37,19 +37,17 @@ func listCommands() {
 
 // config defines the configuration options for dexcctl.
 type config struct {
-	ShowVersion   bool   `short:"V" long:"version" description:"Display version information and exit"`
-	ListCommands  bool   `short:"l" long:"listcommands" description:"List all of the supported commands and exit"`
-	Config        string `short:"C" long:"config" description:"Path to configuration file"`
-	RPCUser       string `short:"u" long:"rpcuser" description:"RPC username"`
-	RPCPass       string `short:"P" long:"rpcpass" default-mask:"-" description:"RPC password"`
-	RPCAddr       string `short:"a" long:"rpcaddr" description:"RPC server to connect to"`
-	RPCCert       string `short:"c" long:"rpccert" description:"RPC server certificate chain for validation"`
-	PrintJSON     bool   `short:"j" long:"json" description:"Print json messages sent and received"`
-	NoTLS         bool   `long:"notls" description:"Disable TLS"`
-	Proxy         string `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
-	ProxyUser     string `long:"proxyuser" description:"Username for proxy server"`
-	ProxyPass     string `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
-	TLSSkipVerify bool   `long:"skipverify" description:"Do not verify tls certificates (not recommended!)"`
+	ShowVersion  bool   `short:"V" long:"version" description:"Display version information and exit"`
+	ListCommands bool   `short:"l" long:"listcommands" description:"List all of the supported commands and exit"`
+	Config       string `short:"C" long:"config" description:"Path to configuration file"`
+	RPCUser      string `short:"u" long:"rpcuser" description:"RPC username"`
+	RPCPass      string `short:"P" long:"rpcpass" default-mask:"-" description:"RPC password"`
+	RPCAddr      string `short:"a" long:"rpcaddr" description:"RPC server to connect to"`
+	RPCCert      string `short:"c" long:"rpccert" description:"RPC server certificate chain for validation"`
+	PrintJSON    bool   `short:"j" long:"json" description:"Print json messages sent and received"`
+	Proxy        string `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
+	ProxyUser    string `long:"proxyuser" description:"Username for proxy server"`
+	ProxyPass    string `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
 }
 
 // fileExists reports whether the named file or directory exists.
@@ -62,7 +60,10 @@ func fileExists(name string) bool {
 	return true
 }
 
-// configure parses command line options and a config file if present.
+// configure parses command line options and a config file if present. Returns
+// an instantiated *config, leftover command line arguments, and a bool that
+// is true if there is nothing further to do (i.e. version was printed and we
+// can exit), or a parsing error, in that order.
 func configure() (*config, []string, bool, error) {
 	stop := true
 	cfg := &config{
