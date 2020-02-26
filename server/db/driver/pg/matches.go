@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -24,7 +22,6 @@ func (a *Archiver) matchTableName(match *order.Match) (string, error) {
 
 // UserMatches retrieves all matches involving a user on the given market.
 // TODO: consider a time limited version of this to retrieve recent matches.
-// TODO: load the Sigs.
 func (a *Archiver) UserMatches(aid account.AccountID, base, quote uint32) ([]*db.MatchData, error) {
 	marketSchema, err := a.marketSchema(base, quote)
 	if err != nil {
@@ -39,7 +36,6 @@ func (a *Archiver) UserMatches(aid account.AccountID, base, quote uint32) ([]*db
 	return userMatches(ctx, a.db, matchesTableName, aid)
 }
 
-// TODO: load the Sigs.
 func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) ([]*db.MatchData, error) {
 	stmt := fmt.Sprintf(internal.RetrieveUserMatches, tableName)
 	rows, err := dbe.QueryContext(ctx, stmt, aid)
@@ -51,14 +47,9 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 	for rows.Next() {
 		var m db.MatchData
 		var status uint8
-		var epochID string
 		err := rows.Scan(&m.ID, &m.Taker, &m.TakerAcct, &m.TakerAddr,
 			&m.Maker, &m.MakerAcct, &m.MakerAddr,
-			&epochID, &m.Quantity, &m.Rate, &status)
-		if err != nil {
-			return nil, err
-		}
-		m.Epoch.Idx, m.Epoch.Dur, err = splitEpochID(epochID)
+			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
 		if err != nil {
 			return nil, err
 		}
@@ -103,14 +94,9 @@ func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid a
 	for rows.Next() {
 		var m db.MatchData
 		var status uint8
-		var epochID string
 		err := rows.Scan(&m.ID, &m.Taker, &m.TakerAcct, &m.TakerAddr,
 			&m.Maker, &m.MakerAcct, &m.MakerAddr,
-			&epochID, &m.Quantity, &m.Rate, &status)
-		if err != nil {
-			return nil, err
-		}
-		m.Epoch.Idx, m.Epoch.Dur, err = splitEpochID(epochID)
+			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
 		if err != nil {
 			return nil, err
 		}
@@ -152,46 +138,28 @@ func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid a
 	return ms, nil
 }
 
-func splitEpochID(epochID string) (epochIdx uint64, epochDur uint64, err error) {
-	strs := strings.Split(epochID, ":")
-	if len(strs) != 2 {
-		return 0, 0, fmt.Errorf("invalid epochID: %s", epochID)
-	}
-	epochIdx, err = strconv.ParseUint(strs[0], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid epochIdx: %s", strs[0])
-	}
-	epochDur, err = strconv.ParseUint(strs[1], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("invalid epochDur: %s", strs[1])
-	}
-	return
-}
-
 func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, error) {
 	stmt := fmt.Sprintf(internal.UpsertMatch, tableName)
-	epochID := fmt.Sprintf("%d:%d", match.Epoch.Idx, match.Epoch.Dur)
 	return sqlExec(dbe, stmt, match.ID(),
 		match.Taker.ID(), match.Taker.User(), match.Taker.Trade().SwapAddress(),
 		match.Maker.ID(), match.Maker.User(), match.Maker.Trade().SwapAddress(),
-		epochID, int64(match.Quantity), int64(match.Rate), int8(match.Status),
-		match.Sigs.TakerMatch, match.Sigs.MakerMatch,
-		match.Sigs.TakerAudit, match.Sigs.MakerAudit,
-		match.Sigs.TakerRedeem, match.Sigs.MakerRedeem)
+		match.Epoch.Idx, match.Epoch.Dur,
+		int64(match.Quantity), int64(match.Rate), int8(match.Status))
 }
 
-// UpdateMatch updates an existing match.
-func (a *Archiver) UpdateMatch(match *order.Match) error {
+// InsertMatch updates an existing match.
+func (a *Archiver) InsertMatch(match *order.Match) error {
 	matchesTableName, err := a.matchTableName(match)
 	if err != nil {
 		return err
 	}
 	N, err := upsertMatch(a.db, matchesTableName, match)
 	if err != nil {
-		return fmt.Errorf("updateMatch: %v", err)
+		a.fatalBackendErr(err)
+		return err
 	}
 	if N != 1 {
-		return fmt.Errorf("updateMatch: updated %d rows, expected 1", N)
+		return fmt.Errorf("upsertMatch: updated %d rows, expected 1", N)
 	}
 	return nil
 }
@@ -214,22 +182,173 @@ func (a *Archiver) MatchByID(mid order.MatchID, base, quote uint32) (*db.MatchDa
 func matchByID(dbe *sql.DB, tableName string, mid order.MatchID) (*db.MatchData, error) {
 	var m db.MatchData
 	var status uint8
-	var epochID string
 	stmt := fmt.Sprintf(internal.RetrieveMatchByID, tableName)
 	err := dbe.QueryRow(stmt, mid).
 		Scan(&m.ID, &m.Taker, &m.TakerAcct, &m.TakerAddr,
 			&m.Maker, &m.MakerAcct, &m.MakerAddr,
-			&epochID, &m.Quantity, &m.Rate, &status,
-			&m.Sigs.TakerMatch, &m.Sigs.MakerMatch,
-			&m.Sigs.TakerAudit, &m.Sigs.MakerAudit,
-			&m.Sigs.TakerRedeem, &m.Sigs.MakerRedeem)
-	if err != nil {
-		return nil, err
-	}
-	m.Epoch.Idx, m.Epoch.Dur, err = splitEpochID(epochID)
+			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
 	if err != nil {
 		return nil, err
 	}
 	m.Status = order.MatchStatus(status)
 	return &m, nil
+}
+
+// SwapData retrieves the match status and all the SwapData for a match.
+func (a *Archiver) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
+	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+	stmt := fmt.Sprintf(internal.RetrieveSwapData, matchesTableName)
+
+	var sd db.SwapData
+	var status uint8
+	var contractATime, contractBTime, redeemATime, redeemBTime sql.NullInt64
+	err = a.db.QueryRow(stmt, mid).
+		Scan(&status,
+			&sd.SigMatchAckMaker, &sd.SigMatchAckTaker,
+			&sd.ContractACoinID, &sd.ContractA, &contractATime,
+			&sd.ContractAAckSig,
+			&sd.ContractBCoinID, &sd.ContractB, &contractBTime,
+			&sd.ContractBAckSig,
+			&sd.RedeemACoinID, &redeemATime,
+			&sd.RedeemAAckSig,
+			&sd.RedeemBCoinID, &redeemBTime,
+			&sd.RedeemBAckSig)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	sd.ContractATime = contractATime.Int64
+	sd.ContractBTime = contractBTime.Int64
+	sd.RedeemATime = redeemATime.Int64
+	sd.RedeemBTime = redeemBTime.Int64
+
+	return order.MatchStatus(status), &sd, nil
+}
+
+// Swap Data
+//
+// In the swap process, the counterparties are:
+// - Initiator or party A on chain X. This is the maker in the DEX.
+// - Participant or party B on chain Y. This is the taker in the DEX.
+//
+// For each match, a successful swap will generate the following data that must
+// be stored:
+// - 6 client signatures. Both parties sign the data to acknowledge (1) the
+//   match ack, (2) the counterparty's contract script and contract transaction,
+//   and (3) the counterparty's redemption transaction.
+// - 2 swap contracts and the associated transaction outputs (more generally,
+//   coinIDs), one on each party's blockchain.
+// - 2 redemption transaction outputs (coinIDs).
+//
+// The methods for saving this data are defined below in the order in which the
+// data is expected from the parties.
+
+// Match acknowledgement message signatures.
+
+func (a *Archiver) saveMatchSig(mid db.MarketMatchID, sig []byte, sigStmt string) error {
+	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
+	if err != nil {
+		return err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+	stmt := fmt.Sprintf(sigStmt, matchesTableName)
+	_, err = a.db.Exec(stmt, mid.MatchID, sig)
+	return err
+}
+
+// SaveMatchAckSigA records the match data acknowledgement signature from swap
+// party A (the initiator), which is the maker in the DEX.
+func (a *Archiver) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error {
+	return a.saveMatchSig(mid, sig, internal.SetMakerMatchAckSig)
+}
+
+// SaveMatchAckSigB records the match data acknowledgement signature from swap
+// party B (the participant), which is the taker in the DEX.
+func (a *Archiver) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error {
+	return a.saveMatchSig(mid, sig, internal.SetTakerMatchAckSig)
+}
+
+// Swap contracts, and counterparty audit acknowledgement signatures.
+
+func (a *Archiver) saveContract(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64, status uint8, contractStmt string) error {
+	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
+	if err != nil {
+		return err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+	stmt := fmt.Sprintf(contractStmt, matchesTableName)
+	_, err = a.db.Exec(stmt, mid.MatchID, status, coinID, contract, timestamp)
+	return err
+}
+
+// SaveContractA records party A's swap contract script and the coinID (e.g.
+// transaction output) containing the contract on chain X. Note that this
+// contract contains the secret hash.
+func (a *Archiver) SaveContractA(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
+	return a.saveContract(mid, contract, coinID, timestamp, uint8(order.MakerSwapCast), internal.SetInitiatorSwapData)
+}
+
+// SaveAuditAckSigB records party B's signature acknowledging their audit of A's
+// swap contract.
+func (a *Archiver) SaveAuditAckSigB(mid db.MarketMatchID, sig []byte) error {
+	return a.saveMatchSig(mid, sig, internal.SetParticipantContractAuditSig)
+}
+
+// SaveContractB records party B's swap contract script and the coinID (e.g.
+// transaction output) containing the contract on chain Y.
+func (a *Archiver) SaveContractB(mid db.MarketMatchID, contract []byte, coinID []byte, timestamp int64) error {
+	return a.saveContract(mid, contract, coinID, timestamp, uint8(order.TakerSwapCast), internal.SetParticipantSwapData)
+}
+
+// SaveAuditAckSigA records party A's signature acknowledging their audit of B's
+// swap contract.
+func (a *Archiver) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error {
+	return a.saveMatchSig(mid, sig, internal.SetInitiatorContractAuditSig)
+}
+
+// Redemption transactions, and counterparty acknowledgement signatures.
+
+func (a *Archiver) saveRedeem(mid db.MarketMatchID, coinID []byte, timestamp int64, status uint8, redeemStmt string) error {
+	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
+	if err != nil {
+		return err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+	stmt := fmt.Sprintf(redeemStmt, matchesTableName)
+	_, err = a.db.Exec(stmt, mid.MatchID, status, coinID, timestamp)
+	return err
+}
+
+// SaveRedeemA records party A's redemption coinID (e.g. transaction output),
+// which spends party B's swap contract on chain Y. Note that this transaction
+// will contain the secret, which party B extracts.
+func (a *Archiver) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+	return a.saveRedeem(mid, coinID, timestamp, uint8(order.MakerRedeemed), internal.SetInitiatorRedeemData)
+}
+
+// SaveRedeemAckSigB records party B's signature acknowledging party A's
+// redemption, which spent their swap contract on chain Y and revealed the
+// secret.
+func (a *Archiver) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
+	return a.saveMatchSig(mid, sig, internal.SetParticipantRedeemAckSig)
+}
+
+// SaveRedeemB records party B's redemption coinID (e.g. transaction output),
+// which spends party A's swap contract on chain X.
+func (a *Archiver) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+	return a.saveRedeem(mid, coinID, timestamp, uint8(order.MatchComplete), internal.SetParticipantRedeemData)
+}
+
+// SaveRedeemAckSigA records party A's signature acknowledging party B's
+// redemption.
+func (a *Archiver) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
+	return a.saveMatchSig(mid, sig, internal.SetInitiatorRedeemAckSig)
 }

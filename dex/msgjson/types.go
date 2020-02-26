@@ -335,6 +335,7 @@ type Match struct {
 	// match serialization.
 	Status uint8 `json:"status"`
 	Side   uint8 `json:"side"`
+	// Time?
 }
 
 var _ Signable = (*Match)(nil)
@@ -355,11 +356,11 @@ func (m *Match) Serialize() ([]byte, error) {
 // Init is the payload for a client-originating InitRoute request.
 type Init struct {
 	signable
-	OrderID  Bytes  `json:"orderid"`
-	MatchID  Bytes  `json:"matchid"`
-	CoinID   Bytes  `json:"coinid"`
-	Time     uint64 `json:"timestamp"`
-	Contract Bytes  `json:"contract"`
+	OrderID Bytes `json:"orderid"`
+	MatchID Bytes `json:"matchid"`
+	CoinID  Bytes `json:"coinid"`
+	// Time     uint64 `json:"timestamp"` // client originating
+	Contract Bytes `json:"contract"`
 }
 
 var _ Signable = (*Init)(nil)
@@ -367,12 +368,12 @@ var _ Signable = (*Init)(nil)
 // Serialize serializes the Init data.
 func (init *Init) Serialize() ([]byte, error) {
 	// Init serialization is orderid (32) + matchid (32) + txid (probably 32) +
-	// vout (4) + timestamp (8) + contract (97 ish). Sum = 205
-	s := make([]byte, 0, 205)
+	// vout (4) + contract (97 ish). Sum = 197
+	s := make([]byte, 0, 197)
 	s = append(s, init.OrderID...)
 	s = append(s, init.MatchID...)
 	s = append(s, init.CoinID...)
-	s = append(s, uint64Bytes(init.Time)...)
+	//s = append(s, uint64Bytes(init.Time)...)
 	s = append(s, init.Contract...)
 	return s, nil
 }
@@ -421,30 +422,37 @@ func (rev *RevokeMatch) Serialize() ([]byte, error) {
 // Redeem are the params for a client-originating RedeemRoute request.
 type Redeem struct {
 	signable
-	OrderID Bytes  `json:"orderid"`
-	MatchID Bytes  `json:"matchid"`
-	CoinID  Bytes  `json:"coinid"`
-	Time    uint64 `json:"timestamp"`
+	OrderID Bytes `json:"orderid"`
+	MatchID Bytes `json:"matchid"`
+	CoinID  Bytes `json:"coinid"`
+	// Time    uint64 `json:"timestamp"`
 }
 
 var _ Signable = (*Redeem)(nil)
 
 // Serialize serializes the Redeem data.
 func (redeem *Redeem) Serialize() ([]byte, error) {
-	// Init serialization is orderid (32) + matchid (32) + txid (32) + vout (4)
-	// + timestamp(8) = 108
-	s := make([]byte, 0, 108)
+	// Init serialization is orderid (32) + matchid (32) + txid (32) + vout (4) = 100
+	s := make([]byte, 0, 100)
 	s = append(s, redeem.OrderID...)
 	s = append(s, redeem.MatchID...)
 	s = append(s, []byte(redeem.CoinID)...)
-	s = append(s, uint64Bytes(redeem.Time)...)
+	//s = append(s, uint64Bytes(redeem.Time)...)
 	return s, nil
 }
 
 // Redemption is the payload for a DEX-originating RedemptionRoute request.
-// They are identical to the Redeem parameters, but Redeem is for the
-// client-originating RedeemRoute request.
-type Redemption = Redeem
+type Redemption struct {
+	Redeem
+	Time uint64 `json:"timestamp"`
+}
+
+// Serialize serializes the Redemption data.
+func (r *Redemption) Serialize() ([]byte, error) {
+	// Redemption serialization is Redeem (100) + timestamp (8) = 108
+	s, _ := r.Redeem.Serialize()
+	return append(s, uint64Bytes(r.Time)...), nil
+}
 
 const (
 	BuyOrderNum       = 1

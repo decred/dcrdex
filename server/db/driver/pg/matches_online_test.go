@@ -4,6 +4,7 @@ package pg
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"decred.org/dcrdex/dex/order"
@@ -11,7 +12,7 @@ import (
 	"decred.org/dcrdex/server/db"
 )
 
-func TestUpdateMatch(t *testing.T) {
+func TestInsertMatch(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
 	}
@@ -27,7 +28,7 @@ func TestUpdateMatch(t *testing.T) {
 
 	matchAUpdated := matchA
 	matchAUpdated.Status = order.MakerSwapCast
-	matchAUpdated.Sigs.MakerMatch = randomBytes(73)
+	// matchAUpdated.Sigs.MakerMatch = randomBytes(73)
 
 	tests := []struct {
 		name    string
@@ -53,9 +54,9 @@ func TestUpdateMatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := archie.UpdateMatch(tt.match)
+			err := archie.InsertMatch(tt.match)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("UpdateMatch() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("InsertMatch() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
 			if tt.wantErr {
@@ -74,11 +75,266 @@ func TestUpdateMatch(t *testing.T) {
 				t.Errorf("Incorrect match status, got %d, expected %d",
 					matchData.Status, tt.match.Status)
 			}
-			if !bytes.Equal(tt.match.Sigs.MakerMatch, matchData.Sigs.MakerMatch) {
-				t.Errorf("incorrect MakerMatch sig. got %v, expected %v",
-					matchData.Sigs.MakerMatch, tt.match.Sigs.MakerMatch)
-			}
 		})
+	}
+}
+
+func TestSetSwapData(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// Make a perfect 1 lot match.
+	limitBuyStanding := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
+	limitSellImmediate := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
+
+	epochID := order.EpochID{132412341, 10}
+	matchA := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
+	matchID := matchA.ID()
+
+	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
+
+	checkMatch := func(wantStatus order.MatchStatus) error {
+		matchData, err := archie.MatchByID(matchID, base, quote)
+		if err != nil {
+			return err
+		}
+		if matchData.ID != matchID {
+			return fmt.Errorf("Retrieved match with ID %v, expected %v", matchData.ID, matchID)
+		}
+		if matchData.Status != wantStatus {
+			return fmt.Errorf("Incorrect match status, got %d, expected %d",
+				matchData.Status, wantStatus)
+		}
+		return nil
+	}
+
+	err := archie.InsertMatch(matchA)
+	if err != nil {
+		t.Errorf("InsertMatch() failed: %v", err)
+	}
+
+	if err = checkMatch(order.NewlyMatched); err != nil {
+		t.Fatal(err)
+	}
+
+	mid := db.MarketMatchID{
+		MatchID: matchA.ID(),
+		Base:    base,
+		Quote:   quote,
+	}
+
+	// Match Ack Sig A (maker's match ack sig)
+	sigMakerMatch := randomBytes(73)
+	err = archie.SaveMatchAckSigA(mid, sigMakerMatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, swapData, err := archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.NewlyMatched {
+		t.Errorf("Got status %v, expected %v", status, order.NewlyMatched)
+	}
+	if !bytes.Equal(swapData.SigMatchAckMaker, sigMakerMatch) {
+		t.Fatalf("SigMatchAckMaker incorrect. got %v, expected %v",
+			swapData.SigMatchAckMaker, sigMakerMatch)
+	}
+
+	// Match Ack Sig B (taker's match ack sig)
+	sigTakerMatch := randomBytes(73)
+	err = archie.SaveMatchAckSigB(mid, sigTakerMatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.NewlyMatched {
+		t.Errorf("Got status %v, expected %v", status, order.NewlyMatched)
+	}
+	if !bytes.Equal(swapData.SigMatchAckTaker, sigTakerMatch) {
+		t.Fatalf("SigMatchAckTaker incorrect. got %v, expected %v",
+			swapData.SigMatchAckTaker, sigTakerMatch)
+	}
+
+	// Contract A
+	contractA := randomBytes(128)
+	coinIDA := randomBytes(36)
+	contractATime := int64(1234)
+	err = archie.SaveContractA(mid, contractA, coinIDA, contractATime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.MakerSwapCast {
+		t.Errorf("Got status %v, expected %v", status, order.MakerSwapCast)
+	}
+	if !bytes.Equal(swapData.ContractA, contractA) {
+		t.Fatalf("ContractA incorrect. got %v, expected %v",
+			swapData.ContractA, contractA)
+	}
+	if !bytes.Equal(swapData.ContractACoinID, coinIDA) {
+		t.Fatalf("ContractACoinID incorrect. got %v, expected %v",
+			swapData.ContractACoinID, coinIDA)
+	}
+	if swapData.ContractATime != contractATime {
+		t.Fatalf("ContractATime incorrect. got %d, expected %d",
+			swapData.ContractATime, contractATime)
+	}
+
+	// Party B's signature for acknowledgement of contract A
+	auditSigB := randomBytes(73)
+	if err = archie.SaveAuditAckSigB(mid, auditSigB); err != nil {
+		t.Fatal(err)
+	}
+
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.MakerSwapCast {
+		t.Errorf("Got status %v, expected %v", status, order.MakerSwapCast)
+	}
+	if !bytes.Equal(swapData.ContractAAckSig, auditSigB) {
+		t.Fatalf("ContractAAckSig incorrect. got %v, expected %v",
+			swapData.ContractAAckSig, auditSigB)
+	}
+
+	// Contract B
+	contractB := randomBytes(128)
+	coinIDB := randomBytes(36)
+	contractBTime := int64(1235)
+	err = archie.SaveContractB(mid, contractB, coinIDB, contractBTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.TakerSwapCast {
+		t.Errorf("Got status %v, expected %v", status, order.TakerSwapCast)
+	}
+	if !bytes.Equal(swapData.ContractB, contractB) {
+		t.Fatalf("ContractB incorrect. got %v, expected %v",
+			swapData.ContractB, contractB)
+	}
+	if !bytes.Equal(swapData.ContractBCoinID, coinIDB) {
+		t.Fatalf("ContractBCoinID incorrect. got %v, expected %v",
+			swapData.ContractBCoinID, coinIDB)
+	}
+	if swapData.ContractBTime != contractBTime {
+		t.Fatalf("ContractBTime incorrect. got %d, expected %d",
+			swapData.ContractBTime, contractBTime)
+	}
+
+	// Party A's signature for acknowledgement of contract B
+	auditSigA := randomBytes(73)
+	if err = archie.SaveAuditAckSigA(mid, auditSigA); err != nil {
+		t.Fatal(err)
+	}
+
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.TakerSwapCast {
+		t.Errorf("Got status %v, expected %v", status, order.TakerSwapCast)
+	}
+	if !bytes.Equal(swapData.ContractBAckSig, auditSigA) {
+		t.Fatalf("ContractBAckSig incorrect. got %v, expected %v",
+			swapData.ContractBAckSig, auditSigB)
+	}
+
+	// Redeem A
+	redeemCoinIDA := randomBytes(36)
+	redeemATime := int64(1234)
+	err = archie.SaveRedeemA(mid, redeemCoinIDA, redeemATime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.MakerRedeemed {
+		t.Errorf("Got status %v, expected %v", status, order.MakerRedeemed)
+	}
+	if !bytes.Equal(swapData.RedeemACoinID, redeemCoinIDA) {
+		t.Fatalf("RedeemACoinID incorrect. got %v, expected %v",
+			swapData.RedeemACoinID, redeemCoinIDA)
+	}
+	if swapData.RedeemATime != redeemATime {
+		t.Fatalf("RedeemATime incorrect. got %d, expected %d",
+			swapData.RedeemATime, redeemATime)
+	}
+
+	// Party B's signature for acknowledgement of A's redemption
+	redeemAckSigB := randomBytes(73)
+	if err = archie.SaveRedeemAckSigB(mid, redeemAckSigB); err != nil {
+		t.Fatal(err)
+	}
+
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.MakerRedeemed {
+		t.Errorf("Got status %v, expected %v", status, order.MakerRedeemed)
+	}
+	if !bytes.Equal(swapData.RedeemAAckSig, redeemAckSigB) {
+		t.Fatalf("RedeemAAckSig incorrect. got %v, expected %v",
+			swapData.RedeemAAckSig, redeemAckSigB)
+	}
+
+	// Redeem B
+	redeemCoinIDB := randomBytes(36)
+	redeemBTime := int64(1234)
+	err = archie.SaveRedeemB(mid, redeemCoinIDB, redeemBTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.MatchComplete {
+		t.Errorf("Got status %v, expected %v", status, order.MatchComplete)
+	}
+	if !bytes.Equal(swapData.RedeemBCoinID, redeemCoinIDB) {
+		t.Fatalf("RedeemBCoinID incorrect. got %v, expected %v",
+			swapData.RedeemBCoinID, redeemCoinIDB)
+	}
+	if swapData.RedeemBTime != redeemBTime {
+		t.Fatalf("RedeemBTime incorrect. got %d, expected %d",
+			swapData.RedeemBTime, redeemBTime)
+	}
+
+	// Party A's signature for acknowledgement of B's redemption
+	redeemAckSigA := randomBytes(73)
+	if err = archie.SaveRedeemAckSigA(mid, redeemAckSigA); err != nil {
+		t.Fatal(err)
+	}
+
+	status, swapData, err = archie.SwapData(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != order.MatchComplete {
+		t.Errorf("Got status %v, expected %v", status, order.MatchComplete)
+	}
+	if !bytes.Equal(swapData.RedeemBAckSig, redeemAckSigA) {
+		t.Fatalf("RedeemBAckSig incorrect. got %v, expected %v",
+			swapData.RedeemBAckSig, redeemAckSigA)
 	}
 }
 
@@ -96,9 +352,9 @@ func TestMatchByID(t *testing.T) {
 	// Store it.
 	epochID := order.EpochID{132412341, 10}
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
-	err := archie.UpdateMatch(match)
+	err := archie.InsertMatch(match)
 	if err != nil {
-		t.Fatalf("UpdateMatch() failed: %v", err)
+		t.Fatalf("InsertMatch() failed: %v", err)
 	}
 
 	tests := []struct {
@@ -154,9 +410,9 @@ func TestUserMatches(t *testing.T) {
 	// Store it.
 	epochID := order.EpochID{132412341, 10}
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
-	err := archie.UpdateMatch(match)
+	err := archie.InsertMatch(match)
 	if err != nil {
-		t.Fatalf("UpdateMatch() failed: %v", err)
+		t.Fatalf("InsertMatch() failed: %v", err)
 	}
 
 	tests := []struct {
@@ -211,9 +467,9 @@ func TestActiveMatches(t *testing.T) {
 	epochID := order.EpochID{132412341, 10}
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 	match.Status = order.MatchComplete // not an active order now
-	err := archie.UpdateMatch(match)
+	err := archie.InsertMatch(match)
 	if err != nil {
-		t.Fatalf("UpdateMatch() failed: %v", err)
+		t.Fatalf("InsertMatch() failed: %v", err)
 	}
 
 	// Make a perfect 1 lot match, same parties.
@@ -225,9 +481,9 @@ func TestActiveMatches(t *testing.T) {
 	// Store it.
 	epochID2 := order.EpochID{132412342, 10}
 	match2 := newMatch(limitBuyStanding2, limitSellImmediate2, limitSellImmediate2.Quantity, epochID2)
-	err = archie.UpdateMatch(match2)
+	err = archie.InsertMatch(match2)
 	if err != nil {
-		t.Fatalf("UpdateMatch() failed: %v", err)
+		t.Fatalf("InsertMatch() failed: %v", err)
 	}
 
 	// Make a perfect 1 lot BTC-LTC match.
@@ -243,9 +499,9 @@ func TestActiveMatches(t *testing.T) {
 	// Store it.
 	epochID3 := order.EpochID{132412342, 10}
 	match3 := newMatch(limitBuyStanding3, limitSellImmediate3, limitSellImmediate3.Quantity, epochID3)
-	err = archie.UpdateMatch(match3)
+	err = archie.InsertMatch(match3)
 	if err != nil {
-		t.Fatalf("UpdateMatch() failed: %v", err)
+		t.Fatalf("InsertMatch() failed: %v", err)
 	}
 
 	tests := []struct {

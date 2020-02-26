@@ -160,6 +160,19 @@ func (dcr *Backend) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error)
 	return dcr.utxo(txHash, vout, redeemScript)
 }
 
+// ValidateCoinID attempts to decode the coinID.
+func (dcr *Backend) ValidateCoinID(coinID []byte) error {
+	_, _, err := decodeCoinID(coinID)
+	return err
+}
+
+// ValidateContract ensures that the swap contract is constructed properly, and
+// contains valid sender and receiver addresses.
+func (dcr *Backend) ValidateContract(contract []byte) error {
+	_, _, _, _, err := dexdcr.ExtractSwapDetails(contract, chainParams)
+	return err
+}
+
 // CheckAddress checks that the given address is parseable.
 func (dcr *Backend) CheckAddress(addr string) bool {
 	_, err := dcrutil.DecodeAddress(addr, chainParams)
@@ -351,7 +364,47 @@ func (dcr *Backend) onBlockConnected(serializedHeader []byte, _ [][]byte) {
 		return
 	}
 	h := blockHeader.BlockHash()
+	// TODO: Instead of a buffered channel, anyQ, make a queue with a slice so
+	// the buffer size has no role in correctness i.e. the ability of this
+	// function to work when previous blocks require RPC calls to complete their
+	// processing. That is, if the channel buffer is full there is likely to be
+	// deadlock waiting for other RPCs.
 	dcr.anyQ <- &h
+}
+
+// validateTxOut validates an outpoint (txHash:out) by retrieving associated
+// output's pkScript, and if the provided redeemScript is not empty, verifying
+// that the pkScript is a P2SH with a script hash to which the redeem script
+// hashes. This also screens out multi-sig scripts.
+func (dcr *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScript []byte) error {
+	_, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
+	if err != nil {
+		return err
+	}
+
+	scriptType := dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, pkScript, redeemScript)
+	if scriptType == dexdcr.ScriptUnsupported {
+		return dex.UnsupportedScriptError
+	}
+
+	switch {
+	case scriptType.IsP2SH(): // regular or stake (vsp vote) p2sh
+		if len(redeemScript) == 0 {
+			return fmt.Errorf("no redeem script provided for P2SH pkScript")
+		}
+		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
+		if err != nil {
+			return fmt.Errorf("failed to extract script hash for P2SH pkScript: %v", err)
+		}
+		// Check the script hash against the hash of the redeem script.
+		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
+			return fmt.Errorf("redeem script does not match script hash from P2SH pkScript")
+		}
+	case len(redeemScript) > 0:
+		return fmt.Errorf("redeem script provided for non P2SH pubkey script")
+	}
+
+	return nil
 }
 
 // Get the UTXO, populating the block data along the way.
@@ -448,7 +501,7 @@ func msgTxFromHex(txhex string) (*wire.MsgTx, error) {
 func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chainjson.GetTxOutResult, []byte, error) {
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err)
+		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err) // TODO: make RPC error type for client message sanitization
 	}
 	if txOut == nil {
 		return nil, nil, fmt.Errorf("UTXO - no unspent txout found for %s:%d", txHash, vout)

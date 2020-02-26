@@ -278,7 +278,6 @@ func TestWsConn(t *testing.T) {
 		OrderID:  orderid,
 		MatchID:  matchid,
 		CoinID:   coinID,
-		Time:     1570704776,
 		Contract: contract,
 	}
 
