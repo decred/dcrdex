@@ -511,8 +511,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	tCore := newTestRig().core
 	mid := "ob"
 	dc := &dexConnection{
-		books:  make(map[string]*order.OrderBook),
-		epochs: make(map[string]*order.EpochQueue),
+		books: make(map[string]*order.OrderBook),
 	}
 
 	// Ensure handleOrderBookMsg creates an order book as expected.
