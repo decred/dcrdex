@@ -434,7 +434,7 @@ func TestParseHTTPRequest(t *testing.T) {
 	ensureMsgErr("bad route", msgjson.RPCUnknownRoute)
 
 	// Set the route correctly.
-	routes["123"] = func(r *RPCServer, m *msgjson.Message) *msgjson.ResponsePayload {
+	routes[route("123")] = func(r *RPCServer, m *msgjson.Message) *msgjson.ResponsePayload {
 		return new(msgjson.ResponsePayload)
 	}
 
@@ -442,6 +442,8 @@ func TestParseHTTPRequest(t *testing.T) {
 	bbuff = bytes.NewBuffer(b)
 	r, _ = http.NewRequest("GET", "", bbuff)
 	ensureNoErr("good request")
+
+	delete(routes, route("123"))
 }
 
 type authMiddlewareTest struct {

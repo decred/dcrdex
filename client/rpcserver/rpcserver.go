@@ -158,15 +158,6 @@ func genCertPair(certFile, keyFile string) error {
 	return nil
 }
 
-// handler is the type for functions that handle RPC requests.
-type handler func(*RPCServer, *msgjson.Message) *msgjson.ResponsePayload
-
-// routes maps routes to their handler.
-var routes = map[string]handler{
-	"help":    handleHelp,
-	"version": handleVersion,
-}
-
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
 func writeJSON(w http.ResponseWriter, thing interface{}) {
@@ -358,10 +349,10 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	}
 
 	// Find the correct handler for this route.
-	h, ok := routes[req.Route]
-	if !ok {
-		log.Debugf("could not find route: %v", req.Route)
-		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route")
+	h, exists := routes[route(req.Route)]
+	if !exists {
+		log.Debugf("%v: %v", ErrUnknownCmd, req.Route)
+		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, ErrUnknownCmd.Error())
 		return payload
 	}
 

@@ -34,11 +34,6 @@ func (s semver) String() string {
 	return fmt.Sprintf("%d.%d.%d", s.major, s.minor, s.patch)
 }
 
-// commandUsage display the usage for a specific command.
-func commandUsage(method interface{}) {
-	fmt.Println("TODO")
-}
-
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -87,7 +82,12 @@ func run() error {
 	// Parse the arguments and convert into a type the server accepts.
 	payload, err := rpcserver.ParseCmdArgs(args[0], params)
 	if err != nil {
-		return fmt.Errorf("unable to parse parameters: %v", err)
+		if errors.Is(err, rpcserver.ErrArgs) {
+			// This is a known command. Ignoring unreachable error.
+			usage, _ := rpcserver.CommandUsage(args[0])
+			return fmt.Errorf("%v\n\n%s", err, usage)
+		}
+		return err
 	}
 
 	// Create a request using the parsedArgs.

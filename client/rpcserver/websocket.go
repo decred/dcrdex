@@ -103,7 +103,7 @@ func (s *RPCServer) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson
 		handler, found := wsHandlers[msg.Route]
 		if !found {
 			// If a this request exists in routes, call it.
-			if _, found = routes[msg.Route]; !found {
+			if _, found = routes[route(msg.Route)]; !found {
 				return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route '"+msg.Route+"'")
 			}
 			handler = wsHandleRequest
@@ -146,7 +146,7 @@ type marketResponse struct {
 
 // wsHandleRequest handles requests found in the routes map for a websocket client.
 func wsHandleRequest(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
-	handler := routes[msg.Route]
+	handler := routes[route(msg.Route)]
 	payload := handler(s, msg)
 	encodedPayload, err := json.Marshal(payload)
 	if err != nil {
