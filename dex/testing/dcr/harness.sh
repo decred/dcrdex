@@ -55,6 +55,7 @@ cat > "${NODES_ROOT}/alpha/w-alpha.conf" <<EOF
 username=${RPC_USER}
 password=${RPC_PASS}
 cafile=${NODES_ROOT}/alpha/rpc.cert
+rpccert=${NODES_ROOT}/alpha/rpc.cert
 logdir=${NODES_ROOT}/alpha/log
 appdata=${NODES_ROOT}/alpha
 simnet=1
@@ -72,6 +73,7 @@ cat > "${NODES_ROOT}/beta/w-beta.conf" <<EOF
 username=${RPC_USER}
 password=${RPC_PASS}
 cafile=${NODES_ROOT}/beta/rpc.cert
+rpccert=${NODES_ROOT}/beta/rpc.cert
 logdir=${NODES_ROOT}/beta/log
 appdata=${NODES_ROOT}/beta
 simnet=1
