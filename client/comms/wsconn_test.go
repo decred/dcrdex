@@ -80,8 +80,8 @@ func TestWsConn(t *testing.T) {
 	var id uint64
 	// server's "/ws" handler
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		id := atomic.AddUint64(&id, 1) // shadow id
 		hCtx, hCancel := context.WithCancel(ctx)
-		atomic.AddUint64(&id, 1)
 
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -89,7 +89,6 @@ func TestWsConn(t *testing.T) {
 		}
 
 		c.SetPongHandler(func(string) error {
-			id := atomic.LoadUint64(&id)
 			t.Logf("handler #%d: pong received", id)
 			return nil
 		})
@@ -107,7 +106,6 @@ func TestWsConn(t *testing.T) {
 						return
 					}
 
-					id := atomic.LoadUint64(&id)
 					t.Logf("handler #%d: ping sent", id)
 
 				case msg := <-readPumpCh:

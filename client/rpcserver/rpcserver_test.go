@@ -129,6 +129,14 @@ func (c *TConn) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
 
+func (c *TConn) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	return nil
+}
+
+func (c *TConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
 func (c *TConn) Close() error {
 	// If the test has a non-nil close channel, signal close.
 	select {

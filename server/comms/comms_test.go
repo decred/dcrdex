@@ -111,6 +111,14 @@ func (conn *wsConnStub) SetWriteDeadline(t time.Time) error {
 	return nil // TODO implement and test write timeouts
 }
 
+func (conn *wsConnStub) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (conn *wsConnStub) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	return nil
+}
+
 func (conn *wsConnStub) Close() error {
 	select {
 	case <-conn.quit:

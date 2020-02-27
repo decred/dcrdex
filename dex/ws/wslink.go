@@ -6,8 +6,6 @@ package ws
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -41,9 +39,11 @@ const ErrClientDisconnected = Error("client disconnected")
 // Connection represents a websocket connection to the client. In practice,
 // it is satisfied by *websocket.Conn. For testing, a stub can be used.
 type Connection interface {
+	WriteControl(messageType int, data []byte, deadline time.Time) error
 	ReadMessage() (int, []byte, error)
 	WriteMessage(int, []byte) error
 	SetWriteDeadline(t time.Time) error
+	SetReadDeadline(t time.Time) error
 	Close() error
 }
 
@@ -120,6 +120,14 @@ func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 
 // Start begins processing input and output messages.
 func (c *WSLink) Start() {
+	// Set the initial read deadline now that the ping ticker is about to be
+	// started. The pong handler will set subsequent read deadlines.
+	err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2))
+	if err != nil {
+		log.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err)
+		return
+	}
+
 	log.Tracef("Starting websocket client %s", c.ip)
 	// Start processing input and output.
 	c.wg.Add(2)
@@ -133,8 +141,10 @@ func (c *WSLink) Disconnect() {
 	c.quitMtx.Lock()
 	defer c.quitMtx.Unlock()
 	if !c.on {
+		log.Debugf("Disconnect attempted on stopped WSLink.")
 		return
 	}
+	log.Tracef("Closing connection with client %v", c.ip)
 	c.on = false
 	c.conn.Close()
 	close(c.quit)
@@ -162,7 +172,8 @@ out:
 		_, msgBytes, err := c.conn.ReadMessage()
 		if err != nil {
 			// Log the error if it's not due to disconnecting.
-			if !errors.Is(err, io.EOF) {
+			if !websocket.IsCloseError(err, websocket.CloseGoingAway,
+				websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
 				log.Errorf("Websocket receive error from %s: %v", c.ip, err)
 			}
 			break out
@@ -210,8 +221,7 @@ out:
 				break out
 			}
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			err := c.conn.WriteMessage(websocket.PingMessage, ping)
+			err := c.conn.WriteControl(websocket.PingMessage, ping, time.Now().Add(writeWait))
 			if err != nil {
 				c.Disconnect()
 				// Don't really care what the error is, but log it at debug level.
@@ -249,7 +259,7 @@ func (c *WSLink) IP() string {
 	return c.ip
 }
 
-func NewConnection(w http.ResponseWriter, r *http.Request, wait time.Duration) (Connection, error) {
+func NewConnection(w http.ResponseWriter, r *http.Request, readTimeout time.Duration) (Connection, error) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		var hsErr websocket.HandshakeError
@@ -260,13 +270,14 @@ func NewConnection(w http.ResponseWriter, r *http.Request, wait time.Duration) (
 		http.Error(w, "400 Bad Request.", http.StatusBadRequest)
 		return nil, err
 	}
-	pongHandler := func(string) error {
-		return ws.SetReadDeadline(time.Now().Add(wait))
-	}
-	err = pongHandler("")
-	if err != nil {
-		return nil, fmt.Errorf("error setting read deadline: %v", err)
-	}
-	ws.SetPongHandler(pongHandler)
+	// Configure the pong handler.
+	reqAddr := r.RemoteAddr
+	ws.SetPongHandler(func(string) error {
+		log.Tracef("got pong from %v", reqAddr)
+		return ws.SetReadDeadline(time.Now().Add(readTimeout))
+	})
+
+	// Do not set an initial read deadline until pinging begins.
+
 	return ws, nil
 }
