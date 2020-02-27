@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/coinwaiter"
@@ -64,6 +65,7 @@ var (
 func init() {
 	auth.UseLogger(authLogger)
 	comms.UseLogger(commsLogger)
+	ws.UseLogger(commsLogger)
 	db.UseLogger(dbLogger)
 	dexsrv.UseLogger(dexmanLogger)
 	market.UseLogger(marketLogger)
