@@ -421,7 +421,6 @@ func TestMain(m *testing.M) {
 	book.UseLogger(logger)
 	matcher.UseLogger(logger)
 	swap.UseLogger(logger)
-	order.UseLogger(logger)
 
 	privKey, _ := secp256k1.GeneratePrivateKey()
 	auth := &TAuth{
