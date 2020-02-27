@@ -1237,12 +1237,18 @@ func (c *Core) handleUnbookOrderMsg(dc *dexConnection, msg *msgjson.Message) err
 // listen monitors the DEX websocket connection for server requests and
 // notifications.
 func (c *Core) listen(dc *dexConnection) {
-	msgs := dc.MessageSource()
 	defer c.wg.Done()
+	msgs := dc.MessageSource()
 out:
 	for {
 		select {
-		case msg := <-msgs:
+		case msg, ok := <-msgs:
+			if !ok {
+				log.Warnf("Connection closed for %s.", dc.acct.url)
+				// TODO: remove from c.conns, and then?
+				return
+			}
+
 			switch msg.Type {
 			case msgjson.Request:
 				switch msg.Route {
