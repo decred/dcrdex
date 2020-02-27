@@ -239,6 +239,7 @@ out:
 				// to this new epoch. This is needed for msgjson.OrderBook in
 				// sendBook, which must include the current epoch index.
 				book.setEpoch(u.epochIdx)
+				log.Tracef("Book is now ready for next epoch %d", u.epochIdx)
 				continue // no notification to send
 
 			case bookAction:
@@ -359,6 +360,7 @@ func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msg
 	}
 	mkt, err := dex.MarketName(sub.Base, sub.Quote)
 	if err != nil {
+		log.Tracef("handleOrderBook: unknown market (%d, %d): %v", sub.Base, sub.Quote, err)
 		return &msgjson.Error{
 			Code:    msgjson.UnknownMarket,
 			Message: "market name error: " + err.Error(),
@@ -366,6 +368,7 @@ func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msg
 	}
 	book, found := r.books[mkt]
 	if !found {
+		log.Tracef("handleOrderBook: no book for market %s", mkt)
 		return &msgjson.Error{
 			Code:    msgjson.UnknownMarket,
 			Message: "unknown market",
@@ -390,6 +393,7 @@ func (r *BookRouter) handleUnsubOrderBook(conn comms.Link, msg *msgjson.Message)
 	}
 	book := r.books[unsub.MarketID]
 	if book == nil {
+		log.Tracef("handleUnsubOrderBook: no book for market %s", unsub.MarketID)
 		return &msgjson.Error{
 			Code:    msgjson.UnknownMarket,
 			Message: "unknown market: " + unsub.MarketID,
@@ -425,8 +429,10 @@ func (r *BookRouter) sendNote(route string, subs *subscribers, note interface{})
 		return
 	}
 
-	deletes := make([]uint64, 0)
+	var deletes []uint64
 	subs.mtx.RLock()
+	log.Debugf("Sending notification %v (id=%d) to %d clients.",
+		route, msg.ID, len(subs.conns))
 	for _, conn := range subs.conns {
 		err := conn.Send(msg)
 		if err != nil {
@@ -434,6 +440,7 @@ func (r *BookRouter) sendNote(route string, subs *subscribers, note interface{})
 		}
 	}
 	subs.mtx.RUnlock()
+
 	if len(deletes) > 0 {
 		subs.mtx.Lock()
 		for _, id := range deletes {

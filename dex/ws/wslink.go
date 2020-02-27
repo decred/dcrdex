@@ -93,10 +93,13 @@ func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler f
 // Send sends the passed Message to the websocket peer.
 func (c *WSLink) Send(msg *msgjson.Message) error {
 	if c.Off() {
+		log.Debugf("Cannot send to disconnected peer %s.", c.ip)
 		return ErrPeerDisconnected
 	}
 	b, err := json.Marshal(msg)
 	if err != nil {
+		log.Tracef("Unable to send message ID %d to peer %v: %v",
+			msg.ID, c.ip, err)
 		return err
 	}
 
@@ -109,6 +112,8 @@ func (c *WSLink) Send(msg *msgjson.Message) error {
 	case <-c.quit:
 		return ErrPeerDisconnected
 	}
+	log.Tracef("Sending message %d, type %d, route %s to peer %v",
+		msg.ID, msg.Type, msg.Route, c.ip)
 	return nil
 }
 
@@ -236,6 +241,7 @@ out:
 				log.Debugf("WriteMessage ping error: %v", err)
 				break out
 			}
+			log.Tracef("pinged %v", c.ip)
 		case <-c.quit:
 			break out
 		}
@@ -281,7 +287,7 @@ func NewConnection(w http.ResponseWriter, r *http.Request, readTimeout time.Dura
 	// Configure the pong handler.
 	reqAddr := r.RemoteAddr
 	ws.SetPongHandler(func(string) error {
-		log.Tracef("got pong from %v", reqAddr)
+		log.Tracef("got pong from peer %v", reqAddr)
 		return ws.SetReadDeadline(time.Now().Add(readTimeout))
 	})
 

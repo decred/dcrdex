@@ -99,9 +99,11 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		}
 		cb := c.respHandler(msg.ID)
 		if cb == nil {
+			log.Debugf("no response handler found for response %d", msg.ID)
 			return msgjson.NewError(msgjson.UnknownResponseID,
 				"unknown response ID")
 		}
+		log.Tracef("Starting response handler for id %d, client %s", msg.ID, c.IP())
 		cb.f(c, msg)
 		return nil
 	}
