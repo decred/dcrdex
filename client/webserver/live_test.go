@@ -55,6 +55,7 @@ func mkMrkt(base, quote string) *core.Market {
 	qty := uint64(randomMagnitude(7, 11))
 	for i := 0; i < orderCount; i++ {
 		market.Orders = append(market.Orders, &core.Order{
+			ID: ordertest.RandomOrderID().String(),
 			Type:    order.OrderType(rand.Intn(2) + 1),
 			Stamp:   encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*86_400_000),
 			Rate:    uint64(randomMagnitude(-2, 4)),
@@ -416,12 +417,27 @@ func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
 		oType = order.MarketOrderType
 	}
 	return &core.Order{
+		ID: ordertest.RandomOrderID().String(),
 		Type:  oType,
 		Stamp: encode.UnixMilliU(time.Now()),
 		Rate:  form.Rate,
 		Qty:   form.Qty,
 		Sell:  form.Sell,
 	}, nil
+}
+
+func (c *TCore) Cancel(pw string, sid string) error {
+	for _, xc := range tExchanges {
+		for _, mkt := range xc.Markets {
+			for _, ord := range mkt.Orders {
+				if ord.ID == sid {
+					fmt.Println("--cancelling", sid)
+					ord.Cancelling = true
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func TestServer(t *testing.T) {

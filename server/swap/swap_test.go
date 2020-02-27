@@ -50,7 +50,7 @@ type tUser struct {
 	acct     account.AccountID
 	addr     string
 	lbl      string
-	matchIDs []string
+	matchIDs []order.MatchID
 }
 
 func tickMempool() {
@@ -406,7 +406,7 @@ func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
 func (rig *testRig) getTracker() *matchTracker {
 	rig.swapper.matchMtx.Lock()
 	defer rig.swapper.matchMtx.Unlock()
-	return rig.swapper.matches[rig.matchInfo.matchID]
+	return rig.swapper.matches[rig.matchInfo.matchID.String()]
 }
 
 // Taker: Acknowledge the servers match notification.
@@ -441,7 +441,7 @@ func (rig *testRig) ackMatch_taker(checkSig bool) error {
 	return nil
 }
 
-func (rig *testRig) ackMatch(user *tUser, oid, counterAddr string) error {
+func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string) error {
 	// If the match is already acked, which might be the case for the taker when
 	// an order.MatchSet hash multiple makers, skip the this step without error.
 	req := rig.auth.getReq(user.acct)
@@ -463,7 +463,7 @@ func (rig *testRig) ackMatch(user *tUser, oid, counterAddr string) error {
 }
 
 // helper to check the match notifications.
-func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid, counterAddr string) error {
+func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid order.OrderID, counterAddr string) error {
 	matchInfo := rig.matchInfo
 	var notes []*msgjson.Match
 	err := json.Unmarshal(msg.Payload, &notes)
@@ -472,7 +472,7 @@ func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid, counterAdd
 	}
 	var notification *msgjson.Match
 	for _, n := range notes {
-		if n.MatchID.String() == matchInfo.matchID {
+		if bytes.Equal(n.MatchID, matchInfo.matchID[:]) {
 			notification = n
 			break
 		}
@@ -480,7 +480,7 @@ func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid, counterAdd
 	if notification == nil {
 		return fmt.Errorf("did not find match ID %s in match notifications", matchInfo.matchID)
 	}
-	if notification.OrderID.String() != oid {
+	if notification.OrderID.String() != oid.String() {
 		return fmt.Errorf("expected order ID %s, got %s", oid, notification.OrderID)
 	}
 	if notification.Quantity != matchInfo.qty {
@@ -555,7 +555,7 @@ func (rig *testRig) sendSwap_taker(checkStatus bool) (err error) {
 	return nil
 }
 
-func (rig *testRig) sendSwap(user *tUser, oid, recipient string) (*tSwap, error) {
+func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (*tSwap, error) {
 	matchInfo := rig.matchInfo
 	swap := tNewSwap(matchInfo, oid, recipient, user)
 	if isQuoteSwap(user, matchInfo.match) {
@@ -596,7 +596,7 @@ func (rig *testRig) auditSwap_maker() error {
 	return rig.auditSwap(req.req, matchInfo.makerOID, matchInfo.db.takerSwap.contract, "maker", matchInfo.maker)
 }
 
-func (rig *testRig) auditSwap(msg *msgjson.Message, oid, contract, tag string, user *tUser) error {
+func (rig *testRig) auditSwap(msg *msgjson.Message, oid order.OrderID, contract, tag string, user *tUser) error {
 	if msg == nil {
 		return fmt.Errorf("no %s 'audit' request from DEX", user.lbl)
 	}
@@ -609,11 +609,11 @@ func (rig *testRig) auditSwap(msg *msgjson.Message, oid, contract, tag string, u
 	if err != nil {
 		return fmt.Errorf("error unmarshaling audit params: %v", err)
 	}
-	if params.OrderID.String() != oid {
+	if params.OrderID.String() != oid.String() {
 		return fmt.Errorf("%s : incorrect order ID in auditSwap, expected '%s', got '%s'", tag, oid, params.OrderID)
 	}
 	matchID := rig.matchInfo.matchID
-	if params.MatchID.String() != matchID {
+	if params.MatchID.String() != matchID.String() {
 		return fmt.Errorf("%s : incorrect match ID in auditSwap, expected '%s', got '%s'", tag, matchID, params.MatchID)
 	}
 	if params.Contract.String() != contract {
@@ -698,7 +698,7 @@ func (rig *testRig) redeem_taker(checkStatus bool) error {
 	return nil
 }
 
-func (rig *testRig) redeem(user *tUser, oid string) *tRedeem {
+func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
 	matchInfo := rig.matchInfo
 	redeem := tNewRedeem(matchInfo, oid, user)
 	if isQuoteSwap(user, matchInfo.match) {
@@ -746,7 +746,7 @@ func (rig *testRig) ackRedemption_maker(checkSig bool) error {
 	return nil
 }
 
-func (rig *testRig) ackRedemption(user *tUser, oid string, redeem *tRedeem) error {
+func (rig *testRig) ackRedemption(user *tUser, oid order.OrderID, redeem *tRedeem) error {
 	if redeem == nil {
 		return fmt.Errorf("nil redeem info")
 	}
@@ -762,17 +762,17 @@ func (rig *testRig) ackRedemption(user *tUser, oid string, redeem *tRedeem) erro
 	return nil
 }
 
-func (rig *testRig) checkRedeem(msg *msgjson.Message, oid string, coinID []byte, tag string) error {
+func (rig *testRig) checkRedeem(msg *msgjson.Message, oid order.OrderID, coinID []byte, tag string) error {
 	var params *msgjson.Redemption
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
 		return fmt.Errorf("error unmarshaling redeem params: %v", err)
 	}
-	if params.OrderID.String() != oid {
+	if params.OrderID.String() != oid.String() {
 		return fmt.Errorf("%s : incorrect order ID in checkRedeem, expected '%s', got '%s'", tag, oid, params.OrderID)
 	}
 	matchID := rig.matchInfo.matchID
-	if params.MatchID.String() != matchID {
+	if params.MatchID.String() != matchID.String() {
 		return fmt.Errorf("%s : incorrect match ID in checkRedeem, expected '%s', got '%s'", tag, matchID, params.MatchID)
 	}
 	if !bytes.Equal(params.CoinID, coinID) {
@@ -876,9 +876,9 @@ func tCancelPair() *tMatchSet {
 // with tMatchInfo.
 type tMatch struct {
 	match    *order.Match
-	matchID  string
-	makerOID string
-	takerOID string
+	matchID  order.MatchID
+	makerOID order.OrderID
+	takerOID order.OrderID
 	qty      uint64
 	rate     uint64
 	maker    *tUser
@@ -893,22 +893,22 @@ type tMatch struct {
 	}
 }
 
-func makeAck(id string, sig string) msgjson.Acknowledgement {
+func makeAck(mid order.MatchID, sig []byte) msgjson.Acknowledgement {
 	return msgjson.Acknowledgement{
-		MatchID: id,
+		MatchID: mid[:],
 		Sig:     sig,
 	}
 }
 
-func tAck(user *tUser, matchID string) []byte {
-	b, _ := json.Marshal(makeAck(matchID, user.sigHex))
+func tAck(user *tUser, matchID order.MatchID) []byte {
+	b, _ := json.Marshal(makeAck(matchID, user.sig))
 	return b
 }
 
-func tAckArr(user *tUser, matchIDs []string) []byte {
+func tAckArr(user *tUser, matchIDs []order.MatchID) []byte {
 	ackArr := make([]msgjson.Acknowledgement, 0, len(matchIDs))
 	for _, matchID := range matchIDs {
-		ackArr = append(ackArr, makeAck(matchID, user.sigHex))
+		ackArr = append(ackArr, makeAck(matchID, user.sig))
 	}
 	b, _ := json.Marshal(ackArr)
 	return b
@@ -921,16 +921,16 @@ func tMatchInfo(maker, taker *tUser, matchQty, matchRate uint64, makerOrder *ord
 		Quantity: matchQty,
 		Rate:     matchRate,
 	}
-	matchID := match.ID().String()
-	maker.matchIDs = append(maker.matchIDs, matchID)
-	taker.matchIDs = append(taker.matchIDs, matchID)
+	mid := match.ID()
+	maker.matchIDs = append(maker.matchIDs, mid)
+	taker.matchIDs = append(taker.matchIDs, mid)
 	return &tMatch{
 		match:    match,
 		qty:      matchQty,
 		rate:     matchRate,
-		matchID:  matchID,
-		makerOID: makerOrder.ID().String(),
-		takerOID: takerOrder.ID().String(),
+		matchID:  mid,
+		makerOID: makerOrder.ID(),
+		takerOID: takerOrder.ID(),
 		maker:    maker,
 		taker:    taker,
 	}
@@ -997,7 +997,7 @@ type tSwap struct {
 var tValSpoofer uint64 = 1
 var tRecipientSpoofer = ""
 
-func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
+func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUser) *tSwap {
 	auditVal := matchInfo.qty
 	if isQuoteSwap(user, matchInfo.match) {
 		auditVal = matcher.BaseToQuote(matchInfo.rate, matchInfo.qty)
@@ -1011,8 +1011,8 @@ func tNewSwap(matchInfo *tMatch, oid, recipient string, user *tUser) *tSwap {
 	}
 	contract := "01234567" + user.sigHex
 	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Init{
-		OrderID: dirtyEncode(oid),
-		MatchID: dirtyEncode(matchInfo.matchID),
+		OrderID: oid[:],
+		MatchID: matchInfo.matchID[:],
 		// We control what the backend returns, so the txid doesn't matter right now.
 		CoinID: coinID,
 		//Time:     encode.UnixMilliU(unixMsNow()),
@@ -1044,11 +1044,11 @@ type tRedeem struct {
 	coin *TCoin
 }
 
-func tNewRedeem(matchInfo *tMatch, oid string, user *tUser) *tRedeem {
+func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
 	coinID := randBytes(36)
 	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Redeem{
-		OrderID: dirtyEncode(oid),
-		MatchID: dirtyEncode(matchInfo.matchID),
+		OrderID: oid[:],
+		MatchID: matchInfo.matchID[:],
 		CoinID:  coinID,
 		//Time:    encode.UnixMilliU(unixMsNow()),
 	})
@@ -1356,7 +1356,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unmarshal error for %s at step %d: %s", user.lbl, i, string(req.req.Payload))
 		}
-		if params.MatchID.String() != rig.matchInfo.matchID {
+		if params.MatchID.String() != rig.matchInfo.matchID.String() {
 			t.Fatalf("unexpected revocation match ID for %s at step %d. expected %s, got %s",
 				user.lbl, i, rig.matchInfo.matchID, params.MatchID)
 		}
@@ -1580,24 +1580,13 @@ func TestBadParams(t *testing.T) {
 		isAudit: true,
 	}
 	checkParseErr := rpcErrorChecker(t, rig, msgjson.RPCParseError)
-	checkSigErr := rpcErrorChecker(t, rig, msgjson.SignatureError)
 	checkAckCountErr := rpcErrorChecker(t, rig, msgjson.AckCountError)
-	checkMismatchErr := rpcErrorChecker(t, rig, msgjson.IDMismatchError)
 
-	ack := &msgjson.Acknowledgement{
-		MatchID: matchInfo.matchID,
-		// non-hex characters
-		Sig: "zyxw",
-	}
 	ackArr := make([]*msgjson.Acknowledgement, 0)
 	matches := []*messageAcker{
 		{match: rig.getTracker()},
 	}
 
-	encodedAck := func() json.RawMessage {
-		b, _ := json.Marshal(ack)
-		return json.RawMessage(b)
-	}
 	encodedAckArray := func() json.RawMessage {
 		b, _ := json.Marshal(ackArr)
 		return json.RawMessage(b)
@@ -1611,26 +1600,9 @@ func TestBadParams(t *testing.T) {
 	swapper.processMatchAcks(user.acct, msg, []*messageAcker{})
 	checkParseErr(user)
 
-	msg, _ = msgjson.NewResponse(1, encodedAck(), nil)
-	swapper.processAck(msg, acker)
-	checkSigErr(user)
-
 	msg, _ = msgjson.NewResponse(1, encodedAckArray(), nil)
 	swapper.processMatchAcks(user.acct, msg, matches)
 	checkAckCountErr(user)
-
-	// check bad ack ID
-	ack.MatchID = "bogusid"
-	ackArr = append(ackArr, ack)
-	msg, _ = msgjson.NewResponse(1, encodedAckArray(), nil)
-	swapper.processMatchAcks(user.acct, msg, matches)
-	checkMismatchErr(user)
-
-	// Fix the ID, but check for a sig error
-	ack.MatchID = matchInfo.matchID
-	msg, _ = msgjson.NewResponse(1, encodedAckArray(), nil)
-	swapper.processMatchAcks(user.acct, msg, matches)
-	checkSigErr(user)
 }
 
 func TestCancel(t *testing.T) {
@@ -1655,10 +1627,10 @@ func TestCancel(t *testing.T) {
 		t.Fatalf("expected 2 match notification, got %d", len(matchNotes))
 	}
 	makerNote, takerNote := matchNotes[0], matchNotes[1]
-	if makerNote.OrderID.String() != matchInfo.makerOID {
+	if makerNote.OrderID.String() != matchInfo.makerOID.String() {
 		t.Fatalf("expected maker ID %s, got %s", matchInfo.makerOID, makerNote.OrderID)
 	}
-	if takerNote.OrderID.String() != matchInfo.takerOID {
+	if takerNote.OrderID.String() != matchInfo.takerOID.String() {
 		t.Fatalf("expected taker ID %s, got %s", matchInfo.takerOID, takerNote.OrderID)
 	}
 	if makerNote.MatchID.String() != takerNote.MatchID.String() {

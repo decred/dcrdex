@@ -11,6 +11,9 @@ var app
 const SUCCESS = 'success'
 const ERROR = 'error'
 const DCR_ID = 42
+const LIMIT = 1
+// const MARKET = 2
+// const CANCEL = 3
 
 const updateWalletRoute = 'update_wallet'
 const errorMsgRoute = 'error_message'
@@ -299,6 +302,7 @@ function handleLogin (main) {
     app.loaded()
     var res = await postJSON('/api/login', { pass: pw })
     if (!checkResponse(res)) return
+    await app.fetchUser()
     app.setLogged(true)
     app.loadPage('markets')
   })
@@ -454,6 +458,9 @@ function handleRegister (main) {
 
 // handleMarkets is the 'markets' page main element handler.
 async function handleMarkets (main, data) {
+
+  console.log("--user", app.user)
+
   var market
   const page = parsePage(main, [
     // Templates, loaders, chart div...
@@ -473,9 +480,11 @@ async function handleMarkets (main, data) {
     'vTotal', 'vQuote', 'vPass', 'vSubmit', 'verifyLimit', 'verifyMarket',
     'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore',
     // Create wallet form
-    'walletForm',
+    'walletForm', 'acctName',
     // Active orders
-    'liveTemplate', 'liveList'
+    'liveTemplate', 'liveList',
+    // Cancel order form
+    'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit'
   ])
 
   page.rowTemplate.remove()
@@ -695,6 +704,19 @@ async function handleMarkets (main, data) {
       set('rate', formatCoinValue(order.rate / 1e8))
       set('qty', formatCoinValue(order.qty / 1e8))
       set('filled', `${(order.filled / order.qty * 100).toFixed(1)}%`)
+      if (order.type === LIMIT) {
+        if (order.cancelling) {
+          set('cancel', 'cancelling')
+        } else {
+          const icon = row.querySelector('[data-col=cancel] > span')
+          Doc.show(icon)
+          Doc.bind(icon, 'click', e => {
+            console.log("--click event", e)
+            e.stopPropagation()
+            showCancel(icon, order)
+          })
+        }
+      }
       page.liveList.appendChild(row)
     }
   }
@@ -738,7 +760,7 @@ async function handleMarkets (main, data) {
   var currentForm
   const showForm = async form => {
     currentForm = form
-    Doc.hide(page.openForm, page.verifyForm, page.walletForm)
+    Doc.hide(page.openForm, page.verifyForm, page.walletForm, page.cancelForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -773,7 +795,7 @@ async function handleMarkets (main, data) {
       page.vBase.textContent = baseAsset.symbol.toUpperCase()
       page.vQuote.textContent = quoteAsset.symbol.toUpperCase()
       page.vSide.textContent = order.sell ? 'sell' : 'buy'
-      page.vTotal.textContent = formatCoinValue(order.rate * order.qty / 1e16)
+      page.vTotal.textContent = formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
     } else {
       Doc.hide(page.verifyLimit)
       Doc.show(page.verifyMarket)
@@ -796,11 +818,35 @@ async function handleMarkets (main, data) {
     showForm(page.verifyForm)
   }
 
+  const showCancel = (bttn, order) => {
+    const remaining = order.qty - order.filled
+    page.cancelRemain.textContent = formatCoinValue(remaining / 1e8)
+    const isMarketBuy = !order.isLimit && !order.sell
+    const symbol = isMarketBuy ? selected.quote.symbol : selected.base.symbol
+    page.cancelUnit.textContent = symbol.toUpperCase()
+    showForm(page.cancelForm)
+    Doc.bind(page.cancelSubmit, 'click', async () => {
+      const pw = page.cancelPass.value
+      page.cancelPass.value = ''
+      const req = {
+        orderID: order.id,
+        pw: pw
+      }
+      var res = await postJSON('/api/cancel', req)
+      app.loaded()
+      Doc.hide(page.forms)
+      if (!checkResponse(res)) return
+      bttn.parentNode.textContent = 'cancelling'
+      order.cancelling = true
+    })
+  }
+
   var currentCreate
   const showCreate = asset => {
     currentCreate = asset
     page.walletForm.setAsset(asset)
     showForm(page.walletForm)
+    page.acctName.focus()
   }
 
   const stepSubmit = () => {

@@ -848,7 +848,7 @@ func TestCancel(t *testing.T) {
 			AccountID:  user.acct,
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,
-			OrderType:  order.MarketOrderType,
+			OrderType:  order.CancelOrderType,
 			ClientTime: clientTime,
 			Commit:     commit,
 		},

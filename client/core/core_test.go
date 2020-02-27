@@ -23,7 +23,6 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
-	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/slog"
@@ -749,7 +748,7 @@ func TestRegister(t *testing.T) {
 			sigMsg, _ := req.Serialize()
 			sig, _ := tDexPriv.Sign(sigMsg)
 			// Shouldn't Sig be dex.Bytes?
-			result := &msgjson.Acknowledgement{Sig: hex.EncodeToString(sig.Serialize())}
+			result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
 			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 			f(resp)
 			return nil
@@ -1203,30 +1202,6 @@ func TestTrade(t *testing.T) {
 	badSig := false
 	noID := false
 	badID := false
-	orderResponse := func(msgID uint64, msgPrefix msgjson.Stampable, ord order.Order) *msgjson.Message {
-		orderTime := time.Now()
-		timeStamp := encode.UnixMilliU(orderTime)
-		msgPrefix.Stamp(timeStamp)
-		sign(tDexPriv, msgPrefix)
-		if badSig {
-			msgPrefix.SetSig(encode.RandomBytes(5))
-		}
-		ord.SetTime(orderTime)
-		oid := ord.ID()
-		oidB := oid[:]
-		if noID {
-			oidB = nil
-		} else if badID {
-			oidB = encode.RandomBytes(32)
-		}
-		resp, _ := msgjson.NewResponse(msgID, &msgjson.OrderResult{
-			Sig:        msgPrefix.SigBytes(),
-			OrderID:    oidB,
-			ServerTime: timeStamp,
-		}, nil)
-		return resp
-	}
-
 	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
 		// Need to stamp and sign the message with the server's key.
 		msgOrder := new(msgjson.LimitOrder)
@@ -1235,7 +1210,7 @@ func TestTrade(t *testing.T) {
 			t.Fatalf("unmarshal error: %v", err)
 		}
 		lo := convertMsgLimitOrder(msgOrder)
-		f(orderResponse(msg.ID, msgOrder, lo))
+		f(orderResponse(msg.ID, msgOrder, lo, badSig, noID, badID))
 		return nil
 	}
 
@@ -1247,7 +1222,7 @@ func TestTrade(t *testing.T) {
 			t.Fatalf("unmarshal error: %v", err)
 		}
 		mo := convertMsgMarketOrder(msgOrder)
-		f(orderResponse(msg.ID, msgOrder, mo))
+		f(orderResponse(msg.ID, msgOrder, mo, badSig, noID, badID))
 		return nil
 	}
 
@@ -1293,22 +1268,10 @@ func TestTrade(t *testing.T) {
 	ensureErr("no dcr wallet")
 	tCore.wallets[tDCR.ID] = dcrWallet
 
-	// From wallet locked
-	ogTime := dcrWallet.lockTime
-	dcrWallet.lockTime = time.Time{}
-	ensureErr("dcr wallet locked")
-	dcrWallet.lockTime = ogTime
-
 	// No to wallet
 	delete(tCore.wallets, tBTC.ID)
 	ensureErr("no btc wallet")
 	tCore.wallets[tBTC.ID] = btcWallet
-
-	// To wallet locked
-	ogTime = btcWallet.lockTime
-	btcWallet.lockTime = time.Time{}
-	ensureErr("btc wallet locked")
-	btcWallet.lockTime = ogTime
 
 	// Address error
 	tBtcWallet.addrErr = tErr
@@ -1369,19 +1332,92 @@ func TestTrade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("market order error: %v", err)
 	}
+}
+
+func TestCancel(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+	preImg := newPreimage()
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			OrderType:  order.LimitOrderType,
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			ClientTime: time.Now(),
+			ServerTime: time.Now(),
+			Commit:     preImg.Commit(),
+		},
+	}
+	oid := lo.ID()
+	tracker := newTrackedTrade(lo, dc, preImg)
+	dc.trades[oid] = tracker
+
+	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
+		// Need to stamp and sign the message with the server's key.
+		msgOrder := new(msgjson.CancelOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		co := convertMsgCancelOrder(msgOrder)
+		f(orderResponse(msg.ID, msgOrder, co, false, false, false))
+		return nil
+	}
+
+	sid := oid.String()
+	rig.ws.queueResponse(msgjson.CancelRoute, handleCancel)
+	err := rig.core.Cancel(tPW, sid)
+	if err != nil {
+		t.Fatalf("cancel error: %v", err)
+	}
+	if tracker.cancelOrder == nil {
+		t.Fatalf("cancel order not found")
+	}
+	// remove the cancel order so we can check its nilness on error.
+	tracker.cancelOrder = nil
+
+	ensureErr := func(tag string) {
+		err := rig.core.Cancel(tPW, sid)
+		if err == nil {
+			t.Fatalf("%s: no error", tag)
+		}
+		if tracker.cancelOrder != nil {
+			t.Fatalf("%s: cancel order found", tag)
+		}
+	}
+
+	// Bad order ID
+	ogID := sid
+	sid = "badid"
+	ensureErr("bad id")
+	sid = ogID
+
+	// Order not found
+	delete(dc.trades, oid)
+	ensureErr("no order")
+	dc.trades[oid] = tracker
+
+	// Send error
+	rig.ws.reqErr = tErr
+	ensureErr("Request error")
+	rig.ws.reqErr = nil
 
 }
 
 func TestHandlePreimg(t *testing.T) {
 	rig := newTestRig()
-	oid := ordertest.RandomOrderID()
+	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+	oid := ord.ID()
+	preImg := newPreimage()
 	payload := &msgjson.PreimageRequest{
 		OrderID: oid[:],
 	}
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
-	var preImg order.Preimage
-	copy(preImg[:], encode.RandomBytes(32))
-	tracker := &trackedTrade{preImg: preImg}
+
+	tracker := &trackedTrade{
+		Order:  ord,
+		preImg: preImg,
+	}
 	rig.dc.trades[oid] = tracker
 	err := handlePreimageRequest(rig.core, rig.dc, req)
 	if err != nil {
@@ -1404,6 +1440,80 @@ func TestHandlePreimg(t *testing.T) {
 	rig.ws.sendErr = nil
 }
 
+func TestTradeTracking(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+	qty := tDCR.LotSize * 5
+	rate := tBTC.RateStep * 10
+	preImgL := newPreimage()
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			AccountID:  dc.acct.ID(),
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			OrderType:  order.MarketOrderType,
+			ClientTime: time.Now(),
+			ServerTime: time.Now().Add(time.Millisecond),
+			Commit:     preImgL.Commit(),
+		},
+		T: order.Trade{
+			Sell:     true,
+			Quantity: qty,
+			Address:  "testaddr",
+		},
+		Rate: tBTC.RateStep,
+	}
+	loid := lo.ID()
+	var mid order.MatchID
+	copy(mid[:], encode.RandomBytes(32))
+	tracker := newTrackedTrade(lo, dc, preImgL)
+	rig.dc.trades[tracker.ID()] = tracker
+	preImgC := newPreimage()
+	co := &order.CancelOrder{
+		P: order.Prefix{
+			AccountID:  dc.acct.ID(),
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			OrderType:  order.MarketOrderType,
+			ClientTime: time.Now(),
+			ServerTime: time.Now().Add(time.Millisecond),
+			Commit:     preImgC.Commit(),
+		},
+	}
+	tracker.cancelOrder = co
+	coid := co.ID()
+	msgMatches := []*msgjson.Match{
+		{
+			OrderID:  loid[:],
+			MatchID:  mid[:],
+			Quantity: qty,
+			Rate:     rate,
+			Address:  "",
+		},
+		{
+			OrderID:  coid[:],
+			MatchID:  mid[:],
+			Quantity: qty,
+			Rate:     rate,
+			Address:  "testaddr",
+		},
+	}
+	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, msgMatches)
+	err := handleMatchRoute(rig.core, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("match messages error: %v", err)
+	}
+	if tracker.cancelMatches.maker == nil {
+		t.Fatalf("cancelMatches.maker not set")
+	}
+	if tracker.Trade().Filled != qty {
+		t.Fatalf("fill not set")
+	}
+	if tracker.cancelMatches.taker == nil {
+		t.Fatalf("cancelMatches.taker not set")
+	}
+}
+
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {
 	tif := order.ImmediateTiF
 	if msgOrder.TiF == msgjson.StandingOrderNum {
@@ -1421,6 +1531,15 @@ func convertMsgMarketOrder(msgOrder *msgjson.MarketOrder) *order.MarketOrder {
 	return &order.MarketOrder{
 		P: convertMsgPrefix(&msgOrder.Prefix, order.MarketOrderType),
 		T: convertMsgTrade(&msgOrder.Trade),
+	}
+}
+
+func convertMsgCancelOrder(msgOrder *msgjson.CancelOrder) *order.CancelOrder {
+	var oid order.OrderID
+	copy(oid[:], msgOrder.TargetID)
+	return &order.CancelOrder{
+		P:             convertMsgPrefix(&msgOrder.Prefix, order.CancelOrderType),
+		TargetOrderID: oid,
 	}
 }
 
@@ -1456,4 +1575,28 @@ func convertMsgTrade(msgTrade *msgjson.Trade) order.Trade {
 		Quantity: msgTrade.Quantity,
 		Address:  msgTrade.Address,
 	}
+}
+
+func orderResponse(msgID uint64, msgPrefix msgjson.Stampable, ord order.Order, badSig, noID, badID bool) *msgjson.Message {
+	orderTime := time.Now()
+	timeStamp := encode.UnixMilliU(orderTime)
+	msgPrefix.Stamp(timeStamp)
+	sign(tDexPriv, msgPrefix)
+	if badSig {
+		msgPrefix.SetSig(encode.RandomBytes(5))
+	}
+	ord.SetTime(orderTime)
+	oid := ord.ID()
+	oidB := oid[:]
+	if noID {
+		oidB = nil
+	} else if badID {
+		oidB = encode.RandomBytes(32)
+	}
+	resp, _ := msgjson.NewResponse(msgID, &msgjson.OrderResult{
+		Sig:        msgPrefix.SigBytes(),
+		OrderID:    oidB,
+		ServerTime: timeStamp,
+	}, nil)
+	return resp
 }

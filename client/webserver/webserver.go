@@ -73,6 +73,7 @@ type clientCore interface {
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error)
 	Trade(pw string, form *core.TradeForm) (*core.Order, error)
+	Cancel(pw string, sid string) error
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -229,6 +230,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Get("/user", s.apiUser)
 		r.Post("/connectwallet", s.apiConnect)
 		r.Post("/trade", s.apiTrade)
+		r.Post("/cancel", s.apiCancel)
 	})
 	// Files
 	fileServer(mux, "/js", fp(root, "dist"))

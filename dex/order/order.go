@@ -29,6 +29,20 @@ const OrderIDSize = hashSize
 // Blake256 hash of the serialized order.
 type OrderID hash
 
+// IDFromHex decodes an OrderID from a hexadecimal string.
+func IDFromHex(sid string) (OrderID, error) {
+	if len(sid) != OrderIDSize*2 {
+		return OrderID{}, fmt.Errorf("invalid order ID. wrong length %d", len(sid))
+	}
+	oidB, err := hex.DecodeString(sid)
+	if err != nil {
+		return OrderID{}, fmt.Errorf("order ID decode error: %v", err)
+	}
+	var oid OrderID
+	copy(oid[:], oidB)
+	return oid, nil
+}
+
 // String returns a hexadecimal representation of the OrderID. String implements
 // fmt.Stringer.
 func (oid OrderID) String() string {

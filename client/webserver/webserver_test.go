@@ -120,6 +120,8 @@ func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
 	}, nil
 }
 
+func (c *TCore) Cancel(pw string, sid string) error { return nil }
+
 type TWriter struct {
 	b []byte
 }

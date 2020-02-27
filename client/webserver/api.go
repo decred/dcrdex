@@ -225,6 +225,25 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
+type cancelForm struct {
+	Pass    string `json:"pw"`
+	OrderID string `json:"orderID"`
+}
+
+// apiCancel is the handler for the '/cancel' API request.
+func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
+	form := new(cancelForm)
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.Cancel(form.Pass, form.OrderID)
+	if err != nil {
+		s.writeAPIError(w, "error cancelling order %s: %v", form.OrderID, err)
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiCloseWallet is the handler for the '/closewallet' API request.
 func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 	form := &struct {

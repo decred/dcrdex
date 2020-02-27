@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -165,14 +166,16 @@ type Match struct {
 }
 
 type Order struct {
-	Type     order.OrderType `json:"type"`
-	Stamp    uint64          `json:"stamp"`
-	TargetID string          `json:"targetID,omitempty"`
-	Rate     uint64          `json:"rate"`
-	Qty      uint64          `json:"qty"`
-	Sell     bool            `json:"sell"`
-	Filled   uint64          `json:"filled"`
-	Matches  []*Match        `json:"matches"`
+	Type       order.OrderType `json:"type"`
+	ID         string          `json:"id"`
+	Stamp      uint64          `json:"stamp"`
+	TargetID   string          `json:"targetID,omitempty"`
+	Rate       uint64          `json:"rate"`
+	Qty        uint64          `json:"qty"`
+	Sell       bool            `json:"sell"`
+	Filled     uint64          `json:"filled"`
+	Matches    []*Match        `json:"matches"`
+	Cancelling bool            `json:"cancelling"`
 }
 
 // Market is market info.
@@ -401,31 +404,6 @@ type matchNegotiator struct {
 	update chan *MatchUpdate
 }
 
-// negotiate creates a matchNegotiator and starts the negotiation thread.
-func negotiate(ctx context.Context, msgMatch *msgjson.Match, ord order.Order) (*matchNegotiator, error) {
-	if len(msgMatch.MatchID) != order.MatchIDSize {
-		return nil, fmt.Errorf("match id of incorrect length. expected %d, got %d",
-			order.MatchIDSize, len(msgMatch.MatchID))
-	}
-	var mid order.MatchID
-	copy(mid[:], msgMatch.MatchID)
-	n := &matchNegotiator{
-		UserMatch: order.UserMatch{
-			OrderID:  ord.ID(),
-			MatchID:  mid,
-			Quantity: msgMatch.Quantity,
-			Rate:     msgMatch.Rate,
-			Address:  msgMatch.Address,
-			Status:   order.MatchStatus(msgMatch.Status),
-			Side:     order.MatchSide(msgMatch.Side),
-		},
-		update: make(chan *MatchUpdate, 1),
-		trade:  ord,
-	}
-	go n.runMatch(ctx)
-	return n, nil
-}
-
 // Feed returns the MatchUpdate channel. Part of the Negotiator interface.
 func (m *matchNegotiator) Feed() <-chan *MatchUpdate {
 	return m.update
@@ -458,18 +436,26 @@ type TradeForm struct {
 type trackedTrade struct {
 	// mtx   sync.RWMutex
 	order.Order
-	preImg      order.Preimage
-	sid         string
-	cancel      *order.CancelOrder
+	dc            *dexConnection
+	preImg        order.Preimage
+	sid           string
+	cancelOrder   *order.CancelOrder
+	cancelPreImg  order.Preimage
+	cancelMatches struct {
+		maker *msgjson.Match
+		taker *msgjson.Match
+	}
 	negotiators map[order.MatchID]*matchNegotiator
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
-func newTrackedTrade(trade order.Order, preImg order.Preimage) *trackedTrade {
+func newTrackedTrade(trade order.Order, dc *dexConnection, preImg order.Preimage) *trackedTrade {
 	return &trackedTrade{
-		Order:  trade,
-		preImg: preImg,
-		sid:    sid(trade.Base(), trade.Quote()),
+		Order:       trade,
+		dc:          dc,
+		preImg:      preImg,
+		sid:         sid(trade.Base(), trade.Quote()),
+		negotiators: make(map[order.MatchID]*matchNegotiator),
 	}
 }
 
@@ -485,12 +471,14 @@ func (t *trackedTrade) rate() uint64 {
 func (t *trackedTrade) coreOrder() (*Order, *Order) {
 	prefix, trade := t.Prefix(), t.Trade()
 	coreOrder := &Order{
-		Type:   prefix.OrderType,
-		Stamp:  encode.UnixMilliU(prefix.ServerTime),
-		Rate:   t.rate(),
-		Qty:    trade.Quantity,
-		Sell:   trade.Sell,
-		Filled: trade.Filled,
+		Type:       prefix.OrderType,
+		ID:         t.ID().String(),
+		Stamp:      encode.UnixMilliU(prefix.ServerTime),
+		Rate:       t.rate(),
+		Qty:        trade.Quantity,
+		Sell:       trade.Sell,
+		Filled:     trade.Filled,
+		Cancelling: t.cancelOrder != nil,
 	}
 	for _, n := range t.negotiators {
 		coreOrder.Matches = append(coreOrder.Matches, &Match{
@@ -501,14 +489,74 @@ func (t *trackedTrade) coreOrder() (*Order, *Order) {
 		})
 	}
 	var cancelOrder *Order
-	if t.cancel != nil {
+	if t.cancelOrder != nil {
 		cancelOrder = &Order{
 			Type:     order.CancelOrderType,
-			Stamp:    encode.UnixMilliU(t.cancel.ServerTime),
-			TargetID: t.cancel.TargetOrderID.String(),
+			Stamp:    encode.UnixMilliU(t.cancelOrder.ServerTime),
+			TargetID: t.cancelOrder.TargetOrderID.String(),
 		}
 	}
 	return coreOrder, cancelOrder
+}
+
+// negotiate creates a matchNegotiator and starts the negotiation thread.
+func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) error {
+	if len(msgMatch.MatchID) != order.MatchIDSize {
+		return fmt.Errorf("match id of incorrect length. expected %d, got %d",
+			order.MatchIDSize, len(msgMatch.MatchID))
+	}
+	var mid order.MatchID
+	copy(mid[:], msgMatch.MatchID)
+	var oid order.OrderID
+	copy(oid[:], msgMatch.OrderID)
+	if oid != t.ID() {
+		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.ID())
+	}
+	// First check that this isn't a match on a cancel order. I'm not crazy about
+	// this, but I am detecting this case right now based on the Address field
+	// being an empty string.
+	n := &matchNegotiator{
+		UserMatch: order.UserMatch{
+			OrderID:  oid,
+			MatchID:  mid,
+			Quantity: msgMatch.Quantity,
+			Rate:     msgMatch.Rate,
+			Address:  msgMatch.Address,
+			Status:   order.MatchStatus(msgMatch.Status),
+			Side:     order.MatchSide(msgMatch.Side),
+		},
+		update: make(chan *MatchUpdate, 1),
+		trade:  t.Order,
+	}
+	isCancel := t.cancelOrder != nil && msgMatch.Address == ""
+	if isCancel {
+		t.cancelMatches.maker = msgMatch
+	} else {
+		go n.runMatch(ctx)
+	}
+	t.negotiators[n.MatchID] = n
+	isMarketBuy := t.Type() == order.MarketOrderType && !t.Trade().Sell
+	var filled uint64
+	for _, n := range t.negotiators {
+		if isMarketBuy {
+			filled += calc.BaseToQuote(n.Rate, n.Quantity)
+		} else {
+			filled += n.Quantity
+		}
+	}
+	t.Trade().Filled = filled
+	return nil
+}
+
+func (t *trackedTrade) cancel(msgMatch *msgjson.Match) error {
+	var oid order.OrderID
+	copy(oid[:], msgMatch.OrderID)
+	if oid != t.cancelOrder.ID() {
+		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.cancelOrder.ID())
+	}
+	log.Infof("maker notification for cancel order detected for order %s. match id = %s", oid, msgMatch.MatchID)
+	t.cancelMatches.taker = msgMatch
+	return nil
 }
 
 // sid is a string ID constructed from the asset IDs.

@@ -225,7 +225,7 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	// putting it on the queue.
 	if err := m.validateOrder(rec.order); err != nil {
 		// Order ID may not be computed since ServerTime has not been set.
-		log.Debugf("SubmitOrderAsync: Invalid order received: %x", rec.order.Serialize())
+		log.Debugf("SubmitOrderAsync: Invalid order received: %x: %v", rec.order.Serialize(), err)
 		errChan := make(chan error, 1)
 		errChan <- err // i.e. ErrInvalidOrder, ErrInvalidCommitment
 		return errChan

@@ -50,8 +50,11 @@ type dexConnection struct {
 	books      map[string]*book.OrderBook
 	marketMtx  sync.RWMutex
 	marketMap  map[string]*Market
-	tradeMtx   sync.RWMutex
-	trades     map[order.OrderID]*trackedTrade
+	// tradeMtx is used to synchronize access to the trades field and the
+	// trackers' fields. trackedTrade does not itself attempt to protect against
+	// concurrent access to its fields... for now.
+	tradeMtx sync.RWMutex
+	trades   map[order.OrderID]*trackedTrade
 }
 
 // refreshMarkets rebuilds, saves, and returns the market map. The map itself
@@ -79,9 +82,6 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 			if trade.sid == mid {
 				coreOrder, _ := trade.coreOrder()
 				market.Orders = append(market.Orders, coreOrder)
-				// if cancelOrder != nil {
-				// 	market.Orders = append(market.Orders, cancelOrder)
-				// }
 			}
 		}
 		dc.tradeMtx.RUnlock()
@@ -111,6 +111,21 @@ func (dc *dexConnection) hasOrders(assetID uint32) bool {
 		}
 	}
 	return false
+}
+
+// findOrder returns the tracker and preimage for an order ID, and a boolean
+// indicating whether this is a cancel order.
+func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, commit order.Preimage, isCancel bool) {
+	dc.tradeMtx.RLock()
+	defer dc.tradeMtx.RUnlock()
+	for _, tracker := range dc.trades {
+		if tracker.ID() == oid {
+			return tracker, tracker.preImg, false
+		} else if tracker.cancelOrder != nil && tracker.cancelOrder.ID() == oid {
+			return tracker, tracker.cancelPreImg, true
+		}
+	}
+	return nil, order.Preimage{}, false
 }
 
 // coinWaiter is a message waiting to be stamped, signed, and sent once a
@@ -774,6 +789,7 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 	if len(errs) > 0 {
 		err = fmt.Errorf("authorization errors: %s", strings.Join(errs, ", "))
 	}
+	c.refreshUser()
 	return negotiations, err
 }
 
@@ -801,7 +817,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	// We'll need this to validate the server's acknowledgement.
 	reqB, err := req.Serialize()
 	if err != nil {
-		log.Warnf("fee paid with coin %x, but unable to serialize notifyfee request so server signature cannot be verified")
+		log.Warnf("fee paid with coin %x, but unable to serialize notifyfee request so server signature cannot be verified", coinID)
 		// Don't quit. The fee is already paid, so follow through if possible.
 	}
 	// Sign the request and send it.
@@ -824,17 +840,10 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		}
 		// If there was a serialization error, validation is skipped. A warning
 		// message was already logged.
-		sig := []byte{}
 		if len(reqB) > 0 {
 			// redefining err here, since these errors won't be sent over the
 			// response channel.
-			var err error
-			sig, err = hex.DecodeString(ack.Sig)
-			if err != nil {
-				log.Warnf("account was registered, but server's signature could not be decoded: %v", err)
-				return
-			}
-			err = dc.acct.checkSig(reqB, sig)
+			err := dc.acct.checkSig(reqB, ack.Sig)
 			if err != nil {
 				log.Warnf("account was registered, but DEX signature could not be verified: %v", err)
 			}
@@ -844,7 +853,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		errChan <- c.db.AccountPaid(&db.AccountProof{
 			URL:   dc.acct.url,
 			Stamp: req.Time,
-			Sig:   sig,
+			Sig:   ack.Sig,
 		})
 	})
 	if err != nil {
@@ -873,10 +882,6 @@ func (c *Core) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, er
 // Trade is used to place a market or limit order.
 func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	// Check the user password.
-	//
-	// DRAFT NOTE: Right now, wallets must be unlocked prior to placing an order.
-	// We should probably make that optional, since the app password is used for
-	// unlocking wallets now, so the wallets can be unlocked here instead.
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("Trade password error: %v", err)
@@ -994,23 +999,10 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 
 	// Everything is ready. Send the order.
 	route, msgOrder := messageOrder(ord, msgCoins)
-	err = sign(dc.acct.privKey, msgOrder)
-	if err != nil {
-		return nil, fmt.Errorf("error signing order message: %v", err)
-	}
-	req, err := msgjson.NewRequest(dc.NextID(), route, msgOrder)
-	if err != nil {
-		return nil, fmt.Errorf("error encoding 'connect' request: %v", err)
-	}
-	errChan := make(chan error, 1)
+
+	// Send and get the result.
 	var result = new(msgjson.OrderResult)
-	err = dc.Request(req, func(msg *msgjson.Message) {
-		errChan <- msg.UnmarshalResult(result)
-	})
-	if err != nil {
-		return nil, err
-	}
-	err = extractError(errChan, requestTimeout, route)
+	err = c.signAndRequest(msgOrder, dc, route, result)
 	if err != nil {
 		return nil, err
 	}
@@ -1024,31 +1016,11 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 			preImg[:], result.ServerTime, err)
 	}
 
-	// Order accepted. Check the server's signature
-	msgOrder.Stamp(result.ServerTime)
-	msg, err := msgOrder.Serialize()
+	err = validateOrderResponse(dc, result, ord, msgOrder)
 	if err != nil {
-		logAbandon(err)
-		return nil, fmt.Errorf("serialization error. order abandoned. see logs")
-	}
-	err = dc.acct.checkSig(msg, result.Sig)
-	if err != nil {
-		logAbandon(fmt.Sprintf(", message: %x, signature: %s, error: %v", msg, result.Sig, err))
-		return nil, fmt.Errorf("signature error. order abandoned. see logs")
-	}
-
-	// Check the order ID.
-	ord.SetTime(encode.UnixTimeMilli(int64(result.ServerTime)))
-	if len(result.OrderID) != order.OrderIDSize {
-		logAbandon(fmt.Sprintf("incorrect order ID length %d", len(result.OrderID)))
-		return nil, fmt.Errorf("failed ID length check. order abandoned. see logs")
-	}
-	var checkID order.OrderID
-	copy(checkID[:], result.OrderID)
-	oid := ord.ID()
-	if oid != checkID {
-		logAbandon(fmt.Sprintf("failed ID check. %x != %x", oid, checkID))
-		return nil, fmt.Errorf("failed ID match. order abandoned. see logs")
+		log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
+			preImg[:], result.ServerTime, err)
+		return nil, err
 	}
 
 	// Store the order.
@@ -1065,14 +1037,14 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	})
 	if err != nil {
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
-		return nil, fmt.Errorf("Database error. order abandoned. see logs")
+		return nil, fmt.Errorf("Database error. order abandoned")
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(ord, preImg)
+	tracker := newTrackedTrade(ord, dc, preImg)
 	coreOrder, _ := tracker.coreOrder()
 	dc.tradeMtx.Lock()
-	dc.trades[oid] = tracker
+	dc.trades[tracker.ID()] = tracker
 	dc.tradeMtx.Unlock()
 
 	// Refresh the markets and user.
@@ -1080,6 +1052,125 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	c.refreshUser()
 
 	return coreOrder, nil
+}
+
+// Cancel is used to send a cancel order which cancels a limit order.
+func (c *Core) Cancel(pw string, sid string) error {
+	// Check the user password.
+	_, err := c.encryptionKey(pw)
+	if err != nil {
+		return fmt.Errorf("Trade password error: %v", err)
+	}
+
+	// Find the order. Make sure it's a limit order.
+	oid, err := order.IDFromHex(sid)
+	if err != nil {
+		return err
+	}
+	dc, tracker, _ := c.findDEXOrder(oid)
+	if tracker == nil {
+		return fmt.Errorf("active order %s not found. cannot cancel", sid)
+	}
+	if tracker.Type() != order.LimitOrderType {
+		return fmt.Errorf("cannot cancel non-limit order %s of type %s", sid, tracker.Type())
+	}
+
+	// Construct the order.
+	prefix := tracker.Prefix()
+	preImg := newPreimage()
+	co := &order.CancelOrder{
+		P: order.Prefix{
+			AccountID:  prefix.AccountID,
+			BaseAsset:  prefix.BaseAsset,
+			QuoteAsset: prefix.QuoteAsset,
+			OrderType:  order.CancelOrderType,
+			ClientTime: time.Now(),
+			Commit:     preImg.Commit(),
+		},
+		TargetOrderID: oid,
+	}
+	err = order.ValidateOrder(co, order.OrderStatusEpoch, 0)
+	if err != nil {
+		return err
+	}
+
+	// Create and send the order message. Check the response before using it.
+	route, msgOrder := messageOrder(co, nil)
+	var result = new(msgjson.OrderResult)
+	err = c.signAndRequest(msgOrder, tracker.dc, route, result)
+	if err != nil {
+		return err
+	}
+	err = validateOrderResponse(dc, result, co, msgOrder)
+	if err != nil {
+		log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
+			preImg[:], result.ServerTime, err)
+		return err
+	}
+
+	// Store the order.
+	err = c.db.UpdateOrder(&db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusEpoch,
+			DEX:    dc.acct.url,
+			Proof: db.OrderProof{
+				DEXSig:   result.Sig,
+				Preimage: preImg[:],
+			},
+		},
+		Order: co,
+	})
+	if err != nil {
+		log.Errorf("failed to store order in database: %v", err)
+		return fmt.Errorf("Database error. order abandoned")
+	}
+
+	// Store the cancel order with the tracker.
+	dc.tradeMtx.Lock()
+	tracker.cancelOrder = co
+	tracker.cancelPreImg = preImg
+	dc.tradeMtx.Unlock()
+
+	return nil
+}
+
+// findDEXOrder finds the dexConnection and order for the order ID. A boolean is
+// returned indicating whether this is the cancel order for the trade.
+func (c *Core) findDEXOrder(oid order.OrderID) (*dexConnection, *trackedTrade, bool) {
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	for _, dc := range c.conns {
+		tracker, _, isCancel := dc.findOrder(oid)
+		if tracker != nil {
+			return dc, tracker, isCancel
+		}
+	}
+	return nil, nil, false
+}
+
+// signAndRequest signs and sends the request, unmarshaling the response into
+// the provided interface.
+func (c *Core) signAndRequest(signable msgjson.Signable, dc *dexConnection, route string, result interface{}) error {
+	err := sign(dc.acct.privKey, signable)
+	if err != nil {
+		return fmt.Errorf("error signing %s message: %v", route, err)
+	}
+	req, err := msgjson.NewRequest(dc.NextID(), route, signable)
+	if err != nil {
+		return fmt.Errorf("error encoding %s request: %v", route, err)
+	}
+	errChan := make(chan error, 1)
+	err = dc.Request(req, func(msg *msgjson.Message) {
+		errChan <- msg.UnmarshalResult(result)
+	})
+	if err != nil {
+		return err
+	}
+	err = extractError(errChan, requestTimeout, route)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // authDEX authenticates the connection for a DEX.
@@ -1135,12 +1226,11 @@ func (c *Core) authDEX(dc *dexConnection) ([]Negotiation, error) {
 			errs = append(errs, "order "+msgMatch.OrderID.String()+" does not have a matching active order")
 			continue
 		}
-		negotiator, err := negotiate(c.ctx, msgMatch, tracker)
+		err := tracker.negotiate(c.ctx, msgMatch)
 		if err != nil {
 			errs = append(errs, err.Error())
 			continue
 		}
-		tracker.negotiators[negotiator.MatchID] = negotiator
 	}
 	if len(errs) > 0 {
 		err = fmt.Errorf("errors beginning match negotiations: %s", strings.Join(errs, ", "))
@@ -1332,11 +1422,11 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 }
 
 // Prepare trackers based on orders stored as active in the database.
-func (c *Core) dbTrackers(dex string) (map[order.OrderID]*trackedTrade, error) {
+func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, error) {
 	// Prepare active orders, according to the DB.
-	dbOrders, err := c.db.ActiveDEXOrders(dex)
+	dbOrders, err := c.db.ActiveDEXOrders(dc.acct.url)
 	if err != nil {
-		return nil, fmt.Errorf("database error when fetching orders for %s: %x", dex, err)
+		return nil, fmt.Errorf("database error when fetching orders for %s: %x", dc.acct.url, err)
 	}
 	cancels := make(map[order.OrderID]*order.CancelOrder)
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
@@ -1347,7 +1437,7 @@ func (c *Core) dbTrackers(dex string) (map[order.OrderID]*trackedTrade, error) {
 			proof := dbOrder.MetaData.Proof
 			var preImg order.Preimage
 			copy(preImg[:], proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder.Order, preImg)
+			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder.Order, dc, preImg)
 		}
 	}
 	for oid := range cancels {
@@ -1356,7 +1446,7 @@ func (c *Core) dbTrackers(dex string) (map[order.OrderID]*trackedTrade, error) {
 			log.Errorf("unmatched active cancel order: %s", oid)
 			continue
 		}
-		tracker.cancel = cancels[oid]
+		tracker.cancelOrder = cancels[oid]
 	}
 	return trackers, nil
 }
@@ -1364,10 +1454,6 @@ func (c *Core) dbTrackers(dex string) (map[order.OrderID]*trackedTrade, error) {
 // connectDEX creates and connects a *dexConnection, but does not authenticate the
 // connection through the 'connect' route.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
-	trackers, err := c.dbTrackers(acctInfo.URL)
-	if err != nil {
-		return nil, err
-	}
 	// Get the host from the DEX URL.
 	uri := acctInfo.URL
 	parsedURL, err := url.Parse(uri)
@@ -1459,7 +1545,11 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 			books:      make(map[string]*book.OrderBook),
 			acct:       newDEXAccount(acctInfo),
 			marketMap:  marketMap,
-			trades:     trackers,
+		}
+		dc.trades, reqErr = c.dbTrackers(dc)
+		if reqErr != nil {
+			connChan <- nil
+			return
 		}
 		dc.refreshMarkets()
 		connChan <- dc
@@ -1467,6 +1557,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		// Listen for incoming messages.
 		log.Infof("Connected to DEX %s and listening for messages.", uri)
 		go c.listen(dc)
+
 	})
 	if err != nil {
 		log.Errorf("error sending 'config' request: %v", err)
@@ -1574,7 +1665,7 @@ type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 var reqHandlers = map[string]routeHandler{
 	msgjson.MatchProofRoute:  nil,
 	msgjson.PreimageRoute:    handlePreimageRequest,
-	msgjson.MatchRoute:       nil,
+	msgjson.MatchRoute:       handleMatchRoute,
 	msgjson.AuditRoute:       nil,
 	msgjson.RedemptionRoute:  nil,
 	msgjson.RevokeMatchRoute: nil,
@@ -1646,16 +1737,15 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return fmt.Errorf("preimage request parsing error: %v", err)
 	}
+
 	var oid order.OrderID
 	copy(oid[:], req.OrderID)
-	dc.tradeMtx.Lock()
-	defer dc.tradeMtx.Unlock()
-	tracker, found := dc.trades[oid]
-	if !found {
-		return fmt.Errorf("no active trade found for %s", oid)
+	tracker, preImg, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return fmt.Errorf("no active order found for preimage request for %s", oid)
 	}
 	resp, err := msgjson.NewResponse(msg.ID, &msgjson.PreimageResponse{
-		Preimage: tracker.preImg[:],
+		Preimage: preImg[:],
 	}, nil)
 	if err != nil {
 		return fmt.Errorf("preimage response encoding error: %v", err)
@@ -1663,6 +1753,71 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	err = dc.Send(resp)
 	if err != nil {
 		return fmt.Errorf("preimage send error: %v", err)
+	}
+	return nil
+}
+
+// handleMatchRoute processes the DEX-originating match route request,
+// indicating that a match has been made and needs to be negotiated.
+func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	dumpErr := func(s string, a ...interface{}) error {
+		customPart := fmt.Sprintf(s, a...)
+		return fmt.Errorf("match route error for notification from %s for match data %s: %s",
+			dc.acct.url, string(msg.Payload), customPart)
+	}
+	msgMatches := make([]*msgjson.Match, 0)
+	err := msg.Unmarshal(&msgMatches)
+	if err != nil {
+		return dumpErr("match request parsing error: %v", err)
+	}
+	var acks []msgjson.Acknowledgement
+	// The server will only accept the match acknowledgments
+	// ([]msgjson.Acknowledgement) when all are present, so if an error occurs on
+	// processing even one match, we might as well abandon everything.
+	for _, msgMatch := range msgMatches {
+		var oid order.OrderID
+		copy(oid[:], msgMatch.OrderID)
+
+		// Run the appropriate function under lock to prevent concurrent access to
+		// trades field and underlying trackedTrades.
+		tracker, _, isCancel := dc.findOrder(oid)
+		if tracker == nil {
+			return dumpErr("order %s not found for match route", oid)
+		}
+		var err error
+		dc.tradeMtx.Lock()
+		if isCancel {
+			err = tracker.cancel(msgMatch)
+		} else {
+			err = tracker.negotiate(c.ctx, msgMatch)
+		}
+		dc.tradeMtx.Unlock()
+		if err != nil {
+			return dumpErr(err.Error())
+		}
+		if err != nil {
+			return dumpErr(err.Error())
+		}
+		sigMsg, err := msgMatch.Serialize()
+		if err != nil {
+			return dumpErr(err.Error())
+		}
+		sig, err := dc.acct.sign(sigMsg)
+		if err != nil {
+			return dumpErr(err.Error())
+		}
+		acks = append(acks, msgjson.Acknowledgement{
+			MatchID: msgMatch.MatchID,
+			Sig:     sig,
+		})
+	}
+	resp, err := msgjson.NewResponse(msg.ID, acks, nil)
+	if err != nil {
+		return dumpErr(err.Error())
+	}
+	err = dc.Send(resp)
+	if err != nil {
+		dumpErr(err.Error())
 	}
 	return nil
 }
@@ -1773,10 +1928,14 @@ func newPreimage() (p order.Preimage) {
 	return
 }
 
+// messagePrefix converts the order.Prefix to a msgjson.Prefix.
 func messagePrefix(prefix *order.Prefix) *msgjson.Prefix {
 	oType := uint8(msgjson.LimitOrderNum)
-	if prefix.OrderType == order.MarketOrderType {
+	switch prefix.OrderType {
+	case order.MarketOrderType:
 		oType = msgjson.MarketOrderNum
+	case order.CancelOrderType:
+		oType = msgjson.CancelOrderNum
 	}
 	return &msgjson.Prefix{
 		AccountID:  prefix.AccountID[:],
@@ -1788,6 +1947,7 @@ func messagePrefix(prefix *order.Prefix) *msgjson.Prefix {
 	}
 }
 
+// messageTrade converts the order.Trade to a msgjson.Trade, adding the coins.
 func messageTrade(trade *order.Trade, coins []*msgjson.Coin) *msgjson.Trade {
 	side := uint8(msgjson.BuyOrderNum)
 	if trade.Sell {
@@ -1801,6 +1961,8 @@ func messageTrade(trade *order.Trade, coins []*msgjson.Coin) *msgjson.Trade {
 	}
 }
 
+// messageCoin converts the []asset.Coin to a []*msgjson.Coin, signing the coin
+// IDs and retrieving the pubkeys too.
 func messageCoins(wallet *xcWallet, coins asset.Coins) ([]*msgjson.Coin, error) {
 	msgCoins := make([]*msgjson.Coin, 0, len(coins))
 	for _, coin := range coins {
@@ -1819,6 +1981,8 @@ func messageCoins(wallet *xcWallet, coins asset.Coins) ([]*msgjson.Coin, error) 
 	return msgCoins, nil
 }
 
+// messageOrder converts an order.Order of any underlying type to an appropriate
+// msgjson type used for submitting the order.
 func messageOrder(ord order.Order, coins []*msgjson.Coin) (string, msgjson.Stampable) {
 	prefix, trade := ord.Prefix(), ord.Trade()
 	switch o := ord.(type) {
@@ -1858,4 +2022,34 @@ func confTrigger(wallet *xcWallet, coinID []byte, reqConfs uint16) func() (bool,
 		}
 		return confs >= uint32(reqConfs), nil
 	}
+}
+
+// validateOrderResponse validates the response against the order and the order
+// message.
+func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord order.Order, msgOrder msgjson.Stampable) error {
+	if result.ServerTime == 0 {
+		return fmt.Errorf("OrderResult cannot have servertime = 0")
+	}
+	msgOrder.Stamp(result.ServerTime)
+	msg, err := msgOrder.Serialize()
+	if err != nil {
+		// logAbandon(err)
+		return fmt.Errorf("serialization error. order abandoned")
+	}
+	err = dc.acct.checkSig(msg, result.Sig)
+	if err != nil {
+		return fmt.Errorf("signature error. order abandoned")
+	}
+	ord.SetTime(encode.UnixTimeMilli(int64(result.ServerTime)))
+	// Check the order ID
+	if len(result.OrderID) != order.OrderIDSize {
+		return fmt.Errorf("failed ID length check. order abandoned")
+	}
+	var checkID order.OrderID
+	copy(checkID[:], result.OrderID)
+	oid := ord.ID()
+	if oid != checkID {
+		return fmt.Errorf("failed ID match. order abandoned")
+	}
+	return nil
 }
