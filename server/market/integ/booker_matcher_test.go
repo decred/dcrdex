@@ -39,10 +39,6 @@ func startLogger() {
 	logger = slog.NewBackend(os.Stdout).Logger("MATCHTEST - matcher")
 	logger.SetLevel(slog.LevelDebug)
 	matcher.UseLogger(logger)
-
-	logger = slog.NewBackend(os.Stdout).Logger("MATCHTEST - order")
-	logger.SetLevel(slog.LevelDebug)
-	order.UseLogger(logger)
 }
 
 func randomPreimage() (pe order.Preimage) {
