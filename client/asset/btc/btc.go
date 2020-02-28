@@ -611,6 +611,9 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	if err != nil {
 		return nil, nil, err
 	}
+	if len(tx.Details) == 0 {
+		return nil, nil, fmt.Errorf("no tx details found for %s = %s:%v", coin, output.txHash.String(), output.vout)
+	}
 	for _, txDetails := range tx.Details {
 		if txDetails.Vout == output.vout &&
 			(txDetails.Category == TxCatReceive ||

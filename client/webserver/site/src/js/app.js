@@ -458,9 +458,6 @@ function handleRegister (main) {
 
 // handleMarkets is the 'markets' page main element handler.
 async function handleMarkets (main, data) {
-
-  console.log("--user", app.user)
-
   var market
   const page = parsePage(main, [
     // Templates, loaders, chart div...
@@ -711,7 +708,6 @@ async function handleMarkets (main, data) {
           const icon = row.querySelector('[data-col=cancel] > span')
           Doc.show(icon)
           Doc.bind(icon, 'click', e => {
-            console.log("--click event", e)
             e.stopPropagation()
             showCancel(icon, order)
           })

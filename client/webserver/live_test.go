@@ -431,7 +431,6 @@ func (c *TCore) Cancel(pw string, sid string) error {
 		for _, mkt := range xc.Markets {
 			for _, ord := range mkt.Orders {
 				if ord.ID == sid {
-					fmt.Println("--cancelling", sid)
 					ord.Cancelling = true
 				}
 			}
