@@ -182,6 +182,14 @@ func (r *swapReceipt) Coin() asset.Coin {
 	return r.output
 }
 
+// fundingCoin is similar to output, but also stores the address. The
+// ExchangeWallet fundingCoins dict is used as a local cache of coins being
+// spent.
+type fundingCoin struct {
+	op   *output
+	addr string
+}
+
 // Driver implements asset.Driver.
 type Driver struct{}
 
@@ -378,7 +386,6 @@ func (dcr *ExchangeWallet) fund(confs uint32,
 		coins = append(coins, op)
 		spents = append(spents, &fundingCoin{
 			op:   op,
-			tree: unspent.rpc.Tree,
 			addr: unspent.rpc.Address,
 		})
 		size += unspent.input.Size()
@@ -420,16 +427,11 @@ out:
 	return coins, sum, size, nil
 }
 
-type fundingCoin struct {
-	op   *output
-	tree int8
-	addr string
-}
-
+// lockUnspent locks the funding coins via RPC and stores them in the map.
 func (dcr *ExchangeWallet) lockUnspent(fCoins []*fundingCoin) error {
 	wireOPs := make([]*wire.OutPoint, 0, len(fCoins))
 	for _, c := range fCoins {
-		wireOPs = append(wireOPs, wire.NewOutPoint(&c.op.txHash, c.op.vout, c.tree))
+		wireOPs = append(wireOPs, wire.NewOutPoint(&c.op.txHash, c.op.vout, c.op.tree))
 	}
 	err := dcr.node.LockUnspent(false, wireOPs)
 	if err != nil {

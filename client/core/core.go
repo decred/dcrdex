@@ -468,6 +468,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW string) error {
 	return nil
 }
 
+// unlockWallet unlocks the wallet with the crypter.
 func unlockWallet(wallet *xcWallet, crypter encrypt.Crypter) error {
 	pwB, err := crypter.Decrypt(wallet.encPW)
 	if err != nil {

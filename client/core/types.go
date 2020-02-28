@@ -86,6 +86,8 @@ func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 	return nil
 }
 
+// lock the wallet, setting the lockTime to the time when the wallet will be
+// locked.
 func (w *xcWallet) lock() error {
 	w.mtx.Lock()
 	w.lockTime = time.Time{}
@@ -93,6 +95,7 @@ func (w *xcWallet) lock() error {
 	return w.Lock()
 }
 
+// unlocked will return true if the lockTime has not passed.
 func (w *xcWallet) unlocked() bool {
 	w.mtx.RLock()
 	defer w.mtx.RUnlock()
@@ -158,6 +161,7 @@ type Registration struct {
 	Fee      uint64
 }
 
+// Match represents a match on an order. An order may have many matches.
 type Match struct {
 	MatchID string            `json:"matchID"`
 	Step    order.MatchStatus `json:"step"`
@@ -165,17 +169,20 @@ type Match struct {
 	Qty     uint64            `json:"qty"`
 }
 
+// Order is core's general type for an order. An order may be a market, limit,
+// or cancel order. Some fields are only relevant to particular order types.
 type Order struct {
-	Type       order.OrderType `json:"type"`
-	ID         string          `json:"id"`
-	Stamp      uint64          `json:"stamp"`
-	TargetID   string          `json:"targetID,omitempty"`
-	Rate       uint64          `json:"rate"`
-	Qty        uint64          `json:"qty"`
-	Sell       bool            `json:"sell"`
-	Filled     uint64          `json:"filled"`
-	Matches    []*Match        `json:"matches"`
-	Cancelling bool            `json:"cancelling"`
+	Type        order.OrderType   `json:"type"`
+	ID          string            `json:"id"`
+	Stamp       uint64            `json:"stamp"`
+	Qty         uint64            `json:"qty"`
+	Sell        bool              `json:"sell"`
+	Filled      uint64            `json:"filled"`
+	Matches     []*Match          `json:"matches"`
+	Cancelling  bool              `json:"cancelling"`
+	Rate        uint64            `json:"rate"`               // limit only
+	TimeInForce order.TimeInForce `json:"tif"`                // limit only
+	TargetID    string            `json:"targetID,omitempty"` // cancel only
 }
 
 // Market is market info.
@@ -209,6 +216,7 @@ type Exchange struct {
 	FeePending bool                  `json:"feePending"`
 }
 
+// Return the markets as a slice sorted by Display ID, ascending.
 func (xc *Exchange) SortedMarkets() []*Market {
 	markets := make([]*Market, 0, len(xc.Markets))
 	for _, market := range xc.Markets {
@@ -470,15 +478,20 @@ func (t *trackedTrade) rate() uint64 {
 // coreOrder constructs a *core.Order for the tracked order.Order.
 func (t *trackedTrade) coreOrder() (*Order, *Order) {
 	prefix, trade := t.Prefix(), t.Trade()
+	var tif order.TimeInForce
+	if lo, ok := t.Order.(*order.LimitOrder); ok {
+		tif = lo.Force
+	}
 	coreOrder := &Order{
-		Type:       prefix.OrderType,
-		ID:         t.ID().String(),
-		Stamp:      encode.UnixMilliU(prefix.ServerTime),
-		Rate:       t.rate(),
-		Qty:        trade.Quantity,
-		Sell:       trade.Sell,
-		Filled:     trade.Filled,
-		Cancelling: t.cancelOrder != nil,
+		Type:        prefix.OrderType,
+		ID:          t.ID().String(),
+		Stamp:       encode.UnixMilliU(prefix.ServerTime),
+		Rate:        t.rate(),
+		Qty:         trade.Quantity,
+		Sell:        trade.Sell,
+		Filled:      trade.Filled,
+		Cancelling:  t.cancelOrder != nil,
+		TimeInForce: tif,
 	}
 	for _, n := range t.negotiators {
 		coreOrder.Matches = append(coreOrder.Matches, &Match{
@@ -512,9 +525,6 @@ func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) e
 	if oid != t.ID() {
 		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.ID())
 	}
-	// First check that this isn't a match on a cancel order. I'm not crazy about
-	// this, but I am detecting this case right now based on the Address field
-	// being an empty string.
 	n := &matchNegotiator{
 		UserMatch: order.UserMatch{
 			OrderID:  oid,
@@ -528,6 +538,9 @@ func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) e
 		update: make(chan *MatchUpdate, 1),
 		trade:  t.Order,
 	}
+	// First check that this isn't a match on a cancel order. I'm not crazy about
+	// this, but I am detecting this case right now based on the Address field
+	// being an empty string.
 	isCancel := t.cancelOrder != nil && msgMatch.Address == ""
 	if isCancel {
 		t.cancelMatches.maker = msgMatch
@@ -548,6 +561,7 @@ func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) e
 	return nil
 }
 
+// cancel should be called with the message for the match on a cancel order.
 func (t *trackedTrade) cancel(msgMatch *msgjson.Match) error {
 	var oid order.OrderID
 	copy(oid[:], msgMatch.OrderID)
