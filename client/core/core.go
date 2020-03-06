@@ -1244,8 +1244,12 @@ out:
 		select {
 		case msg, ok := <-msgs:
 			if !ok {
-				log.Warnf("Connection closed for %s.", dc.acct.url)
-				// TODO: remove from c.conns, and then?
+				log.Debugf("Connection closed for %s.", dc.acct.url)
+				// TODO: This just means that wsConn, which created the
+				// MessageSource channel, was shut down before this loop
+				// returned via ctx.Done. It may be necessary to investigate the
+				// most appropriate normal shutdown sequence (i.e. close all
+				// connections before stopping Core).
 				return
 			}
 

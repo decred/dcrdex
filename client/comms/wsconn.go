@@ -72,7 +72,6 @@ type wsConn struct {
 	reqMtx       sync.RWMutex
 	connected    bool
 	connectedMtx sync.RWMutex
-	once         sync.Once
 	respHandlers map[uint64]*responseHandler
 }
 
