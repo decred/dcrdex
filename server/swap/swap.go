@@ -510,6 +510,13 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			return
 		}
 
+		failMatch := func(userAtFault account.AccountID) {
+			deletions = append(deletions, match.ID().String())
+			s.storage.SetMatchInactive(db.MatchID(match.Match))
+			s.authMgr.Penalize(userAtFault, account.FailureToAct)
+			s.revoke(match)
+		}
+
 		match.makerStatus.mtx.RLock()
 		defer match.makerStatus.mtx.RUnlock()
 		match.takerStatus.mtx.RLock()
@@ -524,9 +531,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// the time the match notification was sent (match.time) for the broadcast
 			// timeout.
 			if match.makerStatus.swapTime.IsZero() && match.time.Before(oldestAllowed) {
-				deletions = append(deletions, match.ID().String())
-				s.authMgr.Penalize(match.Maker.User(), account.FailureToAct)
-				s.revoke(match)
+				failMatch(match.Maker.User())
 			}
 		case order.MakerSwapCast:
 			if match.takerStatus.swapAsset != assetID {
@@ -537,10 +542,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			if match.takerStatus.swapTime.IsZero() &&
 				!match.makerStatus.swapConfirmed.IsZero() &&
 				match.makerStatus.swapConfirmed.Before(oldestAllowed) {
-
-				deletions = append(deletions, match.ID().String())
-				s.authMgr.Penalize(match.Taker.User(), account.FailureToAct)
-				s.revoke(match)
+				failMatch(match.Taker.User())
 			}
 		case order.TakerSwapCast:
 			if match.takerStatus.swapAsset != assetID {
@@ -552,10 +554,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			if match.makerStatus.redeemTime.IsZero() &&
 				!match.takerStatus.swapConfirmed.IsZero() &&
 				match.takerStatus.swapConfirmed.Before(oldestAllowed) {
-
-				deletions = append(deletions, match.ID().String())
-				s.authMgr.Penalize(match.Maker.User(), account.FailureToAct)
-				s.revoke(match)
+				failMatch(match.Maker.User())
 			}
 		case order.MakerRedeemed:
 			if match.takerStatus.swapAsset != assetID {
@@ -567,13 +566,14 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			if match.takerStatus.redeemTime.IsZero() &&
 				!match.makerStatus.redeemTime.IsZero() &&
 				match.makerStatus.redeemTime.Before(oldestAllowed) {
-
-				deletions = append(deletions, match.ID().String())
-				s.authMgr.Penalize(match.Taker.User(), account.FailureToAct)
-				s.revoke(match)
+				failMatch(match.Taker.User())
 			}
 		case order.MatchComplete:
 			// Nothing to do here right now.
+
+			// Note: clients still must ack the counterparty's redeem for the
+			// swap to be flagged as done/inactive in the DB, but the match may
+			// be deleted from s.matches if the redeem txns fully confirm first.
 		}
 	}
 
@@ -795,11 +795,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 
 	// Set and store the appropriate signature, based on the current step and
 	// actor.
-	mktMatch := db.MarketMatchID{
-		MatchID: acker.match.ID(),
-		Base:    acker.match.Maker.BaseAsset, // same for taker's init as BaseAsset refers to the market
-		Quote:   acker.match.Maker.QuoteAsset,
-	}
+	mktMatch := db.MatchID(acker.match.Match)
 
 	acker.match.mtx.Lock()
 	defer acker.match.mtx.Unlock()
@@ -874,12 +870,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if stepInfo.actor.isMaker {
 		storFn = s.storage.SaveContractA
 	}
-	match := stepInfo.match
-	mktMatch := db.MarketMatchID{
-		MatchID: match.ID(),
-		Base:    match.Maker.BaseAsset, // same for taker's init as BaseAsset refers to the market
-		Quote:   match.Maker.QuoteAsset,
-	}
+	mktMatch := db.MatchID(stepInfo.match.Match)
 	swapTimeMs := encode.UnixMilli(swapTime)
 	err = storFn(mktMatch, params.Contract, params.CoinID, swapTimeMs)
 	if err != nil {
@@ -887,6 +878,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			matchID, actor.isMaker, err)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
 			fmt.Sprintf("internal server error"))
+		// TODO: revoke the match without penalties instead of retrying forever?
 		return coinwaiter.TryAgain
 	}
 
@@ -981,19 +973,15 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	}
 	match := stepInfo.match
 	matchID := match.ID()
-	mktMatch := db.MarketMatchID{
-		MatchID: matchID,
-		Base:    match.Maker.BaseAsset, // same for taker's redeem as BaseAsset refers to the market
-		Quote:   match.Maker.QuoteAsset,
-	}
 	swapTime := unixMsNow()
 	swapTimeMs := encode.UnixMilli(swapTime)
-	err = storFn(mktMatch, params.CoinID, swapTimeMs)
+	err = storFn(db.MatchID(match.Match), params.CoinID, swapTimeMs)
 	if err != nil {
 		log.Errorf("saving redeem transaction (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
 			fmt.Sprintf("internal server error"))
+		// TODO: revoke the match without penalties instead of retrying forever?
 		return coinwaiter.TryAgain // why not, the DB might come alive
 	}
 
@@ -1360,17 +1348,13 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		if matchInfo.isMaker {
 			storFn = s.storage.SaveMatchAckSigA
 		}
-		mid := db.MarketMatchID{
-			MatchID: matchID,
-			Base:    matchInfo.match.Maker.BaseAsset, // same for taker's redeem as BaseAsset refers to the market
-			Quote:   matchInfo.match.Maker.QuoteAsset,
-		}
-		err = storFn(mid, sigBytes)
+		err = storFn(db.MatchID(matchInfo.match.Match), sigBytes)
 		if err != nil {
 			log.Errorf("saving match ack signature (match id=%v, maker=%v) failed: %v",
-				mid, matchInfo.isMaker, err)
+				matchID, matchInfo.isMaker, err)
 			s.respondError(msg.ID, matchInfo.user, msgjson.UnknownMarketError,
 				fmt.Sprintf("internal server error"))
+			// TODO: revoke the match without penalties?
 			return
 		}
 

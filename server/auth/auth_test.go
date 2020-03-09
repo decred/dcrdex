@@ -49,10 +49,12 @@ func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) { s.closed
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
 }
-func (s *TStorage) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) { return s.matches, nil }
-func (s *TStorage) CreateAccount(*account.Account) (string, error)              { return s.acctAddr, s.acctErr }
-func (s *TStorage) AccountRegAddr(account.AccountID) (string, error)            { return s.regAddr, s.regErr }
-func (s *TStorage) PayAccount(account.AccountID, []byte) error                  { return s.payErr }
+func (s *TStorage) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) {
+	return s.matches, nil
+}
+func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
+func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
+func (s *TStorage) PayAccount(account.AccountID, []byte) error       { return s.payErr }
 
 // TSigner satisfies the Signer interface
 type TSigner struct {

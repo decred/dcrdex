@@ -16,6 +16,7 @@ const (
 	//  false (Q->B) |    base      |      quote      |     base      ||  true (B->Q)  |     quote    |      base       |     quote
 	CreateMatchesTable = `CREATE TABLE IF NOT EXISTS %s (
 		matchid BYTEA PRIMARY KEY,
+		active BOOL DEFAULT TRUE,    -- swap active, where FALSE includes failure and successful completion
 		takerSell BOOL,        -- to identify asset of address and coinIDs
 		takerOrder BYTEA,      -- INDEX this
 		takerAccount BYTEA,    -- INDEX this
@@ -27,7 +28,7 @@ const (
 		epochDur INT8,
 		quantity INT8,
 		rate INT8,
-		status INT2,           -- also updated during swap negotiation
+		status INT2,           -- also updated during swap negotiation, independent from active for failed swaps
 
 		-- The remaining columns are only set during swap negotiation.
 		sigMatchAckMaker BYTEA,   -- maker's ack of the match
@@ -77,22 +78,26 @@ const (
 	UpsertMatch = InsertMatch + ` ON CONFLICT (matchid) DO
 	UPDATE SET quantity = $10, status = $12;`
 
-	SelectActiveMatches = `SELECT makerOrder, takerOrder
-		FROM %s WHERE status = %d;`
-
-	RetrieveMatchByID = `SELECT matchid, takerOrder, takerAccount, takerAddress,
-		makerOrder, makerAccount, makerAddress, epochIdx, epochDur, quantity, rate, status
+	RetrieveMatchByID = `SELECT matchid, active,
+		takerOrder, takerAccount, takerAddress,
+		makerOrder, makerAccount, makerAddress,
+		epochIdx, epochDur, quantity, rate, status
 	FROM %s WHERE matchid = $1;`
 
-	RetrieveUserMatches = `SELECT matchid, takerOrder, takerAccount, takerAddress,
-		makerOrder, makerAccount, makerAddress, epochIdx, epochDur, quantity, rate, status
-	FROM %s WHERE takerAccount = $1 OR makerAccount = $1;`
+	RetrieveUserMatches = `SELECT matchid, active,
+		takerOrder, takerAccount, takerAddress,
+		makerOrder, makerAccount, makerAddress,
+		epochIdx, epochDur, quantity, rate, status
+	FROM %s
+	WHERE takerAccount = $1 OR makerAccount = $1;`
 
-	RetrieveActiveUserMatches = `SELECT matchid, takerOrder, takerAccount, takerAddress,
-		makerOrder, makerAccount, makerAddress, epochIdx, epochDur, quantity, rate, status
+	RetrieveActiveUserMatches = `SELECT matchid, 
+		takerOrder, takerAccount, takerAddress,
+		makerOrder, makerAccount, makerAddress,
+		epochIdx, epochDur, quantity, rate, status
 	FROM %s
 	WHERE (takerAccount = $1 OR makerAccount = $1)
-		AND status <> $2;`  // $2 should the code for MatchComplete
+		AND active IS TRUE;`
 
 	SetMakerMatchAckSig = `UPDATE %s SET sigMatchAckMaker = $2 WHERE matchid = $1;`
 	SetTakerMatchAckSig = `UPDATE %s SET sigMatchAckTaker = $2 WHERE matchid = $1;`
@@ -114,6 +119,13 @@ const (
 		bRedeemCoinID = $3, bRedeemTime = $4
 	WHERE matchid = $1;`
 
-	SetParticipantRedeemAckSig = `UPDATE %s SET bSigAckOfARedeem = $2 WHERE matchid = $1;`
-	SetInitiatorRedeemAckSig   = `UPDATE %s SET aSigAckOfBRedeem = $2 WHERE matchid = $1;`
+	SetParticipantRedeemAckSig = `UPDATE %s SET bSigAckOfARedeem = $2
+		WHERE matchid = $1;`
+	// SetInitiatorRedeemAckSig also sets active=TRUE since this is the final step
+	// in swap negotiation.
+	SetInitiatorRedeemAckSig = `UPDATE %s SET aSigAckOfBRedeem = $2, active = FALSE
+		WHERE matchid = $1;`
+
+	SetSwapDone = `UPDATE %s SET active = FALSE
+		WHERE matchid = $1;`
 )

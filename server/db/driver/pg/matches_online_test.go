@@ -466,10 +466,14 @@ func TestActiveMatches(t *testing.T) {
 	// Make it complete and store it.
 	epochID := order.EpochID{132412341, 10}
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
-	match.Status = order.MatchComplete // not an active order now
-	err := archie.InsertMatch(match)
+	match.Status = order.TakerSwapCast // failed here
+	err := archie.InsertMatch(match)   // active by default
 	if err != nil {
 		t.Fatalf("InsertMatch() failed: %v", err)
+	}
+	err = archie.SetMatchInactive(db.MatchID(match)) // set inactive
+	if err != nil {
+		t.Fatalf("SetMatchInactive() failed: %v", err)
 	}
 
 	// Make a perfect 1 lot match, same parties.
