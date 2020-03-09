@@ -172,11 +172,15 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	})
 
 	conn.wsMtx.Lock()
+	// If keepAlive called connect, the wsConn's current websocket.Conn may need
+	// to be closed depending on the error that triggered the reconnect.
 	if conn.ws != nil {
-		// msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye")
-		// conn.ws.WriteControl(websocket.CloseMessage, msg,
-		// 	time.Now().Add(writeWait))
-		//conn.ws.Close()
+		// Attempt to send a close message in case the connection is still live.
+		msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye")
+		conn.ws.WriteControl(websocket.CloseMessage, msg,
+			time.Now().Add(50*time.Millisecond)) // ignore any error
+		// Forcibly close the underlying connection.
+		conn.ws.Close()
 	}
 	conn.ws = ws
 	conn.wsMtx.Unlock()
@@ -253,7 +257,7 @@ func (conn *wsConn) read(ctx context.Context) {
 			handler := conn.respHandler(msg.ID)
 			if handler == nil {
 				b, _ := json.Marshal(msg)
-				log.Errorf("no handler found for response", string(b))
+				log.Errorf("No handler found for response: %v", string(b))
 				continue
 			}
 			// Run handlers in a goroutine so that other messages can be
@@ -284,7 +288,7 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 			}
 
 			if conn.reconnects >= maxReconnects {
-				log.Errorf("Max reconnection attempts reached. Stopping connection.")
+				log.Error("Max reconnection attempts reached. Stopping connection.")
 				conn.cancel()
 				// The WaitGroup provided to the consumer by Connect will start
 				// to be decremented as goroutines shutdown.
@@ -353,7 +357,7 @@ func (conn *wsConn) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 		<-ctxInternal.Done()
 		conn.setConnected(false)
 		if conn.ws != nil {
-			log.Info("Sending close 1000 (normal) message.")
+			log.Debug("Sending close 1000 (normal) message.")
 			msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye")
 			conn.ws.WriteControl(websocket.CloseMessage, msg,
 				time.Now().Add(writeWait))
