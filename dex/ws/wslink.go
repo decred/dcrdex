@@ -14,7 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// outBufferSize is the size of the client's buffered channel for outgoing
+// outBufferSize is the size of the WSLink's buffered channel for outgoing
 // messages.
 const outBufferSize = 128
 
@@ -32,24 +32,27 @@ func (e Error) Error() string {
 	return string(e)
 }
 
-// ErrClientDisconnected will be returned if Send or Request is called on a
+// ErrPeerDisconnected will be returned if Send or Request is called on a
 // disconnected link.
-const ErrClientDisconnected = Error("client disconnected")
+const ErrPeerDisconnected = Error("peer disconnected")
 
-// Connection represents a websocket connection to the client. In practice,
+// Connection represents a websocket connection to a remote peer. In practice,
 // it is satisfied by *websocket.Conn. For testing, a stub can be used.
 type Connection interface {
-	WriteControl(messageType int, data []byte, deadline time.Time) error
-	ReadMessage() (int, []byte, error)
-	WriteMessage(int, []byte) error
-	SetWriteDeadline(t time.Time) error
-	SetReadDeadline(t time.Time) error
 	Close() error
+
+	SetReadDeadline(t time.Time) error
+	ReadMessage() (int, []byte, error)
+
+	SetWriteDeadline(t time.Time) error
+	WriteMessage(int, []byte) error
+	WriteControl(messageType int, data []byte, deadline time.Time) error
 }
 
-// wsLink is the local, per-connection representation of a DEX client.
+// WSLink is the local, per-connection representation of a DEX peer (client or
+// server) connection.
 type WSLink struct {
-	// ip is the client's IP address.
+	// ip is the peer's IP address.
 	ip string
 	// conn is the gorilla websocket.Conn, or a stub for testing.
 	conn Connection
@@ -58,23 +61,23 @@ type WSLink struct {
 	// on is used internally to prevent multiple Close calls on the underlying
 	// connections.
 	on bool
-	// Once the client is disconnected, the quit channel will be closed.
+	// After disconnect, the quit channel will be closed.
 	quit chan struct{}
-	// wg is the client's WaitGroup. The client has at least 3 goroutines, one for
-	// read, one for write, and one server goroutine to monitor the client
-	// disconnect. The WaitGroup is used to synchronize cleanup on disconnection.
+	// The WSLink has at least 3 goroutines, one for read, one for write, and
+	// one server goroutine to monitor for peer disconnection. The WaitGroup is
+	// used to synchronize cleanup on disconnection.
 	wg sync.WaitGroup
-	// Messages to the client are routed through the outChan. This ensures
+	// Messages to the peer are routed through the outChan. This ensures
 	// messages are sent in the correct order, and satisfies the thread-safety
 	// requirements of the (*websocket.Conn).WriteMessage.
 	outChan chan []byte
 	// A master message handler.
 	handler func(*msgjson.Message) *msgjson.Error
-	// pingPeriod is how often to ping the client.
+	// pingPeriod is how often to ping the peer.
 	pingPeriod time.Duration
 }
 
-// newWSLink is a constructor for a new WSLink.
+// NewWSLink is a constructor for a new WSLink.
 func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error) *WSLink {
 	return &WSLink{
 		on:         true,
@@ -87,26 +90,29 @@ func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler f
 	}
 }
 
-// Send sends the passed Message to the websocket client. If the client's
-// channel is blocking (outBufferSize pending messages), the client is
-// disconnected.
+// Send sends the passed Message to the websocket peer.
 func (c *WSLink) Send(msg *msgjson.Message) error {
 	if c.Off() {
-		return ErrClientDisconnected
+		return ErrPeerDisconnected
 	}
 	b, err := json.Marshal(msg)
 	if err != nil {
 		return err
 	}
+
+	// If outChan is blocking (outBufferSize pending messages), many messages
+	// are being sent and not quickly enough. If the connection is actually
+	// down, c.quit will be closed. TODO: Add a default case with error return
+	// or just block until outHandler receives?
 	select {
 	case c.outChan <- b:
 	case <-c.quit:
-		return ErrClientDisconnected
+		return ErrPeerDisconnected
 	}
 	return nil
 }
 
-// SendError sends the msgjson.Error to the client.
+// SendError sends the msgjson.Error to the peer.
 func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	msg, err := msgjson.NewResponse(id, nil, rpcErr)
 	if err != nil {
@@ -114,21 +120,23 @@ func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	}
 	err = c.Send(msg)
 	if err != nil {
-		log.Debug("SendError: failed to send message to %s: %v", c.ip, err)
+		log.Debug("SendError: failed to send message to peer %s: %v", c.ip, err)
 	}
 }
 
 // Start begins processing input and output messages.
 func (c *WSLink) Start() {
 	// Set the initial read deadline now that the ping ticker is about to be
-	// started. The pong handler will set subsequent read deadlines.
+	// started. The pong handler will set subsequent read deadlines. 2x ping
+	// period is a very generous initial pong wait; the readWait provided to
+	// NewConnection could be stored and used here (once) instead.
 	err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2))
 	if err != nil {
 		log.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err)
 		return
 	}
 
-	log.Tracef("Starting websocket client %s", c.ip)
+	log.Tracef("Starting websocket messaging with peer %s", c.ip)
 	// Start processing input and output.
 	c.wg.Add(2)
 	go c.inHandler()
@@ -144,14 +152,14 @@ func (c *WSLink) Disconnect() {
 		log.Debugf("Disconnect attempted on stopped WSLink.")
 		return
 	}
-	log.Tracef("Closing connection with client %v", c.ip)
+	log.Tracef("Closing connection with peer %v", c.ip)
 	c.on = false
 	c.conn.Close()
 	close(c.quit)
 }
 
-// WaitForShutdown blocks until the websocket client goroutines are stopped
-// and the connection is closed.
+// WaitForShutdown blocks until the WSLink goroutines are stopped and the
+// connection is closed.
 func (c *WSLink) WaitForShutdown() {
 	c.wg.Wait()
 }
@@ -174,7 +182,7 @@ out:
 			// Log the error if it's not due to disconnecting.
 			if !websocket.IsCloseError(err, websocket.CloseGoingAway,
 				websocket.CloseNormalClosure, websocket.CloseNoStatusReceived) {
-				log.Errorf("Websocket receive error from %s: %v", c.ip, err)
+				log.Errorf("Websocket receive error from peer %s: %v", c.ip, err)
 			}
 			break out
 		}
@@ -244,17 +252,17 @@ cleanup:
 		}
 	}
 	c.wg.Done()
-	log.Tracef("Websocket client output handler done for %s", c.ip)
+	log.Tracef("Websocket output handler done for peer %s", c.ip)
 }
 
-// Off will return true if the client has disconnected.
+// Off will return true if the link has disconnected.
 func (c *WSLink) Off() bool {
 	c.quitMtx.RLock()
 	defer c.quitMtx.RUnlock()
 	return !c.on
 }
 
-// IP is the address passed to the constructor.
+// IP is the peer address passed to the constructor.
 func (c *WSLink) IP() string {
 	return c.ip
 }

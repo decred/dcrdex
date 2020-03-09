@@ -395,9 +395,9 @@ func TestClientRequests(t *testing.T) {
 	if !server.isQuarantined(stubAddr) {
 		t.Fatalf("server has not marked client as quarantined")
 	}
-	// A call to Send should return ErrClientDisconnected
+	// A call to Send should return ErrPeerDisconnected
 	lockedExe(func() {
-		if !errors.Is(client.Send(nil), ws.ErrClientDisconnected) {
+		if !errors.Is(client.Send(nil), ws.ErrPeerDisconnected) {
 			t.Fatalf("incorrect error for disconnected client")
 		}
 	})

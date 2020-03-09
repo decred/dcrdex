@@ -799,7 +799,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 			m.handlePreimageResp(msg, reqData)
 		}, piTimeout, miss)
 		if err != nil {
-			if errors.Is(err, ws.ErrClientDisconnected) {
+			if errors.Is(err, ws.ErrPeerDisconnected) {
 				misses = append(misses, ord)
 				log.Debug("Preimage request failed: client gone.")
 			} else {
