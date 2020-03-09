@@ -15,14 +15,52 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
-	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
+
+// errorSet is a slice of orders with a prefix prepended to the Error output.
+type errorSet struct {
+	prefix string
+	errs   []error
+}
+
+// newErrorSet constructs an error set with a prefix.
+func newErrorSet(s string, a ...interface{}) *errorSet {
+	return &errorSet{prefix: fmt.Sprintf(s, a...)}
+}
+
+// add adds the message to the slice as an error and returns the errorSet.
+func (set *errorSet) add(s string, a ...interface{}) *errorSet {
+	set.errs = append(set.errs, fmt.Errorf(s, a...))
+	return set
+}
+
+// addErr adds the error to the set.
+func (set *errorSet) addErr(err error) *errorSet {
+	set.errs = append(set.errs, err)
+	return set
+}
+
+// If any returns the error set if there are any errors, else nil.
+func (set *errorSet) ifany() *errorSet {
+	if len(set.errs) > 0 {
+		return set
+	}
+	return nil
+}
+
+// Error satisfies the error interface. Error strings are concatenated using a
+// ", " and prepended with the prefix.
+func (set *errorSet) Error() string {
+	errStrings := make([]string, 0, len(set.errs))
+	for i := range set.errs {
+		errStrings = append(errStrings, set.errs[i].Error())
+	}
+	return set.prefix + strings.Join(errStrings, ", ")
+}
 
 // WalletForm is information necessary to create a new exchange wallet.
 type WalletForm struct {
@@ -392,42 +430,6 @@ func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
 	return err
 }
 
-// MatchUpdate will be delivered from the negotiation feed.
-type MatchUpdate struct{}
-
-// A Negotiation represents an active match negotiation.
-type Negotiation interface {
-	// Feed is a MatchUpdate channel. Feed always returns the same channel and
-	// does not support multiple clients. The channel will be closed when the
-	// Negotiation process has completed or encountered an unrecoverable error.
-	Feed() <-chan *MatchUpdate
-	Order() order.Order
-}
-
-// A matchNegotiator negotiates a match. matchNegotiator satisfies the
-// Negotiation interface.
-type matchNegotiator struct {
-	order.UserMatch
-	trade  order.Order
-	update chan *MatchUpdate
-}
-
-// Feed returns the MatchUpdate channel. Part of the Negotiator interface.
-func (m *matchNegotiator) Feed() <-chan *MatchUpdate {
-	return m.update
-}
-
-// Order returns the order associated with the match.
-func (m *matchNegotiator) Order() order.Order {
-	return m.trade
-}
-
-// runMatch is the match negotiation thread.
-func (m *matchNegotiator) runMatch(ctx context.Context) {
-	// do match stuff
-	<-ctx.Done()
-}
-
 // TradeForm is used to place a market or limit order
 type TradeForm struct {
 	DEX     string `json:"dex"`
@@ -438,165 +440,6 @@ type TradeForm struct {
 	Qty     uint64 `json:"qty"`
 	Rate    uint64 `json:"rate"`
 	TifNow  bool   `json:"tifnow"`
-}
-
-// trackedCancel is information necessary to track a cancel order. A
-// trackedCancel is always associated with a trackedTrade.
-type trackedCancel struct {
-	order.CancelOrder
-	preImg  order.Preimage
-	matches struct {
-		maker *msgjson.Match
-		taker *msgjson.Match
-	}
-}
-
-// trackedTrade is an order placed by the core. A trackedTrade may or may not
-// have a non-nil trackedCancel storing information about the cancellation.
-type trackedTrade struct {
-	order.Order
-	mtx         sync.RWMutex
-	dc          *dexConnection
-	preImg      order.Preimage
-	sid         string
-	cancel      *trackedCancel
-	negotiators map[order.MatchID]*matchNegotiator
-}
-
-// newTrackedTrade is a constructor for a trackedTrade.
-func newTrackedTrade(trade order.Order, dc *dexConnection, preImg order.Preimage) *trackedTrade {
-	return &trackedTrade{
-		Order:       trade,
-		dc:          dc,
-		preImg:      preImg,
-		sid:         sid(trade.Base(), trade.Quote()),
-		negotiators: make(map[order.MatchID]*matchNegotiator),
-	}
-}
-
-// rate returns the order's rate, or zero if a market or cancel order.
-func (t *trackedTrade) rate() uint64 {
-	if ord, ok := t.Order.(*order.LimitOrder); ok {
-		return ord.Rate
-	}
-	return 0
-}
-
-// coreOrder constructs a *core.Order for the tracked order.Order. If the trade
-// has a cancel order associated with it, the cancel order will be returned,
-// otherwise the second returned *Order will be nil.
-func (t *trackedTrade) coreOrder() (*Order, *Order) {
-	t.mtx.RLock()
-	defer t.mtx.RUnlock()
-	prefix, trade := t.Prefix(), t.Trade()
-	var tif order.TimeInForce
-	if lo, ok := t.Order.(*order.LimitOrder); ok {
-		tif = lo.Force
-	}
-	coreOrder := &Order{
-		Type:        prefix.OrderType,
-		ID:          t.ID().String(),
-		Stamp:       encode.UnixMilliU(prefix.ServerTime),
-		Rate:        t.rate(),
-		Qty:         trade.Quantity,
-		Sell:        trade.Sell,
-		Filled:      trade.Filled,
-		Cancelling:  t.cancel != nil,
-		TimeInForce: tif,
-	}
-	for _, n := range t.negotiators {
-		coreOrder.Matches = append(coreOrder.Matches, &Match{
-			MatchID: n.MatchID.String(),
-			Step:    n.Status,
-			Rate:    n.Rate,
-			Qty:     n.Quantity,
-		})
-	}
-	var cancelOrder *Order
-	if t.cancel != nil {
-		cancelOrder = &Order{
-			Type:     order.CancelOrderType,
-			Stamp:    encode.UnixMilliU(t.cancel.ServerTime),
-			TargetID: t.cancel.TargetOrderID.String(),
-		}
-	}
-	return coreOrder, cancelOrder
-}
-
-func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage) {
-	t.mtx.Lock()
-	t.cancel = &trackedCancel{
-		CancelOrder: *co,
-		preImg:      preImg,
-	}
-	t.mtx.Unlock()
-}
-
-// negotiate creates a matchNegotiator and starts the negotiation thread.
-func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) error {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
-	if len(msgMatch.MatchID) != order.MatchIDSize {
-		return fmt.Errorf("match id of incorrect length. expected %d, got %d",
-			order.MatchIDSize, len(msgMatch.MatchID))
-	}
-	var mid order.MatchID
-	copy(mid[:], msgMatch.MatchID)
-	var oid order.OrderID
-	copy(oid[:], msgMatch.OrderID)
-	if oid != t.ID() {
-		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.ID())
-	}
-	n := &matchNegotiator{
-		UserMatch: order.UserMatch{
-			OrderID:  oid,
-			MatchID:  mid,
-			Quantity: msgMatch.Quantity,
-			Rate:     msgMatch.Rate,
-			Address:  msgMatch.Address,
-			Status:   order.MatchStatus(msgMatch.Status),
-			Side:     order.MatchSide(msgMatch.Side),
-		},
-		update: make(chan *MatchUpdate, 1),
-		trade:  t.Order,
-	}
-	// First check that this isn't a match on a cancel order. I'm not crazy about
-	// this, but I am detecting this case right now based on the Address field
-	// being an empty string.
-	isCancel := t.cancel != nil && msgMatch.Address == ""
-	if isCancel {
-		log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
-		t.cancel.matches.maker = msgMatch
-	} else {
-		go n.runMatch(ctx)
-	}
-	t.negotiators[n.MatchID] = n
-	isMarketBuy := t.Type() == order.MarketOrderType && !t.Trade().Sell
-	var filled uint64
-	for _, n := range t.negotiators {
-		if isMarketBuy {
-			filled += calc.BaseToQuote(n.Rate, n.Quantity)
-		} else {
-			filled += n.Quantity
-		}
-	}
-	t.Trade().Filled = filled
-	return nil
-}
-
-// processCancelMatch should be called with the message for the match on a
-// cancel order.
-func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
-	var oid order.OrderID
-	copy(oid[:], msgMatch.OrderID)
-	if oid != t.cancel.ID() {
-		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.cancel.ID())
-	}
-	log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
-	t.cancel.matches.taker = msgMatch
-	return nil
 }
 
 // sid is a string ID constructed from the asset IDs.

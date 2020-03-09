@@ -416,6 +416,62 @@ func TestReturnCoins(t *testing.T) {
 	}
 }
 
+func TestFundingCoins(t *testing.T) {
+	wallet, node, shutdown := tNewWallet()
+	defer shutdown()
+
+	vout := uint32(123)
+	coinID := toCoinID(tTxHash, vout)
+
+	p2pkhUnspent := &ListUnspentResult{
+		TxID:         tTxID,
+		Vout:         vout,
+		ScriptPubKey: tP2PKH,
+	}
+	unspents := []*ListUnspentResult{p2pkhUnspent}
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
+	coinIDs := []dex.Bytes{coinID}
+
+	ensureGood := func() {
+		coins, err := wallet.FundingCoins(coinIDs)
+		if err != nil {
+			t.Fatalf("FundingCoins error: %v", err)
+		}
+		if len(coins) != 1 {
+			t.Fatalf("expected 1 coin, got %d", len(coins))
+		}
+	}
+	ensureGood()
+
+	ensureErr := func(tag string) {
+		// Clear the cache.
+		wallet.fundingCoins = make(map[string]*compositeUTXO)
+		_, err := wallet.FundingCoins(coinIDs)
+		if err == nil {
+			t.Fatalf("%s: no error", tag)
+		}
+	}
+
+	// No coins
+	node.rawRes[methodListUnspent] = mustMarshal(t, []*ListUnspentResult{})
+	ensureErr("no coins")
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+
+	// RPC error
+	node.rawErr[methodListUnspent] = tErr
+	ensureErr("rpc coins")
+	node.rawErr[methodListUnspent] = nil
+
+	// Bad coin ID.
+	ogIDs := coinIDs
+	coinIDs = []dex.Bytes{randBytes(35)}
+	ensureErr("bad coin ID")
+	coinIDs = ogIDs
+
+	ensureGood()
+}
+
 func TestFundEdges(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
 	defer shutdown()
@@ -564,11 +620,10 @@ func TestSwap(t *testing.T) {
 		LockTime:   uint64(time.Now().Unix()),
 	}
 
-	swap := &asset.Swap{
-		Inputs:   coins,
-		Contract: contract,
+	swaps := &asset.Swaps{
+		Inputs:    coins,
+		Contracts: []*asset.Contract{contract},
 	}
-	swaps := []*asset.Swap{swap}
 
 	signTxRes := SignTxResult{
 		Complete: true,
@@ -609,22 +664,22 @@ func TestSwap(t *testing.T) {
 	}
 
 	// This time should succeed.
-	_, err := wallet.Swap(swaps, tBTC)
+	_, _, err := wallet.Swap(swaps, tBTC)
 	if err != nil {
 		t.Fatalf("swap error: %v", err)
 	}
 
 	// Not enough funds
-	swap.Inputs = coins[:1]
-	_, err = wallet.Swap(swaps, tBTC)
+	swaps.Inputs = coins[:1]
+	_, _, err = wallet.Swap(swaps, tBTC)
 	if err == nil {
 		t.Fatalf("no error for listunspent not enough funds")
 	}
-	swap.Inputs = coins
+	swaps.Inputs = coins
 
 	// AddressPKH error
 	node.rawErr[methodNewAddress] = tErr
-	_, err = wallet.Swap(swaps, tBTC)
+	_, _, err = wallet.Swap(swaps, tBTC)
 	if err == nil {
 		t.Fatalf("no error for getnewaddress rpc error")
 	}
@@ -632,7 +687,7 @@ func TestSwap(t *testing.T) {
 
 	// ChangeAddress error
 	node.rawErr[methodChangeAddress] = tErr
-	_, err = wallet.Swap(swaps, tBTC)
+	_, _, err = wallet.Swap(swaps, tBTC)
 	if err == nil {
 		t.Fatalf("no error for getrawchangeaddress rpc error")
 	}
@@ -640,7 +695,7 @@ func TestSwap(t *testing.T) {
 
 	// SignTx error
 	node.rawErr[methodSignTx] = tErr
-	_, err = wallet.Swap(swaps, tBTC)
+	_, _, err = wallet.Swap(swaps, tBTC)
 	if err == nil {
 		t.Fatalf("no error for signrawtransactionwithwallet rpc error")
 	}
@@ -648,14 +703,14 @@ func TestSwap(t *testing.T) {
 
 	// incomplete signatures
 	signTxRes.Complete = false
-	_, err = wallet.Swap(swaps, tBTC)
+	_, _, err = wallet.Swap(swaps, tBTC)
 	if err == nil {
 		t.Fatalf("no error for incomplete signature rpc error")
 	}
 	signTxRes.Complete = true
 
 	// Make sure we can succeed again.
-	_, err = wallet.Swap(swaps, tBTC)
+	_, _, err = wallet.Swap(swaps, tBTC)
 	if err != nil {
 		t.Fatalf("re-swap error: %v", err)
 	}
@@ -666,6 +721,7 @@ type TAuditInfo struct{}
 func (ai *TAuditInfo) Recipient() string     { return tP2PKHAddr }
 func (ai *TAuditInfo) Expiration() time.Time { return time.Time{} }
 func (ai *TAuditInfo) Coin() asset.Coin      { return &tCoin{} }
+func (ai *TAuditInfo) SecretHash() dex.Bytes { return nil }
 
 func TestRedeem(t *testing.T) {
 	wallet, node, shutdown := tNewWallet()
@@ -702,14 +758,14 @@ func TestRedeem(t *testing.T) {
 	node.rawRes[methodChangeAddress] = mustMarshal(t, tP2WPKHAddr)
 	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
 
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err != nil {
 		t.Fatalf("redeem error: %v", err)
 	}
 
 	// No audit info
 	redemption.Spends = nil
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err == nil {
 		t.Fatalf("no error for nil AuditInfo")
 	}
@@ -717,7 +773,7 @@ func TestRedeem(t *testing.T) {
 
 	// Spoofing AuditInfo is not allowed.
 	redemption.Spends = &TAuditInfo{}
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err == nil {
 		t.Fatalf("no error for spoofed AuditInfo")
 	}
@@ -725,7 +781,7 @@ func TestRedeem(t *testing.T) {
 
 	// Wrong secret hash
 	redemption.Secret = randBytes(32)
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err == nil {
 		t.Fatalf("no error for wrong secret")
 	}
@@ -733,7 +789,7 @@ func TestRedeem(t *testing.T) {
 
 	// too low of value
 	ci.output.value = 200
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err == nil {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
@@ -741,7 +797,7 @@ func TestRedeem(t *testing.T) {
 
 	// Change address error
 	node.rawErr[methodChangeAddress] = tErr
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err == nil {
 		t.Fatalf("no error for change address error")
 	}
@@ -749,7 +805,7 @@ func TestRedeem(t *testing.T) {
 
 	// Missing priv key error
 	node.rawErr[methodPrivKeyForAddress] = tErr
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err == nil {
 		t.Fatalf("no error for missing private key")
 	}
@@ -757,7 +813,7 @@ func TestRedeem(t *testing.T) {
 
 	// Send error
 	node.sendErr = tErr
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err == nil {
 		t.Fatalf("no error for send error")
 	}
@@ -767,7 +823,7 @@ func TestRedeem(t *testing.T) {
 	var h chainhash.Hash
 	h[0] = 0x01
 	node.sendHash = &h
-	err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
+	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tBTC)
 	if err == nil {
 		t.Fatalf("no error for wrong return hash")
 	}
@@ -794,16 +850,9 @@ func TestSignMessage(t *testing.T) {
 	}
 	sig := signature.Serialize()
 
-	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{
-		Details: []*WalletTxDetails{
-			{
-				Address:  tP2PKHAddr,
-				Category: TxCatReceive,
-				Vout:     vout,
-			},
-		},
-	})
-
+	opID := outpointID(tTxID, vout)
+	utxo := &compositeUTXO{address: tP2PKHAddr}
+	wallet.fundingCoins[opID] = utxo
 	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
 	node.signMsgFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		if len(params) != 2 {
@@ -846,13 +895,13 @@ func TestSignMessage(t *testing.T) {
 		t.Fatalf("wrong signature. exptected %x, got %x", sigs[0], sig)
 	}
 
-	// gettransaction error
-	node.rawErr[methodGetTransaction] = tErr
+	// Unknown UTXO
+	delete(wallet.fundingCoins, opID)
 	_, _, err = wallet.SignMessage(coin, msg)
 	if err == nil {
-		t.Fatalf("no error for gettransaction rpc error")
+		t.Fatalf("no error for unknown utxo")
 	}
-	node.rawErr[methodGetTransaction] = nil
+	wallet.fundingCoins[opID] = utxo
 
 	// dumpprivkey error
 	node.rawErr[methodPrivKeyForAddress] = tErr
@@ -867,13 +916,6 @@ func TestSignMessage(t *testing.T) {
 	_, _, err = wallet.SignMessage(badCoin, msg)
 	if err == nil {
 		t.Fatalf("no error for bad coin")
-	}
-
-	// Not a wallet address
-	node.rawRes[methodGetTransaction] = mustMarshal(t, &GetTransactionResult{})
-	_, _, err = wallet.SignMessage(coin, msg)
-	if err == nil {
-		t.Fatalf("no error for unrecognized address")
 	}
 }
 

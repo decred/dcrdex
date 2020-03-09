@@ -124,6 +124,11 @@ type OrderMetaData struct {
 	DEX string
 	// Proof is the signatures and other verification-related data for the order.
 	Proof OrderProof
+	// ChangeCoin is a change coin from a match. Change coins are "daisy-chained"
+	// for matches. All funding coins go into the first match, and the change coin
+	// from the initiation transaction is used to fund the next match. The
+	// change from that matches ini tx funds the next match, etc.
+	ChangeCoin order.CoinID
 }
 
 // MetaMatch is the match and its metadata.
@@ -168,9 +173,7 @@ type MatchAuth struct {
 type MatchProof struct {
 	CounterScript []byte
 	SecretHash    []byte
-	SecretKey     []byte
-	InitStamp     uint64
-	RedeemStamp   uint64
+	Secret        []byte
 	MakerSwap     order.CoinID
 	MakerRedeem   order.CoinID
 	TakerSwap     order.CoinID
@@ -184,7 +187,7 @@ func (p *MatchProof) Encode() []byte {
 	return dbBytes{0}.
 		AddData(p.CounterScript).
 		AddData(p.SecretHash).
-		AddData(p.SecretKey).
+		AddData(p.Secret).
 		AddData(p.MakerSwap).
 		AddData(p.MakerRedeem).
 		AddData(p.TakerSwap).
@@ -221,7 +224,7 @@ func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
 	return &MatchProof{
 		CounterScript: pushes[0],
 		SecretHash:    pushes[1],
-		SecretKey:     pushes[2],
+		Secret:        pushes[2],
 		MakerSwap:     pushes[3],
 		MakerRedeem:   pushes[4],
 		TakerSwap:     pushes[5],

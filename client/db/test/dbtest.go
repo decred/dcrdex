@@ -60,13 +60,7 @@ func RandomMatchProof(sparsity float64) *db.MatchProof {
 		proof.SecretHash = randBytes(32)
 	}
 	if !doZero() {
-		proof.SecretKey = randBytes(32)
-	}
-	if !doZero() {
-		proof.InitStamp = rand.Uint64()
-	}
-	if !doZero() {
-		proof.RedeemStamp = rand.Uint64()
+		proof.Secret = randBytes(32)
 	}
 	if !doZero() {
 		proof.MakerSwap = randBytes(36)
@@ -161,8 +155,8 @@ func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 	if !bytes.Equal(m1.SecretHash, m2.SecretHash) {
 		t.Fatalf("SecretHash mismatch. %x != %x", m1.SecretHash, m2.SecretHash)
 	}
-	if !bytes.Equal(m1.SecretKey, m2.SecretKey) {
-		t.Fatalf("SecretKey mismatch. %x != %x", m1.SecretKey, m2.SecretKey)
+	if !bytes.Equal(m1.Secret, m2.Secret) {
+		t.Fatalf("SecretKey mismatch. %x != %x", m1.Secret, m2.Secret)
 	}
 	if !bytes.Equal(m1.MakerSwap, m2.MakerSwap) {
 		t.Fatalf("MakerSwap mismatch. %x != %x", m1.MakerSwap, m2.MakerSwap)

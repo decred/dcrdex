@@ -6,6 +6,7 @@ package dcr
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -166,6 +167,17 @@ func (dcr *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract
 		return nil, err
 	}
 	return utxo, nil
+}
+
+// ValidateSecret checks that the secret satisfies the contract.
+func (dcr *Backend) ValidateSecret(secret, contract []byte) bool {
+	_, _, _, secretHash, err := dexdcr.ExtractSwapDetails(contract, chainParams)
+	if err != nil {
+		dcr.log.Errorf("ValidateSecret->ExtractSwapDetails error: %v\n", err)
+		return false
+	}
+	h := sha256.Sum256(secret)
+	return bytes.Equal(h[:], secretHash)
 }
 
 // Redemption is an input that redeems a swap contract.

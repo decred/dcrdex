@@ -55,6 +55,7 @@ func (a *TAsset) ValidateCoinID(coinID []byte) error {
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil
 }
+func (a *TAsset) ValidateSecret(secret, contract []byte) bool { return true }
 
 func newAsset(id uint32, lotSize uint64) *asset.BackedAsset {
 	return &asset.BackedAsset{

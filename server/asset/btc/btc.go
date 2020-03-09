@@ -207,6 +207,17 @@ func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract
 	return utxo, nil
 }
 
+// VerifySecret checks that the secret satisfies the contract.
+func (btc *Backend) ValidateSecret(secret, contract []byte) bool {
+	_, _, _, secretHash, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
+	if err != nil {
+		btc.log.Errorf("ValidateSecret->ExtractSwapDetails error: %v\n", err)
+		return false
+	}
+	h := sha256.Sum256(secret)
+	return bytes.Equal(h[:], secretHash)
+}
+
 // Redemption is an input that redeems a swap contract.
 func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
 	txHash, vin, err := decodeCoinID(redemptionID)
@@ -536,6 +547,12 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.GetTxOutResult, *btcjson.TxRawResult, []byte, error) {
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
+		var rpcErr *btcjson.RPCError
+		if errors.As(err, &rpcErr) {
+			if rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey {
+				return nil, nil, nil, asset.CoinNotFoundError
+			}
+		}
 		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err)
 	}
 	if txOut == nil {

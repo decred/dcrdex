@@ -310,6 +310,8 @@ func (b *TBackend) ValidateContract(contract []byte) error {
 	return nil
 }
 
+func (b *TBackend) ValidateSecret(secret, contract []byte) bool { return true }
+
 type tUTXO struct {
 	val uint64
 }
@@ -329,6 +331,7 @@ func (u *tUTXO) TxID() string                    { return "" }
 func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
 func (u *tUTXO) FeeRate() uint64                 { return 0 }
+func (u *tUTXO) Script() []byte                  { return nil }
 
 type tUser struct {
 	acct    account.AccountID

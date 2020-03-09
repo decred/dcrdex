@@ -74,7 +74,7 @@ func (c *TCore) Exchanges() map[string]*core.Exchange                { return ni
 func (c *TCore) PreRegister(dex string) (uint64, error)              { return 1e8, c.preRegErr }
 func (c *TCore) Register(r *core.Registration) (error, <-chan error) { return c.regErr, nil }
 func (c *TCore) InitializeClient(pw string) error                    { return c.initErr }
-func (c *TCore) Login(pw string) ([]core.Negotiation, error)         { return nil, c.loginErr }
+func (c *TCore) Login(pw string) error                               { return c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return nil, c.syncErr
 }

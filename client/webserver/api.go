@@ -325,7 +325,7 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 
 // apiActuallyLogin logs the user in.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
-	_, err := s.core.Login(login.Pass)
+	err := s.core.Login(login.Pass)
 	if err != nil {
 		s.writeAPIError(w, "login error: %v", err)
 		return

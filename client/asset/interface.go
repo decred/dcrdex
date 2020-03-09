@@ -10,6 +10,10 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
+// CoinNotFoundError is returned from AuditContract when the counter-party's
+// swap transaction coin cannot be found.
+const CoinNotFoundError = dex.Error("coin not found")
+
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
 	// ConfigPath is the default ConfigPath that the wallet will search for its
@@ -57,19 +61,26 @@ type Wallet interface {
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
+	// FundingCoins gets funding coins for the coin IDs. The coins are locked.
+	// This method might be called to reinitialize an order from data stored
+	// externally. This method will only return funding coins, e.g. unspent
+	// transaction outputs.
+	FundingCoins([]dex.Bytes) (Coins, error)
 	// Swap sends the swaps in a single transaction. The Receipts returned can be
 	// used to refund a failed transaction.
-	Swap([]*Swap, *dex.Asset) ([]Receipt, error)
+	Swap(*Swaps, *dex.Asset) ([]Receipt, Coin, error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption.
-	Redeem([]*Redemption, *dex.Asset) error
+	Redeem([]*Redemption, *dex.Asset) ([]dex.Bytes, error)
 	// SignMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
 	SignMessage(Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error)
 	// AuditContract retrieves information about a swap contract on the
 	// blockchain. This would be used to verify the counter-party's contract
-	// during a swap.
+	// during a swap. If the coin cannot be found for the coin ID, the
+	// ExchangeWallet should return CoinNotFoundError. This enables the client
+	// to properly handle network latency.
 	AuditContract(coinID, contract dex.Bytes) (AuditInfo, error)
 	// FindRedemption should attempt to find the input that spends the specified
 	// coin, and return the secret key if it does.
@@ -104,6 +115,8 @@ type Wallet interface {
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
 	Withdraw(address string, value, feeRate uint64) (Coin, error)
+	// ValidateSecret checks that the secret hashes to the secret hash.
+	ValidateSecret(secret, secretHash []byte) bool
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed
@@ -142,18 +155,20 @@ type AuditInfo interface {
 	Expiration() time.Time
 	// Coin is the coin that contains the contract.
 	Coin() Coin
+	// SecretHash is the contract's secret hash.
+	SecretHash() dex.Bytes
 }
 
 // INPUT TYPES
 // The types below will be used by the client as inputs for the methods exposed
 // by the wallet.
 
-// Swap is the details needed to broadcast some a swap contract.
-type Swap struct {
+// Swaps is the details needed to broadcast a swap contract(s).
+type Swaps struct {
 	// Inputs are the Coins being spent.
 	Inputs Coins
 	// Contract is the contract data.
-	Contract *Contract
+	Contracts []*Contract
 }
 
 // Contract is a swap contract.

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/slog"
@@ -77,6 +79,33 @@ func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 	}
 }
 
+func makeAcker(serializer func(msg *msgjson.Message) msgjson.Signable) func(msg *msgjson.Message, f msgFunc) error {
+	return func(msg *msgjson.Message, f msgFunc) error {
+		signable := serializer(msg)
+		sigMsg, _ := signable.Serialize()
+		sig, _ := tDexPriv.Sign(sigMsg)
+		ack := &msgjson.Acknowledgement{
+			Sig: sig.Serialize(),
+		}
+		resp, _ := msgjson.NewResponse(msg.ID, ack, nil)
+		f(resp)
+		return nil
+	}
+}
+
+var (
+	initAcker = makeAcker(func(msg *msgjson.Message) msgjson.Signable {
+		init := new(msgjson.Init)
+		msg.Unmarshal(init)
+		return init
+	})
+	redeemAcker = makeAcker(func(msg *msgjson.Message) msgjson.Signable {
+		redeem := new(msgjson.Redeem)
+		msg.Unmarshal(redeem)
+		return redeem
+	})
+)
+
 type TWebsocket struct {
 	mtx        sync.RWMutex
 	id         uint64
@@ -127,7 +156,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		books: make(map[string]*book.OrderBook),
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
-			BroadcastTimeout: 5 * 60000,
+			BroadcastTimeout: 5 * 60,
 			Assets: []msgjson.Asset{
 				*uncovertAssetInfo(tDCR),
 				*uncovertAssetInfo(tBTC),
@@ -300,14 +329,55 @@ func (c *tCoin) Redeem() dex.Bytes {
 	return nil
 }
 
+type tReceipt struct {
+	coin       *tCoin
+	expiration time.Time
+}
+
+func (r *tReceipt) Coin() asset.Coin {
+	return r.coin
+}
+
+func (r *tReceipt) Expiration() time.Time {
+	return r.expiration
+}
+
+type tAuditInfo struct {
+	recipient  string
+	expiration time.Time
+	coin       *tCoin
+	secretHash []byte
+}
+
+func (ai *tAuditInfo) Recipient() string {
+	return ai.recipient
+}
+
+func (ai *tAuditInfo) Expiration() time.Time {
+	return ai.expiration
+}
+
+func (ai *tAuditInfo) Coin() asset.Coin {
+	return ai.coin
+}
+
+func (ai *tAuditInfo) SecretHash() dex.Bytes {
+	return ai.secretHash
+}
+
 type TXCWallet struct {
-	mtx         sync.RWMutex
-	payFeeCoin  *tCoin
-	payFeeErr   error
-	fundCoins   asset.Coins
-	fundErr     error
-	addrErr     error
-	signCoinErr error
+	mtx          sync.RWMutex
+	payFeeCoin   *tCoin
+	payFeeErr    error
+	fundCoins    asset.Coins
+	fundErr      error
+	addrErr      error
+	signCoinErr  error
+	swapReceipts []asset.Receipt
+	auditInfo    asset.AuditInfo
+	auditErr     error
+	redeemCoins  []dex.Bytes
+	badSecret    bool
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -341,12 +411,16 @@ func (w *TXCWallet) ReturnCoins(asset.Coins) error {
 	return nil
 }
 
-func (w *TXCWallet) Swap([]*asset.Swap, *dex.Asset) ([]asset.Receipt, error) {
+func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 	return nil, nil
 }
 
-func (w *TXCWallet) Redeem([]*asset.Redemption, *dex.Asset) error {
-	return nil
+func (w *TXCWallet) Swap(swap *asset.Swaps, _ *dex.Asset) ([]asset.Receipt, asset.Coin, error) {
+	return w.swapReceipts, &tCoin{id: []byte{0x0a, 0x0b}}, nil
+}
+
+func (w *TXCWallet) Redeem([]*asset.Redemption, *dex.Asset) ([]dex.Bytes, error) {
+	return w.redeemCoins, nil
 }
 
 func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
@@ -354,7 +428,7 @@ func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Byte
 }
 
 func (w *TXCWallet) AuditContract(coinID, contract dex.Bytes) (asset.AuditInfo, error) {
-	return nil, nil
+	return w.auditInfo, w.auditErr
 }
 
 func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error) {
@@ -393,6 +467,10 @@ func (w *TXCWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (asset.Co
 
 func (w *TXCWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
+}
+
+func (w *TXCWallet) ValidateSecret(secret, secretHash []byte) bool {
+	return !w.badSecret
 }
 
 func (w *TXCWallet) setConfs(confs uint32) {
@@ -454,8 +532,8 @@ func newTestRig() *testRig {
 				Backend:      slog.NewBackend(os.Stdout),
 				DefaultLevel: slog.LevelTrace,
 			},
-			wallets: make(map[uint32]*xcWallet),
-			waiters: make(map[uint64]*coinWaiter),
+			wallets:      make(map[uint32]*xcWallet),
+			blockWaiters: make(map[uint64]*blockWaiter),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
@@ -761,7 +839,7 @@ func TestRegister(t *testing.T) {
 				select {
 				case <-time.NewTimer(time.Millisecond).C:
 					tCore.waiterMtx.Lock()
-					waiterCount := len(tCore.waiters)
+					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 {
 						tWallet.setConfs(tDCR.FundConf)
@@ -943,7 +1021,7 @@ func TestLogin(t *testing.T) {
 	}
 
 	queueSuccess()
-	_, err := tCore.Login(tPW)
+	err := tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("initial Login error: %v", err)
 	}
@@ -951,7 +1029,7 @@ func TestLogin(t *testing.T) {
 	// No encryption key.
 	rig.acct.unauth()
 	rig.db.encKeyErr = tErr
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err == nil {
 		t.Fatalf("no error for missing app key")
 	}
@@ -959,7 +1037,7 @@ func TestLogin(t *testing.T) {
 
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("error for unpaid account: %v", err)
 	}
@@ -975,7 +1053,7 @@ func TestLogin(t *testing.T) {
 		f(resp)
 		return nil
 	})
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err == nil {
 		t.Fatalf("no error for 'connect' route error")
 	}
@@ -983,7 +1061,7 @@ func TestLogin(t *testing.T) {
 	// Success again.
 	rig.acct.unauth()
 	queueSuccess()
-	_, err = tCore.Login(tPW)
+	err = tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("final Login error: %v", err)
 	}
@@ -999,7 +1077,9 @@ func TestConnectDEX(t *testing.T) {
 
 	queueConfig := func() {
 		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
-			result := &msgjson.ConfigResult{}
+			result := &msgjson.ConfigResult{
+				BroadcastTimeout: 5 * 60,
+			}
 			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 			f(resp)
 			return nil
@@ -1239,6 +1319,14 @@ func TestTrade(t *testing.T) {
 		t.Fatalf("limit order error: %v", err)
 	}
 
+	// Should not be able to close wallet now, since there are orders.
+	if tCore.CloseWallet(tDCR.ID) == nil {
+		t.Fatalf("no error for closing DCR wallet with active orders")
+	}
+	if tCore.CloseWallet(tBTC.ID) == nil {
+		t.Fatalf("no error for closing BTC wallet with active orders")
+	}
+
 	// Dex not found
 	form.DEX = "https://someotherdex.org"
 	_, err = tCore.Trade(tPW, form)
@@ -1347,8 +1435,18 @@ func TestCancel(t *testing.T) {
 			Commit:     preImg.Commit(),
 		},
 	}
+	dbOrder := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusEpoch,
+			DEX:    dc.acct.url,
+			Proof: db.OrderProof{
+				Preimage: preImg[:],
+			},
+		},
+		Order: lo,
+	}
 	oid := lo.ID()
-	tracker := newTrackedTrade(lo, dc, preImg)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.db, nil, nil)
 	dc.trades[oid] = tracker
 
 	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
@@ -1442,9 +1540,23 @@ func TestHandlePreimageRequest(t *testing.T) {
 func TestTradeTracking(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
-	qty := tDCR.LotSize * 5
+	tCore := rig.core
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
+	dcrWallet.Unlock(tPW, time.Hour)
+
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(tPW, time.Hour)
+
+	matchSize := 4 * tDCR.LotSize
+	cancelledQty := tDCR.LotSize
+	qty := 2*matchSize + cancelledQty
 	rate := tBTC.RateStep * 10
 	preImgL := newPreimage()
+	addr := ordertest.RandomAddress()
 	lo := &order.LimitOrder{
 		P: order.Prefix{
 			AccountID:  dc.acct.ID(),
@@ -1458,15 +1570,266 @@ func TestTradeTracking(t *testing.T) {
 		T: order.Trade{
 			Sell:     true,
 			Quantity: qty,
-			Address:  "testaddr",
+			Address:  addr,
 		},
 		Rate: tBTC.RateStep,
 	}
+	dbOrder := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusEpoch,
+			DEX:    dc.acct.url,
+			Proof: db.OrderProof{
+				Preimage: preImgL[:],
+			},
+		},
+		Order: lo,
+	}
 	loid := lo.ID()
-	var mid order.MatchID
-	copy(mid[:], encode.RandomBytes(32))
-	tracker := newTrackedTrade(lo, dc, preImgL)
+	mid := ordertest.RandomMatchID()
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, rig.db, walletSet, nil)
 	rig.dc.trades[tracker.ID()] = tracker
+	var match *matchTracker
+	checkStatus := func(tag string, wantStatus order.MatchStatus) {
+		if match.Match.Status != wantStatus {
+			t.Fatalf("%s: wrong status wanted %d, got %d", tag, match.Match.Status, wantStatus)
+		}
+	}
+
+	// MAKER MATCH
+	//
+	msgMatch := &msgjson.Match{
+		OrderID:  loid[:],
+		MatchID:  mid[:],
+		Quantity: matchSize,
+		Rate:     rate,
+		Address:  "counterparty-address",
+		Side:     uint8(order.Maker),
+	}
+	counterSwapID := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
+	sign(tDexPriv, msgMatch)
+	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("match messages error: %v", err)
+	}
+	match, found := tracker.matches[mid]
+	if !found {
+		t.Fatalf("match not found")
+	}
+
+	// We're the maker, so the init transaction should be broadcast.
+	checkStatus("maker swapped", order.MakerSwapCast)
+	_, metaData := match.Match, match.MetaData
+	proof, auth := &metaData.Proof, &metaData.Proof.Auth
+	if len(auth.MatchSig) == 0 {
+		t.Fatalf("no match sig recorded")
+	}
+	if !bytes.Equal(proof.MakerSwap, counterSwapID) {
+		t.Fatalf("receipt ID not recorded")
+	}
+	if len(proof.Secret) == 0 {
+		t.Fatalf("secret not set")
+	}
+	if len(proof.SecretHash) == 0 {
+		t.Fatalf("secret hash not set")
+	}
+
+	// Send the counter-party's init info.
+	auditQty := calc.BaseToQuote(rate, matchSize)
+	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
+	tBtcWallet.auditInfo = auditInfo
+	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
+
+	// Check audit errors.
+	tBtcWallet.auditErr = tErr
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err == nil {
+		t.Fatalf("no maker error for AuditContract error")
+	}
+	tBtcWallet.auditErr = nil
+
+	auditInfo.coin.val = auditQty - 1
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err == nil {
+		t.Fatalf("no maker error for low value")
+	}
+	auditInfo.coin.val = auditQty
+
+	auditInfo.secretHash = []byte{0x01}
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err == nil {
+		t.Fatalf("no maker error for wrong secret hash")
+	}
+	auditInfo.secretHash = proof.SecretHash
+
+	auditInfo.recipient = "wrong address"
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err == nil {
+		t.Fatalf("no maker error for wrong address")
+	}
+	auditInfo.recipient = addr
+
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("match message error: %v", err)
+	}
+	checkStatus("maker counter-party swapped", order.TakerSwapCast)
+	if match.counterSwap == nil {
+		t.Fatalf("counter-swap not set")
+	}
+	if !bytes.Equal(proof.CounterScript, audit.Contract) {
+		t.Fatalf("counter-script not recorded")
+	}
+	if !bytes.Equal(proof.TakerSwap, audit.CoinID) {
+		t.Fatalf("taker contract ID not set")
+	}
+	if !bytes.Equal(auth.AuditSig, audit.Sig) {
+		t.Fatalf("audit sig not set")
+	}
+	if auth.AuditStamp != audit.Time {
+		t.Fatalf("audit time not set")
+	}
+	// Confirming the counter-swap triggers a redemption.
+	auditInfo.coin.confs = tBTC.SwapConf
+	redeemCoin := encode.RandomBytes(36)
+	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
+	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
+	dc.tickAsset(tBTC.ID)
+	checkStatus("maker redeemed", order.MakerRedeemed)
+	if !bytes.Equal(proof.MakerRedeem, redeemCoin) {
+		t.Fatalf("redeem coin ID not logged")
+	}
+	redemptionCoin := encode.RandomBytes(36)
+	// The taker's redemption is simply logged.
+	redemption := &msgjson.Redemption{
+		Redeem: msgjson.Redeem{
+			OrderID: loid[:],
+			MatchID: mid[:],
+			CoinID:  redemptionCoin,
+		},
+	}
+	msg, _ = msgjson.NewRequest(1, msgjson.RedemptionRoute, redemption)
+	err = handleRedemptionRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("redemption message error: %v", err)
+	}
+	checkStatus("maker match complete", order.MatchComplete)
+	if !bytes.Equal(redemptionCoin, proof.TakerRedeem) {
+		t.Fatalf("taker redemption coin not recorded")
+	}
+
+	// TAKER MATCH
+	//
+	mid = ordertest.RandomMatchID()
+	msgMatch = &msgjson.Match{
+		OrderID:  loid[:],
+		MatchID:  mid[:],
+		Quantity: matchSize,
+		Rate:     rate,
+		Address:  "counterparty-address",
+		Side:     uint8(order.Taker),
+	}
+	sign(tDexPriv, msgMatch)
+	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("match messages error: %v", err)
+	}
+	match, found = tracker.matches[mid]
+	if !found {
+		t.Fatalf("match not found")
+	}
+	checkStatus("taker matched", order.NewlyMatched)
+	_, metaData = match.Match, match.MetaData
+	proof, auth = &metaData.Proof, &metaData.Proof.Auth
+	if len(auth.MatchSig) == 0 {
+		t.Fatalf("no match sig recorded")
+	}
+	// Secret should not be set yet.
+	if len(proof.Secret) != 0 {
+		t.Fatalf("secret set for taker")
+	}
+	if len(proof.SecretHash) != 0 {
+		t.Fatalf("secret hash set for taker")
+	}
+	// Now send through the audit request for the maker's init.
+	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
+	tBtcWallet.auditInfo = auditInfo
+	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("taker's match message error: %v", err)
+	}
+	checkStatus("taker counter-party swapped", order.MakerSwapCast)
+	if len(proof.SecretHash) == 0 {
+		t.Fatalf("secret hash not set for taker")
+	}
+	if !bytes.Equal(proof.MakerSwap, audit.CoinID) {
+		t.Fatalf("maker redeem coin not set")
+	}
+	if !bytes.Equal(auth.AuditSig, audit.Sig) {
+		t.Fatalf("audit sig not set for taker")
+	}
+	if auth.AuditStamp != audit.Time {
+		t.Fatalf("audit time not set for taker")
+	}
+	// The swap should not be sent, since the auditInfo coin doesn't have the
+	// requisite confirmations.
+	if len(proof.TakerSwap) != 0 {
+		t.Fatalf("swap broadcast before confirmations")
+	}
+	// Now with the confirmations.
+	auditInfo.coin.confs = tBTC.SwapConf
+	swapID := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
+	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	dc.tickAsset(tBTC.ID)
+	checkStatus("taker swapped", order.TakerSwapCast)
+	if len(proof.TakerSwap) == 0 {
+		t.Fatalf("swap not broadcast with confirmations")
+	}
+	// Receive the maker's redemption.
+	redemptionCoin = encode.RandomBytes(36)
+	redemption = &msgjson.Redemption{
+		Redeem: msgjson.Redeem{
+			OrderID: loid[:],
+			MatchID: mid[:],
+			CoinID:  redemptionCoin,
+		},
+	}
+	redeemCoin = encode.RandomBytes(36)
+	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
+	msg, _ = msgjson.NewRequest(1, msgjson.RedemptionRoute, redemption)
+
+	tBtcWallet.badSecret = true
+	err = handleRedemptionRoute(tCore, rig.dc, msg)
+	if err == nil {
+		t.Fatalf("no error for wrong secret")
+	}
+	tBtcWallet.badSecret = false
+
+	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
+	err = handleRedemptionRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("redemption message error: %v", err)
+	}
+	checkStatus("taker complete", order.MatchComplete)
+	if !bytes.Equal(proof.MakerRedeem, redemptionCoin) {
+		t.Fatalf("redemption coin ID not logged")
+	}
+	if len(proof.TakerRedeem) == 0 {
+		t.Fatalf("taker redemption not sent")
+	}
+
+	// CANCEL ORDER MATCH
+	//
+	copy(mid[:], encode.RandomBytes(32))
 	preImgC := newPreimage()
 	co := &order.CancelOrder{
 		P: order.Prefix{
@@ -1481,24 +1844,24 @@ func TestTradeTracking(t *testing.T) {
 	}
 	tracker.cancel = &trackedCancel{CancelOrder: *co}
 	coid := co.ID()
-	msgMatches := []*msgjson.Match{
-		{
-			OrderID:  loid[:],
-			MatchID:  mid[:],
-			Quantity: qty,
-			Rate:     rate,
-			Address:  "",
-		},
-		{
-			OrderID:  coid[:],
-			MatchID:  mid[:],
-			Quantity: qty,
-			Rate:     rate,
-			Address:  "testaddr",
-		},
+	m1 := &msgjson.Match{
+		OrderID:  loid[:],
+		MatchID:  mid[:],
+		Quantity: cancelledQty,
+		Rate:     rate,
+		Address:  "",
 	}
-	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, msgMatches)
-	err := handleMatchRoute(rig.core, rig.dc, msg)
+	m2 := &msgjson.Match{
+		OrderID:  coid[:],
+		MatchID:  mid[:],
+		Quantity: cancelledQty,
+		Rate:     rate,
+		Address:  "testaddr",
+	}
+	sign(tDexPriv, m1)
+	sign(tDexPriv, m2)
+	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{m1, m2})
+	err = handleMatchRoute(tCore, rig.dc, msg)
 	if err != nil {
 		t.Fatalf("match messages error: %v", err)
 	}
@@ -1598,4 +1961,28 @@ func orderResponse(msgID uint64, msgPrefix msgjson.Stampable, ord order.Order, b
 		ServerTime: timeStamp,
 	}, nil)
 	return resp
+}
+
+func tMsgAudit(oid order.OrderID, mid order.MatchID, recipient string, val uint64, secretHash []byte) (*msgjson.Audit, *tAuditInfo) {
+	auditID := encode.RandomBytes(36)
+	auditContract := encode.RandomBytes(75)
+	if secretHash == nil {
+		secretHash = encode.RandomBytes(32)
+	}
+	auditStamp := encode.UnixMilliU(time.Now())
+	audit := &msgjson.Audit{
+		OrderID:  oid[:],
+		MatchID:  mid[:],
+		Time:     auditStamp,
+		CoinID:   auditID,
+		Contract: auditContract,
+	}
+	sign(tDexPriv, audit)
+	auditCoin := &tCoin{id: auditID, val: val}
+	auditInfo := &tAuditInfo{
+		recipient:  recipient,
+		coin:       auditCoin,
+		secretHash: secretHash,
+	}
+	return audit, auditInfo
 }

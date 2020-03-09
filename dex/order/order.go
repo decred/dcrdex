@@ -49,6 +49,11 @@ func (oid OrderID) String() string {
 	return hex.EncodeToString(oid[:])
 }
 
+// Bytes returns the order ID as a []byte.
+func (oid OrderID) Bytes() []byte {
+	return oid[:]
+}
+
 // Value implements the sql/driver.Valuer interface.
 func (oid OrderID) Value() (driver.Value, error) {
 	return oid[:], nil // []byte

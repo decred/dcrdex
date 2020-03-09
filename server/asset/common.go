@@ -17,6 +17,8 @@ type Backend interface {
 	// on the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
 	Contract(coinID []byte, redeemScript []byte) (Contract, error)
+	// ValidateSecret checks that the secret satisfies the contract.
+	ValidateSecret(secret, contract []byte) bool
 	// Redemption returns the redemption at the specified location.
 	Redemption(redemptionID, contractID []byte) (Coin, error)
 	// FundingCoin returns the unspent coin at the specified location.
@@ -77,6 +79,8 @@ type Contract interface {
 	Address() string
 	// FeeRate returns the transaction fee rate, in atoms/byte equivalent.
 	FeeRate() uint64
+	// Script is the contract redeem script.
+	Script() []byte
 }
 
 // BackedAsset is a dex.Asset with a Backend.

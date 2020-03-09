@@ -91,7 +91,7 @@ const (
 	FROM %s
 	WHERE takerAccount = $1 OR makerAccount = $1;`
 
-	RetrieveActiveUserMatches = `SELECT matchid, 
+	RetrieveActiveUserMatches = `SELECT matchid,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
 		epochIdx, epochDur, quantity, rate, status

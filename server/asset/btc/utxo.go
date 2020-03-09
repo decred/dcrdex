@@ -45,7 +45,7 @@ type TXIO struct {
 func (txio *TXIO) confirmations() (int64, error) {
 	btc := txio.btc
 	tipHash := btc.blockCache.tipHash()
-	// If the tx was in a mempool transaction, check if it has been confirmed.
+	// If the tx was a mempool transaction, check if it has been confirmed.
 	if txio.height == 0 {
 		// If the tip hasn't changed, don't do anything here.
 		if txio.lastLookup == nil || *txio.lastLookup != tipHash {
@@ -223,6 +223,11 @@ func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 		}
 	}
 	return nil
+}
+
+// Script returns the UTXO's redeem script.
+func (utxo *UTXO) Script() []byte {
+	return utxo.redeemScript
 }
 
 type pkMatch struct {

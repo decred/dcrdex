@@ -56,7 +56,7 @@ var (
 type clientCore interface {
 	Exchanges() map[string]*core.Exchange
 	Register(*core.Registration) (error, <-chan error)
-	Login(pw string) ([]core.Negotiation, error)
+	Login(pw string) error
 	InitializeClient(pw string) error
 	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
 	Book(dex string, base, quote uint32) *core.OrderBook
