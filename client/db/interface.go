@@ -64,4 +64,6 @@ type DB interface {
 	UpdateWallet(wallet *Wallet) error
 	// Wallets lists all saved wallets.
 	Wallets() ([]*Wallet, error)
+	// Backup makes a copy of the database.
+	Backup() error
 }

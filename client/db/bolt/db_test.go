@@ -14,6 +14,7 @@ import (
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"github.com/decred/slog"
 )
 
 var (
@@ -38,6 +39,12 @@ func newTestDB(t *testing.T) *boltDB {
 }
 
 func TestMain(m *testing.M) {
+	backendLogger := slog.NewBackend(os.Stdout)
+	defer os.Stdout.Sync()
+	log := backendLogger.Logger("Debug")
+	log.SetLevel(slog.LevelTrace)
+	UseLogger(log)
+
 	doIt := func() int {
 		var err error
 		tDir, err = ioutil.TempDir("", "dbtest")
@@ -52,6 +59,28 @@ func TestMain(m *testing.M) {
 		return m.Run()
 	}
 	os.Exit(doIt())
+}
+
+func TestBackup(t *testing.T) {
+	db := newTestDB(t)
+
+	// Backup the database.
+	err := db.Backup()
+	if err != nil {
+		t.Fatalf("unable to backup database: %v", err)
+	}
+
+	// Ensure the backup exists.
+	path := filepath.Join(filepath.Dir(db.Path()), backupDir, filepath.Base(db.Path()))
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Fatalf("backup file does not exist: %v", err)
+	}
+
+	// Overwrite the backup.
+	err = db.Backup()
+	if err != nil {
+		t.Fatalf("unable to overwrite backup: %v", err)
+	}
 }
 
 func TestStore(t *testing.T) {

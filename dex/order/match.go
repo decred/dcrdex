@@ -61,13 +61,13 @@ const (
 	// broadcast their swap notification. The DEX has validated the swap
 	// notification and sent the details to the maker.
 	TakerSwapCast // 2
-	// MakerRedeemed: Maker has acknowledged their audit request and
-	// broadcast their redemption transaction. The DEX has validated the
-	// redemption and sent the details to the taker.
+	// MakerRedeemed: Maker has acknowledged their audit request and broadcast
+	// their redemption transaction. The DEX has validated the redemption and
+	// sent the details to the taker.
 	MakerRedeemed // 3
-	// MatchComplete: Taker has acknowledged their audit request and
-	// broadcast their redemption transaction. The DEX has validated the
-	// redemption and sent the details to the maker.
+	// MatchComplete: Taker has acknowledged their audit request and broadcast
+	// their redemption transaction. The DEX has validated the redemption and
+	// sent the details to the maker.
 	MatchComplete // 4
 )
 

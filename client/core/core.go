@@ -131,10 +131,11 @@ func New(cfg *Config) (*Core, error) {
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 	}
+
 	// Populate the initial user data. User won't include any DEX info yet, as
 	// those are retrieved when Run is called and the core connects to the DEXes.
 	core.refreshUser()
-	log.Tracef("new client core created")
+	log.Debugf("new client core created")
 	return core, nil
 }
 
@@ -145,7 +146,7 @@ func (c *Core) Run(ctx context.Context) {
 	// when new accounts are registered.
 	c.ctx = ctx
 	c.initialize()
-	<-ctx.Done()
+	c.db.Run(ctx)
 	c.wg.Wait()
 	log.Infof("DEX client core off")
 }
@@ -436,13 +437,16 @@ func (c *Core) PreRegister(dex string) (uint64, error) {
 	if found {
 		return 0, fmt.Errorf("already registered at %s", dex)
 	}
+
 	dc, err := c.connectDEX(&db.AccountInfo{URL: dex})
 	if err != nil {
 		return 0, err
 	}
+
 	c.connMtx.Lock()
+	defer c.connMtx.Unlock() // remain locked for pendingReg and pendingTimer
 	c.pendingReg = dc
-	c.connMtx.Unlock()
+
 	// After a while, if the registration hasn't been completed, disconnect from
 	// the DEX. The Register loop will form a new connection if pendingReg is nil.
 	if c.pendingTimer == nil {
@@ -495,10 +499,21 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	ai := &db.AccountInfo{
 		URL: form.DEX,
 	}
+
+	// Lock conns map, pendingReg, and pendingTimer.
 	c.connMtx.Lock()
 	dc, found := c.conns[ai.URL]
 	// If it's not already in the map, see if there is a pre-registration pending.
-	if !found && c.pendingReg != nil && c.pendingReg.acct.url == form.DEX {
+	if !found && c.pendingReg != nil {
+		if c.pendingReg.acct.url != ai.URL {
+			return fmt.Errorf("pending registration exists for dex %s", c.pendingReg.acct.url), nil
+		}
+		if c.pendingTimer != nil { // it should be set
+			if !c.pendingTimer.Stop() {
+				return fmt.Errorf("pre-registration timer already fired and shutdown the connection"), nil
+			}
+			c.pendingTimer = nil
+		}
 		dc = c.pendingReg
 		c.conns[ai.URL] = dc
 		found = true
@@ -513,6 +528,8 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		c.conns[ai.URL] = dc
 	}
 	c.connMtx.Unlock()
+
+	// Update user in case conns or wallets were updated.
 	c.refreshUser()
 
 	regAsset, found := dc.assets[assetID]
@@ -585,6 +602,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 	if regRes.Fee != form.Fee {
 		return fmt.Errorf("registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee), nil
 	}
+
 	// Pay the registration fee.
 	log.Infof("Attempting registration fee payment for %s of %d units of %s", regRes.Address,
 		regRes.Fee, regAsset.Symbol)
@@ -1000,9 +1018,16 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 	if confs >= uint32(dc.cfg.RegFeeConfirms) {
 		err := c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
-			log.Errorf("reFee %s - notifyfee error: %v", err)
+			log.Errorf("reFee %s - notifyfee error: %v", dc.acct.url, err)
+		} else {
+			log.Infof("Fee paid at %s", dc.acct.url)
+			// dc.acct.pay() and c.authDEX????
+			dc.acct.pay()
+			_, err = c.authDEX(dc)
+			if err != nil {
+				log.Errorf("fee paid, but failed to authenticate connection to %s", dc.acct.url)
+			}
 		}
-		log.Infof("Fee paid at %s", dc.acct.url)
 		return
 	}
 
@@ -1026,7 +1051,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 			return
 		}
 		dc.acct.pay()
-		log.Infof("Fee paid at %s", dc.acct.url)
+		log.Infof("waiter: Fee paid at %s", dc.acct.url)
 		// New account won't have any active negotiations, so OK to discard first
 		// first return value from authDEX.
 		_, err = c.authDEX(dc)
@@ -1045,6 +1070,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing account URL %s: %v", uri, err)
 	}
+
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&comms.WsCfg{
 		URL:      "wss://" + parsedURL.Host + "/ws",
@@ -1065,6 +1091,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		connMaster.Disconnect()
 		return nil, fmt.Errorf("Error initalizing websocket connection: %v", err)
 	}
+
 	// Request the market configuration. The DEX is only added when the DEX
 	// configuration is successfully retrieved.
 	reqMsg, err := msgjson.NewRequest(conn.NextID(), msgjson.ConfigRoute, nil)

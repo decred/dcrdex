@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
@@ -51,6 +53,7 @@ var (
 	byteFalse      = encode.ByteFalse
 	byteEpoch      = uint16Bytes(uint16(order.OrderStatusEpoch))
 	byteBooked     = uint16Bytes(uint16(order.OrderStatusBooked))
+	backupDir      = "backup"
 )
 
 // boltDB is a bbolt-based database backend for a DEX client. boltDB satisfies
@@ -81,6 +84,10 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 // Run waits for context cancellation and closes the database.
 func (db *boltDB) Run(ctx context.Context) {
 	<-ctx.Done()
+	err := db.Backup()
+	if err != nil {
+		log.Errorf("unable to backup database: %v", err)
+	}
 	db.Close()
 }
 
@@ -690,6 +697,23 @@ func (db *boltDB) withBucket(bkt []byte, viewer txFunc, f bucketFunc) error {
 		}
 		return f(bucket)
 	})
+}
+
+// Backup makes a copy of the database.
+func (db *boltDB) Backup() error {
+	dir := filepath.Join(filepath.Dir(db.Path()), backupDir)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err := os.Mkdir(dir, 0700)
+		if err != nil {
+			return fmt.Errorf("unable to create backup directory: %v", err)
+		}
+	}
+
+	path := filepath.Join(dir, filepath.Base(db.Path()))
+	err := db.View(func(tx *bbolt.Tx) error {
+		return tx.CopyFile(path, 0600)
+	})
+	return err
 }
 
 // bucketPutter enables chained calls to (*bbolt.Bucket).Put with error
