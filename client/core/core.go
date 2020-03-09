@@ -131,6 +131,9 @@ func New(cfg *Config) (*Core, error) {
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 	}
+
+	// Populate the initial user data. User won't include any DEX info yet, as
+	// those are retrieved when Run is called and the core connects to the DEXes.
 	core.refreshUser()
 	log.Debugf("new client core created")
 	return core, nil
