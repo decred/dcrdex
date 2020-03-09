@@ -862,14 +862,6 @@ func TestSignMessage(t *testing.T) {
 	}
 	node.rawErr[methodPrivKeyForAddress] = nil
 
-	// // signmessagewithprivkey error
-	// node.rawErr[methodSignMessage] = tErr
-	// _, _, err = wallet.SignMessage(coin, msg)
-	// if err == nil {
-	// 	t.Fatalf("no error for signmessagewithprivkey rpc error")
-	// }
-	// node.rawErr[methodSignMessage] = nil
-
 	// bad coin
 	badCoin := &tCoin{id: make([]byte, 15)}
 	_, _, err = wallet.SignMessage(badCoin, msg)

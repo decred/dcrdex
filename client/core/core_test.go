@@ -56,7 +56,7 @@ var (
 	tPW                   = "dexpw"
 	wPW                   = "walletpw"
 	tDexUrl               = "somedex.tld"
-	tDcrBtcMktName        = "dcr_btc_mainnet"
+	tDcrBtcMktName        = "dcr_btc"
 	tErr                  = fmt.Errorf("test error")
 	tFee           uint64 = 1e8
 )
@@ -474,7 +474,6 @@ func tMarketID(base, quote uint32) string {
 }
 
 func TestMain(m *testing.M) {
-	// requestTimeout = time.Millisecond
 	log = slog.NewBackend(os.Stdout).Logger("TEST")
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -1404,7 +1403,7 @@ func TestCancel(t *testing.T) {
 
 }
 
-func TestHandlePreimg(t *testing.T) {
+func TestHandlePreimageRequest(t *testing.T) {
 	rig := newTestRig()
 	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
 	oid := ord.ID()

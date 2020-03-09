@@ -44,7 +44,7 @@ func mkMrkt(base, quote string) *core.Market {
 	baseID, _ := dex.BipSymbolID(base)
 	quoteID, _ := dex.BipSymbolID(quote)
 	market := &core.Market{
-		Name:            fmt.Sprintf("%s-%s_mainnet", base, quote),
+		Name:            fmt.Sprintf("%s-%s", base, quote),
 		BaseID:          baseID,
 		BaseSymbol:      base,
 		QuoteID:         quoteID,

@@ -895,7 +895,6 @@ async function handleMarkets (main, data) {
     var res = await postJSON('/api/trade', req)
     app.loaded()
     if (!checkResponse(res)) return
-    console.log("--success: order =", res.order)
     // If the wallets are not open locally, they must have been opened during
     // ordering. Grab updated info.
     const baseWallet = app.walletMap[selected.base.id]

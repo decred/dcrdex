@@ -61,7 +61,7 @@ type dexConnection struct {
 // should be treated as read only. A new map is constructed and is assigned to
 // dc.marketMap under lock, and can be safely accessed with
 // dexConnection.markets. refreshMarkets is used when a change to the status of
-// a market or the users orders on a market has changed.
+// a market or the user's orders on a market has changed.
 func (dc *dexConnection) refreshMarkets() map[string]*Market {
 	marketMap := make(map[string]*Market, len(dc.cfg.Markets))
 	for _, mkt := range dc.cfg.Markets {
@@ -1519,7 +1519,6 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 			}
 		}
 
-		markets := make([]*Market, 0, len(dexCfg.Markets))
 		marketMap := make(map[string]*Market)
 		for _, mkt := range dexCfg.Markets {
 			base, quote := assets[mkt.Base], assets[mkt.Quote]
@@ -1533,7 +1532,6 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 				StartEpoch:      mkt.StartEpoch,
 				MarketBuyBuffer: mkt.MarketBuyBuffer,
 			}
-			markets = append(markets, market)
 			marketMap[mkt.Name] = market
 		}
 
@@ -1924,8 +1922,7 @@ func extractError(errChan <-chan error, delay time.Duration, route string) error
 // newPreimage creates a random order commitment. If you require a matching
 // commitment, generate a Preimage, then Preimage.Commit().
 func newPreimage() (p order.Preimage) {
-	b := encode.RandomBytes(order.PreimageSize)
-	copy(p[:], b)
+	copy(p[:], encode.RandomBytes(order.PreimageSize))
 	return
 }
 
@@ -2034,7 +2031,6 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 	msgOrder.Stamp(result.ServerTime)
 	msg, err := msgOrder.Serialize()
 	if err != nil {
-		// logAbandon(err)
 		return fmt.Errorf("serialization error. order abandoned")
 	}
 	err = dc.acct.checkSig(msg, result.Sig)
