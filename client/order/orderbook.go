@@ -54,12 +54,14 @@ type OrderBook struct {
 	sells        *bookSide
 	synced       bool
 	syncedMtx    sync.Mutex
+	epochQueue   *EpochQueue
 }
 
 // NewOrderBook creates a new order book.
 func NewOrderBook() *OrderBook {
 	ob := &OrderBook{
-		noteQueue: make([]*cachedOrderNote, 0, defaultQueueCapacity),
+		noteQueue:  make([]*cachedOrderNote, 0, defaultQueueCapacity),
+		epochQueue: NewEpochQueue(),
 	}
 	return ob
 }
@@ -361,4 +363,36 @@ func (ob *OrderBook) BestFill(qty uint64, side uint8) ([]*fill, error) {
 	default:
 		return nil, fmt.Errorf("unknown side provided: %d", side)
 	}
+}
+
+// ResetEpoch clears the orderbook's epoch queue. This should be called when
+// a new epoch begins.
+func (ob *OrderBook) ResetEpoch() {
+	ob.epochQueue.Reset()
+}
+
+// Enqueue appends the provided order note to the orderbook's epoch queue.
+func (ob *OrderBook) Enqueue(note *msgjson.EpochOrderNote) error {
+	return ob.epochQueue.Enqueue(note)
+}
+
+// EpochSize returns the number of entries in the orderbook's epoch queue.
+func (ob *OrderBook) EpochSize() int {
+	return ob.epochQueue.Size()
+}
+
+// IsEpochEntry checks if the provided order id is in the orderbook's epoch queue.
+func (ob *OrderBook) IsEpochEntry(oid order.OrderID) bool {
+	return ob.epochQueue.Exists(oid)
+}
+
+// Epoch returns the current epoch being tracked.
+func (ob *OrderBook) Epoch() uint64 {
+	return ob.epochQueue.Epoch()
+}
+
+// GenerateMatchProof calculates the sorting seed used in order matching
+// as well as the commitment checksum from the orderbook's epoch queue.
+func (ob *OrderBook) GenerateMatchProof(preimages []order.Preimage, misses []order.OrderID) (msgjson.Bytes, msgjson.Bytes, error) {
+	return ob.epochQueue.GenerateMatchProof(preimages, misses)
 }

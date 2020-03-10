@@ -11,7 +11,7 @@ import (
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
-func makeEpochOrderNote(mid string, oid order.OrderID, side uint8, rate uint64, qty uint64, commitment order.Commitment) *msgjson.EpochOrderNote {
+func makeEpochOrderNote(mid string, oid order.OrderID, side uint8, rate uint64, qty uint64, commitment order.Commitment, epoch uint64) *msgjson.EpochOrderNote {
 	return &msgjson.EpochOrderNote{
 		Commit: commitment[:],
 		BookOrderNote: msgjson.BookOrderNote{
@@ -25,6 +25,7 @@ func makeEpochOrderNote(mid string, oid order.OrderID, side uint8, rate uint64, 
 				Quantity: qty,
 			},
 		},
+		Epoch: epoch,
 	}
 }
 
@@ -52,21 +53,27 @@ func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) 
 
 func TestEpochQueue(t *testing.T) {
 	mid := "mkt"
+	epoch := uint64(10)
 	eq := NewEpochQueue()
 	n1Pimg := [32]byte{'1'}
 	n1Commitment := makeCommitment(n1Pimg)
 	n1OrderID := [32]byte{'a'}
-	n1 := makeEpochOrderNote(mid, n1OrderID, msgjson.BuyOrderNum, 1, 2, n1Commitment)
+	n1 := makeEpochOrderNote(mid, n1OrderID, msgjson.BuyOrderNum, 1, 2, n1Commitment, epoch)
 
 	n2Pimg := [32]byte{'2'}
 	n2Commitment := makeCommitment(n2Pimg)
 	n2OrderID := [32]byte{'b'}
-	n2 := makeEpochOrderNote(mid, n2OrderID, msgjson.BuyOrderNum, 1, 2, n2Commitment)
+	n2 := makeEpochOrderNote(mid, n2OrderID, msgjson.BuyOrderNum, 1, 2, n2Commitment, epoch)
 
 	n3Pimg := [32]byte{'3'}
 	n3Commitment := makeCommitment(n3Pimg)
 	n3OrderID := [32]byte{'c'}
-	n3 := makeEpochOrderNote(mid, n3OrderID, msgjson.BuyOrderNum, 1, 2, n3Commitment)
+	n3 := makeEpochOrderNote(mid, n3OrderID, msgjson.BuyOrderNum, 1, 2, n3Commitment, epoch)
+
+	n4Pimg := [32]byte{'4'}
+	n4Commitment := makeCommitment(n4Pimg)
+	n4OrderID := [32]byte{'d'}
+	n4 := makeEpochOrderNote(mid, n4OrderID, msgjson.BuyOrderNum, 1, 2, n4Commitment, epoch+1)
 
 	err := eq.Enqueue(n1)
 	if err != nil {
@@ -78,6 +85,12 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[Size] expected queue size of %d, got %d", 1, eq.Size())
 	}
 
+	// Enqueue an order from a different epoch.
+	err = eq.Enqueue(n4)
+	if err == nil {
+		t.Fatal("[Queue]: expected epoch mismatch error")
+	}
+
 	// Reset the epoch queue.
 	eq.Reset()
 
@@ -86,10 +99,26 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[Size] expected queue size of %d, got %d", 0, eq.Size())
 	}
 
+	// Ensure a new or reset epoch queue has an epoch of 0 (default).
+	epoch = eq.Epoch()
+	if epoch != 0 {
+		t.Fatalf("[Epoch]: expected epoch value of %d, got %d", 0, epoch)
+	}
+
 	// Ensure the epoch queue does not enqueue duplicate orders.
 	err = eq.Enqueue(n1)
 	if err != nil {
 		t.Fatalf("[Queue]: unexpected error: %v", err)
+	}
+
+	// Ensure the epoch is set when the first order note is queued.
+	epoch = eq.Epoch()
+	if err != nil {
+		t.Fatalf("[Epoch]: unexpected error: %v", err)
+	}
+
+	if epoch != n1.Epoch {
+		t.Fatalf("[Epoch]: expected epoch value of %d, got %d", n1.Epoch, epoch)
 	}
 
 	err = eq.Enqueue(n1)
@@ -236,7 +265,8 @@ func benchmarkGenerateMatchProof(c int, b *testing.B) {
 	preimages := make([]order.Preimage, 0, c)
 	for i := range notes {
 		pi := randPreimage()
-		notes[i] = makeEpochOrderNote("mkt", randOrderID(), msgjson.BuyOrderNum, 1, 2, blake256.Sum256(pi[:]))
+		notes[i] = makeEpochOrderNote("mkt", randOrderID(),
+			msgjson.BuyOrderNum, 1, 2, blake256.Sum256(pi[:]), 10)
 		preimages = append(preimages, pi)
 	}
 

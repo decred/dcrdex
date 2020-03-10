@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
@@ -1200,7 +1199,7 @@ func (c *Core) handleOrderBookMsg(dc *dexConnection, msg *msgjson.Message) error
 // handleBookOrderMsg is called when a book_order notification is received.
 func (c *Core) handleBookOrderMsg(dc *dexConnection, msg *msgjson.Message) error {
 	var note msgjson.BookOrderNote
-	err := json.Unmarshal(msg.Payload, &note)
+	err := msg.Unmarshal(&note)
 	if err != nil {
 		return fmt.Errorf("book order note unmarshal error: %v", err)
 	}
@@ -1220,7 +1219,7 @@ func (c *Core) handleBookOrderMsg(dc *dexConnection, msg *msgjson.Message) error
 // received.
 func (c *Core) handleUnbookOrderMsg(dc *dexConnection, msg *msgjson.Message) error {
 	var note msgjson.UnbookOrderNote
-	err := json.Unmarshal(msg.Payload, &note)
+	err := msg.Unmarshal(&note)
 	if err != nil {
 		return fmt.Errorf("unbook order note unmarshal error: %v", err)
 	}
@@ -1235,6 +1234,27 @@ func (c *Core) handleUnbookOrderMsg(dc *dexConnection, msg *msgjson.Message) err
 	}
 
 	return ob.Unbook(&note)
+}
+
+// handleEpochOrderMsg is called when an epoch_order notification is
+// received.
+func (c *Core) handleEpochOrderMsg(dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.EpochOrderNote
+	err := msg.Unmarshal(&note)
+	if err != nil {
+		return fmt.Errorf("epoch order note unmarshal error: %v", err)
+	}
+
+	dc.booksMtx.Lock()
+	defer dc.booksMtx.Unlock()
+
+	ob, ok := dc.books[note.MarketID]
+	if !ok {
+		return fmt.Errorf("no order book found with market id %q",
+			note.MarketID)
+	}
+
+	return ob.Enqueue(&note)
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -1274,7 +1294,7 @@ out:
 				case msgjson.BookOrderRoute:
 					err = c.handleBookOrderMsg(dc, msg)
 				case msgjson.EpochOrderRoute:
-					log.Info("epoch_order message received")
+					err = c.handleEpochOrderMsg(dc, msg)
 				case msgjson.UnbookOrderRoute:
 					err = c.handleUnbookOrderMsg(dc, msg)
 				default:

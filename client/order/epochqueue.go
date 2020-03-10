@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -24,8 +25,9 @@ type epochOrder struct {
 
 // EpochQueue represents a client epoch queue.
 type EpochQueue struct {
+	epoch  uint64
 	orders map[order.OrderID]*epochOrder
-	mtx    sync.Mutex
+	mtx    sync.RWMutex
 }
 
 // NewEpochQueue creates a client epoch queue.
@@ -38,12 +40,22 @@ func NewEpochQueue() *EpochQueue {
 // Reset clears the epoch queue. This should be called when a new epoch begins.
 func (eq *EpochQueue) Reset() {
 	eq.mtx.Lock()
+	eq.epoch = 0
 	eq.orders = make(map[order.OrderID]*epochOrder)
 	eq.mtx.Unlock()
 }
 
 // Enqueue appends the provided order note to the epoch queue.
 func (eq *EpochQueue) Enqueue(note *msgjson.EpochOrderNote) error {
+	eq.mtx.Lock()
+	defer eq.mtx.Unlock()
+
+	// Ensure the order received is of the current epoch.
+	if eq.epoch != 0 && note.Epoch != eq.epoch {
+		return fmt.Errorf("epoch mismatch: expected %d, got %d",
+			eq.epoch, note.Epoch)
+	}
+
 	if len(note.OrderID) != order.OrderIDSize {
 		return fmt.Errorf("expected order id length of %d, got %d",
 			order.OrderIDSize, len(note.OrderID))
@@ -68,27 +80,38 @@ func (eq *EpochQueue) Enqueue(note *msgjson.EpochOrderNote) error {
 		Side:       note.Side,
 	}
 
-	eq.mtx.Lock()
+	// Set the epoch if the order note is the first to be queued.
+	if eq.epoch == 0 {
+		atomic.StoreUint64(&eq.epoch, note.Epoch)
+	}
+
 	eq.orders[oid] = order
-	eq.mtx.Unlock()
 
 	return nil
 }
 
 // Size returns the number of entries in the epoch queue.
 func (eq *EpochQueue) Size() int {
-	eq.mtx.Lock()
+	eq.mtx.RLock()
 	size := len(eq.orders)
-	eq.mtx.Unlock()
+	eq.mtx.RUnlock()
 	return size
 }
 
 // Exists checks if the provided order id is in the queue.
 func (eq *EpochQueue) Exists(oid order.OrderID) bool {
-	eq.mtx.Lock()
+	eq.mtx.RLock()
 	_, ok := eq.orders[oid]
-	eq.mtx.Unlock()
+	eq.mtx.RUnlock()
 	return ok
+}
+
+// Epoch returns the current epoch being tracked by the queue.
+func (eq *EpochQueue) Epoch() uint64 {
+	eq.mtx.RLock()
+	epoch := eq.epoch
+	eq.mtx.RUnlock()
+	return epoch
 }
 
 // GenerateMatchProof calculates the sorting seed used in order matching
