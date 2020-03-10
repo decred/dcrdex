@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 
+	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/dcr"
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -14,9 +15,10 @@ import (
 	"github.com/decred/dcrd/dcrutil/v2"
 )
 
-// A UTXO is information regarding an unspent transaction output. It must
-// satisfy the asset.UTXO interface to be DEX-compatible.
-type UTXO struct {
+const ErrReorgDetected = dex.Error("reorg detected")
+
+// TXIO is common information stored with an Input or a UTXO
+type TXIO struct {
 	// Because a UTXO's validity and block info can change after creation, keep a
 	// Backend around to query the state of the tx and update the block info.
 	dcr *Backend
@@ -24,12 +26,136 @@ type UTXO struct {
 	// The height and hash of the transaction's best known block.
 	height    uint32
 	blockHash chainhash.Hash
-	vout      uint32
 	// The number of confirmations needed for maturity. For outputs of a coinbase
 	// transactions and stake-related transactions, this will be set to
 	// chaincfg.Params.CoinbaseMaturity (256 for mainchain). For other supported
 	// script types, this will be zero.
 	maturity int32
+	// While the utxo's tx is still in mempool, the tip hash will be stored.
+	// This enables an optimization in the Confirmations method to return zero
+	// without extraneous RPC calls.
+	lastLookup *chainhash.Hash
+}
+
+// confirmations returns the number of confirmations for a TXIO's transaction.
+// Because a TXIO can become invalid after once being considered valid, validity
+// should be verified again on every call. An error will be returned if this
+// TXIO is no longer ready to spend. An unmined transaction should have zero
+// confirmations. A transaction in the current best block should have one
+// confirmation. The value -1 will be returned with any error.
+func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
+	dcr := txio.dcr
+	tipHash := dcr.blockCache.tipHash()
+	// If the UTXO was in a mempool transaction, check if it has been confirmed.
+	if txio.height == 0 {
+		// If the tip hasn't changed, don't do anything here.
+		if txio.lastLookup == nil || *txio.lastLookup != tipHash {
+			txio.lastLookup = &tipHash
+			verboseTx, err := txio.dcr.node.GetRawTransactionVerbose(&txio.tx.hash)
+			if err != nil {
+				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txio.tx.hash, err)
+			}
+			// More than zero confirmations would indicate that the transaction has
+			// been mined. Collect the block info and update the utxo fields.
+			if verboseTx.Confirmations > 0 {
+				blk, err := txio.dcr.getBlockInfo(verboseTx.BlockHash)
+				if err != nil {
+					return -1, err
+				}
+				txio.height = blk.height
+				txio.blockHash = blk.hash
+			}
+			return verboseTx.Confirmations, nil
+		}
+	} else {
+		// The UTXO was included in a block, but make sure that the utxo's block has
+		// not been orphaned or voted as invalid.
+		mainchainBlock, found := dcr.blockCache.atHeight(txio.height)
+		if !found {
+			return -1, fmt.Errorf("no mainchain block for tx %s at height %d", txio.tx.hash.String(), txio.height)
+		}
+		// If the UTXO's block has been orphaned, check for a new containing block.
+		if mainchainBlock.hash != txio.blockHash {
+			return -1, ErrReorgDetected
+		}
+		if mainchainBlock != nil && checkApproval {
+			nextBlock, err := dcr.getMainchainDcrBlock(txio.height + 1)
+			if err != nil {
+				return -1, fmt.Errorf("error retrieving approving block tx %s: %v", txio.tx.hash, err)
+			}
+			if nextBlock != nil && !nextBlock.vote {
+				return -1, fmt.Errorf("utxo's block has been voted as invalid")
+			}
+		}
+	}
+	// If the height is still 0, this is a mempool transaction.
+	if txio.height == 0 {
+		return 0, nil
+	}
+	// Otherwise just check that there hasn't been a reorg which would render the
+	// output immature. This would be exceedingly rare (impossible?).
+	confs := int32(dcr.blockCache.tipHeight()) - int32(txio.height) + 1
+	if confs < txio.maturity {
+		return -1, fmt.Errorf("transaction %s became immature", txio.tx.hash)
+	}
+	return int64(confs), nil
+}
+
+// TxID is a string identifier for the transaction, typically a hexadecimal
+// representation of the byte-reversed transaction hash. Should always return
+// the same value as the txid argument passed to (Backend).UTXO.
+func (txio *TXIO) TxID() string {
+	return txio.tx.hash.String()
+}
+
+// FeeRate returns the transaction fee rate, in atoms/byte.
+func (txio *TXIO) FeeRate() uint64 {
+	return txio.tx.feeRate
+}
+
+// Input is a transaction input.
+type Input struct {
+	TXIO
+	vin uint32
+}
+
+var _ asset.Coin = (*Input)(nil)
+
+// Confirmations returns the number of confirmations on this input's
+// transaction.
+func (input *Input) Confirmations() (int64, error) {
+	confs, err := input.confirmations(false)
+	if err == ErrReorgDetected {
+		newInput, err := input.dcr.input(&input.tx.hash, input.vin)
+		if err != nil {
+			return -1, fmt.Errorf("input block is not mainchain")
+		}
+		*input = *newInput
+		return input.Confirmations()
+	}
+	return confs, err
+}
+
+// ID returns the coin ID.
+func (input *Input) ID() []byte {
+	return toCoinID(&input.tx.hash, input.vin)
+}
+
+// spendsCoin checks whether a particular coin is spent in this coin's tx.
+func (input *Input) spendsCoin(coinID []byte) (bool, error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return false, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+	}
+	txIn := input.tx.ins[input.vin]
+	return txIn.prevTx == *txHash && txIn.vout == vout, nil
+}
+
+// A UTXO is information regarding an unspent transaction output. It must
+// satisfy the asset.UTXO interface to be DEX-compatible.
+type UTXO struct {
+	TXIO
+	vout uint32
 	// A bitmask for script type information.
 	scriptType dexdcr.DCRScriptType
 	// The output's scriptPubkey.
@@ -45,14 +171,13 @@ type UTXO struct {
 	spendSize uint32
 	// The output value.
 	value uint64
-	// While the utxo's tx is still in mempool, the tip hash will be stored.
-	// This enables an optimization in the Confirmations method to return zero
-	// without extraneous RPC calls.
-	lastLookup *chainhash.Hash
+	// address is populated for swap contract outputs
+	address string
 }
 
-// Check that UTXO satisfies the asset.UTXO interface
+// Check that UTXO satisfies the asset.Contract interface
 var _ asset.Coin = (*UTXO)(nil)
+var _ asset.FundingCoin = (*UTXO)(nil)
 
 // Confirmations is an asset.Backend method that returns the number of
 // confirmations for a UTXO. Because it is possible for a UTXO that was once
@@ -62,75 +187,17 @@ var _ asset.Coin = (*UTXO)(nil)
 // transactions that is voted on by stakeholders. While stakeholder approval is
 // a part of UTXO validity, there are other considerations as well.
 func (utxo *UTXO) Confirmations() (int64, error) {
-	dcr := utxo.dcr
-	tipHash := dcr.blockCache.tipHash()
-	// If the UTXO was in a mempool transaction, check if it has been confirmed.
-	if utxo.height == 0 {
-		// If the tip hasn't changed, don't do anything here.
-		if utxo.lastLookup == nil || *utxo.lastLookup != tipHash {
-			utxo.lastLookup = &tipHash
-			txOut, verboseTx, _, err := dcr.getTxOutInfo(&utxo.tx.hash, utxo.vout)
-			if err != nil {
-				return -1, err
-			}
-			// More than zero confirmations would indicate that the transaction has
-			// been mined. Collect the block info and update the utxo fields.
-			if txOut.Confirmations > 0 {
-				blk, err := dcr.getBlockInfo(verboseTx.BlockHash)
-				if err != nil {
-					return -1, err
-				}
-				utxo.height = blk.height
-				utxo.blockHash = blk.hash
-			}
+	confs, err := utxo.confirmations(!utxo.scriptType.IsStake())
+	if err == ErrReorgDetected {
+		// See if we can find the utxo in another block.
+		newUtxo, err := utxo.dcr.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
+		if err != nil {
+			return -1, fmt.Errorf("utxo block is not mainchain")
 		}
-	} else {
-		// The UTXO was included in a block, but make sure that the utxo's block has
-		// not been orphaned or voted as invalid.
-		mainchainBlock, found := dcr.blockCache.atHeight(utxo.height)
-		if !found {
-			return -1, fmt.Errorf("no mainchain block for tx %s at height %d", utxo.tx.hash.String(), utxo.height)
-		}
-		// If the UTXO's block has been orphaned, check for a new containing block.
-		if mainchainBlock.hash != utxo.blockHash {
-			// See if we can find the utxo in another block.
-			newUtxo, err := dcr.utxo(&utxo.tx.hash, utxo.vout, utxo.redeemScript)
-			if err != nil {
-				return -1, fmt.Errorf("utxo block is not mainchain")
-			}
-			*utxo = *newUtxo
-			if utxo.height == 0 {
-				mainchainBlock = nil
-			} else {
-				mainchainBlock, found = dcr.blockCache.atHeight(utxo.height)
-				if !found {
-					return -1, fmt.Errorf("new block not found for utxo moved from orphaned block")
-				}
-			}
-		}
-		// If the block is set, check for stakeholder invalidation. Stakeholders
-		// can only invalidate a regular-tree transaction.
-		if mainchainBlock != nil && !utxo.scriptType.IsStake() {
-			nextBlock, err := dcr.getMainchainDcrBlock(utxo.height + 1)
-			if err != nil {
-				return -1, fmt.Errorf("error retrieving approving block for utxo %s:%d: %v", utxo.tx.hash, utxo.vout, err)
-			}
-			if nextBlock != nil && !nextBlock.vote {
-				return -1, fmt.Errorf("utxo's block has been voted as invalid")
-			}
-		}
+		*utxo = *newUtxo
+		return utxo.Confirmations()
 	}
-	// If the height is still 0, this is a mempool transaction.
-	if utxo.height == 0 {
-		return 0, nil
-	}
-	// Otherwise just check that there hasn't been a reorg which would render the
-	// output immature. This would be exceedingly rare (impossible?).
-	confs := int32(dcr.blockCache.tipHeight()) - int32(utxo.height) + 1
-	if confs < utxo.maturity {
-		return -1, fmt.Errorf("transaction %s became immature", utxo.tx.hash)
-	}
-	return int64(confs), nil
+	return confs, err
 }
 
 // Auth verifies that the utxo pays to the supplied public key(s). This is an
@@ -222,43 +289,25 @@ func pkMatches(pubkeys [][]byte, addrs []dcrutil.Address, hasher func([]byte) []
 
 // AuditContract checks that UTXO is a swap contract and extracts the
 // receiving address and contract value on success.
-func (utxo *UTXO) AuditContract() (string, uint64, error) {
+func (utxo *UTXO) auditContract() error {
 	tx := utxo.tx
 	if len(tx.outs) <= int(utxo.vout) {
-		return "", 0, fmt.Errorf("invalid index %d for transaction %s", utxo.vout, tx.hash)
+		return fmt.Errorf("invalid index %d for transaction %s", utxo.vout, tx.hash)
 	}
 	output := tx.outs[int(utxo.vout)]
 	scriptHash := dexdcr.ExtractScriptHash(output.pkScript)
 	if scriptHash == nil {
-		return "", 0, fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, utxo.vout)
+		return fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, utxo.vout)
 	}
 	if !bytes.Equal(dcrutil.Hash160(utxo.redeemScript), scriptHash) {
-		return "", 0, fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, utxo.vout)
+		return fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, utxo.vout)
 	}
 	_, receiver, err := extractSwapAddresses(utxo.redeemScript)
 	if err != nil {
-		return "", 0, fmt.Errorf("error extracting address from swap contract for %s:%d", tx.hash, utxo.vout)
+		return fmt.Errorf("error extracting address from swap contract for %s:%d", tx.hash, utxo.vout)
 	}
-	return receiver, output.value, nil
-}
-
-// SpendsUTXO checks whether a particular coin is spent in this coin's tx.
-func (utxo *UTXO) SpendsCoin(coinID []byte) (bool, error) {
-	txHash, vout, err := decodeCoinID(coinID)
-	if err != nil {
-		return false, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
-	}
-	for _, txIn := range utxo.tx.ins {
-		if txIn.prevTx == *txHash && txIn.vout == vout {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-// FeeRate returns the transaction fee rate, in atoms/byte.
-func (utxo *UTXO) FeeRate() uint64 {
-	return utxo.tx.feeRate
+	utxo.address = receiver
+	return nil
 }
 
 // SpendSize returns the maximum size of the serialized TxIn that spends this
@@ -272,14 +321,12 @@ func (utxo *UTXO) ID() []byte {
 	return toCoinID(&utxo.tx.hash, utxo.vout)
 }
 
-// TxID is a string identifier for the transaction, typically a hexadecimal
-// representation of the byte-reversed transaction hash. Should always return
-// the same value as the txid argument passed to (Backend).UTXO.
-func (utxo *UTXO) TxID() string {
-	return utxo.tx.hash.String()
-}
-
 // Value is the output value, in atoms.
 func (utxo *UTXO) Value() uint64 {
 	return utxo.value
+}
+
+// Address is the receiving address if this is a swap contract.
+func (utxo *UTXO) Address() string {
+	return utxo.address
 }

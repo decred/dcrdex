@@ -540,7 +540,7 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 				fmt.Sprintf("coin %x is locked", coin.ID))
 		}
 		// Get the coin from the backend and validate it.
-		dexCoin, err := assets.funding.Backend.Coin(coin.ID, coin.Redeem)
+		dexCoin, err := assets.funding.Backend.FundingCoin(coin.ID, coin.Redeem)
 		if err != nil {
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("error retrieving coin %x", coin.ID))

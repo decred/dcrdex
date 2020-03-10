@@ -1008,12 +1008,13 @@ func TestUTXOs(t *testing.T) {
 	}
 
 	// CASE 13: A swap contract
+	val := uint64(5)
 	cleanTestChain()
 	txHash = randomHash()
 	blockHash = randomHash()
-	swap := testMsgTxSwapInit(5)
+	swap := testMsgTxSwapInit(int64(val))
 	testAddBlockVerbose(blockHash, 1, txHeight, 1)
-	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1).Value = float64(val) / 1e8
 	verboseTx := testChain.txRaws[*txHash]
 	spentTx := randomHash()
 	spentVout := rand.Uint32()
@@ -1025,27 +1026,88 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 13 - received error for utxo: %v", err)
 	}
 
-	// Check that the spent tx is in the Tx's input record.
-	spentID := toCoinID(spentTx, spentVout)
-	spent, err := utxo.SpendsCoin(spentID)
-	if err != nil {
-		t.Fatalf("case 13 - SpendsUTXO error: %v", err)
-	}
-	if !spent {
-		t.Fatalf("case 13 - transaction not confirming spent utxo")
-	}
 	// Now try again with the correct vout.
-	recipient, swapVal, err := utxo.AuditContract()
+	err = utxo.auditContract()
 	if err != nil {
 		t.Fatalf("case 13 - unexpected error auditing contract: %v", err)
 	}
-	if recipient != swap.recipient.String() {
-		t.Fatalf("case 13 - wrong recipient. wanted '%s' got '%s'", recipient, swap.recipient.String())
+	if utxo.Address() != swap.recipient.String() {
+		t.Fatalf("case 13 - wrong recipient. wanted '%s' got '%s'", utxo.Address(), swap.recipient.String())
 	}
-	if swapVal != 5 {
-		t.Fatalf("case 13 - unexpected output value. wanted 5, got %d", swapVal)
+	if utxo.Value() != val {
+		t.Fatalf("case 13 - unexpected output value. wanted 5, got %d", utxo.Value())
 	}
 
+}
+
+func TestRedemption(t *testing.T) {
+	dcr, shutdown := testBackend()
+	defer shutdown()
+
+	// The vout will be randomized during reset.
+	txHeight := uint32(32)
+	cleanTestChain()
+	txHash := randomHash()
+	redemptionID := toCoinID(txHash, 0)
+	// blockHash := randomHash()
+	spentHash := randomHash()
+	spentVout := uint32(5)
+	spentID := toCoinID(spentHash, spentVout)
+	msg := testMsgTxRegular(dcrec.STEcdsaSecp256k1)
+	vin := chainjson.Vin{
+		Txid: spentHash.String(),
+		Vout: spentVout,
+	}
+
+	// A valid mempool redemption.
+	verboseTx := testAddTxVerbose(msg.tx, txHash, nil, 0, 0)
+	verboseTx.Vin = append(verboseTx.Vin, vin)
+	redemption, err := dcr.Redemption(redemptionID, spentID)
+	if err != nil {
+		t.Fatalf("Redemption error: %v", err)
+	}
+	confs, err := redemption.Confirmations()
+	if err != nil {
+		t.Fatalf("redemption Confirmations error: %v", err)
+	}
+	if confs != 0 {
+		t.Fatalf("expected 0 confirmations, got %d", confs)
+	}
+
+	// Missing transaction
+	delete(testChain.txRaws, *txHash)
+	_, err = dcr.Redemption(redemptionID, spentID)
+	if err == nil {
+		t.Fatalf("No error for missing transaction")
+	}
+
+	// Doesn't spend transaction.
+	verboseTx = testAddTxVerbose(msg.tx, txHash, nil, 0, 0)
+	verboseTx.Vin = append(verboseTx.Vin, chainjson.Vin{
+		Txid: randomHash().String(),
+	})
+	_, err = dcr.Redemption(redemptionID, spentID)
+	if err == nil {
+		t.Fatalf("No error for wrong previous outpoint")
+	}
+
+	// Mined transaction.
+	blockHash := randomHash()
+	blockHeight := txHeight - 1
+	verboseTx = testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight), 1)
+	verboseTx.Vin = append(verboseTx.Vin, vin)
+	testAddBlockVerbose(blockHash, 1, blockHeight, 1)
+	redemption, err = dcr.Redemption(redemptionID, spentID)
+	if err != nil {
+		t.Fatalf("Redemption with confs error: %v", err)
+	}
+	confs, err = redemption.Confirmations()
+	if err != nil {
+		t.Fatalf("redemption with confs Confirmations error: %v", err)
+	}
+	if confs != 1 {
+		t.Fatalf("expected 1 confirmation, got %d", confs)
+	}
 }
 
 // TestReorg sends a reorganization-causing block through the anyQ channel, and
@@ -1145,7 +1207,7 @@ func TestAuxiliary(t *testing.T) {
 	dcr, shutdown := testBackend()
 	defer shutdown()
 
-	// Add a transaction and retrieve it. Use a vote, since it has non-zero vout.
+	// Add a funding coin and retrieve it. Use a vote, since it has non-zero vout.
 	cleanTestChain()
 	maturity := int64(chainParams.CoinbaseMaturity)
 	msg := testMsgTxVote()
@@ -1155,7 +1217,7 @@ func TestAuxiliary(t *testing.T) {
 	blockHash := testAddBlockVerbose(nil, 1, txHeight, 1)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	coinID := toCoinID(txHash, msg.vout)
-	utxo, err := dcr.Coin(coinID, nil)
+	utxo, err := dcr.FundingCoin(coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

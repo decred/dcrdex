@@ -985,12 +985,13 @@ func TestUTXOs(t *testing.T) {
 	}
 
 	// CASE 11: A swap contract
+	val := uint64(5)
 	cleanTestChain()
 	txHash = randomHash()
 	blockHash = randomHash()
-	swap := testMsgTxSwapInit(5)
+	swap := testMsgTxSwapInit(int64(val))
 	testAddBlockVerbose(blockHash, nil, 1, txHeight)
-	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1)
+	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1).Value = float64(val) / 1e8
 	verboseTx := testChain.txRaws[*txHash]
 
 	spentTxHash := randomHash()
@@ -1007,25 +1008,90 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
 	}
 
-	// Check that the spent tx is in the Tx's input record.
-	spentID := toCoinID(spentTxHash, 0)
-	spent, err := utxo.SpendsCoin(spentID)
-	if err != nil {
-		t.Fatalf("case 11 - SpendsUTXO error: %v", err)
-	}
-	if !spent {
-		t.Fatalf("case 11 - transaction not confirming spent utxo")
-	}
-	// Now try again with the correct vout.
-	recipient, swapVal, err := utxo.AuditContract()
+	// // Now try again with the correct vout.
+	err = utxo.auditContract()
 	if err != nil {
 		t.Fatalf("case 11 - unexpected error auditing contract: %v", err)
 	}
-	if recipient != swap.recipient.String() {
-		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", recipient, swap.recipient.String())
+	if utxo.Address() != swap.recipient.String() {
+		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", utxo.Address(), swap.recipient.String())
 	}
-	if swapVal != 5 {
-		t.Fatalf("case 11 - unexpected output value. wanted 5, got %d", swapVal)
+	if utxo.Value() != 5 {
+		t.Fatalf("case 11 - unexpected output value. wanted 5, got %d", utxo.Value())
+	}
+}
+
+func TestRedemption(t *testing.T) {
+	btc, shutdown := testBackend()
+	defer shutdown()
+
+	// The vout will be randomized during reset.
+	txHeight := uint32(32)
+	cleanTestChain()
+	txHash := randomHash()
+	redemptionID := toCoinID(txHash, 0)
+	// blockHash := randomHash()
+	spentHash := randomHash()
+	spentVout := uint32(0)
+	spentID := toCoinID(spentHash, spentVout)
+	verboseTx := testAddTxVerbose(testMakeMsgTx(false).tx, spentHash, nil, 0)
+	verboseTx.Vout = append(verboseTx.Vout, btcjson.Vout{
+		Value: 5,
+	})
+	msg := testMakeMsgTx(false)
+	vin := btcjson.Vin{
+		Txid: spentHash.String(),
+		Vout: spentVout,
+	}
+
+	// A valid mempool redemption.
+	verboseTx = testAddTxVerbose(msg.tx, txHash, nil, 0)
+	verboseTx.Vin = append(verboseTx.Vin, vin)
+	redemption, err := btc.Redemption(redemptionID, spentID)
+	if err != nil {
+		t.Fatalf("Redemption error: %v", err)
+	}
+	confs, err := redemption.Confirmations()
+	if err != nil {
+		t.Fatalf("redemption Confirmations error: %v", err)
+	}
+	if confs != 0 {
+		t.Fatalf("expected 0 confirmations, got %d", confs)
+	}
+
+	// Missing transaction
+	delete(testChain.txRaws, *txHash)
+	_, err = btc.Redemption(redemptionID, spentID)
+	if err == nil {
+		t.Fatalf("No error for missing transaction")
+	}
+
+	// Doesn't spend transaction.
+	verboseTx = testAddTxVerbose(msg.tx, txHash, nil, 0)
+	verboseTx.Vin = append(verboseTx.Vin, btcjson.Vin{
+		Txid: randomHash().String(),
+	})
+	_, err = btc.Redemption(redemptionID, spentID)
+	if err == nil {
+		t.Fatalf("No error for wrong previous outpoint")
+	}
+
+	// Mined transaction.
+	blockHash := randomHash()
+	blockHeight := txHeight - 1
+	verboseTx = testAddTxVerbose(msg.tx, txHash, blockHash, int64(blockHeight))
+	verboseTx.Vin = append(verboseTx.Vin, vin)
+	testAddBlockVerbose(blockHash, nil, 1, blockHeight)
+	redemption, err = btc.Redemption(redemptionID, spentID)
+	if err != nil {
+		t.Fatalf("Redemption with confs error: %v", err)
+	}
+	confs, err = redemption.Confirmations()
+	if err != nil {
+		t.Fatalf("redemption with confs Confirmations error: %v", err)
+	}
+	if confs != 1 {
+		t.Fatalf("expected 1 confirmation, got %d", confs)
 	}
 }
 
@@ -1153,7 +1219,7 @@ func TestAuxiliary(t *testing.T) {
 	blockHash := testAddBlockVerbose(nil, nil, 1, txHeight)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	coinID := toCoinID(txHash, msg.vout)
-	utxo, err := btc.Coin(coinID, nil)
+	utxo, err := btc.FundingCoin(coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

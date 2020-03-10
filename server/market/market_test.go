@@ -36,7 +36,13 @@ const (
 // This stub satisfies asset.Backend.
 type TAsset struct{}
 
-func (a *TAsset) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error) {
+func (a *TAsset) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
+	return nil, nil
+}
+func (a *TAsset) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+	return nil, nil
+}
+func (a *TAsset) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
 	return nil, nil
 }
 func (a *TAsset) BlockChannel(size int) chan uint32 { return nil }

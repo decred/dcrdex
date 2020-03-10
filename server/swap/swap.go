@@ -67,7 +67,7 @@ type swapStatus struct {
 	mtx sync.RWMutex
 	// The time that the swap coordinator sees the transaction.
 	swapTime time.Time
-	swap     asset.Coin
+	swap     asset.Contract
 	// The time that the transaction receives its SwapConf'th confirmation.
 	swapConfirmed time.Time
 	// The time that the swap coordinator sees the user's redemption
@@ -830,7 +830,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Validate the swap contract
 	chain := stepInfo.asset.Backend
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
-	coin, err := chain.Coin(params.CoinID, params.Contract)
+	contract, err := chain.Contract(params.CoinID, params.Contract)
 	if err != nil {
 		// If there is an error, don't give up yet, since it could be due to network
 		// latency. Check again on the next tick.
@@ -840,20 +840,14 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		return coinwaiter.TryAgain
 	}
 
-	// Decode the contract and audit the contract.
-	recipient, val, err := coin.AuditContract()
-	if err != nil {
-		s.respondError(msg.ID, actor.user, msgjson.ContractError, fmt.Sprintf("error auditing contract: %v", err))
+	if contract.Address() != counterParty.order.Trade().SwapAddress() {
+		s.respondError(msg.ID, actor.user, msgjson.ContractError,
+			fmt.Sprintf("incorrect recipient. expected %s. got %s", contract.Address(), counterParty.order.Trade().SwapAddress()))
 		return coinwaiter.DontTryAgain
 	}
-	if recipient != counterParty.order.Trade().SwapAddress() {
+	if contract.Value() != stepInfo.checkVal {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			fmt.Sprintf("incorrect recipient. expected %s. got %s", recipient, counterParty.order.Trade().SwapAddress()))
-		return coinwaiter.DontTryAgain
-	}
-	if val != stepInfo.checkVal {
-		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			fmt.Sprintf("contract error. expected contract value to be %d, got %d", stepInfo.checkVal, val))
+			fmt.Sprintf("contract error. expected contract value to be %d, got %d", stepInfo.checkVal, contract.Value()))
 		return coinwaiter.DontTryAgain
 	}
 
@@ -885,7 +879,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	}
 
 	actor.status.mtx.Lock()
-	actor.status.swap = coin
+	actor.status.swap = contract
 	actor.status.swapTime = swapTime
 	actor.status.mtx.Unlock()
 
@@ -932,15 +926,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 // not perform user authentication, which is handled in handleRedeem before
 // processRedeem is invoked. This method is run as a coin waiter.
 func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, stepInfo *stepInformation) bool {
-	// Get the transaction
-	chain := stepInfo.asset.Backend
-	coin, err := chain.Coin(params.CoinID, nil)
-	// If there is an error, don't return an error yet, since it could be due to
-	// network latency. Instead, queue it up for another check.
-	if err != nil {
-		return coinwaiter.TryAgain
-	}
-
 	// TODO(consider): Extract secret from initiator's (maker's) redemption
 	// transaction. The Backend would need a method identify the component of
 	// the redemption transaction that contains the secret and extract it. In a
@@ -954,16 +939,14 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	counterParty.status.mtx.RLock()
 	cpSwapCoin := counterParty.status.swap.ID()
 	counterParty.status.mtx.RUnlock()
-	spends, err := coin.SpendsCoin(cpSwapCoin)
+
+	// Get the transaction
+	chain := stepInfo.asset.Backend
+	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin)
+	// If there is an error, don't return an error yet, since it could be due to
+	// network latency. Instead, queue it up for another check.
 	if err != nil {
-		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
-			fmt.Sprintf("error checking redemption %x: %v", cpSwapCoin, err))
-		return coinwaiter.DontTryAgain
-	}
-	if !spends {
-		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
-			fmt.Sprintf("redemption does not spend %x", cpSwapCoin))
-		return coinwaiter.DontTryAgain
+		return coinwaiter.TryAgain
 	}
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
@@ -989,7 +972,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	// Modify the match's swapStatuses.
 	actor.status.mtx.Lock()
-	actor.status.redemption = coin
+	actor.status.redemption = redemption
 	actor.status.redeemTime = swapTime
 	actor.status.mtx.Unlock()
 
@@ -1138,7 +1121,6 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	if rpcErr != nil {
 		return rpcErr
 	}
-
 	// Validate the redeem coin ID before starting a coinWaiter. This does not
 	// check the blockchain, but does ensure the CoinID can be decoded for the
 	// asset before starting up a coin Waiter.
