@@ -25,19 +25,22 @@ func ParseCmdArgs(cmd string, args []interface{}) (interface{}, error) {
 
 // parsers is a map of commands to parsing functions.
 var parsers = map[string](func([]interface{}) (interface{}, error)){
-	"help": func(args []interface{}) (interface{}, error) {
+	"help":    parseHelpArgs,
+	"version": parseVersionArgs,
+}
 
-		if len(args) > 1 {
-			return nil, fmt.Errorf("too many arguments: wanted 1 but got %d", len(args))
-		} else if len(args) == 0 {
-			return nil, nil
-		}
-		return args[0], nil
-	},
-	"version": func(args []interface{}) (interface{}, error) {
-		if len(args) > 0 {
-			return nil, fmt.Errorf("too many arguments: wanted 0 but got %d", len(args))
-		}
+func parseHelpArgs(args []interface{}) (interface{}, error) {
+	if len(args) > 1 {
+		return nil, fmt.Errorf("too many arguments: wanted 1 but got %d", len(args))
+	} else if len(args) == 0 {
 		return nil, nil
-	},
+	}
+	return args[0], nil
+}
+
+func parseVersionArgs(args []interface{}) (interface{}, error) {
+	if len(args) > 0 {
+		return nil, fmt.Errorf("too many arguments: wanted 0 but got %d", len(args))
+	}
+	return nil, nil
 }
