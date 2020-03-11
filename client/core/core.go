@@ -1260,12 +1260,22 @@ func (c *Core) handleEpochOrderMsg(dc *dexConnection, msg *msgjson.Message) erro
 // listen monitors the DEX websocket connection for server requests and
 // notifications.
 func (c *Core) listen(dc *dexConnection) {
-	msgs := dc.MessageSource()
 	defer c.wg.Done()
+	msgs := dc.MessageSource()
 out:
 	for {
 		select {
-		case msg := <-msgs:
+		case msg, ok := <-msgs:
+			if !ok {
+				log.Debugf("Connection closed for %s.", dc.acct.url)
+				// TODO: This just means that wsConn, which created the
+				// MessageSource channel, was shut down before this loop
+				// returned via ctx.Done. It may be necessary to investigate the
+				// most appropriate normal shutdown sequence (i.e. close all
+				// connections before stopping Core).
+				return
+			}
+
 			switch msg.Type {
 			case msgjson.Request:
 				switch msg.Route {

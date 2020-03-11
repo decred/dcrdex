@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,18 +61,24 @@ func TestMain(m *testing.M) {
 }
 
 func TestWsConn(t *testing.T) {
+	// Must wait for goroutines, especially the ones that capture t.
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
 	upgrader := websocket.Upgrader{}
 
 	pingCh := make(chan struct{})
 	readPumpCh := make(chan interface{})
 	writePumpCh := make(chan *msgjson.Message)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	pingWait := time.Millisecond * 200
 
 	var wsc *wsConn
 
-	id := uint64(0)
+	var id uint64
+	// server's "/ws" handler
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		hCtx, hCancel := context.WithCancel(ctx)
 		atomic.AddUint64(&id, 1)
@@ -87,7 +94,9 @@ func TestWsConn(t *testing.T) {
 			return nil
 		})
 
+		wg.Add(1)
 		go func() {
+			defer wg.Done()
 			for {
 				select {
 				case <-pingCh:
@@ -178,10 +187,11 @@ func TestWsConn(t *testing.T) {
 		Addr:         host,
 		Handler:      mux,
 	}
+	defer server.Shutdown(context.Background())
 
-	defer server.Close()
-
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := server.ListenAndServeTLS(certFile.Name(), keyFile.Name())
 		if err != nil {
 			fmt.Println(err)
@@ -199,11 +209,12 @@ func TestWsConn(t *testing.T) {
 	}
 	wsc = conn.(*wsConn)
 	waiter := dex.NewConnectionMaster(wsc)
-	waiter.Connect(ctx)
+	err = waiter.Connect(ctx)
+	t.Log("Connect:", err)
 
 	reconnectAndPing := func() {
 		// Drop the connection and force a reconnect by waiting.
-		time.Sleep(time.Millisecond * 210)
+		time.Sleep(pingWait * 2)
 
 		// Wait for a reconnection.
 		for !wsc.isConnected() {
@@ -237,12 +248,6 @@ func TestWsConn(t *testing.T) {
 	readSource := wsc.MessageSource()
 	if readSource == nil {
 		t.Fatal("expected a non-nil read source")
-	}
-
-	// Ensure the read source can be fetched once.
-	rSource := wsc.MessageSource()
-	if rSource != nil {
-		t.Fatal("expected a nil read source")
 	}
 
 	// Read the message received by the client.
@@ -334,86 +339,14 @@ func TestWsConn(t *testing.T) {
 		t.Fatal("expected an error for unlogged id")
 	}
 
-	// Drop the connection and force a reconnect by waiting.
-	time.Sleep(time.Millisecond * 210)
-
-	// Ensure the connection is disconnected.
-	for wsc.isConnected() {
-		time.Sleep(time.Millisecond * 10)
-		continue
-	}
-
-	// Try sending a message on a disconnected connection.
-	err = wsc.Send(sent)
-	if err == nil {
-		t.Fatalf("expected a connection state error")
-	}
-
-	cancel()
 	waiter.Disconnect()
-}
 
-func TestFailingConnection(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	pingWait := time.Millisecond * 200
-
-	certFile, err := ioutil.TempFile("", "certfile")
-	if err != nil {
-		t.Fatalf("unable to create temp certfile: %s", err)
-	}
-	certFile.Close()
-	defer os.Remove(certFile.Name())
-
-	keyFile, err := ioutil.TempFile("", "keyfile")
-	if err != nil {
-		t.Fatalf("unable to create temp keyfile: %s", err)
-	}
-	keyFile.Close()
-	defer os.Remove(keyFile.Name())
-
-	err = genCertPair(certFile.Name(), keyFile.Name(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	host := "127.0.0.1:6060"
-	cfg := &WsCfg{
-		URL:      "wss://" + host + "/ws",
-		PingWait: pingWait,
-		RpcCert:  certFile.Name(),
-	}
-	// Initial connection will fail immediately
-	conn, err := NewWsConn(cfg)
-	if err != nil {
-		t.Fatalf("constructor error: %v", err)
-	}
-	wsc := conn.(*wsConn)
-	waiter := dex.NewConnectionMaster(wsc)
-	err = waiter.Connect(ctx)
-	if err == nil {
-		t.Fatal("no error for non-existent server")
-	}
-
-	oldCount := atomic.LoadUint64(&wsc.reconnects)
-	for idx := 0; idx < 5; idx++ {
-		time.Sleep(time.Millisecond * 210)
-
-		// Ensure the connection status is false and the number of
-		// reconnect attempts have increased.
-		if wsc.isConnected() {
-			t.Fatalf("expected the connection to be in a disconnected state")
+	select {
+	case _, ok := <-readSource:
+		if ok {
+			t.Error("read source should have been closed")
 		}
-
-		updatedCount := atomic.LoadUint64(&wsc.reconnects)
-		if updatedCount == oldCount || updatedCount < oldCount {
-			t.Fatalf("expected the connection to have "+
-				"increased connection attempts, %v", updatedCount)
-		}
-
-		oldCount = updatedCount
+	default:
+		t.Error("read source should have been closed")
 	}
-
-	cancel()
-	waiter.Disconnect()
 }
