@@ -87,7 +87,7 @@ func configure() (*config, []string, bool, error) {
 	// Show the available commands and exit if the associated flag was
 	// specified.
 	if cfg.ListCommands {
-		fmt.Print(rpcserver.ListCommands())
+		fmt.Println(rpcserver.ListCommands())
 		return nil, nil, stop, nil
 	}
 

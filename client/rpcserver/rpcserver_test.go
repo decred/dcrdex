@@ -36,8 +36,10 @@ var (
 )
 
 type TCore struct {
-	balanceErr error
-	syncErr    error
+	preRegisterFee uint64
+	preRegisterErr error
+	balanceErr     error
+	syncErr        error
 }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
@@ -46,6 +48,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, err
 func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook { return nil }
 func (c *TCore) Unsync(dex string, base, quote uint32)               {}
 func (c *TCore) Balance(uint32) (uint64, error)                      { return 0, c.balanceErr }
+func (c *TCore) PreRegister(string) (uint64, error)                  { return c.preRegisterFee, c.preRegisterErr }
 
 type TWriter struct {
 	b []byte

@@ -61,7 +61,7 @@ func run() error {
 	// Support using '-' as an argument to allow the argument to be read
 	// from a stdin pipe.
 	bio := bufio.NewReader(os.Stdin)
-	params := make([]interface{}, 0, len(args[1:]))
+	params := make([]string, 0, len(args[1:]))
 	for _, arg := range args[1:] {
 		if arg == "-" {
 			param, err := bio.ReadString('\n')

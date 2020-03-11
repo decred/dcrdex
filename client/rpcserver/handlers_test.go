@@ -83,7 +83,7 @@ func TestListCommands(t *testing.T) {
 		want += helpMsgs[r][0]
 		want += "\n"
 	}
-	if res != want {
+	if res != want[:len(want)-1] {
 		t.Fatalf("wanted %s but got %s", want, res)
 	}
 }
@@ -151,5 +151,48 @@ func TestHandleVersion(t *testing.T) {
 	res := ""
 	if err := verifyResponse(payload, &res, -1); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHandlePreRegister(t *testing.T) {
+	tests := []struct {
+		name           string
+		arg            interface{}
+		preRegisterFee uint64
+		preRegisterErr error
+		wantErrCode    int
+	}{{
+		name:           "ok",
+		arg:            "dex",
+		preRegisterFee: 5,
+		wantErrCode:    -1,
+	}, {
+		name:        "argument wrong type",
+		arg:         2,
+		wantErrCode: msgjson.RPCParseError,
+	}, {
+		name:           "core.PreRegister error",
+		arg:            "dex",
+		preRegisterFee: 5,
+		preRegisterErr: errors.New("error"),
+		wantErrCode:    msgjson.RPCErrorUnspecified,
+	}}
+	for _, test := range tests {
+		msg := new(msgjson.Message)
+		reqPayload, err := json.Marshal(test.arg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg.Payload = reqPayload
+		tc := &TCore{preRegisterFee: test.preRegisterFee, preRegisterErr: test.preRegisterErr}
+		r := &RPCServer{core: tc}
+		payload := handlePreRegister(r, msg)
+		res := new(preRegisterResponse)
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+		if test.wantErrCode == -1 && res.Fee != test.preRegisterFee {
+			t.Fatalf("wanted registration fee %d but got %d for test %s", test.preRegisterFee, res.Fee, test.name)
+		}
 	}
 }

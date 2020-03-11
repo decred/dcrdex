@@ -10,24 +10,24 @@ import (
 func TestParseCmdArgs(t *testing.T) {
 	tests := []struct {
 		name, cmd string
-		args      []interface{}
+		args      []string
 		want      interface{}
 		wantErr   bool
 	}{{
 		name:    "ok",
 		cmd:     "help",
-		args:    []interface{}{"some command"},
+		args:    []string{"some command"},
 		want:    "some command",
 		wantErr: false,
 	}, {
 		name:    "route doesnt exist",
 		cmd:     "never make this command",
-		args:    []interface{}{"some command"},
+		args:    []string{"some command"},
 		wantErr: true,
 	}, {
 		name:    "wrong number of arguments",
 		cmd:     "version",
-		args:    []interface{}{"some command"},
+		args:    []string{"some command"},
 		wantErr: true,
 	}}
 	for _, test := range tests {
