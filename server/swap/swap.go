@@ -47,6 +47,7 @@ type AuthManager interface {
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
 	Penalize(account.AccountID, account.Rule)
+	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
 }
 
 // Storage updates match data in what is presumably a database.
@@ -368,6 +369,9 @@ func (s *Swapper) processBlock(block *blockNotification) {
 	}
 
 	for _, match := range completions {
+		// Note that orders are not considered completed for the purposes of
+		// cancellation ratio until the user sends their redeem ack.
+
 		s.unlockOrderCoins(match.Taker)
 		s.unlockOrderCoins(match.Maker)
 		// Remove the completed match. Note that checkInaction may also remove
@@ -771,6 +775,10 @@ type messageAcker struct {
 // signature and updating the (order.Match).Sigs record. This is required by
 // processInit, processRedeem, and revoke.
 func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
+	// The time that the ack is received is stored for redeem acks to facilitate
+	// cancellation ratio enforcement.
+	tAck := time.Now()
+
 	ack := new(msgjson.Acknowledgement)
 	err := msg.UnmarshalResult(ack)
 	if err != nil {
@@ -810,12 +818,15 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 			s.storage.SaveAuditAckSigB(mktMatch, ack.Sig)
 		}
 	} else {
+		tAckMS := encode.UnixMilli(tAck)
 		if acker.isMaker {
+			s.authMgr.RecordCompletedOrder(acker.user, acker.match.Maker.ID(), tAck)
 			acker.match.Sigs.MakerRedeem = ack.Sig
-			s.storage.SaveRedeemAckSigA(mktMatch, ack.Sig)
+			s.storage.SaveRedeemAckSigA(mktMatch, ack.Sig, tAckMS)
 		} else {
+			s.authMgr.RecordCompletedOrder(acker.user, acker.match.Taker.ID(), tAck)
 			acker.match.Sigs.TakerRedeem = ack.Sig
-			s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig)
+			s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig, tAckMS)
 		}
 	}
 }

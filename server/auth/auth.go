@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -17,6 +18,8 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
+
+const cancelThreshWindow = 25 // spec
 
 func unixMsNow() time.Time {
 	return time.Now().Truncate(time.Millisecond).UTC()
@@ -61,6 +64,7 @@ type clientInfo struct {
 	acct         *account.Account
 	conn         comms.Link
 	respHandlers map[uint64]*respHandler
+	recentOrders *latestOrders
 }
 
 func (client *clientInfo) expire(id uint64) bool {
@@ -114,14 +118,15 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // signing messages with the DEX's private key. AuthManager manages requests to
 // the 'connect' route.
 type AuthManager struct {
-	connMtx  sync.RWMutex
-	users    map[account.AccountID]*clientInfo
-	conns    map[uint64]*clientInfo
-	storage  Storage
-	signer   Signer
-	regFee   uint64
-	checkFee FeeChecker
-	feeConfs int64
+	connMtx      sync.RWMutex
+	cancelThresh float32
+	users        map[account.AccountID]*clientInfo
+	conns        map[uint64]*clientInfo
+	storage      Storage
+	signer       Signer
+	regFee       uint64
+	checkFee     FeeChecker
+	feeConfs     int64
 	// coinWaiter is a coin waiter to deal with latency.
 	coinWaiter *coinwaiter.Waiter
 }
@@ -141,18 +146,21 @@ type Config struct {
 	FeeConfs int64
 	// FeeChecker is a method for getting the registration fee output info.
 	FeeChecker FeeChecker
+
+	CancelThreshold float32
 }
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
 	auth := &AuthManager{
-		users:    make(map[account.AccountID]*clientInfo),
-		conns:    make(map[uint64]*clientInfo),
-		storage:  cfg.Storage,
-		signer:   cfg.Signer,
-		regFee:   cfg.RegistrationFee,
-		checkFee: cfg.FeeChecker,
-		feeConfs: cfg.FeeConfs,
+		users:        make(map[account.AccountID]*clientInfo),
+		conns:        make(map[uint64]*clientInfo),
+		storage:      cfg.Storage,
+		signer:       cfg.Signer,
+		regFee:       cfg.RegistrationFee,
+		checkFee:     cfg.FeeChecker,
+		feeConfs:     cfg.FeeConfs,
+		cancelThresh: cfg.CancelThreshold,
 	}
 	// Referring to auth.Send in the construction above would create a function
 	// with a nil receiver, so do it after auth is set.
@@ -162,6 +170,47 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
 	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee)
 	return auth
+}
+
+func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {
+	tMS := encode.UnixMilli(t)
+	auth.recordOrderDone(user, oid, &target, tMS)
+}
+
+func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time) {
+	tMS := encode.UnixMilli(t)
+	auth.recordOrderDone(user, oid, nil, tMS)
+}
+
+// recordOrderDone an order that has finished processing. This can be a cancel
+// order, which matched and unbooked another order, or a trade order that
+// completed the swap negotiation. Note that in the case of a cancel, oid refers
+// to the ID of the cancel order itself, while target is non-nil for cancel
+// orders.
+func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, tMS int64) {
+	auth.connMtx.RLock()
+	defer auth.connMtx.RUnlock()
+
+	client := auth.users[user]
+	if client == nil {
+		log.Errorf("unknown client for user %v", user)
+		return
+	}
+
+	client.mtx.Lock()
+	client.recentOrders.add(&ord{
+		OrderID: oid,
+		time:    tMS,
+		target:  target,
+	})
+	client.mtx.Unlock()
+
+	log.Debugf("Recorded order %v that has finished processing: user=%v, time=%v, target=%v",
+		oid, user, tMS, target)
+
+	// TODO: decide when to count and penalize
+
+	return
 }
 
 // Run runs the AuthManager until the context is canceled. Satisfies the
@@ -391,10 +440,12 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	// Check to see if there is already an existing client for this account.
 	client := auth.user(acctInfo.ID)
 	if client == nil {
+		// retrieve active matches from DB and store them in a latestOrders.
 		client = &clientInfo{
 			acct:         acctInfo,
 			conn:         conn,
 			respHandlers: make(map[uint64]*respHandler),
+			recentOrders: newLatestOrders(cancelThreshWindow),
 		}
 	} else {
 		client.conn = conn
