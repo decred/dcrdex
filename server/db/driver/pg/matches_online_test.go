@@ -94,7 +94,7 @@ func TestSetSwapData(t *testing.T) {
 
 	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
 
-	checkMatch := func(wantStatus order.MatchStatus) error {
+	checkMatch := func(wantStatus order.MatchStatus, wantActive bool) error {
 		matchData, err := archie.MatchByID(matchID, base, quote)
 		if err != nil {
 			return err
@@ -106,6 +106,10 @@ func TestSetSwapData(t *testing.T) {
 			return fmt.Errorf("Incorrect match status, got %d, expected %d",
 				matchData.Status, wantStatus)
 		}
+		if matchData.Active != wantActive {
+			return fmt.Errorf("Incorrect match active flag, got %v, expected %v",
+				matchData.Active, wantActive)
+		}
 		return nil
 	}
 
@@ -114,7 +118,7 @@ func TestSetSwapData(t *testing.T) {
 		t.Errorf("InsertMatch() failed: %v", err)
 	}
 
-	if err = checkMatch(order.NewlyMatched); err != nil {
+	if err = checkMatch(order.NewlyMatched, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -335,6 +339,11 @@ func TestSetSwapData(t *testing.T) {
 	if !bytes.Equal(swapData.RedeemBAckSig, redeemAckSigA) {
 		t.Fatalf("RedeemBAckSig incorrect. got %v, expected %v",
 			swapData.RedeemBAckSig, redeemAckSigA)
+	}
+
+	// Check active flag via MatchByID.
+	if err = checkMatch(order.MatchComplete, false); err != nil {
+		t.Fatal(err)
 	}
 }
 

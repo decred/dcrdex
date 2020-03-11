@@ -360,7 +360,10 @@ func (a *Archiver) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp in
 
 // SaveRedeemAckSigB records party B's signature acknowledging party A's
 // redemption, which spent their swap contract on chain Y and revealed the
-// secret.
+// secret. Since this may be the final step in match negotiation, the match is
+// also flagged as inactive (not the same as archival or even status of
+// MatchComplete, which is set by SaveRedeemB) if the initiators's redeem ack
+// signature is already set.
 func (a *Archiver) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
 	return a.saveMatchSig(mid, sig, internal.SetParticipantRedeemAckSig)
 }
@@ -372,14 +375,17 @@ func (a *Archiver) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp in
 }
 
 // SaveRedeemAckSigA records party A's signature acknowledging party B's
-// redemption. Since this is the final step in match negotiation, the match is
-// also flagged as done/inactive (not the same as archival).
+// redemption. Since this may be the final step in match negotiation, the match
+// is also flagged as inactive (not the same as archival or even status of
+// MatchComplete, which is set by SaveRedeemB) if the participant's redeem ack
+// signature is already set.
 func (a *Archiver) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
 	return a.saveMatchSig(mid, sig, internal.SetInitiatorRedeemAckSig)
 }
 
-// SetMatchInactive flags the match as done/inactive. This is not necessary
-// following SaveRedeemAckSigA since it also flags the match as done.
+// SetMatchInactive flags the match as done/inactive. This is not necessary if
+// both SaveRedeemAckSigA and SaveRedeemAckSigB are run for the match since they
+// will also flags the match as done when both signatures are stored.
 func (a *Archiver) SetMatchInactive(mid db.MarketMatchID) error {
 	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
 	if err != nil {

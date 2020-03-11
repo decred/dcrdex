@@ -355,6 +355,12 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			// TODO: Can coins be unlocked now regardless of redemption?
 			if makerRedeemed && takerRedeemed {
 				completions = append(completions, match)
+				// Note that although match status is now "complete", the swap
+				// may still be active until both counterparties acknowledge the
+				// redemptions. Conversely, the match may already be inactive
+				// before the status is complete if the parties have
+				// acknowledged the redeem txns before they hit their
+				// confirmation requirements, which triggers this status change.
 			}
 		}
 
@@ -673,6 +679,8 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 			ackType = msgjson.AuditRoute
 		} else /* MakerRedeemed */ {
 			nextStep = order.MatchComplete
+			// Note that the swap is still considered "active" until both
+			// counterparties acknowledge the redemptions.
 			isBaseAsset = maker.Sell
 			reqSigs = [][]byte{match.Sigs.TakerRedeem}
 			ackType = msgjson.RedemptionRoute
@@ -967,9 +975,9 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
 	// contract script hash. Maker is party A, the initiator. Taker is party B,
 	// the participant.
-	storFn := s.storage.SaveRedeemB
+	storFn := s.storage.SaveRedeemB // also sets match status to MatchComplete
 	if stepInfo.actor.isMaker {
-		storFn = s.storage.SaveRedeemA
+		storFn = s.storage.SaveRedeemA // also sets match status to MakerRedeemed
 	}
 	match := stepInfo.match
 	matchID := match.ID()

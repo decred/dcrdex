@@ -16,7 +16,7 @@ const (
 	//  false (Q->B) |    base      |      quote      |     base      ||  true (B->Q)  |     quote    |      base       |     quote
 	CreateMatchesTable = `CREATE TABLE IF NOT EXISTS %s (
 		matchid BYTEA PRIMARY KEY,
-		active BOOL DEFAULT TRUE,    -- swap active, where FALSE includes failure and successful completion
+		active BOOL DEFAULT TRUE,    -- negotiation active, where FALSE includes failure and successful completion
 		takerSell BOOL,        -- to identify asset of address and coinIDs
 		takerOrder BYTEA,      -- INDEX this
 		takerAccount BYTEA,    -- INDEX this
@@ -119,11 +119,18 @@ const (
 		bRedeemCoinID = $3, bRedeemTime = $4
 	WHERE matchid = $1;`
 
-	SetParticipantRedeemAckSig = `UPDATE %s SET bSigAckOfARedeem = $2
+	// Both SetParticipantRedeemAckSig and SetInitiatorRedeemAckSig may set
+	// active=FALSE since this can be the final step in swap negotiation. Either
+	// party may ack first. Note that this can happen before status is set to
+	// MatchComplete on account of the confirmation requirement.
+
+	SetParticipantRedeemAckSig = `UPDATE %s
+		SET bSigAckOfARedeem = $2,
+			active = (aSigAckOfBRedeem IS NULL) -- set inactive if aSigAckOfBRedeem is set
 		WHERE matchid = $1;`
-	// SetInitiatorRedeemAckSig also sets active=TRUE since this is the final step
-	// in swap negotiation.
-	SetInitiatorRedeemAckSig = `UPDATE %s SET aSigAckOfBRedeem = $2, active = FALSE
+	SetInitiatorRedeemAckSig = `UPDATE %s
+		SET aSigAckOfBRedeem = $2,
+			active = (bSigAckOfARedeem IS NULL) -- set inactive if bSigAckOfARedeem is set
 		WHERE matchid = $1;`
 
 	SetSwapDone = `UPDATE %s SET active = FALSE
