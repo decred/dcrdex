@@ -46,13 +46,13 @@ type dexConnection struct {
 	assets     map[uint32]*dex.Asset
 	cfg        *msgjson.ConfigResult
 	acct       *dexAccount
-	booksMtx   sync.RWMutex
-	books      map[string]*book.OrderBook
-	marketMtx  sync.RWMutex
-	marketMap  map[string]*Market
-	// tradeMtx is used to synchronize access to the trades field and the
-	// trackers' fields. trackedTrade does not itself attempt to protect against
-	// concurrent access to its fields... for now.
+
+	booksMtx sync.RWMutex
+	books    map[string]*book.OrderBook
+
+	marketMtx sync.RWMutex
+	marketMap map[string]*Market
+
 	tradeMtx sync.RWMutex
 	trades   map[order.OrderID]*trackedTrade
 }
@@ -65,6 +65,8 @@ type dexConnection struct {
 func (dc *dexConnection) refreshMarkets() map[string]*Market {
 	marketMap := make(map[string]*Market, len(dc.cfg.Markets))
 	for _, mkt := range dc.cfg.Markets {
+		// The presence of the asset for every market was already verified when the
+		// dexConnection was created in connectDEX.
 		base, quote := dc.assets[mkt.Base], dc.assets[mkt.Quote]
 		market := &Market{
 			Name:            mkt.Name,
@@ -115,21 +117,21 @@ func (dc *dexConnection) hasOrders(assetID uint32) bool {
 
 // findOrder returns the tracker and preimage for an order ID, and a boolean
 // indicating whether this is a cancel order.
-func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, commit order.Preimage, isCancel bool) {
+func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for _, tracker := range dc.trades {
 		if tracker.ID() == oid {
 			return tracker, tracker.preImg, false
-		} else if tracker.cancelOrder != nil && tracker.cancelOrder.ID() == oid {
-			return tracker, tracker.cancelPreImg, true
+		} else if tracker.cancel != nil && tracker.cancel.ID() == oid {
+			return tracker, tracker.cancel.preImg, true
 		}
 	}
-	return nil, order.Preimage{}, false
+	return
 }
 
 // coinWaiter is a message waiting to be stamped, signed, and sent once a
-// specified coin has the requisite confirmations. This type is similar to
+// specified coin has the requisite confirmations. The coinWaiter is similar to
 // dcrdex/server/coinwaiter.Waiter, but is different enough to warrant a
 // separate type.
 type coinWaiter struct {
@@ -219,8 +221,8 @@ func (c *Core) Run(ctx context.Context) {
 	log.Infof("DEX client core off")
 }
 
-// Exchanges returns exchange information, including a list of markets and
-// their orders.
+// Exchanges returns a map of Exchange keyed by URI, including a list of markets
+// and their orders.
 func (c *Core) Exchanges() map[string]*Exchange {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
@@ -472,11 +474,11 @@ func (c *Core) OpenWallet(assetID uint32, appPW string) error {
 func unlockWallet(wallet *xcWallet, crypter encrypt.Crypter) error {
 	pwB, err := crypter.Decrypt(wallet.encPW)
 	if err != nil {
-		return fmt.Errorf("OpenWallet: decryption error: %v", err)
+		return fmt.Errorf("unlockWallet decryption error: %v", err)
 	}
 	err = wallet.Unlock(string(pwB), aYear)
 	if err != nil {
-		return fmt.Errorf("wallet unlock error: %v", err)
+		return fmt.Errorf("unlockWallet unlock error: %v", err)
 	}
 	return nil
 }
@@ -753,6 +755,7 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 		return nil, err
 	}
 	var wg sync.WaitGroup
+	var mtx sync.Mutex
 	var errs []string
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
@@ -776,11 +779,10 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 		go func(dc *dexConnection) {
 			defer wg.Done()
 			n, err := c.authDEX(dc)
-			// Using the tradeMtx here to synchronize access to the errs slice too.
-			dc.tradeMtx.Lock()
-			defer dc.tradeMtx.Unlock()
 			if err != nil {
+				mtx.Lock()
 				errs = append(errs, fmt.Sprintf("%s: %v", dc.acct.url, err))
+				mtx.Unlock()
 				return
 			}
 			negotiations = append(negotiations, n...)
@@ -893,7 +895,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	dc, found := c.conns[form.DEX]
 	c.connMtx.RUnlock()
 	if !found {
-		return nil, fmt.Errorf("unkown DEX %s", form.DEX)
+		return nil, fmt.Errorf("unknown DEX %s", form.DEX)
 	}
 	baseAsset, found := dc.assets[form.Base]
 	if !found {
@@ -921,7 +923,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 		return nil, err
 	}
 	if !fromWallet.unlocked() {
-		err := unlockWallet(fromWallet, crypter)
+		err = unlockWallet(fromWallet, crypter)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unlock %s wallet", unbip(fromID))
 		}
@@ -931,7 +933,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 		return nil, err
 	}
 	if !toWallet.unlocked() {
-		err := unlockWallet(toWallet, crypter)
+		err = unlockWallet(toWallet, crypter)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unlock %s wallet", unbip(toID))
 		}
@@ -951,7 +953,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
 		var b []byte = coins[i].ID()
-		coinIDs = append(coinIDs, b[:])
+		coinIDs = append(coinIDs, b)
 	}
 	msgCoins, err := messageCoins(fromWallet, coins)
 	if err != nil {
@@ -1056,7 +1058,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 }
 
 // Cancel is used to send a cancel order which cancels a limit order.
-func (c *Core) Cancel(pw string, sid string) error {
+func (c *Core) Cancel(pw string, tradeID string) error {
 	// Check the user password.
 	_, err := c.encryptionKey(pw)
 	if err != nil {
@@ -1064,16 +1066,16 @@ func (c *Core) Cancel(pw string, sid string) error {
 	}
 
 	// Find the order. Make sure it's a limit order.
-	oid, err := order.IDFromHex(sid)
+	oid, err := order.IDFromHex(tradeID)
 	if err != nil {
 		return err
 	}
 	dc, tracker, _ := c.findDEXOrder(oid)
 	if tracker == nil {
-		return fmt.Errorf("active order %s not found. cannot cancel", sid)
+		return fmt.Errorf("active order %s not found. cannot cancel", oid)
 	}
 	if tracker.Type() != order.LimitOrderType {
-		return fmt.Errorf("cannot cancel non-limit order %s of type %s", sid, tracker.Type())
+		return fmt.Errorf("cannot cancel non-limit order %s of type %s", oid, tracker.Type())
 	}
 
 	// Construct the order.
@@ -1127,10 +1129,7 @@ func (c *Core) Cancel(pw string, sid string) error {
 	}
 
 	// Store the cancel order with the tracker.
-	dc.tradeMtx.Lock()
-	tracker.cancelOrder = co
-	tracker.cancelPreImg = preImg
-	dc.tradeMtx.Unlock()
+	tracker.cancelTrade(co, preImg)
 
 	return nil
 }
@@ -1430,15 +1429,17 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		return nil, fmt.Errorf("database error when fetching orders for %s: %x", dc.acct.url, err)
 	}
 	cancels := make(map[order.OrderID]*order.CancelOrder)
+	cancelPreimages := make(map[order.OrderID]order.Preimage)
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
 	for _, dbOrder := range dbOrders {
+		oid := dbOrder.Order.ID()
+		var preImg order.Preimage
+		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 		if co, ok := dbOrder.Order.(*order.CancelOrder); ok {
-			cancels[co.ID()] = co
+			cancels[co.TargetOrderID] = co
+			cancelPreimages[co.TargetOrderID] = preImg
 		} else {
-			proof := dbOrder.MetaData.Proof
-			var preImg order.Preimage
-			copy(preImg[:], proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder.Order, dc, preImg)
+			trackers[oid] = newTrackedTrade(dbOrder.Order, dc, preImg)
 		}
 	}
 	for oid := range cancels {
@@ -1447,7 +1448,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 			log.Errorf("unmatched active cancel order: %s", oid)
 			continue
 		}
-		tracker.cancelOrder = cancels[oid]
+		tracker.cancelTrade(cancels[oid], cancelPreimages[oid])
 	}
 	return trackers, nil
 }
@@ -1573,7 +1574,7 @@ func (c *Core) handleReconnect(uri string) {
 }
 
 // handleOrderBookMsg is called when an orderbook response is received.
-func handleOrderBookMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handleOrderBookMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
 	snapshot := new(msgjson.OrderBook)
 	err := msg.UnmarshalResult(snapshot)
 	if err != nil {
@@ -1598,7 +1599,7 @@ func handleOrderBookMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 }
 
 // handleBookOrderMsg is called when a book_order notification is received.
-func handleBookOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var note msgjson.BookOrderNote
 	err := msg.Unmarshal(&note)
 	if err != nil {
@@ -1618,7 +1619,7 @@ func handleBookOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 
 // handleUnbookOrderMsg is called when an unbook_order notification is
 // received.
-func handleUnbookOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var note msgjson.UnbookOrderNote
 	err := msg.Unmarshal(&note)
 	if err != nil {
@@ -1730,7 +1731,7 @@ out:
 
 // handlePreimageRequest handles a DEX-originating request for an order
 // preimage.
-func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handlePreimageRequest(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
 	req := new(msgjson.PreimageRequest)
 	err := msg.Unmarshal(req)
 	if err != nil {
@@ -1784,13 +1785,11 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 			return dumpErr("order %s not found for match route", oid)
 		}
 		var err error
-		dc.tradeMtx.Lock()
 		if isCancel {
-			err = tracker.cancel(msgMatch)
+			err = tracker.processCancelMatch(msgMatch)
 		} else {
 			err = tracker.negotiate(c.ctx, msgMatch)
 		}
-		dc.tradeMtx.Unlock()
 		if err != nil {
 			return dumpErr(err.Error())
 		}
@@ -2006,7 +2005,7 @@ func messageOrder(ord order.Order, coins []*msgjson.Coin) (string, msgjson.Stamp
 			TargetID: o.TargetOrderID[:],
 		}
 	default:
-		panic("unkown order type")
+		panic("unknown order type")
 	}
 }
 

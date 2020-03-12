@@ -312,6 +312,10 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 	go func() {
 		defer wg.Done()
 		btc.run(ctx)
+		err := btc.wallet.LockUnspent(true, nil)
+		if err != nil {
+			btc.log.Errorf("failed to unlock %s outputs on shutdown: %v", btc.symbol, err)
+		}
 	}()
 	return nil, &wg
 }
@@ -342,7 +346,6 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 		return nil, err
 	}
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
-	fmt.Println("--", len(unspents), "unspents", nfo.FundConf)
 	utxos, _, unconf, err := btc.spendableUTXOs(unspents, nfo.FundConf)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)

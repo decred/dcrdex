@@ -211,16 +211,20 @@ func init() {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	client *rpcclient.Client
-	node   rpcClient
-	log    dex.Logger
-	acct   string
+	client    *rpcclient.Client
+	node      rpcClient
+	log       dex.Logger
+	acct      string
+	tipChange func(error)
+
 	// The DEX specifies that change outputs from DEX-monitored transactions are
 	// exempt from minimum confirmation limits, so we must track those as they are
 	// created.
-	changeMtx    sync.RWMutex
-	tradeChange  map[string]time.Time
-	tipChange    func(error)
+	changeMtx   sync.RWMutex
+	tradeChange map[string]time.Time
+
+	// Coins returned by Fund are cached for quick reference and for cleanup on
+	// shutdown.
 	fundingMtx   sync.RWMutex
 	fundingCoins map[string]*fundingCoin
 }
@@ -420,15 +424,15 @@ out:
 		}
 	}
 
-	err = dcr.lockUnspent(spents)
+	err = dcr.lockFundingCoins(spents)
 	if err != nil {
 		return nil, 0, 0, err
 	}
 	return coins, sum, size, nil
 }
 
-// lockUnspent locks the funding coins via RPC and stores them in the map.
-func (dcr *ExchangeWallet) lockUnspent(fCoins []*fundingCoin) error {
+// lockFundingCoins locks the funding coins via RPC and stores them in the map.
+func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	wireOPs := make([]*wire.OutPoint, 0, len(fCoins))
 	for _, c := range fCoins {
 		wireOPs = append(wireOPs, wire.NewOutPoint(&c.op.txHash, c.op.vout, c.op.tree))
@@ -534,6 +538,13 @@ func (dcr *ExchangeWallet) Swap(swaps []*asset.Swap, nfo *dex.Asset) ([]asset.Re
 			expiration: time.Unix(int64(cinfo.LockTime), 0).UTC(),
 		})
 	}
+	dcr.fundingMtx.Lock()
+	for _, swap := range swaps {
+		for _, coin := range swap.Inputs {
+			delete(dcr.fundingCoins, coin.String())
+		}
+	}
+	dcr.fundingMtx.Unlock()
 	return receipts, nil
 }
 
@@ -643,7 +654,6 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	dcr.fundingMtx.RUnlock()
 	var addr string
 	if found {
-		// Try to get it from gettxout
 		addr = fCoin.addr
 	} else {
 		// Check if we can get the address from gettxout.
@@ -1034,6 +1044,11 @@ func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (
 
 // Shutdown down the rpcclient.Client.
 func (dcr *ExchangeWallet) shutdown() {
+	// Unlock any locked outputs.
+	err := dcr.node.LockUnspent(true, nil)
+	if err != nil {
+		dcr.log.Errorf("failed to unlock DCR outputs on shutdown: %v", err)
+	}
 	if dcr.client != nil {
 		dcr.client.Shutdown()
 		dcr.client.WaitForShutdown()

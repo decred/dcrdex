@@ -332,7 +332,7 @@ func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
 		http.Error(w, "error reading JSON message", http.StatusBadRequest)
 		return false
 	}
-	err = json.Unmarshal(body, &thing)
+	err = json.Unmarshal(body, thing)
 	if err != nil {
 		log.Debugf("failed to unmarshal JSON request: %v", err)
 		http.Error(w, "failed to unmarshal JSON request", http.StatusBadRequest)

@@ -440,19 +440,26 @@ type TradeForm struct {
 	TifNow  bool   `json:"tifnow"`
 }
 
-// trackedTrade is an order placed by the core.
-type trackedTrade struct {
-	// mtx   sync.RWMutex
-	order.Order
-	dc            *dexConnection
-	preImg        order.Preimage
-	sid           string
-	cancelOrder   *order.CancelOrder
-	cancelPreImg  order.Preimage
-	cancelMatches struct {
+// trackedCancel is information necessary to track a cancel order. A
+// trackedCancel is always associated with a trackedTrade.
+type trackedCancel struct {
+	order.CancelOrder
+	preImg  order.Preimage
+	matches struct {
 		maker *msgjson.Match
 		taker *msgjson.Match
 	}
+}
+
+// trackedTrade is an order placed by the core. A trackedTrade may or may not
+// have a non-nil trackedCancel storing information about the cancellation.
+type trackedTrade struct {
+	order.Order
+	mtx         sync.RWMutex
+	dc          *dexConnection
+	preImg      order.Preimage
+	sid         string
+	cancel      *trackedCancel
 	negotiators map[order.MatchID]*matchNegotiator
 }
 
@@ -475,8 +482,12 @@ func (t *trackedTrade) rate() uint64 {
 	return 0
 }
 
-// coreOrder constructs a *core.Order for the tracked order.Order.
+// coreOrder constructs a *core.Order for the tracked order.Order. If the trade
+// has a cancel order associated with it, the cancel order will be returned,
+// otherwise the second returned *Order will be nil.
 func (t *trackedTrade) coreOrder() (*Order, *Order) {
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
 	prefix, trade := t.Prefix(), t.Trade()
 	var tif order.TimeInForce
 	if lo, ok := t.Order.(*order.LimitOrder); ok {
@@ -490,7 +501,7 @@ func (t *trackedTrade) coreOrder() (*Order, *Order) {
 		Qty:         trade.Quantity,
 		Sell:        trade.Sell,
 		Filled:      trade.Filled,
-		Cancelling:  t.cancelOrder != nil,
+		Cancelling:  t.cancel != nil,
 		TimeInForce: tif,
 	}
 	for _, n := range t.negotiators {
@@ -502,18 +513,29 @@ func (t *trackedTrade) coreOrder() (*Order, *Order) {
 		})
 	}
 	var cancelOrder *Order
-	if t.cancelOrder != nil {
+	if t.cancel != nil {
 		cancelOrder = &Order{
 			Type:     order.CancelOrderType,
-			Stamp:    encode.UnixMilliU(t.cancelOrder.ServerTime),
-			TargetID: t.cancelOrder.TargetOrderID.String(),
+			Stamp:    encode.UnixMilliU(t.cancel.ServerTime),
+			TargetID: t.cancel.TargetOrderID.String(),
 		}
 	}
 	return coreOrder, cancelOrder
 }
 
+func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage) {
+	t.mtx.Lock()
+	t.cancel = &trackedCancel{
+		CancelOrder: *co,
+		preImg:      preImg,
+	}
+	t.mtx.Unlock()
+}
+
 // negotiate creates a matchNegotiator and starts the negotiation thread.
 func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
 	if len(msgMatch.MatchID) != order.MatchIDSize {
 		return fmt.Errorf("match id of incorrect length. expected %d, got %d",
 			order.MatchIDSize, len(msgMatch.MatchID))
@@ -541,9 +563,10 @@ func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) e
 	// First check that this isn't a match on a cancel order. I'm not crazy about
 	// this, but I am detecting this case right now based on the Address field
 	// being an empty string.
-	isCancel := t.cancelOrder != nil && msgMatch.Address == ""
+	isCancel := t.cancel != nil && msgMatch.Address == ""
 	if isCancel {
-		t.cancelMatches.maker = msgMatch
+		log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
+		t.cancel.matches.maker = msgMatch
 	} else {
 		go n.runMatch(ctx)
 	}
@@ -561,15 +584,18 @@ func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) e
 	return nil
 }
 
-// cancel should be called with the message for the match on a cancel order.
-func (t *trackedTrade) cancel(msgMatch *msgjson.Match) error {
+// processCancelMatch should be called with the message for the match on a
+// cancel order.
+func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
 	var oid order.OrderID
 	copy(oid[:], msgMatch.OrderID)
-	if oid != t.cancelOrder.ID() {
-		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.cancelOrder.ID())
+	if oid != t.cancel.ID() {
+		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.cancel.ID())
 	}
-	log.Infof("maker notification for cancel order detected for order %s. match id = %s", oid, msgMatch.MatchID)
-	t.cancelMatches.taker = msgMatch
+	log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
+	t.cancel.matches.taker = msgMatch
 	return nil
 }
 

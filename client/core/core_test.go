@@ -1369,18 +1369,18 @@ func TestCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cancel error: %v", err)
 	}
-	if tracker.cancelOrder == nil {
+	if tracker.cancel == nil {
 		t.Fatalf("cancel order not found")
 	}
 	// remove the cancel order so we can check its nilness on error.
-	tracker.cancelOrder = nil
+	tracker.cancel = nil
 
 	ensureErr := func(tag string) {
 		err := rig.core.Cancel(tPW, sid)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
 		}
-		if tracker.cancelOrder != nil {
+		if tracker.cancel != nil {
 			t.Fatalf("%s: cancel order found", tag)
 		}
 	}
@@ -1479,7 +1479,7 @@ func TestTradeTracking(t *testing.T) {
 			Commit:     preImgC.Commit(),
 		},
 	}
-	tracker.cancelOrder = co
+	tracker.cancel = &trackedCancel{CancelOrder: *co}
 	coid := co.ID()
 	msgMatches := []*msgjson.Match{
 		{
@@ -1502,13 +1502,13 @@ func TestTradeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("match messages error: %v", err)
 	}
-	if tracker.cancelMatches.maker == nil {
+	if tracker.cancel.matches.maker == nil {
 		t.Fatalf("cancelMatches.maker not set")
 	}
 	if tracker.Trade().Filled != qty {
 		t.Fatalf("fill not set")
 	}
-	if tracker.cancelMatches.taker == nil {
+	if tracker.cancel.matches.taker == nil {
 		t.Fatalf("cancelMatches.taker not set")
 	}
 }

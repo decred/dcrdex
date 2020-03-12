@@ -31,15 +31,15 @@ type OrderID hash
 
 // IDFromHex decodes an OrderID from a hexadecimal string.
 func IDFromHex(sid string) (OrderID, error) {
-	if len(sid) != OrderIDSize*2 {
-		return OrderID{}, fmt.Errorf("invalid order ID. wrong length %d", len(sid))
+	if len(sid) > OrderIDSize*2 {
+		return OrderID{}, fmt.Errorf("invalid order ID. too long %d > %d", len(sid), OrderIDSize*2)
 	}
 	oidB, err := hex.DecodeString(sid)
 	if err != nil {
 		return OrderID{}, fmt.Errorf("order ID decode error: %v", err)
 	}
 	var oid OrderID
-	copy(oid[:], oidB)
+	copy(oid[OrderIDSize-len(oidB):], oidB)
 	return oid, nil
 }
 
@@ -664,7 +664,7 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 		}
 	default:
 		// cannot validate an unknown order type
-		return fmt.Errorf("unkown order type")
+		return fmt.Errorf("unknown order type")
 	}
 
 	return nil
