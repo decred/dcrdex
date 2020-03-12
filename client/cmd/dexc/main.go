@@ -72,7 +72,7 @@ func main() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				rpcserver.SetLogger(log)
+				rpcserver.SetLogger(logMaker.Logger("RPC"))
 				rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
 				rpcSrv, err := rpcserver.New(rpcCfg)
 				if err != nil {
