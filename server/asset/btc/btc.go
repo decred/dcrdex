@@ -188,8 +188,8 @@ func ReadCloneParams(cloneParams interface{}) (*chaincfg.Params, error) {
 	return p, nil
 }
 
-// Contract is part of the asset.Backend interface. See the unexported Backend.utxo
-// method for the full implementation.
+// Contract is part of the asset.Backend interface. An asset.Contract is a
+// utxo that has been validated as a swap contract for the passed redeem script.
 func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
@@ -322,6 +322,10 @@ func (btc *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScr
 // blockInfo returns block information for the verbose transaction data. The
 // current tip hash is also returned as a convenience.
 func (btc *Backend) blockInfo(verboseTx *btcjson.TxRawResult) (blockHeight uint32, blockHash chainhash.Hash, tipHash *chainhash.Hash, err error) {
+	h := btc.blockCache.tipHash()
+	if h != zeroHash {
+		tipHash = &h
+	}
 	if verboseTx.Confirmations > 0 {
 		var blk *cachedBlock
 		blk, err = btc.getBlockInfo(verboseTx.BlockHash)
@@ -330,12 +334,6 @@ func (btc *Backend) blockInfo(verboseTx *btcjson.TxRawResult) (blockHeight uint3
 		}
 		blockHeight = blk.height
 		blockHash = blk.hash
-	} else {
-		// Set the lastLookup to the current tip.
-		h := btc.blockCache.tipHash()
-		if h != zeroHash {
-			tipHash = &h
-		}
 	}
 	return
 }

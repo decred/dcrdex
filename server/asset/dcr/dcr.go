@@ -144,15 +144,14 @@ func (dcr *Backend) BlockChannel(size int) chan uint32 {
 	return c
 }
 
-// Contract is part of the asset.Backend interface, so returns the
-// asset.Contract type. Only spendable utxos with known types of pubkey script
-// will be successfully retrieved. A spendable utxo is one that can be spent in
-// the next block. Every regular-tree output from a non-coinbase transaction is
-// spendable immediately. Coinbase and stake tree outputs are only spendable
-// after CoinbaseMaturity confirmations. Pubkey scripts can be P2PKH or P2SH in
-// either regular- or stake-tree flavor. P2PKH supports two alternative
-// signatures, Schnorr and Edwards. Multi-sig P2SH redeem scripts are supported
-// as well.
+// Contract is part of the asset.Backend interface. An asset.Contract is a utxo
+// that has been validated as a swap contract for the passed redeem script. A
+// spendable utxo is one that can be spent in the next block. Every regular-tree
+// output from a non-coinbase transaction is spendable immediately. Coinbase and
+// stake tree outputs are only spendable after CoinbaseMaturity confirmations.
+// Pubkey scripts can be P2PKH or P2SH in either regular- or stake-tree flavor.
+// P2PKH supports two alternative signatures, Schnorr and Edwards. Multi-sig
+// P2SH redeem scripts are supported as well.
 func (dcr *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
@@ -449,10 +448,14 @@ func (dcr *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScr
 // current tip hash is also returned as a convenience.
 func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uint32, blockHash chainhash.Hash, tipHash *chainhash.Hash, err error) {
 	blockHeight = uint32(verboseTx.BlockHeight)
+	tip := dcr.blockCache.tipHash()
+	if tip != zeroHash {
+		tipHash = &tip
+	}
 	// UTXO is assumed to be valid while in mempool, so skip the validity check.
 	if verboseTx.Confirmations > 0 {
 		if blockHeight == 0 {
-			err = fmt.Errorf("no raw transaction result found for tx output with "+
+			err = fmt.Errorf("zero block height for output with "+
 				"non-zero confirmation count (%s has %d confirmations)", verboseTx.Txid, verboseTx.Confirmations)
 			return
 		}
@@ -463,12 +466,6 @@ func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uin
 		}
 		blockHeight = blk.height
 		blockHash = blk.hash
-	} else {
-		// Set the lastLookup to the current tip.
-		tip := dcr.blockCache.tipHash()
-		if tip != zeroHash {
-			tipHash = &tip
-		}
 	}
 	return
 }

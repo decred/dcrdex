@@ -19,34 +19,34 @@ const ErrReorgDetected = dex.Error("reorg detected")
 
 // TXIO is common information stored with an Input or a UTXO
 type TXIO struct {
-	// Because a UTXO's validity and block info can change after creation, keep a
+	// Because a TXIO's validity and block info can change after creation, keep a
 	// Backend around to query the state of the tx and update the block info.
 	dcr *Backend
 	tx  *Tx
 	// The height and hash of the transaction's best known block.
 	height    uint32
 	blockHash chainhash.Hash
-	// The number of confirmations needed for maturity. For outputs of a coinbase
+	// The number of confirmations needed for maturity. For outputs of coinbase
 	// transactions and stake-related transactions, this will be set to
 	// chaincfg.Params.CoinbaseMaturity (256 for mainchain). For other supported
 	// script types, this will be zero.
 	maturity int32
-	// While the utxo's tx is still in mempool, the tip hash will be stored.
+	// While the TXIO's tx is still in mempool, the tip hash will be stored.
 	// This enables an optimization in the Confirmations method to return zero
 	// without extraneous RPC calls.
 	lastLookup *chainhash.Hash
 }
 
-// confirmations returns the number of confirmations for a TXIO's transaction.
-// Because a TXIO can become invalid after once being considered valid, validity
+// confirmations returns the number of confirmations for a tx's transaction.
+// Because a tx can become invalid after once being considered valid, validity
 // should be verified again on every call. An error will be returned if this
-// TXIO is no longer ready to spend. An unmined transaction should have zero
+// tx is no longer ready to spend. An unmined transaction should have zero
 // confirmations. A transaction in the current best block should have one
 // confirmation. The value -1 will be returned with any error.
 func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 	dcr := txio.dcr
 	tipHash := dcr.blockCache.tipHash()
-	// If the UTXO was in a mempool transaction, check if it has been confirmed.
+	// If the tx was in a mempool transaction, check if it has been confirmed.
 	if txio.height == 0 {
 		// If the tip hasn't changed, don't do anything here.
 		if txio.lastLookup == nil || *txio.lastLookup != tipHash {
@@ -56,7 +56,7 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 				return -1, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txio.tx.hash, err)
 			}
 			// More than zero confirmations would indicate that the transaction has
-			// been mined. Collect the block info and update the utxo fields.
+			// been mined. Collect the block info and update the tx fields.
 			if verboseTx.Confirmations > 0 {
 				blk, err := txio.dcr.getBlockInfo(verboseTx.BlockHash)
 				if err != nil {
@@ -68,13 +68,13 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 			return verboseTx.Confirmations, nil
 		}
 	} else {
-		// The UTXO was included in a block, but make sure that the utxo's block has
+		// The tx was included in a block, but make sure that the tx's block has
 		// not been orphaned or voted as invalid.
 		mainchainBlock, found := dcr.blockCache.atHeight(txio.height)
 		if !found {
 			return -1, fmt.Errorf("no mainchain block for tx %s at height %d", txio.tx.hash.String(), txio.height)
 		}
-		// If the UTXO's block has been orphaned, check for a new containing block.
+		// If the tx's block has been orphaned, check for a new containing block.
 		if mainchainBlock.hash != txio.blockHash {
 			return -1, ErrReorgDetected
 		}
@@ -84,7 +84,7 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 				return -1, fmt.Errorf("error retrieving approving block tx %s: %v", txio.tx.hash, err)
 			}
 			if nextBlock != nil && !nextBlock.vote {
-				return -1, fmt.Errorf("utxo's block has been voted as invalid")
+				return -1, fmt.Errorf("transaction %s block %s has been voted as invalid", txio.tx.hash, nextBlock.hash)
 			}
 		}
 	}
@@ -147,12 +147,14 @@ func (input *Input) spendsCoin(coinID []byte) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
+	if uint32(len(input.tx.ins)) < input.vin+1 {
+		return false, nil
+	}
 	txIn := input.tx.ins[input.vin]
 	return txIn.prevTx == *txHash && txIn.vout == vout, nil
 }
 
-// A UTXO is information regarding an unspent transaction output. It must
-// satisfy the asset.UTXO interface to be DEX-compatible.
+// A UTXO is information regarding an unspent transaction output.
 type UTXO struct {
 	TXIO
 	vout uint32
