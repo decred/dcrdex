@@ -320,7 +320,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	if acctInfo == nil {
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
-			Message: "not account info found for account ID" + connect.AccountID.String(),
+			Message: "no account info found for account ID" + connect.AccountID.String(),
 		}
 	}
 	if !paid {
@@ -354,6 +354,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	// Send the connect response, which includes a list of active matches.
 	matches, err := auth.storage.ActiveMatches(user)
 	if err != nil {
+		log.Errorf("ActiveMatches(%x): %v", user, err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "DB error",

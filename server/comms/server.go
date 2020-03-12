@@ -213,7 +213,7 @@ func (s *Server) Run(ctx context.Context) {
 			http.Error(w, "server at maximum capacity", http.StatusServiceUnavailable)
 			return
 		}
-		wsConn, err := ws.NewConnection(w, r, pingPeriod+pongWait)
+		wsConn, err := ws.NewConnection(w, r, pongWait)
 		if err != nil {
 			log.Errorf("ws connection error: %v", err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)

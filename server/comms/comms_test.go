@@ -111,6 +111,14 @@ func (conn *wsConnStub) SetWriteDeadline(t time.Time) error {
 	return nil // TODO implement and test write timeouts
 }
 
+func (conn *wsConnStub) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (conn *wsConnStub) WriteControl(messageType int, data []byte, deadline time.Time) error {
+	return nil
+}
+
 func (conn *wsConnStub) Close() error {
 	select {
 	case <-conn.quit:
@@ -387,9 +395,9 @@ func TestClientRequests(t *testing.T) {
 	if !server.isQuarantined(stubAddr) {
 		t.Fatalf("server has not marked client as quarantined")
 	}
-	// A call to Send should return ErrClientDisconnected
+	// A call to Send should return ErrPeerDisconnected
 	lockedExe(func() {
-		if !errors.Is(client.Send(nil), ws.ErrClientDisconnected) {
+		if !errors.Is(client.Send(nil), ws.ErrPeerDisconnected) {
 			t.Fatalf("incorrect error for disconnected client")
 		}
 	})
