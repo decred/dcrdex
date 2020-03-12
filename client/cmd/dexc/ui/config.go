@@ -83,6 +83,7 @@ type Config struct {
 
 var defaultConfig = Config{
 	AppData:    applicationDirectory,
+	Config:     defaultConfigPath,
 	DebugLevel: defaultLogLevel,
 	RPCAddr:    defaultRPCAddr,
 	WebAddr:    defaultWebAddr,
