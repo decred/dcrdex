@@ -8,15 +8,15 @@ import (
 	"fmt"
 )
 
-// versionResult holds a semver version JSON object.
-type versionResult struct {
+// versionResponse holds a semver version JSON object.
+type versionResponse struct {
 	Major uint32 `json:"major"`
 	Minor uint32 `json:"minor"`
 	Patch uint32 `json:"patch"`
 }
 
 // String satisfies the Stringer interface.
-func (vr versionResult) String() string {
+func (vr versionResponse) String() string {
 	return fmt.Sprintf("%d.%d.%d", vr.Major, vr.Minor, vr.Patch)
 }
 
@@ -29,26 +29,25 @@ var (
 
 // ParseCmdArgs parses arguments to commands for rpcserver requests.
 func ParseCmdArgs(cmd string, args []interface{}) (interface{}, error) {
-	r := route(cmd)
-	nArg, exists := nArgs[r]
+	nArg, exists := nArgs[cmd]
 	if !exists {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownCmd, cmd)
 	}
 	if err := checkNArgs(len(args), nArg); err != nil {
 		return nil, err
 	}
-	return parsers[r](args)
+	return parsers[cmd](args)
 }
 
 // nArgs is a map of routes to the number of arguments accepted. One integer
 // indicates an exact match, two are the min and max.
-var nArgs = map[route][]int{
+var nArgs = map[string][]int{
 	helpRoute:    []int{0, 1},
 	versionRoute: []int{0},
 }
 
 // parsers is a map of commands to parsing functions.
-var parsers = map[route](func([]interface{}) (interface{}, error)){
+var parsers = map[string](func([]interface{}) (interface{}, error)){
 	helpRoute:    parseHelpArgs,
 	versionRoute: parseVersionArgs,
 }

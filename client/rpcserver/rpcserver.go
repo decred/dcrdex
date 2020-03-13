@@ -349,7 +349,7 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	}
 
 	// Find the correct handler for this route.
-	h, exists := routes[route(req.Route)]
+	h, exists := routes[req.Route]
 	if !exists {
 		log.Debugf("%v: %v", ErrUnknownCmd, req.Route)
 		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, ErrUnknownCmd.Error())

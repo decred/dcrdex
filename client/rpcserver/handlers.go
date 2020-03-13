@@ -12,11 +12,9 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 )
 
-type route string
-
 const (
-	helpRoute    route = "help"
-	versionRoute       = "version"
+	helpRoute    = "help"
+	versionRoute = "version"
 )
 
 // createResponse creates a msgjson response payload.
@@ -30,7 +28,7 @@ func createResponse(op string, res interface{}, resErr *msgjson.Error) *msgjson.
 }
 
 // routes maps routes to a handler function.
-var routes = map[route]func(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload{
+var routes = map[string]func(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload{
 	helpRoute:    handleHelp,
 	versionRoute: handleVersion,
 }
@@ -62,7 +60,7 @@ func handleHelp(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 // handleVersion handles requests for version. It takes no arguments and returns
 // the semver.
 func handleVersion(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
-	res := &versionResult{
+	res := &versionResponse{
 		Major: rpcSemverMajor,
 		Minor: rpcSemverMinor,
 		Patch: rpcSemverPatch,
@@ -87,7 +85,7 @@ func ListCommands() string {
 
 // CommandUsage returns a help message for cmd or an error if cmd is unknown.
 func CommandUsage(cmd string) (string, error) {
-	msg, exists := helpMsgs[route(cmd)]
+	msg, exists := helpMsgs[cmd]
 	if !exists {
 		return "", fmt.Errorf("%w: %s", ErrUnknownCmd, cmd)
 	}
@@ -95,13 +93,13 @@ func CommandUsage(cmd string) (string, error) {
 }
 
 // sortHelpKeys returns a sorted list of helpMsgs keys.
-func sortHelpKeys() []route {
-	keys := make([]route, 0, len(helpMsgs))
+func sortHelpKeys() []string {
+	keys := make([]string, 0, len(helpMsgs))
 	for k := range helpMsgs {
 		keys = append(keys, k)
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		return string(keys[i]) < string(keys[j])
+		return keys[i] < keys[j]
 	})
 	return keys
 }
@@ -109,7 +107,7 @@ func sortHelpKeys() []route {
 // helpMsgs are a map of routes to help messages. The first string is a short
 // description of usage. The second is a brief description and a breakdown of
 // the arguments and return values.
-var helpMsgs = map[route][2]string{
+var helpMsgs = map[string][2]string{
 	helpRoute: [2]string{`("cmd")`,
 		`Print a help message.
 

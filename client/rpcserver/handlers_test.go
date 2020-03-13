@@ -78,7 +78,7 @@ func TestListCommands(t *testing.T) {
 	}
 	want := ""
 	for _, r := range sortHelpKeys() {
-		want += string(r)
+		want += r
 		want += " "
 		want += helpMsgs[r][0]
 		want += "\n"
@@ -90,11 +90,11 @@ func TestListCommands(t *testing.T) {
 
 func TestCommandUsage(t *testing.T) {
 	for r, msg := range helpMsgs {
-		res, err := CommandUsage(string(r))
+		res, err := CommandUsage(r)
 		if err != nil {
 			t.Fatalf("unexpected error for command %s", r)
 		}
-		want := string(r)
+		want := r
 		want += " "
 		want += msg[0]
 		want += "\n\n"
