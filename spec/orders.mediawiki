@@ -687,6 +687,8 @@ contract and issue their redemption.
 |-
 | timestamp || int  || server's UNIX timestamp (milliseconds)
 |-
+| coinid    || string || hex-encoded coin ID
+|-
 | contract  || string || hex-encoded swap redeem script
 |-
 | sig       || string || DEX's signature of the serialized notification. serialization described below
@@ -702,6 +704,8 @@ contract and issue their redemption.
 | matchid    || 32  || the match ID
 |-
 | timestamp  || 8  || server's UNIX timestamp (milliseconds)
+|-
+| coin ID    || asset-dependent  || the coin ID
 |-
 | contract   || asset-dependent || swap redeem script
 |}
@@ -720,7 +724,9 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | matchid    || string    || the match ID
 |-
-| coinid    || string || hex-encoded coin ID
+| coinid     || string || hex-encoded coin ID
+|-
+| secret     || string || the hex-encoded swap contract secret
 |-
 | timestamp  || int    || client's UNIX timestamp (milliseconds)
 |-
@@ -737,7 +743,7 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | coin ID    || asset-dependent  || the coin ID
 |-
-| timestamp  || 8  || the client's UNIX timestamp (milliseconds)
+| secret     || 32  || the swap contract secret
 |}
 
 The DEX responds with an acknowledgement.
@@ -756,6 +762,8 @@ The DEX informs the taker when the maker has redeemed.
 |-
 | coinid     || string || hex-encoded coin ID
 |-
+| secret     || string || the hex-encoded swap contract secret
+|-
 | timestamp  || int    || server's UNIX timestamp (milliseconds)
 |-
 | sig        || string || DEX's signature of the serialized notification. serialization described below
@@ -771,6 +779,8 @@ The DEX informs the taker when the maker has redeemed.
 | matchid    || 32  || the match ID
 |-
 | coin ID    || asset-dependent  || the coin ID
+|-
+| secret     || 32  || the swap contract secret
 |-
 | timestamp  || 8  || server's UNIX timestamp (milliseconds)
 |}
