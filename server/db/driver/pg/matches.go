@@ -258,7 +258,7 @@ func (a *Archiver) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapDa
 
 // Match acknowledgement message signatures.
 
-func (a *Archiver) saveMatchSig(mid db.MarketMatchID, sig []byte, sigStmt string) error {
+func (a *Archiver) saveAckSig(mid db.MarketMatchID, sig []byte, sigStmt string) error {
 	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
 	if err != nil {
 		return err
@@ -280,13 +280,13 @@ func (a *Archiver) saveMatchSig(mid db.MarketMatchID, sig []byte, sigStmt string
 // SaveMatchAckSigA records the match data acknowledgement signature from swap
 // party A (the initiator), which is the maker in the DEX.
 func (a *Archiver) SaveMatchAckSigA(mid db.MarketMatchID, sig []byte) error {
-	return a.saveMatchSig(mid, sig, internal.SetMakerMatchAckSig)
+	return a.saveAckSig(mid, sig, internal.SetMakerMatchAckSig)
 }
 
 // SaveMatchAckSigB records the match data acknowledgement signature from swap
 // party B (the participant), which is the taker in the DEX.
 func (a *Archiver) SaveMatchAckSigB(mid db.MarketMatchID, sig []byte) error {
-	return a.saveMatchSig(mid, sig, internal.SetTakerMatchAckSig)
+	return a.saveAckSig(mid, sig, internal.SetTakerMatchAckSig)
 }
 
 // Swap contracts, and counterparty audit acknowledgement signatures.
@@ -320,7 +320,7 @@ func (a *Archiver) SaveContractA(mid db.MarketMatchID, contract []byte, coinID [
 // SaveAuditAckSigB records party B's signature acknowledging their audit of A's
 // swap contract.
 func (a *Archiver) SaveAuditAckSigB(mid db.MarketMatchID, sig []byte) error {
-	return a.saveMatchSig(mid, sig, internal.SetParticipantContractAuditSig)
+	return a.saveAckSig(mid, sig, internal.SetParticipantContractAuditSig)
 }
 
 // SaveContractB records party B's swap contract script and the coinID (e.g.
@@ -332,7 +332,7 @@ func (a *Archiver) SaveContractB(mid db.MarketMatchID, contract []byte, coinID [
 // SaveAuditAckSigA records party A's signature acknowledging their audit of B's
 // swap contract.
 func (a *Archiver) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error {
-	return a.saveMatchSig(mid, sig, internal.SetInitiatorContractAuditSig)
+	return a.saveAckSig(mid, sig, internal.SetInitiatorContractAuditSig)
 }
 
 // Redemption transactions, and counterparty acknowledgement signatures.
@@ -356,6 +356,18 @@ func (a *Archiver) saveRedeem(mid db.MarketMatchID, coinID []byte, timestamp int
 	return nil
 }
 
+func (a *Archiver) saveRedeemAckSig(mid db.MarketMatchID, sig []byte, sigStmt string) error {
+	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
+	if err != nil {
+		return err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+	stmt := fmt.Sprintf(sigStmt, matchesTableName)
+	_, err = a.db.Exec(stmt, mid.MatchID, sig)
+	return err
+}
+
 // SaveRedeemA records party A's redemption coinID (e.g. transaction output),
 // which spends party B's swap contract on chain Y. Note that this transaction
 // will contain the secret, which party B extracts.
@@ -370,7 +382,7 @@ func (a *Archiver) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp in
 // MatchComplete, which is set by SaveRedeemB) if the initiators's redeem ack
 // signature is already set.
 func (a *Archiver) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
-	return a.saveMatchSig(mid, sig, internal.SetParticipantRedeemAckSig)
+	return a.saveRedeemAckSig(mid, sig, internal.SetParticipantRedeemAckSig)
 }
 
 // SaveRedeemB records party B's redemption coinID (e.g. transaction output),
@@ -385,7 +397,7 @@ func (a *Archiver) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp in
 // MatchComplete, which is set by SaveRedeemB) if the participant's redeem ack
 // signature is already set.
 func (a *Archiver) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
-	return a.saveMatchSig(mid, sig, internal.SetInitiatorRedeemAckSig)
+	return a.saveRedeemAckSig(mid, sig, internal.SetInitiatorRedeemAckSig)
 }
 
 // SetMatchInactive flags the match as done/inactive. This is not necessary if

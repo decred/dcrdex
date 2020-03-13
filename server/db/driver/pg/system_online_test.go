@@ -144,7 +144,7 @@ func nukeAll(db *sql.DB) error {
 
 	// Drop market schemas.
 	for i := range markets {
-		log.Infof(`Dropping market %s schema...`, markets[i])
+		log.Tracef(`Dropping market %s schema...`, markets[i])
 		_, err = db.Exec(fmt.Sprintf("DROP SCHEMA %s CASCADE;", markets[i]))
 		if err != nil {
 			return err
@@ -155,7 +155,7 @@ func nukeAll(db *sql.DB) error {
 	dropPublic := func(stmts []tableStmt) error {
 		for i := range stmts {
 			tableName := "public." + stmts[i].name
-			log.Infof(`Dropping DEX table %s...`, tableName)
+			log.Tracef(`Dropping DEX table %s...`, tableName)
 			if err = dropTable(db, tableName); err != nil {
 				return err
 			}

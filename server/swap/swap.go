@@ -47,6 +47,7 @@ type AuthManager interface {
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
 	Penalize(account.AccountID, account.Rule)
+	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
 }
 
@@ -56,6 +57,8 @@ type Storage interface {
 	LastErr() error
 	InsertMatch(match *order.Match) error
 	CancelOrder(*order.LimitOrder) error
+	RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error)
+	SetOrderCompleteTime(ord order.Order, compTimeMs int64) error
 }
 
 // swapStatus is information related to the completion or incompletion of each
@@ -167,6 +170,10 @@ type Swapper struct {
 	// The matches map and the contained matches are protected by the matchMtx.
 	matchMtx sync.RWMutex
 	matches  map[string]*matchTracker
+	// orderMatches, which counts the number of active swaps for a given order,
+	// is protected by orderMatchesMtx.
+	orderMatchesMtx sync.Mutex
+	orderMatches    map[order.OrderID]int
 	// Each asset backend gets a goroutine to monitor for new blocks. When a new
 	// block is received, it is passed to the start loop through the block
 	// channel.
@@ -181,13 +188,14 @@ type Swapper struct {
 func NewSwapper(cfg *Config) *Swapper {
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		coins:      cfg.Assets,
-		storage:    cfg.Storage,
-		authMgr:    authMgr,
-		coinWaiter: coinwaiter.New(recheckInterval, authMgr.Send),
-		matches:    make(map[string]*matchTracker),
-		block:      make(chan *blockNotification, 8),
-		bTimeout:   cfg.BroadcastTimeout,
+		coins:        cfg.Assets,
+		storage:      cfg.Storage,
+		authMgr:      authMgr,
+		coinWaiter:   coinwaiter.New(recheckInterval, authMgr.Send),
+		matches:      make(map[string]*matchTracker),
+		orderMatches: make(map[order.OrderID]int),
+		block:        make(chan *blockNotification, 8),
+		bTimeout:     cfg.BroadcastTimeout,
 	}
 
 	// The swapper is only concerned with two types of client-originating
@@ -288,6 +296,76 @@ out:
 	}
 
 	wg.Wait()
+}
+
+// BeginMatchAndNegotiate prevents updates to the active swap counter until
+// EndMatchAndNegotiate is called. This should be run before modifying order
+// status or remaining amount (e.g. epoch processing and order matching in
+// Market), so that any orders already involved in active swaps remain
+// unmodified until new matches are recorded by the Swapper in Negotiate. As
+// such, EndMatchAndNegotiate should be called after Negotiate completes if
+// their are new matches to initiate.
+func (s *Swapper) BeginMatchAndNegotiate() {
+	s.orderMatchesMtx.Lock()
+}
+
+// EndMatchAndNegotiate releases the Swapper's lock on it's active swap counter,
+// so orders may be flagged as complete if they are involved in no active swaps
+// and have successfully completed their final swap.
+func (s *Swapper) EndMatchAndNegotiate() {
+	s.orderMatchesMtx.Unlock()
+}
+
+// isOrderComplete decrements the number of active swaps for an order, returning
+// a boolean indicating if the order is now considered complete, where complete
+// means there are no more active swaps and the order is either a market order
+// or a limit order with immediate force or zero remaining amount.
+func (s *Swapper) isOrderComplete(ord order.Order) bool {
+	s.orderMatchesMtx.Lock()
+	defer s.orderMatchesMtx.Unlock()
+
+	oid := ord.ID()
+	count := s.orderMatches[oid]
+	if count <= 1 {
+		delete(s.orderMatches, oid)
+		count = 0 // in case count was somehow <1
+	} else {
+		s.orderMatches[oid]--
+		count--
+	}
+
+	if count != 0 {
+		return false
+	}
+
+	if lo, ok := ord.(*order.LimitOrder); ok {
+		return lo.Force == order.ImmediateTiF || lo.Remaining() == 0
+	}
+	// TODO: Decide out how to deal with market and standing limit orders with
+	// multiple active swaps where not all swaps succeeded. Presently, just one
+	// successful swap will appear to have completed the order if the other
+	// swaps fail first because order remaining amount is decremented on
+	// matching (prior to start of swap negotiation). We may even wish to
+	// incentivize the user to complete remaining swaps by crediting the final
+	// successful swap as a completed order, especially since *each* revoked
+	// swap creates a virtual cancel order that counts against them. However,
+	// this could be resolved by having storage.SetOrderCompleteTime fail to
+	// stamp an order with completion time if it is in revoked status, and
+	// return that status prior to authMgr.RecordCompletedOrder.
+	return true
+}
+
+// decrementActiveSwapCount is the same as isOrderComplete without return value.
+func (s *Swapper) decrementActiveSwapCount(ord order.Order) {
+	s.orderMatchesMtx.Lock()
+	defer s.orderMatchesMtx.Unlock()
+
+	oid := ord.ID()
+	if s.orderMatches[oid] <= 1 {
+		delete(s.orderMatches, oid)
+	} else {
+		s.orderMatches[oid]--
+	}
 }
 
 func (s *Swapper) tryConfirmSwap(status *swapStatus) {
@@ -507,7 +585,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 		return
 	}
 
-	var deletions []string
+	var deletions []*matchTracker
 	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
 
 	checkMatch := func(match *matchTracker) {
@@ -520,10 +598,40 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			return
 		}
 
-		failMatch := func(userAtFault account.AccountID) {
-			deletions = append(deletions, match.ID().String())
+		failMatch := func(makerFault bool) {
+			orderAtFault := match.Taker // an order.Order
+			if makerFault {
+				orderAtFault = match.Maker
+			}
+			deletions = append(deletions, match)
+
+			// Record the end of this match's processing.
 			s.storage.SetMatchInactive(db.MatchID(match.Match))
-			s.authMgr.Penalize(userAtFault, account.FailureToAct)
+
+			// Create the server-generated cancel order, and register it with
+			// the AuthManager for cancellation ratio computation.
+			coid, revTime, err := s.storage.RevokeOrder(orderAtFault)
+			if err == nil {
+				s.authMgr.RecordCancel(orderAtFault.User(), coid, orderAtFault.ID(), revTime)
+			} else {
+				log.Errorf("Failed to revoke order %v with a new cancel order: %v",
+					orderAtFault.UID(), err)
+			}
+
+			// That's one less active swap for this order.
+			s.decrementActiveSwapCount(orderAtFault)
+
+			// Penalize for failure to act.
+			//
+			// TODO: This currently obviates the RecordCancel above since this
+			// closes the account before the possibility of a cancellation ratio
+			// penalty. I'm keeping it this way for now however since penalties
+			// may become less severe than account closure (e.g. temporary
+			// suspension, cool down, or order throttling), and restored
+			// accounts will still require a record of the revoked order.
+			s.authMgr.Penalize(orderAtFault.User(), account.FailureToAct)
+
+			// Send the revoke_match messages, and solicit acks.
 			s.revoke(match)
 		}
 
@@ -541,7 +649,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// the time the match notification was sent (match.time) for the broadcast
 			// timeout.
 			if match.makerStatus.swapTime.IsZero() && match.time.Before(oldestAllowed) {
-				failMatch(match.Maker.User())
+				failMatch(true)
 			}
 		case order.MakerSwapCast:
 			if match.takerStatus.swapAsset != assetID {
@@ -552,7 +660,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			if match.takerStatus.swapTime.IsZero() &&
 				!match.makerStatus.swapConfirmed.IsZero() &&
 				match.makerStatus.swapConfirmed.Before(oldestAllowed) {
-				failMatch(match.Taker.User())
+				failMatch(false)
 			}
 		case order.TakerSwapCast:
 			if match.takerStatus.swapAsset != assetID {
@@ -564,7 +672,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			if match.makerStatus.redeemTime.IsZero() &&
 				!match.takerStatus.swapConfirmed.IsZero() &&
 				match.takerStatus.swapConfirmed.Before(oldestAllowed) {
-				failMatch(match.Maker.User())
+				failMatch(true)
 			}
 		case order.MakerRedeemed:
 			if match.takerStatus.swapAsset != assetID {
@@ -576,7 +684,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			if match.takerStatus.redeemTime.IsZero() &&
 				!match.makerStatus.redeemTime.IsZero() &&
 				match.makerStatus.redeemTime.Before(oldestAllowed) {
-				failMatch(match.Taker.User())
+				failMatch(false)
 			}
 		case order.MatchComplete:
 			// Nothing to do here right now.
@@ -594,8 +702,8 @@ func (s *Swapper) checkInaction(assetID uint32) {
 		checkMatch(match)
 	}
 
-	for _, matchID := range deletions {
-		delete(s.matches, matchID)
+	for _, match := range deletions {
+		delete(s.matches, match.ID().String())
 	}
 }
 
@@ -808,7 +916,8 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 
 	acker.match.mtx.Lock()
 	defer acker.match.mtx.Unlock()
-	// ack of either contract audit or redeem receipt
+
+	// This is an ack of either contract audit or redeem receipt.
 	if acker.isAudit {
 		if acker.isMaker {
 			acker.match.Sigs.MakerAudit = ack.Sig         // i.e. audited taker's contract
@@ -817,18 +926,61 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 			acker.match.Sigs.TakerAudit = ack.Sig
 			s.storage.SaveAuditAckSigB(mktMatch, ack.Sig)
 		}
+		return
+	}
+
+	// This is a redemption acknowledgement. Store the ack signature, and
+	// potentially record the order as complete with the auth manager and in
+	// persistent storage.
+	tAckMS := encode.UnixMilli(tAck)
+	if acker.isMaker {
+		// A maker order is complete if it has force immediate or no
+		// remaining amount, indicating it is off the books.
+		lo := acker.match.Maker
+		if s.isOrderComplete(lo) {
+			s.authMgr.RecordCompletedOrder(acker.user, lo.ID(), tAck)
+			if err = s.storage.SetOrderCompleteTime(lo, tAckMS); err != nil {
+				if db.IsErrGeneralFailure(err) {
+					log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", lo, err)
+					s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
+					return
+				}
+				log.Warnf("SetOrderCompleteTime for %v: %v", lo, err)
+			}
+		}
+
+		acker.match.Sigs.MakerRedeem = ack.Sig
+		if err = s.storage.SaveRedeemAckSigA(mktMatch, ack.Sig); err != nil {
+			s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
+			log.Errorf("SaveRedeemAckSigA failed for match %v: %v", mktMatch.String(), err)
+			return
+		}
+
 	} else {
-		tAckMS := encode.UnixMilli(tAck)
-		if acker.isMaker {
-			s.authMgr.RecordCompletedOrder(acker.user, acker.match.Maker.ID(), tAck)
-			acker.match.Sigs.MakerRedeem = ack.Sig
-			s.storage.SaveRedeemAckSigA(mktMatch, ack.Sig, tAckMS)
-		} else {
-			s.authMgr.RecordCompletedOrder(acker.user, acker.match.Taker.ID(), tAck)
-			acker.match.Sigs.TakerRedeem = ack.Sig
-			s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig, tAckMS)
+		// A taker order is complete if it is one of: (1) a market order,
+		// which does not go on the books, (2) limit with force immediate,
+		// or (3) limit with no remaining amount.
+		ord := acker.match.Taker
+		if s.isOrderComplete(ord) {
+			s.authMgr.RecordCompletedOrder(acker.user, ord.ID(), tAck)
+			if err = s.storage.SetOrderCompleteTime(ord, tAckMS); err != nil {
+				if db.IsErrGeneralFailure(err) {
+					log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", ord.UID(), err)
+					s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
+					return
+				}
+				log.Warnf("SetOrderCompleteTime for %v: %v", ord.UID(), err)
+			}
+		}
+
+		acker.match.Sigs.TakerRedeem = ack.Sig
+		if err = s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig); err != nil {
+			s.respondError(msg.ID, acker.user, msgjson.UnknownMarketError, "internal server error")
+			log.Errorf("SaveRedeemAckSigB failed for match %v: %v", mktMatch.String(), err)
+			return
 		}
 	}
+
 }
 
 // processInit processes the `init` RPC request, which is used to inform the DEX
@@ -1443,7 +1595,16 @@ func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
 	assetLock.UnlockOrderCoins(oid)
 }
 
-// Negotiate takes ownership of the matches and begins swap negotiation.
+// Negotiate takes ownership of the matches and begins swap negotiation. For
+// reliable identification of completed orders when redeem acks are received and
+// processed by processAck, BeginMatchAndNegotiate should be called prior to
+// matching and order status/amount updates, and EndMatchAndNegotiate should be
+// called after Negotiate. This locking sequence allows for orders that may
+// already be involved in active swaps to remain unmodified by the
+// Matcher/Market until new matches are recorded by the Swapper in Negotiate. If
+// this is not done, it is possible that an order may be flagged as completed if
+// a swap A completes after Matching and creation of swap B but before Negotiate
+// has a chance to record the new swap.
 func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 	// Lock trade order coins.
 	swapOrders := make([]order.Order, 0, 2*len(matchSets)) // size guess, with the single maker case
@@ -1513,8 +1674,14 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 
 	// Add the matches to the map.
 	s.matchMtx.Lock()
+	// NOTE: s.orderMatchesMtx must be locked by the caller. See
+	// BeginMatchAndNegotiate, which should be called prior to matching and
+	// order status/amount updates, and EndMatchAndNegotiate, which should be
+	// called after Negotiate.
 	for _, match := range toMonitor {
 		s.matches[match.ID().String()] = match
+		s.orderMatches[match.Maker.ID()]++
+		s.orderMatches[match.Taker.ID()]++
 	}
 	s.matchMtx.Unlock()
 

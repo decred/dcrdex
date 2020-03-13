@@ -37,6 +37,7 @@ var createMarketTableStatements = []tableStmt{
 	{"cancels_archived", internal.CreateCancelOrdersTable},
 	{"cancels_active", internal.CreateCancelOrdersTable},
 	{"matches", internal.CreateMatchesTable}, // just one matches table per market for now
+	{"epochs", internal.CreateEpochsTable},
 }
 
 var tableMap = func() map[string]string {
@@ -80,6 +81,10 @@ func fullMatchesTableName(dbName, marketSchema string) string {
 	return dbName + "." + marketSchema + ".matches"
 }
 
+func fullEpochsTableName(dbName, marketSchema string) string {
+	return dbName + "." + marketSchema + ".epochs"
+}
+
 // CreateTable creates one of the known tables by name. The table will be
 // created in the specified schema (schema.tableName). If schema is empty,
 // "public" is used.
@@ -104,7 +109,7 @@ func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
 		return fmt.Errorf("failed to create markets table: %v", err)
 	}
 	if created {
-		log.Warn("Creating new markets table.")
+		log.Trace("Creating new markets table.")
 	}
 
 	// Verify config of existing markets, creating a new markets table if none
@@ -145,7 +150,7 @@ func prepareMarkets(db *sql.DB, mktConfig []*dex.MarketInfo) (map[string]*dex.Ma
 	for _, mkt := range mktConfig {
 		existingMkt := marketMap[mkt.Name]
 		if existingMkt == nil {
-			log.Infof("New market specified in config: %s", mkt.Name)
+			log.Tracef("New market specified in config: %s", mkt.Name)
 			err = newMarket(db, marketsTableName, mkt)
 			if err != nil {
 				return nil, fmt.Errorf("newMarket failed: %v", err)

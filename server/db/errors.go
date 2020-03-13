@@ -49,6 +49,8 @@ const (
 	ErrUnsupportedMarket
 	ErrInvalidOrder
 	ErrReusedCommit
+	ErrOrderNotExecuted
+	ErrUpdateCount
 )
 
 func (ae ArchiveError) Error() string {
@@ -66,6 +68,10 @@ func (ae ArchiveError) Error() string {
 		desc = "invalid order"
 	case ErrReusedCommit:
 		desc = "order commit reused"
+	case ErrOrderNotExecuted:
+		desc = "order not in executed status"
+	case ErrUpdateCount:
+		desc = "unexpected number of rows updated"
 	}
 
 	if ae.Detail == "" {
@@ -83,6 +89,13 @@ func SameErrorTypes(errA, errB error) bool {
 	}
 
 	return errors.Is(errA, errB)
+}
+
+// IsErrGeneralFailure returns true if the error is of type ArchiveError and has
+// code ErrGeneralFailure.
+func IsErrGeneralFailure(err error) bool {
+	var errA ArchiveError
+	return errors.As(err, &errA) && errA.Code == ErrGeneralFailure
 }
 
 // IsErrOrderUnknown returns true if the error is of type ArchiveError and has
@@ -118,4 +131,18 @@ func IsErrInvalidOrder(err error) bool {
 func IsErrReusedCommit(err error) bool {
 	var errA ArchiveError
 	return errors.As(err, &errA) && errA.Code == ErrReusedCommit
+}
+
+// IsErrOrderNotExecuted returns true if the error is of type ArchiveError and
+// has code ErrOrderNotExecuted.
+func IsErrOrderNotExecuted(err error) bool {
+	var errA ArchiveError
+	return errors.As(err, &errA) && errA.Code == ErrOrderNotExecuted
+}
+
+// IsErrUpdateCount returns true if the error is of type ArchiveError and has
+// code ErrUpdateCount.
+func IsErrUpdateCount(err error) bool {
+	var errA ArchiveError
+	return errors.As(err, &errA) && errA.Code == ErrUpdateCount
 }

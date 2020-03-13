@@ -46,7 +46,7 @@ func Test_latestOrders(t *testing.T) {
 	// add one cancel
 	ts := int64(1234)
 	coid := randomOrderID()
-	ordList.add(&ord{order.OrderID{0x1}, ts, &coid})
+	ordList.add(&oidStamped{order.OrderID{0x1}, ts, &coid})
 	checkSort()
 	total, cancels = ordList.counts()
 	if total != 1 {
@@ -58,7 +58,7 @@ func Test_latestOrders(t *testing.T) {
 
 	// add one non-cancel
 	ts++
-	ordList.add(&ord{order.OrderID{0x2}, ts, nil})
+	ordList.add(&oidStamped{order.OrderID{0x2}, ts, nil})
 	checkSort()
 	total, cancels = ordList.counts()
 	if total != 2 {
@@ -69,7 +69,7 @@ func Test_latestOrders(t *testing.T) {
 	}
 
 	// add one that is the smallest
-	ordList.add(&ord{order.OrderID{0x3}, ts - 10, nil})
+	ordList.add(&oidStamped{order.OrderID{0x3}, ts - 10, nil})
 	checkSort()
 	total, cancels = ordList.counts()
 	if total != 3 {
@@ -83,7 +83,7 @@ func Test_latestOrders(t *testing.T) {
 
 	for i := total; i < int(cap); i++ {
 		ts++
-		ordList.add(&ord{
+		ordList.add(&oidStamped{
 			OrderID: randomOrderID(),
 			time:    ts,
 			target:  maybeCancel(),
@@ -100,7 +100,7 @@ func Test_latestOrders(t *testing.T) {
 	// Now that the list is at capacity, add another to test pop of the oldest order.
 	expectedOldest := ordList.orders[1] // the second oldest order
 	ts += 2                             // still in order, leave space for an out of order add
-	ordList.add(&ord{
+	ordList.add(&oidStamped{
 		OrderID: order.OrderID{0x4},
 		time:    ts,
 		target:  maybeCancel(),
@@ -121,7 +121,7 @@ func Test_latestOrders(t *testing.T) {
 	// Now add one with the same time as the last, but larger order ID, thus not
 	// requiring a swap.
 	oid4 := order.OrderID{0x5}
-	ordList.add(&ord{
+	ordList.add(&oidStamped{
 		OrderID: oid4,
 		time:    ts,
 		target:  maybeCancel(),
@@ -137,7 +137,7 @@ func Test_latestOrders(t *testing.T) {
 	// Add another with the same time as last, but this time with a smaller ID,
 	// thus requiring a swap.
 	oid0 := order.OrderID{0x0}
-	ordList.add(&ord{
+	ordList.add(&oidStamped{
 		OrderID: oid0,
 		time:    ts,
 		target:  maybeCancel(),
@@ -152,7 +152,7 @@ func Test_latestOrders(t *testing.T) {
 
 	// Add one with an older time, thus necessitating a few swaps.
 	ts--
-	ordList.add(&ord{
+	ordList.add(&oidStamped{
 		OrderID: randomOrderID(),
 		time:    ts,
 		target:  maybeCancel(),
@@ -167,7 +167,7 @@ func Test_latestOrders(t *testing.T) {
 
 	// Now exercise it and ensure it is always sorted.
 	for i := 0; i < 100000; i++ {
-		ordList.add(&ord{
+		ordList.add(&oidStamped{
 			OrderID: randomOrderID(),
 			time:    rand.Int63n(44444),
 			target:  maybeCancel(),
@@ -179,38 +179,38 @@ func Test_latestOrders(t *testing.T) {
 func Test_ordsByTimeThenID_Sort(t *testing.T) {
 	tests := []struct {
 		name     string
-		ords     []*ord
-		wantOrds []*ord
+		ords     []*oidStamped
+		wantOrds []*oidStamped
 	}{
 		{
 			name: "unique, no swap",
-			ords: []*ord{
+			ords: []*oidStamped{
 				{order.OrderID{0x1}, 1234, nil},
 				{order.OrderID{0x2}, 1235, nil},
 			},
-			wantOrds: []*ord{
+			wantOrds: []*oidStamped{
 				{order.OrderID{0x1}, 1234, nil},
 				{order.OrderID{0x2}, 1235, nil},
 			},
 		},
 		{
 			name: "unique, one swap",
-			ords: []*ord{
+			ords: []*oidStamped{
 				{order.OrderID{0x2}, 1235, nil},
 				{order.OrderID{0x1}, 1234, nil},
 			},
-			wantOrds: []*ord{
+			wantOrds: []*oidStamped{
 				{order.OrderID{0x1}, 1234, nil},
 				{order.OrderID{0x2}, 1235, nil},
 			},
 		},
 		{
 			name: "time tie, swap by order ID",
-			ords: []*ord{
+			ords: []*oidStamped{
 				{order.OrderID{0x2}, 1234, nil},
 				{order.OrderID{0x1}, 1234, nil},
 			},
-			wantOrds: []*ord{
+			wantOrds: []*oidStamped{
 				{order.OrderID{0x1}, 1234, nil},
 				{order.OrderID{0x2}, 1234, nil},
 			},
@@ -228,16 +228,19 @@ func Test_ordsByTimeThenID_Sort(t *testing.T) {
 		})
 	}
 
-	t.Run("dup order should panic", func(t *testing.T) {
-		defer func() {
-			if recover() == nil {
-				t.Error("sort should have paniced with identical orders.")
-			}
-		}()
-		dups := []*ord{
-			{order.OrderID{0x1}, 1234, nil},
-			{order.OrderID{0x1}, 1234, nil},
-		}
-		sort.Sort(ordsByTimeThenID(dups))
-	})
+	// Identical orders in the slice now just log and error, but the case can be
+	// tested with the panic instead:
+	//
+	// t.Run("dup order should panic", func(t *testing.T) {
+	//  defer func() {
+	//      if recover() == nil {
+	//          t.Error("sort should have paniced with identical orders.")
+	//      }
+	//  }()
+	//  dups := []*oidStamped{
+	//      {order.OrderID{0x1}, 1234, nil},
+	//      {order.OrderID{0x1}, 1234, nil},
+	//  }
+	//  sort.Sort(ordsByTimeThenID(dups))
+	// })
 }

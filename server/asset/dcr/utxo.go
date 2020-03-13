@@ -121,6 +121,12 @@ type Input struct {
 
 var _ asset.Coin = (*Input)(nil)
 
+// String creates a human-readable representation of a Decred transaction input
+// in the format "{txid = [transaction hash], vin = [input index]}".
+func (input *Input) String() string {
+	return fmt.Sprintf("{txid = %s, vin = %d}", input.TxID(), input.vin)
+}
+
 // Confirmations returns the number of confirmations on this input's
 // transaction.
 func (input *Input) Confirmations() (int64, error) {
@@ -180,6 +186,13 @@ type UTXO struct {
 // Check that UTXO satisfies the asset.Contract interface
 var _ asset.Coin = (*UTXO)(nil)
 var _ asset.FundingCoin = (*UTXO)(nil)
+var _ asset.Contract = (*UTXO)(nil)
+
+// String creates a human-readable representation of a Decred transaction output
+// in the format "{txid = [transaction hash], vout = [output index]}".
+func (utxo *UTXO) String() string {
+	return fmt.Sprintf("{txid = %s, vout = %d}", utxo.TxID(), utxo.vout)
+}
 
 // Confirmations is an asset.Backend method that returns the number of
 // confirmations for a UTXO. Because it is possible for a UTXO that was once

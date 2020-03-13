@@ -53,6 +53,8 @@ type Coin interface {
 	ID() []byte
 	// TxID is a transaction identifier for the coin.
 	TxID() string
+	// String is a human readable representation of the Coin.
+	String() string
 }
 
 // FundingCoin is some unspent value on the blockchain.

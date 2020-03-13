@@ -5,14 +5,16 @@ package auth
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 	"sync"
 
 	"decred.org/dcrdex/dex/order"
 )
 
-// ord is a time-stamped order ID with a flag indicating if it is a cancel.
-type ord struct {
+// oidStamped is a time-stamped order ID, with a field for target order ID if
+// the order is a cancel order.
+type oidStamped struct {
 	order.OrderID
 	time   int64
 	target *order.OrderID
@@ -21,7 +23,7 @@ type ord struct {
 // ordsByTimeThenID is used to sort an ord slice in ascending order by time and
 // then order ID. This puts the oldest order at the front and latest at the back
 // of the slice.
-type ordsByTimeThenID []*ord
+type ordsByTimeThenID []*oidStamped
 
 func (o ordsByTimeThenID) Len() int {
 	return len(o)
@@ -35,11 +37,14 @@ func (o ordsByTimeThenID) Less(i, j int) bool {
 	return less(o[i], o[j])
 }
 
-func less(oi, oj *ord) bool {
+func less(oi, oj *oidStamped) bool {
 	if oi.time == oj.time {
 		cmp := bytes.Compare(oi.OrderID[:], oj.OrderID[:])
+		// The same order should not be in the slice more than once, but nothing
+		// will explode so just log it.
 		if cmp == 0 {
-			panic("slice contains the more than one instance of a given order")
+			log.Errorf(fmt.Sprintf("slice contains more than one instance of order %v",
+				oi.OrderID))
 		}
 		return cmp < 0 // ascending (smaller order ID first)
 	}
@@ -47,17 +52,17 @@ func less(oi, oj *ord) bool {
 }
 
 // latestOrders manages a list of the latest orders for a user. Its purpose is
-// to track cancelation frequency.
+// to track cancellation frequency.
 type latestOrders struct {
 	mtx    sync.Mutex
 	cap    int16
-	orders []*ord
+	orders []*oidStamped
 }
 
 func newLatestOrders(cap int16) *latestOrders {
 	return &latestOrders{
 		cap:    cap,
-		orders: make([]*ord, 0, cap+1), // cap+1 since an old order is always popped after a new one is pushed
+		orders: make([]*oidStamped, 0, cap+1), // cap+1 since an old order is always popped after a new one is pushed
 	}
 }
 
@@ -80,7 +85,7 @@ func newLatestOrders(cap int16) *latestOrders {
 	}
 }*/
 
-func (lo *latestOrders) add(o *ord) {
+func (lo *latestOrders) add(o *oidStamped) {
 	lo.mtx.Lock()
 	defer lo.mtx.Unlock()
 
@@ -95,7 +100,7 @@ func (lo *latestOrders) add(o *ord) {
 	} else {
 		// Insert at proper location.
 		i = n - i // i-1 is first location that stays
-		lo.orders = append(lo.orders[:i], append([]*ord{o}, lo.orders[i:]...)...)
+		lo.orders = append(lo.orders[:i], append([]*oidStamped{o}, lo.orders[i:]...)...)
 	}
 
 	// if !sort.IsSorted(ordsByTimeThenID(lo.orders)) {

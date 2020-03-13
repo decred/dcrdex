@@ -206,6 +206,9 @@ func (a *TAuth) Penalize(user account.AccountID, rule account.Rule) {
 	log.Infof("Penalize for user %v", user)
 }
 
+func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time)        {}
+func (a *TAuth) RecordCancel(account.AccountID, order.OrderID, order.OrderID, time.Time) {}
+
 type TMarketTunnel struct {
 	adds       []*orderRecord
 	auth       *TAuth
@@ -303,6 +306,9 @@ func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
 }
 func (b *TBackend) Run(context.Context) {}
+func (b *TBackend) CoinIDString(coinID []byte) (string, error) {
+	return "coin", nil
+}
 func (b *TBackend) ValidateCoinID(coinID []byte) error {
 	return nil
 }
@@ -328,6 +334,7 @@ func (u *tUTXO) Address() string                 { return "" }
 func (u *tUTXO) SpendSize() uint32               { return dummySize }
 func (u *tUTXO) ID() []byte                      { return nil }
 func (u *tUTXO) TxID() string                    { return "" }
+func (u *tUTXO) String() string                  { return "" }
 func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
 func (u *tUTXO) FeeRate() uint64                 { return 0 }
@@ -1361,7 +1368,7 @@ func TestRouter(t *testing.T) {
 		break
 	}
 
-	lo.Filled = mkt2.LotSize
+	lo.FillAmt = mkt2.LotSize
 	sig = &bookUpdateSignal{
 		action: bookAction,
 		order:  lo,

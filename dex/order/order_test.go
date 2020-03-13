@@ -476,9 +476,9 @@ func TestMarketOrder_ID(t *testing.T) {
 				},
 			}
 			remaining := o.Remaining()
-			if remaining != o.Quantity-o.Filled {
+			if remaining != o.Quantity-o.FillAmt {
 				t.Errorf("MarketOrder.Remaining incorrect, got %d, expected %d",
-					remaining, o.Quantity-o.Filled)
+					remaining, o.Quantity-o.FillAmt)
 			}
 			if got := o.ID(); got != tt.want {
 				t.Errorf("MarketOrder.ID() = %v, want %v", got, tt.want)
@@ -538,9 +538,9 @@ func TestLimitOrder_ID(t *testing.T) {
 				Force: tt.fields.Force,
 			}
 			remaining := o.Remaining()
-			if remaining != o.Quantity-o.Filled {
+			if remaining != o.Quantity-o.FillAmt {
 				t.Errorf("LimitOrder.Remaining incorrect, got %d, expected %d",
-					remaining, o.Quantity-o.Filled)
+					remaining, o.Quantity-o.FillAmt)
 			}
 			if got := o.ID(); got != tt.want {
 				t.Errorf("LimitOrder.ID() = %v, want %v", got, tt.want)

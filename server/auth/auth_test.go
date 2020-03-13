@@ -55,6 +55,12 @@ func (s *TStorage) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) 
 func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
 func (s *TStorage) PayAccount(account.AccountID, []byte) error       { return s.payErr }
+func (s *TStorage) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
+	return nil, nil, nil
+}
+func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
+	return nil, nil, nil, nil
+}
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
@@ -277,6 +283,7 @@ func TestMain(m *testing.M) {
 			RegistrationFee: tRegFee,
 			FeeConfs:        tCheckFeeConfs,
 			FeeChecker:      tCheckFee,
+			CancelThreshold: 0.2,
 		})
 		go authMgr.Run(ctx)
 		rig = &testRig{
@@ -1063,7 +1070,7 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 		t.Errorf("got %d cancels, expected %d", cancels, 0)
 	}
 
-	checkOrd := func(ord *ord, oid order.OrderID, cancel bool, timestamp int64) {
+	checkOrd := func(ord *oidStamped, oid order.OrderID, cancel bool, timestamp int64) {
 		if ord.OrderID != oid {
 			t.Errorf("completed order id mismatch. got %v, expected %v",
 				ord.OrderID, oid)

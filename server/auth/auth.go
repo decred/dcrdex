@@ -32,6 +32,8 @@ type Storage interface {
 	CloseAccount(account.AccountID, account.Rule)
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
+	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
+	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
 	// ActiveMatches fetches the account's active matches.
 	ActiveMatches(account.AccountID) ([]*order.UserMatch, error)
 	CreateAccount(*account.Account) (string, error)
@@ -70,9 +72,19 @@ type clientInfo struct {
 func (client *clientInfo) expire(id uint64) bool {
 	client.mtx.Lock()
 	defer client.mtx.Unlock()
-	_, removed := client.respHandlers[id]
-	delete(client.respHandlers, id)
-	return removed
+	_, found := client.respHandlers[id]
+	if found {
+		delete(client.respHandlers, id)
+	}
+	return found
+}
+
+func (client *clientInfo) cancelRatio() float64 {
+	client.mtx.Lock()
+	total, cancels := client.recentOrders.counts()
+	client.mtx.Unlock()
+	// completed = total - cancels
+	return float64(cancels) / float64(total)
 }
 
 // logReq associates the specified response handler with the message ID.
@@ -119,7 +131,7 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // the 'connect' route.
 type AuthManager struct {
 	connMtx      sync.RWMutex
-	cancelThresh float32
+	cancelThresh float64
 	users        map[account.AccountID]*clientInfo
 	conns        map[uint64]*clientInfo
 	storage      Storage
@@ -147,7 +159,7 @@ type Config struct {
 	// FeeChecker is a method for getting the registration fee output info.
 	FeeChecker FeeChecker
 
-	CancelThreshold float32
+	CancelThreshold float64
 }
 
 // NewAuthManager is the constructor for an AuthManager.
@@ -172,11 +184,16 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	return auth
 }
 
+// RecordCancel records a user's executed cancel order, including the canceled
+// order ID, and the time when the cancel was executed.
 func (auth *AuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {
 	tMS := encode.UnixMilli(t)
 	auth.recordOrderDone(user, oid, &target, tMS)
 }
 
+// RecordCompletedOrder records a user's completed order, where completed means
+// a swap involving the order was successfully completed and the order is no
+// longer on the books if it ever was.
 func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time) {
 	tMS := encode.UnixMilli(t)
 	auth.recordOrderDone(user, oid, nil, tMS)
@@ -198,7 +215,7 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 	}
 
 	client.mtx.Lock()
-	client.recentOrders.add(&ord{
+	client.recentOrders.add(&oidStamped{
 		OrderID: oid,
 		time:    tMS,
 		target:  target,
@@ -208,9 +225,7 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 	log.Debugf("Recorded order %v that has finished processing: user=%v, time=%v, target=%v",
 		oid, user, tMS, target)
 
-	// TODO: decide when to count and penalize
-
-	return
+	// TODO: decide when and where to count and penalize
 }
 
 // Run runs the AuthManager until the context is canceled. Satisfies the
@@ -305,7 +320,7 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 
 // Penalize signals that a user has broken a rule of community conduct, and that
 // their account should be penalized.
-func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) {
+func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) { // TODO: option to close permanently or suspend for a certain time
 	client := auth.user(user)
 	if client == nil {
 		log.Errorf("no client to penalize")
@@ -440,12 +455,33 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	// Check to see if there is already an existing client for this account.
 	client := auth.user(acctInfo.ID)
 	if client == nil {
-		// retrieve active matches from DB and store them in a latestOrders.
+		// Retrieve the user's N latest finished (completed or canceled orders)
+		// and store them in a latestOrders.
+		latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, cancelThreshWindow)
+		if err != nil {
+			log.Errorf("unable to retrieve user's executed cancels and completed orders: %v", err)
+			return &msgjson.Error{
+				Code:    msgjson.RPCInternalError,
+				Message: "DB error",
+			}
+		}
 		client = &clientInfo{
 			acct:         acctInfo,
 			conn:         conn,
 			respHandlers: make(map[uint64]*respHandler),
-			recentOrders: newLatestOrders(cancelThreshWindow),
+			recentOrders: latestFinished,
+		}
+		if cancelRatio := client.cancelRatio(); cancelRatio > auth.cancelThresh {
+			// Account should already be closed, but perhaps the server crashed
+			// or the account was not penalized before shutdown.
+			auth.storage.CloseAccount(acctInfo.ID, account.CancellationRatio)
+			log.Debugf("bouncing closed account %v (cancellation ratio = %f)",
+				acctInfo.ID, cancelRatio)
+			return &msgjson.Error{
+				Code: msgjson.AccountClosedError,
+				Message: fmt.Sprintf("cancellation ratio (%f) exceeds threshold %f",
+					cancelRatio, auth.cancelThresh),
+			}
 		}
 	} else {
 		client.conn = conn
@@ -454,6 +490,42 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	auth.addClient(client)
 	log.Tracef("user %x connected", acctInfo.ID[:])
 	return nil
+}
+
+func (auth *AuthManager) loadRecentFinishedOrders(aid account.AccountID, N int) (*latestOrders, error) {
+	// Load the N latest successfully completed orders for the user.
+	oids, compTimes, err := auth.storage.CompletedUserOrders(aid, N)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load the N latest executed cancel orders for the user.
+	cancelOids, targetOids, cancelTimes, err := auth.storage.ExecutedCancelsForUser(aid, N)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create the sorted list with capacity.
+	latestFinished := newLatestOrders(cancelThreshWindow)
+	// Insert the completed orders.
+	for i := range oids {
+		latestFinished.add(&oidStamped{
+			OrderID: oids[i],
+			time:    compTimes[i],
+			//target: nil,
+		})
+	}
+	// Insert the executed cancels, popping off older orders that do not fit in
+	// the list.
+	for i := range cancelOids {
+		latestFinished.add(&oidStamped{
+			OrderID: cancelOids[i],
+			time:    cancelTimes[i],
+			target:  &targetOids[i],
+		})
+	}
+
+	return latestFinished, nil
 }
 
 // handleResponse handles all responses for AuthManager registered routes,

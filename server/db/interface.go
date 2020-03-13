@@ -31,11 +31,26 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 )
+
+// EpochResults represents the outcome of epoch order processing, including
+// preimage collection, and computation of commitment checksum and shuffle seed.
+// MatchTime is the time at which order matching is executed.
+type EpochResults struct {
+	MktBase, MktQuote uint32
+	Idx               int64
+	Dur               int64
+	MatchTime         int64
+	CSum              []byte
+	Seed              []byte
+	OrdersRevealed    []order.OrderID
+	OrdersMissed      []order.OrderID
+}
 
 // DEXArchivist will be composed of several different interfaces. Starting with
 // OrderArchiver.
@@ -47,6 +62,9 @@ type DEXArchivist interface {
 
 	// Close should gracefully shutdown the backend, returning when complete.
 	Close() error
+
+	// InsertEpoch stores the results of a newly-processed epoch.
+	InsertEpoch(ed *EpochResults) error
 
 	OrderArchiver
 	AccountArchiver
@@ -61,12 +79,25 @@ type OrderArchiver interface {
 	// specified by the given base and quote assets.
 	Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error)
 
+	// ActiveOrderCoins retrieves a CoinID slice for each active order.
 	ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error)
 
 	// UserOrders retrieves all orders for the given account in the market
 	// specified by a base and quote asset.
 	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
 
+	// CompletedUserOrders retrieves the N most recently completed orders for a
+	// user across all markets.
+	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
+
+	// ExecutedCancelsForUser retrieves up to N executed cancel orders for a
+	// given user. These may be user-initiated cancels, or cancels created by
+	// the server (revokes). Executed cancel orders from all markets are
+	// returned.
+	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
+
+	// OrderWithCommit searches all markets' trade and cancel orders, both
+	// active and archived, for an order with the given Commitment.
 	OrderWithCommit(ctx context.Context, commit order.Commitment) (found bool, oid order.OrderID, err error)
 
 	// OrderStatus gets the status, ID, and filled amount of the given order.
@@ -75,7 +106,10 @@ type OrderArchiver interface {
 	// NewEpochOrder stores a new order with epoch status. Such orders are
 	// pending execution or insertion on a book (standing limit orders with a
 	// remaining unfilled amount).
-	NewEpochOrder(ord order.Order) error
+	NewEpochOrder(ord order.Order, epochIdx, epochDur int64) error
+
+	// StorePreimage stores the preimage associated with an existing order.
+	StorePreimage(ord order.Order, pi order.Preimage) error
 
 	// BookOrder books the given order. If the order was already stored (i.e.
 	// NewEpochOrder), it's status and filled amount are updated, otherwise it
@@ -94,22 +128,28 @@ type OrderArchiver interface {
 	// "revoked", and RevokeOrder should be used to set this status.
 	CancelOrder(*order.LimitOrder) error
 
-	// RevokeOrder puts a limit order into the revoked state. Orders should be
+	// RevokeOrder puts an order into the revoked state. Orders should be
 	// revoked by the DEX according to policy on failed orders. For canceling an
 	// order that was matched with a cancel order, use CancelOrder.
-	RevokeOrder(*order.LimitOrder) error
+	RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error)
 
 	// FailCancelOrder puts an unmatched cancel order into the executed state.
 	// For matched cancel orders, use ExecuteOrder.
 	FailCancelOrder(*order.CancelOrder) error
 
 	// UpdateOrderFilled updates the filled amount of the given order. This
-	// function applies only to market and limit orders, not cancel orders.
-	UpdateOrderFilled(order.Order) error
+	// function applies only to limit orders, not cancel or market orders. The
+	// filled amount of a market order should be updated by ExecuteOrder.
+	UpdateOrderFilled(*order.LimitOrder) error
 
 	// UpdateOrderStatus updates the status and filled amount of the given
 	// order.
 	UpdateOrderStatus(order.Order, order.OrderStatus) error
+
+	// SetOrderCompleteTime sets the successful completion time for an existing
+	// order. This will follow the final step in swap negotiation, for an order
+	// that is not on the book.
+	SetOrderCompleteTime(ord order.Order, compTimeMs int64) error
 }
 
 // AccountArchiver is the interface required for storage and retrieval of all
@@ -167,9 +207,11 @@ type SwapData struct {
 	RedeemACoinID    []byte
 	RedeemATime      int64
 	RedeemAAckSig    []byte // B's signature of redeem A data
+	RedeemAAckTime   int64  // time that B's signature of redeem A data was received
 	RedeemBCoinID    []byte
 	RedeemBTime      int64
 	RedeemBAckSig    []byte // A's signature of redeem B data
+	RedeemBAckTime   int64  // time that A's signature of redeem B data was received
 }
 
 // MarketMatchID designates a MatchID for a certain market by the market's
@@ -266,8 +308,7 @@ type SwapArchiver interface {
 	SaveRedeemB(mid MarketMatchID, coinID []byte, timestamp int64) error
 
 	// SaveRedeemAckSigA records party A's signature acknowledging party B's
-	// redemption. Since this is the final match negotiation step, the match is
-	// marked as done/inactive (not the same as archival).
+	// redemption.
 	SaveRedeemAckSigA(mid MarketMatchID, sig []byte) error
 
 	// SetMatchInactive sets the swap as done/inactive. This can be because of a

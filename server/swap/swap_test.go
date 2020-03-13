@@ -164,6 +164,9 @@ func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule) {
 	m.penalty.rule = rule
 }
 
+func (m *TAuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {}
+func (m *TAuthManager) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time)            {}
+
 func (m *TAuthManager) flushPenalty() (account.AccountID, account.Rule) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
@@ -215,7 +218,11 @@ type TStorage struct{}
 
 func (s *TStorage) InsertMatch(match *order.Match) error { return nil }
 func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
-func (s *TStorage) LastErr() error                       { return nil }
+func (s *TStorage) RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error) {
+	return
+}
+func (s *TStorage) SetOrderCompleteTime(ord order.Order, compTime int64) error { return nil }
+func (s *TStorage) LastErr() error                                             { return nil }
 func (s *TStorage) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
 	return 0, nil, nil
 }
@@ -236,12 +243,16 @@ func (s *TStorage) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error { re
 func (s *TStorage) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (s *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (s *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
+	return nil
+}
 func (s *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
-func (s *TStorage) SetMatchInactive(mid db.MarketMatchID) error              { return nil }
+func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
+	return nil
+}
+func (s *TStorage) SetMatchInactive(mid db.MarketMatchID) error { return nil }
 
 // This stub satisfies asset.Backend.
 type TAsset struct {
@@ -278,7 +289,9 @@ func (a *TAsset) Redemption(redemptionID, contractID []byte) (asset.Coin, error)
 	defer a.mtx.RUnlock()
 	return a.redemption, a.redemptionErr
 }
-
+func (a *TAsset) CoinIDString(coinID []byte) (string, error) {
+	return "coin", nil
+}
 func (a *TAsset) ValidateCoinID(coinID []byte) error {
 	return nil
 }
@@ -334,6 +347,7 @@ func (coin *TCoin) ID() []byte                                    { return coin.
 func (coin *TCoin) TxID() string                                  { return hex.EncodeToString(coin.id) }
 func (coin *TCoin) Value() uint64                                 { return coin.auditVal }
 func (coin *TCoin) SpendSize() uint32                             { return 0 }
+func (coin *TCoin) String() string                                { return hex.EncodeToString(coin.id) /* not txid:vout */ }
 
 func (coin *TCoin) FeeRate() uint64 {
 	return 1
