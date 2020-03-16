@@ -94,7 +94,7 @@ func TestSetSwapData(t *testing.T) {
 
 	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
 
-	checkMatch := func(wantStatus order.MatchStatus) error {
+	checkMatch := func(wantStatus order.MatchStatus, wantActive bool) error {
 		matchData, err := archie.MatchByID(matchID, base, quote)
 		if err != nil {
 			return err
@@ -106,6 +106,10 @@ func TestSetSwapData(t *testing.T) {
 			return fmt.Errorf("Incorrect match status, got %d, expected %d",
 				matchData.Status, wantStatus)
 		}
+		if matchData.Active != wantActive {
+			return fmt.Errorf("Incorrect match active flag, got %v, expected %v",
+				matchData.Active, wantActive)
+		}
 		return nil
 	}
 
@@ -114,7 +118,7 @@ func TestSetSwapData(t *testing.T) {
 		t.Errorf("InsertMatch() failed: %v", err)
 	}
 
-	if err = checkMatch(order.NewlyMatched); err != nil {
+	if err = checkMatch(order.NewlyMatched, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -336,6 +340,11 @@ func TestSetSwapData(t *testing.T) {
 		t.Fatalf("RedeemBAckSig incorrect. got %v, expected %v",
 			swapData.RedeemBAckSig, redeemAckSigA)
 	}
+
+	// Check active flag via MatchByID.
+	if err = checkMatch(order.MatchComplete, false); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMatchByID(t *testing.T) {
@@ -466,10 +475,14 @@ func TestActiveMatches(t *testing.T) {
 	// Make it complete and store it.
 	epochID := order.EpochID{132412341, 10}
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
-	match.Status = order.MatchComplete // not an active order now
-	err := archie.InsertMatch(match)
+	match.Status = order.TakerSwapCast // failed here
+	err := archie.InsertMatch(match)   // active by default
 	if err != nil {
 		t.Fatalf("InsertMatch() failed: %v", err)
+	}
+	err = archie.SetMatchInactive(db.MatchID(match)) // set inactive
+	if err != nil {
+		t.Fatalf("SetMatchInactive() failed: %v", err)
 	}
 
 	// Make a perfect 1 lot match, same parties.

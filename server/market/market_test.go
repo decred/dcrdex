@@ -150,7 +150,9 @@ func (ta *TArchivist) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp
 	return nil
 }
 func (ta *TArchivist) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
-func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule)             {}
+func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error              { return nil }
+
+func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule) {}
 func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
 	return nil, false, false
 }

@@ -233,10 +233,15 @@ func (s *TStorage) SaveContractB(mid db.MarketMatchID, contract []byte, coinID [
 func (s *TStorage) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
 
 // Redeem data.
-func (s *TStorage) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error { return nil }
-func (s *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error               { return nil }
-func (s *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error { return nil }
-func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error               { return nil }
+func (s *TStorage) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+	return nil
+}
+func (s *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (s *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+	return nil
+}
+func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
+func (s *TStorage) SetMatchInactive(mid db.MarketMatchID) error              { return nil }
 
 // This stub satisfies asset.Backend.
 type TAsset struct {

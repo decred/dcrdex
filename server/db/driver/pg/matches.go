@@ -47,7 +47,8 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 	for rows.Next() {
 		var m db.MatchData
 		var status uint8
-		err := rows.Scan(&m.ID, &m.Taker, &m.TakerAcct, &m.TakerAddr,
+		err := rows.Scan(&m.ID, &m.Active,
+			&m.Taker, &m.TakerAcct, &m.TakerAddr,
 			&m.Maker, &m.MakerAcct, &m.MakerAddr,
 			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
 		if err != nil {
@@ -65,7 +66,8 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 }
 
 // ActiveMatches retrieves a UserMatch slice for active matches involving the
-// given user. TODO: do we need an order.MatchStatus for swaps that have failed?
+// given user. Swaps that have successfully completed or failed are not
+// included.
 func (a *Archiver) ActiveMatches(aid account.AccountID) ([]*order.UserMatch, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 	defer cancel()
@@ -85,7 +87,7 @@ func (a *Archiver) ActiveMatches(aid account.AccountID) ([]*order.UserMatch, err
 
 func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) ([]*order.UserMatch, error) {
 	stmt := fmt.Sprintf(internal.RetrieveActiveUserMatches, tableName)
-	rows, err := dbe.QueryContext(ctx, stmt, aid, order.MatchComplete)
+	rows, err := dbe.QueryContext(ctx, stmt, aid)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +186,8 @@ func matchByID(dbe *sql.DB, tableName string, mid order.MatchID) (*db.MatchData,
 	var status uint8
 	stmt := fmt.Sprintf(internal.RetrieveMatchByID, tableName)
 	err := dbe.QueryRow(stmt, mid).
-		Scan(&m.ID, &m.Taker, &m.TakerAcct, &m.TakerAddr,
+		Scan(&m.ID, &m.Active,
+			&m.Taker, &m.TakerAcct, &m.TakerAddr,
 			&m.Maker, &m.MakerAcct, &m.MakerAddr,
 			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
 	if err != nil {
@@ -258,8 +261,15 @@ func (a *Archiver) saveMatchSig(mid db.MarketMatchID, sig []byte, sigStmt string
 
 	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
 	stmt := fmt.Sprintf(sigStmt, matchesTableName)
-	_, err = a.db.Exec(stmt, mid.MatchID, sig)
-	return err
+	N, err := sqlExec(a.db, stmt, mid.MatchID, sig)
+	if err != nil { // not just no rows updated
+		a.fatalBackendErr(err)
+		return err
+	}
+	if N != 1 {
+		return fmt.Errorf("saveMatchSig: updated %d match rows for match %v, expected 1", N, mid)
+	}
+	return nil
 }
 
 // SaveMatchAckSigA records the match data acknowledgement signature from swap
@@ -284,8 +294,15 @@ func (a *Archiver) saveContract(mid db.MarketMatchID, contract []byte, coinID []
 
 	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
 	stmt := fmt.Sprintf(contractStmt, matchesTableName)
-	_, err = a.db.Exec(stmt, mid.MatchID, status, coinID, contract, timestamp)
-	return err
+	N, err := sqlExec(a.db, stmt, mid.MatchID, status, coinID, contract, timestamp)
+	if err != nil { // not just no rows updated
+		a.fatalBackendErr(err)
+		return err
+	}
+	if N != 1 {
+		return fmt.Errorf("saveContract: updated %d match rows for match %v, expected 1", N, mid)
+	}
+	return nil
 }
 
 // SaveContractA records party A's swap contract script and the coinID (e.g.
@@ -323,8 +340,15 @@ func (a *Archiver) saveRedeem(mid db.MarketMatchID, coinID []byte, timestamp int
 
 	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
 	stmt := fmt.Sprintf(redeemStmt, matchesTableName)
-	_, err = a.db.Exec(stmt, mid.MatchID, status, coinID, timestamp)
-	return err
+	N, err := sqlExec(a.db, stmt, mid.MatchID, status, coinID, timestamp)
+	if err != nil { // not just no rows updated
+		a.fatalBackendErr(err)
+		return err
+	}
+	if N != 1 {
+		return fmt.Errorf("saveRedeem: updated %d match rows for match %v, expected 1", N, mid)
+	}
+	return nil
 }
 
 // SaveRedeemA records party A's redemption coinID (e.g. transaction output),
@@ -336,7 +360,10 @@ func (a *Archiver) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp in
 
 // SaveRedeemAckSigB records party B's signature acknowledging party A's
 // redemption, which spent their swap contract on chain Y and revealed the
-// secret.
+// secret. Since this may be the final step in match negotiation, the match is
+// also flagged as inactive (not the same as archival or even status of
+// MatchComplete, which is set by SaveRedeemB) if the initiators's redeem ack
+// signature is already set.
 func (a *Archiver) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
 	return a.saveMatchSig(mid, sig, internal.SetParticipantRedeemAckSig)
 }
@@ -348,7 +375,31 @@ func (a *Archiver) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp in
 }
 
 // SaveRedeemAckSigA records party A's signature acknowledging party B's
-// redemption.
+// redemption. Since this may be the final step in match negotiation, the match
+// is also flagged as inactive (not the same as archival or even status of
+// MatchComplete, which is set by SaveRedeemB) if the participant's redeem ack
+// signature is already set.
 func (a *Archiver) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
 	return a.saveMatchSig(mid, sig, internal.SetInitiatorRedeemAckSig)
+}
+
+// SetMatchInactive flags the match as done/inactive. This is not necessary if
+// both SaveRedeemAckSigA and SaveRedeemAckSigB are run for the match since they
+// will also flags the match as done when both signatures are stored.
+func (a *Archiver) SetMatchInactive(mid db.MarketMatchID) error {
+	marketSchema, err := a.marketSchema(mid.Base, mid.Quote)
+	if err != nil {
+		return err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+	N, err := sqlExec(a.db, fmt.Sprintf(internal.SetSwapDone, matchesTableName), mid.MatchID)
+	if err != nil { // not just no rows updated
+		a.fatalBackendErr(err)
+		return err
+	}
+	if N != 1 {
+		return fmt.Errorf("SetMatchInactive: updated %d match rows for match %v, expected 1", N, mid)
+	}
+	return nil
 }
