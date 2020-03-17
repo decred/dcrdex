@@ -6,6 +6,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,8 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -42,7 +46,7 @@ type WalletState struct {
 
 // User is information about the user's wallets and DEX accounts.
 type User struct {
-	Markets     map[string][]*Market       `json:"markets"`
+	Exchanges   map[string]*Exchange       `json:"exchanges"`
 	Initialized bool                       `json:"inited"`
 	Assets      map[uint32]*SupportedAsset `json:"assets"`
 }
@@ -82,11 +86,20 @@ func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 	return nil
 }
 
+// lock the wallet, setting the lockTime to the time when the wallet will be
+// locked.
 func (w *xcWallet) lock() error {
 	w.mtx.Lock()
 	w.lockTime = time.Time{}
 	w.mtx.Unlock()
 	return w.Lock()
+}
+
+// unlocked will return true if the lockTime has not passed.
+func (w *xcWallet) unlocked() bool {
+	w.mtx.RLock()
+	defer w.mtx.RUnlock()
+	return w.lockTime.After(time.Now())
 }
 
 // state returns the current WalletState.
@@ -148,20 +161,79 @@ type Registration struct {
 	Fee      uint64
 }
 
+// Match represents a match on an order. An order may have many matches.
+type Match struct {
+	MatchID string            `json:"matchID"`
+	Step    order.MatchStatus `json:"step"`
+	Rate    uint64            `json:"rate"`
+	Qty     uint64            `json:"qty"`
+}
+
+// Order is core's general type for an order. An order may be a market, limit,
+// or cancel order. Some fields are only relevant to particular order types.
+type Order struct {
+	Type        order.OrderType   `json:"type"`
+	ID          string            `json:"id"`
+	Stamp       uint64            `json:"stamp"`
+	Qty         uint64            `json:"qty"`
+	Sell        bool              `json:"sell"`
+	Filled      uint64            `json:"filled"`
+	Matches     []*Match          `json:"matches"`
+	Cancelling  bool              `json:"cancelling"`
+	Rate        uint64            `json:"rate"`               // limit only
+	TimeInForce order.TimeInForce `json:"tif"`                // limit only
+	TargetID    string            `json:"targetID,omitempty"` // cancel only
+}
+
 // Market is market info.
 type Market struct {
-	BaseID          uint32  `json:"baseid"`
-	BaseSymbol      string  `json:"basesymbol"`
-	QuoteID         uint32  `json:"quoteid"`
-	QuoteSymbol     string  `json:"quotesymbol"`
-	EpochLen        uint64  `json:"epochlen"`
-	StartEpoch      uint64  `json:"startepoch"`
-	MarketBuyBuffer float64 `json:"buybuffer"`
+	Name            string   `json:"name"`
+	BaseID          uint32   `json:"baseid"`
+	BaseSymbol      string   `json:"basesymbol"`
+	QuoteID         uint32   `json:"quoteid"`
+	QuoteSymbol     string   `json:"quotesymbol"`
+	EpochLen        uint64   `json:"epochlen"`
+	StartEpoch      uint64   `json:"startepoch"`
+	MarketBuyBuffer float64  `json:"buybuffer"`
+	Orders          []*Order `json:"orders"`
 }
 
 // Display returns an ID string suitable for displaying in a UI.
 func (m *Market) Display() string {
 	return newDisplayIDFromSymbols(m.BaseSymbol, m.QuoteSymbol)
+}
+
+// sid is a simpler string ID constructed from the asset IDs.
+func (m *Market) sid() string {
+	return sid(m.BaseID, m.QuoteID)
+}
+
+// Exchange represents a single DEX with any number of markets.
+type Exchange struct {
+	URL        string                `json:"url"`
+	Markets    map[string]*Market    `json:"markets"`
+	Assets     map[uint32]*dex.Asset `json:"assets"`
+	FeePending bool                  `json:"feePending"`
+}
+
+// Return the markets as a slice sorted by Display ID, ascending.
+func (xc *Exchange) SortedMarkets() []*Market {
+	markets := make([]*Market, 0, len(xc.Markets))
+	for _, market := range xc.Markets {
+		markets = append(markets, market)
+	}
+	sort.Slice(markets, func(i, j int) bool {
+		m1, m2 := markets[i], markets[j]
+		switch true {
+		case m1.BaseSymbol < m2.BaseSymbol:
+			return true
+		case m1.BaseSymbol > m2.BaseSymbol:
+			return false
+		default: // Same base symbol.
+			return m2.QuoteSymbol < m2.QuoteSymbol
+		}
+	})
+	return markets
 }
 
 // newDisplayID creates a display-friendly market ID for a base/quote ID pair.
@@ -291,6 +363,14 @@ func (a *dexAccount) pay() {
 	a.authMtx.Unlock()
 }
 
+// feePending checks whether the fee transaction has been broadcast, but the
+// notifyfee request has not been sent/accepted yet.
+func (a *dexAccount) feePending() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	return !a.isPaid && len(a.feeCoin) > 0
+}
+
 // sign uses the account private key to sign the message. If the account is
 // locked, an error will be returned.
 func (a *dexAccount) sign(msg []byte) ([]byte, error) {
@@ -304,6 +384,12 @@ func (a *dexAccount) sign(msg []byte) ([]byte, error) {
 		return nil, err
 	}
 	return sig.Serialize(), nil
+}
+
+// checkSig checks the signature against the message and the DEX pubkey.
+func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
+	_, err := checkSigS256(msg, a.dexPubKey.Serialize(), sig)
+	return err
 }
 
 // MatchUpdate will be delivered from the negotiation feed.
@@ -321,44 +407,9 @@ type Negotiation interface {
 // A matchNegotiator negotiates a match. matchNegotiator satisfies the
 // Negotiation interface.
 type matchNegotiator struct {
-	orderID  order.OrderID
-	matchID  order.MatchID
-	quantity uint64
-	rate     uint64
-	address  string
-	status   order.MatchStatus
-	side     order.MatchSide
-	update   chan *MatchUpdate
-	order    order.Order
-}
-
-// negotiate creates a matchNegotiator and starts the negotiation thread.
-func negotiate(ctx context.Context, msgMatch *msgjson.Match, ord order.Order) (*matchNegotiator, error) {
-	if len(msgMatch.OrderID) != order.OrderIDSize {
-		return nil, fmt.Errorf("order id of incorrect length. expected %d, got %d",
-			order.OrderIDSize, len(msgMatch.OrderID))
-	}
-	if len(msgMatch.MatchID) != order.MatchIDSize {
-		return nil, fmt.Errorf("match id of incorrect length. expected %d, got %d",
-			order.MatchIDSize, len(msgMatch.MatchID))
-	}
-	var oid order.OrderID
-	copy(oid[:], msgMatch.OrderID)
-	var mid order.MatchID
-	copy(mid[:], msgMatch.MatchID)
-	n := &matchNegotiator{
-		orderID:  oid,
-		matchID:  mid,
-		quantity: msgMatch.Quantity,
-		rate:     msgMatch.Rate,
-		address:  msgMatch.Address,
-		status:   order.MatchStatus(msgMatch.Status),
-		side:     order.MatchSide(msgMatch.Side),
-		update:   make(chan *MatchUpdate, 1),
-		order:    ord,
-	}
-	go n.runMatch(ctx)
-	return n, nil
+	order.UserMatch
+	trade  order.Order
+	update chan *MatchUpdate
 }
 
 // Feed returns the MatchUpdate channel. Part of the Negotiator interface.
@@ -368,11 +419,187 @@ func (m *matchNegotiator) Feed() <-chan *MatchUpdate {
 
 // Order returns the order associated with the match.
 func (m *matchNegotiator) Order() order.Order {
-	return m.order
+	return m.trade
 }
 
 // runMatch is the match negotiation thread.
 func (m *matchNegotiator) runMatch(ctx context.Context) {
 	// do match stuff
 	<-ctx.Done()
+}
+
+// TradeForm is used to place a market or limit order
+type TradeForm struct {
+	DEX     string `json:"dex"`
+	IsLimit bool   `json:"isLimit"`
+	Sell    bool   `json:"sell"`
+	Base    uint32 `json:"base"`
+	Quote   uint32 `json:"quote"`
+	Qty     uint64 `json:"qty"`
+	Rate    uint64 `json:"rate"`
+	TifNow  bool   `json:"tifnow"`
+}
+
+// trackedCancel is information necessary to track a cancel order. A
+// trackedCancel is always associated with a trackedTrade.
+type trackedCancel struct {
+	order.CancelOrder
+	preImg  order.Preimage
+	matches struct {
+		maker *msgjson.Match
+		taker *msgjson.Match
+	}
+}
+
+// trackedTrade is an order placed by the core. A trackedTrade may or may not
+// have a non-nil trackedCancel storing information about the cancellation.
+type trackedTrade struct {
+	order.Order
+	mtx         sync.RWMutex
+	dc          *dexConnection
+	preImg      order.Preimage
+	sid         string
+	cancel      *trackedCancel
+	negotiators map[order.MatchID]*matchNegotiator
+}
+
+// newTrackedTrade is a constructor for a trackedTrade.
+func newTrackedTrade(trade order.Order, dc *dexConnection, preImg order.Preimage) *trackedTrade {
+	return &trackedTrade{
+		Order:       trade,
+		dc:          dc,
+		preImg:      preImg,
+		sid:         sid(trade.Base(), trade.Quote()),
+		negotiators: make(map[order.MatchID]*matchNegotiator),
+	}
+}
+
+// rate returns the order's rate, or zero if a market or cancel order.
+func (t *trackedTrade) rate() uint64 {
+	if ord, ok := t.Order.(*order.LimitOrder); ok {
+		return ord.Rate
+	}
+	return 0
+}
+
+// coreOrder constructs a *core.Order for the tracked order.Order. If the trade
+// has a cancel order associated with it, the cancel order will be returned,
+// otherwise the second returned *Order will be nil.
+func (t *trackedTrade) coreOrder() (*Order, *Order) {
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+	prefix, trade := t.Prefix(), t.Trade()
+	var tif order.TimeInForce
+	if lo, ok := t.Order.(*order.LimitOrder); ok {
+		tif = lo.Force
+	}
+	coreOrder := &Order{
+		Type:        prefix.OrderType,
+		ID:          t.ID().String(),
+		Stamp:       encode.UnixMilliU(prefix.ServerTime),
+		Rate:        t.rate(),
+		Qty:         trade.Quantity,
+		Sell:        trade.Sell,
+		Filled:      trade.Filled,
+		Cancelling:  t.cancel != nil,
+		TimeInForce: tif,
+	}
+	for _, n := range t.negotiators {
+		coreOrder.Matches = append(coreOrder.Matches, &Match{
+			MatchID: n.MatchID.String(),
+			Step:    n.Status,
+			Rate:    n.Rate,
+			Qty:     n.Quantity,
+		})
+	}
+	var cancelOrder *Order
+	if t.cancel != nil {
+		cancelOrder = &Order{
+			Type:     order.CancelOrderType,
+			Stamp:    encode.UnixMilliU(t.cancel.ServerTime),
+			TargetID: t.cancel.TargetOrderID.String(),
+		}
+	}
+	return coreOrder, cancelOrder
+}
+
+func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage) {
+	t.mtx.Lock()
+	t.cancel = &trackedCancel{
+		CancelOrder: *co,
+		preImg:      preImg,
+	}
+	t.mtx.Unlock()
+}
+
+// negotiate creates a matchNegotiator and starts the negotiation thread.
+func (t *trackedTrade) negotiate(ctx context.Context, msgMatch *msgjson.Match) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+	if len(msgMatch.MatchID) != order.MatchIDSize {
+		return fmt.Errorf("match id of incorrect length. expected %d, got %d",
+			order.MatchIDSize, len(msgMatch.MatchID))
+	}
+	var mid order.MatchID
+	copy(mid[:], msgMatch.MatchID)
+	var oid order.OrderID
+	copy(oid[:], msgMatch.OrderID)
+	if oid != t.ID() {
+		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.ID())
+	}
+	n := &matchNegotiator{
+		UserMatch: order.UserMatch{
+			OrderID:  oid,
+			MatchID:  mid,
+			Quantity: msgMatch.Quantity,
+			Rate:     msgMatch.Rate,
+			Address:  msgMatch.Address,
+			Status:   order.MatchStatus(msgMatch.Status),
+			Side:     order.MatchSide(msgMatch.Side),
+		},
+		update: make(chan *MatchUpdate, 1),
+		trade:  t.Order,
+	}
+	// First check that this isn't a match on a cancel order. I'm not crazy about
+	// this, but I am detecting this case right now based on the Address field
+	// being an empty string.
+	isCancel := t.cancel != nil && msgMatch.Address == ""
+	if isCancel {
+		log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
+		t.cancel.matches.maker = msgMatch
+	} else {
+		go n.runMatch(ctx)
+	}
+	t.negotiators[n.MatchID] = n
+	isMarketBuy := t.Type() == order.MarketOrderType && !t.Trade().Sell
+	var filled uint64
+	for _, n := range t.negotiators {
+		if isMarketBuy {
+			filled += calc.BaseToQuote(n.Rate, n.Quantity)
+		} else {
+			filled += n.Quantity
+		}
+	}
+	t.Trade().Filled = filled
+	return nil
+}
+
+// processCancelMatch should be called with the message for the match on a
+// cancel order.
+func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+	var oid order.OrderID
+	copy(oid[:], msgMatch.OrderID)
+	if oid != t.cancel.ID() {
+		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.cancel.ID())
+	}
+	log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
+	t.cancel.matches.taker = msgMatch
+	return nil
+}
+
+// sid is a string ID constructed from the asset IDs.
+func sid(b, q uint32) string {
+	return strconv.Itoa(int(b)) + "-" + strconv.Itoa(int(q))
 }

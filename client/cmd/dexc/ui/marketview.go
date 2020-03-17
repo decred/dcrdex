@@ -24,9 +24,8 @@ func newMarketView() *marketViewer {
 	marketJournal := newJournal("Market Journal", nil)
 	marketLog = mustLogger("MRKT", marketJournal.Write)
 	marketList := newChooser("Markets", nil)
-	marketMap := clientCore.Markets()
-	for url, markets := range marketMap {
-		for _, market := range markets {
+	for url, xc := range clientCore.Exchanges() {
+		for _, market := range xc.Markets {
 			m := market
 			marketList.addEntry(url+":"+m.Display(), func() {
 				marketLog.Infof("%s selected", m.Display())

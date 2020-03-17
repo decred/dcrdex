@@ -590,7 +590,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 	tests := []struct {
 		label     string
 		orderBook *OrderBook
-		n         uint64
+		n         int
 		side      uint8
 		expected  []*Order
 		wantErr   bool
@@ -706,7 +706,7 @@ func TestOrderBookBestNOrders(t *testing.T) {
 	}
 
 	for idx, tc := range tests {
-		best, err := tc.orderBook.BestNOrders(tc.n, tc.side)
+		best, _, err := tc.orderBook.BestNOrders(tc.n, tc.side)
 		if (err != nil) != tc.wantErr {
 			t.Fatalf("[OrderBook.BestNOrders] #%d: error: %v, wantErr: %v",
 				idx+1, err, tc.wantErr)

@@ -54,7 +54,7 @@ var (
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {
-	Markets() map[string][]*core.Market
+	Exchanges() map[string]*core.Exchange
 	Register(*core.Registration) (error, <-chan error)
 	Login(pw string) ([]core.Negotiation, error)
 	InitializeClient(pw string) error
@@ -72,6 +72,8 @@ type clientCore interface {
 	PreRegister(dex string) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error)
+	Trade(pw string, form *core.TradeForm) (*core.Order, error)
+	Cancel(pw string, sid string) error
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -176,9 +178,9 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	bb := "bodybuilder"
 	tmpl := newTemplates(fp(root, "src/html"), reloadHTML).
 		addTemplate("login", bb).
-		addTemplate("register", bb).
-		addTemplate("markets", bb).
-		addTemplate("wallets", bb).
+		addTemplate("register", bb, "forms").
+		addTemplate("markets", bb, "forms").
+		addTemplate("wallets", bb, "forms").
 		addTemplate("settings", bb)
 	err := tmpl.buildErr()
 	if err != nil {
@@ -227,6 +229,8 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/withdraw", s.apiWithdraw)
 		r.Get("/user", s.apiUser)
 		r.Post("/connectwallet", s.apiConnect)
+		r.Post("/trade", s.apiTrade)
+		r.Post("/cancel", s.apiCancel)
 	})
 	// Files
 	fileServer(mux, "/js", fp(root, "dist"))
@@ -241,7 +245,6 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 func (s *WebServer) Run(ctx context.Context) {
 	// Use the context for market syncers created by watchMarket.
 	s.ctx = ctx
-
 	// Start serving.
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -329,7 +332,7 @@ func readPost(w http.ResponseWriter, r *http.Request, thing interface{}) bool {
 		http.Error(w, "error reading JSON message", http.StatusBadRequest)
 		return false
 	}
-	err = json.Unmarshal(body, &thing)
+	err = json.Unmarshal(body, thing)
 	if err != nil {
 		log.Debugf("failed to unmarshal JSON request: %v", err)
 		http.Error(w, "failed to unmarshal JSON request", http.StatusBadRequest)

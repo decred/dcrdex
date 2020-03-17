@@ -141,9 +141,14 @@ func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid a
 }
 
 func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, error) {
+	var takerAddr string
+	tt := match.Taker.Trade()
+	if tt != nil {
+		takerAddr = tt.SwapAddress()
+	}
 	stmt := fmt.Sprintf(internal.UpsertMatch, tableName)
 	return sqlExec(dbe, stmt, match.ID(),
-		match.Taker.ID(), match.Taker.User(), match.Taker.Trade().SwapAddress(),
+		match.Taker.ID(), match.Taker.User(), takerAddr,
 		match.Maker.ID(), match.Maker.User(), match.Maker.Trade().SwapAddress(),
 		match.Epoch.Idx, match.Epoch.Dur,
 		int64(match.Quantity), int64(match.Rate), int8(match.Status))

@@ -63,7 +63,7 @@ type Wallet interface {
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption.
 	Redeem([]*Redemption, *dex.Asset) error
-	// SignMessage signs the message with the private key associated with the
+	// SignMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
 	SignMessage(Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error)

@@ -44,6 +44,7 @@ class MessageSocket {
     this.handlers = {}
     this.queue = []
     this.maxQlength = 5
+    this.connected = false
   }
 
   registerRoute (route, handler) {
@@ -57,7 +58,7 @@ class MessageSocket {
 
   // request sends a request-type message to the server
   request (route, payload) {
-    if (this.connection === undefined) {
+    if (!this.connected) {
       while (this.queue.length > this.maxQlength - 1) this.queue.shift()
       this.queue.push([route, payload])
       return
@@ -95,6 +96,7 @@ class MessageSocket {
 
       // Stub out standard functions
       conn.onclose = () => {
+        this.connected = false
         forward('close', null, this.handlers)
         retrys++
         // 1.2, 1.6, 2.0, 2.4, 3.1, 3.8, 4.8, 6.0, 7.5, 9.3, 11.6, 14.6, 18.2,
@@ -107,6 +109,7 @@ class MessageSocket {
       }
 
       conn.onopen = () => {
+        this.connected = true
         if (retrys > 0) {
           retrys = 0
           reloader()

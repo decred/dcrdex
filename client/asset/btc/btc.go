@@ -312,6 +312,10 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 	go func() {
 		defer wg.Done()
 		btc.run(ctx)
+		err := btc.wallet.LockUnspent(true, nil)
+		if err != nil {
+			btc.log.Errorf("failed to unlock %s outputs on shutdown: %v", btc.symbol, err)
+		}
 	}()
 	return nil, &wg
 }
@@ -599,8 +603,8 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 }
 
 // SignMessage signs the message with the private key associated with the
-// specified unspent coin. A slice of pubkeys required to spend the
-// coin and a signature for each pubkey are returned.
+// specified unspent coin. A slice of pubkeys required to spend the coin and a
+// signature for each pubkey are returned.
 func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
 	output, err := btc.convertCoin(coin)
 	if err != nil {
@@ -610,17 +614,25 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	if err != nil {
 		return nil, nil, err
 	}
+	if len(tx.Details) == 0 {
+		return nil, nil, fmt.Errorf("no tx details found for %s = %s:%v", coin, output.txHash.String(), output.vout)
+	}
 	for _, txDetails := range tx.Details {
 		if txDetails.Vout == output.vout &&
 			(txDetails.Category == TxCatReceive ||
 				txDetails.Category == TxCatGenerate) {
 
-			pk, sig, err := btc.wallet.SignMessage(txDetails.Address, msg)
+			privKey, err := btc.wallet.PrivKeyForAddress(txDetails.Address)
 			if err != nil {
-				return nil, nil, fmt.Errorf("error signing message with pubkey for address %s: %v", txDetails.Address, err)
+				return nil, nil, err
 			}
-			pubkeys = append(pubkeys, pk)
-			sigs = append(sigs, sig)
+			pk := privKey.PubKey()
+			sig, err := privKey.Sign(msg)
+			if err != nil {
+				return nil, nil, err
+			}
+			pubkeys = append(pubkeys, pk.SerializeCompressed())
+			sigs = append(sigs, sig.Serialize())
 		}
 	}
 	if len(pubkeys) == 0 {

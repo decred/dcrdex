@@ -16,7 +16,9 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 	"github.com/decred/slog"
 )
 
@@ -68,7 +70,7 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Markets() map[string][]*core.Market                  { return nil }
+func (c *TCore) Exchanges() map[string]*core.Exchange                { return nil }
 func (c *TCore) PreRegister(dex string) (uint64, error)              { return 1e8, c.preRegErr }
 func (c *TCore) Register(r *core.Registration) (error, <-chan error) { return c.regErr, nil }
 func (c *TCore) InitializeClient(pw string) error                    { return c.initErr }
@@ -104,6 +106,21 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 func (c *TCore) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.withdrawErr
 }
+func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
+	oType := order.LimitOrderType
+	if !form.IsLimit {
+		oType = order.MarketOrderType
+	}
+	return &core.Order{
+		Type:  oType,
+		Stamp: encode.UnixMilliU(time.Now()),
+		Rate:  form.Rate,
+		Qty:   form.Qty,
+		Sell:  form.Sell,
+	}, nil
+}
+
+func (c *TCore) Cancel(pw string, sid string) error { return nil }
 
 type TWriter struct {
 	b []byte

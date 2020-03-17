@@ -68,6 +68,7 @@ div.main {
   display: flex;
   flex-grow: 1;
   min-height: 0;
+  position: relative;
 }
 
 button.selected {

@@ -14,14 +14,16 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
-	"decred.org/dcrdex/client/order"
+	book "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/btc"
+	"decred.org/dcrdex/dex/calc"
 	dexdcr "decred.org/dcrdex/dex/dcr"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
-	dexorder "decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/slog"
 )
@@ -49,14 +51,14 @@ var (
 		SwapConf: 1,
 		FundConf: 1,
 	}
-	tDexPriv *secp256k1.PrivateKey
-	tDexKey  *secp256k1.PublicKey
-	tPW             = "dexpw"
-	wPW             = "walletpw"
-	tDexUrl         = "somedex.tld"
-	tErr            = fmt.Errorf("test error")
-	tFee     uint64 = 1e8
-	tCrypter encrypt.Crypter
+	tDexPriv       *secp256k1.PrivateKey
+	tDexKey        *secp256k1.PublicKey
+	tPW                   = "dexpw"
+	wPW                   = "walletpw"
+	tDexUrl               = "somedex.tld"
+	tDcrBtcMktName        = "dcr_btc"
+	tErr                  = fmt.Errorf("test error")
+	tFee           uint64 = 1e8
 )
 
 type tMsg = *msgjson.Message
@@ -94,11 +96,11 @@ func newTWebsocket() *TWebsocket {
 
 func tNewAccount() *dexAccount {
 	privKey, _ := secp256k1.GeneratePrivateKey()
-	encPW, _ := tCrypter.Encrypt(privKey.Serialize())
 	return &dexAccount{
 		url:       tDexUrl,
-		encKey:    encPW,
+		encKey:    privKey.Serialize(),
 		dexPubKey: tDexKey,
+		privKey:   privKey,
 		feeCoin:   []byte("somecoin"),
 	}
 }
@@ -106,6 +108,15 @@ func tNewAccount() *dexAccount {
 func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 	conn := newTWebsocket()
 	acct := tNewAccount()
+	mkt := &Market{
+		Name:            tDcrBtcMktName,
+		BaseID:          tDCR.ID,
+		BaseSymbol:      tDCR.Symbol,
+		QuoteID:         tBTC.ID,
+		QuoteSymbol:     tBTC.Symbol,
+		EpochLen:        60000,
+		MarketBuyBuffer: 1.1,
+	}
 	return &dexConnection{
 		WsConn: conn,
 		acct:   acct,
@@ -113,6 +124,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			tDCR.ID: tDCR,
 			tBTC.ID: tBTC,
 		},
+		books: make(map[string]*book.OrderBook),
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
 			BroadcastTimeout: 5 * 60000,
@@ -122,7 +134,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			},
 			Markets: []msgjson.Market{
 				{
-					Name:            "dcr_btc",
+					Name:            tDcrBtcMktName,
 					Base:            tDCR.ID,
 					Quote:           tBTC.ID,
 					EpochLen:        60000,
@@ -131,16 +143,8 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			},
 			Fee: tFee,
 		},
-		markets: []*Market{
-			{
-				BaseID:          tDCR.ID,
-				BaseSymbol:      tDCR.Symbol,
-				QuoteID:         tBTC.ID,
-				QuoteSymbol:     tBTC.Symbol,
-				EpochLen:        60000,
-				MarketBuyBuffer: 1.1,
-			},
-		},
+		marketMap: map[string]*Market{tDcrBtcMktName: mkt},
+		trades:    make(map[order.OrderID]*trackedTrade),
 	}, conn, acct
 }
 
@@ -188,8 +192,8 @@ type TDB struct {
 	getErr          error
 	storeErr        error
 	encKeyErr       error
-	storedKey       []byte
 	accts           []*db.AccountInfo
+	updateOrderErr  error
 }
 
 func (db *TDB) Run(context.Context) {}
@@ -211,7 +215,11 @@ func (db *TDB) CreateAccount(ai *db.AccountInfo) error {
 }
 
 func (db *TDB) UpdateOrder(m *db.MetaOrder) error {
-	return nil
+	return db.updateOrderErr
+}
+
+func (db *TDB) ActiveDEXOrders(dex string) ([]*db.MetaOrder, error) {
+	return nil, nil
 }
 
 func (db *TDB) ActiveOrders() ([]*db.MetaOrder, error) {
@@ -222,7 +230,7 @@ func (db *TDB) AccountOrders(dex string, n int, since uint64) ([]*db.MetaOrder, 
 	return nil, nil
 }
 
-func (db *TDB) Order(dexorder.OrderID) (*db.MetaOrder, error) {
+func (db *TDB) Order(order.OrderID) (*db.MetaOrder, error) {
 	return nil, nil
 }
 
@@ -251,15 +259,12 @@ func (db *TDB) AccountPaid(proof *db.AccountProof) error {
 }
 
 func (db *TDB) Store(k string, b []byte) error {
-	if k == keyParamsKey {
-		db.storedKey = b
-	}
 	return db.storeErr
 }
 
 func (db *TDB) Get(k string) ([]byte, error) {
 	if k == keyParamsKey {
-		return db.storedKey, db.encKeyErr
+		return nil, db.encKeyErr
 	}
 	return nil, db.getErr
 }
@@ -272,6 +277,7 @@ type tCoin struct {
 	id       []byte
 	confs    uint32
 	confsErr error
+	val      uint64
 }
 
 func (c *tCoin) ID() dex.Bytes {
@@ -283,7 +289,7 @@ func (c *tCoin) String() string {
 }
 
 func (c *tCoin) Value() uint64 {
-	return 0
+	return c.val
 }
 
 func (c *tCoin) Confirmations() (uint32, error) {
@@ -295,9 +301,13 @@ func (c *tCoin) Redeem() dex.Bytes {
 }
 
 type TXCWallet struct {
-	mtx        sync.RWMutex
-	payFeeCoin *tCoin
-	payFeeErr  error
+	mtx         sync.RWMutex
+	payFeeCoin  *tCoin
+	payFeeErr   error
+	fundCoins   asset.Coins
+	fundErr     error
+	addrErr     error
+	signCoinErr error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -324,7 +334,7 @@ func (w *TXCWallet) Balance(confs uint32) (available, locked uint64, err error) 
 }
 
 func (w *TXCWallet) Fund(uint64, *dex.Asset) (asset.Coins, error) {
-	return nil, nil
+	return w.fundCoins, w.fundErr
 }
 
 func (w *TXCWallet) ReturnCoins(asset.Coins) error {
@@ -340,7 +350,7 @@ func (w *TXCWallet) Redeem([]*asset.Redemption, *dex.Asset) error {
 }
 
 func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
-	return nil, nil, nil
+	return nil, nil, w.signCoinErr
 }
 
 func (w *TXCWallet) AuditContract(coinID, contract dex.Bytes) (asset.AuditInfo, error) {
@@ -356,7 +366,7 @@ func (w *TXCWallet) Refund(asset.Receipt, *dex.Asset) error {
 }
 
 func (w *TXCWallet) Address() (string, error) {
-	return "", nil
+	return "", w.addrErr
 }
 
 func (w *TXCWallet) Unlock(pw string, dur time.Duration) error {
@@ -391,6 +401,19 @@ func (w *TXCWallet) setConfs(confs uint32) {
 	w.mtx.Unlock()
 }
 
+type tCrypter struct{}
+
+func (c *tCrypter) Encrypt(b []byte) ([]byte, error) { return b, nil }
+
+func (c *tCrypter) Decrypt(b []byte) ([]byte, error) { return b, nil }
+
+func (c *tCrypter) Serialize() []byte { return nil }
+
+func (c *tCrypter) Close() {}
+
+func tNewCrypter(string) encrypt.Crypter                 { return &tCrypter{} }
+func tReCrypter(string, []byte) (encrypt.Crypter, error) { return &tCrypter{}, nil }
+
 var tAssetID uint32
 
 func randomAsset() *msgjson.Asset {
@@ -406,17 +429,16 @@ func randomMsgMarket() (baseAsset, quoteAsset *msgjson.Asset) {
 }
 
 type testRig struct {
-	core    *Core
-	db      *TDB
-	ws      *TWebsocket
-	dexConn *dexConnection
-	acct    *dexAccount
+	core *Core
+	db   *TDB
+	ws   *TWebsocket
+	dc   *dexConnection
+	acct *dexAccount
 }
 
 func newTestRig() *testRig {
 	db := new(TDB)
 
-	db.storedKey = tCrypter.Serialize()
 	dc, conn, acct := testDexConnection()
 
 	// Store the
@@ -437,11 +459,13 @@ func newTestRig() *testRig {
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
+			newCrypter: tNewCrypter,
+			reCrypter:  tReCrypter,
 		},
-		db:      db,
-		ws:      conn,
-		dexConn: dc,
-		acct:    acct,
+		db:   db,
+		ws:   conn,
+		dc:   dc,
+		acct: acct,
 	}
 }
 
@@ -450,7 +474,6 @@ func tMarketID(base, quote uint32) string {
 }
 
 func TestMain(m *testing.M) {
-	tCrypter = encrypt.NewCrypter(tPW)
 	log = slog.NewBackend(os.Stdout).Logger("TEST")
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
@@ -467,36 +490,36 @@ func TestMain(m *testing.M) {
 
 func TestMarkets(t *testing.T) {
 	rig := newTestRig()
+	// The test rig's dexConnection comes with a market. Clear that for this test.
+	rig.dc.cfg.Markets = nil
 	tCore := rig.core
 	// Simulate 10 markets.
 	marketIDs := make(map[string]struct{})
-	rig.dexConn.cfg.Markets = nil
-	rig.dexConn.markets = nil
 	for i := 0; i < 10; i++ {
 		base, quote := randomMsgMarket()
-		marketIDs[tMarketID(base.ID, quote.ID)] = struct{}{}
-		rig.dexConn.markets = append(rig.dexConn.markets, &Market{
-			BaseID:          base.ID,
-			BaseSymbol:      base.Symbol,
-			QuoteID:         quote.ID,
-			QuoteSymbol:     quote.Symbol,
+		marketIDs[sid(base.ID, quote.ID)] = struct{}{}
+		cfg := rig.dc.cfg
+		cfg.Markets = append(cfg.Markets, msgjson.Market{
+			Name:            base.Symbol + quote.Symbol,
+			Base:            base.ID,
+			Quote:           quote.ID,
 			EpochLen:        5000,
-			StartEpoch:      1234,
 			MarketBuyBuffer: 1.4,
 		})
-		rig.dexConn.assets[base.ID] = convertAssetInfo(base)
-		rig.dexConn.assets[quote.ID] = convertAssetInfo(quote)
+		rig.dc.assets[base.ID] = convertAssetInfo(base)
+		rig.dc.assets[quote.ID] = convertAssetInfo(quote)
 	}
+	rig.dc.refreshMarkets()
 
 	// Just check that the information is coming through correctly.
-	mktMap := tCore.Markets()
-	if len(mktMap) != 1 {
-		t.Fatalf("expected 1 MarketInfo, got %d", len(mktMap))
+	xcs := tCore.Exchanges()
+	if len(xcs) != 1 {
+		t.Fatalf("expected 1 MarketInfo, got %d", len(xcs))
 	}
-	assets := rig.dexConn.assets
-	for _, markets := range mktMap {
-		for _, market := range markets {
-			mkt := tMarketID(market.BaseID, market.QuoteID)
+	assets := rig.dc.assets
+	for _, xc := range xcs {
+		for _, market := range xc.Markets {
+			mkt := sid(market.BaseID, market.QuoteID)
 			_, found := marketIDs[mkt]
 			if !found {
 				t.Fatalf("market %s not found", mkt)
@@ -515,7 +538,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	tCore := newTestRig().core
 	mid := "ob"
 	dc := &dexConnection{
-		books: make(map[string]*order.OrderBook),
+		books: make(map[string]*book.OrderBook),
 	}
 
 	// Ensure handleOrderBookMsg creates an order book as expected.
@@ -545,7 +568,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		t.Fatalf("[NewResponse]: unexpected err: %v", err)
 	}
 
-	err = tCore.handleOrderBookMsg(dc, msg)
+	err = handleOrderBookMsg(tCore, dc, msg)
 	if err != nil {
 		t.Fatalf("[handleOrderBookMsg]: unexpected err: %v", err)
 	}
@@ -580,7 +603,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		t.Fatalf("[NewNotification]: unexpected err: %v", err)
 	}
 
-	err = tCore.handleBookOrderMsg(dc, msg)
+	err = handleBookOrderMsg(tCore, dc, msg)
 	if err != nil {
 		t.Fatalf("[handleBookOrderMsg]: unexpected err: %v", err)
 	}
@@ -605,7 +628,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		t.Fatalf("[NewNotification]: unexpected err: %v", err)
 	}
 
-	err = tCore.handleUnbookOrderMsg(dc, msg)
+	err = handleUnbookOrderMsg(tCore, dc, msg)
 	if err != nil {
 		t.Fatalf("[handleUnbookOrderMsg]: unexpected err: %v", err)
 	}
@@ -689,7 +712,7 @@ func TestRegister(t *testing.T) {
 	// Register is called.
 	rig := newTestRig()
 	tCore := rig.core
-	dc := rig.dexConn
+	dc := rig.dc
 	acct := dc.acct
 
 	wallet, tWallet := newTWallet(tDCR.ID)
@@ -724,7 +747,7 @@ func TestRegister(t *testing.T) {
 			sigMsg, _ := req.Serialize()
 			sig, _ := tDexPriv.Sign(sigMsg)
 			// Shouldn't Sig be dex.Bytes?
-			result := &msgjson.Acknowledgement{Sig: hex.EncodeToString(sig.Serialize())}
+			result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
 			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 			f(resp)
 			return nil
@@ -905,6 +928,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestLogin(t *testing.T) {
+
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.pay()
@@ -1107,4 +1131,471 @@ func TestWithdraw(t *testing.T) {
 	if len(coinID) != 1 || coinID[0] != 'a' {
 		t.Fatalf("coin ID not propagated")
 	}
+}
+
+func TestTrade(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
+	dcrWallet.Unlock(tPW, time.Hour)
+
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(tPW, time.Hour)
+
+	qty := tDCR.LotSize * 10
+	rate := tBTC.RateStep * 1000
+
+	form := &TradeForm{
+		DEX:     tDexUrl,
+		IsLimit: true,
+		Sell:    true,
+		Base:    tDCR.ID,
+		Quote:   tBTC.ID,
+		Qty:     qty,
+		Rate:    rate,
+		TifNow:  false,
+	}
+
+	dcrCoin := &tCoin{
+		id:  encode.RandomBytes(36),
+		val: qty * 2,
+	}
+	tDcrWallet.fundCoins = asset.Coins{dcrCoin}
+
+	btcVal := calc.BaseToQuote(rate, qty*2)
+	btcCoin := &tCoin{
+		id:  encode.RandomBytes(36),
+		val: btcVal,
+	}
+	tBtcWallet.fundCoins = asset.Coins{btcCoin}
+
+	orderBook := book.NewOrderBook()
+	rig.dc.books[tDcrBtcMktName] = orderBook
+
+	msgOrderNote := &msgjson.BookOrderNote{
+		OrderNote: msgjson.OrderNote{
+			OrderID: encode.RandomBytes(32),
+		},
+		TradeNote: msgjson.TradeNote{
+			Side:     msgjson.SellOrderNum,
+			Quantity: tDCR.LotSize,
+			Time:     uint64(time.Now().Unix()),
+			Rate:     rate,
+		},
+	}
+
+	err := orderBook.Sync(&msgjson.OrderBook{
+		MarketID: tDcrBtcMktName,
+		Seq:      1,
+		Epoch:    1,
+		Orders:   []*msgjson.BookOrderNote{msgOrderNote},
+	})
+	if err != nil {
+		t.Fatalf("order book sync error: %v", err)
+	}
+
+	badSig := false
+	noID := false
+	badID := false
+	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
+		// Need to stamp and sign the message with the server's key.
+		msgOrder := new(msgjson.LimitOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		lo := convertMsgLimitOrder(msgOrder)
+		f(orderResponse(msg.ID, msgOrder, lo, badSig, noID, badID))
+		return nil
+	}
+
+	handleMarket := func(msg *msgjson.Message, f msgFunc) error {
+		// Need to stamp and sign the message with the server's key.
+		msgOrder := new(msgjson.MarketOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		mo := convertMsgMarketOrder(msgOrder)
+		f(orderResponse(msg.ID, msgOrder, mo, badSig, noID, badID))
+		return nil
+	}
+
+	ensureErr := func(tag string) {
+		_, err = tCore.Trade(tPW, form)
+		if err == nil {
+			t.Fatalf("%s: no error", tag)
+		}
+	}
+
+	// Initial success
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+	_, err = tCore.Trade(tPW, form)
+	if err != nil {
+		t.Fatalf("limit order error: %v", err)
+	}
+
+	// Dex not found
+	form.DEX = "https://someotherdex.org"
+	_, err = tCore.Trade(tPW, form)
+	if err == nil {
+		t.Fatalf("no error for unknown dex")
+	}
+	form.DEX = tDexUrl
+
+	// No base asset
+	form.Base = 12345
+	ensureErr("bad base asset")
+	form.Base = tDCR.ID
+
+	// No quote asset
+	form.Quote = 12345
+	ensureErr("bad quote asset")
+	form.Quote = tBTC.ID
+
+	// Limit order zero rate
+	form.Rate = 0
+	ensureErr("zero rate limit")
+	form.Rate = rate
+
+	// No from wallet
+	delete(tCore.wallets, tDCR.ID)
+	ensureErr("no dcr wallet")
+	tCore.wallets[tDCR.ID] = dcrWallet
+
+	// No to wallet
+	delete(tCore.wallets, tBTC.ID)
+	ensureErr("no btc wallet")
+	tCore.wallets[tBTC.ID] = btcWallet
+
+	// Address error
+	tBtcWallet.addrErr = tErr
+	ensureErr("address error")
+	tBtcWallet.addrErr = nil
+
+	// Not enough funds
+	tDcrWallet.fundErr = tErr
+	ensureErr("funds error")
+	tDcrWallet.fundErr = nil
+
+	// Lot size violation
+	ogQty := form.Qty
+	form.Qty += tDCR.LotSize / 2
+	ensureErr("bad size")
+	form.Qty = ogQty
+
+	// Coin signature error
+	tDcrWallet.signCoinErr = tErr
+	ensureErr("signature error")
+	tDcrWallet.signCoinErr = nil
+
+	// LimitRoute error
+	rig.ws.reqErr = tErr
+	ensureErr("Request error")
+	rig.ws.reqErr = nil
+
+	// The rest need a queued handler
+
+	// Bad signature
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+	badSig = true
+	ensureErr("bad server sig")
+	badSig = false
+
+	// No order ID in response
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+	noID = true
+	ensureErr("no ID")
+	noID = false
+
+	// Wrong order ID in response
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+	badID = true
+	ensureErr("no ID")
+	badID = false
+
+	// Storage failure
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+	rig.db.updateOrderErr = tErr
+	ensureErr("db failure")
+	rig.db.updateOrderErr = nil
+
+	// Successful market order
+	form.IsLimit = false
+	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
+	_, err = tCore.Trade(tPW, form)
+	if err != nil {
+		t.Fatalf("market order error: %v", err)
+	}
+}
+
+func TestCancel(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+	preImg := newPreimage()
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			OrderType:  order.LimitOrderType,
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			ClientTime: time.Now(),
+			ServerTime: time.Now(),
+			Commit:     preImg.Commit(),
+		},
+	}
+	oid := lo.ID()
+	tracker := newTrackedTrade(lo, dc, preImg)
+	dc.trades[oid] = tracker
+
+	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
+		// Need to stamp and sign the message with the server's key.
+		msgOrder := new(msgjson.CancelOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		co := convertMsgCancelOrder(msgOrder)
+		f(orderResponse(msg.ID, msgOrder, co, false, false, false))
+		return nil
+	}
+
+	sid := oid.String()
+	rig.ws.queueResponse(msgjson.CancelRoute, handleCancel)
+	err := rig.core.Cancel(tPW, sid)
+	if err != nil {
+		t.Fatalf("cancel error: %v", err)
+	}
+	if tracker.cancel == nil {
+		t.Fatalf("cancel order not found")
+	}
+	// remove the cancel order so we can check its nilness on error.
+	tracker.cancel = nil
+
+	ensureErr := func(tag string) {
+		err := rig.core.Cancel(tPW, sid)
+		if err == nil {
+			t.Fatalf("%s: no error", tag)
+		}
+		if tracker.cancel != nil {
+			t.Fatalf("%s: cancel order found", tag)
+		}
+	}
+
+	// Bad order ID
+	ogID := sid
+	sid = "badid"
+	ensureErr("bad id")
+	sid = ogID
+
+	// Order not found
+	delete(dc.trades, oid)
+	ensureErr("no order")
+	dc.trades[oid] = tracker
+
+	// Send error
+	rig.ws.reqErr = tErr
+	ensureErr("Request error")
+	rig.ws.reqErr = nil
+
+}
+
+func TestHandlePreimageRequest(t *testing.T) {
+	rig := newTestRig()
+	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+	oid := ord.ID()
+	preImg := newPreimage()
+	payload := &msgjson.PreimageRequest{
+		OrderID: oid[:],
+	}
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
+
+	tracker := &trackedTrade{
+		Order:  ord,
+		preImg: preImg,
+	}
+	rig.dc.trades[oid] = tracker
+	err := handlePreimageRequest(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("handlePreimageRequest error: %v", err)
+	}
+
+	ensureErr := func(tag string) {
+		err := handlePreimageRequest(rig.core, rig.dc, req)
+		if err == nil {
+			t.Fatalf("%s: no error", tag)
+		}
+	}
+
+	delete(rig.dc.trades, oid)
+	ensureErr("no tracker")
+	rig.dc.trades[oid] = tracker
+
+	rig.ws.sendErr = tErr
+	ensureErr("send error")
+	rig.ws.sendErr = nil
+}
+
+func TestTradeTracking(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+	qty := tDCR.LotSize * 5
+	rate := tBTC.RateStep * 10
+	preImgL := newPreimage()
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			AccountID:  dc.acct.ID(),
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			OrderType:  order.MarketOrderType,
+			ClientTime: time.Now(),
+			ServerTime: time.Now().Add(time.Millisecond),
+			Commit:     preImgL.Commit(),
+		},
+		T: order.Trade{
+			Sell:     true,
+			Quantity: qty,
+			Address:  "testaddr",
+		},
+		Rate: tBTC.RateStep,
+	}
+	loid := lo.ID()
+	var mid order.MatchID
+	copy(mid[:], encode.RandomBytes(32))
+	tracker := newTrackedTrade(lo, dc, preImgL)
+	rig.dc.trades[tracker.ID()] = tracker
+	preImgC := newPreimage()
+	co := &order.CancelOrder{
+		P: order.Prefix{
+			AccountID:  dc.acct.ID(),
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			OrderType:  order.MarketOrderType,
+			ClientTime: time.Now(),
+			ServerTime: time.Now().Add(time.Millisecond),
+			Commit:     preImgC.Commit(),
+		},
+	}
+	tracker.cancel = &trackedCancel{CancelOrder: *co}
+	coid := co.ID()
+	msgMatches := []*msgjson.Match{
+		{
+			OrderID:  loid[:],
+			MatchID:  mid[:],
+			Quantity: qty,
+			Rate:     rate,
+			Address:  "",
+		},
+		{
+			OrderID:  coid[:],
+			MatchID:  mid[:],
+			Quantity: qty,
+			Rate:     rate,
+			Address:  "testaddr",
+		},
+	}
+	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, msgMatches)
+	err := handleMatchRoute(rig.core, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("match messages error: %v", err)
+	}
+	if tracker.cancel.matches.maker == nil {
+		t.Fatalf("cancelMatches.maker not set")
+	}
+	if tracker.Trade().Filled != qty {
+		t.Fatalf("fill not set")
+	}
+	if tracker.cancel.matches.taker == nil {
+		t.Fatalf("cancelMatches.taker not set")
+	}
+}
+
+func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {
+	tif := order.ImmediateTiF
+	if msgOrder.TiF == msgjson.StandingOrderNum {
+		tif = order.StandingTiF
+	}
+	return &order.LimitOrder{
+		P:     convertMsgPrefix(&msgOrder.Prefix, order.LimitOrderType),
+		T:     convertMsgTrade(&msgOrder.Trade),
+		Rate:  msgOrder.Rate,
+		Force: tif,
+	}
+}
+
+func convertMsgMarketOrder(msgOrder *msgjson.MarketOrder) *order.MarketOrder {
+	return &order.MarketOrder{
+		P: convertMsgPrefix(&msgOrder.Prefix, order.MarketOrderType),
+		T: convertMsgTrade(&msgOrder.Trade),
+	}
+}
+
+func convertMsgCancelOrder(msgOrder *msgjson.CancelOrder) *order.CancelOrder {
+	var oid order.OrderID
+	copy(oid[:], msgOrder.TargetID)
+	return &order.CancelOrder{
+		P:             convertMsgPrefix(&msgOrder.Prefix, order.CancelOrderType),
+		TargetOrderID: oid,
+	}
+}
+
+func convertMsgPrefix(msgPrefix *msgjson.Prefix, oType order.OrderType) order.Prefix {
+	var commit order.Commitment
+	copy(commit[:], msgPrefix.Commit)
+	var acctID account.AccountID
+	copy(acctID[:], msgPrefix.AccountID)
+	return order.Prefix{
+		AccountID:  acctID,
+		BaseAsset:  msgPrefix.Base,
+		QuoteAsset: msgPrefix.Quote,
+		OrderType:  oType,
+		ClientTime: encode.UnixTimeMilli(int64(msgPrefix.ClientTime)),
+		//ServerTime set in epoch queue processing pipeline.
+		Commit: commit,
+	}
+}
+
+func convertMsgTrade(msgTrade *msgjson.Trade) order.Trade {
+	coins := make([]order.CoinID, 0, len(msgTrade.Coins))
+	for _, coin := range msgTrade.Coins {
+		var b []byte = coin.ID
+		coins = append(coins, b)
+	}
+	sell := true
+	if msgTrade.Side == msgjson.BuyOrderNum {
+		sell = false
+	}
+	return order.Trade{
+		Coins:    coins,
+		Sell:     sell,
+		Quantity: msgTrade.Quantity,
+		Address:  msgTrade.Address,
+	}
+}
+
+func orderResponse(msgID uint64, msgPrefix msgjson.Stampable, ord order.Order, badSig, noID, badID bool) *msgjson.Message {
+	orderTime := time.Now()
+	timeStamp := encode.UnixMilliU(orderTime)
+	msgPrefix.Stamp(timeStamp)
+	sign(tDexPriv, msgPrefix)
+	if badSig {
+		msgPrefix.SetSig(encode.RandomBytes(5))
+	}
+	ord.SetTime(orderTime)
+	oid := ord.ID()
+	oidB := oid[:]
+	if noID {
+		oidB = nil
+	} else if badID {
+		oidB = encode.RandomBytes(32)
+	}
+	resp, _ := msgjson.NewResponse(msgID, &msgjson.OrderResult{
+		Sig:        msgPrefix.SigBytes(),
+		OrderID:    oidB,
+		ServerTime: timeStamp,
+	}, nil)
+	return resp
 }

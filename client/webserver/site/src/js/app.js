@@ -11,6 +11,9 @@ var app
 const SUCCESS = 'success'
 const ERROR = 'error'
 const DCR_ID = 42
+const LIMIT = 1
+// const MARKET = 2
+// const CANCEL = 3
 
 const updateWalletRoute = 'update_wallet'
 const errorMsgRoute = 'error_message'
@@ -28,9 +31,9 @@ export default class Application {
     }
   }
 
-  start () {
+  async start () {
     app = this
-    this.userPromise = this.fetchUser()
+    await this.fetchUser()
     bind(window, 'popstate', (e) => {
       const page = e.state.page
       if (!page && page !== '') return
@@ -221,6 +224,15 @@ export default class Application {
   loaded () {
     this.page.loader.remove()
   }
+
+  orders (dex, bid, qid) {
+    var o = this.user.exchanges[dex].markets[sid(bid, qid)].orders
+    if (!o) {
+      o = []
+      this.user.exchanges[dex].markets[sid(bid, qid)].orders = o
+    }
+    return o
+  }
 }
 
 function getSocketURI () {
@@ -279,17 +291,18 @@ function handleLogin (main) {
   ])
   bindForm(page.loginForm, page.submit, async (e) => {
     app.loading(page.loginForm)
-    page.errMsg.classList.add('d-hide')
+    Doc.hide(page.errMsg)
     const pw = page.pw.value
     page.pw.value = ''
     if (pw === '') {
       page.errMsg.textContent = 'password cannot be empty'
-      page.errMsg.classList.remove('d-hide')
+      Doc.show(page.errMsg)
       return
     }
     app.loaded()
     var res = await postJSON('/api/login', { pass: pw })
     if (!checkResponse(res)) return
+    await app.fetchUser()
     app.setLogged(true)
     app.loadPage('markets')
   })
@@ -304,7 +317,7 @@ function handleRegister (main) {
     // Form 2: Create Decred wallet
     'walletForm',
     // Form 3: Open Decred wallet
-    'openForm', 'walletPass', 'submitOpen', 'openErr',
+    'openForm',
     // Form 4: DEX address
     'urlForm', 'addrInput', 'submitAddr', 'feeDisplay', 'addrErr',
     // Form 5: Final form to initiate registration. Client app password.
@@ -334,11 +347,10 @@ function handleRegister (main) {
   bindForm(page.appPWForm, page.appPWSubmit, async () => {
     Doc.hide(page.appErrMsg)
     const pw = page.appPW.value
-    page.appPW.value = ''
     const pwAgain = page.appPWAgain.value
     if (pw === '') {
-      page.errMsg.textContent = 'password cannot be empty'
-      Doc.show(page.errMsg)
+      page.appErrMsg.textContent = 'password cannot be empty'
+      Doc.show(page.appErrMsg)
       return
     }
     if (pw !== pwAgain) {
@@ -346,6 +358,8 @@ function handleRegister (main) {
       Doc.show(page.appErrMsg)
       return
     }
+    page.appPW.value = ''
+    page.appPWAgain.value = ''
     app.loading(page.appPWForm)
     var res = await postJSON('/api/init', { pass: pw })
     app.loaded()
@@ -369,17 +383,17 @@ function handleRegister (main) {
     changeForm(page.appPWForm, page.urlForm)
   })
 
-  page.walletForm.dataset.assetID = DCR_ID
   bindNewWalletForm(page.walletForm, () => {
     changeForm(page.walletForm, page.urlForm)
   })
+  page.walletForm.setAsset(app.assets[DCR_ID])
 
   // OPEN DCR WALLET
   // This form is only show if the wallet is not already open.
-  page.openForm.dataset.assetID = DCR_ID
   bindOpenWalletForm(page.openForm, () => {
     changeForm(page.openForm, page.urlForm)
   })
+  page.openForm.setAsset(app.assets[DCR_ID])
 
   // ENTER NEW DEX URL
   var fee
@@ -401,7 +415,6 @@ function handleRegister (main) {
     }
     page.feeDisplay.textContent = formatCoinValue(res.fee / 1e8)
     fee = res.fee
-    await app.userPromise
     const dcrWallet = app.walletMap[DCR_ID]
     if (!dcrWallet) {
       // There is no known Decred wallet, show the wallet form
@@ -444,54 +457,140 @@ function handleRegister (main) {
 }
 
 // handleMarkets is the 'markets' page main element handler.
-function handleMarkets (main, data) {
+async function handleMarkets (main, data) {
   var market
   const page = parsePage(main, [
-    'marketLoader', 'priceBox', 'buyBttn', 'sellBttn', 'baseImg', 'quoteImg',
-    'baseBalance', 'quoteBalance', 'limitBttn', 'marketBttn', 'tifBox',
-    'marketChart', 'marketList', 'rowTemplate', 'buyRows', 'sellRows'
+    // Templates, loaders, chart div...
+    'marketLoader', 'marketChart', 'marketList', 'rowTemplate', 'buyRows',
+    'sellRows',
+    // Order form.
+    'orderForm', 'priceBox', 'buyBttn', 'sellBttn', 'baseBalance',
+    'quoteBalance', 'limitBttn', 'marketBttn', 'tifBox', 'submitBttn',
+    'qtyField', 'rateField', 'orderErr', 'baseBox', 'quoteBox', 'baseImg',
+    'quoteImg', 'baseNewButton', 'quoteNewButton', 'baseBalSpan',
+    'quoteBalSpan', 'lotSize', 'rateStep', 'lotField', 'tifNow', 'mktBuyBox',
+    'mktBuyLots', 'mktBuyField', 'minMktBuy', 'qtyBox',
+    // Wallet unlock form
+    'forms', 'openForm', 'walletPass',
+    // Order submission is verified with the user's password.
+    'verifyForm', 'vSide', 'vQty', 'vBase', 'vRate',
+    'vTotal', 'vQuote', 'vPass', 'vSubmit', 'verifyLimit', 'verifyMarket',
+    'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore',
+    // Create wallet form
+    'walletForm', 'acctName',
+    // Active orders
+    'liveTemplate', 'liveList',
+    // Cancel order form
+    'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit'
   ])
 
   page.rowTemplate.remove()
   page.rowTemplate.removeAttribute('id')
-  const priceField = page.priceBox.querySelector('input[type=number]')
+  page.liveTemplate.removeAttribute('id')
+  page.liveTemplate.remove()
   const quoteUnits = main.querySelectorAll('[data-unit=quote]')
   const baseUnits = main.querySelectorAll('[data-unit=base]')
+  const isSell = () => page.sellBttn.classList.contains('selected')
+  const isLimit = () => page.limitBttn.classList.contains('selected')
+  const asAtoms = s => Math.round(parseFloat(s) * 1e8)
   const swapBttns = (before, now) => {
     before.classList.remove('selected')
     now.classList.add('selected')
   }
-  bind(page.buyBttn, 'click', () => swapBttns(page.sellBttn, page.buyBttn))
-  bind(page.sellBttn, 'click', () => swapBttns(page.buyBttn, page.sellBttn))
+
+  const setOrderVisibility = (limit, sell) => {
+    if (limit) {
+      Doc.show(page.priceBox, page.tifBox, page.qtyBox)
+      Doc.hide(page.mktBuyBox)
+    } else {
+      Doc.hide(page.priceBox)
+      if (sell) {
+        Doc.hide(page.mktBuyBox)
+        Doc.show(page.qtyBox)
+      } else {
+        Doc.show(page.mktBuyBox)
+        Doc.hide(page.qtyBox)
+      }
+    }
+  }
+
+  bind(page.buyBttn, 'click', () => {
+    setOrderVisibility(isLimit(), false)
+    swapBttns(page.sellBttn, page.buyBttn)
+  })
+  bind(page.sellBttn, 'click', () => {
+    setOrderVisibility(isLimit(), true)
+    swapBttns(page.buyBttn, page.sellBttn)
+  })
   // const tifCheck = tifDiv.querySelector('input[type=checkbox]')
   bind(page.limitBttn, 'click', () => {
-    page.priceBox.classList.remove('d-hide')
-    page.tifBox.classList.remove('d-hide')
+    setOrderVisibility(true, isSell())
     swapBttns(page.marketBttn, page.limitBttn)
   })
   bind(page.marketBttn, 'click', () => {
-    page.priceBox.classList.add('d-hide')
-    page.tifBox.classList.add('d-hide')
+    setOrderVisibility(false, isSell())
     swapBttns(page.limitBttn, page.marketBttn)
   })
 
-  var selected = {}
-  const reqMarket = async (dex, base, quote) => {
-    await app.userPromise
-    selected = {
-      base: app.assets[base],
-      quote: app.assets[quote]
-    }
-    ws.request('loadmarket', makeMarket(dex, base, quote))
+  const walletIcons = {
+    base: new StateIcons(page.baseBox),
+    quote: new StateIcons(page.quoteBox)
   }
 
-  const reportPrice = p => { priceField.value = p.toFixed(8) }
+  var selected
+  const reqMarket = async (url, base, quote) => {
+    const dex = app.user.exchanges[url]
+    selected = {
+      dex: dex,
+      sid: sid(base, quote), // A string market identifier used by the DEX.
+      base: app.assets[base],
+      baseCfg: dex.assets[base],
+      quote: app.assets[quote],
+      quoteCfg: dex.assets[quote]
+    }
+    ws.request('loadmarket', makeMarket(url, base, quote))
+  }
+
+  const reportPrice = p => { page.rateField.value = p.toFixed(8) }
   const reporters = {
     price: reportPrice
   }
   const chart = new DepthChart(page.marketChart, reporters)
   const marketRows = page.marketList.querySelectorAll('.marketrow')
   const markets = []
+
+  const parseOrder = () => {
+    let qtyField = page.qtyField
+    const limit = isLimit()
+    const sell = isSell()
+    if (!limit && !sell) {
+      qtyField = page.mktBuyField
+    }
+    return {
+      dex: selected.dex.url,
+      isLimit: limit,
+      sell: sell,
+      base: selected.base.id,
+      quote: selected.quote.id,
+      qty: asAtoms(qtyField.value),
+      rate: asAtoms(page.rateField.value), // message-rate
+      tifnow: page.tifNow.checked
+    }
+  }
+
+  const validateOrder = order => {
+    if (order.isLimit && !order.rate) {
+      Doc.show(page.orderErr)
+      page.orderErr.textContent = 'zero rate not allowed'
+      return false
+    }
+    if (!order.qty) {
+      Doc.show(page.orderErr)
+      page.orderErr.textContent = 'zero quantity not allowed'
+      return false
+    }
+    return true
+  }
 
   // If no data was passed in, check if there is a market saved for the user.
   var lastMarket = (data && data.market) ? data.market : State.fetch('selectedMarket')
@@ -513,6 +612,7 @@ function handleMarkets (main, data) {
     })
   })
 
+  // Template elements used to clone rows in the order tables.
   const tableBuilder = {
     row: page.rowTemplate,
     buys: page.buyRows,
@@ -522,8 +622,9 @@ function handleMarkets (main, data) {
 
   // handleBook is the handler for the 'book' notification from the server.
   // Updates the charts, order tables, etc.
+  var book
   const handleBook = (data) => {
-    const book = data.book
+    book = data.book
     const b = tableBuilder
     if (!book) {
       chart.clear()
@@ -532,12 +633,88 @@ function handleMarkets (main, data) {
       return
     }
     chart.set({
-      book: data.book,
+      book: book,
       quoteSymbol: selected.quote.symbol,
       baseSymbol: selected.base.symbol
     })
     loadTable(book.buys, b.buys, b, 'buycolor')
     loadTable(book.sells, b.sells, b, 'sellcolor')
+  }
+
+  const midGap = () => {
+    if (!book) return
+    if (book.buys && book.buys.length) {
+      if (book.sells && book.sells.length) {
+        return (book.buys[0].rate + book.sells[0].rate) / 2
+      }
+      return book.buys[0].rate
+    }
+    if (book.sells && book.sells.length) {
+      return book.sells[0].rate
+    }
+    return null
+  }
+
+  const setMktBuyEstimate = () => {
+    const lotSize = selected.baseCfg.lotSize
+    const xc = app.user.exchanges[selected.dex.url]
+    const buffer = xc.markets[selected.sid].buybuffer
+    const gap = midGap()
+    if (gap) {
+      page.minMktBuy.textContent = formatCoinValue(lotSize * buffer * gap / 1e8)
+    }
+  }
+
+  const setBalance = (a, row, img, button, bal) => {
+    img.src = `/img/coins/${a.symbol.toLowerCase()}.png`
+    if (a.wallet) {
+      Doc.hide(button)
+      Doc.show(row)
+      bal.textContent = formatCoinValue(a.wallet.balance / 1e8)
+      return
+    }
+    Doc.show(button)
+    Doc.hide(row)
+  }
+
+  const updateWallet = assetID => {
+    const asset = app.assets[assetID]
+    switch (assetID) {
+      case (selected.base.id):
+        setBalance(asset, page.baseBalSpan, page.baseImg, page.baseNewButton, page.baseBalance)
+        walletIcons.base.readWallet(asset.wallet)
+        break
+      case (selected.quote.id):
+        setBalance(asset, page.quoteBalSpan, page.quoteImg, page.quoteNewButton, page.quoteBalance)
+        walletIcons.quote.readWallet(asset.wallet)
+    }
+  }
+
+  const refreshActiveOrders = () => {
+    const orders = app.orders(selected.dex.url, selected.base.id, selected.quote.id)
+    Doc.empty(page.liveList)
+    for (const order of orders) {
+      const row = page.liveTemplate.cloneNode(true)
+      const set = (col, s) => { row.querySelector(`[data-col=${col}]`).textContent = s }
+      set('side', order.sell ? 'sell' : 'buy')
+      set('age', timeSince(order.stamp))
+      set('rate', formatCoinValue(order.rate / 1e8))
+      set('qty', formatCoinValue(order.qty / 1e8))
+      set('filled', `${(order.filled / order.qty * 100).toFixed(1)}%`)
+      if (order.type === LIMIT) {
+        if (order.cancelling) {
+          set('cancel', 'cancelling')
+        } else {
+          const icon = row.querySelector('[data-col=cancel] > span')
+          Doc.show(icon)
+          Doc.bind(icon, 'click', e => {
+            e.stopPropagation()
+            showCancel(icon, order)
+          })
+        }
+      }
+      page.liveList.appendChild(row)
+    }
   }
 
   ws.registerRoute('book', data => {
@@ -546,8 +723,10 @@ function handleMarkets (main, data) {
     handleBook(data)
     market = data.market
     page.marketLoader.classList.add('d-none')
+    const url = selected.dex.url
     marketRows.forEach(row => {
-      if (row.dataset.dex === data.dex && parseInt(row.dataset.base) === data.base && parseInt(row.dataset.quote) === data.quote) {
+      const d = row.dataset
+      if (d.dex === url && parseInt(d.base) === data.base && parseInt(d.quote) === data.quote) {
         row.classList.add('selected')
       } else {
         row.classList.remove('selected')
@@ -558,28 +737,263 @@ function handleMarkets (main, data) {
       base: data.base,
       quote: data.quote
     })
+    page.lotSize.textContent = formatCoinValue(selected.baseCfg.lotSize / 1e8)
+    page.rateStep.textContent = formatCoinValue(selected.quoteCfg.rateStep / 1e8)
     baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
     quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
-    page.baseImg.src = `/img/coins/${b.symbol.toLowerCase()}.png`
-    page.quoteImg.src = `/img/coins/${q.symbol.toLowerCase()}.png`
-    var bal = b.wallet ? b.wallet.balance / 1e8 : 0
-    page.baseBalance.textContent = formatCoinValue(bal)
-    bal = q.wallet ? q.wallet.balance / 1e8 : 0
-    page.quoteBalance.textContent = formatCoinValue(bal)
+    updateWallet(b.id)
+    updateWallet(q.id)
+    setMktBuyEstimate()
+    refreshActiveOrders()
   })
+
   ws.registerRoute('bookupdate', e => {
     if (market && (e.market.dex !== market.dex || e.market.base !== market.base || e.market.quote !== market.quote)) return
     handleBookUpdate(main, e)
   })
+
+  const animationLength = 500
+  var currentForm
+  const showForm = async form => {
+    currentForm = form
+    Doc.hide(page.openForm, page.verifyForm, page.walletForm, page.cancelForm)
+    form.style.right = '10000px'
+    Doc.show(page.forms, form)
+    const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
+    await Doc.animate(animationLength, progress => {
+      form.style.right = `${(1 - progress) * shift}px`
+    }, 'easeOutHard')
+    form.style.right = '0px'
+  }
+
+  // Show a form to connect/unlock a wallet.
+  var openAsset
+  var openFunc
+  const showOpen = async (asset, f) => {
+    openAsset = asset
+    openFunc = f
+    page.openForm.setAsset(app.assets[asset.id])
+    showForm(page.openForm)
+    page.walletPass.focus()
+  }
+
+  const showVerify = () => {
+    const order = parseOrder()
+    const baseAsset = app.assets[order.base]
+    const quoteAsset = app.assets[order.quote]
+    const fromAsset = order.sell ? baseAsset : quoteAsset
+    const toAsset = order.sell ? quoteAsset : baseAsset
+    if (order.isLimit) {
+      Doc.show(page.verifyLimit)
+      Doc.hide(page.verifyMarket)
+      page.vRate.textContent = formatCoinValue(order.rate / 1e8)
+      page.vQty.textContent = formatCoinValue(order.qty / 1e8)
+      page.vBase.textContent = baseAsset.symbol.toUpperCase()
+      page.vQuote.textContent = quoteAsset.symbol.toUpperCase()
+      page.vSide.textContent = order.sell ? 'sell' : 'buy'
+      page.vTotal.textContent = formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
+    } else {
+      Doc.hide(page.verifyLimit)
+      Doc.show(page.verifyMarket)
+      page.vSide.textContent = 'trade'
+      page.vQty.textContent = formatCoinValue(order.qty / 1e8)
+      page.vBase.textContent = fromAsset.symbol.toUpperCase()
+      const gap = midGap()
+      if (gap) {
+        const received = order.sell ? order.qty * gap : order.qty / gap
+        const lotSize = selected.baseCfg.lotSize
+        const lots = order.sell ? order.qty / lotSize : received / lotSize
+        // TODO: Some kind of adjustment to align with lot sizes for market buy?
+        page.vmTotal.textContent = formatCoinValue(received / 1e8)
+        page.vmAsset.textContent = toAsset.symbol.toUpperCase()
+        page.vmLots.textContent = lots.toFixed(1)
+      } else {
+        Doc.hide(page.verifyMarket)
+      }
+    }
+    showForm(page.verifyForm)
+  }
+
+  const showCancel = (bttn, order) => {
+    const remaining = order.qty - order.filled
+    page.cancelRemain.textContent = formatCoinValue(remaining / 1e8)
+    const isMarketBuy = !order.isLimit && !order.sell
+    const symbol = isMarketBuy ? selected.quote.symbol : selected.base.symbol
+    page.cancelUnit.textContent = symbol.toUpperCase()
+    showForm(page.cancelForm)
+    Doc.bind(page.cancelSubmit, 'click', async () => {
+      const pw = page.cancelPass.value
+      page.cancelPass.value = ''
+      const req = {
+        orderID: order.id,
+        pw: pw
+      }
+      var res = await postJSON('/api/cancel', req)
+      app.loaded()
+      Doc.hide(page.forms)
+      if (!checkResponse(res)) return
+      bttn.parentNode.textContent = 'cancelling'
+      order.cancelling = true
+    })
+  }
+
+  var currentCreate
+  const showCreate = asset => {
+    currentCreate = asset
+    page.walletForm.setAsset(asset)
+    showForm(page.walletForm)
+    page.acctName.focus()
+  }
+
+  const stepSubmit = () => {
+    Doc.hide(page.orderErr)
+    if (!validateOrder(parseOrder())) return
+    const baseWallet = app.walletMap[selected.base.id]
+    const quoteWallet = app.walletMap[selected.quote.id]
+    if (!baseWallet) {
+      page.orderErr.textContent = `No ${selected.base.symbol} wallet`
+      Doc.show(page.orderErr)
+      return
+    }
+    if (!quoteWallet) {
+      page.orderErr.textContent = `No ${selected.quote.symbol} wallet`
+      Doc.show(page.orderErr)
+      return
+    }
+    showVerify()
+  }
+
+  // Bind the wallet unlock form.
+  bindOpenWalletForm(page.openForm, async () => {
+    openFunc()
+  })
+
+  // Create a wallet
+  bindNewWalletForm(page.walletForm, async () => {
+    const user = await app.fetchUser()
+    const asset = user.assets[currentCreate.id]
+    Doc.hide(page.forms)
+    updateWallet(asset.id)
+  })
+
+  // Main order form
+  bindForm(page.orderForm, page.submitBttn, async () => {
+    stepSubmit()
+  })
+
+  // Order verification form
+  bindForm(page.verifyForm, page.vSubmit, async () => {
+    Doc.hide(page.forms)
+    const order = parseOrder()
+    const pw = page.vPass.value
+    page.vPass.textContent = ''
+    const req = {
+      order: order,
+      pw: pw
+    }
+    if (!validateOrder(order)) return
+    var res = await postJSON('/api/trade', req)
+    app.loaded()
+    if (!checkResponse(res)) return
+    // If the wallets are not open locally, they must have been opened during
+    // ordering. Grab updated info.
+    const baseWallet = app.walletMap[selected.base.id]
+    const quoteWallet = app.walletMap[selected.quote.id]
+    if (!baseWallet.open || !quoteWallet.open) {
+      await app.fetchUser()
+      updateWallet(selected.base.id)
+      updateWallet(selected.quote.id)
+    }
+    app.orders(order.dex, order.base, order.quote).push(res.order)
+    refreshActiveOrders()
+  })
+
+  // If the user clicks outside of a form, it should close the page overlay.
+  bind(page.forms, 'click', e => {
+    if (!Doc.mouseInElement(e, currentForm)) Doc.hide(page.forms)
+  })
+
+  // Add wallet buttons
+  bind(page.baseNewButton, 'click', () => { showCreate(selected.base) })
+  bind(page.quoteNewButton, 'click', () => { showCreate(selected.quote) })
+  const unlocked = async () => {
+    Doc.hide(page.forms)
+    await app.fetchUser()
+    updateWallet(openAsset.id)
+  }
+  bind(walletIcons.base.icons.locked, 'click', () => { showOpen(selected.base, unlocked) })
+  bind(walletIcons.quote.icons.locked, 'click', () => { showOpen(selected.quote, unlocked) })
+  bind(walletIcons.base.icons.sleeping, 'click', () => { showOpen(selected.base, unlocked) })
+  bind(walletIcons.quote.icons.sleeping, 'click', () => { showOpen(selected.quote, unlocked) })
 
   // Fetch the first market in the list, or the users last selected market, if
   // it was found.
   const firstEntry = mktFound ? lastMarket : markets[0]
   reqMarket(firstEntry.dex, firstEntry.base, firstEntry.quote)
 
+  const lotChange = () => {
+    const lots = parseInt(page.lotField.value)
+    if (lots <= 0) {
+      page.lotField.value = 0
+      page.qtyField.value = ''
+      return
+    }
+    const lotSize = selected.baseCfg.lotSize
+    page.lotField.value = lots
+    page.qtyField.value = (lots * lotSize / 1e8)
+  }
+  bind(page.lotField, 'change', lotChange)
+  bind(page.lotField, 'keyup', lotChange)
+
+  const qtyChange = (finalize) => {
+    const order = parseOrder()
+    if (order.qty <= 0) {
+      page.lotField.value = 0
+      page.qtyField.value = ''
+      return
+    }
+    const lotSize = selected.baseCfg.lotSize
+    const lots = Math.floor(order.qty / lotSize)
+    const adjusted = lots * lotSize
+    page.lotField.value = lots
+    if (!order.isLimit && !order.sell) return
+    if (finalize) page.qtyField.value = (adjusted / 1e8)
+  }
+  bind(page.qtyField, 'change', () => qtyChange(true))
+  bind(page.qtyField, 'keyup', () => qtyChange(false))
+
+  const mktBuyChange = () => {
+    const qty = asAtoms(page.mktBuyField.value)
+    const gap = midGap()
+    if (!gap || !qty) {
+      page.mktBuyLots.textContent = '0'
+      page.mktBuyScore.textContent = '0'
+      return
+    }
+    const lotSize = selected.baseCfg.lotSize
+    const received = qty / gap
+    page.mktBuyLots.textContent = (received / lotSize).toFixed(1)
+    page.mktBuyScore.textContent = formatCoinValue(received / 1e8)
+  }
+  bind(page.mktBuyField, 'change', mktBuyChange)
+  bind(page.mktBuyField, 'keyup', mktBuyChange)
+
+  bind(page.rateField, 'change', () => {
+    const order = parseOrder()
+    if (order.rate <= 0) {
+      page.rateField.value = 0
+      return
+    }
+    // Truncate to rate step. If it is a market buy order, do not adjust.
+    const rateStep = selected.quoteCfg.rateStep
+    const adjusted = order.rate - (order.rate % rateStep)
+    page.rateField.value = (adjusted / 1e8)
+  })
+
   unattach(() => {
     ws.request('unmarket', {})
     ws.deregisterRoute('book')
+    ws.deregisterRoute('bookupdate')
     chart.unattach()
   })
 }
@@ -639,8 +1053,7 @@ function handleWallets (main) {
     'walletForm', 'acctName', 'newWalletPass', 'iniPath', 'walletErr',
     'newWalletLogo', 'newWalletName',
     // Unlock wallet form
-    'openForm', 'unlockLogo', 'unlockName', 'walletPass', 'submitOpen',
-    'openErr',
+    'openForm',
     // Deposit
     'deposit', 'depositName', 'depositAddress',
     // Withdraw
@@ -650,7 +1063,6 @@ function handleWallets (main) {
   ])
 
   // Read the document.
-  const stateIcon = (row, name) => row.querySelector(`[data-state=${name}]`)
   const getAction = (row, name) => row.querySelector(`[data-action=${name}]`)
   const rowInfos = {}
   const rows = page.walletTable.querySelectorAll('tr')
@@ -663,12 +1075,7 @@ function handleWallets (main) {
     rowInfo.tr = tr
     rowInfo.symbol = tr.dataset.symbol
     rowInfo.name = tr.dataset.name
-    rowInfo.stateIcons = {
-      sleeping: stateIcon(tr, 'sleeping'),
-      locked: stateIcon(tr, 'locked'),
-      unlocked: stateIcon(tr, 'unlocked'),
-      nowallet: stateIcon(tr, 'nowallet')
-    }
+    rowInfo.stateIcons = new StateIcons(tr)
     rowInfo.actions = {
       connect: getAction(tr, 'connect'),
       unlock: getAction(tr, 'unlock'),
@@ -679,7 +1086,7 @@ function handleWallets (main) {
     }
   }
 
-  // Prepare asset markets template
+  // Prepare templates
   page.dexTitle.removeAttribute('id')
   page.dexTitle.remove()
   page.oneMarket.removeAttribute('id')
@@ -695,12 +1102,12 @@ function handleWallets (main) {
   const hideBox = async () => {
     if (animation) await animation
     if (!displayed) return
-    displayed.classList.add('d-hide')
+    Doc.hide(displayed)
   }
 
   const showBox = async (box, focuser) => {
     box.style.opacity = '0'
-    box.classList.remove('d-hide')
+    Doc.show(box)
     if (focuser) focuser.focus()
     await Doc.animate(animationLength, progress => {
       box.style.opacity = `${progress}`
@@ -712,25 +1119,24 @@ function handleWallets (main) {
   // Show the markets box, which lists the markets available for a selected
   // asset.
   const showMarkets = async assetID => {
-    await app.userPromise
     const box = page.marketsBox
     const card = page.marketsCard
     const rowInfo = rowInfos[assetID]
     await hideBox()
     Doc.empty(card)
     page.marketsFor.textContent = rowInfo.name
-    for (const [url, markets] of Object.entries(app.user.markets)) {
-      const count = markets.reduce((a, market) => {
-        if (market.baseid === assetID || market.quoteid === assetID) a++
-        return a
-      }, 0)
+    for (const [url, xc] of Object.entries(app.user.exchanges)) {
+      let count = 0
+      for (const market of Object.values(xc.markets)) {
+        if (market.baseid === assetID || market.quoteid === assetID) count++
+      }
       if (count === 0) continue
       const header = page.dexTitle.cloneNode(true)
       header.textContent = new URL(url).host
       card.appendChild(header)
       const marketsBox = page.markets.cloneNode(true)
       card.appendChild(marketsBox)
-      for (const market of markets) {
+      for (const market of Object.values(xc.markets)) {
         // Only show markets where this is the base or quote asset.
         if (market.baseid !== assetID && market.quoteid !== assetID) continue
         const mBox = page.oneMarket.cloneNode(true)
@@ -757,36 +1163,27 @@ function handleWallets (main) {
       page.newWalletPass.value = ''
       page.iniPath.value = ''
       page.iniPath.placeholder = asset.info.configpath
-      page.walletErr.classList.add('d-hide')
+      Doc.hide(page.walletErr)
       page.newWalletName.textContent = asset.info.name
     }
     walletAsset = assetID
-    page.walletForm.dataset.assetID = assetID
-    page.newWalletLogo.src = logoPath(asset.symbol)
-    page.newWalletName.textContent = asset.info.name
+    page.walletForm.setAsset(asset)
     animation = showBox(box, page.acctName)
   }
 
   // Show the form used to unlock a wallet.
   var openAsset
   const showOpen = async assetID => {
-    const box = page.openForm
-    const asset = app.assets[assetID]
-    await hideBox()
-    page.openErr.classList.add('d-hide')
-    page.unlockLogo.src = logoPath(asset.symbol)
-    page.unlockName.textContent = asset.info.name
-    page.walletPass.value = ''
     openAsset = assetID
-    box.dataset.assetID = assetID
-    animation = showBox(box, page.walletPass)
+    await hideBox()
+    page.openForm.setAsset(app.assets[assetID])
+    animation = showBox(page.openForm, page.walletPass)
   }
 
   // Display a deposit address.
   const showDeposit = async assetID => {
     const box = page.deposit
     const asset = app.assets[assetID]
-    await app.userPromise
     const wallet = app.walletMap[assetID]
     if (!wallet) {
       app.notify(ERROR, `No wallet found for ${asset.info.name}. Cannot retrieve deposit address.`)
@@ -802,7 +1199,6 @@ function handleWallets (main) {
   const showWithdraw = async assetID => {
     const box = page.withdrawForm
     const asset = app.assets[assetID]
-    await app.userPromise
     const wallet = app.walletMap[assetID]
     if (!wallet) {
       app.notify(ERROR, `No wallet found for ${asset.info.name}. Cannot withdraw.`)
@@ -827,9 +1223,8 @@ function handleWallets (main) {
     app.loaded()
     if (!checkResponse(res)) return
     const rowInfo = rowInfos[assetID]
-    const [a, i] = [rowInfo.actions, rowInfo.stateIcons]
-    Doc.hide(a.connect, i.sleeping)
-    Doc.show(i.locked)
+    Doc.hide(rowInfo.actions.connect)
+    rowInfo.stateIcons.locked()
   }
 
   // Bind the new wallet form.
@@ -837,17 +1232,19 @@ function handleWallets (main) {
   bindNewWalletForm(page.walletForm, () => {
     const rowInfo = rowInfos[walletAsset]
     showMarkets(rowInfo.ID)
-    const [a, i] = [rowInfo.actions, rowInfo.stateIcons]
-    Doc.hide(a.create, i.nowallet)
-    Doc.show(a.withdraw, a.deposit, a.lock, i.unlocked)
+    const a = rowInfo.actions
+    Doc.hide(a.create)
+    Doc.show(a.withdraw, a.deposit, a.lock)
+    rowInfo.stateIcons.unlocked()
   })
 
   // Bind the wallet unlock form.
   bindOpenWalletForm(page.openForm, async () => {
     const rowInfo = rowInfos[openAsset]
-    const [a, i] = [rowInfo.actions, rowInfo.stateIcons]
-    Doc.show(i.unlocked, a.lock, a.withdraw, a.deposit)
-    Doc.hide(i.sleeping, i.locked, a.unlock, a.connect)
+    const a = rowInfo.actions
+    Doc.show(a.lock, a.withdraw, a.deposit)
+    Doc.hide(a.unlock, a.connect)
+    rowInfo.stateIcons.unlocked()
     showMarkets(openAsset)
   })
 
@@ -884,6 +1281,7 @@ function handleWallets (main) {
   // Bind buttons
   for (const [k, asset] of Object.entries(rowInfos)) {
     const assetID = parseInt(k) // keys are string asset ID.
+    const rowInfo = rowInfos[assetID]
     const a = asset.actions
     const show = (e, f) => {
       e.stopPropagation()
@@ -910,9 +1308,10 @@ function handleWallets (main) {
       var res = await postJSON('/api/closewallet', { assetID: assetID })
       app.loaded()
       if (!checkResponse(res)) return
-      const [a, i] = [asset.actions, asset.stateIcons]
-      Doc.hide(i.unlocked, a.lock, a.withdraw, a.deposit)
-      Doc.show(i.locked, a.unlock)
+      const a = asset.actions
+      Doc.hide(a.lock, a.withdraw, a.deposit)
+      Doc.show(a.unlock)
+      rowInfo.stateIcons.locked()
     })
   }
 
@@ -941,7 +1340,7 @@ function handleSettings (main) {
 
 // Parameters for printing asset values.
 const coinValueSpecs = {
-  minimumSignificantDigits: 3,
+  minimumSignificantDigits: 4,
   maximumSignificantDigits: 6,
   maximumFractionDigits: 8
 }
@@ -992,12 +1391,18 @@ function bindNewWalletForm (form, success) {
   // This form is only shown the first time the user visits the /register page.
   const fields = parsePage(form, [
     'iniPath', 'acctName', 'newWalletPass', 'submitCreate', 'walletErr',
-    'wClientPass'
+    'newWalletLogo', 'newWalletName', 'wClientPass'
   ])
+  var currentAsset
+  form.setAsset = asset => {
+    currentAsset = asset
+    fields.newWalletLogo.src = logoPath(asset.symbol)
+    fields.newWalletName.textContent = asset.info.name
+  }
   bindForm(form, fields.submitCreate, async () => {
     Doc.hide(fields.walletErr)
     const create = {
-      assetID: parseInt(form.dataset.assetID),
+      assetID: parseInt(currentAsset.id),
       pass: fields.newWalletPass.value,
       account: fields.acctName.value,
       inipath: fields.iniPath.value,
@@ -1019,12 +1424,19 @@ function bindNewWalletForm (form, success) {
 
 function bindOpenWalletForm (form, success) {
   const fields = parsePage(form, [
-    'submitOpen', 'openErr', 'walletPass'
+    'submitOpen', 'openErr', 'walletPass', 'unlockLogo', 'unlockName'
   ])
+  var currentAsset
+  form.setAsset = asset => {
+    currentAsset = asset
+    fields.unlockLogo.src = logoPath(asset.symbol)
+    fields.unlockName.textContent = asset.name
+    fields.walletPass.value = ''
+  }
   bindForm(form, fields.submitOpen, async () => {
     Doc.hide(fields.openErr)
     const open = {
-      assetID: parseInt(form.dataset.assetID),
+      assetID: parseInt(currentAsset.id),
       pass: fields.walletPass.value
     }
     fields.walletPass.value = ''
@@ -1038,4 +1450,97 @@ function bindOpenWalletForm (form, success) {
     }
     success()
   })
+}
+
+class StateIcons {
+  constructor (box) {
+    const stateIcon = (row, name) => row.querySelector(`[data-state=${name}]`)
+    this.icons = {}
+    this.icons.sleeping = stateIcon(box, 'sleeping')
+    this.icons.locked = stateIcon(box, 'locked')
+    this.icons.unlocked = stateIcon(box, 'unlocked')
+    this.icons.nowallet = stateIcon(box, 'nowallet')
+  }
+
+  sleeping () {
+    const i = this.icons
+    Doc.hide(i.locked, i.unlocked, i.nowallet)
+    Doc.show(i.sleeping)
+  }
+
+  locked () {
+    const i = this.icons
+    Doc.hide(i.unlocked, i.nowallet, i.sleeping)
+    Doc.show(i.locked)
+  }
+
+  unlocked () {
+    const i = this.icons
+    Doc.hide(i.locked, i.nowallet, i.sleeping)
+    Doc.show(i.unlocked)
+  }
+
+  nowallet () {
+    const i = this.icons
+    Doc.hide(i.locked, i.unlocked, i.sleeping)
+    Doc.show(i.nowallet)
+  }
+
+  readWallet (wallet) {
+    switch (true) {
+      case (!wallet):
+        this.nowallet()
+        break
+      case (!wallet.running):
+        this.sleeping()
+        break
+      case (!wallet.open):
+        this.locked()
+        break
+      case (wallet.open):
+        this.unlocked()
+        break
+      default:
+        console.error('wallet in unknown state', wallet)
+    }
+  }
+}
+
+function sid (b, q) { return `${b}-${q}` }
+
+const aYear = 31536000000
+const aMonth = 2592000000
+const aDay = 86400000
+const anHour = 3600000
+const aMinute = 60000
+
+function timeMod (t, dur) {
+  const n = Math.floor(t / dur)
+  const mod = t - n * dur
+  return [n, mod]
+}
+
+function timeSince (t) {
+  var seconds = Math.floor(((new Date().getTime()) - t))
+  var result = ''
+  var count = 0
+  const add = (n, s) => {
+    if (n > 0 || count > 0) count++
+    if (n > 0) result += `${n} ${s} `
+    return count >= 2
+  }
+  var y, mo, d, h, m, s
+  [y, seconds] = timeMod(seconds, aYear)
+  if (add(y, 'y')) { return result }
+  [mo, seconds] = timeMod(seconds, aMonth)
+  if (add(mo, 'mo')) { return result }
+  [d, seconds] = timeMod(seconds, aDay)
+  if (add(d, 'd')) { return result }
+  [h, seconds] = timeMod(seconds, anHour)
+  if (add(h, 'h')) { return result }
+  [m, seconds] = timeMod(seconds, aMinute)
+  if (add(m, 'm')) { return result }
+  [s, seconds] = timeMod(seconds, 1000)
+  add(s, 's')
+  return result || '0 s'
 }

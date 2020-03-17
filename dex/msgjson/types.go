@@ -159,8 +159,8 @@ type Stampable interface {
 // requires an acknowledgement. It is typically a signature of some serialized
 // data associated with the request.
 type Acknowledgement struct {
-	MatchID string `json:"matchid"`
-	Sig     string `json:"sig"`
+	MatchID Bytes `json:"matchid"`
+	Sig     Bytes `json:"sig"`
 }
 
 // Error is returned as part of the Response to indicate that an error

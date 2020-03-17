@@ -203,6 +203,9 @@ func MustCompareOrderProof(t testKiller, p1, p2 *db.OrderProof) {
 	if !bytes.Equal(p1.DEXSig, p2.DEXSig) {
 		t.Fatalf("DEXSig mismatch. %x != %x", p1.DEXSig, p2.DEXSig)
 	}
+	if !bytes.Equal(p1.Preimage, p2.Preimage) {
+		t.Fatalf("Preimage mismatch. %x != %x", p1.Preimage, p2.Preimage)
+	}
 }
 
 // MustCompareWallets ensures the two Wallet are identical, calling the Fatalf

@@ -391,7 +391,7 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 			AccountID:  user,
 			BaseAsset:  cancel.Base,
 			QuoteAsset: cancel.Quote,
-			OrderType:  order.MarketOrderType,
+			OrderType:  order.CancelOrderType,
 			ClientTime: encode.UnixTimeMilli(int64(cancel.ClientTime)),
 			//ServerTime set in epoch queue processing pipeline.
 			Commit: commit,

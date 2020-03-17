@@ -46,7 +46,12 @@ func TestMatchProof(t *testing.T) {
 func TestOrderProof(t *testing.T) {
 	spins := 10000
 	proofs := make([]*db.OrderProof, 0, spins)
-	nTimes(spins, func(int) { proofs = append(proofs, &db.OrderProof{DEXSig: randBytes(73)}) })
+	nTimes(spins, func(int) {
+		proofs = append(proofs, &db.OrderProof{
+			DEXSig:   randBytes(73),
+			Preimage: randBytes(32),
+		})
+	})
 	tStart := time.Now()
 	nTimes(spins, func(i int) {
 		proof := proofs[i]

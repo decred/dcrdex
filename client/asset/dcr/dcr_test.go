@@ -761,30 +761,44 @@ func TestSignMessage(t *testing.T) {
 	node.privWIF = dcrutil.NewWIF(privKey, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
 	var coin asset.Coin = newOutput(node, tTxHash, vout, 5e7, wire.TxTreeRegular, nil)
-	pubkeys, sigs, err := wallet.SignMessage(coin, msg)
-	if err != nil {
-		t.Fatalf("SignMessage error: %v", err)
-	}
-	if len(pubkeys) != 1 {
-		t.Fatalf("expected 1 pubkey, received %d", len(pubkeys))
-	}
-	if len(sigs) != 1 {
-		t.Fatalf("expected 1 sig, received %d", len(sigs))
-	}
-	if !bytes.Equal(pk, pubkeys[0]) {
-		t.Fatalf("wrong pubkey. expected %x, got %x", pubkeys[0], pk)
-	}
-	if !bytes.Equal(sig, sigs[0]) {
-		t.Fatalf("wrong signature. exptected %x, got %x", sigs[0], sig)
+
+	wallet.fundingCoins[coin.String()] = &fundingCoin{
+		addr: tPKHAddr.String(),
 	}
 
+	check := func() {
+		pubkeys, sigs, err := wallet.SignMessage(coin, msg)
+		if err != nil {
+			t.Fatalf("SignMessage error: %v", err)
+		}
+		if len(pubkeys) != 1 {
+			t.Fatalf("expected 1 pubkey, received %d", len(pubkeys))
+		}
+		if len(sigs) != 1 {
+			t.Fatalf("expected 1 sig, received %d", len(sigs))
+		}
+		if !bytes.Equal(pk, pubkeys[0]) {
+			t.Fatalf("wrong pubkey. expected %x, got %x", pubkeys[0], pk)
+		}
+		if !bytes.Equal(sig, sigs[0]) {
+			t.Fatalf("wrong signature. exptected %x, got %x", sigs[0], sig)
+		}
+	}
+
+	check()
+	delete(wallet.fundingCoins, coin.String())
+	txOut := makeGetTxOutRes(1, 5, nil)
+	txOut.ScriptPubKey.Addresses = []string{tPKHAddr.String()}
+	node.txOutRes[outpointID(tTxHash, vout)] = txOut
+	check()
+
 	// gettransaction error
-	node.walletTxErr = tErr
+	node.txOutErr = tErr
 	_, _, err = wallet.SignMessage(coin, msg)
 	if err == nil {
-		t.Fatalf("no error for gettransaction rpc error")
+		t.Fatalf("no error for gettxout rpc error")
 	}
-	node.walletTxErr = nil
+	node.txOutErr = nil
 
 	// dumpprivkey error
 	node.privWIFErr = tErr
@@ -799,13 +813,6 @@ func TestSignMessage(t *testing.T) {
 	_, _, err = wallet.SignMessage(badCoin, msg)
 	if err == nil {
 		t.Fatalf("no error for bad coin")
-	}
-
-	// Not a wallet address. This would probably always be an error though.
-	node.walletTx = &walletjson.GetTransactionResult{}
-	_, _, err = wallet.SignMessage(coin, msg)
-	if err == nil {
-		t.Fatalf("no error for unrecognized address")
 	}
 }
 

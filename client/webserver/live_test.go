@@ -21,6 +21,8 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/slog"
 )
@@ -41,12 +43,30 @@ func randomMagnitude(low, high int) float64 {
 func mkMrkt(base, quote string) *core.Market {
 	baseID, _ := dex.BipSymbolID(base)
 	quoteID, _ := dex.BipSymbolID(quote)
-	return &core.Market{
-		BaseID:      baseID,
-		BaseSymbol:  base,
-		QuoteID:     quoteID,
-		QuoteSymbol: quote,
+	market := &core.Market{
+		Name:            fmt.Sprintf("%s-%s", base, quote),
+		BaseID:          baseID,
+		BaseSymbol:      base,
+		QuoteID:         quoteID,
+		QuoteSymbol:     quote,
+		MarketBuyBuffer: rand.Float64() + 1,
 	}
+	orderCount := rand.Intn(5)
+	qty := uint64(randomMagnitude(7, 11))
+	for i := 0; i < orderCount; i++ {
+		market.Orders = append(market.Orders, &core.Order{
+			ID: ordertest.RandomOrderID().String(),
+			Type:    order.OrderType(rand.Intn(2) + 1),
+			Stamp:   encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*86_400_000),
+			Rate:    uint64(randomMagnitude(-2, 4)),
+			Qty:     qty,
+			Sell:    rand.Intn(2) > 0,
+			Filled:  uint64(rand.Float64() * float64(qty)),
+			Matches: nil,
+		})
+	}
+
+	return market
 }
 
 func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.SupportedAsset {
@@ -77,12 +97,55 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.Supp
 	}
 }
 
-var tMarkets = map[string][]*core.Market{
-	"https://somedex.com": []*core.Market{
-		mkMrkt("dcr", "btc"), mkMrkt("dcr", "ltc"), mkMrkt("doge", "mona"),
+func mkDexAsset(symbol string) *dex.Asset {
+	assetID, _ := dex.BipSymbolID(symbol)
+	assetOrder := rand.Intn(5) + 6
+	return &dex.Asset{
+		ID:       assetID,
+		Symbol:   symbol,
+		LotSize:  uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(10)),
+		RateStep: uint64(math.Pow10(assetOrder-2)) * uint64(rand.Intn(10)),
+		FeeRate:  uint64(rand.Intn(10) + 1),
+		SwapSize: uint64(rand.Intn(150) + 150),
+		SwapConf: uint32(rand.Intn(5) + 2),
+		FundConf: uint32(rand.Intn(5) + 2),
+	}
+}
+
+func mkid(b, q uint32) string {
+	return fmt.Sprintf("%d-%d", b, q)
+}
+
+var tExchanges = map[string]*core.Exchange{
+	"https://somedex.com": &core.Exchange{
+		URL: "https://somedex.com",
+		Assets: map[uint32]*dex.Asset{
+			0:  mkDexAsset("btc"),
+			2:  mkDexAsset("ltc"),
+			42: mkDexAsset("dcr"),
+			22: mkDexAsset("mona"),
+			3:  mkDexAsset("doge"),
+		},
+		Markets: map[string]*core.Market{
+			mkid(42, 0): mkMrkt("dcr", "btc"),
+			mkid(42, 2): mkMrkt("dcr", "ltc"),
+			mkid(3, 22): mkMrkt("doge", "mona"),
+		},
 	},
-	"https://thisdexwithalongname.com": []*core.Market{
-		mkMrkt("dcr", "vtc"), mkMrkt("btc", "ltc"), mkMrkt("mona", "ltc"),
+	"https://thisdexwithalongname.com": &core.Exchange{
+		URL: "https://thisdexwithalongname.com",
+		Assets: map[uint32]*dex.Asset{
+			0:  mkDexAsset("btc"),
+			2:  mkDexAsset("ltc"),
+			42: mkDexAsset("dcr"),
+			22: mkDexAsset("mona"),
+			28: mkDexAsset("vtc"),
+		},
+		Markets: map[string]*core.Market{
+			mkid(42, 28): mkMrkt("dcr", "vtc"),
+			mkid(0, 2):   mkMrkt("btc", "ltc"),
+			mkid(22, 2):  mkMrkt("mona", "ltc"),
+		},
 	},
 }
 
@@ -132,11 +195,14 @@ func newTCore() *TCore {
 			0:  uint64(randomMagnitude(7, 11)),
 			2:  uint64(randomMagnitude(7, 11)),
 			42: uint64(randomMagnitude(7, 11)),
+			22: uint64(randomMagnitude(7, 11)),
+			3:  uint64(randomMagnitude(7, 11)),
+			28: uint64(randomMagnitude(7, 11)),
 		},
 	}
 }
 
-func (c *TCore) Markets() map[string][]*core.Market { return tMarkets }
+func (c *TCore) Exchanges() map[string]*core.Exchange { return tExchanges }
 
 func (c *TCore) InitializeClient(pw string) error {
 	randomDelay()
@@ -160,7 +226,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, err
 
 // Book randomizes an order book.
 func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook {
-	midGap := randomMagnitude(0, 6)
+	midGap := randomMagnitude(-2, 4)
 	maxQty := randomMagnitude(-2, 4)
 	// Set the market width to about 5% of midGap.
 	marketWidth := 0.05 * midGap
@@ -217,20 +283,36 @@ var winfos = map[uint32]*asset.WalletInfo{
 		Units:   "atoms",
 		Name:    "Decred",
 	},
+	22: &asset.WalletInfo{
+		FeeRate: 50,
+		Units:   "atoms",
+		Name:    "Monacoin",
+	},
+	3: &asset.WalletInfo{
+		FeeRate: 1000,
+		Units:   "atoms",
+		Name:    "Dogecoin",
+	},
+	28: &asset.WalletInfo{
+		FeeRate: 20,
+		Units:   "Satoshis",
+		Name:    "Vertcoin",
+	},
 }
 
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
-	if c.wallets[assetID] == nil {
+	w := c.wallets[assetID]
+	if w == nil {
 		return nil
 	}
 	return &core.WalletState{
 		Symbol:  unbip(assetID),
 		AssetID: assetID,
 
-		Open:    true,
-		Running: true,
+		Open:    w.open,
+		Running: w.running,
 		Address: ordertest.RandomAddress(),
 		Balance: c.balances[assetID],
 		FeeRate: winfos[assetID].FeeRate,
@@ -303,7 +385,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 
 func (c *TCore) User() *core.User {
 	user := &core.User{
-		Markets:     tMarkets,
+		Exchanges:   tExchanges,
 		Initialized: c.inited,
 		Assets:      c.SupportedAssets(),
 	}
@@ -317,11 +399,44 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 		0:  mkSupportedAsset("btc", c.wallets[0], c.balances[0]),
 		42: mkSupportedAsset("dcr", c.wallets[42], c.balances[42]),
 		2:  mkSupportedAsset("ltc", c.wallets[2], c.balances[2]),
+		22: mkSupportedAsset("mona", c.wallets[22], c.balances[22]),
+		3:  mkSupportedAsset("doge", c.wallets[3], c.balances[3]),
+		28: mkSupportedAsset("vtc", c.wallets[28], c.balances[28]),
 	}
 }
 
 func (c *TCore) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, nil
+}
+
+func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
+	c.OpenWallet(form.Quote, "")
+	c.OpenWallet(form.Base, "")
+	oType := order.LimitOrderType
+	if !form.IsLimit {
+		oType = order.MarketOrderType
+	}
+	return &core.Order{
+		ID: ordertest.RandomOrderID().String(),
+		Type:  oType,
+		Stamp: encode.UnixMilliU(time.Now()),
+		Rate:  form.Rate,
+		Qty:   form.Qty,
+		Sell:  form.Sell,
+	}, nil
+}
+
+func (c *TCore) Cancel(pw string, sid string) error {
+	for _, xc := range tExchanges {
+		for _, mkt := range xc.Markets {
+			for _, ord := range mkt.Orders {
+				if ord.ID == sid {
+					ord.Cancelling = true
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func TestServer(t *testing.T) {

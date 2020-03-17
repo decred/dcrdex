@@ -114,7 +114,7 @@ book and place orders.
 
 * [[orders.mediawiki/#Connection_Persistence|Connection Persistence]]
 * [[orders.mediawiki/#Order_Book_Subscriptions|Order Book Subscriptions]]
-* [[orders.mediawiki/#Order_Type|Order Types]]
+* [[orders.mediawiki/#Order_Types|Order Types]]
 * [[orders.mediawiki/#Preimage_Reveal|Preimage Handling]]
 * [[orders.mediawiki/#Match_negotiation|Match Negotiation]]
 

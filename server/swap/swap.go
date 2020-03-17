@@ -4,8 +4,8 @@
 package swap
 
 import (
+	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -782,19 +782,13 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// Note: ack.MatchID unused, but could be checked against acker.match.ID().
 
 	// Check the signature.
-	sigBytes, err := hex.DecodeString(ack.Sig)
-	if err != nil {
-		s.respondError(msg.ID, acker.user, msgjson.SignatureError,
-			fmt.Sprintf("error decoding signature %s: %v", ack.Sig, err))
-		return
-	}
 	sigMsg, err := acker.params.Serialize()
 	if err != nil {
 		s.respondError(msg.ID, acker.user, msgjson.SerializationError,
 			fmt.Sprintf("unable to serialize match params: %v", err))
 		return
 	}
-	err = s.authMgr.Auth(acker.user, sigMsg, sigBytes)
+	err = s.authMgr.Auth(acker.user, sigMsg, ack.Sig)
 	if err != nil {
 		s.respondError(msg.ID, acker.user, msgjson.SignatureError,
 			fmt.Sprintf("signature validation error: %v", err))
@@ -810,19 +804,19 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// ack of either contract audit or redeem receipt
 	if acker.isAudit {
 		if acker.isMaker {
-			acker.match.Sigs.MakerAudit = sigBytes         // i.e. audited taker's contract
-			s.storage.SaveAuditAckSigA(mktMatch, sigBytes) // TODO: check err and/or make the backend go fatal
+			acker.match.Sigs.MakerAudit = ack.Sig         // i.e. audited taker's contract
+			s.storage.SaveAuditAckSigA(mktMatch, ack.Sig) // TODO: check err and/or make the backend go fatal
 		} else {
-			acker.match.Sigs.TakerAudit = sigBytes
-			s.storage.SaveAuditAckSigB(mktMatch, sigBytes)
+			acker.match.Sigs.TakerAudit = ack.Sig
+			s.storage.SaveAuditAckSigB(mktMatch, ack.Sig)
 		}
 	} else {
 		if acker.isMaker {
-			acker.match.Sigs.MakerRedeem = sigBytes
-			s.storage.SaveRedeemAckSigA(mktMatch, sigBytes)
+			acker.match.Sigs.MakerRedeem = ack.Sig
+			s.storage.SaveRedeemAckSigA(mktMatch, ack.Sig)
 		} else {
-			acker.match.Sigs.TakerRedeem = sigBytes
-			s.storage.SaveRedeemAckSigB(mktMatch, sigBytes)
+			acker.match.Sigs.TakerRedeem = ack.Sig
+			s.storage.SaveRedeemAckSigB(mktMatch, ack.Sig)
 		}
 	}
 }
@@ -902,8 +896,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
-		MatchID: matchID.String(),
-		Sig:     params.Sig.String(),
+		MatchID: matchID[:],
+		Sig:     params.Sig,
 	})
 
 	// Prepare an 'audit' request for the counter-party.
@@ -1006,8 +1000,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
-		MatchID: matchID.String(),
-		Sig:     params.Sig.String(),
+		MatchID: matchID[:],
+		Sig:     params.Sig,
 	})
 
 	// Inform the counterparty.
@@ -1327,15 +1321,9 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	for i, matchInfo := range matches {
 		ack := acks[i]
 		matchID := matchInfo.match.ID()
-		if ack.MatchID != matchID.String() {
+		if !bytes.Equal(ack.MatchID, matchID[:]) {
 			s.respondError(msg.ID, user, msgjson.IDMismatchError,
 				fmt.Sprintf("unexpected match ID at acknowledgment index %d", i))
-			return
-		}
-		sigBytes, err := hex.DecodeString(ack.Sig)
-		if err != nil {
-			s.respondError(msg.ID, user, msgjson.SignatureError,
-				fmt.Sprintf("error decoding signature %s: %v", ack.Sig, err))
 			return
 		}
 		sigMsg, err := matchInfo.params.Serialize()
@@ -1344,7 +1332,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 				fmt.Sprintf("unable to serialize match params: %v", err))
 			return
 		}
-		err = s.authMgr.Auth(user, sigMsg, sigBytes)
+		err = s.authMgr.Auth(user, sigMsg, ack.Sig)
 		if err != nil {
 			s.respondError(msg.ID, user, msgjson.SignatureError,
 				fmt.Sprintf("signature validation error: %v", err))
@@ -1356,7 +1344,12 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		if matchInfo.isMaker {
 			storFn = s.storage.SaveMatchAckSigA
 		}
-		err = storFn(db.MatchID(matchInfo.match.Match), sigBytes)
+		mid := db.MarketMatchID{
+			MatchID: matchID,
+			Base:    matchInfo.match.Maker.BaseAsset, // same for taker's redeem as BaseAsset refers to the market
+			Quote:   matchInfo.match.Maker.QuoteAsset,
+		}
+		err = storFn(mid, ack.Sig)
 		if err != nil {
 			log.Errorf("saving match ack signature (match id=%v, maker=%v) failed: %v",
 				matchID, matchInfo.isMaker, err)
@@ -1370,9 +1363,9 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		// before the init steps begin and swap contracts are broadcasted.
 		matchInfo.match.mtx.Lock()
 		if matchInfo.isMaker {
-			matchInfo.match.Sigs.MakerMatch = sigBytes
+			matchInfo.match.Sigs.MakerMatch = ack.Sig
 		} else {
-			matchInfo.match.Sigs.TakerMatch = sigBytes
+			matchInfo.match.Sigs.TakerMatch = ack.Sig
 		}
 		matchInfo.match.mtx.Unlock()
 

@@ -182,6 +182,14 @@ func (r *swapReceipt) Coin() asset.Coin {
 	return r.output
 }
 
+// fundingCoin is similar to output, but also stores the address. The
+// ExchangeWallet fundingCoins dict is used as a local cache of coins being
+// spent.
+type fundingCoin struct {
+	op   *output
+	addr string
+}
+
 // Driver implements asset.Driver.
 type Driver struct{}
 
@@ -203,16 +211,22 @@ func init() {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	client *rpcclient.Client
-	node   rpcClient
-	log    dex.Logger
-	acct   string
+	client    *rpcclient.Client
+	node      rpcClient
+	log       dex.Logger
+	acct      string
+	tipChange func(error)
+
 	// The DEX specifies that change outputs from DEX-monitored transactions are
 	// exempt from minimum confirmation limits, so we must track those as they are
 	// created.
 	changeMtx   sync.RWMutex
 	tradeChange map[string]time.Time
-	tipChange   func(error)
+
+	// Coins returned by Fund are cached for quick reference and for cleanup on
+	// shutdown.
+	fundingMtx   sync.RWMutex
+	fundingCoins map[string]*fundingCoin
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -248,10 +262,11 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 // be set before use.
 func unconnectedWallet(cfg *asset.WalletConfig, logger dex.Logger) *ExchangeWallet {
 	return &ExchangeWallet{
-		log:         logger,
-		acct:        cfg.Account,
-		tradeChange: make(map[string]time.Time),
-		tipChange:   cfg.TipChange,
+		log:          logger,
+		acct:         cfg.Account,
+		tradeChange:  make(map[string]time.Time),
+		tipChange:    cfg.TipChange,
+		fundingCoins: make(map[string]*fundingCoin),
 	}
 }
 
@@ -359,7 +374,7 @@ func (dcr *ExchangeWallet) fund(confs uint32,
 	var sum uint64
 	var size uint32
 	var coins asset.Coins
-	var spents []*wire.OutPoint
+	var spents []*fundingCoin
 
 	addUTXO := func(unspent *compositeUTXO) error {
 		txHash, err := chainhash.NewHashFromStr(unspent.rpc.TxID)
@@ -373,7 +388,10 @@ func (dcr *ExchangeWallet) fund(confs uint32,
 		}
 		op := newOutput(dcr.node, txHash, unspent.rpc.Vout, v, unspent.rpc.Tree, redeemScript)
 		coins = append(coins, op)
-		spents = append(spents, wire.NewOutPoint(txHash, op.vout, unspent.rpc.Tree))
+		spents = append(spents, &fundingCoin{
+			op:   op,
+			addr: unspent.rpc.Address,
+		})
 		size += unspent.input.Size()
 		sum += v
 		return nil
@@ -406,11 +424,29 @@ out:
 		}
 	}
 
-	err = dcr.node.LockUnspent(false, spents)
+	err = dcr.lockFundingCoins(spents)
 	if err != nil {
 		return nil, 0, 0, err
 	}
 	return coins, sum, size, nil
+}
+
+// lockFundingCoins locks the funding coins via RPC and stores them in the map.
+func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
+	wireOPs := make([]*wire.OutPoint, 0, len(fCoins))
+	for _, c := range fCoins {
+		wireOPs = append(wireOPs, wire.NewOutPoint(&c.op.txHash, c.op.vout, c.op.tree))
+	}
+	err := dcr.node.LockUnspent(false, wireOPs)
+	if err != nil {
+		return err
+	}
+	dcr.fundingMtx.Lock()
+	defer dcr.fundingMtx.Unlock()
+	for _, c := range fCoins {
+		dcr.fundingCoins[c.op.String()] = c
+	}
+	return nil
 }
 
 // ReturnCoins unlocks coins. This would be necessary in the case of a
@@ -502,6 +538,13 @@ func (dcr *ExchangeWallet) Swap(swaps []*asset.Swap, nfo *dex.Asset) ([]asset.Re
 			expiration: time.Unix(int64(cinfo.LockTime), 0).UTC(),
 		})
 	}
+	dcr.fundingMtx.Lock()
+	for _, swap := range swaps {
+		for _, coin := range swap.Inputs {
+			delete(dcr.fundingCoins, coin.String())
+		}
+	}
+	dcr.fundingMtx.Unlock()
 	return receipts, nil
 }
 
@@ -603,36 +646,47 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	if err != nil {
 		return nil, nil, fmt.Errorf("error converting coin: %v", err)
 	}
-	tx, err := dcr.node.GetTransaction(&output.txHash)
+
+	// First check if we have the funding coin cached. If so, grab the address
+	// from there.
+	dcr.fundingMtx.RLock()
+	fCoin, found := dcr.fundingCoins[coin.String()]
+	dcr.fundingMtx.RUnlock()
+	var addr string
+	if found {
+		addr = fCoin.addr
+	} else {
+		// Check if we can get the address from gettxout.
+		txOut, err := dcr.node.GetTxOut(&output.txHash, output.vout, true)
+		if err == nil && txOut != nil {
+			addrs := txOut.ScriptPubKey.Addresses
+			if len(addrs) != 1 {
+				return nil, nil, fmt.Errorf("multi-sig not supported")
+			}
+			addr = addrs[0]
+			found = true
+		}
+	}
+	// Could also try the gettransaction endpoint, which is supposed to return
+	// information about wallet transactions, but which (I think?) doesn't list
+	// ssgen outputs.
+	if !found {
+		return nil, nil, fmt.Errorf("did not locate coin %s. is this a coin returned from Fund?", coin)
+	}
+	address, err := dcrutil.DecodeAddress(addr, chainParams)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error decoding address: %v", err)
+	}
+	priv, pub, err := dcr.getKeys(address)
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, txDetails := range tx.Details {
-		if txDetails.Vout == output.vout &&
-			(txDetails.Category == txCatReceive ||
-				txDetails.Category == txCatGenerate) {
-
-			addr, err := dcrutil.DecodeAddress(txDetails.Address, chainParams)
-			if err != nil {
-				return nil, nil, fmt.Errorf("error decoding address: %v", err)
-			}
-
-			priv, pub, err := dcr.getKeys(addr)
-			if err != nil {
-				return nil, nil, fmt.Errorf("error fetching keys: %v", err)
-			}
-
-			signature, err := priv.Sign(msg)
-			if err != nil {
-				return nil, nil, fmt.Errorf("signing error: %v", err)
-			}
-			pubkeys = append(pubkeys, pub.SerializeCompressed())
-			sigs = append(sigs, signature.Serialize())
-		}
+	signature, err := priv.Sign(msg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("signing error: %v", err)
 	}
-	if len(pubkeys) == 0 {
-		return nil, nil, fmt.Errorf("no valid keys found.")
-	}
+	pubkeys = append(pubkeys, pub.SerializeCompressed())
+	sigs = append(sigs, signature.Serialize())
 	return pubkeys, sigs, nil
 }
 
@@ -990,6 +1044,11 @@ func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (
 
 // Shutdown down the rpcclient.Client.
 func (dcr *ExchangeWallet) shutdown() {
+	// Unlock any locked outputs.
+	err := dcr.node.LockUnspent(true, nil)
+	if err != nil {
+		dcr.log.Errorf("failed to unlock DCR outputs on shutdown: %v", err)
+	}
 	if dcr.client != nil {
 		dcr.client.Shutdown()
 		dcr.client.WaitForShutdown()

@@ -462,9 +462,8 @@ func TestBookSideBestNOrders(t *testing.T) {
 	tests := []struct {
 		label    string
 		side     *bookSide
-		n        uint64
+		n        int
 		expected []*Order
-		wantErr  bool
 	}{
 		{
 			label: "Fetch best N orders from buy book side sorted in ascending order",
@@ -488,7 +487,6 @@ func TestBookSideBestNOrders(t *testing.T) {
 				makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 3, 1, 5),
 				makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 1, 2, 2),
 			},
-			wantErr: false,
 		},
 		{
 			label: "Fetch best N orders from buy book side sorted in descending order",
@@ -512,27 +510,6 @@ func TestBookSideBestNOrders(t *testing.T) {
 				makeOrder([32]byte{'d'}, msgjson.BuyOrderNum, 5, 2, 5),
 				makeOrder([32]byte{'a'}, msgjson.BuyOrderNum, 5, 1, 2),
 			},
-			wantErr: false,
-		},
-		{
-			label: "Fetch best N orders from buy book side sorted in unknown order",
-			side: makeBookSide(
-				map[uint64][]*Order{
-					1: {
-						makeOrder([32]byte{'a'}, msgjson.BuyOrderNum, 5, 1, 2),
-						makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 3, 1, 5),
-					},
-					2: {
-						makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 1, 2, 2),
-						makeOrder([32]byte{'d'}, msgjson.BuyOrderNum, 5, 2, 5),
-					},
-				},
-				makeRateIndex([]uint64{1, 2}),
-				100,
-			),
-			n:        3,
-			expected: nil,
-			wantErr:  true,
 		},
 		{
 			label: "Fetch best N orders from sell book side sorted in ascending order",
@@ -555,7 +532,6 @@ func TestBookSideBestNOrders(t *testing.T) {
 				makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 3, 1, 5),
 				makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 1, 2, 2),
 			},
-			wantErr: false,
 		},
 		{
 			label: "Fetch best N orders from sell book side sorted in descending order",
@@ -580,7 +556,6 @@ func TestBookSideBestNOrders(t *testing.T) {
 				makeOrder([32]byte{'a'}, msgjson.SellOrderNum, 5, 1, 2),
 				makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 3, 1, 5),
 			},
-			wantErr: false,
 		},
 		{
 			label: "Fetch best N orders from empty book side sorted in ascending order",
@@ -591,42 +566,34 @@ func TestBookSideBestNOrders(t *testing.T) {
 			),
 			n:        3,
 			expected: []*Order{},
-			wantErr:  false,
 		},
 	}
 
 	for idx, tc := range tests {
-		best, err := tc.side.BestNOrders(tc.n)
-		if (err != nil) != tc.wantErr {
-			t.Fatalf("[BookSide.BestNOrders] #%d: error: %v, "+
-				"wantErr: %v", idx+1, err, tc.wantErr)
+		best, _ := tc.side.BestNOrders(tc.n)
+		if len(best) != len(tc.expected) {
+			t.Fatalf("[BookSide.BestNOrders] #%d: expected best "+
+				"order size of %d, got %d", idx+1, len(tc.expected),
+				len(best))
 		}
 
-		if !tc.wantErr {
-			if len(best) != len(tc.expected) {
-				t.Fatalf("[BookSide.BestNOrders] #%d: expected best "+
-					"order size of %d, got %d", idx+1, len(tc.expected),
-					len(best))
+		for i := 0; i < len(best); i++ {
+			if best[i].OrderID != tc.expected[i].OrderID {
+				t.Fatalf("[BookSide.BestNOrders] #%d: expected "+
+					"order id %x at index of %d, got %x", idx+1,
+					tc.expected[i].OrderID[:], idx, best[i].OrderID[:])
 			}
 
-			for i := 0; i < len(best); i++ {
-				if best[i].OrderID != tc.expected[i].OrderID {
-					t.Fatalf("[BookSide.BestNOrders] #%d: expected "+
-						"order id %x at index of %d, got %x", idx+1,
-						tc.expected[i].OrderID[:], idx, best[i].OrderID[:])
-				}
+			if best[i].Quantity != tc.expected[i].Quantity {
+				t.Fatalf("[BookSide.BestNOrders] #%d: expected "+
+					"quantity %d at index of %d, got %d", idx+1,
+					tc.expected[i].Quantity, idx, best[i].Quantity)
+			}
 
-				if best[i].Quantity != tc.expected[i].Quantity {
-					t.Fatalf("[BookSide.BestNOrders] #%d: expected "+
-						"quantity %d at index of %d, got %d", idx+1,
-						tc.expected[i].Quantity, idx, best[i].Quantity)
-				}
-
-				if best[i].Time != tc.expected[i].Time {
-					t.Fatalf("[BookSide.BestNOrders] #%d: expected "+
-						"timestamp %d at index of %d, got %d", idx+1,
-						tc.expected[i].Time, idx, best[i].Time)
-				}
+			if best[i].Time != tc.expected[i].Time {
+				t.Fatalf("[BookSide.BestNOrders] #%d: expected "+
+					"timestamp %d at index of %d, got %d", idx+1,
+					tc.expected[i].Time, idx, best[i].Time)
 			}
 		}
 	}

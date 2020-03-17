@@ -330,21 +330,25 @@ func (ob *OrderBook) Unbook(note *msgjson.UnbookOrderNote) error {
 }
 
 // BestNOrders returns the best n orders from the provided side.
-func (ob *OrderBook) BestNOrders(n uint64, side uint8) ([]*Order, error) {
+func (ob *OrderBook) BestNOrders(n int, side uint8) ([]*Order, bool, error) {
 	if !ob.isSynced() {
-		return nil, fmt.Errorf("order book is unsynced")
+		return nil, false, fmt.Errorf("order book is unsynced")
 	}
 
+	var orders []*Order
+	var filled bool
 	switch side {
 	case msgjson.BuyOrderNum:
-		return ob.buys.BestNOrders(n)
+		orders, filled = ob.buys.BestNOrders(n)
 
 	case msgjson.SellOrderNum:
-		return ob.sells.BestNOrders(n)
+		orders, filled = ob.sells.BestNOrders(n)
 
 	default:
-		return nil, fmt.Errorf("unknown side provided: %d", side)
+		return nil, false, fmt.Errorf("unknown side provided: %d", side)
 	}
+
+	return orders, filled, nil
 }
 
 // BestFIll returns the best fill for a quantity from the provided side.
@@ -395,4 +399,22 @@ func (ob *OrderBook) Epoch() uint64 {
 // as well as the commitment checksum from the orderbook's epoch queue.
 func (ob *OrderBook) GenerateMatchProof(preimages []order.Preimage, misses []order.OrderID) (msgjson.Bytes, msgjson.Bytes, error) {
 	return ob.epochQueue.GenerateMatchProof(preimages, misses)
+}
+
+// MidGap returns the mid-gap price for the market. If one market side is empty
+// the bets rate from the other side will be used. If both sides are empty, an
+// error will be returned.
+func (ob *OrderBook) MidGap() (uint64, error) {
+	s, senough := ob.sells.BestNOrders(1)
+	b, benough := ob.buys.BestNOrders(1)
+	if !senough {
+		if !benough {
+			return 0, fmt.Errorf("cannot calculate mid-gap from empty order book")
+		}
+		return b[0].Rate, nil
+	}
+	if !benough {
+		return s[0].Rate, nil
+	}
+	return (s[0].Rate + b[0].Rate) / 2, nil
 }
