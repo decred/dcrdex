@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -411,6 +412,9 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 func (btc *Backend) input(txHash *chainhash.Hash, vin uint32) (*Input, error) {
 	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
 	}
 	tx, err := btc.transaction(txHash, verboseTx)
@@ -535,7 +539,7 @@ func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.
 		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err)
 	}
 	if txOut == nil {
-		return nil, nil, nil, fmt.Errorf("UTXO - no unspent txout found for %s:%d", txHash, vout)
+		return nil, nil, nil, asset.CoinNotFoundError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
@@ -698,4 +702,11 @@ func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 	copy(b[:hashLen], txHash[:])
 	binary.BigEndian.PutUint32(b[hashLen:], vout)
 	return b
+}
+
+// isTxNotFoundErr will return true if the error indicates that the requested
+// transaction is not known.
+func isTxNotFoundErr(err error) bool {
+	var rpcErr *btcjson.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
 }

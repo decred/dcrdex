@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -19,6 +20,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
+	"github.com/decred/dcrd/dcrjson"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v5"
@@ -539,6 +541,9 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 func (dcr *Backend) input(txHash *chainhash.Hash, vin uint32) (*Input, error) {
 	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
 	}
 	tx, err := dcr.transaction(txHash, verboseTx)
@@ -577,7 +582,7 @@ func (dcr *Backend) getUnspentTxOut(txHash *chainhash.Hash, vout uint32) (*chain
 		return nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err) // TODO: make RPC error type for client message sanitization
 	}
 	if txOut == nil {
-		return nil, nil, fmt.Errorf("UTXO - no unspent txout found for %s:%d", txHash, vout)
+		return nil, nil, asset.CoinNotFoundError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
@@ -685,4 +690,11 @@ func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 // Convert the DCR value to atoms.
 func toAtoms(v float64) uint64 {
 	return uint64(math.Round(v * 1e8))
+}
+
+// isTxNotFoundErr will return true if the error indicates that the requested
+// transaction is not known.
+func isTxNotFoundErr(err error) bool {
+	var rpcErr *dcrjson.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCInvalidAddressOrKey
 }

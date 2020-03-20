@@ -5,6 +5,11 @@ package asset
 
 import "decred.org/dcrdex/dex"
 
+// CoinNotFoundError is to be returned from Contract, Redemption, and
+// FundingCoin when the specified transaction cannot be found. Used by the
+// server to handle network latency.
+const CoinNotFoundError = dex.Error("coin not found")
+
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
 	dex.Runner

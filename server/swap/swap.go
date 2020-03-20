@@ -832,12 +832,14 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	contract, err := chain.Contract(params.CoinID, params.Contract)
 	if err != nil {
-		// If there is an error, don't give up yet, since it could be due to network
-		// latency. Check again on the next tick.
-		// NOTE: Could get a little smarter here by using go 1.13 (Error).Is to
-		// check that the transaction was not found, and not some other less
-		// recoverable state. Should require minimal modification of backends.
-		return coinwaiter.TryAgain
+		if err == asset.CoinNotFoundError {
+			return coinwaiter.TryAgain
+		}
+		log.Warnf("Contract error encountered for match %s, actor %s using coin ID %x and contract %x: %v",
+			stepInfo.match.ID(), actor, params.CoinID, params.Contract, err)
+		s.respondError(msg.ID, actor.user, msgjson.ContractError,
+			"redemption error")
+		return coinwaiter.DontTryAgain
 	}
 
 	if contract.Address() != counterParty.order.Trade().SwapAddress() {
@@ -946,7 +948,14 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
 	if err != nil {
-		return coinwaiter.TryAgain
+		if err == asset.CoinNotFoundError {
+			return coinwaiter.TryAgain
+		}
+		log.Warnf("Redemption error encountered for match %s, actor %s using coin ID %x to satisfy contract at %x: %v",
+			stepInfo.match.ID(), actor, params.CoinID, cpSwapCoin, err)
+		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
+			"redemption error")
+		return coinwaiter.DontTryAgain
 	}
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
