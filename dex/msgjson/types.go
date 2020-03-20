@@ -170,6 +170,11 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// String satisfies the Stringer interface for pretty printing.
+func (e Error) String() string {
+	return fmt.Sprintf("error code %d: %s", e.Code, e.Message)
+}
+
 // NewError is a constructor for an Error.
 func NewError(code int, msg string) *Error {
 	return &Error{

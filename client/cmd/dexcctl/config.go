@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 
+	"decred.org/dcrdex/client/rpcserver"
 	"github.com/decred/dcrd/dcrutil/v2"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -27,12 +28,6 @@ var (
 	appDir            = dcrutil.AppDataDir("dexc", false)
 	defaultConfigPath = filepath.Join(appDir, defaultConfigFilename)
 )
-
-// listCommands categorizes and lists all of the usable commands along with
-// their one-line usage.
-func listCommands() {
-	fmt.Println("TODO")
-}
 
 // config defines the configuration options for dexcctl.
 type config struct {
@@ -73,6 +68,7 @@ func configure() (*config, []string, bool, error) {
 	if err != nil {
 		var flagErr *flags.Error
 		if errors.As(err, &flagErr) && flagErr.Type == flags.ErrHelp {
+			// This line is printed below the help message.
 			fmt.Printf("%v\nThe special parameter `-` indicates that a parameter should be read from the\nnext unread line from standard input.\n", err)
 			return nil, nil, stop, nil
 		}
@@ -91,7 +87,7 @@ func configure() (*config, []string, bool, error) {
 	// Show the available commands and exit if the associated flag was
 	// specified.
 	if cfg.ListCommands {
-		listCommands()
+		fmt.Print(rpcserver.ListCommands())
 		return nil, nil, stop, nil
 	}
 

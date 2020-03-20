@@ -450,6 +450,8 @@ func TestParseHTTPRequest(t *testing.T) {
 	bbuff = bytes.NewBuffer(b)
 	r, _ = http.NewRequest("GET", "", bbuff)
 	ensureNoErr("good request")
+
+	delete(routes, "123")
 }
 
 type authMiddlewareTest struct {

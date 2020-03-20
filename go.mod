@@ -30,6 +30,8 @@ require (
 	github.com/ltcsuite/ltcd v0.0.0-20190519120615-e27ee083f08f
 	go.etcd.io/bbolt v1.3.3
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
+	golang.org/x/lint v0.0.0-20200130185559-910be7a94367 // indirect
+	golang.org/x/tools v0.0.0-20200225230052-807dcd883420 // indirect
 )
 
 replace github.com/ltcsuite/ltcutil => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
