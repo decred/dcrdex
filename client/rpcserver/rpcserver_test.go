@@ -36,10 +36,16 @@ var (
 )
 
 type TCore struct {
-	preRegisterFee uint64
-	preRegisterErr error
-	balanceErr     error
-	syncErr        error
+	preRegisterFee      uint64
+	preRegisterErr      error
+	balanceErr          error
+	syncErr             error
+	createWalletErr     error
+	openWalletErr       error
+	walletState         *core.WalletState
+	closeWalletErr      error
+	wallets             []*core.WalletState
+	initializeClientErr error
 }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
@@ -49,6 +55,14 @@ func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook { return ni
 func (c *TCore) Unsync(dex string, base, quote uint32)               {}
 func (c *TCore) Balance(uint32) (uint64, error)                      { return 0, c.balanceErr }
 func (c *TCore) PreRegister(string) (uint64, error)                  { return c.preRegisterFee, c.preRegisterErr }
+func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
+	return c.createWalletErr
+}
+func (c *TCore) OpenWallet(assetID uint32, pw string) error   { return c.openWalletErr }
+func (c *TCore) WalletState(assetID uint32) *core.WalletState { return c.walletState }
+func (c *TCore) CloseWallet(assetID uint32) error             { return c.closeWalletErr }
+func (c *TCore) Wallets() []*core.WalletState                 { return c.wallets }
+func (c *TCore) InitializeClient(pw string) error             { return c.initializeClientErr }
 
 type TWriter struct {
 	b []byte
