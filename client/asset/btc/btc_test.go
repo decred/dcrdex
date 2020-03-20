@@ -1226,7 +1226,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 		},
 	})
 
-	unspents := []*ListUnspentResult{&ListUnspentResult{
+	unspents := []*ListUnspentResult{{
 		TxID:          tTxID,
 		Address:       "1Bggq7Vu5oaoLFV1NNp5KhAzcku83qQhgi",
 		Amount:        100,

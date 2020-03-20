@@ -55,7 +55,7 @@ func mkMrkt(base, quote string) *core.Market {
 	qty := uint64(randomMagnitude(7, 11))
 	for i := 0; i < orderCount; i++ {
 		market.Orders = append(market.Orders, &core.Order{
-			ID: ordertest.RandomOrderID().String(),
+			ID:      ordertest.RandomOrderID().String(),
 			Type:    order.OrderType(rand.Intn(2) + 1),
 			Stamp:   encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*86_400_000),
 			Rate:    uint64(randomMagnitude(-2, 4)),
@@ -117,7 +117,7 @@ func mkid(b, q uint32) string {
 }
 
 var tExchanges = map[string]*core.Exchange{
-	"https://somedex.com": &core.Exchange{
+	"https://somedex.com": {
 		URL: "https://somedex.com",
 		Assets: map[uint32]*dex.Asset{
 			0:  mkDexAsset("btc"),
@@ -132,7 +132,7 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(3, 22): mkMrkt("doge", "mona"),
 		},
 	},
-	"https://thisdexwithalongname.com": &core.Exchange{
+	"https://thisdexwithalongname.com": {
 		URL: "https://thisdexwithalongname.com",
 		Assets: map[uint32]*dex.Asset{
 			0:  mkDexAsset("btc"),
@@ -268,32 +268,32 @@ func (c *TCore) Balance(uint32) (uint64, error) {
 }
 
 var winfos = map[uint32]*asset.WalletInfo{
-	0: &asset.WalletInfo{
+	0: {
 		FeeRate: 2,
 		Units:   "Satoshis",
 		Name:    "Bitcoin",
 	},
-	2: &asset.WalletInfo{
+	2: {
 		FeeRate: 100,
 		Units:   "litoshi", // Plural seemingly has no 's'.
 		Name:    "Litecoin",
 	},
-	42: &asset.WalletInfo{
+	42: {
 		FeeRate: 10,
 		Units:   "atoms",
 		Name:    "Decred",
 	},
-	22: &asset.WalletInfo{
+	22: {
 		FeeRate: 50,
 		Units:   "atoms",
 		Name:    "Monacoin",
 	},
-	3: &asset.WalletInfo{
+	3: {
 		FeeRate: 1000,
 		Units:   "atoms",
 		Name:    "Dogecoin",
 	},
-	28: &asset.WalletInfo{
+	28: {
 		FeeRate: 20,
 		Units:   "Satoshis",
 		Name:    "Vertcoin",
@@ -417,7 +417,7 @@ func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
 		oType = order.MarketOrderType
 	}
 	return &core.Order{
-		ID: ordertest.RandomOrderID().String(),
+		ID:    ordertest.RandomOrderID().String(),
 		Type:  oType,
 		Stamp: encode.UnixMilliU(time.Now()),
 		Rate:  form.Rate,

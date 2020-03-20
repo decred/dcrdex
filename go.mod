@@ -28,10 +28,8 @@ require (
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/lib/pq v1.2.0
 	github.com/ltcsuite/ltcd v0.0.0-20190519120615-e27ee083f08f
-	go.etcd.io/bbolt v1.3.3
+	go.etcd.io/bbolt v1.3.4
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
 )
 
 replace github.com/ltcsuite/ltcutil => github.com/ltcsuite/ltcutil v0.0.0-20190507133322-23cdfa9fcc3d
-
-replace go.etcd.io/bbolt => github.com/jrick/bbolt v1.3.4-0.20200208065811-52cf6d0e86ee
