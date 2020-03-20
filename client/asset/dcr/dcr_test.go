@@ -1116,7 +1116,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 	addr := tPKHAddr.String()
 	node.changeAddr = tPKHAddr
 
-	node.unspent = []walletjson.ListUnspentResult{walletjson.ListUnspentResult{
+	node.unspent = []walletjson.ListUnspentResult{{
 		TxID:          tTxID,
 		Address:       tPKHAddr.String(),
 		Amount:        100e8,
