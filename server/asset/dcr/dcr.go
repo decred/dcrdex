@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -20,7 +19,6 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"github.com/decred/dcrd/blockchain/stake/v2"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrd/dcrjson"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v5"
@@ -695,6 +693,5 @@ func toAtoms(v float64) uint64 {
 // isTxNotFoundErr will return true if the error indicates that the requested
 // transaction is not known.
 func isTxNotFoundErr(err error) bool {
-	var rpcErr *dcrjson.RPCError
-	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCInvalidAddressOrKey
+	return strings.HasPrefix(err.Error(), "-5:")
 }
