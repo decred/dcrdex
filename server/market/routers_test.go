@@ -279,12 +279,22 @@ func tNewBackend() *TBackend {
 	}
 }
 
-func (b *TBackend) Coin(coinID, redeemScript []byte) (asset.Coin, error) {
+func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 	v := b.utxos[hex.EncodeToString(coinID)]
 	if v == 0 {
 		return nil, fmt.Errorf("no utxo")
 	}
 	return &tUTXO{val: v}, b.utxoErr
+}
+
+func (b *TBackend) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
+	return b.utxo(coinID)
+}
+func (b *TBackend) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, error) {
+	return b.utxo(coinID)
+}
+func (b *TBackend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+	return b.utxo(redemptionID)
 }
 func (b *TBackend) BlockChannel(size int) chan uint32 { return nil }
 func (b *TBackend) InitTxSize() uint32                { return dummySize }
@@ -309,17 +319,16 @@ var utxoConfsErr error
 var utxoConfs int64 = 2
 
 func (u *tUTXO) Confirmations() (int64, error) { return utxoConfs, utxoConfsErr }
-func (u *tUTXO) Auth(pubkeys,
-	sigs [][]byte, msg []byte) error {
+func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
-func (u *tUTXO) AuditContract() (string, uint64, error) { return "", 0, nil }
-func (u *tUTXO) SpendSize() uint32                      { return dummySize }
-func (u *tUTXO) ID() []byte                             { return nil }
-func (u *tUTXO) TxID() string                           { return "" }
-func (u *tUTXO) SpendsCoin([]byte) (bool, error)        { return true, nil }
-func (u *tUTXO) Value() uint64                          { return u.val }
-func (u *tUTXO) FeeRate() uint64                        { return 0 }
+func (u *tUTXO) Address() string                 { return "" }
+func (u *tUTXO) SpendSize() uint32               { return dummySize }
+func (u *tUTXO) ID() []byte                      { return nil }
+func (u *tUTXO) TxID() string                    { return "" }
+func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
+func (u *tUTXO) Value() uint64                   { return u.val }
+func (u *tUTXO) FeeRate() uint64                 { return 0 }
 
 type tUser struct {
 	acct    account.AccountID

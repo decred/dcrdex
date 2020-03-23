@@ -5,13 +5,22 @@ package asset
 
 import "decred.org/dcrdex/dex"
 
+// CoinNotFoundError is to be returned from Contract, Redemption, and
+// FundingCoin when the specified transaction cannot be found. Used by the
+// server to handle network latency.
+const CoinNotFoundError = dex.Error("coin not found")
+
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
 	dex.Runner
-	// Coin should return a Coin only for outputs that would be spendable on the
-	// blockchain immediately. Pay-to-script-hash Coins require the redeem script
-	// in order to calculate sigScript length and verify pubkeys.
-	Coin(coinID []byte, redeemScript []byte) (Coin, error)
+	// Contract should return a Contract only for outputs that would be spendable
+	// on the blockchain immediately. The redeem script is required in order to
+	// calculate sigScript length and verify pubkeys.
+	Contract(coinID []byte, redeemScript []byte) (Contract, error)
+	// Redemption returns the redemption at the specified location.
+	Redemption(redemptionID, contractID []byte) (Coin, error)
+	// FundingCoin returns the unspent coin at the specified location.
+	FundingCoin(coinID []byte, redeemScript []byte) (FundingCoin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
 	BlockChannel(size int) chan uint32
@@ -28,7 +37,7 @@ type Backend interface {
 	ValidateContract(contract []byte) error
 }
 
-// Coin provides data about an unspent transaction output.
+// Coin represents a transaction input or ouptut.
 type Coin interface {
 	// Confirmations returns the number of confirmations for a Coin's transaction.
 	// Because a Coin can become invalid after once being considered valid, this
@@ -38,28 +47,36 @@ type Coin interface {
 	// should have one confirmation. A negative number can be returned if error
 	// is not nil.
 	Confirmations() (int64, error)
-	// Auth checks that the owner of the provided pubkeys can spend the Coin.
-	// The signatures (sigs) generated with the private keys corresponding
-	// to pubkeys must validate against the pubkeys and signing message (msg).
-	Auth(pubkeys, sigs [][]byte, msg []byte) error
-	// AuditContract checks that coin is a swap contract and extracts the
-	// receiving address and contract value on success.
-	AuditContract() (string, uint64, error)
-	// SpendsCoin checks if the coin spends a specified previous coin.
-	// An error will be returned if the input is not parseable. If the Coin is not
-	// spent by this coin, the boolean return value will be false, but no
-	// error is returned.
-	SpendsCoin(coinID []byte) (bool, error)
-	// FeeRate returns the transaction fee rate, in atoms/byte equivalent.
-	FeeRate() uint64
-	// SpendSize returns the size of the serialized input that spends this Coin.
-	SpendSize() uint32
 	// ID is the coin ID.
 	ID() []byte
 	// TxID is a transaction identifier for the coin.
 	TxID() string
+}
+
+// FundingCoin is some unspent value on the blockchain.
+type FundingCoin interface {
+	Coin
+	// Auth checks that the owner of the provided pubkeys can spend the
+	// FundingCoin. The signatures (sigs) generated with the private keys
+	// corresponding to pubkeys must validate against the pubkeys and signing
+	// message (msg).
+	Auth(pubkeys, sigs [][]byte, msg []byte) error
+	// SpendSize returns the size of the serialized input that spends this
+	// FundingCoin.
+	SpendSize() uint32
 	// Value is the output value.
 	Value() uint64
+}
+
+// Contract is an atomic swap contract.
+type Contract interface {
+	Coin
+	// Value is the contract value.
+	Value() uint64
+	// Address retrieves the receiving address of the contract.
+	Address() string
+	// FeeRate returns the transaction fee rate, in atoms/byte equivalent.
+	FeeRate() uint64
 }
 
 // BackedAsset is a dex.Asset with a Backend.

@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -188,12 +189,49 @@ func ReadCloneParams(cloneParams interface{}) (*chaincfg.Params, error) {
 	return p, nil
 }
 
-// Coin is part of the asset.Backend interface. See the unexported Backend.utxo
-// method for the full implementation.
-func (btc *Backend) Coin(coinID []byte, redeemScript []byte) (asset.Coin, error) {
+// Contract is part of the asset.Backend interface. An asset.Contract is a
+// utxo that has been validated as a swap contract for the passed redeem script.
+func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return nil, fmt.Errorf("error decoding tx ID %x: %v", coinID, err)
+		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+	}
+	utxo, err := btc.utxo(txHash, vout, redeemScript)
+	if err != nil {
+		return nil, err
+	}
+	err = utxo.auditContract()
+	if err != nil {
+		return nil, err
+	}
+	return utxo, nil
+}
+
+// Redemption is an input that redeems a swap contract.
+func (btc *Backend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+	txHash, vin, err := decodeCoinID(redemptionID)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding redemption coin ID %x: %v", txHash, err)
+	}
+	input, err := btc.input(txHash, vin)
+	if err != nil {
+		return nil, err
+	}
+	spends, err := input.spendsCoin(contractID)
+	if err != nil {
+		return nil, err
+	}
+	if !spends {
+		return nil, fmt.Errorf("%x does not spend %x", redemptionID, contractID)
+	}
+	return input, nil
+}
+
+// FundingCoin is an unspent output.
+func (btc *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
 	return btc.utxo(txHash, vout, redeemScript)
 }
@@ -282,6 +320,25 @@ func (btc *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScr
 	return nil
 }
 
+// blockInfo returns block information for the verbose transaction data. The
+// current tip hash is also returned as a convenience.
+func (btc *Backend) blockInfo(verboseTx *btcjson.TxRawResult) (blockHeight uint32, blockHash chainhash.Hash, tipHash *chainhash.Hash, err error) {
+	h := btc.blockCache.tipHash()
+	if h != zeroHash {
+		tipHash = &h
+	}
+	if verboseTx.Confirmations > 0 {
+		var blk *cachedBlock
+		blk, err = btc.getBlockInfo(verboseTx.BlockHash)
+		if err != nil {
+			return
+		}
+		blockHeight = blk.height
+		blockHash = blk.hash
+	}
+	return
+}
+
 // Get the UTXO data and perform some checks for script support.
 func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*UTXO, error) {
 	txOut, verboseTx, pkScript, err := btc.getTxOutInfo(txHash, vout)
@@ -313,22 +370,9 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 	}
 
 	// Get block information.
-	var blockHeight uint32
-	var blockHash chainhash.Hash
-	var lastLookup *chainhash.Hash
-	if txOut.Confirmations > 0 {
-		blk, err := btc.getBlockInfo(verboseTx.BlockHash)
-		if err != nil {
-			return nil, fmt.Errorf("error retrieving block for hash %s", verboseTx.BlockHash)
-		}
-		blockHeight = blk.height
-		blockHash = blk.hash
-	} else {
-		// Set the lastLookup to the current tip.
-		tipHash := btc.blockCache.tipHash()
-		if tipHash != zeroHash {
-			lastLookup = &tipHash
-		}
+	blockHeight, blockHash, lastLookup, err := btc.blockInfo(verboseTx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Coinbase transactions must mature before spending.
@@ -346,20 +390,50 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 	}
 
 	return &UTXO{
-		btc:          btc,
-		tx:           tx,
-		height:       blockHeight,
-		blockHash:    blockHash,
-		txHash:       *txHash,
+		TXIO: TXIO{
+			btc:        btc,
+			tx:         tx,
+			height:     blockHeight,
+			blockHash:  blockHash,
+			maturity:   int32(maturity),
+			lastLookup: lastLookup,
+		},
 		vout:         vout,
-		maturity:     int32(maturity),
 		scriptType:   scriptType,
 		pkScript:     pkScript,
 		redeemScript: redeemScript,
 		numSigs:      inputNfo.ScriptAddrs.NRequired,
 		spendSize:    inputNfo.VBytes(),
 		value:        uint64(txOut.Value * btcToSatoshi),
-		lastLookup:   lastLookup,
+	}, nil
+}
+
+// input gets the transaction input.
+func (btc *Backend) input(txHash *chainhash.Hash, vin uint32) (*Input, error) {
+	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
+		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+	}
+	tx, err := btc.transaction(txHash, verboseTx)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
+	}
+	blockHeight, blockHash, lastLookup, err := btc.blockInfo(verboseTx)
+	if err != nil {
+		return nil, err
+	}
+	return &Input{
+		TXIO: TXIO{
+			btc:        btc,
+			tx:         tx,
+			height:     blockHeight,
+			blockHash:  blockHash,
+			lastLookup: lastLookup,
+		},
+		vin: vin,
 	}, nil
 }
 
@@ -465,7 +539,7 @@ func (btc *Backend) getTxOutInfo(txHash *chainhash.Hash, vout uint32) (*btcjson.
 		return nil, nil, nil, fmt.Errorf("GetTxOut error for output %s:%d: %v", txHash, vout, err)
 	}
 	if txOut == nil {
-		return nil, nil, nil, fmt.Errorf("UTXO - no unspent txout found for %s:%d", txHash, vout)
+		return nil, nil, nil, asset.CoinNotFoundError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
@@ -628,4 +702,11 @@ func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 	copy(b[:hashLen], txHash[:])
 	binary.BigEndian.PutUint32(b[hashLen:], vout)
 	return b
+}
+
+// isTxNotFoundErr will return true if the error indicates that the requested
+// transaction is not known.
+func isTxNotFoundErr(err error) bool {
+	var rpcErr *btcjson.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
 }
