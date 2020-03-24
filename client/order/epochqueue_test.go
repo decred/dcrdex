@@ -77,7 +77,7 @@ func TestEpochQueue(t *testing.T) {
 
 	err := eq.Enqueue(n1)
 	if err != nil {
-		t.Fatalf("[Queue]: unexpected error: %v", err)
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
 	// Ensure the epoch queue size is 1.
@@ -88,7 +88,7 @@ func TestEpochQueue(t *testing.T) {
 	// Enqueue an order from a different epoch.
 	err = eq.Enqueue(n4)
 	if err == nil {
-		t.Fatal("[Queue]: expected epoch mismatch error")
+		t.Fatal("[Enqueue]: expected epoch mismatch error")
 	}
 
 	// Reset the epoch queue.
@@ -108,7 +108,7 @@ func TestEpochQueue(t *testing.T) {
 	// Ensure the epoch queue does not enqueue duplicate orders.
 	err = eq.Enqueue(n1)
 	if err != nil {
-		t.Fatalf("[Queue]: unexpected error: %v", err)
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
 	// Ensure the epoch is set when the first order note is queued.
@@ -123,7 +123,7 @@ func TestEpochQueue(t *testing.T) {
 
 	err = eq.Enqueue(n1)
 	if err == nil {
-		t.Fatal("[Queue]: expected a duplicate enqueue error")
+		t.Fatal("[Enqueue]: expected a duplicate enqueue error")
 	}
 
 	// Ensure the epoch queue size is 1.
@@ -143,17 +143,17 @@ func TestEpochQueue(t *testing.T) {
 
 	err = eq.Enqueue(n1)
 	if err != nil {
-		t.Fatalf("[Queue]: unexpected error: %v", err)
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
 	err = eq.Enqueue(n2)
 	if err != nil {
-		t.Fatalf("[Queue]: unexpected error: %v", err)
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
 	err = eq.Enqueue(n3)
 	if err != nil {
-		t.Fatalf("[Queue]: unexpected error: %v", err)
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
 	// Ensure the queue has n2 epoch order.
@@ -192,17 +192,17 @@ func TestEpochQueue(t *testing.T) {
 	// Queue epoch orders.
 	err = eq.Enqueue(n3)
 	if err != nil {
-		t.Fatalf("[Queue]: unexpected error: %v", err)
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
 	err = eq.Enqueue(n1)
 	if err != nil {
-		t.Fatalf("[Queue]: unexpected error: %v", err)
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
 	err = eq.Enqueue(n2)
 	if err != nil {
-		t.Fatalf("[Queue]: unexpected error: %v", err)
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
 	}
 
 	// Ensure the queue has n1 epoch order.

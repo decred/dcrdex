@@ -1,6 +1,7 @@
 package order
 
 import (
+	"bytes"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -395,10 +396,42 @@ func (ob *OrderBook) Epoch() uint64 {
 	return ob.epochQueue.Epoch()
 }
 
-// GenerateMatchProof calculates the sorting seed used in order matching
-// as well as the commitment checksum from the orderbook's epoch queue.
-func (ob *OrderBook) GenerateMatchProof(preimages []order.Preimage, misses []order.OrderID) (msgjson.Bytes, msgjson.Bytes, error) {
-	return ob.epochQueue.GenerateMatchProof(preimages, misses)
+// ValidateMatchProof ensures the match proof data provided is correct by
+// comparing it to a locally generated proof from the same epoch queue.
+func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
+	pimgs := make([]order.Preimage, 0, len(note.Preimages))
+	for _, entry := range note.Preimages {
+		var pimg order.Preimage
+		copy(pimg[:], entry[:order.PreimageSize])
+		pimgs = append(pimgs, pimg)
+	}
+
+	misses := make([]order.OrderID, 0, len(note.Misses))
+	for _, entry := range note.Misses {
+		var miss order.OrderID
+		copy(miss[:], entry[:order.OrderIDSize])
+		misses = append(misses, miss)
+	}
+
+	seed, csum, err := ob.epochQueue.GenerateMatchProof(pimgs, misses)
+	if err != nil {
+		return fmt.Errorf("unable to generate match proof for epoch %d: %v",
+			note.Epoch, err)
+	}
+
+	if !bytes.Equal(seed, note.Seed) {
+		return fmt.Errorf("match proof seed mismatch for epoch %d: "+
+			"expected %s, got %s", note.Epoch, note.Seed.String(),
+			seed.String())
+	}
+
+	if !bytes.Equal(csum, note.CSum) {
+		return fmt.Errorf("match proof csum mismatch for epoch %d: "+
+			"expected %s, got %s", note.Epoch, note.CSum.String(),
+			csum.String())
+	}
+
+	return nil
 }
 
 // MidGap returns the mid-gap price for the market. If one market side is empty

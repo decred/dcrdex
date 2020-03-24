@@ -879,7 +879,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		log.Errorf("saving swap contract (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
-			fmt.Sprintf("internal server error"))
+			"internal server error")
 		// TODO: revoke the match without penalties instead of retrying forever?
 		return coinwaiter.TryAgain
 	}
@@ -982,7 +982,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		log.Errorf("saving redeem transaction (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
-			fmt.Sprintf("internal server error"))
+			"internal server error")
 		// TODO: revoke the match without penalties instead of retrying forever?
 		return coinwaiter.TryAgain // why not, the DB might come alive
 	}
@@ -1354,7 +1354,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			log.Errorf("saving match ack signature (match id=%v, maker=%v) failed: %v",
 				matchID, matchInfo.isMaker, err)
 			s.respondError(msg.ID, matchInfo.user, msgjson.UnknownMarketError,
-				fmt.Sprintf("internal server error"))
+				"internal server error")
 			// TODO: revoke the match without penalties?
 			return
 		}
