@@ -155,7 +155,10 @@ func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage)
 	t.mtx.Unlock()
 }
 
-// negotiate creates a Match and starts the negotiation thread.
+// negotiate creates and stores matchTrackers for the []*msgjson.Match, and
+// updates (UserMatch).Filled. Match negotiation can then be progressed by
+// calling (*trackedTrade).tick when a relevant event occurs, such as a request
+// from the DEX or a tip change. negotiate calls tick internally.
 func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
@@ -213,7 +216,9 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
 			t.cancel.matches.maker = msgMatch
 		} else {
+			t.matchMtx.Lock()
 			t.matches[match.id] = match
+			t.matchMtx.Unlock()
 		}
 	}
 
@@ -224,7 +229,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	if t.cancel != nil && t.cancel.matches.maker != nil {
 		filled += t.cancel.matches.maker.Quantity
 	}
-	t.matchMtx.Lock()
+	t.matchMtx.RLock()
 	for _, n := range t.matches {
 		if isMarketBuy {
 			filled += calc.BaseToQuote(n.Match.Rate, n.Match.Quantity)
@@ -232,10 +237,10 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			filled += n.Match.Quantity
 		}
 	}
-	t.matchMtx.Unlock()
+	t.matchMtx.RUnlock()
 	t.Trade().Filled = filled
 
-	return nil
+	return t.tick()
 }
 
 // processCancelMatch should be called with the message for the match on a
@@ -248,7 +253,7 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 	if oid != t.cancel.ID() {
 		return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.cancel.ID())
 	}
-	log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
+	log.Infof("taker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
 	t.cancel.matches.taker = msgMatch
 	return nil
 }
@@ -260,7 +265,12 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 		return false
 	}
 	dbMatch, metaData, _, _ := match.parts()
+	walletLocked := !t.wallets.fromWallet.unlocked()
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerSwapCast {
+		if walletLocked {
+			log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked", t.ID(), match.id, unbip(t.wallets.toAsset.ID))
+			return false
+		}
 		// This might be ready to swap. Check the confirmations on the maker's
 		// swap.
 		coin := match.counterSwap.Coin()
@@ -272,7 +282,14 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 		assetCfg := t.wallets.fromAsset
 		return confs >= assetCfg.SwapConf
 	}
-	return dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched
+	if dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched {
+		if walletLocked {
+			log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked", t.ID(), match.id, unbip(t.wallets.toAsset.ID))
+			return false
+		}
+		return true
+	}
+	return false
 }
 
 // isRedeemable will be true if the match is ready for our redemption to be
@@ -282,7 +299,12 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 		return false
 	}
 	dbMatch, metaData, _, _ := match.parts()
+	walletLocked := !t.wallets.toWallet.unlocked()
 	if dbMatch.Side == order.Maker && metaData.Status == order.TakerSwapCast {
+		if walletLocked {
+			log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked", t.ID(), match.id, unbip(t.wallets.toAsset.ID))
+			return false
+		}
 		coin := match.counterSwap.Coin()
 		confs, err := coin.Confirmations()
 		if err != nil {
@@ -292,10 +314,17 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 		assetCfg := t.wallets.toAsset
 		return confs >= assetCfg.SwapConf
 	}
-	return dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed
+	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
+		if walletLocked {
+			log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked", t.ID(), match.id, unbip(t.wallets.toAsset.ID))
+			return false
+		}
+		return true
+	}
+	return false
 }
 
-// tick will check for and peform any match actions necessary.
+// tick will check for and perform any match actions necessary.
 func (t *trackedTrade) tick() error {
 	var swaps []*matchTracker
 	var redeems []*matchTracker
@@ -382,7 +411,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) *errorSet {
 	}
 	t.change = change
 	t.coins[change.String()] = change
-	t.metaData.ChangeCoin = reByte(change.ID())
+	t.metaData.ChangeCoin = []byte(change.ID())
 
 	// Prepare the msgjson.Init and send to the DEX.
 	oid := t.ID()
@@ -390,7 +419,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) *errorSet {
 		match := matches[i]
 		match.receipt = &receipt
 		coin := receipt.Coin()
-		coinID := reByte(coin.ID())
+		coinID := []byte(coin.ID())
 		contract := coin.Redeem()
 		init := &msgjson.Init{
 			OrderID:  oid[:],
@@ -460,7 +489,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) *errorSet {
 	// Send the redemption information to the DEX.
 	for i, match := range matches {
 		_, _, proof, auth := match.parts()
-		coinID := reByte(coinIDs[i])
+		coinID := []byte(coinIDs[i])
 		msgRedeem := &msgjson.Redeem{
 			OrderID: t.ID().Bytes(),
 			MatchID: match.id.Bytes(),
@@ -558,11 +587,11 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 			return errs.add("secret hash mismatch. expected %x, got %x", proof.SecretHash, auditInfo.SecretHash())
 		}
 		match.setStatus(order.TakerSwapCast)
-		proof.TakerSwap = reByte(audit.CoinID)
+		proof.TakerSwap = []byte(audit.CoinID)
 	} else {
 		proof.SecretHash = auditInfo.SecretHash()
 		match.setStatus(order.MakerSwapCast)
-		proof.MakerSwap = reByte(audit.CoinID)
+		proof.MakerSwap = []byte(audit.CoinID)
 	}
 	err = t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
@@ -609,7 +638,7 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	auth.RedemptionStamp = redemption.Time
 	if dbMatch.Side == order.Maker {
 		match.setStatus(order.MatchComplete)
-		proof.TakerRedeem = reByte(redemption.CoinID)
+		proof.TakerRedeem = []byte(redemption.CoinID)
 		err := t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			return errs.add("error storing match info in database: %v", err)
@@ -626,7 +655,7 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 			proof.Secret, proof.SecretHash)
 	}
 	match.setStatus(order.MakerRedeemed)
-	proof.MakerRedeem = reByte(redemption.CoinID)
+	proof.MakerRedeem = []byte(redemption.CoinID)
 	proof.Secret = redemption.Secret
 	err = t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
@@ -634,8 +663,6 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	}
 	return nil
 }
-
-func reByte(b []byte) []byte { return b }
 
 // mapifyCoins converts the slice of coins to a map keyed by hex coin ID.
 func mapifyCoins(coins asset.Coins) map[string]asset.Coin {

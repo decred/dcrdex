@@ -156,7 +156,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		books: make(map[string]*book.OrderBook),
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
-			BroadcastTimeout: 5 * 60,
+			BroadcastTimeout: 5 * 60 * 1000,
 			Assets: []msgjson.Asset{
 				*uncovertAssetInfo(tDCR),
 				*uncovertAssetInfo(tBTC),
@@ -386,6 +386,8 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		Wallet:    w,
 		connector: dex.NewConnectionMaster(w),
 		AssetID:   assetID,
+		lockTime:  time.Now().Add(time.Hour),
+		hookedUp:  true,
 	}, w
 }
 
@@ -1078,7 +1080,7 @@ func TestConnectDEX(t *testing.T) {
 	queueConfig := func() {
 		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
 			result := &msgjson.ConfigResult{
-				BroadcastTimeout: 5 * 60,
+				BroadcastTimeout: 5 * 60 * 1000,
 			}
 			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 			f(resp)

@@ -483,7 +483,7 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	// First check if we have the coins in cache.
 	coins := make(asset.Coins, 0, len(ids))
-	notFound := make(map[string]byte)
+	notFound := make(map[string]bool)
 	dcr.fundingMtx.RLock()
 	for _, id := range ids {
 		txHash, vout, err := decodeCoinID(id)
@@ -497,7 +497,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			coins = append(coins, fundingCoin.op)
 			continue
 		}
-		notFound[opID] = 1
+		notFound[opID] = true
 	}
 	dcr.fundingMtx.RUnlock()
 	if len(notFound) == 0 {
@@ -516,7 +516,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			return nil, fmt.Errorf("error decoding txid from rpc server %s: %v", txout.TxID, err)
 		}
 		opID := outpointID(txHash, txout.Vout)
-		if notFound[opID] == 1 {
+		if notFound[opID] {
 			redeemScript, err := hex.DecodeString(txout.RedeemScript)
 			if err != nil {
 				return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
@@ -1150,7 +1150,8 @@ type compositeUTXO struct {
 }
 
 // spendableUTXOs filters the RPC utxos for those that are spendable with
-// regards to the DEX's configuration.
+// regards to the DEX's configuration. The UTXOs will be sorted by ascending
+// value.
 func (dcr *ExchangeWallet) spendableUTXOs(unspents []walletjson.ListUnspentResult, confs uint32) ([]*compositeUTXO, uint64, uint64, error) {
 	var sum, unconf uint64
 	utxos := make([]*compositeUTXO, 0, len(unspents))

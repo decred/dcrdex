@@ -445,7 +445,7 @@ func (btc *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	// First check if we have the coins in cache.
 	coins := make(asset.Coins, 0, len(ids))
-	notFound := make(map[string]byte)
+	notFound := make(map[string]struct{})
 	btc.fundingMtx.RLock()
 	for _, id := range ids {
 		txHash, vout, err := decodeCoinID(id)
@@ -459,7 +459,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			coins = append(coins, newOutput(btc.node, txHash, vout, fundingCoin.amount, fundingCoin.redeemScript))
 			continue
 		}
-		notFound[opID] = 1
+		notFound[opID] = struct{}{}
 	}
 	btc.fundingMtx.RUnlock()
 	if len(notFound) == 0 {
@@ -1207,7 +1207,8 @@ type compositeUTXO struct {
 }
 
 // spendableUTXOs filters the RPC utxos for those that are spendable with
-// with regards to the DEX's configuration.
+// with regards to the DEX's configuration. The UTXOs will be sorted by
+// ascending value.
 func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[string]*compositeUTXO, uint64, uint64, error) {
 	unspents, err := btc.wallet.ListUnspent()
 	if err != nil {

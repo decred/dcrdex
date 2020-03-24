@@ -228,7 +228,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match) (map[order.Or
 			matches[trackerID] = match
 		}
 		if isCancel {
-			err = tracker.processCancelMatch(msgMatch)
+			match.cancel = msgMatch
 		} else {
 			match.msgMatches = append(match.msgMatches, msgMatch)
 		}
@@ -243,21 +243,17 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match) (map[order.Or
 // runMatches runs the sorted matches returned from parseMatches.
 func (dc *dexConnection) runMatches(matches map[order.OrderID]*trackerMatches) error {
 	for _, match := range matches {
-		var err error
 		if len(match.msgMatches) > 0 {
-			err = match.tracker.negotiate(match.msgMatches)
-			if err == nil {
-				err = match.tracker.tick()
+			err := match.tracker.negotiate(match.msgMatches)
+			if err != nil {
+				return err
 			}
 		}
-		if err != nil {
-			return err
-		}
 		if match.cancel != nil {
-			err = match.tracker.processCancelMatch(match.cancel)
-		}
-		if err != nil {
-			return err
+			err := match.tracker.processCancelMatch(match.cancel)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -1087,7 +1083,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	}
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
-		coinIDs = append(coinIDs, reByte(coins[i].ID()))
+		coinIDs = append(coinIDs, []byte(coins[i].ID()))
 	}
 	msgCoins, err := messageCoins(fromWallet, coins)
 	if err != nil {
@@ -1215,13 +1211,13 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 	}
 
 	// Connect and open the wallets if needed.
-	baseWallet, err := c.connectedWallet(baseID)
-	if err != nil {
-		return nil, err
+	baseWallet, found := c.wallet(baseID)
+	if !found {
+		return nil, fmt.Errorf("%s wallet not found", unbip(baseID))
 	}
-	quoteWallet, err := c.connectedWallet(quoteID)
-	if err != nil {
-		return nil, err
+	quoteWallet, found := c.wallet(quoteID)
+	if !found {
+		return nil, fmt.Errorf("%s wallet not found", unbip(quoteID))
 	}
 
 	// We actually care less about base/quote, and more about from/to, which
@@ -1598,15 +1594,14 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 			if len(coinIDs) > 0 {
 				byteIDs := make([]dex.Bytes, 0, len(coinIDs))
 				for _, cid := range coinIDs {
-					byteIDs = append(byteIDs, reByte(cid))
+					byteIDs = append(byteIDs, []byte(cid))
 				}
 				_, err = wallets.fromWallet.FundingCoins(byteIDs)
 				log.Errorf("source coins retrieval error for %s: %v", oid, err)
 				continue
 			}
-			proof := dbOrder.MetaData.Proof
 			var preImg order.Preimage
-			copy(preImg[:], proof.Preimage)
+			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
 			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, c.db, wallets, coins)
 		}
 	}
@@ -1859,7 +1854,7 @@ func (c *Core) listen(dc *dexConnection) {
 	//
 	// DRAFT NOTE: This is set as seconds in server/dex/dex.go, but I think it
 	// should be milliseconds, no?
-	bTimeout := time.Second * time.Duration(dc.cfg.BroadcastTimeout)
+	bTimeout := time.Millisecond * time.Duration(dc.cfg.BroadcastTimeout)
 	ticker := time.NewTicker(bTimeout / 3)
 out:
 	for {
