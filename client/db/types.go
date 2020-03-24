@@ -5,6 +5,7 @@ package db
 
 import (
 	"fmt"
+	"io/ioutil"
 	"strconv"
 	"time"
 
@@ -339,3 +340,96 @@ type dbBytes = encode.BuildyBytes
 var uint64Bytes = encode.Uint64Bytes
 var uint32Bytes = encode.Uint32Bytes
 var intCoder = encode.IntCoder
+
+// AccountBackup represents a user account backup.
+type AccountBackup struct {
+	KeyParams []byte
+	Accounts  []*AccountInfo
+}
+
+// encodeDEXAccount serializes the details needed to backup a dex account.
+func encodeDEXAccount(acct *AccountInfo) []byte {
+	return dbBytes{0}.
+		AddData([]byte(acct.URL)).
+		AddData(acct.EncKey).
+		AddData(acct.DEXPubKey.Serialize())
+}
+
+// decodeDEXAccount decodes the versioned blob into an AccountInfo.
+func decodeDEXAccount(acctB []byte) (*AccountInfo, error) {
+	ver, pushes, err := encode.DecodeBlob(acctB)
+	if err != nil {
+		return nil, err
+	}
+
+	switch ver {
+	case 0:
+		if len(pushes) != 3 {
+			return nil, fmt.Errorf("expected 3 pushes, got %d", len(pushes))
+		}
+
+		var ai AccountInfo
+		ai.URL = string(pushes[0])
+		ai.EncKey = pushes[1]
+		ai.DEXPubKey, err = secp256k1.ParsePubKey(pushes[2])
+		if err != nil {
+			return nil, err
+		}
+		return &ai, nil
+	}
+	return nil, fmt.Errorf("unknown DEX account backup version %d", ver)
+}
+
+// Serialize encodes an account backup as bytes.
+func (ab *AccountBackup) Serialize() []byte {
+	backup := dbBytes{0}.AddData(ab.KeyParams)
+	for _, acct := range ab.Accounts {
+		backup = backup.AddData(encodeDEXAccount(acct))
+	}
+	return backup
+}
+
+// decodeAccountBackup decodes the versioned blob into an *AccountBackup.
+func decodeAccountBackup(b []byte) (*AccountBackup, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		keyParams := pushes[0]
+		accts := make([]*AccountInfo, 0, len(pushes[1:]))
+		for _, push := range pushes[1:] {
+			ai, err := decodeDEXAccount(push)
+			if err != nil {
+				return nil, err
+			}
+			accts = append(accts, ai)
+		}
+
+		return &AccountBackup{
+			KeyParams: keyParams,
+			Accounts:  accts,
+		}, nil
+	}
+	return nil, fmt.Errorf("unknown AccountBackup version %d", ver)
+}
+
+// Save persists an account backup to file.
+func (ab *AccountBackup) Save(path string) error {
+	backup := ab.Serialize()
+	return ioutil.WriteFile(path, backup, 0644)
+}
+
+// RestoreAccountBackup generates a user account from a backup file.
+func RestoreAccountBackup(path string) (*AccountBackup, error) {
+	backup, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	ab, err := decodeAccountBackup(backup)
+	if err != nil {
+		return nil, err
+	}
+	return ab, nil
+}

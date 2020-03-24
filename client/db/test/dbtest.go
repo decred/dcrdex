@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex/encode"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
@@ -36,7 +37,7 @@ func RandomWallet() *db.Wallet {
 		Account:   ordertest.RandomAddress(),
 		INIPath:   ordertest.RandomAddress(),
 		Balance:   rand.Uint64(),
-		BalUpdate: time.Unix(int64(rand.Uint64()), 0),
+		BalUpdate: encode.UnixTimeMilli(encode.UnixMilli(time.Now())),
 		Address:   ordertest.RandomAddress(),
 	}
 }

@@ -566,7 +566,7 @@ type timedBalance struct {
 // serialize serializes the timedBalance to a versioned blob.
 func (tb *timedBalance) serialize() []byte {
 	return encode.BuildyBytes{0}.
-		AddData(uint64Bytes(uint64(tb.time.Unix()))).
+		AddData(uint64Bytes(encode.UnixMilliU(tb.time))).
 		AddData(uint64Bytes(tb.balance))
 }
 
@@ -583,7 +583,7 @@ func decodeTimedBalance(b []byte) (*timedBalance, error) {
 		return nil, fmt.Errorf("decodeTimedBalance: expected 2 pushes, got %d", len(pushes))
 	}
 	return &timedBalance{
-		time:    time.Unix(int64(intCoder.Uint64(pushes[0])), 0),
+		time:    encode.DecodeUTime(pushes[0]),
 		balance: intCoder.Uint64(pushes[1]),
 	}, nil
 }
