@@ -2,6 +2,7 @@ package order
 
 import (
 	"bytes"
+	"encoding/hex"
 	"testing"
 
 	"decred.org/dcrdex/dex/msgjson"
@@ -884,5 +885,207 @@ func TestOrderBookBestFill(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestValidateMatchProof(t *testing.T) {
+	mid := "mkt"
+	ob := NewOrderBook()
+	epoch := uint64(10)
+	n1Pimg := [32]byte{'1'}
+	n1Commitment := makeCommitment(n1Pimg)
+	n1OrderID := [32]byte{'a'}
+	n1 := makeEpochOrderNote(mid, n1OrderID, msgjson.BuyOrderNum, 1, 2, n1Commitment, epoch)
+
+	n2Pimg := [32]byte{'2'}
+	n2Commitment := makeCommitment(n2Pimg)
+	n2OrderID := [32]byte{'b'}
+	n2 := makeEpochOrderNote(mid, n2OrderID, msgjson.BuyOrderNum, 1, 2, n2Commitment, epoch)
+
+	n3Pimg := [32]byte{'3'}
+	n3Commitment := makeCommitment(n3Pimg)
+	n3OrderID := [32]byte{'c'}
+	n3 := makeEpochOrderNote(mid, n3OrderID, msgjson.BuyOrderNum, 1, 2, n3Commitment, epoch)
+
+	err := ob.Enqueue(n1)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n2)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n3)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	expectedCSum, _ := hex.DecodeString("9db8c0547f3b80574df730c3b7005ccef" +
+		"4310e93f766442110fc2c9353230985")
+	expectedSeed, _ := hex.DecodeString("e2b770f60baab7ac877edfa55bd1443b59" +
+		"1c1cdd461667c6eb737ae0c65daf2d")
+
+	matchProofNote := msgjson.MatchProofNote{
+		MarketID:  mid,
+		Epoch:     epoch,
+		Preimages: []msgjson.Bytes{n1Pimg[:], n2Pimg[:], n3Pimg[:]},
+		Misses:    []msgjson.Bytes{},
+		CSum:      expectedCSum,
+		Seed:      expectedSeed,
+	}
+
+	// Ensure a valid match proof message gets validated as expected.
+	if err := ob.ValidateMatchProof(matchProofNote); err != nil {
+		t.Fatalf("[ValidateMatchProof]: unexpected error: %v", err)
+	}
+
+	ob.ResetEpoch()
+
+	err = ob.Enqueue(n1)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n2)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n3)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	expectedSeedWithMisses, _ := hex.DecodeString("01a161289f06be16ea9b5a5a" +
+		"5492f5664f3e92750dc5ce3fa5775eb9be225730")
+	expectedCSumWithMisses, _ := hex.DecodeString("0433a2dec5f3b9f530fba28a" +
+		"d1b4c15c454b4b41ab3bd0ba8f30a6d1de2a1128")
+
+	matchProofNoteWithMisses := msgjson.MatchProofNote{
+		MarketID:  mid,
+		Epoch:     epoch,
+		Preimages: []msgjson.Bytes{n1Pimg[:], n3Pimg[:]},
+		Misses:    []msgjson.Bytes{n2.OrderID},
+		CSum:      expectedCSumWithMisses,
+		Seed:      expectedSeedWithMisses,
+	}
+
+	// Ensure a valid match proof message gets validated as expected.
+	if err := ob.ValidateMatchProof(matchProofNoteWithMisses); err != nil {
+		t.Fatalf("[ValidateMatchProof (with misses)]: unexpected error: %v", err)
+	}
+
+	ob.ResetEpoch()
+
+	err = ob.Enqueue(n1)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n2)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n3)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	expectedCSum, _ = hex.DecodeString("9db8c0547f3b80574df730c3b7005ccef" +
+		"4310e93f766442110fc2c9353230985")
+	expectedSeed, _ = hex.DecodeString("e2b770f60baab7ac877edfa55bd1443b59" +
+		"1c1cdd461667c6eb737ae0c65daf2d")
+
+	matchProofNote = msgjson.MatchProofNote{
+		MarketID:  mid,
+		Epoch:     epoch,
+		Preimages: []msgjson.Bytes{n1Pimg[:], n2Pimg[:]},
+		Misses:    []msgjson.Bytes{},
+		CSum:      expectedCSum,
+		Seed:      expectedSeed,
+	}
+
+	// Ensure a invalid match proof message (missing a preimage) gets
+	// detected as expected.
+	if err := ob.ValidateMatchProof(matchProofNote); err == nil {
+		t.Fatalf("[ValidateMatchProof (missing a preimage)]: "+
+			"unexpected error: %v", err)
+	}
+
+	ob.ResetEpoch()
+
+	err = ob.Enqueue(n1)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n2)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n3)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	expectedCSum, _ = hex.DecodeString("0433a2dec5f3b9f530fba28a" +
+		"d1b4c15c454b4b41ab3bd0ba8f30a6d1de2a1128")
+	expectedSeed, _ = hex.DecodeString("e2b770f60baab7ac877edfa55bd1443b59" +
+		"1c1cdd461667c6eb737ae0c65daf2d")
+
+	matchProofNote = msgjson.MatchProofNote{
+		MarketID:  mid,
+		Epoch:     epoch,
+		Preimages: []msgjson.Bytes{n1Pimg[:], n3Pimg[:]},
+		Misses:    []msgjson.Bytes{n2.OrderID},
+		CSum:      expectedCSum,
+		Seed:      expectedSeed,
+	}
+
+	// Ensure a invalid match proof message (invalid seed) gets detected
+	// as expected.
+	if err := ob.ValidateMatchProof(matchProofNote); err == nil {
+		t.Fatalf("[ValidateMatchProof (inavlid seed)]: unexpected error: %v", err)
+	}
+
+	ob.ResetEpoch()
+
+	err = ob.Enqueue(n1)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n2)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	err = ob.Enqueue(n3)
+	if err != nil {
+		t.Fatalf("[Enqueue]: unexpected error: %v", err)
+	}
+
+	expectedCSum, _ = hex.DecodeString("9db8c0547f3b80574df730c3b7005ccef" +
+		"4310e93f766442110fc2c9353230985")
+	expectedSeed, _ = hex.DecodeString("01a161289f06be16ea9b5a5a" +
+		"5492f5664f3e92750dc5ce3fa5775eb9be225730")
+
+	matchProofNote = msgjson.MatchProofNote{
+		MarketID:  mid,
+		Epoch:     epoch,
+		Preimages: []msgjson.Bytes{n1Pimg[:], n3Pimg[:]},
+		Misses:    []msgjson.Bytes{n2.OrderID},
+		CSum:      expectedCSum,
+		Seed:      expectedSeed,
+	}
+
+	// Ensure a invalid match proof message (invalid csum) gets detected
+	// as expected.
+	if err := ob.ValidateMatchProof(matchProofNote); err == nil {
+		t.Fatalf("[ValidateMatchProof (inavlid csum)]: unexpected error: %v", err)
 	}
 }

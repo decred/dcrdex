@@ -1606,9 +1606,10 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 		return fmt.Errorf("book order note unmarshal error: %v", err)
 	}
 
-	dc.booksMtx.Lock()
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
+
 	ob, ok := dc.books[note.MarketID]
-	dc.booksMtx.Unlock()
 	if !ok {
 		return fmt.Errorf("no order book found with market id '%v'",
 			note.MarketID)
@@ -1626,8 +1627,8 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return fmt.Errorf("unbook order note unmarshal error: %v", err)
 	}
 
-	dc.booksMtx.Lock()
-	defer dc.booksMtx.Unlock()
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
 
 	ob, ok := dc.books[note.MarketID]
 	if !ok {
@@ -1647,8 +1648,8 @@ func handleEpochOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("epoch order note unmarshal error: %v", err)
 	}
 
-	dc.booksMtx.Lock()
-	defer dc.booksMtx.Unlock()
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
 
 	ob, ok := dc.books[note.MarketID]
 	if !ok {
@@ -1656,14 +1657,44 @@ func handleEpochOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error
 			note.MarketID)
 	}
 
+	// Reset an initialized queue if a new order with a different epoch is
+	// received.
+	epoch := ob.Epoch()
+	if epoch != note.Epoch && epoch != 0 {
+		ob.ResetEpoch()
+	}
+
 	return ob.Enqueue(&note)
+}
+
+// handleMatchProofMsg is called when a match_proof notification is received.
+func handleMatchProofMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.MatchProofNote
+	err := msg.Unmarshal(&note)
+	if err != nil {
+		return fmt.Errorf("match proof note unmarshal error: %v", err)
+	}
+
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
+
+	ob, ok := dc.books[note.MarketID]
+	if !ok {
+		return fmt.Errorf("no order book found with market id %q",
+			note.MarketID)
+	}
+
+	// Reset the epoch queue after processing the match proof message.
+	defer ob.ResetEpoch()
+
+	return ob.ValidateMatchProof(note)
 }
 
 // routeHandler is a handler for a message from the DEX.
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
 var reqHandlers = map[string]routeHandler{
-	msgjson.MatchProofRoute:  nil,
+	msgjson.MatchProofRoute:  handleMatchProofMsg,
 	msgjson.PreimageRoute:    handlePreimageRequest,
 	msgjson.MatchRoute:       handleMatchRoute,
 	msgjson.AuditRoute:       nil,
