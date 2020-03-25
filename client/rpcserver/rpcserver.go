@@ -47,10 +47,10 @@ var (
 
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
-	Balance(uint32) (uint64, error)
-	Book(dex string, base, quote uint32) *core.OrderBook
-	PreRegister(dex string) (uint64, error)
-	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
+	Balance(assetID uint32) (baseUnits uint64, err error)
+	Book(dex string, base, quote uint32) (orderBook *core.OrderBook)
+	PreRegister(dex string) (fee uint64, err error)
+	Sync(dex string, base, quote uint32) (updateChan chan *core.BookUpdate, err error)
 	Unsync(dex string, base, quote uint32)
 }
 

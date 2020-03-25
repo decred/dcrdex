@@ -29,8 +29,7 @@ func (vr versionResponse) String() string {
 
 // preRegisterResponse is used when responding to the preregister route.
 type preRegisterResponse struct {
-	OK  bool   `json:"ok"`
-	Fee uint64 `json:"fee,omitempty"`
+	Fee uint64 `json:"fee"`
 }
 
 // ParseCmdArgs parses arguments to commands for rpcserver requests.

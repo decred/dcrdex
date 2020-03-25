@@ -85,7 +85,6 @@ func handlePreRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayl
 		return createResponse(req.Route, nil, resErr)
 	}
 	res := &preRegisterResponse{
-		OK:  true,
 		Fee: fee,
 	}
 	return createResponse(req.Route, res, nil)
@@ -157,8 +156,7 @@ Args:
 Returns:
 	obj: The preregister result.
 	{
-		"ok" (bool): Whether preregistering succeeded.
-		"fee" (float, omitempty): The dex registration fee.
+		"fee" (float): The dex registration fee.
 	}`,
 	},
 }
