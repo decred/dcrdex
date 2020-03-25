@@ -36,7 +36,7 @@ func RandomWallet() *db.Wallet {
 		Account:   ordertest.RandomAddress(),
 		INIPath:   ordertest.RandomAddress(),
 		Balance:   rand.Uint64(),
-		BalUpdate: time.Unix(int64(rand.Uint64()), 0),
+		BalUpdate: time.Now().Truncate(time.Millisecond).UTC(),
 		Address:   ordertest.RandomAddress(),
 	}
 }

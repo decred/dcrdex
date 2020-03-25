@@ -1,6 +1,8 @@
 package dbtest
 
 import (
+	"bytes"
+	"os"
 	"testing"
 	"time"
 
@@ -68,5 +70,66 @@ func TestOrderProof(t *testing.T) {
 func nTimes(n int, f func(int)) {
 	for i := 0; i < n; i++ {
 		f(i)
+	}
+}
+
+func TestAccountsBackupAndRestore(t *testing.T) {
+	keyParams := randBytes(128)
+	count := 5
+	accts := make(map[string]*db.AccountInfo, count)
+	for i := 0; i < count; i++ {
+		acct := RandomAccountInfo()
+		accts[acct.URL] = acct
+	}
+
+	bkp := db.AccountBackup{
+		KeyParams: keyParams,
+	}
+	for _, acct := range accts {
+		bkp.Accounts = append(bkp.Accounts, acct)
+	}
+
+	// Save the account backup to file.
+	backupPath := "acct.backup"
+	err := bkp.Save(backupPath)
+	if err != nil {
+		t.Fatalf("[Save] unexpected error: %v", err)
+	}
+
+	defer os.Remove(backupPath)
+
+	// Restore accounts from backup.
+	restored, err := db.RestoreAccountBackup(backupPath)
+	if err != nil {
+		t.Fatalf("[RestoreAccountBackup] unexpected error: %v", err)
+	}
+
+	// Ensure restored account details are identical to the original.
+	if !bytes.Equal(restored.KeyParams, bkp.KeyParams) {
+		t.Fatalf("expected key params value of %x, got %x",
+			bkp.KeyParams, restored.KeyParams)
+	}
+
+	if len(restored.Accounts) != len(bkp.Accounts) {
+		t.Fatalf("expected %d restored accounts, got %x",
+			count, len(restored.Accounts))
+	}
+
+	for _, dexAcct := range restored.Accounts {
+		acct, ok := accts[dexAcct.URL]
+		if !ok {
+			t.Fatalf("no account found with url %s", dexAcct.URL)
+		}
+
+		if !bytes.Equal(dexAcct.EncKey, acct.EncKey) {
+			t.Fatalf("expected restored account %s with encryption key %x, "+
+				"got %x", dexAcct.URL, dexAcct.EncKey, acct.EncKey)
+		}
+
+		if !dexAcct.DEXPubKey.IsEqual(acct.DEXPubKey) {
+			t.Fatalf("expected restored account %s with dex public key %x, "+
+				"got %x", dexAcct.URL, dexAcct.DEXPubKey.Serialize(),
+				acct.DEXPubKey.Serialize())
+		}
 	}
 }
