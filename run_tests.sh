@@ -14,6 +14,15 @@ do
 	env GORACE="halt_on_error=1" go test -race -short ./...
 done
 
+cd $dir
+dumptags="-c -o /dev/null -tags"
+go test $dumptags live ./client/webserver
+go test $dumptags harness ./client/asset/dcr
+go test $dumptags harness ./client/asset/btc
+go test $dumptags dcrlive ./server/asset/dcr
+go test $dumptags btclive ./server/asset/btc
+go test $dumptags pgonline ./server/db/driver/pg
+
 # Return to initial directory.
 cd $dir
 # golangci-lint (github.com/golangci/golangci-lint) is used to run each
