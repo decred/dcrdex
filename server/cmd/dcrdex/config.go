@@ -38,6 +38,7 @@ const (
 	defaultDEXPrivKeyFilename  = "dexprivkey"
 	defaultRPCHost             = "127.0.0.1"
 	defaultRPCPort             = "7232"
+	defaultWebAdminAddr        = "127.0.0.1:6542"
 
 	defaultCancelThresh     = 0.6
 	defaultRegFeeConfirms   = 4
@@ -74,6 +75,9 @@ type dexConf struct {
 	BroadcastTimeout time.Duration
 	AltDNSNames      []string
 	LogMaker         *dex.LoggerMaker
+	WebAdminOn       bool
+	WebAdminAddr     string
+	WebAdminPass     string
 }
 
 type flagsData struct {
@@ -110,6 +114,9 @@ type flagsData struct {
 	PGPass       string `long:"pgpass" description:"PostgreSQL DB password."`
 	PGHost       string `long:"pghost" description:"PostgreSQL server host:port or UNIX socket (e.g. /run/postgresql)."`
 	HidePGConfig bool   `long:"hidepgconfig" description:"Blocks logging of the PostgreSQL db configuration on system start up."`
+	WebAdminOn   bool   `long:"webadminon" description:"turn on the web server"`
+	WebAdminAddr string `long:"webadminaddr" description:"web administration HTTP server address"`
+	WebAdminPass string `long:"webadminpass" description:"web administration password"`
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed
@@ -489,6 +496,19 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		dbPort = uint16(port)
 	}
 
+	webAdminAddr := defaultWebAdminAddr
+	if cfg.WebAdminAddr != "" {
+		_, port, err := net.SplitHostPort(cfg.WebAdminAddr)
+		if err != nil {
+			return loadConfigError(fmt.Errorf("invalid web admin host %q: %v", cfg.WebAdminAddr, err))
+		}
+		_, err = strconv.ParseUint(port, 10, 16)
+		if err != nil {
+			return loadConfigError(fmt.Errorf("invalid web admin port %q: %v", port, err))
+		}
+		webAdminAddr = cfg.WebAdminAddr
+	}
+
 	// Load the DEX signing key. TODO: Implement a secure key storage scheme.
 	pkFileBuffer, err := ioutil.ReadFile(cfg.DEXPrivKeyPath)
 	if err != nil {
@@ -516,6 +536,9 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		AltDNSNames:      cfg.AltDNSNames,
 		LogMaker:         logMaker,
+		WebAdminAddr:     webAdminAddr,
+		WebAdminPass:     cfg.WebAdminPass,
+		WebAdminOn:       cfg.WebAdminOn,
 	}
 
 	opts := &procOpts{

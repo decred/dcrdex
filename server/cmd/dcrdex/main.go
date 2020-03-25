@@ -13,6 +13,7 @@ import (
 	"runtime/pprof"
 	"strings"
 
+	webadmin "decred.org/dcrdex/server/admin/webserver"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
@@ -98,8 +99,31 @@ func mainCore(ctx context.Context) error {
 		return err
 	}
 
+	adminWebServerDone := make(chan struct{})
+	if cfg.WebAdminOn {
+		webCFG := &webadmin.Config{
+			Core: dexMan,
+			Addr: cfg.WebAdminAddr,
+			Pass: cfg.WebAdminPass,
+			Cert: cfg.RPCCert,
+			Key:  cfg.RPCKey,
+		}
+		adminWebServer, err := webadmin.New(webCFG)
+		if err != nil {
+			return fmt.Errorf("cannot set up admin webserver: %v", err)
+		}
+		go func() {
+			adminWebServer.Run(ctx)
+			log.Info("Stopping AdminServer...")
+			close(adminWebServerDone)
+		}()
+	} else {
+		close(adminWebServerDone)
+	}
+
 	log.Info("The DEX is running. Hit CTRL+C to quit...")
 	<-ctx.Done()
+	<-adminWebServerDone
 
 	log.Info("Stopping DEX...")
 	dexMan.Stop()
