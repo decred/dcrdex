@@ -218,7 +218,7 @@ func (c *TCore) Register(r *core.Registration) (error, <-chan error) {
 	errChan <- nil
 	return nil, errChan
 }
-func (c *TCore) Login(string) ([]core.Negotiation, error) { return nil, nil }
+func (c *TCore) Login(string) error { return nil }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return make(chan *core.BookUpdate), nil

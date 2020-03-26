@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/client/db/bolt"
 	book "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -1077,7 +1078,11 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	}
 
 	// Fund the order and prepare the coins.
-	coins, err := fromWallet.Fund(qty, wallets.fromAsset)
+	fundQty := qty
+	if form.IsLimit && !form.Sell {
+		fundQty = calc.BaseToQuote(rate, fundQty)
+	}
+	coins, err := fromWallet.Fund(fundQty, wallets.fromAsset)
 	if err != nil {
 		return nil, err
 	}

@@ -378,6 +378,7 @@ type TXCWallet struct {
 	auditErr     error
 	redeemCoins  []dex.Bytes
 	badSecret    bool
+	fundedVal    uint64
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -405,7 +406,8 @@ func (w *TXCWallet) Balance(confs uint32) (available, locked uint64, err error) 
 	return 0, 0, nil
 }
 
-func (w *TXCWallet) Fund(uint64, *dex.Asset) (asset.Coins, error) {
+func (w *TXCWallet) Fund(v uint64, _ *dex.Asset) (asset.Coins, error) {
+	w.fundedVal = v
 	return w.fundCoins, w.fundErr
 }
 
@@ -1321,6 +1323,13 @@ func TestTrade(t *testing.T) {
 		t.Fatalf("limit order error: %v", err)
 	}
 
+	// Check that the Fund request for a limit sell came through and that
+	// value was not adjusted internally with BaseToQuote.
+	if tDcrWallet.fundedVal != qty {
+		t.Fatalf("limit sell expected funded value %d, got %d", qty, tDcrWallet.fundedVal)
+	}
+	tDcrWallet.fundedVal = 0
+
 	// Should not be able to close wallet now, since there are orders.
 	if tCore.CloseWallet(tDCR.ID) == nil {
 		t.Fatalf("no error for closing DCR wallet with active orders")
@@ -1414,13 +1423,49 @@ func TestTrade(t *testing.T) {
 	ensureErr("db failure")
 	rig.db.updateOrderErr = nil
 
-	// Successful market order
+	// Success when buying.
+	form.Sell = false
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+	_, err = tCore.Trade(tPW, form)
+	if err != nil {
+		t.Fatalf("limit order error: %v", err)
+	}
+
+	// Check that the Fund request for a limit buy came through to the BTC wallet
+	// and that the value was adjusted internally with BaseToQuote.
+	expQty := calc.BaseToQuote(rate, qty)
+	if tBtcWallet.fundedVal != expQty {
+		t.Fatalf("limit buy expected funded value %d, got %d", expQty, tBtcWallet.fundedVal)
+	}
+	tBtcWallet.fundedVal = 0
+
+	// Successful market buy order
 	form.IsLimit = false
 	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
 	_, err = tCore.Trade(tPW, form)
 	if err != nil {
 		t.Fatalf("market order error: %v", err)
 	}
+
+	// The funded qty for a market buy should not be adjusted.
+	if tBtcWallet.fundedVal != qty {
+		t.Fatalf("market buy expected funded value %d, got %d", qty, tBtcWallet.fundedVal)
+	}
+	tBtcWallet.fundedVal = 0
+
+	// Successful market sell order.
+	form.Sell = true
+	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
+	_, err = tCore.Trade(tPW, form)
+	if err != nil {
+		t.Fatalf("market order error: %v", err)
+	}
+
+	// The funded qty for a market sell order should not be adjusted.
+	if tDcrWallet.fundedVal != qty {
+		t.Fatalf("market sell expected funded value %d, got %d", qty, tDcrWallet.fundedVal)
+	}
+	tDcrWallet.fundedVal = 0
 }
 
 func TestCancel(t *testing.T) {
