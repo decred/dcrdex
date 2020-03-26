@@ -1035,14 +1035,14 @@ func loadTradeFromTable(dbe *sql.DB, fullTable string, oid order.OrderID) (order
 	switch prefix.OrderType {
 	case order.LimitOrderType:
 		return &order.LimitOrder{
-			T:     trade,
+			T:     *trade.Copy(), // govet would complain because Trade has a Mutex
 			P:     prefix,
 			Rate:  rate,
 			Force: tif,
 		}, status, nil
 	case order.MarketOrderType:
 		return &order.MarketOrder{
-			T: trade,
+			T: *trade.Copy(),
 			P: prefix,
 		}, status, nil
 
@@ -1108,14 +1108,14 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, bas
 		case order.LimitOrderType:
 			ord = &order.LimitOrder{
 				P:     prefix,
-				T:     trade,
+				T:     *trade.Copy(),
 				Rate:  rate,
 				Force: tif,
 			}
 		case order.MarketOrderType:
 			ord = &order.MarketOrder{
 				P: prefix,
-				T: trade,
+				T: *trade.Copy(),
 			}
 		default:
 			log.Errorf("userOrdersFromTable: encountered unexpected order type %v",

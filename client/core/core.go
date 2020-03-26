@@ -1105,12 +1105,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 		ClientTime: time.Now(),
 		Commit:     preImg.Commit(),
 	}
-	trade := &order.Trade{
-		Coins:    coinIDs,
-		Sell:     form.Sell,
-		Quantity: form.Qty,
-		Address:  addr,
-	}
+
 	var ord order.Order
 	if form.IsLimit {
 		prefix.OrderType = order.LimitOrderType
@@ -1119,15 +1114,25 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 			tif = order.ImmediateTiF
 		}
 		ord = &order.LimitOrder{
-			P:     *prefix,
-			T:     *trade,
+			P: *prefix,
+			T: order.Trade{
+				Coins:    coinIDs,
+				Sell:     form.Sell,
+				Quantity: form.Qty,
+				Address:  addr,
+			},
 			Rate:  form.Rate,
 			Force: tif,
 		}
 	} else {
 		ord = &order.MarketOrder{
 			P: *prefix,
-			T: *trade,
+			T: order.Trade{
+				Coins:    coinIDs,
+				Sell:     form.Sell,
+				Quantity: form.Qty,
+				Address:  addr,
+			},
 		}
 	}
 	err = order.ValidateOrder(ord, order.OrderStatusEpoch, wallets.baseAsset.LotSize)

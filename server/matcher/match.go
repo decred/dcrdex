@@ -351,7 +351,7 @@ func matchMarketSellOrder(book Booker, ord *order.MarketOrder) (matchSet *order.
 	// immediate and no minimum rate (a rate of 0).
 	limOrd := &order.LimitOrder{
 		P:     ord.P,
-		T:     ord.T,
+		T:     *ord.T.Copy(),
 		Force: order.ImmediateTiF,
 		Rate:  0,
 	}

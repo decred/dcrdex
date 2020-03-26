@@ -383,6 +383,19 @@ type Trade struct {
 	FillAmt    uint64 // use Filled and AddFill methods for thread-safe access
 }
 
+// Copy makes a shallow copy of a Trade. This is useful when attempting to
+// assign a newly-created trade to an order's field without a linter warning
+// about copying a mutex (e.g. MarketOrder{T: *aNewTrade.Copy()}).
+func (t *Trade) Copy() *Trade {
+	return &Trade{
+		Coins:    t.Coins, // shallow
+		Sell:     t.Sell,
+		Quantity: t.Quantity,
+		Address:  t.Address,
+		FillAmt:  t.FillAmt,
+	}
+}
+
 // T is an alias for Trade. Embedding with the alias allows us to define a
 // method on the interface called Trade that returns the *Trade.
 type T = Trade

@@ -286,7 +286,7 @@ func decodeOrder_v0(pushes [][]byte) (Order, error) {
 		}
 		return &LimitOrder{
 			P:     *prefix,
-			T:     *trade,
+			T:     *trade.Copy(),
 			Rate:  intCoder.Uint64(rateB),
 			Force: tif,
 		}, nil
@@ -306,7 +306,7 @@ func decodeOrder_v0(pushes [][]byte) (Order, error) {
 		}
 		return &MarketOrder{
 			P: *prefix,
-			T: *trade,
+			T: *trade.Copy(),
 		}, nil
 
 	case bEqual(oType, orderTypeCancel):
