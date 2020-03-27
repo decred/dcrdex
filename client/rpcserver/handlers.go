@@ -39,18 +39,18 @@ var routes = map[string]func(s *RPCServer, req *msgjson.Message) *msgjson.Respon
 // if no arguments are passed or verbose help if the passed argument is a known
 // command.
 func handleHelp(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
-	reqPayload := ""
-	err := json.Unmarshal(req.Payload, &reqPayload)
+	helpWith := ""
+	err := json.Unmarshal(req.Payload, &helpWith)
 	if err != nil {
 		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
 		return createResponse(req.Route, nil, resErr)
 	}
 	res := ""
-	if reqPayload == "" {
+	if helpWith == "" {
 		// List all commands if no arguments.
 		res = ListCommands()
 	} else {
-		res, err = CommandUsage(reqPayload)
+		res, err = CommandUsage(helpWith)
 		if err != nil {
 			resErr := &msgjson.Error{Code: msgjson.RPCUnknownRoute, Message: err.Error()}
 			return createResponse(req.Route, nil, resErr)
@@ -73,13 +73,13 @@ func handleVersion(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload 
 // handlePreRegister handles requests for preregister. It accepts the name of a
 // dex and returns whether the request was successful and the dex fee if it was.
 func handlePreRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
-	reqPayload := ""
-	err := json.Unmarshal(req.Payload, &reqPayload)
+	dexURL := ""
+	err := json.Unmarshal(req.Payload, &dexURL)
 	if err != nil {
 		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
 		return createResponse(req.Route, nil, resErr)
 	}
-	fee, err := s.core.PreRegister(reqPayload)
+	fee, err := s.core.PreRegister(dexURL)
 	if err != nil {
 		resErr := &msgjson.Error{Code: msgjson.RPCErrorUnspecified, Message: err.Error()}
 		return createResponse(req.Route, nil, resErr)
