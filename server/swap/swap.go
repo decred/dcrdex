@@ -156,6 +156,111 @@ type Config struct {
 	BroadcastTimeout time.Duration
 }
 
+type orderSwapStat struct {
+	swapCount int
+	offBook   bool
+	hasFailed bool
+}
+
+type orderSwapTracker struct {
+	mtx          sync.Mutex
+	orderMatches map[order.OrderID]*orderSwapStat
+}
+
+func newOrderSwapTracker() *orderSwapTracker {
+	return &orderSwapTracker{
+		orderMatches: make(map[order.OrderID]*orderSwapStat),
+	}
+}
+
+// decrementActiveSwapCount decrements the number of active swaps for an order,
+// returning a boolean indicating if the order is now considered complete, where
+// complete means there are no more active swaps and the order is off-book. If
+// the number of active swaps is reduced to zero, the order is removed from the
+// tracker, and repeated calls to decrementActiveSwapCount for the order will
+// return true.
+func (s *orderSwapTracker) decrementActiveSwapCount(ord order.Order, failed bool) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	oid := ord.ID()
+	stat := s.orderMatches[oid]
+	if stat == nil {
+		log.Warnf("isOrderComplete: untracked order %v", oid)
+		return true
+	}
+
+	stat.hasFailed = stat.hasFailed || failed
+
+	stat.swapCount--
+	if stat.swapCount != 0 {
+		return false
+	}
+
+	// Remove the order's entry only if:
+	// - it has never failed OR
+	// - it is off-book, meaning it will never be seen again
+	if !stat.hasFailed || stat.offBook {
+		delete(s.orderMatches, oid)
+	}
+
+	return stat.offBook && !stat.hasFailed
+}
+
+// swapSuccess decrements the active swap counter for an order. The order's
+// failure and off-book flags are unchanged.
+func (s *orderSwapTracker) swapSuccess(ord order.Order) bool {
+	return s.decrementActiveSwapCount(ord, false)
+}
+
+// swapFailure decrements the active swap counter for an order, and flags the
+// order as having failed. The off-book flag is unchanged.
+func (s *orderSwapTracker) swapFailure(ord order.Order) {
+	s.decrementActiveSwapCount(ord, true)
+}
+
+// incActiveSwapCount registers a new swap for the given order, flagging the
+// order according to offBook.
+func (s *orderSwapTracker) incActiveSwapCount(ord order.Order, offBook bool) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	oid := ord.ID()
+	stat := s.orderMatches[oid]
+	if stat == nil {
+		s.orderMatches[oid] = &orderSwapStat{
+			swapCount: 1,
+			offBook:   offBook,
+		}
+		return
+	}
+
+	stat.swapCount++
+	stat.offBook = offBook // should never change true to false
+}
+
+// canceled records an order as off-book and failed if it exists in the active
+// order swaps map. No new entry is made because there cannot be future swaps
+// for a canceled order. For this reason, be sure to use incActiveSwapCount
+// before canceled when processing new matches in Negotiate.
+func (s *orderSwapTracker) canceled(ord order.Order) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	oid := ord.ID()
+	stat := s.orderMatches[oid]
+	if stat == nil {
+		// No active swaps for canceled order, OK.
+		log.Debugf("orderOffBook: untracked order %v", oid)
+		return
+	}
+
+	// Prevent completion of active swaps from counting the order as
+	// successfully completed.
+	stat.offBook = true
+	stat.hasFailed = true
+}
+
 // Swapper handles order matches by handling authentication and inter-party
 // communications between clients, or 'users'. The Swapper authenticates users
 // (vua AuthManager) and validates transactions as they are reported.
@@ -170,10 +275,8 @@ type Swapper struct {
 	// The matches map and the contained matches are protected by the matchMtx.
 	matchMtx sync.RWMutex
 	matches  map[string]*matchTracker
-	// orderMatches, which counts the number of active swaps for a given order,
-	// is protected by orderMatchesMtx.
-	orderMatchesMtx sync.Mutex
-	orderMatches    map[order.OrderID]int
+	// orders tracks order status and active swaps.
+	orders *orderSwapTracker
 	// Each asset backend gets a goroutine to monitor for new blocks. When a new
 	// block is received, it is passed to the start loop through the block
 	// channel.
@@ -188,14 +291,14 @@ type Swapper struct {
 func NewSwapper(cfg *Config) *Swapper {
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		coins:        cfg.Assets,
-		storage:      cfg.Storage,
-		authMgr:      authMgr,
-		coinWaiter:   coinwaiter.New(recheckInterval, authMgr.Send),
-		matches:      make(map[string]*matchTracker),
-		orderMatches: make(map[order.OrderID]int),
-		block:        make(chan *blockNotification, 8),
-		bTimeout:     cfg.BroadcastTimeout,
+		coins:      cfg.Assets,
+		storage:    cfg.Storage,
+		authMgr:    authMgr,
+		coinWaiter: coinwaiter.New(recheckInterval, authMgr.Send),
+		matches:    make(map[string]*matchTracker),
+		orders:     newOrderSwapTracker(),
+		block:      make(chan *blockNotification, 8),
+		bTimeout:   cfg.BroadcastTimeout,
 	}
 
 	// The swapper is only concerned with two types of client-originating
@@ -296,76 +399,6 @@ out:
 	}
 
 	wg.Wait()
-}
-
-// BeginMatchAndNegotiate prevents updates to the active swap counter until
-// EndMatchAndNegotiate is called. This should be run before modifying order
-// status or remaining amount (e.g. epoch processing and order matching in
-// Market), so that any orders already involved in active swaps remain
-// unmodified until new matches are recorded by the Swapper in Negotiate. As
-// such, EndMatchAndNegotiate should be called after Negotiate completes if
-// their are new matches to initiate.
-func (s *Swapper) BeginMatchAndNegotiate() {
-	s.orderMatchesMtx.Lock()
-}
-
-// EndMatchAndNegotiate releases the Swapper's lock on it's active swap counter,
-// so orders may be flagged as complete if they are involved in no active swaps
-// and have successfully completed their final swap.
-func (s *Swapper) EndMatchAndNegotiate() {
-	s.orderMatchesMtx.Unlock()
-}
-
-// isOrderComplete decrements the number of active swaps for an order, returning
-// a boolean indicating if the order is now considered complete, where complete
-// means there are no more active swaps and the order is either a market order
-// or a limit order with immediate force or zero remaining amount.
-func (s *Swapper) isOrderComplete(ord order.Order) bool {
-	s.orderMatchesMtx.Lock()
-	defer s.orderMatchesMtx.Unlock()
-
-	oid := ord.ID()
-	count := s.orderMatches[oid]
-	if count <= 1 {
-		delete(s.orderMatches, oid)
-		count = 0 // in case count was somehow <1
-	} else {
-		s.orderMatches[oid]--
-		count--
-	}
-
-	if count != 0 {
-		return false
-	}
-
-	if lo, ok := ord.(*order.LimitOrder); ok {
-		return lo.Force == order.ImmediateTiF || lo.Remaining() == 0
-	}
-	// TODO: Decide out how to deal with market and standing limit orders with
-	// multiple active swaps where not all swaps succeeded. Presently, just one
-	// successful swap will appear to have completed the order if the other
-	// swaps fail first because order remaining amount is decremented on
-	// matching (prior to start of swap negotiation). We may even wish to
-	// incentivize the user to complete remaining swaps by crediting the final
-	// successful swap as a completed order, especially since *each* revoked
-	// swap creates a virtual cancel order that counts against them. However,
-	// this could be resolved by having storage.SetOrderCompleteTime fail to
-	// stamp an order with completion time if it is in revoked status, and
-	// return that status prior to authMgr.RecordCompletedOrder.
-	return true
-}
-
-// decrementActiveSwapCount is the same as isOrderComplete without return value.
-func (s *Swapper) decrementActiveSwapCount(ord order.Order) {
-	s.orderMatchesMtx.Lock()
-	defer s.orderMatchesMtx.Unlock()
-
-	oid := ord.ID()
-	if s.orderMatches[oid] <= 1 {
-		delete(s.orderMatches, oid)
-	} else {
-		s.orderMatches[oid]--
-	}
 }
 
 func (s *Swapper) tryConfirmSwap(status *swapStatus) {
@@ -618,8 +651,8 @@ func (s *Swapper) checkInaction(assetID uint32) {
 					orderAtFault.UID(), err)
 			}
 
-			// That's one less active swap for this order.
-			s.decrementActiveSwapCount(orderAtFault)
+			// That's one less active swap for this order, and a failure.
+			s.orders.swapFailure(orderAtFault)
 
 			// Penalize for failure to act.
 			//
@@ -937,7 +970,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 		// A maker order is complete if it has force immediate or no
 		// remaining amount, indicating it is off the books.
 		lo := acker.match.Maker
-		if s.isOrderComplete(lo) {
+		if s.orders.swapSuccess(lo) {
 			s.authMgr.RecordCompletedOrder(acker.user, lo.ID(), tAck)
 			if err = s.storage.SetOrderCompleteTime(lo, tAckMS); err != nil {
 				if db.IsErrGeneralFailure(err) {
@@ -961,7 +994,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 		// which does not go on the books, (2) limit with force immediate,
 		// or (3) limit with no remaining amount.
 		ord := acker.match.Taker
-		if s.isOrderComplete(ord) {
+		if s.orders.swapSuccess(ord) {
 			s.authMgr.RecordCompletedOrder(acker.user, ord.ID(), tAck)
 			if err = s.storage.SetOrderCompleteTime(ord, tAckMS); err != nil {
 				if db.IsErrGeneralFailure(err) {
@@ -1605,7 +1638,7 @@ func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
 // this is not done, it is possible that an order may be flagged as completed if
 // a swap A completes after Matching and creation of swap B but before Negotiate
 // has a chance to record the new swap.
-func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
+func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool) {
 	// Lock trade order coins.
 	swapOrders := make([]order.Order, 0, 2*len(matchSets)) // size guess, with the single maker case
 	for _, match := range matchSets {
@@ -1648,8 +1681,12 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 	// Setting length to max possible, which is over-allocating by the number of
 	// cancels.
 	toMonitor := make([]*matchTracker, 0, len(matches))
+	var canceled []*order.LimitOrder
 	for _, match := range matches {
 		if match.Taker.Type() == order.CancelOrderType {
+			// The canceled orders must be flagged after new swaps are counted.
+			canceled = append(canceled, match.Maker)
+
 			// If this is a cancellation, there is nothing to track. Just cancel
 			// the target order by removing it from the DB. It is already
 			// removed from book by the Market.
@@ -1664,6 +1701,8 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 			}
 		} else {
 			toMonitor = append(toMonitor, match)
+			s.orders.incActiveSwapCount(match.Maker, offBook[match.Maker.ID()])
+			s.orders.incActiveSwapCount(match.Taker, offBook[match.Taker.ID()])
 		}
 
 		// Create an acker for maker and taker, sharing the same matchTracker.
@@ -1672,16 +1711,16 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet) {
 		addUserMatch(takerAck)
 	}
 
+	// Flag the canceled orders as failed and off-book if they are involved in
+	// active swaps from this or previous epochs.
+	for _, lo := range canceled {
+		s.orders.canceled(lo)
+	}
+
 	// Add the matches to the map.
 	s.matchMtx.Lock()
-	// NOTE: s.orderMatchesMtx must be locked by the caller. See
-	// BeginMatchAndNegotiate, which should be called prior to matching and
-	// order status/amount updates, and EndMatchAndNegotiate, which should be
-	// called after Negotiate.
 	for _, match := range toMonitor {
 		s.matches[match.ID().String()] = match
-		s.orderMatches[match.Maker.ID()]++
-		s.orderMatches[match.Taker.ID()]++
 	}
 	s.matchMtx.Unlock()
 

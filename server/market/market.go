@@ -47,9 +47,7 @@ const (
 
 // Swapper coordinates atomic swaps for one or more matchsets.
 type Swapper interface {
-	BeginMatchAndNegotiate()
-	Negotiate(matchSets []*order.MatchSet)
-	EndMatchAndNegotiate()
+	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
 	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
 	LockOrdersCoins(orders []order.Order)
 	TxMonitored(user account.AccountID, asset uint32, txid string) bool
@@ -1018,8 +1016,7 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 
 	// Perform order matching using the preimages to shuffle the queue.
 	m.bookMtx.Lock()
-	m.swapper.BeginMatchAndNegotiate() // Suspend Swapper's order completion checking.
-	matchTime := time.Now()            // considered as the time at which matched cancel orders are executed
+	matchTime := time.Now() // considered as the time at which matched cancel orders are executed
 	seed, matches, _, failed, doneOK, partial, booked, unbooked, updates := m.matcher.Match(m.book, ordersRevealed)
 	m.epochIdx = epoch.Epoch + 1
 	m.bookMtx.Unlock()
@@ -1030,14 +1027,6 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 		len(matches), len(partial), len(doneOK),
 		len(booked), len(unbooked), len(failed),
 	)
-	// Resume Swapper's order completion checking. If there are no new matches
-	// release the Swapper's active swap tracking for other internal updates
-	// (e.g. terminated swaps) now, otherwise after Swapper.Negotiate.
-	if len(matches) > 0 {
-		defer m.swapper.EndMatchAndNegotiate()
-	} else {
-		m.swapper.EndMatchAndNegotiate()
-	}
 
 	// Store data in epochs table, including matchTime so that cancel execution
 	// times can be obtained from the DB for cancellation ratio computation.
@@ -1125,8 +1114,25 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 		}
 	}
 
+	// The Swapper needs to know which orders it is processing are off the book
+	// so that they may be marked as complete when/if all swaps complete.
+	offBookOrders := make(map[order.OrderID]bool)
+	offBook := func(ord order.Order) bool {
+		lo, limit := ord.(*order.LimitOrder)
+		// Non-limit orders are not on the book (!limit).
+		// Immediate force limits are not on the book.
+		// Standing limits with no remaining are not on the book.
+		return !limit || lo.Force == order.ImmediateTiF || lo.Remaining() == 0
+		// Don't forget to check canceled orders too.
+	}
+
 	// Set the EpochID for each MatchSet, and record executed cancels.
 	for _, match := range matches {
+		offBookOrders[match.Taker.ID()] = offBook(match.Taker)
+		for _, lo := range match.Makers {
+			offBookOrders[lo.ID()] = offBook(lo)
+		}
+
 		// Set the epoch ID.
 		match.Epoch.Idx = uint64(epoch.Epoch)
 		match.Epoch.Dur = uint64(epoch.Duration)
@@ -1134,6 +1140,9 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 		// Record the cancel in the auth manager.
 		if co, ok := match.Taker.(*order.CancelOrder); ok {
 			m.auth.RecordCancel(co.User(), co.ID(), co.TargetOrderID, matchTime) // cancel execution time, not order's server time
+			// The order could be involved in trade match from up the epoch, but
+			// it is now off the book regardless of order type and status.
+			offBookOrders[co.TargetOrderID] = true
 		}
 	}
 
@@ -1204,7 +1213,7 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
 			epoch.Epoch, epoch.Duration)
-		m.swapper.Negotiate(matches)
+		m.swapper.Negotiate(matches, offBookOrders)
 	}
 }
 

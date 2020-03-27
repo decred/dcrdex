@@ -1155,23 +1155,23 @@ func TestSwaps(t *testing.T) {
 		}
 		t.Run("perfect limit-limit match"+sellStr, func(t *testing.T) {
 			rig.matches = tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 			testSwap(t, rig)
 		})
 		t.Run("perfect limit-market match"+sellStr, func(t *testing.T) {
 			rig.matches = tPerfectLimitMarket(uint64(1e8), uint64(1e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 			testSwap(t, rig)
 		})
 		t.Run("imperfect limit-market match"+sellStr, func(t *testing.T) {
 			// only requirement is that maker val > taker val.
 			rig.matches = tMarketPair(uint64(10e8), uint64(2e8), uint64(5e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 			testSwap(t, rig)
 		})
 		t.Run("imperfect limit-limit match"+sellStr, func(t *testing.T) {
 			rig.matches = tLimitPair(uint64(10e8), uint64(2e8), uint64(2e8), uint64(5e8), uint64(5e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 			testSwap(t, rig)
 		})
 		for _, isMarket := range []bool{true, false} {
@@ -1183,7 +1183,7 @@ func TestSwaps(t *testing.T) {
 				matchQtys := []uint64{uint64(1e8), uint64(9e8), uint64(3e8)}
 				rates := []uint64{uint64(10e8), uint64(11e8), uint64(12e8)}
 				rig.matches = tMultiMatchSet(matchQtys, rates, makerSell, isMarket)
-				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 				testSwap(t, rig)
 			})
 		}
@@ -1195,7 +1195,7 @@ func TestNoAck(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	mustBeError := makeMustBeError(t)
 	maker, taker := matchInfo.maker, matchInfo.taker
@@ -1253,7 +1253,7 @@ func TestTxWaiters(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	dummyError := fmt.Errorf("test error")
 
@@ -1423,7 +1423,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 		matchInfo := set.matchInfos[0]
 		rig.matchInfo = matchInfo
-		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 		// Step through the negotiation process. No errors should be generated.
 		ensureNilErr(rig.ackMatch_maker(true))
 		ensureNilErr(rig.ackMatch_taker(true))
@@ -1478,7 +1478,7 @@ func TestSigErrors(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	// checkResp makes sure that the specified user has a signature error response
 	// from the swapper.
@@ -1533,7 +1533,7 @@ func TestMalformedSwap(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	checkContractErr := rpcErrorChecker(t, rig, msgjson.ContractError)
 
@@ -1558,7 +1558,7 @@ func TestBadParams(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	swapper := rig.swapper
 	match := rig.getTracker()
 	user := matchInfo.maker
@@ -1599,7 +1599,7 @@ func TestCancel(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	// There should be no matchTracker
 	if rig.getTracker() != nil {
 		t.Fatalf("found matchTracker for a cancellation")
@@ -1638,7 +1638,7 @@ func TestTxMonitored(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	maker, taker := matchInfo.maker, matchInfo.taker
 
