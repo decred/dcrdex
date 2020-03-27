@@ -114,7 +114,6 @@ func mainCore(ctx context.Context) error {
 		}
 		go func() {
 			adminWebServer.Run(ctx)
-			log.Info("Stopping AdminServer...")
 			close(adminWebServerDone)
 		}()
 	} else {
