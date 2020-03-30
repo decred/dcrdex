@@ -1106,7 +1106,6 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 		t.Errorf("got %d cancels, expected %d", cancels, 0)
 	}
 
-	fmt.Println(len(client.recentOrders.orders))
 	client.mtx.Lock()
 	ord = client.recentOrders.orders[1]
 	client.mtx.Unlock()

@@ -175,10 +175,11 @@ func newOrderSwapTracker() *orderSwapTracker {
 
 // decrementActiveSwapCount decrements the number of active swaps for an order,
 // returning a boolean indicating if the order is now considered complete, where
-// complete means there are no more active swaps and the order is off-book. If
-// the number of active swaps is reduced to zero, the order is removed from the
-// tracker, and repeated calls to decrementActiveSwapCount for the order will
-// return true.
+// complete means there are no more active swaps, the order is off-book, and the
+// user is not responsible for any swap failures or premature unbooking of the
+// order. If the number of active swaps is reduced to zero, the order is removed
+// from the tracker, and repeated calls to decrementActiveSwapCount for the
+// order will return true.
 func (s *orderSwapTracker) decrementActiveSwapCount(ord order.Order, failed bool) bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -207,8 +208,11 @@ func (s *orderSwapTracker) decrementActiveSwapCount(ord order.Order, failed bool
 	return stat.offBook && !stat.hasFailed
 }
 
-// swapSuccess decrements the active swap counter for an order. The order's
-// failure and off-book flags are unchanged.
+// swapSuccess decrements the active swap counter for an order. The return value
+// indicates if the order is considered successfully complete, which is a status
+// that precludes cancellation of the order, or failure of any swaps involving
+// the order on account of the user's (in)action. The order's failure and
+// off-book flags are unchanged.
 func (s *orderSwapTracker) swapSuccess(ord order.Order) bool {
 	return s.decrementActiveSwapCount(ord, false)
 }
@@ -636,6 +640,9 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			if makerFault {
 				orderAtFault = match.Maker
 			}
+			log.Debugf("checkInaction(failMatch): swap %v failing (maker fault = %v) at %v",
+				match.ID(), makerFault, match.Status)
+
 			deletions = append(deletions, match)
 
 			// Record the end of this match's processing.
@@ -802,10 +809,18 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 		if match.Status == order.NewlyMatched {
 			nextStep = order.MakerSwapCast
 			isBaseAsset = maker.Sell
+			if len(match.Sigs.MakerMatch) == 0 {
+				log.Debugf("swap %v at status %v missing MakerMatch signature(s) needed for NewlyMatched->MakerSwapCast",
+					match.ID(), match.Status)
+			}
 			reqSigs = [][]byte{match.Sigs.MakerMatch}
 		} else /* TakerSwapCast */ {
 			nextStep = order.MakerRedeemed
 			isBaseAsset = !maker.Sell
+			if len(match.Sigs.MakerAudit) == 0 {
+				log.Debugf("swap %v at status %v missing MakerAudit signature(s) needed for TakerSwapCast->MakerRedeemed",
+					match.ID(), match.Status)
+			}
 			reqSigs = [][]byte{match.Sigs.MakerAudit}
 			ackType = msgjson.AuditRoute
 		}
@@ -819,6 +834,14 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 		if match.Status == order.MakerSwapCast {
 			nextStep = order.TakerSwapCast
 			isBaseAsset = !maker.Sell
+			if len(match.Sigs.TakerMatch) == 0 {
+				log.Debugf("swap %v at status %v missing TakerMatch signature(s) needed for MakerSwapCast->TakerSwapCast",
+					match.ID(), match.Status)
+			}
+			if len(match.Sigs.TakerAudit) == 0 {
+				log.Debugf("swap %v at status %v missing TakerAudit signature(s) needed for MakerSwapCast->TakerSwapCast",
+					match.ID(), match.Status)
+			}
 			reqSigs = [][]byte{match.Sigs.TakerMatch, match.Sigs.TakerAudit}
 			ackType = msgjson.AuditRoute
 		} else /* MakerRedeemed */ {
@@ -826,6 +849,10 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 			// Note that the swap is still considered "active" until both
 			// counterparties acknowledge the redemptions.
 			isBaseAsset = maker.Sell
+			if len(match.Sigs.TakerRedeem) == 0 {
+				log.Debugf("swap %v at status %v missing TakerRedeem signature(s) needed for MakerRedeemed->MatchComplete",
+					match.ID(), match.Status)
+			}
 			reqSigs = [][]byte{match.Sigs.TakerRedeem}
 			ackType = msgjson.RedemptionRoute
 		}
@@ -865,6 +892,9 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 		counterParty.swapAsset = maker.BaseAsset
 		checkVal = matcher.BaseToQuote(maker.Rate, match.Quantity)
 	}
+
+	log.Debugf("step(user=%v, match=%v): ready for user %v action, status %v, next %v",
+		actor.user, matchID, counterParty.user, match.Status, nextStep)
 
 	return &stepInformation{
 		match: match,
@@ -1084,6 +1114,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	stepInfo.match.Status = stepInfo.nextStep
 	stepInfo.match.mtx.Unlock()
 
+	log.Debugf("processInit: valid contract received at %v from %v for match %v, "+
+		"swapStatus %v => %v", swapTime, actor.user, matchID, stepInfo.step, stepInfo.nextStep)
+
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
@@ -1114,6 +1147,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		isAudit: true,
 	}
 	// Send the 'audit' request to the counter-party.
+	log.Debugf("processInit: sending contract 'audit' ack request to counterparty %v "+
+		"for match %v", counterParty.order.User(), matchID)
 	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, ack)
 	})
@@ -1189,6 +1224,9 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	match.Status = stepInfo.nextStep
 	match.mtx.Unlock()
 
+	log.Debugf("processRedeem: valid redemption received at %v from %v for match %v, "+
+		"swapStatus %v => %v", swapTime, actor.user, matchID, stepInfo.step, stepInfo.nextStep)
+
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
@@ -1221,6 +1259,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		isMaker: counterParty.isMaker,
 		// isAudit: false,
 	}
+	log.Debugf("processRedeem: sending contract 'redeem' ack request to counterparty %v "+
+		"for match %v", counterParty.order.User(), matchID)
 	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, ack)
 	})
@@ -1246,6 +1286,9 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	if rpcErr != nil {
 		return rpcErr
 	}
+
+	log.Debugf("handleInit: 'init' received from %v for match %v, order %v",
+		user, params.MatchID, params.OrderID)
 
 	stepInfo, rpcErr := s.step(user, params.MatchID.String())
 	if rpcErr != nil {
@@ -1327,6 +1370,9 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 		return rpcErr
 	}
 
+	log.Debugf("handleRedeem: 'redeem' received from %v for match %v, order %v",
+		user, params.MatchID, params.OrderID)
+
 	stepInfo, rpcErr := s.step(user, params.MatchID.String())
 	if rpcErr != nil {
 		return rpcErr
@@ -1377,6 +1423,7 @@ func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Mes
 // revoke revokes the match, sending the 'revoke_match' request to each client
 // and processing the acknowledgement. Match Sigs and Status are not accessed.
 func (s *Swapper) revoke(match *matchTracker) {
+	log.Infof("revoke: sending the 'revoke_match' request to each client for match %v", match.ID())
 	// Unlock the maker and taker order coins.
 	s.unlockOrderCoins(match.Taker)
 	s.unlockOrderCoins(match.Maker)
@@ -1511,6 +1558,9 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		return
 	}
 
+	log.Debugf("processMatchAcks: 'match' ack received from %v for %d matches",
+		user, len(matches))
+
 	// Verify the signature of each Acknowledgement, and store the signatures in
 	// the matchTracker of each match (messageAcker). The signature will be
 	// either a MakerMatch or TakerMatch signature depending on whether the
@@ -1531,6 +1581,8 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 		}
 		err = s.authMgr.Auth(user, sigMsg, ack.Sig)
 		if err != nil {
+			log.Warnf("processMatchAcks: 'match' ack for match %v from user %v, "+
+				" failed sig verification: %v", matchInfo.match.ID(), user, err)
 			s.respondError(msg.ID, user, msgjson.SignatureError,
 				fmt.Sprintf("signature validation error: %v", err))
 			return
@@ -1558,6 +1610,8 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 
 		// Store the signature in the matchTracker. These must be collected
 		// before the init steps begin and swap contracts are broadcasted.
+		log.Debugf("processMatchAcks: storing valid 'match' ack signature from %v (maker=%v) "+
+			"for match %v (status %v)", user, matchInfo.isMaker, matchID, matchInfo.match.Status)
 		matchInfo.match.mtx.Lock()
 		if matchInfo.isMaker {
 			matchInfo.match.Sigs.MakerMatch = ack.Sig
@@ -1565,7 +1619,6 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			matchInfo.match.Sigs.TakerMatch = ack.Sig
 		}
 		matchInfo.match.mtx.Unlock()
-
 	}
 }
 
@@ -1744,6 +1797,8 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 		// Copy the loop variables for capture by the match acknowledgement
 		// response handler.
 		u, m := user, matches
+		log.Debugf("Negotiate: sending 'match' ack request to user %v for %d matches",
+			user, len(matches))
 		s.authMgr.Request(user, req, func(_ comms.Link, msg *msgjson.Message) {
 			s.processMatchAcks(u, msg, m)
 		})

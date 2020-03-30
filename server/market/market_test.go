@@ -49,9 +49,6 @@ func (a *TAsset) BlockChannel(size int) chan uint32 { return nil }
 func (a *TAsset) InitTxSize() uint32                { return 100 }
 func (a *TAsset) CheckAddress(string) bool          { return true }
 func (a *TAsset) Run(context.Context)               {}
-func (a *TAsset) CoinIDString(coinID []byte) (string, error) {
-	return "coin", nil
-}
 func (a *TAsset) ValidateCoinID(coinID []byte) error {
 	return nil
 }

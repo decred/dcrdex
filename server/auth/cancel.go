@@ -103,20 +103,12 @@ func (lo *latestOrders) add(o *oidStamped) {
 		lo.orders = append(lo.orders[:i], append([]*oidStamped{o}, lo.orders[i:]...)...)
 	}
 
-	// if !sort.IsSorted(ordsByTimeThenID(lo.orders)) {
-	// 	panic("it's not sorted")
-	// }
-
 	// Pop one order if the slice was at capacity prior to pushing the new one.
 	if len(lo.orders) > int(lo.cap) {
 		// pop front, the oldest order
 		lo.orders[0] = nil // avoid memory leak
 		lo.orders = lo.orders[1:]
 	}
-
-	// if len(lo.orders) > int(lo.cap) {
-	// 	panic("still too long")
-	// }
 }
 
 func (lo *latestOrders) counts() (total, cancels int) {
