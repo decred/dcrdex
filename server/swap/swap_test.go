@@ -289,8 +289,8 @@ func (a *TAsset) Redemption(redemptionID, contractID []byte) (asset.Coin, error)
 	defer a.mtx.RUnlock()
 	return a.redemption, a.redemptionErr
 }
-func (a *TAsset) ValidateCoinID(coinID []byte) error {
-	return nil
+func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
+	return "", nil
 }
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil

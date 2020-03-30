@@ -1319,7 +1319,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	}
 
 	// Validate the coinID and contract script before starting a coinWaiter.
-	err = stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
+	coinStr, err := stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
 	if err != nil {
 		// TODO: ensure Backends provide sanitized errors or type information to
 		// provide more details to the client.
@@ -1330,6 +1330,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	}
 	err = stepInfo.asset.Backend.ValidateContract(params.Contract)
 	if err != nil {
+		log.Debugf("ValidateContract (asset %v, coin %v) failure: %v", stepInfo.asset.Symbol, coinStr, err)
 		// TODO: ensure Backends provide sanitized errors or type information to
 		// provide more details to the client.
 		return &msgjson.Error{
@@ -1380,7 +1381,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	// Validate the redeem coin ID before starting a coinWaiter. This does not
 	// check the blockchain, but does ensure the CoinID can be decoded for the
 	// asset before starting up a coin Waiter.
-	err = stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
+	_, err = stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
 	if err != nil {
 		// TODO: ensure Backends provide sanitized errors or type information to
 		// provide more details to the client.

@@ -306,8 +306,8 @@ func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
 }
 func (b *TBackend) Run(context.Context) {}
-func (b *TBackend) ValidateCoinID(coinID []byte) error {
-	return nil
+func (b *TBackend) ValidateCoinID(coinID []byte) (string, error) {
+	return "", nil
 }
 func (b *TBackend) ValidateContract(contract []byte) error {
 	return nil
