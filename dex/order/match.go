@@ -23,6 +23,11 @@ func (id MatchID) String() string {
 	return hex.EncodeToString(id[:])
 }
 
+// Bytes returns the match ID as a []byte.
+func (id MatchID) Bytes() []byte {
+	return id[:]
+}
+
 // Value implements the sql/driver.Valuer interface.
 func (mid MatchID) Value() (driver.Value, error) {
 	return mid[:], nil // []byte
@@ -71,15 +76,42 @@ const (
 	MatchComplete // 4
 )
 
+// String satisfies fmt.Stringer.
+func (status MatchStatus) String() string {
+	switch status {
+	case NewlyMatched:
+		return "NewlyMatched"
+	case MakerSwapCast:
+		return "MakerSwapCast"
+	case TakerSwapCast:
+		return "TakerSwapCast"
+	case MakerRedeemed:
+		return "MakerRedeemed"
+	case MatchComplete:
+		return "MatchComplete"
+	}
+	return "MatchStatusUnknown"
+}
+
 // MatchSide is the client's side in a match. It will be one of Maker or Taker.
 type MatchSide uint8
 
 const (
 	// Maker is the order that matches out of the epoch queue.
-	Maker = iota
+	Maker MatchSide = iota
 	// Taker is the order from the order book.
 	Taker
 )
+
+func (side MatchSide) String() string {
+	switch side {
+	case Maker:
+		return "Maker"
+	case Taker:
+		return "Taker"
+	}
+	return "UnknownMatchSide"
+}
 
 // Signatures holds the acknowledgement signatures required for swap
 // negotiation.

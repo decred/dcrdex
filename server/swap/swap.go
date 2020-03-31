@@ -646,7 +646,6 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 
 	// Maker broadcasts the swap contract. Sequence: NewlyMatched ->
 	// MakerSwapCast -> TakerSwapCast -> MakerRedeemed -> MatchComplete
-
 	switch match.Status {
 	case order.NewlyMatched, order.TakerSwapCast:
 		counterParty.order, actor.order = taker, maker
@@ -901,6 +900,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		OrderID:  idToBytes(counterParty.order.ID()),
 		MatchID:  matchID[:],
 		Time:     uint64(swapTimeMs),
+		CoinID:   params.CoinID,
 		Contract: params.Contract,
 	}
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)
@@ -939,11 +939,20 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Make sure that the expected output is being spent.
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	counterParty.status.mtx.RLock()
+	cpContract := counterParty.status.swap.Script()
 	cpSwapCoin := counterParty.status.swap.ID()
 	counterParty.status.mtx.RUnlock()
 
 	// Get the transaction
+	match := stepInfo.match
+	matchID := match.ID()
 	chain := stepInfo.asset.Backend
+	if !chain.ValidateSecret(params.Secret, cpContract) {
+		log.Errorf("secret validation failed (match id=%v, maker=%v, secret=%x)",
+			matchID, actor.isMaker, params.Secret)
+		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
+		return coinwaiter.DontTryAgain
+	}
 	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin)
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
@@ -953,8 +962,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		}
 		log.Warnf("Redemption error encountered for match %s, actor %s using coin ID %x to satisfy contract at %x: %v",
 			stepInfo.match.ID(), actor, params.CoinID, cpSwapCoin, err)
-		s.respondError(msg.ID, actor.user, msgjson.RedemptionError,
-			"redemption error")
+		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "redemption error")
 		return coinwaiter.DontTryAgain
 	}
 
@@ -965,17 +973,13 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	if stepInfo.actor.isMaker {
 		storFn = s.storage.SaveRedeemA // also sets match status to MakerRedeemed
 	}
-	match := stepInfo.match
-	matchID := match.ID()
 	swapTime := unixMsNow()
 	swapTimeMs := encode.UnixMilli(swapTime)
 	err = storFn(db.MatchID(match.Match), params.CoinID, swapTimeMs)
 	if err != nil {
 		log.Errorf("saving redeem transaction (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
-		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
-			"internal server error")
-		// TODO: revoke the match without penalties instead of retrying forever?
+		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "internal server error")
 		return coinwaiter.TryAgain // why not, the DB might come alive
 	}
 
@@ -1002,6 +1006,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 			OrderID: idToBytes(counterParty.order.ID()),
 			MatchID: matchID[:],
 			CoinID:  params.CoinID,
+			Secret:  params.Secret,
 		},
 		Time: uint64(encode.UnixMilli(swapTime)),
 	}
@@ -1254,18 +1259,23 @@ func extractAddress(ord order.Order) string {
 // matchNotifications creates a pair of msgjson.MatchNotification from a
 // matchTracker.
 func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
+	stamp := (match.Epoch.Idx + 1) * match.Epoch.Dur
 	return &msgjson.Match{
-			OrderID:  idToBytes(match.Maker.ID()),
-			MatchID:  idToBytes(match.ID()),
-			Quantity: match.Quantity,
-			Rate:     match.Rate,
-			Address:  extractAddress(match.Taker),
+			OrderID:    idToBytes(match.Maker.ID()),
+			MatchID:    idToBytes(match.ID()),
+			Quantity:   match.Quantity,
+			Rate:       match.Rate,
+			Address:    extractAddress(match.Taker),
+			Side:       uint8(order.Maker),
+			ServerTime: stamp,
 		}, &msgjson.Match{
-			OrderID:  idToBytes(match.Taker.ID()),
-			MatchID:  idToBytes(match.ID()),
-			Quantity: match.Quantity,
-			Rate:     match.Rate,
-			Address:  extractAddress(match.Maker),
+			OrderID:    idToBytes(match.Taker.ID()),
+			MatchID:    idToBytes(match.ID()),
+			Quantity:   match.Quantity,
+			Rate:       match.Rate,
+			Address:    extractAddress(match.Maker),
+			Side:       uint8(order.Taker),
+			ServerTime: stamp,
 		}
 }
 

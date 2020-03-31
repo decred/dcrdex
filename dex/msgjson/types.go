@@ -331,31 +331,38 @@ func (msg *Message) String() string {
 // Match is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	signable
-	OrderID  Bytes  `json:"orderid"`
-	MatchID  Bytes  `json:"matchid"`
-	Quantity uint64 `json:"quantity"`
-	Rate     uint64 `json:"rate"`
-	Address  string `json:"address"`
+	OrderID    Bytes  `json:"orderid"`
+	MatchID    Bytes  `json:"matchid"`
+	Quantity   uint64 `json:"quantity"`
+	Rate       uint64 `json:"rate"`
+	Address    string `json:"address"`
+	ServerTime uint64 `json:"tserver"`
 	// Status and Side are provided for convenience and are not part of the
 	// match serialization.
 	Status uint8 `json:"status"`
 	Side   uint8 `json:"side"`
-	// Time?
 }
 
-var _ Signable = (*Match)(nil)
+var _ Stampable = (*Match)(nil)
 
 // Serialize serializes the Match data.
 func (m *Match) Serialize() ([]byte, error) {
 	// Match serialization is orderid (32) + matchid (32) + quantity (8) + rate (8)
-	// + address (variable, guess 35). Sum = 115
-	s := make([]byte, 0, 115)
+	// + server time (8) + address (variable, guess 35). Sum = 123
+	s := make([]byte, 0, 123)
 	s = append(s, m.OrderID...)
 	s = append(s, m.MatchID...)
 	s = append(s, uint64Bytes(m.Quantity)...)
 	s = append(s, uint64Bytes(m.Rate)...)
+	s = append(s, uint64Bytes(m.ServerTime)...)
 	s = append(s, []byte(m.Address)...)
 	return s, nil
+}
+
+// Stamp sets the server timestamp and epoch ID. Partially satisfies the
+// Stampable interface.
+func (m *Match) Stamp(t uint64) {
+	m.ServerTime = t
 }
 
 // Init is the payload for a client-originating InitRoute request.
@@ -389,6 +396,7 @@ type Audit struct {
 	OrderID  Bytes  `json:"orderid"`
 	MatchID  Bytes  `json:"matchid"`
 	Time     uint64 `json:"timestamp"`
+	CoinID   Bytes  `json:"coinid"`
 	Contract Bytes  `json:"contract"`
 }
 
@@ -397,11 +405,12 @@ var _ Signable = (*Audit)(nil)
 // Serialize serializes the Audit data.
 func (audit *Audit) Serialize() ([]byte, error) {
 	// Audit serialization is orderid (32) + matchid (32) + time (8) +
-	// contract (97 ish) = 169
-	s := make([]byte, 0, 169)
+	// coin ID (36) + contract (97 ish) = 205
+	s := make([]byte, 0, 205)
 	s = append(s, audit.OrderID...)
 	s = append(s, audit.MatchID...)
 	s = append(s, uint64Bytes(audit.Time)...)
+	s = append(s, audit.CoinID...)
 	s = append(s, audit.Contract...)
 	return s, nil
 }
@@ -430,6 +439,7 @@ type Redeem struct {
 	OrderID Bytes `json:"orderid"`
 	MatchID Bytes `json:"matchid"`
 	CoinID  Bytes `json:"coinid"`
+	Secret  Bytes `json:"secret"`
 	// Time    uint64 `json:"timestamp"`
 }
 
@@ -437,13 +447,14 @@ var _ Signable = (*Redeem)(nil)
 
 // Serialize serializes the Redeem data.
 func (redeem *Redeem) Serialize() ([]byte, error) {
-	// Init serialization is orderid (32) + matchid (32) + txid (32) + vout (4) = 100
+	// Redeem serialization is orderid (32) + matchid (32) + coin ID (36) + secret
+	// (32) = 132
 	s := make([]byte, 0, 100)
 	s = append(s, redeem.OrderID...)
 	s = append(s, redeem.MatchID...)
-	s = append(s, []byte(redeem.CoinID)...)
+	s = append(s, redeem.CoinID...)
 	//s = append(s, uint64Bytes(redeem.Time)...)
-	return s, nil
+	return append(s, redeem.Secret...), nil
 }
 
 // Redemption is the payload for a DEX-originating RedemptionRoute request.

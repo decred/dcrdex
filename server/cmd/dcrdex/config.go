@@ -41,7 +41,7 @@ const (
 
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
-	defaultBroadcastTimeout = 10 * time.Second
+	defaultBroadcastTimeout = time.Minute
 )
 
 var (

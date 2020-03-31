@@ -241,6 +241,11 @@ func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return nil
 }
 
+// Script returns the UTXO's redeem script.
+func (utxo *UTXO) Script() []byte {
+	return utxo.redeemScript
+}
+
 type pkMatch struct {
 	pubkey  []byte
 	sigType dcrec.SignatureType

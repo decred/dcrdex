@@ -129,7 +129,7 @@ type configResponse struct {
 
 func newConfigResponse(cfg *DexConf, cfgAssets []msgjson.Asset, cfgMarkets []msgjson.Market) (*configResponse, error) {
 	configMsg := &msgjson.ConfigResult{
-		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Seconds()),
+		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
 		CancelMax:        cfg.CancelThreshold,
 		RegFeeConfirms:   uint16(cfg.RegFeeConfirms),
 		Assets:           cfgAssets,

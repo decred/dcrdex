@@ -278,20 +278,23 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	}
 
 	// Calculate the fees and check that the utxo sum is enough.
-	var reqVal uint64
-	if sell {
-		reqVal = calc.RequiredFunds(market.Quantity, spendSize, &assets.funding.Asset)
-	} else {
+	reqVal := calc.RequiredFunds(market.Quantity, spendSize, &assets.funding.Asset)
+	if !sell {
 		// This is a market buy order, so the quantity gets special handling.
 		// 1. The quantity is in units of the quote asset.
 		// 2. The quantity has to satisfy the market buy buffer.
 		midGap := tunnel.MidGap()
 		buyBuffer := tunnel.MarketBuyBuffer()
-		reqVal = matcher.QuoteToBase(midGap, market.Quantity)
 		lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
-		minReq := matcher.QuoteToBase(midGap, lotWithBuffer)
-		if reqVal < minReq {
-			return msgjson.NewError(msgjson.FundingError, "order quantity does not satisfy market buy buffer")
+		minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
+
+		// TODO: I'm pretty sure that if there are no orders on the book, the midGap
+		// will be zero, and so will minReq, meaning any Quanity would be accepted.
+		// Is this a security concern?
+
+		if market.Quantity < minReq {
+			errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", reqVal, minReq, midGap)
+			return msgjson.NewError(msgjson.FundingError, errStr)
 		}
 	}
 	if valSum < reqVal {

@@ -285,10 +285,11 @@ func (a *TAsset) ValidateCoinID(coinID []byte) error {
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil
 }
-func (a *TAsset) BlockChannel(size int) chan uint32 { return a.bChan }
-func (a *TAsset) InitTxSize() uint32                { return 100 }
-func (a *TAsset) CheckAddress(string) bool          { return true }
-func (a *TAsset) Run(context.Context)               {}
+func (a *TAsset) BlockChannel(size int) chan uint32           { return a.bChan }
+func (a *TAsset) InitTxSize() uint32                          { return 100 }
+func (a *TAsset) CheckAddress(string) bool                    { return true }
+func (a *TAsset) Run(context.Context)                         {}
+func (a *TAsset) ValidateSecret(secret, contract []byte) bool { return true }
 
 func (a *TAsset) setContractErr(err error) {
 	a.mtx.Lock()
@@ -337,6 +338,8 @@ func (coin *TCoin) SpendSize() uint32                             { return 0 }
 func (coin *TCoin) FeeRate() uint64 {
 	return 1
 }
+
+func (coin *TCoin) Script() []byte { return nil }
 
 func TNewAsset(backend asset.Backend) *asset.BackedAsset {
 	return &asset.BackedAsset{

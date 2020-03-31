@@ -310,6 +310,8 @@ func (b *TBackend) ValidateContract(contract []byte) error {
 	return nil
 }
 
+func (b *TBackend) ValidateSecret(secret, contract []byte) bool { return true }
+
 type tUTXO struct {
 	val uint64
 }
@@ -329,6 +331,7 @@ func (u *tUTXO) TxID() string                    { return "" }
 func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
 func (u *tUTXO) FeeRate() uint64                 { return 0 }
+func (u *tUTXO) Script() []byte                  { return nil }
 
 type tUser struct {
 	acct    account.AccountID
@@ -726,7 +729,8 @@ func TestMarketStartProcessStop(t *testing.T) {
 	// First check an order that doesn't satisfy the market buy buffer. For
 	// testing, the market buy buffer is set to 1.5.
 	ensureErr("market buy buffer unsatisfied", sendMarket(), msgjson.FundingError)
-	mkt.Quantity = qty
+	mktBuyQty := matcher.BaseToQuote(midGap, uint64(dcrLotSize*1.6))
+	mkt.Quantity = mktBuyQty
 	rpcErr = sendMarket()
 	if rpcErr != nil {
 		t.Fatalf("error for buy order: %s", rpcErr.Message)
@@ -745,10 +749,11 @@ func TestMarketStartProcessStop(t *testing.T) {
 		},
 		T: order.Trade{
 			Sell:     false,
-			Quantity: qty,
+			Quantity: mktBuyQty,
 			Address:  dcrAddr,
 		},
 	}
+
 	// Get the last order submitted to the epoch
 	oRecord := oRig.market.pop()
 	if oRecord == nil {

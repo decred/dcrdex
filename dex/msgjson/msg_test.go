@@ -14,11 +14,12 @@ func TestMatch(t *testing.T) {
 	oid, _ := hex.DecodeString("2219c5f3a03407c87211748c884404e2f466cba19616faca1cda0010ca5db0d3")
 	mid, _ := hex.DecodeString("4969784b00a59dd0340952c9b8f52840fbb32e9b51d4f6e18cbec7f50c8a3ed7")
 	match := &Match{
-		OrderID:  oid,
-		MatchID:  mid,
-		Quantity: 5e8,
-		Rate:     uint64(2e8),
-		Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+		OrderID:    oid,
+		MatchID:    mid,
+		Quantity:   5e8,
+		Rate:       uint64(2e8),
+		ServerTime: 1585043380123,
+		Address:    "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 	}
 	exp := []byte{
 		// Order ID 32 bytes
@@ -33,6 +34,8 @@ func TestMatch(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x1d, 0xcd, 0x65, 0x00,
 		// rate 8 bytes
 		0x00, 0x00, 0x00, 0x00, 0x0b, 0xeb, 0xc2, 0x00,
+		// timestamp 8 bytes
+		0x00, 0x00, 0x01, 0x71, 0x0b, 0xf2, 0x97, 0x9b,
 		// address - utf-8 encoding
 		0x44, 0x63, 0x71, 0x58, 0x73, 0x77, 0x6a, 0x54, 0x50, 0x6e, 0x55, 0x63, 0x64,
 		0x34, 0x46, 0x52, 0x43, 0x6b, 0x58, 0x34, 0x76, 0x52, 0x4a, 0x78, 0x6d, 0x56,
@@ -69,6 +72,9 @@ func TestMatch(t *testing.T) {
 	}
 	if matchBack.Rate != match.Rate {
 		t.Fatal(matchBack.Rate, match.Rate)
+	}
+	if matchBack.ServerTime != match.ServerTime {
+		t.Fatal(matchBack.ServerTime, match.ServerTime)
 	}
 	if matchBack.Address != match.Address {
 		t.Fatal(matchBack.Address, match.Address)
@@ -139,14 +145,17 @@ func TestInit(t *testing.T) {
 }
 
 func TestAudit(t *testing.T) {
-	// serialization: orderid (32) + matchid (32) + time (8) + contract (97 ish)
+	// serialization: orderid (32) + matchid (32) + time (8) + coin ID (36)
+	// + contract (97 ish)
 	oid, _ := hex.DecodeString("d6c752bb34d833b6e0eb4d114d690d044f8ab3f6de9defa08e9d7d237f670fe4")
 	mid, _ := hex.DecodeString("79f84ef6c60e72edd305047c015d7b7ade64525a301fdac136976f05edb6172b")
+	coinID, _ := hex.DecodeString("3cdabd9bd62dfbd7d8b020d5de4e643b439886f4b0dc86cb8a56dff8e61c5ec333487a97")
 	contract, _ := hex.DecodeString("fc99f576f8e0e5dc")
 	audit := &Audit{
 		OrderID:  oid,
 		MatchID:  mid,
 		Time:     1570705920,
+		CoinID:   coinID,
 		Contract: contract,
 	}
 
@@ -161,6 +170,10 @@ func TestAudit(t *testing.T) {
 		0x36, 0x97, 0x6f, 0x05, 0xed, 0xb6, 0x17, 0x2b,
 		// Timestamp 8 bytes
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0x9f, 0x12, 0x00,
+		// Coin ID
+		0x3c, 0xda, 0xbd, 0x9b, 0xd6, 0x2d, 0xfb, 0xd7, 0xd8, 0xb0, 0x20, 0xd5,
+		0xde, 0x4e, 0x64, 0x3b, 0x43, 0x98, 0x86, 0xf4, 0xb0, 0xdc, 0x86, 0xcb,
+		0x8a, 0x56, 0xdf, 0xf8, 0xe6, 0x1c, 0x5e, 0xc3, 0x33, 0x48, 0x7a, 0x97,
 		// Contract 8 bytes (shortened for testing)
 		0xfc, 0x99, 0xf5, 0x76, 0xf8, 0xe0, 0xe5, 0xdc,
 	}
@@ -246,15 +259,17 @@ func TestRevokeMatch(t *testing.T) {
 }
 
 func TestRedeem(t *testing.T) {
-	// serialization: orderid (32) + matchid (32) + txid (probably 64) + vout (4)
-	// + timestamp (8)
+	// Redeem serialization is orderid (32) + matchid (32) + coin ID (36) +
+	// secret (32) = 132
 	oid, _ := hex.DecodeString("ee17139af2d86bd6052829389c0531f71042ed0b0539e617213a9a7151215a1b")
 	mid, _ := hex.DecodeString("6ea1227b03d7bf05ce1e23f3edf57368f69ba9ee0cc069f09ab0952a36d964c5")
 	coinid, _ := hex.DecodeString("28cb86e678f647cc88da734eed11286dab18b8483feb04580e3cbc90555a004700000005")
+	secret, _ := hex.DecodeString("f1df467afb1e0803cefa25e76cf00e07a99416087f6c9d10921bbbb55be5ded9")
 	redeem := &Redeem{
 		OrderID: oid,
 		MatchID: mid,
 		CoinID:  coinid,
+		Secret:  secret,
 	}
 
 	exp := []byte{
@@ -270,6 +285,10 @@ func TestRedeem(t *testing.T) {
 		0x28, 0xcb, 0x86, 0xe6, 0x78, 0xf6, 0x47, 0xcc, 0x88, 0xda, 0x73, 0x4e,
 		0xed, 0x11, 0x28, 0x6d, 0xab, 0x18, 0xb8, 0x48, 0x3f, 0xeb, 0x04, 0x58,
 		0x0e, 0x3c, 0xbc, 0x90, 0x55, 0x5a, 0x00, 0x47, 0x00, 0x00, 0x00, 0x05,
+		// Secret 32 bytes
+		0xf1, 0xdf, 0x46, 0x7a, 0xfb, 0x1e, 0x08, 0x03, 0xce, 0xfa, 0x25, 0xe7,
+		0x6c, 0xf0, 0x0e, 0x07, 0xa9, 0x94, 0x16, 0x08, 0x7f, 0x6c, 0x9d, 0x10,
+		0x92, 0x1b, 0xbb, 0xb5, 0x5b, 0xe5, 0xde, 0xd9,
 	}
 
 	b, err := redeem.Serialize()

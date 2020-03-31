@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/client/db/bolt"
 	book "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -130,11 +131,154 @@ func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, pr
 	return
 }
 
-// coinWaiter is a message waiting to be stamped, signed, and sent once a
-// specified coin has the requisite confirmations. The coinWaiter is similar to
-// dcrdex/server/coinwaiter.Waiter, but is different enough to warrant a
+// signAndRequest signs and sends the request, unmarshaling the response into
+// the provided interface.
+func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result interface{}) error {
+	err := sign(dc.acct.privKey, signable)
+	if err != nil {
+		return fmt.Errorf("error signing %s message: %v", route, err)
+	}
+	req, err := msgjson.NewRequest(dc.NextID(), route, signable)
+	if err != nil {
+		return fmt.Errorf("error encoding %s request: %v", route, err)
+	}
+	errChan := make(chan error, 1)
+	err = dc.Request(req, func(msg *msgjson.Message) {
+		errChan <- msg.UnmarshalResult(result)
+	})
+	if err != nil {
+		return err
+	}
+	err = extractError(errChan, requestTimeout, route)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// ack sends and Acknowledgement for a match-related request.
+func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjson.Signable) error {
+	ack := &msgjson.Acknowledgement{
+		MatchID: matchID[:],
+	}
+	sigMsg, err := signable.Serialize()
+	if err != nil {
+		return fmt.Errorf("Serialize error - %v", err)
+	}
+	ack.Sig, err = dc.acct.sign(sigMsg)
+	if err != nil {
+		return fmt.Errorf("sign error - %v", err)
+	}
+	msg, err := msgjson.NewResponse(msgID, ack, nil)
+	if err != nil {
+		return fmt.Errorf("NewResponse error - %v", err)
+	}
+	err = dc.Send(msg)
+	if err != nil {
+		return fmt.Errorf("Send error - %v", err)
+	}
+	return nil
+}
+
+// trackerMatches are an intermediate structure used by the dexConnection to
+// sort incoming match notifications.
+type trackerMatches struct {
+	tracker    *trackedTrade
+	msgMatches []*msgjson.Match
+	cancel     *msgjson.Match
+}
+
+// parseMatches sorts the list of matches and associates them with a trade.
+func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match) (map[order.OrderID]*trackerMatches, []msgjson.Acknowledgement, error) {
+	var acks []msgjson.Acknowledgement
+	matches := make(map[order.OrderID]*trackerMatches)
+	var errs []string
+	for _, msgMatch := range msgMatches {
+		var oid order.OrderID
+		copy(oid[:], msgMatch.OrderID)
+		tracker, _, isCancel := dc.findOrder(oid)
+		if tracker == nil {
+			errs = append(errs, "order "+oid.String()+" not found")
+			continue
+		}
+		sigMsg, err := msgMatch.Serialize()
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		err = dc.acct.checkSig(sigMsg, msgMatch.Sig)
+		if err != nil {
+			return nil, nil, fmt.Errorf("parseMatches: %v", err)
+		}
+		sig, err := dc.acct.sign(sigMsg)
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		acks = append(acks, msgjson.Acknowledgement{
+			MatchID: msgMatch.MatchID,
+			Sig:     sig,
+		})
+
+		trackerID := tracker.ID()
+		match := matches[trackerID]
+		if match == nil {
+			match = &trackerMatches{
+				tracker: tracker,
+			}
+			matches[trackerID] = match
+		}
+		if isCancel {
+			match.cancel = msgMatch
+		} else {
+			match.msgMatches = append(match.msgMatches, msgMatch)
+		}
+	}
+	var err error
+	if len(errs) > 0 {
+		err = fmt.Errorf("match errors: %s", strings.Join(errs, ", "))
+	}
+	return matches, acks, err
+}
+
+// runMatches runs the sorted matches returned from parseMatches.
+func (dc *dexConnection) runMatches(matches map[order.OrderID]*trackerMatches) error {
+	for _, match := range matches {
+		if len(match.msgMatches) > 0 {
+			err := match.tracker.negotiate(match.msgMatches)
+			if err != nil {
+				return err
+			}
+		}
+		if match.cancel != nil {
+			err := match.tracker.processCancelMatch(match.cancel)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// tickAsset checks open matches related to a specific asset for needed action.
+func (dc *dexConnection) tickAsset(assetID uint32) {
+	dc.tradeMtx.RLock()
+	defer dc.tradeMtx.RUnlock()
+	for _, trade := range dc.trades {
+		if trade.Base() == assetID || trade.Quote() == assetID {
+			err := trade.tick()
+			if err != nil {
+				log.Errorf("%s tick error: %v", dc.acct.url, err)
+			}
+		}
+	}
+}
+
+// blockWaiter is a message waiting to be stamped, signed, and sent once a
+// specified coin has the requisite confirmations. The blockWaiter is similar to
+// dcrdex/server/blockWaiter.Waiter, but is different enough to warrant a
 // separate type.
-type coinWaiter struct {
+type blockWaiter struct {
 	assetID uint32
 	trigger func() (bool, error)
 	action  func(error)
@@ -161,23 +305,27 @@ type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
 	cfg           *Config
-	connMtx       sync.RWMutex
-	conns         map[string]*dexConnection
 	pendingTimer  *time.Timer
 	pendingReg    *dexConnection
 	db            db.DB
 	certs         map[string]string
-	wallets       map[uint32]*xcWallet
-	walletMtx     sync.RWMutex
 	loggerMaker   *dex.LoggerMaker
 	net           dex.Network
-	waiterMtx     sync.Mutex
-	waiters       map[uint64]*coinWaiter
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
-	userMtx       sync.RWMutex
-	user          *User
 	newCrypter    func(string) encrypt.Crypter
 	reCrypter     func(string, []byte) (encrypt.Crypter, error)
+
+	connMtx sync.RWMutex
+	conns   map[string]*dexConnection
+
+	walletMtx sync.RWMutex
+	wallets   map[uint32]*xcWallet
+
+	waiterMtx    sync.Mutex
+	blockWaiters map[uint64]*blockWaiter
+
+	userMtx sync.RWMutex
+	user    *User
 }
 
 // New is the constructor for a new Core.
@@ -188,14 +336,14 @@ func New(cfg *Config) (*Core, error) {
 		return nil, fmt.Errorf("database initialization error: %v", err)
 	}
 	core := &Core{
-		cfg:         cfg,
-		db:          db,
-		certs:       cfg.Certs,
-		conns:       make(map[string]*dexConnection),
-		wallets:     make(map[uint32]*xcWallet),
-		net:         cfg.Net,
-		loggerMaker: cfg.LoggerMaker,
-		waiters:     make(map[uint64]*coinWaiter),
+		cfg:          cfg,
+		db:           db,
+		certs:        cfg.Certs,
+		conns:        make(map[string]*dexConnection),
+		wallets:      make(map[uint32]*xcWallet),
+		net:          cfg.Net,
+		loggerMaker:  cfg.LoggerMaker,
+		blockWaiters: make(map[uint64]*blockWaiter),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
@@ -727,7 +875,7 @@ func (c *Core) Register(form *Registration) (error, <-chan error) {
 		dc.acct.pay()
 		// New account won't have any active negotiations, so OK to discard first
 		// first return value from authDEX.
-		_, err = c.authDEX(dc)
+		err = c.authDEX(dc)
 		errChan <- err
 	})
 	c.refreshUser()
@@ -749,10 +897,10 @@ func (c *Core) InitializeClient(pw string) error {
 }
 
 // Login logs the user in, decrypting the account keys for all known DEXes.
-func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
+func (c *Core) Login(pw string) (err error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var wg sync.WaitGroup
 	var mtx sync.Mutex
@@ -778,14 +926,13 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
-			n, err := c.authDEX(dc)
+			err := c.authDEX(dc)
 			if err != nil {
 				mtx.Lock()
 				errs = append(errs, fmt.Sprintf("%s: %v", dc.acct.url, err))
 				mtx.Unlock()
 				return
 			}
-			negotiations = append(negotiations, n...)
 		}(dc)
 	}
 	wg.Wait()
@@ -793,7 +940,7 @@ func (c *Core) Login(pw string) (negotiations []Negotiation, err error) {
 		err = fmt.Errorf("authorization errors: %s", strings.Join(errs, ", "))
 	}
 	c.refreshUser()
-	return negotiations, err
+	return err
 }
 
 var waiterID uint64
@@ -801,7 +948,7 @@ var waiterID uint64
 func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(error)) {
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
-	c.waiters[atomic.AddUint64(&waiterID, 1)] = &coinWaiter{
+	c.blockWaiters[atomic.AddUint64(&waiterID, 1)] = &blockWaiter{
 		assetID: assetID,
 		trigger: trigger,
 		action:  action,
@@ -897,40 +1044,25 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	if !found {
 		return nil, fmt.Errorf("unknown DEX %s", form.DEX)
 	}
-	baseAsset, found := dc.assets[form.Base]
-	if !found {
-		return nil, fmt.Errorf("unknown base asset %d -> %s for %s", form.Base, unbip(form.Base), form.DEX)
-	}
-	quoteAsset, found := dc.assets[form.Quote]
-	if !found {
-		return nil, fmt.Errorf("unknown quote asset %d -> %s for %s", form.Quote, unbip(form.Quote), form.DEX)
-	}
 
-	// We actually care less about base/quote, and more about from/to, which
-	// depends on whether this is a buy or sell order.
-	fromID, toID, fromAsset := form.Base, form.Quote, baseAsset
 	rate, qty := form.Rate, form.Qty
-	if !form.Sell {
-		fromID, toID, fromAsset = toID, fromID, quoteAsset
-	}
 	if form.IsLimit && rate == 0 {
 		return nil, fmt.Errorf("zero-rate order not allowed")
 	}
 
-	// Connect and open the wallets if needed.
-	fromWallet, err := c.connectedWallet(fromID)
+	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
 		return nil, err
 	}
+
+	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
+	fromID, toID := fromWallet.AssetID, toWallet.AssetID
+
 	if !fromWallet.unlocked() {
 		err = unlockWallet(fromWallet, crypter)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unlock %s wallet", unbip(fromID))
 		}
-	}
-	toWallet, err := c.connectedWallet(toID)
-	if err != nil {
-		return nil, err
 	}
 	if !toWallet.unlocked() {
 		err = unlockWallet(toWallet, crypter)
@@ -946,14 +1078,17 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	}
 
 	// Fund the order and prepare the coins.
-	coins, err := fromWallet.Fund(qty, fromAsset)
+	fundQty := qty
+	if form.IsLimit && !form.Sell {
+		fundQty = calc.BaseToQuote(rate, fundQty)
+	}
+	coins, err := fromWallet.Fund(fundQty, wallets.fromAsset)
 	if err != nil {
 		return nil, err
 	}
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
-		var b []byte = coins[i].ID()
-		coinIDs = append(coinIDs, b)
+		coinIDs = append(coinIDs, []byte(coins[i].ID()))
 	}
 	msgCoins, err := messageCoins(fromWallet, coins)
 	if err != nil {
@@ -995,7 +1130,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 			T: *trade,
 		}
 	}
-	err = order.ValidateOrder(ord, order.OrderStatusEpoch, baseAsset.LotSize)
+	err = order.ValidateOrder(ord, order.OrderStatusEpoch, wallets.baseAsset.LotSize)
 	if err != nil {
 		return nil, err
 	}
@@ -1005,7 +1140,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 
 	// Send and get the result.
 	var result = new(msgjson.OrderResult)
-	err = c.signAndRequest(msgOrder, dc, route, result)
+	err = dc.signAndRequest(msgOrder, route, result)
 	if err != nil {
 		return nil, err
 	}
@@ -1027,7 +1162,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	}
 
 	// Store the order.
-	err = c.db.UpdateOrder(&db.MetaOrder{
+	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusEpoch,
 			DEX:    dc.acct.url,
@@ -1037,14 +1172,15 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 			},
 		},
 		Order: ord,
-	})
+	}
+	err = c.db.UpdateOrder(dbOrder)
 	if err != nil {
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
 		return nil, fmt.Errorf("Database error. order abandoned")
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(ord, dc, preImg)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, c.db, wallets, coins)
 	coreOrder, _ := tracker.coreOrder()
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -1055,6 +1191,57 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	c.refreshUser()
 
 	return coreOrder, nil
+}
+
+// walletSet is a pair of wallets with asset configurations identified in useful
+// ways.
+type walletSet struct {
+	baseAsset  *dex.Asset
+	quoteAsset *dex.Asset
+	fromWallet *xcWallet
+	fromAsset  *dex.Asset
+	toWallet   *xcWallet
+	toAsset    *dex.Asset
+}
+
+// walletSet constructs a walletSet.
+func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, error) {
+	baseAsset, found := dc.assets[baseID]
+	if !found {
+		return nil, fmt.Errorf("unknown base asset %d -> %s for %s", baseID, unbip(baseID), dc.acct.url)
+	}
+	quoteAsset, found := dc.assets[quoteID]
+	if !found {
+		return nil, fmt.Errorf("unknown quote asset %d -> %s for %s", quoteID, unbip(quoteID), dc.acct.url)
+	}
+
+	// Connect and open the wallets if needed.
+	baseWallet, found := c.wallet(baseID)
+	if !found {
+		return nil, fmt.Errorf("%s wallet not found", unbip(baseID))
+	}
+	quoteWallet, found := c.wallet(quoteID)
+	if !found {
+		return nil, fmt.Errorf("%s wallet not found", unbip(quoteID))
+	}
+
+	// We actually care less about base/quote, and more about from/to, which
+	// depends on whether this is a buy or sell order.
+	fromAsset, toAsset := baseAsset, quoteAsset
+	fromWallet, toWallet := baseWallet, quoteWallet
+	if !sell {
+		fromAsset, toAsset = quoteAsset, baseAsset
+		fromWallet, toWallet = quoteWallet, baseWallet
+	}
+
+	return &walletSet{
+		baseAsset:  baseAsset,
+		quoteAsset: quoteAsset,
+		fromWallet: fromWallet,
+		fromAsset:  fromAsset,
+		toWallet:   toWallet,
+		toAsset:    toAsset,
+	}, nil
 }
 
 // Cancel is used to send a cancel order which cancels a limit order.
@@ -1100,7 +1287,7 @@ func (c *Core) Cancel(pw string, tradeID string) error {
 	// Create and send the order message. Check the response before using it.
 	route, msgOrder := messageOrder(co, nil)
 	var result = new(msgjson.OrderResult)
-	err = c.signAndRequest(msgOrder, tracker.dc, route, result)
+	err = tracker.dc.signAndRequest(msgOrder, route, result)
 	if err != nil {
 		return err
 	}
@@ -1148,33 +1335,8 @@ func (c *Core) findDEXOrder(oid order.OrderID) (*dexConnection, *trackedTrade, b
 	return nil, nil, false
 }
 
-// signAndRequest signs and sends the request, unmarshaling the response into
-// the provided interface.
-func (c *Core) signAndRequest(signable msgjson.Signable, dc *dexConnection, route string, result interface{}) error {
-	err := sign(dc.acct.privKey, signable)
-	if err != nil {
-		return fmt.Errorf("error signing %s message: %v", route, err)
-	}
-	req, err := msgjson.NewRequest(dc.NextID(), route, signable)
-	if err != nil {
-		return fmt.Errorf("error encoding %s request: %v", route, err)
-	}
-	errChan := make(chan error, 1)
-	err = dc.Request(req, func(msg *msgjson.Message) {
-		errChan <- msg.UnmarshalResult(result)
-	})
-	if err != nil {
-		return err
-	}
-	err = extractError(errChan, requestTimeout, route)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // authDEX authenticates the connection for a DEX.
-func (c *Core) authDEX(dc *dexConnection) ([]Negotiation, error) {
+func (c *Core) authDEX(dc *dexConnection) error {
 	// Prepare and sign the message for the 'connect' route.
 	acctID := dc.acct.ID()
 	payload := &msgjson.Connect{
@@ -1184,17 +1346,17 @@ func (c *Core) authDEX(dc *dexConnection) ([]Negotiation, error) {
 	}
 	b, err := payload.Serialize()
 	if err != nil {
-		return nil, fmt.Errorf("error serializing 'connect' message: %v", err)
+		return fmt.Errorf("error serializing 'connect' message: %v", err)
 	}
 	sig, err := dc.acct.sign(b)
 	if err != nil {
-		return nil, fmt.Errorf("signing error: %v", err)
+		return fmt.Errorf("signing error: %v", err)
 	}
 	payload.SetSig(sig)
 	// Send the 'connect' request.
 	req, err := msgjson.NewRequest(dc.NextID(), msgjson.ConnectRoute, payload)
 	if err != nil {
-		return nil, fmt.Errorf("error encoding 'connect' request: %v", err)
+		return fmt.Errorf("error encoding 'connect' request: %v", err)
 	}
 	errChan := make(chan error, 1)
 	var result = new(msgjson.ConnectResult)
@@ -1203,39 +1365,22 @@ func (c *Core) authDEX(dc *dexConnection) ([]Negotiation, error) {
 	})
 	// Check the request error.
 	if err != nil {
-		return nil, err
+		return err
 	}
 	// Check the response error.
 	err = extractError(errChan, requestTimeout, "connect")
 	if err != nil {
-		return nil, fmt.Errorf("'connect' error: %v", err)
+		return fmt.Errorf("'connect' error: %v", err)
 	}
 	log.Debugf("authenticated connection to %s", dc.acct.url)
 	// Set the account as authenticated.
 	dc.acct.auth()
-	// Prepare the trade Negotiations.
-	negotiations := make([]Negotiation, 0, len(result.Matches))
-	var errs []string
-	dc.tradeMtx.Lock()
-	defer dc.tradeMtx.Unlock()
-	for _, msgMatch := range result.Matches {
-		var oid order.OrderID
-		copy(oid[:], msgMatch.OrderID)
-		tracker, found := dc.trades[oid]
-		if !found {
-			errs = append(errs, "order "+msgMatch.OrderID.String()+" does not have a matching active order")
-			continue
-		}
-		err := tracker.negotiate(c.ctx, msgMatch)
-		if err != nil {
-			errs = append(errs, err.Error())
-			continue
-		}
+
+	matches, _, err := dc.parseMatches(result.Matches)
+	if err != nil {
+		log.Error(err)
 	}
-	if len(errs) > 0 {
-		err = fmt.Errorf("errors beginning match negotiations: %s", strings.Join(errs, ", "))
-	}
-	return negotiations, err
+	return dc.runMatches(matches)
 }
 
 func (c *Core) Sync(dex string, base, quote uint32) (chan *BookUpdate, error) {
@@ -1389,7 +1534,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 			log.Infof("Fee paid at %s", dc.acct.url)
 			// dc.acct.pay() and c.authDEX????
 			dc.acct.pay()
-			_, err = c.authDEX(dc)
+			err = c.authDEX(dc)
 			if err != nil {
 				log.Errorf("fee paid, but failed to authenticate connection to %s", dc.acct.url)
 			}
@@ -1414,7 +1559,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		log.Infof("waiter: Fee paid at %s", dc.acct.url)
 		// New account won't have any active negotiations, so OK to discard first
 		// first return value from authDEX.
-		_, err = c.authDEX(dc)
+		err = c.authDEX(dc)
 		if err != nil {
 			log.Errorf("fee paid, but failed to authenticate connection to %s", dc.acct.url)
 		}
@@ -1432,14 +1577,37 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	cancelPreimages := make(map[order.OrderID]order.Preimage)
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
 	for _, dbOrder := range dbOrders {
-		oid := dbOrder.Order.ID()
+		ord, md := dbOrder.Order, dbOrder.MetaData
+		oid := ord.ID()
 		var preImg order.Preimage
-		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-		if co, ok := dbOrder.Order.(*order.CancelOrder); ok {
+		copy(preImg[:], md.Proof.Preimage)
+		if co, ok := ord.(*order.CancelOrder); ok {
 			cancels[co.TargetOrderID] = co
 			cancelPreimages[co.TargetOrderID] = preImg
 		} else {
-			trackers[oid] = newTrackedTrade(dbOrder.Order, dc, preImg)
+			// Make sure we have the necessary wallets.
+			wallets, err := c.walletSet(dc, ord.Base(), ord.Quote(), ord.Trade().Sell)
+			if err != nil {
+				log.Errorf("wallet retrieval error for active order %s: %v", oid, err)
+				continue
+			}
+			coinIDs := ord.Trade().Coins
+			if len(md.ChangeCoin) != 0 {
+				coinIDs = []order.CoinID{md.ChangeCoin}
+			}
+			coins := make(asset.Coins, 0, len(coinIDs))
+			if len(coinIDs) > 0 {
+				byteIDs := make([]dex.Bytes, 0, len(coinIDs))
+				for _, cid := range coinIDs {
+					byteIDs = append(byteIDs, []byte(cid))
+				}
+				_, err = wallets.fromWallet.FundingCoins(byteIDs)
+				log.Errorf("source coins retrieval error for %s: %v", oid, err)
+				continue
+			}
+			var preImg order.Preimage
+			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
+			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, c.db, wallets, coins)
 		}
 	}
 	for oid := range cancels {
@@ -1697,8 +1865,8 @@ var reqHandlers = map[string]routeHandler{
 	msgjson.MatchProofRoute:  handleMatchProofMsg,
 	msgjson.PreimageRoute:    handlePreimageRequest,
 	msgjson.MatchRoute:       handleMatchRoute,
-	msgjson.AuditRoute:       nil,
-	msgjson.RedemptionRoute:  nil,
+	msgjson.AuditRoute:       handleAuditRoute,
+	msgjson.RedemptionRoute:  handleRedemptionRoute,
 	msgjson.RevokeMatchRoute: nil,
 	msgjson.SuspensionRoute:  nil,
 }
@@ -1718,6 +1886,12 @@ var respHandlers = map[string]routeHandler{
 func (c *Core) listen(dc *dexConnection) {
 	defer c.wg.Done()
 	msgs := dc.MessageSource()
+	// Lets run a match check every 1/3 broadcast timeout.
+	//
+	// DRAFT NOTE: This is set as seconds in server/dex/dex.go, but I think it
+	// should be milliseconds, no?
+	bTimeout := time.Millisecond * time.Duration(dc.cfg.BroadcastTimeout)
+	ticker := time.NewTicker(bTimeout / 3)
 out:
 	for {
 		select {
@@ -1754,6 +1928,15 @@ out:
 			if err != nil {
 				log.Error(err)
 			}
+		case <-ticker.C:
+			dc.tradeMtx.Lock()
+			for _, trade := range dc.trades {
+				err := trade.tick()
+				if err != nil {
+					log.Error(err)
+				}
+			}
+			dc.tradeMtx.Unlock()
 		case <-c.ctx.Done():
 			break out
 		}
@@ -1791,70 +1974,74 @@ func handlePreimageRequest(_ *Core, dc *dexConnection, msg *msgjson.Message) err
 // handleMatchRoute processes the DEX-originating match route request,
 // indicating that a match has been made and needs to be negotiated.
 func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
-	dumpErr := func(s string, a ...interface{}) error {
-		customPart := fmt.Sprintf(s, a...)
-		return fmt.Errorf("match route error for notification from %s for match data %s: %s",
-			dc.acct.url, string(msg.Payload), customPart)
-	}
 	msgMatches := make([]*msgjson.Match, 0)
 	err := msg.Unmarshal(&msgMatches)
 	if err != nil {
-		return dumpErr("match request parsing error: %v", err)
+		return fmt.Errorf("match request parsing error: %v", err)
 	}
-	var acks []msgjson.Acknowledgement
-	// The server will only accept the match acknowledgments
-	// ([]msgjson.Acknowledgement) when all are present, so if an error occurs on
-	// processing even one match, we might as well abandon everything.
-	for _, msgMatch := range msgMatches {
-		var oid order.OrderID
-		copy(oid[:], msgMatch.OrderID)
+	matches, acks, err := dc.parseMatches(msgMatches)
+	if err != nil {
+		return err
+	}
 
-		// Run the appropriate function under lock to prevent concurrent access to
-		// trades field and underlying trackedTrades.
-		tracker, _, isCancel := dc.findOrder(oid)
-		if tracker == nil {
-			return dumpErr("order %s not found for match route", oid)
-		}
-		var err error
-		if isCancel {
-			err = tracker.processCancelMatch(msgMatch)
-		} else {
-			err = tracker.negotiate(c.ctx, msgMatch)
-		}
-		if err != nil {
-			return dumpErr(err.Error())
-		}
-		if err != nil {
-			return dumpErr(err.Error())
-		}
-		sigMsg, err := msgMatch.Serialize()
-		if err != nil {
-			return dumpErr(err.Error())
-		}
-		sig, err := dc.acct.sign(sigMsg)
-		if err != nil {
-			return dumpErr(err.Error())
-		}
-		acks = append(acks, msgjson.Acknowledgement{
-			MatchID: msgMatch.MatchID,
-			Sig:     sig,
-		})
-	}
 	resp, err := msgjson.NewResponse(msg.ID, acks, nil)
 	if err != nil {
-		return dumpErr(err.Error())
+		return err
 	}
 	err = dc.Send(resp)
 	if err != nil {
-		dumpErr(err.Error())
+		return err
 	}
-	return nil
+
+	return dc.runMatches(matches)
 }
 
-// removeWaiter removes a coinWaiter from the map.
+// handleAuditRoute handles the DEX-originating audit request, which is sent
+// when a match counter-party reports their initiation transaction.
+func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	audit := new(msgjson.Audit)
+	err := msg.Unmarshal(audit)
+	if err != nil {
+		return fmt.Errorf("audit request parsing error: %v", err)
+	}
+	var oid order.OrderID
+	copy(oid[:], audit.OrderID)
+	tracker, _, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
+	}
+	err = tracker.processAudit(msg.ID, audit)
+	if err != nil {
+		return err
+	}
+	return tracker.tick()
+}
+
+// handleRedemptionRoute handles the DEX-originating redemption request, which
+// is sent when a match counter-party reports their redemption transaction.
+func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	redemption := new(msgjson.Redemption)
+	err := msg.Unmarshal(redemption)
+	if err != nil {
+		return fmt.Errorf("redemption request parsing error: %v", err)
+	}
+	var oid order.OrderID
+	copy(oid[:], redemption.OrderID)
+	tracker, _, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return fmt.Errorf("redemption request received for unknown order: %s", string(msg.Payload))
+	}
+	err = tracker.processRedemption(msg.ID, redemption)
+	if err != nil {
+		return err
+	}
+	return tracker.tick()
+}
+
+// removeWaiter removes a blockWaiter from the map.
 func (c *Core) removeWaiter(id uint64) {
 	c.waiterMtx.Lock()
-	delete(c.waiters, id)
+	delete(c.blockWaiters, id)
 	c.waiterMtx.Unlock()
 }
 
@@ -1868,12 +2055,11 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	}
 	log.Tracef("processing tip change for %s", unbip(assetID))
 	c.waiterMtx.Lock()
-	defer c.waiterMtx.Unlock()
-	for id, waiter := range c.waiters {
+	for id, waiter := range c.blockWaiters {
 		if waiter.assetID != assetID {
 			continue
 		}
-		go func(id uint64, waiter *coinWaiter) {
+		go func(id uint64, waiter *blockWaiter) {
 			ok, err := waiter.trigger()
 			if err != nil {
 				waiter.action(err)
@@ -1885,6 +2071,12 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 			}
 		}(id, waiter)
 	}
+	c.waiterMtx.Unlock()
+	c.connMtx.RLock()
+	for _, dc := range c.conns {
+		dc.tickAsset(assetID)
+	}
+	c.connMtx.RUnlock()
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical

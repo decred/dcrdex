@@ -223,17 +223,12 @@ func TestWallet(t *testing.T) {
 		SecretHash: keyHash2[:],
 		LockTime:   uint64(lockTime.Unix()),
 	}
-	swap1 := &asset.Swap{
-		Inputs:   utxos1,
-		Contract: contract1,
+	swaps := &asset.Swaps{
+		Inputs:    append(utxos1, utxos2...),
+		Contracts: []*asset.Contract{contract1, contract2},
 	}
-	swap2 := &asset.Swap{
-		Inputs:   utxos2,
-		Contract: contract2,
-	}
-	swaps := []*asset.Swap{swap1, swap2}
 
-	receipts, err := rig.beta().Swap(swaps, tDCR)
+	receipts, _, err := rig.beta().Swap(swaps, tDCR)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -291,7 +286,7 @@ func TestWallet(t *testing.T) {
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	err = rig.alpha().Redeem(redemptions, tDCR)
+	_, err = rig.alpha().Redeem(redemptions, tDCR)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
@@ -340,13 +335,12 @@ func TestWallet(t *testing.T) {
 		SecretHash: keyHash[:],
 		LockTime:   uint64(lockTime.Unix()),
 	}
-	swap := &asset.Swap{
-		Inputs:   utxos,
-		Contract: contract,
+	swaps = &asset.Swaps{
+		Inputs:    utxos,
+		Contracts: []*asset.Contract{contract},
 	}
-	swaps = []*asset.Swap{swap}
 
-	receipts, err = rig.beta().Swap(swaps, tDCR)
+	receipts, _, err = rig.beta().Swap(swaps, tDCR)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}

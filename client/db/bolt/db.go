@@ -49,6 +49,7 @@ var (
 	accountKey     = []byte("account")
 	balanceKey     = []byte("balance")
 	walletKey      = []byte("wallet")
+	changeKey      = []byte("change")
 	byteTrue       = encode.ByteTrue
 	byteFalse      = encode.ByteFalse
 	byteEpoch      = uint16Bytes(uint16(order.OrderStatusEpoch))
@@ -267,6 +268,7 @@ func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(dexKey, []byte(md.DEX)).
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
+			put(changeKey, md.ChangeCoin).
 			put(orderKey, order.EncodeOrder(ord)).
 			err()
 	})
@@ -443,9 +445,10 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	}
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
-			Proof:  *proof,
-			Status: order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
-			DEX:    string(oBkt.Get(dexKey)),
+			Proof:      *proof,
+			Status:     order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
+			DEX:        string(oBkt.Get(dexKey)),
+			ChangeCoin: oBkt.Get(changeKey),
 		},
 		Order: ord,
 	}, nil
