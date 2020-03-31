@@ -88,19 +88,71 @@ type OrderRevealed struct {
 	Preimage order.Preimage
 }
 
+// OrdersUpdated represents the orders updated by (*Matcher).Match, and may
+// include orders from both the epoch queue and the book. Trade orders that are
+// not in TradesFailed may appear in multiple other trade order slices, so
+// update them in sequence: booked, partial, and finally completed or canceled.
+// Orders in TradesFailed will not be in another slice since failed indicates
+// unmatched&unbooked or bad lot size. Cancel orders may only be in one of
+// CancelsExecuted or CancelsFailed.
+type OrdersUpdated struct {
+	// CancelsExecuted are cancel orders that were matched to and removed
+	// another order from the book.
+	CancelsExecuted []*order.CancelOrder
+	// CancelsFailed are cancel orders that failed to match and cancel an order.
+	CancelsFailed []*order.CancelOrder
+
+	// TradesFailed are unmatched and unbooked (i.e. unmatched market or limit
+	// with immediate time-in-force), or orders with bad lot size. These orders
+	// will be in no other slice.
+	TradesFailed []order.Order
+
+	// TradesBooked are limit orders from the epoch queue that were put on the
+	// book. Because of downstream epoch processing, these may also be in
+	// TradesPartial, and TradesCompleted or TradesCanceled.
+	TradesBooked []*order.LimitOrder
+	// TradesPartial are limit orders that were partially filled as maker orders
+	// (while on the book). Epoch orders that were partially filled prior to
+	// being booked (while takers) are not necessarily in TradesPartial unless
+	// they are filled again by a taker. This is because all status updates also
+	// update the filled amount.
+	TradesPartial []*order.LimitOrder
+	// TradesCanceled are limit orders that were removed from the the book by a
+	// cancel order. These may also be in TradesBooked and TradesPartial, but
+	// not TradesCompleted.
+	TradesCanceled []*order.LimitOrder
+	// TradesCompleted are market or limit orders that filled to completion. For
+	// a market order, this means it had a match that partially or completely
+	// filled it. For a limit order, this means the time-in-force is immediate
+	// with at least one match for any amount, or the time-in-force is standing
+	// and it is completely filled.
+	TradesCompleted []order.Order
+}
+
+func (ou *OrdersUpdated) String() string {
+	return fmt.Sprintf("cExec=%d, cFail=%d, tPartial=%d, tBooked=%d, tCanceled=%d, tComp=%d, tFail=%d",
+		len(ou.CancelsExecuted), len(ou.CancelsFailed), len(ou.TradesPartial), len(ou.TradesBooked),
+		len(ou.TradesCanceled), len(ou.TradesCompleted), len(ou.TradesFailed))
+}
+
 // Match matches orders given a standing order book and an epoch queue. Matched
 // orders from the book are removed from the book. The EpochID of the MatchSet
 // is not set. passed = booked + doneOK. queue = passed + failed. unbooked may
 // include orders that are not in the queue. Each of partial are in passed.
-func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, matches []*order.MatchSet, passed, failed, doneOK, partial, booked []*OrderRevealed, unbooked []*order.LimitOrder) {
+//
+// TODO: Eliminate order slice return args in favor of just the *OrdersUpdated.
+func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, matches []*order.MatchSet, passed, failed, doneOK, partial, booked []*OrderRevealed, unbooked []*order.LimitOrder, updates *OrdersUpdated) {
 	// Apply the deterministic pseudorandom shuffling.
 	seed = shuffleQueue(queue)
+
+	updates = new(OrdersUpdated)
 
 	// For each order in the queue, find the best match in the book.
 	for _, q := range queue {
 		if !orderLotSizeOK(q.Order, book.LotSize()) {
 			log.Warnf("Order with bad lot size in the queue: %v!", q.Order.ID())
 			failed = append(failed, q)
+			updates.TradesFailed = append(updates.TradesFailed, q.Order)
 			continue
 		}
 
@@ -112,11 +164,14 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 				log.Debugf("Failed to remove order %v set by a cancel order %v",
 					o.ID(), o.TargetOrderID)
 				failed = append(failed, q)
+				updates.CancelsFailed = append(updates.CancelsFailed, o)
 				continue
 			}
 
 			passed = append(passed, q)
 			doneOK = append(doneOK, q)
+			updates.CancelsExecuted = append(updates.CancelsExecuted, o)
+
 			// CancelOrder Match has zero values for Amounts, Rates, and Total.
 			matches = append(matches, &order.MatchSet{
 				Taker:   q.Order,
@@ -125,6 +180,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 				Rates:   []uint64{removed.Rate},
 			})
 			unbooked = append(unbooked, removed)
+			updates.TradesCanceled = append(updates.TradesCanceled, removed)
 
 		case *order.LimitOrder:
 			// limit-limit order matching
@@ -136,6 +192,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 			} else if o.Force == order.ImmediateTiF {
 				// There was no match and TiF is Immediate. Fail.
 				failed = append(failed, q)
+				updates.TradesFailed = append(updates.TradesFailed, o)
 				break
 			}
 
@@ -146,24 +203,32 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 			for _, maker := range makers {
 				if maker.Remaining() == 0 {
 					unbooked = append(unbooked, maker)
+					updates.TradesCompleted = append(updates.TradesCompleted, maker)
+				} else {
+					updates.TradesPartial = append(updates.TradesPartial, maker)
 				}
 			}
 
 			var wasBooked bool
 			if o.Remaining() > 0 {
-				if matchSet != nil {
+				if o.Filled() > 0 {
 					partial = append(partial, q)
 				}
 				if o.Force == order.StandingTiF {
 					// Standing TiF orders go on the book.
 					book.Insert(o)
 					booked = append(booked, q)
+					updates.TradesBooked = append(updates.TradesBooked, o)
 					wasBooked = true
 				}
 			}
 
-			if !wasBooked {
+			// booked => TradesBooked
+			// !booked => TradesCompleted
+
+			if !wasBooked { // either nothing remaining or immediate force
 				doneOK = append(doneOK, q)
+				updates.TradesCompleted = append(updates.TradesCompleted, o)
 			}
 
 		case *order.MarketOrder:
@@ -180,15 +245,20 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 				matches = append(matches, matchSet)
 				passed = append(passed, q)
 				doneOK = append(doneOK, q)
+				updates.TradesCompleted = append(updates.TradesCompleted, o)
 			} else {
 				// There was no match and this is a market order. Fail.
 				failed = append(failed, q)
+				updates.TradesFailed = append(updates.TradesFailed, o)
 				break
 			}
 
 			for _, maker := range matchSet.Makers {
 				if maker.Remaining() == 0 {
 					unbooked = append(unbooked, maker)
+					updates.TradesCompleted = append(updates.TradesCompleted, maker)
+				} else {
+					updates.TradesPartial = append(updates.TradesPartial, maker)
 				}
 			}
 
@@ -202,7 +272,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 
 // limit-limit order matching
 func matchLimitOrder(book Booker, ord *order.LimitOrder) (matchSet *order.MatchSet) {
-	amtRemaining := ord.Remaining() // i.e. ord.Quantity - ord.Filled
+	amtRemaining := ord.Remaining() // i.e. ord.Quantity - ord.FillAmt
 	if amtRemaining == 0 {
 		return
 	}
@@ -245,11 +315,11 @@ func matchLimitOrder(book Booker, ord *order.LimitOrder) (matchSet *order.MatchS
 				log.Errorf("Failed to remove standing order %v.", best)
 			}
 		}
-		best.Filled += amt
+		best.AddFill(amt)
 
 		// Reduce the remaining quantity of the taker order.
 		amtRemaining -= amt
-		ord.Filled += amt
+		ord.AddFill(amt)
 
 		// Add the matched maker order to the output.
 		if matchSet == nil {
@@ -281,7 +351,7 @@ func matchMarketSellOrder(book Booker, ord *order.MarketOrder) (matchSet *order.
 	// immediate and no minimum rate (a rate of 0).
 	limOrd := &order.LimitOrder{
 		P:     ord.P,
-		T:     ord.T,
+		T:     *ord.T.Copy(),
 		Force: order.ImmediateTiF,
 		Rate:  0,
 	}
@@ -303,7 +373,7 @@ func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (matchSet *order.M
 	lotSize := book.LotSize()
 
 	// Amount remaining for market buy is in *quoute* asset, not base asset.
-	amtRemaining := ord.Remaining() // i.e. ord.Quantity - ord.Filled
+	amtRemaining := ord.Remaining() // i.e. ord.Quantity - ord.FillAmt
 	if amtRemaining == 0 {
 		return
 	}
@@ -339,14 +409,14 @@ func matchMarketBuyOrder(book Booker, ord *order.MarketOrder) (matchSet *order.M
 				log.Errorf("Failed to remove standing order %v.", best)
 			}
 		}
-		best.Filled += amt
+		best.AddFill(amt)
 
 		// Reduce the remaining quantity of the taker order.
 		// amtRemainingBase -= amt // FYI
 		amtQuote := BaseToQuote(best.Rate, amt)
 		//amtQuote := uint64(float64(amt) * best.Rate)
 		amtRemaining -= amtQuote // quote asset remaining
-		ord.Filled += amtQuote   // quote asset filled
+		ord.AddFill(amtQuote)    // quote asset filled
 
 		// Add the matched maker order to the output.
 		if matchSet == nil {

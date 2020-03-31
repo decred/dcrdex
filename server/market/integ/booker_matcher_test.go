@@ -204,10 +204,10 @@ func newBook(t *testing.T) *book.Book {
 
 func resetMakers() {
 	for _, o := range bookBuyOrders {
-		o.Filled = 0
+		o.FillAmt = 0
 	}
 	for _, o := range bookSellOrders {
-		o.Filled = 0
+		o.FillAmt = 0
 	}
 }
 
@@ -263,9 +263,9 @@ func TestMatchWithBook_limitsOnly(t *testing.T) {
 		for _, o := range takers {
 			switch ot := o.Order.(type) {
 			case *order.MarketOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			case *order.LimitOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			}
 		}
 	}
@@ -422,7 +422,7 @@ func TestMatchWithBook_limitsOnly(t *testing.T) {
 			resetMakers()
 
 			// Ignore the seed since it is tested in the matcher unit tests.
-			_, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			_, matches, passed, failed, doneOK, partial, booked, unbooked, _ := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -562,9 +562,9 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 		for _, o := range epochQueue {
 			switch ot := o.Order.(type) {
 			case *order.MarketOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			case *order.LimitOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			}
 		}
 	}
@@ -577,7 +577,7 @@ func TestMatchWithBook_limitsOnly_multipleQueued(t *testing.T) {
 	resetMakers()
 
 	// Ignore the seed since it is tested in the matcher unit tests.
-	_, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(b, epochQueue)
+	_, matches, passed, failed, doneOK, partial, booked, unbooked, _ := me.Match(b, epochQueue)
 	//t.Log(matches, passed, failed, doneOK, partial, booked, unbooked)
 
 	// PASSED orders
@@ -773,7 +773,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 			numBuys0 := tt.args.book.BuyCount()
 
 			// Ignore the seed since it is tested in the matcher unit tests.
-			_, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			_, matches, passed, failed, doneOK, partial, booked, unbooked, _ := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -837,9 +837,9 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 		for _, o := range takers {
 			switch ot := o.Order.(type) {
 			case *order.MarketOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			case *order.LimitOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			}
 		}
 	}
@@ -939,7 +939,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			//fmt.Printf("%v\n", takers)
 
 			// Ignore the seed since it is tested in the matcher unit tests.
-			_, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			_, matches, passed, failed, doneOK, partial, booked, unbooked, _ := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -1030,9 +1030,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 		for _, o := range takers {
 			switch ot := o.Order.(type) {
 			case *order.MarketOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			case *order.LimitOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			}
 		}
 	}
@@ -1142,7 +1142,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			resetMakers()
 
 			// Ignore the seed since it is tested in the matcher unit tests.
-			_, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			_, matches, passed, failed, doneOK, partial, booked, unbooked, _ := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -1259,9 +1259,9 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 		for _, o := range epochQueue {
 			switch ot := o.Order.(type) {
 			case *order.MarketOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			case *order.LimitOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			}
 		}
 	}
@@ -1271,7 +1271,7 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	resetMakers()
 
 	// Ignore the seed since it is tested in the matcher unit tests.
-	_, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(b, epochQueue)
+	_, matches, passed, failed, doneOK, partial, booked, unbooked, _ := me.Match(b, epochQueue)
 	//t.Log("Matches:", matches)
 	// s := "Passed: "
 	// for _, o := range passed {

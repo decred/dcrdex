@@ -46,6 +46,7 @@ const (
 	InvalidPreimage                   // 30
 	PreimageCommitmentMismatch        // 31
 	UnknownMessageType                // 32
+	AccountClosedError                // 33
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -782,7 +783,7 @@ type NotifyFeeResult struct {
 
 // ConfigResult is the successful result from the 'config' route.
 type ConfigResult struct {
-	CancelMax        float32  `json:"cancelmax"`
+	CancelMax        float64  `json:"cancelmax"`
 	BroadcastTimeout uint64   `json:"btimeout"`
 	RegFeeConfirms   uint16   `json:"regfeeconfirms"`
 	Assets           []Asset  `json:"assets"`

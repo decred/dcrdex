@@ -150,7 +150,7 @@ func createTable(db *sql.DB, fmtStmt, schema, tableName string) (bool, error) {
 	var created bool
 	if !exists {
 		stmt := fmt.Sprintf(fmtStmt, nameSpacedTable)
-		log.Infof(`Creating the "%s" table.`, nameSpacedTable)
+		log.Tracef(`Creating the "%s" table.`, nameSpacedTable)
 		_, err = db.Exec(stmt)
 		if err != nil {
 			return false, err
@@ -457,7 +457,7 @@ func createSchema(db *sql.DB, schema string) (bool, error) {
 
 	var created bool
 	if !exists {
-		log.Infof(`Creating schema "%s".`, schema)
+		log.Tracef(`Creating schema "%s".`, schema)
 		stmt := fmt.Sprintf(internal.CreateSchema, schema)
 		_, err = db.Exec(stmt)
 		if err != nil {

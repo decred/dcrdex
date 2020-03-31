@@ -239,38 +239,31 @@ func TestMarketOrder_Serialize_serializeSize(t *testing.T) {
 }
 
 func TestLimitOrder_Serialize_serializeSize(t *testing.T) {
-	type fields struct {
-		MarketOrder MarketOrder
-		Rate        uint64
-		Force       TimeInForce
-	}
 	tests := []struct {
-		name   string
-		fields fields
-		want   []byte
+		name       string
+		LimitOrder *LimitOrder
+		want       []byte
 	}{
 		{
 			"ok acct0",
-			fields{
-				MarketOrder: MarketOrder{
-					P: Prefix{
-						AccountID:  acct0,
-						BaseAsset:  AssetDCR,
-						QuoteAsset: AssetBTC,
-						OrderType:  LimitOrderType,
-						ClientTime: time.Unix(1566497653, 0),
-						ServerTime: time.Unix(1566497656, 0),
-						Commit:     commit0,
+			&LimitOrder{
+				P: Prefix{
+					AccountID:  acct0,
+					BaseAsset:  AssetDCR,
+					QuoteAsset: AssetBTC,
+					OrderType:  LimitOrderType,
+					ClientTime: time.Unix(1566497653, 0),
+					ServerTime: time.Unix(1566497656, 0),
+					Commit:     commit0,
+				},
+				T: Trade{
+					Coins: []CoinID{
+						utxoCoinID("d186e4b6625c9c94797cc494f535fc150177e0619e2303887e0a677f29ef1bab", 0),
+						utxoCoinID("11d9580e19ad65a875a5bc558d600e96b2916062db9e8b65cbc2bb905207c1ad", 16),
 					},
-					T: Trade{
-						Coins: []CoinID{
-							utxoCoinID("d186e4b6625c9c94797cc494f535fc150177e0619e2303887e0a677f29ef1bab", 0),
-							utxoCoinID("11d9580e19ad65a875a5bc558d600e96b2916062db9e8b65cbc2bb905207c1ad", 16),
-						},
-						Sell:     false,
-						Quantity: 132413241324,
-						Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
-					},
+					Sell:     false,
+					Quantity: 132413241324,
+					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
 				Rate:  13241324,
 				Force: StandingTiF,
@@ -330,12 +323,7 @@ func TestLimitOrder_Serialize_serializeSize(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			o := &LimitOrder{
-				P:     tt.fields.MarketOrder.P,
-				T:     tt.fields.MarketOrder.T,
-				Rate:  tt.fields.Rate,
-				Force: tt.fields.Force,
-			}
+			o := tt.LimitOrder
 			got := o.Serialize()
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("LimitOrder.Serialize() = %#v, want %#v", got, tt.want)
@@ -476,9 +464,9 @@ func TestMarketOrder_ID(t *testing.T) {
 				},
 			}
 			remaining := o.Remaining()
-			if remaining != o.Quantity-o.Filled {
+			if remaining != o.Quantity-o.FillAmt {
 				t.Errorf("MarketOrder.Remaining incorrect, got %d, expected %d",
-					remaining, o.Quantity-o.Filled)
+					remaining, o.Quantity-o.FillAmt)
 			}
 			if got := o.ID(); got != tt.want {
 				t.Errorf("MarketOrder.ID() = %v, want %v", got, tt.want)
@@ -492,36 +480,29 @@ func TestLimitOrder_ID(t *testing.T) {
 	var orderID OrderID
 	copy(orderID[:], orderID0)
 
-	type fields struct {
-		MarketOrder MarketOrder
-		Rate        uint64
-		Force       TimeInForce
-	}
 	tests := []struct {
-		name   string
-		fields fields
-		want   OrderID
+		name       string
+		LimitOrder *LimitOrder
+		want       OrderID
 	}{
 		{
 			"ok",
-			fields{
-				MarketOrder: MarketOrder{
-					P: Prefix{
-						AccountID:  acct0,
-						BaseAsset:  AssetDCR,
-						QuoteAsset: AssetBTC,
-						OrderType:  LimitOrderType,
-						ClientTime: time.Unix(1566497653, 0),
-						ServerTime: time.Unix(1566497656, 0),
+			&LimitOrder{
+				P: Prefix{
+					AccountID:  acct0,
+					BaseAsset:  AssetDCR,
+					QuoteAsset: AssetBTC,
+					OrderType:  LimitOrderType,
+					ClientTime: time.Unix(1566497653, 0),
+					ServerTime: time.Unix(1566497656, 0),
+				},
+				T: Trade{
+					Coins: []CoinID{
+						utxoCoinID("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
 					},
-					T: Trade{
-						Coins: []CoinID{
-							utxoCoinID("01516d9c7ffbe260b811dc04462cedd3f8969ce3a3ffe6231ae870775a92e9b0", 1),
-						},
-						Sell:     false,
-						Quantity: 132413241324,
-						Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
-					},
+					Sell:     false,
+					Quantity: 132413241324,
+					Address:  "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
 				},
 				Rate:  13241324,
 				Force: StandingTiF,
@@ -531,16 +512,11 @@ func TestLimitOrder_ID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			o := &LimitOrder{
-				T:     tt.fields.MarketOrder.T,
-				P:     tt.fields.MarketOrder.P,
-				Rate:  tt.fields.Rate,
-				Force: tt.fields.Force,
-			}
+			o := tt.LimitOrder
 			remaining := o.Remaining()
-			if remaining != o.Quantity-o.Filled {
+			if remaining != o.Quantity-o.FillAmt {
 				t.Errorf("LimitOrder.Remaining incorrect, got %d, expected %d",
-					remaining, o.Quantity-o.Filled)
+					remaining, o.Quantity-o.FillAmt)
 			}
 			if got := o.ID(); got != tt.want {
 				t.Errorf("LimitOrder.ID() = %v, want %v", got, tt.want)

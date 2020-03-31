@@ -54,7 +54,7 @@ const (
 		-- participant/B (taker) REDEEM data
 		bRedeemCoinID BYTEA,
 		bRedeemTime INT8,         -- server time stamp
-		aSigAckOfBRedeem BYTEA    -- counterparty's (initiator) sig with ack of participant REDEEM data
+		aSigAckOfBRedeem BYTEA   -- counterparty's (initiator) sig with ack of participant REDEEM data
 	)`
 
 	RetrieveSwapData = `SELECT status, sigMatchAckMaker, sigMatchAckTaker,

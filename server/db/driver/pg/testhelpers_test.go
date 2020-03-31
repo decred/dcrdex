@@ -44,6 +44,11 @@ func randomAccountID() account.AccountID {
 	return account.NewID(pk)
 }
 
+func randomPreimage() (pi order.Preimage) {
+	rand.Read(pi[:])
+	return
+}
+
 func randomCommitment() (com order.Commitment) {
 	rand.Read(com[:])
 	return
@@ -76,6 +81,13 @@ func newMatch(maker *order.LimitOrder, taker order.Order, quantity uint64, epoch
 		Sigs:     order.Signatures{},
 		Epoch:    epochID,
 	}
+}
+
+func newLimitOrderRevealed(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) (*order.LimitOrder, order.Preimage) {
+	lo := newLimitOrder(sell, rate, quantityLots, force, timeOffset)
+	pi := randomPreimage()
+	lo.Commit = pi.Commit()
+	return lo, pi
 }
 
 func newLimitOrder(sell bool, rate, quantityLots uint64, force order.TimeInForce, timeOffset int64) *order.LimitOrder {

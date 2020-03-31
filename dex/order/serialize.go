@@ -92,7 +92,7 @@ func EncodeTrade(ord *Trade) []byte {
 		AddData(sell).
 		AddData(uint64B(ord.Quantity)).
 		AddData([]byte(ord.Address)).
-		AddData(uint64B(ord.Filled))
+		AddData(uint64B(ord.Filled()))
 }
 
 // DecodeTrade decodes the versioned-blob market order, but does not populate
@@ -133,7 +133,7 @@ func decodeTrade_v0(pushes [][]byte) (mrkt *Trade, err error) {
 		Sell:     sell,
 		Quantity: intCoder.Uint64(qtyB),
 		Address:  string(addrB),
-		Filled:   intCoder.Uint64(filledB),
+		FillAmt:  intCoder.Uint64(filledB),
 	}, nil
 }
 
@@ -286,7 +286,7 @@ func decodeOrder_v0(pushes [][]byte) (Order, error) {
 		}
 		return &LimitOrder{
 			P:     *prefix,
-			T:     *trade,
+			T:     *trade.Copy(),
 			Rate:  intCoder.Uint64(rateB),
 			Force: tif,
 		}, nil
@@ -306,7 +306,7 @@ func decodeOrder_v0(pushes [][]byte) (Order, error) {
 		}
 		return &MarketOrder{
 			P: *prefix,
-			T: *trade,
+			T: *trade.Copy(),
 		}, nil
 
 	case bEqual(oType, orderTypeCancel):

@@ -32,8 +32,9 @@ type Backend interface {
 	InitTxSize() uint32
 	// CheckAddress checks that the given address is parseable.
 	CheckAddress(string) bool
-	// ValidateCoinID checks the coinID to ensure it can be decoded.
-	ValidateCoinID(coinID []byte) error
+	// ValidateCoinID checks the coinID to ensure it can be decoded, returning a
+	// human-readable string if it is valid.
+	ValidateCoinID(coinID []byte) (string, error)
 	// ValidateContract ensures that the swap contract is constructed properly
 	// for the asset.
 	ValidateContract(contract []byte) error
@@ -53,6 +54,8 @@ type Coin interface {
 	ID() []byte
 	// TxID is a transaction identifier for the coin.
 	TxID() string
+	// String is a human readable representation of the Coin.
+	String() string
 }
 
 // FundingCoin is some unspent value on the blockchain.

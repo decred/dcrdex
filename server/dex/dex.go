@@ -94,7 +94,7 @@ type DexConf struct {
 	RegFeeConfirms   int64
 	RegFeeAmount     uint64
 	BroadcastTimeout time.Duration
-	CancelThreshold  float32
+	CancelThreshold  float64
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
 }
@@ -328,10 +328,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		RegistrationFee: cfg.RegFeeAmount,
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.UnspentCoinDetails,
+		CancelThreshold: cfg.CancelThreshold,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
-	go authMgr.Run(ctx)
+	startSubSys("Auth manager", authMgr)
 
 	// Create the swapper.
 	swapperCfg := &swap.Config{

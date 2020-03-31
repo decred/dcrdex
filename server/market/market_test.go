@@ -49,8 +49,8 @@ func (a *TAsset) BlockChannel(size int) chan uint32 { return nil }
 func (a *TAsset) InitTxSize() uint32                { return 100 }
 func (a *TAsset) CheckAddress(string) bool          { return true }
 func (a *TAsset) Run(context.Context)               {}
-func (a *TAsset) ValidateCoinID(coinID []byte) error {
-	return nil
+func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
+	return "", nil
 }
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil
@@ -99,10 +99,16 @@ func (ta *TArchivist) failOnCommitWithOrder(ord order.Order) {
 	ta.orderWithKnownCommit = ord.ID()
 	ta.mtx.Unlock()
 }
+func (ta *TArchivist) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
+	return nil, nil, nil
+}
+func (ta *TArchivist) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
+	return nil, nil, nil, nil
+}
 func (ta *TArchivist) OrderStatus(order.Order) (order.OrderStatus, order.OrderType, int64, error) {
 	return order.OrderStatusUnknown, order.UnknownOrderType, -1, errors.New("boom")
 }
-func (ta *TArchivist) NewEpochOrder(ord order.Order) error {
+func (ta *TArchivist) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) error {
 	ta.mtx.Lock()
 	defer ta.mtx.Unlock()
 	if ta.poisonEpochOrder != nil && ord.ID() == ta.poisonEpochOrder.ID() {
@@ -110,19 +116,24 @@ func (ta *TArchivist) NewEpochOrder(ord order.Order) error {
 	}
 	return nil
 }
+func (ta *TArchivist) StorePreimage(ord order.Order, pi order.Preimage) error { return nil }
 func (ta *TArchivist) failOnEpochOrder(ord order.Order) {
 	ta.mtx.Lock()
 	ta.poisonEpochOrder = ord
 	ta.mtx.Unlock()
 }
-func (ta *TArchivist) BookOrder(*order.LimitOrder) error                      { return nil }
-func (ta *TArchivist) ExecuteOrder(ord order.Order) error                     { return nil }
-func (ta *TArchivist) CancelOrder(*order.LimitOrder) error                    { return nil }
-func (ta *TArchivist) RevokeOrder(*order.LimitOrder) error                    { return nil }
-func (ta *TArchivist) FailCancelOrder(*order.CancelOrder) error               { return nil }
-func (ta *TArchivist) UpdateOrderFilled(order.Order) error                    { return nil }
-func (ta *TArchivist) UpdateOrderStatus(order.Order, order.OrderStatus) error { return nil }
-func (ta *TArchivist) InsertMatch(match *order.Match) error                   { return nil }
+func (ta *TArchivist) InsertEpoch(ed *db.EpochResults) error { return nil }
+func (ta *TArchivist) BookOrder(*order.LimitOrder) error     { return nil }
+func (ta *TArchivist) ExecuteOrder(ord order.Order) error    { return nil }
+func (ta *TArchivist) CancelOrder(*order.LimitOrder) error   { return nil }
+func (ta *TArchivist) RevokeOrder(order.Order) (order.OrderID, time.Time, error) {
+	return order.OrderID{}, time.Now(), nil
+}
+func (ta *TArchivist) SetOrderCompleteTime(ord order.Order, compTime int64) error { return nil }
+func (ta *TArchivist) FailCancelOrder(*order.CancelOrder) error                   { return nil }
+func (ta *TArchivist) UpdateOrderFilled(*order.LimitOrder) error                  { return nil }
+func (ta *TArchivist) UpdateOrderStatus(order.Order, order.OrderStatus) error     { return nil }
+func (ta *TArchivist) InsertMatch(match *order.Match) error                       { return nil }
 func (ta *TArchivist) MatchByID(mid order.MatchID, base, quote uint32) (*db.MatchData, error) {
 	return nil, nil
 }
@@ -152,13 +163,16 @@ func (ta *TArchivist) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error {
 func (ta *TArchivist) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (ta *TArchivist) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (ta *TArchivist) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
+	return nil
+}
 func (ta *TArchivist) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (ta *TArchivist) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
-func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error              { return nil }
-
+func (ta *TArchivist) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
+	return nil
+}
+func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error  { return nil }
 func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule) {}
 func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
 	return nil, false, false
@@ -941,20 +955,21 @@ func TestMarket_Cancelable(t *testing.T) {
 }
 
 func TestMarket_handlePreimageResp(t *testing.T) {
-
-	randomPreimage := func() (pi order.Preimage) {
-		rand.Read(pi[:])
-		return
-	}
-
 	randomCommit := func() (com order.Commitment) {
 		rand.Read(com[:])
 		return
 	}
 
+	newOrder := func() (*order.LimitOrder, order.Preimage) {
+		qty := uint64(dcrLotSize * 10)
+		rate := uint64(1000) * dcrRateStep
+		return makeLORevealed(seller3, rate, qty, order.StandingTiF)
+	}
+
 	authMgr := &TAuth{}
 	mkt := &Market{
-		auth: authMgr,
+		auth:    authMgr,
+		storage: &TArchivist{},
 	}
 
 	piMsg := &msgjson.PreimageResponse{
@@ -976,7 +991,8 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 
 	// 1. bad Message.Type: RPCParseError
 	msg.Type = msgjson.Request // should be Response
-	dat := &piData{preimage: make(chan *order.Preimage)}
+	lo, pi := newOrder()
+	dat := &piData{lo, make(chan *order.Preimage)}
 	piRes := runAndReceive(msg, dat)
 	if piRes != nil {
 		t.Errorf("Expected <nil> preimage, got %v", piRes)
@@ -1002,7 +1018,8 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 
 	// 2. empty preimage from client: InvalidPreimage
 	msg, _ = msgjson.NewResponse(5, piMsg, nil)
-	dat = &piData{preimage: make(chan *order.Preimage)}
+	//lo, pi := newOrder()
+	dat = &piData{lo, make(chan *order.Preimage)}
 	piRes = runAndReceive(msg, dat)
 	if piRes != nil {
 		t.Errorf("Expected <nil> preimage, got %v", piRes)
@@ -1025,9 +1042,10 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 	}
 
 	// 3. correct preimage length, commitment mismatch
-	pi := randomPreimage()
+	//lo, pi := newOrder()
+	lo.Commit = randomCommit() // break the commitment
 	dat = &piData{
-		commit:   randomCommit(), // instead of pi.Commit()
+		ord:      lo,
 		preimage: make(chan *order.Preimage),
 	}
 	piMsg = &msgjson.PreimageResponse{
@@ -1058,8 +1076,9 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 	}
 
 	// 4. correct preimage and commit
+	lo.Commit = pi.Commit() // fix the commitment
 	dat = &piData{
-		commit:   pi.Commit(),
+		ord:      lo,
 		preimage: make(chan *order.Preimage),
 	}
 	piMsg = &msgjson.PreimageResponse{
@@ -1082,7 +1101,7 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 	// 5. payload is not msgjson.PreimageResponse, unmarshal still succeeds, but PI is nil
 	notaPiMsg := new(msgjson.OrderBookSubscription)
 	msg, _ = msgjson.NewResponse(5, notaPiMsg, nil)
-	dat = &piData{preimage: make(chan *order.Preimage)}
+	dat = &piData{lo, make(chan *order.Preimage)}
 	piRes = runAndReceive(msg, dat)
 	if piRes != nil {
 		t.Errorf("Expected <nil> preimage, got %v", piRes)
@@ -1107,7 +1126,7 @@ func TestMarket_handlePreimageResp(t *testing.T) {
 	// 6. payload unmarshal error
 	msg, _ = msgjson.NewResponse(5, piMsg, nil)
 	msg.Payload = json.RawMessage(`{"result":1}`) // ResponsePayload with invalid Result
-	dat = &piData{preimage: make(chan *order.Preimage)}
+	dat = &piData{lo, make(chan *order.Preimage)}
 	piRes = runAndReceive(msg, dat)
 	if piRes != nil {
 		t.Errorf("Expected <nil> preimage, got %v", piRes)

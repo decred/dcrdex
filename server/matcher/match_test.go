@@ -378,10 +378,10 @@ func newBooker() Booker {
 
 func resetMakers() {
 	for _, o := range bookBuyOrders {
-		o.Filled = 0
+		o.FillAmt = 0
 	}
 	for _, o := range bookSellOrders {
-		o.Filled = 0
+		o.FillAmt = 0
 	}
 }
 
@@ -420,7 +420,7 @@ func Test_matchLimitOrder(t *testing.T) {
 	}
 	resetTakers := func() {
 		for _, o := range takers {
-			o.Filled = 0
+			o.FillAmt = 0
 		}
 	}
 
@@ -549,17 +549,19 @@ func TestMatch_cancelOnly(t *testing.T) {
 		queue []*OrderRevealed
 	}
 	tests := []struct {
-		name            string
-		args            args
-		doesMatch       bool
-		wantSeed        []byte
-		wantMatches     []*order.MatchSet
-		wantNumPassed   int
-		wantNumFailed   int
-		wantDoneOK      int
-		wantNumPartial  int
-		wantNumInserted int
-		wantNumUnbooked int
+		name                   string
+		args                   args
+		doesMatch              bool
+		wantSeed               []byte
+		wantMatches            []*order.MatchSet
+		wantNumPassed          int
+		wantNumFailed          int
+		wantDoneOK             int
+		wantNumPartial         int
+		wantNumInserted        int
+		wantNumUnbooked        int
+		wantNumCancelsExecuted int
+		wantNumTradesCanceled  int
 	}{
 		{
 			name: "cancel standing ok",
@@ -582,12 +584,14 @@ func TestMatch_cancelOnly(t *testing.T) {
 					Total:   0,
 				},
 			},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 1,
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        1,
+			wantNumCancelsExecuted: 1,
+			wantNumTradesCanceled:  1,
 		},
 		{
 			name: "cancel non-existent standing",
@@ -601,13 +605,15 @@ func TestMatch_cancelOnly(t *testing.T) {
 				0xf0, 0x90, 0x38, 0x7a, 0xa6, 0xb9, 0x8a, 0x83,
 				0x5a, 0x75, 0x05, 0x19, 0x66, 0x6d, 0x53, 0x12,
 				0x7e, 0xc8, 0x9d, 0xe3, 0x87, 0x5d, 0xdc, 0x8a},
-			wantMatches:     nil,
-			wantNumPassed:   0,
-			wantNumFailed:   1,
-			wantDoneOK:      0,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 0,
+			wantMatches:            nil,
+			wantNumPassed:          0,
+			wantNumFailed:          1,
+			wantDoneOK:             0,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        0,
+			wantNumCancelsExecuted: 0,
+			wantNumTradesCanceled:  0,
 		},
 	}
 	for _, tt := range tests {
@@ -617,7 +623,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 
 			numBuys0 := tt.args.book.BuyCount()
 
-			seed, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -650,6 +656,13 @@ func TestMatch_cancelOnly(t *testing.T) {
 			}
 			if len(unbooked) != tt.wantNumUnbooked {
 				t.Errorf("number unbooked %d, expected %d", len(unbooked), tt.wantNumUnbooked)
+			}
+
+			if len(updates.CancelsExecuted) != tt.wantNumCancelsExecuted {
+				t.Errorf("number of cancels executed %d, expected %d", len(updates.CancelsExecuted), tt.wantNumCancelsExecuted)
+			}
+			if len(updates.TradesCanceled) != tt.wantNumTradesCanceled {
+				t.Errorf("number of trades canceled %d, expected %d", len(updates.CancelsExecuted), tt.wantNumCancelsExecuted)
 			}
 
 			numBuys1 := tt.args.book.BuyCount()
@@ -689,9 +702,9 @@ func TestMatch_limitsOnly(t *testing.T) {
 		for _, o := range takers {
 			switch ot := o.Order.(type) {
 			case *order.MarketOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			case *order.LimitOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			}
 		}
 	}
@@ -703,17 +716,22 @@ func TestMatch_limitsOnly(t *testing.T) {
 		queue []*OrderRevealed
 	}
 	tests := []struct {
-		name            string
-		args            args
-		doesMatch       bool
-		wantSeed        []byte
-		wantMatches     []*order.MatchSet
-		wantNumPassed   int
-		wantNumFailed   int
-		wantDoneOK      int
-		wantNumPartial  int
-		wantNumInserted int
-		wantNumUnbooked int
+		name                   string
+		args                   args
+		doesMatch              bool
+		wantSeed               []byte
+		wantMatches            []*order.MatchSet
+		wantNumPassed          int
+		wantNumFailed          int
+		wantDoneOK             int
+		wantNumPartial         int
+		wantNumInserted        int
+		wantNumUnbooked        int
+		wantNumTradesPartial   int
+		wantNumTradesBooked    int
+		wantNumTradesCanceled  int
+		wantNumTradesCompleted int
+		wantNumTradesFailed    int
 	}{
 		{
 			name: "limit buy immediate rate match",
@@ -730,12 +748,13 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[0].Order, []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 1,
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        1,
+			wantNumTradesCompleted: 2,
 		},
 		{
 			name: "limit buy standing partial taker inserted to book",
@@ -752,12 +771,14 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[1].Order, []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      0,
-			wantNumPartial:  1,
-			wantNumInserted: 1,
-			wantNumUnbooked: 1,
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             0,
+			wantNumPartial:         1,
+			wantNumInserted:        1,
+			wantNumUnbooked:        1,
+			wantNumTradesBooked:    1,
+			wantNumTradesCompleted: 1,
 		},
 		{
 			name: "limit buy immediate partial taker unfilled",
@@ -774,12 +795,13 @@ func TestMatch_limitsOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[2].Order, []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  1,
-			wantNumInserted: 0,
-			wantNumUnbooked: 1,
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         1,
+			wantNumInserted:        0,
+			wantNumUnbooked:        1,
+			wantNumTradesCompleted: 2, // not in partial since they are done
 		},
 		{
 			name: "limit buy immediate unfilled fail",
@@ -793,16 +815,17 @@ func TestMatch_limitsOnly(t *testing.T) {
 				0xaf, 0xb7, 0x32, 0xcc, 0xd1, 0x77, 0xe9, 0x3e,
 				0x41, 0xdb, 0x0b, 0x7a, 0x9e, 0x6f, 0x34, 0xbe,
 				0xc9, 0xab, 0x6b, 0xb5, 0x17, 0xb2, 0x89, 0x82},
-			wantMatches:     nil,
-			wantNumPassed:   0,
-			wantNumFailed:   1,
-			wantDoneOK:      0,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 0,
+			wantMatches:         nil,
+			wantNumPassed:       0,
+			wantNumFailed:       1,
+			wantDoneOK:          0,
+			wantNumPartial:      0,
+			wantNumInserted:     0,
+			wantNumUnbooked:     0,
+			wantNumTradesFailed: 1,
 		},
 		{
-			name: "bad lot size order", // panic?
+			name: "bad lot size order",
 			args: args{
 				book:  newBooker(),
 				queue: []*OrderRevealed{badLotsizeOrder},
@@ -813,13 +836,14 @@ func TestMatch_limitsOnly(t *testing.T) {
 				0x97, 0xa3, 0xc6, 0x8b, 0x43, 0x0c, 0x9e, 0x9a,
 				0xfa, 0x6c, 0xf6, 0x86, 0x70, 0x97, 0xc7, 0x74,
 				0xb, 0xfb, 0x29, 0x19, 0xbf, 0x86, 0x6a, 0xc8},
-			wantMatches:     nil,
-			wantNumPassed:   0,
-			wantNumFailed:   1,
-			wantDoneOK:      0,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 0,
+			wantMatches:         nil,
+			wantNumPassed:       0,
+			wantNumFailed:       1,
+			wantDoneOK:          0,
+			wantNumPartial:      0,
+			wantNumInserted:     0,
+			wantNumUnbooked:     0,
+			wantNumTradesFailed: 1,
 		},
 		{
 			name: "limit buy standing partial taker inserted to book, then filled by down-queue sell",
@@ -846,12 +870,14 @@ func TestMatch_limitsOnly(t *testing.T) {
 					Total:   1 * LotSize,
 				},
 			},
-			wantNumPassed:   2,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  1,
-			wantNumInserted: 1,
-			wantNumUnbooked: 2,
+			wantNumPassed:          2,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         1,
+			wantNumInserted:        1,
+			wantNumUnbooked:        2,
+			wantNumTradesBooked:    1,
+			wantNumTradesCompleted: 3, // both queue orders and one book sell order fully filled
 		},
 	}
 	for _, tt := range tests {
@@ -860,7 +886,7 @@ func TestMatch_limitsOnly(t *testing.T) {
 			resetTakers()
 			resetMakers()
 
-			seed, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -894,6 +920,16 @@ func TestMatch_limitsOnly(t *testing.T) {
 			if len(unbooked) != tt.wantNumUnbooked {
 				t.Errorf("number unbooked %d, expected %d", len(unbooked), tt.wantNumUnbooked)
 			}
+
+			if len(updates.TradesCompleted) != tt.wantNumTradesCompleted {
+				t.Errorf("number of trades completed %d, expected %d", len(updates.TradesCompleted), tt.wantNumTradesCompleted)
+			}
+			if len(updates.TradesBooked) != tt.wantNumTradesBooked {
+				t.Errorf("number of trades booked %d, expected %d", len(updates.TradesBooked), tt.wantNumTradesBooked)
+			}
+			if len(updates.TradesFailed) != tt.wantNumTradesFailed {
+				t.Errorf("number of trades failed %d, expected %d", len(updates.TradesFailed), tt.wantNumTradesFailed)
+			}
 		})
 	}
 }
@@ -913,8 +949,8 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 	// takers is heterogenous w.r.t. type
 	takers := []*OrderRevealed{
 		newMarketSellOrder(1, 0),  // sell, 1 lot
-		newMarketSellOrder(3, 0),  // sell, 2 lot
-		newMarketSellOrder(6, 0),  // sell, 3 lot, partial maker fill
+		newMarketSellOrder(3, 0),  // sell, 3 lot
+		newMarketSellOrder(6, 0),  // sell, 6 lot, partial maker fill
 		newMarketSellOrder(99, 0), // sell, 99 lot, partial taker fill
 	}
 
@@ -922,9 +958,9 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 		for _, o := range takers {
 			switch ot := o.Order.(type) {
 			case *order.MarketOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			case *order.LimitOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			}
 		}
 	}
@@ -936,17 +972,20 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 		queue []*OrderRevealed
 	}
 	tests := []struct {
-		name            string
-		args            args
-		doesMatch       bool
-		wantSeed        []byte
-		wantMatches     []*order.MatchSet
-		wantNumPassed   int
-		wantNumFailed   int
-		wantDoneOK      int
-		wantNumPartial  int
-		wantNumInserted int
-		wantNumUnbooked int
+		name                   string
+		args                   args
+		doesMatch              bool
+		wantSeed               []byte
+		wantMatches            []*order.MatchSet
+		wantNumPassed          int
+		wantNumFailed          int
+		wantDoneOK             int
+		wantNumPartial         int
+		wantNumInserted        int
+		wantNumUnbooked        int
+		wantNumTradesCompleted int
+		wantNumTradesPartial   int
+		wantNumTradesFailed    int
 	}{
 		{
 			name: "market sell, 1 maker match",
@@ -963,12 +1002,13 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[0].Order, []*order.LimitOrder{bookBuyOrders[nBuy-1]}),
 			},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 1,
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        1,
+			wantNumTradesCompleted: 2, // queued market and already booked limit
 		},
 		{
 			name: "market sell, 2 maker match",
@@ -985,15 +1025,16 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[1].Order, []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2]}),
 			},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 2,
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        2,
+			wantNumTradesCompleted: 3, // queued market and two already booked limits
 		},
 		{
-			name: "market sell, 2 maker match, partial taker fill",
+			name: "market sell, 3 maker match, 1 partial maker fill",
 			args: args{
 				book:  newBooker(),
 				queue: []*OrderRevealed{takers[2]},
@@ -1007,15 +1048,17 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[2].Order, []*order.LimitOrder{bookBuyOrders[nBuy-1], bookBuyOrders[nBuy-2], bookBuyOrders[nBuy-3]}, 3*LotSize),
 			},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 2,
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        2,
+			wantNumTradesCompleted: 3, // taker and two already booked limits
+			wantNumTradesPartial:   1, // partial fill of one already booked limit, which consumed the taker
 		},
 		{
-			name: "market sell bad lot size", // shouldn't it panic?
+			name: "market sell bad lot size",
 			args: args{
 				book:  newBooker(),
 				queue: []*OrderRevealed{badLotsizeOrder},
@@ -1026,13 +1069,14 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 				0x97, 0xa3, 0xc6, 0x8b, 0x43, 0x0c, 0x9e, 0x9a,
 				0xfa, 0x6c, 0xf6, 0x86, 0x70, 0x97, 0xc7, 0x74,
 				0x0b, 0xfb, 0x29, 0x19, 0xbf, 0x86, 0x6a, 0xc8},
-			wantMatches:     nil,
-			wantNumPassed:   0,
-			wantNumFailed:   1,
-			wantDoneOK:      0,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 0,
+			wantMatches:         nil,
+			wantNumPassed:       0,
+			wantNumFailed:       1,
+			wantDoneOK:          0,
+			wantNumPartial:      0,
+			wantNumInserted:     0,
+			wantNumUnbooked:     0,
+			wantNumTradesFailed: 1,
 		},
 	}
 	for _, tt := range tests {
@@ -1043,7 +1087,7 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 
 			fmt.Printf("%v\n", takers)
 
-			seed, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -1077,6 +1121,17 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			if len(unbooked) != tt.wantNumUnbooked {
 				t.Errorf("number unbooked %d, expected %d", len(unbooked), tt.wantNumUnbooked)
 			}
+
+			if len(updates.TradesCompleted) != tt.wantNumTradesCompleted {
+				t.Errorf("number of trades completed %d, expected %d", len(updates.TradesCompleted), tt.wantNumTradesCompleted)
+			}
+			if len(updates.TradesPartial) != tt.wantNumTradesPartial {
+				t.Errorf("number of book trades partially filled %d, expected %d", len(updates.TradesPartial), tt.wantNumTradesPartial)
+			}
+			if len(updates.TradesFailed) != tt.wantNumTradesFailed {
+				t.Errorf("number of trades failed %d, expected %d", len(updates.TradesFailed), tt.wantNumTradesFailed)
+			}
+			t.Log(updates)
 		})
 	}
 }
@@ -1136,9 +1191,9 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 		for _, o := range takers {
 			switch ot := o.Order.(type) {
 			case *order.MarketOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			case *order.LimitOrder:
-				ot.Filled = 0
+				ot.FillAmt = 0
 			}
 		}
 	}
@@ -1153,18 +1208,21 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 		queue []*OrderRevealed
 	}
 	tests := []struct {
-		name            string
-		args            args
-		doesMatch       bool
-		wantSeed        []byte
-		wantMatches     []*order.MatchSet
-		remaining       []uint64
-		wantNumPassed   int
-		wantNumFailed   int
-		wantDoneOK      int
-		wantNumPartial  int
-		wantNumInserted int
-		wantNumUnbooked int
+		name                   string
+		args                   args
+		doesMatch              bool
+		wantSeed               []byte
+		wantMatches            []*order.MatchSet
+		remaining              []uint64
+		wantNumPassed          int
+		wantNumFailed          int
+		wantDoneOK             int
+		wantNumPartial         int
+		wantNumInserted        int
+		wantNumUnbooked        int
+		wantNumTradesCompleted int
+		wantNumTradesPartial   int
+		wantNumTradesFailed    int
 	}{
 		{
 			name: "market buy, 1 maker match",
@@ -1181,13 +1239,14 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[0].Order, []*order.LimitOrder{bookSellOrders[nSell-1]}),
 			},
-			remaining:       []uint64{quoteAmt(1) - marketBuyQuoteAmt(1)},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 1,
+			remaining:              []uint64{quoteAmt(1) - marketBuyQuoteAmt(1)},
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        1,
+			wantNumTradesCompleted: 2, // the taker and the maker are completed
 		},
 		{
 			name: "market buy, 2 maker match",
@@ -1204,13 +1263,15 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[1].Order, []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}, 1*LotSize),
 			},
-			remaining:       []uint64{0},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 1,
+			remaining:              []uint64{0},
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        1,
+			wantNumTradesCompleted: 2, // taker, and one maker
+			wantNumTradesPartial:   1, // the second maker
 		},
 		{
 			name: "market buy, 3 maker match",
@@ -1227,13 +1288,14 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[2].Order, []*order.LimitOrder{bookSellOrders[nSell-1], bookSellOrders[nSell-2]}),
 			},
-			remaining:       []uint64{0},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 2,
+			remaining:              []uint64{0},
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        2,
+			wantNumTradesCompleted: 3, // taker, 2 makers
 		},
 		{
 			name: "market buy, 99 maker match",
@@ -1250,13 +1312,14 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			wantMatches: []*order.MatchSet{
 				newMatchSet(takers[3].Order, bookSellOrdersReverse),
 			},
-			remaining:       []uint64{0},
-			wantNumPassed:   1,
-			wantNumFailed:   0,
-			wantDoneOK:      1,
-			wantNumPartial:  0,
-			wantNumInserted: 0,
-			wantNumUnbooked: 11,
+			remaining:              []uint64{0},
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumPartial:         0,
+			wantNumInserted:        0,
+			wantNumUnbooked:        11,
+			wantNumTradesCompleted: 12, // taker, 11 makers
 		},
 	}
 	for _, tt := range tests {
@@ -1265,7 +1328,7 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			resetTakers()
 			resetMakers()
 
-			seed, matches, passed, failed, doneOK, partial, booked, unbooked := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -1302,6 +1365,16 @@ func TestMatch_marketBuysOnly(t *testing.T) {
 			}
 			if len(unbooked) != tt.wantNumUnbooked {
 				t.Errorf("number unbooked %d, expected %d", len(unbooked), tt.wantNumUnbooked)
+			}
+
+			if len(updates.TradesCompleted) != tt.wantNumTradesCompleted {
+				t.Errorf("number of trades completed %d, expected %d", len(updates.TradesCompleted), tt.wantNumTradesCompleted)
+			}
+			if len(updates.TradesPartial) != tt.wantNumTradesPartial {
+				t.Errorf("number of book trades partially filled %d, expected %d", len(updates.TradesPartial), tt.wantNumTradesPartial)
+			}
+			if len(updates.TradesFailed) != tt.wantNumTradesFailed {
+				t.Errorf("number of trades failed %d, expected %d", len(updates.TradesFailed), tt.wantNumTradesFailed)
 			}
 		})
 	}

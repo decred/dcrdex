@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex/encode"
@@ -242,6 +243,30 @@ func (pi *Preimage) Commit() Commitment {
 	return blake256.Sum256(pi[:])
 }
 
+// Value implements the sql/driver.Valuer interface.
+func (pi Preimage) Value() (driver.Value, error) {
+	return pi[:], nil // []byte
+}
+
+// Scan implements the sql.Scanner interface.
+func (pi *Preimage) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		copy(pi[:], src)
+		return nil
+	case nil: // NULL in the table
+		*pi = Preimage{}
+		return nil
+	}
+
+	return fmt.Errorf("cannot convert %T to Preimage", src)
+}
+
+// IsZero checks if the Preimage is the zero Preimage.
+func (pi *Preimage) IsZero() bool {
+	return *pi == Preimage{}
+}
+
 // Prefix is the order prefix containing data fields common to all orders.
 type Prefix struct {
 	AccountID  account.AccountID
@@ -353,8 +378,22 @@ type Trade struct {
 	Quantity uint64
 	Address  string
 
-	// Filled is not part of the order's serialization.
-	Filled uint64
+	// FillAmt is not part of the order's serialization.
+	fillAmtMtx sync.RWMutex
+	FillAmt    uint64 // use Filled and AddFill methods for thread-safe access
+}
+
+// Copy makes a shallow copy of a Trade. This is useful when attempting to
+// assign a newly-created trade to an order's field without a linter warning
+// about copying a mutex (e.g. MarketOrder{T: *aNewTrade.Copy()}).
+func (t *Trade) Copy() *Trade {
+	return &Trade{
+		Coins:    t.Coins, // shallow
+		Sell:     t.Sell,
+		Quantity: t.Quantity,
+		Address:  t.Address,
+		FillAmt:  t.FillAmt,
+	}
 }
 
 // T is an alias for Trade. Embedding with the alias allows us to define a
@@ -368,7 +407,30 @@ func (t *Trade) Trade() *Trade {
 
 // Remaining returns the remaining order amount.
 func (t *Trade) Remaining() uint64 {
-	return t.Quantity - t.Filled
+	t.fillAmtMtx.RLock()
+	defer t.fillAmtMtx.RUnlock()
+	return t.Quantity - t.FillAmt
+}
+
+// Filled returns the filled amount.
+func (t *Trade) Filled() uint64 {
+	t.fillAmtMtx.RLock()
+	defer t.fillAmtMtx.RUnlock()
+	return t.FillAmt
+}
+
+// AddFill increases the filled amount.
+func (t *Trade) AddFill(amt uint64) {
+	t.fillAmtMtx.Lock()
+	t.FillAmt += amt
+	t.fillAmtMtx.Unlock()
+}
+
+// SetFill sets the filled amount.
+func (t *Trade) SetFill(amt uint64) {
+	t.fillAmtMtx.Lock()
+	t.FillAmt = amt
+	t.fillAmtMtx.Unlock()
 }
 
 // SwapAddress returns the order's payment address.
@@ -615,7 +677,7 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 		// Market orders OK statuses: epoch and executed (NOT booked or
 		// canceled).
 		switch status {
-		case OrderStatusEpoch, OrderStatusExecuted:
+		case OrderStatusEpoch, OrderStatusExecuted, OrderStatusRevoked:
 		default:
 			return fmt.Errorf("invalid market order status %d -> %s", status, status)
 		}
@@ -632,10 +694,11 @@ func ValidateOrder(ord Order, status OrderStatus, lotSize uint64) error {
 		}
 
 	case *CancelOrder:
-		// Cancel order OK statuses: epoch, and executed (NOT booked or
-		// canceled).
+		// Cancel order OK statuses: epoch, executed (NOT booked or canceled),
+		// and revoked. Revoked status indicates the cancel order is
+		// server-generated and corresponds to a revoked trade order.
 		switch status {
-		case OrderStatusEpoch, OrderStatusExecuted: // orderStatusFailed if we decide to export that
+		case OrderStatusEpoch, OrderStatusExecuted, OrderStatusRevoked: // orderStatusFailed if we decide to export that
 		default:
 			return fmt.Errorf("invalid cancel order status %d -> %s", status, status)
 		}

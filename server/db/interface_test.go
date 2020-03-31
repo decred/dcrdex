@@ -37,7 +37,7 @@ func TestValidateOrder(t *testing.T) {
 	marketOrderBadAmt.Quantity /= 2
 
 	marketOrderBadRemaining := newMarketSellOrder(1, 0)
-	marketOrderBadRemaining.Filled = marketOrderBadAmt.Quantity / 2
+	marketOrderBadRemaining.FillAmt = marketOrderBadAmt.Quantity / 2
 
 	// order ID for a cancel order
 	orderID0, _ := hex.DecodeString("dd64e2ae2845d281ba55a6d46eceb9297b2bdec5c5bada78f9ae9e373164df0d")

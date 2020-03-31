@@ -32,6 +32,7 @@ type AuthManager interface {
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
 	Penalize(user account.AccountID, rule account.Rule)
+	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 }
 
 // MarketTunnel is a connection to a market and information about existing
@@ -536,39 +537,38 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 				len(coin.PubKeys), sigCount, i,
 			))
 		}
-		// Check that the outpoint isn't locked.
-		locked := tunnel.CoinLocked(coinAssetID, order.CoinID(coin.ID))
-		if locked {
-			return errSet(msgjson.FundingError,
-				fmt.Sprintf("coin %x is locked", coin.ID))
-		}
 		// Get the coin from the backend and validate it.
 		dexCoin, err := assets.funding.Backend.FundingCoin(coin.ID, coin.Redeem)
 		if err != nil {
 			return errSet(msgjson.FundingError,
-				fmt.Sprintf("error retrieving coin %x", coin.ID))
+				fmt.Sprintf("error retrieving coin ID %v", coin.ID))
+		}
+		// Check that the outpoint isn't locked.
+		locked := tunnel.CoinLocked(coinAssetID, order.CoinID(coin.ID))
+		if locked {
+			return errSet(msgjson.FundingError,
+				fmt.Sprintf("coin %v is locked", dexCoin))
 		}
 		// Make sure the UTXO has the requisite number of confirmations.
 		confs, err := dexCoin.Confirmations()
 		if err != nil {
 			return errSet(msgjson.FundingError,
-				fmt.Sprintf("coin confirmations error for %x: %v", coin.ID, err))
+				fmt.Sprintf("coin confirmations error for %v: %v", dexCoin, err))
 		}
 		// Valid coins have either confs >= FundConf, or come from a
 		// DEX-monitored transaction.
 		if confs < int64(assets.funding.FundConf) &&
 			!tunnel.TxMonitored(user, assets.funding.ID, dexCoin.TxID()) {
 			return errSet(msgjson.FundingError,
-				fmt.Sprintf("not enough confirmations for %x. require %d, have %d",
+				fmt.Sprintf("not enough confirmations for %v. require %d, have %d",
 					coin.ID, assets.funding.FundConf, confs))
 		}
 		err = dexCoin.Auth(msgBytesToBytes(coin.PubKeys), msgBytesToBytes(coin.Sigs), coin.ID)
 		if err != nil {
 			return errSet(msgjson.CoinAuthError,
-				fmt.Sprintf("failed to authorize coin %x", coin.ID))
+				fmt.Sprintf("failed to authorize coin %v", dexCoin))
 		}
-		var id []byte = coin.ID
-		coinIDs = append(coinIDs, id)
+		coinIDs = append(coinIDs, []byte(coin.ID))
 		valSum += dexCoin.Value()
 		spendSize += dexCoin.SpendSize()
 	}

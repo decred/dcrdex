@@ -164,6 +164,9 @@ func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule) {
 	m.penalty.rule = rule
 }
 
+func (m *TAuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {}
+func (m *TAuthManager) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time)            {}
+
 func (m *TAuthManager) flushPenalty() (account.AccountID, account.Rule) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
@@ -215,7 +218,11 @@ type TStorage struct{}
 
 func (s *TStorage) InsertMatch(match *order.Match) error { return nil }
 func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
-func (s *TStorage) LastErr() error                       { return nil }
+func (s *TStorage) RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error) {
+	return
+}
+func (s *TStorage) SetOrderCompleteTime(ord order.Order, compTime int64) error { return nil }
+func (s *TStorage) LastErr() error                                             { return nil }
 func (s *TStorage) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
 	return 0, nil, nil
 }
@@ -236,12 +243,16 @@ func (s *TStorage) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error { re
 func (s *TStorage) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (s *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error { return nil }
+func (s *TStorage) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
+	return nil
+}
 func (s *TStorage) SaveRedeemB(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
 	return nil
 }
-func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
-func (s *TStorage) SetMatchInactive(mid db.MarketMatchID) error              { return nil }
+func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
+	return nil
+}
+func (s *TStorage) SetMatchInactive(mid db.MarketMatchID) error { return nil }
 
 // This stub satisfies asset.Backend.
 type TAsset struct {
@@ -278,9 +289,8 @@ func (a *TAsset) Redemption(redemptionID, contractID []byte) (asset.Coin, error)
 	defer a.mtx.RUnlock()
 	return a.redemption, a.redemptionErr
 }
-
-func (a *TAsset) ValidateCoinID(coinID []byte) error {
-	return nil
+func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
+	return "", nil
 }
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil
@@ -334,6 +344,7 @@ func (coin *TCoin) ID() []byte                                    { return coin.
 func (coin *TCoin) TxID() string                                  { return hex.EncodeToString(coin.id) }
 func (coin *TCoin) Value() uint64                                 { return coin.auditVal }
 func (coin *TCoin) SpendSize() uint32                             { return 0 }
+func (coin *TCoin) String() string                                { return hex.EncodeToString(coin.id) /* not txid:vout */ }
 
 func (coin *TCoin) FeeRate() uint64 {
 	return 1
@@ -1141,23 +1152,23 @@ func TestSwaps(t *testing.T) {
 		}
 		t.Run("perfect limit-limit match"+sellStr, func(t *testing.T) {
 			rig.matches = tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 			testSwap(t, rig)
 		})
 		t.Run("perfect limit-market match"+sellStr, func(t *testing.T) {
 			rig.matches = tPerfectLimitMarket(uint64(1e8), uint64(1e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 			testSwap(t, rig)
 		})
 		t.Run("imperfect limit-market match"+sellStr, func(t *testing.T) {
 			// only requirement is that maker val > taker val.
 			rig.matches = tMarketPair(uint64(10e8), uint64(2e8), uint64(5e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 			testSwap(t, rig)
 		})
 		t.Run("imperfect limit-limit match"+sellStr, func(t *testing.T) {
 			rig.matches = tLimitPair(uint64(10e8), uint64(2e8), uint64(2e8), uint64(5e8), uint64(5e8), makerSell)
-			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+			rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 			testSwap(t, rig)
 		})
 		for _, isMarket := range []bool{true, false} {
@@ -1169,7 +1180,7 @@ func TestSwaps(t *testing.T) {
 				matchQtys := []uint64{uint64(1e8), uint64(9e8), uint64(3e8)}
 				rates := []uint64{uint64(10e8), uint64(11e8), uint64(12e8)}
 				rig.matches = tMultiMatchSet(matchQtys, rates, makerSell, isMarket)
-				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
+				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet}, nil)
 				testSwap(t, rig)
 			})
 		}
@@ -1181,7 +1192,7 @@ func TestNoAck(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	mustBeError := makeMustBeError(t)
 	maker, taker := matchInfo.maker, matchInfo.taker
@@ -1239,7 +1250,7 @@ func TestTxWaiters(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	dummyError := fmt.Errorf("test error")
 
@@ -1409,7 +1420,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
 		matchInfo := set.matchInfos[0]
 		rig.matchInfo = matchInfo
-		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 		// Step through the negotiation process. No errors should be generated.
 		ensureNilErr(rig.ackMatch_maker(true))
 		ensureNilErr(rig.ackMatch_taker(true))
@@ -1464,7 +1475,7 @@ func TestSigErrors(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	// checkResp makes sure that the specified user has a signature error response
 	// from the swapper.
@@ -1519,7 +1530,7 @@ func TestMalformedSwap(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	checkContractErr := rpcErrorChecker(t, rig, msgjson.ContractError)
 
@@ -1544,7 +1555,7 @@ func TestBadParams(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	swapper := rig.swapper
 	match := rig.getTracker()
 	user := matchInfo.maker
@@ -1585,7 +1596,7 @@ func TestCancel(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	// There should be no matchTracker
 	if rig.getTracker() != nil {
 		t.Fatalf("found matchTracker for a cancellation")
@@ -1624,7 +1635,7 @@ func TestTxMonitored(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet})
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	maker, taker := matchInfo.maker, matchInfo.taker
 

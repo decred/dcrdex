@@ -248,9 +248,12 @@ func (btc *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.Fundi
 }
 
 // ValidateCoinID attempts to decode the coinID.
-func (btc *Backend) ValidateCoinID(coinID []byte) error {
-	_, _, err := decodeCoinID(coinID)
-	return err
+func (btc *Backend) ValidateCoinID(coinID []byte) (string, error) {
+	txid, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%v:%d", txid, vout), err
 }
 
 // ValidateContract ensures that the swap contract is constructed properly, and

@@ -110,10 +110,10 @@ func newBook(t *testing.T) *Book {
 
 func resetMakers() {
 	for _, o := range bookBuyOrders {
-		o.Filled = 0
+		o.FillAmt = 0
 	}
 	for _, o := range bookSellOrders {
-		o.Filled = 0
+		o.FillAmt = 0
 	}
 }
 

@@ -1915,7 +1915,7 @@ func TestTradeTracking(t *testing.T) {
 	if tracker.cancel.matches.maker == nil {
 		t.Fatalf("cancelMatches.maker not set")
 	}
-	if tracker.Trade().Filled != qty {
+	if tracker.Trade().Filled() != qty {
 		t.Fatalf("fill not set")
 	}
 	if tracker.cancel.matches.taker == nil {

@@ -119,7 +119,7 @@ func (t *trackedTrade) coreOrder() (*Order, *Order) {
 		Rate:        t.rate(),
 		Qty:         trade.Quantity,
 		Sell:        trade.Sell,
-		Filled:      trade.Filled,
+		Filled:      trade.Filled(),
 		Cancelling:  t.cancel != nil,
 		TimeInForce: tif,
 	}
@@ -238,7 +238,9 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		}
 	}
 	t.matchMtx.RUnlock()
-	t.Trade().Filled = filled
+	// The filled amount includes all of the trackedTrade's matches, so the
+	// filled amount must be set, not just increased.
+	t.Trade().SetFill(filled)
 
 	return t.tick()
 }

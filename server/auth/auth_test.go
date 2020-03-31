@@ -31,6 +31,14 @@ func randBytes(l int) []byte {
 	return b
 }
 
+type ratioData struct {
+	oidsCompleted  []order.OrderID
+	timesCompleted []int64
+	oidsCancels    []order.OrderID
+	oidsCanceled   []order.OrderID
+	timesCanceled  []int64
+}
+
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct     *account.Account
@@ -43,6 +51,7 @@ type TStorage struct {
 	payErr   error
 	unpaid   bool
 	closed   bool
+	ratio    ratioData
 }
 
 func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) { s.closedID = id }
@@ -55,6 +64,15 @@ func (s *TStorage) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) 
 func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
 func (s *TStorage) PayAccount(account.AccountID, []byte) error       { return s.payErr }
+func (s *TStorage) setRatioData(dat *ratioData) {
+	s.ratio = *dat
+}
+func (s *TStorage) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
+	return s.ratio.oidsCompleted, s.ratio.timesCompleted, nil
+}
+func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
+	return s.ratio.oidsCancels, s.ratio.oidsCanceled, s.ratio.timesCanceled, nil
+}
 
 // TSigner satisfies the Signer interface
 type TSigner struct {
@@ -211,8 +229,15 @@ func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 }
 
 func connectUser(t *testing.T, user *tUser) *msgjson.Message {
+	return tryConnectUser(t, user, false)
+}
+
+func tryConnectUser(t *testing.T, user *tUser, wantErr bool) *msgjson.Message {
 	connect := queueUser(t, user)
-	rig.mgr.handleConnect(user.conn, connect)
+	err := rig.mgr.handleConnect(user.conn, connect)
+	if (err != nil) != wantErr {
+		t.Fatalf("handleConnect: wantErr=%v, got err=%v", wantErr, err)
+	}
 
 	// Check the response.
 	respMsg := user.conn.getSend()
@@ -260,6 +285,10 @@ var tDexPubKeyBytes = []byte{
 	0x11, 0x11, 0x8b, 0x52, 0xe2, 0x9c, 0x77, 0x3f, 0x27,
 }
 
+func resetStorage() {
+	*rig.storage = TStorage{acctAddr: tFeeAddr, regAddr: tCheckFeeAddr}
+}
+
 func TestMain(m *testing.M) {
 	doIt := func() int {
 		ctx, shutdown := context.WithCancel(context.Background())
@@ -273,6 +302,7 @@ func TestMain(m *testing.M) {
 			RegistrationFee: tRegFee,
 			FeeConfs:        tCheckFeeConfs,
 			FeeChecker:      tCheckFee,
+			CancelThreshold: 0.8,
 		})
 		go authMgr.Run(ctx)
 		rig = &testRig{
@@ -304,8 +334,24 @@ func TestConnect(t *testing.T) {
 		Side:     4,
 	}
 	rig.storage.matches = []*order.UserMatch{userMatch}
-	// Connect the user.
+	rig.storage.setRatioData(&ratioData{
+		oidsCompleted:  []order.OrderID{{0x1}},
+		timesCompleted: []int64{1234},
+		oidsCancels:    []order.OrderID{{0x2}},
+		oidsCanceled:   []order.OrderID{{0x1}},
+		timesCanceled:  []int64{1235},
+	}) // 50%
+	defer rig.storage.setRatioData(&ratioData{}) // clean slate
+
+	// Fail on account failing cancel ratio.
+	rig.mgr.cancelThresh = 0.2
 	user := tNewUser(t)
+	tryConnectUser(t, user, true)
+	rig.storage.closedID = account.AccountID{}
+	rig.mgr.cancelThresh = 0.8 // passable
+
+	// Connect the user.
+	user = tNewUser(t)
 	respMsg := connectUser(t, user)
 	cResp := extractConnectResult(t, respMsg)
 	if len(cResp.Matches) != 1 {
@@ -867,6 +913,13 @@ func TestHandleRegister(t *testing.T) {
 	ensureErr(do(msg), "DEX signature error", msgjson.RPCInternalError)
 	rig.signer.err = nil
 
+	sigMsg := randBytes(73)
+	sig, err := user.privKey.Sign(sigMsg)
+	if err != nil {
+		t.Fatalf("signing error: %v", err)
+	}
+	rig.signer.sig = sig
+
 	// Send a valid registration and check the response.
 	// Before starting, make sure there are no responses in the queue.
 	respMsg := user.conn.getSend()
@@ -884,7 +937,7 @@ func TestHandleRegister(t *testing.T) {
 	}
 	resp, _ := respMsg.Response()
 	regRes := new(msgjson.RegisterResult)
-	err := json.Unmarshal(resp.Result, regRes)
+	err = json.Unmarshal(resp.Result, regRes)
 	if err != nil {
 		t.Fatalf("error unmarshaling payload")
 	}
@@ -910,6 +963,11 @@ func TestHandleNotifyFee(t *testing.T) {
 		0x5b, 0x7b, 0xd5, 0x8d, 0x7a, 0x06, 0x1a, 0xc6, 0x89, 0x0a, 0x86, 0x2b,
 		0x1e, 0x59, 0xb3, 0xc8, 0xf6, 0xad, 0xee, 0xc8, 0x00, 0x00, 0x00, 0x32,
 	}
+
+	defer func() {
+		rig.storage.unpaid = false
+	}()
+	defer resetStorage()
 
 	newNotify := func() *msgjson.NotifyFee {
 		notify := &msgjson.NotifyFee{
@@ -973,9 +1031,9 @@ func TestHandleNotifyFee(t *testing.T) {
 
 	// account already paid
 	ensureErr(do(newMsg(newNotify())), "already paid", msgjson.AuthenticationError)
-	rig.storage.unpaid = true
 
 	// Signature error
+	rig.storage.unpaid = true // notifyfee cannot be sent for paid account
 	notify = newNotify()
 	notify.Sig = []byte{0x01, 0x02}
 	ensureErr(do(newMsg(notify)), "bad signature", msgjson.SignatureError)
@@ -1004,9 +1062,107 @@ func TestHandleNotifyFee(t *testing.T) {
 	ensureErr(doWaiter(goodMsg), "DEX signature", msgjson.RPCInternalError)
 	rig.signer.err = nil
 
+	sigMsg := randBytes(73)
+	sig, err := user.privKey.Sign(sigMsg)
+	if err != nil {
+		t.Fatalf("signing error: %v", err)
+	}
+	rig.signer.sig = sig
+
 	// Send a valid notifyfee, and check the response.
 	rpcErr := doWaiter(goodMsg)
 	if rpcErr != nil {
 		t.Fatalf("error sending valid notifyfee: %s", rpcErr.Message)
 	}
+}
+
+func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
+	resetStorage()
+	user := tNewUser(t)
+	connectUser(t, user)
+
+	client := rig.mgr.user(user.acctID)
+	if client == nil {
+		t.Fatalf("client not found")
+	}
+
+	newOrderID := func() (oid order.OrderID) {
+		rand.Read(oid[:])
+		return
+	}
+
+	oid := newOrderID()
+	tCompleted := unixMsNow()
+	rig.mgr.RecordCompletedOrder(user.acctID, oid, tCompleted)
+
+	client.mtx.Lock()
+	total, cancels := client.recentOrders.counts()
+	client.mtx.Unlock()
+	if total != 1 {
+		t.Errorf("got %d total orders, expected %d", total, 1)
+	}
+	if cancels != 0 {
+		t.Errorf("got %d cancels, expected %d", cancels, 0)
+	}
+
+	checkOrd := func(ord *oidStamped, oid order.OrderID, cancel bool, timestamp int64) {
+		if ord.OrderID != oid {
+			t.Errorf("completed order id mismatch. got %v, expected %v",
+				ord.OrderID, oid)
+		}
+		isCancel := ord.target != nil
+		if isCancel != cancel {
+			t.Errorf("order marked as cancel=%v, expected %v", isCancel, cancel)
+		}
+		//tMS := encode.UnixMilli(tCompleted)
+		if ord.time != timestamp {
+			t.Errorf("completed order time mismatch. got %v, expected %v",
+				ord.time, timestamp)
+		}
+	}
+
+	client.mtx.Lock()
+	ord := client.recentOrders.orders[0]
+	client.mtx.Unlock()
+	checkOrd(ord, oid, false, encode.UnixMilli(tCompleted))
+
+	// another
+	oid = newOrderID()
+	tCompleted = tCompleted.Add(time.Millisecond) // newer
+	rig.mgr.RecordCompletedOrder(user.acctID, oid, tCompleted)
+
+	client.mtx.Lock()
+	total, cancels = client.recentOrders.counts()
+	client.mtx.Unlock()
+	if total != 2 {
+		t.Errorf("got %d total orders, expected %d", total, 2)
+	}
+	if cancels != 0 {
+		t.Errorf("got %d cancels, expected %d", cancels, 0)
+	}
+
+	client.mtx.Lock()
+	ord = client.recentOrders.orders[1]
+	client.mtx.Unlock()
+	checkOrd(ord, oid, false, encode.UnixMilli(tCompleted))
+
+	// now a cancel
+	coid := newOrderID()
+	tCompleted = tCompleted.Add(time.Millisecond) // newer
+	rig.mgr.RecordCancel(user.acctID, coid, oid, tCompleted)
+
+	client.mtx.Lock()
+	total, cancels = client.recentOrders.counts()
+	client.mtx.Unlock()
+	if total != 3 {
+		t.Errorf("got %d total orders, expected %d", total, 3)
+	}
+	if cancels != 1 {
+		t.Errorf("got %d cancels, expected %d", cancels, 1)
+	}
+
+	client.mtx.Lock()
+	ord = client.recentOrders.orders[2]
+	client.mtx.Unlock()
+	checkOrd(ord, coid, true, encode.UnixMilli(tCompleted))
 }

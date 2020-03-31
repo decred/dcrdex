@@ -39,6 +39,7 @@ const (
 	defaultRPCHost             = "127.0.0.1"
 	defaultRPCPort             = "7232"
 
+	defaultCancelThresh     = 0.6
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
 	defaultBroadcastTimeout = time.Minute
@@ -65,6 +66,7 @@ type dexConf struct {
 	RegFeeXPub       string
 	RegFeeConfirms   int64
 	RegFeeAmount     uint64
+	CancelThreshold  float64
 	DEXPrivKey       *secp256k1.PrivateKey
 	RPCCert          string
 	RPCKey           string
@@ -97,6 +99,7 @@ type flagsData struct {
 	RegFeeXPub       string        `long:"regfeexpub" description:"The extended public key for deriving Decred addresses to which DEX registration fees should be paid."`
 	RegFeeConfirms   int64         `long:"regfeeconfirms" description:"The number of confirmations required to consider a registration fee paid."`
 	RegFeeAmount     uint64        `long:"regfeeamount" description:"The registration fee amount in atoms."`
+	CancelThreshold  float64       `long:"cancelthresh" description:"Cancellation ratio threshold (cancels/completed)."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 
 	HTTPProfile bool   `long:"httpprof" short:"p" description:"Start HTTP profiler."`
@@ -251,6 +254,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RegFeeConfirms:   defaultRegFeeConfirms,
 		RegFeeAmount:     defaultRegFeeAmount,
 		BroadcastTimeout: defaultBroadcastTimeout,
+		CancelThreshold:  defaultCancelThresh,
 	}
 
 	// Pre-parse the command line options to see if an alternative config file
@@ -504,6 +508,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RegFeeAmount:     cfg.RegFeeAmount,
 		RegFeeConfirms:   cfg.RegFeeConfirms,
 		RegFeeXPub:       cfg.RegFeeXPub,
+		CancelThreshold:  cfg.CancelThreshold,
 		DEXPrivKey:       privKey,
 		RPCCert:          cfg.RPCCert,
 		RPCKey:           cfg.RPCKey,

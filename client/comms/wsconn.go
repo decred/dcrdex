@@ -281,7 +281,7 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 	for {
 		select {
 		case <-conn.reconnectCh:
-			// Prioritize context cancelation even if there are reconnect
+			// Prioritize context cancellation even if there are reconnect
 			// requests.
 			if ctx.Err() != nil {
 				return

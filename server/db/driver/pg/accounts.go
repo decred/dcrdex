@@ -132,7 +132,7 @@ func createAccountTables(db *sql.DB) error {
 			return err
 		}
 		if created {
-			log.Infof("Table %s created", c.name)
+			log.Tracef("Table %s created", c.name)
 		}
 	}
 	return nil
