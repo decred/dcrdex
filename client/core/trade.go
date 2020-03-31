@@ -238,7 +238,9 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		}
 	}
 	t.matchMtx.RUnlock()
-	t.Trade().AddFill(filled)
+	// The filled amount includes all of the trackedTrade's matches, so the
+	// filled amount must be set, not just increased.
+	t.Trade().SetFill(filled)
 
 	return t.tick()
 }

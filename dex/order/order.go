@@ -426,6 +426,13 @@ func (t *Trade) AddFill(amt uint64) {
 	t.fillAmtMtx.Unlock()
 }
 
+// SetFill sets the filled amount.
+func (t *Trade) SetFill(amt uint64) {
+	t.fillAmtMtx.Lock()
+	t.FillAmt = amt
+	t.fillAmtMtx.Unlock()
+}
+
 // SwapAddress returns the order's payment address.
 func (t *Trade) SwapAddress() string {
 	return t.Address
