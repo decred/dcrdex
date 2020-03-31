@@ -8,10 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
-	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	dexsrv "decred.org/dcrdex/server/dex"
@@ -72,7 +72,7 @@ func init() {
 	swap.UseLogger(swapLogger)
 	book.UseLogger(bookLogger)
 	matcher.UseLogger(matcherLogger)
-	coinwaiter.UseLogger(waiterLogger)
+	wait.UseLogger(waiterLogger)
 }
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.

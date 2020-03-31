@@ -13,8 +13,8 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
-	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
@@ -139,8 +139,8 @@ type AuthManager struct {
 	regFee       uint64
 	checkFee     FeeChecker
 	feeConfs     int64
-	// coinWaiter is a coin waiter to deal with latency.
-	coinWaiter *coinwaiter.Waiter
+	// latencyQ is a queue for coin waiters to deal with latency.
+	latencyQ *wait.TickerQueue
 }
 
 // Config is the configuration settings for the AuthManager, and the only
@@ -176,7 +176,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	}
 	// Referring to auth.Send in the construction above would create a function
 	// with a nil receiver, so do it after auth is set.
-	auth.coinWaiter = coinwaiter.New(recheckInterval, auth.Send)
+	auth.latencyQ = wait.NewTickerQueue(recheckInterval)
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
@@ -231,7 +231,7 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 // Run runs the AuthManager until the context is canceled. Satisfies the
 // dex.Runner interface.
 func (auth *AuthManager) Run(ctx context.Context) {
-	go auth.coinWaiter.Run(ctx)
+	go auth.latencyQ.Run(ctx)
 	<-ctx.Done()
 }
 

@@ -14,10 +14,10 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/coinlock"
-	"decred.org/dcrdex/server/coinwaiter"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
@@ -287,22 +287,22 @@ type Swapper struct {
 	block chan *blockNotification
 	// The broadcast timeout.
 	bTimeout time.Duration
-	// coinWaiter is a coinwaiter.Waiter to deal with latency.
-	coinWaiter *coinwaiter.Waiter
+	// latencyQ is a queue for coin waiters to deal with network latency.
+	latencyQ *wait.TickerQueue
 }
 
 // NewSwapper is a constructor for a Swapper.
 func NewSwapper(cfg *Config) *Swapper {
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		coins:      cfg.Assets,
-		storage:    cfg.Storage,
-		authMgr:    authMgr,
-		coinWaiter: coinwaiter.New(recheckInterval, authMgr.Send),
-		matches:    make(map[string]*matchTracker),
-		orders:     newOrderSwapTracker(),
-		block:      make(chan *blockNotification, 8),
-		bTimeout:   cfg.BroadcastTimeout,
+		coins:    cfg.Assets,
+		storage:  cfg.Storage,
+		authMgr:  authMgr,
+		latencyQ: wait.NewTickerQueue(recheckInterval),
+		matches:  make(map[string]*matchTracker),
+		orders:   newOrderSwapTracker(),
+		block:    make(chan *blockNotification, 8),
+		bTimeout: cfg.BroadcastTimeout,
 	}
 
 	// The swapper is only concerned with two types of client-originating
@@ -355,7 +355,7 @@ func (s *Swapper) Run(ctx context.Context) {
 
 	wg.Add(1)
 	go func() {
-		s.coinWaiter.Run(ctxSwap)
+		s.latencyQ.Run(ctxSwap)
 		wg.Done()
 	}()
 
@@ -1072,24 +1072,24 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	contract, err := chain.Contract(params.CoinID, params.Contract)
 	if err != nil {
 		if err == asset.CoinNotFoundError {
-			return coinwaiter.TryAgain
+			return wait.TryAgain
 		}
 		log.Warnf("Contract error encountered for match %s, actor %s using coin ID %x and contract %x: %v",
 			stepInfo.match.ID(), actor, params.CoinID, params.Contract, err)
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			"redemption error")
-		return coinwaiter.DontTryAgain
+		return wait.DontTryAgain
 	}
 
 	if contract.Address() != counterParty.order.Trade().SwapAddress() {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("incorrect recipient. expected %s. got %s", contract.Address(), counterParty.order.Trade().SwapAddress()))
-		return coinwaiter.DontTryAgain
+		return wait.DontTryAgain
 	}
 	if contract.Value() != stepInfo.checkVal {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("contract error. expected contract value to be %d, got %d", stepInfo.checkVal, contract.Value()))
-		return coinwaiter.DontTryAgain
+		return wait.DontTryAgain
 	}
 
 	// Update the match.
@@ -1116,7 +1116,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError,
 			"internal server error")
 		// TODO: revoke the match without penalties instead of retrying forever?
-		return coinwaiter.TryAgain
+		return wait.TryAgain
 	}
 
 	actor.status.mtx.Lock()
@@ -1150,7 +1150,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if err != nil {
 		// This is likely an impossibly condition.
 		log.Errorf("error creating audit request: %v", err)
-		return coinwaiter.DontTryAgain
+		return wait.DontTryAgain
 	}
 	// Set up the acknowledgement for the callback.
 	ack := &messageAcker{
@@ -1166,7 +1166,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, ack)
 	})
-	return coinwaiter.DontTryAgain
+	return wait.DontTryAgain
 }
 
 // processRedeem processes a 'redeem' request from a client. processRedeem does
@@ -1196,19 +1196,19 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		log.Errorf("secret validation failed (match id=%v, maker=%v, secret=%x)",
 			matchID, actor.isMaker, params.Secret)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
-		return coinwaiter.DontTryAgain
+		return wait.DontTryAgain
 	}
 	redemption, err := chain.Redemption(params.CoinID, cpSwapCoin)
 	// If there is an error, don't return an error yet, since it could be due to
 	// network latency. Instead, queue it up for another check.
 	if err != nil {
 		if err == asset.CoinNotFoundError {
-			return coinwaiter.TryAgain
+			return wait.TryAgain
 		}
 		log.Warnf("Redemption error encountered for match %s, actor %s using coin ID %x to satisfy contract at %x: %v",
 			stepInfo.match.ID(), actor, params.CoinID, cpSwapCoin, err)
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "redemption error")
-		return coinwaiter.DontTryAgain
+		return wait.DontTryAgain
 	}
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
@@ -1225,7 +1225,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		log.Errorf("saving redeem transaction (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "internal server error")
-		return coinwaiter.TryAgain // why not, the DB might come alive
+		return wait.TryAgain // why not, the DB might come alive
 	}
 
 	// Modify the match's swapStatuses.
@@ -1262,7 +1262,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
 	if err != nil {
 		log.Errorf("error creating redemption request: %v", err)
-		return coinwaiter.DontTryAgain
+		return wait.DontTryAgain
 	}
 
 	// Set up the acknowledgement callback.
@@ -1278,7 +1278,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
 		s.processAck(msg, ack)
 	})
-	return coinwaiter.DontTryAgain
+	return wait.DontTryAgain
 }
 
 // handleInit handles the 'init' request from a user, which is used to inform
@@ -1332,7 +1332,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 		}
 	}
 
-	// Validate the coinID and contract script before starting a coinWaiter.
+	// Validate the coinID and contract script before starting a coin waiter.
 	coinStr, err := stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
 	if err != nil {
 		// TODO: ensure Backends provide sanitized errors or type information to
@@ -1358,11 +1358,15 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 
 	// Since we have to consider broadcast latency of the asset's network, run
 	// this as a coin waiter.
-	s.coinWaiter.Wait(
-		coinwaiter.NewSettings(user, msg /* just for msg.ID */, params.CoinID /* just for error message */, txWaitExpiration),
-		func() bool {
+	s.latencyQ.Wait(&wait.Waiter{
+		Expiration: time.Now().Add(txWaitExpiration),
+		TryFunc: func() bool {
 			return s.processInit(msg, params, stepInfo)
-		})
+		},
+		ExpireFunc: func() {
+			s.coinNotFound(user, msg.ID, params.CoinID)
+		},
+	})
 	return nil
 }
 
@@ -1392,9 +1396,9 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	if rpcErr != nil {
 		return rpcErr
 	}
-	// Validate the redeem coin ID before starting a coinWaiter. This does not
+	// Validate the redeem coin ID before starting a wait. This does not
 	// check the blockchain, but does ensure the CoinID can be decoded for the
-	// asset before starting up a coin Waiter.
+	// asset before starting up a coin waiter.
 	_, err = stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
 	if err != nil {
 		// TODO: ensure Backends provide sanitized errors or type information to
@@ -1406,10 +1410,28 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	}
 
 	// Since we have to consider latency, run this as a coin waiter.
-	s.coinWaiter.Wait(coinwaiter.NewSettings(user, msg, params.CoinID, txWaitExpiration), func() bool {
-		return s.processRedeem(msg, params, stepInfo)
+	s.latencyQ.Wait(&wait.Waiter{
+		Expiration: time.Now().Add(txWaitExpiration),
+		TryFunc: func() bool {
+			return s.processRedeem(msg, params, stepInfo)
+		},
+		ExpireFunc: func() {
+			s.coinNotFound(user, msg.ID, params.CoinID)
+		},
 	})
 	return nil
+}
+
+// coinNotFound sends an error response for a coin not found.
+func (s *Swapper) coinNotFound(acctID account.AccountID, msgID uint64, coinID []byte) {
+	resp, err := msgjson.NewResponse(msgID, nil, &msgjson.Error{
+		Code:    msgjson.TransactionUndiscovered,
+		Message: fmt.Sprintf("failed to find transaction %x", coinID),
+	})
+	if err != nil {
+		log.Error("NewResponse error in (Swapper).loop: %v", err)
+	}
+	s.authMgr.Send(acctID, resp)
 }
 
 // revocationRequests prepares a match revocation RPC request for each client.

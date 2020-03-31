@@ -17,7 +17,19 @@ import (
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/wait"
 )
+
+// txWaitExpiration is the longest the AuthManager will wait for a coin
+// waiter. This could be thought of as the maximum allowable backend latency.
+var txWaitExpiration = time.Minute
+
+// ExpirationErr indicates that the wait.TickerQueue has expired a waiter, e.g.
+// a reported coin was not found before txWaitExpiration.
+type ExpirationErr string
+
+// Error satisfies the error interface for ExpirationErr.
+func (err ExpirationErr) Error() string { return string(err) }
 
 // A matchTracker is used to negotiate a match.
 type matchTracker struct {
@@ -65,6 +77,7 @@ type trackedTrade struct {
 	metaData *db.OrderMetaData
 	dc       *dexConnection
 	db       db.DB
+	latencyQ *wait.TickerQueue
 	wallets  *walletSet
 	preImg   order.Preimage
 	sid      string
@@ -77,7 +90,7 @@ type trackedTrade struct {
 
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection,
-	db db.DB, wallets *walletSet, coins asset.Coins) *trackedTrade {
+	db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet, coins asset.Coins) *trackedTrade {
 
 	ord := dbOrder.Order
 	return &trackedTrade{
@@ -85,6 +98,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		metaData: dbOrder.MetaData,
 		dc:       dc,
 		db:       db,
+		latencyQ: latencyQ,
 		wallets:  wallets,
 		preImg:   preImg,
 		sid:      sid(ord.Base(), ord.Quote()),
@@ -553,19 +567,40 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 		errs.add("server audit signature error: %v", err)
 	}
 
+	// Get the asset.AuditInfo from the ExchangeWallet. Handle network latency.
+	// The coin waiter will run once every recheckInterval until successful or
+	// until expiration after txWaitExpiration.
+	errChan := make(chan error, 1)
+	var auditInfo asset.AuditInfo
+	t.latencyQ.Wait(&wait.Waiter{
+		Expiration: time.Now().Add(txWaitExpiration),
+		TryFunc: func() bool {
+			var err error
+			auditInfo, err = t.wallets.toWallet.AuditContract(audit.CoinID, audit.Contract)
+			if err != nil {
+				if err == asset.CoinNotFoundError {
+					return wait.TryAgain
+				}
+				errChan <- err
+				return wait.DontTryAgain
+			}
+			errChan <- nil
+			return wait.DontTryAgain
+		},
+		ExpireFunc: func() {
+			errChan <- ExpirationErr(fmt.Sprintf("timed out waiting for AuditContract coin %x", audit.CoinID))
+		},
+	})
+	err = extractError(errChan, requestTimeout, "AuditContract")
+	if err != nil {
+		return errs.addErr(err)
+	}
+
 	// Audit the contract.
 	// 1. Recipient Address
 	// 2. Contract value
 	// 3. Secret hash: maker compares, taker records
 	dbMatch, _, proof, auth := match.parts()
-	// TODO: Need to handle latency here. I think I want to adapt
-	// server/coinwaiter to be more general purpose and use it here too. Note the
-	// handling here is different than the blockWaiter, where re-checks are only
-	// triggered on tip changes.
-	auditInfo, err := t.wallets.toWallet.AuditContract(audit.CoinID, audit.Contract)
-	if err != nil {
-		return errs.add("AuditContract error: %v", err)
-	}
 	match.counterSwap = auditInfo
 	if auditInfo.Recipient() != t.Trade().Address {
 		return errs.add("swap recipient %s is not the order address %s.", auditInfo.Recipient(), t.Trade().Address)
