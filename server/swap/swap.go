@@ -636,9 +636,9 @@ func (s *Swapper) checkInaction(assetID uint32) {
 		}
 
 		failMatch := func(makerFault bool) {
-			orderAtFault := match.Taker // an order.Order
+			orderAtFault, otherOrder := match.Taker, order.Order(match.Maker) // an order.Order
 			if makerFault {
-				orderAtFault = match.Maker
+				orderAtFault, otherOrder = match.Maker, match.Taker
 			}
 			log.Debugf("checkInaction(failMatch): swap %v failing (maker fault = %v) at %v",
 				match.ID(), makerFault, match.Status)
@@ -660,10 +660,24 @@ func (s *Swapper) checkInaction(assetID uint32) {
 
 			// That's one less active swap for this order, and a failure.
 			s.orders.swapFailure(orderAtFault)
+			// The other order now has one less active swap too.
+			if s.orders.swapSuccess(otherOrder) {
+				// TODO: We should count this as a successful swap, but should
+				// it only be a completed order with the extra stipulation that
+				// it had already completed another swap?
+				s.authMgr.RecordCompletedOrder(otherOrder.User(), otherOrder.ID(), revTime)
+				if err = s.storage.SetOrderCompleteTime(otherOrder, encode.UnixMilli(revTime)); err != nil {
+					if db.IsErrGeneralFailure(err) {
+						log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", otherOrder.UID(), err)
+					} else {
+						log.Warnf("SetOrderCompleteTime for %v: %v", otherOrder.UID(), err)
+					}
+				}
+			}
 
 			// Penalize for failure to act.
 			//
-			// TODO: This currently obviates the RecordCancel above since this
+			// TODO: Arguably, this obviates the RecordCancel above since this
 			// closes the account before the possibility of a cancellation ratio
 			// penalty. I'm keeping it this way for now however since penalties
 			// may become less severe than account closure (e.g. temporary
