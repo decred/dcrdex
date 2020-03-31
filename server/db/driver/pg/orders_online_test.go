@@ -1204,6 +1204,15 @@ func TestCompletedUserOrders(t *testing.T) {
 		t.Fatalf("SetOrderCompleteTime failed: %v", err)
 	}
 
+	// Order without completion time set.
+	taker2Incomplete := newLimitOrder(true, 4390000, 1, order.StandingTiF, 20)
+	taker2Incomplete.AccountID = taker.AccountID
+	err = archie.StoreOrder(taker2Incomplete, epochIdx, epochDur, order.OrderStatusCanceled) // archived, but not complete
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+	// NO SetOrderCompleteTime, BUT in an orders_archived table.
+
 	// Try and fail to set completion time for an order not in executed status.
 	taker3 := newLimitOrder(true, 4390000, 1, order.StandingTiF, 20)
 	err = archie.StoreOrder(taker3, epochIdx, epochDur, order.OrderStatusBooked)

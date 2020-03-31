@@ -80,7 +80,7 @@ const (
 
 	RetrieveCompletedOrdersForAccount = `SELECT oid, account_id, complete_time
 		FROM %s
-		WHERE account_id = $1
+		WHERE account_id = $1 AND complete_time IS NOT NULL
 		ORDER BY complete_time DESC
 		LIMIT $2;`
 
