@@ -25,6 +25,7 @@ import (
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/wait"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
@@ -38,6 +39,8 @@ var (
 	unbip          = dex.BipIDSymbol
 	aYear          = time.Hour * 24 * 365
 	requestTimeout = 10 * time.Second
+	// The coin waiters will query for transaction data every recheckInterval.
+	recheckInterval = time.Second * 5
 )
 
 // dexConnection is the websocket connection and the DEX configuration.
@@ -156,7 +159,7 @@ func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string,
 	return nil
 }
 
-// ack sends and Acknowledgement for a match-related request.
+// ack sends an Acknowledgement for a match-related request.
 func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjson.Signable) error {
 	ack := &msgjson.Acknowledgement{
 		MatchID: matchID[:],
@@ -314,6 +317,7 @@ type Core struct {
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
 	newCrypter    func(string) encrypt.Crypter
 	reCrypter     func(string, []byte) (encrypt.Crypter, error)
+	latencyQ      *wait.TickerQueue
 
 	connMtx sync.RWMutex
 	conns   map[string]*dexConnection
@@ -348,6 +352,7 @@ func New(cfg *Config) (*Core, error) {
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
 		reCrypter:     encrypt.Deserialize,
+		latencyQ:      wait.NewTickerQueue(recheckInterval),
 	}
 
 	// Populate the initial user data. User won't include any DEX info yet, as
@@ -364,7 +369,16 @@ func (c *Core) Run(ctx context.Context) {
 	// when new accounts are registered.
 	c.ctx = ctx
 	c.initialize()
-	c.db.Run(ctx)
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.db.Run(ctx)
+	}()
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.latencyQ.Run(ctx)
+	}()
 	c.wg.Wait()
 	log.Infof("DEX client core off")
 }
@@ -1185,7 +1199,7 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(dbOrder, preImg, dc, c.db, wallets, coins)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, c.db, c.latencyQ, wallets, coins)
 	coreOrder, _ := tracker.coreOrder()
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -1612,7 +1626,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 			}
 			var preImg order.Preimage
 			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, c.db, wallets, coins)
+			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, c.db, c.latencyQ, wallets, coins)
 		}
 	}
 	for oid := range cancels {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/slog"
@@ -511,15 +513,21 @@ func randomMsgMarket() (baseAsset, quoteAsset *msgjson.Asset) {
 }
 
 type testRig struct {
-	core *Core
-	db   *TDB
-	ws   *TWebsocket
-	dc   *dexConnection
-	acct *dexAccount
+	core  *Core
+	db    *TDB
+	queue *wait.TickerQueue
+	ws    *TWebsocket
+	dc    *dexConnection
+	acct  *dexAccount
 }
 
 func newTestRig() *testRig {
 	db := new(TDB)
+
+	// Set the global waiter expiration, and start the waiter.
+	txWaitExpiration = time.Millisecond * 10
+	queue := wait.NewTickerQueue(time.Millisecond * 5)
+	go queue.Run(tCtx)
 
 	dc, conn, acct := testDexConnection()
 
@@ -527,8 +535,9 @@ func newTestRig() *testRig {
 
 	return &testRig{
 		core: &Core{
-			ctx: tCtx,
-			db:  db,
+			ctx:      tCtx,
+			db:       db,
+			latencyQ: queue,
 			conns: map[string]*dexConnection{
 				tDexUrl: dc,
 			},
@@ -544,10 +553,11 @@ func newTestRig() *testRig {
 			newCrypter: tNewCrypter,
 			reCrypter:  tReCrypter,
 		},
-		db:   db,
-		ws:   conn,
-		dc:   dc,
-		acct: acct,
+		db:    db,
+		queue: queue,
+		ws:    conn,
+		dc:    dc,
+		acct:  acct,
 	}
 }
 
@@ -1493,7 +1503,7 @@ func TestCancel(t *testing.T) {
 		Order: lo,
 	}
 	oid := lo.ID()
-	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.db, nil, nil)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.db, rig.queue, nil, nil)
 	dc.trades[oid] = tracker
 
 	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
@@ -1637,7 +1647,7 @@ func TestTradeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
-	tracker := newTrackedTrade(dbOrder, preImgL, dc, rig.db, walletSet, nil)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, rig.db, rig.queue, walletSet, nil)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -1698,6 +1708,21 @@ func TestTradeTracking(t *testing.T) {
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err == nil {
 		t.Fatalf("no maker error for AuditContract error")
+	}
+
+	// Check expiration error.
+	tBtcWallet.auditErr = asset.CoinNotFoundError
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err == nil {
+		t.Fatalf("no maker error for AuditContract expiration")
+	}
+	var errSet *errorSet
+	if !errors.As(err, &errSet) {
+		t.Fatalf("unexpected error type")
+	}
+	var expErr ExpirationErr
+	if !errors.As(errSet.errs[0], &expErr) {
+		t.Fatalf("wrong error type. expecting ExpirationTimeout, got %T: %v", errSet.errs[0], errSet.errs[0])
 	}
 	tBtcWallet.auditErr = nil
 
