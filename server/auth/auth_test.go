@@ -31,6 +31,14 @@ func randBytes(l int) []byte {
 	return b
 }
 
+type ratioData struct {
+	oidsCompleted  []order.OrderID
+	timesCompleted []int64
+	oidsCancels    []order.OrderID
+	oidsCanceled   []order.OrderID
+	timesCanceled  []int64
+}
+
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct     *account.Account
@@ -43,6 +51,7 @@ type TStorage struct {
 	payErr   error
 	unpaid   bool
 	closed   bool
+	ratio    ratioData
 }
 
 func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) { s.closedID = id }
@@ -55,11 +64,14 @@ func (s *TStorage) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) 
 func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
 func (s *TStorage) PayAccount(account.AccountID, []byte) error       { return s.payErr }
+func (s *TStorage) setRatioData(dat *ratioData) {
+	s.ratio = *dat
+}
 func (s *TStorage) CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error) {
-	return nil, nil, nil
+	return s.ratio.oidsCompleted, s.ratio.timesCompleted, nil
 }
 func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
-	return nil, nil, nil, nil
+	return s.ratio.oidsCancels, s.ratio.oidsCanceled, s.ratio.timesCanceled, nil
 }
 
 // TSigner satisfies the Signer interface
@@ -217,8 +229,15 @@ func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 }
 
 func connectUser(t *testing.T, user *tUser) *msgjson.Message {
+	return tryConnectUser(t, user, false)
+}
+
+func tryConnectUser(t *testing.T, user *tUser, wantErr bool) *msgjson.Message {
 	connect := queueUser(t, user)
-	rig.mgr.handleConnect(user.conn, connect)
+	err := rig.mgr.handleConnect(user.conn, connect)
+	if (err != nil) != wantErr {
+		t.Fatalf("handleConnect: wantErr=%v, got err=%v", wantErr, err)
+	}
 
 	// Check the response.
 	respMsg := user.conn.getSend()
@@ -283,7 +302,7 @@ func TestMain(m *testing.M) {
 			RegistrationFee: tRegFee,
 			FeeConfs:        tCheckFeeConfs,
 			FeeChecker:      tCheckFee,
-			CancelThreshold: 0.2,
+			CancelThreshold: 0.8,
 		})
 		go authMgr.Run(ctx)
 		rig = &testRig{
@@ -315,8 +334,24 @@ func TestConnect(t *testing.T) {
 		Side:     4,
 	}
 	rig.storage.matches = []*order.UserMatch{userMatch}
-	// Connect the user.
+	rig.storage.setRatioData(&ratioData{
+		oidsCompleted:  []order.OrderID{{0x1}},
+		timesCompleted: []int64{1234},
+		oidsCancels:    []order.OrderID{{0x2}},
+		oidsCanceled:   []order.OrderID{{0x1}},
+		timesCanceled:  []int64{1235},
+	}) // 50%
+	defer rig.storage.setRatioData(&ratioData{}) // clean slate
+
+	// Fail on account failing cancel ratio.
+	rig.mgr.cancelThresh = 0.2
 	user := tNewUser(t)
+	tryConnectUser(t, user, true)
+	rig.storage.closedID = account.AccountID{}
+	rig.mgr.cancelThresh = 0.8 // passable
+
+	// Connect the user.
+	user = tNewUser(t)
 	respMsg := connectUser(t, user)
 	cResp := extractConnectResult(t, respMsg)
 	if len(cResp.Matches) != 1 {
