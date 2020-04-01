@@ -21,6 +21,13 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 	return NewBackend(configPath, logger, network)
 }
 
+// DecodeCoinID creates a human-readable representation of a coin ID for
+// Litecoin.
+func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
+	// Litecoin and Bitcoin have the same tx hash and output format.
+	return (&btc.Driver{}).DecodeCoinID(coinID)
+}
+
 func init() {
 	asset.Register(assetName, &Driver{})
 }
