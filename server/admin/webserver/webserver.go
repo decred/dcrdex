@@ -7,13 +7,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
+	"golang.org/x/crypto/ssh/terminal"
 
 	dexsrv "decred.org/dcrdex/server/dex"
 	"github.com/decred/slog"
@@ -21,7 +24,7 @@ import (
 
 const (
 	// rpcTimeoutSeconds is the number of seconds a connection to the
-	// RPC server is allowed to stay open without authenticating before it
+	// web server is allowed to stay open without authenticating before it
 	// is closed.
 	rpcTimeoutSeconds = 10
 )
@@ -32,28 +35,48 @@ var (
 	log slog.Logger
 )
 
-// serverCore is satisfied by core.Core.
+// ServerCore is satisfied by core.Core.
 type ServerCore interface{}
 
-// WebServer is a single-client http and websocket server enabling a browser
-// interface to the DEX client.
+// WebServer is a multi-client https server.
 type WebServer struct {
 	core      ServerCore
 	addr      string
 	tlsConfig *tls.Config
 	srv       *http.Server
-	authsha   [32]byte
+	authSHA   [32]byte
 }
 
-// Config holds variables neede to create a new RPC Server.
+// Config holds variables needed to create a new web Server.
 type Config struct {
-	Core                  ServerCore
-	Addr, Pass, Cert, Key string
+	Core            ServerCore
+	Addr, Cert, Key string
+	AuthSHA         [32]byte
 }
 
-// UseLogger sets the logger for the RPCServer package.
+// UseLogger sets the logger for the webserver package.
 func UseLogger(logger slog.Logger) {
 	log = logger
+}
+
+// PasswordPrompt prompts the user to enter a password for use with the admin
+// webserver and returns its sha256 hash. Password must not be an empty string.
+func PasswordPrompt() ([32]byte, error) {
+	var authSHA [32]byte
+	fmt.Println("Enter admin webserver password:")
+	password, err := terminal.ReadPassword(syscall.Stdin)
+	if err != nil {
+		return authSHA, err
+	}
+	if password == nil {
+		return authSHA, errors.New("admin webserver password must be set to use the admin webserver")
+	}
+	authSHA = sha256.Sum256(password)
+	// Zero password bytes.
+	for i := range password {
+		password[i] = 0x00
+	}
+	return authSHA, nil
 }
 
 // filesExists reports whether the named file or directory exists.
@@ -64,12 +87,6 @@ func fileExists(name string) bool {
 
 // New is the constructor for a new WebServer.
 func New(cfg *Config) (*WebServer, error) {
-	// Create authsha to verify requests against.
-	if cfg.Pass == "" {
-		return nil, fmt.Errorf("admin webserver password must be set to use the admin webserver")
-	}
-	authsha := sha256.Sum256([]byte(cfg.Pass))
-
 	// Find the key pair.
 	if !fileExists(cfg.Key) || !fileExists(cfg.Cert) {
 		return nil, fmt.Errorf("missing certificates")
@@ -100,7 +117,7 @@ func New(cfg *Config) (*WebServer, error) {
 		srv:       httpServer,
 		addr:      cfg.Addr,
 		tlsConfig: tlsConfig,
-		authsha:   authsha,
+		authSHA:   cfg.AuthSHA,
 	}
 
 	// Middleware
@@ -151,8 +168,7 @@ func (s *WebServer) Run(ctx context.Context) {
 func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
-
-		if !ok || s.authsha != sha256.Sum256([]byte(pass)) {
+		if !ok || s.authSHA != sha256.Sum256([]byte(pass)) {
 			log.Warnf("authentication failure from ip: %s for user: %s with password: %s", r.RemoteAddr, user, pass)
 			w.Header().Add("WWW-Authenticate", `Basic realm="dex admin"`)
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)

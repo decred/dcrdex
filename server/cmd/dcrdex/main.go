@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"strings"
+	"sync"
 
 	webadmin "decred.org/dcrdex/server/admin/webserver"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
@@ -32,6 +33,15 @@ func mainCore(ctx context.Context) error {
 			logRotator.Close()
 		}
 	}()
+
+	// Aquire web admin password if turned on.
+	var webAdminAuthSHA [32]byte
+	if cfg.WebAdminOn {
+		webAdminAuthSHA, err = webadmin.PasswordPrompt()
+		if err != nil {
+			return fmt.Errorf("cannot use password: %v", err)
+		}
+	}
 
 	if opts.CPUProfile != "" {
 		var f *os.File
@@ -99,30 +109,30 @@ func mainCore(ctx context.Context) error {
 		return err
 	}
 
-	adminWebServerDone := make(chan struct{})
+	var wg sync.WaitGroup
 	if cfg.WebAdminOn {
 		webCFG := &webadmin.Config{
-			Core: dexMan,
-			Addr: cfg.WebAdminAddr,
-			Pass: cfg.WebAdminPass,
-			Cert: cfg.RPCCert,
-			Key:  cfg.RPCKey,
+			Core:    dexMan,
+			Addr:    cfg.WebAdminAddr,
+			AuthSHA: webAdminAuthSHA,
+			Cert:    cfg.RPCCert,
+			Key:     cfg.RPCKey,
 		}
 		adminWebServer, err := webadmin.New(webCFG)
 		if err != nil {
 			return fmt.Errorf("cannot set up admin webserver: %v", err)
 		}
+		wg.Add(1)
 		go func() {
 			adminWebServer.Run(ctx)
-			close(adminWebServerDone)
+			wg.Done()
 		}()
-	} else {
-		close(adminWebServerDone)
 	}
 
 	log.Info("The DEX is running. Hit CTRL+C to quit...")
 	<-ctx.Done()
-	<-adminWebServerDone
+	// Wait for the admin webserver to finish.
+	wg.Wait()
 
 	log.Info("Stopping DEX...")
 	dexMan.Stop()
@@ -141,7 +151,7 @@ func main() {
 
 	err := mainCore(ctx)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	os.Exit(0)

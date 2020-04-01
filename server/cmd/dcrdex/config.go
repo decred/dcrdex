@@ -77,7 +77,6 @@ type dexConf struct {
 	LogMaker         *dex.LoggerMaker
 	WebAdminOn       bool
 	WebAdminAddr     string
-	WebAdminPass     string
 }
 
 type flagsData struct {
@@ -116,7 +115,6 @@ type flagsData struct {
 	HidePGConfig bool   `long:"hidepgconfig" description:"Blocks logging of the PostgreSQL db configuration on system start up."`
 	WebAdminOn   bool   `long:"webadminon" description:"turn on the web server"`
 	WebAdminAddr string `long:"webadminaddr" description:"web administration HTTP server address"`
-	WebAdminPass string `long:"webadminpass" description:"web administration password"`
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed
@@ -537,7 +535,6 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		AltDNSNames:      cfg.AltDNSNames,
 		LogMaker:         logMaker,
 		WebAdminAddr:     webAdminAddr,
-		WebAdminPass:     cfg.WebAdminPass,
 		WebAdminOn:       cfg.WebAdminOn,
 	}
 
