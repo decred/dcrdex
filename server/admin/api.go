@@ -1,7 +1,7 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package webserver
+package admin
 
 import (
 	"encoding/json"
@@ -27,7 +27,7 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 }
 
 // apiPing is the handler for the '/ping' API request.
-func (s *WebServer) apiPing(w http.ResponseWriter, r *http.Request) {
+func (s *WebServer) apiPing(w http.ResponseWriter, _ *http.Request) {
 	resp := "pong"
 	writeJSON(w, &resp)
 }

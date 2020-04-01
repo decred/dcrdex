@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	webadmin "decred.org/dcrdex/server/admin/webserver"
+	"decred.org/dcrdex/server/admin"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
@@ -37,7 +37,7 @@ func mainCore(ctx context.Context) error {
 	// Aquire web admin password if turned on.
 	var webAdminAuthSHA [32]byte
 	if cfg.WebAdminOn {
-		webAdminAuthSHA, err = webadmin.PasswordPrompt()
+		webAdminAuthSHA, err = admin.PasswordPrompt("Enter admin webserver password:")
 		if err != nil {
 			return fmt.Errorf("cannot use password: %v", err)
 		}
@@ -111,14 +111,14 @@ func mainCore(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	if cfg.WebAdminOn {
-		webCFG := &webadmin.Config{
+		webCFG := &admin.WebConfig{
 			Core:    dexMan,
 			Addr:    cfg.WebAdminAddr,
 			AuthSHA: webAdminAuthSHA,
 			Cert:    cfg.RPCCert,
 			Key:     cfg.RPCKey,
 		}
-		adminWebServer, err := webadmin.New(webCFG)
+		adminWebServer, err := admin.NewWebServer(webCFG)
 		if err != nil {
 			return fmt.Errorf("cannot set up admin webserver: %v", err)
 		}

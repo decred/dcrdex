@@ -1,22 +1,21 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package webserver
+package admin
 
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"syscall"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
-	"golang.org/x/crypto/ssh/terminal"
 
 	dexsrv "decred.org/dcrdex/server/dex"
 	"github.com/decred/slog"
@@ -47,8 +46,8 @@ type WebServer struct {
 	authSHA   [32]byte
 }
 
-// Config holds variables needed to create a new web Server.
-type Config struct {
+// WebConfig holds variables needed to create a new web Server.
+type WebConfig struct {
 	Core            ServerCore
 	Addr, Cert, Key string
 	AuthSHA         [32]byte
@@ -59,34 +58,14 @@ func UseLogger(logger slog.Logger) {
 	log = logger
 }
 
-// PasswordPrompt prompts the user to enter a password for use with the admin
-// webserver and returns its sha256 hash. Password must not be an empty string.
-func PasswordPrompt() ([32]byte, error) {
-	var authSHA [32]byte
-	fmt.Println("Enter admin webserver password:")
-	password, err := terminal.ReadPassword(syscall.Stdin)
-	if err != nil {
-		return authSHA, err
-	}
-	if password == nil {
-		return authSHA, errors.New("admin webserver password must be set to use the admin webserver")
-	}
-	authSHA = sha256.Sum256(password)
-	// Zero password bytes.
-	for i := range password {
-		password[i] = 0x00
-	}
-	return authSHA, nil
-}
-
 // filesExists reports whether the named file or directory exists.
 func fileExists(name string) bool {
 	_, err := os.Stat(name)
 	return !os.IsNotExist(err)
 }
 
-// New is the constructor for a new WebServer.
-func New(cfg *Config) (*WebServer, error) {
+// NewWebServer is the constructor for a new WebServer.
+func NewWebServer(cfg *WebConfig) (*WebServer, error) {
 	// Find the key pair.
 	if !fileExists(cfg.Key) || !fileExists(cfg.Cert) {
 		return nil, fmt.Errorf("missing certificates")
@@ -144,9 +123,10 @@ func (s *WebServer) Run(ctx context.Context) {
 	}
 
 	// Close the listener on context cancellation.
-	shutdown := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
-		defer close(shutdown)
+		defer wg.Done()
 		<-ctx.Done()
 
 		if err := s.srv.Shutdown(context.Background()); err != nil {
@@ -160,7 +140,7 @@ func (s *WebServer) Run(ctx context.Context) {
 	}
 
 	// Wait for Shutdown.
-	<-shutdown
+	wg.Wait()
 	log.Infof("admin webserver off")
 }
 
@@ -168,13 +148,14 @@ func (s *WebServer) Run(ctx context.Context) {
 func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
-		if !ok || s.authSHA != sha256.Sum256([]byte(pass)) {
+		authSHA := sha256.Sum256([]byte(pass))
+		if !ok || subtle.ConstantTimeCompare(s.authSHA[:], authSHA[:]) != 1 {
 			log.Warnf("authentication failure from ip: %s for user: %s with password: %s", r.RemoteAddr, user, pass)
 			w.Header().Add("WWW-Authenticate", `Basic realm="dex admin"`)
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
-		log.Debugf("authenticated user %s with ip: %s", user, r.RemoteAddr)
+		log.Infof("authenticated user %s with ip: %s", user, r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
 }
