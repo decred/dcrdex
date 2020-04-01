@@ -137,23 +137,6 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.notifyWalletUpdate(form.AssetID)
-	type response struct {
-		OK     bool   `json:"ok"`
-		Locked bool   `json:"locked"`
-		Msg    string `json:"msg"`
-	}
-	err = s.core.OpenWallet(form.AssetID, form.AppPW)
-	if err != nil {
-		errMsg := fmt.Sprintf("wallet connected, but failed to open with provided password: %v", err)
-		log.Errorf(errMsg)
-		resp := &response{
-			Locked: true,
-			Msg:    errMsg,
-		}
-		writeJSON(w, resp, s.indent)
-		return
-	}
-	s.notifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 

@@ -574,10 +574,6 @@ func TestAPINewWallet(t *testing.T) {
 	ensure(`{"ok":false,"msg":"error creating btc wallet: test error"}`)
 	tCore.createWalletErr = nil
 
-	tCore.openWalletErr = tErr
-	ensure(`{"ok":false,"locked":true,"msg":"wallet connected, but failed to open with provided password: test error"}`)
-	tCore.openWalletErr = nil
-
 	tCore.notHas = false
 }
 

@@ -505,6 +505,12 @@ func (c *Core) refreshUser() {
 
 // CreateWallet creates a new exchange wallet.
 func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
+	assetID := form.AssetID
+	_, exists := c.wallet(assetID)
+	if exists {
+		return fmt.Errorf("%s wallet already exists", unbip(assetID))
+	}
+
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
 		return err
@@ -515,28 +521,19 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 	}
 
 	dbWallet := &db.Wallet{
-		AssetID:     form.AssetID,
+		AssetID:     assetID,
 		Account:     form.Account,
 		INIPath:     form.INIPath,
 		EncryptedPW: encPW,
 	}
-	_, exists := c.wallet(form.AssetID)
-	if exists {
-		return fmt.Errorf("%s wallet already exists", unbip(dbWallet.AssetID))
-	}
 
 	wallet, err := c.loadWallet(dbWallet)
 	if err != nil {
-		return fmt.Errorf("error loading wallet for %d -> %s: %v", dbWallet.AssetID, unbip(dbWallet.AssetID), err)
+		return fmt.Errorf("error loading wallet for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
 
 	err = wallet.Connect(c.ctx)
 	if err != nil {
-		// Assume that the wallet form values are invalid, and drop the wallet from
-		// the wallets map.
-		c.walletMtx.Lock()
-		delete(c.wallets, dbWallet.AssetID)
-		c.walletMtx.Unlock()
 		return fmt.Errorf("Error connecting wallet: %v", err)
 	}
 
@@ -545,15 +542,20 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 		return fmt.Errorf(s, a...)
 	}
 
+	err = wallet.Unlock(walletPW, aYear)
+	if err != nil {
+		return initErr("%s wallet authentication error: %v", unbip(assetID), err)
+	}
+
 	dbWallet.Balance, _, err = wallet.Balance(0)
 	if err != nil {
-		return initErr("error getting balance for %s: %v", unbip(form.AssetID), err)
+		return initErr("error getting balance for %s: %v", unbip(assetID), err)
 	}
 	wallet.setBalance(dbWallet.Balance)
 
 	dbWallet.Address, err = wallet.Address()
 	if err != nil {
-		return initErr("error getting deposit address for %s: %v", unbip(form.AssetID), err)
+		return initErr("error getting deposit address for %s: %v", unbip(assetID), err)
 	}
 	wallet.setAddress(dbWallet.Address)
 
@@ -562,6 +564,11 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 	if err != nil {
 		return initErr("error storing wallet credentials: %v", err)
 	}
+
+	// The wallet has been successfully created. Store it.
+	c.walletMtx.Lock()
+	c.wallets[assetID] = wallet
+	c.walletMtx.Unlock()
 
 	c.refreshUser()
 	return nil
@@ -591,10 +598,6 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	}
 	wallet.Wallet = w
 	wallet.connector = dex.NewConnectionMaster(w)
-
-	c.walletMtx.Lock()
-	c.wallets[dbWallet.AssetID] = wallet
-	c.walletMtx.Unlock()
 	return wallet, nil
 }
 
@@ -659,7 +662,7 @@ func (c *Core) CloseWallet(assetID uint32) error {
 			return fmt.Errorf("cannot lock %s wallet with active orders or negotiations", unbip(assetID))
 		}
 	}
-	err = wallet.lock()
+	err = wallet.Lock()
 	if err != nil {
 		return err
 	}
@@ -1473,17 +1476,19 @@ func (c *Core) initialize() {
 	if err != nil {
 		log.Errorf("error loading wallets from database: %v", err)
 	}
+	c.walletMtx.Lock()
 	for _, dbWallet := range dbWallets {
-		_, err := c.loadWallet(dbWallet)
+		wallet, err := c.loadWallet(dbWallet)
 		if err != nil {
 			aid := dbWallet.AssetID
 			log.Errorf("error loading %d -> %s wallet: %v", aid, unbip(aid), err)
+			continue
 		}
+		c.wallets[dbWallet.AssetID] = wallet
 	}
+	numWallets := len(c.wallets)
+	c.walletMtx.Unlock()
 	if len(dbWallets) > 0 {
-		c.walletMtx.RLock()
-		numWallets := len(c.wallets)
-		c.walletMtx.RUnlock()
 		log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
 	}
 	c.refreshUser()
@@ -1576,8 +1581,6 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		dc.acct.pay()
 		log.Infof("waiter: Fee paid at %s", dc.acct.url)
-		// New account won't have any active negotiations, so OK to discard first
-		// first return value from authDEX.
 		err = c.authDEX(dc)
 		if err != nil {
 			log.Errorf("fee paid, but failed to authenticate connection to %s", dc.acct.url)
