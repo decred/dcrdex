@@ -214,6 +214,20 @@ func (testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	return hash, nil
 }
 
+// Part of the dcrNode interface.
+func (testNode) GetBestBlockHash() (*chainhash.Hash, error) {
+	if len(testChain.hashes) == 0 {
+		return nil, fmt.Errorf("no blocks in testChain")
+	}
+	var bestHeight int64
+	for height := range testChain.hashes {
+		if height > bestHeight {
+			bestHeight = height
+		}
+	}
+	return testChain.hashes[bestHeight], nil
+}
+
 // Create a chainjson.GetTxOutResult such as is returned from GetTxOut.
 func testGetTxOut(confirmations int64, pkScript []byte) *chainjson.GetTxOutResult {
 	return &chainjson.GetTxOutResult{
@@ -855,8 +869,8 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 7 - received error before reorg")
 	}
 	betterHash := testAddBlockVerbose(nil, 1, txHeight, 1)
-	dcr.anyQ <- betterHash
-	time.Sleep(time.Millisecond * 50)
+	dcr.blockCache.add(testChain.blocks[*betterHash])
+	dcr.blockCache.reorg(int64(txHeight))
 	// Remove the txout from the blockchain, since dcrd would no longer return it.
 	delete(testChain.txOuts, txOutID(txHash, msg.vout))
 	_, err = utxo.Confirmations()
@@ -877,27 +891,27 @@ func TestUTXOs(t *testing.T) {
 	}
 	// Now orphan the block, by doing a reorg.
 	betterHash = testAddBlockVerbose(nil, 1, txHeight, 1)
-	dcr.anyQ <- betterHash
-	time.Sleep(time.Millisecond * 50)
+	dcr.blockCache.reorg(int64(txHeight))
+	dcr.blockCache.add(testChain.blocks[*betterHash])
 	testAddTxOut(msg.tx, msg.vout, txHash, betterHash, int64(txHeight), 1)
 	_, err = utxo.Confirmations()
 	if err != nil {
-		t.Fatalf("case 8 - unexpected error after reorg")
+		t.Fatalf("case 8 - unexpected error after reorg: %v", err)
 	}
 	if utxo.blockHash != *betterHash {
 		t.Fatalf("case 8 - unexpected hash for utxo after reorg")
 	}
 	// Do it again, but this time, put the utxo into mempool.
 	evenBetter := testAddBlockVerbose(nil, 1, txHeight, 1)
-	dcr.anyQ <- evenBetter
-	time.Sleep(time.Millisecond * 50)
+	dcr.blockCache.reorg(int64(txHeight))
+	dcr.blockCache.add(testChain.blocks[*evenBetter])
 	testAddTxOut(msg.tx, msg.vout, txHash, evenBetter, 0, 0)
 	_, err = utxo.Confirmations()
 	if err != nil {
 		t.Fatalf("case 8 - unexpected error for mempool tx after reorg")
 	}
 	if utxo.height != 0 {
-		t.Fatalf("case 10 - unexpected height %d after dumping into mempool", utxo.height)
+		t.Fatalf("case 8 - unexpected height %d after dumping into mempool", utxo.height)
 	}
 
 	// CASE 9: A UTXO with a pay-to-script-hash for a 1-of-2 multisig redeem
@@ -1162,8 +1176,8 @@ func TestReorg(t *testing.T) {
 	// Add a replacement blocks
 	newHash := testAddBlockVerbose(nil, 1, uint32(tipHeight), 1)
 	// Passing the hash to anyQ triggers the reorganization.
-	dcr.anyQ <- newHash
-	time.Sleep(time.Millisecond * 50)
+	dcr.blockCache.reorg(int64(tipHeight))
+	dcr.blockCache.add(testChain.blocks[*newHash])
 	ensureOrphaned(tipHash, tipHeight)
 	newTip, found := dcr.blockCache.mainchain[uint32(tipHeight)]
 	if !found {
@@ -1182,8 +1196,8 @@ func TestReorg(t *testing.T) {
 		t.Fatalf("not all block found for 3-block reorg (%t, %t, %t)", found1, found2, found3)
 	}
 	newHash = testAddBlockVerbose(nil, 1, uint32(tipHeight-2), 1)
-	dcr.anyQ <- newHash
-	time.Sleep(time.Millisecond * 50)
+	dcr.blockCache.reorg(int64(tipHeight - 2))
+	dcr.blockCache.add(testChain.blocks[*newHash])
 	ensureOrphaned(&tip.hash, int(tip.height))
 	ensureOrphaned(&oneDeep.hash, int(tip.height))
 	ensureOrphaned(&twoDeep.hash, int(tip.height))

@@ -115,20 +115,20 @@ func TestBlockMonitor(t *testing.T) {
 out:
 	for {
 		select {
-		case height := <-blockChan:
-			if height > lastHeight {
-				fmt.Printf("block received for height %d\n", height)
-			} else {
-				reorgDepth := lastHeight - height + 1
-				fmt.Printf("block received for block %d causes a %d block reorg\n", height, reorgDepth)
+		case update := <-blockChan:
+			if update.Err != nil {
+				t.Fatalf("error encountered while monitoring blocks: %v", update.Err)
 			}
 			tipHeight := btc.blockCache.tipHeight()
-			if tipHeight != height {
-				t.Fatalf("unexpected height after block notification. expected %d, received %d", height, tipHeight)
+			if update.Reorg {
+				fmt.Printf("block received at height %d causes a %d block reorg\n", tipHeight, lastHeight-tipHeight+1)
+			} else {
+				fmt.Printf("block received for height %d\n", tipHeight)
 			}
-			_, found := btc.blockCache.atHeight(height)
+			lastHeight = tipHeight
+			_, found := btc.blockCache.atHeight(tipHeight)
 			if !found {
-				t.Fatalf("did not find newly connected block at height %d", height)
+				t.Fatalf("did not find newly connected block at height %d", tipHeight)
 			}
 		case <-ctx.Done():
 			break out

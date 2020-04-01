@@ -41,7 +41,7 @@ var (
 	zeroHash chainhash.Hash
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
 	// check for new blocks.
-	blockPollInterval = time.Second * 5
+	blockPollInterval = time.Second
 )
 
 const (
@@ -80,7 +80,7 @@ type Backend struct {
 	// The backend provides block notification channels through it BlockChannel
 	// method. signalMtx locks the blockChans array.
 	signalMtx   sync.RWMutex
-	blockChans  []chan uint32
+	blockChans  []chan *asset.BlockUpdate
 	chainParams *chaincfg.Params
 	// A logger will be provided by the dex for this backend. All logging should
 	// use the provided logger.
@@ -266,8 +266,8 @@ func (btc *Backend) ValidateContract(contract []byte) error {
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the btc package. Part of the asset.Backend interface.
-func (btc *Backend) BlockChannel(size int) chan uint32 {
-	c := make(chan uint32, size)
+func (btc *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
+	c := make(chan *asset.BlockUpdate, size)
 	btc.signalMtx.Lock()
 	defer btc.signalMtx.Unlock()
 	btc.blockChans = append(btc.blockChans, c)
@@ -291,7 +291,7 @@ func newBTC(name string, chainParams *chaincfg.Params, logger dex.Logger, node b
 	btc := &Backend{
 		name:        name,
 		blockCache:  newBlockCache(),
-		blockChans:  make([]chan uint32, 0),
+		blockChans:  make([]chan *asset.BlockUpdate, 0),
 		chainParams: chainParams,
 		log:         logger,
 		node:        node,
@@ -602,7 +602,7 @@ func (btc *Backend) Run(ctx context.Context) {
 
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
-	addBlock := func(block *btcjson.GetBlockVerboseResult) {
+	addBlock := func(block *btcjson.GetBlockVerboseResult, reorg bool) {
 		_, err := btc.blockCache.add(block)
 		if err != nil {
 			btc.log.Errorf("error adding new best block to cache: %v", err)
@@ -612,12 +612,32 @@ func (btc *Backend) Run(ctx context.Context) {
 			len(btc.blockChans), btc.name, block.Height)
 		for _, c := range btc.blockChans {
 			select {
-			case c <- uint32(block.Height):
+			case c <- &asset.BlockUpdate{
+				Err:   nil,
+				Reorg: reorg,
+			}:
 			default:
-				btc.log.Errorf("tried sending block update on blocking channel")
+				btc.log.Errorf("failed to send block update on blocking channel")
 			}
 		}
 		btc.signalMtx.RUnlock()
+	}
+
+	sendErr := func(err error) {
+		btc.log.Error(err)
+		for _, c := range btc.blockChans {
+			select {
+			case c <- &asset.BlockUpdate{
+				Err: err,
+			}:
+			default:
+				btc.log.Errorf("failed to send sending block update on blocking channel")
+			}
+		}
+	}
+
+	sendErrFmt := func(s string, a ...interface{}) {
+		sendErr(fmt.Errorf(s, a...))
 	}
 
 out:
@@ -627,7 +647,7 @@ out:
 			tip := btc.blockCache.tip()
 			bestHash, err := btc.node.GetBestBlockHash()
 			if err != nil {
-				btc.log.Errorf("error retrieving best block: %v", err)
+				sendErr(asset.NewConnectionError("error retrieving best block: %v", err))
 				continue
 			}
 			if *bestHash == tip.hash {
@@ -636,19 +656,19 @@ out:
 			best := bestHash.String()
 			block, err := btc.node.GetBlockVerbose(bestHash)
 			if err != nil {
-				btc.log.Errorf("error retrieving block %s: %v", best, err)
+				sendErrFmt("error retrieving block %s: %v", best, err)
 				continue
 			}
 			// If this doesn't build on the best known block, look for a reorg.
 			prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
 			if err != nil {
-				btc.log.Errorf("error parsing previous hash %s: %v", block.PreviousHash, err)
+				sendErrFmt("error parsing previous hash %s: %v", block.PreviousHash, err)
 				continue
 			}
 			// If it builds on the best block or the cache is empty, it's good to add.
 			if *prevHash == tip.hash || tip.height == 0 {
 				btc.log.Debugf("Run: Processing new block %s", bestHash)
-				addBlock(block)
+				addBlock(block, false)
 				continue
 			}
 			// It is either a reorg, or the previous block is not the cached
@@ -662,7 +682,7 @@ out:
 				}
 				iBlock, err := btc.node.GetBlockVerbose(iHash)
 				if err != nil {
-					btc.log.Errorf("error retrieving block %s: %v", iHash, err)
+					sendErrFmt("error retrieving block %s: %v", iHash, err)
 					break
 				}
 				if iBlock.Confirmations > -1 {
@@ -675,7 +695,7 @@ out:
 				reorgHeight = iBlock.Height
 				iHash, err = chainhash.NewHashFromStr(iBlock.PreviousHash)
 				if err != nil {
-					btc.log.Errorf("error decoding previous hash %s for block %s: %v",
+					sendErrFmt("error decoding previous hash %s for block %s: %v",
 						iBlock.PreviousHash, iHash.String(), err)
 					// Some blocks on the side chain may not be flagged as
 					// orphaned, but still proceed, flagging the ones we have
@@ -684,13 +704,15 @@ out:
 					break
 				}
 			}
+			var reorg bool
 			if reorgHeight > 0 {
+				reorg = true
 				btc.log.Infof("Reorg from %s (%d) to %s (%d) detected.",
 					tip.hash, tip.height, bestHash, block.Height)
 				btc.blockCache.reorg(reorgHeight)
 			}
 			// Now add the new block.
-			addBlock(block)
+			addBlock(block, reorg)
 		case <-ctx.Done():
 			break out
 		}

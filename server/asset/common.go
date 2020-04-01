@@ -3,7 +3,11 @@
 
 package asset
 
-import "decred.org/dcrdex/dex"
+import (
+	"fmt"
+
+	"decred.org/dcrdex/dex"
+)
 
 // CoinNotFoundError is to be returned from Contract, Redemption, and
 // FundingCoin when the specified transaction cannot be found. Used by the
@@ -25,7 +29,7 @@ type Backend interface {
 	FundingCoin(coinID []byte, redeemScript []byte) (FundingCoin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.
-	BlockChannel(size int) chan uint32
+	BlockChannel(size int) <-chan *BlockUpdate
 	// InitTxSize is the size of a serialized atomic swap initialization
 	// transaction with 1 input spending a P2PKH utxo, 1 swap contract output and
 	// 1 change output.
@@ -84,6 +88,21 @@ type Contract interface {
 	FeeRate() uint64
 	// Script is the contract redeem script.
 	Script() []byte
+}
+
+// BlockUpdate is sent over the update channel when a tip change is detected.
+type BlockUpdate struct {
+	Err   error
+	Reorg bool
+}
+
+// ConnectionError error should be sent over the block update channel if a
+// connection error is detected by the Backend.
+type ConnectionError error
+
+// NewConnectionError is a constructor for a ConnectionError.
+func NewConnectionError(s string, a ...interface{}) ConnectionError {
+	return ConnectionError(fmt.Errorf(s, a...))
 }
 
 // BackedAsset is a dex.Asset with a Backend.

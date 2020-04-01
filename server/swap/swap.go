@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -94,7 +95,7 @@ type matchTracker struct {
 // block.
 type blockNotification struct {
 	time    time.Time
-	height  uint32
+	err     error
 	assetID uint32
 }
 
@@ -333,24 +334,24 @@ func (s *Swapper) Run(ctx context.Context) {
 
 	// Start a listen loop for each asset's block channel.
 	var wg sync.WaitGroup
-	for assetID, asset := range s.coins {
+	for assetID, lockable := range s.coins {
 		wg.Add(1)
-		go func(assetID uint32, blockSource <-chan uint32) {
+		go func(assetID uint32, blockSource <-chan *asset.BlockUpdate) {
 			defer wg.Done()
 		out:
 			for {
 				select {
-				case h := <-blockSource:
+				case blk := <-blockSource:
 					s.block <- &blockNotification{
 						time:    time.Now().UTC(),
-						height:  h,
+						err:     blk.Err,
 						assetID: assetID,
 					}
 				case <-ctxSwap.Done():
 					break out
 				}
 			}
-		}(assetID, asset.Backend.BlockChannel(5))
+		}(assetID, lockable.Backend.BlockChannel(5))
 	}
 
 	wg.Add(1)
@@ -365,6 +366,16 @@ out:
 		case block := <-s.block:
 			// Schedule a check of matches with one side equal to this block's asset
 			// by appending the block to the bcastTriggers.
+			if block.err != nil {
+				var connectionErr asset.ConnectionError
+				if errors.As(block.err, &connectionErr) {
+					// Conneciton issues handling can be triggered here.
+					log.Errorf("connection error detected for %d: %v", block.assetID, block.err)
+				} else {
+					log.Errorf("asset %d is reporting a block notification error: %v", block.assetID, block.err)
+				}
+				break
+			}
 			bcastTriggers = append(bcastTriggers, block)
 			// processBlock will update confirmation times in the swapStatus structs.
 			s.processBlock(block)
