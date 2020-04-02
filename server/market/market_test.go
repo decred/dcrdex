@@ -160,7 +160,7 @@ func (ta *TArchivist) SaveContractB(mid db.MarketMatchID, contract []byte, coinI
 func (ta *TArchivist) SaveAuditAckSigA(mid db.MarketMatchID, sig []byte) error { return nil }
 
 // Redeem data.
-func (ta *TArchivist) SaveRedeemA(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+func (ta *TArchivist) SaveRedeemA(mid db.MarketMatchID, coinID, secret []byte, timestamp int64) error {
 	return nil
 }
 func (ta *TArchivist) SaveRedeemAckSigB(mid db.MarketMatchID, sig []byte) error {
