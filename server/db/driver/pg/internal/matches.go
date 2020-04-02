@@ -48,6 +48,7 @@ const (
 
 		-- initiator/A (maker) REDEEM data
 		aRedeemCoinID BYTEA,      -- the input spending the taker's contract output includes the secret
+		aRedeemSecret BYTEA,
 		aRedeemTime INT8,         -- server time stamp
 		bSigAckOfARedeem BYTEA,   -- counterparty's (participant) sig with ack of initiator REDEEM data
 
@@ -60,7 +61,7 @@ const (
 	RetrieveSwapData = `SELECT status, sigMatchAckMaker, sigMatchAckTaker,
 		aContractCoinID, aContract, aContractTime, bSigAckOfAContract,
 		bContractCoinID, bContract, bContractTime, aSigAckOfBContract,
-		aRedeemCoinID, aRedeemTime, bSigAckOfARedeem,
+		aRedeemCoinID, aRedeemSecret, aRedeemTime, bSigAckOfARedeem,
 		bRedeemCoinID, bRedeemTime, aSigAckOfBRedeem
 	FROM %s WHERE matchid = $1;`
 
@@ -113,7 +114,7 @@ const (
 	SetInitiatorContractAuditSig   = `UPDATE %s SET aSigAckOfBContract = $2 WHERE matchid = $1;`
 
 	SetInitiatorRedeemData = `UPDATE %s SET status = $2,
-		aRedeemCoinID = $3, aRedeemTime = $4
+		aRedeemCoinID = $3, aRedeemSecret = $4, aRedeemTime = $5
 	WHERE matchid = $1;`
 	SetParticipantRedeemData = `UPDATE %s SET status = $2,
 		bRedeemCoinID = $3, bRedeemTime = $4

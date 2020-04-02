@@ -260,8 +260,9 @@ func TestSetSwapData(t *testing.T) {
 
 	// Redeem A
 	redeemCoinIDA := randomBytes(36)
+	secret := randomBytes(72)
 	redeemATime := int64(1234)
-	err = archie.SaveRedeemA(mid, redeemCoinIDA, redeemATime)
+	err = archie.SaveRedeemA(mid, redeemCoinIDA, secret, redeemATime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,6 +276,10 @@ func TestSetSwapData(t *testing.T) {
 	if !bytes.Equal(swapData.RedeemACoinID, redeemCoinIDA) {
 		t.Fatalf("RedeemACoinID incorrect. got %v, expected %v",
 			swapData.RedeemACoinID, redeemCoinIDA)
+	}
+	if !bytes.Equal(swapData.RedeemASecret, secret) {
+		t.Fatalf("RedeemASecret incorrect. got %v, expected %v",
+			swapData.RedeemASecret, secret)
 	}
 	if swapData.RedeemATime != redeemATime {
 		t.Fatalf("RedeemATime incorrect. got %d, expected %d",
