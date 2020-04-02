@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	helpRoute    = "help"
-	versionRoute = "version"
+	helpRoute        = "help"
+	versionRoute     = "version"
+	preRegisterRoute = "preregister"
 )
 
 // createResponse creates a msgjson response payload.
@@ -29,26 +30,27 @@ func createResponse(op string, res interface{}, resErr *msgjson.Error) *msgjson.
 
 // routes maps routes to a handler function.
 var routes = map[string]func(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload{
-	helpRoute:    handleHelp,
-	versionRoute: handleVersion,
+	helpRoute:        handleHelp,
+	versionRoute:     handleVersion,
+	preRegisterRoute: handlePreRegister,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
 // if no arguments are passed or verbose help if the passed argument is a known
 // command.
 func handleHelp(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
-	reqPayload := ""
-	err := json.Unmarshal(req.Payload, &reqPayload)
+	helpWith := ""
+	err := json.Unmarshal(req.Payload, &helpWith)
 	if err != nil {
 		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
 		return createResponse(req.Route, nil, resErr)
 	}
 	res := ""
-	if reqPayload == "" {
+	if helpWith == "" {
 		// List all commands if no arguments.
 		res = ListCommands()
 	} else {
-		res, err = CommandUsage(reqPayload)
+		res, err = CommandUsage(helpWith)
 		if err != nil {
 			resErr := &msgjson.Error{Code: msgjson.RPCUnknownRoute, Message: err.Error()}
 			return createResponse(req.Route, nil, resErr)
@@ -68,6 +70,26 @@ func handleVersion(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload 
 	return createResponse(req.Route, res.String(), nil)
 }
 
+// handlePreRegister handles requests for preregister. It accepts the name of a
+// dex and returns whether the request was successful and the dex fee if it was.
+func handlePreRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
+	dexURL := ""
+	err := json.Unmarshal(req.Payload, &dexURL)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		return createResponse(req.Route, nil, resErr)
+	}
+	fee, err := s.core.PreRegister(dexURL)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCErrorUnspecified, Message: err.Error()}
+		return createResponse(req.Route, nil, resErr)
+	}
+	res := &preRegisterResponse{
+		Fee: fee,
+	}
+	return createResponse(req.Route, res, nil)
+}
+
 // ListCommands prints a short usage string for every route available to the
 // rpcserver.
 func ListCommands() string {
@@ -80,7 +102,9 @@ func ListCommands() string {
 			return ""
 		}
 	}
-	return sb.String()
+	s := sb.String()
+	// Remove trailing newline.
+	return s[:len(s)-1]
 }
 
 // CommandUsage returns a help message for cmd or an error if cmd is unknown.
@@ -122,5 +146,17 @@ Returns:
 
 Returns:
 	string: The dex client rpcserver version.`,
+	},
+	preRegisterRoute: [2]string{`"dex"`,
+		`Preregister for dex.
+
+Args:
+	string: The dex to preregister for.
+
+Returns:
+	obj: The preregister result.
+	{
+		"fee" (float): The dex registration fee.
+	}`,
 	},
 }

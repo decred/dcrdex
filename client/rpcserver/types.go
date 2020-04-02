@@ -8,6 +8,13 @@ import (
 	"fmt"
 )
 
+var (
+	// ErrArgs is wrapped when arguments to the known command cannot be parsed.
+	ErrArgs = errors.New("unable to parse arguments")
+	// ErrUnknownCmd is wrapped when the command is not know.
+	ErrUnknownCmd = errors.New("unknown command")
+)
+
 // versionResponse holds a semver version JSON object.
 type versionResponse struct {
 	Major uint32 `json:"major"`
@@ -20,15 +27,13 @@ func (vr versionResponse) String() string {
 	return fmt.Sprintf("%d.%d.%d", vr.Major, vr.Minor, vr.Patch)
 }
 
-var (
-	// ErrArgs is wrapped when arguments to the known command cannot be parsed.
-	ErrArgs = errors.New("unable to parse arguments")
-	// ErrUnknownCmd is wrapped when the command is not know.
-	ErrUnknownCmd = errors.New("unknown command")
-)
+// preRegisterResponse is used when responding to the preregister route.
+type preRegisterResponse struct {
+	Fee uint64 `json:"fee"`
+}
 
 // ParseCmdArgs parses arguments to commands for rpcserver requests.
-func ParseCmdArgs(cmd string, args []interface{}) (interface{}, error) {
+func ParseCmdArgs(cmd string, args []string) (interface{}, error) {
 	nArg, exists := nArgs[cmd]
 	if !exists {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownCmd, cmd)
@@ -42,14 +47,16 @@ func ParseCmdArgs(cmd string, args []interface{}) (interface{}, error) {
 // nArgs is a map of routes to the number of arguments accepted. One integer
 // indicates an exact match, two are the min and max.
 var nArgs = map[string][]int{
-	helpRoute:    []int{0, 1},
-	versionRoute: []int{0},
+	helpRoute:        []int{0, 1},
+	versionRoute:     []int{0},
+	preRegisterRoute: []int{1},
 }
 
 // parsers is a map of commands to parsing functions.
-var parsers = map[string](func([]interface{}) (interface{}, error)){
-	helpRoute:    parseHelpArgs,
-	versionRoute: parseVersionArgs,
+var parsers = map[string](func([]string) (interface{}, error)){
+	helpRoute:        parseHelpArgs,
+	versionRoute:     func([]string) (interface{}, error) { return nil, nil },
+	preRegisterRoute: func(args []string) (interface{}, error) { return args[0], nil },
 }
 
 func checkNArgs(have int, want []int) error {
@@ -65,13 +72,9 @@ func checkNArgs(have int, want []int) error {
 	return nil
 }
 
-func parseHelpArgs(args []interface{}) (interface{}, error) {
+func parseHelpArgs(args []string) (interface{}, error) {
 	if len(args) == 0 {
 		return nil, nil
 	}
 	return args[0], nil
-}
-
-func parseVersionArgs(args []interface{}) (interface{}, error) {
-	return nil, nil
 }

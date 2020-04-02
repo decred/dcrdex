@@ -47,10 +47,11 @@ var (
 
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
-	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
-	Book(dex string, base, quote uint32) *core.OrderBook
+	Balance(assetID uint32) (baseUnits uint64, err error)
+	Book(dex string, base, quote uint32) (orderBook *core.OrderBook)
+	PreRegister(dexURL string) (fee uint64, err error)
+	Sync(dex string, base, quote uint32) (updateChan chan *core.BookUpdate, err error)
 	Unsync(dex string, base, quote uint32)
-	Balance(uint32) (uint64, error)
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
