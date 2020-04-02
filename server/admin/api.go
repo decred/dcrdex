@@ -31,3 +31,9 @@ func (s *WebServer) apiPing(w http.ResponseWriter, _ *http.Request) {
 	resp := "pong"
 	writeJSON(w, &resp)
 }
+
+// apiConfig is the handler for the '/config' API request.
+func (s *WebServer) apiConfig(w http.ResponseWriter, _ *http.Request) {
+	resp := s.core.Config()
+	writeJSON(w, &resp)
+}

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -35,7 +36,9 @@ var (
 )
 
 // ServerCore is satisfied by core.Core.
-type ServerCore interface{}
+type ServerCore interface {
+	Config() json.RawMessage
+}
 
 // WebServer is a multi-client https server.
 type WebServer struct {
@@ -108,6 +111,7 @@ func NewWebServer(cfg *WebConfig) (*WebServer, error) {
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Get("/ping", s.apiPing)
+		r.Get("/config", s.apiConfig)
 	})
 
 	return s, nil
