@@ -24,6 +24,7 @@ const (
 	defaultRPCCertFile = "rpc.cert"
 	defaultRPCKeyFile  = "rpc.key"
 	defaultWebAddr     = "localhost:5758"
+	defaultNoTUI       = true
 	configFilename     = "dexc.conf"
 	certsFilename      = "certs.json"
 	defaultLogLevel    = "info"
@@ -87,6 +88,7 @@ var defaultConfig = Config{
 	DebugLevel: defaultLogLevel,
 	RPCAddr:    defaultRPCAddr,
 	WebAddr:    defaultWebAddr,
+	NoTUI:      defaultNoTUI,
 }
 
 // Configure processes the application configuration.
