@@ -36,6 +36,7 @@ var (
 	ordersBucket   = []byte("orders")
 	matchesBucket  = []byte("matches")
 	walletsBucket  = []byte("wallets")
+	notesBucket    = []byte("notes")
 	feeProofKey    = []byte("feecoin")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
@@ -50,6 +51,10 @@ var (
 	balanceKey     = []byte("balance")
 	walletKey      = []byte("wallet")
 	changeKey      = []byte("change")
+	noteKey        = []byte("note")
+	stampKey       = []byte("stamp")
+	severityKey    = []byte("severity")
+	ackKey         = []byte("ack")
 	byteTrue       = encode.ByteTrue
 	byteFalse      = encode.ByteFalse
 	byteEpoch      = uint16Bytes(uint16(order.OrderStatusEpoch))
@@ -79,7 +84,7 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 	}
 
 	return bdb, bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket,
-		ordersBucket, matchesBucket, walletsBucket})
+		ordersBucket, matchesBucket, walletsBucket, notesBucket})
 }
 
 // Run waits for context cancellation and closes the database.
@@ -343,12 +348,6 @@ func (db *boltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uin
 	})
 }
 
-// orderTimePair is used to build an on-the-fly index to sort orders by time.
-type orderTimePair struct {
-	oid []byte
-	t   uint64
-}
-
 // newestOrders returns the n newest orders, filtered with a supplied filter
 // function. Each order's bucket is provided to the filter, and a boolean true
 // return value indicates the order should is eligible to be decoded and
@@ -356,27 +355,10 @@ type orderTimePair struct {
 func (db *boltDB) newestOrders(n int, filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
 	return orders, db.ordersView(func(master *bbolt.Bucket) error {
-		pairs := make([]*orderTimePair, 0, n)
-		master.ForEach(func(oid, _ []byte) error {
-			oBkt := master.Bucket(oid)
-			timeB := oBkt.Get(updateTimeKey)
-			if filter(oBkt) {
-				pairs = append(pairs, &orderTimePair{
-					oid: oid,
-					t:   intCoder.Uint64(timeB),
-				})
-			}
-			return nil
-		})
-		// Sort the pairs newest first.
-		sort.Slice(pairs, func(i, j int) bool { return pairs[i].t > pairs[j].t })
-		if n > 0 && len(pairs) > n {
-			pairs = pairs[:n]
-		}
-
+		pairs := newestBuckets(master, n, updateTimeKey, filter)
 		for _, pair := range pairs {
-			oBkt := master.Bucket(pair.oid)
-			o, err := decodeOrderBucket(pair.oid, oBkt)
+			oBkt := master.Bucket(pair.k)
+			o, err := decodeOrderBucket(pair.k, oBkt)
 			if err != nil {
 				return err
 			}
@@ -674,7 +656,7 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 	return w, nil
 }
 
-// wallets is a convenience function for reading from the wallets bucket.
+// walletsView is a convenience function for reading from the wallets bucket.
 func (db *boltDB) walletsView(f bucketFunc) error {
 	return db.withBucket(walletsBucket, db.View, f)
 }
@@ -682,6 +664,87 @@ func (db *boltDB) walletsView(f bucketFunc) error {
 // walletUpdate is a convenience function for updating the wallets bucket.
 func (db *boltDB) walletsUpdate(f bucketFunc) error {
 	return db.withBucket(walletsBucket, db.Update, f)
+}
+
+// SaveNotification saves the notification.
+func (db *boltDB) SaveNotification(note *dexdb.Notification) error {
+	if note.Severeness < dexdb.Success {
+		return fmt.Errorf("Storage of notification with severity %s is forbidden.", note.Severeness)
+	}
+	return db.notesUpdate(func(master *bbolt.Bucket) error {
+		noteB := note.Encode()
+		k := note.ID()
+		noteBkt, err := master.CreateBucketIfNotExists(k)
+		if err != nil {
+			return err
+		}
+		err = noteBkt.Put(stampKey, uint64Bytes(note.TimeStamp))
+		if err != nil {
+			return err
+		}
+		err = noteBkt.Put(severityKey, []byte{byte(note.Severeness)})
+		if err != nil {
+			return err
+		}
+		return noteBkt.Put(noteKey, noteB)
+	})
+}
+
+// AckNotification sets the acknowledgement for a notification.
+func (db *boltDB) AckNotification(id []byte) error {
+	return db.notesUpdate(func(master *bbolt.Bucket) error {
+		noteBkt := master.Bucket(id)
+		if noteBkt == nil {
+			return fmt.Errorf("notification not found")
+		}
+		return noteBkt.Put(ackKey, byteTrue)
+	})
+}
+
+// NotificationsN reads out the N most recent notifications.
+func (db *boltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
+	notes := make([]*dexdb.Notification, 0, n)
+	return notes, db.notesView(func(master *bbolt.Bucket) error {
+		pairs := newestBuckets(master, n, stampKey, nil)
+		for _, pair := range pairs {
+			noteBkt := master.Bucket(pair.k)
+			note, err := dexdb.DecodeNotification(noteBkt.Get(noteKey))
+			if err != nil {
+				return err
+			}
+			note.Ack = bEqual(noteBkt.Get(ackKey), byteTrue)
+			note.Id = note.ID()
+			notes = append(notes, note)
+		}
+		return nil
+	})
+}
+
+// notesView is a convenience function to read from the notifications bucket.
+func (db *boltDB) notesView(f bucketFunc) error {
+	return db.withBucket(notesBucket, db.View, f)
+}
+
+// notesUpdate is a convenience function for updating the notifications bucket.
+func (db *boltDB) notesUpdate(f bucketFunc) error {
+	return db.withBucket(notesBucket, db.Update, f)
+}
+
+// Newest buckets gets the nested buckets with the hightest timestamp from the
+// specified master bucket. The nested bucket should have an encoded uint64 at
+// the timeKey. An optional filter function can be used to reject buckets.
+func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func(*bbolt.Bucket) bool) []*keyTimePair {
+	idx := newTimeIndexNewest(n)
+	master.ForEach(func(k, _ []byte) error {
+		bkt := master.Bucket(k)
+		timeB := bkt.Get(timeKey)
+		stamp := intCoder.Uint64(timeB)
+		if filter == nil || filter(bkt) {
+			idx.add(stamp, k)
+		}
+		return nil
+	})
+	return idx.pairs
 }
 
 // makeTopLevelBuckets creates a top-level bucket for each of the provided keys,
@@ -754,6 +817,55 @@ func (bp *bucketPutter) put(k, v []byte) *bucketPutter {
 // Return any push error encountered.
 func (bp *bucketPutter) err() error {
 	return bp.putErr
+}
+
+// keyTimePair is used to build an on-the-fly time-sorted index.
+type keyTimePair struct {
+	k []byte
+	t uint64
+}
+
+// timeIndexNewest is a struct used to build an index of sorted keyTimePairs.
+// The index can have a maximum capacity. If the capacity is set to zero, the
+// index size is unlimited.
+type timeIndexNewest struct {
+	pairs []*keyTimePair
+	cap   int
+}
+
+// Create a new *timeIndexNewest, with the specified capacity.
+func newTimeIndexNewest(n int) *timeIndexNewest {
+	return &timeIndexNewest{
+		pairs: make([]*keyTimePair, 0, n),
+		cap:   n,
+	}
+}
+
+// Conditionally add a time-key pair to the index. The pair will only be added
+// if the timeIndexNewest is under capacity and the time t is larger than the
+// oldest pair's time.
+func (idx *timeIndexNewest) add(t uint64, k []byte) {
+	count := len(idx.pairs)
+	if idx.cap == 0 || count < idx.cap { // count = 0 always evals true here.
+		idx.pairs = append(idx.pairs, &keyTimePair{
+			// Need to make a copy, and []byte(k) upsets the linter.
+			k: append([]byte(nil), k...),
+			t: t,
+		})
+	} else {
+		// non-zero length, at capacity.
+		if t <= idx.pairs[count-1].t {
+			// Too old. Discard.
+			return
+		}
+		idx.pairs[count-1] = &keyTimePair{
+			k: append([]byte(nil), k...),
+			t: t,
+		}
+	}
+	sort.Slice(idx.pairs, func(i, j int) bool {
+		return idx.pairs[i].t > idx.pairs[j].t
+	})
 }
 
 // timeNow is the current unix timestamp in milliseconds.

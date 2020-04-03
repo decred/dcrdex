@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
+	dbtest "decred.org/dcrdex/client/db/test"
 	book "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/btc"
@@ -289,6 +290,9 @@ func (db *TDB) AccountPaid(proof *db.AccountProof) error {
 	return nil
 }
 
+func (db *TDB) SaveNotification(*db.Notification) error        { return nil }
+func (db *TDB) NotificationsN(int) ([]*db.Notification, error) { return nil, nil }
+
 func (db *TDB) Store(k string, b []byte) error {
 	return db.storeErr
 }
@@ -303,6 +307,8 @@ func (db *TDB) Get(k string) ([]byte, error) {
 func (db *TDB) Backup() error {
 	return nil
 }
+
+func (db *TDB) AckNotification(id []byte) error { return nil }
 
 type tCoin struct {
 	id       []byte
@@ -595,7 +601,7 @@ func TestMarkets(t *testing.T) {
 	marketIDs := make(map[string]struct{})
 	for i := 0; i < 10; i++ {
 		base, quote := randomMsgMarket()
-		marketIDs[sid(base.ID, quote.ID)] = struct{}{}
+		marketIDs[mktID(base.ID, quote.ID)] = struct{}{}
 		cfg := rig.dc.cfg
 		cfg.Markets = append(cfg.Markets, msgjson.Market{
 			Name:            base.Symbol + quote.Symbol,
@@ -617,7 +623,7 @@ func TestMarkets(t *testing.T) {
 	assets := rig.dc.assets
 	for _, xc := range xcs {
 		for _, market := range xc.Markets {
-			mkt := sid(market.BaseID, market.QuoteID)
+			mkt := mktID(market.BaseID, market.QuoteID)
 			_, found := marketIDs[mkt]
 			if !found {
 				t.Fatalf("market %s not found", mkt)
@@ -856,7 +862,6 @@ func TestRegister(t *testing.T) {
 	}
 	sign(tDexPriv, regRes)
 
-	var timer *time.Timer
 	queueRegister := func() {
 		rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
@@ -924,30 +929,45 @@ func TestRegister(t *testing.T) {
 
 	tWallet.payFeeCoin = &tCoin{id: []byte("abcdef")}
 
+	ch := tCore.NotificationFeed()
+
 	var err error
-	run := func() <-chan error {
-		if timer != nil {
-			timer.Stop()
-		}
+	run := func() {
 		tWallet.setConfs(tDCR.FundConf)
-		// No errors
-		var errChan <-chan error
-		err, errChan = tCore.Register(form)
-		return errChan
+		err = tCore.Register(form)
 	}
 
-	runWithWait := func() {
-		errChan := run()
-		if err != nil {
-			t.Fatalf("runWithWait error: %v", err)
+	getFeeNote := func() *FeePaymentNote {
+		select {
+		case n := <-ch:
+			switch note := n.(type) {
+			case *FeePaymentNote:
+				return note
+			default:
+				t.Fatalf("wrong notification type: %T", note)
+			}
+			// When it works, it should be virtually instant, but I have seen it fail
+			// at 1 millisecond.
+		case <-time.NewTimer(time.Second).C:
+			t.Fatalf("timed out waiting for fee payment notification")
 		}
-		err = <-errChan
+		return nil
 	}
 
 	queueResponses()
-	runWithWait()
+	run()
 	if err != nil {
 		t.Fatalf("registration error: %v", err)
+	}
+	// Should be two success notifications. One for fee paid on-chain, one for
+	// fee notification sent.
+	feeNote := getFeeNote()
+	if feeNote.Severity() != db.Success {
+		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
+	}
+	feeNote = getFeeNote()
+	if feeNote.Severity() != db.Success {
+		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
 
 	// wallet not found
@@ -1039,16 +1059,32 @@ func TestRegister(t *testing.T) {
 		f(m)
 		return nil
 	})
-	runWithWait()
-	if err == nil {
-		t.Fatalf("no error for notifyfee response error")
+	run()
+	// This should not return a registration error, but the 2nd FeePaymentNote
+	// should indicate an error.
+	if err != nil {
+		t.Fatalf("error for notifyfee response error: %v", err)
+	}
+	// 1st note is fee sent.
+	feeNote = getFeeNote()
+	if feeNote.Severity() != db.Success {
+		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
+	}
+	// 2nd note is fee error
+	feeNote = getFeeNote()
+	if feeNote.Severity() != db.ErrorLevel {
+		t.Fatalf("non-error fee payment notification for notifyfee response error: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
 
 	// Make sure it's good again.
 	queueResponses()
-	runWithWait()
+	run()
 	if err != nil {
 		t.Fatalf("error after regaining valid state: %v", err)
+	}
+	feeNote = getFeeNote()
+	if feeNote.Severity() != db.Success {
+		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
 }
 
@@ -1068,7 +1104,7 @@ func TestLogin(t *testing.T) {
 	}
 
 	queueSuccess()
-	err := tCore.Login(tPW)
+	_, err := tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("initial Login error: %v", err)
 	}
@@ -1076,7 +1112,7 @@ func TestLogin(t *testing.T) {
 	// No encryption key.
 	rig.acct.unauth()
 	rig.db.encKeyErr = tErr
-	err = tCore.Login(tPW)
+	_, err = tCore.Login(tPW)
 	if err == nil {
 		t.Fatalf("no error for missing app key")
 	}
@@ -1084,7 +1120,7 @@ func TestLogin(t *testing.T) {
 
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
-	err = tCore.Login(tPW)
+	_, err = tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("error for unpaid account: %v", err)
 	}
@@ -1100,7 +1136,7 @@ func TestLogin(t *testing.T) {
 		f(resp)
 		return nil
 	})
-	err = tCore.Login(tPW)
+	_, err = tCore.Login(tPW)
 	if err == nil {
 		t.Fatalf("no error for 'connect' route error")
 	}
@@ -1108,7 +1144,7 @@ func TestLogin(t *testing.T) {
 	// Success again.
 	rig.acct.unauth()
 	queueSuccess()
-	err = tCore.Login(tPW)
+	_, err = tCore.Login(tPW)
 	if err != nil {
 		t.Fatalf("final Login error: %v", err)
 	}
@@ -1536,7 +1572,7 @@ func TestCancel(t *testing.T) {
 		Order: lo,
 	}
 	oid := lo.ID()
-	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.db, rig.queue, nil, nil)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
 	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
@@ -1604,6 +1640,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 	tracker := &trackedTrade{
 		Order:  ord,
 		preImg: preImg,
+		dc:     rig.dc,
 	}
 	rig.dc.trades[oid] = tracker
 	err := handlePreimageRequest(rig.core, rig.dc, req)
@@ -1680,7 +1717,7 @@ func TestTradeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
-	tracker := newTrackedTrade(dbOrder, preImgL, dc, rig.db, rig.queue, walletSet, nil)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -1978,6 +2015,22 @@ func TestTradeTracking(t *testing.T) {
 	}
 	if tracker.cancel.matches.taker == nil {
 		t.Fatalf("cancelMatches.taker not set")
+	}
+}
+
+func TestNotifications(t *testing.T) {
+	tCore := newTestRig().core
+
+	// Insert a notification into the database.
+	typedNote := newOrderNote("abc", "def", 100, nil)
+
+	ch := tCore.NotificationFeed()
+	tCore.notify(typedNote)
+	select {
+	case n := <-ch:
+		dbtest.MustCompareNotifications(t, n.DBNote(), &typedNote.Notification)
+	default:
+		t.Fatalf("no notification received over the notification channel")
 	}
 }
 

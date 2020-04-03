@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
@@ -211,14 +212,12 @@ func (c *TCore) InitializeClient(pw string) error {
 }
 func (c *TCore) PreRegister(dex string) (uint64, error) { return 1e8, nil }
 
-func (c *TCore) Register(r *core.Registration) (error, <-chan error) {
+func (c *TCore) Register(r *core.Registration) error {
 	randomDelay()
 	c.reg = r
-	errChan := make(chan error, 1)
-	errChan <- nil
-	return nil, errChan
+	return nil
 }
-func (c *TCore) Login(string) error { return nil }
+func (c *TCore) Login(string) ([]*db.Notification, error) { return nil, nil }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return make(chan *core.BookUpdate), nil
@@ -266,6 +265,8 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {}
 func (c *TCore) Balance(uint32) (uint64, error) {
 	return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6)), nil
 }
+
+func (c *TCore) AckNotes(ids []dex.Bytes) {}
 
 var winfos = map[uint32]*asset.WalletInfo{
 	0: {
@@ -438,6 +439,8 @@ func (c *TCore) Cancel(pw string, sid string) error {
 	}
 	return nil
 }
+
+func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
 
 func TestServer(t *testing.T) {
 	ctx, shutdown := context.WithCancel(context.Background())

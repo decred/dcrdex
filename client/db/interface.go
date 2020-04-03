@@ -69,4 +69,10 @@ type DB interface {
 	Wallets() ([]*Wallet, error)
 	// Backup makes a copy of the database.
 	Backup() error
+	// SaveNotification saves the notification.
+	SaveNotification(*Notification) error
+	// NotificationsN reads out the N most recent notifications.
+	NotificationsN(int) ([]*Notification, error)
+	// AckNotification sets the acknowledgement for a notification.
+	AckNotification(id []byte) error
 }
