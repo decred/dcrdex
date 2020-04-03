@@ -45,7 +45,7 @@ func TestConfigure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mainnet Configure error: %v", err)
 	}
-	check("mainnet notui", cfg.NoTUI == false)
+	check("mainnet notui", cfg.NoTUI == true)
 	check("mainnet testnet", cfg.Testnet == false)
 	check("mainnet simnet", cfg.Simnet == false)
 	check("mainnet rpc", cfg.RPCOn == false)
@@ -71,7 +71,7 @@ func TestConfigure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("simnet Configure error: %v", err)
 	}
-	check("simnet notui", cfg.NoTUI == false)
+	check("simnet notui", cfg.NoTUI == true)
 	check("simnet testnet", cfg.Testnet == false)
 	check("simnet simnet", cfg.Simnet == true)
 	check("simnet rpc", cfg.RPCOn == false)
