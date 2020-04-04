@@ -69,7 +69,7 @@ func main() {
 	go clientCore.Run(appCtx)
 	// At least one of --rpc or --web must be specified.
 	if cfg.NoWeb && !cfg.RPCOn {
-		fmt.Fprintf(os.Stderr, "Cannot run without web user interface unless --rpc or --tui is specified\n")
+		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc or --tui is specified\n")
 		return
 	}
 	var wg sync.WaitGroup

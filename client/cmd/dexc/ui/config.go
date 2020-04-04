@@ -69,7 +69,7 @@ type Config struct {
 	RPCCert    string `long:"rpccert" description:"RPC server certificate file location"`
 	RPCKey     string `long:"rpckey" description:"RPC server key file location"`
 	WebAddr    string `long:"webaddr" description:"HTTP server address"`
-	NoWeb      bool   `long:"noweb" description:"disable the web user interface."`
+	NoWeb      bool   `long:"noweb" description:"disable the web server."`
 	TUI        bool   `long:"tui" description:"enable the terminal-based user interface."`
 	Testnet    bool   `long:"testnet" description:"use testnet"`
 	Simnet     bool   `long:"simnet" description:"use simnet"`
