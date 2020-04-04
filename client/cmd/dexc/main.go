@@ -44,60 +44,62 @@ func main() {
 		return
 	}
 
-	// If --notui is specified, don't create the tview application. Initialize
-	// logging with the standard stdout logger.
-	if cfg.NoTUI {
-		logStdout := func(msg []byte) {
-			os.Stdout.Write(msg)
-		}
-		logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
-		clientCore, err := core.New(&core.Config{
-			DBPath:      cfg.DBPath, // global set in config.go
-			LoggerMaker: logMaker,
-			Certs:       cfg.Certs,
-			Net:         cfg.Net,
-		})
-		if err != nil {
-			fmt.Fprint(os.Stderr, "error creating client core: ", err)
-			return
-		}
-		go clientCore.Run(appCtx)
-		// At least one of --rpc or --web must be specified.
-		if !cfg.RPCOn && !cfg.WebOn {
-			fmt.Fprintf(os.Stderr, "Cannot run without TUI unless --rpc and/or --web is specified\n")
-			return
-		}
-		var wg sync.WaitGroup
-		if cfg.RPCOn {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				rpcserver.SetLogger(logMaker.Logger("RPC"))
-				rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
-				rpcSrv, err := rpcserver.New(rpcCfg)
-				if err != nil {
-					log.Errorf("Error starting rpc server: %v", err)
-					return
-				}
-				rpcSrv.Run(appCtx)
-			}()
-		}
-		if cfg.WebOn {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
-				if err != nil {
-					log.Errorf("Error starting web server: %v", err)
-					return
-				}
-				webSrv.Run(appCtx)
-			}()
-		}
-		wg.Wait()
-		ui.Close()
+	if cfg.TUI {
+		// Run in TUI mode.
+		ui.Run(appCtx)
 		return
 	}
-	// Run in TUI mode.
-	ui.Run(appCtx)
+
+	// If --tui is not specified, don't create the tview application. Initialize
+	// logging with the standard stdout logger.
+	logStdout := func(msg []byte) {
+		os.Stdout.Write(msg)
+	}
+	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
+	clientCore, err := core.New(&core.Config{
+		DBPath:      cfg.DBPath, // global set in config.go
+		LoggerMaker: logMaker,
+		Certs:       cfg.Certs,
+		Net:         cfg.Net,
+	})
+	if err != nil {
+		fmt.Fprint(os.Stderr, "error creating client core: ", err)
+		return
+	}
+	go clientCore.Run(appCtx)
+	// At least one of --rpc or --web must be specified.
+	if !cfg.RPCOn && !cfg.WebOn {
+		fmt.Fprintf(os.Stderr, "Cannot run without TUI unless --rpc and/or --web is specified\n")
+		return
+	}
+	var wg sync.WaitGroup
+	if cfg.RPCOn {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rpcserver.SetLogger(logMaker.Logger("RPC"))
+			rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
+			rpcSrv, err := rpcserver.New(rpcCfg)
+			if err != nil {
+				log.Errorf("Error starting rpc server: %v", err)
+				return
+			}
+			rpcSrv.Run(appCtx)
+		}()
+	}
+	if cfg.WebOn {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
+			if err != nil {
+				log.Errorf("Error starting web server: %v", err)
+				return
+			}
+			webSrv.Run(appCtx)
+		}()
+	}
+	wg.Wait()
+	ui.Close()
+
 }

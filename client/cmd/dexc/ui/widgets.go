@@ -143,8 +143,8 @@ func createApp() {
 	if cfg.RPCOn {
 		rpcView.toggle()
 	}
-	// --web flag was set.
-	if cfg.WebOn {
+	// --noweb flag was not set, i.e. default to toggling on web view
+	if !cfg.NoWeb {
 		webView.toggle()
 	}
 }
