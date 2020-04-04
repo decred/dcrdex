@@ -48,7 +48,6 @@ func TestConfigure(t *testing.T) {
 	check("mainnet testnet", cfg.Testnet == false)
 	check("mainnet simnet", cfg.Simnet == false)
 	check("mainnet rpc", cfg.RPCOn == false)
-	//check("mainnet web", cfg.WebOn == false)
 	check("mainnet webaddr", cfg.WebAddr == ":9876")
 
 	// Check the testnet configuration.
@@ -60,7 +59,6 @@ func TestConfigure(t *testing.T) {
 	check("testnet testnet", cfg.Testnet == true)
 	check("testnet simnet", cfg.Simnet == false)
 	check("testnet rpc", cfg.RPCOn == true)
-	//check("testnet web", cfg.WebOn == false)
 	check("testnet tui", cfg.TUI == true)
 	check("testnet webaddr", cfg.WebAddr == defaultWebAddr)
 
