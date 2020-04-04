@@ -1,6 +1,8 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
+// Package admin provides a password protected https server to send commands to
+// a running dex server.
 package admin
 
 import (
@@ -24,39 +26,39 @@ import (
 
 const (
 	// rpcTimeoutSeconds is the number of seconds a connection to the
-	// web server is allowed to stay open without authenticating before it
+	// server is allowed to stay open without authenticating before it
 	// is closed.
 	rpcTimeoutSeconds = 10
 )
 
 var (
-	// Check that *dexsrv.DEX satifies ServerCore.
-	_   ServerCore = (*dexsrv.DEX)(nil)
+	// Check that *dexsrv.DEX satifies SvrCore.
+	_   SvrCore = (*dexsrv.DEX)(nil)
 	log slog.Logger
 )
 
-// ServerCore is satisfied by core.Core.
-type ServerCore interface {
+// SvrCore is satisfied by core.Core.
+type SvrCore interface {
 	Config() json.RawMessage
 }
 
-// WebServer is a multi-client https server.
-type WebServer struct {
-	core      ServerCore
+// Server is a multi-client https server.
+type Server struct {
+	core      SvrCore
 	addr      string
 	tlsConfig *tls.Config
 	srv       *http.Server
 	authSHA   [32]byte
 }
 
-// WebConfig holds variables needed to create a new web Server.
-type WebConfig struct {
-	Core            ServerCore
+// SrvConfig holds variables needed to create a new Server.
+type SrvConfig struct {
+	Core            SvrCore
 	Addr, Cert, Key string
 	AuthSHA         [32]byte
 }
 
-// UseLogger sets the logger for the webserver package.
+// UseLogger sets the logger for the admin package.
 func UseLogger(logger slog.Logger) {
 	log = logger
 }
@@ -67,8 +69,8 @@ func fileExists(name string) bool {
 	return !os.IsNotExist(err)
 }
 
-// NewWebServer is the constructor for a new WebServer.
-func NewWebServer(cfg *WebConfig) (*WebServer, error) {
+// NewSrv is the constructor for a new Server.
+func NewSrv(cfg *SrvConfig) (*Server, error) {
 	// Find the key pair.
 	if !fileExists(cfg.Key) || !fileExists(cfg.Cert) {
 		return nil, fmt.Errorf("missing certificates")
@@ -94,7 +96,7 @@ func NewWebServer(cfg *WebConfig) (*WebServer, error) {
 	}
 
 	// Make the server.
-	s := &WebServer{
+	s := &Server{
 		core:      cfg.Core,
 		srv:       httpServer,
 		addr:      cfg.Addr,
@@ -105,6 +107,7 @@ func NewWebServer(cfg *WebConfig) (*WebServer, error) {
 	// Middleware
 	mux.Use(middleware.Recoverer)
 	mux.Use(middleware.RealIP)
+	mux.Use(oneTimeConnection)
 	mux.Use(s.authMiddleware)
 
 	// api endpoints
@@ -117,12 +120,12 @@ func NewWebServer(cfg *WebConfig) (*WebServer, error) {
 	return s, nil
 }
 
-// Run starts the web server.
-func (s *WebServer) Run(ctx context.Context) {
+// Run starts the server.
+func (s *Server) Run(ctx context.Context) {
 	// Create listener.
 	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
 	if err != nil {
-		log.Errorf("can't listen on %s. admin webserver quitting: %v", s.addr, err)
+		log.Errorf("can't listen on %s. admin server quitting: %v", s.addr, err)
 		return
 	}
 
@@ -138,28 +141,39 @@ func (s *WebServer) Run(ctx context.Context) {
 			log.Errorf("HTTP server Shutdown: %v", err)
 		}
 	}()
-	log.Infof("admin webserver listening on %s", s.addr)
+	log.Infof("admin server listening on %s", s.addr)
 	if err := s.srv.Serve(listener); err != http.ErrServerClosed {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}
 
 	// Wait for Shutdown.
 	wg.Wait()
-	log.Infof("admin webserver off")
+	log.Infof("admin server off")
+}
+
+// oneTimeConnection sets fields in the header and request that indicate this
+// connection should not be reused.
+func oneTimeConnection(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		r.Close = true
+		next.ServeHTTP(w, r)
+	})
 }
 
 // authMiddleware checks incoming requests for authentication.
-func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, pass, ok := r.BasicAuth()
+		// User is ignored.
+		_, pass, ok := r.BasicAuth()
 		authSHA := sha256.Sum256([]byte(pass))
 		if !ok || subtle.ConstantTimeCompare(s.authSHA[:], authSHA[:]) != 1 {
-			log.Warnf("authentication failure from ip: %s for user: %s with password: %s", r.RemoteAddr, user, pass)
+			log.Warnf("server authentication failure from ip: %s", r.RemoteAddr)
 			w.Header().Add("WWW-Authenticate", `Basic realm="dex admin"`)
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
-		log.Infof("authenticated user %s with ip: %s", user, r.RemoteAddr)
+		log.Infof("server authenticated ip: %s", r.RemoteAddr)
 		next.ServeHTTP(w, r)
 	})
 }

@@ -34,10 +34,10 @@ func mainCore(ctx context.Context) error {
 		}
 	}()
 
-	// Aquire web admin password if turned on.
-	var webAdminAuthSHA [32]byte
-	if cfg.WebAdminOn {
-		webAdminAuthSHA, err = admin.PasswordPrompt("Enter admin webserver password:")
+	// Aquire admin server password if turned on.
+	var adminSrvAuthSHA [32]byte
+	if cfg.AdminSrvOn {
+		adminSrvAuthSHA, err = admin.PasswordPrompt("Enter admin server password:")
 		if err != nil {
 			return fmt.Errorf("cannot use password: %v", err)
 		}
@@ -110,28 +110,28 @@ func mainCore(ctx context.Context) error {
 	}
 
 	var wg sync.WaitGroup
-	if cfg.WebAdminOn {
-		webCFG := &admin.WebConfig{
+	if cfg.AdminSrvOn {
+		srvCFG := &admin.SrvConfig{
 			Core:    dexMan,
-			Addr:    cfg.WebAdminAddr,
-			AuthSHA: webAdminAuthSHA,
+			Addr:    cfg.AdminSrvAddr,
+			AuthSHA: adminSrvAuthSHA,
 			Cert:    cfg.RPCCert,
 			Key:     cfg.RPCKey,
 		}
-		adminWebServer, err := admin.NewWebServer(webCFG)
+		adminServer, err := admin.NewSrv(srvCFG)
 		if err != nil {
-			return fmt.Errorf("cannot set up admin webserver: %v", err)
+			return fmt.Errorf("cannot set up admin server: %v", err)
 		}
 		wg.Add(1)
 		go func() {
-			adminWebServer.Run(ctx)
+			adminServer.Run(ctx)
 			wg.Done()
 		}()
 	}
 
 	log.Info("The DEX is running. Hit CTRL+C to quit...")
 	<-ctx.Done()
-	// Wait for the admin webserver to finish.
+	// Wait for the admin server to finish.
 	wg.Wait()
 
 	log.Info("Stopping DEX...")
