@@ -369,7 +369,6 @@ func (dcr *Backend) shutdown() {
 // before use.
 func unconnectedDCR(logger dex.Logger) *Backend {
 	return &Backend{
-		blockChans: make([]chan *asset.BlockUpdate, 0),
 		blockCache: newBlockCache(logger),
 		log:        logger,
 	}
@@ -405,6 +404,7 @@ func (dcr *Backend) Run(ctx context.Context) {
 
 	sendErr := func(err error) {
 		dcr.log.Error(err)
+		dcr.signalMtx.RLock()
 		for _, c := range dcr.blockChans {
 			select {
 			case c <- &asset.BlockUpdate{
@@ -414,6 +414,7 @@ func (dcr *Backend) Run(ctx context.Context) {
 				dcr.log.Errorf("failed to send sending block update on blocking channel")
 			}
 		}
+		dcr.signalMtx.RUnlock()
 	}
 
 	sendErrFmt := func(s string, a ...interface{}) {
