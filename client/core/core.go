@@ -538,7 +538,7 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 	}
 
 	initErr := func(s string, a ...interface{}) error {
-		wallet.connector.Disconnect()
+		wallet.Disconnect()
 		return fmt.Errorf(s, a...)
 	}
 

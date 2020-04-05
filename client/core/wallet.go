@@ -38,8 +38,7 @@ func (w *xcWallet) Unlock(pw string, dur time.Duration) error {
 	return nil
 }
 
-// lock the wallet, setting the lockTime to the time when the wallet will be
-// locked.
+// Lock the wallet. The lockTime is zeroed so that unlocked will return false.
 func (w *xcWallet) Lock() error {
 	w.mtx.Lock()
 	w.lockTime = time.Time{}
@@ -94,7 +93,7 @@ func (w *xcWallet) connected() bool {
 }
 
 // Connect calls the dex.Connector's Connect method and sets the
-// xcWallet.hookedUp flag.
+// xcWallet.hookedUp flag to true.
 func (w *xcWallet) Connect(ctx context.Context) error {
 	err := w.connector.Connect(ctx)
 	if err != nil {
@@ -104,4 +103,13 @@ func (w *xcWallet) Connect(ctx context.Context) error {
 	w.hookedUp = true
 	w.mtx.Unlock()
 	return nil
+}
+
+// Disconnect calls the dex.Connector's Disconnect method and sets the
+// xcWallet.hookedUp flag to false.
+func (w *xcWallet) Disconnect() {
+	w.connector.Disconnect()
+	w.mtx.Lock()
+	w.hookedUp = false
+	w.mtx.Unlock()
 }
