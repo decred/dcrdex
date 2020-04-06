@@ -33,6 +33,16 @@ func (d *Driver) Setup(configPath string, logger dex.Logger, network dex.Network
 	return NewBackend(configPath, logger, network)
 }
 
+// DecodeCoinID creates a human-readable representation of a coin ID for
+// Bitcoin.
+func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
+	txid, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%v:%d", txid, vout), err
+}
+
 func init() {
 	asset.Register(assetName, &Driver{})
 }

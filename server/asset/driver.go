@@ -1,3 +1,6 @@
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
+
 package asset
 
 import (
@@ -16,6 +19,19 @@ var (
 // Backend, but not start the backend connection.
 type Driver interface {
 	Setup(configPath string, logger dex.Logger, network dex.Network) (Backend, error)
+	DecodeCoinID(coinID []byte) (string, error)
+}
+
+// DecodeCoinID creates a human-readable representation of a coin ID for a named
+// asset with a corresponding driver registered with this package.
+func DecodeCoinID(name string, coinID []byte) (string, error) {
+	driversMtx.Lock()
+	drv, ok := drivers[name]
+	driversMtx.Unlock()
+	if !ok {
+		return "", fmt.Errorf("db: unknown asset driver %q", name)
+	}
+	return drv.DecodeCoinID(coinID)
 }
 
 // Register should be called by the init function of an asset's package.
