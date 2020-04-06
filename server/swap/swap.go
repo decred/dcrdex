@@ -1212,11 +1212,14 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	}
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
-	// contract script hash. Maker is party A, the initiator. Taker is party B,
-	// the participant.
+	// contract script hash. Maker is party A, the initiator, who first reveals
+	// the secret. Taker is party B, the participant.
 	storFn := s.storage.SaveRedeemB // also sets match status to MatchComplete
 	if stepInfo.actor.isMaker {
-		storFn = s.storage.SaveRedeemA // also sets match status to MakerRedeemed
+		// Maker redeem stores the secret too.
+		storFn = func(mid db.MarketMatchID, coinID []byte, timestamp int64) error {
+			return s.storage.SaveRedeemA(mid, coinID, params.Secret, timestamp) // also sets match status to MakerRedeemed
+		}
 	}
 	swapTime := unixMsNow()
 	swapTimeMs := encode.UnixMilli(swapTime)

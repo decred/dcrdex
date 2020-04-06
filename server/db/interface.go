@@ -196,7 +196,7 @@ type MatchData struct {
 type SwapData struct {
 	SigMatchAckMaker []byte
 	SigMatchAckTaker []byte
-	ContractA        []byte
+	ContractA        []byte // contains the secret hash used by both parties
 	ContractACoinID  []byte
 	ContractATime    int64
 	ContractAAckSig  []byte // B's signature of contract A data
@@ -205,6 +205,7 @@ type SwapData struct {
 	ContractBTime    int64
 	ContractBAckSig  []byte // A's signature of contract B data
 	RedeemACoinID    []byte
+	RedeemASecret    []byte // the secret revealed in A's redeem, also used in B's redeem
 	RedeemATime      int64
 	RedeemAAckSig    []byte // B's signature of redeem A data
 	RedeemAAckTime   int64  // time that B's signature of redeem A data was received
@@ -296,7 +297,7 @@ type SwapArchiver interface {
 	// SaveRedeemA records party A's redemption coinID (e.g. transaction
 	// output), which spends party B's swap contract on chain Y. Note that this
 	// transaction will contain the secret, which party B extracts.
-	SaveRedeemA(mid MarketMatchID, coinID []byte, timestamp int64) error
+	SaveRedeemA(mid MarketMatchID, coinID, secret []byte, timestamp int64) error
 
 	// SaveRedeemAckSigB records party B's signature acknowledging party A's
 	// redemption, which spent their swap contract on chain Y and revealed the
