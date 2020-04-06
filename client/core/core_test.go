@@ -381,6 +381,9 @@ type TXCWallet struct {
 	redeemCoins  []dex.Bytes
 	badSecret    bool
 	fundedVal    uint64
+	connectErr   error
+	unlockErr    error
+	balErr       error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -399,13 +402,13 @@ func (w *TXCWallet) Info() *asset.WalletInfo {
 }
 
 func (w *TXCWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
-	return nil, &sync.WaitGroup{}
+	return w.connectErr, &sync.WaitGroup{}
 }
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
 func (w *TXCWallet) Balance(confs uint32) (available, locked uint64, err error) {
-	return 0, 0, nil
+	return 0, 0, w.balErr
 }
 
 func (w *TXCWallet) Fund(v uint64, _ *dex.Asset) (asset.Coins, error) {
@@ -450,7 +453,7 @@ func (w *TXCWallet) Address() (string, error) {
 }
 
 func (w *TXCWallet) Unlock(pw string, dur time.Duration) error {
-	return nil
+	return w.unlockErr
 }
 
 func (w *TXCWallet) Lock() error {
@@ -485,18 +488,19 @@ func (w *TXCWallet) setConfs(confs uint32) {
 	w.mtx.Unlock()
 }
 
-type tCrypter struct{}
+type tCrypter struct {
+	encryptErr error
+	decryptErr error
+	recryptErr error
+}
 
-func (c *tCrypter) Encrypt(b []byte) ([]byte, error) { return b, nil }
+func (c *tCrypter) Encrypt(b []byte) ([]byte, error) { return b, c.encryptErr }
 
-func (c *tCrypter) Decrypt(b []byte) ([]byte, error) { return b, nil }
+func (c *tCrypter) Decrypt(b []byte) ([]byte, error) { return b, c.decryptErr }
 
 func (c *tCrypter) Serialize() []byte { return nil }
 
 func (c *tCrypter) Close() {}
-
-func tNewCrypter(string) encrypt.Crypter                 { return &tCrypter{} }
-func tReCrypter(string, []byte) (encrypt.Crypter, error) { return &tCrypter{}, nil }
 
 var tAssetID uint32
 
@@ -513,12 +517,13 @@ func randomMsgMarket() (baseAsset, quoteAsset *msgjson.Asset) {
 }
 
 type testRig struct {
-	core  *Core
-	db    *TDB
-	queue *wait.TickerQueue
-	ws    *TWebsocket
-	dc    *dexConnection
-	acct  *dexAccount
+	core    *Core
+	db      *TDB
+	queue   *wait.TickerQueue
+	ws      *TWebsocket
+	dc      *dexConnection
+	acct    *dexAccount
+	crypter *tCrypter
 }
 
 func newTestRig() *testRig {
@@ -531,7 +536,7 @@ func newTestRig() *testRig {
 
 	dc, conn, acct := testDexConnection()
 
-	// Store the
+	crypter := &tCrypter{}
 
 	return &testRig{
 		core: &Core{
@@ -550,14 +555,15 @@ func newTestRig() *testRig {
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
-			newCrypter: tNewCrypter,
-			reCrypter:  tReCrypter,
+			newCrypter: func(string) encrypt.Crypter { return crypter },
+			reCrypter:  func(string, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 		},
-		db:    db,
-		queue: queue,
-		ws:    conn,
-		dc:    dc,
-		acct:  acct,
+		db:      db,
+		queue:   queue,
+		ws:      conn,
+		dc:      dc,
+		acct:    acct,
+		crypter: crypter,
 	}
 }
 
@@ -759,41 +765,68 @@ func TestCreateWallet(t *testing.T) {
 		Account: "default",
 	}
 
-	// Try to add an existing wallet.
-	wallet, _ := newTWallet(tILT.ID)
-	tCore.wallets[tILT.ID] = wallet
-	err := tCore.CreateWallet(tPW, wPW, form)
-	if err == nil {
-		t.Fatalf("no error for existing wallet")
+	ensureErr := func(tag string) {
+		err := tCore.CreateWallet(tPW, wPW, form)
+		if err == nil {
+			t.Fatalf("no %s error", tag)
+		}
 	}
+
+	// Try to add an existing wallet.
+	wallet, tWallet := newTWallet(tILT.ID)
+	tCore.wallets[tILT.ID] = wallet
+	ensureErr("existing wallet")
 	delete(tCore.wallets, tILT.ID)
 
+	// Failure to retrieve encryption key params.
+	rig.db.encKeyErr = tErr
+	ensureErr("db.Get")
+	rig.db.encKeyErr = nil
+
+	// Crypter error.
+	rig.crypter.encryptErr = tErr
+	ensureErr("Encrypt")
+	rig.crypter.encryptErr = nil
+
 	// Try an unknown wallet (not yet asset.Register'ed).
-	err = tCore.CreateWallet(tPW, wPW, form)
-	if err == nil {
-		t.Fatalf("no error for unknown asset")
-	}
+	ensureErr("unregistered asset")
 
 	// Register the asset.
 	asset.Register(tILT.ID, &tDriver{
 		f: func(wCfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
-			w, _ := newTWallet(tILT.ID)
-			return w.Wallet, nil
+			return wallet.Wallet, nil
 		},
 		winfo: &asset.WalletInfo{},
 	})
 
+	// Connection error.
+	tWallet.connectErr = tErr
+	ensureErr("Connect")
+	tWallet.connectErr = nil
+
+	// Unlock error.
+	tWallet.unlockErr = tErr
+	ensureErr("Unlock")
+	tWallet.unlockErr = nil
+
+	// Address error.
+	tWallet.addrErr = tErr
+	ensureErr("Address")
+	tWallet.addrErr = nil
+
+	// Balance error.
+	tWallet.balErr = tErr
+	ensureErr("Balance")
+	tWallet.balErr = nil
+
 	// Database error.
 	rig.db.updateWalletErr = tErr
-	err = tCore.CreateWallet(tPW, wPW, form)
-	if err == nil {
-		t.Fatalf("no error for database error")
-	}
+	ensureErr("db.UpdateWallet")
 	rig.db.updateWalletErr = nil
 
 	// Success
 	delete(tCore.wallets, tILT.ID)
-	err = tCore.CreateWallet(tPW, wPW, form)
+	err := tCore.CreateWallet(tPW, wPW, form)
 	if err != nil {
 		t.Fatalf("error when should be no error: %v", err)
 	}
