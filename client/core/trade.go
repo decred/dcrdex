@@ -140,7 +140,7 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 		tif = lo.Force
 	}
 	cancelling := t.cancel != nil
-	coreOrder := &Order{
+	corder := &Order{
 		DEX:        t.dc.acct.url,
 		MarketID:   t.mktID,
 		Type:       prefix.OrderType,
@@ -157,7 +157,7 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 	}
 	for _, match := range t.matches {
 		dbMatch := match.Match
-		coreOrder.Matches = append(coreOrder.Matches, &Match{
+		corder.Matches = append(corder.Matches, &Match{
 			MatchID: match.id.String(),
 			Step:    dbMatch.Status,
 			Rate:    dbMatch.Rate,
@@ -174,7 +174,7 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 			TargetID: t.cancel.TargetOrderID.String(),
 		}
 	}
-	return coreOrder, cancelOrder
+	return corder, cancelOrder
 }
 
 // token is a shortened representation of the order ID.
@@ -414,14 +414,14 @@ func (t *trackedTrade) tick() error {
 		corder, _ := t.coreOrderInternal()
 		if err != nil {
 			details := fmt.Sprintf("Error encountered sending a swap output(s) worth %.8f %s on order %s",
-				float64(qty)/1e8, unbip(fromID), t.token())
+				float64(qty)/conversionFactor, unbip(fromID), t.token())
 			log.Error(details + " " + err.Error())
 			t.notify(newOrderNote("Swap error", details, db.ErrorLevel, corder))
 			return err
 		} else {
 
 			details := fmt.Sprintf("Sent swaps worth %.8f %s on order %s",
-				float64(qty)/1e8, unbip(fromID), t.token())
+				float64(qty)/conversionFactor, unbip(fromID), t.token())
 			log.Error(details)
 			t.notify(newOrderNote("Swaps initiated", details, db.Poke, corder))
 		}
@@ -436,12 +436,12 @@ func (t *trackedTrade) tick() error {
 		err := t.redeemMatches(redeems)
 		corder, _ := t.coreOrderInternal()
 		if err != nil {
-			details := fmt.Sprintf("Error encountered sending redemptions worth %.8f %s on order %s", float64(qty)/1e8, unbip(toAsset), t.token())
+			details := fmt.Sprintf("Error encountered sending redemptions worth %.8f %s on order %s", float64(qty)/conversionFactor, unbip(toAsset), t.token())
 			log.Error(details)
 			t.notify(newOrderNote("Redemption error", details, db.ErrorLevel, corder))
 			return err
 		} else {
-			details := fmt.Sprintf("Redeemed %.8f %s on order %s", float64(qty)/1e8, unbip(toAsset), t.token())
+			details := fmt.Sprintf("Redeemed %.8f %s on order %s", float64(qty)/conversionFactor, unbip(toAsset), t.token())
 			log.Error(details)
 			t.notify(newOrderNote("Match complete", details, db.Poke, corder))
 		}

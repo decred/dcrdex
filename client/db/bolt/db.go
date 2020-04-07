@@ -846,7 +846,7 @@ func newTimeIndexNewest(n int) *timeIndexNewest {
 // oldest pair's time.
 func (idx *timeIndexNewest) add(t uint64, k []byte) {
 	count := len(idx.pairs)
-	if idx.cap == 0 || count < idx.cap { // count = 0 always evals true here.
+	if idx.cap == 0 || count < idx.cap {
 		idx.pairs = append(idx.pairs, &keyTimePair{
 			// Need to make a copy, and []byte(k) upsets the linter.
 			k: append([]byte(nil), k...),
@@ -870,8 +870,7 @@ func (idx *timeIndexNewest) add(t uint64, k []byte) {
 
 // timeNow is the current unix timestamp in milliseconds.
 func timeNow() uint64 {
-	t := time.Now()
-	return uint64(t.Unix()*1e3) + uint64(t.Nanosecond())/1e6
+	return encode.UnixMilliU(time.Now())
 }
 
 // A couple of common bbolt functions.

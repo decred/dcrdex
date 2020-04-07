@@ -72,6 +72,8 @@ export default class Application {
     const user = await getJSON('/api/user')
     if (!checkResponse(user)) return
     this.user = user
+    // Clear the notification cache for unitialized users.
+    if (!user.inited) State.store('notifications', null)
     this.assets = user.assets
     this.walletMap = {}
     for (const [assetID, asset] of Object.entries(user.assets)) {
@@ -197,11 +199,11 @@ export default class Application {
   }
 
   notify (note) {
-    const order = note.order
-    const mkt = this.user.exchanges[order.dex].markets[order.market]
     // Handle type-specific updates.
     switch (note.type) {
-      case 'order':
+      case 'order': {
+        const order = note.order
+        const mkt = this.user.exchanges[order.dex].markets[order.market]
         if (mkt.orders) {
           for (const i in mkt.orders) {
             if (mkt.orders[i].id === order.id) {
@@ -210,6 +212,7 @@ export default class Application {
             }
           }
         }
+      }
     }
     // Inform the page.
     if (this.notifiers[note.type]) this.notifiers[note.type](note)
@@ -417,9 +420,6 @@ function handleRegister (main) {
       Doc.show(page.appErrMsg)
       return
     }
-    // User account created. Clearing the notification cache here, because old
-    // notifications are annoying during dev.
-    State.store('notifications', null)
     app.setLogged(true)
     const dcrWallet = app.walletMap[DCR_ID]
     if (!dcrWallet) {

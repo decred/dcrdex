@@ -30,7 +30,8 @@ import (
 )
 
 const (
-	keyParamsKey = "keyParams"
+	keyParamsKey     = "keyParams"
+	conversionFactor = 1e8
 )
 
 var (
@@ -86,8 +87,8 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 		dc.tradeMtx.RLock()
 		for _, trade := range dc.trades {
 			if trade.mktID == mid {
-				coreOrder, _ := trade.coreOrder()
-				market.Orders = append(market.Orders, coreOrder)
+				corder, _ := trade.coreOrder()
+				market.Orders = append(market.Orders, corder)
 			}
 		}
 		dc.tradeMtx.RUnlock()
@@ -1225,25 +1226,25 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, c.db, c.latencyQ, wallets, coins, c.notify)
-	coreOrder, _ := tracker.coreOrder()
+	corder, _ := tracker.coreOrder()
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
 	dc.tradeMtx.Unlock()
 
 	// Send a low-priority notification.
 	details := fmt.Sprintf("%sing %.8f %s (%s)",
-		sellString(coreOrder.Sell), float64(coreOrder.Qty)/1e8, unbip(form.Base), tracker.token())
+		sellString(corder.Sell), float64(corder.Qty)/conversionFactor, unbip(form.Base), tracker.token())
 	if !form.IsLimit && !form.Sell {
 		details = fmt.Sprintf("selling %.8f %s (%s)",
-			float64(coreOrder.Qty)/1e8, unbip(form.Quote), tracker.token())
+			float64(corder.Qty)/conversionFactor, unbip(form.Quote), tracker.token())
 	}
-	c.notify(newOrderNote("Order placed", details, db.Poke, coreOrder))
+	c.notify(newOrderNote("Order placed", details, db.Poke, corder))
 
 	// Refresh the markets and user.
 	dc.refreshMarkets()
 	c.refreshUser()
 
-	return coreOrder, nil
+	return corder, nil
 }
 
 // walletSet is a pair of wallets with asset configurations identified in useful

@@ -19,6 +19,7 @@ func (c *Core) notify(n Notification) {
 		select {
 		case ch <- n:
 		default:
+			log.Errorf("blocking notification channel")
 		}
 	}
 	c.noteMtx.RUnlock()
@@ -60,7 +61,7 @@ type Notification interface {
 	// Severity is the notification severity.
 	Severity() db.Severity
 	// Time is the notification timestamp. The timestamp is set in
-	// db.NewNotification.
+	// db.NewNotification. Time is a UNIX timestamp, in milliseconds.
 	Time() uint64
 	// Acked is true if the user has seen the notification. Acknowledgement is
 	// recorded with (*Core).AckNotes.
