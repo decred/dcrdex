@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
@@ -48,14 +49,12 @@ var (
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
 	Balance(assetID uint32) (baseUnits uint64, err error)
-	Book(dex string, base, quote uint32) (orderBook *core.OrderBook)
 	PreRegister(*core.PreRegisterForm) (fee uint64, err error)
-	Sync(dex string, base, quote uint32) (updateChan chan *core.BookUpdate, err error)
+	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass string, form *core.WalletForm) error
 	InitializeClient(appPass string) error
 	OpenWallet(assetID uint32, pw string) error
-	Unsync(dex string, base, quote uint32)
 	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)
 	Register(registrationForm *core.Registration) error
@@ -65,64 +64,39 @@ type ClientCore interface {
 // manages a map of clients who are subscribed to the market, and distributes
 // order book updates when received.
 type marketSyncer struct {
-	mtx     sync.Mutex
-	core    ClientCore
-	dex     string
-	base    uint32
-	quote   uint32
-	clients map[int32]*wsClient
+	feed *core.BookFeed
+	cl   *wsClient
 }
 
 // newMarketSyncer is the constructor for a marketSyncer.
-func newMarketSyncer(ctx context.Context, wg *sync.WaitGroup, core ClientCore, dex string, base, quote uint32) (*marketSyncer, error) {
-	m := &marketSyncer{
-		core:    core,
-		dex:     dex,
-		base:    base,
-		quote:   quote,
-		clients: make(map[int32]*wsClient),
-	}
+func newMarketSyncer(ctx context.Context, cl *wsClient, feed *core.BookFeed) *dex.StartStopWaiter {
+	ssWaiter := dex.NewStartStopWaiter(&marketSyncer{
+		feed: feed,
+		cl:   cl,
+	})
+	ssWaiter.Start(ctx)
+	return ssWaiter
+}
 
-	// Get an updates channel, and begin syncing the book.
-	updates, err := core.Sync(dex, base, quote)
-	if err != nil {
-		return nil, err
-	}
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		log.Debugf("monitoring market %d-%d @ %s", base, quote, dex)
-	out:
-		for {
-			select {
-			case update := <-updates:
-				// Distribute the book to the subscribed clients.
-				log.Tracef("order book update received for " + update.Market)
-			case <-ctx.Done():
+func (m *marketSyncer) Run(ctx context.Context) {
+	defer m.feed.Close()
+out:
+	for {
+		select {
+		case update := <-m.feed.C:
+			note, err := msgjson.NewNotification(update.Action, update)
+			if err != nil {
+				log.Errorf("error encoding notification message: %v", err)
 				break out
 			}
+			err = m.cl.Send(note)
+			if err != nil {
+				log.Debug("send error. ending market feed")
+				break out
+			}
+		case <-ctx.Done():
+			break out
 		}
-	}()
-	return m, nil
-}
-
-// add adds a client to the client map, and returns a fresh orderbook.
-func (m *marketSyncer) add(cl *wsClient) *core.OrderBook {
-	m.mtx.Lock()
-	m.clients[cl.cid] = cl
-	m.mtx.Unlock()
-	return m.core.Book(m.dex, m.base, m.quote)
-}
-
-// remove removes a client from the client map. If this is the last client,
-// the market will be "unsynced".
-func (m *marketSyncer) remove(cl *wsClient) {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	delete(m.clients, cl.cid)
-	if len(m.clients) == 0 {
-		m.core.Unsync(m.dex, m.base, m.quote)
 	}
 }
 
@@ -324,27 +298,6 @@ func (s *RPCServer) Run(ctx context.Context) {
 	// Wait for market syncers to finish and Shutdown.
 	s.wg.Wait()
 	log.Infof("RPC server off")
-}
-
-// watchMarket watches the specified market for changes in orders. A fresh order
-// book and a quit function are returned on success. The quit function should be
-// called to unsubscribe the client from the market.
-func (s *RPCServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (book *core.OrderBook, quit func(), err error) {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	mktID := marketID(base, quote)
-	syncer, found := s.syncers[mktID]
-	if !found {
-		syncer, err = newMarketSyncer(s.ctx, &s.wg, s.core, dex, base, quote)
-		if err != nil {
-			return
-		}
-		s.syncers[mktID] = syncer
-	}
-	book = syncer.add(cl)
-	return book, func() {
-		syncer.remove(cl)
-	}, nil
 }
 
 // handleRequest sends the request to the correct handler function if able.

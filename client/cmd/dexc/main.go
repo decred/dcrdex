@@ -63,12 +63,11 @@ func main() {
 		os.Stdout.Write(msg)
 	}
 	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
-	log = logMaker.Logger("DEXC")
+	core.UseLoggerMaker(logMaker)
 
 	clientCore, err := core.New(&core.Config{
-		DBPath:      cfg.DBPath, // global set in config.go
-		LoggerMaker: logMaker,
-		Net:         cfg.Net,
+		DBPath: cfg.DBPath, // global set in config.go
+		Net:    cfg.Net,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating client core: %v\n", err)

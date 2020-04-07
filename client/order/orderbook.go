@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -45,6 +44,7 @@ type cachedOrderNote struct {
 
 // OrderBook represents a client tracked order book.
 type OrderBook struct {
+	seqMtx       sync.Mutex
 	seq          uint64
 	marketID     string
 	noteQueue    []*cachedOrderNote
@@ -79,6 +79,19 @@ func (ob *OrderBook) isSynced() bool {
 	ob.syncedMtx.Lock()
 	defer ob.syncedMtx.Unlock()
 	return ob.synced
+}
+
+// setSeq should be called whenever a sequenced message is received. If seq is
+// out of sequence, an error is logged.
+func (ob *OrderBook) setSeq(seq uint64) {
+	ob.seqMtx.Lock()
+	defer ob.seqMtx.Unlock()
+	if seq != ob.seq+1 {
+		log.Errorf("notification received out of sync. %d != %d - 1\n", ob.seq, seq)
+	}
+	if seq > ob.seq {
+		ob.seq = seq
+	}
 }
 
 // cacheOrderNote caches an order note.
@@ -150,7 +163,12 @@ func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 		return fmt.Errorf("order book is already synced")
 	}
 
-	atomic.StoreUint64(&ob.seq, snapshot.Seq)
+	// Don't use setSeq here, since this message is the seed and is not expected
+	// to be 1 more than the current seq value.
+	ob.seqMtx.Lock()
+	ob.seq = snapshot.Seq
+	ob.seqMtx.Unlock()
+
 	ob.marketID = snapshot.MarketID
 	ob.orders = make(map[order.OrderID]*Order)
 	ob.buys = NewBookSide(descending)
@@ -214,15 +232,7 @@ func (ob *OrderBook) book(note *msgjson.BookOrderNote, cached bool) error {
 		}
 	}
 
-	// Discard a note if the order book is synced past it.
-	if ob.seq > note.Seq {
-		return nil
-	}
-
-	seq := atomic.AddUint64(&ob.seq, 1)
-	if seq != note.Seq {
-		return fmt.Errorf("order book out of sync, %d < %d", seq, note.Seq)
-	}
+	ob.setSeq(note.Seq)
 
 	if len(note.OrderID) != order.OrderIDSize {
 		return fmt.Errorf("expected order id length of %d, got %d",
@@ -277,15 +287,7 @@ func (ob *OrderBook) unbook(note *msgjson.UnbookOrderNote, cached bool) error {
 		}
 	}
 
-	// Discard a note if the order book is synced past it.
-	if ob.seq > note.Seq {
-		return nil
-	}
-
-	seq := atomic.AddUint64(&ob.seq, 1)
-	if seq != note.Seq {
-		return fmt.Errorf("order book out of sync, %d < %d", seq, note.Seq)
-	}
+	ob.setSeq(note.Seq)
 
 	if len(note.OrderID) != order.OrderIDSize {
 		return fmt.Errorf("expected order id length of %d, got %d",
@@ -352,6 +354,12 @@ func (ob *OrderBook) BestNOrders(n int, side uint8) ([]*Order, bool, error) {
 	return orders, filled, nil
 }
 
+// Orders is the full order book, as slices of sorted buys and sells, and
+// unsorted epoch orders.
+func (ob *OrderBook) Orders() ([]*Order, []*Order, []*Order) {
+	return ob.buys.orders(), ob.sells.orders(), ob.epochQueue.Orders()
+}
+
 // BestFIll returns the best fill for a quantity from the provided side.
 func (ob *OrderBook) BestFill(qty uint64, side uint8) ([]*fill, error) {
 	if !ob.isSynced() {
@@ -378,6 +386,7 @@ func (ob *OrderBook) ResetEpoch() {
 
 // Enqueue appends the provided order note to the orderbook's epoch queue.
 func (ob *OrderBook) Enqueue(note *msgjson.EpochOrderNote) error {
+	ob.setSeq(note.Seq)
 	return ob.epochQueue.Enqueue(note)
 }
 
@@ -391,14 +400,12 @@ func (ob *OrderBook) IsEpochEntry(oid order.OrderID) bool {
 	return ob.epochQueue.Exists(oid)
 }
 
-// Epoch returns the current epoch being tracked.
-func (ob *OrderBook) Epoch() uint64 {
-	return ob.epochQueue.Epoch()
-}
-
 // ValidateMatchProof ensures the match proof data provided is correct by
 // comparing it to a locally generated proof from the same epoch queue.
 func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
+	if len(note.Preimages) == 0 {
+		return nil
+	}
 	pimgs := make([]order.Preimage, 0, len(note.Preimages))
 	for _, entry := range note.Preimages {
 		var pimg order.Preimage
@@ -413,7 +420,7 @@ func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
 		misses = append(misses, miss)
 	}
 
-	seed, csum, err := ob.epochQueue.GenerateMatchProof(pimgs, misses)
+	seed, csum, err := ob.epochQueue.GenerateMatchProof(note.Epoch, pimgs, misses)
 	if err != nil {
 		return fmt.Errorf("unable to generate match proof for epoch %d: %v",
 			note.Epoch, err)

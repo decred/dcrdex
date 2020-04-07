@@ -28,7 +28,10 @@ function forward (route, payload, handlers) {
     console.error(`websocket error (code ${err.code}): ${err.message}`)
     return
   }
-  if (typeof handlers[route] === 'undefined') return
+  if (typeof handlers[route] === 'undefined') {
+    // console.log(`unhandled message for ${route}: ${payload}`)
+    return
+  }
   // call each handler
   for (var i = 0; i < handlers[route].length; i++) {
     handlers[route][i](payload)

@@ -103,7 +103,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		latencyQ: latencyQ,
 		wallets:  wallets,
 		preImg:   preImg,
-		mktID:    mktID(ord.Base(), ord.Quote()),
+		mktID:    marketName(ord.Base(), ord.Quote()),
 		coins:    mapifyCoins(coins),
 		matches:  make(map[order.MatchID]*matchTracker),
 		notify:   notify,

@@ -14,7 +14,9 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,13 +24,19 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/slog"
 )
 
-var maxDelay = time.Second * 2
+var (
+	tCtx context.Context
+	maxDelay = time.Second * 2
+	epochDuration = time.Second * 120 // milliseconds
+	feedPeriod = time.Second * 10
+)
 
 func randomDelay() {
 	time.Sleep(time.Duration(rand.Float64() * float64(maxDelay)))
@@ -114,7 +122,37 @@ func mkDexAsset(symbol string) *dex.Asset {
 }
 
 func mkid(b, q uint32) string {
-	return fmt.Sprintf("%d-%d", b, q)
+	return unbip(b) + "_" + unbip(q)
+}
+
+func getEpoch() uint64 {
+	return encode.UnixMilliU(time.Now()) / uint64(epochDuration.Milliseconds())
+}
+
+func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *core.MiniOrder {
+	var epochIdx uint64
+	var rate float64
+	var limitRate = midGap - rand.Float64()*marketWidth
+	if sell {
+		limitRate = midGap + rand.Float64()*marketWidth
+	}
+	if epoch {
+		epochIdx = getEpoch()
+		// Epoch orders might be market orders.
+		if rand.Float32() < 0.5 {
+			rate = limitRate
+		}
+	} else {
+		rate = limitRate
+	}
+
+	return &core.MiniOrder{
+		Qty: math.Exp(-rand.Float64()*5) * maxQty,
+		Rate: rate,
+		Sell: sell,
+		Token: nextToken(),
+		Epoch: epochIdx,
+	}
 }
 
 var tExchanges = map[string]*core.Exchange{
@@ -187,6 +225,13 @@ type TCore struct {
 	mtx      sync.RWMutex
 	wallets  map[uint32]*tWalletState
 	balances map[uint32]uint64
+	midGap   float64
+	maxQty   float64
+	feed     *core.BookFeed
+	killFeed  context.CancelFunc
+	buys      map[string]*core.MiniOrder
+	sells     map[string]*core.MiniOrder
+	noteFeed  chan core.Notification
 }
 
 func newTCore() *TCore {
@@ -200,6 +245,7 @@ func newTCore() *TCore {
 			3:  uint64(randomMagnitude(7, 11)),
 			28: uint64(randomMagnitude(7, 11)),
 		},
+		noteFeed: make(chan core.Notification, 1),
 	}
 }
 
@@ -221,38 +267,105 @@ func (c *TCore) Register(r *core.Registration) error {
 }
 func (c *TCore) Login(string) ([]*db.Notification, error) { return nil, nil }
 
-func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
-	return make(chan *core.BookUpdate), nil
+func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
+	c.midGap = randomMagnitude(-2, 4)
+	c.maxQty = randomMagnitude(-2, 4)
+
+	if c.feed != nil {
+		c.killFeed()
+	}
+
+	c.feed = core.NewBookFeed(func(*core.BookFeed) {})
+	var ctx context.Context
+	ctx, c.killFeed = context.WithCancel(tCtx)
+	trySend := func(u *core.BookUpdate) {
+		select {
+		case c.feed.C <- u:
+		default:
+		}
+	}
+	go func(){
+		out:
+			for {
+				select{
+				case <-time.NewTicker(feedPeriod).C:
+					// Send a random order to the order feed. Slighly biased away from
+					// unbook_order and towards book_order.
+					r := rand.Float32()
+					switch{
+					case r < 0.33:
+						// Epoch order
+						trySend(&core.BookUpdate{
+							Action: msgjson.EpochOrderRoute,
+							Order: randomOrder(rand.Float32() < 0.5, c.maxQty, c.midGap, 0.05 * c.midGap, true),
+						})
+					case r < 0.76:
+						// Book order
+						sell := rand.Float32() < 0.5
+						ord := randomOrder(sell, c.maxQty, c.midGap, 0.05 * c.midGap, false)
+						side := c.buys
+						if sell{
+							side = c.sells
+						}
+						side[ord.Token] = ord
+						trySend(&core.BookUpdate{
+							Action: msgjson.BookOrderRoute,
+							Order: ord,
+						})
+					default:
+						// Unbook order
+						sell := rand.Float32() < 0.5
+						side := c.buys
+						if sell{
+							side = c.sells
+						}
+						var tkn string
+						for tkn = range side {
+							break
+						}
+						if (tkn == "") { continue }
+						delete(side, tkn)
+
+						trySend(&core.BookUpdate{
+							Action: msgjson.UnbookOrderRoute,
+							Order: &core.MiniOrder{Token: tkn},
+						})
+					}
+				case <-ctx.Done():
+					break out
+				}
+			}
+		}()
+	return c.book(), c.feed, nil
+}
+
+var numBuys = 80
+var numSells = 80
+var tokenCounter uint32
+
+func nextToken() string {
+	return strconv.Itoa(int(atomic.AddUint32(&tokenCounter, 1)))
 }
 
 // Book randomizes an order book.
-func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook {
-	midGap := randomMagnitude(-2, 4)
-	maxQty := randomMagnitude(-2, 4)
+func (c *TCore) book() *core.OrderBook {
+	midGap := c.midGap
+	maxQty := c.maxQty
 	// Set the market width to about 5% of midGap.
 	marketWidth := 0.05 * midGap
-	numPerSide := 80
-	sells := make([]*core.MiniOrder, 0, numPerSide)
-	buys := make([]*core.MiniOrder, 0, numPerSide)
-	for i := 0; i < numPerSide; i++ {
-		// For sells the rate must be larger than midGap.
-		rate := midGap + rand.Float64()*marketWidth
-		sells = append(sells, &core.MiniOrder{
-			Rate: rate,
-			// Find a random quantity on an exponential curve with a minimum of
-			// e^-5 * maxQty ~= .0067 * maxQty
-			Qty:   math.Exp(-rand.Float64()*5) * maxQty,
-			Epoch: rand.Float32() > 0.8, // 1 in 5 are epoch orders.
-		})
+	var buys, sells []*core.MiniOrder
+	c.buys = make(map[string]*core.MiniOrder, numBuys)
+	c.sells = make(map[string]*core.MiniOrder, numSells)
+	for i := 0; i < numSells; i++ {
+		ord := randomOrder(true, maxQty, midGap, marketWidth, false)
+		sells = append(sells, ord)
+		c.sells[ord.Token] = ord
 	}
-	for i := 0; i < numPerSide; i++ {
+	for i := 0; i < numBuys; i++ {
 		// For buys the rate must be smaller than midGap.
-		rate := midGap - rand.Float64()*marketWidth
-		buys = append(buys, &core.MiniOrder{
-			Rate:  rate,
-			Qty:   math.Exp(-rand.Float64()*5) * maxQty,
-			Epoch: rand.Float32() > 0.8, // 1 in 5 are epoch orders.
-		})
+		ord := randomOrder(false, maxQty, midGap, marketWidth, false)
+		buys = append(buys, ord)
+		c.buys[ord.Token] = ord
 	}
 	sort.Slice(buys, func(i, j int) bool { return buys[i].Rate > buys[j].Rate })
 	sort.Slice(sells, func(i, j int) bool { return sells[i].Rate < sells[j].Rate })
@@ -262,7 +375,11 @@ func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook {
 	}
 }
 
-func (c *TCore) Unsync(dex string, base, quote uint32) {}
+func (c *TCore) Unsync(dex string, base, quote uint32) {
+	if c.feed != nil {
+		c.killFeed()
+	}
+}
 
 func (c *TCore) Balance(uint32) (uint64, error) {
 	return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6)), nil
@@ -443,18 +560,49 @@ func (c *TCore) Cancel(pw string, sid string) error {
 	return nil
 }
 
-func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
+func (c *TCore) NotificationFeed() <-chan core.Notification { return c.noteFeed }
+
+func (c *TCore) runEpochs() {
+	epochTick := time.NewTimer(time.Second).C
+out:
+	for {
+		select{
+		case <-epochTick:
+			epochTick = time.NewTimer(epochDuration - time.Since(time.Now().Truncate(epochDuration))).C
+			c.noteFeed <- &core.EpochNotification{
+				Notification: db.NewNotification("epoch", "", "", db.Data),
+				Epoch:        getEpoch(),
+			}
+		case <-tCtx.Done():
+			break out
+		}
+	}
+}
 
 func TestServer(t *testing.T) {
-	ctx, shutdown := context.WithCancel(context.Background())
+	numBuys = 0
+	numSells = 0
+	feedPeriod = 5000 * time.Millisecond
+	register := true
+
+	var shutdown context.CancelFunc
+	tCtx, shutdown = context.WithCancel(context.Background())
 	time.AfterFunc(time.Minute*59, func() { shutdown() })
 	logger := slog.NewBackend(os.Stdout).Logger("TEST")
 	logger.SetLevel(slog.LevelTrace)
 	time.AfterFunc(time.Minute*60, func() { shutdown() })
-	s, err := New(newTCore(), ":54321", logger, true)
+	tCore := newTCore()
+
+	if register {
+		tCore.InitializeClient("")
+		tCore.Register(new(core.Registration))
+	}
+
+	s, err := New(tCore, ":54321", logger, true)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
-	go s.Run(ctx)
-	<-ctx.Done()
+	go s.Run(tCtx)
+	go tCore.runEpochs()
+	<-tCtx.Done()
 }

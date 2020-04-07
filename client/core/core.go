@@ -18,7 +18,6 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/db/bolt"
-	book "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
@@ -36,7 +35,6 @@ const (
 
 var (
 	// log is a logger generated with the LogMaker provided with Config.
-	log            dex.Logger
 	unbip          = dex.BipIDSymbol
 	aYear          = time.Hour * 24 * 365
 	requestTimeout = 10 * time.Second
@@ -54,7 +52,7 @@ type dexConnection struct {
 	notify     func(Notification)
 
 	booksMtx sync.RWMutex
-	books    map[string]*book.OrderBook
+	books    map[string]*bookie
 
 	marketMtx sync.RWMutex
 	marketMap map[string]*Market
@@ -84,7 +82,7 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 			StartEpoch:      mkt.StartEpoch,
 			MarketBuyBuffer: mkt.MarketBuyBuffer,
 		}
-		mid := market.mktID()
+		mid := market.marketName()
 		dc.tradeMtx.RLock()
 		for _, trade := range dc.trades {
 			if trade.mktID == mid {
@@ -93,7 +91,7 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 			}
 		}
 		dc.tradeMtx.RUnlock()
-		marketMap[market.mktID()] = market
+		marketMap[market.marketName()] = market
 	}
 	dc.marketMtx.Lock()
 	dc.marketMap = marketMap
@@ -315,9 +313,6 @@ type Config struct {
 	// DBPath is a filepath to use for the client database. If the database does
 	// not already exist, it will be created.
 	DBPath string
-	// LoggerMaker is a LoggerMaker for the core to use. Having the logger as an
-	// argument enables creating custom loggers for use in a GUI interface.
-	LoggerMaker *dex.LoggerMaker
 	// Net is the current network.
 	Net dex.Network
 }
@@ -331,7 +326,6 @@ type Core struct {
 	pendingTimer  *time.Timer
 	pendingReg    *dexConnection
 	db            db.DB
-	loggerMaker   *dex.LoggerMaker
 	net           dex.Network
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
 	newCrypter    func(string) encrypt.Crypter
@@ -352,11 +346,13 @@ type Core struct {
 
 	noteMtx   sync.RWMutex
 	noteChans []chan Notification
+
+	epochMtx sync.RWMutex
+	epoch    uint64
 }
 
 // New is the constructor for a new Core.
 func New(cfg *Config) (*Core, error) {
-	log = cfg.LoggerMaker.Logger("CORE")
 	db, err := bolt.NewDB(cfg.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("database initialization error: %v", err)
@@ -367,7 +363,6 @@ func New(cfg *Config) (*Core, error) {
 		conns:        make(map[string]*dexConnection),
 		wallets:      make(map[uint32]*xcWallet),
 		net:          cfg.Net,
-		loggerMaker:  cfg.LoggerMaker,
 		blockWaiters: make(map[uint64]*blockWaiter),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
@@ -612,7 +607,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			c.tipChange(dbWallet.AssetID, err)
 		},
 	}
-	logger := c.loggerMaker.SubLogger("CORE", unbip(dbWallet.AssetID))
+	logger := loggerMaker.SubLogger("CORE", unbip(dbWallet.AssetID))
 	w, err := asset.Setup(dbWallet.AssetID, walletCfg, logger, c.net)
 	if err != nil {
 		return nil, fmt.Errorf("error creating wallet: %v", err)
@@ -1227,7 +1222,6 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 		ClientTime: time.Now(),
 		Commit:     preImg.Commit(),
 	}
-
 	var ord order.Order
 	if form.IsLimit {
 		prefix.OrderType = order.LimitOrderType
@@ -1521,16 +1515,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 	return nil
 }
-
-func (c *Core) Sync(dex string, base, quote uint32) (chan *BookUpdate, error) {
-	return make(chan *BookUpdate), nil
-}
-
-func (c *Core) Book(dex string, base, quote uint32) *OrderBook {
-	return nil
-}
-
-func (c *Core) Unsync(dex string, base, quote uint32) {}
 
 // Balance retrieves the current wallet balance.
 func (c *Core) Balance(assetID uint32) (uint64, error) {
@@ -2026,7 +2010,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 			connMaster: connMaster,
 			assets:     assets,
 			cfg:        dexCfg,
-			books:      make(map[string]*book.OrderBook),
+			books:      make(map[string]*bookie),
 			acct:       newDEXAccount(acctInfo),
 			marketMap:  marketMap,
 			trades:     make(map[order.OrderID]*trackedTrade),
@@ -2049,127 +2033,47 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	return <-connChan, reqErr
 }
 
+// If the passed epoch is greater than the highest previously passed epoch,
+// send an epoch notification to all subscribers.
+func (c *Core) setEpoch(epochIdx uint64) {
+	c.epochMtx.Lock()
+	defer c.epochMtx.Unlock()
+	if epochIdx > c.epoch {
+		c.epoch = epochIdx
+		c.notify(newEpochNotification(epochIdx))
+	}
+}
+
 // handleReconnect is called when a WsConn indicates that a lost connection has
 // been re-established.
 func (c *Core) handleReconnect(uri string) {
 	log.Infof("DEX at %s has reconnected", uri)
 }
 
-// handleOrderBookMsg is called when an orderbook response is received.
-func handleOrderBookMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
-	snapshot := new(msgjson.OrderBook)
-	err := msg.UnmarshalResult(snapshot)
-	if err != nil {
-		return err
-	}
-
-	if snapshot.MarketID == "" {
-		return fmt.Errorf("snapshot market id cannot be an empty string")
-	}
-
-	ob := book.NewOrderBook()
-	err = ob.Sync(snapshot)
-	if err != nil {
-		return err
-	}
-
-	dc.booksMtx.Lock()
-	dc.books[snapshot.MarketID] = ob
-	dc.booksMtx.Unlock()
-
-	return nil
-}
-
-// handleBookOrderMsg is called when a book_order notification is received.
-func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
-	var note msgjson.BookOrderNote
-	err := msg.Unmarshal(&note)
-	if err != nil {
-		return fmt.Errorf("book order note unmarshal error: %v", err)
-	}
-
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	ob, ok := dc.books[note.MarketID]
-	if !ok {
-		return fmt.Errorf("no order book found with market id '%v'",
-			note.MarketID)
-	}
-
-	return ob.Book(&note)
-}
-
-// handleUnbookOrderMsg is called when an unbook_order notification is
-// received.
-func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
-	var note msgjson.UnbookOrderNote
-	err := msg.Unmarshal(&note)
-	if err != nil {
-		return fmt.Errorf("unbook order note unmarshal error: %v", err)
-	}
-
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	ob, ok := dc.books[note.MarketID]
-	if !ok {
-		return fmt.Errorf("no order book found with market id %q",
-			note.MarketID)
-	}
-
-	return ob.Unbook(&note)
-}
-
-// handleEpochOrderMsg is called when an epoch_order notification is
-// received.
-func handleEpochOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
-	var note msgjson.EpochOrderNote
-	err := msg.Unmarshal(&note)
-	if err != nil {
-		return fmt.Errorf("epoch order note unmarshal error: %v", err)
-	}
-
-	dc.booksMtx.RLock()
-	defer dc.booksMtx.RUnlock()
-
-	ob, ok := dc.books[note.MarketID]
-	if !ok {
-		return fmt.Errorf("no order book found with market id %q",
-			note.MarketID)
-	}
-
-	// Reset an initialized queue if a new order with a different epoch is
-	// received.
-	epoch := ob.Epoch()
-	if epoch != note.Epoch && epoch != 0 {
-		ob.ResetEpoch()
-	}
-
-	return ob.Enqueue(&note)
-}
-
 // handleMatchProofMsg is called when a match_proof notification is received.
-func handleMatchProofMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var note msgjson.MatchProofNote
 	err := msg.Unmarshal(&note)
 	if err != nil {
 		return fmt.Errorf("match proof note unmarshal error: %v", err)
 	}
 
+	// Expire the epoch
+	c.setEpoch(note.Epoch + 1)
+
 	dc.booksMtx.RLock()
 	defer dc.booksMtx.RUnlock()
 
-	ob, ok := dc.books[note.MarketID]
+	book, ok := dc.books[note.MarketID]
 	if !ok {
 		return fmt.Errorf("no order book found with market id %q",
 			note.MarketID)
 	}
 
 	// Reset the epoch queue after processing the match proof message.
-	defer ob.ResetEpoch()
+	defer book.ResetEpoch()
 
-	return ob.ValidateMatchProof(note)
+	return book.ValidateMatchProof(note)
 }
 
 // handleRevokeMatchMsg is called when a revoke_match message is received.
@@ -2202,7 +2106,6 @@ func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
 var reqHandlers = map[string]routeHandler{
-	msgjson.MatchProofRoute:  handleMatchProofMsg,
 	msgjson.PreimageRoute:    handlePreimageRequest,
 	msgjson.MatchRoute:       handleMatchRoute,
 	msgjson.AuditRoute:       handleAuditRoute,
@@ -2212,13 +2115,10 @@ var reqHandlers = map[string]routeHandler{
 }
 
 var noteHandlers = map[string]routeHandler{
+	msgjson.MatchProofRoute:  handleMatchProofMsg,
 	msgjson.BookOrderRoute:   handleBookOrderMsg,
 	msgjson.EpochOrderRoute:  handleEpochOrderMsg,
 	msgjson.UnbookOrderRoute: handleUnbookOrderMsg,
-}
-
-var respHandlers = map[string]routeHandler{
-	msgjson.OrderBookRoute: handleOrderBookMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -2254,7 +2154,7 @@ out:
 			case msgjson.Notification:
 				handler, found = noteHandlers[msg.Route]
 			case msgjson.Response:
-				handler, found = respHandlers[msg.Route]
+				log.Errorf("A response was received in the message queue: %s", msg)
 			default:
 				log.Errorf("invalid message type %d from MessageSource", msg.Type)
 				continue

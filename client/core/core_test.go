@@ -17,7 +17,6 @@ import (
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
-	book "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/dex/calc"
@@ -157,7 +156,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			tDCR.ID: tDCR,
 			tBTC.ID: tBTC,
 		},
-		books: make(map[string]*book.OrderBook),
+		books: make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
 			BroadcastTimeout: 5 * 60 * 1000,
@@ -573,10 +572,6 @@ func newTestRig() *testRig {
 			conns: map[string]*dexConnection{
 				tDexUrl: dc,
 			},
-			loggerMaker: &dex.LoggerMaker{
-				Backend:      slog.NewBackend(os.Stdout),
-				DefaultLevel: slog.LevelTrace,
-			},
 			wallets:      make(map[uint32]*xcWallet),
 			blockWaiters: make(map[uint64]*blockWaiter),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
@@ -599,7 +594,10 @@ func tMarketID(base, quote uint32) string {
 }
 
 func TestMain(m *testing.M) {
-	log = slog.NewBackend(os.Stdout).Logger("TEST")
+	UseLoggerMaker(&dex.LoggerMaker{
+		Backend:      slog.NewBackend(os.Stdout),
+		DefaultLevel: slog.LevelTrace,
+	})
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tDexPriv, _ = secp256k1.GeneratePrivateKey()
@@ -622,7 +620,7 @@ func TestMarkets(t *testing.T) {
 	marketIDs := make(map[string]struct{})
 	for i := 0; i < 10; i++ {
 		base, quote := randomMsgMarket()
-		marketIDs[mktID(base.ID, quote.ID)] = struct{}{}
+		marketIDs[marketName(base.ID, quote.ID)] = struct{}{}
 		cfg := rig.dc.cfg
 		cfg.Markets = append(cfg.Markets, msgjson.Market{
 			Name:            base.Symbol + quote.Symbol,
@@ -644,7 +642,7 @@ func TestMarkets(t *testing.T) {
 	assets := rig.dc.assets
 	for _, xc := range xcs {
 		for _, market := range xc.Markets {
-			mkt := mktID(market.BaseID, market.QuoteID)
+			mkt := marketName(market.BaseID, market.QuoteID)
 			_, found := marketIDs[mkt]
 			if !found {
 				t.Fatalf("market %s not found", mkt)
@@ -660,21 +658,16 @@ func TestMarkets(t *testing.T) {
 }
 
 func TestDexConnectionOrderBook(t *testing.T) {
-	tCore := newTestRig().core
-	mid := "ob"
-	dc := &dexConnection{
-		books:  make(map[string]*book.OrderBook),
-		notify: func(Notification) {},
-	}
+	rig := newTestRig()
+	tCore := rig.core
+	mid := marketName(tDCR.ID, tBTC.ID)
+	dc := rig.dc
 
 	// Ensure handleOrderBookMsg creates an order book as expected.
-	oid, err := hex.DecodeString("1d6c8998e93898f872fa43f35ede17c3196c6a1a2054cb8d91f2e184e8ca0316")
-	if err != nil {
-		t.Fatalf("[DecodeString]: unexpected err: %v", err)
-	}
-	msg, err := msgjson.NewResponse(1, &msgjson.OrderBook{
+	oid1 := ordertest.RandomOrderID()
+	bookMsg, err := msgjson.NewResponse(1, &msgjson.OrderBook{
 		Seq:      1,
-		MarketID: "ob",
+		MarketID: mid,
 		Orders: []*msgjson.BookOrderNote{
 			{
 				TradeNote: msgjson.TradeNote{
@@ -685,7 +678,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 				OrderNote: msgjson.OrderNote{
 					Seq:      1,
 					MarketID: mid,
-					OrderID:  oid,
+					OrderID:  oid1[:],
 				},
 			},
 		},
@@ -694,73 +687,140 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		t.Fatalf("[NewResponse]: unexpected err: %v", err)
 	}
 
-	err = handleOrderBookMsg(tCore, dc, msg)
-	if err != nil {
-		t.Fatalf("[handleOrderBookMsg]: unexpected err: %v", err)
-	}
-	if len(dc.books) != 1 {
-		t.Fatalf("expected %v order book created, got %v", 1, len(dc.books))
-	}
-	_, ok := dc.books[mid]
-	if !ok {
-		t.Fatalf("expected order book with market id %s", mid)
-	}
-
-	// Ensure handleBookOrderMsg creates a book order for the associated
-	// order book as expected.
-	oid, err = hex.DecodeString("d445ab685f5cf54dfebdaa05232892b4cfa453a566b5e85f62627dd6834c5c02")
-	if err != nil {
-		t.Fatalf("[DecodeString]: unexpected err: %v", err)
-	}
-	bookSeq := uint64(2)
-	msg, err = msgjson.NewNotification(msgjson.BookOrderRoute, &msgjson.BookOrderNote{
+	oid2 := ordertest.RandomOrderID()
+	bookNote, _ := msgjson.NewNotification(msgjson.BookOrderRoute, &msgjson.BookOrderNote{
 		TradeNote: msgjson.TradeNote{
 			Side:     msgjson.BuyOrderNum,
 			Quantity: 10,
 			Rate:     2,
 		},
 		OrderNote: msgjson.OrderNote{
-			Seq:      bookSeq,
+			Seq:      2,
 			MarketID: mid,
-			OrderID:  oid,
+			OrderID:  oid2[:],
 		},
 	})
-	if err != nil {
-		t.Fatalf("[NewNotification]: unexpected err: %v", err)
+
+	err = handleBookOrderMsg(tCore, dc, bookNote)
+	if err == nil {
+		t.Fatalf("no error for missing book")
 	}
 
-	err = handleBookOrderMsg(tCore, dc, msg)
+	// Sync to unknown dex
+	_, _, err = tCore.Sync("unknown dex", tDCR.ID, tBTC.ID)
+	if err == nil {
+		t.Fatalf("no error for unknown dex")
+	}
+	_, _, err = tCore.Sync(tDexUrl, tDCR.ID, 12345)
+	if err == nil {
+		t.Fatalf("no error for nonsense market")
+	}
+
+	// Success
+	rig.ws.queueResponse(msgjson.OrderBookRoute, func(msg *msgjson.Message, f msgFunc) error {
+		f(bookMsg)
+		return nil
+	})
+	_, feed1, err := tCore.Sync(tDexUrl, tDCR.ID, tBTC.ID)
+	if err != nil {
+		t.Fatalf("Sync 1 error: %v", err)
+	}
+	_, feed2, err := tCore.Sync(tDexUrl, tDCR.ID, tBTC.ID)
+	if err != nil {
+		t.Fatalf("Sync 2 error: %v", err)
+	}
+
+	// Should be able to retrieve the book now.
+	book, err := tCore.Book(tDexUrl, tDCR.ID, tBTC.ID)
+	if err != nil {
+		t.Fatalf("Core.Book error: %v", err)
+	}
+	// Should have one buy order
+	if len(book.Buys) != 1 {
+		t.Fatalf("no buy orders found. expected 1")
+	}
+
+	err = handleBookOrderMsg(tCore, dc, bookNote)
 	if err != nil {
 		t.Fatalf("[handleBookOrderMsg]: unexpected err: %v", err)
 	}
-	_, ok = dc.books[mid]
-	if !ok {
-		t.Fatalf("expected order book with market id %s", mid)
+
+	// Both channels should have an update.
+	select {
+	case <-feed1.C:
+	default:
+		t.Fatalf("no update received on feed 1")
+	}
+	select {
+	case <-feed2.C:
+	default:
+		t.Fatalf("no update received on feed 2")
+	}
+
+	// Close feed 1
+	feed1.Close()
+
+	oid3 := ordertest.RandomOrderID()
+	bookNote, _ = msgjson.NewNotification(msgjson.BookOrderRoute, &msgjson.BookOrderNote{
+		TradeNote: msgjson.TradeNote{
+			Side:     msgjson.SellOrderNum,
+			Quantity: 10,
+			Rate:     3,
+		},
+		OrderNote: msgjson.OrderNote{
+			Seq:      3,
+			MarketID: mid,
+			OrderID:  oid3[:],
+		},
+	})
+	err = handleBookOrderMsg(tCore, dc, bookNote)
+	if err != nil {
+		t.Fatalf("[handleBookOrderMsg]: unexpected err: %v", err)
+	}
+
+	// feed1 should have no update
+	select {
+	case <-feed1.C:
+		t.Fatalf("update for feed 1 after Close")
+	default:
+	}
+	// feed2 should though
+	select {
+	case <-feed2.C:
+	default:
+		t.Fatalf("no update received on feed 2")
+	}
+
+	// Make sure the book has been updated.
+	book, _ = tCore.Book(tDexUrl, tDCR.ID, tBTC.ID)
+	if len(book.Buys) != 2 {
+		t.Fatalf("expected 2 buys, got %d", len(book.Buys))
+	}
+	if len(book.Sells) != 1 {
+		t.Fatalf("expected 1 sell, got %d", len(book.Sells))
 	}
 
 	// Ensure handleUnbookOrderMsg removes a book order from an associated
 	// order book as expected.
-	oid, err = hex.DecodeString("d445ab685f5cf54dfebdaa05232892b4cfa453a566b5e85f62627dd6834c5c02")
-	if err != nil {
-		t.Fatalf("[DecodeString]: unexpected err: %v", err)
-	}
-	unbookSeq := uint64(3)
-	msg, err = msgjson.NewNotification(msgjson.UnbookOrderRoute, &msgjson.UnbookOrderNote{
-		Seq:      unbookSeq,
+	unbookNote, _ := msgjson.NewNotification(msgjson.UnbookOrderRoute, &msgjson.UnbookOrderNote{
+		Seq:      4,
 		MarketID: mid,
-		OrderID:  oid,
+		OrderID:  oid1[:],
 	})
-	if err != nil {
-		t.Fatalf("[NewNotification]: unexpected err: %v", err)
-	}
 
-	err = handleUnbookOrderMsg(tCore, dc, msg)
+	err = handleUnbookOrderMsg(tCore, dc, unbookNote)
 	if err != nil {
 		t.Fatalf("[handleUnbookOrderMsg]: unexpected err: %v", err)
 	}
-	_, ok = dc.books[mid]
-	if !ok {
-		t.Fatalf("expected order book with market id %s", mid)
+	// feed2 should have a notification.
+	select {
+	case <-feed2.C:
+	default:
+		t.Fatalf("no update received on feed 2")
+	}
+	book, _ = tCore.Book(tDexUrl, tDCR.ID, tBTC.ID)
+	if len(book.Buys) != 1 {
+		t.Fatalf("expected 1 buy after unbook_order, got %d", len(book.Buys))
 	}
 }
 
@@ -1358,8 +1418,8 @@ func TestTrade(t *testing.T) {
 	}
 	tBtcWallet.fundCoins = asset.Coins{btcCoin}
 
-	orderBook := book.NewOrderBook()
-	rig.dc.books[tDcrBtcMktName] = orderBook
+	book := newBookie(func() {})
+	rig.dc.books[tDcrBtcMktName] = book
 
 	msgOrderNote := &msgjson.BookOrderNote{
 		OrderNote: msgjson.OrderNote{
@@ -1373,7 +1433,7 @@ func TestTrade(t *testing.T) {
 		},
 	}
 
-	err := orderBook.Sync(&msgjson.OrderBook{
+	err := book.Sync(&msgjson.OrderBook{
 		MarketID: tDcrBtcMktName,
 		Seq:      1,
 		Epoch:    1,
@@ -2478,26 +2538,11 @@ func TestHandleEpochOrderMsg(t *testing.T) {
 		t.Fatal("[handleEpochOrderMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[mid] = book.NewOrderBook()
+	rig.dc.books[mid] = newBookie(func() {})
 
 	err = handleEpochOrderMsg(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("[handleEpochOrderMsg] unexpected error: %v", err)
-	}
-
-	payload.Epoch = 2
-	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.EpochOrderRoute, payload)
-
-	// Ensure receiving an epoch order with a different epoch resets the queue.
-	err = handleEpochOrderMsg(rig.core, rig.dc, req)
-	if err != nil {
-		t.Fatalf("[handleEpochOrderMsg] unexpected error: %v", err)
-	}
-
-	epochSize := rig.dc.books[mid].EpochSize()
-	if epochSize != 1 {
-		t.Fatalf("[handleEpochOrderMsg] expected an epoch size of 1, got %d",
-			epochSize)
 	}
 }
 
@@ -2556,7 +2601,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 		t.Fatal("[handleMatchProofMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[mid] = book.NewOrderBook()
+	rig.dc.books[mid] = newBookie(func() {})
 
 	err = rig.dc.books[mid].Enqueue(eo)
 	if err != nil {

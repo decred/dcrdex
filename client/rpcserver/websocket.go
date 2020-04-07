@@ -36,9 +36,9 @@ var (
 
 type wsClient struct {
 	*ws.WSLink
-	mtx  sync.Mutex
-	cid  int32
-	quit func()
+	mtx      sync.Mutex
+	cid      int32
+	feedLoop *dex.StartStopWaiter
 }
 
 func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error) *wsClient {
@@ -84,8 +84,8 @@ func (s *RPCServer) websocketHandler(conn ws.Connection, ip string) {
 	s.mtx.Unlock()
 	defer func() {
 		cl.mtx.Lock()
-		if cl.quit != nil {
-			cl.quit()
+		if cl.feedLoop != nil {
+			cl.feedLoop.Stop()
 		}
 		cl.mtx.Unlock()
 		s.mtx.Lock()
@@ -193,47 +193,26 @@ func wsLoadMarket(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
-	base, quote := market.Base, market.Quote
-	baseBalance, err := s.core.Balance(base)
-	if err != nil {
-		errMsg := fmt.Sprintf("unable to get balance for %s", unbip(base))
-		log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.RPCInternal, errMsg+": "+err.Error())
-	}
-	quoteBalance, err := s.core.Balance(quote)
-	if err != nil {
-		errMsg := fmt.Sprintf("unable to get balance for %s", unbip(quote))
-		log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.RPCInternal, errMsg+": "+err.Error())
-	}
 
-	// Switch current market.
-	book, quit, err := s.watchMarket(cl, market.DEX, market.Base, market.Quote)
+	book, feed, err := s.core.Sync(market.DEX, market.Base, market.Quote)
 	if err != nil {
-		errMsg := fmt.Sprintf("error watching market %s-%s @ %s",
-			unbip(market.Base), unbip(market.Quote), market.DEX)
-		log.Errorf(errMsg + ": " + err.Error())
+		errMsg := fmt.Sprintf("error getting order feed: %v", err)
+		log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
 	cl.mtx.Lock()
-	if cl.quit != nil {
-		cl.quit()
+	if cl.feedLoop != nil {
+		cl.feedLoop.Stop()
 	}
-	cl.quit = quit
+	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed)
 	cl.mtx.Unlock()
 
 	note, err := msgjson.NewNotification("book", &marketResponse{
-		Book:         book,
-		DEX:          market.DEX,
-		Base:         base,
-		BaseSymbol:   unbip(base),
-		Quote:        quote,
-		QuoteSymbol:  unbip(quote),
-		BaseBalance:  baseBalance,
-		QuoteBalance: quoteBalance,
+		Book:  book,
+		Base:  market.Base,
+		Quote: market.Quote,
 	})
-
 	if err != nil {
 		log.Errorf("error encoding loadmarkets response: %v", err)
 		return msgjson.NewError(msgjson.RPCInternal, "error encoding order book: "+err.Error())
@@ -248,9 +227,9 @@ func wsLoadMarket(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 func wsUnmarket(_ *RPCServer, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 	cl.mtx.Lock()
 	defer cl.mtx.Unlock()
-	if cl.quit != nil {
-		cl.quit()
-		cl.quit = nil
+	if cl.feedLoop != nil {
+		cl.feedLoop.Stop()
+		cl.feedLoop = nil
 	}
 	return nil
 }

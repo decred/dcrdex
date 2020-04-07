@@ -34,9 +34,9 @@ var (
 
 type wsClient struct {
 	*ws.WSLink
-	mtx  sync.RWMutex
-	cid  int32
-	quit func()
+	mtx      sync.RWMutex
+	cid      int32
+	feedLoop *dex.StartStopWaiter
 }
 
 func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error) *wsClient {
@@ -82,8 +82,8 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 	s.mtx.Unlock()
 	defer func() {
 		cl.mtx.Lock()
-		if cl.quit != nil {
-			cl.quit()
+		if cl.feedLoop != nil {
+			cl.feedLoop.Stop()
 		}
 		cl.mtx.Unlock()
 
@@ -165,20 +165,19 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
-	// Switch current market.
-	book, quit, err := s.watchMarket(cl, market.DEX, market.Base, market.Quote)
+
+	book, feed, err := s.core.Sync(market.DEX, market.Base, market.Quote)
 	if err != nil {
-		errMsg := fmt.Sprintf("error watching market %s-%s @ %s",
-			unbip(market.Base), unbip(market.Quote), market.DEX)
-		log.Errorf(errMsg + ": " + err.Error())
+		errMsg := fmt.Sprintf("error getting order feed: %v", err)
+		log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
 	cl.mtx.Lock()
-	if cl.quit != nil {
-		cl.quit()
+	if cl.feedLoop != nil {
+		cl.feedLoop.Stop()
 	}
-	cl.quit = quit
+	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed)
 	cl.mtx.Unlock()
 
 	note, err := msgjson.NewNotification("book", &marketResponse{
@@ -186,7 +185,6 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		Base:  market.Base,
 		Quote: market.Quote,
 	})
-
 	if err != nil {
 		log.Errorf("error encoding loadmarkets response: %v", err)
 		return msgjson.NewError(msgjson.RPCInternal, "error encoding order book: "+err.Error())
@@ -201,9 +199,9 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 func wsUnmarket(_ *WebServer, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 	cl.mtx.Lock()
 	defer cl.mtx.Unlock()
-	if cl.quit != nil {
-		cl.quit()
-		cl.quit = nil
+	if cl.feedLoop != nil {
+		cl.feedLoop.Stop()
+		cl.feedLoop = nil
 	}
 	return nil
 }
