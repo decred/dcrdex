@@ -177,7 +177,7 @@ func TestHandlePreRegister(t *testing.T) {
 		arg:            "dex",
 		preRegisterFee: 5,
 		preRegisterErr: errors.New("error"),
-		wantErrCode:    msgjson.RPCErrorUnspecified,
+		wantErrCode:    msgjson.RPCPreRegisterError,
 	}}
 	for _, test := range tests {
 		msg := new(msgjson.Message)
@@ -221,7 +221,7 @@ func TestHandleInit(t *testing.T) {
 		name:                "core.InitializeClient error",
 		arg:                 "password123",
 		initializeClientErr: errors.New("error"),
-		wantErrCode:         msgjson.RPCErrorUnspecified,
+		wantErrCode:         msgjson.RPCInitError,
 	}}
 	for _, test := range tests {
 		msg := new(msgjson.Message)
@@ -255,19 +255,15 @@ func TestHandleNewWallet(t *testing.T) {
 		createWalletErr error
 		openWalletErr   error
 		wantErrCode     int
-		wantIsLocked    bool
-		wantIsNew       bool
 	}{{
 		name:        "ok new wallet",
 		arg:         nwf,
 		wantErrCode: -1,
-		wantIsNew:   true,
 	}, {
-		name:         "ok existing wallet",
-		arg:          nwf,
-		walletState:  &core.WalletState{Open: false},
-		wantErrCode:  -1,
-		wantIsLocked: true,
+		name:        "ok existing wallet",
+		arg:         nwf,
+		walletState: &core.WalletState{Open: false},
+		wantErrCode: msgjson.RPCWalletExistsError,
 	}, {
 		name:        "argument wrong type",
 		arg:         42,
@@ -276,12 +272,12 @@ func TestHandleNewWallet(t *testing.T) {
 		name:            "core.CreateWallet error",
 		arg:             nwf,
 		createWalletErr: errors.New("error"),
-		wantErrCode:     msgjson.RPCErrorUnspecified,
+		wantErrCode:     msgjson.RPCCreateWalletError,
 	}, {
 		name:          "core.OpenWallet error",
 		arg:           nwf,
 		openWalletErr: errors.New("error"),
-		wantErrCode:   msgjson.RPCErrorUnspecified,
+		wantErrCode:   msgjson.RPCOpenWalletError,
 	}}
 	for _, test := range tests {
 		msg := new(msgjson.Message)
@@ -297,19 +293,9 @@ func TestHandleNewWallet(t *testing.T) {
 		}
 		r := &RPCServer{core: tc}
 		payload := handleNewWallet(r, msg)
-		res := new(newWalletResponse)
-		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
-		}
-		if test.wantErrCode == -1 {
-			if res.IsLocked != test.wantIsLocked {
-				t.Fatalf("wanted isLocked %v but got %v for test %s",
-					test.wantIsLocked, res.IsLocked, test.name)
-			}
-			if res.IsNew != test.wantIsNew {
-				t.Fatalf("wanted isNew %v but got %v for test %s",
-					test.wantIsNew, res.IsNew, test.name)
-			}
 		}
 	}
 }
@@ -336,7 +322,7 @@ func TestHandleOpenWallet(t *testing.T) {
 		name:          "core.OpenWallet error",
 		arg:           owf,
 		openWalletErr: errors.New("error"),
-		wantErrCode:   msgjson.RPCErrorUnspecified,
+		wantErrCode:   msgjson.RPCOpenWalletError,
 	}}
 	for _, test := range tests {
 		msg := new(msgjson.Message)
@@ -373,7 +359,7 @@ func TestHandleCloseWallet(t *testing.T) {
 		name:           "core.closeWallet error",
 		arg:            42,
 		closeWalletErr: errors.New("error"),
-		wantErrCode:    msgjson.RPCErrorUnspecified,
+		wantErrCode:    msgjson.RPCCloseWalletError,
 	}}
 	for _, test := range tests {
 		msg := new(msgjson.Message)

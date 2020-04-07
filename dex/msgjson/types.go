@@ -47,6 +47,12 @@ const (
 	PreimageCommitmentMismatch        // 31
 	UnknownMessageType                // 32
 	AccountClosedError                // 33
+	RPCInitError                      // 34
+	RPCCreateWalletError              // 35
+	RPCOpenWalletError                // 36
+	RPCWalletExistsError              // 37
+	RPCCloseWalletError               // 38
+	RPCPreRegisterError               // 39
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
