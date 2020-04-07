@@ -1,6 +1,14 @@
-import Doc from './doc'
+import Doc, { StateIcons } from './doc'
+import BasePage from './basepage'
 import State from './state'
+import RegistrationPage from './register'
+import LoginPage from './login'
+import WalletsPage from './wallets'
+import SettingsPage from './settings'
 import { DepthChart } from './charts'
+import { postJSON, getJSON } from './http'
+import * as forms from './forms'
+import * as ntfn from './notifications'
 import ws from './ws'
 
 const idel = Doc.idel // = element by id
@@ -8,14 +16,6 @@ const bind = Doc.bind
 const unbind = Doc.unbind
 var app
 
-const IGNORE = 0
-// const DATA = 1
-const POKE = 2
-const SUCCESS = 3
-const WARNING = 4
-const ERROR = 5
-
-const DCR_ID = 42
 const LIMIT = 1
 // const MARKET = 2
 // const CANCEL = 3
@@ -28,7 +28,6 @@ const notificationRoute = 'notify'
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
   constructor () {
-    this.notifiers = {}
     this.notes = []
     this.user = {
       accounts: {},
@@ -36,22 +35,39 @@ export default class Application {
     }
   }
 
+  /**
+   * Start the application. This is the only thing done from the index.js entry
+   * point. Read the id = main element and attach handlers.
+   */
   async start () {
     app = this
+    // The "user" is a large data structure that contains nearly all state
+    // information, including exchanges, markets, wallets, and orders. It must
+    // be loaded immediately.
     await this.fetchUser()
+    // Handle back navigation from the browser.
     bind(window, 'popstate', (e) => {
       const page = e.state.page
       if (!page && page !== '') return
       this.loadPage(page)
     })
+    // The main element is the interchangable part of the page that doesn't
+    // include the header. Main should define a data-handler attribute
+    // associated with  one of the available constructors.
     this.main = idel(document, 'main')
     const handler = this.main.dataset.handler
+    // The application is free to respond with a page that differs from the
+    // one requested in the omnibox, e.g. routing though a login page. Set the
+    // current URL state based on the actual page.
     window.history.replaceState({ page: handler }, '', `/${handler}`)
+    // Attach stuff.
     this.attachHeader()
     this.attachCommon(this.header)
     this.attach()
+    // Load recent notifications from Window.localStorage.
     const notes = State.fetch('notifications')
     this.setNotes(notes || [])
+    // Connect the websocket and register for a couple of routes.
     ws.connect(getSocketURI(), this.reconnected)
     ws.registerRoute(updateWalletRoute, wallet => {
       this.assets[wallet.assetID].wallet = wallet
@@ -64,13 +80,18 @@ export default class Application {
     })
   }
 
+  // reconnected is called by the websocket client when a reconnection is made.
   reconnected () {
     window.location.reload()
   }
 
+  /*
+   * Fetch and save the user, which is the primary core state that must be
+   * maintained by the Application.
+   */
   async fetchUser () {
     const user = await getJSON('/api/user')
-    if (!checkResponse(user)) return
+    if (!app.checkResponse(user)) return
     this.user = user
     // Clear the notification cache for unitialized users.
     if (!user.inited) State.store('notifications', null)
@@ -84,7 +105,7 @@ export default class Application {
     return user
   }
 
-  // Load the page from the server. Insert and bind to the HTML.
+  // Load the page from the server. Insert and bind the DOM.
   async loadPage (page, data) {
     const response = await window.fetch(`/${page}`)
     if (!response.ok) return false
@@ -100,7 +121,7 @@ export default class Application {
     return true
   }
 
-  // attach binds the common and specific handlers to the current main element.
+  // attach binds the common handlers and calls the page constructor.
   attach (data) {
     var handlerID = this.main.dataset.handler
     if (!handlerID) {
@@ -110,17 +131,18 @@ export default class Application {
     unattachers.forEach(f => f())
     unattachers = []
     this.attachCommon(this.main)
-    var handler = handlers[handlerID]
-    if (!handler) {
-      console.error(`no handler for ${handlerID}`)
+    var constructor = constructors[handlerID]
+    if (!constructor) {
+      console.error(`no constructor for ${handlerID}`)
     }
-    this.notifiers = handler(this.main, data) || {}
+    if (this.loadedPage) this.loadedPage.unload()
+    this.loadedPage = new constructor(this, this.main, data) || {}
   }
 
   attachHeader () {
     this.header = idel(document.body, 'header')
     this.pokeNote = idel(document.body, 'pokeNote')
-    const pg = this.page = parsePage(this.header, [
+    const pg = this.page = Doc.parsePage(this.header, [
       'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
       'walletsMenuEntry', 'noteMenuEntry', 'settingsIcon', 'loginLink', 'loader'
     ])
@@ -145,7 +167,7 @@ export default class Application {
       for (const note of this.notes) {
         if (!note.acked) {
           note.acked = true
-          if (note.id && note.severity > POKE) acks.push(note.id)
+          if (note.id && note.severity > ntfn.POKE) acks.push(note.id)
         }
         note.el.querySelector('div.note-time').textContent = timeSince(note.stamp)
       }
@@ -215,11 +237,11 @@ export default class Application {
       }
     }
     // Inform the page.
-    if (this.notifiers[note.type]) this.notifiers[note.type](note)
+    this.loadedPage.notify(note)
     // Discard data notifications.
-    if (note.severity < POKE) return
+    if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
-    if (note.severity === POKE) {
+    if (note.severity === ntfn.POKE) {
       this.pokeNote.firstChild.textContent = `${note.subject}: ${note.details}`
       this.pokeNote.classList.add('active')
       if (this.pokeNote.timer) {
@@ -252,14 +274,14 @@ export default class Application {
     const severity = this.notes.reduce((s, v) => {
       if (!v.acked && v.severity > s) return v.severity
       return s
-    }, IGNORE)
+    }, ntfn.IGNORE)
     setSeverityClass(this.page.noteIndicator, severity)
   }
 
   makeNote (note) {
     const el = this.page.noteTemplate.cloneNode(true)
-    if (note.severity > POKE) {
-      const cls = note.severity === SUCCESS ? 'good' : note.severity === WARNING ? 'warn' : 'bad'
+    if (note.severity > ntfn.POKE) {
+      const cls = note.severity === ntfn.SUCCESS ? 'good' : note.severity === ntfn.WARNING ? 'warn' : 'bad'
       el.querySelector('div.note-indicator').classList.add(cls)
     }
     el.querySelector('div.note-subject').textContent = note.subject
@@ -283,38 +305,19 @@ export default class Application {
     }
     return o
   }
+
+  checkResponse (resp) {
+    if (!resp.requestSuccessful || !resp.ok) {
+      if (this.user.inited) this.notify(ntfn.make('API error', resp.msg, ntfn.ERROR))
+      return false
+    }
+    return true
+  }
 }
 
 function getSocketURI () {
   var protocol = (window.location.protocol === 'https:') ? 'wss' : 'ws'
   return `${protocol}://${window.location.host}/ws`
-}
-
-// requestJSON encodes the object and sends the JSON to the specified address.
-async function requestJSON (method, addr, reqBody) {
-  try {
-    const response = await window.fetch(addr, {
-      method: method,
-      headers: new window.Headers({ 'content-type': 'application/json' }),
-      body: reqBody
-    })
-    if (response.status !== 200) { throw response }
-    const obj = await response.json()
-    obj.requestSuccessful = true
-    return obj
-  } catch (response) {
-    response.requestSuccessful = false
-    response.msg = await response.text()
-    return response
-  }
-}
-
-async function postJSON (addr, data) {
-  return requestJSON('POST', addr, JSON.stringify(data))
-}
-
-async function getJSON (addr) {
-  return requestJSON('GET', addr)
 }
 
 // unattachers are handlers to be run when a page is unloaded.
@@ -325,191 +328,17 @@ function unattach (f) {
   unattachers.push(f)
 }
 
-// handlers are handlers for binding to main elements.
-var handlers = {
-  login: handleLogin,
-  register: handleRegister,
-  markets: handleMarkets,
-  wallets: handleWallets,
-  settings: handleSettings
-}
-
-// handleLogin is the 'login' page main element handler.
-function handleLogin (main) {
-  const page = parsePage(main, [
-    'submit', 'errMsg', 'loginForm', 'pw'
-  ])
-  bindForm(page.loginForm, page.submit, async (e) => {
-    app.loading(page.loginForm)
-    Doc.hide(page.errMsg)
-    const pw = page.pw.value
-    page.pw.value = ''
-    if (pw === '') {
-      page.errMsg.textContent = 'password cannot be empty'
-      Doc.show(page.errMsg)
-      return
-    }
-    app.loaded()
-    var res = await postJSON('/api/login', { pass: pw })
-    if (!checkResponse(res)) return
-    res.notes.reverse()
-    app.setNotes(res.notes)
-    await app.fetchUser()
-    app.setLogged(true)
-    app.loadPage('markets')
-  })
-  page.pw.focus()
-}
-
-// handleRegister is the 'register' page main element handler.
-function handleRegister (main) {
-  const page = parsePage(main, [
-    // Form 1: Set the application password
-    'appPWForm', 'appPWSubmit', 'appErrMsg', 'appPW', 'appPWAgain',
-    // Form 2: Create Decred wallet
-    'walletForm',
-    // Form 3: Open Decred wallet
-    'openForm',
-    // Form 4: DEX address
-    'urlForm', 'addrInput', 'submitAddr', 'feeDisplay', 'addrErr',
-    // Form 5: Final form to initiate registration. Client app password.
-    'pwForm', 'clientPass', 'submitPW', 'regErr'
-  ])
-
-  const animationLength = 300
-
-  const changeForm = async (form1, form2) => {
-    const shift = main.offsetWidth / 2
-    await Doc.animate(animationLength, progress => {
-      form1.style.right = `${progress * shift}px`
-    }, 'easeInHard')
-    Doc.hide(form1)
-    form1.style.right = '0px'
-    form2.style.right = -shift
-    Doc.show(form2)
-    form2.querySelector('input').focus()
-    await Doc.animate(animationLength, progress => {
-      form2.style.right = `${-shift + progress * shift}px`
-    }, 'easeOutHard')
-    form2.style.right = '0px'
+class MarketsPage extends BasePage {
+  constructor (application, main, data) {
+    super()
+    this.notifiers = handleMarkets(main, data)
   }
-
-  // SET APP PASSWORD
-  // This form is only shown the first time the user visits the /register page.
-  bindForm(page.appPWForm, page.appPWSubmit, async () => {
-    Doc.hide(page.appErrMsg)
-    const pw = page.appPW.value
-    const pwAgain = page.appPWAgain.value
-    if (pw === '') {
-      page.appErrMsg.textContent = 'password cannot be empty'
-      Doc.show(page.appErrMsg)
-      return
-    }
-    if (pw !== pwAgain) {
-      page.appErrMsg.textContent = 'passwords do not match'
-      Doc.show(page.appErrMsg)
-      return
-    }
-    page.appPW.value = ''
-    page.appPWAgain.value = ''
-    app.loading(page.appPWForm)
-    var res = await postJSON('/api/init', { pass: pw })
-    app.loaded()
-    if (!checkResponse(res)) {
-      page.appErrMsg.textContent = res.msg
-      Doc.show(page.appErrMsg)
-      return
-    }
-    app.setLogged(true)
-    const dcrWallet = app.walletMap[DCR_ID]
-    if (!dcrWallet) {
-      changeForm(page.appPWForm, page.walletForm)
-      return
-    }
-    // Not really sure if these other cases are possible if the user hasn't
-    // even set their password yet.
-    if (!dcrWallet.open) {
-      changeForm(page.appPWForm, page.openForm)
-      return
-    }
-    changeForm(page.appPWForm, page.urlForm)
-  })
-
-  bindNewWalletForm(page.walletForm, () => {
-    changeForm(page.walletForm, page.urlForm)
-  })
-  page.walletForm.setAsset(app.assets[DCR_ID])
-
-  // OPEN DCR WALLET
-  // This form is only show if the wallet is not already open.
-  bindOpenWalletForm(page.openForm, () => {
-    changeForm(page.openForm, page.urlForm)
-  })
-  page.openForm.setAsset(app.assets[DCR_ID])
-
-  // ENTER NEW DEX URL
-  var fee
-  bindForm(page.urlForm, page.submitAddr, async () => {
-    Doc.hide(page.addrErr)
-    const dex = page.addrInput.value
-    if (dex === '') {
-      page.addrErr.textContent = 'URL cannot be empty'
-      Doc.show(page.addrErr)
-      return
-    }
-    app.loading(page.urlForm)
-    var res = await postJSON('/api/preregister', { dex: dex })
-    app.loaded()
-    if (!checkResponse(res)) {
-      page.addrErr.textContent = res.msg
-      Doc.show(page.addrErr)
-      return
-    }
-    page.feeDisplay.textContent = formatCoinValue(res.fee / 1e8)
-    fee = res.fee
-    const dcrWallet = app.walletMap[DCR_ID]
-    if (!dcrWallet) {
-      // There is no known Decred wallet, show the wallet form
-      await changeForm(page.urlForm, page.walletForm)
-      return
-    }
-    // The Decred wallet is known, check if it is open.
-    if (!dcrWallet.open) {
-      await changeForm(page.urlForm, page.openForm)
-      return
-    }
-    // The Decred wallet is known and open, collect the main client password.
-    await changeForm(page.urlForm, page.pwForm)
-  })
-
-  // SUBMIT DEX REGISTRATION
-  bindForm(page.pwForm, page.submitPW, async () => {
-    Doc.hide(page.regErr)
-    const registration = {
-      dex: page.addrInput.value,
-      pass: page.clientPass.value,
-      fee: fee
-    }
-    page.clientPass.value = ''
-    app.loading(page.pwForm)
-    var res = await postJSON('/api/register', registration)
-    app.loaded()
-    if (!checkResponse(res)) {
-      page.regErr.textContent = res.msg
-      Doc.show(page.regErr)
-      return
-    }
-    // Need to get a fresh market list. May consider handling this with a
-    // websocket update instead.
-    await app.fetchUser()
-    app.loadPage('markets')
-  })
 }
 
 // handleMarkets is the 'markets' page main element handler.
 function handleMarkets (main, data) {
   var market
-  const page = parsePage(main, [
+  const page = Doc.parsePage(main, [
     // Templates, loaders, chart div...
     'marketLoader', 'marketChart', 'marketList', 'rowTemplate', 'buyRows',
     'sellRows',
@@ -711,7 +540,7 @@ function handleMarkets (main, data) {
     const buffer = xc.markets[selected.sid].buybuffer
     const gap = midGap()
     if (gap) {
-      page.minMktBuy.textContent = formatCoinValue(lotSize * buffer * gap / 1e8)
+      page.minMktBuy.textContent = Doc.formatCoinValue(lotSize * buffer * gap / 1e8)
     }
   }
 
@@ -720,7 +549,7 @@ function handleMarkets (main, data) {
     if (a.wallet) {
       Doc.hide(button)
       Doc.show(row)
-      bal.textContent = formatCoinValue(a.wallet.balance / 1e8)
+      bal.textContent = Doc.formatCoinValue(a.wallet.balance / 1e8)
       return
     }
     Doc.show(button)
@@ -751,8 +580,8 @@ function handleMarkets (main, data) {
       const set = (col, s) => { row.querySelector(`[data-col=${col}]`).textContent = s }
       set('side', order.sell ? 'sell' : 'buy')
       set('age', timeSince(order.stamp))
-      set('rate', formatCoinValue(order.rate / 1e8))
-      set('qty', formatCoinValue(order.qty / 1e8))
+      set('rate', Doc.formatCoinValue(order.rate / 1e8))
+      set('qty', Doc.formatCoinValue(order.qty / 1e8))
       set('filled', `${(order.filled / order.qty * 100).toFixed(1)}%`)
       if (order.type === LIMIT) {
         if (order.cancelling) {
@@ -790,8 +619,8 @@ function handleMarkets (main, data) {
       base: data.base,
       quote: data.quote
     })
-    page.lotSize.textContent = formatCoinValue(selected.baseCfg.lotSize / 1e8)
-    page.rateStep.textContent = formatCoinValue(selected.quoteCfg.rateStep / 1e8)
+    page.lotSize.textContent = Doc.formatCoinValue(selected.baseCfg.lotSize / 1e8)
+    page.rateStep.textContent = Doc.formatCoinValue(selected.quoteCfg.rateStep / 1e8)
     baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
     quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
     updateWallet(b.id)
@@ -839,17 +668,17 @@ function handleMarkets (main, data) {
     if (order.isLimit) {
       Doc.show(page.verifyLimit)
       Doc.hide(page.verifyMarket)
-      page.vRate.textContent = formatCoinValue(order.rate / 1e8)
-      page.vQty.textContent = formatCoinValue(order.qty / 1e8)
+      page.vRate.textContent = Doc.formatCoinValue(order.rate / 1e8)
+      page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
       page.vBase.textContent = baseAsset.symbol.toUpperCase()
       page.vQuote.textContent = quoteAsset.symbol.toUpperCase()
       page.vSide.textContent = order.sell ? 'sell' : 'buy'
-      page.vTotal.textContent = formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
+      page.vTotal.textContent = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
     } else {
       Doc.hide(page.verifyLimit)
       Doc.show(page.verifyMarket)
       page.vSide.textContent = 'trade'
-      page.vQty.textContent = formatCoinValue(order.qty / 1e8)
+      page.vQty.textContent = Doc.formatCoinValue(order.qty / 1e8)
       page.vBase.textContent = fromAsset.symbol.toUpperCase()
       const gap = midGap()
       if (gap) {
@@ -857,7 +686,7 @@ function handleMarkets (main, data) {
         const lotSize = selected.baseCfg.lotSize
         const lots = order.sell ? order.qty / lotSize : received / lotSize
         // TODO: Some kind of adjustment to align with lot sizes for market buy?
-        page.vmTotal.textContent = formatCoinValue(received / 1e8)
+        page.vmTotal.textContent = Doc.formatCoinValue(received / 1e8)
         page.vmAsset.textContent = toAsset.symbol.toUpperCase()
         page.vmLots.textContent = lots.toFixed(1)
       } else {
@@ -869,7 +698,7 @@ function handleMarkets (main, data) {
 
   const showCancel = (bttn, order) => {
     const remaining = order.qty - order.filled
-    page.cancelRemain.textContent = formatCoinValue(remaining / 1e8)
+    page.cancelRemain.textContent = Doc.formatCoinValue(remaining / 1e8)
     const isMarketBuy = !order.isLimit && !order.sell
     const symbol = isMarketBuy ? selected.quote.symbol : selected.base.symbol
     page.cancelUnit.textContent = symbol.toUpperCase()
@@ -884,7 +713,7 @@ function handleMarkets (main, data) {
       var res = await postJSON('/api/cancel', req)
       app.loaded()
       Doc.hide(page.forms)
-      if (!checkResponse(res)) return
+      if (!app.checkResponse(res)) return
       bttn.parentNode.textContent = 'cancelling'
       order.cancelling = true
     })
@@ -917,12 +746,12 @@ function handleMarkets (main, data) {
   }
 
   // Bind the wallet unlock form.
-  bindOpenWalletForm(page.openForm, async () => {
+  forms.bindOpenWallet(app, page.openForm, async () => {
     openFunc()
   })
 
   // Create a wallet
-  bindNewWalletForm(page.walletForm, async () => {
+  forms.bindNewWallet(app, page.walletForm, async () => {
     const user = await app.fetchUser()
     const asset = user.assets[currentCreate.id]
     Doc.hide(page.forms)
@@ -930,12 +759,12 @@ function handleMarkets (main, data) {
   })
 
   // Main order form
-  bindForm(page.orderForm, page.submitBttn, async () => {
+  forms.bind(page.orderForm, page.submitBttn, async () => {
     stepSubmit()
   })
 
   // Order verification form
-  bindForm(page.verifyForm, page.vSubmit, async () => {
+  forms.bind(page.verifyForm, page.vSubmit, async () => {
     Doc.hide(page.forms)
     const order = parseOrder()
     const pw = page.vPass.value
@@ -947,7 +776,7 @@ function handleMarkets (main, data) {
     if (!validateOrder(order)) return
     var res = await postJSON('/api/trade', req)
     app.loaded()
-    if (!checkResponse(res)) return
+    if (!app.checkResponse(res)) return
     // If the wallets are not open locally, they must have been opened during
     // ordering. Grab updated info.
     const baseWallet = app.walletMap[selected.base.id]
@@ -1026,7 +855,7 @@ function handleMarkets (main, data) {
     const lotSize = selected.baseCfg.lotSize
     const received = qty / gap
     page.mktBuyLots.textContent = (received / lotSize).toFixed(1)
-    page.mktBuyScore.textContent = formatCoinValue(received / 1e8)
+    page.mktBuyScore.textContent = Doc.formatCoinValue(received / 1e8)
   }
   bind(page.mktBuyField, 'change', mktBuyChange)
   bind(page.mktBuyField, 'keyup', mktBuyChange)
@@ -1067,6 +896,15 @@ function handleMarkets (main, data) {
       }
     }
   }
+}
+
+// constructors is a map to page constructors.
+var constructors = {
+  login: LoginPage,
+  register: RegistrationPage,
+  markets: MarketsPage,
+  wallets: WalletsPage,
+  settings: SettingsPage
 }
 
 function makeMarket (dex, base, quote) {
@@ -1111,471 +949,6 @@ function handleBookUpdate (main, update) {
   console.log('updating order book')
 }
 
-// handleWallets is the 'wallets' page main element handler.
-function handleWallets (main) {
-  const page = parsePage(main, [
-    'rightBox',
-    // Table Rows
-    'assetArrow', 'balanceArrow', 'statusArrow', 'walletTable', 'txtStatus',
-    // Available markets
-    'markets', 'dexTitle', 'marketsBox', 'oneMarket', 'marketsFor',
-    'marketsCard',
-    // New wallet form
-    'walletForm', 'acctName', 'newWalletPass', 'iniPath', 'walletErr',
-    'newWalletLogo', 'newWalletName',
-    // Unlock wallet form
-    'openForm',
-    // Deposit
-    'deposit', 'depositName', 'depositAddress',
-    // Withdraw
-    'withdrawForm', 'withdrawLogo', 'withdrawName', 'withdrawAddr',
-    'withdrawAmt', 'withdrawAvail', 'submitWithdraw', 'withdrawFee',
-    'withdrawUnit', 'withdrawPW', 'withdrawErr'
-  ])
-
-  // Read the document.
-  const getAction = (row, name) => row.querySelector(`[data-action=${name}]`)
-  const rowInfos = {}
-  const rows = page.walletTable.querySelectorAll('tr')
-  var firstRow
-  for (const tr of rows) {
-    const assetID = parseInt(tr.dataset.assetID)
-    const rowInfo = rowInfos[assetID] = {}
-    if (!firstRow) firstRow = rowInfo
-    rowInfo.ID = assetID
-    rowInfo.tr = tr
-    rowInfo.symbol = tr.dataset.symbol
-    rowInfo.name = tr.dataset.name
-    rowInfo.stateIcons = new StateIcons(tr)
-    rowInfo.actions = {
-      connect: getAction(tr, 'connect'),
-      unlock: getAction(tr, 'unlock'),
-      withdraw: getAction(tr, 'withdraw'),
-      deposit: getAction(tr, 'deposit'),
-      create: getAction(tr, 'create'),
-      lock: getAction(tr, 'lock')
-    }
-  }
-
-  // Prepare templates
-  page.dexTitle.removeAttribute('id')
-  page.dexTitle.remove()
-  page.oneMarket.removeAttribute('id')
-  page.oneMarket.remove()
-  page.markets.removeAttribute('id')
-  page.markets.remove()
-
-  // Methods to switch the item displayed on the right side, with a little
-  // fade-in animation.
-  var displayed, animation
-  const animationLength = 300
-
-  const hideBox = async () => {
-    if (animation) await animation
-    if (!displayed) return
-    Doc.hide(displayed)
-  }
-
-  const showBox = async (box, focuser) => {
-    box.style.opacity = '0'
-    Doc.show(box)
-    if (focuser) focuser.focus()
-    await Doc.animate(animationLength, progress => {
-      box.style.opacity = `${progress}`
-    }, 'easeOut')
-    box.style.opacity = '1'
-    displayed = box
-  }
-
-  // Show the markets box, which lists the markets available for a selected
-  // asset.
-  const showMarkets = async assetID => {
-    const box = page.marketsBox
-    const card = page.marketsCard
-    const rowInfo = rowInfos[assetID]
-    await hideBox()
-    Doc.empty(card)
-    page.marketsFor.textContent = rowInfo.name
-    for (const [url, xc] of Object.entries(app.user.exchanges)) {
-      let count = 0
-      for (const market of Object.values(xc.markets)) {
-        if (market.baseid === assetID || market.quoteid === assetID) count++
-      }
-      if (count === 0) continue
-      const header = page.dexTitle.cloneNode(true)
-      header.textContent = new URL(url).host
-      card.appendChild(header)
-      const marketsBox = page.markets.cloneNode(true)
-      card.appendChild(marketsBox)
-      for (const market of Object.values(xc.markets)) {
-        // Only show markets where this is the base or quote asset.
-        if (market.baseid !== assetID && market.quoteid !== assetID) continue
-        const mBox = page.oneMarket.cloneNode(true)
-        mBox.querySelector('span').textContent = prettyMarketName(market)
-        let counterSymbol = market.basesymbol
-        if (market.baseid === assetID) counterSymbol = market.quotesymbol
-        mBox.querySelector('img').src = logoPath(counterSymbol)
-        // Bind the click to a load of the markets page.
-        const pageData = { market: makeMarket(url, market.baseid, market.quoteid) }
-        bind(mBox, 'click', () => { app.loadPage('markets', pageData) })
-        marketsBox.appendChild(mBox)
-      }
-    }
-    animation = showBox(box)
-  }
-
-  // Show the new wallet form.
-  const showNewWallet = async assetID => {
-    const box = page.walletForm
-    const asset = app.assets[assetID]
-    await hideBox()
-    if (assetID !== walletAsset) {
-      page.acctName.value = ''
-      page.newWalletPass.value = ''
-      page.iniPath.value = ''
-      page.iniPath.placeholder = asset.info.configpath
-      Doc.hide(page.walletErr)
-      page.newWalletName.textContent = asset.info.name
-    }
-    walletAsset = assetID
-    page.walletForm.setAsset(asset)
-    animation = showBox(box, page.acctName)
-  }
-
-  // Show the form used to unlock a wallet.
-  var openAsset
-  const showOpen = async assetID => {
-    openAsset = assetID
-    await hideBox()
-    page.openForm.setAsset(app.assets[assetID])
-    animation = showBox(page.openForm, page.walletPass)
-  }
-
-  // Display a deposit address.
-  const showDeposit = async assetID => {
-    const box = page.deposit
-    const asset = app.assets[assetID]
-    const wallet = app.walletMap[assetID]
-    if (!wallet) {
-      app.notify(makeNotification(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ERROR))
-      return
-    }
-    await hideBox()
-    page.depositName.textContent = asset.info.name
-    page.depositAddress.textContent = wallet.address
-    animation = showBox(box, page.walletPass)
-  }
-
-  // Show the form to withdraw funds.
-  const showWithdraw = async assetID => {
-    const box = page.withdrawForm
-    const asset = app.assets[assetID]
-    const wallet = app.walletMap[assetID]
-    if (!wallet) {
-      app.notify(makeNotification(`No wallet found for ${asset.info.name}`, 'Cannot withdraw.', ERROR))
-    }
-    await hideBox()
-    page.withdrawAddr.value = ''
-    page.withdrawAmt.value = ''
-    page.withdrawAvail.textContent = (wallet.balance / 1e8).toFixed(8)
-    page.withdrawLogo.src = logoPath(asset.symbol)
-    page.withdrawName.textContent = asset.info.name
-    page.withdrawFee.textContent = wallet.feerate
-    page.withdrawUnit.textContent = wallet.units
-    box.dataset.assetID = assetID
-    animation = showBox(box, page.walletPass)
-  }
-
-  const doConnect = async assetID => {
-    app.loading(main)
-    var res = await postJSON('/api/connectwallet', {
-      assetID: assetID
-    })
-    app.loaded()
-    if (!checkResponse(res)) return
-    const rowInfo = rowInfos[assetID]
-    Doc.hide(rowInfo.actions.connect)
-    rowInfo.stateIcons.locked()
-  }
-
-  // Bind the new wallet form.
-  var walletAsset
-  bindNewWalletForm(page.walletForm, () => {
-    const rowInfo = rowInfos[walletAsset]
-    showMarkets(rowInfo.ID)
-    const a = rowInfo.actions
-    Doc.hide(a.create)
-    Doc.show(a.withdraw, a.deposit, a.lock)
-    rowInfo.stateIcons.unlocked()
-  })
-
-  // Bind the wallet unlock form.
-  bindOpenWalletForm(page.openForm, async () => {
-    const rowInfo = rowInfos[openAsset]
-    const a = rowInfo.actions
-    Doc.show(a.lock, a.withdraw, a.deposit)
-    Doc.hide(a.unlock, a.connect)
-    rowInfo.stateIcons.unlocked()
-    showMarkets(openAsset)
-  })
-
-  // Bind the withdraw form.
-  const wForm = page.withdrawForm
-  bindForm(wForm, page.submitWithdraw, async () => {
-    Doc.hide(page.withdrawErr)
-    const assetID = parseInt(wForm.dataset.assetID)
-    const open = {
-      assetID: assetID,
-      address: page.withdrawAddr.value,
-      value: parseInt(page.withdrawAmt.value * 1e8),
-      pw: page.withdrawPW.value
-    }
-    app.loading(page.withdrawForm)
-    var res = await postJSON('/api/withdraw', open)
-    app.loaded()
-    if (!checkResponse(res)) {
-      page.withdrawErr.textContent = res.msg
-      Doc.show(page.withdrawErr)
-      return
-    }
-    showMarkets(assetID)
-  })
-
-  // Bind the row clicks, which shows the available markets for the asset.
-  for (const asset of Object.values(rowInfos)) {
-    bind(asset.tr, 'click', () => {
-      showMarkets(asset.ID)
-    })
-  }
-
-  // Bind buttons
-  for (const [k, asset] of Object.entries(rowInfos)) {
-    const assetID = parseInt(k) // keys are string asset ID.
-    const rowInfo = rowInfos[assetID]
-    const a = asset.actions
-    const show = (e, f) => {
-      e.stopPropagation()
-      f(assetID)
-    }
-    bind(a.connect, 'click', () => {
-      doConnect(assetID)
-    })
-    bind(a.withdraw, 'click', e => {
-      show(e, showWithdraw)
-    })
-    bind(a.deposit, 'click', e => {
-      show(e, showDeposit)
-    })
-    bind(a.create, 'click', e => {
-      show(e, showNewWallet)
-    })
-    bind(a.unlock, 'click', e => {
-      show(e, showOpen)
-    })
-    bind(a.lock, 'click', async e => {
-      e.stopPropagation()
-      app.loading(page.walletForm)
-      var res = await postJSON('/api/closewallet', { assetID: assetID })
-      app.loaded()
-      if (!checkResponse(res)) return
-      const a = asset.actions
-      Doc.hide(a.lock, a.withdraw, a.deposit)
-      Doc.show(a.unlock)
-      rowInfo.stateIcons.locked()
-    })
-  }
-
-  // Clicking on the avaailable amount on the withdraw form populates the
-  // amount field.
-  bind(page.withdrawAvail, 'click', () => {
-    page.withdrawAmt.value = page.withdrawAvail.textContent
-  })
-
-  if (!firstRow) return
-  showMarkets(firstRow.ID)
-}
-
-// handleSettings is the 'settings' page main element handler.
-function handleSettings (main) {
-  const darkMode = idel(main, 'darkMode')
-  bind(darkMode, 'click', () => {
-    State.dark(darkMode.checked)
-    if (darkMode.checked) {
-      document.body.classList.add('dark')
-    } else {
-      document.body.classList.remove('dark')
-    }
-  })
-}
-
-// Parameters for printing asset values.
-const coinValueSpecs = {
-  minimumSignificantDigits: 4,
-  maximumSignificantDigits: 6,
-  maximumFractionDigits: 8
-}
-
-// formatCoinValue formats the asset value to a string.
-function formatCoinValue (x) {
-  return x.toLocaleString('en-us', coinValueSpecs)
-}
-
-// parsePage finds the child elements with the IDs specified in ids. An object
-// with the elements as properties with names matching the IDs is returned.
-function parsePage (main, ids) {
-  const get = s => idel(main, s)
-  const page = {}
-  ids.forEach(id => { page[id] = get(id) })
-  return page
-}
-
-function checkResponse (resp) {
-  if (!resp.requestSuccessful || !resp.ok) {
-    if (app.user.inited) app.notify(makeNotification('Error', resp.msg, ERROR))
-    return false
-  }
-  return true
-}
-
-// bindForm binds the click and submit events and prevents page reloading on
-// submission.
-function bindForm (form, submitBttn, handler) {
-  const wrapper = e => {
-    if (e.preventDefault) e.preventDefault()
-    handler(e)
-  }
-  bind(submitBttn, 'click', wrapper)
-  bind(form, 'submit', wrapper)
-}
-
-function prettyMarketName (market) {
-  return `${market.basesymbol.toUpperCase()}-${market.quotesymbol.toUpperCase()}`
-}
-
-function logoPath (symbol) {
-  return `/img/coins/${symbol}.png`
-}
-
-function bindNewWalletForm (form, success) {
-  // CREATE DCR WALLET
-  // This form is only shown the first time the user visits the /register page.
-  const fields = parsePage(form, [
-    'iniPath', 'acctName', 'newWalletPass', 'submitCreate', 'walletErr',
-    'newWalletLogo', 'newWalletName', 'wClientPass'
-  ])
-  var currentAsset
-  form.setAsset = asset => {
-    currentAsset = asset
-    fields.newWalletLogo.src = logoPath(asset.symbol)
-    fields.newWalletName.textContent = asset.info.name
-  }
-  bindForm(form, fields.submitCreate, async () => {
-    Doc.hide(fields.walletErr)
-    const create = {
-      assetID: parseInt(currentAsset.id),
-      pass: fields.newWalletPass.value,
-      account: fields.acctName.value,
-      inipath: fields.iniPath.value,
-      appPass: fields.wClientPass.value
-    }
-    fields.wClientPass.value = ''
-    app.loading(form)
-    var res = await postJSON('/api/newwallet', create)
-    app.loaded()
-    if (!checkResponse(res)) {
-      fields.walletErr.textContent = res.msg
-      Doc.show(fields.walletErr)
-      return
-    }
-    fields.newWalletPass.value = ''
-    success()
-  })
-}
-
-function bindOpenWalletForm (form, success) {
-  const fields = parsePage(form, [
-    'submitOpen', 'openErr', 'walletPass', 'unlockLogo', 'unlockName'
-  ])
-  var currentAsset
-  form.setAsset = asset => {
-    currentAsset = asset
-    fields.unlockLogo.src = logoPath(asset.symbol)
-    fields.unlockName.textContent = asset.name
-    fields.walletPass.value = ''
-  }
-  bindForm(form, fields.submitOpen, async () => {
-    Doc.hide(fields.openErr)
-    const open = {
-      assetID: parseInt(currentAsset.id),
-      pass: fields.walletPass.value
-    }
-    fields.walletPass.value = ''
-    app.loading(form)
-    var res = await postJSON('/api/openwallet', open)
-    app.loaded()
-    if (!checkResponse(res)) {
-      fields.openErr.textContent = res.msg
-      Doc.show(fields.openErr)
-      return
-    }
-    success()
-  })
-}
-
-class StateIcons {
-  constructor (box) {
-    const stateIcon = (row, name) => row.querySelector(`[data-state=${name}]`)
-    this.icons = {}
-    this.icons.sleeping = stateIcon(box, 'sleeping')
-    this.icons.locked = stateIcon(box, 'locked')
-    this.icons.unlocked = stateIcon(box, 'unlocked')
-    this.icons.nowallet = stateIcon(box, 'nowallet')
-  }
-
-  sleeping () {
-    const i = this.icons
-    Doc.hide(i.locked, i.unlocked, i.nowallet)
-    Doc.show(i.sleeping)
-  }
-
-  locked () {
-    const i = this.icons
-    Doc.hide(i.unlocked, i.nowallet, i.sleeping)
-    Doc.show(i.locked)
-  }
-
-  unlocked () {
-    const i = this.icons
-    Doc.hide(i.locked, i.nowallet, i.sleeping)
-    Doc.show(i.unlocked)
-  }
-
-  nowallet () {
-    const i = this.icons
-    Doc.hide(i.locked, i.unlocked, i.sleeping)
-    Doc.show(i.nowallet)
-  }
-
-  readWallet (wallet) {
-    switch (true) {
-      case (!wallet):
-        this.nowallet()
-        break
-      case (!wallet.running):
-        this.sleeping()
-        break
-      case (!wallet.open):
-        this.locked()
-        break
-      case (wallet.open):
-        this.unlocked()
-        break
-      default:
-        console.error('wallet in unknown state', wallet)
-    }
-  }
-}
-
 function sid (b, q) { return `${b}-${q}` }
 
 const aYear = 31536000000
@@ -1615,19 +988,10 @@ function timeSince (t) {
   return result || '0 s'
 }
 
-function makeNotification (subject, details, severity) {
-  return {
-    subject: subject,
-    details: details,
-    severity: severity,
-    stamp: new Date().getTime()
-  }
-}
-
 const severityClassMap = {
-  [SUCCESS]: 'good',
-  [ERROR]: 'bad',
-  [WARNING]: 'warn'
+  [ntfn.SUCCESS]: 'good',
+  [ntfn.ERROR]: 'bad',
+  [ntfn.WARNING]: 'warn'
 }
 
 function setSeverityClass (el, severity) {

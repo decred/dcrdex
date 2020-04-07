@@ -327,6 +327,7 @@ func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) erro
 	defer c.mtx.Unlock()
 	c.wallets[form.AssetID] = &tWalletState{
 		running: true,
+		open: true,
 	}
 	return nil
 }
