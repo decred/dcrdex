@@ -45,9 +45,10 @@ func TestCreateResponse(t *testing.T) {
 		resErr:      nil,
 		wantErrCode: -1,
 	}, {
-		name:        "parse error",
-		res:         "",
-		resErr:      msgjson.NewError(msgjson.RPCParseError, "failed to encode response"),
+		name: "parse error",
+		res:  "",
+		resErr: msgjson.NewError(msgjson.RPCParseError,
+			"failed to encode response"),
 		wantErrCode: msgjson.RPCParseError,
 	}}
 
@@ -185,7 +186,10 @@ func TestHandlePreRegister(t *testing.T) {
 			t.Fatal(err)
 		}
 		msg.Payload = reqPayload
-		tc := &TCore{preRegisterFee: test.preRegisterFee, preRegisterErr: test.preRegisterErr}
+		tc := &TCore{
+			preRegisterFee: test.preRegisterFee,
+			preRegisterErr: test.preRegisterErr,
+		}
 		r := &RPCServer{core: tc}
 		payload := handlePreRegister(r, msg)
 		res := new(preRegisterResponse)
@@ -193,7 +197,8 @@ func TestHandlePreRegister(t *testing.T) {
 			t.Fatal(err)
 		}
 		if test.wantErrCode == -1 && res.Fee != test.preRegisterFee {
-			t.Fatalf("wanted registration fee %d but got %d for test %s", test.preRegisterFee, res.Fee, test.name)
+			t.Fatalf("wanted registration fee %d but got %d for test %s",
+				test.preRegisterFee, res.Fee, test.name)
 		}
 	}
 }
@@ -236,6 +241,13 @@ func TestHandleInit(t *testing.T) {
 }
 
 func TestHandleNewWallet(t *testing.T) {
+	nwf := &newWalletForm{
+		AssetID:    uint32(42),
+		Account:    "default",
+		INIPath:    "/home/wallet.conf",
+		WalletPass: "password123",
+		AppPass:    "password123",
+	}
 	tests := []struct {
 		name            string
 		arg             interface{}
@@ -247,12 +259,12 @@ func TestHandleNewWallet(t *testing.T) {
 		wantIsNew       bool
 	}{{
 		name:        "ok new wallet",
-		arg:         &newWalletForm{AssetID: uint32(42), Account: "default", INIPath: "/home/wallet.conf", WalletPass: "password123", AppPass: "password123"},
+		arg:         nwf,
 		wantErrCode: -1,
 		wantIsNew:   true,
 	}, {
 		name:         "ok existing wallet",
-		arg:          &newWalletForm{AssetID: uint32(42), Account: "default", INIPath: "/home/wallet.conf", WalletPass: "password123", AppPass: "password123"},
+		arg:          nwf,
 		walletState:  &core.WalletState{Open: false},
 		wantErrCode:  -1,
 		wantIsLocked: true,
@@ -262,12 +274,12 @@ func TestHandleNewWallet(t *testing.T) {
 		wantErrCode: msgjson.RPCParseError,
 	}, {
 		name:            "core.CreateWallet error",
-		arg:             &newWalletForm{AssetID: uint32(42), Account: "default", INIPath: "/home/wallet.conf", WalletPass: "password123", AppPass: "password123"},
+		arg:             nwf,
 		createWalletErr: errors.New("error"),
 		wantErrCode:     msgjson.RPCErrorUnspecified,
 	}, {
 		name:          "core.OpenWallet error",
-		arg:           &newWalletForm{AssetID: uint32(42), Account: "default", INIPath: "/home/wallet.conf", WalletPass: "password123", AppPass: "password123"},
+		arg:           nwf,
 		openWalletErr: errors.New("error"),
 		wantErrCode:   msgjson.RPCErrorUnspecified,
 	}}
@@ -278,7 +290,11 @@ func TestHandleNewWallet(t *testing.T) {
 			t.Fatal(err)
 		}
 		msg.Payload = reqPayload
-		tc := &TCore{walletState: test.walletState, createWalletErr: test.createWalletErr, openWalletErr: test.openWalletErr}
+		tc := &TCore{
+			walletState:     test.walletState,
+			createWalletErr: test.createWalletErr,
+			openWalletErr:   test.openWalletErr,
+		}
 		r := &RPCServer{core: tc}
 		payload := handleNewWallet(r, msg)
 		res := new(newWalletResponse)
@@ -287,16 +303,22 @@ func TestHandleNewWallet(t *testing.T) {
 		}
 		if test.wantErrCode == -1 {
 			if res.IsLocked != test.wantIsLocked {
-				t.Fatalf("wanted isLocked %v but got %v for test %s", test.wantIsLocked, res.IsLocked, test.name)
+				t.Fatalf("wanted isLocked %v but got %v for test %s",
+					test.wantIsLocked, res.IsLocked, test.name)
 			}
 			if res.IsNew != test.wantIsNew {
-				t.Fatalf("wanted isNew %v but got %v for test %s", test.wantIsNew, res.IsNew, test.name)
+				t.Fatalf("wanted isNew %v but got %v for test %s",
+					test.wantIsNew, res.IsNew, test.name)
 			}
 		}
 	}
 }
 
 func TestHandleOpenWallet(t *testing.T) {
+	owf := &openWalletForm{
+		AssetID: uint32(42),
+		AppPass: "password123",
+	}
 	tests := []struct {
 		name          string
 		arg           interface{}
@@ -304,7 +326,7 @@ func TestHandleOpenWallet(t *testing.T) {
 		wantErrCode   int
 	}{{
 		name:        "ok",
-		arg:         &openWalletForm{AssetID: uint32(42), AppPass: "password123"},
+		arg:         owf,
 		wantErrCode: -1,
 	}, {
 		name:        "argument wrong type",
@@ -312,7 +334,7 @@ func TestHandleOpenWallet(t *testing.T) {
 		wantErrCode: msgjson.RPCParseError,
 	}, {
 		name:          "core.OpenWallet error",
-		arg:           &openWalletForm{AssetID: uint32(42), AppPass: "password123"},
+		arg:           owf,
 		openWalletErr: errors.New("error"),
 		wantErrCode:   msgjson.RPCErrorUnspecified,
 	}}

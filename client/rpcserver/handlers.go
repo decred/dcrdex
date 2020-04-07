@@ -27,9 +27,9 @@ const (
 )
 
 const (
-	INITIALIZED     = "initialized"
-	WALLET_LOCKED   = "wallet locked"
-	WALLET_UNLOCKED = "wallet unlocked"
+	initializedStr    = "initialized"
+	walletLockedStr   = "wallet locked"
+	walletUnlockedStr = "wallet unlocked"
 )
 
 // createResponse creates a msgjson response payload.
@@ -57,11 +57,11 @@ var routes = map[string]func(s *RPCServer, req *msgjson.Message) *msgjson.Respon
 // handleHelp handles requests for help. Returns general help for all commands
 // if no arguments are passed or verbose help if the passed argument is a known
 // command.
-func handleHelp(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
+func handleHelp(_ *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	helpWith := ""
-	err := json.Unmarshal(req.Payload, &helpWith)
+	err := req.Unmarshal(&helpWith)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
 	res := ""
@@ -71,7 +71,7 @@ func handleHelp(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	} else {
 		res, err = CommandUsage(helpWith)
 		if err != nil {
-			resErr := &msgjson.Error{Code: msgjson.RPCUnknownRoute, Message: err.Error()}
+			resErr := msgjson.NewError(msgjson.RPCUnknownRoute, err.Error())
 			return createResponse(req.Route, nil, resErr)
 		}
 	}
@@ -82,23 +82,23 @@ func handleHelp(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 // if successful.
 func handleInit(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	appPass := ""
-	err := json.Unmarshal(req.Payload, &appPass)
+	err := req.Unmarshal(&appPass)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
 	if err := s.core.InitializeClient(appPass); err != nil {
 		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
-		resErr := &msgjson.Error{Code: msgjson.RPCErrorUnspecified, Message: errMsg}
+		resErr := msgjson.NewError(msgjson.RPCErrorUnspecified, errMsg)
 		return createResponse(req.Route, nil, resErr)
 	}
-	res := INITIALIZED
+	res := initializedStr
 	return createResponse(req.Route, &res, nil)
 }
 
 // handleVersion handles requests for version. It takes no arguments and returns
 // the semver.
-func handleVersion(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
+func handleVersion(_ *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	res := &versionResponse{
 		Major: rpcSemverMajor,
 		Minor: rpcSemverMinor,
@@ -107,14 +107,14 @@ func handleVersion(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload 
 	return createResponse(req.Route, res.String(), nil)
 }
 
-// handleNewWallet handles requests for newwallet. *msgjson.ResponsePayload.Error
-// is empty if successful. Returns whether this is a new or preexisting wallet
-// and the locked status.
+// handleNewWallet handles requests for newwallet.
+// *msgjson.ResponsePayload.Error is empty if successful. Returns whether this
+// is a new or preexisting wallet and the locked status.
 func handleNewWallet(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	form := new(newWalletForm)
-	err := json.Unmarshal(req.Payload, form)
+	err := req.Unmarshal(form)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
 	res := new(newWalletResponse)
@@ -131,14 +131,14 @@ func handleNewWallet(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayloa
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("error creating %s wallet: %v", dex.BipIDSymbol(form.AssetID), err)
-		resErr := &msgjson.Error{Code: msgjson.RPCErrorUnspecified, Message: errMsg}
+		resErr := msgjson.NewError(msgjson.RPCErrorUnspecified, errMsg)
 		return createResponse(req.Route, nil, resErr)
 	}
 	s.notifyWalletUpdate(form.AssetID)
 	err = s.core.OpenWallet(form.AssetID, form.AppPass)
 	if err != nil {
 		errMsg := fmt.Sprintf("wallet connected, but failed to open with provided password: %v", err)
-		resErr := &msgjson.Error{Code: msgjson.RPCErrorUnspecified, Message: errMsg}
+		resErr := msgjson.NewError(msgjson.RPCErrorUnspecified, errMsg)
 		return createResponse(req.Route, nil, resErr)
 	}
 	s.notifyWalletUpdate(form.AssetID)
@@ -147,42 +147,43 @@ func handleNewWallet(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayloa
 	return createResponse(req.Route, res, nil)
 }
 
-// handleOpenWallet handles requests for openWallet. *msgjson.ResponsePayload.Error
-// is empty if successful. Requires the app password. Opens the wallet.
+// handleOpenWallet handles requests for openWallet.
+// *msgjson.ResponsePayload.Error is empty if successful. Requires the app
+// password. Opens the wallet.
 func handleOpenWallet(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	form := new(openWalletForm)
-	err := json.Unmarshal(req.Payload, form)
+	err := req.Unmarshal(form)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
 	err = s.core.OpenWallet(form.AssetID, form.AppPass)
 	if err != nil {
 		errMsg := fmt.Sprintf("error unlocking %s wallet: %v", dex.BipIDSymbol(form.AssetID), err)
-		resErr := &msgjson.Error{Code: msgjson.RPCErrorUnspecified, Message: errMsg}
+		resErr := msgjson.NewError(msgjson.RPCErrorUnspecified, errMsg)
 		return createResponse(req.Route, nil, resErr)
 	}
 	s.notifyWalletUpdate(form.AssetID)
-	res := WALLET_UNLOCKED
+	res := walletUnlockedStr
 	return createResponse(req.Route, &res, nil)
 }
 
-// handleCloseWallet handles requests for closeWallet. *msgjson.ResponsePayload.Error
-// is empty if successful. Closes the wallet.
+// handleCloseWallet handles requests for closeWallet.
+// *msgjson.ResponsePayload.Error is empty if successful. Closes the wallet.
 func handleCloseWallet(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	var assetID uint32
-	err := json.Unmarshal(req.Payload, &assetID)
+	err := req.Unmarshal(&assetID)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
 	if err := s.core.CloseWallet(assetID); err != nil {
 		errMsg := fmt.Sprintf("unable to close wallet %s: %v", dex.BipIDSymbol(assetID), err)
-		resErr := &msgjson.Error{Code: msgjson.RPCErrorUnspecified, Message: errMsg}
+		resErr := msgjson.NewError(msgjson.RPCErrorUnspecified, errMsg)
 		return createResponse(req.Route, nil, resErr)
 	}
 	s.notifyWalletUpdate(assetID)
-	res := WALLET_LOCKED
+	res := walletLockedStr
 	return createResponse(req.Route, res, nil)
 }
 
@@ -192,18 +193,19 @@ func handleWallets(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload 
 	return createResponse(req.Route, walletsStates, nil)
 }
 
-// handlePreRegister handles requests for preregister. *msgjson.ResponsePayload.Error
-// is empty if successful. Requires the address of a dex and returns the dex fee.
+// handlePreRegister handles requests for preregister.
+// *msgjson.ResponsePayload.Error is empty if successful. Requires the address
+// of a dex and returns the dex fee.
 func handlePreRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	dexURL := ""
-	err := json.Unmarshal(req.Payload, &dexURL)
+	err := req.Unmarshal(&dexURL)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
 	fee, err := s.core.PreRegister(dexURL)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCErrorUnspecified, Message: err.Error()}
+		resErr := msgjson.NewError(msgjson.RPCErrorUnspecified, err.Error())
 		return createResponse(req.Route, nil, resErr)
 	}
 	res := &preRegisterResponse{
@@ -276,7 +278,7 @@ Args:
     appPass (string): The dex client password.
 
 Returns:
-    string: The message "` + INITIALIZED + `".`,
+    string: The message "` + initializedStr + `".`,
 	},
 	preRegisterRoute: {`"dex"`,
 		`Preregister for dex.
@@ -313,10 +315,10 @@ Returns:
 
 Args:
     assetID (int): The asset's SLIP-0044 ID, 42 for dcr or 0 for btc.
-    appPass (string): The Dex Client password.
+    appPass (string): The DEX client password.
 
 Returns:
-    string: The message "` + WALLET_UNLOCKED + `"`,
+    string: The message "` + walletUnlockedStr + `"`,
 	},
 	closeWalletRoute: {`assetID`,
 		`Close an open wallet.
@@ -325,7 +327,7 @@ Args:
     assetID (int): The asset's SLIP-0044 ID. 42 for dcr or 0 for btc.
 
 Returns:
-    string: The message "` + WALLET_LOCKED + `"`,
+    string: The message "` + walletLockedStr + `"`,
 	},
 	walletsRoute: {``,
 		`List all wallets.
@@ -338,7 +340,8 @@ Returns:
         "assetID" (int): The coin SLIP-0044 number.
         "open" (bool): Whether the wallet is unlocked.
         "running" (bool): Whether the wallet is running.
-        "updated" (int): ???
+	"updated" (int): Unix time of last balance update. Seconds since
+	    00:00:00 Jan 1 1970.
         "balance" (int): The wallet balance.
         "address" (string): A wallet address.
         "feerate" (int): The fee rate.

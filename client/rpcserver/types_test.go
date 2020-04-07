@@ -36,15 +36,18 @@ func TestParseCmdArgs(t *testing.T) {
 		res, err := ParseCmdArgs(test.cmd, test.args)
 		if test.wantErr {
 			if err == nil {
-				t.Fatalf("expected error for test %s", test.name)
+				t.Fatalf("expected error for test %s",
+					test.name)
 			}
 			continue
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %s: %v", test.name, err)
+			t.Fatalf("unexpected error for test %s: %v",
+				test.name, err)
 		}
 		if res != test.want {
-			t.Fatalf("got %v but want %v for test %s", res, test.want, test.name)
+			t.Fatalf("got %v but want %v for test %s",
+				res, test.want, test.name)
 		}
 	}
 }
@@ -107,12 +110,14 @@ func TestCheckNArgs(t *testing.T) {
 		err := checkNArgs(test.have, test.wantNArgs)
 		if test.wantErr {
 			if err == nil {
-				t.Fatalf("expected error for test %s", test.name)
+				t.Fatalf("expected error for test %s",
+					test.name)
 			}
 			continue
 		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %s: %v", test.name, err)
+			t.Fatalf("unexpected error for test %s: %v",
+				test.name, err)
 		}
 	}
 }
@@ -130,23 +135,33 @@ func TestParsers(t *testing.T) {
 }
 
 func TestParseNewWalletArgs(t *testing.T) {
+	argsWithAssetID := func(id string) []string {
+		return []string{
+			id,
+			"default",
+			"/home/wallet.conf",
+			"password123",
+			"password123",
+		}
+	}
 	tests := []struct {
 		name    string
 		args    []string
 		wantErr error
 	}{{
 		name: "ok",
-		args: []string{"42", "default", "/home/wallet.conf", "password123", "password123"},
+		args: argsWithAssetID("42"),
 	}, {
 		name:    "assetID is not int",
-		args:    []string{"42.1", "default", "/home/wallet.conf", "password123", "password123"},
+		args:    argsWithAssetID("42.1"),
 		wantErr: ErrArgs,
 	}}
 	for _, test := range tests {
 		res, err := parseNewWalletArgs(test.args)
 		if test.wantErr != nil {
 			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s", err, test.name)
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
 			}
 			continue
 		}
@@ -189,7 +204,8 @@ func TestParseOpenWalletArgs(t *testing.T) {
 		res, err := parseOpenWalletArgs(test.args)
 		if test.wantErr != nil {
 			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s", err, test.name)
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
 			}
 			continue
 		}
@@ -223,7 +239,8 @@ func TestCheckIntArg(t *testing.T) {
 		res, err := checkIntArg(test.arg, "name")
 		if test.wantErr != nil {
 			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("unexpected error %v for test %s", err, test.name)
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
 			}
 			continue
 		}
