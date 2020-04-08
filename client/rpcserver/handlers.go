@@ -311,8 +311,9 @@ Returns:
 		`Connect to a new wallet.
 
 Args:
-    assetID (int): The assets's BIP ID, 42 for dcr or 0 for btc.
-    account (string): The account name.
+    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
+      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+    account (string): The account or wallet name, depending on wallet software.
     inipath (string): The location of the wallet's config file.
     walletPass (string): The wallet's password.
     appPass (string): The dex client password.
@@ -324,7 +325,8 @@ Returns:
 		`Open an existing wallet.
 
 Args:
-    assetID (int): The asset's SLIP-0044 ID, 42 for dcr or 0 for btc.
+    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
+      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     appPass (string): The DEX client password.
 
 Returns:
@@ -334,7 +336,8 @@ Returns:
 		`Close an open wallet.
 
 Args:
-    assetID (int): The asset's SLIP-0044 ID. 42 for dcr or 0 for btc.
+    assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
+      See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
 
 Returns:
     string: The message "` + fmt.Sprintf(walletLockedStr, "[coin symbol]") + `"`,
@@ -347,11 +350,11 @@ Returns:
     [
       {
         "symbol" (string): The coin symbol.
-        "assetID" (int): The coin SLIP-0044 number.
+        "assetID" (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
+          See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
         "open" (bool): Whether the wallet is unlocked.
         "running" (bool): Whether the wallet is running.
-	"updated" (int): Unix time of last balance update. Seconds since
-	    00:00:00 Jan 1 1970.
+        "updated" (int): Unix time of last balance update. Seconds since 00:00:00 Jan 1 1970.
         "balance" (int): The wallet balance.
         "address" (string): A wallet address.
         "feerate" (int): The fee rate.

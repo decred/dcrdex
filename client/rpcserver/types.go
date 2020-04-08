@@ -33,12 +33,6 @@ type preRegisterResponse struct {
 	Fee uint64 `json:"fee"`
 }
 
-// newWalletResponse is a response to newWalletRequest.
-type newWalletResponse struct {
-	IsNew    bool `json:"isnew"`
-	IsLocked bool `json:"islocked"`
-}
-
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	AssetID uint32 `json:"assetID"`
