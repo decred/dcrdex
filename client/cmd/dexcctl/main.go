@@ -15,6 +15,7 @@ import (
 
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/admin"
 )
 
 const (
@@ -39,6 +40,35 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
+}
+
+// promptPasswords is a map of routes to password prompts. Passwords are
+// prompted in the order given.
+var promptPasswords = map[string][]string{
+	"openwallet": {"App password:"},
+	"newwallet":  {"App password:", "Wallet password:"},
+	"init":       {"Set new app password:"},
+	"register":   {"App password:"},
+}
+
+// promptPWs prompts for passwords on stdin and returns an error if prompting
+// fails or a password is empty. Returns passwords as a slice of strings.
+func promptPWs(cmd string) ([]string, error) {
+	prompts, exists := promptPasswords[cmd]
+	if !exists {
+		return nil, nil
+	}
+	pws := make([]string, len(prompts))
+	// Prompt for passwords one at a time.
+	for i, prompt := range prompts {
+		pw, err := admin.PasswordPrompt(prompt)
+		if err != nil {
+			return nil, err
+		}
+		pws[i] = string(pw)
+		admin.ClearBytes(pw)
+	}
+	return pws, nil
 }
 
 func run() error {
@@ -79,15 +109,15 @@ func run() error {
 		params = append(params, arg)
 	}
 
-	// Parse the arguments and convert into a type the server accepts.
-	payload, err := rpcserver.ParseCmdArgs(args[0], params)
+	// Prompt for passwords.
+	pws, err := promptPWs(args[0])
 	if err != nil {
-		if errors.Is(err, rpcserver.ErrArgs) {
-			// This is a known command. Ignoring unreachable error.
-			usage, _ := rpcserver.CommandUsage(args[0])
-			return fmt.Errorf("%v\n\n%s", err, usage)
-		}
 		return err
+	}
+
+	payload := &rpcserver.RawParams{
+		PWArgs: pws,
+		Args:   params,
 	}
 
 	// Create a request using the parsedArgs.

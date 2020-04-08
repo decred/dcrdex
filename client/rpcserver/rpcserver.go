@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -44,6 +45,8 @@ var (
 	// Check that core.Core satifies ClientCore.
 	_   ClientCore = (*core.Core)(nil)
 	log slog.Logger
+	// errUnknownCmd is wrapped when the command is not know.
+	errUnknownCmd = errors.New("unknown command")
 )
 
 // ClientCore is satisfied by core.Core.
@@ -312,12 +315,20 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	// Find the correct handler for this route.
 	h, exists := routes[req.Route]
 	if !exists {
-		log.Debugf("%v: %v", ErrUnknownCmd, req.Route)
-		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, ErrUnknownCmd.Error())
+		log.Debugf("%v: %v", errUnknownCmd, req.Route)
+		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, errUnknownCmd.Error())
 		return payload
 	}
 
-	return h(s, req)
+	params := new(RawParams)
+	err := req.Unmarshal(params)
+	if err != nil {
+		log.Debugf("cannot unmarshal params for route %s", req.Route)
+		payload.Error = msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
+		return payload
+	}
+
+	return h(s, params)
 }
 
 // parseHTTPRequest parses the msgjson message in the request body, creates a

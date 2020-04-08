@@ -12,9 +12,10 @@ import (
 	"runtime"
 	"strings"
 
+	flags "github.com/jessevdk/go-flags"
+
 	"decred.org/dcrdex/client/rpcserver"
 	"github.com/decred/dcrd/dcrutil/v2"
-	flags "github.com/jessevdk/go-flags"
 )
 
 const (
@@ -87,7 +88,7 @@ func configure() (*config, []string, bool, error) {
 	// Show the available commands and exit if the associated flag was
 	// specified.
 	if cfg.ListCommands {
-		fmt.Println(rpcserver.ListCommands())
+		fmt.Println(rpcserver.ListCommands(false))
 		return nil, nil, stop, nil
 	}
 

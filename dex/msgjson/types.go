@@ -54,6 +54,7 @@ const (
 	RPCCloseWalletError               // 38
 	RPCPreRegisterError               // 39
 	RPCRegisterError                  // 40
+	RPCArgumentsError                 // 41
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
