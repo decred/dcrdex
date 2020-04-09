@@ -1234,7 +1234,13 @@ func TestAuxiliary(t *testing.T) {
 	confs := int64(3)
 	txout := testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), confs)
 	txout.Value = 8
-	scriptAddrs, _ := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].PkScript, chainParams)
+	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].PkScript, chainParams)
+	if err != nil {
+		t.Fatalf("ExtractScriptAddrs error: %v", err)
+	}
+	if nonStandard {
+		t.Errorf("vote output 0 was non-standard")
+	}
 	addr := scriptAddrs.PkHashes[0].String()
 	txAddr, v, confs, err := dcr.UnspentCoinDetails(toCoinID(txHash, 0))
 	if err != nil {

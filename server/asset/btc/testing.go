@@ -35,6 +35,7 @@ func LiveP2SHStats(btc *Backend, t *testing.T) {
 		swaps        int
 		emptyRedeems int
 		addrErr      int
+		nonStd       int
 		noSigs       int
 	}
 	var stats scriptStats
@@ -146,10 +147,13 @@ out:
 					if scriptType.IsP2SH() {
 						evalScript = redeemScript
 					}
-					scriptAddrs, err := dexbtc.ExtractScriptAddrs(evalScript, btc.chainParams)
+					scriptAddrs, nonStandard, err := dexbtc.ExtractScriptAddrs(evalScript, btc.chainParams)
 					if err != nil {
 						stats.addrErr++
 						continue
+					}
+					if nonStandard {
+						stats.nonStd++
 					}
 					if scriptAddrs.NRequired == 0 {
 						stats.noSigs++

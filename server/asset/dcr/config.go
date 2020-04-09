@@ -51,9 +51,9 @@ type DCRConfig struct {
 }
 
 // loadConfig loads the DCRConfig from file. If no values are found for
-// RPCListen or RPCCert in the specified file, default values will be used.
-// If configPath is an empty string, loadConfig will attempt to read settings
-// directly from the default dcrd.conf filpath. If there is no error, the
+// RPCListen or RPCCert in the specified file, default values will be used. If
+// configPath is an empty string, loadConfig will attempt to read settings
+// directly from the default dcrd.conf file path. If there is no error, the
 // module-level chainParams variable will be set appropriately for the network.
 func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
 	// Check for missing credentials. The user and password must be set.

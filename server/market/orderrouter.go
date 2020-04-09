@@ -543,6 +543,9 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("error retrieving coin ID %v", coin.ID))
 		}
+		// FundingCoin must ensure that the coin requires at least one signature
+		// to spend, and that the redeem script is not non-standard.
+
 		// Check that the outpoint isn't locked.
 		locked := tunnel.CoinLocked(coinAssetID, order.CoinID(coin.ID))
 		if locked {

@@ -337,13 +337,17 @@ type BtcScriptAddrs struct {
 
 // ExtractScriptAddrs extracts the addresses from the pubkey script, or the
 // redeem script if the pubkey script is P2SH.
-func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScriptAddrs, error) {
+func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScriptAddrs, bool, error) {
 	pubkeys := make([]btcutil.Address, 0)
 	pkHashes := make([]btcutil.Address, 0)
 	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
-	_, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(script, chainParams)
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(script, chainParams)
+	nonStandard := class == txscript.NonStandardTy
 	if err != nil {
-		return nil, fmt.Errorf("ExtractScriptAddrs: %v", err)
+		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %v", err)
+	}
+	if nonStandard {
+		return &BtcScriptAddrs{}, nonStandard, nil
 	}
 	for _, addr := range addrs {
 		// If the address is an unhashed public key, is won't need a pubkey as part
@@ -361,7 +365,7 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScript
 		PKHashes:  pkHashes,
 		NumPKH:    len(pkHashes),
 		NRequired: numRequired,
-	}, nil
+	}, false, nil
 }
 
 // ExtractSwapDetails extacts the sender and receiver addresses from a swap
@@ -456,10 +460,11 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 }
 
 type SpendInfo struct {
-	SigScriptSize uint32
-	WitnessSize   uint32
-	ScriptAddrs   *BtcScriptAddrs
-	ScriptType    BTCScriptType
+	SigScriptSize     uint32
+	WitnessSize       uint32
+	ScriptAddrs       *BtcScriptAddrs
+	ScriptType        BTCScriptType
+	NonStandardScript bool
 }
 
 // VBytes is the virtual bytes of the spending transaction input. Miners use
@@ -486,9 +491,17 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 		}
 		evalScript = redeemScript
 	}
-	scriptAddrs, err := ExtractScriptAddrs(evalScript, chainParams)
+	scriptAddrs, nonStandard, err := ExtractScriptAddrs(evalScript, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing script addresses: %v", err)
+	}
+	if nonStandard {
+		return &SpendInfo{
+			// SigScriptSize and WitnessSizecannot be determined, leave zero.
+			ScriptAddrs:       scriptAddrs,
+			ScriptType:        scriptType,
+			NonStandardScript: true,
+		}, nil
 	}
 
 	// Start with standard P2PKH.
@@ -582,7 +595,7 @@ func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte
 // The pkScript must be a a P2SH script, requiring only 1 pkh address, which
 // must be a script hash address.
 func ExtractScriptHash(pkScript []byte, chainParams *chaincfg.Params) ([]byte, error) {
-	scriptAddrs, err := ExtractScriptAddrs(pkScript, chainParams)
+	scriptAddrs, _, err := ExtractScriptAddrs(pkScript, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting contract address: %v", err)
 	}

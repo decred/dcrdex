@@ -165,7 +165,8 @@ type UTXO struct {
 	TXIO
 	vout uint32
 	// A bitmask for script type information.
-	scriptType dexdcr.DCRScriptType
+	scriptType        dexdcr.DCRScriptType
+	nonStandardScript bool
 	// The output's scriptPubkey.
 	pkScript []byte
 	// If the pubkey script is P2SH, the UTXO will only be generated if
@@ -225,9 +226,20 @@ func (utxo *UTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	if utxo.scriptType.IsP2SH() {
 		evalScript = utxo.redeemScript
 	}
-	scriptAddrs, err := dexdcr.ExtractScriptAddrs(evalScript, chainParams)
+	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(evalScript, chainParams)
 	if err != nil {
 		return err
+	}
+	if nonStandard {
+		return fmt.Errorf("non-standard script")
+	}
+	// Ensure that at least 1 signature is required to spend this output.
+	// Non-standard scripts are already be caught, but check again here in case
+	// this can happen another way. Note that Auth may be called via an
+	// interface, where this requirement may not fit into a generic spendability
+	// check.
+	if scriptAddrs.NRequired == 0 {
+		return fmt.Errorf("script requires no signatures to spend")
 	}
 	if scriptAddrs.NRequired != utxo.numSigs {
 		return fmt.Errorf("signature requirement mismatch for utxo %s:%d. %d != %d", utxo.tx.hash, utxo.vout, scriptAddrs.NRequired, utxo.numSigs)
