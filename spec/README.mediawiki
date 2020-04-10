@@ -65,7 +65,7 @@ traders and operators alike.
 While trades are fully trustless, steps are taken to discourage malicious
 clients from hindering normal trade activity.
 Registered clients are bound by the
-[[#community-conduct|rules of community conduct]], violation of which typically
+[[community.mediawiki|rules of community conduct]], violation of which typically
 results in loss of trading privileges.
 Serious violations may result in a permanent ban, in which case the affected user
 must pay another registration fee to continue using the DEX.
