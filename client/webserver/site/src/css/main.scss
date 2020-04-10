@@ -9,7 +9,7 @@ html {
 
 html,
 button {
-  color: #333;
+  color: $font-color-light;
 }
 
 body {
@@ -22,7 +22,7 @@ body {
   flex-direction: column;
   justify-content: flex-start;
   background-color: #e0e0e0;
-  font-family: 'source-sans', sans-serif;
+  font-family: $sans;
 }
 
 button {
@@ -116,14 +116,12 @@ body.dark button {
 }
 
 div.mainlinks > span {
-  font-family: $demi-sans;
-  font-weight: bolder;
   padding-right: 1.7em;
   color: #4a4949;
   cursor: pointer;
 }
 
-div.mainlinks > span:hover {
+div.mainlinks .hoverbright:hover {
   color: $dark_bg_3;
 }
 
@@ -168,13 +166,42 @@ div.note-indicator {
 }
 
 div.note-indicator.good {
-  display: block;
   background-color: green;
 }
 
 div.note-indicator.bad {
-  display: block;
   background-color: red;
+}
+
+div.note-indicator.warn {
+  background-color: orange;
+}
+
+div.poke-note {
+  position: fixed;
+  right: 20px;
+  top: 100%;
+  height: 30px;
+  transition: top 1s;
+  background-color: black;
+  color: $font-color-dark;
+  border-radius: 5px 5px 0 0;
+  z-index: 1000;
+  border-width: 1px;
+  border-style: solid;
+  border-color: #444;
+  max-width: 90%;
+
+  & > span {
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+div.poke-note.active {
+  top: calc(100% - 30px);
 }
 
 #noteBox {
@@ -182,23 +209,26 @@ div.note-indicator.bad {
   display: none;
   top: -10px;
   right: 10px;
-  width: 375px;
-  padding: 10px;
+  width: 450px;
   background-color: white;
   border: 1px solid black;
   z-index: 1;
   cursor: default;
+  font-family: $sans;
 }
 
-div.note {
-  overflow-wrap: break-word;
-  padding: 5px 0;
+div.note-header {
+  margin: 0 5px;
+  padding: 10px 5px;
+  border-bottom-style: solid;
+  border-width: 2px;
+  border-color: #aaa;
 }
 
 div.note:not(:last-child) {
   border-bottom-style: solid;
   border-width: 1px;
-  border-color: #777;
+  border-color: #aaa;
 }
 
 @keyframes spin {

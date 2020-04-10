@@ -43,7 +43,7 @@ func (set *errorSet) addErr(err error) *errorSet {
 }
 
 // If any returns the error set if there are any errors, else nil.
-func (set *errorSet) ifany() *errorSet {
+func (set *errorSet) ifany() error {
 	if len(set.errs) > 0 {
 		return set
 	}
@@ -114,6 +114,8 @@ type Match struct {
 // Order is core's general type for an order. An order may be a market, limit,
 // or cancel order. Some fields are only relevant to particular order types.
 type Order struct {
+	DEX         string            `json:"dex"`
+	MarketID    string            `json:"market"`
 	Type        order.OrderType   `json:"type"`
 	ID          string            `json:"id"`
 	Stamp       uint64            `json:"stamp"`
@@ -122,6 +124,7 @@ type Order struct {
 	Filled      uint64            `json:"filled"`
 	Matches     []*Match          `json:"matches"`
 	Cancelling  bool              `json:"cancelling"`
+	Canceled    bool              `json:"canceled"`
 	Rate        uint64            `json:"rate"`               // limit only
 	TimeInForce order.TimeInForce `json:"tif"`                // limit only
 	TargetID    string            `json:"targetID,omitempty"` // cancel only
@@ -145,9 +148,9 @@ func (m *Market) Display() string {
 	return newDisplayIDFromSymbols(m.BaseSymbol, m.QuoteSymbol)
 }
 
-// sid is a simpler string ID constructed from the asset IDs.
-func (m *Market) sid() string {
-	return sid(m.BaseID, m.QuoteID)
+// mktID is a string ID constructed from the asset IDs.
+func (m *Market) mktID() string {
+	return mktID(m.BaseID, m.QuoteID)
 }
 
 // Exchange represents a single DEX with any number of markets.
@@ -346,7 +349,7 @@ type TradeForm struct {
 	TifNow  bool   `json:"tifnow"`
 }
 
-// sid is a string ID constructed from the asset IDs.
-func sid(b, q uint32) string {
+// mktID is a string ID constructed from the asset IDs.
+func mktID(b, q uint32) string {
 	return strconv.Itoa(int(b)) + "-" + strconv.Itoa(int(q))
 }

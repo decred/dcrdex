@@ -136,6 +136,7 @@ func (s *WebServer) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson
 var wsHandlers = map[string]func(*WebServer, *wsClient, *msgjson.Message) *msgjson.Error{
 	"loadmarket": wsLoadMarket,
 	"unmarket":   wsUnmarket,
+	"acknotes":   wsAckNotes,
 }
 
 // marketLoad is sent by websocket clients to subscribe to a market and request
@@ -204,5 +205,20 @@ func wsUnmarket(_ *WebServer, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 		cl.quit()
 		cl.quit = nil
 	}
+	return nil
+}
+
+type ackNoteIDs []dex.Bytes
+
+// wsAckNotes is the handler for the 'acknotes' websocket endpoint. Informs the
+// Core that the user has seen the specified notifications.
+func wsAckNotes(s *WebServer, _ *wsClient, msg *msgjson.Message) *msgjson.Error {
+	ids := make(ackNoteIDs, 0)
+	err := msg.Unmarshal(&ids)
+	if err != nil {
+		log.Errorf("error acking notifications: %v", err)
+		return nil
+	}
+	s.core.AckNotes(ids)
 	return nil
 }

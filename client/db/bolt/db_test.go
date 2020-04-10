@@ -590,3 +590,64 @@ func randBytes(l int) []byte {
 	rand.Read(b)
 	return b
 }
+
+func TestNotifications(t *testing.T) {
+	boltdb := newTestDB(t)
+	numToDo := 1000
+	numToFetch := 200
+	if testing.Short() {
+		numToDo = 10
+		numToFetch = 2
+	}
+	newest := uint64(rand.Int63()) - uint64(numToFetch)
+
+	notes := make([]*db.Notification, 0, numToDo)
+	nTimes(numToDo, func(int) {
+		notes = append(notes, dbtest.RandomNotification(newest))
+	})
+
+	fetches := make([]*db.Notification, numToFetch)
+	for i := numToFetch - 1; i >= 0; i-- {
+		newest++
+		notes[i].TimeStamp = newest
+		fetches[i] = notes[i]
+	}
+
+	tStart := time.Now()
+	nTimes(numToDo, func(i int) {
+		err := boltdb.SaveNotification(notes[i])
+		if err != nil {
+			t.Fatalf("SaveNotification error: %v", err)
+		}
+	})
+	t.Logf("%d milliseconds to insert %d active Notification", time.Since(tStart)/time.Millisecond, numToDo)
+
+	tStart = time.Now()
+	fetched, err := boltdb.NotificationsN(numToFetch)
+	if err != nil {
+		t.Fatalf("fetch error: %v", err)
+	}
+	t.Logf("%d milliseconds to fetch %d sorted Notification", time.Since(tStart)/time.Millisecond, numToFetch)
+	if len(fetched) != numToFetch {
+		t.Fatalf("fetched wrong number of notifications. %d != %d", len(fetched), numToFetch)
+	}
+
+	var ids [][]byte
+	for i, note := range fetched {
+		dbtest.MustCompareNotifications(t, note, fetches[i])
+		ids = append(ids, note.ID())
+		boltdb.AckNotification(note.ID())
+	}
+
+	fetched, err = boltdb.NotificationsN(numToFetch)
+	if err != nil {
+		t.Fatalf("fetch error after acks: %v", err)
+	}
+
+	for _, note := range fetched {
+		if !note.Ack {
+			t.Fatalf("order acknowledgedgement not recorded")
+		}
+	}
+
+}

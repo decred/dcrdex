@@ -8,22 +8,27 @@ const bind = Doc.bind
 const unbind = Doc.unbind
 var app
 
-const SUCCESS = 'success'
-const ERROR = 'error'
+const IGNORE = 0
+// const DATA = 1
+const POKE = 2
+const SUCCESS = 3
+const WARNING = 4
+const ERROR = 5
+
 const DCR_ID = 42
 const LIMIT = 1
 // const MARKET = 2
 // const CANCEL = 3
 
 const updateWalletRoute = 'update_wallet'
-const errorMsgRoute = 'error_message'
-const successMsgRoute = 'success_message'
+const notificationRoute = 'notify'
 
 // window.logit = function (lvl, msg) { app.notify(lvl, msg) }
 
 // Application is the main javascript web application for the Decred DEX client.
 export default class Application {
   constructor () {
+    this.notifiers = {}
     this.notes = []
     this.user = {
       accounts: {},
@@ -42,9 +47,11 @@ export default class Application {
     this.main = idel(document, 'main')
     const handler = this.main.dataset.handler
     window.history.replaceState({ page: handler }, '', `/${handler}`)
-    this.attachHeader(idel(document, 'header'))
+    this.attachHeader()
     this.attachCommon(this.header)
     this.attach()
+    const notes = State.fetch('notifications')
+    this.setNotes(notes || [])
     ws.connect(getSocketURI(), this.reconnected)
     ws.registerRoute(updateWalletRoute, wallet => {
       this.assets[wallet.assetID].wallet = wallet
@@ -52,11 +59,8 @@ export default class Application {
       const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
       balances.forEach(el => { el.textContent = (wallet.balance / 1e8).toFixed(8) })
     })
-    ws.registerRoute(errorMsgRoute, msg => {
-      this.notify(ERROR, msg)
-    })
-    ws.registerRoute(successMsgRoute, msg => {
-      this.notify(SUCCESS, msg)
+    ws.registerRoute(notificationRoute, note => {
+      this.notify(note)
     })
   }
 
@@ -68,6 +72,8 @@ export default class Application {
     const user = await getJSON('/api/user')
     if (!checkResponse(user)) return
     this.user = user
+    // Clear the notification cache for unitialized users.
+    if (!user.inited) State.store('notifications', null)
     this.assets = user.assets
     this.walletMap = {}
     for (const [assetID, asset] of Object.entries(user.assets)) {
@@ -108,17 +114,18 @@ export default class Application {
     if (!handler) {
       console.error(`no handler for ${handlerID}`)
     }
-    handler(this.main, data)
+    this.notifiers = handler(this.main, data) || {}
   }
 
-  attachHeader (header) {
-    this.header = header
-    const pg = this.page = parsePage(header, [
+  attachHeader () {
+    this.header = idel(document.body, 'header')
+    this.pokeNote = idel(document.body, 'pokeNote')
+    const pg = this.page = parsePage(this.header, [
       'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
       'walletsMenuEntry', 'noteMenuEntry', 'settingsIcon', 'loginLink', 'loader'
     ])
     pg.noteIndicator.style.display = 'none'
-    pg.noteTemplate.id = undefined
+    delete pg.noteTemplate.id
     pg.noteTemplate.remove()
     pg.loader.remove()
     pg.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
@@ -130,14 +137,37 @@ export default class Application {
         unbind(document, hide)
       }
     }
-    bind(pg.noteMenuEntry, 'click', e => {
+    bind(pg.noteMenuEntry, 'click', async e => {
       bind(document, 'click', hide)
       pg.noteBox.style.display = 'block'
       pg.noteIndicator.style.display = 'none'
+      const acks = []
+      for (const note of this.notes) {
+        if (!note.acked) {
+          note.acked = true
+          if (note.id && note.severity > POKE) acks.push(note.id)
+        }
+        note.el.querySelector('div.note-time').textContent = timeSince(note.stamp)
+      }
+      this.storeNotes()
+      if (acks.length) ws.request('acknotes', acks)
     })
     if (this.notes.length === 0) {
       pg.noteList.textContent = 'no notifications'
     }
+  }
+
+  storeNotes () {
+    State.store('notifications', this.notes.map(n => {
+      return {
+        subject: n.subject,
+        details: n.details,
+        severity: n.severity,
+        stamp: n.stamp,
+        id: n.id,
+        acked: n.acked
+      }
+    }))
   }
 
   // Use setLogged when user has signed in or out. For logging out, it may be
@@ -163,58 +193,78 @@ export default class Application {
     })
   }
 
-  notify (level, msg) {
-    var found = false
-    for (let i = 0; i < this.notes.length; i++) {
-      if (this.notes[i].msg === msg) {
-        this.notes[i].count++
-        found = true
-        break
+  setNotes (notes) {
+    this.notes = notes
+    this.setNoteElements()
+  }
+
+  notify (note) {
+    // Handle type-specific updates.
+    switch (note.type) {
+      case 'order': {
+        const order = note.order
+        const mkt = this.user.exchanges[order.dex].markets[order.market]
+        if (mkt.orders) {
+          for (const i in mkt.orders) {
+            if (mkt.orders[i].id === order.id) {
+              mkt.orders[i] = order
+              break
+            }
+          }
+        }
       }
     }
-    if (!found) {
-      this.notes.push({
-        level: level,
-        msg: msg,
-        count: 1
-      })
+    // Inform the page.
+    if (this.notifiers[note.type]) this.notifiers[note.type](note)
+    // Discard data notifications.
+    if (note.severity < POKE) return
+    // Poke notifications have their own display.
+    if (note.severity === POKE) {
+      this.pokeNote.firstChild.textContent = `${note.subject}: ${note.details}`
+      this.pokeNote.classList.add('active')
+      if (this.pokeNote.timer) {
+        clearTimeout(this.pokeNote.timer)
+      }
+      this.pokeNote.timer = setTimeout(() => {
+        this.pokeNote.classList.remove('active')
+        delete this.pokeNote.timer
+      }, 5000)
+      return
     }
-    const notes = this.page.noteList
-    Doc.empty(notes)
+    // Success and higher severity go to the bell dropdown.
+    this.notes.push(note)
+    this.setNoteElements()
+  }
+
+  setNoteElements () {
+    const noteList = this.page.noteList
+    while (this.notes.length > 10) this.notes.shift()
+    Doc.empty(noteList)
     for (let i = this.notes.length - 1; i >= 0; i--) {
-      if (i < this.notes.length - 10) return
       const note = this.notes[i]
-      const noteEl = this.makeNote(note.level, note.msg)
-      notes.appendChild(noteEl)
+      const noteEl = this.makeNote(note)
+      note.el = noteEl
+      noteList.appendChild(noteEl)
     }
-    this.notifyUI()
+    this.storeNotes()
+    // Set the indicator color.
+    if (this.notes.length === 0) return
+    const severity = this.notes.reduce((s, v) => {
+      if (!v.acked && v.severity > s) return v.severity
+      return s
+    }, IGNORE)
+    setSeverityClass(this.page.noteIndicator, severity)
   }
 
-  notifyUI () {
-    const ni = this.page.noteIndicator
-    ni.style.display = 'block'
-    ni.classList.remove('bad')
-    ni.classList.remove('good')
-    const noteLevel = this.notes.reduce((a, v) => {
-      if (v.level === ERROR) return ERROR
-      if (v.level === SUCCESS && a !== ERROR) return SUCCESS
-      return a
-    }, 0)
-    switch (noteLevel) {
-      case ERROR:
-        ni.classList.add('bad')
-        break
-      case SUCCESS:
-        ni.classList.add('good')
-        break
+  makeNote (note) {
+    const el = this.page.noteTemplate.cloneNode(true)
+    if (note.severity > POKE) {
+      const cls = note.severity === SUCCESS ? 'good' : note.severity === WARNING ? 'warn' : 'bad'
+      el.querySelector('div.note-indicator').classList.add(cls)
     }
-  }
-
-  makeNote (level, msg) {
-    const note = this.page.noteTemplate.cloneNode(true)
-    note.querySelector('div').classList.add(level === ERROR ? 'bad' : 'good')
-    note.querySelector('span').textContent = msg
-    return note
+    el.querySelector('div.note-subject').textContent = note.subject
+    el.querySelector('div.note-details').textContent = note.details
+    return el
   }
 
   loading (el) {
@@ -302,6 +352,8 @@ function handleLogin (main) {
     app.loaded()
     var res = await postJSON('/api/login', { pass: pw })
     if (!checkResponse(res)) return
+    res.notes.reverse()
+    app.setNotes(res.notes)
     await app.fetchUser()
     app.setLogged(true)
     app.loadPage('markets')
@@ -433,7 +485,6 @@ function handleRegister (main) {
   // SUBMIT DEX REGISTRATION
   bindForm(page.pwForm, page.submitPW, async () => {
     Doc.hide(page.regErr)
-    const dex = page.addrInput.value
     const registration = {
       dex: page.addrInput.value,
       pass: page.clientPass.value,
@@ -451,13 +502,12 @@ function handleRegister (main) {
     // Need to get a fresh market list. May consider handling this with a
     // websocket update instead.
     await app.fetchUser()
-    app.notify(SUCCESS, `Account registered for ${dex}. Waiting for confirmations.`)
     app.loadPage('markets')
   })
 }
 
 // handleMarkets is the 'markets' page main element handler.
-async function handleMarkets (main, data) {
+function handleMarkets (main, data) {
   var market
   const page = parsePage(main, [
     // Templates, loaders, chart div...
@@ -690,11 +740,14 @@ async function handleMarkets (main, data) {
     }
   }
 
+  const orderRows = {}
   const refreshActiveOrders = () => {
+    for (const oid in orderRows) delete orderRows[oid]
     const orders = app.orders(selected.dex.url, selected.base.id, selected.quote.id)
     Doc.empty(page.liveList)
     for (const order of orders) {
       const row = page.liveTemplate.cloneNode(true)
+      orderRows[order.id] = row
       const set = (col, s) => { row.querySelector(`[data-col=${col}]`).textContent = s }
       set('side', order.sell ? 'sell' : 'buy')
       set('age', timeSince(order.stamp))
@@ -703,8 +756,8 @@ async function handleMarkets (main, data) {
       set('filled', `${(order.filled / order.qty * 100).toFixed(1)}%`)
       if (order.type === LIMIT) {
         if (order.cancelling) {
-          set('cancel', 'cancelling')
-        } else {
+          set('cancel', order.canceled ? 'canceled' : 'cancelling')
+        } else if (order.filled !== order.qty) {
           const icon = row.querySelector('[data-col=cancel] > span')
           Doc.show(icon)
           Doc.bind(icon, 'click', e => {
@@ -996,6 +1049,24 @@ async function handleMarkets (main, data) {
     ws.deregisterRoute('bookupdate')
     chart.unattach()
   })
+
+  return {
+    order: note => {
+      const order = note.order
+      if (order.targetID && note.subject === 'cancel') {
+        orderRows[order.targetID].querySelector('[data-col=cancel]').textContent = 'canceled'
+      } else {
+        const row = orderRows[order.id]
+        if (!row) return
+        const td = row.querySelector('[data-col=filled]')
+        td.textContent = `${(order.filled / order.qty * 100).toFixed(1)}%`
+        if (order.filled === order.qty) {
+          // Remove the cancellation button.
+          row.querySelector('[data-col=cancel]').textContent = ''
+        }
+      }
+    }
+  }
 }
 
 function makeMarket (dex, base, quote) {
@@ -1186,7 +1257,7 @@ function handleWallets (main) {
     const asset = app.assets[assetID]
     const wallet = app.walletMap[assetID]
     if (!wallet) {
-      app.notify(ERROR, `No wallet found for ${asset.info.name}. Cannot retrieve deposit address.`)
+      app.notify(makeNotification(`No wallet found for ${asset.info.name}`, 'Cannot retrieve deposit address.', ERROR))
       return
     }
     await hideBox()
@@ -1201,7 +1272,7 @@ function handleWallets (main) {
     const asset = app.assets[assetID]
     const wallet = app.walletMap[assetID]
     if (!wallet) {
-      app.notify(ERROR, `No wallet found for ${asset.info.name}. Cannot withdraw.`)
+      app.notify(makeNotification(`No wallet found for ${asset.info.name}`, 'Cannot withdraw.', ERROR))
     }
     await hideBox()
     page.withdrawAddr.value = ''
@@ -1267,7 +1338,6 @@ function handleWallets (main) {
       Doc.show(page.withdrawErr)
       return
     }
-    app.notify(SUCCESS, `Withdraw initiated. Coin ID ${res.coin}.`)
     showMarkets(assetID)
   })
 
@@ -1361,7 +1431,7 @@ function parsePage (main, ids) {
 
 function checkResponse (resp) {
   if (!resp.requestSuccessful || !resp.ok) {
-    if (app.user.inited) app.notify(ERROR, resp.msg)
+    if (app.user.inited) app.notify(makeNotification('Error', resp.msg, ERROR))
     return false
   }
   return true
@@ -1543,4 +1613,26 @@ function timeSince (t) {
   [s, seconds] = timeMod(seconds, 1000)
   add(s, 's')
   return result || '0 s'
+}
+
+function makeNotification (subject, details, severity) {
+  return {
+    subject: subject,
+    details: details,
+    severity: severity,
+    stamp: new Date().getTime()
+  }
+}
+
+const severityClassMap = {
+  [SUCCESS]: 'good',
+  [ERROR]: 'bad',
+  [WARNING]: 'warn'
+}
+
+function setSeverityClass (el, severity) {
+  el.classList.remove('bad', 'warn', 'good')
+  const cls = severityClassMap[severity]
+  if (cls) el.classList.add(cls)
+  el.style.display = cls ? 'block' : 'none'
 }

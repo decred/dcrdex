@@ -23,6 +23,8 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -46,17 +48,15 @@ var (
 	// updateWalletRoute is a notification route that updates the state of a
 	// wallet.
 	updateWalletRoute = "update_wallet"
-	// errMsgRoute is used to send a simple error message .
-	errorMsgRoute = "error_message"
-	// successMsgRoute is used to send a simple success message.
-	successMsgRoute = "success_message"
+	// updateWalletRoute is a route used for general notifications.
+	notifyRoute = "notify"
 )
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	Exchanges() map[string]*core.Exchange
-	Register(*core.Registration) (error, <-chan error)
-	Login(pw string) error
+	Register(*core.Registration) error
+	Login(pw string) ([]*db.Notification, error)
 	InitializeClient(pw string) error
 	Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error)
 	Book(dex string, base, quote uint32) *core.OrderBook
@@ -74,6 +74,8 @@ type clientCore interface {
 	Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error)
 	Trade(pw string, form *core.TradeForm) (*core.Order, error)
 	Cancel(pw string, sid string) error
+	NotificationFeed() <-chan core.Notification
+	AckNotes([]dex.Bytes)
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -264,6 +266,12 @@ func (s *WebServer) Run(ctx context.Context) {
 		}
 	}()
 
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.readNotifications(ctx)
+	}()
+
 	log.Infof("Web server listening on %s", s.addr)
 	err = s.srv.Serve(listener)
 	if !errors.Is(err, http.ErrServerClosed) {
@@ -321,6 +329,21 @@ func (s *WebServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (b
 	return book, func() {
 		syncer.remove(cl)
 	}, nil
+}
+
+// readNotifications reads from the Core notification channel and relays to
+// websocket clients.
+func (s *WebServer) readNotifications(ctx context.Context) {
+	ch := s.core.NotificationFeed()
+	for {
+		select {
+		case n := <-ch:
+			s.notify(notifyRoute, n)
+			log.Debugf("%s: %s: %s", n.Severity(), n.Subject(), n.Details())
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // readPost unmarshals the request body into the provided interface.

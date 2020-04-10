@@ -133,6 +133,7 @@ export class DepthChart {
 
   // click_ is the canvas 'click' event handler.
   click_ (e) {
+    if (!this.dataExtents) return
     const x = e.clientX - this.rect.left
     const y = e.clientY - this.rect.y
     if (this.zoomInBttn.contains(x, y)) { this.zoom(true); return }

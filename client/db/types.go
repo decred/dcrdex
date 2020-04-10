@@ -9,10 +9,51 @@ import (
 	"strconv"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"golang.org/x/crypto/blake2s"
 )
+
+// Severity indicates the level of required action for a notification. The DEX
+// db only stores notifications with Severity >= Success.
+type Severity uint8
+
+const (
+	Ignorable Severity = iota
+	// Data notifications are not meant for display to the user. These
+	// notifications are used only for communication of information necessary for
+	// UI updates or other high-level state changes.
+	Data
+	// Poke notifications are not persistent across sessions. These should be
+	// displayed if the user has a live notification feed. They are not stored in
+	// the database.
+	Poke
+	// Success and higher are stored and can be recalled using DB.NotificationsN.
+	Success
+	WarningLevel
+	ErrorLevel
+)
+
+// String satisfies fmt.Stringer for Severity.
+func (s Severity) String() string {
+	switch s {
+	case Ignorable:
+		return "ignore"
+	case Data:
+		return "data"
+	case Poke:
+		return "poke"
+	case WarningLevel:
+		return "warning"
+	case ErrorLevel:
+		return "error"
+	case Success:
+		return "success"
+	}
+	return "unknown severity"
+}
 
 // AccountInfo is information about an account on a Decred DEX. The database
 // is designed for one account per server.
@@ -435,4 +476,127 @@ func RestoreAccountBackup(path string) (*AccountBackup, error) {
 		return nil, err
 	}
 	return ab, nil
+}
+
+// Notification is information for the user that is typically meant for display,
+// and is persisted for recall across sessions.
+type Notification struct {
+	NoteType    string    `json:"type"`
+	SubjectText string    `json:"subject"`
+	DetailText  string    `json:"details"`
+	Severeness  Severity  `json:"severity"`
+	TimeStamp   uint64    `json:"stamp"`
+	Ack         bool      `json:"acked"`
+	Id          dex.Bytes `json:"id"`
+}
+
+// NewNotification is a constructor for a Notification.
+func NewNotification(noteType, subject, details string, severity Severity) Notification {
+	note := Notification{
+		NoteType:    noteType,
+		SubjectText: subject,
+		DetailText:  details,
+		Severeness:  severity,
+	}
+	note.Stamp()
+	return note
+}
+
+// ID is a unique ID based on a hash of the notification data.
+func (n *Notification) ID() dex.Bytes {
+	return hashKey(n.Encode())
+}
+
+// Type is the notification type.
+func (n *Notification) Type() string {
+	return n.NoteType
+}
+
+// Subject is a short description of the notification contents.
+func (n *Notification) Subject() string {
+	return n.SubjectText
+}
+
+// Details should contain more detailed information.
+func (n *Notification) Details() string {
+	return n.DetailText
+}
+
+// Severity is the notification severity.
+func (n *Notification) Severity() Severity {
+	return n.Severeness
+}
+
+// Time is the notification timestamp. The timestamp is set in NewNotification.
+func (n *Notification) Time() uint64 {
+	return n.TimeStamp
+}
+
+// Acked is true if the user has seen the notification. Acknowledgement is
+// recorded with DB.AckNotification.
+func (n *Notification) Acked() bool {
+	return n.Ack
+}
+
+// Stamp sets the notification timestamp. If NewNotification is used to
+// construct the Notification, the timestamp will already be set.
+func (n *Notification) Stamp() {
+	n.TimeStamp = encode.UnixMilliU(time.Now())
+	n.Id = n.ID()
+}
+
+// DBNote is a function to return the *Notification itself. It  should really be
+// defined on the concrete types in core, but is ubiquitous so defined here for
+// convenience.
+func (n *Notification) DBNote() *Notification {
+	return n
+}
+
+// DecodeWallet decodes the versioned blob to a *Wallet.
+func DecodeNotification(b []byte) (*Notification, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeNotification_v0(pushes)
+	}
+	return nil, fmt.Errorf("unknown DecodeNotification version %d", ver)
+}
+
+func decodeNotification_v0(pushes [][]byte) (*Notification, error) {
+	if len(pushes) != 5 {
+		return nil, fmt.Errorf("decodeNotification_v0: expected 5 pushes, got %d", len(pushes))
+	}
+	if len(pushes[3]) != 1 {
+		return nil, fmt.Errorf("decodeNotification_v0: severity push is supposed to be length 1. got %d", len(pushes[2]))
+	}
+
+	return &Notification{
+		NoteType:    string(pushes[0]),
+		SubjectText: string(pushes[1]),
+		DetailText:  string(pushes[2]),
+		Severeness:  Severity(pushes[3][0]),
+		TimeStamp:   intCoder.Uint64(pushes[4]),
+	}, nil
+}
+
+// Encode encodes the Notification to a versioned blob.
+func (n *Notification) Encode() []byte {
+	return dbBytes{0}.
+		AddData([]byte(n.NoteType)).
+		AddData([]byte(n.SubjectText)).
+		AddData([]byte(n.DetailText)).
+		AddData([]byte{byte(n.Severeness)}).
+		AddData(uint64Bytes(n.TimeStamp))
+}
+
+// hashKeySize must be <= 32.
+const hashKeySize = 8
+
+// hashKey creates a unique key from the hash of the supplied bytes.
+func hashKey(b []byte) []byte {
+	h := blake2s.Sum256(b)
+	return h[:hashKeySize]
 }

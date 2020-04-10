@@ -15,6 +15,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -70,11 +71,11 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Exchanges() map[string]*core.Exchange                { return nil }
-func (c *TCore) PreRegister(dex string) (uint64, error)              { return 1e8, c.preRegErr }
-func (c *TCore) Register(r *core.Registration) (error, <-chan error) { return c.regErr, nil }
-func (c *TCore) InitializeClient(pw string) error                    { return c.initErr }
-func (c *TCore) Login(pw string) error                               { return c.loginErr }
+func (c *TCore) Exchanges() map[string]*core.Exchange        { return nil }
+func (c *TCore) PreRegister(dex string) (uint64, error)      { return 1e8, c.preRegErr }
+func (c *TCore) Register(r *core.Registration) error         { return c.regErr }
+func (c *TCore) InitializeClient(pw string) error            { return c.initErr }
+func (c *TCore) Login(pw string) ([]*db.Notification, error) { return nil, c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return nil, c.syncErr
 }
@@ -121,6 +122,10 @@ func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
 }
 
 func (c *TCore) Cancel(pw string, sid string) error { return nil }
+
+func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
+
+func (c *TCore) AckNotes(ids []dex.Bytes) {}
 
 type TWriter struct {
 	b []byte
@@ -444,7 +449,7 @@ func TestAPILogin(t *testing.T) {
 		Pass: "def",
 	}
 	body = goodBody
-	ensure(`{"ok":true}`)
+	ensure(`{"ok":true,"notes":null}`)
 
 	// Login error
 	tCore.loginErr = tErr
@@ -519,7 +524,7 @@ func TestAPIInit(t *testing.T) {
 		Pass: "def",
 	}
 	body = goodBody
-	ensure(`{"ok":true}`)
+	ensure(`{"ok":true,"notes":null}`)
 
 	// Initialization error
 	tCore.initErr = tErr
