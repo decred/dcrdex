@@ -95,6 +95,7 @@ type DexConf struct {
 	RegFeeAmount     uint64
 	BroadcastTimeout time.Duration
 	CancelThreshold  float64
+	Anarchy          bool
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
 }
@@ -329,6 +330,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.UnspentCoinDetails,
 		CancelThreshold: cfg.CancelThreshold,
+		Anarchy:         cfg.Anarchy,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)

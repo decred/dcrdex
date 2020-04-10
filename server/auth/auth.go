@@ -130,6 +130,7 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // signing messages with the DEX's private key. AuthManager manages requests to
 // the 'connect' route.
 type AuthManager struct {
+	anarchy      bool
 	connMtx      sync.RWMutex
 	cancelThresh float64
 	users        map[account.AccountID]*clientInfo
@@ -160,11 +161,13 @@ type Config struct {
 	FeeChecker FeeChecker
 
 	CancelThreshold float64
+	Anarchy         bool
 }
 
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
 	auth := &AuthManager{
+		anarchy:      cfg.Anarchy,
 		users:        make(map[account.AccountID]*clientInfo),
 		conns:        make(map[uint64]*clientInfo),
 		storage:      cfg.Storage,
@@ -326,8 +329,15 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) { /
 		log.Errorf("no client to penalize")
 		return
 	}
+	if auth.anarchy {
+		log.Infof("user %v penalized for rule %v, but not enforcing it", user, rule)
+		return
+	}
 	auth.storage.CloseAccount(client.acct.ID, rule)
 	client.conn.Banish() // May not want to do this. Leaving it for now.
+	// TODO: definitely don't want to do disconnect if the user has active
+	// swaps, which everyone would benefit from if they finish them. However, we
+	// do not want the user to initiate a swap or place a new order.
 	auth.removeClient(client)
 }
 
