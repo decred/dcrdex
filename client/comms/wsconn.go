@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -51,7 +50,7 @@ type WsCfg struct {
 	// The maximum time in seconds to wait for a ping from the server.
 	PingWait time.Duration
 	// The rpc certificate file path.
-	RpcCert string
+	Cert []byte
 	// ReconnectSync runs the needed reconnection synchronization after
 	// a disconnect.
 	ReconnectSync func()
@@ -88,23 +87,14 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 	}
 
 	var tlsConfig *tls.Config
-	if cfg.RpcCert != "" {
-		if !fileExists(cfg.RpcCert) {
-			return nil, fmt.Errorf("the rpc cert provided (%v) "+
-				"does not exist", cfg.RpcCert)
-		}
+	if len(cfg.Cert) > 0 {
 
 		rootCAs, _ := x509.SystemCertPool()
 		if rootCAs == nil {
 			rootCAs = x509.NewCertPool()
 		}
 
-		certs, err := ioutil.ReadFile(cfg.RpcCert)
-		if err != nil {
-			return nil, fmt.Errorf("file reading error: %v", err)
-		}
-
-		if ok := rootCAs.AppendCertsFromPEM(certs); !ok {
+		if ok := rootCAs.AppendCertsFromPEM(cfg.Cert); !ok {
 			return nil, fmt.Errorf("unable to append cert")
 		}
 

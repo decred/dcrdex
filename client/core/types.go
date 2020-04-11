@@ -98,9 +98,16 @@ type SupportedAsset struct {
 
 // Registration is information necessary to register an account on a DEX.
 type Registration struct {
-	DEX      string
+	URL      string
 	Password string
 	Fee      uint64
+	Cert     string
+}
+
+// PreRegisterForm is the information necessary to pre-register a DEX.
+type PreRegisterForm struct {
+	URL  string `json:"url"`
+	Cert string `json:"cert"`
 }
 
 // Match represents a match on an order. An order may have many matches.
@@ -220,6 +227,7 @@ type dexAccount struct {
 	id        account.AccountID
 	dexPubKey *secp256k1.PublicKey
 	feeCoin   []byte
+	cert      []byte
 	isPaid    bool
 	authMtx   sync.RWMutex
 	isAuthed  bool
@@ -233,6 +241,7 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 		dexPubKey: acctInfo.DEXPubKey,
 		isPaid:    acctInfo.Paid,
 		feeCoin:   acctInfo.FeeCoin,
+		cert:      acctInfo.Cert,
 	}
 }
 

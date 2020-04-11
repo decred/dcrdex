@@ -6,6 +6,7 @@ package rpcserver
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"strconv"
 
 	"decred.org/dcrdex/client/core"
@@ -68,7 +69,7 @@ var nArgs = map[string][]int{
 	helpRoute:        {0, 1},
 	initRoute:        {1},
 	versionRoute:     {0},
-	preRegisterRoute: {1},
+	preRegisterRoute: {1, 2},
 	newWalletRoute:   {5},
 	openWalletRoute:  {2},
 	closeWalletRoute: {1},
@@ -81,7 +82,7 @@ var parsers = map[string](func([]string) (interface{}, error)){
 	helpRoute:        parseHelpArgs,
 	initRoute:        func(args []string) (interface{}, error) { return args[0], nil },
 	versionRoute:     func([]string) (interface{}, error) { return nil, nil },
-	preRegisterRoute: func(args []string) (interface{}, error) { return args[0], nil },
+	preRegisterRoute: parsePreRegisterArgs,
 	newWalletRoute:   parseNewWalletArgs,
 	openWalletRoute:  parseOpenWalletArgs,
 	closeWalletRoute: func(args []string) (interface{}, error) {
@@ -150,4 +151,19 @@ func parseRegisterArgs(args []string) (interface{}, error) {
 	}
 	req := &core.Registration{Password: args[0], DEX: args[1], Fee: uint64(fee)}
 	return req, nil
+}
+
+func parsePreRegisterArgs(args []string) (interface{}, error) {
+	cert := ""
+	if len(args) > 1 {
+		certB, err := ioutil.ReadFile(args[1])
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %v", args[1], err)
+		}
+		cert = string(certB)
+	}
+	return &core.PreRegisterForm{
+		URL:  args[0],
+		Cert: cert,
+	}, nil
 }

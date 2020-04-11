@@ -174,6 +174,11 @@ func TestWsConn(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	certB, err := ioutil.ReadFile(certFile.Name())
+	if err != nil {
+		t.Fatalf("file reading error: %v", err)
+	}
+
 	host := "127.0.0.1:6060"
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", handler)
@@ -199,7 +204,7 @@ func TestWsConn(t *testing.T) {
 	cfg := &WsCfg{
 		URL:      "wss://" + host + "/ws",
 		PingWait: pingWait,
-		RpcCert:  certFile.Name(),
+		Cert:     certB,
 	}
 	conn, err := NewWsConn(cfg)
 	if err != nil {

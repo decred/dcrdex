@@ -210,7 +210,9 @@ func (c *TCore) InitializeClient(pw string) error {
 	c.inited = true
 	return nil
 }
-func (c *TCore) PreRegister(dex string) (uint64, error) { return 1e8, nil }
+func (c *TCore) PreRegister(form *core.PreRegisterForm) (uint64, error) {
+	return 1e8, nil
+}
 
 func (c *TCore) Register(r *core.Registration) error {
 	randomDelay()

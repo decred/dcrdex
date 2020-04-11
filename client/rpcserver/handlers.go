@@ -212,14 +212,14 @@ func handleWallets(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload 
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the address
 // of a dex and returns the dex fee.
 func handlePreRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
-	dexURL := ""
-	err := req.Unmarshal(&dexURL)
+	form := new(core.PreRegisterForm)
+	err := json.Unmarshal(req.Payload, &form)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCParseError,
 			"unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
-	fee, err := s.core.PreRegister(dexURL)
+	fee, err := s.core.PreRegister(form)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
 			err.Error())

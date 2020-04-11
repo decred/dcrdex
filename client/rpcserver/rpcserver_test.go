@@ -59,7 +59,7 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {}
 func (c *TCore) Balance(uint32) (uint64, error) {
 	return 0, c.balanceErr
 }
-func (c *TCore) PreRegister(string) (uint64, error) {
+func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) {
 	return c.preRegisterFee, c.preRegisterErr
 }
 func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
