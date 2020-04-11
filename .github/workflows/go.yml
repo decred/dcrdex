@@ -33,6 +33,7 @@ jobs:
       matrix:
         node-version: [12.x, 13.x]
     steps:
+    - uses: actions/checkout@v2
     - name: Use nodejs ${{ matrix.node-version }}
       uses: actions/setup-node@v1
       with:
