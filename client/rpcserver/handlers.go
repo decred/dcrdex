@@ -22,12 +22,14 @@ const (
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
 	preRegisterRoute = "preregister"
+	registerRoute    = "register"
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
 )
 
 const (
 	initializedStr    = "app initialized"
+	feePaidStr        = "the DEX fee of %v has been paid"
 	walletCreatedStr  = "%s wallet created and unlocked"
 	walletLockedStr   = "%s wallet locked"
 	walletUnlockedStr = "%s wallet unlocked"
@@ -45,13 +47,14 @@ func createResponse(op string, res interface{}, resErr *msgjson.Error) *msgjson.
 
 // routes maps routes to a handler function.
 var routes = map[string]func(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload{
+	closeWalletRoute: handleCloseWallet,
 	helpRoute:        handleHelp,
 	initRoute:        handleInit,
-	versionRoute:     handleVersion,
-	preRegisterRoute: handlePreRegister,
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
-	closeWalletRoute: handleCloseWallet,
+	preRegisterRoute: handlePreRegister,
+	registerRoute:    handleRegister,
+	versionRoute:     handleVersion,
 	walletsRoute:     handleWallets,
 }
 
@@ -228,6 +231,26 @@ func handlePreRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayl
 	return createResponse(req.Route, res, nil)
 }
 
+// handleRegister handles requests for register. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
+	form := new(core.Registration)
+	err := json.Unmarshal(req.Payload, form)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		return createResponse(req.Route, nil, resErr)
+	}
+	err = s.core.Register(form)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCRegisterError, Message: err.Error()}
+		return createResponse(req.Route, nil, resErr)
+	}
+
+	resp := fmt.Sprintf(feePaidStr, form.Fee)
+
+	return createResponse(req.Route, &resp, nil)
+}
+
 // ListCommands prints a short usage string for every route available to the
 // rpcserver.
 func ListCommands() string {
@@ -361,5 +384,17 @@ Returns:
         "units" (str): Unit of measure for amounts.
       },...
     ]`,
+	},
+	registerRoute: {`"dex" "password" fee`,
+		`Register for dex. An ok response does not mean that registration is complete.
+Registration is complete after the fee transaction has been confirmed.
+
+Args:
+    dex (string): The DEX addr to register for.
+    appPass (string): The DEX client password.
+    fee (int): The DEX fee.
+
+Returns:
+    string: The message "` + fmt.Sprintf(feePaidStr, "[fee]") + `"`,
 	},
 }

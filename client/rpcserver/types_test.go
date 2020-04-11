@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"decred.org/dcrdex/client/core"
 )
 
 func TestParseCmdArgs(t *testing.T) {
@@ -246,6 +248,44 @@ func TestCheckIntArg(t *testing.T) {
 		}
 		if fmt.Sprint(res) != test.arg {
 			t.Fatalf("strings don't match")
+		}
+	}
+}
+
+func TestParseRegisterArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr error
+	}{{
+		name: "ok",
+		args: []string{"dex", "password123", "1000"},
+	}, {
+		name:    "fee not int",
+		args:    []string{"dex", "password123", "1000.0"},
+		wantErr: ErrArgs,
+	}}
+	for _, test := range tests {
+		res, err := parseRegisterArgs(test.args)
+		if test.wantErr != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		reg, ok := res.(*core.Registration)
+		if !ok {
+			t.Fatal("result doesn't wrap *core.Registration")
+		}
+		if reg.DEX != test.args[0] {
+			t.Fatalf("dex doesn't match")
+		}
+		if reg.Password != test.args[1] {
+			t.Fatalf("appPass doesn't match")
+		}
+		if fmt.Sprint(reg.Fee) != test.args[2] {
+			t.Fatalf("fee doesn't match")
 		}
 	}
 }

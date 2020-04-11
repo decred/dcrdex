@@ -58,6 +58,7 @@ type ClientCore interface {
 	Unsync(dex string, base, quote uint32)
 	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)
+	Register(registrationForm *core.Registration) error
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer

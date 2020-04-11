@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	"decred.org/dcrdex/client/core"
 )
 
 var (
@@ -71,6 +73,7 @@ var nArgs = map[string][]int{
 	openWalletRoute:  {2},
 	closeWalletRoute: {1},
 	walletsRoute:     {0},
+	registerRoute:    {3},
 }
 
 // parsers is a map of commands to parsing functions.
@@ -84,7 +87,8 @@ var parsers = map[string](func([]string) (interface{}, error)){
 	closeWalletRoute: func(args []string) (interface{}, error) {
 		return checkIntArg(args[0], "assetID")
 	},
-	walletsRoute: func([]string) (interface{}, error) { return nil, nil },
+	walletsRoute:  func([]string) (interface{}, error) { return nil, nil },
+	registerRoute: parseRegisterArgs,
 }
 
 func checkNArgs(have int, want []int) error {
@@ -130,5 +134,14 @@ func parseOpenWalletArgs(args []string) (interface{}, error) {
 		return nil, err
 	}
 	req := &openWalletForm{AssetID: uint32(assetID), AppPass: args[1]}
+	return req, nil
+}
+
+func parseRegisterArgs(args []string) (interface{}, error) {
+	fee, err := checkIntArg(args[2], "fee")
+	if err != nil {
+		return nil, err
+	}
+	req := &core.Registration{DEX: args[0], Password: args[1], Fee: uint64(fee)}
 	return req, nil
 }

@@ -388,3 +388,41 @@ func TestHandleWallets(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestHandleRegister(t *testing.T) {
+	form := &core.Registration{DEX: "dex:1234", Password: "password123", Fee: 1000}
+	tests := []struct {
+		name        string
+		arg         interface{}
+		registerErr error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		arg:         form,
+		wantErrCode: -1,
+	}, {
+		name:        "argument wrong type",
+		arg:         2,
+		wantErrCode: msgjson.RPCParseError,
+	}, {
+		name:        "core.Register error",
+		arg:         form,
+		registerErr: errors.New("error"),
+		wantErrCode: msgjson.RPCRegisterError,
+	}}
+	for _, test := range tests {
+		msg := new(msgjson.Message)
+		reqPayload, err := json.Marshal(test.arg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg.Payload = reqPayload
+		tc := &TCore{registerErr: test.registerErr}
+		r := &RPCServer{core: tc}
+		payload := handleRegister(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
