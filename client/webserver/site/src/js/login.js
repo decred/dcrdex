@@ -30,7 +30,7 @@ export default class LoginPage extends BasePage {
     }
     app.loaded()
     var res = await postJSON('/api/login', { pass: pw })
-    if (!Doc.checkResponse(res)) return
+    if (!app.checkResponse(res)) return
     res.notes.reverse()
     app.setNotes(res.notes)
     await app.fetchUser()
