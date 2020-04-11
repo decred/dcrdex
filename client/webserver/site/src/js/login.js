@@ -16,6 +16,7 @@ export default class LoginPage extends BasePage {
     page.pw.focus()
   }
 
+  /* login submits the sign-in form and parses the result. */
   async login (e) {
     const page = this.page
     app.loading(page.loginForm)

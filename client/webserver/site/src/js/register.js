@@ -31,14 +31,14 @@ export default class RegistrationPage extends BasePage {
     forms.bind(page.appPWForm, page.appPWSubmit, () => { this.setAppPass() })
 
     // NEW DCR WALLET
-    // This form is only show if there is no DCR wallet yet.
+    // This form is only shown if there is no DCR wallet yet.
     forms.bindNewWallet(app, page.walletForm, () => {
       this.changeForm(page.walletForm, page.urlForm)
     })
     page.walletForm.setAsset(app.assets[DCR_ID])
 
     // OPEN DCR WALLET
-    // This form is only show if there is a wallet, but its not open..
+    // This form is only shown if there is a wallet, but it's not open.
     forms.bindOpenWallet(app, page.openForm, () => {
       this.changeForm(page.openForm, page.urlForm)
     })

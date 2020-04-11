@@ -75,10 +75,10 @@ export default class WalletsPage extends BasePage {
     this.walletAsset = null
 
     // Bind the new wallet form.
-    forms.bindNewWallet(app, page.walletForm, () => { this.createWallet() })
+    forms.bindNewWallet(app, page.walletForm, () => { this.createWalletSuccess() })
 
     // Bind the wallet unlock form.
-    forms.bindOpenWallet(app, page.openForm, () => { this.openWallet() })
+    forms.bindOpenWallet(app, page.openForm, () => { this.openWalletSuccess() })
 
     // Bind the withdraw form.
     forms.bind(page.withdrawForm, page.submitWithdraw, () => { this.withdraw() })
@@ -116,13 +116,19 @@ export default class WalletsPage extends BasePage {
     this.showMarkets(firstRow.assetID)
   }
 
-  /*  */
+  /*
+   * hideBox hides the displayed box after waiting for the currently running
+   * animation to complete.
+   */
   async hideBox () {
     if (this.animation) await this.animation
     if (!this.displayed) return
     Doc.hide(this.displayed)
   }
 
+  /*
+   * showBox shows the box with a fade-in animation.
+   */
   async showBox (box, focuser) {
     box.style.opacity = '0'
     Doc.show(box)
@@ -218,7 +224,7 @@ export default class WalletsPage extends BasePage {
     this.animation = this.showBox(box, page.walletPass)
   }
 
-  // Show the form to withdraw funds.
+  /* Show the form to withdraw funds. */
   async showWithdraw (assetID) {
     const page = this.page
     const box = page.withdrawForm
@@ -239,6 +245,7 @@ export default class WalletsPage extends BasePage {
     this.animation = this.showBox(box, page.walletPass)
   }
 
+  /* doConnect connects to a wallet via the connectwallet API route. */
   async doConnect (assetID) {
     app.loading(this.body)
     var res = await postJSON('/api/connectwallet', {
@@ -251,7 +258,8 @@ export default class WalletsPage extends BasePage {
     rowInfo.stateIcons.locked()
   }
 
-  createWallet () {
+  /* createWalletSuccess is the success callback for wallet creation. */
+  createWalletSuccess () {
     const rowInfo = this.rowInfos[this.walletAsset]
     this.showMarkets(rowInfo.assetID)
     const a = rowInfo.actions
@@ -260,7 +268,8 @@ export default class WalletsPage extends BasePage {
     rowInfo.stateIcons.unlocked()
   }
 
-  async openWallet () {
+  /* openWalletSuccess is the success callback for wallet unlocking. */
+  async openWalletSuccess () {
     const rowInfo = this.rowInfos[this.openAsset]
     const a = rowInfo.actions
     Doc.show(a.lock, a.withdraw, a.deposit)
@@ -269,6 +278,7 @@ export default class WalletsPage extends BasePage {
     this.showMarkets(this.openAsset)
   }
 
+  /* withdraw submits the withdrawal form to the API. */
   async withdraw () {
     const page = this.page
     Doc.hide(page.withdrawErr)
@@ -290,6 +300,7 @@ export default class WalletsPage extends BasePage {
     this.showMarkets(assetID)
   }
 
+  /* lock instructs the API to lock the wallet. */
   async lock (assetID, asset) {
     const rowInfo = this.rowInfos[assetID]
     const page = this.page
@@ -304,10 +315,18 @@ export default class WalletsPage extends BasePage {
   }
 }
 
+/*
+ * Given a market object as created with makeMarket, prettyMarketName will
+ * create a string ABC-XYZ, where ABC and XYZ are the upper-case ticker symbols
+ * for the base and quote assets respectively.
+ */
 function prettyMarketName (market) {
   return `${market.basesymbol.toUpperCase()}-${market.quotesymbol.toUpperCase()}`
 }
 
+/*
+ * makeMarket creates a market object.
+ */
 function makeMarket (dex, base, quote) {
   return {
     dex: dex,

@@ -76,7 +76,7 @@ export function bindOpenWallet (app, form, success) {
 }
 
 /*
- * bindForm binds the click and submit events and prevents page reloading on
+ * bind binds the click and submit events and prevents page reloading on
  * submission.
  */
 export function bind (form, submitBttn, handler) {

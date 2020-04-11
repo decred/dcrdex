@@ -80,7 +80,9 @@ export default class Application {
     })
   }
 
-  // reconnected is called by the websocket client when a reconnection is made.
+  /*
+   * reconnected is called by the websocket client when a reconnection is made.
+   */
   reconnected () {
     window.location.reload()
   }
@@ -105,7 +107,7 @@ export default class Application {
     return user
   }
 
-  // Load the page from the server. Insert and bind the DOM.
+  /* Load the page from the server. Insert and bind the DOM. */
   async loadPage (page, data) {
     const response = await window.fetch(`/${page}`)
     if (!response.ok) return false
@@ -121,7 +123,7 @@ export default class Application {
     return true
   }
 
-  // attach binds the common handlers and calls the page constructor.
+  /* attach binds the common handlers and calls the page constructor. */
   attach (data) {
     var handlerID = this.main.dataset.handler
     if (!handlerID) {
@@ -139,6 +141,9 @@ export default class Application {
     this.loadedPage = new constructor(this, this.main, data) || {}
   }
 
+  /* attachHeader attaches the header element, which unlike the main element,
+   * isn't replaced during page navigation.
+   */
   attachHeader () {
     this.header = idel(document.body, 'header')
     this.pokeNote = idel(document.body, 'pokeNote')
@@ -179,6 +184,10 @@ export default class Application {
     }
   }
 
+  /*
+   * storeNotes stores the list of notifications in Window.localStorage. The
+   * actual stored list is stripped of information not necessary for display.
+   */
   storeNotes () {
     State.store('notifications', this.notes.map(n => {
       return {
@@ -192,8 +201,10 @@ export default class Application {
     }))
   }
 
-  // Use setLogged when user has signed in or out. For logging out, it may be
-  // better to trigger a hard reload.
+  /*
+   * setLogged should be called when the user has signed in or out. For logging
+   * out, it may be better to trigger a hard reload.
+   */
   setLogged (logged) {
     const pg = this.page
     if (logged) {
@@ -205,7 +216,7 @@ export default class Application {
     Doc.show(pg.loginLink)
   }
 
-  // attachCommon scans the provided node and handles some common bindings.
+  /* attachCommon scans the provided node and handles some common bindings. */
   attachCommon (node) {
     node.querySelectorAll('[data-pagelink]').forEach(link => {
       const page = link.dataset.pagelink
@@ -215,11 +226,19 @@ export default class Application {
     })
   }
 
+  /*
+   * setNotes sets the current notification cache and populates the notification
+   * display.
+   */
   setNotes (notes) {
     this.notes = notes
     this.setNoteElements()
   }
 
+  /*
+   * notify is the top-level handler for notifications received from the client.
+   * Notifications are propagated to the loadedPage.
+   */
   notify (note) {
     // Handle type-specific updates.
     switch (note.type) {
@@ -258,6 +277,7 @@ export default class Application {
     this.setNoteElements()
   }
 
+  /* setNoteElements re-builds the drop-down notification list. */
   setNoteElements () {
     const noteList = this.page.noteList
     while (this.notes.length > 10) this.notes.shift()
@@ -278,6 +298,10 @@ export default class Application {
     setSeverityClass(this.page.noteIndicator, severity)
   }
 
+  /*
+   * makeNote constructs a single notification element for the drop-down
+   * notification list.
+   */
   makeNote (note) {
     const el = this.page.noteTemplate.cloneNode(true)
     if (note.severity > ntfn.POKE) {
@@ -289,14 +313,21 @@ export default class Application {
     return el
   }
 
+  /*
+   * loading appends the loader to the specified element and displays the
+   * loading icon. The loader will block all interaction with the specified
+   * element until Application.loaded is called.
+   */
   loading (el) {
     el.appendChild(this.page.loader)
   }
 
+  /* loaded hides the loading element as shown with Application.loading. */
   loaded () {
     this.page.loader.remove()
   }
 
+  /* orders retreives a list of orders for the specified dex and market. */
   orders (dex, bid, qid) {
     var o = this.user.exchanges[dex].markets[sid(bid, qid)].orders
     if (!o) {
@@ -306,6 +337,12 @@ export default class Application {
     return o
   }
 
+  /*
+   * checkResponse checks the response object as returned from the functions in
+   * the http module. If the response indicates that the request failed, a
+   * message will be displayed in the drop-down notifications and false will be
+   * returned.
+   */
   checkResponse (resp) {
     if (!resp.requestSuccessful || !resp.ok) {
       if (this.user.inited) this.notify(ntfn.make('API error', resp.msg, ntfn.ERROR))
@@ -315,15 +352,16 @@ export default class Application {
   }
 }
 
+/* getSocketURI returns the websocket URI for the client. */
 function getSocketURI () {
   var protocol = (window.location.protocol === 'https:') ? 'wss' : 'ws'
   return `${protocol}://${window.location.host}/ws`
 }
 
-// unattachers are handlers to be run when a page is unloaded.
+/* unattachers are handlers to be run when a page is unloaded. */
 var unattachers = []
 
-// unattach adds an unattacher to the array.
+/* unattach adds an unattacher to the array. */
 function unattach (f) {
   unattachers.push(f)
 }
@@ -898,7 +936,7 @@ function handleMarkets (main, data) {
   }
 }
 
-// constructors is a map to page constructors.
+/* constructors is a map to page constructors. */
 var constructors = {
   login: LoginPage,
   register: RegistrationPage,
@@ -957,12 +995,16 @@ const aDay = 86400000
 const anHour = 3600000
 const aMinute = 60000
 
+/* return returns the quotient and remainder of t / dur. */
 function timeMod (t, dur) {
   const n = Math.floor(t / dur)
-  const mod = t - n * dur
-  return [n, mod]
+  return [n, t - n * dur]
 }
 
+/*
+ * timeSince returns a string representation of the duration since the specified
+ * unix timestamp.
+ */
 function timeSince (t) {
   var seconds = Math.floor(((new Date().getTime()) - t))
   var result = ''
@@ -988,12 +1030,20 @@ function timeSince (t) {
   return result || '0 s'
 }
 
+/*
+ * severityClassMap maps a notification severity level to a CSS class that
+ * assigns a background color.
+ */
 const severityClassMap = {
   [ntfn.SUCCESS]: 'good',
   [ntfn.ERROR]: 'bad',
   [ntfn.WARNING]: 'warn'
 }
 
+/*
+ * setSeverityClass sets the element's CSS class based on the specified
+ * notification severity level.
+ */
 function setSeverityClass (el, severity) {
   el.classList.remove('bad', 'warn', 'good')
   const cls = severityClassMap[severity]

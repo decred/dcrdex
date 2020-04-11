@@ -1,4 +1,6 @@
-// requestJSON encodes the object and sends the JSON to the specified address.
+/*
+ * requestJSON encodes the object and sends the JSON to the specified address.
+ */
 export async function requestJSON (method, addr, reqBody) {
   try {
     const response = await window.fetch(addr, {
@@ -17,10 +19,17 @@ export async function requestJSON (method, addr, reqBody) {
   }
 }
 
+/*
+ * postJSON sends a POST request with JSON-formatted data and returns the
+ * response.
+ */
 export async function postJSON (addr, data) {
   return requestJSON('POST', addr, JSON.stringify(data))
 }
 
+/*
+ * getJSON sends a GET request and returns the response.
+ */
 export async function getJSON (addr) {
   return requestJSON('GET', addr)
 }
