@@ -344,10 +344,18 @@ func New(cfg *Config) (*Core, error) {
 	if err != nil {
 		return nil, fmt.Errorf("database initialization error: %v", err)
 	}
+	certMap := make(map[string]string, len(cfg.Certs))
+	for k, path := range cfg.Certs {
+		url, err := url.Parse(k)
+		if err != nil || url.Host == "" {
+			return nil, fmt.Errorf("failed to parse certificate host from %s", k)
+		}
+		certMap[url.Host] = path
+	}
 	core := &Core{
 		cfg:          cfg,
 		db:           db,
-		certs:        cfg.Certs,
+		certs:        certMap,
 		conns:        make(map[string]*dexConnection),
 		wallets:      make(map[uint32]*xcWallet),
 		net:          cfg.Net,
@@ -1690,12 +1698,11 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing account URL %s: %v", uri, err)
 	}
-
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&comms.WsCfg{
 		URL:      "wss://" + parsedURL.Host + "/ws",
 		PingWait: 60 * time.Second,
-		RpcCert:  c.certs[uri],
+		RpcCert:  c.certs[parsedURL.Host],
 		ReconnectSync: func() {
 			go c.handleReconnect(uri)
 		},
