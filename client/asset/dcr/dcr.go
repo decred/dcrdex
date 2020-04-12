@@ -406,6 +406,10 @@ func (dcr *ExchangeWallet) fund(confs uint32,
 
 out:
 	for {
+		// If there are none left, we don't have enough.
+		if len(utxos) == 0 {
+			return nil, 0, 0, fmt.Errorf("not enough to cover requested funds")
+		}
 		// On each loop, find the smallest UTXO that is enough. If no UTXO is large
 		// enough, add the largest and continue.
 		var txout *compositeUTXO
@@ -425,10 +429,6 @@ out:
 		}
 		// Pop the utxo from the unspents
 		utxos = utxos[:len(utxos)-1]
-		// If there are none left, we don't have enough.
-		if len(utxos) == 0 {
-			return nil, 0, 0, fmt.Errorf("not enough to cover requested funds")
-		}
 	}
 
 	err = dcr.lockFundingCoins(spents)
