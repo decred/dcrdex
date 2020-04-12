@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"testing"
 
+	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex/msgjson"
 )
 
@@ -44,9 +45,10 @@ func TestCreateResponse(t *testing.T) {
 		resErr:      nil,
 		wantErrCode: -1,
 	}, {
-		name:        "parse error",
-		res:         "",
-		resErr:      msgjson.NewError(msgjson.RPCParseError, "failed to encode response"),
+		name: "parse error",
+		res:  "",
+		resErr: msgjson.NewError(msgjson.RPCParseError,
+			"failed to encode response"),
 		wantErrCode: msgjson.RPCParseError,
 	}}
 
@@ -175,7 +177,7 @@ func TestHandlePreRegister(t *testing.T) {
 		arg:            "dex",
 		preRegisterFee: 5,
 		preRegisterErr: errors.New("error"),
-		wantErrCode:    msgjson.RPCErrorUnspecified,
+		wantErrCode:    msgjson.RPCPreRegisterError,
 	}}
 	for _, test := range tests {
 		msg := new(msgjson.Message)
@@ -184,7 +186,10 @@ func TestHandlePreRegister(t *testing.T) {
 			t.Fatal(err)
 		}
 		msg.Payload = reqPayload
-		tc := &TCore{preRegisterFee: test.preRegisterFee, preRegisterErr: test.preRegisterErr}
+		tc := &TCore{
+			preRegisterFee: test.preRegisterFee,
+			preRegisterErr: test.preRegisterErr,
+		}
 		r := &RPCServer{core: tc}
 		payload := handlePreRegister(r, msg)
 		res := new(preRegisterResponse)
@@ -192,7 +197,194 @@ func TestHandlePreRegister(t *testing.T) {
 			t.Fatal(err)
 		}
 		if test.wantErrCode == -1 && res.Fee != test.preRegisterFee {
-			t.Fatalf("wanted registration fee %d but got %d for test %s", test.preRegisterFee, res.Fee, test.name)
+			t.Fatalf("wanted registration fee %d but got %d for test %s",
+				test.preRegisterFee, res.Fee, test.name)
 		}
+	}
+}
+
+func TestHandleInit(t *testing.T) {
+	tests := []struct {
+		name                string
+		arg                 interface{}
+		initializeClientErr error
+		wantErrCode         int
+	}{{
+		name:        "ok",
+		arg:         "password123",
+		wantErrCode: -1,
+	}, {
+		name:        "argument wrong type",
+		arg:         2,
+		wantErrCode: msgjson.RPCParseError,
+	}, {
+		name:                "core.InitializeClient error",
+		arg:                 "password123",
+		initializeClientErr: errors.New("error"),
+		wantErrCode:         msgjson.RPCInitError,
+	}}
+	for _, test := range tests {
+		msg := new(msgjson.Message)
+		reqPayload, err := json.Marshal(test.arg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg.Payload = reqPayload
+		tc := &TCore{initializeClientErr: test.initializeClientErr}
+		r := &RPCServer{core: tc}
+		payload := handleInit(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleNewWallet(t *testing.T) {
+	nwf := &newWalletForm{
+		AssetID:    uint32(42),
+		Account:    "default",
+		INIPath:    "/home/wallet.conf",
+		WalletPass: "password123",
+		AppPass:    "password123",
+	}
+	tests := []struct {
+		name            string
+		arg             interface{}
+		walletState     *core.WalletState
+		createWalletErr error
+		openWalletErr   error
+		wantErrCode     int
+	}{{
+		name:        "ok new wallet",
+		arg:         nwf,
+		wantErrCode: -1,
+	}, {
+		name:        "ok existing wallet",
+		arg:         nwf,
+		walletState: &core.WalletState{Open: false},
+		wantErrCode: msgjson.RPCWalletExistsError,
+	}, {
+		name:        "argument wrong type",
+		arg:         42,
+		wantErrCode: msgjson.RPCParseError,
+	}, {
+		name:            "core.CreateWallet error",
+		arg:             nwf,
+		createWalletErr: errors.New("error"),
+		wantErrCode:     msgjson.RPCCreateWalletError,
+	}, {
+		name:          "core.OpenWallet error",
+		arg:           nwf,
+		openWalletErr: errors.New("error"),
+		wantErrCode:   msgjson.RPCOpenWalletError,
+	}}
+	for _, test := range tests {
+		msg := new(msgjson.Message)
+		reqPayload, err := json.Marshal(test.arg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg.Payload = reqPayload
+		tc := &TCore{
+			walletState:     test.walletState,
+			createWalletErr: test.createWalletErr,
+			openWalletErr:   test.openWalletErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleNewWallet(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleOpenWallet(t *testing.T) {
+	owf := &openWalletForm{
+		AssetID: uint32(42),
+		AppPass: "password123",
+	}
+	tests := []struct {
+		name          string
+		arg           interface{}
+		openWalletErr error
+		wantErrCode   int
+	}{{
+		name:        "ok",
+		arg:         owf,
+		wantErrCode: -1,
+	}, {
+		name:        "argument wrong type",
+		arg:         42,
+		wantErrCode: msgjson.RPCParseError,
+	}, {
+		name:          "core.OpenWallet error",
+		arg:           owf,
+		openWalletErr: errors.New("error"),
+		wantErrCode:   msgjson.RPCOpenWalletError,
+	}}
+	for _, test := range tests {
+		msg := new(msgjson.Message)
+		reqPayload, err := json.Marshal(test.arg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg.Payload = reqPayload
+		tc := &TCore{openWalletErr: test.openWalletErr}
+		r := &RPCServer{core: tc}
+		payload := handleOpenWallet(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleCloseWallet(t *testing.T) {
+	tests := []struct {
+		name           string
+		arg            interface{}
+		closeWalletErr error
+		wantErrCode    int
+	}{{
+		name:        "ok",
+		arg:         42,
+		wantErrCode: -1,
+	}, {
+		name:        "argument wrong type",
+		arg:         "42",
+		wantErrCode: msgjson.RPCParseError,
+	}, {
+		name:           "core.closeWallet error",
+		arg:            42,
+		closeWalletErr: errors.New("error"),
+		wantErrCode:    msgjson.RPCCloseWalletError,
+	}}
+	for _, test := range tests {
+		msg := new(msgjson.Message)
+		reqPayload, err := json.Marshal(test.arg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg.Payload = reqPayload
+		tc := &TCore{closeWalletErr: test.closeWalletErr}
+		r := &RPCServer{core: tc}
+		payload := handleCloseWallet(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleWallets(t *testing.T) {
+	msg := new(msgjson.Message)
+	tc := new(TCore)
+	r := &RPCServer{core: tc}
+	payload := handleWallets(r, msg)
+	res := ""
+	if err := verifyResponse(payload, &res, -1); err != nil {
+		t.Fatal(err)
 	}
 }

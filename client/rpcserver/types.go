@@ -6,6 +6,7 @@ package rpcserver
 import (
 	"errors"
 	"fmt"
+	"strconv"
 )
 
 var (
@@ -32,6 +33,21 @@ type preRegisterResponse struct {
 	Fee uint64 `json:"fee"`
 }
 
+// openWalletForm is information necessary to open a wallet.
+type openWalletForm struct {
+	AssetID uint32 `json:"assetID"`
+	AppPass string `json:"appPass"`
+}
+
+// newWalletForm is information necessary to create a new wallet.
+type newWalletForm struct {
+	AssetID    uint32 `json:"assetID"`
+	Account    string `json:"account"`
+	INIPath    string `json:"inipath"`
+	WalletPass string `json:"walletPass"`
+	AppPass    string `json:"appPass"`
+}
+
 // ParseCmdArgs parses arguments to commands for rpcserver requests.
 func ParseCmdArgs(cmd string, args []string) (interface{}, error) {
 	nArg, exists := nArgs[cmd]
@@ -47,16 +63,28 @@ func ParseCmdArgs(cmd string, args []string) (interface{}, error) {
 // nArgs is a map of routes to the number of arguments accepted. One integer
 // indicates an exact match, two are the min and max.
 var nArgs = map[string][]int{
-	helpRoute:        []int{0, 1},
-	versionRoute:     []int{0},
-	preRegisterRoute: []int{1},
+	helpRoute:        {0, 1},
+	initRoute:        {1},
+	versionRoute:     {0},
+	preRegisterRoute: {1},
+	newWalletRoute:   {5},
+	openWalletRoute:  {2},
+	closeWalletRoute: {1},
+	walletsRoute:     {0},
 }
 
 // parsers is a map of commands to parsing functions.
 var parsers = map[string](func([]string) (interface{}, error)){
 	helpRoute:        parseHelpArgs,
+	initRoute:        func(args []string) (interface{}, error) { return args[0], nil },
 	versionRoute:     func([]string) (interface{}, error) { return nil, nil },
 	preRegisterRoute: func(args []string) (interface{}, error) { return args[0], nil },
+	newWalletRoute:   parseNewWalletArgs,
+	openWalletRoute:  parseOpenWalletArgs,
+	closeWalletRoute: func(args []string) (interface{}, error) {
+		return checkIntArg(args[0], "assetID")
+	},
+	walletsRoute: func([]string) (interface{}, error) { return nil, nil },
 }
 
 func checkNArgs(have int, want []int) error {
@@ -72,9 +100,35 @@ func checkNArgs(have int, want []int) error {
 	return nil
 }
 
+func checkIntArg(arg, name string) (int, error) {
+	i, err := strconv.Atoi(arg)
+	if err != nil {
+		return i, fmt.Errorf("%w, %s must be an integer: %v", ErrArgs, name, err)
+	}
+	return i, nil
+}
+
 func parseHelpArgs(args []string) (interface{}, error) {
 	if len(args) == 0 {
 		return nil, nil
 	}
 	return args[0], nil
+}
+
+func parseNewWalletArgs(args []string) (interface{}, error) {
+	assetID, err := checkIntArg(args[0], "assetID")
+	if err != nil {
+		return nil, err
+	}
+	req := &newWalletForm{AssetID: uint32(assetID), Account: args[1], INIPath: args[2], WalletPass: args[3], AppPass: args[4]}
+	return req, nil
+}
+
+func parseOpenWalletArgs(args []string) (interface{}, error) {
+	assetID, err := checkIntArg(args[0], "assetID")
+	if err != nil {
+		return nil, err
+	}
+	req := &openWalletForm{AssetID: uint32(assetID), AppPass: args[1]}
+	return req, nil
 }

@@ -36,19 +36,49 @@ var (
 )
 
 type TCore struct {
-	preRegisterFee uint64
-	preRegisterErr error
-	balanceErr     error
-	syncErr        error
+	preRegisterFee      uint64
+	preRegisterErr      error
+	balanceErr          error
+	syncErr             error
+	createWalletErr     error
+	openWalletErr       error
+	walletState         *core.WalletState
+	closeWalletErr      error
+	wallets             []*core.WalletState
+	initializeClientErr error
 }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return nil, c.syncErr
 }
-func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook { return nil }
-func (c *TCore) Unsync(dex string, base, quote uint32)               {}
-func (c *TCore) Balance(uint32) (uint64, error)                      { return 0, c.balanceErr }
-func (c *TCore) PreRegister(string) (uint64, error)                  { return c.preRegisterFee, c.preRegisterErr }
+func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook {
+	return nil
+}
+func (c *TCore) Unsync(dex string, base, quote uint32) {}
+func (c *TCore) Balance(uint32) (uint64, error) {
+	return 0, c.balanceErr
+}
+func (c *TCore) PreRegister(string) (uint64, error) {
+	return c.preRegisterFee, c.preRegisterErr
+}
+func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
+	return c.createWalletErr
+}
+func (c *TCore) OpenWallet(assetID uint32, pw string) error {
+	return c.openWalletErr
+}
+func (c *TCore) WalletState(assetID uint32) *core.WalletState {
+	return c.walletState
+}
+func (c *TCore) CloseWallet(assetID uint32) error {
+	return c.closeWalletErr
+}
+func (c *TCore) Wallets() []*core.WalletState {
+	return c.wallets
+}
+func (c *TCore) InitializeClient(pw string) error {
+	return c.initializeClientErr
+}
 
 type TWriter struct {
 	b []byte
@@ -96,7 +126,8 @@ type TConn struct {
 	close     chan struct{} // Close tells ReadMessage to return with error
 }
 
-var readTimeout = 10 * time.Second // ReadMessage must not return constantly with nothing
+// ReadMessage must not return constantly with nothing
+var readTimeout = 10 * time.Second
 
 func (c *TConn) ReadMessage() (int, []byte, error) {
 	if len(c.reads) > 0 {
@@ -156,7 +187,8 @@ type tLink struct {
 
 func newLink() *tLink {
 	conn := new(TConn)
-	cl := newWSClient("", conn, func(*msgjson.Message) *msgjson.Error { return nil })
+	cl := newWSClient("", conn,
+		func(*msgjson.Message) *msgjson.Error { return nil })
 	return &tLink{
 		cl:   cl,
 		conn: conn,
@@ -165,7 +197,8 @@ func newLink() *tLink {
 
 var tPort = 5555
 
-func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore, func()) {
+func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
+	*TCore, func()) {
 	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
@@ -176,7 +209,8 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore
 	cert, key := tmp+"/cert.cert", tmp+"/key.key"
 	defer os.Remove(cert)
 	defer os.Remove(key)
-	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), user, pass, cert, key}
+	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), user, pass, cert,
+		key}
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
@@ -195,7 +229,9 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, *TCore
 	return s, c, shutdown
 }
 
-func ensureResponse(t *testing.T, s *RPCServer, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
+func ensureResponse(t *testing.T, s *RPCServer, f func(w http.ResponseWriter,
+	r *http.Request), want string, reader *TReader, writer *TWriter,
+	body interface{}) {
 	reader.msg, _ = json.Marshal(body)
 	req, err := http.NewRequest("POST", "/", reader)
 	if err != nil {
@@ -239,8 +275,8 @@ func TestLoadMarket(t *testing.T) {
 	}
 
 	ensureWatching := func(base, quote uint32) {
-		// Add a tiny delay here because because it's convenient and this function
-		// is typically called right after ...
+		// Add a tiny delay here because because it's convenient and
+		// this function is typically called right after ...
 
 		time.Sleep(time.Millisecond)
 		mktID := marketID(base, quote)
@@ -277,7 +313,8 @@ func TestLoadMarket(t *testing.T) {
 			t.Fatalf("%s: no error", name)
 		}
 		if wantCode != got.Code {
-			t.Fatalf("%s, wanted %d, got %d", name, wantCode, got.Code)
+			t.Fatalf("%s, wanted %d, got %d",
+				name, wantCode, got.Code)
 		}
 	}
 
@@ -314,7 +351,8 @@ func TestLoadMarket(t *testing.T) {
 	for _, syncer := range s.syncers {
 		syncer.mtx.Lock()
 		if len(syncer.clients) != 0 {
-			t.Fatalf("Syncer for market %d-%d still has %d clients after unMarket", syncer.base, syncer.quote, len(syncer.clients))
+			t.Fatalf("Syncer for market %d-%d still has %d clients after unMarket",
+				syncer.base, syncer.quote, len(syncer.clients))
 		}
 		syncer.mtx.Unlock()
 	}
@@ -338,7 +376,8 @@ func TestHandleMessage(t *testing.T) {
 			t.Fatalf("%s: no error", name)
 		}
 		if wantCode != got.Code {
-			t.Fatalf("%s, wanted %d, got %d", name, wantCode, got.Code)
+			t.Fatalf("%s, wanted %d, got %d",
+				name, wantCode, got.Code)
 		}
 	}
 
@@ -357,7 +396,8 @@ func TestHandleMessage(t *testing.T) {
 
 	rpcErr := s.handleMessage(link.cl, msg)
 	if rpcErr != nil {
-		t.Fatalf("error for good message: %d: %s", rpcErr.Code, rpcErr.Message)
+		t.Fatalf("error for good message: %d: %s",
+			rpcErr.Code, rpcErr.Message)
 	}
 }
 
@@ -386,7 +426,8 @@ func TestParseHTTPRequest(t *testing.T) {
 		w := &tResponseWriter{}
 		s.handleJSON(w, r)
 		if w.code != wantCode {
-			t.Fatalf("Expected HTTP error %d, got %d", wantCode, w.code)
+			t.Fatalf("Expected HTTP error %d, got %d",
+				wantCode, w.code)
 		}
 	}
 
@@ -408,7 +449,8 @@ func TestParseHTTPRequest(t *testing.T) {
 			t.Fatalf("%s: no error", name)
 		}
 		if wantCode != payload.Error.Code {
-			t.Fatalf("%s, wanted %d, got %d", name, wantCode, payload.Error.Code)
+			t.Fatalf("%s, wanted %d, got %d",
+				name, wantCode, payload.Error.Code)
 		}
 	}
 	ensureNoErr := func(name string) {
@@ -466,7 +508,8 @@ func TestNew(t *testing.T) {
 	authTests := [][]string{
 		{"user", "pass", "AK+rg3mIGeouojwZwNRMjBjZouASr4mu4FWMTXQQcD0="},
 		{"", "", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
-		{`&!"#$%&'()~=`, `+<>*?,:.;/][{}`, "Te4g4+Ke9Q07MYo3iT1OCqq5qXX2ZcB47FBiVaT41hQ="},
+		{`&!"#$%&'()~=`, `+<>*?,:.;/][{}`,
+			"Te4g4+Ke9Q07MYo3iT1OCqq5qXX2ZcB47FBiVaT41hQ="},
 	}
 	for _, test := range authTests {
 		s, _, shutdown := newTServer(t, false, test[0], test[1])
@@ -481,25 +524,29 @@ func TestNew(t *testing.T) {
 func TestAuthMiddleware(t *testing.T) {
 	s, _, shutdown := newTServer(t, false, "", "")
 	defer shutdown()
-	am := s.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
+	am := s.authMiddleware(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
 	r, _ := http.NewRequest("GET", "", nil)
 
 	wantAuthError := func(name string, want bool) {
 		w := &tResponseWriter{}
 		am.ServeHTTP(w, r)
 		if w.code != http.StatusUnauthorized && w.code != http.StatusOK {
-			t.Fatalf("unexpected HTTP error %d for test \"%s\"", w.code, name)
+			t.Fatalf("unexpected HTTP error %d for test \"%s\"",
+				w.code, name)
 		}
 		switch want {
 		case true:
 			if w.code != http.StatusUnauthorized {
-				t.Fatalf("Expected unauthorized HTTP error for test \"%s\"", name)
+				t.Fatalf("Expected unauthorized HTTP error for test \"%s\"",
+					name)
 			}
 		case false:
 			if w.code != http.StatusOK {
-				t.Fatalf("Expected OK HTTP status for test \"%s\"", name)
+				t.Fatalf("Expected OK HTTP status for test \"%s\"",
+					name)
 			}
 		}
 	}
@@ -542,8 +589,8 @@ func TestClientMap(t *testing.T) {
 
 	go s.websocketHandler(conn, "someip")
 
-	// When a response to our dummy message is received, the client should be in
-	// RPCServer's client map.
+	// When a response to our dummy message is received, the client should
+	// be in RPCServer's client map.
 	<-resp
 
 	// While we're here, check that the client is properly mapped.

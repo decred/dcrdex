@@ -18,6 +18,8 @@ import (
 	"decred.org/dcrdex/dex/ws"
 )
 
+const updateWalletRoute = "updatewallet"
+
 var (
 	// Time allowed to read the next pong message from the peer. The
 	// default is intended for production, but leaving as a var instead of const
@@ -142,6 +144,25 @@ type marketResponse struct {
 	QuoteSymbol  string          `json:"quoteSymbol"`
 	BaseBalance  uint64          `json:"baseBalance"`
 	QuoteBalance uint64          `json:"quoteBalance"`
+}
+
+// notify sends a notification to the websocket client.
+func (s *RPCServer) notify(route string, payload interface{}) {
+	msg, err := msgjson.NewNotification(route, payload)
+	if err != nil {
+		log.Errorf("notification encoding error: %v", err)
+		return
+	}
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	for _, cl := range s.clients {
+		cl.Send(msg)
+	}
+}
+
+func (s *RPCServer) notifyWalletUpdate(assetID uint32) {
+	walletUpdate := s.core.WalletState(assetID)
+	s.notify(updateWalletRoute, walletUpdate)
 }
 
 // wsHandleRequest handles requests found in the routes map for a websocket client.
