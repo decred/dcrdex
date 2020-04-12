@@ -333,7 +333,8 @@ Returns:
 		`Preregister for dex.
 
 Args:
-    string: The dex address to preregister for.
+    url (string): The dex to preregister for.
+    cert-path (string): Optional. The filepath to the TLS certificate for the dex.
 
 Returns:
     obj: The preregister result.
