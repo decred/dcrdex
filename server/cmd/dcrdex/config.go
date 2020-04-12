@@ -38,6 +38,7 @@ const (
 	defaultDEXPrivKeyFilename  = "dexprivkey"
 	defaultRPCHost             = "127.0.0.1"
 	defaultRPCPort             = "7232"
+	defaultAdminSrvAddr        = "127.0.0.1:6542"
 
 	defaultCancelThresh     = 0.6
 	defaultRegFeeConfirms   = 4
@@ -74,6 +75,8 @@ type dexConf struct {
 	BroadcastTimeout time.Duration
 	AltDNSNames      []string
 	LogMaker         *dex.LoggerMaker
+	AdminSrvOn       bool
+	AdminSrvAddr     string
 }
 
 type flagsData struct {
@@ -110,6 +113,8 @@ type flagsData struct {
 	PGPass       string `long:"pgpass" description:"PostgreSQL DB password."`
 	PGHost       string `long:"pghost" description:"PostgreSQL server host:port or UNIX socket (e.g. /run/postgresql)."`
 	HidePGConfig bool   `long:"hidepgconfig" description:"Blocks logging of the PostgreSQL db configuration on system start up."`
+	AdminSrvOn   bool   `long:"adminsrvon" description:"turn on the admin server"`
+	AdminSrvAddr string `long:"adminsrvaddr" description:"administration HTTPS server address (default: 127.0.0.1:6542)"`
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed
@@ -489,6 +494,19 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		dbPort = uint16(port)
 	}
 
+	adminSrvAddr := defaultAdminSrvAddr
+	if cfg.AdminSrvAddr != "" {
+		_, port, err := net.SplitHostPort(cfg.AdminSrvAddr)
+		if err != nil {
+			return loadConfigError(fmt.Errorf("invalid admin server host %q: %v", cfg.AdminSrvAddr, err))
+		}
+		_, err = strconv.ParseUint(port, 10, 16)
+		if err != nil {
+			return loadConfigError(fmt.Errorf("invalid admin server port %q: %v", port, err))
+		}
+		adminSrvAddr = cfg.AdminSrvAddr
+	}
+
 	// Load the DEX signing key. TODO: Implement a secure key storage scheme.
 	pkFileBuffer, err := ioutil.ReadFile(cfg.DEXPrivKeyPath)
 	if err != nil {
@@ -516,6 +534,8 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		AltDNSNames:      cfg.AltDNSNames,
 		LogMaker:         logMaker,
+		AdminSrvAddr:     adminSrvAddr,
+		AdminSrvOn:       cfg.AdminSrvOn,
 	}
 
 	opts := &procOpts{

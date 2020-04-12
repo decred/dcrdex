@@ -12,7 +12,9 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"strings"
+	"sync"
 
+	"decred.org/dcrdex/server/admin"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
@@ -31,6 +33,15 @@ func mainCore(ctx context.Context) error {
 			logRotator.Close()
 		}
 	}()
+
+	// Aquire admin server password if turned on.
+	var adminSrvAuthSHA [32]byte
+	if cfg.AdminSrvOn {
+		adminSrvAuthSHA, err = admin.PasswordPrompt("Enter admin server password:")
+		if err != nil {
+			return fmt.Errorf("cannot use password: %v", err)
+		}
+	}
 
 	if opts.CPUProfile != "" {
 		var f *os.File
@@ -98,8 +109,30 @@ func mainCore(ctx context.Context) error {
 		return err
 	}
 
+	var wg sync.WaitGroup
+	if cfg.AdminSrvOn {
+		srvCFG := &admin.SrvConfig{
+			Core:    dexMan,
+			Addr:    cfg.AdminSrvAddr,
+			AuthSHA: adminSrvAuthSHA,
+			Cert:    cfg.RPCCert,
+			Key:     cfg.RPCKey,
+		}
+		adminServer, err := admin.NewSrv(srvCFG)
+		if err != nil {
+			return fmt.Errorf("cannot set up admin server: %v", err)
+		}
+		wg.Add(1)
+		go func() {
+			adminServer.Run(ctx)
+			wg.Done()
+		}()
+	}
+
 	log.Info("The DEX is running. Hit CTRL+C to quit...")
 	<-ctx.Done()
+	// Wait for the admin server to finish.
+	wg.Wait()
 
 	log.Info("Stopping DEX...")
 	dexMan.Stop()
@@ -118,7 +151,7 @@ func main() {
 
 	err := mainCore(ctx)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	os.Exit(0)

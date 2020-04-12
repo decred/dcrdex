@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/dex/ws"
+	"decred.org/dcrdex/server/admin"
 	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/comms"
@@ -60,6 +61,7 @@ var (
 	bookLogger    = backendLog.Logger("BOOK")
 	matcherLogger = backendLog.Logger("MTCH")
 	waiterLogger  = backendLog.Logger("CHWT")
+	adminLogger   = backendLog.Logger("ADMN")
 )
 
 func init() {
@@ -73,6 +75,7 @@ func init() {
 	book.UseLogger(bookLogger)
 	matcher.UseLogger(matcherLogger)
 	wait.UseLogger(waiterLogger)
+	admin.UseLogger(adminLogger)
 }
 
 // subsystemLoggers maps each subsystem identifier to its associated logger.
@@ -90,6 +93,7 @@ var subsystemLoggers = map[string]slog.Logger{
 	"ASSET": slog.Disabled,
 	"BOOK":  bookLogger,
 	"MTCH":  matcherLogger,
+	"ADMN":  adminLogger,
 }
 
 // initLogRotator initializes the logging rotater to write logs to logFile and

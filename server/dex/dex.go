@@ -421,3 +421,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 	return dexMgr, nil
 }
+
+// Config returns the current dex configuration.
+func (dm *DEX) Config() json.RawMessage {
+	return dm.config.configEnc
+}
