@@ -299,9 +299,9 @@ func (b *TBackend) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, 
 func (b *TBackend) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
 	return b.utxo(redemptionID)
 }
-func (b *TBackend) BlockChannel(size int) chan uint32 { return nil }
-func (b *TBackend) InitTxSize() uint32                { return dummySize }
-func (b *TBackend) CheckAddress(string) bool          { return b.addrChecks }
+func (b *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate { return nil }
+func (b *TBackend) InitTxSize() uint32                              { return dummySize }
+func (b *TBackend) CheckAddress(string) bool                        { return b.addrChecks }
 func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
 }

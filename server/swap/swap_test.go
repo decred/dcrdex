@@ -263,13 +263,13 @@ type TAsset struct {
 	fundsErr      error
 	redemption    asset.Coin
 	redemptionErr error
-	bChan         chan uint32
+	bChan         chan *asset.BlockUpdate
 	lbl           string
 }
 
 func newTAsset(lbl string) *TAsset {
 	return &TAsset{
-		bChan: make(chan uint32, 5),
+		bChan: make(chan *asset.BlockUpdate, 5),
 		lbl:   lbl,
 	}
 }
@@ -295,11 +295,11 @@ func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil
 }
-func (a *TAsset) BlockChannel(size int) chan uint32           { return a.bChan }
-func (a *TAsset) InitTxSize() uint32                          { return 100 }
-func (a *TAsset) CheckAddress(string) bool                    { return true }
-func (a *TAsset) Run(context.Context)                         {}
-func (a *TAsset) ValidateSecret(secret, contract []byte) bool { return true }
+func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate { return a.bChan }
+func (a *TAsset) InitTxSize() uint32                              { return 100 }
+func (a *TAsset) CheckAddress(string) bool                        { return true }
+func (a *TAsset) Run(context.Context)                             {}
+func (a *TAsset) ValidateSecret(secret, contract []byte) bool     { return true }
 
 func (a *TAsset) setContractErr(err error) {
 	a.mtx.Lock()
@@ -1354,7 +1354,7 @@ func TestTxWaiters(t *testing.T) {
 	matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
 	matchInfo.db.takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
 	// send a block through for either chain to trigger a completion check.
-	rig.xyzNode.bChan <- 1
+	rig.xyzNode.bChan <- &asset.BlockUpdate{Err: nil}
 	tickMempool()
 	if tracker.Status != order.MatchComplete {
 		t.Fatalf("match not marked as complete: %d", tracker.Status)
@@ -1370,7 +1370,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 	defer cleanup()
 	ensureNilErr := makeEnsureNilErr(t)
 	sendBlock := func(node *TAsset) {
-		node.bChan <- 1
+		node.bChan <- &asset.BlockUpdate{Err: nil}
 		tickMempool()
 	}
 	checkRevokeMatch := func(user *tUser, i int) {
@@ -1626,7 +1626,7 @@ func TestCancel(t *testing.T) {
 
 func TestTxMonitored(t *testing.T) {
 	sendBlock := func(node *TAsset) {
-		node.bChan <- 1
+		node.bChan <- &asset.BlockUpdate{Err: nil}
 		tickMempool()
 	}
 

@@ -14,6 +14,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	dexdcr "decred.org/dcrdex/dex/dcr"
@@ -47,7 +48,12 @@ func init() {
 	asset.Register(assetName, &Driver{})
 }
 
-var zeroHash chainhash.Hash
+var (
+	zeroHash chainhash.Hash
+	// The blockPollInterval is the delay between calls to GetBestBlockHash to
+	// check for new blocks.
+	blockPollInterval = time.Second
+)
 
 type Error = dex.Error
 
@@ -64,6 +70,7 @@ type dcrNode interface {
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
+	GetBestBlockHash() (*chainhash.Hash, error)
 }
 
 // Backend is an asset backend for Decred. It has methods for fetching UTXO
@@ -80,13 +87,10 @@ type Backend struct {
 	// The backend provides block notification channels through it BlockChannel
 	// method. signalMtx locks the blockChans array.
 	signalMtx  sync.RWMutex
-	blockChans []chan uint32
+	blockChans []chan *asset.BlockUpdate
 	// The block cache stores just enough info about the blocks to prevent future
 	// calls to GetBlockVerbose.
 	blockCache *blockCache
-	// dcrd block and reorganization are synchronized through a general purpose
-	// queue.
-	anyQ chan interface{}
 	// A logger will be provided by the DEX. All logging should use the provided
 	// logger.
 	log dex.Logger
@@ -108,13 +112,10 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 		return nil, err
 	}
 	dcr := unconnectedDCR(logger)
-	notifications := &rpcclient.NotificationHandlers{
-		OnBlockConnected: dcr.onBlockConnected,
-	}
 	// When the exported constructor is used, the node will be an
 	// rpcclient.Client.
 	dcr.client, err = connectNodeRPC(cfg.RPCListen, cfg.RPCUser, cfg.RPCPass,
-		cfg.RPCCert, notifications)
+		cfg.RPCCert)
 	if err != nil {
 		return nil, err
 	}
@@ -138,10 +139,6 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 		return nil, fmt.Errorf("wrong net %v", net.String())
 	}
 
-	err = dcr.client.NotifyBlocks()
-	if err != nil {
-		return nil, fmt.Errorf("error registering for block notifications")
-	}
 	dcr.node = dcr.client
 	// Prime the cache with the best block.
 	bestHash, _, err := dcr.client.GetBestBlock()
@@ -166,8 +163,8 @@ func (btc *Backend) InitTxSize() uint32 {
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the dcr package. Part of the asset.Backend interface.
-func (dcr *Backend) BlockChannel(size int) chan uint32 {
-	c := make(chan uint32, size)
+func (dcr *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
+	c := make(chan *asset.BlockUpdate, size)
 	dcr.signalMtx.Lock()
 	defer dcr.signalMtx.Unlock()
 	dcr.blockChans = append(dcr.blockChans, c)
@@ -381,9 +378,7 @@ func (dcr *Backend) shutdown() {
 // before use.
 func unconnectedDCR(logger dex.Logger) *Backend {
 	return &Backend{
-		blockChans: make([]chan uint32, 0),
 		blockCache: newBlockCache(logger),
-		anyQ:       make(chan interface{}, 128), // way bigger than needed.
 		log:        logger,
 	}
 }
@@ -393,64 +388,128 @@ func unconnectedDCR(logger dex.Logger) *Backend {
 // then deposit the payload into the anyQ channel.
 func (dcr *Backend) Run(ctx context.Context) {
 	defer dcr.shutdown()
+	blockPoll := time.NewTicker(blockPollInterval)
+	defer blockPoll.Stop()
+	addBlock := func(block *chainjson.GetBlockVerboseResult, reorg bool) {
+		_, err := dcr.blockCache.add(block)
+		if err != nil {
+			dcr.log.Errorf("error adding new best block to cache: %v", err)
+		}
+		dcr.signalMtx.RLock()
+		dcr.log.Debugf("Notifying %d dcr asset consumers of new block at height %d",
+			len(dcr.blockChans), block.Height)
+		for _, c := range dcr.blockChans {
+			select {
+			case c <- &asset.BlockUpdate{
+				Err:   nil,
+				Reorg: reorg,
+			}:
+			default:
+				dcr.log.Errorf("failed to send block update on blocking channel")
+			}
+		}
+		dcr.signalMtx.RUnlock()
+	}
+
+	sendErr := func(err error) {
+		dcr.log.Error(err)
+		dcr.signalMtx.RLock()
+		for _, c := range dcr.blockChans {
+			select {
+			case c <- &asset.BlockUpdate{
+				Err: err,
+			}:
+			default:
+				dcr.log.Errorf("failed to send sending block update on blocking channel")
+			}
+		}
+		dcr.signalMtx.RUnlock()
+	}
+
+	sendErrFmt := func(s string, a ...interface{}) {
+		sendErr(fmt.Errorf(s, a...))
+	}
+
 out:
 	for {
 		select {
-		case rawMsg := <-dcr.anyQ:
-			switch msg := rawMsg.(type) {
-			case *chainhash.Hash:
-				// This is a new block notification.
-				blockHash := msg
-				dcr.log.Debugf("Run: Processing new block %s", blockHash)
-				blockVerbose, err := dcr.node.GetBlockVerbose(blockHash, false)
-				if err != nil {
-					dcr.log.Errorf("onBlockConnected error retrieving block %s: %v", blockHash, err)
-					return
-				}
-				// Check if this forces a reorg.
-				currentTip := int64(dcr.blockCache.tipHeight())
-				if blockVerbose.Height <= currentTip {
-					dcr.blockCache.reorg(blockVerbose)
-				}
-				block, err := dcr.blockCache.add(blockVerbose)
-				if err != nil {
-					dcr.log.Errorf("error adding block to cache")
-				}
-				dcr.signalMtx.RLock()
-				for _, c := range dcr.blockChans {
-					select {
-					case c <- block.height:
-					default:
-						dcr.log.Errorf("tried sending block update on blocking channel")
-					}
-				}
-				dcr.signalMtx.RUnlock()
-			default:
-				dcr.log.Warn("unknown message type in Run: %T", rawMsg)
+
+		case <-blockPoll.C:
+			tip := dcr.blockCache.tip()
+			bestHash, err := dcr.node.GetBestBlockHash()
+			if err != nil {
+				sendErr(asset.NewConnectionError("error retrieving best block: %v", err))
+				continue
 			}
+			if *bestHash == tip.hash {
+				continue
+			}
+
+			best := bestHash.String()
+			block, err := dcr.node.GetBlockVerbose(bestHash, false)
+			if err != nil {
+				sendErrFmt("error retrieving block %s: %v", best, err)
+				continue
+			}
+			// If this doesn't build on the best known block, look for a reorg.
+			prevHash, err := chainhash.NewHashFromStr(block.PreviousHash)
+			if err != nil {
+				sendErrFmt("error parsing previous hash %s: %v", block.PreviousHash, err)
+				continue
+			}
+			// If it builds on the best block or the cache is empty, it's good to add.
+			if *prevHash == tip.hash || tip.height == 0 {
+				dcr.log.Debugf("Run: Processing new block %s", bestHash)
+				addBlock(block, false)
+				continue
+			}
+			// It is either a reorg, or the previous block is not the cached
+			// best block. Crawl blocks backwards until finding a mainchain
+			// block, flagging blocks from the cache as orphans along the way.
+			iHash := &tip.hash
+			reorgHeight := int64(0)
+			for {
+				if *iHash == zeroHash {
+					break
+				}
+				iBlock, err := dcr.node.GetBlockVerbose(iHash, false)
+				if err != nil {
+					sendErrFmt("error retrieving block %s: %v", iHash, err)
+					break
+				}
+				if iBlock.Confirmations > -1 {
+					// This is a mainchain block, nothing to do.
+					break
+				}
+				if iBlock.Height == 0 {
+					break
+				}
+				reorgHeight = iBlock.Height
+				iHash, err = chainhash.NewHashFromStr(iBlock.PreviousHash)
+				if err != nil {
+					sendErrFmt("error decoding previous hash %s for block %s: %v",
+						iBlock.PreviousHash, iHash.String(), err)
+					// Some blocks on the side chain may not be flagged as
+					// orphaned, but still proceed, flagging the ones we have
+					// identified and adding the new best block to the cache and
+					// setting it to the best block in the cache.
+					break
+				}
+			}
+			var reorg bool
+			if reorgHeight > 0 {
+				reorg = true
+				dcr.log.Infof("Reorg from %s (%d) to %s (%d) detected.",
+					tip.hash, tip.height, bestHash, block.Height)
+				dcr.blockCache.reorg(reorgHeight)
+			}
+			// Now add the new block.
+			addBlock(block, reorg)
+
 		case <-ctx.Done():
 			break out
 		}
 	}
-}
-
-// A callback to be registered with dcrd. It is critical that no RPC calls are
-// made from this method. Doing so will likely result in a deadlock, as per
-// https://github.com/decred/dcrd/blob/952bd7bba34c8aeab86f63f9c9f69fc74ff1a7e1/rpcclient/notify.go#L78
-func (dcr *Backend) onBlockConnected(serializedHeader []byte, _ [][]byte) {
-	blockHeader := new(wire.BlockHeader)
-	err := blockHeader.FromBytes(serializedHeader)
-	if err != nil {
-		dcr.log.Errorf("error decoding serialized header: %v", err)
-		return
-	}
-	h := blockHeader.BlockHash()
-	// TODO: Instead of a buffered channel, anyQ, make a queue with a slice so
-	// the buffer size has no role in correctness i.e. the ability of this
-	// function to work when previous blocks require RPC calls to complete their
-	// processing. That is, if the channel buffer is full there is likely to be
-	// deadlock waiting for other RPCs.
-	dcr.anyQ <- &h
 }
 
 // validateTxOut validates an outpoint (txHash:out) by retrieving associated
@@ -686,8 +745,7 @@ func (dcr *Backend) getMainchainDcrBlock(height uint32) (*dcrBlock, error) {
 
 // connectNodeRPC attempts to create a new websocket connection to a dcrd node
 // with the given credentials and notification handlers.
-func connectNodeRPC(host, user, pass, cert string,
-	notifications *rpcclient.NotificationHandlers) (*rpcclient.Client, error) {
+func connectNodeRPC(host, user, pass, cert string) (*rpcclient.Client, error) {
 
 	dcrdCerts, err := ioutil.ReadFile(cert)
 	if err != nil {
@@ -702,7 +760,7 @@ func connectNodeRPC(host, user, pass, cert string,
 		Certificates: dcrdCerts,
 	}
 
-	dcrdClient, err := rpcclient.New(config, notifications)
+	dcrdClient, err := rpcclient.New(config, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start dcrd RPC client: %v", err)
 	}
