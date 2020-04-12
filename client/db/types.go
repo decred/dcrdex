@@ -181,6 +181,10 @@ type MetaMatch struct {
 	Match *order.UserMatch
 }
 
+func (m *MetaMatch) ID() []byte {
+	return hashKey(append(m.Match.MatchID[:], m.Match.OrderID[:]...))
+}
+
 // MatchMetaData is important auxiliary information about the match.
 type MatchMetaData struct {
 	// Status is the last known match status.
@@ -504,7 +508,7 @@ func NewNotification(noteType, subject, details string, severity Severity) Notif
 
 // ID is a unique ID based on a hash of the notification data.
 func (n *Notification) ID() dex.Bytes {
-	return hashKey(n.Encode())
+	return noteKey(n.Encode())
 }
 
 // Type is the notification type.
@@ -592,11 +596,17 @@ func (n *Notification) Encode() []byte {
 		AddData(uint64Bytes(n.TimeStamp))
 }
 
-// hashKeySize must be <= 32.
-const hashKeySize = 8
+// noteKeySize must be <= 32.
+const noteKeySize = 8
+
+// noteKey creates a unique key from the hash of the supplied bytes.
+func noteKey(b []byte) []byte {
+	h := blake2s.Sum256(b)
+	return h[:noteKeySize]
+}
 
 // hashKey creates a unique key from the hash of the supplied bytes.
 func hashKey(b []byte) []byte {
 	h := blake2s.Sum256(b)
-	return h[:hashKeySize]
+	return h[:]
 }
