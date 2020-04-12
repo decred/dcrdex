@@ -379,6 +379,11 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 
 out:
 	for {
+		// If there are none left, we don't have enough.
+		if len(utxos) == 0 {
+			return nil, fmt.Errorf("not enough to cover requested funds + fees = %d",
+				btc.reqFunds(value, size, nfo))
+		}
 		// On each loop, find the smallest UTXO that is enough for the value. If
 		// no UTXO is large enough, add the largest and continue.
 		var txout *compositeUTXO
@@ -398,11 +403,6 @@ out:
 		}
 		// Pop the utxo from the unspents
 		utxos = utxos[:len(utxos)-1]
-		// If there are none left, we don't have enough.
-		if len(utxos) == 0 {
-			return nil, fmt.Errorf("not enough to cover requested funds + fees = %d",
-				btc.reqFunds(value, size, nfo))
-		}
 	}
 
 	err = btc.wallet.LockUnspent(false, spents)

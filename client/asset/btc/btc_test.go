@@ -318,6 +318,14 @@ func TestAvailableFund(t *testing.T) {
 		t.Fatalf("no funding error for zero value")
 	}
 
+	// Nothing to spend
+	node.rawRes[methodListUnspent] = mustMarshal(t, []struct{}{})
+	_, err = wallet.Fund(littleBit-300, tBTC)
+	if err == nil {
+		t.Fatalf("no error for zero utxos")
+	}
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+
 	// RPC error
 	node.rawErr[methodListUnspent] = tErr
 	_, err = wallet.Fund(littleBit-300, tBTC)

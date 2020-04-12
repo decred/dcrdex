@@ -337,6 +337,14 @@ func TestAvailableFund(t *testing.T) {
 		t.Fatalf("no funding error for zero value")
 	}
 
+	// Nothing to spend
+	node.unspent = nil
+	_, err = wallet.Fund(littleBit-5000, tDCR)
+	if err == nil {
+		t.Fatalf("no error for zero utxos")
+	}
+	node.unspent = unspents
+
 	// RPC error
 	node.unspentErr = tErr
 	_, err = wallet.Fund(littleBit-5000, tDCR)
