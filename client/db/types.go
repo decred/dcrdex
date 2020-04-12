@@ -98,7 +98,7 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 		return nil, fmt.Errorf("decodeAccountInfo: expected 5 data pushes, got %d", len(pushes))
 	}
 	urlB, keyB, dexB := pushes[0], pushes[1], pushes[2]
-	coinB, cert := pushes[3], pushes[4]
+	coinB, certB := pushes[3], pushes[4]
 	pk, err := secp256k1.ParsePubKey(dexB)
 	if err != nil {
 		return nil, err
@@ -108,7 +108,7 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 		EncKey:    keyB,
 		DEXPubKey: pk,
 		FeeCoin:   coinB,
-		Cert:      cert,
+		Cert:      certB,
 	}, nil
 }
 
