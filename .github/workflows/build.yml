@@ -1,7 +1,7 @@
 name: Build and Test
 on: [push, pull_request]
 jobs:
-  build:
+  build-go:
     name: Go CI
     runs-on: ubuntu-latest
     strategy:
@@ -26,3 +26,21 @@ jobs:
         run: |
           export PATH=${PATH}:$(go env GOPATH)/bin
           ./run_tests.sh
+  build-js:
+    name: Build JS
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [12.x, 13.x]
+    steps:
+    - uses: actions/checkout@v2
+    - name: Use nodejs ${{ matrix.node-version }}
+      uses: actions/setup-node@v1
+      with:
+        node-version: ${{ matrix.node-version }}
+    - name: npm install
+      working-directory: ./client/webserver/site
+      run: npm install
+    - name: npm run build
+      working-directory: ./client/webserver/site
+      run: npm run build
