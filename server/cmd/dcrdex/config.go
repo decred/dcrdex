@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"os/user"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -35,7 +33,7 @@ const (
 	defaultPGHost              = "127.0.0.1:5432"
 	defaultPGUser              = "dcrdex"
 	defaultPGDBName            = "dcrdex"
-	defaultDEXPrivKeyFilename  = "dexprivkey"
+	defaultDEXPrivKeyFilename  = "sigkey"
 	defaultRPCHost             = "127.0.0.1"
 	defaultRPCPort             = "7232"
 	defaultAdminSrvAddr        = "127.0.0.1:6542"
@@ -68,7 +66,7 @@ type dexConf struct {
 	RegFeeConfirms   int64
 	RegFeeAmount     uint64
 	CancelThreshold  float64
-	DEXPrivKey       *secp256k1.PrivateKey
+	DEXPrivKeyPath   string
 	RPCCert          string
 	RPCKey           string
 	RPCListen        []string
@@ -507,14 +505,6 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		adminSrvAddr = cfg.AdminSrvAddr
 	}
 
-	// Load the DEX signing key. TODO: Implement a secure key storage scheme.
-	pkFileBuffer, err := ioutil.ReadFile(cfg.DEXPrivKeyPath)
-	if err != nil {
-		return loadConfigError(fmt.Errorf("unable to read DEX private key file %s: %v",
-			cfg.DEXPrivKeyPath, err))
-	}
-	privKey, _ := secp256k1.PrivKeyFromBytes(pkFileBuffer)
-
 	dexCfg := &dexConf{
 		Network:          network,
 		DBName:           cfg.PGDBName,
@@ -527,7 +517,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RegFeeConfirms:   cfg.RegFeeConfirms,
 		RegFeeXPub:       cfg.RegFeeXPub,
 		CancelThreshold:  cfg.CancelThreshold,
-		DEXPrivKey:       privKey,
+		DEXPrivKeyPath:   cfg.DEXPrivKeyPath,
 		RPCCert:          cfg.RPCCert,
 		RPCKey:           cfg.RPCKey,
 		RPCListen:        RPCListen,
