@@ -51,7 +51,7 @@ export default class Application {
       if (!page && page !== '') return
       this.loadPage(page)
     })
-    // The main element is the interchangable part of the page that doesn't
+    // The main element is the interchangeable part of the page that doesn't
     // include the header. Main should define a data-handler attribute
     // associated with  one of the available constructors.
     this.main = idel(document, 'main')
@@ -95,8 +95,6 @@ export default class Application {
     const user = await getJSON('/api/user')
     if (!app.checkResponse(user)) return
     this.user = user
-    // Clear the notification cache for unitialized users.
-    if (!user.inited) State.store('notifications', null)
     this.assets = user.assets
     this.walletMap = {}
     for (const [assetID, asset] of Object.entries(user.assets)) {
@@ -995,7 +993,7 @@ const aDay = 86400000
 const anHour = 3600000
 const aMinute = 60000
 
-/* return returns the quotient and remainder of t / dur. */
+/* timeMod returns the quotient and remainder of t / dur. */
 function timeMod (t, dur) {
   const n = Math.floor(t / dur)
   return [n, t - n * dur]

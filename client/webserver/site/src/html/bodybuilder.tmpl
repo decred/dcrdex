@@ -46,7 +46,7 @@
   <title>{{.Title}}</title>
   <link href="/css/style.css?v=0" rel="stylesheet">
 </head>
-<body data-handler="home"{{if .UserInfo.DarkMode}} class="dark"{{end}}>
+<body {{if .UserInfo.DarkMode}} class="dark"{{end}}>
 <div class="poke-note px-2 fs14 d-flex align-items-center" id="pokeNote"><span>Here is a poke note.</span></div>
 {{template "header" .}}
 {{end}}

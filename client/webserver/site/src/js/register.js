@@ -85,6 +85,11 @@ export default class RegistrationPage extends BasePage {
       Doc.show(page.appErrMsg)
       return
     }
+    // Clear the notification cache. Useful for development purposes, since
+    // the Application will only clear them on login, which would leave old
+    // browser-cached notifications in place after registering even if the
+    // client db is wiped.
+    app.setNotes([])
     page.appPW.value = ''
     page.appPWAgain.value = ''
     app.loading(page.appPWForm)

@@ -13,7 +13,7 @@ const coinValueSpecs = {
 export default class Doc {
   /*
    * idel is the element with the specified id that is the descendent of the
-   * specificed node.
+   * specified node.
    */
   static idel (el, id) {
     return el.querySelector(`#${id}`)
@@ -70,11 +70,11 @@ export default class Doc {
    * accepting one argument. The progress function will be called repeatedly
    * with the argument varying from 0.0 to 1.0. The exact path that animate
    * takes from 0.0 to 1.0 will vary depending on the choice of easing
-   * algorithm. See the Easing object for the available easing algo choices.
+   * algorithm. See the Easing object for the available easing algo choices. The
+   * default easing algorithm is linear.
    */
   static async animate (duration, f, easingAlgo) {
     const easer = easingAlgo ? Easing[easingAlgo] : Easing.linear
-    // key is a string referencing any property of Meter.data.
     const start = new Date().getTime()
     const end = start + duration
     const range = end - start
