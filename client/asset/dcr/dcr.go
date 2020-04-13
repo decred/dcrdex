@@ -1322,10 +1322,6 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 	size := msgTx.SerializeSize()
 	minFee := feeRate * uint64(size)
 	remaining := totalIn - totalOut
-	if minFee > remaining {
-		return nil, nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
-			totalIn, minFee+totalOut)
-	}
 	lastFee := remaining
 	// Create the change output.
 	changeScript, err := txscript.PayToAddrScript(addr)
@@ -1344,7 +1340,11 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 	} else {
 		reservoir = uint64(subtractee.Value)
 	}
-	isDust := dexdcr.IsDust(changeOutput, feeRate)
+	if minFee > reservoir {
+		return nil, nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
+			minFee, reservoir)
+	}
+	isDust := dexdcr.IsDust(subtractee, feeRate)
 	sigCycles := 0
 	if !isDust {
 		// Add the change output.
