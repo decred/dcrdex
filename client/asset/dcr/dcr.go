@@ -62,7 +62,7 @@ type rpcClient interface {
 	ListUnspentMin(minConf int) ([]walletjson.ListUnspentResult, error)
 	LockUnspent(unlock bool, ops []*wire.OutPoint) error
 	GetRawChangeAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error)
-	GetNewAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error)
+	GetNewAddressGapPolicy(string, rpcclient.GapPolicy, dcrutil.AddressParams) (dcrutil.Address, error)
 	SignRawTransaction(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
 	DumpPrivKey(address dcrutil.Address, net [2]byte) (*dcrutil.WIF, error)
 	GetTransaction(txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error)
@@ -565,7 +565,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 		totalOut += contract.Value
 		// revokeAddr is the address that will receive the refund if the contract is
 		// abandoned.
-		revokeAddr, err := dcr.node.GetNewAddress(dcr.acct, chainParams)
+		revokeAddr, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error creating revocation address: %v", err)
 		}
@@ -1000,13 +1000,13 @@ func (dcr *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
 		return fmt.Errorf("refund tx not worth the fees")
 	}
 
-	refundAddr, err := dcr.node.GetRawChangeAddress(dcr.acct, chainParams)
+	refundAddr, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
 	if err != nil {
 		return fmt.Errorf("error getting new address from the wallet: %v", err)
 	}
 	pkScript, err := txscript.PayToAddrScript(refundAddr)
 	if err != nil {
-		return fmt.Errorf("error creating refund script for address '%s': %v", refundAddr, err)
+		return fmt.Errorf("error creating refund script for address '%v': %v", refundAddr, err)
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
 	// One last check for dust.
@@ -1039,7 +1039,7 @@ func (dcr *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
 
 // Address returns an address for the exchange wallet.
 func (dcr *ExchangeWallet) Address() (string, error) {
-	addr, err := dcr.node.GetNewAddress(dcr.acct, chainParams)
+	addr, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
 	if err != nil {
 		return "", err
 	}
