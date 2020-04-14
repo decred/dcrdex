@@ -17,6 +17,7 @@ import (
 // routes
 const (
 	closeWalletRoute = "closewallet"
+	exchangesRoute   = "exchanges"
 	helpRoute        = "help"
 	initRoute        = "init"
 	newWalletRoute   = "newwallet"
@@ -57,6 +58,7 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 // routes maps routes to a handler function.
 var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponsePayload{
 	closeWalletRoute: handleCloseWallet,
+	exchangesRoute:   handleExchanges,
 	helpRoute:        handleHelp,
 	initRoute:        handleInit,
 	newWalletRoute:   handleNewWallet,
@@ -263,6 +265,13 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(registerRoute, &resp, nil)
 }
 
+// handleExchanges handles requests for exchangess. It takes no arguments and
+// returns a map of exchanges.
+func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
+	res := s.core.Exchanges()
+	return createResponse(exchangesRoute, &res, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -445,7 +454,7 @@ var helpMsgs = map[string]helpMsg{
         "balance" (int): The wallet balance.
         "address" (string): A wallet address.
         "feerate" (int): The fee rate.
-        "units" (str): Unit of measure for amounts.
+        "units" (string): Unit of measure for amounts.
       },...
     ]`,
 	},
@@ -462,5 +471,72 @@ Registration is complete after the fee transaction has been confirmed.`,
     cert (string): Optional. The TLS certificate path.`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(feePaidStr, "[fee]") + `"`,
+	},
+	exchangesRoute: {
+		pwArgsShort: ``,
+		argsShort:   ``,
+		cmdSummary:  `List assets supported by all registered DEX servers their and active trades.`,
+		pwArgsLong:  ``,
+		argsLong:    ``,
+		returns: `Returns:
+    map: The exchanges result.
+    {
+      "[DEX url] (map): {
+        "url" (string): The DEX URL.
+        "markets" (map): {
+          "[assetID-assetID]" (map): {
+            "name" (string): The market name. e.g. "dcr_btc".
+            "baseid" (int): The base assetID
+            "basesymbol" (string): The base assetID symbol.
+            "quoteid" (int): The quote assetID.
+            "quotesymbol" (string): The quote assetID symbol,
+            "epochlen" (int): Duration of a trade window in milliseconds.
+            "startepoch" (int): Unix time of start of the last epoch in seconds
+	      since 00:00:00 Jan 1 1970.
+            "buybuffer" (float): The minimum order size for a market buy order.
+            "orders" (map): {
+              "dex" (string): The DEX URL.
+              "market" (string): The market name. e.g. "dcr_btc".
+              "type" (int): 0 for market or 1 for limit.
+              "id" (string): A unique trade ID.
+              "stamp" (int): The unix trade timestamp. Seconds since 00:00:00
+	        Jan 1 1970.
+              "qty" (bool): Number of units offered in the trade.
+              "sell" (bool): Whether this is a sell order.
+              "filled" (int): How much of the order has been filled.
+              "matches" (array): [
+	        {
+                  "matchID" (string): A unique match ID.
+                  "step" (string): ???
+                  "rate" (int): The price per offered unit.
+                  "qty" (int): Number of units offered in the trade.
+		},...
+	      ]
+              "cancelling" (bool): Whether this trade is in the process of being
+	        cancelled.
+              "canceled" (bool): Whether this trade has been canceled.
+              "rate" (int): The price per offered unit.
+              "tif" (int): The number of epochs this trade is good for.
+              "targetID" (string): ???
+	      },...
+          },...
+        },
+        "assets" (map): {
+          "[assetID]" (map): {
+            "id" (int): The asset's BIP-44 registered coin index.
+            "symbol (string)": The asset's coin symbol.
+            "lotSize" (int): The amount of units of a coin in one lot.
+            "rateStep" (int): the price rate increment in atoms.
+            "feeRate" (int): The transaction fee in atoms per byte.
+            "swapSize" (int): The size of a swap transaction in bytes.
+            "swapConf" (int): The number of confirmations needed to confirm
+	      trade transactions.
+            "fundConf" (int): The number of confirmations needed to allow use
+	      of coins for trading.
+          },...
+        },
+        "feePending" (bool): Whether the dex fee is pending.
+      },...
+    }`,
 	},
 }

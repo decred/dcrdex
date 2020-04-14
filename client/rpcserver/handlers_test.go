@@ -441,3 +441,13 @@ func TestHandleRegister(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleExchanges(t *testing.T) {
+	tc := &TCore{exchanges: make(map[string]*core.Exchange)}
+	r := &RPCServer{core: tc}
+	payload := handleExchanges(r, nil)
+	var res map[string]*core.Exchange
+	if err := verifyResponse(payload, &res, -1); err != nil {
+		t.Fatal(err)
+	}
+}
