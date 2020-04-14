@@ -25,6 +25,7 @@ const (
 	openWalletRoute  = "openwallet"
 	getFeeRoute      = "getfee"
 	registerRoute    = "register"
+	tradeRoute       = "trade"
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
 )
@@ -67,6 +68,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	openWalletRoute:  handleOpenWallet,
 	getFeeRoute:      handleGetFee,
 	registerRoute:    handleRegister,
+	tradeRoute:       handleTrade,
 	versionRoute:     handleVersion,
 	walletsRoute:     handleWallets,
 }
@@ -349,6 +351,22 @@ func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(loginRoute, &res, nil)
 }
 
+// handleTrade handles requests for trade. *msgjson.ResponsePayload.Error is
+// empty if successful.
+func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseTradeArgs(params)
+	if err != nil {
+		return usage(tradeRoute, err)
+	}
+	res, err := s.core.Trade(form.AppPass, form.SrvForm)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to trade: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCTradeError, errMsg)
+		return createResponse(tradeRoute, nil, resErr)
+	}
+	return createResponse(tradeRoute, &res, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -444,18 +462,18 @@ var helpMsgs = map[string]helpMsg{
 	versionRoute: {
 		pwArgsShort: ``,
 		argsShort:   ``,
-		cmdSummary:  `Print the dex client rpcserver version.`,
+		cmdSummary:  `Print the DEX client rpcserver version.`,
 		pwArgsLong:  ``,
 		argsLong:    ``,
 		returns: `Returns:
-    string: The dex client rpcserver version.`,
+    string: The DEX client rpcserver version.`,
 	},
 	initRoute: {
 		pwArgsShort: `"appPass"`,
 		argsShort:   ``,
 		cmdSummary:  `Initialize the client.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The dex client password.`,
+    appPass (string): The DEX client password.`,
 		argsLong: ``,
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
@@ -471,7 +489,7 @@ var helpMsgs = map[string]helpMsg{
 		returns: `Returns:
     obj: The getFee result.
     {
-      "fee" (int): The dex registration fee.
+      "fee" (int): The DEX registration fee.
     }`,
 	},
 	newWalletRoute: {
@@ -479,7 +497,7 @@ var helpMsgs = map[string]helpMsg{
 		argsShort:   `assetID "account" ("config")`,
 		cmdSummary:  `Connect to a new wallet.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The dex client password.
+    appPass (string): The DEX client password.
     walletPass (string): The wallet's password.`,
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
@@ -546,7 +564,7 @@ var helpMsgs = map[string]helpMsg{
 	registerRoute: {
 		pwArgsShort: `"appPass"`,
 		argsShort:   `"addr" fee ("cert")`,
-		cmdSummary: `Register for dex. An ok response does not mean that registration is complete.
+		cmdSummary: `Register for DEX. An ok response does not mean that registration is complete.
 Registration is complete after the fee transaction has been confirmed.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
@@ -652,6 +670,48 @@ Registration is complete after the fee transaction has been confirmed.`,
           "tradeIDs" (array): An array of active trade IDs.
         }
       ]
+    }`,
+	},
+	tradeRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `"dex" isLimit sell base qyote qty rate tifnow`,
+		cmdSummary:  ``,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		argsLong: `Args:
+    isLimit (bool): Whether the order is a limit order.
+    sell (bool): Whether the order is selling.
+    base (int): The base BIP-44 registered coin index.
+    quote (int): The quote BIP-44 registered coin index.
+    qty (int): The number of lots to sell/buy.
+    rate (int): The number of units to ask per lot.
+    tifnow (bool): The number of epochs the trade is good for.`,
+		returns: `Returns:
+    dict: The order details.
+    {
+      "dex" (string): The DEX URL.
+      "market" (string): The market name. e.g. "dcr_btc".
+      "type" (int): 0 for market or 1 for limit.
+      "id" (string): A unique trade ID.
+      "stamp" (int): The unix trade timestamp. Seconds since 00:00:00
+        Jan 1 1970.
+      "qty" (bool): Number of units offered in the trade.
+      "sell" (bool): Whether this is a sell order.
+      "filled" (int): How much of the order has been filled.
+      "matches" (array): [
+        {
+          "matchID" (string): A unique match ID.
+          "step" (string): ???
+          "rate" (int): The price per offered unit.
+          "qty" (int): Number of units offered in the trade.
+        },...
+      ]
+      "cancelling" (bool): Whether this trade is in the process of being
+        cancelled.
+      "canceled" (bool): Whether this trade has been canceled.
+      "rate" (int): The price per offered unit.
+      "tif" (int): The number of epochs this trade is good for.
+      "targetID" (string): ???
     }`,
 	},
 }

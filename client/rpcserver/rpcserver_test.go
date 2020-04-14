@@ -52,6 +52,8 @@ type TCore struct {
 	exchanges           map[string]*core.Exchange
 	loginErr            error
 	loginResult         *core.LoginResult
+	order               *core.Order
+	tradeErr            error
 }
 
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
@@ -84,6 +86,9 @@ func (c *TCore) Register(*core.RegisterForm) error {
 }
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return nil, core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr
+}
+func (c *TCore) Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error) {
+	return c.order, c.tradeErr
 }
 func (c *TCore) Wallets() []*core.WalletState {
 	return c.wallets

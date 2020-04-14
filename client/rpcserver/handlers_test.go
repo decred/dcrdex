@@ -635,3 +635,46 @@ func TestHandleLogin(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleTrade(t *testing.T) {
+	params := &RawParams{
+		PWArgs: []encode.PassBytes{encode.PassBytes("123")}, // 0. AppPass
+		Args: []string{
+			"1.2.3.4:3000", // 0. DEX
+			"true",         // 1. IsLimit
+			"true",         // 2. Sell
+			"0",            // 3. Base
+			"42",           // 4. Quote
+			"1",            // 5. Qty
+			"1",            // 6. Rate
+			"true",         // 7. TifNow
+		}}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		tradeErr    error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:        "core.Trade error",
+		params:      params,
+		tradeErr:    errors.New("error"),
+		wantErrCode: msgjson.RPCTradeError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{tradeErr: test.tradeErr}
+		r := &RPCServer{core: tc}
+		payload := handleTrade(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

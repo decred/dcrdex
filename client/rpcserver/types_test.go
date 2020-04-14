@@ -326,3 +326,102 @@ func TestParseHelpArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestTradeArgs(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	goodParams := &RawParams{
+		PWArgs: []encode.PassBytes{pw}, // 0. AppPass
+		Args: []string{
+			"1.2.3.4:3000", // 0. DEX
+			"true",         // 1. IsLimit
+			"true",         // 2. Sell
+			"0",            // 3. Base
+			"42",           // 4. Quote
+			"1",            // 5. Qty
+			"1",            // 6. Rate
+			"true",         // 7. TifNow
+		}}
+	paramsWith := func(idx int, thing string) *RawParams {
+		newParams := &RawParams{
+			PWArgs: make([]encode.PassBytes, 1),
+			Args:   make([]string, 8),
+		}
+		copy(newParams.PWArgs, goodParams.PWArgs)
+		copy(newParams.Args, goodParams.Args)
+		newParams.Args[idx] = thing
+		return newParams
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: goodParams,
+	}, {
+		name:    "isLimit not bool",
+		params:  paramsWith(1, "blue"),
+		wantErr: errArgs,
+	}, {
+		name:    "sell not bool",
+		params:  paramsWith(2, "blue"),
+		wantErr: errArgs,
+	}, {
+		name:    "base not uint32",
+		params:  paramsWith(3, "-1"),
+		wantErr: errArgs,
+	}, {
+		name:    "quote not uint32",
+		params:  paramsWith(4, "-1"),
+		wantErr: errArgs,
+	}, {
+		name:    "qty not uint64",
+		params:  paramsWith(5, "-1"),
+		wantErr: errArgs,
+	}, {
+		name:    "rate not uint64",
+		params:  paramsWith(6, "-1"),
+		wantErr: errArgs,
+	}, {
+		name:    "tifnow not bool",
+		params:  paramsWith(7, "blue"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		reg, err := parseTradeArgs(test.params)
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
+			t.Fatalf("AppPass doesn't match")
+		}
+		if reg.SrvForm.DEX != test.params.Args[0] {
+			t.Fatalf("DEX doesn't match")
+		}
+		if fmt.Sprint(reg.SrvForm.IsLimit) != test.params.Args[1] {
+			t.Fatalf("IsLimit doesn't match")
+		}
+		if fmt.Sprint(reg.SrvForm.Sell) != test.params.Args[2] {
+			t.Fatalf("Sell doesn't match")
+		}
+		if fmt.Sprint(reg.SrvForm.Base) != test.params.Args[3] {
+			t.Fatalf("Base doesn't match")
+		}
+		if fmt.Sprint(reg.SrvForm.Quote) != test.params.Args[4] {
+			t.Fatalf("Quote doesn't match")
+		}
+		if fmt.Sprint(reg.SrvForm.Qty) != test.params.Args[5] {
+			t.Fatalf("Qty doesn't match")
+		}
+		if fmt.Sprint(reg.SrvForm.Rate) != test.params.Args[6] {
+			t.Fatalf("Rate doesn't match")
+		}
+		if fmt.Sprint(reg.SrvForm.TifNow) != test.params.Args[7] {
+			t.Fatalf("TifNow doesn't match")
+		}
+	}
+}
