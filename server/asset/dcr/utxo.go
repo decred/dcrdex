@@ -165,7 +165,9 @@ type UTXO struct {
 	TXIO
 	vout uint32
 	// A bitmask for script type information.
-	scriptType        dexdcr.DCRScriptType
+	scriptType dexdcr.DCRScriptType
+	// If the pkScript, or redeemScript in the case of a P2SH pkScript, is
+	// non-standard according to txscript.
 	nonStandardScript bool
 	// The output's scriptPubkey.
 	pkScript []byte

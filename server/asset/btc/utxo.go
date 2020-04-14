@@ -155,7 +155,9 @@ type UTXO struct {
 	TXIO
 	vout uint32
 	// A bitmask for script type information.
-	scriptType        dexbtc.BTCScriptType
+	scriptType dexbtc.BTCScriptType
+	// If the pkScript, or redeemScript in the case of a P2SH/P2WSH pkScript, is
+	// non-standard according to txscript.
 	nonStandardScript bool
 	// The output's scriptPubkey.
 	pkScript []byte

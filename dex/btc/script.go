@@ -336,7 +336,8 @@ type BtcScriptAddrs struct {
 }
 
 // ExtractScriptAddrs extracts the addresses from the pubkey script, or the
-// redeem script if the pubkey script is P2SH.
+// redeem script if the pubkey script is P2SH. The returned bool indicates if
+// the script is non-standard.
 func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScriptAddrs, bool, error) {
 	pubkeys := make([]btcutil.Address, 0)
 	pkHashes := make([]btcutil.Address, 0)
@@ -459,6 +460,7 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 		Script()
 }
 
+// SpendInfo is information about an input and it's previous outpoint.
 type SpendInfo struct {
 	SigScriptSize     uint32
 	WitnessSize       uint32

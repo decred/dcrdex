@@ -276,7 +276,8 @@ func Test_nonstandardScript(t *testing.T) {
 		t.Fatalf(fmt.Sprintf("script hash check failed for output %s,%d", contractTx, vout))
 	}
 
-	// ExtractScriptAddrs should error for non-standard scripts.
+	// ExtractScriptAddrs should not error for non-standard scripts, but should
+	// detect them as such.
 	chainParams := chaincfg.TestNet3Params()
 	_, nonStd, err := ExtractScriptAddrs(contractScript, chainParams)
 	if err != nil {
