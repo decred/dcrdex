@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/chaincfg/v2/chainec"
 	"github.com/decred/dcrd/dcrec"
@@ -243,10 +244,65 @@ func TestIsDust(t *testing.T) {
 	}
 }
 
+// Test both InputInfo and ExtractScriptHashByType with a non-standard script.
+func Test_nonstandardScript(t *testing.T) {
+	// The tx hash of a DCR testnet swap contract.
+	contractTx, err := chainhash.NewHashFromStr("4a14a2d79c1374d286ebd68d2c104343bcf8be44ed54045b5963fbf73667cecc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vout := 0 // the contract output index, 1 is change
+
+	// The contract output's P2SH pkScript and the corresponding redeem script
+	// (the actual contract).
+	pkScript, _ := hex.DecodeString("a9146d4bc656b3287a0e6b0d38802db6400f7053111787") // verboseTx.Vout[vout].ScriptPubKey.Hex from getrawtransaction(verbose)
+	contractScript, _ := hex.DecodeString("6382012088c020c6de3217594af525fb" +
+		"57eaf1f2aae04c305ddc67d465edd325151685fc5a5e428876a914479eddda81" +
+		"b6ed289515f2dbcc95f05ce80dff466704fe03865eb17576a91498a67ed502ad" +
+		"b04173d88fb1ef92d0317711c3816888ac")
+
+	scriptType := ParseScriptType(CurrentScriptVersion, pkScript, contractScript)
+	if !scriptType.IsP2SH() {
+		t.Fatalf("script was not P2SH, got %v (see script.go)", scriptType)
+	}
+
+	// Double check that the pkScript's script hash matches the hash of the
+	// redeem (contract) script.
+	scriptHash, err := ExtractScriptHashByType(scriptType, pkScript)
+	if err != nil {
+		t.Fatalf(fmt.Sprintf("ExtractScriptHashByType error: %v", err))
+	}
+	if !bytes.Equal(dcrutil.Hash160(contractScript), scriptHash) {
+		t.Fatalf(fmt.Sprintf("script hash check failed for output %s,%d", contractTx, vout))
+	}
+
+	// ExtractScriptAddrs should not error for non-standard scripts, but should
+	// detect them as such.
+	chainParams := chaincfg.TestNet3Params()
+	_, nonStd, err := ExtractScriptAddrs(contractScript, chainParams)
+	if err != nil {
+		t.Fatalf("ExtractScriptAddrs failed: %v", err)
+	}
+	if !nonStd {
+		t.Errorf("expected non-standard script")
+	}
+
+	// InputInfo currently calls ExtractScriptAddrs at the time of writing, but
+	// InputInfo should error regardless.
+	spendInfo, err := InputInfo(pkScript, contractScript, chainParams)
+	if err != nil {
+		t.Fatalf("InputInfo failed: %v", err)
+	}
+	if !spendInfo.NonStandardScript {
+		t.Errorf("contract script should be non-standard")
+	}
+}
+
 func TestExtractScriptAddrs(t *testing.T) {
 	addrs := testAddresses()
 	type test struct {
 		addr   dcrutil.Address
+		nonStd bool
 		script []byte
 		pk     int
 		pkh    int
@@ -254,9 +310,10 @@ func TestExtractScriptAddrs(t *testing.T) {
 	}
 
 	tests := []test{
-		{addrs.pkh, nil, 0, 1, 1},
-		{addrs.sh, nil, 0, 1, 1},
-		{nil, addrs.multiSig, 2, 0, 1},
+		{addrs.pkh, false, nil, 0, 1, 1},
+		{addrs.sh, false, nil, 0, 1, 1},
+		{nil, false, addrs.multiSig, 2, 0, 1},
+		{nil, true, []byte{1}, 0, 0, 0},
 	}
 
 	for _, tt := range tests {
@@ -264,9 +321,12 @@ func TestExtractScriptAddrs(t *testing.T) {
 		if s == nil {
 			s, _ = txscript.PayToAddrScript(tt.addr)
 		}
-		scriptAddrs, err := ExtractScriptAddrs(s, tParams)
+		scriptAddrs, nonStd, err := ExtractScriptAddrs(s, tParams)
 		if err != nil {
 			t.Fatalf("error extracting script addresses: %v", err)
+		}
+		if nonStd != tt.nonStd {
+			t.Fatalf("expected nonStd=%v, got %v", tt.nonStd, nonStd)
 		}
 		if scriptAddrs.NumPK != tt.pk {
 			t.Fatalf("wrong number of hash addresses. wanted %d, got %d", tt.pk, scriptAddrs.NumPK)

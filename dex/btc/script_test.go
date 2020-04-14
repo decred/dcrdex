@@ -233,14 +233,18 @@ func TestIsDust(t *testing.T) {
 
 func TestExtractScriptAddrs(t *testing.T) {
 	// Invalid script
-	_, err := ExtractScriptAddrs(invalidScript, tParams)
+	_, nonStd, err := ExtractScriptAddrs(invalidScript, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad script")
+	}
+	if !nonStd {
+		t.Errorf("expected non-standard script")
 	}
 
 	addrs := testAddresses()
 	type test struct {
 		addr   btcutil.Address
+		nonStd bool
 		script []byte
 		pk     int
 		pkh    int
@@ -248,11 +252,11 @@ func TestExtractScriptAddrs(t *testing.T) {
 	}
 
 	tests := []test{
-		{addrs.pkh, nil, 0, 1, 1},
-		{addrs.sh, nil, 0, 1, 1},
-		{addrs.wpkh, nil, 0, 1, 1},
-		{addrs.wsh, nil, 0, 1, 1},
-		{nil, addrs.multiSig, 2, 0, 1},
+		{addrs.pkh, false, nil, 0, 1, 1},
+		{addrs.sh, false, nil, 0, 1, 1},
+		{addrs.wpkh, false, nil, 0, 1, 1},
+		{addrs.wsh, false, nil, 0, 1, 1},
+		{nil, false, addrs.multiSig, 2, 0, 1},
 	}
 
 	for _, tt := range tests {
@@ -260,9 +264,12 @@ func TestExtractScriptAddrs(t *testing.T) {
 		if s == nil {
 			s, _ = txscript.PayToAddrScript(tt.addr)
 		}
-		scriptAddrs, err := ExtractScriptAddrs(s, tParams)
+		scriptAddrs, nonStd, err := ExtractScriptAddrs(s, tParams)
 		if err != nil {
 			t.Fatalf("error extracting script addresses: %v", err)
+		}
+		if nonStd != tt.nonStd {
+			t.Fatalf("expected nonStd=%v, got %v", tt.nonStd, nonStd)
 		}
 		if scriptAddrs.NumPK != tt.pk {
 			t.Fatalf("wrong number of hash addresses. wanted %d, got %d", tt.pk, scriptAddrs.NumPK)

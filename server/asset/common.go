@@ -25,7 +25,9 @@ type Backend interface {
 	ValidateSecret(secret, contract []byte) bool
 	// Redemption returns the redemption at the specified location.
 	Redemption(redemptionID, contractID []byte) (Coin, error)
-	// FundingCoin returns the unspent coin at the specified location.
+	// FundingCoin returns the unspent coin at the specified location. Coins
+	// with non-standard pkScripts or scripts that require zero signatures to
+	// redeem must return an error.
 	FundingCoin(coinID []byte, redeemScript []byte) (FundingCoin, error)
 	// BlockChannel creates and returns a new channel on which to receive updates
 	// when new blocks are connected.

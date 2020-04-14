@@ -27,7 +27,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -38,20 +37,13 @@ import (
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/wire"
 	"github.com/decred/slog"
-	flags "github.com/jessevdk/go-flags"
 )
 
 var (
-	dcrdConfigPath = filepath.Join(dcrdHomeDir, "dcrd.conf")
-	dcr            *Backend
-	ctx            context.Context
-	testLogger     dex.Logger
+	dcr        *Backend
+	ctx        context.Context
+	testLogger dex.Logger
 )
-
-type dcrdConfig struct {
-	RPCUser string `short:"u" long:"rpcuser" description:"Username for RPC connections"`
-	RPCPass string `short:"P" long:"rpcpass" default-mask:"-" description:"Password for RPC connections"`
-}
 
 func TestMain(m *testing.M) {
 	// Wrap everything for defers.
@@ -68,14 +60,8 @@ func TestMain(m *testing.M) {
 			logger.Infof("done.")
 		}()
 
-		cfg := new(dcrdConfig)
-		err := flags.NewIniParser(flags.NewParser(cfg, flags.Default|flags.IgnoreUnknown)).ParseFile(dcrdConfigPath)
-		if err != nil {
-			fmt.Printf("error reading dcrd config: %v\n", err)
-			return 1
-		}
-
-		dcr, err = NewBackend("", logger, dex.Mainnet)
+		var err error
+		dcr, err = NewBackend("", logger, dex.Testnet)
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
 			return 1
@@ -123,7 +109,7 @@ func TestLiveUTXO(t *testing.T) {
 		return *bestHash != *h
 	}
 
-	// Get the MsgTxs for the lsit of hashes.
+	// Get the MsgTxs for the list of hashes.
 	getMsgTxs := func(hashes []*chainhash.Hash) []*wire.MsgTx {
 		outTxs := make([]*wire.MsgTx, 0)
 		for _, h := range hashes {
@@ -202,7 +188,7 @@ func TestLiveUTXO(t *testing.T) {
 				scriptTypeOK := scriptType != dexdcr.ScriptUnsupported
 				// Now try to get the UTXO with the Backend
 				utxo, err := dcr.utxo(txHash, uint32(vout), nil)
-				// Can't do stakebase or cainbase.
+				// Can't do stakebase or coinbase.
 				// ToDo: Use a custom error and check it.
 				if err == immatureTransactionError {
 					// just count these for now.

@@ -555,14 +555,19 @@ type DCRScriptAddrs struct {
 // separated into pubkey and pubkey hash, where the pkh addresses are actually a
 // catch all for non-P2PK addresses. As such, this function is not intended for
 // use on P2SH pkScripts. Rather, the corresponding redeem script should be
-// processed with ExtractScriptAddrs.
-func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScriptAddrs, error) {
+// processed with ExtractScriptAddrs. The returned bool indicates if the script
+// is non-standard.
+func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScriptAddrs, bool, error) {
 	pubkeys := make([]dcrutil.Address, 0)
 	pkHashes := make([]dcrutil.Address, 0)
 	// For P2SH and non-P2SH multi-sig, pull the addresses from the pubkey script.
-	_, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams)
+	class, addrs, numRequired, err := txscript.ExtractPkScriptAddrs(0, script, chainParams)
+	nonStandard := class == txscript.NonStandardTy
 	if err != nil {
-		return nil, fmt.Errorf("ExtractScriptAddrs: %v", err)
+		return nil, nonStandard, fmt.Errorf("ExtractScriptAddrs: %v", err)
+	}
+	if nonStandard {
+		return &DCRScriptAddrs{}, nonStandard, nil
 	}
 	for _, addr := range addrs {
 		// If the address is an unhashed public key, is won't need a pubkey as part
@@ -580,14 +585,15 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*DCRScript
 		PkHashes:  pkHashes,
 		NumPKH:    len(pkHashes),
 		NRequired: numRequired,
-	}, nil
+	}, false, nil
 }
 
 // SpendInfo is information about an input and it's previous outpoint.
 type SpendInfo struct {
-	SigScriptSize uint32
-	ScriptAddrs   *DCRScriptAddrs
-	ScriptType    DCRScriptType
+	SigScriptSize     uint32
+	ScriptAddrs       *DCRScriptAddrs
+	ScriptType        DCRScriptType
+	NonStandardScript bool
 }
 
 // Size is the serialized size of the input.
@@ -612,9 +618,17 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 		}
 		evalScript = redeemScript
 	}
-	scriptAddrs, err := ExtractScriptAddrs(evalScript, chainParams)
+	scriptAddrs, nonStandard, err := ExtractScriptAddrs(evalScript, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing utxo script addresses")
+	}
+	if nonStandard {
+		return &SpendInfo{
+			// SigScriptSize cannot be determined, leave zero.
+			ScriptAddrs:       scriptAddrs,
+			ScriptType:        scriptType,
+			NonStandardScript: true,
+		}, nil
 	}
 
 	// Get the size of the signature script.
@@ -646,7 +660,7 @@ func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte
 		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %v",
 			scriptHex, err)
 	}
-	scriptAddrs, err := ExtractScriptAddrs(pkScript, chainParams)
+	scriptAddrs, _, err := ExtractScriptAddrs(pkScript, chainParams)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting contract address: %v", err)
 	}

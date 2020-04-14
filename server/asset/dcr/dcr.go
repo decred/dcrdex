@@ -232,7 +232,14 @@ func (dcr *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.Fundi
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
-	return dcr.utxo(txHash, vout, redeemScript)
+	utxo, err := dcr.utxo(txHash, vout, redeemScript)
+	if err != nil {
+		return nil, err
+	}
+	if utxo.nonStandardScript {
+		return nil, fmt.Errorf("non-standard script")
+	}
+	return utxo, nil
 }
 
 // ValidateCoinID attempts to decode the coinID.
@@ -289,9 +296,14 @@ func (dcr *Backend) UTXODetails(txid string, vout uint32) (string, uint64, int64
 		return "", 0, -1, dex.UnsupportedScriptError
 	}
 
-	scriptAddrs, err := dexdcr.ExtractScriptAddrs(pkScript, chainParams)
+	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(pkScript, chainParams)
 	if err != nil {
 		return "", 0, -1, fmt.Errorf("error parsing utxo script addresses")
+	}
+	if nonStandard {
+		// This should be covered by the NumPKH check, but this is a more
+		// informative error message.
+		return "", 0, -1, fmt.Errorf("non-standard script")
 	}
 	if scriptAddrs.NumPK != 0 {
 		return "", 0, -1, fmt.Errorf("pubkey addresses not supported for P2PKHDetails")
@@ -627,11 +639,12 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 			maturity:   int32(maturity),
 			lastLookup: lastLookup,
 		},
-		vout:         vout,
-		scriptType:   scriptType,
-		pkScript:     pkScript,
-		redeemScript: redeemScript,
-		numSigs:      inputNfo.ScriptAddrs.NRequired,
+		vout:              vout,
+		scriptType:        scriptType,
+		nonStandardScript: inputNfo.NonStandardScript,
+		pkScript:          pkScript,
+		redeemScript:      redeemScript,
+		numSigs:           inputNfo.ScriptAddrs.NRequired,
 		// The total size associated with the wire.TxIn.
 		spendSize: inputNfo.SigScriptSize + dexdcr.TxInOverhead,
 		value:     toAtoms(txOut.Value),

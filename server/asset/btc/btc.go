@@ -254,7 +254,14 @@ func (btc *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.Fundi
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
-	return btc.utxo(txHash, vout, redeemScript)
+	utxo, err := btc.utxo(txHash, vout, redeemScript)
+	if err != nil {
+		return nil, err
+	}
+	if utxo.nonStandardScript {
+		return nil, fmt.Errorf("non-standard script")
+	}
+	return utxo, nil
 }
 
 // ValidateCoinID attempts to decode the coinID.
@@ -422,13 +429,14 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 			maturity:   int32(maturity),
 			lastLookup: lastLookup,
 		},
-		vout:         vout,
-		scriptType:   scriptType,
-		pkScript:     pkScript,
-		redeemScript: redeemScript,
-		numSigs:      inputNfo.ScriptAddrs.NRequired,
-		spendSize:    inputNfo.VBytes(),
-		value:        uint64(txOut.Value * btcToSatoshi),
+		vout:              vout,
+		scriptType:        scriptType,
+		nonStandardScript: inputNfo.NonStandardScript,
+		pkScript:          pkScript,
+		redeemScript:      redeemScript,
+		numSigs:           inputNfo.ScriptAddrs.NRequired,
+		spendSize:         inputNfo.VBytes(),
+		value:             uint64(txOut.Value * btcToSatoshi),
 	}, nil
 }
 
