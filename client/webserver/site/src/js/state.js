@@ -12,6 +12,9 @@ export default class State {
     document.cookie = cname + '=' + cvalue + ';' + expires + ';path=/'
   }
 
+  /*
+   * getCookie returns the value at the specified cookie name, otherwise null.
+   */
   static getCookie (cname) {
     for (const cstr of document.cookie.split(';')) {
       const [k, v] = cstr.split('=')
@@ -20,6 +23,7 @@ export default class State {
     return null
   }
 
+  /* dark sets the dark-mode cookie. */
   static dark (dark) {
     this.setCookie(darkModeCK, dark ? '1' : '0')
     if (dark) {
@@ -29,14 +33,22 @@ export default class State {
     }
   }
 
+  /*
+   * isDark returns true if the dark-mode cookie is currently set to '1' = true.
+   */
   static isDark () {
     return document.cookie.split(';').filter((item) => item.includes(`${darkModeCK}=1`)).length
   }
 
+  /* store puts the key-value pair into Window.localStorage. */
   static store (k, v) {
     window.localStorage.setItem(k, JSON.stringify(v))
   }
 
+  /*
+  * fetch fetches the value associated with the key in Window.localStorage, or
+  * null if the no value exists for the key.
+  */
   static fetch (k) {
     const v = window.localStorage.getItem(k)
     if (v !== null) {
