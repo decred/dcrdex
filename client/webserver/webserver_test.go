@@ -16,7 +16,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -75,11 +74,11 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Exchanges() map[string]*core.Exchange        { return nil }
-func (c *TCore) GetFee(string, string) (uint64, error)       { return 1e8, c.getFeeErr }
-func (c *TCore) Register(r *core.RegisterForm) error         { return c.regErr }
-func (c *TCore) InitializeClient(pw []byte) error            { return c.initErr }
-func (c *TCore) Login(pw []byte) ([]*db.Notification, error) { return nil, c.loginErr }
+func (c *TCore) Exchanges() map[string]*core.Exchange       { return nil }
+func (c *TCore) GetFee(string, string) (uint64, error)      { return 1e8, c.getFeeErr }
+func (c *TCore) Register(r *core.RegisterForm) error        { return c.regErr }
+func (c *TCore) InitializeClient(pw []byte) error           { return c.initErr }
+func (c *TCore) Login(pw []byte) (*core.LoginResult, error) { return &core.LoginResult{}, c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return c.syncBook, c.syncFeed, c.syncErr
 }

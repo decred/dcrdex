@@ -20,6 +20,7 @@ const (
 	exchangesRoute   = "exchanges"
 	helpRoute        = "help"
 	initRoute        = "init"
+	loginRoute       = "login"
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
 	getFeeRoute      = "getfee"
@@ -61,6 +62,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	exchangesRoute:   handleExchanges,
 	helpRoute:        handleHelp,
 	initRoute:        handleInit,
+	loginRoute:       handleLogin,
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
 	getFeeRoute:      handleGetFee,
@@ -332,6 +334,21 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(exchangesRoute, &exchanges, nil)
 }
 
+// handleLogin sets up the dex connection and returns received notifications.
+func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	appPass, err := parseLoginArgs(params)
+	if err != nil {
+		return usage(loginRoute, err)
+	}
+	res, err := s.core.Login(appPass)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to login: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCLoginError, errMsg)
+		return createResponse(loginRoute, nil, resErr)
+	}
+	return createResponse(loginRoute, &res, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -593,5 +610,27 @@ Registration is complete after the fee transaction has been confirmed.`,
         "feePending" (bool): Whether the dex fee is pending.
       },...
     }`,
+	},
+	loginRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   ``,
+		cmdSummary:  `Attempt to login to all known DEX servers.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The dex client password.`,
+		argsLong: ``,
+		returns: `Returns:
+    obj: An array of notifications.
+    [
+      {
+        "type" (string): The notification type.
+        "subject" (string): A clarification of type.
+        "details"(string): The notification details.
+        "severity" (int): The importance of the notification on a scale of 0
+	  through 5.
+        "stamp" (int): Unix time of the notification. Seconds since 00:00:00 Jan 1 1970.
+        "acked" (bool): Whether the notification was acknowledged.
+        "id" (string): A unique hex ID.
+      },...,
+    ]`,
 	},
 }

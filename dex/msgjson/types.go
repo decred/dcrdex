@@ -56,6 +56,7 @@ const (
 	RPCRegisterError                  // 40
 	RPCArgumentsError                 // 41
 	MarketNotRunningError             // 42
+	RPCLoginError                     // 43
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

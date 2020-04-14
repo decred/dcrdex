@@ -23,7 +23,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/slog"
@@ -63,7 +62,7 @@ var (
 type clientCore interface {
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) error
-	Login(pw []byte) ([]*db.Notification, error)
+	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
 	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	Balance(uint32) (uint64, error)
