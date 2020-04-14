@@ -120,8 +120,9 @@ func RandomNotification(maxTime uint64) *db.Notification {
 		NoteType:    randString(25),
 		SubjectText: randString(255),
 		DetailText:  randString(255),
-		Severeness:  db.Severity(randBytes(1)[0]),
-		TimeStamp:   uint64(rand.Int63n(int64(maxTime))),
+		// Since this is for DB tests, only use severity level >= Success.
+		Severeness: db.Severity(rand.Intn(3)) + db.Success,
+		TimeStamp:  uint64(rand.Int63n(int64(maxTime))),
 	}
 }
 
