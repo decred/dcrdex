@@ -235,9 +235,9 @@ func handlePreRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayl
 // is empty if successful.
 func handleRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
 	form := new(core.Registration)
-	err := json.Unmarshal(req.Payload, form)
+	err := req.Unmarshal(form)
 	if err != nil {
-		resErr := &msgjson.Error{Code: msgjson.RPCParseError, Message: "unable to unmarshal request"}
+		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
 	err = s.core.Register(form)
@@ -330,27 +330,27 @@ Returns:
       "fee" (int): The dex registration fee.
     }`,
 	},
-	newWalletRoute: {`assetID "account" "inipath" "walletPass" "appPass"`,
+	newWalletRoute: {`"appPass" "walletPass" assetID "account" "inipath"`,
 		`Connect to a new wallet.
 
 Args:
+    appPass (string): The dex client password.
+    walletPass (string): The wallet's password.
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     account (string): The account or wallet name, depending on wallet software.
     inipath (string): The location of the wallet's config file.
-    walletPass (string): The wallet's password.
-    appPass (string): The dex client password.
 
 Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
 	},
-	openWalletRoute: {`assetID "appPass"`,
+	openWalletRoute: {`"appPass" assetID`,
 		`Open an existing wallet.
 
 Args:
+    appPass (string): The DEX client password.
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    appPass (string): The DEX client password.
 
 Returns:
     string: The message "` + fmt.Sprintf(walletUnlockedStr, "[coin symbol]") + `"`,
@@ -385,13 +385,13 @@ Returns:
       },...
     ]`,
 	},
-	registerRoute: {`"dex" "password" fee`,
+	registerRoute: {`"appPass" "dex" fee`,
 		`Register for dex. An ok response does not mean that registration is complete.
 Registration is complete after the fee transaction has been confirmed.
 
 Args:
-    dex (string): The DEX addr to register for.
     appPass (string): The DEX client password.
+    dex (string): The DEX addr to register for.
     fee (int): The DEX fee.
 
 Returns:

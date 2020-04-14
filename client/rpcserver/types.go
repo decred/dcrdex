@@ -120,20 +120,26 @@ func parseHelpArgs(args []string) (interface{}, error) {
 }
 
 func parseNewWalletArgs(args []string) (interface{}, error) {
-	assetID, err := checkIntArg(args[0], "assetID")
+	assetID, err := checkIntArg(args[2], "assetID")
 	if err != nil {
 		return nil, err
 	}
-	req := &newWalletForm{AssetID: uint32(assetID), Account: args[1], INIPath: args[2], WalletPass: args[3], AppPass: args[4]}
+	req := &newWalletForm{
+		AppPass:    args[0],
+		WalletPass: args[1],
+		AssetID:    uint32(assetID),
+		Account:    args[3],
+		INIPath:    args[4],
+	}
 	return req, nil
 }
 
 func parseOpenWalletArgs(args []string) (interface{}, error) {
-	assetID, err := checkIntArg(args[0], "assetID")
+	assetID, err := checkIntArg(args[1], "assetID")
 	if err != nil {
 		return nil, err
 	}
-	req := &openWalletForm{AssetID: uint32(assetID), AppPass: args[1]}
+	req := &openWalletForm{AppPass: args[0], AssetID: uint32(assetID)}
 	return req, nil
 }
 
@@ -142,6 +148,6 @@ func parseRegisterArgs(args []string) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := &core.Registration{DEX: args[0], Password: args[1], Fee: uint64(fee)}
+	req := &core.Registration{Password: args[0], DEX: args[1], Fee: uint64(fee)}
 	return req, nil
 }
