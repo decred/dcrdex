@@ -702,13 +702,13 @@ func TestPenalize(t *testing.T) {
 		t.Fatalf("penalty not stored")
 	}
 	rig.storage.closedID = zeroAcct
-	if !user.conn.banished {
-		t.Fatalf("penalized user not banished")
+	if user.conn.banished {
+		t.Fatalf("penalized user should not be banished")
 	}
 
-	// The user should not be in the map
-	if rig.mgr.user(user.acctID) != nil {
-		t.Fatalf("penalized user not removed from map")
+	// The user should remain in the map to finish their work.
+	if rig.mgr.user(user.acctID) == nil {
+		t.Fatalf("penalized user should not be removed from map")
 	}
 }
 

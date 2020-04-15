@@ -66,6 +66,7 @@ type dexConf struct {
 	RegFeeConfirms   int64
 	RegFeeAmount     uint64
 	CancelThreshold  float64
+	Anarchy          bool
 	DEXPrivKeyPath   string
 	RPCCert          string
 	RPCKey           string
@@ -101,6 +102,7 @@ type flagsData struct {
 	RegFeeConfirms   int64         `long:"regfeeconfirms" description:"The number of confirmations required to consider a registration fee paid."`
 	RegFeeAmount     uint64        `long:"regfeeamount" description:"The registration fee amount in atoms."`
 	CancelThreshold  float64       `long:"cancelthresh" description:"Cancellation ratio threshold (cancels/completed)."`
+	Anarchy          bool          `long:"anarchy" description:"Do not enforce any rules."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 
 	HTTPProfile bool   `long:"httpprof" short:"p" description:"Start HTTP profiler."`
@@ -517,6 +519,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RegFeeConfirms:   cfg.RegFeeConfirms,
 		RegFeeXPub:       cfg.RegFeeXPub,
 		CancelThreshold:  cfg.CancelThreshold,
+		Anarchy:          cfg.Anarchy,
 		DEXPrivKeyPath:   cfg.DEXPrivKeyPath,
 		RPCCert:          cfg.RPCCert,
 		RPCKey:           cfg.RPCKey,

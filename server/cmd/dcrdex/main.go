@@ -111,6 +111,7 @@ func mainCore(ctx context.Context) error {
 		RegFeeConfirms:   cfg.RegFeeConfirms,
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		CancelThreshold:  cfg.CancelThreshold,
+		Anarchy:          cfg.Anarchy,
 		DEXPrivKey:       privKey,
 		CommsCfg: &dexsrv.RPCConfig{
 			RPCCert:     cfg.RPCCert,

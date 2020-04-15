@@ -95,6 +95,7 @@ type DexConf struct {
 	RegFeeAmount     uint64
 	BroadcastTimeout time.Duration
 	CancelThreshold  float64
+	Anarchy          bool
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
 }
@@ -195,6 +196,11 @@ func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.E
 //  8. Create and start the book router, and create the order router.
 //  9. Create and start the comms server.
 func NewDEX(cfg *DexConf) (*DEX, error) {
+	// Disallow running without user penalization in a mainnet config.
+	if cfg.Anarchy && cfg.Network == dex.Mainnet {
+		return nil, fmt.Errorf("User penalties may not be disabled on mainnet.")
+	}
+
 	var stopWaiters []subsystem
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -329,6 +335,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.UnspentCoinDetails,
 		CancelThreshold: cfg.CancelThreshold,
+		Anarchy:         cfg.Anarchy,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
