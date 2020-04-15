@@ -21,31 +21,31 @@ func Test_createAndStoreKey(t *testing.T) {
 	tests := []struct {
 		name    string
 		path    string
-		pass    string
+		pass    []byte
 		wantErr bool
 	}{
 		{
 			"bad path",
 			"/totally/not/a/path",
-			"pass1234",
+			[]byte("pass1234"),
 			true,
 		},
 		{
 			"ok new",
 			filepath.Join(dir, file),
-			"pass1234",
+			[]byte("pass1234"),
 			false,
 		},
 		{
 			"already exists",
 			filepath.Join(dir, file),
-			"pass1234",
+			[]byte("pass1234"),
 			true,
 		},
 		{
 			"empty pass",
 			filepath.Join(dir, "newkey2"),
-			"",
+			[]byte{},
 			true,
 		},
 	}
@@ -65,7 +65,7 @@ func Test_loadKeyFile(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	fullFile := filepath.Join(dir, "newkey")
-	pass := "pass1234"
+	pass := []byte("pass1234")
 
 	privKey, err := createAndStoreKey(fullFile, pass)
 	if err != nil {
@@ -75,28 +75,28 @@ func Test_loadKeyFile(t *testing.T) {
 	tests := []struct {
 		name    string
 		path    string
-		pass    string
+		pass    []byte
 		want    *secp256k1.PrivateKey
 		wantErr bool
 	}{
 		{
 			"ok",
 			fullFile,
-			"pass1234",
+			[]byte("pass1234"),
 			privKey,
 			false,
 		},
 		{
 			"bad path",
 			filepath.Join(dir, "wrongName"),
-			"pass1234",
+			[]byte("pass1234"),
 			nil,
 			true,
 		},
 		{
 			"wrong pass",
 			fullFile,
-			"adsf",
+			[]byte("adsd"),
 			nil,
 			true,
 		},
@@ -128,37 +128,37 @@ func Test_dexKey(t *testing.T) {
 	tests := []struct {
 		name    string
 		path    string
-		pass    string
+		pass    []byte
 		wantErr bool
 	}{
 		{
 			"bad path",
 			"/totally/not/a/path",
-			"pass1234",
+			[]byte("pass1234"),
 			true,
 		},
 		{
 			"ok new",
 			fullFile,
-			"pass1234",
+			[]byte("pass1234"),
 			false,
 		},
 		{
 			"ok exists",
 			fullFile,
-			"pass1234",
+			[]byte("pass1234"),
 			false,
 		},
 		{
 			"wrong pass",
 			fullFile,
-			"adsf",
+			[]byte("adsf"),
 			true,
 		},
 		{
 			"empty pass for new",
 			filepath.Join(dir, "newkey2"),
-			"",
+			[]byte{},
 			true,
 		},
 	}

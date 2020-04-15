@@ -90,6 +90,7 @@ func mainCore(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		admin.ClearBytes(keyPW)
 	}
 
 	// Create the DEX manager.

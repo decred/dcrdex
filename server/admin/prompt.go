@@ -14,30 +14,29 @@ import (
 
 // PasswordPrompt prompts the user to enter a password. Password must not be an
 // empty string.
-func PasswordPrompt(prompt string) (string, error) {
+func PasswordPrompt(prompt string) ([]byte, error) {
 	fmt.Print(prompt)
 	pass, err := terminal.ReadPassword(syscall.Stdin)
 	fmt.Println()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if pass == nil {
-		return "", errors.New("password must not be empty")
+		return nil, errors.New("password must not be empty")
 	}
-	return string(pass), nil
+	return pass, nil
 }
 
 // PasswordHashPrompt prompts the user to enter a password and returns its
 // SHA256 hash. Password must not be an empty string.
-func PasswordHashPrompt(prompt string) ([32]byte, error) {
-	var authSHA [32]byte
-	password, err := PasswordPrompt(prompt)
+func PasswordHashPrompt(prompt string) ([sha256.Size]byte, error) {
+	var authSHA [sha256.Size]byte
+	passBytes, err := PasswordPrompt(prompt)
 	if err != nil {
 		return authSHA, err
 	}
-	passBytes := []byte(password)
 	authSHA = sha256.Sum256(passBytes)
-	// Zero password bytes. What about the password string?
+	// Zero password bytes.
 	ClearBytes(passBytes)
 	return authSHA, nil
 }

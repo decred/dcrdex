@@ -13,7 +13,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
-func dexKey(path, pass string) (*secp256k1.PrivateKey, error) {
+func dexKey(path string, pass []byte) (*secp256k1.PrivateKey, error) {
 	var privKey *secp256k1.PrivateKey
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		log.Infof("Creating new DEX signing key file at %s...", path)
@@ -33,7 +33,7 @@ func dexKey(path, pass string) (*secp256k1.PrivateKey, error) {
 	return privKey, nil
 }
 
-func loadKeyFile(path, pass string) (*secp256k1.PrivateKey, error) {
+func loadKeyFile(path string, pass []byte) (*secp256k1.PrivateKey, error) {
 	// Load and decrypt it.
 	pkFileBuffer, err := ioutil.ReadFile(path)
 	if err != nil {
@@ -47,10 +47,15 @@ func loadKeyFile(path, pass string) (*secp256k1.PrivateKey, error) {
 	if ver != 0 {
 		return nil, fmt.Errorf("unrecognized key file version %d: %v", ver, err)
 	}
+	if len(pushes) != 2 {
+		return nil, fmt.Errorf("invalid signing key file, "+
+			"containing %d data pushes instead of 2", len(pushes))
+	}
 	keyParams := pushes[0]
 	encKey := pushes[1]
 
-	crypter, err := encrypt.Deserialize(pass, keyParams)
+	// TODO: change encrypt.Deserialize to accept pass as a []byte.
+	crypter, err := encrypt.Deserialize(string(pass), keyParams)
 	if err != nil {
 		return nil, err
 	}
@@ -63,9 +68,9 @@ func loadKeyFile(path, pass string) (*secp256k1.PrivateKey, error) {
 	return privKey, nil
 }
 
-func createAndStoreKey(path, pass string) (*secp256k1.PrivateKey, error) {
+func createAndStoreKey(path string, pass []byte) (*secp256k1.PrivateKey, error) {
 	// Disallow an empty password.
-	if pass == "" {
+	if len(pass) == 0 {
 		return nil, fmt.Errorf("empty password")
 	}
 	// Do not overwrite existing key files.
@@ -80,7 +85,8 @@ func createAndStoreKey(path, pass string) (*secp256k1.PrivateKey, error) {
 	}
 
 	// Encrypt the private key.
-	crypter := encrypt.NewCrypter(pass)
+	// TODO: change encrypt.NewCrypter to accept pass as a []byte.
+	crypter := encrypt.NewCrypter(string(pass))
 	keyParams := crypter.Serialize()
 	encKey, err := crypter.Encrypt(privKey.Serialize())
 	if err != nil {
