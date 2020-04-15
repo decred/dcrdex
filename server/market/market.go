@@ -118,12 +118,12 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 		return nil, err
 	}
 	// TODO: first check that the coins aren't already locked by e.g. another market.
-	log.Tracef("Locking %d base asset coins", len(baseCoins))
+	log.Debugf("Locking %d base asset coins.", len(baseCoins))
 	for oid, coins := range baseCoins {
 		log.Tracef(" - order %v: %v", oid, coins)
 	}
 	coinLockerBase.LockCoins(baseCoins)
-	log.Debugf("Locking %d quote asset coins", len(quoteCoins))
+	log.Debugf("Locking %d quote asset coins.", len(quoteCoins))
 	for oid, coins := range quoteCoins {
 		log.Tracef(" - order %v: %v", oid, coins)
 	}
@@ -972,8 +972,10 @@ func (m *Market) enqueueEpoch(eq *epochPump, epoch *EpochQueue) {
 func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed []*matcher.OrderRevealed, misses []order.Order) {
 	// Solicit the preimages for each order.
 	cSum, ordersRevealed, misses = m.collectPreimages(orders)
-	log.Debugf("Collected %d valid order preimages, missed %d. Commit checksum: %x",
-		len(ordersRevealed), len(misses), cSum)
+	if len(orders) > 0 {
+		log.Infof("Collected %d valid order preimages, missed %d. Commit checksum: %x",
+			len(ordersRevealed), len(misses), cSum)
+	}
 
 	// Penalize accounts with misses. TODO: consider if Penalize can be an async
 	// function call.
@@ -1020,13 +1022,15 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 	seed, matches, _, failed, doneOK, partial, booked, unbooked, updates := m.matcher.Match(m.book, ordersRevealed)
 	m.epochIdx = epoch.Epoch + 1
 	m.bookMtx.Unlock()
-	log.Debugf("Matching complete for market %v epoch %d:"+
-		" %d matches (%d partial fills), %d completed OK (not booked),"+
-		" %d booked, %d unbooked, %d failed",
-		m.marketInfo.Name, epoch.Epoch,
-		len(matches), len(partial), len(doneOK),
-		len(booked), len(unbooked), len(failed),
-	)
+	if len(ordersRevealed) > 0 {
+		log.Infof("Matching complete for market %v epoch %d:"+
+			" %d matches (%d partial fills), %d completed OK (not booked),"+
+			" %d booked, %d unbooked, %d failed",
+			m.marketInfo.Name, epoch.Epoch,
+			len(matches), len(partial), len(doneOK),
+			len(booked), len(unbooked), len(failed),
+		)
+	}
 
 	// Store data in epochs table, including matchTime so that cancel execution
 	// times can be obtained from the DB for cancellation ratio computation.
