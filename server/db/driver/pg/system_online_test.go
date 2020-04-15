@@ -67,7 +67,7 @@ func openDB() (func() error, error) {
 		User:         PGTestsUser,
 		Pass:         PGTestsPass,
 		DBName:       PGTestsDBName,
-		HidePGConfig: true,
+		ShowPGConfig: true,
 		QueryTimeout: 0, // zero to use the default
 		MarketCfg:    []*dex.MarketInfo{mktInfo, mktInfo2},
 		//CheckedStores: true,

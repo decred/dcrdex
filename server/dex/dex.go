@@ -39,11 +39,12 @@ type AssetConf struct {
 
 // DBConf groups the database configuration parameters.
 type DBConf struct {
-	DBName string
-	User   string
-	Pass   string
-	Host   string
-	Port   uint16
+	DBName       string
+	User         string
+	Pass         string
+	Host         string
+	Port         uint16
+	ShowPGConfig bool
 }
 
 // RPCConfig is an alias for the comms Server's RPC config struct.
@@ -315,7 +316,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		User:         cfg.DBConf.User,
 		Pass:         cfg.DBConf.Pass,
 		DBName:       cfg.DBConf.DBName,
-		HidePGConfig: false,
+		ShowPGConfig: cfg.DBConf.ShowPGConfig,
 		QueryTimeout: 20 * time.Minute,
 		MarketCfg:    cfg.Markets,
 		//CheckedStores: true,

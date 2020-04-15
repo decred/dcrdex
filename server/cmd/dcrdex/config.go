@@ -61,6 +61,7 @@ type dexConf struct {
 	DBPass           string
 	DBHost           string
 	DBPort           uint16
+	ShowPGConfig     bool
 	MarketsConfPath  string
 	RegFeeXPub       string
 	RegFeeConfirms   int64
@@ -112,7 +113,7 @@ type flagsData struct {
 	PGUser       string `long:"pguser" description:"PostgreSQL DB user."`
 	PGPass       string `long:"pgpass" description:"PostgreSQL DB password."`
 	PGHost       string `long:"pghost" description:"PostgreSQL server host:port or UNIX socket (e.g. /run/postgresql)."`
-	HidePGConfig bool   `long:"hidepgconfig" description:"Blocks logging of the PostgreSQL db configuration on system start up."`
+	ShowPGConfig bool   `long:"showpgconfig" description:"Logs the PostgreSQL db configuration on system start up."`
 	AdminSrvOn   bool   `long:"adminsrvon" description:"turn on the admin server"`
 	AdminSrvAddr string `long:"adminsrvaddr" description:"administration HTTPS server address (default: 127.0.0.1:6542)"`
 }
@@ -514,6 +515,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		DBPort:           dbPort,
 		DBUser:           cfg.PGUser,
 		DBPass:           cfg.PGPass,
+		ShowPGConfig:     cfg.ShowPGConfig,
 		MarketsConfPath:  cfg.MarketsConfPath,
 		RegFeeAmount:     cfg.RegFeeAmount,
 		RegFeeConfirms:   cfg.RegFeeConfirms,

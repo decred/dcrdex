@@ -408,9 +408,9 @@ func checkCurrentTimeZone(db *sql.DB) (currentTZ string, err error) {
 	return
 }
 
-func (a *Archiver) checkPerfSettings(hidePGConfig bool) error {
+func (a *Archiver) checkPerfSettings(showPGConfig bool) error {
 	// Optionally log the PostgreSQL configuration.
-	if !hidePGConfig {
+	if showPGConfig {
 		perfSettings, err := retrieveSysSettingsPerformance(a.db)
 		if err != nil {
 			return err
