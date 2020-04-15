@@ -101,5 +101,4 @@ func main() {
 	}
 	wg.Wait()
 	ui.Close()
-
 }
