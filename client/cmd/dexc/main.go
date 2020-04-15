@@ -66,13 +66,17 @@ func main() {
 		fmt.Fprint(os.Stderr, "error creating client core: ", err)
 		return
 	}
-	go clientCore.Run(appCtx)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		clientCore.Run(appCtx)
+		wg.Done()
+	}()
 	// At least one of --rpc or --web must be specified.
 	if cfg.NoWeb && !cfg.RPCOn {
 		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc or --tui is specified\n")
 		return
 	}
-	var wg sync.WaitGroup
 	if cfg.RPCOn {
 		wg.Add(1)
 		go func() {
