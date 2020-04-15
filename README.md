@@ -36,7 +36,7 @@ testnet.
 
 ```
 CREATE USER dcrdex WITH PASSWORD 'dexpass';
-CREATE DATABASE dcrdex_testnet OWNED BY dcrdex;
+CREATE DATABASE dcrdex_testnet OWNER dcrdex;
 ```
 
 **Generate a master public key** for collecting registration fees. This can be
