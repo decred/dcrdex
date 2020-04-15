@@ -287,9 +287,11 @@ func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 		log.Errorf("Send requested for unknown user %x", user[:])
 		return
 	}
+
 	err := client.conn.Send(msg)
 	if err != nil {
 		log.Debugf("error sending on link: %v", err)
+		auth.removeClient(client)
 	}
 }
 
@@ -317,6 +319,7 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 	err := client.conn.Request(msg, auth.handleResponse, expireTime, func() {})
 	if err != nil {
 		log.Debugf("error sending request: %v", err)
+		auth.removeClient(client)
 	}
 	return err
 }
@@ -334,11 +337,10 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) { /
 		return
 	}
 	auth.storage.CloseAccount(client.acct.ID, rule)
-	client.conn.Banish() // May not want to do this. Leaving it for now.
-	// TODO: definitely don't want to do disconnect if the user has active
-	// swaps, which everyone would benefit from if they finish them. However, we
-	// do not want the user to initiate a swap or place a new order.
-	auth.removeClient(client)
+
+	// We do NOT want to do disconnect if the user has active swaps. TODO:
+	// However, we do not want the user to initiate a swap or place a new order,
+	// so there should be appropriate checks on order submission.
 }
 
 // user gets the clientInfo for the specified account ID.
@@ -557,6 +559,7 @@ func (auth *AuthManager) handleResponse(conn comms.Link, msg *msgjson.Message) {
 			err := conn.Send(errMsg)
 			if err != nil {
 				log.Tracef("error sending response failure message: %v", err)
+				auth.removeClient(client)
 			}
 		}
 		return
