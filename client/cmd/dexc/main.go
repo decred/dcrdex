@@ -41,13 +41,13 @@ func main() {
 	cfg, err := ui.Configure()
 	if err != nil {
 		fmt.Fprint(os.Stderr, "configration error: ", err)
-		return
+		os.Exit(1)
 	}
 
 	if cfg.TUI {
 		// Run in TUI mode.
 		ui.Run(appCtx)
-		return
+		os.Exit(0)
 	}
 
 	// If --tui is not specified, don't create the tview application. Initialize
@@ -64,7 +64,7 @@ func main() {
 	})
 	if err != nil {
 		fmt.Fprint(os.Stderr, "error creating client core: ", err)
-		return
+		os.Exit(1)
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -75,7 +75,7 @@ func main() {
 	// At least one of --rpc or --web must be specified.
 	if cfg.NoWeb && !cfg.RPCOn {
 		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc or --tui is specified\n")
-		return
+		os.Exit(1)
 	}
 	if cfg.RPCOn {
 		wg.Add(1)
@@ -86,7 +86,7 @@ func main() {
 			rpcSrv, err := rpcserver.New(rpcCfg)
 			if err != nil {
 				log.Errorf("Error starting rpc server: %v", err)
-				return
+				os.Exit(1)
 			}
 			rpcSrv.Run(appCtx)
 		}()
@@ -98,7 +98,7 @@ func main() {
 			webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
 			if err != nil {
 				log.Errorf("Error starting web server: %v", err)
-				return
+				os.Exit(1)
 			}
 			webSrv.Run(appCtx)
 		}()
