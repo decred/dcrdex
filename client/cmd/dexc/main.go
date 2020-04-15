@@ -72,7 +72,8 @@ func main() {
 		clientCore.Run(appCtx)
 		wg.Done()
 	}()
-	// At least one of --rpc or --web must be specified.
+	// If explicitly running without web server then you must run the rpc
+	// server or the terminal ui.
 	if cfg.NoWeb && !cfg.RPCOn {
 		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc or --tui is specified\n")
 		os.Exit(1)
