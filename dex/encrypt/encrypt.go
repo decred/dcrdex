@@ -46,8 +46,8 @@ var intCoder = encode.IntCoder
 // Key is 32 bytes.
 type Key [KeySize]byte
 
-// Salt is randomness used as part of key deriviation. This is different from
-// the salt generated during xchacha20poly1305 encryption, which is shorter.
+// Salt is randomness used as part of key derivation. This is different from the
+// salt generated during xchacha20poly1305 encryption, which is shorter.
 type Salt [SaltSize]byte
 
 // newSalt is the constructor for a salt based on randomness from crypto/rand.

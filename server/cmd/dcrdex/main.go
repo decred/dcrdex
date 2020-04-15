@@ -19,6 +19,7 @@ import (
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
 	dexsrv "decred.org/dcrdex/server/dex"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
 func mainCore(ctx context.Context) error {
@@ -34,10 +35,10 @@ func mainCore(ctx context.Context) error {
 		}
 	}()
 
-	// Aquire admin server password if turned on.
+	// Acquire admin server password if enabled.
 	var adminSrvAuthSHA [32]byte
 	if cfg.AdminSrvOn {
-		adminSrvAuthSHA, err = admin.PasswordPrompt("Enter admin server password:")
+		adminSrvAuthSHA, err = admin.PasswordHashPrompt("Admin interface password: ")
 		if err != nil {
 			return fmt.Errorf("cannot use password: %v", err)
 		}
@@ -78,6 +79,20 @@ func mainCore(ctx context.Context) error {
 	log.Infof("Found %d assets, loaded %d markets, for network %s",
 		len(assets), len(markets), strings.ToUpper(cfg.Network.String()))
 
+	// Load, or create and save, the DEX signing key.
+	var privKey *secp256k1.PrivateKey
+	{
+		keyPW, err := admin.PasswordPrompt("Signing key password: ")
+		if err != nil {
+			return fmt.Errorf("cannot use password: %v", err)
+		}
+		privKey, err = dexKey(cfg.DEXPrivKeyPath, keyPW)
+		if err != nil {
+			return err
+		}
+		admin.ClearBytes(keyPW)
+	}
+
 	// Create the DEX manager.
 	dexConf := &dexsrv.DexConf{
 		LogBackend: cfg.LogMaker,
@@ -96,7 +111,7 @@ func mainCore(ctx context.Context) error {
 		RegFeeConfirms:   cfg.RegFeeConfirms,
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		CancelThreshold:  cfg.CancelThreshold,
-		DEXPrivKey:       cfg.DEXPrivKey,
+		DEXPrivKey:       privKey,
 		CommsCfg: &dexsrv.RPCConfig{
 			RPCCert:     cfg.RPCCert,
 			RPCKey:      cfg.RPCKey,

@@ -29,6 +29,9 @@ type logWriter struct{}
 
 // Write writes the data in p to standard out and the log rotator.
 func (logWriter) Write(p []byte) (n int, err error) {
+	if logRotator == nil {
+		return os.Stdout.Write(p)
+	}
 	os.Stdout.Write(p)
 	return logRotator.Write(p)
 }
