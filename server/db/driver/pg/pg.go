@@ -48,7 +48,7 @@ const (
 // Config holds the Archiver's configuration.
 type Config struct {
 	Host, Port, User, Pass, DBName string
-	HidePGConfig                   bool
+	ShowPGConfig                   bool
 	QueryTimeout                   time.Duration
 
 	// MarketCfg specifies all of the markets that the Archiver should prepare.
@@ -153,7 +153,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 	}
 
 	// Check critical performance-related settings.
-	if err = archiver.checkPerfSettings(cfg.HidePGConfig); err != nil {
+	if err = archiver.checkPerfSettings(cfg.ShowPGConfig); err != nil {
 		return nil, err
 	}
 
