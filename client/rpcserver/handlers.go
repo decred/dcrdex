@@ -240,6 +240,17 @@ func handleRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload
 		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
+	fee, err := s.core.PreRegister(form.DEX)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
+			err.Error())
+		return createResponse(req.Route, nil, resErr)
+	}
+	if fee != form.Fee {
+		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.DEX, fee, form.Fee)
+		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
+		return createResponse(req.Route, nil, resErr)
+	}
 	err = s.core.Register(form)
 	if err != nil {
 		resErr := &msgjson.Error{Code: msgjson.RPCRegisterError, Message: err.Error()}
