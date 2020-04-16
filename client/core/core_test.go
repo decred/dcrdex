@@ -29,6 +29,7 @@ import (
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
+	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/slog"
 )
@@ -2143,4 +2144,124 @@ func tMsgAudit(oid order.OrderID, mid order.MatchID, recipient string, val uint6
 		secretHash: secretHash,
 	}
 	return audit, auditInfo
+}
+
+func TestHandleEpochOrderMsg(t *testing.T) {
+	rig := newTestRig()
+	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+	oid := ord.ID()
+	mid := hex.EncodeToString(encode.RandomBytes(order.OrderIDSize))
+	payload := &msgjson.EpochOrderNote{
+		BookOrderNote: msgjson.BookOrderNote{
+			OrderNote: msgjson.OrderNote{
+				MarketID: mid,
+				OrderID:  oid.Bytes(),
+			},
+			TradeNote: msgjson.TradeNote{
+				Side:     msgjson.BuyOrderNum,
+				Rate:     4,
+				Quantity: 10,
+			},
+		},
+		Epoch: 1,
+	}
+
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.EpochOrderRoute, payload)
+
+	// Ensure handling an epoch order associated with a non-existent orderbook
+	// generates an error.
+	err := handleEpochOrderMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleEpochOrderMsg] expected a non-existent orderbook error")
+	}
+
+	rig.dc.books[mid] = book.NewOrderBook()
+
+	err = handleEpochOrderMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleEpochOrderMsg] unexpected error: %v", err)
+	}
+
+	payload.Epoch = 2
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.EpochOrderRoute, payload)
+
+	// Ensure receiving an epoch order with a different epoch resets the queue.
+	err = handleEpochOrderMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleEpochOrderMsg] unexpected error: %v", err)
+	}
+
+	epochSize := rig.dc.books[mid].EpochSize()
+	if epochSize != 1 {
+		t.Fatalf("[handleEpochOrderMsg] expected an epoch size of 1, got %d",
+			epochSize)
+	}
+}
+
+func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) (msgjson.Bytes, msgjson.Bytes, error) {
+	if len(preimages) != len(commitments) {
+		return nil, nil, fmt.Errorf("expected equal number of preimages and commitments")
+	}
+
+	sbuff := make([]byte, 0, len(preimages)*order.PreimageSize)
+	cbuff := make([]byte, 0, len(commitments)*order.CommitmentSize)
+	for i := 0; i < len(preimages); i++ {
+		sbuff = append(sbuff, preimages[i][:]...)
+		cbuff = append(cbuff, commitments[i][:]...)
+	}
+	seed := blake256.Sum256(sbuff)
+	csum := blake256.Sum256(cbuff)
+	return seed[:], csum[:], nil
+}
+
+func TestHandleMatchProofMsg(t *testing.T) {
+	rig := newTestRig()
+	mid := hex.EncodeToString(encode.RandomBytes(order.OrderIDSize))
+	pimg := newPreimage()
+	cmt := pimg.Commit()
+
+	seed, csum, err := makeMatchProof([]order.Preimage{pimg}, []order.Commitment{cmt})
+	if err != nil {
+		t.Fatalf("[makeMatchProof] unexpected error: %v", err)
+	}
+
+	payload := &msgjson.MatchProofNote{
+		MarketID:  mid,
+		Epoch:     1,
+		Preimages: []dex.Bytes{pimg[:]},
+		CSum:      csum[:],
+		Seed:      seed[:],
+	}
+
+	eo := &msgjson.EpochOrderNote{
+		BookOrderNote: msgjson.BookOrderNote{
+			OrderNote: msgjson.OrderNote{
+				MarketID: mid,
+				OrderID:  encode.RandomBytes(order.OrderIDSize),
+			},
+		},
+		Epoch:  1,
+		Commit: cmt[:],
+	}
+
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
+
+	// Ensure match proof validation generates an error for a non-existent
+	// orderbook generates an error.
+	err = handleMatchProofMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleMatchProofMsg] expected a non-existent orderbook error")
+	}
+
+	rig.dc.books[mid] = book.NewOrderBook()
+
+	err = rig.dc.books[mid].Enqueue(eo)
+	if err != nil {
+		t.Fatalf("[Enqueue] unexpected error: %v", err)
+	}
+
+	err = handleMatchProofMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleMatchProofMsg] unexpected error: %v", err)
+	}
 }
