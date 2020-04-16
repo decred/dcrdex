@@ -34,10 +34,10 @@ func TestConfigure(t *testing.T) {
 	createFile(mainFP, "webaddr=:9876")
 
 	testFP := filepath.Join(dir, "dexc_testnet.conf")
-	createFile(testFP, "notui=1\ntestnet=1\nrpc=1")
+	createFile(testFP, "tui=1\ntestnet=1\nrpc=1")
 
 	simFP := filepath.Join(dir, "dexc_simnet.conf")
-	createFile(simFP, "webaddr=:1234\nsimnet=1\nweb=1")
+	createFile(simFP, "webaddr=:1234\nsimnet=1\nnoweb=1")
 
 	// Check the mainnet configuration.
 	os.Args = []string{cmd, "--appdata", dir, "--config", mainFP}
@@ -45,11 +45,9 @@ func TestConfigure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mainnet Configure error: %v", err)
 	}
-	check("mainnet notui", cfg.NoTUI == false)
 	check("mainnet testnet", cfg.Testnet == false)
 	check("mainnet simnet", cfg.Simnet == false)
 	check("mainnet rpc", cfg.RPCOn == false)
-	check("mainnet web", cfg.WebOn == false)
 	check("mainnet webaddr", cfg.WebAddr == ":9876")
 
 	// Check the testnet configuration.
@@ -58,11 +56,10 @@ func TestConfigure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("simnet Configure error: %v", err)
 	}
-	check("testnet notui", cfg.NoTUI == true)
 	check("testnet testnet", cfg.Testnet == true)
 	check("testnet simnet", cfg.Simnet == false)
 	check("testnet rpc", cfg.RPCOn == true)
-	check("testnet web", cfg.WebOn == false)
+	check("testnet tui", cfg.TUI == true)
 	check("testnet webaddr", cfg.WebAddr == defaultWebAddr)
 
 	// Check the simnet configuration.
@@ -71,10 +68,9 @@ func TestConfigure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("simnet Configure error: %v", err)
 	}
-	check("simnet notui", cfg.NoTUI == false)
 	check("simnet testnet", cfg.Testnet == false)
 	check("simnet simnet", cfg.Simnet == true)
 	check("simnet rpc", cfg.RPCOn == false)
-	check("simnet web", cfg.WebOn == true)
+	check("simnet noweb", cfg.NoWeb == true)
 	check("simnet webaddr", cfg.WebAddr == ":1234")
 }

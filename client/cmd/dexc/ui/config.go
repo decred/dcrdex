@@ -68,9 +68,9 @@ type Config struct {
 	RPCPass    string `long:"rpcpass" description:"RPC server password"`
 	RPCCert    string `long:"rpccert" description:"RPC server certificate file location"`
 	RPCKey     string `long:"rpckey" description:"RPC server key file location"`
-	WebOn      bool   `long:"web" description:"turn on the web server"`
 	WebAddr    string `long:"webaddr" description:"HTTP server address"`
-	NoTUI      bool   `long:"notui" description:"disable the terminal-based user interface. must be used with --rpc or --web"`
+	NoWeb      bool   `long:"noweb" description:"disable the web server."`
+	TUI        bool   `long:"tui" description:"enable the terminal-based user interface."`
 	Testnet    bool   `long:"testnet" description:"use testnet"`
 	Simnet     bool   `long:"simnet" description:"use simnet"`
 	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
