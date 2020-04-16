@@ -249,7 +249,7 @@ func (s *WebServer) Run(ctx context.Context) {
 		s.readNotifications(ctx)
 	}()
 
-	log.Infof("Web server listening on %s", s.addr)
+	log.Infof("Web server listening on http://%s", s.addr)
 	err = s.srv.Serve(listener)
 	if !errors.Is(err, http.ErrServerClosed) {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
