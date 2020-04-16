@@ -61,7 +61,8 @@ appdata=${NODES_ROOT}/alpha
 simnet=1
 enablevoting=1
 enableticketbuyer=1
-ticketbuyer.limit=4
+ticketbuyer.limit=5
+ticketbuyer.balancetomaintainabsolute=1000
 pass=${WALLET_PASS}
 rpcconnect=127.0.0.1:${ALPHA_RPC_PORT}
 rpclisten=127.0.0.1:${ALPHA_WALLET_PORT}
@@ -203,7 +204,10 @@ sleep 1
 tmux send-keys -t $SESSION:2 "${WALLET_PASS}" C-m "${WALLET_PASS}" C-m "n" C-m "y" C-m
 sleep 1
 tmux send-keys -t $SESSION:2 "${ALPHA_WALLET_SEED}" C-m C-m
-tmux send-keys -t $SESSION:2 "dcrwallet -C w-alpha.conf " C-m
+# unlock the wallet on start-up to buy tickets and vote on blocks
+tmux send-keys -t $SESSION:2 "dcrwallet -C w-alpha.conf --promptpass" C-m
+sleep 1
+tmux send-keys -t $SESSION:2 "${WALLET_PASS}" C-m
 
 tmux new-window -t $SESSION:3 -n 'w-beta'
 tmux send-keys -t $SESSION:3 "cd ${NODES_ROOT}/beta" C-m
@@ -234,7 +238,7 @@ tmux send-keys -t $SESSION:4 "./mine-alpha 160${WAIT}" C-m\; wait-for donedcr
 
 sleep 5
 
-# Have beta send some credits to alpha
+# Have alpha send some credits to beta
 for i in 10 18 5 7 1 15 3 25
 do
   tmux send-keys -t $SESSION:4 "./alpha sendtoaddress ${BETA_MINING_ADDR} ${i}${WAIT}" C-m\; wait-for donedcr
