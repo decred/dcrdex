@@ -61,6 +61,8 @@ type Wallet interface {
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
+	// DecodeCoinID creates a human-readable representation of a coin ID.
+	//DecodeCoinID(dex.Bytes) (string, error)
 	// FundingCoins gets funding coins for the coin IDs. The coins are locked.
 	// This method might be called to reinitialize an order from data stored
 	// externally. This method will only return funding coins, e.g. unspent
@@ -70,8 +72,8 @@ type Wallet interface {
 	// used to refund a failed transaction.
 	Swap(*Swaps, *dex.Asset) ([]Receipt, Coin, error)
 	// Redeem sends the redemption transaction, which may contain more than one
-	// redemption.
-	Redeem([]*Redemption, *dex.Asset) ([]dex.Bytes, error)
+	// redemption. The input coin IDs and the output Coin are returned.
+	Redeem([]*Redemption, *dex.Asset) ([]dex.Bytes, Coin, error)
 	// SignMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.

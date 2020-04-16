@@ -487,6 +487,15 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	return dcr.node.LockUnspent(true, ops)
 }
 
+// DecodeCoinID creates a human-readable representation of a coin ID.
+// func (dcr *ExchangeWallet) DecodeCoinID(coinID dex.Bytes) (string, error) {
+// 	txHash, vout, err := decodeCoinID(coinID)
+// 	if err != nil {
+// 		return "", err
+// 	}
+// 	return fmt.Sprintf("%v:%d", txHash, vout), err
+// }
+
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
 // method might be called to reinitialize an order from data stored externally.
 // This method will only return funding coins, e.g. unspent transaction outputs.
@@ -634,7 +643,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 
 // Redeem sends the redemption transaction, which may contain more than one
 // redemption.
-func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asset) ([]dex.Bytes, error) {
+func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asset) ([]dex.Bytes, asset.Coin, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx()
 	var totalIn uint64
@@ -643,17 +652,17 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 	for _, r := range redemptions {
 		cinfo, ok := r.Spends.(*auditInfo)
 		if !ok {
-			return nil, fmt.Errorf("Redemption contract info of wrong type")
+			return nil, nil, fmt.Errorf("Redemption contract info of wrong type")
 		}
 		// Extract the swap contract recipient and secret hash and check the secret
 		// hash against the hash of the provided secret.
 		_, receiver, _, secretHash, err := dexdcr.ExtractSwapDetails(cinfo.output.redeem, chainParams)
 		if err != nil {
-			return nil, fmt.Errorf("error extracting swap addresses: %v", err)
+			return nil, nil, fmt.Errorf("error extracting swap addresses: %v", err)
 		}
 		checkSecretHash := sha256.Sum256(r.Secret)
 		if !bytes.Equal(checkSecretHash[:], secretHash) {
-			return nil, fmt.Errorf("secret hash mismatch. %x != %x", checkSecretHash[:], secretHash)
+			return nil, nil, fmt.Errorf("secret hash mismatch. %x != %x", checkSecretHash[:], secretHash)
 		}
 		addresses = append(addresses, receiver)
 		contracts = append(contracts, cinfo.output.redeem)
@@ -672,21 +681,21 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 	size := msgTx.SerializeSize() + dexdcr.RedeemSwapSigScriptSize*len(redemptions) + dexdcr.P2PKHOutputSize
 	fee := nfo.FeeRate * uint64(size)
 	if fee > totalIn {
-		return nil, fmt.Errorf("redeem tx not worth the fees")
+		return nil, nil, fmt.Errorf("redeem tx not worth the fees")
 	}
 	// Send the funds back to the exchange wallet.
 	redeemAddr, err := dcr.node.GetRawChangeAddress(dcr.acct, chainParams)
 	if err != nil {
-		return nil, fmt.Errorf("error getting new address from the wallet: %v", err)
+		return nil, nil, fmt.Errorf("error getting new address from the wallet: %v", err)
 	}
 	pkScript, err := txscript.PayToAddrScript(redeemAddr)
 	if err != nil {
-		return nil, fmt.Errorf("error creating redemption script for address '%s': %v", redeemAddr, err)
+		return nil, nil, fmt.Errorf("error creating redemption script for address '%s': %v", redeemAddr, err)
 	}
 	txOut := wire.NewTxOut(int64(totalIn-fee), pkScript)
 	// One last check for dust.
 	if dexdcr.IsDust(txOut, nfo.FeeRate) {
-		return nil, fmt.Errorf("redeem output is dust")
+		return nil, nil, fmt.Errorf("redeem output is dust")
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign the inputs.
@@ -694,11 +703,11 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 		contract := contracts[i]
 		redeemSig, redeemPubKey, err := dcr.createSig(msgTx, i, contract, addresses[i])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		redeemSigScript, err := dexdcr.RedeemP2SHContract(contract, redeemSig, redeemPubKey, r.Secret)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		msgTx.TxIn[i].SignatureScript = redeemSigScript
 	}
@@ -706,19 +715,20 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 	checkHash := msgTx.TxHash()
 	txHash, err := dcr.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if *txHash != checkHash {
-		return nil, fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
+		return nil, nil, fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", *txHash, checkHash)
 	}
 	coinIDs := make([]dex.Bytes, 0, len(redemptions))
 	for i := range redemptions {
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
 	}
+
 	// Log the change output.
 	dcr.addChange(txHash, 0)
-	return coinIDs, nil
+	return coinIDs, newOutput(dcr.node, txHash, 0, uint64(txOut.Value), wire.TxTreeRegular, nil), nil
 }
 
 const (
@@ -1078,7 +1088,7 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset)
 		return nil, err
 	}
 	if sent != regFee {
-		return nil, fmt.Errorf("transaction %s was sent, but the reported value sent was unexpcted. "+
+		return nil, fmt.Errorf("transaction %s was sent, but the reported value sent was unexpected. "+
 			"expected %d, but %d was reported", msgTx.CachedTxHash(), regFee, sent)
 	}
 	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular, nil), nil
@@ -1386,11 +1396,12 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 					totalIn, totalOut, minFee, lastFee)
 				return nil, nil, fmt.Errorf("change error")
 			}
-			// If 1) lastFee == minFee, nothing changed since the last cycle. And
-			// there is likely no room for improvment. If 2) The minFee required for a
-			// transaction of this size is less than the currently signed transaction
-			// fees, but we've already tried it, then it must have a larger serialize
-			// size, so the current fee is as good as it gets.
+			// If 1) lastFee == minFee, nothing changed since the last cycle.
+			// And there is likely no room for improvement. If 2) The minFee
+			// required for a transaction of this size is less than the
+			// currently signed transaction fees, but we've already tried it,
+			// then it must have a larger serialize size, so the current fee is
+			// as good as it gets.
 			if lastFee == minFee || (minFee < lastFee && tried[minFee] == 1) {
 				break
 			}

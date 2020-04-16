@@ -522,9 +522,10 @@ func (c *Core) refreshUser() {
 // CreateWallet creates a new exchange wallet.
 func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 	assetID := form.AssetID
+	symbol := unbip(assetID)
 	_, exists := c.wallet(assetID)
 	if exists {
-		return fmt.Errorf("%s wallet already exists", unbip(assetID))
+		return fmt.Errorf("%s wallet already exists", symbol)
 	}
 
 	crypter, err := c.encryptionKey(appPW)
@@ -545,7 +546,7 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 
 	wallet, err := c.loadWallet(dbWallet)
 	if err != nil {
-		return fmt.Errorf("error loading wallet for %d -> %s: %v", assetID, unbip(assetID), err)
+		return fmt.Errorf("error loading wallet for %d -> %s: %v", assetID, symbol, err)
 	}
 
 	err = wallet.Connect(c.ctx)
@@ -560,18 +561,19 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 
 	err = wallet.Unlock(walletPW, aYear)
 	if err != nil {
-		return initErr("%s wallet authentication error: %v", unbip(assetID), err)
+		return initErr("%s wallet authentication error: %v", symbol, err)
 	}
 
-	dbWallet.Balance, _, err = wallet.Balance(0)
+	var lockedAmt uint64
+	dbWallet.Balance, lockedAmt, err = wallet.Balance(0)
 	if err != nil {
-		return initErr("error getting balance for %s: %v", unbip(assetID), err)
+		return initErr("error getting balance for %s: %v", symbol, err)
 	}
 	wallet.setBalance(dbWallet.Balance)
 
 	dbWallet.Address, err = wallet.Address()
 	if err != nil {
-		return initErr("error getting deposit address for %s: %v", unbip(assetID), err)
+		return initErr("error getting deposit address for %s: %v", symbol, err)
 	}
 	wallet.setAddress(dbWallet.Address)
 
@@ -580,6 +582,10 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 	if err != nil {
 		return initErr("error storing wallet credentials: %v", err)
 	}
+
+	log.Infof("Created %s wallet. Account %q balance available = %d / "+
+		"locked = %d, Deposit address = %s",
+		symbol, form.Account, dbWallet.Balance, lockedAmt, dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -594,6 +600,7 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
+		Account:   dbWallet.Account,
 		AssetID:   dbWallet.AssetID,
 		balance:   dbWallet.Balance,
 		balUpdate: dbWallet.BalUpdate,
@@ -643,8 +650,14 @@ func (c *Core) OpenWallet(assetID uint32, appPW string) error {
 	if err != nil {
 		return err
 	}
-	dcrID, _ := dex.BipSymbolID("dcr")
-	if assetID == dcrID {
+
+	state := wallet.state()
+	avail, locked, _ := wallet.Balance(0) // the wallet just unlocked successfully
+	log.Infof("Connected to and unlocked %s wallet. Account %q balance available "+
+		"= %d / locked = %d, Deposit address = %s",
+		state.Symbol, wallet.Account, avail, locked, state.Address)
+
+	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
 	}
 	c.refreshUser()
@@ -898,8 +911,8 @@ func (c *Core) Register(form *RegisterForm) error {
 	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", dc.cfg.RegFeeConfirms, dc.acct.url)
 	c.notify(newFeePaymentNote("Fee paid", details, db.Success))
 
-	trigger := confTrigger(wallet, coin.ID(), dc.cfg.RegFeeConfirms)
 	// Set up the coin waiter.
+	trigger := confTrigger(wallet, coin.ID(), dc.cfg.RegFeeConfirms)
 	c.wait(assetID, trigger, func(err error) {
 		log.Debugf("Registration fee txn %x now has %d confirmations.", coin.ID(), dc.cfg.RegFeeConfirms)
 		defer func() {
@@ -921,6 +934,9 @@ func (c *Core) Register(form *RegisterForm) error {
 		}
 		dc.acct.pay()
 		err = c.authDEX(dc)
+		if err != nil {
+			log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.url, err)
+		}
 	})
 	c.refreshUser()
 	return nil
@@ -1582,11 +1598,14 @@ func (c *Core) initialize() {
 	c.walletMtx.Lock()
 	for _, dbWallet := range dbWallets {
 		wallet, err := c.loadWallet(dbWallet)
+		aid := dbWallet.AssetID
 		if err != nil {
-			aid := dbWallet.AssetID
 			log.Errorf("error loading %d -> %s wallet: %v", aid, unbip(aid), err)
 			continue
 		}
+		// Wallet is loaded from the DB, but not yet connected.
+		log.Infof("Loaded %s wallet configuration. Account %q, Deposit address = %s",
+			unbip(aid), dbWallet.Account, dbWallet.Address)
 		c.wallets[dbWallet.AssetID] = wallet
 	}
 	numWallets := len(c.wallets)
@@ -1667,7 +1686,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 			dc.acct.pay()
 			err = c.authDEX(dc)
 			if err != nil {
-				log.Errorf("fee paid, but failed to authenticate connection to %s", dc.acct.url)
+				log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.url, err)
 			}
 		}
 		return
@@ -1690,7 +1709,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		log.Infof("waiter: Fee paid at %s", dc.acct.url)
 		err = c.authDEX(dc)
 		if err != nil {
-			log.Errorf("fee paid, but failed to authenticate connection to %s", dc.acct.url)
+			log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.url, err)
 		}
 	})
 }
@@ -2259,10 +2278,13 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	copy(oid[:], audit.OrderID)
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
-		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
+		err = fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
+		log.Error(err)
+		return err
 	}
 	err = tracker.processAudit(msg.ID, audit)
 	if err != nil {
+		log.Errorf("processAudit failed: %v", err)
 		return err
 	}
 	return tracker.tick()
@@ -2280,10 +2302,13 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	copy(oid[:], redemption.OrderID)
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
-		return fmt.Errorf("redemption request received for unknown order: %s", string(msg.Payload))
+		err = fmt.Errorf("redemption request received for unknown order: %s", string(msg.Payload))
+		log.Error(err)
+		return err
 	}
 	err = tracker.processRedemption(msg.ID, redemption)
 	if err != nil {
+		log.Errorf("processRedemption failed: %v", err)
 		return err
 	}
 	return tracker.tick()
