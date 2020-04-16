@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+
+	"decred.org/dcrdex/client/core"
 )
 
 var (
@@ -71,6 +73,7 @@ var nArgs = map[string][]int{
 	openWalletRoute:  {2},
 	closeWalletRoute: {1},
 	walletsRoute:     {0},
+	registerRoute:    {3},
 }
 
 // parsers is a map of commands to parsing functions.
@@ -84,7 +87,8 @@ var parsers = map[string](func([]string) (interface{}, error)){
 	closeWalletRoute: func(args []string) (interface{}, error) {
 		return checkIntArg(args[0], "assetID")
 	},
-	walletsRoute: func([]string) (interface{}, error) { return nil, nil },
+	walletsRoute:  func([]string) (interface{}, error) { return nil, nil },
+	registerRoute: parseRegisterArgs,
 }
 
 func checkNArgs(have int, want []int) error {
@@ -116,19 +120,34 @@ func parseHelpArgs(args []string) (interface{}, error) {
 }
 
 func parseNewWalletArgs(args []string) (interface{}, error) {
-	assetID, err := checkIntArg(args[0], "assetID")
+	assetID, err := checkIntArg(args[2], "assetID")
 	if err != nil {
 		return nil, err
 	}
-	req := &newWalletForm{AssetID: uint32(assetID), Account: args[1], INIPath: args[2], WalletPass: args[3], AppPass: args[4]}
+	req := &newWalletForm{
+		AppPass:    args[0],
+		WalletPass: args[1],
+		AssetID:    uint32(assetID),
+		Account:    args[3],
+		INIPath:    args[4],
+	}
 	return req, nil
 }
 
 func parseOpenWalletArgs(args []string) (interface{}, error) {
-	assetID, err := checkIntArg(args[0], "assetID")
+	assetID, err := checkIntArg(args[1], "assetID")
 	if err != nil {
 		return nil, err
 	}
-	req := &openWalletForm{AssetID: uint32(assetID), AppPass: args[1]}
+	req := &openWalletForm{AppPass: args[0], AssetID: uint32(assetID)}
+	return req, nil
+}
+
+func parseRegisterArgs(args []string) (interface{}, error) {
+	fee, err := checkIntArg(args[2], "fee")
+	if err != nil {
+		return nil, err
+	}
+	req := &core.Registration{Password: args[0], DEX: args[1], Fee: uint64(fee)}
 	return req, nil
 }

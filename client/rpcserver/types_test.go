@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"decred.org/dcrdex/client/core"
 )
 
 func TestParseCmdArgs(t *testing.T) {
@@ -137,11 +139,11 @@ func TestParsers(t *testing.T) {
 func TestParseNewWalletArgs(t *testing.T) {
 	argsWithAssetID := func(id string) []string {
 		return []string{
+			"password123",
+			"password123",
 			id,
 			"default",
 			"/home/wallet.conf",
-			"password123",
-			"password123",
 		}
 	}
 	tests := []struct {
@@ -169,20 +171,20 @@ func TestParseNewWalletArgs(t *testing.T) {
 		if !ok {
 			t.Fatal("result doesn't wrap *newWalletForm")
 		}
-		if fmt.Sprint(nwf.AssetID) != test.args[0] {
-			t.Fatalf("assetID doesn't match")
+		if nwf.AppPass != test.args[0] {
+			t.Fatalf("appPass doesn't match")
 		}
-		if nwf.Account != test.args[1] {
-			t.Fatalf("account doesn't match")
-		}
-		if nwf.INIPath != test.args[2] {
-			t.Fatalf("inipath doesn't match")
-		}
-		if nwf.WalletPass != test.args[3] {
+		if nwf.WalletPass != test.args[1] {
 			t.Fatalf("walletPass doesn't match")
 		}
-		if nwf.AppPass != test.args[4] {
-			t.Fatalf("appPass doesn't match")
+		if fmt.Sprint(nwf.AssetID) != test.args[2] {
+			t.Fatalf("assetID doesn't match")
+		}
+		if nwf.Account != test.args[3] {
+			t.Fatalf("account doesn't match")
+		}
+		if nwf.INIPath != test.args[4] {
+			t.Fatalf("inipath doesn't match")
 		}
 	}
 }
@@ -194,10 +196,10 @@ func TestParseOpenWalletArgs(t *testing.T) {
 		wantErr error
 	}{{
 		name: "ok",
-		args: []string{"42", "password123"},
+		args: []string{"password123", "42"},
 	}, {
 		name:    "assetID is not int",
-		args:    []string{"42.1", "password123"},
+		args:    []string{"password123", "42.1"},
 		wantErr: ErrArgs,
 	}}
 	for _, test := range tests {
@@ -213,11 +215,11 @@ func TestParseOpenWalletArgs(t *testing.T) {
 		if !ok {
 			t.Fatal("result doesn't wrap *openWalletForm")
 		}
-		if fmt.Sprint(owf.AssetID) != test.args[0] {
-			t.Fatalf("assetID doesn't match")
-		}
-		if owf.AppPass != test.args[1] {
+		if owf.AppPass != test.args[0] {
 			t.Fatalf("appPass doesn't match")
+		}
+		if fmt.Sprint(owf.AssetID) != test.args[1] {
+			t.Fatalf("assetID doesn't match")
 		}
 	}
 }
@@ -246,6 +248,44 @@ func TestCheckIntArg(t *testing.T) {
 		}
 		if fmt.Sprint(res) != test.arg {
 			t.Fatalf("strings don't match")
+		}
+	}
+}
+
+func TestParseRegisterArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr error
+	}{{
+		name: "ok",
+		args: []string{"password123", "dex", "1000"},
+	}, {
+		name:    "fee not int",
+		args:    []string{"password123", "dex", "1000.0"},
+		wantErr: ErrArgs,
+	}}
+	for _, test := range tests {
+		res, err := parseRegisterArgs(test.args)
+		if test.wantErr != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		reg, ok := res.(*core.Registration)
+		if !ok {
+			t.Fatal("result doesn't wrap *core.Registration")
+		}
+		if reg.Password != test.args[0] {
+			t.Fatalf("appPass doesn't match")
+		}
+		if reg.DEX != test.args[1] {
+			t.Fatalf("dex doesn't match")
+		}
+		if fmt.Sprint(reg.Fee) != test.args[2] {
+			t.Fatalf("fee doesn't match")
 		}
 	}
 }

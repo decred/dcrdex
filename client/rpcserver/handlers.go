@@ -22,12 +22,14 @@ const (
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
 	preRegisterRoute = "preregister"
+	registerRoute    = "register"
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
 )
 
 const (
 	initializedStr    = "app initialized"
+	feePaidStr        = "the DEX fee of %v has been paid"
 	walletCreatedStr  = "%s wallet created and unlocked"
 	walletLockedStr   = "%s wallet locked"
 	walletUnlockedStr = "%s wallet unlocked"
@@ -45,13 +47,14 @@ func createResponse(op string, res interface{}, resErr *msgjson.Error) *msgjson.
 
 // routes maps routes to a handler function.
 var routes = map[string]func(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload{
+	closeWalletRoute: handleCloseWallet,
 	helpRoute:        handleHelp,
 	initRoute:        handleInit,
-	versionRoute:     handleVersion,
-	preRegisterRoute: handlePreRegister,
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
-	closeWalletRoute: handleCloseWallet,
+	preRegisterRoute: handlePreRegister,
+	registerRoute:    handleRegister,
+	versionRoute:     handleVersion,
 	walletsRoute:     handleWallets,
 }
 
@@ -228,6 +231,37 @@ func handlePreRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayl
 	return createResponse(req.Route, res, nil)
 }
 
+// handleRegister handles requests for register. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload {
+	form := new(core.Registration)
+	err := req.Unmarshal(form)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
+		return createResponse(req.Route, nil, resErr)
+	}
+	fee, err := s.core.PreRegister(form.DEX)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
+			err.Error())
+		return createResponse(req.Route, nil, resErr)
+	}
+	if fee != form.Fee {
+		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.DEX, fee, form.Fee)
+		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
+		return createResponse(req.Route, nil, resErr)
+	}
+	err = s.core.Register(form)
+	if err != nil {
+		resErr := &msgjson.Error{Code: msgjson.RPCRegisterError, Message: err.Error()}
+		return createResponse(req.Route, nil, resErr)
+	}
+
+	resp := fmt.Sprintf(feePaidStr, form.Fee)
+
+	return createResponse(req.Route, &resp, nil)
+}
+
 // ListCommands prints a short usage string for every route available to the
 // rpcserver.
 func ListCommands() string {
@@ -307,27 +341,27 @@ Returns:
       "fee" (int): The dex registration fee.
     }`,
 	},
-	newWalletRoute: {`assetID "account" "inipath" "walletPass" "appPass"`,
+	newWalletRoute: {`"appPass" "walletPass" assetID "account" "inipath"`,
 		`Connect to a new wallet.
 
 Args:
+    appPass (string): The dex client password.
+    walletPass (string): The wallet's password.
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     account (string): The account or wallet name, depending on wallet software.
     inipath (string): The location of the wallet's config file.
-    walletPass (string): The wallet's password.
-    appPass (string): The dex client password.
 
 Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
 	},
-	openWalletRoute: {`assetID "appPass"`,
+	openWalletRoute: {`"appPass" assetID`,
 		`Open an existing wallet.
 
 Args:
+    appPass (string): The DEX client password.
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    appPass (string): The DEX client password.
 
 Returns:
     string: The message "` + fmt.Sprintf(walletUnlockedStr, "[coin symbol]") + `"`,
@@ -361,5 +395,17 @@ Returns:
         "units" (str): Unit of measure for amounts.
       },...
     ]`,
+	},
+	registerRoute: {`"appPass" "dex" fee`,
+		`Register for dex. An ok response does not mean that registration is complete.
+Registration is complete after the fee transaction has been confirmed.
+
+Args:
+    appPass (string): The DEX client password.
+    dex (string): The DEX addr to register for.
+    fee (int): The DEX fee.
+
+Returns:
+    string: The message "` + fmt.Sprintf(feePaidStr, "[fee]") + `"`,
 	},
 }

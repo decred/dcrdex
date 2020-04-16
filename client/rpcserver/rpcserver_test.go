@@ -46,6 +46,7 @@ type TCore struct {
 	closeWalletErr      error
 	wallets             []*core.WalletState
 	initializeClientErr error
+	registerErr         error
 }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
@@ -78,6 +79,9 @@ func (c *TCore) Wallets() []*core.WalletState {
 }
 func (c *TCore) InitializeClient(pw string) error {
 	return c.initializeClientErr
+}
+func (c *TCore) Register(*core.Registration) error {
+	return c.registerErr
 }
 
 type TWriter struct {

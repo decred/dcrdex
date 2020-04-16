@@ -388,3 +388,59 @@ func TestHandleWallets(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestHandleRegister(t *testing.T) {
+	form := &core.Registration{DEX: "dex:1234", Password: "password123", Fee: 1000}
+	tests := []struct {
+		name                        string
+		arg                         interface{}
+		preRegisterFee              uint64
+		preRegisterErr, registerErr error
+		wantErrCode                 int
+	}{{
+		name:           "ok",
+		arg:            form,
+		preRegisterFee: 1000,
+		wantErrCode:    -1,
+	}, {
+		name:           "argument wrong type",
+		arg:            2,
+		preRegisterFee: 1000,
+		wantErrCode:    msgjson.RPCParseError,
+	}, {
+		name:           "preRegister fee different",
+		arg:            form,
+		preRegisterFee: 100,
+		wantErrCode:    msgjson.RPCRegisterError,
+	}, {
+		name:           "core.Register error",
+		arg:            form,
+		preRegisterFee: 1000,
+		registerErr:    errors.New("error"),
+		wantErrCode:    msgjson.RPCRegisterError,
+	}, {
+		name:           "core.PreRegister error",
+		arg:            form,
+		preRegisterErr: errors.New("error"),
+		wantErrCode:    msgjson.RPCPreRegisterError,
+	}}
+	for _, test := range tests {
+		msg := new(msgjson.Message)
+		reqPayload, err := json.Marshal(test.arg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg.Payload = reqPayload
+		tc := &TCore{
+			registerErr:    test.registerErr,
+			preRegisterFee: test.preRegisterFee,
+			preRegisterErr: test.preRegisterErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleRegister(r, msg)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
