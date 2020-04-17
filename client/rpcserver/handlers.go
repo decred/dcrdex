@@ -240,14 +240,14 @@ func handleRegister(s *RPCServer, req *msgjson.Message) *msgjson.ResponsePayload
 		resErr := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
 		return createResponse(req.Route, nil, resErr)
 	}
-	fee, err := s.core.PreRegister(form.DEX)
+	fee, err := s.core.PreRegister(&core.PreRegisterForm{URL: form.URL})
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
 			err.Error())
 		return createResponse(req.Route, nil, resErr)
 	}
 	if fee != form.Fee {
-		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.DEX, fee, form.Fee)
+		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.URL, fee, form.Fee)
 		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
 		return createResponse(req.Route, nil, resErr)
 	}
@@ -397,7 +397,7 @@ Returns:
       },...
     ]`,
 	},
-	registerRoute: {`"appPass" "dex" fee`,
+	registerRoute: {`"appPass" "dex" fee ("cert-path")`,
 		`Register for dex. An ok response does not mean that registration is complete.
 Registration is complete after the fee transaction has been confirmed.
 
@@ -405,6 +405,7 @@ Args:
     appPass (string): The DEX client password.
     dex (string): The DEX addr to register for.
     fee (int): The DEX fee.
+    cert-path (string): Optional. The filepath to the TLS certificate for the dex.
 
 Returns:
     string: The message "` + fmt.Sprintf(feePaidStr, "[fee]") + `"`,

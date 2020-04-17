@@ -390,7 +390,7 @@ func TestHandleWallets(t *testing.T) {
 }
 
 func TestHandleRegister(t *testing.T) {
-	form := &core.Registration{DEX: "dex:1234", Password: "password123", Fee: 1000}
+	form := &core.Registration{URL: "dex:1234", Password: "password123", Fee: 1000}
 	tests := []struct {
 		name                        string
 		arg                         interface{}

@@ -74,7 +74,7 @@ var nArgs = map[string][]int{
 	openWalletRoute:  {2},
 	closeWalletRoute: {1},
 	walletsRoute:     {0},
-	registerRoute:    {3},
+	registerRoute:    {3, 4},
 }
 
 // parsers is a map of commands to parsing functions.
@@ -149,7 +149,20 @@ func parseRegisterArgs(args []string) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := &core.Registration{Password: args[0], DEX: args[1], Fee: uint64(fee)}
+	cert := ""
+	if len(args) == 4 {
+		certB, err := ioutil.ReadFile(args[3])
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %v", args[1], err)
+		}
+		cert = string(certB)
+	}
+	req := &core.Registration{
+		Password: args[0],
+		URL:      args[1],
+		Fee:      uint64(fee),
+		Cert:     cert,
+	}
 	return req, nil
 }
 
