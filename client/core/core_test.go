@@ -1671,7 +1671,7 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	preImg := newPreimage()
 	payload := &msgjson.RevokeMatch{
 		OrderID: oid[:],
-		MatchID: encode.RandomBytes(order.OrderIDSize),
+		MatchID: encode.RandomBytes(order.MatchIDSize),
 	}
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.RevokeMatchRoute, payload)
 
