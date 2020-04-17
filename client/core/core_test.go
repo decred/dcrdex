@@ -1664,6 +1664,51 @@ func TestHandlePreimageRequest(t *testing.T) {
 	rig.ws.sendErr = nil
 }
 
+func TestHandleRevokeMatchMsg(t *testing.T) {
+	rig := newTestRig()
+	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+	oid := ord.ID()
+	preImg := newPreimage()
+	payload := &msgjson.RevokeMatch{
+		OrderID: oid[:],
+		MatchID: encode.RandomBytes(order.OrderIDSize),
+	}
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.RevokeMatchRoute, payload)
+
+	// Ensure revoking a non-existent order generates an error.
+	err := handleRevokeMatchMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleRevokeMatchMsg] expected a non-existent order")
+	}
+
+	tracker := &trackedTrade{
+		db: rig.db,
+		metaData: &db.OrderMetaData{
+			Status: order.OrderStatusBooked,
+		},
+		Order:  ord,
+		preImg: preImg,
+		dc:     rig.dc,
+	}
+	rig.dc.trades[oid] = tracker
+
+	err = handleRevokeMatchMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("handleRevokeMatchMsg error: %v", err)
+	}
+
+	// Ensure the order status has been updated to revoked.
+	tracker, _, _ = rig.dc.findOrder(oid)
+	if tracker == nil {
+		t.Fatalf("expected to find an order with id %s", oid.String())
+	}
+
+	if tracker.metaData.Status != order.OrderStatusRevoked {
+		t.Fatalf("expected a revoked order status, got %v",
+			tracker.metaData.Status)
+	}
+}
+
 func TestTradeTracking(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
