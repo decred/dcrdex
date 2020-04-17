@@ -241,11 +241,6 @@ func newLink() *tLink {
 	}
 }
 
-func enableLogging() {
-	log = slog.NewBackend(os.Stdout).Logger("TEST")
-	log.SetLevel(slog.LevelTrace)
-}
-
 var tPort int = 5142
 
 func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
@@ -303,7 +298,6 @@ func TestMain(m *testing.M) {
 }
 
 func TestLoadMarket(t *testing.T) {
-	enableLogging()
 	link := newLink()
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
@@ -399,7 +393,6 @@ func TestLoadMarket(t *testing.T) {
 }
 
 func TestAPIRegister(t *testing.T) {
-	enableLogging()
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
@@ -434,7 +427,6 @@ func TestAPIRegister(t *testing.T) {
 }
 
 func TestAPILogin(t *testing.T) {
-	// enableLogging()
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
