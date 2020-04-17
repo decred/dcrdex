@@ -62,7 +62,14 @@ func (s *WebServer) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	go s.websocketHandler(wsConn, ip)
+	// Supervise all websocket handler goroutines, especially since they use the
+	// package-level logger than is reset by a New server, but also to be
+	// courteous to connected clients when we shut down.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.websocketHandler(wsConn, ip)
+	}()
 }
 
 // websocketHandler handles a new websocket client by creating a new wsClient,
@@ -92,7 +99,7 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 		s.mtx.Unlock()
 	}()
 	cl.Start()
-	cl.WaitForShutdown()
+	cl.WaitForShutdown() // cl.Disconnect will trigger shutdown.
 	log.Tracef("Disconnected websocket client %s", ip)
 }
 

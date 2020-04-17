@@ -91,7 +91,7 @@ type marketSyncer struct {
 }
 
 // newMarketSyncer is the constructor for a marketSyncer.
-func newMarketSyncer(ctx context.Context, core clientCore, dex string, base, quote uint32) (*marketSyncer, error) {
+func newMarketSyncer(ctx context.Context, wg *sync.WaitGroup, core clientCore, dex string, base, quote uint32) (*marketSyncer, error) {
 	m := &marketSyncer{
 		core:    core,
 		dex:     dex,
@@ -106,7 +106,10 @@ func newMarketSyncer(ctx context.Context, core clientCore, dex string, base, quo
 		return nil, err
 	}
 
-	go func() {
+	// Start the marketSyncer with a copy of the logger in case it is reset.
+	wg.Add(1)
+	go func(log slog.Logger) {
+		defer wg.Done()
 		log.Debugf("monitoring market %d-%d @ %s", base, quote, dex)
 	out:
 		for {
@@ -118,7 +121,7 @@ func newMarketSyncer(ctx context.Context, core clientCore, dex string, base, quo
 				break out
 			}
 		}
-	}()
+	}(log)
 	return m, nil
 }
 
@@ -144,6 +147,7 @@ func (m *marketSyncer) remove(cl *wsClient) {
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
+	wg        sync.WaitGroup
 	ctx       context.Context
 	core      clientCore
 	addr      string
@@ -255,20 +259,19 @@ func (s *WebServer) Run(ctx context.Context) {
 	}
 
 	// Shutdown the server on context cancellation.
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	s.wg.Add(1)
+	go func(log slog.Logger) {
+		defer s.wg.Done()
 		<-ctx.Done()
 		err := s.srv.Shutdown(context.Background())
 		if err != nil {
 			log.Errorf("Problem shutting down rpc: %v", err)
 		}
-	}()
+	}(log)
 
-	wg.Add(1)
+	s.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer s.wg.Done()
 		s.readNotifications(ctx)
 	}()
 
@@ -287,7 +290,7 @@ func (s *WebServer) Run(ctx context.Context) {
 		cl.Disconnect()
 	}
 
-	wg.Wait()
+	s.wg.Wait()
 }
 
 // auth creates, stores, and returns a new auth token.
@@ -319,7 +322,7 @@ func (s *WebServer) watchMarket(cl *wsClient, dex string, base, quote uint32) (b
 	mktID := marketID(base, quote)
 	syncer, found := s.syncers[mktID]
 	if !found {
-		syncer, err = newMarketSyncer(s.ctx, s.core, dex, base, quote)
+		syncer, err = newMarketSyncer(s.ctx, &s.wg, s.core, dex, base, quote)
 		if err != nil {
 			return
 		}
