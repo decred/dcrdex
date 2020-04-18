@@ -181,6 +181,7 @@ type MetaMatch struct {
 	Match *order.UserMatch
 }
 
+// ID is a unique ID for the match-order pair.
 func (m *MetaMatch) ID() []byte {
 	return hashKey(append(m.Match.MatchID[:], m.Match.OrderID[:]...))
 }

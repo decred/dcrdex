@@ -194,10 +194,12 @@ func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage)
 }
 
 // readConnectMatches resolves the matches reported by the server in the
-// 'connect' response against those marked incomplete in the matchTracker map.
-func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) (new, extras []*msgjson.Match) {
+// 'connect' response against those in the match tracker map.
+func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 	ids := make(map[order.MatchID]bool)
-	var missing int
+	var extras []*msgjson.Match
+	var missing []order.MatchID
+	corder, _ := t.coreOrder()
 	t.matchMtx.RLock()
 	defer t.matchMtx.RUnlock()
 	for _, msgMatch := range msgMatches {
@@ -209,20 +211,30 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) (new, ext
 			extras = append(extras, msgMatch)
 			continue
 		}
-		new = append(new, msgMatch)
 	}
 	for _, match := range t.matches {
 		if !ids[match.id] {
-			missing++
+			missing = append(missing, match.id)
 			match.failErr = fmt.Errorf("order not reported by the server on connect")
 		}
 	}
-	if missing > 0 {
+
+	url := t.dc.acct.url
+	if len(missing) > 0 {
 		details := fmt.Sprintf("%d matches for order %s were not reported by %s and are in a failed state", missing, t.ID(), t.dc.acct.url)
 		corder, _ := t.coreOrder()
 		t.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
+		for _, mid := range missing {
+			log.Errorf("%s did not report active match %s on order %s", url, mid, t.ID())
+		}
 	}
-	return
+	if len(extras) > 0 {
+		details := fmt.Sprintf("%d matches reported by %s were not found for %s.", len(extras), url, t.token())
+		t.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
+		for _, extra := range extras {
+			log.Errorf("%s reported match %s which is not a known active match for order %s", url, extra.MatchID, extra.OrderID)
+		}
+	}
 }
 
 // negotiate creates and stores matchTrackers for the []*msgjson.Match, and

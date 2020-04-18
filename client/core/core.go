@@ -272,22 +272,17 @@ func (dc *dexConnection) runMatches(matches map[order.OrderID]*serverMatches) er
 // compareServerMatches resolves the matches reported by the server in the
 // 'connect' response against those marked incomplete in the matchTracker map
 // for each serverMatch.
+// Reported matches with missing trackers are already checked by parseMatches,
+// but we also must check for incomplete matches that the server is not
+// reporting.
 //
 // DRAFT NOTE: Right now, the matches are just checked and notifications sent,
 // but it may be a good  place to trigger a FindRedemption if the conditions
 // warrant.
 func (dc *dexConnection) compareServerMatches(matches map[order.OrderID]*serverMatches) {
 	for _, match := range matches {
-		new, extras := match.tracker.readConnectMatches(match.msgMatches)
-		if len(extras) > 0 {
-			details := fmt.Sprintf("%d matches reported by %s were not found for %s.", len(extras), dc.acct.url, match.tracker.token())
-			corder, _ := match.tracker.coreOrder()
-			dc.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
-			for _, extra := range extras {
-				log.Errorf("%s reported, but now a known active match for order %s", extra.MatchID, extra.OrderID)
-			}
-		}
-		match.msgMatches = new
+		// readConnectMatches sends notifications for any problems encountered.
+		match.tracker.readConnectMatches(match.msgMatches)
 	}
 }
 
@@ -993,13 +988,13 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 		}
 		dcrID, _ := dex.BipSymbolID("dcr")
 		if !dc.acct.paid() {
-			// Try to unlock the Decred wallet, which should run the reFee cycle, and
-			// in turn will run authDEX.
 			if len(dc.acct.feeCoin) == 0 {
 				details := fmt.Sprintf("Empty fee coin for %s.", dc.acct.url)
 				c.notify(newFeePaymentNote("Fee coin error", details, db.ErrorLevel))
 				continue
 			}
+			// Try to unlock the Decred wallet, which should run the reFee cycle, and
+			// in turn will run authDEX.
 			dcrWallet, err := c.connectedWallet(dcrID)
 			if err != nil {
 				log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.url, err)
@@ -1522,9 +1517,6 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		log.Error(err)
 	}
 
-	// Reported matches with missing trackers are already checked by parseMatches,
-	// but we also must check for incomplete matches that the server is not
-	// reporting.
 	dc.compareServerMatches(matches)
 
 	return nil
@@ -1720,7 +1712,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 }
 
 // dbTrackers prepares trackeTrades based on active orders and matches in the
-// database. Since dbTrackers runs before sign in when wallets are not conected
+// database. Since dbTrackers runs before sign in when wallets are not connected
 // or unlocked, wallets and coins are not added to the returned trackers. Use
 // resumeTrades with the app Crypter to prepare wallets and coins.
 func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, error) {
