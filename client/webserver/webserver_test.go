@@ -71,11 +71,11 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Exchanges() map[string]*core.Exchange        { return nil }
-func (c *TCore) PreRegister(dex string) (uint64, error)      { return 1e8, c.preRegErr }
-func (c *TCore) Register(r *core.Registration) error         { return c.regErr }
-func (c *TCore) InitializeClient(pw string) error            { return c.initErr }
-func (c *TCore) Login(pw string) ([]*db.Notification, error) { return nil, c.loginErr }
+func (c *TCore) Exchanges() map[string]*core.Exchange              { return nil }
+func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) { return 1e8, c.preRegErr }
+func (c *TCore) Register(r *core.Registration) error               { return c.regErr }
+func (c *TCore) InitializeClient(pw string) error                  { return c.initErr }
+func (c *TCore) Login(pw string) ([]*db.Notification, error)       { return nil, c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
 	return nil, c.syncErr
 }
@@ -411,7 +411,7 @@ func TestAPIRegister(t *testing.T) {
 	}
 
 	goodBody := &core.Registration{
-		DEX:      "test",
+		URL:      "test",
 		Password: "pass",
 	}
 	body = goodBody
@@ -543,7 +543,7 @@ func TestAPIPreRegister(t *testing.T) {
 		ensureResponse(t, s, s.apiPreRegister, want, reader, writer, body)
 	}
 
-	body = &preRegisterForm{"somedexaddress.org"}
+	body = &core.PreRegisterForm{URL: "somedexaddress.org"}
 	ensure(`{"ok":true,"fee":100000000}`)
 
 	// Preregister error

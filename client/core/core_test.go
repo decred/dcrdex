@@ -923,7 +923,7 @@ func TestRegister(t *testing.T) {
 	}
 
 	form := &Registration{
-		DEX:      tDexUrl,
+		URL:      tDexUrl,
 		Password: tPW,
 		Fee:      tFee,
 	}

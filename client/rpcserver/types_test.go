@@ -281,7 +281,7 @@ func TestParseRegisterArgs(t *testing.T) {
 		if reg.Password != test.args[0] {
 			t.Fatalf("appPass doesn't match")
 		}
-		if reg.DEX != test.args[1] {
+		if reg.URL != test.args[1] {
 			t.Fatalf("dex doesn't match")
 		}
 		if fmt.Sprint(reg.Fee) != test.args[2] {

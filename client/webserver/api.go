@@ -25,18 +25,13 @@ func simpleAck() *standardResponse {
 	}
 }
 
-// preRegisterForm is the information necessary to pre-register a DEX.
-type preRegisterForm struct {
-	DEX string `json:"dex"`
-}
-
 // apiPreRegister is the handler for the '/preregister' API request.
 func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
-	form := new(preRegisterForm)
+	form := new(core.PreRegisterForm)
 	if !readPost(w, r, form) {
 		return
 	}
-	fee, err := s.core.PreRegister(form.DEX)
+	fee, err := s.core.PreRegister(form)
 	if err != nil {
 		s.writeAPIError(w, "preregister error: %v", err)
 		return
@@ -53,7 +48,7 @@ func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
 
 // registration is used to register a new DEX account.
 type registration struct {
-	DEX      string `json:"dex"`
+	URL      string `json:"url"`
 	Password string `json:"pass"`
 	Fee      uint64 `json:"fee"`
 }
@@ -80,7 +75,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.core.Register(&core.Registration{
-		DEX:      reg.DEX,
+		URL:      reg.URL,
 		Password: reg.Password,
 		Fee:      reg.Fee,
 	})

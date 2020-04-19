@@ -23,6 +23,7 @@ export default class RegistrationPage extends BasePage {
       'openForm',
       // Form 4: DEX address
       'urlForm', 'addrInput', 'submitAddr', 'feeDisplay', 'addrErr',
+      'certInput', 'selectedCert', 'removeTLS', 'addTLS',
       // Form 5: Final form to initiate registration. Client app password.
       'pwForm', 'clientPass', 'submitPW', 'regErr'
     ])
@@ -47,6 +48,11 @@ export default class RegistrationPage extends BasePage {
     // ENTER NEW DEX URL
     this.fee = null
     forms.bind(page.urlForm, page.submitAddr, () => { this.checkDEX() })
+    // tls certificate upload
+    this.defaultTLSText = page.selectedCert.textContent
+    Doc.bind(page.certInput, 'change', () => this.readCert())
+    Doc.bind(page.removeTLS, 'click', () => this.resetCert())
+    Doc.bind(page.addTLS, 'click', () => this.page.certInput.click())
 
     // SUBMIT DEX REGISTRATION
     forms.bind(page.pwForm, page.submitPW, () => { this.registerDEX() })
@@ -119,14 +125,23 @@ export default class RegistrationPage extends BasePage {
   async checkDEX () {
     const page = this.page
     Doc.hide(page.addrErr)
-    const dex = page.addrInput.value
-    if (dex === '') {
+    const url = page.addrInput.value
+    if (url === '') {
       page.addrErr.textContent = 'URL cannot be empty'
       Doc.show(page.addrErr)
       return
     }
+
+    var cert = ''
+    if (page.certInput.value) {
+      cert = await page.certInput.files[0].text()
+    }
+
     app.loading(page.urlForm)
-    var res = await postJSON('/api/preregister', { dex: dex })
+    var res = await postJSON('/api/preregister', {
+      url: url,
+      cert: cert
+    })
     app.loaded()
     if (!app.checkResponse(res)) {
       page.addrErr.textContent = res.msg
@@ -156,7 +171,7 @@ export default class RegistrationPage extends BasePage {
     const page = this.page
     Doc.hide(page.regErr)
     const registration = {
-      dex: page.addrInput.value,
+      url: page.addrInput.value,
       pass: page.clientPass.value,
       fee: this.fee
     }
@@ -173,5 +188,22 @@ export default class RegistrationPage extends BasePage {
     // websocket update instead.
     await app.fetchUser()
     app.loadPage('markets')
+  }
+
+  async readCert () {
+    const page = this.page
+    const files = page.certInput.files
+    if (!files.length) return
+    page.selectedCert.textContent = files[0].name
+    Doc.show(page.removeTLS)
+    Doc.hide(page.addTLS)
+  }
+
+  resetCert () {
+    const page = this.page
+    page.certInput.value = ''
+    page.selectedCert.textContent = this.defaultTLSText
+    Doc.hide(page.removeTLS)
+    Doc.show(page.addTLS)
   }
 }

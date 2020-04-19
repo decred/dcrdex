@@ -69,7 +69,7 @@ type clientCore interface {
 	ConnectWallet(assetID uint32) error
 	Wallets() []*core.WalletState
 	User() *core.User
-	PreRegister(dex string) (uint64, error)
+	PreRegister(*core.PreRegisterForm) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error)
 	Trade(pw string, form *core.TradeForm) (*core.Order, error)

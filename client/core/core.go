@@ -684,15 +684,18 @@ func (c *Core) ConnectWallet(assetID uint32) error {
 // PreRegister creates a connection to the specified DEX and fetches the
 // registration fee. The connection is left open and stored temporarily while
 // registration is completed.
-func (c *Core) PreRegister(dex string) (uint64, error) {
+func (c *Core) PreRegister(form *PreRegisterForm) (uint64, error) {
 	c.connMtx.RLock()
-	_, found := c.conns[dex]
+	_, found := c.conns[form.URL]
 	c.connMtx.RUnlock()
 	if found {
-		return 0, fmt.Errorf("already registered at %s", dex)
+		return 0, fmt.Errorf("already registered at %s", form.URL)
 	}
 
-	dc, err := c.connectDEX(&db.AccountInfo{URL: dex})
+	dc, err := c.connectDEX(&db.AccountInfo{
+		URL:  form.URL,
+		Cert: []byte(form.Cert),
+	})
 	if err != nil {
 		return 0, err
 	}
@@ -735,7 +738,7 @@ func (c *Core) Register(form *Registration) error {
 	}
 	// For now, asset ID is hard-coded to Decred for registration fees.
 	assetID, _ := dex.BipSymbolID("dcr")
-	if form.DEX == "" {
+	if form.URL == "" {
 		return fmt.Errorf("no dex url specified")
 	}
 	wallet, err := c.connectedWallet(assetID)
@@ -744,14 +747,15 @@ func (c *Core) Register(form *Registration) error {
 	}
 
 	// Make sure the account doesn't already exist.
-	_, err = c.db.Account(form.DEX)
+	_, err = c.db.Account(form.URL)
 	if err == nil {
-		return fmt.Errorf("account already exists for %s", form.DEX)
+		return fmt.Errorf("account already exists for %s", form.URL)
 	}
 
 	// Get a connection to the dex.
 	ai := &db.AccountInfo{
-		URL: form.DEX,
+		URL:  form.URL,
+		Cert: []byte(form.Cert),
 	}
 
 	// Lock conns map, pendingReg, and pendingTimer.
@@ -770,6 +774,7 @@ func (c *Core) Register(form *Registration) error {
 		}
 		dc = c.pendingReg
 		c.conns[ai.URL] = dc
+		ai.Cert = dc.acct.cert
 		found = true
 	}
 	// If it was neither in the map or pre-registered, get a new connection.
@@ -1695,7 +1700,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	conn, err := c.wsConstructor(&comms.WsCfg{
 		URL:      "wss://" + parsedURL.Host + "/ws",
 		PingWait: 60 * time.Second,
-		RpcCert:  c.certs[uri],
+		Cert:     acctInfo.Cert,
 		ReconnectSync: func() {
 			go c.handleReconnect(uri)
 		},

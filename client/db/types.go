@@ -64,6 +64,7 @@ type AccountInfo struct {
 	EncKey    []byte
 	DEXPubKey *secp256k1.PublicKey
 	FeeCoin   []byte
+	Cert      []byte
 	// Paid will be set on retrieval based on whether there is an AccountProof
 	// set.
 	Paid bool
@@ -75,7 +76,8 @@ func (ai *AccountInfo) Encode() []byte {
 		AddData([]byte(ai.URL)).
 		AddData(ai.EncKey).
 		AddData(ai.DEXPubKey.Serialize()).
-		AddData(ai.FeeCoin)
+		AddData(ai.FeeCoin).
+		AddData(ai.Cert)
 }
 
 // DecodeAccountInfo decodes the versioned blob into an *AccountInfo.
@@ -92,10 +94,11 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 }
 
 func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
-	if len(pushes) != 4 {
-		return nil, fmt.Errorf("decodeAccountInfo: expected 4 data pushes, got %d", len(pushes))
+	if len(pushes) != 5 {
+		return nil, fmt.Errorf("decodeAccountInfo: expected 5 data pushes, got %d", len(pushes))
 	}
-	urlB, keyB, dexB, coinB := pushes[0], pushes[1], pushes[2], pushes[3]
+	urlB, keyB, dexB := pushes[0], pushes[1], pushes[2]
+	coinB, certB := pushes[3], pushes[4]
 	pk, err := secp256k1.ParsePubKey(dexB)
 	if err != nil {
 		return nil, err
@@ -105,6 +108,7 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 		EncKey:    keyB,
 		DEXPubKey: pk,
 		FeeCoin:   coinB,
+		Cert:      certB,
 	}, nil
 }
 

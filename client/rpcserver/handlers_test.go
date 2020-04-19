@@ -165,7 +165,7 @@ func TestHandlePreRegister(t *testing.T) {
 		wantErrCode    int
 	}{{
 		name:           "ok",
-		arg:            "dex",
+		arg:            &core.PreRegisterForm{URL: "dex"},
 		preRegisterFee: 5,
 		wantErrCode:    -1,
 	}, {
@@ -174,7 +174,7 @@ func TestHandlePreRegister(t *testing.T) {
 		wantErrCode: msgjson.RPCParseError,
 	}, {
 		name:           "core.PreRegister error",
-		arg:            "dex",
+		arg:            &core.PreRegisterForm{URL: "dex"},
 		preRegisterFee: 5,
 		preRegisterErr: errors.New("error"),
 		wantErrCode:    msgjson.RPCPreRegisterError,
@@ -390,7 +390,7 @@ func TestHandleWallets(t *testing.T) {
 }
 
 func TestHandleRegister(t *testing.T) {
-	form := &core.Registration{DEX: "dex:1234", Password: "password123", Fee: 1000}
+	form := &core.Registration{URL: "dex:1234", Password: "password123", Fee: 1000}
 	tests := []struct {
 		name                        string
 		arg                         interface{}

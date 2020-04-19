@@ -34,6 +34,7 @@ func RandomAccountInfo() *db.AccountInfo {
 		EncKey:    randBytes(32),
 		DEXPubKey: randomPubKey(),
 		FeeCoin:   randBytes(32),
+		Cert:      randBytes(100),
 	}
 }
 
