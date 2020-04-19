@@ -1918,6 +1918,32 @@ func handleMatchProofMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error
 	return ob.ValidateMatchProof(note)
 }
 
+// handleRevokeMatchMsg is called when a revoke_match message is received.
+func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var revocation msgjson.RevokeMatch
+	err := msg.Unmarshal(&revocation)
+	if err != nil {
+		return fmt.Errorf("revoke match unmarshal error: %v", err)
+	}
+
+	var oid order.OrderID
+	copy(oid[:], revocation.OrderID)
+
+	tracker, _, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return fmt.Errorf("no order found with id %s", oid.String())
+	}
+
+	md := tracker.metaData
+	md.Status = order.OrderStatusRevoked
+	metaOrder := &db.MetaOrder{
+		MetaData: md,
+		Order:    tracker.Order,
+	}
+
+	return tracker.db.UpdateOrder(metaOrder)
+}
+
 // routeHandler is a handler for a message from the DEX.
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
@@ -1927,7 +1953,7 @@ var reqHandlers = map[string]routeHandler{
 	msgjson.MatchRoute:       handleMatchRoute,
 	msgjson.AuditRoute:       handleAuditRoute,
 	msgjson.RedemptionRoute:  handleRedemptionRoute,
-	msgjson.RevokeMatchRoute: nil,
+	msgjson.RevokeMatchRoute: handleRevokeMatchMsg,
 	msgjson.SuspensionRoute:  nil,
 }
 
