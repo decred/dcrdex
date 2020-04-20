@@ -17,11 +17,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
-
-	dexsrv "decred.org/dcrdex/server/dex"
-	"github.com/decred/slog"
 )
 
 const (
@@ -32,14 +30,12 @@ const (
 )
 
 var (
-	// Check that *dexsrv.DEX satifies SvrCore.
-	_   SvrCore = (*dexsrv.DEX)(nil)
 	log slog.Logger
 )
 
 // SvrCore is satisfied by core.Core.
 type SvrCore interface {
-	Config() json.RawMessage
+	ConfigMsg() json.RawMessage
 }
 
 // Server is a multi-client https server.
@@ -69,8 +65,8 @@ func fileExists(name string) bool {
 	return !os.IsNotExist(err)
 }
 
-// NewSrv is the constructor for a new Server.
-func NewSrv(cfg *SrvConfig) (*Server, error) {
+// NewServer is the constructor for a new Server.
+func NewServer(cfg *SrvConfig) (*Server, error) {
 	// Find the key pair.
 	if !fileExists(cfg.Key) || !fileExists(cfg.Cert) {
 		return nil, fmt.Errorf("missing certificates")

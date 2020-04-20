@@ -135,7 +135,7 @@ func mainCore(ctx context.Context) error {
 			Cert:    cfg.RPCCert,
 			Key:     cfg.RPCKey,
 		}
-		adminServer, err := admin.NewSrv(srvCFG)
+		adminServer, err := admin.NewServer(srvCFG)
 		if err != nil {
 			return fmt.Errorf("cannot set up admin server: %v", err)
 		}

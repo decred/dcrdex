@@ -22,18 +22,16 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "    ")
 	if err := encoder.Encode(thing); err != nil {
-		log.Infof("JSON encode error: %v", err)
+		log.Errorf("JSON encode error: %v", err)
 	}
 }
 
 // apiPing is the handler for the '/ping' API request.
-func (s *Server) apiPing(w http.ResponseWriter, _ *http.Request) {
-	resp := "pong"
-	writeJSON(w, &resp)
+func (_ *Server) apiPing(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, "pong")
 }
 
 // apiConfig is the handler for the '/config' API request.
 func (s *Server) apiConfig(w http.ResponseWriter, _ *http.Request) {
-	resp := s.core.Config()
-	writeJSON(w, &resp)
+	writeJSON(w, s.core.ConfigMsg())
 }

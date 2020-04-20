@@ -11,10 +11,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	dexsrv "decred.org/dcrdex/server/dex"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
 )
@@ -25,13 +29,13 @@ func init() {
 }
 
 var (
-	_ SvrCore = (*TCore)(nil)
+	// Check that *dexsrv.DEX satisfies SvrCore.
+	_ SvrCore = (*dexsrv.DEX)(nil)
 )
 
-type TCore struct {
-}
+type TCore struct{}
 
-func (c *TCore) Config() json.RawMessage { return nil }
+func (c *TCore) ConfigMsg() json.RawMessage { return nil }
 
 type tResponseWriter struct {
 	b    []byte
@@ -76,46 +80,86 @@ func genCertPair(certFile, keyFile string) error {
 
 var tPort = 5555
 
-func newTServer(t *testing.T, start bool, authSHA [32]byte) (*Server, *TCore, func()) {
-	c := &TCore{}
-	ctx, cancel := context.WithCancel(context.Background())
-	tmp, err := os.Getwd()
+// If start is true, the Server's Run goroutine is started, and the shutdown
+// func must be called when finished with the Server.
+func newTServer(t *testing.T, start bool, authSHA [32]byte) (*Server, func()) {
+	tmp, err := ioutil.TempDir("", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	cert, key := tmp+"/cert.cert", tmp+"/key.key"
+	defer os.RemoveAll(tmp)
+
+	cert, key := filepath.Join(tmp, "tls.cert"), filepath.Join(tmp, "tls.key")
 	err = genCertPair(cert, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Remove(cert)
-	defer os.Remove(key)
-	cfg := &SrvConfig{
-		Core:    c,
+
+	s, err := NewServer(&SrvConfig{
+		Core:    new(TCore),
 		Addr:    fmt.Sprintf("localhost:%d", tPort),
 		Cert:    cert,
 		Key:     key,
 		AuthSHA: authSHA,
-	}
-	s, err := NewSrv(cfg)
+	})
 	if err != nil {
-		t.Fatalf("error creating server: %v", err)
+		t.Fatalf("error creating Server: %v", err)
 	}
-	if start {
+	if !start {
+		return s, func() {}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
 		s.Run(ctx)
+		wg.Done()
+	}()
+	shutdown := func() {
+		cancel()
+		wg.Wait()
 	}
-	return s, c, cancel
+	return s, shutdown
+}
+
+func TestPing(t *testing.T) {
+	w := httptest.NewRecorder()
+	// apiPing is a Server method, but the receiver and http.Request are unused.
+	(*Server)(nil).apiPing(w, nil)
+	if w.Code != 200 {
+		t.Fatalf("apiPing returned code %d, expected 200", w.Code)
+	}
+
+	resp := w.Result()
+	ctHdr := resp.Header.Get("Content-Type")
+	wantCt := "application/json; charset=utf-8"
+	if ctHdr != wantCt {
+		t.Errorf("Content-Type incorrect. got %q, expected %q", ctHdr, wantCt)
+	}
+
+	// JSON strings are double quoted. Each value is terminated with a newline.
+	expectedBody := `"pong"` + "\n"
+	if w.Body == nil {
+		t.Fatalf("got empty body")
+	}
+	gotBody := w.Body.String()
+	if gotBody != expectedBody {
+		t.Errorf("apiPong response said %q, expected %q", gotBody, expectedBody)
+	}
 }
 
 func TestAuthMiddleware(t *testing.T) {
 	pass := "password123"
 	authSHA := sha256.Sum256([]byte(pass))
-	s, _, shutdown := newTServer(t, false, authSHA)
-	defer shutdown()
+	s, _ := newTServer(t, false, authSHA)
 	am := s.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
+
 	r, _ := http.NewRequest("GET", "", nil)
+	r.RemoteAddr = "localhost"
+
 	wantAuthError := func(name string, want bool) {
 		w := &tResponseWriter{}
 		am.ServeHTTP(w, r)
@@ -133,6 +177,7 @@ func TestAuthMiddleware(t *testing.T) {
 			}
 		}
 	}
+
 	tests := []struct {
 		name, user, pass string
 		wantErr          bool
