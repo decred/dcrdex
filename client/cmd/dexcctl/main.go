@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 
@@ -51,6 +52,12 @@ var promptPasswords = map[string][]string{
 	"register":   {"App password:"},
 }
 
+// swapCerts is a map of routes to tsl certificate indexes.
+var swapCerts = map[string]int{
+	"preregister": 1,
+	"register":    2,
+}
+
 // promptPWs prompts for passwords on stdin and returns an error if prompting
 // fails or a password is empty. Returns passwords as a slice of strings.
 func promptPWs(cmd string) ([]string, error) {
@@ -69,6 +76,27 @@ func promptPWs(cmd string) ([]string, error) {
 		admin.ClearBytes(pw)
 	}
 	return pws, nil
+}
+
+// swapPathsForFiles will find tsl certificate paths for routes in swapCerts,
+// attempt to read those files, and swap the path for the entire certificate as
+// a string.
+func swapPathsForFiles(cmd string, args *[]string) error {
+	idx, exists := swapCerts[cmd]
+	// Certs are optional, so it is not an error if they are not included.
+	if !exists || len(*args) < idx+1 || (*args)[idx] == "" {
+		return nil
+	}
+	path := cleanAndExpandPath((*args)[idx])
+	if !fileExists(path) {
+		return fmt.Errorf("no cert file found at %s", path)
+	}
+	certB, err := ioutil.ReadFile(path)
+	if err != nil {
+		fmt.Errorf("error reading %s: %v", path, err)
+	}
+	(*args)[idx] = string(certB)
+	return nil
 }
 
 func run() error {
@@ -111,6 +139,12 @@ func run() error {
 
 	// Prompt for passwords.
 	pws, err := promptPWs(args[0])
+	if err != nil {
+		return err
+	}
+
+	// Attempt to read certificates and swap with paths.
+	err = swapPathsForFiles(args[0], &params)
 	if err != nil {
 		return err
 	}

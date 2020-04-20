@@ -109,21 +109,23 @@ func checkBoolArg(arg, name string) (bool, error) {
 }
 
 func parseHelpArgs(params *RawParams) (*helpForm, error) {
-	if err := checkNArgs(params, []int{0}, []int{0, 3}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{0, 2}); err != nil {
 		return nil, err
 	}
-	switch len(params.Args) {
-	case 0:
-		return new(helpForm), nil
-	case 1:
-		return &helpForm{HelpWith: params.Args[0]}, nil
+	var helpWith string
+	if len(params.Args) > 0 {
+		helpWith = params.Args[0]
 	}
-	includePasswords, err := checkBoolArg(params.Args[1], "includepasswords")
-	if err != nil {
-		return nil, err
+	var includePasswords bool
+	if len(params.Args) > 1 {
+		var err error
+		includePasswords, err = checkBoolArg(params.Args[1], "includepasswords")
+		if err != nil {
+			return nil, err
+		}
 	}
 	return &helpForm{
-		HelpWith:         params.Args[0],
+		HelpWith:         helpWith,
 		IncludePasswords: includePasswords,
 	}, nil
 }
@@ -177,29 +179,37 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 }
 
 func parsePreRegisterArgs(params *RawParams) (*core.PreRegisterForm, error) {
-	if err := checkNArgs(params, []int{0}, []int{2}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
 		return nil, err
+	}
+	var cert string
+	if len(params.Args) > 1 {
+		cert = params.Args[1]
 	}
 	req := &core.PreRegisterForm{
 		URL:  params.Args[0],
-		Cert: params.Args[1],
+		Cert: cert,
 	}
 	return req, nil
 }
 
 func parseRegisterArgs(params *RawParams) (*RegisterForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{3}); err != nil {
+	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
 		return nil, err
 	}
 	fee, err := checkIntArg(params.Args[1], "fee")
 	if err != nil {
 		return nil, err
 	}
+	cert := ""
+	if len(params.Args) > 2 {
+		cert = params.Args[2]
+	}
 	req := &RegisterForm{
 		AppPass: params.PWArgs[0],
 		URL:     params.Args[0],
 		Fee:     uint64(fee),
-		Cert:    params.Args[2],
+		Cert:    cert,
 	}
 	return req, nil
 }

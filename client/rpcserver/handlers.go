@@ -230,7 +230,7 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(registerRoute, err)
 	}
-	fee, err := s.core.PreRegister(&core.PreRegisterForm{URL: form.URL})
+	fee, err := s.core.PreRegister(&core.PreRegisterForm{URL: form.URL, Cert: form.Cert})
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
 			err.Error())
@@ -358,7 +358,8 @@ var helpMsgs = map[string][6]string{
 		``,
 		`Args:
     dex (string): The dex address to preregister for.
-    cert (string): Optional. The TLS certificate for the dex. For dexcctl, the cert-path.`,
+    cert (string): Optional. The TLS certificate for the dex. For dexcctl, the
+      certificate's path should be used.`,
 		`Returns:
     obj: The preregister result.
     {
@@ -435,7 +436,8 @@ Registration is complete after the fee transaction has been confirmed.`,
 		`Args:
     url (string): The DEX addr to register for.
     fee (int): The DEX fee.
-    cert (string): Optional. The TLS certificate for the dex. For dexcctl, the cert-path.`,
+    cert (string): Optional. The TLS certificate for the dex. For dexcctl, the
+      certificate's path should be used.`,
 		`Returns:
     string: The message "` + fmt.Sprintf(feePaidStr, "[fee]") + `"`,
 	},
