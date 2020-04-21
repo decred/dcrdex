@@ -16,13 +16,15 @@ possible.
 {|
 ! variable !! relevant section !! units || default
 |-
-| epoch&nbsp;duration || [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]] || milliseconds || 60000
+| epoch&nbsp;duration || [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]] || milliseconds || 60,000
 |-
 | market&nbsp;buy&nbsp;buffer || [[orders.mediawiki/#Market_Buy_Orders|Market Buy Orders]] || unitless ratio || 1.25
 |-
 | registration&nbsp;fees || [[fundamentals.mediawiki/#Fees|Fees]] || atoms || 1e8 (1 DCR)
 |-
 | cancellation&nbsp;threshold || [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 3]] || unitless ratio || 0.6
+|-
+| broadcast&nbsp;timeout || [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]] &amp; [[community.mediawiki/#rule-1-clients-must-respond-to-all-preimage-requests|Rule 1]] || milliseconds || 60,000
 |}
 
 '''Per-asset Variables'''
