@@ -228,28 +228,32 @@ client clocks are synchronized within acceptable tolerances.
 
 ===Pseudorandom Order Matching===
 
-When the epoch ends, a match cycle begins.
+When the epoch ends, a match cycle begins. The preimage for each order is
+collected and the orders are sorted lexicographically by their
+[[orders.mediawiki/#Order_ID|order IDs]].
 
-First, the order pool is shuffled.
-Shuffling is deterministic, using the Fisher-Yates algorithm where the
-random number generator seed is derived from the hash of the concatenated
-[[orders.mediawiki/#Order_Commitment|order commitments]].
-Specifically for hash function '''''f''''', the seed is the 64-bit integer
-corresponding to the little-endian byte order interpretation of the first 8
-bytes of the hash.
-The hash is computed as
+A random seed is derived from the Blake-256 hash of the concatenated
+[[orders.mediawiki/#Order_Commitment|order preimages]].
 
-<!--H_{seed} = f(p_1 || p_2 || ... || p_N)-->
+<!--H_{seed} = \text{\footnotesize BLAKE256}(p_1 || p_2 || ... || p_N)-->
 [[File:images/seed-eq.png]]
 
-where '''''||''''' indicates concatenation.
-'''''p<sub>i</sub>''''' is the commitment preimage of the
-'''''i<sup>th</sup>''''' order in the list of epoch orders sorted
-lexicographically by their [[orders.mediawiki/#Order_ID|order IDs]].
+where '''''||''''' indicates concatenation and
+'''''p<sub>i</sub>''''' is the preimage of the '''''i<sup>th</sup>''''' order.
 
-The preimages and seed are published at the start of the matching process.
-This is done so that the shuffling may be independently computed for external
-verification and to facilitate server mesh operation.
+The integer series produced by evaluating the hash
+as a series of 8-byte big-endian integers is used to seed a Mersenne Twister
+(mt19937) random number generator.
+
+Shuffling is then performed using the The Fisher-Yates algorithm on the
+'''''N''''' orders, where at each step '''''i : i < N''''', the order at index
+'''''i''''' is swapped with the order at index '''''j''''',
+
+<!--j = i + [r_i \bmod (N - i)]-->
+[[File:images/fisher_yates_j.png]]
+
+'''''r<sub>i</sub>''''' is the '''''i<sup>th</sup>''''' number in the seeded
+mt19937 series.
 
 Orders are processed one at a time. Each order is matched according to its type.
 
@@ -270,6 +274,15 @@ price rate).
 
 The process continues with the next order in the list and iterates until all
 orders have been processed.
+
+The preimages and seed are published at the start of the matching process. In
+addition, a '''''checksum''''', which is the Blake-256 hash of the
+lexicographically sorted order commitments, is sent to the client. Because
+the client already has the commitments from their order book subscription,
+the checksum allows the client to check that the orders underlying the preimages
+are indeed the same set received in their order notification feed.
+
+For the special case of an epoch with no orders, the checksum will be null.
 
 ==Identities based on Public Key Infrastructure (PKI) Key Pairs==
 
