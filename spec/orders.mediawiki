@@ -245,8 +245,16 @@ As part of every submitted order, the client should submit a cryptographic
 To generate a commitment, the client creates a random 32-byte sequence,
 the ''preimage''. The commitment is the Blake-256 hash of the
 preimage. Every order must be assigned a unique commitment, therefore preimages
-cannot be reused. They should be generated with a cryptographically secure
+cannot be reused. They should be generated with a cryptographically-secure
 pseudo-random number generator.
+
+The server will reject any zero-valued commitment as well as the specific
+commitment generated from hashing a zero-valued preimage. The server can also
+reject a commitment that has already been used for any previous order. Depending
+on server policy, the historical commitment duplicate search may be limited to
+only recent commitments and/or commitments received for orders on a specific
+market. Assuming that a cryptographically-secure PRNG is used to generate
+preimages, rejection should realistically be impossible.
 
 At the expiration of the epoch, the server sends a <code>preimage</code> request
 for each order that is eligible for matching.
