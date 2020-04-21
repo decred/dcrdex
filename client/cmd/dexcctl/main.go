@@ -52,8 +52,8 @@ var promptPasswords = map[string][]string{
 	"register":   {"App password:"},
 }
 
-// swapCerts is a map of routes to tsl certificate indexes.
-var swapCerts = map[string]int{
+// readCerts is a map of routes to TLS certificate indexes.
+var readCerts = map[string]int{
 	"preregister": 1,
 	"register":    2,
 }
@@ -78,25 +78,30 @@ func promptPWs(cmd string) ([]string, error) {
 	return pws, nil
 }
 
-// swapPathsForFiles will find tsl certificate paths for routes in swapCerts,
-// attempt to read those files, and swap the path for the entire certificate as
-// a string.
-func swapPathsForFiles(cmd string, args *[]string) error {
-	idx, exists := swapCerts[cmd]
+// readCert reads TLS certificate content located at a file specified at args
+// index as expected for cmd and returns it as a string along with args minus
+// the cert path. Errors if a cert is specified but unable to be read.
+func readCert(cmd string, args []string) (cert string, params []string, err error) {
+	idx, exists := readCerts[cmd]
 	// Certs are optional, so it is not an error if they are not included.
-	if !exists || len(*args) < idx+1 || (*args)[idx] == "" {
-		return nil
+	if !exists || len(args) < idx+1 || args[idx] == "" {
+		return "", args, nil
 	}
-	path := cleanAndExpandPath((*args)[idx])
+	path := cleanAndExpandPath(args[idx])
 	if !fileExists(path) {
-		return fmt.Errorf("no cert file found at %s", path)
+		return "", nil, fmt.Errorf("no cert file found at %s", path)
 	}
 	certB, err := ioutil.ReadFile(path)
 	if err != nil {
-		fmt.Errorf("error reading %s: %v", path, err)
+		return "", nil, fmt.Errorf("error reading %s: %v", path, err)
 	}
-	(*args)[idx] = string(certB)
-	return nil
+	// Return all args except the path.
+	for i, arg := range args {
+		if i != idx {
+			params = append(params, arg)
+		}
+	}
+	return string(certB), params, nil
 }
 
 func run() error {
@@ -133,7 +138,6 @@ func run() error {
 			params = append(params, param)
 			continue
 		}
-
 		params = append(params, arg)
 	}
 
@@ -143,8 +147,8 @@ func run() error {
 		return err
 	}
 
-	// Attempt to read certificates and swap with paths.
-	err = swapPathsForFiles(args[0], &params)
+	// Attempt to read TLS certificates.
+	cert, params, err := readCert(args[0], params)
 	if err != nil {
 		return err
 	}
@@ -152,6 +156,7 @@ func run() error {
 	payload := &rpcserver.RawParams{
 		PWArgs: pws,
 		Args:   params,
+		Cert:   cert,
 	}
 
 	// Create a request using the parsedArgs.

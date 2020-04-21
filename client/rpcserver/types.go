@@ -20,6 +20,7 @@ var (
 type RawParams struct {
 	PWArgs []string `json:"PWArgs"`
 	Args   []string `json:"args"`
+	Cert   string   `json:"cert,omitempty"`
 }
 
 // versionResponse holds a semver version JSON object.
@@ -179,37 +180,29 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 }
 
 func parsePreRegisterArgs(params *RawParams) (*core.PreRegisterForm, error) {
-	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
 		return nil, err
-	}
-	var cert string
-	if len(params.Args) > 1 {
-		cert = params.Args[1]
 	}
 	req := &core.PreRegisterForm{
 		URL:  params.Args[0],
-		Cert: cert,
+		Cert: params.Cert,
 	}
 	return req, nil
 }
 
 func parseRegisterArgs(params *RawParams) (*RegisterForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
+	if err := checkNArgs(params, []int{1}, []int{2}); err != nil {
 		return nil, err
 	}
 	fee, err := checkIntArg(params.Args[1], "fee")
 	if err != nil {
 		return nil, err
 	}
-	cert := ""
-	if len(params.Args) > 2 {
-		cert = params.Args[2]
-	}
 	req := &RegisterForm{
 		AppPass: params.PWArgs[0],
 		URL:     params.Args[0],
 		Fee:     uint64(fee),
-		Cert:    cert,
+		Cert:    params.Cert,
 	}
 	return req, nil
 }

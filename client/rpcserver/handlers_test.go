@@ -184,12 +184,12 @@ func TestHandlePreRegister(t *testing.T) {
 		wantErrCode    int
 	}{{
 		name:           "ok",
-		params:         &RawParams{Args: []string{"dex", "cert"}},
+		params:         &RawParams{Args: []string{"dex"}, Cert: "cert"},
 		preRegisterFee: 5,
 		wantErrCode:    -1,
 	}, {
 		name:           "core.PreRegister error",
-		params:         &RawParams{Args: []string{"dex", "cert"}},
+		params:         &RawParams{Args: []string{"dex"}, Cert: "cert"},
 		preRegisterErr: errors.New("error"),
 		wantErrCode:    msgjson.RPCPreRegisterError,
 	}, {
@@ -392,8 +392,8 @@ func TestHandleRegister(t *testing.T) {
 		Args: []string{
 			"dex:1234",
 			"1000",
-			"cert",
 		},
+		Cert: "cert",
 	}
 	tests := []struct {
 		name                        string

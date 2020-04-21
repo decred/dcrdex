@@ -225,8 +225,8 @@ func TestCheckBoolArg(t *testing.T) {
 func TestParseRegisterArgs(t *testing.T) {
 	paramsWithFee := func(fee string) *RawParams {
 		pwArgs := []string{"password123"}
-		args := []string{"dex", fee, "cert"}
-		return &RawParams{PWArgs: pwArgs, Args: args}
+		args := []string{"dex", fee}
+		return &RawParams{PWArgs: pwArgs, Args: args, Cert: "cert"}
 	}
 	tests := []struct {
 		name    string
@@ -258,7 +258,7 @@ func TestParseRegisterArgs(t *testing.T) {
 		if fmt.Sprint(reg.Fee) != test.params.Args[1] {
 			t.Fatalf("fee doesn't match")
 		}
-		if fmt.Sprint(reg.Cert) != test.params.Args[2] {
+		if fmt.Sprint(reg.Cert) != test.params.Cert {
 			t.Fatalf("cert doesn't match")
 		}
 	}

@@ -7,6 +7,7 @@ package main
 import (
 	"io/ioutil"
 	"os"
+	"reflect"
 	"testing"
 )
 
@@ -87,5 +88,66 @@ func TestConfigure(t *testing.T) {
 	_, _, _, err = configure()
 	if err == nil {
 		t.Fatal("expected failure on bad flag")
+	}
+}
+
+func TestReadCert(t *testing.T) {
+	cert := "Hi. I'm a TLS certificate."
+	createCertAtPath := func(path string) {
+		p := cleanAndExpandPath(path)
+		f, err := os.Create(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.WriteString(cert)
+		f.Close()
+	}
+	tests := []struct {
+		name, cmd, want, certPath string
+		args, wantParams          []string
+		wantErr                   bool
+	}{{
+		name:       "ok with",
+		cmd:        "preregister",
+		args:       []string{"1.2.3.4:3000", "./cert"},
+		wantParams: []string{"1.2.3.4:3000"},
+		certPath:   "./cert",
+		want:       cert,
+	}, {
+		name:       "ok no cert",
+		cmd:        "preregister",
+		args:       []string{"1.2.3.4:3000"},
+		wantParams: []string{"1.2.3.4:3000"},
+		want:       "",
+	}, {
+		name: "not a readCerts command",
+		cmd:  "not a real command",
+		want: "",
+	}, {
+		name:    "no cert at path",
+		cmd:     "preregister",
+		args:    []string{"1.2.3.4:3000", "./cert"},
+		wantErr: true,
+	}}
+	for _, test := range tests {
+		if test.certPath != "" {
+			createCertAtPath(test.certPath)
+		}
+		res, params, err := readCert(test.cmd, test.args)
+		os.Remove(test.certPath)
+		if err != nil {
+			if test.wantErr {
+				continue
+			}
+			t.Fatalf("unexepected error for %s: %v", test.name, err)
+		} else if test.wantErr {
+			t.Fatalf("expected error for test %s", test.name)
+		}
+		if test.want != res {
+			t.Fatalf("wanted %v but got %v for test %s", test.want, res, test.name)
+		}
+		if !reflect.DeepEqual(test.wantParams, params) {
+			t.Fatalf("wanted %v but got %v for test %s", test.wantParams, params, test.name)
+		}
 	}
 }
