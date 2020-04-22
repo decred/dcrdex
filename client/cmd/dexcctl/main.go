@@ -95,12 +95,7 @@ func readCert(cmd string, args []string) (cert string, params []string, err erro
 	if err != nil {
 		return "", nil, fmt.Errorf("error reading %s: %v", path, err)
 	}
-	// Return all args except the path.
-	for i, arg := range args {
-		if i != idx {
-			params = append(params, arg)
-		}
-	}
+	params = append(args[:idx], args[idx+1:]...)
 	return string(certB), params, nil
 }
 
