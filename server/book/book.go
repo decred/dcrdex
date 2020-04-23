@@ -25,6 +25,7 @@ const (
 type Book struct {
 	mtx     sync.RWMutex
 	lotSize uint64
+	halfCap uint32
 	buys    *OrderPQ
 	sells   *OrderPQ
 }
@@ -39,9 +40,18 @@ func New(lotSize uint64, halfCapacity ...uint32) *Book {
 	}
 	return &Book{
 		lotSize: lotSize,
+		halfCap: halfCap,
 		buys:    NewMaxOrderPQ(halfCap),
 		sells:   NewMinOrderPQ(halfCap),
 	}
+}
+
+// Clear reset the order book with configured capacity.
+func (b *Book) Clear() {
+	b.mtx.Lock()
+	b.buys = NewMaxOrderPQ(b.halfCap)
+	b.sells = NewMaxOrderPQ(b.halfCap)
+	b.mtx.Unlock()
 }
 
 // Realloc changes the capacity of the order book given the specified capacity

@@ -11,10 +11,6 @@ import (
 	"decred.org/dcrdex/dex/ws"
 )
 
-// outBufferSize is the size of the client's buffered channel for outgoing
-// messages.
-const outBufferSize = 128
-
 // Link is an interface for a communication channel with an API client. The
 // reference implementation of a Link-satisfying type is the wsLink, which
 // passes messages over a websocket connection.
@@ -23,8 +19,11 @@ type Link interface {
 	ID() uint64
 	// IP returns the IP address of the peer.
 	IP() string
-	// Send sends the msgjson.Message to the client.
+	// Send sends the msgjson.Message to the peer.
 	Send(msg *msgjson.Message) error
+	// SendError sends the msgjson.Error to the peer, with reference to a
+	// request message ID.
+	SendError(id uint64, rpcErr *msgjson.Error)
 	// Request sends the Request-type msgjson.Message to the client and registers
 	// a handler for the response.
 	Request(msg *msgjson.Message, f func(Link, *msgjson.Message), expireTime time.Duration, expire func()) error

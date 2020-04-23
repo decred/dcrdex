@@ -1945,8 +1945,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	}
 
 	assets := make(map[uint32]*dex.Asset, len(dexCfg.Assets))
-	for i := range dexCfg.Assets {
-		asset := &dexCfg.Assets[i]
+	for _, asset := range dexCfg.Assets {
 		assets[asset.ID] = convertAssetInfo(asset)
 	}
 	// Validate the markets so we don't have to check every time later.

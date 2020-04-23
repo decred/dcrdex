@@ -106,6 +106,8 @@ func (c *TRPCClient) Send(msg *msgjson.Message) error {
 	c.sends = append(c.sends, msg)
 	return c.sendErr
 }
+func (c *TRPCClient) SendError(id uint64, msg *msgjson.Error) {
+}
 func (c *TRPCClient) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Message), _ time.Duration, _ func()) error {
 	c.reqs = append(c.reqs, &tReq{
 		msg:      msg,

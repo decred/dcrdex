@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -118,7 +119,9 @@ type DEX struct {
 	bookRouter  *market.BookRouter
 	stopWaiters []subsystem
 	server      *comms.Server
-	config      *configResponse
+
+	configRespMtx sync.RWMutex
+	configResp    *configResponse
 }
 
 // configResponse is defined here to leave open the possibility for hot
@@ -129,7 +132,7 @@ type configResponse struct {
 	configEnc json.RawMessage
 }
 
-func newConfigResponse(cfg *DexConf, cfgAssets []msgjson.Asset, cfgMarkets []msgjson.Market) (*configResponse, error) {
+func newConfigResponse(cfg *DexConf, cfgAssets []*msgjson.Asset, cfgMarkets []*msgjson.Market) (*configResponse, error) {
 	configMsg := &msgjson.ConfigResult{
 		BroadcastTimeout: uint64(cfg.BroadcastTimeout.Milliseconds()),
 		CancelMax:        cfg.CancelThreshold,
@@ -138,6 +141,12 @@ func newConfigResponse(cfg *DexConf, cfgAssets []msgjson.Asset, cfgMarkets []msg
 		Markets:          cfgMarkets,
 		Fee:              cfg.RegFeeAmount,
 	}
+
+	// NOTE/TODO: To include active epoch in the market status objects, we need
+	// a channel from Market to push status changes back to DEX manager.
+	// Presently just include start epoch that we set when launching the
+	// Markets, and suspend info that DEX obtained when calling the Market's
+	// Suspend method.
 
 	encResult, err := json.Marshal(configMsg)
 	if err != nil {
@@ -157,6 +166,35 @@ func newConfigResponse(cfg *DexConf, cfgAssets []msgjson.Asset, cfgMarkets []msg
 	}, nil
 }
 
+func (cr *configResponse) setMktSuspend(name string, finalEpoch uint64, persist bool) {
+	for _, mkt := range cr.configMsg.Markets {
+		if mkt.Name == name {
+			mkt.MarketStatus.FinalEpoch = finalEpoch
+			mkt.MarketStatus.Persist = &persist
+			cr.remarshall()
+			return
+		}
+	}
+	log.Errorf("Failed to set MarketStatus for market %q", name)
+}
+
+func (cr *configResponse) remarshall() {
+	encResult, err := json.Marshal(cr.configMsg)
+	if err != nil {
+		log.Errorf("failed to marshal config message: %v", err)
+		return
+	}
+	payload := &msgjson.ResponsePayload{
+		Result: encResult,
+	}
+	encPayload, err := json.Marshal(payload)
+	if err != nil {
+		log.Errorf("failed to marshal config message payload: %v", err)
+		return
+	}
+	cr.configEnc = encPayload
+}
+
 // Stop shuts down the DEX. Stop returns only after all components have
 // completed their shutdown.
 func (dm *DEX) Stop() {
@@ -172,10 +210,13 @@ func (dm *DEX) Stop() {
 }
 
 func (dm *DEX) handleDEXConfig(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	dm.configRespMtx.RLock()
+	defer dm.configRespMtx.RUnlock()
+
 	ack := &msgjson.Message{
 		Type:    msgjson.Response,
 		ID:      msg.ID,
-		Payload: dm.config.configEnc,
+		Payload: dm.configResp.configEnc,
 	}
 
 	if err := conn.Send(ack); err != nil {
@@ -252,7 +293,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	var dcrBackend *dcrasset.Backend
 	lockableAssets := make(map[uint32]*swap.LockableAsset, len(cfg.Assets))
 	backedAssets := make(map[uint32]*asset.BackedAsset, len(cfg.Assets))
-	cfgAssets := make([]msgjson.Asset, 0, len(cfg.Assets))
+	cfgAssets := make([]*msgjson.Asset, 0, len(cfg.Assets))
 	for i, assetConf := range cfg.Assets {
 		symbol := strings.ToLower(assetConf.Symbol)
 		ID := assetIDs[i]
@@ -297,7 +338,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			CoinLocker:  dexCoinLocker.AssetLocker(ID).Swap(),
 		}
 
-		cfgAssets = append(cfgAssets, msgjson.Asset{
+		cfgAssets = append(cfgAssets, &msgjson.Asset{
 			Symbol:   assetConf.Symbol,
 			ID:       ID,
 			LotSize:  assetConf.LotSize,
@@ -307,6 +348,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			SwapConf: uint16(assetConf.SwapConf),
 			FundConf: uint16(assetConf.FundConf),
 		})
+	}
+
+	for _, mkt := range cfg.Markets {
+		mkt.Name = strings.ToLower(mkt.Name)
 	}
 
 	// Create DEXArchivist with the pg DB driver.
@@ -371,20 +416,22 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	now := encode.UnixMilli(time.Now())
 	bookSources := make(map[string]market.BookSource, len(cfg.Markets))
 	marketTunnels := make(map[string]market.MarketTunnel, len(cfg.Markets))
-	cfgMarkets := make([]msgjson.Market, 0, len(cfg.Markets))
+	cfgMarkets := make([]*msgjson.Market, 0, len(cfg.Markets))
 	for name, mkt := range markets {
 		startEpochIdx := 1 + now/int64(mkt.EpochDuration())
 		mkt.SetStartEpochIdx(startEpochIdx)
 		startSubSys(fmt.Sprintf("Market[%s]", name), mkt)
 		bookSources[name] = mkt
 		marketTunnels[name] = mkt
-		cfgMarkets = append(cfgMarkets, msgjson.Market{
+		cfgMarkets = append(cfgMarkets, &msgjson.Market{
 			Name:            name,
 			Base:            mkt.Base(),
 			Quote:           mkt.Quote(),
 			EpochLen:        mkt.EpochDuration(),
-			StartEpoch:      uint64(startEpochIdx),
 			MarketBuyBuffer: mkt.MarketBuyBuffer(),
+			MarketStatus: msgjson.MarketStatus{
+				StartEpoch: uint64(startEpochIdx),
+			},
 		})
 	}
 
@@ -422,7 +469,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		bookRouter:  bookRouter,
 		stopWaiters: stopWaiters,
 		server:      server,
-		config:      cfgResp,
+		configResp:  cfgResp,
 	}
 
 	comms.Route(msgjson.ConfigRoute, dexMgr.handleDEXConfig)
@@ -432,5 +479,71 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 // Config returns the current dex configuration.
 func (dm *DEX) ConfigMsg() json.RawMessage {
-	return dm.config.configEnc
+	dm.configRespMtx.RLock()
+	defer dm.configRespMtx.RUnlock()
+	return dm.configResp.configEnc
 }
+
+// TODO: for just market running status, the DEX manager should use it's
+// knowledge of Market subsystem state.
+func (dm *DEX) MarketRunning(mktName string) (found, running bool) {
+	mkt := dm.markets[mktName]
+	if mkt == nil {
+		return
+	}
+	return true, mkt.Running()
+}
+
+// MarketStatus returns the market.Status for the named market. If the market is
+// unknown to the DEX, nil is returned.
+func (dm *DEX) MarketStatus(mktName string) *market.Status {
+	mkt := dm.markets[mktName]
+	if mkt == nil {
+		return nil
+	}
+	return mkt.Status()
+}
+
+// MarketStatuses returns a map of market names to market.Status for all known
+// markets.
+func (dm *DEX) MarketStatuses() map[string]*market.Status {
+	statuses := make(map[string]*market.Status, len(dm.markets))
+	for name, mkt := range dm.markets {
+		statuses[name] = mkt.Status()
+	}
+	return statuses
+}
+
+// SuspendMarket schedules a suspension of a given market, with the option to
+// persist the orders on the book (or purge the book automatically on market
+// shutdown). The scheduled final epoch and suspend time are returned. This is a
+// passthrough to the OrderRouter. A TradeSuspension notification is broadcasted
+// to all connected clients.
+func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch {
+	name = strings.ToLower(name)
+	// Go through the order router since OrderRouter is likely to have market
+	// status tracking built into it to facilitate resume.
+	suspEpoch := dm.orderRouter.SuspendMarket(name, tSusp, persistBooks)
+
+	// Update config message with suspend schedule.
+	dm.configRespMtx.Lock()
+	dm.configResp.setMktSuspend(name, uint64(suspEpoch.Idx), persistBooks)
+	dm.configRespMtx.Unlock()
+
+	// Broadcast a TradeSuspension notification to all connected clients.
+	note, err := msgjson.NewNotification(msgjson.SuspensionRoute, msgjson.TradeSuspension{
+		MarketID:    name,
+		FinalEpoch:  uint64(suspEpoch.Idx),
+		SuspendTime: encode.UnixMilliU(suspEpoch.End),
+		Persist:     persistBooks,
+	})
+	if err != nil {
+		log.Errorf("Failed to create suspend notification: %v", err)
+	} else {
+		dm.server.Broadcast(note)
+	}
+	return suspEpoch
+}
+
+// TODO: resume by relaunching the market subsystems (Run)
+// Resume / ResumeMarket

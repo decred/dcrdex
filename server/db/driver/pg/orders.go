@@ -188,6 +188,106 @@ func (a *Archiver) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) erro
 	return a.storeOrder(ord, epochIdx, epochDur, orderStatusEpoch)
 }
 
+func makePseudoCancel(target order.OrderID, user account.AccountID, base, quote uint32, timeStamp time.Time) *order.CancelOrder {
+	// Create a server-generated cancel order to record the server's revoke
+	// order action.
+	var commit order.Commitment
+	rand.Read(commit[:])
+	return &order.CancelOrder{
+		P: order.Prefix{
+			AccountID:  user,
+			BaseAsset:  base,
+			QuoteAsset: quote,
+			OrderType:  order.CancelOrderType,
+			ClientTime: timeStamp,
+			ServerTime: timeStamp,
+			Commit:     commit,
+		},
+		TargetOrderID: target,
+	}
+}
+
+// FlushBook revokes all booked orders for a market.
+func (a *Archiver) FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []order.OrderID, err error) {
+	var marketSchema string
+	marketSchema, err = a.marketSchema(base, quote)
+	if err != nil {
+		return
+	}
+
+	// Booked orders (active) are made revoked (archived).
+	srcTableName := fullOrderTableName(a.dbName, marketSchema, orderStatusBooked.active())
+	dstTableName := fullOrderTableName(a.dbName, marketSchema, orderStatusRevoked.active())
+
+	timeStamp := time.Now().Truncate(time.Millisecond).UTC()
+
+	var dbTx *sql.Tx
+	dbTx, err = a.db.Begin()
+	if err != nil {
+		err = fmt.Errorf("failed to begin database transaction: %v", err)
+		return
+	}
+
+	fail := func() {
+		sellsRemoved, buysRemoved = nil, nil
+		a.fatalBackendErr(err)
+		_ = dbTx.Rollback()
+	}
+
+	// Changed all booked orders to revoked.
+	stmt := fmt.Sprintf(internal.PurgeBook, srcTableName, orderStatusRevoked, dstTableName)
+	var rows *sql.Rows
+	rows, err = dbTx.Query(stmt, orderStatusBooked)
+	if err != nil {
+		fail()
+		return
+	}
+
+	var cos []*order.CancelOrder
+	for rows.Next() {
+		var oid order.OrderID
+		var sell bool
+		var aid account.AccountID
+		if err = rows.Scan(&oid, &sell, &aid); err != nil {
+			rows.Close()
+			fail()
+			return
+		}
+		cos = append(cos, makePseudoCancel(oid, aid, base, quote, timeStamp))
+		if sell {
+			sellsRemoved = append(sellsRemoved, oid)
+		} else {
+			buysRemoved = append(buysRemoved, oid)
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		fail()
+		return
+	}
+
+	// Insert the pseudo-cancel orders.
+	cancelTable := fullCancelOrderTableName(a.dbName, marketSchema, orderStatusRevoked.active())
+	stmt = fmt.Sprintf(internal.InsertCancelOrder, cancelTable)
+	for _, co := range cos {
+		_, err = dbTx.Exec(stmt, co.ID(), co.AccountID, co.ClientTime,
+			co.ServerTime, co.Commit, co.TargetOrderID, orderStatusRevoked, 0, 0)
+		if err != nil {
+			fail()
+			err = fmt.Errorf("failed to store pseudo-cancel order: %v", err)
+			return
+		}
+	}
+
+	if err = dbTx.Commit(); err != nil {
+		fail()
+		err = fmt.Errorf("failed to commit transaction: %v", err)
+		return
+	}
+
+	return
+}
+
 // BookOrders retrieves all booked orders (with order status booked) for the
 // specified market. This will be used to repopulate a market's book on
 // construction of the market.
@@ -300,26 +400,11 @@ func (a *Archiver) RevokeOrder(ord order.Order) (cancelID order.OrderID, timeSta
 		return
 	}
 
-	// Create a server-generated cancel order to record this action.
-	timeStamp = time.Now().Truncate(time.Millisecond).UTC()
-	var commit order.Commitment
-	rand.Read(commit[:])
-	co := &order.CancelOrder{
-		P: order.Prefix{
-			AccountID:  ord.User(),
-			BaseAsset:  ord.Base(),
-			QuoteAsset: ord.Quote(),
-			OrderType:  order.CancelOrderType,
-			ClientTime: timeStamp,
-			ServerTime: timeStamp,
-			Commit:     commit,
-		},
-		TargetOrderID: ord.ID(),
-	}
-	cancelID = co.ID()
-
 	// Store the pseudo-cancel order with 0 epoch idx and duration and status
 	// orderStatusRevoked as indicators that this is a revocation.
+	timeStamp = time.Now().Truncate(time.Millisecond).UTC()
+	co := makePseudoCancel(ord.ID(), ord.User(), ord.Base(), ord.Quote(), timeStamp)
+	cancelID = co.ID()
 	err = a.storeOrder(co, 0, 0, orderStatusRevoked)
 	return
 }

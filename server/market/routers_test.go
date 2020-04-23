@@ -274,6 +274,15 @@ func (m *TMarketTunnel) Cancelable(order.OrderID) bool {
 	return m.cancelable
 }
 
+func (m *TMarketTunnel) Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx int64, finalEpochEnd time.Time) {
+	// no suspension
+	return -1, time.Time{}
+}
+
+func (m *TMarketTunnel) Running() bool {
+	return true
+}
+
 type TBackend struct {
 	utxoErr    error
 	utxos      map[string]uint64
@@ -1082,19 +1091,19 @@ func makeCORevealed(writer *ordertest.Writer, targetID order.OrderID) (*order.Ca
 type TBookSource struct {
 	buys  []*order.LimitOrder
 	sells []*order.LimitOrder
-	feed  chan *bookUpdateSignal
+	feed  chan *updateSignal
 }
 
 func tNewBookSource() *TBookSource {
 	return &TBookSource{
-		feed: make(chan *bookUpdateSignal, 16),
+		feed: make(chan *updateSignal, 16),
 	}
 }
 
 func (s *TBookSource) Book() (eidx int64, buys []*order.LimitOrder, sells []*order.LimitOrder) {
 	return 13241324, s.buys, s.sells
 }
-func (s *TBookSource) OrderFeed() <-chan *bookUpdateSignal {
+func (s *TBookSource) OrderFeed() <-chan *updateSignal {
 	return s.feed
 }
 
@@ -1125,6 +1134,15 @@ func (conn *TLink) Send(msg *msgjson.Message) error {
 	defer conn.mtx.Unlock()
 	conn.sends = append(conn.sends, msg)
 	return conn.sendErr
+}
+func (conn *TLink) SendError(id uint64, msgErr *msgjson.Error) {
+	msg, err := msgjson.NewResponse(id, nil, msgErr)
+	if err != nil {
+		log.Errorf("SendError: failed to create message: %v", err)
+	}
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
+	conn.sends = append(conn.sends, msg)
 }
 
 func (conn *TLink) getSend() *msgjson.Message {
@@ -1336,10 +1354,12 @@ func TestRouter(t *testing.T) {
 	// An epoch notification sent on market 1's channel should arrive at both
 	// clients.
 	lo := makeLO(buyer1, mkRate1(0.8, 1.0), randLots(10), order.ImmediateTiF)
-	sig := &bookUpdateSignal{
-		action:   epochAction,
-		order:    lo,
-		epochIdx: 12345678,
+	sig := &updateSignal{
+		action: epochAction,
+		data: sigDataEpochOrder{
+			order:    lo,
+			epochIdx: 12345678,
+		},
 	}
 	src1.feed <- sig
 	tick(responseDelay)
@@ -1354,8 +1374,9 @@ func TestRouter(t *testing.T) {
 	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link2")
 
 	// just for kicks, checks the epoch is as expected.
-	if epochNote.Epoch != uint64(sig.epochIdx) {
-		t.Fatalf("wrong epoch. wanted %d, got %d", sig.epochIdx, epochNote.Epoch)
+	wantIdx := sig.data.(sigDataEpochOrder).epochIdx
+	if epochNote.Epoch != uint64(wantIdx) {
+		t.Fatalf("wrong epoch. wanted %d, got %d", wantIdx, epochNote.Epoch)
 	}
 
 	// Have both subscribers subscribe to market 2.
@@ -1370,10 +1391,12 @@ func TestRouter(t *testing.T) {
 
 	// Send an epoch update for a market order.
 	mo := makeMO(buyer2, randLots(10))
-	sig = &bookUpdateSignal{
-		action:   epochAction,
-		order:    mo,
-		epochIdx: 12345678,
+	sig = &updateSignal{
+		action: epochAction,
+		data: sigDataEpochOrder{
+			order:    mo,
+			epochIdx: 12345678,
+		},
 	}
 	src2.feed <- sig
 	tick(responseDelay)
@@ -1392,9 +1415,12 @@ func TestRouter(t *testing.T) {
 	}
 
 	lo.FillAmt = mkt2.LotSize
-	sig = &bookUpdateSignal{
+	sig = &updateSignal{
 		action: bookAction,
-		order:  lo,
+		data: sigDataBookedOrder{
+			order:    lo,
+			epochIdx: 12344365,
+		},
 	}
 	src2.feed <- sig
 	tick(responseDelay)
@@ -1413,10 +1439,12 @@ func TestRouter(t *testing.T) {
 	}
 
 	// Now unbook the order.
-	sig = &bookUpdateSignal{
-		action:   unbookAction,
-		order:    lo,
-		epochIdx: 12345678,
+	sig = &updateSignal{
+		action: unbookAction,
+		data: sigDataUnbookedOrder{
+			order:    lo,
+			epochIdx: 12345678,
+		},
 	}
 	src2.feed <- sig
 	tick(responseDelay)
@@ -1459,10 +1487,12 @@ func TestRouter(t *testing.T) {
 	}
 
 	mo = makeMO(seller1, randLots(10))
-	sig = &bookUpdateSignal{
-		action:   epochAction,
-		order:    mo,
-		epochIdx: 12345678,
+	sig = &updateSignal{
+		action: epochAction,
+		data: sigDataEpochOrder{
+			order:    mo,
+			epochIdx: 12345678,
+		},
 	}
 	src1.feed <- sig
 	tick(responseDelay)
@@ -1483,10 +1513,12 @@ func TestRouter(t *testing.T) {
 	}
 	oid := lo.ID()
 	co := makeCO(buyer1, oid)
-	sig = &bookUpdateSignal{
-		action:   epochAction,
-		order:    co,
-		epochIdx: 12345678,
+	sig = &updateSignal{
+		action: epochAction,
+		data: sigDataEpochOrder{
+			order:    co,
+			epochIdx: 12345678,
+		},
 	}
 	src1.feed <- sig
 	tick(responseDelay)

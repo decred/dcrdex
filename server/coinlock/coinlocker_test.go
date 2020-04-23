@@ -159,7 +159,7 @@ func Test_bookLocker_LockCoins(t *testing.T) {
 
 	bookLock.LockCoins(coinMap)
 
-	verifyLocked := func(cl CoinLockChecker, coins []CoinID, wantLocked bool) bool {
+	verifyLocked := func(cl CoinLockChecker, coins []CoinID, wantLocked bool) (ok bool) {
 		for _, coin := range coins {
 			locked := cl.CoinLocked(coin)
 			if locked != wantLocked {
@@ -201,5 +201,19 @@ func Test_bookLocker_LockCoins(t *testing.T) {
 	}
 	if !verifyLocked(swapLock, orderCoins, false) {
 		t.Errorf("swapLock indicated coins were locked that should have been unlocked")
+	}
+
+	// Relock the coins.
+	bookLock.LockCoins(coinMap)
+
+	// Make sure the BOOK locker say they are locked.
+	if !verifyLocked(bookLock, allCoins, true) {
+		t.Errorf("bookLock indicated coins were unlocked that should have been locked")
+	}
+
+	bookLock.UnlockAll()
+
+	if !verifyLocked(bookLock, orderCoins, false) {
+		t.Errorf("bookLock indicated coins were locked that should have been unlocked")
 	}
 }

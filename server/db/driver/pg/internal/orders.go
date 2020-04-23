@@ -121,8 +121,8 @@ const (
 	//			quantity,
 	//			rate,
 	//			force,
-	//			2,                                      -- new status ($d)
-	//			123456789,                              -- new filled ($d)
+	//			2,                                      -- new status (%d)
+	//			123456789,                              -- new filled (%d)
 	//          epoch_idx, epoch_dur, preimage, complete_time
 	//		)
 	//		INSERT INTO dcrdex.dcr_btc.orders_archived  -- destination table (%s)
@@ -138,6 +138,18 @@ const (
 	INSERT INTO %s
 	SELECT * FROM moved;`
 	// TODO: consider a MoveOrderSameFilled query
+
+	PurgeBook = `WITH moved AS (
+		DELETE FROM %s       -- active orders table for market X
+		WHERE status = $1    -- booked status code
+		RETURNING oid, type, sell, account_id, address,
+			client_time, server_time, commit, coins, quantity,
+			rate, force, %d, filled, -- revoked status code
+			epoch_idx, epoch_dur, preimage, complete_time
+	)
+	INSERT INTO %s -- archived orders table for market X
+	SELECT * FROM moved
+	RETURNING oid, sell, account_id;`
 
 	// CreateCancelOrdersTable creates a table specified via the %s printf
 	// specifier for cancel orders.

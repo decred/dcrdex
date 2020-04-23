@@ -248,4 +248,20 @@ func TestBook(t *testing.T) {
 		t.Errorf("Failed to remove best sell order. Got %v, wanted %v",
 			removed.ID(), bestSellOrder.ID())
 	}
+
+	if b.SellCount() == 0 {
+		t.Errorf("sell side was empty")
+	}
+	if b.BuyCount() == 0 {
+		t.Errorf("buy side was empty")
+	}
+
+	b.Clear()
+
+	if b.SellCount() != 0 {
+		t.Errorf("sell side was not empty after Clear")
+	}
+	if b.BuyCount() != 0 {
+		t.Errorf("buy side was not empty after Clear")
+	}
 }

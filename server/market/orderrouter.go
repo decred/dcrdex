@@ -66,6 +66,15 @@ type MarketTunnel interface {
 	// involved in a DEX-monitored trade. Change outputs from DEX-monitored trades
 	// can be used in other orders without waiting for fundConf confirmations.
 	TxMonitored(user account.AccountID, asset uint32, txid string) bool
+
+	// Suspend suspends the market as soon as a given time, returning the final
+	// epoch index and and time at which that epoch closes.
+	Suspend(asSoonAs time.Time, persistBook bool) (finalEpochIdx int64, finalEpochEnd time.Time)
+
+	// Running indicates is the market is accepting new orders. This will return
+	// false when suspended, but false does not necessarily mean Run has stopped
+	// since a start epoch may be set.
+	Running() bool
 }
 
 // orderRecord contains the information necessary to respond to an order
@@ -165,6 +174,12 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	tunnel, coins, sell, rpcErr := r.extractMarketDetails(&limit.Prefix, &limit.Trade)
 	if rpcErr != nil {
 		return rpcErr
+	}
+
+	// Spare some resources if the market is closed now. Any orders that make it
+	// through to a closed market will receive a similar error from SubmitOrder.
+	if !tunnel.Running() {
+		return msgjson.NewError(msgjson.MarketNotRunningError, "market closed to new orders")
 	}
 
 	// Check that OrderType is set correctly
@@ -272,6 +287,10 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
+	if !tunnel.Running() {
+		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders")
+	}
+
 	// Check that OrderType is set correctly
 	if market.OrderType != msgjson.MarketOrderNum {
 		return msgjson.NewError(msgjson.OrderParameterError, "wrong order type set for market order")
@@ -295,9 +314,9 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
 		minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
 
-		// TODO: I'm pretty sure that if there are no orders on the book, the midGap
-		// will be zero, and so will minReq, meaning any Quanity would be accepted.
-		// Is this a security concern?
+		// TODO: I'm pretty sure that if there are no orders on the book, the
+		// midGap will be zero, and so will minReq, meaning any Quantity would
+		// be accepted. Is this a security concern?
 
 		if market.Quantity < minReq {
 			errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", reqVal, minReq, midGap)
@@ -366,6 +385,10 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	tunnel, rpcErr := r.extractMarket(&cancel.Prefix)
 	if rpcErr != nil {
 		return rpcErr
+	}
+
+	if !tunnel.Running() {
+		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders")
 	}
 
 	if len(cancel.TargetID) != order.OrderIDSize {
@@ -450,6 +473,53 @@ func (r *OrderRouter) extractMarket(prefix *msgjson.Prefix) (MarketTunnel, *msgj
 		return nil, msgjson.NewError(msgjson.UnknownMarketError, "unknown market "+mktName)
 	}
 	return tunnel, nil
+}
+
+// SuspendEpoch holds the index and end time of final epoch marking the
+// suspension of a market.
+type SuspendEpoch struct {
+	Idx int64
+	End time.Time
+}
+
+// SuspendMarket schedules a suspension of a given market, with the option to
+// persist the orders on the book (or purge the book automatically on market
+// shutdown). The scheduled final epoch and suspend time are returned. Note that
+// OrderRouter is a proxy for this request to the ultimate Market. This is done
+// because OrderRouter is the entry point for new orders into the market. TODO:
+// track running, suspended, and scheduled-suspended markets, appropriately
+// blocking order submission according to the schedule rather than just checking
+// Market.Running prior to submitting incoming orders to the Market.
+func (r *OrderRouter) SuspendMarket(mktName string, asSoonAs time.Time, persistBooks bool) *SuspendEpoch {
+	mkt, found := r.tunnels[mktName]
+	if !found {
+		return nil
+	}
+
+	idx, t := mkt.Suspend(asSoonAs, persistBooks)
+	return &SuspendEpoch{
+		Idx: idx,
+		End: t,
+	}
+}
+
+// Suspend is like SuspendMarket, but for all known markets. TODO: use this in a
+// "suspend all as soon as" DEX function with rather than shutting down in the
+// middle of an active epoch as SIGINT shutdown presently does.
+func (r *OrderRouter) Suspend(asSoonAs time.Time, persistBooks bool) map[string]*SuspendEpoch {
+
+	suspendTimes := make(map[string]*SuspendEpoch, len(r.tunnels))
+	for name, mkt := range r.tunnels {
+		idx, ts := mkt.Suspend(asSoonAs, persistBooks)
+		suspendTimes[name] = &SuspendEpoch{Idx: idx, End: ts}
+	}
+
+	// MarketTunnel.Running will return false when the market closes, and true
+	// when and if it opens again. Locking/blocking of the incoming order
+	// handlers is not necessary since any orders that sneak in to a Market will
+	// be rejected if there is no active epoch.
+
+	return suspendTimes
 }
 
 // extractMarketDetails finds the MarketTunnel, an assetSet, and market side for

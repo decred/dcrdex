@@ -367,6 +367,99 @@ func TestRevokeOrder(t *testing.T) {
 	}
 }
 
+func TestFlushBook(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// Standing limit == OK as booked
+	var epochIdx, epochDur int64 = 13245678, 6000
+	lo := newLimitOrder(false, 4800000, 1, order.StandingTiF, 0)
+	err := archie.StoreOrder(lo, epochIdx, epochDur, order.OrderStatusBooked)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	// A not booked order.
+	mo := newMarketSellOrder(1, 0)
+	mo.AccountID = lo.AccountID
+	err = archie.StoreOrder(mo, epochIdx, epochDur, order.OrderStatusExecuted)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	sellsRemoved, buysRemoved, err := archie.FlushBook(lo.BaseAsset, lo.QuoteAsset)
+	if err != nil {
+		t.Fatalf("FlushBook failed: %v", err)
+	}
+	if len(sellsRemoved) != 0 {
+		t.Fatalf("flushed %d book sell orders, expected 0", len(sellsRemoved))
+	}
+	if len(buysRemoved) != 1 {
+		t.Fatalf("flushed %d book buy orders, expected 1", len(buysRemoved))
+	}
+	if buysRemoved[0] != lo.ID() {
+		t.Errorf("flushed sell order has ID %v, expected %v", buysRemoved[0], lo.ID())
+	}
+
+	// Check for new status of the order.
+	loNow, loStatus, err := archie.Order(lo.ID(), lo.BaseAsset, lo.QuoteAsset)
+	if err != nil {
+		t.Fatalf("Failed to locate order: %v", err)
+	}
+	if loNow.ID() != lo.ID() {
+		t.Errorf("incorrect order ID retrieved")
+	}
+	_, ok := loNow.(*order.LimitOrder)
+	if !ok {
+		t.Fatalf("not a limit order")
+	}
+	if loStatus != order.OrderStatusRevoked {
+		t.Errorf("got order status %v, expected %v", loStatus, order.OrderStatusRevoked)
+	}
+
+	ordersOut, _, err := archie.UserOrders(context.Background(), lo.User(), lo.BaseAsset, lo.QuoteAsset)
+	if err != nil {
+		t.Fatalf("UserOrders failed: %v", err)
+	}
+
+	wantNumOrders := 2 // market and limit
+	if len(ordersOut) != wantNumOrders {
+		t.Fatalf("got %d user orders, expected %d", len(ordersOut), wantNumOrders)
+	}
+
+	coids, targets, _, err := archie.ExecutedCancelsForUser(lo.User(), 25)
+	if err != nil {
+		t.Errorf("ExecutedCancelsForUser failed: %v", err)
+	}
+	if len(coids) != 1 {
+		t.Fatalf("got %d cancels, expected 1", len(coids))
+	}
+	if len(targets) != 1 {
+		t.Fatalf("got %d cancel targets, expected 1", len(targets))
+	}
+
+	if targets[0] != lo.ID() {
+		t.Fatalf("cancel order is targeting %v, expected %v", targets[0], lo.ID())
+	}
+
+	// Ensure market order is still there.
+	moNow, moStatus, err := archie.Order(mo.ID(), mo.BaseAsset, mo.QuoteAsset)
+	if err != nil {
+		t.Fatalf("Failed to locate order: %v", err)
+	}
+	if moNow.ID() != mo.ID() {
+		t.Errorf("incorrect order ID retrieved")
+	}
+	_, ok = moNow.(*order.MarketOrder)
+	if !ok {
+		t.Fatalf("not a market order")
+	}
+	if moStatus != order.OrderStatusExecuted {
+		t.Errorf("got order status %v, expected %v", loStatus, order.OrderStatusExecuted)
+	}
+}
+
 func TestLoadOrderUnknown(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
