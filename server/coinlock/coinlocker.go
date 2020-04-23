@@ -22,6 +22,8 @@ type CoinLockChecker interface {
 // coins.
 type CoinLocker interface {
 	CoinLockChecker
+	// UnlockAll releases all locked coins.
+	UnlockAll()
 	// UnlockOrderCoins unlocks all locked coins associated with an order.
 	UnlockOrderCoins(oid order.OrderID)
 	// LockOrdersCoins locks all of the coins associated with multiple orders.
@@ -96,6 +98,11 @@ func (bl *bookLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) {
 	bl.bookLock.LockCoins(orderCoins)
 }
 
+// UnlockAll releases all locked coins.
+func (bl *bookLocker) UnlockAll() {
+	bl.bookLock.UnlockAll()
+}
+
 // UnlockOrderCoins unlocks all locked coins associated with an order.
 func (bl *bookLocker) UnlockOrderCoins(oid order.OrderID) {
 	bl.bookLock.UnlockOrderCoins(oid)
@@ -108,18 +115,23 @@ type swapLocker struct {
 }
 
 // LockOrdersCoins locks all coins for the given orders.
-func (bl *swapLocker) LockOrdersCoins(orders []order.Order) {
-	bl.swapLock.LockOrdersCoins(orders)
+func (sl *swapLocker) LockOrdersCoins(orders []order.Order) {
+	sl.swapLock.LockOrdersCoins(orders)
 }
 
 // LockOrdersCoins locks coins associated with certain orders.
-func (bl *swapLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) {
-	bl.swapLock.LockCoins(orderCoins)
+func (sl *swapLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) {
+	sl.swapLock.LockCoins(orderCoins)
+}
+
+// UnlockAll releases all locked coins.
+func (sl *swapLocker) UnlockAll() {
+	sl.swapLock.UnlockAll()
 }
 
 // UnlockOrderCoins unlocks all locked coins associated with an order.
-func (bl *swapLocker) UnlockOrderCoins(oid order.OrderID) {
-	bl.swapLock.UnlockOrderCoins(oid)
+func (sl *swapLocker) UnlockOrderCoins(oid order.OrderID) {
+	sl.swapLock.UnlockOrderCoins(oid)
 }
 
 var _ (CoinLocker) = (*swapLocker)(nil)
@@ -140,6 +152,14 @@ func NewAssetCoinLocker() *AssetCoinLocker {
 		lockedCoins:        make(map[coinIDKey]struct{}),
 		lockedCoinsByOrder: make(map[order.OrderID][]CoinID),
 	}
+}
+
+// UnlockAll releases all locked coins.
+func (ac *AssetCoinLocker) UnlockAll() {
+	ac.coinMtx.Lock()
+	ac.lockedCoins = make(map[coinIDKey]struct{})
+	ac.lockedCoinsByOrder = make(map[order.OrderID][]CoinID)
+	ac.coinMtx.Unlock()
 }
 
 // CoinLocked indicates if a coin identifier (e.g. UTXO) is locked.

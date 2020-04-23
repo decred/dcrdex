@@ -55,6 +55,7 @@ const (
 	RPCGetFeeError                    // 39
 	RPCRegisterError                  // 40
 	RPCArgumentsError                 // 41
+	MarketNotRunningError             // 42
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -127,8 +128,13 @@ const (
 	// preimages for the client's epoch orders.
 	PreimageRoute = "preimage"
 	// SuspensionRoute is the DEX-originating request-type message informing the
-	// client of an upcoming trade suspension.
+	// client of an upcoming trade suspension. This is part of the
+	// subscription-based orderbook notification feed.
 	SuspensionRoute = "suspension"
+	// ResumptionRoute is the DEX-originating request-type message informing the
+	// client of an upcoming trade resumption. This is part of the
+	// subscription-based orderbook notification feed.
+	ResumptionRoute = "resumption"
 )
 
 type Bytes = dex.Bytes
@@ -211,6 +217,21 @@ const (
 	Response                              // 2
 	Notification                          // 3
 )
+
+// String satisfies the Stringer interface for translating the MessageType code
+// into a description, primarily for logging.
+func (mt MessageType) String() string {
+	switch mt {
+	case Request:
+		return "request"
+	case Response:
+		return "response"
+	case Notification:
+		return "notification"
+	default:
+		return "unknown MessageType"
+	}
+}
 
 // Message is the primary messaging type for websocket communications.
 type Message struct {
@@ -297,7 +318,7 @@ func (msg *Message) Response() (*ResponsePayload, error) {
 // NewNotification encodes the payload and creates a Notification-type *Message.
 func NewNotification(route string, payload interface{}) (*Message, error) {
 	if route == "" {
-		return nil, fmt.Errorf("empty string not allowed for route of request-type message")
+		return nil, fmt.Errorf("empty string not allowed for route of notification-type message")
 	}
 	encPayload, err := json.Marshal(payload)
 	if err != nil {
@@ -669,6 +690,7 @@ type OrderBook struct {
 	MarketID string `json:"marketid"`
 	Seq      uint64 `json:"seq"`
 	Epoch    uint64 `json:"epoch"`
+	// MarketStatus `json:"status"`// maybe
 	// DRAFT NOTE: We might want to use a different structure for bulk updates.
 	// Sending a struct of arrays rather than an array of structs could
 	// potentially cut the encoding effort and encoded size substantially.
@@ -683,6 +705,24 @@ type MatchProofNote struct {
 	Misses    []Bytes `json:"misses"`
 	CSum      Bytes   `json:"csum"`
 	Seed      Bytes   `json:"seed"`
+}
+
+// TradeSuspension is the SuspensionRoute notification payload. It is part of
+// the orderbook subscription.
+type TradeSuspension struct {
+	MarketID    string `json:"marketid"`
+	FinalEpoch  uint64 `json:"finalepoch"`
+	SuspendTime uint64 `json:"suspendtime"`
+	Persist     bool   `json:"persistbook"`
+}
+
+// TradeResumption is the ResumptionRoute notification payload. It is part of
+// the orderbook subscription. EpochLen is specified if the market configuration
+// change, and the client should also hit the 'config' route for full details.
+type TradeResumption struct {
+	MarketID   string `json:"marketid"`
+	StartEpoch uint64 `json:"startepoch"`
+	EpochLen   uint64 `json:"epochlen,omitempty"` // maybe just ConfigChange bool `json:"configchange"`
 }
 
 // PreimageRequest is the server-originating preimage request payload.
@@ -789,25 +829,25 @@ type NotifyFeeResult struct {
 	signable
 }
 
-// ConfigResult is the successful result from the 'config' route.
-type ConfigResult struct {
-	CancelMax        float64  `json:"cancelmax"`
-	BroadcastTimeout uint64   `json:"btimeout"`
-	RegFeeConfirms   uint16   `json:"regfeeconfirms"`
-	Assets           []Asset  `json:"assets"`
-	Markets          []Market `json:"markets"`
-	Fee              uint64   `json:"fee"`
+// MarketStatus describes the status of the market, where StartEpoch is when the
+// market started or will start. FinalEpoch is a when the market will suspend
+// if it is running, or when the market suspended if it is presently stopped.
+type MarketStatus struct {
+	StartEpoch uint64 `json:"startepoch"`
+	FinalEpoch uint64 `json:"finalepoch,omitempty"`
+	Persist    *bool  `json:"persistbook,omitempty"` // nil and omitted when finalepoch is omitted
 }
 
 // Market describes a market and its variables, and is returned as part of a
-// ConfigResult.
+// ConfigResult. The market's status (running, start epoch, and any planned
+// final epoch before suspend) are also provided.
 type Market struct {
 	Name            string  `json:"name"`
 	Base            uint32  `json:"base"`
 	Quote           uint32  `json:"quote"`
 	EpochLen        uint64  `json:"epochlen"`
-	StartEpoch      uint64  `json:"startepoch"`
 	MarketBuyBuffer float64 `json:"buybuffer"`
+	MarketStatus    `json:"status"`
 }
 
 // Asset describes an asset and its variables, and is returned as part of a
@@ -821,6 +861,16 @@ type Asset struct {
 	SwapSize uint64 `json:"swapsize"`
 	SwapConf uint16 `json:"swapconf"`
 	FundConf uint16 `json:"fundconf"`
+}
+
+// ConfigResult is the successful result for the ConfigRoute.
+type ConfigResult struct {
+	CancelMax        float64   `json:"cancelmax"`
+	BroadcastTimeout uint64    `json:"btimeout"`
+	RegFeeConfirms   uint16    `json:"regfeeconfirms"`
+	Assets           []*Asset  `json:"assets"`
+	Markets          []*Market `json:"markets"`
+	Fee              uint64    `json:"fee"`
 }
 
 // Convert uint64 to 8 bytes.

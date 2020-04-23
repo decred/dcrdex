@@ -82,6 +82,9 @@ type OrderArchiver interface {
 	// BookOrders returns all book orders for a market.
 	BookOrders(base, quote uint32) ([]*order.LimitOrder, error)
 
+	// FlushBook revokes all booked orders for a market.
+	FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []order.OrderID, err error)
+
 	// ActiveOrderCoins retrieves a CoinID slice for each active order.
 	ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error)
 

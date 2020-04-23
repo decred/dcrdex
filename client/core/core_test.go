@@ -163,11 +163,11 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
 			BroadcastTimeout: 5 * 60 * 1000,
-			Assets: []msgjson.Asset{
-				*uncovertAssetInfo(tDCR),
-				*uncovertAssetInfo(tBTC),
+			Assets: []*msgjson.Asset{
+				uncovertAssetInfo(tDCR),
+				uncovertAssetInfo(tBTC),
 			},
-			Markets: []msgjson.Market{
+			Markets: []*msgjson.Market{
 				{
 					Name:            tDcrBtcMktName,
 					Base:            tDCR.ID,
@@ -633,7 +633,7 @@ func TestMarkets(t *testing.T) {
 		base, quote := randomMsgMarket()
 		marketIDs[marketName(base.ID, quote.ID)] = struct{}{}
 		cfg := rig.dc.cfg
-		cfg.Markets = append(cfg.Markets, msgjson.Market{
+		cfg.Markets = append(cfg.Markets, &msgjson.Market{
 			Name:            base.Symbol + quote.Symbol,
 			Base:            base.ID,
 			Quote:           quote.ID,

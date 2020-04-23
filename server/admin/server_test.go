@@ -14,13 +14,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	dexsrv "decred.org/dcrdex/server/dex"
+	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/server/market"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
+	"github.com/go-chi/chi"
 )
 
 func init() {
@@ -28,14 +32,87 @@ func init() {
 	log.SetLevel(slog.LevelTrace)
 }
 
-var (
-	// Check that *dexsrv.DEX satisfies SvrCore.
-	_ SvrCore = (*dexsrv.DEX)(nil)
-)
+type TMarket struct {
+	running bool
+	ep0, ep int64
+	dur     uint64
+	suspend *market.SuspendEpoch
+	persist bool
+}
 
-type TCore struct{}
+type TCore struct {
+	markets map[string]*TMarket
+}
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
+
+func (c *TCore) Suspend(tSusp time.Time, persistBooks bool) map[string]*market.SuspendEpoch {
+	return nil
+}
+
+func (c *TCore) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch {
+	tMkt := c.markets[name]
+	if tMkt == nil {
+		return nil
+	}
+	tMkt.persist = persistBooks
+	tMkt.suspend.Idx = encode.UnixMilli(tSusp)
+	tMkt.suspend.End = tSusp.Add(time.Millisecond)
+	return tMkt.suspend
+}
+
+func (c *TCore) market(name string) *TMarket {
+	if c.markets == nil {
+		return nil
+	}
+	return c.markets[name]
+}
+
+func (c *TCore) MarketStatus(mktName string) *market.Status {
+	mkt := c.market(mktName)
+	if mkt == nil {
+		return nil
+	}
+	var suspendEpoch int64
+	if mkt.suspend != nil {
+		suspendEpoch = mkt.suspend.Idx
+	}
+	return &market.Status{
+		Running:       mkt.running,
+		EpochDuration: mkt.dur,
+		ActiveEpoch:   mkt.ep,
+		StartEpoch:    mkt.ep0,
+		SuspendEpoch:  suspendEpoch,
+		PersistBook:   mkt.persist,
+	}
+}
+
+func (c *TCore) MarketStatuses() map[string]*market.Status {
+	mktStatuses := make(map[string]*market.Status, len(c.markets))
+	for name, mkt := range c.markets {
+		var suspendEpoch int64
+		if mkt.suspend != nil {
+			suspendEpoch = mkt.suspend.Idx
+		}
+		mktStatuses[name] = &market.Status{
+			Running:       mkt.running,
+			EpochDuration: mkt.dur,
+			ActiveEpoch:   mkt.ep,
+			StartEpoch:    mkt.ep0,
+			SuspendEpoch:  suspendEpoch,
+			PersistBook:   mkt.persist,
+		}
+	}
+	return mktStatuses
+}
+
+func (c *TCore) MarketRunning(mktName string) (found, running bool) {
+	mkt := c.market(mktName)
+	if mkt == nil {
+		return
+	}
+	return true, mkt.running
+}
 
 type tResponseWriter struct {
 	b    []byte
@@ -146,6 +223,419 @@ func TestPing(t *testing.T) {
 	gotBody := w.Body.String()
 	if gotBody != expectedBody {
 		t.Errorf("apiPong response said %q, expected %q", gotBody, expectedBody)
+	}
+}
+
+func TestMarkets(t *testing.T) {
+	core := &TCore{
+		markets: make(map[string]*TMarket),
+	}
+	srv := &Server{
+		core: core,
+	}
+
+	mux := chi.NewRouter()
+	mux.Get("/markets", srv.apiMarkets)
+
+	// No markets.
+	w := httptest.NewRecorder()
+	r, _ := http.NewRequest("GET", "https://localhost/markets", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiMarkets returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	respBody := w.Body.String()
+	if respBody != fmt.Sprintf("{}\n") {
+		t.Errorf("incorrect response body: %q", respBody)
+	}
+
+	// A market.
+	dur := uint64(1234)
+	idx := int64(12345)
+	tMkt := &TMarket{
+		running: true,
+		dur:     dur,
+		ep0:     12340,
+		ep:      12343,
+	}
+	core.markets["dcr_btc"] = tMkt
+
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/markets", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiMarkets returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+
+	exp := `{
+    "dcr_btc": {
+        "running": true,
+        "epochlen": 1234,
+        "activeepoch": 12343,
+        "startepoch": 12340
+    }
+}
+`
+	if exp != w.Body.String() {
+		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
+	}
+
+	var mktStatuses map[string]*MarketStatus
+	err := json.Unmarshal(w.Body.Bytes(), &mktStatuses)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+
+	wantMktStatuses := map[string]*MarketStatus{
+		"dcr_btc": {
+			Running:       true,
+			EpochDuration: 1234,
+			ActiveEpoch:   12343,
+			StartEpoch:    12340,
+		},
+	}
+	if len(wantMktStatuses) != len(mktStatuses) {
+		t.Fatalf("got %d market statuses, wanted %d", len(mktStatuses), len(wantMktStatuses))
+	}
+	for name, stat := range mktStatuses {
+		wantStat := wantMktStatuses[name]
+		if wantStat == nil {
+			t.Fatalf("market %s not expected", name)
+		}
+		if !reflect.DeepEqual(wantStat, stat) {
+			log.Errorf("incorrect market status. got %v, expected %v", stat, wantStat)
+		}
+	}
+
+	// Set suspend data.
+	tMkt.suspend = &market.SuspendEpoch{Idx: 12345, End: encode.UnixTimeMilli(int64(dur) * idx)}
+	tMkt.persist = true
+
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/markets", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiMarkets returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+
+	exp = `{
+    "dcr_btc": {
+        "running": true,
+        "epochlen": 1234,
+        "activeepoch": 12343,
+        "startepoch": 12340,
+        "finalepoch": 12345,
+        "persistbook": true
+    }
+}
+`
+	if exp != w.Body.String() {
+		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
+	}
+
+	mktStatuses = nil
+	err = json.Unmarshal(w.Body.Bytes(), &mktStatuses)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+
+	persist := true
+	wantMktStatuses = map[string]*MarketStatus{
+		"dcr_btc": {
+			Running:       true,
+			EpochDuration: 1234,
+			ActiveEpoch:   12343,
+			StartEpoch:    12340,
+			SuspendEpoch:  12345,
+			PersistBook:   &persist,
+		},
+	}
+	if len(wantMktStatuses) != len(mktStatuses) {
+		t.Fatalf("got %d market statuses, wanted %d", len(mktStatuses), len(wantMktStatuses))
+	}
+	for name, stat := range mktStatuses {
+		wantStat := wantMktStatuses[name]
+		if wantStat == nil {
+			t.Fatalf("market %s not expected", name)
+		}
+		if !reflect.DeepEqual(wantStat, stat) {
+			log.Errorf("incorrect market status. got %v, expected %v", stat, wantStat)
+		}
+	}
+}
+
+func TestMarketInfo(t *testing.T) {
+
+	core := &TCore{
+		markets: make(map[string]*TMarket),
+	}
+	srv := &Server{
+		core: core,
+	}
+
+	mux := chi.NewRouter()
+	mux.Get("/market/{"+marketNameKey+"}", srv.apiMarketInfo)
+
+	// Request a non-existent market.
+	w := httptest.NewRecorder()
+	name := "dcr_btc"
+	r, _ := http.NewRequest("GET", "https://localhost/market/"+name, nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiMarketInfo returned code %d, expected %d", w.Code, http.StatusBadRequest)
+	}
+	respBody := w.Body.String()
+	if respBody != fmt.Sprintf("unknown market %q\n", name) {
+		t.Errorf("incorrect response body: %q", respBody)
+	}
+
+	tMkt := &TMarket{}
+	core.markets[name] = tMkt
+
+	// Not running market.
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name, nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiMarketInfo returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	mktStatus := new(MarketStatus)
+	err := json.Unmarshal(w.Body.Bytes(), &mktStatus)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+	if mktStatus.Name != name {
+		t.Errorf("incorrect market name %q, expected %q", mktStatus.Name, name)
+	}
+	if mktStatus.Running {
+		t.Errorf("market should not have been reported as running")
+	}
+
+	// Flip the market on.
+	core.markets[name].running = true
+	core.markets[name].suspend = &market.SuspendEpoch{Idx: 1324, End: time.Now()}
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name, nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiMarketInfo returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	mktStatus = new(MarketStatus)
+	err = json.Unmarshal(w.Body.Bytes(), &mktStatus)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+	if mktStatus.Name != name {
+		t.Errorf("incorrect market name %q, expected %q", mktStatus.Name, name)
+	}
+	if !mktStatus.Running {
+		t.Errorf("market should have been reported as running")
+	}
+}
+
+func TestSuspend(t *testing.T) {
+
+	core := &TCore{
+		markets: make(map[string]*TMarket),
+	}
+	srv := &Server{
+		core: core,
+	}
+
+	mux := chi.NewRouter()
+	mux.Get("/market/{"+marketNameKey+"}/suspend", srv.apiSuspend)
+
+	// Non-existent market
+	name := "dcr_btc"
+	w := httptest.NewRecorder()
+	r, _ := http.NewRequest("GET", "https://localhost/market/"+name+"/suspend", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusBadRequest)
+	}
+
+	// With the market, but not running
+	tMkt := &TMarket{
+		suspend: &market.SuspendEpoch{},
+	}
+	core.markets[name] = tMkt
+
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	wantMsg := "market \"dcr_btc\" not running\n"
+	if w.Body.String() != wantMsg {
+		t.Errorf("expected body %q, got %q", wantMsg, w.Body)
+	}
+
+	// Now running.
+	tMkt.running = true
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	suspRes := new(SuspendResult)
+	err := json.Unmarshal(w.Body.Bytes(), &suspRes)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+	if suspRes.Market != name {
+		t.Errorf("incorrect market name %q, expected %q", suspRes.Market, name)
+	}
+
+	var zeroTime time.Time
+	wantIdx := encode.UnixMilli(zeroTime)
+	if suspRes.FinalEpoch != wantIdx {
+		t.Errorf("incorrect final epoch index. got %d, expected %d",
+			suspRes.FinalEpoch, tMkt.suspend.Idx)
+	}
+
+	wantFinal := zeroTime.Add(time.Millisecond)
+	if suspRes.SuspendTime.Equal(wantFinal) {
+		t.Errorf("incorrect suspend time. got %v, expected %v",
+			suspRes.SuspendTime, tMkt.suspend.End)
+	}
+
+	// Specify a time in the past.
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?t=12", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	resp := w.Body.String()
+	wantPrefix := "specified market suspend time is in the past"
+	if !strings.HasPrefix(resp, wantPrefix) {
+		t.Errorf("Expected error message starting with %q, got %q", wantPrefix, resp)
+	}
+
+	// Bad suspend time (not a time)
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?t=QWERT", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	resp = w.Body.String()
+	wantPrefix = "invalid suspend time"
+	if !strings.HasPrefix(resp, wantPrefix) {
+		t.Errorf("Expected error message starting with %q, got %q", wantPrefix, resp)
+	}
+
+	// Good suspend time, one minute in the future
+	w = httptest.NewRecorder()
+	tMsFuture := encode.UnixMilli(time.Now().Add(time.Minute))
+	r, _ = http.NewRequest("GET", fmt.Sprintf("https://localhost/market/%v/suspend?t=%d", name, tMsFuture), nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	suspRes = new(SuspendResult)
+	err = json.Unmarshal(w.Body.Bytes(), &suspRes)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal result: %v", err)
+	}
+
+	if suspRes.FinalEpoch != tMsFuture {
+		t.Errorf("incorrect final epoch index. got %d, expected %d",
+			suspRes.FinalEpoch, tMsFuture)
+	}
+
+	wantFinal = encode.UnixTimeMilli(tMsFuture + 1)
+	if suspRes.SuspendTime.Equal(wantFinal) {
+		t.Errorf("incorrect suspend time. got %v, expected %v",
+			suspRes.SuspendTime, wantFinal)
+	}
+
+	if !tMkt.persist {
+		t.Errorf("market persist was false")
+	}
+
+	// persist=true (OK)
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?persist=true", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+
+	if !tMkt.persist {
+		t.Errorf("market persist was false")
+	}
+
+	// persist=0 (OK)
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?persist=0", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+
+	if tMkt.persist {
+		t.Errorf("market persist was true")
+	}
+
+	// invalid persist
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/market/"+name+"/suspend?persist=blahblahblah", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiSuspend returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	resp = w.Body.String()
+	wantPrefix = "invalid persist book boolean"
+	if !strings.HasPrefix(resp, wantPrefix) {
+		t.Errorf("Expected error message starting with %q, got %q", wantPrefix, resp)
 	}
 }
 

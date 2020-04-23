@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/server/market"
 	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -27,15 +28,21 @@ const (
 	// server is allowed to stay open without authenticating before it
 	// is closed.
 	rpcTimeoutSeconds = 10
+
+	marketNameKey = "market"
 )
 
 var (
 	log slog.Logger
 )
 
-// SvrCore is satisfied by core.Core.
+// SvrCore is satisfied by server/dex.DEX.
 type SvrCore interface {
 	ConfigMsg() json.RawMessage
+	MarketRunning(mktName string) (found, running bool)
+	MarketStatus(mktName string) *market.Status
+	MarketStatuses() map[string]*market.Status
+	SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch
 }
 
 // Server is a multi-client https server.
@@ -111,6 +118,12 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Get("/ping", s.apiPing)
 		r.Get("/config", s.apiConfig)
+
+		r.Get("/markets", s.apiMarkets)
+		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {
+			rm.Get("/", s.apiMarketInfo)
+			rm.Get("/suspend", s.apiSuspend)
+		})
 	})
 
 	return s, nil
