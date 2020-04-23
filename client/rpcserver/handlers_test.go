@@ -82,7 +82,7 @@ func TestListCommands(t *testing.T) {
 	want := ""
 	for _, r := range sortHelpKeys() {
 		msg := helpMsgs[r]
-		want += r + " " + msg[1] + "\n"
+		want += r + " " + msg.argsShort + "\n"
 	}
 	if res != want[:len(want)-1] {
 		t.Fatalf("wanted %s but got %s", want, res)
@@ -95,10 +95,10 @@ func TestListCommands(t *testing.T) {
 	want = ""
 	for _, r := range sortHelpKeys() {
 		msg := helpMsgs[r]
-		if msg[0] != "" {
-			want += r + " " + msg[0] + " " + msg[1] + "\n"
+		if msg.pwArgsShort != "" {
+			want += r + " " + msg.pwArgsShort + " " + msg.argsShort + "\n"
 		} else {
-			want += r + " " + msg[1] + "\n"
+			want += r + " " + msg.argsShort + "\n"
 		}
 	}
 	if res != want[:len(want)-1] {
@@ -113,19 +113,21 @@ func TestCommandUsage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for command %s", r)
 		}
-		want := r + " " + msg[1] + "\n\n" + msg[2] + "\n\n" + msg[4] + "\n\n" + msg[5]
+		want := r + " " + msg.argsShort + "\n\n" + msg.cmdSummary + "\n\n" + msg.argsLong +
+			"\n\n" + msg.returns
 		if res != want {
 			t.Fatalf("wanted %s but got %s for usage of %s without passwords", want, res, r)
 		}
 
 		// with passwords when applicable
-		if msg[0] != "" {
+		if msg.pwArgsShort != "" {
 			res, err = commandUsage(r, true)
 			if err != nil {
 				t.Fatalf("unexpected error for command %s", r)
 			}
-			want = r + " " + msg[0] + " " + msg[1] + "\n\n" + msg[2] + "\n\n" +
-				msg[3] + "\n\n" + msg[4] + "\n\n" + msg[5]
+			want = r + " " + msg.pwArgsShort + " " + msg.argsShort + "\n\n" +
+				msg.cmdSummary + "\n\n" + msg.pwArgsLong + "\n\n" + msg.argsLong +
+				"\n\n" + msg.returns
 			if res != want {
 				t.Fatalf("wanted %s but got %s for usage of %s with passwords", want, res, r)
 			}
@@ -184,12 +186,12 @@ func TestHandlePreRegister(t *testing.T) {
 		wantErrCode    int
 	}{{
 		name:           "ok",
-		params:         &RawParams{Args: []string{"dex"}, Cert: "cert"},
+		params:         &RawParams{Args: []string{"dex", "cert"}},
 		preRegisterFee: 5,
 		wantErrCode:    -1,
 	}, {
 		name:           "core.PreRegister error",
-		params:         &RawParams{Args: []string{"dex"}, Cert: "cert"},
+		params:         &RawParams{Args: []string{"dex", "cert"}},
 		preRegisterErr: errors.New("error"),
 		wantErrCode:    msgjson.RPCPreRegisterError,
 	}, {
@@ -392,8 +394,8 @@ func TestHandleRegister(t *testing.T) {
 		Args: []string{
 			"dex:1234",
 			"1000",
+			"cert",
 		},
-		Cert: "cert",
 	}
 	tests := []struct {
 		name                        string

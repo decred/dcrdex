@@ -741,9 +741,9 @@ func (c *Core) PreRegister(form *PreRegisterForm) (uint64, error) {
 // returned immediately as the first argument. A thread will be started to wait
 // for the requisite confirmations and send the fee notification to the server.
 // Any error returned from that thread will be sent over the returned channel.
-func (c *Core) Register(form *Registration) error {
+func (c *Core) Register(form *RegisterForm) error {
 	// Check the app password.
-	crypter, err := c.encryptionKey(form.Password)
+	crypter, err := c.encryptionKey(form.AppPass)
 	if err != nil {
 		return err
 	}

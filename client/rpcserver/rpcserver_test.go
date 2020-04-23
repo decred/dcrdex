@@ -81,7 +81,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 func (c *TCore) InitializeClient(pw string) error {
 	return c.initializeClientErr
 }
-func (c *TCore) Register(*core.Registration) error {
+func (c *TCore) Register(*core.RegisterForm) error {
 	return c.registerErr
 }
 

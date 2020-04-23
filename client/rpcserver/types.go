@@ -20,7 +20,6 @@ var (
 type RawParams struct {
 	PWArgs []string `json:"PWArgs"`
 	Args   []string `json:"args"`
-	Cert   string   `json:"cert,omitempty"`
 }
 
 // versionResponse holds a semver version JSON object.
@@ -38,14 +37,6 @@ func (vr versionResponse) String() string {
 // preRegisterResponse is used when responding to the preregister route.
 type preRegisterResponse struct {
 	Fee uint64 `json:"fee"`
-}
-
-// RegisterForm is information necessary to register an account on a DEX.
-type RegisterForm struct {
-	URL     string `json:"url"`
-	AppPass string `json:"appPass"`
-	Fee     uint64 `json:"fee"`
-	Cert    string `json:"cert"`
 }
 
 // openWalletForm is information necessary to open a wallet.
@@ -180,29 +171,37 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 }
 
 func parsePreRegisterArgs(params *RawParams) (*core.PreRegisterForm, error) {
-	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
 		return nil, err
+	}
+	var cert string
+	if len(params.Args) > 1 {
+		cert = params.Args[1]
 	}
 	req := &core.PreRegisterForm{
 		URL:  params.Args[0],
-		Cert: params.Cert,
+		Cert: cert,
 	}
 	return req, nil
 }
 
-func parseRegisterArgs(params *RawParams) (*RegisterForm, error) {
-	if err := checkNArgs(params, []int{1}, []int{2}); err != nil {
+func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
 		return nil, err
 	}
 	fee, err := checkIntArg(params.Args[1], "fee")
 	if err != nil {
 		return nil, err
 	}
-	req := &RegisterForm{
+	cert := ""
+	if len(params.Args) > 2 {
+		cert = params.Args[2]
+	}
+	req := &core.RegisterForm{
 		AppPass: params.PWArgs[0],
 		URL:     params.Args[0],
 		Fee:     uint64(fee),
-		Cert:    params.Cert,
+		Cert:    cert,
 	}
 	return req, nil
 }

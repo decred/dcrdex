@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
-	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/encode"
@@ -220,7 +220,7 @@ type tWalletState struct {
 }
 
 type TCore struct {
-	reg      *core.Registration
+	reg      *core.RegisterForm
 	inited   bool
 	mtx      sync.RWMutex
 	wallets  map[uint32]*tWalletState
@@ -260,7 +260,7 @@ func (c *TCore) PreRegister(form *core.PreRegisterForm) (uint64, error) {
 	return 1e8, nil
 }
 
-func (c *TCore) Register(r *core.Registration) error {
+func (c *TCore) Register(r *core.RegisterForm) error {
 	randomDelay()
 	c.reg = r
 	return nil
@@ -446,7 +446,7 @@ func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) erro
 	defer c.mtx.Unlock()
 	c.wallets[form.AssetID] = &tWalletState{
 		running: true,
-		open: true,
+		open:    true,
 	}
 	return nil
 }

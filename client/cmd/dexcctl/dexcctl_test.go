@@ -103,26 +103,23 @@ func TestReadCert(t *testing.T) {
 		f.Close()
 	}
 	tests := []struct {
-		name, cmd, want, certPath string
-		args, wantParams          []string
-		wantErr                   bool
+		name, cmd, certPath string
+		args, want          []string
+		wantErr             bool
 	}{{
-		name:       "ok with",
-		cmd:        "preregister",
-		args:       []string{"1.2.3.4:3000", "./cert"},
-		wantParams: []string{"1.2.3.4:3000"},
-		certPath:   "./cert",
-		want:       cert,
+		name:     "ok with",
+		cmd:      "preregister",
+		args:     []string{"1.2.3.4:3000", "./cert"},
+		certPath: "./cert",
+		want:     []string{"1.2.3.4:3000", cert},
 	}, {
-		name:       "ok no cert",
-		cmd:        "preregister",
-		args:       []string{"1.2.3.4:3000"},
-		wantParams: []string{"1.2.3.4:3000"},
-		want:       "",
+		name: "ok no cert",
+		cmd:  "preregister",
+		args: []string{"1.2.3.4:3000"},
+		want: []string{"1.2.3.4:3000"},
 	}, {
 		name: "not a readCerts command",
 		cmd:  "not a real command",
-		want: "",
 	}, {
 		name:    "no cert at path",
 		cmd:     "preregister",
@@ -133,7 +130,7 @@ func TestReadCert(t *testing.T) {
 		if test.certPath != "" {
 			createCertAtPath(test.certPath)
 		}
-		res, params, err := readCert(test.cmd, test.args)
+		params, err := readCert(test.cmd, test.args)
 		os.Remove(test.certPath)
 		if err != nil {
 			if test.wantErr {
@@ -143,11 +140,8 @@ func TestReadCert(t *testing.T) {
 		} else if test.wantErr {
 			t.Fatalf("expected error for test %s", test.name)
 		}
-		if test.want != res {
-			t.Fatalf("wanted %v but got %v for test %s", test.want, res, test.name)
-		}
-		if !reflect.DeepEqual(test.wantParams, params) {
-			t.Fatalf("wanted %v but got %v for test %s", test.wantParams, params, test.name)
+		if !reflect.DeepEqual(test.want, params) {
+			t.Fatalf("wanted %v but got %v for test %s", test.want, params, test.name)
 		}
 	}
 }

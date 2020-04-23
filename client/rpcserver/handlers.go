@@ -241,12 +241,7 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
 		return createResponse(registerRoute, nil, resErr)
 	}
-	err = s.core.Register(&core.Registration{
-		Password: form.AppPass,
-		URL:      form.URL,
-		Fee:      form.Fee,
-		Cert:     form.Cert,
-	})
+	err = s.core.Register(form)
 	if err != nil {
 		resErr := &msgjson.Error{Code: msgjson.RPCRegisterError, Message: err.Error()}
 		return createResponse(registerRoute, nil, resErr)
@@ -266,10 +261,11 @@ func ListCommands(includePasswords bool) string {
 		msg := helpMsgs[r]
 		// If help should include password arguments and this command
 		// has password arguments, add them to the help message.
-		if includePasswords && msg[0] != "" {
-			_, err = sb.WriteString(fmt.Sprintf("%s %s %s\n", r, msg[0], msg[1]))
+		if includePasswords && msg.pwArgsShort != "" {
+			_, err = sb.WriteString(fmt.Sprintf("%s %s %s\n", r, msg.pwArgsShort,
+				msg.argsShort))
 		} else {
-			_, err = sb.WriteString(fmt.Sprintf("%s %s\n", r, msg[1]))
+			_, err = sb.WriteString(fmt.Sprintf("%s %s\n", r, msg.argsShort))
 		}
 		if err != nil {
 			log.Errorf("unable to parse help message for %s", r)
@@ -289,11 +285,13 @@ func commandUsage(cmd string, includePasswords bool) (string, error) {
 	}
 	// If help should include password arguments and this command has
 	// password arguments, return them as part of the help message.
-	if includePasswords && msg[0] != "" {
+	if includePasswords && msg.pwArgsShort != "" {
 		return fmt.Sprintf("%s %s %s\n\n%s\n\n%s\n\n%s\n\n%s",
-			cmd, msg[0], msg[1], msg[2], msg[3], msg[4], msg[5]), nil
+			cmd, msg.pwArgsShort, msg.argsShort, msg.cmdSummary, msg.pwArgsLong,
+			msg.argsLong, msg.returns), nil
 	}
-	return fmt.Sprintf("%s %s\n\n%s\n\n%s\n\n%s", cmd, msg[1], msg[2], msg[4], msg[5]), nil
+	return fmt.Sprintf("%s %s\n\n%s\n\n%s\n\n%s", cmd, msg.argsShort, msg.cmdSummary,
+		msg.argsLong, msg.returns), nil
 }
 
 // sortHelpKeys returns a sorted list of helpMsgs keys.
@@ -308,6 +306,10 @@ func sortHelpKeys() []string {
 	return keys
 }
 
+type helpMsg struct {
+	pwArgsShort, argsShort, cmdSummary, pwArgsLong, argsLong, returns string
+}
+
 // helpMsgs are a map of routes to help messages. They are broken down into six
 // sections.
 // In descending order:
@@ -319,7 +321,7 @@ func sortHelpKeys() []string {
 // 4. An extensive breakdown of the password arguments.
 // 5. An extensive breakdown of the arguements.
 // 6. An extensive breakdown of the returned values.
-var helpMsgs = map[string][6]string{
+var helpMsgs = map[string]helpMsg{
 	helpRoute: {
 		``,                           // password args example input
 		`("cmd") (includePasswords)`, // args example input
@@ -358,8 +360,7 @@ var helpMsgs = map[string][6]string{
 		``,
 		`Args:
     dex (string): The dex address to preregister for.
-    cert (string): Optional. The TLS certificate for the dex. For dexcctl, the
-      certificate's path should be used.`,
+    cert (string): Optional. The TLS certificate path.`,
 		`Returns:
     obj: The preregister result.
     {
@@ -436,8 +437,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		`Args:
     url (string): The DEX addr to register for.
     fee (int): The DEX fee.
-    cert (string): Optional. The TLS certificate for the dex. For dexcctl, the
-      certificate's path should be used.`,
+    cert (string): Optional. The TLS certificate path.`,
 		`Returns:
     string: The message "` + fmt.Sprintf(feePaidStr, "[fee]") + `"`,
 	},

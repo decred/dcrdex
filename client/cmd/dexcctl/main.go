@@ -78,25 +78,25 @@ func promptPWs(cmd string) ([]string, error) {
 	return pws, nil
 }
 
-// readCert reads TLS certificate content located at a file specified at args
-// index as expected for cmd and returns it as a string along with args minus
-// the cert path. Errors if a cert is specified but unable to be read.
-func readCert(cmd string, args []string) (cert string, params []string, err error) {
+// readCert reads TLS certificate content located in a file specified at args'
+// index as expected for cmd, replaces it with the file as a string, and returns
+// the altered params.
+func readCert(cmd string, args []string) (params []string, err error) {
 	idx, exists := readCerts[cmd]
 	// Certs are optional, so it is not an error if they are not included.
 	if !exists || len(args) < idx+1 || args[idx] == "" {
-		return "", args, nil
+		return args, nil
 	}
 	path := cleanAndExpandPath(args[idx])
 	if !fileExists(path) {
-		return "", nil, fmt.Errorf("no cert file found at %s", path)
+		return nil, fmt.Errorf("no cert file found at %s", path)
 	}
 	certB, err := ioutil.ReadFile(path)
 	if err != nil {
-		return "", nil, fmt.Errorf("error reading %s: %v", path, err)
+		return nil, fmt.Errorf("error reading %s: %v", path, err)
 	}
-	params = append(args[:idx], args[idx+1:]...)
-	return string(certB), params, nil
+	params = append(append(args[:idx], string(certB)), args[idx+1:]...)
+	return params, nil
 }
 
 func run() error {
@@ -143,7 +143,7 @@ func run() error {
 	}
 
 	// Attempt to read TLS certificates.
-	cert, params, err := readCert(args[0], params)
+	params, err = readCert(args[0], params)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,6 @@ func run() error {
 	payload := &rpcserver.RawParams{
 		PWArgs: pws,
 		Args:   params,
-		Cert:   cert,
 	}
 
 	// Create a request using the parsedArgs.
