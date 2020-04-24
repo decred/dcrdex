@@ -38,7 +38,7 @@ func mainCore(ctx context.Context) error {
 	// Acquire admin server password if enabled.
 	var adminSrvAuthSHA [32]byte
 	if cfg.AdminSrvOn {
-		adminSrvAuthSHA, err = admin.PasswordHashPrompt("Admin interface password: ")
+		adminSrvAuthSHA, err = admin.PasswordHashPrompt(ctx, "Admin interface password: ")
 		if err != nil {
 			return fmt.Errorf("cannot use password: %v", err)
 		}
@@ -82,7 +82,7 @@ func mainCore(ctx context.Context) error {
 	// Load, or create and save, the DEX signing key.
 	var privKey *secp256k1.PrivateKey
 	{
-		keyPW, err := admin.PasswordPrompt("Signing key password: ")
+		keyPW, err := admin.PasswordPrompt(ctx, "Signing key password: ")
 		if err != nil {
 			return fmt.Errorf("cannot use password: %v", err)
 		}
