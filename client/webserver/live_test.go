@@ -251,7 +251,7 @@ func newTCore() *TCore {
 
 func (c *TCore) Exchanges() map[string]*core.Exchange { return tExchanges }
 
-func (c *TCore) InitializeClient(pw string) error {
+func (c *TCore) InitializeClient(pw []byte) error {
 	randomDelay()
 	c.inited = true
 	return nil
@@ -265,7 +265,7 @@ func (c *TCore) Register(r *core.RegisterForm) error {
 	c.reg = r
 	return nil
 }
-func (c *TCore) Login(string) ([]*db.Notification, error) { return nil, nil }
+func (c *TCore) Login([]byte) ([]*db.Notification, error) { return nil, nil }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	c.midGap = randomMagnitude(-2, 4)
@@ -442,7 +442,7 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	}
 }
 
-func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
+func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	randomDelay()
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -453,7 +453,7 @@ func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) erro
 	return nil
 }
 
-func (c *TCore) OpenWallet(assetID uint32, pw string) error {
+func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
 	wallet := c.wallets[assetID]
@@ -528,13 +528,13 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	}
 }
 
-func (c *TCore) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error) {
+func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, nil
 }
 
-func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
-	c.OpenWallet(form.Quote, "")
-	c.OpenWallet(form.Base, "")
+func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
+	c.OpenWallet(form.Quote, []byte(""))
+	c.OpenWallet(form.Base, []byte(""))
 	oType := order.LimitOrderType
 	if !form.IsLimit {
 		oType = order.MarketOrderType
@@ -549,7 +549,7 @@ func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
 	}, nil
 }
 
-func (c *TCore) Cancel(pw string, sid string) error {
+func (c *TCore) Cancel(pw []byte, sid string) error {
 	for _, xc := range tExchanges {
 		for _, mkt := range xc.Markets {
 			for _, ord := range mkt.Orders {

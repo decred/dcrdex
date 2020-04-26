@@ -10,6 +10,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 )
 
 // standardResponse is a basic API response when no data needs to be returned.
@@ -74,11 +75,13 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	regPass := []byte(reg.Password)
 	err := s.core.Register(&core.RegisterForm{
 		URL:     reg.URL,
-		AppPass: reg.Password,
+		AppPass: regPass,
 		Fee:     reg.Fee,
 	})
+	encode.ClearBytes(regPass)
 	if err != nil {
 		s.writeAPIError(w, "registration error: %v", err)
 		return
@@ -112,11 +115,15 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Wallet does not exist yet. Try to create it.
-	err := s.core.CreateWallet(form.AppPW, form.Pass, &core.WalletForm{
+	appPass := []byte(form.AppPW)
+	walletPass := []byte(form.Pass)
+	err := s.core.CreateWallet(appPass, walletPass, &core.WalletForm{
 		AssetID: form.AssetID,
 		Account: form.Account,
 		INIPath: form.INIPath,
 	})
+	encode.ClearBytes(appPass)
+	encode.ClearBytes(walletPass)
 	if err != nil {
 		s.writeAPIError(w, "error creating %s wallet: %v", unbip(form.AssetID), err)
 		return
@@ -143,7 +150,9 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "No wallet for %d -> %s", form.AssetID, unbip(form.AssetID))
 		return
 	}
-	err := s.core.OpenWallet(form.AssetID, form.Pass)
+	pw := []byte(form.Pass)
+	err := s.core.OpenWallet(form.AssetID, pw)
+	encode.ClearBytes(pw)
 	if err != nil {
 		s.writeAPIError(w, "error unlocking %s wallet: %v", unbip(form.AssetID), err)
 		return
@@ -178,7 +187,9 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	ord, err := s.core.Trade(form.Pass, form.Order)
+	pw := []byte(form.Pass)
+	ord, err := s.core.Trade(pw, form.Order)
+	encode.ClearBytes(pw)
 	if err != nil {
 		s.writeAPIError(w, "error placing order: %v", err)
 		return
@@ -204,7 +215,9 @@ func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	err := s.core.Cancel(form.Pass, form.OrderID)
+	pw := []byte(form.Pass)
+	err := s.core.Cancel(pw, form.OrderID)
+	encode.ClearBytes(pw)
 	if err != nil {
 		s.writeAPIError(w, "error cancelling order %s: %v", form.OrderID, err)
 		return
@@ -240,7 +253,9 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, login) {
 		return
 	}
-	err := s.core.InitializeClient(login.Pass)
+	pw := []byte(login.Pass)
+	err := s.core.InitializeClient(pw)
+	encode.ClearBytes(pw)
 	if err != nil {
 		s.writeAPIError(w, "initialization error: %v", err)
 		return
@@ -276,7 +291,9 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "no wallet found for %s", unbip(form.AssetID))
 		return
 	}
-	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value)
+	pw := []byte(form.Pass)
+	coin, err := s.core.Withdraw(pw, form.AssetID, form.Value)
+	encode.ClearBytes(pw)
 	if err != nil {
 		s.writeAPIError(w, "withdraw error: %v", err)
 		return
@@ -293,7 +310,9 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 
 // apiActuallyLogin logs the user in.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
-	notes, err := s.core.Login(login.Pass)
+	pw := []byte(login.Pass)
+	notes, err := s.core.Login(pw)
+	encode.ClearBytes(pw)
 	if err != nil {
 		s.writeAPIError(w, "login error: %v", err)
 		return

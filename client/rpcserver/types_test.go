@@ -98,10 +98,10 @@ func TestParseNewWalletArgs(t *testing.T) {
 			}
 			continue
 		}
-		if nwf.AppPass != test.params.PWArgs[0] {
+		if string(nwf.AppPass) != test.params.PWArgs[0] {
 			t.Fatalf("appPass doesn't match")
 		}
-		if nwf.WalletPass != test.params.PWArgs[1] {
+		if string(nwf.WalletPass) != test.params.PWArgs[1] {
 			t.Fatalf("walletPass doesn't match")
 		}
 		if fmt.Sprint(nwf.AssetID) != test.params.Args[0] {
@@ -143,7 +143,7 @@ func TestParseOpenWalletArgs(t *testing.T) {
 			}
 			continue
 		}
-		if owf.AppPass != test.params.PWArgs[0] {
+		if string(owf.AppPass) != test.params.PWArgs[0] {
 			t.Fatalf("appPass doesn't match")
 		}
 		if fmt.Sprint(owf.AssetID) != test.params.Args[0] {
@@ -262,7 +262,7 @@ func TestParseRegisterArgs(t *testing.T) {
 			}
 			continue
 		}
-		if reg.AppPass != test.params.PWArgs[0] {
+		if string(reg.AppPass) != test.params.PWArgs[0] {
 			t.Fatalf("appPass doesn't match")
 		}
 		if reg.URL != test.params.Args[0] {

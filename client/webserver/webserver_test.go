@@ -76,8 +76,8 @@ type TCore struct {
 func (c *TCore) Exchanges() map[string]*core.Exchange              { return nil }
 func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) { return 1e8, c.preRegErr }
 func (c *TCore) Register(r *core.RegisterForm) error               { return c.regErr }
-func (c *TCore) InitializeClient(pw string) error                  { return c.initErr }
-func (c *TCore) Login(pw string) ([]*db.Notification, error)       { return nil, c.loginErr }
+func (c *TCore) InitializeClient(pw []byte) error                  { return c.initErr }
+func (c *TCore) Login(pw []byte) ([]*db.Notification, error)       { return nil, c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return c.syncBook, c.syncFeed, c.syncErr
 }
@@ -96,10 +96,10 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 		Running: !c.notRunning,
 	}
 }
-func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
+func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	return c.createWalletErr
 }
-func (c *TCore) OpenWallet(assetID uint32, pw string) error { return c.openWalletErr }
+func (c *TCore) OpenWallet(assetID uint32, pw []byte) error { return c.openWalletErr }
 func (c *TCore) CloseWallet(assetID uint32) error           { return c.closeWalletErr }
 func (c *TCore) ConnectWallet(assetID uint32) error         { return nil }
 func (c *TCore) Wallets() []*core.WalletState               { return nil }
@@ -107,10 +107,10 @@ func (c *TCore) User() *core.User                           { return nil }
 func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	return make(map[uint32]*core.SupportedAsset)
 }
-func (c *TCore) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error) {
+func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, c.withdrawErr
 }
-func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
+func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	oType := order.LimitOrderType
 	if !form.IsLimit {
 		oType = order.MarketOrderType
@@ -124,7 +124,7 @@ func (c *TCore) Trade(pw string, form *core.TradeForm) (*core.Order, error) {
 	}, nil
 }
 
-func (c *TCore) Cancel(pw string, sid string) error { return nil }
+func (c *TCore) Cancel(pw []byte, sid string) error { return nil }
 
 func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
 
@@ -392,7 +392,7 @@ func TestAPIRegister(t *testing.T) {
 
 	goodBody := &core.RegisterForm{
 		URL:     "test",
-		AppPass: "pass",
+		AppPass: []byte("pass"),
 	}
 	body = goodBody
 	ensure(`{"ok":true}`)

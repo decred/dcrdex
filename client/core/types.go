@@ -99,7 +99,7 @@ type SupportedAsset struct {
 // RegisterForm is information necessary to register an account on a DEX.
 type RegisterForm struct {
 	URL     string `json:"url"`
-	AppPass string `json:"appPass"`
+	AppPass []byte `json:"appPass"`
 	Fee     uint64 `json:"fee"`
 	Cert    string `json:"cert"`
 }

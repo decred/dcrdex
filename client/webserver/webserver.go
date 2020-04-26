@@ -57,22 +57,22 @@ var (
 type clientCore interface {
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) error
-	Login(pw string) ([]*db.Notification, error)
-	InitializeClient(pw string) error
+	Login(pw []byte) ([]*db.Notification, error)
+	InitializeClient(pw []byte) error
 	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	Balance(uint32) (uint64, error)
 	WalletState(assetID uint32) *core.WalletState
-	CreateWallet(appPW, walletPW string, form *core.WalletForm) error
-	OpenWallet(assetID uint32, pw string) error
+	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
+	OpenWallet(assetID uint32, pw []byte) error
 	CloseWallet(assetID uint32) error
 	ConnectWallet(assetID uint32) error
 	Wallets() []*core.WalletState
 	User() *core.User
 	PreRegister(*core.PreRegisterForm) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
-	Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error)
-	Trade(pw string, form *core.TradeForm) (*core.Order, error)
-	Cancel(pw string, sid string) error
+	Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error)
+	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
+	Cancel(pw []byte, sid string) error
 	NotificationFeed() <-chan core.Notification
 	AckNotes([]dex.Bytes)
 }

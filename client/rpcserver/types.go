@@ -42,7 +42,7 @@ type preRegisterResponse struct {
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	AssetID uint32 `json:"assetID"`
-	AppPass string `json:"appPass"`
+	AppPass []byte `json:"appPass"`
 }
 
 // newWalletForm is information necessary to create a new wallet.
@@ -50,8 +50,8 @@ type newWalletForm struct {
 	AssetID    uint32 `json:"assetID"`
 	Account    string `json:"account"`
 	INIPath    string `json:"inipath"`
-	WalletPass string `json:"walletPass"`
-	AppPass    string `json:"appPass"`
+	WalletPass []byte `json:"walletPass"`
+	AppPass    []byte `json:"appPass"`
 }
 
 // helpForm is information necessary to obtain help.
@@ -122,11 +122,11 @@ func parseHelpArgs(params *RawParams) (*helpForm, error) {
 	}, nil
 }
 
-func parseInitArgs(params *RawParams) (string, error) {
+func parseInitArgs(params *RawParams) ([]byte, error) {
 	if err := checkNArgs(params, []int{1}, []int{0}); err != nil {
-		return "", err
+		return nil, err
 	}
-	return params.PWArgs[0], nil
+	return []byte(params.PWArgs[0]), nil
 }
 
 func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
@@ -138,8 +138,8 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		return nil, err
 	}
 	req := &newWalletForm{
-		AppPass:    params.PWArgs[0],
-		WalletPass: params.PWArgs[1],
+		AppPass:    []byte(params.PWArgs[0]),
+		WalletPass: []byte(params.PWArgs[1]),
 		AssetID:    uint32(assetID),
 		Account:    params.Args[1],
 		INIPath:    params.Args[2],
@@ -155,7 +155,7 @@ func parseOpenWalletArgs(params *RawParams) (*openWalletForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := &openWalletForm{AppPass: params.PWArgs[0], AssetID: uint32(assetID)}
+	req := &openWalletForm{AppPass: []byte(params.PWArgs[0]), AssetID: uint32(assetID)}
 	return req, nil
 }
 
@@ -198,7 +198,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 		cert = params.Args[2]
 	}
 	req := &core.RegisterForm{
-		AppPass: params.PWArgs[0],
+		AppPass: []byte(params.PWArgs[0]),
 		URL:     params.Args[0],
 		Fee:     fee,
 		Cert:    cert,

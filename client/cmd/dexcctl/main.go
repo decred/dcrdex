@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/client/rpcserver"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/admin"
 )
@@ -78,7 +79,7 @@ func promptPWs(ctx context.Context, cmd string) ([]string, error) {
 			return nil, err
 		}
 		pws[i] = string(pw)
-		admin.ClearBytes(pw)
+		encode.ClearBytes(pw)
 	}
 	return pws, nil
 }
