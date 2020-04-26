@@ -60,6 +60,13 @@ func RandomBytes(len int) []byte {
 	return bytes
 }
 
+// ClearBytes zeroes the byte slice.
+func ClearBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
 // UnixMilli returns the elapsed time in milliseconds since the Unix Epoch for
 // the given time as an int64. The Location does not matter.
 func UnixMilli(t time.Time) int64 {

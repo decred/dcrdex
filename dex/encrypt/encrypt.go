@@ -73,7 +73,7 @@ func NewCrypter(pw []byte) Crypter {
 }
 
 // Deserialize deserializes the Crypter for the password.
-func Deserialize(pw []byte, encCrypter []byte) (Crypter, error) {
+func Deserialize(pw, encCrypter []byte) (Crypter, error) {
 	ver, pushes, err := encode.DecodeBlob(encCrypter)
 	if err != nil {
 		return nil, err

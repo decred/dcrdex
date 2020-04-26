@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/admin"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
@@ -88,7 +89,7 @@ func mainCore(ctx context.Context) error {
 		}
 	}
 	privKey, err = dexKey(cfg.DEXPrivKeyPath, cfg.SigningKeyPW)
-	admin.ClearBytes(cfg.SigningKeyPW)
+	encode.ClearBytes(cfg.SigningKeyPW)
 	if err != nil {
 		return err
 	}
