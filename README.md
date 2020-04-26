@@ -60,15 +60,6 @@ DEX server, but can be customized with a command-line argument.
 Master public keys are network-specific, so **dcrd** and **dcrwallet** will need
 to be run on the same network on which the server will be run.
 
-**Generate DEX signing keys** from *server/cmd/genkey*.
-
-```
-go build
-./genkey
-```
-
-and move the *dexpubkey* and *dexprivkey* files to app data directory.
-
 **Run your asset daemons**. As of writing, only `dcrd`, `bitcoind`, and
 `litecoind` are supported. The `txindex` configuration option must be set.
 
