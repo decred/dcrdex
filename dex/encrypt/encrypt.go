@@ -68,12 +68,12 @@ type argonParams struct {
 }
 
 // NewCrypter derives an encryption key from a password string.
-func NewCrypter(pw string) Crypter {
+func NewCrypter(pw []byte) Crypter {
 	return newArgonPolyCrypter(pw)
 }
 
 // Deserialize deserializes the Crypter for the password.
-func Deserialize(pw string, encCrypter []byte) (Crypter, error) {
+func Deserialize(pw []byte, encCrypter []byte) (Crypter, error) {
 	ver, pushes, err := encode.DecodeBlob(encCrypter)
 	if err != nil {
 		return nil, err
@@ -96,12 +96,11 @@ type argonPolyCrypter struct {
 }
 
 // newArgonPolyCrypter is the constructor for an argonPolyCrypter.
-func newArgonPolyCrypter(pw string) *argonPolyCrypter {
-	pwB := []byte(pw)
+func newArgonPolyCrypter(pw []byte) *argonPolyCrypter {
 	salt := newSalt()
 	threads := uint8(runtime.NumCPU())
 
-	keyB := argon2.IDKey(pwB, salt[:], defaultTime, defaultMem, threads, KeySize*2)
+	keyB := argon2.IDKey(pw, salt[:], defaultTime, defaultMem, threads, KeySize*2)
 	// The argon2id key is split into two keys, The encryption key is the first 32
 	// bytes.
 	var encKey Key
@@ -191,7 +190,7 @@ func (c *argonPolyCrypter) Close() {
 
 // decodeArgonPoly_v0 decodes an argonPolyCrypter from the pushes extracted from
 // a version 0 blob.
-func decodeArgonPoly_v0(pw string, pushes [][]byte) (*argonPolyCrypter, error) {
+func decodeArgonPoly_v0(pw []byte, pushes [][]byte) (*argonPolyCrypter, error) {
 	if len(pushes) != 5 {
 		return nil, fmt.Errorf("decodeArgonPoly_v0 expected 5 pushes, but got %d", len(pushes))
 	}
@@ -227,8 +226,7 @@ func decodeArgonPoly_v0(pw string, pushes [][]byte) (*argonPolyCrypter, error) {
 	}
 
 	// Prepare the key.
-	pwB := []byte(pw)
-	keyB := argon2.IDKey(pwB, c.salt[:], params.time, params.memory, params.threads, KeySize*2)
+	keyB := argon2.IDKey(pw, c.salt[:], params.time, params.memory, params.threads, KeySize*2)
 
 	// Check the poly1305 auth to verify the password.
 	polyKeyB := keyB[KeySize:]

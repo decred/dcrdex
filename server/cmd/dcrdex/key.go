@@ -54,8 +54,7 @@ func loadKeyFile(path string, pass []byte) (*secp256k1.PrivateKey, error) {
 	keyParams := pushes[0]
 	encKey := pushes[1]
 
-	// TODO: change encrypt.Deserialize to accept pass as a []byte.
-	crypter, err := encrypt.Deserialize(string(pass), keyParams)
+	crypter, err := encrypt.Deserialize(pass, keyParams)
 	if err != nil {
 		return nil, err
 	}
@@ -85,8 +84,7 @@ func createAndStoreKey(path string, pass []byte) (*secp256k1.PrivateKey, error) 
 	}
 
 	// Encrypt the private key.
-	// TODO: change encrypt.NewCrypter to accept pass as a []byte.
-	crypter := encrypt.NewCrypter(string(pass))
+	crypter := encrypt.NewCrypter(pass)
 	keyParams := crypter.Serialize()
 	encKey, err := crypter.Encrypt(privKey.Serialize())
 	if err != nil {

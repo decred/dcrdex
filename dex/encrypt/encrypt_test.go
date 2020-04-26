@@ -17,7 +17,7 @@ var (
 )
 
 func TestDecrypt(t *testing.T) {
-	pw := "4kliaOCha2"
+	pw := []byte("4kliaOCha2")
 	crypter := NewCrypter(pw)
 	thing := randB(50)
 	encThing, err := crypter.Encrypt(thing)
@@ -73,7 +73,7 @@ func TestDecrypt(t *testing.T) {
 }
 
 func TestSerialize(t *testing.T) {
-	pw := "20O6KcujCU"
+	pw := []byte("20O6KcujCU")
 	crypter := NewCrypter(pw)
 	thing := randB(50)
 	encThing, err := crypter.Encrypt(thing)
@@ -97,7 +97,7 @@ func TestSerialize(t *testing.T) {
 	reCheck("first")
 
 	// Can't deserialize with wrong password.
-	_, err = Deserialize("wrong password", serializedCrypter)
+	_, err = Deserialize([]byte("wrong password"), serializedCrypter)
 	if err == nil {
 		t.Fatalf("no Deserialize error for wrong password")
 	}
@@ -146,7 +146,7 @@ func TestSerialize(t *testing.T) {
 }
 
 func TestRandomness(t *testing.T) {
-	pw := string(randB(15))
+	pw := randB(15)
 	crypter := NewCrypter(pw)
 	numToDo := 10_000
 	if testing.Short() {
@@ -156,14 +156,14 @@ func TestRandomness(t *testing.T) {
 		thing := randB(rand.Intn(100))
 		encThing, err := crypter.Encrypt(thing)
 		if err != nil {
-			t.Fatalf("error encrypting %x with password %x", thing, []byte(pw))
+			t.Fatalf("error encrypting %x with password %x", thing, pw)
 		}
 		reThing, err := crypter.Decrypt(encThing)
 		if err != nil {
-			t.Fatalf("error decrypting %x, which is encrypted %x with password %x", encThing, thing, []byte(pw))
+			t.Fatalf("error decrypting %x, which is encrypted %x with password %x", encThing, thing, pw)
 		}
 		if !bytes.Equal(thing, reThing) {
-			t.Fatalf("decrypted %x is different that encrypted %x with password %x", reThing, thing, []byte(pw))
+			t.Fatalf("decrypted %x is different that encrypted %x with password %x", reThing, thing, pw)
 		}
 	}
 }

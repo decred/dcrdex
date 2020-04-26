@@ -577,8 +577,8 @@ func newTestRig() *testRig {
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
-			newCrypter: func(string) encrypt.Crypter { return crypter },
-			reCrypter:  func(string, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
+			newCrypter: func([]byte) encrypt.Crypter { return crypter },
+			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 		},
 		db:      db,
 		queue:   queue,
