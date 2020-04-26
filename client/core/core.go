@@ -297,9 +297,6 @@ type Config struct {
 	// LoggerMaker is a LoggerMaker for the core to use. Having the logger as an
 	// argument enables creating custom loggers for use in a GUI interface.
 	LoggerMaker *dex.LoggerMaker
-	// Certs is a mapping of URL to filepaths of TLS Certificates for the server.
-	// This is intended for accommodating self-signed certificates.
-	Certs map[string]string
 	// Net is the current network.
 	Net dex.Network
 }
@@ -313,7 +310,6 @@ type Core struct {
 	pendingTimer  *time.Timer
 	pendingReg    *dexConnection
 	db            db.DB
-	certs         map[string]string
 	loggerMaker   *dex.LoggerMaker
 	net           dex.Network
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
@@ -347,7 +343,6 @@ func New(cfg *Config) (*Core, error) {
 	core := &Core{
 		cfg:          cfg,
 		db:           db,
-		certs:        cfg.Certs,
 		conns:        make(map[string]*dexConnection),
 		wallets:      make(map[uint32]*xcWallet),
 		net:          cfg.Net,
