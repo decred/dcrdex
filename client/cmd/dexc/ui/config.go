@@ -4,9 +4,7 @@
 package ui
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -25,21 +23,20 @@ const (
 	defaultRPCKeyFile  = "rpc.key"
 	defaultWebAddr     = "localhost:5758"
 	configFilename     = "dexc.conf"
-	certsFilename      = "certs.json"
 	defaultLogLevel    = "info"
 )
 
 var (
-	applicationDirectory      = dcrutil.AppDataDir("dexc", false)
-	defaultConfigPath         = filepath.Join(applicationDirectory, configFilename)
-	logFilename, netDirectory string
-	logDirectory              string
-	cfg                       *Config
+	defaultApplicationDirectory = dcrutil.AppDataDir("dexc", false)
+	defaultConfigPath           = filepath.Join(defaultApplicationDirectory, configFilename)
+	logFilename, netDirectory   string
+	logDirectory                string
+	cfg                         *Config
 )
 
 // setNet sets the filepath for the network directory and some network specific
 // files. It returns a suggested path for the database file.
-func setNet(net string) string {
+func setNet(applicationDirectory, net string) string {
 	netDirectory = filepath.Join(applicationDirectory, net)
 	logDirectory = filepath.Join(netDirectory, "logs")
 	logFilename = filepath.Join(logDirectory, "dex.log")
@@ -58,10 +55,9 @@ func setNet(net string) string {
 
 // Config is the configuration for the DEX client application.
 type Config struct {
-	AppData    string `long:"appdata" description:"Path to application directory"`
-	Config     string `long:"config" description:"Path to an INI configuration file. default:[home]/dexc_mainnet.conf"`
+	AppData    string `long:"appdata" description:"Path to application directory."`
+	Config     string `long:"config" description:"Path to an INI configuration file."`
 	DBPath     string `long:"db" description:"Database filepath. Database will be created if it does not exist."`
-	CertsPath  string `long:"certs" description:"Path to a JSON-formatted file linking DEX URL keys to TLS certificate filepaths."`
 	RPCOn      bool   `long:"rpc" description:"turn on the rpc server"`
 	RPCAddr    string `long:"rpcaddr" description:"RPC server listen address"`
 	RPCUser    string `long:"rpcuser" description:"RPC server user name"`
@@ -75,14 +71,11 @@ type Config struct {
 	Simnet     bool   `long:"simnet" description:"use simnet"`
 	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
 	DebugLevel string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
-	// Certs is not set by the client. It is parsed from the JSON file at the
-	// Certs path.
-	Certs map[string]string
-	Net   dex.Network
+	Net        dex.Network
 }
 
 var defaultConfig = Config{
-	AppData:    applicationDirectory,
+	AppData:    defaultApplicationDirectory,
 	Config:     defaultConfigPath,
 	DebugLevel: defaultLogLevel,
 	RPCAddr:    defaultRPCAddr,
@@ -113,7 +106,7 @@ func Configure() (*Config, error) {
 
 	// If the app directory has been changed, but the config file path hasn't,
 	// reform the config file path with the new directory.
-	if preCfg.AppData != applicationDirectory && preCfg.Config == defaultConfigPath {
+	if preCfg.AppData != defaultApplicationDirectory && preCfg.Config == defaultConfigPath {
 		preCfg.Config = filepath.Join(preCfg.AppData, configFilename)
 	}
 	cfgPath := cleanAndExpandPath(preCfg.Config)
@@ -149,13 +142,13 @@ func Configure() (*Config, error) {
 	switch {
 	case cfg.Testnet:
 		cfg.Net = dex.Testnet
-		defaultDBPath = setNet("testnet")
+		defaultDBPath = setNet(preCfg.AppData, "testnet")
 	case cfg.Simnet:
 		cfg.Net = dex.Simnet
-		defaultDBPath = setNet("simnet")
+		defaultDBPath = setNet(preCfg.AppData, "simnet")
 	default:
 		cfg.Net = dex.Mainnet
-		defaultDBPath = setNet("mainnet")
+		defaultDBPath = setNet(preCfg.AppData, "mainnet")
 	}
 
 	if cfg.RPCCert == "" {
@@ -164,24 +157,6 @@ func Configure() (*Config, error) {
 
 	if cfg.RPCKey == "" {
 		cfg.RPCKey = filepath.Join(preCfg.AppData, defaultRPCKeyFile)
-	}
-
-	defaultCertsPath := filepath.Join(preCfg.AppData, certsFilename)
-	if cfg.CertsPath == "" {
-		cfg.CertsPath = defaultCertsPath
-	}
-	b, err := ioutil.ReadFile(cfg.CertsPath)
-	if err != nil {
-		// If the certificate path is the default path, assume the error is for a
-		// missing file and ignore it.
-		if cfg.CertsPath != defaultCertsPath {
-			return nil, fmt.Errorf("error reading certificates file: %v", err)
-		}
-	} else {
-		err = json.Unmarshal(b, &cfg.Certs)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing certificates file: %v", err)
-		}
 	}
 
 	if cfg.DBPath == "" {

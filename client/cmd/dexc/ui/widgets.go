@@ -108,7 +108,6 @@ func createApp() {
 	clientCore, err = core.New(&core.Config{
 		DBPath:      cfg.DBPath, // global set in config.go
 		LoggerMaker: lm,
-		Certs:       cfg.Certs,
 		Net:         cfg.Net,
 	})
 	if err != nil {

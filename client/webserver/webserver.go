@@ -48,7 +48,7 @@ var (
 	// updateWalletRoute is a notification route that updates the state of a
 	// wallet.
 	updateWalletRoute = "update_wallet"
-	// updateWalletRoute is a route used for general notifications.
+	// notifyRoute is a route used for general notifications.
 	notifyRoute = "notify"
 )
 
@@ -408,7 +408,7 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 		case http.ErrNoCookie:
 			darkMode = true
 		default:
-			log.Errorf("Cookie dcrdataDarkBG retrieval error: %v", err)
+			log.Errorf("Cookie dark mode retrieval error: %v", err)
 		}
 		ctx := context.WithValue(r.Context(), authCV, &userInfo{
 			User:     s.core.User(),

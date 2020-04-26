@@ -60,15 +60,6 @@ DEX server, but can be customized with a command-line argument.
 Master public keys are network-specific, so **dcrd** and **dcrwallet** will need
 to be run on the same network on which the server will be run.
 
-**Generate DEX signing keys** from *server/cmd/genkey*.
-
-```
-go build
-./genkey
-```
-
-and move the *dexpubkey* and *dexprivkey* files to app data directory.
-
 **Run your asset daemons**. As of writing, only `dcrd`, `bitcoind`, and
 `litecoind` are supported. The `txindex` configuration option must be set.
 
@@ -99,21 +90,6 @@ are listed for development purposes.
 
 1. [Go >= 1.13](https://golang.org/doc/install)
 2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface.
-
-Assuming you're pointing your client to a testnet DEX server without a TLS
-certificate from a recognized CA, you'll need to provide the location of a
-copy of the server's TLS certificate. The current solution is to point to the
-certificate in a JSON formatted file mapping URL to file path.
-
-**~/.dexc/certs.json**
-```
-{
-	"https://127.0.0.1:7232": "/path/to/.dcrdex/rpc.cert"
-}
-```
-
-If the server used the default settings, *.dcrdex* will be in the user's home
-directory.
 
 **Build the web assets** from *client/webserver/site/*.
 

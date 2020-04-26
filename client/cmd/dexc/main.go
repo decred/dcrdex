@@ -40,7 +40,7 @@ func main() {
 	// types package used by both, but doing it this way works for now.
 	cfg, err := ui.Configure()
 	if err != nil {
-		fmt.Fprint(os.Stderr, "configration error: ", err)
+		fmt.Fprintf(os.Stderr, "configration error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -50,34 +50,38 @@ func main() {
 		os.Exit(0)
 	}
 
-	// If --tui is not specified, don't create the tview application. Initialize
-	// logging with the standard stdout logger.
-	logStdout := func(msg []byte) {
-		os.Stdout.Write(msg)
-	}
-	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
-	clientCore, err := core.New(&core.Config{
-		DBPath:      cfg.DBPath, // global set in config.go
-		LoggerMaker: logMaker,
-		Certs:       cfg.Certs,
-		Net:         cfg.Net,
-	})
-	if err != nil {
-		fmt.Fprint(os.Stderr, "error creating client core: ", err)
-		os.Exit(1)
-	}
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		clientCore.Run(appCtx)
-		wg.Done()
-	}()
 	// If explicitly running without web server then you must run the rpc
 	// server or the terminal ui.
 	if cfg.NoWeb && !cfg.RPCOn {
 		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc or --tui is specified\n")
 		os.Exit(1)
 	}
+
+	// If --tui is not specified, don't create the tview application. Initialize
+	// logging with the standard stdout logger.
+	logStdout := func(msg []byte) {
+		os.Stdout.Write(msg)
+	}
+	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
+	log = logMaker.Logger("DEXC")
+
+	clientCore, err := core.New(&core.Config{
+		DBPath:      cfg.DBPath, // global set in config.go
+		LoggerMaker: logMaker,
+		Net:         cfg.Net,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating client core: %v\n", err)
+		os.Exit(1)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		clientCore.Run(appCtx)
+		wg.Done()
+	}()
+
 	if cfg.RPCOn {
 		wg.Add(1)
 		go func() {
@@ -92,6 +96,7 @@ func main() {
 			rpcSrv.Run(appCtx)
 		}()
 	}
+
 	if !cfg.NoWeb {
 		wg.Add(1)
 		go func() {
@@ -104,6 +109,7 @@ func main() {
 			webSrv.Run(appCtx)
 		}()
 	}
+
 	wg.Wait()
 	ui.Close()
 }
