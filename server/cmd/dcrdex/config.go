@@ -75,6 +75,7 @@ type dexConf struct {
 	BroadcastTimeout time.Duration
 	AltDNSNames      []string
 	LogMaker         *dex.LoggerMaker
+	SigningKeyPW     []byte
 	AdminSrvOn       bool
 	AdminSrvAddr     string
 }
@@ -109,13 +110,14 @@ type flagsData struct {
 	HTTPProfile bool   `long:"httpprof" short:"p" description:"Start HTTP profiler."`
 	CPUProfile  string `long:"cpuprofile" description:"File for CPU profiling."`
 
-	PGDBName     string `long:"pgdbname" description:"PostgreSQL DB name."`
-	PGUser       string `long:"pguser" description:"PostgreSQL DB user."`
-	PGPass       string `long:"pgpass" description:"PostgreSQL DB password."`
-	PGHost       string `long:"pghost" description:"PostgreSQL server host:port or UNIX socket (e.g. /run/postgresql)."`
-	ShowPGConfig bool   `long:"showpgconfig" description:"Logs the PostgreSQL db configuration on system start up."`
-	AdminSrvOn   bool   `long:"adminsrvon" description:"turn on the admin server"`
-	AdminSrvAddr string `long:"adminsrvaddr" description:"administration HTTPS server address (default: 127.0.0.1:6542)"`
+	PGDBName           string `long:"pgdbname" description:"PostgreSQL DB name."`
+	PGUser             string `long:"pguser" description:"PostgreSQL DB user."`
+	PGPass             string `long:"pgpass" description:"PostgreSQL DB password."`
+	PGHost             string `long:"pghost" description:"PostgreSQL server host:port or UNIX socket (e.g. /run/postgresql)."`
+	ShowPGConfig       bool   `long:"showpgconfig" description:"Logs the PostgreSQL db configuration on system start up."`
+	SigningKeyPassword string `long:"signingkeypass" description:"Password for encrypting/decrypting the dex privkey. INSECURE. Do not set unless absolutely necessary."`
+	AdminSrvOn         bool   `long:"adminsrvon" description:"turn on the admin server"`
+	AdminSrvAddr       string `long:"adminsrvaddr" description:"administration HTTPS server address (default: 127.0.0.1:6542)"`
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed
@@ -529,6 +531,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		AltDNSNames:      cfg.AltDNSNames,
 		LogMaker:         logMaker,
+		SigningKeyPW:     []byte(cfg.SigningKeyPassword),
 		AdminSrvAddr:     adminSrvAddr,
 		AdminSrvOn:       cfg.AdminSrvOn,
 	}

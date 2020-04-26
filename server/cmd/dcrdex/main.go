@@ -82,15 +82,17 @@ func mainCore(ctx context.Context) error {
 	// Load, or create and save, the DEX signing key.
 	var privKey *secp256k1.PrivateKey
 	{
-		keyPW, err := admin.PasswordPrompt(ctx, "Signing key password: ")
-		if err != nil {
-			return fmt.Errorf("cannot use password: %v", err)
+		if len(cfg.SigningKeyPW) == 0 {
+			cfg.SigningKeyPW, err = admin.PasswordPrompt(ctx, "Signing key password: ")
+			if err != nil {
+				return fmt.Errorf("cannot use password: %v", err)
+			}
 		}
-		privKey, err = dexKey(cfg.DEXPrivKeyPath, keyPW)
+		privKey, err = dexKey(cfg.DEXPrivKeyPath, cfg.SigningKeyPW)
+		admin.ClearBytes(cfg.SigningKeyPW)
 		if err != nil {
 			return err
 		}
-		admin.ClearBytes(keyPW)
 	}
 
 	// Create the DEX manager.
