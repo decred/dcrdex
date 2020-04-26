@@ -50,12 +50,21 @@ func main() {
 		os.Exit(0)
 	}
 
+	// If explicitly running without web server then you must run the rpc
+	// server or the terminal ui.
+	if cfg.NoWeb && !cfg.RPCOn {
+		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc or --tui is specified\n")
+		os.Exit(1)
+	}
+
 	// If --tui is not specified, don't create the tview application. Initialize
 	// logging with the standard stdout logger.
 	logStdout := func(msg []byte) {
 		os.Stdout.Write(msg)
 	}
 	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
+	log = logMaker.Logger("DEXC")
+
 	clientCore, err := core.New(&core.Config{
 		DBPath:      cfg.DBPath, // global set in config.go
 		LoggerMaker: logMaker,
@@ -72,15 +81,6 @@ func main() {
 		clientCore.Run(appCtx)
 		wg.Done()
 	}()
-
-	// If explicitly running without web server then you must run the rpc
-	// server or the terminal ui.
-	if cfg.NoWeb && !cfg.RPCOn {
-		fmt.Fprintf(os.Stderr, "Cannot run without web server unless --rpc or --tui is specified\n")
-		os.Exit(1)
-	}
-
-	log = logMaker.Logger("DEXC")
 
 	if cfg.RPCOn {
 		wg.Add(1)
