@@ -38,7 +38,7 @@ func mainCore(ctx context.Context) error {
 	// Acquire admin server password if enabled.
 	var adminSrvAuthSHA [32]byte
 	if cfg.AdminSrvOn {
-		adminSrvAuthSHA, err = admin.PasswordHashPrompt("Admin interface password: ")
+		adminSrvAuthSHA, err = admin.PasswordHashPrompt(ctx, "Admin interface password: ")
 		if err != nil {
 			return fmt.Errorf("cannot use password: %v", err)
 		}
@@ -81,16 +81,16 @@ func mainCore(ctx context.Context) error {
 
 	// Load, or create and save, the DEX signing key.
 	var privKey *secp256k1.PrivateKey
-	{
-		keyPW, err := admin.PasswordPrompt("Signing key password: ")
+	if len(cfg.SigningKeyPW) == 0 {
+		cfg.SigningKeyPW, err = admin.PasswordPrompt(ctx, "Signing key password: ")
 		if err != nil {
 			return fmt.Errorf("cannot use password: %v", err)
 		}
-		privKey, err = dexKey(cfg.DEXPrivKeyPath, keyPW)
-		if err != nil {
-			return err
-		}
-		admin.ClearBytes(keyPW)
+	}
+	privKey, err = dexKey(cfg.DEXPrivKeyPath, cfg.SigningKeyPW)
+	admin.ClearBytes(cfg.SigningKeyPW)
+	if err != nil {
+		return err
 	}
 
 	// Create the DEX manager.

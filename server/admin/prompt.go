@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -12,26 +13,53 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
+type passwordReadResponse struct {
+	password []byte
+	err      error
+}
+
 // PasswordPrompt prompts the user to enter a password. Password must not be an
 // empty string.
-func PasswordPrompt(prompt string) ([]byte, error) {
-	fmt.Print(prompt)
-	pass, err := terminal.ReadPassword(syscall.Stdin)
-	fmt.Println()
+func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
+	// Get the initial state of the terminal.
+	initialTermState, err := terminal.GetState(syscall.Stdin)
 	if err != nil {
 		return nil, err
 	}
-	if pass == nil {
-		return nil, errors.New("password must not be empty")
+
+	passwordReadChan := make(chan passwordReadResponse, 1)
+
+	go func() {
+		fmt.Print(prompt)
+		pass, err := terminal.ReadPassword(syscall.Stdin)
+		fmt.Println()
+		passwordReadChan <- passwordReadResponse{
+			password: pass,
+			err:      err,
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		_ = terminal.Restore(syscall.Stdin, initialTermState)
+		return nil, ctx.Err()
+
+	case res := <-passwordReadChan:
+		if res.err != nil {
+			return nil, res.err
+		}
+		if res.password == nil {
+			return nil, errors.New("password must not be empty")
+		}
+		return res.password, nil
 	}
-	return pass, nil
 }
 
 // PasswordHashPrompt prompts the user to enter a password and returns its
 // SHA256 hash. Password must not be an empty string.
-func PasswordHashPrompt(prompt string) ([sha256.Size]byte, error) {
+func PasswordHashPrompt(ctx context.Context, prompt string) ([sha256.Size]byte, error) {
 	var authSHA [sha256.Size]byte
-	passBytes, err := PasswordPrompt(prompt)
+	passBytes, err := PasswordPrompt(ctx, prompt)
 	if err != nil {
 		return authSHA, err
 	}
