@@ -1711,7 +1711,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 	})
 }
 
-// dbTrackers prepares trackeTrades based on active orders and matches in the
+// dbTrackers prepares trackedTrades based on active orders and matches in the
 // database. Since dbTrackers runs before sign in when wallets are not connected
 // or unlocked, wallets and coins are not added to the returned trackers. Use
 // resumeTrades with the app Crypter to prepare wallets and coins.
