@@ -483,7 +483,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			respHandlers: make(map[uint64]*respHandler),
 			recentOrders: latestFinished,
 		}
-		if cancelRatio := client.cancelRatio(); cancelRatio > auth.cancelThresh {
+		if cancelRatio := client.cancelRatio(); !auth.anarchy && cancelRatio > auth.cancelThresh {
 			// Account should already be closed, but perhaps the server crashed
 			// or the account was not penalized before shutdown.
 			auth.storage.CloseAccount(acctInfo.ID, account.CancellationRatio)
