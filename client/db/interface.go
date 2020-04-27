@@ -55,12 +55,19 @@ type DB interface {
 	// returned. since = 0 is equivalent to disabling the time filter, since
 	// no orders were created before before 1970.
 	MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*MetaOrder, error)
+	// SetChangeCoin stores the change coin for the order.
+	SetChangeCoin(order.OrderID, order.CoinID) error
 	// UpdateMatch updates the match information in the database. Any existing
 	// entry for the match will be overwritten without indication.
 	UpdateMatch(m *MetaMatch) error
 	// ActiveMatches retrieves the matches that are in an active state, which is
 	// any state except order.MatchComplete.
 	ActiveMatches() ([]*MetaMatch, error)
+	// ActiveDEXMatches retrieves the matches that are in an active state for a
+	// specified DEX, which is any state except order.MatchComplete.
+	ActiveDEXMatches(dex string) ([]*MetaMatch, error)
+	// MatchesForOrder gets the matches for the order ID.
+	MatchesForOrder(oid order.OrderID) ([]*MetaMatch, error)
 	// Update wallets adds a wallet to the database, or updates the wallet
 	// credentials if the wallet already exists. A wallet is specified by the
 	// pair (asset ID, account name).

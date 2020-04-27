@@ -193,6 +193,50 @@ func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage)
 	t.mtx.Unlock()
 }
 
+// readConnectMatches resolves the matches reported by the server in the
+// 'connect' response against those in the match tracker map.
+func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
+	ids := make(map[order.MatchID]bool)
+	var extras []*msgjson.Match
+	var missing []order.MatchID
+	corder, _ := t.coreOrder()
+	t.matchMtx.RLock()
+	defer t.matchMtx.RUnlock()
+	for _, msgMatch := range msgMatches {
+		var matchID order.MatchID
+		copy(matchID[:], msgMatch.MatchID)
+		ids[matchID] = true
+		_, found := t.matches[matchID]
+		if !found {
+			extras = append(extras, msgMatch)
+			continue
+		}
+	}
+	for _, match := range t.matches {
+		if !ids[match.id] {
+			missing = append(missing, match.id)
+			match.failErr = fmt.Errorf("order not reported by the server on connect")
+		}
+	}
+
+	url := t.dc.acct.url
+	if len(missing) > 0 {
+		details := fmt.Sprintf("%d matches for order %s were not reported by %s and are in a failed state", missing, t.ID(), t.dc.acct.url)
+		corder, _ := t.coreOrder()
+		t.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
+		for _, mid := range missing {
+			log.Errorf("%s did not report active match %s on order %s", url, mid, t.ID())
+		}
+	}
+	if len(extras) > 0 {
+		details := fmt.Sprintf("%d matches reported by %s were not found for %s.", len(extras), url, t.token())
+		t.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
+		for _, extra := range extras {
+			log.Errorf("%s reported match %s which is not a known active match for order %s", url, extra.MatchID, extra.OrderID)
+		}
+	}
+}
+
 // negotiate creates and stores matchTrackers for the []*msgjson.Match, and
 // updates (UserMatch).Filled. Match negotiation can then be progressed by
 // calling (*trackedTrade).tick when a relevant event occurs, such as a request
@@ -299,7 +343,33 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		t.notify(newOrderNote("Matches made", details, db.Poke, corder))
 	}
 
+	// Set the order as executed depending on type and fill.
+	if t.metaData.Status != order.OrderStatusCanceled {
+		switch t.Prefix().Type() {
+		case order.LimitOrderType:
+			if trade.Filled() == trade.Quantity {
+				t.metaData.Status = order.OrderStatusExecuted
+			}
+		case order.CancelOrderType:
+			t.metaData.Status = order.OrderStatusCanceled
+		case order.MarketOrderType:
+			t.metaData.Status = order.OrderStatusExecuted
+		}
+	}
+
+	err := t.db.UpdateOrder(t.metaOrder())
+	if err != nil {
+		return fmt.Errorf("Failed to update order in db")
+	}
+
 	return t.tick()
+}
+
+func (t *trackedTrade) metaOrder() *db.MetaOrder {
+	return &db.MetaOrder{
+		MetaData: t.metaData,
+		Order:    t.Order,
+	}
 }
 
 // processCancelMatch should be called with the message for the match on a
@@ -323,6 +393,7 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 	if match.failErr != nil {
 		return false
 	}
+
 	dbMatch, metaData, _, _ := match.parts()
 	walletLocked := !t.wallets.fromWallet.unlocked()
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerSwapCast {
@@ -393,6 +464,7 @@ func (t *trackedTrade) tick() error {
 	var sent, quoteSent, received, quoteReceived uint64
 	for _, match := range t.matches {
 		if t.isSwappable(match) {
+
 			swaps = append(swaps, match)
 			sent += match.Match.Quantity
 			quoteSent += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
@@ -422,7 +494,6 @@ func (t *trackedTrade) tick() error {
 
 			details := fmt.Sprintf("Sent swaps worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
-			log.Error(details)
 			t.notify(newOrderNote("Swaps initiated", details, db.Poke, corder))
 		}
 
@@ -442,7 +513,7 @@ func (t *trackedTrade) tick() error {
 			return err
 		} else {
 			details := fmt.Sprintf("Redeemed %.8f %s on order %s", float64(qty)/conversionFactor, unbip(toAsset), t.token())
-			log.Error(details)
+			log.Info(details)
 			t.notify(newOrderNote("Match complete", details, db.Poke, corder))
 		}
 	}
@@ -508,6 +579,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	t.change = change
 	t.coins[change.String()] = change
 	t.metaData.ChangeCoin = []byte(change.ID())
+	t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin)
 
 	// Prepare the msgjson.Init and send to the DEX.
 	oid := t.ID()
@@ -549,6 +621,10 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		} else {
 			match.setStatus(order.MakerSwapCast)
 			proof.MakerSwap = coinID
+		}
+		err = t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			return errs.add("error storing match info in database: %v", err)
 		}
 
 	}
@@ -728,14 +804,16 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redemption) error {
 	var mid order.MatchID
 	copy(mid[:], redemption.MatchID)
-	errs := newErrorSet("processRedemption order %s, match %s -", t.ID(), mid)
+	errs := newErrorSet("processRedemption order %s, match %s - ", t.ID(), mid)
 	t.matchMtx.Lock()
 	defer t.matchMtx.Unlock()
 	match, found := t.matches[mid]
 	if !found {
 		return errs.add("match not known")
 	}
-	if match.counterSwap == nil {
+	// If the order was loaded from the DB, we're the maker, and we've already
+	// redeemed, the counterSwap (AuditInfo) will not have been retrieved.
+	if match.Match.Side == order.Taker && match.counterSwap == nil {
 		return errs.add("redemption received before audit request")
 	}
 	sigMsg, _ := redemption.Serialize()

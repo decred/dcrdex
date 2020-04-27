@@ -51,6 +51,7 @@ type dexConnection struct {
 	assets     map[uint32]*dex.Asset
 	cfg        *msgjson.ConfigResult
 	acct       *dexAccount
+	notify     func(Notification)
 
 	booksMtx sync.RWMutex
 	books    map[string]*book.OrderBook
@@ -184,18 +185,18 @@ func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjs
 	return nil
 }
 
-// trackerMatches are an intermediate structure used by the dexConnection to
+// serverMatches are an intermediate structure used by the dexConnection to
 // sort incoming match notifications.
-type trackerMatches struct {
+type serverMatches struct {
 	tracker    *trackedTrade
 	msgMatches []*msgjson.Match
 	cancel     *msgjson.Match
 }
 
 // parseMatches sorts the list of matches and associates them with a trade.
-func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match) (map[order.OrderID]*trackerMatches, []msgjson.Acknowledgement, error) {
+func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs bool) (map[order.OrderID]*serverMatches, []msgjson.Acknowledgement, error) {
 	var acks []msgjson.Acknowledgement
-	matches := make(map[order.OrderID]*trackerMatches)
+	matches := make(map[order.OrderID]*serverMatches)
 	var errs []string
 	for _, msgMatch := range msgMatches {
 		var oid order.OrderID
@@ -210,9 +211,11 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match) (map[order.Or
 			errs = append(errs, err.Error())
 			continue
 		}
-		err = dc.acct.checkSig(sigMsg, msgMatch.Sig)
-		if err != nil {
-			return nil, nil, fmt.Errorf("parseMatches: %v", err)
+		if checkSigs {
+			err = dc.acct.checkSig(sigMsg, msgMatch.Sig)
+			if err != nil {
+				return nil, nil, fmt.Errorf("parseMatches: %v", err)
+			}
 		}
 		sig, err := dc.acct.sign(sigMsg)
 		if err != nil {
@@ -227,7 +230,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match) (map[order.Or
 		trackerID := tracker.ID()
 		match := matches[trackerID]
 		if match == nil {
-			match = &trackerMatches{
+			match = &serverMatches{
 				tracker: tracker,
 			}
 			matches[trackerID] = match
@@ -246,16 +249,17 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match) (map[order.Or
 }
 
 // runMatches runs the sorted matches returned from parseMatches.
-func (dc *dexConnection) runMatches(matches map[order.OrderID]*trackerMatches) error {
+func (dc *dexConnection) runMatches(matches map[order.OrderID]*serverMatches) error {
 	for _, match := range matches {
+		tracker := match.tracker
 		if len(match.msgMatches) > 0 {
-			err := match.tracker.negotiate(match.msgMatches)
+			err := tracker.negotiate(match.msgMatches)
 			if err != nil {
 				return err
 			}
 		}
 		if match.cancel != nil {
-			err := match.tracker.processCancelMatch(match.cancel)
+			err := tracker.processCancelMatch(match.cancel)
 			if err != nil {
 				return err
 			}
@@ -263,6 +267,23 @@ func (dc *dexConnection) runMatches(matches map[order.OrderID]*trackerMatches) e
 	}
 	dc.refreshMarkets()
 	return nil
+}
+
+// compareServerMatches resolves the matches reported by the server in the
+// 'connect' response against those marked incomplete in the matchTracker map
+// for each serverMatch.
+// Reported matches with missing trackers are already checked by parseMatches,
+// but we also must check for incomplete matches that the server is not
+// reporting.
+//
+// DRAFT NOTE: Right now, the matches are just checked and notifications sent,
+// but it may be a good  place to trigger a FindRedemption if the conditions
+// warrant.
+func (dc *dexConnection) compareServerMatches(matches map[order.OrderID]*serverMatches) {
+	for _, match := range matches {
+		// readConnectMatches sends notifications for any problems encountered.
+		match.tracker.readConnectMatches(match.msgMatches)
+	}
 }
 
 // tickAsset checks open matches related to a specific asset for needed action.
@@ -926,13 +947,32 @@ func (c *Core) InitializeClient(pw string) error {
 
 // Login logs the user in, decrypting the account keys for all known DEXes.
 func (c *Core) Login(pw string) ([]*db.Notification, error) {
-	errs := newErrorSet("Login: ")
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
-		return nil, errs.addErr(err)
+		return nil, err
 	}
+
+	loaded := c.resolveActiveTrades(crypter)
+	if loaded > 0 {
+		log.Infof("loaded %d incomplete orders", loaded)
+	}
+
+	c.initializeDEXConnections(crypter)
+	notes, err := c.db.NotificationsN(10)
+	if err != nil {
+		log.Errorf("Login -> NotificationsN error: %v", err)
+	}
+	c.refreshUser()
+	return notes, nil
+}
+
+// initializeDEXConnections connects to the DEX servers in the conns map and
+// authenticates the connection. If registration is incomplete, reFee is run and
+// the connection will be authenticated once the `notifyfee` request is sent.
+func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
+	// Connections will be attempted in parallel, so we'll need to protect the
+	// errorSet.
 	var wg sync.WaitGroup
-	var mtx sync.Mutex
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	for _, dc := range c.conns {
@@ -942,37 +982,79 @@ func (c *Core) Login(pw string) ([]*db.Notification, error) {
 		}
 		err := dc.acct.unlock(crypter)
 		if err != nil {
-			errs.add("error unlocking account for %s: %v", dc.acct.url, err)
+			details := fmt.Sprintf("error unlocking account for %s: %v", dc.acct.url, err)
+			c.notify(newFeePaymentNote("Account unlock error", details, db.ErrorLevel))
 			continue
 		}
+		dcrID, _ := dex.BipSymbolID("dcr")
 		if !dc.acct.paid() {
-			// Unlock the account, but don't authenticate. Registration will be
-			// completed when the user unlocks the Decred password.
-			log.Errorf("skipping authorization for unpaid account %s", dc.acct.url)
+			if len(dc.acct.feeCoin) == 0 {
+				details := fmt.Sprintf("Empty fee coin for %s.", dc.acct.url)
+				c.notify(newFeePaymentNote("Fee coin error", details, db.ErrorLevel))
+				continue
+			}
+			// Try to unlock the Decred wallet, which should run the reFee cycle, and
+			// in turn will run authDEX.
+			dcrWallet, err := c.connectedWallet(dcrID)
+			if err != nil {
+				log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.url, err)
+				details := fmt.Sprintf("Incomplete registration detected for %s, but failed to connect to the Decred wallet", dc.acct.url)
+				c.notify(newFeePaymentNote("Wallet connection warning", details, db.WarningLevel))
+				continue
+			}
+			if !dcrWallet.unlocked() {
+				err = unlockWallet(dcrWallet, crypter)
+				if err != nil {
+					details := fmt.Sprintf("Connected to Decred wallet to complete registration at %s, but failed to unlock: %v", dc.acct.url, err)
+					c.notify(newFeePaymentNote("Wallet unlock error", details, db.ErrorLevel))
+					continue
+				}
+			}
+			c.reFee(dcrWallet, dc)
 			continue
 		}
+
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
 			err := c.authDEX(dc)
 			if err != nil {
-				mtx.Lock()
-				errs.add("authDEX error for %s: %v", dc.acct.url, err)
-				mtx.Unlock()
+				details := fmt.Sprintf("%s: %v", dc.acct.url, err)
+				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel))
 				return
 			}
 		}(dc)
 	}
-
 	wg.Wait()
+}
 
-	notes, err := c.db.NotificationsN(10)
-	if err != nil {
-		errs.addErr(err)
+// resolveActiveTrades loads order and match data from the database. Only active
+// orders and orders with active matches are loaded. Also, only active matches
+// are loaded, even if there are inactive matches for the same order, but it may
+// be desirable to load all matches, so this behavior may change.
+func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) int {
+	failed := make(map[uint32]struct{})
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	var loaded int
+	for _, dc := range c.conns {
+		// loadDBTrades can add to the failed map.
+		ready, err := c.loadDBTrades(dc, crypter, failed)
+		if err != nil {
+			details := fmt.Sprintf("Some orders failed to load from the database: %v", err)
+			c.notify(newOrderNote("Order load failure", details, db.ErrorLevel, nil))
+		}
+		if len(ready) > 0 {
+			err = c.resumeTrades(dc, ready)
+			if err != nil {
+				details := fmt.Sprintf("Some active orders failed to resume: %v", err)
+				c.notify(newOrderNote("Order resumption error", details, db.ErrorLevel, nil))
+			}
+		}
+		loaded += len(ready)
+		dc.refreshMarkets()
 	}
-
-	c.refreshUser()
-	return notes, errs.ifany()
+	return loaded
 }
 
 var waiterID uint64
@@ -1430,11 +1512,14 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// Set the account as authenticated.
 	dc.acct.auth()
 
-	matches, _, err := dc.parseMatches(result.Matches)
+	matches, _, err := dc.parseMatches(result.Matches, false)
 	if err != nil {
 		log.Error(err)
 	}
-	return dc.runMatches(matches)
+
+	dc.compareServerMatches(matches)
+
+	return nil
 }
 
 func (c *Core) Sync(dex string, base, quote uint32) (chan *BookUpdate, error) {
@@ -1626,48 +1711,56 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 	})
 }
 
-// Prepare trackers based on orders stored as active in the database.
+// dbTrackers prepares trackedTrades based on active orders and matches in the
+// database. Since dbTrackers runs before sign in when wallets are not connected
+// or unlocked, wallets and coins are not added to the returned trackers. Use
+// resumeTrades with the app Crypter to prepare wallets and coins.
 func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, error) {
 	// Prepare active orders, according to the DB.
 	dbOrders, err := c.db.ActiveDEXOrders(dc.acct.url)
 	if err != nil {
 		return nil, fmt.Errorf("database error when fetching orders for %s: %x", dc.acct.url, err)
 	}
+	// It's possible for an order to not be active, but still have active matches.
+	// Grab the orders for those too.
+	haveOrder := func(oid order.OrderID) bool {
+		for _, dbo := range dbOrders {
+			if dbo.Order.ID() == oid {
+				return true
+			}
+		}
+		return false
+	}
+
+	activeDBMatches, err := c.db.ActiveDEXMatches(dc.acct.url)
+	if err != nil {
+		return nil, fmt.Errorf("database error fetching active matches for %s: %v", dc.acct.url, err)
+	}
+	for _, dbMatch := range activeDBMatches {
+		oid := dbMatch.Match.OrderID
+		if !haveOrder(oid) {
+			dbOrder, err := c.db.Order(oid)
+			if err != nil {
+				return nil, fmt.Errorf("database error fetching order %s for active match %s at %s: %v", oid, dbMatch.Match.MatchID, dc.acct.url, err)
+			}
+			dbOrders = append(dbOrders, dbOrder)
+		}
+	}
+
 	cancels := make(map[order.OrderID]*order.CancelOrder)
 	cancelPreimages := make(map[order.OrderID]order.Preimage)
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
 	for _, dbOrder := range dbOrders {
 		ord, md := dbOrder.Order, dbOrder.MetaData
-		oid := ord.ID()
 		var preImg order.Preimage
 		copy(preImg[:], md.Proof.Preimage)
 		if co, ok := ord.(*order.CancelOrder); ok {
 			cancels[co.TargetOrderID] = co
 			cancelPreimages[co.TargetOrderID] = preImg
 		} else {
-			// Make sure we have the necessary wallets.
-			wallets, err := c.walletSet(dc, ord.Base(), ord.Quote(), ord.Trade().Sell)
-			if err != nil {
-				log.Errorf("wallet retrieval error for active order %s: %v", oid, err)
-				continue
-			}
-			coinIDs := ord.Trade().Coins
-			if len(md.ChangeCoin) != 0 {
-				coinIDs = []order.CoinID{md.ChangeCoin}
-			}
-			coins := make(asset.Coins, 0, len(coinIDs))
-			if len(coinIDs) > 0 {
-				byteIDs := make([]dex.Bytes, 0, len(coinIDs))
-				for _, cid := range coinIDs {
-					byteIDs = append(byteIDs, []byte(cid))
-				}
-				_, err = wallets.fromWallet.FundingCoins(byteIDs)
-				log.Errorf("source coins retrieval error for %s: %v", oid, err)
-				continue
-			}
 			var preImg order.Preimage
 			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, c.db, c.latencyQ, wallets, coins, c.notify)
+			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, c.db, c.latencyQ, nil, nil, c.notify)
 		}
 	}
 	for oid := range cancels {
@@ -1678,11 +1771,174 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		}
 		tracker.cancelTrade(cancels[oid], cancelPreimages[oid])
 	}
+
+	for _, dbMatch := range activeDBMatches {
+		// Impossible for the tracker to not be here, since it would have errored
+		// in the previous activeDBMatches loop.
+		tracker := trackers[dbMatch.Match.OrderID]
+		tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
+			id:        dbMatch.Match.MatchID,
+			prefix:    tracker.Prefix(),
+			trade:     tracker.Trade(),
+			MetaMatch: *dbMatch,
+		}
+	}
+
 	return trackers, nil
 }
 
-// connectDEX creates and connects a *dexConnection, but does not authenticate the
-// connection through the 'connect' route.
+// loadDBTrades loads orders and matches from the database for the specified
+// dexConnection. If there are active trades, the necessary wallets will be
+// unlocked. To prevent spamming wallet connections, the 'failed' map will be
+// populated with asset IDs for which the attempt to connect or unlock has
+// failed. The failed map should be passed on subsequent calls for other dexes.
+func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed map[uint32]struct{}) ([]*trackedTrade, error) {
+	// Parse the active trades and see if any wallets need unlocking.
+	trades, err := c.dbTrackers(dc)
+	if err != nil {
+		return nil, fmt.Errorf("error retreiving active matches: %v", err)
+	}
+
+	errs := newErrorSet(dc.acct.url + ": ")
+	ready := make([]*trackedTrade, 0, len(dc.trades))
+	for _, trade := range trades {
+		base, quote := trade.Base(), trade.Quote()
+		_, baseFailed := failed[base]
+		_, quoteFailed := failed[quote]
+		if !baseFailed {
+			baseWallet, err := c.connectedWallet(base)
+			if err != nil {
+				baseFailed = true
+				failed[base] = struct{}{}
+			} else if !baseWallet.unlocked() {
+				err = unlockWallet(baseWallet, crypter)
+				if err != nil {
+					baseFailed = true
+					failed[base] = struct{}{}
+				}
+			}
+		}
+		if !baseFailed && !quoteFailed {
+			quoteWallet, err := c.connectedWallet(quote)
+			if err != nil {
+				quoteFailed = true
+				failed[quote] = struct{}{}
+			} else if !quoteWallet.unlocked() {
+				err = unlockWallet(quoteWallet, crypter)
+				if err != nil {
+					quoteFailed = true
+					failed[quote] = struct{}{}
+				}
+			}
+		}
+		if baseFailed {
+			errs.add("could not complete order %s because the wallet for %s cannot be used", trade.token(), unbip(base))
+			continue
+		}
+		if quoteFailed {
+			errs.add("could not complete order %s because the wallet for %s cannot be used", trade.token(), unbip(quote))
+			continue
+		}
+		ready = append(ready, trade)
+	}
+	return ready, errs.ifany()
+}
+
+// resumeTrades recovers the states of active trades and matches, including
+// loading audit info needed to finish swaps and funding coins needed to create
+// new matches on an order.
+func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) error {
+	var tracker *trackedTrade
+	notifyErr := func(subject, s string, a ...interface{}) {
+		detail := fmt.Sprintf(s, a...)
+		corder, _ := tracker.coreOrder()
+		c.notify(newOrderNote(subject, detail, db.ErrorLevel, corder))
+	}
+	for _, tracker = range trackers {
+		// See if the order is 100% filled.
+		trade := tracker.Trade()
+		// Make sure we have the necessary wallets.
+		wallets, err := c.walletSet(dc, tracker.Base(), tracker.Quote(), trade.Sell)
+		if err != nil {
+			notifyErr("Wallet missing", "Wallet retrieval error for active order %s: %v", tracker.token(), err)
+			continue
+		}
+		tracker.wallets = wallets
+		// If matches haven't redeemed, but the counter-swap has been received,
+		// reload the audit info.
+		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
+		var stillNeedsCoins bool
+		for _, match := range tracker.matches {
+			dbMatch, metaData := match.Match, match.MetaData
+			var counterSwap []byte
+			takerNeedsSwap := dbMatch.Side == order.Taker && dbMatch.Status >= order.MakerSwapCast && dbMatch.Status < order.MatchComplete
+			if takerNeedsSwap {
+				stillNeedsCoins = true
+				counterSwap = metaData.Proof.MakerSwap
+			}
+			makerNeedsSwap := dbMatch.Side == order.Maker && dbMatch.Status >= order.TakerSwapCast && dbMatch.Status < order.MakerRedeemed
+			if makerNeedsSwap {
+				counterSwap = metaData.Proof.TakerSwap
+			}
+			if takerNeedsSwap || makerNeedsSwap {
+				if len(counterSwap) == 0 {
+					match.failErr = fmt.Errorf("missing counter-swap, order %s, match %s", tracker.ID(), match.id)
+					notifyErr("Match status error", "Match %s for order %s is in state %s, but has no maker swap coin.", dbMatch.Side, tracker.token(), dbMatch.Status)
+					continue
+				}
+				counterContract := metaData.Proof.CounterScript
+				if len(counterContract) == 0 {
+					match.failErr = fmt.Errorf("missing counter-contract, order %s, match %s", tracker.ID(), match.id)
+					notifyErr("Match status error", "Match %s for order %s is in state %s, but has no maker swap contract.", dbMatch.Side, tracker.token(), dbMatch.Status)
+					continue
+				}
+				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract)
+				if err != nil {
+					match.failErr = fmt.Errorf("audit error, order %s, match %s: %v", tracker.ID(), match.id, err)
+					notifyErr("Match recovery error", "Error auditing counter-parties swap contract during swap recovery on order %s: %v", tracker.token(), err)
+					continue
+				}
+				match.counterSwap = auditInfo
+				continue
+			}
+		}
+
+		// Active orders and orders with matches with unsent swaps need the funding
+		// coin(s).
+		if isActive || stillNeedsCoins {
+			coinIDs := trade.Coins
+			if len(tracker.metaData.ChangeCoin) != 0 {
+				coinIDs = []order.CoinID{tracker.metaData.ChangeCoin}
+			}
+			if len(coinIDs) == 0 {
+				notifyErr("No funding coins", "Order %s has no %s funding coins", tracker.token(), unbip(wallets.fromAsset.ID))
+				continue
+			}
+			byteIDs := make([]dex.Bytes, 0, len(coinIDs))
+			for _, cid := range coinIDs {
+				byteIDs = append(byteIDs, []byte(cid))
+			}
+			if len(byteIDs) == 0 {
+				notifyErr("Order coin error", "No coins for loaded order %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
+				continue
+			}
+			coins, err := wallets.fromWallet.FundingCoins(byteIDs)
+			if err != nil {
+				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
+				continue
+			}
+			tracker.coins = mapifyCoins(coins)
+		}
+
+		dc.tradeMtx.Lock()
+		dc.trades[tracker.ID()] = tracker
+		dc.tradeMtx.Unlock()
+	}
+	return nil
+}
+
+// connectDEX creates and connects a dexConnection, but does not authenticate
+// the connection through the 'connect' route.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// Get the host from the DEX URL.
 	uri := acctInfo.URL
@@ -1773,20 +2029,18 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 			books:      make(map[string]*book.OrderBook),
 			acct:       newDEXAccount(acctInfo),
 			marketMap:  marketMap,
+			trades:     make(map[order.OrderID]*trackedTrade),
+			notify:     c.notify,
 		}
-		dc.trades, reqErr = c.dbTrackers(dc)
-		if reqErr != nil {
-			connChan <- nil
-			return
-		}
+
 		dc.refreshMarkets()
 		connChan <- dc
 		c.wg.Add(1)
 		// Listen for incoming messages.
 		log.Infof("Connected to DEX %s and listening for messages.", uri)
 		go c.listen(dc)
+	}) // End 'config' request
 
-	})
 	if err != nil {
 		log.Errorf("error sending 'config' request: %v", err)
 		reqErr = err
@@ -2074,7 +2328,7 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return fmt.Errorf("match request parsing error: %v", err)
 	}
-	matches, acks, err := dc.parseMatches(msgMatches)
+	matches, acks, err := dc.parseMatches(msgMatches, true)
 	if err != nil {
 		return err
 	}

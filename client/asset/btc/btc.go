@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -206,12 +207,13 @@ func init() {
 // client app communicates with the BTC blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	client      *rpcclient.Client
-	node        rpcClient
-	wallet      *walletClient
-	chainParams *chaincfg.Params
-	log         dex.Logger
-	symbol      string
+	client       *rpcclient.Client
+	node         rpcClient
+	wallet       *walletClient
+	chainParams  *chaincfg.Params
+	log          dex.Logger
+	symbol       string
+	hasConnected uint32
 	// The DEX specifies that change outputs from DEX-monitored transactions are
 	// exempt from minimum confirmation limits, so we must track those as they are
 	// created.
@@ -318,6 +320,14 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 	}
 	if codeVer < minProtocolVersion {
 		return fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion), nil
+	}
+	// If this is the first time connecting, clear the locked coins. This should
+	// have been done at shutdown, but shutdown may not have been clean.
+	if atomic.SwapUint32(&btc.hasConnected, 1) == 0 {
+		err := btc.wallet.LockUnspent(true, nil)
+		if err != nil {
+			return err, nil
+		}
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)

@@ -43,6 +43,8 @@ var (
 	quoteKey       = []byte("quote")
 	orderKey       = []byte("order")
 	matchKey       = []byte("match")
+	orderIDKey     = []byte("orderID")
+	matchIDKey     = []byte("matchID")
 	proofKey       = []byte("proof")
 	activeKey      = []byte("active")
 	dexKey         = []byte("dex")
@@ -436,6 +438,18 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	}, nil
 }
 
+// SetChangeCoin sets the current change coin on an order. Change coins are
+// chained for matches, so only the last change coin needs to be saved.
+func (db *boltDB) SetChangeCoin(oid order.OrderID, changeCoin order.CoinID) error {
+	return db.ordersUpdate(func(master *bbolt.Bucket) error {
+		oBkt, err := master.CreateBucketIfNotExists(oid[:])
+		if err != nil {
+			return err
+		}
+		return oBkt.Put(changeKey, changeCoin)
+	})
+}
+
 // ordersView is a convenience function for reading from the order bucket.
 func (db *boltDB) ordersView(f bucketFunc) error {
 	return db.withBucket(ordersBucket, db.View, f)
@@ -457,7 +471,8 @@ func (db *boltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 		return fmt.Errorf("empty DEX not allowed")
 	}
 	return db.matchesUpdate(func(master *bbolt.Bucket) error {
-		mBkt, err := master.CreateBucketIfNotExists(match.MatchID[:])
+		metaID := m.ID()
+		mBkt, err := master.CreateBucketIfNotExists(metaID)
 		if err != nil {
 			return fmt.Errorf("order bucket error: %v", err)
 		}
@@ -468,6 +483,8 @@ func (db *boltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 			put(dexKey, []byte(md.DEX)).
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
+			put(orderIDKey, match.OrderID[:]).
+			put(matchIDKey, match.MatchID[:]).
 			put(matchKey, order.EncodeMatch(match)).
 			err()
 	})
@@ -479,6 +496,25 @@ func (db *boltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
 		status := mBkt.Get(statusKey)
 		return len(status) != 1 || status[0] != uint8(order.MatchComplete)
+	})
+}
+
+// ActiveDEXMatches retrieves the matches that are in an active state for a
+// specified DEX, which is any state except order.MatchComplete.
+func (db *boltDB) ActiveDEXMatches(dex string) ([]*dexdb.MetaMatch, error) {
+	dexB := []byte(dex)
+	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
+		status := mBkt.Get(statusKey)
+		return bytes.Equal(dexB, mBkt.Get(dexKey)) && (len(status) != 1 || status[0] != uint8(order.MatchComplete))
+	})
+}
+
+// MatchesForOrder retrieves the matches for the specified order ID.
+func (db *boltDB) MatchesForOrder(oid order.OrderID) ([]*dexdb.MetaMatch, error) {
+	oidB := oid[:]
+	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
+		oid := mBkt.Get(orderIDKey)
+		return bytes.Equal(oid, oidB)
 	})
 }
 

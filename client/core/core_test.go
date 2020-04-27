@@ -176,6 +176,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			},
 			Fee: tFee,
 		},
+		notify:    func(Notification) {},
 		marketMap: map[string]*Market{tDcrBtcMktName: mkt},
 		trades:    make(map[order.OrderID]*trackedTrade),
 	}, conn, acct
@@ -219,97 +220,114 @@ func (conn *TWebsocket) Connect(context.Context) (error, *sync.WaitGroup) {
 }
 
 type TDB struct {
-	updateWalletErr error
-	acct            *db.AccountInfo
-	acctErr         error
-	getErr          error
-	storeErr        error
-	encKeyErr       error
-	accts           []*db.AccountInfo
-	updateOrderErr  error
+	updateWalletErr        error
+	acct                   *db.AccountInfo
+	acctErr                error
+	getErr                 error
+	storeErr               error
+	encKeyErr              error
+	accts                  []*db.AccountInfo
+	updateOrderErr         error
+	activeDEXOrders        []*db.MetaOrder
+	matchesForOID          []*db.MetaMatch
+	matchesForOIDErr       error
+	activeMatchesForDEX    []*db.MetaMatch
+	activeMatchesForDEXErr error
 }
 
-func (db *TDB) Run(context.Context) {}
+func (tdb *TDB) Run(context.Context) {}
 
-func (db *TDB) ListAccounts() ([]string, error) {
+func (tdb *TDB) ListAccounts() ([]string, error) {
 	return nil, nil
 }
 
-func (db *TDB) Accounts() ([]*db.AccountInfo, error) {
-	return db.accts, nil
+func (tdb *TDB) Accounts() ([]*db.AccountInfo, error) {
+	return tdb.accts, nil
 }
 
-func (db *TDB) Account(url string) (*db.AccountInfo, error) {
-	return db.acct, db.acctErr
+func (tdb *TDB) Account(url string) (*db.AccountInfo, error) {
+	return tdb.acct, tdb.acctErr
 }
 
-func (db *TDB) CreateAccount(ai *db.AccountInfo) error {
+func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 	return nil
 }
 
-func (db *TDB) UpdateOrder(m *db.MetaOrder) error {
-	return db.updateOrderErr
+func (tdb *TDB) UpdateOrder(m *db.MetaOrder) error {
+	return tdb.updateOrderErr
 }
 
-func (db *TDB) ActiveDEXOrders(dex string) ([]*db.MetaOrder, error) {
+func (tdb *TDB) ActiveDEXOrders(dex string) ([]*db.MetaOrder, error) {
+	return tdb.activeDEXOrders, nil
+}
+
+func (tdb *TDB) ActiveOrders() ([]*db.MetaOrder, error) {
 	return nil, nil
 }
 
-func (db *TDB) ActiveOrders() ([]*db.MetaOrder, error) {
+func (tdb *TDB) AccountOrders(dex string, n int, since uint64) ([]*db.MetaOrder, error) {
 	return nil, nil
 }
 
-func (db *TDB) AccountOrders(dex string, n int, since uint64) ([]*db.MetaOrder, error) {
+func (tdb *TDB) Order(order.OrderID) (*db.MetaOrder, error) {
 	return nil, nil
 }
 
-func (db *TDB) Order(order.OrderID) (*db.MetaOrder, error) {
+func (tdb *TDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*db.MetaOrder, error) {
 	return nil, nil
 }
 
-func (db *TDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*db.MetaOrder, error) {
-	return nil, nil
-}
-
-func (db *TDB) UpdateMatch(m *db.MetaMatch) error {
+func (tdb *TDB) SetChangeCoin(order.OrderID, order.CoinID) error {
 	return nil
 }
 
-func (db *TDB) ActiveMatches() ([]*db.MetaMatch, error) {
-	return nil, nil
-}
-
-func (db *TDB) UpdateWallet(wallet *db.Wallet) error {
-	return db.updateWalletErr
-}
-
-func (db *TDB) Wallets() ([]*db.Wallet, error) {
-	return nil, nil
-}
-
-func (db *TDB) AccountPaid(proof *db.AccountProof) error {
+func (tdb *TDB) UpdateMatch(m *db.MetaMatch) error {
 	return nil
 }
 
-func (db *TDB) SaveNotification(*db.Notification) error        { return nil }
-func (db *TDB) NotificationsN(int) ([]*db.Notification, error) { return nil, nil }
-
-func (db *TDB) Store(k string, b []byte) error {
-	return db.storeErr
+func (tdb *TDB) ActiveMatches() ([]*db.MetaMatch, error) {
+	return nil, nil
 }
 
-func (db *TDB) Get(k string) ([]byte, error) {
+func (tdb *TDB) MatchesForOrder(oid order.OrderID) ([]*db.MetaMatch, error) {
+	return tdb.matchesForOID, tdb.matchesForOIDErr
+}
+
+func (tdb *TDB) ActiveDEXMatches(dex string) ([]*db.MetaMatch, error) {
+	return tdb.activeMatchesForDEX, tdb.activeMatchesForDEXErr
+}
+
+func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
+	return tdb.updateWalletErr
+}
+
+func (tdb *TDB) Wallets() ([]*db.Wallet, error) {
+	return nil, nil
+}
+
+func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
+	return nil
+}
+
+func (tdb *TDB) SaveNotification(*db.Notification) error        { return nil }
+func (tdb *TDB) NotificationsN(int) ([]*db.Notification, error) { return nil, nil }
+
+func (tdb *TDB) Store(k string, b []byte) error {
+	return tdb.storeErr
+}
+
+func (tdb *TDB) Get(k string) ([]byte, error) {
 	if k == keyParamsKey {
-		return nil, db.encKeyErr
+		return nil, tdb.encKeyErr
 	}
-	return nil, db.getErr
+	return nil, tdb.getErr
 }
 
-func (db *TDB) Backup() error {
+func (tdb *TDB) Backup() error {
 	return nil
 }
 
-func (db *TDB) AckNotification(id []byte) error { return nil }
+func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
 type tCoin struct {
 	id       []byte
@@ -375,22 +393,24 @@ func (ai *tAuditInfo) SecretHash() dex.Bytes {
 }
 
 type TXCWallet struct {
-	mtx          sync.RWMutex
-	payFeeCoin   *tCoin
-	payFeeErr    error
-	fundCoins    asset.Coins
-	fundErr      error
-	addrErr      error
-	signCoinErr  error
-	swapReceipts []asset.Receipt
-	auditInfo    asset.AuditInfo
-	auditErr     error
-	redeemCoins  []dex.Bytes
-	badSecret    bool
-	fundedVal    uint64
-	connectErr   error
-	unlockErr    error
-	balErr       error
+	mtx            sync.RWMutex
+	payFeeCoin     *tCoin
+	payFeeErr      error
+	fundCoins      asset.Coins
+	fundErr        error
+	addrErr        error
+	signCoinErr    error
+	swapReceipts   []asset.Receipt
+	auditInfo      asset.AuditInfo
+	auditErr       error
+	redeemCoins    []dex.Bytes
+	badSecret      bool
+	fundedVal      uint64
+	connectErr     error
+	unlockErr      error
+	balErr         error
+	fundingCoins   asset.Coins
+	fundingCoinErr error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -428,7 +448,7 @@ func (w *TXCWallet) ReturnCoins(asset.Coins) error {
 }
 
 func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
-	return nil, nil
+	return w.fundingCoins, w.fundingCoinErr
 }
 
 func (w *TXCWallet) Swap(swap *asset.Swaps, _ *dex.Asset) ([]asset.Receipt, asset.Coin, error) {
@@ -643,7 +663,8 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	tCore := newTestRig().core
 	mid := "ob"
 	dc := &dexConnection{
-		books: make(map[string]*book.OrderBook),
+		books:  make(map[string]*book.OrderBook),
+		notify: func(Notification) {},
 	}
 
 	// Ensure handleOrderBookMsg creates an order book as expected.
@@ -1090,7 +1111,6 @@ func TestRegister(t *testing.T) {
 }
 
 func TestLogin(t *testing.T) {
-
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.pay()
@@ -1106,7 +1126,7 @@ func TestLogin(t *testing.T) {
 
 	queueSuccess()
 	_, err := tCore.Login(tPW)
-	if err != nil {
+	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
 	}
 
@@ -1114,7 +1134,7 @@ func TestLogin(t *testing.T) {
 	rig.acct.unauth()
 	rig.db.encKeyErr = tErr
 	_, err = tCore.Login(tPW)
-	if err == nil {
+	if err == nil || rig.acct.authed() {
 		t.Fatalf("no error for missing app key")
 	}
 	rig.db.encKeyErr = nil
@@ -1122,7 +1142,7 @@ func TestLogin(t *testing.T) {
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
 	_, err = tCore.Login(tPW)
-	if err != nil {
+	if err != nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
 	}
 	if rig.acct.locked() {
@@ -1138,15 +1158,16 @@ func TestLogin(t *testing.T) {
 		return nil
 	})
 	_, err = tCore.Login(tPW)
-	if err == nil {
-		t.Fatalf("no error for 'connect' route error")
+	// Should be no error, but also not authed. Error is sent and logged
+	// as a notification.
+	if err != nil || rig.acct.authed() {
+		t.Fatalf("account authed after 'connect' error")
 	}
 
 	// Success again.
-	rig.acct.unauth()
 	queueSuccess()
 	_, err = tCore.Login(tPW)
-	if err != nil {
+	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
 	}
 }
@@ -1735,7 +1756,7 @@ func TestTradeTracking(t *testing.T) {
 			AccountID:  dc.acct.ID(),
 			BaseAsset:  tDCR.ID,
 			QuoteAsset: tBTC.ID,
-			OrderType:  order.MarketOrderType,
+			OrderType:  order.LimitOrderType,
 			ClientTime: time.Now(),
 			ServerTime: time.Now().Add(time.Millisecond),
 			Commit:     preImgL.Commit(),
@@ -2078,6 +2099,243 @@ func TestNotifications(t *testing.T) {
 	default:
 		t.Fatalf("no notification received over the notification channel")
 	}
+}
+
+func TestResolveActiveTrades(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+
+	rig.acct.auth() // Short path through initializeDEXConnections
+
+	// Create an order
+	qty := tDCR.LotSize * 5
+	rate := tDCR.RateStep * 5
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			OrderType:  order.LimitOrderType,
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			ClientTime: time.Now(),
+			ServerTime: time.Now(),
+			Commit:     ordertest.RandomCommitment(),
+		},
+		T: order.Trade{
+			Quantity: qty,
+			Sell:     true,
+		},
+		Rate: rate,
+	}
+
+	oid := lo.ID()
+	changeCoinID := encode.RandomBytes(32)
+	changeCoin := &tCoin{id: changeCoinID}
+
+	// Need to return an order from db.ActiveDEXOrders
+	rig.db.activeDEXOrders = []*db.MetaOrder{
+		{
+			MetaData: &db.OrderMetaData{
+				Status:     order.OrderStatusBooked,
+				DEX:        tDexUrl,
+				Proof:      db.OrderProof{},
+				ChangeCoin: changeCoinID,
+			},
+			Order: lo,
+		},
+	}
+
+	mid := ordertest.RandomMatchID()
+	addr := ordertest.RandomAddress()
+	match := &db.MetaMatch{
+		MetaData: &db.MatchMetaData{
+			Status: order.MakerSwapCast,
+			Proof: db.MatchProof{
+				CounterScript: encode.RandomBytes(50),
+				SecretHash:    encode.RandomBytes(32),
+				MakerSwap:     encode.RandomBytes(32),
+				Auth: db.MatchAuth{
+					MatchSig: encode.RandomBytes(32),
+				},
+			},
+			DEX:   tDexUrl,
+			Base:  tDCR.ID,
+			Quote: tBTC.ID,
+		},
+		Match: &order.UserMatch{
+			OrderID:  oid,
+			MatchID:  mid,
+			Quantity: qty,
+			Rate:     rate,
+			Address:  addr,
+			Status:   order.MakerSwapCast,
+			Side:     order.Taker,
+		},
+	}
+	rig.db.activeMatchesForDEX = []*db.MetaMatch{match}
+	tDcrWallet.fundingCoins = asset.Coins{changeCoin}
+	_, auditInfo := tMsgAudit(oid, mid, addr, qty, nil)
+	tBtcWallet.auditInfo = auditInfo
+
+	// reset
+	reset := func() {
+		rig.acct.lock()
+		dcrWallet.Lock()
+		btcWallet.Lock()
+		rig.dc.trades = make(map[order.OrderID]*trackedTrade)
+	}
+
+	// Ensure the order is good, and reset the state.
+	ensureGood := func(tag string) {
+		_, err := tCore.Login(tPW)
+		if err != nil {
+			t.Fatalf("%s: login error: %v", tag, err)
+		}
+
+		if !btcWallet.unlocked() {
+			t.Fatalf("%s: btc wallet not unlocked", tag)
+		}
+
+		if !dcrWallet.unlocked() {
+			t.Fatalf("%s: dcr wallet not unlocked", tag)
+		}
+
+		trade, found := rig.dc.trades[oid]
+		if !found {
+			t.Fatalf("%s: trade with expected order id not found. len(trades) = %d", tag, len(rig.dc.trades))
+		}
+
+		_, found = trade.matches[mid]
+		if !found {
+			t.Fatalf("%s: trade with expected order id not found. len(matches) = %d", tag, len(trade.matches))
+		}
+		reset()
+	}
+
+	ensureGood("initial")
+
+	// Ensure a failuare AND reset. err != nil just helps to make sure that we're
+	// hitting errors in resolveActiveTrades, which sends errors as notifications,
+	// vs somewhere else.
+	ensureFail := func(tag string) {
+		_, err := tCore.Login(tPW)
+		if err != nil || len(rig.dc.trades) != 0 {
+			t.Fatalf("%s: no error. err = %v, len(trades) = %d", tag, err, len(rig.dc.trades))
+		}
+		reset()
+	}
+
+	// No base wallet
+	delete(tCore.wallets, tDCR.ID)
+	ensureFail("missing base")
+	tCore.wallets[tDCR.ID] = dcrWallet
+
+	// Base wallet unlock errors
+	tDcrWallet.unlockErr = tErr
+	ensureFail("base unlock")
+	tDcrWallet.unlockErr = nil
+
+	// No quote wallet
+	delete(tCore.wallets, tBTC.ID)
+	ensureFail("missing quote")
+	tCore.wallets[tBTC.ID] = btcWallet
+
+	// Quote wallet unlock errors
+	tBtcWallet.unlockErr = tErr
+	ensureFail("quote unlock")
+	tBtcWallet.unlockErr = nil
+
+	// Funding coin error.
+	tDcrWallet.fundingCoinErr = tErr
+	ensureFail("funding coin")
+	tDcrWallet.fundingCoinErr = nil
+
+	// No matches
+	rig.db.activeMatchesForDEXErr = tErr
+	ensureFail("matches error")
+	rig.db.activeMatchesForDEXErr = nil
+
+	// Success again
+	ensureGood("final")
+}
+
+func TestReadConnectMatches(t *testing.T) {
+	rig := newTestRig()
+	preImg := newPreimage()
+	dc := rig.dc
+
+	notes := make(map[string][]Notification)
+	notify := func(note Notification) {
+		notes[note.Type()] = append(notes[note.Type()], note)
+	}
+
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			// 	OrderType:  order.LimitOrderType,
+			// 	BaseAsset:  tDCR.ID,
+			// 	QuoteAsset: tBTC.ID,
+			// 	ClientTime: time.Now(),
+			ServerTime: time.Now(),
+			// 	Commit:     preImg.Commit(),
+		},
+	}
+	oid := lo.ID()
+	dbOrder := &db.MetaOrder{
+		// MetaData: &db.OrderMetaData{},
+		Order: lo,
+	}
+	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.db, rig.queue, nil, nil, notify)
+	metaMatch := db.MetaMatch{
+		MetaData: &db.MatchMetaData{},
+		Match:    &order.UserMatch{},
+	}
+
+	// Store a match
+	knownID := ordertest.RandomMatchID()
+	knownMatch := &matchTracker{
+		id:        knownID,
+		MetaMatch: metaMatch,
+	}
+	tracker.matches[knownID] = knownMatch
+	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: knownID[:]}
+
+	missingID := ordertest.RandomMatchID()
+	missingMatch := &matchTracker{
+		id:        missingID,
+		MetaMatch: metaMatch,
+	}
+	tracker.matches[missingID] = missingMatch
+
+	extraID := ordertest.RandomMatchID()
+	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
+
+	matches := []*msgjson.Match{knownMsgMatch, extraMsgMatch}
+	tracker.readConnectMatches(matches)
+
+	if knownMatch.failErr != nil {
+		t.Fatalf("error set for known and reported match")
+	}
+
+	if missingMatch.failErr == nil {
+		t.Fatalf("error not set for missing match")
+	}
+
+	if len(notes["order"]) != 2 {
+		t.Fatalf("expected 2 core 'order'-type notifications, got %d", len(notes["order"]))
+	}
+
+	if notes["order"][0].Subject() != "Missing matches" {
+		t.Fatalf("no core notification sent for missing matches")
+	}
+
+	if notes["order"][1].Subject() != "Match resolution error" {
+		t.Fatalf("no core notification sent for unknown matches")
+	}
+
 }
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {

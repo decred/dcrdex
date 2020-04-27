@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -218,11 +219,12 @@ func init() {
 // client app communicates with the Decred blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	client    *rpcclient.Client
-	node      rpcClient
-	log       dex.Logger
-	acct      string
-	tipChange func(error)
+	client       *rpcclient.Client
+	node         rpcClient
+	log          dex.Logger
+	acct         string
+	tipChange    func(error)
+	hasConnected uint32
 
 	// The DEX specifies that change outputs from DEX-monitored transactions are
 	// exempt from minimum confirmation limits, so we must track those as they are
@@ -323,6 +325,14 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 	err = checkVersionInfo(versions)
 	if err != nil {
 		return fmt.Errorf("DCR ExchangeWallet version check failed: %v", err), nil
+	}
+	// If this is the first time connecting, clear the locked coins. This should
+	// have been done at shutdown, but shutdown may not have been clean.
+	if atomic.SwapUint32(&dcr.hasConnected, 1) == 0 {
+		err := dcr.node.LockUnspent(true, nil)
+		if err != nil {
+			return err, nil
+		}
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)

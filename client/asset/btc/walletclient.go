@@ -62,7 +62,7 @@ func (wc *walletClient) ListUnspent() ([]*ListUnspentResult, error) {
 // an order, but not yet spent, should be locked until spent or until the order
 // is  canceled or fails.
 func (wc *walletClient) LockUnspent(unlock bool, ops []*output) error {
-	rpcops := make([]*RPCOutpoint, 0, len(ops))
+	var rpcops []*RPCOutpoint // To clear all, this must be nil, not empty slice.
 	for _, op := range ops {
 		rpcops = append(rpcops, &RPCOutpoint{
 			TxID: op.txHash.String(),
