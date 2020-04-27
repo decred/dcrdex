@@ -293,31 +293,33 @@ func TestOrderBookBook(t *testing.T) {
 			),
 			wantErr: false,
 		},
-		{
-			label: "Book buy order with outdated sequence value",
-			orderBook: makeOrderBook(
-				2,
-				"ob",
-				[]*Order{
-					makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 10, 1, 2),
-					makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
-				},
-				make([]*cachedOrderNote, 0),
-				true,
-			),
-			note: makeBookOrderNote(0, "ob", [32]byte{'a'}, msgjson.BuyOrderNum, 2, 3, 1),
-			expected: makeOrderBook(
-				2,
-				"ob",
-				[]*Order{
-					makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 10, 1, 2),
-					makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
-				},
-				make([]*cachedOrderNote, 0),
-				true,
-			),
-			wantErr: false,
-		},
+		// May want to re-implement strict sequence checking. Might use these tests
+		// again.
+		// {
+		// 	label: "Book buy order with outdated sequence value",
+		// 	orderBook: makeOrderBook(
+		// 		2,
+		// 		"ob",
+		// 		[]*Order{
+		// 			makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 10, 1, 2),
+		// 			makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
+		// 		},
+		// 		make([]*cachedOrderNote, 0),
+		// 		true,
+		// 	),
+		// 	note: makeBookOrderNote(0, "ob", [32]byte{'a'}, msgjson.BuyOrderNum, 2, 3, 1),
+		// 	expected: makeOrderBook(
+		// 		2,
+		// 		"ob",
+		// 		[]*Order{
+		// 			makeOrder([32]byte{'b'}, msgjson.BuyOrderNum, 10, 1, 2),
+		// 			makeOrder([32]byte{'c'}, msgjson.BuyOrderNum, 10, 2, 5),
+		// 		},
+		// 		make([]*cachedOrderNote, 0),
+		// 		true,
+		// 	),
+		// 	wantErr: false,
+		// },
 		{
 			label: "Book buy order to unsynced order book",
 			orderBook: makeOrderBook(
@@ -362,29 +364,31 @@ func TestOrderBookBook(t *testing.T) {
 			expected: nil,
 			wantErr:  true,
 		},
-		{
-			label: "Book sell order to synced order book with future sequence value",
-			orderBook: makeOrderBook(
-				2,
-				"ob",
-				[]*Order{
-					makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
-					makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
-				},
-				make([]*cachedOrderNote, 0),
-				true,
-			),
-			note:     makeBookOrderNote(5, "ob", [32]byte{'d'}, msgjson.SellOrderNum, 5, 3, 10),
-			expected: nil,
-			wantErr:  true,
-		},
+		// May want to re-implement strict sequence checking. Might use these tests
+		// again.
+		// {
+		// 	label: "Book sell order to synced order book with future sequence value",
+		// 	orderBook: makeOrderBook(
+		// 		2,
+		// 		"ob",
+		// 		[]*Order{
+		// 			makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
+		// 			makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
+		// 		},
+		// 		make([]*cachedOrderNote, 0),
+		// 		true,
+		// 	),
+		// 	note:     makeBookOrderNote(5, "ob", [32]byte{'d'}, msgjson.SellOrderNum, 5, 3, 10),
+		// 	expected: nil,
+		// 	wantErr:  true,
+		// },
 	}
 
 	for idx, tc := range tests {
 		err := tc.orderBook.Book(tc.note)
 		if (err != nil) != tc.wantErr {
-			t.Fatalf("[OrderBook.Book] #%d: error: %v, wantErr: %v",
-				idx+1, err, tc.wantErr)
+			t.Fatalf("[OrderBook.Book:%s]: error: %v, wantErr: %v",
+				tc.label, err, tc.wantErr)
 		}
 
 		if !tc.wantErr {
@@ -456,31 +460,33 @@ func TestOrderBookUnbook(t *testing.T) {
 			),
 			wantErr: false,
 		},
-		{
-			label: "Unbook sell order with outdated sequence value",
-			orderBook: makeOrderBook(
-				2,
-				"ob",
-				[]*Order{
-					makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
-					makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
-				},
-				make([]*cachedOrderNote, 0),
-				true,
-			),
-			note: makeUnbookOrderNote(0, "ob", [32]byte{'a'}),
-			expected: makeOrderBook(
-				2,
-				"ob",
-				[]*Order{
-					makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
-					makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
-				},
-				make([]*cachedOrderNote, 0),
-				true,
-			),
-			wantErr: false,
-		},
+		// May want to re-implement strict sequence checking. Might use these tests
+		// again.
+		// {
+		// 	label: "Unbook sell order with outdated sequence value",
+		// 	orderBook: makeOrderBook(
+		// 		2,
+		// 		"ob",
+		// 		[]*Order{
+		// 			makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
+		// 			makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
+		// 		},
+		// 		make([]*cachedOrderNote, 0),
+		// 		true,
+		// 	),
+		// 	note: makeUnbookOrderNote(0, "ob", [32]byte{'a'}),
+		// 	expected: makeOrderBook(
+		// 		2,
+		// 		"ob",
+		// 		[]*Order{
+		// 			makeOrder([32]byte{'b'}, msgjson.SellOrderNum, 10, 1, 2),
+		// 			makeOrder([32]byte{'c'}, msgjson.SellOrderNum, 10, 2, 5),
+		// 		},
+		// 		make([]*cachedOrderNote, 0),
+		// 		true,
+		// 	),
+		// 	wantErr: false,
+		// },
 		{
 			label: "Unbook sell order with unsynced order book",
 			orderBook: makeOrderBook(
@@ -546,8 +552,8 @@ func TestOrderBookUnbook(t *testing.T) {
 	for idx, tc := range tests {
 		err := tc.orderBook.Unbook(tc.note)
 		if (err != nil) != tc.wantErr {
-			t.Fatalf("[OrderBook.Book] #%d: error: %v, wantErr: %v",
-				idx+1, err, tc.wantErr)
+			t.Fatalf("[OrderBook.Book:%s]: error: %v, wantErr: %v",
+				tc.label, err, tc.wantErr)
 		}
 
 		if !tc.wantErr {

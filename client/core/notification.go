@@ -110,3 +110,16 @@ func newOrderNote(subject, details string, severity db.Severity, corder *Order) 
 		Order:        corder,
 	}
 }
+
+// EpochNotification is a data notifcation that a new epoch has begun.
+type EpochNotification struct {
+	db.Notification
+	Epoch uint64 `json:"epoch"`
+}
+
+func newEpochNotification(epochIdx uint64) *EpochNotification {
+	return &EpochNotification{
+		Notification: db.NewNotification("epoch", "", "", db.Data),
+		Epoch:        epochIdx,
+	}
+}

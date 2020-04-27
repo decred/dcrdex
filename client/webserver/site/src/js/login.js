@@ -19,7 +19,6 @@ export default class LoginPage extends BasePage {
   /* login submits the sign-in form and parses the result. */
   async login (e) {
     const page = this.page
-    app.loading(page.loginForm)
     Doc.hide(page.errMsg)
     const pw = page.pw.value
     page.pw.value = ''
@@ -28,11 +27,17 @@ export default class LoginPage extends BasePage {
       Doc.show(page.errMsg)
       return
     }
-    app.loaded()
+    app.loading(page.loginForm)
     var res = await postJSON('/api/login', { pass: pw })
-    if (!app.checkResponse(res)) return
-    res.notes.reverse()
-    app.setNotes(res.notes)
+    app.loaded()
+    if (!app.checkResponse(res)) {
+      console.log(res)
+      return
+    }
+    if (res.notes) {
+      res.notes.reverse()
+    }
+    app.setNotes(res.notes || [])
     await app.fetchUser()
     app.setLogged(true)
     app.loadPage('markets')

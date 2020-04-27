@@ -57,6 +57,8 @@ func (c *tCoin) Redeem() dex.Bytes {
 
 type TCore struct {
 	balanceErr      error
+	syncBook        *core.OrderBook
+	syncFeed        *core.BookFeed
 	syncErr         error
 	regErr          error
 	loginErr        error
@@ -76,12 +78,13 @@ func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) { return 1e8,
 func (c *TCore) Register(r *core.Registration) error               { return c.regErr }
 func (c *TCore) InitializeClient(pw string) error                  { return c.initErr }
 func (c *TCore) Login(pw string) ([]*db.Notification, error)       { return nil, c.loginErr }
-func (c *TCore) Sync(dex string, base, quote uint32) (chan *core.BookUpdate, error) {
-	return nil, c.syncErr
+func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
+	return c.syncBook, c.syncFeed, c.syncErr
 }
-func (c *TCore) Book(dex string, base, quote uint32) *core.OrderBook { return nil }
-func (c *TCore) Unsync(dex string, base, quote uint32)               {}
-func (c *TCore) Balance(uint32) (uint64, error)                      { return 0, c.balanceErr }
+func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
+	return &core.OrderBook{}, nil
+}
+func (c *TCore) Balance(uint32) (uint64, error) { return 0, c.balanceErr }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	if c.notHas {
 		return nil
@@ -233,7 +236,9 @@ type tLink struct {
 }
 
 func newLink() *tLink {
-	conn := new(TConn)
+	conn := &TConn{
+		respReady: make(chan []byte, 1),
+	}
 	cl := newWSClient("", conn, func(*msgjson.Message) *msgjson.Error { return nil })
 	return &tLink{
 		cl:   cl,
@@ -307,95 +312,70 @@ func TestLoadMarket(t *testing.T) {
 	link := newLink()
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
-	tBase := uint32(1)
-	tQuote := uint32(2)
-	tDEX := "abc"
+	link.cl.Start()
+	defer link.cl.Disconnect()
 	params := &marketLoad{
-		DEX:   tDEX,
-		Base:  tBase,
-		Quote: tQuote,
+		DEX:   "abc",
+		Base:  uint32(1),
+		Quote: uint32(2),
 	}
 
-	ensureWatching := func(base, quote uint32) {
-		// Add a tiny delay here because because it's convenient and this function
-		// is called right after a monitoring goroutine is started.
-		time.Sleep(time.Millisecond)
-		mktID := marketID(base, quote)
-		clientCount := 0
-		s.mtx.Lock()
-		// Make sure there is only one client total
-		for _, syncer := range s.syncers {
-			clientCount += len(syncer.clients)
-		}
-		syncer, found := s.syncers[mktID]
-		s.mtx.Unlock()
+	subscription, _ := msgjson.NewRequest(1, "loadmarket", params)
+	tCore.syncBook = &core.OrderBook{}
 
-		if clientCount != 1 {
-			t.Fatalf("expected 1 client, found %d", clientCount)
+	extractMessage := func() *msgjson.Message {
+		select {
+		case msgB := <-link.conn.respReady:
+			msg := new(msgjson.Message)
+			json.Unmarshal(msgB, &msg)
+			return msg
+		case <-time.NewTimer(time.Millisecond * 100).C:
+			t.Fatalf("extractMessage got nothing")
 		}
-
-		if !found {
-			t.Fatalf("no syncer found for market %s", mktID)
-		}
-
-		syncer.mtx.Lock()
-		_, found = syncer.clients[link.cl.cid]
-		syncer.mtx.Unlock()
-
-		if !found {
-			t.Fatalf("client not found in syncer list")
-		}
+		return nil
 	}
 
-	msg, _ := msgjson.NewRequest(1, "a", params)
-	ensureErr := func(name string, wantCode int) {
-		got := wsLoadMarket(s, link.cl, msg)
-		if got == nil {
-			t.Fatalf("%s: no error", name)
+	ensureGood := func() {
+		// Create a new feed for every request because a Close()d feed cannot be
+		// reused.
+		tCore.syncFeed = core.NewBookFeed(func(feed *core.BookFeed) {})
+		msgErr := s.handleMessage(link.cl, subscription)
+		if msgErr != nil {
+			t.Fatalf("'loadmarket' error: %d: %s", msgErr.Code, msgErr.Message)
 		}
-		if wantCode != got.Code {
-			t.Fatalf("%s, wanted %d, got %d", name, wantCode, got.Code)
+		msg := extractMessage()
+		if msg.Route != "book" {
+			t.Fatalf("wrong message received. Expected 'book', got %s", msg.Route)
+		}
+		if link.cl.feedLoop == nil {
+			t.Fatalf("nil book feed waiter after 'loadmarket'")
 		}
 	}
 
-	// Sync error from core is an error.
+	// Initial success.
+	ensureGood()
+
+	// Unsubscribe.
+	unsub, _ := msgjson.NewRequest(2, "unmarket", nil)
+	msgErr := s.handleMessage(link.cl, unsub)
+	if msgErr != nil {
+		t.Fatalf("'unmarket' error: %d: %s", msgErr.Code, msgErr.Message)
+	}
+
+	if link.cl.feedLoop != nil {
+		t.Fatalf("non-nil book feed waiter after 'unmarket'")
+	}
+
+	// Make sure a sync error propagates.
 	tCore.syncErr = tErr
-	ensureErr("sync", msgjson.RPCInternal)
+	msgErr = s.handleMessage(link.cl, subscription)
+	if msgErr == nil {
+		t.Fatalf("no handleMessage error from Sync error")
+	}
 	tCore.syncErr = nil
 
-	rpcErr := wsLoadMarket(s, link.cl, msg)
-	if rpcErr != nil {
-		t.Fatalf("error loading market: %v", rpcErr)
-	}
-
-	// Ensure the client is watching.
-	ensureWatching(tBase, tQuote)
-
-	// Load a new market, and make sure the old market was unloaded.
-	newBase := uint32(3)
-	newQuote := uint32(4)
-	params.Base = newBase
-	params.Quote = newQuote
-	msg, _ = msgjson.NewRequest(2, "a", params)
-	rpcErr = wsLoadMarket(s, link.cl, msg)
-	if rpcErr != nil {
-		t.Fatalf("error loading market: %v", rpcErr)
-	}
-	ensureWatching(newBase, newQuote)
-
-	// Unsubscribe
-	wsUnmarket(nil, link.cl, nil)
-
-	// Ensure there are no clients watching any markets.
-	s.mtx.Lock()
-	for _, syncer := range s.syncers {
-		syncer.mtx.Lock()
-		if len(syncer.clients) != 0 {
-			t.Fatalf("Syncer for market %d-%d still has %d clients after unMarket", syncer.base, syncer.quote, len(syncer.clients))
-		}
-		syncer.mtx.Unlock()
-	}
-	s.mtx.Unlock()
+	// Success again.
+	ensureGood()
 }
 
 func TestAPIRegister(t *testing.T) {

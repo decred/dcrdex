@@ -104,11 +104,11 @@ func createApp() {
 	if err != nil {
 		log.Errorf("error creating core logger")
 	}
+	core.UseLoggerMaker(lm)
 
 	clientCore, err = core.New(&core.Config{
-		DBPath:      cfg.DBPath, // global set in config.go
-		LoggerMaker: lm,
-		Net:         cfg.Net,
+		DBPath: cfg.DBPath, // global set in config.go
+		Net:    cfg.Net,
 	})
 	if err != nil {
 		log.Errorf("error creating client core: %v", err)

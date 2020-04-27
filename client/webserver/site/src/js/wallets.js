@@ -1,4 +1,4 @@
-import Doc, { StateIcons } from './doc'
+import Doc, { WalletIcons } from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
 import * as forms from './forms'
@@ -47,7 +47,7 @@ export default class WalletsPage extends BasePage {
       rowInfo.tr = tr
       rowInfo.symbol = tr.dataset.symbol
       rowInfo.name = tr.dataset.name
-      rowInfo.stateIcons = new StateIcons(tr)
+      rowInfo.stateIcons = new WalletIcons(tr)
       rowInfo.actions = {
         connect: getAction(tr, 'connect'),
         unlock: getAction(tr, 'unlock'),

@@ -580,10 +580,10 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 		switch asset {
 		case match.makerStatus.swapAsset:
 			// Maker's swap transaction is the asset of interest.
-			if user == match.Maker.User() && match.makerStatus.swap.TxID() == txid {
+			if user == match.Maker.User() {
 				// The swap contract tx is considered monitored until the swap
 				// is complete, regardless of confirms.
-				return true
+				return match.makerStatus.swap != nil && match.makerStatus.swap.TxID() == txid
 			}
 
 			// Taker's redemption transaction is the asset of interest.
@@ -594,10 +594,10 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 			}
 		case match.takerStatus.swapAsset:
 			// Taker's swap transaction is the asset of interest.
-			if user == match.Taker.User() && match.takerStatus.swap.TxID() == txid {
+			if user == match.Taker.User() {
 				// The swap contract tx is considered monitored until the swap
 				// is complete, regardless of confirms.
-				return true
+				return match.takerStatus.swap != nil && match.takerStatus.swap.TxID() == txid
 			}
 
 			// Maker's redemption transaction is the asset of interest.

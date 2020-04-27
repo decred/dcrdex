@@ -51,8 +51,7 @@ export class DepthChart {
     this.ctx = this.canvas.getContext('2d')
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
-    this.sells = []
-    this.buys = []
+    this.book = null
     this.dataExtents = null
     this.zoomState = {}
     parent.appendChild(this.canvas)
@@ -105,7 +104,7 @@ export class DepthChart {
     this.zoomInBttn = new Region(this.ctx, new Extents(0, 0, 0, 0))
     this.zoomOutBttn = new Region(this.ctx, new Extents(0, 0, 0, 0))
     this.rect = this.canvas.getBoundingClientRect()
-    this.draw()
+    if (this.book) this.draw()
   }
 
   // wheel_ is a mousewheel event handler.
@@ -117,11 +116,16 @@ export class DepthChart {
   zoom (bigger) {
     if (!this.zoomState) return
     if (this.wheelLimiter) return
-    if (!this.buys || !this.sells) return
+    if (!this.book.buys || !this.book.sells) return
     this.wheeled()
     const zoom = this.zoomState
     // If the current window already contains all available data, do nothing.
-    if (!bigger && zoom.high > last(this.sells).rate && zoom.low < last(this.buys).rate) return
+    const lastSell = last(this.book.sells) || false
+    const lastBuy = last(this.book.buys) || false
+    const midGap = this.gap()[0]
+    const low = lastBuy ? lastBuy.rate : midGap
+    const high = lastSell ? lastSell.rate : midGap
+    if (!bigger && zoom.high > high && zoom.low < low) return
     // Zoom in to 66%, but out to 150% = 1 / (2/3) so that the same zoom levels
     // are hit when reversing direction.
     const zoomRange = zoom.high - zoom.low
@@ -148,11 +152,10 @@ export class DepthChart {
   }
 
   // set sets the current data set and draws.
-  set (data) {
-    this.buys = data.book.buys
-    this.sells = data.book.sells
-    this.baseTicker = data.baseSymbol.toUpperCase()
-    this.quoteTicker = data.quoteSymbol.toUpperCase()
+  set (book) {
+    this.book = book
+    this.baseTicker = book.baseSymbol.toUpperCase()
+    this.quoteTicker = book.quoteSymbol.toUpperCase()
     this.zoomState = {}
     this.draw()
   }
@@ -166,53 +169,57 @@ export class DepthChart {
   // 5. Data.
   // 6. Legend.
   draw () {
-    const zoom = this.zoomState
     this.clear()
+    // if (!this.book || this.book.empty()) return
+    const zoom = this.zoomState
+
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
     const mousePos = this.mousePos
-    const buys = this.buys
-    const sells = this.sells
-    if (buys.length < 2 || sells.length < 2) return
+    const buys = this.book.buys
+    const sells = this.book.sells
     var sum = 0
     // The zoomState stores these high and low values to facilitate zooming. It
     // has to be high and low rather than leftEdge and rightEdge since the draw
     // loop adds some padding and extends horizontal lines outward for
     // aesthetics.
-    const high = zoom.high || last(sells).rate
-    const low = zoom.low || last(buys).rate
-    zoom.high = high
-    zoom.low = low
-    const midGap = (buys[0].rate + sells[0].rate) / 2
-    const gapWidth = sells[0].rate - buys[0].rate
-    const halfX = Math.min(high - midGap, midGap - low)
-    const xPad = halfX * 0.05
-    // Add a little x-padding.
-    const leftEdge = midGap - halfX - xPad / 2
-    const rightEdge = midGap + halfX + xPad / 2
+    const [midGap, gapWidth] = this.gap()
+    const lastSell = last(sells) || false
+    const lastBuy = last(buys) || false
+    var high = zoom.high || (lastSell ? lastSell.rate : midGap)
+    var low = zoom.low || (lastBuy ? lastBuy.rate : midGap)
 
+    // Clamp the zoom between 0.5% and 100% of mid-gap.
+    const minRange = Math.max(gapWidth * 2, midGap * 0.005)
+    const halfRange = clamp(high - low, minRange, midGap) / 2
+    zoom.high = high = midGap + halfRange
+    zoom.low = low = midGap - halfRange
     const buyDepth = []
     const sellDepth = []
     for (let i = 0; i < buys.length; i++) {
       const pt = buys[i]
       sum += pt.qty
       buyDepth.push([pt.rate, sum])
-      if (pt.rate < leftEdge) break
+      if (pt.rate < zoom.low) break
     }
-    // Add a data point going to the left so that the data doesn't end with a
-    // vertical line.
-    buyDepth.push([last(buyDepth)[0] - xPad, last(buyDepth)[1]])
+    const buySum = lastBuy ? last(buyDepth)[1] : 0
+    buyDepth.push([low - halfRange, buySum])
     sum = 0
     for (let i = 0; i < sells.length; i++) {
       const pt = sells[i]
       sum += pt.qty
       sellDepth.push([pt.rate, sum])
-      if (pt.rate > rightEdge) break
+      if (pt.rate > zoom.high) break
     }
-    sellDepth.push([last(sellDepth)[0] + xPad, last(sellDepth)[1]])
+    // Add a data point going to the left so that the data doesn't end with a
+    // vertical line.
+    const sellSum = lastSell ? last(sellDepth)[1] : 0
+    sellDepth.push([high + halfRange, sellSum])
+
     // Add 5% padding to the top of the chart.
-    const maxY = Math.max(last(buyDepth)[1], last(sellDepth)[1]) * 1.05
-    const dataExtents = new Extents(leftEdge, rightEdge, 0, maxY)
+    const maxY = sellSum && buySum ? Math.max(buySum, sellSum) * 1.05 : sellSum || buySum || 1
+
+    const dataExtents = new Extents(zoom.low, zoom.high, 0, maxY)
     this.dataExtents = dataExtents
 
     // Draw the axis tick labels.
@@ -358,7 +365,7 @@ export class DepthChart {
     }, true)
 
     // Print the x labels
-    this.xRegion.plot(new Extents(leftEdge, rightEdge, 0, 1), (ctx, tools) => {
+    this.xRegion.plot(new Extents(zoom.low, zoom.high, 0, 1), (ctx, tools) => {
       xLabels.lbls.forEach(lbl => {
         ctx.fillText(lbl.txt, tools.x(lbl.val), tools.y(0.5))
       })
@@ -434,6 +441,15 @@ export class DepthChart {
       ctx.globalAlpha = 0.4
       ctx.fill()
     })
+  }
+
+  gap () {
+    const [b, s] = [this.book.buys, this.book.sells]
+    if (!b.length) {
+      if (!s.length) return [1, 0]
+      return [s[0].rate, 0]
+    } else if (!s.length) return [b[0].rate, 0]
+    return [(s[0].rate + b[0].rate) / 2, s[0].rate - b[0].rate]
   }
 }
 
@@ -641,6 +657,12 @@ function widest (ctx, ...texts) {
     wide = Math.max(wide, ctx.measureText(txt).width)
   })
   return wide
+}
+
+function clamp (v, min, max) {
+  if (v < min) return min
+  if (v > max) return max
+  return v
 }
 
 // labelSpecs is specifications for axis tick labels.

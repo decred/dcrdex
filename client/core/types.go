@@ -4,9 +4,9 @@
 package core
 
 import (
+	"encoding/hex"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -156,8 +156,8 @@ func (m *Market) Display() string {
 }
 
 // mktID is a string ID constructed from the asset IDs.
-func (m *Market) mktID() string {
-	return mktID(m.BaseID, m.QuoteID)
+func (m *Market) marketName() string {
+	return marketName(m.BaseID, m.QuoteID)
 }
 
 // Exchange represents a single DEX with any number of markets.
@@ -203,18 +203,29 @@ func newDisplayIDFromSymbols(base, quote string) string {
 type MiniOrder struct {
 	Qty   float64 `json:"qty"`
 	Rate  float64 `json:"rate"`
-	Epoch bool    `json:"epoch"`
+	Epoch uint64  `json:"epoch"`
+	Sell  bool    `json:"sell"`
+	Token string  `json:"token"`
 }
 
-// OrderBook represents an order book, which is just two sorted lists of orders.
+// OrderBook represents an order book, which are sorted buys and sells, and
+// unsorted epoch orders.
 type OrderBook struct {
 	Sells []*MiniOrder `json:"sells"`
 	Buys  []*MiniOrder `json:"buys"`
+	Epoch []*MiniOrder `json:"epoch"`
 }
+
+const (
+	BookOrderAction   = "book_order"
+	EpochOrderAction  = "epoch_order"
+	UnbookOrderAction = "unbook_order"
+)
 
 // BookUpdate is an order book update.
 type BookUpdate struct {
-	Market string
+	Action string     `json:"action"`
+	Order  *MiniOrder `json:"order"`
 }
 
 // dexAccount is the core type to represent the client's account information for
@@ -359,6 +370,17 @@ type TradeForm struct {
 }
 
 // mktID is a string ID constructed from the asset IDs.
-func mktID(b, q uint32) string {
-	return strconv.Itoa(int(b)) + "-" + strconv.Itoa(int(q))
+func marketName(b, q uint32) string {
+	mkt, _ := dex.MarketName(b, q)
+	return mkt
+}
+
+// token is a short representation of a byte-slice-like ID, such as a match ID
+// or an order ID. The token is meant for display where the 64-character
+// hexadecimal IDs are untenable.
+func token(id []byte) string {
+	if len(id) < 4 {
+		return ""
+	}
+	return hex.EncodeToString(id[:4])
 }

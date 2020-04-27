@@ -70,11 +70,6 @@ func TestEpochQueue(t *testing.T) {
 	n3OrderID := [32]byte{'c'}
 	n3 := makeEpochOrderNote(mid, n3OrderID, msgjson.BuyOrderNum, 1, 2, n3Commitment, epoch)
 
-	n4Pimg := [32]byte{'4'}
-	n4Commitment := makeCommitment(n4Pimg)
-	n4OrderID := [32]byte{'d'}
-	n4 := makeEpochOrderNote(mid, n4OrderID, msgjson.BuyOrderNum, 1, 2, n4Commitment, epoch+1)
-
 	err := eq.Enqueue(n1)
 	if err != nil {
 		t.Fatalf("[Enqueue]: unexpected error: %v", err)
@@ -85,12 +80,6 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[Size] expected queue size of %d, got %d", 1, eq.Size())
 	}
 
-	// Enqueue an order from a different epoch.
-	err = eq.Enqueue(n4)
-	if err == nil {
-		t.Fatal("[Enqueue]: expected epoch mismatch error")
-	}
-
 	// Reset the epoch queue.
 	eq.Reset()
 
@@ -99,22 +88,10 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[Size] expected queue size of %d, got %d", 0, eq.Size())
 	}
 
-	// Ensure a new or reset epoch queue has an epoch of 0 (default).
-	epoch = eq.Epoch()
-	if epoch != 0 {
-		t.Fatalf("[Epoch]: expected epoch value of %d, got %d", 0, epoch)
-	}
-
 	// Ensure the epoch queue does not enqueue duplicate orders.
 	err = eq.Enqueue(n1)
 	if err != nil {
 		t.Fatalf("[Enqueue]: unexpected error: %v", err)
-	}
-
-	// Ensure the epoch is set when the first order note is queued.
-	epoch = eq.Epoch()
-	if err != nil {
-		t.Fatalf("[Epoch]: unexpected error: %v", err)
 	}
 
 	if epoch != n1.Epoch {
@@ -136,7 +113,7 @@ func TestEpochQueue(t *testing.T) {
 
 	// Ensure match proof generation fails if there epoch queue is empty.
 	preimages := []order.Preimage{n1Pimg, n2Pimg, n3Pimg}
-	_, _, err = eq.GenerateMatchProof(preimages, nil)
+	_, _, err = eq.GenerateMatchProof(0, preimages, nil)
 	if err == nil {
 		t.Fatalf("[GenerateMatchProof] expected an empty epoch queue error")
 	}
@@ -174,7 +151,7 @@ func TestEpochQueue(t *testing.T) {
 		t.Fatalf("[makeMatchProof] unexpected error: %v", err)
 	}
 
-	seed, cmtChecksum, err := eq.GenerateMatchProof(preimages, nil)
+	seed, cmtChecksum, err := eq.GenerateMatchProof(0, preimages, nil)
 	if err != nil {
 		t.Fatalf("[GenerateMatchProof] unexpected error: %v", err)
 	}
@@ -219,7 +196,7 @@ func TestEpochQueue(t *testing.T) {
 	}
 
 	misses := []order.OrderID{n2OrderID}
-	seed, cmtChecksum, err = eq.GenerateMatchProof(preimages, misses)
+	seed, cmtChecksum, err = eq.GenerateMatchProof(0, preimages, misses)
 	if err != nil {
 		t.Fatalf("[GenerateMatchProof] unexpected error: %v", err)
 	}
@@ -235,13 +212,13 @@ func TestEpochQueue(t *testing.T) {
 
 	// Ensure match proof fails when there is a preimage mismatch.
 	preimages = []order.Preimage{n1Pimg}
-	_, _, err = eq.GenerateMatchProof(preimages, nil)
+	_, _, err = eq.GenerateMatchProof(0, preimages, nil)
 	if err == nil {
 		t.Fatalf("[GenerateMatchProof] expected a preimage/orders mismatch")
 	}
 
 	preimages = []order.Preimage{n1Pimg, n2Pimg, n3Pimg}
-	_, _, err = eq.GenerateMatchProof(preimages, nil)
+	_, _, err = eq.GenerateMatchProof(0, preimages, nil)
 	if err == nil {
 		t.Fatalf("[GenerateMatchProof] expected no order match " +
 			"for preimate error")
@@ -302,7 +279,7 @@ func benchmarkGenerateMatchProof(c int, b *testing.B) {
 			}
 		}
 
-		_, _, err := eq.GenerateMatchProof(preimages, misses)
+		_, _, err := eq.GenerateMatchProof(0, preimages, misses)
 		if err != nil {
 			b.Error(err)
 		}

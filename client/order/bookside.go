@@ -106,8 +106,16 @@ func (d *bookSide) Remove(order *Order) error {
 	return fmt.Errorf("order %s not found", order.OrderID)
 }
 
+// orders is all orders for the side, sorted.
+func (d *bookSide) orders() []*Order {
+	orders, _ := d.BestNOrders(int(^uint(0) >> 1)) // Max int value
+	return orders
+}
+
 // BestNOrders returns the best N orders of the book side.
 func (d *bookSide) BestNOrders(n int) ([]*Order, bool) {
+	d.mtx.RLock()
+	defer d.mtx.RUnlock()
 	count := n
 	best := make([]*Order, 0)
 

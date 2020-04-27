@@ -229,7 +229,6 @@ out:
 			}
 
 			// Prepare the book/unbook/epoch note.
-			seq := subs.nextSeq()
 			var note interface{}
 			var route string
 			switch u.action {
@@ -248,7 +247,7 @@ out:
 					panic("non-limit order received with bookAction")
 				}
 				n := book.update(lo)
-				n.Seq = seq
+				n.Seq = subs.nextSeq()
 				note = n
 
 			case unbookAction:
@@ -260,7 +259,7 @@ out:
 				book.remove(lo)
 				oid := u.order.ID()
 				note = &msgjson.UnbookOrderNote{
-					Seq:      seq,
+					Seq:      subs.nextSeq(),
 					MarketID: book.name,
 					OrderID:  oid[:],
 				}
@@ -280,9 +279,12 @@ out:
 					epochNote.TargetID = o.TargetOrderID[:]
 				}
 
-				epochNote.Seq = seq
+				epochNote.Seq = subs.nextSeq()
 				epochNote.MarketID = book.name
 				epochNote.Epoch = uint64(u.epochIdx)
+				c := u.order.Commitment()
+				epochNote.Commit = c[:]
+
 				note = epochNote
 
 			case matchProofAction:

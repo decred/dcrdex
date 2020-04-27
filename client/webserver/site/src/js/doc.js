@@ -2,6 +2,14 @@ const parser = new window.DOMParser()
 
 const FPS = 30
 
+export const BipIDs = {
+  0: 'btc',
+  42: 'dcr',
+  2: 'ltc',
+  22: 'mona',
+  28: 'vtc'
+}
+
 // Parameters for printing asset values.
 const coinValueSpecs = {
   minimumSignificantDigits: 4,
@@ -110,6 +118,35 @@ export default class Doc {
   static logoPath (symbol) {
     return `/img/coins/${symbol}.png`
   }
+
+  /*
+   * timeSince returns a string representation of the duration since the specified
+   * unix timestamp.
+   */
+  static timeSince (t) {
+    var seconds = Math.floor(((new Date().getTime()) - t))
+    var result = ''
+    var count = 0
+    const add = (n, s) => {
+      if (n > 0 || count > 0) count++
+      if (n > 0) result += `${n} ${s} `
+      return count >= 2
+    }
+    var y, mo, d, h, m, s
+    [y, seconds] = timeMod(seconds, aYear)
+    if (add(y, 'y')) { return result }
+    [mo, seconds] = timeMod(seconds, aMonth)
+    if (add(mo, 'mo')) { return result }
+    [d, seconds] = timeMod(seconds, aDay)
+    if (add(d, 'd')) { return result }
+    [h, seconds] = timeMod(seconds, anHour)
+    if (add(h, 'h')) { return result }
+    [m, seconds] = timeMod(seconds, aMinute)
+    if (add(m, 'm')) { return result }
+    [s, seconds] = timeMod(seconds, 1000)
+    add(s, 's')
+    return result || '0 s'
+  }
 }
 
 /* Easing algorithms for animations. */
@@ -121,8 +158,8 @@ var Easing = {
   easeOutHard: t => (--t) * t * t + 1
 }
 
-/* StateIcons are used for controlling wallets in various places. */
-export class StateIcons {
+/* WalletIcons are used for controlling wallets in various places. */
+export class WalletIcons {
   constructor (box) {
     const stateIcon = (row, name) => row.querySelector(`[data-state=${name}]`)
     this.icons = {}
@@ -189,4 +226,16 @@ export class StateIcons {
 /* sleep can be used by async functions to pause for a specified period. */
 function sleep (ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+const aYear = 31536000000
+const aMonth = 2592000000
+const aDay = 86400000
+const anHour = 3600000
+const aMinute = 60000
+
+/* timeMod returns the quotient and remainder of t / dur. */
+function timeMod (t, dur) {
+  const n = Math.floor(t / dur)
+  return [n, t - n * dur]
 }
