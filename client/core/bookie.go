@@ -153,7 +153,7 @@ func (c *Core) Sync(url string, base, quote uint32) (*OrderBook, *BookFeed, erro
 	dc, found := c.conns[url]
 	c.connMtx.RUnlock()
 	if !found {
-		return nil, nil, fmt.Errorf("unkown DEX '%s'", url)
+		return nil, nil, fmt.Errorf("unknown DEX '%s'", url)
 	}
 
 	mkt := marketName(base, quote)
@@ -261,8 +261,8 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 func translateBookSide(ins []*orderbook.Order) (outs []*MiniOrder) {
 	for _, o := range ins {
 		outs = append(outs, &MiniOrder{
-			Qty:   float64(o.Quantity) / 1e8,
-			Rate:  float64(o.Rate) / 1e8,
+			Qty:   float64(o.Quantity) / conversionFactor,
+			Rate:  float64(o.Rate) / conversionFactor,
 			Sell:  o.Side == msgjson.SellOrderNum,
 			Token: token(o.OrderID[:]),
 		})
@@ -363,8 +363,8 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 // be supplied.
 func minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *MiniOrder {
 	return &MiniOrder{
-		Qty:   float64(trade.Quantity) / 1e8,
-		Rate:  float64(trade.Rate) / 1e8,
+		Qty:   float64(trade.Quantity) / conversionFactor,
+		Rate:  float64(trade.Rate) / conversionFactor,
 		Sell:  trade.Side == msgjson.SellOrderNum,
 		Token: token(oid),
 		Epoch: epoch,

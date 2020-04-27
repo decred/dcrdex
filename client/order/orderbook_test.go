@@ -293,6 +293,8 @@ func TestOrderBookBook(t *testing.T) {
 			),
 			wantErr: false,
 		},
+		// May want to re-implement strict sequence checking. Might use these tests
+		// again.
 		// {
 		// 	label: "Book buy order with outdated sequence value",
 		// 	orderBook: makeOrderBook(
@@ -362,6 +364,8 @@ func TestOrderBookBook(t *testing.T) {
 			expected: nil,
 			wantErr:  true,
 		},
+		// May want to re-implement strict sequence checking. Might use these tests
+		// again.
 		// {
 		// 	label: "Book sell order to synced order book with future sequence value",
 		// 	orderBook: makeOrderBook(
@@ -456,6 +460,8 @@ func TestOrderBookUnbook(t *testing.T) {
 			),
 			wantErr: false,
 		},
+		// May want to re-implement strict sequence checking. Might use these tests
+		// again.
 		// {
 		// 	label: "Unbook sell order with outdated sequence value",
 		// 	orderBook: makeOrderBook(
