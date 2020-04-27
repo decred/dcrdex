@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-type passwordReadResult struct {
+type passwordReadResponse struct {
 	password []byte
 	err      error
 }
@@ -27,12 +27,13 @@ func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 		return nil, err
 	}
 
-	done := make(chan passwordReadResult, 1)
+	passwordReadChan := make(chan passwordReadResponse, 1)
 
-	fmt.Print(prompt)
 	go func() {
+		fmt.Print(prompt)
 		pass, err := terminal.ReadPassword(syscall.Stdin)
-		done <- passwordReadResult{
+		fmt.Println()
+		passwordReadChan <- passwordReadResponse{
 			password: pass,
 			err:      err,
 		}
@@ -43,15 +44,14 @@ func PasswordPrompt(ctx context.Context, prompt string) ([]byte, error) {
 		_ = terminal.Restore(syscall.Stdin, initialTermState)
 		return nil, ctx.Err()
 
-	case passwordReadResult := <-done:
-		fmt.Println()
-		if passwordReadResult.err != nil {
-			return nil, passwordReadResult.err
+	case res := <-passwordReadChan:
+		if res.err != nil {
+			return nil, res.err
 		}
-		if passwordReadResult.password == nil {
+		if res.password == nil {
 			return nil, errors.New("password must not be empty")
 		}
-		return passwordReadResult.password, nil
+		return res.password, nil
 	}
 }
 
