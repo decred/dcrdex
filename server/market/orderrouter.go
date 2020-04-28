@@ -208,7 +208,11 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	var commit order.Commitment
 	copy(commit[:], limit.Commit)
 
-	// Create the limit order
+	// Create the limit order.
+	force := order.StandingTiF
+	if limit.TiF == msgjson.ImmediateOrderNum {
+		force = order.ImmediateTiF
+	}
 	lo := &order.LimitOrder{
 		P: order.Prefix{
 			AccountID:  user,
@@ -226,7 +230,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			Address:  limit.Address,
 		},
 		Rate:  limit.Rate,
-		Force: order.StandingTiF,
+		Force: force,
 	}
 
 	// NOTE: ServerTime is not yet set, so the order's ID, which is computed
