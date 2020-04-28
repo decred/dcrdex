@@ -12,6 +12,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
 
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/go-socks/socks"
@@ -19,7 +20,7 @@ import (
 
 // newHTTPClient returns a new HTTP client that is configured according to the
 // proxy and TLS settings in the associated connection configuration.
-func newHTTPClient(cfg *config) (*http.Client, error) {
+func newHTTPClient(cfg *config, urlStr string) (*http.Client, error) {
 	// Configure proxy if needed.
 	var dial func(network, addr string) (net.Conn, error)
 	if cfg.Proxy != "" {
@@ -43,12 +44,20 @@ func newHTTPClient(cfg *config) (*http.Client, error) {
 		return nil, err
 	}
 
+	uri, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing URL: %v", err)
+	}
+
 	pool := x509.NewCertPool()
 	if ok := pool.AppendCertsFromPEM(pem); !ok {
 		return nil, fmt.Errorf("invalid certificate file: %v",
 			cfg.RPCCert)
 	}
-	tlsConfig := &tls.Config{RootCAs: pool}
+	tlsConfig := &tls.Config{
+		RootCAs:    pool,
+		ServerName: uri.Hostname(),
+	}
 
 	// Create and return the new HTTP client potentially configured with a
 	// proxy and TLS.
@@ -67,12 +76,12 @@ func newHTTPClient(cfg *config) (*http.Client, error) {
 // response or error.
 func sendPostRequest(marshalledJSON []byte, cfg *config) (*msgjson.Message, error) {
 	// Generate a request to the configured RPC server.
-	url := "https://" + cfg.RPCAddr
+	urlStr := "https://" + cfg.RPCAddr
 	if cfg.PrintJSON {
 		fmt.Println(string(marshalledJSON))
 	}
 	bodyReader := bytes.NewReader(marshalledJSON)
-	httpRequest, err := http.NewRequest("POST", url, bodyReader)
+	httpRequest, err := http.NewRequest("POST", urlStr, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +93,7 @@ func sendPostRequest(marshalledJSON []byte, cfg *config) (*msgjson.Message, erro
 
 	// Create the new HTTP client that is configured according to the user-
 	// specified options and submit the request.
-	httpClient, err := newHTTPClient(cfg)
+	httpClient, err := newHTTPClient(cfg, urlStr)
 	if err != nil {
 		return nil, err
 	}

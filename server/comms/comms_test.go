@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -167,12 +168,18 @@ func sendReplace(t *testing.T, conn *wsConnStub, thing interface{}, old, new str
 }
 
 func newTestDEXClient(addr string, rootCAs *x509.CertPool) (*websocket.Conn, error) {
+	uri, err := url.Parse(addr)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing url: %v", err)
+	}
+
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment, // Same as DefaultDialer.
 		HandshakeTimeout: 10 * time.Second,          // DefaultDialer is 45 seconds.
 		TLSClientConfig: &tls.Config{
 			RootCAs:            rootCAs,
 			InsecureSkipVerify: true,
+			ServerName:         uri.Hostname(),
 		},
 	}
 

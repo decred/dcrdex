@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -89,6 +90,11 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 	var tlsConfig *tls.Config
 	if len(cfg.Cert) > 0 {
 
+		uri, err := url.Parse(cfg.URL)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing URL: %v", err)
+		}
+
 		rootCAs, _ := x509.SystemCertPool()
 		if rootCAs == nil {
 			rootCAs = x509.NewCertPool()
@@ -101,6 +107,7 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 		tlsConfig = &tls.Config{
 			RootCAs:    rootCAs,
 			MinVersion: tls.VersionTLS12,
+			ServerName: uri.Hostname(),
 		}
 	}
 
