@@ -540,6 +540,7 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 		// Get the coin from the backend and validate it.
 		dexCoin, err := assets.funding.Backend.FundingCoin(coin.ID, coin.Redeem)
 		if err != nil {
+			log.Debugf("FundingCoin error for %s coin %v: %v", assets.funding.Symbol, coin.ID, err)
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("error retrieving coin ID %v", coin.ID))
 		}
