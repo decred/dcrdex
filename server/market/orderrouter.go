@@ -556,6 +556,7 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 		// Make sure the UTXO has the requisite number of confirmations.
 		confs, err := dexCoin.Confirmations()
 		if err != nil {
+			log.Debugf("Confirmations error for %s coin %s: %v", assets.funding.Symbol, dexCoin, err)
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("coin confirmations error for %v: %v", dexCoin, err))
 		}
@@ -569,6 +570,7 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 		}
 		err = dexCoin.Auth(msgBytesToBytes(coin.PubKeys), msgBytesToBytes(coin.Sigs), coin.ID)
 		if err != nil {
+			log.Debugf("Auth error for %s coin %s: %v", assets.funding.Symbol, dexCoin, err)
 			return errSet(msgjson.CoinAuthError,
 				fmt.Sprintf("failed to authorize coin %v", dexCoin))
 		}
