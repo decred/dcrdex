@@ -559,6 +559,24 @@ func TestLimit(t *testing.T) {
 		t.Fatalf("no order submitted to epoch")
 	}
 
+	// Check TiF
+	epochOrder := oRecord.order.(*order.LimitOrder)
+	if epochOrder.Force != order.StandingTiF {
+		t.Errorf("Got force %v, expected %v (standing)", epochOrder.Force, order.StandingTiF)
+	}
+
+	// Now check with immediate TiF.
+	limit.TiF = msgjson.ImmediateOrderNum
+	ensureErr("valid order", sendLimit(), -1)
+	oRecord = oRig.market.pop()
+	if oRecord == nil {
+		t.Fatalf("no order submitted to epoch")
+	}
+	epochOrder = oRecord.order.(*order.LimitOrder)
+	if epochOrder.Force != order.ImmediateTiF {
+		t.Errorf("Got force %v, expected %v (immediate)", epochOrder.Force, order.ImmediateTiF)
+	}
+
 	// Test an invalid payload.
 	msg := new(msgjson.Message)
 	msg.Payload = []byte(`?`)
@@ -585,7 +603,7 @@ func TestLimit(t *testing.T) {
 	limit.Rate = rate
 
 	// Time-in-force incorrectly marked
-	limit.TiF = 0
+	limit.TiF = 0 // not msgjson.StandingOrderNum (1) or msgjson.ImmediateOrderNum (2)
 	ensureErr("bad tif", sendLimit(), msgjson.OrderParameterError)
 	limit.TiF = msgjson.StandingOrderNum
 
@@ -629,7 +647,7 @@ func TestLimit(t *testing.T) {
 	}
 
 	// Check the utxo
-	epochOrder := oRecord.order.(*order.LimitOrder)
+	epochOrder = oRecord.order.(*order.LimitOrder)
 	if len(epochOrder.Coins) != 1 {
 		t.Fatalf("expected 1 order UTXO, got %d", len(epochOrder.Coins))
 	}
