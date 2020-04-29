@@ -207,7 +207,7 @@ func (a *Archiver) BookOrders(base, quote uint32) ([]*order.LimitOrder, error) {
 	}
 
 	// Verify loaded orders are limits, and cast to *LimitOrder.
-	limits := make([]*order.LimitOrder, len(ords))
+	limits := make([]*order.LimitOrder, 0, len(ords))
 	for _, ord := range ords {
 		lo, ok := ord.(*order.LimitOrder)
 		if !ok {

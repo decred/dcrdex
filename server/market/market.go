@@ -137,6 +137,8 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 		return nil, err
 	}
 
+	log.Infof("Loaded %d stored book orders.", len(bookOrders))
+
 	Book := book.New(mktInfo.LotSize)
 	for _, lo := range bookOrders {
 		if ok := Book.Insert(lo); !ok {
