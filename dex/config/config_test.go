@@ -229,7 +229,7 @@ func TestMapToINIDataConversion(t *testing.T) {
 		"KEY4": "4.4",
 		"key5": "parsed as option, but not populated into struct",
 	}
-	cfgData := OptionsMapToINIData(m)
+	cfgData := optionsMapToINIData(m)
 
 	opts, err := Options(cfgData)
 	if err != nil {

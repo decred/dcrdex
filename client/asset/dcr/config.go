@@ -48,16 +48,13 @@ type DCRConfig struct {
 	Context context.Context
 }
 
-// loadConfig loads the DCRConfig from file. If no values are found for
-// RPCListen or RPCCert in the specified file, default values will be used.
-// If configPath is an empty string, loadConfig will attempt to read settings
-// directly from the default dcrwallet.conf filepath. If there is no error, the
-// module-level chainParams variable will be set appropriately for the network.
+// loadConfig loads the DCRConfig from a settings map. If no values are found
+// for RPCListen or RPCCert in the specified file, default values will be used.
+// If there is no error, the module-level chainParams variable will be set
+// appropriately for the network.
 func loadConfig(settings map[string]string, network dex.Network) (*DCRConfig, error) {
 	cfg := new(DCRConfig)
-	cfgData := config.OptionsMapToINIData(settings)
-	err := config.Parse(cfgData, cfg)
-	if err != nil {
+	if err := config.Unmapify(settings, cfg); err != nil {
 		return nil, fmt.Errorf("error parsing config: %v", err)
 	}
 

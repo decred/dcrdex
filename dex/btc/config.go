@@ -41,28 +41,25 @@ type Config struct {
 	RPCPort int    `ini:"rpcport"`
 }
 
-// LoadConfigFromPath wraps loadConfig to ensure that callers pass a string as
-// the first argument.
+// LoadConfigFromPath loads the configuration settings from the specified filepath.
 func LoadConfigFromPath(cfgPath string, name string, network dex.Network, ports NetPorts) (*Config, error) {
-	return loadConfig(cfgPath, name, network, ports)
-}
-
-// LoadConfigFromSettings wraps loadConfig to ensure that callers pass previously
-// extracted config options as the first argument.
-func LoadConfigFromSettings(settings map[string]string, name string, network dex.Network, ports NetPorts) (*Config, error) {
-	cfgData := config.OptionsMapToINIData(settings)
-	return loadConfig(cfgData, name, network, ports)
-}
-
-// loadConfig loads the configuration settings from the specified config file
-// or []byte data.
-func loadConfig(cfgPathOrData interface{}, name string, network dex.Network, ports NetPorts) (*Config, error) {
 	cfg := &Config{}
-	err := config.Parse(cfgPathOrData, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing config: %v", err)
+	if err := config.Parse(cfgPath, cfg); err != nil {
+		return nil, fmt.Errorf("error parsing config file: %v", err)
 	}
+	return checkConfig(cfg, name, network, ports)
+}
 
+// LoadConfigFromSettings loads the configuration settings from a settings map.
+func LoadConfigFromSettings(settings map[string]string, name string, network dex.Network, ports NetPorts) (*Config, error) {
+	cfg := &Config{}
+	if err := config.Unmapify(settings, cfg); err != nil {
+		return nil, fmt.Errorf("error parsing connection settings: %v", err)
+	}
+	return checkConfig(cfg, name, network, ports)
+}
+
+func checkConfig(cfg *Config, name string, network dex.Network, ports NetPorts) (*Config, error) {
 	if cfg.RPCUser == "" {
 		return nil, fmt.Errorf("no rpcuser set in %q config file", name)
 	}

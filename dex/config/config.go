@@ -10,15 +10,6 @@ import (
 	"gopkg.in/go-ini/ini.v1"
 )
 
-// OptionsMapToINIData generates a config []byte data from settings.
-func OptionsMapToINIData(options map[string]string) []byte {
-	var buffer bytes.Buffer
-	for key, value := range options {
-		buffer.WriteString(fmt.Sprintf("%s=%s\n", key, value))
-	}
-	return buffer.Bytes()
-}
-
 // Options returns a collection of all key-value options in provided config
 // file path or []byte data.
 func Options(cfgPathOrData interface{}) (map[string]string, error) {
@@ -39,6 +30,13 @@ func options(cfgFile *ini.File) map[string]string {
 	return options
 }
 
+// Unmapify parses config options from the provided settings map into the
+// specified struct object.
+func Unmapify(settings map[string]string, obj interface{}) error {
+	cfgData := optionsMapToINIData(settings)
+	return Parse(cfgData, obj)
+}
+
 // Parse parses config options from the provided config file path or []byte
 // data into the specified struct object.
 // If the config has section headers, the config options are first read into
@@ -55,10 +53,19 @@ func Parse(cfgPathOrData, obj interface{}) error {
 		// config file or data has non-default section headers, remove sections
 		// by extracting all config options and regenerating the config data.
 		cfgOptions := options(cfgFile)
-		cfgPathOrData = OptionsMapToINIData(cfgOptions)
+		cfgPathOrData = optionsMapToINIData(cfgOptions)
 		return Parse(cfgPathOrData, obj)
 	}
 
 	err = cfgFile.MapTo(obj)
 	return err
+}
+
+// optionsMapToINIData generates a config []byte data from settings.
+func optionsMapToINIData(settings map[string]string) []byte {
+	var buffer bytes.Buffer
+	for key, value := range settings {
+		buffer.WriteString(fmt.Sprintf("%s=%s\n", key, value))
+	}
+	return buffer.Bytes()
 }
