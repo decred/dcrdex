@@ -426,7 +426,7 @@ func TestAPILogin(t *testing.T) {
 	}
 
 	goodBody := &loginForm{
-		Pass: "def",
+		Pass: PassBytes("def"),
 	}
 	body = goodBody
 	ensure(`{"ok":true,"notes":null}`)
@@ -501,7 +501,7 @@ func TestAPIInit(t *testing.T) {
 	}
 
 	goodBody := &loginForm{
-		Pass: "def",
+		Pass: PassBytes("def"),
 	}
 	body = goodBody
 	ensure(`{"ok":true,"notes":null}`)
@@ -546,7 +546,7 @@ func TestAPINewWallet(t *testing.T) {
 	body = &newWalletForm{
 		Account: "account",
 		INIPath: "/path/to/somewhere",
-		Pass:    "123",
+		Pass:    PassBytes("123"),
 	}
 	tCore.notHas = true
 	ensure(`{"ok":true}`)

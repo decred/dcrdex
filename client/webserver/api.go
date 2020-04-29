@@ -13,19 +13,6 @@ import (
 	"decred.org/dcrdex/dex/encode"
 )
 
-// standardResponse is a basic API response when no data needs to be returned.
-type standardResponse struct {
-	OK  bool   `json:"ok"`
-	Msg string `json:"msg,omitempty"`
-}
-
-// simpleAck is a plain standardResponse with "ok" = true.
-func simpleAck() *standardResponse {
-	return &standardResponse{
-		OK: true,
-	}
-}
-
 // apiPreRegister is the handler for the '/preregister' API request.
 func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
 	form := new(core.PreRegisterForm)
@@ -47,16 +34,10 @@ func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
-// registration is used to register a new DEX account.
-type registration struct {
-	URL      string `json:"url"`
-	Password string `json:"pass"`
-	Fee      uint64 `json:"fee"`
-}
-
 // apiRegister is the handler for the '/register' API request.
 func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	reg := new(registration)
+	defer encode.ClearBytes(reg.Password)
 	if !readPost(w, r, reg) {
 		return
 	}
@@ -75,13 +56,11 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	regPass := []byte(reg.Password)
 	err := s.core.Register(&core.RegisterForm{
 		URL:     reg.URL,
-		AppPass: regPass,
+		AppPass: reg.Password,
 		Fee:     reg.Fee,
 	})
-	encode.ClearBytes(regPass)
 	if err != nil {
 		s.writeAPIError(w, "registration error: %v", err)
 		return
@@ -92,20 +71,11 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-// newWalletForm is information necessary to create a new wallet.
-type newWalletForm struct {
-	AssetID uint32 `json:"assetID"`
-	// These are only used if the Decred wallet does not already exist. In that
-	// case, these parameters will be used to create the wallet.
-	Account string `json:"account"`
-	INIPath string `json:"inipath"`
-	Pass    string `json:"pass"`
-	AppPW   string `json:"appPass"`
-}
-
 // apiNewWallet is the handler for the '/newwallet' API request.
 func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	form := new(newWalletForm)
+	defer encode.ClearBytes(form.AppPW)
+	defer encode.ClearBytes(form.Pass)
 	if !readPost(w, r, form) {
 		return
 	}
@@ -115,15 +85,11 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Wallet does not exist yet. Try to create it.
-	appPass := []byte(form.AppPW)
-	walletPass := []byte(form.Pass)
-	err := s.core.CreateWallet(appPass, walletPass, &core.WalletForm{
+	err := s.core.CreateWallet(form.AppPW, form.Pass, &core.WalletForm{
 		AssetID: form.AssetID,
 		Account: form.Account,
 		INIPath: form.INIPath,
 	})
-	encode.ClearBytes(appPass)
-	encode.ClearBytes(walletPass)
 	if err != nil {
 		s.writeAPIError(w, "error creating %s wallet: %v", unbip(form.AssetID), err)
 		return
@@ -132,16 +98,11 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-// openWalletForm is information necessary to open a wallet.
-type openWalletForm struct {
-	AssetID uint32 `json:"assetID"`
-	Pass    string `json:"pass"` // Application password.
-}
-
 // apiOpenWallet is the handler for the '/openwallet' API request. Unlocks the
 // specified wallet.
 func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	form := new(openWalletForm)
+	defer encode.ClearBytes(form.Pass)
 	if !readPost(w, r, form) {
 		return
 	}
@@ -150,9 +111,7 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "No wallet for %d -> %s", form.AssetID, unbip(form.AssetID))
 		return
 	}
-	pw := []byte(form.Pass)
-	err := s.core.OpenWallet(form.AssetID, pw)
-	encode.ClearBytes(pw)
+	err := s.core.OpenWallet(form.AssetID, form.Pass)
 	if err != nil {
 		s.writeAPIError(w, "error unlocking %s wallet: %v", unbip(form.AssetID), err)
 		return
@@ -176,20 +135,14 @@ func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-type tradeForm struct {
-	Pass  string          `json:"pw"`
-	Order *core.TradeForm `json:"order"`
-}
-
 // apiTrade is the handler for the '/trade' API request.
 func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	form := new(tradeForm)
+	defer encode.ClearBytes(form.Pass)
 	if !readPost(w, r, form) {
 		return
 	}
-	pw := []byte(form.Pass)
-	ord, err := s.core.Trade(pw, form.Order)
-	encode.ClearBytes(pw)
+	ord, err := s.core.Trade(form.Pass, form.Order)
 	if err != nil {
 		s.writeAPIError(w, "error placing order: %v", err)
 		return
@@ -204,20 +157,14 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, resp, s.indent)
 }
 
-type cancelForm struct {
-	Pass    string `json:"pw"`
-	OrderID string `json:"orderID"`
-}
-
 // apiCancel is the handler for the '/cancel' API request.
 func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	form := new(cancelForm)
+	defer encode.ClearBytes(form.Pass)
 	if !readPost(w, r, form) {
 		return
 	}
-	pw := []byte(form.Pass)
-	err := s.core.Cancel(pw, form.OrderID)
-	encode.ClearBytes(pw)
+	err := s.core.Cancel(form.Pass, form.OrderID)
 	if err != nil {
 		s.writeAPIError(w, "error cancelling order %s: %v", form.OrderID, err)
 		return
@@ -242,20 +189,14 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-// The loginForm is sent by the client to log in to a DEX.
-type loginForm struct {
-	Pass string `json:"pass"`
-}
-
 // apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
+	defer encode.ClearBytes(login.Pass)
 	if !readPost(w, r, login) {
 		return
 	}
-	pw := []byte(login.Pass)
-	err := s.core.InitializeClient(pw)
-	encode.ClearBytes(pw)
+	err := s.core.InitializeClient(login.Pass)
 	if err != nil {
 		s.writeAPIError(w, "initialization error: %v", err)
 		return
@@ -263,26 +204,20 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	s.actuallyLogin(w, r, login)
 }
 
-// apiLogin handles the 'login' API request.
+// apiLogin handles the 'login' API request. ..
 func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
+	defer encode.ClearBytes(login.Pass)
 	if !readPost(w, r, login) {
 		return
 	}
 	s.actuallyLogin(w, r, login)
 }
 
-// withdrawForm is sent to initiate a withdraw.
-type withdrawForm struct {
-	AssetID uint32 `json:"assetID"`
-	Value   uint64 `json:"value"`
-	Address string `json:"address"`
-	Pass    string `json:"pw"`
-}
-
 // apiWithdraw handles the 'withdraw' API request.
 func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 	form := new(withdrawForm)
+	defer encode.ClearBytes(form.Pass)
 	if !readPost(w, r, form) {
 		return
 	}
@@ -291,9 +226,7 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "no wallet found for %s", unbip(form.AssetID))
 		return
 	}
-	pw := []byte(form.Pass)
-	coin, err := s.core.Withdraw(pw, form.AssetID, form.Value)
-	encode.ClearBytes(pw)
+	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value)
 	if err != nil {
 		s.writeAPIError(w, "withdraw error: %v", err)
 		return
