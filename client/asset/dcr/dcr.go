@@ -206,6 +206,15 @@ func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.N
 	return NewWallet(cfg, logger, network)
 }
 
+// DecodeCoinID creates a human-readable representation of a coin ID for Decred.
+func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
+	txid, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%v:%d", txid, vout), err
+}
+
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return walletInfo
@@ -486,15 +495,6 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	}
 	return dcr.node.LockUnspent(true, ops)
 }
-
-// DecodeCoinID creates a human-readable representation of a coin ID.
-// func (dcr *ExchangeWallet) DecodeCoinID(coinID dex.Bytes) (string, error) {
-// 	txHash, vout, err := decodeCoinID(coinID)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	return fmt.Sprintf("%v:%d", txHash, vout), err
-// }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
 // method might be called to reinitialize an order from data stored externally.

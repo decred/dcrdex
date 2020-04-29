@@ -194,6 +194,16 @@ func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.N
 	return NewWallet(cfg, logger, network)
 }
 
+// DecodeCoinID creates a human-readable representation of a coin ID for
+// Bitcoin.
+func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
+	txid, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%v:%d", txid, vout), err
+}
+
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
 	return walletInfo
@@ -448,15 +458,6 @@ func (btc *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	}
 	return btc.wallet.LockUnspent(true, ops)
 }
-
-// DecodeCoinID creates a human-readable representation of a coin ID.
-// func (dcr *ExchangeWallet) DecodeCoinID(coinID dex.Bytes) (string, error) {
-// 	txHash, vout, err := decodeCoinID(coinID)
-// 	if err != nil {
-// 		return "", err
-// 	}
-// 	return fmt.Sprintf("%v:%d", txHash, vout), err
-// }
 
 // FundingCoins gets funding coins for the coin IDs. The coins are locked. This
 // method might be called to reinitialize an order from data stored externally.
@@ -1002,7 +1003,7 @@ func (btc *ExchangeWallet) Address() (string, error) {
 }
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
-// the registartion fee, and the fee rate is taken from the DEX configuration.
+// the registration fee, and the fee rate is taken from the DEX configuration.
 func (btc *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset) (asset.Coin, error) {
 	txHash, vout, sent, err := btc.send(address, regFee, nfo.FeeRate, false)
 	if err != nil {

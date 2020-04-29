@@ -825,12 +825,17 @@ func TestDexConnectionOrderBook(t *testing.T) {
 }
 
 type tDriver struct {
-	f     func(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error)
-	winfo *asset.WalletInfo
+	f       func(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error)
+	decoder func(coinID []byte) (string, error)
+	winfo   *asset.WalletInfo
 }
 
 func (drv *tDriver) Setup(cfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
 	return drv.f(cfg, logger, net)
+}
+
+func (drv *tDriver) DecodeCoinID(coinID []byte) (string, error) {
+	return drv.decoder(coinID)
 }
 
 func (drv *tDriver) Info() *asset.WalletInfo {
@@ -846,6 +851,12 @@ func TestCreateWallet(t *testing.T) {
 	tILT := &a
 	tILT.Symbol = "ilt"
 	tILT.ID, _ = dex.BipSymbolID(tILT.Symbol)
+
+	// ILT is based on DCR, so use it's coinID decoder. If this changes, update
+	// the following decoder function:
+	decoder := func(coinID []byte) (string, error) {
+		return asset.DecodeCoinID(tDCR.ID, coinID) // using DCR decoder
+	}
 
 	// Create registration form.
 	form := &WalletForm{
@@ -884,7 +895,8 @@ func TestCreateWallet(t *testing.T) {
 		f: func(wCfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
 			return wallet.Wallet, nil
 		},
-		winfo: &asset.WalletInfo{},
+		decoder: decoder,
+		winfo:   &asset.WalletInfo{},
 	})
 
 	// Connection error.

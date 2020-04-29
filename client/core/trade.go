@@ -660,8 +660,8 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 	}
 
 	// Send the transaction.
-	wallet := t.wallets.toWallet
-	coinIDs, outCoin, err := wallet.Redeem(redemptions, t.wallets.toAsset)
+	redeemWallet, redeemAsset := t.wallets.toWallet, t.wallets.toAsset // this is our redeem
+	coinIDs, outCoin, err := redeemWallet.Redeem(redemptions, redeemAsset)
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {
@@ -676,23 +676,33 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		)
 	}
 
+	coinToStr := func(assetID uint32, coinID []byte) string {
+		coinStr, err := asset.DecodeCoinID(assetID, coinID)
+		if err != nil {
+			// Coin IDs come from wallet.Redeem so this shouldn't happen. Warn.
+			log.Warnf("redeemMatches: invalid redeemed coin ID %v: %v", coinID, err)
+			return "<invalid coin>"
+		}
+		return coinStr
+	}
+
 	// Send the redemption information to the DEX.
-	//coinStrs := make([]string, len(matches))
 	for i, match := range matches {
 		_, _, proof, auth := match.parts()
 		coinID := []byte(coinIDs[i])
-		//coinStrs[i], _ = t.wallets.toWallet.DecodeCoinID(coinIDs[i]) // unless Redeem returns output asset.Coin
 		msgRedeem := &msgjson.Redeem{
 			OrderID: t.ID().Bytes(),
 			MatchID: match.id.Bytes(),
 			CoinID:  coinID,
 			Secret:  proof.Secret,
 		}
+
 		ack := new(msgjson.Acknowledgement)
 		err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack)
 		if err != nil {
 			match.failErr = err
-			errs.add("error sending 'redeem' message for match %s, coin %x: %v", match.id, coinID, err)
+			errs.add("error sending 'redeem' message for match %s, coin %x: %v",
+				match.id, coinToStr(redeemAsset.ID, coinID), err)
 			continue
 		}
 		sigMsg, _ := msgRedeem.Serialize()
@@ -716,13 +726,14 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		}
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
-			errs.add("error storing match info in database for match %s, coin %s", match.id, coinID)
+			errs.add("error storing match info in database for match %s, coin %s",
+				match.id, coinToStr(redeemAsset.ID, coinID))
 			continue
 		}
 	}
 
-	log.Infof("Broadcasted %d redeem transactions for order %v, paying to: %v",
-		len(redemptions), t.ID(), outCoin.String())
+	log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s:%s",
+		len(redemptions), t.ID(), redeemAsset.Symbol, outCoin)
 
 	return errs.ifany()
 }
@@ -855,15 +866,24 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 		return errs.add("Audit - %v", err)
 	}
 
+	coinToStr := func(assetID uint32, coinID []byte) string {
+		coinStr, err := asset.DecodeCoinID(assetID, coinID)
+		if err != nil {
+			log.Warnf("processRedemption: invalid redemption coin ID %v: %v", coinID, err)
+			return "<invalid coin>"
+		}
+		return coinStr
+	}
+
 	// Update the database.
 	dbMatch, _, proof, auth := match.parts()
 	auth.RedemptionSig = redemption.Sig
 	auth.RedemptionStamp = redemption.Time
+	redeemAsset := t.wallets.fromAsset // this redeem is the other party's
 	if dbMatch.Side == order.Maker {
 		// You are the maker, this is the taker's redeem.
 		log.Debugf("Notified of taker's redemption (%s: %v) for order %v...",
-			t.wallets.fromAsset.Symbol, redemption.CoinID, t.ID())
-		// NOTE: DecodeCoinID would be helpful here ^.
+			redeemAsset.Symbol, coinToStr(redeemAsset.ID, redemption.CoinID), t.ID())
 		match.setStatus(order.MatchComplete)
 		proof.TakerRedeem = []byte(redemption.CoinID)
 		err := t.db.UpdateMatch(&match.MetaMatch)
@@ -886,8 +906,7 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	}
 
 	log.Infof("Notified of maker's redemption (%s: %v) and validated secret for order %v...",
-		t.wallets.fromAsset.Symbol, redemption.CoinID, t.ID())
-	// NOTE: DecodeCoinID would be helpful here ^.
+		redeemAsset.Symbol, coinToStr(redeemAsset.ID, redemption.CoinID), t.ID())
 
 	match.setStatus(order.MakerRedeemed)
 	proof.MakerRedeem = []byte(redemption.CoinID)

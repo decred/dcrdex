@@ -61,8 +61,6 @@ type Wallet interface {
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
-	// DecodeCoinID creates a human-readable representation of a coin ID.
-	//DecodeCoinID(dex.Bytes) (string, error)
 	// FundingCoins gets funding coins for the coin IDs. The coins are locked.
 	// This method might be called to reinitialize an order from data stored
 	// externally. This method will only return funding coins, e.g. unspent
