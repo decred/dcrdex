@@ -43,6 +43,10 @@ const (
 		commit, coins, quantity, rate, force, status, filled
 	FROM %s WHERE oid = $1;`
 
+	SelectOrdersByStatus = `SELECT oid, type, sell, account_id, address, client_time, server_time,
+		commit, coins, quantity, rate, force, filled
+	FROM %s WHERE status = $1;`
+
 	// SelectUserOrders retrieves all columns of all orders for the given
 	// account ID.
 	SelectUserOrders = `SELECT oid, type, sell, account_id, address, client_time, server_time,
@@ -68,11 +72,9 @@ const (
 	SelectOrderPreimage = `SELECT preimage FROM %s WHERE oid = $1;`
 
 	// SelectOrderCoinIDs retrieves the order id, sell flag, and coins for all
-	// orders in a table with one of the given statuses. Note that this includes
-	// all order statuses.
+	// orders in a certain table.
 	SelectOrderCoinIDs = `SELECT oid, sell, coins
-		FROM %s
-		WHERE type = ANY($1);`
+		FROM %s;`
 
 	SetOrderPreimage     = `UPDATE %s SET preimage = $1 WHERE oid = $2;`
 	SetOrderCompleteTime = `UPDATE %s SET complete_time = $1
