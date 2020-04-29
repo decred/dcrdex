@@ -107,7 +107,7 @@ func TestReadCert(t *testing.T) {
 		args, want          []string
 		wantErr             bool
 	}{{
-		name:     "ok with",
+		name:     "ok with cert",
 		cmd:      "preregister",
 		args:     []string{"1.2.3.4:3000", "./cert"},
 		certPath: "./cert",
@@ -130,7 +130,7 @@ func TestReadCert(t *testing.T) {
 		if test.certPath != "" {
 			createCertAtPath(test.certPath)
 		}
-		params, err := readCert(test.cmd, test.args)
+		err := readCert(test.cmd, test.args)
 		os.Remove(test.certPath)
 		if err != nil {
 			if test.wantErr {
@@ -140,8 +140,8 @@ func TestReadCert(t *testing.T) {
 		} else if test.wantErr {
 			t.Fatalf("expected error for test %s", test.name)
 		}
-		if !reflect.DeepEqual(test.want, params) {
-			t.Fatalf("wanted %v but got %v for test %s", test.want, params, test.name)
+		if !reflect.DeepEqual(test.want, test.args) {
+			t.Fatalf("wanted %v but got %v for test %s", test.want, test.args, test.name)
 		}
 	}
 }

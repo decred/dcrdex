@@ -96,7 +96,7 @@ func TestListCommands(t *testing.T) {
 	for _, r := range sortHelpKeys() {
 		msg := helpMsgs[r]
 		if msg.pwArgsShort != "" {
-			want += r + " " + msg.pwArgsShort + " " + msg.argsShort + "\n"
+			want += r + " " + format(msg.pwArgsShort, " ") + msg.argsShort + "\n"
 		} else {
 			want += r + " " + msg.argsShort + "\n"
 		}
@@ -113,8 +113,8 @@ func TestCommandUsage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for command %s", r)
 		}
-		want := r + " " + msg.argsShort + "\n\n" + msg.cmdSummary + "\n\n" + msg.argsLong +
-			"\n\n" + msg.returns
+		want := r + " " + msg.argsShort + "\n\n" + msg.cmdSummary + "\n\n" +
+			format(msg.argsLong, "\n\n") + msg.returns
 		if res != want {
 			t.Fatalf("wanted %s but got %s for usage of %s without passwords", want, res, r)
 		}
@@ -125,9 +125,9 @@ func TestCommandUsage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error for command %s", r)
 			}
-			want = r + " " + msg.pwArgsShort + " " + msg.argsShort + "\n\n" +
-				msg.cmdSummary + "\n\n" + msg.pwArgsLong + "\n\n" + msg.argsLong +
-				"\n\n" + msg.returns
+			want = r + " " + format(msg.pwArgsShort, " ") + msg.argsShort + "\n\n" +
+				msg.cmdSummary + "\n\n" + format(msg.pwArgsLong, "\n\n") +
+				format(msg.argsLong, "\n\n") + msg.returns
 			if res != want {
 				t.Fatalf("wanted %s but got %s for usage of %s with passwords", want, res, r)
 			}

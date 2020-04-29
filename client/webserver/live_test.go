@@ -13,8 +13,8 @@ import (
 	"math/rand"
 	"os"
 	"sort"
-	"strings"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,18 +24,18 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/slog"
 )
 
 var (
-	tCtx context.Context
-	maxDelay = time.Second * 2
+	tCtx          context.Context
+	maxDelay      = time.Second * 2
 	epochDuration = time.Second * 120 // milliseconds
-	feedPeriod = time.Second * 10
+	feedPeriod    = time.Second * 10
 )
 
 func randomDelay() {
@@ -147,9 +147,9 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 	}
 
 	return &core.MiniOrder{
-		Qty: math.Exp(-rand.Float64()*5) * maxQty,
-		Rate: rate,
-		Sell: sell,
+		Qty:   math.Exp(-rand.Float64()*5) * maxQty,
+		Rate:  rate,
+		Sell:  sell,
 		Token: nextToken(),
 		Epoch: epochIdx,
 	}
@@ -228,10 +228,10 @@ type TCore struct {
 	midGap   float64
 	maxQty   float64
 	feed     *core.BookFeed
-	killFeed  context.CancelFunc
-	buys      map[string]*core.MiniOrder
-	sells     map[string]*core.MiniOrder
-	noteFeed  chan core.Notification
+	killFeed context.CancelFunc
+	buys     map[string]*core.MiniOrder
+	sells    map[string]*core.MiniOrder
+	noteFeed chan core.Notification
 }
 
 func newTCore() *TCore {
@@ -284,58 +284,60 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 		default:
 		}
 	}
-	go func(){
-		out:
-			for {
-				select{
-				case <-time.NewTicker(feedPeriod).C:
-					// Send a random order to the order feed. Slighly biased away from
-					// unbook_order and towards book_order.
-					r := rand.Float32()
-					switch{
-					case r < 0.33:
-						// Epoch order
-						trySend(&core.BookUpdate{
-							Action: msgjson.EpochOrderRoute,
-							Order: randomOrder(rand.Float32() < 0.5, c.maxQty, c.midGap, 0.05 * c.midGap, true),
-						})
-					case r < 0.76:
-						// Book order
-						sell := rand.Float32() < 0.5
-						ord := randomOrder(sell, c.maxQty, c.midGap, 0.05 * c.midGap, false)
-						side := c.buys
-						if sell{
-							side = c.sells
-						}
-						side[ord.Token] = ord
-						trySend(&core.BookUpdate{
-							Action: msgjson.BookOrderRoute,
-							Order: ord,
-						})
-					default:
-						// Unbook order
-						sell := rand.Float32() < 0.5
-						side := c.buys
-						if sell{
-							side = c.sells
-						}
-						var tkn string
-						for tkn = range side {
-							break
-						}
-						if (tkn == "") { continue }
-						delete(side, tkn)
-
-						trySend(&core.BookUpdate{
-							Action: msgjson.UnbookOrderRoute,
-							Order: &core.MiniOrder{Token: tkn},
-						})
+	go func() {
+	out:
+		for {
+			select {
+			case <-time.NewTicker(feedPeriod).C:
+				// Send a random order to the order feed. Slighly biased away from
+				// unbook_order and towards book_order.
+				r := rand.Float32()
+				switch {
+				case r < 0.33:
+					// Epoch order
+					trySend(&core.BookUpdate{
+						Action: msgjson.EpochOrderRoute,
+						Order:  randomOrder(rand.Float32() < 0.5, c.maxQty, c.midGap, 0.05*c.midGap, true),
+					})
+				case r < 0.76:
+					// Book order
+					sell := rand.Float32() < 0.5
+					ord := randomOrder(sell, c.maxQty, c.midGap, 0.05*c.midGap, false)
+					side := c.buys
+					if sell {
+						side = c.sells
 					}
-				case <-ctx.Done():
-					break out
+					side[ord.Token] = ord
+					trySend(&core.BookUpdate{
+						Action: msgjson.BookOrderRoute,
+						Order:  ord,
+					})
+				default:
+					// Unbook order
+					sell := rand.Float32() < 0.5
+					side := c.buys
+					if sell {
+						side = c.sells
+					}
+					var tkn string
+					for tkn = range side {
+						break
+					}
+					if tkn == "" {
+						continue
+					}
+					delete(side, tkn)
+
+					trySend(&core.BookUpdate{
+						Action: msgjson.UnbookOrderRoute,
+						Order:  &core.MiniOrder{Token: tkn},
+					})
 				}
+			case <-ctx.Done():
+				break out
 			}
-		}()
+		}
+	}()
 	return c.book(), c.feed, nil
 }
 
@@ -566,7 +568,7 @@ func (c *TCore) runEpochs() {
 	epochTick := time.NewTimer(time.Second).C
 out:
 	for {
-		select{
+		select {
 		case <-epochTick:
 			epochTick = time.NewTimer(epochDuration - time.Since(time.Now().Truncate(epochDuration))).C
 			c.noteFeed <- &core.EpochNotification{
@@ -595,7 +597,7 @@ func TestServer(t *testing.T) {
 
 	if register {
 		tCore.InitializeClient("")
-		tCore.Register(new(core.Registration))
+		tCore.Register(new(core.RegisterForm))
 	}
 
 	s, err := New(tCore, ":54321", logger, true)

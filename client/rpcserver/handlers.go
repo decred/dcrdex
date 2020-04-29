@@ -252,6 +252,15 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(registerRoute, &resp, nil)
 }
 
+// format concatenates thing and tail. If thing is empty, returns an empty
+// string.
+var format = func(thing, tail string) string {
+	if thing == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s%s", thing, tail)
+}
+
 // ListCommands prints a short usage string for every route available to the
 // rpcserver.
 func ListCommands(includePasswords bool) string {
@@ -262,8 +271,8 @@ func ListCommands(includePasswords bool) string {
 		// If help should include password arguments and this command
 		// has password arguments, add them to the help message.
 		if includePasswords && msg.pwArgsShort != "" {
-			_, err = sb.WriteString(fmt.Sprintf("%s %s %s\n", r, msg.pwArgsShort,
-				msg.argsShort))
+			_, err = sb.WriteString(fmt.Sprintf("%s %s%s\n", r,
+				format(msg.pwArgsShort, " "), msg.argsShort))
 		} else {
 			_, err = sb.WriteString(fmt.Sprintf("%s %s\n", r, msg.argsShort))
 		}
@@ -286,12 +295,13 @@ func commandUsage(cmd string, includePasswords bool) (string, error) {
 	// If help should include password arguments and this command has
 	// password arguments, return them as part of the help message.
 	if includePasswords && msg.pwArgsShort != "" {
-		return fmt.Sprintf("%s %s %s\n\n%s\n\n%s\n\n%s\n\n%s",
-			cmd, msg.pwArgsShort, msg.argsShort, msg.cmdSummary, msg.pwArgsLong,
-			msg.argsLong, msg.returns), nil
+		return fmt.Sprintf("%s %s%s\n\n%s\n\n%s%s%s",
+			cmd, format(msg.pwArgsShort, " "), msg.argsShort,
+			msg.cmdSummary, format(msg.pwArgsLong, "\n\n"), format(msg.argsLong, "\n\n"),
+			msg.returns), nil
 	}
-	return fmt.Sprintf("%s %s\n\n%s\n\n%s\n\n%s", cmd, msg.argsShort, msg.cmdSummary,
-		msg.argsLong, msg.returns), nil
+	return fmt.Sprintf("%s %s\n\n%s\n\n%s%s", cmd, msg.argsShort,
+		msg.cmdSummary, format(msg.argsLong, "\n\n"), msg.returns), nil
 }
 
 // sortHelpKeys returns a sorted list of helpMsgs keys.
@@ -323,94 +333,95 @@ type helpMsg struct {
 // 6. An extensive breakdown of the returned values.
 var helpMsgs = map[string]helpMsg{
 	helpRoute: {
-		``,                           // password args example input
-		`("cmd") (includePasswords)`, // args example input
-		`Print a help message.`,      // command explanation
-		``,                           // password args breakdown
-		`Args:
+		pwArgsShort: ``,                           // password args example input
+		argsShort:   `("cmd") (includePasswords)`, // args example input
+		cmdSummary:  `Print a help message.`,      // command explanation
+		pwArgsLong:  ``,                           // password args breakdown
+		argsLong: `Args:
     cmd (string): Optional. The command to print help for.
     includePasswords (bool): Optional. Default is false. Whether to include
       password arguments in the returned help.`, // args breakdown
-		`Returns:
+		returns: `Returns:
     string: The help message for command.`, // returns breakdown
 	},
 	versionRoute: {
-		``,
-		``,
-		`Print the dex client rpcserver version.`,
-		``,
-		``,
-		`Returns:
+		pwArgsShort: ``,
+		argsShort:   ``,
+		cmdSummary:  `Print the dex client rpcserver version.`,
+		pwArgsLong:  ``,
+		argsLong:    ``,
+		returns: `Returns:
     string: The dex client rpcserver version.`,
 	},
 	initRoute: {
-		`"appPass"`,
-		``,
-		`Initialize the client.`,
-		`Password Args:
+		pwArgsShort: `"appPass"`,
+		argsShort:   ``,
+		cmdSummary:  `Initialize the client.`,
+		pwArgsLong: `Password Args:
     appPass (string): The dex client password.`,
-		``,
-		`Returns:
+		argsLong: ``,
+		returns: `Returns:
     string: The message "` + initializedStr + `"`,
 	},
 	preRegisterRoute: {
-		``,
-		`"dex" ("cert")`,
-		`Preregister for dex.`,
-		``,
-		`Args:
+		pwArgsShort: ``,
+		argsShort:   `"dex" ("cert")`,
+		cmdSummary:  `Preregister for dex.`,
+		pwArgsLong:  ``,
+		argsLong: `Args:
     dex (string): The dex address to preregister for.
     cert (string): Optional. The TLS certificate path.`,
-		`Returns:
+		returns: `Returns:
     obj: The preregister result.
     {
       "fee" (int): The dex registration fee.
     }`,
 	},
 	newWalletRoute: {
-		`"appPass" "walletPass"`,
-		`assetID "account" "inipath"`,
-		`Connect to a new wallet.`,
-		`Password Args:
+		pwArgsShort: `"appPass" "walletPass"`,
+		argsShort:   `assetID "account" "inipath"`,
+		cmdSummary:  `Connect to a new wallet.`,
+		pwArgsLong: `Password Args:
     appPass (string): The dex client password.
     walletPass (string): The wallet's password.`,
-		`Args:
+		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     account (string): The account or wallet name, depending on wallet software.
     inipath (string): The location of the wallet's config file.`,
-		`Returns:
+		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
 	},
-	openWalletRoute: {`"appPass"`,
-		`assetID`,
-		`Open an existing wallet.`,
-		`Password Args:
+	openWalletRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `assetID`,
+		cmdSummary:  `Open an existing wallet.`,
+		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
-		`Args:
+		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md`,
-		`Returns:
+		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletUnlockedStr, "[coin symbol]") + `"`,
 	},
 	closeWalletRoute: {
-		``,
-		`assetID`,
-		`Close an open wallet.`,
-		``,
-		`Args:
+		pwArgsShort: ``,
+		argsShort:   `assetID`,
+		cmdSummary:  `Close an open wallet.`,
+		pwArgsLong:  ``,
+		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md`,
-		`Returns:
+		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletLockedStr, "[coin symbol]") + `"`,
 	},
 	walletsRoute: {
-		``,
-		``,
-		`List all wallets.`,
-		``,
-		``,
-		`Returns:
+		pwArgsShort: ``,
+		argsShort:   ``,
+		cmdSummary:  `List all wallets.`,
+		pwArgsLong:  ``,
+		argsLong:    ``,
+		returns: `Returns:
     obj: The wallets result.
     [
       {
@@ -428,17 +439,17 @@ var helpMsgs = map[string]helpMsg{
     ]`,
 	},
 	registerRoute: {
-		`"appPass"`,
-		`"url" fee ("cert")`,
-		`Register for dex. An ok response does not mean that registration is complete.
+		pwArgsShort: `"appPass"`,
+		argsShort:   `"url" fee ("cert")`,
+		cmdSummary: `Register for dex. An ok response does not mean that registration is complete.
 Registration is complete after the fee transaction has been confirmed.`,
-		`Password Args:
+		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
-		`Args:
+		argsLong: `Args:
     url (string): The DEX addr to register for.
     fee (int): The DEX fee.
     cert (string): Optional. The TLS certificate path.`,
-		`Returns:
+		returns: `Returns:
     string: The message "` + fmt.Sprintf(feePaidStr, "[fee]") + `"`,
 	},
 }

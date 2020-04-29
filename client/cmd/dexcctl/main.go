@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,7 +38,11 @@ func (s semver) String() string {
 }
 
 func main() {
-	if err := run(); err != nil {
+	// Create a context that is canceled when a shutdown signal is received.
+	ctx := withShutdownCancel(context.Background())
+	// Listen for interrupt signals (e.g. CTRL+C).
+	go shutdownListener()
+	if err := run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
@@ -60,7 +65,7 @@ var readCerts = map[string]int{
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting
 // fails or a password is empty. Returns passwords as a slice of strings.
-func promptPWs(cmd string) ([]string, error) {
+func promptPWs(ctx context.Context, cmd string) ([]string, error) {
 	prompts, exists := promptPasswords[cmd]
 	if !exists {
 		return nil, nil
@@ -68,7 +73,7 @@ func promptPWs(cmd string) ([]string, error) {
 	pws := make([]string, len(prompts))
 	// Prompt for passwords one at a time.
 	for i, prompt := range prompts {
-		pw, err := admin.PasswordPrompt(prompt)
+		pw, err := admin.PasswordPrompt(ctx, prompt)
 		if err != nil {
 			return nil, err
 		}
@@ -79,27 +84,27 @@ func promptPWs(cmd string) ([]string, error) {
 }
 
 // readCert reads TLS certificate content located in a file specified at args'
-// index as expected for cmd, replaces it with the file as a string, and returns
-// the altered params.
-func readCert(cmd string, args []string) (params []string, err error) {
+// index as expected for cmd and replaces it with the file as a string. The
+// passed args are modified.
+func readCert(cmd string, args []string) error {
 	idx, exists := readCerts[cmd]
 	// Certs are optional, so it is not an error if they are not included.
 	if !exists || len(args) < idx+1 || args[idx] == "" {
-		return args, nil
+		return nil
 	}
 	path := cleanAndExpandPath(args[idx])
 	if !fileExists(path) {
-		return nil, fmt.Errorf("no cert file found at %s", path)
+		return fmt.Errorf("no cert file found at %s", path)
 	}
 	certB, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("error reading %s: %v", path, err)
+		return fmt.Errorf("error reading %s: %v", path, err)
 	}
-	params = append(append(args[:idx], string(certB)), args[idx+1:]...)
-	return params, nil
+	args[idx] = string(certB)
+	return nil
 }
 
-func run() error {
+func run(ctx context.Context) error {
 	cfg, args, stop, err := configure()
 	if err != nil {
 		return fmt.Errorf("unable to configure: %v", err)
@@ -137,13 +142,13 @@ func run() error {
 	}
 
 	// Prompt for passwords.
-	pws, err := promptPWs(args[0])
+	pws, err := promptPWs(ctx, args[0])
 	if err != nil {
 		return err
 	}
 
 	// Attempt to read TLS certificates.
-	params, err = readCert(args[0], params)
+	err = readCert(args[0], params)
 	if err != nil {
 		return err
 	}
