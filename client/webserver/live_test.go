@@ -596,7 +596,7 @@ func TestServer(t *testing.T) {
 	tCore := newTCore()
 
 	if register {
-		tCore.InitializeClient("")
+		tCore.InitializeClient([]byte(""))
 		tCore.Register(new(core.RegisterForm))
 	}
 
