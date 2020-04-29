@@ -197,7 +197,13 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	}
 
 	// Check time-in-force
-	if !(limit.TiF == msgjson.StandingOrderNum || limit.TiF == msgjson.ImmediateOrderNum) {
+	var force order.TimeInForce
+	switch limit.TiF {
+	case msgjson.StandingOrderNum:
+		force = order.StandingTiF
+	case msgjson.ImmediateOrderNum:
+		force = order.ImmediateTiF
+	default:
 		return msgjson.NewError(msgjson.OrderParameterError, "unknown time-in-force")
 	}
 
@@ -208,7 +214,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	var commit order.Commitment
 	copy(commit[:], limit.Commit)
 
-	// Create the limit order
+	// Create the limit order.
 	lo := &order.LimitOrder{
 		P: order.Prefix{
 			AccountID:  user,
@@ -226,7 +232,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 			Address:  limit.Address,
 		},
 		Rate:  limit.Rate,
-		Force: order.StandingTiF,
+		Force: force,
 	}
 
 	// NOTE: ServerTime is not yet set, so the order's ID, which is computed
