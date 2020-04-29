@@ -2282,7 +2282,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	}
 	err = tracker.processAudit(msg.ID, audit)
 	if err != nil {
-		return fmt.Errorf("processAudit failed: %v", err)
+		return err
 	}
 	return tracker.tick()
 }
@@ -2303,7 +2303,7 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	}
 	err = tracker.processRedemption(msg.ID, redemption)
 	if err != nil {
-		return fmt.Errorf("processRedemption failed: %v", err)
+		return err
 	}
 	return tracker.tick()
 }
