@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/client/db/bolt"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -599,6 +600,20 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
+	// todo: wallet config file should be parsed when wallet is being created
+	// and the parsed options save to db. Remember to use the default ini path
+	// if an emtpy path is passed to CreateWallet()
+	if dbWallet.INIPath == "" {
+		defaultINIPath, err := asset.DefaultConfigPath(dbWallet.AssetID)
+		if err != nil {
+			return nil, fmt.Errorf("error creating wallet: %v", err)
+		}
+		dbWallet.INIPath = defaultINIPath
+	}
+	walletConnSettings, err := config.Options(dbWallet.INIPath)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing wallet config: %v", err)
+	}
 	wallet := &xcWallet{
 		Account:   dbWallet.Account,
 		AssetID:   dbWallet.AssetID,
@@ -608,8 +623,8 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		address:   dbWallet.Address,
 	}
 	walletCfg := &asset.WalletConfig{
-		Account: dbWallet.Account,
-		INIPath: dbWallet.INIPath,
+		Account:  dbWallet.Account,
+		Settings: walletConnSettings,
 		TipChange: func(err error) {
 			c.tipChange(dbWallet.AssetID, err)
 		},
@@ -1151,7 +1166,7 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, er
 	if !found {
 		return nil, fmt.Errorf("%s wallet not found", unbip(assetID))
 	}
-	coin, err := wallet.Withdraw(wallet.address, value, wallet.Info().FeeRate)
+	coin, err := wallet.Withdraw(wallet.address, value, wallet.Info().DefaultFeeRate)
 	if err != nil {
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote("Withdraw error", details, db.ErrorLevel))

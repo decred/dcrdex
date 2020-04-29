@@ -6,13 +6,12 @@ package dcr
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
-	flags "github.com/jessevdk/go-flags"
 )
 
 const (
@@ -34,16 +33,16 @@ var (
 // DCRConfig is passed to the constructor.
 type DCRConfig struct {
 	// RPCUser is the RPC username provided to dcrwallet configuration.
-	RPCUser string `long:"username" description:"Username for RPC connections"`
+	RPCUser string `ini:"username"`
 	// RPCPass is the RPC password provided to dcrwallet configuration.
-	RPCPass string `long:"password" description:"Password for RPC connections"`
+	RPCPass string `ini:"password"`
 	// RPCListen is the RPC network address provided to dcrwallet configuration.
 	// If the value is an empty string, it will be set to a default value for the
 	// network.
-	RPCListen string `long:"rpclisten" description:"dcrd interface/port for RPC connections (default port: 9109, testnet: 19109)"`
+	RPCListen string `ini:"rpclisten"`
 	// RPCCert is the filepath to the dcrwallet TLS certificate. If it is not
 	// provided, the default dcrwallet location will be assumed.
-	RPCCert string `long:"rpccert" description:"File containing the TLS certificate"`
+	RPCCert string `ini:"rpccert"`
 	// Context should be canceled when the application exits. This will cause
 	// some cleanup to be performed during shutdown.
 	Context context.Context
@@ -54,27 +53,12 @@ type DCRConfig struct {
 // If configPath is an empty string, loadConfig will attempt to read settings
 // directly from the default dcrwallet.conf filepath. If there is no error, the
 // module-level chainParams variable will be set appropriately for the network.
-func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
+func loadConfig(settings map[string]string, network dex.Network) (*DCRConfig, error) {
 	cfg := new(DCRConfig)
-
-	// Since we are not reading command-line arguments, and the DCRConfig fields
-	// share names with the dcrwallet configuration options, passing IgnoreUnknown
-	// allows us to have the option to read directly from the dcrwallet.conf file.
-	parser := flags.NewParser(cfg, flags.IgnoreUnknown)
-
-	// If no path provided, use default dcrwallet path.
-	if configPath == "" {
-		configPath = defaultConfigPath
-	}
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no DCR config file found at %s", configPath)
-	} else {
-		// The config file exists, so attempt to parse it.
-		err = flags.NewIniParser(parser).ParseFile(configPath)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing DCR ini file: %v", err)
-		}
+	cfgData := config.OptionsMapToINIData(settings)
+	err := config.Parse(cfgData, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing config: %v", err)
 	}
 
 	missing := ""
@@ -85,7 +69,7 @@ func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
 		missing += " password"
 	}
 	if missing != "" {
-		return nil, fmt.Errorf("missing dcrd credentials:%s", missing)
+		return nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
 	}
 
 	// Get network settings. Zero value is mainnet, but unknown non-zero cfg.Net

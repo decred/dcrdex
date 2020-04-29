@@ -6,13 +6,12 @@ package btc
 import (
 	"fmt"
 	"net"
-	"os"
 	"path/filepath"
 	"strconv"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	"github.com/btcsuite/btcutil"
-	flags "github.com/jessevdk/go-flags"
 )
 
 // NetPorts are a set of port to use with the different networks.
@@ -33,34 +32,35 @@ const (
 	defaultHost = "localhost"
 )
 
-// Config is a partial bitcoind configuration file, with only the parameters
-// needed to initialize the RPC connection. Because we have no need to read
-// command line arguments, we can use the IgnoreUnknown flag to allow pulling
-// the needed confiruration settings directly from the bitcoin.conf, if the user
-// chooses.
+// Config holds the parameters needed to initialize an RPC connection to a btc
+// wallet or backend.
 type Config struct {
-	RPCUser string `long:"rpcuser" description:"JSON-RPC user"`
-	RPCPass string `long:"rpcpassword" description:"JSON-RPC password"`
-	RPCBind string `long:"rpcbind" description:"RPC address. Can be <addr> or <addr>:<port>, which would override rpcport"`
-	RPCPort int    `long:"rpcport" description:"JSON-RPC port"`
+	RPCUser string `ini:"rpcuser"`
+	RPCPass string `ini:"rpcpassword"`
+	RPCBind string `ini:"rpcbind"`
+	RPCPort int    `ini:"rpcport"`
 }
 
-// LoadConfig loads the configuration settings from the specified filepath.
-func LoadConfig(configPath string, name string, network dex.Network, ports NetPorts) (*Config, error) {
-	cfg := &Config{}
-	// Since we are not reading command-line arguments, and the Config fields
-	// share names with the bitcoind configuration options, passing just
-	// IgnoreUnknown allows us to have the option to read directly from the
-	// bitcoin.conf file.
-	parser := flags.NewParser(cfg, flags.IgnoreUnknown)
+// LoadConfigFromPath wraps loadConfig to ensure that callers pass a string as
+// the first argument.
+func LoadConfigFromPath(cfgPath string, name string, network dex.Network, ports NetPorts) (*Config, error) {
+	return loadConfig(cfgPath, name, network, ports)
+}
 
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no %q config file found at %s", name, configPath)
-	}
-	// The config file exists, so attempt to parse it.
-	err := flags.NewIniParser(parser).ParseFile(configPath)
+// LoadConfigFromSettings wraps loadConfig to ensure that callers pass previously
+// extracted config options as the first argument.
+func LoadConfigFromSettings(settings map[string]string, name string, network dex.Network, ports NetPorts) (*Config, error) {
+	cfgData := config.OptionsMapToINIData(settings)
+	return loadConfig(cfgData, name, network, ports)
+}
+
+// loadConfig loads the configuration settings from the specified config file
+// or []byte data.
+func loadConfig(cfgPathOrData interface{}, name string, network dex.Network, ports NetPorts) (*Config, error) {
+	cfg := &Config{}
+	err := config.Parse(cfgPathOrData, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing %q ini file %q: %v", name, configPath, err)
+		return nil, fmt.Errorf("error parsing config: %v", err)
 	}
 
 	if cfg.RPCUser == "" {

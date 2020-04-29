@@ -29,6 +29,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/btc"
+	"decred.org/dcrdex/dex/config"
 	"github.com/decred/slog"
 )
 
@@ -65,9 +66,14 @@ func tBackend(t *testing.T, conf, name string, blkFunc func(string, error)) (*Ex
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
 	}
+	cfgPath := filepath.Join(user.HomeDir, "dextest", "btc", "harness-ctl", conf+".conf")
+	connSettings, err := config.Options(cfgPath)
+	if err != nil {
+		t.Fatalf("error reading config options: %v", err)
+	}
 	walletCfg := &asset.WalletConfig{
-		INIPath: filepath.Join(user.HomeDir, "dextest", "btc", "harness-ctl", conf+".conf"),
-		Account: name,
+		Settings: connSettings,
+		Account:  name,
 		TipChange: func(err error) {
 			blkFunc(conf, err)
 		},

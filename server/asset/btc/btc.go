@@ -131,7 +131,7 @@ func NewBTCClone(name, configPath string, logger dex.Logger, network dex.Network
 	params *chaincfg.Params, ports dexbtc.NetPorts) (*Backend, error) {
 
 	// Read the configuration parameters
-	cfg, err := dexbtc.LoadConfig(configPath, name, network, ports)
+	cfg, err := dexbtc.LoadConfigFromPath(configPath, name, network, ports)
 	if err != nil {
 		return nil, err
 	}
