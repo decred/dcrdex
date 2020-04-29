@@ -332,7 +332,6 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	if includesCancellation {
 		details := fmt.Sprintf("%s order on %s-%s at %s has been canceled (%s)",
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.url, t.token())
-		log.Debugf(details)
 		t.notify(newOrderNote("Order canceled", details, db.Success, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote("cancel", "", db.Data, cancelOrder))
@@ -341,7 +340,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		fillRatio := float64(trade.Filled()) / float64(trade.Quantity)
 		details := fmt.Sprintf("%s order on %s-%s %.1f%% filled (%s)",
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillRatio*100, t.token())
-		log.Debugf("%s, matched with %d orders", details, len(msgMatches))
+		log.Debugf("trade order %v matched with %d orders", t.ID(), len(msgMatches))
 		t.notify(newOrderNote("Matches made", details, db.Poke, corder))
 	}
 
@@ -493,15 +492,14 @@ func (t *trackedTrade) tick() error {
 		// notifications before swapMatches.
 		corder, _ := t.coreOrderInternal()
 		if err != nil {
+			log.Errorf("swapMatches: %v", err)
 			details := fmt.Sprintf("Error encountered sending a swap output(s) worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
-			log.Error(details + " " + err.Error())
 			t.notify(newOrderNote("Swap error", details, db.ErrorLevel, corder))
 			return err
 		} else {
 			details := fmt.Sprintf("Sent swaps worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
-			log.Error(details)
 			t.notify(newOrderNote("Swaps initiated", details, db.Poke, corder))
 		}
 
@@ -515,15 +513,14 @@ func (t *trackedTrade) tick() error {
 		err := t.redeemMatches(redeems)
 		corder, _ := t.coreOrderInternal()
 		if err != nil {
+			log.Errorf("redeemMatches: %v", err)
 			details := fmt.Sprintf("Error encountered sending redemptions worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(toAsset), t.token())
-			log.Error(details)
 			t.notify(newOrderNote("Redemption error", details, db.ErrorLevel, corder))
 			return err
 		} else {
 			details := fmt.Sprintf("Redeemed %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(toAsset), t.token())
-			log.Info(details)
 			t.notify(newOrderNote("Match complete", details, db.Poke, corder))
 		}
 	}

@@ -2278,14 +2278,11 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	copy(oid[:], audit.OrderID)
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
-		err = fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
-		log.Error(err)
-		return err
+		return fmt.Errorf("audit request received for unknown order: %s", string(msg.Payload))
 	}
 	err = tracker.processAudit(msg.ID, audit)
 	if err != nil {
-		log.Errorf("processAudit failed: %v", err)
-		return err
+		return fmt.Errorf("processAudit failed: %v", err)
 	}
 	return tracker.tick()
 }
@@ -2302,14 +2299,11 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	copy(oid[:], redemption.OrderID)
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
-		err = fmt.Errorf("redemption request received for unknown order: %s", string(msg.Payload))
-		log.Error(err)
-		return err
+		return fmt.Errorf("redemption request received for unknown order: %s", string(msg.Payload))
 	}
 	err = tracker.processRedemption(msg.ID, redemption)
 	if err != nil {
-		log.Errorf("processRedemption failed: %v", err)
-		return err
+		return fmt.Errorf("processRedemption failed: %v", err)
 	}
 	return tracker.tick()
 }

@@ -14,6 +14,22 @@ func (c *Core) notify(n Notification) {
 	if n.Severity() >= db.Success {
 		c.db.SaveNotification(n.DBNote())
 	}
+
+	logFun := log.Warnf // default in case the Severity level is unknown to notify
+	switch n.Severity() {
+	case db.Poke:
+		logFun = log.Tracef
+	case db.Data:
+		logFun = log.Debugf
+	case db.Success:
+		logFun = log.Infof
+	case db.WarningLevel:
+		logFun = log.Warnf
+	case db.ErrorLevel:
+		logFun = log.Errorf
+	}
+	logFun("notify: %v", n)
+
 	c.noteMtx.RLock()
 	for _, ch := range c.noteChans {
 		select {
