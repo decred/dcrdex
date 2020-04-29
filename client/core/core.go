@@ -538,6 +538,13 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf("wallet password encryption error: %v", err)
 	}
 
+	if form.INIPath == "" {
+		form.INIPath, err = asset.DefaultConfigPath(assetID)
+		if err != nil {
+			return fmt.Errorf("cannot use default wallet config path: %v", err)
+		}
+	}
+
 	dbWallet := &db.Wallet{
 		AssetID:     assetID,
 		Account:     form.Account,
@@ -601,14 +608,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	// todo: wallet config file should be parsed when wallet is being created
-	// and the parsed options save to db. Remember to use the default ini path
-	// if an emtpy path is passed to CreateWallet()
+	// and the parsed options save to db.
 	if dbWallet.INIPath == "" {
-		defaultINIPath, err := asset.DefaultConfigPath(dbWallet.AssetID)
-		if err != nil {
-			return nil, fmt.Errorf("error creating wallet: %v", err)
-		}
-		dbWallet.INIPath = defaultINIPath
+		return nil, fmt.Errorf("wallet config path not set")
 	}
 	walletConnSettings, err := config.Options(dbWallet.INIPath)
 	if err != nil {
