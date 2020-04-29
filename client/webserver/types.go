@@ -4,8 +4,6 @@
 package webserver
 
 import (
-	"bytes"
-
 	"decred.org/dcrdex/client/core"
 )
 
@@ -67,21 +65,4 @@ type withdrawForm struct {
 	Value   uint64    `json:"value"`
 	Address string    `json:"address"`
 	Pass    PassBytes `json:"pw"`
-}
-
-// PassBytes is an alias of type []byte that implements json.UnmarshalJSON
-// to enable parsing json-encoded strings as []byte.
-type PassBytes []byte
-
-// UnmarshalJSON satisfies the json.Unmarshaler interface, parses json-encoded
-// strings as []byte.
-func (pb *PassBytes) UnmarshalJSON(rawBytes []byte) error {
-	rawBytes = bytes.Trim(rawBytes, `"`)
-	*pb = make([]byte, len(rawBytes))
-	copy((*pb)[:], rawBytes)
-	return nil
-}
-
-func (pb PassBytes) String() string {
-	return string(pb)
 }
