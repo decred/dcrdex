@@ -19,9 +19,9 @@ func (c *Core) notify(n Notification) {
 
 	logFun := log.Warnf // default in case the Severity level is unknown to notify
 	switch n.Severity() {
-	case db.Poke:
-		logFun = log.Tracef
 	case db.Data:
+		logFun = log.Tracef
+	case db.Poke:
 		logFun = log.Debugf
 	case db.Success:
 		logFun = log.Infof
