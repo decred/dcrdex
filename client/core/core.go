@@ -1156,7 +1156,7 @@ func (c *Core) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, er
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote("Withdraw error", details, db.ErrorLevel))
 	} else {
-		details := fmt.Sprintf("Withdraw of %s has completed successfully. %s", unbip(assetID), coin)
+		details := fmt.Sprintf("Withdraw of %s has completed successfully. Coin ID = %s", unbip(assetID), coin)
 		c.notify(newWithdrawNote("Withdraw sent", details, db.Success))
 	}
 	return coin, err
