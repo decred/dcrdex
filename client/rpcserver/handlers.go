@@ -254,7 +254,7 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
-var format = func(thing, tail string) string {
+func format(thing, tail string) string {
 	if thing == "" {
 		return ""
 	}
