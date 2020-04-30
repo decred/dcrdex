@@ -16,7 +16,7 @@ const (
 	//  false (Q->B) |    base      |      quote      |     base      ||  true (B->Q)  |     quote    |      base       |     quote
 	CreateMatchesTable = `CREATE TABLE IF NOT EXISTS %s (
 		matchid BYTEA PRIMARY KEY,
-		active BOOL DEFAULT TRUE,    -- negotiation active, where FALSE includes failure and successful completion
+		active BOOL DEFAULT TRUE,    -- negotiation active, where FALSE includes failure, successful completion, or a taker cancel order
 		takerSell BOOL,        -- to identify asset of address and coinIDs
 		takerOrder BYTEA,      -- INDEX this
 		takerAccount BYTEA,    -- INDEX this
@@ -79,6 +79,19 @@ const (
 	UpsertMatch = InsertMatch + ` ON CONFLICT (matchid) DO
 	UPDATE SET quantity = $10, status = $12;`
 
+	InsertCancelMatch = `INSERT INTO %s (matchid, active,
+			takerOrder, takerAccount, -- no taker address for a cancel order
+			makerOrder, makerAccount, -- omit maker's swap address too
+			epochIdx, epochDur,
+			quantity, rate, status)
+		VALUES ($1, FALSE, -- no active swap for a cancel
+			$2, $3,
+			$4, $5,
+			$6, $7,
+			$8, $9, $10) `  // status should be MatchComplete although there is no swap
+
+	UpsertCancelMatch = InsertCancelMatch + ` ON CONFLICT (matchid) DO NOTHING;`
+
 	RetrieveMatchByID = `SELECT matchid, active,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
@@ -98,7 +111,7 @@ const (
 		epochIdx, epochDur, quantity, rate, status
 	FROM %s
 	WHERE (takerAccount = $1 OR makerAccount = $1)
-		AND active IS TRUE;`
+		AND active;`
 
 	SetMakerMatchAckSig = `UPDATE %s SET sigMatchAckMaker = $2 WHERE matchid = $1;`
 	SetTakerMatchAckSig = `UPDATE %s SET sigMatchAckTaker = $2 WHERE matchid = $1;`

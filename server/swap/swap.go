@@ -1765,6 +1765,10 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 	// let the others proceed, but that could seem selective trickery to the
 	// clients.
 	for _, match := range matches {
+		// Note that matches where the taker order is a cancel will be stored
+		// with status MatchComplete, and without the maker swap address. The
+		// match will also be flagged as inactive since there is no associated
+		// swap negotiation.
 		if err := s.storage.InsertMatch(match.Match); err != nil {
 			log.Errorf("InsertMatch (match id=%v) failed: %v", match.ID(), err)
 			// TODO: notify clients (notification or response to what?)
