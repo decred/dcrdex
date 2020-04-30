@@ -4,6 +4,8 @@
 package core
 
 import (
+	"fmt"
+
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 )
@@ -14,6 +16,22 @@ func (c *Core) notify(n Notification) {
 	if n.Severity() >= db.Success {
 		c.db.SaveNotification(n.DBNote())
 	}
+
+	logFun := log.Warnf // default in case the Severity level is unknown to notify
+	switch n.Severity() {
+	case db.Data:
+		logFun = log.Tracef
+	case db.Poke:
+		logFun = log.Debugf
+	case db.Success:
+		logFun = log.Infof
+	case db.WarningLevel:
+		logFun = log.Warnf
+	case db.ErrorLevel:
+		logFun = log.Errorf
+	}
+	logFun("notify: %v", n)
+
 	c.noteMtx.RLock()
 	for _, ch := range c.noteChans {
 		select {
@@ -74,6 +92,9 @@ type Notification interface {
 	Stamp()
 	// DBNote returns the underlying *db.Notification.
 	DBNote() *db.Notification
+	// String generates a compact human-readable representation of the
+	// Notification that is suitable for logging.
+	String() string
 }
 
 // FeePaymentNote is a notification regarding registration fee payment.
@@ -111,7 +132,17 @@ func newOrderNote(subject, details string, severity db.Severity, corder *Order) 
 	}
 }
 
-// EpochNotification is a data notifcation that a new epoch has begun.
+// String supplements db.Notification's Stringer with the Order's ID, if the
+// Order is not nil.
+func (on *OrderNote) String() string {
+	base := on.Notification.String()
+	if on.Order == nil {
+		return base
+	}
+	return fmt.Sprintf("%s - Order: %s", base, on.Order.ID)
+}
+
+// EpochNotification is a data notification that a new epoch has begun.
 type EpochNotification struct {
 	db.Notification
 	Epoch uint64 `json:"epoch"`
@@ -122,4 +153,9 @@ func newEpochNotification(epochIdx uint64) *EpochNotification {
 		Notification: db.NewNotification("epoch", "", "", db.Data),
 		Epoch:        epochIdx,
 	}
+}
+
+// String supplements db.Notification's Stringer with the Epoch index.
+func (on *EpochNotification) String() string {
+	return fmt.Sprintf("%s - Index: %d", on.Notification.String(), on.Epoch)
 }

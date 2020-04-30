@@ -291,7 +291,7 @@ func TestWallet(t *testing.T) {
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	_, err = rig.alpha().Redeem(redemptions, tBTC)
+	_, _, err = rig.alpha().Redeem(redemptions, tBTC)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}

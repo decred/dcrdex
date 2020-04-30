@@ -70,8 +70,8 @@ type Wallet interface {
 	// used to refund a failed transaction.
 	Swap(*Swaps, *dex.Asset) ([]Receipt, Coin, error)
 	// Redeem sends the redemption transaction, which may contain more than one
-	// redemption.
-	Redeem([]*Redemption, *dex.Asset) ([]dex.Bytes, error)
+	// redemption. The input coin IDs and the output Coin are returned.
+	Redeem([]*Redemption, *dex.Asset) ([]dex.Bytes, Coin, error)
 	// SignMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.

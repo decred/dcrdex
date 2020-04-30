@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"strconv"
+	"strings"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -559,6 +560,28 @@ func (n *Notification) Stamp() {
 // convenience.
 func (n *Notification) DBNote() *Notification {
 	return n
+}
+
+// String generates a compact human-readable representation of the Notification
+// that is suitable for logging. For example:
+//   |SUCCESS| (fee payment) Fee paid - Waiting for 2 confirmations before trading at https://superdex.tld:7232
+//   |DATA| (boring event) Subject without details
+func (n *Notification) String() string {
+	// In case type and/or detail or empty strings, adjust the formatting to
+	// avoid extra whitespace.
+	var format strings.Builder
+	format.WriteString("|%s| (%s)") // always nil error
+	if len(n.DetailText) > 0 || len(n.SubjectText) > 0 {
+		format.WriteString(" ")
+	}
+	format.WriteString("%s")
+	if len(n.DetailText) > 0 && len(n.SubjectText) > 0 {
+		format.WriteString(" - ")
+	}
+	format.WriteString("%s")
+
+	severity := strings.ToUpper(n.Severity().String())
+	return fmt.Sprintf(format.String(), severity, n.NoteType, n.SubjectText, n.DetailText)
 }
 
 // DecodeWallet decodes the versioned blob to a *Wallet.

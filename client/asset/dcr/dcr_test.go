@@ -731,14 +731,14 @@ func TestRedeem(t *testing.T) {
 	node.changeAddr = tPKHAddr
 	node.privWIF = dcrutil.NewWIF(privKey, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err != nil {
 		t.Fatalf("redeem error: %v", err)
 	}
 
 	// No audit info
 	redemption.Spends = nil
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for nil AuditInfo")
 	}
@@ -746,7 +746,7 @@ func TestRedeem(t *testing.T) {
 
 	// Spoofing AuditInfo is not allowed.
 	redemption.Spends = &TAuditInfo{}
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for spoofed AuditInfo")
 	}
@@ -754,7 +754,7 @@ func TestRedeem(t *testing.T) {
 
 	// Wrong secret hash
 	redemption.Secret = randBytes(32)
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for wrong secret")
 	}
@@ -762,7 +762,7 @@ func TestRedeem(t *testing.T) {
 
 	// too low of value
 	ci.output.value = 200
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
@@ -770,7 +770,7 @@ func TestRedeem(t *testing.T) {
 
 	// Change address error
 	node.changeAddrErr = tErr
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for change address error")
 	}
@@ -778,7 +778,7 @@ func TestRedeem(t *testing.T) {
 
 	// Missing priv key error
 	node.privWIFErr = tErr
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for missing private key")
 	}
@@ -786,7 +786,7 @@ func TestRedeem(t *testing.T) {
 
 	// Send error
 	node.sendRawErr = tErr
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for send error")
 	}
@@ -796,7 +796,7 @@ func TestRedeem(t *testing.T) {
 	var h chainhash.Hash
 	h[0] = 0x01
 	node.sendRawHash = &h
-	_, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
+	_, _, err = wallet.Redeem([]*asset.Redemption{redemption}, tDCR)
 	if err == nil {
 		t.Fatalf("no error for wrong return hash")
 	}
