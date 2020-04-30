@@ -51,38 +51,39 @@ type TCore struct {
 	registerErr         error
 }
 
-func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
-	return nil, core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr
-}
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return nil, nil
 }
 func (c *TCore) Balance(uint32) (uint64, error) {
 	return 0, c.balanceErr
 }
-func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) {
-	return c.preRegisterFee, c.preRegisterErr
-}
 func (c *TCore) CreateWallet(appPW, walletPW string, form *core.WalletForm) error {
 	return c.createWalletErr
-}
-func (c *TCore) OpenWallet(assetID uint32, pw string) error {
-	return c.openWalletErr
-}
-func (c *TCore) WalletState(assetID uint32) *core.WalletState {
-	return c.walletState
 }
 func (c *TCore) CloseWallet(assetID uint32) error {
 	return c.closeWalletErr
 }
-func (c *TCore) Wallets() []*core.WalletState {
-	return c.wallets
-}
 func (c *TCore) InitializeClient(pw string) error {
 	return c.initializeClientErr
 }
+func (c *TCore) OpenWallet(assetID uint32, pw string) error {
+	return c.openWalletErr
+}
+func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) {
+	return c.preRegisterFee, c.preRegisterErr
+}
 func (c *TCore) Register(*core.RegisterForm) error {
 	return c.registerErr
+}
+func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
+	return nil, core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr
+}
+func (c *TCore) Unsync(dex string, base, quote uint32) {}
+func (c *TCore) Wallets() []*core.WalletState {
+	return c.wallets
+}
+func (c *TCore) WalletState(assetID uint32) *core.WalletState {
+	return c.walletState
 }
 
 type TWriter struct {

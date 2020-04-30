@@ -84,10 +84,10 @@ func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	return nil
 }
 
-func checkIntArg(arg, name string) (int, error) {
-	i, err := strconv.Atoi(arg)
+func checkUIntArg(arg, name string, bitSize int) (uint64, error) {
+	i, err := strconv.ParseUint(arg, 10, bitSize)
 	if err != nil {
-		return i, fmt.Errorf("%w, %s must be an integer: %v", errArgs, name, err)
+		return i, fmt.Errorf("%w: cannot parse %s: %v", errArgs, name, err)
 	}
 	return i, nil
 }
@@ -133,7 +133,7 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 	if err := checkNArgs(params, []int{2}, []int{3}); err != nil {
 		return nil, err
 	}
-	assetID, err := checkIntArg(params.Args[0], "assetID")
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func parseOpenWalletArgs(params *RawParams) (*openWalletForm, error) {
 	if err := checkNArgs(params, []int{1}, []int{1}); err != nil {
 		return nil, err
 	}
-	assetID, err := checkIntArg(params.Args[0], "assetID")
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
 		return 0, err
 	}
-	assetID, err := checkIntArg(params.Args[0], "assetID")
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
 	if err != nil {
 		return 0, err
 	}
@@ -189,7 +189,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
 		return nil, err
 	}
-	fee, err := checkIntArg(params.Args[1], "fee")
+	fee, err := checkUIntArg(params.Args[1], "fee", 64)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 	req := &core.RegisterForm{
 		AppPass: params.PWArgs[0],
 		URL:     params.Args[0],
-		Fee:     uint64(fee),
+		Fee:     fee,
 		Cert:    cert,
 	}
 	return req, nil
