@@ -73,11 +73,17 @@ type TArchivist struct {
 	poisonEpochOrder     order.Order
 	orderWithKnownCommit order.OrderID
 	commitForKnownOrder  order.Commitment
+	bookedOrders         []*order.LimitOrder
 }
 
 func (ta *TArchivist) LastErr() error { return nil }
 func (ta *TArchivist) Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error) {
 	return nil, order.OrderStatusUnknown, errors.New("boom")
+}
+func (ta *TArchivist) BookOrders(base, quote uint32) ([]*order.LimitOrder, error) {
+	ta.mtx.Lock()
+	defer ta.mtx.Unlock()
+	return ta.bookedOrders, nil
 }
 func (ta *TArchivist) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
 	return make(map[order.OrderID][]order.CoinID), make(map[order.OrderID][]order.CoinID), nil
@@ -123,9 +129,16 @@ func (ta *TArchivist) failOnEpochOrder(ord order.Order) {
 	ta.mtx.Unlock()
 }
 func (ta *TArchivist) InsertEpoch(ed *db.EpochResults) error { return nil }
-func (ta *TArchivist) BookOrder(*order.LimitOrder) error     { return nil }
-func (ta *TArchivist) ExecuteOrder(ord order.Order) error    { return nil }
-func (ta *TArchivist) CancelOrder(*order.LimitOrder) error   { return nil }
+func (ta *TArchivist) BookOrder(lo *order.LimitOrder) error {
+	ta.mtx.Lock()
+	defer ta.mtx.Unlock()
+	// Note that the other storage functions like ExecuteOrder and CancelOrder
+	// do not change this order slice.
+	ta.bookedOrders = append(ta.bookedOrders, lo)
+	return nil
+}
+func (ta *TArchivist) ExecuteOrder(ord order.Order) error  { return nil }
+func (ta *TArchivist) CancelOrder(*order.LimitOrder) error { return nil }
 func (ta *TArchivist) RevokeOrder(order.Order) (order.OrderID, time.Time, error) {
 	return order.OrderID{}, time.Now(), nil
 }
@@ -189,7 +202,7 @@ func randomOrderID() order.OrderID {
 	return id
 }
 
-func newTestMarket() (*Market, *TArchivist, *TAuth, func(), error) {
+func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), error) {
 	// The DEX will make MasterCoinLockers for each asset.
 	masterLockerBase := coinlock.NewMasterCoinLocker()
 	bookLockerBase := masterLockerBase.Book()
@@ -201,6 +214,9 @@ func newTestMarket() (*Market, *TArchivist, *TAuth, func(), error) {
 
 	epochDurationMSec := uint64(500) // 0.5 sec epoch duration
 	storage := &TArchivist{}
+	if len(stor) > 0 {
+		storage = stor[0]
+	}
 	authMgr := &TAuth{
 		sends:            make([]*msgjson.Message, 0),
 		preimagesByMsgID: make(map[uint64]order.Preimage),
@@ -236,6 +252,49 @@ func newTestMarket() (*Market, *TArchivist, *TAuth, func(), error) {
 		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %v", err)
 	}
 	return mkt, storage, authMgr, cleanup, nil
+}
+
+func TestMarket_NewMarket_BookOrders(t *testing.T) {
+	mkt, storage, _, cleanup, err := newTestMarket()
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+
+	// With no book orders in the DB, the market should have an empty book after
+	// construction.
+	_, buys, sells := mkt.Book()
+	if len(buys) > 0 || len(sells) > 0 {
+		cleanup()
+		t.Fatalf("Fresh market had %d buys and %d sells, expected none.",
+			len(buys), len(sells))
+	}
+	cleanup()
+
+	// Now store some book orders to verify NewMarket sees them.
+	loBuy := makeLO(buyer3, mkRate3(0.8, 1.0), randLots(10), order.StandingTiF)
+	loSell := makeLO(seller3, mkRate3(1.0, 1.2), randLots(10), order.StandingTiF)
+	_ = storage.BookOrder(loBuy)  // the stub does not error
+	_ = storage.BookOrder(loSell) // the stub does not error
+
+	mkt, _, _, cleanup, err = newTestMarket(storage)
+	if err != nil {
+		t.Fatalf("newTestMarket failure: %v", err)
+	}
+	defer cleanup()
+
+	_, buys, sells = mkt.Book()
+	if len(buys) != 1 || len(sells) != 1 {
+		t.Fatalf("Fresh market had %d buys and %d sells, expected 1 buy, 1 sell.",
+			len(buys), len(sells))
+	}
+	if buys[0].ID() != loBuy.ID() {
+		t.Errorf("booked buy order has incorrect ID. Expected %v, got %v",
+			loBuy.ID(), buys[0].ID())
+	}
+	if sells[0].ID() != loSell.ID() {
+		t.Errorf("booked sell order has incorrect ID. Expected %v, got %v",
+			loSell.ID(), sells[0].ID())
+	}
 }
 
 func TestMarket_Book(t *testing.T) {

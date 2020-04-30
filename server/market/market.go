@@ -131,11 +131,28 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 	// TODO: fail and archive orders that are in orderStatusEpoch, and unlock
 	// their coins.
 
+	// Load existing book orders from the DB.
+	bookOrders, err := storage.BookOrders(mktInfo.Base, mktInfo.Quote)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Infof("Loaded %d stored book orders.", len(bookOrders))
+
+	Book := book.New(mktInfo.LotSize)
+	for _, lo := range bookOrders {
+		if ok := Book.Insert(lo); !ok {
+			// This can only happen if one of the loaded orders has an
+			// incompatible lot size for the current market config.
+			log.Errorf("Failed to insert order %v into %v book.", mktInfo.Name, lo)
+		}
+	}
+
 	return &Market{
 		running:          make(chan struct{}),
 		marketInfo:       mktInfo,
 		orderRouter:      make(chan *orderUpdateSignal, 16),
-		book:             book.New(mktInfo.LotSize),
+		book:             Book,
 		matcher:          matcher.New(),
 		epochCommitments: make(map[order.Commitment]order.OrderID),
 		epochOrders:      make(map[order.OrderID]order.Order),

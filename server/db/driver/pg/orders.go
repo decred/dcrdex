@@ -19,7 +19,6 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
-	"github.com/lib/pq"
 )
 
 // Wrap the CoinID slice to implement custom Scanner and Valuer.
@@ -189,6 +188,39 @@ func (a *Archiver) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) erro
 	return a.storeOrder(ord, epochIdx, epochDur, orderStatusEpoch)
 }
 
+// BookOrders retrieves all booked orders (with order status booked) for the
+// specified market. This will be used to repopulate a market's book on
+// construction of the market.
+func (a *Archiver) BookOrders(base, quote uint32) ([]*order.LimitOrder, error) {
+	marketSchema, err := a.marketSchema(base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	// All booked orders are active.
+	tableName := fullOrderTableName(a.dbName, marketSchema, true) // active (true)
+
+	// no query timeout here, only explicit cancellation
+	ords, err := ordersByStatusFromTable(a.ctx, a.db, tableName, base, quote, orderStatusBooked)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify loaded orders are limits, and cast to *LimitOrder.
+	limits := make([]*order.LimitOrder, 0, len(ords))
+	for _, ord := range ords {
+		lo, ok := ord.(*order.LimitOrder)
+		if !ok {
+			log.Errorf("loaded book order %v that was not a limit order", ord.ID())
+			continue
+		}
+
+		limits = append(limits, lo)
+	}
+
+	return limits, nil
+}
+
 // ActiveOrderCoins retrieves a CoinID slice for each active order.
 func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
 	var marketSchema string
@@ -200,13 +232,8 @@ func (a *Archiver) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins m
 	tableName := fullOrderTableName(a.dbName, marketSchema, true) // active (true)
 	stmt := fmt.Sprintf(internal.SelectOrderCoinIDs, tableName)
 
-	orderTypes := []int64{
-		int64(order.MarketOrderType),
-		int64(order.LimitOrderType),
-	} // i.e. NOT cancel
-
 	var rows *sql.Rows
-	rows, err = a.db.Query(stmt, pq.Int64Array(orderTypes))
+	rows, err = a.db.Query(stmt)
 	switch err {
 	case sql.ErrNoRows:
 		err = nil
@@ -1074,6 +1101,63 @@ func (a *Archiver) userOrders(ctx context.Context, base, quote uint32, aid accou
 	statuses = append(statuses, statusesArchived...)
 
 	return orders, statuses, nil
+}
+
+// base and quote are used to set the prefix, not specify which table to search.
+// NOTE: There is considerable overlap with userOrdersFromTable, but a
+// generalized function is likely to hurt readability and simplicity.
+func ordersByStatusFromTable(ctx context.Context, dbe *sql.DB, fullTable string, base, quote uint32, status pgOrderStatus) ([]order.Order, error) {
+	stmt := fmt.Sprintf(internal.SelectOrdersByStatus, fullTable)
+	rows, err := dbe.QueryContext(ctx, stmt, status)
+	if err != nil {
+		return nil, err
+	}
+
+	var orders []order.Order
+
+	for rows.Next() {
+		var prefix order.Prefix
+		var trade order.Trade
+		var id order.OrderID
+		var tif order.TimeInForce
+		var rate uint64
+		err = rows.Scan(&id, &prefix.OrderType, &trade.Sell,
+			&prefix.AccountID, &trade.Address, &prefix.ClientTime, &prefix.ServerTime,
+			&prefix.Commit, (*dbCoins)(&trade.Coins),
+			&trade.Quantity, &rate, &tif, &trade.FillAmt)
+		if err != nil {
+			return nil, err
+		}
+		prefix.BaseAsset, prefix.QuoteAsset = base, quote
+
+		var ord order.Order
+		switch prefix.OrderType {
+		case order.LimitOrderType:
+			ord = &order.LimitOrder{
+				P:     prefix,
+				T:     *trade.Copy(),
+				Rate:  rate,
+				Force: tif,
+			}
+		case order.MarketOrderType:
+			ord = &order.MarketOrder{
+				P: prefix,
+				T: *trade.Copy(),
+			}
+		default:
+			log.Errorf("ordersByStatusFromTable: encountered unexpected order type %v",
+				prefix.OrderType)
+			continue
+		}
+
+		orders = append(orders, ord)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return orders, nil
 }
 
 // base and quote are used to set the prefix, not specify which table to search.

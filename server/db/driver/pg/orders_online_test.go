@@ -568,6 +568,7 @@ func TestOrderStatusUnknown(t *testing.T) {
 	}
 }
 
+// Test both ActiveOrderCoins and BookOrders.
 func TestActiveOrderCoins(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
@@ -657,6 +658,24 @@ func TestActiveOrderCoins(t *testing.T) {
 			}
 		}
 	}
+
+	bookOrders, err := archie.BookOrders(mktInfo.Base, mktInfo.Quote)
+	if err != nil {
+		t.Fatalf("BookOrders failed: %v", err)
+	}
+
+	if len(bookOrders) != 1 {
+		t.Fatalf("got %d book orders, expected 1", len(bookOrders))
+	}
+
+	// Verify the order ID of the loaded order is correct. This ensures the
+	// order is being loaded with all the fields to provide and identical
+	// serialization.
+	if multiCoinLO.ID() != bookOrders[0].ID() {
+		t.Errorf("loaded book order has an incorrect order ID. Got %v, expected %v",
+			bookOrders[0].ID(), multiCoinLO.ID())
+	}
+
 }
 
 func TestOrderStatus(t *testing.T) {

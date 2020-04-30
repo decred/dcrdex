@@ -79,6 +79,9 @@ type OrderArchiver interface {
 	// specified by the given base and quote assets.
 	Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error)
 
+	// BookOrders returns all book orders for a market.
+	BookOrders(base, quote uint32) ([]*order.LimitOrder, error)
+
 	// ActiveOrderCoins retrieves a CoinID slice for each active order.
 	ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error)
 
