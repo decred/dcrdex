@@ -152,22 +152,35 @@ func TestParseOpenWalletArgs(t *testing.T) {
 	}
 }
 
-func TestCheckIntArg(t *testing.T) {
+func TestCheckUIntArg(t *testing.T) {
 	tests := []struct {
 		name    string
 		arg     string
+		bitSize int
 		wantErr error
 	}{{
-		name: "ok",
-		arg:  "42",
+		name:    "ok",
+		arg:     "4294967295",
+		bitSize: 32,
 	}, {
-		name:    "assetID is not int",
+		name:    "too big",
+		arg:     "4294967296",
+		bitSize: 32,
+		wantErr: errArgs,
+	}, {
+		name:    "not int",
 		arg:     "42.1",
+		bitSize: 32,
+		wantErr: errArgs,
+	}, {
+		name:    "negative",
+		arg:     "-42",
+		bitSize: 32,
 		wantErr: errArgs,
 	}}
 	for _, test := range tests {
-		res, err := checkIntArg(test.arg, "name")
-		if test.wantErr != nil {
+		res, err := checkUIntArg(test.arg, "name", test.bitSize)
+		if err != nil {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("unexpected error %v for test %s",
 					err, test.name)
@@ -175,7 +188,7 @@ func TestCheckIntArg(t *testing.T) {
 			continue
 		}
 		if fmt.Sprint(res) != test.arg {
-			t.Fatalf("strings don't match")
+			t.Fatalf("strings don't match for test %s", test.name)
 		}
 	}
 }
