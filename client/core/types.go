@@ -96,12 +96,12 @@ type SupportedAsset struct {
 	Info   *asset.WalletInfo `json:"info"`
 }
 
-// Registration is information necessary to register an account on a DEX.
-type Registration struct {
-	URL      string
-	Password string
-	Fee      uint64
-	Cert     string
+// RegisterForm is information necessary to register an account on a DEX.
+type RegisterForm struct {
+	URL     string `json:"url"`
+	AppPass string `json:"appPass"`
+	Fee     uint64 `json:"fee"`
+	Cert    string `json:"cert"`
 }
 
 // PreRegisterForm is the information necessary to pre-register a DEX.

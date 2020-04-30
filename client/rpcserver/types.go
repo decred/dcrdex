@@ -6,18 +6,21 @@ package rpcserver
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"strconv"
 
 	"decred.org/dcrdex/client/core"
 )
 
 var (
-	// ErrArgs is wrapped when arguments to the known command cannot be parsed.
-	ErrArgs = errors.New("unable to parse arguments")
-	// ErrUnknownCmd is wrapped when the command is not know.
-	ErrUnknownCmd = errors.New("unknown command")
+	// errArgs is wrapped when arguments to the known command cannot be parsed.
+	errArgs = errors.New("unable to parse arguments")
 )
+
+// RawParams is used for all server requests.
+type RawParams struct {
+	PWArgs []string `json:"PWArgs"`
+	Args   []string `json:"args"`
+}
 
 // versionResponse holds a semver version JSON object.
 type versionResponse struct {
@@ -51,56 +54,32 @@ type newWalletForm struct {
 	AppPass    string `json:"appPass"`
 }
 
-// ParseCmdArgs parses arguments to commands for rpcserver requests.
-func ParseCmdArgs(cmd string, args []string) (interface{}, error) {
-	nArg, exists := nArgs[cmd]
-	if !exists {
-		return nil, fmt.Errorf("%w: %s", ErrUnknownCmd, cmd)
-	}
-	if err := checkNArgs(len(args), nArg); err != nil {
-		return nil, err
-	}
-	return parsers[cmd](args)
+// helpForm is information necessary to obtain help.
+type helpForm struct {
+	HelpWith         string `json:"helpwith"`
+	IncludePasswords bool   `json:"includepasswords"`
 }
 
-// nArgs is a map of routes to the number of arguments accepted. One integer
-// indicates an exact match, two are the min and max.
-var nArgs = map[string][]int{
-	helpRoute:        {0, 1},
-	initRoute:        {1},
-	versionRoute:     {0},
-	preRegisterRoute: {1, 2},
-	newWalletRoute:   {5},
-	openWalletRoute:  {2},
-	closeWalletRoute: {1},
-	walletsRoute:     {0},
-	registerRoute:    {3, 4},
-}
-
-// parsers is a map of commands to parsing functions.
-var parsers = map[string](func([]string) (interface{}, error)){
-	helpRoute:        parseHelpArgs,
-	initRoute:        func(args []string) (interface{}, error) { return args[0], nil },
-	versionRoute:     func([]string) (interface{}, error) { return nil, nil },
-	preRegisterRoute: parsePreRegisterArgs,
-	newWalletRoute:   parseNewWalletArgs,
-	openWalletRoute:  parseOpenWalletArgs,
-	closeWalletRoute: func(args []string) (interface{}, error) {
-		return checkIntArg(args[0], "assetID")
-	},
-	walletsRoute:  func([]string) (interface{}, error) { return nil, nil },
-	registerRoute: parseRegisterArgs,
-}
-
-func checkNArgs(have int, want []int) error {
-	if len(want) == 1 {
-		if want[0] != have {
-			return fmt.Errorf("%w: wanted %d but got %d", ErrArgs, want[0], have)
+// checkNArgs checks that args and pwArgs are the correct length.
+func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
+	// For want, one integer indicates an exact match, two are the min and max.
+	check := func(have int, want []int) error {
+		if len(want) == 1 {
+			if want[0] != have {
+				return fmt.Errorf("%w: wanted %d but got %d", errArgs, want[0], have)
+			}
+		} else {
+			if have < want[0] || have > want[1] {
+				return fmt.Errorf("%w: wanted between %d and %d but got %d", errArgs, want[0], want[1], have)
+			}
 		}
-	} else {
-		if have < want[0] || have > want[1] {
-			return fmt.Errorf("%w: wanted between %d and %d but got %d", ErrArgs, want[0], want[1], have)
-		}
+		return nil
+	}
+	if err := check(len(params.Args), nArgs); err != nil {
+		return fmt.Errorf("arguments: %w", err)
+	}
+	if err := check(len(params.PWArgs), nPWArgs); err != nil {
+		return fmt.Errorf("password arguments: %w", err)
 	}
 	return nil
 }
@@ -108,75 +87,121 @@ func checkNArgs(have int, want []int) error {
 func checkIntArg(arg, name string) (int, error) {
 	i, err := strconv.Atoi(arg)
 	if err != nil {
-		return i, fmt.Errorf("%w, %s must be an integer: %v", ErrArgs, name, err)
+		return i, fmt.Errorf("%w, %s must be an integer: %v", errArgs, name, err)
 	}
 	return i, nil
 }
 
-func parseHelpArgs(args []string) (interface{}, error) {
-	if len(args) == 0 {
-		return nil, nil
+func checkBoolArg(arg, name string) (bool, error) {
+	b, err := strconv.ParseBool(arg)
+	if err != nil {
+		return b, fmt.Errorf("%w: %s must be a boolean: %v", errArgs, name, err)
 	}
-	return args[0], nil
+	return b, nil
 }
 
-func parseNewWalletArgs(args []string) (interface{}, error) {
-	assetID, err := checkIntArg(args[2], "assetID")
+func parseHelpArgs(params *RawParams) (*helpForm, error) {
+	if err := checkNArgs(params, []int{0}, []int{0, 2}); err != nil {
+		return nil, err
+	}
+	var helpWith string
+	if len(params.Args) > 0 {
+		helpWith = params.Args[0]
+	}
+	var includePasswords bool
+	if len(params.Args) > 1 {
+		var err error
+		includePasswords, err = checkBoolArg(params.Args[1], "includepasswords")
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &helpForm{
+		HelpWith:         helpWith,
+		IncludePasswords: includePasswords,
+	}, nil
+}
+
+func parseInitArgs(params *RawParams) (string, error) {
+	if err := checkNArgs(params, []int{1}, []int{0}); err != nil {
+		return "", err
+	}
+	return params.PWArgs[0], nil
+}
+
+func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
+	if err := checkNArgs(params, []int{2}, []int{3}); err != nil {
+		return nil, err
+	}
+	assetID, err := checkIntArg(params.Args[0], "assetID")
 	if err != nil {
 		return nil, err
 	}
 	req := &newWalletForm{
-		AppPass:    args[0],
-		WalletPass: args[1],
+		AppPass:    params.PWArgs[0],
+		WalletPass: params.PWArgs[1],
 		AssetID:    uint32(assetID),
-		Account:    args[3],
-		INIPath:    args[4],
+		Account:    params.Args[1],
+		INIPath:    params.Args[2],
 	}
 	return req, nil
 }
 
-func parseOpenWalletArgs(args []string) (interface{}, error) {
-	assetID, err := checkIntArg(args[1], "assetID")
+func parseOpenWalletArgs(params *RawParams) (*openWalletForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{1}); err != nil {
+		return nil, err
+	}
+	assetID, err := checkIntArg(params.Args[0], "assetID")
 	if err != nil {
 		return nil, err
 	}
-	req := &openWalletForm{AppPass: args[0], AssetID: uint32(assetID)}
+	req := &openWalletForm{AppPass: params.PWArgs[0], AssetID: uint32(assetID)}
 	return req, nil
 }
 
-func parseRegisterArgs(args []string) (interface{}, error) {
-	fee, err := checkIntArg(args[2], "fee")
+func parseCloseWalletArgs(params *RawParams) (uint32, error) {
+	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
+		return 0, err
+	}
+	assetID, err := checkIntArg(params.Args[0], "assetID")
 	if err != nil {
+		return 0, err
+	}
+	return uint32(assetID), nil
+}
+
+func parsePreRegisterArgs(params *RawParams) (*core.PreRegisterForm, error) {
+	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
 		return nil, err
 	}
-	cert := ""
-	if len(args) == 4 {
-		certB, err := ioutil.ReadFile(args[3])
-		if err != nil {
-			return nil, fmt.Errorf("error reading %s: %v", args[1], err)
-		}
-		cert = string(certB)
+	var cert string
+	if len(params.Args) > 1 {
+		cert = params.Args[1]
 	}
-	req := &core.Registration{
-		Password: args[0],
-		URL:      args[1],
-		Fee:      uint64(fee),
-		Cert:     cert,
-	}
-	return req, nil
-}
-
-func parsePreRegisterArgs(args []string) (interface{}, error) {
-	cert := ""
-	if len(args) > 1 {
-		certB, err := ioutil.ReadFile(args[1])
-		if err != nil {
-			return nil, fmt.Errorf("error reading %s: %v", args[1], err)
-		}
-		cert = string(certB)
-	}
-	return &core.PreRegisterForm{
-		URL:  args[0],
+	req := &core.PreRegisterForm{
+		URL:  params.Args[0],
 		Cert: cert,
-	}, nil
+	}
+	return req, nil
+}
+
+func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
+		return nil, err
+	}
+	fee, err := checkIntArg(params.Args[1], "fee")
+	if err != nil {
+		return nil, err
+	}
+	cert := ""
+	if len(params.Args) > 2 {
+		cert = params.Args[2]
+	}
+	req := &core.RegisterForm{
+		AppPass: params.PWArgs[0],
+		URL:     params.Args[0],
+		Fee:     uint64(fee),
+		Cert:    cert,
+	}
+	return req, nil
 }

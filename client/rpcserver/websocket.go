@@ -168,7 +168,14 @@ func (s *RPCServer) notifyWalletUpdate(assetID uint32) {
 // wsHandleRequest handles requests found in the routes map for a websocket client.
 func wsHandleRequest(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
 	handler := routes[msg.Route]
-	payload := handler(s, msg)
+	params := new(RawParams)
+	err := msg.Unmarshal(params)
+	if err != nil {
+		log.Debugf("cannot unmarshal params for route %s", msg.Route)
+		msgError := msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
+		return msgError
+	}
+	payload := handler(s, params)
 	encodedPayload, err := json.Marshal(payload)
 	if err != nil {
 		err := fmt.Errorf("unable to encode payload: %v", err)

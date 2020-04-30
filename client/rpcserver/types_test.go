@@ -7,109 +7,52 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-
-	"decred.org/dcrdex/client/core"
 )
-
-func TestParseCmdArgs(t *testing.T) {
-	tests := []struct {
-		name, cmd string
-		args      []string
-		want      interface{}
-		wantErr   bool
-	}{{
-		name:    "ok",
-		cmd:     "help",
-		args:    []string{"some command"},
-		want:    "some command",
-		wantErr: false,
-	}, {
-		name:    "route doesnt exist",
-		cmd:     "never make this command",
-		args:    []string{"some command"},
-		wantErr: true,
-	}, {
-		name:    "wrong number of arguments",
-		cmd:     "version",
-		args:    []string{"some command"},
-		wantErr: true,
-	}}
-	for _, test := range tests {
-		res, err := ParseCmdArgs(test.cmd, test.args)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %s",
-					test.name)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatalf("unexpected error for test %s: %v",
-				test.name, err)
-		}
-		if res != test.want {
-			t.Fatalf("got %v but want %v for test %s",
-				res, test.want, test.name)
-		}
-	}
-}
-
-func TestNArgs(t *testing.T) {
-	// routes and nArgs must have the same keys.
-	if len(routes) != len(nArgs) {
-		t.Fatal("routes and nArgs have different number of routes")
-	}
-	for k := range routes {
-		if _, exists := nArgs[k]; !exists {
-			t.Fatalf("%v exists in routes but not in nArgs", k)
-		}
-	}
-}
 
 func TestCheckNArgs(t *testing.T) {
 	tests := []struct {
 		name      string
-		have      int
+		have      []string
 		wantNArgs []int
 		wantErr   bool
 	}{{
 		name:      "ok exact",
-		have:      3,
+		have:      []string{"1", "2", "3"},
 		wantNArgs: []int{3},
 		wantErr:   false,
 	}, {
 		name:      "ok between",
-		have:      3,
+		have:      []string{"1", "2", "3"},
 		wantNArgs: []int{2, 4},
 		wantErr:   false,
 	}, {
 		name:      "ok lower",
-		have:      2,
+		have:      []string{"1", "2"},
 		wantNArgs: []int{2, 4},
 		wantErr:   false,
 	}, {
 		name:      "ok upper",
-		have:      4,
+		have:      []string{"1", "2", "3", "4"},
 		wantNArgs: []int{2, 4},
 		wantErr:   false,
 	}, {
 		name:      "not exact",
-		have:      3,
+		have:      []string{"1", "2", "3"},
 		wantNArgs: []int{2},
 		wantErr:   true,
 	}, {
 		name:      "too few",
-		have:      2,
+		have:      []string{"1", "2"},
 		wantNArgs: []int{3, 5},
 		wantErr:   true,
 	}, {
 		name:      "too many",
-		have:      7,
+		have:      []string{"1", "2", "3", "4", "5", "6"},
 		wantNArgs: []int{2, 5},
 		wantErr:   true,
 	}}
 	for _, test := range tests {
-		err := checkNArgs(test.have, test.wantNArgs)
+		err := checkNArgs(&RawParams{PWArgs: test.have, Args: test.have}, test.wantNArgs, test.wantNArgs)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %s",
@@ -120,46 +63,34 @@ func TestCheckNArgs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for test %s: %v",
 				test.name, err)
-		}
-	}
-}
-
-func TestParsers(t *testing.T) {
-	// routes and parsers must have the same keys.
-	if len(routes) != len(parsers) {
-		t.Fatal("routes and parsers have different number of routes")
-	}
-	for k := range routes {
-		if _, exists := parsers[k]; !exists {
-			t.Fatalf("%v exists in routes but not in parsers", k)
 		}
 	}
 }
 
 func TestParseNewWalletArgs(t *testing.T) {
-	argsWithAssetID := func(id string) []string {
-		return []string{
-			"password123",
-			"password123",
+	paramsWithAssetID := func(id string) *RawParams {
+		pwArgs := []string{"password123", "password123"}
+		args := []string{
 			id,
 			"default",
 			"/home/wallet.conf",
 		}
+		return &RawParams{PWArgs: pwArgs, Args: args}
 	}
 	tests := []struct {
 		name    string
-		args    []string
+		params  *RawParams
 		wantErr error
 	}{{
-		name: "ok",
-		args: argsWithAssetID("42"),
+		name:   "ok",
+		params: paramsWithAssetID("42"),
 	}, {
 		name:    "assetID is not int",
-		args:    argsWithAssetID("42.1"),
-		wantErr: ErrArgs,
+		params:  paramsWithAssetID("42.1"),
+		wantErr: errArgs,
 	}}
 	for _, test := range tests {
-		res, err := parseNewWalletArgs(test.args)
+		nwf, err := parseNewWalletArgs(test.params)
 		if test.wantErr != nil {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("unexpected error %v for test %s",
@@ -167,43 +98,44 @@ func TestParseNewWalletArgs(t *testing.T) {
 			}
 			continue
 		}
-		nwf, ok := res.(*newWalletForm)
-		if !ok {
-			t.Fatal("result doesn't wrap *newWalletForm")
-		}
-		if nwf.AppPass != test.args[0] {
+		if nwf.AppPass != test.params.PWArgs[0] {
 			t.Fatalf("appPass doesn't match")
 		}
-		if nwf.WalletPass != test.args[1] {
+		if nwf.WalletPass != test.params.PWArgs[1] {
 			t.Fatalf("walletPass doesn't match")
 		}
-		if fmt.Sprint(nwf.AssetID) != test.args[2] {
+		if fmt.Sprint(nwf.AssetID) != test.params.Args[0] {
 			t.Fatalf("assetID doesn't match")
 		}
-		if nwf.Account != test.args[3] {
+		if nwf.Account != test.params.Args[1] {
 			t.Fatalf("account doesn't match")
 		}
-		if nwf.INIPath != test.args[4] {
+		if nwf.INIPath != test.params.Args[2] {
 			t.Fatalf("inipath doesn't match")
 		}
 	}
 }
 
 func TestParseOpenWalletArgs(t *testing.T) {
+	paramsWithAssetID := func(id string) *RawParams {
+		pwArgs := []string{"password123"}
+		args := []string{id}
+		return &RawParams{PWArgs: pwArgs, Args: args}
+	}
 	tests := []struct {
 		name    string
-		args    []string
+		params  *RawParams
 		wantErr error
 	}{{
-		name: "ok",
-		args: []string{"password123", "42"},
+		name:   "ok",
+		params: paramsWithAssetID("42"),
 	}, {
 		name:    "assetID is not int",
-		args:    []string{"password123", "42.1"},
-		wantErr: ErrArgs,
+		params:  paramsWithAssetID("42.1"),
+		wantErr: errArgs,
 	}}
 	for _, test := range tests {
-		res, err := parseOpenWalletArgs(test.args)
+		owf, err := parseOpenWalletArgs(test.params)
 		if test.wantErr != nil {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("unexpected error %v for test %s",
@@ -211,14 +143,10 @@ func TestParseOpenWalletArgs(t *testing.T) {
 			}
 			continue
 		}
-		owf, ok := res.(*openWalletForm)
-		if !ok {
-			t.Fatal("result doesn't wrap *openWalletForm")
-		}
-		if owf.AppPass != test.args[0] {
+		if owf.AppPass != test.params.PWArgs[0] {
 			t.Fatalf("appPass doesn't match")
 		}
-		if fmt.Sprint(owf.AssetID) != test.args[1] {
+		if fmt.Sprint(owf.AssetID) != test.params.Args[0] {
 			t.Fatalf("assetID doesn't match")
 		}
 	}
@@ -235,7 +163,7 @@ func TestCheckIntArg(t *testing.T) {
 	}, {
 		name:    "assetID is not int",
 		arg:     "42.1",
-		wantErr: ErrArgs,
+		wantErr: errArgs,
 	}}
 	for _, test := range tests {
 		res, err := checkIntArg(test.arg, "name")
@@ -252,21 +180,68 @@ func TestCheckIntArg(t *testing.T) {
 	}
 }
 
-func TestParseRegisterArgs(t *testing.T) {
+func TestCheckBoolArg(t *testing.T) {
 	tests := []struct {
 		name    string
-		args    []string
+		arg     string
+		want    bool
 		wantErr error
 	}{{
-		name: "ok",
-		args: []string{"password123", "dex", "1000"},
+		name: "ok string lower",
+		arg:  "true",
+		want: true,
 	}, {
-		name:    "fee not int",
-		args:    []string{"password123", "dex", "1000.0"},
-		wantErr: ErrArgs,
+		name: "ok string upper",
+		arg:  "False",
+		want: false,
+	}, {
+		name: "ok int",
+		arg:  "1",
+		want: true,
+	}, {
+		name:    "string but not true or false",
+		arg:     "blue",
+		wantErr: errArgs,
+	}, {
+		name:    "int but not 0 or 1",
+		arg:     "2",
+		wantErr: errArgs,
 	}}
 	for _, test := range tests {
-		res, err := parseRegisterArgs(test.args)
+		res, err := checkBoolArg(test.arg, "name")
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		if res != test.want {
+			t.Fatalf("wanted %v but got %v for test %v", test.want, res, test.name)
+		}
+	}
+}
+
+func TestParseRegisterArgs(t *testing.T) {
+	paramsWithFee := func(fee string) *RawParams {
+		pwArgs := []string{"password123"}
+		args := []string{"dex", fee, "cert"}
+		return &RawParams{PWArgs: pwArgs, Args: args}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: paramsWithFee("1000"),
+	}, {
+		name:    "fee not int",
+		params:  paramsWithFee("1000.0"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		reg, err := parseRegisterArgs(test.params)
 		if test.wantErr != nil {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("unexpected error %v for test %s",
@@ -274,18 +249,57 @@ func TestParseRegisterArgs(t *testing.T) {
 			}
 			continue
 		}
-		reg, ok := res.(*core.Registration)
-		if !ok {
-			t.Fatal("result doesn't wrap *core.Registration")
-		}
-		if reg.Password != test.args[0] {
+		if reg.AppPass != test.params.PWArgs[0] {
 			t.Fatalf("appPass doesn't match")
 		}
-		if reg.URL != test.args[1] {
-			t.Fatalf("dex doesn't match")
+		if reg.URL != test.params.Args[0] {
+			t.Fatalf("url doesn't match")
 		}
-		if fmt.Sprint(reg.Fee) != test.args[2] {
+		if fmt.Sprint(reg.Fee) != test.params.Args[1] {
 			t.Fatalf("fee doesn't match")
+		}
+		if fmt.Sprint(reg.Cert) != test.params.Args[2] {
+			t.Fatalf("cert doesn't match")
+		}
+	}
+}
+
+func TestParseHelpArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    *helpForm
+		wantErr error
+	}{{
+		name: "ok no args",
+		want: &helpForm{},
+	}, {
+		name: "ok help with",
+		args: []string{"thing"},
+		want: &helpForm{HelpWith: "thing"},
+	}, {
+		name: "ok help with include passwords",
+		args: []string{"thing", "true"},
+		want: &helpForm{HelpWith: "thing", IncludePasswords: true},
+	}, {
+		name:    "include passwords not boolean",
+		args:    []string{"thing", "thing2"},
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		form, err := parseHelpArgs(&RawParams{Args: test.args})
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		if len(test.args) > 0 && form.HelpWith != test.args[0] {
+			t.Fatalf("helpwith doesn't match")
+		}
+		if len(test.args) > 1 && fmt.Sprint(form.IncludePasswords) != test.args[1] {
+			t.Fatalf("includepasswords doesn't match")
 		}
 	}
 }

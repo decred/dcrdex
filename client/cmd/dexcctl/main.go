@@ -6,15 +6,18 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"strings"
 
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/admin"
 )
 
 const (
@@ -35,13 +38,73 @@ func (s semver) String() string {
 }
 
 func main() {
-	if err := run(); err != nil {
+	// Create a context that is canceled when a shutdown signal is received.
+	ctx := withShutdownCancel(context.Background())
+	// Listen for interrupt signals (e.g. CTRL+C).
+	go shutdownListener()
+	if err := run(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// promptPasswords is a map of routes to password prompts. Passwords are
+// prompted in the order given.
+var promptPasswords = map[string][]string{
+	"openwallet": {"App password:"},
+	"newwallet":  {"App password:", "Wallet password:"},
+	"init":       {"Set new app password:"},
+	"register":   {"App password:"},
+}
+
+// readCerts is a map of routes to TLS certificate indexes.
+var readCerts = map[string]int{
+	"preregister": 1,
+	"register":    2,
+}
+
+// promptPWs prompts for passwords on stdin and returns an error if prompting
+// fails or a password is empty. Returns passwords as a slice of strings.
+func promptPWs(ctx context.Context, cmd string) ([]string, error) {
+	prompts, exists := promptPasswords[cmd]
+	if !exists {
+		return nil, nil
+	}
+	pws := make([]string, len(prompts))
+	// Prompt for passwords one at a time.
+	for i, prompt := range prompts {
+		pw, err := admin.PasswordPrompt(ctx, prompt)
+		if err != nil {
+			return nil, err
+		}
+		pws[i] = string(pw)
+		admin.ClearBytes(pw)
+	}
+	return pws, nil
+}
+
+// readCert reads TLS certificate content located in a file specified at args'
+// index as expected for cmd and replaces it with the file as a string. The
+// passed args are modified.
+func readCert(cmd string, args []string) error {
+	idx, exists := readCerts[cmd]
+	// Certs are optional, so it is not an error if they are not included.
+	if !exists || len(args) < idx+1 || args[idx] == "" {
+		return nil
+	}
+	path := cleanAndExpandPath(args[idx])
+	if !fileExists(path) {
+		return fmt.Errorf("no cert file found at %s", path)
+	}
+	certB, err := ioutil.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("error reading %s: %v", path, err)
+	}
+	args[idx] = string(certB)
+	return nil
+}
+
+func run(ctx context.Context) error {
 	cfg, args, stop, err := configure()
 	if err != nil {
 		return fmt.Errorf("unable to configure: %v", err)
@@ -75,19 +138,24 @@ func run() error {
 			params = append(params, param)
 			continue
 		}
-
 		params = append(params, arg)
 	}
 
-	// Parse the arguments and convert into a type the server accepts.
-	payload, err := rpcserver.ParseCmdArgs(args[0], params)
+	// Prompt for passwords.
+	pws, err := promptPWs(ctx, args[0])
 	if err != nil {
-		if errors.Is(err, rpcserver.ErrArgs) {
-			// This is a known command. Ignoring unreachable error.
-			usage, _ := rpcserver.CommandUsage(args[0])
-			return fmt.Errorf("%v\n\n%s", err, usage)
-		}
 		return err
+	}
+
+	// Attempt to read TLS certificates.
+	err = readCert(args[0], params)
+	if err != nil {
+		return err
+	}
+
+	payload := &rpcserver.RawParams{
+		PWArgs: pws,
+		Args:   params,
 	}
 
 	// Create a request using the parsedArgs.

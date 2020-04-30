@@ -74,10 +74,10 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.core.Register(&core.Registration{
-		URL:      reg.URL,
-		Password: reg.Password,
-		Fee:      reg.Fee,
+	err := s.core.Register(&core.RegisterForm{
+		URL:     reg.URL,
+		AppPass: reg.Password,
+		Fee:     reg.Fee,
 	})
 	if err != nil {
 		s.writeAPIError(w, "registration error: %v", err)

@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -44,12 +45,15 @@ var (
 	// Check that core.Core satifies ClientCore.
 	_   ClientCore = (*core.Core)(nil)
 	log slog.Logger
+	// errUnknownCmd is wrapped when the command is not know.
+	errUnknownCmd = errors.New("unknown command")
 )
 
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
 	Balance(assetID uint32) (baseUnits uint64, err error)
-	PreRegister(*core.PreRegisterForm) (fee uint64, err error)
+	Book(dex string, base, quote uint32) (orderBook *core.OrderBook, err error)
+	PreRegister(form *core.PreRegisterForm) (fee uint64, err error)
 	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass string, form *core.WalletForm) error
@@ -57,7 +61,7 @@ type ClientCore interface {
 	OpenWallet(assetID uint32, pw string) error
 	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)
-	Register(registrationForm *core.Registration) error
+	Register(form *core.RegisterForm) error
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -312,12 +316,20 @@ func (s *RPCServer) handleRequest(req *msgjson.Message) *msgjson.ResponsePayload
 	// Find the correct handler for this route.
 	h, exists := routes[req.Route]
 	if !exists {
-		log.Debugf("%v: %v", ErrUnknownCmd, req.Route)
-		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, ErrUnknownCmd.Error())
+		log.Debugf("%v: %v", errUnknownCmd, req.Route)
+		payload.Error = msgjson.NewError(msgjson.RPCUnknownRoute, errUnknownCmd.Error())
 		return payload
 	}
 
-	return h(s, req)
+	params := new(RawParams)
+	err := req.Unmarshal(params)
+	if err != nil {
+		log.Debugf("cannot unmarshal params for route %s", req.Route)
+		payload.Error = msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
+		return payload
+	}
+
+	return h(s, params)
 }
 
 // parseHTTPRequest parses the msgjson message in the request body, creates a

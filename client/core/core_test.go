@@ -1003,10 +1003,10 @@ func TestRegister(t *testing.T) {
 		queueConnect()
 	}
 
-	form := &Registration{
-		URL:      tDexUrl,
-		Password: tPW,
-		Fee:      tFee,
+	form := &RegisterForm{
+		URL:     tDexUrl,
+		AppPass: tPW,
+		Fee:     tFee,
 	}
 
 	tWallet.payFeeCoin = &tCoin{id: []byte("abcdef")}

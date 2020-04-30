@@ -81,7 +81,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 func (c *TCore) InitializeClient(pw string) error {
 	return c.initializeClientErr
 }
-func (c *TCore) Register(*core.Registration) error {
+func (c *TCore) Register(*core.RegisterForm) error {
 	return c.registerErr
 }
 
@@ -460,17 +460,19 @@ func TestParseHTTPRequest(t *testing.T) {
 	r, _ = http.NewRequest("GET", "", bbuff)
 	ensureMsgErr("bad route", msgjson.RPCUnknownRoute)
 
-	// Set the route correctly.
-	routes["123"] = func(r *RPCServer, m *msgjson.Message) *msgjson.ResponsePayload {
-		return new(msgjson.ResponsePayload)
-	}
-
-	// Try again for no error.
+	// Use real route.
+	msg, _ = msgjson.NewRequest(1, "version", nil)
+	b, _ = json.Marshal(msg)
 	bbuff = bytes.NewBuffer(b)
 	r, _ = http.NewRequest("GET", "", bbuff)
 	ensureNoErr("good request")
 
-	delete(routes, "123")
+	// Use real route with bad args.
+	msg, _ = msgjson.NewRequest(1, "version", "something")
+	b, _ = json.Marshal(msg)
+	bbuff = bytes.NewBuffer(b)
+	r, _ = http.NewRequest("GET", "", bbuff)
+	ensureMsgErr("bad params", msgjson.RPCParseError)
 }
 
 type authMiddlewareTest struct {
