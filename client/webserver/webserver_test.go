@@ -277,7 +277,11 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 }
 
 func ensureResponse(t *testing.T, s *WebServer, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
-	reader.msg, _ = json.Marshal(body)
+	var err error
+	reader.msg, err = json.Marshal(body)
+	if err != nil {
+		t.Fatalf("error marshalling request body: %v", err)
+	}
 	req, err := http.NewRequest("GET", "/", reader)
 	if err != nil {
 		t.Fatalf("error creating request: %v", err)
@@ -426,7 +430,7 @@ func TestAPILogin(t *testing.T) {
 	}
 
 	goodBody := &loginForm{
-		Pass: PassBytes("def"),
+		Pass: encode.PassBytes("def"),
 	}
 	body = goodBody
 	ensure(`{"ok":true,"notes":null}`)
@@ -501,7 +505,7 @@ func TestAPIInit(t *testing.T) {
 	}
 
 	goodBody := &loginForm{
-		Pass: PassBytes("def"),
+		Pass: encode.PassBytes("def"),
 	}
 	body = goodBody
 	ensure(`{"ok":true,"notes":null}`)
@@ -546,7 +550,7 @@ func TestAPINewWallet(t *testing.T) {
 	body = &newWalletForm{
 		Account: "account",
 		INIPath: "/path/to/somewhere",
-		Pass:    PassBytes("123"),
+		Pass:    encode.PassBytes("123"),
 	}
 	tCore.notHas = true
 	ensure(`{"ok":true}`)

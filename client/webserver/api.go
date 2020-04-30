@@ -10,7 +10,6 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 )
 
 // apiPreRegister is the handler for the '/preregister' API request.
@@ -37,7 +36,7 @@ func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
 // apiRegister is the handler for the '/register' API request.
 func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	reg := new(registration)
-	defer encode.ClearBytes(reg.Password)
+	defer reg.Password.Clear()
 	if !readPost(w, r, reg) {
 		return
 	}
@@ -74,8 +73,10 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 // apiNewWallet is the handler for the '/newwallet' API request.
 func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	form := new(newWalletForm)
-	defer encode.ClearBytes(form.AppPW)
-	defer encode.ClearBytes(form.Pass)
+	defer func() {
+		form.AppPW.Clear()
+		form.Pass.Clear()
+	}()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -102,7 +103,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 // specified wallet.
 func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	form := new(openWalletForm)
-	defer encode.ClearBytes(form.Pass)
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -138,7 +139,7 @@ func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
 // apiTrade is the handler for the '/trade' API request.
 func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 	form := new(tradeForm)
-	defer encode.ClearBytes(form.Pass)
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -160,7 +161,7 @@ func (s *WebServer) apiTrade(w http.ResponseWriter, r *http.Request) {
 // apiCancel is the handler for the '/cancel' API request.
 func (s *WebServer) apiCancel(w http.ResponseWriter, r *http.Request) {
 	form := new(cancelForm)
-	defer encode.ClearBytes(form.Pass)
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -192,7 +193,7 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 // apiInit is the handler for the '/init' API request.
 func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
-	defer encode.ClearBytes(login.Pass)
+	defer login.Pass.Clear()
 	if !readPost(w, r, login) {
 		return
 	}
@@ -207,7 +208,7 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 // apiLogin handles the 'login' API request. ..
 func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
-	defer encode.ClearBytes(login.Pass)
+	defer login.Pass.Clear()
 	if !readPost(w, r, login) {
 		return
 	}
@@ -217,7 +218,7 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 // apiWithdraw handles the 'withdraw' API request.
 func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 	form := new(withdrawForm)
-	defer encode.ClearBytes(form.Pass)
+	defer form.Pass.Clear()
 	if !readPost(w, r, form) {
 		return
 	}
@@ -243,9 +244,7 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 
 // apiActuallyLogin logs the user in.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
-	pw := []byte(login.Pass)
-	notes, err := s.core.Login(pw)
-	encode.ClearBytes(pw)
+	notes, err := s.core.Login(login.Pass)
 	if err != nil {
 		s.writeAPIError(w, "login error: %v", err)
 		return
