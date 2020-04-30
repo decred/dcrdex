@@ -13,6 +13,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
@@ -98,10 +99,10 @@ type SupportedAsset struct {
 
 // RegisterForm is information necessary to register an account on a DEX.
 type RegisterForm struct {
-	URL     string `json:"url"`
-	AppPass []byte `json:"appPass"`
-	Fee     uint64 `json:"fee"`
-	Cert    string `json:"cert"`
+	URL     string           `json:"url"`
+	AppPass encode.PassBytes `json:"appPass"`
+	Fee     uint64           `json:"fee"`
+	Cert    string           `json:"cert"`
 }
 
 // PreRegisterForm is the information necessary to pre-register a DEX.

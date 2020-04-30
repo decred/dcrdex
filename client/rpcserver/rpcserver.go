@@ -22,6 +22,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
@@ -54,9 +55,9 @@ type ClientCore interface {
 	Balance(assetID uint32) (baseUnits uint64, err error)
 	Book(dex string, base, quote uint32) (orderBook *core.OrderBook, err error)
 	CloseWallet(assetID uint32) error
-	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
-	InitializeClient(appPass []byte) error
-	OpenWallet(assetID uint32, pw []byte) error
+	CreateWallet(appPass, walletPass encode.PassBytes, form *core.WalletForm) error
+	InitializeClient(appPass encode.PassBytes) error
+	OpenWallet(assetID uint32, pw encode.PassBytes) error
 	PreRegister(form *core.PreRegisterForm) (fee uint64, err error)
 	Register(form *core.RegisterForm) error
 	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)

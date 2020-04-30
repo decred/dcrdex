@@ -19,8 +19,8 @@ var (
 
 // RawParams is used for all server requests.
 type RawParams struct {
-	PWArgs []string `json:"PWArgs"`
-	Args   []string `json:"args"`
+	PWArgs []encode.PassBytes `json:"PWArgs"`
+	Args   []string           `json:"args"`
 }
 
 // versionResponse holds a semver version JSON object.
@@ -123,11 +123,11 @@ func parseHelpArgs(params *RawParams) (*helpForm, error) {
 	}, nil
 }
 
-func parseInitArgs(params *RawParams) ([]byte, error) {
+func parseInitArgs(params *RawParams) (encode.PassBytes, error) {
 	if err := checkNArgs(params, []int{1}, []int{0}); err != nil {
 		return nil, err
 	}
-	return []byte(params.PWArgs[0]), nil
+	return params.PWArgs[0], nil
 }
 
 func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
@@ -139,8 +139,8 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		return nil, err
 	}
 	req := &newWalletForm{
-		AppPass:    encode.PassBytes(params.PWArgs[0]),
-		WalletPass: encode.PassBytes(params.PWArgs[1]),
+		AppPass:    params.PWArgs[0],
+		WalletPass: params.PWArgs[1],
 		AssetID:    uint32(assetID),
 		Account:    params.Args[1],
 		INIPath:    params.Args[2],
@@ -156,7 +156,7 @@ func parseOpenWalletArgs(params *RawParams) (*openWalletForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := &openWalletForm{AppPass: encode.PassBytes(params.PWArgs[0]), AssetID: uint32(assetID)}
+	req := &openWalletForm{AppPass: params.PWArgs[0], AssetID: uint32(assetID)}
 	return req, nil
 }
 
@@ -199,7 +199,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 		cert = params.Args[2]
 	}
 	req := &core.RegisterForm{
-		AppPass: encode.PassBytes(params.PWArgs[0]),
+		AppPass: params.PWArgs[0],
 		URL:     params.Args[0],
 		Fee:     fee,
 		Cert:    cert,
