@@ -93,16 +93,27 @@ CREATE USER dcrdex WITH PASSWORD 'dexpass';
 CREATE DATABASE dcrdex_testnet OWNER dcrdex;
 ```
 
-#### Generate a master public key
+#### Generate a dcrwallet account public key
 
-The master public key is used for collecting registration fees. This can be
-done with [dcrwallet](https://github.com/decred/dcrwallet) using the
-`getmasterpubkey` RPC command. Place the pubkey string into a new DEX
-configuration file.
+The master public key is used for collecting registration fees.
+Using [dcrctl](https://docs.decred.org/wallets/cli/dcrctl-basics/)
+and [dcrwallet](https://github.com/decred/dcrwallet),
+create a new account.
+
+`dcrctl --wallet --testnet createnewaccount fees`
+
+Get the master public key for the account.
+
+`dcrctl --wallet --testnet getmasterpubkey fees`
+
+Master public keys are network-specific, so make sure to specify the network
+to both `dcrwallet` and `dcrctl`, if not using mainnet.
+
+Place the pubkey string into a new DEX configuration file.
 
 **~/.dcrdex/dcrdex.conf**
 ```
-# Mainnet extended pubkey
+# Testnet extended pubkey
 regfeexpub=tpubVWHTkHRefqHptAnBdNcDJ...
 
 # PostgreSQL Credentials
@@ -110,20 +121,19 @@ pgdbname=dcrdex_testnet
 pgpass=dexpass
 ```
 
-The *~/.dcrdex/* is the default **app data directory** location used by the
+*~/.dcrdex/* is the default **app data directory** location used by the
 DEX server, but can be customized with the `--appdata` command-line argument.
-
-Master public keys are network-specific, so **dcrd** and **dcrwallet** will need
-to be run on the same network on which the server will be run.
 
 #### Run your asset daemons.
 
 As of writing, only `dcrd`, `bitcoind`, and `litecoind` are supported. The
-`txindex` configuration option must be set.
+`txindex` configuration option must be set. Be sure to specify the correct
+network if not using mainnet.
 
-#### Create the asset and market configuration file
+#### Create the assets and market configuration file
 
-A sample is given at *dcrdex/cmd/dcrdex/sample-markets.json*. See the
+A sample is given at
+[*sample-markets.json*](server/cmd/dcrdex/sample-markets.json). See the
 [**Per-asset Variables**](spec/admin.mediawiki) section of the specification for
 more information on individual options.
 
@@ -131,8 +141,8 @@ more information on individual options.
 
 From a command prompt, navigate to **server/cmd/dcrdex**. Build the executable
 by running `go build`. The generated executable will be named **dcrdex**. Run
-`./dcrdex --help` to see configuration options that can be set either here or
-in the *dcrdex.conf* file. The
+`./dcrdex --help` to see configuration options that can be set either as a
+command line argument or in the *dcrdex.conf* file. The
 [**Exchange Variables**](spec/admin.mediawiki) section of the specification has
 additional information on a few key options.
 
