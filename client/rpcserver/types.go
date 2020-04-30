@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex/encode"
 )
 
 var (
@@ -41,17 +42,17 @@ type preRegisterResponse struct {
 
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
-	AssetID uint32 `json:"assetID"`
-	AppPass []byte `json:"appPass"`
+	AssetID uint32           `json:"assetID"`
+	AppPass encode.PassBytes `json:"appPass"`
 }
 
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
-	AssetID    uint32 `json:"assetID"`
-	Account    string `json:"account"`
-	INIPath    string `json:"inipath"`
-	WalletPass []byte `json:"walletPass"`
-	AppPass    []byte `json:"appPass"`
+	AssetID    uint32           `json:"assetID"`
+	Account    string           `json:"account"`
+	INIPath    string           `json:"inipath"`
+	WalletPass encode.PassBytes `json:"walletPass"`
+	AppPass    encode.PassBytes `json:"appPass"`
 }
 
 // helpForm is information necessary to obtain help.
@@ -138,8 +139,8 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		return nil, err
 	}
 	req := &newWalletForm{
-		AppPass:    []byte(params.PWArgs[0]),
-		WalletPass: []byte(params.PWArgs[1]),
+		AppPass:    encode.PassBytes(params.PWArgs[0]),
+		WalletPass: encode.PassBytes(params.PWArgs[1]),
 		AssetID:    uint32(assetID),
 		Account:    params.Args[1],
 		INIPath:    params.Args[2],
@@ -155,7 +156,7 @@ func parseOpenWalletArgs(params *RawParams) (*openWalletForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := &openWalletForm{AppPass: []byte(params.PWArgs[0]), AssetID: uint32(assetID)}
+	req := &openWalletForm{AppPass: encode.PassBytes(params.PWArgs[0]), AssetID: uint32(assetID)}
 	return req, nil
 }
 
@@ -198,7 +199,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 		cert = params.Args[2]
 	}
 	req := &core.RegisterForm{
-		AppPass: []byte(params.PWArgs[0]),
+		AppPass: encode.PassBytes(params.PWArgs[0]),
 		URL:     params.Args[0],
 		Fee:     fee,
 		Cert:    cert,
