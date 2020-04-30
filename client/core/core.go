@@ -1175,16 +1175,28 @@ func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 	fromID, toID := fromWallet.AssetID, toWallet.AssetID
 
+	if !fromWallet.connected() {
+		err = fromWallet.Connect(c.ctx)
+		if err != nil {
+			return nil, fmt.Errorf("Error connecting wallet: %v", err)
+		}
+	}
 	if !fromWallet.unlocked() {
 		err = unlockWallet(fromWallet, crypter)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet", unbip(fromID))
+			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(fromID), err)
+		}
+	}
+	if !toWallet.connected() {
+		err = toWallet.Connect(c.ctx)
+		if err != nil {
+			return nil, fmt.Errorf("Error connecting wallet: %v", err)
 		}
 	}
 	if !toWallet.unlocked() {
 		err = unlockWallet(toWallet, crypter)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet", unbip(toID))
+			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(toID), err)
 		}
 	}
 
