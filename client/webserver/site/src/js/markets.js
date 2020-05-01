@@ -40,7 +40,7 @@ export default class MarketsPage extends BasePage {
       'qtyField', 'rateField', 'orderErr', 'baseBox', 'quoteBox', 'baseImg',
       'quoteImg', 'baseNewButton', 'quoteNewButton', 'baseBalSpan',
       'quoteBalSpan', 'lotSize', 'rateStep', 'lotField', 'tifNow', 'mktBuyBox',
-      'mktBuyLots', 'mktBuyField', 'minMktBuy', 'qtyBox',
+      'mktBuyLots', 'mktBuyField', 'minMktBuy', 'qtyBox', 'loaderMsg',
       // Wallet unlock form
       'forms', 'openForm', 'walletPass',
       // Order submission is verified with the user's password.
@@ -208,18 +208,50 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  /* showLoaderMsg shows a message at loaderMsg and hides the orderForm in case
+  * dexc does not support an asset.
+  */
+  showLoaderMsg (symbol) {
+    const page = this.page
+    Doc.hide(page.orderForm)
+    Doc.show(page.loaderMsg)
+    page.loaderMsg.textContent = `The asset ${symbol} is not supported.`
+  }
+
+  /* hideLoaderMsg hides the loaderMsg and shows the orderForm back again */
+  hideLoaderMsg () {
+    const page = this.page
+    Doc.show(page.orderForm)
+    Doc.hide(page.loaderMsg)
+  }
+
   /* setMarket sets the currently displayed market. */
   async setMarket (url, base, quote) {
     const dex = app.user.exchanges[url]
     this.market = {
       dex: dex,
       sid: marketID(base, quote), // A string market identifier used by the DEX.
+      // app.assets is a map of core.SupportedAsset type, which can be found at
+      // client/core/types.go.
       base: app.assets[base],
-      baseCfg: dex.assets[base],
       quote: app.assets[quote],
+      // dex.assets is a map of dex.Asset type, which is defined at
+      // dex/asset.go.
+      baseCfg: dex.assets[base],
       quoteCfg: dex.assets[quote]
     }
     ws.request('loadmarket', makeMarket(url, base, quote))
+
+    const [b, q] = [this.market.base, this.market.quote]
+    if (b && q) {
+      return this.hideLoaderMsg()
+    }
+    if (!b) {
+      this.showLoaderMsg(this.market.baseCfg.symbol)
+    }
+    if (!q) {
+      this.showLoaderMsg(this.market.quoteCfg.symbol)
+    }
   }
 
   /*
@@ -349,14 +381,22 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const market = this.market
     const asset = app.assets[assetID]
-    switch (assetID) {
-      case (market.base.id):
-        this.setBalance(asset, page.baseBalSpan, page.baseImg, page.baseNewButton, page.baseBalance)
-        this.walletIcons.base.readWallet(asset.wallet)
-        break
-      case (market.quote.id):
-        this.setBalance(asset, page.quoteBalSpan, page.quoteImg, page.quoteNewButton, page.quoteBalance)
-        this.walletIcons.quote.readWallet(asset.wallet)
+    const [b, q] = [market.base, market.quote]
+    if (!b) {
+      Doc.hide(page.baseBox)
+    } else if (b.id === assetID) {
+      Doc.show(page.baseBox)
+      this.setBalance(asset, page.baseBalSpan, page.baseImg, page.baseNewButton, page.baseBalance)
+      this.walletIcons.base.readWallet(asset.wallet)
+      return
+    }
+
+    if (!q) {
+      Doc.hide(page.quoteBox)
+    } else if (q.id === assetID) {
+      this.setBalance(asset, page.quoteBalSpan, page.quoteImg, page.quoteNewButton, page.quoteBalance)
+      this.walletIcons.quote.readWallet(asset.wallet)
+      Doc.show(page.quoteBox)
     }
   }
 
@@ -366,7 +406,7 @@ export default class MarketsPage extends BasePage {
     const orderRows = this.orderRows
     const market = this.market
     for (const oid in orderRows) delete orderRows[oid]
-    const orders = app.orders(market.dex.url, market.base.id, market.quote.id)
+    const orders = app.orders(market.dex.url, market.baseCfg.id, market.quoteCfg.id)
     Doc.empty(page.liveList)
     for (const order of orders) {
       const row = page.liveTemplate.cloneNode(true)
@@ -400,11 +440,11 @@ export default class MarketsPage extends BasePage {
   handleBookRoute (data) {
     const market = this.market
     const page = this.page
-    const [b, q] = [market.base, market.quote]
+    const url = market.dex.url
+    const [b, q] = [market.baseCfg, market.quoteCfg]
     if (data.base !== b.id || data.quote !== q.id) return
     this.handleBook(data)
     page.marketLoader.classList.add('d-none')
-    const url = market.dex.url
     this.marketRows.forEach(row => {
       const d = row.dataset
       if (d.dex === url && parseInt(d.base) === data.base && parseInt(d.quote) === data.quote) {
@@ -436,7 +476,7 @@ export default class MarketsPage extends BasePage {
     this.chart.draw()
   }
 
-  /* handleBookOrderRoute is the handles for 'unbook_order' notifications. */
+  /* handleUnbookOrderRoute is the handles for 'unbook_order' notifications. */
   handleUnbookOrderRoute (data) {
     const order = data.order
     this.book.remove(order.token)
@@ -444,7 +484,7 @@ export default class MarketsPage extends BasePage {
     this.chart.draw()
   }
 
-  /* handleBookOrderRoute is the handles for 'epoch_order' notifications. */
+  /* handleEpochOrderRoute is the handles for 'epoch_order' notifications. */
   handleEpochOrderRoute (data) {
     const order = data.order
     if (order.rate > 0) this.book.add(order)
