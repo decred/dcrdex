@@ -39,7 +39,7 @@ cat > "${NODES_ROOT}/alpha/alpha-ctl.conf" <<EOF
 rpcuser=${RPC_USER}
 rpcpass=${RPC_PASS}
 rpccert=${NODES_ROOT}/alpha/rpc.cert
-rpcserver=127.0.0.1:${ALPHA_WALLET_PORT}
+rpclisten=127.0.0.1:${ALPHA_WALLET_PORT}
 EOF
 
 # Beta ctl config
@@ -47,7 +47,7 @@ cat > "${NODES_ROOT}/beta/beta-ctl.conf" <<EOF
 rpcuser=${RPC_USER}
 rpcpass=${RPC_PASS}
 rpccert=${NODES_ROOT}/beta/rpc.cert
-rpcserver=127.0.0.1:${BETA_WALLET_PORT}
+rpclisten=127.0.0.1:${BETA_WALLET_PORT}
 EOF
 
 # Alpha wallet config
@@ -91,14 +91,14 @@ EOF
 # Beta ctl
 cat > "${NODES_ROOT}/harness-ctl/alpha" <<EOF
 #!/bin/sh
-dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf --wallet \$*
+dcrctl -c ${NODES_ROOT}/alpha/rpc.cert -u${RPC_USER} -P${RPC_PASS} -w127.0.0.1:${ALPHA_WALLET_PORT} --wallet \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/alpha"
 
 # Alpha ctl
 cat > "${NODES_ROOT}/harness-ctl/beta" <<EOF
 #!/bin/sh
-dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf --wallet \$*
+dcrctl -c ${NODES_ROOT}/beta/rpc.cert -u${RPC_USER} -P${RPC_PASS} -w127.0.0.1:${BETA_WALLET_PORT} --wallet \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/beta"
 
@@ -110,7 +110,7 @@ cat > "${NODES_ROOT}/harness-ctl/mine-alpha" <<EOF
       *) NUM=\$1 ;;
   esac
   for i in \$(seq \$NUM) ; do
-    dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf generate 1
+    dcrctl -c ${NODES_ROOT}/alpha/rpc.cert -u${RPC_USER} -P${RPC_PASS} -s127.0.0.1:${ALPHA_RPC_PORT} generate 1
     sleep 0.5
   done
 EOF
@@ -125,7 +125,7 @@ NUM=1
       *) NUM=\$1 ;;
   esac
   for i in \$(seq \$NUM) ; do
-    dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf generate 1
+    dcrctl -c ${NODES_ROOT}/beta/rpc.cert -u${RPC_USER} -P${RPC_PASS} -s127.0.0.1:${BETA_RPC_PORT} generate 1
     sleep 0.5
   done
 EOF
@@ -219,7 +219,7 @@ sleep 1
 tmux send-keys -t $SESSION:3 "${BETA_WALLET_SEED}" C-m C-m
 tmux send-keys -t $SESSION:3 "dcrwallet -C w-beta.conf --debuglevel=debug" C-m
 
-sleep 30
+sleep 15
 
 ################################################################################
 # Prepare the wallets
