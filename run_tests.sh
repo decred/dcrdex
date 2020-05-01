@@ -26,7 +26,7 @@ go test $dumptags pgonline ./server/db/driver/pg
 for path in server/cmd/dcrdex client/cmd/dexc client/cmd/dexcctl
 do
 	cd $dir/$path
-	go build -race
+	go build
 done
 
 # Return to initial directory.
