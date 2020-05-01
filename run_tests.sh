@@ -23,6 +23,12 @@ go test $dumptags dcrlive ./server/asset/dcr
 go test $dumptags btclive ./server/asset/btc
 go test $dumptags pgonline ./server/db/driver/pg
 
+for path in server/cmd/dcrdex client/cmd/dexc client/cmd/dexcctl
+do
+	cd $dir/$path
+	go build
+done
+
 # Return to initial directory.
 cd $dir
 # golangci-lint (github.com/golangci/golangci-lint) is used to run each
