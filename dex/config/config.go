@@ -31,17 +31,17 @@ func options(cfgFile *ini.File) map[string]string {
 }
 
 // Unmapify parses config options from the provided settings map into the
-// specified struct object.
+// specified interface.
 func Unmapify(settings map[string]string, obj interface{}) error {
 	cfgData := optionsMapToINIData(settings)
 	return Parse(cfgData, obj)
 }
 
 // Parse parses config options from the provided config file path or []byte
-// data into the specified struct object.
+// data into the specified interface.
 // If the config has section headers, the config options are first read into
-// a map, then converted to []byte before being parsed. Otherwise the struct
-// object would not be modified with any data from the config file.
+// a map, then converted to []byte before being parsed. Otherwise `obj` would
+// not be modified with any data from the config.
 func Parse(cfgPathOrData, obj interface{}) error {
 	cfgFile, err := ini.Load(cfgPathOrData)
 	if err != nil {
