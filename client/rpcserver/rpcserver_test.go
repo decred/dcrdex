@@ -20,7 +20,6 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/slog"
 )
@@ -58,16 +57,16 @@ func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 func (c *TCore) Balance(uint32) (uint64, error) {
 	return 0, c.balanceErr
 }
-func (c *TCore) CreateWallet(appPW, walletPW encode.PassBytes, form *core.WalletForm) error {
+func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	return c.createWalletErr
 }
 func (c *TCore) CloseWallet(assetID uint32) error {
 	return c.closeWalletErr
 }
-func (c *TCore) InitializeClient(pw encode.PassBytes) error {
+func (c *TCore) InitializeClient(pw []byte) error {
 	return c.initializeClientErr
 }
-func (c *TCore) OpenWallet(assetID uint32, pw encode.PassBytes) error {
+func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
 }
 func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) {

@@ -205,7 +205,7 @@ func (s *WebServer) apiInit(w http.ResponseWriter, r *http.Request) {
 	s.actuallyLogin(w, r, login)
 }
 
-// apiLogin handles the 'login' API request. ..
+// apiLogin handles the 'login' API request.
 func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	login := new(loginForm)
 	defer login.Pass.Clear()
