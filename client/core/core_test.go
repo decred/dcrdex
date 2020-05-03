@@ -139,6 +139,8 @@ func tNewAccount() *dexAccount {
 
 func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 	conn := newTWebsocket()
+	connMgr := dex.NewConnectionManager(conn)
+	connMgr.Connect(tCtx)
 	acct := tNewAccount()
 	mkt := &Market{
 		Name:            tDcrBtcMktName,
@@ -150,8 +152,9 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		MarketBuyBuffer: 1.1,
 	}
 	return &dexConnection{
-		WsConn: conn,
-		acct:   acct,
+		WsConn:  conn,
+		connMgr: connMgr,
+		acct:    acct,
 		assets: map[uint32]*dex.Asset{
 			tDCR.ID: tDCR,
 			tBTC.ID: tBTC,
@@ -249,6 +252,10 @@ func (tdb *TDB) Account(url string) (*db.AccountInfo, error) {
 }
 
 func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
+	return nil
+}
+
+func (tdb *TDB) UpdateAccount(ai *db.AccountInfo) error {
 	return nil
 }
 
@@ -423,11 +430,11 @@ type TXCWallet struct {
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := new(TXCWallet)
 	return &xcWallet{
-		Wallet:    w,
-		connector: dex.NewConnectionMaster(w),
-		AssetID:   assetID,
-		lockTime:  time.Now().Add(time.Hour),
-		hookedUp:  true,
+		Wallet:      w,
+		connManager: dex.NewConnectionManager(w),
+		AssetID:     assetID,
+		lockTime:    time.Now().Add(time.Hour),
+		hookedUp:    true,
 	}, w
 }
 
@@ -957,7 +964,7 @@ func TestRegister(t *testing.T) {
 	rig.db.acctErr = tErr
 
 	regRes := &msgjson.RegisterResult{
-		DEXPubKey:    acct.dexPubKey.Serialize(),
+		DEXPubKey:    tDexKey.Serialize(),
 		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
 		Address:      "someaddr",
 		Fee:          tFee,
@@ -1036,6 +1043,13 @@ func TestRegister(t *testing.T) {
 
 	var err error
 	run := func() {
+		// Register method will error if url is already in conns map.
+		// Cache the conn for the test url instead so it is used by Register.
+		tCore.connMtx.Lock()
+		delete(tCore.conns, tDexUrl)
+		tCore.connMtx.Unlock()
+		tCore.storeTemporaryConn(dc)
+
 		tWallet.setConfs(tDCR.FundConf)
 		err = tCore.Register(form)
 	}
@@ -1194,7 +1208,7 @@ func TestRegister(t *testing.T) {
 func TestLogin(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
-	rig.acct.pay()
+	rig.acct.markFeePaid()
 
 	queueSuccess := func() {
 		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -1229,7 +1243,7 @@ func TestLogin(t *testing.T) {
 	if rig.acct.locked() {
 		t.Fatalf("unpaid account is locked")
 	}
-	rig.acct.pay()
+	rig.acct.markFeePaid()
 
 	// 'connect' route error.
 	rig.acct.unauth()
@@ -1258,7 +1272,8 @@ func TestConnectDEX(t *testing.T) {
 	tCore := rig.core
 
 	ai := &db.AccountInfo{
-		URL: "https://somedex.com",
+		URL:  "https://somedex.com",
+		Cert: []byte("required"),
 	}
 
 	queueConfig := func() {

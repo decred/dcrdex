@@ -78,23 +78,23 @@ type Connector interface {
 	Connect(ctx context.Context) (error, *sync.WaitGroup)
 }
 
-// ConnectionMaster manages a Connector.
-type ConnectionMaster struct {
+// ConnectionManager manages a Connector.
+type ConnectionManager struct {
 	contextManager
 	wg        *sync.WaitGroup
 	connector Connector
 }
 
-// NewConnectionMaster is the constructor for a new ConnectionMaster.
-func NewConnectionMaster(c Connector) *ConnectionMaster {
-	return &ConnectionMaster{
+// NewConnectionManager is the constructor for a new ConnectionManager.
+func NewConnectionManager(c Connector) *ConnectionManager {
+	return &ConnectionManager{
 		connector: c,
 	}
 }
 
-// Connect connects the Connector, and returns any initial connection error. Use
-// Disconnect to shut down the Connector.
-func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
+// Connect establishes a connection using connector, and returns any initial
+// connection error. Use Disconnect to shut down the connection.
+func (c *ConnectionManager) Connect(ctx context.Context) (err error) {
 	c.init(ctx)
 	c.mtx.Lock()
 	err, c.wg = c.connector.Connect(c.ctx)
@@ -103,7 +103,7 @@ func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 }
 
 // Disconnect closes the connection and waits for shutdown.
-func (c *ConnectionMaster) Disconnect() {
+func (c *ConnectionManager) Disconnect() {
 	c.mtx.RLock()
 	c.cancel()
 	defer c.mtx.RUnlock()

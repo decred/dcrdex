@@ -211,7 +211,7 @@ func TestWsConn(t *testing.T) {
 		t.Fatal(err)
 	}
 	wsc = conn.(*wsConn)
-	waiter := dex.NewConnectionMaster(wsc)
+	waiter := dex.NewConnectionManager(wsc)
 	err = waiter.Connect(ctx)
 	t.Log("Connect:", err)
 

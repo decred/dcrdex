@@ -28,6 +28,8 @@ type DB interface {
 	Account(url string) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
+	// UpdateAccount updates the AccountInfo for the specified DEX.
+	UpdateAccount(ai *AccountInfo) error
 	// AccountPaid marks the account as paid.
 	AccountPaid(proof *AccountProof) error
 	// UpdateOrder saves the order information in the database. Any existing
