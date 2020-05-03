@@ -146,7 +146,8 @@ export default class Application {
     this.pokeNote = idel(document.body, 'pokeNote')
     const pg = this.page = Doc.parsePage(this.header, [
       'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
-      'marketsMenuEntry', 'walletsMenuEntry', 'noteMenuEntry', 'loader'
+      'marketsMenuEntry', 'walletsMenuEntry', 'noteMenuEntry', 'loader',
+      'profileIcon'
     ])
     pg.noteIndicator.style.display = 'none'
     delete pg.noteTemplate.id
@@ -210,10 +211,10 @@ export default class Application {
       return
     }
     if (!this.user.authed) {
-      Doc.hide(pg.noteMenuEntry, pg.walletsMenuEntry, pg.marketsMenuEntry)
+      Doc.hide(pg.noteMenuEntry, pg.walletsMenuEntry, pg.marketsMenuEntry, pg.profileIcon)
       return
     }
-    Doc.show(pg.noteMenuEntry, pg.walletsMenuEntry)
+    Doc.show(pg.noteMenuEntry, pg.walletsMenuEntry, pg.profileIcon)
     if (Object.keys(this.user.exchanges).length > 0) {
       Doc.show(pg.marketsMenuEntry)
     } else {
