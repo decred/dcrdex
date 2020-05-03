@@ -399,7 +399,14 @@ func unconnectedDCR(logger dex.Logger) *Backend {
 // dcrd-registered handlers should perform any necessary type conversion and
 // then deposit the payload into the anyQ channel.
 func (dcr *Backend) Run(ctx context.Context) {
-	defer dcr.shutdown()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	// Shut down the RPC client on ctx.Done().
+	go func() {
+		<-ctx.Done()
+		dcr.shutdown()
+		wg.Done()
+	}()
 	blockPoll := time.NewTicker(blockPollInterval)
 	defer blockPoll.Stop()
 	addBlock := func(block *chainjson.GetBlockVerboseResult, reorg bool) {
@@ -522,6 +529,8 @@ out:
 			break out
 		}
 	}
+	// Wait for the RPC client to shut down.
+	wg.Wait()
 }
 
 // validateTxOut validates an outpoint (txHash:out) by retrieving associated
