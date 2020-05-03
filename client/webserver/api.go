@@ -250,12 +250,13 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 		s.writeAPIError(w, "login error: %v", err)
 		return
 	}
-	ai, found := r.Context().Value(authCV).(*userInfo)
-	if !found || !ai.Authed {
-		cval := s.auth()
+
+	user := extractUserInfo(r)
+	if !user.Authed {
+		authToken := s.authorize()
 		http.SetCookie(w, &http.Cookie{
 			Name:  authCK,
-			Value: cval,
+			Value: authToken,
 			Path:  "/",
 			// The client should only send the cookie with first-party requests.
 			// Cross-site requests should not include the auth cookie.
@@ -264,6 +265,7 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 			// Secure: false, // while false we require SameSite set
 		})
 	}
+
 	writeJSON(w, struct {
 		OK    bool               `json:"ok"`
 		Notes []*db.Notification `json:"notes"`

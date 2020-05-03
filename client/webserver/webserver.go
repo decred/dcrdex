@@ -32,17 +32,17 @@ import (
 )
 
 const (
-	// rpcTimeoutSeconds is the number of seconds a connection to the
-	// RPC server is allowed to stay open without authenticating before it
-	// is closed.
-	rpcTimeoutSeconds = 10
+	// httpConnTimeoutSeconds is the maximum number of seconds allowed for reading
+	// an http request or writing the response, beyond which the http connection is
+	// terminated.
+	httpConnTimeoutSeconds = 10
 	// darkModeCK is the cookie key for dark mode.
 	darkModeCK = "darkMode"
 	// authCK is the authorization token cookie key.
 	authCK = "dexauth"
-	// authCV is the authorization middleware contextual value key.
-	authCV = "authctx"
 )
+
+type contextKey string
 
 var (
 	log slog.Logger
@@ -51,6 +51,9 @@ var (
 	updateWalletRoute = "update_wallet"
 	// notifyRoute is a route used for general notifications.
 	notifyRoute = "notify"
+	// ctxKeyUserInfo is used in the authorization middleware for saving user
+	// info in http request contexts.
+	ctxKeyUserInfo = contextKey("userinfo")
 )
 
 // clientCore is satisfied by core.Core.
@@ -121,16 +124,16 @@ out:
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
-	ctx       context.Context
-	core      clientCore
-	addr      string
-	srv       *http.Server
-	html      *templates
-	indent    bool
-	mtx       sync.RWMutex
-	authToken string
-	syncers   map[string]*marketSyncer
-	clients   map[int32]*wsClient
+	ctx            context.Context
+	core           clientCore
+	addr           string
+	srv            *http.Server
+	html           *templates
+	indent         bool
+	mtx            sync.RWMutex
+	validAuthToken string
+	syncers        map[string]*marketSyncer
+	clients        map[int32]*wsClient
 }
 
 // New is the constructor for a new WebServer.
@@ -141,7 +144,6 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		stat, err := os.Stat(fp)
 		return err == nil && stat.IsDir()
 	}
-	fp := filepath.Join
 
 	// Right now, it is expected that the working directory
 	// is either the dcrdex root directory, or the WebServer directory itself.
@@ -153,9 +155,11 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		}
 	}
 
+	join := filepath.Join
+
 	// Prepare the templates.
 	bb := "bodybuilder"
-	tmpl := newTemplates(fp(root, "src/html"), reloadHTML).
+	tmpl := newTemplates(join(root, "src/html"), reloadHTML).
 		addTemplate("login", bb).
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
@@ -170,8 +174,8 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	mux := chi.NewRouter()
 	httpServer := &http.Server{
 		Handler:      mux,
-		ReadTimeout:  rpcTimeoutSeconds * time.Second, // slow requests should not hold connections opened
-		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
+		ReadTimeout:  httpConnTimeoutSeconds * time.Second, // slow requests should not hold connections opened
+		WriteTimeout: httpConnTimeoutSeconds * time.Second, // hung responses must die
 	}
 
 	// Make the server here so its methods can be registered.
@@ -213,10 +217,10 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/cancel", s.apiCancel)
 	})
 	// Files
-	fileServer(mux, "/js", fp(root, "dist"))
-	fileServer(mux, "/css", fp(root, "dist"))
-	fileServer(mux, "/img", fp(root, "src/img"))
-	fileServer(mux, "/font", fp(root, "src/font"))
+	fileServer(mux, "/js", join(root, "dist"))
+	fileServer(mux, "/css", join(root, "dist"))
+	fileServer(mux, "/img", join(root, "src/img"))
+	fileServer(mux, "/font", join(root, "src/font"))
 
 	return s, nil
 }
@@ -268,24 +272,37 @@ func (s *WebServer) Run(ctx context.Context) {
 	wg.Wait()
 }
 
-// auth creates, stores, and returns a new auth token.
-func (s *WebServer) auth() string {
-	// Create a token to identify the user. Only one token can be active at
-	// a time = only 1 authorized device at a time.
+// authorize creates, stores, and returns a new auth token to identify the
+// user. Only one token can be active at a time = only 1 authorized device
+// at a time. `WebServer.validAuthToken` is set to the newly created token,
+// effectively deauthorizing previously authenticated devices.
+func (s *WebServer) authorize() string {
 	b := make([]byte, 32)
 	rand.Read(b)
 	token := hex.EncodeToString(b)
 	s.mtx.Lock()
-	s.authToken = token
+	s.validAuthToken = token
 	s.mtx.Unlock()
 	return token
 }
 
-// token returns the current auth token.
-func (s *WebServer) token() string {
+// isAuthed checks if the incoming request is from an authorized user/device.
+// Requires the auth token cookie to be set in the request and for the token
+// to match `WebServer.validAuthToken`.
+func (s *WebServer) isAuthed(r *http.Request) bool {
+	var authToken string
+	cookie, err := r.Cookie(authCK)
+	switch err {
+	case nil:
+		authToken = cookie.Value
+	case http.ErrNoCookie:
+	default:
+		log.Errorf("authToken retrieval error: %v", err)
+	}
+
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
-	return s.authToken
+	return authToken != "" && authToken == s.validAuthToken
 }
 
 // readNotifications reads from the Core notification channel and relays to
@@ -332,12 +349,12 @@ type userInfo struct {
 
 // Extract the userInfo from the request context.
 func extractUserInfo(r *http.Request) *userInfo {
-	ai, ok := r.Context().Value(authCV).(*userInfo)
+	user, ok := r.Context().Value(ctxKeyUserInfo).(*userInfo)
 	if !ok {
 		log.Errorf("no auth info retrieved from client")
 		return &userInfo{}
 	}
-	return ai
+	return user
 }
 
 // securityMiddleware adds security headers to the server responses.
@@ -357,20 +374,9 @@ func securityMiddleware(next http.Handler) http.Handler {
 // including the auth token.
 func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var authToken string
-		cookie, err := r.Cookie(authCK)
-		switch err {
-		case nil:
-			authToken = cookie.Value
-		case http.ErrNoCookie:
-		default:
-			log.Errorf("authToken retrieval error: %v", err)
-		}
-		authed := authToken != "" && authToken == s.token()
-
 		// darkMode cookie.
 		var darkMode bool
-		cookie, err = r.Cookie(darkModeCK)
+		cookie, err := r.Cookie(darkModeCK)
 		switch err {
 		// Dark mode is the default
 		case nil:
@@ -380,9 +386,10 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 		default:
 			log.Errorf("Cookie dark mode retrieval error: %v", err)
 		}
-		ctx := context.WithValue(r.Context(), authCV, &userInfo{
+
+		ctx := context.WithValue(r.Context(), ctxKeyUserInfo, &userInfo{
 			User:     s.core.User(),
-			Authed:   authed,
+			Authed:   s.isAuthed(r),
 			DarkMode: darkMode,
 		})
 		next.ServeHTTP(w, r.WithContext(ctx))
