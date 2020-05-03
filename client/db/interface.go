@@ -16,6 +16,8 @@ type DB interface {
 	Store(string, []byte) error
 	// Get retrieves values stored with Store.
 	Get(string) ([]byte, error)
+	// ValueExists checks if a value was previously stored.
+	ValueExists(k string) (bool, error)
 	// ListAccounts returns a list of DEX URLs. The DB is designed to have a
 	// single account per DEX, so the account is uniquely identified by the DEX
 	// URL.

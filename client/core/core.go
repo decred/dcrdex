@@ -506,13 +506,14 @@ func (c *Core) User() *User {
 // refreshUser is a thread-safe way to update the current User. This method
 // should be called after adding wallets and DEXes.
 func (c *Core) refreshUser() {
-	// An unititialized user would not have this key/value stored yet, so would
-	// be an error. This is likely the only error possible here.
-	k, _ := c.db.Get(keyParamsKey)
+	initialized, err := c.IsInitialized()
+	if err != nil {
+		log.Errorf("refreshUser: error checking if app is initialized: %v", err)
+	}
 	u := &User{
 		Assets:      c.SupportedAssets(),
 		Exchanges:   c.Exchanges(),
-		Initialized: len(k) > 0,
+		Initialized: initialized,
 	}
 	c.userMtx.Lock()
 	c.user = u
@@ -942,11 +943,23 @@ func (c *Core) Register(form *RegisterForm) error {
 	return nil
 }
 
+// IsInitialized checks if the app is already initialized.
+func (c *Core) IsInitialized() (bool, error) {
+	return c.db.ValueExists(keyParamsKey)
+}
+
 // InitializeClient sets the initial app-wide password for the client.
 func (c *Core) InitializeClient(pw []byte) error {
+	if initialized, err := c.IsInitialized(); err != nil {
+		return fmt.Errorf("error checking if app is already initialized: %v", err)
+	} else if initialized {
+		return fmt.Errorf("already initialized, login instead")
+	}
+
 	if len(pw) == 0 {
 		return fmt.Errorf("empty password not allowed")
 	}
+
 	crypter := c.newCrypter(pw)
 	err := c.db.Store(keyParamsKey, crypter.Serialize())
 	if err != nil {

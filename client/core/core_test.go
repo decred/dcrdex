@@ -315,6 +315,10 @@ func (tdb *TDB) Store(k string, b []byte) error {
 	return tdb.storeErr
 }
 
+func (tdb *TDB) ValueExists(k string) (bool, error) {
+	return false, nil
+}
+
 func (tdb *TDB) Get(k string) ([]byte, error) {
 	if k == keyParamsKey {
 		return nil, tdb.encKeyErr
