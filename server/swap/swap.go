@@ -30,8 +30,6 @@ var (
 	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
 	// This could be thought of as the maximum allowable backend latency.
 	txWaitExpiration = time.Minute
-
-	requestExpiration = 30 * time.Second
 )
 
 func unixMsNow() time.Time {
@@ -369,7 +367,7 @@ out:
 			if block.err != nil {
 				var connectionErr asset.ConnectionError
 				if errors.As(block.err, &connectionErr) {
-					// Conneciton issues handling can be triggered here.
+					// Connection issues handling can be triggered here.
 					log.Errorf("connection error detected for %d: %v", block.assetID, block.err)
 				} else {
 					log.Errorf("asset %d is reporting a block notification error: %v", block.assetID, block.err)
@@ -1766,9 +1764,15 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 	// clients.
 	for _, match := range matches {
 		// Note that matches where the taker order is a cancel will be stored
-		// with status MatchComplete, and without the maker swap address. The
-		// match will also be flagged as inactive since there is no associated
-		// swap negotiation.
+		// with status MatchComplete, and without the maker or taker swap
+		// addresses. The match will also be flagged as inactive since there is
+		// no associated swap negotiation.
+
+		// TODO: Initially store cancel matches lacking ack sigs as active, only
+		// flagging as inactive when both maker and taker match ack sigs have
+		// been received. The client will need a mechanism to provide the ack,
+		// perhaps having the server resend missing match ack requests on client
+		// connect.
 		if err := s.storage.InsertMatch(match.Match); err != nil {
 			log.Errorf("InsertMatch (match id=%v) failed: %v", match.ID(), err)
 			// TODO: notify clients (notification or response to what?)

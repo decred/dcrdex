@@ -151,8 +151,8 @@ func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, 
 		takerAddr = tt.SwapAddress()
 	}
 
-	// Cancel orders do not store taker address, and stored with complete status
-	// with no active swap negotiation.
+	// Cancel orders do not store taker or maker addresses, and are stored with
+	// complete status with no active swap negotiation.
 	if takerAddr == "" {
 		stmt := fmt.Sprintf(internal.UpsertCancelMatch, tableName)
 		return sqlExec(dbe, stmt, match.ID(),
