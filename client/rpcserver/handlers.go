@@ -21,7 +21,7 @@ const (
 	initRoute        = "init"
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
-	preRegisterRoute = "preregister"
+	getFeeRoute      = "getfee"
 	registerRoute    = "register"
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
@@ -61,7 +61,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	initRoute:        handleInit,
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
-	preRegisterRoute: handlePreRegister,
+	getFeeRoute:      handleGetFee,
 	registerRoute:    handleRegister,
 	versionRoute:     handleVersion,
 	walletsRoute:     handleWallets,
@@ -213,24 +213,23 @@ func handleWallets(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(walletsRoute, walletsStates, nil)
 }
 
-// handlePreRegister handles requests for preregister.
+// handleGetFee handles requests for getfee.
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the address
 // of a dex and returns the dex fee.
-func handlePreRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	url, cert, err := parsePreRegisterArgs(params)
+func handleGetFee(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	url, cert, err := parseGetFeeArgs(params)
 	if err != nil {
-		return usage(preRegisterRoute, err)
+		return usage(getFeeRoute, err)
 	}
 	fee, err := s.core.GetFee(url, cert)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
-			err.Error())
-		return createResponse(preRegisterRoute, nil, resErr)
+		resErr := msgjson.NewError(msgjson.RPCGetFeeError, err.Error())
+		return createResponse(getFeeRoute, nil, resErr)
 	}
-	res := &preRegisterResponse{
+	res := &getFeeResponse{
 		Fee: fee,
 	}
-	return createResponse(preRegisterRoute, res, nil)
+	return createResponse(getFeeRoute, res, nil)
 }
 
 // handleRegister handles requests for register. *msgjson.ResponsePayload.Error
@@ -243,7 +242,7 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	defer form.AppPass.Clear()
 	fee, err := s.core.GetFee(form.URL, form.Cert)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
+		resErr := msgjson.NewError(msgjson.RPCGetFeeError,
 			err.Error())
 		return createResponse(registerRoute, nil, resErr)
 	}
@@ -374,16 +373,16 @@ var helpMsgs = map[string]helpMsg{
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
 	},
-	preRegisterRoute: {
+	getFeeRoute: {
 		pwArgsShort: ``,
 		argsShort:   `"dex" ("cert")`,
-		cmdSummary:  `Preregister for dex.`,
+		cmdSummary:  `Get dex registration fee.`,
 		pwArgsLong:  ``,
 		argsLong: `Args:
-    dex (string): The dex address to preregister for.
+    dex (string): The dex address to get fee for.
     cert (string): Optional. The TLS certificate path.`,
 		returns: `Returns:
-    obj: The preregister result.
+    obj: The getFee result.
     {
       "fee" (int): The dex registration fee.
     }`,

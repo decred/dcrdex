@@ -35,8 +35,8 @@ func (vr versionResponse) String() string {
 	return fmt.Sprintf("%d.%d.%d", vr.Major, vr.Minor, vr.Patch)
 }
 
-// preRegisterResponse is used when responding to the preregister route.
-type preRegisterResponse struct {
+// getFeeResponse is used when responding to the getfee route.
+type getFeeResponse struct {
 	Fee uint64 `json:"fee"`
 }
 
@@ -173,7 +173,7 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 	return uint32(assetID), nil
 }
 
-func parsePreRegisterArgs(params *RawParams) (url, cert string, err error) {
+func parseGetFeeArgs(params *RawParams) (url, cert string, err error) {
 	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
 		return "", "", err
 	}

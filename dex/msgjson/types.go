@@ -52,7 +52,7 @@ const (
 	RPCOpenWalletError                // 36
 	RPCWalletExistsError              // 37
 	RPCCloseWalletError               // 38
-	RPCPreRegisterError               // 39
+	RPCGetFeeError                    // 39
 	RPCRegisterError                  // 40
 	RPCArgumentsError                 // 41
 )

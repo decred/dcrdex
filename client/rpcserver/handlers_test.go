@@ -178,23 +178,23 @@ func TestHandleVersion(t *testing.T) {
 	}
 }
 
-func TestHandlePreRegister(t *testing.T) {
+func TestHandleGetFee(t *testing.T) {
 	tests := []struct {
-		name           string
-		params         *RawParams
-		preRegisterFee uint64
-		preRegisterErr error
-		wantErrCode    int
+		name            string
+		params          *RawParams
+		registrationFee uint64
+		preRegisterErr  error
+		wantErrCode     int
 	}{{
-		name:           "ok",
-		params:         &RawParams{Args: []string{"dex", "cert"}},
-		preRegisterFee: 5,
-		wantErrCode:    -1,
+		name:            "ok",
+		params:          &RawParams{Args: []string{"dex", "cert"}},
+		registrationFee: 5,
+		wantErrCode:     -1,
 	}, {
-		name:           "core.PreRegister error",
+		name:           "core.getFee error",
 		params:         &RawParams{Args: []string{"dex", "cert"}},
 		preRegisterErr: errors.New("error"),
-		wantErrCode:    msgjson.RPCPreRegisterError,
+		wantErrCode:    msgjson.RPCGetFeeError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
@@ -202,18 +202,18 @@ func TestHandlePreRegister(t *testing.T) {
 	}}
 	for _, test := range tests {
 		tc := &TCore{
-			preRegisterFee: test.preRegisterFee,
+			preRegisterFee: test.registrationFee,
 			preRegisterErr: test.preRegisterErr,
 		}
 		r := &RPCServer{core: tc}
-		payload := handlePreRegister(r, test.params)
-		res := new(preRegisterResponse)
+		payload := handleGetFee(r, test.params)
+		res := new(getFeeResponse)
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
-		if test.wantErrCode == -1 && res.Fee != test.preRegisterFee {
+		if test.wantErrCode == -1 && res.Fee != test.registrationFee {
 			t.Fatalf("wanted registration fee %d but got %d for test %s",
-				test.preRegisterFee, res.Fee, test.name)
+				test.registrationFee, res.Fee, test.name)
 		}
 	}
 }
@@ -421,7 +421,7 @@ func TestHandleRegister(t *testing.T) {
 		name:           "core.PreRegister error",
 		params:         params,
 		preRegisterErr: errors.New("error"),
-		wantErrCode:    msgjson.RPCPreRegisterError,
+		wantErrCode:    msgjson.RPCGetFeeError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
