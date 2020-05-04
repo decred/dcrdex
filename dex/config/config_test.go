@@ -35,7 +35,7 @@ func makeConfigPtr() *config {
 	return &c
 }
 
-// TestConfigParsing tests the Options() and Parse() functions.
+// TestConfigParsing tests the Parse() and ParseInto() functions.
 func TestConfigParsing(t *testing.T) {
 	var testConfig = defaultConfig()
 
@@ -56,10 +56,10 @@ func TestConfigParsing(t *testing.T) {
 	}
 
 	type expectations struct {
-		optionsError bool
-		optionsCount int
-		parseError   bool
-		parsedCfg    config
+		parseError     bool
+		optionsCount   int
+		parseIntoError bool
+		parsedCfg      config
 	}
 
 	type test struct {
@@ -89,9 +89,9 @@ func TestConfigParsing(t *testing.T) {
 			cfgData:   []byte(cfgDataString),
 			parsedCfg: makeConfigPtr(),
 			expect: expectations{
-				optionsError: false,
-				optionsCount: 5,
-				parseError:   false,
+				parseError:     false,
+				optionsCount:   5,
+				parseIntoError: false,
 				parsedCfg: config{
 					Key1: value1,
 					Key2: false,
@@ -103,7 +103,7 @@ func TestConfigParsing(t *testing.T) {
 		}
 	}
 
-	// Test Options() function.
+	// Prepare test data.
 	tests := []test{
 		makeOkTest("ok, with default application options header", "[Application Options]", ""),
 		makeOkTest("ok, with random section header", "[Random Header]", ""),
@@ -114,10 +114,10 @@ func TestConfigParsing(t *testing.T) {
 			cfgData:   cfgFilePath,
 			parsedCfg: makeConfigPtr(),
 			expect: expectations{
-				optionsError: false,
-				optionsCount: 4, // file was created from struct with only 4 valid ini fields
-				parseError:   false,
-				parsedCfg:    defaultConfig(),
+				parseError:     false,
+				optionsCount:   4, // file was created from struct with only 4 valid ini fields
+				parseIntoError: false,
+				parsedCfg:      defaultConfig(),
 			},
 		},
 		{
@@ -125,9 +125,9 @@ func TestConfigParsing(t *testing.T) {
 			cfgData:   cfgFilePath,
 			parsedCfg: defaultConfig(), // not a pointer
 			expect: expectations{
-				optionsError: false,
-				optionsCount: 4, // file was created from cfg struct with only 4 valid ini fields
-				parseError:   true,
+				parseError:     false,
+				optionsCount:   4, // file was created from cfg struct with only 4 valid ini fields
+				parseIntoError: true,
 			},
 		},
 		{
@@ -139,9 +139,9 @@ func TestConfigParsing(t *testing.T) {
 			`),
 			parsedCfg: defaultConfig(), // not a pointer
 			expect: expectations{
-				optionsError: false,
-				optionsCount: 3,
-				parseError:   true,
+				parseError:     false,
+				optionsCount:   3,
+				parseIntoError: true,
 			},
 		},
 		{
@@ -154,8 +154,8 @@ func TestConfigParsing(t *testing.T) {
 			`),
 			parsedCfg: makeConfigPtr(),
 			expect: expectations{
-				optionsError: true,
-				parseError:   true,
+				parseError:     true,
+				parseIntoError: true,
 			},
 		},
 		{
@@ -167,30 +167,31 @@ func TestConfigParsing(t *testing.T) {
 			`),
 			parsedCfg: makeConfigPtr(),
 			expect: expectations{
-				optionsError: true,
-				parseError:   true,
+				parseError:     true,
+				parseIntoError: true,
 			},
 		},
 	}
+	// Test Parse() and ParseInto() functions.
 	for _, tt := range tests {
-		parsedOptions, err := Options(tt.cfgData)
-		if tt.expect.optionsError && err == nil {
-			t.Fatalf("%s: expected Options() error but got no error", tt.name)
-		} else if !tt.expect.optionsError && err != nil {
-			t.Fatalf("%s: got unexpected Options() error: %v", tt.name, err)
+		parsedOptions, err := Parse(tt.cfgData)
+		if tt.expect.parseError && err == nil {
+			t.Fatalf("%s: expected Parse() to error but got no error", tt.name)
+		} else if !tt.expect.parseError && err != nil {
+			t.Fatalf("%s: got unexpected Parse() error: %v", tt.name, err)
 		}
 		if len(parsedOptions) != tt.expect.optionsCount {
 			t.Fatalf("%s: expected %d options, got %d", tt.name, tt.expect.optionsCount, len(parsedOptions))
 		}
 
-		err = Parse(tt.cfgData, tt.parsedCfg)
-		if tt.expect.parseError && err != nil {
+		err = ParseInto(tt.cfgData, tt.parsedCfg)
+		if tt.expect.parseIntoError && err != nil {
 			return
 		}
-		if tt.expect.parseError && err == nil {
-			t.Fatalf("%s: expected Parse() error but got no error", tt.name)
-		} else if !tt.expect.parseError && err != nil {
-			t.Fatalf("%s: got unexpected Parse() error: %v", tt.name, err)
+		if tt.expect.parseIntoError && err == nil {
+			t.Fatalf("%s: expected ParseInto() to error but got no error", tt.name)
+		} else if !tt.expect.parseIntoError && err != nil {
+			t.Fatalf("%s: got unexpected ParseInto() error: %v", tt.name, err)
 		}
 
 		parsedCfg, ok := tt.parsedCfg.(*config)
@@ -220,34 +221,34 @@ func TestConfigParsing(t *testing.T) {
 	}
 }
 
-// Test OptionsMapToINIData()
-func TestMapToINIDataConversion(t *testing.T) {
+// Test Data() function to convert map to config data (in []byte).
+func DataConversion(t *testing.T) {
 	m := map[string]string{
 		"key1": "value1",
 		"key2": "false",
 		"key3": "3",
 		"KEY4": "4.4",
-		"key5": "parsed as option, but not populated into struct",
+		"key5": "parsed, but not populated into struct",
 	}
-	cfgData := optionsMapToINIData(m)
+	cfgData := Data(m)
 
-	opts, err := Options(cfgData)
+	opts, err := Parse(cfgData)
 	if err != nil {
-		t.Fatalf("unexpected error when extracting options from cfg data generated from map: %v", err)
+		t.Fatalf("unexpected error when parsing cfg data generated from map: %v", err)
 	}
 	if len(opts) != len(m) {
 		t.Fatalf("map-cfg-map: expected %d options, got %d", len(m), len(opts))
 	}
 	for k, vOriginal := range m {
-		if vExtracted, ok := opts[k]; !ok {
-			t.Fatalf("map-cfg-map: key '%s' not found in extracted options", k)
-		} else if vExtracted != vOriginal {
-			t.Fatalf("map-cfg-map: unexpected value for key '%s', expected '%s', got '%s'", k, vOriginal, vExtracted)
+		if vParsed, ok := opts[k]; !ok {
+			t.Fatalf("map-cfg-map: key '%s' not found in parsed options", k)
+		} else if vParsed != vOriginal {
+			t.Fatalf("map-cfg-map: unexpected value for key '%s', expected '%s', got '%s'", k, vOriginal, vParsed)
 		}
 	}
 
 	var cfg = makeConfigPtr()
-	err = Parse(cfgData, cfg)
+	err = ParseInto(cfgData, cfg)
 	if err != nil {
 		t.Fatalf("unexpected error when parsing cfg data generated from map into obj: %v", err)
 	}

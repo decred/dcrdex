@@ -546,10 +546,15 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		}
 	}
 
+	settings, err := config.Parse(form.INIPath)
+	if err != nil {
+		return fmt.Errorf("error parsing config file: %v", err)
+	}
+
 	dbWallet := &db.Wallet{
 		AssetID:     assetID,
 		Account:     form.Account,
-		INIPath:     form.INIPath,
+		Settings:    settings,
 		EncryptedPW: encPW,
 	}
 
@@ -608,15 +613,6 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
-	// todo: wallet config file should be parsed when wallet is being created
-	// and the parsed options save to db.
-	if dbWallet.INIPath == "" {
-		return nil, fmt.Errorf("wallet config path not set")
-	}
-	walletConnSettings, err := config.Options(dbWallet.INIPath)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing wallet config: %v", err)
-	}
 	wallet := &xcWallet{
 		Account:   dbWallet.Account,
 		AssetID:   dbWallet.AssetID,
@@ -627,7 +623,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	}
 	walletCfg := &asset.WalletConfig{
 		Account:  dbWallet.Account,
-		Settings: walletConnSettings,
+		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
 			c.tipChange(dbWallet.AssetID, err)
 		},

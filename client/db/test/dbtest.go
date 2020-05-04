@@ -41,9 +41,14 @@ func RandomAccountInfo() *db.AccountInfo {
 // RandomWallet creates a random wallet.
 func RandomWallet() *db.Wallet {
 	return &db.Wallet{
-		AssetID:   rand.Uint32(),
-		Account:   ordertest.RandomAddress(),
-		INIPath:   ordertest.RandomAddress(),
+		AssetID: rand.Uint32(),
+		Account: ordertest.RandomAddress(),
+		Settings: map[string]string{
+			ordertest.RandomAddress(): ordertest.RandomAddress(),
+			ordertest.RandomAddress(): ordertest.RandomAddress(),
+			ordertest.RandomAddress(): ordertest.RandomAddress(),
+			ordertest.RandomAddress(): ordertest.RandomAddress(),
+		},
 		Balance:   rand.Uint64(),
 		BalUpdate: time.Now().Truncate(time.Millisecond).UTC(),
 		Address:   ordertest.RandomAddress(),
@@ -231,8 +236,15 @@ func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 	if w1.Account != w2.Account {
 		t.Fatalf("Account mismatch. %s != %s", w1.Account, w2.Account)
 	}
-	if w1.INIPath != w2.INIPath {
-		t.Fatalf("INIPath mismatch. %s != %s", w1.INIPath, w2.INIPath)
+	if len(w1.Settings) != len(w2.Settings) {
+		t.Fatalf("Settings mismatch. %d != %s", len(w1.Settings), len(w2.Settings))
+	}
+	for k, v1 := range w1.Settings {
+		if v2, ok := w2.Settings[k]; !ok {
+			t.Fatalf("Settings mismatch: key '%s' not found in one wallet", k)
+		} else if v1 != v2 {
+			t.Fatalf("Settings mismatch: different values for key '%s'", k)
+		}
 	}
 	if w1.Balance != w2.Balance {
 		t.Fatalf("Balance mismatch. %d != %d", w1.Balance, w2.Balance)
