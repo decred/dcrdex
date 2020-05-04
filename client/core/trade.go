@@ -245,7 +245,6 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
-
 	// Add the matches to the match map and update the database.
 	trade := t.Trade()
 	var includesCancellation, includesTrades bool
@@ -289,15 +288,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 				},
 			},
 		}
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			return err
-		}
 		// First check that this isn't a match on its own cancel order. I'm not crazy
 		// about this, but I am detecting this case right now based on the Address
 		// field being an empty string.
 		isCancel := t.cancel != nil && msgMatch.Address == ""
 		if isCancel {
+			match.setStatus(order.MatchComplete)
 			includesCancellation = true
 			log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
 			t.cancel.matches.maker = msgMatch
@@ -306,6 +302,10 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			t.matchMtx.Lock()
 			t.matches[match.id] = match
 			t.matchMtx.Unlock()
+		}
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -336,6 +336,9 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		t.notify(newOrderNote("Order canceled", details, db.Success, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote("cancel", "", db.Data, cancelOrder))
+		// Set the order status for both orders.
+		t.metaData.Status = order.OrderStatusCanceled
+		t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
 	}
 	if includesTrades {
 		fillRatio := float64(trade.Filled()) / float64(trade.Quantity)
@@ -472,7 +475,6 @@ func (t *trackedTrade) tick() error {
 	var sent, quoteSent, received, quoteReceived uint64
 	for _, match := range t.matches {
 		if t.isSwappable(match) {
-
 			swaps = append(swaps, match)
 			sent += match.Match.Quantity
 			quoteSent += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
@@ -568,7 +570,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	for _, coinID := range coinIDs {
 		coin, found := t.coins[hex.EncodeToString(coinID)]
 		if !found {
-			return errs.add("coin ID %x not found", coinID)
+			return errs.add("coin ID %s not found", coinID)
 		}
 		swaps.Inputs = append(swaps.Inputs, coin)
 	}

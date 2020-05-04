@@ -456,11 +456,22 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 // chained for matches, so only the last change coin needs to be saved.
 func (db *boltDB) SetChangeCoin(oid order.OrderID, changeCoin order.CoinID) error {
 	return db.ordersUpdate(func(master *bbolt.Bucket) error {
-		oBkt, err := master.CreateBucketIfNotExists(oid[:])
-		if err != nil {
-			return err
+		oBkt := master.Bucket(oid[:])
+		if oBkt == nil {
+			return fmt.Errorf("SetChangeCoin - order %s not found", oid)
 		}
 		return oBkt.Put(changeKey, changeCoin)
+	})
+}
+
+// UpdateOrderStatus sets the order status for an order.
+func (db *boltDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error {
+	return db.ordersUpdate(func(master *bbolt.Bucket) error {
+		oBkt := master.Bucket(oid[:])
+		if oBkt == nil {
+			return fmt.Errorf("UpdateOrderStatus - order %s not found", oid)
+		}
+		return oBkt.Put(statusKey, uint16Bytes(uint16(status)))
 	})
 }
 

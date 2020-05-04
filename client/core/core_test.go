@@ -283,6 +283,10 @@ func (tdb *TDB) SetChangeCoin(order.OrderID, order.CoinID) error {
 	return nil
 }
 
+func (tdb *TDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error {
+	return nil
+}
+
 func (tdb *TDB) UpdateMatch(m *db.MetaMatch) error {
 	return nil
 }
