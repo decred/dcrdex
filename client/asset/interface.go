@@ -21,7 +21,7 @@ type WalletInfo struct {
 	// Units is the unit used for the smallest (integer) denomination of the
 	// currency, in plural form e.g. atoms, Satoshis.
 	Units string `json:"units"`
-	// DefaultConfigPath is the default DefaultConfigPath that the wallet will search for its
+	// DefaultConfigPath is the default file path that the Wallet uses for its
 	// configuration file.
 	DefaultConfigPath string `json:"configpath"`
 	// DefaultFeeRate is the default fee rate used for withdraws.

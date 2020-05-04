@@ -47,10 +47,11 @@ const (
 	minProtocolVersion   = 70015
 )
 
-// How often to check the tip hash.
 var (
+	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker = time.Second
-	walletInfo  = &asset.WalletInfo{
+	// walletInfo defines some general information about a Bitcoin wallet.
+	walletInfo = &asset.WalletInfo{
 		Name:              "Bitcoin",
 		Units:             "Satoshis",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),

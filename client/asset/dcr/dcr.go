@@ -40,10 +40,11 @@ const (
 	defaultWithdrawalFee = 10
 )
 
-// How often to check the tip hash.
 var (
+	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker = time.Second
-	walletInfo  = &asset.WalletInfo{
+	// walletInfo defines some general information about a Decred wallet.
+	walletInfo = &asset.WalletInfo{
 		Name:              "Decred",
 		Units:             "atoms",
 		DefaultConfigPath: defaultConfigPath,
