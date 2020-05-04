@@ -31,6 +31,11 @@ import (
 	"github.com/go-chi/chi/middleware"
 )
 
+// contextKey is the key param type used when saving values to a context using
+// context.WithValue. A custom type is defined because built-in types are
+// discouraged.
+type contextKey string
+
 const (
 	// httpConnTimeoutSeconds is the maximum number of seconds allowed for reading
 	// an http request or writing the response, beyond which the http connection is
@@ -40,20 +45,18 @@ const (
 	darkModeCK = "darkMode"
 	// authCK is the authorization token cookie key.
 	authCK = "dexauth"
-)
-
-type contextKey string
-
-var (
-	log slog.Logger
+	// ctxKeyUserInfo is used in the authorization middleware for saving user
+	// info in http request contexts.
+	ctxKeyUserInfo = contextKey("userinfo")
 	// updateWalletRoute is a notification route that updates the state of a
 	// wallet.
 	updateWalletRoute = "update_wallet"
 	// notifyRoute is a route used for general notifications.
 	notifyRoute = "notify"
-	// ctxKeyUserInfo is used in the authorization middleware for saving user
-	// info in http request contexts.
-	ctxKeyUserInfo = contextKey("userinfo")
+)
+
+var (
+	log slog.Logger
 )
 
 // clientCore is satisfied by core.Core.
