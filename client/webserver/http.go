@@ -50,10 +50,9 @@ func (s *WebServer) allow(route string, w http.ResponseWriter, r *http.Request) 
 		return false
 	}
 
-	// Redirect to the markets page on the following conditions:
-	// - user attempts to visit register page but has already connected a DEX.
-	// - user attempts to visit login page but is already logged in.
-	if (route == "/register" && dexConnected) || (isLoginRoute && user.Authed) {
+	// Disallow visits to the login page if user is already logged in. Redirect
+	// to the markets page instead.
+	if isLoginRoute && user.Authed {
 		s.handleMarkets(w, r)
 		return false
 	}
@@ -105,10 +104,6 @@ type registerTmplData struct {
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
-	if !s.allow("/register", w, r) {
-		return
-	}
-
 	user := extractUserInfo(r)
 	feeAssetID, _ := dex.BipSymbolID("dcr")
 	feeWalletStatus := s.core.WalletState(feeAssetID)
@@ -186,8 +181,5 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
-	if !s.allow("/settings", w, r) {
-		return
-	}
 	s.sendTemplate(w, "settings", commonArgs(r, "Settings | Decred DEX"))
 }
