@@ -6,19 +6,19 @@
 
 ## What is DEX?
 
-The Decred Distributed Exchange (DEX) is a system that enables trustless
+The Decred Decentralized Exchange (DEX) is a system that enables trustless
 exchange of different types of blockchain assets via a familiar market-based
 API. DEX is a non-custodial solution for cross-chain exchange based on
-atomic swap technology. DEX matches clients and facilitates price discovery and
-the communication of swap details.
+atomic swap technology. DEX matches trading parties and facilitates price
+discovery and the communication of swap details.
 
 Matching is performed through a familiar exchange interface, with market and
 limit orders and an order book. Settlement occurs on-chain. DEX's epoch-based
 matching algorithm and rules of community conduct ensure that the order book
 action you see is real and not an army of bots.
 
-Trades are performed directly between clients through on-chain contracts with no
-actual reliance on DEX, though clients do report their swap details both as a
+Trades are performed directly between users through on-chain contracts with no
+actual reliance on DEX, though swap details must be reported both as a
 courtesy and to prove compliance with trading rules. Trades are settled with
 pure 4-transaction atomic swaps and nothing else. Because DEX collects no
 trading fees, there's no intermediary token and no fee transactions.
@@ -26,17 +26,17 @@ trading fees, there's no intermediary token and no fee transactions.
 Although trading fees are not collected, DEX does require a one-time
 registration fee to be paid on-chain. Atomic swap technology secures all trades,
 but client software must still adhere to a set of policies to ensure orderly
-settlement of matches. Loss of registration fee is the heaviest consequence for
-clients that break the rules.
+settlement of matches. The maximum penalty imposable by DEX is loss of trading
+privileges and forfeiture of registration fee.
 
 ## Contents
 
-1. [Market API](#market-api)
-1. [Client Applications and the Core Package](#client-applications-and-the-core-package)
-1. [Using Decred DEX](#using-decred-dex)
-1. [Server Installation](#server-installation)
-1. [Client Installation](#client-installation)
-1. [Contribute](#contribute)
+- [Market API](#market-api)
+- [Client Applications and the Core Package](#client-applications-and-the-core-package)
+- [Using Decred DEX](#using-decred-dex)
+- [Server Installation](#server-installation)
+- [Client Installation](#client-installation)
+- [Contribute](#contribute)
 
 ## Market API
 
@@ -61,10 +61,11 @@ The **browser-based GUI** (a.k.a. "the app") offers a familiar exchange
 experience in your browser. The app is really just a one-client web server that
 you run and connect to on the same machine. The market view allows you to see
 the market's order book in sorted lists or as a depth chart. You can place your
-order and monitor it's status in the same market view.
+order and monitor it's status in the same market view. The GUI application is
+managed by the **dexc** utility in *client/cmd/dexc*.
 
 The **dexcctl** utility enables trading via CLI. Commands are parsed and
-issued to **Core** for execution.
+issued to **Core** for execution. **dexcctl** also requires **dexc**.
 
 ## Using Decred DEX
 
@@ -78,22 +79,22 @@ poke around and offer feedback, there are a number of ways to do that.
 
 ## Server Installation
 
-#### Dependencies
+### Dependencies
 
-1. Linux
+1. Linux or MacOS
 2. [Go >= 1.13](https://golang.org/doc/install)
 3. [PostgreSQL 11+](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
 
-#### Set up the database
+### Set up the database
 
 In a PostgreSQL `psql` terminal, run
 
-```
+```sql
 CREATE USER dcrdex WITH PASSWORD 'dexpass';
 CREATE DATABASE dcrdex_testnet OWNER dcrdex;
 ```
 
-#### Generate a dcrwallet account public key
+### Generate a dcrwallet account public key
 
 The master public key is used for collecting registration fees.
 Using [dcrctl](https://docs.decred.org/wallets/cli/dcrctl-basics/)
@@ -112,7 +113,8 @@ to both `dcrwallet` and `dcrctl`, if not using mainnet.
 Place the pubkey string into a new DEX configuration file.
 
 **~/.dcrdex/dcrdex.conf**
-```
+
+```ini
 # Testnet extended pubkey
 regfeexpub=tpubVWHTkHRefqHptAnBdNcDJ...
 
@@ -124,20 +126,20 @@ pgpass=dexpass
 *~/.dcrdex/* is the default **app data directory** location used by the
 DEX server, but can be customized with the `--appdata` command-line argument.
 
-#### Run your asset daemons.
+### Run your asset daemons.
 
 As of writing, only `dcrd`, `bitcoind`, and `litecoind` are supported. The
 `txindex` configuration option must be set. Be sure to specify the correct
 network if not using mainnet.
 
-#### Create the assets and market configuration file
+### Create the assets and market configuration file
 
 A sample is given at
 [*sample-markets.json*](server/cmd/dcrdex/sample-markets.json). See the
 [**Per-asset Variables**](spec/admin.mediawiki) section of the specification for
 more information on individual options.
 
-#### Build and run dcrdex
+### Build and run dcrdex
 
 From a command prompt, navigate to **server/cmd/dcrdex**. Build the executable
 by running `go build`. The generated executable will be named **dcrdex**. Run
@@ -157,7 +159,7 @@ from **server/cmd/dcrdex**.
 The client is in early development, and is not fully functional. Instructions
 are listed for development purposes.
 
-#### Dependencies
+### Dependencies
 
 1. [Go >= 1.13](https://golang.org/doc/install)
 2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface.
@@ -182,8 +184,9 @@ Connect to the client from your browser at `localhost:5758`.
 
 **Looking to contribute? We need your help** to make DEX &#35;1.
 
-Nearly all development is done in Golang and JavaScript. Work is coordinated
-through [the repo issues](../../issues), so that's the best place to start.
+Nearly all development is done in Go and JavaScript. Work is coordinated
+through [the repo issues](https://github.com/decred/dcrdex/issues),
+so that's the best place to start.
 Before beginning work, chat with us in the
 [DEX Development room](https://matrix.to/#/!EzTSRQITaqHuFBDFhM:decred.org?via=decred.org&via=matrix.org&via=zettaport.com).
 The pace of development is pretty fast right now, so you'll be expected to keep
