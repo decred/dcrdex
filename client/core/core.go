@@ -46,11 +46,11 @@ var (
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
 	comms.WsConn
-	connMgr *dex.ConnectionManager
-	assets  map[uint32]*dex.Asset
-	cfg     *msgjson.ConfigResult
-	acct    *dexAccount
-	notify  func(Notification)
+	connMaster *dex.ConnectionMaster
+	assets     map[uint32]*dex.Asset
+	cfg        *msgjson.ConfigResult
+	acct       *dexAccount
+	notify     func(Notification)
 
 	booksMtx sync.RWMutex
 	books    map[string]*bookie
@@ -610,7 +610,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		return nil, fmt.Errorf("error creating wallet: %v", err)
 	}
 	wallet.Wallet = w
-	wallet.connManager = dex.NewConnectionManager(w)
+	wallet.connector = dex.NewConnectionMaster(w)
 	return wallet, nil
 }
 
@@ -716,7 +716,7 @@ func (c *Core) GetFee(url, cert string) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer dexConn.connMgr.Disconnect()
+	defer dexConn.connMaster.Disconnect()
 	return dexConn.cfg.Fee, nil
 }
 
@@ -756,7 +756,7 @@ func (c *Core) Register(form *RegisterForm) error {
 	// close the connection to the dex server if the registration fails.
 	defer func() {
 		if !c.isDEXRegistered(dexConn.acct.url) {
-			dexConn.connMgr.Disconnect()
+			dexConn.connMaster.Disconnect()
 		}
 	}()
 
@@ -1927,12 +1927,12 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		return nil, fmt.Errorf("Error creating websocket connection for %s: %v", uri, err)
 	}
 
-	connMgr := dex.NewConnectionManager(conn)
-	err = connMgr.Connect(c.ctx)
+	connMaster := dex.NewConnectionMaster(conn)
+	err = connMaster.Connect(c.ctx)
 	// If the initial connection returned an error, shut it down to kill the
 	// auto-reconnect cycle.
 	if err != nil {
-		connMgr.Disconnect()
+		connMaster.Disconnect()
 		return nil, fmt.Errorf("Error initalizing websocket connection: %v", err)
 	}
 
@@ -1941,7 +1941,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	dexCfg := new(msgjson.ConfigResult)
 	err = sendRequest(conn, msgjson.ConfigRoute, nil, dexCfg)
 	if err != nil {
-		connMgr.Disconnect()
+		connMaster.Disconnect()
 		return nil, fmt.Errorf("Error fetching DEX server config: %v", err)
 	}
 
@@ -1982,15 +1982,15 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 
 	// Create the dexConnection and listen for incoming messages.
 	dc := &dexConnection{
-		WsConn:    conn,
-		connMgr:   connMgr,
-		assets:    assets,
-		cfg:       dexCfg,
-		books:     make(map[string]*bookie),
-		acct:      newDEXAccount(acctInfo),
-		marketMap: marketMap,
-		trades:    make(map[order.OrderID]*trackedTrade),
-		notify:    c.notify,
+		WsConn:     conn,
+		connMaster: connMaster,
+		assets:     assets,
+		cfg:        dexCfg,
+		books:      make(map[string]*bookie),
+		acct:       newDEXAccount(acctInfo),
+		marketMap:  marketMap,
+		trades:     make(map[order.OrderID]*trackedTrade),
+		notify:     c.notify,
 	}
 
 	dc.refreshMarkets()

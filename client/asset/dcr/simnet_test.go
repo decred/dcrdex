@@ -57,7 +57,7 @@ func mineAlpha() error {
 	return exec.Command("tmux", "send-keys", "-t", "dcr-harness:4", "./mine-alpha 1", "C-m").Run()
 }
 
-func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionManager) {
+func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
@@ -79,7 +79,7 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 	if err != nil {
 		t.Fatalf("error creating backend: %v", err)
 	}
-	cm := dex.NewConnectionManager(backend)
+	cm := dex.NewConnectionMaster(backend)
 	err = cm.Connect(tCtx)
 	if err != nil {
 		t.Fatalf("error connecting backend: %v", err)
@@ -89,13 +89,13 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 
 type testRig struct {
 	backends          map[string]*ExchangeWallet
-	connectionMasters map[string]*dex.ConnectionManager
+	connectionMasters map[string]*dex.ConnectionMaster
 }
 
 func newTestRig(t *testing.T, blkFunc func(string, error)) *testRig {
 	rig := &testRig{
 		backends:          make(map[string]*ExchangeWallet),
-		connectionMasters: make(map[string]*dex.ConnectionManager, 3),
+		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
 	}
 	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, "alpha", blkFunc)
 	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(t, "beta", blkFunc)

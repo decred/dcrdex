@@ -139,8 +139,8 @@ func tNewAccount() *dexAccount {
 
 func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 	conn := newTWebsocket()
-	connMgr := dex.NewConnectionManager(conn)
-	connMgr.Connect(tCtx)
+	connMaster := dex.NewConnectionMaster(conn)
+	connMaster.Connect(tCtx)
 	acct := tNewAccount()
 	mkt := &Market{
 		Name:            tDcrBtcMktName,
@@ -152,9 +152,9 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		MarketBuyBuffer: 1.1,
 	}
 	return &dexConnection{
-		WsConn:  conn,
-		connMgr: connMgr,
-		acct:    acct,
+		WsConn:     conn,
+		connMaster: connMaster,
+		acct:       acct,
 		assets: map[uint32]*dex.Asset{
 			tDCR.ID: tDCR,
 			tBTC.ID: tBTC,
@@ -430,11 +430,11 @@ type TXCWallet struct {
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := new(TXCWallet)
 	return &xcWallet{
-		Wallet:      w,
-		connManager: dex.NewConnectionManager(w),
-		AssetID:     assetID,
-		lockTime:    time.Now().Add(time.Hour),
-		hookedUp:    true,
+		Wallet:    w,
+		connector: dex.NewConnectionMaster(w),
+		AssetID:   assetID,
+		lockTime:  time.Now().Add(time.Hour),
+		hookedUp:  true,
 	}, w
 }
 
@@ -964,7 +964,7 @@ func TestRegister(t *testing.T) {
 	rig.db.acctErr = tErr
 
 	regRes := &msgjson.RegisterResult{
-		DEXPubKey:    tDexKey.Serialize(),
+		DEXPubKey:    acct.dexPubKey.Serialize(),
 		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
 		Address:      "someaddr",
 		Fee:          tFee,

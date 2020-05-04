@@ -218,7 +218,7 @@ func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 // CreateAccount saves the AccountInfo. If an account already exists for this
 // DEX, it will return an error.
 func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
-	if err := db.checkAccountInfo(ai); err != nil {
+	if err := checkAccountInfo(ai); err != nil {
 		return err
 	}
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
@@ -240,7 +240,7 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 
 // UpdateAccount updates the AccountInfo for the specified DEX.
 func (db *boltDB) UpdateAccount(ai *dexdb.AccountInfo) error {
-	if err := db.checkAccountInfo(ai); err != nil {
+	if err := checkAccountInfo(ai); err != nil {
 		return err
 	}
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
@@ -268,7 +268,7 @@ func (db *boltDB) AccountPaid(proof *dexdb.AccountProof) error {
 	})
 }
 
-func (db *boltDB) checkAccountInfo(ai *dexdb.AccountInfo) error {
+func checkAccountInfo(ai *dexdb.AccountInfo) error {
 	if ai.URL == "" {
 		return fmt.Errorf("empty URL not allowed")
 	}

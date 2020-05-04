@@ -15,16 +15,16 @@ import (
 // xcWallet is a wallet.
 type xcWallet struct {
 	asset.Wallet
-	connManager *dex.ConnectionManager
-	Account     string
-	AssetID     uint32
-	mtx         sync.RWMutex
-	lockTime    time.Time
-	hookedUp    bool
-	balance     uint64
-	balUpdate   time.Time
-	encPW       []byte
-	address     string
+	connector *dex.ConnectionMaster
+	Account   string
+	AssetID   uint32
+	mtx       sync.RWMutex
+	lockTime  time.Time
+	hookedUp  bool
+	balance   uint64
+	balUpdate time.Time
+	encPW     []byte
+	address   string
 }
 
 // Unlock unlocks the wallet.
@@ -63,7 +63,7 @@ func (w *xcWallet) state() *WalletState {
 		Symbol:  unbip(w.AssetID),
 		AssetID: w.AssetID,
 		Open:    w.lockTime.After(time.Now()),
-		Running: w.connManager.On(),
+		Running: w.connector.On(),
 		Balance: w.balance,
 		Address: w.address,
 		FeeRate: winfo.DefaultFeeRate, // Withdraw fee, not swap.
@@ -96,7 +96,7 @@ func (w *xcWallet) connected() bool {
 // Connect calls the dex.Connector's Connect method and sets the
 // xcWallet.hookedUp flag to true.
 func (w *xcWallet) Connect(ctx context.Context) error {
-	err := w.connManager.Connect(ctx)
+	err := w.connector.Connect(ctx)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (w *xcWallet) Connect(ctx context.Context) error {
 // Disconnect calls the dex.Connector's Disconnect method and sets the
 // xcWallet.hookedUp flag to false.
 func (w *xcWallet) Disconnect() {
-	w.connManager.Disconnect()
+	w.connector.Disconnect()
 	w.mtx.Lock()
 	w.hookedUp = false
 	w.mtx.Unlock()
