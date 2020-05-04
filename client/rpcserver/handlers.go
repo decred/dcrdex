@@ -98,6 +98,7 @@ func handleInit(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(initRoute, err)
 	}
+	defer appPass.Clear()
 	if err := s.core.InitializeClient(appPass); err != nil {
 		errMsg := fmt.Sprintf("unable to initialize client: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCInitError, errMsg)
@@ -127,6 +128,13 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(newWalletRoute, err)
 	}
+
+	// zero password params in request payload when done handling this request
+	defer func() {
+		form.AppPass.Clear()
+		form.WalletPass.Clear()
+	}()
+
 	exists := s.core.WalletState(form.AssetID) != nil
 	if exists {
 		errMsg := fmt.Sprintf("error creating %s wallet: wallet already exists",
@@ -167,7 +175,9 @@ func handleOpenWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 	if err != nil {
 		return usage(openWalletRoute, err)
 	}
+
 	err = s.core.OpenWallet(form.AssetID, form.AppPass)
+	form.AppPass.Clear() // AppPass not needed after this, clear
 	if err != nil {
 		errMsg := fmt.Sprintf("error unlocking %s wallet: %v",
 			dex.BipIDSymbol(form.AssetID), err)
@@ -230,6 +240,7 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(registerRoute, err)
 	}
+	defer form.AppPass.Clear()
 	fee, err := s.core.PreRegister(&core.PreRegisterForm{URL: form.URL, Cert: form.Cert})
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,

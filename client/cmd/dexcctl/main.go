@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"decred.org/dcrdex/client/rpcserver"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/admin"
 )
@@ -64,21 +65,20 @@ var readCerts = map[string]int{
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting
-// fails or a password is empty. Returns passwords as a slice of strings.
-func promptPWs(ctx context.Context, cmd string) ([]string, error) {
+// fails or a password is empty. Returns passwords as a slice of []byte.
+func promptPWs(ctx context.Context, cmd string) ([]encode.PassBytes, error) {
 	prompts, exists := promptPasswords[cmd]
 	if !exists {
 		return nil, nil
 	}
-	pws := make([]string, len(prompts))
+	var err error
+	pws := make([]encode.PassBytes, len(prompts))
 	// Prompt for passwords one at a time.
 	for i, prompt := range prompts {
-		pw, err := admin.PasswordPrompt(ctx, prompt)
+		pws[i], err = admin.PasswordPrompt(ctx, prompt)
 		if err != nil {
 			return nil, err
 		}
-		pws[i] = string(pw)
-		admin.ClearBytes(pw)
 	}
 	return pws, nil
 }

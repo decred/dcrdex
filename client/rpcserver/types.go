@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex/encode"
 )
 
 var (
@@ -18,8 +19,8 @@ var (
 
 // RawParams is used for all server requests.
 type RawParams struct {
-	PWArgs []string `json:"PWArgs"`
-	Args   []string `json:"args"`
+	PWArgs []encode.PassBytes `json:"PWArgs"`
+	Args   []string           `json:"args"`
 }
 
 // versionResponse holds a semver version JSON object.
@@ -41,17 +42,17 @@ type preRegisterResponse struct {
 
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
-	AssetID uint32 `json:"assetID"`
-	AppPass string `json:"appPass"`
+	AssetID uint32           `json:"assetID"`
+	AppPass encode.PassBytes `json:"appPass"`
 }
 
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
-	AssetID    uint32 `json:"assetID"`
-	Account    string `json:"account"`
-	INIPath    string `json:"inipath"`
-	WalletPass string `json:"walletPass"`
-	AppPass    string `json:"appPass"`
+	AssetID    uint32           `json:"assetID"`
+	Account    string           `json:"account"`
+	INIPath    string           `json:"inipath"`
+	WalletPass encode.PassBytes `json:"walletPass"`
+	AppPass    encode.PassBytes `json:"appPass"`
 }
 
 // helpForm is information necessary to obtain help.
@@ -122,9 +123,9 @@ func parseHelpArgs(params *RawParams) (*helpForm, error) {
 	}, nil
 }
 
-func parseInitArgs(params *RawParams) (string, error) {
+func parseInitArgs(params *RawParams) (encode.PassBytes, error) {
 	if err := checkNArgs(params, []int{1}, []int{0}); err != nil {
-		return "", err
+		return nil, err
 	}
 	return params.PWArgs[0], nil
 }

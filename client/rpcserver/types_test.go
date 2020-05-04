@@ -4,9 +4,12 @@
 package rpcserver
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"testing"
+
+	"decred.org/dcrdex/dex/encode"
 )
 
 func TestCheckNArgs(t *testing.T) {
@@ -52,7 +55,11 @@ func TestCheckNArgs(t *testing.T) {
 		wantErr:   true,
 	}}
 	for _, test := range tests {
-		err := checkNArgs(&RawParams{PWArgs: test.have, Args: test.have}, test.wantNArgs, test.wantNArgs)
+		pwArgs := make([]encode.PassBytes, len(test.have))
+		for i, testValue := range test.have {
+			pwArgs[i] = encode.PassBytes(testValue)
+		}
+		err := checkNArgs(&RawParams{PWArgs: pwArgs, Args: test.have}, test.wantNArgs, test.wantNArgs)
 		if test.wantErr {
 			if err == nil {
 				t.Fatalf("expected error for test %s",
@@ -69,7 +76,8 @@ func TestCheckNArgs(t *testing.T) {
 
 func TestParseNewWalletArgs(t *testing.T) {
 	paramsWithAssetID := func(id string) *RawParams {
-		pwArgs := []string{"password123", "password123"}
+		pw := encode.PassBytes("password123")
+		pwArgs := []encode.PassBytes{pw, pw}
 		args := []string{
 			id,
 			"default",
@@ -98,10 +106,10 @@ func TestParseNewWalletArgs(t *testing.T) {
 			}
 			continue
 		}
-		if nwf.AppPass != test.params.PWArgs[0] {
+		if !bytes.Equal(nwf.AppPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
 		}
-		if nwf.WalletPass != test.params.PWArgs[1] {
+		if !bytes.Equal(nwf.WalletPass, test.params.PWArgs[1]) {
 			t.Fatalf("walletPass doesn't match")
 		}
 		if fmt.Sprint(nwf.AssetID) != test.params.Args[0] {
@@ -118,7 +126,8 @@ func TestParseNewWalletArgs(t *testing.T) {
 
 func TestParseOpenWalletArgs(t *testing.T) {
 	paramsWithAssetID := func(id string) *RawParams {
-		pwArgs := []string{"password123"}
+		pw := encode.PassBytes("password123")
+		pwArgs := []encode.PassBytes{pw}
 		args := []string{id}
 		return &RawParams{PWArgs: pwArgs, Args: args}
 	}
@@ -143,7 +152,7 @@ func TestParseOpenWalletArgs(t *testing.T) {
 			}
 			continue
 		}
-		if owf.AppPass != test.params.PWArgs[0] {
+		if !bytes.Equal(owf.AppPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
 		}
 		if fmt.Sprint(owf.AssetID) != test.params.Args[0] {
@@ -237,7 +246,8 @@ func TestCheckBoolArg(t *testing.T) {
 
 func TestParseRegisterArgs(t *testing.T) {
 	paramsWithFee := func(fee string) *RawParams {
-		pwArgs := []string{"password123"}
+		pw := encode.PassBytes("password123")
+		pwArgs := []encode.PassBytes{pw}
 		args := []string{"dex", fee, "cert"}
 		return &RawParams{PWArgs: pwArgs, Args: args}
 	}
@@ -262,7 +272,7 @@ func TestParseRegisterArgs(t *testing.T) {
 			}
 			continue
 		}
-		if reg.AppPass != test.params.PWArgs[0] {
+		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
 		}
 		if reg.URL != test.params.Args[0] {

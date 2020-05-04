@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"syscall"
 
+	"decred.org/dcrdex/dex/encode"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -65,12 +66,6 @@ func PasswordHashPrompt(ctx context.Context, prompt string) ([sha256.Size]byte, 
 	}
 	authSHA = sha256.Sum256(passBytes)
 	// Zero password bytes.
-	ClearBytes(passBytes)
+	encode.ClearBytes(passBytes)
 	return authSHA, nil
-}
-
-func ClearBytes(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
 }

@@ -176,6 +176,10 @@ func wsHandleRequest(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.
 		return msgError
 	}
 	payload := handler(s, params)
+	// clear all password data in unmarshalled request params after request is handled
+	for _, pass := range params.PWArgs {
+		pass.Clear()
+	}
 	encodedPayload, err := json.Marshal(payload)
 	if err != nil {
 		err := fmt.Errorf("unable to encode payload: %v", err)

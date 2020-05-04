@@ -328,8 +328,8 @@ type Core struct {
 	db            db.DB
 	net           dex.Network
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
-	newCrypter    func(string) encrypt.Crypter
-	reCrypter     func(string, []byte) (encrypt.Crypter, error)
+	newCrypter    func([]byte) encrypt.Crypter
+	reCrypter     func([]byte, []byte) (encrypt.Crypter, error)
 	latencyQ      *wait.TickerQueue
 
 	connMtx sync.RWMutex
@@ -426,7 +426,7 @@ func (c *Core) wallet(assetID uint32) (*xcWallet, bool) {
 
 // encryptionKey retrieves the application encryption key. The key itself is
 // encrypted using an encryption key derived from the user's password.
-func (c *Core) encryptionKey(pw string) (encrypt.Crypter, error) {
+func (c *Core) encryptionKey(pw []byte) (encrypt.Crypter, error) {
 	keyParams, err := c.db.Get(keyParamsKey)
 	if err != nil {
 		return nil, fmt.Errorf("key retrieval error: %v", err)
@@ -520,7 +520,7 @@ func (c *Core) refreshUser() {
 }
 
 // CreateWallet creates a new exchange wallet.
-func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
+func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	assetID := form.AssetID
 	symbol := unbip(assetID)
 	_, exists := c.wallet(assetID)
@@ -532,7 +532,7 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 	if err != nil {
 		return err
 	}
-	encPW, err := crypter.Encrypt([]byte(walletPW))
+	encPW, err := crypter.Encrypt(walletPW)
 	if err != nil {
 		return fmt.Errorf("wallet password encryption error: %v", err)
 	}
@@ -559,7 +559,7 @@ func (c *Core) CreateWallet(appPW, walletPW string, form *WalletForm) error {
 		return fmt.Errorf(s, a...)
 	}
 
-	err = wallet.Unlock(walletPW, aYear)
+	err = wallet.Unlock(string(walletPW), aYear)
 	if err != nil {
 		return initErr("%s wallet authentication error: %v", symbol, err)
 	}
@@ -637,7 +637,7 @@ func (c *Core) WalletState(assetID uint32) *WalletState {
 }
 
 // OpenWallet opens (unlocks) the wallet for use.
-func (c *Core) OpenWallet(assetID uint32, appPW string) error {
+func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	crypter, err := c.encryptionKey(appPW)
 	if err != nil {
 		return err
@@ -943,8 +943,8 @@ func (c *Core) Register(form *RegisterForm) error {
 }
 
 // InitializeClient sets the initial app-wide password for the client.
-func (c *Core) InitializeClient(pw string) error {
-	if pw == "" {
+func (c *Core) InitializeClient(pw []byte) error {
+	if len(pw) == 0 {
 		return fmt.Errorf("empty password not allowed")
 	}
 	crypter := c.newCrypter(pw)
@@ -957,7 +957,7 @@ func (c *Core) InitializeClient(pw string) error {
 }
 
 // Login logs the user in, decrypting the account keys for all known DEXes.
-func (c *Core) Login(pw string) ([]*db.Notification, error) {
+func (c *Core) Login(pw []byte) ([]*db.Notification, error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, err
@@ -1139,7 +1139,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 
 // Withdraw initiates a withdraw from an exchange wallet. The client password
 // must be provided as an additional verification.
-func (c *Core) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, error) {
+func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error) {
 	_, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("Withdraw password error: %v", err)
@@ -1163,7 +1163,7 @@ func (c *Core) Withdraw(pw string, assetID uint32, value uint64) (asset.Coin, er
 }
 
 // Trade is used to place a market or limit order.
-func (c *Core) Trade(pw string, form *TradeForm) (*Order, error) {
+func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	// Check the user password.
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
@@ -1391,7 +1391,7 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 }
 
 // Cancel is used to send a cancel order which cancels a limit order.
-func (c *Core) Cancel(pw string, tradeID string) error {
+func (c *Core) Cancel(pw []byte, tradeID string) error {
 	// Check the user password.
 	_, err := c.encryptionKey(pw)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 )
 
@@ -218,6 +219,7 @@ func TestHandlePreRegister(t *testing.T) {
 }
 
 func TestHandleInit(t *testing.T) {
+	pw := encode.PassBytes("password123")
 	tests := []struct {
 		name                string
 		params              *RawParams
@@ -225,11 +227,11 @@ func TestHandleInit(t *testing.T) {
 		wantErrCode         int
 	}{{
 		name:        "ok",
-		params:      &RawParams{PWArgs: []string{"password123"}},
+		params:      &RawParams{PWArgs: []encode.PassBytes{pw}},
 		wantErrCode: -1,
 	}, {
 		name:                "core.InitializeClient error",
-		params:              &RawParams{PWArgs: []string{"password123"}},
+		params:              &RawParams{PWArgs: []encode.PassBytes{pw}},
 		initializeClientErr: errors.New("error"),
 		wantErrCode:         msgjson.RPCInitError,
 	}, {
@@ -249,11 +251,9 @@ func TestHandleInit(t *testing.T) {
 }
 
 func TestHandleNewWallet(t *testing.T) {
+	pw := encode.PassBytes("password123")
 	params := &RawParams{
-		PWArgs: []string{
-			"password123",
-			"password123",
-		},
+		PWArgs: []encode.PassBytes{pw, pw},
 		Args: []string{
 			"42",
 			"default",
@@ -307,10 +307,9 @@ func TestHandleNewWallet(t *testing.T) {
 }
 
 func TestHandleOpenWallet(t *testing.T) {
+	pw := encode.PassBytes("password123")
 	params := &RawParams{
-		PWArgs: []string{
-			"password123",
-		},
+		PWArgs: []encode.PassBytes{pw},
 		Args: []string{
 			"42",
 		},
@@ -387,10 +386,9 @@ func TestHandleWallets(t *testing.T) {
 }
 
 func TestHandleRegister(t *testing.T) {
+	pw := encode.PassBytes("password123")
 	params := &RawParams{
-		PWArgs: []string{
-			"password123",
-		},
+		PWArgs: []encode.PassBytes{pw},
 		Args: []string{
 			"dex:1234",
 			"1000",
