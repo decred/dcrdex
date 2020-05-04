@@ -221,7 +221,8 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 
 	url := t.dc.acct.url
 	if len(missing) > 0 {
-		details := fmt.Sprintf("%d matches for order %s were not reported by %s and are in a failed state", missing, t.ID(), t.dc.acct.url)
+		details := fmt.Sprintf("%d matches for order %s were not reported by %q and are in a failed state",
+			len(missing), t.ID(), t.dc.acct.url)
 		corder, _ := t.coreOrder()
 		t.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
 		for _, mid := range missing {

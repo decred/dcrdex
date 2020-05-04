@@ -30,25 +30,39 @@ func TestInsertMatch(t *testing.T) {
 	matchAUpdated.Status = order.MakerSwapCast
 	// matchAUpdated.Sigs.MakerMatch = randomBytes(73)
 
+	cancelLOBuy := newCancelOrder(limitBuyStanding.ID(), base, quote, 0)
+	matchCancel := newMatch(limitBuyStanding, cancelLOBuy, 0, epochID)
+	matchCancel.Status = order.MatchComplete // will be forced to complete on store too
+
 	tests := []struct {
-		name    string
-		match   *order.Match
-		wantErr bool
+		name     string
+		match    *order.Match
+		wantErr  bool
+		isCancel bool
 	}{
 		{
 			"store ok",
 			matchA,
+			false,
 			false,
 		},
 		{
 			"update ok",
 			matchAUpdated,
 			false,
+			false,
 		},
 		{
 			"update again ok",
 			matchAUpdated,
 			false,
+			false,
+		},
+		{
+			"cancel",
+			matchCancel,
+			false,
+			true,
 		},
 	}
 
@@ -74,6 +88,18 @@ func TestInsertMatch(t *testing.T) {
 			if matchData.Status != tt.match.Status {
 				t.Errorf("Incorrect match status, got %d, expected %d",
 					matchData.Status, tt.match.Status)
+			}
+			if tt.isCancel {
+				if matchData.Active {
+					t.Errorf("Incorrect match active flag, got %v, expected false",
+						matchData.Active)
+				}
+				if matchData.TakerAddr != "" {
+					t.Errorf("Expected empty taker address for cancel match, got %v", matchData.TakerAddr)
+				}
+				if matchData.MakerAddr != "" {
+					t.Errorf("Expected empty maker address for cancel match, got %v", matchData.MakerAddr)
+				}
 			}
 		})
 	}

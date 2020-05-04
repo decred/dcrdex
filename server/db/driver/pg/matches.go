@@ -47,14 +47,17 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 	for rows.Next() {
 		var m db.MatchData
 		var status uint8
+		var takerAddr, makerAddr sql.NullString
 		err := rows.Scan(&m.ID, &m.Active,
-			&m.Taker, &m.TakerAcct, &m.TakerAddr,
-			&m.Maker, &m.MakerAcct, &m.MakerAddr,
+			&m.Taker, &m.TakerAcct, &takerAddr,
+			&m.Maker, &m.MakerAcct, &makerAddr,
 			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
 		if err != nil {
 			return nil, err
 		}
 		m.Status = order.MatchStatus(status)
+		m.TakerAddr = takerAddr.String
+		m.MakerAddr = makerAddr.String
 		ms = append(ms, &m)
 	}
 
@@ -94,40 +97,41 @@ func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid a
 
 	var ms []*order.UserMatch
 	for rows.Next() {
-		var m db.MatchData
+		var md db.MatchData
 		var status uint8
-		err := rows.Scan(&m.ID, &m.Taker, &m.TakerAcct, &m.TakerAddr,
-			&m.Maker, &m.MakerAcct, &m.MakerAddr,
-			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
+		var takerAddr, makerAddr sql.NullString
+		err := rows.Scan(&md.ID, &md.Taker, &md.TakerAcct, &takerAddr,
+			&md.Maker, &md.MakerAcct, &makerAddr,
+			&md.Epoch.Idx, &md.Epoch.Dur, &md.Quantity, &md.Rate, &status)
 		if err != nil {
 			return nil, err
 		}
-		m.Status = order.MatchStatus(status)
+		md.Status = order.MatchStatus(status)
 
 		var addr string
 		var oid order.OrderID
 		var side order.MatchSide
 		switch aid {
-		case m.TakerAcct:
-			addr = m.TakerAddr
-			oid = m.Taker
+		case md.TakerAcct:
+			addr = takerAddr.String
+			oid = md.Taker
 			side = order.Taker
-		case m.MakerAcct:
-			addr = m.MakerAddr
-			oid = m.Maker
+		case md.MakerAcct:
+			addr = makerAddr.String
+			oid = md.Maker
 			side = order.Maker
 		default:
-			return nil, fmt.Errorf("loaded match %v not belonging to user %v", m.ID, aid)
+			return nil, fmt.Errorf("loaded match %v not belonging to user %v", md.ID, aid)
 		}
 
 		um := &order.UserMatch{
 			OrderID:  oid,
-			MatchID:  m.ID,
-			Quantity: m.Quantity,
-			Rate:     m.Rate,
+			MatchID:  md.ID,
+			Quantity: md.Quantity,
+			Rate:     md.Rate,
 			Address:  addr,
 			Side:     side,
-			Status:   m.Status,
+			Status:   md.Status,
 		}
 
 		ms = append(ms, um)
@@ -146,6 +150,19 @@ func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, 
 	if tt != nil {
 		takerAddr = tt.SwapAddress()
 	}
+
+	// Cancel orders do not store taker or maker addresses, and are stored with
+	// complete status with no active swap negotiation.
+	if takerAddr == "" {
+		stmt := fmt.Sprintf(internal.UpsertCancelMatch, tableName)
+		return sqlExec(dbe, stmt, match.ID(),
+			match.Taker.ID(), match.Taker.User(), // taker address remains unset/default
+			match.Maker.ID(), match.Maker.User(), // as does maker's since it is not used
+			match.Epoch.Idx, match.Epoch.Dur,
+			int64(match.Quantity), int64(match.Rate), // quantity and rate may be useful for cancel statistics however
+			int8(order.MatchComplete)) // status is complete
+	}
+
 	stmt := fmt.Sprintf(internal.UpsertMatch, tableName)
 	return sqlExec(dbe, stmt, match.ID(),
 		match.Taker.ID(), match.Taker.User(), takerAddr,
@@ -189,15 +206,18 @@ func (a *Archiver) MatchByID(mid order.MatchID, base, quote uint32) (*db.MatchDa
 func matchByID(dbe *sql.DB, tableName string, mid order.MatchID) (*db.MatchData, error) {
 	var m db.MatchData
 	var status uint8
+	var takerAddr, makerAddr sql.NullString
 	stmt := fmt.Sprintf(internal.RetrieveMatchByID, tableName)
 	err := dbe.QueryRow(stmt, mid).
 		Scan(&m.ID, &m.Active,
-			&m.Taker, &m.TakerAcct, &m.TakerAddr,
-			&m.Maker, &m.MakerAcct, &m.MakerAddr,
+			&m.Taker, &m.TakerAcct, &takerAddr,
+			&m.Maker, &m.MakerAcct, &makerAddr,
 			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
 	if err != nil {
 		return nil, err
 	}
+	m.TakerAddr = takerAddr.String
+	m.MakerAddr = makerAddr.String
 	m.Status = order.MatchStatus(status)
 	return &m, nil
 }
