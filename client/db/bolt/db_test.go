@@ -87,9 +87,12 @@ func TestStore(t *testing.T) {
 	k := "some random key"
 	boltdb := newTestDB(t)
 	// Check no key
-	_, err := boltdb.Get(k)
-	if err == nil {
-		t.Fatalf("no error for missing key")
+	exists, err := boltdb.ValueExists(k)
+	if err != nil {
+		t.Fatalf("error checking if value exists for key: %v", err)
+	}
+	if exists {
+		t.Fatalf("value exists for missing key")
 	}
 	v := randBytes(50)
 	err = boltdb.Store(k, v)

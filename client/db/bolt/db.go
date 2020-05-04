@@ -118,13 +118,12 @@ func (db *boltDB) Store(k string, v []byte) error {
 // bucket at the specified key.
 func (db *boltDB) ValueExists(k string) (bool, error) {
 	var exists bool
-	keyB := []byte(k)
 	return exists, db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(appBucket)
 		if bucket == nil {
 			return fmt.Errorf("app bucket not found")
 		}
-		exists = bucket.Get(keyB) != nil
+		exists = bucket.Get([]byte(k)) != nil
 		return nil
 	})
 }
