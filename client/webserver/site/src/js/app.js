@@ -145,7 +145,7 @@ export default class Application {
     this.pokeNote = idel(document.body, 'pokeNote')
     const pg = this.page = Doc.parsePage(this.header, [
       'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
-      'walletsMenuEntry', 'noteMenuEntry', 'settingsIcon', 'loginLink', 'loader'
+      'marketsMenuEntry', 'walletsMenuEntry', 'noteMenuEntry', 'settingsIcon', 'loader'
     ])
     pg.noteIndicator.style.display = 'none'
     delete pg.noteTemplate.id
@@ -203,13 +203,16 @@ export default class Application {
    */
   setLogged (logged) {
     const pg = this.page
-    if (logged) {
-      Doc.show(pg.noteMenuEntry, pg.settingsIcon, pg.walletsMenuEntry)
-      Doc.hide(pg.loginLink)
+    if (!logged) {
+      Doc.hide(pg.noteMenuEntry, pg.settingsIcon, pg.walletsMenuEntry, pg.marketsMenuEntry)
       return
     }
-    Doc.hide(pg.noteMenuEntry, pg.settingsIcon)
-    Doc.show(pg.loginLink)
+    Doc.show(pg.noteMenuEntry, pg.settingsIcon, pg.walletsMenuEntry)
+    if (Object.keys(this.user.exchanges).length > 0) {
+      Doc.show(pg.marketsMenuEntry)
+    } else {
+      Doc.hide(pg.marketsMenuEntry)
+    }
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */

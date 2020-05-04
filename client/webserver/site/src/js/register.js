@@ -16,16 +16,16 @@ export default class RegistrationPage extends BasePage {
     this.notifiers = {}
     const page = this.page = Doc.parsePage(body, [
       // Form 1: Set the application password
-      'appPWForm', 'appPWSubmit', 'appErrMsg', 'appPW', 'appPWAgain',
+      'appPWForm', 'appPW', 'appPWAgain', 'appPWSubmit', 'appPWErrMsg',
       // Form 2: Create Decred wallet
-      'walletForm',
-      // Form 3: Open Decred wallet
-      'openForm',
-      // Form 4: DEX address
-      'urlForm', 'addrInput', 'submitAddr', 'feeDisplay', 'addrErr',
-      'certInput', 'selectedCert', 'removeTLS', 'addTLS',
-      // Form 5: Final form to initiate registration. Client app password.
-      'pwForm', 'clientPass', 'submitPW', 'regErr'
+      'newWalletForm',
+      // Form 3: Unlock Decred wallet
+      'unlockWalletForm',
+      // Form 4: PreRegister DEX
+      'dexForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
+      'submitDEXAddr', 'dexAddrErr',
+      // Form 5: Confirm DEX registration and pay fee
+      'confirmRegForm', 'feeDisplay', 'clientPass', 'submitConfirm', 'regErr'
     ])
 
     // SET APP PASSWORD
@@ -33,29 +33,30 @@ export default class RegistrationPage extends BasePage {
 
     // NEW DCR WALLET
     // This form is only shown if there is no DCR wallet yet.
-    forms.bindNewWallet(app, page.walletForm, () => {
-      this.changeForm(page.walletForm, page.urlForm)
+    forms.bindNewWallet(app, page.newWalletForm, () => {
+      this.changeForm(page.newWalletForm, page.dexForm)
     })
-    page.walletForm.setAsset(app.assets[DCR_ID])
+    page.newWalletForm.setAsset(app.assets[DCR_ID])
 
     // OPEN DCR WALLET
     // This form is only shown if there is a wallet, but it's not open.
-    forms.bindOpenWallet(app, page.openForm, () => {
-      this.changeForm(page.openForm, page.urlForm)
+    forms.bindOpenWallet(app, page.unlockWalletForm, () => {
+      this.changeForm(page.unlockWalletForm, page.dexForm)
     })
-    page.openForm.setAsset(app.assets[DCR_ID])
+    page.unlockWalletForm.setAsset(app.assets[DCR_ID])
 
-    // ENTER NEW DEX URL
-    this.fee = null
-    forms.bind(page.urlForm, page.submitAddr, () => { this.checkDEX() })
+    // ADD DEX
     // tls certificate upload
-    this.defaultTLSText = page.selectedCert.textContent
-    Doc.bind(page.certInput, 'change', () => this.readCert())
-    Doc.bind(page.removeTLS, 'click', () => this.resetCert())
-    Doc.bind(page.addTLS, 'click', () => this.page.certInput.click())
+    this.defaultTLSText = 'none selected'
+    page.selectedCert.textContent = this.defaultTLSText
+    Doc.bind(page.certFile, 'change', () => this.readCert())
+    Doc.bind(page.removeCert, 'click', () => this.resetCert())
+    Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
+    // DEX form
+    forms.bind(page.dexForm, page.submitDEXAddr, () => { this.checkDEX() })
 
     // SUBMIT DEX REGISTRATION
-    forms.bind(page.pwForm, page.submitPW, () => { this.registerDEX() })
+    forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
   }
 
   /* Swap this currently displayed form1 for form2 with an animation. */
@@ -78,17 +79,17 @@ export default class RegistrationPage extends BasePage {
   /* Set the application password. Attached to form submission. */
   async setAppPass () {
     const page = this.page
-    Doc.hide(page.appErrMsg)
+    Doc.hide(page.appPWErrMsg)
     const pw = page.appPW.value
     const pwAgain = page.appPWAgain.value
     if (pw === '') {
-      page.appErrMsg.textContent = 'password cannot be empty'
-      Doc.show(page.appErrMsg)
+      page.appPWErrMsg.textContent = 'password cannot be empty'
+      Doc.show(page.appPWErrMsg)
       return
     }
     if (pw !== pwAgain) {
-      page.appErrMsg.textContent = 'passwords do not match'
-      Doc.show(page.appErrMsg)
+      page.appPWErrMsg.textContent = 'passwords do not match'
+      Doc.show(page.appPWErrMsg)
       return
     }
     // Clear the notification cache. Useful for development purposes, since
@@ -107,63 +108,40 @@ export default class RegistrationPage extends BasePage {
       return
     }
     app.setLogged(true)
-    const dcrWallet = app.walletMap[DCR_ID]
-    if (!dcrWallet) {
-      this.changeForm(page.appPWForm, page.walletForm)
-      return
-    }
-    // Not really sure if these other cases are possible if the user hasn't
-    // even set their password yet.
-    if (!dcrWallet.open) {
-      this.changeForm(page.appPWForm, page.openForm)
-      return
-    }
-    this.changeForm(page.appPWForm, page.urlForm)
+    this.changeForm(page.appPWForm, page.newWalletForm)
   }
 
   /* Get the reg fees for the DEX. */
   async checkDEX () {
     const page = this.page
-    Doc.hide(page.addrErr)
-    const url = page.addrInput.value
+    Doc.hide(page.dexAddrErr)
+    const url = page.dexAddr.value
     if (url === '') {
-      page.addrErr.textContent = 'URL cannot be empty'
-      Doc.show(page.addrErr)
+      page.dexAddrErr.textContent = 'URL cannot be empty'
+      Doc.show(page.dexAddrErr)
       return
     }
 
     var cert = ''
-    if (page.certInput.value) {
-      cert = await page.certInput.files[0].text()
+    if (page.certFile.value) {
+      cert = await page.certFile.files[0].text()
     }
 
-    app.loading(page.urlForm)
+    app.loading(page.dexForm)
     var res = await postJSON('/api/getfee', {
       url: url,
       cert: cert
     })
     app.loaded()
     if (!app.checkResponse(res)) {
-      page.addrErr.textContent = res.msg
-      Doc.show(page.addrErr)
+      page.dexAddrErr.textContent = res.msg
+      Doc.show(page.dexAddrErr)
       return
     }
-    page.feeDisplay.textContent = Doc.formatCoinValue(res.fee / 1e8)
     this.fee = res.fee
 
-    const dcrWallet = app.walletMap[DCR_ID]
-    if (!dcrWallet) {
-      // There is no known Decred wallet, show the wallet form
-      await this.changeForm(page.urlForm, page.walletForm)
-      return
-    }
-    // The Decred wallet is known, check if it is open.
-    if (!dcrWallet.open) {
-      await this.changeForm(page.urlForm, page.openForm)
-      return
-    }
-    // The Decred wallet is known and open, collect the main client password.
-    await this.changeForm(page.urlForm, page.pwForm)
+    page.feeDisplay.textContent = Doc.formatCoinValue(res.fee / 1e8)
+    await this.changeForm(page.dexForm, page.confirmRegForm)
   }
 
   /* Authorize DEX registration. */
@@ -175,13 +153,13 @@ export default class RegistrationPage extends BasePage {
       cert = await page.certInput.files[0].text()
     }
     const registration = {
-      url: page.addrInput.value,
+      url: page.dexAddr.value,
       pass: page.clientPass.value,
       fee: this.fee,
       cert: cert
     }
     page.clientPass.value = ''
-    app.loading(page.pwForm)
+    app.loading(page.confirmRegForm)
     var res = await postJSON('/api/register', registration)
     app.loaded()
     if (!app.checkResponse(res)) {
@@ -197,18 +175,18 @@ export default class RegistrationPage extends BasePage {
 
   async readCert () {
     const page = this.page
-    const files = page.certInput.files
+    const files = page.certFile.files
     if (!files.length) return
     page.selectedCert.textContent = files[0].name
-    Doc.show(page.removeTLS)
-    Doc.hide(page.addTLS)
+    Doc.show(page.removeCert)
+    Doc.hide(page.addCert)
   }
 
   resetCert () {
     const page = this.page
-    page.certInput.value = ''
+    page.certFile.value = ''
     page.selectedCert.textContent = this.defaultTLSText
-    Doc.hide(page.removeTLS)
-    Doc.show(page.addTLS)
+    Doc.hide(page.removeCert)
+    Doc.show(page.addCert)
   }
 }
