@@ -99,6 +99,15 @@ func TestStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error storing value: %v", err)
 	}
+	// Confirm value exists for key
+	exists, err = boltdb.ValueExists(k)
+	if err != nil {
+		t.Fatalf("error checking if value exists for key: %v", err)
+	}
+	if !exists {
+		t.Fatalf("no value found for stored key")
+	}
+	// Confirm db value for key matches what was stored.
 	reV, err := boltdb.Get(k)
 	if err != nil {
 		t.Fatalf("error storing value: %v", err)
