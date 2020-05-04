@@ -172,3 +172,18 @@ func newEpochNotification(dexAddr, mktID string, epochIdx uint64) *EpochNotifica
 func (on *EpochNotification) String() string {
 	return fmt.Sprintf("%s - Index: %d", on.Notification.String(), on.Epoch)
 }
+
+// ConnEventNote is a notification regarding individual DEX connection status.
+type ConnEventNote struct {
+	db.Notification
+	URL       string `json:"url"`
+	Connected bool   `json:"connected"`
+}
+
+func newConnEventNote(subject, url string, connected bool, details string, severity db.Severity) *ConnEventNote {
+	return &ConnEventNote{
+		Notification: db.NewNotification("conn", subject, details, severity),
+		URL:          url,
+		Connected:    connected,
+	}
+}

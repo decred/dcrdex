@@ -12,7 +12,10 @@
   {{- /* MARKET LIST */ -}}
   <div id="marketList" class="marketlist">
     {{range $host, $xc := .Exchanges}}
-      <div class="fs16 py-1 pl-2 bg1">{{$host}}</div>
+      <div class="fs16 py-1 pl-2 bg1">
+        {{$host}}
+        <span id="disconnected:{{$host}}" class="ico-disconnected{{if $xc.Connected}} d-hide{{end}}" data-toggle="tooltip" title="disconnected"></span>
+      </div>
       {{range $xc.SortedMarkets}}
         <div class="marketrow" data-dex="{{$host}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
           <img src="{{logoPath .BaseSymbol}}" class="micro-icon mr-1">

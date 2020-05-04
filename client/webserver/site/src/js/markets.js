@@ -190,7 +190,8 @@ export default class MarketsPage extends BasePage {
     // Notification filters.
     this.notifiers = {
       order: note => { this.handleOrderNote(note) },
-      epoch: note => { this.handleEpochNote(note) }
+      epoch: note => { this.handleEpochNote(note) },
+      conn: note => { this.handleConnEventNote(note) }
     }
 
     // Fetch the first market in the list, or the users last selected market, if
@@ -702,6 +703,19 @@ export default class MarketsPage extends BasePage {
           order.status = statusExecuted
           break
       }
+    }
+  }
+
+  /*
+   * handleConnEventNote handles notifications about individual DEX connections.
+   */
+  handleConnEventNote (note) {
+    const id = 'disconnected:' + note.url
+    const el = document.getElementById(id)
+    if (note.connected) {
+      Doc.hide(el)
+    } else {
+      Doc.show(el)
     }
   }
 
