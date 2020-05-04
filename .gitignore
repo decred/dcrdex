@@ -21,3 +21,4 @@ node_modules/
 package-lock.json
 client/cmd/dexc/dexc
 client/cmd/dexcctl/dexcctl
+wiki
