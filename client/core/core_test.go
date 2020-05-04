@@ -255,10 +255,6 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 	return nil
 }
 
-func (tdb *TDB) UpdateAccount(ai *db.AccountInfo) error {
-	return nil
-}
-
 func (tdb *TDB) UpdateOrder(m *db.MetaOrder) error {
 	return tdb.updateOrderErr
 }

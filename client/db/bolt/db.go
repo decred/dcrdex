@@ -218,8 +218,14 @@ func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 // CreateAccount saves the AccountInfo. If an account already exists for this
 // DEX, it will return an error.
 func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
-	if err := checkAccountInfo(ai); err != nil {
-		return err
+	if ai.URL == "" {
+		return fmt.Errorf("empty URL not allowed")
+	}
+	if ai.DEXPubKey == nil {
+		return fmt.Errorf("nil DEXPubKey not allowed")
+	}
+	if len(ai.EncKey) == 0 {
+		return fmt.Errorf("zero-length EncKey not allowed")
 	}
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct, err := accts.CreateBucket([]byte(ai.URL))
@@ -238,24 +244,6 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	})
 }
 
-// UpdateAccount updates the AccountInfo for the specified DEX.
-func (db *boltDB) UpdateAccount(ai *dexdb.AccountInfo) error {
-	if err := checkAccountInfo(ai); err != nil {
-		return err
-	}
-	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		acct := accts.Bucket([]byte(ai.URL))
-		if acct == nil {
-			return fmt.Errorf("account not found for %s", ai.URL)
-		}
-		err := acct.Put(accountKey, ai.Encode())
-		if err != nil {
-			return fmt.Errorf("accountKey put error: %v", err)
-		}
-		return nil
-	})
-}
-
 // AccountPaid marks the account as paid by setting the "fee proof".
 func (db *boltDB) AccountPaid(proof *dexdb.AccountProof) error {
 	acctKey := []byte(proof.URL)
@@ -266,19 +254,6 @@ func (db *boltDB) AccountPaid(proof *dexdb.AccountProof) error {
 		}
 		return acct.Put(feeProofKey, proof.Encode())
 	})
-}
-
-func checkAccountInfo(ai *dexdb.AccountInfo) error {
-	if ai.URL == "" {
-		return fmt.Errorf("empty URL not allowed")
-	}
-	if ai.DEXPubKey == nil {
-		return fmt.Errorf("nil DEXPubKey not allowed")
-	}
-	if len(ai.EncKey) == 0 {
-		return fmt.Errorf("zero-length EncKey not allowed")
-	}
-	return nil
 }
 
 // acctsView is a convenience function for reading from the account bucket.

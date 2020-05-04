@@ -803,14 +803,6 @@ func (c *Core) Register(form *RegisterForm) error {
 		return fmt.Errorf("registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee)
 	}
 
-	// Server's signature and reg fee checks out. Save the new dex account info
-	// before paying fee, in case of db save errors.
-	dexConn.acct.dexPubKey = dexPubKey
-	err = c.db.CreateAccount(dexConn.acct.dbInfo())
-	if err != nil {
-		return fmt.Errorf("error saving account: %v", err)
-	}
-
 	// Pay the registration fee.
 	log.Infof("Attempting registration fee payment for %s of %d units of %s", regRes.Address,
 		regRes.Fee, regAsset.Symbol)
@@ -823,18 +815,18 @@ func (c *Core) Register(form *RegisterForm) error {
 	c.connMtx.Lock()
 	c.conns[dexConn.acct.url] = dexConn
 	c.connMtx.Unlock()
-	c.refreshUser() // update user.Exchanges
 
-	details := fmt.Sprintf("[PENDING] Waiting for %d confirmations before trading at %s", dexConn.cfg.RegFeeConfirms, dexConn.acct.url)
-	c.notify(newFeePaymentNote("Fee paid", details, db.Success))
-
-	// save payment details to db
+	// Set the dexConnection account fields and save account info to db.
+	dexConn.acct.dexPubKey = dexPubKey
 	dexConn.acct.feeCoin = coin.ID()
-	err = c.db.UpdateAccount(dexConn.acct.dbInfo())
+	err = c.db.CreateAccount(dexConn.acct.dbInfo())
 	if err != nil {
-		log.Errorf("error saving fee payment info: %v", err)
+		log.Errorf("error saving account: %v", err)
 		// Don't abandon registration. The fee is already paid.
 	}
+
+	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", dexConn.cfg.RegFeeConfirms, dexConn.acct.url)
+	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success))
 
 	// Set up the coin waiter.
 	c.verifyRegistrationFee(wallet, dexConn, coin.ID(), regFeeAssetID)
@@ -871,7 +863,7 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 				details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.url, err)
 				c.notify(newFeePaymentNote("Fee payment error", details, db.ErrorLevel))
 			} else {
-				details := fmt.Sprintf("[CONNECTED] You may now trade at %s", dc.acct.url)
+				details := fmt.Sprintf("You may now trade at %s", dc.acct.url)
 				c.notify(newFeePaymentNote("Account registered", details, db.Success))
 			}
 		}()
