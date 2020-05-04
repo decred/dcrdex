@@ -973,6 +973,11 @@ func TestRegister(t *testing.T) {
 	sign(tDexPriv, regRes)
 
 	queueRegister := func() {
+		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+			resp, _ := msgjson.NewResponse(msg.ID, dc.cfg, nil)
+			f(resp)
+			return nil
+		})
 		rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
 			f(resp)
@@ -1035,6 +1040,7 @@ func TestRegister(t *testing.T) {
 		URL:     tDexUrl,
 		AppPass: tPW,
 		Fee:     tFee,
+		Cert:    "required",
 	}
 
 	tWallet.payFeeCoin = &tCoin{id: []byte("abcdef")}
@@ -1044,11 +1050,9 @@ func TestRegister(t *testing.T) {
 	var err error
 	run := func() {
 		// Register method will error if url is already in conns map.
-		// Cache the conn for the test url instead so it is used by Register.
 		tCore.connMtx.Lock()
 		delete(tCore.conns, tDexUrl)
 		tCore.connMtx.Unlock()
-		tCore.storeTemporaryConn(dc)
 
 		tWallet.setConfs(tDCR.FundConf)
 		err = tCore.Register(form)

@@ -29,6 +29,7 @@ type loginForm struct {
 // registration is used to register a new DEX account.
 type registration struct {
 	URL      string           `json:"url"`
+	Cert     string           `json:"cert"`
 	Password encode.PassBytes `json:"pass"`
 	Fee      uint64           `json:"fee"`
 }

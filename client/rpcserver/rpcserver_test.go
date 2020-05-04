@@ -69,7 +69,7 @@ func (c *TCore) InitializeClient(pw []byte) error {
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
 }
-func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) {
+func (c *TCore) GetFee(url, cert string) (uint64, error) {
 	return c.preRegisterFee, c.preRegisterErr
 }
 func (c *TCore) Register(*core.RegisterForm) error {

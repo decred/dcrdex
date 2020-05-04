@@ -306,12 +306,8 @@ type Core struct {
 	reCrypter     func([]byte, []byte) (encrypt.Crypter, error)
 	latencyQ      *wait.TickerQueue
 
-	connMtx   sync.RWMutex
-	conns     map[string]*dexConnection
-	connCache struct {
-		conn  *dexConnection
-		timer *time.Timer
-	}
+	connMtx sync.RWMutex
+	conns   map[string]*dexConnection
 
 	walletMtx sync.RWMutex
 	wallets   map[uint32]*xcWallet
@@ -706,76 +702,30 @@ func (c *Core) isDEXRegistered(url string) bool {
 	return found
 }
 
-// PreRegister creates a connection to the specified DEX Server and fetches the
-// registration fee. The connection is left open and stored temporarily while
-// registration is completed.
-func (c *Core) PreRegister(form *PreRegisterForm) (uint64, error) {
-	if c.isDEXRegistered(form.URL) {
-		return 0, fmt.Errorf("already registered at %s", form.URL)
+// GetFee creates a connection to the specified DEX Server and fetches the
+// registration fee. The connection is closed after the fee is retrieved.
+// Returns an error if user is already registered to the DEX.
+func (c *Core) GetFee(url, cert string) (uint64, error) {
+	if c.isDEXRegistered(url) {
+		return 0, fmt.Errorf("already registered at %s", url)
 	}
-
-	// Don't (re-)connect if there is a cached connection to this DEX server.
-	dexConn := c.connCache.conn
-	if dexConn == nil || dexConn.acct.url != form.URL {
-		dc, err := c.connectDEX(&db.AccountInfo{
-			URL:  form.URL,
-			Cert: []byte(form.Cert),
-		})
-		if err != nil {
-			return 0, err
-		}
-		dexConn = dc
-
-		// New connection established, close previously cached connection.
-		c.closeTemporaryConn()
+	dexConn, err := c.connectDEX(&db.AccountInfo{
+		URL:  url,
+		Cert: []byte(cert),
+	})
+	if err != nil {
+		return 0, err
 	}
-
-	// Keep dexConn alive and store temporarily. If the registration isn't completed
-	// after a while, close the connection. The Register method will form a new connection
-	// if this connection is closed before it is called.
-	c.storeTemporaryConn(dexConn)
-
+	defer dexConn.connMgr.Disconnect()
 	return dexConn.cfg.Fee, nil
-}
-
-func (c *Core) closeTemporaryConn() {
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
-	if c.connCache.conn == nil {
-		return
-	}
-	c.connCache.timer.Stop()
-	c.connCache.conn.connMgr.Disconnect()
-	c.connCache.conn = nil
-	c.connCache.timer = nil
-}
-
-func (c *Core) storeTemporaryConn(newConn *dexConnection) {
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock()
-
-	switch {
-	case c.connCache.conn == nil: // no previously cached connection
-		c.connCache.conn = newConn
-		c.connCache.timer = time.AfterFunc(time.Minute*5, c.closeTemporaryConn)
-
-	case c.connCache.conn.acct.url == newConn.acct.url: // same url, simply reset timer
-		c.connCache.timer.Stop()
-		c.connCache.timer.Reset(time.Minute * 5)
-
-	case c.connCache.conn.acct.url != newConn.acct.url: // new url, close prev conn
-		c.connCache.timer.Stop()
-		c.connCache.conn.connMgr.Disconnect()
-		c.connCache.conn = newConn
-		c.connCache.timer = time.AfterFunc(time.Minute*5, c.closeTemporaryConn)
-	}
 }
 
 // Register registers an account with a new DEX. If an error occurs while
 // fetching the DEX configuration or creating the fee transaction, it will be
-// returned immediately as the first argument. A thread will be started to wait
-// for the requisite confirmations and send the fee notification to the server.
-// Any error returned from that thread will be sent over the returned channel.
+// returned immediately.
+// A thread will be started to wait for the requisite confirmations and send
+// the fee notification to the server. Any error returned from that thread is
+// sent as a notification.
 func (c *Core) Register(form *RegisterForm) error {
 	// Check the app password.
 	crypter, err := c.encryptionKey(form.AppPass)
@@ -795,24 +745,20 @@ func (c *Core) Register(form *RegisterForm) error {
 		return fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
 	}
 
-	// check if there is a cached connection from a previous registration
-	// attempt
-	dexConn := c.connCache.conn
-	if dexConn != nil && dexConn.acct.url != form.URL {
-		return fmt.Errorf("pending registration exists for dex %s", dexConn.acct.url)
+	dexConn, err := c.connectDEX(&db.AccountInfo{
+		URL:  form.URL,
+		Cert: []byte(form.Cert),
+	})
+	if err != nil {
+		return err
 	}
-	if dexConn == nil {
-		dexConn, err = c.connectDEX(&db.AccountInfo{
-			URL:  form.URL,
-			Cert: []byte(form.Cert),
-		})
-		if err != nil {
-			return err
+
+	// close the connection to the dex server if the registration fails.
+	defer func() {
+		if !c.isDEXRegistered(dexConn.acct.url) {
+			dexConn.connMgr.Disconnect()
 		}
-		// Keep conn alive for a while, in case this reg attempt fails and
-		// user tries again.
-		c.storeTemporaryConn(dexConn)
-	}
+	}()
 
 	regAsset, found := dexConn.assets[regFeeAssetID]
 	if !found {
@@ -877,8 +823,7 @@ func (c *Core) Register(form *RegisterForm) error {
 	c.connMtx.Lock()
 	c.conns[dexConn.acct.url] = dexConn
 	c.connMtx.Unlock()
-	c.closeTemporaryConn() // we have no need for this anymore
-	c.refreshUser()        // update user.Exchanges
+	c.refreshUser() // update user.Exchanges
 
 	details := fmt.Sprintf("[PENDING] Waiting for %d confirmations before trading at %s", dexConn.cfg.RegFeeConfirms, dexConn.acct.url)
 	c.notify(newFeePaymentNote("Fee paid", details, db.Success))

@@ -173,19 +173,14 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 	return uint32(assetID), nil
 }
 
-func parsePreRegisterArgs(params *RawParams) (*core.PreRegisterForm, error) {
+func parsePreRegisterArgs(params *RawParams) (url, cert string, err error) {
 	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
-		return nil, err
+		return "", "", err
 	}
-	var cert string
-	if len(params.Args) > 1 {
-		cert = params.Args[1]
+	if len(params.Args) == 1 {
+		return params.Args[0], "", nil
 	}
-	req := &core.PreRegisterForm{
-		URL:  params.Args[0],
-		Cert: cert,
-	}
-	return req, nil
+	return params.Args[0], params.Args[1], nil
 }
 
 func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {

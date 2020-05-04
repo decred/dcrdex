@@ -108,12 +108,6 @@ type RegisterForm struct {
 	Cert    string           `json:"cert"`
 }
 
-// PreRegisterForm is the information necessary to pre-register a DEX.
-type PreRegisterForm struct {
-	URL  string `json:"url"`
-	Cert string `json:"cert"`
-}
-
 // Match represents a match on an order. An order may have many matches.
 type Match struct {
 	MatchID string            `json:"matchID"`

@@ -217,11 +217,11 @@ func handleWallets(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the address
 // of a dex and returns the dex fee.
 func handlePreRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	form, err := parsePreRegisterArgs(params)
+	url, cert, err := parsePreRegisterArgs(params)
 	if err != nil {
 		return usage(preRegisterRoute, err)
 	}
-	fee, err := s.core.PreRegister(form)
+	fee, err := s.core.GetFee(url, cert)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
 			err.Error())
@@ -241,7 +241,7 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(registerRoute, err)
 	}
 	defer form.AppPass.Clear()
-	fee, err := s.core.PreRegister(&core.PreRegisterForm{URL: form.URL, Cert: form.Cert})
+	fee, err := s.core.GetFee(form.URL, form.Cert)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCPreRegisterError,
 			err.Error())

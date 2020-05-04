@@ -121,7 +121,7 @@ export default class RegistrationPage extends BasePage {
     this.changeForm(page.appPWForm, page.urlForm)
   }
 
-  /* Pre-register the DEX and get the reg fees. */
+  /* Get the reg fees for the DEX. */
   async checkDEX () {
     const page = this.page
     Doc.hide(page.addrErr)
@@ -138,7 +138,7 @@ export default class RegistrationPage extends BasePage {
     }
 
     app.loading(page.urlForm)
-    var res = await postJSON('/api/preregister', {
+    var res = await postJSON('/api/getfee', {
       url: url,
       cert: cert
     })
