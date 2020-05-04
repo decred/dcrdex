@@ -99,7 +99,7 @@ func (db *boltDB) Run(ctx context.Context) {
 	db.Close()
 }
 
-// Store stores a value at the specified key in a general-use bucket.
+// Store stores a value at the specified key in the general-use bucket.
 func (db *boltDB) Store(k string, v []byte) error {
 	if len(k) == 0 {
 		return fmt.Errorf("cannot store with empty key")
@@ -111,6 +111,20 @@ func (db *boltDB) Store(k string, v []byte) error {
 			return fmt.Errorf("failed to create key bucket")
 		}
 		return bucket.Put(keyB, v)
+	})
+}
+
+// ValueExists checks if a value was previously stored in the general-use
+// bucket at the specified key.
+func (db *boltDB) ValueExists(k string) (bool, error) {
+	var exists bool
+	return exists, db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(appBucket)
+		if bucket == nil {
+			return fmt.Errorf("app bucket not found")
+		}
+		exists = bucket.Get([]byte(k)) != nil
+		return nil
 	})
 }
 
