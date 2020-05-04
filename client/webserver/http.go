@@ -25,23 +25,50 @@ func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data inte
 	io.WriteString(w, page)
 }
 
-// handleHome is the handler for the '/' page request. The response depends on
-// whether the user is authenticated or not.
-func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
+// allow checks if the user should be allowed to visit the requested route.
+// If not, a different (recommended) page handler is invoked to handle the
+// request.
+func (s *WebServer) allow(route string, w http.ResponseWriter, r *http.Request) bool {
 	user := extractUserInfo(r)
-	switch {
-	// The registration page also walks the user through setting up their app
-	// password and connecting the Decred wallet, if not already done.
-	case !user.Initialized || (user.Authed && len(user.Exchanges) == 0):
+	isLoginRoute := route == "/login"
+	dexConnected := len(user.Exchanges) > 0
+
+	// Once initialized, all pages except "/login" requires user to be logged in.
+	if user.Initialized && !user.Authed {
+		if !isLoginRoute {
+			s.handleLogin(w, r)
+		}
+		return isLoginRoute
+	}
+
+	// Disallow visits to the markets page if the user has not connected a DEX,
+	// redirect to the registration page instead. The registration page walks
+	// the user through setting up their app password, connecting their Decred
+	// wallet, connecting a DEX server and paying the server fee.
+	if route == "/markets" && !dexConnected {
 		s.handleRegister(w, r)
-		return
-	case !user.Authed:
-		s.handleLogin(w, r)
-		return
-	default:
+		return false
+	}
+
+	// Redirect to the markets page on the following conditions:
+	// - user attempts to visit register page but has already connected a DEX.
+	// - user attempts to visit login page but is already logged in.
+	if (route == "/register" && dexConnected) || (isLoginRoute && user.Authed) {
 		s.handleMarkets(w, r)
+		return false
+	}
+
+	return true
+}
+
+// handleHome is the handler for the '/' page request. The response depends on
+// whether the user is authenticated or not and whether the user has connected
+// a DEX server.
+func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
+	if !s.allow("/", w, r) {
 		return
 	}
+	s.handleMarkets(w, r)
 }
 
 // CommonArguments are common page arguments that must be supplied to every
@@ -59,30 +86,9 @@ func commonArgs(r *http.Request, title string) *CommonArguments {
 	}
 }
 
-// tryInit sends the registration page if the core user is not initialized,
-// otherwise returns false.
-func (s *WebServer) tryInit(w http.ResponseWriter, r *http.Request, user *userInfo) bool {
-	if !user.Initialized {
-		s.handleRegister(w, r)
-		return true
-	}
-	return false
-}
-
-// tryAuth sends the login page if the core user authenticated, otherwise
-// returns false.
-func (s *WebServer) tryAuth(w http.ResponseWriter, r *http.Request, user *userInfo) bool {
-	if !user.Authed {
-		s.handleLogin(w, r)
-		return true
-	}
-	return false
-}
-
 // handleLogin is the handler for the '/login' page request.
 func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
-	user := extractUserInfo(r)
-	if s.tryInit(w, r, user) {
+	if !s.allow("/login", w, r) {
 		return
 	}
 	s.sendTemplate(w, "login", commonArgs(r, "Login | Decred DEX"))
@@ -99,19 +105,29 @@ type registerTmplData struct {
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if !s.allow("/register", w, r) {
+		return
+	}
+
 	user := extractUserInfo(r)
-	dcrID, _ := dex.BipSymbolID("dcr")
-	status := s.core.WalletState(dcrID)
-	exists := status != nil
-	open := exists && status.Open
-	needsInit := !user.Initialized
+	feeAssetID, _ := dex.BipSymbolID("dcr")
+	feeWalletStatus := s.core.WalletState(feeAssetID)
+	feeWalletExists := feeWalletStatus != nil
+	feeWalletOpen := feeWalletExists && feeWalletStatus.Open
+
 	data := &registerTmplData{
 		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
-		InitStep:        needsInit,
-		WalletStep:      !needsInit && !exists,
-		OpenStep:        exists && !open,
-		DEXStep:         exists && open && !needsInit,
 	}
+	if !user.Initialized {
+		data.InitStep = true
+	} else if !feeWalletExists {
+		data.WalletStep = true
+	} else if !feeWalletOpen {
+		data.OpenStep = true
+	} else {
+		data.DEXStep = true
+	}
+
 	s.sendTemplate(w, "register", data)
 }
 
@@ -123,10 +139,10 @@ type marketTmplData struct {
 
 // handleMarkets is the handler for the '/markets' page request.
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
-	user := extractUserInfo(r)
-	if s.tryInit(w, r, user) || s.tryAuth(w, r, user) {
+	if !s.allow("/markets", w, r) {
 		return
 	}
+	user := extractUserInfo(r)
 	s.sendTemplate(w, "markets", &marketTmplData{
 		CommonArguments: *commonArgs(r, "Markets | Decred DEX"),
 		Exchanges:       user.Exchanges,
@@ -140,8 +156,7 @@ type walletsTmplData struct {
 
 // handleWallets is the handler for the '/wallets' page request.
 func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
-	user := extractUserInfo(r)
-	if s.tryInit(w, r, user) || s.tryAuth(w, r, user) {
+	if !s.allow("/wallets", w, r) {
 		return
 	}
 	assetMap := s.core.SupportedAssets()
@@ -171,5 +186,8 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if !s.allow("/settings", w, r) {
+		return
+	}
 	s.sendTemplate(w, "settings", commonArgs(r, "Settings | Decred DEX"))
 }
