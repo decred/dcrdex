@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -31,6 +33,7 @@ import (
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/slog"
+	"gopkg.in/ini.v1"
 )
 
 var (
@@ -858,10 +861,22 @@ func TestCreateWallet(t *testing.T) {
 		return asset.DecodeCoinID(tDCR.ID, coinID) // using DCR decoder
 	}
 
+	tempDir, err := ioutil.TempDir("", "coretest")
+	if err != nil {
+		t.Fatalf("error creating temporary directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+	cfgFilePath := filepath.Join(tempDir, "test.conf")
+	err = ini.Empty().SaveTo(cfgFilePath)
+	if err != nil {
+		t.Fatalf("error creating temporary config file: %v", err)
+	}
+
 	// Create registration form.
 	form := &WalletForm{
 		AssetID: tILT.ID,
 		Account: "default",
+		INIPath: cfgFilePath,
 	}
 
 	ensureErr := func(tag string) {
@@ -926,7 +941,7 @@ func TestCreateWallet(t *testing.T) {
 
 	// Success
 	delete(tCore.wallets, tILT.ID)
-	err := tCore.CreateWallet(tPW, []byte(wPW), form)
+	err = tCore.CreateWallet(tPW, []byte(wPW), form)
 	if err != nil {
 		t.Fatalf("error when should be no error: %v", err)
 	}

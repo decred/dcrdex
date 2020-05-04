@@ -89,7 +89,7 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.Supp
 			Running: state.running,
 			Address: ordertest.RandomAddress(),
 			Balance: bal,
-			FeeRate: winfos[assetID].FeeRate,
+			FeeRate: winfos[assetID].DefaultFeeRate,
 			Units:   winfos[assetID].Units,
 		}
 	}
@@ -100,8 +100,8 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.Supp
 		Symbol: symbol,
 		Wallet: wallet,
 		Info: &asset.WalletInfo{
-			Name:       name,
-			ConfigPath: "/home/you/." + lower + "/" + lower + ".conf",
+			Name:              name,
+			DefaultConfigPath: "/home/you/." + lower + "/" + lower + ".conf",
 		},
 	}
 }
@@ -391,34 +391,34 @@ func (c *TCore) AckNotes(ids []dex.Bytes) {}
 
 var winfos = map[uint32]*asset.WalletInfo{
 	0: {
-		FeeRate: 2,
-		Units:   "Satoshis",
-		Name:    "Bitcoin",
+		DefaultFeeRate: 2,
+		Units:          "Satoshis",
+		Name:           "Bitcoin",
 	},
 	2: {
-		FeeRate: 100,
-		Units:   "litoshi", // Plural seemingly has no 's'.
-		Name:    "Litecoin",
+		DefaultFeeRate: 100,
+		Units:          "litoshi", // Plural seemingly has no 's'.
+		Name:           "Litecoin",
 	},
 	42: {
-		FeeRate: 10,
-		Units:   "atoms",
-		Name:    "Decred",
+		DefaultFeeRate: 10,
+		Units:          "atoms",
+		Name:           "Decred",
 	},
 	22: {
-		FeeRate: 50,
-		Units:   "atoms",
-		Name:    "Monacoin",
+		DefaultFeeRate: 50,
+		Units:          "atoms",
+		Name:           "Monacoin",
 	},
 	3: {
-		FeeRate: 1000,
-		Units:   "atoms",
-		Name:    "Dogecoin",
+		DefaultFeeRate: 1000,
+		Units:          "atoms",
+		Name:           "Dogecoin",
 	},
 	28: {
-		FeeRate: 20,
-		Units:   "Satoshis",
-		Name:    "Vertcoin",
+		DefaultFeeRate: 20,
+		Units:          "Satoshis",
+		Name:           "Vertcoin",
 	},
 }
 
@@ -437,7 +437,7 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 		Running: w.running,
 		Address: ordertest.RandomAddress(),
 		Balance: c.balances[assetID],
-		FeeRate: winfos[assetID].FeeRate,
+		FeeRate: winfos[assetID].DefaultFeeRate,
 		Units:   winfos[assetID].Units,
 	}
 }
@@ -499,7 +499,7 @@ func (c *TCore) Wallets() []*core.WalletState {
 			Running: wallet.running,
 			Address: ordertest.RandomAddress(),
 			Balance: c.balances[assetID],
-			FeeRate: winfos[assetID].FeeRate,
+			FeeRate: winfos[assetID].DefaultFeeRate,
 			Units:   winfos[assetID].Units,
 		})
 	}

@@ -32,7 +32,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
 	"github.com/decred/slog"
-	flags "github.com/jessevdk/go-flags"
+	"gopkg.in/ini.v1"
 )
 
 var (
@@ -61,16 +61,19 @@ func TestConfig(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 	filePath := filepath.Join(tempDir, "test.conf")
-	rootParser := flags.NewParser(cfg, flags.None)
-	iniParser := flags.NewIniParser(rootParser)
 
 	runCfg := func(config *dexbtc.Config) error {
 		*cfg = *config
-		err := iniParser.WriteFile(filePath, flags.IniNone)
+		cfgFile := ini.Empty()
+		err := cfgFile.ReflectFrom(cfg)
 		if err != nil {
 			return err
 		}
-		parsedCfg, err = dexbtc.LoadConfig(filePath, assetName, dex.Mainnet, dexbtc.RPCPorts)
+		err = cfgFile.SaveTo(filePath)
+		if err != nil {
+			return err
+		}
+		parsedCfg, err = dexbtc.LoadConfigFromPath(filePath, assetName, dex.Mainnet, dexbtc.RPCPorts)
 		return err
 	}
 

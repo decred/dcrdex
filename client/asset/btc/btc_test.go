@@ -1257,7 +1257,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 	}
 	if senderType == tWithdrawSender {
 		sender = func(addr string, val uint64) (asset.Coin, error) {
-			return wallet.Withdraw(addr, val, walletInfo.FeeRate)
+			return wallet.Withdraw(addr, val, walletInfo.DefaultFeeRate)
 		}
 	}
 	defer shutdown()

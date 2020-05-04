@@ -77,3 +77,14 @@ func Assets() map[uint32]RegisteredAsset {
 	}
 	return assets
 }
+
+// DefaultConfigPath returns the default config path for a registered asset.
+func DefaultConfigPath(assetID uint32) (string, error) {
+	driversMtx.RLock()
+	drv, ok := drivers[assetID]
+	driversMtx.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("asset: unknown asset driver %d", assetID)
+	}
+	return drv.Info().DefaultConfigPath, nil
+}

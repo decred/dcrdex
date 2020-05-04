@@ -40,14 +40,15 @@ const (
 	defaultWithdrawalFee = 10
 )
 
-// How often to check the tip hash.
 var (
+	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker = time.Second
-	walletInfo  = &asset.WalletInfo{
-		ConfigPath: defaultConfigPath,
-		Name:       "Decred",
-		FeeRate:    defaultWithdrawalFee,
-		Units:      "atoms",
+	// walletInfo defines some general information about a Decred wallet.
+	walletInfo = &asset.WalletInfo{
+		Name:              "Decred",
+		Units:             "atoms",
+		DefaultConfigPath: defaultConfigPath,
+		DefaultFeeRate:    defaultWithdrawalFee,
 	}
 )
 
@@ -256,7 +257,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (*ExchangeWallet, error) {
 	// loadConfig will set fields if defaults are used and set the chainParams
 	// package variable.
-	walletCfg, err := loadConfig(cfg.INIPath, network)
+	walletCfg, err := loadConfig(cfg.Settings, network)
 	if err != nil {
 		return nil, err
 	}

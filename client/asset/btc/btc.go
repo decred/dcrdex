@@ -47,14 +47,15 @@ const (
 	minProtocolVersion   = 70015
 )
 
-// How often to check the tip hash.
 var (
+	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker = time.Second
-	walletInfo  = &asset.WalletInfo{
-		ConfigPath: dexbtc.SystemConfigPath("bitcoin"),
-		Name:       "Bitcoin",
-		FeeRate:    defaultWithdrawalFee,
-		Units:      "Satoshis",
+	// walletInfo defines some general information about a Bitcoin wallet.
+	walletInfo = &asset.WalletInfo{
+		Name:              "Bitcoin",
+		Units:             "Satoshis",
+		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
+		DefaultFeeRate:    defaultWithdrawalFee,
 	}
 )
 
@@ -255,10 +256,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	if cfg.INIPath == "" {
-		cfg.INIPath = dexbtc.SystemConfigPath("bitcoin")
-	}
-
 	return BTCCloneWallet(cfg, "btc", logger, network, params, dexbtc.RPCPorts)
 }
 
@@ -270,7 +267,7 @@ func BTCCloneWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 	network dex.Network, chainParams *chaincfg.Params, ports dexbtc.NetPorts) (*ExchangeWallet, error) {
 
 	// Read the configuration parameters
-	btcCfg, err := dexbtc.LoadConfig(cfg.INIPath, assetName, network, ports)
+	btcCfg, err := dexbtc.LoadConfigFromSettings(cfg.Settings, assetName, network, ports)
 	if err != nil {
 		return nil, err
 	}

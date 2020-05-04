@@ -16,16 +16,16 @@ const CoinNotFoundError = dex.Error("coin not found")
 
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
-	// ConfigPath is the default ConfigPath that the wallet will search for its
-	// configuration file.
-	ConfigPath string `json:"configpath"`
 	// Name is the display name for the currency, e.g. "Decred"
 	Name string `json:"name"`
-	// FeeRate is the default fee rate used for withdraws.
-	FeeRate uint64 `json:"feerate"`
 	// Units is the unit used for the smallest (integer) denomination of the
 	// currency, in plural form e.g. atoms, Satoshis.
 	Units string `json:"units"`
+	// DefaultConfigPath is the default file path that the Wallet uses for its
+	// configuration file.
+	DefaultConfigPath string `json:"configpath"`
+	// DefaultFeeRate is the default fee rate used for withdraws.
+	DefaultFeeRate uint64 `json:"feerate"`
 }
 
 // WalletConfig is the configuration settings for the wallet. WalletConfig
@@ -34,8 +34,8 @@ type WalletConfig struct {
 	// Account is the name of the wallet account. The account and wallet must
 	// already exist.
 	Account string
-	// INIPath is the path of a configuration file.
-	INIPath string
+	// Settings is the key-value store of wallet connection parameters.
+	Settings map[string]string
 	// TipChange is a function that will be called when the blockchain monitoring
 	// loop detects a new block. If the error supplied is nil, the client should
 	// check the confirmations on any negotiating swaps to see if action is
