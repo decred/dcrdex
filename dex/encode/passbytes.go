@@ -118,11 +118,11 @@ func isUTF8Encoded(data []byte) bool {
 //    UTF8-encoded byte or byte sequence.
 // Inspired by encoding/json.(*decodeState).unquoteBytes.
 func parseJSONEncodedDataAsUTF8Bytes(data []byte) ([]byte, error) {
+	if len(data) < 2 || data[0] != '"' || data[len(data)-1] != '"' {
+		return nil, fmt.Errorf("json-encoded data is not quoted")
+	}
 	if !json.Valid(data) {
 		return nil, fmt.Errorf("data is not json-encoded")
-	}
-	if data[0] != '"' || len(data) < 2 || data[len(data)-1] != '"' {
-		return nil, fmt.Errorf("json-encoded data is not quoted")
 	}
 
 	// unquote data before parsing
