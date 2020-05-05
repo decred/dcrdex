@@ -272,10 +272,13 @@ func BTCCloneWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 		return nil, err
 	}
 
+	endpoint := btcCfg.RPCBind + "/wallet/" + cfg.Account
+	logger.Infof("Setting up new %s wallet at %s.", symbol, endpoint)
+
 	client, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
 		DisableTLS:   true,
-		Host:         btcCfg.RPCBind + "/wallet/" + cfg.Account,
+		Host:         endpoint,
 		User:         btcCfg.RPCUser,
 		Pass:         btcCfg.RPCPass,
 	}, nil)

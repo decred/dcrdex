@@ -266,6 +266,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 	dcr := unconnectedWallet(cfg, logger)
 
+	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
+		walletCfg.RPCListen, walletCfg.RPCCert)
 	dcr.client, err = newClient(walletCfg.RPCListen, walletCfg.RPCUser,
 		walletCfg.RPCPass, walletCfg.RPCCert)
 	if err != nil {
