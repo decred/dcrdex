@@ -170,10 +170,15 @@ export default class RegistrationPage extends BasePage {
   async registerDEX () {
     const page = this.page
     Doc.hide(page.regErr)
+    var cert = ''
+    if (page.certInput.value) {
+      cert = await page.certInput.files[0].text()
+    }
     const registration = {
       url: page.addrInput.value,
       pass: page.clientPass.value,
-      fee: this.fee
+      fee: this.fee,
+      cert: cert
     }
     page.clientPass.value = ''
     app.loading(page.pwForm)

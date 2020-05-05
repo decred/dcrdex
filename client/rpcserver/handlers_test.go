@@ -180,21 +180,21 @@ func TestHandleVersion(t *testing.T) {
 
 func TestHandleGetFee(t *testing.T) {
 	tests := []struct {
-		name            string
-		params          *RawParams
-		registrationFee uint64
-		preRegisterErr  error
-		wantErrCode     int
+		name        string
+		params      *RawParams
+		regFee      uint64
+		getFeeErr   error
+		wantErrCode int
 	}{{
-		name:            "ok",
-		params:          &RawParams{Args: []string{"dex", "cert"}},
-		registrationFee: 5,
-		wantErrCode:     -1,
+		name:        "ok",
+		params:      &RawParams{Args: []string{"dex", "cert"}},
+		regFee:      5,
+		wantErrCode: -1,
 	}, {
-		name:           "core.getFee error",
-		params:         &RawParams{Args: []string{"dex", "cert"}},
-		preRegisterErr: errors.New("error"),
-		wantErrCode:    msgjson.RPCGetFeeError,
+		name:        "core.getFee error",
+		params:      &RawParams{Args: []string{"dex", "cert"}},
+		getFeeErr:   errors.New("error"),
+		wantErrCode: msgjson.RPCGetFeeError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
@@ -202,8 +202,8 @@ func TestHandleGetFee(t *testing.T) {
 	}}
 	for _, test := range tests {
 		tc := &TCore{
-			preRegisterFee: test.registrationFee,
-			preRegisterErr: test.preRegisterErr,
+			regFee:    test.regFee,
+			getFeeErr: test.getFeeErr,
 		}
 		r := &RPCServer{core: tc}
 		payload := handleGetFee(r, test.params)
@@ -211,9 +211,9 @@ func TestHandleGetFee(t *testing.T) {
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
-		if test.wantErrCode == -1 && res.Fee != test.registrationFee {
+		if test.wantErrCode == -1 && res.Fee != test.regFee {
 			t.Fatalf("wanted registration fee %d but got %d for test %s",
-				test.registrationFee, res.Fee, test.name)
+				test.regFee, res.Fee, test.name)
 		}
 	}
 }
@@ -396,32 +396,32 @@ func TestHandleRegister(t *testing.T) {
 		},
 	}
 	tests := []struct {
-		name                        string
-		params                      *RawParams
-		preRegisterFee              uint64
-		preRegisterErr, registerErr error
-		wantErrCode                 int
+		name                   string
+		params                 *RawParams
+		regFee                 uint64
+		getFeeErr, registerErr error
+		wantErrCode            int
 	}{{
-		name:           "ok",
-		params:         params,
-		preRegisterFee: 1000,
-		wantErrCode:    -1,
+		name:        "ok",
+		params:      params,
+		regFee:      1000,
+		wantErrCode: -1,
 	}, {
-		name:           "preRegister fee different",
-		params:         params,
-		preRegisterFee: 100,
-		wantErrCode:    msgjson.RPCRegisterError,
+		name:        "fee different",
+		params:      params,
+		regFee:      100,
+		wantErrCode: msgjson.RPCRegisterError,
 	}, {
-		name:           "core.Register error",
-		params:         params,
-		preRegisterFee: 1000,
-		registerErr:    errors.New("error"),
-		wantErrCode:    msgjson.RPCRegisterError,
+		name:        "core.Register error",
+		params:      params,
+		regFee:      1000,
+		registerErr: errors.New("error"),
+		wantErrCode: msgjson.RPCRegisterError,
 	}, {
-		name:           "core.PreRegister error",
-		params:         params,
-		preRegisterErr: errors.New("error"),
-		wantErrCode:    msgjson.RPCGetFeeError,
+		name:        "core.GetFee error",
+		params:      params,
+		getFeeErr:   errors.New("error"),
+		wantErrCode: msgjson.RPCGetFeeError,
 	}, {
 		name:        "bad params",
 		params:      &RawParams{},
@@ -429,9 +429,9 @@ func TestHandleRegister(t *testing.T) {
 	}}
 	for _, test := range tests {
 		tc := &TCore{
-			registerErr:    test.registerErr,
-			preRegisterFee: test.preRegisterFee,
-			preRegisterErr: test.preRegisterErr,
+			registerErr: test.registerErr,
+			regFee:      test.regFee,
+			getFeeErr:   test.getFeeErr,
 		}
 		r := &RPCServer{core: tc}
 		payload := handleRegister(r, test.params)

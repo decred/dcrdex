@@ -62,9 +62,9 @@ var promptPasswords = map[string][]string{
 // the text content of a file, where the file path _may_ be found in the route's
 // cmd args at the specified index.
 var optionalTextFiles = map[string]int{
-	"preregister": 1,
-	"register":    2,
-	"newwallet":   2,
+	"getfee":    1,
+	"register":  2,
+	"newwallet": 2,
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting

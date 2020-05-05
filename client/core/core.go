@@ -1928,8 +1928,8 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		return nil, fmt.Errorf("Error initalizing websocket connection: %v", err)
 	}
 
-	// Request the market configuration. Disconnect from DEX server if
-	// configuration is successfully retrieved.
+	// Request the market configuration. Disconnect from the DEX server if the
+	// configuration cannot be retrieved.
 	dexCfg := new(msgjson.ConfigResult)
 	err = sendRequest(conn, msgjson.ConfigRoute, nil, dexCfg)
 	if err != nil {
