@@ -363,6 +363,10 @@ export default class Application {
     return true
   }
 
+  /**
+   * Close all wallets if they are opening, if there is an error while closing wont logout,
+   * if successful will delete auth cookies and reload the page
+   */
   async signOut () {
     try {
       const closeWallet = async (asset) => {
