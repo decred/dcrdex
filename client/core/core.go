@@ -926,9 +926,16 @@ func (c *Core) Register(form *RegisterForm) error {
 	c.notify(newFeePaymentNote("Fee paid", details, db.Success))
 
 	// Set up the coin waiter.
-	trigger := confTrigger(wallet, coin.ID(), dc.cfg.RegFeeConfirms)
+	c.verifyRegistrationFee(wallet, dc, coin.ID(), assetID)
+	c.refreshUser()
+	return nil
+}
+
+func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, assetID uint32) {
+	reqConfs := dc.cfg.RegFeeConfirms
+	trigger := c.confTrigger(wallet, coinID, reqConfs)
 	c.wait(assetID, trigger, func(err error) {
-		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(assetID, coin.ID()), dc.cfg.RegFeeConfirms)
+		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(assetID, coinID), reqConfs)
 		defer func() {
 			if err != nil {
 				details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.url, err)
@@ -942,7 +949,7 @@ func (c *Core) Register(form *RegisterForm) error {
 			return
 		}
 		log.Infof("Notifying dex %s of fee payment.", dc.acct.url)
-		err = c.notifyFee(dc, coin.ID())
+		err = c.notifyFee(dc, coinID)
 		if err != nil {
 			return
 		}
@@ -952,8 +959,7 @@ func (c *Core) Register(form *RegisterForm) error {
 			log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.url, err)
 		}
 	})
-	c.refreshUser()
-	return nil
+
 }
 
 // IsInitialized checks if the app is already initialized.
@@ -1729,27 +1735,8 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		return
 	}
-
-	trigger := confTrigger(dcrWallet, acctInfo.FeeCoin, dc.cfg.RegFeeConfirms)
-	// Set up the coin waiter.
 	dcrID, _ := dex.BipSymbolID("dcr")
-	c.wait(dcrID, trigger, func(err error) {
-		if err != nil {
-			log.Errorf("reFee %s - waiter error: %v", dc.acct.url, err)
-			return
-		}
-		err = c.notifyFee(dc, acctInfo.FeeCoin)
-		if err != nil {
-			log.Errorf("reFee %s - notifyfee error: %v", dc.acct.url, err)
-			return
-		}
-		dc.acct.pay()
-		log.Infof("waiter: Fee paid at %s", dc.acct.url)
-		err = c.authDEX(dc)
-		if err != nil {
-			log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.url, err)
-		}
-	})
+	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, dcrID)
 }
 
 // dbTrackers prepares trackedTrades based on active orders and matches in the
@@ -2387,6 +2374,18 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	c.connMtx.RUnlock()
 }
 
+// confTrigger is a Core.wait trigger that checks a coin ID for a minimum number
+// of confirmations.
+func (c *Core) confTrigger(wallet *xcWallet, coinID []byte, reqConfs uint16) func() (bool, error) {
+	return func() (bool, error) {
+		confs, err := wallet.Confirmations(coinID)
+		if err != nil {
+			return false, fmt.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
+		}
+		return confs >= uint32(reqConfs), nil
+	}
+}
+
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical
 // *dex.Asset.
 func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {
@@ -2537,18 +2536,6 @@ func messageOrder(ord order.Order, coins []*msgjson.Coin) (string, msgjson.Stamp
 		}
 	default:
 		panic("unknown order type")
-	}
-}
-
-// confTrigger is a Core.wait trigger that checks a coin ID for a minimum number
-// of confirmations.
-func confTrigger(wallet *xcWallet, coinID []byte, reqConfs uint16) func() (bool, error) {
-	return func() (bool, error) {
-		confs, err := wallet.Confirmations(coinID)
-		if err != nil {
-			return false, fmt.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
-		}
-		return confs >= uint32(reqConfs), nil
 	}
 }
 
