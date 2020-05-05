@@ -12,6 +12,15 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
+const (
+	homeRoute     = "/"
+	registerRoute = "/register"
+	loginRoute    = "/login"
+	marketsRoute  = "/markets"
+	walletsRoute  = "/wallets"
+	settingsRoute = "/settings"
+)
+
 // sendTemplate processes the template and sends the result.
 func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data interface{}) {
 	page, err := s.html.exec(tmplID, data)
@@ -30,7 +39,7 @@ func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data inte
 // request.
 func (s *WebServer) allow(route string, w http.ResponseWriter, r *http.Request) bool {
 	user := extractUserInfo(r)
-	isLoginRoute := route == "/login"
+	isLoginRoute := route == loginRoute
 	dexConnected := len(user.Exchanges) > 0
 
 	// Once initialized, all pages except "/login" requires user to be logged in.
@@ -45,7 +54,7 @@ func (s *WebServer) allow(route string, w http.ResponseWriter, r *http.Request) 
 	// redirect to the registration page instead. The registration page walks
 	// the user through setting up their app password, connecting their Decred
 	// wallet, connecting a DEX server and paying the server fee.
-	if route == "/markets" && !dexConnected {
+	if route == marketsRoute && !dexConnected {
 		s.handleRegister(w, r)
 		return false
 	}
@@ -64,7 +73,7 @@ func (s *WebServer) allow(route string, w http.ResponseWriter, r *http.Request) 
 // whether the user is authenticated or not and whether the user has connected
 // a DEX server.
 func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
-	if !s.allow("/", w, r) {
+	if !s.allow(homeRoute, w, r) {
 		return
 	}
 	s.handleMarkets(w, r)
@@ -87,7 +96,7 @@ func commonArgs(r *http.Request, title string) *CommonArguments {
 
 // handleLogin is the handler for the '/login' page request.
 func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !s.allow("/login", w, r) {
+	if !s.allow(loginRoute, w, r) {
 		return
 	}
 	s.sendTemplate(w, "login", commonArgs(r, "Login | Decred DEX"))
@@ -134,7 +143,7 @@ type marketTmplData struct {
 
 // handleMarkets is the handler for the '/markets' page request.
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
-	if !s.allow("/markets", w, r) {
+	if !s.allow(marketsRoute, w, r) {
 		return
 	}
 	user := extractUserInfo(r)
@@ -151,7 +160,7 @@ type walletsTmplData struct {
 
 // handleWallets is the handler for the '/wallets' page request.
 func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
-	if !s.allow("/wallets", w, r) {
+	if !s.allow(walletsRoute, w, r) {
 		return
 	}
 	assetMap := s.core.SupportedAssets()

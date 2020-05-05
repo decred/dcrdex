@@ -22,7 +22,7 @@ export default class RegistrationPage extends BasePage {
       // Form 3: Unlock Decred wallet
       'unlockWalletForm',
       // Form 4: PreRegister DEX
-      'dexForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
+      'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
       // Form 5: Confirm DEX registration and pay fee
       'confirmRegForm', 'feeDisplay', 'clientPass', 'submitConfirm', 'regErr'
@@ -34,14 +34,14 @@ export default class RegistrationPage extends BasePage {
     // NEW DCR WALLET
     // This form is only shown if there is no DCR wallet yet.
     forms.bindNewWallet(app, page.newWalletForm, () => {
-      this.changeForm(page.newWalletForm, page.dexForm)
+      this.changeForm(page.newWalletForm, page.dexAddrForm)
     })
     page.newWalletForm.setAsset(app.assets[DCR_ID])
 
     // OPEN DCR WALLET
     // This form is only shown if there is a wallet, but it's not open.
     forms.bindOpenWallet(app, page.unlockWalletForm, () => {
-      this.changeForm(page.unlockWalletForm, page.dexForm)
+      this.changeForm(page.unlockWalletForm, page.dexAddrForm)
     })
     page.unlockWalletForm.setAsset(app.assets[DCR_ID])
 
@@ -52,8 +52,7 @@ export default class RegistrationPage extends BasePage {
     Doc.bind(page.certFile, 'change', () => this.readCert())
     Doc.bind(page.removeCert, 'click', () => this.resetCert())
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
-    // DEX form
-    forms.bind(page.dexForm, page.submitDEXAddr, () => { this.checkDEX() })
+    forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.checkDEX() })
 
     // SUBMIT DEX REGISTRATION
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
@@ -127,7 +126,7 @@ export default class RegistrationPage extends BasePage {
       cert = await page.certFile.files[0].text()
     }
 
-    app.loading(page.dexForm)
+    app.loading(page.dexAddrForm)
     var res = await postJSON('/api/getfee', {
       url: url,
       cert: cert
@@ -141,7 +140,7 @@ export default class RegistrationPage extends BasePage {
     this.fee = res.fee
 
     page.feeDisplay.textContent = Doc.formatCoinValue(res.fee / 1e8)
-    await this.changeForm(page.dexForm, page.confirmRegForm)
+    await this.changeForm(page.dexAddrForm, page.confirmRegForm)
   }
 
   /* Authorize DEX registration. */

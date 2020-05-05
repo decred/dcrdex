@@ -198,12 +198,12 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	// Websocket endpoint
 	mux.Get("/ws", s.handleWS)
 	// Webpages
-	mux.Get("/", s.handleHome)
-	mux.Get("/register", s.handleRegister)
-	mux.Get("/login", s.handleLogin)
-	mux.Get("/markets", s.handleMarkets)
-	mux.Get("/wallets", s.handleWallets)
-	mux.Get("/settings", s.handleSettings)
+	mux.Get(homeRoute, s.handleHome)
+	mux.Get(registerRoute, s.handleRegister)
+	mux.Get(loginRoute, s.handleLogin)
+	mux.Get(marketsRoute, s.handleMarkets)
+	mux.Get(walletsRoute, s.handleWallets)
+	mux.Get(settingsRoute, s.handleSettings)
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/getfee", s.apiGetFee)

@@ -6,8 +6,8 @@
   Wallet
 </div>
 <div class="p-4">
-  {{if .}}
-    <div class="fs16">{{.}}</div>
+  {{if .subtext}}
+    <div class="fs16">{{.subtext}}</div>
     <hr class="dashed my-4">
   {{end}}
   <div>
@@ -15,8 +15,12 @@
     <input type="text" class="form-control select" id="acctName">
   </div>
   <div>
+    {{if .showHelp}}
     <label for="newWalletPass" class="pt-3 pl-1 mb-0">Wallet Password</label>
     <div class="fs14 px-1 mb-1">This is the password you have configured with your wallet backend.</div>
+    {{else}}
+    <label for="newWalletPass" class="pt-3 pl-1 mb-1">Wallet Password</label>
+    {{end}}
     <input type="password" class="form-control select" id="newWalletPass" autocomplete="off">
   </div>
   <div id="walletSettings" class="d-hide">
@@ -38,12 +42,16 @@
     </div>
   </div>
   <div>
+    {{if .showHelp}}
     <label for="nwClientPass" class="pt-3 pl-1 mb-0">Client Password</label>
     <div class="fs14 px-1 mb-1">Your client password is always required when performing sensitive wallet operations.</div>
+    {{else}}
+    <label for="nwClientPass" class="pt-3 pl-1 mb-1">Client Password</label>
+    {{end}}
     <input type="password" class="form-control select" id="nwClientPass" autocomplete="off">
   </div>
   <div class="d-flex justify-content-end mt-4">
-    <button id="submitAdd" type="submit" class="justify-content-center fs15 px-3 bg2 selected">Add Wallet</button>
+    <button id="submitAdd" type="submit" class="justify-content-center fs15 px-3 bg2 selected">Add</button>
   </div>
   <div class="fs15 pt-3 text-center d-hide errcolor" id="newWalletErr"></div>
 </div>
