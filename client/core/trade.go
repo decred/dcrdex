@@ -245,7 +245,6 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
-
 	// Add the matches to the match map and update the database.
 	trade := t.Trade()
 	var includesCancellation, includesTrades bool
@@ -289,15 +288,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 				},
 			},
 		}
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			return err
-		}
 		// First check that this isn't a match on its own cancel order. I'm not crazy
 		// about this, but I am detecting this case right now based on the Address
 		// field being an empty string.
 		isCancel := t.cancel != nil && msgMatch.Address == ""
 		if isCancel {
+			match.setStatus(order.MatchComplete)
 			includesCancellation = true
 			log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
 			t.cancel.matches.maker = msgMatch
@@ -306,6 +302,10 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			t.matchMtx.Lock()
 			t.matches[match.id] = match
 			t.matchMtx.Unlock()
+		}
+		err := t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -336,6 +336,9 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		t.notify(newOrderNote("Order canceled", details, db.Success, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote("cancel", "", db.Data, cancelOrder))
+		// Set the order status for both orders.
+		t.metaData.Status = order.OrderStatusCanceled
+		t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
 	}
 	if includesTrades {
 		fillRatio := float64(trade.Filled()) / float64(trade.Quantity)
@@ -472,7 +475,6 @@ func (t *trackedTrade) tick() error {
 	var sent, quoteSent, received, quoteReceived uint64
 	for _, match := range t.matches {
 		if t.isSwappable(match) {
-
 			swaps = append(swaps, match)
 			sent += match.Match.Quantity
 			quoteSent += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
@@ -568,7 +570,8 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	for _, coinID := range coinIDs {
 		coin, found := t.coins[hex.EncodeToString(coinID)]
 		if !found {
-			return errs.add("coin ID %x not found", coinID)
+			fromID := t.wallets.fromAsset.ID
+			return errs.add("%s coin %s not found", unbip(fromID), coinIDString(fromID, coinID))
 		}
 		swaps.Inputs = append(swaps.Inputs, coin)
 	}
@@ -674,16 +677,6 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		)
 	}
 
-	coinToStr := func(assetID uint32, coinID []byte) string {
-		coinStr, err := asset.DecodeCoinID(assetID, coinID)
-		if err != nil {
-			// Coin IDs come from wallet.Redeem so this shouldn't happen. Warn.
-			log.Warnf("redeemMatches: invalid redeemed coin ID %v: %v", coinID, err)
-			return "<invalid coin>"
-		}
-		return coinStr
-	}
-
 	// Send the redemption information to the DEX.
 	for i, match := range matches {
 		_, _, proof, auth := match.parts()
@@ -700,7 +693,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		if err != nil {
 			match.failErr = err
 			errs.add("error sending 'redeem' message for match %s, coin %x: %v",
-				match.id, coinToStr(redeemAsset.ID, coinID), err)
+				match.id, coinIDString(redeemAsset.ID, coinID), err)
 			continue
 		}
 		sigMsg, _ := msgRedeem.Serialize()
@@ -725,7 +718,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			errs.add("error storing match info in database for match %s, coin %s",
-				match.id, coinToStr(redeemAsset.ID, coinID))
+				match.id, coinIDString(redeemAsset.ID, coinID))
 			continue
 		}
 	}
@@ -864,15 +857,6 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 		return errs.add("Audit - %v", err)
 	}
 
-	coinToStr := func(assetID uint32, coinID []byte) string {
-		coinStr, err := asset.DecodeCoinID(assetID, coinID)
-		if err != nil {
-			log.Warnf("processRedemption: invalid redemption coin ID %v: %v", coinID, err)
-			return "<invalid coin>"
-		}
-		return coinStr
-	}
-
 	// Update the database.
 	dbMatch, _, proof, auth := match.parts()
 	auth.RedemptionSig = redemption.Sig
@@ -881,7 +865,7 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	if dbMatch.Side == order.Maker {
 		// You are the maker, this is the taker's redeem.
 		log.Debugf("Notified of taker's redemption (%s: %v) for order %v...",
-			redeemAsset.Symbol, coinToStr(redeemAsset.ID, redemption.CoinID), t.ID())
+			redeemAsset.Symbol, coinIDString(redeemAsset.ID, redemption.CoinID), t.ID())
 		match.setStatus(order.MatchComplete)
 		proof.TakerRedeem = []byte(redemption.CoinID)
 		err := t.db.UpdateMatch(&match.MetaMatch)
@@ -904,7 +888,7 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	}
 
 	log.Infof("Notified of maker's redemption (%s: %v) and validated secret for order %v...",
-		redeemAsset.Symbol, coinToStr(redeemAsset.ID, redemption.CoinID), t.ID())
+		redeemAsset.Symbol, coinIDString(redeemAsset.ID, redemption.CoinID), t.ID())
 
 	match.setStatus(order.MakerRedeemed)
 	proof.MakerRedeem = []byte(redemption.CoinID)

@@ -501,6 +501,37 @@ func TestOrders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error after order fixed: %v", err)
 	}
+
+	// Set the change coin for an order.
+	activeOrder := activeOrders[0].Order
+	err = boltdb.UpdateOrderStatus(activeOrder.ID(), order.OrderStatusExecuted)
+	if err != nil {
+		t.Fatalf("error setting order status: %v", err)
+	}
+	mord, _ = boltdb.Order(activeOrder.ID())
+	if mord.MetaData.Status != order.OrderStatusExecuted {
+		t.Fatalf("failed to update order status")
+	}
+	// random id should be an error
+	err = boltdb.UpdateOrderStatus(ordertest.RandomOrderID(), order.OrderStatusExecuted)
+	if err == nil {
+		t.Fatalf("no error encountered for updating unknown order's status")
+	}
+
+	// Set the change coin.
+	err = boltdb.SetChangeCoin(activeOrder.ID(), []byte("abc"))
+	if err != nil {
+		t.Fatalf("error setting change coin: %v", err)
+	}
+	mord, _ = boltdb.Order(activeOrder.ID())
+	if string(mord.MetaData.ChangeCoin) != "abc" {
+		t.Fatalf("failed to set change coin")
+	}
+	// random id should be an error
+	err = boltdb.SetChangeCoin(ordertest.RandomOrderID(), []byte("abc"))
+	if err == nil {
+		t.Fatalf("no error encountered for updating unknown order change coin")
+	}
 }
 
 func TestMatches(t *testing.T) {

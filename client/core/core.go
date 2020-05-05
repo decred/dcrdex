@@ -932,7 +932,7 @@ func (c *Core) Register(form *RegisterForm) error {
 	// Set up the coin waiter.
 	trigger := confTrigger(wallet, coin.ID(), dc.cfg.RegFeeConfirms)
 	c.wait(assetID, trigger, func(err error) {
-		log.Debugf("Registration fee txn %x now has %d confirmations.", coin.ID(), dc.cfg.RegFeeConfirms)
+		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(assetID, coin.ID()), dc.cfg.RegFeeConfirms)
 		defer func() {
 			if err != nil {
 				details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.url, err)
