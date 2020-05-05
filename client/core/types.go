@@ -385,3 +385,15 @@ func token(id []byte) string {
 	}
 	return hex.EncodeToString(id[:4])
 }
+
+// coinIDString converts a coin ID to a human-readable string. If an error is
+// encountered, the error is logged at Warning level, and the value
+// "<invalid coin>" is returned.
+func coinIDString(assetID uint32, coinID []byte) string {
+	coinStr, err := asset.DecodeCoinID(assetID, coinID)
+	if err != nil {
+		log.Warnf("invalid coin ID %x for asset %d -> %s: %v", coinID, assetID, unbip(assetID), err)
+		return "<invalid coin>"
+	}
+	return coinStr
+}

@@ -59,7 +59,7 @@ type DB interface {
 	MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*MetaOrder, error)
 	// SetChangeCoin stores the change coin for the order.
 	SetChangeCoin(order.OrderID, order.CoinID) error
-	// SetChangeCoin sets the order status for an order.
+	// UpdateOrderStatus sets the order status for an order.
 	UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error
 	// UpdateMatch updates the match information in the database. Any existing
 	// entry for the match will be overwritten without indication.
