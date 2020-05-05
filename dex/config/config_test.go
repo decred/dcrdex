@@ -107,7 +107,7 @@ func TestConfigParsing(t *testing.T) {
 	tests := []test{
 		makeOkTest("ok, with default application options header", "[Application Options]", ""),
 		makeOkTest("ok, with random section header", "[Random Header]", ""),
-		makeOkTest("ok, with random section header", "[Application Options]", "[Random Options]"),
+		makeOkTest("ok, with multiple section headers", "[Application Options]", "[Random Options]"),
 		makeOkTest("ok, with no section header", "", ""),
 		{
 			name:      "ok, with file path",

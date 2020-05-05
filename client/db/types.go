@@ -373,8 +373,6 @@ func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
 	keyB, addressB := pushes[3], pushes[4]
 	settings, err := config.Parse(settingsB)
 	if err != nil {
-		// this should generally not happen as `settings` is always properly
-		// encoded before saving.
 		return nil, fmt.Errorf("unable to decode wallet settings")
 	}
 	return &Wallet{
