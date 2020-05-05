@@ -931,9 +931,28 @@ func (c *Core) Register(form *RegisterForm) error {
 	return nil
 }
 
+// verifyRegistrationFee waits the required amount of confirmations for the
+// registration fee payment. Once the requirment is met the server is notified.
+// If the server acknowedlment is successfull, the account is set as 'paid' in
+// the database. Notifications about confirmations increase, errors and success
+// events are broadcasted to all subscribers.
 func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, assetID uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
-	trigger := c.confTrigger(wallet, coinID, reqConfs)
+
+	trigger := func() (bool, error) {
+		confs, err := wallet.Confirmations(coinID)
+		if err != nil {
+			return false, fmt.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
+		}
+		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, uint32(reqConfs))
+
+		if confs < uint32(reqConfs) {
+			c.notify(newFeePaymentNote("Waiting for confirmations", details, db.Data))
+		}
+
+		return confs >= uint32(reqConfs), nil
+	}
+
 	c.wait(assetID, trigger, func(err error) {
 		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(assetID, coinID), reqConfs)
 		defer func() {
@@ -2372,18 +2391,6 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		dc.tickAsset(assetID)
 	}
 	c.connMtx.RUnlock()
-}
-
-// confTrigger is a Core.wait trigger that checks a coin ID for a minimum number
-// of confirmations.
-func (c *Core) confTrigger(wallet *xcWallet, coinID []byte, reqConfs uint16) func() (bool, error) {
-	return func() (bool, error) {
-		confs, err := wallet.Confirmations(coinID)
-		if err != nil {
-			return false, fmt.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
-		}
-		return confs >= uint32(reqConfs), nil
-	}
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical
