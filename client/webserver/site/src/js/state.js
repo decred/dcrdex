@@ -23,6 +23,10 @@ export default class State {
     return null
   }
 
+  static removeCookie (cname) {
+    document.cookie = `${cname}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
+  }
+
   /* dark sets the dark-mode cookie. */
   static dark (dark) {
     this.setCookie(darkModeCK, dark ? '1' : '0')

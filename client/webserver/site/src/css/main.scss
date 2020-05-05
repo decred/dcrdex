@@ -204,7 +204,8 @@ div.poke-note.active {
   top: calc(100% - 30px);
 }
 
-#noteBox {
+#noteBox,
+#profileBox {
   position: absolute;
   display: none;
   top: -10px;
