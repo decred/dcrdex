@@ -5,7 +5,7 @@ import LoginPage from './login'
 import WalletsPage from './wallets'
 import SettingsPage from './settings'
 import MarketsPage, { marketID } from './markets'
-import { getJSON } from './http'
+import { getJSON, postJSON } from './http'
 
 import * as ntfn from './notifications'
 import ws from './ws'
@@ -185,10 +185,7 @@ export default class Application {
       bind(document, 'click', hide.bind(this, pg.profileBox))
       pg.profileBox.style.display = 'block'
     })
-    bind(pg.profileSignout, 'click', async e => {
-      State.removeCookie(authCK)
-      window.location.reload()
-    })
+    bind(pg.profileSignout, 'click', async e => await this.signOut())
   }
 
   /*
@@ -364,6 +361,23 @@ export default class Application {
       return false
     }
     return true
+  }
+
+  async signOut () {
+    try {
+      const closeWallet = async (asset) => {
+        if (asset.wallet && asset.wallet.open) {
+          const res = await postJSON('/api/closewallet', { assetID: asset.id })
+          if (!this.checkResponse(res)) throw res.msg
+        }
+      }
+      await Promise.all(
+        Object.keys(this.assets).map((assetID) => closeWallet(this.assets[assetID]))
+      )
+      State.removeCookie(authCK)
+      window.location.reload()
+    } catch (error) {
+    }
   }
 }
 
