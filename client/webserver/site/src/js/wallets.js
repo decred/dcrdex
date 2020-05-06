@@ -22,8 +22,7 @@ export default class WalletsPage extends BasePage {
       'markets', 'dexTitle', 'marketsBox', 'oneMarket', 'marketsFor',
       'marketsCard',
       // New wallet form
-      'walletForm', 'acctName', 'newWalletPass', 'iniPath', 'walletErr',
-      'newWalletLogo', 'newWalletName',
+      'walletForm', 'acctName',
       // Unlock wallet form
       'openForm',
       // Deposit
@@ -186,14 +185,6 @@ export default class WalletsPage extends BasePage {
     const box = page.walletForm
     const asset = app.assets[assetID]
     await this.hideBox()
-    if (assetID !== this.walletAsset) {
-      page.acctName.value = ''
-      page.newWalletPass.value = ''
-      page.iniPath.value = ''
-      page.iniPath.placeholder = asset.info.configpath
-      Doc.hide(page.walletErr)
-      page.newWalletName.textContent = asset.info.name
-    }
     this.walletAsset = assetID
     page.walletForm.setAsset(asset)
     this.animation = this.showBox(box, page.acctName)

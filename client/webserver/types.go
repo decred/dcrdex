@@ -39,7 +39,7 @@ type newWalletForm struct {
 	// These are only used if the Decred wallet does not already exist. In that
 	// case, these parameters will be used to create the wallet.
 	Account string           `json:"account"`
-	INIPath string           `json:"inipath"`
+	Config  string           `json:"config"`
 	Pass    encode.PassBytes `json:"pass"`
 	AppPW   encode.PassBytes `json:"appPass"`
 }
