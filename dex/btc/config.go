@@ -44,7 +44,7 @@ type Config struct {
 // LoadConfigFromPath loads the configuration settings from the specified filepath.
 func LoadConfigFromPath(cfgPath string, name string, network dex.Network, ports NetPorts) (*Config, error) {
 	cfg := &Config{}
-	if err := config.Parse(cfgPath, cfg); err != nil {
+	if err := config.ParseInto(cfgPath, cfg); err != nil {
 		return nil, fmt.Errorf("error parsing config file: %v", err)
 	}
 	return checkConfig(cfg, name, network, ports)

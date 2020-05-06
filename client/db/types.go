@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
@@ -334,7 +335,7 @@ func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
 type Wallet struct {
 	AssetID     uint32
 	Account     string
-	INIPath     string
+	Settings    map[string]string
 	Balance     uint64
 	BalUpdate   time.Time
 	EncryptedPW []byte
@@ -346,7 +347,7 @@ func (w *Wallet) Encode() []byte {
 	return dbBytes{0}.
 		AddData(uint32Bytes(w.AssetID)).
 		AddData([]byte(w.Account)).
-		AddData([]byte(w.INIPath)).
+		AddData(config.Data(w.Settings)).
 		AddData(w.EncryptedPW).
 		AddData([]byte(w.Address))
 }
@@ -368,12 +369,16 @@ func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
 	if len(pushes) != 5 {
 		return nil, fmt.Errorf("decodeWallet_v0: expected 5 pushes, got %d", len(pushes))
 	}
-	idB, acctB, iniB := pushes[0], pushes[1], pushes[2]
+	idB, acctB, settingsB := pushes[0], pushes[1], pushes[2]
 	keyB, addressB := pushes[3], pushes[4]
+	settings, err := config.Parse(settingsB)
+	if err != nil {
+		return nil, fmt.Errorf("unable to decode wallet settings")
+	}
 	return &Wallet{
 		AssetID:     intCoder.Uint32(idB),
 		Account:     string(acctB),
-		INIPath:     string(iniB),
+		Settings:    settings,
 		EncryptedPW: keyB,
 		Address:     string(addressB),
 	}, nil

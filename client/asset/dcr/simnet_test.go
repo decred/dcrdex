@@ -63,12 +63,12 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 		t.Fatalf("error getting current user: %v", err)
 	}
 	cfgPath := filepath.Join(user.HomeDir, "dextest", "dcr", name, "w-"+name+".conf")
-	connSettings, err := config.Options(cfgPath)
+	settings, err := config.Parse(cfgPath)
 	if err != nil {
 		t.Fatalf("error reading config options: %v", err)
 	}
 	walletCfg := &asset.WalletConfig{
-		Settings: connSettings,
+		Settings: settings,
 		Account:  "default",
 		TipChange: func(err error) {
 			blkFunc(name, err)
