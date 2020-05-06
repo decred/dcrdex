@@ -81,7 +81,7 @@ func TestParseNewWalletArgs(t *testing.T) {
 		args := []string{
 			id,
 			"default",
-			"/home/wallet.conf",
+			"rpclisten=127.0.0.0",
 		}
 		return &RawParams{PWArgs: pwArgs, Args: args}
 	}
@@ -118,7 +118,7 @@ func TestParseNewWalletArgs(t *testing.T) {
 		if nwf.Account != test.params.Args[1] {
 			t.Fatalf("account doesn't match")
 		}
-		if nwf.INIPath != test.params.Args[2] {
+		if nwf.ConfigText != test.params.Args[2] {
 			t.Fatalf("inipath doesn't match")
 		}
 	}

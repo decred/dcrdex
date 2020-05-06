@@ -539,18 +539,16 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf("wallet password encryption error: %v", err)
 	}
 
-	if form.ConfigText == "" && form.INIPath == "" {
-		form.INIPath, err = asset.DefaultConfigPath(assetID)
+	var settings map[string]string
+	if form.ConfigText == "" {
+		var defaultWalletCfgPath string
+		defaultWalletCfgPath, err = asset.DefaultConfigPath(assetID)
 		if err != nil {
 			return fmt.Errorf("cannot use default wallet config path: %v", err)
 		}
-	}
-
-	var settings map[string]string
-	if form.ConfigText != "" {
-		settings, err = config.Parse([]byte(form.ConfigText))
+		settings, err = config.Parse(defaultWalletCfgPath)
 	} else {
-		settings, err = config.Parse(form.INIPath)
+		settings, err = config.Parse([]byte(form.ConfigText))
 	}
 	if err != nil {
 		return fmt.Errorf("error parsing config file: %v", err)

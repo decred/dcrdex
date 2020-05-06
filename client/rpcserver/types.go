@@ -50,7 +50,7 @@ type openWalletForm struct {
 type newWalletForm struct {
 	AssetID    uint32           `json:"assetID"`
 	Account    string           `json:"account"`
-	INIPath    string           `json:"inipath"`
+	ConfigText string           `json:"config"`
 	WalletPass encode.PassBytes `json:"walletPass"`
 	AppPass    encode.PassBytes `json:"appPass"`
 }
@@ -131,7 +131,7 @@ func parseInitArgs(params *RawParams) (encode.PassBytes, error) {
 }
 
 func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
-	if err := checkNArgs(params, []int{2}, []int{3}); err != nil {
+	if err := checkNArgs(params, []int{2}, []int{2, 3}); err != nil {
 		return nil, err
 	}
 	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
@@ -143,7 +143,9 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		WalletPass: params.PWArgs[1],
 		AssetID:    uint32(assetID),
 		Account:    params.Args[1],
-		INIPath:    params.Args[2],
+	}
+	if len(params.Args) > 2 {
+		req.ConfigText = params.Args[2]
 	}
 	return req, nil
 }

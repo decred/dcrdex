@@ -92,26 +92,28 @@ func TestConfigure(t *testing.T) {
 }
 
 func TestReadCert(t *testing.T) {
-	cert := "Hi. I'm a TLS certificate."
-	createCertAtPath := func(path string) {
-		p := cleanAndExpandPath(path)
-		f, err := os.Create(p)
+	saveTextToFile := func(text, filePath string) {
+		path := cleanAndExpandPath(filePath)
+		file, err := os.Create(path)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("create test file error: %v", err)
 		}
-		f.WriteString(cert)
-		f.Close()
+		file.WriteString(text)
+		file.Close()
 	}
+	certTxt := "Hi. I'm a TLS certificate."
+	cfgTxt := "Hi, I'm a config"
 	tests := []struct {
-		name, cmd, certPath string
-		args, want          []string
-		wantErr             bool
+		name, cmd, txtFilePath, txtToSave string
+		args, want                        []string
+		wantErr                           bool
 	}{{
-		name:     "ok with cert",
-		cmd:      "preregister",
-		args:     []string{"1.2.3.4:3000", "./cert"},
-		certPath: "./cert",
-		want:     []string{"1.2.3.4:3000", cert},
+		name:        "ok with cert",
+		cmd:         "preregister",
+		args:        []string{"1.2.3.4:3000", "./cert"},
+		txtFilePath: "./cert",
+		txtToSave:   certTxt,
+		want:        []string{"1.2.3.4:3000", certTxt},
 	}, {
 		name: "ok no cert",
 		cmd:  "preregister",
@@ -121,17 +123,29 @@ func TestReadCert(t *testing.T) {
 		name: "not a readCerts command",
 		cmd:  "not a real command",
 	}, {
-		name:    "no cert at path",
+		name:    "no file at path",
 		cmd:     "preregister",
 		args:    []string{"1.2.3.4:3000", "./cert"},
 		wantErr: true,
+	}, {
+		name:        "newwallet ok, with cfg file",
+		cmd:         "newwallet",
+		args:        []string{"42", "default", "./w.conf"},
+		txtFilePath: "./w.conf",
+		txtToSave:   cfgTxt,
+		want:        []string{"42", "default", cfgTxt},
+	}, {
+		name: "newwallet ok, no cfg file",
+		cmd:  "newwallet",
+		args: []string{"42", "default"},
+		want: []string{"42", "default"},
 	}}
 	for _, test := range tests {
-		if test.certPath != "" {
-			createCertAtPath(test.certPath)
+		if test.txtFilePath != "" {
+			saveTextToFile(test.txtToSave, test.txtFilePath)
 		}
-		err := readCert(test.cmd, test.args)
-		os.Remove(test.certPath)
+		err := readTextFile(test.cmd, test.args)
+		os.Remove(test.txtFilePath)
 		if err != nil {
 			if test.wantErr {
 				continue

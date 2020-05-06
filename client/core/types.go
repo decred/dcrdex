@@ -62,14 +62,11 @@ func (set *errorSet) Error() string {
 }
 
 // WalletForm is information necessary to create a new exchange wallet.
-// Requires either config file path or config text to connect to wallet.
-// If both are provided, the config text is used. If none is provided,
-// default config file path is used.
+// If ConfigText is provided, the asset's default config file path is used.
 type WalletForm struct {
 	AssetID    uint32
 	Account    string
 	ConfigText string
-	INIPath    string
 }
 
 // WalletState is the current status of an exchange wallet.
