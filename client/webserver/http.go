@@ -42,8 +42,16 @@ func (s *WebServer) allow(route string, w http.ResponseWriter, r *http.Request) 
 	isLoginRoute := route == loginRoute
 	dexConnected := len(user.Exchanges) > 0
 
+	if !user.Initialized {
+		isRegisterRoute := route == registerRoute
+		if !isRegisterRoute {
+			s.handleRegister(w, r)
+		}
+		return isRegisterRoute
+	}
+
 	// Once initialized, all pages except "/login" requires user to be logged in.
-	if user.Initialized && !user.Authed {
+	if !user.Authed {
 		if !isLoginRoute {
 			s.handleLogin(w, r)
 		}
@@ -59,9 +67,10 @@ func (s *WebServer) allow(route string, w http.ResponseWriter, r *http.Request) 
 		return false
 	}
 
-	// Disallow visits to the login page if user is already logged in. Redirect
-	// to the markets page instead.
-	if isLoginRoute && user.Authed {
+	// Disallow visits to the login page since the user is already logged in at
+	// this point. Redirect to the markets page instead since the user has also
+	// connected at least 1 DEX.
+	if isLoginRoute {
 		s.handleMarkets(w, r)
 		return false
 	}
