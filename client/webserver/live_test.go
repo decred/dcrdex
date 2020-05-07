@@ -34,7 +34,7 @@ import (
 var (
 	tCtx          context.Context
 	maxDelay      = time.Second * 2
-	epochDuration = time.Second * 120 // milliseconds
+	epochDuration = time.Second * 30 // milliseconds
 	feedPeriod    = time.Second * 10
 )
 
@@ -232,6 +232,8 @@ type TCore struct {
 	buys     map[string]*core.MiniOrder
 	sells    map[string]*core.MiniOrder
 	noteFeed chan core.Notification
+	orderMtx sync.Mutex
+	epochOrders []*core.BookUpdate
 }
 
 func newTCore() *TCore {
@@ -246,6 +248,13 @@ func newTCore() *TCore {
 			28: uint64(randomMagnitude(7, 11)),
 		},
 		noteFeed: make(chan core.Notification, 1),
+	}
+}
+
+func (c *TCore) trySend(u *core.BookUpdate) {
+	select {
+	case c.feed.C <- u:
+	default:
 	}
 }
 
@@ -278,12 +287,6 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 	c.feed = core.NewBookFeed(func(*core.BookFeed) {})
 	var ctx context.Context
 	ctx, c.killFeed = context.WithCancel(tCtx)
-	trySend := func(u *core.BookUpdate) {
-		select {
-		case c.feed.C <- u:
-		default:
-		}
-	}
 	go func() {
 	out:
 		for {
@@ -293,28 +296,28 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 				// unbook_order and towards book_order.
 				r := rand.Float32()
 				switch {
-				case r < 0.33:
-					// Epoch order
-					trySend(&core.BookUpdate{
-						Action: msgjson.EpochOrderRoute,
-						Order:  randomOrder(rand.Float32() < 0.5, c.maxQty, c.midGap, 0.05*c.midGap, true),
-					})
-				case r < 0.76:
+				case r < 0.80:
 					// Book order
+
 					sell := rand.Float32() < 0.5
-					ord := randomOrder(sell, c.maxQty, c.midGap, 0.05*c.midGap, false)
+					ord := randomOrder(sell, c.maxQty, c.midGap, 0.05*c.midGap, true)
+					c.orderMtx.Lock()
 					side := c.buys
 					if sell {
 						side = c.sells
 					}
 					side[ord.Token] = ord
-					trySend(&core.BookUpdate{
-						Action: msgjson.BookOrderRoute,
+					epochOrder := &core.BookUpdate{
+						Action: msgjson.EpochOrderRoute,
 						Order:  ord,
-					})
+					}
+					c.trySend(epochOrder)
+					c.epochOrders = append(c.epochOrders, epochOrder)
+					c.orderMtx.Unlock()
 				default:
 					// Unbook order
 					sell := rand.Float32() < 0.5
+					c.orderMtx.Lock()
 					side := c.buys
 					if sell {
 						side = c.sells
@@ -324,11 +327,13 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 						break
 					}
 					if tkn == "" {
+						c.orderMtx.Unlock()
 						continue
 					}
 					delete(side, tkn)
+					c.orderMtx.Unlock()
 
-					trySend(&core.BookUpdate{
+					c.trySend(&core.BookUpdate{
 						Action: msgjson.UnbookOrderRoute,
 						Order:  &core.MiniOrder{Token: tkn},
 					})
@@ -356,8 +361,10 @@ func (c *TCore) book() *core.OrderBook {
 	// Set the market width to about 5% of midGap.
 	marketWidth := 0.05 * midGap
 	var buys, sells []*core.MiniOrder
+	c.orderMtx.Lock()
 	c.buys = make(map[string]*core.MiniOrder, numBuys)
 	c.sells = make(map[string]*core.MiniOrder, numSells)
+	c.epochOrders = nil
 	for i := 0; i < numSells; i++ {
 		ord := randomOrder(true, maxQty, midGap, marketWidth, false)
 		sells = append(sells, ord)
@@ -369,6 +376,7 @@ func (c *TCore) book() *core.OrderBook {
 		buys = append(buys, ord)
 		c.buys[ord.Token] = ord
 	}
+	c.orderMtx.Unlock()
 	sort.Slice(buys, func(i, j int) bool { return buys[i].Rate > buys[j].Rate })
 	sort.Slice(sells, func(i, j int) bool { return sells[i].Rate < sells[j].Rate })
 	return &core.OrderBook{
@@ -575,6 +583,21 @@ out:
 				Notification: db.NewNotification("epoch", "", "", db.Data),
 				Epoch:        getEpoch(),
 			}
+			c.orderMtx.Lock()
+			for _, o := range c.epochOrders {
+				o.Order.Epoch = 0
+				o.Action = msgjson.BookOrderRoute
+				c.trySend(o)
+				if (o.Order.Rate > 0) {
+					if (o.Order.Sell) {
+						c.sells[o.Order.Token] = o.Order
+					} else {
+						c.buys[o.Order.Token] = o.Order
+					}
+				}
+			}
+			c.epochOrders = nil
+			c.orderMtx.Unlock()
 		case <-tCtx.Done():
 			break out
 		}
@@ -584,7 +607,7 @@ out:
 func TestServer(t *testing.T) {
 	numBuys = 0
 	numSells = 0
-	feedPeriod = 5000 * time.Millisecond
+	feedPeriod = 500 * time.Millisecond
 	register := true
 
 	var shutdown context.CancelFunc

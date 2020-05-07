@@ -167,7 +167,8 @@ export class DepthChart {
   //    position indicator...
   // 4. Tick labels.
   // 5. Data.
-  // 6. Legend.
+  // 6. Epoch line legend.
+  // 7. Hover legend.
   draw () {
     this.clear()
     // if (!this.book || this.book.empty()) return
@@ -178,7 +179,6 @@ export class DepthChart {
     const mousePos = this.mousePos
     const buys = this.book.buys
     const sells = this.book.sells
-    var sum = 0
     // The zoomState stores these high and low values to facilitate zooming. It
     // has to be high and low rather than leftEdge and rightEdge since the draw
     // loop adds some padding and extends horizontal lines outward for
@@ -195,50 +195,71 @@ export class DepthChart {
     zoom.high = high = midGap + halfRange
     zoom.low = low = midGap - halfRange
     const buyDepth = []
+    const buyEpoch = []
     const sellDepth = []
+    const sellEpoch = []
+    var sum = 0
+    // The epoch line is above the non-epoch region, so the epochSum y value
+    // must account for non-epoch orders too.
+    var epochSum = 0
     for (let i = 0; i < buys.length; i++) {
       const pt = buys[i]
-      sum += pt.qty
-      buyDepth.push([pt.rate, sum])
+      epochSum += pt.qty
+      buyEpoch.push([pt.rate, epochSum])
+      if (!pt.epoch) {
+        sum += pt.qty
+        buyDepth.push([pt.rate, sum])
+      }
       if (pt.rate < zoom.low) break
     }
-    const buySum = lastBuy ? last(buyDepth)[1] : 0
+    const buySum = buyDepth.length ? last(buyDepth)[1] : 0
     buyDepth.push([low - halfRange, buySum])
+    const epochBuySum = buyEpoch.length ? last(buyEpoch)[1] : 0
+    buyEpoch.push([low - halfRange, epochBuySum])
+
     sum = 0
+    epochSum = 0
     for (let i = 0; i < sells.length; i++) {
       const pt = sells[i]
-      sum += pt.qty
-      sellDepth.push([pt.rate, sum])
+      epochSum += pt.qty
+      sellEpoch.push([pt.rate, epochSum])
+      if (!pt.epoch) {
+        sum += pt.qty
+        sellDepth.push([pt.rate, sum])
+      }
       if (pt.rate > zoom.high) break
     }
     // Add a data point going to the left so that the data doesn't end with a
     // vertical line.
-    const sellSum = lastSell ? last(sellDepth)[1] : 0
+    const sellSum = sellDepth.length ? last(sellDepth)[1] : 0
     sellDepth.push([high + halfRange, sellSum])
+    const epochSellSum = sellEpoch.length ? last(sellEpoch)[1] : 0
+    sellEpoch.push([high + halfRange, epochSellSum])
 
     // Add 5% padding to the top of the chart.
-    const maxY = sellSum && buySum ? Math.max(buySum, sellSum) * 1.05 : sellSum || buySum || 1
+    const maxY = epochSellSum && epochBuySum ? Math.max(epochBuySum, epochSellSum) * 1.05 : epochSellSum || epochBuySum || 1
 
     const dataExtents = new Extents(zoom.low, zoom.high, 0, maxY)
     this.dataExtents = dataExtents
 
     // Draw the axis tick labels.
-    this.ctx.font = '12px \'sans\', sans-serif'
-    this.ctx.fillStyle = this.theme.axisLabel
+    const ctx = this.ctx
+    ctx.font = '12px \'sans\', sans-serif'
+    ctx.fillStyle = this.theme.axisLabel
 
-    const yLabels = makeLabels(this.ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50)
+    const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50)
     // Reassign the width of the y-label column to accomodate the widest text.
     const newWidth = yLabels.widest * 1.5
     this.yRegion.extents.x.max = newWidth
     this.plotRegion.extents.x.min = newWidth
     this.xRegion.extents.x.min = newWidth
-    const xLabels = makeLabels(this.ctx, this.plotRegion.width(), dataExtents.x.min, dataExtents.x.max, 100)
+    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min, dataExtents.x.max, 100)
 
     // A function to be run at the end if there is legend data to display.
     var legendData
 
     // Draw the grid.
-    this.ctx.lineWidth = 1
+    ctx.lineWidth = 1
     this.plotRegion.plot(dataExtents, (ctx, tools) => {
       // first, a square around the plot area.
       ctx.strokeStyle = this.theme.gridBorder
@@ -371,12 +392,66 @@ export class DepthChart {
       })
     }, true)
 
-    this.ctx.fillStyle = this.theme.sellFill
-    this.ctx.strokeStyle = this.theme.sellLine
+    // Draw the epoch lines
+    this.ctx.lineWidth = 1.5
+    ctx.setLineDash([3, 3])
+    // epoch sells
+    ctx.fillStyle = this.theme.sellFill
+    ctx.strokeStyle = this.theme.sellLine
+    this.drawDepth(sellEpoch)
+    // epoch buys
+    ctx.fillStyle = this.theme.buyFill
+    ctx.strokeStyle = this.theme.buyLine
+    this.drawDepth(buyEpoch)
+
+    // Draw the book depth.
+    this.ctx.lineWidth = 2.5
+    ctx.setLineDash([])
+    // book sells
+    ctx.fillStyle = this.theme.sellFill
+    ctx.strokeStyle = this.theme.sellLine
     this.drawDepth(sellDepth)
-    this.ctx.fillStyle = this.theme.buyFill
-    this.ctx.strokeStyle = this.theme.buyLine
+    // book buys
+    ctx.fillStyle = this.theme.buyFill
+    ctx.strokeStyle = this.theme.buyLine
     this.drawDepth(buyDepth)
+
+    // Draw the epoch line legend
+    this.plotRegion.plot(new Extents(0, 1, 0, 1), (ctx, tools) => {
+      const fontSize = 14
+      ctx.font = `${fontSize}px 'sans', sans-serif`
+      // Top-left corner is at (5, 5) from top left of plot region.
+      const topLeft = {
+        x: tools.x(0) + 5,
+        y: tools.y(1) + 5
+      }
+
+      // Get the label metrics to plan the box.
+      const lbl = 'epoch'
+      const textMetrics = ctx.measureText(lbl)
+      const padding = 10
+      const halfWidth = textMetrics.width + padding
+      const topCenter = {
+        x: topLeft.x + halfWidth,
+        y: topLeft.y
+      }
+
+      // Draw the legend background.
+      ctx.fillStyle = this.theme.legendFill
+      ctx.globalAlpha = 0.9
+      ctx.fillRect(topLeft.x, topCenter.y, halfWidth * 2, fontSize * 2)
+
+      // Draw the dashed line.
+      const lineY = topCenter.y + fontSize
+      this.ctx.lineWidth = 1.5
+      ctx.setLineDash([3, 3])
+      ctx.strokeStyle = this.theme.legendText
+      line(ctx, topLeft.x + padding, lineY, topCenter.x - padding, lineY)
+
+      // Write the text.
+      ctx.fillStyle = this.theme.legendText
+      ctx.fillText(lbl, topCenter.x + (textMetrics.width / 2), topCenter.y + fontSize + 1)
+    })
 
     // If there is legend data to display, run that now.
     // dot(ctx, tools.x(dataX), tools.y(bestDepth[1]), dotColor, 5)
@@ -418,7 +493,6 @@ export class DepthChart {
     var firstPt = depth[0]
     var y = firstPt[1]
     var x
-    this.ctx.lineWidth = 2.5
     this.plotRegion.plot(this.dataExtents, (ctx, tools) => {
       tools.dataCoords(() => {
         ctx.beginPath()
@@ -438,7 +512,7 @@ export class DepthChart {
         ctx.lineTo(firstPt[0], 0)
       })
       ctx.closePath()
-      ctx.globalAlpha = 0.4
+      ctx.globalAlpha = 0.25
       ctx.fill()
     })
   }
