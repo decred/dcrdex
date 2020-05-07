@@ -101,7 +101,7 @@ type Notification interface {
 type FeePaymentNote struct {
 	db.Notification
 	ConfirmationsRequired uint32 `json:"confirmationsrequired,omitempty"`
-	ConfirmationsReceived uint32 `json:"confirmationsreceived,omitempty"`
+	Confirmations         uint32 `json:"confirmations,omitempty"`
 }
 
 func newFeePaymentNote(subject, details string, severity db.Severity) *FeePaymentNote {
@@ -113,7 +113,7 @@ func newFeePaymentNote(subject, details string, severity db.Severity) *FeePaymen
 func newFeePaymentNoteWithConfirmations(subject, details string, severity db.Severity, reqConfs uint32, currConfs uint32) *FeePaymentNote {
 	feePmtNt := newFeePaymentNote(subject, details, severity)
 	feePmtNt.ConfirmationsRequired = reqConfs
-	feePmtNt.ConfirmationsReceived = currConfs
+	feePmtNt.Confirmations = currConfs
 	return feePmtNt
 }
 
