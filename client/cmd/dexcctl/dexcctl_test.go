@@ -91,7 +91,7 @@ func TestConfigure(t *testing.T) {
 	}
 }
 
-func TestReadCert(t *testing.T) {
+func TestReadTextFile(t *testing.T) {
 	saveTextToFile := func(text, filePath string) {
 		path := cleanAndExpandPath(filePath)
 		file, err := os.Create(path)

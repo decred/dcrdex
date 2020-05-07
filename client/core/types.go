@@ -62,7 +62,9 @@ func (set *errorSet) Error() string {
 }
 
 // WalletForm is information necessary to create a new exchange wallet.
-// If ConfigText is provided, the asset's default config file path is used.
+// The ConfigText, if provided, will be parsed for wallet connection settings.
+// If ConfigText is not provided, and a file exists at the `asset.DefaultConfigPath`,
+// that file will be parsed for wallet connection settings.
 type WalletForm struct {
 	AssetID    uint32
 	Account    string

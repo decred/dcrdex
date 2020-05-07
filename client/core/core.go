@@ -551,7 +551,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		settings, err = config.Parse([]byte(form.ConfigText))
 	}
 	if err != nil {
-		return fmt.Errorf("error parsing config file: %v", err)
+		return fmt.Errorf("error parsing config: %v", err)
 	}
 
 	dbWallet := &db.Wallet{

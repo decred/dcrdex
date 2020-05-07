@@ -119,7 +119,7 @@ func TestParseNewWalletArgs(t *testing.T) {
 			t.Fatalf("account doesn't match")
 		}
 		if nwf.ConfigText != test.params.Args[2] {
-			t.Fatalf("inipath doesn't match")
+			t.Fatalf("config doesn't match")
 		}
 	}
 }

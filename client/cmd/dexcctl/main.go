@@ -59,20 +59,13 @@ var promptPasswords = map[string][]string{
 }
 
 // optionalTextFiles is a map of routes to arg index for routes that should read
-// the text content of a file, where the file path may be found in the route's
+// the text content of a file, where the file path _may_ be found in the route's
 // cmd args at the specified index.
 var optionalTextFiles = map[string]int{
 	"preregister": 1,
 	"register":    2,
 	"newwallet":   2,
 }
-
-// requiredTextFiles is a map of routes to arg index for routes that should read
-// the text content of a file, where the file path is required be present in the
-// route's cmd args at the specified index.
-// todo: "preregister" and "register" routes should be listed here instead of in
-// `optionalTextFiles` because those cmds will fail if the cert arg is not passed.
-var requiredTextFiles = map[string]int{}
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting
 // fails or a password is empty. Returns passwords as a slice of []byte.
@@ -97,16 +90,10 @@ func promptPWs(ctx context.Context, cmd string) ([]encode.PassBytes, error) {
 // args' index as expected for cmd and sets the args value at the expected index
 // to the file's text content. The passed args are modified.
 func readTextFile(cmd string, args []string) error {
-	fileArgIndx, readFile := requiredTextFiles[cmd]
-	if readFile && (len(args) < fileArgIndx+1 || args[fileArgIndx] == "") {
-		return fmt.Errorf("command requires argument %d to be a file path", fileArgIndx+1)
-	}
-	if !readFile {
-		fileArgIndx, readFile = optionalTextFiles[cmd]
-		// Not an error if file path arg is not provided for optional file args.
-		if !readFile || len(args) < fileArgIndx+1 || args[fileArgIndx] == "" {
-			return nil
-		}
+	fileArgIndx, readFile := optionalTextFiles[cmd]
+	// Not an error if file path arg is not provided for optional file args.
+	if !readFile || len(args) < fileArgIndx+1 || args[fileArgIndx] == "" {
+		return nil
 	}
 	path := cleanAndExpandPath(args[fileArgIndx])
 	if !fileExists(path) {
