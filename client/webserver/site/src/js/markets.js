@@ -215,7 +215,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     Doc.hide(page.orderForm)
     Doc.show(page.loaderMsg)
-    page.loaderMsg.textContent = `The asset ${symbol} is not supported.`
+    page.loaderMsg.textContent = `${symbol.toUpperCase()} is not supported`
   }
 
   /* hideLoaderMsg hides the loaderMsg and shows the orderForm back again */
@@ -382,21 +382,24 @@ export default class MarketsPage extends BasePage {
     const market = this.market
     const asset = app.assets[assetID]
     const [b, q] = [market.base, market.quote]
-    if (!b) {
-      Doc.hide(page.baseBox)
-    } else if (b.id === assetID) {
-      Doc.show(page.baseBox)
-      this.setBalance(asset, page.baseBalSpan, page.baseImg, page.baseNewButton, page.baseBalance)
-      this.walletIcons.base.readWallet(asset.wallet)
-      return
-    }
-
-    if (!q) {
-      Doc.hide(page.quoteBox)
-    } else if (q.id === assetID) {
-      this.setBalance(asset, page.quoteBalSpan, page.quoteImg, page.quoteNewButton, page.quoteBalance)
-      this.walletIcons.quote.readWallet(asset.wallet)
-      Doc.show(page.quoteBox)
+    switch (assetID) {
+      case (market.baseCfg.id):
+        if (!b) {
+          Doc.hide(page.baseBox)
+          return
+        }
+        Doc.show(page.baseBox)
+        this.setBalance(asset, page.baseBalSpan, page.baseImg, page.baseNewButton, page.baseBalance)
+        this.walletIcons.base.readWallet(asset.wallet)
+        break
+      case (market.quoteCfg.id):
+        if (!q) {
+          Doc.hide(page.quoteBox)
+          return
+        }
+        Doc.show(page.quoteBox)
+        this.setBalance(asset, page.quoteBalSpan, page.quoteImg, page.quoteNewButton, page.quoteBalance)
+        this.walletIcons.quote.readWallet(asset.wallet)
     }
   }
 
