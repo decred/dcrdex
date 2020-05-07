@@ -1272,8 +1272,7 @@ func TestConnectDEX(t *testing.T) {
 	tCore := rig.core
 
 	ai := &db.AccountInfo{
-		URL:  "https://somedex.com",
-		Cert: []byte("required"),
+		URL: "https://somedex.com",
 	}
 
 	queueConfig := func() {

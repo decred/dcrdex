@@ -695,7 +695,7 @@ func (c *Core) ConnectWallet(assetID uint32) error {
 	return err
 }
 
-func (c *Core) isDEXRegistered(url string) bool {
+func (c *Core) isRegistered(url string) bool {
 	c.connMtx.RLock()
 	_, found := c.conns[url]
 	c.connMtx.RUnlock()
@@ -706,7 +706,7 @@ func (c *Core) isDEXRegistered(url string) bool {
 // registration fee. The connection is closed after the fee is retrieved.
 // Returns an error if user is already registered to the DEX.
 func (c *Core) GetFee(url, cert string) (uint64, error) {
-	if c.isDEXRegistered(url) {
+	if c.isRegistered(url) {
 		return 0, fmt.Errorf("already registered at %s", url)
 	}
 	dexConn, err := c.connectDEX(&db.AccountInfo{
@@ -735,7 +735,7 @@ func (c *Core) Register(form *RegisterForm) error {
 	if form.URL == "" {
 		return fmt.Errorf("no dex url specified")
 	}
-	if c.isDEXRegistered(form.URL) {
+	if c.isRegistered(form.URL) {
 		return fmt.Errorf("already registered at %s", form.URL)
 	}
 
@@ -755,7 +755,7 @@ func (c *Core) Register(form *RegisterForm) error {
 
 	// close the connection to the dex server if the registration fails.
 	defer func() {
-		if !c.isDEXRegistered(dexConn.acct.url) {
+		if !c.isRegistered(dexConn.acct.url) {
 			dexConn.connMaster.Disconnect()
 		}
 	}()
@@ -1899,11 +1899,6 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	uri := parsedURL.Host // empty for urls without scheme
 	if uri == "" {
 		uri = parsedURL.String()
-	}
-
-	// Sanity check that a cert is provided.
-	if len(acctInfo.Cert) == 0 {
-		return nil, fmt.Errorf("cert required")
 	}
 
 	// Create a websocket connection to the server.
