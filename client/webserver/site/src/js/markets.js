@@ -645,7 +645,10 @@ export default class MarketsPage extends BasePage {
    * handleEpochNote handles notifications signalling the start of a new epoch.
    */
   handleEpochNote (note) {
-    if (this.book) this.book.setEpoch(note.epoch)
+    if (this.book) {
+      this.book.setEpoch(note.epoch)
+      this.chart.draw()
+    }
     this.clearOrderTableEpochs(note.epoch)
   }
 

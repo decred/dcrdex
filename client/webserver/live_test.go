@@ -584,11 +584,12 @@ out:
 				Epoch:        getEpoch(),
 			}
 			c.orderMtx.Lock()
+			// Send limit orders as newly booked.
 			for _, o := range c.epochOrders {
-				o.Order.Epoch = 0
-				o.Action = msgjson.BookOrderRoute
-				c.trySend(o)
 				if (o.Order.Rate > 0) {
+					o.Order.Epoch = 0
+					o.Action = msgjson.BookOrderRoute
+					c.trySend(o)
 					if (o.Order.Sell) {
 						c.sells[o.Order.Token] = o.Order
 					} else {
