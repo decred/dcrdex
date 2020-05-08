@@ -7,7 +7,8 @@ export const BipIDs = {
   42: 'dcr',
   2: 'ltc',
   22: 'mona',
-  28: 'vtc'
+  28: 'vtc',
+  3: 'doge'
 }
 
 // Parameters for printing asset values.
