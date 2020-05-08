@@ -443,11 +443,93 @@ func TestHandleRegister(t *testing.T) {
 }
 
 func TestHandleExchanges(t *testing.T) {
-	tc := &TCore{exchanges: make(map[string]*core.Exchange)}
+	in := `{
+  "https://127.0.0.1:7232": {
+    "url": "https://127.0.0.1:7232",
+    "markets": {
+      "dcr_btc": {
+        "name": "dcr_btc",
+        "baseid": 42,
+        "basesymbol": "dcr",
+        "quoteid": 0,
+        "quotesymbol": "btc",
+        "epochlen": 10000,
+        "startepoch": 158891349,
+        "buybuffer": 1.25,
+        "orders": [
+          {
+            "dex": "https://127.0.0.1:7232",
+            "market": "dcr_btc",
+            "type": 1,
+            "id": "e016a563ff5b845e9af20718af72224af630e65ca53edf2a3342d175dc6d3738",
+            "stamp": 1588913556583,
+            "qty": 100000000,
+            "sell": false,
+            "filled": 0,
+            "matches": null,
+            "cancelling": false,
+            "canceled": false,
+            "rate": 100000000,
+            "tif": 1
+          }
+        ]
+      }
+    },
+    "assets": {
+      "0": {
+        "id": 0,
+        "symbol": "btc",
+        "lotSize": 100000,
+        "rateStep": 100000,
+        "feeRate": 100,
+        "swapSize": 224,
+        "swapConf": 1,
+        "fundConf": 1
+      },
+      "42": {
+        "id": 42,
+        "symbol": "dcr",
+        "lotSize": 100000000,
+        "rateStep": 100000000,
+        "feeRate": 10,
+        "swapSize": 253,
+        "swapConf": 1,
+        "fundConf": 1
+      }
+    },
+    "feePending": false
+  }
+}`
+	var exchanges map[string]*core.Exchange
+	if err := json.Unmarshal([]byte(in), &exchanges); err != nil {
+		panic(err)
+	}
+	tc := &TCore{exchanges: exchanges}
 	r := &RPCServer{core: tc}
 	payload := handleExchanges(r, nil)
 	var res map[string]*core.Exchange
 	if err := verifyResponse(payload, &res, -1); err != nil {
 		t.Fatal(err)
+	}
+	url := "https://127.0.0.1:7232"
+	// Verify fields have values.
+	if res[url].Markets["dcr_btc"].BaseID != 42 {
+		t.Fatal("BaseID isn't 42")
+	}
+	// Verify fields were removed and have a nil value.
+	if res[url].URL != "" {
+		t.Fatal("exchange url not removed")
+	}
+	if res[url].Markets["dcr_btc"].Name != "" {
+		t.Fatal("market name not removed")
+	}
+	if res[url].Markets["dcr_btc"].Orders[0].DEX != "" {
+		t.Fatal("order dex not removed")
+	}
+	if res[url].Markets["dcr_btc"].Orders[0].MarketID != "" {
+		t.Fatal("order market not removed")
+	}
+	if res[url].Assets[uint32(42)].ID != uint32(0) {
+		t.Fatal("asset id not removed")
 	}
 }
