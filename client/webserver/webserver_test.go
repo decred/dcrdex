@@ -549,7 +549,6 @@ func TestAPINewWallet(t *testing.T) {
 
 	body = &newWalletForm{
 		Account: "account",
-		INIPath: "/path/to/somewhere",
 		Pass:    encode.PassBytes("123"),
 	}
 	tCore.notHas = true

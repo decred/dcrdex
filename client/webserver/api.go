@@ -87,9 +87,9 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	// Wallet does not exist yet. Try to create it.
 	err := s.core.CreateWallet(form.AppPW, form.Pass, &core.WalletForm{
-		AssetID: form.AssetID,
-		Account: form.Account,
-		INIPath: form.INIPath,
+		AssetID:    form.AssetID,
+		Account:    form.Account,
+		ConfigText: form.Config,
 	})
 	if err != nil {
 		s.writeAPIError(w, "error creating %s wallet: %v", unbip(form.AssetID), err)

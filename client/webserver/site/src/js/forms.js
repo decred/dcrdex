@@ -9,22 +9,56 @@ export function bindNewWallet (app, form, success) {
   // CREATE DCR WALLET
   // This form is only shown the first time the user visits the /register page.
   const fields = Doc.parsePage(form, [
-    'iniPath', 'acctName', 'newWalletPass', 'submitCreate', 'walletErr',
+    'acctName', 'newWalletPass',
+    'cfgFile', 'selectedCfgFile', 'removeCfgFile', 'addCfgFile',
+    'submitCreate', 'walletErr',
     'newWalletLogo', 'newWalletName', 'wClientPass'
   ])
+
+  // config file upload
+  const defaultCfgFileText = 'none selected'
+  fields.selectedCfgFile.textContent = defaultCfgFileText
+  const resetCfgFileUpload = () => {
+    fields.cfgFile.value = ''
+    fields.selectedCfgFile.textContent = defaultCfgFileText
+    Doc.hide(fields.removeCfgFile)
+    Doc.show(fields.addCfgFile)
+  }
+  Doc.bind(fields.cfgFile, 'change', () => {
+    const files = fields.cfgFile.files
+    if (!files.length) return
+    fields.selectedCfgFile.textContent = files[0].name
+    Doc.show(fields.removeCfgFile)
+    Doc.hide(fields.addCfgFile)
+  })
+  Doc.bind(fields.removeCfgFile, 'click', resetCfgFileUpload)
+  Doc.bind(fields.addCfgFile, 'click', () => fields.cfgFile.click())
+
   var currentAsset
   form.setAsset = asset => {
+    if (currentAsset && currentAsset.id !== asset.id) {
+      // adding wallet for a different asset, clear form
+      fields.acctName.value = ''
+      fields.newWalletPass.value = ''
+      resetCfgFileUpload()
+      Doc.hide(fields.walletErr)
+    }
     currentAsset = asset
     fields.newWalletLogo.src = Doc.logoPath(asset.symbol)
     fields.newWalletName.textContent = asset.info.name
   }
+
   bind(form, fields.submitCreate, async () => {
     Doc.hide(fields.walletErr)
+    var config = ''
+    if (fields.cfgFile.value) {
+      config = await fields.cfgFile.files[0].text()
+    }
     const create = {
       assetID: parseInt(currentAsset.id),
       pass: fields.newWalletPass.value,
       account: fields.acctName.value,
-      inipath: fields.iniPath.value,
+      config: config,
       appPass: fields.wClientPass.value
     }
     fields.wClientPass.value = ''

@@ -45,8 +45,13 @@
           <input type="password" class="form-control select" id="newWalletPass" autocomplete="off">
         </div>
         <div>
-          <label for="iniPath" class="pt-3 pl-1 mb-1">Configuration Filepath</label>
-          <input type="text" class="form-control select" placeholder="leave empty to use default path" id="iniPath">
+          <div class="pt-3 pl-1 mb-1 pointer">Configuration File</div>
+          <input type="file" class="form-control select d-none" id="cfgFile">
+          <div class="pl-1 mt-2 fs15">
+            <span id="selectedCfgFile">none selected</span>
+            <span class="underline ml-3 pointer d-hide" id="removeCfgFile">remove</span>
+            <span class="underline ml-3 pointer" id="addCfgFile">select a file</span>
+          </div>
         </div>
         <div>
           <label for="wClientPass" class="pt-3 pl-1 mb-0">Client Password</label>

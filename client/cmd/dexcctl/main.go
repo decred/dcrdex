@@ -58,10 +58,13 @@ var promptPasswords = map[string][]string{
 	"register":   {"App password:"},
 }
 
-// readCerts is a map of routes to TLS certificate indexes.
-var readCerts = map[string]int{
+// optionalTextFiles is a map of routes to arg index for routes that should read
+// the text content of a file, where the file path _may_ be found in the route's
+// cmd args at the specified index.
+var optionalTextFiles = map[string]int{
 	"preregister": 1,
 	"register":    2,
+	"newwallet":   2,
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting
@@ -83,24 +86,24 @@ func promptPWs(ctx context.Context, cmd string) ([]encode.PassBytes, error) {
 	return pws, nil
 }
 
-// readCert reads TLS certificate content located in a file specified at args'
-// index as expected for cmd and replaces it with the file as a string. The
-// passed args are modified.
-func readCert(cmd string, args []string) error {
-	idx, exists := readCerts[cmd]
-	// Certs are optional, so it is not an error if they are not included.
-	if !exists || len(args) < idx+1 || args[idx] == "" {
+// readTextFile reads the text content of the file whose path is specified at
+// args' index as expected for cmd and sets the args value at the expected index
+// to the file's text content. The passed args are modified.
+func readTextFile(cmd string, args []string) error {
+	fileArgIndx, readFile := optionalTextFiles[cmd]
+	// Not an error if file path arg is not provided for optional file args.
+	if !readFile || len(args) < fileArgIndx+1 || args[fileArgIndx] == "" {
 		return nil
 	}
-	path := cleanAndExpandPath(args[idx])
+	path := cleanAndExpandPath(args[fileArgIndx])
 	if !fileExists(path) {
-		return fmt.Errorf("no cert file found at %s", path)
+		return fmt.Errorf("no file found at %s", path)
 	}
-	certB, err := ioutil.ReadFile(path)
+	fileContents, err := ioutil.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("error reading %s: %v", path, err)
 	}
-	args[idx] = string(certB)
+	args[fileArgIndx] = string(fileContents)
 	return nil
 }
 
@@ -148,7 +151,7 @@ func run(ctx context.Context) error {
 	}
 
 	// Attempt to read TLS certificates.
-	err = readCert(args[0], params)
+	err = readTextFile(args[0], params)
 	if err != nil {
 		return err
 	}

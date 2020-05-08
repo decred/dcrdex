@@ -144,9 +144,9 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	// Wallet does not exist yet. Try to create it.
 	err = s.core.CreateWallet(form.AppPass, form.WalletPass, &core.WalletForm{
-		AssetID: form.AssetID,
-		Account: form.Account,
-		INIPath: form.INIPath,
+		AssetID:    form.AssetID,
+		Account:    form.Account,
+		ConfigText: form.ConfigText,
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("error creating %s wallet: %v",
@@ -390,7 +390,7 @@ var helpMsgs = map[string]helpMsg{
 	},
 	newWalletRoute: {
 		pwArgsShort: `"appPass" "walletPass"`,
-		argsShort:   `assetID "account" "inipath"`,
+		argsShort:   `assetID "account" ("config")`,
 		cmdSummary:  `Connect to a new wallet.`,
 		pwArgsLong: `Password Args:
     appPass (string): The dex client password.
@@ -399,7 +399,7 @@ var helpMsgs = map[string]helpMsg{
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
     account (string): The account or wallet name, depending on wallet software.
-    inipath (string): The location of the wallet's config file.`,
+    config (string): Optional. The path to the wallet's config file.`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
 	},
