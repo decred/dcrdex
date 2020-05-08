@@ -639,8 +639,11 @@ Registration is complete after the fee transaction has been confirmed.`,
             "fundConf" (int): The number of confirmations needed before coins
 	      can be traded.
           },...
-        },
-        "feePending" (bool): Whether the dex fee is pending.
+		},
+        "confsrequired": (int) The number of confirmations needed for the 
+        registration fee payment
+        "confs" (int): The current number of confirmations for the registration
+        fee payment. This is only present during the registration process.
       },...
     }`,
 	},

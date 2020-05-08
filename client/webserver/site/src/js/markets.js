@@ -56,6 +56,9 @@ export default class MarketsPage extends BasePage {
       // Templates, loaders, chart div...
       'marketLoader', 'marketChart', 'marketList', 'rowTemplate', 'buyRows',
       'sellRows', 'marketSearch',
+      // Registration status
+      'registrationStatus', 'regStatusTitle', 'regStatusMessage', 'regStatusConfsDisplay',
+      'regStatusDex', 'confReq',
       // Order form.
       'orderForm', 'priceBox', 'buyBttn', 'sellBttn', 'baseBalance',
       'quoteBalance', 'limitBttn', 'marketBttn', 'tifBox', 'submitBttn',
@@ -77,6 +80,7 @@ export default class MarketsPage extends BasePage {
       'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit'
     ])
     this.market = null
+    this.registrationStatus = {}
     this.currentForm = null
     this.openAsset = null
     this.openFunc = null
@@ -189,7 +193,8 @@ export default class MarketsPage extends BasePage {
       order: note => { this.handleOrderNote(note) },
       epoch: note => { this.handleEpochNote(note) },
       conn: note => { this.marketList.setConnectionStatus(note) },
-      balance: note => { this.handleBalanceNote(note) }
+      balance: note => { this.handleBalanceNote(note) },
+      feepayment: note => { this.handleFeePayment(note) }
     }
 
     // Fetch the first market in the list, or the users last selected market, if
@@ -206,6 +211,9 @@ export default class MarketsPage extends BasePage {
         td.textContent = Doc.timeSince(td.parentNode.order.stamp)
       })
     }, 1000)
+
+    // set the initial state for the registration status
+    this.setRegistrationStatusVisibility()
   }
 
   /* isSell is true if the user has selected sell in the order options. */
@@ -254,6 +262,66 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     Doc.show(page.orderForm)
     Doc.hide(page.loaderMsg)
+  }
+
+  /* setRegistrationStatusView sets the text content and class for the
+   * registration status view
+   */
+  setRegistrationStatusView (titleContent, confStatusMsg, titleClass) {
+    const page = this.page
+    page.regStatusTitle.textContent = titleContent
+    page.regStatusConfsDisplay.textContent = confStatusMsg
+    page.registrationStatus.classList.remove('completed', 'error', 'waiting')
+    page.registrationStatus.classList.add(titleClass)
+  }
+
+  /*
+   * updateRegistrationStatusView updates the view based on the current
+   * registration status
+   */
+  updateRegistrationStatusView (dexAddr, feePaid, confirmationsRequired, confirmations) {
+    const page = this.page
+
+    page.confReq.textContent = confirmationsRequired
+    page.regStatusDex.textContent = dexAddr
+
+    if (feePaid) {
+      this.setRegistrationStatusView('Registration fee payment successful!', '', 'completed')
+      return
+    }
+
+    const confStatusMsg = `${confirmations} / ${confirmationsRequired}`
+
+    this.setRegistrationStatusView('Waiting for confirmations...', confStatusMsg, 'waiting')
+  }
+
+  /*
+   * setRegistrationStatusVisibility toggles the registration status view based
+   * on the dex data.
+   */
+  setRegistrationStatusVisibility () {
+    const { page, market: { dex } } = this
+    const { confs, confsrequired } = dex
+    const feePending = typeof confs === 'number'
+
+    this.updateRegistrationStatusView(dex.host, !feePending, confsrequired, confs)
+
+    if (feePending) {
+      Doc.hide(page.orderForm)
+      Doc.show(page.registrationStatus)
+    } else {
+      const toggle = () => {
+        Doc.hide(page.registrationStatus)
+        Doc.show(page.orderForm)
+      }
+      if (Doc.isHidden(page.orderForm)) {
+        // wait a couple of seconds before showing the form so the success
+        // message is shown to the user
+        setTimeout(toggle, 5000)
+        return
+      }
+      toggle()
+    }
   }
 
   /* setMarket sets the currently displayed market. */
@@ -653,6 +721,18 @@ export default class MarketsPage extends BasePage {
       return
     }
     this.showVerify()
+  }
+
+  /*
+   * handleFeePayment is the handler for the 'feepayment' notification type.
+   * This is used to update the registration status of the currrent exchange.
+   */
+  handleFeePayment (note) {
+    const dexAddr = note.dex
+    if (dexAddr !== this.market.dex.host) return
+    // update local dex
+    this.market.dex = app.exchanges[dexAddr]
+    this.setRegistrationStatusVisibility()
   }
 
   /*

@@ -172,11 +172,13 @@ func (m *Market) marketName() string {
 
 // Exchange represents a single DEX with any number of markets.
 type Exchange struct {
-	Host       string                `json:"host"`
-	Markets    map[string]*Market    `json:"markets"`
-	Assets     map[uint32]*dex.Asset `json:"assets"`
-	FeePending bool                  `json:"feePending"`
-	Connected  bool                  `json:"connected"`
+	Host          string                `json:"host"`
+	Markets       map[string]*Market    `json:"markets"`
+	Assets        map[uint32]*dex.Asset `json:"assets"`
+	FeePending    bool                  `json:"feePending"`
+	Connected     bool                  `json:"connected"`
+	ConfsRequired uint32                `json:"confsrequired"`
+	RegConfirms   *uint32               `json:"confs,omitempty"`
 }
 
 // newDisplayID creates a display-friendly market ID for a base/quote ID pair.

@@ -100,20 +100,20 @@ type Notification interface {
 // FeePaymentNote is a notification regarding registration fee payment.
 type FeePaymentNote struct {
 	db.Notification
-	ConfirmationsRequired uint32 `json:"confirmationsrequired,omitempty"`
-	Confirmations         uint32 `json:"confirmations,omitempty"`
+	Confirmations *uint32 `json:"confirmations,omitempty"`
+	Dex           string  `json:"dex,omitempty"`
 }
 
-func newFeePaymentNote(subject, details string, severity db.Severity) *FeePaymentNote {
+func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
 	return &FeePaymentNote{
-		Notification: db.NewNotification("fee payment", subject, details, severity),
+		Notification: db.NewNotification("feepayment", subject, details, severity),
+		Dex:          addrHost(dexAddr),
 	}
 }
 
-func newFeePaymentNoteWithConfirmations(subject, details string, severity db.Severity, reqConfs uint32, currConfs uint32) *FeePaymentNote {
-	feePmtNt := newFeePaymentNote(subject, details, severity)
-	feePmtNt.ConfirmationsRequired = reqConfs
-	feePmtNt.Confirmations = currConfs
+func newFeePaymentNoteWithConfirmations(subject, details string, severity db.Severity, currConfs uint32, dexAddr string) *FeePaymentNote {
+	feePmtNt := newFeePaymentNote(subject, details, severity, dexAddr)
+	feePmtNt.Confirmations = &currConfs
 	return feePmtNt
 }
 
