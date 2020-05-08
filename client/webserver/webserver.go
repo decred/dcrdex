@@ -81,6 +81,7 @@ type clientCore interface {
 	Cancel(pw []byte, sid string) error
 	NotificationFeed() <-chan core.Notification
 	AckNotes([]dex.Bytes)
+	Logout() error
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
@@ -245,6 +246,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/connectwallet", s.apiConnect)
 		r.Post("/trade", s.apiTrade)
 		r.Post("/cancel", s.apiCancel)
+		r.Post("/logout", s.apiLogout)
 	})
 
 	// Files

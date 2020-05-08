@@ -6,6 +6,7 @@ package webserver
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
@@ -300,4 +301,27 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, format string, a ...int
 		Msg: errMsg,
 	}
 	writeJSON(w, resp, s.indent)
+}
+
+// apiLogout handles the 'logout' API request.
+func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
+	err := s.core.Logout()
+	if err != nil {
+		s.writeAPIError(w, "Sign out with error: %v", err)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:    authCK,
+		Path:    "/",
+		Value:   "",
+		Expires: time.Unix(0, 0),
+	})
+
+	response := struct {
+		OK bool `json:"ok"`
+	}{
+		OK: true,
+	}
+	writeJSON(w, response, s.indent)
 }

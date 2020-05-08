@@ -273,6 +273,7 @@ func (c *TCore) Register(r *core.RegisterForm) error {
 	return nil
 }
 func (c *TCore) Login([]byte) ([]*db.Notification, error) { return nil, nil }
+func (c *TCore) Logout() ([]*db.Notification, error)      { return nil, nil }
 
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	c.midGap = randomMagnitude(-2, 4)
