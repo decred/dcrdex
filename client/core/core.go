@@ -2489,3 +2489,25 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 	}
 	return nil
 }
+
+// Logout logs the user out
+func (c *Core) Logout() error {
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	for _, asset := range c.user.Assets {
+		for _, dc := range c.conns {
+			if dc.hasOrders(asset.ID) {
+				return fmt.Errorf("cannot logs out with active orders, wallet %s ", unbip(asset.ID))
+			}
+			dc.acct.lock()
+		}
+		wallet, found := c.wallet(asset.ID)
+		if found && wallet.connected() {
+			if err := wallet.Lock(); err != nil {
+				return err
+			}
+		}
+	}
+	c.refreshUser()
+	return nil
+}
