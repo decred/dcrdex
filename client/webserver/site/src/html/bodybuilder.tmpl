@@ -44,9 +44,9 @@
       <span class="ico-bell fs20 hoverbright" id="noteBell"></span>
     </span>
     <span class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="profileMenuEntry">
-      <div id="profileBox">
-        <div class="note-header fs20 demi" id="profileSignout">
-          Signout
+      <div id="profileBox" class="profile-box">
+        <div class="profile-header fs20 demi" id="profileSignout">
+          Sign Out
         </div>
       </div>
       <span class="ico-profile fs20 hoverbright" id="profileIcon"></span>
@@ -60,7 +60,7 @@
 {{end}}
 
 {{define "bottom"}}
-<script src="/js/entry.js?v=1"></script>
+<script src="/js/entry.js?v=2"></script>
 </body>
 </html>
 {{end}}

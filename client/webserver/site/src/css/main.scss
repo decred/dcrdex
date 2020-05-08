@@ -218,7 +218,8 @@ div.poke-note.active {
   font-family: $sans;
 }
 
-div.note-header {
+div.note-header,
+div.profile-header {
   margin: 0 5px;
   padding: 10px 5px;
   border-bottom-style: solid;
@@ -281,4 +282,16 @@ hr.dashed {
 
 .underline {
   text-decoration: underline;
+}
+
+#profileBox.profile-box {
+  max-width: 120px;
+  text-align: center;
+  cursor: pointer;
+  z-index: 2;
+
+  .profile-header {
+    text-decoration: underline;
+    font-size: 16px;
+  }
 }

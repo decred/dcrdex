@@ -16,7 +16,6 @@ const unbind = Doc.unbind
 
 const updateWalletRoute = 'update_wallet'
 const notificationRoute = 'notify'
-const authCK = 'dexauth'
 
 /* constructors is a map to page constructors. */
 const constructors = {
@@ -364,24 +363,16 @@ export default class Application {
   }
 
   /**
-   * Close all wallets if they are opening, if there is an error while closing wont logout,
-   * if successful will delete auth cookies and reload the page
+   * signOut call to /api/logout, if response with no errors occured reload the page,
+   * otherwise will show a notification
    */
   async signOut () {
-    try {
-      const closeWallet = async (asset) => {
-        if (asset.wallet && asset.wallet.open) {
-          const res = await postJSON('/api/closewallet', { assetID: asset.id })
-          if (!this.checkResponse(res)) throw res.msg
-        }
-      }
-      await Promise.all(
-        Object.keys(this.assets).map((assetID) => closeWallet(this.assets[assetID]))
-      )
-      State.removeCookie(authCK)
-      window.location.reload()
-    } catch (error) {
+    const res = await postJSON('/api/logout')
+    if (!this.checkResponse(res)) {
+      this.page.profileBox.style.display = 'none'
+      return
     }
+    window.location.reload()
   }
 }
 
