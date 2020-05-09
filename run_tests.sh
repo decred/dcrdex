@@ -36,9 +36,11 @@ cd $dir
 
 # check linters
 golangci-lint run --disable-all --deadline=10m \
+  --out-format=github-actions \
   --enable=goimports \
   --enable=govet \
   --enable=gosimple \
   --enable=unconvert \
   --enable=structcheck \
-  --enable=ineffassign
+  --enable=ineffassign \
+  --enable=asciicheck
