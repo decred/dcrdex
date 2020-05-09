@@ -33,12 +33,13 @@ const (
 )
 
 // Config holds the parameters needed to initialize an RPC connection to a btc
-// wallet or backend.
+// wallet or backend. Default values are used for RPCBind and/or RPCPort if not
+// set.
 type Config struct {
-	RPCUser string `ini:"rpcuser"`
-	RPCPass string `ini:"rpcpassword"`
-	RPCBind string `ini:"rpcbind"`
-	RPCPort int    `ini:"rpcport"`
+	RPCUser string `ini:"rpcuser, JSON-RPC Username, JSON-RPC user"`
+	RPCPass string `ini:"rpcpassword, JSON-RPC Password, JSON-RPC password"`
+	RPCBind string `ini:"rpcbind, JSON-RPC Address, Can be <addr> or <addr>:<port>, which would override rpcport"`
+	RPCPort int    `ini:"rpcport, JSON-RPC Port, JSON-RPC port"`
 }
 
 // LoadConfigFromPath loads the configuration settings from the specified filepath.

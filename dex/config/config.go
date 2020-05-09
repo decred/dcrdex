@@ -17,13 +17,13 @@ func Parse(cfgPathOrData interface{}) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	options := make(map[string]string)
+	cfgKeyValues := make(map[string]string)
 	for _, section := range cfgFile.Sections() {
 		for _, key := range section.Keys() {
-			options[key.Name()] = key.String()
+			cfgKeyValues[key.Name()] = key.String()
 		}
 	}
-	return options, nil
+	return cfgKeyValues, nil
 }
 
 // ParseInto parses config options from the provided config file path or []byte

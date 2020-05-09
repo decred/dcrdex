@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
 )
 
 // CoinNotFoundError is returned from AuditContract when the counter-party's
@@ -24,6 +25,11 @@ type WalletInfo struct {
 	// DefaultConfigPath is the default file path that the Wallet uses for its
 	// configuration file.
 	DefaultConfigPath string `json:"configpath"`
+	// ConfigOpts is a slice of expected Wallet config options, with the display
+	// name, config key (for parsing the option from a config file/text) and
+	// description for each option. This can be used to request config info from
+	// users e.g. via dynamically generated GUI forms.
+	ConfigOpts []*config.Option `json:"configopts"`
 	// DefaultFeeRate is the default fee rate used for withdraws.
 	DefaultFeeRate uint64 `json:"feerate"`
 }

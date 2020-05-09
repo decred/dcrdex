@@ -23,6 +23,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/config"
 	dexdcr "decred.org/dcrdex/dex/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
@@ -48,6 +49,7 @@ var (
 		Name:              "Decred",
 		Units:             "atoms",
 		DefaultConfigPath: defaultConfigPath,
+		ConfigOpts:        config.Options(&Config{}),
 		DefaultFeeRate:    defaultWithdrawalFee,
 	}
 )
