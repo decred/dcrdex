@@ -1,6 +1,15 @@
 import Doc from './doc'
 import { postJSON } from './http'
 
+var configInputField = (option) => {
+  return `
+  <div>
+    <label for="${option.key}" class="pl-1 mb-1 small">${option.displayname || option.key}</label>
+    <input type="text" class="form-control select" placeholder="${option.description}" id="${option.key}">
+  </div>
+  `
+}
+
 /*
  * bindNewWalletForm is used with the "newWalletForm" template. The enclosing
  * <form> element should be the second argument.
@@ -10,42 +19,44 @@ export function bindNewWallet (app, form, success) {
   // This form is only shown the first time the user visits the /register page.
   const fields = Doc.parsePage(form, [
     'acctName', 'newWalletPass',
-    'cfgFile', 'selectedCfgFile', 'removeCfgFile', 'addCfgFile',
+    'walletSettings', 'walletSettingsInputs', 'selectCfgFile',
+    'walletConfig', 'cfgFile', 'selectedCfgFile', 'removeCfgFile',
     'submitCreate', 'walletErr',
     'newWalletLogo', 'newWalletName', 'wClientPass'
   ])
 
-  // config file upload
-  const defaultCfgFileText = 'none selected'
-  fields.selectedCfgFile.textContent = defaultCfgFileText
-  const resetCfgFileUpload = () => {
-    fields.cfgFile.value = ''
-    fields.selectedCfgFile.textContent = defaultCfgFileText
-    Doc.hide(fields.removeCfgFile)
-    Doc.show(fields.addCfgFile)
+  // wallet settings form
+  const resetWalletSettingsForm = (configOpts) => {
+    fields.walletSettingsInputs.innerHTML = configOpts.map(configInputField).join('\n')
+    Doc.show(fields.walletSettings)
+    Doc.hide(fields.walletConfig)
   }
+  Doc.bind(fields.selectCfgFile, 'click', () => fields.cfgFile.click())
+
+  // config file upload
   Doc.bind(fields.cfgFile, 'change', () => {
     const files = fields.cfgFile.files
-    if (!files.length) return
     fields.selectedCfgFile.textContent = files[0].name
-    Doc.show(fields.removeCfgFile)
-    Doc.hide(fields.addCfgFile)
+    Doc.show(fields.walletConfig)
+    Doc.hide(fields.walletSettings)
   })
-  Doc.bind(fields.removeCfgFile, 'click', resetCfgFileUpload)
-  Doc.bind(fields.addCfgFile, 'click', () => fields.cfgFile.click())
+  Doc.bind(fields.removeCfgFile, 'click', () => {
+    fields.cfgFile.value = ''
+    fields.selectedCfgFile.textContent = ''
+    Doc.show(fields.walletSettings)
+    Doc.hide(fields.walletConfig)
+  })
 
   var currentAsset
   form.setAsset = asset => {
-    if (currentAsset && currentAsset.id !== asset.id) {
-      // adding wallet for a different asset, clear form
-      fields.acctName.value = ''
-      fields.newWalletPass.value = ''
-      resetCfgFileUpload()
-      Doc.hide(fields.walletErr)
-    }
+    if (currentAsset && currentAsset.id === asset.id) return
     currentAsset = asset
     fields.newWalletLogo.src = Doc.logoPath(asset.symbol)
     fields.newWalletName.textContent = asset.info.name
+    fields.acctName.value = ''
+    fields.newWalletPass.value = ''
+    resetWalletSettingsForm(asset.info.configopts)
+    Doc.hide(fields.walletErr)
   }
 
   bind(form, fields.submitCreate, async () => {
@@ -53,6 +64,10 @@ export function bindNewWallet (app, form, success) {
     var config = ''
     if (fields.cfgFile.value) {
       config = await fields.cfgFile.files[0].text()
+    } else {
+      config = currentAsset.info.configopts.map(option => {
+        return `${option.key}=${Doc.idel(form, option.key).value}`
+      }).join('\n')
     }
     const create = {
       assetID: parseInt(currentAsset.id),
