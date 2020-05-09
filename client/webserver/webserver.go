@@ -195,15 +195,42 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	mux.Use(securityMiddleware)
 	mux.Use(middleware.Recoverer)
 	mux.Use(s.authMiddleware)
+
 	// Websocket endpoint
 	mux.Get("/ws", s.handleWS)
+
 	// Webpages
-	mux.Get(homeRoute, s.handleHome)
-	mux.Get(registerRoute, s.handleRegister)
-	mux.Get(loginRoute, s.handleLogin)
-	mux.Get(marketsRoute, s.handleMarkets)
-	mux.Get(walletsRoute, s.handleWallets)
-	mux.Get(settingsRoute, s.handleSettings)
+	mux.Group(func(web chi.Router) {
+		// The register page and settings page are always allowed.
+		// The register page performs init if needed, along with
+		// initial setup and is also used to register more DEXs
+		// after initial setup.
+		web.Get(registerRoute, s.handleRegister)
+		web.Get(settingsRoute, s.handleSettings)
+
+		// The rest of the web handlers require initialization.
+		web.Group(func(webInit chi.Router) {
+			webInit.Use(s.requireInit)
+			// The login handler is the only one that requires init but not auth
+			// since it performs the auth.
+			webInit.Get(loginRoute, s.handleLogin)
+
+			// The rest of these handlers require auth.
+			webInit.Group(func(webAuth chi.Router) {
+				webAuth.Use(s.requireLogin)
+				webAuth.Get(walletsRoute, s.handleWallets)
+
+				// These handlers require a DEX connection.
+				webAuth.Group(func(webDC chi.Router) {
+					webDC.Use(s.requireDEXConnection)
+					webDC.Get(homeRoute, s.handleHome)
+					webDC.Get(marketsRoute, s.handleMarkets)
+				})
+			})
+		})
+	})
+
+	// api endpoints
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Post("/getfee", s.apiGetFee)
@@ -219,6 +246,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/trade", s.apiTrade)
 		r.Post("/cancel", s.apiCancel)
 	})
+
 	// Files
 	fileServer(mux, "/js", join(root, "dist"))
 	fileServer(mux, "/css", join(root, "dist"))
@@ -358,45 +386,6 @@ func extractUserInfo(r *http.Request) *userInfo {
 		return &userInfo{}
 	}
 	return user
-}
-
-// securityMiddleware adds security headers to the server responses.
-func securityMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("x-frame-options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'self';  font-src 'self'; connect-src 'self'")
-		w.Header().Set("Feature-Policy", "geolocation 'none'; midi 'none'; notifications 'none'; push 'none'; sync-xhr 'self'; microphone 'none'; camera 'none'; magnetometer 'none'; gyroscope 'none'; speaker 'none'; vibrate 'none'; fullscreen 'self'; payment 'none'")
-		next.ServeHTTP(w, r)
-	})
-}
-
-// authMiddleware checks incoming requests for cookie-based information
-// including the auth token.
-func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// darkMode cookie.
-		var darkMode bool
-		cookie, err := r.Cookie(darkModeCK)
-		switch err {
-		// Dark mode is the default
-		case nil:
-			darkMode = cookie.Value == "1"
-		case http.ErrNoCookie:
-			darkMode = true
-		default:
-			log.Errorf("Cookie dark mode retrieval error: %v", err)
-		}
-
-		ctx := context.WithValue(r.Context(), ctxKeyUserInfo, &userInfo{
-			User:     s.core.User(),
-			Authed:   s.isAuthed(r),
-			DarkMode: darkMode,
-		})
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
 }
 
 // FileServer sets up a http.FileServer handler to serve static files from a

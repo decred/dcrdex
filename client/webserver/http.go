@@ -34,60 +34,6 @@ func (s *WebServer) sendTemplate(w http.ResponseWriter, tmplID string, data inte
 	io.WriteString(w, page)
 }
 
-// allow checks if the user should be allowed to visit the requested route.
-// If not, a different (recommended) page handler is invoked to handle the
-// request.
-func (s *WebServer) allow(route string, w http.ResponseWriter, r *http.Request) bool {
-	user := extractUserInfo(r)
-	isLoginRoute := route == loginRoute
-	dexConnected := len(user.Exchanges) > 0
-
-	if !user.Initialized {
-		isRegisterRoute := route == registerRoute
-		if !isRegisterRoute {
-			s.handleRegister(w, r)
-		}
-		return isRegisterRoute
-	}
-
-	// Once initialized, all pages except "/login" requires user to be logged in.
-	if !user.Authed {
-		if !isLoginRoute {
-			s.handleLogin(w, r)
-		}
-		return isLoginRoute
-	}
-
-	// Disallow visits to the markets page if the user has not connected a DEX,
-	// redirect to the registration page instead. The registration page walks
-	// the user through setting up their app password, connecting their Decred
-	// wallet, connecting a DEX server and paying the server fee.
-	if route == marketsRoute && !dexConnected {
-		s.handleRegister(w, r)
-		return false
-	}
-
-	// Disallow visits to the login page since the user is already logged in at
-	// this point. Redirect to the markets page instead since the user has also
-	// connected at least 1 DEX.
-	if isLoginRoute {
-		s.handleMarkets(w, r)
-		return false
-	}
-
-	return true
-}
-
-// handleHome is the handler for the '/' page request. The response depends on
-// whether the user is authenticated or not and whether the user has connected
-// a DEX server.
-func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
-	if !s.allow(homeRoute, w, r) {
-		return
-	}
-	s.handleMarkets(w, r)
-}
-
 // CommonArguments are common page arguments that must be supplied to every
 // page to populate the <title> and <header> elements.
 type CommonArguments struct {
@@ -103,12 +49,20 @@ func commonArgs(r *http.Request, title string) *CommonArguments {
 	}
 }
 
+// handleHome is the handler for the '/' page request. It redirects the
+// requester to the markets page.
+func (s *WebServer) handleHome(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, marketsRoute, http.StatusSeeOther)
+}
+
 // handleLogin is the handler for the '/login' page request.
 func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if !s.allow(loginRoute, w, r) {
+	cArgs := commonArgs(r, "Login | Decred DEX")
+	if cArgs.UserInfo.Authed {
+		http.Redirect(w, r, marketsRoute, http.StatusSeeOther)
 		return
 	}
-	s.sendTemplate(w, "login", commonArgs(r, "Login | Decred DEX"))
+	s.sendTemplate(w, "login", cArgs)
 }
 
 // registerTmplData is template data for the /register page.
@@ -122,16 +76,22 @@ type registerTmplData struct {
 
 // handleRegister is the handler for the '/register' page request.
 func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
-	user := extractUserInfo(r)
+	cArgs := commonArgs(r, "Register | Decred DEX")
+	if cArgs.UserInfo.Initialized && !cArgs.UserInfo.Authed {
+		// Initialized app should login before using the Register page.
+		http.Redirect(w, r, loginRoute, http.StatusSeeOther)
+		return
+	}
+
 	feeAssetID, _ := dex.BipSymbolID("dcr")
 	feeWalletStatus := s.core.WalletState(feeAssetID)
 	feeWalletExists := feeWalletStatus != nil
 	feeWalletOpen := feeWalletExists && feeWalletStatus.Open
 
 	data := &registerTmplData{
-		CommonArguments: *commonArgs(r, "Register | Decred DEX"),
+		CommonArguments: *cArgs,
 	}
-	if !user.Initialized {
+	if !cArgs.UserInfo.Initialized {
 		data.InitStep = true
 	} else if !feeWalletExists {
 		data.WalletStep = true
@@ -152,13 +112,10 @@ type marketTmplData struct {
 
 // handleMarkets is the handler for the '/markets' page request.
 func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
-	if !s.allow(marketsRoute, w, r) {
-		return
-	}
-	user := extractUserInfo(r)
+	cArgs := commonArgs(r, "Markets | Decred DEX")
 	s.sendTemplate(w, "markets", &marketTmplData{
-		CommonArguments: *commonArgs(r, "Markets | Decred DEX"),
-		Exchanges:       user.Exchanges,
+		CommonArguments: *cArgs,
+		Exchanges:       cArgs.UserInfo.Exchanges,
 	})
 }
 
@@ -169,9 +126,6 @@ type walletsTmplData struct {
 
 // handleWallets is the handler for the '/wallets' page request.
 func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
-	if !s.allow(walletsRoute, w, r) {
-		return
-	}
 	assetMap := s.core.SupportedAssets()
 	// Sort assets by 1. wallet vs no wallet, and 2) alphabetically.
 	assets := make([]*core.SupportedAsset, 0, len(assetMap))

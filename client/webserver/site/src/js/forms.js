@@ -54,9 +54,8 @@ export function bindNewWallet (app, form, success) {
     fields.nwAssetName.textContent = asset.info.name
     fields.acctName.value = ''
     fields.newWalletPass.value = ''
-    fields.submitAdd.textContent = `Add ${asset.info.name} Wallet`
     resetWalletSettingsForm(asset.info.configopts)
-    Doc.hide(fields.walletErr)
+    Doc.hide(fields.newWalletErr)
   }
   bind(form, fields.submitAdd, async () => {
     if (fields.newWalletPass.value === '') {
