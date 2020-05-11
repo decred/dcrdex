@@ -21,6 +21,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
 	"github.com/decred/dcrd/certgen"
+	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
@@ -291,7 +292,7 @@ func (s *Server) banish(ip string) {
 // run as a goroutine.
 func (s *Server) websocketHandler(wg *sync.WaitGroup, conn ws.Connection, ip string) {
 	defer wg.Done()
-	log.Tracef("New websocket client %s", ip)
+	log.Debugf("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
@@ -308,6 +309,25 @@ func (s *Server) websocketHandler(wg *sync.WaitGroup, conn ws.Connection, ip str
 		s.banish(client.IP())
 	}
 	log.Tracef("Disconnected websocket client %s", ip)
+}
+
+// Broadcast sends a message to all connected clients. The message should be a
+// notification. See msgjson.NewNotification.
+func (s *Server) Broadcast(msg *msgjson.Message) {
+	s.clientMtx.RLock()
+	defer s.clientMtx.RUnlock()
+
+	log.Infof("Broadcasting %s for route %s to %d clients...", msg.Type, msg.Route, len(s.clients))
+	if log.Level() <= slog.LevelTrace { // don't marshal unless needed
+		log.Tracef("Broadcast: %q", msg.String())
+	}
+
+	for id, cl := range s.clients {
+		if err := cl.Send(msg); err != nil {
+			log.Debugf("Send to client %d at %s failed: %v", id, cl.IP(), err)
+			cl.Disconnect() // triggers return of websocketHandler, and removeClient
+		}
+	}
 }
 
 // disconnectClients calls disconnect on each wsLink, but does not remove it

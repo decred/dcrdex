@@ -500,7 +500,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	auth.addClient(client)
-	log.Tracef("user %x connected", acctInfo.ID[:])
+	log.Debugf("User %s connected from %s.", acctInfo.ID, conn.IP())
 	return nil
 }
 

@@ -41,11 +41,13 @@ type wsConnStub struct {
 	read    int
 	close   int
 	lastMsg []byte
+	recv    chan []byte
 }
 
 func newWsStub() *wsConnStub {
 	return &wsConnStub{
-		msg:  make(chan []byte),
+		msg: make(chan []byte),
+		// recv is nil unless a test wants to receive
 		quit: make(chan struct{}),
 	}
 }
@@ -97,6 +99,10 @@ func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
 		return nil
 	}
 	conn.lastMsg = msg
+	// Send the message if their is a receiver for the current test.
+	if conn.recv != nil {
+		conn.recv <- msg
+	}
 	conn.write++
 	writeErrMtx.Lock()
 	defer writeErrMtx.Unlock()
@@ -145,6 +151,11 @@ func makeReq(route, msg string) *msgjson.Message {
 func makeResp(id uint64, msg string) *msgjson.Message {
 	resp, _ := msgjson.NewResponse(id, json.RawMessage(msg), nil)
 	return resp
+}
+
+func makeNtfn(route, msg string) *msgjson.Message {
+	ntfn, _ := msgjson.NewNotification(route, json.RawMessage(msg))
+	return ntfn
 }
 
 func sendToConn(t *testing.T, conn *wsConnStub, method, msg string) {
@@ -499,6 +510,25 @@ func TestClientResponses(t *testing.T) {
 		server.disconnectClients()
 		wg.Wait()
 	}()
+
+	// Test Broadcast
+	conn.recv = make(chan []byte)                    // for WriteMessage in this test
+	server.Broadcast(makeNtfn("someNote", `"blah"`)) // async conn.recv <- msg send
+	msgBytes := <-conn.recv
+	conn.recv = nil // all done with this chan
+	msg, err := msgjson.DecodeMessage(msgBytes)
+	if err != nil {
+		t.Fatalf("error decoding last message: %v", err)
+	}
+	var note string
+	err = json.Unmarshal(msg.Payload, &note)
+	if err != nil {
+		return
+	}
+	conn.lastMsg = nil
+	if note != "blah" {
+		t.Errorf("wrong note: %s", note)
+	}
 
 	// Send a request from the server to the client, setting a flag when the
 	// client responds.

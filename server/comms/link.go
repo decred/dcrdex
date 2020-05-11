@@ -19,8 +19,10 @@ const outBufferSize = 128
 // reference implementation of a Link-satisfying type is the wsLink, which
 // passes messages over a websocket connection.
 type Link interface {
-	// ID will return a unique ID by which this connection can be identified.
+	// ID returns a unique ID by which this connection can be identified.
 	ID() uint64
+	// IP returns the IP address of the peer.
+	IP() string
 	// Send sends the msgjson.Message to the client.
 	Send(msg *msgjson.Message) error
 	// Request sends the Request-type msgjson.Message to the client and registers
@@ -69,8 +71,14 @@ func (c *wsLink) Banish() {
 	c.Disconnect()
 }
 
+// ID returns a unique ID by which this connection can be identified.
 func (c *wsLink) ID() uint64 {
 	return c.id
+}
+
+// IP returns the IP address of the peer.
+func (c *wsLink) IP() string {
+	return c.WSLink.IP()
 }
 
 func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
