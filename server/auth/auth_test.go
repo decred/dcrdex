@@ -92,6 +92,7 @@ type tReq struct {
 // tRPCClient satisfies the comms.Link interface.
 type TRPCClient struct {
 	id         uint64
+	ip         string
 	sendErr    error
 	requestErr error
 	banished   bool
@@ -100,6 +101,7 @@ type TRPCClient struct {
 }
 
 func (c *TRPCClient) ID() uint64 { return c.id }
+func (c *TRPCClient) IP() string { return c.ip }
 func (c *TRPCClient) Send(msg *msgjson.Message) error {
 	c.sends = append(c.sends, msg)
 	return c.sendErr
@@ -133,7 +135,10 @@ var tClientID uint64
 
 func tNewRPCClient() *TRPCClient {
 	tClientID++
-	return &TRPCClient{id: tClientID}
+	return &TRPCClient{
+		id: tClientID,
+		ip: "123.123.123.123",
+	}
 }
 
 var tAcctID uint64

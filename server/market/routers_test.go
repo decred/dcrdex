@@ -1101,6 +1101,7 @@ func (s *TBookSource) OrderFeed() <-chan *bookUpdateSignal {
 type TLink struct {
 	mtx      sync.Mutex
 	id       uint64
+	ip       string
 	sends    []*msgjson.Message
 	sendErr  error
 	banished bool
@@ -1112,11 +1113,13 @@ func tNewLink() *TLink {
 	linkCounter++
 	return &TLink{
 		id:    linkCounter,
+		ip:    "[1:800:dex:rules::]",
 		sends: make([]*msgjson.Message, 0),
 	}
 }
 
 func (conn *TLink) ID() uint64 { return conn.id }
+func (conn *TLink) IP() string { return conn.ip }
 func (conn *TLink) Send(msg *msgjson.Message) error {
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()
