@@ -277,8 +277,7 @@ type Prefix struct {
 	ServerTime time.Time
 	Commit     Commitment
 
-	id  *OrderID // cache of the order's OrderID
-	uid string   // cache of the order's UID
+	id *OrderID // cache of the order's OrderID
 }
 
 // P is an alias for Prefix. Embedding with the alias allows us to define a
@@ -308,7 +307,7 @@ func (p *Prefix) SetTime(t time.Time) {
 	p.ServerTime = t.UTC()
 	// SetTime should only ever be called once in practice, but in case it is
 	// necessary to restamp the ServerTime, clear any computed OrderID.
-	p.id, p.uid = nil, ""
+	p.id = nil
 }
 
 // User gives the user's account ID.
@@ -507,12 +506,7 @@ func (o *MarketOrder) ID() OrderID {
 
 // UID computes the order ID, returning the string representation.
 func (o *MarketOrder) UID() string {
-	if o.uid != "" {
-		return o.uid
-	}
-	uid := o.ID().String()
-	o.uid = uid
-	return uid
+	return o.ID().String()
 }
 
 // String is the same as UID. It is defined to satisfy Stringer.
@@ -568,12 +562,7 @@ func (o *LimitOrder) ID() OrderID {
 
 // UID computes the order ID, returning the string representation.
 func (o *LimitOrder) UID() string {
-	if o.uid != "" {
-		return o.uid
-	}
-	uid := o.ID().String()
-	o.uid = uid
-	return uid
+	return o.ID().String()
 }
 
 // String is the same as UID. It is defined to satisfy Stringer.
@@ -632,12 +621,7 @@ func (o *CancelOrder) ID() OrderID {
 
 // UID computes the order ID, returning the string representation.
 func (o *CancelOrder) UID() string {
-	if o.uid != "" {
-		return o.uid
-	}
-	uid := o.ID().String()
-	o.uid = uid
-	return uid
+	return o.ID().String()
 }
 
 // Trade returns a pointer to the orders embedded Trade.
