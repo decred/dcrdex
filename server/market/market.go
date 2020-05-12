@@ -251,8 +251,9 @@ func (m *Market) SubmitOrderAsync(rec *orderRecord) <-chan error {
 	// a second validation for (1) this Market and (2) epoch status, before
 	// putting it on the queue.
 	if err := m.validateOrder(rec.order); err != nil {
-		// Order ID may not be computed since ServerTime has not been set.
-		log.Debugf("SubmitOrderAsync: Invalid order received: %x: %v", rec.order.Serialize(), err)
+		// Order ID cannot be computed since ServerTime has not been set.
+		log.Debugf("SubmitOrderAsync: Invalid order received from user %v with commitment %v: %v",
+			rec.order.User(), rec.order.Commitment(), err)
 		errChan := make(chan error, 1)
 		errChan <- err // i.e. ErrInvalidOrder, ErrInvalidCommitment
 		return errChan
@@ -489,8 +490,10 @@ func (m *Market) Run(ctx context.Context) {
 				continue
 			}
 
-			// The order's server time stamp.
+			// Set the order's server time stamp, giving the order a valid ID.
 			sTime := time.Now().Truncate(time.Millisecond).UTC()
+			s.rec.order.SetTime(sTime) // Order.ID()/UID()/String() is OK now.
+			log.Tracef("Received order %v at %v", s.rec.order, sTime)
 
 			// Push the order into the next epoch if receiving and stamping it
 			// took just a little too long.
@@ -499,7 +502,7 @@ func (m *Market) Run(ctx context.Context) {
 			case currentEpoch.IncludesTime(sTime):
 				orderEpoch = currentEpoch
 			case nextEpoch.IncludesTime(sTime):
-				log.Warnf("Order %v (sTime=%d) fell into the next epoch [%d,%d)",
+				log.Infof("Order %v (sTime=%d) fell into the next epoch [%d,%d)",
 					s.rec.order, sTime.UnixNano(), nextEpoch.Start.Unix(), nextEpoch.End.Unix())
 				orderEpoch = nextEpoch
 			default:
@@ -511,7 +514,6 @@ func (m *Market) Run(ctx context.Context) {
 			}
 
 			// Stamp and process the order in the target epoch queue.
-			s.rec.order.SetTime(sTime)
 			err := m.processOrder(ctxRun, s.rec, orderEpoch, s.errChan)
 			if err != nil {
 				if ctxRun.Err() == nil {
@@ -600,6 +602,7 @@ func (m *Market) processOrder(ctx context.Context, rec *orderRecord, epoch *Epoc
 		log.Debugf("Received order %v with commitment %x also used in previous order %v!",
 			ord, commit, otherOid)
 		errChan <- ErrInvalidCommitment
+		return nil
 	}
 
 	// Verify that another cancel order targeting the same order is not already
@@ -770,7 +773,7 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 	}
 
 	// The preimage is good.
-	log.Tracef("Good preimage received for order %v: %x", reqData.ord.UID(), pi)
+	log.Tracef("Good preimage received for order %v: %x", reqData.ord, pi)
 	err = m.storage.StorePreimage(reqData.ord, pi)
 	if err != nil {
 		log.Errorf("StorePreimage: %v", err)
