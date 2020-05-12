@@ -45,7 +45,7 @@ const (
 	mkt3BaseRate  = 3e9
 	responseDelay = 10 // milliseconds
 
-	clientPreimageDelay = 125 * time.Millisecond
+	clientPreimageDelay = 75 * time.Millisecond
 )
 
 var (
@@ -113,12 +113,13 @@ func nowMs() time.Time {
 // The AuthManager handles client-related actions, including authorization and
 // communications.
 type TAuth struct {
-	authErr          error
-	sendsMtx         sync.Mutex
-	sends            []*msgjson.Message
-	piMtx            sync.Mutex
-	preimagesByMsgID map[uint64]order.Preimage
-	preimagesByOrdID map[string]order.Preimage
+	authErr            error
+	sendsMtx           sync.Mutex
+	sends              []*msgjson.Message
+	piMtx              sync.Mutex
+	preimagesByMsgID   map[uint64]order.Preimage
+	preimagesByOrdID   map[string]order.Preimage
+	handlePreimageDone chan struct{}
 }
 
 func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
@@ -172,6 +173,7 @@ func (a *TAuth) getSend() *msgjson.Message {
 func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
 	return a.RequestWithTimeout(user, msg, f, time.Hour, func() {})
 }
+
 func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message), expDur time.Duration, exp func()) error {
 	log.Infof("Request for user %v", user)
 	// Emulate the client.
@@ -198,6 +200,9 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 			// Simulate network latency before handling the response.
 			time.Sleep(clientPreimageDelay)
 			f(nil, resp)
+			if a.handlePreimageDone != nil { // this tests wants to know when this is done
+				a.handlePreimageDone <- struct{}{}
+			}
 		}()
 	}
 	return nil
