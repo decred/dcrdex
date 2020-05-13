@@ -27,11 +27,11 @@ type CoinLocker interface {
 	// UnlockOrderCoins unlocks all locked coins associated with an order.
 	UnlockOrderCoins(oid order.OrderID)
 	// LockOrdersCoins locks all of the coins associated with multiple orders.
-	LockOrdersCoins(orders []order.Order)
+	LockOrdersCoins(orders []order.Order) (failed []order.Order)
 	// LockCoins locks coins associated with certain orders. The input is
 	// defined as a map of OrderIDs to a CoinID slice since it is likely easiest
 	// for the caller to construct the input in this way.
-	LockCoins(orderCoins map[order.OrderID][]CoinID)
+	LockCoins(orderCoins map[order.OrderID][]CoinID) (failed map[order.OrderID][]CoinID)
 }
 
 // MasterCoinLocker coordinates a book and swap coin locker. The lock status of
@@ -89,13 +89,13 @@ type bookLocker struct {
 }
 
 // LockOrdersCoins locks all coins for the given orders.
-func (bl *bookLocker) LockOrdersCoins(orders []order.Order) {
-	bl.bookLock.LockOrdersCoins(orders)
+func (bl *bookLocker) LockOrdersCoins(orders []order.Order) []order.Order {
+	return bl.bookLock.LockOrdersCoins(orders)
 }
 
 // LockOrdersCoins locks coins associated with certain orders.
-func (bl *bookLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) {
-	bl.bookLock.LockCoins(orderCoins)
+func (bl *bookLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) map[order.OrderID][]CoinID {
+	return bl.bookLock.LockCoins(orderCoins)
 }
 
 // UnlockAll releases all locked coins.
@@ -115,13 +115,13 @@ type swapLocker struct {
 }
 
 // LockOrdersCoins locks all coins for the given orders.
-func (sl *swapLocker) LockOrdersCoins(orders []order.Order) {
-	sl.swapLock.LockOrdersCoins(orders)
+func (sl *swapLocker) LockOrdersCoins(orders []order.Order) []order.Order {
+	return sl.swapLock.LockOrdersCoins(orders)
 }
 
 // LockOrdersCoins locks coins associated with certain orders.
-func (sl *swapLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) {
-	sl.swapLock.LockCoins(orderCoins)
+func (sl *swapLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) map[order.OrderID][]CoinID {
+	return sl.swapLock.LockCoins(orderCoins)
 }
 
 // UnlockAll releases all locked coins.
@@ -188,41 +188,57 @@ func (ac *AssetCoinLocker) UnlockOrderCoins(oid order.OrderID) {
 }
 
 // LockCoins locks all coins (e.g. UTXOS) connected with certain orders.
-func (ac *AssetCoinLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) {
+func (ac *AssetCoinLocker) LockCoins(orderCoins map[order.OrderID][]CoinID) (failed map[order.OrderID][]CoinID) {
+	failed = make(map[order.OrderID][]CoinID)
 	ac.coinMtx.Lock()
 	for oid, coins := range orderCoins {
+		var fail bool
+		for i := range coins {
+			_, locked := ac.lockedCoins[coinIDKey(coins[i])]
+			if locked {
+				failed[oid] = append(failed[oid], coins[i])
+				fail = true
+			}
+		}
+		if fail {
+			// Do not lock any of this order's coins.
+			continue
+		}
+
 		ac.lockedCoinsByOrder[oid] = coins
 		for i := range coins {
-			// _, locked := ac.lockedCoins[coins[i]]
-			// if locked {
-			// 	panic(fmt.Sprintf("coin already locked: %v", coins[i]))
-			// }
 			ac.lockedCoins[coinIDKey(coins[i])] = struct{}{}
 		}
 	}
 	ac.coinMtx.Unlock()
+	return
 }
 
 // LockOrdersCoins locks all coins associated with certain orders.
-func (ac *AssetCoinLocker) LockOrdersCoins(orders []order.Order) {
+func (ac *AssetCoinLocker) LockOrdersCoins(orders []order.Order) (failed []order.Order) {
 	ac.coinMtx.Lock()
+ordersLoop:
 	for _, ord := range orders {
 		coinIDs := ord.Trade().Coins
 		if len(coinIDs) == 0 {
 			continue // e.g. CancelOrder
 		}
 
+		for i := range coinIDs {
+			_, locked := ac.lockedCoins[coinIDKey(coinIDs[i])]
+			if locked {
+				failed = append(failed, ord)
+				continue ordersLoop
+			}
+		}
+
 		ac.lockedCoinsByOrder[ord.ID()] = coinIDs
 		for i := range coinIDs {
-			// _, locked := ac.lockedCoins[coinIDs[i]]
-			// if locked {
-			// 	panic(fmt.Sprintf("coin already locked: %v", coinIDs[i]))
-			// }
 			ac.lockedCoins[coinIDKey(coinIDs[i])] = struct{}{}
 		}
 	}
-
 	ac.coinMtx.Unlock()
+	return
 }
 
 // DEXCoinLocker manages multiple MasterCoinLocker, one for each asset used by

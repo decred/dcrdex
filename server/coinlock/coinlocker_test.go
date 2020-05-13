@@ -104,6 +104,12 @@ func Test_swapLocker_LockOrderCoins(t *testing.T) {
 		}
 	}
 
+	// Try and fail to relock coins.
+	failed := swapLock.LockOrdersCoins(orders)
+	if len(failed) != len(orders) {
+		t.Fatalf("should have failed to lock %d coins, got %d failed", len(orders), len(failed))
+	}
+
 	// Now lock some in the book lock.
 	bookLock.LockOrdersCoins([]order.Order{lo0})
 	// unlock them in swap lock
@@ -203,8 +209,17 @@ func Test_bookLocker_LockCoins(t *testing.T) {
 		t.Errorf("swapLock indicated coins were locked that should have been unlocked")
 	}
 
-	// Relock the coins.
-	bookLock.LockCoins(coinMap)
+	// Attempt relock of the all of the already-locked coins.
+	delete(coinMap, oid)
+	failed := bookLock.LockCoins(coinMap)
+	if len(failed) != len(coinMap) {
+		t.Fatalf("should have failed to lock %d coins, got %d failed", len(coinMap), len(failed))
+	}
+
+	// Relock the coins for the removed order.
+	bookLock.LockCoins(map[order.OrderID][]CoinID{
+		oid: orderCoins,
+	})
 
 	// Make sure the BOOK locker say they are locked.
 	if !verifyLocked(bookLock, allCoins, true) {
