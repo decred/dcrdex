@@ -249,9 +249,23 @@ func TestMarket_NewMarket_BookOrders(t *testing.T) {
 	}
 	cleanup()
 
+	rand.Seed(12)
+
+	randCoinDCR := func() []byte {
+		coinID := make([]byte, 36)
+		rand.Read(coinID[:])
+		return coinID
+	}
+
 	// Now store some book orders to verify NewMarket sees them.
 	loBuy := makeLO(buyer3, mkRate3(0.8, 1.0), randLots(10), order.StandingTiF)
-	loSell := makeLO(seller3, mkRate3(1.0, 1.2), randLots(10), order.StandingTiF)
+	loBuy.FillAmt = mkt.marketInfo.LotSize // partial fill to cover utxo check alt. path
+	loSell := makeLO(seller3, mkRate3(1.0, 1.2), randLots(10)+1, order.StandingTiF)
+	fundingCoinDCR := randCoinDCR()
+	loSell.Coins = []order.CoinID{fundingCoinDCR}
+	// let VerifyUnspentCoin find this coin as unspent
+	oRig.dcr.addUTXO(&msgjson.Coin{ID: fundingCoinDCR}, 1234)
+
 	_ = storage.BookOrder(loBuy)  // the stub does not error
 	_ = storage.BookOrder(loSell) // the stub does not error
 

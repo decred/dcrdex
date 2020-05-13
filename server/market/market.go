@@ -17,11 +17,13 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
+	"github.com/decred/slog"
 )
 
 // Error is just a basic error.
@@ -50,6 +52,7 @@ type Swapper interface {
 	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
 	LockOrdersCoins(orders []order.Order)
 	TxMonitored(user account.AccountID, asset uint32, txid string) bool
+	CheckUnspent(asset uint32, coinID []byte) (string, error)
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -100,6 +103,8 @@ type Market struct {
 	swapper Swapper
 	auth    AuthManager
 
+	// checkUnspentBase  func(coinID []byte) (val uint64, confs int64, err error)
+	// checkUnspentQuote func(coinID []byte) (val uint64, confs int64, err error)
 	coinLockerBase  coinlock.CoinLocker
 	coinLockerQuote coinlock.CoinLocker
 
@@ -116,35 +121,140 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 		return nil, err
 	}
 
-	// Lock coins backing active orders.
-	baseCoins, quoteCoins, err := storage.ActiveOrderCoins(mktInfo.Base, mktInfo.Quote)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: first check that the coins aren't already locked by e.g. another market.
-	log.Debugf("Locking %d base asset coins.", len(baseCoins))
-	for oid, coins := range baseCoins {
-		log.Tracef(" - order %v: %v", oid, coins)
-	}
-	coinLockerBase.LockCoins(baseCoins)
-	log.Debugf("Locking %d quote asset coins.", len(quoteCoins))
-	for oid, coins := range quoteCoins {
-		log.Tracef(" - order %v: %v", oid, coins)
-	}
-	coinLockerQuote.LockCoins(quoteCoins)
-	// TODO: fail and archive orders that are in orderStatusEpoch, and unlock
-	// their coins.
-
 	// Load existing book orders from the DB.
-	bookOrders, err := storage.BookOrders(mktInfo.Base, mktInfo.Quote)
+	base, quote := mktInfo.Base, mktInfo.Quote
+	bookOrders, err := storage.BookOrders(base, quote)
 	if err != nil {
 		return nil, err
 	}
 
 	log.Infof("Loaded %d stored book orders.", len(bookOrders))
+	// Put the book orders in a map so orders that no longer have funding coins
+	// can be removed easily.
+	bookOrdersByID := make(map[order.OrderID]*order.LimitOrder, len(bookOrders))
+	for _, ord := range bookOrders {
+		bookOrdersByID[ord.ID()] = ord
+	}
+
+	baseCoins := make(map[order.OrderID][]order.CoinID)
+	quoteCoins := make(map[order.OrderID][]order.CoinID)
+
+ordersLoop:
+	for id, lo := range bookOrdersByID {
+		if lo.FillAmt > 0 {
+			// Order already matched with another trade, so it is expected that
+			// the funding coins are spent in a swap.
+
+			// In general, our position is that the server is not ultimately
+			// responsible for verifying that all orders have locked coins since
+			// the client will be penalized if they cannot complete the swap.
+			// The least the server can do is ensure funding coins for NEW
+			// orders are unspent and owned by the user, but there are other
+			// possibilities:
+
+			// TODO 1: We may consider following the chain of dex contracts and
+			// redeems to ensure that lo.Remaining() in value is unspent, or at
+			// least check that the initial coins were spent in a dex monitored
+			// tx with TxMonitored(..., spendingTx).
+
+			// TODO 2: The swapper could notify market when a redeem output is
+			// created so it can lock those coins if the order is still on the
+			// book (e.g. signal{orderID, redeemOutCoins} -> market). Otherwise
+			// the user could place new orders with these coins even though they
+			// are implicitly funding the still booked order with a remaining
+			// amount.
+
+			// On to next order. Do not bother locking coins that are spent.
+			continue
+		}
+
+		// Verify all funding coins for this order.
+		assetID := quote
+		if lo.Sell {
+			assetID = base
+		}
+		for i := range lo.Coins {
+			coin, err := swapper.CheckUnspent(assetID, lo.Coins[i])
+			if err == nil {
+				continue
+			}
+
+			if errors.Is(err, asset.CoinNotFoundError) {
+				// spent, exclude this order
+				log.Warnf("Coin %s not unspent for unfilled order %v. "+
+					"Revoking the order.", coin, lo)
+			} else {
+				// other failure (coinID decode, RPC, etc.)
+				log.Errorf("Unexpected error checking coinID %v for order %v: %v. "+
+					"Revoking the order.", lo.Coins[i], lo, err)
+			}
+
+			delete(bookOrdersByID, id)
+			if _, _, err = storage.RevokeOrder(lo); err != nil {
+				log.Errorf("Failed to revoke order %v: %v", lo, err)
+			}
+			// No penalization here presently since the market was down, but if
+			// a suspend message with persist=true was sent, the users should
+			// have kept their coins locked. (TODO)
+			continue ordersLoop
+		}
+
+		// All coins are unspent. Lock them.
+		if lo.Sell {
+			baseCoins[id] = lo.Coins
+		} else {
+			quoteCoins[id] = lo.Coins
+		}
+	}
+
+	log.Debugf("Locking %d base asset (%d) coins.", len(baseCoins), base)
+	if log.Level() <= slog.LevelTrace {
+		for oid, coins := range baseCoins {
+			log.Tracef(" - order %v: %v", oid, coins)
+		}
+	}
+
+	log.Debugf("Locking %d quote asset (%d) coins.", len(quoteCoins), quote)
+	if log.Level() <= slog.LevelTrace {
+		for oid, coins := range quoteCoins {
+			log.Tracef(" - order %v: %v", oid, coins)
+		}
+	}
+
+	// Lock the coins, catching and removing orders where coins were already
+	// locked by another market.
+	failedOrderCoins := coinLockerBase.LockCoins(baseCoins)
+	// Merge base and quote asset coins.
+	for id, coins := range coinLockerQuote.LockCoins(quoteCoins) {
+		failedOrderCoins[id] = coins
+	}
+
+	for oid := range failedOrderCoins {
+		log.Warnf("Revoking book order %v with already locked coins.", oid)
+		bad := bookOrdersByID[oid]
+		delete(bookOrdersByID, oid)
+		if _, _, err = storage.RevokeOrder(bad); err != nil {
+			log.Errorf("Failed to revoke order %v: %v", bad, err)
+			// But still not added back on the book.
+		}
+	}
 
 	Book := book.New(mktInfo.LotSize)
-	for _, lo := range bookOrders {
+	for _, lo := range bookOrdersByID {
+		// Limit order amount requirements are simple unlike market buys.
+		if lo.Quantity%mktInfo.LotSize != 0 || lo.FillAmt%mktInfo.LotSize != 0 {
+			// To change market configuration, the operator should suspended the
+			// market with persist=false, but that may not have happened, or
+			// maybe a revoke failed.
+			log.Errorf("Not rebooking order %v with amount (%v/%v) incompatible with current lot size (%v)",
+				lo.FillAmt, lo.Quantity, mktInfo.LotSize)
+			if _, _, err = storage.RevokeOrder(lo); err != nil {
+				log.Errorf("Failed to revoke order %v: %v", lo, err)
+				// But still not added back on the book.
+			}
+			continue
+		}
+
 		if ok := Book.Insert(lo); !ok {
 			// This can only happen if one of the loaded orders has an
 			// incompatible lot size for the current market config.

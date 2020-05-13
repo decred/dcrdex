@@ -297,11 +297,12 @@ func tNewBackend() *TBackend {
 }
 
 func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
-	v := b.utxos[hex.EncodeToString(coinID)]
+	str := hex.EncodeToString(coinID)
+	v := b.utxos[str]
 	if v == 0 {
 		return nil, fmt.Errorf("no utxo")
 	}
-	return &tUTXO{val: v}, b.utxoErr
+	return &tUTXO{val: v, decoded: str}, b.utxoErr
 }
 
 func (b *TBackend) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
@@ -328,9 +329,17 @@ func (b *TBackend) ValidateContract(contract []byte) error {
 }
 
 func (b *TBackend) ValidateSecret(secret, contract []byte) bool { return true }
+func (b *TBackend) VerifyUnspentCoin(coinID []byte) (label string, err error) {
+	utxo, err := b.utxo(coinID)
+	if err != nil {
+		return "", err
+	}
+	return utxo.String(), nil
+}
 
 type tUTXO struct {
-	val uint64
+	val     uint64
+	decoded string
 }
 
 var utxoAuthErr error
@@ -345,7 +354,7 @@ func (u *tUTXO) Address() string                 { return "" }
 func (u *tUTXO) SpendSize() uint32               { return dummySize }
 func (u *tUTXO) ID() []byte                      { return nil }
 func (u *tUTXO) TxID() string                    { return "" }
-func (u *tUTXO) String() string                  { return "" }
+func (u *tUTXO) String() string                  { return u.decoded }
 func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
 func (u *tUTXO) FeeRate() uint64                 { return 0 }
