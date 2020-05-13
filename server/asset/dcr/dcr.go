@@ -266,6 +266,33 @@ func (dcr *Backend) CheckAddress(addr string) bool {
 	return err == nil
 }
 
+// VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID and
+// retrieving the corresponding UTXO. If the coin is not found or no longer
+// unspent, an asset.CoinNotFoundError is returned.
+func (dcr *Backend) VerifyUnspentCoin(coinID []byte) (label string, err error) {
+	txHash, vout, errCoin := decodeCoinID(coinID)
+	if errCoin != nil {
+		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
+		return
+	}
+	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
+	if err != nil {
+		err = asset.RPCError(fmt.Errorf("GetTxOut (%s:%d): %v", txHash.String(), vout, err))
+		return
+	}
+	if txOut == nil {
+		err = asset.CoinNotFoundError
+		return
+	}
+	// coin = &basicUTXO{
+	// 	backend: dcr,
+	// 	value:   toAtoms(txOut.Value),
+	// 	txHash:  *txHash,
+	// 	vout:    vout,
+	// }
+	return fmt.Sprintf("%s:%d", txHash.String(), vout), nil
+}
+
 // UnspentCoinDetails gets the recipient address, value, and confirmations of
 // unspent coins. For DCR, this corresponds to a UTXO. If the utxo does not
 // exist or has a pubkey script of the wrong type, an error will be returned.
