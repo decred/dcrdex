@@ -44,9 +44,14 @@ type Backend interface {
 	// ValidateContract ensures that the swap contract is constructed properly
 	// for the asset.
 	ValidateContract(contract []byte) error
+	// VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID
+	// and retrieving the corresponding Coin. If the coin is not found or no
+	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
+	// for more UTXO data.
+	VerifyUnspentCoin(coinID []byte) (label string, err error)
 }
 
-// Coin represents a transaction input or ouptut.
+// Coin represents a transaction input or output.
 type Coin interface {
 	// Confirmations returns the number of confirmations for a Coin's transaction.
 	// Because a Coin can become invalid after once being considered valid, this
@@ -97,6 +102,9 @@ type BlockUpdate struct {
 	Err   error
 	Reorg bool
 }
+
+// RPCError is an error type used for unexpected backend RPC failures.
+type RPCError error
 
 // ConnectionError error should be sent over the block update channel if a
 // connection error is detected by the Backend.
