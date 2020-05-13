@@ -155,15 +155,17 @@ export default class Application {
     pg.loader.remove()
     pg.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
     Doc.show(pg.loader)
-    var hide
-    hide = (el, e) => {
+    var hide = (el, e, f) => {
       if (!Doc.mouseInElement(e, el)) {
         el.style.display = 'none'
-        unbind(document, hide.bind(this, el))
+        unbind(document, f)
       }
     }
+    const hideNotes = e => { hide(pg.noteBox, e, hideNotes) }
+    const hideProfile = e => { hide(pg.profileBox, e, hideProfile) }
+
     bind(pg.noteMenuEntry, 'click', async e => {
-      bind(document, 'click', hide.bind(this, pg.noteBox))
+      bind(document, 'click', hideNotes)
       pg.noteBox.style.display = 'block'
       pg.noteIndicator.style.display = 'none'
       const acks = []
@@ -181,7 +183,7 @@ export default class Application {
       pg.noteList.textContent = 'no notifications'
     }
     bind(pg.profileMenuEntry, 'click', async e => {
-      bind(document, 'click', hide.bind(this, pg.profileBox))
+      bind(document, 'click', hideProfile)
       pg.profileBox.style.display = 'block'
     })
     bind(pg.profileSignout, 'click', async e => await this.signOut())
