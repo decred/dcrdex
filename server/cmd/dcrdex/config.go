@@ -80,6 +80,7 @@ type dexConf struct {
 	AdminSrvOn       bool
 	AdminSrvAddr     string
 	AdminSrvPW       []byte
+	AssetsDataDir    string
 }
 
 type flagsData struct {
@@ -313,6 +314,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 			os.Exit(1)
 		}
 	}
+
 	isDefaultConfigFile := preCfg.ConfigFile == ""
 	if isDefaultConfigFile {
 		preCfg.ConfigFile = filepath.Join(cfg.AppDataDir, defaultConfigFilename)
@@ -542,6 +544,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		AdminSrvAddr:     adminSrvAddr,
 		AdminSrvOn:       cfg.AdminSrvOn,
 		AdminSrvPW:       []byte(cfg.AdminSrvPassword),
+		AssetsDataDir:    filepath.Join(cfg.AppDataDir, "assets"),
 	}
 
 	opts := &procOpts{

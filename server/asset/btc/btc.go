@@ -42,10 +42,6 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return fmt.Sprintf("%v:%d", txid, vout), err
 }
 
-func init() {
-	asset.Register(assetName, &Driver{})
-}
-
 var (
 	zeroHash chainhash.Hash
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
@@ -54,7 +50,7 @@ var (
 )
 
 const (
-	assetName                = "btc"
+	AssetName                = "btc"
 	btcToSatoshi             = 1e8
 	immatureTransactionError = dex.ErrorKind("immature output")
 )
@@ -119,7 +115,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		configPath = dexbtc.SystemConfigPath("bitcoin")
 	}
 
-	return NewBTCClone(assetName, configPath, logger, network, params, dexbtc.RPCPorts)
+	return NewBTCClone(AssetName, configPath, logger, network, params, dexbtc.RPCPorts)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default

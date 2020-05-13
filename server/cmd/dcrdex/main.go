@@ -9,9 +9,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"path/filepath"
+	"plugin"
 	"runtime"
 	"runtime/pprof"
 	"strings"
@@ -20,9 +23,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/admin"
-	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
-	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
-	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
 	dexsrv "decred.org/dcrdex/server/dex"
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
@@ -35,6 +35,20 @@ func mainCore(ctx context.Context) error {
 		fmt.Printf("Failed to load dcrdata config: %s\n", err.Error())
 		return err
 	}
+	// Load asset driver
+	// cfg.AssetsDataDir
+	files, err := ioutil.ReadDir(cfg.AssetsDataDir)
+	if err != nil {
+		fmt.Printf("Failed to load asset plugin: %s\n", err)
+		return err
+	}
+
+	for _, file := range files {
+		if err == nil && !file.IsDir() && filepath.Ext(file.Name()) == ".so" {
+			plugin.Open(filepath.Join(cfg.AssetsDataDir, file.Name()))
+		}
+	}
+
 	defer func() {
 		if logRotator != nil {
 			logRotator.Close()

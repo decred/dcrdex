@@ -29,11 +29,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
 
-func init() {
-	asset.Register(assetName, &Driver{})
-}
-
-const assetName = "ltc"
+const AssetName = "ltc"
 
 // NewBackend generates the network parameters and creates a ltc backend as a
 // btc clone using an asset/btc helper function.

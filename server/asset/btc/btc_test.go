@@ -73,7 +73,7 @@ func TestConfig(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		parsedCfg, err = dexbtc.LoadConfigFromPath(filePath, assetName, dex.Mainnet, dexbtc.RPCPorts)
+		parsedCfg, err = dexbtc.LoadConfigFromPath(filePath, AssetName, dex.Mainnet, dexbtc.RPCPorts)
 		return err
 	}
 

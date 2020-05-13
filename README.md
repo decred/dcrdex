@@ -138,6 +138,19 @@ A sample is given at
 [**Per-asset Variables**](spec/admin.mediawiki) section of the specification for
 more information on individual options.
 
+### Build and run assets backend plugin
+
+From a command prompt, navigate to **server/asset/build** .
+Build the plugin assets and copy to resource application folder by running:
+```
+go build -buildmode=plugin ./btc/
+cp ./btc.so ~/.dcrdex/assets/btc.so
+go build -buildmode=plugin ./dcr/
+cp ./dcr.so ~/.dcrdex/assets/dcr.so
+go build -buildmode=plugin ./ltc/
+cp ./ltc.so ~/.dcrdex/assets/ltc.so
+```
+
 ### Build and run dcrdex
 
 From a command prompt, navigate to **server/cmd/dcrdex**. Build the executable
