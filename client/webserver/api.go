@@ -307,7 +307,7 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, format string, a ...int
 func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 	err := s.core.Logout()
 	if err != nil {
-		s.writeAPIError(w, "Sign out with error: %v", err)
+		s.writeAPIError(w, "logout error: %v", err)
 		return
 	}
 
