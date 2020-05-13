@@ -83,21 +83,23 @@ func (s *WebServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	data := &registerTmplData{
+		CommonArguments: *cArgs,
+	}
+
 	feeAssetID, _ := dex.BipSymbolID("dcr")
 	feeWalletStatus := s.core.WalletState(feeAssetID)
 	feeWalletExists := feeWalletStatus != nil
 	feeWalletOpen := feeWalletExists && feeWalletStatus.Open
 
-	data := &registerTmplData{
-		CommonArguments: *cArgs,
-	}
-	if !cArgs.UserInfo.Initialized {
+	switch {
+	case !cArgs.UserInfo.Initialized:
 		data.InitStep = true
-	} else if !feeWalletExists {
+	case !feeWalletExists:
 		data.WalletStep = true
-	} else if !feeWalletOpen {
+	case !feeWalletOpen:
 		data.OpenStep = true
-	} else {
+	default:
 		data.DEXStep = true
 	}
 

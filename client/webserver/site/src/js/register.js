@@ -106,7 +106,8 @@ export default class RegistrationPage extends BasePage {
       Doc.show(page.appErrMsg)
       return
     }
-    app.setLogged(true)
+    app.user.authed = true // no need to call app.fetchUser(), much hasn't changed.
+    app.updateMenuItemsDisplay()
     this.changeForm(page.appPWForm, page.newWalletForm)
   }
 

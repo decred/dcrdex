@@ -280,10 +280,12 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 	userInfo := extractUserInfo(r)
 	response := struct {
 		*core.User
-		OK bool `json:"ok"`
+		Authed bool `json:"authed"`
+		OK     bool `json:"ok"`
 	}{
-		User: userInfo.User,
-		OK:   true,
+		User:   userInfo.User,
+		Authed: userInfo.Authed,
+		OK:     true,
 	}
 	writeJSON(w, response, s.indent)
 }

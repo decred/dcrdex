@@ -44,9 +44,11 @@ func (s *WebServer) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// requireInit ensures that the core app is initialized before allowing the
+// incoming request to proceed. Redirects to the register page if the app is
+// not initialized.
 func (s *WebServer) requireInit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Uninitialized app must go to register.
 		user := extractUserInfo(r)
 		if !user.Initialized {
 			http.Redirect(w, r, registerRoute, http.StatusSeeOther)
@@ -56,9 +58,12 @@ func (s *WebServer) requireInit(next http.Handler) http.Handler {
 	})
 }
 
+// requireLogin ensures that the user is authenticated (has logged in) before
+// allowing the incoming request to proceed. Redirects to login page if user is
+// not logged in. This check should typically be performed after checking that
+// the app is initialized.
 func (s *WebServer) requireLogin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Unauthenticated user must go to login.
 		user := extractUserInfo(r)
 		if !user.Authed {
 			http.Redirect(w, r, loginRoute, http.StatusSeeOther)
@@ -68,9 +73,11 @@ func (s *WebServer) requireLogin(next http.Handler) http.Handler {
 	})
 }
 
+// requireDEXConnection ensures that the user has completely registered with at
+// least 1 DEX before allowing the incoming request to proceed. Redirects to the
+// register page if the user has not connected any DEX.
 func (s *WebServer) requireDEXConnection(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// User with no connected DEX must go to register.
 		user := extractUserInfo(r)
 		if len(user.Exchanges) == 0 {
 			http.Redirect(w, r, registerRoute, http.StatusSeeOther)
