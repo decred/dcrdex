@@ -28,6 +28,7 @@ require (
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/lib/pq v1.2.0
 	github.com/ltcsuite/ltcd v0.0.0-20190519120615-e27ee083f08f
+	github.com/smartystreets/goconvey v1.6.4 // indirect
 	go.etcd.io/bbolt v1.3.4
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
 	gopkg.in/go-ini/ini.v1 v1.55.0

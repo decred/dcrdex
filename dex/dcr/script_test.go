@@ -10,8 +10,8 @@ import (
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
-	"github.com/decred/dcrd/chaincfg/v2/chainec"
 	"github.com/decred/dcrd/dcrec"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/dcrd/dcrutil/v2"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
@@ -30,11 +30,11 @@ func randBytes(l int) []byte {
 }
 
 func newPubKey() []byte {
-	_, x, y, err := chainec.Secp256k1.GenerateKey(rand.Reader)
+	_, x, y, err := secp256k1.GenerateKey(rand.Reader)
 	if err != nil {
 		fmt.Printf("error creating pubkey: %v\n", err)
 	}
-	return chainec.Secp256k1.NewPublicKey(x, y).SerializeCompressed()
+	return secp256k1.NewPublicKey(x, y).SerializeCompressed()
 }
 
 type tAddrs struct {
