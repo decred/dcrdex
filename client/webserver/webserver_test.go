@@ -63,7 +63,7 @@ type TCore struct {
 	syncErr         error
 	regErr          error
 	loginErr        error
-	loginOut        error
+	logOutErr       error
 	initErr         error
 	getFeeErr       error
 	createWalletErr error
@@ -80,7 +80,7 @@ func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) { return 1e8,
 func (c *TCore) Register(r *core.RegisterForm) error               { return c.regErr }
 func (c *TCore) InitializeClient(pw []byte) error                  { return c.initErr }
 func (c *TCore) Login(pw []byte) ([]*db.Notification, error)       { return nil, c.loginErr }
-func (c *TCore) Logout() error                                     { return c.loginOut }
+func (c *TCore) Logout() error                                     { return c.logOutErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return c.syncBook, c.syncFeed, c.syncErr
 }
@@ -649,8 +649,8 @@ func TestAPILogout(t *testing.T) {
 	}
 	ensure(`{"ok":true}`)
 
-	// Login error
-	tCore.loginOut = tErr
+	// Logout error
+	tCore.logOutErr = tErr
 	ensure(`{"ok":false,"msg":"logout error: test error"}`)
-	tCore.loginOut = nil
+	tCore.logOutErr = nil
 }
