@@ -30,6 +30,7 @@ require (
 	github.com/ltcsuite/ltcd v0.0.0-20190519120615-e27ee083f08f
 	go.etcd.io/bbolt v1.3.4
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
+	golang.org/x/tools v0.0.0-20200512001501-aaeff5de670a // indirect
 	gopkg.in/go-ini/ini.v1 v1.55.0
 	gopkg.in/ini.v1 v1.55.0
 )

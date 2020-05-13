@@ -28,11 +28,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return (&btc.Driver{}).DecodeCoinID(coinID)
 }
 
-func init() {
-	asset.Register(assetName, &Driver{})
-}
-
-const assetName = "ltc"
+const AssetName = "ltc"
 
 // NewBackend generates the network parameters and creates a ltc backend as a
 // btc clone using an asset/btc helper function.
@@ -67,5 +63,5 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		configPath = dexbtc.SystemConfigPath("litecoin")
 	}
 
-	return btc.NewBTCClone(assetName, configPath, logger, network, btcParams, ports)
+	return btc.NewBTCClone(AssetName, configPath, logger, network, btcParams, ports)
 }

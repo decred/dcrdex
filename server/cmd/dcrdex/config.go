@@ -78,6 +78,7 @@ type dexConf struct {
 	SigningKeyPW     []byte
 	AdminSrvOn       bool
 	AdminSrvAddr     string
+	AssetsDataDir    string
 }
 
 type flagsData struct {
@@ -310,6 +311,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 			os.Exit(1)
 		}
 	}
+
 	isDefaultConfigFile := preCfg.ConfigFile == ""
 	if isDefaultConfigFile {
 		preCfg.ConfigFile = filepath.Join(cfg.AppDataDir, defaultConfigFilename)
@@ -534,6 +536,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		SigningKeyPW:     []byte(cfg.SigningKeyPassword),
 		AdminSrvAddr:     adminSrvAddr,
 		AdminSrvOn:       cfg.AdminSrvOn,
+		AssetsDataDir:    filepath.Join(cfg.AppDataDir, "assets"),
 	}
 
 	opts := &procOpts{

@@ -44,10 +44,6 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 	return fmt.Sprintf("%v:%d", txid, vout), err
 }
 
-func init() {
-	asset.Register(assetName, &Driver{})
-}
-
 var (
 	zeroHash chainhash.Hash
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
@@ -58,7 +54,7 @@ var (
 type Error = dex.Error
 
 const (
-	assetName                = "dcr"
+	AssetName                = "dcr"
 	immatureTransactionError = Error("immature output")
 )
 
