@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -246,11 +247,6 @@ func newLink() *tLink {
 	}
 }
 
-func enableLogging() {
-	log = slog.NewBackend(os.Stdout).Logger("TEST")
-	log.SetLevel(slog.LevelTrace)
-}
-
 var tPort int = 5142
 
 func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
@@ -312,7 +308,6 @@ func TestMain(m *testing.M) {
 }
 
 func TestLoadMarket(t *testing.T) {
-	enableLogging()
 	link := newLink()
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
@@ -383,7 +378,6 @@ func TestLoadMarket(t *testing.T) {
 }
 
 func TestAPIRegister(t *testing.T) {
-	enableLogging()
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
@@ -418,7 +412,6 @@ func TestAPIRegister(t *testing.T) {
 }
 
 func TestAPILogin(t *testing.T) {
-	// enableLogging()
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
@@ -611,7 +604,12 @@ func TestClientMap(t *testing.T) {
 	read, _ := json.Marshal(msgjson.Message{ID: 0})
 	conn.addRead(read)
 
-	go s.websocketHandler(conn, "someip")
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		s.websocketHandler(conn, "someip")
+		wg.Done()
+	}()
 
 	// When a response to our dummy message is received, the client should be in
 	// RPCServer's client map.
@@ -632,6 +630,7 @@ func TestClientMap(t *testing.T) {
 
 	// Close the server and make sure the connection is closed.
 	shutdown()
+	wg.Wait() // websocketHandler since it's using log
 	if !cl.Off() {
 		t.Fatalf("connection not closed on server shutdown")
 	}
