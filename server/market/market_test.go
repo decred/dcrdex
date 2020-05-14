@@ -420,9 +420,8 @@ func TestMarket_Run(t *testing.T) {
 		t.Error(err)
 	}
 
-	// Let the epoch cycle.
-	//time.Sleep(time.Duration(epochDurationMSec+epochDurationMSec/20) * time.Millisecond)
-	// Let the fake client respond with its preimage (handlePreimageResp done)...
+	// Let the epoch cycle and the fake client respond with its preimage
+	// (handlePreimageResp done)...
 	<-auth.handlePreimageDone
 	// and for matching to complete (in processReadyEpoch).
 	<-storage.epochInserted
@@ -523,9 +522,8 @@ func TestMarket_Run(t *testing.T) {
 		t.Errorf(`expected ErrDuplicateCancelOrder ("%v"), got "%v"`, ErrDuplicateCancelOrder, err)
 	}
 
-	// Let the epoch cycle.
-	//time.Sleep(time.Duration(epochDurationMSec+epochDurationMSec/20) * time.Millisecond)
-	// Let the fake client respond with its preimage (handlePreimageResp done)...
+	// Let the epoch cycle and the fake client respond with its preimage
+	// (handlePreimageResp done)..
 	<-auth.handlePreimageDone
 	// and for matching to complete (in processReadyEpoch).
 	<-storage.epochInserted
@@ -582,9 +580,8 @@ func TestMarket_Run(t *testing.T) {
 		t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
 	}
 
-	// Let the epoch cycle.
-	//time.Sleep(time.Duration(epochDurationMSec+epochDurationMSec/20) * time.Millisecond)
-	// Let the fake client respond with its preimage (handlePreimageResp done)...
+	// Let the epoch cycle and the fake client respond with its preimage
+	// (handlePreimageResp done)..
 	<-auth.handlePreimageDone
 	// and for matching to complete (in processReadyEpoch).
 	<-storage.epochInserted
@@ -974,9 +971,8 @@ func TestMarket_Cancelable(t *testing.T) {
 			"but it was in the epoch queue", lo)
 	}
 
-	// Let the epoch cycle.
-	//time.Sleep(time.Duration(epochDurationMSec+epochDurationMSec/20) * time.Millisecond)
-	// Let the fake client respond with its preimage (handlePreimageResp done)...
+	// Let the epoch cycle and the fake client respond with its preimage
+	// (handlePreimageResp done)..
 	<-auth.handlePreimageDone
 	// and for matching to complete (in processReadyEpoch).
 	<-storage.epochInserted
