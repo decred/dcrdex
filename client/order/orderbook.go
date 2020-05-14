@@ -284,6 +284,8 @@ func (ob *OrderBook) Book(note *msgjson.BookOrderNote) error {
 	return ob.book(note, false)
 }
 
+// updateRemaining is the workhorse of the exported UpdateRemaining function. It
+// allows updating cached and uncached orders.
 func (ob *OrderBook) updateRemaining(note *msgjson.UpdateRemainingNote, cached bool) error {
 	if ob.marketID != note.MarketID {
 		return fmt.Errorf("invalid update_remaining note market id %s", note.MarketID)
@@ -319,6 +321,7 @@ func (ob *OrderBook) updateRemaining(note *msgjson.UpdateRemainingNote, cached b
 	return fmt.Errorf("update_remaining order %s not found", oid)
 }
 
+// UpdateRemaining updates the remaining quantity of a booked order.
 func (ob *OrderBook) UpdateRemaining(note *msgjson.UpdateRemainingNote) error {
 	return ob.updateRemaining(note, false)
 }
