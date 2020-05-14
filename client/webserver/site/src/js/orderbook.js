@@ -23,7 +23,7 @@ export default class OrderBook {
     this.removeFromSide(this.buys, token)
   }
 
-  /* removeFromSide remvoes an order from the list of orders. */
+  /* removeFromSide removes an order from the list of orders. */
   removeFromSide (side, token) {
     const [ord, i] = this.findOrder(side, token)
     if (ord) {
