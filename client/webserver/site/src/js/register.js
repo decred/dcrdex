@@ -25,7 +25,7 @@ export default class RegistrationPage extends BasePage {
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
       // Form 5: Confirm DEX registration and pay fee
-      'confirmRegForm', 'feeDisplay', 'clientPass', 'submitConfirm', 'regErr'
+      'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr'
     ])
 
     // SET APP PASSWORD
@@ -154,11 +154,11 @@ export default class RegistrationPage extends BasePage {
     }
     const registration = {
       url: page.dexAddr.value,
-      pass: page.clientPass.value,
+      pass: page.appPass.value,
       fee: this.fee,
       cert: cert
     }
-    page.clientPass.value = ''
+    page.appPass.value = ''
     app.loading(page.confirmRegForm)
     var res = await postJSON('/api/register', registration)
     app.loaded()

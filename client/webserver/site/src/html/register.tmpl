@@ -5,9 +5,9 @@
 
     {{- /* Set up the initial application password. Only shown if app is not already initialized. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .InitStep}} d-hide{{end}}" id="appPWForm">
-      <div class="bg2 px-2 py-1 text-center fs18">Set Client Password</div>
+      <div class="bg2 px-2 py-1 text-center fs18">Set App Password</div>
       <div class="p-4">
-        <div class="fs16">Set your client password. This password will protect your DEX account keys and connected wallets.</div>
+        <div class="fs16">Set your app password. This password will protect your DEX account keys and connected wallets.</div>
         <hr class="dashed my-4">
         <div class="pb-3">
           <label for="appPW" class="pl-1 mb-1">Password</label>
@@ -63,13 +63,13 @@
       <div class="bg2 px-2 py-1 text-center fs18">Confirm Registration</div>
       <div class="p-4">
         <div class="fs16">
-          Enter your client password to confirm DEX registration.
+          Enter your app password to confirm DEX registration.
           When you submit this form, <span id="feeDisplay"></span> DCR will be spent from your Decred wallet to pay registration fees.
         </div>
         <hr class="dashed my-4">
         <div>
-          <label for="clientPass" class="pl-1 mb-1">Password</label>
-          <input type="password" class="form-control select" id="clientPass" autocomplete="current-password">
+          <label for="appPass" class="pl-1 mb-1">Password</label>
+          <input type="password" class="form-control select" id="appPass" autocomplete="current-password">
         </div>
         <div class="d-flex justify-content-end mt-4">
           <button id="submitConfirm" type="button" class="col-8 justify-content-center fs15 bg2 selected">Register</button>

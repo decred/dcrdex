@@ -43,12 +43,12 @@
   </div>
   <div>
     {{if .}}
-    <label for="nwClientPass" class="pt-3 pl-1 mb-0">Client Password</label>
-    <div class="fs14 px-1 mb-1">Your client password is always required when performing sensitive wallet operations.</div>
+    <label for="nwAppPass" class="pt-3 pl-1 mb-0">App Password</label>
+    <div class="fs14 px-1 mb-1">Your app password is always required when performing sensitive wallet operations.</div>
     {{else}}
-    <label for="nwClientPass" class="pt-3 pl-1 mb-1">Client Password</label>
+    <label for="nwAppPass" class="pt-3 pl-1 mb-1">App Password</label>
     {{end}}
-    <input type="password" class="form-control select" id="nwClientPass" autocomplete="off">
+    <input type="password" class="form-control select" id="nwAppPass" autocomplete="off">
   </div>
   <div class="d-flex justify-content-end mt-4">
     <button id="submitAdd" type="submit" class="col-8 justify-content-center fs15 bg2 selected">Add</button>
@@ -70,9 +70,9 @@
     <hr class="dashed my-4">
   {{end}}
   <div>
-    <label for="uwClientPass" class="pl-1 mb-0">Client Password</label>
-    <div class="fs14 px-1 mb-1">Your client password is always required when performing sensitive wallet operations.</div>
-    <input type="password" class="form-control select" id="uwClientPass" autocomplete="off">
+    <label for="uwAppPass" class="pl-1 mb-0">App Password</label>
+    <div class="fs14 px-1 mb-1">Your app password is always required when performing sensitive wallet operations.</div>
+    <input type="password" class="form-control select" id="uwAppPass" autocomplete="off">
   </div>
   <div class="d-flex justify-content-end mt-4">
     <button id="submitUnlock" type="submit" class="col-8 justify-content-center fs15 bg2 selected">Unlock</button>

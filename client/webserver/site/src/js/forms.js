@@ -18,7 +18,7 @@ var configInputField = (option, idx) => {
 export function bindNewWallet (app, form, success) {
   const fields = Doc.parsePage(form, [
     'nwAssetLogo', 'nwAssetName',
-    'acctName', 'newWalletPass', 'nwClientPass',
+    'acctName', 'newWalletPass', 'nwAppPass',
     'walletSettings', 'walletSettingsInputs', 'selectCfgFile',
     'walletConfig', 'cfgFile', 'selectedCfgFile', 'removeCfgFile',
     'submitAdd', 'newWalletErr'
@@ -63,8 +63,8 @@ export function bindNewWallet (app, form, success) {
       Doc.show(fields.newWalletErr)
       return
     }
-    if (fields.nwClientPass.value === '') {
-      fields.newWalletErr.textContent = 'client password cannot be empty'
+    if (fields.nwAppPass.value === '') {
+      fields.newWalletErr.textContent = 'app password cannot be empty'
       Doc.show(fields.newWalletErr)
       return
     }
@@ -83,9 +83,9 @@ export function bindNewWallet (app, form, success) {
       pass: fields.newWalletPass.value,
       account: fields.acctName.value,
       config: config,
-      appPass: fields.nwClientPass.value
+      appPass: fields.nwAppPass.value
     }
-    fields.nwClientPass.value = ''
+    fields.nwAppPass.value = ''
     app.loading(form)
     var res = await postJSON('/api/newwallet', create)
     app.loaded()
@@ -106,27 +106,27 @@ export function bindNewWallet (app, form, success) {
 export function bindOpenWallet (app, form, success) {
   const fields = Doc.parsePage(form, [
     'uwAssetLogo', 'uwAssetName',
-    'uwClientPass', 'submitUnlock', 'unlockErr'
+    'uwAppPass', 'submitUnlock', 'unlockErr'
   ])
   var currentAsset
   form.setAsset = asset => {
     currentAsset = asset
     fields.uwAssetLogo.src = Doc.logoPath(asset.symbol)
     fields.uwAssetName.textContent = asset.info.name
-    fields.uwClientPass.value = ''
+    fields.uwAppPass.value = ''
   }
   bind(form, fields.submitUnlock, async () => {
-    if (fields.uwClientPass.value === '') {
-      fields.unlockErr.textContent = 'client password cannot be empty'
+    if (fields.uwAppPass.value === '') {
+      fields.unlockErr.textContent = 'app password cannot be empty'
       Doc.show(fields.unlockErr)
       return
     }
     Doc.hide(fields.unlockErr)
     const open = {
       assetID: parseInt(currentAsset.id),
-      pass: fields.uwClientPass.value
+      pass: fields.uwAppPass.value
     }
-    fields.uwClientPass.value = ''
+    fields.uwAppPass.value = ''
     app.loading(form)
     var res = await postJSON('/api/openwallet', open)
     app.loaded()
