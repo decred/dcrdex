@@ -111,6 +111,25 @@ following table. The payload for all three routes is an '''Order''' object.
 | unbook_order || remove the order from the order book
 |}
 
+Additionally, there is a notification for updating the remaining quantity of an
+order. This notification is sent when a booked order partially fills and remains
+on the book with a reduced matchable quantity.
+
+'''Notification route:''' <code>update_remaining</code>, '''originator: ''' DEX
+
+<code>payload</code>
+{|
+! field   !! type   !! description
+|-
+| seq       || int   || A sequence ID
+|-
+| marketid  || string || The market identifier
+|-
+| oid       || string || The order ID
+|-
+| remaining || int    || remaining quantity (atoms)
+|}
+
 At the beginning of the matching cycle, the DEX will publish a list of order
 preimages, the seed hash used for
 [[fundamentals.mediawiki/#Pseudorandom_Order_Matching|order sequencing]], and the
