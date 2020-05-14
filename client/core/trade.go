@@ -609,7 +609,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 			Contract: contract[:],
 		}
 		ack := new(msgjson.Acknowledgement)
-		err := signAndRequest(t.dc, msgjson.InitRoute, init, t.dc.acct.privKey, ack)
+		err := t.dc.signAndRequest(init, msgjson.InitRoute, ack)
 		if err != nil {
 			match.failErr = err
 			errs.add("error sending 'init' message for match %s: %v", match.id, err)
@@ -689,7 +689,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		}
 
 		ack := new(msgjson.Acknowledgement)
-		err := signAndRequest(t.dc, msgjson.RedeemRoute, msgRedeem, t.dc.acct.privKey, ack)
+		err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack)
 		if err != nil {
 			match.failErr = err
 			errs.add("error sending 'redeem' message for match %s, coin %x: %v",

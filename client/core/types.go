@@ -272,16 +272,18 @@ func (a *dexAccount) ID() account.AccountID {
 }
 
 // setupEncryption creates and returns a new privkey for the account.
-// Errors if the account already has a privkey set.
+// Returns existing privkey if previously set up.
 func (a *dexAccount) setupEncryption(crypter encrypt.Crypter) (*secp256k1.PrivateKey, error) {
+	// Check if privKey exists. Check a.encKey instead of a.privKey
+	// as a.privKey will be nil if the account is locked.
 	a.keyMtx.RLock()
-	privKey := a.privKey
-	a.keyMtx.RUnlock()
-
-	if privKey != nil {
-		// no need to generate a new privKey, just decrypt.
-		return privKey, a.unlock(crypter)
+	if a.encKey != nil {
+		defer a.keyMtx.RUnlock()
+		// no need to generate a new privKey, return existing privKey AFTER unlocking.
+		err := a.unlock(crypter)
+		return a.privKey, err
 	}
+	a.keyMtx.RUnlock()
 
 	// Create a new private key for the account.
 	privKey, err := secp256k1.GeneratePrivateKey()

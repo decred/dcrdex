@@ -135,6 +135,16 @@ func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, pr
 	return
 }
 
+// signAndRequest signs and sends the request, unmarshaling the response into
+// the provided interface.
+func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result interface{}) error {
+	err := sign(dc.acct.privKey, signable)
+	if err != nil {
+		return fmt.Errorf("error signing %s message: %v", route, err)
+	}
+	return sendRequest(dc.WsConn, route, signable, result)
+}
+
 // ack sends an Acknowledgement for a match-related request.
 func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjson.Signable) error {
 	ack := &msgjson.Acknowledgement{
@@ -778,7 +788,7 @@ func (c *Core) Register(form *RegisterForm) error {
 		Time:   encode.UnixMilliU(time.Now()),
 	}
 	regRes := new(msgjson.RegisterResult)
-	err = signAndRequest(dc.WsConn, msgjson.RegisterRoute, dexReg, privKey, regRes)
+	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes)
 	if err != nil {
 		return err
 	}
@@ -1245,7 +1255,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 
 	// Send and get the result.
 	var result = new(msgjson.OrderResult)
-	err = signAndRequest(dc.WsConn, route, msgOrder, dc.acct.privKey, result)
+	err = dc.signAndRequest(msgOrder, route, result)
 	if err != nil {
 		return nil, err
 	}
@@ -1401,7 +1411,7 @@ func (c *Core) Cancel(pw []byte, tradeID string) error {
 	// Create and send the order message. Check the response before using it.
 	route, msgOrder := messageOrder(co, nil)
 	var result = new(msgjson.OrderResult)
-	err = signAndRequest(tracker.dc.WsConn, route, msgOrder, dc.acct.privKey, result)
+	err = dc.signAndRequest(msgOrder, route, result)
 	if err != nil {
 		return err
 	}
@@ -2337,16 +2347,6 @@ func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
 func stamp(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) error {
 	payload.Stamp(encode.UnixMilliU(time.Now()))
 	return sign(privKey, payload)
-}
-
-// signAndRequest signs and sends the requestvia the specified ws connection
-// and unmarshals the response into the provided interface.
-func signAndRequest(conn comms.WsConn, route string, signable msgjson.Signable, privKey *secp256k1.PrivateKey, result interface{}) error {
-	err := sign(privKey, signable)
-	if err != nil {
-		return fmt.Errorf("error signing %s message: %v", route, err)
-	}
-	return sendRequest(conn, route, signable, result)
 }
 
 // sendRequest sends a request via the specified ws connection and unmarshals
