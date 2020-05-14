@@ -335,7 +335,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 
 					c.trySend(&core.BookUpdate{
 						Action: msgjson.UnbookOrderRoute,
-						Order:  &core.MiniOrder{Token: tkn},
+						Payload:  &core.MiniOrder{Token: tkn},
 					})
 				}
 			case <-ctx.Done():

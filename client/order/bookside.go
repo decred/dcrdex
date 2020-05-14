@@ -108,9 +108,9 @@ func (d *bookSide) Remove(order *Order) error {
 	return fmt.Errorf("order %s not found", order.OrderID)
 }
 
-// Update updates the remaining quantity for an order. If the order is found
-// it will be returned, else nil.
-func (d *bookSide) Update(oid order.OrderID, remaining uint64) *Order {
+// UpdateRemaining updates the remaining quantity for an order. If the order is
+// found it will be returned, else nil.
+func (d *bookSide) UpdateRemaining(oid order.OrderID, remaining uint64) *Order {
 	d.mtx.Lock()
 	defer d.mtx.Unlock()
 

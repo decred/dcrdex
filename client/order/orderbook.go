@@ -308,12 +308,12 @@ func (ob *OrderBook) updateRemaining(note *msgjson.UpdateRemainingNote, cached b
 	var oid order.OrderID
 	copy(oid[:], note.OrderID)
 
-	ord := ob.sells.Update(oid, note.Remaining)
+	ord := ob.sells.UpdateRemaining(oid, note.Remaining)
 	if ord != nil {
 		return nil
 	}
 
-	ord = ob.buys.Update(oid, note.Remaining)
+	ord = ob.buys.UpdateRemaining(oid, note.Remaining)
 	if ord != nil {
 		return nil
 	}

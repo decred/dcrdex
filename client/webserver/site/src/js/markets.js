@@ -476,7 +476,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */
   handleBookOrderRoute (data) {
-    const order = data.order
+    const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
     this.chart.draw()
@@ -484,7 +484,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleUnbookOrderRoute is the handler for 'unbook_order' notifications. */
   handleUnbookOrderRoute (data) {
-    const order = data.order
+    const order = data.payload
     this.book.remove(order.token)
     this.removeTableOrder(order)
     this.chart.draw()
@@ -495,15 +495,15 @@ export default class MarketsPage extends BasePage {
    * notifications.
    */
   handleUpdateRemainingRoute (data) {
-    const order = data.order
-    this.book.updateRemaining(order.token, order.qty)
-    this.updateTableOrder(order)
+    const update = data.payload
+    this.book.updateRemaining(update.token, update.qty)
+    this.updateTableOrder(update)
     this.chart.draw()
   }
 
   /* handleEpochOrderRoute is the handler for 'epoch_order' notifications. */
   handleEpochOrderRoute (data) {
-    const order = data.order
+    const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
     this.chart.draw()
@@ -848,13 +848,13 @@ export default class MarketsPage extends BasePage {
   }
 
   /* updateTableOrder looks for the order in the table and updates the qty */
-  updateTableOrder (order) {
-    const token = order.token
+  updateTableOrder (update) {
+    const token = update.token
     for (const tbody of [this.page.sellRows, this.page.buyRows]) {
       for (const tr of Array.from(tbody.children)) {
         if (tr.order.token === token) {
           const td = tr.querySelector('[data-type=qty]')
-          td.innerText = order.qty.toFixed(8)
+          td.innerText = update.qty.toFixed(8)
           return
         }
       }

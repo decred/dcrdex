@@ -291,8 +291,8 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 		return err
 	}
 	book.send(&BookUpdate{
-		Action: msg.Route,
-		Order:  minifyOrder(note.OrderID, &note.TradeNote, 0),
+		Action:  msg.Route,
+		Payload: minifyOrder(note.OrderID, &note.TradeNote, 0),
 	})
 	return nil
 }
@@ -319,8 +319,8 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return err
 	}
 	book.send(&BookUpdate{
-		Action: msg.Route,
-		Order:  &MiniOrder{Token: token(note.OrderID)},
+		Action:  msg.Route,
+		Payload: &MiniOrder{Token: token(note.OrderID)},
 	})
 
 	return nil
@@ -349,7 +349,7 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 	}
 	book.send(&BookUpdate{
 		Action: msg.Route,
-		Order: &MiniOrder{
+		Payload: &RemainingUpdate{
 			Token: token(note.OrderID),
 			Qty:   float64(note.Remaining) / conversionFactor,
 		},
@@ -383,8 +383,8 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	}
 	// Send a mini-order for book updates.
 	book.send(&BookUpdate{
-		Action: msg.Route,
-		Order:  minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),
+		Action:  msg.Route,
+		Payload: minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),
 	})
 
 	return nil
