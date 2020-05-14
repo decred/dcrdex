@@ -5,6 +5,6 @@ import (
 	"decred.org/dcrdex/server/asset/btc"
 )
 
-func init()  {
+func init() {
 	asset.Register(btc.AssetName, &btc.Driver{})
 }
