@@ -709,15 +709,15 @@ func (c *Core) GetFee(url, cert string) (uint64, error) {
 	if c.isRegistered(url) {
 		return 0, fmt.Errorf("already registered at %s", url)
 	}
-	dexConn, err := c.connectDEX(&db.AccountInfo{
+	dc, err := c.connectDEX(&db.AccountInfo{
 		URL:  url,
 		Cert: []byte(cert),
 	})
 	if err != nil {
 		return 0, err
 	}
-	defer dexConn.connMaster.Disconnect()
-	return dexConn.cfg.Fee, nil
+	defer dc.connMaster.Disconnect()
+	return dc.cfg.Fee, nil
 }
 
 // Register registers an account with a new DEX. If an error occurs while
@@ -745,7 +745,7 @@ func (c *Core) Register(form *RegisterForm) error {
 		return fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
 	}
 
-	dexConn, err := c.connectDEX(&db.AccountInfo{
+	dc, err := c.connectDEX(&db.AccountInfo{
 		URL:  form.URL,
 		Cert: []byte(form.Cert),
 	})
@@ -754,18 +754,19 @@ func (c *Core) Register(form *RegisterForm) error {
 	}
 
 	// close the connection to the dex server if the registration fails.
+	var registrationComplete bool
 	defer func() {
-		if !c.isRegistered(dexConn.acct.url) {
-			dexConn.connMaster.Disconnect()
+		if !registrationComplete {
+			dc.connMaster.Disconnect()
 		}
 	}()
 
-	regAsset, found := dexConn.assets[regFeeAssetID]
+	regAsset, found := dc.assets[regFeeAssetID]
 	if !found {
 		return fmt.Errorf("dex server does not support %s asset", regFeeAssetSymbol)
 	}
 
-	privKey, err := dexConn.acct.setupEncryption(crypter)
+	privKey, err := dc.acct.setupEncryption(crypter)
 	if err != nil {
 		return err
 	}
@@ -777,7 +778,7 @@ func (c *Core) Register(form *RegisterForm) error {
 		Time:   encode.UnixMilliU(time.Now()),
 	}
 	regRes := new(msgjson.RegisterResult)
-	err = signAndRequest(dexConn.WsConn, msgjson.RegisterRoute, dexReg, privKey, regRes)
+	err = signAndRequest(dc.WsConn, msgjson.RegisterRoute, dexReg, privKey, regRes)
 	if err != nil {
 		return err
 	}
@@ -796,8 +797,8 @@ func (c *Core) Register(form *RegisterForm) error {
 	if regRes.Fee == 0 {
 		return fmt.Errorf("zero registration fees not allowed")
 	}
-	if regRes.Fee != dexConn.cfg.Fee {
-		return fmt.Errorf("DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dexConn.cfg.Fee)
+	if regRes.Fee != dc.cfg.Fee {
+		return fmt.Errorf("DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dc.cfg.Fee)
 	}
 	if regRes.Fee != form.Fee {
 		return fmt.Errorf("registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee)
@@ -812,24 +813,25 @@ func (c *Core) Register(form *RegisterForm) error {
 	}
 
 	// Registration complete.
+	registrationComplete = true
 	c.connMtx.Lock()
-	c.conns[dexConn.acct.url] = dexConn
+	c.conns[dc.acct.url] = dc
 	c.connMtx.Unlock()
 
 	// Set the dexConnection account fields and save account info to db.
-	dexConn.acct.dexPubKey = dexPubKey
-	dexConn.acct.feeCoin = coin.ID()
-	err = c.db.CreateAccount(dexConn.acct.dbInfo())
+	dc.acct.dexPubKey = dexPubKey
+	dc.acct.feeCoin = coin.ID()
+	err = c.db.CreateAccount(dc.acct.dbInfo())
 	if err != nil {
 		log.Errorf("error saving account: %v", err)
 		// Don't abandon registration. The fee is already paid.
 	}
 
-	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", dexConn.cfg.RegFeeConfirms, dexConn.acct.url)
+	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", dc.cfg.RegFeeConfirms, dc.acct.url)
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success))
 
 	// Set up the coin waiter.
-	c.verifyRegistrationFee(wallet, dexConn, coin.ID(), regFeeAssetID)
+	c.verifyRegistrationFee(wallet, dc, coin.ID(), regFeeAssetID)
 	c.refreshUser()
 	return nil
 }
@@ -1920,7 +1922,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// auto-reconnect cycle.
 	if err != nil {
 		connMaster.Disconnect()
-		return nil, fmt.Errorf("Error initalizing websocket connection: %v", err)
+		return nil, fmt.Errorf("Error initializing websocket connection: %v", err)
 	}
 
 	// Request the market configuration. Disconnect from the DEX server if the
@@ -1932,7 +1934,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		return nil, fmt.Errorf("Error fetching DEX server config: %v", err)
 	}
 
-	assets := make(map[uint32]*dex.Asset)
+	assets := make(map[uint32]*dex.Asset, len(dexCfg.Assets))
 	for i := range dexCfg.Assets {
 		asset := &dexCfg.Assets[i]
 		assets[asset.ID] = convertAssetInfo(asset)
@@ -1981,6 +1983,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	}
 
 	dc.refreshMarkets()
+	c.wg.Add(1)
 	go c.listen(dc)
 	log.Infof("Connected to DEX server at %s and listening for messages.", uri)
 
@@ -2078,7 +2081,6 @@ var noteHandlers = map[string]routeHandler{
 // listen monitors the DEX websocket connection for server requests and
 // notifications.
 func (c *Core) listen(dc *dexConnection) {
-	c.wg.Add(1)
 	defer c.wg.Done()
 	msgs := dc.MessageSource()
 	// Lets run a match check every 1/3 broadcast timeout.
