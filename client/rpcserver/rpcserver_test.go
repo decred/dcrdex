@@ -36,8 +36,8 @@ var (
 )
 
 type TCore struct {
-	preRegisterFee      uint64
-	preRegisterErr      error
+	regFee              uint64
+	getFeeErr           error
 	balanceErr          error
 	syncBook            *core.OrderBook
 	syncFeed            *core.BookFeed
@@ -71,8 +71,8 @@ func (c *TCore) InitializeClient(pw []byte) error {
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr
 }
-func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) {
-	return c.preRegisterFee, c.preRegisterErr
+func (c *TCore) GetFee(url, cert string) (uint64, error) {
+	return c.regFee, c.getFeeErr
 }
 func (c *TCore) Register(*core.RegisterForm) error {
 	return c.registerErr

@@ -60,13 +60,13 @@ func (s Severity) String() string {
 // AccountInfo is information about an account on a Decred DEX. The database
 // is designed for one account per server.
 type AccountInfo struct {
-	URL string
+	URL  string
+	Cert []byte
 	// EncKey should be an encrypted private key. The database itself does not
 	// handle encryption (yet?).
 	EncKey    []byte
 	DEXPubKey *secp256k1.PublicKey
 	FeeCoin   []byte
-	Cert      []byte
 	// Paid will be set on retrieval based on whether there is an AccountProof
 	// set.
 	Paid bool

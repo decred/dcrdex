@@ -139,6 +139,8 @@ func tNewAccount() *dexAccount {
 
 func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 	conn := newTWebsocket()
+	connMaster := dex.NewConnectionMaster(conn)
+	connMaster.Connect(tCtx)
 	acct := tNewAccount()
 	mkt := &Market{
 		Name:            tDcrBtcMktName,
@@ -150,8 +152,9 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		MarketBuyBuffer: 1.1,
 	}
 	return &dexConnection{
-		WsConn: conn,
-		acct:   acct,
+		WsConn:     conn,
+		connMaster: connMaster,
+		acct:       acct,
 		assets: map[uint32]*dex.Asset{
 			tDCR.ID: tDCR,
 			tBTC.ID: tBTC,
@@ -966,6 +969,11 @@ func TestRegister(t *testing.T) {
 	sign(tDexPriv, regRes)
 
 	queueRegister := func() {
+		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+			resp, _ := msgjson.NewResponse(msg.ID, dc.cfg, nil)
+			f(resp)
+			return nil
+		})
 		rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
 			f(resp)
@@ -1028,6 +1036,7 @@ func TestRegister(t *testing.T) {
 		URL:     tDexUrl,
 		AppPass: tPW,
 		Fee:     tFee,
+		Cert:    "required",
 	}
 
 	tWallet.payFeeCoin = &tCoin{id: []byte("abcdef")}
@@ -1036,6 +1045,11 @@ func TestRegister(t *testing.T) {
 
 	var err error
 	run := func() {
+		// Register method will error if url is already in conns map.
+		tCore.connMtx.Lock()
+		delete(tCore.conns, tDexUrl)
+		tCore.connMtx.Unlock()
+
 		tWallet.setConfs(tDCR.FundConf)
 		err = tCore.Register(form)
 	}
@@ -1194,7 +1208,7 @@ func TestRegister(t *testing.T) {
 func TestLogin(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
-	rig.acct.pay()
+	rig.acct.markFeePaid()
 
 	queueSuccess := func() {
 		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -1229,7 +1243,7 @@ func TestLogin(t *testing.T) {
 	if rig.acct.locked() {
 		t.Fatalf("unpaid account is locked")
 	}
-	rig.acct.pay()
+	rig.acct.markFeePaid()
 
 	// 'connect' route error.
 	rig.acct.unauth()

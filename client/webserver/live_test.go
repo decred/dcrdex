@@ -265,7 +265,7 @@ func (c *TCore) InitializeClient(pw []byte) error {
 	c.inited = true
 	return nil
 }
-func (c *TCore) PreRegister(form *core.PreRegisterForm) (uint64, error) {
+func (c *TCore) GetFee(url, cert string) (uint64, error) {
 	return 1e8, nil
 }
 

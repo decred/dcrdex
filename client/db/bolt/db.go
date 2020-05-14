@@ -216,7 +216,7 @@ func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 }
 
 // CreateAccount saves the AccountInfo. If an account already exists for this
-// DEX, it will be overwritten without indication.
+// DEX, it will return an error.
 func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	if ai.URL == "" {
 		return fmt.Errorf("empty URL not allowed")
@@ -228,7 +228,7 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		return fmt.Errorf("zero-length EncKey not allowed")
 	}
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		acct, err := accts.CreateBucketIfNotExists([]byte(ai.URL))
+		acct, err := accts.CreateBucket([]byte(ai.URL))
 		if err != nil {
 			return fmt.Errorf("failed to create account bucket")
 		}

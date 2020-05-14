@@ -68,7 +68,7 @@ type clientCore interface {
 	ConnectWallet(assetID uint32) error
 	Wallets() []*core.WalletState
 	User() *core.User
-	PreRegister(*core.PreRegisterForm) (uint64, error)
+	GetFee(url, cert string) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
@@ -198,7 +198,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	mux.Get("/settings", s.handleSettings)
 	mux.Route("/api", func(r chi.Router) {
 		r.Use(middleware.AllowContentType("application/json"))
-		r.Post("/preregister", s.apiPreRegister)
+		r.Post("/getfee", s.apiGetFee)
 		r.Post("/newwallet", s.apiNewWallet)
 		r.Post("/openwallet", s.apiOpenWallet)
 		r.Post("/closewallet", s.apiCloseWallet)

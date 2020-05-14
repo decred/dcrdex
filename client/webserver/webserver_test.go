@@ -63,7 +63,7 @@ type TCore struct {
 	regErr          error
 	loginErr        error
 	initErr         error
-	preRegErr       error
+	getFeeErr       error
 	createWalletErr error
 	openWalletErr   error
 	closeWalletErr  error
@@ -73,11 +73,11 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Exchanges() map[string]*core.Exchange              { return nil }
-func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) { return 1e8, c.preRegErr }
-func (c *TCore) Register(r *core.RegisterForm) error               { return c.regErr }
-func (c *TCore) InitializeClient(pw []byte) error                  { return c.initErr }
-func (c *TCore) Login(pw []byte) ([]*db.Notification, error)       { return nil, c.loginErr }
+func (c *TCore) Exchanges() map[string]*core.Exchange        { return nil }
+func (c *TCore) GetFee(string, string) (uint64, error)       { return 1e8, c.getFeeErr }
+func (c *TCore) Register(r *core.RegisterForm) error         { return c.regErr }
+func (c *TCore) InitializeClient(pw []byte) error            { return c.initErr }
+func (c *TCore) Login(pw []byte) ([]*db.Notification, error) { return nil, c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return c.syncBook, c.syncFeed, c.syncErr
 }
@@ -516,7 +516,7 @@ func TestAPIInit(t *testing.T) {
 	tCore.initErr = nil
 }
 
-func TestAPIPreRegister(t *testing.T) {
+func TestAPIGetFee(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
@@ -524,16 +524,16 @@ func TestAPIPreRegister(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiPreRegister, want, reader, writer, body)
+		ensureResponse(t, s, s.apiGetFee, want, reader, writer, body)
 	}
 
-	body = &core.PreRegisterForm{URL: "somedexaddress.org"}
+	body = &registration{URL: "somedexaddress.org"}
 	ensure(`{"ok":true,"fee":100000000}`)
 
-	// Preregister error
-	tCore.preRegErr = tErr
-	ensure(`{"ok":false,"msg":"preregister error: test error"}`)
-	tCore.preRegErr = nil
+	// getFee error
+	tCore.getFeeErr = tErr
+	ensure(`{"ok":false,"msg":"getfee error: test error"}`)
+	tCore.getFeeErr = nil
 }
 
 func TestAPINewWallet(t *testing.T) {

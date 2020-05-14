@@ -12,15 +12,15 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
-// apiPreRegister is the handler for the '/preregister' API request.
-func (s *WebServer) apiPreRegister(w http.ResponseWriter, r *http.Request) {
-	form := new(core.PreRegisterForm)
+// apiGetFee is the handler for the '/getfee' API request.
+func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
+	form := new(registration)
 	if !readPost(w, r, form) {
 		return
 	}
-	fee, err := s.core.PreRegister(form)
+	fee, err := s.core.GetFee(form.URL, form.Cert)
 	if err != nil {
-		s.writeAPIError(w, "preregister error: %v", err)
+		s.writeAPIError(w, "getfee error: %v", err)
 		return
 	}
 	resp := struct {
@@ -57,6 +57,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 
 	err := s.core.Register(&core.RegisterForm{
 		URL:     reg.URL,
+		Cert:    reg.Cert,
 		AppPass: reg.Password,
 		Fee:     reg.Fee,
 	})

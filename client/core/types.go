@@ -108,12 +108,6 @@ type RegisterForm struct {
 	Cert    string           `json:"cert"`
 }
 
-// PreRegisterForm is the information necessary to pre-register a DEX.
-type PreRegisterForm struct {
-	URL  string `json:"url"`
-	Cert string `json:"cert"`
-}
-
 // Match represents a match on an order. An order may have many matches.
 type Match struct {
 	MatchID string            `json:"matchID"`
@@ -260,11 +254,55 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	}
 }
 
+func (a *dexAccount) dbInfo() *db.AccountInfo {
+	return &db.AccountInfo{
+		URL:       a.url,
+		Cert:      a.cert,
+		EncKey:    a.encKey,
+		DEXPubKey: a.dexPubKey,
+		FeeCoin:   a.feeCoin,
+	}
+}
+
 // ID returns the account ID.
 func (a *dexAccount) ID() account.AccountID {
 	a.keyMtx.RLock()
 	defer a.keyMtx.RUnlock()
 	return a.id
+}
+
+// setupEncryption creates and returns a new privkey for the account.
+// Returns existing privkey if previously set up.
+func (a *dexAccount) setupEncryption(crypter encrypt.Crypter) (*secp256k1.PrivateKey, error) {
+	// Check if privKey exists. Check a.encKey instead of a.privKey
+	// as a.privKey will be nil if the account is locked.
+	a.keyMtx.RLock()
+	if a.encKey != nil {
+		defer a.keyMtx.RUnlock()
+		// no need to generate a new privKey, return existing privKey AFTER unlocking.
+		err := a.unlock(crypter)
+		return a.privKey, err
+	}
+	a.keyMtx.RUnlock()
+
+	// Create a new private key for the account.
+	privKey, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		return nil, fmt.Errorf("error creating acct private key: %v", err)
+	}
+	// Encrypt the private key.
+	encKey, err := crypter.Encrypt(privKey.Serialize())
+	if err != nil {
+		return nil, fmt.Errorf("error encrypting acct private key: %v", err)
+	}
+
+	a.keyMtx.Lock()
+	a.encKey = encKey
+	a.privKey = privKey
+	a.id = account.NewID(privKey.PubKey().SerializeCompressed())
+	a.keyMtx.Unlock()
+
+	return privKey, nil
 }
 
 // unlock decrypts the account private key.
@@ -317,27 +355,27 @@ func (a *dexAccount) unauth() {
 	a.authMtx.Unlock()
 }
 
-// paid will be true if the account regisration fee has been accepted by the
-// DEX.
-func (a *dexAccount) paid() bool {
-	a.authMtx.RLock()
-	defer a.authMtx.RUnlock()
-	return a.isPaid
-}
-
-// pay sets the account paid flag.
-func (a *dexAccount) pay() {
-	a.authMtx.Lock()
-	a.isPaid = true
-	a.authMtx.Unlock()
-}
-
 // feePending checks whether the fee transaction has been broadcast, but the
 // notifyfee request has not been sent/accepted yet.
 func (a *dexAccount) feePending() bool {
 	a.authMtx.RLock()
 	defer a.authMtx.RUnlock()
 	return !a.isPaid && len(a.feeCoin) > 0
+}
+
+// feePaid returns true if the account regisration fee has been accepted by the
+// DEX.
+func (a *dexAccount) feePaid() bool {
+	a.authMtx.RLock()
+	defer a.authMtx.RUnlock()
+	return a.isPaid
+}
+
+// markFeePaid sets the account paid flag.
+func (a *dexAccount) markFeePaid() {
+	a.authMtx.Lock()
+	a.isPaid = true
+	a.authMtx.Unlock()
 }
 
 // sign uses the account private key to sign the message. If the account is

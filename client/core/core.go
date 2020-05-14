@@ -30,12 +30,12 @@ import (
 )
 
 const (
-	keyParamsKey     = "keyParams"
-	conversionFactor = 1e8
+	keyParamsKey      = "keyParams"
+	conversionFactor  = 1e8
+	regFeeAssetSymbol = "dcr" // Hard-coded to Decred for registration fees, for now.
 )
 
 var (
-	// log is a logger generated with the LogMaker provided with Config.
 	unbip          = dex.BipIDSymbol
 	aYear          = time.Hour * 24 * 365
 	requestTimeout = 10 * time.Second
@@ -142,22 +142,7 @@ func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string,
 	if err != nil {
 		return fmt.Errorf("error signing %s message: %v", route, err)
 	}
-	req, err := msgjson.NewRequest(dc.NextID(), route, signable)
-	if err != nil {
-		return fmt.Errorf("error encoding %s request: %v", route, err)
-	}
-	errChan := make(chan error, 1)
-	err = dc.Request(req, func(msg *msgjson.Message) {
-		errChan <- msg.UnmarshalResult(result)
-	})
-	if err != nil {
-		return err
-	}
-	err = extractError(errChan, requestTimeout, route)
-	if err != nil {
-		return err
-	}
-	return nil
+	return sendRequest(dc.WsConn, route, signable, result)
 }
 
 // ack sends an Acknowledgement for a match-related request.
@@ -324,8 +309,6 @@ type Core struct {
 	ctx           context.Context
 	wg            sync.WaitGroup
 	cfg           *Config
-	pendingTimer  *time.Timer
-	pendingReg    *dexConnection
 	db            db.DB
 	net           dex.Network
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
@@ -722,15 +705,54 @@ func (c *Core) ConnectWallet(assetID uint32) error {
 	return err
 }
 
-// PreRegister creates a connection to the specified DEX and fetches the
-// registration fee. The connection is left open and stored temporarily while
-// registration is completed.
-func (c *Core) PreRegister(form *PreRegisterForm) (uint64, error) {
+func (c *Core) isRegistered(url string) bool {
 	c.connMtx.RLock()
-	_, found := c.conns[form.URL]
+	_, found := c.conns[url]
 	c.connMtx.RUnlock()
-	if found {
-		return 0, fmt.Errorf("already registered at %s", form.URL)
+	return found
+}
+
+// GetFee creates a connection to the specified DEX Server and fetches the
+// registration fee. The connection is closed after the fee is retrieved.
+// Returns an error if user is already registered to the DEX.
+func (c *Core) GetFee(url, cert string) (uint64, error) {
+	if c.isRegistered(url) {
+		return 0, fmt.Errorf("already registered at %s", url)
+	}
+	dc, err := c.connectDEX(&db.AccountInfo{
+		URL:  url,
+		Cert: []byte(cert),
+	})
+	if err != nil {
+		return 0, err
+	}
+	defer dc.connMaster.Disconnect()
+	return dc.cfg.Fee, nil
+}
+
+// Register registers an account with a new DEX. If an error occurs while
+// fetching the DEX configuration or creating the fee transaction, it will be
+// returned immediately.
+// A thread will be started to wait for the requisite confirmations and send
+// the fee notification to the server. Any error returned from that thread is
+// sent as a notification.
+func (c *Core) Register(form *RegisterForm) error {
+	// Check the app password.
+	crypter, err := c.encryptionKey(form.AppPass)
+	if err != nil {
+		return err
+	}
+	if form.URL == "" {
+		return fmt.Errorf("no dex url specified")
+	}
+	if c.isRegistered(form.URL) {
+		return fmt.Errorf("already registered at %s", form.URL)
+	}
+
+	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	wallet, err := c.connectedWallet(regFeeAssetID)
+	if err != nil {
+		return fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
 	}
 
 	dc, err := c.connectDEX(&db.AccountInfo{
@@ -738,155 +760,44 @@ func (c *Core) PreRegister(form *PreRegisterForm) (uint64, error) {
 		Cert: []byte(form.Cert),
 	})
 	if err != nil {
-		return 0, err
+		return err
 	}
 
-	c.connMtx.Lock()
-	defer c.connMtx.Unlock() // remain locked for pendingReg and pendingTimer
-	c.pendingReg = dc
-
-	// After a while, if the registration hasn't been completed, disconnect from
-	// the DEX. The Register loop will form a new connection if pendingReg is nil.
-	if c.pendingTimer == nil {
-		c.pendingTimer = time.AfterFunc(time.Minute*5, func() {
-			c.connMtx.Lock()
-			defer c.connMtx.Unlock()
-			pendingDEX := c.pendingReg
-			if pendingDEX != nil && pendingDEX.acct.url == dc.acct.url {
-				pendingDEX.connMaster.Disconnect()
-				c.pendingReg = nil
-			}
-		})
-	} else {
-		if !c.pendingTimer.Stop() {
-			<-c.pendingTimer.C
+	// close the connection to the dex server if the registration fails.
+	var registrationComplete bool
+	defer func() {
+		if !registrationComplete {
+			dc.connMaster.Disconnect()
 		}
-		c.pendingTimer.Reset(time.Minute * 5)
-	}
-	return dc.cfg.Fee, nil
-}
+	}()
 
-// Register registers an account with a new DEX. If an error occurs while
-// fetching the DEX configuration or creating the fee transaction, it will be
-// returned immediately as the first argument. A thread will be started to wait
-// for the requisite confirmations and send the fee notification to the server.
-// Any error returned from that thread will be sent over the returned channel.
-func (c *Core) Register(form *RegisterForm) error {
-	// Check the app password.
-	crypter, err := c.encryptionKey(form.AppPass)
+	regAsset, found := dc.assets[regFeeAssetID]
+	if !found {
+		return fmt.Errorf("dex server does not support %s asset", regFeeAssetSymbol)
+	}
+
+	privKey, err := dc.acct.setupEncryption(crypter)
 	if err != nil {
 		return err
 	}
-	// For now, asset ID is hard-coded to Decred for registration fees.
-	assetID, _ := dex.BipSymbolID("dcr")
-	if form.URL == "" {
-		return fmt.Errorf("no dex url specified")
-	}
-	wallet, err := c.connectedWallet(assetID)
-	if err != nil {
-		return fmt.Errorf("Register: wallet error for %d -> %s: %v", assetID, unbip(assetID), err)
-	}
-
-	// Make sure the account doesn't already exist.
-	_, err = c.db.Account(form.URL)
-	if err == nil {
-		return fmt.Errorf("account already exists for %s", form.URL)
-	}
-
-	// Get a connection to the dex.
-	ai := &db.AccountInfo{
-		URL:  form.URL,
-		Cert: []byte(form.Cert),
-	}
-
-	// Lock conns map, pendingReg, and pendingTimer.
-	c.connMtx.Lock()
-	dc, found := c.conns[ai.URL]
-	// If it's not already in the map, see if there is a pre-registration pending.
-	if !found && c.pendingReg != nil {
-		if c.pendingReg.acct.url != ai.URL {
-			return fmt.Errorf("pending registration exists for dex %s", c.pendingReg.acct.url)
-		}
-		if c.pendingTimer != nil { // it should be set
-			if !c.pendingTimer.Stop() {
-				return fmt.Errorf("pre-registration timer already fired and shutdown the connection")
-			}
-			c.pendingTimer = nil
-		}
-		dc = c.pendingReg
-		c.conns[ai.URL] = dc
-		ai.Cert = dc.acct.cert
-		found = true
-	}
-	// If it was neither in the map or pre-registered, get a new connection.
-	if !found {
-		dc, err = c.connectDEX(ai)
-		if err != nil {
-			c.connMtx.Unlock()
-			return err
-		}
-		c.conns[ai.URL] = dc
-	}
-	c.connMtx.Unlock()
-
-	// Update user in case conns or wallets were updated.
-	c.refreshUser()
-
-	regAsset, found := dc.assets[assetID]
-	if !found {
-		return fmt.Errorf("asset information not found: %v", err)
-	}
-
-	// Create a new private key for the account.
-	privKey, err := secp256k1.GeneratePrivateKey()
-	if err != nil {
-		return fmt.Errorf("error creating wallet key: %v", err)
-	}
-
-	// Encrypt the private key.
-	encKey, err := crypter.Encrypt(privKey.Serialize())
-	if err != nil {
-		return fmt.Errorf("error encrypting private key: %v", err)
-	}
-
-	// The account ID is generated from the public key.
-	pubKey := privKey.PubKey()
 
 	// Prepare and sign the registration payload.
+	// The account ID is generated from the public key.
 	dexReg := &msgjson.Register{
-		PubKey: pubKey.Serialize(),
+		PubKey: privKey.PubKey().Serialize(),
 		Time:   encode.UnixMilliU(time.Now()),
 	}
-	err = sign(privKey, dexReg)
+	regRes := new(msgjson.RegisterResult)
+	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes)
 	if err != nil {
 		return err
 	}
 
-	// Create and send the the request, grabbing the result in the callback.
-	regMsg, err := msgjson.NewRequest(dc.NextID(), msgjson.RegisterRoute, dexReg)
-	if err != nil {
-		return fmt.Errorf("error encoding message: %v", err)
-	}
-	regRes := new(msgjson.RegisterResult)
-	errChan := make(chan error, 1)
-	err = dc.Request(regMsg, func(msg *msgjson.Message) {
-		errChan <- msg.UnmarshalResult(regRes)
-	})
-	if err != nil {
-		return fmt.Errorf("'register' request error: %v", err)
-	}
-	err = extractError(errChan, requestTimeout, "register")
-	if err != nil {
-		return fmt.Errorf("'register' result decode error: %v", err)
-	}
-
-	// Check the server's signature.
+	// Check the DEX server's signature.
 	msg, err := regRes.Serialize()
 	if err != nil {
 		return fmt.Errorf("error serializing RegisterResult for signature check: %v", err)
 	}
-
-	// Create a public key for this account.
 	dexPubKey, err := checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
 	if err != nil {
 		return fmt.Errorf("DEX signature validation error: %v", err)
@@ -894,7 +805,7 @@ func (c *Core) Register(form *RegisterForm) error {
 
 	// Check that the fee is non-zero.
 	if regRes.Fee == 0 {
-		return fmt.Errorf("zero registration fees not supported")
+		return fmt.Errorf("zero registration fees not allowed")
 	}
 	if regRes.Fee != dc.cfg.Fee {
 		return fmt.Errorf("DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dc.cfg.Fee)
@@ -910,26 +821,27 @@ func (c *Core) Register(form *RegisterForm) error {
 	if err != nil {
 		return fmt.Errorf("error paying registration fee: %v", err)
 	}
-	// Set the dexConnection account fields.
-	dc.acct.dexPubKey = dexPubKey
-	dc.acct.encKey = encKey
-	dc.acct.feeCoin = coin.ID()
-	dc.acct.unlock(crypter)
 
-	// Set the db.AccountInfo fields and save the account info.
-	ai.EncKey = encKey
-	ai.DEXPubKey = dexPubKey
-	ai.FeeCoin = coin.ID()
-	err = c.db.CreateAccount(ai)
+	// Registration complete.
+	registrationComplete = true
+	c.connMtx.Lock()
+	c.conns[dc.acct.url] = dc
+	c.connMtx.Unlock()
+
+	// Set the dexConnection account fields and save account info to db.
+	dc.acct.dexPubKey = dexPubKey
+	dc.acct.feeCoin = coin.ID()
+	err = c.db.CreateAccount(dc.acct.dbInfo())
 	if err != nil {
 		log.Errorf("error saving account: %v", err)
 		// Don't abandon registration. The fee is already paid.
 	}
+
 	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", dc.cfg.RegFeeConfirms, dc.acct.url)
-	c.notify(newFeePaymentNote("Fee paid", details, db.Success))
+	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success))
 
 	// Set up the coin waiter.
-	c.verifyRegistrationFee(wallet, dc, coin.ID(), assetID)
+	c.verifyRegistrationFee(wallet, dc, coin.ID(), regFeeAssetID)
 	c.refreshUser()
 	return nil
 }
@@ -975,7 +887,7 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		if err != nil {
 			return
 		}
-		dc.acct.pay()
+		dc.acct.markFeePaid()
 		err = c.authDEX(dc)
 		if err != nil {
 			log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.url, err)
@@ -1052,7 +964,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 			continue
 		}
 		dcrID, _ := dex.BipSymbolID("dcr")
-		if !dc.acct.paid() {
+		if !dc.acct.feePaid() {
 			if len(dc.acct.feeCoin) == 0 {
 				details := fmt.Sprintf("Empty fee coin for %s.", dc.acct.url)
 				c.notify(newFeePaymentNote("Fee coin error", details, db.ErrorLevel))
@@ -1499,7 +1411,7 @@ func (c *Core) Cancel(pw []byte, tradeID string) error {
 	// Create and send the order message. Check the response before using it.
 	route, msgOrder := messageOrder(co, nil)
 	var result = new(msgjson.OrderResult)
-	err = tracker.dc.signAndRequest(msgOrder, route, result)
+	err = dc.signAndRequest(msgOrder, route, result)
 	if err != nil {
 		return err
 	}
@@ -1696,7 +1608,7 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 	}
 	var wg sync.WaitGroup
 	for _, dc := range c.conns {
-		if dc.acct.paid() {
+		if dc.acct.feePaid() {
 			continue
 		}
 		if len(dc.acct.feeCoin) == 0 {
@@ -1749,7 +1661,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 			details := fmt.Sprintf("You may now trade at %s.", dc.acct.url)
 			c.notify(newFeePaymentNote("Registration complete", details, db.Success))
 			// dc.acct.pay() and c.authDEX????
-			dc.acct.pay()
+			dc.acct.markFeePaid()
 			err = c.authDEX(dc)
 			if err != nil {
 				log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.url, err)
@@ -1987,19 +1899,23 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) error {
 	return nil
 }
 
-// connectDEX creates and connects a dexConnection, but does not authenticate
-// the connection through the 'connect' route.
+// connectDEX establishes a ws connection to a DEX server using the provided
+// url and cert, but does not authenticate the connection through the 'connect'
+// route.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// Get the host from the DEX URL.
-	uri := acctInfo.URL
-	parsedURL, err := url.Parse(uri)
+	parsedURL, err := url.Parse(acctInfo.URL)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing account URL %s: %v", uri, err)
+		return nil, fmt.Errorf("error parsing account URL %s: %v", acctInfo.URL, err)
+	}
+	uri := parsedURL.Host // empty for urls without scheme
+	if uri == "" {
+		uri = parsedURL.String()
 	}
 
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&comms.WsCfg{
-		URL:      "wss://" + parsedURL.Host + "/ws",
+		URL:      "wss://" + uri + "/ws",
 		PingWait: 60 * time.Second,
 		Cert:     acctInfo.Cert,
 		ReconnectSync: func() {
@@ -2009,94 +1925,79 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Error creating websocket connection for %s: %v", uri, err)
 	}
+
 	connMaster := dex.NewConnectionMaster(conn)
 	err = connMaster.Connect(c.ctx)
 	// If the initial connection returned an error, shut it down to kill the
 	// auto-reconnect cycle.
 	if err != nil {
 		connMaster.Disconnect()
-		return nil, fmt.Errorf("Error initalizing websocket connection: %v", err)
+		return nil, fmt.Errorf("Error initializing websocket connection: %v", err)
 	}
 
-	// Request the market configuration. The DEX is only added when the DEX
-	// configuration is successfully retrieved.
-	reqMsg, err := msgjson.NewRequest(conn.NextID(), msgjson.ConfigRoute, nil)
+	// Request the market configuration. Disconnect from the DEX server if the
+	// configuration cannot be retrieved.
+	dexCfg := new(msgjson.ConfigResult)
+	err = sendRequest(conn, msgjson.ConfigRoute, nil, dexCfg)
 	if err != nil {
-		log.Errorf("error creating 'config' request: %v", err)
+		connMaster.Disconnect()
+		return nil, fmt.Errorf("Error fetching DEX server config: %v", err)
 	}
-	connChan := make(chan *dexConnection, 1)
-	var reqErr error
-	err = conn.Request(reqMsg, func(msg *msgjson.Message) {
-		dexCfg := new(msgjson.ConfigResult)
-		err = msg.UnmarshalResult(dexCfg)
-		if err != nil {
-			reqErr = fmt.Errorf("'config' result decode error: %v", err)
-			connChan <- nil
-			return
-		}
 
-		assets := make(map[uint32]*dex.Asset)
-		for i := range dexCfg.Assets {
-			asset := &dexCfg.Assets[i]
-			assets[asset.ID] = convertAssetInfo(asset)
-		}
-		// Validate the markets so we don't have to check every time later.
-		for _, mkt := range dexCfg.Markets {
-			_, ok := assets[mkt.Base]
-			if !ok {
-				log.Errorf("%s reported a market with base asset %d, "+
-					"but did not provide the asset info.", uri, mkt.Base)
-			}
-			_, ok = assets[mkt.Quote]
-			if !ok {
-				log.Errorf("%s reported a market with quote asset %d, "+
-					"but did not provide the asset info.", uri, mkt.Quote)
-			}
-		}
-
-		marketMap := make(map[string]*Market)
-		for _, mkt := range dexCfg.Markets {
-			base, quote := assets[mkt.Base], assets[mkt.Quote]
-			market := &Market{
-				Name:            mkt.Name,
-				BaseID:          base.ID,
-				BaseSymbol:      base.Symbol,
-				QuoteID:         quote.ID,
-				QuoteSymbol:     quote.Symbol,
-				EpochLen:        mkt.EpochLen,
-				StartEpoch:      mkt.StartEpoch,
-				MarketBuyBuffer: mkt.MarketBuyBuffer,
-			}
-			marketMap[mkt.Name] = market
-		}
-
-		// Create the dexConnection and add it to the map.
-		dc := &dexConnection{
-			WsConn:     conn,
-			connMaster: connMaster,
-			assets:     assets,
-			cfg:        dexCfg,
-			books:      make(map[string]*bookie),
-			acct:       newDEXAccount(acctInfo),
-			marketMap:  marketMap,
-			trades:     make(map[order.OrderID]*trackedTrade),
-			notify:     c.notify,
-		}
-
-		dc.refreshMarkets()
-		connChan <- dc
-		c.wg.Add(1)
-		// Listen for incoming messages.
-		log.Infof("Connected to DEX %s and listening for messages.", uri)
-		go c.listen(dc)
-	}) // End 'config' request
-
-	if err != nil {
-		log.Errorf("error sending 'config' request: %v", err)
-		reqErr = err
-		connChan <- nil
+	assets := make(map[uint32]*dex.Asset, len(dexCfg.Assets))
+	for i := range dexCfg.Assets {
+		asset := &dexCfg.Assets[i]
+		assets[asset.ID] = convertAssetInfo(asset)
 	}
-	return <-connChan, reqErr
+	// Validate the markets so we don't have to check every time later.
+	for _, mkt := range dexCfg.Markets {
+		_, ok := assets[mkt.Base]
+		if !ok {
+			log.Errorf("%s reported a market with base asset %d, "+
+				"but did not provide the asset info.", uri, mkt.Base)
+		}
+		_, ok = assets[mkt.Quote]
+		if !ok {
+			log.Errorf("%s reported a market with quote asset %d, "+
+				"but did not provide the asset info.", uri, mkt.Quote)
+		}
+	}
+
+	marketMap := make(map[string]*Market)
+	for _, mkt := range dexCfg.Markets {
+		base, quote := assets[mkt.Base], assets[mkt.Quote]
+		market := &Market{
+			Name:            mkt.Name,
+			BaseID:          base.ID,
+			BaseSymbol:      base.Symbol,
+			QuoteID:         quote.ID,
+			QuoteSymbol:     quote.Symbol,
+			EpochLen:        mkt.EpochLen,
+			StartEpoch:      mkt.StartEpoch,
+			MarketBuyBuffer: mkt.MarketBuyBuffer,
+		}
+		marketMap[mkt.Name] = market
+	}
+
+	// Create the dexConnection and listen for incoming messages.
+	dc := &dexConnection{
+		WsConn:     conn,
+		connMaster: connMaster,
+		assets:     assets,
+		cfg:        dexCfg,
+		books:      make(map[string]*bookie),
+		acct:       newDEXAccount(acctInfo),
+		marketMap:  marketMap,
+		trades:     make(map[order.OrderID]*trackedTrade),
+		notify:     c.notify,
+	}
+
+	dc.refreshMarkets()
+	c.wg.Add(1)
+	go c.listen(dc)
+	log.Infof("Connected to DEX server at %s and listening for messages.", uri)
+
+	return dc, nil
 }
 
 // If the passed epoch is greater than the highest previously passed epoch,
@@ -2446,6 +2347,25 @@ func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
 func stamp(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) error {
 	payload.Stamp(encode.UnixMilliU(time.Now()))
 	return sign(privKey, payload)
+}
+
+// sendRequest sends a request via the specified ws connection and unmarshals
+// the response into the provided interface.
+func sendRequest(conn comms.WsConn, route string, request, response interface{}) error {
+	reqMsg, err := msgjson.NewRequest(conn.NextID(), route, request)
+	if err != nil {
+		return fmt.Errorf("error encoding %s request: %v", route, err)
+	}
+
+	errChan := make(chan error, 1)
+	err = conn.Request(reqMsg, func(msg *msgjson.Message) {
+		errChan <- msg.UnmarshalResult(response)
+	})
+	if err != nil {
+		return err
+	}
+
+	return extractError(errChan, requestTimeout, route)
 }
 
 // extractError extracts the error from the channel with a timeout.
