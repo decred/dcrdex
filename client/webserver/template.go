@@ -5,7 +5,6 @@
 package webserver
 
 import (
-	"errors"
 	"fmt"
 	"html/template"
 	"net/url"
@@ -130,22 +129,6 @@ func (t *templates) execWithReload(name string, data interface{}) (string, error
 
 // templateFuncs are able to be called during template execution.
 var templateFuncs = template.FuncMap{
-	// map provides a generic means to build a map from a template.
-	"map": func(key1 string, value1 interface{}, otherKVs ...interface{}) (map[string]interface{}, error) {
-		if len(otherKVs)%2 != 0 {
-			return nil, errors.New("invalid dict call")
-		}
-		dict := make(map[string]interface{}, 1+len(otherKVs)/2)
-		dict[key1] = value1
-		for i := 0; i < len(otherKVs); i += 2 {
-			key, ok := otherKVs[i].(string)
-			if !ok {
-				return nil, errors.New("dict keys must be strings")
-			}
-			dict[key] = otherKVs[i+1]
-		}
-		return dict, nil
-	},
 	"toUpper": strings.ToUpper,
 	// logoPath gets the logo image path for the base asset of the specified
 	// market.

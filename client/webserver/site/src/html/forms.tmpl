@@ -6,8 +6,8 @@
   Wallet
 </div>
 <div class="p-4">
-  {{if .subtext}}
-    <div class="fs16">{{.subtext}}</div>
+  {{if .}}
+    <div class="fs16">{{.}}</div>
     <hr class="dashed my-4">
   {{end}}
   <div>
@@ -15,7 +15,7 @@
     <input type="text" class="form-control select" id="acctName">
   </div>
   <div>
-    {{if .showHelp}}
+    {{if .}}
     <label for="newWalletPass" class="pt-3 pl-1 mb-0">Wallet Password</label>
     <div class="fs14 px-1 mb-1">This is the password you have configured with your wallet backend.</div>
     {{else}}
@@ -42,7 +42,7 @@
     </div>
   </div>
   <div>
-    {{if .showHelp}}
+    {{if .}}
     <label for="nwClientPass" class="pt-3 pl-1 mb-0">Client Password</label>
     <div class="fs14 px-1 mb-1">Your client password is always required when performing sensitive wallet operations.</div>
     {{else}}

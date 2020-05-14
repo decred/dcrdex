@@ -26,8 +26,7 @@
 
     {{- /* Set up the Decred wallet. Only shown if user has not connected their Decred wallet. */ -}}
     <form class="card mx-auto my-5 bg1{{if not .WalletStep}} d-hide{{end}}" id="newWalletForm">
-      {{$newWalletFormData := map "subtext" "Your Decred wallet is required to pay registration fees." "showHelp" true}}
-      {{template "newWalletForm" $newWalletFormData}}
+      {{template "newWalletForm" "Your Decred wallet is required to pay registration fees."}}
     </form>
 
     {{- /* Unlock Decred wallet. Only shown if not already unlocked. */ -}}
