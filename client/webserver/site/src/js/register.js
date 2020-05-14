@@ -149,8 +149,8 @@ export default class RegistrationPage extends BasePage {
     const page = this.page
     Doc.hide(page.regErr)
     var cert = ''
-    if (page.certInput.value) {
-      cert = await page.certInput.files[0].text()
+    if (page.certFile.value) {
+      cert = await page.certFile.files[0].text()
     }
     const registration = {
       url: page.dexAddr.value,
