@@ -326,6 +326,37 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	return nil
 }
 
+// handleUpdateRemainingMsg is called when an update_remaining notification is
+// received.
+func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+	note := new(msgjson.UpdateRemainingNote)
+	err := msg.Unmarshal(note)
+	if err != nil {
+		return fmt.Errorf("book order note unmarshal error: %v", err)
+	}
+
+	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock()
+
+	book, ok := dc.books[note.MarketID]
+	if !ok {
+		return fmt.Errorf("no order book found with market id '%v'",
+			note.MarketID)
+	}
+	err = book.UpdateRemaining(note)
+	if err != nil {
+		return err
+	}
+	book.send(&BookUpdate{
+		Action: msg.Route,
+		Order: &MiniOrder{
+			Token: token(note.OrderID),
+			Qty:   float64(note.Remaining) / conversionFactor,
+		},
+	})
+	return nil
+}
+
 // handleEpochOrderMsg is called when an epoch_order notification is
 // received.
 func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {

@@ -2081,10 +2081,11 @@ var reqHandlers = map[string]routeHandler{
 }
 
 var noteHandlers = map[string]routeHandler{
-	msgjson.MatchProofRoute:  handleMatchProofMsg,
-	msgjson.BookOrderRoute:   handleBookOrderMsg,
-	msgjson.EpochOrderRoute:  handleEpochOrderMsg,
-	msgjson.UnbookOrderRoute: handleUnbookOrderMsg,
+	msgjson.MatchProofRoute:      handleMatchProofMsg,
+	msgjson.BookOrderRoute:       handleBookOrderMsg,
+	msgjson.EpochOrderRoute:      handleEpochOrderMsg,
+	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
+	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and

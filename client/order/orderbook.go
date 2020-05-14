@@ -99,7 +99,7 @@ func (ob *OrderBook) cacheOrderNote(route string, entry interface{}) error {
 	note := new(cachedOrderNote)
 
 	switch route {
-	case msgjson.BookOrderRoute, msgjson.UnbookOrderRoute:
+	case msgjson.BookOrderRoute, msgjson.UnbookOrderRoute, msgjson.UpdateRemainingRoute:
 		note.Route = route
 		note.OrderNote = entry
 
@@ -143,6 +143,17 @@ func (ob *OrderBook) processCachedNotes() error {
 					" as an UnbookOrderNote")
 			}
 			err := ob.unbook(note, true)
+			if err != nil {
+				return err
+			}
+
+		case msgjson.UpdateRemainingRoute:
+			note, ok := entry.OrderNote.(*msgjson.UpdateRemainingNote)
+			if !ok {
+				panic("failed to cast cached update_remaining note" +
+					" as an UnbookOrderNote")
+			}
+			err := ob.updateRemaining(note, true)
 			if err != nil {
 				return err
 			}
@@ -271,6 +282,45 @@ func (ob *OrderBook) book(note *msgjson.BookOrderNote, cached bool) error {
 // Book adds a new order to the order book.
 func (ob *OrderBook) Book(note *msgjson.BookOrderNote) error {
 	return ob.book(note, false)
+}
+
+func (ob *OrderBook) updateRemaining(note *msgjson.UpdateRemainingNote, cached bool) error {
+	if ob.marketID != note.MarketID {
+		return fmt.Errorf("invalid update_remaining note market id %s", note.MarketID)
+	}
+
+	if !cached {
+		// Cache the note if the order book is not synced.
+		if !ob.isSynced() {
+			return ob.cacheOrderNote(msgjson.UpdateRemainingRoute, note)
+		}
+	}
+
+	ob.setSeq(note.Seq)
+
+	if len(note.OrderID) != order.OrderIDSize {
+		return fmt.Errorf("expected order id length of %d, got %d",
+			order.OrderIDSize, len(note.OrderID))
+	}
+
+	var oid order.OrderID
+	copy(oid[:], note.OrderID)
+
+	ord := ob.sells.Update(oid, note.Remaining)
+	if ord != nil {
+		return nil
+	}
+
+	ord = ob.buys.Update(oid, note.Remaining)
+	if ord != nil {
+		return nil
+	}
+
+	return fmt.Errorf("update_remaining order %s not found", oid)
+}
+
+func (ob *OrderBook) UpdateRemaining(note *msgjson.UpdateRemainingNote) error {
+	return ob.updateRemaining(note, false)
 }
 
 // unbook is the workhorse of the exported Unbook function. It allows unbooking

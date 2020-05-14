@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+
+	"decred.org/dcrdex/dex/order"
 )
 
 // OrderPreference reprsents ordering preference for a sort.
@@ -104,6 +106,23 @@ func (d *bookSide) Remove(order *Order) error {
 	}
 
 	return fmt.Errorf("order %s not found", order.OrderID)
+}
+
+// Update updates the remaining quantity for an order. If the order is found
+// it will be returned, else nil.
+func (d *bookSide) Update(oid order.OrderID, remaining uint64) *Order {
+	d.mtx.Lock()
+	defer d.mtx.Unlock()
+
+	for _, bin := range d.bins {
+		for _, ord := range bin {
+			if ord.OrderID == oid {
+				ord.Quantity = remaining
+				return ord
+			}
+		}
+	}
+	return nil
 }
 
 // orders is all orders for the side, sorted.
