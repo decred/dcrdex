@@ -255,8 +255,13 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 		cval := s.auth()
 		http.SetCookie(w, &http.Cookie{
 			Name:  authCK,
-			Path:  "/",
 			Value: cval,
+			Path:  "/",
+			// The client should only send the cookie with first-party requests.
+			// Cross-site requests should not include the auth cookie.
+			// https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00#section-4.1.1
+			SameSite: http.SameSiteStrictMode,
+			// Secure: false, // while false we require SameSite set
 		})
 	}
 	writeJSON(w, struct {
