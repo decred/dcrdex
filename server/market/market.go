@@ -973,6 +973,8 @@ func (m *Market) enqueueEpoch(eq *epochPump, epoch *EpochQueue) {
 	// it is this epoch's turn.
 	rq := eq.Insert(epoch)
 
+	// With this epoch closed, these orders are no longer cancelable, if and
+	// until they are booked in processReadyEpoch (after preimage collection).
 	orders := epoch.OrderSlice()
 	m.epochMtx.Lock()
 	for _, ord := range orders {
@@ -1037,7 +1039,7 @@ func (m *Market) processReadyEpoch(ctx context.Context, epoch *readyEpoch) {
 	misses := epoch.misses
 
 	// Perform order matching using the preimages to shuffle the queue.
-	m.bookMtx.Lock()
+	m.bookMtx.Lock()        // allow a coherent view of book orders with (*Market).Book
 	matchTime := time.Now() // considered as the time at which matched cancel orders are executed
 	seed, matches, _, failed, doneOK, partial, booked, unbooked, updates := m.matcher.Match(m.book, ordersRevealed)
 	m.epochIdx = epoch.Epoch + 1

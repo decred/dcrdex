@@ -22,51 +22,10 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/server/account"
-	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/swap"
 )
-
-const (
-	AssetDCR = 42
-	AssetBTC = 0
-)
-
-// This stub satisfies asset.Backend.
-type TAsset struct{}
-
-func (a *TAsset) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
-	return nil, nil
-}
-func (a *TAsset) FundingCoin(coinID []byte, redeemScript []byte) (asset.FundingCoin, error) {
-	return nil, nil
-}
-func (a *TAsset) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
-	return nil, nil
-}
-func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate { return nil }
-func (a *TAsset) InitTxSize() uint32                              { return 100 }
-func (a *TAsset) CheckAddress(string) bool                        { return true }
-func (a *TAsset) Run(context.Context)                             {}
-func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
-	return "", nil
-}
-func (a *TAsset) ValidateContract(contract []byte) error {
-	return nil
-}
-func (a *TAsset) ValidateSecret(secret, contract []byte) bool { return true }
-
-func newAsset(id uint32, lotSize uint64) *asset.BackedAsset {
-	return &asset.BackedAsset{
-		Backend: &TAsset{},
-		Asset: dex.Asset{
-			ID:      id,
-			LotSize: lotSize,
-			Symbol:  dex.BipIDSymbol(id),
-		},
-	}
-}
 
 type TArchivist struct {
 	mtx                  sync.Mutex
@@ -74,6 +33,7 @@ type TArchivist struct {
 	orderWithKnownCommit order.OrderID
 	commitForKnownOrder  order.Commitment
 	bookedOrders         []*order.LimitOrder
+	epochInserted        chan struct{}
 }
 
 func (ta *TArchivist) LastErr() error { return nil }
@@ -128,7 +88,12 @@ func (ta *TArchivist) failOnEpochOrder(ord order.Order) {
 	ta.poisonEpochOrder = ord
 	ta.mtx.Unlock()
 }
-func (ta *TArchivist) InsertEpoch(ed *db.EpochResults) error { return nil }
+func (ta *TArchivist) InsertEpoch(ed *db.EpochResults) error {
+	if ta.epochInserted != nil { // the test wants to know
+		ta.epochInserted <- struct{}{}
+	}
+	return nil
+}
 func (ta *TArchivist) BookOrder(lo *order.LimitOrder) error {
 	ta.mtx.Lock()
 	defer ta.mtx.Unlock()
@@ -354,6 +319,10 @@ func TestMarket_Run(t *testing.T) {
 		return
 	}
 	epochDurationMSec := int64(mkt.EpochDuration())
+	// This test wants to know when epoch order matching booking is done.
+	storage.epochInserted = make(chan struct{}, 1)
+	// and when handlePreimage is done.
+	auth.handlePreimageDone = make(chan struct{}, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
@@ -451,10 +420,11 @@ func TestMarket_Run(t *testing.T) {
 		t.Error(err)
 	}
 
-	// Let the epoch cycle.
-	time.Sleep(time.Duration(epochDurationMSec)*time.Millisecond + time.Duration(epochDurationMSec/20))
-	// Let the fake client respond with its preimage, and for matching to complete.
-	time.Sleep(clientPreimageDelay + 20*time.Millisecond)
+	// Let the epoch cycle and the fake client respond with its preimage
+	// (handlePreimageResp done)...
+	<-auth.handlePreimageDone
+	// and for matching to complete (in processReadyEpoch).
+	<-storage.epochInserted
 
 	// Submit a valid cancel order.
 	loID := oRecord.order.ID()
@@ -552,10 +522,12 @@ func TestMarket_Run(t *testing.T) {
 		t.Errorf(`expected ErrDuplicateCancelOrder ("%v"), got "%v"`, ErrDuplicateCancelOrder, err)
 	}
 
-	// Let the epoch cycle.
-	time.Sleep(time.Duration(epochDurationMSec)*time.Millisecond + time.Duration(epochDurationMSec/20))
-	// Let the fake client respond with its preimage, and for matching to complete.
-	time.Sleep(clientPreimageDelay + 20*time.Millisecond)
+	// Let the epoch cycle and the fake client respond with its preimage
+	// (handlePreimageResp done)..
+	<-auth.handlePreimageDone
+	// and for matching to complete (in processReadyEpoch).
+	<-storage.epochInserted
+	storage.epochInserted = nil
 
 	cancel()
 	wg.Wait()
@@ -566,6 +538,9 @@ func TestMarket_Run(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 	}
+	storage.epochInserted = make(chan struct{}, 1)
+	auth.handlePreimageDone = make(chan struct{}, 1)
+
 	ctx, cancel = context.WithCancel(context.Background())
 	wg.Add(1)
 	go func() {
@@ -605,10 +580,12 @@ func TestMarket_Run(t *testing.T) {
 		t.Errorf(`expected ErrInvalidOrder ("%v"), got "%v"`, ErrInvalidOrder, err)
 	}
 
-	// Let the epoch cycle.
-	time.Sleep(time.Duration(epochDurationMSec)*time.Millisecond + time.Duration(epochDurationMSec/20))
-	// Let the fake client respond with its preimage, and for matching to complete.
-	time.Sleep(clientPreimageDelay + 20*time.Millisecond)
+	// Let the epoch cycle and the fake client respond with its preimage
+	// (handlePreimageResp done)..
+	<-auth.handlePreimageDone
+	// and for matching to complete (in processReadyEpoch).
+	<-storage.epochInserted
+	storage.epochInserted = nil
 
 	// Submit an order with a Commitment known to the DB.
 	// NOTE: disabled since the OrderWithCommit check in Market.processOrder is disabled too.
@@ -815,6 +792,8 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mkt.enqueueEpoch(ePump, tt.epoch)
+			// Wait for processReadyEpoch, which sends on buffered (async) book
+			// order feed channels.
 			<-goForIt
 			time.Sleep(50 * time.Millisecond) // let the test goroutine receive the signals, and update bookSignals
 			mtx.Lock()
@@ -893,12 +872,16 @@ func TestMarket_enqueueEpoch(t *testing.T) {
 
 func TestMarket_Cancelable(t *testing.T) {
 	// Create the market.
-	mkt, _, auth, cleanup, err := newTestMarket()
+	mkt, storage, auth, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 		return
 	}
 	defer cleanup()
+	// This test wants to know when epoch order matching booking is done.
+	storage.epochInserted = make(chan struct{}, 1)
+	// and when handlePreimage is done.
+	auth.handlePreimageDone = make(chan struct{}, 1)
 
 	epochDurationMSec := int64(mkt.EpochDuration())
 	startEpochIdx := 1 + encode.UnixMilli(time.Now().Truncate(time.Millisecond))/epochDurationMSec
@@ -988,10 +971,13 @@ func TestMarket_Cancelable(t *testing.T) {
 			"but it was in the epoch queue", lo)
 	}
 
-	// Let the epoch cycle.
-	time.Sleep(time.Duration(epochDurationMSec+epochDurationMSec/20) * time.Millisecond)
-	// Let the fake client respond with its preimage, and for matching to complete.
-	time.Sleep(clientPreimageDelay + 20*time.Millisecond)
+	// Let the epoch cycle and the fake client respond with its preimage
+	// (handlePreimageResp done)..
+	<-auth.handlePreimageDone
+	// and for matching to complete (in processReadyEpoch).
+	<-storage.epochInserted
+	storage.epochInserted = nil
+
 	if !mkt.Cancelable(lo.ID()) {
 		t.Errorf("Cancelable failed to report order %v as cancelable, "+
 			"but it should have been booked.", lo)
