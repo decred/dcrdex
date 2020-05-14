@@ -75,12 +75,11 @@ type TCore struct {
 	notOpen         bool
 }
 
-func (c *TCore) Exchanges() map[string]*core.Exchange              { return nil }
-func (c *TCore) PreRegister(*core.PreRegisterForm) (uint64, error) { return 1e8, c.preRegErr }
-func (c *TCore) Register(r *core.RegisterForm) error               { return c.regErr }
-func (c *TCore) InitializeClient(pw []byte) error                  { return c.initErr }
-func (c *TCore) Login(pw []byte) ([]*db.Notification, error)       { return nil, c.loginErr }
-func (c *TCore) Logout() error                                     { return c.logoutErr }
+func (c *TCore) Exchanges() map[string]*core.Exchange        { return nil }
+func (c *TCore) GetFee(string, string) (uint64, error)       { return 1e8, c.getFeeErr }
+func (c *TCore) Register(r *core.RegisterForm) error         { return c.regErr }
+func (c *TCore) InitializeClient(pw []byte) error            { return c.initErr }
+func (c *TCore) Login(pw []byte) ([]*db.Notification, error) { return nil, c.loginErr }
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return c.syncBook, c.syncFeed, c.syncErr
 }
@@ -132,6 +131,8 @@ func (c *TCore) Cancel(pw []byte, sid string) error { return nil }
 func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
+
+func (c *TCore) Logout() error { return c.logoutErr }
 
 type TWriter struct {
 	b []byte
