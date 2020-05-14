@@ -55,6 +55,7 @@ type ClientCore interface {
 	Book(dex string, base, quote uint32) (orderBook *core.OrderBook, err error)
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
+	Exchanges() (exchanges map[string]*core.Exchange)
 	InitializeClient(appPass []byte) error
 	OpenWallet(assetID uint32, pw []byte) error
 	PreRegister(form *core.PreRegisterForm) (fee uint64, err error)

@@ -49,6 +49,7 @@ type TCore struct {
 	wallets             []*core.WalletState
 	initializeClientErr error
 	registerErr         error
+	exchanges           map[string]*core.Exchange
 }
 
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
@@ -63,6 +64,7 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 func (c *TCore) CloseWallet(assetID uint32) error {
 	return c.closeWalletErr
 }
+func (c *TCore) Exchanges() (exchanges map[string]*core.Exchange) { return c.exchanges }
 func (c *TCore) InitializeClient(pw []byte) error {
 	return c.initializeClientErr
 }
@@ -78,7 +80,6 @@ func (c *TCore) Register(*core.RegisterForm) error {
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return nil, core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr
 }
-func (c *TCore) Unsync(dex string, base, quote uint32) {}
 func (c *TCore) Wallets() []*core.WalletState {
 	return c.wallets
 }

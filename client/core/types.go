@@ -117,7 +117,7 @@ type PreRegisterForm struct {
 // Match represents a match on an order. An order may have many matches.
 type Match struct {
 	MatchID string            `json:"matchID"`
-	Step    order.MatchStatus `json:"step"`
+	Step    order.MatchStatus `json:"status"`
 	Rate    uint64            `json:"rate"`
 	Qty     uint64            `json:"qty"`
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"decred.org/dcrdex/client/core"
@@ -439,5 +440,163 @@ func TestHandleRegister(t *testing.T) {
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestHandleExchanges(t *testing.T) {
+	/*
+	   handleExchanges removes some redundant fields from the response.
+	   $ diff in out
+	   3d2
+	   <     "url": "https://127.0.0.1:7232",
+	   6d4
+	   <         "name": "dcr_btc",
+	   16,17d13
+	   <             "dex": "https://127.0.0.1:7232",
+	   <             "market": "dcr_btc",
+	   42d37
+	   <         "id": 0,
+	   52d46
+	   <         "id": 42,
+	*/
+	in := `{
+  "https://127.0.0.1:7232": {
+    "url": "https://127.0.0.1:7232",
+    "markets": {
+      "dcr_btc": {
+        "name": "dcr_btc",
+        "baseid": 42,
+        "basesymbol": "dcr",
+        "quoteid": 0,
+        "quotesymbol": "btc",
+        "epochlen": 10000,
+        "startepoch": 158891349,
+        "buybuffer": 1.25,
+        "orders": [
+          {
+            "dex": "https://127.0.0.1:7232",
+            "market": "dcr_btc",
+            "type": 1,
+            "id": "e016a563ff5b845e9af20718af72224af630e65ca53edf2a3342d175dc6d3738",
+            "stamp": 1588913556583,
+            "qty": 100000000,
+            "sell": false,
+            "filled": 0,
+            "matches": [
+              {
+                "matchID": "1472deb169fb359a48676161be8ca81983201f28abe8cc9b504950032d6f14ec",
+                "qty": 100000000,
+                "rate": 100000000,
+                "step": 1
+              }
+            ],
+            "cancelling": false,
+            "canceled": false,
+            "rate": 100000000,
+            "tif": 1
+          }
+        ]
+      }
+    },
+    "assets": {
+      "0": {
+        "id": 0,
+        "symbol": "btc",
+        "lotSize": 100000,
+        "rateStep": 100000,
+        "feeRate": 100,
+        "swapSize": 224,
+        "swapConf": 1,
+        "fundConf": 1
+      },
+      "42": {
+        "id": 42,
+        "symbol": "dcr",
+        "lotSize": 100000000,
+        "rateStep": 100000000,
+        "feeRate": 10,
+        "swapSize": 253,
+        "swapConf": 1,
+        "fundConf": 1
+      }
+    },
+    "feePending": false
+  }
+}`
+	out := `{
+  "https://127.0.0.1:7232": {
+    "markets": {
+      "dcr_btc": {
+        "baseid": 42,
+        "basesymbol": "dcr",
+        "quoteid": 0,
+        "quotesymbol": "btc",
+        "epochlen": 10000,
+        "startepoch": 158891349,
+        "buybuffer": 1.25,
+        "orders": [
+          {
+            "type": 1,
+            "id": "e016a563ff5b845e9af20718af72224af630e65ca53edf2a3342d175dc6d3738",
+            "stamp": 1588913556583,
+            "qty": 100000000,
+            "sell": false,
+            "filled": 0,
+            "matches": [
+              {
+                "matchID": "1472deb169fb359a48676161be8ca81983201f28abe8cc9b504950032d6f14ec",
+                "qty": 100000000,
+                "rate": 100000000,
+                "step": 1
+              }
+            ],
+            "cancelling": false,
+            "canceled": false,
+            "rate": 100000000,
+            "tif": 1
+          }
+        ]
+      }
+    },
+    "assets": {
+      "0": {
+        "symbol": "btc",
+        "lotSize": 100000,
+        "rateStep": 100000,
+        "feeRate": 100,
+        "swapSize": 224,
+        "swapConf": 1,
+        "fundConf": 1
+      },
+      "42": {
+        "symbol": "dcr",
+        "lotSize": 100000000,
+        "rateStep": 100000000,
+        "feeRate": 10,
+        "swapSize": 253,
+        "swapConf": 1,
+        "fundConf": 1
+      }
+    },
+    "feePending": false
+  }
+}`
+	var exchangesIn map[string]*core.Exchange
+	if err := json.Unmarshal([]byte(in), &exchangesIn); err != nil {
+		panic(err)
+	}
+	tc := &TCore{exchanges: exchangesIn}
+	r := &RPCServer{core: tc}
+	payload := handleExchanges(r, nil)
+	var res map[string]*core.Exchange
+	if err := verifyResponse(payload, &res, -1); err != nil {
+		t.Fatal(err)
+	}
+	var exchangesOut map[string]*core.Exchange
+	if err := json.Unmarshal([]byte(out), &exchangesOut); err != nil {
+		panic(err)
+	}
+	if !reflect.DeepEqual(res, exchangesOut) {
+		t.Fatal("result does not have expected fields removed")
 	}
 }
