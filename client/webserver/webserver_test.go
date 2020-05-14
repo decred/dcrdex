@@ -641,12 +641,11 @@ func TestClientMap(t *testing.T) {
 func TestAPILogout(t *testing.T) {
 	writer := new(TWriter)
 	reader := new(TReader)
-	var body interface{}
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiLogout, want, reader, writer, body)
+		ensureResponse(t, s, s.apiLogout, want, reader, writer, nil)
 	}
 	ensure(`{"ok":true}`)
 
