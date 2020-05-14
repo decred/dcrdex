@@ -147,6 +147,10 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 
 	updates = new(OrdersUpdated)
 
+	// Store partially filled limit orders in a map to start to avoid duplicate
+	// entries.
+	partials := make(map[order.OrderID]*order.LimitOrder)
+
 	// For each order in the queue, find the best match in the book.
 	for _, q := range queue {
 		if !orderLotSizeOK(q.Order, book.LotSize()) {
@@ -205,7 +209,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 					unbooked = append(unbooked, maker)
 					updates.TradesCompleted = append(updates.TradesCompleted, maker)
 				} else {
-					updates.TradesPartial = append(updates.TradesPartial, maker)
+					partials[maker.ID()] = maker
 				}
 			}
 
@@ -258,13 +262,21 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 					unbooked = append(unbooked, maker)
 					updates.TradesCompleted = append(updates.TradesCompleted, maker)
 				} else {
-					updates.TradesPartial = append(updates.TradesPartial, maker)
+					partials[maker.ID()] = maker
 				}
 			}
 
 			// Regardless of remaining amount, market orders never go on the book.
 		}
 
+	}
+
+	for _, partial := range partials {
+		// Ignore orders with zero remainder. An order can be added to the partials
+		// map, but fill on a later order.
+		if partial.Remaining() > 0 {
+			updates.TradesPartial = append(updates.TradesPartial, partial)
+		}
 	}
 
 	return

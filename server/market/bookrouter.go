@@ -33,6 +33,9 @@ const (
 	// unbookAction means an order is being removed from the order book and will
 	// result in a msgjson.UnbookOrderNote being sent to subscribers.
 	unbookAction
+	// updateRemainingAction means a standling limit order has partially filled
+	// and will result in a msgjson.
+	updateRemainingAction
 	// newEpochAction is an internal signal to the routers main loop that
 	// indicates when a new epoch has opened.
 	newEpochAction
@@ -55,6 +58,8 @@ func (bua updateAction) String() string {
 		return "book"
 	case unbookAction:
 		return "unbook"
+	case updateRemainingAction:
+		return "update_remaining"
 	case newEpochAction:
 		return "newEpoch"
 	case matchProofAction:
@@ -86,6 +91,7 @@ type sigDataOrder struct {
 type sigDataBookedOrder sigDataOrder
 type sigDataUnbookedOrder sigDataOrder
 type sigDataEpochOrder sigDataOrder
+type sigDataUpdateRemaining sigDataOrder
 
 type sigDataNewEpoch struct {
 	idx int64
@@ -312,6 +318,20 @@ out:
 					MarketID: book.name,
 					OrderID:  oid[:],
 				}
+
+			case sigDataUpdateRemaining:
+				route = msgjson.UpdateRemainingRoute
+				lo, ok := sigData.order.(*order.LimitOrder)
+				if !ok {
+					panic("non-limit order received with unbookAction")
+				}
+				bookNote := book.update(lo)
+				n := &msgjson.UpdateRemainingNote{
+					OrderNote: bookNote.OrderNote,
+					Remaining: lo.Remaining(),
+				}
+				n.Seq = subs.nextSeq()
+				note = n
 
 			case sigDataEpochOrder:
 				route = msgjson.EpochOrderRoute

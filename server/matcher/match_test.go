@@ -954,6 +954,10 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 		newMarketSellOrder(99, 0), // sell, 99 lot, partial taker fill
 	}
 
+	partialRate := uint64(2500000)
+	partialWithRemainder := newLimitOrder(false, partialRate, 2, order.StandingTiF, 0)
+	partialThenGone := newLimitOrder(false, partialRate, 4, order.StandingTiF, 0)
+
 	resetTakers := func() {
 		for _, o := range takers {
 			switch ot := o.Order.(type) {
@@ -1077,6 +1081,79 @@ func TestMatch_marketSellsOnly(t *testing.T) {
 			wantNumInserted:     0,
 			wantNumUnbooked:     0,
 			wantNumTradesFailed: 1,
+		},
+		{
+			name: "market sell partial fill with remainder",
+			args: args{
+				book: &BookStub{
+					lotSize:   LotSize,
+					buyOrders: []*order.LimitOrder{partialWithRemainder},
+				},
+				queue: []*OrderRevealed{takers[0]},
+			},
+			doesMatch: true,
+			wantSeed: []byte{
+				0xbb, 0x20, 0x85, 0x39, 0x78, 0xd5, 0x09, 0xa9,
+				0xa0, 0x56, 0x78, 0x4c, 0x50, 0xb1, 0xb4, 0x3d,
+				0xe3, 0xe9, 0x9b, 0x2b, 0x88, 0x35, 0x2c, 0x71,
+				0xed, 0xff, 0x5d, 0xc2, 0x1e, 0x87, 0xcb, 0xf8},
+			wantMatches: []*order.MatchSet{
+				{
+					Taker:   takers[0].Order,
+					Makers:  []*order.LimitOrder{partialWithRemainder},
+					Amounts: []uint64{LotSize},
+					Rates:   []uint64{partialRate},
+					Total:   LotSize,
+				},
+			},
+			wantNumPassed:          1,
+			wantNumFailed:          0,
+			wantDoneOK:             1,
+			wantNumTradesPartial:   1,
+			wantNumTradesCompleted: 1,
+			wantNumUnbooked:        0,
+			wantNumTradesFailed:    0,
+		},
+		// If a booked order partially matches, but then completes on a subsequent
+		// order, the updates.TradesPartial should not contain the order.
+		{
+			name: "market sell partial fill before complete fill",
+			args: args{
+				book: &BookStub{
+					lotSize:   LotSize,
+					buyOrders: []*order.LimitOrder{partialThenGone},
+				},
+				queue: []*OrderRevealed{takers[0], takers[1]},
+			},
+			doesMatch: true,
+			wantSeed: []byte{
+				0x29, 0x39, 0xf3, 0x0e, 0x9e, 0x00, 0xc6, 0xe5,
+				0xc7, 0x1d, 0x56, 0x82, 0x2c, 0x89, 0x92, 0x3c,
+				0x59, 0x97, 0x84, 0x43, 0xaf, 0x7f, 0x7b, 0x67,
+				0xeb, 0x54, 0xd0, 0x88, 0x01, 0x2b, 0xf0, 0x58},
+			wantMatches: []*order.MatchSet{
+				{
+					Taker:   takers[0].Order,
+					Makers:  []*order.LimitOrder{partialThenGone},
+					Amounts: []uint64{LotSize},
+					Rates:   []uint64{partialRate},
+					Total:   LotSize,
+				},
+				{
+					Taker:   takers[1].Order,
+					Makers:  []*order.LimitOrder{partialThenGone},
+					Amounts: []uint64{LotSize * 3},
+					Rates:   []uint64{partialRate},
+					Total:   LotSize * 3,
+				},
+			},
+			wantNumPassed:          2,
+			wantNumFailed:          0,
+			wantDoneOK:             2,
+			wantNumTradesPartial:   0,
+			wantNumTradesCompleted: 3,
+			wantNumUnbooked:        1,
+			wantNumTradesFailed:    0,
 		},
 	}
 	for _, tt := range tests {

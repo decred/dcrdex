@@ -1371,6 +1371,17 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		notifyChan <- sig
 	}
 
+	// Send "update_remaining" notifications to order book subscribers.
+	for _, lo := range updates.TradesPartial {
+		notifyChan <- &updateSignal{
+			action: updateRemainingAction,
+			data: sigDataUnbookedOrder{
+				order:    lo,
+				epochIdx: epoch.Epoch,
+			},
+		}
+	}
+
 	// Initiate the swaps.
 	if len(matches) > 0 {
 		log.Debugf("Negotiating %d matches for epoch %d:%d", len(matches),
