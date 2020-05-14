@@ -34,7 +34,7 @@ type BookFeed struct {
 // feed when it's no longer being used.
 func NewBookFeed(close func(feed *BookFeed)) *BookFeed {
 	return &BookFeed{
-		C:     make(chan *BookUpdate, 1),
+		C:     make(chan *BookUpdate, 256),
 		off:   make(chan struct{}),
 		id:    atomic.AddUint32(&feederID, 1),
 		close: close,
