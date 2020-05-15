@@ -1,11 +1,12 @@
 import Doc from './doc'
 import { postJSON } from './http'
 
-var configInputField = (option) => {
+var configInputField = (option, idx) => {
+  const id = `wcfg-${idx}`
   return `
   <div>
-    <label for="${option.key}" class="pl-1 mb-1 small">${option.displayname || option.key}</label>
-    <input type="text" class="form-control select" placeholder="${option.description}" id="${option.key}">
+    <label for="${id}" class="pl-1 mb-1 small">${option.displayname || option.key}</label>
+    <input id="${id}" type="text" class="form-control select" data-cfgkey="${option.key}" placeholder="${option.description}">
   </div>
   `
 }
@@ -66,7 +67,8 @@ export function bindNewWallet (app, form, success) {
       config = await fields.cfgFile.files[0].text()
     } else {
       config = currentAsset.info.configopts.map(option => {
-        return `${option.key}=${Doc.idel(form, option.key).value}`
+        const value = form.querySelector(`input[data-cfgkey="${option.key}"]`).value
+        return `${option.key}=${value}`
       }).join('\n')
     }
     const create = {
