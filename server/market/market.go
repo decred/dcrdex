@@ -1375,7 +1375,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	for _, lo := range updates.TradesPartial {
 		notifyChan <- &updateSignal{
 			action: updateRemainingAction,
-			data: sigDataUnbookedOrder{
+			data: sigDataUpdateRemaining{
 				order:    lo,
 				epochIdx: epoch.Epoch,
 			},

@@ -323,7 +323,7 @@ out:
 				route = msgjson.UpdateRemainingRoute
 				lo, ok := sigData.order.(*order.LimitOrder)
 				if !ok {
-					panic("non-limit order received with unbookAction")
+					panic("non-limit order received with updateRemainingAction")
 				}
 				bookNote := book.update(lo)
 				n := &msgjson.UpdateRemainingNote{
