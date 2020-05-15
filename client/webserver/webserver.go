@@ -185,6 +185,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	}
 
 	// Middleware
+	mux.Use(securityMiddleware)
 	mux.Use(middleware.Recoverer)
 	mux.Use(s.authMiddleware)
 	// Websocket endpoint
@@ -337,6 +338,19 @@ func extractUserInfo(r *http.Request) *userInfo {
 		return &userInfo{}
 	}
 	return ai
+}
+
+// securityMiddleware adds security headers to the server responses.
+func securityMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("x-frame-options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'self';  font-src 'self'; connect-src 'self'")
+		w.Header().Set("Feature-Policy", "geolocation 'none'; midi 'none'; notifications 'none'; push 'none'; sync-xhr 'self'; microphone 'none'; camera 'none'; magnetometer 'none'; gyroscope 'none'; speaker 'none'; vibrate 'none'; fullscreen 'self'; payment 'none'")
+        next.ServeHTTP(w, r)
+    })
 }
 
 // authMiddleware checks incoming requests for cookie-based information
