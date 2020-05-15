@@ -350,7 +350,7 @@ func securityMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; img-src 'self'; style-src 'self';  font-src 'self'; connect-src 'self'")
 		w.Header().Set("Feature-Policy", "geolocation 'none'; midi 'none'; notifications 'none'; push 'none'; sync-xhr 'self'; microphone 'none'; camera 'none'; magnetometer 'none'; gyroscope 'none'; speaker 'none'; vibrate 'none'; fullscreen 'self'; payment 'none'")
 		next.ServeHTTP(w, r)
-    })
+	})
 }
 
 // authMiddleware checks incoming requests for cookie-based information
