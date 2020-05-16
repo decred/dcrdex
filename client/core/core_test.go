@@ -421,6 +421,7 @@ type TXCWallet struct {
 	balErr         error
 	fundingCoins   asset.Coins
 	fundingCoinErr error
+	lockErr        error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -494,7 +495,7 @@ func (w *TXCWallet) Unlock(pw string, dur time.Duration) error {
 }
 
 func (w *TXCWallet) Lock() error {
-	return nil
+	return w.lockErr
 }
 
 func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
@@ -2680,53 +2681,41 @@ func TestLogout(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 
-	dcrWallet, _ := newTWallet(tDCR.ID)
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 
-	form := &TradeForm{
-		DEX:     tDexUrl,
-		IsLimit: true,
-		Sell:    false,
-		Base:    tDCR.ID,
-		Quote:   tBTC.ID,
-		Qty:     tDCR.LotSize * 10,
-		Rate:    tBTC.RateStep * 1000,
-		TifNow:  false,
+	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+	tracker := &trackedTrade{
+		Order:  ord,
+		preImg: newPreimage(),
+		dc:     rig.dc,
 	}
-
-	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
-		msgOrder := new(msgjson.LimitOrder)
-		err := msg.Unmarshal(msgOrder)
-		if err != nil {
-			t.Fatalf("unmarshal error: %v", err)
-		}
-		lo := convertMsgLimitOrder(msgOrder)
-		f(orderResponse(msg.ID, msgOrder, lo, false, false, false))
-		return nil
-	}
-
-	// Adds active orders
-	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
-	_, err := tCore.Trade(tPW, form)
-	if err != nil {
-		t.Fatalf("limit order error: %v", err)
-	}
+	rig.dc.trades[ord.ID()] = tracker
 
 	dc, _, _ := testDexConnection()
 	tCore.user = new(User)
 	tCore.user.Assets = make(map[uint32]*SupportedAsset, len(dc.assets))
-	for _, as := range dc.assets {
-		tCore.user.Assets[as.ID] = &SupportedAsset{
-			ID:     as.ID,
-			Symbol: as.Symbol,
+	for assetsID := range dc.assets {
+		tCore.user.Assets[assetsID] = &SupportedAsset{
+			ID: assetsID,
 		}
 	}
 
-	logoutErr := tCore.Logout()
-	if logoutErr == nil {
-		t.Fatalf("no active orders error")
+	ensureErr := func(tag string) {
+		err := tCore.Logout()
+		if err == nil {
+			t.Fatalf("%s: no error", tag)
+		}
 	}
+
+	// Active orders error.
+	ensureErr("active orders")
+	rig.dc.trades = nil
+
+	// Lock wallet error.
+	tDcrWallet.lockErr = tErr
+	ensureErr("lock wallet")
 }

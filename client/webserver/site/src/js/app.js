@@ -1,5 +1,5 @@
 import Doc from './doc'
-import State from './state'
+import State, { darkModeCK, authCK } from './state'
 import RegistrationPage from './register'
 import LoginPage from './login'
 import WalletsPage from './wallets'
@@ -365,7 +365,8 @@ export default class Application {
   }
 
   /**
-   * signOut call to /api/logout, if response with no errors occured reload the page,
+   * signOut call to /api/logout, if response with no errors occured clear all store,
+   * remove auth, darkMode cookies and reload the page,
    * otherwise will show a notification
    */
   async signOut () {
@@ -374,6 +375,8 @@ export default class Application {
       this.page.profileBox.style.display = 'none'
       return
     }
+    State.clearAllStore()
+    State.removeCookies(authCK, darkModeCK)
     window.location.reload()
   }
 }

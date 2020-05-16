@@ -217,6 +217,30 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	s.actuallyLogin(w, r, login)
 }
 
+// apiLogout handles the 'logout' API request.
+func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
+	err := s.core.Logout()
+	if err != nil {
+		s.writeAPIError(w, "logout error: %v", err)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCK,
+		Path:     "/",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	response := struct {
+		OK bool `json:"ok"`
+	}{
+		OK: true,
+	}
+	writeJSON(w, response, s.indent)
+}
+
 // apiWithdraw handles the 'withdraw' API request.
 func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 	form := new(withdrawForm)
@@ -301,27 +325,4 @@ func (s *WebServer) writeAPIError(w http.ResponseWriter, format string, a ...int
 		Msg: errMsg,
 	}
 	writeJSON(w, resp, s.indent)
-}
-
-// apiLogout handles the 'logout' API request.
-func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
-	err := s.core.Logout()
-	if err != nil {
-		s.writeAPIError(w, "logout error: %v", err)
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:    authCK,
-		Path:    "/",
-		Value:   "",
-		Expires: time.Unix(0, 0),
-	})
-
-	response := struct {
-		OK bool `json:"ok"`
-	}{
-		OK: true,
-	}
-	writeJSON(w, response, s.indent)
 }

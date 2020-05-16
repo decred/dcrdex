@@ -948,6 +948,36 @@ func (c *Core) Login(pw []byte) ([]*db.Notification, error) {
 	return notes, nil
 }
 
+// Logout logs the user out
+func (c *Core) Logout() error {
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+
+	// Check active orders and lock wallets
+	for assetID := range c.User().Assets {
+		for _, dc := range c.conns {
+			if dc.hasOrders(assetID) {
+				return fmt.Errorf("cannot log out with active orders, wallet %s ", unbip(assetID))
+			}
+		}
+		wallet, found := c.wallet(assetID)
+		if found && wallet.connected() {
+			if err := wallet.Lock(); err != nil {
+				return err
+			}
+		}
+	}
+
+	// With no open orders for any of the dex connections, and all wallets locked,
+	// lock each dex account.
+	for _, dc := range c.conns {
+		dc.acct.lock()
+	}
+
+	c.refreshUser()
+	return nil
+}
+
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
@@ -2487,27 +2517,5 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 	if oid != checkID {
 		return fmt.Errorf("failed ID match. order abandoned")
 	}
-	return nil
-}
-
-// Logout logs the user out
-func (c *Core) Logout() error {
-	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
-	for _, asset := range c.user.Assets {
-		for _, dc := range c.conns {
-			if dc.hasOrders(asset.ID) {
-				return fmt.Errorf("cannot logs out with active orders, wallet %s ", unbip(asset.ID))
-			}
-			dc.acct.lock()
-		}
-		wallet, found := c.wallet(asset.ID)
-		if found && wallet.connected() {
-			if err := wallet.Lock(); err != nil {
-				return err
-			}
-		}
-	}
-	c.refreshUser()
 	return nil
 }
