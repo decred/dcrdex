@@ -44,7 +44,7 @@ func Options(cfgObj interface{}) []*Option {
 			key = fieldType.Name
 		}
 		options = append(options, &Option{
-			Key:         key,
+			Key:         strings.ToLower(key),
 			DisplayName: displayName,
 			Description: desc,
 			Value:       field.Interface(),

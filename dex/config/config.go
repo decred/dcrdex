@@ -10,10 +10,16 @@ import (
 	"gopkg.in/go-ini/ini.v1"
 )
 
+func loadINIConfig(cfgPathOrData interface{}) (*ini.File, error) {
+	// force all section and key names to lowercase
+	loadOpts := ini.LoadOptions{Insensitive: true}
+	return ini.LoadSources(loadOpts, cfgPathOrData)
+}
+
 // Parse returns a collection of all key-value options in the provided config
 // file path or []byte data.
 func Parse(cfgPathOrData interface{}) (map[string]string, error) {
-	cfgFile, err := ini.Load(cfgPathOrData)
+	cfgFile, err := loadINIConfig(cfgPathOrData)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +35,7 @@ func Parse(cfgPathOrData interface{}) (map[string]string, error) {
 // ParseInto parses config options from the provided config file path or []byte
 // data into the specified interface.
 func ParseInto(cfgPathOrData, obj interface{}) error {
-	cfgFile, err := ini.Load(cfgPathOrData)
+	cfgFile, err := loadINIConfig(cfgPathOrData)
 	if err != nil {
 		return err
 	}

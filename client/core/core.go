@@ -557,13 +557,14 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	// Remove unused key-values from parsed settings before saving to db.
 	// Especially necessary if settings was parsed from a config file, b/c
 	// config files usually define more key-values than we need.
+	// Expected keys should be lowercase because config.Parse returns lowercase
+	// keys.
 	expectedKeys := make(map[string]bool, len(walletInfo.ConfigOpts))
 	for _, option := range walletInfo.ConfigOpts {
-		expectedKeys[option.Key] = true
+		expectedKeys[strings.ToLower(option.Key)] = true
 	}
 	for key := range settings {
-		expected := expectedKeys[key]
-		if !expected {
+		if !expectedKeys[key] {
 			delete(settings, key)
 		}
 	}

@@ -6,6 +6,7 @@ package dbtest
 import (
 	"bytes"
 	"math/rand"
+	"strings"
 	"time"
 
 	"decred.org/dcrdex/client/db"
@@ -239,8 +240,12 @@ func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 	if len(w1.Settings) != len(w2.Settings) {
 		t.Fatalf("Settings mismatch. %d != %s", len(w1.Settings), len(w2.Settings))
 	}
+	w2Settings := make(map[string]string, len(w2.Settings))
+	for k, v := range w2.Settings {
+		w2Settings[strings.ToLower(k)] = v
+	}
 	for k, v1 := range w1.Settings {
-		if v2, ok := w2.Settings[k]; !ok {
+		if v2, ok := w2Settings[k]; !ok {
 			t.Fatalf("Settings mismatch: key '%s' not found in one wallet", k)
 		} else if v1 != v2 {
 			t.Fatalf("Settings mismatch: different values for key '%s'", k)

@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -19,12 +19,20 @@ type tConfigurable struct {
 func (c tConfigurable) expectedOptionKeysAndDesc() map[string]string {
 	return c.expectedOptions
 }
+
+// Ensure that test values are defined for all option keys and that the values
+// defined differ from the current option values.
+// The test values map may define keys in mixed case, which is permitted.
+// Option keys are all lowercased, so build testValues map with lower case keys
+// to use in performing validation.
 func (c tConfigurable) validateTestValues(options []*Option) map[string]string {
 	testValues := c.randomValues
-	// ensure that test values are defined for all option keys and
-	// that the values defined differ from the current option values.
+	lckTestValues := make(map[string]string, len(testValues))
+	for k, v := range testValues {
+		lckTestValues[strings.ToLower(k)] = v
+	}
 	for _, option := range options {
-		testValue, isDefined := testValues[option.Key]
+		testValue, isDefined := lckTestValues[option.Key]
 		if !isDefined || testValue == fmt.Sprintf("%v", option.Value) {
 			return nil
 		}
@@ -74,6 +82,24 @@ func TestOptions(t *testing.T) {
 			},
 		},
 	}
+	var cfgWithMixedCaseKeys = &struct {
+		tConfigurable `ini:"-"`
+		OptField1     string `ini:"opt1,,lowercase key in cfg obj"`
+		OptField2     string `ini:"Opt2,,titlecase key in cfg obj"`
+	}{
+		tConfigurable: tConfigurable{
+			// expect all cfg ini keys to be lowercased
+			expectedOptions: map[string]string{
+				"opt1": "lowercase key in cfg obj",
+				"opt2": "titlecase key in cfg obj",
+			},
+			// expect parsing to be insensitive to key casing (Opt1=>opt1, opt2=>Opt2)
+			randomValues: map[string]string{
+				"Opt1": "parse titlecase key where cfg has lowercase",
+				"opt2": "parse lowercase key where cfg has titlecase",
+			},
+		},
+	}
 	var dcrConfig = &struct {
 		tConfigurable `ini:"-"`
 		RPCUser       string `ini:"username,,Username for RPC connections"`
@@ -116,6 +142,10 @@ func TestOptions(t *testing.T) {
 		{
 			name:   "dcr config",
 			cfgObj: dcrConfig,
+		},
+		{
+			name:   "diff key cases in cfg struct vs. data",
+			cfgObj: cfgWithMixedCaseKeys,
 		},
 	}
 	for _, tt := range tests {
@@ -181,27 +211,10 @@ func TestOptions(t *testing.T) {
 }
 
 func readCfgValues(cfgObj interface{}) map[string]string {
-	cfgVal := reflect.ValueOf(cfgObj)
-	if reflect.TypeOf(cfgObj).Kind() == reflect.Ptr {
-		cfgVal = cfgVal.Elem()
-	}
-	cfgType := cfgVal.Type()
-
-	values := make(map[string]string)
-	for i := 0; i < cfgType.NumField(); i++ {
-		field := cfgVal.Field(i)
-		if !field.CanSet() {
-			continue
-		}
-		fieldType := cfgType.Field(i)
-		key, _, _ := iniTagValues(fieldType.Tag.Get("ini"))
-		if key == "-" {
-			continue
-		}
-		if key == "" {
-			key = fieldType.Name
-		}
-		values[key] = fmt.Sprint(field.Interface())
+	cfgOptions := Options(cfgObj)
+	values := make(map[string]string, len(cfgOptions))
+	for _, option := range cfgOptions {
+		values[option.Key] = fmt.Sprintf("%v", option.Value)
 	}
 	return values
 }
