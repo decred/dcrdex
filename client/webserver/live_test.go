@@ -20,9 +20,11 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -397,7 +399,7 @@ var winfos = map[uint32]*asset.WalletInfo{
 		DefaultFeeRate: 2,
 		Units:          "Satoshis",
 		Name:           "Bitcoin",
-		ConfigOpts:     configOpts,
+		ConfigOpts:     config.Options(&btc.Config{}),
 	},
 	2: {
 		DefaultFeeRate: 100,
@@ -409,7 +411,7 @@ var winfos = map[uint32]*asset.WalletInfo{
 		DefaultFeeRate: 10,
 		Units:          "atoms",
 		Name:           "Decred",
-		ConfigOpts:     configOpts,
+		ConfigOpts:     config.Options(&dcr.Config{}),
 	},
 	22: {
 		DefaultFeeRate: 50,

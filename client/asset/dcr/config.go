@@ -33,9 +33,9 @@ var (
 // Config holds the parameters needed to initialize an RPC connection to a dcr
 // wallet. Default values are used for RPCListen and/or RPCCert if not set.
 type Config struct {
-	RPCUser   string `ini:"username, RPC Username, Username for RPC connections"`
-	RPCPass   string `ini:"password, RPC Password, Password for RPC connections"`
-	RPCListen string `ini:"rpclisten, RPC Address (host or host:port), dcrwallet interface/port for RPC connections (default port: 9109, testnet: 19109)"`
+	RPCUser   string `ini:"username, RPC Username, dcrwallet's 'username' setting for JSON-RPC"`
+	RPCPass   string `ini:"password, RPC Password, dcrwallet's 'password' setting for JSON-RPC"`
+	RPCListen string `ini:"rpclisten, RPC Address (host or host:port), dcrwallet's address (default port: 9109, testnet: 19109)"`
 	RPCCert   string `ini:"rpccert, TLS Certificate, Path to the dcrwallet TLS certificate file"`
 	// Context should be canceled when the application exits. This will cause
 	// some cleanup to be performed during shutdown.
