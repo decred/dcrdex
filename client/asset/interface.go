@@ -47,7 +47,9 @@ type WalletConfig struct {
 	// check the confirmations on any negotiating swaps to see if action is
 	// needed. If the error is non-nil, the wallet monitoring loop encountered an
 	// error while retrieving tip information.
-	TipChange func(error)
+	TipChange         func(error)
+	MinNetworkVersion uint64
+	WalletInfo        *WalletInfo
 }
 
 // Wallet is a common interface to be implemented by cryptocurrency wallet

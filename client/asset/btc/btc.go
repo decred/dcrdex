@@ -230,9 +230,11 @@ type ExchangeWallet struct {
 	// The DEX specifies that change outputs from DEX-monitored transactions are
 	// exempt from minimum confirmation limits, so we must track those as they are
 	// created.
-	changeMtx   sync.RWMutex
-	tradeChange map[string]time.Time
-	tipChange   func(error)
+	changeMtx         sync.RWMutex
+	tradeChange       map[string]time.Time
+	tipChange         func(error)
+	minNetworkVersion uint64
+	walletInfo        *asset.WalletInfo
 
 	fundingMtx   sync.RWMutex
 	fundingCoins map[string]*compositeUTXO
@@ -257,6 +259,8 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
+	cfg.MinNetworkVersion = minNetworkVersion
+	cfg.WalletInfo = walletInfo
 
 	return BTCCloneWallet(cfg, "btc", logger, network, params, dexbtc.RPCPorts)
 }
@@ -299,14 +303,16 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 	chainParams *chaincfg.Params, node rpcClient) *ExchangeWallet {
 
 	wallet := &ExchangeWallet{
-		node:         node,
-		wallet:       newWalletClient(node, chainParams),
-		symbol:       symbol,
-		chainParams:  chainParams,
-		log:          logger,
-		tradeChange:  make(map[string]time.Time),
-		tipChange:    cfg.TipChange,
-		fundingCoins: make(map[string]*compositeUTXO),
+		node:              node,
+		wallet:            newWalletClient(node, chainParams),
+		symbol:            symbol,
+		chainParams:       chainParams,
+		log:               logger,
+		tradeChange:       make(map[string]time.Time),
+		tipChange:         cfg.TipChange,
+		fundingCoins:      make(map[string]*compositeUTXO),
+		minNetworkVersion: cfg.MinNetworkVersion,
+		walletInfo:        cfg.WalletInfo,
 	}
 
 	return wallet
@@ -316,7 +322,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // Info returns basic information about the wallet and asset.
 func (btc *ExchangeWallet) Info() *asset.WalletInfo {
-	return walletInfo
+	return btc.walletInfo
 }
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
@@ -327,7 +333,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 	if err != nil {
 		return fmt.Errorf("error getting version: %v", err), nil
 	}
-	if netVer < minNetworkVersion {
+	if netVer < btc.minNetworkVersion {
 		return fmt.Errorf("reported node version %d is less than minimum %d", netVer, minNetworkVersion), nil
 	}
 	if codeVer < minProtocolVersion {
