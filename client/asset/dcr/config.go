@@ -30,30 +30,24 @@ var (
 	defaultConfigPath = filepath.Join(dcrwHomeDir, "dcrwallet.conf")
 )
 
-// DCRConfig is passed to the constructor.
-type DCRConfig struct {
-	// RPCUser is the RPC username provided to dcrwallet configuration.
-	RPCUser string `ini:"username"`
-	// RPCPass is the RPC password provided to dcrwallet configuration.
-	RPCPass string `ini:"password"`
-	// RPCListen is the RPC network address provided to dcrwallet configuration.
-	// If the value is an empty string, it will be set to a default value for the
-	// network.
-	RPCListen string `ini:"rpclisten"`
-	// RPCCert is the filepath to the dcrwallet TLS certificate. If it is not
-	// provided, the default dcrwallet location will be assumed.
-	RPCCert string `ini:"rpccert"`
+// Config holds the parameters needed to initialize an RPC connection to a dcr
+// wallet. Default values are used for RPCListen and/or RPCCert if not set.
+type Config struct {
+	RPCUser   string `ini:"username, RPC Username, dcrwallet's 'username' setting for JSON-RPC"`
+	RPCPass   string `ini:"password, RPC Password, dcrwallet's 'password' setting for JSON-RPC"`
+	RPCListen string `ini:"rpclisten, RPC Address (host or host:port), dcrwallet's address (default port: 9109, testnet: 19109)"`
+	RPCCert   string `ini:"rpccert, TLS Certificate, Path to the dcrwallet TLS certificate file"`
 	// Context should be canceled when the application exits. This will cause
 	// some cleanup to be performed during shutdown.
-	Context context.Context
+	Context context.Context `ini:"-"`
 }
 
 // loadConfig loads the DCRConfig from a settings map. If no values are found
 // for RPCListen or RPCCert in the specified file, default values will be used.
 // If there is no error, the module-level chainParams variable will be set
 // appropriately for the network.
-func loadConfig(settings map[string]string, network dex.Network) (*DCRConfig, error) {
-	cfg := new(DCRConfig)
+func loadConfig(settings map[string]string, network dex.Network) (*Config, error) {
+	cfg := new(Config)
 	if err := config.Unmapify(settings, cfg); err != nil {
 		return nil, fmt.Errorf("error parsing config: %v", err)
 	}

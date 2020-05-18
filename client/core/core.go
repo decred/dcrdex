@@ -522,19 +522,34 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return fmt.Errorf("wallet password encryption error: %v", err)
 	}
 
+	walletInfo, err := asset.Info(assetID)
+	if err != nil {
+		return err
+	}
+
 	var settings map[string]string
 	if form.ConfigText == "" {
-		var defaultWalletCfgPath string
-		defaultWalletCfgPath, err = asset.DefaultConfigPath(assetID)
-		if err != nil {
-			return fmt.Errorf("cannot use default wallet config path: %v", err)
-		}
-		settings, err = config.Parse(defaultWalletCfgPath)
+		settings, err = config.Parse(walletInfo.DefaultConfigPath)
 	} else {
 		settings, err = config.Parse([]byte(form.ConfigText))
 	}
 	if err != nil {
 		return fmt.Errorf("error parsing config: %v", err)
+	}
+
+	// Remove unused key-values from parsed settings before saving to db.
+	// Especially necessary if settings was parsed from a config file, b/c
+	// config files usually define more key-values than we need.
+	// Expected keys should be lowercase because config.Parse returns lowercase
+	// keys.
+	expectedKeys := make(map[string]bool, len(walletInfo.ConfigOpts))
+	for _, option := range walletInfo.ConfigOpts {
+		expectedKeys[strings.ToLower(option.Key)] = true
+	}
+	for key := range settings {
+		if !expectedKeys[key] {
+			delete(settings, key)
+		}
 	}
 
 	dbWallet := &db.Wallet{

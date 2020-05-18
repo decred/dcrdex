@@ -14,16 +14,18 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/btc"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -80,6 +82,7 @@ func mkMrkt(base, quote string) *core.Market {
 
 func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.SupportedAsset {
 	assetID, _ := dex.BipSymbolID(symbol)
+	winfo := winfos[assetID]
 	var wallet *core.WalletState
 	if state != nil {
 		wallet = &core.WalletState{
@@ -89,20 +92,15 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.Supp
 			Running: state.running,
 			Address: ordertest.RandomAddress(),
 			Balance: bal,
-			FeeRate: winfos[assetID].DefaultFeeRate,
-			Units:   winfos[assetID].Units,
+			FeeRate: winfo.DefaultFeeRate,
+			Units:   winfo.Units,
 		}
 	}
-	name := winfos[assetID].Name
-	lower := strings.ToLower(name)
 	return &core.SupportedAsset{
 		ID:     assetID,
 		Symbol: symbol,
 		Wallet: wallet,
-		Info: &asset.WalletInfo{
-			Name:              name,
-			DefaultConfigPath: "/home/you/." + lower + "/" + lower + ".conf",
-		},
+		Info:   winfo,
 	}
 }
 
@@ -397,36 +395,49 @@ func (c *TCore) Balance(uint32) (uint64, error) {
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
 
+var configOpts = []*config.Option{
+	{
+		DisplayName: "RPC Server",
+		Description: "RPC Server",
+		Key:         "rpc_server",
+	},
+}
 var winfos = map[uint32]*asset.WalletInfo{
 	0: {
 		DefaultFeeRate: 2,
 		Units:          "Satoshis",
 		Name:           "Bitcoin",
+		ConfigOpts:     config.Options(&btc.Config{}),
 	},
 	2: {
 		DefaultFeeRate: 100,
 		Units:          "litoshi", // Plural seemingly has no 's'.
 		Name:           "Litecoin",
+		ConfigOpts:     configOpts,
 	},
 	42: {
 		DefaultFeeRate: 10,
 		Units:          "atoms",
 		Name:           "Decred",
+		ConfigOpts:     config.Options(&dcr.Config{}),
 	},
 	22: {
 		DefaultFeeRate: 50,
 		Units:          "atoms",
 		Name:           "Monacoin",
+		ConfigOpts:     configOpts,
 	},
 	3: {
 		DefaultFeeRate: 1000,
 		Units:          "atoms",
 		Name:           "Dogecoin",
+		ConfigOpts:     configOpts,
 	},
 	28: {
 		DefaultFeeRate: 20,
 		Units:          "Satoshis",
 		Name:           "Vertcoin",
+		ConfigOpts:     configOpts,
 	},
 }
 

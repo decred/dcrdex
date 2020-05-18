@@ -24,6 +24,7 @@ import (
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/config"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -55,6 +56,7 @@ var (
 		Name:              "Bitcoin",
 		Units:             "Satoshis",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
+		ConfigOpts:        config.Options(&dexbtc.Config{}),
 		DefaultFeeRate:    defaultWithdrawalFee,
 	}
 )
