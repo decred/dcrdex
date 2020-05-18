@@ -307,7 +307,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 					side[ord.Token] = ord
 					epochOrder := &core.BookUpdate{
 						Action: msgjson.EpochOrderRoute,
-						Order:  ord,
+						Payload:  ord,
 					}
 					c.trySend(epochOrder)
 					c.epochOrders = append(c.epochOrders, epochOrder)
@@ -333,7 +333,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 
 					c.trySend(&core.BookUpdate{
 						Action: msgjson.UnbookOrderRoute,
-						Order:  &core.MiniOrder{Token: tkn},
+						Payload:  &core.MiniOrder{Token: tkn},
 					})
 				}
 			case <-ctx.Done():
@@ -597,14 +597,15 @@ out:
 			c.orderMtx.Lock()
 			// Send limit orders as newly booked.
 			for _, o := range c.epochOrders {
-				if (o.Order.Rate > 0) {
-					o.Order.Epoch = 0
+				miniOrder := o.Payload.(*core.MiniOrder)
+				if (miniOrder.Rate > 0) {
+					miniOrder.Epoch = 0
 					o.Action = msgjson.BookOrderRoute
 					c.trySend(o)
-					if (o.Order.Sell) {
-						c.sells[o.Order.Token] = o.Order
+					if (miniOrder.Sell) {
+						c.sells[miniOrder.Token] = miniOrder
 					} else {
-						c.buys[o.Order.Token] = o.Order
+						c.buys[miniOrder.Token] = miniOrder
 					}
 				}
 			}

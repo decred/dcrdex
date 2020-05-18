@@ -811,10 +811,36 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		t.Fatalf("expected 1 sell, got %d", len(book.Sells))
 	}
 
+	// Update the remaining quantity of the just booked order.
+	bookNote, _ = msgjson.NewNotification(msgjson.BookOrderRoute, &msgjson.UpdateRemainingNote{
+		OrderNote: msgjson.OrderNote{
+			Seq:      4,
+			MarketID: mid,
+			OrderID:  oid3[:],
+		},
+		Remaining: 5 * 1e8,
+	})
+	err = handleUpdateRemainingMsg(tCore, dc, bookNote)
+	if err != nil {
+		t.Fatalf("[handleBookOrderMsg]: unexpected err: %v", err)
+	}
+
+	// feed2 should have an update
+	select {
+	case <-feed2.C:
+	default:
+		t.Fatalf("no update received on feed 2")
+	}
+	book, _ = tCore.Book(tDexUrl, tDCR.ID, tBTC.ID)
+	firstSellQty := book.Sells[0].Qty
+	if firstSellQty != 5 {
+		t.Fatalf("expected remaining quantity of 5.00000000 after update_remaining. got %.8f", firstSellQty)
+	}
+
 	// Ensure handleUnbookOrderMsg removes a book order from an associated
 	// order book as expected.
 	unbookNote, _ := msgjson.NewNotification(msgjson.UnbookOrderRoute, &msgjson.UnbookOrderNote{
-		Seq:      4,
+		Seq:      5,
 		MarketID: mid,
 		OrderID:  oid1[:],
 	})

@@ -248,7 +248,7 @@ func TestMarkets(t *testing.T) {
 		t.Fatalf("apiMarkets returned code %d, expected %d", w.Code, http.StatusOK)
 	}
 	respBody := w.Body.String()
-	if respBody != fmt.Sprintf("{}\n") {
+	if respBody != "{}\n" {
 		t.Errorf("incorrect response body: %q", respBody)
 	}
 

@@ -23,13 +23,41 @@ export default class OrderBook {
     this.removeFromSide(this.buys, token)
   }
 
-  /* removeFromSide remvoes an order from the list of orders. */
+  /* removeFromSide removes an order from the list of orders. */
   removeFromSide (side, token) {
+    const [ord, i] = this.findOrder(side, token)
+    if (ord) {
+      side.splice(i, 1)
+      return true
+    }
+    return false
+  }
+
+  /* findOrder finds an order in a specified side */
+  findOrder (side, token) {
     for (const i in side) {
       if (side[i].token === token) {
-        side.splice(i, 1)
-        return true
+        return [side[i], i]
       }
+    }
+    return [null, -1]
+  }
+
+  /* updates the remaining quantity of an order. */
+  updateRemaining (token, qty) {
+    if (this.updateRemainingSide(this.sells, token, qty)) return
+    this.updateRemainingSide(this.buys, token, qty)
+  }
+
+  /*
+   * updateRemainingSide looks for the order in the side and updates the
+   * quantity, returning true on success, false if order not found.
+   */
+  updateRemainingSide (side, token, qty) {
+    const ord = this.findOrder(side, token)[0]
+    if (ord) {
+      ord.qty = qty
+      return true
     }
     return false
   }

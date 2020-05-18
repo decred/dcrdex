@@ -17,6 +17,7 @@ const LIMIT = 1
 const bookRoute = 'book'
 const bookOrderRoute = 'book_order'
 const unbookOrderRoute = 'unbook_order'
+const updateRemainingRoute = 'update_remaining'
 const epochOrderRoute = 'epoch_order'
 const bookUpdateRoute = 'bookupdate'
 const unmarketRoute = 'unmarket'
@@ -131,6 +132,8 @@ export default class MarketsPage extends BasePage {
     ws.registerRoute(bookOrderRoute, data => { this.handleBookOrderRoute(data) })
     // Remove the order sent on the 'unbook_order' route from the orderbook.
     ws.registerRoute(unbookOrderRoute, data => { this.handleUnbookOrderRoute(data) })
+    // Update the remaining quantity on a booked order.
+    ws.registerRoute(updateRemainingRoute, data => { this.handleUpdateRemainingRoute(data) })
     // Handle the new order for the order book on the 'epoch_order' route.
     ws.registerRoute(epochOrderRoute, data => { this.handleEpochOrderRoute(data) })
     // Bind the wallet unlock form.
@@ -471,25 +474,36 @@ export default class MarketsPage extends BasePage {
     this.refreshActiveOrders()
   }
 
-  /* handleBookOrderRoute is the handles for 'book_order' notifications. */
+  /* handleBookOrderRoute is the handler for 'book_order' notifications. */
   handleBookOrderRoute (data) {
-    const order = data.order
+    const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
     this.chart.draw()
   }
 
-  /* handleUnbookOrderRoute is the handles for 'unbook_order' notifications. */
+  /* handleUnbookOrderRoute is the handler for 'unbook_order' notifications. */
   handleUnbookOrderRoute (data) {
-    const order = data.order
+    const order = data.payload
     this.book.remove(order.token)
     this.removeTableOrder(order)
     this.chart.draw()
   }
 
-  /* handleEpochOrderRoute is the handles for 'epoch_order' notifications. */
+  /*
+   * handleUpdateRemainingRoute is the handler for 'update_remaining'
+   * notifications.
+   */
+  handleUpdateRemainingRoute (data) {
+    const update = data.payload
+    this.book.updateRemaining(update.token, update.qty)
+    this.updateTableOrder(update)
+    this.chart.draw()
+  }
+
+  /* handleEpochOrderRoute is the handler for 'epoch_order' notifications. */
   handleEpochOrderRoute (data) {
-    const order = data.order
+    const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
     this.chart.draw()
@@ -650,6 +664,7 @@ export default class MarketsPage extends BasePage {
       this.chart.draw()
     }
     this.clearOrderTableEpochs(note.epoch)
+    this.chart.draw()
   }
 
   /*
@@ -828,6 +843,20 @@ export default class MarketsPage extends BasePage {
       if (tr.order.token === token) {
         tr.remove()
         return
+      }
+    }
+  }
+
+  /* updateTableOrder looks for the order in the table and updates the qty */
+  updateTableOrder (update) {
+    const token = update.token
+    for (const tbody of [this.page.sellRows, this.page.buyRows]) {
+      for (const tr of Array.from(tbody.children)) {
+        if (tr.order.token === token) {
+          const td = tr.querySelector('[data-type=qty]')
+          td.innerText = update.qty.toFixed(8)
+          return
+        }
       }
     }
   }

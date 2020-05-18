@@ -206,6 +206,12 @@ type MiniOrder struct {
 	Token string  `json:"token"`
 }
 
+// RemainingUpdate is an update to the quantity for an order on the order book.
+type RemainingUpdate struct {
+	Token string  `json:"token"`
+	Qty   float64 `json:"qty"`
+}
+
 // OrderBook represents an order book, which are sorted buys and sells, and
 // unsorted epoch orders.
 type OrderBook struct {
@@ -222,8 +228,8 @@ const (
 
 // BookUpdate is an order book update.
 type BookUpdate struct {
-	Action string     `json:"action"`
-	Order  *MiniOrder `json:"order"`
+	Action  string      `json:"action"`
+	Payload interface{} `json:"payload"`
 }
 
 // dexAccount is the core type to represent the client's account information for

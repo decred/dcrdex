@@ -1241,6 +1241,19 @@ func getBookNoteFromLink(t *testing.T, link *TLink) *msgjson.BookOrderNote {
 	return bookNote
 }
 
+func getUpdateRemainingNoteFromLink(t *testing.T, link *TLink) *msgjson.UpdateRemainingNote {
+	noteMsg := link.getSend()
+	if noteMsg == nil {
+		t.Fatalf("no epoch notification sent")
+	}
+	urNote := new(msgjson.UpdateRemainingNote)
+	err := json.Unmarshal(noteMsg.Payload, urNote)
+	if err != nil {
+		t.Fatalf("error unmarshaling epoch notification: %v", err)
+	}
+	return urNote
+}
+
 func getUnbookNoteFromLink(t *testing.T, link *TLink) *msgjson.UnbookOrderNote {
 	noteMsg := link.getSend()
 	if noteMsg == nil {
@@ -1437,6 +1450,27 @@ func TestRouter(t *testing.T) {
 	if bookNote.Quantity != lo.Remaining() {
 		t.Fatalf("wrong quantity in book update. expected %d, got %d", lo.Remaining(), bookNote.Quantity)
 	}
+
+	// Update the order's remaining quantity. Leave one lot.
+	lo.FillAmt = lo.Quantity - mkt2.LotSize
+
+	sig = &updateSignal{
+		action: updateRemainingAction,
+		data: sigDataUpdateRemaining{
+			order:    lo,
+			epochIdx: 12344365,
+		},
+	}
+
+	src2.feed <- sig
+	tick(responseDelay)
+
+	urNote := getUpdateRemainingNoteFromLink(t, link2)
+	if urNote.Remaining != lo.Remaining() {
+		t.Fatalf("wrong remaining quantity for link2. expected %d, got %d", lo.Remaining(), urNote.Remaining)
+	}
+	// clear the send from client 1
+	link1.getSend()
 
 	// Now unbook the order.
 	sig = &updateSignal{

@@ -59,12 +59,13 @@ func makeCachedUnbookOrderNote(orderNote *msgjson.UnbookOrderNote) *cachedOrderN
 
 func makeOrderBook(seq uint64, marketID string, orders []*Order, cachedOrders []*cachedOrderNote, synced bool) *OrderBook {
 	ob := &OrderBook{
-		seq:       seq,
-		marketID:  marketID,
-		noteQueue: cachedOrders,
-		orders:    make(map[order.OrderID]*Order),
-		buys:      NewBookSide(descending),
-		sells:     NewBookSide(ascending),
+		seq:        seq,
+		marketID:   marketID,
+		noteQueue:  cachedOrders,
+		orders:     make(map[order.OrderID]*Order),
+		buys:       NewBookSide(descending),
+		sells:      NewBookSide(ascending),
+		epochQueue: NewEpochQueue(),
 	}
 
 	for _, order := range orders {
@@ -425,6 +426,55 @@ func TestOrderBookBook(t *testing.T) {
 					len(tc.orderBook.noteQueue))
 			}
 		}
+	}
+}
+
+func TestOrderBookUpdateRemaining(t *testing.T) {
+	var qty uint64 = 10
+	var remaining uint64 = 5
+	mid := "abc_xyz"
+	oid := order.OrderID{0x01}
+
+	book := makeOrderBook(
+		1,
+		mid,
+		[]*Order{
+			makeOrder(oid, msgjson.SellOrderNum, qty, 1, 2),
+		},
+		make([]*cachedOrderNote, 0),
+		true,
+	)
+
+	urNote := &msgjson.UpdateRemainingNote{
+		OrderNote: msgjson.OrderNote{
+			OrderID:  oid[:],
+			MarketID: mid,
+		},
+		Remaining: remaining,
+	}
+
+	err := book.UpdateRemaining(urNote)
+	if err != nil {
+		t.Fatalf("error updating remaining qty: %v", err)
+	}
+	_, sells, _ := book.Orders()
+	if sells[0].Quantity != remaining {
+		t.Fatalf("failed to update remaining,. Wanted %d, got %d", remaining, sells[0].Quantity)
+	}
+
+	// Unkown order
+	wrongID := order.OrderID{0x02}
+	urNote.OrderID = wrongID[:]
+	err = book.UpdateRemaining(urNote)
+	if err == nil {
+		t.Fatalf("no error updating remaining qty for unknown order")
+	}
+
+	// Bad order ID
+	urNote.OrderID = []byte{0x03}
+	err = book.UpdateRemaining(urNote)
+	if err == nil {
+		t.Fatalf("no error updating remaining qty for invalid order ID")
 	}
 }
 

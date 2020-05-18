@@ -108,6 +108,9 @@ const (
 	// EpochOrderRoute is the DEX-originating notification-type message informing
 	// the client about an order added to the epoch queue.
 	EpochOrderRoute = "epoch_order"
+	// UpdateRemainingRoute is the DEX-originating notification-type message that
+	// updates the remaining amount of unfilled quantity on a standing limit order.
+	UpdateRemainingRoute = "update_remaining"
 	// ConnectRoute is a client-originating request-type message seeking
 	// authentication so that the connection can be used for trading.
 	ConnectRoute = "connect"
@@ -683,6 +686,13 @@ type EpochOrderNote struct {
 	OrderType uint8  `json:"otype"`
 	Epoch     uint64 `json:"epoch"`
 	TargetID  Bytes  `json:"target,omitempty"` // omit for cancel orders
+}
+
+// UpdateRemainingNote is the DEX-originating notification-type message
+// informing the client about an update to a booked order's remaining quantity.
+type UpdateRemainingNote struct {
+	OrderNote
+	Remaining uint64 `json:"remaining"`
 }
 
 // OrderBook is the response to a successful OrderBookSubscription.

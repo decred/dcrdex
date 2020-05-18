@@ -588,7 +588,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		return errs.add("error sending swap transaction: %v", err)
 	}
 	t.change = change
-	t.coins[change.String()] = change
+	t.coins[hex.EncodeToString(change.ID())] = change
 	t.metaData.ChangeCoin = []byte(change.ID())
 	t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin)
 
