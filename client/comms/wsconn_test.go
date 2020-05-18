@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/elliptic"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -201,16 +202,42 @@ func TestWsConn(t *testing.T) {
 		}
 	}()
 
-	cfg := &WsCfg{
-		URL:      "wss://" + host + "/ws",
-		PingWait: pingWait,
-		Cert:     certB,
+	setupWsConn := func(cert []byte) (*wsConn, error) {
+		cfg := &WsCfg{
+			URL:      "wss://" + host + "/ws",
+			PingWait: pingWait,
+			Cert:     cert,
+		}
+		conn, err := NewWsConn(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return conn.(*wsConn), nil
 	}
-	conn, err := NewWsConn(cfg)
+
+	// test no cert error
+	noCertConn, err := setupWsConn(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wsc = conn.(*wsConn)
+	noCertConnMaster := dex.NewConnectionMaster(noCertConn)
+	err = noCertConnMaster.Connect(ctx)
+	noCertConnMaster.Disconnect()
+	if err == nil || !errors.Is(err, ErrInvalidCert) {
+		t.Fatalf("failed to get ErrInvalidCert for no cert connection")
+	}
+
+	// test invalid cert error
+	_, err = setupWsConn([]byte("invalid cert"))
+	if err == nil || !errors.Is(err, ErrInvalidCert) {
+		t.Fatalf("failed to get ErrInvalidCert for invalid cert connection")
+	}
+
+	// connect with cert
+	wsc, err = setupWsConn(certB)
+	if err != nil {
+		t.Fatal(err)
+	}
 	waiter := dex.NewConnectionMaster(wsc)
 	err = waiter.Connect(ctx)
 	t.Log("Connect:", err)

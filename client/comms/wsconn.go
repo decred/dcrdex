@@ -28,6 +28,10 @@ const (
 	writeWait = time.Second * 3
 )
 
+// ErrInvalidCert is the error returned when a ws connection errors for
+// cert-related reasons.
+var ErrInvalidCert = fmt.Errorf("invalid certificate")
+
 // WsConn is an interface for a websocket client.
 type WsConn interface {
 	NextID() uint64
@@ -50,7 +54,7 @@ type WsCfg struct {
 	URL string
 	// The maximum time in seconds to wait for a ping from the server.
 	PingWait time.Duration
-	// The rpc certificate file path.
+	// The server's certificate.
 	Cert []byte
 	// ReconnectSync runs the needed reconnection synchronization after
 	// a reconnect.
@@ -101,7 +105,7 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 		}
 
 		if ok := rootCAs.AppendCertsFromPEM(cfg.Cert); !ok {
-			return nil, fmt.Errorf("unable to append cert")
+			return nil, ErrInvalidCert
 		}
 
 		tlsConfig = &tls.Config{
@@ -144,6 +148,9 @@ func (conn *wsConn) connect(ctx context.Context) error {
 
 	ws, _, err := dialer.Dial(conn.cfg.URL, nil)
 	if err != nil {
+		if _, isInvalidCertError := err.(x509.UnknownAuthorityError); isInvalidCertError {
+			return ErrInvalidCert
+		}
 		return err
 	}
 
