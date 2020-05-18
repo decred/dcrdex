@@ -181,6 +181,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		notify:    func(Notification) {},
 		marketMap: map[string]*Market{tDcrBtcMktName: mkt},
 		trades:    make(map[order.OrderID]*trackedTrade),
+		epoch:     map[string]uint64{tDcrBtcMktName: 0},
 	}, conn, acct
 }
 
@@ -672,14 +673,13 @@ func TestMarkets(t *testing.T) {
 func TestDexConnectionOrderBook(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
-	mid := marketName(tDCR.ID, tBTC.ID)
 	dc := rig.dc
 
 	// Ensure handleOrderBookMsg creates an order book as expected.
 	oid1 := ordertest.RandomOrderID()
 	bookMsg, err := msgjson.NewResponse(1, &msgjson.OrderBook{
 		Seq:      1,
-		MarketID: mid,
+		MarketID: tDcrBtcMktName,
 		Orders: []*msgjson.BookOrderNote{
 			{
 				TradeNote: msgjson.TradeNote{
@@ -689,7 +689,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 				},
 				OrderNote: msgjson.OrderNote{
 					Seq:      1,
-					MarketID: mid,
+					MarketID: tDcrBtcMktName,
 					OrderID:  oid1[:],
 				},
 			},
@@ -708,7 +708,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		},
 		OrderNote: msgjson.OrderNote{
 			Seq:      2,
-			MarketID: mid,
+			MarketID: tDcrBtcMktName,
 			OrderID:  oid2[:],
 		},
 	})
@@ -781,7 +781,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		},
 		OrderNote: msgjson.OrderNote{
 			Seq:      3,
-			MarketID: mid,
+			MarketID: tDcrBtcMktName,
 			OrderID:  oid3[:],
 		},
 	})
@@ -816,7 +816,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	bookNote, _ = msgjson.NewNotification(msgjson.BookOrderRoute, &msgjson.UpdateRemainingNote{
 		OrderNote: msgjson.OrderNote{
 			Seq:      4,
-			MarketID: mid,
+			MarketID: tDcrBtcMktName,
 			OrderID:  oid3[:],
 		},
 		Remaining: 5 * 1e8,
@@ -842,7 +842,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	// order book as expected.
 	unbookNote, _ := msgjson.NewNotification(msgjson.UnbookOrderRoute, &msgjson.UnbookOrderNote{
 		Seq:      5,
-		MarketID: mid,
+		MarketID: tDcrBtcMktName,
 		OrderID:  oid1[:],
 	})
 
@@ -1695,29 +1695,10 @@ func TestTrade(t *testing.T) {
 func TestCancel(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
-	preImg := newPreimage()
-	lo := &order.LimitOrder{
-		P: order.Prefix{
-			OrderType:  order.LimitOrderType,
-			BaseAsset:  tDCR.ID,
-			QuoteAsset: tBTC.ID,
-			ClientTime: time.Now(),
-			ServerTime: time.Now(),
-			Commit:     preImg.Commit(),
-		},
-	}
-	dbOrder := &db.MetaOrder{
-		MetaData: &db.OrderMetaData{
-			Status: order.OrderStatusEpoch,
-			DEX:    dc.acct.url,
-			Proof: db.OrderProof{
-				Preimage: preImg[:],
-			},
-		},
-		Order: lo,
-	}
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
-	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.db, rig.queue, nil, nil, rig.core.notify)
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt, rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
 	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
@@ -1783,9 +1764,10 @@ func TestHandlePreimageRequest(t *testing.T) {
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.PreimageRoute, payload)
 
 	tracker := &trackedTrade{
-		Order:  ord,
-		preImg: preImg,
-		dc:     rig.dc,
+		Order:    ord,
+		preImg:   preImg,
+		dc:       rig.dc,
+		metaData: &db.OrderMetaData{},
 	}
 	rig.dc.trades[oid] = tracker
 	err := handlePreimageRequest(rig.core, rig.dc, req)
@@ -1872,42 +1854,15 @@ func TestTradeTracking(t *testing.T) {
 	cancelledQty := tDCR.LotSize
 	qty := 2*matchSize + cancelledQty
 	rate := tBTC.RateStep * 10
-	preImgL := newPreimage()
-	addr := ordertest.RandomAddress()
-	lo := &order.LimitOrder{
-		P: order.Prefix{
-			AccountID:  dc.acct.ID(),
-			BaseAsset:  tDCR.ID,
-			QuoteAsset: tBTC.ID,
-			OrderType:  order.LimitOrderType,
-			ClientTime: time.Now(),
-			ServerTime: time.Now().Add(time.Millisecond),
-			Commit:     preImgL.Commit(),
-		},
-		T: order.Trade{
-			Sell:     true,
-			Quantity: qty,
-			Address:  addr,
-		},
-		Rate: tBTC.RateStep,
-	}
-	dbOrder := &db.MetaOrder{
-		MetaData: &db.OrderMetaData{
-			Status: order.OrderStatusEpoch,
-			DEX:    dc.acct.url,
-			Proof: db.OrderProof{
-				Preimage: preImgL[:],
-			},
-		},
-		Order: lo,
-	}
+	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep)
 	loid := lo.ID()
 	mid := ordertest.RandomMatchID()
 	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 	if err != nil {
 		t.Fatalf("walletSet error: %v", err)
 	}
-	tracker := newTrackedTrade(dbOrder, preImgL, dc, rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt, rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -2408,10 +2363,11 @@ func TestReadConnectMatches(t *testing.T) {
 	}
 	oid := lo.ID()
 	dbOrder := &db.MetaOrder{
-		// MetaData: &db.OrderMetaData{},
-		Order: lo,
+		MetaData: &db.OrderMetaData{},
+		Order:    lo,
 	}
-	tracker := newTrackedTrade(dbOrder, preImg, dc, rig.db, rig.queue, nil, nil, notify)
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt, rig.db, rig.queue, nil, nil, notify)
 	metaMatch := db.MetaMatch{
 		MetaData: &db.MatchMetaData{},
 		Match:    &order.UserMatch{},
@@ -2576,11 +2532,10 @@ func TestHandleEpochOrderMsg(t *testing.T) {
 	rig := newTestRig()
 	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
 	oid := ord.ID()
-	mid := hex.EncodeToString(encode.RandomBytes(order.OrderIDSize))
 	payload := &msgjson.EpochOrderNote{
 		BookOrderNote: msgjson.BookOrderNote{
 			OrderNote: msgjson.OrderNote{
-				MarketID: mid,
+				MarketID: tDcrBtcMktName,
 				OrderID:  oid.Bytes(),
 			},
 			TradeNote: msgjson.TradeNote{
@@ -2601,7 +2556,7 @@ func TestHandleEpochOrderMsg(t *testing.T) {
 		t.Fatal("[handleEpochOrderMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[mid] = newBookie(func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
 
 	err = handleEpochOrderMsg(rig.core, rig.dc, req)
 	if err != nil {
@@ -2627,7 +2582,6 @@ func makeMatchProof(preimages []order.Preimage, commitments []order.Commitment) 
 
 func TestHandleMatchProofMsg(t *testing.T) {
 	rig := newTestRig()
-	mid := hex.EncodeToString(encode.RandomBytes(order.OrderIDSize))
 	pimg := newPreimage()
 	cmt := pimg.Commit()
 
@@ -2637,7 +2591,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 	}
 
 	payload := &msgjson.MatchProofNote{
-		MarketID:  mid,
+		MarketID:  tDcrBtcMktName,
 		Epoch:     1,
 		Preimages: []dex.Bytes{pimg[:]},
 		CSum:      csum[:],
@@ -2647,7 +2601,7 @@ func TestHandleMatchProofMsg(t *testing.T) {
 	eo := &msgjson.EpochOrderNote{
 		BookOrderNote: msgjson.BookOrderNote{
 			OrderNote: msgjson.OrderNote{
-				MarketID: mid,
+				MarketID: tDcrBtcMktName,
 				OrderID:  encode.RandomBytes(order.OrderIDSize),
 			},
 		},
@@ -2664,9 +2618,9 @@ func TestHandleMatchProofMsg(t *testing.T) {
 		t.Fatal("[handleMatchProofMsg] expected a non-existent orderbook error")
 	}
 
-	rig.dc.books[mid] = newBookie(func() {})
+	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
 
-	err = rig.dc.books[mid].Enqueue(eo)
+	err = rig.dc.books[tDcrBtcMktName].Enqueue(eo)
 	if err != nil {
 		t.Fatalf("[Enqueue] unexpected error: %v", err)
 	}
@@ -2721,4 +2675,104 @@ func TestLogout(t *testing.T) {
 	// Lock wallet error.
 	tDcrWallet.lockErr = tErr
 	ensureErr("lock wallet")
+}
+
+func TestSetEpoch(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt, rig.db, rig.queue, nil, nil, rig.core.notify)
+	dc.trades[lo.ID()] = tracker
+	metaData := tracker.metaData
+
+	payload := &msgjson.MatchProofNote{
+		MarketID: tDcrBtcMktName,
+		Epoch:    uint64(tracker.Time()) / tracker.epochLen,
+	}
+	nextReq := func() *msgjson.Message {
+		payload.Epoch++
+		req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
+		return req
+	}
+
+	ensureStatus := func(tag string, status order.OrderStatus) {
+		err := handleMatchProofMsg(rig.core, rig.dc, nextReq())
+		if err != nil {
+			t.Fatalf("error setting epoch for %s: %v", tag, err)
+		}
+		if metaData.Status != status {
+			t.Fatalf("wrong status for %s. expected %s, got %s", tag, status, metaData.Status)
+		}
+		corder, _ := tracker.coreOrderInternal()
+		if corder.Status != status {
+			t.Fatalf("wrong core order status for %s. expected %s, got %s", tag, status, corder.Status)
+		}
+	}
+
+	// Immediate limit order
+	ensureStatus("immediate limit order", order.OrderStatusExecuted)
+
+	// Standing limit order
+	metaData.Status = order.OrderStatusEpoch
+	lo.Force = order.StandingTiF
+	ensureStatus("standing limit order", order.OrderStatusBooked)
+
+	// Market order
+	mo := &order.MarketOrder{
+		P: lo.P,
+		T: *lo.T.Copy(),
+	}
+	mo.P.OrderType = order.LimitOrderType
+	dbOrder = &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusEpoch,
+		},
+		Order: mo,
+	}
+	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt, rig.db, rig.queue, nil, nil, rig.core.notify)
+	metaData = tracker.metaData
+	dc.trades[mo.ID()] = tracker
+	ensureStatus("market order", order.OrderStatusExecuted)
+
+	// Same epoch shouldn't result in change.
+	payload.Epoch--
+	metaData.Status = order.OrderStatusEpoch
+	ensureStatus("market order unchanged", order.OrderStatusEpoch)
+
+}
+
+func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
+	preImg := newPreimage()
+	addr := ordertest.RandomAddress()
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			AccountID:  dc.acct.ID(),
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			OrderType:  order.LimitOrderType,
+			ClientTime: time.Now(),
+			ServerTime: time.Now().Add(time.Millisecond),
+			Commit:     preImg.Commit(),
+		},
+		T: order.Trade{
+			Sell:     true,
+			Quantity: qty,
+			Address:  addr,
+		},
+		Rate:  tBTC.RateStep,
+		Force: order.ImmediateTiF,
+	}
+	dbOrder := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusEpoch,
+			DEX:    dc.acct.url,
+			Proof: db.OrderProof{
+				Preimage: preImg[:],
+			},
+		},
+		Order: lo,
+	}
+	return lo, dbOrder, preImg, addr
 }

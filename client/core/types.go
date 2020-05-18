@@ -111,9 +111,10 @@ type RegisterForm struct {
 // Match represents a match on an order. An order may have many matches.
 type Match struct {
 	MatchID string            `json:"matchID"`
-	Step    order.MatchStatus `json:"status"`
+	Status  order.MatchStatus `json:"status"`
 	Rate    uint64            `json:"rate"`
 	Qty     uint64            `json:"qty"`
+	Side    order.MatchSide   `json:"side"`
 }
 
 // Order is core's general type for an order. An order may be a market, limit,
@@ -124,6 +125,8 @@ type Order struct {
 	Type        order.OrderType   `json:"type"`
 	ID          string            `json:"id"`
 	Stamp       uint64            `json:"stamp"`
+	Status      order.OrderStatus `json:"status"`
+	Epoch       uint64            `json:"epoch"`
 	Qty         uint64            `json:"qty"`
 	Sell        bool              `json:"sell"`
 	Filled      uint64            `json:"filled"`
@@ -199,11 +202,12 @@ func newDisplayIDFromSymbols(base, quote string) string {
 
 // MiniOrder is minimal information about an order in a market's order book.
 type MiniOrder struct {
-	Qty   float64 `json:"qty"`
-	Rate  float64 `json:"rate"`
-	Epoch uint64  `json:"epoch"`
-	Sell  bool    `json:"sell"`
-	Token string  `json:"token"`
+	Qty      float64 `json:"qty"`
+	Rate     float64 `json:"rate"`
+	Epoch    uint64  `json:"epoch"`
+	Sell     bool    `json:"sell"`
+	Token    string  `json:"token"`
+	MarketID string  `json:"marketID"`
 }
 
 // RemainingUpdate is an update to the quantity for an order on the order book.
@@ -228,8 +232,10 @@ const (
 
 // BookUpdate is an order book update.
 type BookUpdate struct {
-	Action  string      `json:"action"`
-	Payload interface{} `json:"payload"`
+	Action   string      `json:"action"`
+	DEX      string      `json:"dex"`
+	MarketID string      `json:"marketID"`
+	Payload  interface{} `json:"payload"`
 }
 
 // dexAccount is the core type to represent the client's account information for
@@ -417,7 +423,7 @@ type TradeForm struct {
 	TifNow  bool   `json:"tifnow"`
 }
 
-// mktID is a string ID constructed from the asset IDs.
+// marketName is a string ID constructed from the asset IDs.
 func marketName(b, q uint32) string {
 	mkt, _ := dex.MarketName(b, q)
 	return mkt

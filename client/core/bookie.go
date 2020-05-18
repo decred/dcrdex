@@ -291,8 +291,10 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 		return err
 	}
 	book.send(&BookUpdate{
-		Action:  msg.Route,
-		Payload: minifyOrder(note.OrderID, &note.TradeNote, 0),
+		Action:   msg.Route,
+		DEX:      dc.acct.url,
+		MarketID: note.MarketID,
+		Payload:  minifyOrder(note.OrderID, &note.TradeNote, 0),
 	})
 	return nil
 }
@@ -319,8 +321,10 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return err
 	}
 	book.send(&BookUpdate{
-		Action:  msg.Route,
-		Payload: &MiniOrder{Token: token(note.OrderID)},
+		Action:   msg.Route,
+		DEX:      dc.acct.url,
+		MarketID: note.MarketID,
+		Payload:  &MiniOrder{Token: token(note.OrderID)},
 	})
 
 	return nil
@@ -348,7 +352,9 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 		return err
 	}
 	book.send(&BookUpdate{
-		Action: msg.Route,
+		Action:   msg.Route,
+		DEX:      dc.acct.url,
+		MarketID: note.MarketID,
 		Payload: &RemainingUpdate{
 			Token: token(note.OrderID),
 			Qty:   float64(note.Remaining) / conversionFactor,
@@ -366,7 +372,9 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 		return fmt.Errorf("epoch order note unmarshal error: %v", err)
 	}
 
-	c.setEpoch(note.Epoch)
+	if dc.setEpoch(note.MarketID, note.Epoch) {
+		c.refreshUser()
+	}
 
 	dc.booksMtx.RLock()
 	defer dc.booksMtx.RUnlock()
@@ -383,8 +391,10 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	}
 	// Send a mini-order for book updates.
 	book.send(&BookUpdate{
-		Action:  msg.Route,
-		Payload: minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),
+		Action:   msg.Route,
+		DEX:      dc.acct.url,
+		MarketID: note.MarketID,
+		Payload:  minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),
 	})
 
 	return nil

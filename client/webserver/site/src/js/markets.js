@@ -11,7 +11,7 @@ var app
 const bind = Doc.bind
 
 const LIMIT = 1
-// const MARKET = 2
+const MARKET = 2
 // const CANCEL = 3
 
 const bookRoute = 'book'
@@ -21,6 +21,25 @@ const updateRemainingRoute = 'update_remaining'
 const epochOrderRoute = 'epoch_order'
 const bookUpdateRoute = 'bookupdate'
 const unmarketRoute = 'unmarket'
+
+/* The match statuses are a mirror of dex/order.MatchStatus. */
+// const newlyMatched = 0
+// const makerSwapCast = 1
+// const takerSwapCast = 2
+const makerRedeemed = 3
+// const matchComplete = 4
+
+/* The time-in-force specifiers are a mirror of dex/order.TimeInForce. */
+const immediateTiF = 0
+// const standingTiF = 1
+
+/* The order statuses are a mirror of dex/order.OrderStatus. */
+const statusUnknown = 0
+const statusEpoch = 1
+const statusBooked = 2
+const statusExecuted = 3
+const statusCanceled = 4
+const statusRevoked = 5
 
 const animationLength = 500
 
@@ -178,6 +197,13 @@ export default class MarketsPage extends BasePage {
     // it was found.
     const firstEntry = mktFound ? lastMarket : this.markets[0]
     this.setMarket(firstEntry.dex, firstEntry.base, firstEntry.quote)
+
+    // Start a ticker to update time-since values.
+    this.secondTicker = setInterval(() => {
+      this.page.liveList.querySelectorAll('[data-col=age]').forEach(td => {
+        td.textContent = Doc.timeSince(td.parentNode.order.stamp)
+      })
+    }, 1000)
   }
 
   /* isSell is true if the user has selected sell in the order options. */
@@ -416,17 +442,11 @@ export default class MarketsPage extends BasePage {
     Doc.empty(page.liveList)
     for (const order of orders) {
       const row = page.liveTemplate.cloneNode(true)
+      row.order = order
       orderRows[order.id] = row
-      const set = (col, s) => { row.querySelector(`[data-col=${col}]`).textContent = s }
-      set('side', order.sell ? 'sell' : 'buy')
-      set('age', Doc.timeSince(order.stamp))
-      set('rate', Doc.formatCoinValue(order.rate / 1e8))
-      set('qty', Doc.formatCoinValue(order.qty / 1e8))
-      set('filled', `${(order.filled / order.qty * 100).toFixed(1)}%`)
+      updateUserOrderRow(row, order)
       if (order.type === LIMIT) {
-        if (order.cancelling) {
-          set('cancel', order.canceled ? 'canceled' : 'cancelling')
-        } else if (order.filled !== order.qty) {
+        if (!order.cancelling && order.filled !== order.qty) {
           const icon = row.querySelector('[data-col=cancel] > span')
           Doc.show(icon)
           bind(icon, 'click', e => {
@@ -476,6 +496,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */
   handleBookOrderRoute (data) {
+    if (data.dex !== this.market.dex.url || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
@@ -484,6 +505,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleUnbookOrderRoute is the handler for 'unbook_order' notifications. */
   handleUnbookOrderRoute (data) {
+    if (data.dex !== this.market.dex.url || data.marketID !== this.market.sid) return
     const order = data.payload
     this.book.remove(order.token)
     this.removeTableOrder(order)
@@ -495,6 +517,7 @@ export default class MarketsPage extends BasePage {
    * notifications.
    */
   handleUpdateRemainingRoute (data) {
+    if (data.dex !== this.market.dex.url || data.marketID !== this.market.sid) return
     const update = data.payload
     this.book.updateRemaining(update.token, update.qty)
     this.updateTableOrder(update)
@@ -503,6 +526,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleEpochOrderRoute is the handler for 'epoch_order' notifications. */
   handleEpochOrderRoute (data) {
+    if (data.dex !== this.market.dex.url || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
@@ -579,8 +603,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const remaining = order.qty - order.filled
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining / 1e8)
-    const isMarketBuy = !order.isLimit && !order.sell
-    const symbol = isMarketBuy ? this.market.quote.symbol : this.market.base.symbol
+    const symbol = isMarketBuy(order) ? this.market.quote.symbol : this.market.base.symbol
     page.cancelUnit.textContent = symbol.toUpperCase()
     this.showForm(page.cancelForm)
     bind(page.cancelSubmit, 'click', async () => {
@@ -646,11 +669,10 @@ export default class MarketsPage extends BasePage {
     } else {
       const row = this.orderRows[order.id]
       if (!row) return
-      const td = row.querySelector('[data-col=filled]')
-      td.textContent = `${(order.filled / order.qty * 100).toFixed(1)}%`
+      updateUserOrderRow(row, order)
       if (order.filled === order.qty) {
         // Remove the cancellation button.
-        row.querySelector('[data-col=cancel]').textContent = ''
+        updateDataCol(row, 'cancel', '')
       }
     }
   }
@@ -659,12 +681,28 @@ export default class MarketsPage extends BasePage {
    * handleEpochNote handles notifications signalling the start of a new epoch.
    */
   handleEpochNote (note) {
+    if (note.dex !== this.market.dex.url || note.marketID !== this.market.sid) return
     if (this.book) {
       this.book.setEpoch(note.epoch)
       this.chart.draw()
     }
     this.clearOrderTableEpochs(note.epoch)
-    this.chart.draw()
+    for (const tr of Array.from(this.page.liveList.children)) {
+      const order = tr.order
+      const alreadyMatched = note.epoch > order.epoch
+      const statusTD = tr.querySelector('[data-col=status]')
+      switch (true) {
+        case order.type === LIMIT && order.status === statusEpoch && alreadyMatched:
+          statusTD.textContent = order.tif === immediateTiF ? 'executed' : 'booked'
+          order.status = order.tif === immediateTiF ? statusExecuted : statusBooked
+          break
+        case order.type === MARKET && order.status === statusEpoch:
+          // Tehcnically don't know if this should be 'executed' or 'settling'.
+          statusTD.textContent = 'executed'
+          order.status = statusExecuted
+          break
+      }
+    }
   }
 
   /*
@@ -690,12 +728,11 @@ export default class MarketsPage extends BasePage {
     // ordering. Grab updated info.
     const baseWallet = app.walletMap[market.base.id]
     const quoteWallet = app.walletMap[market.quote.id]
+    await app.fetchUser()
     if (!baseWallet.open || !quoteWallet.open) {
-      await app.fetchUser()
       this.updateWallet(market.base.id)
       this.updateWallet(market.quote.id)
     }
-    app.orders(order.dex, order.base, order.quote).push(res.order)
     this.refreshActiveOrders()
   }
 
@@ -929,6 +966,7 @@ export default class MarketsPage extends BasePage {
     ws.deregisterRoute(bookOrderRoute)
     ws.deregisterRoute(unbookOrderRoute)
     this.chart.unattach()
+    clearInterval(this.secondTicker)
   }
 }
 
@@ -953,4 +991,69 @@ function asAtoms (s) {
 function swapBttns (before, now) {
   before.classList.remove('selected')
   now.classList.add('selected')
+}
+
+/* sumSettled sums the quantities of the matches that have completed. */
+function sumSettled (order) {
+  if (!order.matches) return 0
+  const qty = isMarketBuy(order) ? m => m.qty * m.rate * 1e-8 : m => m.qty
+  return order.matches.reduce((settled, match) => {
+    // >= makerRedeemed is used because the maker never actually goes to
+    // matchComplete (once at makerRedeemed, nothing left to do), and the taker
+    // never goes to makerRedeemed, since at that point, they just complete the
+    // swap.
+    return (match.status >= makerRedeemed) ? settled + qty(match) : settled
+  }, 0)
+}
+
+/*
+ * hasLiveMatches returns true if the order has matches that have not completed
+ * settlement yet.
+ */
+function hasLiveMatches (order) {
+  if (!order.matches) return false
+  for (const match of order.matches) {
+    if (match.status < makerRedeemed) return true
+  }
+  return false
+}
+
+/* statusString converts the order status to a string */
+function statusString (order) {
+  const isLive = hasLiveMatches(order)
+  switch (order.status) {
+    case statusUnknown: return 'unknown'
+    case statusEpoch: return 'epoch'
+    case statusBooked: return order.cancelling ? 'cancelling' : 'booked'
+    case statusExecuted: return isLive ? 'settling' : 'excecuted'
+    case statusCanceled: return isLive ? 'canceled/settling' : 'canceled'
+    case statusRevoked: return isLive ? 'revoked/settling' : 'revoked'
+  }
+}
+
+/*
+ * updateDataCol sets the value of data-col=[col] <td> element that is a child
+ * of the specified <tr>.
+ */
+function updateDataCol (tr, col, s) {
+  tr.querySelector(`[data-col=${col}]`).textContent = s
+}
+
+/*
+ * updateUserOrderRow sets the td values of the user's order table row element.
+ */
+function updateUserOrderRow (tr, order) {
+  updateDataCol(tr, 'type', order.type === LIMIT ? 'limit' : 'market')
+  updateDataCol(tr, 'side', order.sell ? 'sell' : 'buy')
+  updateDataCol(tr, 'age', Doc.timeSince(order.stamp))
+  updateDataCol(tr, 'rate', Doc.formatCoinValue(order.rate / 1e8))
+  updateDataCol(tr, 'qty', Doc.formatCoinValue(order.qty / 1e8))
+  updateDataCol(tr, 'filled', `${(order.filled / order.qty * 100).toFixed(1)}%`)
+  updateDataCol(tr, 'settled', `${(sumSettled(order) / order.qty * 100).toFixed(1)}%`)
+  updateDataCol(tr, 'status', statusString(order))
+}
+
+/* isMarketBuy will return true if the order is a market buy order. */
+function isMarketBuy (order) {
+  return order.type === MARKET && !order.sell
 }
