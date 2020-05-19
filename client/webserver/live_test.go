@@ -33,6 +33,11 @@ import (
 	"github.com/decred/slog"
 )
 
+const (
+	firstDEX  = "https://somedex.com"
+	secondDEX = "https://thisdexwithalongname.com"
+)
+
 var (
 	tCtx          context.Context
 	maxDelay      = time.Second * 2
@@ -108,20 +113,20 @@ func mkMrkt(base, quote string) *core.Market {
 	}
 }
 
-func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.SupportedAsset {
+func mkSupportedAsset(symbol string, state *tWalletState, bal *core.BalanceSet) *core.SupportedAsset {
 	assetID, _ := dex.BipSymbolID(symbol)
 	winfo := winfos[assetID]
 	var wallet *core.WalletState
 	if state != nil {
 		wallet = &core.WalletState{
-			Symbol:  unbip(assetID),
-			AssetID: assetID,
-			Open:    state.open,
-			Running: state.running,
-			Address: ordertest.RandomAddress(),
-			Balance: bal,
-			FeeRate: winfo.DefaultFeeRate,
-			Units:   winfo.Units,
+			Symbol:   unbip(assetID),
+			AssetID:  assetID,
+			Open:     state.open,
+			Running:  state.running,
+			Address:  ordertest.RandomAddress(),
+			Balances: bal,
+			FeeRate:  winfo.DefaultFeeRate,
+			Units:    winfo.Units,
 		}
 	}
 	return &core.SupportedAsset{
@@ -182,7 +187,7 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 }
 
 var tExchanges = map[string]*core.Exchange{
-	"somedex.com": {
+	firstDEX: {
 		Host: "somedex.com",
 		Assets: map[uint32]*dex.Asset{
 			0:  mkDexAsset("btc"),
@@ -197,7 +202,7 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(3, 22): mkMrkt("doge", "mona"),
 		},
 	},
-	"thisdexwithalongname.com": {
+	secondDEX: {
 		Host: "thisdexwithalongname.com",
 		Assets: map[uint32]*dex.Asset{
 			0:  mkDexAsset("btc"),
@@ -250,7 +255,7 @@ type TCore struct {
 	inited      bool
 	mtx         sync.RWMutex
 	wallets     map[uint32]*tWalletState
-	balances    map[uint32]uint64
+	balances    map[uint32]*core.BalanceSet
 	dexAddr     string
 	marketID    string
 	midGap      float64
@@ -267,13 +272,13 @@ type TCore struct {
 func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
-		balances: map[uint32]uint64{
-			0:  uint64(randomMagnitude(7, 11)),
-			2:  uint64(randomMagnitude(7, 11)),
-			42: uint64(randomMagnitude(7, 11)),
-			22: uint64(randomMagnitude(7, 11)),
-			3:  uint64(randomMagnitude(7, 11)),
-			28: uint64(randomMagnitude(7, 11)),
+		balances: map[uint32]*core.BalanceSet{
+			0:  randomBalanceSet(),
+			2:  randomBalanceSet(),
+			42: randomBalanceSet(),
+			22: randomBalanceSet(),
+			3:  randomBalanceSet(),
+			28: randomBalanceSet(),
 		},
 		noteFeed: make(chan core.Notification, 1),
 	}
@@ -428,8 +433,28 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {
 	}
 }
 
-func (c *TCore) Balance(uint32) (uint64, error) {
-	return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6)), nil
+func randomBalanceSet() *core.BalanceSet {
+	randVal := func() uint64 {
+		return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6))
+	}
+	randBal := func() *asset.Balance {
+		return &asset.Balance{
+			Available: randVal(),
+			Immature:  randVal(),
+			Locked:    randVal(),
+		}
+	}
+	return &core.BalanceSet{
+		ZeroConf: randBal(),
+		XC: map[string]*asset.Balance{
+			firstDEX:  randBal(),
+			secondDEX: randBal(),
+		},
+	}
+}
+
+func (c *TCore) AssetBalances(assetID uint32) (*core.BalanceSet, error) {
+	return c.balances[assetID], nil
 }
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
@@ -491,12 +516,12 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 		Symbol:  unbip(assetID),
 		AssetID: assetID,
 
-		Open:    w.open,
-		Running: w.running,
-		Address: ordertest.RandomAddress(),
-		Balance: c.balances[assetID],
-		FeeRate: winfos[assetID].DefaultFeeRate,
-		Units:   winfos[assetID].Units,
+		Open:     w.open,
+		Running:  w.running,
+		Address:  ordertest.RandomAddress(),
+		Balances: c.balances[assetID],
+		FeeRate:  winfos[assetID].DefaultFeeRate,
+		Units:    winfos[assetID].Units,
 	}
 }
 
@@ -551,14 +576,14 @@ func (c *TCore) Wallets() []*core.WalletState {
 	stats := make([]*core.WalletState, 0, len(c.wallets))
 	for assetID, wallet := range c.wallets {
 		stats = append(stats, &core.WalletState{
-			Symbol:  unbip(assetID),
-			AssetID: assetID,
-			Open:    wallet.open,
-			Running: wallet.running,
-			Address: ordertest.RandomAddress(),
-			Balance: c.balances[assetID],
-			FeeRate: winfos[assetID].DefaultFeeRate,
-			Units:   winfos[assetID].Units,
+			Symbol:   unbip(assetID),
+			AssetID:  assetID,
+			Open:     wallet.open,
+			Running:  wallet.running,
+			Address:  ordertest.RandomAddress(),
+			Balances: c.balances[assetID],
+			FeeRate:  winfos[assetID].DefaultFeeRate,
+			Units:    winfos[assetID].Units,
 		})
 	}
 	return stats

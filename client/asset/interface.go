@@ -128,14 +128,14 @@ type Wallet interface {
 
 // Balance is categorized information about a wallet's balance.
 type Balance struct {
-	Available uint64
-	Locked    uint64
-	Immature  uint64
-}
-
-// Total is the total sum wallet balance, including locked and immature.
-func (b *Balance) Total() uint64 {
-	return b.Available + b.Locked + b.Immature
+	// Available is the balance that is available for trading immediately.
+	Available uint64 `json:"available"`
+	// Immature is the balance that is not ready, but will be after some
+	// confirmations.
+	Immature uint64 `json:"immature"`
+	// Locked is the balance that that is currently locked for swap, but
+	// not actually swapped yet.
+	Locked uint64 `json:"locked"`
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed

@@ -73,7 +73,7 @@ export default class Application {
       this.assets[wallet.assetID].wallet = wallet
       this.walletMap[wallet.assetID] = wallet
       const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-      balances.forEach(el => { el.textContent = (wallet.balance / 1e8).toFixed(8) })
+      balances.forEach(el => { el.textContent = (wallet.balances.zeroConf.available / 1e8).toFixed(8) })
     })
     ws.registerRoute(notificationRoute, note => {
       this.notify(note)

@@ -85,7 +85,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return &core.OrderBook{}, nil
 }
-func (c *TCore) Balance(uint32) (uint64, error) { return 0, c.balanceErr }
+func (c *TCore) AssetBalances(assetID uint32) (*core.BalanceSet, error) { return nil, c.balanceErr }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	if c.notHas {
 		return nil

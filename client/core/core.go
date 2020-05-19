@@ -1717,7 +1717,7 @@ func (c *Core) AssetBalances(assetID uint32) (*BalanceSet, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
 	}
-	return wallet.balances, nil
+	return c.walletBalances(wallet)
 }
 
 // initialize pulls the known DEX URLs from the database and attempts to

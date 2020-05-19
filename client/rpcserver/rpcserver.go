@@ -51,7 +51,7 @@ var (
 
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
-	Balance(assetID uint32) (baseUnits uint64, err error)
+	AssetBalances(assetID uint32) (*core.BalanceSet, error)
 	Book(dex string, base, quote uint32) (orderBook *core.OrderBook, err error)
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error

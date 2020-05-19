@@ -396,7 +396,7 @@ export default class MarketsPage extends BasePage {
     if (a.wallet) {
       Doc.hide(button)
       Doc.show(row)
-      bal.textContent = Doc.formatCoinValue(a.wallet.balance / 1e8)
+      bal.textContent = Doc.formatCoinValue(a.wallet.balances.zeroConf.available / 1e8)
       return
     }
     Doc.show(button)
