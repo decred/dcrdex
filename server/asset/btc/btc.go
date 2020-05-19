@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -164,39 +163,6 @@ func NewBTCClone(name, configPath string, logger dex.Logger, network dex.Network
 	}
 
 	return btc, nil
-}
-
-// This entire module may be usable by a BTC clone if certain conditions are
-// met. Many BTC clones have btcd forks with their own go config files. The
-// Backend only uses a handful of configuration settings, so if all of those
-// settings are present in the clone parameter files, the ReadCloneParams can
-// likely translate them into btcd-flavor.
-//
-// Another option for clones that don't have a compatible golang config file is
-// to write the file on the fly. ReadCloneParams will take any interface and
-// look for the fields with appropriate names. This list is an attempt to
-// capture those, but may not be comprehensive. Run live tests and compatibility
-// tests from testing.go as well.
-//
-// PubKeyHashAddrID: Net ID byte for a pubkey-hash address
-// ScriptHashAddrID: Net ID byte for a script-hash address
-// CoinbaseMaturity: The number of confirmations before a transaction spending
-//                   a coinbase input can be spent.
-// WitnessPubKeyHashAddrID: Net ID byte for a witness-pubkey-hash address
-// WitnessScriptHashAddrID: Net ID byte for a witness-script-hash address
-// Bech32HRPSegwit: Human-readable part for Bech32 encoded segwit addresses,
-//                  as defined in BIP 173.
-func ReadCloneParams(cloneParams interface{}) (*chaincfg.Params, error) {
-	p := new(chaincfg.Params)
-	cloneJson, err := json.Marshal(cloneParams)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling network params: %v", err)
-	}
-	err = json.Unmarshal(cloneJson, &p)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling network params: %v", err)
-	}
-	return p, nil
 }
 
 // Contract is part of the asset.Backend interface. An asset.Contract is a
