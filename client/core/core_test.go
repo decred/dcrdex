@@ -2776,3 +2776,69 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 	}
 	return lo, dbOrder, preImg, addr
 }
+
+func TestAddrHost(t *testing.T) {
+	tests := []struct {
+		name, addr, want string
+		wantErr          bool
+	}{{
+		name: "scheme, host, and port",
+		addr: "https://localhost:5758",
+		want: "localhost:5758",
+	}, {
+		name: "host and port",
+		addr: "localhost:5758",
+		want: "localhost:5758",
+	}, {
+		name: "just port",
+		addr: ":5758",
+		want: "localhost:5758",
+	}, {
+		name: "ip host and port",
+		addr: "127.0.0.1:5758",
+		want: "127.0.0.1:5758",
+	}, {
+		name: "host, port, and path",
+		addr: "localhost:5758/any/path",
+		want: "localhost:5758",
+	}, {
+		name: "just host",
+		addr: "thatonedex.com",
+		want: "thatonedex.com",
+	}, {
+		name: "shceme and host",
+		addr: "https://thatonedex.com",
+		want: "thatonedex.com",
+	}, {
+		name: "scheme, host, and path",
+		addr: "https://thatonedex.com/any/path",
+		want: "thatonedex.com",
+	}, {
+		name:    "invalid address",
+		addr:    "\n",
+		wantErr: true,
+	}, {
+		name:    "empty address",
+		wantErr: true,
+	}}
+	for _, test := range tests {
+		res, err := addrHost(test.addr)
+		if err != nil {
+			if test.wantErr {
+				continue
+			}
+			t.Fatalf("unexpected error for test '%s': %v", test.name, err)
+		}
+		if res != test.want {
+			t.Fatalf("wanted %s but got %s for test '%s'", test.want, res, test.name)
+		}
+		// Parsing results a second time should produce the same results.
+		res, err = addrHost(res)
+		if err != nil {
+			t.Fatalf("unexpected error for test '%s': %v", test.name, err)
+		}
+		if res != test.want {
+			t.Fatalf("wanted %s but got %s for test '%s'", test.want, res, test.name)
+		}
+	}
+}

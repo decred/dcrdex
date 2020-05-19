@@ -182,8 +182,8 @@ func randomOrder(sell bool, maxQty, midGap, marketWidth float64, epoch bool) *co
 }
 
 var tExchanges = map[string]*core.Exchange{
-	"https://somedex.com": {
-		URL: "https://somedex.com",
+	"somedex.com": {
+		Host: "somedex.com",
 		Assets: map[uint32]*dex.Asset{
 			0:  mkDexAsset("btc"),
 			2:  mkDexAsset("ltc"),
@@ -197,8 +197,8 @@ var tExchanges = map[string]*core.Exchange{
 			mkid(3, 22): mkMrkt("doge", "mona"),
 		},
 	},
-	"https://thisdexwithalongname.com": {
-		URL: "https://thisdexwithalongname.com",
+	"thisdexwithalongname.com": {
+		Host: "thisdexwithalongname.com",
 		Assets: map[uint32]*dex.Asset{
 			0:  mkDexAsset("btc"),
 			2:  mkDexAsset("ltc"),

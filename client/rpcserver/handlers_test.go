@@ -448,7 +448,7 @@ func TestHandleExchanges(t *testing.T) {
 	   handleExchanges removes some redundant fields from the response.
 	   $ diff in out
 	   3d2
-	   <     "url": "https://127.0.0.1:7232",
+	   <     "host": "https://127.0.0.1:7232",
 	   6d4
 	   <         "name": "dcr_btc",
 	   16,17d13
@@ -461,7 +461,7 @@ func TestHandleExchanges(t *testing.T) {
 	*/
 	in := `{
   "https://127.0.0.1:7232": {
-    "url": "https://127.0.0.1:7232",
+    "host": "https://127.0.0.1:7232",
     "markets": {
       "dcr_btc": {
         "name": "dcr_btc",

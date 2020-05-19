@@ -9,6 +9,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -41,6 +43,9 @@ var (
 	requestTimeout = 10 * time.Second
 	// The coin waiters will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
+	// validChars are characters that are accepted as part of a dex's host
+	// address.
+	validChars = regexp.MustCompile(`^[A-Za-z0-9:-_.]+$`).MatchString
 )
 
 // dexConnection is the websocket connection and the DEX configuration.
@@ -430,15 +435,72 @@ func (c *Core) Run(ctx context.Context) {
 	log.Infof("DEX client core off")
 }
 
-// Exchanges returns a map of Exchange keyed by URI, including a list of markets
+// addrHost returns the host or url:port pair for an address.
+func addrHost(addr string) (string, error) {
+	// validateHost validates the passed host as being an acceptable dex
+	// host in the form of host or host:port. An address in the form of
+	// :port will be made localhost:port
+	validateHost := func(host string) (string, error) {
+		if host == "" {
+			return "", fmt.Errorf("empty host")
+		}
+		if !validChars(host) {
+			return "", fmt.Errorf("host %s contains invalid characters", host)
+		}
+		// The host must be in the form of host:port, :port, or just
+		// host.
+		split := strings.Split(host, ":")
+		if len(split) > 2 {
+			return "", fmt.Errorf("host %s contains too many colons", host)
+		}
+		// Return just the host.
+		if len(split) == 1 {
+			return split[0], nil
+		}
+		// The port must be a valid port if it exists.
+		_, err := strconv.ParseUint(split[1], 10, 16)
+		if err != nil {
+			return "", fmt.Errorf("invalid host port %s: %v", split[1], err)
+		}
+		host = split[0]
+		// Replace an empty host with localhost.
+		if host == "" {
+			host = "localhost"
+		}
+		return fmt.Sprintf("%s:%s", host, split[1]), nil
+	}
+	// If this is already a valid address, return it.
+	if host, err := validateHost(addr); err == nil {
+		return host, nil
+	}
+	a, err := url.Parse(addr)
+	if err != nil {
+		return "", err
+	}
+	host := a.Hostname()
+	// An address without a scheme in the form of host:port/path will not
+	// find a hostname. Take everything before /path and confirm that it is
+	// valid.
+	if host == "" {
+		host := strings.Split(a.String(), "/")[0]
+		return validateHost(host)
+	}
+	port := a.Port()
+	if port == "" {
+		return validateHost(host)
+	}
+	return validateHost(fmt.Sprintf("%s:%s", host, port))
+}
+
+// Exchanges returns a map of Exchange keyed by host, including a list of markets
 // and their orders.
 func (c *Core) Exchanges() map[string]*Exchange {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	infos := make(map[string]*Exchange, len(c.conns))
-	for uri, dc := range c.conns {
-		infos[uri] = &Exchange{
-			URL:        uri,
+	for host, dc := range c.conns {
+		infos[host] = &Exchange{
+			Host:       host,
 			Markets:    dc.markets(),
 			Assets:     dc.assets,
 			FeePending: dc.acct.feePending(),
@@ -767,9 +829,9 @@ func (c *Core) ConnectWallet(assetID uint32) error {
 	return err
 }
 
-func (c *Core) isRegistered(url string) bool {
+func (c *Core) isRegistered(host string) bool {
 	c.connMtx.RLock()
-	_, found := c.conns[url]
+	_, found := c.conns[host]
 	c.connMtx.RUnlock()
 	return found
 }
@@ -778,7 +840,11 @@ func (c *Core) isRegistered(url string) bool {
 // registration fee. The connection is closed after the fee is retrieved.
 // Returns an error if user is already registered to the DEX.
 func (c *Core) GetFee(url, cert string) (uint64, error) {
-	if c.isRegistered(url) {
+	host, err := addrHost(url)
+	if err != nil {
+		return 0, err
+	}
+	if c.isRegistered(host) {
 		return 0, fmt.Errorf("already registered at %s", url)
 	}
 	dc, err := c.connectDEX(&db.AccountInfo{
@@ -807,7 +873,11 @@ func (c *Core) Register(form *RegisterForm) error {
 	if form.URL == "" {
 		return fmt.Errorf("no dex url specified")
 	}
-	if c.isRegistered(form.URL) {
+	host, err := addrHost(form.URL)
+	if err != nil {
+		return err
+	}
+	if c.isRegistered(host) {
 		return fmt.Errorf("already registered at %s", form.URL)
 	}
 
@@ -884,7 +954,7 @@ func (c *Core) Register(form *RegisterForm) error {
 	// Registration complete.
 	registrationComplete = true
 	c.connMtx.Lock()
-	c.conns[dc.acct.url] = dc
+	c.conns[host] = dc
 	c.connMtx.Unlock()
 
 	// Set the dexConnection account fields and save account info to db.
@@ -1247,9 +1317,14 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 		return nil, fmt.Errorf("Trade password error: %v", err)
 	}
 
+	host, err := addrHost(form.DEX)
+	if err != nil {
+		return nil, err
+	}
+
 	// Get the dexConnection and the dex.Asset for each asset.
 	c.connMtx.RLock()
-	dc, found := c.conns[form.DEX]
+	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if !found {
 		return nil, fmt.Errorf("unknown DEX %s", form.DEX)
@@ -1666,8 +1741,10 @@ func (c *Core) initialize() {
 				c.notify(newFeePaymentNote("Incomplete registration", details, db.WarningLevel))
 				// checkUnpaidFees will pay the fees if the wallet is unlocked
 			}
+			// acct.URL has been verified as parseable.
+			host, _ := addrHost(acct.URL)
 			c.connMtx.Lock()
-			c.conns[acct.URL] = dc
+			c.conns[host] = dc
 			c.connMtx.Unlock()
 			log.Debugf("dex connection to %s ready", acct.URL)
 		}(acct)
@@ -2024,26 +2101,22 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) error {
 // route.
 func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// Get the host from the DEX URL.
-	parsedURL, err := url.Parse(acctInfo.URL)
+	host, err := addrHost(acctInfo.URL)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing account URL %s: %v", acctInfo.URL, err)
-	}
-	uri := parsedURL.Host // empty for urls without scheme
-	if uri == "" {
-		uri = parsedURL.String()
 	}
 
 	// Create a websocket connection to the server.
 	conn, err := c.wsConstructor(&comms.WsCfg{
-		URL:      "wss://" + uri + "/ws",
+		URL:      "wss://" + host + "/ws",
 		PingWait: 60 * time.Second,
 		Cert:     acctInfo.Cert,
 		ReconnectSync: func() {
-			go c.handleReconnect(uri)
+			go c.handleReconnect(host)
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("Error creating websocket connection for %s: %v", uri, err)
+		return nil, fmt.Errorf("Error creating websocket connection for %s: %v", host, err)
 	}
 
 	connMaster := dex.NewConnectionMaster(conn)
@@ -2073,12 +2146,12 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		_, ok := assets[mkt.Base]
 		if !ok {
 			log.Errorf("%s reported a market with base asset %d, "+
-				"but did not provide the asset info.", uri, mkt.Base)
+				"but did not provide the asset info.", host, mkt.Base)
 		}
 		_, ok = assets[mkt.Quote]
 		if !ok {
 			log.Errorf("%s reported a market with quote asset %d, "+
-				"but did not provide the asset info.", uri, mkt.Quote)
+				"but did not provide the asset info.", host, mkt.Quote)
 		}
 	}
 
@@ -2117,15 +2190,15 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	dc.refreshMarkets()
 	c.wg.Add(1)
 	go c.listen(dc)
-	log.Infof("Connected to DEX server at %s and listening for messages.", uri)
+	log.Infof("Connected to DEX server at %s and listening for messages.", host)
 
 	return dc, nil
 }
 
 // handleReconnect is called when a WsConn indicates that a lost connection has
 // been re-established.
-func (c *Core) handleReconnect(uri string) {
-	log.Infof("DEX at %s has reconnected", uri)
+func (c *Core) handleReconnect(host string) {
+	log.Infof("DEX at %s has reconnected", host)
 }
 
 // handleMatchProofMsg is called when a match_proof notification is received.
