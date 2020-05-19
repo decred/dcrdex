@@ -119,7 +119,6 @@ Place the pubkey string into a new DEX configuration file.
 regfeexpub=tpubVWHTkHRefqHptAnBdNcDJ...
 
 # PostgreSQL Credentials
-pgdbname=dcrdex_testnet
 pgpass=dexpass
 ```
 

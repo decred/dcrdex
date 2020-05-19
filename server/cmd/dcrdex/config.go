@@ -32,7 +32,7 @@ const (
 	defaultMaxLogZips          = 16
 	defaultPGHost              = "127.0.0.1:5432"
 	defaultPGUser              = "dcrdex"
-	defaultPGDBName            = "dcrdex"
+	defaultPGDBName            = "dcrdex_{netname}"
 	defaultDEXPrivKeyFilename  = "sigkey"
 	defaultRPCHost             = "127.0.0.1"
 	defaultRPCPort             = "7232"
@@ -509,6 +509,9 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		}
 		adminSrvAddr = cfg.AdminSrvAddr
 	}
+
+	// If using {netname} then replace it with the network name.
+	cfg.PGDBName = strings.Replace(cfg.PGDBName, "{netname}", network.String(), -1)
 
 	dexCfg := &dexConf{
 		Network:          network,
