@@ -512,7 +512,7 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 	defer cancel()
 
 	startEpochIdx := 2 + encode.UnixMilli(time.Now())/epochDurationMSec
-	startEpochTime := encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	//startEpochTime := encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
 
 	// ~----|-------|-------|-------|
 	// ^now ^prev   ^start  ^next
@@ -525,18 +525,22 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 	}()
 
 	var wantClosedFeed bool
-	feedReceiver := func() {
-		feed := mkt.OrderFeed()
-		for range feed {
-		}
-		if !wantClosedFeed {
-			t.Errorf("order feed should not be closed")
-		}
+
+	startFeedRecv := func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			feed := mkt.OrderFeed()
+			for range feed {
+			}
+			if !wantClosedFeed {
+				t.Errorf("order feed should not be closed")
+			}
+		}()
 	}
-	go feedReceiver()
 
 	// Wait until after original start time.
-	<-time.After(time.Until(startEpochTime.Add(20 * time.Millisecond)))
+	mkt.waitForEpochOpen()
 
 	if !mkt.Running() {
 		t.Fatal("the market should be running")
@@ -580,16 +584,16 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 
 	// Start it up again.
 	startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
-	startEpochTime = encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
+	//startEpochTime = encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		mkt.Start(ctx, startEpochIdx)
 	}()
 
-	go feedReceiver()
+	startFeedRecv()
 
-	<-time.After(time.Until(startEpochTime.Add(20 * time.Millisecond)))
+	mkt.waitForEpochOpen()
 
 	if !mkt.Running() {
 		t.Fatal("the market should be running")
