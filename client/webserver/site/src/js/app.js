@@ -1,5 +1,5 @@
 import Doc from './doc'
-import State, { darkModeCK, authCK } from './state'
+import State from './state'
 import RegistrationPage from './register'
 import LoginPage from './login'
 import WalletsPage from './wallets'
@@ -218,10 +218,10 @@ export default class Application {
       return
     }
     if (!this.user.authed) {
-      Doc.hide(pg.noteMenuEntry, pg.walletsMenuEntry, pg.marketsMenuEntry, pg.profileIcon)
+      Doc.hide(pg.noteMenuEntry, pg.walletsMenuEntry, pg.marketsMenuEntry, pg.profileMenuEntry)
       return
     }
-    Doc.show(pg.noteMenuEntry, pg.walletsMenuEntry, pg.profileIcon)
+    Doc.show(pg.noteMenuEntry, pg.walletsMenuEntry, pg.profileMenuEntry)
     if (Object.keys(this.user.exchanges).length > 0) {
       Doc.show(pg.marketsMenuEntry)
     } else {
@@ -376,8 +376,8 @@ export default class Application {
       return
     }
     State.clearAllStore()
-    State.removeCookies(authCK, darkModeCK)
-    window.location.reload()
+    State.removeAuthCK()
+    window.location.href = '/login'
   }
 }
 

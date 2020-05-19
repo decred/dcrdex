@@ -1,5 +1,5 @@
-export const darkModeCK = 'darkMode'
-export const authCK = 'dexauth'
+const darkModeCK = 'darkMode'
+const authCK = 'dexauth'
 
 // State is a set of static methods for working with the user state. It has
 // utilities for setting and retrieving cookies and storing user configuration
@@ -51,10 +51,8 @@ export default class State {
     window.localStorage.clear()
   }
 
-  static removeCookies (...cnames) {
-    cnames.forEach(cname => {
-      document.cookie = `${cname}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
-    })
+  static removeAuthCK () {
+    document.cookie = `${authCK}=;expires=Thu, 01 Jan 1970 00:00:01 GMT;`
   }
 
   /*
