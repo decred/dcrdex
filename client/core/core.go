@@ -718,6 +718,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 	wallet.setAddress(dbWallet.Address)
 
+	balances, err = c.walletBalances(wallet)
+	if err != nil {
+		return initErr("error getting wallet balance for %s: %v", symbol, err)
+	}
+	dbWallet.Balance = balances.ZeroConf
+
 	// Store the wallet in the database.
 	err = c.db.UpdateWallet(dbWallet)
 	if err != nil {

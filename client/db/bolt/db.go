@@ -643,6 +643,9 @@ func decodeTimedBalance(b []byte) (*timedBalance, error) {
 
 // UpdateWallet adds a wallet to the database.
 func (db *boltDB) UpdateWallet(wallet *dexdb.Wallet) error {
+	if wallet.Balance == nil {
+		return fmt.Errorf("cannot UpdateWallet with nil Balance field")
+	}
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt, err := master.CreateBucketIfNotExists(wallet.ID())
 		if err != nil {
