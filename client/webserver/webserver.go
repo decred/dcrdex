@@ -297,10 +297,10 @@ func (s *WebServer) Run(ctx context.Context) {
 	// Disconnect the websocket clients since Shutdown does not deal with
 	// hijacked websocket connections.
 	s.mtx.Lock()
-	defer s.mtx.Unlock()
 	for _, cl := range s.clients {
 		cl.Disconnect()
 	}
+	s.mtx.Unlock()
 
 	wg.Wait()
 }
