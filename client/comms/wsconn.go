@@ -28,9 +28,13 @@ const (
 	writeWait = time.Second * 3
 )
 
-// ErrInvalidCert is the error returned when a ws connection errors for
-// cert-related reasons.
+// ErrInvalidCert is the error returned when attempting to use an invalid cert
+// to set up a ws connection.
 var ErrInvalidCert = fmt.Errorf("invalid certificate")
+
+// ErrCertRequired is the error returned when a ws connection fails because no
+// cert was provided.
+var ErrCertRequired = fmt.Errorf("certificate required")
 
 // WsConn is an interface for a websocket client.
 type WsConn interface {
@@ -148,7 +152,10 @@ func (conn *wsConn) connect(ctx context.Context) error {
 
 	ws, _, err := dialer.Dial(conn.cfg.URL, nil)
 	if err != nil {
-		if _, isInvalidCertError := err.(x509.UnknownAuthorityError); isInvalidCertError {
+		if _, isUnknownAuthError := err.(x509.UnknownAuthorityError); isUnknownAuthError {
+			if conn.tlsCfg == nil {
+				return ErrCertRequired
+			}
 			return ErrInvalidCert
 		}
 		return err
