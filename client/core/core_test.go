@@ -85,7 +85,7 @@ func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 func makeAcker(serializer func(msg *msgjson.Message) msgjson.Signable) func(msg *msgjson.Message, f msgFunc) error {
 	return func(msg *msgjson.Message, f msgFunc) error {
 		signable := serializer(msg)
-		sigMsg, _ := signable.Serialize()
+		sigMsg := signable.Serialize()
 		sig, _ := tDexPriv.Sign(sigMsg)
 		ack := &msgjson.Acknowledgement{
 			Sig: sig.Serialize(),
@@ -1011,7 +1011,7 @@ func TestRegister(t *testing.T) {
 		rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
 			req := new(msgjson.NotifyFee)
 			json.Unmarshal(msg.Payload, req)
-			sigMsg, _ := req.Serialize()
+			sigMsg := req.Serialize()
 			sig, _ := tDexPriv.Sign(sigMsg)
 			// Shouldn't Sig be dex.Bytes?
 			result := &msgjson.Acknowledgement{Sig: sig.Serialize()}

@@ -42,10 +42,7 @@ func TestMatch(t *testing.T) {
 		0x74, 0x66, 0x67, 0x47, 0x56, 0x61, 0x35, 0x75, 0x69,
 	}
 
-	b, err := match.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := match.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -111,10 +108,7 @@ func TestInit(t *testing.T) {
 		// Contract 8 bytes (shortened for testing)
 		0xca, 0xf8, 0xd2, 0x77, 0xf8, 0x0f, 0x71, 0xe4,
 	}
-	b, err := init.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := init.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -178,10 +172,7 @@ func TestAudit(t *testing.T) {
 		0xfc, 0x99, 0xf5, 0x76, 0xf8, 0xe0, 0xe5, 0xdc,
 	}
 
-	b, err := audit.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := audit.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -231,10 +222,7 @@ func TestRevokeMatch(t *testing.T) {
 		0xb8, 0x71, 0x88, 0xaa, 0x95, 0x79, 0x5c, 0x16,
 	}
 
-	b, err := revoke.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := revoke.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -291,10 +279,7 @@ func TestRedeem(t *testing.T) {
 		0x92, 0x1b, 0xbb, 0xb5, 0x5b, 0xe5, 0xde, 0xd9,
 	}
 
-	b, err := redeem.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := redeem.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -353,10 +338,7 @@ func TestRedemption(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0x9f, 0x15, 0x92,
 	}
 
-	b, err := redeem.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := redeem.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -540,10 +522,7 @@ func TestLimit(t *testing.T) {
 		TiF:    1,
 	}
 
-	b, err := limit.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := limit.Serialize()
 
 	// Compare the prefix byte-for-byte and pop it from the front.
 	x := prefix.Serialize()
@@ -621,10 +600,7 @@ func TestMarket(t *testing.T) {
 		Trade:  *trade,
 	}
 
-	b, err := market.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := market.Serialize()
 
 	// Compare the prefix byte-for-byte and pop it from the front.
 	x := prefix.Serialize()
@@ -684,10 +660,7 @@ func TestCancel(t *testing.T) {
 		TargetID: targetID,
 	}
 
-	b, err := cancel.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := cancel.Serialize()
 
 	// Compare the prefix byte-for-byte and pop it from the front.
 	x := prefix.Serialize()
@@ -743,10 +716,7 @@ func TestConnect(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0xac, 0x55, 0x38,
 	}
 
-	b, err := connect.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := connect.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -790,10 +760,7 @@ func TestRegister(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0xae, 0x3d, 0x6d,
 	}
 
-	b, err := register.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := register.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -850,10 +817,7 @@ func TestRegisterResult(t *testing.T) {
 		0x4a, 0x43, 0x56, 0x79, 0x54, 0x33, 0x51, 0x65, 0x71, 0x6b, 0x78,
 	}
 
-	b, err := regRes.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := regRes.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
@@ -908,10 +872,7 @@ func TestNotifyFee(t *testing.T) {
 		0x00, 0x00, 0x00, 0x00, 0x5d, 0xae, 0x4f, 0x23,
 	}
 
-	b, err := notify.Serialize()
-	if err != nil {
-		t.Fatalf("serialization error: %v", err)
-	}
+	b := notify.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}
