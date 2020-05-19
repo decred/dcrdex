@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
@@ -336,7 +337,7 @@ type Wallet struct {
 	AssetID     uint32
 	Account     string
 	Settings    map[string]string
-	Balance     uint64
+	Balance     *asset.Balance
 	BalUpdate   time.Time
 	EncryptedPW []byte
 	Address     string
