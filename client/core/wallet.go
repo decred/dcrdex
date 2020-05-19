@@ -21,7 +21,7 @@ type xcWallet struct {
 	mtx       sync.RWMutex
 	lockTime  time.Time
 	hookedUp  bool
-	balance   uint64
+	balance   *asset.Balance
 	balUpdate time.Time
 	encPW     []byte
 	address   string
@@ -72,7 +72,7 @@ func (w *xcWallet) state() *WalletState {
 }
 
 // setBalance sets the wallet balance.
-func (w *xcWallet) setBalance(bal uint64) {
+func (w *xcWallet) setBalance(*asset.Balance) {
 	w.mtx.Lock()
 	w.balance = bal
 	w.balUpdate = time.Now()

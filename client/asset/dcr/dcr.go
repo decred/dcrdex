@@ -65,6 +65,7 @@ type rpcClient interface {
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	ListUnspentMin(minConf int) ([]walletjson.ListUnspentResult, error)
 	LockUnspent(unlock bool, ops []*wire.OutPoint) error
+	ListLockUnspent() ([]*wire.OutPoint, error)
 	GetRawChangeAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error)
 	GetNewAddressGapPolicy(string, rpcclient.GapPolicy, dcrutil.AddressParams) (dcrutil.Address, error)
 	SignRawTransaction(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
@@ -320,7 +321,7 @@ func newClient(host, user, pass, cert string) (*rpcclient.Client, error) {
 }
 
 // Info returns basic information about the wallet and asset.
-func (d *ExchangeWallet) Info() *asset.WalletInfo {
+func (dcr *ExchangeWallet) Info() *asset.WalletInfo {
 	return walletInfo
 }
 
@@ -364,13 +365,19 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 // a simple getbalance with a minconf argument is not sufficient to see all
 // balance available for the exchange. Instead, all wallet UTXOs are scanned
 // for those that match DEX requirements. Part of the asset.Wallet interface.
-func (dcr *ExchangeWallet) Balance(confs uint32) (available, locked uint64, err error) {
-	unspents, err := dcr.node.ListUnspentMin(0)
+func (dcr *ExchangeWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
+	balances, err := dcr.balances(confs)
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
-	_, sum, unconf, err := dcr.spendableUTXOs(unspents, confs)
-	return sum, unconf, err
+	locked, err := dcr.lockedSats()
+	if err != nil {
+		return nil, err
+	}
+	for _, balance := range balances {
+		balance.Locked = locked
+	}
+	return balances, err
 }
 
 // Fund selects coins for use in an order. The coins will be locked, and will
@@ -1213,6 +1220,62 @@ func (dcr *ExchangeWallet) spendableUTXOs(unspents []walletjson.ListUnspentResul
 		}
 	}
 	return utxos, sum, unconf, nil
+}
+
+// balances creates a slice of *asset.Balance corresponding to the input slice
+// of minconf.
+func (dcr *ExchangeWallet) balances(confs []uint32) ([]*asset.Balance, error) {
+	if len(confs) == 0 {
+		return nil, fmt.Errorf("balances confs slice cannot be empty")
+	}
+	unspents, err := dcr.node.ListUnspentMin(0)
+	if err != nil {
+		return nil, err
+	}
+	balances := make([]*asset.Balance, len(confs))
+	for i := range balances {
+		balances[i] = new(asset.Balance)
+	}
+	for _, txout := range unspents {
+		txHash, err := chainhash.NewHashFromStr(txout.TxID)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding txid from rpc server %s: %v", txout.TxID, err)
+		}
+		for i, balance := range balances {
+			// Change from a DEX-monitored transaction is exempt from the fundconf requirement.
+			if txout.Confirmations >= int64(confs[i]) || dcr.isDEXChange(txHash, txout.Vout) {
+				balance.Available += toAtoms(txout.Amount)
+			} else {
+				balance.Immature += toAtoms(txout.Amount)
+			}
+		}
+	}
+	return balances, nil
+}
+
+// lockedSats is the total value of locked outputs, as locked with LockUnspent.
+func (dcr *ExchangeWallet) lockedSats() (uint64, error) {
+	lockedOutpoints, err := dcr.node.ListLockUnspent()
+	if err != nil {
+		return 0, err
+	}
+	var sum uint64
+	dcr.fundingMtx.Lock()
+	defer dcr.fundingMtx.Unlock()
+	for _, outPoint := range lockedOutpoints {
+		opID := outpointID(&outPoint.Hash, outPoint.Index)
+		utxo, found := dcr.fundingCoins[opID]
+		if found {
+			sum += utxo.op.value
+			continue
+		}
+		txOut, err := dcr.node.GetTxOut(&outPoint.Hash, outPoint.Index, true)
+		if err != nil {
+			return 0, err
+		}
+		sum += toAtoms(txOut.Value)
+	}
+	return sum, nil
 }
 
 // addChange adds the output to the list of DEX-trade change outputs. These

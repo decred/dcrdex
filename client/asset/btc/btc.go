@@ -315,7 +315,7 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // Info returns basic information about the wallet and asset.
-func (d *ExchangeWallet) Info() *asset.WalletInfo {
+func (btc *ExchangeWallet) Info() *asset.WalletInfo {
 	return walletInfo
 }
 
@@ -354,15 +354,26 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 	return nil, &wg
 }
 
-// Balance should return the total available funds in the wallet.
-// Note that after calling Fund, the amount returned by Balance may change
-// by more than the value funded. Because of the DEX confirmation requirements,
-// a simple getbalance with a minconf argument is not sufficient to see all
-// balance available for the exchange. Instead, all wallet UTXOs are scanned
-// for those that match DEX requirements. Part of the asset.Wallet interface.
-func (btc *ExchangeWallet) Balance(confs uint32) (uint64, uint64, error) {
-	_, _, sum, unconf, err := btc.spendableUTXOs(confs)
-	return sum, unconf, err
+// Balance should return the total available funds in the wallet. Balance takes
+// a list of minimum confirmations for which to calculate maturity, and returns
+// a list of corresponding *assetBalance. Because of the DEX confirmation
+// requirements, a simple getbalance with a minconf argument is not sufficient
+// to see all balance available for the exchanges. Instead, all wallet UTXOs are
+// scanned for those that match confirmation requirements. Part of the
+// asset.Wallet interface.
+func (btc *ExchangeWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
+	balances, err := btc.balances(confs)
+	if err != nil {
+		return nil, err
+	}
+	locked, err := btc.lockedSats()
+	if err != nil {
+		return nil, err
+	}
+	for _, balance := range balances {
+		balance.Locked = locked
+	}
+	return balances, err
 }
 
 // Fund selects utxos (as asset.Coin) for use in an order. Any Coins returned
@@ -1266,6 +1277,62 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[s
 		}
 	}
 	return utxos, utxoMap, sum, unconf, nil
+}
+
+// balances creates a slice of *asset.Balance corresponding to the input slice
+// of minconf.
+func (btc *ExchangeWallet) balances(confs []uint32) ([]*asset.Balance, error) {
+	if len(confs) == 0 {
+		return nil, fmt.Errorf("balances confs slice cannot be empty")
+	}
+	unspents, err := btc.wallet.ListUnspent()
+	if err != nil {
+		return nil, err
+	}
+	balances := make([]*asset.Balance, len(confs))
+	for i := range balances {
+		balances[i] = new(asset.Balance)
+	}
+	for _, txout := range unspents {
+		for i, balance := range balances {
+			confReq := confs[i]
+			if txout.Confirmations >= confReq || btc.isDEXChange(txout.TxID, txout.Vout) {
+				balance.Available += toSatoshi(txout.Amount)
+			} else {
+				balance.Immature += toSatoshi(txout.Amount)
+			}
+		}
+	}
+	return balances, nil
+}
+
+// lockedSats is the total value of locked outputs, as locked with LockUnspent.
+func (btc *ExchangeWallet) lockedSats() (uint64, error) {
+	lockedOutpoints, err := btc.wallet.ListLockUnspent()
+	if err != nil {
+		return 0, err
+	}
+	var sum uint64
+	btc.fundingMtx.Lock()
+	defer btc.fundingMtx.Unlock()
+	for _, outPoint := range lockedOutpoints {
+		opID := outpointID(outPoint.TxID, outPoint.Vout)
+		utxo, found := btc.fundingCoins[opID]
+		if found {
+			sum += utxo.amount
+			continue
+		}
+		txHash, err := chainhash.NewHashFromStr(outPoint.TxID)
+		if err != nil {
+			return 0, err
+		}
+		txOut, err := btc.node.GetTxOut(txHash, outPoint.Vout, true)
+		if err != nil {
+			return 0, err
+		}
+		sum += toSatoshi(txOut.Value)
+	}
+	return sum, nil
 }
 
 // addChange adds the output to the list of DEX-trade change outputs. These

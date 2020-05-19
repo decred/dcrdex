@@ -250,19 +250,21 @@ func TestAvailableFund(t *testing.T) {
 	// should be returned.
 	unspents := make([]*ListUnspentResult, 0)
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err := wallet.Balance(tBTC.FundConf)
+	node.rawRes[methodListLockUnspent] = mustMarshal(t, make([]*RPCOutpoint, 0))
+	balances, err := wallet.Balance([]uint32{tBTC.FundConf})
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
 	}
-	if available != 0 {
-		t.Fatalf("expected available = 0, got %d", available)
+	bal := balances[0]
+	if bal.Available != 0 {
+		t.Fatalf("expected available = 0, got %d", bal.Available)
 	}
-	if unconf != 0 {
-		t.Fatalf("unconf unconf = 0, got %d", unconf)
+	if bal.Immature != 0 {
+		t.Fatalf("unconf unconf = 0, got %d", bal.Immature)
 	}
 
 	node.rawErr[methodListUnspent] = tErr
-	_, _, err = wallet.Balance(tBTC.FundConf)
+	_, err = wallet.Balance([]uint32{tBTC.FundConf})
 	if err == nil {
 		t.Fatalf("no wallet error for rpc error")
 	}
@@ -277,17 +279,32 @@ func TestAvailableFund(t *testing.T) {
 		ScriptPubKey:  tP2PKH,
 	}
 	unspents = append(unspents, littleUnspent)
-
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err = wallet.Balance(tBTC.FundConf)
+	lockedVal := uint64(1e6)
+	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{
+		{
+			TxID: tTxID,
+			Vout: 5,
+		},
+	})
+	node.txOutRes = &btcjson.GetTxOutResult{
+		Confirmations: 2,
+		Value:         float64(lockedVal) / 1e8,
+	}
+
+	balances, err = wallet.Balance([]uint32{tBTC.FundConf})
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
-	if available != 0 {
-		t.Fatalf("expected available = 0 for unconf-only, got %d", available)
+	bal = balances[0]
+	if bal.Available != 0 {
+		t.Fatalf("expected available = 0 for unconf-only, got %d", bal.Available)
 	}
-	if unconf != littleBit {
-		t.Fatalf("expected unconf = %d, got %d", littleBit, unconf)
+	if bal.Immature != littleBit {
+		t.Fatalf("expected unconf = %d, got %d", littleBit, bal.Immature)
+	}
+	if bal.Locked != lockedVal {
+		t.Fatalf("expected locked = %d, got %d", lockedVal, bal.Locked)
 	}
 
 	lottaBit := uint64(1e7)
@@ -301,15 +318,16 @@ func TestAvailableFund(t *testing.T) {
 	})
 	littleUnspent.Confirmations = 1
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	available, unconf, err = wallet.Balance(tBTC.FundConf)
+	balances, err = wallet.Balance([]uint32{tBTC.FundConf})
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
-	if available != littleBit+lottaBit {
-		t.Fatalf("expected available = %d for 2 outputs, got %d", littleBit+lottaBit, available)
+	bal = balances[0]
+	if bal.Available != littleBit+lottaBit {
+		t.Fatalf("expected available = %d for 2 outputs, got %d", littleBit+lottaBit, bal.Available)
 	}
-	if unconf != 0 {
-		t.Fatalf("expected unconf = 0 for 2 outputs, got %d", unconf)
+	if bal.Immature != 0 {
+		t.Fatalf("expected unconf = 0 for 2 outputs, got %d", bal.Immature)
 	}
 
 	// Zero value
