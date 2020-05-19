@@ -533,12 +533,44 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 		// If first connecting the wallet, try to get the balance. Ignore errors
 		// here with the assumption that some wallets may not reveal balance until
 		// unlocked.
-		balance, _, err := wallet.Balance(0)
-		if err == nil {
-			wallet.setBalance(balance)
+		_, err = c.walletBalances(wallet)
+		if err != nil {
+			return nil, fmt.Errorf("error getting balances for %s: %v", unbip(assetID), err)
 		}
 	}
 	return wallet, nil
+}
+
+// walletBalances retrieves balances for the wallet.
+func (c *Core) walletBalances(wallet *xcWallet) (*BalanceSet, error) {
+	c.connMtx.RLock()
+	defer c.connMtx.RUnlock()
+	// Add a zero-conf entry.
+	confs := make([]uint32, 1)
+	var addrs []string
+	for _, dc := range c.conns {
+		assetCfg, found := dc.assets[wallet.AssetID]
+		if !found {
+			continue
+		}
+		addrs = append(addrs, dc.acct.url)
+		confs = append(confs, assetCfg.FundConf)
+	}
+	bals, err := wallet.Balance(confs)
+	if err != nil {
+		return nil, err
+	}
+	zeroConfBal := bals[0]
+	balMap := make(map[string]*asset.Balance, len(addrs))
+	for i, bal := range bals[1:] {
+		balMap[addrs[i]] = bal
+	}
+	coreBals := &BalanceSet{
+		ZeroConf: zeroConfBal,
+		XC:       balMap,
+	}
+	wallet.setBalance(coreBals)
+	return coreBals, nil
 }
 
 // Wallets creates a slice of WalletState for all known wallets.
@@ -674,12 +706,11 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return initErr("%s wallet authentication error: %v", symbol, err)
 	}
 
-	var lockedAmt uint64
-	dbWallet.Balance, lockedAmt, err = wallet.Balance(0)
+	balances, err := c.walletBalances(wallet)
 	if err != nil {
-		return initErr("error getting balance for %s: %v", symbol, err)
+		return fmt.Errorf("error getting balances for %s: %v", unbip(assetID), err)
 	}
-	wallet.setBalance(dbWallet.Balance)
+	wallet.setBalance(balances)
 
 	dbWallet.Address, err = wallet.Address()
 	if err != nil {
@@ -695,7 +726,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	log.Infof("Created %s wallet. Account %q balance available = %d / "+
 		"locked = %d, Deposit address = %s",
-		symbol, form.Account, dbWallet.Balance, lockedAmt, dbWallet.Address)
+		symbol, form.Account, dbWallet.Balance, balances.ZeroConf.Locked, dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -710,9 +741,11 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
-		Account:   dbWallet.Account,
-		AssetID:   dbWallet.AssetID,
-		balance:   dbWallet.Balance,
+		Account: dbWallet.Account,
+		AssetID: dbWallet.AssetID,
+		balances: &BalanceSet{
+			ZeroConf: dbWallet.Balance,
+		},
 		balUpdate: dbWallet.BalUpdate,
 		encPW:     dbWallet.EncryptedPW,
 		address:   dbWallet.Address,
@@ -762,10 +795,13 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	}
 
 	state := wallet.state()
-	avail, locked, _ := wallet.Balance(0) // the wallet just unlocked successfully
+	balances, err := c.walletBalances(wallet)
+	if err != nil {
+		return err
+	}
 	log.Infof("Connected to and unlocked %s wallet. Account %q balance available "+
 		"= %d / locked = %d, Deposit address = %s",
-		state.Symbol, wallet.Account, avail, locked, state.Address)
+		state.Symbol, wallet.Account, balances.ZeroConf.Available, balances.ZeroConf.Locked, state.Address)
 
 	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
@@ -1675,13 +1711,13 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	return nil
 }
 
-// Balance retrieves the current wallet balance.
-func (c *Core) Balance(assetID uint32) (uint64, error) {
+// AssetBalances retrieves the current wallet balance.
+func (c *Core) AssetBalances(assetID uint32) (*BalanceSet, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return 0, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
+		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
 	}
-	return wallet.balance, nil
+	return wallet.balances, nil
 }
 
 // initialize pulls the known DEX URLs from the database and attempts to

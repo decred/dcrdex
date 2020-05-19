@@ -420,6 +420,7 @@ type TXCWallet struct {
 	connectErr     error
 	unlockErr      error
 	balErr         error
+	bals           []*asset.Balance
 	fundingCoins   asset.Coins
 	fundingCoinErr error
 	lockErr        error
@@ -446,8 +447,18 @@ func (w *TXCWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
-func (w *TXCWallet) Balance(confs uint32) (available, locked uint64, err error) {
-	return 0, 0, w.balErr
+func (w *TXCWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
+	if w.balErr != nil {
+		return nil, w.balErr
+	}
+	if w.bals != nil {
+		return w.bals, nil
+	}
+	bals := make([]*asset.Balance, 0, len(confs))
+	for i := 0; i < len(confs); i++ {
+		bals = append(bals, new(asset.Balance))
+	}
+	return bals, nil
 }
 
 func (w *TXCWallet) Fund(v uint64, _ *dex.Asset) (asset.Coins, error) {
@@ -2839,4 +2850,31 @@ func TestAddrHost(t *testing.T) {
 			t.Fatalf("wanted %s but got %s for test '%s'", test.want, res, test.name)
 		}
 	}
+}
+
+func TestAssetBalances(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	wallet, tWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = wallet
+	bals := []*asset.Balance{
+		{
+			Available: 1e8,
+			Immature:  0,
+			Locked:    2e8,
+		},
+		{
+			Available: 4e7,
+			Immature:  6e7,
+			Locked:    2e8,
+		},
+	}
+	tWallet.bals = bals
+	balances, err := tCore.AssetBalances(tDCR.ID)
+	if err != nil {
+		t.Fatalf("error retreiving asset balance: %v", err)
+	}
+	dbtest.MustCompareBalances(t, bals[0], balances.ZeroConf)
+	dbtest.MustCompareBalances(t, bals[1], balances.XC[tDexUrl])
 }
