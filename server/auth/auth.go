@@ -265,11 +265,8 @@ func (auth *AuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 
 // Sign signs the msgjson.Signables with the DEX private key.
 func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
-	for i, signable := range signables {
-		sigMsg, err := signable.Serialize()
-		if err != nil {
-			return fmt.Errorf("signature message for signable index %d: %v", i, err)
-		}
+	for _, signable := range signables {
+		sigMsg := signable.Serialize()
 		sig, err := auth.signer.Sign(sigMsg)
 		if err != nil {
 			return fmt.Errorf("signature error: %v", err)
@@ -412,13 +409,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		}
 	}
 	// Authorize the account.
-	sigMsg, err := connect.Serialize()
-	if err != nil {
-		return &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "serialization error",
-		}
-	}
+	sigMsg := connect.Serialize()
 	err = checkSigS256(sigMsg, connect.SigBytes(), acctInfo.PubKey)
 	if err != nil {
 		return &msgjson.Error{

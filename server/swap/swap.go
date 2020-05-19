@@ -938,14 +938,8 @@ func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation
 // data. nil is returned for successful signature verification.
 func (s *Swapper) authUser(user account.AccountID, params msgjson.Signable) *msgjson.Error {
 	// Authorize the user.
-	msg, err := params.Serialize()
-	if err != nil {
-		return &msgjson.Error{
-			Code:    msgjson.SerializationError,
-			Message: fmt.Sprintf("unable to serialize init params: %v", err),
-		}
-	}
-	err = s.authMgr.Auth(user, msg, params.SigBytes())
+	msg := params.Serialize()
+	err := s.authMgr.Auth(user, msg, params.SigBytes())
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.SignatureError,
@@ -983,12 +977,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// Note: ack.MatchID unused, but could be checked against acker.match.ID().
 
 	// Check the signature.
-	sigMsg, err := acker.params.Serialize()
-	if err != nil {
-		s.respondError(msg.ID, acker.user, msgjson.SerializationError,
-			fmt.Sprintf("unable to serialize match params: %v", err))
-		return
-	}
+	sigMsg := acker.params.Serialize()
 	err = s.authMgr.Auth(acker.user, sigMsg, ack.Sig)
 	if err != nil {
 		s.respondError(msg.ID, acker.user, msgjson.SignatureError,
@@ -1622,12 +1611,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 				fmt.Sprintf("unexpected match ID at acknowledgment index %d", i))
 			return
 		}
-		sigMsg, err := matchInfo.params.Serialize()
-		if err != nil {
-			s.respondError(msg.ID, user, msgjson.SerializationError,
-				fmt.Sprintf("unable to serialize match params: %v", err))
-			return
-		}
+		sigMsg := matchInfo.params.Serialize()
 		err = s.authMgr.Auth(user, sigMsg, ack.Sig)
 		if err != nil {
 			log.Warnf("processMatchAcks: 'match' ack for match %v from user %v, "+

@@ -144,7 +144,7 @@ type Bytes = dex.Bytes
 
 // Signable allows for serialization and signing.
 type Signable interface {
-	Serialize() ([]byte, error)
+	Serialize() []byte
 	SetSig([]byte)
 	SigBytes() []byte
 }
@@ -379,7 +379,7 @@ type Match struct {
 var _ Stampable = (*Match)(nil)
 
 // Serialize serializes the Match data.
-func (m *Match) Serialize() ([]byte, error) {
+func (m *Match) Serialize() []byte {
 	// Match serialization is orderid (32) + matchid (32) + quantity (8) + rate (8)
 	// + server time (8) + address (variable, guess 35). Sum = 123
 	s := make([]byte, 0, 123)
@@ -388,8 +388,7 @@ func (m *Match) Serialize() ([]byte, error) {
 	s = append(s, uint64Bytes(m.Quantity)...)
 	s = append(s, uint64Bytes(m.Rate)...)
 	s = append(s, uint64Bytes(m.ServerTime)...)
-	s = append(s, []byte(m.Address)...)
-	return s, nil
+	return append(s, []byte(m.Address)...)
 }
 
 // Stamp sets the server timestamp and epoch ID. Partially satisfies the
@@ -411,7 +410,7 @@ type Init struct {
 var _ Signable = (*Init)(nil)
 
 // Serialize serializes the Init data.
-func (init *Init) Serialize() ([]byte, error) {
+func (init *Init) Serialize() []byte {
 	// Init serialization is orderid (32) + matchid (32) + txid (probably 32) +
 	// vout (4) + contract (97 ish). Sum = 197
 	s := make([]byte, 0, 197)
@@ -419,8 +418,7 @@ func (init *Init) Serialize() ([]byte, error) {
 	s = append(s, init.MatchID...)
 	s = append(s, init.CoinID...)
 	//s = append(s, uint64Bytes(init.Time)...)
-	s = append(s, init.Contract...)
-	return s, nil
+	return append(s, init.Contract...)
 }
 
 // Audit is the payload for a DEX-originating AuditRoute request.
@@ -436,7 +434,7 @@ type Audit struct {
 var _ Signable = (*Audit)(nil)
 
 // Serialize serializes the Audit data.
-func (audit *Audit) Serialize() ([]byte, error) {
+func (audit *Audit) Serialize() []byte {
 	// Audit serialization is orderid (32) + matchid (32) + time (8) +
 	// coin ID (36) + contract (97 ish) = 205
 	s := make([]byte, 0, 205)
@@ -444,8 +442,7 @@ func (audit *Audit) Serialize() ([]byte, error) {
 	s = append(s, audit.MatchID...)
 	s = append(s, uint64Bytes(audit.Time)...)
 	s = append(s, audit.CoinID...)
-	s = append(s, audit.Contract...)
-	return s, nil
+	return append(s, audit.Contract...)
 }
 
 // RevokeMatch are the params for a DEX-originating RevokeMatchRoute request.
@@ -458,12 +455,11 @@ type RevokeMatch struct {
 var _ Signable = (*RevokeMatch)(nil)
 
 // Serialize serializes the RevokeMatchParams data.
-func (rev *RevokeMatch) Serialize() ([]byte, error) {
+func (rev *RevokeMatch) Serialize() []byte {
 	// RevokeMatch serialization is order id (32) + match id (32) = 64 bytes
 	s := make([]byte, 0, 64)
 	s = append(s, rev.OrderID...)
-	s = append(s, rev.MatchID...)
-	return s, nil
+	return append(s, rev.MatchID...)
 }
 
 // Redeem are the params for a client-originating RedeemRoute request.
@@ -479,7 +475,7 @@ type Redeem struct {
 var _ Signable = (*Redeem)(nil)
 
 // Serialize serializes the Redeem data.
-func (redeem *Redeem) Serialize() ([]byte, error) {
+func (redeem *Redeem) Serialize() []byte {
 	// Redeem serialization is orderid (32) + matchid (32) + coin ID (36) + secret
 	// (32) = 132
 	s := make([]byte, 0, 100)
@@ -487,7 +483,7 @@ func (redeem *Redeem) Serialize() ([]byte, error) {
 	s = append(s, redeem.MatchID...)
 	s = append(s, redeem.CoinID...)
 	//s = append(s, uint64Bytes(redeem.Time)...)
-	return append(s, redeem.Secret...), nil
+	return append(s, redeem.Secret...)
 }
 
 // Redemption is the payload for a DEX-originating RedemptionRoute request.
@@ -497,10 +493,10 @@ type Redemption struct {
 }
 
 // Serialize serializes the Redemption data.
-func (r *Redemption) Serialize() ([]byte, error) {
+func (r *Redemption) Serialize() []byte {
 	// Redemption serialization is Redeem (100) + timestamp (8) = 108
-	s, _ := r.Redeem.Serialize()
-	return append(s, uint64Bytes(r.Time)...), nil
+	s := r.Redeem.Serialize()
+	return append(s, uint64Bytes(r.Time)...)
 }
 
 const (
@@ -590,7 +586,7 @@ type LimitOrder struct {
 }
 
 // Serialize serializes the Limit data.
-func (l *LimitOrder) Serialize() ([]byte, error) {
+func (l *LimitOrder) Serialize() []byte {
 	// serialization: prefix (89) + trade (variable) + rate (8)
 	// + time-in-force (1) + address (~35) = 133 + len(trade)
 	trade := l.Trade.Serialize()
@@ -599,7 +595,7 @@ func (l *LimitOrder) Serialize() ([]byte, error) {
 	b = append(b, trade...)
 	b = append(b, uint64Bytes(l.Rate)...)
 	b = append(b, l.TiF)
-	return append(b, []byte(l.Trade.Address)...), nil
+	return append(b, []byte(l.Trade.Address)...)
 }
 
 // MarketOrder is the payload for the MarketRoute, which places a market order.
@@ -609,10 +605,10 @@ type MarketOrder struct {
 }
 
 // Serialize serializes the MarketOrder data.
-func (m *MarketOrder) Serialize() ([]byte, error) {
+func (m *MarketOrder) Serialize() []byte {
 	// serialization: prefix (89) + trade (varies) + address (35 ish)
 	b := append(m.Prefix.Serialize(), m.Trade.Serialize()...)
-	return append(b, []byte(m.Trade.Address)...), nil
+	return append(b, []byte(m.Trade.Address)...)
 }
 
 // CancelOrder is the payload for the CancelRoute, which places a cancel order.
@@ -622,9 +618,9 @@ type CancelOrder struct {
 }
 
 // Serialize serializes the CancelOrder data.
-func (c *CancelOrder) Serialize() ([]byte, error) {
+func (c *CancelOrder) Serialize() []byte {
 	// serialization: prefix (89) + target id (32) = 121
-	return append(c.Prefix.Serialize(), c.TargetID...), nil
+	return append(c.Prefix.Serialize(), c.TargetID...)
 }
 
 // OrderResult is returned from the order-placing routes.
@@ -755,13 +751,12 @@ type Connect struct {
 }
 
 // Serialize serializes the Connect data.
-func (c *Connect) Serialize() ([]byte, error) {
+func (c *Connect) Serialize() []byte {
 	// serialization: account ID (32) + api version (2) + timestamp (8) = 42 bytes
 	s := make([]byte, 0, 42)
 	s = append(s, c.AccountID...)
 	s = append(s, uint16Bytes(c.APIVersion)...)
-	s = append(s, uint64Bytes(c.Time)...)
-	return s, nil
+	return append(s, uint64Bytes(c.Time)...)
 }
 
 // ConnectResult is the result result for the ConnectRoute request.
@@ -777,12 +772,11 @@ type Register struct {
 }
 
 // Serialize serializes the Register data.
-func (r *Register) Serialize() ([]byte, error) {
+func (r *Register) Serialize() []byte {
 	// serialization: pubkey (33) + time (8) = 41
 	s := make([]byte, 0, 41)
 	s = append(s, r.PubKey...)
-	s = append(s, uint64Bytes(r.Time)...)
-	return s, nil
+	return append(s, uint64Bytes(r.Time)...)
 }
 
 // RegisterResult is the result for the response to Register.
@@ -796,7 +790,7 @@ type RegisterResult struct {
 }
 
 // Serialize serializes the RegisterResult data.
-func (r *RegisterResult) Serialize() ([]byte, error) {
+func (r *RegisterResult) Serialize() []byte {
 	// serialization: pubkey (33) + client pubkey (33) + time (8) + fee (8) +
 	// address (35-ish) = 117
 	b := make([]byte, 0, 117)
@@ -804,8 +798,7 @@ func (r *RegisterResult) Serialize() ([]byte, error) {
 	b = append(b, r.ClientPubKey...)
 	b = append(b, uint64Bytes(r.Time)...)
 	b = append(b, uint64Bytes(r.Fee)...)
-	b = append(b, []byte(r.Address)...)
-	return b, nil
+	return append(b, []byte(r.Address)...)
 }
 
 // NotifyFee is the payload for a client-originating NotifyFeeRoute request.
@@ -817,14 +810,13 @@ type NotifyFee struct {
 }
 
 // Serialize serializes the NotifyFee data.
-func (n *NotifyFee) Serialize() ([]byte, error) {
+func (n *NotifyFee) Serialize() []byte {
 	// serialization: account id (32) + coinID (variable, ~32+2) + vout (4) +
 	// time (8) = 78
 	b := make([]byte, 0, 68)
 	b = append(b, n.AccountID...)
 	b = append(b, n.CoinID...)
-	b = append(b, uint64Bytes(n.Time)...)
-	return b, nil
+	return append(b, uint64Bytes(n.Time)...)
 }
 
 // Stamp satisfies the Stampable interface.
