@@ -356,7 +356,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 
 // Balance should return the total available funds in the wallet. Balance takes
 // a list of minimum confirmations for which to calculate maturity, and returns
-// a list of corresponding *assetBalance. Because of the DEX confirmation
+// a list of corresponding *asset.Balance. Because of the DEX confirmation
 // requirements, a simple getbalance with a minconf argument is not sufficient
 // to see all balance available for the exchanges. Instead, all wallet UTXOs are
 // scanned for those that match confirmation requirements. Part of the
