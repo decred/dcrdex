@@ -2696,15 +2696,18 @@ func TestLogout(t *testing.T) {
 	rig.dc.trades[ord.ID()] = tracker
 
 	dc, _, _ := testDexConnection()
-	tCore.user = new(User)
-	tCore.user.Assets = make(map[uint32]*SupportedAsset, len(dc.assets))
-	for assetsID := range dc.assets {
-		tCore.user.Assets[assetsID] = &SupportedAsset{
-			ID: assetsID,
+	initUserAssets := func() {
+		tCore.user = new(User)
+		tCore.user.Assets = make(map[uint32]*SupportedAsset, len(dc.assets))
+		for assetsID := range dc.assets {
+			tCore.user.Assets[assetsID] = &SupportedAsset{
+				ID: assetsID,
+			}
 		}
 	}
 
 	ensureErr := func(tag string) {
+		initUserAssets()
 		err := tCore.Logout()
 		if err == nil {
 			t.Fatalf("%s: no error", tag)

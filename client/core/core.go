@@ -951,6 +951,7 @@ func (c *Core) Login(pw []byte) ([]*db.Notification, error) {
 // Logout logs the user out
 func (c *Core) Logout() error {
 	c.connMtx.Lock()
+	defer c.refreshUser()
 	defer c.connMtx.Unlock()
 
 	// Check active orders and lock wallets
@@ -974,7 +975,6 @@ func (c *Core) Logout() error {
 		dc.acct.lock()
 	}
 
-	c.refreshUser()
 	return nil
 }
 
