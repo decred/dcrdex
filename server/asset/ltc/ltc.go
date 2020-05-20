@@ -19,6 +19,7 @@ var (
 		ScriptHashAddrID: 0x32,
 		Bech32HRPSegwit:  "ltc",
 		CoinbaseMaturity: 100,
+		Net:              0xd9b4bef9,
 	}
 	// TestNet4Params are the clone parameters for testnet.
 	TestNet4Params = &dexbtc.CloneParams{
@@ -26,6 +27,7 @@ var (
 		ScriptHashAddrID: 0x3a,
 		Bech32HRPSegwit:  "tltc",
 		CoinbaseMaturity: 100,
+		Net:              0xf1c8d2fd,
 	}
 	// RegressionNetParams are the clone parameters for simnet.
 	RegressionNetParams = &dexbtc.CloneParams{
@@ -33,6 +35,7 @@ var (
 		ScriptHashAddrID: 0x3a,
 		Bech32HRPSegwit:  "rltc",
 		CoinbaseMaturity: 100,
+		Net:              0x12141c16,
 	}
 )
 
@@ -72,12 +75,6 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 
-	// Convert the ltcd params to btcd params.
-	btcParams, err := dexbtc.ReadCloneParams(params)
-	if err != nil {
-		return nil, fmt.Errorf("error converting parameters: %v", err)
-	}
-
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
 	ports := dexbtc.NetPorts{
@@ -90,5 +87,5 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		configPath = dexbtc.SystemConfigPath("litecoin")
 	}
 
-	return btc.NewBTCClone(assetName, configPath, logger, network, btcParams, ports)
+	return btc.NewBTCClone(assetName, configPath, logger, network, dexbtc.ReadCloneParams(params), ports)
 }

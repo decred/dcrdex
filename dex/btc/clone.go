@@ -4,26 +4,19 @@
 package btc
 
 import (
-	"encoding/json"
-	"fmt"
-
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
 )
 
-// ReadCloneParams translates a network parameters struct. This entire module
-// may be usable by a BTC clone if certain conditions are met. Many BTC clones
-// have btcd forks with their own Go config files. See also CloneParams.
-func ReadCloneParams(cloneParams interface{}) (*chaincfg.Params, error) {
-	p := new(chaincfg.Params)
-	cloneJSON, err := json.Marshal(cloneParams)
-	if err != nil {
-		return nil, fmt.Errorf("error marshaling network params: %v", err)
+// ReadCloneParams translates a CloneParams into a btcsuite chaincfg.Params.
+func ReadCloneParams(cloneParams *CloneParams) *chaincfg.Params {
+	return &chaincfg.Params{
+		PubKeyHashAddrID: cloneParams.PubKeyHashAddrID,
+		ScriptHashAddrID: cloneParams.ScriptHashAddrID,
+		Bech32HRPSegwit:  cloneParams.Bech32HRPSegwit,
+		CoinbaseMaturity: cloneParams.CoinbaseMaturity,
+		Net:              wire.BitcoinNet(cloneParams.Net),
 	}
-	err = json.Unmarshal(cloneJSON, &p)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling network params: %v", err)
-	}
-	return p, nil
 }
 
 // CloneParams are the parameters needed by BTC-clone-based Backend and
@@ -41,4 +34,6 @@ type CloneParams struct {
 	// CoinbaseMaturity: The number of confirmations before a transaction
 	// spending a coinbase input can be spent.
 	CoinbaseMaturity uint16
+	// Net is the network identifier, e.g. wire.BitoinNet.
+	Net uint32
 }
