@@ -43,7 +43,7 @@ const (
 	mkt2BaseRate  = 8e9
 	mktName3      = "dcr_btc"
 	mkt3BaseRate  = 3e9
-	responseDelay = 10 // milliseconds
+	responseDelay = 20 // milliseconds
 
 	clientPreimageDelay = 75 * time.Millisecond
 )
