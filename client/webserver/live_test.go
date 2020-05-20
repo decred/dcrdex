@@ -51,33 +51,61 @@ func randomMagnitude(low, high int) float64 {
 	return mantissa * math.Pow10(exponent)
 }
 
+func userOrders() (ords []*core.Order) {
+	orderCount := rand.Intn(5)
+	for i := 0; i < orderCount; i++ {
+		qty := uint64(randomMagnitude(7, 11))
+		filled := uint64(rand.Float64() * float64(qty))
+		orderType := order.OrderType(rand.Intn(2) + 1)
+		status := order.OrderStatusEpoch
+		epoch := encode.UnixMilliU(time.Now()) / uint64(epochDuration.Milliseconds())
+		isLimit := orderType == order.LimitOrderType
+		if rand.Float32() > 0.5 {
+			epoch -= 1
+			if isLimit {
+				status = order.OrderStatusBooked
+			} else {
+				status = order.OrderStatusExecuted
+			}
+		}
+		var tif order.TimeInForce
+		if isLimit && rand.Float32() > 0.66 {
+			tif = order.StandingTiF
+		}
+		ords = append(ords, &core.Order{
+			ID:     ordertest.RandomOrderID().String(),
+			Type:   orderType,
+			Stamp:  encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*600_000),
+			Status: status,
+			Epoch:  epoch,
+			Rate:   uint64(randomMagnitude(-2, 4)),
+			Qty:    qty,
+			Sell:   rand.Intn(2) > 0,
+			Filled: filled,
+			Matches: []*core.Match{
+				{
+					Qty:    uint64(rand.Float64() * float64(filled)),
+					Status: order.MatchComplete,
+				},
+			},
+			TimeInForce: tif,
+		})
+	}
+	return
+}
+
 func mkMrkt(base, quote string) *core.Market {
 	baseID, _ := dex.BipSymbolID(base)
 	quoteID, _ := dex.BipSymbolID(quote)
-	market := &core.Market{
+	return &core.Market{
 		Name:            fmt.Sprintf("%s-%s", base, quote),
 		BaseID:          baseID,
 		BaseSymbol:      base,
 		QuoteID:         quoteID,
 		QuoteSymbol:     quote,
 		MarketBuyBuffer: rand.Float64() + 1,
+		EpochLen:        uint64(epochDuration.Milliseconds()),
 	}
-	orderCount := rand.Intn(5)
-	qty := uint64(randomMagnitude(7, 11))
-	for i := 0; i < orderCount; i++ {
-		market.Orders = append(market.Orders, &core.Order{
-			ID:      ordertest.RandomOrderID().String(),
-			Type:    order.OrderType(rand.Intn(2) + 1),
-			Stamp:   encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*86_400_000),
-			Rate:    uint64(randomMagnitude(-2, 4)),
-			Qty:     qty,
-			Sell:    rand.Intn(2) > 0,
-			Filled:  uint64(rand.Float64() * float64(qty)),
-			Matches: nil,
-		})
-	}
-
-	return market
 }
 
 func mkSupportedAsset(symbol string, state *tWalletState, bal uint64) *core.SupportedAsset {
@@ -218,19 +246,21 @@ type tWalletState struct {
 }
 
 type TCore struct {
-	reg      *core.RegisterForm
-	inited   bool
-	mtx      sync.RWMutex
-	wallets  map[uint32]*tWalletState
-	balances map[uint32]uint64
-	midGap   float64
-	maxQty   float64
-	feed     *core.BookFeed
-	killFeed context.CancelFunc
-	buys     map[string]*core.MiniOrder
-	sells    map[string]*core.MiniOrder
-	noteFeed chan core.Notification
-	orderMtx sync.Mutex
+	reg         *core.RegisterForm
+	inited      bool
+	mtx         sync.RWMutex
+	wallets     map[uint32]*tWalletState
+	balances    map[uint32]uint64
+	dexAddr     string
+	marketID    string
+	midGap      float64
+	maxQty      float64
+	feed        *core.BookFeed
+	killFeed    context.CancelFunc
+	buys        map[string]*core.MiniOrder
+	sells       map[string]*core.MiniOrder
+	noteFeed    chan core.Notification
+	orderMtx    sync.Mutex
 	epochOrders []*core.BookUpdate
 }
 
@@ -275,9 +305,14 @@ func (c *TCore) Register(r *core.RegisterForm) error {
 func (c *TCore) Login([]byte) ([]*db.Notification, error) { return nil, nil }
 func (c *TCore) Logout() error                            { return nil }
 
-func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
+func (c *TCore) Sync(dexAddr string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	c.midGap = randomMagnitude(-2, 4)
 	c.maxQty = randomMagnitude(-2, 4)
+	mktID, _ := dex.MarketName(base, quote)
+	c.mtx.Lock()
+	c.dexAddr = dexAddr
+	c.marketID = mktID
+	c.mtx.Unlock()
 
 	if c.feed != nil {
 		c.killFeed()
@@ -297,7 +332,6 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 				switch {
 				case r < 0.80:
 					// Book order
-
 					sell := rand.Float32() < 0.5
 					ord := randomOrder(sell, c.maxQty, c.midGap, 0.05*c.midGap, true)
 					c.orderMtx.Lock()
@@ -307,7 +341,9 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 					}
 					side[ord.Token] = ord
 					epochOrder := &core.BookUpdate{
-						Action: msgjson.EpochOrderRoute,
+						Action:   msgjson.EpochOrderRoute,
+						DEX:      c.dexAddr,
+						MarketID: mktID,
 						Payload:  ord,
 					}
 					c.trySend(epochOrder)
@@ -333,7 +369,9 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 					c.orderMtx.Unlock()
 
 					c.trySend(&core.BookUpdate{
-						Action: msgjson.UnbookOrderRoute,
+						Action:   msgjson.UnbookOrderRoute,
+						DEX:      c.dexAddr,
+						MarketID: mktID,
 						Payload:  &core.MiniOrder{Token: tkn},
 					})
 				}
@@ -527,10 +565,14 @@ func (c *TCore) Wallets() []*core.WalletState {
 }
 
 func (c *TCore) User() *core.User {
-	// unregistered user should not have exchanges
 	exchanges := map[string]*core.Exchange{}
 	if c.reg != nil {
 		exchanges = tExchanges
+	}
+	for _, xc := range tExchanges {
+		for _, mkt := range xc.Markets {
+			mkt.Orders = userOrders()
+		}
 	}
 	user := &core.User{
 		Exchanges:   exchanges,
@@ -596,7 +638,13 @@ out:
 		select {
 		case <-epochTick:
 			epochTick = time.NewTimer(epochDuration - time.Since(time.Now().Truncate(epochDuration))).C
+			c.mtx.RLock()
+			dexAddr := c.dexAddr
+			mktID := c.marketID
+			c.mtx.RUnlock()
 			c.noteFeed <- &core.EpochNotification{
+				DEX:          dexAddr,
+				MarketID:     mktID,
 				Notification: db.NewNotification("epoch", "", "", db.Data),
 				Epoch:        getEpoch(),
 			}
@@ -604,11 +652,11 @@ out:
 			// Send limit orders as newly booked.
 			for _, o := range c.epochOrders {
 				miniOrder := o.Payload.(*core.MiniOrder)
-				if (miniOrder.Rate > 0) {
+				if miniOrder.Rate > 0 {
 					miniOrder.Epoch = 0
 					o.Action = msgjson.BookOrderRoute
 					c.trySend(o)
-					if (miniOrder.Sell) {
+					if miniOrder.Sell {
 						c.sells[miniOrder.Token] = miniOrder
 					} else {
 						c.buys[miniOrder.Token] = miniOrder
