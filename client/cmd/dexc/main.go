@@ -64,6 +64,7 @@ func main() {
 	}
 	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
 	core.UseLoggerMaker(logMaker)
+	log = logMaker.Logger("DEXC")
 
 	clientCore, err := core.New(&core.Config{
 		DBPath: cfg.DBPath, // global set in config.go

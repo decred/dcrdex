@@ -102,6 +102,7 @@ export default class Application {
         this.walletMap[assetID] = asset.wallet
       }
     }
+    this.updateMenuItemsDisplay()
     return user
   }
 
@@ -145,7 +146,7 @@ export default class Application {
     this.pokeNote = idel(document.body, 'pokeNote')
     const pg = this.page = Doc.parsePage(this.header, [
       'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
-      'walletsMenuEntry', 'noteMenuEntry', 'settingsIcon', 'loginLink', 'loader'
+      'marketsMenuEntry', 'walletsMenuEntry', 'noteMenuEntry', 'loader'
     ])
     pg.noteIndicator.style.display = 'none'
     delete pg.noteTemplate.id
@@ -198,18 +199,26 @@ export default class Application {
   }
 
   /*
-   * setLogged should be called when the user has signed in or out. For logging
-   * out, it may be better to trigger a hard reload.
+   * updateMenuItemsDisplay should be called when the user has signed in or out,
+   * and when the user registers a DEX.
    */
-  setLogged (logged) {
+  updateMenuItemsDisplay () {
     const pg = this.page
-    if (logged) {
-      Doc.show(pg.noteMenuEntry, pg.settingsIcon, pg.walletsMenuEntry)
-      Doc.hide(pg.loginLink)
+    if (!pg) {
+      // initial page load, header elements not yet attached but menu items
+      // would already be hidden/displayed as appropriate.
       return
     }
-    Doc.hide(pg.noteMenuEntry, pg.settingsIcon)
-    Doc.show(pg.loginLink)
+    if (!this.user.authed) {
+      Doc.hide(pg.noteMenuEntry, pg.walletsMenuEntry, pg.marketsMenuEntry)
+      return
+    }
+    Doc.show(pg.noteMenuEntry, pg.walletsMenuEntry)
+    if (Object.keys(this.user.exchanges).length > 0) {
+      Doc.show(pg.marketsMenuEntry)
+    } else {
+      Doc.hide(pg.marketsMenuEntry)
+    }
   }
 
   /* attachCommon scans the provided node and handles some common bindings. */

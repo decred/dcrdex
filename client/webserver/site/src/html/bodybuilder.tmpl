@@ -1,9 +1,27 @@
+{{define "top"}}
+<!DOCTYPE html>
+<html lang="en">
+<head data-turbolinks-eval="false">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- The above 2 meta tags *must* come first in the head; any other head content must come *after* these tags -->
+  <link rel="icon" href="/img/favicon.png?v=yHh3NF">
+  <meta name="description" content="Decred DEX Client Web Portal">
+  <title>{{.Title}}</title>
+  <link href="/css/style.css?v=1" rel="stylesheet">
+</head>
+<body {{if .UserInfo.DarkMode}} class="dark"{{end}}>
+  <div class="poke-note px-2 fs14 d-flex align-items-center" id="pokeNote"><span>Here is a poke note.</span></div>
+  {{template "header" .}}
+{{end}}
+
 {{define "header"}}
 <header id=header class="maintop">
   {{$authed := .UserInfo.Authed}}
+  {{$marketsReady := and $authed (gt (len .UserInfo.Exchanges) 0)}}
   <div data-pagelink="" class="logo"></div>
   <div class="mainlinks fs18 offwhite">
-    <span data-pagelink="markets" class="demi hoverbright">Markets</span>
+    <span data-pagelink="markets" class="demi hoverbright{{if not $marketsReady}} d-hide{{end}}" id="marketsMenuEntry">Markets</span>
     <span data-pagelink="wallets" class="demi hoverbright{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">Wallets</span>
     <span class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="noteMenuEntry">
       <div class="note-indicator" id="noteIndicator"></div>
@@ -25,30 +43,12 @@
       </div>
       <span class="ico-bell fs20 hoverbright" id="noteBell"></span>
     </span>
-    <span class="ico-settings hoverbright fs24{{if not $authed}} d-hide{{end}}" data-pagelink="settings" id="settingsIcon"></span>
-    <span data-pagelink="login" class="hoverbright{{if $authed}} d-hide{{end}}" id="loginLink">Sign In</span>
+    <span class="ico-settings hoverbright fs24" data-pagelink="settings"></span>
   </div>
   <div id="loader" class="fill-abs flex-center d-hide">
     <div class="ico-spinner spinner"></div>
   </div>
 </header>
-{{end}}
-
-{{define "top"}}
-<!DOCTYPE html>
-<html lang="en">
-<head data-turbolinks-eval="false">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <!-- The above 2 meta tags *must* come first in the head; any other head content must come *after* these tags -->
-  <link rel="icon" href="/img/favicon.png?v=yHh3NF">
-  <meta name="description" content="Decred DEX Client Web Portal">
-  <title>{{.Title}}</title>
-  <link href="/css/style.css?v=1" rel="stylesheet">
-</head>
-<body {{if .UserInfo.DarkMode}} class="dark"{{end}}>
-<div class="poke-note px-2 fs14 d-flex align-items-center" id="pokeNote"><span>Here is a poke note.</span></div>
-{{template "header" .}}
 {{end}}
 
 {{define "bottom"}}

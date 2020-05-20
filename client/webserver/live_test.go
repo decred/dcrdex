@@ -526,8 +526,13 @@ func (c *TCore) Wallets() []*core.WalletState {
 }
 
 func (c *TCore) User() *core.User {
+	// unregistered user should not have exchanges
+	exchanges := map[string]*core.Exchange{}
+	if c.reg != nil {
+		exchanges = tExchanges
+	}
 	user := &core.User{
-		Exchanges:   tExchanges,
+		Exchanges:   exchanges,
 		Initialized: c.inited,
 		Assets:      c.SupportedAssets(),
 	}
