@@ -5,7 +5,7 @@ import LoginPage from './login'
 import WalletsPage from './wallets'
 import SettingsPage from './settings'
 import MarketsPage, { marketID } from './markets'
-import { getJSON } from './http'
+import { getJSON, postJSON } from './http'
 
 import * as ntfn from './notifications'
 import ws from './ws'
@@ -146,7 +146,8 @@ export default class Application {
     this.pokeNote = idel(document.body, 'pokeNote')
     const pg = this.page = Doc.parsePage(this.header, [
       'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
-      'marketsMenuEntry', 'walletsMenuEntry', 'noteMenuEntry', 'loader'
+      'marketsMenuEntry', 'walletsMenuEntry', 'noteMenuEntry', 'loader',
+      'profileMenuEntry', 'profileIndicator', 'profileBox', 'profileSignout'
     ])
     pg.noteIndicator.style.display = 'none'
     delete pg.noteTemplate.id
@@ -154,15 +155,17 @@ export default class Application {
     pg.loader.remove()
     pg.loader.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
     Doc.show(pg.loader)
-    var hide
-    hide = e => {
-      if (!Doc.mouseInElement(e, pg.noteBox)) {
-        pg.noteBox.style.display = 'none'
-        unbind(document, hide)
+    var hide = (el, e, f) => {
+      if (!Doc.mouseInElement(e, el)) {
+        el.style.display = 'none'
+        unbind(document, f)
       }
     }
+    const hideNotes = e => { hide(pg.noteBox, e, hideNotes) }
+    const hideProfile = e => { hide(pg.profileBox, e, hideProfile) }
+
     bind(pg.noteMenuEntry, 'click', async e => {
-      bind(document, 'click', hide)
+      bind(document, 'click', hideNotes)
       pg.noteBox.style.display = 'block'
       pg.noteIndicator.style.display = 'none'
       const acks = []
@@ -179,6 +182,11 @@ export default class Application {
     if (this.notes.length === 0) {
       pg.noteList.textContent = 'no notifications'
     }
+    bind(pg.profileMenuEntry, 'click', async e => {
+      bind(document, 'click', hideProfile)
+      pg.profileBox.style.display = 'block'
+    })
+    bind(pg.profileSignout, 'click', async e => await this.signOut())
   }
 
   /*
@@ -210,10 +218,10 @@ export default class Application {
       return
     }
     if (!this.user.authed) {
-      Doc.hide(pg.noteMenuEntry, pg.walletsMenuEntry, pg.marketsMenuEntry)
+      Doc.hide(pg.noteMenuEntry, pg.walletsMenuEntry, pg.marketsMenuEntry, pg.profileMenuEntry)
       return
     }
-    Doc.show(pg.noteMenuEntry, pg.walletsMenuEntry)
+    Doc.show(pg.noteMenuEntry, pg.walletsMenuEntry, pg.profileMenuEntry)
     if (Object.keys(this.user.exchanges).length > 0) {
       Doc.show(pg.marketsMenuEntry)
     } else {
@@ -354,6 +362,22 @@ export default class Application {
       return false
     }
     return true
+  }
+
+  /**
+   * signOut call to /api/logout, if response with no errors occured clear all store,
+   * remove auth, darkMode cookies and reload the page,
+   * otherwise will show a notification
+   */
+  async signOut () {
+    const res = await postJSON('/api/logout')
+    if (!this.checkResponse(res)) {
+      this.page.profileBox.style.display = 'none'
+      return
+    }
+    State.clearAllStore()
+    State.removeAuthCK()
+    window.location.href = '/login'
   }
 }
 

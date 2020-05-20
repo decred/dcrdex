@@ -421,6 +421,7 @@ type TXCWallet struct {
 	balErr         error
 	fundingCoins   asset.Coins
 	fundingCoinErr error
+	lockErr        error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -494,7 +495,7 @@ func (w *TXCWallet) Unlock(pw string, dur time.Duration) error {
 }
 
 func (w *TXCWallet) Lock() error {
-	return nil
+	return w.lockErr
 }
 
 func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, error) {
@@ -2674,4 +2675,50 @@ func TestHandleMatchProofMsg(t *testing.T) {
 	if err != nil {
 		t.Fatalf("[handleMatchProofMsg] unexpected error: %v", err)
 	}
+}
+
+func TestLogout(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+
+	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
+	tracker := &trackedTrade{
+		Order:  ord,
+		preImg: newPreimage(),
+		dc:     rig.dc,
+	}
+	rig.dc.trades[ord.ID()] = tracker
+
+	dc, _, _ := testDexConnection()
+	initUserAssets := func() {
+		tCore.user = new(User)
+		tCore.user.Assets = make(map[uint32]*SupportedAsset, len(dc.assets))
+		for assetsID := range dc.assets {
+			tCore.user.Assets[assetsID] = &SupportedAsset{
+				ID: assetsID,
+			}
+		}
+	}
+
+	ensureErr := func(tag string) {
+		initUserAssets()
+		err := tCore.Logout()
+		if err == nil {
+			t.Fatalf("%s: no error", tag)
+		}
+	}
+
+	// Active orders error.
+	ensureErr("active orders")
+	rig.dc.trades = nil
+
+	// Lock wallet error.
+	tDcrWallet.lockErr = tErr
+	ensureErr("lock wallet")
 }

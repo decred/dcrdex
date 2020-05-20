@@ -63,6 +63,7 @@ type TCore struct {
 	syncErr         error
 	regErr          error
 	loginErr        error
+	logoutErr       error
 	initErr         error
 	getFeeErr       error
 	createWalletErr error
@@ -130,6 +131,8 @@ func (c *TCore) Cancel(pw []byte, sid string) error { return nil }
 func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
+
+func (c *TCore) Logout() error { return c.logoutErr }
 
 type TWriter struct {
 	b []byte
@@ -634,4 +637,21 @@ func TestClientMap(t *testing.T) {
 	if !cl.Off() {
 		t.Fatalf("connection not closed on server shutdown")
 	}
+}
+
+func TestAPILogout(t *testing.T) {
+	writer := new(TWriter)
+	reader := new(TReader)
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	ensure := func(want string) {
+		ensureResponse(t, s, s.apiLogout, want, reader, writer, nil)
+	}
+	ensure(`{"ok":true}`)
+
+	// Logout error
+	tCore.logoutErr = tErr
+	ensure(`{"ok":false,"msg":"logout error: test error"}`)
+	tCore.logoutErr = nil
 }
