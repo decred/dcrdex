@@ -1375,7 +1375,7 @@ func TestRouter(t *testing.T) {
 		},
 	}
 	src1.feed <- sig
-	tick(responseDelay)
+	tick(responseDelay) // let (*BookRouter).runBook receive the signal and send on the subscriber links
 
 	epochNote := getEpochNoteFromLink(t, link1)
 	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link1")
