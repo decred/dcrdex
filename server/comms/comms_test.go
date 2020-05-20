@@ -58,7 +58,7 @@ func readChannel(t *testing.T, tag string, c chan interface{}) interface{} {
 	case i := <-c:
 		return i
 	case <-time.NewTimer(time.Second).C:
-		t.Fatalf("%s: didnt't read channel", tag)
+		t.Fatalf("%s: didn't read channel", tag)
 	}
 	return nil
 }
@@ -333,24 +333,29 @@ func TestClientRequests(t *testing.T) {
 		return nil
 	})
 
-	// A helper function to reconnect to the server and grab the server's
-	// link.
+	// A helper function to reconnect to the server (new comm) and grab the
+	// server's link (new client).
 	reconnect := func() {
 		conn = newWsStub()
-		wg.Add(1)
+
 		needCount := server.clientCount() + 1
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			server.websocketHandler(testCtx, conn, stubAddr)
 		}()
+
 		if !giveItASecond(func() bool {
 			return server.clientCount() == needCount
 		}) {
 			t.Fatalf("failed to add client")
 		}
+
 		getClient()
 	}
+
 	reconnect()
+
 	// Check that the request is parsed as expected.
 	sendToServer("checkrequest", `{"key":"value"}`)
 	readChannel(t, "checkrequest", srvChan)

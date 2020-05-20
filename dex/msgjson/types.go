@@ -59,6 +59,7 @@ const (
 	UnknownMessageType                // 43
 	AccountClosedError                // 44
 	MarketNotRunningError             // 45
+	TryAgainLaterError                // 46
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -152,19 +153,19 @@ type Signable interface {
 	SigBytes() []byte
 }
 
-// signable partially implements Signable, and can be embedded by types intended
+// Signature partially implements Signable, and can be embedded by types intended
 // to satisfy Signable, which must themselves implement the Serialize method.
-type signable struct {
+type Signature struct {
 	Sig Bytes `json:"sig"`
 }
 
 // SetSig sets the Sig field.
-func (s *signable) SetSig(b []byte) {
+func (s *Signature) SetSig(b []byte) {
 	s.Sig = b
 }
 
 // SigBytes returns the signature as a []byte.
-func (s *signable) SigBytes() []byte {
+func (s *Signature) SigBytes() []byte {
 	// Assuming the Sig was set with SetSig, there is likely no way to error
 	// here. Ignoring error for now.
 	return s.Sig
@@ -366,7 +367,7 @@ func (msg *Message) String() string {
 
 // Match is the params for a DEX-originating MatchRoute request.
 type Match struct {
-	signable
+	Signature
 	OrderID    Bytes  `json:"orderid"`
 	MatchID    Bytes  `json:"matchid"`
 	Quantity   uint64 `json:"quantity"`
@@ -402,7 +403,7 @@ func (m *Match) Stamp(t uint64) {
 
 // Init is the payload for a client-originating InitRoute request.
 type Init struct {
-	signable
+	Signature
 	OrderID Bytes `json:"orderid"`
 	MatchID Bytes `json:"matchid"`
 	CoinID  Bytes `json:"coinid"`
@@ -426,7 +427,7 @@ func (init *Init) Serialize() []byte {
 
 // Audit is the payload for a DEX-originating AuditRoute request.
 type Audit struct {
-	signable
+	Signature
 	OrderID  Bytes  `json:"orderid"`
 	MatchID  Bytes  `json:"matchid"`
 	Time     uint64 `json:"timestamp"`
@@ -450,7 +451,7 @@ func (audit *Audit) Serialize() []byte {
 
 // RevokeMatch are the params for a DEX-originating RevokeMatchRoute request.
 type RevokeMatch struct {
-	signable
+	Signature
 	OrderID Bytes `json:"orderid"`
 	MatchID Bytes `json:"matchid"`
 }
@@ -467,7 +468,7 @@ func (rev *RevokeMatch) Serialize() []byte {
 
 // Redeem are the params for a client-originating RedeemRoute request.
 type Redeem struct {
-	signable
+	Signature
 	OrderID Bytes `json:"orderid"`
 	MatchID Bytes `json:"matchid"`
 	CoinID  Bytes `json:"coinid"`
@@ -523,7 +524,7 @@ type Coin struct {
 
 // Prefix is a common structure shared among order type payloads.
 type Prefix struct {
-	signable
+	Signature
 	AccountID  Bytes  `json:"accountid"`
 	Base       uint32 `json:"base"`
 	Quote      uint32 `json:"quote"`
@@ -747,7 +748,7 @@ type PreimageResponse struct {
 
 // Connect is the payload for a client-originating ConnectRoute request.
 type Connect struct {
-	signable
+	Signature
 	AccountID  Bytes  `json:"accountid"`
 	APIVersion uint16 `json:"apiver"`
 	Time       uint64 `json:"timestamp"`
@@ -769,7 +770,7 @@ type ConnectResult struct {
 
 // Register is the payload for the RegisterRoute request.
 type Register struct {
-	signable
+	Signature
 	PubKey Bytes  `json:"pubkey"`
 	Time   uint64 `json:"timestamp"`
 }
@@ -784,7 +785,7 @@ func (r *Register) Serialize() []byte {
 
 // RegisterResult is the result for the response to Register.
 type RegisterResult struct {
-	signable
+	Signature
 	DEXPubKey    Bytes  `json:"pubkey"`
 	ClientPubKey Bytes  `json:"-"`
 	Address      string `json:"address"`
@@ -806,7 +807,7 @@ func (r *RegisterResult) Serialize() []byte {
 
 // NotifyFee is the payload for a client-originating NotifyFeeRoute request.
 type NotifyFee struct {
-	signable
+	Signature
 	AccountID Bytes  `json:"accountid"`
 	CoinID    Bytes  `json:"coinid"`
 	Time      uint64 `json:"timestamp"`
@@ -828,10 +829,10 @@ func (n *NotifyFee) Stamp(t uint64) {
 }
 
 // NotifyFeeResult is the result for the response to NotifyFee. Though it embeds
-//signable, it does not satisfy the Signable interface, as it has no need for
+// Signature, it does not satisfy the Signable interface, as it has no need for
 // serialization.
 type NotifyFeeResult struct {
-	signable
+	Signature
 }
 
 // MarketStatus describes the status of the market, where StartEpoch is when the

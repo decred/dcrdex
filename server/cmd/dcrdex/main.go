@@ -103,6 +103,7 @@ func mainCore(ctx context.Context) error {
 
 	// Create the DEX manager.
 	dexConf := &dexsrv.DexConf{
+		DataDir:    cfg.DataDir,
 		LogBackend: cfg.LogMaker,
 		Markets:    markets,
 		Assets:     assets,
