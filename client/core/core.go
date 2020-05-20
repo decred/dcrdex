@@ -2422,6 +2422,46 @@ func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	return tracker.db.UpdateOrder(metaOrder)
 }
 
+// handleTradeSuspensionMsg is called when a trade suspension notification is received.
+func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var suspension msgjson.TradeSuspension
+	err := msg.Unmarshal(&suspension)
+	if err != nil {
+		return fmt.Errorf("trade suspension unmarshal error: %v", err)
+	}
+
+	go func(ctx context.Context, suspension *msgjson.TradeSuspension) {
+		nowMilli := encode.UnixMilliU(time.Now())
+
+		var duration time.Duration
+		if nowMilli < suspension.SuspendTime {
+			milliDiff := suspension.SuspendTime - nowMilli
+			duration = time.Duration(milliDiff * 1e6)
+		}
+
+		timer := time.NewTimer(duration)
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case <-timer.C:
+				switch suspension.Persist {
+				case true:
+					// TODO: persist outstanding client orders.
+					return
+
+				case false:
+					// TODO: purge outstanding client orders.
+					return
+				}
+			}
+		}
+	}(c.ctx, &suspension)
+
+	return nil
+}
+
 // routeHandler is a handler for a message from the DEX.
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
@@ -2431,7 +2471,6 @@ var reqHandlers = map[string]routeHandler{
 	msgjson.AuditRoute:       handleAuditRoute,
 	msgjson.RedemptionRoute:  handleRedemptionRoute,
 	msgjson.RevokeMatchRoute: handleRevokeMatchMsg,
-	msgjson.SuspensionRoute:  nil,
 }
 
 var noteHandlers = map[string]routeHandler{
@@ -2440,6 +2479,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.EpochOrderRoute:      handleEpochOrderMsg,
 	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
+	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and

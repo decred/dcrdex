@@ -2942,3 +2942,35 @@ func TestAssetCounter(t *testing.T) {
 		t.Fatalf("absorbed counts not combined correctly")
 	}
 }
+
+func TestHandleTradeSuspensionMsg(t *testing.T) {
+	rig := newTestRig()
+	payload := &msgjson.TradeSuspension{
+		MarketID:    "dcr_btc",
+		FinalEpoch:  100,
+		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Hour * 24)),
+		Persist:     false,
+	}
+
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err := handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	form := &TradeForm{
+		DEX:     tDexUrl,
+		IsLimit: true,
+		Sell:    true,
+		Base:    tDCR.ID,
+		Quote:   tBTC.ID,
+		Qty:     tDCR.LotSize * 10,
+		Rate:    tBTC.RateStep * 1000,
+		TifNow:  false,
+	}
+
+	_, err = rig.core.Trade(tPW, form)
+	if err == nil {
+		t.Fatalf("expected a trade suspension set error")
+	}
+}
