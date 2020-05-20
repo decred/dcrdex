@@ -310,7 +310,7 @@ export default class MarketsPage extends BasePage {
     return true
   }
 
-  /* clearPasswordField clears the password field of the order verification form */
+  /* clearPasswordField clears the user password field of the order verification form */
   clearPasswordField () {
     const page = this.page
     page.vPass.value = ''
