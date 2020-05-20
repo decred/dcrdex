@@ -324,8 +324,8 @@ func (dc *dexConnection) marketEpochDuration(mktID string) uint64 {
 	return mkt.EpochLen
 }
 
-// marketEpoch gets the best known epoch for the specified market and time
-// stamp. If the market is not known, 0 is returned.
+// marketEpoch gets the epoch index for the specified market and time stamp. If
+// the market is not known, 0 is returned.
 func (dc *dexConnection) marketEpoch(mktID string, stamp time.Time) uint64 {
 	epochLen := dc.marketEpochDuration(mktID)
 	if epochLen == 0 {
@@ -1386,7 +1386,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt, c.db, c.latencyQ, wallets, coins, c.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, wallets, coins, c.notify)
 	corder, _ := tracker.coreOrder()
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -1816,7 +1816,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		} else {
 			var preImg order.Preimage
 			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt, c.db, c.latencyQ, nil, nil, c.notify)
+			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, nil, nil, c.notify)
 		}
 	}
 	for oid := range cancels {

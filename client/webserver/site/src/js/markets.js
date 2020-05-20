@@ -1040,7 +1040,7 @@ function updateDataCol (tr, col, s) {
 }
 
 /*
- * updateUserOrderRow sets the td values of the user's order table row element.
+ * updateUserOrderRow sets the td contents of the user's order table row.
  */
 function updateUserOrderRow (tr, order) {
   updateDataCol(tr, 'type', order.type === LIMIT ? 'limit' : 'market')

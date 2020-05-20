@@ -1698,7 +1698,7 @@ func TestCancel(t *testing.T) {
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt, rig.db, rig.queue, nil, nil, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
 	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
@@ -1862,7 +1862,7 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("walletSet error: %v", err)
 	}
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt, rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -2367,7 +2367,7 @@ func TestReadConnectMatches(t *testing.T) {
 		Order:    lo,
 	}
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt, rig.db, rig.queue, nil, nil, notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, notify)
 	metaMatch := db.MetaMatch{
 		MetaData: &db.MatchMetaData{},
 		Match:    &order.UserMatch{},
@@ -2683,7 +2683,7 @@ func TestSetEpoch(t *testing.T) {
 	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt, rig.db, rig.queue, nil, nil, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[lo.ID()] = tracker
 	metaData := tracker.metaData
 
@@ -2731,7 +2731,7 @@ func TestSetEpoch(t *testing.T) {
 		},
 		Order: mo,
 	}
-	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt, rig.db, rig.queue, nil, nil, rig.core.notify)
+	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, rig.core.notify)
 	metaData = tracker.metaData
 	dc.trades[mo.ID()] = tracker
 	ensureStatus("market order", order.OrderStatusExecuted)

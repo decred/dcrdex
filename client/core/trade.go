@@ -92,7 +92,7 @@ type trackedTrade struct {
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
-func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, mkt *Market,
+func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
 	db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet, coins asset.Coins, notify func(Notification)) *trackedTrade {
 	ord := dbOrder.Order
 	return &trackedTrade{
@@ -107,7 +107,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		coins:    mapifyCoins(coins),
 		matches:  make(map[order.MatchID]*matchTracker),
 		notify:   notify,
-		epochLen: mkt.EpochLen,
+		epochLen: epochLen,
 	}
 }
 
@@ -910,15 +910,6 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 // index < the new index and has a status of OrderStatusEpoch, the order will
 // be assumed to have matched without error, and the status set to executed or
 // booked, depending on the order type.
-//
-// DRAFT NOTE: As of now, if the client is not subscribed to the order book when
-// the order actually matches, the status might not be set correctly. This is a
-// consequence of having no notifications for orders which either are 1)
-// unmatched (market order against empty book, or immediate limit order with
-// restrictive rate), or 2) are booked without matching. This also creates the
-// odd case that a fully-matched standing limit order may be set to
-// OrderStatusBooked before a subsequent match notification might change it
-// to OrderStatusExecuted.
 func (t *trackedTrade) processEpoch(epochIdx uint64) bool {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
