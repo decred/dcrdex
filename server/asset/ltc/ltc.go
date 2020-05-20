@@ -19,7 +19,7 @@ var (
 		ScriptHashAddrID: 0x32,
 		Bech32HRPSegwit:  "ltc",
 		CoinbaseMaturity: 100,
-		Net:              0xd9b4bef9,
+		Net:              0xdbb6c0fb,
 	}
 	// TestNet4Params are the clone parameters for testnet.
 	TestNet4Params = &dexbtc.CloneParams{

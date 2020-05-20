@@ -34,6 +34,6 @@ type CloneParams struct {
 	// CoinbaseMaturity: The number of confirmations before a transaction
 	// spending a coinbase input can be spent.
 	CoinbaseMaturity uint16
-	// Net is the network identifier, e.g. wire.BitoinNet.
+	// Net is the network identifier, e.g. wire.BitcoinNet.
 	Net uint32
 }
