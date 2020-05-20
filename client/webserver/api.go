@@ -6,6 +6,7 @@ package webserver
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
@@ -216,6 +217,30 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 	s.actuallyLogin(w, r, login)
 }
 
+// apiLogout handles the 'logout' API request.
+func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
+	err := s.core.Logout()
+	if err != nil {
+		s.writeAPIError(w, "logout error: %v", err)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     authCK,
+		Path:     "/",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	response := struct {
+		OK bool `json:"ok"`
+	}{
+		OK: true,
+	}
+	writeJSON(w, response, s.indent)
+}
+
 // apiWithdraw handles the 'withdraw' API request.
 func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 	form := new(withdrawForm)
@@ -250,12 +275,13 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 		s.writeAPIError(w, "login error: %v", err)
 		return
 	}
-	ai, found := r.Context().Value(authCV).(*userInfo)
-	if !found || !ai.Authed {
-		cval := s.auth()
+
+	user := extractUserInfo(r)
+	if !user.Authed {
+		authToken := s.authorize()
 		http.SetCookie(w, &http.Cookie{
 			Name:  authCK,
-			Value: cval,
+			Value: authToken,
 			Path:  "/",
 			// The client should only send the cookie with first-party requests.
 			// Cross-site requests should not include the auth cookie.
@@ -264,6 +290,7 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 			// Secure: false, // while false we require SameSite set
 		})
 	}
+
 	writeJSON(w, struct {
 		OK    bool               `json:"ok"`
 		Notes []*db.Notification `json:"notes"`
@@ -278,10 +305,12 @@ func (s *WebServer) apiUser(w http.ResponseWriter, r *http.Request) {
 	userInfo := extractUserInfo(r)
 	response := struct {
 		*core.User
-		OK bool `json:"ok"`
+		Authed bool `json:"authed"`
+		OK     bool `json:"ok"`
 	}{
-		User: userInfo.User,
-		OK:   true,
+		User:   userInfo.User,
+		Authed: userInfo.Authed,
+		OK:     true,
 	}
 	writeJSON(w, response, s.indent)
 }

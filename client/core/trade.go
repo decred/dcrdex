@@ -615,7 +615,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 			errs.add("error sending 'init' message for match %s: %v", match.id, err)
 			continue
 		}
-		sigMsg, _ := init.Serialize()
+		sigMsg := init.Serialize()
 		err = t.dc.acct.checkSig(sigMsg, ack.Sig)
 		if err != nil {
 			errs.add("acknowledgment signature error for match %s: %v", match.id, err)
@@ -696,7 +696,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 				match.id, coinIDString(redeemAsset.ID, coinID), err)
 			continue
 		}
-		sigMsg, _ := msgRedeem.Serialize()
+		sigMsg := msgRedeem.Serialize()
 		err = t.dc.acct.checkSig(sigMsg, ack.Sig)
 		if err != nil {
 			errs.add("acknowledgment signature error (redeem route) for match %s: %v", match.id, err)
@@ -742,7 +742,7 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 		return errs.add("match ID not known")
 	}
 	// Check the server signature.
-	sigMsg, _ := audit.Serialize()
+	sigMsg := audit.Serialize()
 	err := t.dc.acct.checkSig(sigMsg, audit.Sig)
 	if err != nil {
 		// Log, but don't quit.
@@ -845,7 +845,7 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	if match.Match.Side == order.Taker && match.counterSwap == nil {
 		return errs.add("redemption received before audit request")
 	}
-	sigMsg, _ := redemption.Serialize()
+	sigMsg := redemption.Serialize()
 	err := t.dc.acct.checkSig(sigMsg, redemption.Sig)
 	if err != nil {
 		// Log, but don't quit.

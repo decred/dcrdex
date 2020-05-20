@@ -454,7 +454,7 @@ func (r *OrderRouter) verifyAccount(user account.AccountID, msgAcct msgjson.Byte
 	// Check the clients signature of the order.
 	// DRAFT NOTE: These Serialize methods actually never return errors. We should
 	// just drop the error return value.
-	sigMsg, _ := signable.Serialize()
+	sigMsg := signable.Serialize()
 	err := r.auth.Auth(user, sigMsg, signable.SigBytes())
 	if err != nil {
 		return msgjson.NewError(msgjson.SignatureError, "signature error: "+err.Error())

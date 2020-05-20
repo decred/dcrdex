@@ -45,13 +45,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	}
 
 	// Check signature.
-	sigMsg, err := register.Serialize()
-	if err != nil {
-		return &msgjson.Error{
-			Code:    msgjson.RPCParseError,
-			Message: "error serializing register: " + err.Error(),
-		}
-	}
+	sigMsg := register.Serialize()
 	err = checkSigS256(sigMsg, register.SigBytes(), acct.PubKey)
 	if err != nil {
 		return &msgjson.Error{
@@ -147,13 +141,7 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	}
 
 	// Check signature
-	sigMsg, err := notifyFee.Serialize()
-	if err != nil {
-		return &msgjson.Error{
-			Code:    msgjson.RPCParseError,
-			Message: "error serializing notifyfee: " + err.Error(),
-		}
-	}
+	sigMsg := notifyFee.Serialize()
 	err = checkSigS256(sigMsg, notifyFee.SigBytes(), acct.PubKey)
 	if err != nil {
 		return &msgjson.Error{

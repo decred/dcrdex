@@ -39,7 +39,6 @@ export default class LoginPage extends BasePage {
     }
     app.setNotes(res.notes || [])
     await app.fetchUser()
-    app.setLogged(true)
     app.loadPage('markets')
   }
 }

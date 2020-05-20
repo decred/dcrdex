@@ -186,16 +186,12 @@ var rig *testRig
 type tSignable struct {
 	b   []byte
 	sig []byte
-	err error
 }
 
 func (s *tSignable) SetSig(b []byte)  { s.sig = b }
 func (s *tSignable) SigBytes() []byte { return s.sig }
-func (s *tSignable) Serialize() ([]byte, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.b, nil
+func (s *tSignable) Serialize() []byte {
+	return s.b
 }
 
 func tNewConnect(user *tUser) *msgjson.Connect {
@@ -222,10 +218,7 @@ func extractConnectResult(t *testing.T, msg *msgjson.Message) *msgjson.ConnectRe
 func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 	connect := tNewConnect(user)
-	sigMsg, err := connect.Serialize()
-	if err != nil {
-		t.Fatalf("'connect' serialization error: %v", err)
-	}
+	sigMsg := connect.Serialize()
 	sig, err := user.privKey.Sign(sigMsg)
 	if err != nil {
 		t.Fatalf("error signing message of length %d", len(sigMsg))
@@ -582,20 +575,10 @@ func TestAuth(t *testing.T) {
 }
 
 func TestSign(t *testing.T) {
-	// Test a serialization error
-	s := &tSignable{err: fmt.Errorf("test error")}
-	err := rig.mgr.Sign(s)
-	if err == nil {
-		t.Fatalf("no Sign error for signable serialization error")
-	}
-	if !strings.Contains(err.Error(), "test error") {
-		t.Fatalf("wrong error: %v", err)
-	}
-
 	// Test a Sign error
 	rig.signer.err = fmt.Errorf("test error 2")
-	s = &tSignable{b: randBytes(25)}
-	err = rig.mgr.Sign(s)
+	s := &tSignable{b: randBytes(25)}
+	err := rig.mgr.Sign(s)
 	if err == nil {
 		t.Fatalf("no error for forced key signing error")
 	}
@@ -770,10 +753,7 @@ func TestConnectErrors(t *testing.T) {
 	// A send error should not return an error, but the client should not be
 	// saved to the map.
 	// need to "register" the user first
-	msgBytes, err := connect.Serialize()
-	if err != nil {
-		t.Fatalf("error serializing 'connect': %v", err)
-	}
+	msgBytes := connect.Serialize()
 	sig, err := user.privKey.Sign(msgBytes)
 	if err != nil {
 		t.Fatalf("error signing 'connect': %v", err)
@@ -876,7 +856,7 @@ func TestHandleRegister(t *testing.T) {
 			PubKey: user.privKey.PubKey().SerializeCompressed(),
 			Time:   encode.UnixMilliU(unixMsNow()),
 		}
-		sigMsg, _ := reg.Serialize()
+		sigMsg := reg.Serialize()
 		sig, _ := user.privKey.Sign(sigMsg)
 		reg.SetSig(sig.Serialize())
 		return reg
@@ -982,7 +962,7 @@ func TestHandleNotifyFee(t *testing.T) {
 			CoinID:    coinid,
 			Time:      encode.UnixMilliU(unixMsNow()),
 		}
-		sigMsg, _ := notify.Serialize()
+		sigMsg := notify.Serialize()
 		sig, _ := user.privKey.Sign(sigMsg)
 		notify.SetSig(sig.Serialize())
 		return notify

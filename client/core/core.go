@@ -146,14 +146,11 @@ func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string,
 }
 
 // ack sends an Acknowledgement for a match-related request.
-func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjson.Signable) error {
+func (dc *dexConnection) ack(msgID uint64, matchID order.MatchID, signable msgjson.Signable) (err error) {
 	ack := &msgjson.Acknowledgement{
 		MatchID: matchID[:],
 	}
-	sigMsg, err := signable.Serialize()
-	if err != nil {
-		return fmt.Errorf("Serialize error - %v", err)
-	}
+	sigMsg := signable.Serialize()
 	ack.Sig, err = dc.acct.sign(sigMsg)
 	if err != nil {
 		return fmt.Errorf("sign error - %v", err)
@@ -190,13 +187,9 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			errs = append(errs, "order "+oid.String()+" not found")
 			continue
 		}
-		sigMsg, err := msgMatch.Serialize()
-		if err != nil {
-			errs = append(errs, err.Error())
-			continue
-		}
+		sigMsg := msgMatch.Serialize()
 		if checkSigs {
-			err = dc.acct.checkSig(sigMsg, msgMatch.Sig)
+			err := dc.acct.checkSig(sigMsg, msgMatch.Sig)
 			if err != nil {
 				return nil, nil, fmt.Errorf("parseMatches: %v", err)
 			}
@@ -809,10 +802,7 @@ func (c *Core) Register(form *RegisterForm) error {
 	}
 
 	// Check the DEX server's signature.
-	msg, err := regRes.Serialize()
-	if err != nil {
-		return fmt.Errorf("error serializing RegisterResult for signature check: %v", err)
-	}
+	msg := regRes.Serialize()
 	dexPubKey, err := checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
 	if err != nil {
 		return fmt.Errorf("DEX signature validation error: %v", err)
@@ -958,6 +948,36 @@ func (c *Core) Login(pw []byte) ([]*db.Notification, error) {
 	return notes, nil
 }
 
+// Logout logs the user out
+func (c *Core) Logout() error {
+	c.connMtx.Lock()
+	defer c.refreshUser()
+	defer c.connMtx.Unlock()
+
+	// Check active orders and lock wallets
+	for assetID := range c.User().Assets {
+		for _, dc := range c.conns {
+			if dc.hasOrders(assetID) {
+				return fmt.Errorf("cannot log out with active orders, wallet %s ", unbip(assetID))
+			}
+		}
+		wallet, found := c.wallet(assetID)
+		if found && wallet.connected() {
+			if err := wallet.Lock(); err != nil {
+				return err
+			}
+		}
+	}
+
+	// With no open orders for any of the dex connections, and all wallets locked,
+	// lock each dex account.
+	for _, dc := range c.conns {
+		dc.acct.lock()
+	}
+
+	return nil
+}
+
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
@@ -1071,13 +1091,9 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		CoinID:    coinID,
 	}
 	// We'll need this to validate the server's acknowledgement.
-	reqB, err := req.Serialize()
-	if err != nil {
-		log.Warnf("fee paid with coin %x, but unable to serialize notifyfee request so server signature cannot be verified", coinID)
-		// Don't quit. The fee is already paid, so follow through if possible.
-	}
+	reqB := req.Serialize()
 	// Sign the request and send it.
-	err = stamp(dc.acct.privKey, req)
+	err := stamp(dc.acct.privKey, req)
 	if err != nil {
 		return err
 	}
@@ -1483,10 +1499,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		APIVersion: 0,
 		Time:       encode.UnixMilliU(time.Now()),
 	}
-	b, err := payload.Serialize()
-	if err != nil {
-		return fmt.Errorf("error serializing 'connect' message: %v", err)
-	}
+	b := payload.Serialize()
 	sig, err := dc.acct.sign(b)
 	if err != nil {
 		return fmt.Errorf("signing error: %v", err)
@@ -2346,10 +2359,7 @@ func checkSigS256(msg, pkBytes, sigBytes []byte) (*secp256k1.PublicKey, error) {
 
 // sign signs the msgjson.Signable with the provided private key.
 func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
-	sigMsg, err := payload.Serialize()
-	if err != nil {
-		return fmt.Errorf("Error serializing request: %v", err)
-	}
+	sigMsg := payload.Serialize()
 	sig, err := privKey.Sign(sigMsg)
 	if err != nil {
 		return fmt.Errorf("message signing error: %v", err)
@@ -2491,11 +2501,8 @@ func validateOrderResponse(dc *dexConnection, result *msgjson.OrderResult, ord o
 		return fmt.Errorf("OrderResult cannot have servertime = 0")
 	}
 	msgOrder.Stamp(result.ServerTime)
-	msg, err := msgOrder.Serialize()
-	if err != nil {
-		return fmt.Errorf("serialization error. order abandoned")
-	}
-	err = dc.acct.checkSig(msg, result.Sig)
+	msg := msgOrder.Serialize()
+	err := dc.acct.checkSig(msg, result.Sig)
 	if err != nil {
 		return fmt.Errorf("signature error. order abandoned")
 	}

@@ -12,18 +12,16 @@ var configInputField = (option, idx) => {
 }
 
 /*
- * bindNewWalletForm is used with the "newWalletForm" template. The enclosing
+ * bindNewWallet should be used with the "newWalletForm" template. The enclosing
  * <form> element should be the second argument.
  */
 export function bindNewWallet (app, form, success) {
-  // CREATE DCR WALLET
-  // This form is only shown the first time the user visits the /register page.
   const fields = Doc.parsePage(form, [
-    'acctName', 'newWalletPass',
+    'nwAssetLogo', 'nwAssetName',
+    'acctName', 'newWalletPass', 'nwAppPass',
     'walletSettings', 'walletSettingsInputs', 'selectCfgFile',
     'walletConfig', 'cfgFile', 'selectedCfgFile', 'removeCfgFile',
-    'submitCreate', 'walletErr',
-    'newWalletLogo', 'newWalletName', 'wClientPass'
+    'submitAdd', 'newWalletErr'
   ])
 
   // wallet settings form
@@ -52,16 +50,25 @@ export function bindNewWallet (app, form, success) {
   form.setAsset = asset => {
     if (currentAsset && currentAsset.id === asset.id) return
     currentAsset = asset
-    fields.newWalletLogo.src = Doc.logoPath(asset.symbol)
-    fields.newWalletName.textContent = asset.info.name
+    fields.nwAssetLogo.src = Doc.logoPath(asset.symbol)
+    fields.nwAssetName.textContent = asset.info.name
     fields.acctName.value = ''
     fields.newWalletPass.value = ''
     resetWalletSettingsForm(asset.info.configopts)
-    Doc.hide(fields.walletErr)
+    Doc.hide(fields.newWalletErr)
   }
-
-  bind(form, fields.submitCreate, async () => {
-    Doc.hide(fields.walletErr)
+  bind(form, fields.submitAdd, async () => {
+    if (fields.newWalletPass.value === '') {
+      fields.newWalletErr.textContent = 'wallet password cannot be empty'
+      Doc.show(fields.newWalletErr)
+      return
+    }
+    if (fields.nwAppPass.value === '') {
+      fields.newWalletErr.textContent = 'app password cannot be empty'
+      Doc.show(fields.newWalletErr)
+      return
+    }
+    Doc.hide(fields.newWalletErr)
     var config = ''
     if (fields.cfgFile.value) {
       config = await fields.cfgFile.files[0].text()
@@ -76,15 +83,15 @@ export function bindNewWallet (app, form, success) {
       pass: fields.newWalletPass.value,
       account: fields.acctName.value,
       config: config,
-      appPass: fields.wClientPass.value
+      appPass: fields.nwAppPass.value
     }
-    fields.wClientPass.value = ''
+    fields.nwAppPass.value = ''
     app.loading(form)
     var res = await postJSON('/api/newwallet', create)
     app.loaded()
     if (!app.checkResponse(res)) {
-      fields.walletErr.textContent = res.msg
-      Doc.show(fields.walletErr)
+      fields.newWalletErr.textContent = res.msg
+      Doc.show(fields.newWalletErr)
       return
     }
     fields.newWalletPass.value = ''
@@ -98,28 +105,34 @@ export function bindNewWallet (app, form, success) {
  */
 export function bindOpenWallet (app, form, success) {
   const fields = Doc.parsePage(form, [
-    'submitOpen', 'openErr', 'walletPass', 'unlockLogo', 'unlockName'
+    'uwAssetLogo', 'uwAssetName',
+    'uwAppPass', 'submitUnlock', 'unlockErr'
   ])
   var currentAsset
   form.setAsset = asset => {
     currentAsset = asset
-    fields.unlockLogo.src = Doc.logoPath(asset.symbol)
-    fields.unlockName.textContent = asset.name
-    fields.walletPass.value = ''
+    fields.uwAssetLogo.src = Doc.logoPath(asset.symbol)
+    fields.uwAssetName.textContent = asset.info.name
+    fields.uwAppPass.value = ''
   }
-  bind(form, fields.submitOpen, async () => {
-    Doc.hide(fields.openErr)
+  bind(form, fields.submitUnlock, async () => {
+    if (fields.uwAppPass.value === '') {
+      fields.unlockErr.textContent = 'app password cannot be empty'
+      Doc.show(fields.unlockErr)
+      return
+    }
+    Doc.hide(fields.unlockErr)
     const open = {
       assetID: parseInt(currentAsset.id),
-      pass: fields.walletPass.value
+      pass: fields.uwAppPass.value
     }
-    fields.walletPass.value = ''
+    fields.uwAppPass.value = ''
     app.loading(form)
     var res = await postJSON('/api/openwallet', open)
     app.loaded()
     if (!app.checkResponse(res)) {
-      fields.openErr.textContent = res.msg
-      Doc.show(fields.openErr)
+      fields.unlockErr.textContent = res.msg
+      Doc.show(fields.unlockErr)
       return
     }
     success()
