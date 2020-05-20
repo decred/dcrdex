@@ -600,3 +600,38 @@ func TestHandleExchanges(t *testing.T) {
 		t.Fatal("result does not have expected fields removed")
 	}
 }
+
+func TestHandleLogin(t *testing.T) {
+	params := &RawParams{PWArgs: []encode.PassBytes{encode.PassBytes("123")}}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		loginErr    error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:        "core.Login error",
+		params:      params,
+		loginErr:    errors.New("error"),
+		wantErrCode: msgjson.RPCLoginError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			loginResult: &core.LoginResult{},
+			loginErr:    test.loginErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleLogin(r, test.params)
+		var res *core.LoginResult
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

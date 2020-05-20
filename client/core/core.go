@@ -982,7 +982,7 @@ func (c *Core) InitializeClient(pw []byte) error {
 }
 
 // Login logs the user in, decrypting the account keys for all known DEXes.
-func (c *Core) Login(pw []byte) ([]*db.Notification, error) {
+func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, err
@@ -993,13 +993,17 @@ func (c *Core) Login(pw []byte) ([]*db.Notification, error) {
 		log.Infof("loaded %d incomplete orders", loaded)
 	}
 
-	c.initializeDEXConnections(crypter)
+	dexStats := c.initializeDEXConnections(crypter)
 	notes, err := c.db.NotificationsN(10)
 	if err != nil {
 		log.Errorf("Login -> NotificationsN error: %v", err)
 	}
 	c.refreshUser()
-	return notes, nil
+	result := &LoginResult{
+		Notifications: notes,
+		DEXes:         dexStats,
+	}
+	return result, nil
 }
 
 // Logout logs the user out
@@ -1035,28 +1039,45 @@ func (c *Core) Logout() error {
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
-func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
+func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	// Connections will be attempted in parallel, so we'll need to protect the
 	// errorSet.
 	var wg sync.WaitGroup
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
+	results := make([]*DEXBrief, 0, len(c.conns))
 	for _, dc := range c.conns {
+		dc.tradeMtx.RLock()
+		tradeIDs := make([]string, 0, len(dc.trades))
+		for tradeID := range dc.trades {
+			tradeIDs = append(tradeIDs, tradeID.String())
+		}
+		dc.tradeMtx.RUnlock()
+		result := &DEXBrief{
+			URL:      dc.acct.url,
+			TradeIDs: tradeIDs,
+		}
+		results = append(results, result)
 		// Copy the iterator for use in the authDEX goroutine.
 		if dc.acct.authed() {
+			result.Authed = true
+			result.AcctID = dc.acct.ID().String()
 			continue
 		}
 		err := dc.acct.unlock(crypter)
 		if err != nil {
 			details := fmt.Sprintf("error unlocking account for %s: %v", dc.acct.url, err)
 			c.notify(newFeePaymentNote("Account unlock error", details, db.ErrorLevel))
+			result.AuthErr = details
 			continue
 		}
+		result.AcctID = dc.acct.ID().String()
 		dcrID, _ := dex.BipSymbolID("dcr")
 		if !dc.acct.feePaid() {
 			if len(dc.acct.feeCoin) == 0 {
 				details := fmt.Sprintf("Empty fee coin for %s.", dc.acct.url)
 				c.notify(newFeePaymentNote("Fee coin error", details, db.ErrorLevel))
+				result.AuthErr = details
 				continue
 			}
 			// Try to unlock the Decred wallet, which should run the reFee cycle, and
@@ -1066,6 +1087,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 				log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.url, err)
 				details := fmt.Sprintf("Incomplete registration detected for %s, but failed to connect to the Decred wallet", dc.acct.url)
 				c.notify(newFeePaymentNote("Wallet connection warning", details, db.WarningLevel))
+				result.AuthErr = details
 				continue
 			}
 			if !dcrWallet.unlocked() {
@@ -1073,6 +1095,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 				if err != nil {
 					details := fmt.Sprintf("Connected to Decred wallet to complete registration at %s, but failed to unlock: %v", dc.acct.url, err)
 					c.notify(newFeePaymentNote("Wallet unlock error", details, db.ErrorLevel))
+					result.AuthErr = details
 					continue
 				}
 			}
@@ -1087,11 +1110,14 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) {
 			if err != nil {
 				details := fmt.Sprintf("%s: %v", dc.acct.url, err)
 				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel))
+				result.AuthErr = details
 				return
 			}
+			result.Authed = true
 		}(dc)
 	}
 	wg.Wait()
+	return results
 }
 
 // resolveActiveTrades loads order and match data from the database. Only active

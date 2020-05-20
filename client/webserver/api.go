@@ -270,7 +270,7 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 
 // apiActuallyLogin logs the user in.
 func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login *loginForm) {
-	notes, err := s.core.Login(login.Pass)
+	loginResult, err := s.core.Login(login.Pass)
 	if err != nil {
 		s.writeAPIError(w, "login error: %v", err)
 		return
@@ -296,7 +296,7 @@ func (s *WebServer) actuallyLogin(w http.ResponseWriter, r *http.Request, login 
 		Notes []*db.Notification `json:"notes"`
 	}{
 		OK:    true,
-		Notes: notes,
+		Notes: loginResult.Notifications,
 	}, s.indent)
 }
 

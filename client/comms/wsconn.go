@@ -53,7 +53,7 @@ type WsCfg struct {
 	// The rpc certificate file path.
 	Cert []byte
 	// ReconnectSync runs the needed reconnection synchronization after
-	// a disconnect.
+	// a reconnect.
 	ReconnectSync func()
 }
 

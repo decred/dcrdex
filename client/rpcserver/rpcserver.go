@@ -57,6 +57,7 @@ type ClientCore interface {
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
 	Exchanges() (exchanges map[string]*core.Exchange)
 	InitializeClient(appPass []byte) error
+	Login(appPass []byte) (*core.LoginResult, error)
 	OpenWallet(assetID uint32, pw []byte) error
 	GetFee(url, cert string) (fee uint64, err error)
 	Register(form *core.RegisterForm) error

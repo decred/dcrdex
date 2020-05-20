@@ -50,6 +50,8 @@ type TCore struct {
 	initializeClientErr error
 	registerErr         error
 	exchanges           map[string]*core.Exchange
+	loginErr            error
+	loginResult         *core.LoginResult
 }
 
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
@@ -67,6 +69,9 @@ func (c *TCore) CloseWallet(assetID uint32) error {
 func (c *TCore) Exchanges() (exchanges map[string]*core.Exchange) { return c.exchanges }
 func (c *TCore) InitializeClient(pw []byte) error {
 	return c.initializeClientErr
+}
+func (c *TCore) Login(appPass []byte) (*core.LoginResult, error) {
+	return c.loginResult, c.loginErr
 }
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr

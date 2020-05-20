@@ -20,6 +20,7 @@ const (
 	exchangesRoute   = "exchanges"
 	helpRoute        = "help"
 	initRoute        = "init"
+	loginRoute       = "login"
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
 	getFeeRoute      = "getfee"
@@ -61,6 +62,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	exchangesRoute:   handleExchanges,
 	helpRoute:        handleHelp,
 	initRoute:        handleInit,
+	loginRoute:       handleLogin,
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
 	getFeeRoute:      handleGetFee,
@@ -332,6 +334,21 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(exchangesRoute, &exchanges, nil)
 }
 
+// handleLogin sets up the dex connection and returns core.LoginResult.
+func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	appPass, err := parseLoginArgs(params)
+	if err != nil {
+		return usage(loginRoute, err)
+	}
+	res, err := s.core.Login(appPass)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to login: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCLoginError, errMsg)
+		return createResponse(loginRoute, nil, resErr)
+	}
+	return createResponse(loginRoute, &res, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -592,6 +609,41 @@ Registration is complete after the fee transaction has been confirmed.`,
         },
         "feePending" (bool): Whether the dex fee is pending.
       },...
+    }`,
+	},
+	loginRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   ``,
+		cmdSummary:  `Attempt to login to all registered DEX servers.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The dex client password.`,
+		argsLong: ``,
+		returns: `Returns:
+    map: A map of notifications and dexes.
+    {
+      "notifications" (array): An array of most recent notifications.
+      [
+        {
+          "type" (string): The notification type.
+          "subject" (string): A clarification of type.
+          "details"(string): The notification details.
+          "severity" (int): The importance of the notification on a scale of 0
+            through 5.
+          "stamp" (int): Unix time of the notification. Seconds since 00:00:00 Jan 1 1970.
+          "acked" (bool): Whether the notification was acknowledged.
+          "id" (string): A unique hex ID.
+        },...
+      ],
+      "dexes" (array): An array of login attempted dexes.
+      [
+        {
+          "url" (string): The DEX url.
+          "acctID" (string): A unique hex ID.
+          "authed" (bool): Whether the dex has been successfully authed.
+          "autherr" (string): Omitted if authed. If not authed, the reason.
+          "tradeIDs" (array): An array of active trade IDs.
+        }
+      ]
     }`,
 	},
 }

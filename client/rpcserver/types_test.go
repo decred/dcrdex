@@ -265,7 +265,7 @@ func TestParseRegisterArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		reg, err := parseRegisterArgs(test.params)
-		if test.wantErr != nil {
+		if err != nil {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("unexpected error %v for test %s",
 					err, test.name)

@@ -450,3 +450,18 @@ func coinIDString(assetID uint32, coinID []byte) string {
 	}
 	return coinStr
 }
+
+// DEXBrief holds data returned from initializeDEXConnections.
+type DEXBrief struct {
+	URL      string   `json:"url"`
+	AcctID   string   `json:"acctID"`
+	Authed   bool     `json:"authed"`
+	AuthErr  string   `json:"autherr,omitempty"`
+	TradeIDs []string `json:"tradeIDs"`
+}
+
+// LoginResult holds data returned from Login.
+type LoginResult struct {
+	Notifications []*db.Notification `json:"notifications"`
+	DEXes         []*DEXBrief        `json:"dexes"`
+}

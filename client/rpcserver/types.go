@@ -130,6 +130,13 @@ func parseInitArgs(params *RawParams) (encode.PassBytes, error) {
 	return params.PWArgs[0], nil
 }
 
+func parseLoginArgs(params *RawParams) (encode.PassBytes, error) {
+	if err := checkNArgs(params, []int{1}, []int{0}); err != nil {
+		return nil, err
+	}
+	return params.PWArgs[0], nil
+}
+
 func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 	if err := checkNArgs(params, []int{2}, []int{2, 3}); err != nil {
 		return nil, err
