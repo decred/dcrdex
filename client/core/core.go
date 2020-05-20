@@ -1039,13 +1039,13 @@ func (c *Core) Logout() error {
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
-func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*InitDEXConnsResult {
+func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	// Connections will be attempted in parallel, so we'll need to protect the
 	// errorSet.
 	var wg sync.WaitGroup
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	results := make([]*InitDEXConnsResult, 0, len(c.conns))
+	results := make([]*DEXBrief, 0, len(c.conns))
 	for _, dc := range c.conns {
 		dc.tradeMtx.RLock()
 		tradeIDs := make([]string, 0, len(dc.trades))
@@ -1053,7 +1053,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*InitDEXConns
 			tradeIDs = append(tradeIDs, tradeID.String())
 		}
 		dc.tradeMtx.RUnlock()
-		result := &InitDEXConnsResult{
+		result := &DEXBrief{
 			URL:      dc.acct.url,
 			TradeIDs: tradeIDs,
 		}

@@ -334,7 +334,7 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(exchangesRoute, &exchanges, nil)
 }
 
-// handleLogin sets up the dex connection and returns received notifications.
+// handleLogin sets up the dex connection and returns core.LoginResult.
 func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	appPass, err := parseLoginArgs(params)
 	if err != nil {
@@ -614,23 +614,36 @@ Registration is complete after the fee transaction has been confirmed.`,
 	loginRoute: {
 		pwArgsShort: `"appPass"`,
 		argsShort:   ``,
-		cmdSummary:  `Attempt to login to all known DEX servers.`,
+		cmdSummary:  `Attempt to login to all registered DEX servers.`,
 		pwArgsLong: `Password Args:
     appPass (string): The dex client password.`,
 		argsLong: ``,
 		returns: `Returns:
-    obj: An array of notifications.
-    [
-      {
-        "type" (string): The notification type.
-        "subject" (string): A clarification of type.
-        "details"(string): The notification details.
-        "severity" (int): The importance of the notification on a scale of 0
-	  through 5.
-        "stamp" (int): Unix time of the notification. Seconds since 00:00:00 Jan 1 1970.
-        "acked" (bool): Whether the notification was acknowledged.
-        "id" (string): A unique hex ID.
-      },...,
-    ]`,
+    map: A map of notifications and dexes.
+    {
+      "notifications" (array): An array of most recent notifications.
+      [
+        {
+          "type" (string): The notification type.
+          "subject" (string): A clarification of type.
+          "details"(string): The notification details.
+          "severity" (int): The importance of the notification on a scale of 0
+            through 5.
+          "stamp" (int): Unix time of the notification. Seconds since 00:00:00 Jan 1 1970.
+          "acked" (bool): Whether the notification was acknowledged.
+          "id" (string): A unique hex ID.
+        },...
+      ],
+      "dexes" (array): An array of login attempted dexes.
+      [
+        {
+          "url" (string): The DEX url.
+          "acctID" (string): A unique hex ID.
+          "authed" (bool): Whether the dex has been successfully authed.
+          "autherr" (string): Omitted if authed. If not authed, the reason.
+          "tradeIDs" (array): An array of active trade IDs.
+        }
+      ]
+    }`,
 	},
 }
