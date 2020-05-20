@@ -34,14 +34,50 @@ func newServer() *Server {
 	}
 }
 
+func giveItASecond(f func() bool) bool {
+	ticker := time.NewTicker(time.Millisecond)
+	timeout := time.NewTimer(time.Second)
+	for {
+		if f() {
+			return true
+		}
+		select {
+		case <-timeout.C:
+			return false
+		default:
+		}
+		<-ticker.C
+	}
+}
+
+func readChannel(t *testing.T, tag string, c chan interface{}) interface{} {
+	select {
+	case i := <-c:
+		return i
+	case <-time.NewTimer(time.Second).C:
+		t.Fatalf("%s: didnt't read channel", tag)
+	}
+	return nil
+}
+
 type wsConnStub struct {
-	msg     chan []byte
-	quit    chan struct{}
-	write   int
-	read    int
-	close   int
-	lastMsg []byte
-	recv    chan []byte
+	msg   chan []byte
+	quit  chan struct{}
+	read  int
+	close int
+	recv  chan []byte
+}
+
+func (conn *wsConnStub) addChan() {
+	conn.recv = make(chan []byte)
+}
+
+func (conn *wsConnStub) wait(t *testing.T, tag string) {
+	select {
+	case <-conn.recv:
+	case <-time.NewTimer(time.Second).C:
+		t.Fatalf("%s - wait timeout", tag)
+	}
 }
 
 func newWsStub() *wsConnStub {
@@ -50,15 +86,6 @@ func newWsStub() *wsConnStub {
 		// recv is nil unless a test wants to receive
 		quit: make(chan struct{}),
 	}
-}
-
-var testMtx sync.RWMutex
-
-// check results under lock.
-func lockedExe(f func()) {
-	testMtx.Lock()
-	defer testMtx.Unlock()
-	f()
 }
 
 // nonEOF can specify a particular error should be returned through ReadMessage.
@@ -77,6 +104,7 @@ func (conn *wsConnStub) ReadMessage() (int, []byte, error) {
 	case <-testCtx.Done():
 		return 0, nil, io.EOF
 	case <-nonEOF:
+		close(conn.quit)
 		return 0, nil, fmt.Errorf("test nonEOF error")
 	}
 	conn.read++
@@ -89,8 +117,6 @@ var (
 )
 
 func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
-	testMtx.Lock()
-	defer testMtx.Unlock()
 	if msgType == websocket.PingMessage {
 		select {
 		case conn.msg <- pongTrigger:
@@ -98,12 +124,10 @@ func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
 		}
 		return nil
 	}
-	conn.lastMsg = msg
 	// Send the message if their is a receiver for the current test.
 	if conn.recv != nil {
 		conn.recv <- msg
 	}
-	conn.write++
 	writeErrMtx.Lock()
 	defer writeErrMtx.Unlock()
 	if writeErr == "" {
@@ -164,7 +188,6 @@ func sendToConn(t *testing.T, conn *wsConnStub, method, msg string) {
 		t.Fatalf("error encoding %s request: %v", method, err)
 	}
 	conn.msg <- encMsg
-	time.Sleep(time.Millisecond * 10)
 }
 
 func sendReplace(t *testing.T, conn *wsConnStub, thing interface{}, old, new string) {
@@ -175,7 +198,6 @@ func sendReplace(t *testing.T, conn *wsConnStub, thing interface{}, old, new str
 	s := string(enc)
 	s = strings.ReplaceAll(s, old, new)
 	conn.msg <- []byte(s)
-	time.Sleep(time.Millisecond)
 }
 
 func newTestDEXClient(addr string, rootCAs *x509.CertPool) (*websocket.Conn, error) {
@@ -233,52 +255,58 @@ func TestRoute_PanicsDoubleRegistry(t *testing.T) {
 // Test the server with a stub for the client connections.
 func TestClientRequests(t *testing.T) {
 	server := newServer()
+	var wg sync.WaitGroup
+	defer func() {
+		server.disconnectClients()
+		wg.Wait()
+	}()
 	var client *wsLink
 	var conn *wsConnStub
 	stubAddr := "testaddr"
 	sendToServer := func(method, msg string) { sendToConn(t, conn, method, msg) }
 
-	clientOn := func() bool {
-		var on bool
-		lockedExe(func() {
-			on = !client.Off()
-		})
-		return on
+	waitForShutdown := func(tag string, f func()) {
+		needCount := server.clientCount() - 1
+		f()
+		if !giveItASecond(func() bool {
+			return server.clientCount() == needCount
+		}) {
+			t.Fatalf("%s: waitForShutdown failed", tag)
+		}
 	}
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
+	srvChan := make(chan interface{})
 	Route("getclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
-		testMtx.Lock()
-		defer testMtx.Unlock()
-		var ok bool
-		client, ok = c.(*wsLink)
+		client, ok := c.(*wsLink)
 		if !ok {
 			t.Fatalf("failed to assert client type")
 		}
+		srvChan <- client
 		return nil
 	})
+	getClient := func() {
+		encReq, _ := json.Marshal(makeReq("getclient", `{}`))
+		conn.msg <- encReq
+		client = readChannel(t, "getClient", srvChan).(*wsLink)
+	}
+
 	// Check request parses the request to a map of strings.
-	var parsedParams map[string]string
 	Route("checkrequest", func(c Link, msg *msgjson.Message) *msgjson.Error {
-		testMtx.Lock()
-		defer testMtx.Unlock()
-		parsedParams = make(map[string]string)
-		err := json.Unmarshal(msg.Payload, &parsedParams)
-		if err != nil {
-			t.Fatalf("request parse error: %v", err)
+		if string(msg.Payload) != `{"key":"value"}` {
+			t.Fatalf("wrong request: %s", string(msg.Payload))
 		}
 		if client.id != c.ID() {
 			t.Fatalf("client ID mismatch. %d != %d", client.id, c.ID())
 		}
+		srvChan <- nil
 		return nil
 	})
 	// 'checkinvalid' should never be run, since the request has invalid
 	// formatting.
-	passed := false
+	var passed bool
 	Route("checkinvalid", func(_ Link, _ *msgjson.Message) *msgjson.Error {
-		testMtx.Lock()
-		defer testMtx.Unlock()
 		passed = true
 		return nil
 	})
@@ -300,53 +328,36 @@ func TestClientRequests(t *testing.T) {
 
 	// A helper function to reconnect to the server and grab the server's
 	// link.
-	var wg sync.WaitGroup
 	reconnect := func() {
 		conn = newWsStub()
 		wg.Add(1)
+		needCount := server.clientCount() + 1
 		go server.websocketHandler(&wg, conn, stubAddr)
-		time.Sleep(time.Millisecond * 10)
-		sendToServer("getclient", `{}`)
+		if !giveItASecond(func() bool {
+			return server.clientCount() == needCount
+		}) {
+			t.Fatalf("failed to add client")
+		}
+		getClient()
 	}
 	reconnect()
 
-	defer func() {
-		server.disconnectClients()
-		wg.Wait()
-	}()
-
-	sendToServer("getclient", `{}`)
-	lockedExe(func() {
-		if client == nil {
-			t.Fatalf("'getclient' failed")
-		}
-		if server.clientCount() != 1 {
-			t.Fatalf("clientCount != 1")
-		}
-	})
-
 	// Check that the request is parsed as expected.
 	sendToServer("checkrequest", `{"key":"value"}`)
-	lockedExe(func() {
-		v, found := parsedParams["key"]
-		if !found {
-			t.Fatalf("Route key not found")
-		}
-		if v != "value" {
-			t.Fatalf(`expected "value", got %s`, v)
-		}
-	})
+	readChannel(t, "checkrequest", srvChan)
 
 	// Send invalid params, and make sure the server doesn't pass the message. The
 	// server will not disconnect the client.
+	conn.addChan()
 	ensureReplaceFails := func(old, new string) {
 		sendReplace(t, conn, makeReq("checkinvalid", old), old, new)
+		<-conn.recv
 		if passed {
 			t.Fatalf("invalid request passed to handler")
 		}
 	}
 	ensureReplaceFails(`{"a":"b"}`, "?")
-	if !clientOn() {
+	if client.Off() {
 		t.Fatalf("client unexpectedly disconnected after invalid message")
 	}
 
@@ -355,36 +366,28 @@ func TestClientRequests(t *testing.T) {
 	writeErrMtx.Lock()
 	writeErr = "basic error"
 	writeErrMtx.Unlock()
-	ensureReplaceFails(`{"a":"b"}`, "?")
-	if clientOn() {
-		t.Fatalf("client connected after WriteMessage error")
-	}
-	if server.clientCount() != 0 {
-		t.Fatalf("clientCount != 0")
-	}
+	waitForShutdown("rpc error", func() {
+		ensureReplaceFails(`{"a":"b"}`, "?")
+	})
 
 	// Shut the client down. Check the on flag.
 	reconnect()
-	lockedExe(func() { client.Disconnect() })
-	time.Sleep(time.Millisecond)
-	if clientOn() {
-		t.Fatalf("shutdown client has on flag set")
-	}
-	// Shut down again.
-	lockedExe(func() { client.Disconnect() })
+	waitForShutdown("flag set", func() {
+		client.Disconnect()
+	})
 
 	// Reconnect and try shutting down with non-EOF error.
 	reconnect()
-	nonEOF <- struct{}{}
-	time.Sleep(time.Millisecond)
-	if clientOn() {
-		t.Fatalf("failed to shutdown on non-EOF error")
-	}
+	waitForShutdown("non-EOF", func() {
+		nonEOF <- struct{}{}
+	})
 
 	// Try a non-existent handler. This should not result in a disconnect.
 	reconnect()
+	conn.addChan()
 	sendToServer("nonexistent", "{}")
-	if !clientOn() {
+	conn.wait(t, "bad path without error")
+	if client.Off() {
 		t.Fatalf("client unexpectedly disconnected after invalid method")
 	}
 
@@ -393,52 +396,51 @@ func TestClientRequests(t *testing.T) {
 	writeErrMtx.Lock()
 	writeErr = "basic error"
 	writeErrMtx.Unlock()
-	sendToServer("nonexistent", "{}")
-	if clientOn() {
-		t.Fatalf("client still connected after WriteMessage error for invalid method")
-	}
+	waitForShutdown("rpc error", func() {
+		sendToServer("nonexistent", "{}")
+		conn.wait(t, "bad path with error")
+	})
 
 	// An RPC error. No disconnect.
 	reconnect()
+	conn.addChan()
 	sendToServer("error", "{}")
-	if !clientOn() {
+	conn.wait(t, "rpc error")
+	if client.Off() {
 		t.Fatalf("client unexpectedly disconnected after rpc error")
 	}
 
 	// Return a user quarantine error.
-	sendToServer("ban", "{}")
-	if clientOn() {
-		t.Fatalf("client still connected after quarantine error")
-	}
+	waitForShutdown("ban", func() {
+		sendToServer("ban", "{}")
+		conn.wait(t, "ban")
+	})
 	if !server.isQuarantined(stubAddr) {
 		t.Fatalf("server has not marked client as quarantined")
 	}
 	// A call to Send should return ErrPeerDisconnected
-	lockedExe(func() {
-		if !errors.Is(client.Send(nil), ws.ErrPeerDisconnected) {
-			t.Fatalf("incorrect error for disconnected client")
-		}
-	})
+	if !errors.Is(client.Send(nil), ws.ErrPeerDisconnected) {
+		t.Fatalf("incorrect error for disconnected client")
+	}
 
 	checkParseError := func() {
-		lockedExe(func() {
-			msg, err := msgjson.DecodeMessage(conn.lastMsg)
-			if err != nil {
-				t.Fatalf("error decoding last message (%s): %v", string(conn.lastMsg), err)
-			}
-			resp, err := msg.Response()
-			if err != nil {
-				t.Fatalf("error decoding response payload: %v", err)
-			}
-			conn.lastMsg = nil
-			if resp.Error == nil || resp.Error.Code != msgjson.RPCParseError {
-				t.Fatalf("no error after invalid id")
-			}
-		})
+		b := <-conn.recv
+		msg, err := msgjson.DecodeMessage(b)
+		if err != nil {
+			t.Fatalf("error decoding last message (%s): %v", string(b), err)
+		}
+		resp, err := msg.Response()
+		if err != nil {
+			t.Fatalf("error decoding response payload: %v", err)
+		}
+		if resp.Error == nil || resp.Error.Code != msgjson.RPCParseError {
+			t.Fatalf("no error after invalid id")
+		}
 	}
 
 	// Test an invalid ID.
 	reconnect()
+	conn.addChan()
 	msg := makeReq("getclient", `{}`)
 	msg.ID = 555
 	sendReplace(t, conn, msg, "555", "{}")
@@ -458,32 +460,28 @@ func TestClientResponses(t *testing.T) {
 
 	// Register all methods before sending any requests.
 	// 'getclient' grabs the server's link.
+	srvChan := make(chan interface{})
 	Route("grabclient", func(c Link, _ *msgjson.Message) *msgjson.Error {
-		testMtx.Lock()
-		defer testMtx.Unlock()
-		var ok bool
-		client, ok = c.(*wsLink)
+		client, ok := c.(*wsLink)
 		if !ok {
 			t.Fatalf("failed to assert client type")
 		}
+		srvChan <- client
 		return nil
 	})
 
 	getClient := func() {
 		encReq, _ := json.Marshal(makeReq("grabclient", `{}`))
 		conn.msg <- encReq
-		time.Sleep(time.Millisecond * 10)
+		client = readChannel(t, "getClient", srvChan).(*wsLink)
 	}
 
 	sendToClient := func(route, payload string, f func(Link, *msgjson.Message), expiration time.Duration, expire func()) uint64 {
 		req := makeReq(route, payload)
-		lockedExe(func() {
-			err := client.Request(req, f, expiration, expire)
-			if err != nil {
-				t.Logf("sendToClient error: %v", err)
-			}
-			time.Sleep(time.Millisecond * 10)
-		})
+		err := client.Request(req, f, expiration, expire)
+		if err != nil {
+			t.Logf("sendToClient error: %v", err)
+		}
 		return req.ID
 	}
 
@@ -493,7 +491,6 @@ func TestClientResponses(t *testing.T) {
 			t.Fatalf("error encoding %v (%T) request: %v", id, id, err)
 		}
 		conn.msg <- encResp
-		time.Sleep(time.Millisecond * 10)
 	}
 
 	var wg sync.WaitGroup
@@ -501,7 +498,6 @@ func TestClientResponses(t *testing.T) {
 		conn = newWsStub()
 		wg.Add(1)
 		go server.websocketHandler(&wg, conn, stubAddr)
-		time.Sleep(time.Millisecond * 10)
 		getClient()
 	}
 	reconnect()
@@ -512,10 +508,9 @@ func TestClientResponses(t *testing.T) {
 	}()
 
 	// Test Broadcast
-	conn.recv = make(chan []byte)                    // for WriteMessage in this test
+	conn.addChan()                                   // for WriteMessage in this test
 	server.Broadcast(makeNtfn("someNote", `"blah"`)) // async conn.recv <- msg send
 	msgBytes := <-conn.recv
-	conn.recv = nil // all done with this chan
 	msg, err := msgjson.DecodeMessage(msgBytes)
 	if err != nil {
 		t.Fatalf("error decoding last message: %v", err)
@@ -525,43 +520,33 @@ func TestClientResponses(t *testing.T) {
 	if err != nil {
 		return
 	}
-	conn.lastMsg = nil
 	if note != "blah" {
 		t.Errorf("wrong note: %s", note)
 	}
 
 	// Send a request from the server to the client, setting a flag when the
 	// client responds.
-	responded := make(chan struct{}, 1)
 	id := sendToClient("looptest", `{}`, func(_ Link, _ *msgjson.Message) {
-		responded <- struct{}{}
+		srvChan <- nil
 	}, time.Hour, func() {})
 
 	// Respond to the server
 	respondToServer(id, `{}`)
-	select {
-	case <-responded:
-		// Response received, no problem.
-	default:
-		// No response falls through.
-		t.Fatalf("no response for looptest")
-	}
+	readChannel(t, "looptest", srvChan)
+	<-conn.recv
 
 	checkParseError := func(tag string) {
-		lockedExe(func() {
-			msg, err := msgjson.DecodeMessage(conn.lastMsg)
-			if err != nil {
-				t.Fatalf("error decoding last message (%s): %v", tag, err)
-			}
-			resp, err := msg.Response()
-			if err != nil {
-				t.Fatalf("error decoding response (%s): %v", tag, err)
-			}
-			conn.lastMsg = nil
-			if resp.Error == nil || resp.Error.Code != msgjson.RPCParseError {
-				t.Fatalf("no error after %s", tag)
-			}
-		})
+		msg, err := msgjson.DecodeMessage(<-conn.recv)
+		if err != nil {
+			t.Fatalf("error decoding last message (%s): %v", tag, err)
+		}
+		resp, err := msg.Response()
+		if err != nil {
+			t.Fatalf("error decoding response (%s): %v", tag, err)
+		}
+		if resp.Error == nil || resp.Error.Code != msgjson.RPCParseError {
+			t.Fatalf("no error after %s", tag)
+		}
 	}
 
 	// Test an invalid id type.
@@ -574,57 +559,35 @@ func TestClientResponses(t *testing.T) {
 	checkParseError("invalid payload")
 
 	// check the response handler expiration
-	lockedExe(func() {
-		client.respHandlers = make(map[uint64]*responseHandler)
-	})
+	client.respHandlers = make(map[uint64]*responseHandler)
 	expiredID := sendToClient("expiration", `{}`, func(_ Link, _ *msgjson.Message) {},
 		200*time.Millisecond, func() { t.Log("Expired (good).") })
+	<-conn.recv
 	// The responseHandler map should contain the ntfn ID since expiry has not
 	// yet arrived.
-	lockedExe(func() {
-		client.reqMtx.Lock()
-		defer client.reqMtx.Unlock()
-		_, found := client.respHandlers[expiredID]
-		if !found {
-			t.Fatalf("response handler not found")
-		}
-		if len(client.respHandlers) != 1 {
-			t.Fatalf("expected 1 response handler, found %d", len(client.respHandlers))
-		}
-	})
+	client.reqMtx.Lock()
+	_, found := client.respHandlers[expiredID]
+	if !found {
+		t.Fatalf("response handler not found")
+	}
+	if len(client.respHandlers) != 1 {
+		t.Fatalf("expected 1 response handler, found %d", len(client.respHandlers))
+	}
+	client.reqMtx.Unlock()
 
 	time.Sleep(250 * time.Millisecond) // >> 200ms - 10ms
-	lockedExe(func() {
-		client.reqMtx.Lock()
-		defer client.reqMtx.Unlock()
-		if len(client.respHandlers) != 0 {
-			t.Fatalf("expired response handler not pruned")
-		}
-		_, found := client.respHandlers[expiredID]
-		if found {
-			t.Fatalf("expired response handler still in map")
-		}
-	})
-
-	// immediate expiration
-	expiredID = sendToClient("expiration", `{}`, func(_ Link, _ *msgjson.Message) {},
-		0, func() { t.Log("Expired (good).") })
-	lockedExe(func() {
-		client.reqMtx.Lock()
-		defer client.reqMtx.Unlock()
-		if len(client.respHandlers) != 0 {
-			t.Fatalf("expired response handler not pruned")
-		}
-		_, found := client.respHandlers[expiredID]
-		if found {
-			t.Fatalf("expired response handler still in map")
-		}
-	})
+	client.reqMtx.Lock()
+	if len(client.respHandlers) != 0 {
+		t.Fatalf("expired response handler not pruned")
+	}
+	_, found = client.respHandlers[expiredID]
+	if found {
+		t.Fatalf("expired response handler still in map")
+	}
+	client.reqMtx.Unlock()
 }
 
 func TestOnline(t *testing.T) {
-	portAddr := ":57623"
-	address := "wss://127.0.0.1:57623/ws"
 	tempDir, err := ioutil.TempDir("", "example")
 	if err != nil {
 		t.Fatalf("TempDir error: %v", err)
@@ -636,19 +599,16 @@ func TestOnline(t *testing.T) {
 	pongWait = 50 * time.Millisecond
 	pingPeriod = (pongWait * 9) / 10
 	server, err := NewServer(&RPCConfig{
-		ListenAddrs: []string{portAddr},
+		ListenAddrs: []string{":0"},
 		RPCKey:      keyPath,
 		RPCCert:     certPath,
 	})
 	if err != nil {
 		t.Fatalf("server constructor error: %v", err)
 	}
+	address := "wss://" + server.listeners[0].Addr().String() + "/ws"
 
 	// Register routes before starting server.
-	// No response simulates a route that returns no response.
-	Route("noresponse", func(_ Link, _ *msgjson.Message) *msgjson.Error {
-		return nil
-	})
 	// The 'ok' route returns an affirmative response.
 	type okresult struct {
 		OK bool `json:"ok"`
@@ -665,6 +625,7 @@ func TestOnline(t *testing.T) {
 		return nil
 	})
 	// The 'banuser' route quarantines the user.
+	banChan := make(chan interface{})
 	Route("banuser", func(c Link, req *msgjson.Message) *msgjson.Error {
 		rpcErr := msgjson.NewError(msgjson.RPCQuarantineClient, "test quarantine")
 		msg, _ := msgjson.NewResponse(req.ID, nil, rpcErr)
@@ -673,6 +634,7 @@ func TestOnline(t *testing.T) {
 			t.Fatalf("banuser route send error: %v", err)
 		}
 		c.Banish()
+		banChan <- nil
 		return nil
 	})
 
@@ -705,24 +667,15 @@ func TestOnline(t *testing.T) {
 		t.Fatalf("remoteClient constructor error: %v", err)
 	}
 
-	var response, r []byte
-	// Check if the response is nil.
-	nilResponse := func() bool {
-		var isNil bool
-		lockedExe(func() { isNil = response == nil })
-		return isNil
-	}
-
 	// A loop to grab responses from the server.
-	var readErr, re error
+	recv := make(chan interface{})
 	go func() {
 		for {
-			_, r, re = remoteClient.ReadMessage()
-			lockedExe(func() {
-				response = r
-				readErr = re
-			})
-			if re != nil {
+			_, r, err := remoteClient.ReadMessage()
+			if err == nil {
+				recv <- r
+			} else {
+				recv <- err
 				break
 			}
 		}
@@ -734,35 +687,23 @@ func TestOnline(t *testing.T) {
 			t.Fatalf("error encoding %s request: %v", route, err)
 		}
 		err = remoteClient.WriteMessage(websocket.TextMessage, b)
-		time.Sleep(time.Millisecond * 10)
 		return err
 	}
 
 	// Sleep for a few  pongs to make sure the client doesn't disconnect.
 	time.Sleep(pongWait * 3)
 
-	err = sendToDEX("noresponse", "{}")
-	if err != nil {
-		t.Fatalf("noresponse send error: %v", err)
-	}
-	if !nilResponse() {
-		t.Fatalf("response set for 'noresponse' request")
-	}
-
+	// Positive path.
 	err = sendToDEX("ok", "{}")
 	if err != nil {
 		t.Fatalf("noresponse send error: %v", err)
 	}
-	if nilResponse() {
-		t.Fatalf("no response set for 'ok' request")
-	}
-	var resp *msgjson.ResponsePayload
-	lockedExe(func() {
-		msg, _ := msgjson.DecodeMessage(response)
-		resp, _ = msg.Response()
-	})
+	b := readChannel(t, "ok", recv).([]byte)
+
+	msg, _ := msgjson.DecodeMessage(b)
+
 	ok := new(okresult)
-	err = json.Unmarshal(resp.Result, ok)
+	err = msg.UnmarshalResult(ok)
 	if err != nil {
 		t.Fatalf("'ok' response unmarshal error: %v", err)
 	}
@@ -775,35 +716,36 @@ func TestOnline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("banuser send error: %v", err)
 	}
-	lockedExe(func() {
-		if readErr == nil {
-			t.Fatalf("no read error after ban")
-		}
-	})
+	readChannel(t, "noresponse", banChan)
+	err = readChannel(t, "ok", recv).(error)
+	if err == nil {
+		t.Fatalf("no read error after ban")
+	}
+
 	// Try connecting, and make sure there is an error.
 	_, err = newTestDEXClient(address, rootCAs)
 	if err == nil {
 		t.Fatalf("no websocket connection error after ban")
 	}
 	// Manually set the ban time.
-	func() {
-		server.banMtx.Lock()
-		defer server.banMtx.Unlock()
-		if len(server.quarantine) != 1 {
-			t.Fatalf("unexpected number of quarantined IPs")
-		}
-		for ip := range server.quarantine {
-			server.quarantine[ip] = time.Now()
-		}
-	}()
+	server.banMtx.Lock()
+	if len(server.quarantine) != 1 {
+		t.Fatalf("unexpected number of quarantined IPs")
+	}
+	for ip := range server.quarantine {
+		server.quarantine[ip] = time.Now()
+	}
+	server.banMtx.Unlock()
 	// Now try again. Should connect.
 	conn, err := newTestDEXClient(address, rootCAs)
 	if err != nil {
 		t.Fatalf("error connecting on expired ban")
 	}
-	time.Sleep(time.Millisecond * 10)
-	clientCount := server.clientCount()
-	if clientCount != 1 {
+	var clientCount uint64
+	if !giveItASecond(func() bool {
+		clientCount = server.clientCount()
+		return clientCount == 1
+	}) {
 		t.Fatalf("server claiming %d clients. Expected 1", clientCount)
 	}
 	conn.Close()
