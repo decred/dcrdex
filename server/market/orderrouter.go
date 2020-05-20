@@ -28,12 +28,15 @@ type AuthManager interface {
 	Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...msgjson.Signable) error
-	Send(account.AccountID, *msgjson.Message)
+	Send(account.AccountID, *msgjson.Message) error
+	SendWhenConnected(account.AccountID, *msgjson.Message, time.Duration, func())
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
 	Penalize(user account.AccountID, rule account.Rule)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 }
+
+const DefaultConnectTimeout = 10 * time.Minute
 
 // MarketTunnel is a connection to a market and information about existing
 // swaps.

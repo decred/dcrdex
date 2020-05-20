@@ -88,6 +88,7 @@ func (lm *LoggerMaker) NewLogger(name string, level ...slog.Level) dex.Logger {
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
+	DataDir          string
 	LogBackend       *dex.LoggerMaker
 	Markets          []*dex.MarketInfo
 	Assets           []*AssetConf
@@ -390,13 +391,19 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 	// Create the swapper.
 	swapperCfg := &swap.Config{
+		// TODO: load State and specify it here.
+		DataDir:          cfg.DataDir,
 		Assets:           lockableAssets,
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: cfg.BroadcastTimeout,
 	}
 
-	swapper := swap.NewSwapper(swapperCfg)
+	swapper, err := swap.NewSwapper(swapperCfg)
+	if err != nil {
+		abort()
+		return nil, fmt.Errorf("NewSwapper: %v", err)
+	}
 	startSubSys("Swapper", swapper)
 
 	// Markets

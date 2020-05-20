@@ -55,6 +55,7 @@ type procOpts struct {
 
 // dexConf is the data that is required to setup the dex.
 type dexConf struct {
+	DataDir          string
 	Network          dex.Network
 	DBName           string
 	DBUser           string
@@ -471,7 +472,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	initLogRotator(filepath.Join(cfg.LogDir, defaultLogFilename), cfg.MaxLogZips)
 
 	log.Infof("App data folder: %s", cfg.AppDataDir)
-	//log.Infof("Data folder:    %s", cfg.DataDir) // TODO: remove DataDir if dcrdex does not need it
+	log.Infof("Data folder:     %s", cfg.DataDir)
 	log.Infof("Log folder:      %s", cfg.LogDir)
 	log.Infof("Config file:     %s", configFile)
 
@@ -516,6 +517,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	cfg.PGDBName = strings.Replace(cfg.PGDBName, "{netname}", network.String(), -1)
 
 	dexCfg := &dexConf{
+		DataDir:          cfg.DataDir,
 		Network:          network,
 		DBName:           cfg.PGDBName,
 		DBHost:           dbHost,

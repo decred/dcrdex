@@ -11,10 +11,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +30,7 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
+	"github.com/decred/slog"
 )
 
 const (
@@ -120,7 +123,7 @@ func newTAuthManager() *TAuthManager {
 	}
 }
 
-func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) {
+func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	l := m.resps[user]
@@ -128,6 +131,11 @@ func (m *TAuthManager) Send(user account.AccountID, msg *msgjson.Message) {
 		l = make([]*msgjson.Message, 0, 1)
 	}
 	m.resps[user] = append(l, msg)
+	return nil
+}
+
+func (m *TAuthManager) SendWhenConnected(user account.AccountID, msg *msgjson.Message, _ time.Duration, _ func()) {
+	_ = m.Send(user, msg)
 }
 
 func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message,
@@ -135,6 +143,11 @@ func (m *TAuthManager) Request(user account.AccountID, msg *msgjson.Message,
 	return m.RequestWithTimeout(user, msg, f, time.Hour, func() {})
 }
 
+func (m *TAuthManager) RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
+	expireTimeout, connectTimeout time.Duration, expireFunc func()) {
+	// TODO
+	_ = m.RequestWithTimeout(user, req, handlerFunc, expireTimeout, expireFunc)
+}
 func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 	f func(comms.Link, *msgjson.Message), _ time.Duration, _ func()) error {
 	m.mtx.Lock()
@@ -178,6 +191,7 @@ func (m *TAuthManager) flushPenalty() (account.AccountID, account.Rule) {
 	return user, rule
 }
 
+// pop front
 func (m *TAuthManager) getReq(id account.AccountID) *TRequest {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
@@ -190,18 +204,21 @@ func (m *TAuthManager) getReq(id account.AccountID) *TRequest {
 	return req
 }
 
+// push front
 func (m *TAuthManager) pushReq(id account.AccountID, req *TRequest) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.reqs[id] = append([]*TRequest{req}, m.reqs[id]...)
 }
 
+// push front
 func (m *TAuthManager) pushResp(id account.AccountID, msg *msgjson.Message) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.resps[id] = append([]*msgjson.Message{msg}, m.resps[id]...)
 }
 
+// pop front
 func (m *TAuthManager) getResp(id account.AccountID) (*msgjson.Message, *msgjson.ResponsePayload) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
@@ -283,20 +300,23 @@ func (s *TStorage) SetMatchInactive(mid db.MarketMatchID) error { return nil }
 // This stub satisfies asset.Backend.
 type TAsset struct {
 	mtx           sync.RWMutex
-	contract      asset.Contract
+	contracts     map[string]asset.Contract
 	contractErr   error
 	funds         asset.FundingCoin
 	fundsErr      error
-	redemption    asset.Coin
+	redemptions   map[string]asset.Coin
 	redemptionErr error
-	bChan         chan *asset.BlockUpdate
+	bChan         chan *asset.BlockUpdate // to trigger processBlock and eventually (after up to BroadcastTimeout) checkInaction depending on block time
 	lbl           string
 }
 
 func newTAsset(lbl string) *TAsset {
 	return &TAsset{
-		bChan: make(chan *asset.BlockUpdate, 5),
-		lbl:   lbl,
+		bChan:       make(chan *asset.BlockUpdate, 5),
+		lbl:         lbl,
+		contracts:   make(map[string]asset.Contract),
+		redemptions: make(map[string]asset.Coin),
+		fundsErr:    asset.CoinNotFoundError,
 	}
 }
 
@@ -308,12 +328,26 @@ func (a *TAsset) FundingCoin(coinID, redeemScript []byte) (asset.FundingCoin, er
 func (a *TAsset) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
-	return a.contract, a.contractErr
+	if a.contractErr != nil {
+		return nil, a.contractErr
+	}
+	contract, found := a.contracts[string(coinID)]
+	if !found || contract == nil {
+		return nil, asset.CoinNotFoundError
+	}
+	return contract, nil
 }
-func (a *TAsset) Redemption(redemptionID, contractID []byte) (asset.Coin, error) {
+func (a *TAsset) Redemption(redemptionID, _ /*contractID*/ []byte) (asset.Coin, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
-	return a.redemption, a.redemptionErr
+	if a.redemptionErr != nil {
+		return nil, a.redemptionErr
+	}
+	redeem, found := a.redemptions[string(redemptionID)]
+	if !found || redeem == nil {
+		return nil, asset.CoinNotFoundError
+	}
+	return redeem, nil
 }
 func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
 	return "", nil
@@ -332,11 +366,27 @@ func (a *TAsset) setContractErr(err error) {
 	defer a.mtx.Unlock()
 	a.contractErr = err
 }
+func (a *TAsset) setContract(contract asset.Contract, resetErr bool) {
+	a.mtx.Lock()
+	a.contracts[string(contract.ID())] = contract
+	if resetErr {
+		a.contractErr = nil
+	}
+	a.mtx.Unlock()
+}
 
 func (a *TAsset) setRedemptionErr(err error) {
 	a.mtx.Lock()
 	defer a.mtx.Unlock()
 	a.redemptionErr = err
+}
+func (a *TAsset) setRedemption(redeem asset.Coin, resetErr bool) {
+	a.mtx.Lock()
+	a.redemptions[string(redeem.ID())] = redeem
+	if resetErr {
+		a.redemptionErr = nil
+	}
+	a.mtx.Unlock()
 }
 
 // This stub satisfies asset.Transaction, used by asset.Backend.
@@ -356,8 +406,12 @@ func (coin *TCoin) Confirmations() (int64, error) {
 	return coin.confs, coin.confsErr
 }
 
-func (coin *TCoin) Address() string {
+func (coin *TCoin) SwapAddress() string {
 	return coin.auditAddr
+}
+
+func (coin *TCoin) Addresses() []string {
+	return []string{coin.auditAddr}
 }
 
 func (coin *TCoin) LockTime() time.Time {
@@ -381,13 +435,19 @@ func (coin *TCoin) FeeRate() uint64 {
 	return 1
 }
 
-func (coin *TCoin) Script() []byte { return nil }
+func (coin *TCoin) RedeemScript() []byte { return nil }
 
 func TNewAsset(backend asset.Backend) *asset.BackedAsset {
 	return &asset.BackedAsset{
 		Backend: backend,
 		Asset:   dex.Asset{SwapConf: 2},
 	}
+}
+
+var testMsgID uint64
+
+func nextID() uint64 {
+	return atomic.AddUint64(&testMsgID, 1)
 }
 
 func tNewResponse(id uint64, resp []byte) *msgjson.Message {
@@ -407,21 +467,43 @@ type testRig struct {
 	storage       *TStorage
 	matches       *tMatchSet
 	matchInfo     *tMatch
+	swapDataDir   string
 }
 
-func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
-	abcBackend := newTAsset("abc")
+type rigData struct {
+	state    *State
+	abc, xyz *TAsset
+}
+
+func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
+	var abcBackend, xyzBackend *TAsset
+	var state *State
+	manualMode := len(conf) > 0
+	if manualMode && conf[0] != nil {
+		abcBackend, xyzBackend = conf[0].abc, conf[0].xyz
+		state = conf[0].state
+	} else {
+		abcBackend = newTAsset("abc")
+		xyzBackend = newTAsset("xyz")
+	}
+
 	abcAsset := TNewAsset(abcBackend)
 	abcCoinLocker := coinlock.NewAssetCoinLocker()
 
-	xyzBackend := newTAsset("xyz")
 	xyzAsset := TNewAsset(xyzBackend)
 	xyzCoinLocker := coinlock.NewAssetCoinLocker()
 
 	authMgr := newTAuthManager()
 	storage := &TStorage{}
 
-	swapper := NewSwapper(&Config{
+	swapDataDir, err := ioutil.TempDir("", "swapstates")
+	if err != nil {
+		panic(err.Error())
+	}
+
+	swapper, err := NewSwapper(&Config{
+		State:   state,
+		DataDir: swapDataDir,
 		Assets: map[uint32]*LockableAsset{
 			ABCID: {abcAsset, abcCoinLocker},
 			XYZID: {xyzAsset, xyzCoinLocker},
@@ -430,12 +512,23 @@ func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
 		AuthManager:      authMgr,
 		BroadcastTimeout: txWaitExpiration * 5,
 	})
+	if err != nil {
+		panic(err.Error())
+	}
 
 	ssw := dex.NewStartStopWaiter(swapper)
 	ssw.Start(testCtx)
 	cleanup := func() {
 		ssw.Stop()
 		ssw.WaitForShutdown()
+		// If state was passed, even if nil, do not clean up the swapDataDir.
+		// Leave it to the test that used the state arg to do
+		// os.RemoveAll(rig.swapDataDir) after cleanup().
+		if !manualMode {
+			os.RemoveAll(swapDataDir)
+		} else {
+			time.Sleep(10 * time.Millisecond) // to avoid swap state files with the same ms stamp
+		}
 	}
 
 	return &testRig{
@@ -448,13 +541,14 @@ func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
 		swapperWaiter: ssw,
 		storage:       storage,
 		matchInfo:     matchInfo,
+		swapDataDir:   swapDataDir,
 	}, cleanup
 }
 
 func (rig *testRig) getTracker() *matchTracker {
 	rig.swapper.matchMtx.Lock()
 	defer rig.swapper.matchMtx.Unlock()
-	return rig.swapper.matches[rig.matchInfo.matchID.String()]
+	return rig.swapper.matches[rig.matchInfo.matchID]
 }
 
 // Taker: Acknowledge the servers match notification.
@@ -506,7 +600,7 @@ func (rig *testRig) ackMatch(user *tUser, oid order.OrderID, counterAddr string)
 	// The maker and taker would sign the notifications and return a list of
 	// authorizations.
 	resp := tNewResponse(req.req.ID, tAckArr(user, user.matchIDs))
-	req.respFunc(nil, resp)
+	req.respFunc(nil, resp) // e.g. processMatchAcks, may Send resp on error
 	return nil
 }
 
@@ -607,9 +701,9 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 	matchInfo := rig.matchInfo
 	swap := tNewSwap(matchInfo, oid, recipient, user)
 	if isQuoteSwap(user, matchInfo.match) {
-		rig.xyzNode.contract = swap.coin
+		rig.xyzNode.setContract(swap.coin, false)
 	} else {
-		rig.abcNode.contract = swap.coin
+		rig.abcNode.setContract(swap.coin, false)
 	}
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
 	if rpcErr != nil {
@@ -750,9 +844,10 @@ func (rig *testRig) redeem(user *tUser, oid order.OrderID) *tRedeem {
 	matchInfo := rig.matchInfo
 	redeem := tNewRedeem(matchInfo, oid, user)
 	if isQuoteSwap(user, matchInfo.match) {
-		rig.abcNode.redemption = redeem.coin
+		// do not clear redemptionErr yet
+		rig.abcNode.setRedemption(redeem.coin, false)
 	} else {
-		rig.xyzNode.redemption = redeem.coin
+		rig.xyzNode.setRedemption(redeem.coin, false)
 	}
 	rpcErr := rig.swapper.handleRedeem(user.acct, redeem.req)
 	if rpcErr != nil {
@@ -888,15 +983,15 @@ func marketLimitPair(makerQty, takerQty, rate uint64, maker, taker *tUser, maker
 	return makeLimitOrder(makerQty, rate, maker, makerSell), makeMarketOrder(takerQty, taker, !makerSell)
 }
 
-func tLimitPair(makerQty, takerQty, matchQty, makerRate, takerRate uint64, sell bool) *tMatchSet {
+func tLimitPair(makerQty, takerQty, matchQty, makerRate, takerRate uint64, makerSell bool) *tMatchSet {
 	set := new(tMatchSet)
 	maker, taker := tNewUser("maker"), tNewUser("taker")
-	makerOrder, takerOrder := limitLimitPair(makerQty, takerQty, makerRate, takerRate, maker, taker, sell)
+	makerOrder, takerOrder := limitLimitPair(makerQty, takerQty, makerRate, takerRate, maker, taker, makerSell)
 	return set.add(tMatchInfo(maker, taker, matchQty, makerRate, makerOrder, takerOrder))
 }
 
-func tPerfectLimitLimit(qty, rate uint64, sell bool) *tMatchSet {
-	return tLimitPair(qty, qty, qty, rate, rate, sell)
+func tPerfectLimitLimit(qty, rate uint64, makerSell bool) *tMatchSet {
+	return tLimitPair(qty, qty, qty, rate, rate, makerSell)
 }
 
 func tMarketPair(makerQty, takerQty, rate uint64, makerSell bool) *tMatchSet {
@@ -906,8 +1001,8 @@ func tMarketPair(makerQty, takerQty, rate uint64, makerSell bool) *tMatchSet {
 	return set.add(tMatchInfo(maker, taker, makerQty, rate, makerOrder, takerOrder))
 }
 
-func tPerfectLimitMarket(qty, rate uint64, sell bool) *tMatchSet {
-	return tMarketPair(qty, qty, rate, sell)
+func tPerfectLimitMarket(qty, rate uint64, makerSell bool) *tMatchSet {
+	return tMarketPair(qty, qty, rate, makerSell)
 }
 
 func tCancelPair() *tMatchSet {
@@ -984,12 +1079,10 @@ func tMatchInfo(maker, taker *tUser, matchQty, matchRate uint64, makerOrder *ord
 	}
 }
 
-type tMatches []*tMatch
-
 // Matches are submitted to the swapper in small batches, one for each taker.
 type tMatchSet struct {
 	matchSet   *order.MatchSet
-	matchInfos tMatches
+	matchInfos []*tMatch
 }
 
 // Add a new match to the tMatchSet.
@@ -1069,7 +1162,7 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 	}
 
 	contract := "01234567" + user.sigHex
-	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Init{
+	req, _ := msgjson.NewRequest(nextID(), msgjson.InitRoute, &msgjson.Init{
 		OrderID: oid[:],
 		MatchID: matchInfo.matchID[:],
 		// We control what the backend returns, so the txid doesn't matter right now.
@@ -1105,7 +1198,7 @@ type tRedeem struct {
 
 func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
 	coinID := randBytes(36)
-	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Redeem{
+	req, _ := msgjson.NewRequest(nextID(), msgjson.RedeemRoute, &msgjson.Redeem{
 		OrderID: oid[:],
 		MatchID: matchInfo.matchID[:],
 		CoinID:  coinID,
@@ -1154,6 +1247,12 @@ func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 func TestMain(m *testing.M) {
 	recheckInterval = time.Millisecond * 20
 	txWaitExpiration = recheckInterval * 10
+	logger := slog.NewBackend(os.Stdout).Logger("SWAPTEST")
+	logger.SetLevel(slog.LevelTrace)
+	UseLogger(logger)
+	db.UseLogger(logger)
+	matcher.UseLogger(logger)
+	comms.UseLogger(logger)
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
@@ -1313,8 +1412,12 @@ func TestTxWaiters(t *testing.T) {
 
 	// Get the MatchNotifications that the swapper sent to the clients and check
 	// the match notification length, content, IDs, etc.
-	ensureNilErr(rig.ackMatch_maker(true))
-	ensureNilErr(rig.ackMatch_taker(true))
+	if err := rig.ackMatch_maker(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.ackMatch_taker(true); err != nil {
+		t.Fatal(err)
+	}
 	// Set a non-latency error.
 	rig.abcNode.setContractErr(dummyError)
 	rig.sendSwap_maker(false)
@@ -1326,7 +1429,9 @@ func TestTxWaiters(t *testing.T) {
 	rig.abcNode.setContractErr(asset.CoinNotFoundError)
 	// The error will be generated by the chainWaiter thread, so will need to
 	// check the response.
-	ensureNilErr(rig.sendSwap_maker(false))
+	if err := rig.sendSwap_maker(false); err != nil {
+		t.Fatal(err)
+	}
 	timeOutMempool()
 	// Should have an rpc error.
 	msg, resp = rig.auth.getResp(matchInfo.maker.acct)
@@ -1339,9 +1444,15 @@ func TestTxWaiters(t *testing.T) {
 
 	rig.abcNode.setContractErr(nil)
 	// Everything should work now.
-	ensureNilErr(rig.sendSwap_maker(true))
-	ensureNilErr(rig.auditSwap_taker())
-	ensureNilErr(rig.ackAudit_taker(true))
+	if err := rig.sendSwap_maker(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.auditSwap_taker(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.ackAudit_taker(true); err != nil {
+		t.Fatal(err)
+	}
 	// Non-latency error.
 	rig.xyzNode.setContractErr(dummyError)
 	rig.sendSwap_taker(false)
@@ -1440,7 +1551,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unmarshal error for %s at step %d: %s", user.lbl, i, string(req.req.Payload))
 		}
-		if params.MatchID.String() != rig.matchInfo.matchID.String() {
+		if !bytes.Equal(params.MatchID, rig.matchInfo.matchID[:]) {
 			t.Fatalf("unexpected revocation match ID for %s at step %d. expected %s, got %s",
 				user.lbl, i, rig.matchInfo.matchID, params.MatchID)
 		}
@@ -1474,7 +1585,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 	}
 	// Run a timeout test after every important step.
 	for i := 0; i <= 7; i++ {
-		set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true)
+		set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true) // same orders, different users
 		matchInfo := set.matchInfos[0]
 		rig.matchInfo = matchInfo
 		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
@@ -1532,12 +1643,15 @@ func TestSigErrors(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil) // pushes a new req to m.reqs
 	ensureNilErr := makeEnsureNilErr(t)
-	// checkResp makes sure that the specified user has a signature error response
-	// from the swapper.
-	checkResp := rpcErrorChecker(t, rig, msgjson.SignatureError)
-	// We need a way to restore the state of the queue.
+
+	// ensureSigErr makes sure that the specified user has a signature error
+	// response from the swapper.
+	ensureSigErr := rpcErrorChecker(t, rig, msgjson.SignatureError)
+
+	// We need a way to restore the state of the queue after testing an auth error.
 	var tReq *TRequest
 	var msg *msgjson.Message
 	apply := func(user *tUser) {
@@ -1551,23 +1665,22 @@ func TestSigErrors(t *testing.T) {
 	stash := func(user *tUser) {
 		msg, _ = rig.auth.getResp(user.acct)
 		tReq = rig.auth.getReq(user.acct)
-		apply(user)
+		apply(user) // put them back now that we have a copy
 	}
 	testAction := func(stepFunc func(bool) error, user *tUser) {
+		// First do it with an auth error.
 		rig.auth.authErr = dummyError
-		stash(user)
-		// I really don't care if this is an error. The error will be pulled from
-		// the auth manager. But golangci-lint really wants me to check the error.
-		err := stepFunc(false)
-		if err == nil && err != nil {
-			fmt.Printf("impossible")
-		}
-		checkResp(user)
+		stash(user) // make a copy of this user's next req/resp pair
+		// The error will be pulled from the auth manager.
+		_ = stepFunc(false) // getReq => req.respFunc(..., tNewResponse()) => send error to client (m.resps)
+		ensureSigErr(user)  // getResp
+		// Again with no auth error to go to the next step.
 		rig.auth.authErr = nil
-		apply(user)
+		apply(user) // restore the initial live request
 		ensureNilErr(stepFunc(true))
 	}
 	maker, taker := matchInfo.maker, matchInfo.taker
+	// 1 live match, 2 pending client acks
 	testAction(rig.ackMatch_maker, maker)
 	testAction(rig.ackMatch_taker, taker)
 	testAction(rig.sendSwap_maker, maker)
@@ -1686,6 +1799,568 @@ func TestCancel(t *testing.T) {
 	}
 }
 
+func TestState(t *testing.T) {
+	sendBlock := func(node *TAsset) {
+		node.bChan <- &asset.BlockUpdate{Err: nil}
+		tickMempool() // look for another signal
+	}
+
+	var rig *testRig
+	var stop func()
+	loadLatestState := func() (*State, error) {
+		stateFile, err := LatestStateFile(rig.swapDataDir)
+		if err != nil {
+			return nil, fmt.Errorf("error finding swap state files: %v", err)
+		}
+		if stateFile == nil {
+			return nil, fmt.Errorf("no swap state file found.")
+		}
+		state, err := LoadStateFile(stateFile.Name)
+		if err != nil {
+			return nil, fmt.Errorf("error loading swap state file %q: %v", stateFile.Name, err)
+		}
+		return state, nil
+	}
+
+	// Start a swap negotiation with two pending match acks, then shutdown.
+	// ABC is base, XYZ is quote
+	makerSell := true // maker: swap = ABC, redeem = XYZ / taker: swap = XYZ, redeem = ABC
+	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
+	matchInfo := set.matchInfos[0]
+	rig, stop = tNewTestRig(matchInfo, nil)
+	defer os.RemoveAll(rig.swapDataDir)
+	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
+
+	abc, xyz := rig.abcNode, rig.xyzNode
+
+	maker, taker := matchInfo.maker, matchInfo.taker
+	users := []account.AccountID{maker.acct, taker.acct}
+	userFound := func(user account.AccountID) bool {
+		for i := range users {
+			if user == users[i] {
+				return true
+			}
+		}
+		return false
+	}
+
+	stop()
+
+	// Swap state is now written into a file in rig.swapDataDir.
+	state, err := loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.LiveAckers) != 2 {
+		t.Fatalf("expected 2 live ackers, got %d", len(state.LiveAckers))
+	}
+	for _, acker := range state.LiveAckers {
+		if acker.Request.Route != msgjson.MatchRoute {
+			t.Fatalf("acker for route %v, expected %v", acker.Request.Route, msgjson.MatchRoute)
+		}
+		if !userFound(acker.AckData[0].User) {
+			t.Fatalf("unexpected acker user %v", acker.AckData[0].User)
+		}
+	}
+
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	if len(rig.swapper.matches) != 1 {
+		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
+	}
+
+	tracker := rig.getTracker()
+	if tracker.Status != order.NewlyMatched {
+		t.Fatalf("match not marked as NewlyMatched: %v", tracker.Status)
+	}
+
+	// Maker acks match.
+	err = rig.ackMatch_maker(false)
+	if err != nil {
+		t.Fatalf("maker failed to ack the match: %v", err)
+	}
+
+	stop()
+
+	// Swap state is now written into a file in rig.swapDataDir.
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 1 {
+		t.Fatalf("expected 1 live ackers, got %d", len(state.LiveAckers))
+	}
+	// Still have to range over the map even though there is just one element
+	// since we don't know the msgID (map key).
+	for _, acker := range state.LiveAckers {
+		if acker.Request.Route != msgjson.MatchRoute {
+			t.Fatalf("acker for route %v, expected %v", acker.Request.Route, msgjson.MatchRoute)
+		}
+		// should be just taker left
+		if acker.AckData[0].User != taker.acct {
+			t.Fatalf("unexpected acker user %v, expected %v", acker.AckData[0].User, taker.acct)
+		}
+	}
+
+	// Start the swapper back up.
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	if len(rig.swapper.matches) != 1 {
+		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
+	}
+
+	// Taker acks match.
+	err = rig.ackMatch_taker(false)
+	if err != nil {
+		t.Fatalf("taker failed to ack the match: %v", err)
+	}
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 0 {
+		t.Fatalf("expected 0 live ackers, got %d", len(state.LiveAckers))
+	}
+
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	if len(rig.swapper.matches) != 1 {
+		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
+	}
+
+	// handleInit for maker
+	// if err = rig.sendSwap_maker(true); err != nil {
+	// 	t.Fatalf("maker failed to send swap txn: %v", err)
+	// }
+	makerSwap := tNewSwap(matchInfo, matchInfo.makerOID, matchInfo.taker.addr, maker)
+	// do not "broadcast" the contract yet: abc.setContract(makerSwap.coin, true)
+	// TAsset can't find it yet, TryAgain back to the coinwaiter
+	rpcErr := rig.swapper.handleInit(maker.acct, makerSwap.req)
+	if rpcErr != nil {
+		t.Fatalf("handleInit failed: %v", rpcErr)
+	}
+
+	// There is now a live coin waiter for the maker's swap, no audit request
+	// yet since that is triggered after accounting for latency, calling
+	// processInit>processAck.
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 0 {
+		t.Fatalf("expected 0 live ackers, got %d", len(state.LiveAckers))
+	}
+	if len(state.LiveWaiters) != 1 {
+		t.Fatalf("expected 1 live coin waiter, got %d", len(state.LiveWaiters))
+	}
+
+	// Restarting the swapper should call handleInit again with the same args to
+	// recreate the same coinwaiter.
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	if len(rig.swapper.matches) != 1 {
+		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
+	}
+
+	// Should still be NewlyMatched since the contract has not been bcasted yet.
+	tracker = rig.getTracker()
+	if tracker.Status != order.NewlyMatched {
+		t.Fatalf("match not marked as NewlyMatched: %v", tracker.Status)
+	}
+
+	// "broadcast" the contract and signal a new block.
+	abc.setContract(makerSwap.coin, true)
+	makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
+	sendBlock(abc) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
+	// processInit should have succeeded, requesting an ack from taker of the maker's contract.
+
+	matchInfo.db.makerSwap = makerSwap // for taker's audit
+
+	// The match status should now be MakerSwapCast, and there should be one ack (taker audit request)
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	if tracker.Status != order.MakerSwapCast {
+		t.Fatalf("match not marked as MakerSwapCast: %v", tracker.Status)
+	}
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 1 {
+		t.Fatalf("expected 1 live ackers, got %d", len(state.LiveAckers))
+	}
+	if len(state.LiveWaiters) != 0 {
+		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
+	}
+
+	if state.MatchTrackers[matchInfo.matchID].Match.Status != order.MakerSwapCast {
+		t.Fatalf("state's match tracker in status %v, expected %v",
+			state.MatchTrackers[matchInfo.matchID].Match.Status, order.MakerSwapCast)
+	}
+
+	// Check that it's a taker audit request.
+	for _, acker := range state.LiveAckers {
+		if acker.Request.Route != msgjson.AuditRoute {
+			t.Fatalf("acker for route %v, expected %v", acker.Request.Route, msgjson.AuditRoute)
+		}
+		// taker
+		if acker.AckData[0].User != taker.acct {
+			t.Fatalf("unexpected acker user %v, expected %v", acker.AckData[0].User, taker.acct)
+		}
+	}
+
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	if len(rig.swapper.matches) != 1 {
+		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
+	}
+
+	tracker = rig.getTracker()
+	if tracker.Status != order.MakerSwapCast {
+		t.Fatalf("match not marked as MakerSwapCast: %v", tracker.Status)
+	}
+
+	if err = rig.auditSwap_taker(); err != nil {
+		t.Fatalf("taker failed to audit the maker's contract: %v", err)
+	}
+	if err = rig.ackAudit_taker(true); err != nil {
+		t.Fatalf("taker failed to ack their audit of maker's contract: %v", err)
+	}
+
+	// There are now no live acks or coin waiters. Next step is for the taker to
+	// init for their contract.
+
+	// handleInit for taker
+	takerSwap := tNewSwap(matchInfo, matchInfo.takerOID, matchInfo.maker.addr, taker)
+	// do not "broadcast" the contract yet: xyz.setContract(takerSwap.coin, true)
+	// TAsset can't find it yet, TryAgain back to the coinwaiter
+	rpcErr = rig.swapper.handleInit(taker.acct, takerSwap.req)
+	if rpcErr != nil {
+		t.Fatalf("handleInit failed: %v", rpcErr)
+	}
+
+	// There is now a live coin waiter for the taker's swap, no audit request
+	// yet since that is triggered after accounting for latency, calling
+	// processInit>processAck.
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 0 {
+		t.Fatalf("expected 0 live ackers, got %d", len(state.LiveAckers))
+	}
+	if len(state.LiveWaiters) != 1 {
+		t.Fatalf("expected 1 live coin waiter, got %d", len(state.LiveWaiters))
+	}
+
+	// Restarting the swapper should call handleInit again with the same args to
+	// recreate the same coinwaiter.
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	// Should still be MakerSwapCast since the contract has not been bcasted yet.
+	tracker = rig.getTracker()
+	if tracker.Status != order.MakerSwapCast {
+		t.Fatalf("match not marked as MakerSwapCast: %v", tracker.Status)
+	}
+
+	// "broadcast" the contract and signal a new block.
+	xyz.setContract(takerSwap.coin, true)
+	takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
+	sendBlock(xyz) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
+	// processInit should have succeeded, requesting an ack from taker of the maker's contract.
+
+	matchInfo.db.takerSwap = takerSwap // for maker's audit
+
+	// The match status should now be TakerSwapCast, and there should be one ack (maker audit request)
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	if tracker.Status != order.TakerSwapCast {
+		t.Fatalf("match not marked as TakerSwapCast: %v", tracker.Status)
+	}
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 1 {
+		t.Fatalf("expected 1 live ackers, got %d", len(state.LiveAckers))
+	}
+	if len(state.LiveWaiters) != 0 {
+		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
+	}
+
+	if state.MatchTrackers[matchInfo.matchID].Match.Status != order.TakerSwapCast {
+		t.Fatalf("state's match tracker in status %v, expected %v",
+			state.MatchTrackers[matchInfo.matchID].Match.Status, order.TakerSwapCast)
+	}
+
+	// Check that it's a maker audit request.
+	for _, acker := range state.LiveAckers {
+		if acker.Request.Route != msgjson.AuditRoute {
+			t.Fatalf("acker for route %v, expected %v", acker.Request.Route, msgjson.AuditRoute)
+		}
+		// maker
+		if acker.AckData[0].User != maker.acct {
+			t.Fatalf("unexpected acker user %v, expected %v", acker.AckData[0].User, maker.acct)
+		}
+	}
+
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	tracker = rig.getTracker()
+	if tracker.Status != order.TakerSwapCast {
+		t.Fatalf("match not marked as TakerSwapCast: %v", tracker.Status)
+	}
+
+	if err = rig.auditSwap_maker(); err != nil {
+		t.Fatalf("maker failed to audit the taker's contract: %v", err)
+	}
+	if err = rig.ackAudit_maker(true); err != nil {
+		t.Fatalf("maker failed to ack their audit of taker's contract: %v", err)
+	}
+
+	// handleRedeem for maker
+	makerRedeem := tNewRedeem(matchInfo, matchInfo.makerOID, maker)
+	// do not "broadcast" the redeem yet: xyz.setRedemption(makerRedeem.coin, true)
+	// TAsset can't find it yet, TryAgain back to the coinwaiter
+	rpcErr = rig.swapper.handleRedeem(maker.acct, makerRedeem.req)
+	if rpcErr != nil {
+		t.Fatalf("handleRedeem failed: %v", rpcErr)
+	}
+
+	// There is now a live coin waiter for the maker's redeem, no redeem ack
+	// request yet since that is triggered after accounting for latency, calling
+	// processRedeem>processAck.
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 0 {
+		t.Fatalf("expected 0 live ackers, got %d", len(state.LiveAckers))
+	}
+	if len(state.LiveWaiters) != 1 {
+		t.Fatalf("expected 1 live coin waiter, got %d", len(state.LiveWaiters))
+	}
+
+	// Restarting the swapper should call handleRedeem again with the same args to
+	// recreate the same coinwaiter.
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	if len(rig.swapper.matches) != 1 {
+		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
+	}
+
+	// Should still be TakerSwapCast since the maker's redeem has not been bcasted yet.
+	tracker = rig.getTracker()
+	if tracker.Status != order.TakerSwapCast {
+		t.Fatalf("match not marked as TakerSwapCast: %v", tracker.Status)
+	}
+
+	// "broadcast" the redeem and signal a new block.
+	xyz.setRedemption(makerRedeem.coin, true)
+	makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
+	sendBlock(xyz) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
+	// processRedeem should have succeeded, requesting an ack from taker of the maker's redeem.
+
+	matchInfo.db.makerRedeem = makerRedeem // for taker's redeem ack
+
+	// The match status should now be MakerRedeemed, and there should be one ack
+	// (taker redemption ack request).
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	if tracker.Status != order.MakerRedeemed {
+		t.Fatalf("match not marked as MakerRedeemed: %v", tracker.Status)
+	}
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 1 {
+		t.Fatalf("expected 1 live ackers, got %d", len(state.LiveAckers))
+	}
+	if len(state.LiveWaiters) != 0 {
+		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
+	}
+
+	if state.MatchTrackers[matchInfo.matchID].Match.Status != order.MakerRedeemed {
+		t.Fatalf("state's match tracker in status %v, expected %v",
+			state.MatchTrackers[matchInfo.matchID].Match.Status, order.MakerRedeemed)
+	}
+
+	// Check that it's a taker ack request.
+	for _, acker := range state.LiveAckers {
+		if acker.Request.Route != msgjson.RedemptionRoute {
+			t.Fatalf("acker for route %v, expected %v", acker.Request.Route, msgjson.RedemptionRoute)
+		}
+		// taker
+		if acker.AckData[0].User != taker.acct {
+			t.Fatalf("unexpected acker user %v, expected %v", acker.AckData[0].User, taker.acct)
+		}
+	}
+
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	tracker = rig.getTracker()
+	if tracker.Status != order.MakerRedeemed {
+		t.Fatalf("match not marked as MakerRedeemed: %v", tracker.Status)
+	}
+
+	if err = rig.ackRedemption_taker(true); err != nil {
+		t.Fatalf("taker failed to ack the maker's redemption: %v", err)
+	}
+
+	// handleRedeem for taker
+	takerRedeem := tNewRedeem(matchInfo, matchInfo.takerOID, taker)
+	// do not "broadcast" the redeem yet: abc.setRedemption(takerRedeem.coin, true)
+	// TAsset can't find it yet, TryAgain back to the coinwaiter
+	rpcErr = rig.swapper.handleRedeem(taker.acct, takerRedeem.req)
+	if rpcErr != nil {
+		t.Fatalf("handleRedeem failed: %v", rpcErr)
+	}
+
+	// There is now a live coin waiter for the taker's redeem, no redeem ack
+	// request yet since that is triggered after accounting for latency, calling
+	// processRedeem>processAck.
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 0 {
+		t.Fatalf("expected 0 live ackers, got %d", len(state.LiveAckers))
+	}
+	if len(state.LiveWaiters) != 1 {
+		t.Fatalf("expected 1 live coin waiter, got %d", len(state.LiveWaiters))
+	}
+
+	// Restarting the swapper should call handleRedeem again with the same args to
+	// recreate the same coinwaiter.
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	// Should still be MakerRedeemed since the taker's redeem has not been bcasted yet.
+	tracker = rig.getTracker()
+	if tracker.Status != order.MakerRedeemed {
+		t.Fatalf("match not marked as MakerRedeemed: %v", tracker.Status)
+	}
+
+	// "broadcast" the redeem and signal a new block.
+	abc.setRedemption(takerRedeem.coin, true)
+	takerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
+	sendBlock(abc) // wait recheckInterval*3/2 for the coin waiter, plus trigger processBlock
+	// processRedeem should have succeeded, requesting an ack from maker of the taker's redeem.
+
+	matchInfo.db.takerRedeem = takerRedeem // for maker's redeem ack
+
+	// The match status should now be MatchComplete, and there should be one ack
+	// (maker redemption ack request).
+
+	stop() // Swap state is now written into a file in rig.swapDataDir.
+
+	if tracker.Status != order.MatchComplete {
+		t.Fatalf("match not marked as MatchComplete: %v", tracker.Status)
+	}
+
+	state, err = loadLatestState()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(state.LiveAckers) != 1 {
+		t.Fatalf("expected 1 live ackers, got %d", len(state.LiveAckers))
+	}
+	if len(state.LiveWaiters) != 0 {
+		t.Fatalf("expected 0 live coin waiter, got %d", len(state.LiveWaiters))
+	}
+
+	if state.MatchTrackers[matchInfo.matchID].Match.Status != order.MatchComplete {
+		t.Fatalf("state's match tracker in status %v, expected %v",
+			state.MatchTrackers[matchInfo.matchID].Match.Status, order.MatchComplete)
+	}
+
+	// Check that it's a maker ack request.
+	for _, acker := range state.LiveAckers {
+		if acker.Request.Route != msgjson.RedemptionRoute {
+			t.Fatalf("acker for route %v, expected %v", acker.Request.Route, msgjson.RedemptionRoute)
+		}
+		// maker
+		if acker.AckData[0].User != maker.acct {
+			t.Fatalf("unexpected acker user %v, expected %v", acker.AckData[0].User, maker.acct)
+		}
+	}
+
+	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	defer os.RemoveAll(rig.swapDataDir)
+	defer stop()
+
+	if len(rig.swapper.matches) != 1 {
+		t.Errorf("expected 1 tracked match, got %d", len(rig.swapper.matches))
+	}
+
+	tracker = rig.getTracker()
+	if tracker.Status != order.MatchComplete {
+		t.Fatalf("match not marked as MatchComplete: %v", tracker.Status)
+	}
+
+	if err = rig.ackRedemption_maker(true); err != nil {
+		t.Fatalf("maker failed to ack the taker's redemption: %v", err)
+	}
+
+	sendBlock(abc)
+
+	// match should be gone now
+	if rig.getTracker() != nil {
+		t.Fatalf("expected matchTracker to be removed")
+	}
+}
+
 func TestTxMonitored(t *testing.T) {
 	sendBlock := func(node *TAsset) {
 		node.bChan <- &asset.BlockUpdate{Err: nil}
@@ -1697,17 +2372,16 @@ func TestTxMonitored(t *testing.T) {
 	matchInfo := set.matchInfos[0]
 	rig, cleanup := tNewTestRig(matchInfo)
 	defer cleanup()
+
 	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 	ensureNilErr := makeEnsureNilErr(t)
 	maker, taker := matchInfo.maker, matchInfo.taker
 
-	var makerLockedAsset, takerLockedAsset uint32
-	if makerSell {
-		makerLockedAsset = matchInfo.match.Maker.Base()  // maker sell locks base asset
-		takerLockedAsset = matchInfo.match.Taker.Quote() // taker buy locks quote asset
-	} else {
-		makerLockedAsset = matchInfo.match.Maker.Quote() // maker sell locks base asset
-		takerLockedAsset = matchInfo.match.Taker.Base()  // taker buy locks quote asset
+	makerLockedAsset := matchInfo.match.Maker.Base()  // maker sell locks base asset
+	takerLockedAsset := matchInfo.match.Taker.Quote() // taker buy locks quote asset
+	if !makerSell {
+		// maker buy locks quote asset, taker sell locks base asset
+		makerLockedAsset, takerLockedAsset = takerLockedAsset, makerLockedAsset
 	}
 
 	tracker := rig.getTracker()

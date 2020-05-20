@@ -921,7 +921,12 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 	// Inform the client that the order has been received, stamped, signed, and
 	// inserted into the current epoch queue.
-	m.auth.Send(ord.User(), respMsg)
+	user := ord.User()
+	m.auth.SendWhenConnected(user, respMsg, DefaultConnectTimeout, func() {
+		log.Infof("Failed to send signed new order response to disconnected user %v, order %v",
+			user, oid)
+		// The user may not respond to preimage requests...
+	})
 
 	// Send epoch update to epoch queue subscribers.
 	notifyChan <- &updateSignal{
@@ -940,7 +945,7 @@ func idToBytes(id [order.OrderIDSize]byte) []byte {
 
 // respondError sends an rpcError to a user.
 func (m *Market) respondError(id uint64, user account.AccountID, code int, errMsg string) {
-	log.Debugf("error going to user %x, code: %d, msg: %s", user, code, errMsg)
+	log.Debugf("sending error to user %v, code: %d, msg: %s", user, code, errMsg)
 	msg, err := msgjson.NewResponse(id, nil, &msgjson.Error{
 		Code:    code,
 		Message: errMsg,
@@ -948,7 +953,10 @@ func (m *Market) respondError(id uint64, user account.AccountID, code int, errMs
 	if err != nil {
 		log.Errorf("error creating error response with message '%s': %v", msg, err)
 	}
-	m.auth.Send(user, msg)
+	m.auth.SendWhenConnected(user, msg, DefaultConnectTimeout, func() {
+		log.Infof("Unable to send error response (code %d) to disconnected user %v: %q",
+			code, user, errMsg)
+	})
 }
 
 // preimage request-response handling data

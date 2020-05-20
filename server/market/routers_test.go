@@ -130,7 +130,12 @@ func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	return a.authErr
 }
 func (a *TAuth) Sign(...msgjson.Signable) error { log.Info("Sign"); return nil }
-func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) {
+func (a *TAuth) SendWhenConnected(user account.AccountID, msg *msgjson.Message, _ time.Duration, _ func()) {
+	if err := a.Send(user, msg); err != nil {
+		log.Debug(err)
+	}
+}
+func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) error {
 	msgTxt, _ := json.Marshal(msg)
 	log.Infof("Send for user %v. Message: %v", user, string(msgTxt))
 	a.sendsMtx.Lock()
@@ -144,21 +149,20 @@ func (a *TAuth) Send(user account.AccountID, msg *msgjson.Message) {
 		log.Infof("preimage found for msg id %v: %x", msg.ID, preimage)
 		payload, err := msg.Response()
 		if err != nil {
-			log.Errorf("Failed to unmarshal message ResponsePayload: %v", err)
-			return
+			return fmt.Errorf("Failed to unmarshal message ResponsePayload: %v", err)
 		}
 		if payload.Error != nil {
-			log.Errorf("invalid response: %v", payload.Error.Message)
+			return fmt.Errorf("invalid response: %v", payload.Error.Message)
 		}
 		ordRes := new(msgjson.OrderResult)
 		err = json.Unmarshal(payload.Result, ordRes)
 		if err != nil {
-			log.Errorf("Failed to unmarshal message Payload into OrderResult: %v", err)
-			return
+			return fmt.Errorf("Failed to unmarshal message Payload into OrderResult: %v", err)
 		}
 		log.Debugf("setting preimage for order %v", ordRes.OrderID)
 		a.preimagesByOrdID[ordRes.OrderID.String()] = preimage
 	}
+	return nil
 }
 func (a *TAuth) getSend() *msgjson.Message {
 	a.sendsMtx.Lock()
@@ -173,7 +177,11 @@ func (a *TAuth) getSend() *msgjson.Message {
 func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
 	return a.RequestWithTimeout(user, msg, f, time.Hour, func() {})
 }
-
+func (a *TAuth) RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
+	expireTimeout, connectTimeout time.Duration, expireFunc func()) {
+	// TODO
+	a.RequestWithTimeout(user, req, handlerFunc, expireTimeout, expireFunc)
+}
 func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message), expDur time.Duration, exp func()) error {
 	log.Infof("Request for user %v", user)
 	// Emulate the client.
@@ -240,7 +248,10 @@ func (m *TMarketTunnel) SubmitOrder(o *orderRecord) error {
 		OrderID:    oid[:],
 		ServerTime: encode.UnixMilliU(now),
 	}, nil)
-	m.auth.Send(account.AccountID{}, resp)
+	err := m.auth.Send(account.AccountID{}, resp)
+	if err != nil {
+		log.Debug("Send:", err)
+	}
 
 	return nil
 }
@@ -341,7 +352,6 @@ func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
 func (u *tUTXO) SwapAddress() string             { return "" }
-func (u *tUTXO) RefundAddress() string           { return "" }
 func (u *tUTXO) SpendSize() uint32               { return dummySize }
 func (u *tUTXO) ID() []byte                      { return nil }
 func (u *tUTXO) TxID() string                    { return "" }
