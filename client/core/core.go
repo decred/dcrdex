@@ -456,7 +456,7 @@ func addrHost(addr string) string {
 		// These are addresses with at least one colon in an unexpected
 		// position.
 		a, err := url.Parse(addr)
-		// Ths address is of an unknown format. Return as is.
+		// This address is of an unknown format. Return as is.
 		if err != nil {
 			log.Debugf("addrHost: unable to parse address '%s'", addr)
 			return addr
