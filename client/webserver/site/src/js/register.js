@@ -21,7 +21,7 @@ export default class RegistrationPage extends BasePage {
       'newWalletForm',
       // Form 3: Unlock Decred wallet
       'unlockWalletForm',
-      // Form 4: PreRegister DEX
+      // Form 4: Register DEX
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
       // Form 5: Confirm DEX registration and pay fee

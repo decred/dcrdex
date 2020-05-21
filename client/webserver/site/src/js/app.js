@@ -340,7 +340,7 @@ export default class Application {
     this.page.loader.remove()
   }
 
-  /* orders retreives a list of orders for the specified dex and market. */
+  /* orders retrieves a list of orders for the specified dex and market. */
   orders (dex, bid, qid) {
     var o = this.user.exchanges[dex].markets[marketID(bid, qid)].orders
     if (!o) {
