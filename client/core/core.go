@@ -66,10 +66,7 @@ type dexConnection struct {
 
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
-	// connected implies that the dex is connected.
-	//
-	// NOTE: This field is only used for notifications to the user, and
-	// should not be trusted in operations.
+	// connected is a best guess on the ws connection status.
 	connected bool
 }
 
@@ -2198,7 +2195,7 @@ func (c *Core) handleReconnect(host string) {
 // handleConnectEvent is called when a WsConn indicates that a connection was
 // lost or established.
 //
-// NOTE: This handler is only used to post notifications to the user.
+// NOTE: Disconnect event notifications may lag behind actual disconnections.
 func (c *Core) handleConnectEvent(host string, connected bool) {
 	c.connMtx.Lock()
 	if dc, found := c.conns[host]; found {
@@ -2207,15 +2204,12 @@ func (c *Core) handleConnectEvent(host string, connected bool) {
 	c.connMtx.Unlock()
 	statusStr := "connected"
 	lvl := db.Success
-	lggr := log.Info
 	if !connected {
 		statusStr = "disconnected"
 		lvl = db.WarningLevel
-		lggr = log.Warn
 	}
 	details := fmt.Sprintf("DEX at %s has %s", host, statusStr)
 	c.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), host, connected, details, lvl))
-	lggr(details)
 	c.refreshUser()
 }
 

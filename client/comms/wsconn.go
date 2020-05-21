@@ -71,8 +71,8 @@ type WsCfg struct {
 	ReconnectSync func()
 	// ConnectEventFunc runs whenever connection status changes.
 	//
-	// NOTE: These notifications are for aesthetic purposes only. They
-	// should not be relied upon for operation.
+	// NOTE: Disconnect event notifications may lag behind actual
+	// disconnections.
 	ConnectEventFunc func(bool)
 }
 
