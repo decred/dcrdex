@@ -105,6 +105,12 @@ export default class MarketsPage extends BasePage {
       this.setOrderVisibility()
     })
 
+    document.getElementById('rateField').addEventListener('wheel', myFunction);
+
+    function disableNumberWheel() {
+      this.style.fontSize = "35px";
+    }
+
     // Scan the rows in the market table and pull some basic info.
     var lastMarket = (data && data.market) ? data.market : State.fetch('selectedMarket')
     var mktFound = false
