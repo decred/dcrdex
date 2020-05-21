@@ -143,7 +143,14 @@ func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message), exp
 // Request sends the message to the client and tracks the response handler.
 func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Message), expireTime time.Duration, expire func()) error {
 	c.logReq(msg.ID, f, expireTime, expire)
-	return c.Send(msg)
+	err := c.Send(msg)
+	if err != nil {
+		// Neither expire or the handler should run. Stop the expire timer
+		// created by logReq and delete the response handler it added. The
+		// caller receives a non-nil error to deal with it.
+		c.respHandler(msg.ID) // drop the removed responseHandler
+	}
+	return err
 }
 
 // respHandler extracts the response handler for the provided request ID if it
@@ -154,12 +161,12 @@ func (c *wsLink) respHandler(id uint64) *responseHandler {
 	defer c.reqMtx.Unlock()
 	cb, ok := c.respHandlers[id]
 	if ok {
-		delete(c.respHandlers, id)
 		// Stop the expiration Timer. If the Timer fired after respHandler was
 		// called, but we found the response handler in the map, wsLink.expire
 		// is waiting for the reqMtx lock and will return false, thus preventing
 		// the registered expire func from executing.
 		cb.expire.Stop()
+		delete(c.respHandlers, id)
 	}
 	return cb
 }
