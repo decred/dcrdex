@@ -1052,8 +1052,12 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 		}
 
 		// Failure to respond in time is a miss, signalled by a nil pointer.
+		var missOnce sync.Once
 		miss := func() {
-			piChan <- nil
+			// RequestWithTimeout should only call this on expire, not because
+			// of link or other errors, but put it in a sync.Once to be safe
+			// since it will block if run twice.
+			missOnce.Do(func() { piChan <- nil })
 		}
 
 		// Send the preimage request to the order's owner.
@@ -1061,6 +1065,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 			m.handlePreimageResp(msg, reqData)
 		}, piTimeout, miss)
 		if err != nil {
+			miss() // only called by RequestWithTimeout on expire, not send errors
 			if errors.Is(err, ws.ErrPeerDisconnected) {
 				misses = append(misses, ord)
 				log.Debug("Preimage request failed: client gone.")
