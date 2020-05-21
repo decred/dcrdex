@@ -306,7 +306,7 @@ export default class MarketsPage extends BasePage {
       qtyField = page.mktBuyField
     }
     return {
-      dex: market.dex.url,
+      dex: market.dex.host,
       isLimit: limit,
       sell: sell,
       base: market.base.id,

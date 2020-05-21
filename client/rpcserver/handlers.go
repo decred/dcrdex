@@ -300,7 +300,7 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	for k, exchange := range exchanges {
 		exchangeDetails := convM(exchange)
 		// Remove a redundant address field.
-		delete(exchangeDetails, "url")
+		delete(exchangeDetails, "host")
 		markets := convM(exchangeDetails["markets"])
 		// Market keys are market name.
 		for k, market := range markets {
@@ -558,7 +558,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		returns: `Returns:
     map: The exchanges result.
     {
-      "[DEX url]": {
+      "[DEX host]": {
         "markets": {
           "[assetID-assetID]": {
             "baseid" (int): The base asset ID

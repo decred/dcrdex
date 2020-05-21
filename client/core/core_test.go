@@ -2776,3 +2776,67 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 	}
 	return lo, dbOrder, preImg, addr
 }
+
+func TestAddrHost(t *testing.T) {
+	tests := []struct {
+		name, addr, want string
+	}{{
+		name: "scheme, host, and port",
+		addr: "https://localhost:5758",
+		want: "localhost:5758",
+	}, {
+		name: "host and port",
+		addr: "localhost:5758",
+		want: "localhost:5758",
+	}, {
+		name: "just port",
+		addr: ":5758",
+		want: "localhost:5758",
+	}, {
+		name: "ip host and port",
+		addr: "127.0.0.1:5758",
+		want: "127.0.0.1:5758",
+	}, {
+		name: "just host",
+		addr: "thatonedex.com",
+		want: "thatonedex.com",
+	}, {
+		name: "shceme and host",
+		addr: "https://thatonedex.com",
+		want: "thatonedex.com",
+	}, {
+		name: "scheme, host, and path",
+		addr: "https://thatonedex.com/any/path",
+		want: "thatonedex.com",
+	}, {
+		name: "ipv6 host",
+		addr: "[1:2::]",
+		want: "[1:2::]",
+	}, {
+		name: "ipv6 host and port",
+		addr: "[1:2::]:5758",
+		want: "[1:2::]:5758",
+	}, {
+		name: "empty address",
+		want: "localhost",
+	}, {
+		name: "invalid host",
+		addr: "https://\n:1234",
+		want: "https://\n:1234",
+	}, {
+		name: "invalid port",
+		addr: ":asdf",
+		want: ":asdf",
+	}}
+	for _, test := range tests {
+		res := addrHost(test.addr)
+		if res != test.want {
+			t.Fatalf("wanted %s but got %s for test '%s'", test.want, res, test.name)
+		}
+		// Parsing results a second time should produce the same results.
+		res = addrHost(res)
+		if res != test.want {
+			t.Fatalf("wanted %s but got %s for test '%s'", test.want, res, test.name)
+		}
+	}
+}

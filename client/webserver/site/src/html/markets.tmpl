@@ -11,10 +11,10 @@
 
   {{- /* MARKET LIST */ -}}
   <div id="marketList" class="marketlist">
-    {{range $url, $xc := .Exchanges}}
-      <div class="fs16 py-1 pl-2 bg1">{{urlBase $url}}</div>
+    {{range $host, $xc := .Exchanges}}
+      <div class="fs16 py-1 pl-2 bg1">{{$host}}</div>
       {{range $xc.SortedMarkets}}
-        <div class="marketrow" data-dex="{{$url}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
+        <div class="marketrow" data-dex="{{$host}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
           <img src="{{logoPath .BaseSymbol}}" class="micro-icon mr-1">
           <img src="{{logoPath .QuoteSymbol}}" class="micro-icon mr-1">
           {{.Display}}
