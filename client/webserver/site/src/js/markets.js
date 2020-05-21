@@ -104,12 +104,18 @@ export default class MarketsPage extends BasePage {
       swapBttns(page.limitBttn, page.marketBttn)
       this.setOrderVisibility()
     })
-
-    document.getElementById('rateField').addEventListener('wheel', myFunction);
-
-    function disableNumberWheel() {
-      this.style.fontSize = "35px";
-    }
+    bind(page.rateField, 'wheel', () => {
+      page.rateField.blur()
+    })
+    bind(page.lotField, 'wheel', () => {
+      page.lotField.blur()
+    })
+    bind(page.qtyField, 'wheel', () => {
+      page.qtyField.blur()
+    })
+    bind(page.mktBuyField, 'wheel', () => {
+      page.mktBuyField.blur()
+    })
 
     // Scan the rows in the market table and pull some basic info.
     var lastMarket = (data && data.market) ? data.market : State.fetch('selectedMarket')
