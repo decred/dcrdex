@@ -69,7 +69,15 @@ type clientInfo struct {
 	recentOrders *latestOrders
 }
 
-func (client *clientInfo) expire(id uint64) bool {
+func (client *clientInfo) cancelRatio() float64 {
+	client.mtx.Lock()
+	total, cancels := client.recentOrders.counts()
+	client.mtx.Unlock()
+	// completed = total - cancels
+	return float64(cancels) / float64(total)
+}
+
+func (client *clientInfo) rmHandler(id uint64) bool {
 	client.mtx.Lock()
 	defer client.mtx.Unlock()
 	_, found := client.respHandlers[id]
@@ -77,14 +85,6 @@ func (client *clientInfo) expire(id uint64) bool {
 		delete(client.respHandlers, id)
 	}
 	return found
-}
-
-func (client *clientInfo) cancelRatio() float64 {
-	client.mtx.Lock()
-	total, cancels := client.recentOrders.counts()
-	client.mtx.Unlock()
-	// completed = total - cancels
-	return float64(cancels) / float64(total)
 }
 
 // logReq associates the specified response handler with the message ID.
@@ -95,7 +95,7 @@ func (client *clientInfo) logReq(id uint64, f func(comms.Link, *msgjson.Message)
 		// Delete the response handler, and call the provided expire function if
 		// (*clientInfo).respHandler has not already retrieved the handler
 		// function for execution.
-		if client.expire(id) {
+		if client.rmHandler(id) {
 			expire()
 		}
 	}
@@ -106,19 +106,23 @@ func (client *clientInfo) logReq(id uint64, f func(comms.Link, *msgjson.Message)
 }
 
 // respHandler extracts the response handler from the respHandlers map. If the
-// handler is found, it is also deleted from the map before being returned.
+// handler is found, it is also deleted from the map before being returned, and
+// the expiration Timer is stopped.
 func (client *clientInfo) respHandler(id uint64) *respHandler {
 	client.mtx.Lock()
 	defer client.mtx.Unlock()
-	handler, found := client.respHandlers[id]
-	if found {
-		delete(client.respHandlers, id)
-		// Stop the expiration Timer. If the Timer fired after respHandler was
-		// called, but we found the response handler in the map,
-		// clientInfo.expire is waiting for the reqMtx lock and will return
-		// false, thus preventing the registered expire func from executing.
-		handler.expire.Stop()
+
+	handler := client.respHandlers[id]
+	if handler == nil {
+		return nil
 	}
+
+	// Stop the expiration Timer. If the Timer fired after respHandler was
+	// called, but we found the response handler in the map, clientInfo.expire
+	// is waiting for the lock and will return false, thus preventing the
+	// registered expire func from executing.
+	handler.expire.Stop()
+	delete(client.respHandlers, id)
 	return handler
 }
 
@@ -313,6 +317,10 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 	err := client.conn.Request(msg, auth.handleResponse, expireTime, func() {})
 	if err != nil {
 		log.Debugf("error sending request: %v", err)
+		// Remove the responseHandler registered by logReq and stop the expire
+		// timer so that it does not eventually fire and run the expire func.
+		// The caller receives a non-nil error to deal with it.
+		client.respHandler(msg.ID) // drop the removed handler
 		auth.removeClient(client)
 	}
 	return err
