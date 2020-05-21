@@ -310,12 +310,6 @@ export default class MarketsPage extends BasePage {
     return true
   }
 
-  /* clearPasswordField clears the user password field of the order verification form */
-  clearPasswordField () {
-    const page = this.page
-    page.vPass.value = ''
-  }
-
   /* handleBook accepts the data sent in the 'book' notification. */
   handleBook (data) {
     this.book = new OrderBook(data)
@@ -683,8 +677,7 @@ export default class MarketsPage extends BasePage {
     Doc.hide(page.forms)
     const order = this.parseOrder()
     const pw = page.vPass.value
-    this.clearPasswordField()
-    page.vPass.textContent = ''
+    page.vPass.value = ''
     const req = {
       order: order,
       pw: pw
