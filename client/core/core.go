@@ -2442,18 +2442,45 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		timer := time.NewTimer(duration)
 		for {
 			select {
-			case <-ctx.Done():
+			case <-c.ctx.Done():
 				return
 
 			case <-timer.C:
+				dc.booksMtx.Lock()
+				defer dc.booksMtx.Unlock()
+
+				bookie, ok := dc.books[suspension.MarketID]
+				if !ok {
+					log.Errorf("no bookie found with market id %s",
+						suspension.MarketID)
+				}
+
 				switch suspension.Persist {
 				case true:
-					// TODO: persist outstanding client orders.
-					return
+					bookie.Reset()
 
 				case false:
-					// TODO: purge outstanding client orders.
-					return
+					dc.tradeMtx.Lock()
+					toDelete := make([]*trackedTrade, 0)
+					for _, trade := range dc.trades {
+						if trade.mktID == suspension.MarketID {
+							// Remove unmatched trades
+							status := trade.metaData.Status
+							if status == order.OrderStatusBooked ||
+								status == order.OrderStatusEpoch {
+								toDelete = append(toDelete, trade)
+							}
+						}
+					}
+
+					for _, trade := range toDelete {
+						// TODO: delete the trade from the db, yet to figure
+						// out how to do that.
+						delete(dc.trades, trade.ID())
+					}
+					dc.tradeMtx.Unlock()
+
+					bookie.Reset()
 				}
 			}
 		}

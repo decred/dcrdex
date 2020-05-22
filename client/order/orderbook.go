@@ -437,6 +437,29 @@ func (ob *OrderBook) ResetEpoch() {
 	ob.epochQueue.Reset()
 }
 
+// Reset clears the orderbook and its associated epoch queue. This should be
+// called when a trade suspension does not persist the orderbook.
+func (ob *OrderBook) Reset() {
+	ob.seqMtx.Lock()
+	ob.seq = 0
+	ob.seqMtx.Unlock()
+
+	ob.marketID = ""
+
+	ob.noteQueueMtx.Lock()
+	ob.noteQueue = make([]*cachedOrderNote, 0)
+	ob.noteQueueMtx.Unlock()
+
+	ob.ordersMtx.Lock()
+	ob.orders = make(map[order.OrderID]*Order)
+	ob.ordersMtx.Unlock()
+
+	ob.buys = NewBookSide(descending)
+	ob.sells = NewBookSide(ascending)
+
+	ob.ResetEpoch()
+}
+
 // Enqueue appends the provided order note to the orderbook's epoch queue.
 func (ob *OrderBook) Enqueue(note *msgjson.EpochOrderNote) error {
 	ob.setSeq(note.Seq)
