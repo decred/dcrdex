@@ -248,7 +248,7 @@ export class DepthChart {
     ctx.fillStyle = this.theme.axisLabel
 
     const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50)
-    // Reassign the width of the y-label column to accomodate the widest text.
+    // Reassign the width of the y-label column to accommodate the widest text.
     const newWidth = yLabels.widest * 1.5
     this.yRegion.extents.x.max = newWidth
     this.plotRegion.extents.x.min = newWidth
@@ -637,7 +637,7 @@ class Region {
     // drawing. The tools start with the transformation functions.
     const tools = this.translator(dataExtents)
 
-    // Create a tranformation that allows drawing in data coordinates. It's
+    // Create a transformation that allows drawing in data coordinates. It's
     // not advisable to stroke or add text with this transform in place, as the
     // result will be distorted. You can however use ctx.moveTo and ctx.lineTo
     // with this transform in place using data coordinates, and remove the
