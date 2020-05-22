@@ -35,6 +35,8 @@ import (
 
 const (
 	assetName = "btc"
+	// Use RawRequest to get the verbose block header for a blockhash.
+	methodGetBlockHeader = "getblockheader"
 	// Use RawRequest to get the verbose block with verbose txs, as the btcd
 	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
@@ -125,7 +127,7 @@ func (op *output) Confirmations() (uint32, error) {
 		return 0, fmt.Errorf("error finding coin: %v", err)
 	}
 	if txOut == nil {
-		return 0, fmt.Errorf("tx output not found")
+		return 0, asset.CoinSpentError
 	}
 	return uint32(txOut.Confirmations), nil
 }
@@ -791,6 +793,9 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 	if txOut == nil {
 		return nil, asset.CoinNotFoundError
 	}
+	if txOut == nil {
+		return nil, asset.CoinSpentError
+	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %v",
@@ -824,6 +829,26 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 		secretHash: secretHash,
 		expiration: time.Unix(int64(stamp), 0).UTC(),
 	}, nil
+}
+
+// LocktimeExpired returns true if the specified contract's locktime has
+// expired, making it possible to issue a Refund.
+func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, error) {
+	_, _, locktime, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
+	if err != nil {
+		return false, fmt.Errorf("error extracting contract locktime: %v", err)
+	}
+	contractExpiry := time.Unix(int64(locktime), 0).UTC()
+	bestBlockHash, err := btc.node.GetBestBlockHash()
+	if err != nil {
+		return false, fmt.Errorf("get best block hash error: %v", err)
+	}
+	bestBlockHeader, err := btc.getBlockHeader(bestBlockHash.String())
+	if err != nil {
+		return false, fmt.Errorf("get best block header error: %v", err)
+	}
+	bestBlockMedianTime := time.Unix(bestBlockHeader.MedianTime, 0).UTC()
+	return bestBlockMedianTime.After(contractExpiry), nil
 }
 
 // FindRedemption attempts to find the input that spends the specified output,
@@ -953,9 +978,12 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 
 // Refund revokes a contract. This can only be used after the time lock has
 // expired.
-func (btc *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
-	op := receipt.Coin()
-	txHash, vout, err := decodeCoinID(op.ID())
+// NOTE: The contract cannot be retreived from the unspent coin info as the
+// wallet does not store it, even though it was known when the init transaction
+// was created. The DEX should store this information for persistence across
+// sessions.
+func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) error {
+	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return err
 	}
@@ -964,17 +992,11 @@ func (btc *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
 	if err != nil {
 		return fmt.Errorf("error finding unspent contract: %v", err)
 	}
+	if utxo == nil {
+		return asset.CoinSpentError
+	}
 	val := toSatoshi(utxo.Value)
-	// DRAFT NOTE: The wallet does not store this contract, even though it was
-	// known when the init transaction was created. The DEX should store this
-	// information for persistence across sessions. Care has been taken to ensure
-	// that any type satisfying asset.Coin can be passed to the Wallet's methods,
-	// so the DEX can create it's own asset.Coin to issue a redeem or refund
-	// after a restart, for example, but the (asset.Coin).Redeem script
-	// (the swap contract itself, including the counter-party's pubkey) must be
-	// included.
-	redeem := op.Redeem()
-	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(redeem, btc.chainParams)
+	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
 	if err != nil {
 		return fmt.Errorf("error extracting swap addresses: %v", err)
 	}
@@ -1006,11 +1028,11 @@ func (btc *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign it.
-	refundSig, refundPubKey, err := btc.createSig(msgTx, 0, redeem, sender)
+	refundSig, refundPubKey, err := btc.createSig(msgTx, 0, contract, sender)
 	if err != nil {
 		return err
 	}
-	redeemSigScript, err := dexbtc.RefundP2SHContract(redeem, refundSig, refundPubKey)
+	redeemSigScript, err := dexbtc.RefundP2SHContract(contract, refundSig, refundPubKey)
 	if err != nil {
 		return err
 	}
@@ -1095,6 +1117,50 @@ func (btc *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
+}
+
+// ConfirmTime is the utc time the specified coin ID got the specified number
+// of confirmations. Returns a zero datetime if the coin has not gotten the
+// specified number of confirmations.
+func (btc *ExchangeWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) {
+	zeroTime := time.Time{}
+
+	txHash, _, err := decodeCoinID(id)
+	if err != nil {
+		return zeroTime, err
+	}
+	tx, err := btc.wallet.GetTransaction(txHash.String())
+	if err != nil {
+		return zeroTime, err
+	}
+	if uint32(tx.Confirmations) < nConfs {
+		return zeroTime, err
+	}
+	if nConfs == 1 {
+		return time.Unix(int64(tx.BlockTime), 0).UTC(), nil
+	}
+
+	blockHeaderAt1Conf, err := btc.getBlockHeader(tx.BlockHash)
+	if err != nil {
+		return zeroTime, err
+	}
+	var blockHashAtNConfs string
+	if nConfs == 2 {
+		blockHashAtNConfs = blockHeaderAt1Conf.NextHash
+	} else {
+		blockHeightAtNConfs := int64(blockHeaderAt1Conf.Height) + int64(nConfs-1)
+		hashAtNConfs, err := btc.node.GetBlockHash(blockHeightAtNConfs)
+		if err != nil {
+			return zeroTime, err
+		}
+		blockHashAtNConfs = hashAtNConfs.String()
+	}
+
+	blockHeaderAtNConfs, err := btc.getBlockHeader(blockHashAtNConfs)
+	if err != nil {
+		return zeroTime, err
+	}
+	return time.Unix(blockHeaderAtNConfs.Time, 0).UTC(), nil
 }
 
 // run pings for new blocks and runs the tipChange callback function when the
@@ -1380,6 +1446,28 @@ func (btc *ExchangeWallet) isDEXChange(txid string, vout uint32) bool {
 // Convert the BTC value to satoshi.
 func toSatoshi(v float64) uint64 {
 	return uint64(math.Round(v * 1e8))
+}
+
+// blockHeader is a partial btcjson.GetBlockHeaderVerboseResult with mediantime
+// included.
+type blockHeader struct {
+	Hash          string `json:"hash"`
+	Confirmations int64  `json:"confirmations"`
+	Height        int32  `json:"height"`
+	Time          int64  `json:"time"`
+	MedianTime    int64  `json:"mediantime"`
+	PreviousHash  string `json:"previousblockhash,omitempty"`
+	NextHash      string `json:"nextblockhash,omitempty"`
+}
+
+// getBlockHeader gets the block header for the specified block hash.
+func (btc *ExchangeWallet) getBlockHeader(blockHash string) (*blockHeader, error) {
+	blkHeader := new(blockHeader)
+	err := btc.wallet.call(methodGetBlockHeader, anylist{blockHash, true}, blkHeader)
+	if err != nil {
+		return nil, err
+	}
+	return blkHeader, nil
 }
 
 // verboseBlockTxs is a partial btcjson.GetBlockVerboseResult with

@@ -2337,6 +2337,12 @@ func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return fmt.Errorf("no order found with id %s", oid.String())
 	}
 
+	// todo: consider checking if any refunds/forced redemption are necessary
+	// before setting this match's status to Revoked.
+	// Alternatively, set status to Revoked but "remember" to attempt Refund/
+	// FindRedemption if necessary. Currently, `trackedTrade.isRefundable` will
+	// return false for this match because of the status change.
+
 	md := tracker.metaData
 	md.Status = order.OrderStatusRevoked
 	metaOrder := &db.MetaOrder{

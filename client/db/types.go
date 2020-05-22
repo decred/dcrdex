@@ -207,8 +207,8 @@ type MatchMetaData struct {
 	Quote uint32
 }
 
-// MatchSignatures holds the DEX signatures and timestamps associated with
-// the messages in the negotiation process.
+// MatchAuth holds the DEX signatures and timestamps associated with the
+// messages in the negotiation process.
 type MatchAuth struct {
 	MatchSig        []byte
 	MatchStamp      uint64
@@ -225,6 +225,7 @@ type MatchAuth struct {
 // MatchProof is information related to the progression of the swap negotiation
 // process.
 type MatchProof struct {
+	Script        []byte
 	CounterScript []byte
 	SecretHash    []byte
 	Secret        []byte
@@ -239,6 +240,7 @@ type MatchProof struct {
 func (p *MatchProof) Encode() []byte {
 	auth := p.Auth
 	return dbBytes{0}.
+		AddData(p.Script).
 		AddData(p.CounterScript).
 		AddData(p.SecretHash).
 		AddData(p.Secret).
@@ -272,28 +274,29 @@ func DecodeMatchProof(b []byte) (*MatchProof, error) {
 }
 
 func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
-	if len(pushes) != 17 {
-		return nil, fmt.Errorf("DecodeMatchProof: expected 17 pushes, got %d", len(pushes))
+	if len(pushes) != 18 {
+		return nil, fmt.Errorf("DecodeMatchProof: expected 18 pushes, got %d", len(pushes))
 	}
 	return &MatchProof{
-		CounterScript: pushes[0],
-		SecretHash:    pushes[1],
-		Secret:        pushes[2],
-		MakerSwap:     pushes[3],
-		MakerRedeem:   pushes[4],
-		TakerSwap:     pushes[5],
-		TakerRedeem:   pushes[6],
+		Script:        pushes[0],
+		CounterScript: pushes[1],
+		SecretHash:    pushes[2],
+		Secret:        pushes[3],
+		MakerSwap:     pushes[4],
+		MakerRedeem:   pushes[5],
+		TakerSwap:     pushes[6],
+		TakerRedeem:   pushes[7],
 		Auth: MatchAuth{
-			MatchSig:        pushes[7],
-			MatchStamp:      intCoder.Uint64(pushes[8]),
-			InitSig:         pushes[9],
-			InitStamp:       intCoder.Uint64(pushes[10]),
-			AuditSig:        pushes[11],
-			AuditStamp:      intCoder.Uint64(pushes[12]),
-			RedeemSig:       pushes[13],
-			RedeemStamp:     intCoder.Uint64(pushes[14]),
-			RedemptionSig:   pushes[15],
-			RedemptionStamp: intCoder.Uint64(pushes[16]),
+			MatchSig:        pushes[8],
+			MatchStamp:      intCoder.Uint64(pushes[9]),
+			InitSig:         pushes[10],
+			InitStamp:       intCoder.Uint64(pushes[11]),
+			AuditSig:        pushes[12],
+			AuditStamp:      intCoder.Uint64(pushes[13]),
+			RedeemSig:       pushes[14],
+			RedeemStamp:     intCoder.Uint64(pushes[15]),
+			RedemptionSig:   pushes[16],
+			RedemptionStamp: intCoder.Uint64(pushes[17]),
 		},
 	}, nil
 }

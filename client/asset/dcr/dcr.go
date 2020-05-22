@@ -60,6 +60,7 @@ type rpcClient interface {
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBestBlock() (*chainhash.Hash, int64, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
+	GetBlockHeaderVerbose(hash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error)
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetRawMempool(txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
@@ -119,7 +120,7 @@ func (output *output) Confirmations() (uint32, error) {
 		return 0, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if txOut == nil {
-		return 0, fmt.Errorf("tx output not found")
+		return 0, asset.CoinSpentError
 	}
 	return uint32(txOut.Confirmations), nil
 }
@@ -855,6 +856,17 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 	}, nil
 }
 
+// LocktimeExpired returns true if the specified contract's locktime has
+// expired, making it possible to issue a Refund.
+func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, error) {
+	_, _, locktime, _, err := dexdcr.ExtractSwapDetails(contract, chainParams)
+	if err != nil {
+		return false, fmt.Errorf("error extracting contract locktime: %v", err)
+	}
+	contractExpiry := time.Unix(int64(locktime), 0).UTC()
+	return time.Now().UTC().After(contractExpiry), nil
+}
+
 // FindRedemption should attempt to find the input that spends the specified
 // coin, and return the secret key if it does.
 //
@@ -991,9 +1003,12 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (dcr *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
-	op := receipt.Coin()
-	txHash, vout, err := decodeCoinID(op.ID())
+// NOTE: The contract cannot be retreived from the unspent coin info as the
+// wallet does not store it, even though it was known when the init transaction
+// was created. The DEX should store this information for persistence across
+// sessions.
+func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) error {
+	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return err
 	}
@@ -1002,16 +1017,11 @@ func (dcr *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
 	if err != nil {
 		return fmt.Errorf("error finding unspent contract: %v", err)
 	}
+	if utxo == nil {
+		return asset.CoinSpentError
+	}
 	val := toAtoms(utxo.Value)
-	// NOTE: The wallet does not store this contract, even though it was known
-	// when the init transaction was created. The DEX should store this
-	// information for persistence across sessions. Care has been taken to ensure
-	// that any type satisfying asset.Coin can be passed to the Wallet's methods,
-	// so the DEX can create it's own asset.Coin to issue a redeem or refund after
-	// a restart, for example, but the (asset.Coin).Redeem script (the swap
-	// contract itself, including the counter-party's pubkey) must be included.
-	redeem := op.Redeem()
-	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(redeem, chainParams)
+	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(contract, chainParams)
 	if err != nil {
 		return fmt.Errorf("error extracting swap addresses: %v", err)
 	}
@@ -1019,7 +1029,7 @@ func (dcr *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
 	msgTx := wire.NewMsgTx()
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout, wire.TxTreeRegular)
-	txIn := wire.NewTxIn(prevOut, int64(op.Value()), []byte{})
+	txIn := wire.NewTxIn(prevOut, int64(val), []byte{})
 	txIn.Sequence = wire.MaxTxInSequenceNum - 1
 	msgTx.AddTxIn(txIn)
 	// Calculate fees and add the change output.
@@ -1044,11 +1054,11 @@ func (dcr *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign it.
-	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, redeem, sender)
+	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, contract, sender)
 	if err != nil {
 		return err
 	}
-	redeemSigScript, err := dexdcr.RefundP2SHContract(redeem, refundSig, refundPubKey)
+	redeemSigScript, err := dexdcr.RefundP2SHContract(contract, refundSig, refundPubKey)
 	if err != nil {
 		return err
 	}
@@ -1138,6 +1148,52 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
+}
+
+// ConfirmTime is the utc time the specified coin ID got the specified number
+// of confirmations. Returns a zero datetime if the coin has not gotten the
+// specified number of confirmations.
+func (dcr *ExchangeWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) {
+	zeroTime := time.Time{}
+
+	txHash, _, err := decodeCoinID(id)
+	if err != nil {
+		return zeroTime, err
+	}
+	tx, err := dcr.node.GetTransaction(txHash)
+	if err != nil {
+		return zeroTime, err
+	}
+	if uint32(tx.Confirmations) < nConfs {
+		return zeroTime, nil
+	}
+	if nConfs == 1 {
+		return time.Unix(tx.BlockTime, 0).UTC(), nil
+	}
+
+	blockHashAt1Conf, err := chainhash.NewHashFromStr(tx.BlockHash)
+	if err != nil {
+		return zeroTime, err
+	}
+	blockHeaderAt1Conf, err := dcr.node.GetBlockHeaderVerbose(blockHashAt1Conf)
+	if err != nil {
+		return zeroTime, err
+	}
+	var blockHashAtNConfs *chainhash.Hash
+	if nConfs == 2 {
+		blockHashAtNConfs, err = chainhash.NewHashFromStr(blockHeaderAt1Conf.NextHash)
+	} else {
+		blockHeightAtNConfs := int64(blockHeaderAt1Conf.Height) + int64(nConfs-1)
+		blockHashAtNConfs, err = dcr.node.GetBlockHash(blockHeightAtNConfs)
+	}
+	if err != nil {
+		return zeroTime, err
+	}
+	blockHeaderAtNConfs, err := dcr.node.GetBlockHeaderVerbose(blockHashAtNConfs)
+	if err != nil {
+		return zeroTime, err
+	}
+	return time.Unix(blockHeaderAtNConfs.Time, 0).UTC(), nil
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.
@@ -1304,7 +1360,7 @@ func (dcr *ExchangeWallet) reqFunds(val uint64, funding uint32, nfo *dex.Asset) 
 	return calc.RequiredFunds(val, funding, nfo)
 }
 
-// convertCoin converts the asset.Coin to an output.
+// convertCoin converts the asset.Coin to an unspent output.
 func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	op, _ := coin.(*output)
 	if op != nil {
@@ -1319,7 +1375,7 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 		return nil, fmt.Errorf("error finding unspent output %s:%d: %v", txHash, vout, err)
 	}
 	if txOut == nil {
-		return nil, fmt.Errorf("tx output not found")
+		return nil, asset.CoinSpentError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {

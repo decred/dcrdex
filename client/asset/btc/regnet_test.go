@@ -305,9 +305,9 @@ func TestWallet(t *testing.T) {
 	}
 
 	// Find the redemption
-	receipt := receipts[0]
+	swapCoin := receipts[0].Coin()
 	ctx, _ := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
-	checkKey, err := rig.gamma().FindRedemption(ctx, receipt.Coin().ID())
+	checkKey, err := rig.gamma().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -323,13 +323,13 @@ func TestWallet(t *testing.T) {
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(1)
-	_, err = rig.gamma().FindRedemption(ctx, receipt.Coin().ID())
+	_, err = rig.gamma().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
 
 	// Confirmations should now be an error, since the swap output has been spent.
-	_, err = receipt.Coin().Confirmations()
+	_, err = swapCoin.Confirmations()
 	if err == nil {
 		t.Fatalf("error getting confirmations. has swap output been spent?")
 	}
@@ -362,9 +362,9 @@ func TestWallet(t *testing.T) {
 	if len(receipts) != 1 {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
 	}
-	receipt = receipts[0]
+	swapCoin = receipts[0].Coin()
 
-	err = rig.gamma().Refund(receipt, tBTC)
+	err = rig.gamma().Refund(swapCoin.ID(), swapCoin.Redeem(), tBTC)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

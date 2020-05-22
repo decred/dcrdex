@@ -495,11 +495,15 @@ func (w *TXCWallet) AuditContract(coinID, contract dex.Bytes) (asset.AuditInfo, 
 	return w.auditInfo, w.auditErr
 }
 
+func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, error) {
+	return true, nil
+}
+
 func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error) {
 	return nil, nil
 }
 
-func (w *TXCWallet) Refund(asset.Receipt, *dex.Asset) error {
+func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes, *dex.Asset) error {
 	return nil
 }
 
@@ -523,6 +527,10 @@ func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, 
 
 func (w *TXCWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	return 0, nil
+}
+
+func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 func (w *TXCWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (asset.Coin, error) {
