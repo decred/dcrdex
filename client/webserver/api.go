@@ -219,7 +219,13 @@ func (s *WebServer) apiLogin(w http.ResponseWriter, r *http.Request) {
 
 // apiLogout handles the 'logout' API request.
 func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
-	err := s.core.Logout()
+	err := s.core.RestartDEXConnections()
+	if err != nil {
+		s.writeAPIError(w, "logout error: %v", err)
+		return
+	}
+
+	err = s.core.Logout()
 	if err != nil {
 		s.writeAPIError(w, "logout error: %v", err)
 		return

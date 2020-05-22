@@ -1292,6 +1292,47 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	return results
 }
 
+// RestartDEXConnections retrieve all active orders in database and
+// establishes a ws connection to a DEX server with the url and cert for each dexConnection
+func (c *Core) RestartDEXConnections() error {
+	if len(c.conns) == 0 {
+		return nil
+	}
+	rErr := error(nil)
+
+	c.connMtx.Lock()
+	defer c.refreshUser()
+	defer c.connMtx.Unlock()
+	var wg sync.WaitGroup
+	for _, dc := range c.conns {
+		dc.tradeMtx.Lock()
+		trades, err := c.dbTrackers(dc)
+		if err != nil {
+			log.Errorf("error retreiving active orders matches: %v", err)
+		}
+		dc.trades = trades
+		dc.tradeMtx.Unlock()
+		acct := &db.AccountInfo{
+			URL:  dc.acct.url,
+			Cert: dc.acct.cert,
+		}
+
+		wg.Add(1)
+		go func(acct *db.AccountInfo) {
+			defer wg.Done()
+			_, err := c.connectDEX(acct)
+			if err != nil {
+				log.Errorf("error re-connecting to DEX %s: %v", acct.URL, err)
+				rErr = err
+				return
+			}
+		}(acct)
+	}
+	wg.Wait()
+
+	return rErr
+}
+
 // resolveActiveTrades loads order and match data from the database. Only active
 // orders and orders with active matches are loaded. Also, only active matches
 // are loaded, even if there are inactive matches for the same order, but it may
