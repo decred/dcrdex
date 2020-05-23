@@ -31,7 +31,8 @@ export default class LoginPage extends BasePage {
     var res = await postJSON('/api/login', { pass: pw })
     app.loaded()
     if (!app.checkResponse(res)) {
-      console.log(res)
+      page.errMsg.textContent = res.msg
+      Doc.show(page.errMsg)
       return
     }
     if (res.notes) {
