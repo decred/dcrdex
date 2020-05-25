@@ -527,7 +527,7 @@ func TestAPIGetFee(t *testing.T) {
 
 	// getFee error
 	tCore.getFeeErr = tErr
-	ensure(`{"ok":false,"msg":"getfee error: test error"}`)
+	ensure(`{"ok":false,"msg":"test error"}`)
 	tCore.getFeeErr = nil
 }
 
