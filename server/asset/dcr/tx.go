@@ -19,7 +19,8 @@ type Tx struct {
 	ins  []txIn
 	outs []txOut
 	// Whether the transaction is a stake-related transaction.
-	isStake bool
+	isStake    bool
+	isCoinbase bool
 	// Used to conditionally skip block lookups on mempool transactions during
 	// calls to Confirmations.
 	lastLookup *chainhash.Hash
@@ -32,6 +33,7 @@ type Tx struct {
 type txIn struct {
 	prevTx chainhash.Hash
 	vout   uint32
+	value  uint64
 }
 
 // A txOut holds information about a transaction output.
@@ -42,7 +44,7 @@ type txOut struct {
 
 // A getter for a new Tx.
 func newTransaction(txHash, blockHash, lastLookup *chainhash.Hash, blockHeight int64,
-	isStake bool, ins []txIn, outs []txOut, feeRate uint64) *Tx {
+	isStake, isCoinbase bool, ins []txIn, outs []txOut, feeRate uint64) *Tx {
 	// Set a nil blockHash to the zero hash.
 	hash := blockHash
 	if hash == nil {
@@ -55,6 +57,7 @@ func newTransaction(txHash, blockHash, lastLookup *chainhash.Hash, blockHeight i
 		ins:        ins,
 		outs:       outs,
 		isStake:    isStake,
+		isCoinbase: isCoinbase,
 		lastLookup: lastLookup,
 		feeRate:    feeRate,
 	}

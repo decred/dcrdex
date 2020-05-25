@@ -558,11 +558,12 @@ type testMsgTxSwap struct {
 	tx        *wire.MsgTx
 	contract  []byte
 	recipient btcutil.Address
+	refund    btcutil.Address
 }
 
 // Create a swap (initialization) contract with random pubkeys and return the
 // pubkey script and addresses.
-func testSwapContract() ([]byte, btcutil.Address) {
+func testSwapContract() ([]byte, btcutil.Address, btcutil.Address) {
 	lockTime := time.Now().Add(time.Hour * 24).Unix()
 	secretHash := randomBytes(32)
 	_, receiverPKH := genPubkey()
@@ -597,12 +598,13 @@ func testSwapContract() ([]byte, btcutil.Address) {
 		fmt.Printf("testSwapContract error: %v\n", err)
 	}
 	receiverAddr, _ := btcutil.NewAddressPubKeyHash(receiverPKH, testParams)
-	return contract, receiverAddr
+	refundAddr, _ := btcutil.NewAddressPubKeyHash(senderPKH, testParams)
+	return contract, receiverAddr, refundAddr
 }
 
 func testMsgTxSwapInit(val int64) *testMsgTxSwap {
 	msgTx := wire.NewMsgTx(wire.TxVersion)
-	contract, recipient := testSwapContract()
+	contract, recipient, refund := testSwapContract()
 	scriptHash := btcutil.Hash160(contract)
 	pkScript, err := txscript.NewScriptBuilder().
 		AddOp(txscript.OP_HASH160).
@@ -617,6 +619,7 @@ func testMsgTxSwapInit(val int64) *testMsgTxSwap {
 		tx:        msgTx,
 		contract:  contract,
 		recipient: recipient,
+		refund:    refund,
 	}
 }
 
@@ -1011,16 +1014,21 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
 	}
 
-	// // Now try again with the correct vout.
-	err = utxo.auditContract()
+	contract := &Contract{Output: utxo.Output}
+
+	// Now try again with the correct vout.
+	err = contract.auditContract() // sets refund and swap addresses
 	if err != nil {
 		t.Fatalf("case 11 - unexpected error auditing contract: %v", err)
 	}
-	if utxo.Address() != swap.recipient.String() {
-		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", utxo.Address(), swap.recipient.String())
+	if contract.SwapAddress() != swap.recipient.String() {
+		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", contract.SwapAddress(), swap.recipient.String())
 	}
-	if utxo.Value() != 5 {
-		t.Fatalf("case 11 - unexpected output value. wanted 5, got %d", utxo.Value())
+	if contract.RefundAddress() != swap.refund.String() {
+		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", contract.RefundAddress(), swap.refund.String())
+	}
+	if contract.Value() != 5 {
+		t.Fatalf("case 11 - unexpected output value. wanted 5, got %d", contract.Value())
 	}
 }
 

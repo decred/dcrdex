@@ -303,7 +303,6 @@ func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 	}
 	return &tUTXO{val: v}, b.utxoErr
 }
-
 func (b *TBackend) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
 	return b.utxo(coinID)
 }
@@ -341,7 +340,8 @@ func (u *tUTXO) Confirmations() (int64, error) { return utxoConfs, utxoConfsErr 
 func (u *tUTXO) Auth(pubkeys, sigs [][]byte, msg []byte) error {
 	return utxoAuthErr
 }
-func (u *tUTXO) Address() string                 { return "" }
+func (u *tUTXO) SwapAddress() string             { return "" }
+func (u *tUTXO) RefundAddress() string           { return "" }
 func (u *tUTXO) SpendSize() uint32               { return dummySize }
 func (u *tUTXO) ID() []byte                      { return nil }
 func (u *tUTXO) TxID() string                    { return "" }
@@ -349,7 +349,7 @@ func (u *tUTXO) String() string                  { return "" }
 func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
 func (u *tUTXO) FeeRate() uint64                 { return 0 }
-func (u *tUTXO) Script() []byte                  { return nil }
+func (u *tUTXO) RedeemScript() []byte            { return nil }
 func (u *tUTXO) LockTime() time.Time             { return time.Time{} }
 
 type tUser struct {

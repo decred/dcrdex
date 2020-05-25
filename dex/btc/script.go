@@ -330,7 +330,7 @@ func IsDust(txOut *wire.TxOut, minRelayTxFee uint64) bool {
 type BtcScriptAddrs struct {
 	PubKeys   []btcutil.Address
 	NumPK     int
-	PKHashes  []btcutil.Address
+	PkHashes  []btcutil.Address
 	NumPKH    int
 	NRequired int // num sigs needed
 }
@@ -363,7 +363,7 @@ func ExtractScriptAddrs(script []byte, chainParams *chaincfg.Params) (*BtcScript
 	return &BtcScriptAddrs{
 		PubKeys:   pubkeys,
 		NumPK:     len(pubkeys),
-		PKHashes:  pkHashes,
+		PkHashes:  pkHashes,
 		NumPKH:    len(pkHashes),
 		NRequired: numRequired,
 	}, false, nil
@@ -605,7 +605,7 @@ func ExtractScriptHash(pkScript []byte, chainParams *chaincfg.Params) ([]byte, e
 		return nil, fmt.Errorf("contract output has wrong number of required sigs(%d) or addresses(%d)",
 			scriptAddrs.NRequired, scriptAddrs.NumPKH)
 	}
-	contractAddr := scriptAddrs.PKHashes[0]
+	contractAddr := scriptAddrs.PkHashes[0]
 	_, ok := contractAddr.(*btcutil.AddressScriptHash)
 	if !ok {
 		return nil, fmt.Errorf("wrong contract address type %s: %T", contractAddr, contractAddr)

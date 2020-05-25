@@ -73,7 +73,7 @@ type dcrNode interface {
 	GetBestBlockHash() (*chainhash.Hash, error)
 }
 
-// Backend is an asset backend for Decred. It has methods for fetching UTXO
+// Backend is an asset backend for Decred. It has methods for fetching output
 // information and subscribing to block updates. It maintains a cache of block
 // data for quick lookups. Backend implements asset.Backend, so provides
 // exported methods for DEX-related blockchain info.
@@ -87,7 +87,7 @@ type Backend struct {
 	// The backend provides block notification channels through it BlockChannel
 	// method. signalMtx locks the blockChans array.
 	signalMtx  sync.RWMutex
-	blockChans []chan *asset.BlockUpdate
+	blockChans map[chan *asset.BlockUpdate]struct{}
 	// The block cache stores just enough info about the blocks to prevent future
 	// calls to GetBlockVerbose.
 	blockCache *blockCache
@@ -167,32 +167,34 @@ func (dcr *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 	c := make(chan *asset.BlockUpdate, size)
 	dcr.signalMtx.Lock()
 	defer dcr.signalMtx.Unlock()
-	dcr.blockChans = append(dcr.blockChans, c)
+	dcr.blockChans[c] = struct{}{}
 	return c
 }
 
-// Contract is part of the asset.Backend interface. An asset.Contract is a utxo
-// that has been validated as a swap contract for the passed redeem script. A
-// spendable utxo is one that can be spent in the next block. Every regular-tree
-// output from a non-coinbase transaction is spendable immediately. Coinbase and
-// stake tree outputs are only spendable after CoinbaseMaturity confirmations.
-// Pubkey scripts can be P2PKH or P2SH in either regular- or stake-tree flavor.
-// P2PKH supports two alternative signatures, Schnorr and Edwards. Multi-sig
-// P2SH redeem scripts are supported as well.
+// Contract is part of the asset.Backend interface. An asset.Contract is an
+// output that has been validated as a swap contract for the passed redeem
+// script. A spendable output is one that can be spent in the next block. Every
+// regular-tree output from a non-coinbase transaction is spendable immediately.
+// Coinbase and stake tree outputs are only spendable after CoinbaseMaturity
+// confirmations. Pubkey scripts can be P2PKH or P2SH in either regular- or
+// stake-tree flavor. P2PKH supports two alternative signatures, Schnorr and
+// Edwards. Multi-sig P2SH redeem scripts are supported as well.
 func (dcr *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
-	utxo, err := dcr.utxo(txHash, vout, redeemScript)
+	output, err := dcr.output(txHash, vout, redeemScript)
 	if err != nil {
 		return nil, err
 	}
-	err = utxo.auditContract()
+	contract := &Contract{Output: output}
+	// Verify contract and set refundAddress and swapAddress.
+	err = contract.auditContract()
 	if err != nil {
 		return nil, err
 	}
-	return utxo, nil
+	return contract, nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -350,12 +352,13 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	var isCoinbase bool
 	for _, input := range verboseTx.Vin {
 		isCoinbase = input.Coinbase != ""
-		sumIn += toAtoms(input.AmountIn)
+		value := toAtoms(input.AmountIn)
+		sumIn += value
 		hash, err := chainhash.NewHashFromStr(input.Txid)
 		if err != nil {
-			return nil, fmt.Errorf("error decoding previous tx hash %sfor tx %s: %v", input.Txid, txHash, err)
+			return nil, fmt.Errorf("error decoding previous tx hash %s for tx %s: %v", input.Txid, txHash, err)
 		}
-		inputs = append(inputs, txIn{prevTx: *hash, vout: input.Vout})
+		inputs = append(inputs, txIn{prevTx: *hash, vout: input.Vout, value: value})
 	}
 
 	outputs := make([]txOut, 0, len(verboseTx.Vout))
@@ -375,7 +378,7 @@ func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxR
 	if isCoinbase {
 		feeRate = 0
 	}
-	return newTransaction(txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, inputs, outputs, feeRate), nil
+	return newTransaction(txHash, blockHash, lastLookup, verboseTx.BlockHeight, isStake, isCoinbase, inputs, outputs, feeRate), nil
 }
 
 // Shutdown down the rpcclient.Client.
@@ -392,6 +395,7 @@ func unconnectedDCR(logger dex.Logger) *Backend {
 	return &Backend{
 		blockCache: newBlockCache(logger),
 		log:        logger,
+		blockChans: make(map[chan *asset.BlockUpdate]struct{}),
 	}
 }
 
@@ -414,35 +418,43 @@ func (dcr *Backend) Run(ctx context.Context) {
 		if err != nil {
 			dcr.log.Errorf("error adding new best block to cache: %v", err)
 		}
-		dcr.signalMtx.RLock()
+		dcr.signalMtx.Lock()
 		dcr.log.Debugf("Notifying %d dcr asset consumers of new block at height %d",
 			len(dcr.blockChans), block.Height)
-		for _, c := range dcr.blockChans {
+		for c := range dcr.blockChans {
 			select {
 			case c <- &asset.BlockUpdate{
 				Err:   nil,
 				Reorg: reorg,
 			}:
 			default:
-				dcr.log.Errorf("failed to send block update on blocking channel")
+				// Commented to try sends on future blocks.
+				// close(c)
+				// delete(dcr.blockChans, c)
+				//
+				// TODO: Allow the receiver (e.g. Swapper.Run) to inform done
+				// status so the channels can be retired cleanly rather than
+				// trying them forever.
 			}
 		}
-		dcr.signalMtx.RUnlock()
+		dcr.signalMtx.Unlock()
 	}
 
 	sendErr := func(err error) {
 		dcr.log.Error(err)
-		dcr.signalMtx.RLock()
-		for _, c := range dcr.blockChans {
+		dcr.signalMtx.Lock()
+		for c := range dcr.blockChans {
 			select {
 			case c <- &asset.BlockUpdate{
 				Err: err,
 			}:
 			default:
 				dcr.log.Errorf("failed to send sending block update on blocking channel")
+				// close(c)
+				// delete(dcr.blockChans, c)
 			}
 		}
-		dcr.signalMtx.RUnlock()
+		dcr.signalMtx.Unlock()
 	}
 
 	sendErrFmt := func(s string, a ...interface{}) {
@@ -576,7 +588,7 @@ func (dcr *Backend) blockInfo(verboseTx *chainjson.TxRawResult) (blockHeight uin
 	if tip != zeroHash {
 		tipHash = &tip
 	}
-	// UTXO is assumed to be valid while in mempool, so skip the validity check.
+	// Assumed to be valid while in mempool, so skip the validity check.
 	if verboseTx.Confirmations > 0 {
 		if blockHeight == 0 {
 			err = fmt.Errorf("zero block height for output with "+
@@ -624,10 +636,11 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		return nil, err
 	}
 
-	// Coinbase, vote, and revocation transactions all must mature before
-	// spending.
+	// Coinbase, vote, and revocation transactions must mature before spending.
 	var maturity int64
 	if scriptType.IsStake() || txOut.Coinbase {
+		// TODO: this is specific to the output with stake transactions. Must
+		// check the output type.
 		maturity = int64(chainParams.CoinbaseMaturity)
 	}
 	if txOut.Confirmations < maturity {
@@ -639,7 +652,7 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
 	}
 
-	return &UTXO{
+	out := &Output{
 		TXIO: TXIO{
 			dcr:        dcr,
 			tx:         tx,
@@ -657,35 +670,111 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		// The total size associated with the wire.TxIn.
 		spendSize: inputNfo.SigScriptSize + dexdcr.TxInOverhead,
 		value:     toAtoms(txOut.Value),
-	}, nil
+	}
+	return &UTXO{out}, nil
+}
+
+// newTXIO creates a TXIO for any transaction, spent or unspent. The caller must
+// set the maturity field.
+func (dcr *Backend) newTXIO(txHash *chainhash.Hash) (*TXIO, int64, error) {
+	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, 0, asset.CoinNotFoundError
+		}
+		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+	}
+	tx, err := dcr.transaction(txHash, verboseTx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error fetching verbose transaction data: %v", err)
+	}
+	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(verboseTx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return &TXIO{
+		dcr:       dcr,
+		tx:        tx,
+		height:    blockHeight,
+		blockHash: blockHash,
+		// maturity TODO: move this into an output specific type.
+		lastLookup: lastLookup,
+	}, verboseTx.Confirmations, nil
 }
 
 // input gets the transaction input.
 func (dcr *Backend) input(txHash *chainhash.Hash, vin uint32) (*Input, error) {
-	verboseTx, err := dcr.node.GetRawTransactionVerbose(txHash)
-	if err != nil {
-		if isTxNotFoundErr(err) {
-			return nil, asset.CoinNotFoundError
-		}
-		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
-	}
-	tx, err := dcr.transaction(txHash, verboseTx)
-	if err != nil {
-		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
-	}
-	blockHeight, blockHash, lastLookup, err := dcr.blockInfo(verboseTx)
+	txio, _, err := dcr.newTXIO(txHash)
 	if err != nil {
 		return nil, err
 	}
+	if int(vin) >= len(txio.tx.ins) {
+		return nil, fmt.Errorf("tx %v has %d outputs (no vin %d)", txHash, len(txio.tx.ins), vin)
+	}
 	return &Input{
-		TXIO: TXIO{
-			dcr:        dcr,
-			tx:         tx,
-			height:     blockHeight,
-			blockHash:  blockHash,
-			lastLookup: lastLookup,
-		},
-		vin: vin,
+		TXIO: *txio,
+		vin:  vin,
+	}, nil
+}
+
+// output gets the transaction output.
+func (dcr *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*Output, error) {
+	txio, confs, err := dcr.newTXIO(txHash)
+	if err != nil {
+		return nil, err
+	}
+	if int(vout) >= len(txio.tx.outs) {
+		return nil, fmt.Errorf("tx %v has %d outputs (no vout %d)", txHash, len(txio.tx.outs), vout)
+	}
+
+	txOut := txio.tx.outs[vout]
+	pkScript := txOut.pkScript
+	inputNfo, err := dexdcr.InputInfo(pkScript, redeemScript, chainParams)
+	if err != nil {
+		return nil, err
+	}
+	scriptType := inputNfo.ScriptType
+
+	// If it's a pay-to-script-hash, extract the script hash and check it against
+	// the hash of the user-supplied redeem script.
+	if scriptType.IsP2SH() {
+		scriptHash, err := dexdcr.ExtractScriptHashByType(scriptType, pkScript)
+		if err != nil {
+			return nil, fmt.Errorf("output error: %v", err)
+		}
+		if !bytes.Equal(dcrutil.Hash160(redeemScript), scriptHash) {
+			return nil, fmt.Errorf("script hash check failed for output %s:%d", txHash, vout)
+		}
+	}
+
+	scrAddrs := inputNfo.ScriptAddrs
+	addresses := make([]string, scrAddrs.NumPK+scrAddrs.NumPKH)
+	for i, addr := range append(scrAddrs.PkHashes, scrAddrs.PubKeys...) {
+		addresses[i] = addr.String() // unconverted
+	}
+
+	// Coinbase, vote, and revocation transactions must mature before spending.
+	var maturity int64
+	if scriptType.IsStake() || txio.tx.isCoinbase {
+		maturity = int64(chainParams.CoinbaseMaturity)
+	}
+	if confs < maturity {
+		return nil, immatureTransactionError
+	}
+	txio.maturity = int32(maturity)
+
+	return &Output{
+		TXIO:              *txio,
+		vout:              vout,
+		value:             txOut.value,
+		addresses:         addresses,
+		scriptType:        scriptType,
+		nonStandardScript: inputNfo.NonStandardScript,
+		pkScript:          pkScript,
+		redeemScript:      redeemScript,
+		numSigs:           scrAddrs.NRequired,
+		// The total size associated with the wire.TxIn.
+		spendSize: inputNfo.SigScriptSize + dexdcr.TxInOverhead,
 	}, nil
 }
 
@@ -790,7 +879,7 @@ func connectNodeRPC(host, user, pass, cert string) (*rpcclient.Client, error) {
 	return dcrdClient, nil
 }
 
-// decodeCoinID decodes the coin ID into a tx hash and a vout.
+// decodeCoinID decodes the coin ID into a tx hash and a vin/vout index.
 func decodeCoinID(coinID []byte) (*chainhash.Hash, uint32, error) {
 	if len(coinID) != 36 {
 		return nil, 0, fmt.Errorf("coin ID wrong length. expected 36, got %d", len(coinID))
