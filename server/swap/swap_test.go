@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -214,7 +215,33 @@ func (m *TAuthManager) getResp(id account.AccountID) (*msgjson.Message, *msgjson
 	return msg, resp
 }
 
-type TStorage struct{}
+type TStorage struct {
+	fatalMtx sync.RWMutex
+	fatal    chan struct{}
+	fatalErr error
+}
+
+func (ts *TStorage) LastErr() error {
+	ts.fatalMtx.RLock()
+	defer ts.fatalMtx.RUnlock()
+	return ts.fatalErr
+}
+
+func (ts *TStorage) Fatal() <-chan struct{} {
+	ts.fatalMtx.RLock()
+	defer ts.fatalMtx.RUnlock()
+	return ts.fatal
+}
+
+func (ts *TStorage) fatalBackendErr(err error) {
+	ts.fatalMtx.Lock()
+	if ts.fatal == nil {
+		ts.fatal = make(chan struct{})
+		close(ts.fatal)
+	}
+	ts.fatalErr = err // consider slice and append
+	ts.fatalMtx.Unlock()
+}
 
 func (s *TStorage) InsertMatch(match *order.Match) error { return nil }
 func (s *TStorage) CancelOrder(*order.LimitOrder) error  { return nil }
@@ -222,7 +249,6 @@ func (s *TStorage) RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time
 	return
 }
 func (s *TStorage) SetOrderCompleteTime(ord order.Order, compTime int64) error { return nil }
-func (s *TStorage) LastErr() error                                             { return nil }
 func (s *TStorage) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {
 	return 0, nil, nil
 }
@@ -371,14 +397,16 @@ func tNewResponse(id uint64, resp []byte) *msgjson.Message {
 
 // testRig is the primary test data structure.
 type testRig struct {
-	abc       *asset.BackedAsset
-	abcNode   *TAsset
-	xyz       *asset.BackedAsset
-	xyzNode   *TAsset
-	auth      *TAuthManager
-	swapper   *Swapper
-	matches   *tMatchSet
-	matchInfo *tMatch
+	abc           *asset.BackedAsset
+	abcNode       *TAsset
+	xyz           *asset.BackedAsset
+	xyzNode       *TAsset
+	auth          *TAuthManager
+	swapper       *Swapper
+	swapperWaiter *dex.StartStopWaiter
+	storage       *TStorage
+	matches       *tMatchSet
+	matchInfo     *tMatch
 }
 
 func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
@@ -411,13 +439,15 @@ func tNewTestRig(matchInfo *tMatch) (*testRig, func()) {
 	}
 
 	return &testRig{
-		abc:       abcAsset,
-		abcNode:   abcBackend,
-		xyz:       xyzAsset,
-		xyzNode:   xyzBackend,
-		auth:      authMgr,
-		swapper:   swapper,
-		matchInfo: matchInfo,
+		abc:           abcAsset,
+		abcNode:       abcBackend,
+		xyz:           xyzAsset,
+		xyzNode:       xyzBackend,
+		auth:          authMgr,
+		swapper:       swapper,
+		swapperWaiter: ssw,
+		storage:       storage,
+		matchInfo:     matchInfo,
 	}, cleanup
 }
 
@@ -1131,6 +1161,17 @@ func TestMain(m *testing.M) {
 	// logger.SetLevel(slog.LevelTrace)
 	// UseLogger(logger)
 	os.Exit(m.Run())
+}
+
+func TestFatalStorageErr(t *testing.T) {
+	rig, cleanup := tNewTestRig(nil)
+	defer cleanup()
+
+	// Test a fatal storage backend error that causes the main loop to return
+	// first, the anomalous shutdown route.
+	rig.storage.fatalBackendErr(errors.New("backend error"))
+
+	rig.swapperWaiter.WaitForShutdown()
 }
 
 func testSwap(t *testing.T, rig *testRig) {

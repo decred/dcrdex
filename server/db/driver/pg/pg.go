@@ -7,7 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -77,7 +77,6 @@ type archiverTables struct {
 // So far: OrderArchiver, AccountArchiver.
 type Archiver struct {
 	ctx          context.Context
-	lastErr      atomic.Value
 	queryTimeout time.Duration
 	db           *sql.DB
 	dbName       string
@@ -87,18 +86,39 @@ type Archiver struct {
 	keyHash      []byte // Store the hash to ref the counter table.
 	keyParams    *chaincfg.Params
 	tables       archiverTables
+
+	fatalMtx sync.RWMutex
+	fatal    chan struct{}
+	fatalErr error
 }
 
 // LastErr returns any fatal or unexpected error encountered in a recent query.
 // This may be used to check if the database had an unrecoverable error
 // (disconnect, etc.).
 func (a *Archiver) LastErr() error {
-	err, _ := a.lastErr.Load().(error)
-	return err
+	a.fatalMtx.RLock()
+	defer a.fatalMtx.RUnlock()
+	return a.fatalErr
+}
+
+// Fatal returns a nil or closed channel for select use. Use LastErr to get the
+// latest fatal error.
+func (a *Archiver) Fatal() <-chan struct{} {
+	a.fatalMtx.RLock()
+	defer a.fatalMtx.RUnlock()
+	return a.fatal
 }
 
 func (a *Archiver) fatalBackendErr(err error) {
-	a.lastErr.Store(err)
+	if err == nil {
+		return
+	}
+	a.fatalMtx.Lock()
+	if a.fatalErr == nil {
+		close(a.fatal)
+	}
+	a.fatalErr = err // consider slice and append
+	a.fatalMtx.Unlock()
 }
 
 // NewArchiver constructs a new Archiver. Use Close when done with the Archiver.
@@ -150,6 +170,7 @@ func NewArchiver(ctx context.Context, cfg *Config) (*Archiver, error) {
 			feeKeys:  fullTableName(cfg.DBName, publicSchema, feeKeysTableName),
 			accounts: fullTableName(cfg.DBName, publicSchema, accountsTableName),
 		},
+		fatal: make(chan struct{}),
 	}
 
 	// Check critical performance-related settings.
