@@ -37,7 +37,8 @@ type TArchivist struct {
 	epochInserted        chan struct{}
 }
 
-func (ta *TArchivist) LastErr() error { return nil }
+func (ta *TArchivist) LastErr() error         { return nil }
+func (ta *TArchivist) Fatal() <-chan struct{} { return nil }
 func (ta *TArchivist) Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error) {
 	return nil, order.OrderStatusUnknown, errors.New("boom")
 }

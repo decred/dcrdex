@@ -60,6 +60,10 @@ type DEXArchivist interface {
 	// unrecoverable error (disconnect, etc.).
 	LastErr() error
 
+	// Fatal provides select semantics like Context.Done when there is a fatal
+	// backend error. Use LastErr to get the error.
+	Fatal() <-chan struct{}
+
 	// Close should gracefully shutdown the backend, returning when complete.
 	Close() error
 
