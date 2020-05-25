@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -273,6 +274,63 @@ func TestMain(m *testing.M) {
 		return m.Run()
 	}
 	os.Exit(doIt())
+}
+
+func TestCreateListener(t *testing.T) {
+	// Save current function and restore at the end:
+	oldOsExit := osExit
+	defer func() { osExit = oldOsExit }()
+	var actualExitCode int
+	myExit := func(code int) {
+		actualExitCode = code
+	}
+	osExit = myExit
+
+	s, _, _ := newTServer(t, false, "", "")
+
+	type args struct {
+		addr      string
+		protocol  string
+		tlsConfig *tls.Config
+	}
+
+	tests := []struct {
+		name             string
+		args             args
+		wantErr          bool
+		expectedExitCode int
+	}{
+		{
+			"start rpc listener",
+			args{
+				s.addr,
+				"tcp",
+				s.tlsConfig,
+			},
+			false,
+			0,
+		},
+		{
+			"exit on rpc listener error",
+			args{
+				s.addr,
+				"tcp",
+				nil,
+			},
+			false,
+			1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			createListener(tt.args.protocol, tt.args.addr, tt.args.tlsConfig)
+			if actualExitCode != tt.expectedExitCode {
+				t.Errorf("Expected exit code: %d, actualExitCode: %d", tt.expectedExitCode, actualExitCode)
+			}
+		})
+	}
+
 }
 
 func TestLoadMarket(t *testing.T) {

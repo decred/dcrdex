@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -274,11 +275,14 @@ func (s *RPCServer) Run(ctx context.Context) {
 	s.ctx = ctx
 
 	// Create listener.
-	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
-	if err != nil {
-		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
-		return
-	}
+	//listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
+	//if err != nil {
+	//	log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
+	//	//os.Exit(1)
+	//	return
+	//}
+
+	listener := createListener("tcp", s.addr, s.tlsConfig)
 
 	// Close the listener on context cancellation.
 	s.wg.Add(1)
@@ -304,6 +308,18 @@ func (s *RPCServer) Run(ctx context.Context) {
 	// Wait for market syncers to finish and Shutdown.
 	s.wg.Wait()
 	log.Infof("RPC server off")
+}
+
+var osExit = os.Exit
+
+func createListener(protocol string, addr string, tlsConfig *tls.Config) net.Listener {
+	listener, err := tls.Listen("tcp", addr, tlsConfig)
+	if err != nil {
+		log.Errorf("can't listen on %s. rpc server quitting: %v", addr, err)
+		osExit(1)
+		return nil
+	}
+	return listener
 }
 
 // handleRequest sends the request to the correct handler function if able.

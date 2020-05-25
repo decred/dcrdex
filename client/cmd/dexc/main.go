@@ -90,7 +90,7 @@ func main() {
 			rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
 			rpcSrv, err := rpcserver.New(rpcCfg)
 			if err != nil {
-				log.Errorf("Error starting rpc server: %v", err)
+				log.Errorf("Error constructing rpc server: %v", err)
 				os.Exit(1)
 			}
 			rpcSrv.Run(appCtx)
