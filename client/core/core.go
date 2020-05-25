@@ -2090,7 +2090,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("Error creating websocket connection for %s: %v", host, err)
+		return nil, err
 	}
 
 	connMaster := dex.NewConnectionMaster(conn)
@@ -2099,7 +2099,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// auto-reconnect cycle.
 	if err != nil {
 		connMaster.Disconnect()
-		return nil, fmt.Errorf("Error initializing websocket connection: %v", err)
+		return nil, err
 	}
 
 	// Request the market configuration. Disconnect from the DEX server if the
