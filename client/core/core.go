@@ -66,6 +66,8 @@ type dexConnection struct {
 
 	epochMtx sync.RWMutex
 	epoch    map[string]uint64
+	// connected is a best guess on the ws connection status.
+	connected bool
 }
 
 // refreshMarkets rebuilds, saves, and returns the market map. The map itself
@@ -487,6 +489,7 @@ func (c *Core) Exchanges() map[string]*Exchange {
 			Markets:    dc.markets(),
 			Assets:     dc.assets,
 			FeePending: dc.acct.feePending(),
+			Connected:  dc.connected,
 		}
 	}
 	return infos
@@ -2088,6 +2091,9 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		ReconnectSync: func() {
 			go c.handleReconnect(host)
 		},
+		ConnectEventFunc: func(connected bool) {
+			go c.handleConnectEvent(host, connected)
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -2159,6 +2165,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		trades:     make(map[order.OrderID]*trackedTrade),
 		notify:     c.notify,
 		epoch:      epochMap,
+		connected:  true,
 	}
 
 	dc.refreshMarkets()
@@ -2172,7 +2179,38 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 // handleReconnect is called when a WsConn indicates that a lost connection has
 // been re-established.
 func (c *Core) handleReconnect(host string) {
-	log.Infof("DEX at %s has reconnected", host)
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if !found {
+		log.Errorf("unable to find previous connection to DEX at %s", host)
+		return
+	}
+	if err := c.authDEX(dc); err != nil {
+		log.Errorf("unable to authorize DEX at %s: %v", host, err)
+		return
+	}
+}
+
+// handleConnectEvent is called when a WsConn indicates that a connection was
+// lost or established.
+//
+// NOTE: Disconnect event notifications may lag behind actual disconnections.
+func (c *Core) handleConnectEvent(host string, connected bool) {
+	c.connMtx.Lock()
+	if dc, found := c.conns[host]; found {
+		dc.connected = connected
+	}
+	c.connMtx.Unlock()
+	statusStr := "connected"
+	lvl := db.Success
+	if !connected {
+		statusStr = "disconnected"
+		lvl = db.WarningLevel
+	}
+	details := fmt.Sprintf("DEX at %s has %s", host, statusStr)
+	c.notify(newConnEventNote(fmt.Sprintf("DEX %s", statusStr), host, connected, details, lvl))
+	c.refreshUser()
 }
 
 // handleMatchProofMsg is called when a match_proof notification is received.

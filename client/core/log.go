@@ -4,6 +4,7 @@
 package core
 
 import (
+	"decred.org/dcrdex/client/comms"
 	orderbook "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
@@ -25,4 +26,5 @@ func UseLoggerMaker(maker *dex.LoggerMaker) {
 	loggerMaker = maker
 	log = maker.Logger("CORE")
 	orderbook.UseLogger(maker.Logger("ORDBOOK"))
+	comms.UseLogger(maker.Logger("COMMS"))
 }
