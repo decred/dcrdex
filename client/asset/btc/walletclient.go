@@ -21,6 +21,7 @@ import (
 const (
 	methodListUnspent       = "listunspent"
 	methodLockUnspent       = "lockunspent"
+	methodListLockUnspent   = "listlockunspent"
 	methodChangeAddress     = "getrawchangeaddress"
 	methodNewAddress        = "getnewaddress"
 	methodSignTx            = "signrawtransactionwithwallet"
@@ -75,6 +76,14 @@ func (wc *walletClient) LockUnspent(unlock bool, ops []*output) error {
 		return fmt.Errorf("lockunspent unsuccessful")
 	}
 	return err
+}
+
+// ListLockUnspent returns a slice of outpoints for all unspent outputs marked
+// as locked by a wallet.
+func (wc *walletClient) ListLockUnspent() ([]*RPCOutpoint, error) {
+	var unspents []*RPCOutpoint
+	err := wc.call(methodListLockUnspent, nil, &unspents)
+	return unspents, err
 }
 
 // ChangeAddress gets a new internal address from the wallet. The address will

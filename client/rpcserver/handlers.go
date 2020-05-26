@@ -528,7 +528,15 @@ var helpMsgs = map[string]helpMsg{
         "open" (bool): Whether the wallet is unlocked.
         "running" (bool): Whether the wallet is running.
         "updated" (int): Unix time of last balance update. Seconds since 00:00:00 Jan 1 1970.
-        "balance" (int): The wallet balance.
+        "balance" (obj): {
+          "zeroConf" (obj): {
+            "available" (int): The balance available for the use in the zero-minconf case.
+            "immature" (int): Balance that requires confirmations before use. Can be non-zero for balances in the xc map.
+            "locked" (int): The total locked balance.
+	      },
+          "xc" (map string -> obj): Mapping of dex address to balance objects with the same structure as zeroConf.
+                                    The balance categorization is based on DEX asset variables.
+        }
         "address" (string): A wallet address.
         "feerate" (int): The fee rate.
         "units" (string): Unit of measure for amounts.

@@ -65,7 +65,7 @@ type clientCore interface {
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
 	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
-	Balance(uint32) (uint64, error)
+	AssetBalances(assetID uint32) (*core.BalanceSet, error)
 	WalletState(assetID uint32) *core.WalletState
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
@@ -82,6 +82,8 @@ type clientCore interface {
 	AckNotes([]dex.Bytes)
 	Logout() error
 }
+
+var _ clientCore = (*core.Core)(nil)
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer
 // manages a map of clients who are subscribed to the market, and distributes

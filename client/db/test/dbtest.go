@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
@@ -50,7 +51,11 @@ func RandomWallet() *db.Wallet {
 			ordertest.RandomAddress(): ordertest.RandomAddress(),
 			ordertest.RandomAddress(): ordertest.RandomAddress(),
 		},
-		Balance:   rand.Uint64(),
+		Balance: &asset.Balance{
+			Available: rand.Uint64(),
+			Immature:  rand.Uint64(),
+			Locked:    rand.Uint64(),
+		},
 		BalUpdate: time.Now().Truncate(time.Millisecond).UTC(),
 		Address:   ordertest.RandomAddress(),
 	}
@@ -251,9 +256,7 @@ func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 			t.Fatalf("Settings mismatch: different values for key '%s'", k)
 		}
 	}
-	if w1.Balance != w2.Balance {
-		t.Fatalf("Balance mismatch. %d != %d", w1.Balance, w2.Balance)
-	}
+	MustCompareBalances(t, w1.Balance, w2.Balance)
 	if !w1.BalUpdate.Equal(w2.BalUpdate) {
 		t.Fatalf("BalUpdate mismatch. %s != %s", w1.BalUpdate, w2.BalUpdate)
 	}
@@ -262,6 +265,18 @@ func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 	}
 	if !bytes.Equal(w1.EncryptedPW, w2.EncryptedPW) {
 		t.Fatalf("EncryptedPW mismatch. %x != %x", w1.EncryptedPW, w2.EncryptedPW)
+	}
+}
+
+func MustCompareBalances(t testKiller, b1, b2 *asset.Balance) {
+	if b1.Available != b2.Available {
+		t.Fatalf("available balance mismatch. %d != %d", b1.Available, b2.Available)
+	}
+	if b1.Immature != b2.Immature {
+		t.Fatalf("immature balance mismatch. %d != %d", b1.Immature, b2.Immature)
+	}
+	if b1.Locked != b2.Locked {
+		t.Fatalf("locked balance mismatch. %d != %d", b1.Locked, b2.Locked)
 	}
 }
 

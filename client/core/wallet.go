@@ -21,7 +21,7 @@ type xcWallet struct {
 	mtx       sync.RWMutex
 	lockTime  time.Time
 	hookedUp  bool
-	balance   uint64
+	balances  *BalanceSet
 	balUpdate time.Time
 	encPW     []byte
 	address   string
@@ -60,21 +60,21 @@ func (w *xcWallet) state() *WalletState {
 	defer w.mtx.RUnlock()
 	winfo := w.Info()
 	return &WalletState{
-		Symbol:  unbip(w.AssetID),
-		AssetID: w.AssetID,
-		Open:    w.lockTime.After(time.Now()),
-		Running: w.connector.On(),
-		Balance: w.balance,
-		Address: w.address,
-		FeeRate: winfo.DefaultFeeRate, // Withdraw fee, not swap.
-		Units:   winfo.Units,
+		Symbol:   unbip(w.AssetID),
+		AssetID:  w.AssetID,
+		Open:     w.lockTime.After(time.Now()),
+		Running:  w.connector.On(),
+		Balances: w.balances,
+		Address:  w.address,
+		FeeRate:  winfo.DefaultFeeRate, // Withdraw fee, not swap.
+		Units:    winfo.Units,
 	}
 }
 
 // setBalance sets the wallet balance.
-func (w *xcWallet) setBalance(bal uint64) {
+func (w *xcWallet) setBalance(bals *BalanceSet) {
 	w.mtx.Lock()
-	w.balance = bal
+	w.balances = bals
 	w.balUpdate = time.Now()
 	w.mtx.Unlock()
 }

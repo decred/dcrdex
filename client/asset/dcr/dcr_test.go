@@ -145,6 +145,8 @@ type tRPCClient struct {
 	verboseBlocks   map[string]*chainjson.GetBlockVerboseResult
 	mainchain       map[int64]*chainhash.Hash
 	bestHash        chainhash.Hash
+	locked          []*wire.OutPoint
+	listLockedErr   error
 }
 
 func newTRPCClient() *tRPCClient {
@@ -220,6 +222,10 @@ func (c *tRPCClient) LockUnspent(unlock bool, ops []*wire.OutPoint) error {
 	return c.lockUnspentErr
 }
 
+func (c *tRPCClient) ListLockUnspent() ([]*wire.OutPoint, error) {
+	return c.locked, c.listLockedErr
+}
+
 func (c *tRPCClient) GetRawChangeAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error) {
 	return c.changeAddr, c.changeAddrErr
 }
@@ -278,15 +284,16 @@ func TestAvailableFund(t *testing.T) {
 	// should be returned.
 	unspents := make([]walletjson.ListUnspentResult, 0)
 	node.unspent = unspents
-	available, unconf, err := wallet.Balance(tDCR.FundConf)
+	balances, err := wallet.Balance([]uint32{tDCR.FundConf})
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
 	}
-	if available != 0 {
-		t.Fatalf("expected available = 0, got %d", available)
+	bal := balances[0]
+	if bal.Available != 0 {
+		t.Fatalf("expected available = 0, got %d", bal.Available)
 	}
-	if unconf != 0 {
-		t.Fatalf("unconf unconf = 0, got %d", unconf)
+	if bal.Immature != 0 {
+		t.Fatalf("unconf unconf = 0, got %d", bal.Immature)
 	}
 
 	littleBit := uint64(1e7)
@@ -297,17 +304,28 @@ func TestAvailableFund(t *testing.T) {
 		Confirmations: 0,
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
 	}
-
 	node.unspent = []walletjson.ListUnspentResult{littleUnspent}
-	available, unconf, err = wallet.Balance(tDCR.FundConf)
+
+	node.locked = []*wire.OutPoint{
+		{
+			Hash: *tTxHash,
+		},
+	}
+	node.txOutRes[outpointID(tTxHash, 0)] = makeGetTxOutRes(1, 1, tP2PKHScript)
+
+	balances, err = wallet.Balance([]uint32{tDCR.FundConf})
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
-	if available != 0 {
-		t.Fatalf("expected available = 0 for unconf-only, got %d", available)
+	bal = balances[0]
+	if bal.Available != 0 {
+		t.Fatalf("expected available = 0 for unconf-only, got %d", bal.Available)
 	}
-	if unconf != littleBit {
-		t.Fatalf("expected unconf = %d, got %d", littleBit, unconf)
+	if bal.Immature != littleBit {
+		t.Fatalf("expected unconf = %d, got %d", littleBit, bal.Immature)
+	}
+	if bal.Locked != tLotSize {
+		t.Fatalf("expected locked = %d, got %d", tLotSize, bal.Locked)
 	}
 
 	lottaBit := uint64(1e9)
@@ -321,15 +339,16 @@ func TestAvailableFund(t *testing.T) {
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
 	}}
 	node.unspent = unspents
-	available, unconf, err = wallet.Balance(tDCR.FundConf)
+	balances, err = wallet.Balance([]uint32{tDCR.FundConf})
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
-	if available != littleBit+lottaBit {
-		t.Fatalf("expected available = %d for 2 outputs, got %d", littleBit+lottaBit, available)
+	bal = balances[0]
+	if bal.Available != littleBit+lottaBit {
+		t.Fatalf("expected available = %d for 2 outputs, got %d", littleBit+lottaBit, bal.Available)
 	}
-	if unconf != 0 {
-		t.Fatalf("expected unconf = 0 for 2 outputs, got %d", unconf)
+	if bal.Immature != 0 {
+		t.Fatalf("expected unconf = 0 for 2 outputs, got %d", bal.Immature)
 	}
 
 	// Zero value

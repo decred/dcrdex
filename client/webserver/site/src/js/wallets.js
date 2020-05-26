@@ -227,7 +227,7 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     page.withdrawAddr.value = ''
     page.withdrawAmt.value = ''
-    page.withdrawAvail.textContent = (wallet.balance / 1e8).toFixed(8)
+    page.withdrawAvail.textContent = (wallet.balances.zeroConf.available / 1e8).toFixed(8)
     page.withdrawLogo.src = Doc.logoPath(asset.symbol)
     page.withdrawName.textContent = asset.info.name
     page.withdrawFee.textContent = wallet.feerate

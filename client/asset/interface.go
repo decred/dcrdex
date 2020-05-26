@@ -56,10 +56,11 @@ type Wallet interface {
 	dex.Connector
 	// Info returns a set of basic information about the wallet.
 	Info() *WalletInfo
-	// Balance should return the total available funds in the wallet.
-	// Note that after calling Fund, the amount returned by Balance may change
-	// by more than the value funded.
-	Balance(confs uint32) (available, locked uint64, err error)
+	// Balance should return the balance of the wallet, categorized by
+	// available, immature, and locked. Balance takes a list of minimum
+	// confirmations for which to calculate maturity, and returns a list of
+	// corresponding *Balance.
+	Balance(confs []uint32) ([]*Balance, error)
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
@@ -123,6 +124,18 @@ type Wallet interface {
 	Withdraw(address string, value, feeRate uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
+}
+
+// Balance is categorized information about a wallet's balance.
+type Balance struct {
+	// Available is the balance that is available for trading immediately.
+	Available uint64 `json:"available"`
+	// Immature is the balance that is not ready, but will be after some
+	// confirmations.
+	Immature uint64 `json:"immature"`
+	// Locked is the balance that that is currently locked for swap, but
+	// not actually swapped yet.
+	Locked uint64 `json:"locked"`
 }
 
 // Coin is some amount of spendable asset. Coin provides the information needed
