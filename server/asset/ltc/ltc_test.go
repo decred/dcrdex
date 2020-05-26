@@ -4,8 +4,8 @@ import (
 	"encoding/hex"
 	"testing"
 
+	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/server/asset/btc"
-	"github.com/ltcsuite/ltcd/chaincfg"
 )
 
 func TestCompatibility(t *testing.T) {
@@ -28,9 +28,5 @@ func TestCompatibility(t *testing.T) {
 		P2WSHScript:  fromHex("0020adb044cf4da15506e73c6d3928737229e64227f29cd86dcc34b7353c1f5560eb"),
 		WSHAddr:      "ltc1q4kcyfn6d592sdeeud5ujsumj98nyyfljnnvxmnp5ku6nc864vr4sawj2gw",
 	}
-	chainParams, err := btc.ReadCloneParams(&chaincfg.MainNetParams)
-	if err != nil {
-		t.Fatalf("error reading clone parameters: %v", err)
-	}
-	btc.CompatibilityCheck(items, chainParams, t)
+	btc.CompatibilityCheck(items, dexbtc.ReadCloneParams(MainNetParams), t)
 }

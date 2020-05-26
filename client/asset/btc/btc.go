@@ -100,16 +100,16 @@ func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64
 }
 
 // Value returns the value of the output. Part of the asset.Coin interface.
-func (output *output) Value() uint64 {
-	return output.value
+func (op *output) Value() uint64 {
+	return op.value
 }
 
 // Confirmations is the number of confirmations on the output's block.
 // Confirmations always pulls the block information fresh from the block chain,
 // and will return an error if the output has been spent. Part of the
 // asset.Coin interface.
-func (output *output) Confirmations() (uint32, error) {
-	txOut, err := output.node.GetTxOut(&output.txHash, output.vout, true)
+func (op *output) Confirmations() (uint32, error) {
+	txOut, err := op.node.GetTxOut(&op.txHash, op.vout, true)
 	if err != nil {
 		return 0, fmt.Errorf("error finding coin: %v", err)
 	}
@@ -315,7 +315,7 @@ func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // Info returns basic information about the wallet and asset.
-func (d *ExchangeWallet) Info() *asset.WalletInfo {
+func (btc *ExchangeWallet) Info() *asset.WalletInfo {
 	return walletInfo
 }
 

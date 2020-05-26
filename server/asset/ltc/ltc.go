@@ -10,7 +10,33 @@ import (
 	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
-	"github.com/ltcsuite/ltcd/chaincfg"
+)
+
+var (
+	// MainNetParams are the clone parameters for mainnet.
+	MainNetParams = &dexbtc.CloneParams{
+		PubKeyHashAddrID: 0x30,
+		ScriptHashAddrID: 0x32,
+		Bech32HRPSegwit:  "ltc",
+		CoinbaseMaturity: 100,
+		Net:              0xdbb6c0fb,
+	}
+	// TestNet4Params are the clone parameters for testnet.
+	TestNet4Params = &dexbtc.CloneParams{
+		PubKeyHashAddrID: 0x6f,
+		ScriptHashAddrID: 0x3a,
+		Bech32HRPSegwit:  "tltc",
+		CoinbaseMaturity: 100,
+		Net:              0xf1c8d2fd,
+	}
+	// RegressionNetParams are the clone parameters for simnet.
+	RegressionNetParams = &dexbtc.CloneParams{
+		PubKeyHashAddrID: 0x6f,
+		ScriptHashAddrID: 0x3a,
+		Bech32HRPSegwit:  "rltc",
+		CoinbaseMaturity: 100,
+		Net:              0x12141c16,
+	}
 )
 
 // Driver implements asset.Driver.
@@ -37,22 +63,16 @@ const assetName = "ltc"
 // NewBackend generates the network parameters and creates a ltc backend as a
 // btc clone using an asset/btc helper function.
 func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asset.Backend, error) {
-	var params *chaincfg.Params
+	var params *dexbtc.CloneParams
 	switch network {
 	case dex.Mainnet:
-		params = &chaincfg.MainNetParams
+		params = MainNetParams
 	case dex.Testnet:
-		params = &chaincfg.TestNet4Params
+		params = TestNet4Params
 	case dex.Regtest:
-		params = &chaincfg.RegressionNetParams
+		params = RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
-	}
-
-	// Convert the ltcd params to btcd params.
-	btcParams, err := btc.ReadCloneParams(params)
-	if err != nil {
-		return nil, fmt.Errorf("error converting parameters: %v", err)
 	}
 
 	// Designate the clone ports. These will be overwritten by any explicit
@@ -67,5 +87,5 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		configPath = dexbtc.SystemConfigPath("litecoin")
 	}
 
-	return btc.NewBTCClone(assetName, configPath, logger, network, btcParams, ports)
+	return btc.NewBTCClone(assetName, configPath, logger, network, dexbtc.ReadCloneParams(params), ports)
 }
