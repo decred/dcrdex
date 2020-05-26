@@ -535,7 +535,7 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 		// unlocked.
 		_, err = c.walletBalances(wallet)
 		if err != nil {
-			return nil, fmt.Errorf("error getting balances for %s: %v", unbip(assetID), err)
+			log.Tracef("could not retrieve balances for locked %s wallet: %v", unbip(assetID), err)
 		}
 	}
 	return wallet, nil
