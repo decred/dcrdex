@@ -194,13 +194,18 @@ func TestWsConn(t *testing.T) {
 	defer server.Shutdown(context.Background())
 
 	wg.Add(1)
+	serverReady := make(chan struct{}, 1)
 	go func() {
 		defer wg.Done()
+		serverReady <- struct{}{}
 		err := server.ListenAndServeTLS(certFile.Name(), keyFile.Name())
 		if err != nil {
 			fmt.Println(err)
 		}
 	}()
+
+	// wait for server to start listening before connecting
+	<-serverReady
 
 	setupWsConn := func(cert []byte) (*wsConn, error) {
 		cfg := &WsCfg{
