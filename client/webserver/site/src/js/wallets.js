@@ -151,14 +151,14 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     Doc.empty(card)
     page.marketsFor.textContent = rowInfo.name
-    for (const [url, xc] of Object.entries(app.user.exchanges)) {
+    for (const [host, xc] of Object.entries(app.user.exchanges)) {
       let count = 0
       for (const market of Object.values(xc.markets)) {
         if (market.baseid === assetID || market.quoteid === assetID) count++
       }
       if (count === 0) continue
       const header = page.dexTitle.cloneNode(true)
-      header.textContent = new URL(url).host
+      header.textContent = host
       card.appendChild(header)
       const marketsBox = page.markets.cloneNode(true)
       card.appendChild(marketsBox)
@@ -171,7 +171,7 @@ export default class WalletsPage extends BasePage {
         if (market.baseid === assetID) counterSymbol = market.quotesymbol
         mBox.querySelector('img').src = Doc.logoPath(counterSymbol)
         // Bind the click to a load of the markets page.
-        const pageData = { market: makeMarket(url, market.baseid, market.quoteid) }
+        const pageData = { market: makeMarket(host, market.baseid, market.quoteid) }
         bind(mBox, 'click', () => { app.loadPage('markets', pageData) })
         marketsBox.appendChild(mBox)
       }

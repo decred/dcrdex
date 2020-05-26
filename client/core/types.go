@@ -167,6 +167,7 @@ type Exchange struct {
 	Markets    map[string]*Market    `json:"markets"`
 	Assets     map[uint32]*dex.Asset `json:"assets"`
 	FeePending bool                  `json:"feePending"`
+	Connected  bool                  `json:"connected"`
 }
 
 // Return the markets as a slice sorted by Display ID, ascending.

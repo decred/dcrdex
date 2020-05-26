@@ -26,7 +26,21 @@ const (
 
 	// The maximum time in seconds to write to a connection.
 	writeWait = time.Second * 3
+
+	// reconnetInterval is the initial and increment between reconnect tries.
+	reconnectInterval = 5 * time.Second
+
+	// maxReconnetInterval is the maximum allowed reconnect interval.
+	maxReconnectInterval = time.Minute
 )
+
+// ErrInvalidCert is the error returned when attempting to use an invalid cert
+// to set up a ws connection.
+var ErrInvalidCert = fmt.Errorf("invalid certificate")
+
+// ErrCertRequired is the error returned when a ws connection fails because no
+// cert was provided.
+var ErrCertRequired = fmt.Errorf("certificate required")
 
 // WsConn is an interface for a websocket client.
 type WsConn interface {
@@ -50,11 +64,16 @@ type WsCfg struct {
 	URL string
 	// The maximum time in seconds to wait for a ping from the server.
 	PingWait time.Duration
-	// The rpc certificate file path.
+	// The server's certificate.
 	Cert []byte
 	// ReconnectSync runs the needed reconnection synchronization after
 	// a reconnect.
 	ReconnectSync func()
+	// ConnectEventFunc runs whenever connection status changes.
+	//
+	// NOTE: Disconnect event notifications may lag behind actual
+	// disconnections.
+	ConnectEventFunc func(bool)
 }
 
 // wsConn represents a client websocket connection.
@@ -101,7 +120,7 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 		}
 
 		if ok := rootCAs.AppendCertsFromPEM(cfg.Cert); !ok {
-			return nil, fmt.Errorf("unable to append cert")
+			return nil, ErrInvalidCert
 		}
 
 		tlsConfig = &tls.Config{
@@ -127,11 +146,16 @@ func (conn *wsConn) isConnected() bool {
 	return conn.connected
 }
 
-// setConnected updates the connection's connected state.
+// setConnected updates the connection's connected state and runs the
+// ConnectEventFunc in case of a change.
 func (conn *wsConn) setConnected(connected bool) {
 	conn.connectedMtx.Lock()
+	statusChange := conn.connected != connected
 	conn.connected = connected
 	conn.connectedMtx.Unlock()
+	if statusChange && conn.cfg.ConnectEventFunc != nil {
+		conn.cfg.ConnectEventFunc(connected)
+	}
 }
 
 // connect attempts to establish a websocket connection.
@@ -144,6 +168,12 @@ func (conn *wsConn) connect(ctx context.Context) error {
 
 	ws, _, err := dialer.Dial(conn.cfg.URL, nil)
 	if err != nil {
+		if _, isUnknownAuthError := err.(x509.UnknownAuthorityError); isUnknownAuthError {
+			if conn.tlsCfg == nil {
+				return ErrCertRequired
+			}
+			return ErrInvalidCert
+		}
 		return err
 	}
 
@@ -275,6 +305,7 @@ func (conn *wsConn) read(ctx context.Context) {
 // the established connection is broken. This should be run as a goroutine.
 func (conn *wsConn) keepAlive(ctx context.Context) {
 	maxReconnects := uint64(20000000) // TODO: reason to limit this?
+	rcInt := reconnectInterval
 	for {
 		select {
 		case <-conn.reconnectCh:
@@ -298,13 +329,18 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 				log.Errorf("Reconnect failed: %v", err)
 				conn.reconnects++
 				if conn.reconnects+1 < maxReconnects {
-					conn.queueReconnect()
+					conn.queueReconnect(rcInt)
+					// Increment the wait up to PingWait.
+					if rcInt < maxReconnectInterval {
+						rcInt += reconnectInterval
+					}
 				}
 				continue
 			}
 
 			log.Info("Successfully reconnected.")
 			conn.reconnects = 0
+			rcInt = reconnectInterval
 
 			// Synchronize after a reconnection.
 			if conn.cfg.ReconnectSync != nil {
@@ -324,9 +360,10 @@ func (conn *wsConn) reconnect() {
 }
 
 // queueReconnect queues a reconnection attempt.
-func (conn *wsConn) queueReconnect() {
+func (conn *wsConn) queueReconnect(wait time.Duration) {
 	conn.setConnected(false)
-	time.AfterFunc(conn.cfg.PingWait, func() { conn.reconnectCh <- struct{}{} })
+	log.Infof("Attempting reconnect to %s in %d seconds.", conn.cfg.URL, wait/time.Second)
+	time.AfterFunc(wait, func() { conn.reconnectCh <- struct{}{} })
 }
 
 // NextID returns the next request id.
@@ -393,10 +430,6 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 // Request sends the message with Send, but keeps a record of the callback
 // function to run when a response is received.
 func (conn *wsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) error {
-	if !conn.isConnected() {
-		return fmt.Errorf("cannot send on a broken connection")
-	}
-
 	// Log the message sent if it is a request.
 	if msg.Type == msgjson.Request {
 		conn.logReq(msg.ID, f)

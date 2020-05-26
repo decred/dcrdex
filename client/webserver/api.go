@@ -21,7 +21,7 @@ func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
 	}
 	fee, err := s.core.GetFee(form.URL, form.Cert)
 	if err != nil {
-		s.writeAPIError(w, "getfee error: %v", err)
+		s.writeAPIError(w, err.Error())
 		return
 	}
 	resp := struct {

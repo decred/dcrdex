@@ -190,7 +190,8 @@ export default class MarketsPage extends BasePage {
     // Notification filters.
     this.notifiers = {
       order: note => { this.handleOrderNote(note) },
-      epoch: note => { this.handleEpochNote(note) }
+      epoch: note => { this.handleEpochNote(note) },
+      conn: note => { this.handleConnEventNote(note) }
     }
 
     // Fetch the first market in the list, or the users last selected market, if
@@ -255,8 +256,8 @@ export default class MarketsPage extends BasePage {
   }
 
   /* setMarket sets the currently displayed market. */
-  async setMarket (url, base, quote) {
-    const dex = app.user.exchanges[url]
+  async setMarket (host, base, quote) {
+    const dex = app.user.exchanges[host]
     this.market = {
       dex: dex,
       sid: marketID(base, quote), // A string market identifier used by the DEX.
@@ -269,7 +270,7 @@ export default class MarketsPage extends BasePage {
       baseCfg: dex.assets[base],
       quoteCfg: dex.assets[quote]
     }
-    ws.request('loadmarket', makeMarket(url, base, quote))
+    ws.request('loadmarket', makeMarket(host, base, quote))
 
     const [b, q] = [this.market.base, this.market.quote]
     if (b && q) {
@@ -381,7 +382,7 @@ export default class MarketsPage extends BasePage {
   setMarketBuyOrderEstimate () {
     const market = this.market
     const lotSize = market.baseCfg.lotSize
-    const xc = app.user.exchanges[market.dex.url]
+    const xc = app.user.exchanges[market.dex.host]
     const buffer = xc.markets[market.sid].buybuffer
     const gap = this.midGap()
     if (gap) {
@@ -438,7 +439,7 @@ export default class MarketsPage extends BasePage {
     const orderRows = this.orderRows
     const market = this.market
     for (const oid in orderRows) delete orderRows[oid]
-    const orders = app.orders(market.dex.url, market.baseCfg.id, market.quoteCfg.id)
+    const orders = app.orders(market.dex.host, market.baseCfg.id, market.quoteCfg.id)
     Doc.empty(page.liveList)
     for (const order of orders) {
       const row = page.liveTemplate.cloneNode(true)
@@ -466,7 +467,7 @@ export default class MarketsPage extends BasePage {
   handleBookRoute (data) {
     const market = this.market
     const page = this.page
-    const url = market.dex.url
+    const url = market.dex.host
     const [b, q] = [market.baseCfg, market.quoteCfg]
     if (data.base !== b.id || data.quote !== q.id) return
     this.handleBook(data)
@@ -496,7 +497,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */
   handleBookOrderRoute (data) {
-    if (data.dex !== this.market.dex.url || data.marketID !== this.market.sid) return
+    if (data.dex !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
@@ -505,7 +506,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleUnbookOrderRoute is the handler for 'unbook_order' notifications. */
   handleUnbookOrderRoute (data) {
-    if (data.dex !== this.market.dex.url || data.marketID !== this.market.sid) return
+    if (data.dex !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     this.book.remove(order.token)
     this.removeTableOrder(order)
@@ -517,7 +518,7 @@ export default class MarketsPage extends BasePage {
    * notifications.
    */
   handleUpdateRemainingRoute (data) {
-    if (data.dex !== this.market.dex.url || data.marketID !== this.market.sid) return
+    if (data.dex !== this.market.dex.host || data.marketID !== this.market.sid) return
     const update = data.payload
     this.book.updateRemaining(update.token, update.qty)
     this.updateTableOrder(update)
@@ -526,7 +527,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleEpochOrderRoute is the handler for 'epoch_order' notifications. */
   handleEpochOrderRoute (data) {
-    if (data.dex !== this.market.dex.url || data.marketID !== this.market.sid) return
+    if (data.dex !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
@@ -681,7 +682,7 @@ export default class MarketsPage extends BasePage {
    * handleEpochNote handles notifications signalling the start of a new epoch.
    */
   handleEpochNote (note) {
-    if (note.dex !== this.market.dex.url || note.marketID !== this.market.sid) return
+    if (note.dex !== this.market.dex.host || note.marketID !== this.market.sid) return
     if (this.book) {
       this.book.setEpoch(note.epoch)
       this.chart.draw()
@@ -697,11 +698,24 @@ export default class MarketsPage extends BasePage {
           order.status = order.tif === immediateTiF ? statusExecuted : statusBooked
           break
         case order.type === MARKET && order.status === statusEpoch:
-          // Tehcnically don't know if this should be 'executed' or 'settling'.
+          // Technically don't know if this should be 'executed' or 'settling'.
           statusTD.textContent = 'executed'
           order.status = statusExecuted
           break
       }
+    }
+  }
+
+  /*
+   * handleConnEventNote handles notifications about individual DEX connections.
+   */
+  handleConnEventNote (note) {
+    const id = 'disconnected:' + note.url
+    const el = document.getElementById(id)
+    if (note.connected) {
+      Doc.hide(el)
+    } else {
+      Doc.show(el)
     }
   }
 
@@ -1025,7 +1039,7 @@ function statusString (order) {
     case statusUnknown: return 'unknown'
     case statusEpoch: return 'epoch'
     case statusBooked: return order.cancelling ? 'cancelling' : 'booked'
-    case statusExecuted: return isLive ? 'settling' : 'excecuted'
+    case statusExecuted: return isLive ? 'settling' : 'executed'
     case statusCanceled: return isLive ? 'canceled/settling' : 'canceled'
     case statusRevoked: return isLive ? 'revoked/settling' : 'revoked'
   }
