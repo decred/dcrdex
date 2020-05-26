@@ -147,7 +147,12 @@ export default class MarketsPage extends BasePage {
 
     // If the user clicks outside of a form, it should close the page overlay.
     bind(page.forms, 'mousedown', e => {
-      if (!Doc.mouseInElement(e, this.currentForm)) Doc.hide(page.forms)
+      if (!Doc.mouseInElement(e, this.currentForm)) {
+        Doc.hide(page.forms)
+        if (this.currentForm.id === 'verifyForm') {
+          page.vPass.value = ''
+        }
+      }
     })
 
     // Wallet button callbacks.
