@@ -226,6 +226,19 @@ export default class MarketsPage extends BasePage {
     return this.page.limitBttn.classList.contains('selected')
   }
 
+  /* hasFeePending is true if the fee payment is pending */
+  hasFeePending () {
+    return typeof this.market.dex.confs === 'number'
+  }
+
+  /* assetsAreSupported is true if all the assets of the current market are
+   * supported
+   */
+  assetsAreSupported () {
+    const [b, q] = [this.market.base, this.market.quote]
+    return b && q
+  }
+
   /*
    * setOrderVisibility sets which form is visible based on the specified
    * options.
@@ -247,21 +260,38 @@ export default class MarketsPage extends BasePage {
     }
   }
 
-  /* showLoaderMsg shows a message at loaderMsg and hides the orderForm in case
-  * dexc does not support an asset.
-  */
-  showLoaderMsg (symbol) {
+  /* resolveOrderFormVisibility displays or hides the 'orderForm' based on
+   * a set of conditions to be met.
+   */
+  resolveOrderFormVisibility () {
     const page = this.page
+    const feePaid = !this.hasFeePending()
+    const assetsAreSupported = this.assetsAreSupported()
+
+    if (feePaid && assetsAreSupported) {
+      Doc.show(page.orderForm)
+      return
+    }
+
     Doc.hide(page.orderForm)
-    Doc.show(page.loaderMsg)
-    page.loaderMsg.textContent = `${symbol.toUpperCase()} is not supported`
   }
 
-  /* hideLoaderMsg hides the loaderMsg and shows the orderForm back again */
-  hideLoaderMsg () {
+  /* setLoaderMsgVisibility displays a message in case a dex asset is not
+   * supported
+   */
+  setLoaderMsgVisibility () {
     const page = this.page
-    Doc.show(page.orderForm)
-    Doc.hide(page.loaderMsg)
+    const { base, quote } = this.market
+
+    if (this.assetsAreSupported()) {
+      // make sure to hide the loader msg
+      Doc.hide(page.loaderMsg)
+      return
+    }
+    const symbol = (!base && this.market.baseCfg.symbol) || (!quote && this.market.quoteCfg.symbol)
+
+    page.loaderMsg.textContent = `${symbol.toUpperCase()} is not supported`
+    Doc.show(page.loaderMsg)
   }
 
   /* setRegistrationStatusView sets the text content and class for the
@@ -302,17 +332,16 @@ export default class MarketsPage extends BasePage {
   setRegistrationStatusVisibility () {
     const { page, market: { dex } } = this
     const { confs, confsrequired } = dex
-    const feePending = typeof confs === 'number'
+    const feePending = this.hasFeePending()
 
     this.updateRegistrationStatusView(dex.host, !feePending, confsrequired, confs)
 
     if (feePending) {
-      Doc.hide(page.orderForm)
       Doc.show(page.registrationStatus)
     } else {
       const toggle = () => {
         Doc.hide(page.registrationStatus)
-        Doc.show(page.orderForm)
+        this.resolveOrderFormVisibility()
       }
       if (Doc.isHidden(page.orderForm)) {
         // wait a couple of seconds before showing the form so the success
@@ -341,16 +370,10 @@ export default class MarketsPage extends BasePage {
     }
     this.page.marketLoader.classList.remove('d-none')
     ws.request('loadmarket', makeMarket(host, base, quote))
-    const [b, q] = [this.market.base, this.market.quote]
-    if (b && q) {
-      return this.hideLoaderMsg()
-    }
-    if (!b) {
-      this.showLoaderMsg(this.market.baseCfg.symbol)
-    }
-    if (!q) {
-      this.showLoaderMsg(this.market.quoteCfg.symbol)
-    }
+
+    this.setLoaderMsgVisibility()
+    this.setRegistrationStatusVisibility()
+    this.resolveOrderFormVisibility()
   }
 
   /*
