@@ -531,7 +531,7 @@ var helpMsgs = map[string]helpMsg{
         "balance" (obj): {
           "zeroConf" (obj): {
             "available" (int): The balance available for the use in the zero-minconf case.
-            "immature" (int): 
+            "immature" (int): Balance that requires confirmations before use. Can be non-zero for balances in the xc map.
             "locked" (int): The total locked balance.
 	      },
           "xc" (map string -> obj): Mapping of dex address to balance objects with the same structure as zeroConf.
