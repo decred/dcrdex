@@ -309,6 +309,60 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
+func TestCreateListener(t *testing.T) {
+	// Save current function and restore at the end:
+	oldOsExit := osExit
+	defer func() { osExit = oldOsExit }()
+	var actualExitCode int
+	myExit := func(code int) {
+		actualExitCode = code
+	}
+	osExit = myExit
+
+	s, _, _ := newTServer(t, false)
+
+	type args struct {
+		protocol string
+		s        *WebServer
+	}
+
+	tests := []struct {
+		name             string
+		args             args
+		wantErr          bool
+		expectedExitCode int
+	}{
+		{
+			"start web listener",
+			args{
+				"tcp",
+				s,
+			},
+			false,
+			0,
+		},
+		{
+			"exit on web listener error",
+			args{
+				"bad",
+				s,
+			},
+			false,
+			1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			createListener(tt.args.protocol, tt.args.s)
+			if actualExitCode != tt.expectedExitCode {
+				t.Errorf("Expected exit code: %d, actualExitCode: %d", tt.expectedExitCode, actualExitCode)
+			}
+		})
+	}
+
+}
+
 func TestLoadMarket(t *testing.T) {
 	link := newLink()
 	s, tCore, shutdown := newTServer(t, false)

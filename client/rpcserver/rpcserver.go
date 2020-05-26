@@ -275,14 +275,12 @@ func (s *RPCServer) Run(ctx context.Context) {
 	s.ctx = ctx
 
 	// Create listener.
-	//listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
-	//if err != nil {
-	//	log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
-	//	//os.Exit(1)
-	//	return
-	//}
-
-	listener := createListener("tcp", s.addr, s.tlsConfig)
+	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
+	if err != nil {
+		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
+		return
+	}
+	//listener := createListener("tcp", s)
 
 	// Close the listener on context cancellation.
 	s.wg.Add(1)
@@ -312,12 +310,11 @@ func (s *RPCServer) Run(ctx context.Context) {
 
 var osExit = os.Exit
 
-func createListener(protocol string, addr string, tlsConfig *tls.Config) net.Listener {
-	listener, err := tls.Listen("tcp", addr, tlsConfig)
+func createListener(protocol string, s *RPCServer) net.Listener {
+	listener, err := tls.Listen(protocol, s.addr, s.tlsConfig)
 	if err != nil {
-		log.Errorf("can't listen on %s. rpc server quitting: %v", addr, err)
+		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
 		osExit(1)
-		return nil
 	}
 	return listener
 }

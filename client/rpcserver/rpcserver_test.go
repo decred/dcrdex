@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -288,10 +287,12 @@ func TestCreateListener(t *testing.T) {
 
 	s, _, _ := newTServer(t, false, "", "")
 
+	sWithError, _, _ := newTServer(t, false, "", "")
+	sWithError.tlsConfig = nil
+
 	type args struct {
-		addr      string
-		protocol  string
-		tlsConfig *tls.Config
+		protocol string
+		s        *RPCServer
 	}
 
 	tests := []struct {
@@ -303,9 +304,8 @@ func TestCreateListener(t *testing.T) {
 		{
 			"start rpc listener",
 			args{
-				s.addr,
 				"tcp",
-				s.tlsConfig,
+				s,
 			},
 			false,
 			0,
@@ -313,9 +313,8 @@ func TestCreateListener(t *testing.T) {
 		{
 			"exit on rpc listener error",
 			args{
-				s.addr,
 				"tcp",
-				nil,
+				sWithError,
 			},
 			false,
 			1,
@@ -324,7 +323,7 @@ func TestCreateListener(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createListener(tt.args.protocol, tt.args.addr, tt.args.tlsConfig)
+			createListener(tt.args.protocol, tt.args.s)
 			if actualExitCode != tt.expectedExitCode {
 				t.Errorf("Expected exit code: %d, actualExitCode: %d", tt.expectedExitCode, actualExitCode)
 			}

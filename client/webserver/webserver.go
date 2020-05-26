@@ -261,12 +261,14 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 func (s *WebServer) Run(ctx context.Context) {
 	// We'll use the context for market syncers.
 	s.ctx = ctx
-	// Start serving.
+
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		log.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
 		return
 	}
+
+	//listener := createListener("tcp", s)
 
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
@@ -302,6 +304,18 @@ func (s *WebServer) Run(ctx context.Context) {
 	s.mtx.Unlock()
 
 	wg.Wait()
+}
+
+var osExit = os.Exit
+
+func createListener(protocol string, s *WebServer) net.Listener {
+	// Start serving.
+	listener, err := net.Listen(protocol, s.addr)
+	if err != nil {
+		log.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
+		osExit(1)
+	}
+	return listener
 }
 
 // authorize creates, stores, and returns a new auth token to identify the
