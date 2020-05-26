@@ -184,10 +184,6 @@ func (c *tRPCClient) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 	return h, nil
 }
 
-func (c *tRPCClient) GetBlockHeaderVerbose(hash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error) {
-	return nil, fmt.Errorf("not test data yet")
-}
-
 func (c *tRPCClient) GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error) {
 	blk, found := c.verboseBlocks[blockHash.String()]
 	if !found {

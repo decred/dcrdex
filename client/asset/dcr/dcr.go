@@ -60,7 +60,6 @@ type rpcClient interface {
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetBestBlock() (*chainhash.Hash, int64, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
-	GetBlockHeaderVerbose(hash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error)
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetRawMempool(txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
@@ -1148,52 +1147,6 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
-}
-
-// ConfirmTime is the utc time the specified coin ID got the specified number
-// of confirmations. Returns a zero datetime if the coin has not gotten the
-// specified number of confirmations.
-func (dcr *ExchangeWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) {
-	zeroTime := time.Time{}
-
-	txHash, _, err := decodeCoinID(id)
-	if err != nil {
-		return zeroTime, err
-	}
-	tx, err := dcr.node.GetTransaction(txHash)
-	if err != nil {
-		return zeroTime, err
-	}
-	if uint32(tx.Confirmations) < nConfs {
-		return zeroTime, nil
-	}
-	if nConfs == 1 {
-		return time.Unix(tx.BlockTime, 0).UTC(), nil
-	}
-
-	blockHashAt1Conf, err := chainhash.NewHashFromStr(tx.BlockHash)
-	if err != nil {
-		return zeroTime, err
-	}
-	blockHeaderAt1Conf, err := dcr.node.GetBlockHeaderVerbose(blockHashAt1Conf)
-	if err != nil {
-		return zeroTime, err
-	}
-	var blockHashAtNConfs *chainhash.Hash
-	if nConfs == 2 {
-		blockHashAtNConfs, err = chainhash.NewHashFromStr(blockHeaderAt1Conf.NextHash)
-	} else {
-		blockHeightAtNConfs := int64(blockHeaderAt1Conf.Height) + int64(nConfs-1)
-		blockHashAtNConfs, err = dcr.node.GetBlockHash(blockHeightAtNConfs)
-	}
-	if err != nil {
-		return zeroTime, err
-	}
-	blockHeaderAtNConfs, err := dcr.node.GetBlockHeaderVerbose(blockHashAtNConfs)
-	if err != nil {
-		return zeroTime, err
-	}
-	return time.Unix(blockHeaderAtNConfs.Time, 0).UTC(), nil
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.

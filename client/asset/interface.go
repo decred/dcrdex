@@ -132,10 +132,6 @@ type Wallet interface {
 	// The ID need not represent an unspent coin, but coin IDs unknown to this
 	// wallet may return an error.
 	Confirmations(id dex.Bytes) (uint32, error)
-	// ConfirmTime is the utc time the specified coin ID got the specified number
-	// of confirmations. Returns a zero datetime if the coin has not gotten the
-	// specified number of confirmations.
-	ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
 	Withdraw(address string, value, feeRate uint64) (Coin, error)

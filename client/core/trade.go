@@ -36,12 +36,11 @@ func (err ExpirationErr) Error() string { return string(err) }
 // A matchTracker is used to negotiate a match.
 type matchTracker struct {
 	db.MetaMatch
-	failErr         error
-	prefix          *order.Prefix
-	trade           *order.Trade
-	counterSwap     asset.AuditInfo
-	id              order.MatchID
-	ownSwapConfTime time.Time
+	failErr     error
+	prefix      *order.Prefix
+	trade       *order.Trade
+	counterSwap asset.AuditInfo
+	id          order.MatchID
 }
 
 // The status is part of both the UserMatch and the MatchMetaData used to
@@ -474,10 +473,9 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	return false
 }
 
-// isRefundable will be true if we have broadcasted a swap transaction, our
-// swap has gotten the required confirmations, the other party has not executed
-// the required follow-up action within the expected timeframe AND our swap's
-// locktime has expired.
+// isRefundable will be true if we have broadcasted a swap contract, the other
+// party has not executed the required follow-up action (i.e. match status shows
+// our swap is the last action on the match) AND our swap's locktime has expired.
 func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	if match.failErr != nil {
 		return false
@@ -492,50 +490,18 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	dbMatch, metaData, proof, _ := match.parts()
-	var swapCoinID order.CoinID
 	var side string
 	switch {
 	case dbMatch.Side == order.Maker && metaData.Status == order.MakerSwapCast:
-		swapCoinID = proof.MakerSwap
 		side = "Maker"
 	case dbMatch.Side == order.Taker && metaData.Status == order.TakerSwapCast:
-		swapCoinID = proof.TakerSwap
 		side = "Taker"
 	default:
+		// match status shows that our swap is NOT the last action on this match.
 		return false
 	}
 
-	// Check when/if our swap got it's required confirms.
-	if match.ownSwapConfTime.IsZero() {
-		swapConfTime, err := wallet.ConfirmTime(dex.Bytes(swapCoinID), asset.SwapConf)
-		if err != nil {
-			log.Errorf("cannot fetch swapconf time for %s swap on order %s, match %s: %v",
-				side, t.ID(), match.id, err)
-			return false
-		}
-		if swapConfTime.IsZero() {
-			// swap conf has not gotten required confirms
-			return false
-		}
-		match.ownSwapConfTime = swapConfTime
-	}
-
-	// TODO: redefine maxAllowedActionDuration, should not be tied to BroadcastTimeout.
-	// Pretty irrelevant rn, since refund cannot be issued before swap's locktime and
-	// swap's locktime is most likely ahead of maxAllowedActionDuration.
-	// One concern is if the last swap broadcasted was the counter swap (Taker's swap),
-	// it's locktime would be earlier than the init (Maker's) swap. We should probably
-	// allow more time for this trade to proceed naturally, perhaps up to Maker's swap
-	// locktime, before attempting a refund.
-	maxAllowedActionDuration := time.Millisecond * time.Duration(t.dc.cfg.BroadcastTimeout)
-
-	if time.Since(match.ownSwapConfTime) < maxAllowedActionDuration {
-		// Our swap has gotten the required confirms, but other party still
-		// has some time to act.
-		return false
-	}
-
-	// Max allowed action time exceeded, we should issue a refund if our
+	// Our swap is the last action on this match, we should issue a refund if our
 	// swap's locktime has expired.
 	swapLocktimeExpired, err := wallet.LocktimeExpired(proof.Script)
 	if err != nil {
