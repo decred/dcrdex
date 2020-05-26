@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -194,18 +195,28 @@ func TestWsConn(t *testing.T) {
 	defer server.Shutdown(context.Background())
 
 	wg.Add(1)
-	serverReady := make(chan struct{}, 1)
+	serverReady := make(chan error, 1)
 	go func() {
 		defer wg.Done()
-		serverReady <- struct{}{}
-		err := server.ListenAndServeTLS(certFile.Name(), keyFile.Name())
+
+		ln, err := net.Listen("tcp", server.Addr)
+		serverReady <- err
+		if err != nil {
+			return
+		}
+		defer ln.Close()
+
+		err = server.ServeTLS(ln, certFile.Name(), keyFile.Name())
 		if err != nil {
 			fmt.Println(err)
 		}
 	}()
 
 	// wait for server to start listening before connecting
-	<-serverReady
+	err = <-serverReady
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	setupWsConn := func(cert []byte) (*wsConn, error) {
 		cfg := &WsCfg{
