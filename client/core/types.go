@@ -134,6 +134,7 @@ type Order struct {
 	Type        order.OrderType   `json:"type"`
 	ID          string            `json:"id"`
 	Stamp       uint64            `json:"stamp"`
+	Sig         dex.Bytes         `json:"sig"`
 	Status      order.OrderStatus `json:"status"`
 	Epoch       uint64            `json:"epoch"`
 	Qty         uint64            `json:"qty"`

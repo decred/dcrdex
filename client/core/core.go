@@ -1348,6 +1348,11 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 		return nil, fmt.Errorf("unknown DEX %s", form.Host)
 	}
 
+	// Cannot trade before logging in.
+	if !dc.acct.authed() {
+		return nil, errors.New("cannot trade: account not authed")
+	}
+
 	mktID := marketName(form.Base, form.Quote)
 	mkt := dc.market(mktID)
 	if mkt == nil {

@@ -481,6 +481,7 @@ func TestHandleExchanges(t *testing.T) {
             "stamp": 1588913556583,
             "qty": 100000000,
             "sell": false,
+            "sig": "3045022100c5ef66cbf3c2d305408b666108ae384478f22b558893942b8f66abfb613a5bf802205eb22a0250e5286244b2f5205f0b6d6b4fa6a60930be2ff30f35c3cf6bf969c8",
             "filled": 0,
             "matches": [
               {
@@ -541,6 +542,7 @@ func TestHandleExchanges(t *testing.T) {
             "stamp": 1588913556583,
             "qty": 100000000,
             "sell": false,
+            "sig": "3045022100c5ef66cbf3c2d305408b666108ae384478f22b558893942b8f66abfb613a5bf802205eb22a0250e5286244b2f5205f0b6d6b4fa6a60930be2ff30f35c3cf6bf969c8",
             "filled": 0,
             "matches": [
               {
@@ -669,11 +671,11 @@ func TestHandleTrade(t *testing.T) {
 		wantErrCode: msgjson.RPCArgumentsError,
 	}}
 	for _, test := range tests {
-		tc := &TCore{tradeErr: test.tradeErr}
+		tc := &TCore{order: new(core.Order), tradeErr: test.tradeErr}
 		r := &RPCServer{core: tc}
 		payload := handleTrade(r, test.params)
-		res := ""
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+		res := new(tradeResponse)
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -364,7 +364,12 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCTradeError, errMsg)
 		return createResponse(tradeRoute, nil, resErr)
 	}
-	return createResponse(tradeRoute, &res, nil)
+	tradeRes := &tradeResponse{
+		OrderID: res.ID,
+		Sig:     res.Sig.String(),
+		Stamp:   res.Stamp,
+	}
+	return createResponse(tradeRoute, &tradeRes, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -537,7 +542,7 @@ var helpMsgs = map[string]helpMsg{
 		pwArgsLong:  ``,
 		argsLong:    ``,
 		returns: `Returns:
-    obj: The wallets result.
+    array: An array of wallet results.
     [
       {
         "symbol" (string): The coin symbol.
@@ -582,7 +587,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		pwArgsLong:  ``,
 		argsLong:    ``,
 		returns: `Returns:
-    map: The exchanges result.
+    obj: The exchanges result.
     {
       "[DEX host]": {
         "markets": {
@@ -645,7 +650,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     appPass (string): The dex client password.`,
 		argsLong: ``,
 		returns: `Returns:
-    map: A map of notifications and dexes.
+    obj: A map of notifications and dexes.
     {
       "notifications" (array): An array of most recent notifications.
       [
@@ -687,31 +692,12 @@ Registration is complete after the fee transaction has been confirmed.`,
     rate (int): The number of units to ask per lot.
     tifnow (bool): The number of epochs the trade is good for.`,
 		returns: `Returns:
-    dict: The order details.
+    obj: The order details.
     {
-      "dex" (string): The DEX URL.
-      "market" (string): The market name. e.g. "dcr_btc".
-      "type" (int): 0 for market or 1 for limit.
-      "id" (string): A unique trade ID.
-      "stamp" (int): The unix trade timestamp. Seconds since 00:00:00
+      "orderid" (string): The order's unique hex identifier.
+      "sig" (string): The DEX's signature of the order information.
+      "stamp" (int): The time the order was signed in milliseconds since 00:00:00
         Jan 1 1970.
-      "qty" (bool): Number of units offered in the trade.
-      "sell" (bool): Whether this is a sell order.
-      "filled" (int): How much of the order has been filled.
-      "matches" (array): [
-        {
-          "matchID" (string): A unique match ID.
-          "step" (string): ???
-          "rate" (int): The price per offered unit.
-          "qty" (int): Number of units offered in the trade.
-        },...
-      ]
-      "cancelling" (bool): Whether this trade is in the process of being
-        cancelled.
-      "canceled" (bool): Whether this trade has been canceled.
-      "rate" (int): The price per offered unit.
-      "tif" (int): The number of epochs this trade is good for.
-      "targetID" (string): ???
     }`,
 	},
 }

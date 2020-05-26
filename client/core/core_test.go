@@ -1454,6 +1454,7 @@ func TestWithdraw(t *testing.T) {
 
 func TestTrade(t *testing.T) {
 	rig := newTestRig()
+	rig.dc.acct.auth()
 	tCore := rig.core
 	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet

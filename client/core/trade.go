@@ -150,6 +150,7 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 		Type:        prefix.OrderType,
 		ID:          t.ID().String(),
 		Stamp:       encode.UnixMilliU(prefix.ServerTime),
+		Sig:         t.metaData.Proof.DEXSig,
 		Status:      t.metaData.Status,
 		Epoch:       orderEpoch,
 		Rate:        t.rate(),

@@ -40,6 +40,13 @@ type getFeeResponse struct {
 	Fee uint64 `json:"fee"`
 }
 
+// tradeResponse is used when responding to the trade route.
+type tradeResponse struct {
+	OrderID string `json:"orderid"`
+	Sig     string `json:"sig"`
+	Stamp   uint64 `json:"stamp"`
+}
+
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	AssetID uint32           `json:"assetID"`
