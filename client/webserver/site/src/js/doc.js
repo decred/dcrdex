@@ -148,6 +148,21 @@ export default class Doc {
     add(s, 's')
     return result || '0 s'
   }
+
+  /*
+   * disableMouseWheel can be used to disable the mouse wheel for any
+   * input. It is very easy to unknowingly scroll up on a number input
+   * and then submit an unexpected value. This function prevents the
+   * scroll increment/decrement behavior for a wheel action on a
+   * number input.
+   */
+  static disableMouseWheel (...inputFields) {
+    for (const inputField of inputFields) {
+      inputField.addEventListener('wheel', (ev) => {
+        ev.preventDefault()
+      })
+    }
+  }
 }
 
 /* Easing algorithms for animations. */
