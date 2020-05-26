@@ -258,7 +258,7 @@ export default class Application {
   }
 
   /*
-   * handleFeePaymentNote is the handler for the 'feepayment'-type notificaetion, which
+   * handleFeePaymentNote is the handler for the 'feepayment'-type notification, which
    * is used to update the dex registration status.
    */
   handleFeePaymentNote (note) {
