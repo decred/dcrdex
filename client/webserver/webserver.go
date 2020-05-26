@@ -262,13 +262,7 @@ func (s *WebServer) Run(ctx context.Context) {
 	// We'll use the context for market syncers.
 	s.ctx = ctx
 
-	listener, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		log.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
-		return
-	}
-
-	//listener := createListener("tcp", s)
+	listener := createListener("tcp", s)
 
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
@@ -289,7 +283,7 @@ func (s *WebServer) Run(ctx context.Context) {
 	}()
 
 	log.Infof("Web server listening on http://%s", s.addr)
-	err = s.srv.Serve(listener)
+	err := s.srv.Serve(listener)
 	if !errors.Is(err, http.ErrServerClosed) {
 		log.Warnf("unexpected (http.Server).Serve error: %v", err)
 	}

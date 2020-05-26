@@ -274,13 +274,7 @@ func (s *RPCServer) Run(ctx context.Context) {
 	// ctx passed to newMarketSyncer when making new market syncers.
 	s.ctx = ctx
 
-	// Create listener.
-	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
-	if err != nil {
-		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
-		return
-	}
-	//listener := createListener("tcp", s)
+	listener := createListener("tcp", s)
 
 	// Close the listener on context cancellation.
 	s.wg.Add(1)
