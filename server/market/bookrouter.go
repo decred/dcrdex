@@ -463,7 +463,7 @@ func (r *BookRouter) handleOrderBook(conn comms.Link, msg *msgjson.Message) *msg
 		}
 	}
 	book.subs.add(conn)
-	go r.sendBook(conn, book, msg.ID)
+	r.sendBook(conn, book, msg.ID)
 	return nil
 }
 

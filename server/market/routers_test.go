@@ -43,7 +43,7 @@ const (
 	mkt2BaseRate  = 8e9
 	mktName3      = "dcr_btc"
 	mkt3BaseRate  = 3e9
-	responseDelay = 10 // milliseconds
+	responseDelay = 20 // milliseconds
 
 	clientPreimageDelay = 75 * time.Millisecond
 )
@@ -1375,7 +1375,7 @@ func TestRouter(t *testing.T) {
 		},
 	}
 	src1.feed <- sig
-	tick(responseDelay)
+	tick(responseDelay) // let (*BookRouter).runBook receive the signal and send on the subscriber links
 
 	epochNote := getEpochNoteFromLink(t, link1)
 	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link1")
