@@ -156,7 +156,15 @@ table.ordertable {
   }
 }
 
+#loaderMsg {
+  padding: 1rem;
+  color: red;
+}
+
 #registrationStatus {
+  padding: 0.5rem;
+  border: 1px solid #6a6a6a;
+
   .title {
     font-weight: bold;
     margin-bottom: 5px;
