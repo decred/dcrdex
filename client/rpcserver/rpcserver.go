@@ -52,16 +52,17 @@ var (
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
 	AssetBalances(assetID uint32) (*core.BalanceSet, error)
-	Book(dex string, base, quote uint32) (orderBook *core.OrderBook, err error)
+	Book(host string, base, quote uint32) (orderBook *core.OrderBook, err error)
+	Cancel(appPass []byte, orderID string) error
 	CloseWallet(assetID uint32) error
 	CreateWallet(appPass, walletPass []byte, form *core.WalletForm) error
 	Exchanges() (exchanges map[string]*core.Exchange)
 	InitializeClient(appPass []byte) error
 	Login(appPass []byte) (*core.LoginResult, error)
-	OpenWallet(assetID uint32, pw []byte) error
+	OpenWallet(assetID uint32, appPass []byte) error
 	GetFee(addr, cert string) (fee uint64, err error)
 	Register(form *core.RegisterForm) error
-	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
+	Sync(host string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)

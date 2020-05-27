@@ -12,6 +12,9 @@ import (
 	"decred.org/dcrdex/dex/encode"
 )
 
+// An orderID is a 256 bit number encoded as a hex string.
+const orderIdLen = 64
+
 var (
 	// errArgs is wrapped when arguments to the known command cannot be parsed.
 	errArgs = errors.New("unable to parse arguments")
@@ -42,7 +45,7 @@ type getFeeResponse struct {
 
 // tradeResponse is used when responding to the trade route.
 type tradeResponse struct {
-	OrderID string `json:"orderid"`
+	OrderID string `json:"orderID"`
 	Sig     string `json:"sig"`
 	Stamp   uint64 `json:"stamp"`
 }
@@ -68,9 +71,16 @@ type helpForm struct {
 	IncludePasswords bool   `json:"includepasswords"`
 }
 
+// tradeForm is information necessary to trade.
 type tradeForm struct {
 	AppPass encode.PassBytes
 	SrvForm *core.TradeForm
+}
+
+// cancelForm is information necessary to cancel a trade.
+type cancelForm struct {
+	AppPass encode.PassBytes `json:"appPass"`
+	OrderID string           `json:"orderID"`
 }
 
 // checkNArgs checks that args and pwArgs are the correct length.
@@ -97,8 +107,8 @@ func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	return nil
 }
 
-func checkUIntArg(arg, name string, bitSize int) (uint64, error) {
-	i, err := strconv.ParseUint(arg, 10, bitSize)
+func checkUIntArg(arg, name string, base, bitSize int) (uint64, error) {
+	i, err := strconv.ParseUint(arg, base, bitSize)
 	if err != nil {
 		return i, fmt.Errorf("%w: cannot parse %s: %v", errArgs, name, err)
 	}
@@ -153,7 +163,7 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 	if err := checkNArgs(params, []int{2}, []int{2, 3}); err != nil {
 		return nil, err
 	}
-	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 10, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +183,7 @@ func parseOpenWalletArgs(params *RawParams) (*openWalletForm, error) {
 	if err := checkNArgs(params, []int{1}, []int{1}); err != nil {
 		return nil, err
 	}
-	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 10, 32)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +195,7 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 	if err := checkNArgs(params, []int{0}, []int{1}); err != nil {
 		return 0, err
 	}
-	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 10, 32)
 	if err != nil {
 		return 0, err
 	}
@@ -206,7 +216,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 	if err := checkNArgs(params, []int{1}, []int{2, 3}); err != nil {
 		return nil, err
 	}
-	fee, err := checkUIntArg(params.Args[1], "fee", 64)
+	fee, err := checkUIntArg(params.Args[1], "fee", 10, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -235,19 +245,19 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	base, err := checkUIntArg(params.Args[3], "base", 32)
+	base, err := checkUIntArg(params.Args[3], "base", 10, 32)
 	if err != nil {
 		return nil, err
 	}
-	quote, err := checkUIntArg(params.Args[4], "quote", 32)
+	quote, err := checkUIntArg(params.Args[4], "quote", 10, 32)
 	if err != nil {
 		return nil, err
 	}
-	qty, err := checkUIntArg(params.Args[5], "qty", 64)
+	qty, err := checkUIntArg(params.Args[5], "qty", 10, 64)
 	if err != nil {
 		return nil, err
 	}
-	rate, err := checkUIntArg(params.Args[6], "rate", 64)
+	rate, err := checkUIntArg(params.Args[6], "rate", 10, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -269,4 +279,23 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 		},
 	}
 	return req, nil
+}
+
+func parseCancelArgs(params *RawParams) (*cancelForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{1}); err != nil {
+		return nil, err
+	}
+	id := params.Args[0]
+	if len(id) != orderIdLen {
+		return nil, fmt.Errorf("%w: orderID has incorrect length", errArgs)
+	}
+	// We can only check up to 64 bits at a time. Break the 256 bit hex
+	// into 4 sections and check each.
+	div := orderIdLen / 4
+	for i := 0; i < 4; i++ {
+		if _, err := checkUIntArg(id[i*div:(i+1)*div], "orderID", 16, 64); err != nil {
+			return nil, fmt.Errorf("%w: invalid order id hex", errArgs)
+		}
+	}
+	return &cancelForm{AppPass: params.PWArgs[0], OrderID: id}, nil
 }
