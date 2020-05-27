@@ -1277,7 +1277,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	errChan := make(chan error, 1)
 	err = dc.Request(msg, func(resp *msgjson.Message) {
 		ack := new(msgjson.Acknowledgement)
-		err = resp.UnmarshalResult(ack)
+		err := resp.UnmarshalResult(ack)
 		if err != nil {
 			errChan <- fmt.Errorf("notify fee result error: %v", err)
 			return
