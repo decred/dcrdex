@@ -113,6 +113,10 @@ export default class WalletsPage extends BasePage {
 
     if (!firstRow) return
     this.showMarkets(firstRow.assetID)
+
+    this.notifiers = {
+      balance: note => { this.handleBalanceNote(note) }
+    }
   }
 
   /*
@@ -303,6 +307,12 @@ export default class WalletsPage extends BasePage {
     Doc.hide(a.lock, a.withdraw, a.deposit)
     Doc.show(a.unlock)
     rowInfo.stateIcons.locked()
+  }
+
+  /* handleBalance handles notifications updating a wallet's balance. */
+  handleBalanceNote (note) {
+    const td = this.page.walletTable.querySelector(`[data-balance-target="${note.assetID}"]`)
+    td.textContent = (note.balances.zeroConf.available / 1e8).toFixed(8)
   }
 }
 
