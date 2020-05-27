@@ -69,7 +69,6 @@ type TCore struct {
 	openWalletErr   error
 	closeWalletErr  error
 	withdrawErr     error
-	restartDexcErr  error
 	notHas          bool
 	notRunning      bool
 	notOpen         bool
@@ -133,8 +132,6 @@ func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan c
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
 
 func (c *TCore) Logout() error { return c.logoutErr }
-
-func (c *TCore) RestartDEXConnections() error { return c.restartDexcErr }
 
 type TWriter struct {
 	b []byte

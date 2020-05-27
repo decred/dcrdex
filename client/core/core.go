@@ -156,6 +156,19 @@ func (dc *dexConnection) hasOrders(assetID uint32) bool {
 	return false
 }
 
+// hasActiveOrders checks whether there are any active orders for the dexConnection.
+func (dc *dexConnection) hasActiveOrders() bool {
+	dc.tradeMtx.RLock()
+	defer dc.tradeMtx.RUnlock()
+
+	for _, trade := range dc.trades {
+		if trade.metaData.Status == order.OrderStatusBooked || trade.metaData.Status == order.OrderStatusEpoch {
+			return true
+		}
+	}
+	return false
+}
+
 // findOrder returns the tracker and preimage for an order ID, and a boolean
 // indicating whether this is a cancel order.
 func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
@@ -1184,13 +1197,15 @@ func (c *Core) Logout() error {
 	defer c.refreshUser()
 	defer c.connMtx.Unlock()
 
-	// Check active orders and lock wallets
-	for assetID := range c.User().Assets {
-		for _, dc := range c.conns {
-			if dc.hasOrders(assetID) {
-				return fmt.Errorf("cannot log out with active orders, wallet %s ", unbip(assetID))
-			}
+	// Check active orders
+	for _, dc := range c.conns {
+		if dc.hasActiveOrders() {
+			return fmt.Errorf("cannot log out with active orders")
 		}
+	}
+
+	// Lock wallets
+	for assetID := range c.User().Assets {
 		wallet, found := c.wallet(assetID)
 		if found && wallet.connected() {
 			if err := wallet.Lock(); err != nil {
@@ -1290,47 +1305,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	}
 	wg.Wait()
 	return results
-}
-
-// RestartDEXConnections retrieve all active orders in database and
-// establishes a ws connection to a DEX server with the url and cert for each dexConnection
-func (c *Core) RestartDEXConnections() error {
-	if len(c.conns) == 0 {
-		return nil
-	}
-	rErr := error(nil)
-
-	c.connMtx.Lock()
-	defer c.refreshUser()
-	defer c.connMtx.Unlock()
-	var wg sync.WaitGroup
-	for _, dc := range c.conns {
-		dc.tradeMtx.Lock()
-		trades, err := c.dbTrackers(dc)
-		if err != nil {
-			log.Errorf("error retreiving active orders matches: %v", err)
-		}
-		dc.trades = trades
-		dc.tradeMtx.Unlock()
-		acct := &db.AccountInfo{
-			URL:  dc.acct.url,
-			Cert: dc.acct.cert,
-		}
-
-		wg.Add(1)
-		go func(acct *db.AccountInfo) {
-			defer wg.Done()
-			_, err := c.connectDEX(acct)
-			if err != nil {
-				log.Errorf("error re-connecting to DEX %s: %v", acct.URL, err)
-				rErr = err
-				return
-			}
-		}(acct)
-	}
-	wg.Wait()
-
-	return rErr
 }
 
 // resolveActiveTrades loads order and match data from the database. Only active

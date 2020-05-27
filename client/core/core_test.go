@@ -2677,6 +2677,9 @@ func TestLogout(t *testing.T) {
 		Order:  ord,
 		preImg: newPreimage(),
 		dc:     rig.dc,
+		metaData: &db.OrderMetaData{
+			Status: order.OrderStatusBooked,
+		},
 	}
 	rig.dc.trades[ord.ID()] = tracker
 

@@ -313,7 +313,6 @@ func (c *TCore) Register(r *core.RegisterForm) error {
 }
 func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
 func (c *TCore) Logout() error                           { return nil }
-func (c *TCore) RestartDEXConnections() error            { return nil }
 
 func (c *TCore) Sync(dexAddr string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	c.midGap = randomMagnitude(-2, 4)

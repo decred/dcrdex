@@ -81,7 +81,6 @@ type clientCore interface {
 	NotificationFeed() <-chan core.Notification
 	AckNotes([]dex.Bytes)
 	Logout() error
-	RestartDEXConnections() error
 }
 
 var _ clientCore = (*core.Core)(nil)
