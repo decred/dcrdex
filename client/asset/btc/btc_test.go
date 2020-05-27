@@ -212,7 +212,13 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		TipChange: func(error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	wallet := newWallet(walletCfg, "btc", tLogger, &chaincfg.MainNetParams, client)
+	cfg := &BTCCloneCFG{
+		WalletCFG:   walletCfg,
+		Symbol:      "btc",
+		Logger:      tLogger,
+		ChainParams: &chaincfg.MainNetParams,
+	}
+	wallet := newWallet(cfg, client)
 	go wallet.run(walletCtx)
 
 	return wallet, client, shutdown

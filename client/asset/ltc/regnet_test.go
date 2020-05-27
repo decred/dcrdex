@@ -2,7 +2,7 @@
 
 package ltc
 
-// Regnet tests expect the BTC test harness to be running.
+// Regnet tests expect the LTC test harness to be running.
 //
 // Sim harness info:
 // The harness has three wallets, alpha, beta, and gamma.
@@ -47,7 +47,7 @@ var (
 	blockTicker = time.Second
 	tLogger     dex.Logger
 	tCtx        context.Context
-	tBTC        = &dex.Asset{
+	tLTC        = &dex.Asset{
 		ID:       2,
 		Symbol:   "ltc",
 		SwapSize: dexbtc.InitTxSize,
@@ -61,7 +61,7 @@ var (
 	tBlockWait = tBlockTick + time.Millisecond*50
 )
 
-// Convert the BTC value to satoshi.
+// Convert the LTC value to satoshi.
 func toSatoshi(v float64) uint64 {
 	return uint64(math.Round(v * 1e8))
 }
@@ -180,22 +180,23 @@ func TestWallet(t *testing.T) {
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		available, unconf, err := wallet.Balance(tBTC.FundConf)
-		tLogger.Debugf("%s %f available, %f unconfirmed", name, float64(available)/1e8, float64(unconf)/1e8)
+		available, err := wallet.Balance([]uint32{tLTC.FundConf})
+		a := available[0]
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
 		}
+		tLogger.Debugf("%s %d available, %d immature", name, a.Available/1e8, a.Immature/1e8)
 	}
-	// Gamma should only have 10 BTC utxos, so calling fund for less should only
+	// Gamma should only have 10 LTC utxos, so calling fund for less should only
 	// return 1 utxo.
-	utxos, err := rig.gamma().Fund(contractValue*3, tBTC)
+	utxos, err := rig.gamma().Fund(contractValue*3, tLTC)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// UTXOs should be locked
-	utxos, _ = rig.gamma().Fund(contractValue*3, tBTC)
+	utxos, _ = rig.gamma().Fund(contractValue*3, tLTC)
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
@@ -203,19 +204,19 @@ func TestWallet(t *testing.T) {
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
-	utxos, _ = rig.gamma().Fund(contractValue*3, tBTC)
+	utxos, _ = rig.gamma().Fund(contractValue*3, tLTC)
 	if !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.gamma().ReturnCoins(utxos)
 
 	// Get a separate set of UTXOs for each contract.
-	utxos1, err := rig.gamma().Fund(contractValue, tBTC)
+	utxos1, err := rig.gamma().Fund(contractValue, tLTC)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
-	utxos2, err := rig.gamma().Fund(contractValue*2, tBTC)
+	utxos2, err := rig.gamma().Fund(contractValue*2, tLTC)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -249,7 +250,7 @@ func TestWallet(t *testing.T) {
 		Contracts: []*asset.Contract{contract1, contract2},
 	}
 
-	receipts, _, err := rig.gamma().Swap(swaps, tBTC)
+	receipts, _, err := rig.gamma().Swap(swaps, tLTC)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -306,7 +307,7 @@ func TestWallet(t *testing.T) {
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	_, _, err = rig.alpha().Redeem(redemptions, tBTC)
+	_, _, err = rig.alpha().Redeem(redemptions, tLTC)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
@@ -347,7 +348,7 @@ func TestWallet(t *testing.T) {
 	lockTime = time.Now().Add(-24 * time.Hour)
 
 	// Have gamma send a swap contract to the alpha address.
-	utxos, _ = rig.gamma().Fund(contractValue, tBTC)
+	utxos, _ = rig.gamma().Fund(contractValue, tLTC)
 	contract := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,
@@ -361,7 +362,7 @@ func TestWallet(t *testing.T) {
 
 	time.Sleep(time.Second)
 
-	receipts, _, err = rig.gamma().Swap(swaps, tBTC)
+	receipts, _, err = rig.gamma().Swap(swaps, tLTC)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -371,13 +372,13 @@ func TestWallet(t *testing.T) {
 	}
 	receipt = receipts[0]
 
-	err = rig.gamma().Refund(receipt, tBTC)
+	err = rig.gamma().Refund(receipt, tLTC)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
 
 	// Test PayFee
-	coin, err := rig.gamma().PayFee(alphaAddress, 1e8, tBTC)
+	coin, err := rig.gamma().PayFee(alphaAddress, 1e8, tLTC)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}

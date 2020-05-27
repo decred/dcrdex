@@ -21,7 +21,7 @@ const (
 	BipID = 2
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
-	defaultWithdrawalFee = 2
+	defaultWithdrawalFee = 1
 	minNetworkVersion    = 170100
 	// Litecoin Net parameters in terms of bitcoin's wire.
 	MainNet  wire.BitcoinNet = 0xdbb6c0fb
@@ -46,7 +46,7 @@ func init() {
 // Driver implements asset.Driver.
 type Driver struct{}
 
-// Setup creates the BTC exchange wallet. Start the wallet with its Run method.
+// Setup creates the LTC exchange wallet. Start the wallet with its Run method.
 func (d *Driver) Setup(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	return NewWallet(cfg, logger, network)
 }
@@ -66,7 +66,7 @@ func (d *Driver) Info() *asset.WalletInfo {
 // NewWallet is the exported constructor by which the DEX will import the
 // exchange wallet. The wallet will shut down when the provided context is
 // canceled. The configPath can be an empty string, in which case the standard
-// system location of the bitcoind config file is assumed.
+// system location of the litecoind config file is assumed.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
 	var params *dexbtc.CloneParams
 	switch network {
@@ -81,10 +81,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 
 	// Convert the ltcd params to btcd params.
-	btcParams, err := dexbtc.ReadCloneParams(params)
-	if err != nil {
-		return nil, fmt.Errorf("error converting parameters: %v", err)
-	}
+	btcParams := dexbtc.ReadCloneParams(params)
 
 	// ltc Net parameters are exactly the same as btc for everything but
 	// mainnet and testnet4 and so must be changed in order to register.
@@ -107,7 +104,15 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Testnet: "19335",
 		Simnet:  "18444",
 	}
-	cfg.MinNetworkVersion = minNetworkVersion
-	cfg.WalletInfo = walletInfo
-	return btc.BTCCloneWallet(cfg, "ltc", logger, network, btcParams, ports)
+	cloneCFG := &btc.BTCCloneCFG{
+		WalletCFG:         cfg,
+		MinNetworkVersion: minNetworkVersion,
+		WalletInfo:        walletInfo,
+		Symbol:            "btc",
+		Logger:            logger,
+		Network:           network,
+		ChainParams:       btcParams,
+		Ports:             ports,
+	}
+	return btc.BTCCloneWallet(cloneCFG)
 }
