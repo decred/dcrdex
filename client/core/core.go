@@ -596,6 +596,10 @@ func (c *Core) updateBalances(counts assetCounter) {
 			log.Error("error updateing balance after tick: %v", err)
 			continue
 		}
+		err = c.db.UpdateBalance(w.dbID, bals.ZeroConf)
+		if err != nil {
+			log.Errorf("error updating %s balance in database: %v", unbip(assetID), err)
+		}
 		c.notify(newBalanceNote(assetID, bals))
 	}
 	c.refreshUser()
@@ -783,6 +787,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		balUpdate: dbWallet.BalUpdate,
 		encPW:     dbWallet.EncryptedPW,
 		address:   dbWallet.Address,
+		dbID:      dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
 		Account:  dbWallet.Account,

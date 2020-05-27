@@ -308,6 +308,10 @@ func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
 	return tdb.updateWalletErr
 }
 
+func (tdb *TDB) UpdateBalance(wid []byte, balance *asset.Balance) error {
+	return nil
+}
+
 func (tdb *TDB) Wallets() ([]*db.Wallet, error) {
 	return nil, nil
 }
@@ -434,6 +438,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		AssetID:   assetID,
 		lockTime:  time.Now().Add(time.Hour),
 		hookedUp:  true,
+		dbID:      encode.Uint32Bytes(assetID),
 	}, w
 }
 
