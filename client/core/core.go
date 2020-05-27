@@ -2472,8 +2472,6 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Attempt to cancel and remove pending suspends.
 	if sched := dc.pendingSuspends[sp.MarketID]; sched != nil {
 		if !sched.Stop() {
-			// Drain the channel.
-			<-sched.C
 			return fmt.Errorf("market %s for dex %s is already suspended",
 				sp.MarketID, dc.acct.url)
 		}
