@@ -357,7 +357,7 @@ func TestOrders(t *testing.T) {
 		orders[i] = &db.MetaOrder{
 			MetaData: &db.OrderMetaData{
 				Status: status,
-				DEX:    acct.Host,
+				Host:   acct.Host,
 				Proof:  db.OrderProof{DEXSig: randBytes(73)},
 			},
 			Order: ord,
@@ -476,19 +476,19 @@ func TestOrders(t *testing.T) {
 	m := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusExecuted,
-			DEX:    acct1.Host,
+			Host:   acct1.Host,
 			Proof:  db.OrderProof{DEXSig: randBytes(73)},
 		},
 		Order: randOrderForMarket(base1, quote1),
 	}
 
-	dex := m.MetaData.DEX
-	m.MetaData.DEX = ""
+	host := m.MetaData.Host
+	m.MetaData.Host = ""
 	err = boltdb.UpdateOrder(m)
 	if err == nil {
 		t.Fatalf("no error for empty DEX")
 	}
-	m.MetaData.DEX = dex
+	m.MetaData.Host = host
 
 	sig := m.MetaData.Proof.DEXSig
 	m.MetaData.Proof.DEXSig = nil

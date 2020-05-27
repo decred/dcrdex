@@ -2230,7 +2230,7 @@ func TestResolveActiveTrades(t *testing.T) {
 		{
 			MetaData: &db.OrderMetaData{
 				Status:     order.OrderStatusBooked,
-				DEX:        tDexHost,
+				Host:       tDexHost,
 				Proof:      db.OrderProof{},
 				ChangeCoin: changeCoinID,
 			},
@@ -2778,7 +2778,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusEpoch,
-			DEX:    dc.acct.host,
+			Host:   dc.acct.host,
 			Proof: db.OrderProof{
 				Preimage: preImg[:],
 			},

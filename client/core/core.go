@@ -1490,7 +1490,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusEpoch,
-			DEX:    dc.acct.host,
+			Host:   dc.acct.host,
 			Proof: db.OrderProof{
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
@@ -1636,7 +1636,7 @@ func (c *Core) Cancel(pw []byte, tradeID string) error {
 	err = c.db.UpdateOrder(&db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusEpoch,
-			DEX:    dc.acct.host,
+			Host:   dc.acct.host,
 			Proof: db.OrderProof{
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],

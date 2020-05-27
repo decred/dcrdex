@@ -271,7 +271,7 @@ func (db *boltDB) acctsUpdate(f bucketFunc) error {
 // info for the same order ID will be overwritten without indication.
 func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 	ord, md := m.Order, m.MetaData
-	if md.DEX == "" {
+	if md.Host == "" {
 		return fmt.Errorf("empty DEX not allowed")
 	}
 	if len(md.Proof.DEXSig) == 0 {
@@ -287,7 +287,7 @@ func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(baseKey, uint32Bytes(ord.Base())).
 			put(quoteKey, uint32Bytes(ord.Quote())).
 			put(statusKey, uint16Bytes(uint16(md.Status))).
-			put(dexKey, []byte(md.DEX)).
+			put(dexKey, []byte(md.Host)).
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
 			put(changeKey, md.ChangeCoin).
@@ -446,7 +446,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		MetaData: &dexdb.OrderMetaData{
 			Proof:      *proof,
 			Status:     order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
-			DEX:        string(oBkt.Get(dexKey)),
+			Host:       string(oBkt.Get(dexKey)),
 			ChangeCoin: oBkt.Get(changeKey),
 		},
 		Order: ord,

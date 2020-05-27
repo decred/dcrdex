@@ -169,8 +169,8 @@ type MetaOrder struct {
 type OrderMetaData struct {
 	// Status is the last known order status.
 	Status order.OrderStatus
-	// DEX is the URL of the server that this order is associated with.
-	DEX string
+	// Host is the hostname of the server that this order is associated with.
+	Host string
 	// Proof is the signatures and other verification-related data for the order.
 	Proof OrderProof
 	// ChangeCoin is a change coin from a match. Change coins are "daisy-chained"
