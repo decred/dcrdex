@@ -793,7 +793,10 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 				return nil, asset.CoinNotFoundError
 			}
 		}
-		return nil, fmt.Errorf("error finding unspent contract: %v", err)
+		return nil, fmt.Errorf("error finding unspent contract: %s:%d : %v", txHash, vout, err)
+	}
+	if txOut == nil {
+		return nil, asset.CoinNotFoundError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
@@ -1352,6 +1355,11 @@ func (btc *ExchangeWallet) lockedSats() (uint64, error) {
 		txOut, err := btc.node.GetTxOut(txHash, outPoint.Vout, true)
 		if err != nil {
 			return 0, err
+		}
+		if txOut == nil {
+			// Must be spent now?
+			btc.log.Debugf("ignoring output from listlockunspent that wasn't found with gettxout. %s", opID)
+			continue
 		}
 		sum += toSatoshi(txOut.Value)
 	}

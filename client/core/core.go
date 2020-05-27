@@ -605,8 +605,8 @@ func (c *Core) updateBalances(counts assetCounter) {
 	c.refreshUser()
 }
 
-// updateAssetBalance upates the balance for the specified asset. A notification
-// is sent and refreshUser is called.
+// updateAssetBalance updates the balance for the specified asset. A
+// notification is sent and refreshUser is called.
 func (c *Core) updateAssetBalance(assetID uint32) {
 	c.updateBalances(make(assetCounter).add(assetID, 1))
 }

@@ -822,7 +822,7 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 		return nil, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if txOut == nil {
-		return nil, fmt.Errorf("nil gettxout result")
+		return nil, asset.CoinNotFoundError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
@@ -1272,6 +1272,11 @@ func (dcr *ExchangeWallet) lockedSats() (uint64, error) {
 		txOut, err := dcr.node.GetTxOut(&outPoint.Hash, outPoint.Index, true)
 		if err != nil {
 			return 0, err
+		}
+		if txOut == nil {
+			// Must be spent now?
+			dcr.log.Debugf("ignoring output from listlockunspent that wasn't found with gettxout. %s", opID)
+			continue
 		}
 		sum += toAtoms(txOut.Value)
 	}

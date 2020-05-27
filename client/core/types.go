@@ -456,7 +456,7 @@ type LoginResult struct {
 	DEXes         []*DEXBrief        `json:"dexes"`
 }
 
-// assetCounter tracks a count for an series of assets and provides methods for
+// assetCounter tracks a count for a series of assets and provides methods for
 // adding to the count and combining assetCounters. Methods return the receiver
 // for convenience.
 type assetCounter map[uint32]int
