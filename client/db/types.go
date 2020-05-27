@@ -61,7 +61,7 @@ func (s Severity) String() string {
 // AccountInfo is information about an account on a Decred DEX. The database
 // is designed for one account per server.
 type AccountInfo struct {
-	URL  string
+	Host string
 	Cert []byte
 	// EncKey should be an encrypted private key. The database itself does not
 	// handle encryption (yet?).
@@ -76,7 +76,7 @@ type AccountInfo struct {
 // Encode the AccountInfo as bytes.
 func (ai *AccountInfo) Encode() []byte {
 	return dbBytes{0}.
-		AddData([]byte(ai.URL)).
+		AddData([]byte(ai.Host)).
 		AddData(ai.EncKey).
 		AddData(ai.DEXPubKey.Serialize()).
 		AddData(ai.FeeCoin).
@@ -100,14 +100,14 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 	if len(pushes) != 5 {
 		return nil, fmt.Errorf("decodeAccountInfo: expected 5 data pushes, got %d", len(pushes))
 	}
-	urlB, keyB, dexB := pushes[0], pushes[1], pushes[2]
+	hostB, keyB, dexB := pushes[0], pushes[1], pushes[2]
 	coinB, certB := pushes[3], pushes[4]
 	pk, err := secp256k1.ParsePubKey(dexB)
 	if err != nil {
 		return nil, err
 	}
 	return &AccountInfo{
-		URL:       string(urlB),
+		Host:      string(hostB),
 		EncKey:    keyB,
 		DEXPubKey: pk,
 		FeeCoin:   coinB,
@@ -119,7 +119,7 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 // the account's fee payment. The fee coin is not part of the proof, since it
 // is already stored as part of the AccountInfo blob.
 type AccountProof struct {
-	URL   string
+	Host  string
 	Stamp uint64
 	Sig   []byte
 }
@@ -127,7 +127,7 @@ type AccountProof struct {
 // Encode encodes the AccountProof to a versioned blob.
 func (p *AccountProof) Encode() []byte {
 	return dbBytes{0}.
-		AddData([]byte(p.URL)).
+		AddData([]byte(p.Host)).
 		AddData(uint64Bytes(p.Stamp)).
 		AddData(p.Sig)
 }
@@ -149,9 +149,9 @@ func decodeAccountProof_v0(pushes [][]byte) (*AccountProof, error) {
 	if len(pushes) != 3 {
 		return nil, fmt.Errorf("decodeAccountProof_v0: expected 3 pushes, got %d", len(pushes))
 	}
-	urlB, stampB := pushes[0], pushes[1]
+	hostB, stampB := pushes[0], pushes[1]
 	return &AccountProof{
-		URL:   string(urlB),
+		Host:  string(hostB),
 		Stamp: intCoder.Uint64(stampB),
 		Sig:   pushes[2],
 	}, nil
@@ -410,7 +410,7 @@ type AccountBackup struct {
 // encodeDEXAccount serializes the details needed to backup a dex account.
 func encodeDEXAccount(acct *AccountInfo) []byte {
 	return dbBytes{0}.
-		AddData([]byte(acct.URL)).
+		AddData([]byte(acct.Host)).
 		AddData(acct.EncKey).
 		AddData(acct.DEXPubKey.Serialize())
 }
@@ -429,7 +429,7 @@ func decodeDEXAccount(acctB []byte) (*AccountInfo, error) {
 		}
 
 		var ai AccountInfo
-		ai.URL = string(pushes[0])
+		ai.Host = string(pushes[0])
 		ai.EncKey = pushes[1]
 		ai.DEXPubKey, err = secp256k1.ParsePubKey(pushes[2])
 		if err != nil {

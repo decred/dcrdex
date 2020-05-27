@@ -180,7 +180,7 @@ func parseCloseWalletArgs(params *RawParams) (uint32, error) {
 	return uint32(assetID), nil
 }
 
-func parseGetFeeArgs(params *RawParams) (url, cert string, err error) {
+func parseGetFeeArgs(params *RawParams) (host, cert string, err error) {
 	if err := checkNArgs(params, []int{0}, []int{1, 2}); err != nil {
 		return "", "", err
 	}
@@ -204,7 +204,7 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 	}
 	req := &core.RegisterForm{
 		AppPass: params.PWArgs[0],
-		URL:     params.Args[0],
+		Addr:    params.Args[0],
 		Fee:     fee,
 		Cert:    cert,
 	}

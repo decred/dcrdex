@@ -318,9 +318,9 @@ function prettyMarketName (market) {
 /*
  * makeMarket creates a market object.
  */
-function makeMarket (dex, base, quote) {
+function makeMarket (host, base, quote) {
   return {
-    dex: dex,
+    host: host,
     base: base,
     quote: quote
   }

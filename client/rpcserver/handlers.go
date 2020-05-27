@@ -221,11 +221,11 @@ func handleWallets(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 // *msgjson.ResponsePayload.Error is empty if successful. Requires the address
 // of a dex and returns the dex fee.
 func handleGetFee(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
-	url, cert, err := parseGetFeeArgs(params)
+	host, cert, err := parseGetFeeArgs(params)
 	if err != nil {
 		return usage(getFeeRoute, err)
 	}
-	fee, err := s.core.GetFee(url, cert)
+	fee, err := s.core.GetFee(host, cert)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCGetFeeError, err.Error())
 		return createResponse(getFeeRoute, nil, resErr)
@@ -244,14 +244,14 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(registerRoute, err)
 	}
 	defer form.AppPass.Clear()
-	fee, err := s.core.GetFee(form.URL, form.Cert)
+	fee, err := s.core.GetFee(form.Addr, form.Cert)
 	if err != nil {
 		resErr := msgjson.NewError(msgjson.RPCGetFeeError,
 			err.Error())
 		return createResponse(registerRoute, nil, resErr)
 	}
 	if fee != form.Fee {
-		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.URL, fee, form.Fee)
+		errMsg := fmt.Sprintf("DEX at %s expects a fee of %d but %d was offered", form.Addr, fee, form.Fee)
 		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
 		return createResponse(registerRoute, nil, resErr)
 	}
@@ -545,13 +545,13 @@ var helpMsgs = map[string]helpMsg{
 	},
 	registerRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"url" fee ("cert")`,
+		argsShort:   `"addr" fee ("cert")`,
 		cmdSummary: `Register for dex. An ok response does not mean that registration is complete.
 Registration is complete after the fee transaction has been confirmed.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
 		argsLong: `Args:
-    url (string): The DEX addr to register for.
+    addr (string): The DEX address to register for.
     fee (int): The DEX fee.
     cert (string): Optional. The TLS certificate path.`,
 		returns: `Returns:
@@ -645,7 +645,7 @@ Registration is complete after the fee transaction has been confirmed.`,
       "dexes" (array): An array of login attempted dexes.
       [
         {
-          "url" (string): The DEX url.
+          "host" (string): The DEX address.
           "acctID" (string): A unique hex ID.
           "authed" (bool): Whether the dex has been successfully authed.
           "autherr" (string): Omitted if authed. If not authed, the reason.

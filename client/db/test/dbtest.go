@@ -32,7 +32,7 @@ func randString(maxLen int) string {
 // RandomAccountInfo creates an AccountInfo with random values.
 func RandomAccountInfo() *db.AccountInfo {
 	return &db.AccountInfo{
-		URL:       ordertest.RandomAddress(),
+		Host:      ordertest.RandomAddress(),
 		EncKey:    randBytes(32),
 		DEXPubKey: randomPubKey(),
 		FeeCoin:   randBytes(32),
@@ -207,8 +207,8 @@ func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
 // MustCompareAccountInfo ensures the two AccountInfo are identical, calling the
 // Fatalf method of the testKiller if not.
 func MustCompareAccountInfo(t testKiller, a1, a2 *db.AccountInfo) {
-	if a1.URL != a2.URL {
-		t.Fatalf("URL mismatch. %s != %s", a1.URL, a2.URL)
+	if a1.Host != a2.Host {
+		t.Fatalf("Host mismatch. %s != %s", a1.Host, a2.Host)
 	}
 	if !bytes.Equal(a1.EncKey, a2.EncKey) {
 		t.Fatalf("EncKey mismatch. %x != %x", a1.EncKey, a2.EncKey)

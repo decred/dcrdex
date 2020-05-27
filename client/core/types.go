@@ -111,7 +111,7 @@ type SupportedAsset struct {
 
 // RegisterForm is information necessary to register an account on a DEX.
 type RegisterForm struct {
-	URL     string           `json:"url"`
+	Addr    string           `json:"url"`
 	AppPass encode.PassBytes `json:"appPass"`
 	Fee     uint64           `json:"fee"`
 	Cert    string           `json:"cert"`
@@ -129,7 +129,7 @@ type Match struct {
 // Order is core's general type for an order. An order may be a market, limit,
 // or cancel order. Some fields are only relevant to particular order types.
 type Order struct {
-	DEX         string            `json:"dex"`
+	Host        string            `json:"host"`
 	MarketID    string            `json:"market"`
 	Type        order.OrderType   `json:"type"`
 	ID          string            `json:"id"`
@@ -243,7 +243,7 @@ const (
 // BookUpdate is an order book update.
 type BookUpdate struct {
 	Action   string      `json:"action"`
-	DEX      string      `json:"dex"`
+	Host     string      `json:"host"`
 	MarketID string      `json:"marketID"`
 	Payload  interface{} `json:"payload"`
 }
@@ -251,7 +251,7 @@ type BookUpdate struct {
 // dexAccount is the core type to represent the client's account information for
 // a DEX.
 type dexAccount struct {
-	url       string
+	host      string
 	encKey    []byte
 	keyMtx    sync.RWMutex
 	privKey   *secp256k1.PrivateKey
@@ -267,7 +267,7 @@ type dexAccount struct {
 // newDEXAccount is a constructor for a new *dexAccount.
 func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
-		url:       acctInfo.URL,
+		host:      acctInfo.Host,
 		encKey:    acctInfo.EncKey,
 		dexPubKey: acctInfo.DEXPubKey,
 		isPaid:    acctInfo.Paid,
@@ -278,7 +278,7 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 
 func (a *dexAccount) dbInfo() *db.AccountInfo {
 	return &db.AccountInfo{
-		URL:       a.url,
+		Host:      a.host,
 		Cert:      a.cert,
 		EncKey:    a.encKey,
 		DEXPubKey: a.dexPubKey,
@@ -423,7 +423,7 @@ func (a *dexAccount) checkSig(msg []byte, sig []byte) error {
 
 // TradeForm is used to place a market or limit order
 type TradeForm struct {
-	DEX     string `json:"dex"`
+	Host    string `json:"host"`
 	IsLimit bool   `json:"isLimit"`
 	Sell    bool   `json:"sell"`
 	Base    uint32 `json:"base"`
@@ -463,7 +463,7 @@ func coinIDString(assetID uint32, coinID []byte) string {
 
 // DEXBrief holds data returned from initializeDEXConnections.
 type DEXBrief struct {
-	URL      string   `json:"url"`
+	Host     string   `json:"host"`
 	AcctID   string   `json:"acctID"`
 	Authed   bool     `json:"authed"`
 	AuthErr  string   `json:"autherr,omitempty"`

@@ -282,7 +282,7 @@ func TestLoadMarket(t *testing.T) {
 	link.cl.Start()
 	defer link.cl.Disconnect()
 	params := &marketLoad{
-		DEX:   "abc",
+		Host:  "abc",
 		Base:  uint32(1),
 		Quote: uint32(2),
 	}

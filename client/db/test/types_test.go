@@ -79,7 +79,7 @@ func TestAccountsBackupAndRestore(t *testing.T) {
 	accts := make(map[string]*db.AccountInfo, count)
 	for i := 0; i < count; i++ {
 		acct := RandomAccountInfo()
-		accts[acct.URL] = acct
+		accts[acct.Host] = acct
 	}
 
 	bkp := db.AccountBackup{
@@ -116,19 +116,19 @@ func TestAccountsBackupAndRestore(t *testing.T) {
 	}
 
 	for _, dexAcct := range restored.Accounts {
-		acct, ok := accts[dexAcct.URL]
+		acct, ok := accts[dexAcct.Host]
 		if !ok {
-			t.Fatalf("no account found with url %s", dexAcct.URL)
+			t.Fatalf("no account found with url %s", dexAcct.Host)
 		}
 
 		if !bytes.Equal(dexAcct.EncKey, acct.EncKey) {
 			t.Fatalf("expected restored account %s with encryption key %x, "+
-				"got %x", dexAcct.URL, dexAcct.EncKey, acct.EncKey)
+				"got %x", dexAcct.Host, dexAcct.EncKey, acct.EncKey)
 		}
 
 		if !dexAcct.DEXPubKey.IsEqual(acct.DEXPubKey) {
 			t.Fatalf("expected restored account %s with dex public key %x, "+
-				"got %x", dexAcct.URL, dexAcct.DEXPubKey.Serialize(),
+				"got %x", dexAcct.Host, dexAcct.DEXPubKey.Serialize(),
 				acct.DEXPubKey.Serialize())
 		}
 	}

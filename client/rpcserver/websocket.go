@@ -127,7 +127,7 @@ var wsHandlers = map[string]func(*RPCServer, *wsClient, *msgjson.Message) *msgjs
 // marketLoad is sent by websocket clients to subscribe to a market and request
 // the order book.
 type marketLoad struct {
-	DEX   string `json:"dex"`
+	Host  string `json:"host"`
 	Base  uint32 `json:"base"`
 	Quote uint32 `json:"quote"`
 }
@@ -137,7 +137,7 @@ type marketLoad struct {
 type marketResponse struct {
 	Book         *core.OrderBook `json:"book"`
 	Market       string          `json:"market"`
-	DEX          string          `json:"dex"`
+	Host         string          `json:"host"`
 	Base         uint32          `json:"base"`
 	BaseSymbol   string          `json:"baseSymbol"`
 	Quote        uint32          `json:"quote"`
@@ -205,7 +205,7 @@ func wsLoadMarket(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
-	book, feed, err := s.core.Sync(market.DEX, market.Base, market.Quote)
+	book, feed, err := s.core.Sync(market.Host, market.Base, market.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
 		log.Errorf(errMsg)

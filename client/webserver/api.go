@@ -19,7 +19,7 @@ func (s *WebServer) apiGetFee(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	fee, err := s.core.GetFee(form.URL, form.Cert)
+	fee, err := s.core.GetFee(form.Addr, form.Cert)
 	if err != nil {
 		s.writeAPIError(w, err.Error())
 		return
@@ -57,7 +57,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := s.core.Register(&core.RegisterForm{
-		URL:     reg.URL,
+		Addr:    reg.Addr,
 		Cert:    reg.Cert,
 		AppPass: reg.Password,
 		Fee:     reg.Fee,

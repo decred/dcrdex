@@ -34,8 +34,8 @@ import (
 )
 
 const (
-	firstDEX  = "https://somedex.com"
-	secondDEX = "https://thisdexwithalongname.com"
+	firstDEX  = "somedex.com"
+	secondDEX = "thisdexwithalongname.com"
 )
 
 var (
@@ -298,7 +298,7 @@ func (c *TCore) InitializeClient(pw []byte) error {
 	c.inited = true
 	return nil
 }
-func (c *TCore) GetFee(url, cert string) (uint64, error) {
+func (c *TCore) GetFee(host, cert string) (uint64, error) {
 	return 1e8, nil
 }
 
@@ -347,7 +347,7 @@ func (c *TCore) Sync(dexAddr string, base, quote uint32) (*core.OrderBook, *core
 					side[ord.Token] = ord
 					epochOrder := &core.BookUpdate{
 						Action:   msgjson.EpochOrderRoute,
-						DEX:      c.dexAddr,
+						Host:     c.dexAddr,
 						MarketID: mktID,
 						Payload:  ord,
 					}
@@ -375,7 +375,7 @@ func (c *TCore) Sync(dexAddr string, base, quote uint32) (*core.OrderBook, *core
 
 					c.trySend(&core.BookUpdate{
 						Action:   msgjson.UnbookOrderRoute,
-						DEX:      c.dexAddr,
+						Host:     c.dexAddr,
 						MarketID: mktID,
 						Payload:  &core.MiniOrder{Token: tkn},
 					})
@@ -668,7 +668,7 @@ out:
 			mktID := c.marketID
 			c.mtx.RUnlock()
 			c.noteFeed <- &core.EpochNotification{
-				DEX:          dexAddr,
+				Host:         dexAddr,
 				MarketID:     mktID,
 				Notification: db.NewNotification("epoch", "", "", db.Data),
 				Epoch:        getEpoch(),

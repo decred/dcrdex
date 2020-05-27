@@ -115,9 +115,9 @@ export default class RegistrationPage extends BasePage {
   async checkDEX () {
     const page = this.page
     Doc.hide(page.dexAddrErr)
-    const url = page.dexAddr.value
-    if (url === '') {
-      page.dexAddrErr.textContent = 'URL cannot be empty'
+    const addr = page.dexAddr.value
+    if (addr === '') {
+      page.dexAddrErr.textContent = 'DEX address cannot be empty'
       Doc.show(page.dexAddrErr)
       return
     }
@@ -129,7 +129,7 @@ export default class RegistrationPage extends BasePage {
 
     app.loading(page.dexAddrForm)
     var res = await postJSON('/api/getfee', {
-      url: url,
+      addr: addr,
       cert: cert
     })
     app.loaded()
@@ -153,7 +153,7 @@ export default class RegistrationPage extends BasePage {
       cert = await page.certFile.files[0].text()
     }
     const registration = {
-      url: page.dexAddr.value,
+      addr: page.dexAddr.value,
       pass: page.appPass.value,
       fee: this.fee,
       cert: cert

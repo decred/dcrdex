@@ -142,7 +142,7 @@ var wsHandlers = map[string]func(*WebServer, *wsClient, *msgjson.Message) *msgjs
 // marketLoad is sent by websocket clients to subscribe to a market and request
 // the order book.
 type marketLoad struct {
-	DEX   string `json:"dex"`
+	Host  string `json:"host"`
 	Base  uint32 `json:"base"`
 	Quote uint32 `json:"quote"`
 }
@@ -150,6 +150,7 @@ type marketLoad struct {
 // marketResponse is the websocket update sent when the client requests a
 // market via the 'loadmarket' route.
 type marketResponse struct {
+	Host  string          `json:"host"`
 	Book  *core.OrderBook `json:"book"`
 	Base  uint32          `json:"base"`
 	Quote uint32          `json:"quote"`
@@ -166,7 +167,7 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
-	book, feed, err := s.core.Sync(market.DEX, market.Base, market.Quote)
+	book, feed, err := s.core.Sync(market.Host, market.Base, market.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
 		log.Errorf(errMsg)
@@ -181,6 +182,7 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 	cl.mtx.Unlock()
 
 	note, err := msgjson.NewNotification("book", &marketResponse{
+		Host:  market.Host,
 		Book:  book,
 		Base:  market.Base,
 		Quote: market.Quote,
