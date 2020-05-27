@@ -158,6 +158,7 @@ type Market struct {
 	StartEpoch      uint64   `json:"startepoch"`
 	MarketBuyBuffer float64  `json:"buybuffer"`
 	Orders          []*Order `json:"orders"`
+	Suspended       bool     `json:"suspended"`
 }
 
 // Display returns an ID string suitable for displaying in a UI.

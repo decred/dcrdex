@@ -150,6 +150,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		QuoteSymbol:     tBTC.Symbol,
 		EpochLen:        60000,
 		MarketBuyBuffer: 1.1,
+		Suspended:       false,
 	}
 	return &dexConnection{
 		WsConn:     conn,
@@ -178,10 +179,11 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			},
 			Fee: tFee,
 		},
-		notify:    func(Notification) {},
-		marketMap: map[string]*Market{tDcrBtcMktName: mkt},
-		trades:    make(map[order.OrderID]*trackedTrade),
-		epoch:     map[string]uint64{tDcrBtcMktName: 0},
+		notify:          func(Notification) {},
+		marketMap:       map[string]*Market{tDcrBtcMktName: mkt},
+		trades:          make(map[order.OrderID]*trackedTrade),
+		epoch:           map[string]uint64{tDcrBtcMktName: 0},
+		pendingSuspends: make(map[string]*time.Timer),
 	}, conn, acct
 }
 
@@ -266,6 +268,10 @@ func (tdb *TDB) ActiveDEXOrders(dex string) ([]*db.MetaOrder, error) {
 
 func (tdb *TDB) ActiveOrders() ([]*db.MetaOrder, error) {
 	return nil, nil
+}
+
+func (tdb *TDB) ActiveDexMarketOrders(dex []byte, base []byte, quote []byte) ([]*db.MetaOrder, error) {
+	return []*db.MetaOrder{}, nil
 }
 
 func (tdb *TDB) AccountOrders(dex string, n int, since uint64) ([]*db.MetaOrder, error) {
@@ -2948,8 +2954,8 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	payload := &msgjson.TradeSuspension{
 		MarketID:    "dcr_btc",
 		FinalEpoch:  100,
-		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Hour * 24)),
-		Persist:     false,
+		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Second * 2)),
+		Persist:     true,
 	}
 
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)

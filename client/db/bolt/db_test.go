@@ -12,6 +12,7 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/slog"
@@ -532,6 +533,38 @@ func TestOrders(t *testing.T) {
 	err = boltdb.SetChangeCoin(ordertest.RandomOrderID(), []byte("abc"))
 	if err == nil {
 		t.Fatalf("no error encountered for updating unknown order change coin")
+	}
+
+	numToDo = 5
+	numActiveDex := numToDo
+	acct := acct1
+	base, quote := uint32(42), uint32(0) // base - dcr, quote - btc.
+	nTimes(numToDo, func(i int) {
+		status := order.OrderStatusBooked
+		ord := randOrderForMarket(base, quote)
+		order := &db.MetaOrder{
+			MetaData: &db.OrderMetaData{
+				Status: status,
+				DEX:    acct.URL,
+				Proof:  db.OrderProof{DEXSig: randBytes(73)},
+			},
+			Order: ord,
+		}
+
+		err := boltdb.UpdateOrder(order)
+		if err != nil {
+			t.Fatalf("error inserting order: %v", err)
+		}
+	})
+
+	activeDexOrders, err := boltdb.ActiveDexMarketOrders([]byte(acct.URL),
+		encode.Uint32Bytes(base), encode.Uint32Bytes(quote))
+	if err != nil {
+		t.Fatalf("error retrieving active dex orders: %v", err)
+	}
+	if len(activeDexOrders) != numActiveDex {
+		t.Fatalf("expected %d active dex orders, got %d",
+			numActiveDex, len(activeDexOrders))
 	}
 }
 

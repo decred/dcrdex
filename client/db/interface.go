@@ -37,6 +37,9 @@ type DB interface {
 	// ActiveOrders retrieves all orders which appear to be in an active state,
 	// which is either in the epoch queue or in the order book.
 	ActiveOrders() ([]*MetaOrder, error)
+	// ActiveDexMarketOrders retrieves active orders associated with the
+	// provided dex, base and quote assets.
+	ActiveDexMarketOrders(dex []byte, base []byte, quote []byte) ([]*MetaOrder, error)
 	// AccountOrders retrieves all orders associated with the specified DEX. The
 	// order count can be limited by supplying a non-zero n value. In that case
 	// the newest n orders will be returned. The orders can be additionally

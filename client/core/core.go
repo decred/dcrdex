@@ -76,6 +76,34 @@ type dexConnection struct {
 
 	regConfMtx  sync.RWMutex
 	regConfirms uint32
+
+	pendingSuspendsMtx sync.Mutex
+	pendingSuspends    map[string]*time.Timer
+}
+
+// suspended returns the suspended status of the provided market.
+func (dc *dexConnection) suspended(mkt string) bool {
+	dc.marketMtx.Lock()
+	defer dc.marketMtx.Unlock()
+	suspended, ok := dc.marketMap[mkt]
+	if !ok {
+		return false
+	}
+	return suspended.Suspended
+}
+
+// suspend halts trading for the provided market.
+func (dc *dexConnection) suspend(mkt string) {
+	dc.marketMtx.Lock()
+	dc.marketMap[mkt].Suspended = true
+	dc.marketMtx.Unlock()
+}
+
+// resume commences trading for the provided market.
+func (dc *dexConnection) resume(mkt string) {
+	dc.marketMtx.Lock()
+	dc.marketMap[mkt].Suspended = false
+	dc.marketMtx.Unlock()
 }
 
 // refreshMarkets rebuilds, saves, and returns the market map. The map itself
@@ -98,6 +126,7 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 			EpochLen:        mkt.EpochLen,
 			StartEpoch:      mkt.StartEpoch,
 			MarketBuyBuffer: mkt.MarketBuyBuffer,
+			Suspended:       dc.suspended(mkt.Name),
 		}
 		mid := market.marketName()
 		dc.tradeMtx.RLock()
@@ -1467,6 +1496,12 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 		return nil, fmt.Errorf("order placed for unknown market")
 	}
 
+	// Proceed with the order if there is no trade suspension
+	// scheduled for the market.
+	if dc.suspended(mktID) {
+		return nil, fmt.Errorf("suspended market")
+	}
+
 	rate, qty := form.Rate, form.Qty
 	if form.IsLimit && rate == 0 {
 		return nil, fmt.Errorf("zero-rate order not allowed")
@@ -2310,17 +2345,18 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 
 	// Create the dexConnection and listen for incoming messages.
 	dc := &dexConnection{
-		WsConn:     conn,
-		connMaster: connMaster,
-		assets:     assets,
-		cfg:        dexCfg,
-		books:      make(map[string]*bookie),
-		acct:       newDEXAccount(acctInfo),
-		marketMap:  marketMap,
-		trades:     make(map[order.OrderID]*trackedTrade),
-		notify:     c.notify,
-		epoch:      epochMap,
-		connected:  true,
+		WsConn:          conn,
+		connMaster:      connMaster,
+		assets:          assets,
+		cfg:             dexCfg,
+		books:           make(map[string]*bookie),
+		acct:            newDEXAccount(acctInfo),
+		marketMap:       marketMap,
+		trades:          make(map[order.OrderID]*trackedTrade),
+		notify:          c.notify,
+		epoch:           epochMap,
+		connected:       true,
+		pendingSuspends: make(map[string]*time.Timer),
 	}
 
 	dc.refreshMarkets()
@@ -2424,67 +2460,72 @@ func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 
 // handleTradeSuspensionMsg is called when a trade suspension notification is received.
 func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
-	var suspension msgjson.TradeSuspension
-	err := msg.Unmarshal(&suspension)
+	var sp msgjson.TradeSuspension
+	err := msg.Unmarshal(&sp)
 	if err != nil {
 		return fmt.Errorf("trade suspension unmarshal error: %v", err)
 	}
 
-	go func(ctx context.Context, suspension *msgjson.TradeSuspension) {
-		nowMilli := encode.UnixMilliU(time.Now())
+	dc.pendingSuspendsMtx.Lock()
+	defer dc.pendingSuspendsMtx.Unlock()
 
-		var duration time.Duration
-		if nowMilli < suspension.SuspendTime {
-			milliDiff := suspension.SuspendTime - nowMilli
-			duration = time.Duration(milliDiff * 1e6)
+	// Attempt to cancel and remove pending suspends.
+	if sched := dc.pendingSuspends[sp.MarketID]; sched != nil {
+		if !sched.Stop() {
+			// Drain the channel.
+			<-sched.C
+			return fmt.Errorf("market %s for dex %s is already suspended",
+				sp.MarketID, dc.acct.url)
 		}
+		delete(dc.pendingSuspends, sp.MarketID)
+	}
 
-		timer := time.NewTimer(duration)
-		for {
-			select {
-			case <-c.ctx.Done():
+	// Set the new scheduled suspend.
+	duration := time.Until(encode.UnixTimeMilli(int64(sp.SuspendTime)))
+	dc.pendingSuspends[sp.MarketID] = time.AfterFunc(duration, func() {
+		dc.pendingSuspendsMtx.Lock()
+		dc.suspend(sp.MarketID)
+		if bookie := dc.books[sp.MarketID]; bookie != nil {
+			bookie.Reset()
+		}
+		if !sp.Persist {
+			assets := strings.Split(sp.MarketID, "_")
+			base, ok := dex.BipSymbolID(assets[0])
+			if !ok {
+				log.Errorf("no ID for base BIP symbol: %v", assets[0])
+			}
+
+			quote, ok := dex.BipSymbolID(assets[1])
+			if !ok {
+				log.Errorf("no ID for quote BIP symbol: %v", assets[1])
+			}
+
+			orders, err := c.db.ActiveDexMarketOrders([]byte(dc.acct.url),
+				encode.Uint32Bytes(base), encode.Uint32Bytes(quote))
+			if err != nil {
+				log.Errorf("unable to fetch active dex marker orders: %v", err)
 				return
+			}
 
-			case <-timer.C:
-				dc.booksMtx.Lock()
-				defer dc.booksMtx.Unlock()
-
-				bookie, ok := dc.books[suspension.MarketID]
-				if !ok {
-					log.Errorf("no bookie found with market id %s",
-						suspension.MarketID)
+			// Revoke all active orders of the suspended market for the dex.
+			for _, entry := range orders {
+				md := entry.MetaData
+				md.Status = order.OrderStatusRevoked
+				metaOrder := &db.MetaOrder{
+					MetaData: md,
+					Order:    entry.Order,
 				}
 
-				switch suspension.Persist {
-				case true:
-					bookie.Reset()
-
-				case false:
-					dc.tradeMtx.Lock()
-					toDelete := make([]*trackedTrade, 0)
-					for _, trade := range dc.trades {
-						if trade.mktID == suspension.MarketID {
-							// Remove unmatched trades
-							status := trade.metaData.Status
-							if status == order.OrderStatusBooked ||
-								status == order.OrderStatusEpoch {
-								toDelete = append(toDelete, trade)
-							}
-						}
-					}
-
-					for _, trade := range toDelete {
-						// TODO: delete the trade from the db, yet to figure
-						// out how to do that.
-						delete(dc.trades, trade.ID())
-					}
-					dc.tradeMtx.Unlock()
-
-					bookie.Reset()
+				err := c.db.UpdateOrder(metaOrder)
+				if err != nil {
+					log.Errorf("unable to revoke order: %v", err)
+					return
 				}
 			}
 		}
-	}(c.ctx, &suspension)
+		delete(dc.pendingSuspends, sp.MarketID)
+		dc.pendingSuspendsMtx.Unlock()
+	})
 
 	return nil
 }

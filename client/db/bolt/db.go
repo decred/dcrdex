@@ -305,6 +305,19 @@ func (db *boltDB) ActiveOrders() ([]*dexdb.MetaOrder, error) {
 	})
 }
 
+// ActiveDexMarketOrders retrieves active orders associated with the
+// provided dex, base and quote assets.
+func (db *boltDB) ActiveDexMarketOrders(dex []byte, base []byte, quote []byte) ([]*dexdb.MetaOrder, error) {
+	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
+		statusB := oBkt.Get(statusKey)
+		dexB := oBkt.Get(dexKey)
+		baseB := oBkt.Get(baseKey)
+		quoteB := oBkt.Get(quoteKey)
+		return bEqual(base, baseB) && bEqual(quote, quoteB) &&
+			bEqual(dex, dexB) && (bEqual(statusB, byteEpoch) || bEqual(statusB, byteBooked))
+	})
+}
+
 // AccountOrders retrieves all orders associated with the specified DEX. n = 0
 // applies no limit on number of orders returned. since = 0 is equivalent to
 // disabling the time filter, since no orders were created before before 1970.
