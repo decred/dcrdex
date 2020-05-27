@@ -2898,3 +2898,29 @@ func TestAssetBalances(t *testing.T) {
 	dbtest.MustCompareBalances(t, bals[0], balances.ZeroConf)
 	dbtest.MustCompareBalances(t, bals[1], balances.XC[tDexHost])
 }
+
+func TestAssetCounter(t *testing.T) {
+	counts := make(assetCounter)
+	counts.add(1, 1)
+	if len(counts) != 1 {
+		t.Fatalf("count not added")
+	}
+	counts.add(1, 3)
+	if counts[1] != 4 {
+		t.Fatalf("counts not incremented properly")
+	}
+	newCounts := assetCounter{
+		1: 100,
+		2: 2,
+	}
+	counts.absorb(newCounts)
+	if len(counts) != 2 {
+		t.Fatalf("counts not absorbed properly")
+	}
+	if counts[2] != 2 {
+		t.Fatalf("absorbed counts not set correctly")
+	}
+	if counts[1] != 104 {
+		t.Fatalf("absorbed counts not combined correctly")
+	}
+}
