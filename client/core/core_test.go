@@ -1092,21 +1092,32 @@ func TestRegister(t *testing.T) {
 		err = tCore.Register(form)
 	}
 
-	getFeeNote := func() *FeePaymentNote {
+	getNotification := func(tag string) interface{} {
 		select {
 		case n := <-ch:
-			switch note := n.(type) {
-			case *FeePaymentNote:
-				return note
-			default:
-				t.Fatalf("wrong notification type: %T", note)
-			}
+			return n
 			// When it works, it should be virtually instant, but I have seen it fail
 			// at 1 millisecond.
 		case <-time.NewTimer(time.Second).C:
-			t.Fatalf("timed out waiting for fee payment notification")
+			t.Fatalf("timed out waiting for %s notification", tag)
 		}
 		return nil
+	}
+
+	getBalanceNote := func() *BalanceNote {
+		note, ok := getNotification("balance").(*BalanceNote)
+		if !ok {
+			t.Fatalf("wrong notification. Expected BalanceNote")
+		}
+		return note
+	}
+
+	getFeeNote := func() *FeePaymentNote {
+		note, ok := getNotification("feepayment").(*FeePaymentNote)
+		if !ok {
+			t.Fatalf("wrong notification. Expected FeePaymentNote")
+		}
+		return note
 	}
 
 	queueResponses()
@@ -1116,6 +1127,7 @@ func TestRegister(t *testing.T) {
 	}
 	// Should be two success notifications. One for fee paid on-chain, one for
 	// fee notification sent.
+	getBalanceNote()
 	feeNote := getFeeNote()
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
@@ -1220,7 +1232,9 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error for notifyfee response error: %v", err)
 	}
-	// 1st note is fee sent.
+	// 1st note is balance.
+	getBalanceNote()
+	// 2nd is feepayment.
 	feeNote = getFeeNote()
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
@@ -1237,6 +1251,7 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error after regaining valid state: %v", err)
 	}
+	getBalanceNote()
 	feeNote = getFeeNote()
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())

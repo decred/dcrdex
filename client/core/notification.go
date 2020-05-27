@@ -187,3 +187,18 @@ func newConnEventNote(subject, host string, connected bool, details string, seve
 		Connected:    connected,
 	}
 }
+
+// BalanceNote is an update to a wallet's balance.
+type BalanceNote struct {
+	db.Notification
+	AssetID  uint32      `json:"assetID"`
+	Balances *BalanceSet `json:"balances"`
+}
+
+func newBalanceNote(assetID uint32, bals *BalanceSet) *BalanceNote {
+	return &BalanceNote{
+		Notification: db.NewNotification("balance", "balance updated", "", db.Data),
+		AssetID:      assetID,
+		Balances:     bals,
+	}
+}

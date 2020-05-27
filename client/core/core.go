@@ -275,19 +275,20 @@ func (dc *dexConnection) compareServerMatches(matches map[order.OrderID]*serverM
 }
 
 // tickAsset checks open matches related to a specific asset for needed action.
-func (dc *dexConnection) tickAsset(assetID uint32) (numUpdated int) {
+func (dc *dexConnection) tickAsset(assetID uint32) assetCounter {
+	counts := make(assetCounter)
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for _, trade := range dc.trades {
 		if trade.Base() == assetID || trade.Quote() == assetID {
-			n, err := trade.tick()
+			newCounts, err := trade.tick()
 			if err != nil {
 				log.Errorf("%s tick error: %v", dc.acct.host, err)
 			}
-			numUpdated += n
+			counts.absorb(newCounts)
 		}
 	}
-	return
+	return counts
 }
 
 // market gets the *Market from the marketMap, or nil if mktID is unknown.
@@ -534,8 +535,8 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 			return nil, fmt.Errorf("Connect error: %v", err)
 		}
 		// If first connecting the wallet, try to get the balance. Ignore errors
-		// here with the assumption that some wallets may not reveal balance until
-		// unlocked.
+		// here with the assumption that some wallets may not reveal balance
+		// until unlocked.
 		_, err = c.walletBalances(wallet)
 		if err != nil {
 			log.Tracef("could not retrieve balances for locked %s wallet: %v", unbip(assetID), err)
@@ -574,6 +575,36 @@ func (c *Core) walletBalances(wallet *xcWallet) (*BalanceSet, error) {
 	}
 	wallet.setBalance(coreBals)
 	return coreBals, nil
+}
+
+// updateBalances updates the balance for every key in the counter map.
+// Notifications are sent and refreshUser is called.
+func (c *Core) updateBalances(counts assetCounter) {
+	if len(counts) == 0 {
+		return
+	}
+	for assetID := range counts {
+		w, exists := c.wallet(assetID)
+		if !exists {
+			// This should never be the case, but log an error in case I'm
+			// wrong or something changes.
+			log.Errorf("non-existent wallet should exist")
+			continue
+		}
+		bals, err := c.walletBalances(w)
+		if err != nil {
+			log.Error("error updateing balance after tick: %v", err)
+			continue
+		}
+		c.notify(newBalanceNote(assetID, bals))
+	}
+	c.refreshUser()
+}
+
+// updateAssetBalance upates the balance for the specified asset. A notification
+// is sent and refreshUser is called.
+func (c *Core) updateAssetBalance(assetID uint32) {
+	c.updateBalances(make(assetCounter).add(assetID, 1))
 }
 
 // Wallets creates a slice of WalletState for all known wallets.
@@ -709,19 +740,13 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return initErr("%s wallet authentication error: %v", symbol, err)
 	}
 
-	balances, err := c.walletBalances(wallet)
-	if err != nil {
-		return fmt.Errorf("error getting balances for %s: %v", unbip(assetID), err)
-	}
-	wallet.setBalance(balances)
-
 	dbWallet.Address, err = wallet.Address()
 	if err != nil {
 		return initErr("error getting deposit address for %s: %v", symbol, err)
 	}
 	wallet.setAddress(dbWallet.Address)
 
-	balances, err = c.walletBalances(wallet)
+	balances, err := c.walletBalances(wallet)
 	if err != nil {
 		return initErr("error getting wallet balance for %s: %v", symbol, err)
 	}
@@ -835,16 +860,16 @@ func unlockWallet(wallet *xcWallet, crypter encrypt.Crypter) error {
 // CloseWallet closes the wallet for the specified asset. The wallet cannot be
 // closed if there are active negotiations for the asset.
 func (c *Core) CloseWallet(assetID uint32) error {
-	wallet, err := c.connectedWallet(assetID)
-	if err != nil {
-		return fmt.Errorf("CloseWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
-	}
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	for _, dc := range c.conns {
 		if dc.hasOrders(assetID) {
 			return fmt.Errorf("cannot lock %s wallet with active orders or negotiations", unbip(assetID))
 		}
+	}
+	wallet, err := c.connectedWallet(assetID)
+	if err != nil {
+		return fmt.Errorf("CloseWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
 	err = wallet.Lock()
 	if err != nil {
@@ -991,6 +1016,8 @@ func (c *Core) Register(form *RegisterForm) error {
 		// Don't abandon registration. The fee is already paid.
 	}
 
+	c.updateAssetBalance(regFeeAssetID)
+
 	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", dc.cfg.RegFeeConfirms, dc.acct.host)
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success))
 
@@ -1093,6 +1120,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	if err != nil {
 		log.Errorf("Login -> NotificationsN error: %v", err)
 	}
+
 	c.refreshUser()
 	result := &LoginResult{
 		Notifications: notes,
@@ -1327,11 +1355,13 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, er
 	if err != nil {
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote("Withdraw error", details, db.ErrorLevel))
+		return nil, err
 	} else {
 		details := fmt.Sprintf("Withdraw of %s has completed successfully. Coin ID = %s", unbip(assetID), coin)
 		c.notify(newWithdrawNote("Withdraw sent", details, db.Success))
 	}
-	return coin, err
+	c.updateAssetBalance(assetID)
+	return coin, nil
 }
 
 // Trade is used to place a market or limit order.
@@ -1525,7 +1555,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 
 	// Refresh the markets and user.
 	dc.refreshMarkets()
-	c.refreshUser()
+	c.updateAssetBalance(wallets.fromWallet.AssetID)
 
 	return corder, nil
 }
@@ -2380,19 +2410,19 @@ out:
 				log.Error(err)
 			}
 		case <-ticker.C:
-			var numUpdated int
+			counts := make(assetCounter)
 			dc.tradeMtx.Lock()
 			for _, trade := range dc.trades {
-				n, err := trade.tick()
+				newCounts, err := trade.tick()
 				if err != nil {
 					log.Error(err)
 				}
-				numUpdated += n
+				counts.absorb(newCounts)
 			}
 			dc.tradeMtx.Unlock()
-			if numUpdated > 0 {
+			if len(counts) > 0 {
 				dc.refreshMarkets()
-				c.refreshUser()
+				c.updateBalances(counts)
 			}
 		case <-c.ctx.Done():
 			break out
@@ -2482,10 +2512,10 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return err
 	}
-	numUpdated, err := tracker.tick()
-	if numUpdated > 0 {
+	counts, err := tracker.tick()
+	if len(counts) > 0 {
 		dc.refreshMarkets()
-		c.refreshUser()
+		c.updateBalances(counts)
 	}
 	return err
 }
@@ -2508,10 +2538,10 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return err
 	}
-	numUpdated, err := tracker.tick()
-	if numUpdated > 0 {
+	counts, err := tracker.tick()
+	if len(counts) > 0 {
 		dc.refreshMarkets()
-		c.refreshUser()
+		c.updateBalances(counts)
 	}
 	return err
 }
@@ -2551,18 +2581,16 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	}
 	c.waiterMtx.Unlock()
 	c.connMtx.RLock()
-	var numUpdated int
+	counts := make(assetCounter)
 	for _, dc := range c.conns {
-		n := dc.tickAsset(assetID)
-		if n > 0 {
+		newCounts := dc.tickAsset(assetID)
+		if len(newCounts) > 0 {
 			dc.refreshMarkets()
+			counts.absorb(newCounts)
 		}
-		numUpdated += n
 	}
 	c.connMtx.RUnlock()
-	if numUpdated > 0 {
-		c.refreshUser()
-	}
+	c.updateBalances(counts)
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical

@@ -455,3 +455,22 @@ type LoginResult struct {
 	Notifications []*db.Notification `json:"notifications"`
 	DEXes         []*DEXBrief        `json:"dexes"`
 }
+
+// assetCounter tracks a count for an series of assets and provides methods for
+// adding to the count and combining assetCounters. Methods return the receiver
+// for convenience.
+type assetCounter map[uint32]int
+
+// add increments the count for a specific asset.
+func (c assetCounter) add(assetID uint32, increment int) assetCounter {
+	c[assetID] = c[assetID] + increment
+	return c
+}
+
+// absorb adds the counts from another assetCounter to the current counts.
+func (c assetCounter) absorb(otherCounter assetCounter) assetCounter {
+	for assetID, count := range otherCounter {
+		c.add(assetID, count)
+	}
+	return c
+}
