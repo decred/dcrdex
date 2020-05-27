@@ -3,7 +3,7 @@
 set -e
 set -x # for verbose output
 SESSION="dcr-harness"
-NODES_ROOT=~/dextest/dcr
+NODES_ROOT=$(cd ~/dextest/dcr; pwd) # absolute path
 RPC_USER="user"
 RPC_PASS="pass"
 ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
@@ -33,6 +33,14 @@ mkdir -p "${NODES_ROOT}/harness-ctl"
 ################################################################################
 # Configuration Files
 ################################################################################
+
+# Alpha node config. Not used here, but added for use in dcrdex's markets.json
+cat > "${NODES_ROOT}/alpha/dcrd.conf" <<EOF
+rpcuser=${RPC_USER}
+rpcpass=${RPC_PASS}
+rpccert=${NODES_ROOT}/alpha/rpc.cert
+rpclisten=127.0.0.1:${ALPHA_WALLET_PORT}
+EOF
 
 # Alpha ctl config
 cat > "${NODES_ROOT}/alpha/alpha-ctl.conf" <<EOF
