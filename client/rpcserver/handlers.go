@@ -679,18 +679,18 @@ Registration is complete after the fee transaction has been confirmed.`,
 	},
 	tradeRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"dex" isLimit sell base qyote qty rate tifnow`,
+		argsShort:   `"dex" isLimit sell base quote qty rate immediate`,
 		cmdSummary:  ``,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
 		argsLong: `Args:
     isLimit (bool): Whether the order is a limit order.
     sell (bool): Whether the order is selling.
-    base (int): The base BIP-44 registered coin index.
-    quote (int): The quote BIP-44 registered coin index.
-    qty (int): The number of lots to sell/buy.
-    rate (int): The number of units to ask per lot.
-    tifnow (bool): The number of epochs the trade is good for.`,
+    base (int): The BIP-44 coin index for the market's base asset.
+    quote (int): The BIP-44 coin index for the market's quote asset.
+    qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
+    rate (int): The atoms quote asset to pay/accept per unit base asset.
+    immediate (bool): Require immediate match. Do not book the order.`,
 		returns: `Returns:
     obj: The order details.
     {

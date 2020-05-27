@@ -251,7 +251,7 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	tifnow, err := checkBoolArg(params.Args[7], "tifnow")
+	tifnow, err := checkBoolArg(params.Args[7], "immediate")
 	if err != nil {
 		return nil, err
 	}
