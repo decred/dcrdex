@@ -416,12 +416,13 @@ func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
 	for _, o := range book.orders {
 		msgBook = append(msgBook, o)
 	}
+	epochIdx := book.epochIdx // instead of book.epoch() while already locked
 	book.mtx.RUnlock()
 
 	msg, err := msgjson.NewResponse(msgID, &msgjson.OrderBook{
 		Seq:      book.subs.lastSeq(),
 		MarketID: book.name,
-		Epoch:    uint64(book.epochIdx),
+		Epoch:    uint64(epochIdx),
 		Orders:   msgBook,
 	}, nil)
 	if err != nil {
