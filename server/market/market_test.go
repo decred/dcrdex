@@ -648,7 +648,7 @@ func TestMarket_Run(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
+	startEpochIdx := 2 + encode.UnixMilli(time.Now())/epochDurationMSec
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
