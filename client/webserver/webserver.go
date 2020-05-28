@@ -169,7 +169,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
 		addTemplate("wallets", bb, "forms").
-		addTemplate("settings", bb)
+		addTemplate("settings", bb, "forms")
 	err := tmpl.buildErr()
 	if err != nil {
 		return nil, err

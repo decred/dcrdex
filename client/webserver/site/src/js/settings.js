@@ -14,6 +14,7 @@ export default class SettingsPage extends BasePage {
     app = application
     const page = this.page = Doc.parsePage(body, [
       'darkMode', 'commitHash',
+      'addMoreDex',
       // Form configure DEX server
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
@@ -29,10 +30,10 @@ export default class SettingsPage extends BasePage {
       }
     })
     page.commitHash.textContent = app.commitHash.substring(0, 7)
+    Doc.bind(page.addMoreDex, 'click', () => this.showForm(page.dexAddrForm))
     Doc.bind(page.certFile, 'change', () => this.readCert())
     Doc.bind(page.removeCert, 'click', () => this.resetCert())
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
-
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
     Doc.bind(page.forms, 'mousedown', e => {
@@ -44,6 +45,7 @@ export default class SettingsPage extends BasePage {
   async showForm (form) {
     const page = this.page
     this.currentForm = form
+    Doc.hide(page.dexAddrForm, page.confirmRegForm)
     form.style.right = '10000px'
     Doc.show(page.forms, form)
     const shift = (page.forms.offsetWidth + form.offsetWidth) / 2
@@ -53,7 +55,11 @@ export default class SettingsPage extends BasePage {
     form.style.right = '0px'
   }
 
-  async readCert () {
+  /**
+   * onCertFileChange when the input certFile changed, read the file
+   * and setting cert name into text of selectedCert to display on the view
+   */
+  async onCertFileChange () {
     const page = this.page
     const files = page.certFile.files
     if (!files.length) return
@@ -62,7 +68,8 @@ export default class SettingsPage extends BasePage {
     Doc.hide(page.addCert)
   }
 
-  resetCert () {
+  /* clearCertFile cleanup certFile value and selectedCert text */
+  clearCertFile () {
     const page = this.page
     page.certFile.value = ''
     page.selectedCert.textContent = this.defaultTLSText
@@ -126,7 +133,7 @@ export default class SettingsPage extends BasePage {
       Doc.show(page.regErr)
     }
     page.dexAddr.value = ''
-    this.resetCert()
+    this.clearCertFile()
     Doc.hide(page.forms)
   }
 }
