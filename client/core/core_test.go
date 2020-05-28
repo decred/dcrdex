@@ -270,10 +270,6 @@ func (tdb *TDB) ActiveOrders() ([]*db.MetaOrder, error) {
 	return nil, nil
 }
 
-func (tdb *TDB) ActiveDexMarketOrders(dex []byte, base []byte, quote []byte) ([]*db.MetaOrder, error) {
-	return []*db.MetaOrder{}, nil
-}
-
 func (tdb *TDB) AccountOrders(dex string, n int, since uint64) ([]*db.MetaOrder, error) {
 	return nil, nil
 }
@@ -2965,7 +2961,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	}
 
 	form := &TradeForm{
-		DEX:     tDexUrl,
+		Host:    tDexHost,
 		IsLimit: true,
 		Sell:    true,
 		Base:    tDCR.ID,

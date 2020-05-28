@@ -85,11 +85,11 @@ type dexConnection struct {
 func (dc *dexConnection) suspended(mkt string) bool {
 	dc.marketMtx.Lock()
 	defer dc.marketMtx.Unlock()
-	suspended, ok := dc.marketMap[mkt]
+	market, ok := dc.marketMap[mkt]
 	if !ok {
 		return false
 	}
-	return suspended.Suspended
+	return market.Suspended
 }
 
 // suspend halts trading for the provided market.
@@ -2473,7 +2473,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	if sched := dc.pendingSuspends[sp.MarketID]; sched != nil {
 		if !sched.Stop() {
 			return fmt.Errorf("market %s for dex %s is already suspended",
-				sp.MarketID, dc.acct.url)
+				sp.MarketID, dc.acct.host)
 		}
 		delete(dc.pendingSuspends, sp.MarketID)
 	}
@@ -2482,47 +2482,43 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	duration := time.Until(encode.UnixTimeMilli(int64(sp.SuspendTime)))
 	dc.pendingSuspends[sp.MarketID] = time.AfterFunc(duration, func() {
 		dc.pendingSuspendsMtx.Lock()
+		defer dc.pendingSuspendsMtx.Unlock()
 		dc.suspend(sp.MarketID)
 		if bookie := dc.books[sp.MarketID]; bookie != nil {
 			bookie.Reset()
 		}
 		if !sp.Persist {
-			assets := strings.Split(sp.MarketID, "_")
-			base, ok := dex.BipSymbolID(assets[0])
+			mkt, ok := dc.marketMap[sp.MarketID]
 			if !ok {
-				log.Errorf("no ID for base BIP symbol: %v", assets[0])
+				log.Errorf("no market found with ID %s", sp.MarketID)
 			}
 
-			quote, ok := dex.BipSymbolID(assets[1])
-			if !ok {
-				log.Errorf("no ID for quote BIP symbol: %v", assets[1])
-			}
-
-			orders, err := c.db.ActiveDexMarketOrders([]byte(dc.acct.url),
-				encode.Uint32Bytes(base), encode.Uint32Bytes(quote))
-			if err != nil {
-				log.Errorf("unable to fetch active dex marker orders: %v", err)
-				return
-			}
+			dc.tradeMtx.Lock()
+			defer dc.tradeMtx.Unlock()
 
 			// Revoke all active orders of the suspended market for the dex.
-			for _, entry := range orders {
-				md := entry.MetaData
-				md.Status = order.OrderStatusRevoked
-				metaOrder := &db.MetaOrder{
-					MetaData: md,
-					Order:    entry.Order,
-				}
+			for _, tracker := range dc.trades {
+				if tracker.Order.Base() == mkt.BaseID &&
+					tracker.Order.Quote() == mkt.QuoteID &&
+					tracker.metaData.Host == dc.acct.host &&
+					(tracker.metaData.Status == order.OrderStatusEpoch ||
+						tracker.metaData.Status == order.OrderStatusBooked) {
 
-				err := c.db.UpdateOrder(metaOrder)
-				if err != nil {
-					log.Errorf("unable to revoke order: %v", err)
-					return
+					md := tracker.metaData
+					md.Status = order.OrderStatusRevoked
+					metaOrder := &db.MetaOrder{
+						MetaData: md,
+						Order:    tracker.Order,
+					}
+
+					err = tracker.db.UpdateOrder(metaOrder)
+					if err != nil {
+						log.Errorf("unable to update order: %v", err)
+					}
 				}
 			}
 		}
 		delete(dc.pendingSuspends, sp.MarketID)
-		dc.pendingSuspendsMtx.Unlock()
 	})
 
 	return nil
