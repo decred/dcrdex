@@ -10,20 +10,29 @@
 <div id="main" data-handler="markets" class="main align-items-stretch justify-content-center">
 
   {{- /* MARKET LIST */ -}}
-  <div id="marketList" class="marketlist">
-    {{range $host, $xc := .Exchanges}}
-      <div class="fs16 py-1 pl-2 bg1">
-        {{$host}}
-        <span id="disconnected:{{$host}}" class="ico-disconnected{{if $xc.Connected}} d-hide{{end}}" data-toggle="tooltip" title="disconnected"></span>
-      </div>
-      {{range $xc.SortedMarkets}}
-        <div class="marketrow" data-host="{{$host}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
-          <img src="{{logoPath .BaseSymbol}}" class="micro-icon mr-1">
-          <img src="{{logoPath .QuoteSymbol}}" class="micro-icon mr-1">
-          {{.Display}}
+  <div class="marketlist">
+
+    {{- /* SEARCH INPUT */ -}}
+    <label class="market-search">
+        <input class="flex-grow-1 pl-2" type="text" id="marketSearch">
+        <span class="ico-search px-1"></span>
+    </label>
+
+    {{- /* LIST OF EXCHANGE SECTIONS WITH MARKETS */ -}}
+    <div id="marketList">
+      <div data-tmpl="xc">
+        <div class="fs16 py-1 pl-2 bg1" data-tmpl="header">
+          <span class="ico-disconnected" title="disconnected" data-tmpl="disconnected"></span>
         </div>
-      {{end}}
-    {{end}}
+        <div data-tmpl="mkts">
+          <div class="marketrow" data-tmpl="mktrow">
+            <img class="micro-icon mr-1" data-tmpl="baseicon">
+            <img class="micro-icon mr-1" data-tmpl="quoteicon">
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   {{- /* RIGHT COLUMN */ -}}
