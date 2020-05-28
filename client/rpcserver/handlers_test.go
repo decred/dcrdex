@@ -788,3 +788,29 @@ func TestHandleWithdraw(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleLogout(t *testing.T) {
+	tests := []struct {
+		name        string
+		logoutErr   error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		wantErrCode: -1,
+	}, {
+		name:        "core.Logout error",
+		logoutErr:   errors.New("error"),
+		wantErrCode: msgjson.RPCLogoutError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			logoutErr: test.logoutErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleLogout(r, nil)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
