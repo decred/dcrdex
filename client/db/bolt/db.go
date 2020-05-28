@@ -219,8 +219,8 @@ func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 // CreateAccount saves the AccountInfo. If an account already exists for this
 // DEX, it will return an error.
 func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
-	if ai.URL == "" {
-		return fmt.Errorf("empty URL not allowed")
+	if ai.Host == "" {
+		return fmt.Errorf("empty host not allowed")
 	}
 	if ai.DEXPubKey == nil {
 		return fmt.Errorf("nil DEXPubKey not allowed")
@@ -229,7 +229,7 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		return fmt.Errorf("zero-length EncKey not allowed")
 	}
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		acct, err := accts.CreateBucket([]byte(ai.URL))
+		acct, err := accts.CreateBucket([]byte(ai.Host))
 		if err != nil {
 			return fmt.Errorf("failed to create account bucket")
 		}
@@ -247,11 +247,11 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 
 // AccountPaid marks the account as paid by setting the "fee proof".
 func (db *boltDB) AccountPaid(proof *dexdb.AccountProof) error {
-	acctKey := []byte(proof.URL)
+	acctKey := []byte(proof.Host)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct := accts.Bucket(acctKey)
 		if acct == nil {
-			return fmt.Errorf("account not found for %s", proof.URL)
+			return fmt.Errorf("account not found for %s", proof.Host)
 		}
 		return acct.Put(feeProofKey, proof.Encode())
 	})
@@ -271,7 +271,7 @@ func (db *boltDB) acctsUpdate(f bucketFunc) error {
 // info for the same order ID will be overwritten without indication.
 func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 	ord, md := m.Order, m.MetaData
-	if md.DEX == "" {
+	if md.Host == "" {
 		return fmt.Errorf("empty DEX not allowed")
 	}
 	if len(md.Proof.DEXSig) == 0 {
@@ -287,7 +287,7 @@ func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(baseKey, uint32Bytes(ord.Base())).
 			put(quoteKey, uint32Bytes(ord.Quote())).
 			put(statusKey, uint16Bytes(uint16(md.Status))).
-			put(dexKey, []byte(md.DEX)).
+			put(dexKey, []byte(md.Host)).
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
 			put(changeKey, md.ChangeCoin).
@@ -446,7 +446,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		MetaData: &dexdb.OrderMetaData{
 			Proof:      *proof,
 			Status:     order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
-			DEX:        string(oBkt.Get(dexKey)),
+			Host:       string(oBkt.Get(dexKey)),
 			ChangeCoin: oBkt.Get(changeKey),
 		},
 		Order: ord,

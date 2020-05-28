@@ -60,7 +60,7 @@ var (
 	tDexKey        *secp256k1.PublicKey
 	tPW                   = []byte("dexpw")
 	wPW                   = "walletpw"
-	tDexUrl               = "somedex.tld"
+	tDexHost              = "somedex.tld"
 	tDcrBtcMktName        = "dcr_btc"
 	tErr                  = fmt.Errorf("test error")
 	tFee           uint64 = 1e8
@@ -129,7 +129,7 @@ func newTWebsocket() *TWebsocket {
 func tNewAccount() *dexAccount {
 	privKey, _ := secp256k1.GeneratePrivateKey()
 	return &dexAccount{
-		url:       tDexUrl,
+		host:      tDexHost,
 		encKey:    privKey.Serialize(),
 		dexPubKey: tDexKey,
 		privKey:   privKey,
@@ -594,7 +594,7 @@ func newTestRig() *testRig {
 			db:       db,
 			latencyQ: queue,
 			conns: map[string]*dexConnection{
-				tDexUrl: dc,
+				tDexHost: dc,
 			},
 			wallets:      make(map[uint32]*xcWallet),
 			blockWaiters: make(map[uint64]*blockWaiter),
@@ -734,7 +734,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for unknown dex")
 	}
-	_, _, err = tCore.Sync(tDexUrl, tDCR.ID, 12345)
+	_, _, err = tCore.Sync(tDexHost, tDCR.ID, 12345)
 	if err == nil {
 		t.Fatalf("no error for nonsense market")
 	}
@@ -744,17 +744,17 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		f(bookMsg)
 		return nil
 	})
-	_, feed1, err := tCore.Sync(tDexUrl, tDCR.ID, tBTC.ID)
+	_, feed1, err := tCore.Sync(tDexHost, tDCR.ID, tBTC.ID)
 	if err != nil {
 		t.Fatalf("Sync 1 error: %v", err)
 	}
-	_, feed2, err := tCore.Sync(tDexUrl, tDCR.ID, tBTC.ID)
+	_, feed2, err := tCore.Sync(tDexHost, tDCR.ID, tBTC.ID)
 	if err != nil {
 		t.Fatalf("Sync 2 error: %v", err)
 	}
 
 	// Should be able to retrieve the book now.
-	book, err := tCore.Book(tDexUrl, tDCR.ID, tBTC.ID)
+	book, err := tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
 	if err != nil {
 		t.Fatalf("Core.Book error: %v", err)
 	}
@@ -815,7 +815,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	}
 
 	// Make sure the book has been updated.
-	book, _ = tCore.Book(tDexUrl, tDCR.ID, tBTC.ID)
+	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
 	if len(book.Buys) != 2 {
 		t.Fatalf("expected 2 buys, got %d", len(book.Buys))
 	}
@@ -843,7 +843,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	default:
 		t.Fatalf("no update received on feed 2")
 	}
-	book, _ = tCore.Book(tDexUrl, tDCR.ID, tBTC.ID)
+	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
 	firstSellQty := book.Sells[0].Qty
 	if firstSellQty != 5 {
 		t.Fatalf("expected remaining quantity of 5.00000000 after update_remaining. got %.8f", firstSellQty)
@@ -867,7 +867,7 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	default:
 		t.Fatalf("no update received on feed 2")
 	}
-	book, _ = tCore.Book(tDexUrl, tDCR.ID, tBTC.ID)
+	book, _ = tCore.Book(tDexHost, tDCR.ID, tBTC.ID)
 	if len(book.Buys) != 1 {
 		t.Fatalf("expected 1 buy after unbook_order, got %d", len(book.Buys))
 	}
@@ -1071,7 +1071,7 @@ func TestRegister(t *testing.T) {
 	}
 
 	form := &RegisterForm{
-		URL:     tDexUrl,
+		Addr:    tDexHost,
 		AppPass: tPW,
 		Fee:     tFee,
 		Cert:    "required",
@@ -1085,7 +1085,7 @@ func TestRegister(t *testing.T) {
 	run := func() {
 		// Register method will error if url is already in conns map.
 		tCore.connMtx.Lock()
-		delete(tCore.conns, tDexUrl)
+		delete(tCore.conns, tDexHost)
 		tCore.connMtx.Unlock()
 
 		tWallet.setConfs(tDCR.FundConf)
@@ -1135,7 +1135,7 @@ func TestRegister(t *testing.T) {
 
 	// account already exists
 	rig.db.acct = &db.AccountInfo{
-		URL:       tDexUrl,
+		Host:      tDexHost,
 		EncKey:    acct.encKey,
 		DEXPubKey: acct.dexPubKey,
 		FeeCoin:   acct.feeCoin,
@@ -1310,7 +1310,7 @@ func TestConnectDEX(t *testing.T) {
 	tCore := rig.core
 
 	ai := &db.AccountInfo{
-		URL: "https://somedex.com",
+		Host: "somedex.com",
 	}
 
 	queueConfig := func() {
@@ -1331,12 +1331,12 @@ func TestConnectDEX(t *testing.T) {
 	}
 
 	// Bad URL.
-	ai.URL = ":::"
+	ai.Host = ":::"
 	_, err = tCore.connectDEX(ai)
 	if err == nil {
 		t.Fatalf("no error for bad URL")
 	}
-	ai.URL = "https://someotherdex.org"
+	ai.Host = "someotherdex.org"
 
 	// Constructor error.
 	ogConstructor := tCore.wsConstructor
@@ -1469,7 +1469,7 @@ func TestTrade(t *testing.T) {
 	rate := tBTC.RateStep * 1000
 
 	form := &TradeForm{
-		DEX:     tDexUrl,
+		Host:    tDexHost,
 		IsLimit: true,
 		Sell:    true,
 		Base:    tDCR.ID,
@@ -1574,12 +1574,12 @@ func TestTrade(t *testing.T) {
 	}
 
 	// Dex not found
-	form.DEX = "https://someotherdex.org"
+	form.Host = "someotherdex.org"
 	_, err = tCore.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("no error for unknown dex")
 	}
-	form.DEX = tDexUrl
+	form.Host = tDexHost
 
 	// No base asset
 	form.Base = 12345
@@ -2230,7 +2230,7 @@ func TestResolveActiveTrades(t *testing.T) {
 		{
 			MetaData: &db.OrderMetaData{
 				Status:     order.OrderStatusBooked,
-				DEX:        tDexUrl,
+				Host:       tDexHost,
 				Proof:      db.OrderProof{},
 				ChangeCoin: changeCoinID,
 			},
@@ -2251,7 +2251,7 @@ func TestResolveActiveTrades(t *testing.T) {
 					MatchSig: encode.RandomBytes(32),
 				},
 			},
-			DEX:   tDexUrl,
+			DEX:   tDexHost,
 			Base:  tDCR.ID,
 			Quote: tBTC.ID,
 		},
@@ -2778,7 +2778,7 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 	dbOrder := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusEpoch,
-			DEX:    dc.acct.url,
+			Host:   dc.acct.host,
 			Proof: db.OrderProof{
 				Preimage: preImg[:],
 			},
@@ -2876,5 +2876,5 @@ func TestAssetBalances(t *testing.T) {
 		t.Fatalf("error retreiving asset balance: %v", err)
 	}
 	dbtest.MustCompareBalances(t, bals[0], balances.ZeroConf)
-	dbtest.MustCompareBalances(t, bals[1], balances.XC[tDexUrl])
+	dbtest.MustCompareBalances(t, bals[1], balances.XC[tDexHost])
 }

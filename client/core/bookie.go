@@ -147,13 +147,13 @@ func (b *bookie) book() *OrderBook {
 // Sync subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use.
-func (c *Core) Sync(url string, base, quote uint32) (*OrderBook, *BookFeed, error) {
+func (c *Core) Sync(host string, base, quote uint32) (*OrderBook, *BookFeed, error) {
 	// Need to send the 'orderbook' message and parse the results.
 	c.connMtx.RLock()
-	dc, found := c.conns[url]
+	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if !found {
-		return nil, nil, fmt.Errorf("unknown DEX '%s'", url)
+		return nil, nil, fmt.Errorf("unknown DEX '%s'", host)
 	}
 
 	mkt := marketName(base, quote)
@@ -292,7 +292,7 @@ func handleBookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error 
 	}
 	book.send(&BookUpdate{
 		Action:   msg.Route,
-		DEX:      dc.acct.url,
+		Host:     dc.acct.host,
 		MarketID: note.MarketID,
 		Payload:  minifyOrder(note.OrderID, &note.TradeNote, 0),
 	})
@@ -322,7 +322,7 @@ func handleUnbookOrderMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	}
 	book.send(&BookUpdate{
 		Action:   msg.Route,
-		DEX:      dc.acct.url,
+		Host:     dc.acct.host,
 		MarketID: note.MarketID,
 		Payload:  &MiniOrder{Token: token(note.OrderID)},
 	})
@@ -353,7 +353,7 @@ func handleUpdateRemainingMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) 
 	}
 	book.send(&BookUpdate{
 		Action:   msg.Route,
-		DEX:      dc.acct.url,
+		Host:     dc.acct.host,
 		MarketID: note.MarketID,
 		Payload: &RemainingUpdate{
 			Token: token(note.OrderID),
@@ -392,7 +392,7 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 	// Send a mini-order for book updates.
 	book.send(&BookUpdate{
 		Action:   msg.Route,
-		DEX:      dc.acct.url,
+		Host:     dc.acct.host,
 		MarketID: note.MarketID,
 		Payload:  minifyOrder(note.OrderID, &note.TradeNote, note.Epoch),
 	})

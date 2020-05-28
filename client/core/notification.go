@@ -154,14 +154,14 @@ func (on *OrderNote) String() string {
 // EpochNotification is a data notification that a new epoch has begun.
 type EpochNotification struct {
 	db.Notification
-	DEX      string `json:"dex"`
+	Host     string `json:"host"`
 	MarketID string `json:"marketID"`
 	Epoch    uint64 `json:"epoch"`
 }
 
-func newEpochNotification(dexAddr, mktID string, epochIdx uint64) *EpochNotification {
+func newEpochNotification(host, mktID string, epochIdx uint64) *EpochNotification {
 	return &EpochNotification{
-		DEX:          dexAddr,
+		Host:         host,
 		MarketID:     mktID,
 		Notification: db.NewNotification("epoch", "", "", db.Data),
 		Epoch:        epochIdx,

@@ -136,7 +136,7 @@ func TestAccounts(t *testing.T) {
 	nTimes(numToDo, func(int) {
 		acct := dbtest.RandomAccountInfo()
 		accts = append(accts, acct)
-		acctMap[acct.URL] = acct
+		acctMap[acct.Host] = acct
 	})
 	tStart := time.Now()
 	nTimes(numToDo, func(i int) {
@@ -147,7 +147,7 @@ func TestAccounts(t *testing.T) {
 	tStart = time.Now()
 	nTimes(numToDo, func(i int) {
 		ai := accts[i]
-		reAI, err := boltdb.Account(ai.URL)
+		reAI, err := boltdb.Account(ai.Host)
 		if err != nil {
 			t.Fatalf("error fetching AccountInfo")
 		}
@@ -162,9 +162,9 @@ func TestAccounts(t *testing.T) {
 	}
 	nTimes(numToDo, func(i int) {
 		reAI := readAccts[i]
-		ai, found := acctMap[reAI.URL]
+		ai, found := acctMap[reAI.Host]
 		if !found {
-			t.Fatalf("no account found in map for %s", reAI.URL)
+			t.Fatalf("no account found in map for %s", reAI.Host)
 		}
 		dbtest.MustCompareAccountInfo(t, ai, reAI)
 	})
@@ -186,10 +186,10 @@ func TestAccounts(t *testing.T) {
 		}
 	}
 
-	url := acct.URL
-	acct.URL = ""
-	ensureErr("URL")
-	acct.URL = url
+	host := acct.Host
+	acct.Host = ""
+	ensureErr("Host")
+	acct.Host = host
 
 	dexKey := acct.DEXPubKey
 	acct.DEXPubKey = nil
@@ -207,17 +207,17 @@ func TestAccounts(t *testing.T) {
 	}
 
 	// Test account proofs.
-	zerothURL := accts[0].URL
-	zerothAcct, _ := boltdb.Account(zerothURL)
+	zerothHost := accts[0].Host
+	zerothAcct, _ := boltdb.Account(zerothHost)
 	if zerothAcct.Paid {
 		t.Fatalf("Account marked as paid before account proof set")
 	}
 	boltdb.AccountPaid(&db.AccountProof{
-		URL:   zerothAcct.URL,
+		Host:  zerothAcct.Host,
 		Stamp: 123456789,
 		Sig:   []byte("some signature here"),
 	})
-	reAcct, _ := boltdb.Account(zerothURL)
+	reAcct, _ := boltdb.Account(zerothHost)
 	if !reAcct.Paid {
 		t.Fatalf("Account not marked as paid after account proof set")
 	}
@@ -357,7 +357,7 @@ func TestOrders(t *testing.T) {
 		orders[i] = &db.MetaOrder{
 			MetaData: &db.OrderMetaData{
 				Status: status,
-				DEX:    acct.URL,
+				Host:   acct.Host,
 				Proof:  db.OrderProof{DEXSig: randBytes(73)},
 			},
 			Order: ord,
@@ -406,7 +406,7 @@ func TestOrders(t *testing.T) {
 
 	// Get the orders for account 1.
 	tStart = time.Now()
-	acctOrders, err := boltdb.AccountOrders(acct1.URL, 0, 0)
+	acctOrders, err := boltdb.AccountOrders(acct1.Host, 0, 0)
 	if err != nil {
 		t.Fatalf("error fetching account orders: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestOrders(t *testing.T) {
 
 	// Filter the account's first half of orders by timestamp.
 	tStart = time.Now()
-	sinceOrders, err := boltdb.AccountOrders(acct1.URL, 0, tMid)
+	sinceOrders, err := boltdb.AccountOrders(acct1.Host, 0, tMid)
 	if err != nil {
 		t.Fatalf("error retrieve account's since orders: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestOrders(t *testing.T) {
 
 	// Get the orders for the specified market.
 	tStart = time.Now()
-	mktOrders, err := boltdb.MarketOrders(acct1.URL, base1, quote1, 0, 0)
+	mktOrders, err := boltdb.MarketOrders(acct1.Host, base1, quote1, 0, 0)
 	if err != nil {
 		t.Fatalf("error retrieving orders for market: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestOrders(t *testing.T) {
 
 	// Filter the market's first half out by timestamp.
 	tStart = time.Now()
-	sinceOrders, err = boltdb.MarketOrders(acct1.URL, base1, quote1, 0, tMid)
+	sinceOrders, err = boltdb.MarketOrders(acct1.Host, base1, quote1, 0, tMid)
 	if err != nil {
 		t.Fatalf("error retrieving market's since orders: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestOrders(t *testing.T) {
 
 	// Same thing, but only last half
 	halfSince := len(sinceOrders) / 2
-	nOrders, err := boltdb.MarketOrders(acct1.URL, base1, quote1, halfSince, tMid)
+	nOrders, err := boltdb.MarketOrders(acct1.Host, base1, quote1, halfSince, tMid)
 	if err != nil {
 		t.Fatalf("error returning n orders: %v", err)
 	}
@@ -476,19 +476,19 @@ func TestOrders(t *testing.T) {
 	m := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusExecuted,
-			DEX:    acct1.URL,
+			Host:   acct1.Host,
 			Proof:  db.OrderProof{DEXSig: randBytes(73)},
 		},
 		Order: randOrderForMarket(base1, quote1),
 	}
 
-	dex := m.MetaData.DEX
-	m.MetaData.DEX = ""
+	host := m.MetaData.Host
+	m.MetaData.Host = ""
 	err = boltdb.UpdateOrder(m)
 	if err == nil {
 		t.Fatalf("no error for empty DEX")
 	}
-	m.MetaData.DEX = dex
+	m.MetaData.Host = host
 
 	sig := m.MetaData.Proof.DEXSig
 	m.MetaData.Proof.DEXSig = nil
@@ -557,7 +557,7 @@ func TestMatches(t *testing.T) {
 			MetaData: &db.MatchMetaData{
 				Status: status,
 				Proof:  *dbtest.RandomMatchProof(0.5),
-				DEX:    acct.URL,
+				DEX:    acct.Host,
 				Base:   base,
 				Quote:  quote,
 			},
@@ -594,7 +594,7 @@ func TestMatches(t *testing.T) {
 		MetaData: &db.MatchMetaData{
 			Status: order.NewlyMatched,
 			Proof:  *dbtest.RandomMatchProof(0.5),
-			DEX:    acct.URL,
+			DEX:    acct.Host,
 			Base:   base,
 			Quote:  quote,
 		},
@@ -606,7 +606,7 @@ func TestMatches(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error on empty DEX")
 	}
-	m.MetaData.DEX = acct.URL
+	m.MetaData.DEX = acct.Host
 
 	m.MetaData.Base, m.MetaData.Quote = 0, 0
 	err = boltdb.UpdateMatch(m)

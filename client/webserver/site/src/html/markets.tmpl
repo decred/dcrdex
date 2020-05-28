@@ -17,7 +17,7 @@
         <span id="disconnected:{{$host}}" class="ico-disconnected{{if $xc.Connected}} d-hide{{end}}" data-toggle="tooltip" title="disconnected"></span>
       </div>
       {{range $xc.SortedMarkets}}
-        <div class="marketrow" data-dex="{{$host}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
+        <div class="marketrow" data-host="{{$host}}" data-base="{{.BaseID}}" data-quote="{{.QuoteID}}">
           <img src="{{logoPath .BaseSymbol}}" class="micro-icon mr-1">
           <img src="{{logoPath .QuoteSymbol}}" class="micro-icon mr-1">
           {{.Display}}

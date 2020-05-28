@@ -145,7 +145,7 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 		tif = lo.Force
 	}
 	corder := &Order{
-		DEX:         t.dc.acct.url,
+		Host:        t.dc.acct.host,
 		MarketID:    t.mktID,
 		Type:        prefix.OrderType,
 		ID:          t.ID().String(),
@@ -173,7 +173,7 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 	var cancelOrder *Order
 	if t.cancel != nil {
 		cancelOrder = &Order{
-			DEX:      t.dc.acct.url,
+			Host:     t.dc.acct.host,
 			MarketID: t.mktID,
 			Type:     order.CancelOrderType,
 			Stamp:    encode.UnixMilliU(t.cancel.ServerTime),
@@ -226,21 +226,21 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 		}
 	}
 
-	url := t.dc.acct.url
+	host := t.dc.acct.host
 	if len(missing) > 0 {
 		details := fmt.Sprintf("%d matches for order %s were not reported by %q and are in a failed state",
-			len(missing), t.ID(), t.dc.acct.url)
+			len(missing), t.ID(), host)
 		corder, _ := t.coreOrder()
 		t.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
 		for _, mid := range missing {
-			log.Errorf("%s did not report active match %s on order %s", url, mid, t.ID())
+			log.Errorf("%s did not report active match %s on order %s", host, mid, t.ID())
 		}
 	}
 	if len(extras) > 0 {
-		details := fmt.Sprintf("%d matches reported by %s were not found for %s.", len(extras), url, t.token())
+		details := fmt.Sprintf("%d matches reported by %s were not found for %s.", len(extras), host, t.token())
 		t.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
 		for _, extra := range extras {
-			log.Errorf("%s reported match %s which is not a known active match for order %s", url, extra.MatchID, extra.OrderID)
+			log.Errorf("%s reported match %s which is not a known active match for order %s", host, extra.MatchID, extra.OrderID)
 		}
 	}
 }
@@ -280,7 +280,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 							MatchStamp: msgMatch.ServerTime,
 						},
 					},
-					DEX:   t.dc.acct.url,
+					DEX:   t.dc.acct.host,
 					Base:  t.Base(),
 					Quote: t.Quote(),
 				},
@@ -358,7 +358,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	// Send notifications.
 	if includesCancellation {
 		details := fmt.Sprintf("%s order on %s-%s at %s has been canceled (%s)",
-			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.url, t.token())
+			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
 		t.notify(newOrderNote("Order canceled", details, db.Success, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote("cancel", "", db.Data, cancelOrder))
@@ -476,7 +476,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 func (t *trackedTrade) tick() (int, error) {
 	var swaps []*matchTracker
 	var redeems []*matchTracker
-	errs := newErrorSet(t.dc.acct.url + " tick: ")
+	errs := newErrorSet(t.dc.acct.host + " tick: ")
 
 	t.matchMtx.Lock()
 	defer t.matchMtx.Unlock()

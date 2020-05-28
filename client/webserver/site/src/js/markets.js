@@ -22,6 +22,8 @@ const epochOrderRoute = 'epoch_order'
 const bookUpdateRoute = 'bookupdate'
 const unmarketRoute = 'unmarket'
 
+const lastMarketKey = 'selectedMarket'
+
 /* The match statuses are a mirror of dex/order.MatchStatus. */
 // const newlyMatched = 0
 // const makerSwapCast = 1
@@ -125,23 +127,23 @@ export default class MarketsPage extends BasePage {
     })
 
     // Scan the rows in the market table and pull some basic info.
-    var lastMarket = (data && data.market) ? data.market : State.fetch('selectedMarket')
+    var lastMarket = (data && data.market) ? data.market : State.fetch(lastMarketKey)
     var mktFound = false
     this.marketRows.forEach(div => {
       const base = parseInt(div.dataset.base)
       const quote = parseInt(div.dataset.quote)
-      const dex = div.dataset.dex
-      mktFound = mktFound || (lastMarket && lastMarket.dex === dex &&
+      const host = div.dataset.host
+      mktFound = mktFound || (lastMarket && lastMarket.host === host &&
         lastMarket.base === base && lastMarket.quote === quote)
       // Clicking on the row will load a new market.
       bind(div, 'click', () => {
         page.marketLoader.classList.remove('d-none')
-        this.setMarket(dex, base, quote)
+        this.setMarket(host, base, quote)
       })
       this.markets.push({
         base: base,
         quote: quote,
-        dex: dex
+        host: host
       })
     })
 
@@ -197,7 +199,7 @@ export default class MarketsPage extends BasePage {
     // Fetch the first market in the list, or the users last selected market, if
     // it was found.
     const firstEntry = mktFound ? lastMarket : this.markets[0]
-    this.setMarket(firstEntry.dex, firstEntry.base, firstEntry.quote)
+    this.setMarket(firstEntry.host, firstEntry.base, firstEntry.quote)
 
     // Start a ticker to update time-since values.
     this.secondTicker = setInterval(() => {
@@ -307,7 +309,7 @@ export default class MarketsPage extends BasePage {
       qtyField = page.mktBuyField
     }
     return {
-      dex: market.dex.host,
+      host: market.dex.host,
       isLimit: limit,
       sell: sell,
       base: market.base.id,
@@ -467,24 +469,26 @@ export default class MarketsPage extends BasePage {
   handleBookRoute (data) {
     const market = this.market
     const page = this.page
-    const url = market.dex.host
+    const host = market.dex.host
     const [b, q] = [market.baseCfg, market.quoteCfg]
     if (data.base !== b.id || data.quote !== q.id) return
     this.handleBook(data)
     page.marketLoader.classList.add('d-none')
     this.marketRows.forEach(row => {
       const d = row.dataset
-      if (d.dex === url && parseInt(d.base) === data.base && parseInt(d.quote) === data.quote) {
+      if (d.host === host && parseInt(d.base) === data.base && parseInt(d.quote) === data.quote) {
         row.classList.add('selected')
       } else {
         row.classList.remove('selected')
       }
     })
-    State.store('selectedMarket', {
-      dex: data.dex,
+
+    State.store(lastMarketKey, {
+      host: data.host,
       base: data.base,
       quote: data.quote
     })
+
     page.lotSize.textContent = Doc.formatCoinValue(market.baseCfg.lotSize / 1e8)
     page.rateStep.textContent = Doc.formatCoinValue(market.quoteCfg.rateStep / 1e8)
     this.baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
@@ -497,7 +501,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */
   handleBookOrderRoute (data) {
-    if (data.dex !== this.market.dex.host || data.marketID !== this.market.sid) return
+    if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
@@ -506,7 +510,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleUnbookOrderRoute is the handler for 'unbook_order' notifications. */
   handleUnbookOrderRoute (data) {
-    if (data.dex !== this.market.dex.host || data.marketID !== this.market.sid) return
+    if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     this.book.remove(order.token)
     this.removeTableOrder(order)
@@ -518,7 +522,7 @@ export default class MarketsPage extends BasePage {
    * notifications.
    */
   handleUpdateRemainingRoute (data) {
-    if (data.dex !== this.market.dex.host || data.marketID !== this.market.sid) return
+    if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const update = data.payload
     this.book.updateRemaining(update.token, update.qty)
     this.updateTableOrder(update)
@@ -527,7 +531,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleEpochOrderRoute is the handler for 'epoch_order' notifications. */
   handleEpochOrderRoute (data) {
-    if (data.dex !== this.market.dex.host || data.marketID !== this.market.sid) return
+    if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
     this.addTableOrder(order)
@@ -682,7 +686,7 @@ export default class MarketsPage extends BasePage {
    * handleEpochNote handles notifications signalling the start of a new epoch.
    */
   handleEpochNote (note) {
-    if (note.dex !== this.market.dex.host || note.marketID !== this.market.sid) return
+    if (note.host !== this.market.dex.host || note.marketID !== this.market.sid) return
     if (this.book) {
       this.book.setEpoch(note.epoch)
       this.chart.draw()
@@ -985,9 +989,9 @@ export default class MarketsPage extends BasePage {
 }
 
 /* makeMarket creates a market object that specifies basic market details. */
-function makeMarket (dex, base, quote) {
+function makeMarket (host, base, quote) {
   return {
-    dex: dex,
+    host: host,
     base: base,
     quote: quote
   }

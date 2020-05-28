@@ -275,7 +275,7 @@ func TestParseRegisterArgs(t *testing.T) {
 		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
 		}
-		if reg.URL != test.params.Args[0] {
+		if reg.Addr != test.params.Args[0] {
 			t.Fatalf("url doesn't match")
 		}
 		if fmt.Sprint(reg.Fee) != test.params.Args[1] {

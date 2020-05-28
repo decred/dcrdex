@@ -257,7 +257,7 @@ export default class Application {
     switch (note.type) {
       case 'order': {
         const order = note.order
-        const mkt = this.user.exchanges[order.dex].markets[order.market]
+        const mkt = this.user.exchanges[order.host].markets[order.market]
         if (mkt.orders) {
           for (const i in mkt.orders) {
             if (mkt.orders[i].id === order.id) {
@@ -341,11 +341,11 @@ export default class Application {
   }
 
   /* orders retrieves a list of orders for the specified dex and market. */
-  orders (dex, bid, qid) {
-    var o = this.user.exchanges[dex].markets[marketID(bid, qid)].orders
+  orders (host, bid, qid) {
+    var o = this.user.exchanges[host].markets[marketID(bid, qid)].orders
     if (!o) {
       o = []
-      this.user.exchanges[dex].markets[marketID(bid, qid)].orders = o
+      this.user.exchanges[host].markets[marketID(bid, qid)].orders = o
     }
     return o
   }
