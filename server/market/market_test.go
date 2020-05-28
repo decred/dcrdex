@@ -647,6 +647,7 @@ func TestMarket_Run(t *testing.T) {
 	auth.handlePreimageDone = make(chan struct{}, 1)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	startEpochIdx := 1 + encode.UnixMilli(time.Now())/epochDurationMSec
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -726,7 +727,7 @@ func TestMarket_Run(t *testing.T) {
 	// Submit order before market starts running
 	err = mkt.SubmitOrder(oRecord)
 	if err == nil {
-		t.Error("order submitted to stopped market")
+		t.Error("order successfully submitted to stopped market")
 	}
 	if !errors.Is(err, ErrMarketNotRunning) {
 		t.Fatalf(`expected ErrMarketNotRunning ("%v"), got "%v"`, ErrMarketNotRunning, err)
@@ -734,14 +735,14 @@ func TestMarket_Run(t *testing.T) {
 
 	mktStatus := mkt.Status()
 	if mktStatus.Running {
-		t.Errorf("Market should not be running yet")
+		t.Fatalf("Market should not be running yet")
 	}
 
 	mkt.waitForEpochOpen()
 
 	mktStatus = mkt.Status()
 	if !mktStatus.Running {
-		t.Errorf("Market should be running now")
+		t.Fatalf("Market should be running now")
 	}
 
 	// Submit again
@@ -749,7 +750,7 @@ func TestMarket_Run(t *testing.T) {
 	storMsgPI(oRecord.msgID, pi)
 	err = mkt.SubmitOrder(oRecord)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
 	// Let the epoch cycle and the fake client respond with its preimage
@@ -859,7 +860,6 @@ func TestMarket_Run(t *testing.T) {
 	<-auth.handlePreimageDone
 	// and for matching to complete (in processReadyEpoch).
 	<-storage.epochInserted
-	storage.epochInserted = nil
 
 	cancel()
 	wg.Wait()
@@ -918,7 +918,6 @@ func TestMarket_Run(t *testing.T) {
 	<-auth.handlePreimageDone
 	// and for matching to complete (in processReadyEpoch).
 	<-storage.epochInserted
-	storage.epochInserted = nil
 
 	// Submit an order with a Commitment known to the DB.
 	// NOTE: disabled since the OrderWithCommit check in Market.processOrder is disabled too.
