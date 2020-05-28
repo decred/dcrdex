@@ -342,6 +342,7 @@ func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(loginRoute, err)
 	}
+	defer appPass.Clear()
 	res, err := s.core.Login(appPass)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to login: %v", err)
@@ -358,6 +359,7 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(tradeRoute, err)
 	}
+	defer form.AppPass.Clear()
 	res, err := s.core.Trade(form.AppPass, form.SrvForm)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to trade: %v", err)

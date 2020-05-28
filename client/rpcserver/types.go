@@ -69,7 +69,7 @@ type helpForm struct {
 }
 
 type tradeForm struct {
-	AppPass []byte
+	AppPass encode.PassBytes
 	SrvForm *core.TradeForm
 }
 
