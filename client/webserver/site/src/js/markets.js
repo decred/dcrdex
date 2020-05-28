@@ -978,7 +978,7 @@ export default class MarketsPage extends BasePage {
 
 /*
  * tmplElement is a helper function for grabbing sub-elements of the market list
- * template
+ * template.
  */
 function tmplElement (ancestor, s) {
   return ancestor.querySelector(`[data-tmpl="${s}"]`)
@@ -1006,8 +1006,8 @@ class MarketList {
   }
 
   /*
-   * sortedSections returns a list or ExchangeSection sorted
-   * alphabetically by host.
+   * sortedSections returns a list of ExchangeSection sorted alphabetically by
+   * host.
    */
   sortedSections () {
     return [...this.xcSections].sort((a, b) => a.host < b.host ? -1 : 1)
@@ -1018,9 +1018,7 @@ class MarketList {
    */
   xcSection (host) {
     for (const xc of this.xcSections) {
-      if (xc.host === host) {
-        return xc
-      }
+      if (xc.host === host) return xc
     }
     return null
   }
@@ -1067,7 +1065,7 @@ class MarketList {
 }
 
 /*
- * ExchangeSection if a top level section of the MarketList.
+ * ExchangeSection is a top level section of the MarketList.
  */
 class ExchangeSection {
   constructor (tmpl, dex) {
