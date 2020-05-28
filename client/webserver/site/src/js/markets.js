@@ -9,7 +9,6 @@ import ws from './ws'
 
 var app
 const bind = Doc.bind
-const disableMouseWheel = Doc.disableMouseWheel
 
 const LIMIT = 1
 // const MARKET = 2
@@ -106,7 +105,7 @@ export default class MarketsPage extends BasePage {
       this.setOrderVisibility()
     })
 
-    disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
+    Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
 
     // Scan the rows in the market table and pull some basic info.
     var lastMarket = (data && data.market) ? data.market : State.fetch('selectedMarket')
