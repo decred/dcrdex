@@ -189,7 +189,7 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 		if !found {
 			// If we have no preimage for this order, then we've decided to
 			// expire the response after the expire duration.
-			go func() { <-time.AfterFunc(expDur, exp).C }()
+			time.AfterFunc(expDur, exp)
 		}
 		log.Infof("found preimage: %x", pi)
 		piMsg := &msgjson.PreimageResponse{

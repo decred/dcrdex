@@ -117,10 +117,7 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 		// called, but we found the response handler in the map,
 		// clientInfo.expire is waiting for the reqMtx lock and will return
 		// false, thus preventing the registered expire func from executing.
-		if !handler.expire.Stop() {
-			// Drain the Timer channel if Timer had fired as described above.
-			<-handler.expire.C
-		}
+		handler.expire.Stop()
 	}
 	return handler
 }
