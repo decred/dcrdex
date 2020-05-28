@@ -159,10 +159,7 @@ func (c *wsLink) respHandler(id uint64) *responseHandler {
 		// called, but we found the response handler in the map, wsLink.expire
 		// is waiting for the reqMtx lock and will return false, thus preventing
 		// the registered expire func from executing.
-		if !cb.expire.Stop() {
-			// Drain the Timer channel if Timer had fired as described above.
-			<-cb.expire.C
-		}
+		cb.expire.Stop()
 	}
 	return cb
 }
