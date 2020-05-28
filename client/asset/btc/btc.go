@@ -73,6 +73,18 @@ type rpcClient interface {
 	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
 }
 
+// BTCCloneCFG holds clone specific parameters.
+type BTCCloneCFG struct {
+	WalletCFG         *asset.WalletConfig
+	MinNetworkVersion uint64
+	WalletInfo        *asset.WalletInfo
+	Symbol            string
+	Logger            dex.Logger
+	Network           dex.Network
+	ChainParams       *chaincfg.Params
+	Ports             dexbtc.NetPorts
+}
+
 // outpointID creates a unique string for a transaction output.
 func outpointID(txid string, vout uint32) string {
 	return txid + ":" + strconv.Itoa(int(vout))
@@ -230,9 +242,11 @@ type ExchangeWallet struct {
 	// The DEX specifies that change outputs from DEX-monitored transactions are
 	// exempt from minimum confirmation limits, so we must track those as they are
 	// created.
-	changeMtx   sync.RWMutex
-	tradeChange map[string]time.Time
-	tipChange   func(error)
+	changeMtx         sync.RWMutex
+	tradeChange       map[string]time.Time
+	tipChange         func(error)
+	minNetworkVersion uint64
+	walletInfo        *asset.WalletInfo
 
 	fundingMtx   sync.RWMutex
 	fundingCoins map[string]*compositeUTXO
@@ -257,25 +271,33 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
-
-	return BTCCloneWallet(cfg, "btc", logger, network, params, dexbtc.RPCPorts)
+	cloneCFG := &BTCCloneCFG{
+		WalletCFG:         cfg,
+		MinNetworkVersion: minNetworkVersion,
+		WalletInfo:        walletInfo,
+		Symbol:            "btc",
+		Logger:            logger,
+		Network:           network,
+		ChainParams:       params,
+		Ports:             dexbtc.RPCPorts,
+	}
+	return BTCCloneWallet(cloneCFG)
 }
 
 // BTCCloneWallet creates a wallet backend for a set of network parameters and
 // default network ports. A BTC clone can use this method, possibly in
 // conjunction with ReadCloneParams, to create a ExchangeWallet for other assets
 // with minimal coding.
-func BTCCloneWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
-	network dex.Network, chainParams *chaincfg.Params, ports dexbtc.NetPorts) (*ExchangeWallet, error) {
+func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 
 	// Read the configuration parameters
-	btcCfg, err := dexbtc.LoadConfigFromSettings(cfg.Settings, assetName, network, ports)
+	btcCfg, err := dexbtc.LoadConfigFromSettings(cfg.WalletCFG.Settings, cfg.Symbol, cfg.Network, cfg.Ports)
 	if err != nil {
 		return nil, err
 	}
 
-	endpoint := btcCfg.RPCBind + "/wallet/" + cfg.Account
-	logger.Infof("Setting up new %s wallet at %s.", symbol, endpoint)
+	endpoint := btcCfg.RPCBind + "/wallet/" + cfg.WalletCFG.Account
+	cfg.Logger.Infof("Setting up new %s wallet at %s.", cfg.Symbol, endpoint)
 
 	client, err := rpcclient.New(&rpcclient.ConnConfig{
 		HTTPPostMode: true,
@@ -288,25 +310,26 @@ func BTCCloneWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
 		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
 	}
 
-	btc := newWallet(cfg, symbol, logger, chainParams, client)
+	btc := newWallet(cfg, client)
 	btc.client = client
 
 	return btc, nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *asset.WalletConfig, symbol string, logger dex.Logger,
-	chainParams *chaincfg.Params, node rpcClient) *ExchangeWallet {
+func newWallet(cfg *BTCCloneCFG, node rpcClient) *ExchangeWallet {
 
 	wallet := &ExchangeWallet{
-		node:         node,
-		wallet:       newWalletClient(node, chainParams),
-		symbol:       symbol,
-		chainParams:  chainParams,
-		log:          logger,
-		tradeChange:  make(map[string]time.Time),
-		tipChange:    cfg.TipChange,
-		fundingCoins: make(map[string]*compositeUTXO),
+		node:              node,
+		wallet:            newWalletClient(node, cfg.ChainParams),
+		symbol:            cfg.Symbol,
+		chainParams:       cfg.ChainParams,
+		log:               cfg.Logger,
+		tradeChange:       make(map[string]time.Time),
+		tipChange:         cfg.WalletCFG.TipChange,
+		fundingCoins:      make(map[string]*compositeUTXO),
+		minNetworkVersion: cfg.MinNetworkVersion,
+		walletInfo:        cfg.WalletInfo,
 	}
 
 	return wallet
@@ -316,7 +339,7 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 
 // Info returns basic information about the wallet and asset.
 func (btc *ExchangeWallet) Info() *asset.WalletInfo {
-	return walletInfo
+	return btc.walletInfo
 }
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
@@ -327,7 +350,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 	if err != nil {
 		return fmt.Errorf("error getting version: %v", err), nil
 	}
-	if netVer < minNetworkVersion {
+	if netVer < btc.minNetworkVersion {
 		return fmt.Errorf("reported node version %d is less than minimum %d", netVer, minNetworkVersion), nil
 	}
 	if codeVer < minProtocolVersion {
