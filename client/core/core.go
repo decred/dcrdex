@@ -146,6 +146,9 @@ func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, pr
 // signAndRequest signs and sends the request, unmarshaling the response into
 // the provided interface.
 func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result interface{}) error {
+	if dc.acct.locked() {
+		return fmt.Errorf("cannot sign with a locked account")
+	}
 	err := sign(dc.acct.privKey, signable)
 	if err != nil {
 		return fmt.Errorf("error signing %s message: %v", route, err)
@@ -1346,11 +1349,6 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	c.connMtx.RUnlock()
 	if !found {
 		return nil, fmt.Errorf("unknown DEX %s", form.Host)
-	}
-
-	// Cannot trade before logging in.
-	if !dc.acct.authed() {
-		return nil, errors.New("cannot trade: account not authed")
 	}
 
 	mktID := marketName(form.Base, form.Quote)
