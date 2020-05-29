@@ -1,3 +1,5 @@
+// +build !harness
+
 package core
 
 import (

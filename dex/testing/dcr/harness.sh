@@ -39,7 +39,7 @@ cat > "${NODES_ROOT}/alpha/dcrd.conf" <<EOF
 rpcuser=${RPC_USER}
 rpcpass=${RPC_PASS}
 rpccert=${NODES_ROOT}/alpha/rpc.cert
-rpclisten=127.0.0.1:${ALPHA_WALLET_PORT}
+rpclisten=127.0.0.1:${ALPHA_RPC_PORT}
 EOF
 
 # Alpha ctl config
