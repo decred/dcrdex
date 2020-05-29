@@ -284,6 +284,17 @@ func (auth *AuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	return checkSigS256(msg, sig, client.acct.PubKey)
 }
 
+// Suspended indicates the the user exists (is presently connected) and is
+// suspended. This does not access the persistent storage.
+func (auth *AuthManager) Suspended(user account.AccountID) (found, suspended bool) {
+	client := auth.user(user)
+	if client == nil {
+		// TODO: consider hitting auth.storage.Account(user)
+		return false, true // suspended for practical purposes
+	}
+	return true, client.isSuspended()
+}
+
 // Sign signs the msgjson.Signables with the DEX private key.
 func (auth *AuthManager) Sign(signables ...msgjson.Signable) error {
 	for _, signable := range signables {

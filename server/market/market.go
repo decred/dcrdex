@@ -40,6 +40,7 @@ const (
 	ErrDuplicateOrder         = Error("order already in epoch") // maybe remove since this is ill defined
 	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
 	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
+	ErrSuspendedAccount       = Error("suspended account")
 	ErrMalformedOrderResponse = Error("malformed order response")
 	ErrInternalServer         = Error("internal server error")
 )
@@ -816,6 +817,16 @@ func (m *Market) unlockOrderCoins(o order.Order) {
 // 5. Respond to the client that placed the order.
 // 6. Notify epoch queue event subscribers.
 func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan chan<- *updateSignal, errChan chan<- error) error {
+	// Disallow trade orders from suspended accounts. Cancel orders are allowed.
+	if rec.order.Type() != order.CancelOrderType {
+		// Do not bother the auth manager for cancel orders.
+		if _, suspended := m.auth.Suspended(rec.order.User()); suspended {
+			log.Debugf("Account %v not allowed to submit order %v", rec.order.User(), rec.order.ID())
+			errChan <- ErrSuspendedAccount
+			return nil
+		}
+	}
+
 	// Verify that an order with the same commitment is not already in the epoch
 	// queue. Since commitment is part of the order serialization and thus order
 	// ID, this also prevents orders with the same ID.
@@ -936,6 +947,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 			epochIdx: epoch.Epoch,
 		},
 	}
+	// With the notification sent to subscribers, this order must be included in
+	// the processing of this epoch.
 	return nil
 }
 
@@ -1123,6 +1136,14 @@ func (m *Market) enqueueEpoch(eq *epochPump, epoch *EpochQueue) bool {
 	for _, ord := range orders {
 		delete(m.epochOrders, ord.ID())
 		delete(m.epochCommitments, ord.Commitment())
+		// Would be nice to remove orders from users that got suspended, but the
+		// epoch order notifications were sent to subscribers when the order was
+		// received, thus setting expectations for auditing the queue.
+		//
+		// Preimage collection for suspended users could be skipped, forcing
+		// them into the misses slice perhaps by passing user IDs to skip into
+		// epochStart, with a SPEC UPDATE noting that preimage requests are not
+		// sent to suspended accounts.
 	}
 	m.epochMtx.Unlock()
 

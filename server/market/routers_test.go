@@ -120,10 +120,15 @@ type TAuth struct {
 	preimagesByMsgID   map[uint64]order.Preimage
 	preimagesByOrdID   map[string]order.Preimage
 	handlePreimageDone chan struct{}
+	suspensions        map[account.AccountID]bool
 }
 
 func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 	log.Infof("Route for %s", route)
+}
+func (a *TAuth) Suspended(user account.AccountID) (found, suspended bool) {
+	suspended, found = a.suspensions[user]
+	return // TODO: test suspended account handling (no trades, just cancels)
 }
 func (a *TAuth) Auth(user account.AccountID, msg, sig []byte) error {
 	//log.Infof("Auth for user %v", user)
