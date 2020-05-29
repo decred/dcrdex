@@ -126,6 +126,8 @@ export default class MarketsPage extends BasePage {
       this.setOrderVisibility()
     })
 
+    Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
+
     // Scan the rows in the market table and pull some basic info.
     var lastMarket = (data && data.market) ? data.market : State.fetch(lastMarketKey)
     var mktFound = false
