@@ -10,7 +10,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -787,12 +786,6 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 	// Get the contracts P2SH address from the tx output's pubkey script.
 	txOut, err := btc.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		var rpcErr *btcjson.RPCError
-		if errors.As(err, &rpcErr) {
-			if rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey {
-				return nil, asset.CoinNotFoundError
-			}
-		}
 		return nil, fmt.Errorf("error finding unspent contract: %s:%d : %v", txHash, vout, err)
 	}
 	if txOut == nil {
