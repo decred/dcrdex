@@ -481,6 +481,7 @@ func TestHandleExchanges(t *testing.T) {
             "stamp": 1588913556583,
             "qty": 100000000,
             "sell": false,
+            "sig": "3045022100c5ef66cbf3c2d305408b666108ae384478f22b558893942b8f66abfb613a5bf802205eb22a0250e5286244b2f5205f0b6d6b4fa6a60930be2ff30f35c3cf6bf969c8",
             "filled": 0,
             "matches": [
               {
@@ -541,6 +542,7 @@ func TestHandleExchanges(t *testing.T) {
             "stamp": 1588913556583,
             "qty": 100000000,
             "sell": false,
+            "sig": "3045022100c5ef66cbf3c2d305408b666108ae384478f22b558893942b8f66abfb613a5bf802205eb22a0250e5286244b2f5205f0b6d6b4fa6a60930be2ff30f35c3cf6bf969c8",
             "filled": 0,
             "matches": [
               {
@@ -631,6 +633,49 @@ func TestHandleLogin(t *testing.T) {
 		payload := handleLogin(r, test.params)
 		var res *core.LoginResult
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleTrade(t *testing.T) {
+	params := &RawParams{
+		PWArgs: []encode.PassBytes{encode.PassBytes("123")}, // 0. AppPass
+		Args: []string{
+			"1.2.3.4:3000", // 0. DEX
+			"true",         // 1. IsLimit
+			"true",         // 2. Sell
+			"0",            // 3. Base
+			"42",           // 4. Quote
+			"1",            // 5. Qty
+			"1",            // 6. Rate
+			"true",         // 7. TifNow
+		}}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		tradeErr    error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:        "core.Trade error",
+		params:      params,
+		tradeErr:    errors.New("error"),
+		wantErrCode: msgjson.RPCTradeError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{order: new(core.Order), tradeErr: test.tradeErr}
+		r := &RPCServer{core: tc}
+		payload := handleTrade(r, test.params)
+		res := new(tradeResponse)
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
 	}

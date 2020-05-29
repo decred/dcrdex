@@ -25,6 +25,7 @@ const (
 	openWalletRoute  = "openwallet"
 	getFeeRoute      = "getfee"
 	registerRoute    = "register"
+	tradeRoute       = "trade"
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
 )
@@ -67,6 +68,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	openWalletRoute:  handleOpenWallet,
 	getFeeRoute:      handleGetFee,
 	registerRoute:    handleRegister,
+	tradeRoute:       handleTrade,
 	versionRoute:     handleVersion,
 	walletsRoute:     handleWallets,
 }
@@ -340,6 +342,7 @@ func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(loginRoute, err)
 	}
+	defer appPass.Clear()
 	res, err := s.core.Login(appPass)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to login: %v", err)
@@ -347,6 +350,28 @@ func handleLogin(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return createResponse(loginRoute, nil, resErr)
 	}
 	return createResponse(loginRoute, &res, nil)
+}
+
+// handleTrade handles requests for trade. *msgjson.ResponsePayload.Error is
+// empty if successful.
+func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseTradeArgs(params)
+	if err != nil {
+		return usage(tradeRoute, err)
+	}
+	defer form.AppPass.Clear()
+	res, err := s.core.Trade(form.AppPass, form.SrvForm)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to trade: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCTradeError, errMsg)
+		return createResponse(tradeRoute, nil, resErr)
+	}
+	tradeRes := &tradeResponse{
+		OrderID: res.ID,
+		Sig:     res.Sig.String(),
+		Stamp:   res.Stamp,
+	}
+	return createResponse(tradeRoute, &tradeRes, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -444,18 +469,18 @@ var helpMsgs = map[string]helpMsg{
 	versionRoute: {
 		pwArgsShort: ``,
 		argsShort:   ``,
-		cmdSummary:  `Print the dex client rpcserver version.`,
+		cmdSummary:  `Print the DEX client rpcserver version.`,
 		pwArgsLong:  ``,
 		argsLong:    ``,
 		returns: `Returns:
-    string: The dex client rpcserver version.`,
+    string: The DEX client rpcserver version.`,
 	},
 	initRoute: {
 		pwArgsShort: `"appPass"`,
 		argsShort:   ``,
 		cmdSummary:  `Initialize the client.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The dex client password.`,
+    appPass (string): The DEX client password.`,
 		argsLong: ``,
 		returns: `Returns:
     string: The message "` + initializedStr + `"`,
@@ -471,7 +496,7 @@ var helpMsgs = map[string]helpMsg{
 		returns: `Returns:
     obj: The getFee result.
     {
-      "fee" (int): The dex registration fee.
+      "fee" (int): The DEX registration fee.
     }`,
 	},
 	newWalletRoute: {
@@ -479,7 +504,7 @@ var helpMsgs = map[string]helpMsg{
 		argsShort:   `assetID "account" ("config")`,
 		cmdSummary:  `Connect to a new wallet.`,
 		pwArgsLong: `Password Args:
-    appPass (string): The dex client password.
+    appPass (string): The DEX client password.
     walletPass (string): The wallet's password.`,
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
@@ -519,7 +544,7 @@ var helpMsgs = map[string]helpMsg{
 		pwArgsLong:  ``,
 		argsLong:    ``,
 		returns: `Returns:
-    obj: The wallets result.
+    array: An array of wallet results.
     [
       {
         "symbol" (string): The coin symbol.
@@ -546,7 +571,7 @@ var helpMsgs = map[string]helpMsg{
 	registerRoute: {
 		pwArgsShort: `"appPass"`,
 		argsShort:   `"addr" fee ("cert")`,
-		cmdSummary: `Register for dex. An ok response does not mean that registration is complete.
+		cmdSummary: `Register for DEX. An ok response does not mean that registration is complete.
 Registration is complete after the fee transaction has been confirmed.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
@@ -564,7 +589,7 @@ Registration is complete after the fee transaction has been confirmed.`,
 		pwArgsLong:  ``,
 		argsLong:    ``,
 		returns: `Returns:
-    map: The exchanges result.
+    obj: The exchanges result.
     {
       "[DEX host]": {
         "markets": {
@@ -627,7 +652,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     appPass (string): The dex client password.`,
 		argsLong: ``,
 		returns: `Returns:
-    map: A map of notifications and dexes.
+    obj: A map of notifications and dexes.
     {
       "notifications" (array): An array of most recent notifications.
       [
@@ -652,6 +677,31 @@ Registration is complete after the fee transaction has been confirmed.`,
           "tradeIDs" (array): An array of active trade IDs.
         }
       ]
+    }`,
+	},
+	tradeRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `"host" isLimit sell base quote qty rate immediate`,
+		cmdSummary:  ``,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		argsLong: `Args:
+    host (string): The DEX to trade on.
+    isLimit (bool): Whether the order is a limit order.
+    sell (bool): Whether the order is selling.
+    base (int): The BIP-44 coin index for the market's base asset.
+    quote (int): The BIP-44 coin index for the market's quote asset.
+    qty (int): The number of units to buy/sell. Must be a multiple of the lot size.
+    rate (int): The atoms quote asset to pay/accept per unit base asset. e.g.
+      156000 satoshi/DCR for the DCR(base)_BTC(quote).
+    immediate (bool): Require immediate match. Do not book the order.`,
+		returns: `Returns:
+    obj: The order details.
+    {
+      "orderid" (string): The order's unique hex identifier.
+      "sig" (string): The DEX's signature of the order information.
+      "stamp" (int): The time the order was signed in milliseconds since 00:00:00
+        Jan 1 1970.
     }`,
 	},
 }

@@ -146,6 +146,9 @@ func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, pr
 // signAndRequest signs and sends the request, unmarshaling the response into
 // the provided interface.
 func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result interface{}) error {
+	if dc.acct.locked() {
+		return fmt.Errorf("cannot sign: %s account locked", dc.acct.host)
+	}
 	err := sign(dc.acct.privKey, signable)
 	if err != nil {
 		return fmt.Errorf("error signing %s message: %v", route, err)

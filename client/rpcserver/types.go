@@ -40,6 +40,13 @@ type getFeeResponse struct {
 	Fee uint64 `json:"fee"`
 }
 
+// tradeResponse is used when responding to the trade route.
+type tradeResponse struct {
+	OrderID string `json:"orderid"`
+	Sig     string `json:"sig"`
+	Stamp   uint64 `json:"stamp"`
+}
+
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	AssetID uint32           `json:"assetID"`
@@ -59,6 +66,11 @@ type newWalletForm struct {
 type helpForm struct {
 	HelpWith         string `json:"helpwith"`
 	IncludePasswords bool   `json:"includepasswords"`
+}
+
+type tradeForm struct {
+	AppPass encode.PassBytes
+	SrvForm *core.TradeForm
 }
 
 // checkNArgs checks that args and pwArgs are the correct length.
@@ -207,6 +219,54 @@ func parseRegisterArgs(params *RawParams) (*core.RegisterForm, error) {
 		Addr:    params.Args[0],
 		Fee:     fee,
 		Cert:    cert,
+	}
+	return req, nil
+}
+
+func parseTradeArgs(params *RawParams) (*tradeForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{8}); err != nil {
+		return nil, err
+	}
+	isLimit, err := checkBoolArg(params.Args[1], "isLimit")
+	if err != nil {
+		return nil, err
+	}
+	sell, err := checkBoolArg(params.Args[2], "sell")
+	if err != nil {
+		return nil, err
+	}
+	base, err := checkUIntArg(params.Args[3], "base", 32)
+	if err != nil {
+		return nil, err
+	}
+	quote, err := checkUIntArg(params.Args[4], "quote", 32)
+	if err != nil {
+		return nil, err
+	}
+	qty, err := checkUIntArg(params.Args[5], "qty", 64)
+	if err != nil {
+		return nil, err
+	}
+	rate, err := checkUIntArg(params.Args[6], "rate", 64)
+	if err != nil {
+		return nil, err
+	}
+	tifnow, err := checkBoolArg(params.Args[7], "immediate")
+	if err != nil {
+		return nil, err
+	}
+	req := &tradeForm{
+		AppPass: params.PWArgs[0],
+		SrvForm: &core.TradeForm{
+			Host:    params.Args[0],
+			IsLimit: isLimit,
+			Sell:    sell,
+			Base:    uint32(base),
+			Quote:   uint32(quote),
+			Qty:     qty,
+			Rate:    rate,
+			TifNow:  tifnow,
+		},
 	}
 	return req, nil
 }
