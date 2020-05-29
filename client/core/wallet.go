@@ -25,6 +25,7 @@ type xcWallet struct {
 	balUpdate time.Time
 	encPW     []byte
 	address   string
+	dbID      []byte
 }
 
 // Unlock unlocks the wallet.

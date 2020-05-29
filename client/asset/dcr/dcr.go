@@ -370,7 +370,7 @@ func (dcr *ExchangeWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
 	if err != nil {
 		return nil, err
 	}
-	locked, err := dcr.lockedSats()
+	locked, err := dcr.lockedAtoms()
 	if err != nil {
 		return nil, err
 	}
@@ -816,13 +816,10 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 	// Get the contracts P2SH address from the tx output's pubkey script.
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "-5:") {
-			return nil, asset.CoinNotFoundError
-		}
 		return nil, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if txOut == nil {
-		return nil, fmt.Errorf("nil gettxout result")
+		return nil, asset.CoinNotFoundError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
@@ -1253,8 +1250,8 @@ func (dcr *ExchangeWallet) balances(confs []uint32) ([]*asset.Balance, error) {
 	return balances, nil
 }
 
-// lockedSats is the total value of locked outputs, as locked with LockUnspent.
-func (dcr *ExchangeWallet) lockedSats() (uint64, error) {
+// lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
+func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
 	lockedOutpoints, err := dcr.node.ListLockUnspent()
 	if err != nil {
 		return 0, err
@@ -1272,6 +1269,11 @@ func (dcr *ExchangeWallet) lockedSats() (uint64, error) {
 		txOut, err := dcr.node.GetTxOut(&outPoint.Hash, outPoint.Index, true)
 		if err != nil {
 			return 0, err
+		}
+		if txOut == nil {
+			// Must be spent now?
+			dcr.log.Debugf("ignoring output from listlockunspent that wasn't found with gettxout. %s", opID)
+			continue
 		}
 		sum += toAtoms(txOut.Value)
 	}

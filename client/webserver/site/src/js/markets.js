@@ -188,7 +188,8 @@ export default class MarketsPage extends BasePage {
     this.notifiers = {
       order: note => { this.handleOrderNote(note) },
       epoch: note => { this.handleEpochNote(note) },
-      conn: note => { this.marketList.setConnectionStatus(note) }
+      conn: note => { this.marketList.setConnectionStatus(note) },
+      balance: note => { this.handleBalanceNote(note) }
     }
 
     // Fetch the first market in the list, or the users last selected market, if
@@ -699,6 +700,11 @@ export default class MarketsPage extends BasePage {
           break
       }
     }
+  }
+
+  // handleBalanceNote handles notifications updating a wallet's balance.
+  handleBalanceNote (note) {
+    this.updateWallet(note.assetID)
   }
 
   /*

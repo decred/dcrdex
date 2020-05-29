@@ -260,6 +260,8 @@ type TCore struct {
 	balances    map[uint32]*core.BalanceSet
 	dexAddr     string
 	marketID    string
+	base        uint32
+	quote       uint32
 	midGap      float64
 	maxQty      float64
 	feed        *core.BookFeed
@@ -319,6 +321,8 @@ func (c *TCore) Sync(dexAddr string, base, quote uint32) (*core.OrderBook, *core
 	c.mtx.Lock()
 	c.dexAddr = dexAddr
 	c.marketID = mktID
+	c.base = base
+	c.quote = quote
 	c.mtx.Unlock()
 
 	if c.feed != nil {
@@ -452,6 +456,14 @@ func randomBalanceSet() *core.BalanceSet {
 			firstDEX:  randBal(),
 			secondDEX: randBal(),
 		},
+	}
+}
+
+func randomBalanceNote(assetID uint32) *core.BalanceNote {
+	return &core.BalanceNote{
+		Notification: db.NewNotification("balance", "", "", db.Data),
+		AssetID:      assetID,
+		Balances:     randomBalanceSet(),
 	}
 }
 
@@ -668,6 +680,8 @@ out:
 			c.mtx.RLock()
 			dexAddr := c.dexAddr
 			mktID := c.marketID
+			baseID := c.base
+			quoteID := c.quote
 			c.mtx.RUnlock()
 			c.noteFeed <- &core.EpochNotification{
 				Host:         dexAddr,
@@ -675,6 +689,10 @@ out:
 				Notification: db.NewNotification("epoch", "", "", db.Data),
 				Epoch:        getEpoch(),
 			}
+			// // randomize the balance
+			c.noteFeed <- randomBalanceNote(baseID)
+			c.noteFeed <- randomBalanceNote(quoteID)
+
 			c.orderMtx.Lock()
 			// Send limit orders as newly booked.
 			for _, o := range c.epochOrders {

@@ -266,8 +266,15 @@ export default class Application {
             }
           }
         }
+        break
+      }
+      case 'balance': {
+        const wallet = this.user.assets[note.assetID].wallet
+        if (wallet) wallet.balances = note.balances
+        break
       }
     }
+
     // Inform the page.
     this.loadedPage.notify(note)
     // Discard data notifications.

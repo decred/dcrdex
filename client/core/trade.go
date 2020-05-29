@@ -474,9 +474,10 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 }
 
 // tick will check for and perform any match actions necessary.
-func (t *trackedTrade) tick() (int, error) {
+func (t *trackedTrade) tick() (assetCounter, error) {
 	var swaps []*matchTracker
 	var redeems []*matchTracker
+	counts := make(assetCounter)
 	errs := newErrorSet(t.dc.acct.host + " tick: ")
 
 	t.matchMtx.Lock()
@@ -495,6 +496,7 @@ func (t *trackedTrade) tick() (int, error) {
 	}
 	if len(swaps) > 0 {
 		fromID := t.wallets.fromAsset.ID
+		counts[fromID] = len(swaps)
 		qty := sent
 		if !t.Trade().Sell {
 			qty = quoteSent
@@ -517,6 +519,7 @@ func (t *trackedTrade) tick() (int, error) {
 	}
 	if len(redeems) > 0 {
 		toAsset := t.wallets.toAsset.ID
+		counts[toAsset] = len(redeems)
 		qty := received
 		if t.Trade().Sell {
 			qty = quoteReceived
@@ -534,7 +537,7 @@ func (t *trackedTrade) tick() (int, error) {
 			t.notify(newOrderNote("Match complete", details, db.Poke, corder))
 		}
 	}
-	return len(swaps) + len(redeems), errs.ifany()
+	return counts, errs.ifany()
 }
 
 // swapMatches will send a transaction with swap outputs for the specified

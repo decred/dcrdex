@@ -308,6 +308,10 @@ func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
 	return tdb.updateWalletErr
 }
 
+func (tdb *TDB) UpdateBalance(wid []byte, balance *asset.Balance) error {
+	return nil
+}
+
 func (tdb *TDB) Wallets() ([]*db.Wallet, error) {
 	return nil, nil
 }
@@ -434,6 +438,7 @@ func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 		AssetID:   assetID,
 		lockTime:  time.Now().Add(time.Hour),
 		hookedUp:  true,
+		dbID:      encode.Uint32Bytes(assetID),
 	}, w
 }
 
@@ -1092,21 +1097,32 @@ func TestRegister(t *testing.T) {
 		err = tCore.Register(form)
 	}
 
-	getFeeNote := func() *FeePaymentNote {
+	getNotification := func(tag string) interface{} {
 		select {
 		case n := <-ch:
-			switch note := n.(type) {
-			case *FeePaymentNote:
-				return note
-			default:
-				t.Fatalf("wrong notification type: %T", note)
-			}
+			return n
 			// When it works, it should be virtually instant, but I have seen it fail
 			// at 1 millisecond.
 		case <-time.NewTimer(time.Second).C:
-			t.Fatalf("timed out waiting for fee payment notification")
+			t.Fatalf("timed out waiting for %s notification", tag)
 		}
 		return nil
+	}
+
+	getBalanceNote := func() *BalanceNote {
+		note, ok := getNotification("balance").(*BalanceNote)
+		if !ok {
+			t.Fatalf("wrong notification. Expected BalanceNote")
+		}
+		return note
+	}
+
+	getFeeNote := func() *FeePaymentNote {
+		note, ok := getNotification("feepayment").(*FeePaymentNote)
+		if !ok {
+			t.Fatalf("wrong notification. Expected FeePaymentNote")
+		}
+		return note
 	}
 
 	queueResponses()
@@ -1116,6 +1132,7 @@ func TestRegister(t *testing.T) {
 	}
 	// Should be two success notifications. One for fee paid on-chain, one for
 	// fee notification sent.
+	getBalanceNote()
 	feeNote := getFeeNote()
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
@@ -1220,7 +1237,9 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error for notifyfee response error: %v", err)
 	}
-	// 1st note is fee sent.
+	// 1st note is balance.
+	getBalanceNote()
+	// 2nd is feepayment.
 	feeNote = getFeeNote()
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
@@ -1237,6 +1256,7 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error after regaining valid state: %v", err)
 	}
+	getBalanceNote()
 	feeNote = getFeeNote()
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
@@ -2877,4 +2897,30 @@ func TestAssetBalances(t *testing.T) {
 	}
 	dbtest.MustCompareBalances(t, bals[0], balances.ZeroConf)
 	dbtest.MustCompareBalances(t, bals[1], balances.XC[tDexHost])
+}
+
+func TestAssetCounter(t *testing.T) {
+	counts := make(assetCounter)
+	counts.add(1, 1)
+	if len(counts) != 1 {
+		t.Fatalf("count not added")
+	}
+	counts.add(1, 3)
+	if counts[1] != 4 {
+		t.Fatalf("counts not incremented properly")
+	}
+	newCounts := assetCounter{
+		1: 100,
+		2: 2,
+	}
+	counts.absorb(newCounts)
+	if len(counts) != 2 {
+		t.Fatalf("counts not absorbed properly")
+	}
+	if counts[2] != 2 {
+		t.Fatalf("absorbed counts not set correctly")
+	}
+	if counts[1] != 104 {
+		t.Fatalf("absorbed counts not combined correctly")
+	}
 }

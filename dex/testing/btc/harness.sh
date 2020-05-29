@@ -14,7 +14,7 @@ ALPHA_WALLET_SEED="cMndqchcXSCUQDDZQSKU2cUHbPb5UfFL9afspxsBELeE6qx6ac9n"
 BETA_WALLET_SEED="cRHosJjgZ2UWsEAeHYYUFa8Z6viHYXm94GguGtpzMo6qwKBC1DSq"
 # Gamma is a named wallet in the alpha wallet directory.
 GAMMA_WALLET_SEED="cR6gasj1RtB9Qv9j2kVej2XzQmXPmZBcn8KzUmxSSCQoz3TqTNMg"
-GAMMA_WALLET_PASSWORD="abc"
+WALLET_PASSWORD="abc"
 GAMMA_ADDRESS="2N9Lwbw6DKoNSyTB9xL4e9LXftuPP7XU214"
 ALPHA_MINING_ADDR="2MzNGEV9CBZBptm25CZ4rm2TrKF8gfVU8XA"
 BETA_MINING_ADDR="2NC2bYfZ9GX3gnDZB8CL7pYLytNKMfVxYDX"
@@ -208,8 +208,10 @@ tmux send-keys -t $SESSION:2 "./alpha createwallet gamma${WAIT}" C-m\; wait-for 
 tmux send-keys -t $SESSION:2 "./gamma sethdseed true ${GAMMA_WALLET_SEED}${WAIT}" C-m\; wait-for donebtc
 tmux send-keys -t $SESSION:2 "./gamma getnewaddress${WAIT}" C-m\; wait-for donebtc
 tmux send-keys -t $SESSION:2 "./gamma getnewaddress \"\" \"legacy\"${WAIT}" C-m\; wait-for donebtc
-echo "Encrypting the gamma wallet (may take a minute)"
-tmux send-keys -t $SESSION:2 "./gamma encryptwallet ${GAMMA_WALLET_PASSWORD}${WAIT}" C-m\; wait-for donebtc
+echo "Encrypting wallets (may take a minute)"
+tmux send-keys -t $SESSION:2 "./gamma encryptwallet ${WALLET_PASSWORD}${WAIT}" C-m\; wait-for donebtc
+tmux send-keys -t $SESSION:2 "./beta encryptwallet ${WALLET_PASSWORD}${WAIT}" C-m\; wait-for donebtc
+
 echo "Sending 84 BTC to gamma in 8 blocks"
 for i in 10 18 5 7 1 15 3 25
 do
