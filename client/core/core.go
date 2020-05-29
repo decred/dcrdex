@@ -2481,29 +2481,32 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Set the new scheduled suspend.
 	duration := time.Until(encode.UnixTimeMilli(int64(sp.SuspendTime)))
 	dc.pendingSuspends[sp.MarketID] = time.AfterFunc(duration, func() {
-		dc.pendingSuspendsMtx.Lock()
-		defer dc.pendingSuspendsMtx.Unlock()
 		dc.suspend(sp.MarketID)
+
+		dc.booksMtx.RLock()
 		if bookie := dc.books[sp.MarketID]; bookie != nil {
 			bookie.Reset()
 		}
+		dc.booksMtx.RUnlock()
+
 		if !sp.Persist {
+			dc.marketMtx.RLock()
 			mkt, ok := dc.marketMap[sp.MarketID]
 			if !ok {
 				log.Errorf("no market found with ID %s", sp.MarketID)
+				dc.marketMtx.Unlock()
+				return
 			}
-
-			dc.tradeMtx.Lock()
-			defer dc.tradeMtx.Unlock()
+			dc.marketMtx.RUnlock()
 
 			// Revoke all active orders of the suspended market for the dex.
+			dc.tradeMtx.RLock()
 			for _, tracker := range dc.trades {
 				if tracker.Order.Base() == mkt.BaseID &&
 					tracker.Order.Quote() == mkt.QuoteID &&
 					tracker.metaData.Host == dc.acct.host &&
 					(tracker.metaData.Status == order.OrderStatusEpoch ||
 						tracker.metaData.Status == order.OrderStatusBooked) {
-
 					md := tracker.metaData
 					md.Status = order.OrderStatusRevoked
 					metaOrder := &db.MetaOrder{
@@ -2517,8 +2520,13 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 					}
 				}
 			}
+			dc.tradeMtx.RUnlock()
 		}
+
+		// Remove suspend after execution.
+		dc.pendingSuspendsMtx.Lock()
 		delete(dc.pendingSuspends, sp.MarketID)
+		dc.pendingSuspendsMtx.Unlock()
 	})
 
 	return nil
