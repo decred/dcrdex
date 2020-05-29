@@ -392,7 +392,7 @@ export default class MarketsPage extends BasePage {
 
   /* setBalance sets the balance display. */
   setBalance (a, row, img, button, bal) {
-    img.src = logoSrc(a.symbol)
+    img.src = Doc.logoPath(a.symbol)
     if (a.wallet) {
       Doc.hide(button)
       Doc.show(row)
@@ -990,18 +990,17 @@ function tmplElement (ancestor, s) {
  * and sort order of markets.
  */
 class MarketList {
-  constructor (col) {
-    this.column = col
+  constructor (div) {
     this.selected = null
-    const tmpl = tmplElement(col, 'xc')
-    cleanTemplates(tmpl)
+    const xcTmpl = tmplElement(div, 'xc')
+    cleanTemplates(xcTmpl)
     this.xcSections = []
     for (const dex of Object.values(app.user.exchanges)) {
-      this.xcSections.push(new ExchangeSection(tmpl, dex))
+      this.xcSections.push(new ExchangeSection(xcTmpl, dex))
     }
     // Initial sort is alphabetical.
     for (const xc of this.sortedSections()) {
-      this.column.appendChild(xc.box)
+      div.appendChild(xc.box)
     }
   }
 
@@ -1048,7 +1047,7 @@ class MarketList {
   }
 
   /* setConnectionStatus sets the visiblity of the disconnected icon based
-   * on the core.EpochNotification.
+   * on the core.ConnEventNote.
    */
   setConnectionStatus (note) {
     this.xcSection(note.host).setConnected(note.connected)
@@ -1074,8 +1073,8 @@ class ExchangeSection {
     const box = tmpl.cloneNode(true)
     this.box = box
     const header = tmplElement(box, 'header')
-    this.connectedIcon = tmplElement(header, 'disconnected')
-    if (dex.connected) Doc.hide(this.connectedIcon)
+    this.disconnectedIcon = tmplElement(header, 'disconnected')
+    if (dex.connected) Doc.hide(this.disconnectedIcon)
     header.append(dex.host)
 
     this.marketRows = []
@@ -1119,8 +1118,8 @@ class ExchangeSection {
 
   /* setConnected sets the visiblity of the disconnected icon. */
   setConnected (isConnected) {
-    if (isConnected) Doc.hide(this.connectedIcon)
-    else Doc.show(this.connectedIcon)
+    if (isConnected) Doc.hide(this.disconnectedIcon)
+    else Doc.show(this.disconnectedIcon)
   }
 
   /*
@@ -1145,8 +1144,8 @@ class MarketRow {
     this.quoteID = mkt.quoteid
     const row = tmpl.cloneNode(true)
     this.row = row
-    tmplElement(row, 'baseicon').src = logoSrc(mkt.basesymbol)
-    tmplElement(row, 'quoteicon').src = logoSrc(mkt.quotesymbol)
+    tmplElement(row, 'baseicon').src = Doc.logoPath(mkt.basesymbol)
+    tmplElement(row, 'quoteicon').src = Doc.logoPath(mkt.quotesymbol)
     row.append(`${mkt.basesymbol.toUpperCase()}-${mkt.quotesymbol.toUpperCase()}`)
   }
 }
@@ -1248,12 +1247,4 @@ function cleanTemplates (...tmpls) {
     tmpl.remove()
     tmpl.removeAttribute('id')
   })
-}
-
-/*
- * logoSrc constructs the src attribute value for an img element that displays
- * an asset's logo.
- */
-function logoSrc (symbol) {
-  return `/img/coins/${symbol.toLowerCase()}.png`
 }
