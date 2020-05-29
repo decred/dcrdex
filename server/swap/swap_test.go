@@ -106,20 +106,18 @@ type TRequest struct {
 
 // This stub satisfies AuthManager.
 type TAuthManager struct {
-	mtx     sync.Mutex
-	authErr error
-	reqs    map[account.AccountID][]*TRequest
-	resps   map[account.AccountID][]*msgjson.Message
-	penalty struct {
-		violator account.AccountID
-		rule     account.Rule
-	}
+	mtx         sync.Mutex
+	authErr     error
+	reqs        map[account.AccountID][]*TRequest
+	resps       map[account.AccountID][]*msgjson.Message
+	suspensions map[account.AccountID]account.Rule
 }
 
 func newTAuthManager() *TAuthManager {
 	return &TAuthManager{
-		reqs:  make(map[account.AccountID][]*TRequest),
-		resps: make(map[account.AccountID][]*msgjson.Message),
+		reqs:        make(map[account.AccountID][]*TRequest),
+		resps:       make(map[account.AccountID][]*msgjson.Message),
+		suspensions: make(map[account.AccountID]account.Rule),
 	}
 }
 
@@ -164,6 +162,12 @@ func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.M
 	return nil
 }
 func (m *TAuthManager) Sign(...msgjson.Signable) error { return nil }
+func (m *TAuthManager) Suspended(user account.AccountID) (found, suspended bool) {
+	var rule account.Rule
+	rule, found = m.suspensions[user]
+	suspended = rule != account.NoRule
+	return // TODO: test suspended account handling (no trades, just cancels)
+}
 func (m *TAuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	return m.authErr
 }
@@ -174,21 +178,20 @@ func (m *TAuthManager) Route(string,
 func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	m.penalty.violator = id
-	m.penalty.rule = rule
+	m.suspensions[id] = rule
 }
 
 func (m *TAuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {}
 func (m *TAuthManager) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time)            {}
 
-func (m *TAuthManager) flushPenalty() (account.AccountID, account.Rule) {
+func (m *TAuthManager) flushPenalty(user account.AccountID) (found bool, rule account.Rule) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-	user := m.penalty.violator
-	rule := m.penalty.rule
-	m.penalty.violator = account.AccountID{}
-	m.penalty.rule = account.NoRule
-	return user, rule
+	rule, found = m.suspensions[user]
+	if found {
+		delete(m.suspensions, user)
+	}
+	return
 }
 
 // pop front
@@ -1571,12 +1574,12 @@ func TestBroadcastTimeouts(t *testing.T) {
 		// BroadcastTimeout.
 		sendBlock(node)
 		timeoutBroadcast()
-		user, rule := rig.auth.flushPenalty()
+		found, rule := rig.auth.flushPenalty(jerk.acct)
+		if !found {
+			t.Fatalf("failed to penalize user at step %d", i)
+		}
 		if rule == account.NoRule {
 			t.Fatalf("no penalty at step %d (status %v)", i, step)
-		}
-		if user != jerk.acct {
-			t.Fatalf("user mismatch at step %d", i)
 		}
 		// Make sure the specified user has a cancellation for this order
 		checkRevokeMatch(jerk, i)

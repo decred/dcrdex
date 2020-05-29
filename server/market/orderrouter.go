@@ -27,6 +27,7 @@ const maxClockOffset = 10_000 // milliseconds
 type AuthManager interface {
 	Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
+	Suspended(user account.AccountID) (found, suspended bool)
 	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message) error
 	SendWhenConnected(account.AccountID, *msgjson.Message, time.Duration, func())
@@ -174,6 +175,10 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		return rpcErr
 	}
 
+	if _, suspended := r.auth.Suspended(user); suspended {
+		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account may not submit trade orders")
+	}
+
 	tunnel, coins, sell, rpcErr := r.extractMarketDetails(&limit.Prefix, &limit.Trade)
 	if rpcErr != nil {
 		return rpcErr
@@ -285,6 +290,10 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		return rpcErr
 	}
 
+	if _, suspended := r.auth.Suspended(user); suspended {
+		return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account may not submit trade orders")
+	}
+
 	tunnel, assets, sell, rpcErr := r.extractMarketDetails(&market.Prefix, &market.Trade)
 	if rpcErr != nil {
 		return rpcErr
@@ -384,6 +393,13 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	if rpcErr != nil {
 		return rpcErr
 	}
+
+	// Consideration: allow suspended accounts to submit cancel orders? Depends
+	// if their orders get canceled on suspension or if they simply cannot make
+	// new orders.
+	// if _, suspended := r.auth.Suspended(user); suspended {
+	// 	return msgjson.NewError(msgjson.MarketNotRunningError, "suspended account may not submit cancel orders")
+	// }
 
 	tunnel, rpcErr := r.extractMarket(&cancel.Prefix)
 	if rpcErr != nil {
