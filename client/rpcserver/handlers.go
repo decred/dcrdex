@@ -681,11 +681,12 @@ Registration is complete after the fee transaction has been confirmed.`,
 	},
 	tradeRoute: {
 		pwArgsShort: `"appPass"`,
-		argsShort:   `"dex" isLimit sell base quote qty rate immediate`,
+		argsShort:   `"host" isLimit sell base quote qty rate immediate`,
 		cmdSummary:  ``,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.`,
 		argsLong: `Args:
+    host (string): The DEX to trade on.
     isLimit (bool): Whether the order is a limit order.
     sell (bool): Whether the order is selling.
     base (int): The BIP-44 coin index for the market's base asset.

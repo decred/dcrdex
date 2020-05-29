@@ -332,7 +332,7 @@ func TestTradeArgs(t *testing.T) {
 	goodParams := &RawParams{
 		PWArgs: []encode.PassBytes{pw}, // 0. AppPass
 		Args: []string{
-			"1.2.3.4:3000", // 0. DEX
+			"1.2.3.4:3000", // 0. Host
 			"true",         // 1. IsLimit
 			"true",         // 2. Sell
 			"0",            // 3. Base
@@ -399,8 +399,8 @@ func TestTradeArgs(t *testing.T) {
 		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
 			t.Fatalf("AppPass doesn't match")
 		}
-		if reg.SrvForm.DEX != test.params.Args[0] {
-			t.Fatalf("DEX doesn't match")
+		if reg.SrvForm.Host != test.params.Args[0] {
+			t.Fatalf("Host doesn't match")
 		}
 		if fmt.Sprint(reg.SrvForm.IsLimit) != test.params.Args[1] {
 			t.Fatalf("IsLimit doesn't match")

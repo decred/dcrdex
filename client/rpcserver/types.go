@@ -258,7 +258,7 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 	req := &tradeForm{
 		AppPass: params.PWArgs[0],
 		SrvForm: &core.TradeForm{
-			DEX:     params.Args[0],
+			Host:    params.Args[0],
 			IsLimit: isLimit,
 			Sell:    sell,
 			Base:    uint32(base),
