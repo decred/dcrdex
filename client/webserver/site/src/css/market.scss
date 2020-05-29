@@ -23,6 +23,18 @@ div.marketrow.selected {
   background-color: #f0f7f7;
 }
 
+label.market-search {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 1px;
+  background-color: white;
+
+  input {
+    border: none;
+  }
+}
+
 div.marketforms {
   position: fixed;
   left: 0;

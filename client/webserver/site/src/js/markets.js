@@ -55,7 +55,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page = Doc.parsePage(main, [
       // Templates, loaders, chart div...
       'marketLoader', 'marketChart', 'marketList', 'rowTemplate', 'buyRows',
-      'sellRows',
+      'sellRows', 'marketSearch',
       // Order form.
       'orderForm', 'priceBox', 'buyBttn', 'sellBttn', 'baseBalance',
       'quoteBalance', 'limitBttn', 'marketBttn', 'tifBox', 'submitBttn',
@@ -83,18 +83,23 @@ export default class MarketsPage extends BasePage {
     this.currentCreate = null
     this.book = null
     this.orderRows = {}
-    this.marketRows = page.marketList.querySelectorAll('.marketrow')
-    this.markets = []
     const reporters = {
       price: p => { this.reportPrice(p) }
     }
     this.chart = new DepthChart(page.marketChart, reporters)
 
     // Prepare templates for the buy and sell tables and the user's order table.
-    page.rowTemplate.remove()
-    page.rowTemplate.removeAttribute('id')
-    page.liveTemplate.removeAttribute('id')
-    page.liveTemplate.remove()
+    cleanTemplates(page.rowTemplate, page.liveTemplate)
+
+    // Prepare the list of markets.
+    this.marketList = new MarketList(page.marketList)
+    for (const xc of this.marketList.xcSections) {
+      for (const mkt of xc.marketRows) {
+        bind(mkt.row, 'click', () => {
+          this.setMarket(xc.host, mkt.baseID, mkt.quoteID)
+        })
+      }
+    }
 
     // Store the elements that need their ticker changed when the market
     // changes.
@@ -127,27 +132,6 @@ export default class MarketsPage extends BasePage {
     })
 
     Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
-
-    // Scan the rows in the market table and pull some basic info.
-    var lastMarket = (data && data.market) ? data.market : State.fetch(lastMarketKey)
-    var mktFound = false
-    this.marketRows.forEach(div => {
-      const base = parseInt(div.dataset.base)
-      const quote = parseInt(div.dataset.quote)
-      const host = div.dataset.host
-      mktFound = mktFound || (lastMarket && lastMarket.host === host &&
-        lastMarket.base === base && lastMarket.quote === quote)
-      // Clicking on the row will load a new market.
-      bind(div, 'click', () => {
-        page.marketLoader.classList.remove('d-none')
-        this.setMarket(host, base, quote)
-      })
-      this.markets.push({
-        base: base,
-        quote: quote,
-        host: host
-      })
-    })
 
     // Handle the full orderbook sent on the 'book' route.
     ws.registerRoute(bookRoute, data => { this.handleBookRoute(data) })
@@ -196,17 +180,24 @@ export default class MarketsPage extends BasePage {
     bind(page.mktBuyField, 'keyup', () => { this.marketBuyChanged() })
     bind(page.rateField, 'change', () => { this.rateFieldChanged() })
 
+    // Market search input bindings.
+    bind(page.marketSearch, 'change', () => { this.filterMarkets() })
+    bind(page.marketSearch, 'keyup', () => { this.filterMarkets() })
+
     // Notification filters.
     this.notifiers = {
       order: note => { this.handleOrderNote(note) },
       epoch: note => { this.handleEpochNote(note) },
-      conn: note => { this.handleConnEventNote(note) }
+      conn: note => { this.marketList.setConnectionStatus(note) }
     }
 
     // Fetch the first market in the list, or the users last selected market, if
-    // it was found.
-    const firstEntry = mktFound ? lastMarket : this.markets[0]
-    this.setMarket(firstEntry.host, firstEntry.base, firstEntry.quote)
+    // it exists.
+    var selected = (data && data.market) ? data.market : State.fetch(lastMarketKey)
+    if (!this.marketList.exists(selected.host, selected.base, selected.quote)) {
+      selected = this.marketList.first()
+    }
+    this.setMarket(selected.host, selected.base, selected.quote)
 
     // Start a ticker to update time-since values.
     this.secondTicker = setInterval(() => {
@@ -279,8 +270,8 @@ export default class MarketsPage extends BasePage {
       baseCfg: dex.assets[base],
       quoteCfg: dex.assets[quote]
     }
+    this.page.marketLoader.classList.remove('d-none')
     ws.request('loadmarket', makeMarket(host, base, quote))
-
     const [b, q] = [this.market.base, this.market.quote]
     if (b && q) {
       return this.hideLoaderMsg()
@@ -401,7 +392,7 @@ export default class MarketsPage extends BasePage {
 
   /* setBalance sets the balance display. */
   setBalance (a, row, img, button, bal) {
-    img.src = `/img/coins/${a.symbol.toLowerCase()}.png`
+    img.src = Doc.logoPath(a.symbol)
     if (a.wallet) {
       Doc.hide(button)
       Doc.show(row)
@@ -481,14 +472,7 @@ export default class MarketsPage extends BasePage {
     if (data.base !== b.id || data.quote !== q.id) return
     this.handleBook(data)
     page.marketLoader.classList.add('d-none')
-    this.marketRows.forEach(row => {
-      const d = row.dataset
-      if (d.host === host && parseInt(d.base) === data.base && parseInt(d.quote) === data.quote) {
-        row.classList.add('selected')
-      } else {
-        row.classList.remove('selected')
-      }
-    })
+    this.marketList.select(host, b.id, q.id)
 
     State.store(lastMarketKey, {
       host: data.host,
@@ -714,19 +698,6 @@ export default class MarketsPage extends BasePage {
           order.status = statusExecuted
           break
       }
-    }
-  }
-
-  /*
-   * handleConnEventNote handles notifications about individual DEX connections.
-   */
-  handleConnEventNote (note) {
-    const id = 'disconnected:' + note.url
-    const el = document.getElementById(id)
-    if (note.connected) {
-      Doc.hide(el)
-    } else {
-      Doc.show(el)
     }
   }
 
@@ -980,6 +951,16 @@ export default class MarketsPage extends BasePage {
   }
 
   /*
+   * filterMarkets sets the display of markets in the markets list based on the
+   * value of the search input.
+   */
+  filterMarkets () {
+    const filterTxt = this.page.marketSearch.value
+    const filter = filterTxt ? mkt => mkt.name.includes(filterTxt) : () => true
+    this.marketList.setFilter(filter)
+  }
+
+  /*
    * unload is called by the Application when the user navigates away from
    * the /markets page.
    */
@@ -992,6 +973,180 @@ export default class MarketsPage extends BasePage {
     ws.deregisterRoute(unbookOrderRoute)
     this.chart.unattach()
     clearInterval(this.secondTicker)
+  }
+}
+
+/*
+ * tmplElement is a helper function for grabbing sub-elements of the market list
+ * template.
+ */
+function tmplElement (ancestor, s) {
+  return ancestor.querySelector(`[data-tmpl="${s}"]`)
+}
+
+/*
+ * MarketList respresents the list of exchanges and markets on the left side of
+ * markets view. The MarketList provides utilities for adjusting the visibility
+ * and sort order of markets.
+ */
+class MarketList {
+  constructor (div) {
+    this.selected = null
+    const xcTmpl = tmplElement(div, 'xc')
+    cleanTemplates(xcTmpl)
+    this.xcSections = []
+    for (const dex of Object.values(app.user.exchanges)) {
+      this.xcSections.push(new ExchangeSection(xcTmpl, dex))
+    }
+    // Initial sort is alphabetical.
+    for (const xc of this.sortedSections()) {
+      div.appendChild(xc.box)
+    }
+  }
+
+  /*
+   * sortedSections returns a list of ExchangeSection sorted alphabetically by
+   * host.
+   */
+  sortedSections () {
+    return [...this.xcSections].sort((a, b) => a.host < b.host ? -1 : 1)
+  }
+
+  /*
+   * xcSection is a getter for the ExchangeSection for a specified host.
+   */
+  xcSection (host) {
+    for (const xc of this.xcSections) {
+      if (xc.host === host) return xc
+    }
+    return null
+  }
+
+  /* exists will be true if the specified market exists. */
+  exists (host, baseID, quoteID) {
+    const xc = this.xcSection(host)
+    if (!xc) return false
+    for (const mkt of xc.marketRows) {
+      if (mkt.baseID === baseID && mkt.quoteID === quoteID) return true
+    }
+    return false
+  }
+
+  /* first gets the first market from the first exchange, alphabetically. */
+  first () {
+    const firstXC = this.sortedSections()[0]
+    const firstMkt = firstXC.first()
+    return makeMarket(firstXC.host, firstMkt.baseID, firstMkt.quoteID)
+  }
+
+  /* select sets the specified market as selected. */
+  select (host, baseID, quoteID) {
+    if (this.selected) this.selected.row.classList.remove('selected')
+    this.selected = this.xcSection(host).marketRow(baseID, quoteID)
+    this.selected.row.classList.add('selected')
+  }
+
+  /* setConnectionStatus sets the visiblity of the disconnected icon based
+   * on the core.ConnEventNote.
+   */
+  setConnectionStatus (note) {
+    this.xcSection(note.host).setConnected(note.connected)
+  }
+
+  /*
+   * setFilter sets the visibility of market rows based on the provided filter.
+   */
+  setFilter (filter) {
+    for (const xc of this.xcSections) {
+      xc.setFilter(filter)
+    }
+  }
+}
+
+/*
+ * ExchangeSection is a top level section of the MarketList.
+ */
+class ExchangeSection {
+  constructor (tmpl, dex) {
+    this.dex = dex
+    this.host = dex.host
+    const box = tmpl.cloneNode(true)
+    this.box = box
+    const header = tmplElement(box, 'header')
+    this.disconnectedIcon = tmplElement(header, 'disconnected')
+    if (dex.connected) Doc.hide(this.disconnectedIcon)
+    header.append(dex.host)
+
+    this.marketRows = []
+    this.rows = tmplElement(box, 'mkts')
+    const rowTmpl = tmplElement(this.rows, 'mktrow')
+    this.rows.removeChild(rowTmpl)
+    for (const mkt of Object.values(dex.markets)) {
+      this.marketRows.push(new MarketRow(rowTmpl, mkt))
+    }
+
+    for (const market of this.sortedMarkets()) {
+      this.rows.appendChild(market.row)
+    }
+  }
+
+  /*
+   * sortedMarkets is the list of MarketRow sorted alphabetically by the base
+   * symbol first, quote symbol second.
+   */
+  sortedMarkets () {
+    return [...this.marketRows].sort((a, b) => a.name < b.name ? -1 : 1)
+  }
+
+  /*
+   * first returns the first market in the alphabetically-sorted list of
+   * markets.
+   */
+  first () {
+    return this.sortedMarkets()[0]
+  }
+
+  /*
+   * marketRow gets the MarketRow for the specified market.
+   */
+  marketRow (baseID, quoteID) {
+    for (const mkt of this.marketRows) {
+      if (mkt.baseID === baseID && mkt.quoteID === quoteID) return mkt
+    }
+    return null
+  }
+
+  /* setConnected sets the visiblity of the disconnected icon. */
+  setConnected (isConnected) {
+    if (isConnected) Doc.hide(this.disconnectedIcon)
+    else Doc.show(this.disconnectedIcon)
+  }
+
+  /*
+   * setFilter sets the visibility of market rows based on the provided filter.
+   */
+  setFilter (filter) {
+    for (const mkt of this.marketRows) {
+      if (filter(mkt)) Doc.show(mkt.row)
+      else Doc.hide(mkt.row)
+    }
+  }
+}
+
+/*
+ * MarketRow represents one row in the MarketList. A MarketRow is a subsection
+ * of the ExchangeSection.
+ */
+class MarketRow {
+  constructor (tmpl, mkt) {
+    this.name = mkt.name
+    this.baseID = mkt.baseid
+    this.quoteID = mkt.quoteid
+    const row = tmpl.cloneNode(true)
+    this.row = row
+    tmplElement(row, 'baseicon').src = Doc.logoPath(mkt.basesymbol)
+    tmplElement(row, 'quoteicon').src = Doc.logoPath(mkt.quotesymbol)
+    row.append(`${mkt.basesymbol.toUpperCase()}-${mkt.quotesymbol.toUpperCase()}`)
   }
 }
 
@@ -1081,4 +1236,15 @@ function updateUserOrderRow (tr, order) {
 /* isMarketBuy will return true if the order is a market buy order. */
 function isMarketBuy (order) {
   return order.type === MARKET && !order.sell
+}
+
+/*
+ * cleanTemplates removes the elements from the DOM and deletes the id
+ * attribute.
+ */
+function cleanTemplates (...tmpls) {
+  tmpls.forEach(tmpl => {
+    tmpl.remove()
+    tmpl.removeAttribute('id')
+  })
 }

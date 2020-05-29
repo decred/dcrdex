@@ -176,14 +176,14 @@ func (on *EpochNotification) String() string {
 // ConnEventNote is a notification regarding individual DEX connection status.
 type ConnEventNote struct {
 	db.Notification
-	URL       string `json:"url"`
+	Host      string `json:"host"`
 	Connected bool   `json:"connected"`
 }
 
-func newConnEventNote(subject, url string, connected bool, details string, severity db.Severity) *ConnEventNote {
+func newConnEventNote(subject, host string, connected bool, details string, severity db.Severity) *ConnEventNote {
 	return &ConnEventNote{
 		Notification: db.NewNotification("conn", subject, details, severity),
-		URL:          url,
+		Host:         host,
 		Connected:    connected,
 	}
 }

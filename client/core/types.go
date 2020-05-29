@@ -6,7 +6,6 @@ package core
 import (
 	"encoding/hex"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 
@@ -178,26 +177,6 @@ type Exchange struct {
 	Assets     map[uint32]*dex.Asset `json:"assets"`
 	FeePending bool                  `json:"feePending"`
 	Connected  bool                  `json:"connected"`
-}
-
-// Return the markets as a slice sorted by Display ID, ascending.
-func (xc *Exchange) SortedMarkets() []*Market {
-	markets := make([]*Market, 0, len(xc.Markets))
-	for _, market := range xc.Markets {
-		markets = append(markets, market)
-	}
-	sort.Slice(markets, func(i, j int) bool {
-		m1, m2 := markets[i], markets[j]
-		switch true {
-		case m1.BaseSymbol < m2.BaseSymbol:
-			return true
-		case m1.BaseSymbol > m2.BaseSymbol:
-			return false
-		default: // Same base symbol.
-			return m2.QuoteSymbol < m2.QuoteSymbol
-		}
-	})
-	return markets
 }
 
 // newDisplayID creates a display-friendly market ID for a base/quote ID pair.

@@ -117,7 +117,6 @@ func (s *WebServer) handleMarkets(w http.ResponseWriter, r *http.Request) {
 	cArgs := commonArgs(r, "Markets | Decred DEX")
 	s.sendTemplate(w, "markets", &marketTmplData{
 		CommonArguments: *cArgs,
-		Exchanges:       cArgs.UserInfo.Exchanges,
 	})
 }
 
