@@ -93,7 +93,11 @@ func main() {
 				log.Errorf("Error constructing rpc server: %v", err)
 				os.Exit(1)
 			}
-			rpcSrv.Run(appCtx)
+
+			//rpcSrv.Run(appCtx)
+
+			rpcSrv.Start(appCtx)
+
 		}()
 	}
 
