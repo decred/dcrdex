@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -275,31 +276,21 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
-func TestCreateListener(t *testing.T) {
-	// Save current function and restore at the end:
-	oldOsExit := osExit
-	defer func() { osExit = oldOsExit }()
-	var actualExitCode int
-	myExit := func(code int) {
-		actualExitCode = code
-	}
-	osExit = myExit
-
+func TestConnect(t *testing.T) {
+	tCtx, shutdown := context.WithCancel(context.Background())
 	s, _, _ := newTServer(t, false, "", "")
-
 	sWithError, _, _ := newTServer(t, false, "", "")
 	sWithError.tlsConfig = nil
-
 	type args struct {
 		protocol string
 		s        *RPCServer
 	}
-
 	tests := []struct {
-		name             string
-		args             args
-		wantErr          bool
-		expectedExitCode int
+		name          string
+		args          args
+		wantErr       bool
+		shutdown      bool
+		expectedError string
 	}{
 		{
 			"start rpc listener",
@@ -308,7 +299,8 @@ func TestCreateListener(t *testing.T) {
 				s,
 			},
 			false,
-			0,
+			true,
+			"",
 		},
 		{
 			"exit on rpc listener error",
@@ -316,20 +308,25 @@ func TestCreateListener(t *testing.T) {
 				"tcp",
 				sWithError,
 			},
+			true,
 			false,
-			1,
+			"tls: neither Certificates, GetCertificate, nor GetConfigForClient set in Config",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createListener(tt.args.protocol, tt.args.s)
-			if actualExitCode != tt.expectedExitCode {
-				t.Errorf("Expected exit code: %d, actualExitCode: %d", tt.expectedExitCode, actualExitCode)
+			if tt.shutdown {
+				shutdown()
+			}
+			err, _ := tt.args.s.Connect(tCtx)
+			if (!tt.wantErr && err != nil) || (tt.wantErr && !strings.HasPrefix(err.Error(), tt.expectedError)) {
+				//t.Errorf("Expected Error: err: %s\nActual Error: err: %s", tt.expectedError, err)
+				t.Errorf("Expected Error: err: %s", tt.expectedError)
+				t.Errorf("Actual Error: err: %s", err)
 			}
 		})
 	}
-
 }
 
 func TestLoadMarket(t *testing.T) {

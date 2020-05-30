@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -307,17 +306,6 @@ func (s *RPCServer) Run(ctx context.Context) {
 	log.Infof("RPC server off")
 }
 
-var osExit = os.Exit
-
-func createListener(protocol string, s *RPCServer) net.Listener {
-	listener, err := tls.Listen(protocol, s.addr, s.tlsConfig)
-	if err != nil {
-		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
-		osExit(1)
-	}
-	return listener
-}
-
 type RpcConn interface {
 	Connect(ctx context.Context) (error, *sync.WaitGroup)
 }
@@ -326,12 +314,12 @@ func NewRpcConn(s *RPCServer) RpcConn {
 	return s
 }
 
+// Start uses ConnectionMaster to start the rpc server with the Connect
+// method using dex.Connector interface
 func (s *RPCServer) Start(ctx context.Context) error {
 	// ctx passed to newMarketSyncer when making new market syncers.
 	s.ctx = ctx
-
 	rpcConn := NewRpcConn(s)
-
 	connMaster := dex.NewConnectionMaster(rpcConn)
 	err := connMaster.Connect(s.ctx)
 	// If the initial connection returned an error, shut it down to kill the
@@ -340,7 +328,6 @@ func (s *RPCServer) Start(ctx context.Context) error {
 		connMaster.Disconnect()
 		return err
 	}
-
 	return nil
 }
 
@@ -348,14 +335,6 @@ func (s *RPCServer) Start(ctx context.Context) error {
 func (s *RPCServer) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 	//ctx passed to newMarketSyncer when making new market syncers.
 	s.ctx = ctx
-
-	//listener := createListener("tcp", s)
-
-	//listener, err := connectListener("tcp", s)
-	//if err != nil {
-	//	return
-	//}
-
 	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
 	if err != nil {
 		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
@@ -387,7 +366,7 @@ func (s *RPCServer) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 	s.wg.Wait()
 	log.Infof("RPC server off")
 
-	return nil, &s.wg
+	return err, &s.wg
 }
 
 // handleRequest sends the request to the correct handler function if able.
