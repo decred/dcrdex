@@ -14,11 +14,11 @@ export default class SettingsPage extends BasePage {
     app = application
     const page = this.page = Doc.parsePage(body, [
       'darkMode', 'commitHash',
-      'addMoreDex',
-      // Form configure DEX server
+      'addADex',
+      // Form to configure DEX server
       'dexAddrForm', 'dexAddr', 'certFile', 'selectedCert', 'removeCert', 'addCert',
       'submitDEXAddr', 'dexAddrErr',
-      // Form confirm DEX registration and pay fee
+      // Form to confirm DEX registration and pay fee
       'forms', 'confirmRegForm', 'feeDisplay', 'appPass', 'submitConfirm', 'regErr'
     ])
     Doc.bind(page.darkMode, 'click', () => {
@@ -30,14 +30,17 @@ export default class SettingsPage extends BasePage {
       }
     })
     page.commitHash.textContent = app.commitHash.substring(0, 7)
-    Doc.bind(page.addMoreDex, 'click', () => this.showForm(page.dexAddrForm))
-    Doc.bind(page.certFile, 'change', () => this.readCert())
-    Doc.bind(page.removeCert, 'click', () => this.resetCert())
+    Doc.bind(page.addADex, 'click', () => this.showForm(page.dexAddrForm))
+    Doc.bind(page.certFile, 'change', () => this.onCertFileChange())
+    Doc.bind(page.removeCert, 'click', () => this.clearCertFile())
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
     forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.verifyDEX() })
     forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
     Doc.bind(page.forms, 'mousedown', e => {
-      if (!Doc.mouseInElement(e, this.currentForm)) Doc.hide(page.forms)
+      if (!Doc.mouseInElement(e, this.currentForm)) {
+        Doc.hide(page.forms)
+        page.appPass.value = ''
+      }
     })
   }
 
@@ -81,8 +84,8 @@ export default class SettingsPage extends BasePage {
   async verifyDEX () {
     const page = this.page
     Doc.hide(page.dexAddrErr)
-    const url = page.dexAddr.value
-    if (url === '') {
+    const addr = page.dexAddr.value
+    if (addr === '') {
       page.dexAddrErr.textContent = 'URL cannot be empty'
       Doc.show(page.dexAddrErr)
       return
@@ -95,7 +98,7 @@ export default class SettingsPage extends BasePage {
 
     app.loading(page.dexAddrForm)
     const res = await postJSON('/api/getfee', {
-      url: url,
+      addr: addr,
       cert: cert
     })
     app.loaded()
@@ -119,7 +122,7 @@ export default class SettingsPage extends BasePage {
       cert = await page.certFile.files[0].text()
     }
     const registration = {
-      url: page.dexAddr.value,
+      addr: page.dexAddr.value,
       pass: page.appPass.value,
       fee: this.fee,
       cert: cert
@@ -127,13 +130,16 @@ export default class SettingsPage extends BasePage {
     page.appPass.value = ''
     app.loading(page.confirmRegForm)
     const res = await postJSON('/api/register', registration)
-    app.loaded()
     if (!app.checkResponse(res)) {
       page.regErr.textContent = res.msg
       Doc.show(page.regErr)
+      app.loaded()
+      return
     }
     page.dexAddr.value = ''
     this.clearCertFile()
     Doc.hide(page.forms)
+    await app.fetchUser()
+    app.loaded()
   }
 }
