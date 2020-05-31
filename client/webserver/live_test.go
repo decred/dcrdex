@@ -694,7 +694,8 @@ func TestServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
-	go s.Run(tCtx)
+	shutdown()
+	go s.Connect(tCtx)
 	go tCore.runEpochs()
 	<-tCtx.Done()
 }

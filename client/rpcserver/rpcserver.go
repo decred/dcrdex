@@ -268,44 +268,6 @@ func New(cfg *Config) (*RPCServer, error) {
 	return s, nil
 }
 
-// Run starts the rpc server. Satisfies the dex.Runner interface.
-func (s *RPCServer) Run(ctx context.Context) {
-	// ctx passed to newMarketSyncer when making new market syncers.
-	s.ctx = ctx
-
-	// Create listener.
-	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
-	if err != nil {
-		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
-		return
-	}
-
-	// Close the listener on context cancellation.
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		<-ctx.Done()
-
-		if err := s.srv.Shutdown(context.Background()); err != nil {
-			// Error from closing listeners:
-			log.Errorf("HTTP server Shutdown: %v", err)
-		}
-	}()
-	log.Infof("RPC server listening on %s", s.addr)
-	if err := s.srv.Serve(listener); err != http.ErrServerClosed {
-		log.Warnf("unexpected (http.Server).Serve error: %v", err)
-	}
-	s.mtx.Lock()
-	for _, cl := range s.clients {
-		cl.Disconnect()
-	}
-	s.mtx.Unlock()
-
-	// Wait for market syncers to finish and Shutdown.
-	s.wg.Wait()
-	log.Infof("RPC server off")
-}
-
 type RpcConn interface {
 	Connect(ctx context.Context) (error, *sync.WaitGroup)
 }

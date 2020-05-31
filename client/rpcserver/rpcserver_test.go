@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -215,8 +216,7 @@ var tPort = 5555
 func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 	*TCore, func()) {
 	c := &TCore{}
-	var shutdown func()
-	ctx, killCtx := context.WithCancel(tCtx)
+	ctx, shutdown := context.WithCancel(tCtx)
 	tmp, err := os.Getwd()
 	if err != nil {
 		t.Error(err)
@@ -230,16 +230,10 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
+	s.ctx = ctx
 	if start {
-		waiter := dex.NewStartStopWaiter(s)
-		waiter.Start(ctx)
-		shutdown = func() {
-			killCtx()
-			waiter.WaitForShutdown()
-		}
-	} else {
-		shutdown = killCtx
-		s.ctx = ctx
+		shutdown()
+		s.Connect(ctx)
 	}
 	return s, c, shutdown
 }
@@ -278,6 +272,7 @@ func TestMain(m *testing.M) {
 
 func TestConnect(t *testing.T) {
 	tCtx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
 	s, _, _ := newTServer(t, false, "", "")
 	sWithError, _, _ := newTServer(t, false, "", "")
 	sWithError.tlsConfig = nil
@@ -622,7 +617,13 @@ func TestClientMap(t *testing.T) {
 	read, _ := json.Marshal(msgjson.Message{ID: 0})
 	conn.addRead(read)
 
-	go s.websocketHandler(conn, "someip")
+	//go s.websocketHandler(conn, "someip")
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		s.websocketHandler(conn, "someip")
+		wg.Done()
+	}()
 
 	// When a response to our dummy message is received, the client should
 	// be in RPCServer's client map.
@@ -643,6 +644,7 @@ func TestClientMap(t *testing.T) {
 
 	// Close the server and make sure the connection is closed.
 	shutdown()
+	wg.Wait() // websocketHandler since it's using log
 	if !cl.Off() {
 		t.Fatalf("connection not closed on server shutdown")
 	}

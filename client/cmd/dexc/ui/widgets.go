@@ -160,7 +160,7 @@ func createWidgets() {
 			log.Errorf("Error starting web server: %v", err)
 			return
 		}
-		webSrv.Run(ctx)
+		webSrv.Connect(ctx)
 		setWebLabelOn(false)
 	})
 	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context, _ string, logger slog.Logger) {
@@ -172,7 +172,7 @@ func createWidgets() {
 			log.Errorf("Error starting rpc server: %v", err)
 			return
 		}
-		rpcSrv.Run(ctx)
+		rpcSrv.Connect(ctx)
 		setRPCLabelOn(false)
 	})
 	noteJournal = newJournal("Notifications", handleNotificationLog)

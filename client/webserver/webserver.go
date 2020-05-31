@@ -257,66 +257,6 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	return s, nil
 }
 
-// Run starts the web server. Satisfies the dex.Runner interface.
-func (s *WebServer) Run(ctx context.Context) {
-	// We'll use the context for market syncers.
-	s.ctx = ctx
-
-	// Start serving.
-	listener, err := net.Listen("tcp", s.addr)
-	if err != nil {
-		log.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
-		return
-	}
-
-	// Shutdown the server on context cancellation.
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		<-ctx.Done()
-		err := s.srv.Shutdown(context.Background())
-		if err != nil {
-			log.Errorf("Problem shutting down rpc: %v", err)
-		}
-	}()
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		s.readNotifications(ctx)
-	}()
-
-	log.Infof("Web server listening on http://%s", s.addr)
-	err = s.srv.Serve(listener)
-	if !errors.Is(err, http.ErrServerClosed) {
-		log.Warnf("unexpected (http.Server).Serve error: %v", err)
-	}
-	log.Infof("Web server off")
-
-	// Disconnect the websocket clients since Shutdown does not deal with
-	// hijacked websocket connections.
-	s.mtx.Lock()
-	for _, cl := range s.clients {
-		cl.Disconnect()
-	}
-	s.mtx.Unlock()
-
-	wg.Wait()
-}
-
-var osExit = os.Exit
-
-func createListener(protocol string, s *WebServer) net.Listener {
-	// Start serving.
-	listener, err := net.Listen(protocol, s.addr)
-	if err != nil {
-		log.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
-		osExit(1)
-	}
-	return listener
-}
-
 type WebConn interface {
 	Connect(ctx context.Context) (error, *sync.WaitGroup)
 }
