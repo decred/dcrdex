@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -309,58 +310,54 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
-func TestCreateListener(t *testing.T) {
-	// Save current function and restore at the end:
-	oldOsExit := osExit
-	defer func() { osExit = oldOsExit }()
-	var actualExitCode int
-	myExit := func(code int) {
-		actualExitCode = code
-	}
-	osExit = myExit
-
+func TestConnect(t *testing.T) {
+	tCtx, shutdown := context.WithCancel(context.Background())
 	s, _, _ := newTServer(t, false)
 
+	sWithError, _, _ := newTServer(t, false)
+	sWithError.addr = "bad"
 	type args struct {
-		protocol string
-		s        *WebServer
+		s *WebServer
 	}
-
 	tests := []struct {
-		name             string
-		args             args
-		wantErr          bool
-		expectedExitCode int
+		name          string
+		args          args
+		wantErr       bool
+		shutdown      bool
+		expectedError string
 	}{
 		{
 			"start web listener",
 			args{
-				"tcp",
 				s,
 			},
-			false,
-			0,
+			true,
+			true,
+			"http: Server closed",
 		},
 		{
 			"exit on web listener error",
 			args{
-				"bad",
-				s,
+				sWithError,
 			},
+			true,
 			false,
-			1,
+			"listen tcp: address bad: missing port in address",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			createListener(tt.args.protocol, tt.args.s)
-			if actualExitCode != tt.expectedExitCode {
-				t.Errorf("Expected exit code: %d, actualExitCode: %d", tt.expectedExitCode, actualExitCode)
+			if tt.shutdown {
+				shutdown()
+			}
+			err, _ := tt.args.s.Connect(tCtx)
+			if (!tt.wantErr && err != nil) || (tt.wantErr && !strings.HasPrefix(err.Error(), tt.expectedError)) {
+				t.Errorf("Expected Error: %s", tt.expectedError)
+				t.Errorf("Actual Error: %s", err)
 			}
 		})
 	}
-
 }
 
 func TestLoadMarket(t *testing.T) {

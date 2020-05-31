@@ -313,7 +313,6 @@ func TestConnect(t *testing.T) {
 			"tls: neither Certificates, GetCertificate, nor GetConfigForClient set in Config",
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.shutdown {
@@ -321,9 +320,8 @@ func TestConnect(t *testing.T) {
 			}
 			err, _ := tt.args.s.Connect(tCtx)
 			if (!tt.wantErr && err != nil) || (tt.wantErr && !strings.HasPrefix(err.Error(), tt.expectedError)) {
-				//t.Errorf("Expected Error: err: %s\nActual Error: err: %s", tt.expectedError, err)
-				t.Errorf("Expected Error: err: %s", tt.expectedError)
-				t.Errorf("Actual Error: err: %s", err)
+				t.Errorf("Expected Error: %s", tt.expectedError)
+				t.Errorf("Actual Error: %s", err)
 			}
 		})
 	}

@@ -93,10 +93,12 @@ func main() {
 				log.Errorf("Error constructing rpc server: %v", err)
 				os.Exit(1)
 			}
-
 			//rpcSrv.Run(appCtx)
-
-			rpcSrv.Start(appCtx)
+			err = rpcSrv.Start(appCtx)
+			if err != nil {
+				log.Errorf("Error starting rpc server: %v", err)
+				os.Exit(1)
+			}
 
 		}()
 	}
@@ -107,10 +109,15 @@ func main() {
 			defer wg.Done()
 			webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
 			if err != nil {
+				log.Errorf("Error constructing web server: %v", err)
+				os.Exit(1)
+			}
+			//webSrv.Run(appCtx)
+			err = webSrv.Start(appCtx)
+			if err != nil {
 				log.Errorf("Error starting web server: %v", err)
 				os.Exit(1)
 			}
-			webSrv.Run(appCtx)
 		}()
 	}
 
