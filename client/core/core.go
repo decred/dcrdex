@@ -161,11 +161,21 @@ func (dc *dexConnection) hasActiveOrders() bool {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 
-	for _, trade := range dc.trades {
+	checkMatchOrderStatus := func(trade *trackedTrade) bool {
+		trade.matchMtx.Lock()
+		defer trade.matchMtx.Unlock()
+
 		for _, match := range trade.matches {
 			if match.MetaData.Status < order.MakerRedeemed {
 				return true
 			}
+		}
+		return false
+	}
+
+	for _, trade := range dc.trades {
+		if checkMatchOrderStatus(trade) {
+			return true
 		}
 		if trade.metaData.Status == order.OrderStatusBooked || trade.metaData.Status == order.OrderStatusEpoch {
 			return true
