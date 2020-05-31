@@ -305,7 +305,7 @@ func TestConnect(t *testing.T) {
 			},
 			true,
 			false,
-			"tls: neither Certificates, GetCertificate, nor GetConfigForClient set in Config",
+			"tls: neither Certificates",
 		},
 	}
 	for _, tt := range tests {
