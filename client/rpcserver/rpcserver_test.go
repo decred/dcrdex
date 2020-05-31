@@ -607,7 +607,7 @@ func TestAuthMiddleware(t *testing.T) {
 }
 
 func TestClientMap(t *testing.T) {
-	s, _, shutdown := newTServer(t, true, "", "")
+	s, _, _ := newTServer(t, true, "", "")
 	resp := make(chan []byte, 1)
 	conn := &TConn{
 		respReady: resp,
@@ -617,7 +617,6 @@ func TestClientMap(t *testing.T) {
 	read, _ := json.Marshal(msgjson.Message{ID: 0})
 	conn.addRead(read)
 
-	//go s.websocketHandler(conn, "someip")
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -643,7 +642,6 @@ func TestClientMap(t *testing.T) {
 	s.mtx.Unlock()
 
 	// Close the server and make sure the connection is closed.
-	shutdown()
 	wg.Wait() // websocketHandler since it's using log
 	if !cl.Off() {
 		t.Fatalf("connection not closed on server shutdown")

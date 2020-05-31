@@ -640,7 +640,7 @@ func TestHandleMessage(t *testing.T) {
 }
 
 func TestClientMap(t *testing.T) {
-	s, _, shutdown := newTServer(t, true)
+	s, _, _ := newTServer(t, true)
 	resp := make(chan []byte, 1)
 	conn := &TConn{
 		respReady: resp,
@@ -675,7 +675,6 @@ func TestClientMap(t *testing.T) {
 	s.mtx.Unlock()
 
 	// Close the server and make sure the connection is closed.
-	shutdown()
 	wg.Wait() // websocketHandler since it's using log
 	if !cl.Off() {
 		t.Fatalf("connection not closed on server shutdown")

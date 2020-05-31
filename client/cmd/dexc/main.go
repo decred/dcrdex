@@ -93,7 +93,6 @@ func main() {
 				log.Errorf("Error constructing rpc server: %v", err)
 				os.Exit(1)
 			}
-			//rpcSrv.Run(appCtx)
 			err = rpcSrv.Start(appCtx)
 			if err != nil {
 				log.Errorf("Error starting rpc server: %v", err)
@@ -112,7 +111,6 @@ func main() {
 				log.Errorf("Error constructing web server: %v", err)
 				os.Exit(1)
 			}
-			//webSrv.Run(appCtx)
 			err = webSrv.Start(appCtx)
 			if err != nil {
 				log.Errorf("Error starting web server: %v", err)
