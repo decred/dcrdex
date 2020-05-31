@@ -19,6 +19,7 @@ dumptags="-c -o /dev/null -tags"
 go test $dumptags live ./client/webserver
 go test $dumptags harness ./client/asset/dcr
 go test $dumptags harness ./client/asset/btc
+go test $dumptags harness ./client/core
 go test $dumptags dcrlive ./server/asset/dcr
 go test $dumptags btclive ./server/asset/btc
 go test $dumptags pgonline ./server/db/driver/pg
