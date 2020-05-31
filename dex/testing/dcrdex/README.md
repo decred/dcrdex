@@ -5,11 +5,11 @@ sandboxed environment for testing dex swap transactions.
 
 ## Dependencies
 
-The dcrdex harness depends on 2 other harnesses: [DCR Test Harness](dex/testing/dcr/README.md) and [BTC Simnet Test Harness](dex/testing/btc/README.md) to run.
+The dcrdex harness depends on 2 other harnesses: [DCR Test Harness](../dcr/README.md) and [BTC Simnet Test Harness](../btc/README.md) to run.
 
 ## Using
 
-The [DCR Test Harness](dex/testing/dcr/README.md) and [BTC Simnet Test Harness](dex/testing/btc/README.md) must be running to use the dcrdex harness.
+The [DCR Test Harness](../dcr/README.md) and [BTC Simnet Test Harness](../btc/README.md) must be running to use the dcrdex harness.
 
 The dcrdex harness script will create a markets.json file referencing dcr and btc
 node config files created by the respective node harnesses; and start a dcrdex
