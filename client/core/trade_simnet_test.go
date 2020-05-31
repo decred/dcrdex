@@ -289,8 +289,10 @@ func TestTrading(t *testing.T) {
 
 	// run subtests
 	tests := map[string]func(*testing.T){
-		"success": testTradeSuccess,
-		"failure": testTradeInterruption,
+		"success":         testTradeSuccess,
+		"no maker swap":   testNoMakerSwap,
+		"no taker swap":   testNoTakerSwap,
+		"no maker redeem": testNoMakerRedeem,
 	}
 	for test, testFn := range tests {
 		fmt.Println() // empty line to separate test logs for easier readability
@@ -300,33 +302,80 @@ func TestTrading(t *testing.T) {
 	}
 }
 
+// testTradeSuccess runs a simple trade test and ensures that the resulting
+// trades are completed successfully.
+// TODO: Compare balances before and after trading to ensure balance changes
+// are as expected.
 func testTradeSuccess(t *testing.T) {
+	err := simpleTradeTest(order.MatchComplete)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testNoMakerSwap runs a simple trade test and ensures that the resulting
+// trades fail because of the Maker not sending their init swap tx.
+// TODO: Compare balances before and after trading to ensure there are no
+//balance changes.
+func testNoMakerSwap(t *testing.T) {
+	err := simpleTradeTest(order.NewlyMatched)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testNoTakerSwap runs a simple trade test and ensures that the resulting
+// trades fail because of the Taker not sending their init swap tx.
+// TODO:
+// - Update the test to ensure Maker's funds are refunded after locktime expires.
+// - Compare balances before and after trading to ensure balance changes are as
+// expected.
+func testNoTakerSwap(t *testing.T) {
+	err := simpleTradeTest(order.MakerSwapCast)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testNoMakerRedeem runs a simple trade test and ensures that the resulting
+// trades fail because of Maker not sending their redemption of Taker's swap.
+// TODO:
+// - Update the test to ensure both Maker and Taker's funds are refunded after
+// their respective swap locktime expires.
+// - Compare balances before and after trading to ensure balance changes are as
+// expected.
+func testNoMakerRedeem(t *testing.T) {
+	err := simpleTradeTest(order.TakerSwapCast)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// simpleTradeTest uses client1 and client2 to place similar orders but on
+// either sides that get matched and monitors the resulting trades up till the
+// specified final status.
+func simpleTradeTest(finalStatus order.MatchStatus) error {
 	c1OrderID, err := placeTestOrder(client1, true)
 	if err != nil {
-		t.Fatalf("client1 place order error: %v", err)
+		return fmt.Errorf("client1 place order error: %v", err)
 	}
 	c2OrderID, err := placeTestOrder(client2, false)
 	if err != nil {
-		t.Fatalf("client2 place order error: %v", err)
+		return fmt.Errorf("client2 place order error: %v", err)
 	}
 
 	monitorTrades, ctx := errgroup.WithContext(context.Background())
 	monitorTrades.Go(func() error {
-		return monitorTradeForTestOrder(ctx, client1, c1OrderID)
+		return monitorTradeForTestOrder(ctx, client1, c1OrderID, finalStatus)
 	})
 	monitorTrades.Go(func() error {
-		return monitorTradeForTestOrder(ctx, client2, c2OrderID)
+		return monitorTradeForTestOrder(ctx, client2, c2OrderID, finalStatus)
 	})
 	err = monitorTrades.Wait()
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		tLog.Infof("Trades ended at %s.", finalStatus)
 	}
-
-	tLog.Info("Trades completed successfully")
-}
-
-func testTradeInterruption(t *testing.T) {
-	t.Fatal("not implemented")
+	return err
 }
 
 func placeTestOrder(c *tClient, sell bool) (string, error) {
@@ -362,7 +411,7 @@ func placeTestOrder(c *tClient, sell bool) (string, error) {
 	return ord.ID, nil
 }
 
-func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID string) error {
+func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID string, finalStatus order.MatchStatus) error {
 	errs := newErrorSet("[client %d] ", client.id)
 
 	oid, err := order.IDFromHex(orderID)
@@ -406,10 +455,10 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		var completedTrades int
 		for _, match := range tracker.matches {
 			side, status := match.Match.Side, match.Match.Status
-			if status == order.MatchComplete {
+			if status >= finalStatus {
 				completedTrades++
 			}
-			if status == matchStatuses[match.id] {
+			if status == matchStatuses[match.id] || status > finalStatus {
 				continue
 			}
 			matchStatuses[match.id] = status
@@ -437,7 +486,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 
 	var incompleteTrades int
 	for _, match := range tracker.matches {
-		if match.Match.Status < order.MakerRedeemed {
+		if match.Match.Status < finalStatus {
 			incompleteTrades++
 			client.log("incomplete trade: order %s, match %s, status %s, side %s", oidShort,
 				token(match.ID()), match.Match.Status, match.Match.Side)
