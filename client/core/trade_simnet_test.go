@@ -38,9 +38,9 @@ func dcrWallet(name string) *tWallet {
 	}
 }
 
-func btcWallet(account string) *tWallet {
+func btcWallet(name, account string) *tWallet {
 	return &tWallet{
-		name:    "alpha",
+		name:    name,
 		account: account,
 		pass:    []byte("abc"),
 	}
@@ -84,22 +84,6 @@ func (client *tClient) btcw() *tWallet {
 	return client.wallets[btc.BipID]
 }
 
-func (client *tClient) balances() ([]uint64, error) {
-	for assetID, wallet := range client.wallets {
-		connectedWallet, err := client.core.connectedWallet(assetID)
-		if err != nil {
-			return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
-		}
-		balance, _, err := connectedWallet.Balance(0)
-		if err != nil {
-			return nil, err
-		}
-		connectedWallet.setBalance(balance)
-		wallet.balance = balance
-	}
-	return []uint64{client.dcrw().balance, client.btcw().balance}, nil
-}
-
 func mineBlocks(assetID uint32, name string, blocks uint16) error {
 	var harnessID string
 	switch assetID {
@@ -119,16 +103,16 @@ var (
 		id:      1,
 		appPass: []byte("client1"),
 		wallets: map[uint32]*tWallet{
-			dcr.BipID: dcrWallet("alpha"), // dcr alpha wallet
-			btc.BipID: btcWallet(""),      // btc alpha wallet
+			dcr.BipID: dcrWallet("alpha"),    // dcr alpha wallet
+			btc.BipID: btcWallet("beta", ""), // btc beta wallet
 		},
 	}
 	client2 = &tClient{
 		id:      2,
 		appPass: []byte("client2"),
 		wallets: map[uint32]*tWallet{
-			dcr.BipID: dcrWallet("beta"),  // dcr beta wallet
-			btc.BipID: btcWallet("gamma"), // btc gamma wallet
+			dcr.BipID: dcrWallet("beta"),           // dcr beta wallet
+			btc.BipID: btcWallet("alpha", "gamma"), // btc gamma wallet
 		},
 	}
 
@@ -230,7 +214,7 @@ func startClients(ctx context.Context) error {
 
 		// connect dex and pay fee
 		err = c.core.Register(&RegisterForm{
-			URL:     dexHost,
+			Addr:    dexHost,
 			Cert:    dexCert,
 			AppPass: c.appPass,
 			Fee:     dexFee,
@@ -355,7 +339,7 @@ func placeTestOrder(c *tClient, sell bool) (string, error) {
 	quoteAsset := dc.assets[dcrBtcMkt.QuoteID]
 
 	tradeForm := &TradeForm{
-		DEX:     dexHost,
+		Host:    dexHost,
 		Base:    baseAsset.ID,
 		Quote:   quoteAsset.ID,
 		IsLimit: true,
