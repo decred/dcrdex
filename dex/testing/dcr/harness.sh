@@ -161,8 +161,10 @@ chmod +x "${NODES_ROOT}/harness-ctl/reorg"
 # Shutdown script
 cat > "${NODES_ROOT}/harness-ctl/quit" <<EOF
 #!/bin/sh
-tmux send-keys -t $SESSION:0 C-c
+tmux send-keys -t $SESSION:3 C-c
+tmux send-keys -t $SESSION:2 C-c
 tmux send-keys -t $SESSION:1 C-c
+tmux send-keys -t $SESSION:0 C-c
 tmux wait-for alphadcr
 tmux wait-for betadcr
 tmux kill-session
