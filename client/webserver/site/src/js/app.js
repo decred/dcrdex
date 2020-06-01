@@ -308,7 +308,6 @@ export default class Application {
         if (wallet) wallet.balances = note.balances
         break
       }
-        break
       case 'feepayment':
         this.handleFeePaymentNote(note)
     }
