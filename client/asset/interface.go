@@ -113,7 +113,6 @@ type Wallet interface {
 	FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded.
-	// CoinNotFoundError
 	// NOTE: The contract cannot be retreived from the unspent coin info as the
 	// wallet does not store it, even though it was known when the init transaction
 	// was created. The DEX should store this information for persistence across

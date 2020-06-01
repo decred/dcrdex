@@ -540,9 +540,13 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 		}
 	}
 
-	if len(swaps) > 0 {
-		fromID := t.wallets.fromAsset.ID
+	fromID := t.wallets.fromAsset.ID
+	nSwapsAndRefunds := len(swaps) + len(refunds)
+	if nSwapsAndRefunds > 0 {
 		counts[fromID] = len(swaps)
+	}
+
+	if len(swaps) > 0 {
 		qty := sent
 		if !t.Trade().Sell {
 			qty = quoteSent
@@ -588,7 +592,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 		refunded, err := t.refundMatches(refunds)
 		corder, _ := t.coreOrderInternal()
 		details := fmt.Sprintf("Refunded %.8f %s on order %s",
-			float64(refunded)/conversionFactor, unbip(t.wallets.fromAsset.ID), t.token())
+			float64(refunded)/conversionFactor, unbip(fromID), t.token())
 		if err != nil {
 			errs.addErr(err)
 			t.notify(newOrderNote("Match failure", details+", with some errors", db.ErrorLevel, corder))
@@ -682,7 +686,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		if err != nil {
 			match.failErr = err
 			errs.add("error sending 'init' message for match %s: %v", match.id, err)
-			// todo: try again and issue refund when locktime expires
+			// TODO: try again and issue refund when locktime expires
 			continue
 		}
 		sigMsg := init.Serialize()
@@ -831,8 +835,8 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund, refundAsset)
 		if err != nil {
 			if err == asset.CoinSpentError {
-				// todo: begin find redemption
-				// note: may be that swap was actually refunded, so FindRedemption
+				// TODO: begin find redemption
+				// NOTE: may be that swap was actually refunded, so FindRedemption
 				// should account for that.
 			}
 			errs.add("error sending refund tx for match %s, swap coin %s: %v",
@@ -845,7 +849,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		} else {
 			refundedQty += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
 		}
-		// todo: order.MatchFailed? Status needs to change so that refund is
+		// TODO: order.MatchFailed? Status needs to change so that refund is
 		// not re-attempted on trackedTrade.tick().
 		match.setStatus(order.MatchComplete)
 		err = t.db.UpdateMatch(&match.MetaMatch)
