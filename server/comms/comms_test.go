@@ -25,7 +25,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var testCtx context.Context
+var (
+	tErr    = fmt.Errorf("test error")
+	testCtx context.Context
+)
 
 func newServer() *Server {
 	return &Server{
@@ -61,11 +64,12 @@ func readChannel(t *testing.T, tag string, c chan interface{}) interface{} {
 }
 
 type wsConnStub struct {
-	msg   chan []byte
-	quit  chan struct{}
-	read  int
-	close int
-	recv  chan []byte
+	msg      chan []byte
+	quit     chan struct{}
+	close    int
+	recv     chan []byte
+	writeMtx sync.Mutex
+	writeErr error
 }
 
 func (conn *wsConnStub) addChan() {
@@ -88,6 +92,12 @@ func newWsStub() *wsConnStub {
 	}
 }
 
+func (conn *wsConnStub) setWriteErr(err error) {
+	conn.writeMtx.Lock()
+	conn.writeErr = err
+	conn.writeMtx.Unlock()
+}
+
 // nonEOF can specify a particular error should be returned through ReadMessage.
 var nonEOF = make(chan struct{})
 var pongTrigger = []byte("pong")
@@ -107,16 +117,12 @@ func (conn *wsConnStub) ReadMessage() (int, []byte, error) {
 		close(conn.quit)
 		return 0, nil, fmt.Errorf("test nonEOF error")
 	}
-	conn.read++
 	return 0, b, nil
 }
 
-var (
-	writeErr    string
-	writeErrMtx sync.Mutex
-)
-
 func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
+	conn.writeMtx.Lock()
+	defer conn.writeMtx.Unlock()
 	if msgType == websocket.PingMessage {
 		select {
 		case conn.msg <- pongTrigger:
@@ -128,13 +134,11 @@ func (conn *wsConnStub) WriteMessage(msgType int, msg []byte) error {
 	if conn.recv != nil {
 		conn.recv <- msg
 	}
-	writeErrMtx.Lock()
-	defer writeErrMtx.Unlock()
-	if writeErr == "" {
+	if conn.writeErr == nil {
 		return nil
 	}
-	err := fmt.Errorf(writeErr)
-	writeErr = ""
+	err := conn.writeErr
+	conn.writeErr = nil
 	return err
 }
 
@@ -227,7 +231,10 @@ func TestMain(m *testing.M) {
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
-	// UseLogger(slog.NewBackend(os.Stdout).Logger("COMMSTEST"))
+	// logger := slog.NewBackend(os.Stdout).Logger("COMMSTEST")
+	// logger.SetLevel(slog.LevelTrace)
+	// UseLogger(logger)
+	// ws.UseLogger(logger)
 	os.Exit(m.Run())
 }
 
@@ -332,7 +339,10 @@ func TestClientRequests(t *testing.T) {
 		conn = newWsStub()
 		wg.Add(1)
 		needCount := server.clientCount() + 1
-		go server.websocketHandler(&wg, conn, stubAddr)
+		go func() {
+			defer wg.Done()
+			server.websocketHandler(testCtx, conn, stubAddr)
+		}()
 		if !giveItASecond(func() bool {
 			return server.clientCount() == needCount
 		}) {
@@ -341,14 +351,13 @@ func TestClientRequests(t *testing.T) {
 		getClient()
 	}
 	reconnect()
-
 	// Check that the request is parsed as expected.
 	sendToServer("checkrequest", `{"key":"value"}`)
 	readChannel(t, "checkrequest", srvChan)
-
 	// Send invalid params, and make sure the server doesn't pass the message. The
 	// server will not disconnect the client.
 	conn.addChan()
+
 	ensureReplaceFails := func(old, new string) {
 		sendReplace(t, conn, makeReq("checkinvalid", old), old, new)
 		<-conn.recv
@@ -356,6 +365,7 @@ func TestClientRequests(t *testing.T) {
 			t.Fatalf("invalid request passed to handler")
 		}
 	}
+
 	ensureReplaceFails(`{"a":"b"}`, "?")
 	if client.Off() {
 		t.Fatalf("client unexpectedly disconnected after invalid message")
@@ -363,9 +373,7 @@ func TestClientRequests(t *testing.T) {
 
 	// Send the invalid message again, but error out on the server's WriteMessage
 	// attempt. The server should disconnect the client in this case.
-	writeErrMtx.Lock()
-	writeErr = "basic error"
-	writeErrMtx.Unlock()
+	conn.setWriteErr(tErr)
 	waitForShutdown("rpc error", func() {
 		ensureReplaceFails(`{"a":"b"}`, "?")
 	})
@@ -393,9 +401,7 @@ func TestClientRequests(t *testing.T) {
 
 	// Again, but with an WriteMessage error when sending error to client. This
 	// should result in a disconnection.
-	writeErrMtx.Lock()
-	writeErr = "basic error"
-	writeErrMtx.Unlock()
+	conn.setWriteErr(tErr)
 	waitForShutdown("rpc error", func() {
 		sendToServer("nonexistent", "{}")
 		conn.wait(t, "bad path with error")
@@ -473,7 +479,7 @@ func TestClientResponses(t *testing.T) {
 	getClient := func() {
 		encReq, _ := json.Marshal(makeReq("grabclient", `{}`))
 		conn.msg <- encReq
-		client = readChannel(t, "getClient", srvChan).(*wsLink)
+		client = readChannel(t, "grabclient", srvChan).(*wsLink)
 	}
 
 	sendToClient := func(route, payload string, f func(Link, *msgjson.Message), expiration time.Duration, expire func()) uint64 {
@@ -497,7 +503,10 @@ func TestClientResponses(t *testing.T) {
 	reconnect := func() {
 		conn = newWsStub()
 		wg.Add(1)
-		go server.websocketHandler(&wg, conn, stubAddr)
+		go func() {
+			defer wg.Done()
+			server.websocketHandler(testCtx, conn, stubAddr)
+		}()
 		getClient()
 	}
 	reconnect()
@@ -596,7 +605,7 @@ func TestOnline(t *testing.T) {
 
 	keyPath := filepath.Join(tempDir, "rpc.key")
 	certPath := filepath.Join(tempDir, "rpc.cert")
-	pongWait = 50 * time.Millisecond
+	pongWait = 100 * time.Millisecond
 	pingPeriod = (pongWait * 9) / 10
 	server, err := NewServer(&RPCConfig{
 		ListenAddrs: []string{":0"},
@@ -716,8 +725,15 @@ func TestOnline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("banuser send error: %v", err)
 	}
+	// Just for sequencing
 	readChannel(t, "noresponse", banChan)
-	err = readChannel(t, "ok", recv).(error)
+
+	msgB := readChannel(t, "banuser msg", recv).([]byte)
+	if !strings.Contains(string(msgB), "test quarantine") {
+		t.Fatalf("wrong ban message received: %s", string(msgB))
+	}
+
+	err = readChannel(t, "banuser err", recv).(error)
 	if err == nil {
 		t.Fatalf("no read error after ban")
 	}

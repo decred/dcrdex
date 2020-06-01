@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 )
 
@@ -94,7 +95,13 @@ func main() {
 				log.Errorf("Error starting rpc server: %v", err)
 				os.Exit(1)
 			}
-			rpcSrv.Run(appCtx)
+			cm := dex.NewConnectionMaster(rpcSrv)
+			err = cm.Connect(appCtx)
+			if err != nil {
+				log.Errorf("Error starting rpc server: %v", err)
+				return
+			}
+			cm.Wait()
 		}()
 	}
 
@@ -104,10 +111,16 @@ func main() {
 			defer wg.Done()
 			webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
 			if err != nil {
-				log.Errorf("Error starting web server: %v", err)
+				log.Errorf("Error creating web server: %v", err)
 				os.Exit(1)
 			}
-			webSrv.Run(appCtx)
+			cm := dex.NewConnectionMaster(webSrv)
+			err = cm.Connect(appCtx)
+			if err != nil {
+				log.Errorf("Error starting web server: %v", err)
+				return
+			}
+			cm.Wait()
 		}()
 	}
 

@@ -109,3 +109,8 @@ func (c *ConnectionMaster) Disconnect() {
 	defer c.mtx.RUnlock()
 	c.wg.Wait()
 }
+
+// Wait waits for the the WaitGroup returned by Connect.
+func (c *ConnectionMaster) Wait() {
+	c.wg.Wait()
+}

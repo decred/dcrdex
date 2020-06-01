@@ -261,11 +261,14 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 	}
 
 	if start {
-		waiter := dex.NewStartStopWaiter(s)
-		waiter.Start(ctx)
+		cm := dex.NewConnectionMaster(s)
+		err := cm.Connect(ctx)
+		if err != nil {
+			t.Fatalf("Error starting WebServer: %v", err)
+		}
 		shutdown = func() {
 			killCtx()
-			waiter.WaitForShutdown()
+			cm.Disconnect()
 		}
 	} else {
 		shutdown = killCtx
@@ -313,7 +316,10 @@ func TestLoadMarket(t *testing.T) {
 	link := newLink()
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
-	link.cl.Start()
+	err, _ := link.cl.Connect(tCtx)
+	if err != nil {
+		t.Fatalf("WSLink Start: %v", err)
+	}
 	defer link.cl.Disconnect()
 	params := &marketLoad{
 		Host:  "abc",

@@ -707,7 +707,6 @@ func TestServer(t *testing.T) {
 	time.AfterFunc(time.Minute*59, func() { shutdown() })
 	logger := slog.NewBackend(os.Stdout).Logger("TEST")
 	logger.SetLevel(slog.LevelTrace)
-	time.AfterFunc(time.Minute*60, func() { shutdown() })
 	tCore := newTCore()
 
 	if register {
@@ -719,7 +718,11 @@ func TestServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
-	go s.Run(tCtx)
+	cm := dex.NewConnectionMaster(s)
+	err = cm.Connect(tCtx)
+	if err != nil {
+		t.Fatalf("Connect error: %v", err)
+	}
 	go tCore.runEpochs()
-	<-tCtx.Done()
+	cm.Wait()
 }

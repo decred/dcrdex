@@ -4,10 +4,13 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex/msgjson"
@@ -56,34 +59,32 @@ type WSLink struct {
 	ip string
 	// conn is the gorilla websocket.Conn, or a stub for testing.
 	conn Connection
-	// quitMtx protects the on flag and closing of the quit channel.
-	quitMtx sync.RWMutex
+	// writeMtx is a mutex to sequence WriteMessage operations.
+	writeMtx sync.Mutex
 	// on is used internally to prevent multiple Close calls on the underlying
 	// connections.
-	on bool
-	// After disconnect, the quit channel will be closed.
-	quit chan struct{}
+	on uint32
+	// quit is used to cancel the Context.
+	quit context.CancelFunc
+	// outChan is used to sequence sent messages.
+	outChan chan []byte
 	// The WSLink has at least 3 goroutines, one for read, one for write, and
 	// one server goroutine to monitor for peer disconnection. The WaitGroup is
 	// used to synchronize cleanup on disconnection.
 	wg sync.WaitGroup
-	// Messages to the peer are routed through the outChan. This ensures
-	// messages are sent in the correct order, and satisfies the thread-safety
-	// requirements of the (*websocket.Conn).WriteMessage.
-	outChan chan []byte
 	// A master message handler.
 	handler func(*msgjson.Message) *msgjson.Error
 	// pingPeriod is how often to ping the peer.
 	pingPeriod time.Duration
+	// sendWG is a WaitGroup to sequence sends with a graceful shutdown.
+	sendWG sync.WaitGroup
 }
 
 // NewWSLink is a constructor for a new WSLink.
 func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler func(*msgjson.Message) *msgjson.Error) *WSLink {
 	return &WSLink{
-		on:         true,
 		ip:         addr,
 		conn:       conn,
-		quit:       make(chan struct{}),
 		outChan:    make(chan []byte, outBufferSize),
 		pingPeriod: pingPeriod,
 		handler:    handler,
@@ -100,15 +101,19 @@ func (c *WSLink) Send(msg *msgjson.Message) error {
 		return err
 	}
 
-	// If outChan is blocking (outBufferSize pending messages), many messages
-	// are being sent and not quickly enough. If the connection is actually
-	// down, c.quit will be closed. TODO: Add a default case with error return
-	// or just block until outHandler receives?
-	select {
-	case c.outChan <- b:
-	case <-c.quit:
-		return ErrPeerDisconnected
-	}
+	c.sendWG.Add(1)
+	c.outChan <- b
+	go func() {
+		c.writeMtx.Lock()
+		b := <-c.outChan
+		c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+		err := c.conn.WriteMessage(websocket.TextMessage, b)
+		c.writeMtx.Unlock()
+		c.sendWG.Done()
+		if err != nil {
+			c.Disconnect()
+		}
+	}()
 	return nil
 }
 
@@ -124,57 +129,54 @@ func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	}
 }
 
-// Start begins processing input and output messages.
-func (c *WSLink) Start() {
+// Connect begins processing input and output messages.
+func (c *WSLink) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 	// Set the initial read deadline now that the ping ticker is about to be
 	// started. The pong handler will set subsequent read deadlines. 2x ping
 	// period is a very generous initial pong wait; the readWait provided to
 	// NewConnection could be stored and used here (once) instead.
+	if !atomic.CompareAndSwapUint32(&c.on, 0, 1) {
+		return fmt.Errorf("Attempted to Start a running WSLink"), nil
+	}
+	linkCtx, quit := context.WithCancel(ctx)
+	c.quit = quit
 	err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2))
 	if err != nil {
-		log.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err)
-		return
+		return fmt.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err), nil
 	}
 
 	log.Tracef("Starting websocket messaging with peer %s", c.ip)
 	// Start processing input and output.
 	c.wg.Add(2)
-	go c.inHandler()
-	go c.outHandler()
+	go c.inHandler(linkCtx)
+	go c.pingHandler(linkCtx)
+	return nil, &c.wg
 }
 
 // Disconnect closes both the underlying websocket connection and the quit
 // channel.
 func (c *WSLink) Disconnect() {
-	c.quitMtx.Lock()
-	defer c.quitMtx.Unlock()
-	if !c.on {
+	if !atomic.CompareAndSwapUint32(&c.on, 1, 0) {
 		log.Debugf("Disconnect attempted on stopped WSLink.")
 		return
 	}
 	log.Tracef("Closing connection with peer %v", c.ip)
-	c.on = false
+	c.quit()
+	c.sendWG.Wait()
 	c.conn.Close()
-	close(c.quit)
-}
-
-// WaitForShutdown blocks until the WSLink goroutines are stopped and the
-// connection is closed.
-func (c *WSLink) WaitForShutdown() {
-	c.wg.Wait()
 }
 
 // inHandler handles all incoming messages for the websocket connection. It must
 // be run as a goroutine.
-func (c *WSLink) inHandler() {
+func (c *WSLink) inHandler(ctx context.Context) {
+	// Ensure the connection is closed.
+	defer c.Disconnect()
+	defer c.wg.Done()
 out:
 	for {
-		// Break out of the loop once the quit channel has been closed.
-		// Use a non-blocking select here so we fall through otherwise.
-		select {
-		case <-c.quit:
+		// Quit when the context is closed.
+		if ctx.Err() != nil {
 			break out
-		default:
 		}
 		// Block until a message is received or an error occurs.
 		_, msgBytes, err := c.conn.ReadMessage()
@@ -205,15 +207,11 @@ out:
 			c.SendError(msg.ID, rpcErr)
 		}
 	}
-	// Ensure the connection is closed.
-	c.Disconnect()
-	c.wg.Done()
 }
 
-// outHandler handles all outgoing messages for the websocket connection.
-// It uses a buffered channel to serialize output messages while allowing the
-// sender to continue running asynchronously.  It must be run as a goroutine.
-func (c *WSLink) outHandler() {
+// pingHandler sends periodic pings to the client.
+func (c *WSLink) pingHandler(ctx context.Context) {
+	defer c.wg.Done()
 	ticker := time.NewTicker(c.pingPeriod)
 	ping := []byte{}
 out:
@@ -221,13 +219,6 @@ out:
 		// Send any messages ready for send until the quit channel is
 		// closed.
 		select {
-		case b := <-c.outChan:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			err := c.conn.WriteMessage(websocket.TextMessage, b)
-			if err != nil {
-				c.Disconnect()
-				break out
-			}
 		case <-ticker.C:
 			err := c.conn.WriteControl(websocket.PingMessage, ping, time.Now().Add(writeWait))
 			if err != nil {
@@ -236,30 +227,17 @@ out:
 				log.Debugf("WriteMessage ping error: %v", err)
 				break out
 			}
-		case <-c.quit:
+		case <-ctx.Done():
 			break out
 		}
 	}
 
-	// Drain any wait channels before exiting so nothing is left waiting
-	// around to send.
-cleanup:
-	for {
-		select {
-		case <-c.outChan:
-		default:
-			break cleanup
-		}
-	}
-	c.wg.Done()
 	log.Tracef("Websocket output handler done for peer %s", c.ip)
 }
 
 // Off will return true if the link has disconnected.
 func (c *WSLink) Off() bool {
-	c.quitMtx.RLock()
-	defer c.quitMtx.RUnlock()
-	return !c.on
+	return atomic.LoadUint32(&c.on) == 0
 }
 
 // IP is the peer address passed to the constructor.

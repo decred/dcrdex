@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
+	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
@@ -155,16 +156,23 @@ func createWidgets() {
 	marketView = newMarketView()
 	webView = newServerView("Web", cfg.WebAddr, func(ctx context.Context, addr string, logger slog.Logger) {
 		setWebLabelOn(true)
+		defer setWebLabelOn(false)
 		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logger, cfg.ReloadHTML)
+		if err != nil {
+			log.Errorf("Error creating web server: %v", err)
+			return
+		}
+		cm := dex.NewConnectionMaster(webSrv)
+		err = cm.Connect(ctx)
 		if err != nil {
 			log.Errorf("Error starting web server: %v", err)
 			return
 		}
-		webSrv.Run(ctx)
-		setWebLabelOn(false)
+		cm.Wait()
 	})
 	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context, _ string, logger slog.Logger) {
 		setRPCLabelOn(true)
+		defer setRPCLabelOn(false)
 		rpcserver.SetLogger(logger)
 		rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
 		rpcSrv, err := rpcserver.New(rpcCfg)
@@ -172,8 +180,14 @@ func createWidgets() {
 			log.Errorf("Error starting rpc server: %v", err)
 			return
 		}
-		rpcSrv.Run(ctx)
-		setRPCLabelOn(false)
+		cm := dex.NewConnectionMaster(rpcSrv)
+		err = cm.Connect(ctx)
+		if err != nil {
+			log.Errorf("Error starting rpc server: %v", err)
+			return
+		}
+		cm.Wait()
+
 	})
 	noteJournal = newJournal("Notifications", handleNotificationLog)
 	noteLog = mustLogger("NOTE", func(msg []byte) {
