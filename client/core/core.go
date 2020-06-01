@@ -36,6 +36,9 @@ const (
 	keyParamsKey      = "keyParams"
 	conversionFactor  = 1e8
 	regFeeAssetSymbol = "dcr" // Hard-coded to Decred for registration fees, for now.
+	// high number to be assigned to 'regConfirms' in 'dexConnection'
+	// when the registration is completed
+	regConfirmationsPaid uint32 = 9999
 )
 
 var (
@@ -69,7 +72,8 @@ type dexConnection struct {
 	// connected is a best guess on the ws connection status.
 	connected bool
 
-	regConfirms *uint32
+	regConfMtx  sync.RWMutex
+	regConfirms uint32
 }
 
 // refreshMarkets rebuilds, saves, and returns the market map. The map itself
@@ -115,6 +119,25 @@ func (dc *dexConnection) markets() map[string]*Market {
 	dc.marketMtx.RLock()
 	defer dc.marketMtx.RUnlock()
 	return dc.marketMap
+}
+
+// getRegConfirms returns the number of confirmations received for the
+// dex registration or nil if the registration is completed
+func (dc *dexConnection) getRegConfirms() *uint32 {
+	dc.regConfMtx.RLock()
+	defer dc.regConfMtx.RUnlock()
+	if dc.regConfirms == regConfirmationsPaid {
+		return nil
+	}
+	return &dc.regConfirms
+}
+
+// setRegConfirms sets the number of confirmations received
+// for the dex registration
+func (dc *dexConnection) setRegConfirms(confs uint32) {
+	dc.regConfMtx.Lock()
+	defer dc.regConfMtx.Unlock()
+	dc.regConfirms = confs
 }
 
 // hasOrders checks whether there are any open orders or negotiating matches for
@@ -497,7 +520,7 @@ func (c *Core) Exchanges() map[string]*Exchange {
 			FeePending:    dc.acct.feePending(),
 			Connected:     dc.connected,
 			ConfsRequired: uint32(dc.cfg.RegFeeConfirms),
-			RegConfirms:   dc.regConfirms,
+			RegConfirms:   dc.getRegConfirms(),
 		}
 	}
 	return infos
@@ -1050,7 +1073,7 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		return
 	}
 
-	dc.regConfirms = &regConfs
+	dc.setRegConfirms(regConfs)
 	c.refreshUser()
 
 	trigger := func() (bool, error) {
@@ -1061,7 +1084,7 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, uint32(reqConfs))
 
 		if confs < uint32(reqConfs) {
-			regConfs = confs
+			dc.setRegConfirms(confs)
 			c.refreshUser()
 			c.notify(newFeePaymentNoteWithConfirmations("regupdate", details, db.Data, confs, dc.acct.host))
 		}
@@ -1077,7 +1100,7 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 				c.notify(newFeePaymentNote("Fee payment error", details, db.ErrorLevel, dc.acct.host))
 			} else {
 				details := fmt.Sprintf("You may now trade at %s", dc.acct.host)
-				dc.regConfirms = nil
+				dc.setRegConfirms(regConfirmationsPaid)
 				c.refreshUser()
 				c.notify(newFeePaymentNote("Account registered", details, db.Success, dc.acct.host))
 			}
