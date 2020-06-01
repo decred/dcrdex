@@ -489,10 +489,24 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 		return false
 	}
 
-	dbMatch, metaData, proof, _ := match.parts()
-	// Check if the last action on this match is our swap.
-	if (dbMatch.Side == order.Maker && metaData.Status != order.MakerSwapCast) ||
-		(dbMatch.Side == order.Taker && metaData.Status != order.TakerSwapCast) {
+	dbMatch, _, proof, _ := match.parts()
+	side, status := dbMatch.Side, dbMatch.Status
+
+	// hasRedeemableSwap is true if
+	// - the client is the taker on the match and the status is TakerSwapCast
+	// - the client is the maker on the match, the status is MakerSwapCast OR
+	//   status is TakerSwapCast but Taker's swap has not been redeemed. The
+	//   second case does not prevent Maker from (re-)attempting to redeem
+	//   Taker's swap; it just ensures that Maker's swap is refunded if Taker's
+	//   swap still can't be refunded **after** Maker's locktime expires.
+	var hasRedeemableSwap bool
+	if side == order.Taker {
+		hasRedeemableSwap = status == order.TakerSwapCast
+	} else {
+		hasRedeemableSwap = status == order.MakerSwapCast ||
+			(status == order.TakerSwapCast && proof.MakerRedeem == nil)
+	}
+	if !hasRedeemableSwap {
 		return false
 	}
 
