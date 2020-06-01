@@ -348,7 +348,8 @@ func (s *Server) disconnectClients() {
 	s.clientMtx.Unlock()
 }
 
-// addClient assigns the client an ID and adds it to the map.
+// addClient assigns the client an ID, adds it to the map, and attempts to
+// connect.
 func (s *Server) addClient(client *wsLink, ctx context.Context) (*dex.ConnectionMaster, error) {
 	s.clientMtx.Lock()
 	defer s.clientMtx.Unlock()
