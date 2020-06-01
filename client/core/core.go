@@ -93,17 +93,31 @@ func (dc *dexConnection) suspended(mkt string) bool {
 }
 
 // suspend halts trading for the provided market.
-func (dc *dexConnection) suspend(mkt string) {
+func (dc *dexConnection) suspend(mkt string) error {
 	dc.marketMtx.Lock()
-	dc.marketMap[mkt].Suspended = true
-	dc.marketMtx.Unlock()
+	defer dc.marketMtx.Unlock()
+
+	market, ok := dc.marketMap[mkt]
+	if !ok {
+		return fmt.Errorf("no market found with ID %s", mkt)
+	}
+
+	market.Suspended = true
+	return nil
 }
 
 // resume commences trading for the provided market.
-func (dc *dexConnection) resume(mkt string) {
+func (dc *dexConnection) resume(mkt string) error {
 	dc.marketMtx.Lock()
-	dc.marketMap[mkt].Suspended = false
-	dc.marketMtx.Unlock()
+	defer dc.marketMtx.Unlock()
+
+	market, ok := dc.marketMap[mkt]
+	if !ok {
+		return fmt.Errorf("no market found with ID %s", mkt)
+	}
+
+	market.Suspended = false
+	return nil
 }
 
 // refreshMarkets rebuilds, saves, and returns the market map. The map itself
@@ -2469,20 +2483,37 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	dc.pendingSuspendsMtx.Lock()
 	defer dc.pendingSuspendsMtx.Unlock()
 
-	// Attempt to cancel and remove pending suspends.
+	// Ensure the provided market exists for the dex.
+	dc.marketMtx.RLock()
+	mkt, ok := dc.marketMap[sp.MarketID]
+	dc.marketMtx.RUnlock()
+	if !ok {
+		return fmt.Errorf("no market found with ID %s", sp.MarketID)
+	}
+
+	// Ensure the market is not already suspended.
+	if mkt.Suspended {
+		return fmt.Errorf("market %s for dex %s is already suspended",
+			sp.MarketID, dc.acct.host)
+	}
+
+	// Remove pending suspends for the market.
 	if sched := dc.pendingSuspends[sp.MarketID]; sched != nil {
-		if !sched.Stop() {
-			return fmt.Errorf("market %s for dex %s is already suspended",
-				sp.MarketID, dc.acct.host)
-		}
+		sched.Stop()
 		delete(dc.pendingSuspends, sp.MarketID)
 	}
 
 	// Set the new scheduled suspend.
 	duration := time.Until(encode.UnixTimeMilli(int64(sp.SuspendTime)))
 	dc.pendingSuspends[sp.MarketID] = time.AfterFunc(duration, func() {
-		dc.suspend(sp.MarketID)
+		// Update the market as suspended.
+		err := dc.suspend(sp.MarketID)
+		if err != nil {
+			log.Error(err)
+			return
+		}
 
+		// Clear the order book associated with the suspended market.
 		dc.booksMtx.RLock()
 		if bookie := dc.books[sp.MarketID]; bookie != nil {
 			bookie.Reset()
@@ -2490,15 +2521,6 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		dc.booksMtx.RUnlock()
 
 		if !sp.Persist {
-			dc.marketMtx.RLock()
-			mkt, ok := dc.marketMap[sp.MarketID]
-			if !ok {
-				log.Errorf("no market found with ID %s", sp.MarketID)
-				dc.marketMtx.Unlock()
-				return
-			}
-			dc.marketMtx.RUnlock()
-
 			// Revoke all active orders of the suspended market for the dex.
 			dc.tradeMtx.RLock()
 			for _, tracker := range dc.trades {

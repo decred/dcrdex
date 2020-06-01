@@ -2947,8 +2947,10 @@ func TestAssetCounter(t *testing.T) {
 
 func TestHandleTradeSuspensionMsg(t *testing.T) {
 	rig := newTestRig()
+
+	// Ensure a non-existent market cannot be suspended.
 	payload := &msgjson.TradeSuspension{
-		MarketID:    "dcr_btc",
+		MarketID:    "dcr_dcr",
 		FinalEpoch:  100,
 		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Second * 2)),
 		Persist:     true,
@@ -2956,10 +2958,46 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
 	err := handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeSuspensionMsg] expected a market " +
+			"ID not found error: %v")
+	}
+
+	mkt := "dcr_btc"
+
+	// Ensure an already suspended market cannot be suspended again.
+	err = rig.dc.suspend(mkt)
 	if err != nil {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
 
+	payload = &msgjson.TradeSuspension{
+		MarketID:    mkt,
+		FinalEpoch:  100,
+		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Second * 2)),
+		Persist:     true,
+	}
+
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeSuspensionMsg] expected a market " +
+			"suspended error: %v")
+	}
+
+	// Suspend a market.
+	err = rig.dc.resume(mkt)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	// Ensure trades for a suspended market generate an error.
 	form := &TradeForm{
 		Host:    tDexHost,
 		IsLimit: true,
