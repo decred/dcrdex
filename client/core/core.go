@@ -129,7 +129,8 @@ func (dc *dexConnection) getRegConfirms() *uint32 {
 	if dc.regConfirms == regConfirmationsPaid {
 		return nil
 	}
-	return &dc.regConfirms
+	confs := dc.regConfirms
+	return &confs
 }
 
 // setRegConfirms sets the number of confirmations received
