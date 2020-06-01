@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -36,9 +37,10 @@ const (
 	keyParamsKey      = "keyParams"
 	conversionFactor  = 1e8
 	regFeeAssetSymbol = "dcr" // Hard-coded to Decred for registration fees, for now.
-	// high number to be assigned to 'regConfirms' in 'dexConnection'
+
+	// highest uint32 number to be assigned to 'regConfirms' in 'dexConnection'
 	// when the registration is completed
-	regConfirmationsPaid uint32 = 9999
+	regConfirmationsPaid uint32 = math.MaxUint32
 )
 
 var (
