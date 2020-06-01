@@ -619,18 +619,19 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	// Prepare the asset.Contracts.
 	swaps := new(asset.Swaps)
 	for _, match := range matches {
-		dbMatch, _, proof, _ := match.parts()
+		dbMatch, _, proof, auth := match.parts()
 		value := dbMatch.Quantity
 		if !match.trade.Sell {
 			value = calc.BaseToQuote(dbMatch.Rate, dbMatch.Quantity)
 		}
+		matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
+		lockTime := matchTime.Add(time.Hour * 24).UTC().Unix()
 		if dbMatch.Side == order.Maker {
 			proof.Secret = encode.RandomBytes(32)
 			secretHash := sha256.Sum256(proof.Secret)
 			proof.SecretHash = secretHash[:]
+			lockTime = matchTime.Add(time.Hour * 48).UTC().Unix()
 		}
-		// TODO: save lock time in match proof?
-		lockTime := time.Now().Add(time.Hour * 48).UTC().Unix()
 
 		contract := &asset.Contract{
 			Address:    dbMatch.Address,
@@ -947,6 +948,8 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 	auth.AuditStamp = audit.Time
 	auth.AuditSig = audit.Sig
 	proof.CounterScript = audit.Contract
+	matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
+	reqLockTime := matchTime.Add(48 * time.Hour) // counterparty = maker, their locktime = 48 hours.
 	if dbMatch.Side == order.Maker {
 		// Check that the secret hash is correct.
 		if !bytes.Equal(proof.SecretHash, auditInfo.SecretHash()) {
@@ -954,10 +957,16 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 		}
 		match.setStatus(order.TakerSwapCast)
 		proof.TakerSwap = []byte(audit.CoinID)
+		// counterparty = taker, their locktime = 24 hours.
+		reqLockTime = matchTime.Add(24 * time.Hour)
 	} else {
 		proof.SecretHash = auditInfo.SecretHash()
 		match.setStatus(order.MakerSwapCast)
 		proof.MakerSwap = []byte(audit.CoinID)
+	}
+
+	if auditInfo.Expiration().Before(reqLockTime) {
+		return errs.add("lock time too early. Need %s, got %s", reqLockTime, auditInfo.Expiration())
 	}
 
 	log.Infof("Audited contract (%s: %v) paying to %s for order %v...",
