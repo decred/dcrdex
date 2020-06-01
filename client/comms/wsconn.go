@@ -47,7 +47,7 @@ type WsConn interface {
 	NextID() uint64
 	Send(msg *msgjson.Message) error
 	Request(msg *msgjson.Message, f func(*msgjson.Message)) error
-	Connect(ctx context.Context) (error, *sync.WaitGroup)
+	Connect(ctx context.Context) (*sync.WaitGroup, error)
 	MessageSource() <-chan *msgjson.Message
 }
 
@@ -375,7 +375,7 @@ func (conn *wsConn) NextID() uint64 {
 // connection will be returned. If the connection is successful, an
 // auto-reconnect goroutine will be started. To shutdown auto-reconnect, use
 // Stop() or cancel the context.
-func (conn *wsConn) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	var ctxInternal context.Context
 	ctxInternal, conn.cancel = context.WithCancel(ctx)
 
@@ -400,7 +400,7 @@ func (conn *wsConn) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 		close(conn.readCh) // signal to receivers that the wsConn is dead
 	}()
 
-	return conn.connect(ctxInternal), &conn.wg
+	return &conn.wg, conn.connect(ctxInternal)
 }
 
 // Stop can be used to close the connection and all of the goroutines started by

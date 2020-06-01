@@ -218,8 +218,8 @@ func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.reqErr
 }
 func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
-func (conn *TWebsocket) Connect(context.Context) (error, *sync.WaitGroup) {
-	return conn.connectErr, &sync.WaitGroup{}
+func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
+	return &sync.WaitGroup{}, conn.connectErr
 }
 
 type TDB struct {
@@ -441,8 +441,8 @@ func (w *TXCWallet) Info() *asset.WalletInfo {
 	return &asset.WalletInfo{}
 }
 
-func (w *TXCWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
-	return w.connectErr, &sync.WaitGroup{}
+func (w *TXCWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
+	return &sync.WaitGroup{}, w.connectErr
 }
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }

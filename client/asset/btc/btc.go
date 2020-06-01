@@ -344,24 +344,24 @@ func (btc *ExchangeWallet) Info() *asset.WalletInfo {
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface.
-func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Check the version. Do it here, so we can also diagnose a bad connection.
 	netVer, codeVer, err := btc.getVersion()
 	if err != nil {
-		return fmt.Errorf("error getting version: %v", err), nil
+		return nil, fmt.Errorf("error getting version: %v", err)
 	}
 	if netVer < btc.minNetworkVersion {
-		return fmt.Errorf("reported node version %d is less than minimum %d", netVer, minNetworkVersion), nil
+		return nil, fmt.Errorf("reported node version %d is less than minimum %d", netVer, minNetworkVersion)
 	}
 	if codeVer < minProtocolVersion {
-		return fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion), nil
+		return nil, fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
 	}
 	// If this is the first time connecting, clear the locked coins. This should
 	// have been done at shutdown, but shutdown may not have been clean.
 	if atomic.SwapUint32(&btc.hasConnected, 1) == 0 {
 		err := btc.wallet.LockUnspent(true, nil)
 		if err != nil {
-			return err, nil
+			return nil, err
 		}
 	}
 	var wg sync.WaitGroup
@@ -374,7 +374,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 			btc.log.Errorf("failed to unlock %s outputs on shutdown: %v", btc.symbol, err)
 		}
 	}()
-	return nil, &wg
+	return &wg, nil
 }
 
 // Balance should return the total available funds in the wallet. Balance takes

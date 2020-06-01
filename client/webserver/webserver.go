@@ -260,13 +260,13 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 }
 
 // Connect starts the web server. Satisfies the dex.Connector interface.
-func (s *WebServer) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// We'll use the context for market syncers.
 	s.ctx = ctx
 	// Start serving.
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
-		return fmt.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err), nil
+		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
 	}
 
 	// Shutdown the server on context cancellation.
@@ -305,7 +305,7 @@ func (s *WebServer) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 	}()
 
 	log.Infof("Web server listening on http://%s", s.addr)
-	return nil, &wg
+	return &wg, nil
 }
 
 // authorize creates, stores, and returns a new auth token to identify the

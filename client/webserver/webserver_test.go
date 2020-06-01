@@ -316,7 +316,7 @@ func TestLoadMarket(t *testing.T) {
 	link := newLink()
 	s, tCore, shutdown := newTServer(t, false)
 	defer shutdown()
-	err, _ := link.cl.Connect(tCtx)
+	_, err := link.cl.Connect(tCtx)
 	if err != nil {
 		t.Fatalf("WSLink Start: %v", err)
 	}

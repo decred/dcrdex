@@ -75,7 +75,7 @@ func (ssw *StartStopWaiter) Stop() {
 // Connector is any type that implements the Connect method, which will return
 // a connection error, and a WaitGroup that can be waited on at Disconnection.
 type Connector interface {
-	Connect(ctx context.Context) (error, *sync.WaitGroup)
+	Connect(ctx context.Context) (*sync.WaitGroup, error)
 }
 
 // ConnectionMaster manages a Connector.
@@ -97,7 +97,7 @@ func NewConnectionMaster(c Connector) *ConnectionMaster {
 func (c *ConnectionMaster) Connect(ctx context.Context) (err error) {
 	c.init(ctx)
 	c.mtx.Lock()
-	err, c.wg = c.connector.Connect(c.ctx)
+	c.wg, err = c.connector.Connect(c.ctx)
 	c.mtx.Unlock()
 	return err
 }

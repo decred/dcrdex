@@ -270,14 +270,14 @@ func New(cfg *Config) (*RPCServer, error) {
 }
 
 // Connect starts the RPC server. Satisfies the dex.Connector interface.
-func (s *RPCServer) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// ctx passed to newMarketSyncer when making new market syncers.
 	s.ctx = ctx
 
 	// Create listener.
 	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
 	if err != nil {
-		return fmt.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err), nil
+		return nil, fmt.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
 	}
 
 	// Close the listener on context cancellation.
@@ -306,7 +306,7 @@ func (s *RPCServer) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 		log.Infof("RPC server off")
 	}()
 	log.Infof("RPC server listening on %s", s.addr)
-	return nil, &s.wg
+	return &s.wg, nil
 }
 
 // handleRequest sends the request to the correct handler function if able.

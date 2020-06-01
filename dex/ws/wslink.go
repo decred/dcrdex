@@ -130,19 +130,19 @@ func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 }
 
 // Connect begins processing input and output messages.
-func (c *WSLink) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Set the initial read deadline now that the ping ticker is about to be
 	// started. The pong handler will set subsequent read deadlines. 2x ping
 	// period is a very generous initial pong wait; the readWait provided to
 	// NewConnection could be stored and used here (once) instead.
 	if !atomic.CompareAndSwapUint32(&c.on, 0, 1) {
-		return fmt.Errorf("Attempted to Start a running WSLink"), nil
+		return nil, fmt.Errorf("Attempted to Start a running WSLink")
 	}
 	linkCtx, quit := context.WithCancel(ctx)
 	c.quit = quit
 	err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2))
 	if err != nil {
-		return fmt.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err), nil
+		return nil, fmt.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err)
 	}
 
 	log.Tracef("Starting websocket messaging with peer %s", c.ip)
@@ -150,7 +150,7 @@ func (c *WSLink) Connect(ctx context.Context) (error, *sync.WaitGroup) {
 	c.wg.Add(2)
 	go c.inHandler(linkCtx)
 	go c.pingHandler(linkCtx)
-	return nil, &c.wg
+	return &c.wg, nil
 }
 
 // Disconnect closes both the underlying websocket connection and the quit
