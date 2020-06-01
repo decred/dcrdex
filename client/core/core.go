@@ -2337,20 +2337,24 @@ func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 		return fmt.Errorf("no order found with id %s", oid.String())
 	}
 
-	// todo: consider checking if any refunds/forced redemption are necessary
-	// before setting this match's status to Revoked.
-	// Alternatively, set status to Revoked but "remember" to attempt Refund/
-	// FindRedemption if necessary. Currently, `trackedTrade.isRefundable` will
-	// return false for this match because of the status change.
+	var matchID order.MatchID
+	copy(matchID[:], revocation.MatchID)
 
-	md := tracker.metaData
-	md.Status = order.OrderStatusRevoked
-	metaOrder := &db.MetaOrder{
-		MetaData: md,
-		Order:    tracker.Order,
+	var revokedMatch *matchTracker
+	tracker.matchMtx.RLock()
+	for _, match := range tracker.matches {
+		if match.id == matchID {
+			revokedMatch = match
+			break
+		}
+	}
+	tracker.matchMtx.RUnlock()
+	if revokedMatch == nil {
+		return fmt.Errorf("no match found with id %s for order %s", matchID, oid.String())
 	}
 
-	return tracker.db.UpdateOrder(metaOrder)
+	revokedMatch.MetaMatch.MetaData.Proof.IsRevoked = true
+	return tracker.db.UpdateMatch(&revokedMatch.MetaMatch)
 }
 
 // routeHandler is a handler for a message from the DEX.

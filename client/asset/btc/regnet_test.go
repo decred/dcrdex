@@ -364,7 +364,7 @@ func TestWallet(t *testing.T) {
 	}
 	swapCoin = receipts[0].Coin()
 
-	err = rig.gamma().Refund(swapCoin.ID(), swapCoin.Redeem(), tBTC)
+	_, err = rig.gamma().Refund(swapCoin.ID(), swapCoin.Redeem(), tBTC)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

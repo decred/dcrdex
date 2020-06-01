@@ -117,7 +117,7 @@ type Wallet interface {
 	// wallet does not store it, even though it was known when the init transaction
 	// was created. The DEX should store this information for persistence across
 	// sessions.
-	Refund(coinID, contract dex.Bytes, nfo *dex.Asset) error
+	Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
 	// Unlock unlocks the exchange wallet.

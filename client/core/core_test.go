@@ -503,8 +503,8 @@ func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.B
 	return nil, nil
 }
 
-func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes, *dex.Asset) error {
-	return nil
+func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes, *dex.Asset) (dex.Bytes, error) {
+	return nil, nil
 }
 
 func (w *TXCWallet) Address() (string, error) {
@@ -1834,10 +1834,12 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	rig := newTestRig()
 	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
 	oid := ord.ID()
+	var mid order.MatchID
+	copy(mid[:], encode.RandomBytes(order.MatchIDSize))
 	preImg := newPreimage()
 	payload := &msgjson.RevokeMatch{
 		OrderID: oid[:],
-		MatchID: encode.RandomBytes(order.MatchIDSize),
+		MatchID: mid[:],
 	}
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.RevokeMatchRoute, payload)
 
@@ -1847,12 +1849,23 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 		t.Fatal("[handleRevokeMatchMsg] expected a non-existent order")
 	}
 
+	match := &matchTracker{
+		id: mid,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{},
+		},
+	}
+
 	tracker := &trackedTrade{
 		db: rig.db,
 		metaData: &db.OrderMetaData{
 			Status: order.OrderStatusBooked,
 		},
-		Order:  ord,
+		Order: ord,
+		matches: map[order.MatchID]*matchTracker{
+			mid: match,
+		},
 		preImg: preImg,
 		dc:     rig.dc,
 	}
@@ -1869,9 +1882,8 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 		t.Fatalf("expected to find an order with id %s", oid.String())
 	}
 
-	if tracker.metaData.Status != order.OrderStatusRevoked {
-		t.Fatalf("expected a revoked order status, got %v",
-			tracker.metaData.Status)
+	if !match.MetaData.Proof.IsRevoked {
+		t.Fatal("match not revoked")
 	}
 }
 

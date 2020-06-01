@@ -359,7 +359,7 @@ func TestWallet(t *testing.T) {
 	swapCoin = receipts[0].Coin()
 
 	waitNetwork()
-	err = rig.beta().Refund(swapCoin.ID(), swapCoin.Redeem(), tDCR)
+	_, err = rig.beta().Refund(swapCoin.ID(), swapCoin.Redeem(), tDCR)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

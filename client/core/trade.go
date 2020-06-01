@@ -477,7 +477,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 // party has not executed the required follow-up action (i.e. match status shows
 // our swap is the last action on the match) AND our swap's locktime has expired.
 func (t *trackedTrade) isRefundable(match *matchTracker) bool {
-	if match.failErr != nil {
+	if match.failErr != nil || match.MetaData.Proof.RefundCoin != nil {
 		return false
 	}
 
@@ -490,23 +490,18 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	dbMatch, metaData, proof, _ := match.parts()
-	var side string
-	switch {
-	case dbMatch.Side == order.Maker && metaData.Status == order.MakerSwapCast:
-		side = "Maker"
-	case dbMatch.Side == order.Taker && metaData.Status == order.TakerSwapCast:
-		side = "Taker"
-	default:
-		// match status shows that our swap is NOT the last action on this match.
+
+	// Check if the last action on this match is our swap.
+	if (dbMatch.Side == order.Maker && metaData.Status != order.MakerSwapCast) ||
+		(dbMatch.Side == order.Taker && metaData.Status != order.TakerSwapCast) {
 		return false
 	}
 
-	// Our swap is the last action on this match, we should issue a refund if our
-	// swap's locktime has expired.
+	// Issue a refund if our swap's locktime has expired.
 	swapLocktimeExpired, err := wallet.LocktimeExpired(proof.Script)
 	if err != nil {
 		log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
-			side, t.ID(), match.id, err)
+			dbMatch.Side, t.ID(), match.id, err)
 		return false
 	}
 	return swapLocktimeExpired
@@ -832,7 +827,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		log.Infof("failed match, %s, refunding %s contract %s",
 			matchFailureReason, unbip(refundAsset.ID), swapCoinString)
 
-		err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund, refundAsset)
+		refundCoin, err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund, refundAsset)
 		if err != nil {
 			if err == asset.CoinSpentError {
 				// TODO: begin find redemption
@@ -849,9 +844,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		} else {
 			refundedQty += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
 		}
-		// TODO: order.MatchFailed? Status needs to change so that refund is
-		// not re-attempted on trackedTrade.tick().
-		match.setStatus(order.MatchComplete)
+		proof.RefundCoin = []byte(refundCoin)
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			errs.add("error storing match info in database: %v", err)

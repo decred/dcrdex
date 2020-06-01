@@ -4,6 +4,7 @@
 package db
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"strconv"
@@ -233,12 +234,18 @@ type MatchProof struct {
 	MakerRedeem   order.CoinID
 	TakerSwap     order.CoinID
 	TakerRedeem   order.CoinID
+	RefundCoin    order.CoinID
 	Auth          MatchAuth
+	IsRevoked     bool
 }
 
 // Encode encodes the MatchProof to a versioned blob.
 func (p *MatchProof) Encode() []byte {
 	auth := p.Auth
+	isRevoked := encode.ByteFalse
+	if p.IsRevoked {
+		isRevoked = encode.ByteTrue
+	}
 	return dbBytes{0}.
 		AddData(p.Script).
 		AddData(p.CounterScript).
@@ -248,6 +255,7 @@ func (p *MatchProof) Encode() []byte {
 		AddData(p.MakerRedeem).
 		AddData(p.TakerSwap).
 		AddData(p.TakerRedeem).
+		AddData(p.RefundCoin).
 		AddData(auth.MatchSig).
 		AddData(uint64Bytes(auth.MatchStamp)).
 		AddData(auth.InitSig).
@@ -257,7 +265,8 @@ func (p *MatchProof) Encode() []byte {
 		AddData(auth.RedeemSig).
 		AddData(uint64Bytes(auth.RedeemStamp)).
 		AddData(auth.RedemptionSig).
-		AddData(uint64Bytes(auth.RedemptionStamp))
+		AddData(uint64Bytes(auth.RedemptionStamp)).
+		AddData(isRevoked)
 }
 
 // DecodeMatchProof decodes the versioned blob to a *MatchProof.
@@ -274,8 +283,8 @@ func DecodeMatchProof(b []byte) (*MatchProof, error) {
 }
 
 func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
-	if len(pushes) != 18 {
-		return nil, fmt.Errorf("DecodeMatchProof: expected 18 pushes, got %d", len(pushes))
+	if len(pushes) != 20 {
+		return nil, fmt.Errorf("DecodeMatchProof: expected 20 pushes, got %d", len(pushes))
 	}
 	return &MatchProof{
 		Script:        pushes[0],
@@ -286,18 +295,20 @@ func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
 		MakerRedeem:   pushes[5],
 		TakerSwap:     pushes[6],
 		TakerRedeem:   pushes[7],
+		RefundCoin:    pushes[8],
 		Auth: MatchAuth{
-			MatchSig:        pushes[8],
-			MatchStamp:      intCoder.Uint64(pushes[9]),
-			InitSig:         pushes[10],
-			InitStamp:       intCoder.Uint64(pushes[11]),
-			AuditSig:        pushes[12],
-			AuditStamp:      intCoder.Uint64(pushes[13]),
-			RedeemSig:       pushes[14],
-			RedeemStamp:     intCoder.Uint64(pushes[15]),
-			RedemptionSig:   pushes[16],
-			RedemptionStamp: intCoder.Uint64(pushes[17]),
+			MatchSig:        pushes[9],
+			MatchStamp:      intCoder.Uint64(pushes[10]),
+			InitSig:         pushes[11],
+			InitStamp:       intCoder.Uint64(pushes[12]),
+			AuditSig:        pushes[13],
+			AuditStamp:      intCoder.Uint64(pushes[14]),
+			RedeemSig:       pushes[15],
+			RedeemStamp:     intCoder.Uint64(pushes[16]),
+			RedemptionSig:   pushes[17],
+			RedemptionStamp: intCoder.Uint64(pushes[18]),
 		},
+		IsRevoked: bytes.Equal(pushes[19], encode.ByteTrue),
 	}, nil
 }
 

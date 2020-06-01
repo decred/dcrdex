@@ -1006,23 +1006,23 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 // wallet does not store it, even though it was known when the init transaction
 // was created. The DEX should store this information for persistence across
 // sessions.
-func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) error {
+func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Grab the unspent output to make sure it's good and to get the value.
 	utxo, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		return fmt.Errorf("error finding unspent contract: %v", err)
+		return nil, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if utxo == nil {
-		return asset.CoinSpentError
+		return nil, asset.CoinSpentError
 	}
 	val := toAtoms(utxo.Value)
 	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(contract, chainParams)
 	if err != nil {
-		return fmt.Errorf("error extracting swap addresses: %v", err)
+		return nil, fmt.Errorf("error extracting swap addresses: %v", err)
 	}
 	// Create the transaction that spends the contract.
 	msgTx := wire.NewMsgTx()
@@ -1035,44 +1035,44 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) er
 	size := msgTx.SerializeSize() + dexdcr.RefundSigScriptSize + dexdcr.P2PKHOutputSize
 	fee := nfo.FeeRate * uint64(size)
 	if fee > val {
-		return fmt.Errorf("refund tx not worth the fees")
+		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
 
 	refundAddr, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
 	if err != nil {
-		return fmt.Errorf("error getting new address from the wallet: %v", err)
+		return nil, fmt.Errorf("error getting new address from the wallet: %v", err)
 	}
 	pkScript, err := txscript.PayToAddrScript(refundAddr)
 	if err != nil {
-		return fmt.Errorf("error creating refund script for address '%v': %v", refundAddr, err)
+		return nil, fmt.Errorf("error creating refund script for address '%v': %v", refundAddr, err)
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
 	// One last check for dust.
 	if dexdcr.IsDust(txOut, nfo.FeeRate) {
-		return fmt.Errorf("refund output is dust")
+		return nil, fmt.Errorf("refund output is dust")
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign it.
 	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, contract, sender)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	redeemSigScript, err := dexdcr.RefundP2SHContract(contract, refundSig, refundPubKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	txIn.SignatureScript = redeemSigScript
 	// Send it.
 	checkHash := msgTx.TxHash()
 	refundHash, err := dcr.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if *refundHash != checkHash {
-		return fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
+		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", *refundHash, checkHash)
 	}
-	return nil
+	return toCoinID(refundHash, 0), nil
 }
 
 // Address returns an address for the exchange wallet.
