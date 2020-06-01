@@ -521,7 +521,8 @@ func TestHandleExchanges(t *testing.T) {
         "fundConf": 1
       }
     },
-    "feePending": false
+	"confsrequired": 1,
+	"confs": null
   }
 }`
 	out := `{
@@ -580,7 +581,8 @@ func TestHandleExchanges(t *testing.T) {
         "fundConf": 1
       }
     },
-    "feePending": false
+    "confsrequired": 1,
+    "confs": null
   }
 }`
 	var exchangesIn map[string]*core.Exchange

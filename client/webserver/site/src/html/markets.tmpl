@@ -128,6 +128,20 @@
             </div>
 
             <div class="fs15 pt-3 text-center d-hide" id="loaderMsg"></div>
+            
+            {{- /* REGISTRATION STATUS */ -}}
+            <div class="d-hide" id="registrationStatus">
+              <div class="p-0 w-100">
+                <div class="d-flex flex-column justify-content-center align-items-center">
+                  <span id="regStatusTitle" class="title"></span>
+                  <p id="regStatusMessage">In order to trade at <span id="regStatusDex"></span>, the registration fee payment
+                    needs <span id="confReq"></span> confirmations.
+                  </p>
+                  <span id="regStatusConfsDisplay"></span>
+                </div>
+              </div>
+            </div>
+
             {{- /* ORDER FORM */ -}}
             <form id="orderForm" class="bg1">
               <div class="p-0 w-100">

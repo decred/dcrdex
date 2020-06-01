@@ -96,6 +96,7 @@ export default class Application {
     if (!this.checkResponse(user)) return
     this.user = user
     this.assets = user.assets
+    this.exchanges = user.exchanges
     this.walletMap = {}
     for (const [assetID, asset] of Object.entries(user.assets)) {
       if (asset.wallet) {
@@ -240,6 +241,40 @@ export default class Application {
   }
 
   /*
+   * updateExchangeRegistration updates the information for the exchange
+   * registration payment
+   */
+  updateExchangeRegistration (dexAddr, isPaid, confs) {
+    const dex = this.exchanges[dexAddr]
+
+    if (isPaid) {
+      // setting the null value in the 'confs' field indicates that the fee
+      // payment was completed
+      dex.confs = null
+      return
+    }
+
+    dex.confs = confs
+  }
+
+  /*
+   * handleFeePaymentNote is the handler for the 'feepayment'-type notification, which
+   * is used to update the dex registration status.
+   */
+  handleFeePaymentNote (note) {
+    switch (note.subject) {
+      case 'regupdate':
+        this.updateExchangeRegistration(note.dex, false, note.confirmations)
+        break
+      case 'Account registered':
+        this.updateExchangeRegistration(note.dex, true)
+        break
+      default:
+        break
+    }
+  }
+
+  /*
    * setNotes sets the current notification cache and populates the notification
    * display.
    */
@@ -273,6 +308,8 @@ export default class Application {
         if (wallet) wallet.balances = note.balances
         break
       }
+      case 'feepayment':
+        this.handleFeePaymentNote(note)
     }
 
     // Inform the page.
@@ -328,6 +365,7 @@ export default class Application {
       const cls = note.severity === ntfn.SUCCESS ? 'good' : note.severity === ntfn.WARNING ? 'warn' : 'bad'
       el.querySelector('div.note-indicator').classList.add(cls)
     }
+
     el.querySelector('div.note-subject').textContent = note.subject
     el.querySelector('div.note-details').textContent = note.details
     return el

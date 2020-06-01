@@ -156,6 +156,43 @@ table.ordertable {
   }
 }
 
+#loaderMsg {
+  padding: 1rem;
+  color: red;
+}
+
+#registrationStatus {
+  padding: 0.5rem;
+  border: 1px solid #6a6a6a;
+
+  .title {
+    font-weight: bold;
+    margin-bottom: 5px;
+  }
+
+  &.waiting {
+    .title {
+      color: #9b8c09;
+    }
+  }
+
+  &.completed {
+    .title {
+      color: #5cba8b;
+    }
+
+    #regStatusMessage {
+      display: none;
+    }
+  }
+
+  &.error {
+    .title {
+      color: red;
+    }
+  }
+}
+
 #orderForm {
   min-height: 375px;
 
