@@ -980,7 +980,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 // expired.
 // NOTE: The contract cannot be retreived from the unspent coin info as the
 // wallet does not store it, even though it was known when the init transaction
-// was created. The DEX should store this information for persistence across
+// was created. The client should store this information for persistence across
 // sessions.
 func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)

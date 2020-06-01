@@ -490,7 +490,6 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	dbMatch, metaData, proof, _ := match.parts()
-
 	// Check if the last action on this match is our swap.
 	if (dbMatch.Side == order.Maker && metaData.Status != order.MakerSwapCast) ||
 		(dbMatch.Side == order.Taker && metaData.Status != order.TakerSwapCast) {
@@ -538,7 +537,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 	fromID := t.wallets.fromAsset.ID
 	nSwapsAndRefunds := len(swaps) + len(refunds)
 	if nSwapsAndRefunds > 0 {
-		counts[fromID] = len(swaps)
+		counts[fromID] = nSwapsAndRefunds
 	}
 
 	if len(swaps) > 0 {
@@ -590,9 +589,9 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 			float64(refunded)/conversionFactor, unbip(fromID), t.token())
 		if err != nil {
 			errs.addErr(err)
-			t.notify(newOrderNote("Match failure", details+", with some errors", db.ErrorLevel, corder))
+			t.notify(newOrderNote("Refund Failure", details+", with some errors", db.ErrorLevel, corder))
 		} else {
-			t.notify(newOrderNote("Match failure", details, db.WarningLevel, corder))
+			t.notify(newOrderNote("Matches Refunded", details, db.WarningLevel, corder))
 		}
 	}
 
@@ -807,19 +806,25 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 	var refundedQty uint64
 
 	for _, match := range matches {
-		dbMatch, metaData, proof, _ := match.parts()
+		dbMatch, _, proof, _ := match.parts()
+		if proof.RefundCoin != nil {
+			log.Errorf("attempted to execute duplicate refund for match %s, side %s, status %s",
+				match.id, dbMatch.Side, dbMatch.Status)
+			continue
+		}
 		contractToRefund := proof.Script
 		var swapCoinID order.CoinID
 		var matchFailureReason string
 		switch {
-		case dbMatch.Side == order.Maker && metaData.Status == order.MakerSwapCast:
+		case dbMatch.Side == order.Maker && dbMatch.Status == order.MakerSwapCast:
 			swapCoinID = proof.MakerSwap
 			matchFailureReason = "no valid counterswap received from Taker"
-		case dbMatch.Side == order.Taker && metaData.Status == order.TakerSwapCast:
+		case dbMatch.Side == order.Taker && dbMatch.Status == order.TakerSwapCast:
 			swapCoinID = proof.TakerSwap
 			matchFailureReason = "no valid redemption received from Maker"
 		default:
-			log.Errorf("attempted to execute invalid refund for match %s", match.id)
+			log.Errorf("attempted to execute invalid refund for match %s, side %s, status %s",
+				match.id, dbMatch.Side, dbMatch.Status)
 			continue
 		}
 

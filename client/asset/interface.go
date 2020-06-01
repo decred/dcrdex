@@ -115,7 +115,7 @@ type Wallet interface {
 	// expired AND if the contract has not been redeemed/refunded.
 	// NOTE: The contract cannot be retreived from the unspent coin info as the
 	// wallet does not store it, even though it was known when the init transaction
-	// was created. The DEX should store this information for persistence across
+	// was created. The client should store this information for persistence across
 	// sessions.
 	Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
