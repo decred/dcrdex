@@ -2,6 +2,7 @@ const path = require('path')
 const { CleanWebpackPlugin } = require('clean-webpack-plugin')
 const MiniCssExtractPlugin = require('mini-css-extract-plugin')
 const StyleLintPlugin = require('stylelint-webpack-plugin')
+const GitRevisionPlugin = require('git-revision-webpack-plugin')
 
 module.exports = {
   entry: {
@@ -50,5 +51,8 @@ module.exports = {
   // https://github.com/webpack/webpack/issues/2297#issuecomment-289291324
   watchOptions: {
     poll: true
+  },
+  externals: {
+    commitHash: JSON.stringify(new GitRevisionPlugin().commithash())
   }
 }
