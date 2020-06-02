@@ -61,8 +61,8 @@ type ClientCore interface {
 	Login(appPass []byte) (*core.LoginResult, error)
 	OpenWallet(assetID uint32, appPass []byte) error
 	GetFee(addr, cert string) (fee uint64, err error)
-	Register(form *core.RegisterForm) error
-	Sync(host string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
+	Register(form *core.RegisterForm) (*core.RegisterResult, error)
+	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)

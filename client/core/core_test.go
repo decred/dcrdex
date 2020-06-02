@@ -1094,7 +1094,7 @@ func TestRegister(t *testing.T) {
 		tCore.connMtx.Unlock()
 
 		tWallet.setConfs(tDCR.FundConf)
-		err = tCore.Register(form)
+		_, err = tCore.Register(form)
 	}
 
 	getNotification := func(tag string) interface{} {

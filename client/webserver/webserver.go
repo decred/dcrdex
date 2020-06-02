@@ -61,7 +61,7 @@ var (
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	Exchanges() map[string]*core.Exchange
-	Register(*core.RegisterForm) error
+	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
 	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)

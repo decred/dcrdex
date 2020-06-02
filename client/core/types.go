@@ -458,6 +458,12 @@ type LoginResult struct {
 	DEXes         []*DEXBrief        `json:"dexes"`
 }
 
+// RegisterResult holds data returned from Register.
+type RegisterResult struct {
+	FeeID       string `json:"feeID"`
+	ReqConfirms uint16 `json:"reqConfirms"`
+}
+
 // assetCounter tracks a count for a series of assets and provides methods for
 // adding to the count and combining assetCounters. Methods return the receiver
 // for convenience.

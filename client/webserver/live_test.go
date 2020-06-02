@@ -306,10 +306,10 @@ func (c *TCore) GetFee(host, cert string) (uint64, error) {
 	return 1e8, nil
 }
 
-func (c *TCore) Register(r *core.RegisterForm) error {
+func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 	randomDelay()
 	c.reg = r
-	return nil
+	return nil, nil
 }
 func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
 func (c *TCore) Logout() error                           { return nil }
