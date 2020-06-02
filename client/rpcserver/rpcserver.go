@@ -269,16 +269,15 @@ func New(cfg *Config) (*RPCServer, error) {
 	return s, nil
 }
 
-// Run starts the web server. Satisfies the dex.Runner interface.
-func (s *RPCServer) Run(ctx context.Context) {
+// Connect starts the RPC server. Satisfies the dex.Connector interface.
+func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// ctx passed to newMarketSyncer when making new market syncers.
 	s.ctx = ctx
 
 	// Create listener.
 	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
 	if err != nil {
-		log.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
-		return
+		return nil, fmt.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
 	}
 
 	// Close the listener on context cancellation.
@@ -292,19 +291,22 @@ func (s *RPCServer) Run(ctx context.Context) {
 			log.Errorf("HTTP server Shutdown: %v", err)
 		}
 	}()
-	log.Infof("RPC server listening on %s", s.addr)
-	if err := s.srv.Serve(listener); err != http.ErrServerClosed {
-		log.Warnf("unexpected (http.Server).Serve error: %v", err)
-	}
-	s.mtx.Lock()
-	for _, cl := range s.clients {
-		cl.Disconnect()
-	}
-	s.mtx.Unlock()
 
-	// Wait for market syncers to finish and Shutdown.
-	s.wg.Wait()
-	log.Infof("RPC server off")
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if err := s.srv.Serve(listener); err != http.ErrServerClosed {
+			log.Warnf("unexpected (http.Server).Serve error: %v", err)
+		}
+		s.mtx.Lock()
+		for _, cl := range s.clients {
+			cl.Disconnect()
+		}
+		s.mtx.Unlock()
+		log.Infof("RPC server off")
+	}()
+	log.Infof("RPC server listening on %s", s.addr)
+	return &s.wg, nil
 }
 
 // handleRequest sends the request to the correct handler function if able.

@@ -327,26 +327,26 @@ func (dcr *ExchangeWallet) Info() *asset.WalletInfo {
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
 // interface.
-func (dcr *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup) {
+func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	err := dcr.client.Connect(ctx, false)
 	if err != nil {
-		return fmt.Errorf("Decred Wallet connect error: %v", err), nil
+		return nil, fmt.Errorf("Decred Wallet connect error: %v", err)
 	}
 	// Check the min api versions.
 	versions, err := dcr.client.Version()
 	if err != nil {
-		return fmt.Errorf("DCR ExchangeWallet version fetch error: %v", err), nil
+		return nil, fmt.Errorf("DCR ExchangeWallet version fetch error: %v", err)
 	}
 	err = checkVersionInfo(versions)
 	if err != nil {
-		return fmt.Errorf("DCR ExchangeWallet version check failed: %v", err), nil
+		return nil, fmt.Errorf("DCR ExchangeWallet version check failed: %v", err)
 	}
 	// If this is the first time connecting, clear the locked coins. This should
 	// have been done at shutdown, but shutdown may not have been clean.
 	if atomic.SwapUint32(&dcr.hasConnected, 1) == 0 {
 		err := dcr.node.LockUnspent(true, nil)
 		if err != nil {
-			return err, nil
+			return nil, err
 		}
 	}
 	var wg sync.WaitGroup
@@ -356,7 +356,7 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (error, *sync.WaitGroup)
 		dcr.monitorBlocks(ctx)
 		dcr.shutdown()
 	}()
-	return nil, &wg
+	return &wg, nil
 }
 
 // Balance should return the total available funds in the wallet.

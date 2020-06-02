@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
 	"github.com/decred/dcrd/certgen"
@@ -226,7 +227,10 @@ func (s *Server) Run(ctx context.Context) {
 		// connections. We must wait on each websocketHandler to return in
 		// response to disconnectClients.
 		wg.Add(1)
-		go s.websocketHandler(&wg, wsConn, ip)
+		go func() {
+			defer wg.Done()
+			s.websocketHandler(ctx, wsConn, ip)
+		}()
 	})
 
 	// Start serving.
@@ -290,20 +294,24 @@ func (s *Server) banish(ip string) {
 // websocketHandler handles a new websocket client by creating a new wsClient,
 // starting it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) websocketHandler(wg *sync.WaitGroup, conn ws.Connection, ip string) {
-	defer wg.Done()
+func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip string) {
 	log.Debugf("New websocket client %s", ip)
 
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
 	client := newWSLink(ip, conn)
-	s.addClient(client)
-	client.Start()
+	cm, err := s.addClient(client, ctx)
+	if err != nil {
+		log.Errorf("Failed to add client %s", ip)
+		return
+	}
+	defer s.removeClient(client.id)
+
 	// The connection remains until the connection is lost or the link's
 	// disconnect method is called (e.g. via disconnectClients).
-	client.WaitForShutdown()
-	s.removeClient(client.id)
+	cm.Wait()
+
 	// If the ban flag is set, quarantine the client's IP address.
 	if client.ban {
 		s.banish(client.IP())
@@ -340,13 +348,16 @@ func (s *Server) disconnectClients() {
 	s.clientMtx.Unlock()
 }
 
-// addClient assigns the client an ID and adds it to the map.
-func (s *Server) addClient(client *wsLink) {
+// addClient assigns the client an ID, adds it to the map, and attempts to
+// connect.
+func (s *Server) addClient(client *wsLink, ctx context.Context) (*dex.ConnectionMaster, error) {
 	s.clientMtx.Lock()
+	defer s.clientMtx.Unlock()
 	client.id = s.counter
 	s.counter++
 	s.clients[client.id] = client
-	s.clientMtx.Unlock()
+	cm := dex.NewConnectionMaster(client)
+	return cm, cm.Connect(ctx)
 }
 
 // Remove the client from the map.

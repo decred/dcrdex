@@ -91,8 +91,13 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 		delete(s.clients, cl.cid)
 		s.mtx.Unlock()
 	}()
-	cl.Start()
-	cl.WaitForShutdown()
+	cm := dex.NewConnectionMaster(cl)
+	err := cm.Connect(s.ctx)
+	if err != nil {
+		log.Errorf("websocketHandler client Connect: %v")
+		return
+	}
+	cm.Wait()
 	log.Tracef("Disconnected websocket client %s", ip)
 }
 
