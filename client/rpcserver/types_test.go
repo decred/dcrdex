@@ -60,16 +60,14 @@ func TestCheckNArgs(t *testing.T) {
 			pwArgs[i] = encode.PassBytes(testValue)
 		}
 		err := checkNArgs(&RawParams{PWArgs: pwArgs, Args: test.have}, test.wantNArgs, test.wantNArgs)
-		if test.wantErr {
-			if err == nil {
-				t.Fatalf("expected error for test %s",
-					test.name)
-			}
-			continue
-		}
 		if err != nil {
-			t.Fatalf("unexpected error for test %s: %v",
-				test.name, err)
+			if test.wantErr {
+				continue
+			}
+			t.Fatalf("unexpected error for test %s: %v", test.name, err)
+		}
+		if test.wantErr {
+			t.Fatalf("expected error for test %s", test.name)
 		}
 	}
 }
@@ -99,7 +97,7 @@ func TestParseNewWalletArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		nwf, err := parseNewWalletArgs(test.params)
-		if test.wantErr != nil {
+		if err != nil {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("unexpected error %v for test %s",
 					err, test.name)
@@ -145,7 +143,7 @@ func TestParseOpenWalletArgs(t *testing.T) {
 	}}
 	for _, test := range tests {
 		owf, err := parseOpenWalletArgs(test.params)
-		if test.wantErr != nil {
+		if err != nil {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("unexpected error %v for test %s",
 					err, test.name)
@@ -165,11 +163,13 @@ func TestCheckUIntArg(t *testing.T) {
 	tests := []struct {
 		name    string
 		arg     string
+		want    uint64
 		bitSize int
 		wantErr error
 	}{{
 		name:    "ok",
 		arg:     "4294967295",
+		want:    4294967295,
 		bitSize: 32,
 	}, {
 		name:    "too big",
@@ -196,8 +196,8 @@ func TestCheckUIntArg(t *testing.T) {
 			}
 			continue
 		}
-		if fmt.Sprint(res) != test.arg {
-			t.Fatalf("strings don't match for test %s", test.name)
+		if res != test.want {
+			t.Fatalf("expected %d but got %d for test %q", test.want, res, test.name)
 		}
 	}
 }
@@ -422,6 +422,46 @@ func TestTradeArgs(t *testing.T) {
 		}
 		if fmt.Sprint(reg.SrvForm.TifNow) != test.params.Args[7] {
 			t.Fatalf("TifNow doesn't match")
+		}
+	}
+}
+
+func TestParseCancelArgs(t *testing.T) {
+	paramsWithOrderID := func(orderID string) *RawParams {
+		pw := encode.PassBytes("password123")
+		pwArgs := []encode.PassBytes{pw}
+		return &RawParams{PWArgs: pwArgs, Args: []string{orderID}}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: paramsWithOrderID("fb94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e"),
+	}, {
+		name:    "order ID incorrect length",
+		params:  paramsWithOrderID("94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e"),
+		wantErr: errArgs,
+	}, {
+		name:    "order ID not hex",
+		params:  paramsWithOrderID("zb94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		reg, err := parseCancelArgs(test.params)
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %q",
+					err, test.name)
+			}
+			continue
+		}
+		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
+			t.Fatalf("appPass doesn't match")
+		}
+		if fmt.Sprint(reg.OrderID) != test.params.Args[0] {
+			t.Fatalf("order ID doesn't match")
 		}
 	}
 }

@@ -4,13 +4,18 @@
 package rpcserver
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/order"
 )
+
+// An orderID is a 256 bit number encoded as a hex string.
+const orderIdLen = 2 * order.OrderIDSize // 2 * 32
 
 var (
 	// errArgs is wrapped when arguments to the known command cannot be parsed.
@@ -42,7 +47,7 @@ type getFeeResponse struct {
 
 // tradeResponse is used when responding to the trade route.
 type tradeResponse struct {
-	OrderID string `json:"orderid"`
+	OrderID string `json:"orderID"`
 	Sig     string `json:"sig"`
 	Stamp   uint64 `json:"stamp"`
 }
@@ -68,9 +73,16 @@ type helpForm struct {
 	IncludePasswords bool   `json:"includepasswords"`
 }
 
+// tradeForm combines the application password and the user's trade details.
 type tradeForm struct {
 	AppPass encode.PassBytes
 	SrvForm *core.TradeForm
+}
+
+// cancelForm is information necessary to cancel a trade.
+type cancelForm struct {
+	AppPass encode.PassBytes `json:"appPass"`
+	OrderID string           `json:"orderID"`
 }
 
 // checkNArgs checks that args and pwArgs are the correct length.
@@ -269,4 +281,18 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 		},
 	}
 	return req, nil
+}
+
+func parseCancelArgs(params *RawParams) (*cancelForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{1}); err != nil {
+		return nil, err
+	}
+	id := params.Args[0]
+	if len(id) != orderIdLen {
+		return nil, fmt.Errorf("%w: orderID has incorrect length", errArgs)
+	}
+	if _, err := hex.DecodeString(id); err != nil {
+		return nil, fmt.Errorf("%w: invalid order id hex", errArgs)
+	}
+	return &cancelForm{AppPass: params.PWArgs[0], OrderID: id}, nil
 }

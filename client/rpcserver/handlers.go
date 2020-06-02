@@ -16,6 +16,7 @@ import (
 
 // routes
 const (
+	cancelRoute      = "cancel"
 	closeWalletRoute = "closewallet"
 	exchangesRoute   = "exchanges"
 	helpRoute        = "help"
@@ -36,6 +37,7 @@ const (
 	walletCreatedStr  = "%s wallet created and unlocked"
 	walletLockedStr   = "%s wallet locked"
 	walletUnlockedStr = "%s wallet unlocked"
+	canceledOrderStr  = "canceled order %s"
 )
 
 // createResponse creates a msgjson response payload.
@@ -59,6 +61,7 @@ func usage(route string, err error) *msgjson.ResponsePayload {
 
 // routes maps routes to a handler function.
 var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponsePayload{
+	cancelRoute:      handleCancel,
 	closeWalletRoute: handleCloseWallet,
 	exchangesRoute:   handleExchanges,
 	helpRoute:        handleHelp,
@@ -372,6 +375,24 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		Stamp:   res.Stamp,
 	}
 	return createResponse(tradeRoute, &tradeRes, nil)
+}
+
+// handleCancel handles requests for cancel. *msgjson.ResponsePayload.Error is
+// empty if successful.
+func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseCancelArgs(params)
+	if err != nil {
+		return usage(cancelRoute, err)
+	}
+	defer form.AppPass.Clear()
+	if err := s.core.Cancel(form.AppPass, form.OrderID); err != nil {
+		errMsg := fmt.Sprintf("unable to cancel order %q: %v", form.OrderID, err)
+		resErr := msgjson.NewError(msgjson.RPCCancelError, errMsg)
+		return createResponse(tradeRoute, nil, resErr)
+	}
+	resp := fmt.Sprintf(canceledOrderStr, form.OrderID)
+
+	return createResponse(cancelRoute, &resp, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -706,5 +727,16 @@ Registration is complete after the fee transaction has been confirmed.`,
       "stamp" (int): The time the order was signed in milliseconds since 00:00:00
         Jan 1 1970.
     }`,
+	},
+	cancelRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `"orderID"`,
+		cmdSummary:  `Cancel an order.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		argsLong: `Args:
+    orderID (string): The hex ID of the order to cancel`,
+		returns: `Returns:
+    string: The message "` + fmt.Sprintf(canceledOrderStr, "[order ID]") + `"`,
 	},
 }

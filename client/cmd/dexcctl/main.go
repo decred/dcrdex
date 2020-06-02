@@ -52,6 +52,7 @@ func main() {
 // promptPasswords is a map of routes to password prompts. Passwords are
 // prompted in the order given.
 var promptPasswords = map[string][]string{
+	"cancel":     {"App password:"},
 	"init":       {"Set new app password:"},
 	"login":      {"App password:"},
 	"newwallet":  {"App password:", "Wallet password:"},

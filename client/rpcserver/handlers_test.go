@@ -682,3 +682,38 @@ func TestHandleTrade(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleCancel(t *testing.T) {
+	params := &RawParams{
+		PWArgs: []encode.PassBytes{encode.PassBytes("123")},
+		Args:   []string{"fb94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e"},
+	}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		cancelErr   error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      params,
+		wantErrCode: -1,
+	}, {
+		name:        "core.Cancel error",
+		params:      params,
+		cancelErr:   errors.New("error"),
+		wantErrCode: msgjson.RPCCancelError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{cancelErr: test.cancelErr}
+		r := &RPCServer{core: tc}
+		payload := handleCancel(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

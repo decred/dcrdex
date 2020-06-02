@@ -54,13 +54,20 @@ type TCore struct {
 	loginResult         *core.LoginResult
 	order               *core.Order
 	tradeErr            error
+	cancelErr           error
 }
 
+func (c *TCore) Balance(uint32) (uint64, error) {
+	return 0, c.balanceErr
+}
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return nil, nil
 }
 func (c *TCore) AssetBalances(uint32) (*core.BalanceSet, error) {
 	return nil, c.balanceErr
+}
+func (c *TCore) Cancel(pw []byte, sid string) error {
+	return c.cancelErr
 }
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	return c.createWalletErr
