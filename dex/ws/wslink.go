@@ -170,8 +170,8 @@ func (c *WSLink) Disconnect() {
 // be run as a goroutine.
 func (c *WSLink) inHandler(ctx context.Context) {
 	// Ensure the connection is closed.
-	defer c.Disconnect()
 	defer c.wg.Done()
+	defer c.Disconnect()
 out:
 	for {
 		// Quit when the context is closed.
