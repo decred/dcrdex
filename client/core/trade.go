@@ -625,12 +625,12 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 			value = calc.BaseToQuote(dbMatch.Rate, dbMatch.Quantity)
 		}
 		matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
-		lockTime := matchTime.Add(time.Hour * 24).UTC().Unix()
+		lockTime := matchTime.Add(dex.LockTimeTaker).UTC().Unix()
 		if dbMatch.Side == order.Maker {
 			proof.Secret = encode.RandomBytes(32)
 			secretHash := sha256.Sum256(proof.Secret)
 			proof.SecretHash = secretHash[:]
-			lockTime = matchTime.Add(time.Hour * 48).UTC().Unix()
+			lockTime = matchTime.Add(dex.LockTimeMaker).UTC().Unix()
 		}
 
 		contract := &asset.Contract{
