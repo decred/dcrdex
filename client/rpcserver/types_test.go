@@ -161,56 +161,34 @@ func TestParseOpenWalletArgs(t *testing.T) {
 
 func TestCheckUIntArg(t *testing.T) {
 	tests := []struct {
-		name          string
-		arg           string
-		want          uint64
-		base, bitSize int
-		wantErr       error
+		name    string
+		arg     string
+		want    uint64
+		bitSize int
+		wantErr error
 	}{{
-		name:    "ok base 10",
+		name:    "ok",
 		arg:     "4294967295",
 		want:    4294967295,
-		base:    10,
 		bitSize: 32,
 	}, {
-		name:    "too big base 10",
+		name:    "too big",
 		arg:     "4294967296",
-		base:    10,
 		bitSize: 32,
-		wantErr: errArgs,
-	}, {
-		name:    "ok base 16",
-		arg:     "FFFF",
-		want:    65535,
-		base:    16,
-		bitSize: 16,
-	}, {
-		name:    "too big base 16",
-		arg:     "010000",
-		base:    16,
-		bitSize: 16,
-		wantErr: errArgs,
-	}, {
-		name:    "base 16 not hex",
-		arg:     "00FG",
-		base:    16,
-		bitSize: 16,
 		wantErr: errArgs,
 	}, {
 		name:    "not int",
 		arg:     "42.1",
-		base:    10,
 		bitSize: 32,
 		wantErr: errArgs,
 	}, {
 		name:    "negative",
 		arg:     "-42",
-		base:    10,
 		bitSize: 32,
 		wantErr: errArgs,
 	}}
 	for _, test := range tests {
-		res, err := checkUIntArg(test.arg, "name", test.base, test.bitSize)
+		res, err := checkUIntArg(test.arg, "name", test.bitSize)
 		if err != nil {
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("unexpected error %v for test %s",
