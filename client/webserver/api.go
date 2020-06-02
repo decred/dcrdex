@@ -47,14 +47,6 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "No Decred wallet")
 		return
 	}
-	if !wallet.Running {
-		s.writeAPIError(w, "Decred wallet not running")
-		return
-	}
-	if !wallet.Open {
-		s.writeAPIError(w, "Decred wallet is locked")
-		return
-	}
 
 	_, err := s.core.Register(&core.RegisterForm{
 		Addr:    reg.Addr,

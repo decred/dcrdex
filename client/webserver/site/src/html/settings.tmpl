@@ -9,10 +9,10 @@
         Dark Mode
       </label>
     </div>
+    <div class="mt-2 {{if not .UserInfo.Authed}} d-hide{{end}}">
+      <button id="addADex" class="col bg2 selected">Add a DEX</button>
+    </div>
     <div class="pt-2">Build ID: <span id="commitHash" class="mono"></span></div>
-  </div>
-  <div class="mt-2">
-    <button id="addADex" class="col bg2 selected {{if not .UserInfo.Authed}} d-hide{{end}}">Add a DEX</button>
   </div>
 
   {{- /* POP-UP FORMS */ -}}
