@@ -1,11 +1,9 @@
-import { BipIDs } from './doc'
-
 export default class OrderBook {
-  constructor (market) {
+  constructor (market, baseSymbol, quoteSymbol) {
     this.base = market.base
-    this.baseSymbol = BipIDs[market.base]
+    this.baseSymbol = baseSymbol
     this.quote = market.quote
-    this.quoteSymbol = BipIDs[market.quote]
+    this.quoteSymbol = quoteSymbol
     // Books are sorted mid-gap first.
     this.buys = market.book.buys || []
     this.sells = market.book.sells || []

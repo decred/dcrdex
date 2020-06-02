@@ -76,7 +76,7 @@ table.ordertable {
   width: 100%;
 
   th {
-    font-size: 13px;
+    font-size: 14px;
     font-family: 'demi-sans', sans-serif;
   }
 
@@ -101,12 +101,6 @@ table.ordertable {
   .ico-check {
     color: #9b8c09;
   }
-}
-
-.market-header {
-  height: 30px;
-  background-color: $light_bg_2;
-  color: black;
 }
 
 .markettab {
@@ -138,34 +132,112 @@ table.ordertable {
   left: 10px;
   top: -11px;
   padding: 0 3px;
-  font-size: 14px;
+  font-size: 16px;
   font-family: 'demi-sans', sans-serif;
   background-color: $light_bg_1;
 }
 
-#orders {
-  button.newwallet {
-    padding: 2px 5px;
+.market-header {
+  height: 30px;
+  background-color: $light_bg_2;
+  color: #222;
+
+  button.selected {
+    color: black;
+  }
+}
+
+table.balance-table {
+  width: 96%;
+  margin: 0 2%;
+  font-size: 15px;
+
+  td,
+  th {
+    white-space: nowrap;
+    text-align: left;
+    border-width: 1px;
+    border-color: #3a3a3a;
+    font-size: 14px;
+  }
+
+  th {
+    border-bottom-style: solid;
+  }
+
+  button {
+    font-family: $sans;
+    padding: 2px 10px;
     margin: 5px 0;
-    font-size: 13px;
+    font-size: 14px;
     border: 1px solid #444;
     border-radius: 3px;
   }
 
+  td:not(:first-child) {
+    font-family: $mono;
+  }
+
+  td:first-child {
+    font-size: 14px;
+  }
+
+  td.fs16 {
+    font-size: 16px;
+  }
+
+  th:not(:first-child),
+  td:not(:first-child) {
+    padding: 0 10px;
+    border-left-style: solid;
+  }
+
+  td.pointer:hover {
+    background-color: #fff1;
+  }
+
+  // tbody > tr:first-child {
+  //   font-weight: bold;
+  // }
+
+  .ico-expired {
+    color: orangered;
+  }
+
+  td .ico-spinner,
+  td .ico-sleeping,
+  td .ico-cross {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    margin: 0 auto;
+  }
+
+  .micro-icon {
+    width: 13px;
+    height: 13px;
+  }
+}
+
+.market-header button:hover {
+  color: black;
+}
+
+table.balance-table button:hover {
+  border-color: #959595;
+}
+
+#orders {
   .ico-unlocked {
     color: #1e7d11;
   }
 }
 
 #loaderMsg {
-  padding: 1rem;
-  color: red;
+  color: #777;
 }
 
 #registrationStatus {
-  padding: 0.5rem;
-  border: 1px solid #6a6a6a;
-
   .title {
     font-weight: bold;
     margin-bottom: 5px;
@@ -195,8 +267,6 @@ table.ordertable {
 }
 
 #orderForm {
-  min-height: 375px;
-
   input[type=number] {
     height: 30px;
     border: 1px solid #6a6a6a;
@@ -208,13 +278,24 @@ table.ordertable {
     outline: none;
   }
 
-  span.unit {
+  span.unitbox {
     position: absolute;
     font-size: 14px;
     font-family: 'demi-sans', sans-serif;
     right: 5px;
     top: 48%; // Looks better than 50 for some reason.
     transform: translateY(-50%);
+    white-space: nowrap;
+  }
+
+  button {
+    padding: 5px 25px;
+    border-radius: 3px;
+    color: #555;
+  }
+
+  button:hover {
+    color: black;
   }
 
   button.submit {
@@ -222,7 +303,9 @@ table.ordertable {
   }
 
   button.selected {
-    background-color: #7e9ad9;
+    background-color: #b6c2da;
+    border: 1px solid black;
+    color: black;
   }
 
   .ico-unlocked {

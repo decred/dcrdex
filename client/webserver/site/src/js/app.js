@@ -4,7 +4,7 @@ import RegistrationPage from './register'
 import LoginPage from './login'
 import WalletsPage from './wallets'
 import SettingsPage from './settings'
-import MarketsPage, { marketID } from './markets'
+import MarketsPage from './markets'
 import { getJSON, postJSON } from './http'
 import commitHash from 'commitHash'
 import * as ntfn from './notifications'
@@ -139,6 +139,24 @@ export default class Application {
     }
     if (this.loadedPage) this.loadedPage.unload()
     this.loadedPage = new constructor(this, this.main, data) || {}
+
+    // Bind the tooltips.
+    this.main.querySelectorAll('[data-tooltip]').forEach(el => {
+      bind(el, 'mouseenter', () => {
+        this.tooltip.textContent = el.dataset.tooltip
+        const lyt = Doc.layoutMetrics(el)
+        var left = lyt.centerX - this.tooltip.offsetWidth / 2
+        if (left < 0) left = 0
+        if (left + this.tooltip.offsetWidth > document.body.offsetWidth) {
+          left = document.body.offsetWidth - this.tooltip.offsetWidth
+        }
+        this.tooltip.style.left = `${left}px`
+        this.tooltip.style.top = `${lyt.bodyTop - this.tooltip.offsetHeight}px`
+      })
+      bind(el, 'mouseleave', () => {
+        this.tooltip.style.left = '-10000px'
+      })
+    })
   }
 
   /* attachHeader attaches the header element, which unlike the main element,
@@ -147,6 +165,7 @@ export default class Application {
   attachHeader () {
     this.header = idel(document.body, 'header')
     this.pokeNote = idel(document.body, 'pokeNote')
+    this.tooltip = idel(document.body, 'tooltip')
     const pg = this.page = Doc.parsePage(this.header, [
       'noteIndicator', 'noteBox', 'noteList', 'noteTemplate',
       'marketsMenuEntry', 'walletsMenuEntry', 'noteMenuEntry', 'loader',
@@ -388,11 +407,11 @@ export default class Application {
   }
 
   /* orders retrieves a list of orders for the specified dex and market. */
-  orders (host, bid, qid) {
-    var o = this.user.exchanges[host].markets[marketID(bid, qid)].orders
+  orders (host, mktID) {
+    var o = this.user.exchanges[host].markets[mktID].orders
     if (!o) {
       o = []
-      this.user.exchanges[host].markets[marketID(bid, qid)].orders = o
+      this.user.exchanges[host].markets[mktID].orders = o
     }
     return o
   }

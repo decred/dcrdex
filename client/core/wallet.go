@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 )
 
@@ -21,8 +22,7 @@ type xcWallet struct {
 	mtx       sync.RWMutex
 	lockTime  time.Time
 	hookedUp  bool
-	balances  *BalanceSet
-	balUpdate time.Time
+	balances  *db.BalanceSet
 	encPW     []byte
 	address   string
 	dbID      []byte
@@ -73,10 +73,9 @@ func (w *xcWallet) state() *WalletState {
 }
 
 // setBalance sets the wallet balance.
-func (w *xcWallet) setBalance(bals *BalanceSet) {
+func (w *xcWallet) setBalance(bals *db.BalanceSet) {
 	w.mtx.Lock()
 	w.balances = bals
-	w.balUpdate = time.Now()
 	w.mtx.Unlock()
 }
 

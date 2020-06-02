@@ -121,6 +121,9 @@ func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		AssetID uint32 `json:"assetID"`
 	}{}
+	if !readPost(w, r, form) {
+		return
+	}
 	err := s.core.ConnectWallet(form.AssetID)
 	if err != nil {
 		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(form.AssetID), err)
@@ -231,6 +234,30 @@ func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 		OK: true,
 	}
 	writeJSON(w, response, s.indent)
+}
+
+// apiGetBalance handles the 'balance' API request.
+func (s *WebServer) apiGetBalance(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	bals, err := s.core.AssetBalances(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, "balance error: %v", err)
+		return
+	}
+	resp := &struct {
+		OK       bool           `json:"ok"`
+		Balances *db.BalanceSet `json:"balances"`
+	}{
+		OK:       true,
+		Balances: bals,
+	}
+	writeJSON(w, resp, s.indent)
+
 }
 
 // apiWithdraw handles the 'withdraw' API request.
