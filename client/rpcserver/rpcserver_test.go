@@ -48,6 +48,7 @@ type TCore struct {
 	closeWalletErr      error
 	wallets             []*core.WalletState
 	initializeClientErr error
+	registerResult      *core.RegisterResult
 	registerErr         error
 	exchanges           map[string]*core.Exchange
 	loginErr            error
@@ -88,8 +89,8 @@ func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 func (c *TCore) GetFee(url, cert string) (uint64, error) {
 	return c.regFee, c.getFeeErr
 }
-func (c *TCore) Register(*core.RegisterForm) error {
-	return c.registerErr
+func (c *TCore) Register(*core.RegisterForm) (*core.RegisterResult, error) {
+	return c.registerResult, c.registerErr
 }
 func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return nil, core.NewBookFeed(func(*core.BookFeed) {}), c.syncErr

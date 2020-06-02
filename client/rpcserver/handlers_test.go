@@ -436,8 +436,8 @@ func TestHandleRegister(t *testing.T) {
 		}
 		r := &RPCServer{core: tc}
 		payload := handleRegister(r, test.params)
-		res := ""
-		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+		res := new(core.RegisterResult)
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
 	}

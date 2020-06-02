@@ -56,7 +56,7 @@ func (s *WebServer) apiRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := s.core.Register(&core.RegisterForm{
+	_, err := s.core.Register(&core.RegisterForm{
 		Addr:    reg.Addr,
 		Cert:    reg.Cert,
 		AppPass: reg.Password,

@@ -33,7 +33,6 @@ const (
 
 const (
 	initializedStr    = "app initialized"
-	feePaidStr        = "the DEX fee of %v has been paid"
 	walletCreatedStr  = "%s wallet created and unlocked"
 	walletLockedStr   = "%s wallet locked"
 	walletUnlockedStr = "%s wallet unlocked"
@@ -260,15 +259,13 @@ func handleRegister(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCRegisterError, errMsg)
 		return createResponse(registerRoute, nil, resErr)
 	}
-	err = s.core.Register(form)
+	res, err := s.core.Register(form)
 	if err != nil {
 		resErr := &msgjson.Error{Code: msgjson.RPCRegisterError, Message: err.Error()}
 		return createResponse(registerRoute, nil, resErr)
 	}
 
-	resp := fmt.Sprintf(feePaidStr, form.Fee)
-
-	return createResponse(registerRoute, &resp, nil)
+	return createResponse(registerRoute, res, nil)
 }
 
 // handleExchanges handles requests for exchangess. It takes no arguments and
@@ -601,7 +598,10 @@ Registration is complete after the fee transaction has been confirmed.`,
     fee (int): The DEX fee.
     cert (string): Optional. The TLS certificate path.`,
 		returns: `Returns:
-    string: The message "` + fmt.Sprintf(feePaidStr, "[fee]") + `"`,
+    {
+      "feeID" (string): The fee transactions's txid and output index.
+      "reqConfirms" (int): The number of confirmations required to start trading.
+    }`,
 	},
 	exchangesRoute: {
 		pwArgsShort: ``,
@@ -661,10 +661,10 @@ Registration is complete after the fee transaction has been confirmed.`,
 	      can be traded.
           },...
 		},
-        "confsrequired": (int) The number of confirmations needed for the 
-        registration fee payment
+        "confsrequired": (int) The number of confirmations needed for the
+          registration fee payment
         "confs" (int): The current number of confirmations for the registration
-        fee payment. This is only present during the registration process.
+          fee payment. This is only present during the registration process.
       },...
     }`,
 	},
