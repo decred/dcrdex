@@ -2677,6 +2677,10 @@ func TestLogout(t *testing.T) {
 		Order:  ord,
 		preImg: newPreimage(),
 		dc:     rig.dc,
+		metaData: &db.OrderMetaData{
+			Status: order.OrderStatusBooked,
+		},
+		matches: make(map[order.MatchID]*matchTracker),
 	}
 	rig.dc.trades[ord.ID()] = tracker
 
@@ -2701,6 +2705,20 @@ func TestLogout(t *testing.T) {
 
 	// Active orders error.
 	ensureErr("active orders")
+
+	tracker.metaData = &db.OrderMetaData{
+		Status: order.OrderStatusExecuted,
+	}
+	mid := ordertest.RandomMatchID()
+	tracker.matches[mid] = &matchTracker{
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{
+				Status: order.NewlyMatched,
+			},
+		},
+	}
+	// Active orders with matches error.
+	ensureErr("active orders matches")
 	rig.dc.trades = nil
 
 	// Lock wallet error.
