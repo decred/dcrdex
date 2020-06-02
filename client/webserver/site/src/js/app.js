@@ -6,7 +6,7 @@ import WalletsPage from './wallets'
 import SettingsPage from './settings'
 import MarketsPage, { marketID } from './markets'
 import { getJSON, postJSON } from './http'
-
+import commitHash from 'commitHash'
 import * as ntfn from './notifications'
 import ws from './ws'
 
@@ -34,6 +34,8 @@ export default class Application {
       accounts: {},
       wallets: {}
     }
+    this.commitHash = commitHash
+    console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
   }
 
   /**
