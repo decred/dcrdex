@@ -146,3 +146,12 @@ func (s *Server) apiSuspend(w http.ResponseWriter, r *http.Request) {
 		SuspendTime: APITime{suspEpoch.End},
 	})
 }
+
+// apiAccounts is the handler for the '/accounts' API request.
+func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
+	accts, err := s.core.Accounts()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to retrieve accounts: %v", err), http.StatusInternalServerError)
+	}
+	writeJSON(w, accts)
+}

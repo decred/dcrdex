@@ -5,10 +5,12 @@ package pg
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v2"
@@ -41,6 +43,34 @@ func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool)
 		return nil, false, false
 	}
 	return acct, isPaid, isOpen
+}
+
+// Accounts returns data for all accounts. Byte array fields in the database are
+// encoded as hex strings.
+func (a *Archiver) Accounts() ([]*db.Account, error) {
+	stmt := fmt.Sprintf(internal.SelectAllAccounts, a.tables.accounts)
+	rows, err := a.db.Query(stmt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var accts []*db.Account
+	for rows.Next() {
+		a := new(db.Account)
+		id, pubkey, feeCoin := []byte{}, []byte{}, []byte{}
+		err = rows.Scan(&id, &pubkey, &a.FeeAddress, &feeCoin, &a.BrokenRule)
+		if err != nil {
+			return nil, err
+		}
+		a.AccountID = hex.EncodeToString(id)
+		a.Pubkey = hex.EncodeToString(pubkey)
+		a.FeeCoin = hex.EncodeToString(feeCoin)
+		accts = append(accts, a)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return accts, nil
 }
 
 // CreateAccount creates an entry for a new account in the accounts table. A

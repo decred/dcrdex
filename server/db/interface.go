@@ -179,6 +179,10 @@ type AccountArchiver interface {
 	// PayAccount sets the registration fee payment transaction details for the
 	// account, completing the registration process.
 	PayAccount(account.AccountID, []byte) error
+
+	// Accounts returns data for all accounts. Byte array fields in the
+	// database are encoded as hex strings.
+	Accounts() ([]*Account, error)
 }
 
 // MatchData represents an order pair match, but with just the order IDs instead

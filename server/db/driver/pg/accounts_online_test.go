@@ -77,6 +77,18 @@ func TestAccounts(t *testing.T) {
 		t.Fatalf("newly paid account marked as closed")
 	}
 
+	accts, err := archie.Accounts()
+	if err != nil {
+		t.Fatalf("error getting accounts: %v", err)
+	}
+	if accts[0].AccountID != "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc" ||
+		accts[0].Pubkey != "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19" ||
+		accts[0].FeeAddress != "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k" ||
+		accts[0].FeeCoin != "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005" ||
+		accts[0].BrokenRule != byte(0) {
+		t.Fatal("accounts has unexpected data")
+	}
+
 	// Close the account for failure to complete a swap.
 	archie.CloseAccount(tAcctID, account.FailureToAct)
 	_, _, open = archie.Account(tAcctID)

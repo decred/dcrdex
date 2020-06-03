@@ -547,3 +547,9 @@ func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *m
 
 // TODO: resume by relaunching the market subsystems (Run)
 // Resume / ResumeMarket
+
+// Accounts returns data for all accounts. Byte array fields in the database are
+// encoded as hex strings.
+func (dm *DEX) Accounts() ([]*db.Account, error) {
+	return dm.storage.Accounts()
+}

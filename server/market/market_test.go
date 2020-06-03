@@ -172,6 +172,7 @@ func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, o
 func (ta *TArchivist) CreateAccount(*account.Account) (string, error)   { return "", nil }
 func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error) { return "", nil }
 func (ta *TArchivist) PayAccount(account.AccountID, []byte) error       { return nil }
+func (ta *TArchivist) Accounts() ([]*db.Account, error)                 { return nil, nil }
 func (ta *TArchivist) Close() error                                     { return nil }
 
 func randomOrderID() order.OrderID {
