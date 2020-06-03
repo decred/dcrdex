@@ -252,20 +252,20 @@ func newLink() *tLink {
 
 var tPort int = 5142
 
-func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
+func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
 	s, err := New(c, fmt.Sprintf("localhost:%d", tPort), tLogger, false)
 	if err != nil {
-		t.Fatalf("error creating server: %v", err)
+		t.Errorf("error creating server: %v", err)
 	}
 
 	if start {
 		cm := dex.NewConnectionMaster(s)
 		err := cm.Connect(ctx)
 		if err != nil {
-			t.Fatalf("Error starting WebServer: %v", err)
+			t.Errorf("Error starting WebServer: %v", err)
 		}
 		shutdown = func() {
 			killCtx()
@@ -275,7 +275,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func()) {
 		shutdown = killCtx
 		s.ctx = ctx
 	}
-	return s, c, shutdown
+	return s, c, shutdown, err
 }
 
 func ensureResponse(t *testing.T, s *WebServer, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
@@ -313,9 +313,36 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
+func TestConnectStart(t *testing.T) {
+	_, _, shutdown, err := newTServer(t, true)
+	defer shutdown()
+
+	if err != nil {
+		t.Fatalf("error starting web server: %s", err)
+	}
+}
+
+func TestConnectBindError(t *testing.T) {
+	_, _, shutdown, _ := newTServer(t, true)
+	defer shutdown()
+
+	s, err := New(&TCore{}, fmt.Sprintf("localhost:%d", tPort), tLogger, false)
+	if err != nil {
+		t.Fatalf("error creating server: %v", err)
+	}
+
+	cm := dex.NewConnectionMaster(s)
+	err = cm.Connect(tCtx)
+	if err == nil {
+		shutdown() // shutdown both servers with shared context
+		cm.Disconnect()
+		t.Fatalf("should have failed to bind")
+	}
+}
+
 func TestLoadMarket(t *testing.T) {
 	link := newLink()
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 	_, err := link.cl.Connect(tCtx)
 	if err != nil {
@@ -390,7 +417,7 @@ func TestAPIRegister(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -424,7 +451,7 @@ func TestAPILogin(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -447,7 +474,7 @@ func TestWithdraw(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
 	isOK := func() bool {
@@ -499,7 +526,7 @@ func TestAPIInit(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -522,7 +549,7 @@ func TestAPIGetFee(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -542,7 +569,7 @@ func TestAPINewWallet(t *testing.T) {
 	writer := new(TWriter)
 	var body interface{}
 	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -569,7 +596,7 @@ func TestAPINewWallet(t *testing.T) {
 
 func TestHandleMessage(t *testing.T) {
 	link := newLink()
-	s, _, shutdown := newTServer(t, false)
+	s, _, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 	var msg *msgjson.Message
 
@@ -603,7 +630,7 @@ func TestHandleMessage(t *testing.T) {
 }
 
 func TestClientMap(t *testing.T) {
-	s, _, shutdown := newTServer(t, true)
+	s, _, shutdown, _ := newTServer(t, true)
 	resp := make(chan []byte, 1)
 	conn := &TConn{
 		respReady: resp,
@@ -641,14 +668,14 @@ func TestClientMap(t *testing.T) {
 	shutdown()
 	wg.Wait() // websocketHandler since it's using log
 	if !cl.Off() {
-		t.Fatalf("connection not closed on server shutdown")
+		t.Fatal("connection not closed on server shutdown")
 	}
 }
 
 func TestAPILogout(t *testing.T) {
 	writer := new(TWriter)
 	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {
@@ -665,7 +692,7 @@ func TestAPILogout(t *testing.T) {
 func TestApiGetBalance(t *testing.T) {
 	writer := new(TWriter)
 	reader := new(TReader)
-	s, tCore, shutdown := newTServer(t, false)
+	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
 
 	ensure := func(want string) {

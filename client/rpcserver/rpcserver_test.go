@@ -226,13 +226,13 @@ func newLink() *tLink {
 var tPort = 5555
 
 func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
-	*TCore, func()) {
+	*TCore, func(), error) {
 	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
 	tmp, err := os.Getwd()
 	if err != nil {
-		t.Error(err)
+		t.Errorf("error getting current directory: %v", err)
 	}
 	cert, key := tmp+"/cert.cert", tmp+"/key.key"
 	defer os.Remove(cert)
@@ -241,13 +241,13 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 		key}
 	s, err := New(cfg)
 	if err != nil {
-		t.Fatalf("error creating server: %v", err)
+		t.Errorf("error creating server: %v", err)
 	}
 	if start {
 		cm := dex.NewConnectionMaster(s)
 		err := cm.Connect(ctx)
 		if err != nil {
-			t.Fatalf("Error starting WebServer: %v", err)
+			t.Errorf("Error starting WebServer: %v", err)
 		}
 		shutdown = func() {
 			killCtx()
@@ -257,7 +257,7 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 		shutdown = killCtx
 		s.ctx = ctx
 	}
-	return s, c, shutdown
+	return s, c, shutdown, err
 }
 
 func ensureResponse(t *testing.T, s *RPCServer, f func(w http.ResponseWriter,
@@ -292,9 +292,45 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
+func TestConnectStart(t *testing.T) {
+	_, _, shutdown, err := newTServer(t, true, "", "")
+	defer shutdown()
+
+	if err != nil {
+		t.Fatalf("error starting web server: %s", err)
+	}
+}
+
+func TestConnectBindError(t *testing.T) {
+	_, _, shutdown, _ := newTServer(t, true, "", "")
+	defer shutdown()
+
+	c := &TCore{}
+	tmp, err := os.Getwd()
+	if err != nil {
+		t.Error(err)
+	}
+	cert, key := tmp+"/cert.cert", tmp+"/key.key"
+	defer os.Remove(cert)
+	defer os.Remove(key)
+	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), "", "", cert,
+		key}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("error creating server: %v", err)
+	}
+
+	cm := dex.NewConnectionMaster(s)
+	if err = cm.Connect(tCtx); err == nil {
+		shutdown() // shutdown both servers with shared context
+		cm.Disconnect()
+		t.Fatal("should have failed to bind")
+	}
+}
+
 func TestLoadMarket(t *testing.T) {
 	link := newLink()
-	s, tCore, shutdown := newTServer(t, false, "", "")
+	s, tCore, shutdown, _ := newTServer(t, false, "", "")
 	defer shutdown()
 	_, err := link.cl.Connect(tCtx)
 	if err != nil {
@@ -367,7 +403,7 @@ func TestLoadMarket(t *testing.T) {
 
 func TestHandleMessage(t *testing.T) {
 	link := newLink()
-	s, _, shutdown := newTServer(t, false, "", "")
+	s, _, shutdown, _ := newTServer(t, false, "", "")
 	defer shutdown()
 	var msg *msgjson.Message
 
@@ -419,7 +455,7 @@ func (w *tResponseWriter) WriteHeader(statusCode int) {
 }
 
 func TestParseHTTPRequest(t *testing.T) {
-	s, _, shutdown := newTServer(t, false, "", "")
+	s, _, shutdown, _ := newTServer(t, false, "", "")
 	defer shutdown()
 	var r *http.Request
 
@@ -515,7 +551,7 @@ func TestNew(t *testing.T) {
 			"Te4g4+Ke9Q07MYo3iT1OCqq5qXX2ZcB47FBiVaT41hQ="},
 	}
 	for _, test := range authTests {
-		s, _, shutdown := newTServer(t, false, test[0], test[1])
+		s, _, shutdown, _ := newTServer(t, false, test[0], test[1])
 		auth := base64.StdEncoding.EncodeToString((s.authsha[:]))
 		if auth != test[2] {
 			t.Fatalf("expected auth %s but got %s", test[2], auth)
@@ -525,7 +561,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestAuthMiddleware(t *testing.T) {
-	s, _, shutdown := newTServer(t, false, "", "")
+	s, _, shutdown, _ := newTServer(t, false, "", "")
 	defer shutdown()
 	am := s.authMiddleware(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
@@ -580,7 +616,7 @@ func TestAuthMiddleware(t *testing.T) {
 }
 
 func TestClientMap(t *testing.T) {
-	s, _, shutdown := newTServer(t, true, "", "")
+	s, _, shutdown, _ := newTServer(t, true, "", "")
 	resp := make(chan []byte, 1)
 	conn := &TConn{
 		respReady: resp,
