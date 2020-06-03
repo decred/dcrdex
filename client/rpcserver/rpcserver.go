@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -66,6 +67,7 @@ type ClientCore interface {
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)
+	Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error)
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer

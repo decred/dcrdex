@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -56,6 +57,8 @@ type TCore struct {
 	order               *core.Order
 	tradeErr            error
 	cancelErr           error
+	coin                asset.Coin
+	withdrawErr         error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -103,6 +106,9 @@ func (c *TCore) Wallets() []*core.WalletState {
 }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	return c.walletState
+}
+func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error) {
+	return c.coin, c.withdrawErr
 }
 
 type TWriter struct {

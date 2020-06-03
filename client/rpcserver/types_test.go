@@ -465,3 +465,50 @@ func TestParseCancelArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestParseWithdrawArgs(t *testing.T) {
+	paramsWithArgs := func(id, value string) *RawParams {
+		pw := encode.PassBytes("password123")
+		pwArgs := []encode.PassBytes{pw}
+		args := []string{
+			id,
+			value,
+			"abc",
+		}
+		return &RawParams{PWArgs: pwArgs, Args: args}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: paramsWithArgs("42", "5000"),
+	}, {
+		name:    "assetID is not int",
+		params:  paramsWithArgs("42.1", "5000"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		res, err := parseWithdrawArgs(test.params)
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		if !bytes.Equal(res.AppPass, test.params.PWArgs[0]) {
+			t.Fatalf("appPass doesn't match")
+		}
+		if fmt.Sprint(res.AssetID) != test.params.Args[0] {
+			t.Fatalf("assetID doesn't match")
+		}
+		if fmt.Sprint(res.Value) != test.params.Args[1] {
+			t.Fatalf("value doesn't match")
+		}
+		if res.Address != test.params.Args[2] {
+			t.Fatalf("address doesn't match")
+		}
+	}
+}

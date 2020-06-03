@@ -29,6 +29,7 @@ const (
 	tradeRoute       = "trade"
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
+	withdrawRoute    = "withdraw"
 )
 
 const (
@@ -37,6 +38,7 @@ const (
 	walletLockedStr   = "%s wallet locked"
 	walletUnlockedStr = "%s wallet unlocked"
 	canceledOrderStr  = "canceled order %s"
+	withdrawStr       = "withdrawal utxo %s"
 )
 
 // createResponse creates a msgjson response payload.
@@ -73,6 +75,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	tradeRoute:       handleTrade,
 	versionRoute:     handleVersion,
 	walletsRoute:     handleWallets,
+	withdrawRoute:    handleWithdraw,
 }
 
 // handleHelp handles requests for help. Returns general help for all commands
@@ -143,8 +146,7 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		form.WalletPass.Clear()
 	}()
 
-	exists := s.core.WalletState(form.AssetID) != nil
-	if exists {
+	if exists := s.core.WalletState(form.AssetID) != nil; exists {
 		errMsg := fmt.Sprintf("error creating %s wallet: wallet already exists",
 			dex.BipIDSymbol(form.AssetID))
 		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, errMsg)
@@ -385,11 +387,35 @@ func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err := s.core.Cancel(form.AppPass, form.OrderID); err != nil {
 		errMsg := fmt.Sprintf("unable to cancel order %q: %v", form.OrderID, err)
 		resErr := msgjson.NewError(msgjson.RPCCancelError, errMsg)
-		return createResponse(tradeRoute, nil, resErr)
+		return createResponse(cancelRoute, nil, resErr)
 	}
 	resp := fmt.Sprintf(canceledOrderStr, form.OrderID)
 
 	return createResponse(cancelRoute, &resp, nil)
+}
+
+// handleWithdraw handles requests for withdraw. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseWithdrawArgs(params)
+	if err != nil {
+		return usage(withdrawRoute, err)
+	}
+	defer form.AppPass.Clear()
+	if exists := s.core.WalletState(form.AssetID) != nil; !exists {
+		errMsg := fmt.Sprintf("error withdrawing: %s wallet does not exist",
+			dex.BipIDSymbol(form.AssetID))
+		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, errMsg)
+		return createResponse(withdrawRoute, nil, resErr)
+	}
+	coin, err := s.core.Withdraw(form.AppPass, form.AssetID, form.Value)
+	if err != nil {
+		resErr := msgjson.NewError(msgjson.RPCWithdrawError, err.Error())
+		return createResponse(withdrawRoute, nil, resErr)
+	}
+	resp := fmt.Sprintf(withdrawStr, coin.String())
+
+	return createResponse(withdrawRoute, &resp, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -738,5 +764,20 @@ Registration is complete after the fee transaction has been confirmed.`,
     orderID (string): The hex ID of the order to cancel`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(canceledOrderStr, "[order ID]") + `"`,
+	},
+	withdrawRoute: {
+		pwArgsShort: `"appPass"`,
+		argsShort:   `assetID value "address"`,
+		cmdSummary:  `Withdraw value from an exchange wallet to address.`,
+		pwArgsLong: `Password Args:
+    appPass (string): The DEX client password.`,
+		argsLong: `Args:
+    assetID (int): The asset's BIP-44 registered coin index. Used to identify
+      which wallet to withdraw from. e.g. 42 for DCR. See
+      https://github.com/satoshilabs/slips/blob/master/slip-0044.md
+    value (int): The amount in the asset's smallest unit to withdraw.
+    address (string): The address to withdraw funds to.`,
+		returns: `Returns:
+    string: The message "` + fmt.Sprintf(withdrawStr, "[txid:output index]") + `"`,
 	},
 }
