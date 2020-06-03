@@ -85,20 +85,21 @@ func main() {
 	}()
 
 	if cfg.RPCOn {
+		rpcserver.SetLogger(logMaker.Logger("RPC"))
+		rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
+		rpcSrv, err := rpcserver.New(rpcCfg)
+		if err != nil {
+			log.Errorf("Error creating rpc server: %v", err)
+			cancel()
+		}
+		cm := dex.NewConnectionMaster(rpcSrv)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			rpcserver.SetLogger(logMaker.Logger("RPC"))
-			rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
-			rpcSrv, err := rpcserver.New(rpcCfg)
-			if err != nil {
-				log.Errorf("Error starting rpc server: %v", err)
-				os.Exit(1)
-			}
-			cm := dex.NewConnectionMaster(rpcSrv)
 			err = cm.Connect(appCtx)
 			if err != nil {
 				log.Errorf("Error starting rpc server: %v", err)
+				cancel()
 				return
 			}
 			cm.Wait()
@@ -107,17 +108,18 @@ func main() {
 
 	if !cfg.NoWeb {
 		wg.Add(1)
+		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
+		if err != nil {
+			log.Errorf("Error creating web server: %v", err)
+			cancel()
+		}
+		cm := dex.NewConnectionMaster(webSrv)
 		go func() {
 			defer wg.Done()
-			webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
-			if err != nil {
-				log.Errorf("Error creating web server: %v", err)
-				os.Exit(1)
-			}
-			cm := dex.NewConnectionMaster(webSrv)
 			err = cm.Connect(appCtx)
 			if err != nil {
 				log.Errorf("Error starting web server: %v", err)
+				cancel()
 				return
 			}
 			cm.Wait()
@@ -126,4 +128,5 @@ func main() {
 
 	wg.Wait()
 	ui.Close()
+	log.Info("Exiting dexc main.")
 }
