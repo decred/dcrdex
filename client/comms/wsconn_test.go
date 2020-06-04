@@ -77,7 +77,24 @@ func TestWsConn(t *testing.T) {
 
 	pingWait := time.Millisecond * 200
 
-	var wsc *wsConn
+	type conn struct {
+		sync.WaitGroup
+		*websocket.Conn
+	}
+	var clientMtx sync.Mutex
+	clients := make(map[uint64]*conn)
+
+	// server.Shutdown does not wait for hijacked connections, and pong handler
+	// uses t.Logf.
+	defer func() {
+		clientMtx.Lock()
+		for id, h := range clients {
+			h.Close()
+			h.Wait()
+			delete(clients, id)
+		}
+		clientMtx.Unlock()
+	}()
 
 	var id uint64
 	// server's "/ws" handler
@@ -87,17 +104,22 @@ func TestWsConn(t *testing.T) {
 
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			t.Fatalf("unable to upgrade http connection: %s", err)
+			t.Errorf("unable to upgrade http connection: %s", err)
 		}
+
+		ch := &conn{Conn: c}
+		clientMtx.Lock()
+		clients[id] = ch
+		clientMtx.Unlock()
 
 		c.SetPongHandler(func(string) error {
 			t.Logf("handler #%d: pong received", id)
 			return nil
 		})
 
-		wg.Add(1)
+		ch.Add(1)
 		go func() {
-			defer wg.Done()
+			defer ch.Done()
 			for {
 				select {
 				case <-pingCh:
@@ -123,38 +145,42 @@ func TestWsConn(t *testing.T) {
 			}
 		}()
 
-		for {
-			mType, message, err := c.ReadMessage()
-			if err != nil {
-				c.Close()
-				hCancel()
-
-				// If the context has been canceled, don't do anything.
-				if hCtx.Err() != nil {
-					return
-				}
-
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-					// Terminate on a normal close message.
-					return
-				}
-
-				t.Fatalf("handler #%d: read error: %v\n", id, err)
-				return
-			}
-
-			if mType == websocket.TextMessage {
-				msg, err := msgjson.DecodeMessage(message)
+		ch.Add(1)
+		go func() {
+			defer ch.Done()
+			for {
+				mType, message, err := c.ReadMessage()
 				if err != nil {
-					t.Errorf("handler #%d: decode error: %v", id, err)
 					c.Close()
 					hCancel()
+
+					// If the context has been canceled, don't do anything.
+					if hCtx.Err() != nil {
+						return
+					}
+
+					if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
+						// Terminate on a normal close message.
+						return
+					}
+
+					t.Errorf("handler #%d: read error: %v\n", id, err)
 					return
 				}
 
-				writePumpCh <- msg
+				if mType == websocket.TextMessage {
+					msg, err := msgjson.DecodeMessage(message)
+					if err != nil {
+						t.Errorf("handler #%d: decode error: %v", id, err)
+						c.Close()
+						hCancel()
+						return
+					}
+
+					writePumpCh <- msg
+				}
 			}
-		}
+		}()
 	}
 
 	certFile, err := ioutil.TempFile("", "certfile")
@@ -250,7 +276,7 @@ func TestWsConn(t *testing.T) {
 	}
 
 	// connect with cert
-	wsc, err = setupWsConn(certB)
+	wsc, err := setupWsConn(certB)
 	if err != nil {
 		t.Fatal(err)
 	}
