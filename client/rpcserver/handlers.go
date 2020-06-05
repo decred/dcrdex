@@ -38,7 +38,6 @@ const (
 	walletLockedStr   = "%s wallet locked"
 	walletUnlockedStr = "%s wallet unlocked"
 	canceledOrderStr  = "canceled order %s"
-	withdrawStr       = "withdrawal utxo %s"
 )
 
 // createResponse creates a msgjson response payload.
@@ -146,7 +145,7 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		form.WalletPass.Clear()
 	}()
 
-	if exists := s.core.WalletState(form.AssetID) != nil; exists {
+	if s.core.WalletState(form.AssetID) != nil {
 		errMsg := fmt.Sprintf("error creating %s wallet: wallet already exists",
 			dex.BipIDSymbol(form.AssetID))
 		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, errMsg)
@@ -389,9 +388,9 @@ func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCCancelError, errMsg)
 		return createResponse(cancelRoute, nil, resErr)
 	}
-	resp := fmt.Sprintf(canceledOrderStr, form.OrderID)
+	res := fmt.Sprintf(canceledOrderStr, form.OrderID)
 
-	return createResponse(cancelRoute, &resp, nil)
+	return createResponse(cancelRoute, &res, nil)
 }
 
 // handleWithdraw handles requests for withdraw. *msgjson.ResponsePayload.Error
@@ -402,7 +401,7 @@ func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(withdrawRoute, err)
 	}
 	defer form.AppPass.Clear()
-	if exists := s.core.WalletState(form.AssetID) != nil; !exists {
+	if s.core.WalletState(form.AssetID) == nil {
 		errMsg := fmt.Sprintf("error withdrawing: %s wallet does not exist",
 			dex.BipIDSymbol(form.AssetID))
 		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, errMsg)
@@ -413,9 +412,9 @@ func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCWithdrawError, err.Error())
 		return createResponse(withdrawRoute, nil, resErr)
 	}
-	resp := fmt.Sprintf(withdrawStr, coin.String())
+	res := coin.String()
 
-	return createResponse(withdrawRoute, &resp, nil)
+	return createResponse(withdrawRoute, &res, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -775,9 +774,10 @@ Registration is complete after the fee transaction has been confirmed.`,
     assetID (int): The asset's BIP-44 registered coin index. Used to identify
       which wallet to withdraw from. e.g. 42 for DCR. See
       https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    value (int): The amount in the asset's smallest unit to withdraw.
-    address (string): The address to withdraw funds to.`,
+    value (int): The amount to withdraw in units of the asset's smallest
+      denomination (e.g. satoshis, atoms, etc.)"
+    address (string): The address to which withdrawn funds are sent.`,
 		returns: `Returns:
-    string: The message "` + fmt.Sprintf(withdrawStr, "[txid:output index]") + `"`,
+    string: "[coin ID]"`,
 	},
 }
