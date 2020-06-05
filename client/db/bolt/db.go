@@ -38,6 +38,7 @@ var (
 	matchesBucket  = []byte("matches")
 	walletsBucket  = []byte("wallets")
 	notesBucket    = []byte("notes")
+	versionKey     = []byte("version")
 	feeProofKey    = []byte("feecoin")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
@@ -86,7 +87,7 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 		DB: db,
 	}
 
-	return bdb, bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket,
+	return bdb, bdb.init([][]byte{appBucket, accountsBucket,
 		ordersBucket, matchesBucket, walletsBucket, notesBucket})
 }
 
@@ -772,9 +773,9 @@ func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func(*bbo
 	return idx.pairs
 }
 
-// makeTopLevelBuckets creates a top-level bucket for each of the provided keys,
-// if the bucket doesn't already exist.
-func (db *BoltDB) makeTopLevelBuckets(buckets [][]byte) error {
+// init sets the database version and creates a top-level bucket
+// for each of the provided keys, if the bucket doesn't already exist.
+func (db *BoltDB) init(buckets [][]byte) error {
 	return db.Update(func(tx *bbolt.Tx) error {
 		for _, bucket := range buckets {
 			_, err := tx.CreateBucketIfNotExists(bucket)
@@ -782,6 +783,20 @@ func (db *BoltDB) makeTopLevelBuckets(buckets [][]byte) error {
 				return err
 			}
 		}
+
+		// Set the db version if it does not already exist.
+		bucket := tx.Bucket(appBucket)
+		if bucket == nil {
+			return fmt.Errorf("app bucket not found")
+		}
+		version := bucket.Get(versionKey)
+		if version == nil {
+			err := bucket.Put(versionKey, encode.Uint32Bytes(uint32(DBVersion)))
+			if err != nil {
+				return err
+			}
+		}
+
 		return nil
 	})
 }

@@ -36,6 +36,11 @@ func Uint32Bytes(i uint32) []byte {
 	return b
 }
 
+// BytesToUint64 converts the length-4, big-endian encoded byte slice to a uint32.
+func BytesToUint32(i []byte) uint32 {
+	return IntCoder.Uint32(i[:4])
+}
+
 // Uint64Bytes converts the uint64 to a length-8, big-endian encoded byte slice.
 func Uint64Bytes(i uint64) []byte {
 	b := make([]byte, 8)
