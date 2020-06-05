@@ -5,7 +5,6 @@ package pg
 
 import (
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -45,8 +44,7 @@ func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool)
 	return acct, isPaid, isOpen
 }
 
-// Accounts returns data for all accounts. Byte array fields in the database are
-// encoded as hex strings.
+// Accounts returns data for all accounts.
 func (a *Archiver) Accounts() ([]*db.Account, error) {
 	stmt := fmt.Sprintf(internal.SelectAllAccounts, a.tables.accounts)
 	rows, err := a.db.Query(stmt)
@@ -57,14 +55,10 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 	var accts []*db.Account
 	for rows.Next() {
 		a := new(db.Account)
-		id, pubkey, feeCoin := []byte{}, []byte{}, []byte{}
-		err = rows.Scan(&id, &pubkey, &a.FeeAddress, &feeCoin, &a.BrokenRule)
+		err = rows.Scan(&a.AccountID, &a.Pubkey, &a.FeeAddress, &a.FeeCoin, &a.BrokenRule)
 		if err != nil {
 			return nil, err
 		}
-		a.AccountID = hex.EncodeToString(id)
-		a.Pubkey = hex.EncodeToString(pubkey)
-		a.FeeCoin = hex.EncodeToString(feeCoin)
 		accts = append(accts, a)
 	}
 	if err = rows.Err(); err != nil {

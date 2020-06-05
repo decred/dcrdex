@@ -180,8 +180,7 @@ type AccountArchiver interface {
 	// account, completing the registration process.
 	PayAccount(account.AccountID, []byte) error
 
-	// Accounts returns data for all accounts. Byte array fields in the
-	// database are encoded as hex strings.
+	// Accounts returns data for all accounts.
 	Accounts() ([]*Account, error)
 }
 

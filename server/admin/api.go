@@ -152,6 +152,7 @@ func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
 	accts, err := s.core.Accounts()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to retrieve accounts: %v", err), http.StatusInternalServerError)
+		return
 	}
 	writeJSON(w, accts)
 }

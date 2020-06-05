@@ -3,12 +3,16 @@
 
 package db
 
-// Account holds data returned by Accounts. Byte array fields in the database
-// are encoded as hex strings.
+import (
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/account"
+)
+
+// Account holds data returned by Accounts.
 type Account struct {
-	AccountID  string
-	Pubkey     string
-	FeeAddress string
-	FeeCoin    string
-	BrokenRule byte
+	AccountID  account.AccountID `json:"accountid"`
+	Pubkey     dex.Bytes         `json:"pubkey"`
+	FeeAddress string            `json:"feeaddress"`
+	FeeCoin    dex.Bytes         `json:"feecoin"`
+	BrokenRule account.Rule      `json:"brokenrule"`
 }
