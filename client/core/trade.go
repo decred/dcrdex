@@ -498,7 +498,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	//   status is TakerSwapCast but Taker's swap has not been redeemed. The
 	//   second case does not prevent Maker from (re-)attempting to redeem
 	//   Taker's swap; it just ensures that Maker's swap is refunded if Taker's
-	//   swap still can't be refunded **after** Maker's locktime expires.
+	//   swap can't be redeemed **after** Maker's locktime expires.
 	var hasRedeemableSwap bool
 	if side == order.Taker {
 		hasRedeemableSwap = status == order.TakerSwapCast
@@ -833,6 +833,9 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		case dbMatch.Side == order.Maker && dbMatch.Status == order.MakerSwapCast:
 			swapCoinID = proof.MakerSwap
 			matchFailureReason = "no valid counterswap received from Taker"
+		case dbMatch.Side == order.Maker && dbMatch.Status == order.TakerSwapCast && proof.MakerRedeem == nil:
+			swapCoinID = proof.MakerSwap
+			matchFailureReason = "unable to redeem Taker's swap"
 		case dbMatch.Side == order.Taker && dbMatch.Status == order.TakerSwapCast:
 			swapCoinID = proof.TakerSwap
 			matchFailureReason = "no valid redemption received from Maker"
