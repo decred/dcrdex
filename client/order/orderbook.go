@@ -46,7 +46,6 @@ type cachedOrderNote struct {
 type OrderBook struct {
 	seqMtx       sync.Mutex
 	seq          uint64
-	idMtx        sync.Mutex
 	marketID     string
 	noteQueue    []*cachedOrderNote
 	noteQueueMtx sync.Mutex
@@ -181,10 +180,7 @@ func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 	ob.seq = snapshot.Seq
 	ob.seqMtx.Unlock()
 
-	ob.idMtx.Lock()
 	ob.marketID = snapshot.MarketID
-	ob.idMtx.Unlock()
-
 	ob.orders = make(map[order.OrderID]*Order)
 	ob.buys = NewBookSide(descending)
 	ob.sells = NewBookSide(ascending)
@@ -236,11 +232,7 @@ func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 // book is the workhorse of the exported Book function. It allows booking
 // cached and uncached order notes.
 func (ob *OrderBook) book(note *msgjson.BookOrderNote, cached bool) error {
-	ob.idMtx.Lock()
-	marketID := ob.marketID
-	ob.idMtx.Unlock()
-
-	if marketID != note.MarketID {
+	if ob.marketID != note.MarketID {
 		return fmt.Errorf("invalid note market id %s", note.MarketID)
 	}
 
@@ -295,11 +287,7 @@ func (ob *OrderBook) Book(note *msgjson.BookOrderNote) error {
 // updateRemaining is the workhorse of the exported UpdateRemaining function. It
 // allows updating cached and uncached orders.
 func (ob *OrderBook) updateRemaining(note *msgjson.UpdateRemainingNote, cached bool) error {
-	ob.idMtx.Lock()
-	marketID := ob.marketID
-	ob.idMtx.Unlock()
-
-	if marketID != note.MarketID {
+	if ob.marketID != note.MarketID {
 		return fmt.Errorf("invalid update_remaining note market id %s", note.MarketID)
 	}
 
@@ -341,11 +329,7 @@ func (ob *OrderBook) UpdateRemaining(note *msgjson.UpdateRemainingNote) error {
 // unbook is the workhorse of the exported Unbook function. It allows unbooking
 // cached and uncached order notes.
 func (ob *OrderBook) unbook(note *msgjson.UnbookOrderNote, cached bool) error {
-	ob.idMtx.Lock()
-	marketID := ob.marketID
-	ob.idMtx.Unlock()
-
-	if marketID != note.MarketID {
+	if ob.marketID != note.MarketID {
 		return fmt.Errorf("invalid note market id %s", note.MarketID)
 	}
 
@@ -451,31 +435,6 @@ func (ob *OrderBook) BestFill(qty uint64, side uint8) ([]*fill, error) {
 // a new epoch begins.
 func (ob *OrderBook) ResetEpoch() {
 	ob.epochQueue.Reset()
-}
-
-// Reset clears the orderbook and its associated epoch queue. This should be
-// called when a trade suspension does not persist the orderbook.
-func (ob *OrderBook) Reset() {
-	ob.seqMtx.Lock()
-	ob.seq = 0
-	ob.seqMtx.Unlock()
-
-	ob.idMtx.Lock()
-	ob.marketID = ""
-	ob.idMtx.Unlock()
-
-	ob.noteQueueMtx.Lock()
-	ob.noteQueue = make([]*cachedOrderNote, 0)
-	ob.noteQueueMtx.Unlock()
-
-	ob.ordersMtx.Lock()
-	ob.orders = make(map[order.OrderID]*Order)
-	ob.ordersMtx.Unlock()
-
-	ob.buys.Reset()
-	ob.sells.Reset()
-
-	ob.ResetEpoch()
 }
 
 // Enqueue appends the provided order note to the orderbook's epoch queue.

@@ -2499,8 +2499,12 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 
 	// Remove pending suspends for the market.
 	if sched := dc.pendingSuspends[sp.MarketID]; sched != nil {
-		sched.Stop()
-		delete(dc.pendingSuspends, sp.MarketID)
+		if !sched.Stop() {
+			// TODO: too late, timer already fired. Need to request the
+			// current configuration for the market at this point.
+			return fmt.Errorf("unable to stop previously scheduled "+
+				"suspend for market %s on dex %s", sp.MarketID, dc.acct.host)
+		}
 	}
 
 	// Set the new scheduled suspend.
@@ -2513,12 +2517,12 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 			return
 		}
 
-		// Clear the order book associated with the suspended market.
-		dc.booksMtx.RLock()
+		// Clear the bookie associated with the suspended market.
+		dc.booksMtx.Lock()
 		if bookie := dc.books[sp.MarketID]; bookie != nil {
-			bookie.Reset()
+			dc.books[sp.MarketID] = newBookie(func() { c.unsub(dc, sp.MarketID) })
 		}
-		dc.booksMtx.RUnlock()
+		dc.booksMtx.Unlock()
 
 		if !sp.Persist {
 			// Revoke all active orders of the suspended market for the dex.
