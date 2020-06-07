@@ -591,7 +591,7 @@ the checksum generated from their local copy of the epoch queue.
 ==Match negotiation==
 
 Swap negotiation details will be relayed through the DEX with a series of
-notifications or progress reports.
+notifications.
 Both the DEX and the clients will need to serialize and sign the notification
 data. The originator includes their signature with the request, while the
 recipient will return an '''acknowledgement''', or a list of
@@ -627,7 +627,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | rate      || int    || the matched price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
-| timestamp || int    || server's UNIX timestamp (milliseconds)
+| tserver || int    || server's UNIX timestamp (milliseconds)
 |-
 | address   || string || the counterparty's receiving address
 |-
@@ -647,10 +647,14 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | rate       || 8  || the matched price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
-| timestamp  || 8  || server's UNIX timestamp (milliseconds)
+| tserver  || 8  || server's UNIX timestamp (milliseconds)
 |-
 | address    || varies || UTF-8 encoded receiving address for the match
 |}
+
+'''The <code>tserver</code> value is used as the basis for the the locktimes.'''
+If it is necessary to convert the time to seconds, the value should be rounded
+down.
 
 The client will respond with a list of signed match acknowledgements.
 
