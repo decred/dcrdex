@@ -776,7 +776,7 @@ func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func(*bbo
 // init sets the database version and creates a top-level bucket
 // for each of the provided keys, if the bucket doesn't already exist.
 func (db *BoltDB) init(buckets [][]byte) error {
-	return db.Update(func(tx *bbolt.Tx) error {
+	err := db.Update(func(tx *bbolt.Tx) error {
 		for _, bucket := range buckets {
 			_, err := tx.CreateBucketIfNotExists(bucket)
 			if err != nil {
@@ -789,16 +789,28 @@ func (db *BoltDB) init(buckets [][]byte) error {
 		if bucket == nil {
 			return fmt.Errorf("app bucket not found")
 		}
-		version := bucket.Get(versionKey)
-		if version == nil {
-			err := bucket.Put(versionKey, encode.Uint32Bytes(uint32(DBVersion)))
+		versionB := bucket.Get(versionKey)
+		if versionB == nil {
+			versionB = encode.Uint32Bytes(uint32(initialVersion))
+			err := bucket.Put(versionKey, versionB)
 			if err != nil {
 				return err
 			}
 		}
 
+		version := encode.BytesToUint32(versionB)
+		if version > DBVersion {
+			return fmt.Errorf("unknown databae version, max version %d, "+
+				"got %d", DBVersion, version)
+		}
+
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	return upgradeDB(db.DB)
 }
 
 // withBucket is a creates a view into a (probably nested) bucket. The viewer

@@ -66,7 +66,12 @@ func upgradeDB(db *bbolt.DB) error {
 		return err
 	}
 
-	if version >= DBVersion {
+	if version > DBVersion {
+		return fmt.Errorf("unknown database version, max version %d, got: %d",
+			DBVersion, version)
+	}
+
+	if version == DBVersion {
 		// No upgrades necessary.
 		return nil
 	}
