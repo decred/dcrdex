@@ -40,6 +40,9 @@ const (
 		FROM %s
 		WHERE account_id = $1;`
 
+	// SelectAllAccounts retrieves all accounts.
+	SelectAllAccounts = `SELECT * FROM %s;`
+
 	// CreateAccount creates an entry for a new account.
 	CreateAccount = `INSERT INTO %s (account_id, pubkey, fee_address)
 		VALUES ($1, $2, $3);`

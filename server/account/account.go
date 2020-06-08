@@ -3,6 +3,7 @@ package account
 import (
 	"database/sql/driver"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 
 	"decred.org/dcrdex/server/account/pki"
@@ -29,6 +30,12 @@ func NewID(pk []byte) AccountID {
 // implements fmt.Stringer.
 func (aid AccountID) String() string {
 	return hex.EncodeToString(aid[:])
+}
+
+// MarshalJSON satisfies the json.Marshaller interface, and will marshal the
+// id to a hex string.
+func (aid AccountID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(aid.String())
 }
 
 // Value implements the sql/driver.Valuer interface.

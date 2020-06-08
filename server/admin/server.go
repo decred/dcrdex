@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
 	"github.com/decred/slog"
 	"github.com/go-chi/chi"
@@ -38,6 +39,7 @@ var (
 
 // SvrCore is satisfied by server/dex.DEX.
 type SvrCore interface {
+	Accounts() ([]*db.Account, error)
 	ConfigMsg() json.RawMessage
 	MarketRunning(mktName string) (found, running bool)
 	MarketStatus(mktName string) *market.Status
@@ -118,6 +120,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Use(middleware.AllowContentType("application/json"))
 		r.Get("/ping", s.apiPing)
 		r.Get("/config", s.apiConfig)
+		r.Get("/accounts", s.apiAccounts)
 
 		r.Get("/markets", s.apiMarkets)
 		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {

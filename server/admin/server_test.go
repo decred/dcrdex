@@ -7,7 +7,9 @@ import (
 	"context"
 	"crypto/elliptic"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -20,7 +22,10 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
 	"github.com/decred/dcrd/certgen"
 	"github.com/decred/slog"
@@ -41,7 +46,9 @@ type TMarket struct {
 }
 
 type TCore struct {
-	markets map[string]*TMarket
+	markets     map[string]*TMarket
+	accounts    []*db.Account
+	accountsErr error
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
@@ -129,6 +136,8 @@ func (w *tResponseWriter) Write(msg []byte) (int, error) {
 func (w *tResponseWriter) WriteHeader(statusCode int) {
 	w.code = statusCode
 }
+
+func (c *TCore) Accounts() ([]*db.Account, error) { return c.accounts, c.accountsErr }
 
 // genCertPair generates a key/cert pair to the paths provided.
 func genCertPair(certFile, keyFile string) error {
@@ -694,5 +703,94 @@ func TestAuthMiddleware(t *testing.T) {
 	for _, test := range tests {
 		r.SetBasicAuth(test.user, test.pass)
 		wantAuthError(test.name, test.wantErr)
+	}
+}
+
+func TestAccounts(t *testing.T) {
+	core := &TCore{
+		accounts: []*db.Account{},
+	}
+	srv := &Server{
+		core: core,
+	}
+
+	mux := chi.NewRouter()
+	mux.Get("/accounts", srv.apiAccounts)
+
+	// No accounts.
+	w := httptest.NewRecorder()
+	r, _ := http.NewRequest("GET", "https://localhost/accounts", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	respBody := w.Body.String()
+	if respBody != "[]\n" {
+		t.Errorf("incorrect response body: %q", respBody)
+	}
+
+	accountIDSlice, err := hex.DecodeString("0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var accountID account.AccountID
+	copy(accountID[:], accountIDSlice)
+	pubkey, err := hex.DecodeString("0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19")
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeCoin, err := hex.DecodeString("6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// An account.
+	acct := &db.Account{
+		AccountID:  accountID,
+		Pubkey:     dex.Bytes(pubkey),
+		FeeAddress: "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
+		FeeCoin:    dex.Bytes(feeCoin),
+		BrokenRule: account.Rule(byte(255)),
+	}
+	core.accounts = append(core.accounts, acct)
+
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/accounts", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+
+	exp := `[
+    {
+        "accountid": "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc",
+        "pubkey": "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19",
+        "feeaddress": "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
+        "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005",
+        "brokenrule": 255
+    }
+]
+`
+	if exp != w.Body.String() {
+		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
+	}
+
+	// core.Accounts error
+	core.accountsErr = errors.New("error")
+
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/accounts", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusInternalServerError)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrutil/v2"
@@ -41,6 +42,29 @@ func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool)
 		return nil, false, false
 	}
 	return acct, isPaid, isOpen
+}
+
+// Accounts returns data for all accounts.
+func (a *Archiver) Accounts() ([]*db.Account, error) {
+	stmt := fmt.Sprintf(internal.SelectAllAccounts, a.tables.accounts)
+	rows, err := a.db.Query(stmt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var accts []*db.Account
+	for rows.Next() {
+		a := new(db.Account)
+		err = rows.Scan(&a.AccountID, &a.Pubkey, &a.FeeAddress, &a.FeeCoin, &a.BrokenRule)
+		if err != nil {
+			return nil, err
+		}
+		accts = append(accts, a)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return accts, nil
 }
 
 // CreateAccount creates an entry for a new account in the accounts table. A
