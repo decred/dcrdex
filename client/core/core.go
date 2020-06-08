@@ -1000,6 +1000,13 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
 	}
 
+	if !wallet.unlocked() {
+		err = unlockWallet(wallet, crypter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+		}
+	}
+
 	dc, err := c.connectDEX(&db.AccountInfo{
 		Host: host,
 		Cert: []byte(form.Cert),

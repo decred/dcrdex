@@ -9,7 +9,25 @@
         Dark Mode
       </label>
     </div>
+    <div class="mt-2 {{if not .UserInfo.Authed}} d-hide{{end}}">
+      <button id="addADex" class="col bg2 selected">Add a DEX</button>
+    </div>
     <div class="pt-2">Build ID: <span id="commitHash" class="mono"></span></div>
+  </div>
+
+  {{- /* POP-UP FORMS */ -}}
+  <div id="forms" class="settingsforms d-flex flex-center p-4 overflow-auto d-hide">
+    
+    {{- /* DEX ADDRESS */ -}}
+    <form class="card mx-auto my-5 bg1" id="dexAddrForm" autocomplete="off">
+      {{template "dexAddrForm"}}
+    </form>
+    
+    {{- /* CONFIRM REGISTRATION */ -}}
+    <form class="card bg1 d-hide" id="confirmRegForm">
+      {{template "confirmRegistrationForm"}}
+    </form>
+
   </div>
 
 </div>
