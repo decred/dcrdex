@@ -375,7 +375,7 @@ func TestWallet(t *testing.T) {
 	}
 	receipt = receipts[0]
 
-	err = rig.gamma().Refund(receipt, tLTC)
+	_, err = rig.gamma().Refund(receipt, tLTC)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

@@ -1103,11 +1103,7 @@ func TestRefund(t *testing.T) {
 	node.privWIF = dcrutil.NewWIF(privKey, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
 	contractOutput := newOutput(node, tTxHash, 0, 1e8, wire.TxTreeRegular, contract)
-	receipt := &swapReceipt{
-		output:     contractOutput,
-		expiration: time.Now().Add(time.Hour * 24).UTC(),
-	}
-	err = wallet.Refund(receipt, tDCR)
+	_, err = wallet.Refund(contractOutput.ID(), contractOutput.Redeem(), tDCR)
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
@@ -1116,30 +1112,29 @@ func TestRefund(t *testing.T) {
 	badReceipt := &tReceipt{
 		coin: &tCoin{id: make([]byte, 15)},
 	}
-	err = wallet.Refund(badReceipt, tDCR)
+	_, err = wallet.Refund(badReceipt.coin.id, badReceipt.coin.Redeem(), tDCR)
 	if err == nil {
 		t.Fatalf("no error for bad receipt")
 	}
 
 	// gettxout error
 	node.txOutErr = tErr
-	err = wallet.Refund(receipt, tDCR)
+	_, err = wallet.Refund(contractOutput.ID(), contractOutput.Redeem(), tDCR)
 	if err == nil {
 		t.Fatalf("no error for missing utxo")
 	}
 	node.txOutErr = nil
 
 	// bad contract
-	receipt.output = newOutput(node, tTxHash, 0, 1e8, wire.TxTreeRegular, randBytes(50))
-	err = wallet.Refund(receipt, tDCR)
+	badContractOutput := newOutput(node, tTxHash, 0, 1e8, wire.TxTreeRegular, randBytes(50))
+	_, err = wallet.Refund(badContractOutput.ID(), badContractOutput.Redeem(), tDCR)
 	if err == nil {
 		t.Fatalf("no error for bad contract")
 	}
-	receipt.output = contractOutput
 
 	// Too small.
 	node.txOutRes[bigOutID] = newTxOutResult(nil, 100, 2)
-	err = wallet.Refund(receipt, tDCR)
+	_, err = wallet.Refund(contractOutput.ID(), contractOutput.Redeem(), tDCR)
 	if err == nil {
 		t.Fatalf("no error for value < fees")
 	}
@@ -1147,7 +1142,7 @@ func TestRefund(t *testing.T) {
 
 	// signature error
 	node.privWIFErr = tErr
-	err = wallet.Refund(receipt, tDCR)
+	_, err = wallet.Refund(contractOutput.ID(), contractOutput.Redeem(), tDCR)
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
@@ -1155,7 +1150,7 @@ func TestRefund(t *testing.T) {
 
 	// send error
 	node.sendRawErr = tErr
-	err = wallet.Refund(receipt, tDCR)
+	_, err = wallet.Refund(contractOutput.ID(), contractOutput.Redeem(), tDCR)
 	if err == nil {
 		t.Fatalf("no error for sendrawtransaction rpc error")
 	}
@@ -1165,14 +1160,14 @@ func TestRefund(t *testing.T) {
 	var badHash chainhash.Hash
 	badHash[0] = 0x05
 	node.sendRawHash = &badHash
-	err = wallet.Refund(receipt, tDCR)
+	_, err = wallet.Refund(contractOutput.ID(), contractOutput.Redeem(), tDCR)
 	if err == nil {
 		t.Fatalf("no error for tx hash")
 	}
 	node.sendRawHash = nil
 
 	// Sanity check that we can succeed again.
-	err = wallet.Refund(receipt, tDCR)
+	_, err = wallet.Refund(contractOutput.ID(), contractOutput.Redeem(), tDCR)
 	if err != nil {
 		t.Fatalf("re-refund error: %v", err)
 	}

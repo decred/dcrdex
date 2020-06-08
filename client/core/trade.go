@@ -14,6 +14,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -40,7 +41,6 @@ type matchTracker struct {
 	trade       *order.Trade
 	counterSwap asset.AuditInfo
 	id          order.MatchID
-	receipt     *asset.Receipt
 }
 
 // The status is part of both the UserMatch and the MatchMetaData used to
@@ -473,10 +473,58 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	return false
 }
 
+// isRefundable will be true if we have broadcasted a swap contract, the other
+// party has not executed the required follow-up action (i.e. match status shows
+// our swap is the last action on the match) AND our swap's locktime has expired.
+func (t *trackedTrade) isRefundable(match *matchTracker) bool {
+	if match.failErr != nil || match.MetaData.Proof.RefundCoin != nil {
+		return false
+	}
+
+	wallet := t.wallets.fromWallet
+	asset := t.wallets.fromAsset
+	if !wallet.unlocked() {
+		log.Errorf("cannot refund order %s, match %s, because %s wallet is not unlocked",
+			t.ID(), match.id, unbip(asset.ID))
+		return false
+	}
+
+	dbMatch, _, proof, _ := match.parts()
+	side, status := dbMatch.Side, dbMatch.Status
+
+	// hasRedeemableSwap is true if
+	// - the client is the taker on the match and the status is TakerSwapCast
+	// - the client is the maker on the match, the status is MakerSwapCast OR
+	//   status is TakerSwapCast but Taker's swap has not been redeemed. The
+	//   second case does not prevent Maker from (re-)attempting to redeem
+	//   Taker's swap; it just ensures that Maker's swap is refunded if Taker's
+	//   swap can't be redeemed **after** Maker's locktime expires.
+	var hasRedeemableSwap bool
+	if side == order.Taker {
+		hasRedeemableSwap = status == order.TakerSwapCast
+	} else {
+		hasRedeemableSwap = status == order.MakerSwapCast ||
+			(status == order.TakerSwapCast && proof.MakerRedeem == nil)
+	}
+	if !hasRedeemableSwap {
+		return false
+	}
+
+	// Issue a refund if our swap's locktime has expired.
+	swapLocktimeExpired, err := wallet.LocktimeExpired(proof.Script)
+	if err != nil {
+		log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
+			dbMatch.Side, t.ID(), match.id, err)
+		return false
+	}
+	return swapLocktimeExpired
+}
+
 // tick will check for and perform any match actions necessary.
 func (t *trackedTrade) tick() (assetCounter, error) {
 	var swaps []*matchTracker
 	var redeems []*matchTracker
+	var refunds []*matchTracker
 	counts := make(assetCounter)
 	errs := newErrorSet(t.dc.acct.host + " tick: ")
 
@@ -484,19 +532,29 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 	defer t.matchMtx.Unlock()
 	var sent, quoteSent, received, quoteReceived uint64
 	for _, match := range t.matches {
-		if t.isSwappable(match) {
+		switch {
+		case t.isSwappable(match):
 			swaps = append(swaps, match)
 			sent += match.Match.Quantity
 			quoteSent += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
-		} else if t.isRedeemable(match) {
+
+		case t.isRedeemable(match):
 			redeems = append(redeems, match)
 			received += match.Match.Quantity
 			quoteReceived += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
+
+		case t.isRefundable(match):
+			refunds = append(refunds, match)
 		}
 	}
+
+	fromID := t.wallets.fromAsset.ID
+	nSwapsAndRefunds := len(swaps) + len(refunds)
+	if nSwapsAndRefunds > 0 {
+		counts[fromID] = nSwapsAndRefunds
+	}
+
 	if len(swaps) > 0 {
-		fromID := t.wallets.fromAsset.ID
-		counts[fromID] = len(swaps)
 		qty := sent
 		if !t.Trade().Sell {
 			qty = quoteSent
@@ -506,7 +564,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 		// notifications before swapMatches.
 		corder, _ := t.coreOrderInternal()
 		if err != nil {
-			errs.add("swapMatches: %v", err)
+			errs.addErr(err)
 			details := fmt.Sprintf("Error encountered sending a swap output(s) worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
 			t.notify(newOrderNote("Swap error", details, db.ErrorLevel, corder))
@@ -515,8 +573,8 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 				float64(qty)/conversionFactor, unbip(fromID), t.token())
 			t.notify(newOrderNote("Swaps initiated", details, db.Poke, corder))
 		}
-
 	}
+
 	if len(redeems) > 0 {
 		toAsset := t.wallets.toAsset.ID
 		counts[toAsset] = len(redeems)
@@ -527,7 +585,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 		err := t.redeemMatches(redeems)
 		corder, _ := t.coreOrderInternal()
 		if err != nil {
-			errs.add("redeemMatches: %v", err)
+			errs.addErr(err)
 			details := fmt.Sprintf("Error encountered sending redemptions worth %.8f %s on order %s",
 				float64(qty)/conversionFactor, unbip(toAsset), t.token())
 			t.notify(newOrderNote("Redemption error", details, db.ErrorLevel, corder))
@@ -537,6 +595,20 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 			t.notify(newOrderNote("Match complete", details, db.Poke, corder))
 		}
 	}
+
+	if len(refunds) > 0 {
+		refunded, err := t.refundMatches(refunds)
+		corder, _ := t.coreOrderInternal()
+		details := fmt.Sprintf("Refunded %.8f %s on order %s",
+			float64(refunded)/conversionFactor, unbip(fromID), t.token())
+		if err != nil {
+			errs.addErr(err)
+			t.notify(newOrderNote("Refund Failure", details+", with some errors", db.ErrorLevel, corder))
+		} else {
+			t.notify(newOrderNote("Matches Refunded", details, db.WarningLevel, corder))
+		}
+	}
+
 	return counts, errs.ifany()
 }
 
@@ -607,7 +679,6 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	coinStrs := make([]string, len(receipts))
 	for i, receipt := range receipts {
 		match := matches[i]
-		match.receipt = &receipt
 		coin := receipt.Coin()
 		coinID := []byte(coin.ID())
 		coinStrs[i] = coin.String()
@@ -623,6 +694,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		if err != nil {
 			match.failErr = err
 			errs.add("error sending 'init' message for match %s: %v", match.id, err)
+			// TODO: try again and issue refund when locktime expires
 			continue
 		}
 		sigMsg := init.Serialize()
@@ -638,6 +710,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		// The time is not part of the signed msgjson.Init structure, but save it
 		// anyway.
 		auth.InitStamp = encode.UnixMilliU(time.Now())
+		proof.Script = contract[:] // Save, in case we need to refund this swap later.
 		if match.Match.Side == order.Taker {
 			match.setStatus(order.TakerSwapCast)
 			proof.TakerSwap = coinID
@@ -737,6 +810,70 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		len(redemptions), t.ID(), redeemAsset.Symbol, outCoin)
 
 	return errs.ifany()
+}
+
+// refundMatches will send refund transactions for the specified matches.
+func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
+	errs := newErrorSet("refundMatches: order %s - ", t.ID())
+
+	refundWallet, refundAsset := t.wallets.fromWallet, t.wallets.fromAsset // refunding to our wallet
+	var refundedQty uint64
+
+	for _, match := range matches {
+		dbMatch, _, proof, _ := match.parts()
+		if proof.RefundCoin != nil {
+			log.Errorf("attempted to execute duplicate refund for match %s, side %s, status %s",
+				match.id, dbMatch.Side, dbMatch.Status)
+			continue
+		}
+		contractToRefund := proof.Script
+		var swapCoinID order.CoinID
+		var matchFailureReason string
+		switch {
+		case dbMatch.Side == order.Maker && dbMatch.Status == order.MakerSwapCast:
+			swapCoinID = proof.MakerSwap
+			matchFailureReason = "no valid counterswap received from Taker"
+		case dbMatch.Side == order.Maker && dbMatch.Status == order.TakerSwapCast && proof.MakerRedeem == nil:
+			swapCoinID = proof.MakerSwap
+			matchFailureReason = "unable to redeem Taker's swap"
+		case dbMatch.Side == order.Taker && dbMatch.Status == order.TakerSwapCast:
+			swapCoinID = proof.TakerSwap
+			matchFailureReason = "no valid redemption received from Maker"
+		default:
+			log.Errorf("attempted to execute invalid refund for match %s, side %s, status %s",
+				match.id, dbMatch.Side, dbMatch.Status)
+			continue
+		}
+
+		swapCoinString := coinIDString(refundAsset.ID, swapCoinID)
+		log.Infof("failed match, %s, refunding %s contract %s",
+			matchFailureReason, unbip(refundAsset.ID), swapCoinString)
+
+		refundCoin, err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund, refundAsset)
+		if err != nil {
+			if err == asset.CoinSpentError {
+				// TODO: begin find redemption
+				// NOTE: may be that swap was actually refunded, so FindRedemption
+				// should account for that.
+			}
+			errs.add("error sending refund tx for match %s, swap coin %s: %v",
+				match.id, swapCoinString, err)
+			match.failErr = err
+			continue
+		}
+		if t.Trade().Sell {
+			refundedQty += match.Match.Quantity
+		} else {
+			refundedQty += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
+		}
+		proof.RefundCoin = []byte(refundCoin)
+		err = t.db.UpdateMatch(&match.MetaMatch)
+		if err != nil {
+			errs.add("error storing match info in database: %v", err)
+		}
+	}
+
+	return refundedQty, errs.ifany()
 }
 
 // processAudit processes the audit request from the server.

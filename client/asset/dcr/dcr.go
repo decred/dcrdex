@@ -119,7 +119,7 @@ func (output *output) Confirmations() (uint32, error) {
 		return 0, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if txOut == nil {
-		return 0, fmt.Errorf("tx output not found")
+		return 0, asset.CoinSpentError
 	}
 	return uint32(txOut.Confirmations), nil
 }
@@ -855,6 +855,17 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 	}, nil
 }
 
+// LocktimeExpired returns true if the specified contract's locktime has
+// expired, making it possible to issue a Refund.
+func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, error) {
+	_, _, locktime, _, err := dexdcr.ExtractSwapDetails(contract, chainParams)
+	if err != nil {
+		return false, fmt.Errorf("error extracting contract locktime: %v", err)
+	}
+	contractExpiry := time.Unix(int64(locktime), 0).UTC()
+	return time.Now().UTC().After(contractExpiry), nil
+}
+
 // FindRedemption should attempt to find the input that spends the specified
 // coin, and return the secret key if it does.
 //
@@ -991,79 +1002,77 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 
 // Refund refunds a contract. This can only be used after the time lock has
 // expired.
-func (dcr *ExchangeWallet) Refund(receipt asset.Receipt, nfo *dex.Asset) error {
-	op := receipt.Coin()
-	txHash, vout, err := decodeCoinID(op.ID())
+// NOTE: The contract cannot be retreived from the unspent coin info as the
+// wallet does not store it, even though it was known when the init transaction
+// was created. The client should store this information for persistence across
+// sessions.
+func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (dex.Bytes, error) {
+	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Grab the unspent output to make sure it's good and to get the value.
 	utxo, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		return fmt.Errorf("error finding unspent contract: %v", err)
+		return nil, fmt.Errorf("error finding unspent contract: %v", err)
+	}
+	if utxo == nil {
+		return nil, asset.CoinSpentError
 	}
 	val := toAtoms(utxo.Value)
-	// NOTE: The wallet does not store this contract, even though it was known
-	// when the init transaction was created. The DEX should store this
-	// information for persistence across sessions. Care has been taken to ensure
-	// that any type satisfying asset.Coin can be passed to the Wallet's methods,
-	// so the DEX can create it's own asset.Coin to issue a redeem or refund after
-	// a restart, for example, but the (asset.Coin).Redeem script (the swap
-	// contract itself, including the counter-party's pubkey) must be included.
-	redeem := op.Redeem()
-	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(redeem, chainParams)
+	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(contract, chainParams)
 	if err != nil {
-		return fmt.Errorf("error extracting swap addresses: %v", err)
+		return nil, fmt.Errorf("error extracting swap addresses: %v", err)
 	}
 	// Create the transaction that spends the contract.
 	msgTx := wire.NewMsgTx()
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout, wire.TxTreeRegular)
-	txIn := wire.NewTxIn(prevOut, int64(op.Value()), []byte{})
+	txIn := wire.NewTxIn(prevOut, int64(val), []byte{})
 	txIn.Sequence = wire.MaxTxInSequenceNum - 1
 	msgTx.AddTxIn(txIn)
 	// Calculate fees and add the change output.
 	size := msgTx.SerializeSize() + dexdcr.RefundSigScriptSize + dexdcr.P2PKHOutputSize
 	fee := nfo.FeeRate * uint64(size)
 	if fee > val {
-		return fmt.Errorf("refund tx not worth the fees")
+		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
 
 	refundAddr, err := dcr.node.GetNewAddressGapPolicy(dcr.acct, rpcclient.GapPolicyIgnore, chainParams)
 	if err != nil {
-		return fmt.Errorf("error getting new address from the wallet: %v", err)
+		return nil, fmt.Errorf("error getting new address from the wallet: %v", err)
 	}
 	pkScript, err := txscript.PayToAddrScript(refundAddr)
 	if err != nil {
-		return fmt.Errorf("error creating refund script for address '%v': %v", refundAddr, err)
+		return nil, fmt.Errorf("error creating refund script for address '%v': %v", refundAddr, err)
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
 	// One last check for dust.
 	if dexdcr.IsDust(txOut, nfo.FeeRate) {
-		return fmt.Errorf("refund output is dust")
+		return nil, fmt.Errorf("refund output is dust")
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign it.
-	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, redeem, sender)
+	refundSig, refundPubKey, err := dcr.createSig(msgTx, 0, contract, sender)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	redeemSigScript, err := dexdcr.RefundP2SHContract(redeem, refundSig, refundPubKey)
+	redeemSigScript, err := dexdcr.RefundP2SHContract(contract, refundSig, refundPubKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	txIn.SignatureScript = redeemSigScript
 	// Send it.
 	checkHash := msgTx.TxHash()
 	refundHash, err := dcr.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if *refundHash != checkHash {
-		return fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
+		return nil, fmt.Errorf("refund sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", *refundHash, checkHash)
 	}
-	return nil
+	return toCoinID(refundHash, 0), nil
 }
 
 // Address returns an address for the exchange wallet.
@@ -1304,7 +1313,7 @@ func (dcr *ExchangeWallet) reqFunds(val uint64, funding uint32, nfo *dex.Asset) 
 	return calc.RequiredFunds(val, funding, nfo)
 }
 
-// convertCoin converts the asset.Coin to an output.
+// convertCoin converts the asset.Coin to an unspent output.
 func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	op, _ := coin.(*output)
 	if op != nil {
@@ -1319,7 +1328,7 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 		return nil, fmt.Errorf("error finding unspent output %s:%d: %v", txHash, vout, err)
 	}
 	if txOut == nil {
-		return nil, fmt.Errorf("tx output not found")
+		return nil, asset.CoinSpentError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {

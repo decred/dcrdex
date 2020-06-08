@@ -418,6 +418,8 @@ type TXCWallet struct {
 	swapReceipts   []asset.Receipt
 	auditInfo      asset.AuditInfo
 	auditErr       error
+	refundCoin     dex.Bytes
+	refundErr      error
 	redeemCoins    []dex.Bytes
 	badSecret      bool
 	fundedVal      uint64
@@ -495,12 +497,16 @@ func (w *TXCWallet) AuditContract(coinID, contract dex.Bytes) (asset.AuditInfo, 
 	return w.auditInfo, w.auditErr
 }
 
+func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, error) {
+	return true, nil
+}
+
 func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error) {
 	return nil, nil
 }
 
-func (w *TXCWallet) Refund(asset.Receipt, *dex.Asset) error {
-	return nil
+func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes, *dex.Asset) (dex.Bytes, error) {
+	return w.refundCoin, w.refundErr
 }
 
 func (w *TXCWallet) Address() (string, error) {
@@ -523,6 +529,10 @@ func (w *TXCWallet) Send(address string, fee uint64, _ *dex.Asset) (asset.Coin, 
 
 func (w *TXCWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	return 0, nil
+}
+
+func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) {
+	return time.Time{}, nil
 }
 
 func (w *TXCWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (asset.Coin, error) {
@@ -1826,10 +1836,11 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	rig := newTestRig()
 	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
 	oid := ord.ID()
+	mid := ordertest.RandomMatchID()
 	preImg := newPreimage()
 	payload := &msgjson.RevokeMatch{
 		OrderID: oid[:],
-		MatchID: encode.RandomBytes(order.MatchIDSize),
+		MatchID: mid[:],
 	}
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.RevokeMatchRoute, payload)
 
@@ -1839,12 +1850,23 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 		t.Fatal("[handleRevokeMatchMsg] expected a non-existent order")
 	}
 
+	match := &matchTracker{
+		id: mid,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{},
+		},
+	}
+
 	tracker := &trackedTrade{
 		db: rig.db,
 		metaData: &db.OrderMetaData{
 			Status: order.OrderStatusBooked,
 		},
-		Order:  ord,
+		Order: ord,
+		matches: map[order.MatchID]*matchTracker{
+			mid: match,
+		},
 		preImg: preImg,
 		dc:     rig.dc,
 	}
@@ -1861,9 +1883,8 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 		t.Fatalf("expected to find an order with id %s", oid.String())
 	}
 
-	if tracker.metaData.Status != order.OrderStatusRevoked {
-		t.Fatalf("expected a revoked order status, got %v",
-			tracker.metaData.Status)
+	if !match.MetaData.Proof.IsRevoked {
+		t.Fatal("match not revoked")
 	}
 }
 
@@ -2192,6 +2213,170 @@ func TestTradeTracking(t *testing.T) {
 	if tracker.cancel.matches.taker == nil {
 		t.Fatalf("cancelMatches.taker not set")
 	}
+}
+
+func TestRefunds(t *testing.T) {
+	checkStatus := func(tag string, match *matchTracker, wantStatus order.MatchStatus) {
+		if match.Match.Status != wantStatus {
+			t.Fatalf("%s: wrong status wanted %d, got %d", tag, match.Match.Status, wantStatus)
+		}
+	}
+	checkRefund := func(tracker *trackedTrade, match *matchTracker, expectAmt uint64) {
+		// Confirm that the status is SwapCast.
+		if match.Match.Side == order.Maker {
+			checkStatus("maker swapped", match, order.MakerSwapCast)
+		} else {
+			checkStatus("taker swapped", match, order.TakerSwapCast)
+		}
+		// Confirm isRefundable = true.
+		if !tracker.isRefundable(match) {
+			t.Fatalf("%s's swap not refundable", match.Match.Side)
+		}
+		// Check refund.
+		amtRefunded, err := tracker.refundMatches([]*matchTracker{match})
+		if err != nil {
+			t.Fatalf("unexpected refund error %v", err)
+		}
+		// Check refunded amount.
+		if amtRefunded != expectAmt {
+			t.Fatalf("expected %d refund amount, got %d", expectAmt, amtRefunded)
+		}
+		// Confirm isRefundable = false.
+		if tracker.isRefundable(match) {
+			t.Fatalf("%s's swap refundable after being refunded", match.Match.Side)
+		}
+		// Expect refund re-attempt to not refund any coin.
+		amtRefunded, err = tracker.refundMatches([]*matchTracker{match})
+		if err != nil {
+			t.Fatalf("unexpected refund error %v", err)
+		}
+		if amtRefunded != 0 {
+			t.Fatalf("expected 0 refund amount, got %d", amtRefunded)
+		}
+		// Confirm that the status is unchanged.
+		if match.Match.Side == order.Maker {
+			checkStatus("maker swapped", match, order.MakerSwapCast)
+		} else {
+			checkStatus("taker swapped", match, order.TakerSwapCast)
+		}
+	}
+
+	rig := newTestRig()
+	dc := rig.dc
+	tCore := rig.core
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
+	dcrWallet.Unlock(wPW, time.Hour)
+
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(wPW, time.Hour)
+
+	matchSize := 4 * tDCR.LotSize
+	qty := 3 * matchSize
+	rate := tBTC.RateStep * 10
+	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep)
+	loid := lo.ID()
+	mid := ordertest.RandomMatchID()
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	rig.dc.trades[tracker.ID()] = tracker
+
+	// MAKER REFUND, INVALID TAKER COUNTERSWAP
+	//
+	msgMatch := &msgjson.Match{
+		OrderID:  loid[:],
+		MatchID:  mid[:],
+		Quantity: matchSize,
+		Rate:     rate,
+		Address:  "counterparty-address",
+		Side:     uint8(order.Maker),
+	}
+	counterSwapID := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
+	sign(tDexPriv, msgMatch)
+	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("match messages error: %v", err)
+	}
+	match, found := tracker.matches[mid]
+	if !found {
+		t.Fatalf("match not found")
+	}
+
+	// We're the maker, so the init transaction should be broadcast.
+	checkStatus("maker swapped", match, order.MakerSwapCast)
+	proof := &match.MetaData.Proof
+
+	// Send the counter-party's init info.
+	auditQty := calc.BaseToQuote(rate, matchSize)
+	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
+	tBtcWallet.auditInfo = auditInfo
+	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
+
+	// Check audit errors.
+	tBtcWallet.auditErr = tErr
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err == nil {
+		t.Fatalf("no maker error for AuditContract error")
+	}
+
+	// Attempt refund.
+	tDcrWallet.refundCoin = encode.RandomBytes(36)
+	tDcrWallet.refundErr = nil
+	tBtcWallet.refundCoin = nil
+	tBtcWallet.refundErr = fmt.Errorf("unexpected call to btcWallet.Refund")
+	checkRefund(tracker, match, matchSize)
+
+	// TAKER REFUND, NO MAKER REDEEM
+	//
+	mid = ordertest.RandomMatchID()
+	msgMatch = &msgjson.Match{
+		OrderID:  loid[:],
+		MatchID:  mid[:],
+		Quantity: matchSize,
+		Rate:     rate,
+		Address:  "counterparty-address",
+		Side:     uint8(order.Taker),
+	}
+	sign(tDexPriv, msgMatch)
+	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("match messages error: %v", err)
+	}
+	match, found = tracker.matches[mid]
+	if !found {
+		t.Fatalf("match not found")
+	}
+	checkStatus("taker matched", match, order.NewlyMatched)
+	// Send through the audit request for the maker's init.
+	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
+	tBtcWallet.auditInfo = auditInfo
+	tBtcWallet.auditErr = nil
+	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
+	err = handleAuditRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("taker's match message error: %v", err)
+	}
+	checkStatus("taker counter-party swapped", match, order.MakerSwapCast)
+	auditInfo.coin.confs = tBTC.SwapConf
+	swapID := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
+	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	dc.tickAsset(tBTC.ID)
+	checkStatus("taker swapped", match, order.TakerSwapCast)
+
+	// Attempt refund.
+	checkRefund(tracker, match, matchSize)
 }
 
 func TestNotifications(t *testing.T) {

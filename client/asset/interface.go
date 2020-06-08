@@ -15,6 +15,11 @@ import (
 // swap transaction coin cannot be found.
 const CoinNotFoundError = dex.Error("coin not found")
 
+// CoinSpentError is returned when an attempt is made to treat a spent coin as
+// unspent. This error may be returned from AuditContract, Refund and Redeem
+// as those methods expect the provided coin to be unspent.
+const CoinSpentError = dex.Error("coin has been spent")
+
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
 	// Name is the display name for the currency, e.g. "Decred"
@@ -89,6 +94,9 @@ type Wallet interface {
 	// ExchangeWallet should return CoinNotFoundError. This enables the client
 	// to properly handle network latency.
 	AuditContract(coinID, contract dex.Bytes) (AuditInfo, error)
+	// LocktimeExpired returns true if the specified contract's locktime has
+	// expired, making it possible to issue a Refund.
+	LocktimeExpired(contract dex.Bytes) (bool, error)
 	// FindRedemption should attempt to find the input that spends the specified
 	// coin, and return the secret key if it does.
 	//
@@ -104,8 +112,12 @@ type Wallet interface {
 	// regardless of whether the server sends the 'redemption' message or not.
 	FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error)
 	// Refund refunds a contract. This can only be used after the time lock has
-	// expired.
-	Refund(Receipt, *dex.Asset) error
+	// expired AND if the contract has not been redeemed/refunded.
+	// NOTE: The contract cannot be retreived from the unspent coin info as the
+	// wallet does not store it, even though it was known when the init transaction
+	// was created. The client should store this information for persistence across
+	// sessions.
+	Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
 	// Unlock unlocks the exchange wallet.
