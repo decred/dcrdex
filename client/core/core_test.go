@@ -342,6 +342,10 @@ func (tdb *TDB) Backup() error {
 	return nil
 }
 
+func (tdb *TDB) Close() error {
+	return nil
+}
+
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
 type tCoin struct {
