@@ -816,6 +816,11 @@ func (db *boltDB) Backup() error {
 	return err
 }
 
+// Close terminates access to the database.
+func (db *boltDB) Close() error {
+	return db.DB.Close()
+}
+
 // bucketPutter enables chained calls to (*bbolt.Bucket).Put with error
 // deferment.
 type bucketPutter struct {
