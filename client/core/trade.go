@@ -866,7 +866,8 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 
 		refundCoin, err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund, refundAsset)
 		if err != nil {
-			if err == asset.CoinSpentError {
+			if err == asset.CoinNotFoundError {
+				// Could not fund the contract coin, which means it has been spent.
 				// TODO: begin find redemption
 				// NOTE: may be that swap was actually refunded, so FindRedemption
 				// should account for that.

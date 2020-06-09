@@ -128,7 +128,7 @@ func (op *output) Confirmations() (uint32, error) {
 		return 0, fmt.Errorf("error finding coin: %v", err)
 	}
 	if txOut == nil {
-		return 0, asset.CoinSpentError
+		return 0, asset.CoinNotFoundError
 	}
 	return uint32(txOut.Confirmations), nil
 }
@@ -794,9 +794,6 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 	if txOut == nil {
 		return nil, asset.CoinNotFoundError
 	}
-	if txOut == nil {
-		return nil, asset.CoinSpentError
-	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %v",
@@ -997,7 +994,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (d
 		return nil, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if utxo == nil {
-		return nil, asset.CoinSpentError
+		return nil, asset.CoinNotFoundError
 	}
 	val := toSatoshi(utxo.Value)
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
