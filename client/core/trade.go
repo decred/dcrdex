@@ -778,6 +778,13 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 			match.failErr = err
 			errs.add("error sending 'redeem' message for match %s, coin %x: %v",
 				match.id, coinIDString(redeemAsset.ID, coinID), err)
+			// TODO: Do not skip this match, set the status to MakerRedeemed.
+			// Redeem tx was broadcasted, and tests have shown cases where the
+			// server got the redeem request but the client did not receieve
+			// the server's ack. In such cases, the counter-party is notified
+			// of this redeem and the trade proceeds as it should. The described
+			// scenarios usually have err = "timed out waiting for 'redeem'
+			// response."
 			continue
 		}
 		sigMsg := msgRedeem.Serialize()

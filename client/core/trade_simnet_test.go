@@ -2,6 +2,16 @@
 
 package core
 
+// The btc, dcr and dcrdex harnesses should be running before executing
+// this test.
+//
+// Some errors you might encounter (especially after running this test
+// multiple times):
+// - error placing order rpc error: 22: coin locked
+//   clear the dcrdex db and restart the dcrdex harness
+// - error placing order not enough to cover requested funds
+//   use the affected asset harness to send funds to the affected wallet
+
 import (
 	"context"
 	"fmt"
@@ -16,111 +26,36 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
 	"github.com/decred/slog"
 	"golang.org/x/sync/errgroup"
 )
 
-type tWallet struct {
-	name    string
-	account string
-	pass    []byte
-	config  string
-	balance uint64
-}
-
-func dcrWallet(name string) *tWallet {
-	return &tWallet{
-		name:    name,
-		account: "default",
-		pass:    []byte("123"),
-	}
-}
-
-func btcWallet(name, account string) *tWallet {
-	return &tWallet{
-		name:    name,
-		account: account,
-		pass:    []byte("abc"),
-	}
-}
-
-type tClient struct {
-	id      int
-	core    *Core
-	appPass []byte
-	wallets map[uint32]*tWallet
-}
-
-func (client *tClient) log(format string, args ...interface{}) {
-	args = append([]interface{}{client.id}, args...)
-	tLog.Infof("[client %d] "+format, args...)
-}
-
-func (client *tClient) init() error {
-	db, err := ioutil.TempFile("", "core.db")
-	if err != nil {
-		return err
-	}
-	client.core, err = New(&Config{
-		DBPath: db.Name(),
-		Net:    dex.Regtest,
-	})
-	return err
-}
-
-func (client *tClient) dc() *dexConnection {
-	client.core.connMtx.RLock()
-	defer client.core.connMtx.RUnlock()
-	return client.core.conns[dexHost]
-}
-
-func (client *tClient) dcrw() *tWallet {
-	return client.wallets[dcr.BipID]
-}
-
-func (client *tClient) btcw() *tWallet {
-	return client.wallets[btc.BipID]
-}
-
-func mineBlocks(assetID uint32, name string, blocks uint16) error {
-	var harnessID string
-	switch assetID {
-	case dcr.BipID:
-		harnessID = "dcr-harness:4"
-	case btc.BipID:
-		harnessID = "btc-harness:2"
-	default:
-		return fmt.Errorf("can't mine blocks for unknown asset %d", assetID)
-	}
-	mineCmd := fmt.Sprintf("./mine-%s %d", name, blocks)
-	return exec.Command("tmux", "send-keys", "-t", harnessID, mineCmd, "C-m").Run()
-}
-
 var (
 	client1 = &tClient{
 		id:      1,
 		appPass: []byte("client1"),
 		wallets: map[uint32]*tWallet{
-			dcr.BipID: dcrWallet("alpha"),    // dcr alpha wallet
-			btc.BipID: btcWallet("beta", ""), // btc beta wallet
+			dcr.BipID: dcrWallet("trading1"),
+			btc.BipID: btcWallet("beta", "delta"),
 		},
 	}
 	client2 = &tClient{
 		id:      2,
 		appPass: []byte("client2"),
 		wallets: map[uint32]*tWallet{
-			dcr.BipID: dcrWallet("beta"),           // dcr beta wallet
-			btc.BipID: btcWallet("alpha", "gamma"), // btc gamma wallet
+			dcr.BipID: dcrWallet("trading2"),
+			btc.BipID: btcWallet("alpha", "gamma"),
 		},
 	}
+	clients = []*tClient{client1, client2}
 
 	dexHost = "127.0.0.1:17273"
 	dexCert string
 
-	tLog       dex.Logger
-	retryQueue *wait.TickerQueue
+	tLog dex.Logger
 )
 
 func readWalletCfgsAndDexCert() error {
@@ -167,7 +102,7 @@ func readWalletCfgsAndDexCert() error {
 }
 
 func startClients(ctx context.Context) error {
-	for _, c := range []*tClient{client1, client2} {
+	for _, c := range clients {
 		err := c.init()
 		c.log("core created")
 
@@ -226,7 +161,7 @@ func startClients(ctx context.Context) error {
 
 		// mine drc block(s) to mark fee as paid
 		regFeeConfs := c.dc().cfg.RegFeeConfirms
-		err = mineBlocks(dcr.BipID, dcrWallet.name, regFeeConfs)
+		err = mineBlocks(dcr.BipID, "alpha", regFeeConfs)
 		if err != nil {
 			return err
 		}
@@ -234,10 +169,10 @@ func startClients(ctx context.Context) error {
 
 		// wait for fee payment
 		c.log("waiting 5 seconds for fee confirmation notice")
-		notifications := c.core.NotificationFeed()
-		feePaid := runWaiter(ctx, 5*time.Second, func() bool {
+		c.notifications = c.core.NotificationFeed()
+		feePaid := tryUntil(ctx, 5*time.Second, func() bool {
 			select {
-			case n := <-notifications:
+			case n := <-c.notifications:
 				return n.Type() == "fee payment" && n.Subject() == "Account registered"
 			default:
 				return wait.TryAgain
@@ -253,14 +188,13 @@ func startClients(ctx context.Context) error {
 }
 
 // TestTrading runs a set of trading tests as subtests to enable performing
-// setup and teardown ops. The btc, dcr and dcrdex harnesses should be running
-// before executing this test.
+// setup and teardown ops.
 func TestTrading(t *testing.T) {
-	ctx, shutdown := context.WithCancel(context.Background())
+	ctx, cancelCtx := context.WithCancel(context.Background())
 
 	// defer teardown
 	defer func() {
-		shutdown()
+		cancelCtx()
 		if client1.core != nil && client1.core.cfg.DBPath != "" {
 			os.RemoveAll(client1.core.cfg.DBPath)
 		}
@@ -269,14 +203,16 @@ func TestTrading(t *testing.T) {
 		}
 	}()
 
-	UseLoggerMaker(&dex.LoggerMaker{DefaultLevel: slog.LevelOff}) // disable core logger
+	UseLoggerMaker(&dex.LoggerMaker{
+		Backend:      slog.NewBackend(os.Stdout),
+		DefaultLevel: slog.LevelError,
+	}) // core log on error only
+
 	tLog = slog.NewBackend(os.Stdout).Logger("TEST")
 	tLog.SetLevel(slog.LevelTrace)
 
 	// setup
 	tLog.Info("=== SETUP")
-	retryQueue = wait.NewTickerQueue(1 * time.Second)
-	go retryQueue.Run(ctx)
 	err := readWalletCfgsAndDexCert()
 	if err != nil {
 		t.Fatalf("error reading wallet cfgs and dex cert, harnesses running? -> %v", err)
@@ -294,8 +230,9 @@ func TestTrading(t *testing.T) {
 		"no taker swap":   testNoTakerSwap,
 		"no maker redeem": testNoMakerRedeem,
 	}
+
 	for test, testFn := range tests {
-		fmt.Println() // empty line to separate test logs for easier readability
+		fmt.Println() // empty line to separate test logs for better readability
 		if !t.Run(test, testFn) {
 			break
 		}
@@ -304,49 +241,44 @@ func TestTrading(t *testing.T) {
 
 // testTradeSuccess runs a simple trade test and ensures that the resulting
 // trades are completed successfully.
-// TODO: Compare balances before and after trading to ensure balance changes
-// are as expected.
 func testTradeSuccess(t *testing.T) {
-	err := simpleTradeTest(order.MatchComplete)
-	if err != nil {
+	var qty, rate uint64 = 12 * 1e8, 1.5 * 1e4 // 12 DCR at 0.00015 BTC/DCR
+	client1.isSeller, client2.isSeller = true, false
+	if err := simpleTradeTest(qty, rate, order.MatchComplete); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // testNoMakerSwap runs a simple trade test and ensures that the resulting
 // trades fail because of the Maker not sending their init swap tx.
-// TODO: Compare balances before and after trading to ensure there are no
-//balance changes.
 func testNoMakerSwap(t *testing.T) {
-	err := simpleTradeTest(order.NewlyMatched)
-	if err != nil {
+	var qty, rate uint64 = 10 * 1e8, 1 * 1e4 // 10 DCR at 0.0001 BTC/DCR
+	client1.isSeller, client2.isSeller = false, true
+	if err := simpleTradeTest(qty, rate, order.NewlyMatched); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // testNoTakerSwap runs a simple trade test and ensures that the resulting
 // trades fail because of the Taker not sending their init swap tx.
-// TODO:
-// - Update the test to ensure Maker's funds are refunded after locktime expires.
-// - Compare balances before and after trading to ensure balance changes are as
-// expected.
+// TODO: Update the test to ensure Maker's funds are refunded after locktime
+// expires.
 func testNoTakerSwap(t *testing.T) {
-	err := simpleTradeTest(order.MakerSwapCast)
-	if err != nil {
+	var qty, rate uint64 = 8 * 1e8, 2 * 1e4 // 8 DCR at 0.0002 BTC/DCR
+	client1.isSeller, client2.isSeller = true, false
+	if err := simpleTradeTest(qty, rate, order.MakerSwapCast); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // testNoMakerRedeem runs a simple trade test and ensures that the resulting
 // trades fail because of Maker not sending their redemption of Taker's swap.
-// TODO:
-// - Update the test to ensure both Maker and Taker's funds are refunded after
-// their respective swap locktime expires.
-// - Compare balances before and after trading to ensure balance changes are as
-// expected.
+// TODO: Update the test to ensure both Maker and Taker's funds are refunded
+// after their respective swap locktime expires.
 func testNoMakerRedeem(t *testing.T) {
-	err := simpleTradeTest(order.TakerSwapCast)
-	if err != nil {
+	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
+	client1.isSeller, client2.isSeller = true, false
+	if err := simpleTradeTest(qty, rate, order.TakerSwapCast); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -354,14 +286,41 @@ func testNoMakerRedeem(t *testing.T) {
 // simpleTradeTest uses client1 and client2 to place similar orders but on
 // either sides that get matched and monitors the resulting trades up till the
 // specified final status.
-func simpleTradeTest(finalStatus order.MatchStatus) error {
-	c1OrderID, err := placeTestOrder(client1, true)
-	if err != nil {
-		return fmt.Errorf("client1 place order error: %v", err)
+// Also checks that the changes to the clients wallets balances are within
+// expected range.
+func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
+	if client1.isSeller && client2.isSeller {
+		return fmt.Errorf("both client 1 and 2 cannot be sellers")
 	}
-	c2OrderID, err := placeTestOrder(client2, false)
+
+	// Unlock wallets to place orders.
+	// Also update starting balances for wallets to enable accurate
+	// balance change assertion after the test completes.
+	for _, client := range clients {
+		if err := client.unlockWallets(); err != nil {
+			return fmt.Errorf("client %d unlock wallet error: %v", client.id, err)
+		}
+		if err := client.updateBalances(); err != nil {
+			return fmt.Errorf("client %d balance update error: %v", client.id, err)
+		}
+	}
+
+	c1OrderID, err := placeTestOrder(client1, qty, rate, client1.isSeller)
 	if err != nil {
-		return fmt.Errorf("client2 place order error: %v", err)
+		return fmt.Errorf("client1 place %s order error: %v", sellString(client1.isSeller), err)
+	}
+	c2OrderID, err := placeTestOrder(client2, qty, rate, client2.isSeller)
+	if err != nil {
+		return fmt.Errorf("client2 place %s order error: %v", sellString(client2.isSeller), err)
+	}
+
+	if finalStatus == order.NewlyMatched {
+		// Lock wallets to prevent Maker from sending swap as soon as the orders are matched.
+		for _, client := range clients {
+			if err = client.lockWallets(); err != nil {
+				return fmt.Errorf("client %d lock wallet error: %v", client.id, err)
+			}
+		}
 	}
 
 	monitorTrades, ctx := errgroup.WithContext(context.Background())
@@ -371,14 +330,29 @@ func simpleTradeTest(finalStatus order.MatchStatus) error {
 	monitorTrades.Go(func() error {
 		return monitorTradeForTestOrder(ctx, client2, c2OrderID, finalStatus)
 	})
-	err = monitorTrades.Wait()
-	if err == nil {
-		tLog.Infof("Trades ended at %s.", finalStatus)
+	if err = monitorTrades.Wait(); err != nil {
+		return err
 	}
-	return err
+
+	tLog.Infof("Trades ended at %s.", finalStatus)
+
+	// Allow some time for balance changes to be properly reported.
+	// There is usually a split-second window where a locked output
+	// has been spent but the spending tx is still in mempool. This
+	// will cause the txout to be included in the wallets locked
+	// balance, causing a higher than actual balance report.
+	time.Sleep(1 * time.Second)
+
+	for _, client := range clients {
+		if err = client.assertBalanceChanges(); err != nil {
+			return fmt.Errorf("client %d balance check error: %v", client.id, err)
+		}
+	}
+
+	return nil
 }
 
-func placeTestOrder(c *tClient, sell bool) (string, error) {
+func placeTestOrder(c *tClient, qty, rate uint64, sell bool) (string, error) {
 	dc := c.dc()
 	dcrBtcMkt := dc.market("dcr_btc")
 	if dcrBtcMkt == nil {
@@ -393,13 +367,13 @@ func placeTestOrder(c *tClient, sell bool) (string, error) {
 		Quote:   quoteAsset.ID,
 		IsLimit: true,
 		Sell:    sell,
-		Qty:     5 * baseAsset.LotSize,     // 5 DCR => 0.00005 BTC
-		Rate:    100 * quoteAsset.RateStep, // 0.0001 BTC
+		Qty:     qty,
+		Rate:    rate,
 		TifNow:  false,
 	}
 
-	qty := fmt.Sprintf("%.8f %s", float64(tradeForm.Qty)/conversionFactor, baseAsset.Symbol)
-	rate := fmt.Sprintf("%.8f %s per %s", float64(tradeForm.Rate)/conversionFactor, quoteAsset.Symbol,
+	qtyStr := fmt.Sprintf("%.8f %s", fmtAmt(qty), baseAsset.Symbol)
+	rateStr := fmt.Sprintf("%.8f %s/%s", fmtAmt(rate), quoteAsset.Symbol,
 		baseAsset.Symbol)
 
 	ord, err := c.core.Trade(c.appPass, tradeForm)
@@ -407,7 +381,7 @@ func placeTestOrder(c *tClient, sell bool) (string, error) {
 		return "", fmt.Errorf("error placing %s order %v", sellString(sell), err)
 	}
 
-	c.log("placed order %sing %s at %s (%s)", sellString(sell), qty, rate, ord.ID[:8])
+	c.log("placed order %sing %s at %s (%s)", sellString(sell), qtyStr, rateStr, ord.ID[:8])
 	return ord.ID, nil
 }
 
@@ -422,9 +396,14 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	oidShort := token(oid.Bytes())
 	client.log("waiting for matches on order %s", oidShort)
 
-	tracker, _, _ := client.dc().findOrder(oid)
-	matched := runWaiter(ctx, 15*time.Second, func() bool {
-		return len(tracker.matches) > 0
+	matched := tryUntil(ctx, 15*time.Second, func() bool {
+		select {
+		case n := <-client.notifications:
+			orderNote, isOrderNote := n.(*OrderNote)
+			return isOrderNote && n.Subject() == "Matches made" && orderNote.Order.ID == orderID
+		default:
+			return wait.TryAgain
+		}
 	})
 	if ctx.Err() != nil { // context canceled
 		return nil
@@ -433,15 +412,11 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		return errs.add("order %s not matched after 15 seconds", oidShort)
 	}
 
+	tracker, _, _ := client.dc().findOrder(oid)
 	client.log("%d match(es) received for order %s", len(tracker.matches), oidShort)
 	for _, match := range tracker.matches {
-		client.log("%s on match %s, amount %.8f", match.Match.Side.String(),
-			token(match.id.Bytes()), float64(match.Match.Quantity)/conversionFactor)
-	}
-
-	// blocks will need to be mined after this client sends a swap or redeem tx.
-	mineAsset := func(asset *dex.Asset) error {
-		return mineBlocks(asset.ID, client.wallets[asset.ID].name, uint16(asset.SwapConf))
+		client.log("%s on match %s, amount %.8f %s", match.Match.Side.String(),
+			token(match.id.Bytes()), fmtAmt(match.Match.Quantity), unbip(tracker.Base()))
 	}
 
 	// set initial match statuses before running check for status changes
@@ -450,33 +425,75 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		matchStatuses[match.id] = order.NewlyMatched
 	}
 
+	// the expected balance changes for this client will be updated
+	// as swaps and redeems are executed
+	client.expectBalanceDiffs = map[uint32]int64{dcr.BipID: 0, btc.BipID: 0}
+	recordBalanceChanges := func(assetID uint32, isSwap bool, qty, rate uint64) {
+		amt := qty
+		if client.isSeller != isSwap {
+			// use quote amt for seller redeem and buyer swap
+			amt = calc.BaseToQuote(rate, qty)
+		}
+		if isSwap {
+			client.log("updated %s balance diff with -%f", unbip(assetID), fmtAmt(amt))
+			client.expectBalanceDiffs[assetID] -= int64(amt)
+		} else {
+			client.log("updated %s balance diff with +%f", unbip(assetID), fmtAmt(amt))
+			client.expectBalanceDiffs[assetID] += int64(amt)
+		}
+	}
+
 	// run a repeated check for match status changes to mine blocks as necessary.
-	runWaiter(ctx, 1*time.Minute, func() bool {
+	tryUntil(ctx, 1*time.Minute, func() bool {
 		var completedTrades int
 		for _, match := range tracker.matches {
 			side, status := match.Match.Side, match.Match.Status
 			if status >= finalStatus {
+				// prevent this client from taking any further action by blocking the match with a failErr
+				match.failErr = fmt.Errorf("take no further action")
 				completedTrades++
 			}
 			if status == matchStatuses[match.id] || status > finalStatus {
 				continue
 			}
 			matchStatuses[match.id] = status
+			client.log("NOW =====> %s", status)
+
+			// check for and mine client's swap or redeem
+			var assetToMine *dex.Asset
+			var swapOrRedeem string
 			switch {
-			// check for and mine client's swap
 			case side == order.Maker && status == order.MakerSwapCast,
 				side == order.Taker && status == order.TakerSwapCast:
-				mineAsset(tracker.wallets.fromAsset)
-				client.log("Mined %d blocks for %s swap, match %s", tracker.wallets.fromAsset.SwapConf,
-					match.Match.Side, token(match.id.Bytes()))
-
-			// check for and mine client's redeem
+				assetToMine, swapOrRedeem = tracker.wallets.fromAsset, "swap"
 			case side == order.Maker && status == order.MakerRedeemed,
 				side == order.Taker && status == order.MatchComplete:
-				mineAsset(tracker.wallets.toAsset)
-				client.log("Mined %d blocks for %s redeem, match %s", tracker.wallets.toAsset.SwapConf,
-					match.Match.Side, token(match.id.Bytes()))
+				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "redeem"
+			default:
+				continue
 			}
+
+			// Wait briefly before mining swap or redeem tx. This allows the
+			// monitor trade goroutine for the other client to capture and
+			// handle the status change before performing the required follow
+			// up action. Mining now without waiting may cause the other client
+			// to perform the follow up action before the goroutine captures
+			// this status change.
+			time.Sleep(1 * time.Second)
+
+			assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)
+			name := client.wallets[assetID].name
+			if assetID == dcr.BipID {
+				name = "alpha"
+			}
+			err := mineBlocks(assetID, name, nBlocks)
+			if err == nil {
+				client.log("Mined %d blocks for %s's %s, match %s", nBlocks, side, swapOrRedeem, token(match.id.Bytes()))
+			} else {
+				client.log("%s %s mine error %v", unbip(assetID), name, err)
+			}
+
+			recordBalanceChanges(assetToMine.ID, swapOrRedeem == "swap", match.Match.Quantity, match.Match.Rate)
 		}
 		return completedTrades == len(tracker.matches)
 	})
@@ -496,29 +513,189 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		return fmt.Errorf("client %d reported %d incomplete trades for order %s after 1 minute",
 			client.id, incompleteTrades, oidShort)
 	}
+
 	return nil
 }
 
-func runWaiter(ctx context.Context, tryDuration time.Duration, tryFn func() bool) bool {
-	successChan := make(chan bool, 1)
-	retryQueue.Wait(&wait.Waiter{
-		Expiration: time.Now().Add(tryDuration),
-		TryFunc: func() bool {
-			select {
-			case <-ctx.Done():
-				successChan <- false
-				return wait.DontTryAgain
-			default:
-				if tryFn() {
-					successChan <- true
-					return wait.DontTryAgain
-				}
-				return wait.TryAgain
+func tryUntil(ctx context.Context, tryDuration time.Duration, tryFn func() bool) bool {
+	expire := time.NewTicker(tryDuration)
+	defer expire.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-expire.C:
+			return false
+		default:
+			if tryFn() {
+				return true
 			}
-		},
-		ExpireFunc: func() {
-			successChan <- false
-		},
+		}
+	}
+}
+
+/************************************
+HELPER TYPES, FUNCTIONS AND METHODS
+************************************/
+
+type tWallet struct {
+	name    string
+	account string
+	pass    []byte
+	config  string
+}
+
+func dcrWallet(name string) *tWallet {
+	return &tWallet{
+		name:    name,
+		account: "default",
+		pass:    []byte("123"),
+	}
+}
+
+func btcWallet(name, account string) *tWallet {
+	return &tWallet{
+		name:    name,
+		account: account,
+		pass:    []byte("abc"),
+	}
+}
+
+type tClient struct {
+	id            int
+	core          *Core
+	notifications <-chan Notification
+	appPass       []byte
+	wallets       map[uint32]*tWallet
+	balances      map[uint32]uint64
+	isSeller      bool
+	// Update after each test run to perform post-test balance
+	// change validation. Set to nil to NOT perform balance checks.
+	expectBalanceDiffs map[uint32]int64
+}
+
+func (client *tClient) log(format string, args ...interface{}) {
+	args = append([]interface{}{client.id}, args...)
+	tLog.Infof("[client %d] "+format, args...)
+}
+
+func (client *tClient) init() error {
+	db, err := ioutil.TempFile("", "dexc.db")
+	if err != nil {
+		return err
+	}
+	client.core, err = New(&Config{
+		DBPath: db.Name(),
+		Net:    dex.Regtest,
 	})
-	return <-successChan
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (client *tClient) updateBalances() error {
+	client.log("updating balances")
+	client.balances = make(map[uint32]uint64, len(client.wallets))
+	for assetID := range client.wallets {
+		balances, err := client.core.AssetBalances(assetID)
+		if err != nil {
+			return err
+		}
+		client.balances[assetID] = balances.ZeroConf.Available + balances.ZeroConf.Locked
+	}
+	return nil
+}
+
+func (client *tClient) assertBalanceChanges() error {
+	prevBalances := client.balances
+	err := client.updateBalances()
+	if err != nil || client.expectBalanceDiffs == nil {
+		return err
+	}
+	for assetID, expectedDiff := range client.expectBalanceDiffs {
+		// actual diff wil likely be lesser than expected because of tx fees
+		// TODO: account for actual fee(s) or use a more realistic fee estimate.
+		minExpectedDiff, maxExpectedDiff := expectedDiff-conversionFactor, expectedDiff
+		if expectedDiff == 0 {
+			minExpectedDiff, maxExpectedDiff = 0, 0 // no tx fees
+		}
+		balanceDiff := int64(client.balances[assetID] - prevBalances[assetID])
+		if balanceDiff < minExpectedDiff || balanceDiff > maxExpectedDiff {
+			return fmt.Errorf("%s balance change not in expected range %.8f - %.8f, got %.8f",
+				unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
+		}
+		client.log("%s balance change %.8f is in expected range of %.8f - %.8f",
+			unbip(assetID), fmtAmt(balanceDiff), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff))
+	}
+	return nil
+}
+
+func (client *tClient) dc() *dexConnection {
+	client.core.connMtx.RLock()
+	defer client.core.connMtx.RUnlock()
+	return client.core.conns[dexHost]
+}
+
+func (client *tClient) dcrw() *tWallet {
+	return client.wallets[dcr.BipID]
+}
+
+func (client *tClient) btcw() *tWallet {
+	return client.wallets[btc.BipID]
+}
+
+func (client *tClient) lockWallets() error {
+	client.log("locking wallets")
+	dcrw := client.dcrw()
+	lockCmd := fmt.Sprintf("./%s walletlock", dcrw.name)
+	if err := tmuxSendKeys("dcr-harness:0", lockCmd); err != nil {
+		return err
+	}
+	time.Sleep(500 * time.Millisecond)
+	btcw := client.btcw()
+	lockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletlock", btcw.name, btcw.account)
+	return tmuxSendKeys("btc-harness:2", lockCmd)
+}
+
+func (client *tClient) unlockWallets() error {
+	client.log("unlocking wallets")
+	dcrw := client.dcrw()
+	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 60", dcrw.name, string(dcrw.pass))
+	if err := tmuxSendKeys("dcr-harness:0", unlockCmd); err != nil {
+		return err
+	}
+	time.Sleep(500 * time.Millisecond)
+	btcw := client.btcw()
+	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 60",
+		btcw.name, btcw.account, string(btcw.pass))
+	return tmuxSendKeys("btc-harness:2", unlockCmd)
+}
+
+func mineBlocks(assetID uint32, name string, blocks uint16) error {
+	var harnessID string
+	switch assetID {
+	case dcr.BipID:
+		harnessID = "dcr-harness:0"
+	case btc.BipID:
+		harnessID = "btc-harness:2"
+	default:
+		return fmt.Errorf("can't mine blocks for unknown asset %d", assetID)
+	}
+	mineCmd := fmt.Sprintf("./mine-%s %d", name, blocks)
+	return tmuxSendKeys(harnessID, mineCmd)
+}
+
+func tmuxSendKeys(tmuxWindow, cmd string) error {
+	return exec.Command("tmux", "send-keys", "-t", tmuxWindow, cmd, "C-m").Run()
+}
+
+func fmtAmt(anyAmt interface{}) float64 {
+	if amt, ok := anyAmt.(uint64); ok {
+		return float64(amt) / conversionFactor
+	}
+	if amt, ok := anyAmt.(int64); ok {
+		return float64(amt) / conversionFactor
+	}
+	panic(fmt.Sprintf("invalid call to fmtAmt with %v", anyAmt))
 }

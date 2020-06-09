@@ -54,7 +54,7 @@ var (
 )
 
 func mineAlpha() error {
-	return exec.Command("tmux", "send-keys", "-t", "dcr-harness:4", "./mine-alpha 1", "C-m").Run()
+	return exec.Command("tmux", "send-keys", "-t", "dcr-harness:0", "./mine-alpha 1", "C-m").Run()
 }
 
 func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
