@@ -5,17 +5,49 @@ sandboxed environment for testing dex swap transactions.
 
 ## Dependencies
 
-The dcrdex harness depends on 2 other harnesses: [DCR Test Harness](../dcr/README.md) and [BTC Simnet Test Harness](../btc/README.md) to run.
+The dcrdex harness depends on 2 other harnesses: [DCR Test Harness](../dcr/README.md)
+and [BTC Simnet Test Harness](../btc/README.md) to run.
 
 ## Using
 
-The [DCR Test Harness](../dcr/README.md) and [BTC Simnet Test Harness](../btc/README.md) must be running to use the dcrdex harness.
+The [DCR Test Harness](../dcr/README.md) and [BTC Simnet Test Harness](../btc/README.md)
+must be running to use the dcrdex harness.
+
+Also prepare your PostgreSQL DB as [described here](https://github.com/decred/dcrdex/wiki/Simnet-Testing#prepare-the-postgresql-db).
+Basically: drop your old simnet db and create a new one.
+
+The dcrdex config file created and used by the harness sets `pgdbname=dcrdex_simnet`,
+and `rpclisten=127.0.0.1:17273`. You can override these or set additional config opts
+by passing them as arguments when executing the harness script e.g.:
+```sh
+./harness.sh --pgpass=dexpass
+```
 
 The dcrdex harness script will create a markets.json file referencing dcr and btc
 node config files created by the respective node harnesses; and start a dcrdex
-instance listening at `127.0.0.1:17273`.
+instance listening at `127.0.0.1:17273` or any address you specify in cli args.
 
-The rpc cert for the dcrdex instance will be created in `~/dextest/dcrdex/rpc.cert`.
+The rpc cert for the dcrdex instance will be created in `~/dextest/dcrdex/rpc.cert`
+with the following content:
+```
+-----BEGIN CERTIFICATE-----
+MIICpTCCAgagAwIBAgIQZMfxMkSi24xMr4CClCODrzAKBggqhkjOPQQDBDBJMSIw
+IAYDVQQKExlkY3JkZXggYXV0b2dlbmVyYXRlZCBjZXJ0MSMwIQYDVQQDExp1YnVu
+dHUtcy0xdmNwdS0yZ2ItbG9uMS0wMTAeFw0yMDA2MDgxMjM4MjNaFw0zMDA2MDcx
+MjM4MjNaMEkxIjAgBgNVBAoTGWRjcmRleCBhdXRvZ2VuZXJhdGVkIGNlcnQxIzAh
+BgNVBAMTGnVidW50dS1zLTF2Y3B1LTJnYi1sb24xLTAxMIGbMBAGByqGSM49AgEG
+BSuBBAAjA4GGAAQApXJpVD7si8yxoITESq+xaXWtEpsCWU7X+8isRDj1cFfH53K6
+/XNvn3G+Yq0L22Q8pMozGukA7KuCQAAL0xnuo10AecWBN0Zo2BLHvpwKkmAs71C+
+5BITJksqFxvjwyMKbo3L/5x8S/JmAWrZoepBLfQ7HcoPqLAcg0XoIgJjOyFZgc+j
+gYwwgYkwDgYDVR0PAQH/BAQDAgKkMA8GA1UdEwEB/wQFMAMBAf8wZgYDVR0RBF8w
+XYIadWJ1bnR1LXMtMXZjcHUtMmdiLWxvbjEtMDGCCWxvY2FsaG9zdIcEfwAAAYcQ
+AAAAAAAAAAAAAAAAAAAAAYcEsj5QQYcEChAABYcQ/oAAAAAAAAAYPqf//vUPXDAK
+BggqhkjOPQQDBAOBjAAwgYgCQgFMEhyTXnT8phDJAnzLbYRktg7rTAbTuQRDp1PE
+jf6b2Df4DkSX7JPXvVi3NeBru+mnrOkHBUMqZd0m036aC4q/ZAJCASa+olu4Isx7
+8JE3XB6kGr+s48eIFPtmq1D0gOvRr3yMHrhJe3XDNqvppcHihG0qNb0gyaiX18Cv
+vF8Ti1x2vTkD
+-----END CERTIFICATE-----
+```
 
 ## Harness control
 
