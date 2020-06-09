@@ -1029,9 +1029,9 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		id:        coinID,
 	}
 
-	swap.lockTime = matchInfo.match.Epoch.End().Add(dex.LockTimeTaker)
+	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker))
 	if user == matchInfo.maker {
-		swap.lockTime = matchInfo.match.Epoch.End().Add(dex.LockTimeMaker)
+		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker))
 	}
 
 	if !tLockTimeSpoofer.IsZero() {

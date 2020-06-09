@@ -1092,9 +1092,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		return wait.DontTryAgain
 	}
 
-	reqLockTime := stepInfo.match.matchTime.Add(dex.LockTimeTaker)
+	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeTaker))
 	if stepInfo.actor.isMaker {
-		reqLockTime = stepInfo.match.matchTime.Add(dex.LockTimeMaker)
+		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeMaker))
 	}
 	if contract.LockTime().Before(reqLockTime) {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
