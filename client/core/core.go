@@ -75,7 +75,7 @@ type dexConnection struct {
 	connected bool
 
 	regConfMtx  sync.RWMutex
-	regConfirms uint32
+	regConfirms *uint32
 }
 
 // refreshMarkets rebuilds, saves, and returns the market map. The map itself
@@ -128,11 +128,7 @@ func (dc *dexConnection) markets() map[string]*Market {
 func (dc *dexConnection) getRegConfirms() *uint32 {
 	dc.regConfMtx.RLock()
 	defer dc.regConfMtx.RUnlock()
-	if dc.regConfirms == regConfirmationsPaid {
-		return nil
-	}
-	confs := dc.regConfirms
-	return &confs
+	return dc.regConfirms
 }
 
 // setRegConfirms sets the number of confirmations received
@@ -140,7 +136,7 @@ func (dc *dexConnection) getRegConfirms() *uint32 {
 func (dc *dexConnection) setRegConfirms(confs uint32) {
 	dc.regConfMtx.Lock()
 	defer dc.regConfMtx.Unlock()
-	dc.regConfirms = confs
+	dc.regConfirms = &confs
 }
 
 // hasOrders checks whether there are any open orders or negotiating matches for
