@@ -410,18 +410,19 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 // isSwappable will be true if the match is ready for a swap transaction to be
 // broadcast.
 func (t *trackedTrade) isSwappable(match *matchTracker) bool {
-	if match.failErr != nil {
+	dbMatch, metaData, proof, _ := match.parts()
+	if match.failErr != nil || proof.IsRevoked {
 		return false
 	}
 
-	dbMatch, metaData, _, _ := match.parts()
-	walletLocked := !t.wallets.fromWallet.unlocked()
+	wallet := t.wallets.fromWallet
+	if !wallet.unlocked() {
+		log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
+			t.ID(), match.id, unbip(wallet.AssetID))
+		return false
+	}
+
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerSwapCast {
-		if walletLocked {
-			log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
-				t.ID(), match.id, unbip(t.wallets.toAsset.ID))
-			return false
-		}
 		// This might be ready to swap. Check the confirmations on the maker's
 		// swap.
 		coin := match.counterSwap.Coin()
@@ -435,11 +436,6 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 		return confs >= assetCfg.SwapConf
 	}
 	if dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched {
-		if walletLocked {
-			log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
-				t.ID(), match.id, unbip(t.wallets.toAsset.ID))
-			return false
-		}
 		return true
 	}
 	return false
@@ -451,6 +447,14 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	if match.failErr != nil {
 		return false
 	}
+
+	wallet := t.wallets.toWallet
+	if !wallet.unlocked() {
+		log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked",
+			t.ID(), match.id, unbip(wallet.AssetID))
+		return false
+	}
+
 	dbMatch, metaData, _, _ := match.parts()
 	walletLocked := !t.wallets.toWallet.unlocked()
 	if dbMatch.Side == order.Maker && metaData.Status == order.TakerSwapCast {
@@ -624,6 +628,11 @@ func (t *trackedTrade) resendPendingRequests() error {
 
 	for _, match := range t.matches {
 		dbMatch, _, proof, auth := match.parts()
+		// do not resend pending requests for revoked matches or matches where
+		// we've refunded our swap.
+		if match.failErr != nil || proof.IsRevoked || proof.RefundCoin != nil {
+			continue
+		}
 		side, status := dbMatch.Side, dbMatch.Status
 		var swapCoinID, redeemCoinID []byte
 		switch {
@@ -636,18 +645,14 @@ func (t *trackedTrade) resendPendingRequests() error {
 		case side == order.Taker && status == order.MatchComplete:
 			swapCoinID = proof.TakerRedeem
 		}
-		if swapCoinID != nil && auth.InitSig == nil {
-			// resend pending `init` request
-			if err := t.finalizeSwapAction(match, swapCoinID, proof.Script); err != nil {
-				errs.addErr(err)
-			}
-			continue
+		var err error
+		if swapCoinID != nil && auth.InitSig == nil { // resend pending `init` request
+			err = t.finalizeSwapAction(match, swapCoinID, proof.Script)
+		} else if redeemCoinID != nil && auth.RedeemSig == nil { // resend pending `redeem` request
+			err = t.finalizeRedeemAction(match, swapCoinID)
 		}
-		if redeemCoinID != nil && auth.RedeemSig == nil {
-			// resend pending `redeem` request
-			if err := t.finalizeRedeemAction(match, swapCoinID); err != nil {
-				errs.addErr(err)
-			}
+		if err != nil {
+			errs.addErr(err)
 		}
 	}
 
@@ -916,7 +921,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		refundCoin, err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund, refundAsset)
 		if err != nil {
 			if err == asset.CoinNotFoundError {
-				// Could not fund the contract coin, which means it has been spent.
+				// Could not find the contract coin, which means it has been spent.
 				// TODO: begin find redemption
 				// NOTE: may be that swap was actually refunded, so FindRedemption
 				// should account for that.
