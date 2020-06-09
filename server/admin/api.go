@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/server/account"
 	"github.com/go-chi/chi"
 )
 
@@ -155,4 +157,22 @@ func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, accts)
+}
+
+// apiAccountInfo is the handler for the '/account/{account id}' API request.
+func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
+	acct := strings.ToLower(chi.URLParam(r, accountNameKey))
+	acctIDSlice, err := hex.DecodeString(acct)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("could not decode accout id: %v", err), http.StatusBadRequest)
+		return
+	}
+	var acctID account.AccountID
+	copy(acctID[:], acctIDSlice)
+	acctInfo, err := s.core.AccountInfo(acctID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to retrieve account: %v", err), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, acctInfo)
 }

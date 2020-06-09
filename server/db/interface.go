@@ -182,6 +182,9 @@ type AccountArchiver interface {
 
 	// Accounts returns data for all accounts.
 	Accounts() ([]*Account, error)
+
+	// AccountInfo returns data for an account.
+	AccountInfo(account.AccountID) (*Account, error)
 }
 
 // MatchData represents an order pair match, but with just the order IDs instead

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
@@ -53,18 +54,40 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 	}
 	defer rows.Close()
 	var accts []*db.Account
+	var accountID, pubkey, feeCoin []byte
+	var brokenRule byte
 	for rows.Next() {
 		a := new(db.Account)
-		err = rows.Scan(&a.AccountID, &a.Pubkey, &a.FeeAddress, &a.FeeCoin, &a.BrokenRule)
+		err = rows.Scan(&accountID, &pubkey, &a.FeeAddress, &feeCoin, &brokenRule)
 		if err != nil {
 			return nil, err
 		}
+		copy(a.AccountID[:], accountID)
+		a.Pubkey = dex.Bytes(pubkey)
+		a.FeeCoin = dex.Bytes(feeCoin)
+		a.BrokenRule = account.Rule(brokenRule)
 		accts = append(accts, a)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 	return accts, nil
+}
+
+// AccountInfo returns data for an account.
+func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
+	stmt := fmt.Sprintf(internal.SelectAccountInfo, a.tables.accounts)
+	acct := new(db.Account)
+	var accountID, pubkey, feeCoin []byte
+	var brokenRule byte
+	if err := a.db.QueryRow(stmt, aid).Scan(&accountID, &pubkey, &acct.FeeAddress, &feeCoin, &brokenRule); err != nil {
+		return nil, err
+	}
+	copy(acct.AccountID[:], accountID)
+	acct.Pubkey = dex.Bytes(pubkey)
+	acct.FeeCoin = dex.Bytes(feeCoin)
+	acct.BrokenRule = account.Rule(brokenRule)
+	return acct, nil
 }
 
 // CreateAccount creates an entry for a new account in the accounts table. A

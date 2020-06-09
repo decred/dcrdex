@@ -4,6 +4,7 @@ package pg
 
 import (
 	"encoding/hex"
+	"reflect"
 	"testing"
 
 	"decred.org/dcrdex/server/account"
@@ -87,6 +88,14 @@ func TestAccounts(t *testing.T) {
 		accts[0].FeeCoin.String() != "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005" ||
 		byte(accts[0].BrokenRule) != byte(0) {
 		t.Fatal("accounts has unexpected data")
+	}
+
+	anAcct, err := archie.AccountInfo(accts[0].AccountID)
+	if err != nil {
+		t.Fatalf("error getting account info: %v", err)
+	}
+	if !reflect.DeepEqual(accts[0], anAcct) {
+		t.Fatal("error getting account info: actual does not equal expected")
 	}
 
 	// Close the account for failure to complete a swap.
