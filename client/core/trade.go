@@ -949,7 +949,7 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 	auth.AuditSig = audit.Sig
 	proof.CounterScript = audit.Contract
 	matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
-	reqLockTime := matchTime.Add(dex.LockTimeMaker) // counterparty = maker, their locktime = 48 hours.
+	reqLockTime := matchTime.Add(dex.LockTimeMaker).Truncate(time.Millisecond) // counterparty = maker, their locktime = 48 hours.
 	if dbMatch.Side == order.Maker {
 		// Check that the secret hash is correct.
 		if !bytes.Equal(proof.SecretHash, auditInfo.SecretHash()) {
@@ -958,7 +958,7 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 		match.setStatus(order.TakerSwapCast)
 		proof.TakerSwap = []byte(audit.CoinID)
 		// counterparty = taker, their locktime = 24 hours.
-		reqLockTime = matchTime.Add(dex.LockTimeTaker)
+		reqLockTime = matchTime.Add(dex.LockTimeTaker).Truncate(time.Millisecond)
 	} else {
 		proof.SecretHash = auditInfo.SecretHash()
 		match.setStatus(order.MakerSwapCast)

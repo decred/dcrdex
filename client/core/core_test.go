@@ -1969,7 +1969,7 @@ func TestTradeTracking(t *testing.T) {
 	// Send the counter-party's init info.
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
-	auditInfo.expiration = matchTime.Add(24 * time.Hour)
+	auditInfo.expiration = matchTime.Add(dex.LockTimeTaker)
 	tBtcWallet.auditInfo = auditInfo
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 
@@ -2111,7 +2111,7 @@ func TestTradeTracking(t *testing.T) {
 	// Now send through the audit request for the maker's init.
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
-	auditInfo.expiration = matchTime.Add(48 * time.Hour)
+	auditInfo.expiration = matchTime.Add(dex.LockTimeMaker)
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
@@ -2310,13 +2310,16 @@ func TestRefunds(t *testing.T) {
 
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
 	//
+
+	matchTime := time.Now()
 	msgMatch := &msgjson.Match{
-		OrderID:  loid[:],
-		MatchID:  mid[:],
-		Quantity: matchSize,
-		Rate:     rate,
-		Address:  "counterparty-address",
-		Side:     uint8(order.Maker),
+		OrderID:    loid[:],
+		MatchID:    mid[:],
+		Quantity:   matchSize,
+		Rate:       rate,
+		Address:    "counterparty-address",
+		Side:       uint8(order.Maker),
+		ServerTime: encode.UnixMilliU(matchTime),
 	}
 	counterSwapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
@@ -2340,6 +2343,7 @@ func TestRefunds(t *testing.T) {
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
 	tBtcWallet.auditInfo = auditInfo
+	auditInfo.expiration = matchTime.Add(dex.LockTimeMaker)
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 
 	// Check audit errors.
@@ -2381,6 +2385,7 @@ func TestRefunds(t *testing.T) {
 	// Send through the audit request for the maker's init.
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
+	auditInfo.expiration = matchTime.Add(dex.LockTimeMaker)
 	tBtcWallet.auditErr = nil
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
