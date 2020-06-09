@@ -11,6 +11,8 @@ package core
 //   clear the dcrdex db and restart the dcrdex harness
 // - error placing order not enough to cover requested funds
 //   use the affected asset harness to send funds to the affected wallet
+// - occasional issue with fee payment confirmation
+//   restart dcr-harness and dcrdex-harness. stop dcrdex before dcr harness
 
 import (
 	"context"
@@ -148,7 +150,7 @@ func startClients(ctx context.Context) error {
 		}
 
 		// connect dex and pay fee
-		err = c.core.Register(&RegisterForm{
+		regRes, err := c.core.Register(&RegisterForm{
 			Addr:    dexHost,
 			Cert:    dexCert,
 			AppPass: c.appPass,
@@ -160,12 +162,11 @@ func startClients(ctx context.Context) error {
 		c.log("connected DEX %s", dexHost)
 
 		// mine drc block(s) to mark fee as paid
-		regFeeConfs := c.dc().cfg.RegFeeConfirms
-		err = mineBlocks(dcr.BipID, "alpha", regFeeConfs)
+		err = mineBlocks(dcr.BipID, "alpha", regRes.ReqConfirms)
 		if err != nil {
 			return err
 		}
-		c.log("mined %d blocks on dcr %s for fee payment confirmation", regFeeConfs, dcrWallet.name)
+		c.log("mined %d blocks on dcr %s for fee payment confirmation", regRes.ReqConfirms, dcrWallet.name)
 
 		// wait for fee payment
 		c.log("waiting 5 seconds for fee confirmation notice")
@@ -173,7 +174,7 @@ func startClients(ctx context.Context) error {
 		feePaid := tryUntil(ctx, 5*time.Second, func() bool {
 			select {
 			case n := <-c.notifications:
-				return n.Type() == "fee payment" && n.Subject() == "Account registered"
+				return n.Type() == "feepayment" && n.Subject() == "Account registered"
 			default:
 				return wait.TryAgain
 			}
@@ -518,7 +519,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 }
 
 func tryUntil(ctx context.Context, tryDuration time.Duration, tryFn func() bool) bool {
-	expire := time.NewTicker(tryDuration)
+	expire := time.NewTimer(tryDuration)
 	defer expire.Stop()
 	for {
 		select {
