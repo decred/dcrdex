@@ -480,40 +480,31 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	return false
 }
 
-// isRefundable will be true if we have broadcasted a swap contract, the other
-// party has not executed the required follow-up action (i.e. match status shows
-// our swap is the last action on the match) AND our swap's locktime has expired.
+// isRefundable will be true if all of the following are true:
+// - We have broadcasted a swap contract (matchProof.Script != nil).
+// - Neither party has redeemed (matchStatus < order.MakerRedeemed).
+//   For Maker, this means we've not redeemed. For Taker, this means we've
+//   not been notified of Maker's redeem.
+// - Our swap's locktime has expired.
+//
+// Those checks are skipped and isRefundable is false if we've already
+// executed a refund or our refund-to wallet is locked.
 func (t *trackedTrade) isRefundable(match *matchTracker) bool {
-	if match.refundErr != nil || match.MetaData.Proof.RefundCoin != nil {
+	dbMatch, _, proof, _ := match.parts()
+	if match.refundErr != nil || proof.RefundCoin != nil {
 		return false
 	}
 
 	wallet := t.wallets.fromWallet
-	asset := t.wallets.fromAsset
 	if !wallet.unlocked() {
 		log.Errorf("cannot refund order %s, match %s, because %s wallet is not unlocked",
-			t.ID(), match.id, unbip(asset.ID))
+			t.ID(), match.id, unbip(wallet.AssetID))
 		return false
 	}
 
-	dbMatch, _, proof, _ := match.parts()
-	side, status := dbMatch.Side, dbMatch.Status
-
-	// hasRedeemableSwap is true if
-	// - the client is the taker on the match and the status is TakerSwapCast
-	// - the client is the maker on the match, the status is MakerSwapCast OR
-	//   status is TakerSwapCast but Taker's swap has not been redeemed. The
-	//   second case does not prevent Maker from (re-)attempting to redeem
-	//   Taker's swap; it just ensures that Maker's swap is refunded if Taker's
-	//   swap can't be redeemed **after** Maker's locktime expires.
-	var hasRedeemableSwap bool
-	if side == order.Taker {
-		hasRedeemableSwap = status == order.TakerSwapCast
-	} else {
-		hasRedeemableSwap = status == order.MakerSwapCast ||
-			(status == order.TakerSwapCast && proof.MakerRedeem == nil)
-	}
-	if !hasRedeemableSwap {
+	// Return if we've NOT sent a swap OR a redeem has been
+	// executed by either party.
+	if proof.Script == nil || dbMatch.Status >= order.MakerRedeemed {
 		return false
 	}
 
@@ -537,6 +528,13 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 
 	t.matchMtx.Lock()
 	defer t.matchMtx.Unlock()
+
+	// Check all matches for and resend pending requests as necessary.
+	if err := t.resendPendingRequests(); err != nil {
+		errs.addErr(err)
+	}
+
+	// Check all matches and send swap, redeem or refund as necessary.
 	var sent, quoteSent, received, quoteReceived uint64
 	for _, match := range t.matches {
 		switch {
@@ -682,59 +680,75 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	t.metaData.ChangeCoin = []byte(change.ID())
 	t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin)
 
-	// Prepare the msgjson.Init and send to the DEX.
-	oid := t.ID()
+	// Process the swap for each match by sending the `init` request
+	// to the DEX and updating the match with swap details.
+	// Add any errors encountered to `errs` and proceed to next match
+	// to ensure that swap details are saved for all matches.
 	coinStrs := make([]string, len(receipts))
 	for i, receipt := range receipts {
 		match := matches[i]
 		coin := receipt.Coin()
-		coinID := []byte(coin.ID())
 		coinStrs[i] = coin.String()
-		contract := coin.Redeem()
-		init := &msgjson.Init{
-			OrderID:  oid[:],
-			MatchID:  match.id[:],
-			CoinID:   coinID,
-			Contract: contract[:],
-		}
-		ack := new(msgjson.Acknowledgement)
-		err := t.dc.signAndRequest(init, msgjson.InitRoute, ack)
+		err := t.sendInitAndSaveSwapDetails(match, coin.ID(), coin.Redeem())
 		if err != nil {
-			match.failErr = err
-			errs.add("error sending 'init' message for match %s: %v", match.id, err)
-			// TODO: try again and issue refund when locktime expires
-			continue
-		}
-		sigMsg := init.Serialize()
-		err = t.dc.acct.checkSig(sigMsg, ack.Sig)
-		if err != nil {
-			errs.add("acknowledgment signature error for match %s: %v", match.id, err)
-			continue
-		}
-
-		// Update the database match data.
-		_, _, proof, auth := match.parts()
-		auth.InitSig = ack.Sig
-		// The time is not part of the signed msgjson.Init structure, but save it
-		// anyway.
-		auth.InitStamp = encode.UnixMilliU(time.Now())
-		proof.Script = contract[:] // Save, in case we need to refund this swap later.
-		if match.Match.Side == order.Taker {
-			match.setStatus(order.TakerSwapCast)
-			proof.TakerSwap = coinID
-		} else {
-			match.setStatus(order.MakerSwapCast)
-			proof.MakerSwap = coinID
-		}
-		err = t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			return errs.add("error storing match info in database: %v", err)
+			errs.addErr(err)
 		}
 	}
 
 	log.Infof("Broadcasted %d swap transactions for order %v. Contract coins: %v",
-		len(receipts), oid, coinStrs)
+		len(receipts), t.ID(), coinStrs)
 
+	return errs.ifany()
+}
+
+// sendInitAndSaveSwapDetails sends an `init` request for the specified match,
+// waits for and validates the server's acknowledgement, then saves the swap
+// details to db.
+// The swap details are always saved even if sending the `init` request errors
+// or a valid ack is not received from the server. This makes it possible to
+// resend the `init` request at a later time OR refund the swap after locktime
+// expires if the trade does not progress as expected.
+func (t *trackedTrade) sendInitAndSaveSwapDetails(match *matchTracker, coinID, contract dex.Bytes) error {
+	_, _, proof, auth := match.parts()
+	if auth.InitSig != nil {
+		return fmt.Errorf("swap already processed for match %v", match.id)
+	}
+
+	errs := newErrorSet("")
+
+	// attempt to send `init` request and validate server ack.
+	ack := new(msgjson.Acknowledgement)
+	oid := t.ID()
+	init := &msgjson.Init{
+		OrderID:  oid[:],
+		MatchID:  match.id[:],
+		CoinID:   coinID,
+		Contract: contract,
+	}
+	if err := t.dc.signAndRequest(init, msgjson.InitRoute, ack); err != nil {
+		errs.add("error sending 'init' message for match %s: %v", match.id, err)
+	} else if err := t.dc.acct.checkSig(init.Serialize(), ack.Sig); err != nil {
+		errs.add("'init' ack signature error for match %s: %v", match.id, err)
+	}
+
+	// Update dbMatch with swap details.
+	proof.Script = contract
+	if match.Match.Side == order.Taker {
+		proof.TakerSwap = []byte(coinID)
+		match.setStatus(order.TakerSwapCast)
+	} else {
+		proof.MakerSwap = []byte(coinID)
+		match.setStatus(order.MakerSwapCast)
+	}
+	if ack.Sig != nil {
+		auth.InitSig = ack.Sig
+		// The time is not part of the signed msgjson.Init structure, but save it
+		// anyway.
+		auth.InitStamp = encode.UnixMilliU(time.Now())
+	}
+	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+		errs.add("error saving swap details in database for match: %v", err)
+	}
 	return errs.ifany()
 }
 
@@ -890,6 +904,32 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 	}
 
 	return refundedQty, errs.ifany()
+}
+
+// resendPendingRequests checks all matches for this order to re-attempt
+// sending the `init` or `redeem` request where necessary.
+func (t *trackedTrade) resendPendingRequests() error {
+	errs := newErrorSet("resendPendingRequest: order %s - ", t.ID())
+
+	for _, match := range t.matches {
+		dbMatch, _, proof, auth := match.parts()
+		side, status := dbMatch.Side, dbMatch.Status
+		var swapCoinID []byte
+		switch {
+		case side == order.Maker && status == order.MakerSwapCast:
+			swapCoinID = proof.MakerSwap
+		case side == order.Taker && status == order.TakerSwapCast:
+			swapCoinID = proof.TakerSwap
+		}
+		if swapCoinID == nil || auth.InitSig != nil {
+			continue
+		}
+		if err := t.sendInitAndSaveSwapDetails(match, swapCoinID, proof.Script); err != nil {
+			errs.addErr(err)
+		}
+	}
+
+	return errs.ifany()
 }
 
 // processAudit processes the audit request from the server.

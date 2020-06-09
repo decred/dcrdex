@@ -349,10 +349,10 @@ func (tdb *TDB) Backup() error {
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
 type tCoin struct {
-	id       []byte
-	confs    uint32
-	confsErr error
-	val      uint64
+	id, script []byte
+	confs      uint32
+	confsErr   error
+	val        uint64
 }
 
 func (c *tCoin) ID() dex.Bytes {
@@ -372,7 +372,7 @@ func (c *tCoin) Confirmations() (uint32, error) {
 }
 
 func (c *tCoin) Redeem() dex.Bytes {
-	return nil
+	return c.script
 }
 
 type tReceipt struct {
@@ -2407,8 +2407,9 @@ func TestRefunds(t *testing.T) {
 		Side:       uint8(order.Maker),
 		ServerTime: encode.UnixMilliU(matchTime),
 	}
-	counterSwapID := encode.RandomBytes(36)
-	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
+	swapID := encode.RandomBytes(36)
+	contract := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID, script: contract}}}
 	sign(tDexPriv, msgMatch)
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
@@ -2424,6 +2425,9 @@ func TestRefunds(t *testing.T) {
 	// We're the maker, so the init transaction should be broadcast.
 	checkStatus("maker swapped", match, order.MakerSwapCast)
 	proof := &match.MetaData.Proof
+	if !bytes.Equal(proof.Script, contract) {
+		t.Fatalf("invalid contract recorded for Maker swap")
+	}
 
 	// Send the counter-party's init info.
 	auditQty := calc.BaseToQuote(rate, matchSize)
@@ -2480,11 +2484,16 @@ func TestRefunds(t *testing.T) {
 	}
 	checkStatus("taker counter-party swapped", match, order.MakerSwapCast)
 	auditInfo.coin.confs = tBTC.SwapConf
-	swapID := encode.RandomBytes(36)
-	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
+	counterSwapID := encode.RandomBytes(36)
+	counterScript := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID, script: counterScript}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
 	dc.tickAsset(tBTC.ID)
+
 	checkStatus("taker swapped", match, order.TakerSwapCast)
+	if !bytes.Equal(match.MetaData.Proof.Script, counterScript) {
+		t.Fatalf("invalid contract recorded for Taker swap")
+	}
 
 	// Attempt refund.
 	checkRefund(tracker, match, matchSize)
