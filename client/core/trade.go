@@ -689,7 +689,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		match := matches[i]
 		coin := receipt.Coin()
 		coinStrs[i] = coin.String()
-		err := t.sendInitAndSaveSwapDetails(match, coin.ID(), coin.Redeem())
+		err := t.finalizeSwapAction(match, coin.ID(), coin.Redeem())
 		if err != nil {
 			errs.addErr(err)
 		}
@@ -701,26 +701,24 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	return errs.ifany()
 }
 
-// sendInitAndSaveSwapDetails sends an `init` request for the specified match,
-// waits for and validates the server's acknowledgement, then saves the swap
-// details to db.
+// finalizeSwapAction sends an `init` request for the specified match, waits
+// for and validates the server's acknowledgement, then saves the swap details
+// to db.
 // The swap details are always saved even if sending the `init` request errors
 // or a valid ack is not received from the server. This makes it possible to
 // resend the `init` request at a later time OR refund the swap after locktime
 // expires if the trade does not progress as expected.
-func (t *trackedTrade) sendInitAndSaveSwapDetails(match *matchTracker, coinID, contract dex.Bytes) error {
+func (t *trackedTrade) finalizeSwapAction(match *matchTracker, coinID, contract []byte) error {
 	_, _, proof, auth := match.parts()
 	if auth.InitSig != nil {
-		return fmt.Errorf("swap already processed for match %v", match.id)
+		return fmt.Errorf("'init' already sent for match %v", match.id)
 	}
-
 	errs := newErrorSet("")
 
 	// attempt to send `init` request and validate server ack.
 	ack := new(msgjson.Acknowledgement)
-	oid := t.ID()
 	init := &msgjson.Init{
-		OrderID:  oid[:],
+		OrderID:  t.ID().Bytes(),
 		MatchID:  match.id[:],
 		CoinID:   coinID,
 		Contract: contract,
@@ -731,23 +729,22 @@ func (t *trackedTrade) sendInitAndSaveSwapDetails(match *matchTracker, coinID, c
 		errs.add("'init' ack signature error for match %s: %v", match.id, err)
 	}
 
-	// Update dbMatch with swap details.
+	// Update the match db data with the swap details.
 	proof.Script = contract
 	if match.Match.Side == order.Taker {
-		proof.TakerSwap = []byte(coinID)
+		proof.TakerSwap = coinID
 		match.setStatus(order.TakerSwapCast)
 	} else {
-		proof.MakerSwap = []byte(coinID)
+		proof.MakerSwap = coinID
 		match.setStatus(order.MakerSwapCast)
 	}
 	if ack.Sig != nil {
 		auth.InitSig = ack.Sig
-		// The time is not part of the signed msgjson.Init structure, but save it
-		// anyway.
 		auth.InitStamp = encode.UnixMilliU(time.Now())
 	}
 	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
-		errs.add("error saving swap details in database for match: %v", err)
+		errs.add("error storing swap details in database for match %s, coin %s: %v",
+			match.id, coinIDString(t.wallets.fromAsset.ID, coinID), err)
 	}
 	return errs.ifany()
 }
@@ -784,60 +781,61 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 
 	// Send the redemption information to the DEX.
 	for i, match := range matches {
-		_, _, proof, auth := match.parts()
-		coinID := []byte(coinIDs[i])
-		msgRedeem := &msgjson.Redeem{
-			OrderID: t.ID().Bytes(),
-			MatchID: match.id.Bytes(),
-			CoinID:  coinID,
-			Secret:  proof.Secret,
-		}
-
-		ack := new(msgjson.Acknowledgement)
-		err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack)
+		err := t.finalizeRedeemAction(match, coinIDs[i])
 		if err != nil {
-			match.failErr = err
-			errs.add("error sending 'redeem' message for match %s, coin %x: %v",
-				match.id, coinIDString(redeemAsset.ID, coinID), err)
-			// TODO: Do not skip this match, set the status to MakerRedeemed.
-			// Redeem tx was broadcasted, and tests have shown cases where the
-			// server got the redeem request but the client did not receieve
-			// the server's ack. In such cases, the counter-party is notified
-			// of this redeem and the trade proceeds as it should. The described
-			// scenarios usually have err = "timed out waiting for 'redeem'
-			// response."
-			continue
-		}
-		sigMsg := msgRedeem.Serialize()
-		err = t.dc.acct.checkSig(sigMsg, ack.Sig)
-		if err != nil {
-			errs.add("acknowledgment signature error (redeem route) for match %s: %v", match.id, err)
-			// Don't continue or return here. Still store the coin ID information in
-			// the database and consider this match complete for all intents and
-			// purposes.
-		}
-
-		// Store the updated match data in the DB.
-		auth.RedeemSig = ack.Sig
-		auth.RedeemStamp = encode.UnixMilliU(time.Now())
-		if match.Match.Side == order.Taker {
-			match.setStatus(order.MatchComplete)
-			proof.TakerRedeem = coinID
-		} else {
-			match.setStatus(order.MakerRedeemed)
-			proof.MakerRedeem = coinID
-		}
-		err = t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			errs.add("error storing match info in database for match %s, coin %s",
-				match.id, coinIDString(redeemAsset.ID, coinID))
-			continue
+			errs.addErr(err)
 		}
 	}
 
 	log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s:%s",
 		len(redemptions), t.ID(), redeemAsset.Symbol, outCoin)
 
+	return errs.ifany()
+}
+
+// finalizeRedeemAction sends a `redeem` request for the specified match,
+// waits for and validates the server's acknowledgement, then saves the
+// redeem details to db.
+// The redeem details are always saved even if sending the `redeem` request
+// errors or a valid ack is not received from the server. This makes it
+// possible to resend the `redeem` request at a later time.
+func (t *trackedTrade) finalizeRedeemAction(match *matchTracker, coinID []byte) error {
+	_, _, proof, auth := match.parts()
+	if auth.RedeemSig != nil {
+		return fmt.Errorf("'redeeem' already sent for match %v", match.id)
+	}
+	errs := newErrorSet("")
+
+	// attempt to send `redeem` request and validate server ack.
+	msgRedeem := &msgjson.Redeem{
+		OrderID: t.ID().Bytes(),
+		MatchID: match.id.Bytes(),
+		CoinID:  coinID,
+		Secret:  proof.Secret,
+	}
+	ack := new(msgjson.Acknowledgement)
+	if err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack); err != nil {
+		errs.add("error sending 'redeem' message for match %s: %v", match.id, err)
+	} else if err := t.dc.acct.checkSig(msgRedeem.Serialize(), ack.Sig); err != nil {
+		errs.add("'redeem' ack signature error for match %s: %v", match.id, err)
+	}
+
+	// Update the match db data with the redeem details.
+	if ack.Sig != nil {
+		auth.RedeemSig = ack.Sig
+		auth.RedeemStamp = encode.UnixMilliU(time.Now())
+	}
+	if match.Match.Side == order.Taker {
+		match.setStatus(order.MatchComplete)
+		proof.TakerRedeem = coinID
+	} else {
+		match.setStatus(order.MakerRedeemed)
+		proof.MakerRedeem = coinID
+	}
+	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+		errs.add("error storing redeem details in database for match %s, coin %s: %v",
+			match.id, coinIDString(t.wallets.toAsset.ID, coinID), err)
+	}
 	return errs.ifany()
 }
 
@@ -914,18 +912,29 @@ func (t *trackedTrade) resendPendingRequests() error {
 	for _, match := range t.matches {
 		dbMatch, _, proof, auth := match.parts()
 		side, status := dbMatch.Side, dbMatch.Status
-		var swapCoinID []byte
+		var swapCoinID, redeemCoinID []byte
 		switch {
 		case side == order.Maker && status == order.MakerSwapCast:
 			swapCoinID = proof.MakerSwap
 		case side == order.Taker && status == order.TakerSwapCast:
 			swapCoinID = proof.TakerSwap
+		case side == order.Maker && status == order.MakerRedeemed:
+			redeemCoinID = proof.MakerRedeem
+		case side == order.Taker && status == order.MatchComplete:
+			swapCoinID = proof.TakerRedeem
 		}
-		if swapCoinID == nil || auth.InitSig != nil {
+		if swapCoinID != nil && auth.InitSig == nil {
+			// resend pending `init` request
+			if err := t.finalizeSwapAction(match, swapCoinID, proof.Script); err != nil {
+				errs.addErr(err)
+			}
 			continue
 		}
-		if err := t.sendInitAndSaveSwapDetails(match, swapCoinID, proof.Script); err != nil {
-			errs.addErr(err)
+		if redeemCoinID != nil && auth.RedeemSig == nil {
+			// resend pending `redeem` request
+			if err := t.finalizeRedeemAction(match, swapCoinID); err != nil {
+				errs.addErr(err)
+			}
 		}
 	}
 
