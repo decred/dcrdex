@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -85,6 +86,7 @@ type matchTracker struct {
 	mtx sync.RWMutex // Match.Sigs and Match.Status
 	*order.Match
 	time        time.Time
+	matchTime   time.Time
 	makerStatus *swapStatus
 	takerStatus *swapStatus
 }
@@ -1090,6 +1092,16 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		return wait.DontTryAgain
 	}
 
+	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeTaker))
+	if stepInfo.actor.isMaker {
+		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeMaker))
+	}
+	if contract.LockTime().Before(reqLockTime) {
+		s.respondError(msg.ID, actor.user, msgjson.ContractError,
+			fmt.Sprintf("contract error. expected lock time >= %s, got %s", reqLockTime, contract.LockTime()))
+		return wait.DontTryAgain
+	}
+
 	// Update the match.
 	swapTime := unixMsNow()
 	matchID := stepInfo.match.Match.ID()
@@ -1513,8 +1525,9 @@ func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
 			}
 
 			matches = append(matches, &matchTracker{
-				Match: match,
-				time:  nowMs,
+				Match:     match,
+				time:      nowMs,
+				matchTime: match.Epoch.End(),
 				makerStatus: &swapStatus{
 					swapAsset: makerSwapAsset,
 				},
@@ -1540,7 +1553,7 @@ func extractAddress(ord order.Order) string {
 // matchNotifications creates a pair of msgjson.MatchNotification from a
 // matchTracker.
 func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
-	stamp := (match.Epoch.Idx + 1) * match.Epoch.Dur
+	stamp := encode.UnixMilliU(match.matchTime)
 	return &msgjson.Match{
 			OrderID:    idToBytes(match.Maker.ID()),
 			MatchID:    idToBytes(match.ID()),

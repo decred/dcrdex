@@ -8,7 +8,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"github.com/decred/dcrd/crypto/blake256"
 )
 
@@ -129,6 +131,11 @@ type Signatures struct {
 type EpochID struct {
 	Idx uint64
 	Dur uint64
+}
+
+// End is the end time of the epoch.
+func (e *EpochID) End() time.Time {
+	return encode.UnixTimeMilli(int64((e.Idx + 1) * e.Dur))
 }
 
 // Match represents a match between two orders.

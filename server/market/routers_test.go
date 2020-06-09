@@ -350,6 +350,7 @@ func (u *tUTXO) SpendsCoin([]byte) (bool, error) { return true, nil }
 func (u *tUTXO) Value() uint64                   { return u.val }
 func (u *tUTXO) FeeRate() uint64                 { return 0 }
 func (u *tUTXO) Script() []byte                  { return nil }
+func (u *tUTXO) LockTime() time.Time             { return time.Time{} }
 
 type tUser struct {
 	acct    account.AccountID

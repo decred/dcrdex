@@ -87,6 +87,11 @@ func UnixTimeMilli(msEpoch int64) time.Time {
 	return time.Unix(sec, msec*1e6).UTC()
 }
 
+// DropMilliseconds returns the time truncated to the previous second.
+func DropMilliseconds(t time.Time) time.Time {
+	return t.Truncate(time.Second)
+}
+
 // DecodeUTime interprets bytes as a uint64 millisecond Unix timestamp and
 // creates a time.Time.
 func DecodeUTime(b []byte) time.Time {

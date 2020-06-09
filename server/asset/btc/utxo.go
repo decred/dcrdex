@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"time"
 
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/btc"
@@ -172,8 +173,10 @@ type UTXO struct {
 	spendSize uint32
 	// The output value.
 	value uint64
-	// address is populated for swap contract outputs
+	// address is populated for swap contract outputs.
 	address string
+	// lockTime is populated for swap contract outputs.
+	lockTime time.Time
 }
 
 // Check that UTXO satisfies the asset.Contract interface
@@ -326,11 +329,12 @@ func (utxo *UTXO) auditContract() error {
 	if !bytes.Equal(hashed, scriptHash) {
 		return fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, utxo.vout)
 	}
-	_, receiver, err := extractSwapAddresses(utxo.redeemScript, utxo.btc.chainParams)
+	_, receiver, lockTime, _, err := dexbtc.ExtractSwapDetails(utxo.redeemScript, utxo.btc.chainParams)
 	if err != nil {
-		return fmt.Errorf("error extracting address from swap contract for %s:%d: %v", tx.hash, utxo.redeemScript, err)
+		return fmt.Errorf("error parsing swap contract for %s:%d: %v", tx.hash, utxo.redeemScript, err)
 	}
-	utxo.address = receiver
+	utxo.address = receiver.String()
+	utxo.lockTime = time.Unix(int64(lockTime), 0)
 	return nil
 }
 
@@ -353,4 +357,10 @@ func (utxo *UTXO) Value() uint64 {
 // Address is the receiving address if this is a swap contract.
 func (utxo *UTXO) Address() string {
 	return utxo.address
+}
+
+// LockTime is a method on the asset.Contract interface for reading the locktime
+// in the contract script.
+func (utxo *UTXO) LockTime() time.Time {
+	return utxo.lockTime
 }

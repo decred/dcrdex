@@ -6,6 +6,7 @@ package dex
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 type Error string
@@ -14,6 +15,8 @@ func (err Error) Error() string { return string(err) }
 
 const (
 	UnsupportedScriptError = Error("unsupported script type")
+	LockTimeTaker          = 24 * time.Hour
+	LockTimeMaker          = 48 * time.Hour
 )
 
 // Network flags passed to asset backends to signify which network to use.

@@ -5,6 +5,7 @@ package asset
 
 import (
 	"fmt"
+	"time"
 
 	"decred.org/dcrdex/dex"
 )
@@ -90,6 +91,8 @@ type Contract interface {
 	FeeRate() uint64
 	// Script is the contract redeem script.
 	Script() []byte
+	// LockTime is the refund locktime.
+	LockTime() time.Time
 }
 
 // BlockUpdate is sent over the update channel when a tip change is detected.

@@ -321,6 +321,7 @@ type TCoin struct {
 	confsErr  error
 	auditAddr string
 	auditVal  uint64
+	lockTime  time.Time
 }
 
 func (coin *TCoin) Confirmations() (int64, error) {
@@ -331,6 +332,10 @@ func (coin *TCoin) Confirmations() (int64, error) {
 
 func (coin *TCoin) Address() string {
 	return coin.auditAddr
+}
+
+func (coin *TCoin) LockTime() time.Time {
+	return coin.lockTime
 }
 
 func (coin *TCoin) setConfs(confs int64) {
@@ -1009,6 +1014,7 @@ type tSwap struct {
 
 var tValSpoofer uint64 = 1
 var tRecipientSpoofer = ""
+var tLockTimeSpoofer time.Time
 
 func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUser) *tSwap {
 	auditVal := matchInfo.qty
@@ -1016,12 +1022,22 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		auditVal = matcher.BaseToQuote(matchInfo.rate, matchInfo.qty)
 	}
 	coinID := randBytes(36)
-	makerSwap := &TCoin{
+	swap := &TCoin{
 		confs:     0,
 		auditAddr: recipient + tRecipientSpoofer,
 		auditVal:  auditVal * tValSpoofer,
 		id:        coinID,
 	}
+
+	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker))
+	if user == matchInfo.maker {
+		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker))
+	}
+
+	if !tLockTimeSpoofer.IsZero() {
+		swap.lockTime = tLockTimeSpoofer
+	}
+
 	contract := "01234567" + user.sigHex
 	req, _ := msgjson.NewRequest(1, msgjson.InitRoute, &msgjson.Init{
 		OrderID: oid[:],
@@ -1033,7 +1049,7 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 	})
 
 	return &tSwap{
-		coin:     makerSwap,
+		coin:     swap,
 		req:      req,
 		contract: contract,
 	}
@@ -1546,6 +1562,11 @@ func TestMalformedSwap(t *testing.T) {
 	ensureNilErr(rig.sendSwap_maker(false))
 	checkContractErr(matchInfo.maker)
 	tRecipientSpoofer = ""
+	// Bad locktime
+	tLockTimeSpoofer = time.Unix(1, 0)
+	ensureNilErr(rig.sendSwap_maker(false))
+	checkContractErr(matchInfo.maker)
+	tLockTimeSpoofer = time.Time{}
 	// Now make sure it works.
 	ensureNilErr(rig.sendSwap_maker(true))
 }

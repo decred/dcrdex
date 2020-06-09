@@ -200,7 +200,7 @@ export default class MarketsPage extends BasePage {
     // Fetch the first market in the list, or the users last selected market, if
     // it exists.
     var selected = (data && data.market) ? data.market : State.fetch(lastMarketKey)
-    if (!this.marketList.exists(selected.host, selected.base, selected.quote)) {
+    if (!selected || !this.marketList.exists(selected.host, selected.base, selected.quote)) {
       selected = this.marketList.first()
     }
     this.setMarket(selected.host, selected.base, selected.quote)
