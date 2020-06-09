@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex/encode"
 	"go.etcd.io/bbolt"
 )
 
@@ -20,9 +21,7 @@ var dbUpgradeTests = [...]struct {
 	verify   func(*testing.T, *bbolt.DB)
 	filename string // in testdata directory
 }{
-	// Add database upgrade verification tests here,
-	// for example:
-	// 		{verifyV2Upgrade, "v1.db.gz"},
+	{verifyV1Upgrade, "v0.db.gz"},
 }
 
 func TestUpgrades(t *testing.T) {
@@ -74,4 +73,26 @@ func TestUpgrades(t *testing.T) {
 	})
 
 	os.RemoveAll(d)
+}
+
+func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
+	err := db.View(func(dbtx *bbolt.Tx) error {
+		bkt := dbtx.Bucket(appBucket)
+		if bkt == nil {
+			return fmt.Errorf("appBucket not found")
+		}
+		versionB := bkt.Get(versionKey)
+		if versionB == nil {
+			return fmt.Errorf("expected a non-nil version value")
+		}
+		version := encode.BytesToUint32(versionB)
+		if version != versionedDBVersion {
+			return fmt.Errorf("expected db version %d, got %d",
+				versionedDBVersion, version)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Error(err)
+	}
 }

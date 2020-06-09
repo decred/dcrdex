@@ -13,19 +13,22 @@ import (
 const (
 	initialVersion = 0
 
+	// versionedDBVersion is the second version of the database. It versions
+	// the database by persisting the version.
+	versionedDBVersion = 1
+
 	// DBVersion is the latest version of the database that is understood by the
 	// program. Databases with recorded versions higher than this will fail to
 	// open (meaning any upgrades prevent reverting to older software).
-	DBVersion = initialVersion
+	DBVersion = versionedDBVersion
 )
 
 // upgrade the database to the next version. Each database upgrade function
-// should be keyed by the database version it upgrades. For example, lets say
-// we have a new version which upgrades match IDs. Its associated upgrade
-// entry would look like this:
-// 			matchIDVersion - 1: matchIDUpgrade
-//
-var upgrades = [...]func(tx *bbolt.Tx) error{}
+// should be keyed by the database version it upgrades.
+
+var upgrades = [...]func(tx *bbolt.Tx) error{
+	versionedDBVersion - 1: versionedDBUpgrade,
+}
 
 func fetchDBVersion(tx *bbolt.Tx) (uint32, error) {
 	bucket := tx.Bucket(appBucket)
@@ -55,11 +58,17 @@ func setDBVersion(tx *bbolt.Tx, newVersion uint32) error {
 func upgradeDB(db *bbolt.DB) error {
 	var version uint32
 	err := db.View(func(tx *bbolt.Tx) error {
-		var err error
-		version, err = fetchDBVersion(tx)
-		if err != nil {
-			return err
+		bucket := tx.Bucket(appBucket)
+		if bucket == nil {
+			return fmt.Errorf("appBucket not found")
 		}
+
+		// If the database has a version set, return it.
+		versionB := bucket.Get(versionKey)
+		if versionB == nil {
+			return nil
+		}
+		version = encode.BytesToUint32(versionB)
 		return nil
 	})
 	if err != nil {
@@ -67,8 +76,8 @@ func upgradeDB(db *bbolt.DB) error {
 	}
 
 	if version > DBVersion {
-		return fmt.Errorf("unknown database version, max version %d, got: %d",
-			DBVersion, version)
+		return fmt.Errorf("unknown database version %d, "+
+			"client recognizes up to %d", version, DBVersion)
 	}
 
 	if version == DBVersion {
@@ -88,4 +97,26 @@ func upgradeDB(db *bbolt.DB) error {
 		}
 		return nil
 	})
+}
+
+func versionedDBUpgrade(dbtx *bbolt.Tx) error {
+	const oldVersion = 0
+	const newVersion = 1
+
+	dbVersion, err := fetchDBVersion(dbtx)
+	if err == nil {
+		return fmt.Errorf("expected database version not found error")
+	}
+
+	if dbVersion != oldVersion {
+		return fmt.Errorf("versionedDBUpgrade inappropriately called")
+	}
+
+	bkt := dbtx.Bucket(appBucket)
+	if bkt == nil {
+		return fmt.Errorf("appBucket not found")
+	}
+
+	// Persist the database version.
+	return setDBVersion(dbtx, newVersion)
 }

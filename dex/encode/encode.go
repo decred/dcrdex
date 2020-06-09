@@ -36,7 +36,7 @@ func Uint32Bytes(i uint32) []byte {
 	return b
 }
 
-// BytesToUint64 converts the length-4, big-endian encoded byte slice to a uint32.
+// BytesToUint32 converts the length-4, big-endian encoded byte slice to a uint32.
 func BytesToUint32(i []byte) uint32 {
 	return IntCoder.Uint32(i[:4])
 }
