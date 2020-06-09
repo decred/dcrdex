@@ -617,6 +617,43 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 	return counts, errs.ifany()
 }
 
+// resendPendingRequests checks all matches for this order to re-attempt
+// sending the `init` or `redeem` request where necessary.
+func (t *trackedTrade) resendPendingRequests() error {
+	errs := newErrorSet("resendPendingRequest: order %s - ", t.ID())
+
+	for _, match := range t.matches {
+		dbMatch, _, proof, auth := match.parts()
+		side, status := dbMatch.Side, dbMatch.Status
+		var swapCoinID, redeemCoinID []byte
+		switch {
+		case side == order.Maker && status == order.MakerSwapCast:
+			swapCoinID = proof.MakerSwap
+		case side == order.Taker && status == order.TakerSwapCast:
+			swapCoinID = proof.TakerSwap
+		case side == order.Maker && status == order.MakerRedeemed:
+			redeemCoinID = proof.MakerRedeem
+		case side == order.Taker && status == order.MatchComplete:
+			swapCoinID = proof.TakerRedeem
+		}
+		if swapCoinID != nil && auth.InitSig == nil {
+			// resend pending `init` request
+			if err := t.finalizeSwapAction(match, swapCoinID, proof.Script); err != nil {
+				errs.addErr(err)
+			}
+			continue
+		}
+		if redeemCoinID != nil && auth.RedeemSig == nil {
+			// resend pending `redeem` request
+			if err := t.finalizeRedeemAction(match, swapCoinID); err != nil {
+				errs.addErr(err)
+			}
+		}
+	}
+
+	return errs.ifany()
+}
+
 // swapMatches will send a transaction with swap outputs for the specified
 // matches.
 func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
@@ -902,43 +939,6 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 	}
 
 	return refundedQty, errs.ifany()
-}
-
-// resendPendingRequests checks all matches for this order to re-attempt
-// sending the `init` or `redeem` request where necessary.
-func (t *trackedTrade) resendPendingRequests() error {
-	errs := newErrorSet("resendPendingRequest: order %s - ", t.ID())
-
-	for _, match := range t.matches {
-		dbMatch, _, proof, auth := match.parts()
-		side, status := dbMatch.Side, dbMatch.Status
-		var swapCoinID, redeemCoinID []byte
-		switch {
-		case side == order.Maker && status == order.MakerSwapCast:
-			swapCoinID = proof.MakerSwap
-		case side == order.Taker && status == order.TakerSwapCast:
-			swapCoinID = proof.TakerSwap
-		case side == order.Maker && status == order.MakerRedeemed:
-			redeemCoinID = proof.MakerRedeem
-		case side == order.Taker && status == order.MatchComplete:
-			swapCoinID = proof.TakerRedeem
-		}
-		if swapCoinID != nil && auth.InitSig == nil {
-			// resend pending `init` request
-			if err := t.finalizeSwapAction(match, swapCoinID, proof.Script); err != nil {
-				errs.addErr(err)
-			}
-			continue
-		}
-		if redeemCoinID != nil && auth.RedeemSig == nil {
-			// resend pending `redeem` request
-			if err := t.finalizeRedeemAction(match, swapCoinID); err != nil {
-				errs.addErr(err)
-			}
-		}
-	}
-
-	return errs.ifany()
 }
 
 // processAudit processes the audit request from the server.

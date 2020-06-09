@@ -100,6 +100,11 @@ func makeAcker(serializer func(msg *msgjson.Message) msgjson.Signable) func(msg 
 }
 
 var (
+	invalidAcker = func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, msg, nil)
+		f(resp)
+		return nil
+	}
 	initAcker = makeAcker(func(msg *msgjson.Message) msgjson.Signable {
 		init := new(msgjson.Init)
 		msg.Unmarshal(init)
@@ -2024,10 +2029,11 @@ func TestTradeTracking(t *testing.T) {
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
 	sign(tDexPriv, msgMatch)
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
-	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	// queue an invalid DEX init ack
+	rig.ws.queueResponse(msgjson.InitRoute, invalidAcker)
 	err = handleMatchRoute(tCore, rig.dc, msg)
-	if err != nil {
-		t.Fatalf("match messages error: %v", err)
+	if err == nil {
+		t.Fatalf("no error for invalid server ack for init route")
 	}
 	match, found := tracker.matches[mid]
 	if !found {
@@ -2049,6 +2055,35 @@ func TestTradeTracking(t *testing.T) {
 	}
 	if len(proof.SecretHash) == 0 {
 		t.Fatalf("secret hash not set")
+	}
+	// auth.InitSig should be unset because our init request received
+	// an invalid ack
+	if len(auth.InitSig) != 0 {
+		t.Fatalf("init sig recorded for invalid init ack")
+	}
+
+	// requeue an invalid DEX init ack and re-send pending init request
+	rig.ws.queueResponse(msgjson.InitRoute, invalidAcker)
+	err = tracker.resendPendingRequests()
+	if err == nil {
+		t.Fatalf("no error for invalid server ack for resent init request")
+	}
+	// auth.InitSig should remain unset because our resent init request
+	// received an invalid ack still
+	if len(auth.InitSig) != 0 {
+		t.Fatalf("init sig recorded for second invalid init ack")
+	}
+
+	// queue a valid DEX init ack and re-send pending init request
+	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	err = tracker.resendPendingRequests()
+	if err != nil {
+		t.Fatalf("unexpected error for resent pending init request: %v", err)
+	}
+	// auth.InitSig should now be set because our init request received
+	// a valid ack
+	if len(auth.InitSig) == 0 {
+		t.Fatalf("init sig not recorded for valid init ack")
 	}
 
 	// Send the counter-party's init info.
