@@ -115,7 +115,8 @@ func (c *TRPCClient) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.M
 	})
 	return c.requestErr
 }
-func (c *TRPCClient) Banish() { c.banished = true }
+func (c *TRPCClient) Disconnect() {}
+func (c *TRPCClient) Banish()     { c.banished = true }
 func (c *TRPCClient) getReq() *tReq {
 	if len(c.reqs) == 0 {
 		return nil
