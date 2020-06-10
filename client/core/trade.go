@@ -444,7 +444,8 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 // isRedeemable will be true if the match is ready for our redemption to be
 // broadcast.
 func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
-	if match.failErr != nil {
+	dbMatch, metaData, proof, _ := match.parts()
+	if match.failErr != nil || proof.RefundCoin != nil {
 		return false
 	}
 
@@ -455,7 +456,6 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 		return false
 	}
 
-	dbMatch, metaData, _, _ := match.parts()
 	walletLocked := !t.wallets.toWallet.unlocked()
 	if dbMatch.Side == order.Maker && metaData.Status == order.TakerSwapCast {
 		if walletLocked {
@@ -524,9 +524,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 
 // tick will check for and perform any match actions necessary.
 func (t *trackedTrade) tick() (assetCounter, error) {
-	var swaps []*matchTracker
-	var redeems []*matchTracker
-	var refunds []*matchTracker
+	var swaps, redeems, refunds []*matchTracker
 	counts := make(assetCounter)
 	errs := newErrorSet(t.dc.acct.host + " tick: ")
 
