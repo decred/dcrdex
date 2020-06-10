@@ -38,8 +38,8 @@ const (
 	conversionFactor  = 1e8
 	regFeeAssetSymbol = "dcr" // Hard-coded to Decred for registration fees, for now.
 
-	// highest uint32 number to be assigned to 'regConfirms' in 'dexConnection'
-	// when the registration is completed
+	// regConfirmationsPaid is used to indicate completed registration to
+	// (*Core).setRegConfirms.
 	regConfirmationsPaid uint32 = math.MaxUint32
 )
 
@@ -75,7 +75,7 @@ type dexConnection struct {
 	connected bool
 
 	regConfMtx  sync.RWMutex
-	regConfirms *uint32
+	regConfirms *uint32 // nil regConfirms means no pending registration.
 }
 
 // refreshMarkets rebuilds, saves, and returns the market map. The map itself
@@ -136,6 +136,11 @@ func (dc *dexConnection) getRegConfirms() *uint32 {
 func (dc *dexConnection) setRegConfirms(confs uint32) {
 	dc.regConfMtx.Lock()
 	defer dc.regConfMtx.Unlock()
+	if confs == regConfirmationsPaid {
+		// A nil regConfirms indicates that there is no pending registration.
+		dc.regConfirms = nil
+		return
+	}
 	dc.regConfirms = &confs
 }
 
