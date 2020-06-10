@@ -88,6 +88,4 @@ type DB interface {
 	NotificationsN(int) ([]*Notification, error)
 	// AckNotification sets the acknowledgement for a notification.
 	AckNotification(id []byte) error
-	// Close terminates access to the database.
-	Close() error
 }

@@ -36,7 +36,11 @@ func setup() error {
 	if err != nil {
 		return err
 	}
-	return db.Close()
+	bdb, ok := db.(*bolt.BoltDB)
+	if !ok {
+		return fmt.Errorf("database is not a BoltDB")
+	}
+	return bdb.DB.Close()
 }
 
 func compress() error {

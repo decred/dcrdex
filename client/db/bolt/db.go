@@ -65,16 +65,16 @@ var (
 	backupDir      = "backup"
 )
 
-// boltDB is a bbolt-based database backend for a DEX client. boltDB satisfies
+// BoltDB is a bbolt-based database backend for a DEX client. BoltDB satisfies
 // the db.DB interface defined at decred.org/dcrdex/client/db.
-type boltDB struct {
+type BoltDB struct {
 	*bbolt.DB
 }
 
-// Check that boltDB satisfies the db.DB interface.
-var _ dexdb.DB = (*boltDB)(nil)
+// Check that BoltDB satisfies the db.DB interface.
+var _ dexdb.DB = (*BoltDB)(nil)
 
-// NewDB is a constructor for a *boltDB.
+// NewDB is a constructor for a *BoltDB.
 func NewDB(dbPath string) (dexdb.DB, error) {
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
@@ -82,7 +82,7 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 	}
 
 	// Release the file lock on exit.
-	bdb := &boltDB{
+	bdb := &BoltDB{
 		DB: db,
 	}
 
@@ -91,7 +91,7 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 }
 
 // Run waits for context cancellation and closes the database.
-func (db *boltDB) Run(ctx context.Context) {
+func (db *BoltDB) Run(ctx context.Context) {
 	<-ctx.Done()
 	err := db.Backup()
 	if err != nil {
@@ -101,7 +101,7 @@ func (db *boltDB) Run(ctx context.Context) {
 }
 
 // Store stores a value at the specified key in the general-use bucket.
-func (db *boltDB) Store(k string, v []byte) error {
+func (db *BoltDB) Store(k string, v []byte) error {
 	if len(k) == 0 {
 		return fmt.Errorf("cannot store with empty key")
 	}
@@ -117,7 +117,7 @@ func (db *boltDB) Store(k string, v []byte) error {
 
 // ValueExists checks if a value was previously stored in the general-use
 // bucket at the specified key.
-func (db *boltDB) ValueExists(k string) (bool, error) {
+func (db *BoltDB) ValueExists(k string) (bool, error) {
 	var exists bool
 	return exists, db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(appBucket)
@@ -130,7 +130,7 @@ func (db *boltDB) ValueExists(k string) (bool, error) {
 }
 
 // Get retrieves value previously stored with Store.
-func (db *boltDB) Get(k string) ([]byte, error) {
+func (db *BoltDB) Get(k string) ([]byte, error) {
 	var v []byte
 	keyB := []byte(k)
 	return v, db.View(func(tx *bbolt.Tx) error {
@@ -148,7 +148,7 @@ func (db *boltDB) Get(k string) ([]byte, error) {
 
 // ListAccounts returns a list of DEX URLs. The DB is designed to have a single
 // account per DEX, so the account itself is identified by the DEX URL.
-func (db *boltDB) ListAccounts() ([]string, error) {
+func (db *BoltDB) ListAccounts() ([]string, error) {
 	var urls []string
 	return urls, db.acctsView(func(accts *bbolt.Bucket) error {
 		c := accts.Cursor()
@@ -168,7 +168,7 @@ func (db *boltDB) ListAccounts() ([]string, error) {
 
 // Accounts returns a list of DEX Accounts. The DB is designed to have a single
 // account per DEX, so the account itself is identified by the DEX URL.
-func (db *boltDB) Accounts() ([]*dexdb.AccountInfo, error) {
+func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 	var accounts []*dexdb.AccountInfo
 	return accounts, db.acctsView(func(accts *bbolt.Bucket) error {
 		c := accts.Cursor()
@@ -194,7 +194,7 @@ func (db *boltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 }
 
 // Account gets the AccountInfo associated with the specified DEX address.
-func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
+func (db *BoltDB) Account(url string) (*dexdb.AccountInfo, error) {
 	var acctInfo *dexdb.AccountInfo
 	acctKey := []byte(url)
 	return acctInfo, db.acctsView(func(accts *bbolt.Bucket) error {
@@ -218,7 +218,7 @@ func (db *boltDB) Account(url string) (*dexdb.AccountInfo, error) {
 
 // CreateAccount saves the AccountInfo. If an account already exists for this
 // DEX, it will return an error.
-func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
+func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	if ai.Host == "" {
 		return fmt.Errorf("empty host not allowed")
 	}
@@ -246,7 +246,7 @@ func (db *boltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 }
 
 // AccountPaid marks the account as paid by setting the "fee proof".
-func (db *boltDB) AccountPaid(proof *dexdb.AccountProof) error {
+func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof) error {
 	acctKey := []byte(proof.Host)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct := accts.Bucket(acctKey)
@@ -258,18 +258,18 @@ func (db *boltDB) AccountPaid(proof *dexdb.AccountProof) error {
 }
 
 // acctsView is a convenience function for reading from the account bucket.
-func (db *boltDB) acctsView(f bucketFunc) error {
+func (db *BoltDB) acctsView(f bucketFunc) error {
 	return db.withBucket(accountsBucket, db.View, f)
 }
 
 // acctsUpdate is a convenience function for updating the account bucket.
-func (db *boltDB) acctsUpdate(f bucketFunc) error {
+func (db *BoltDB) acctsUpdate(f bucketFunc) error {
 	return db.withBucket(accountsBucket, db.Update, f)
 }
 
 // UpdateOrder saves the order information in the database. Any existing order
 // info for the same order ID will be overwritten without indication.
-func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
+func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 	ord, md := m.Order, m.MetaData
 	if md.Host == "" {
 		return fmt.Errorf("empty DEX not allowed")
@@ -298,7 +298,7 @@ func (db *boltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 
 // ActiveOrders retrieves all orders which appear to be in an active state,
 // which is either in the epoch queue or in the order book.
-func (db *boltDB) ActiveOrders() ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) ActiveOrders() ([]*dexdb.MetaOrder, error) {
 	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
 		status := oBkt.Get(statusKey)
 		return bEqual(status, byteEpoch) || bEqual(status, byteBooked)
@@ -308,7 +308,7 @@ func (db *boltDB) ActiveOrders() ([]*dexdb.MetaOrder, error) {
 // AccountOrders retrieves all orders associated with the specified DEX. n = 0
 // applies no limit on number of orders returned. since = 0 is equivalent to
 // disabling the time filter, since no orders were created before before 1970.
-func (db *boltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	if n == 0 && since == 0 {
 		return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
@@ -325,7 +325,7 @@ func (db *boltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaO
 // MarketOrders retrieves all orders for the specified DEX and market. n = 0
 // applies no limit on number of orders returned. since = 0 is equivalent to
 // disabling the time filter, since no orders were created before before 1970.
-func (db *boltDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	baseB := uint32Bytes(base)
 	quoteB := uint32Bytes(quote)
@@ -336,7 +336,7 @@ func (db *boltDB) MarketOrders(dex string, base, quote uint32, n int, since uint
 }
 
 // ActiveDEXOrders retrieves all orders for the specified DEX.
-func (db *boltDB) ActiveDEXOrders(dex string) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) ActiveDEXOrders(dex string) ([]*dexdb.MetaOrder, error) {
 	dexB := []byte(dex)
 	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
 		status := oBkt.Get(statusKey)
@@ -345,7 +345,7 @@ func (db *boltDB) ActiveDEXOrders(dex string) ([]*dexdb.MetaOrder, error) {
 }
 
 // marketOrdersAll retrieves all orders for the specified DEX and market.
-func (db *boltDB) marketOrdersAll(dexB, baseB, quoteB []byte) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) marketOrdersAll(dexB, baseB, quoteB []byte) ([]*dexdb.MetaOrder, error) {
 	return db.filteredOrders(func(oBkt *bbolt.Bucket) bool {
 		return bEqual(dexB, oBkt.Get(dexKey)) && bEqual(baseB, oBkt.Get(baseKey)) &&
 			bEqual(quoteB, oBkt.Get(quoteKey))
@@ -356,7 +356,7 @@ func (db *boltDB) marketOrdersAll(dexB, baseB, quoteB []byte) ([]*dexdb.MetaOrde
 // and age. The sort order is always newest first. If n is 0, there is no limit
 // to the number of orders returned. If using with both n = 0, and since = 0,
 // use marketOrdersAll instead.
-func (db *boltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uint64) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	sinceB := uint64Bytes(since)
 	return db.newestOrders(n, func(oBkt *bbolt.Bucket) bool {
 		timeB := oBkt.Get(updateTimeKey)
@@ -369,7 +369,7 @@ func (db *boltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uin
 // function. Each order's bucket is provided to the filter, and a boolean true
 // return value indicates the order should is eligible to be decoded and
 // returned.
-func (db *boltDB) newestOrders(n int, filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) newestOrders(n int, filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
 	return orders, db.ordersView(func(master *bbolt.Bucket) error {
 		pairs := newestBuckets(master, n, updateTimeKey, filter)
@@ -388,7 +388,7 @@ func (db *boltDB) newestOrders(n int, filter func(*bbolt.Bucket) bool) ([]*dexdb
 // filteredOrders gets all orders that pass the provided filter function. Each
 // order's bucket is provided to the filter, and a boolean true return value
 // indicates the order should be decoded and returned.
-func (db *boltDB) filteredOrders(filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) filteredOrders(filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
 	return orders, db.ordersView(func(master *bbolt.Bucket) error {
 		master.ForEach(func(oid, _ []byte) error {
@@ -410,7 +410,7 @@ func (db *boltDB) filteredOrders(filter func(*bbolt.Bucket) bool) ([]*dexdb.Meta
 }
 
 // Order fetches a MetaOrder by order ID.
-func (db *boltDB) Order(oid order.OrderID) (mord *dexdb.MetaOrder, err error) {
+func (db *BoltDB) Order(oid order.OrderID) (mord *dexdb.MetaOrder, err error) {
 	oidB := oid[:]
 	err = db.ordersView(func(master *bbolt.Bucket) error {
 		oBkt := master.Bucket(oidB)
@@ -455,7 +455,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 
 // SetChangeCoin sets the current change coin on an order. Change coins are
 // chained for matches, so only the last change coin needs to be saved.
-func (db *boltDB) SetChangeCoin(oid order.OrderID, changeCoin order.CoinID) error {
+func (db *BoltDB) SetChangeCoin(oid order.OrderID, changeCoin order.CoinID) error {
 	return db.ordersUpdate(func(master *bbolt.Bucket) error {
 		oBkt := master.Bucket(oid[:])
 		if oBkt == nil {
@@ -466,7 +466,7 @@ func (db *boltDB) SetChangeCoin(oid order.OrderID, changeCoin order.CoinID) erro
 }
 
 // UpdateOrderStatus sets the order status for an order.
-func (db *boltDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error {
+func (db *BoltDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error {
 	return db.ordersUpdate(func(master *bbolt.Bucket) error {
 		oBkt := master.Bucket(oid[:])
 		if oBkt == nil {
@@ -477,18 +477,18 @@ func (db *boltDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus)
 }
 
 // ordersView is a convenience function for reading from the order bucket.
-func (db *boltDB) ordersView(f bucketFunc) error {
+func (db *BoltDB) ordersView(f bucketFunc) error {
 	return db.withBucket(ordersBucket, db.View, f)
 }
 
 // ordersUpdate is a convenience function for updating the order bucket.
-func (db *boltDB) ordersUpdate(f bucketFunc) error {
+func (db *BoltDB) ordersUpdate(f bucketFunc) error {
 	return db.withBucket(ordersBucket, db.Update, f)
 }
 
 // UpdateMatch updates the match information in the database. Any existing
 // entry for the same match ID will be overwritten without indication.
-func (db *boltDB) UpdateMatch(m *dexdb.MetaMatch) error {
+func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 	match, md := m.Match, m.MetaData
 	if md.Quote == md.Base {
 		return fmt.Errorf("quote and base asset cannot be the same")
@@ -518,7 +518,7 @@ func (db *boltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 
 // ActiveMatches retrieves the matches that are in an active state, which is
 // any state except order.MatchComplete.
-func (db *boltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
+func (db *BoltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
 		status := mBkt.Get(statusKey)
 		return len(status) != 1 || status[0] != uint8(order.MatchComplete)
@@ -527,7 +527,7 @@ func (db *boltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 
 // ActiveDEXMatches retrieves the matches that are in an active state for a
 // specified DEX, which is any state except order.MatchComplete.
-func (db *boltDB) ActiveDEXMatches(dex string) ([]*dexdb.MetaMatch, error) {
+func (db *BoltDB) ActiveDEXMatches(dex string) ([]*dexdb.MetaMatch, error) {
 	dexB := []byte(dex)
 	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
 		status := mBkt.Get(statusKey)
@@ -536,7 +536,7 @@ func (db *boltDB) ActiveDEXMatches(dex string) ([]*dexdb.MetaMatch, error) {
 }
 
 // MatchesForOrder retrieves the matches for the specified order ID.
-func (db *boltDB) MatchesForOrder(oid order.OrderID) ([]*dexdb.MetaMatch, error) {
+func (db *BoltDB) MatchesForOrder(oid order.OrderID) ([]*dexdb.MetaMatch, error) {
 	oidB := oid[:]
 	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
 		oid := mBkt.Get(orderIDKey)
@@ -547,7 +547,7 @@ func (db *boltDB) MatchesForOrder(oid order.OrderID) ([]*dexdb.MetaMatch, error)
 // filteredMatches gets all matches that pass the provided filter function. Each
 // match's bucket is provided to the filter, and a boolean true return value
 // indicates the match should be decoded and returned.
-func (db *boltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaMatch, error) {
+func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaMatch, error) {
 	var matches []*dexdb.MetaMatch
 	return matches, db.matchesView(func(master *bbolt.Bucket) error {
 		master.ForEach(func(k, _ []byte) error {
@@ -595,19 +595,19 @@ func (db *boltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 }
 
 // matchesView is a convenience function for reading from the match bucket.
-func (db *boltDB) matchesView(f bucketFunc) error {
+func (db *BoltDB) matchesView(f bucketFunc) error {
 	return db.withBucket(matchesBucket, db.View, f)
 }
 
 // matchesUpdate is a convenience function for updating the match bucket.
-func (db *boltDB) matchesUpdate(f bucketFunc) error {
+func (db *BoltDB) matchesUpdate(f bucketFunc) error {
 	return db.withBucket(matchesBucket, db.Update, f)
 }
 
 // UpdateWallet adds a wallet to the database.
-func (db *boltDB) UpdateWallet(wallet *dexdb.Wallet) error {
+func (db *BoltDB) UpdateWallet(wallet *dexdb.Wallet) error {
 	if wallet.Balances == nil {
-		return fmt.Errorf("cannot UpdateWallet with nil Balance field")
+		return fmt.Errorf("cannot UpdateWallet with nil Balances field")
 	}
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt, err := master.CreateBucketIfNotExists(wallet.ID())
@@ -623,7 +623,7 @@ func (db *boltDB) UpdateWallet(wallet *dexdb.Wallet) error {
 }
 
 // UpdateBalanceSet updates balance in the wallet bucket.
-func (db *boltDB) UpdateBalanceSet(wid []byte, bal *db.BalanceSet) error {
+func (db *BoltDB) UpdateBalanceSet(wid []byte, bal *db.BalanceSet) error {
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt := master.Bucket(wid)
 		if wBkt == nil {
@@ -634,7 +634,7 @@ func (db *boltDB) UpdateBalanceSet(wid []byte, bal *db.BalanceSet) error {
 }
 
 // Wallets loads all wallets from the database.
-func (db *boltDB) Wallets() ([]*dexdb.Wallet, error) {
+func (db *BoltDB) Wallets() ([]*dexdb.Wallet, error) {
 	var wallets []*dexdb.Wallet
 	return wallets, db.walletsView(func(master *bbolt.Bucket) error {
 		c := master.Cursor()
@@ -651,7 +651,7 @@ func (db *boltDB) Wallets() ([]*dexdb.Wallet, error) {
 }
 
 // Wallet loads all wallet from the database.
-func (db *boltDB) Wallet(wid []byte) (wallet *dexdb.Wallet, err error) {
+func (db *BoltDB) Wallet(wid []byte) (wallet *dexdb.Wallet, err error) {
 	return wallet, db.walletsView(func(master *bbolt.Bucket) error {
 		wallet, err = makeWallet(master.Bucket(wid))
 		return err
@@ -682,17 +682,17 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 }
 
 // walletsView is a convenience function for reading from the wallets bucket.
-func (db *boltDB) walletsView(f bucketFunc) error {
+func (db *BoltDB) walletsView(f bucketFunc) error {
 	return db.withBucket(walletsBucket, db.View, f)
 }
 
 // walletUpdate is a convenience function for updating the wallets bucket.
-func (db *boltDB) walletsUpdate(f bucketFunc) error {
+func (db *BoltDB) walletsUpdate(f bucketFunc) error {
 	return db.withBucket(walletsBucket, db.Update, f)
 }
 
 // SaveNotification saves the notification.
-func (db *boltDB) SaveNotification(note *dexdb.Notification) error {
+func (db *BoltDB) SaveNotification(note *dexdb.Notification) error {
 	if note.Severeness < dexdb.Success {
 		return fmt.Errorf("Storage of notification with severity %s is forbidden.", note.Severeness)
 	}
@@ -716,7 +716,7 @@ func (db *boltDB) SaveNotification(note *dexdb.Notification) error {
 }
 
 // AckNotification sets the acknowledgement for a notification.
-func (db *boltDB) AckNotification(id []byte) error {
+func (db *BoltDB) AckNotification(id []byte) error {
 	return db.notesUpdate(func(master *bbolt.Bucket) error {
 		noteBkt := master.Bucket(id)
 		if noteBkt == nil {
@@ -727,7 +727,7 @@ func (db *boltDB) AckNotification(id []byte) error {
 }
 
 // NotificationsN reads out the N most recent notifications.
-func (db *boltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
+func (db *BoltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
 	notes := make([]*dexdb.Notification, 0, n)
 	return notes, db.notesView(func(master *bbolt.Bucket) error {
 		pairs := newestBuckets(master, n, stampKey, nil)
@@ -746,12 +746,12 @@ func (db *boltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
 }
 
 // notesView is a convenience function to read from the notifications bucket.
-func (db *boltDB) notesView(f bucketFunc) error {
+func (db *BoltDB) notesView(f bucketFunc) error {
 	return db.withBucket(notesBucket, db.View, f)
 }
 
 // notesUpdate is a convenience function for updating the notifications bucket.
-func (db *boltDB) notesUpdate(f bucketFunc) error {
+func (db *BoltDB) notesUpdate(f bucketFunc) error {
 	return db.withBucket(notesBucket, db.Update, f)
 }
 
@@ -774,7 +774,7 @@ func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func(*bbo
 
 // makeTopLevelBuckets creates a top-level bucket for each of the provided keys,
 // if the bucket doesn't already exist.
-func (db *boltDB) makeTopLevelBuckets(buckets [][]byte) error {
+func (db *BoltDB) makeTopLevelBuckets(buckets [][]byte) error {
 	return db.Update(func(tx *bbolt.Tx) error {
 		for _, bucket := range buckets {
 			_, err := tx.CreateBucketIfNotExists(bucket)
@@ -789,7 +789,7 @@ func (db *boltDB) makeTopLevelBuckets(buckets [][]byte) error {
 // withBucket is a creates a view into a (probably nested) bucket. The viewer
 // can be read-only (db.View), or read-write (db.Update). The provided
 // bucketFunc will be called with the requested bucket as its only argument.
-func (db *boltDB) withBucket(bkt []byte, viewer txFunc, f bucketFunc) error {
+func (db *BoltDB) withBucket(bkt []byte, viewer txFunc, f bucketFunc) error {
 	return viewer(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(bkt)
 		if bucket == nil {
@@ -800,7 +800,7 @@ func (db *boltDB) withBucket(bkt []byte, viewer txFunc, f bucketFunc) error {
 }
 
 // Backup makes a copy of the database.
-func (db *boltDB) Backup() error {
+func (db *BoltDB) Backup() error {
 	dir := filepath.Join(filepath.Dir(db.Path()), backupDir)
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		err := os.Mkdir(dir, 0700)
@@ -814,11 +814,6 @@ func (db *boltDB) Backup() error {
 		return tx.CopyFile(path, 0600)
 	})
 	return err
-}
-
-// Close terminates access to the database.
-func (db *boltDB) Close() error {
-	return db.DB.Close()
 }
 
 // bucketPutter enables chained calls to (*bbolt.Bucket).Put with error
