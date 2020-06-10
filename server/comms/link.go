@@ -29,6 +29,8 @@ type Link interface {
 	Request(msg *msgjson.Message, f func(Link, *msgjson.Message), expireTime time.Duration, expire func()) error
 	// Banish closes the link and quarantines the client.
 	Banish()
+	// Disconnect closes the link.
+	Disconnect()
 }
 
 // When the DEX sends a request to the client, a responseHandler is created

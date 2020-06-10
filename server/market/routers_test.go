@@ -1179,6 +1179,7 @@ func (conn *TLink) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.Mes
 func (conn *TLink) Banish() {
 	conn.banished = true
 }
+func (conn *TLink) Disconnect() {}
 
 type testRig struct {
 	router  *BookRouter

@@ -771,37 +771,47 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// Check to see if there is already an existing client for this account.
+	respHandlers := make(map[uint64]*respHandler)
 	client := auth.user(acctInfo.ID)
-	if client == nil {
-		// Retrieve the user's N latest finished (completed or canceled orders)
-		// and store them in a latestOrders.
-		latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, cancelThreshWindow)
-		if err != nil {
-			log.Errorf("unable to retrieve user's executed cancels and completed orders: %v", err)
-			return &msgjson.Error{
-				Code:    msgjson.RPCInternalError,
-				Message: "DB error",
-			}
+	if client != nil {
+		// Disconnect and remove known connections. We are creating a new one,
+		// but persist the response handlers.
+		auth.connMtx.Lock() // hold clientInfo maps during conn.Disconnect and respHandlers access
+		delete(auth.users, client.acct.ID)
+		delete(auth.conns, client.conn.ID())
+		client.mtx.Lock()
+		client.conn.Disconnect()
+		respHandlers = client.respHandlers
+		client.mtx.Unlock()
+		auth.connMtx.Unlock()
+	}
+
+	// Retrieve the user's N latest finished (completed or canceled orders)
+	// and store them in a latestOrders.
+	latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, cancelThreshWindow)
+	if err != nil {
+		log.Errorf("unable to retrieve user's executed cancels and completed orders: %v", err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "DB error",
 		}
-		client = &clientInfo{
-			acct:         acctInfo,
-			conn:         conn,
-			respHandlers: make(map[uint64]*respHandler),
-			recentOrders: latestFinished,
-			suspended:    !open,
-		}
-		if cancelRatio := client.cancelRatio(); !auth.anarchy && cancelRatio > auth.cancelThresh {
-			// Account should already be closed, but perhaps the server crashed
-			// or the account was not penalized before shutdown.
-			client.suspended = true
-			// The account might now be closed if the cancellation ratio was
-			// exceeded while the server was running in anarchy mode.
-			auth.storage.CloseAccount(acctInfo.ID, account.CancellationRatio)
-			log.Debugf("Suspended account %v (cancellation ratio = %f) connected.",
-				acctInfo.ID, cancelRatio)
-		}
-	} else {
-		client.conn = conn
+	}
+	client = &clientInfo{
+		acct:         acctInfo,
+		conn:         conn,
+		respHandlers: respHandlers,
+		recentOrders: latestFinished,
+		suspended:    !open,
+	}
+	if cancelRatio := client.cancelRatio(); !auth.anarchy && cancelRatio > auth.cancelThresh {
+		// Account should already be closed, but perhaps the server crashed
+		// or the account was not penalized before shutdown.
+		client.suspended = true
+		// The account might now be closed if the cancellation ratio was
+		// exceeded while the server was running in anarchy mode.
+		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRatio)
+		log.Debugf("Suspended account %v (cancellation ratio = %f) connected.",
+			acctInfo.ID, cancelRatio)
 	}
 
 	pendingReqs, pendingMsgs := auth.addClient(client)
