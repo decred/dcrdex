@@ -157,6 +157,7 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 		marketInfo:       mktInfo,
 		book:             Book,
 		matcher:          matcher.New(),
+		persistBook:      true,
 		epochCommitments: make(map[order.Commitment]order.OrderID),
 		epochOrders:      make(map[order.OrderID]order.Order),
 		swapper:          swapper,
@@ -1133,6 +1134,7 @@ func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed [
 	// Penalize accounts with misses. TODO: consider if Penalize can be an async
 	// function call.
 	for _, ord := range misses {
+		log.Infof("No preimage received for order %v from user %v. Penalizing.", ord.ID(), ord.User())
 		m.auth.Penalize(ord.User(), account.PreimageReveal)
 	}
 
