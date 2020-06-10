@@ -1675,7 +1675,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, wallets, coins, c.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, wallets, coins, c.net, c.notify)
 	corder, _ := tracker.coreOrder()
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -2106,7 +2106,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		} else {
 			var preImg order.Preimage
 			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, nil, nil, c.notify)
+			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, nil, nil, c.net, c.notify)
 		}
 	}
 	for oid := range cancels {

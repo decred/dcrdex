@@ -2,8 +2,12 @@
 
 package core
 
-// The btc, dcr and dcrdex harnesses should be running before executing
-// this test.
+// The btc, dcr and dcrdex harnesses should be running before executing this
+// test.
+//
+// Ensure dcrdex is properly installed to $GOPATH/bin before running the dcrdex
+// harness using the following go install cmd (run from `server/cmd/dcrdex`):
+// go install -ldflags "-X 'decred.org/dcrdex/dex.TestLockTimeTaker=10m' -X 'decred.org/dcrdex/dex.TestLockTimeMaker=20m'"
 //
 // Some errors you might encounter (especially after running this test
 // multiple times):

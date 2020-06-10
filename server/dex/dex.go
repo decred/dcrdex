@@ -400,7 +400,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		BroadcastTimeout: cfg.BroadcastTimeout,
 	}
 
-	swapper, err := swap.NewSwapper(swapperCfg)
+	swapper, err := swap.NewSwapper(cfg.Network, swapperCfg)
 	if err != nil {
 		abort()
 		return nil, fmt.Errorf("NewSwapper: %v", err)

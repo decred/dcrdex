@@ -282,6 +282,9 @@ type Swapper struct {
 	matches  map[order.MatchID]*matchTracker
 	// orders tracks order status and active swaps.
 	orders *orderSwapTracker
+	// Expected locktimes for maker and taker swaps.
+	lockTimeTaker time.Duration
+	lockTimeMaker time.Duration
 	// The broadcast timeout.
 	bTimeout time.Duration
 	// latencyQ is a queue for coin waiters to deal with network latency.
@@ -335,7 +338,7 @@ type Config struct {
 }
 
 // NewSwapper is a constructor for a Swapper.
-func NewSwapper(cfg *Config) (*Swapper, error) {
+func NewSwapper(net dex.Network, cfg *Config) (*Swapper, error) {
 	// Verify the directory where swap state will be saved.
 	inf, err := os.Stat(cfg.DataDir)
 	if os.IsNotExist(err) {
@@ -347,16 +350,18 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		dataDir:     cfg.DataDir,
-		coins:       cfg.Assets,
-		storage:     cfg.Storage,
-		authMgr:     authMgr,
-		latencyQ:    wait.NewTickerQueue(recheckInterval),
-		matches:     make(map[order.MatchID]*matchTracker),
-		orders:      newOrderSwapTracker(),
-		bTimeout:    cfg.BroadcastTimeout,
-		liveWaiters: make(map[waiterKey]*handlerArgs),
-		liveAckers:  make(map[uint64]*msgAckers),
+		dataDir:       cfg.DataDir,
+		coins:         cfg.Assets,
+		storage:       cfg.Storage,
+		authMgr:       authMgr,
+		latencyQ:      wait.NewTickerQueue(recheckInterval),
+		matches:       make(map[order.MatchID]*matchTracker),
+		orders:        newOrderSwapTracker(),
+		lockTimeTaker: dex.LockTimeTaker(net),
+		lockTimeMaker: dex.LockTimeMaker(net),
+		bTimeout:      cfg.BroadcastTimeout,
+		liveWaiters:   make(map[waiterKey]*handlerArgs),
+		liveAckers:    make(map[uint64]*msgAckers),
 	}
 
 	if cfg.State != nil {
@@ -1570,9 +1575,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		return wait.DontTryAgain
 	}
 
-	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeTaker))
+	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeTaker))
 	if stepInfo.actor.isMaker {
-		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeMaker))
+		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeMaker))
 	}
 	if contract.LockTime().Before(reqLockTime) {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,

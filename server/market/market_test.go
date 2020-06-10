@@ -221,7 +221,7 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 		AuthManager:      authMgr,
 		BroadcastTimeout: 10 * time.Second,
 	}
-	swapper, err := swap.NewSwapper(swapperCfg)
+	swapper, err := swap.NewSwapper(dex.Testnet, swapperCfg)
 	if err != nil {
 		panic(err.Error())
 	}
