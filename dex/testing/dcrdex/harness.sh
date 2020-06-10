@@ -6,7 +6,7 @@ set -e
 TEST_ROOT=$(cd ~/dextest; pwd)
 
 # Setup test data dir for dcrdex.
-DCRDEX_DATA_DIR=~/dextest/dcrdex
+DCRDEX_DATA_DIR=${TEST_ROOT}/dcrdex
 if [ -d "${DCRDEX_DATA_DIR}" ]; then
   rm -R "${DCRDEX_DATA_DIR}"
 fi
@@ -56,7 +56,7 @@ EOF
 # Write dcrdex.conf.
 cat > "./dcrdex.conf" <<EOF
 regfeexpub=spubVWHTkHRefqHptAnBdNcDJMnT9w7wBPGtyv5Ji6hHsHGGXyLhgq21SakpXmjEAAQFjcwm14bgXGa23ETaskUTxgm4cqi2qbKLkaY1YdCHmtz
-pgdbname=dcrdex_simnet
+pgdbname=dcrdex_simnet_test
 simnet=1
 rpclisten=127.0.0.1:17273
 debuglevel=trace

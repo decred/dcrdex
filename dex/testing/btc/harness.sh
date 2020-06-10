@@ -3,7 +3,6 @@
 set -e
 #set -x # for verbose output
 SESSION="btc-harness"
-NODES_ROOT=~/dextest/btc
 RPC_USER="user"
 RPC_PASS="pass"
 ALPHA_LISTEN_PORT="20575"
@@ -22,6 +21,7 @@ GAMMA_ADDRESS="2N9Lwbw6DKoNSyTB9xL4e9LXftuPP7XU214"
 DELTA_WALLET_SEED="cURsyTZ8icuTHwWxSfTC2Geu2F6dMRtnzt1gvSaxHdc9Zf6eviJN"
 DELTA_ADDRESS="2NBeBjSW2W5yhRK23F7rZMtqKiDsLCKmifa"
 
+NODES_ROOT=~/dextest/btc
 if [ -d "${NODES_ROOT}" ]; then
   rm -R "${NODES_ROOT}"
 fi

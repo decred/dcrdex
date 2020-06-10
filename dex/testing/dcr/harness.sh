@@ -3,7 +3,6 @@
 set -e
 set -x # for verbose output
 SESSION="dcr-harness"
-NODES_ROOT=$(cd ~/dextest/dcr; pwd) # absolute path
 RPC_USER="user"
 RPC_PASS="pass"
 ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
@@ -28,12 +27,16 @@ TRADING_WALLET2_PORT="19582"
 # wait for process termination.
 WAIT="; tmux wait-for -S donedcr"
 
+NODES_ROOT=~/dextest/dcr
 if [ -d "${NODES_ROOT}" ]; then
   rm -R "${NODES_ROOT}"
 fi
 mkdir -p "${NODES_ROOT}/alpha"
 mkdir -p "${NODES_ROOT}/beta"
 mkdir -p "${NODES_ROOT}/harness-ctl"
+
+# Get the absolute path.
+NODES_ROOT=$(cd ~/dextest/dcr; pwd) # absolute path
 
 echo "Writing ctl scripts"
 ################################################################################

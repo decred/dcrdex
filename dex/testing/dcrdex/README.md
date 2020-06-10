@@ -16,7 +16,7 @@ must be running to use the dcrdex harness.
 Also prepare your PostgreSQL DB as [described here](https://github.com/decred/dcrdex/wiki/Simnet-Testing#prepare-the-postgresql-db).
 Basically: drop your old simnet db and create a new one.
 
-The dcrdex config file created and used by the harness sets `pgdbname=dcrdex_simnet`,
+The dcrdex config file created and used by the harness sets `pgdbname=dcrdex_simnet_test`,
 and `rpclisten=127.0.0.1:17273`. You can override these or set additional config opts
 by passing them as arguments when executing the harness script e.g.:
 ```sh

@@ -26,7 +26,7 @@ require (
 	github.com/go-chi/chi v4.0.2+incompatible
 	github.com/gorilla/websocket v1.4.1
 	github.com/jessevdk/go-flags v1.4.0
-	github.com/lib/pq v1.6.0
+	github.com/lib/pq v1.2.0
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	go.etcd.io/bbolt v1.3.4
 	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4
