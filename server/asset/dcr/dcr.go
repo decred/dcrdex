@@ -277,7 +277,7 @@ func (dcr *Backend) VerifyUnspentCoin(coinID []byte) (label string, err error) {
 	}
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		err = asset.RPCError(fmt.Errorf("GetTxOut (%s:%d): %v", txHash.String(), vout, err))
+		err = fmt.Errorf("GetTxOut (%s:%d): %v", txHash.String(), vout, err)
 		return
 	}
 	if txOut == nil {

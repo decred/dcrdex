@@ -109,9 +109,6 @@ type BlockUpdate struct {
 	Reorg bool
 }
 
-// RPCError is an error type used for unexpected backend RPC failures.
-type RPCError error
-
 // ConnectionError error should be sent over the block update channel if a
 // connection error is detected by the Backend.
 type ConnectionError error
