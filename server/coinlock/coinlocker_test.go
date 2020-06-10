@@ -209,7 +209,7 @@ func Test_bookLocker_LockCoins(t *testing.T) {
 		t.Errorf("swapLock indicated coins were locked that should have been unlocked")
 	}
 
-	// Attempt relock of the all of the already-locked coins.
+	// Attempt relock of the already-locked coins.
 	delete(coinMap, oid)
 	failed := bookLock.LockCoins(coinMap)
 	if len(failed) != len(coinMap) {

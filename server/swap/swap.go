@@ -2242,9 +2242,10 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	}
 }
 
-// CheckUnspent attempts to verify a coin ID for a given asset by decoding the
-// coin ID and retrieving the corresponding asset.Coin. If the coin is not found
-// or spent, an asset.CoinNotFoundError is returned
+// CheckUnspent attempts to verify a coin ID for a given asset by retrieving the
+// corresponding asset.Coin. If the coin is not found or spent, an
+// asset.CoinNotFoundError is returned. On success, a human-readable
+// representation of the coin ID is returned.
 func (s *Swapper) CheckUnspent(asset uint32, coinID []byte) (string, error) {
 	backend := s.coins[asset]
 	if backend == nil {

@@ -284,12 +284,6 @@ func (dcr *Backend) VerifyUnspentCoin(coinID []byte) (label string, err error) {
 		err = asset.CoinNotFoundError
 		return
 	}
-	// coin = &basicUTXO{
-	// 	backend: dcr,
-	// 	value:   toAtoms(txOut.Value),
-	// 	txHash:  *txHash,
-	// 	vout:    vout,
-	// }
 	return fmt.Sprintf("%s:%d", txHash.String(), vout), nil
 }
 

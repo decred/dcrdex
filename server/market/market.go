@@ -104,8 +104,6 @@ type Market struct {
 	swapper Swapper
 	auth    AuthManager
 
-	// checkUnspentBase  func(coinID []byte) (val uint64, confs int64, err error)
-	// checkUnspentQuote func(coinID []byte) (val uint64, confs int64, err error)
 	coinLockerBase  coinlock.CoinLocker
 	coinLockerQuote coinlock.CoinLocker
 
@@ -145,27 +143,15 @@ ordersLoop:
 		if lo.FillAmt > 0 {
 			// Order already matched with another trade, so it is expected that
 			// the funding coins are spent in a swap.
-
+			//
 			// In general, our position is that the server is not ultimately
 			// responsible for verifying that all orders have locked coins since
 			// the client will be penalized if they cannot complete the swap.
 			// The least the server can do is ensure funding coins for NEW
-			// orders are unspent and owned by the user, but there are other
-			// possibilities:
+			// orders are unspent and owned by the user.
 
-			// TODO 1: We may consider following the chain of dex contracts and
-			// redeems to ensure that lo.Remaining() in value is unspent, or at
-			// least check that the initial coins were spent in a dex monitored
-			// tx with TxMonitored(..., spendingTx).
-
-			// TODO 2: The swapper could notify market when a redeem output is
-			// created so it can lock those coins if the order is still on the
-			// book (e.g. signal{orderID, redeemOutCoins} -> market). Otherwise
-			// the user could place new orders with these coins even though they
-			// are implicitly funding the still booked order with a remaining
-			// amount.
-
-			// On to next order. Do not bother locking coins that are spent.
+			// On to the next order. Do not lock coins that are spent or should
+			// be spent in a swap contract.
 			continue
 		}
 
