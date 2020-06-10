@@ -4,6 +4,7 @@ package pg
 
 import (
 	"encoding/hex"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -96,6 +97,41 @@ func TestAccounts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(accts[0], anAcct) {
 		t.Fatal("error getting account info: actual does not equal expected")
+	}
+
+	// The Account ID cannot be null. broken_rule has a default value of 0
+	// and is unexpected to become null.
+	nullAccounts := `UPDATE %s
+		SET
+		pubkey = null ,
+		fee_address = null,
+		fee_coin = null;`
+
+	stmt := fmt.Sprintf(nullAccounts, archie.tables.accounts)
+	if _, err = sqlExec(archie.db, stmt); err != nil {
+		t.Fatalf("error nullifying account: %v", err)
+	}
+
+	accts, err = archie.Accounts()
+	if err != nil {
+		t.Fatalf("error getting null accounts: %v", err)
+	}
+
+	// All fields except account ID are null.
+	if accts[0].AccountID.String() != "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc" ||
+		accts[0].Pubkey.String() != "" ||
+		accts[0].FeeAddress != "" ||
+		accts[0].FeeCoin.String() != "" ||
+		byte(accts[0].BrokenRule) != byte(0) {
+		t.Fatal("accounts has unexpected data")
+	}
+
+	anAcct, err = archie.AccountInfo(accts[0].AccountID)
+	if err != nil {
+		t.Fatalf("error getting null account info: %v", err)
+	}
+	if !reflect.DeepEqual(accts[0], anAcct) {
+		t.Fatal("error getting null account info: actual does not equal expected")
 	}
 
 	// Close the account for failure to complete a swap.

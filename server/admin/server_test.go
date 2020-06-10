@@ -874,9 +874,34 @@ func TestAccountInfo(t *testing.T) {
 		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
 	}
 
+	// ok, upper case account id
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/account/"+strings.ToUpper(acctIDStr), nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusOK)
+	}
+	if exp != w.Body.String() {
+		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
+	}
+
 	// acct id is not hex
 	w = httptest.NewRecorder()
 	r, _ = http.NewRequest("GET", "https://localhost/account/nothex", nil)
+	r.RemoteAddr = "localhost"
+
+	mux.ServeHTTP(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusBadRequest)
+	}
+
+	// acct id wrong length
+	w = httptest.NewRecorder()
+	r, _ = http.NewRequest("GET", "https://localhost/account/"+acctIDStr[2:], nil)
 	r.RemoteAddr = "localhost"
 
 	mux.ServeHTTP(w, r)

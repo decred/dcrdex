@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
@@ -54,18 +53,14 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 	}
 	defer rows.Close()
 	var accts []*db.Account
-	var accountID, pubkey, feeCoin []byte
-	var brokenRule byte
+	var feeAddress sql.NullString
 	for rows.Next() {
 		a := new(db.Account)
-		err = rows.Scan(&accountID, &pubkey, &a.FeeAddress, &feeCoin, &brokenRule)
+		err = rows.Scan(&a.AccountID, &a.Pubkey, &feeAddress, &a.FeeCoin, &a.BrokenRule)
 		if err != nil {
 			return nil, err
 		}
-		copy(a.AccountID[:], accountID)
-		a.Pubkey = dex.Bytes(pubkey)
-		a.FeeCoin = dex.Bytes(feeCoin)
-		a.BrokenRule = account.Rule(brokenRule)
+		a.FeeAddress = feeAddress.String
 		accts = append(accts, a)
 	}
 	if err = rows.Err(); err != nil {
@@ -78,15 +73,12 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 	stmt := fmt.Sprintf(internal.SelectAccountInfo, a.tables.accounts)
 	acct := new(db.Account)
-	var accountID, pubkey, feeCoin []byte
-	var brokenRule byte
-	if err := a.db.QueryRow(stmt, aid).Scan(&accountID, &pubkey, &acct.FeeAddress, &feeCoin, &brokenRule); err != nil {
+	var feeAddress sql.NullString
+	if err := a.db.QueryRow(stmt, aid).Scan(&acct.AccountID, &acct.Pubkey, &feeAddress,
+		&acct.FeeCoin, &acct.BrokenRule); err != nil {
 		return nil, err
 	}
-	copy(acct.AccountID[:], accountID)
-	acct.Pubkey = dex.Bytes(pubkey)
-	acct.FeeCoin = dex.Bytes(feeCoin)
-	acct.BrokenRule = account.Rule(brokenRule)
+	acct.FeeAddress = feeAddress.String
 	return acct, nil
 }
 

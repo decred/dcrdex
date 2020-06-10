@@ -24,6 +24,18 @@ func (b Bytes) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hex.EncodeToString(b))
 }
 
+// Scan implements the sql.Scanner interface.
+func (b *Bytes) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		*b = Bytes(src)
+		return nil
+	case nil:
+		return nil
+	}
+	return fmt.Errorf("cannot convert %T to Bytes", src)
+}
+
 // UnmarshalJSON satisfies the json.Unmarshaler interface, and expects a UTF-8
 // encoding of a hex string.
 func (b *Bytes) UnmarshalJSON(encHex []byte) (err error) {

@@ -161,10 +161,14 @@ func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
 
 // apiAccountInfo is the handler for the '/account/{account id}' API request.
 func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
-	acct := strings.ToLower(chi.URLParam(r, accountNameKey))
-	acctIDSlice, err := hex.DecodeString(acct)
+	acctIDStr := chi.URLParam(r, accountNameKey)
+	acctIDSlice, err := hex.DecodeString(acctIDStr)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("could not decode accout id: %v", err), http.StatusBadRequest)
+		return
+	}
+	if len(acctIDSlice) != account.HashSize {
+		http.Error(w, "account id has incorrect length", http.StatusBadRequest)
 		return
 	}
 	var acctID account.AccountID
