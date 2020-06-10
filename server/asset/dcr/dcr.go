@@ -284,6 +284,46 @@ func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
 	return nil
 }
 
+// CoinDetails gets the recipient address, value, and confirmations of a
+// transaction output encoded by the given coinID. If the output does not exist
+// or has a pubkey script of the wrong type, an error will be returned.
+func (dcr *Backend) CoinDetails(coinID []byte) (addr string, val uint64, confs int64, err error) {
+	txHash, vout, errCoin := decodeCoinID(coinID)
+	if errCoin != nil {
+		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
+		return
+	}
+	return dcr.OutputSummary(txHash, vout)
+}
+
+// OutputSummary gets the recipient address, value, and confirmations of a
+// transaction output. If the output does not exist or has a pubkey script of
+// the wrong type, an error will be returned.
+func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (addr string, val uint64, confs int64, err error) {
+	var verboseTx *chainjson.TxRawResult
+	verboseTx, err = dcr.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		if isTxNotFoundErr(err) {
+			err = asset.CoinNotFoundError
+		}
+		return
+	}
+
+	if int(vout) > len(verboseTx.Vout)-1 {
+		err = asset.CoinNotFoundError
+		return
+	}
+
+	out := verboseTx.Vout[vout]
+	if addrs := out.ScriptPubKey.Addresses; len(addrs) > 0 {
+		addr = addrs[0]
+	}
+
+	val = toAtoms(out.Value)
+	confs = verboseTx.Confirmations
+	return
+}
+
 // UnspentCoinDetails gets the recipient address, value, and confirmations of
 // unspent coins. For DCR, this corresponds to a UTXO. If the utxo does not
 // exist or has a pubkey script of the wrong type, an error will be returned.
