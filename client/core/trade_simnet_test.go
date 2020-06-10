@@ -168,10 +168,10 @@ func startClients(ctx context.Context) error {
 		}
 		c.log("mined %d blocks on dcr %s for fee payment confirmation", regRes.ReqConfirms, dcrWallet.name)
 
-		// wait for fee payment
-		c.log("waiting 5 seconds for fee confirmation notice")
+		// wait 12 seconds for fee payment, notifyfee times out after 10 seconds
+		c.log("waiting 12 seconds for fee confirmation notice")
 		c.notifications = c.core.NotificationFeed()
-		feePaid := tryUntil(ctx, 5*time.Second, func() bool {
+		feePaid := tryUntil(ctx, 12*time.Second, func() bool {
 			select {
 			case n := <-c.notifications:
 				return n.Type() == "feepayment" && n.Subject() == "Account registered"
@@ -180,7 +180,7 @@ func startClients(ctx context.Context) error {
 			}
 		})
 		if !feePaid {
-			return fmt.Errorf("fee payment not confirmed after 5 seconds")
+			return fmt.Errorf("fee payment not confirmed after 12 seconds")
 		}
 		c.log("fee payment confirmed")
 	}
@@ -447,6 +447,8 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	// run a repeated check for match status changes to mine blocks as necessary.
 	tryUntil(ctx, 1*time.Minute, func() bool {
 		var completedTrades int
+		tracker.matchMtx.RLock()
+		defer tracker.matchMtx.RUnlock()
 		for _, match := range tracker.matches {
 			side, status := match.Match.Side, match.Match.Status
 			if status >= finalStatus {
