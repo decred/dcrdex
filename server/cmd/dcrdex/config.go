@@ -78,6 +78,7 @@ type dexConf struct {
 	SigningKeyPW     []byte
 	AdminSrvOn       bool
 	AdminSrvAddr     string
+	AdminSrvPW       []byte
 }
 
 type flagsData struct {
@@ -116,8 +117,9 @@ type flagsData struct {
 	PGHost             string `long:"pghost" description:"PostgreSQL server host:port or UNIX socket (e.g. /run/postgresql)."`
 	ShowPGConfig       bool   `long:"showpgconfig" description:"Logs the PostgreSQL db configuration on system start up."`
 	SigningKeyPassword string `long:"signingkeypass" description:"Password for encrypting/decrypting the dex privkey. INSECURE. Do not set unless absolutely necessary."`
-	AdminSrvOn         bool   `long:"adminsrvon" description:"turn on the admin server"`
-	AdminSrvAddr       string `long:"adminsrvaddr" description:"administration HTTPS server address (default: 127.0.0.1:6542)"`
+	AdminSrvOn         bool   `long:"adminsrvon" description:"Turn on the admin server"`
+	AdminSrvAddr       string `long:"adminsrvaddr" description:"Administration HTTPS server address (default: 127.0.0.1:6542)"`
+	AdminSrvPassword   string `long:"adminsrvpass" description:"Admin server password. INSECURE. Do not set unless absolutely necessary."`
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed
@@ -537,6 +539,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		SigningKeyPW:     []byte(cfg.SigningKeyPassword),
 		AdminSrvAddr:     adminSrvAddr,
 		AdminSrvOn:       cfg.AdminSrvOn,
+		AdminSrvPW:       []byte(cfg.AdminSrvPassword),
 	}
 
 	opts := &procOpts{
