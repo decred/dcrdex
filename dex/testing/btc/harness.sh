@@ -22,9 +22,7 @@ DELTA_WALLET_SEED="cURsyTZ8icuTHwWxSfTC2Geu2F6dMRtnzt1gvSaxHdc9Zf6eviJN"
 DELTA_ADDRESS="2NBeBjSW2W5yhRK23F7rZMtqKiDsLCKmifa"
 
 NODES_ROOT=~/dextest/btc
-if [ -d "${NODES_ROOT}" ]; then
-  rm -R "${NODES_ROOT}"
-fi
+rm -rf "${NODES_ROOT}"
 
 ALPHA_DIR="${NODES_ROOT}/alpha"
 BETA_DIR="${NODES_ROOT}/beta"
@@ -34,9 +32,6 @@ echo "Writing node config files"
 mkdir -p "${ALPHA_DIR}"
 mkdir -p "${BETA_DIR}"
 mkdir -p "${HARNESS_DIR}"
-
-# Get the absolute path.
-NODES_ROOT=$(cd ~/dextest/btc; pwd)
 
 ALPHA_CLI_CFG="-rpcwallet= -rpcport=${ALPHA_RPC_PORT} -regtest=1 -rpcuser=user -rpcpassword=pass"
 

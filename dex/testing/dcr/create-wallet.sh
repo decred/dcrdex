@@ -2,7 +2,7 @@
 # Script for creating dcr wallets, dcr harness should be running before executing.
 set -e
 
-NODES_ROOT=$(cd ~/dextest/dcr; pwd) # absolute path
+NODES_ROOT=~/dextest/dcr
 
 # The following are required script arguments
 TMUX_WIN_ID=$1

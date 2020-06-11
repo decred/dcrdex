@@ -13,22 +13,24 @@ and [BTC Simnet Test Harness](../btc/README.md) to run.
 The [DCR Test Harness](../dcr/README.md) and [BTC Simnet Test Harness](../btc/README.md)
 must be running to use the dcrdex harness.
 
-Also prepare your PostgreSQL DB as [described here](https://github.com/decred/dcrdex/wiki/Simnet-Testing#prepare-the-postgresql-db).
-Basically: drop your old simnet db and create a new one.
+The dcrdex config file created and used by the harness sets
+`pgdbname=dcrdex_simnet_test` and `rpclisten=127.0.0.1:17273`.
+You can override these or set additional config opts by passing them as
+arguments when executing the harness script e.g.:
 
-The dcrdex config file created and used by the harness sets `pgdbname=dcrdex_simnet_test`,
-and `rpclisten=127.0.0.1:17273`. You can override these or set additional config opts
-by passing them as arguments when executing the harness script e.g.:
 ```sh
 ./harness.sh --pgpass=dexpass
 ```
 
-The dcrdex harness script will create a markets.json file referencing dcr and btc
-node config files created by the respective node harnesses; and start a dcrdex
-instance listening at `127.0.0.1:17273` or any address you specify in cli args.
+The harness script will drop any existing `dcrdex_simnet_test` PostgreSQL db
+and create a fresh database for the session. The script will also create a
+markets.json file referencing dcr and btc node config files created by the
+respective node harnesses; and start a dcrdex instance listening at
+`127.0.0.1:17273` or any address you specify in cli args.
 
 The rpc cert for the dcrdex instance will be created in `~/dextest/dcrdex/rpc.cert`
 with the following content:
+
 ```
 -----BEGIN CERTIFICATE-----
 MIICpTCCAgagAwIBAgIQZMfxMkSi24xMr4CClCODrzAKBggqhkjOPQQDBDBJMSIw
@@ -51,8 +53,9 @@ vF8Ti1x2vTkD
 
 ## Harness control
 
-To quit the harness, use ctrl+c to stop the running dcrdex instance and then 
-`tmux kill-session` to exit the harness.
+To quit the harness, run `~/dextest/dcrdex/quit` from any terminal/tmux window,
+or from within the tmux window, use ctrl+c to stop the running dcrdex instance
+and then `tmux kill-session` (or `exit`) to exit the harness.
 
 ## Dev Stuff
 

@@ -35,16 +35,13 @@ mkdir -p "${NODES_ROOT}/alpha"
 mkdir -p "${NODES_ROOT}/beta"
 mkdir -p "${NODES_ROOT}/harness-ctl"
 
-# Get the absolute path.
-NODES_ROOT=$(cd ~/dextest/dcr; pwd) # absolute path
-
 echo "Writing ctl scripts"
 ################################################################################
 # Control Scripts
 ################################################################################
 
 # Add wallet script
-HARNESS_DIR=$(dirname $(pwd)/$0)
+HARNESS_DIR=$(dirname $0)
 cp "${HARNESS_DIR}/create-wallet.sh" "${NODES_ROOT}/harness-ctl/create-wallet"
 
 # Script to send funds from alpha to address
@@ -214,5 +211,8 @@ do
   tmux send-keys -t $SESSION:0 "./fund ${TRADING_WALLET1_ADDRESS} ${i}${WAIT}" C-m\; wait-for donedcr
   tmux send-keys -t $SESSION:0 "./fund ${TRADING_WALLET2_ADDRESS} ${i}${WAIT}" C-m\; wait-for donedcr
 done
+
+# Create fee account on alpha wallet for use by dcrdex simnet instances.
+tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
 
 tmux attach-session -t $SESSION

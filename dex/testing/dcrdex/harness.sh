@@ -1,17 +1,25 @@
 #!/bin/sh
 # Tmux script that configures and runs dcrdex.
+
 set -e
 
-# Get the absolute path for ~/dextest.
-TEST_ROOT=$(cd ~/dextest; pwd)
+# Rebuild dcrdex with the required simnet locktime settings.
+HARNESS_DIR=$(dirname $0)
+(cd $HARNESS_DIR && cd ../../../server/cmd/dcrdex && go install -ldflags \
+"-X 'decred.org/dcrdex/dex.TestLockTimeTaker=1m' \
+-X 'decred.org/dcrdex/dex.TestLockTimeMaker=2m'")
 
 # Setup test data dir for dcrdex.
+TEST_ROOT=~/dextest
 DCRDEX_DATA_DIR=${TEST_ROOT}/dcrdex
-if [ -d "${DCRDEX_DATA_DIR}" ]; then
-  rm -R "${DCRDEX_DATA_DIR}"
-fi
+rm -rf "${DCRDEX_DATA_DIR}"
 mkdir -p "${DCRDEX_DATA_DIR}"
 cd "${DCRDEX_DATA_DIR}"
+
+# Drop and re-create the test db.
+TEST_DB=dcrdex_simnet_test
+sudo -u postgres -H psql -c "DROP DATABASE IF EXISTS ${TEST_DB}" \
+-c "CREATE DATABASE ${TEST_DB} OWNER dcrdex"
 
 echo "Writing markets.json and dcrdex.conf"
 
@@ -55,8 +63,8 @@ EOF
 
 # Write dcrdex.conf.
 cat > "./dcrdex.conf" <<EOF
-regfeexpub=spubVWHTkHRefqHptAnBdNcDJMnT9w7wBPGtyv5Ji6hHsHGGXyLhgq21SakpXmjEAAQFjcwm14bgXGa23ETaskUTxgm4cqi2qbKLkaY1YdCHmtz
-pgdbname=dcrdex_simnet_test
+regfeexpub=spubVWHTkHRefqHpw3qMN2VTWqnT9rMuqDZrbdgxp8QzGBvXCYfdUuk2VKFnsPHE1CBBNSZjrwHTx2LrM9LbXbGH7gb9qLCYc3JUkLW883SeQ2H
+pgdbname=${TEST_DB}
 simnet=1
 rpclisten=127.0.0.1:17273
 debuglevel=trace
@@ -94,9 +102,19 @@ nHxL8mYBatmh6kEt9Dsdyg+osByDRegiAmM7IVmBzw==
 -----END EC PRIVATE KEY-----
 EOF
 
-echo "Starting dcrdex"
 SESSION="dcrdex-harness"
+
+# Shutdown script
+cat > "${DCRDEX_DATA_DIR}/quit" <<EOF
+#!/bin/sh
+tmux send-keys -t $SESSION:0 C-c
+tmux wait-for donedex
+tmux kill-session -t $SESSION
+EOF
+chmod +x "${DCRDEX_DATA_DIR}/quit"
+
+echo "Starting dcrdex"
 tmux new-session -d -s $SESSION
 tmux rename-window -t $SESSION:0 'dcrdex'
-tmux send-keys -t $SESSION:0 "dcrdex --appdata=$(pwd) $@" C-m
+tmux send-keys -t $SESSION:0 "dcrdex --appdata=$(pwd) $@; tmux wait-for -S donedex" C-m
 tmux attach-session -t $SESSION
