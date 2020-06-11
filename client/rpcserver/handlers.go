@@ -401,15 +401,10 @@ func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(withdrawRoute, err)
 	}
 	defer form.AppPass.Clear()
-	if s.core.WalletState(form.AssetID) == nil {
-		errMsg := fmt.Sprintf("error withdrawing: %s wallet does not exist",
-			dex.BipIDSymbol(form.AssetID))
-		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, errMsg)
-		return createResponse(withdrawRoute, nil, resErr)
-	}
-	coin, err := s.core.Withdraw(form.AppPass, form.AssetID, form.Value)
+	coin, err := s.core.Withdraw(form.AppPass, form.AssetID, form.Value, form.Address)
 	if err != nil {
-		resErr := msgjson.NewError(msgjson.RPCWithdrawError, err.Error())
+		errMsg := fmt.Sprintf("unable to withdraw: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCWithdrawError, errMsg)
 		return createResponse(withdrawRoute, nil, resErr)
 	}
 	res := coin.String()

@@ -763,10 +763,6 @@ func TestHandleWithdraw(t *testing.T) {
 		coin:        tCoin{},
 		wantErrCode: -1,
 	}, {
-		name:        "wallet doesn't exist",
-		params:      params,
-		wantErrCode: msgjson.RPCWalletExistsError,
-	}, {
 		name:        "core.Withdraw error",
 		params:      params,
 		walletState: &core.WalletState{},
