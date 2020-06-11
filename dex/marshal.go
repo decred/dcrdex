@@ -28,7 +28,10 @@ func (b Bytes) MarshalJSON() ([]byte, error) {
 func (b *Bytes) Scan(src interface{}) error {
 	switch src := src.(type) {
 	case []byte:
-		*b = Bytes(src)
+		// src may be reused, so create a new slice.
+		dst := make(Bytes, len(src))
+		copy(dst, src)
+		*b = dst
 		return nil
 	case nil:
 		return nil
