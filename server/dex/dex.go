@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	dcrasset "decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
@@ -551,4 +552,9 @@ func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *m
 // Accounts returns data for all accounts.
 func (dm *DEX) Accounts() ([]*db.Account, error) {
 	return dm.storage.Accounts()
+}
+
+// AccountInfo returns data for an account.
+func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
+	return dm.storage.AccountInfo(aid)
 }
