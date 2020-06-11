@@ -295,12 +295,12 @@ func (a *TAsset) ValidateCoinID(coinID []byte) (string, error) {
 func (a *TAsset) ValidateContract(contract []byte) error {
 	return nil
 }
-func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate           { return a.bChan }
-func (a *TAsset) InitTxSize() uint32                                        { return 100 }
-func (a *TAsset) CheckAddress(string) bool                                  { return true }
-func (a *TAsset) Run(context.Context)                                       {}
-func (a *TAsset) ValidateSecret(secret, contract []byte) bool               { return true }
-func (a *TAsset) VerifyUnspentCoin(coinID []byte) (label string, err error) { return "", nil }
+func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate { return a.bChan }
+func (a *TAsset) InitTxSize() uint32                              { return 100 }
+func (a *TAsset) CheckAddress(string) bool                        { return true }
+func (a *TAsset) Run(context.Context)                             {}
+func (a *TAsset) ValidateSecret(secret, contract []byte) bool     { return true }
+func (a *TAsset) VerifyUnspentCoin(coinID []byte) error           { return nil }
 
 func (a *TAsset) setContractErr(err error) {
 	a.mtx.Lock()

@@ -48,7 +48,7 @@ type Backend interface {
 	// and retrieving the corresponding Coin. If the coin is not found or no
 	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
 	// for more UTXO data.
-	VerifyUnspentCoin(coinID []byte) (label string, err error)
+	VerifyUnspentCoin(coinID []byte) error
 }
 
 // Coin represents a transaction input or output.
