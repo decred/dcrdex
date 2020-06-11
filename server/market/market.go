@@ -53,7 +53,7 @@ type Swapper interface {
 	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
 	LockOrdersCoins(orders []order.Order)
 	TxMonitored(user account.AccountID, asset uint32, txid string) bool
-	CheckUnspent(asset uint32, coinID []byte) (string, error)
+	CheckUnspent(asset uint32, coinID []byte) error
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -161,13 +161,14 @@ ordersLoop:
 			assetID = base
 		}
 		for i := range lo.Coins {
-			coin, err := swapper.CheckUnspent(assetID, lo.Coins[i])
+			err := swapper.CheckUnspent(assetID, lo.Coins[i])
 			if err == nil {
 				continue
 			}
 
 			if errors.Is(err, asset.CoinNotFoundError) {
 				// spent, exclude this order
+				coin, _ := asset.DecodeCoinID(dex.BipIDSymbol(assetID), lo.Coins[i]) // coin decoding succeeded in CheckUnspent
 				log.Warnf("Coin %s not unspent for unfilled order %v. "+
 					"Revoking the order.", coin, lo)
 			} else {

@@ -344,12 +344,9 @@ func (b *TBackend) ValidateContract(contract []byte) error {
 }
 
 func (b *TBackend) ValidateSecret(secret, contract []byte) bool { return true }
-func (b *TBackend) VerifyUnspentCoin(coinID []byte) (label string, err error) {
-	utxo, err := b.utxo(coinID)
-	if err != nil {
-		return "", err
-	}
-	return utxo.String(), nil
+func (b *TBackend) VerifyUnspentCoin(coinID []byte) error {
+	_, err := b.utxo(coinID)
+	return err
 }
 
 type tUTXO struct {

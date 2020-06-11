@@ -255,22 +255,19 @@ func (btc *Backend) ValidateContract(contract []byte) error {
 // VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID and
 // retrieving the corresponding UTXO. If the coin is not found or no longer
 // unspent, an asset.CoinNotFoundError is returned.
-func (dcr *Backend) VerifyUnspentCoin(coinID []byte) (label string, err error) {
-	txHash, vout, errCoin := decodeCoinID(coinID)
-	if errCoin != nil {
-		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
-		return
+func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
 	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
 	if err != nil {
-		err = fmt.Errorf("GetTxOut (%s:%d): %v", txHash.String(), vout, err)
-		return
+		return fmt.Errorf("GetTxOut (%s:%d): %v", txHash.String(), vout, err)
 	}
 	if txOut == nil {
-		err = asset.CoinNotFoundError
-		return
+		return asset.CoinNotFoundError
 	}
-	return fmt.Sprintf("%s:%d", txHash.String(), vout), nil
+	return nil
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
