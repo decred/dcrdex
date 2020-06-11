@@ -59,15 +59,15 @@ type WSLink struct {
 	ip string
 	// conn is the gorilla websocket.Conn, or a stub for testing.
 	conn Connection
-	// writeMtx is a mutex to sequence WriteMessage operations.
-	writeMtx sync.Mutex
 	// on is used internally to prevent multiple Close calls on the underlying
 	// connections.
 	on uint32
 	// quit is used to cancel the Context.
 	quit context.CancelFunc
+	// stopped is closed when quit is called.
+	stopped chan struct{}
 	// outChan is used to sequence sent messages.
-	outChan chan []byte
+	outChan chan *sendData
 	// The WSLink has at least 3 goroutines, one for read, one for write, and
 	// one server goroutine to monitor for peer disconnection. The WaitGroup is
 	// used to synchronize cleanup on disconnection.
@@ -76,8 +76,11 @@ type WSLink struct {
 	handler func(*msgjson.Message) *msgjson.Error
 	// pingPeriod is how often to ping the peer.
 	pingPeriod time.Duration
-	// sendWG is a WaitGroup to sequence sends with a graceful shutdown.
-	sendWG sync.WaitGroup
+}
+
+type sendData struct {
+	data []byte
+	ret  chan<- error
 }
 
 // NewWSLink is a constructor for a new WSLink.
@@ -85,14 +88,31 @@ func NewWSLink(addr string, conn Connection, pingPeriod time.Duration, handler f
 	return &WSLink{
 		ip:         addr,
 		conn:       conn,
-		outChan:    make(chan []byte, outBufferSize),
+		outChan:    make(chan *sendData, outBufferSize),
 		pingPeriod: pingPeriod,
 		handler:    handler,
 	}
 }
 
-// Send sends the passed Message to the websocket peer.
+// Send sends the passed Message to the websocket peer. The actual writing of
+// the message on the peer's link occurs asynchronously. As such, a nil error
+// only indicates that the link is believed to be up and the message was
+// successfully marshalled.
 func (c *WSLink) Send(msg *msgjson.Message) error {
+	return c.send(msg, nil)
+}
+
+// SendNow is like send, but it waits for the message to be written on the
+// peer's link, returning any error from the write.
+func (c *WSLink) SendNow(msg *msgjson.Message) error {
+	writeErrChan := make(chan error, 1)
+	if err := c.send(msg, writeErrChan); err != nil {
+		return err
+	}
+	return <-writeErrChan
+}
+
+func (c *WSLink) send(msg *msgjson.Message, writeErr chan<- error) error {
 	if c.Off() {
 		return ErrPeerDisconnected
 	}
@@ -101,19 +121,14 @@ func (c *WSLink) Send(msg *msgjson.Message) error {
 		return err
 	}
 
-	c.sendWG.Add(1)
-	c.outChan <- b
-	go func() {
-		c.writeMtx.Lock()
-		b := <-c.outChan
-		c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-		err := c.conn.WriteMessage(websocket.TextMessage, b)
-		c.writeMtx.Unlock()
-		c.sendWG.Done()
-		if err != nil {
-			c.Disconnect()
-		}
-	}()
+	// NOTE: Without the stopped chan or access to the Context we are now racing
+	// after the c.Off check above.
+	select {
+	case c.outChan <- &sendData{b, writeErr}:
+	case <-c.stopped:
+		return ErrPeerDisconnected
+	}
+
 	return nil
 }
 
@@ -139,7 +154,10 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("Attempted to Start a running WSLink")
 	}
 	linkCtx, quit := context.WithCancel(ctx)
+	// Note that there is a brief window where c.on is true but quit and stopped
+	// are not set.
 	c.quit = quit
+	c.stopped = make(chan struct{}) // control signal to block send
 	err := c.conn.SetReadDeadline(time.Now().Add(c.pingPeriod * 2))
 	if err != nil {
 		return nil, fmt.Errorf("Failed to set initial read deadline for %v: %v", c.ip, err)
@@ -147,23 +165,36 @@ func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 	log.Tracef("Starting websocket messaging with peer %s", c.ip)
 	// Start processing input and output.
-	c.wg.Add(2)
+	c.wg.Add(3)
 	go c.inHandler(linkCtx)
+	go c.outHandler(linkCtx)
 	go c.pingHandler(linkCtx)
 	return &c.wg, nil
 }
 
-// Disconnect closes both the underlying websocket connection and the quit
-// channel.
-func (c *WSLink) Disconnect() {
+func (c *WSLink) stop() bool {
+	// Flip the switch into the off position and cancel the context.
 	if !atomic.CompareAndSwapUint32(&c.on, 1, 0) {
+		return false
+	}
+	// Signal to senders we are done.
+	close(c.stopped)
+	// Begin shutdown of goroutines, and ultimately connection closure.
+	c.quit()
+	return true
+}
+
+// Disconnect begins shutdown of the WSLink, preventing new messages from
+// entering the outgoing queue, and ultimately closing the underlying connection
+// when all queued messages have been handled. This shutdown process is complete
+// when the WaitGroup returned by Connect is Done.
+func (c *WSLink) Disconnect() {
+	// Cancel the Context and close the stopped channel if not already done.
+	if !c.stop() {
 		log.Debugf("Disconnect attempted on stopped WSLink.")
 		return
 	}
-	log.Tracef("Closing connection with peer %v", c.ip)
-	c.quit()
-	c.sendWG.Wait()
-	c.conn.Close()
+	// NOTE: outHandler closes the c.conn on its return.
 }
 
 // inHandler handles all incoming messages for the websocket connection. It must
@@ -171,7 +202,7 @@ func (c *WSLink) Disconnect() {
 func (c *WSLink) inHandler(ctx context.Context) {
 	// Ensure the connection is closed.
 	defer c.wg.Done()
-	defer c.Disconnect()
+	defer c.stop()
 out:
 	for {
 		// Quit when the context is closed.
@@ -209,6 +240,116 @@ out:
 	}
 }
 
+func (c *WSLink) outHandler(ctx context.Context) {
+	// Ensure the connection is closed.
+	defer c.wg.Done()
+	defer c.conn.Close() // close the Conn
+	defer c.stop()       // in the event of context cancellation vs Disconnect call
+
+	// Synchronize access to the output queue and the trigger channel.
+	var mtx sync.Mutex
+	outQueue := make([]*sendData, 0, 128)
+	// buffer length 1 since the writer loop triggers itself.
+	trigger := make(chan struct{}, 1)
+
+	// Relay a write error to senders waiting for one.
+	relayError := func(errChan chan<- error, err error) {
+		if errChan != nil {
+			errChan <- err
+		}
+	}
+
+	write := func(sd *sendData) {
+		c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+		err := c.conn.WriteMessage(websocket.TextMessage, sd.data)
+		if err != nil {
+			relayError(sd.ret, err)
+			// No more Sends should queue messages, and goroutines should return
+			// gracefully.
+			c.stop()
+			return
+		}
+		if sd.ret != nil {
+			close(sd.ret)
+		}
+	}
+
+	// On shutdown, process any queued senders before closing the connection, if
+	// it is still up.
+	defer func() {
+		log.Infof("Shutting down link for %v with %v queued messages.", c.ip, len(outQueue))
+		// Drain the buffered channel of data sent prior to stop, but before it
+		// could be put in the outQueue.
+	out:
+		for {
+			select {
+			case sd := <-c.outChan:
+				outQueue = append(outQueue, sd)
+			default:
+				break out
+			}
+		}
+		// Attempt sending all queued outgoing messages.
+		for _, sd := range outQueue {
+			write(sd)
+		}
+		// NOTE: This also addresses a full trigger channel, but their is no
+		// need to drain it, just the outQueue so SendNow never hangs.
+	}()
+
+	// Top of defer stack: before clean-up, wait for writer goroutine
+	var wg sync.WaitGroup
+	defer wg.Wait()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-trigger:
+				mtx.Lock()
+				// pop front
+				sd := outQueue[0]
+				//outQueue[0] = nil // allow realloc w/o this element
+				//outQueue = outQueue[1:] // reduces length *and* capacity, but no copy now
+				// Or, to reduce or eliminate reallocs at the expense of frequent copies:
+				copy(outQueue, outQueue[1:])
+				outQueue[len(outQueue)-1] = nil
+				outQueue = outQueue[:len(outQueue)-1]
+				if len(outQueue) > 0 {
+					trigger <- struct{}{}
+				}
+				// len(outQueue) may be longer when we get back here, but only
+				// this loop reduces it.
+				mtx.Unlock()
+
+				write(sd)
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case sd := <-c.outChan:
+			mtx.Lock()
+			// push back
+			outQueue = append(outQueue, sd)
+			// If we just repopulated an empty queue, trigger the writer,
+			// otherwise the writer will trigger itself until the queue is
+			// empty.
+			if len(outQueue) == 1 {
+				trigger <- struct{}{}
+			} // else, len>1 and writer will self trigger
+			mtx.Unlock()
+		}
+	}
+}
+
 // pingHandler sends periodic pings to the client.
 func (c *WSLink) pingHandler(ctx context.Context) {
 	defer c.wg.Done()
@@ -222,7 +363,7 @@ out:
 		case <-ticker.C:
 			err := c.conn.WriteControl(websocket.PingMessage, ping, time.Now().Add(writeWait))
 			if err != nil {
-				c.Disconnect()
+				c.stop()
 				// Don't really care what the error is, but log it at debug level.
 				log.Debugf("WriteMessage ping error: %v", err)
 				break out
@@ -245,6 +386,8 @@ func (c *WSLink) IP() string {
 	return c.ip
 }
 
+// NewConnection creates a new Connection by upgrading the http request to a
+// websocket.
 func NewConnection(w http.ResponseWriter, r *http.Request, readTimeout time.Duration) (Connection, error) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -253,6 +396,8 @@ func NewConnection(w http.ResponseWriter, r *http.Request, readTimeout time.Dura
 			log.Errorf("Unexpected websocket error: %v",
 				err)
 		}
+		// TODO: eliminate this http.Error since upgrader.Upgrade already calls
+		// http.Error in many paths where err!=nil and it is possible to write.
 		http.Error(w, "400 Bad Request.", http.StatusBadRequest)
 		return nil, err
 	}
