@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
@@ -158,7 +159,9 @@ type Market struct {
 	StartEpoch      uint64   `json:"startepoch"`
 	MarketBuyBuffer float64  `json:"buybuffer"`
 	Orders          []*Order `json:"orders"`
-	Suspended       bool     `json:"suspended"`
+	pendingSuspend  *time.Timer
+	suspended       bool
+	mtx             sync.Mutex
 }
 
 // Display returns an ID string suitable for displaying in a UI.
@@ -169,6 +172,20 @@ func (m *Market) Display() string {
 // mktID is a string ID constructed from the asset IDs.
 func (m *Market) marketName() string {
 	return marketName(m.BaseID, m.QuoteID)
+}
+
+// GetSuspended returns the suspended state of the market.
+func (m *Market) GetSuspended() bool {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	return m.suspended
+}
+
+// SetSuspended states suspended state of the market.
+func (m *Market) SetSuspended(state bool) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	m.suspended = state
 }
 
 // Exchange represents a single DEX with any number of markets.

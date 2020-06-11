@@ -150,7 +150,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		QuoteSymbol:     tBTC.Symbol,
 		EpochLen:        60000,
 		MarketBuyBuffer: 1.1,
-		Suspended:       false,
+		suspended:       false,
 	}
 	return &dexConnection{
 		WsConn:     conn,
@@ -179,11 +179,10 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 			},
 			Fee: tFee,
 		},
-		notify:          func(Notification) {},
-		marketMap:       map[string]*Market{tDcrBtcMktName: mkt},
-		trades:          make(map[order.OrderID]*trackedTrade),
-		epoch:           map[string]uint64{tDcrBtcMktName: 0},
-		pendingSuspends: make(map[string]*time.Timer),
+		notify:    func(Notification) {},
+		marketMap: map[string]*Market{tDcrBtcMktName: mkt},
+		trades:    make(map[order.OrderID]*trackedTrade),
+		epoch:     map[string]uint64{tDcrBtcMktName: 0},
 	}, conn, acct
 }
 
@@ -2948,12 +2947,34 @@ func TestAssetCounter(t *testing.T) {
 func TestHandleTradeSuspensionMsg(t *testing.T) {
 	rig := newTestRig()
 
+	tCore := rig.core
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
+	dcrWallet.Unlock(wPW, time.Hour)
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(wPW, time.Hour)
+
+	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
+		// Need to stamp and sign the message with the server's key.
+		msgOrder := new(msgjson.LimitOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		lo := convertMsgLimitOrder(msgOrder)
+		f(orderResponse(msg.ID, msgOrder, lo, false, false, false))
+		return nil
+	}
+
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+
 	// Ensure a non-existent market cannot be suspended.
 	payload := &msgjson.TradeSuspension{
-		MarketID:    "dcr_dcr",
-		FinalEpoch:  100,
-		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Second * 2)),
-		Persist:     true,
+		MarketID: "dcr_dcr",
 	}
 
 	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
@@ -2963,7 +2984,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 			"ID not found error: %v")
 	}
 
-	mkt := "dcr_btc"
+	mkt := tDcrBtcMktName
 
 	// Ensure an already suspended market cannot be suspended again.
 	err = rig.dc.suspend(mkt)
@@ -2974,7 +2995,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	payload = &msgjson.TradeSuspension{
 		MarketID:    mkt,
 		FinalEpoch:  100,
-		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Second * 2)),
+		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Millisecond * 20)),
 		Persist:     true,
 	}
 
@@ -2997,6 +3018,9 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
 
+	// Wait for the suspend to execute.
+	time.Sleep(time.Millisecond * 40)
+
 	// Ensure trades for a suspended market generate an error.
 	form := &TradeForm{
 		Host:    tDexHost,
@@ -3011,6 +3035,6 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 
 	_, err = rig.core.Trade(tPW, form)
 	if err == nil {
-		t.Fatalf("expected a trade suspension set error")
+		t.Fatalf("expected a suspension market error")
 	}
 }
