@@ -228,7 +228,8 @@ export default class MarketsPage extends BasePage {
 
   /* hasFeePending is true if the fee payment is pending */
   hasFeePending () {
-    return typeof this.market.dex.confs === 'number'
+    const dex = this.market.dex
+    return typeof dex.confs === 'number' && dex.confs < dex.confsrequired
   }
 
   /* assetsAreSupported is true if all the assets of the current market are
