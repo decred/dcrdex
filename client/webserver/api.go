@@ -245,7 +245,7 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "no wallet found for %s", unbip(form.AssetID))
 		return
 	}
-	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value)
+	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value, form.Address)
 	if err != nil {
 		s.writeAPIError(w, "withdraw error: %v", err)
 		return

@@ -1440,39 +1440,48 @@ func TestInitializeClient(t *testing.T) {
 func TestWithdraw(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
-	wallet, xcWallet := newTWallet(tDCR.ID)
+	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
-	wallet.address = "addr"
+	address := "addr"
 
 	// Successful
-	_, err := tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	_, err := tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
 	if err != nil {
 		t.Fatalf("withdraw error: %v", err)
 	}
 
 	// 0 value
-	_, err = tCore.Withdraw(tPW, tDCR.ID, 0)
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 0, address)
 	if err == nil {
 		t.Fatalf("no error for zero value withdraw")
 	}
 
 	// no wallet
-	_, err = tCore.Withdraw(tPW, 12345, 1e8)
+	_, err = tCore.Withdraw(tPW, 12345, 1e8, address)
 	if err == nil {
 		t.Fatalf("no error for unknown wallet")
 	}
 
+	// connect error
+	wallet.hookedUp = false
+	tWallet.connectErr = tErr
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
+	if err == nil {
+		t.Fatalf("no error for wallet connect error")
+	}
+	tWallet.connectErr = nil
+
 	// Send error
-	xcWallet.payFeeErr = tErr
-	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	tWallet.payFeeErr = tErr
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
 	if err == nil {
 		t.Fatalf("no error for wallet Send error")
 	}
-	xcWallet.payFeeErr = nil
+	tWallet.payFeeErr = nil
 
 	// Check the coin.
-	xcWallet.payFeeCoin = &tCoin{id: []byte{'a'}}
-	coin, err := tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	tWallet.payFeeCoin = &tCoin{id: []byte{'a'}}
+	coin, err := tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
 	if err != nil {
 		t.Fatalf("coin check error: %v", err)
 	}
