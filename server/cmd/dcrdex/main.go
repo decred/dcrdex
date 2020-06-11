@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -36,12 +37,18 @@ func mainCore(ctx context.Context) error {
 		}
 	}()
 
-	// Acquire admin server password if enabled.
+	// Request admin server password if admin server is enabled and
+	// server password is not set in config.
 	var adminSrvAuthSHA [32]byte
 	if cfg.AdminSrvOn {
-		adminSrvAuthSHA, err = admin.PasswordHashPrompt(ctx, "Admin interface password: ")
-		if err != nil {
-			return fmt.Errorf("cannot use password: %v", err)
+		if len(cfg.AdminSrvPW) == 0 {
+			adminSrvAuthSHA, err = admin.PasswordHashPrompt(ctx, "Admin interface password: ")
+			if err != nil {
+				return fmt.Errorf("cannot use password: %v", err)
+			}
+		} else {
+			adminSrvAuthSHA = sha256.Sum256(cfg.AdminSrvPW)
+			encode.ClearBytes(cfg.AdminSrvPW)
 		}
 	}
 
