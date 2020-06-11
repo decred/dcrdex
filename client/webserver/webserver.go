@@ -245,7 +245,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/login", s.apiLogin)
 		r.Post("/withdraw", s.apiWithdraw)
 		r.Get("/user", s.apiUser)
-		r.Post("/connectwallet", s.apiConnect)
+		r.Post("/connectwallet", s.apiConnectWallet)
 		r.Post("/trade", s.apiTrade)
 		r.Post("/cancel", s.apiCancel)
 		r.Post("/logout", s.apiLogout)

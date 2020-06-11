@@ -115,9 +115,9 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-// apiConnect is the handler for the '/connectwallet' API request. Connects to
-// a specified wallet, but does not unlock it.
-func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
+// apiConnectWallet is the handler for the '/connectwallet' API request.
+// Connects to a specified wallet, but does not unlock it.
+func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		AssetID uint32 `json:"assetID"`
 	}{}

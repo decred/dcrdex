@@ -1373,7 +1373,7 @@ function makeMarket (host, base, quote) {
   }
 }
 
-/* marketID creates a DEX-compatible market name from the BIP IDs. */
+/* marketID creates a DEX-compatible market name from the ticker symbols. */
 export function marketID (b, q) { return `${b}_${q}` }
 
 /* asAtoms converts the float string to atoms. */
