@@ -75,7 +75,7 @@ type clientCore interface {
 	User() *core.User
 	GetFee(url, cert string) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
-	Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error)
+	Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	Cancel(pw []byte, sid string) error
 	NotificationFeed() <-chan core.Notification

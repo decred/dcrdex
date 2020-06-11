@@ -604,6 +604,24 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	return wallet, nil
 }
 
+// Connect to the wallet if not already connected. Unlock the wallet if not
+// already unlocked.
+func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error {
+	if !wallet.connected() {
+		err := wallet.Connect(c.ctx)
+		if err != nil {
+			return fmt.Errorf("error connecting %s wallet: %v", unbip(wallet.AssetID), err)
+		}
+	}
+	if !wallet.unlocked() {
+		err := unlockWallet(wallet, crypter)
+		if err != nil {
+			return fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+		}
+	}
+	return nil
+}
+
 // walletBalances retrieves balances for the wallet.
 func (c *Core) walletBalances(wallet *xcWallet) (*BalanceSet, error) {
 	c.connMtx.RLock()
@@ -1427,8 +1445,8 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 
 // Withdraw initiates a withdraw from an exchange wallet. The client password
 // must be provided as an additional verification.
-func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error) {
-	_, err := c.encryptionKey(pw)
+func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
+	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("Withdraw password error: %v", err)
 	}
@@ -1439,7 +1457,11 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, er
 	if !found {
 		return nil, fmt.Errorf("%s wallet not found", unbip(assetID))
 	}
-	coin, err := wallet.Withdraw(wallet.address, value, wallet.Info().DefaultFeeRate)
+	err = c.connectAndUnlock(crypter, wallet)
+	if err != nil {
+		return nil, err
+	}
+	coin, err := wallet.Withdraw(address, value, wallet.Info().DefaultFeeRate)
 	if err != nil {
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote("Withdraw error", details, db.ErrorLevel))
@@ -1486,31 +1508,13 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
-	fromID, toID := fromWallet.AssetID, toWallet.AssetID
-
-	if !fromWallet.connected() {
-		err = fromWallet.Connect(c.ctx)
-		if err != nil {
-			return nil, fmt.Errorf("Error connecting wallet: %v", err)
-		}
+	err = c.connectAndUnlock(crypter, fromWallet)
+	if err != nil {
+		return nil, err
 	}
-	if !fromWallet.unlocked() {
-		err = unlockWallet(fromWallet, crypter)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(fromID), err)
-		}
-	}
-	if !toWallet.connected() {
-		err = toWallet.Connect(c.ctx)
-		if err != nil {
-			return nil, fmt.Errorf("Error connecting wallet: %v", err)
-		}
-	}
-	if !toWallet.unlocked() {
-		err = unlockWallet(toWallet, crypter)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(toID), err)
-		}
+	err = c.connectAndUnlock(crypter, toWallet)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get an address for the swap contract.
