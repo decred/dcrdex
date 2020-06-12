@@ -229,7 +229,6 @@ out:
 				"Failed to parse message: "+err.Error()))
 			continue
 		}
-		// log.Tracef("inHandler: msg ID %d", msg.ID)
 		if msg.ID == 0 {
 			c.SendError(1, msgjson.NewError(msgjson.RPCParseError, "request id cannot be zero"))
 			continue
