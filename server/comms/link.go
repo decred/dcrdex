@@ -82,6 +82,7 @@ func (c *wsLink) IP() string {
 	return c.WSLink.IP()
 }
 
+// The WSLink.handler for WSLink.inHandler
 func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 	switch msg.Type {
 	case msgjson.Request:
@@ -101,11 +102,15 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 		}
 		return nil
 	case msgjson.Response:
+		// NOTE: In the event of an error, we respond to a response, which makes
+		// no sense. A new mechanism is needed with appropriate client handling.
 		if msg.ID == 0 {
 			return msgjson.NewError(msgjson.RPCParseError, "response id cannot be 0")
 		}
+		log.Tracef("Got response msg ID %d, looking up handler.", msg.ID)
 		cb := c.respHandler(msg.ID)
 		if cb == nil {
+			log.Debugf("comms.handleMessage: handler for msg ID %d not found", msg.ID)
 			return msgjson.NewError(msgjson.UnknownResponseID,
 				"unknown response ID")
 		}
@@ -147,6 +152,7 @@ func (c *wsLink) logReq(id uint64, respHandler func(Link, *msgjson.Message), exp
 // is equal to the response Message.ID passed to the handler (see the
 // msgjson.Response case in handleMessage).
 func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Message), expireTime time.Duration, expire func()) error {
+	log.Tracef("Registering '%s' request ID %d (wsLink)", msg.Route, msg.ID)
 	c.logReq(msg.ID, f, expireTime, expire)
 	// Send errors are (1) connection is already down or (2) json marshal
 	// failure. Any connection write errors just cause the link to quit as the
@@ -159,6 +165,7 @@ func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Me
 		// Neither expire nor the handler should run. Stop the expire timer
 		// created by logReq and delete the response handler it added. The
 		// caller receives a non-nil error to deal with it.
+		log.Debugf("(*wsLink).Request Send error, unregistering msg ID %d handler", msg.ID)
 		c.respHandler(msg.ID) // drop the removed responseHandler
 	}
 	return err
@@ -172,6 +179,7 @@ func (c *wsLink) respHandler(id uint64) *responseHandler {
 	defer c.reqMtx.Unlock()
 	cb, ok := c.respHandlers[id]
 	if ok {
+		// log.Debugf("removed handler for msg ID %d", id)
 		// Stop the expiration Timer. If the Timer fired after respHandler was
 		// called, but we found the response handler in the map, wsLink.expire
 		// is waiting for the reqMtx lock and will return false, thus preventing
