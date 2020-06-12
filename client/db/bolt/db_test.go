@@ -23,7 +23,7 @@ var (
 	tCounter int
 )
 
-func newTestDB(t *testing.T) *boltDB {
+func newTestDB(t *testing.T) *BoltDB {
 	tCounter++
 	dbPath := filepath.Join(tDir, fmt.Sprintf("db%d.db", tCounter))
 	dbi, err := NewDB(dbPath)
@@ -31,9 +31,9 @@ func newTestDB(t *testing.T) *boltDB {
 		t.Fatalf("error creating dB: %v", err)
 	}
 	go dbi.Run(tCtx)
-	db, ok := dbi.(*boltDB)
+	db, ok := dbi.(*BoltDB)
 	if !ok {
-		t.Fatalf("DB is not a *boltDB")
+		t.Fatalf("DB is not a *BoltDB")
 	}
 	return db
 }
