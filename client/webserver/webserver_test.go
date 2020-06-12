@@ -16,6 +16,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -85,7 +86,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return &core.OrderBook{}, nil
 }
-func (c *TCore) AssetBalances(assetID uint32) (*core.BalanceSet, error) { return nil, c.balanceErr }
+func (c *TCore) AssetBalances(assetID uint32) (*db.BalanceSet, error) { return nil, c.balanceErr }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	if c.notHas {
 		return nil
@@ -659,4 +660,21 @@ func TestAPILogout(t *testing.T) {
 	tCore.logoutErr = tErr
 	ensure(`{"ok":false,"msg":"logout error: test error"}`)
 	tCore.logoutErr = nil
+}
+
+func TestApiGetBalance(t *testing.T) {
+	writer := new(TWriter)
+	reader := new(TReader)
+	s, tCore, shutdown := newTServer(t, false)
+	defer shutdown()
+
+	ensure := func(want string) {
+		ensureResponse(t, s, s.apiGetBalance, want, reader, writer, struct{}{})
+	}
+	ensure(`{"ok":true,"balances":null}`)
+
+	// Logout error
+	tCore.balanceErr = tErr
+	ensure(`{"ok":false,"msg":"balance error: test error"}`)
+	tCore.balanceErr = nil
 }

@@ -40,6 +40,14 @@ func RandomAccountInfo() *db.AccountInfo {
 	}
 }
 
+func RandomBalance() *asset.Balance {
+	return &asset.Balance{
+		Available: rand.Uint64(),
+		Immature:  rand.Uint64(),
+		Locked:    rand.Uint64(),
+	}
+}
+
 // RandomWallet creates a random wallet.
 func RandomWallet() *db.Wallet {
 	return &db.Wallet{
@@ -51,13 +59,11 @@ func RandomWallet() *db.Wallet {
 			ordertest.RandomAddress(): ordertest.RandomAddress(),
 			ordertest.RandomAddress(): ordertest.RandomAddress(),
 		},
-		Balance: &asset.Balance{
-			Available: rand.Uint64(),
-			Immature:  rand.Uint64(),
-			Locked:    rand.Uint64(),
+		Balances: &db.BalanceSet{
+			ZeroConf: RandomBalance(),
+			Stamp:    time.Unix(rand.Int63()/(1<<31), 0),
 		},
-		BalUpdate: time.Now().Truncate(time.Millisecond).UTC(),
-		Address:   ordertest.RandomAddress(),
+		Address: ordertest.RandomAddress(),
 	}
 }
 
@@ -256,10 +262,7 @@ func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 			t.Fatalf("Settings mismatch: different values for key '%s'", k)
 		}
 	}
-	MustCompareBalances(t, w1.Balance, w2.Balance)
-	if !w1.BalUpdate.Equal(w2.BalUpdate) {
-		t.Fatalf("BalUpdate mismatch. %s != %s", w1.BalUpdate, w2.BalUpdate)
-	}
+	MustCompareBalanceSet(t, w1.Balances, w2.Balances)
 	if w1.Address != w2.Address {
 		t.Fatalf("Address mismatch. %s != %s", w1.Address, w2.Address)
 	}
@@ -268,15 +271,36 @@ func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 	}
 }
 
-func MustCompareBalances(t testKiller, b1, b2 *asset.Balance) {
+// MustCompareBalanceSet ensures the two BalanceSet are identical, calling the
+// Fatalf method of the testKiller if not.
+func MustCompareBalanceSet(t testKiller, b1, b2 *db.BalanceSet) {
+	if len(b1.XC) != len(b2.XC) {
+		t.Fatalf("exchange balance count mismatch. %d != %d", len(b1.XC), len(b2.XC))
+	}
+	if !b1.Stamp.Equal(b2.Stamp) {
+		t.Fatalf("balance timestamp mismatch. %s != %s", b1.Stamp, b2.Stamp)
+	}
+	MustCompareBalance(t, "zero-conf", b1.ZeroConf, b2.ZeroConf)
+	for host, bal1 := range b1.XC {
+		bal2, found := b2.XC[host]
+		if !found {
+			t.Fatalf("host %s only found in one BalanceSet", host)
+		}
+		MustCompareBalance(t, host, bal1, bal2)
+	}
+}
+
+// MustCompareBalance ensures the two Balance are identical, calling the
+// Fatalf method of the testKiller if not.
+func MustCompareBalance(t testKiller, host string, b1, b2 *asset.Balance) {
 	if b1.Available != b2.Available {
-		t.Fatalf("available balance mismatch. %d != %d", b1.Available, b2.Available)
+		t.Fatalf("%s available balance mismatch. %d != %d", host, b1.Available, b2.Available)
 	}
 	if b1.Immature != b2.Immature {
-		t.Fatalf("immature balance mismatch. %d != %d", b1.Immature, b2.Immature)
+		t.Fatalf("%s immature balance mismatch. %d != %d", host, b1.Immature, b2.Immature)
 	}
 	if b1.Locked != b2.Locked {
-		t.Fatalf("locked balance mismatch. %d != %d", b1.Locked, b2.Locked)
+		t.Fatalf("%s locked balance mismatch. %d != %d", host, b1.Locked, b2.Locked)
 	}
 }
 

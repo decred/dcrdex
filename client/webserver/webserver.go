@@ -23,6 +23,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/slog"
@@ -65,7 +66,7 @@ type clientCore interface {
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
 	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
-	AssetBalances(assetID uint32) (*core.BalanceSet, error)
+	AssetBalances(assetID uint32) (*db.BalanceSet, error)
 	WalletState(assetID uint32) *core.WalletState
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
@@ -244,10 +245,11 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/login", s.apiLogin)
 		r.Post("/withdraw", s.apiWithdraw)
 		r.Get("/user", s.apiUser)
-		r.Post("/connectwallet", s.apiConnect)
+		r.Post("/connectwallet", s.apiConnectWallet)
 		r.Post("/trade", s.apiTrade)
 		r.Post("/cancel", s.apiCancel)
 		r.Post("/logout", s.apiLogout)
+		r.Post("/balance", s.apiGetBalance)
 	})
 
 	// Files

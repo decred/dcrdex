@@ -308,7 +308,7 @@ func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
 	return tdb.updateWalletErr
 }
 
-func (tdb *TDB) UpdateBalance(wid []byte, balance *asset.Balance) error {
+func (tdb *TDB) UpdateBalanceSet(wid []byte, balance *db.BalanceSet) error {
 	return nil
 }
 
@@ -3132,8 +3132,8 @@ func TestAssetBalances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error retreiving asset balance: %v", err)
 	}
-	dbtest.MustCompareBalances(t, bals[0], balances.ZeroConf)
-	dbtest.MustCompareBalances(t, bals[1], balances.XC[tDexHost])
+	dbtest.MustCompareBalance(t, "zero-conf", bals[0], balances.ZeroConf)
+	dbtest.MustCompareBalance(t, tDexHost, bals[1], balances.XC[tDexHost])
 }
 
 func TestAssetCounter(t *testing.T) {

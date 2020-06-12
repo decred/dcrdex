@@ -12,7 +12,7 @@ import (
 	"sort"
 	"time"
 
-	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -604,46 +604,9 @@ func (db *boltDB) matchesUpdate(f bucketFunc) error {
 	return db.withBucket(matchesBucket, db.Update, f)
 }
 
-// timedBalance is used to store the balance in a wallet bucket.
-type timedBalance struct {
-	time    time.Time
-	balance *asset.Balance
-}
-
-// serialize serializes the timedBalance to a versioned blob.
-func (tb *timedBalance) serialize() []byte {
-	return encode.BuildyBytes{0}.
-		AddData(uint64Bytes(encode.UnixMilliU(tb.time))).
-		AddData(uint64Bytes(tb.balance.Available)).
-		AddData(uint64Bytes(tb.balance.Immature)).
-		AddData(uint64Bytes(tb.balance.Locked))
-}
-
-// decodeTimedBalance decodes the balance from the versioned blob.
-func decodeTimedBalance(b []byte) (*timedBalance, error) {
-	ver, pushes, err := encode.DecodeBlob(b)
-	if err != nil {
-		return nil, err
-	}
-	if ver != 0 {
-		return nil, fmt.Errorf("unrecognized timedBalance version %d", ver)
-	}
-	if len(pushes) != 4 {
-		return nil, fmt.Errorf("decodeTimedBalance: expected 4 pushes, got %d", len(pushes))
-	}
-	return &timedBalance{
-		time: encode.DecodeUTime(pushes[0]),
-		balance: &asset.Balance{
-			Available: intCoder.Uint64(pushes[1]),
-			Immature:  intCoder.Uint64(pushes[2]),
-			Locked:    intCoder.Uint64(pushes[3]),
-		},
-	}, nil
-}
-
 // UpdateWallet adds a wallet to the database.
 func (db *boltDB) UpdateWallet(wallet *dexdb.Wallet) error {
-	if wallet.Balance == nil {
+	if wallet.Balances == nil {
 		return fmt.Errorf("cannot UpdateWallet with nil Balance field")
 	}
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
@@ -655,26 +618,18 @@ func (db *boltDB) UpdateWallet(wallet *dexdb.Wallet) error {
 		if err != nil {
 			return err
 		}
-		bal := &timedBalance{
-			time:    wallet.BalUpdate,
-			balance: wallet.Balance,
-		}
-		return wBkt.Put(balanceKey, bal.serialize())
+		return wBkt.Put(balanceKey, wallet.Balances.Encode())
 	})
 }
 
-// UpdateBalance updates balance in the wallet bucket.
-func (db *boltDB) UpdateBalance(wid []byte, balance *asset.Balance) error {
+// UpdateBalanceSet updates balance in the wallet bucket.
+func (db *boltDB) UpdateBalanceSet(wid []byte, bal *db.BalanceSet) error {
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt := master.Bucket(wid)
 		if wBkt == nil {
 			return fmt.Errorf("wallet %x bucket is not a bucket", wid)
 		}
-		bal := &timedBalance{
-			time:    time.Now(),
-			balance: balance,
-		}
-		return wBkt.Put(balanceKey, bal.serialize())
+		return wBkt.Put(balanceKey, bal.Encode())
 	})
 }
 
@@ -717,12 +672,11 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 	}
 	balB := wBkt.Get(balanceKey)
 	if balB != nil {
-		bal, err := decodeTimedBalance(balB)
+		bals, err := db.DecodeBalanceSet(balB)
 		if err != nil {
 			return nil, err
 		}
-		w.Balance = bal.balance
-		w.BalUpdate = bal.time
+		w.Balances = bals
 	}
 	return w, nil
 }

@@ -1,21 +1,4 @@
 body.dark {
-  #marketChart {
-    background-color: #131313;
-    border-bottom-color: black;
-  }
-
-  #orderForm {
-    color: #a1a1a1;
-
-    button.selected {
-      background-color: #152171;
-    }
-
-    button.submit {
-      background-color: #0b5831;
-    }
-  }
-
   .marketorders {
     background-color: black;
   }
@@ -58,6 +41,15 @@ body.dark {
   .market-header {
     background-color: $dark_bg_3;
     color: inherit;
+
+    button {
+      color: #bbb;
+    }
+
+    button:hover,
+    button.selected {
+      color: #f2fffd;
+    }
   }
 
   .market-bal {
@@ -75,5 +67,32 @@ body.dark {
 
   .brdrright {
     border-right: 1px solid black;
+  }
+
+  #marketChart {
+    background-color: #131313;
+    border-bottom-color: black;
+  }
+
+  #orderForm {
+    color: #a1a1a1;
+
+    button {
+      color: #bbb;
+    }
+
+    button:hover {
+      color: white;
+    }
+
+    button.selected {
+      background-color: #000017;
+      border: 1px solid #555;
+      color: white;
+    }
+
+    button.submit {
+      background-color: #0b5831;
+    }
   }
 }

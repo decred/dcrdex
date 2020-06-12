@@ -623,7 +623,7 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 }
 
 // walletBalances retrieves balances for the wallet.
-func (c *Core) walletBalances(wallet *xcWallet) (*BalanceSet, error) {
+func (c *Core) walletBalances(wallet *xcWallet) (*db.BalanceSet, error) {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	// Add a zero-conf entry.
@@ -646,11 +646,13 @@ func (c *Core) walletBalances(wallet *xcWallet) (*BalanceSet, error) {
 	for i, bal := range bals[1:] {
 		balMap[addrs[i]] = bal
 	}
-	coreBals := &BalanceSet{
+	coreBals := &db.BalanceSet{
 		ZeroConf: zeroConfBal,
 		XC:       balMap,
+		Stamp:    time.Now(),
 	}
 	wallet.setBalance(coreBals)
+	c.notify(newBalanceNote(wallet.AssetID, coreBals))
 	return coreBals, nil
 }
 
@@ -673,11 +675,10 @@ func (c *Core) updateBalances(counts assetCounter) {
 			log.Error("error updateing balance after tick: %v", err)
 			continue
 		}
-		err = c.db.UpdateBalance(w.dbID, bals.ZeroConf)
+		err = c.db.UpdateBalanceSet(w.dbID, bals)
 		if err != nil {
 			log.Errorf("error updating %s balance in database: %v", unbip(assetID), err)
 		}
-		c.notify(newBalanceNote(assetID, bals))
 	}
 	c.refreshUser()
 }
@@ -831,7 +832,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	if err != nil {
 		return initErr("error getting wallet balance for %s: %v", symbol, err)
 	}
-	dbWallet.Balance = balances.ZeroConf
+	dbWallet.Balances = balances
 
 	// Store the wallet in the database.
 	err = c.db.UpdateWallet(dbWallet)
@@ -841,7 +842,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	log.Infof("Created %s wallet. Account %q balance available = %d / "+
 		"locked = %d, Deposit address = %s",
-		symbol, form.Account, dbWallet.Balance, balances.ZeroConf.Locked, dbWallet.Address)
+		symbol, form.Account, balances.ZeroConf.Available, balances.ZeroConf.Locked, dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -856,15 +857,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
-		Account: dbWallet.Account,
-		AssetID: dbWallet.AssetID,
-		balances: &BalanceSet{
-			ZeroConf: dbWallet.Balance,
-		},
-		balUpdate: dbWallet.BalUpdate,
-		encPW:     dbWallet.EncryptedPW,
-		address:   dbWallet.Address,
-		dbID:      dbWallet.ID(),
+		Account:  dbWallet.Account,
+		AssetID:  dbWallet.AssetID,
+		balances: dbWallet.Balances,
+		encPW:    dbWallet.EncryptedPW,
+		address:  dbWallet.Address,
+		dbID:     dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
 		Account:  dbWallet.Account,
@@ -1843,7 +1841,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 }
 
 // AssetBalances retrieves the current wallet balance.
-func (c *Core) AssetBalances(assetID uint32) (*BalanceSet, error) {
+func (c *Core) AssetBalances(assetID uint32) (*db.BalanceSet, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)

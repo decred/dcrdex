@@ -266,19 +266,19 @@ func TestWallets(t *testing.T) {
 	}
 	// Test changing the balance
 	w := reWallets[0]
-	newBal := *w.Balance
-	newBal.Available += 1e8
-	newBal.Locked += 2e8
-	newBal.Immature += 3e8
-	updated := w.BalUpdate
-	boltdb.UpdateBalance(w.ID(), &newBal)
+	newBal := *w.Balances
+	newBal.ZeroConf.Available += 1e8
+	newBal.ZeroConf.Locked += 2e8
+	newBal.ZeroConf.Immature += 3e8
+	newBal.Stamp = newBal.Stamp.Add(time.Second)
+	boltdb.UpdateBalanceSet(w.ID(), &newBal)
 	reW, err := boltdb.Wallet(w.ID())
 	if err != nil {
 		t.Fatalf("failed to retreive wallet for balance check")
 	}
-	dbtest.MustCompareBalances(t, reW.Balance, &newBal)
-	if updated.After(reW.BalUpdate) {
-		t.Fatalf("update time can't be right: %s < %s", reW.BalUpdate, updated)
+	dbtest.MustCompareBalanceSet(t, reW.Balances, &newBal)
+	if !reW.Balances.Stamp.After(w.Balances.Stamp) {
+		t.Fatalf("update time can't be right: %s > %s", reW.Balances.Stamp, w.Balances.Stamp)
 	}
 	t.Logf("%d milliseconds to read and compare %d Wallet", time.Since(tStart)/time.Millisecond, numToDo)
 
