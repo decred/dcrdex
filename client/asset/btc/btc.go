@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -864,6 +865,9 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	// Get the wallet transaction.
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txHash, err)
 	}
 	if tx.BlockIndex == 0 {
@@ -1094,7 +1098,9 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 	}
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
-		// btc.log.Errorf("error getting transaction for successful fee: %v", err)
+		if isTxNotFoundErr(err) {
+			return nil, 0, 0, asset.CoinNotFoundError
+		}
 		return nil, 0, 0, fmt.Errorf("failed to fetch transaction after send: %v", err)
 	}
 	for _, details := range tx.Details {
@@ -1114,6 +1120,9 @@ func (btc *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	}
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return 0, asset.CoinNotFoundError
+		}
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
@@ -1475,4 +1484,11 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 	var txHash chainhash.Hash
 	copy(txHash[:], coinID[:32])
 	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
+}
+
+// isTxNotFoundErr will return true if the error indicates that the requested
+// transaction is not known.
+func isTxNotFoundErr(err error) bool {
+	var rpcErr *btcjson.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
 }

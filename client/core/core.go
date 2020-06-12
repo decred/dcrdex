@@ -1164,18 +1164,12 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, assetID uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
 
-	regConfs, err := wallet.Confirmations(coinID)
-	if err != nil {
-		log.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
-		return
-	}
-
-	dc.setRegConfirms(regConfs)
+	dc.setRegConfirms(0)
 	c.refreshUser()
 
 	trigger := func() (bool, error) {
 		confs, err := wallet.Confirmations(coinID)
-		if err != nil {
+		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
 		}
 		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, uint32(reqConfs))

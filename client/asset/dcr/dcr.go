@@ -888,6 +888,9 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	// Get the wallet transaction.
 	tx, err := dcr.node.GetTransaction(txHash)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txHash, err)
 	}
 	if tx.Confirmations == 0 {
@@ -1144,6 +1147,9 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	}
 	tx, err := dcr.node.GetTransaction(txHash)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return 0, asset.CoinNotFoundError
+		}
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
@@ -1646,4 +1652,12 @@ func fees(tx *wire.MsgTx) (uint64, float64) {
 	}
 	fees := in - out
 	return uint64(fees), float64(fees) / float64(tx.SerializeSize())
+}
+
+// isTxNotFoundErr will return true if the error indicates that the requested
+// transaction is not known.
+func isTxNotFoundErr(err error) bool {
+	// TODO: Could probably do this right with errors.As if we enforce an RPC
+	// version when connecting.
+	return strings.HasPrefix(err.Error(), "-5:")
 }
