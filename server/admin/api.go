@@ -17,6 +17,10 @@ import (
 	"github.com/go-chi/chi"
 )
 
+const (
+	pongStr = "pong"
+)
+
 // writeJSON marshals the provided interface and writes the bytes to the
 // ResponseWriter. The response code is assumed to be StatusOK.
 func writeJSON(w http.ResponseWriter, thing interface{}) {
@@ -37,7 +41,7 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int) {
 
 // apiPing is the handler for the '/ping' API request.
 func (_ *Server) apiPing(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, "pong")
+	writeJSON(w, pongStr)
 }
 
 // apiConfig is the handler for the '/config' API request.
@@ -161,7 +165,7 @@ func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
 
 // apiAccountInfo is the handler for the '/account/{account id}' API request.
 func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
-	acctIDStr := chi.URLParam(r, accountNameKey)
+	acctIDStr := chi.URLParam(r, accountIDKey)
 	acctIDSlice, err := hex.DecodeString(acctIDStr)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("could not decode accout id: %v", err), http.StatusBadRequest)
@@ -179,4 +183,44 @@ func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, acctInfo)
+}
+
+// apiBan is the handler for the '/account/{accountID}/ban?rule=RULE' API request.
+func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
+	acctIDStr := chi.URLParam(r, accountIDKey)
+	acctIDSlice, err := hex.DecodeString(acctIDStr)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("could not decode accout id: %v", err), http.StatusBadRequest)
+		return
+	}
+	if len(acctIDSlice) != account.HashSize {
+		http.Error(w, "account id has incorrect length", http.StatusBadRequest)
+		return
+	}
+	ruleStr := r.URL.Query().Get(ruleToken)
+	if ruleStr == "" {
+		http.Error(w, "rule not specified", http.StatusBadRequest)
+		return
+	}
+	ruleInt, err := strconv.Atoi(ruleStr)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("bad rule: %v", err), http.StatusBadRequest)
+		return
+	}
+	if ruleInt < 1 || ruleInt >= int(account.MaxRule) {
+		http.Error(w, "bad rule: not known or not punishable", http.StatusBadRequest)
+		return
+	}
+	var acctID account.AccountID
+	copy(acctID[:], acctIDSlice)
+	if err := s.core.Penalize(acctID, account.Rule(ruleInt)); err != nil {
+		http.Error(w, fmt.Sprintf("failed to ban account: %v", err), http.StatusInternalServerError)
+		return
+	}
+	res := BanResult{
+		AccountID:  acctIDStr,
+		BrokenRule: byte(ruleInt),
+		BanTime:    APITime{time.Now()},
+	}
+	writeJSON(w, res)
 }

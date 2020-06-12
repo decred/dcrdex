@@ -54,7 +54,7 @@ type AuthManager interface {
 		expireTimeout time.Duration, expireFunc func()) error
 	RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout, connectTimeout time.Duration, expireFunc func())
-	Penalize(account.AccountID, account.Rule)
+	Penalize(user account.AccountID, rule account.Rule) error
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
 }
@@ -2504,6 +2504,11 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 			s.processMatchAcks(u, resp, m)
 		}, auth.DefaultRequestTimeout, auth.DefaultConnectTimeout, expireFunc)
 	}
+}
+
+// Penalize calls Penalize on the AuthManager and penalizes user for breaking rule.
+func (s *Swapper) Penalize(user account.AccountID, rule account.Rule) error {
+	return s.authMgr.Penalize(user, rule)
 }
 
 func idToBytes(id [order.OrderIDSize]byte) []byte {

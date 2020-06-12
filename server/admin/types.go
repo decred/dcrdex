@@ -42,10 +42,21 @@ func (at *APITime) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals JSON string containing a time in RFC3339 format with
 // millisecond precision into an APITime.
 func (at *APITime) UnmarshalJSON(b []byte) error {
-	t, err := time.Parse(RFC3339Milli, string(b))
+	if len(b) < 2 {
+		return nil
+	}
+	// Parenthesis are included in b and must be removed.
+	t, err := time.Parse(RFC3339Milli, string(b[1:len(b)-1]))
 	if err != nil {
 		return nil
 	}
 	at.Time = t
 	return nil
+}
+
+// BanResult holds the result of a ban.
+type BanResult struct {
+	AccountID  string  `json:"accountid"`
+	BrokenRule byte    `json:"brokenrule"`
+	BanTime    APITime `json:"bantime"`
 }

@@ -172,7 +172,7 @@ type OrderArchiver interface {
 // account data.
 type AccountArchiver interface {
 	// CloseAccount closes an account for violating a rule of community conduct.
-	CloseAccount(account.AccountID, account.Rule)
+	CloseAccount(account.AccountID, account.Rule) error
 
 	// Account retrieves the account information for the specified account ID.
 	// The registration fee payment status is returned as well. A nil pointer
