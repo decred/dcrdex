@@ -784,28 +784,6 @@ func (db *BoltDB) init(buckets [][]byte) error {
 			}
 		}
 
-		// Set the db version if it does not already exist.
-		bucket := tx.Bucket(appBucket)
-		if bucket == nil {
-			return fmt.Errorf("app bucket not found")
-		}
-		versionB := bucket.Get(versionKey)
-		if versionB == nil {
-			versionB = encode.Uint32Bytes(uint32(versionedDBVersion))
-			err := bucket.Put(versionKey, versionB)
-			if err != nil {
-				return err
-			}
-
-			log.Infof("creating new version %d database", versionedDBVersion)
-		}
-
-		version := encode.BytesToUint32(versionB)
-		if version > DBVersion {
-			return fmt.Errorf("unknown database version %d, "+
-				"client recognizes up to %d", version, DBVersion)
-		}
-
 		return nil
 	})
 	if err != nil {

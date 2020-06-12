@@ -105,7 +105,7 @@ func versionedDBUpgrade(dbtx *bbolt.Tx) error {
 
 	dbVersion, err := fetchDBVersion(dbtx)
 	if err == nil {
-		return fmt.Errorf("expected database version not found error")
+		return fmt.Errorf("unexpected database version found")
 	}
 
 	if dbVersion != oldVersion {
