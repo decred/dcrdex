@@ -564,10 +564,13 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 		log.Errorf("Send requested for unknown user %v", user)
 		return fmt.Errorf("unknown user")
 	}
+	// log.Tracef("Registering '%s' request ID %d for user %v (auth clientInfo)", msg.Route, msg.ID, user)
 	client.logReq(msg.ID, f, expireTimeout, expire)
+	// auth.handleResponse checks clientInfo map and the found client's request
+	// handler map, where the expire function should be found for msg.ID.
 	err := client.conn.Request(msg, auth.handleResponse, expireTimeout, func() {})
 	if err != nil {
-		log.Debugf("error sending request: %v", err)
+		log.Debugf("error sending request ID %d: %v", msg.ID, err)
 		// Remove the responseHandler registered by logReq and stop the expire
 		// timer so that it does not eventually fire and run the expire func.
 		// The caller receives a non-nil error to deal with it.
@@ -898,6 +901,7 @@ func (auth *AuthManager) handleResponse(conn comms.Link, msg *msgjson.Message) {
 	}
 	handler := client.respHandler(msg.ID)
 	if handler == nil {
+		log.Debugf("(*AuthManager).handleResponse: unknown msg ID %d", msg.ID)
 		errMsg, err := msgjson.NewResponse(msg.ID, nil,
 			msgjson.NewError(msgjson.UnknownResponseID, "unknown response ID"))
 		if err != nil {

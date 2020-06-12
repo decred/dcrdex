@@ -1164,7 +1164,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 		// The clients preimage response comes back via a channel, where nil
 		// indicates client failure to respond, either due to disconnection or
 		// no action.
-		piChan := make(chan *order.Preimage)
+		piChan := make(chan *order.Preimage, 1) // buffer so the link's in handler does not block
 
 		reqData := &piData{
 			ord:      ord,
@@ -1172,7 +1172,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 		}
 
 		// Failure to respond in time is a miss, signalled by a nil pointer.
-		var missOnce sync.Once
+		var missOnce sync.Once // captured by miss
 		miss := func() {
 			// RequestWithTimeout should only call this on expire, not because
 			// of link or other errors, but put it in a sync.Once to be safe
