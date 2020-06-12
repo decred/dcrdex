@@ -67,7 +67,6 @@ var (
 	tErr                    = fmt.Errorf("test error")
 	tFee             uint64 = 1e8
 	tUnparseableHost        = string([]byte{0x7f})
-	tNet                    = dex.Testnet
 )
 
 type tMsg = *msgjson.Message
@@ -616,8 +615,10 @@ func newTestRig() *testRig {
 			conns: map[string]*dexConnection{
 				tDexHost: dc,
 			},
-			wallets:      make(map[uint32]*xcWallet),
-			blockWaiters: make(map[uint64]*blockWaiter),
+			lockTimeTaker: dex.LockTimeTaker(dex.Testnet),
+			lockTimeMaker: dex.LockTimeMaker(dex.Testnet),
+			wallets:       make(map[uint32]*xcWallet),
+			blockWaiters:  make(map[uint64]*blockWaiter),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
@@ -1821,7 +1822,8 @@ func TestCancel(t *testing.T) {
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, tNet, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
 	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
@@ -1996,7 +1998,8 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("walletSet error: %v", err)
 	}
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.db, rig.queue, walletSet, nil, tNet, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -2387,7 +2390,8 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("walletSet error: %v", err)
 	}
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.db, rig.queue, walletSet, nil, tNet, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
@@ -2690,7 +2694,8 @@ func TestReadConnectMatches(t *testing.T) {
 		Order:    lo,
 	}
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, tNet, notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, notify)
 	metaMatch := db.MetaMatch{
 		MetaData: &db.MatchMetaData{},
 		Match:    &order.UserMatch{},
@@ -3024,7 +3029,8 @@ func TestSetEpoch(t *testing.T) {
 	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, tNet, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[lo.ID()] = tracker
 	metaData := tracker.metaData
 
@@ -3072,7 +3078,8 @@ func TestSetEpoch(t *testing.T) {
 		},
 		Order: mo,
 	}
-	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, tNet, rig.core.notify)
+	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, rig.core.notify)
 	metaData = tracker.metaData
 	dc.trades[mo.ID()] = tracker
 	ensureStatus("market order", order.OrderStatusExecuted)

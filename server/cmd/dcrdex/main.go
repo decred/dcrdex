@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/admin"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
@@ -80,6 +81,8 @@ func mainCore(ctx context.Context) error {
 	// Display app version.
 	log.Infof("%s version %v (Go version %s)", AppName, Version(), runtime.Version())
 	log.Infof("dcrdex starting for network: %s", cfg.Network)
+	log.Infof("swap locktimes config: maker %s, taker %s",
+		dex.LockTimeMaker(cfg.Network), dex.LockTimeTaker(cfg.Network))
 
 	// Load the market and asset configurations for the given network.
 	markets, assets, err := loadMarketConfFile(cfg.Network, cfg.MarketsConfPath)

@@ -6,8 +6,8 @@ set -e
 # Rebuild dcrdex with the required simnet locktime settings.
 HARNESS_DIR=$(dirname $0)
 (cd $HARNESS_DIR && cd ../../../server/cmd/dcrdex && go install -ldflags \
-"-X 'decred.org/dcrdex/dex.TestLockTimeTaker=1m' \
--X 'decred.org/dcrdex/dex.TestLockTimeMaker=2m'")
+"-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' \
+-X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'")
 
 # Setup test data dir for dcrdex.
 TEST_ROOT=~/dextest

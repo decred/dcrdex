@@ -37,6 +37,7 @@ func (err ExpirationErr) Error() string { return string(err) }
 type matchTracker struct {
 	db.MetaMatch
 	failErr     error
+	refundErr   error
 	prefix      *order.Prefix
 	trade       *order.Trade
 	counterSwap asset.AuditInfo
@@ -94,8 +95,9 @@ type trackedTrade struct {
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
-func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64, db db.DB,
-	latencyQ *wait.TickerQueue, wallets *walletSet, coins asset.Coins, net dex.Network, notify func(Notification)) *trackedTrade {
+func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
+	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
+	coins asset.Coins, notify func(Notification)) *trackedTrade {
 
 	ord := dbOrder.Order
 	return &trackedTrade{
@@ -108,8 +110,8 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		preImg:        preImg,
 		mktID:         marketName(ord.Base(), ord.Quote()),
 		coins:         mapifyCoins(coins),
-		lockTimeTaker: dex.LockTimeTaker(net),
-		lockTimeMaker: dex.LockTimeMaker(net),
+		lockTimeTaker: lockTimeTaker,
+		lockTimeMaker: lockTimeMaker,
 		matches:       make(map[order.MatchID]*matchTracker),
 		notify:        notify,
 		epochLen:      epochLen,
@@ -482,7 +484,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 // party has not executed the required follow-up action (i.e. match status shows
 // our swap is the last action on the match) AND our swap's locktime has expired.
 func (t *trackedTrade) isRefundable(match *matchTracker) bool {
-	if match.failErr != nil || match.MetaData.Proof.RefundCoin != nil {
+	if match.refundErr != nil || match.MetaData.Proof.RefundCoin != nil {
 		return false
 	}
 
@@ -871,7 +873,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 			}
 			errs.add("error sending refund tx for match %s, swap coin %s: %v",
 				match.id, swapCoinString, err)
-			match.failErr = err
+			match.refundErr = err
 			continue
 		}
 		if t.Trade().Sell {

@@ -24,8 +24,8 @@ var (
 	// will be used in place of the `lockTimeTaker` and `lockTimeMaker` constants
 	// defined above, _when_ running on a test network (testnet or regtest).
 	// Values for both variables may be set at build time using linker flags e.g:
-	// go build -ldflags "-X 'decred.org/dcrdex/dex.TestLockTimeTaker=10m' \
-	// -X 'decred.org/dcrdex/dex.TestLockTimeMaker=20m'"
+	// go build -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=10m' \
+	// -X 'decred.org/dcrdex/dex.testLockTimeMaker=20m'"
 	// Same values should be set when building server and client binaries.
 	testLockTimeTaker string
 	testLockTimeMaker string

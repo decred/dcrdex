@@ -5,10 +5,10 @@ package core
 // The btc, dcr and dcrdex harnesses should be running before executing this
 // test.
 //
-// The dcrdex harness rebuilds the dcrdex binary with dex.TestLockTimeTaker=1m
-// and dex.TestLockTimeMaker=2m before running the binary. Those test locktimes
-// would be treated by the DEX as minimum swap locktimes allowing this harness
-// to use variable locktimes (greater than those set) in different tests.
+// The dcrdex harness rebuilds the dcrdex binary with dex.testLockTimeTaker=30s
+// and dex.testLockTimeMaker=1m before running the binary, making it possible
+// for this test to wait for swap locktimes to expire and ensure that refundable
+// swaps are actually refunded when the swap locktimes expire.
 //
 // Some errors you might encounter (especially after running this test
 // multiple times):
@@ -34,6 +34,7 @@ import (
 	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
 	"github.com/decred/slog"
@@ -61,6 +62,9 @@ var (
 
 	dexHost = "127.0.0.1:17273"
 	dexCert string
+
+	tLockTimeTaker = 30 * time.Second
+	tLockTimeMaker = 1 * time.Minute
 
 	tLog dex.Logger
 )
@@ -167,7 +171,7 @@ func startClients(ctx context.Context) error {
 		c.log("connected DEX %s", dexHost)
 
 		// mine drc block(s) to mark fee as paid
-		err = mineBlocks(dcr.BipID, "alpha", regRes.ReqConfirms)
+		err = mineBlocks(dcr.BipID, regRes.ReqConfirms)
 		if err != nil {
 			return err
 		}
@@ -267,8 +271,7 @@ func testNoMakerSwap(t *testing.T) {
 
 // testNoTakerSwap runs a simple trade test and ensures that the resulting
 // trades fail because of the Taker not sending their init swap tx.
-// TODO: Update the test to ensure Maker's funds are refunded after locktime
-// expires.
+// Also ensures that Maker's funds are refunded after locktime expires.
 func testNoTakerSwap(t *testing.T) {
 	var qty, rate uint64 = 8 * 1e8, 2 * 1e4 // 8 DCR at 0.0002 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
@@ -279,8 +282,8 @@ func testNoTakerSwap(t *testing.T) {
 
 // testNoMakerRedeem runs a simple trade test and ensures that the resulting
 // trades fail because of Maker not sending their redemption of Taker's swap.
-// TODO: Update the test to ensure both Maker and Taker's funds are refunded
-// after their respective swap locktime expires.
+// Also ensures that both Maker and Taker's funds are refunded after their
+// respective swap locktime expires.
 func testNoMakerRedeem(t *testing.T) {
 	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
@@ -340,8 +343,6 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 		return err
 	}
 
-	tLog.Infof("Trades ended at %s.", finalStatus)
-
 	// Allow some time for balance changes to be properly reported.
 	// There is usually a split-second window where a locked output
 	// has been spent but the spending tx is still in mempool. This
@@ -355,6 +356,20 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 		}
 	}
 
+	// Check if any refunds are necessary and wait to ensure the refunds
+	// are completed.
+	refundsWaiter, ctx := errgroup.WithContext(context.Background())
+	refundsWaiter.Go(func() error {
+		return checkAndWaitForRefunds(ctx, client1, c1OrderID)
+	})
+	refundsWaiter.Go(func() error {
+		return checkAndWaitForRefunds(ctx, client2, c2OrderID)
+	})
+	if err = refundsWaiter.Wait(); err != nil {
+		return err
+	}
+
+	tLog.Infof("Trades ended at %s.", finalStatus)
 	return nil
 }
 
@@ -490,15 +505,11 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 			time.Sleep(1 * time.Second)
 
 			assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)
-			name := client.wallets[assetID].name
-			if assetID == dcr.BipID {
-				name = "alpha"
-			}
-			err := mineBlocks(assetID, name, nBlocks)
+			err := mineBlocks(assetID, nBlocks)
 			if err == nil {
 				client.log("Mined %d blocks for %s's %s, match %s", nBlocks, side, swapOrRedeem, token(match.id.Bytes()))
 			} else {
-				client.log("%s %s mine error %v", unbip(assetID), name, err)
+				client.log("%s mine error %v", unbip(assetID), err)
 			}
 
 			recordBalanceChanges(assetToMine.ID, swapOrRedeem == "swap", match.Match.Quantity, match.Match.Rate)
@@ -523,6 +534,126 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	}
 
 	return nil
+}
+
+func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string) error {
+	// check if client has pending refunds
+	client.log("checking if refunds are necessary")
+	refundAmts := map[uint32]int64{dcr.BipID: 0, btc.BipID: 0}
+	var furthestLockTime time.Time
+
+	hasRefundableSwap := func(match *matchTracker) bool {
+		sentSwap := match.MetaData.Proof.Script != nil
+		noRedeems := match.Match.Status < order.MakerRedeemed
+		return sentSwap && noRedeems
+	}
+
+	oid, err := order.IDFromHex(orderID)
+	if err != nil {
+		return fmt.Errorf("client %d: error parsing order id %s -> %v", client.id, orderID, err)
+	}
+
+	tracker, _, _ := client.dc().findOrder(oid)
+	tracker.matchMtx.RLock()
+	for _, match := range tracker.matches {
+		if !hasRefundableSwap(match) {
+			continue
+		}
+
+		dbMatch, _, _, auth := match.parts()
+		swapAmt := dbMatch.Quantity
+		if !client.isSeller {
+			swapAmt = calc.BaseToQuote(dbMatch.Rate, dbMatch.Quantity)
+		}
+		refundAmts[tracker.wallets.fromAsset.ID] += int64(swapAmt)
+
+		matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
+		swapLockTime := matchTime.Add(tracker.lockTimeTaker)
+		if dbMatch.Side == order.Maker {
+			swapLockTime = matchTime.Add(tracker.lockTimeMaker)
+		}
+		if swapLockTime.After(furthestLockTime) {
+			furthestLockTime = swapLockTime
+		}
+	}
+	tracker.matchMtx.RUnlock()
+
+	if ctx.Err() != nil { // context canceled
+		return nil
+	}
+	if furthestLockTime.IsZero() {
+		client.log("no refunds necessary")
+		return nil
+	}
+
+	client.log("found refundable swaps worth %.8f dcr and %.8f btc",
+		fmtAmt(refundAmts[dcr.BipID]), fmtAmt(refundAmts[btc.BipID]))
+
+	// wait for refunds to be executed
+	now := time.Now()
+	if furthestLockTime.After(now) {
+		wait := furthestLockTime.Sub(now)
+		client.log("waiting %s before checking wallet balances for expected refunds", wait)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(wait):
+		}
+	}
+
+	if refundAmts[btc.BipID] > 0 {
+		// btc swaps cannot be refunded until the MedianTimePast is greater
+		// than the swap locktime. The MedianTimePast is calculated by taking
+		// the timestamps of the last 11 blocks and finding the median. Mining
+		// 11 blocks on btc a second from now will ensure that the MedianTimePast
+		// will be greater than the furthest swap locktime, thereby lifting the
+		// time lock on all btc swaps.
+		time.Sleep(1 * time.Second)
+		if err := mineBlocks(btc.BipID, 11); err == nil {
+			client.log("mined 11 btc blocks to expire swap locktimes")
+		} else {
+			return fmt.Errorf("client %d: error mining 11 btc blocks for swap refunds: %v",
+				client.id, err)
+		}
+	}
+
+	// allow up to 30 seconds for core to get around to refunding the swaps
+	var notRefundedSwaps int
+	refundedSwaps := tryUntil(ctx, 30*time.Second, func() bool {
+		tracker.matchMtx.RLock()
+		defer tracker.matchMtx.RUnlock()
+		notRefundedSwaps = 0
+		for _, match := range tracker.matches {
+			if hasRefundableSwap(match) && match.MetaData.Proof.RefundCoin == nil {
+				notRefundedSwaps++
+			}
+		}
+		return notRefundedSwaps == 0
+	})
+	if ctx.Err() != nil { // context canceled
+		return nil
+	}
+	if !refundedSwaps {
+		return fmt.Errorf("client %d reported %d unrefunded swaps after 30 seconds",
+			client.id, notRefundedSwaps)
+	}
+
+	// swaps refunded, mine some blocks to get the refund txs confirmed and
+	// confirm that balance changes are as expected.
+	for assetID, expectedBalanceDiff := range refundAmts {
+		if expectedBalanceDiff > 0 {
+			mineBlocks(assetID, 2)
+		}
+	}
+	time.Sleep(5 * time.Second)
+
+	client.expectBalanceDiffs = refundAmts
+	err = client.assertBalanceChanges()
+	if err == nil {
+		client.log("successfully refunded swaps worth %.8f dcr and %.8f btc",
+			fmtAmt(refundAmts[dcr.BipID]), fmtAmt(refundAmts[btc.BipID]))
+	}
+	return err
 }
 
 func tryUntil(ctx context.Context, tryDuration time.Duration, tryFn func() bool) bool {
@@ -599,6 +730,8 @@ func (client *tClient) init() error {
 	if err != nil {
 		return err
 	}
+	client.core.lockTimeTaker = tLockTimeTaker
+	client.core.lockTimeMaker = tLockTimeMaker
 	return nil
 }
 
@@ -616,6 +749,11 @@ func (client *tClient) updateBalances() error {
 }
 
 func (client *tClient) assertBalanceChanges() error {
+	defer func() {
+		// Clear after assertion so that the next assertion is only performed
+		// if the expected balance changes are explicitly set.
+		client.expectBalanceDiffs = nil
+	}()
 	prevBalances := client.balances
 	err := client.updateBalances()
 	if err != nil || client.expectBalanceDiffs == nil {
@@ -630,8 +768,8 @@ func (client *tClient) assertBalanceChanges() error {
 		}
 		balanceDiff := int64(client.balances[assetID] - prevBalances[assetID])
 		if balanceDiff < minExpectedDiff || balanceDiff > maxExpectedDiff {
-			return fmt.Errorf("%s balance change not in expected range %.8f - %.8f, got %.8f",
-				unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
+			return fmt.Errorf("client %d %s balance change not in expected range %.8f - %.8f, got %.8f",
+				client.id, unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
 		}
 		client.log("%s balance change %.8f is in expected range of %.8f - %.8f",
 			unbip(assetID), fmtAmt(balanceDiff), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff))
@@ -669,18 +807,18 @@ func (client *tClient) lockWallets() error {
 func (client *tClient) unlockWallets() error {
 	client.log("unlocking wallets")
 	dcrw := client.dcrw()
-	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 60", dcrw.name, string(dcrw.pass))
+	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 300", dcrw.name, string(dcrw.pass))
 	if err := tmuxSendKeys("dcr-harness:0", unlockCmd); err != nil {
 		return err
 	}
 	time.Sleep(500 * time.Millisecond)
 	btcw := client.btcw()
-	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 60",
+	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 300",
 		btcw.name, btcw.account, string(btcw.pass))
 	return tmuxSendKeys("btc-harness:2", unlockCmd)
 }
 
-func mineBlocks(assetID uint32, name string, blocks uint16) error {
+func mineBlocks(assetID uint32, blocks uint16) error {
 	var harnessID string
 	switch assetID {
 	case dcr.BipID:
@@ -690,8 +828,7 @@ func mineBlocks(assetID uint32, name string, blocks uint16) error {
 	default:
 		return fmt.Errorf("can't mine blocks for unknown asset %d", assetID)
 	}
-	mineCmd := fmt.Sprintf("./mine-%s %d", name, blocks)
-	return tmuxSendKeys(harnessID, mineCmd)
+	return tmuxSendKeys(harnessID, fmt.Sprintf("./mine-alpha %d", blocks))
 }
 
 func tmuxSendKeys(tmuxWindow, cmd string) error {

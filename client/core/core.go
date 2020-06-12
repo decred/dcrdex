@@ -468,6 +468,9 @@ type Core struct {
 	cfg           *Config
 	db            db.DB
 	net           dex.Network
+	lockTimeTaker time.Duration
+	lockTimeMaker time.Duration
+
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
 	newCrypter    func([]byte) encrypt.Crypter
 	reCrypter     func([]byte, []byte) (encrypt.Crypter, error)
@@ -496,12 +499,14 @@ func New(cfg *Config) (*Core, error) {
 		return nil, fmt.Errorf("database initialization error: %v", err)
 	}
 	core := &Core{
-		cfg:          cfg,
-		db:           db,
-		conns:        make(map[string]*dexConnection),
-		wallets:      make(map[uint32]*xcWallet),
-		net:          cfg.Net,
-		blockWaiters: make(map[uint64]*blockWaiter),
+		cfg:           cfg,
+		db:            db,
+		conns:         make(map[string]*dexConnection),
+		wallets:       make(map[uint32]*xcWallet),
+		net:           cfg.Net,
+		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
+		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
+		blockWaiters:  make(map[uint64]*blockWaiter),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
@@ -1675,7 +1680,8 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, wallets, coins, c.net, c.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker, c.lockTimeMaker,
+		c.db, c.latencyQ, wallets, coins, c.notify)
 	corder, _ := tracker.coreOrder()
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -2106,7 +2112,8 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		} else {
 			var preImg order.Preimage
 			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, nil, nil, c.net, c.notify)
+			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker,
+				c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify)
 		}
 	}
 	for oid := range cancels {
