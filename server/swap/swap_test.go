@@ -30,6 +30,7 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
+	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/slog"
 )
 
@@ -46,6 +47,7 @@ var (
 		0x46, 0x34, 0xe9, 0x1c, 0xaa, 0xaa, 0xaa, 0xaa,
 	}
 	acctCounter uint32 = 0
+	dexPrivKey  *secp256k1.PrivateKey
 )
 
 type tUser struct {
@@ -108,13 +110,19 @@ type TRequest struct {
 type TAuthManager struct {
 	mtx         sync.Mutex
 	authErr     error
+	privkey     *secp256k1.PrivateKey
 	reqs        map[account.AccountID][]*TRequest
 	resps       map[account.AccountID][]*msgjson.Message
 	suspensions map[account.AccountID]account.Rule
 }
 
 func newTAuthManager() *TAuthManager {
+	// Reuse any previously generated dex server private key.
+	if dexPrivKey == nil {
+		dexPrivKey, _ = secp256k1.GeneratePrivateKey()
+	}
 	return &TAuthManager{
+		privkey:     dexPrivKey,
 		reqs:        make(map[account.AccountID][]*TRequest),
 		resps:       make(map[account.AccountID][]*msgjson.Message),
 		suspensions: make(map[account.AccountID]account.Rule),
@@ -161,7 +169,16 @@ func (m *TAuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.M
 	m.reqs[user] = append(l, tReq)
 	return nil
 }
-func (m *TAuthManager) Sign(...msgjson.Signable) error { return nil }
+func (m *TAuthManager) Sign(signables ...msgjson.Signable) error {
+	for _, signable := range signables {
+		sig, err := m.privkey.Sign(signable.Serialize())
+		if err != nil {
+			return fmt.Errorf("signature error: %v", err)
+		}
+		signable.SetSig(sig.Serialize())
+	}
+	return nil
+}
 func (m *TAuthManager) Suspended(user account.AccountID) (found, suspended bool) {
 	var rule account.Rule
 	rule, found = m.suspensions[user]
@@ -622,6 +639,9 @@ func (rig *testRig) checkMatchNotification(msg *msgjson.Message, oid order.Order
 			notification = n
 			break
 		}
+		if err = checkSigS256(n, rig.auth.privkey.PubKey()); err != nil {
+			return fmt.Errorf("incorrect server signature: %v", err)
+		}
 	}
 	if notification == nil {
 		return fmt.Errorf("did not find match ID %s in match notifications", matchInfo.matchID)
@@ -742,6 +762,19 @@ func (rig *testRig) auditSwap_maker() error {
 	return rig.auditSwap(req.req, matchInfo.makerOID, matchInfo.db.takerSwap.contract, "maker", matchInfo.maker)
 }
 
+// checkSigS256 checks that the message's signature was created with the
+// private key for the provided secp256k1 public key.
+func checkSigS256(msg msgjson.Signable, pubKey *secp256k1.PublicKey) error {
+	signature, err := secp256k1.ParseDERSignature(msg.SigBytes())
+	if err != nil {
+		return fmt.Errorf("error decoding secp256k1 Signature from bytes: %v", err)
+	}
+	if !signature.Verify(msg.Serialize(), pubKey) {
+		return fmt.Errorf("secp256k1 signature verification failed")
+	}
+	return nil
+}
+
 func (rig *testRig) auditSwap(msg *msgjson.Message, oid order.OrderID, contract, tag string, user *tUser) error {
 	if msg == nil {
 		return fmt.Errorf("no %s 'audit' request from DEX", user.lbl)
@@ -754,6 +787,9 @@ func (rig *testRig) auditSwap(msg *msgjson.Message, oid order.OrderID, contract,
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
 		return fmt.Errorf("error unmarshaling audit params: %v", err)
+	}
+	if err = checkSigS256(params, rig.auth.privkey.PubKey()); err != nil {
+		return fmt.Errorf("incorrect server signature: %v", err)
 	}
 	if params.OrderID.String() != oid.String() {
 		return fmt.Errorf("%s : incorrect order ID in auditSwap, expected '%s', got '%s'", tag, oid, params.OrderID)
@@ -914,6 +950,9 @@ func (rig *testRig) checkRedeem(msg *msgjson.Message, oid order.OrderID, coinID 
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
 		return fmt.Errorf("error unmarshaling redeem params: %v", err)
+	}
+	if err = checkSigS256(params, rig.auth.privkey.PubKey()); err != nil {
+		return fmt.Errorf("incorrect server signature: %v", err)
 	}
 	if params.OrderID.String() != oid.String() {
 		return fmt.Errorf("%s : incorrect order ID in checkRedeem, expected '%s', got '%s'", tag, oid, params.OrderID)
@@ -1555,6 +1594,9 @@ func TestBroadcastTimeouts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unmarshal error for %s at step %d: %s", user.lbl, i, string(req.req.Payload))
 		}
+		if err = checkSigS256(params, rig.auth.privkey.PubKey()); err != nil {
+			t.Fatalf("incorrect server signature: %v", err)
+		}
 		if !bytes.Equal(params.MatchID, rig.matchInfo.matchID[:]) {
 			t.Fatalf("unexpected revocation match ID for %s at step %d. expected %s, got %s",
 				user.lbl, i, rig.matchInfo.matchID, params.MatchID)
@@ -1791,6 +1833,11 @@ func TestCancel(t *testing.T) {
 	if len(matchNotes) != 2 {
 		t.Fatalf("expected 2 match notification, got %d", len(matchNotes))
 	}
+	for _, match := range matchNotes {
+		if err = checkSigS256(match, rig.auth.privkey.PubKey()); err != nil {
+			t.Fatalf("incorrect server signature: %v", err)
+		}
+	}
 	makerNote, takerNote := matchNotes[0], matchNotes[1]
 	if makerNote.OrderID.String() != matchInfo.makerOID.String() {
 		t.Fatalf("expected maker ID %s, got %s", matchInfo.makerOID, makerNote.OrderID)
@@ -1944,9 +1991,6 @@ func TestState(t *testing.T) {
 	}
 
 	// handleInit for maker
-	// if err = rig.sendSwap_maker(true); err != nil {
-	// 	t.Fatalf("maker failed to send swap txn: %v", err)
-	// }
 	makerSwap := tNewSwap(matchInfo, matchInfo.makerOID, matchInfo.taker.addr, maker)
 	// do not "broadcast" the contract yet: abc.setContract(makerSwap.coin, true)
 	// TAsset can't find it yet, TryAgain back to the coinwaiter
