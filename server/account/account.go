@@ -89,7 +89,7 @@ type Rule uint8
 const (
 	// NoRule indicates that no rules have been broken. This may be an invalid
 	// value in some contexts.
-	NoRule = iota
+	NoRule Rule = iota
 	// FailureToAct means that an account has not followed through on one of their
 	// swap negotiation steps.
 	FailureToAct
@@ -102,4 +102,8 @@ const (
 	// PreimageReveal means an account failed to respond with a valid preimage
 	// for their order during epoch processing.
 	PreimageReveal
+	// MaxRule in not an actual rule. It is a placeholder that is used to
+	// determine the total number of rules. It must always be the last
+	// definition in this list.
+	MaxRule
 )

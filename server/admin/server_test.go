@@ -51,6 +51,7 @@ type TCore struct {
 	accountsErr error
 	account     *db.Account
 	accountErr  error
+	penalizeErr error
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
@@ -143,6 +144,9 @@ func (c *TCore) Accounts() ([]*db.Account, error) { return c.accounts, c.account
 func (c *TCore) AccountInfo(_ account.AccountID) (*db.Account, error) {
 	return c.account, c.accountErr
 }
+func (c *TCore) Penalize(_ account.AccountID, _ account.Rule) error {
+	return c.penalizeErr
+}
 
 // genCertPair generates a key/cert pair to the paths provided.
 func genCertPair(certFile, keyFile string) error {
@@ -230,7 +234,7 @@ func TestPing(t *testing.T) {
 	}
 
 	// JSON strings are double quoted. Each value is terminated with a newline.
-	expectedBody := `"pong"` + "\n"
+	expectedBody := `"` + pongStr + `"` + "\n"
 	if w.Body == nil {
 		t.Fatalf("got empty body")
 	}
@@ -537,7 +541,7 @@ func TestSuspend(t *testing.T) {
 	}
 
 	wantFinal := zeroTime.Add(time.Millisecond)
-	if suspRes.SuspendTime.Equal(wantFinal) {
+	if !suspRes.SuspendTime.Equal(wantFinal) {
 		t.Errorf("incorrect suspend time. got %v, expected %v",
 			suspRes.SuspendTime, tMkt.suspend.End)
 	}
@@ -597,7 +601,7 @@ func TestSuspend(t *testing.T) {
 	}
 
 	wantFinal = encode.UnixTimeMilli(tMsFuture + 1)
-	if suspRes.SuspendTime.Equal(wantFinal) {
+	if !suspRes.SuspendTime.Equal(wantFinal) {
 		t.Errorf("incorrect suspend time. got %v, expected %v",
 			suspRes.SuspendTime, wantFinal)
 	}
@@ -809,7 +813,7 @@ func TestAccountInfo(t *testing.T) {
 	acctIDStr := "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc"
 
 	mux := chi.NewRouter()
-	mux.Route("/account/{"+accountNameKey+"}", func(rm chi.Router) {
+	mux.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 		rm.Get("/", srv.apiAccountInfo)
 	})
 
@@ -859,7 +863,7 @@ func TestAccountInfo(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusOK)
+		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusOK)
 	}
 
 	exp := `{
@@ -882,7 +886,7 @@ func TestAccountInfo(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusOK)
+		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusOK)
 	}
 	if exp != w.Body.String() {
 		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
@@ -896,7 +900,7 @@ func TestAccountInfo(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusBadRequest)
+		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusBadRequest)
 	}
 
 	// acct id wrong length
@@ -907,7 +911,7 @@ func TestAccountInfo(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusBadRequest)
+		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusBadRequest)
 	}
 
 	// core.Account error
@@ -920,6 +924,101 @@ func TestAccountInfo(t *testing.T) {
 	mux.ServeHTTP(w, r)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusInternalServerError)
+		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestBan(t *testing.T) {
+	core := new(TCore)
+	srv := &Server{
+		core: core,
+	}
+	mux := chi.NewRouter()
+	mux.Route("/account/{"+accountIDKey+"}/ban", func(rm chi.Router) {
+		rm.Get("/", srv.apiBan)
+	})
+	acctIDStr := "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc"
+	tests := []struct {
+		name, acctID, rule string
+		penalizeErr        error
+		wantCode           int
+	}{{
+		name:     "ok hex lower case",
+		acctID:   acctIDStr,
+		rule:     fmt.Sprint(int(account.MaxRule) - 1),
+		wantCode: http.StatusOK,
+	}, {
+		name:     "ok hex upper case",
+		acctID:   strings.ToUpper(acctIDStr),
+		rule:     "1",
+		wantCode: http.StatusOK,
+	}, {
+		name:     "account id not hex",
+		acctID:   "nothex",
+		rule:     "1",
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "account id wrong length",
+		acctID:   acctIDStr[2:],
+		rule:     "1",
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "no rule",
+		acctID:   acctIDStr,
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "rule not integer",
+		acctID:   acctIDStr,
+		rule:     "not int",
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "rule NoRule",
+		acctID:   acctIDStr,
+		rule:     fmt.Sprint(account.NoRule),
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "unknown rule",
+		acctID:   acctIDStr,
+		rule:     fmt.Sprint(account.MaxRule),
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:        "core.Penalize error",
+		acctID:      acctIDStr,
+		rule:        "1",
+		penalizeErr: errors.New("error"),
+		wantCode:    http.StatusInternalServerError,
+	}}
+	for _, test := range tests {
+		core.penalizeErr = test.penalizeErr
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("GET", "https://localhost/account/"+test.acctID+"/ban?"+ruleToken+"="+test.rule, nil)
+		r.RemoteAddr = "localhost"
+
+		mux.ServeHTTP(w, r)
+
+		if w.Code != test.wantCode {
+			t.Fatalf("%q: apiBan returned code %d, expected %d", test.name, w.Code, test.wantCode)
+		}
+		if w.Code == http.StatusOK {
+			res := new(BanResult)
+			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
+				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
+			}
+		}
+	}
+}
+
+func TestAPITimeMarshalJSON(t *testing.T) {
+	now := APITime{time.Now()}
+	b, err := json.Marshal(now)
+	if err != nil {
+		t.Fatalf("unable to marshal api time: %v", err)
+	}
+	var res APITime
+	if err := json.Unmarshal(b, &res); err != nil {
+		t.Fatalf("unable to unmarshal api time: %v", err)
+	}
+	if !res.Equal(now.Time) {
+		t.Fatal("unmarshalled time not equal")
 	}
 }

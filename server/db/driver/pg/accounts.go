@@ -17,7 +17,7 @@ import (
 )
 
 // CloseAccount closes the account by setting the value of the rule column.
-func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) {
+func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) error {
 	err := closeAccount(a.db, a.tables.accounts, aid, rule)
 	if err != nil {
 		// fatal unless 0 matching rows found because that means at least the
@@ -25,8 +25,9 @@ func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) {
 		if !errors.Is(err, errNoRows) {
 			a.fatalBackendErr(err)
 		}
-		log.Errorf("error closing account %s (rule %d): %v", aid, rule, err)
+		return fmt.Errorf("error closing account %s (rule %d): %v", aid, rule, err)
 	}
+	return nil
 }
 
 // Account retrieves the account pubkey, whether the account is paid, and

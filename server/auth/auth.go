@@ -29,7 +29,7 @@ func unixMsNow() time.Time {
 // database.
 type Storage interface {
 	// CloseAccount closes the account for violation of the specified rule.
-	CloseAccount(account.AccountID, account.Rule)
+	CloseAccount(account.AccountID, account.Rule) error
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
@@ -630,10 +630,11 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 
 // Penalize signals that a user has broken a rule of community conduct, and that
 // their account should be penalized.
-func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) {
+func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) error {
 	if auth.anarchy {
-		log.Infof("user %v penalized for rule %v, but not enforcing it", user, rule)
-		return
+		err := fmt.Errorf("user %v penalized for rule %v, but not enforcing it", user, rule)
+		log.Error(err)
+		return err
 	}
 
 	// TODO: option to close permanently or suspend for a certain time.
@@ -643,7 +644,12 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) {
 		client.suspend()
 	}
 
-	auth.storage.CloseAccount(user /*client.acct.ID*/, rule)
+	if err := auth.storage.CloseAccount(user /*client.acct.ID*/, rule); err != nil {
+		log.Error(err)
+		return err
+	}
+
+	log.Debugf("user %v penalized for rule %v", user, rule)
 
 	// We do NOT want to do disconnect if the user has active swaps.  However,
 	// we do not want the user to initiate a swap or place a new order, so there
@@ -651,6 +657,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) {
 	// initiation (TODO).
 
 	// TODO: notify client of penalty / account status change?
+	return nil
 }
 
 // user gets the clientInfo for the specified account ID.

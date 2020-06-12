@@ -222,8 +222,9 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 	}
 	return nil
 }
-func (a *TAuth) Penalize(user account.AccountID, rule account.Rule) {
+func (a *TAuth) Penalize(user account.AccountID, rule account.Rule) error {
 	log.Infof("Penalize for user %v", user)
+	return nil
 }
 
 func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}

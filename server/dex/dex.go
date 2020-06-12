@@ -585,3 +585,9 @@ func (dm *DEX) Accounts() ([]*db.Account, error) {
 func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
 	return dm.storage.AccountInfo(aid)
 }
+
+// Penalize bans an account by canceling the client's orders and setting their rule
+// status to rule.
+func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule) error {
+	return dm.swapper.Penalize(aid, rule)
+}

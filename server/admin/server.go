@@ -31,8 +31,9 @@ const (
 	// is closed.
 	rpcTimeoutSeconds = 10
 
-	marketNameKey  = "market"
-	accountNameKey = "account"
+	marketNameKey = "market"
+	accountIDKey  = "account"
+	ruleToken     = "rule"
 )
 
 var (
@@ -48,6 +49,7 @@ type SvrCore interface {
 	MarketStatus(mktName string) *market.Status
 	MarketStatuses() map[string]*market.Status
 	SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch
+	Penalize(aid account.AccountID, rule account.Rule) error
 }
 
 // Server is a multi-client https server.
@@ -124,10 +126,10 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Get("/ping", s.apiPing)
 		r.Get("/config", s.apiConfig)
 		r.Get("/accounts", s.apiAccounts)
-		r.Route("/account/{"+accountNameKey+"}", func(rm chi.Router) {
+		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)
+			rm.Get("/ban", s.apiBan)
 		})
-
 		r.Get("/markets", s.apiMarkets)
 		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiMarketInfo)
