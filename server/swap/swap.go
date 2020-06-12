@@ -1637,6 +1637,7 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		CoinID:   params.CoinID,
 		Contract: params.Contract,
 	}
+	s.authMgr.Sign(auditParams)
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)
 	if err != nil {
 		// This is likely an impossibly condition.
@@ -1773,7 +1774,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		},
 		Time: uint64(redeemTimeMs),
 	}
-
+	s.authMgr.Sign(rParams)
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
 	if err != nil {
 		log.Errorf("error creating redemption request: %v", err)
@@ -2012,11 +2013,12 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 // revocationRequests prepares a match revocation RPC request for each client.
 // Both the request and the *msgjson.RevokeMatchParams are returned, since they
 // cannot be accessed directly from the request (json.RawMessage).
-func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Message, *msgjson.RevokeMatch, *msgjson.Message, error) {
+func (s *Swapper) revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Message, *msgjson.RevokeMatch, *msgjson.Message, error) {
 	takerParams := &msgjson.RevokeMatch{
 		OrderID: idToBytes(match.Taker.ID()),
 		MatchID: idToBytes(match.ID()),
 	}
+	s.authMgr.Sign(takerParams)
 	takerReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RevokeMatchRoute, takerParams)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -2025,6 +2027,7 @@ func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Mes
 		OrderID: idToBytes(match.Maker.ID()),
 		MatchID: idToBytes(match.ID()),
 	}
+	s.authMgr.Sign(makerParams)
 	makerReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RevokeMatchRoute, makerParams)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -2064,7 +2067,7 @@ func (s *Swapper) revoke(match *matchTracker) {
 		}
 	}
 
-	takerParams, takerReq, makerParams, makerReq, err := revocationRequests(match)
+	takerParams, takerReq, makerParams, makerReq, err := s.revocationRequests(match)
 	if err != nil {
 		log.Errorf("error creating revocation requests: %v", err)
 		return
@@ -2436,7 +2439,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 			msgs = append(msgs, m.params)
 		}
 
-		// Solicit match acknowledgments.
+		// Solicit match acknowledgments. Each Match is signed in addUserMatch.
 		req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
 		if err != nil {
 			log.Errorf("error creating match notification request: %v", err)
