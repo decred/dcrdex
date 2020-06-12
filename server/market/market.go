@@ -1267,8 +1267,19 @@ func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed [
 	// Penalize accounts with misses. TODO: consider if Penalize can be an async
 	// function call.
 	for _, ord := range misses {
-		log.Infof("No preimage received for order %v from user %v. Penalizing.", ord.ID(), ord.User())
+		log.Infof("No preimage received for order %v from user %v. Penalizing user and revoking order.",
+			ord.ID(), ord.User())
 		m.auth.Penalize(ord.User(), account.PreimageReveal)
+		// Unlock the order's coins locked in processOrder.
+		m.unlockOrderCoins(ord) // could also be done in processReadyEpoch
+		// Change the order status from orderStatusEpoch to orderStatusRevoked.
+		coid, revTime, err := m.storage.RevokeOrder(ord)
+		if err == nil {
+			m.auth.RecordCancel(ord.User(), coid, ord.ID(), revTime)
+		} else {
+			log.Errorf("Failed to revoke order %v with a new cancel order: %v",
+				ord.UID(), err)
+		}
 	}
 
 	return
