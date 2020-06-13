@@ -48,7 +48,6 @@ var (
 	}
 	acctCounter uint32 = 0
 	dexPrivKey  *secp256k1.PrivateKey
-	tNet        = dex.Testnet
 )
 
 type tUser struct {
@@ -523,7 +522,7 @@ func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
 		panic(err.Error())
 	}
 
-	swapper, err := NewSwapper(tNet, &Config{
+	swapper, err := NewSwapper(&Config{
 		State:   state,
 		DataDir: swapDataDir,
 		Assets: map[uint32]*LockableAsset{
@@ -533,6 +532,8 @@ func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: txWaitExpiration * 5,
+		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
+		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
 	})
 	if err != nil {
 		panic(err.Error())
@@ -1196,9 +1197,9 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		id:        coinID,
 	}
 
-	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker(tNet)))
+	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker(dex.Testnet)))
 	if user == matchInfo.maker {
-		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker(tNet)))
+		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker(dex.Testnet)))
 	}
 
 	if !tLockTimeSpoofer.IsZero() {

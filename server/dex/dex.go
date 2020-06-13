@@ -398,9 +398,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: cfg.BroadcastTimeout,
+		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
+		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
 	}
 
-	swapper, err := swap.NewSwapper(cfg.Network, swapperCfg)
+	swapper, err := swap.NewSwapper(swapperCfg)
 	if err != nil {
 		abort()
 		return nil, fmt.Errorf("NewSwapper: %v", err)

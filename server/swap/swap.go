@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -282,11 +281,11 @@ type Swapper struct {
 	matches  map[order.MatchID]*matchTracker
 	// orders tracks order status and active swaps.
 	orders *orderSwapTracker
+	// The broadcast timeout.
+	bTimeout time.Duration
 	// Expected locktimes for maker and taker swaps.
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
-	// The broadcast timeout.
-	bTimeout time.Duration
 	// latencyQ is a queue for coin waiters to deal with network latency.
 	latencyQ *wait.TickerQueue
 	// gracePeriod is a flag that indicates how long clients have to respond to
@@ -335,10 +334,14 @@ type Config struct {
 	// BroadcastTimeout is how long the Swapper will wait for expected swap
 	// transactions following new blocks.
 	BroadcastTimeout time.Duration
+	// LockTimeTaker is the locktime Swapper will use for auditing taker swaps.
+	LockTimeTaker time.Duration
+	// LockTimeTaker is the locktime Swapper will use for auditing maker swaps.
+	LockTimeMaker time.Duration
 }
 
 // NewSwapper is a constructor for a Swapper.
-func NewSwapper(net dex.Network, cfg *Config) (*Swapper, error) {
+func NewSwapper(cfg *Config) (*Swapper, error) {
 	// Verify the directory where swap state will be saved.
 	inf, err := os.Stat(cfg.DataDir)
 	if os.IsNotExist(err) {
@@ -357,9 +360,9 @@ func NewSwapper(net dex.Network, cfg *Config) (*Swapper, error) {
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		matches:       make(map[order.MatchID]*matchTracker),
 		orders:        newOrderSwapTracker(),
-		lockTimeTaker: dex.LockTimeTaker(net),
-		lockTimeMaker: dex.LockTimeMaker(net),
 		bTimeout:      cfg.BroadcastTimeout,
+		lockTimeTaker: cfg.LockTimeTaker,
+		lockTimeMaker: cfg.LockTimeMaker,
 		liveWaiters:   make(map[waiterKey]*handlerArgs),
 		liveAckers:    make(map[uint64]*msgAckers),
 	}
