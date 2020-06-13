@@ -1318,6 +1318,7 @@ func TestRouter(t *testing.T) {
 	}
 
 	findBookOrder := func(id msgjson.Bytes, src *TBookSource) *order.LimitOrder {
+		t.Helper()
 		return findOrder(id, src.buys, src.sells)
 	}
 

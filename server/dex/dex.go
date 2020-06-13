@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	dcrasset "decred.org/dcrdex/server/asset/dcr"
@@ -387,6 +388,17 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	authMgr := auth.NewAuthManager(&authCfg)
 	startSubSys("Auth manager", authMgr)
 
+	markets := make(map[string]*market.Market, len(cfg.Markets))
+	marketUnbookHook := func(lo *order.LimitOrder) bool {
+		name, err := dex.MarketName(lo.BaseAsset, lo.QuoteAsset)
+		if err != nil {
+			log.Error(err)
+			return false
+		}
+
+		return markets[name].Unbook(lo)
+	}
+
 	// Create the swapper.
 	swapperCfg := &swap.Config{
 		State:            cfg.SwapState,
@@ -397,6 +409,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		BroadcastTimeout: cfg.BroadcastTimeout,
 		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
 		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
+		UnbookHook:       marketUnbookHook,
 	}
 
 	swapper, err := swap.NewSwapper(swapperCfg)
@@ -404,10 +417,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		abort()
 		return nil, fmt.Errorf("NewSwapper: %v", err)
 	}
-	startSubSys("Swapper", swapper)
 
 	// Markets
-	markets := make(map[string]*market.Market, len(cfg.Markets))
 	for _, mktInf := range cfg.Markets {
 		baseCoinLocker := dexCoinLocker.AssetLocker(mktInf.Base).Book()
 		quoteCoinLocker := dexCoinLocker.AssetLocker(mktInf.Quote).Book()
@@ -418,6 +429,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		}
 		markets[mktInf.Name] = mkt
 	}
+
+	startSubSys("Swapper", swapper) // after markets map set
 
 	// Set start epoch index for each market. Also create BookSources for the
 	// BookRouter, and MarketTunnels for the OrderRouter

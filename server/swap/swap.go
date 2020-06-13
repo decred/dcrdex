@@ -275,7 +275,8 @@ type Swapper struct {
 	// storage is a Database backend.
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.
-	authMgr AuthManager
+	authMgr    AuthManager
+	unbookHook func(lo *order.LimitOrder) bool
 	// The matches map and the contained matches are protected by the matchMtx.
 	matchMtx sync.RWMutex
 	matches  map[order.MatchID]*matchTracker
@@ -338,6 +339,7 @@ type Config struct {
 	LockTimeTaker time.Duration
 	// LockTimeTaker is the locktime Swapper will use for auditing maker swaps.
 	LockTimeMaker time.Duration
+	UnbookHook    func(lo *order.LimitOrder) bool
 }
 
 // NewSwapper is a constructor for a Swapper.
@@ -357,6 +359,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		coins:         cfg.Assets,
 		storage:       cfg.Storage,
 		authMgr:       authMgr,
+		unbookHook:    cfg.UnbookHook,
 		latencyQ:      wait.NewTickerQueue(recheckInterval),
 		matches:       make(map[order.MatchID]*matchTracker),
 		orders:        newOrderSwapTracker(),
@@ -1063,25 +1066,29 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// Record the end of this match's processing.
 			s.storage.SetMatchInactive(db.MatchID(match.Match))
 
-			// Create the server-generated cancel order, and register it with
-			// the AuthManager for cancellation ratio computation.
-			coid, revTime, err := s.storage.RevokeOrder(orderAtFault)
-			if err == nil {
-				s.authMgr.RecordCancel(orderAtFault.User(), coid, orderAtFault.ID(), revTime)
-			} else {
-				log.Errorf("Failed to revoke order %v with a new cancel order: %v",
-					orderAtFault.UID(), err)
+			// If the at-fault order is a limit order, signal that if it is
+			// still on the book is should be unbooked, changed to revoked
+			// status, and a server-generated cancel order recorded .
+			if lo, isLimit := orderAtFault.(*order.LimitOrder); isLimit {
+				if s.unbookHook(lo) {
+					s.orders.canceled(orderAtFault) // set as off-book and failed
+				}
 			}
 
-			// That's one less active swap for this order, and a failure.
+			// That's one less active swap for this order, and a failure. If
+			// this order has no other active swaps, it will be removed from the
+			// order swap tracker by decrementActiveSwapCount since it is
+			// off-book and no new swap negotiations can begin for this order.
 			s.orders.swapFailure(orderAtFault)
+
 			// The other order now has one less active swap too.
 			if s.orders.swapSuccess(otherOrder) {
 				// TODO: We should count this as a successful swap, but should
 				// it only be a completed order with the extra stipulation that
 				// it had already completed another swap?
-				s.authMgr.RecordCompletedOrder(otherOrder.User(), otherOrder.ID(), revTime)
-				if err = s.storage.SetOrderCompleteTime(otherOrder, encode.UnixMilli(revTime)); err != nil {
+				compTime := time.Now().UTC()
+				s.authMgr.RecordCompletedOrder(otherOrder.User(), otherOrder.ID(), compTime)
+				if err := s.storage.SetOrderCompleteTime(otherOrder, encode.UnixMilli(compTime)); err != nil {
 					if db.IsErrGeneralFailure(err) {
 						log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", otherOrder.UID(), err)
 					} else {
