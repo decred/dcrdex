@@ -178,9 +178,10 @@ func startClients(ctx context.Context) error {
 		c.log("mined %d blocks on dcr %s for fee payment confirmation", regRes.ReqConfirms, dcrWallet.name)
 
 		// wait 12 seconds for fee payment, notifyfee times out after 10 seconds
-		c.log("waiting 12 seconds for fee confirmation notice")
+		feeTimeout := 12 * time.Second
+		c.log("waiting %s for fee confirmation notice", feeTimeout)
 		c.notifications = c.core.NotificationFeed()
-		feePaid := tryUntil(ctx, 12*time.Second, func() bool {
+		feePaid := tryUntil(ctx, feeTimeout, func() bool {
 			select {
 			case n := <-c.notifications:
 				return n.Type() == "feepayment" && n.Subject() == "Account registered"
@@ -189,7 +190,7 @@ func startClients(ctx context.Context) error {
 			}
 		})
 		if !feePaid {
-			return fmt.Errorf("fee payment not confirmed after 12 seconds")
+			return fmt.Errorf("fee payment not confirmed after %s", feeTimeout)
 		}
 		c.log("fee payment confirmed")
 	}
@@ -240,6 +241,13 @@ func TestTrading(t *testing.T) {
 		"no taker swap":   testNoTakerSwap,
 		"no maker redeem": testNoMakerRedeem,
 	}
+
+	// TODO: If testTradeSuccess is run last, the DEX account may be suspended
+	// because of previous incompleted trades. Should probably delete the dex
+	// connection after each trade disruption test and re-register with the DEX.
+	// May also modify disruption tests to wait for `match_revoked` requests from
+	// the DEX, but that would be a test that the DEX is operating as expected
+	// which may be outside the purview of this client package.
 
 	for test, testFn := range tests {
 		fmt.Println() // empty line to separate test logs for better readability
@@ -314,11 +322,11 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 		}
 	}
 
-	c1OrderID, err := placeTestOrder(client1, qty, rate, client1.isSeller)
+	c1OrderID, err := client1.placeOrder(qty, rate)
 	if err != nil {
 		return fmt.Errorf("client1 place %s order error: %v", sellString(client1.isSeller), err)
 	}
-	c2OrderID, err := placeTestOrder(client2, qty, rate, client2.isSeller)
+	c2OrderID, err := client2.placeOrder(qty, rate)
 	if err != nil {
 		return fmt.Errorf("client2 place %s order error: %v", sellString(client2.isSeller), err)
 	}
@@ -373,39 +381,6 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 	return nil
 }
 
-func placeTestOrder(c *tClient, qty, rate uint64, sell bool) (string, error) {
-	dc := c.dc()
-	dcrBtcMkt := dc.market("dcr_btc")
-	if dcrBtcMkt == nil {
-		return "", fmt.Errorf("no dcr_btc market found")
-	}
-	baseAsset := dc.assets[dcrBtcMkt.BaseID]
-	quoteAsset := dc.assets[dcrBtcMkt.QuoteID]
-
-	tradeForm := &TradeForm{
-		Host:    dexHost,
-		Base:    baseAsset.ID,
-		Quote:   quoteAsset.ID,
-		IsLimit: true,
-		Sell:    sell,
-		Qty:     qty,
-		Rate:    rate,
-		TifNow:  false,
-	}
-
-	qtyStr := fmt.Sprintf("%.8f %s", fmtAmt(qty), baseAsset.Symbol)
-	rateStr := fmt.Sprintf("%.8f %s/%s", fmtAmt(rate), quoteAsset.Symbol,
-		baseAsset.Symbol)
-
-	ord, err := c.core.Trade(c.appPass, tradeForm)
-	if err != nil {
-		return "", fmt.Errorf("error placing %s order %v", sellString(sell), err)
-	}
-
-	c.log("placed order %sing %s at %s (%s)", sellString(sell), qtyStr, rateStr, ord.ID[:8])
-	return ord.ID, nil
-}
-
 func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID string, finalStatus order.MatchStatus) error {
 	errs := newErrorSet("[client %d] ", client.id)
 
@@ -415,9 +390,12 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	}
 
 	oidShort := token(oid.Bytes())
-	client.log("waiting for matches on order %s", oidShort)
+	tracker, _, _ := client.dc().findOrder(oid)
 
-	matched := tryUntil(ctx, 15*time.Second, func() bool {
+	// Wait a max of 2 epochLen durations for this order to get matched.
+	maxMatchDuration := 2 * time.Duration(tracker.epochLen) * time.Millisecond
+	client.log("Waiting %s for matches on order %s", maxMatchDuration, oidShort)
+	matched := tryUntil(ctx, maxMatchDuration, func() bool {
 		select {
 		case n := <-client.notifications:
 			orderNote, isOrderNote := n.(*OrderNote)
@@ -430,20 +408,23 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		return nil
 	}
 	if !matched {
-		return errs.add("order %s not matched after 15 seconds", oidShort)
+		return errs.add("order %s not matched after %s", oidShort, maxMatchDuration)
 	}
 
-	tracker, _, _ := client.dc().findOrder(oid)
 	client.log("%d match(es) received for order %s", len(tracker.matches), oidShort)
 	for _, match := range tracker.matches {
 		client.log("%s on match %s, amount %.8f %s", match.Match.Side.String(),
 			token(match.id.Bytes()), fmtAmt(match.Match.Quantity), unbip(tracker.Base()))
 	}
 
-	// set initial match statuses before running check for status changes
-	matchStatuses := make(map[order.MatchID]order.MatchStatus, len(tracker.matches))
+	// Save last processed status for each match to accurately identify status
+	// changes and prevent re-processing the same status for a match.
+	// Set the initial processed match statuses to order.NewlyMatched to ignore
+	// matches whose status have not progressed beyond the matched stage until
+	// their status changes.
+	lastProcessedStatus := make(map[order.MatchID]order.MatchStatus, len(tracker.matches))
 	for _, match := range tracker.matches {
-		matchStatuses[match.id] = order.NewlyMatched
+		lastProcessedStatus[match.id] = order.NewlyMatched
 	}
 
 	// the expected balance changes for this client will be updated
@@ -465,7 +446,8 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	}
 
 	// run a repeated check for match status changes to mine blocks as necessary.
-	tryUntil(ctx, 1*time.Minute, func() bool {
+	maxTradeDuration := 1 * time.Minute
+	tryUntil(ctx, maxTradeDuration, func() bool {
 		var completedTrades int
 		tracker.matchMtx.RLock()
 		defer tracker.matchMtx.RUnlock()
@@ -476,10 +458,10 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 				match.failErr = fmt.Errorf("take no further action")
 				completedTrades++
 			}
-			if status == matchStatuses[match.id] || status > finalStatus {
+			if status == lastProcessedStatus[match.id] || status > finalStatus {
 				continue
 			}
-			matchStatuses[match.id] = status
+			lastProcessedStatus[match.id] = status
 			client.log("NOW =====> %s", status)
 
 			// check for and mine client's swap or redeem
@@ -529,8 +511,8 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		}
 	}
 	if incompleteTrades > 0 {
-		return fmt.Errorf("client %d reported %d incomplete trades for order %s after 1 minute",
-			client.id, incompleteTrades, oidShort)
+		return fmt.Errorf("client %d reported %d incomplete trades for order %s after %s",
+			client.id, incompleteTrades, oidShort, maxTradeDuration)
 	}
 
 	return nil
@@ -619,7 +601,8 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 
 	// allow up to 30 seconds for core to get around to refunding the swaps
 	var notRefundedSwaps int
-	refundedSwaps := tryUntil(ctx, 30*time.Second, func() bool {
+	refundWaitTimeout := 30 * time.Second
+	refundedSwaps := tryUntil(ctx, refundWaitTimeout, func() bool {
 		tracker.matchMtx.RLock()
 		defer tracker.matchMtx.RUnlock()
 		notRefundedSwaps = 0
@@ -634,8 +617,8 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 		return nil
 	}
 	if !refundedSwaps {
-		return fmt.Errorf("client %d reported %d unrefunded swaps after 30 seconds",
-			client.id, notRefundedSwaps)
+		return fmt.Errorf("client %d reported %d unrefunded swaps after %s",
+			client.id, notRefundedSwaps, refundWaitTimeout)
 	}
 
 	// swaps refunded, mine some blocks to get the refund txs confirmed and
@@ -733,6 +716,39 @@ func (client *tClient) init() error {
 	client.core.lockTimeTaker = tLockTimeTaker
 	client.core.lockTimeMaker = tLockTimeMaker
 	return nil
+}
+
+func (client *tClient) placeOrder(qty, rate uint64) (string, error) {
+	dc := client.dc()
+	dcrBtcMkt := dc.market("dcr_btc")
+	if dcrBtcMkt == nil {
+		return "", fmt.Errorf("no dcr_btc market found")
+	}
+	baseAsset := dc.assets[dcrBtcMkt.BaseID]
+	quoteAsset := dc.assets[dcrBtcMkt.QuoteID]
+
+	tradeForm := &TradeForm{
+		Host:    dexHost,
+		Base:    baseAsset.ID,
+		Quote:   quoteAsset.ID,
+		IsLimit: true,
+		Sell:    client.isSeller,
+		Qty:     qty,
+		Rate:    rate,
+		TifNow:  false,
+	}
+
+	qtyStr := fmt.Sprintf("%.8f %s", fmtAmt(qty), baseAsset.Symbol)
+	rateStr := fmt.Sprintf("%.8f %s/%s", fmtAmt(rate), quoteAsset.Symbol,
+		baseAsset.Symbol)
+
+	ord, err := client.core.Trade(client.appPass, tradeForm)
+	if err != nil {
+		return "", err
+	}
+
+	client.log("placed order %sing %s at %s (%s)", sellString(client.isSeller), qtyStr, rateStr, ord.ID[:8])
+	return ord.ID, nil
 }
 
 func (client *tClient) updateBalances() error {
