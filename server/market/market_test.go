@@ -37,6 +37,7 @@ type TArchivist struct {
 	commitForKnownOrder  order.Commitment
 	bookedOrders         []*order.LimitOrder
 	epochInserted        chan struct{}
+	revoked              order.Order
 }
 
 func (ta *TArchivist) LastErr() error         { return nil }
@@ -121,8 +122,9 @@ func (ta *TArchivist) BookOrder(lo *order.LimitOrder) error {
 }
 func (ta *TArchivist) ExecuteOrder(ord order.Order) error  { return nil }
 func (ta *TArchivist) CancelOrder(*order.LimitOrder) error { return nil }
-func (ta *TArchivist) RevokeOrder(order.Order) (order.OrderID, time.Time, error) {
-	return order.OrderID{}, time.Now(), nil
+func (ta *TArchivist) RevokeOrder(ord order.Order) (order.OrderID, time.Time, error) {
+	ta.revoked = ord
+	return ord.ID(), time.Now(), nil
 }
 func (ta *TArchivist) RevokeOrderUncounted(order.Order) (order.OrderID, time.Time, error) {
 	return order.OrderID{}, time.Now(), nil
@@ -214,6 +216,7 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 	if err != nil {
 		panic(err.Error())
 	}
+	var mktUnbook func(lo *order.LimitOrder) bool
 	swapperCfg := &swap.Config{
 		DataDir: swapDataDir,
 		Assets: map[uint32]*swap.LockableAsset{
@@ -225,17 +228,13 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 		BroadcastTimeout: 10 * time.Second,
 		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
 		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
+		UnbookHook: func(lo *order.LimitOrder) bool {
+			return mktUnbook(lo)
+		},
 	}
 	swapper, err := swap.NewSwapper(swapperCfg)
 	if err != nil {
 		panic(err.Error())
-	}
-	ssw := dex.NewStartStopWaiter(swapper)
-	ssw.Start(testCtx)
-	cleanup := func() {
-		ssw.Stop()
-		ssw.WaitForShutdown()
-		os.RemoveAll(swapDataDir)
 	}
 
 	mbBuffer := 1.1
@@ -250,6 +249,16 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 	if err != nil {
 		return nil, nil, nil, func() {}, fmt.Errorf("Failed to create test market: %v", err)
 	}
+	mktUnbook = mkt.Unbook
+
+	ssw := dex.NewStartStopWaiter(swapper)
+	ssw.Start(testCtx)
+	cleanup := func() {
+		ssw.Stop()
+		ssw.WaitForShutdown()
+		os.RemoveAll(swapDataDir)
+	}
+
 	return mkt, storage, authMgr, cleanup, nil
 }
 
@@ -325,7 +334,7 @@ func TestMarket_NewMarket_BookOrders(t *testing.T) {
 }
 
 func TestMarket_Book(t *testing.T) {
-	mkt, _, _, cleanup, err := newTestMarket()
+	mkt, storage, auth, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 	}
@@ -367,6 +376,55 @@ func TestMarket_Book(t *testing.T) {
 		t.Errorf("Incorrect best sell order. Got %v, expected %v",
 			sells[0], bestSell)
 	}
+
+	// unbook something not on the book
+	if mkt.Unbook(makeLO(buyer3, 100, 1, order.StandingTiF)) {
+		t.Fatalf("unbooked and order that was not on the book")
+	}
+
+	// unbook the best buy order
+	feed := mkt.OrderFeed()
+
+	if !mkt.Unbook(bestBuy) {
+		t.Fatalf("Failed to unbook order")
+	}
+
+	sig := <-feed
+	if sig.action != unbookAction {
+		t.Fatalf("did not receive unbookAction signal")
+	}
+	sigData, ok := sig.data.(sigDataUnbookedOrder)
+	if !ok {
+		t.Fatalf("incorrect sigdata type")
+	}
+	if sigData.epochIdx != -1 {
+		t.Fatalf("expected epoch index -1, got %d", sigData.epochIdx)
+	}
+	loUnbooked, ok := sigData.order.(*order.LimitOrder)
+	if !ok {
+		t.Fatalf("incorrect unbooked order type")
+	}
+	if loUnbooked.ID() != bestBuy.ID() {
+		t.Errorf("unbooked order %v, wanted %v", loUnbooked.ID(), bestBuy.ID())
+	}
+
+	if auth.canceledOrder != bestBuy.ID() {
+		t.Errorf("revoke not recorded with auth manager")
+	}
+
+	if storage.revoked.ID() != bestBuy.ID() {
+		t.Errorf("revoke not recorded in storage")
+	}
+
+	if lockedCoins := mkt.coinsLocked(bestBuy); lockedCoins != nil {
+		t.Errorf("unbooked order still has locked coins: %v", lockedCoins)
+	}
+
+	bestBuy2, _ := mkt.book.Best()
+	if bestBuy2 == bestBuy {
+		t.Errorf("failed to unbook order")
+	}
+
 }
 
 func TestMarket_Suspend(t *testing.T) {
@@ -403,15 +461,9 @@ func TestMarket_Suspend(t *testing.T) {
 		mkt.Start(ctx, startEpochIdx)
 	}()
 
-	var wantClosedFeed bool
 	feed := mkt.OrderFeed()
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		for range feed {
-		}
-		if !wantClosedFeed {
-			t.Errorf("order feed should not be closed")
 		}
 	}()
 
@@ -452,7 +504,6 @@ func TestMarket_Suspend(t *testing.T) {
 	}
 
 	// Exactly at second epoch start, with same result.
-	wantClosedFeed = true // we intend to have this suspend happen
 	finalIdx, finalTime = mkt.Suspend(nextEpochTime, persist)
 	if finalIdx != nextEpochIdx-1 {
 		t.Fatalf("finalIdx = %d, wanted %d", finalIdx, nextEpochIdx-1)
@@ -481,6 +532,7 @@ func TestMarket_Suspend(t *testing.T) {
 	}
 
 	wg.Wait()
+	mkt.FeedDone(feed)
 
 	// Start up again (consumer resumes the Market manually)
 	startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
@@ -493,13 +545,8 @@ func TestMarket_Suspend(t *testing.T) {
 	}()
 
 	feed = mkt.OrderFeed()
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		for range feed {
-		}
-		if !wantClosedFeed {
-			t.Errorf("order feed should not be closed")
 		}
 	}()
 
@@ -511,7 +558,6 @@ func TestMarket_Suspend(t *testing.T) {
 	}
 
 	// Suspend asap.
-	wantClosedFeed = true // allow the feed receiver goroutine to return w/o error
 	_, finalTime = mkt.SuspendASAP(persist)
 	<-time.After(time.Until(finalTime.Add(40 * time.Millisecond)))
 
@@ -520,15 +566,9 @@ func TestMarket_Suspend(t *testing.T) {
 		t.Fatal("the market should have been suspended")
 	}
 
-	// Ensure the feed is closed (Run returned).
-	select {
-	case <-feed:
-	default:
-		t.Errorf("order feed should be closed")
-	}
-
 	cancel()
 	wg.Wait()
+	mkt.FeedDone(feed)
 }
 
 func TestMarket_Suspend_Persist(t *testing.T) {
@@ -558,17 +598,9 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 		mkt.Start(ctx, startEpochIdx)
 	}()
 
-	var wantClosedFeed bool
-
-	startFeedRecv := func() {
-		wg.Add(1)
+	startFeedRecv := func(feed <-chan *updateSignal) {
 		go func() {
-			defer wg.Done()
-			feed := mkt.OrderFeed()
 			for range feed {
-			}
-			if !wantClosedFeed {
-				t.Errorf("order feed should not be closed")
 			}
 		}()
 	}
@@ -589,7 +621,7 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 
 	// Suspend asap with no resume.  The epoch with the limit order will be
 	// processed and then the market will suspend.
-	wantClosedFeed = true // allow the feed receiver goroutine to return w/o error
+	//wantClosedFeed = true // allow the feed receiver goroutine to return w/o error
 	persist := true
 	_, finalTime := mkt.SuspendASAP(persist)
 	<-time.After(time.Until(finalTime.Add(40 * time.Millisecond)))
@@ -617,6 +649,7 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 	}
 
 	// Start it up again.
+	feed := mkt.OrderFeed()
 	startEpochIdx = 1 + encode.UnixMilli(time.Now())/epochDurationMSec
 	//startEpochTime = encode.UnixTimeMilli(startEpochIdx * epochDurationMSec)
 	wg.Add(1)
@@ -625,7 +658,7 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 		mkt.Start(ctx, startEpochIdx)
 	}()
 
-	startFeedRecv()
+	startFeedRecv(feed)
 
 	mkt.waitForEpochOpen()
 
@@ -639,6 +672,7 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 
 	// Wait for Run to return.
 	wg.Wait()
+	mkt.FeedDone(feed)
 
 	// Should be stopped
 	if mkt.Running() {
@@ -659,8 +693,10 @@ func TestMarket_Suspend_Persist(t *testing.T) {
 		t.Errorf("sell side of book not empty")
 	}
 
-	cancel()
-	wg.Wait()
+	if t.Failed() {
+		cancel()
+		wg.Wait()
+	}
 }
 
 func TestMarket_Run(t *testing.T) {
