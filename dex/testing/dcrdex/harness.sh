@@ -70,6 +70,9 @@ rpclisten=127.0.0.1:17273
 debuglevel=trace
 regfeeconfirms=1
 signingkeypass=keypass
+adminsrvon=1
+adminsrvpass=adminpass
+adminsrvaddr=127.0.0.1:16542
 EOF
 
 # Write rpc.cert and rpc.key.
