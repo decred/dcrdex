@@ -172,8 +172,10 @@ ordersLoop:
 					"Revoking the order.", coin, lo)
 			} else {
 				// other failure (coinID decode, RPC, etc.)
-				log.Errorf("Unexpected error checking coinID %v for order %v: %v. "+
-					"Revoking the order.", lo.Coins[i], lo, err)
+				return nil, fmt.Errorf("unexpected error checking coinID %v for order %v: %v",
+					lo.Coins[i], lo, err)
+				// NOTE: This does not revoke orders from storage since this is
+				// likely to be a configuration or node issue.
 			}
 
 			delete(bookOrdersByID, id)
