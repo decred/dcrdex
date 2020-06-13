@@ -50,8 +50,6 @@ const (
 // Swapper coordinates atomic swaps for one or more matchsets.
 type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
-	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
-	LockOrdersCoins(orders []order.Order)
 	CheckUnspent(asset uint32, coinID []byte) error
 }
 
@@ -426,6 +424,36 @@ func (m *Market) OrderFeed() <-chan *updateSignal {
 	return bookUpdates
 }
 
+// FeedDone informs the market that the caller is finished receiving from the
+// given channel, which should have been obtained from OrderFeed. If the channel
+// was a registered order feed channel from OrderFeed, it is closed and removed
+// so that no further signals will be send on the channel.
+func (m *Market) FeedDone(feed <-chan *updateSignal) bool {
+	m.orderFeedMtx.Lock()
+	defer m.orderFeedMtx.Unlock()
+	for i := range m.orderFeeds {
+		if m.orderFeeds[i] == feed {
+			close(m.orderFeeds[i])
+			// Order is not important to delete the channel without allocation.
+			m.orderFeeds[i] = m.orderFeeds[len(m.orderFeeds)-1]
+			m.orderFeeds[len(m.orderFeeds)-1] = nil // chan is a pointer
+			m.orderFeeds = m.orderFeeds[:len(m.orderFeeds)-1]
+			return true
+		}
+	}
+	return false
+}
+
+// sendToFeeds sends an *updateSignal to all order feed channels created with
+// OrderFeed().
+func (m *Market) sendToFeeds(sig *updateSignal) {
+	m.orderFeedMtx.RLock()
+	for _, s := range m.orderFeeds {
+		s <- sig
+	}
+	m.orderFeedMtx.RUnlock()
+}
+
 type orderUpdateSignal struct {
 	rec     *orderRecord
 	errChan chan error // should be buffered
@@ -649,14 +677,9 @@ func (m *Market) Run(ctx context.Context) {
 		close(notifyChan)
 		wgFeeds.Wait()
 
-		// Close and delete the outgoing order feed channels as a signal to
-		// subscribers that the Market has terminated.
-		m.orderFeedMtx.Lock()
-		for _, s := range m.orderFeeds {
-			close(s)
-		}
-		m.orderFeeds = nil
-		m.orderFeedMtx.Unlock()
+		// Retain the outgoing order feed channels, which are the links to the
+		// book router and any other consumers, for possible Market resume, and
+		// for Swapper's unbook callback to function using sendToFeeds.
 
 		// persistBook is set under epochMtx lock.
 		m.epochMtx.RLock()
@@ -673,13 +696,7 @@ func (m *Market) Run(ctx context.Context) {
 	go func() {
 		defer wgFeeds.Done()
 		for sig := range notifyChan {
-			// send to each receiver
-			m.orderFeedMtx.RLock()
-			feeds := m.orderFeeds
-			m.orderFeedMtx.RUnlock()
-			for _, s := range feeds {
-				s <- sig
-			}
+			m.sendToFeeds(sig)
 		}
 	}()
 
@@ -1279,6 +1296,46 @@ func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed [
 	}
 
 	return
+}
+
+// Unbook allows the DEX manager to remove a booked order. This does: (1) remove
+// the order from the in-memory book, (2) set the order's status in the DB to
+// "revoked", (3) inform the auth manager of the action for cancellation ratio
+// accounting, and (4) send an 'unbook' notification to subscribers of this
+// market's order book. Note that this presently treats the user as at-fault by
+// counting the revocation in the user's cancellation statistics.
+func (m *Market) Unbook(lo *order.LimitOrder) bool {
+	// Ensure we do not unbook during matching.
+	m.bookMtx.Lock()
+	_, removed := m.book.Remove(lo.ID())
+	m.bookMtx.Unlock()
+
+	m.unlockOrderCoins(lo)
+
+	if !removed {
+		return false
+	}
+
+	// Create the server-generated cancel order, and register it with
+	// the AuthManager for cancellation ratio computation.
+	coid, revTime, err := m.storage.RevokeOrder(lo)
+	if err == nil {
+		m.auth.RecordCancel(lo.User(), coid, lo.ID(), revTime)
+	} else {
+		log.Errorf("Failed to revoke order %v with a new cancel order: %v",
+			lo.UID(), err)
+	}
+
+	// Send "unbook" notification to order book subscribers.
+	m.sendToFeeds(&updateSignal{
+		action: unbookAction,
+		data: sigDataUnbookedOrder{
+			order:    lo,
+			epochIdx: -1, // NOTE: no epoch
+		},
+	})
+
+	return true
 }
 
 // processReadyEpoch performs the following operations for a closed epoch that

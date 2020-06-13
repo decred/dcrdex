@@ -164,7 +164,8 @@ func (c *wsLink) Request(msg *msgjson.Message, f func(conn Link, msg *msgjson.Me
 		// Neither expire nor the handler should run. Stop the expire timer
 		// created by logReq and delete the response handler it added. The
 		// caller receives a non-nil error to deal with it.
-		log.Debugf("(*wsLink).Request Send error, unregistering msg ID %d handler", msg.ID)
+		log.Debugf("(*wsLink).Request(route '%s') Send error, unregistering msg ID %d handler",
+			msg.Route, msg.ID)
 		c.respHandler(msg.ID) // drop the removed responseHandler
 	}
 	return err

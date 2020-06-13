@@ -278,7 +278,7 @@ out:
 		select {
 		case u, ok := <-feed:
 			if !ok {
-				log.Errorf("Book order feed closed for market %q at epoch %d without a suspend signal",
+				log.Errorf("Book order feed closed for market %q at epoch %d",
 					book.name, book.epoch())
 				break out
 			}
@@ -389,9 +389,10 @@ out:
 
 				// Depending on resume handling, maybe kill the book router.
 				// Presently the Market closes the order feed channels, so quit.
-				log.Infof("Book order feed closed for market %q after epoch %d, persist book = %v.",
+				log.Infof("Market %q suspended after epoch %d, persist book = %v.",
 					book.name, sigData.finalEpoch, sigData.persistBook)
-				break out
+
+				// Stay running for Swapper unbook callbacks.
 
 			default:
 				panic(fmt.Sprintf("unknown orderbook update action %d", u.action))

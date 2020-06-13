@@ -534,6 +534,7 @@ func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
 		BroadcastTimeout: txWaitExpiration * 5,
 		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
 		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
+		UnbookHook:       func(*order.LimitOrder) bool { return true },
 	})
 	if err != nil {
 		panic(err.Error())
