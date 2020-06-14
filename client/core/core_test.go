@@ -1004,6 +1004,7 @@ func TestRegister(t *testing.T) {
 	tCore := rig.core
 	dc := rig.dc
 	acct := dc.acct
+	delete(tCore.conns, tDexHost)
 
 	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
@@ -1022,11 +1023,6 @@ func TestRegister(t *testing.T) {
 	sign(tDexPriv, regRes)
 
 	queueRegister := func() {
-		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
-			resp, _ := msgjson.NewResponse(msg.ID, dc.cfg, nil)
-			f(resp)
-			return nil
-		})
 		rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
 			f(resp)
@@ -1078,7 +1074,16 @@ func TestRegister(t *testing.T) {
 		})
 	}
 
+	queueConfig := func() {
+		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+			resp, _ := msgjson.NewResponse(msg.ID, dc.cfg, nil)
+			f(resp)
+			return nil
+		})
+	}
+
 	queueResponses := func() {
+		queueConfig()
 		queueRegister()
 		queueTipChange()
 		queueNotifyFee()
@@ -1152,72 +1157,136 @@ func TestRegister(t *testing.T) {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
 
+	// password error
+	rig.crypter.recryptErr = tErr
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, passwordErr) {
+		t.Fatalf("wrong password error: %v", err)
+	}
+	rig.crypter.recryptErr = nil
+
+	// no host error
+	form.Addr = ""
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, emptyHostErr) {
+		t.Fatalf("wrong empty host error: %v", err)
+	}
+	form.Addr = tDexHost
+
+	// account already exists
+
+	tCore.connMtx.Lock()
+	tCore.conns[tDexHost] = dc
+	tCore.connMtx.Unlock()
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, dupeDEXErr) {
+		t.Fatalf("wrong account exists error: %v", err)
+	}
+
 	// wallet not found
 	delete(tCore.wallets, tDCR.ID)
 	run()
-	if err == nil {
-		t.Fatalf("no error for missing wallet")
+	if !errorHasCode(err, walletErr) {
+		t.Fatalf("wrong missing wallet error: %v", err)
 	}
 	tCore.wallets[tDCR.ID] = wallet
 
-	// account already exists
-	rig.db.acct = &db.AccountInfo{
-		Host:      tDexHost,
-		EncKey:    acct.encKey,
-		DEXPubKey: acct.dexPubKey,
-		FeeCoin:   acct.feeCoin,
+	// Unlock wallet error
+	tWallet.unlockErr = tErr
+	wallet.lockTime = time.Time{}
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, walletAuthErr) {
+		t.Fatalf("wrong wallet auth error: %v", err)
 	}
-	rig.db.acctErr = nil
-	run()
-	if err == nil {
-		t.Fatalf("no error for account already exists")
+	tWallet.unlockErr = nil
+
+	// connectDEX error
+	form.Addr = string([]byte{0x7f})
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, connectionErr) {
+		t.Fatalf("wrong connectDEX error: %v", err)
 	}
-	rig.db.acct = nil
-	rig.db.acctErr = tErr
+	form.Addr = tDexHost
 
 	// asset not found
-	dcrAsset := dc.assets[tDCR.ID]
-	delete(dc.assets, tDCR.ID)
+	cfgAssets := dc.cfg.Assets
+	mkts := dc.cfg.Markets
+	dc.cfg.Assets = dc.cfg.Assets[1:]
+	dc.cfg.Markets = []*msgjson.Market{}
+	queueConfig()
 	run()
-	if err == nil {
-		t.Fatalf("no error for missing asset")
+	if !errorHasCode(err, assetSupportErr) {
+		t.Fatalf("wrong error for missing asset: %v", err)
 	}
-	dc.assets[tDCR.ID] = dcrAsset
+	dc.cfg.Assets = cfgAssets
+	dc.cfg.Markets = mkts
+
+	// error creating signing key
+	rig.crypter.encryptErr = tErr
+	queueConfig()
+	run()
+	if !errorHasCode(err, acctKeyErr) {
+		t.Fatalf("wrong account key error: %v", err)
+	}
+	rig.crypter.encryptErr = nil
 
 	// register request error
+	queueConfig()
 	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 		return tErr
 	})
 	run()
-	if err == nil {
-		t.Fatalf("no error for register request error")
+	if !errorHasCode(err, registerErr) {
+		t.Fatalf("wrong error for register request error: %v", err)
 	}
 
 	// signature error
 	goodSig := regRes.Sig
 	regRes.Sig = []byte("badsig")
+	queueConfig()
 	queueRegister()
 	run()
-	if err == nil {
-		t.Fatalf("no error for bad signature on register response")
+	if !errorHasCode(err, signatureErr) {
+		t.Fatalf("wrong error for bad signature on register response: %v", err)
 	}
 	regRes.Sig = goodSig
 
 	// zero fee error
 	goodFee := regRes.Fee
 	regRes.Fee = 0
+	queueConfig()
 	queueRegister()
 	run()
-	if err == nil {
-		t.Fatalf("no error for zero fee")
+	if !errorHasCode(err, zeroFeeErr) {
+		t.Fatalf("wrong error for zero fee: %v", err)
+	}
+
+	// wrong fee error
+	regRes.Fee = tFee + 1
+	queueConfig()
+	queueRegister()
+	run()
+	if !errorHasCode(err, feeMismatchErr) {
+		t.Fatalf("wrong error for wrong fee: %v", err)
 	}
 	regRes.Fee = goodFee
 
+	// Form fee error
+	form.Fee = tFee + 1
+	queueConfig()
+	queueRegister()
+	run()
+	if !errorHasCode(err, feeMismatchErr) {
+		t.Fatalf("wrong error for wrong fee in form: %v", err)
+	}
+	form.Fee = tFee
+
 	// PayFee error
+	queueConfig()
 	queueRegister()
 	tWallet.payFeeErr = tErr
 	run()
-	if err == nil {
+	if !errorHasCode(err, feeSendErr) {
 		t.Fatalf("no error for PayFee error")
 	}
 	tWallet.payFeeErr = nil
@@ -1234,6 +1303,7 @@ func TestRegister(t *testing.T) {
 	// tWallet.payFeeCoin.confsErr = nil
 
 	// notifyfee response error
+	queueConfig()
 	queueRegister()
 	queueTipChange()
 	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -1361,7 +1431,7 @@ func TestConnectDEX(t *testing.T) {
 	}
 
 	// Bad URL.
-	ai.Host = ":::"
+	ai.Host = string([]byte{0x7f}) // Illegal ASCIII control character
 	_, err = tCore.connectDEX(ai)
 	if err == nil {
 		t.Fatalf("no error for bad URL")

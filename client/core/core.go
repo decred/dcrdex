@@ -1001,26 +1001,26 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Check the app password.
 	crypter, err := c.encryptionKey(form.AppPass)
 	if err != nil {
-		return nil, err
+		return nil, codedError(passwordErr, err)
 	}
 	if form.Addr == "" {
-		return nil, fmt.Errorf("no dex address specified")
+		return nil, newError(emptyHostErr, "no dex address specified")
 	}
 	host := addrHost(form.Addr)
 	if c.isRegistered(host) {
-		return nil, fmt.Errorf("already registered at %s", form.Addr)
+		return nil, newError(dupeDEXErr, "already registered at %s", form.Addr)
 	}
 
 	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
 	wallet, err := c.connectedWallet(regFeeAssetID)
 	if err != nil {
-		return nil, fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
+		return nil, newError(walletErr, "cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
 	}
 
 	if !wallet.unlocked() {
 		err = unlockWallet(wallet, crypter)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
 	}
 
@@ -1029,7 +1029,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		Cert: []byte(form.Cert),
 	})
 	if err != nil {
-		return nil, err
+		return nil, codedError(connectionErr, err)
 	}
 
 	// close the connection to the dex server if the registration fails.
@@ -1042,12 +1042,12 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	regAsset, found := dc.assets[regFeeAssetID]
 	if !found {
-		return nil, fmt.Errorf("dex server does not support %s asset", regFeeAssetSymbol)
+		return nil, newError(assetSupportErr, "dex server does not support %s asset", regFeeAssetSymbol)
 	}
 
 	privKey, err := dc.acct.setupEncryption(crypter)
 	if err != nil {
-		return nil, err
+		return nil, codedError(acctKeyErr, err)
 	}
 
 	// Prepare and sign the registration payload.
@@ -1059,25 +1059,25 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	regRes := new(msgjson.RegisterResult)
 	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes)
 	if err != nil {
-		return nil, err
+		return nil, codedError(registerErr, err)
 	}
 
 	// Check the DEX server's signature.
 	msg := regRes.Serialize()
 	dexPubKey, err := checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
 	if err != nil {
-		return nil, fmt.Errorf("DEX signature validation error: %v", err)
+		return nil, newError(signatureErr, "DEX signature validation error: %v", err)
 	}
 
 	// Check that the fee is non-zero.
 	if regRes.Fee == 0 {
-		return nil, fmt.Errorf("zero registration fees not allowed")
+		return nil, newError(zeroFeeErr, "zero registration fees not allowed")
 	}
 	if regRes.Fee != dc.cfg.Fee {
-		return nil, fmt.Errorf("DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dc.cfg.Fee)
+		return nil, newError(feeMismatchErr, "DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dc.cfg.Fee)
 	}
 	if regRes.Fee != form.Fee {
-		return nil, fmt.Errorf("registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee)
+		return nil, newError(feeMismatchErr, "registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee)
 	}
 
 	// Pay the registration fee.
@@ -1085,7 +1085,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		regRes.Fee, regAsset.Symbol)
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, regAsset)
 	if err != nil {
-		return nil, fmt.Errorf("error paying registration fee: %v", err)
+		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
 
 	// Registration complete.
