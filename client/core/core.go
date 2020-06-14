@@ -1150,7 +1150,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success, dc.acct.host))
 
 	// Set up the coin waiter.
-	c.verifyRegistrationFee(wallet, dc, coin.ID(), regFeeAssetID)
+	c.verifyRegistrationFee(wallet, dc, coin.ID(), 0)
 	c.refreshUser()
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: dc.cfg.RegFeeConfirms}
 	return res, nil
@@ -1161,10 +1161,10 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 // If the server acknowledgment is successfull, the account is set as 'paid' in
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.
-func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, assetID uint32) {
+func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, confs uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
 
-	dc.setRegConfirms(0)
+	dc.setRegConfirms(confs)
 	c.refreshUser()
 
 	trigger := func() (bool, error) {
@@ -1183,8 +1183,9 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		return confs >= uint32(reqConfs), nil
 	}
 
-	c.wait(assetID, trigger, func(err error) {
-		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(assetID, coinID), reqConfs)
+	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	c.wait(regFeeAssetID, trigger, func(err error) {
+		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(regFeeAssetID, coinID), reqConfs)
 		defer func() {
 			if err != nil {
 				details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.host, err)
@@ -2041,8 +2042,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		return
 	}
-	dcrID, _ := dex.BipSymbolID("dcr")
-	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, dcrID)
+	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, confs)
 }
 
 // dbTrackers prepares trackedTrades based on active orders and matches in the
