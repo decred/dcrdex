@@ -71,11 +71,11 @@ var (
 
 func readWalletCfgsAndDexCert() error {
 	readText := func(path string) (string, error) {
-		cfgData, err := ioutil.ReadFile(path)
+		data, err := ioutil.ReadFile(path)
 		if err != nil {
 			return "", err
 		}
-		return string(cfgData), nil
+		return string(data), nil
 	}
 
 	user, err := user.Current()
@@ -83,28 +83,16 @@ func readWalletCfgsAndDexCert() error {
 		return err
 	}
 
-	readDcrConfig := func(wallet *tWallet) (err error) {
-		cfgPath := filepath.Join(user.HomeDir, "dextest", "dcr", wallet.name, "w-"+wallet.name+".conf")
-		wallet.config, err = readText(cfgPath)
-		return err
-	}
-	if err = readDcrConfig(client1.dcrw()); err != nil {
-		return err
-	}
-	if err = readDcrConfig(client2.dcrw()); err != nil {
-		return err
-	}
-
-	readBtcConfig := func(wallet *tWallet) (err error) {
-		cfgPath := filepath.Join(user.HomeDir, "dextest", "btc", "harness-ctl", wallet.name+".conf")
-		wallet.config, err = readText(cfgPath)
-		return err
-	}
-	if err = readBtcConfig(client1.btcw()); err != nil {
-		return err
-	}
-	if err = readBtcConfig(client2.btcw()); err != nil {
-		return err
+	fp := filepath.Join
+	for _, client := range clients {
+		dcrw, btcw := client.dcrw(), client.btcw()
+		dcrw.config, err = readText(fp(user.HomeDir, "dextest", "dcr", dcrw.name, "w-"+dcrw.name+".conf"))
+		if err == nil {
+			btcw.config, err = readText(fp(user.HomeDir, "dextest", "btc", "harness-ctl", btcw.name+".conf"))
+		}
+		if err != nil {
+			return err
+		}
 	}
 
 	dexCertPath := filepath.Join(user.HomeDir, "dextest", "dcrdex", "rpc.cert")
@@ -129,70 +117,23 @@ func startClients(ctx context.Context) error {
 		}
 		c.log("core initialized")
 
-		// connect dcr wallet, required to pay dex fees
-		dcrWallet := c.dcrw()
-		err = c.core.CreateWallet(c.appPass, dcrWallet.pass, &WalletForm{
-			AssetID:    dcr.BipID,
-			Account:    dcrWallet.account,
-			ConfigText: dcrWallet.config,
-		})
-		if err != nil {
-			return err
-		}
-		c.log("connected dcr wallet")
-
-		// connect btc wallet, required to trade
-		btcWallet := c.btcw()
-		err = c.core.CreateWallet(c.appPass, btcWallet.pass, &WalletForm{
-			AssetID:    btc.BipID,
-			Account:    btcWallet.account,
-			ConfigText: btcWallet.config,
-		})
-		if err != nil {
-			return err
-		}
-		c.log("connected btc wallet")
-
-		dexFee, err := c.core.GetFee(dexHost, dexCert)
-		if err != nil {
-			return err
-		}
-
-		// connect dex and pay fee
-		regRes, err := c.core.Register(&RegisterForm{
-			Addr:    dexHost,
-			Cert:    dexCert,
-			AppPass: c.appPass,
-			Fee:     dexFee,
-		})
-		if err != nil {
-			return err
-		}
-		c.log("connected DEX %s", dexHost)
-
-		// mine drc block(s) to mark fee as paid
-		err = mineBlocks(dcr.BipID, regRes.ReqConfirms)
-		if err != nil {
-			return err
-		}
-		c.log("mined %d blocks on dcr %s for fee payment confirmation", regRes.ReqConfirms, dcrWallet.name)
-
-		// wait 12 seconds for fee payment, notifyfee times out after 10 seconds
-		feeTimeout := 12 * time.Second
-		c.log("waiting %s for fee confirmation notice", feeTimeout)
-		c.notifications = c.core.NotificationFeed()
-		feePaid := tryUntil(ctx, feeTimeout, func() bool {
-			select {
-			case n := <-c.notifications:
-				return n.Type() == "feepayment" && n.Subject() == "Account registered"
-			default:
-				return wait.TryAgain
+		// connect wallets
+		for assetID, wallet := range c.wallets {
+			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
+				AssetID:    assetID,
+				Account:    wallet.account,
+				ConfigText: wallet.config,
+			})
+			if err != nil {
+				return err
 			}
-		})
-		if !feePaid {
-			return fmt.Errorf("fee payment not confirmed after %s", feeTimeout)
+			c.log("connected %s wallet", unbip(assetID))
 		}
-		c.log("fee payment confirmed")
+
+		err = c.connectDEX(ctx)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -241,13 +182,6 @@ func TestTrading(t *testing.T) {
 		"no taker swap":   testNoTakerSwap,
 		"no maker redeem": testNoMakerRedeem,
 	}
-
-	// TODO: If testTradeSuccess is run last, the DEX account may be suspended
-	// because of previous incompleted trades. Should probably delete the dex
-	// connection after each trade disruption test and re-register with the DEX.
-	// May also modify disruption tests to wait for `match_revoked` requests from
-	// the DEX, but that would be a test that the DEX is operating as expected
-	// which may be outside the purview of this client package.
 
 	for test, testFn := range tests {
 		fmt.Println() // empty line to separate test logs for better readability
@@ -316,6 +250,13 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 	for _, client := range clients {
 		if err := client.unlockWallets(); err != nil {
 			return fmt.Errorf("client %d unlock wallet error: %v", client.id, err)
+		}
+		if client.atFault {
+			client.log("reconnecting DEX for at fault client")
+			err := client.connectDEX(context.Background())
+			if err != nil {
+				return fmt.Errorf("client %d re-connect DEX error: %v", client.id, err)
+			}
 		}
 		if err := client.updateBalances(); err != nil {
 			return fmt.Errorf("client %d balance update error: %v", client.id, err)
@@ -445,6 +386,9 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		}
 	}
 
+	makerAtFault := finalStatus == order.NewlyMatched || finalStatus == order.TakerSwapCast
+	takerAtFault := finalStatus == order.MakerSwapCast || finalStatus == order.MakerRedeemed
+
 	// run a repeated check for match status changes to mine blocks as necessary.
 	maxTradeDuration := 1 * time.Minute
 	tryUntil(ctx, maxTradeDuration, func() bool {
@@ -454,8 +398,13 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		for _, match := range tracker.matches {
 			side, status := match.Match.Side, match.Match.Status
 			if status >= finalStatus {
-				// prevent this client from taking any further action by blocking the match with a failErr
+				// We've done the needful for this match,
+				// - prevent further action by blocking the match with a failErr
+				// - check if this client will be suspended for inaction
 				match.failErr = fmt.Errorf("take no further action")
+				if (side == order.Maker && makerAtFault) || (side == order.Taker && takerAtFault) {
+					client.atFault = true
+				}
 				completedTrades++
 			}
 			if status == lastProcessedStatus[match.id] || status > finalStatus {
@@ -694,6 +643,9 @@ type tClient struct {
 	// Update after each test run to perform post-test balance
 	// change validation. Set to nil to NOT perform balance checks.
 	expectBalanceDiffs map[uint32]int64
+	// atFault will be true if this client is guilty of inaction
+	// during a test run.
+	atFault bool
 }
 
 func (client *tClient) log(format string, args ...interface{}) {
@@ -715,6 +667,59 @@ func (client *tClient) init() error {
 	}
 	client.core.lockTimeTaker = tLockTimeTaker
 	client.core.lockTimeMaker = tLockTimeMaker
+	return nil
+}
+
+func (client *tClient) connectDEX(ctx context.Context) error {
+	dc := client.dc()
+	if dc != nil {
+		dc.connMaster.Disconnect()
+		client.core.connMtx.Lock()
+		delete(client.core.conns, dc.acct.host)
+		client.core.connMtx.Unlock()
+	}
+
+	dexFee, err := client.core.GetFee(dexHost, dexCert)
+	if err != nil {
+		return err
+	}
+
+	// connect dex and pay fee
+	regRes, err := client.core.Register(&RegisterForm{
+		Addr:    dexHost,
+		Cert:    dexCert,
+		AppPass: client.appPass,
+		Fee:     dexFee,
+	})
+	if err != nil {
+		return err
+	}
+	client.log("connected DEX %s", dexHost)
+
+	// mine drc block(s) to mark fee as paid
+	err = mineBlocks(dcr.BipID, regRes.ReqConfirms)
+	if err != nil {
+		return err
+	}
+	client.log("mined %d dcr blocks for fee payment confirmation", regRes.ReqConfirms)
+
+	// wait 12 seconds for fee payment, notifyfee times out after 10 seconds
+	feeTimeout := 12 * time.Second
+	client.log("waiting %s for fee confirmation notice", feeTimeout)
+	client.notifications = client.core.NotificationFeed()
+	feePaid := tryUntil(ctx, feeTimeout, func() bool {
+		select {
+		case n := <-client.notifications:
+			return n.Type() == "feepayment" && n.Subject() == "Account registered"
+		default:
+			return wait.TryAgain
+		}
+	})
+	if !feePaid {
+		return fmt.Errorf("fee payment not confirmed after %s", feeTimeout)
+	}
+
+	client.log("fee payment confirmed")
 	return nil
 }
 
