@@ -174,15 +174,15 @@ func (m *Market) marketName() string {
 	return marketName(m.BaseID, m.QuoteID)
 }
 
-// GetSuspended returns the suspended state of the market.
-func (m *Market) GetSuspended() bool {
+// suspended returns the market's suspended state.
+func (m *Market) Suspended() bool {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	return m.suspended
 }
 
-// SetSuspended states suspended state of the market.
-func (m *Market) SetSuspended(state bool) {
+// setSuspended sets the market's suspended state.
+func (m *Market) setSuspended(state bool) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.suspended = state

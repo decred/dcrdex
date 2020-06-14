@@ -87,7 +87,7 @@ func (dc *dexConnection) suspended(mkt string) bool {
 	if !ok {
 		return false
 	}
-	return market.GetSuspended()
+	return market.Suspended()
 }
 
 // suspend halts trading for the provided market.
@@ -99,7 +99,7 @@ func (dc *dexConnection) suspend(mkt string) error {
 		return fmt.Errorf("no market found with ID %s", mkt)
 	}
 
-	market.SetSuspended(true)
+	market.setSuspended(true)
 
 	return nil
 }
@@ -113,7 +113,7 @@ func (dc *dexConnection) resume(mkt string) error {
 		return fmt.Errorf("no market found with ID %s", mkt)
 	}
 
-	market.SetSuspended(false)
+	market.setSuspended(false)
 
 	return nil
 }
@@ -1510,7 +1510,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 
 	// Proceed with the order if there is no trade suspension
 	// scheduled for the market.
-	if dc.suspended(mktID) {
+	if mkt.Suspended() {
 		return nil, fmt.Errorf("suspended market")
 	}
 

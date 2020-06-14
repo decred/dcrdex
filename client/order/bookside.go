@@ -131,15 +131,6 @@ func (d *bookSide) orders() []*Order {
 	return orders
 }
 
-// Reset clears out the book side.
-func (d *bookSide) Reset() {
-	d.mtx.Lock()
-	defer d.mtx.Unlock()
-
-	d.bins = make(map[uint64][]*Order)
-	d.rateIndex = NewRateIndex()
-}
-
 // BestNOrders returns the best N orders of the book side.
 func (d *bookSide) BestNOrders(n int) ([]*Order, bool) {
 	d.mtx.RLock()

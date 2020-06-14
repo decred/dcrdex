@@ -2950,27 +2950,11 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	tCore := rig.core
 	dcrWallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
-	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
 	dcrWallet.Unlock(wPW, time.Hour)
 
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
-	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
 	btcWallet.Unlock(wPW, time.Hour)
-
-	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
-		// Need to stamp and sign the message with the server's key.
-		msgOrder := new(msgjson.LimitOrder)
-		err := msg.Unmarshal(msgOrder)
-		if err != nil {
-			t.Fatalf("unmarshal error: %v", err)
-		}
-		lo := convertMsgLimitOrder(msgOrder)
-		f(orderResponse(msg.ID, msgOrder, lo, false, false, false))
-		return nil
-	}
-
-	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
 
 	// Ensure a non-existent market cannot be suspended.
 	payload := &msgjson.TradeSuspension{
@@ -2986,7 +2970,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 
 	mkt := tDcrBtcMktName
 
-	// Ensure an already suspended market cannot be suspended again.
+	// Ensure a suspended market cannot be resuspended.
 	err = rig.dc.suspend(mkt)
 	if err != nil {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
