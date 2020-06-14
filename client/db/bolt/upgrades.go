@@ -13,19 +13,19 @@ import (
 const (
 	initialVersion = 0
 
-	// versionedDBVersion is the second version of the database. It versions
-	// the database by persisting the version.
+	// versionedDBVersion is the second version of the database.
+	// The only change for this version is that the DB now stores
+	// it's version number.
 	versionedDBVersion = 1
 
-	// DBVersion is the latest version of the database that is understood by the
-	// program. Databases with recorded versions higher than this will fail to
+	// DBVersion is the latest version of the database that is understood.
+	// Databases with recorded versions higher than this will fail to
 	// open (meaning any upgrades prevent reverting to older software).
 	DBVersion = versionedDBVersion
 )
 
-// upgrade the database to the next version. Each database upgrade function
-// should be keyed by the database version it upgrades.
-
+// Each database upgrade function should be keyed by the database
+// version it upgrades.
 var upgrades = [...]func(tx *bbolt.Tx) error{
 	versionedDBVersion - 1: versionedDBUpgrade,
 }
@@ -41,7 +41,7 @@ func fetchDBVersion(tx *bbolt.Tx) (uint32, error) {
 		return 0, fmt.Errorf("database version not found")
 	}
 
-	return encode.BytesToUint32(versionB), nil
+	return intCoder.Uint32(versionB), nil
 }
 
 func setDBVersion(tx *bbolt.Tx, newVersion uint32) error {
@@ -63,12 +63,12 @@ func upgradeDB(db *bbolt.DB) error {
 			return fmt.Errorf("appBucket not found")
 		}
 
-		// If the database has a version set, return it.
 		versionB := bucket.Get(versionKey)
 		if versionB == nil {
+			// A nil version indicates a version 0 database.
 			return nil
 		}
-		version = encode.BytesToUint32(versionB)
+		version = intCoder.Uint32(versionB)
 		return nil
 	})
 	if err != nil {

@@ -77,6 +77,9 @@ var _ dexdb.DB = (*BoltDB)(nil)
 
 // NewDB is a constructor for a *BoltDB.
 func NewDB(dbPath string) (dexdb.DB, error) {
+	_, err := os.Stat(dbPath)
+	exists := os.IsNotExist(err)
+
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, err
@@ -87,8 +90,39 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 		DB: db,
 	}
 
-	return bdb, bdb.init([][]byte{appBucket, accountsBucket,
+	err = bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket,
 		ordersBucket, matchesBucket, walletsBucket, notesBucket})
+	if err != nil {
+		return nil, err
+	}
+
+	// If the db does not already exist, initialize it with
+	// the current DB version.
+	if !exists {
+		err := bdb.DB.Update(func(dbTx *bbolt.Tx) error {
+			bkt := dbTx.Bucket(appBucket)
+			if bkt == nil {
+				return fmt.Errorf("app bucket not found")
+			}
+
+			versionB := encode.Uint32Bytes(uint32(DBVersion))
+			err := bkt.Put(versionKey, versionB)
+			if err != nil {
+				return err
+			}
+
+			log.Infof("creating new version %d database", DBVersion)
+
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		return bdb, nil
+	}
+
+	return bdb, upgradeDB(bdb.DB)
 }
 
 // Run waits for context cancellation and closes the database.
@@ -773,10 +807,10 @@ func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func(*bbo
 	return idx.pairs
 }
 
-// init sets the database version and creates a top-level bucket
-// for each of the provided keys, if the bucket doesn't already exist.
-func (db *BoltDB) init(buckets [][]byte) error {
-	err := db.Update(func(tx *bbolt.Tx) error {
+// makeTopLevelBuckets creates a top-level bucket for each of the provided keys,
+// if the bucket doesn't already exist.
+func (db *BoltDB) makeTopLevelBuckets(buckets [][]byte) error {
+	return db.Update(func(tx *bbolt.Tx) error {
 		for _, bucket := range buckets {
 			_, err := tx.CreateBucketIfNotExists(bucket)
 			if err != nil {
@@ -786,11 +820,6 @@ func (db *BoltDB) init(buckets [][]byte) error {
 
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-
-	return upgradeDB(db.DB)
 }
 
 // withBucket is a creates a view into a (probably nested) bucket. The viewer

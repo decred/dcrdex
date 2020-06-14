@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/dex/encode"
 	"go.etcd.io/bbolt"
 )
 
@@ -34,7 +33,6 @@ func TestUpgrades(t *testing.T) {
 
 	t.Run("group", func(t *testing.T) {
 		for i, test := range dbUpgradeTests {
-			test := test
 			name := fmt.Sprintf("test%d", i)
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
@@ -85,7 +83,7 @@ func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
 		if versionB == nil {
 			return fmt.Errorf("expected a non-nil version value")
 		}
-		version := encode.BytesToUint32(versionB)
+		version := intCoder.Uint32(versionB)
 		if version != versionedDBVersion {
 			return fmt.Errorf("expected db version %d, got %d",
 				versionedDBVersion, version)
