@@ -978,14 +978,14 @@ func (c *Core) isRegistered(host string) bool {
 func (c *Core) GetFee(dexAddr, cert string) (uint64, error) {
 	host := addrHost(dexAddr)
 	if c.isRegistered(host) {
-		return 0, fmt.Errorf("already registered at %s", dexAddr)
+		return 0, newError(dupeDEXErr, "already registered at %s", dexAddr)
 	}
 	dc, err := c.connectDEX(&db.AccountInfo{
 		Host: host,
 		Cert: []byte(cert),
 	})
 	if err != nil {
-		return 0, err
+		return 0, codedError(connectionErr, err)
 	}
 	defer dc.connMaster.Disconnect()
 	return dc.cfg.Fee, nil

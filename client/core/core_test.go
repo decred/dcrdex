@@ -56,14 +56,15 @@ var (
 		SwapConf: 1,
 		FundConf: 1,
 	}
-	tDexPriv       *secp256k1.PrivateKey
-	tDexKey        *secp256k1.PublicKey
-	tPW                   = []byte("dexpw")
-	wPW                   = "walletpw"
-	tDexHost              = "somedex.tld"
-	tDcrBtcMktName        = "dcr_btc"
-	tErr                  = fmt.Errorf("test error")
-	tFee           uint64 = 1e8
+	tDexPriv         *secp256k1.PrivateKey
+	tDexKey          *secp256k1.PublicKey
+	tPW                     = []byte("dexpw")
+	wPW                     = "walletpw"
+	tDexHost                = "somedex.tld"
+	tDcrBtcMktName          = "dcr_btc"
+	tErr                    = fmt.Errorf("test error")
+	tFee             uint64 = 1e8
+	tUnparseableHost        = string([]byte{0x7f})
 )
 
 type tMsg = *msgjson.Message
@@ -628,6 +629,45 @@ func newTestRig() *testRig {
 	}
 }
 
+func (rig *testRig) queueConfig() {
+	rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, rig.dc.cfg, nil)
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueRegister(regRes *msgjson.RegisterResult) {
+	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueNotifyFee() {
+	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
+		req := new(msgjson.NotifyFee)
+		json.Unmarshal(msg.Payload, req)
+		sigMsg := req.Serialize()
+		sig, _ := tDexPriv.Sign(sigMsg)
+		// Shouldn't Sig be dex.Bytes?
+		result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
+		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueConnect() {
+	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
+		result := &msgjson.ConnectResult{}
+		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+		f(resp)
+		return nil
+	})
+}
+
 func tMarketID(base, quote uint32) string {
 	return strconv.Itoa(int(base)) + "-" + strconv.Itoa(int(quote))
 }
@@ -997,13 +1037,43 @@ func TestCreateWallet(t *testing.T) {
 	}
 }
 
+func TestGetFee(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	// DEX already registered
+	_, err := tCore.GetFee(tDexHost, "")
+	if !errorHasCode(err, dupeDEXErr) {
+		t.Fatalf("wrong account exists error: %v", err)
+	}
+
+	// Lose the dexConnection
+	tCore.connMtx.Lock()
+	delete(tCore.conns, tDexHost)
+	tCore.connMtx.Unlock()
+
+	// connectDEX error
+	_, err = tCore.GetFee(tUnparseableHost, "")
+	if !errorHasCode(err, connectionErr) {
+		t.Fatalf("wrong connectDEX error: %v", err)
+	}
+
+	// Queue a config response for success
+	rig.queueConfig()
+
+	// Success
+	_, err = tCore.GetFee(tDexHost, "")
+	if err != nil {
+		t.Fatalf("GetFee error: %v", err)
+	}
+}
+
 func TestRegister(t *testing.T) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
 	rig := newTestRig()
 	tCore := rig.core
 	dc := rig.dc
-	acct := dc.acct
 	delete(tCore.conns, tDexHost)
 
 	wallet, tWallet := newTWallet(tDCR.ID)
@@ -1014,35 +1084,13 @@ func TestRegister(t *testing.T) {
 	rig.db.acctErr = tErr
 
 	regRes := &msgjson.RegisterResult{
-		DEXPubKey:    acct.dexPubKey.Serialize(),
+		DEXPubKey:    rig.acct.dexPubKey.Serialize(),
 		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
 		Address:      "someaddr",
 		Fee:          tFee,
 		Time:         encode.UnixMilliU(time.Now()),
 	}
 	sign(tDexPriv, regRes)
-
-	queueRegister := func() {
-		rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
-			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
-			f(resp)
-			return nil
-		})
-	}
-
-	queueNotifyFee := func() {
-		rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
-			req := new(msgjson.NotifyFee)
-			json.Unmarshal(msg.Payload, req)
-			sigMsg := req.Serialize()
-			sig, _ := tDexPriv.Sign(sigMsg)
-			// Shouldn't Sig be dex.Bytes?
-			result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
-			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-			f(resp)
-			return nil
-		})
-	}
 
 	queueTipChange := func() {
 		go func() {
@@ -1065,29 +1113,12 @@ func TestRegister(t *testing.T) {
 		}()
 	}
 
-	queueConnect := func() {
-		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
-			result := &msgjson.ConnectResult{}
-			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-			f(resp)
-			return nil
-		})
-	}
-
-	queueConfig := func() {
-		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
-			resp, _ := msgjson.NewResponse(msg.ID, dc.cfg, nil)
-			f(resp)
-			return nil
-		})
-	}
-
 	queueResponses := func() {
-		queueConfig()
-		queueRegister()
+		rig.queueConfig()
+		rig.queueRegister(regRes)
 		queueTipChange()
-		queueNotifyFee()
-		queueConnect()
+		rig.queueNotifyFee()
+		rig.queueConnect()
 	}
 
 	form := &RegisterForm{
@@ -1200,7 +1231,7 @@ func TestRegister(t *testing.T) {
 	tWallet.unlockErr = nil
 
 	// connectDEX error
-	form.Addr = string([]byte{0x7f})
+	form.Addr = tUnparseableHost
 	_, err = tCore.Register(form)
 	if !errorHasCode(err, connectionErr) {
 		t.Fatalf("wrong connectDEX error: %v", err)
@@ -1212,7 +1243,7 @@ func TestRegister(t *testing.T) {
 	mkts := dc.cfg.Markets
 	dc.cfg.Assets = dc.cfg.Assets[1:]
 	dc.cfg.Markets = []*msgjson.Market{}
-	queueConfig()
+	rig.queueConfig()
 	run()
 	if !errorHasCode(err, assetSupportErr) {
 		t.Fatalf("wrong error for missing asset: %v", err)
@@ -1222,7 +1253,7 @@ func TestRegister(t *testing.T) {
 
 	// error creating signing key
 	rig.crypter.encryptErr = tErr
-	queueConfig()
+	rig.queueConfig()
 	run()
 	if !errorHasCode(err, acctKeyErr) {
 		t.Fatalf("wrong account key error: %v", err)
@@ -1230,7 +1261,7 @@ func TestRegister(t *testing.T) {
 	rig.crypter.encryptErr = nil
 
 	// register request error
-	queueConfig()
+	rig.queueConfig()
 	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 		return tErr
 	})
@@ -1242,8 +1273,8 @@ func TestRegister(t *testing.T) {
 	// signature error
 	goodSig := regRes.Sig
 	regRes.Sig = []byte("badsig")
-	queueConfig()
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	run()
 	if !errorHasCode(err, signatureErr) {
 		t.Fatalf("wrong error for bad signature on register response: %v", err)
@@ -1253,8 +1284,8 @@ func TestRegister(t *testing.T) {
 	// zero fee error
 	goodFee := regRes.Fee
 	regRes.Fee = 0
-	queueConfig()
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	run()
 	if !errorHasCode(err, zeroFeeErr) {
 		t.Fatalf("wrong error for zero fee: %v", err)
@@ -1262,8 +1293,8 @@ func TestRegister(t *testing.T) {
 
 	// wrong fee error
 	regRes.Fee = tFee + 1
-	queueConfig()
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	run()
 	if !errorHasCode(err, feeMismatchErr) {
 		t.Fatalf("wrong error for wrong fee: %v", err)
@@ -1272,8 +1303,8 @@ func TestRegister(t *testing.T) {
 
 	// Form fee error
 	form.Fee = tFee + 1
-	queueConfig()
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	run()
 	if !errorHasCode(err, feeMismatchErr) {
 		t.Fatalf("wrong error for wrong fee in form: %v", err)
@@ -1281,8 +1312,8 @@ func TestRegister(t *testing.T) {
 	form.Fee = tFee
 
 	// PayFee error
-	queueConfig()
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	tWallet.payFeeErr = tErr
 	run()
 	if !errorHasCode(err, feeSendErr) {
@@ -1290,20 +1321,9 @@ func TestRegister(t *testing.T) {
 	}
 	tWallet.payFeeErr = nil
 
-	// May want to smarten up error handling in the coin waiter loop. If so
-	// this check can be re-implemented.
-	// // coin confirmation error
-	// queueRegister()
-	// tWallet.payFeeCoin.confsErr = tErr
-	// run()
-	// if err == nil {
-	// 	t.Fatalf("no error for coin confirmation error")
-	// }
-	// tWallet.payFeeCoin.confsErr = nil
-
 	// notifyfee response error
-	queueConfig()
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	queueTipChange()
 	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
 		m, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(1, "test error message"))
@@ -1347,16 +1367,7 @@ func TestLogin(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	queueSuccess := func() {
-		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
-			result := &msgjson.ConnectResult{}
-			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-			f(resp)
-			return nil
-		})
-	}
-
-	queueSuccess()
+	rig.queueConnect()
 	_, err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
@@ -1397,7 +1408,7 @@ func TestLogin(t *testing.T) {
 	}
 
 	// Success again.
-	queueSuccess()
+	rig.queueConnect()
 	_, err = tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
@@ -1412,25 +1423,14 @@ func TestConnectDEX(t *testing.T) {
 		Host: "somedex.com",
 	}
 
-	queueConfig := func() {
-		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
-			result := &msgjson.ConfigResult{
-				BroadcastTimeout: 5 * 60 * 1000,
-			}
-			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-			f(resp)
-			return nil
-		})
-	}
-
-	queueConfig()
+	rig.queueConfig()
 	_, err := tCore.connectDEX(ai)
 	if err != nil {
 		t.Fatalf("initial connectDEX error: %v", err)
 	}
 
 	// Bad URL.
-	ai.Host = string([]byte{0x7f}) // Illegal ASCIII control character
+	ai.Host = tUnparseableHost // Illegal ASCIII control character
 	_, err = tCore.connectDEX(ai)
 	if err == nil {
 		t.Fatalf("no error for bad URL")
@@ -1468,7 +1468,7 @@ func TestConnectDEX(t *testing.T) {
 	}
 
 	// Success again.
-	queueConfig()
+	rig.queueConfig()
 	_, err = tCore.connectDEX(ai)
 	if err != nil {
 		t.Fatalf("final connectDEX error: %v", err)
