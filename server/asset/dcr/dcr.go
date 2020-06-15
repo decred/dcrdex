@@ -284,22 +284,47 @@ func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
 	return nil
 }
 
-// CoinDetails gets the recipient address, value, and confirmations of a
-// transaction output encoded by the given coinID. If the output does not exist
-// or has a pubkey script of the wrong type, an error will be returned.
-func (dcr *Backend) CoinDetails(coinID []byte) (addr string, val uint64, confs int64, err error) {
+// FeeCoin gets the recipient address, value, and confirmations of a transaction
+// output encoded by the given coinID. A non-nil error is returned if the
+// output's pubkey script is not a non-stake P2PKH requiring a single
+// ECDSA-secp256k1 signature.
+func (dcr *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error) {
 	txHash, vout, errCoin := decodeCoinID(coinID)
 	if errCoin != nil {
 		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
 		return
 	}
-	return dcr.OutputSummary(txHash, vout)
+
+	var txOut *TxOutData
+	txOut, confs, err = dcr.OutputSummary(txHash, vout)
+	if err != nil {
+		return
+	}
+
+	if len(txOut.Addresses) != 1 || txOut.SigsRequired != 1 ||
+		txOut.ScriptType != dexdcr.ScriptP2PKH /* no schorr or edwards */ ||
+		txOut.ScriptType&dexdcr.ScriptStake != 0 {
+		return "", 0, -1, dex.UnsupportedScriptError
+	}
+	addr = txOut.Addresses[0]
+	val = txOut.Value
+	return
 }
 
-// OutputSummary gets the recipient address, value, and confirmations of a
-// transaction output. If the output does not exist or has a pubkey script of
-// the wrong type, an error will be returned.
-func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (addr string, val uint64, confs int64, err error) {
+// TxOutData is transaction output data, including recipient addresses, value,
+// script type, and number of required signatures.
+type TxOutData struct {
+	Value        uint64
+	Addresses    []string
+	SigsRequired int
+	ScriptType   dexdcr.DCRScriptType
+}
+
+// OutputSummary gets transaction output data, including recipient addresses,
+// value, script type, and number of required signatures, plus the current
+// confirmations of a transaction output. If the output does not exist, an error
+// will be returned. Non-standard scripts are not an error.
+func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *TxOutData, confs int64, err error) {
 	var verboseTx *chainjson.TxRawResult
 	verboseTx, err = dcr.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
@@ -315,25 +340,25 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (addr str
 	}
 
 	out := verboseTx.Vout[vout]
-	if addrs := out.ScriptPubKey.Addresses; len(addrs) > 0 {
-		addr = addrs[0]
+
+	scriptHex, err := hex.DecodeString(out.ScriptPubKey.Hex)
+	if err != nil {
+		return nil, -1, dex.UnsupportedScriptError
+	}
+	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(scriptHex, chainParams)
+	if err != nil {
+		return nil, -1, dex.UnsupportedScriptError
 	}
 
-	val = toAtoms(out.Value)
+	txOut = &TxOutData{
+		Value:        toAtoms(out.Value),
+		Addresses:    addrs,
+		SigsRequired: numRequired,
+		ScriptType:   scriptType,
+	}
+
 	confs = verboseTx.Confirmations
 	return
-}
-
-// UnspentCoinDetails gets the recipient address, value, and confirmations of
-// unspent coins. For DCR, this corresponds to a UTXO. If the utxo does not
-// exist or has a pubkey script of the wrong type, an error will be returned.
-func (dcr *Backend) UnspentCoinDetails(coinID []byte) (addr string, val uint64, confs int64, err error) {
-	txHash, vout, errCoin := decodeCoinID(coinID)
-	if errCoin != nil {
-		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
-		return
-	}
-	return dcr.UTXODetails(txHash.String(), vout)
 }
 
 // UTXODetails gets the recipient address, value, and confs of an unspent
