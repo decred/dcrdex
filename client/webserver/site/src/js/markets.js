@@ -66,7 +66,7 @@ export default class MarketsPage extends BasePage {
       'tifBox', 'submitBttn', 'qtyField', 'rateField', 'orderErr',
       'baseWalletIcons', 'quoteWalletIcons', 'lotSize', 'rateStep', 'lotField',
       'tifNow', 'mktBuyBox', 'mktBuyLots', 'mktBuyField', 'minMktBuy', 'qtyBox',
-      'loaderMsg', 'balanceTable',
+      'loaderMsg', 'balanceTable', 'orderPreview',
       // Wallet unlock form
       'forms', 'openForm', 'uwAppPass',
       // Order submission is verified with the user's password.
@@ -185,6 +185,7 @@ export default class MarketsPage extends BasePage {
     bind(page.mktBuyField, 'change', () => { this.marketBuyChanged() })
     bind(page.mktBuyField, 'keyup', () => { this.marketBuyChanged() })
     bind(page.rateField, 'change', () => { this.rateFieldChanged() })
+    bind(page.rateField, 'keyup', () => { this.previewOrder(true) })
 
     // Market search input bindings.
     bind(page.marketSearch, 'change', () => { this.filterMarkets() })
@@ -251,15 +252,18 @@ export default class MarketsPage extends BasePage {
     if (this.isLimit()) {
       Doc.show(page.priceBox, page.tifBox, page.qtyBox)
       Doc.hide(page.mktBuyBox)
+      this.previewOrder(true)
     } else {
       if (this.isSell()) {
         Doc.show(page.priceBox)
         Doc.hide(page.mktBuyBox)
         Doc.show(page.qtyBox)
+        this.previewOrder(true)
       } else {
         Doc.hide(page.priceBox)
         Doc.show(page.mktBuyBox)
         Doc.hide(page.qtyBox)
+        this.previewOrder(false)
       }
     }
   }
@@ -419,6 +423,22 @@ export default class MarketsPage extends BasePage {
     }
   }
 
+  /**
+   * previewOrder shows quote amount when rate or quantity input are changed
+   */
+  previewOrder (show) {
+    const page = this.page
+    const order = this.parseOrder()
+    page.orderErr.textContent = ''
+    if (!show || !order.rate || !order.qty) {
+      page.orderPreview.textContent = ''
+      return
+    }
+    const quoteAsset = app.assets[order.quote]
+    const total = Doc.formatCoinValue(order.rate / 1e8 * order.qty / 1e8)
+    page.orderPreview.textContent = `Total: ${total} ${quoteAsset.symbol.toUpperCase()}`
+  }
+
   /*
    * validateOrder performs some basic order sanity checks, returning boolean
    * true if the order appears valid.
@@ -539,7 +559,7 @@ export default class MarketsPage extends BasePage {
     })
 
     page.lotSize.textContent = Doc.formatCoinValue(market.baseCfg.lotSize / 1e8)
-    page.rateStep.textContent = Doc.formatCoinValue(market.quoteCfg.rateStep / 1e8)
+    page.rateStep.textContent = market.quoteCfg.rateStep / 1e8
     this.baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
     this.quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
     this.balanceWgt.setWallets(host, b.id, q.id)
@@ -842,6 +862,7 @@ export default class MarketsPage extends BasePage {
     const lotSize = this.market.baseCfg.lotSize
     page.lotField.value = lots
     page.qtyField.value = (lots * lotSize / 1e8)
+    this.previewOrder(true)
   }
 
   /*
@@ -862,6 +883,7 @@ export default class MarketsPage extends BasePage {
     page.lotField.value = lots
     if (!order.isLimit && !order.sell) return
     if (finalize) page.qtyField.value = (adjusted / 1e8)
+    this.previewOrder(true)
   }
 
   /*
@@ -897,6 +919,7 @@ export default class MarketsPage extends BasePage {
     const rateStep = this.market.quoteCfg.rateStep
     const adjusted = order.rate - (order.rate % rateStep)
     this.page.rateField.value = (adjusted / 1e8)
+    this.previewOrder(true)
   }
 
   /* loadTable reloads the table from the current order book information. */
