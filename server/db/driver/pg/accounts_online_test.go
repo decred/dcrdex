@@ -99,6 +99,24 @@ func TestAccounts(t *testing.T) {
 		t.Fatal("error getting account info: actual does not equal expected")
 	}
 
+	// Close the account for failure to complete a swap.
+	if err := archie.CloseAccount(tAcctID, account.FailureToAct); err != nil {
+		t.Fatalf("error closing account: %v", err)
+	}
+	_, _, open = archie.Account(tAcctID)
+	if open {
+		t.Fatal("closed account still marked as open")
+	}
+
+	// Open the account.
+	if err = archie.OpenAccount(tAcctID); err != nil {
+		t.Fatalf("error opening account: %v", err)
+	}
+	_, _, open = archie.Account(tAcctID)
+	if !open {
+		t.Fatal("open account still marked as closed")
+	}
+
 	// The Account ID cannot be null. broken_rule has a default value of 0
 	// and is unexpected to become null.
 	nullAccounts := `UPDATE %s
@@ -132,13 +150,6 @@ func TestAccounts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(accts[0], anAcct) {
 		t.Fatal("error getting null account info: actual does not equal expected")
-	}
-
-	// Close the account for failure to complete a swap.
-	archie.CloseAccount(tAcctID, account.FailureToAct)
-	_, _, open = archie.Account(tAcctID)
-	if open {
-		t.Fatalf("closed account still marked as open")
 	}
 }
 

@@ -60,3 +60,9 @@ type BanResult struct {
 	BrokenRule byte    `json:"brokenrule"`
 	BanTime    APITime `json:"bantime"`
 }
+
+// UnbanResult holds the result of an unban.
+type UnbanResult struct {
+	AccountID string  `json:"accountid"`
+	UnbanTime APITime `json:"unbantime"`
+}

@@ -591,3 +591,8 @@ func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
 func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule) error {
 	return dm.swapper.Penalize(aid, rule)
 }
+
+// Unban reverses a ban and allows a client to resume trading.
+func (dm *DEX) Unban(aid account.AccountID) error {
+	return dm.swapper.Unban(aid)
+}

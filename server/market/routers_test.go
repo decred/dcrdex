@@ -232,6 +232,7 @@ func (a *TAuth) RecordCancel(aid account.AccountID, coid, oid order.OrderID, t t
 	a.cancelOrder = coid
 	a.canceledOrder = oid
 }
+func (a *TAuth) Unban(account.AccountID) error { return nil }
 
 type TMarketTunnel struct {
 	adds       []*orderRecord

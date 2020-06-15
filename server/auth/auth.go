@@ -30,6 +30,8 @@ func unixMsNow() time.Time {
 type Storage interface {
 	// CloseAccount closes the account for violation of the specified rule.
 	CloseAccount(account.AccountID, account.Rule) error
+	// OpenAccount opens an account that was closed by CloseAccount.
+	OpenAccount(account.AccountID) error
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
@@ -81,6 +83,12 @@ func (client *clientInfo) cancelRatio() float64 {
 func (client *clientInfo) suspend() {
 	client.mtx.Lock()
 	client.suspended = true
+	client.mtx.Unlock()
+}
+
+func (client *clientInfo) resume() {
+	client.mtx.Lock()
+	client.suspended = false
 	client.mtx.Unlock()
 }
 
@@ -657,6 +665,23 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) err
 	// initiation (TODO).
 
 	// TODO: notify client of penalty / account status change?
+	return nil
+}
+
+// Unban forgives a user, allowing them to resume trading.
+func (auth *AuthManager) Unban(user account.AccountID) error {
+	client := auth.user(user)
+	if client != nil {
+		client.resume()
+	}
+
+	if err := auth.storage.OpenAccount(user /*client.acct.ID*/); err != nil {
+		return err
+	}
+
+	log.Debugf("user %v unbanned", user)
+
+	// TODO: notify client of account status change?
 	return nil
 }
 

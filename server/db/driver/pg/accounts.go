@@ -18,7 +18,7 @@ import (
 
 // CloseAccount closes the account by setting the value of the rule column.
 func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) error {
-	err := closeAccount(a.db, a.tables.accounts, aid, rule)
+	err := setRule(a.db, a.tables.accounts, aid, rule)
 	if err != nil {
 		// fatal unless 0 matching rows found because that means at least the
 		// targeted account is not still open.
@@ -26,6 +26,19 @@ func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) error 
 			a.fatalBackendErr(err)
 		}
 		return fmt.Errorf("error closing account %s (rule %d): %v", aid, rule, err)
+	}
+	return nil
+}
+
+// OpenAccount opens the account by setting the value of the rule column.
+func (a *Archiver) OpenAccount(aid account.AccountID) error {
+	err := setRule(a.db, a.tables.accounts, aid, account.NoRule)
+	if err != nil {
+		// fatal unless 0 matching rows found.
+		if !errors.Is(err, errNoRows) {
+			a.fatalBackendErr(err)
+		}
+		return fmt.Errorf("error opening account %s: %v", aid, err)
 	}
 	return nil
 }
@@ -178,8 +191,8 @@ func createAccountTables(db *sql.DB) error {
 	return nil
 }
 
-// closeAccount closes the account by setting the rule column value.
-func closeAccount(dbe sqlExecutor, tableName string, aid account.AccountID, rule account.Rule) error {
+// setRule closes or opens the account by setting the rule column value.
+func setRule(dbe sqlExecutor, tableName string, aid account.AccountID, rule account.Rule) error {
 	stmt := fmt.Sprintf(internal.CloseAccount, tableName)
 	N, err := sqlExec(dbe, stmt, rule, aid)
 	if err != nil {

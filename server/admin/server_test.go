@@ -52,6 +52,7 @@ type TCore struct {
 	account     *db.Account
 	accountErr  error
 	penalizeErr error
+	unbanErr    error
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
@@ -146,6 +147,9 @@ func (c *TCore) AccountInfo(_ account.AccountID) (*db.Account, error) {
 }
 func (c *TCore) Penalize(_ account.AccountID, _ account.Rule) error {
 	return c.penalizeErr
+}
+func (c *TCore) Unban(_ account.AccountID) error {
+	return c.unbanErr
 }
 
 // genCertPair generates a key/cert pair to the paths provided.
@@ -1020,5 +1024,61 @@ func TestAPITimeMarshalJSON(t *testing.T) {
 	}
 	if !res.Equal(now.Time) {
 		t.Fatal("unmarshalled time not equal")
+	}
+}
+
+func TestUnban(t *testing.T) {
+	core := new(TCore)
+	srv := &Server{
+		core: core,
+	}
+	mux := chi.NewRouter()
+	mux.Route("/account/{"+accountIDKey+"}/unban", func(rm chi.Router) {
+		rm.Get("/", srv.apiUnban)
+	})
+	acctIDStr := "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc"
+	tests := []struct {
+		name, acctID string
+		unbanErr     error
+		wantCode     int
+	}{{
+		name:     "ok hex lower case",
+		acctID:   acctIDStr,
+		wantCode: http.StatusOK,
+	}, {
+		name:     "ok hex upper case",
+		acctID:   strings.ToUpper(acctIDStr),
+		wantCode: http.StatusOK,
+	}, {
+		name:     "account id not hex",
+		acctID:   "nothex",
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "account id wrong length",
+		acctID:   acctIDStr[2:],
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "core.Unban error",
+		acctID:   acctIDStr,
+		unbanErr: errors.New("error"),
+		wantCode: http.StatusInternalServerError,
+	}}
+	for _, test := range tests {
+		core.unbanErr = test.unbanErr
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("GET", "https://localhost/account/"+test.acctID+"/unban", nil)
+		r.RemoteAddr = "localhost"
+
+		mux.ServeHTTP(w, r)
+
+		if w.Code != test.wantCode {
+			t.Fatalf("%q: apiUnban returned code %d, expected %d", test.name, w.Code, test.wantCode)
+		}
+		if w.Code == http.StatusOK {
+			res := new(UnbanResult)
+			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
+				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
+			}
+		}
 	}
 }

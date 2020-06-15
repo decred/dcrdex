@@ -174,6 +174,7 @@ func (ta *TArchivist) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error 
 }
 func (ta *TArchivist) SetMatchInactive(mid db.MarketMatchID) error        { return nil }
 func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule) error { return nil }
+func (ta *TArchivist) OpenAccount(account.AccountID) error                { return nil }
 func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
 	return nil, false, false
 }
