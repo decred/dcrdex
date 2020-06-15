@@ -361,44 +361,6 @@ func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *T
 	return
 }
 
-// UTXODetails gets the recipient address, value, and confs of an unspent
-// P2PKH transaction output. If the utxo does not exist or has a pubkey script
-// of the wrong type, an error will be returned.
-func (dcr *Backend) UTXODetails(txid string, vout uint32) (string, uint64, int64, error) {
-	txHash, err := chainhash.NewHashFromStr(txid)
-	if err != nil {
-		return "", 0, -1, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
-	}
-	txOut, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
-	if err != nil {
-		return "", 0, -1, err
-	}
-	scriptType := dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, pkScript, nil)
-	if scriptType == dexdcr.ScriptUnsupported {
-		return "", 0, -1, dex.UnsupportedScriptError
-	}
-	if !scriptType.IsP2PKH() {
-		return "", 0, -1, dex.UnsupportedScriptError
-	}
-
-	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(pkScript, chainParams)
-	if err != nil {
-		return "", 0, -1, fmt.Errorf("error parsing utxo script addresses")
-	}
-	if nonStandard {
-		// This should be covered by the NumPKH check, but this is a more
-		// informative error message.
-		return "", 0, -1, fmt.Errorf("non-standard script")
-	}
-	if scriptAddrs.NumPK != 0 {
-		return "", 0, -1, fmt.Errorf("pubkey addresses not supported for P2PKHDetails")
-	}
-	if scriptAddrs.NumPKH != 1 {
-		return "", 0, -1, fmt.Errorf("multi-sig not supported for P2PKHDetails")
-	}
-	return scriptAddrs.PkHashes[0].String(), toAtoms(txOut.Value), txOut.Confirmations, nil
-}
-
 // Get the Tx. Transaction info is not cached, so every call will result in a
 // GetRawTransactionVerbose RPC call.
 func (dcr *Backend) transaction(txHash *chainhash.Hash, verboseTx *chainjson.TxRawResult) (*Tx, error) {
