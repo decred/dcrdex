@@ -151,6 +151,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		QuoteSymbol:     tBTC.Symbol,
 		EpochLen:        60000,
 		MarketBuyBuffer: 1.1,
+		suspended:       false,
 	}
 	return &dexConnection{
 		WsConn:     conn,
@@ -3228,5 +3229,84 @@ func TestAssetCounter(t *testing.T) {
 	}
 	if counts[1] != 104 {
 		t.Fatalf("absorbed counts not combined correctly")
+	}
+}
+
+func TestHandleTradeSuspensionMsg(t *testing.T) {
+	rig := newTestRig()
+
+	tCore := rig.core
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.Unlock(wPW, time.Hour)
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.Unlock(wPW, time.Hour)
+
+	// Ensure a non-existent market cannot be suspended.
+	payload := &msgjson.TradeSuspension{
+		MarketID: "dcr_dcr",
+	}
+
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err := handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeSuspensionMsg] expected a market " +
+			"ID not found error: %v")
+	}
+
+	mkt := tDcrBtcMktName
+
+	// Ensure a suspended market cannot be resuspended.
+	err = rig.dc.suspend(mkt)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	payload = &msgjson.TradeSuspension{
+		MarketID:    mkt,
+		FinalEpoch:  100,
+		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Millisecond * 20)),
+		Persist:     true,
+	}
+
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeSuspensionMsg] expected a market " +
+			"suspended error: %v")
+	}
+
+	// Suspend a market.
+	err = rig.dc.resume(mkt)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	// Wait for the suspend to execute.
+	time.Sleep(time.Millisecond * 40)
+
+	// Ensure trades for a suspended market generate an error.
+	form := &TradeForm{
+		Host:    tDexHost,
+		IsLimit: true,
+		Sell:    true,
+		Base:    tDCR.ID,
+		Quote:   tBTC.ID,
+		Qty:     tDCR.LotSize * 10,
+		Rate:    tBTC.RateStep * 1000,
+		TifNow:  false,
+	}
+
+	_, err = rig.core.Trade(tPW, form)
+	if err == nil {
+		t.Fatalf("expected a suspension market error")
 	}
 }
