@@ -57,7 +57,7 @@ ID and output index (vout).
 
 In an effort to stay blockchain-protocol agnostic, the DEX accepts
 and recognizes the locating information as a single byte-array called the
-'''''coin ID''''', with the term '''''coin''''' being defined here as a some
+'''''coin ID''''', with the term '''''coin''''' being defined here as some
 amount of spendable value that is verifiable on the blockchain.
 It is up to backend and wallet developers to decide on how to properly encode the
 identifier as a coin ID. As an example, Bitcoin implements

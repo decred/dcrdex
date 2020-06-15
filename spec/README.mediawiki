@@ -1,7 +1,4 @@
-=Decred DEX=
-
-This is the repository for the Decred Distributed Exchange (DEX), for which this
-document provides the '''DRAFT''' specification.
+=Decred DEX Specification=
 
 __TOC__
 
@@ -11,13 +8,13 @@ Decred DEX is a decentralized, non-custodial, trustless, and intermediary-free
 cryptocurrency exchange platform. Decred DEX aims to solve a number of issues
 with existing systems of exchange.
 
-The vast majority of cryptocurrency trading is currently performed via
-centralized, custodial exchanges.
-These exchanges have filled an important role in the blockchain ecosystem, but
-are in many ways antithetical to the spirit of blockchain.
-Blockchain is decentralized, trustless, and enables self-custody.
-The moment you send your coin to a third-party exchange, those benefits all go
-out the window.
+Currently, the majority of cryptocurrency trading is performed via centralized,
+custodial exchanges.
+These exchanges have fill important role in the blockchain ecosystem, but are in
+many ways antithetical to the spirit of blockchain.
+Blockchain is decentralized, trustless, and enables self-custody, but when a
+user must send their coin to a third party in order to trade, all of those
+benefits are lost.
 
 Several projects have attempted to address this misalignment by
 replacing the exchange with a blockchain or a token, and they have met with
@@ -42,9 +39,13 @@ censorship difficult.
 While trades are fully trustless, steps are taken to discourage malicious
 clients from hindering normal trade activity.
 All clients pay a non-refundable registration fee.
-Registered clients are bound by the
+Registered clients are then bound to the
 [[community.mediawiki|rules of community conduct]], violation of which typically
 results in loss of trading privileges up to and including a permanent ban.
+
+In the interest of maintaining active, open-source, community-driven
+development, this specification document describes the protocols necessary for
+implementation of both DEX clients and DEX servers.
 
 ==Contents==
 
@@ -71,15 +72,16 @@ describes the notable design aspects that facilitate an exchange service with
 the features described above.
 
 * [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]]
-** [[comm.mediawiki/#Global_Variables|Global Variables]]
-** [[comm.mediawiki/#Asset_Variables|Asset Variables]]
-** [[comm.mediawiki/#Market_Variables|Market Variables]]
-** [[comm.mediawiki/#Configuration_Data_Request|Configuration Data Request]]
+** [[fundamentals.mediawiki/#Global_Variables|Global Variables]]
+** [[fundamentals.mediawiki/#Asset_Variables|Asset Variables]]
+** [[fundamentals.mediawiki/#Market_Variables|Market Variables]]
+** [[fundamentals.mediawiki/#Configuration_Data_Request|Configuration Data Request]]
 * [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]]
-** [[comm.mediawiki/#Epoch_Time|Epoch Time]]
-** [[comm.mediawiki/#Pseudorandom_Order_Matching|Pseudorandom Order Matching]]
+** [[fundamentals.mediawiki/#Epoch_Time|Epoch Time]]
+** [[fundamentals.mediawiki/#Pseudorandom_Order_Matching|Pseudorandom Order Matching]]
 * [[fundamentals.mediawiki/#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|Identification]]
 * [[fundamentals.mediawiki/#Blockchain_Interaction|Blockchain Interaction]]
+* [[fundamentals.mediawiki/#Adding_New_Assets|Adding New Assets]]
 
 '''&#91;3&#93; [[admin.mediawiki|Distributed Exchange Administration]]''' describes
 the tasks required to administer the exchange.

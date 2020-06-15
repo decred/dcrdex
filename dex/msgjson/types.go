@@ -370,7 +370,7 @@ type Match struct {
 	Signature
 	OrderID    Bytes  `json:"orderid"`
 	MatchID    Bytes  `json:"matchid"`
-	Quantity   uint64 `json:"quantity"`
+	Quantity   uint64 `json:"qty"`
 	Rate       uint64 `json:"rate"`
 	Address    string `json:"address"`
 	ServerTime uint64 `json:"tserver"`
@@ -661,7 +661,7 @@ type OrderNote struct {
 // limit or market order.
 type TradeNote struct {
 	Side     uint8  `json:"side,omitempty"`
-	Quantity uint64 `json:"osize,omitempty"`
+	Quantity uint64 `json:"qty,omitempty"`
 	Rate     uint64 `json:"rate,omitempty"`
 	TiF      uint8  `json:"tif,omitempty"`
 	Time     uint64 `json:"time,omitempty"`
