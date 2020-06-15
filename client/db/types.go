@@ -395,7 +395,7 @@ func (b *BalanceSet) Encode() []byte {
 		AddData(uint64Bytes(encode.UnixMilliU(b.Stamp)))
 
 	for host, bal := range b.XC {
-		enc.AddData([]byte(host)).AddData(encodeBalance(bal))
+		enc = enc.AddData([]byte(host)).AddData(encodeBalance(bal))
 	}
 	return enc
 }
@@ -428,6 +428,7 @@ func decodeBalanceSet_v0(pushes [][]byte) (*BalanceSet, error) {
 	b := &BalanceSet{
 		ZeroConf: zeroConf,
 		Stamp:    encode.UnixTimeMilli(int64(intCoder.Uint64(pushes[1]))),
+		XC:       make(map[string]*asset.Balance, (len(pushes)-2)/2),
 	}
 	for i := 2; i < len(pushes); i += 2 {
 		host := string(pushes[i])
