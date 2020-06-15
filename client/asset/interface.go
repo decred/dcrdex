@@ -11,11 +11,11 @@ import (
 	"decred.org/dcrdex/dex/config"
 )
 
-// CoinNotFoundError is returned when a coin cannot be found, either because
-// it has been spent or it never existed. This error may be returned from
-// AuditContract, Refund or Redeem as those methods expect the provided coin
-// to exist and be unspent.
-const CoinNotFoundError = dex.Error("coin not found")
+// CoinNotFoundError is returned when a coin cannot be found, either because it
+// has been spent or it never existed. This error may be returned from
+// AuditContract, Refund or Redeem as those methods expect the provided coin to
+// exist and be unspent.
+const CoinNotFoundError = dex.ErrorKind("coin not found")
 
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {

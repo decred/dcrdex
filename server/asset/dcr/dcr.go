@@ -57,11 +57,9 @@ var (
 	blockPollInterval = time.Second
 )
 
-type Error = dex.Error
-
 const (
 	assetName                = "dcr"
-	immatureTransactionError = Error("immature output")
+	immatureTransactionError = dex.ErrorKind("immature output")
 )
 
 // dcrNode represents a blockchain information fetcher. In practice, it is
