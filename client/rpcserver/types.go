@@ -85,6 +85,14 @@ type cancelForm struct {
 	OrderID string           `json:"orderID"`
 }
 
+// withdrawForm is information necessary to withdraw funds.
+type withdrawForm struct {
+	AppPass encode.PassBytes `json:"appPass"`
+	AssetID uint32           `json:"assetID"`
+	Value   uint64           `json:"value"`
+	Address string           `json:"address"`
+}
+
 // checkNArgs checks that args and pwArgs are the correct length.
 func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	// For want, one integer indicates an exact match, two are the min and max.
@@ -295,4 +303,25 @@ func parseCancelArgs(params *RawParams) (*cancelForm, error) {
 		return nil, fmt.Errorf("%w: invalid order id hex", errArgs)
 	}
 	return &cancelForm{AppPass: params.PWArgs[0], OrderID: id}, nil
+}
+
+func parseWithdrawArgs(params *RawParams) (*withdrawForm, error) {
+	if err := checkNArgs(params, []int{1}, []int{3}); err != nil {
+		return nil, err
+	}
+	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
+	if err != nil {
+		return nil, err
+	}
+	value, err := checkUIntArg(params.Args[1], "value", 64)
+	if err != nil {
+		return nil, err
+	}
+	req := &withdrawForm{
+		AppPass: params.PWArgs[0],
+		AssetID: uint32(assetID),
+		Value:   value,
+		Address: params.Args[2],
+	}
+	return req, nil
 }
