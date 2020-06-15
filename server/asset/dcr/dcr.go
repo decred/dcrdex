@@ -284,54 +284,81 @@ func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
 	return nil
 }
 
-// UnspentCoinDetails gets the recipient address, value, and confirmations of
-// unspent coins. For DCR, this corresponds to a UTXO. If the utxo does not
-// exist or has a pubkey script of the wrong type, an error will be returned.
-func (dcr *Backend) UnspentCoinDetails(coinID []byte) (addr string, val uint64, confs int64, err error) {
+// FeeCoin gets the recipient address, value, and confirmations of a transaction
+// output encoded by the given coinID. A non-nil error is returned if the
+// output's pubkey script is not a non-stake P2PKH requiring a single
+// ECDSA-secp256k1 signature.
+func (dcr *Backend) FeeCoin(coinID []byte) (addr string, val uint64, confs int64, err error) {
 	txHash, vout, errCoin := decodeCoinID(coinID)
 	if errCoin != nil {
 		err = fmt.Errorf("error decoding coin ID %x: %v", coinID, errCoin)
 		return
 	}
-	return dcr.UTXODetails(txHash.String(), vout)
+
+	var txOut *TxOutData
+	txOut, confs, err = dcr.OutputSummary(txHash, vout)
+	if err != nil {
+		return
+	}
+
+	if len(txOut.Addresses) != 1 || txOut.SigsRequired != 1 ||
+		txOut.ScriptType != dexdcr.ScriptP2PKH /* no schorr or edwards */ ||
+		txOut.ScriptType&dexdcr.ScriptStake != 0 {
+		return "", 0, -1, dex.UnsupportedScriptError
+	}
+	addr = txOut.Addresses[0]
+	val = txOut.Value
+	return
 }
 
-// UTXODetails gets the recipient address, value, and confs of an unspent
-// P2PKH transaction output. If the utxo does not exist or has a pubkey script
-// of the wrong type, an error will be returned.
-func (dcr *Backend) UTXODetails(txid string, vout uint32) (string, uint64, int64, error) {
-	txHash, err := chainhash.NewHashFromStr(txid)
+// TxOutData is transaction output data, including recipient addresses, value,
+// script type, and number of required signatures.
+type TxOutData struct {
+	Value        uint64
+	Addresses    []string
+	SigsRequired int
+	ScriptType   dexdcr.DCRScriptType
+}
+
+// OutputSummary gets transaction output data, including recipient addresses,
+// value, script type, and number of required signatures, plus the current
+// confirmations of a transaction output. If the output does not exist, an error
+// will be returned. Non-standard scripts are not an error.
+func (dcr *Backend) OutputSummary(txHash *chainhash.Hash, vout uint32) (txOut *TxOutData, confs int64, err error) {
+	var verboseTx *chainjson.TxRawResult
+	verboseTx, err = dcr.node.GetRawTransactionVerbose(txHash)
 	if err != nil {
-		return "", 0, -1, fmt.Errorf("error decoding tx ID %s: %v", txid, err)
-	}
-	txOut, pkScript, err := dcr.getUnspentTxOut(txHash, vout)
-	if err != nil {
-		return "", 0, -1, err
-	}
-	scriptType := dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, pkScript, nil)
-	if scriptType == dexdcr.ScriptUnsupported {
-		return "", 0, -1, dex.UnsupportedScriptError
-	}
-	if !scriptType.IsP2PKH() {
-		return "", 0, -1, dex.UnsupportedScriptError
+		if isTxNotFoundErr(err) {
+			err = asset.CoinNotFoundError
+		}
+		return
 	}
 
-	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(pkScript, chainParams)
+	if int(vout) > len(verboseTx.Vout)-1 {
+		err = asset.CoinNotFoundError
+		return
+	}
+
+	out := verboseTx.Vout[vout]
+
+	scriptHex, err := hex.DecodeString(out.ScriptPubKey.Hex)
 	if err != nil {
-		return "", 0, -1, fmt.Errorf("error parsing utxo script addresses")
+		return nil, -1, dex.UnsupportedScriptError
 	}
-	if nonStandard {
-		// This should be covered by the NumPKH check, but this is a more
-		// informative error message.
-		return "", 0, -1, fmt.Errorf("non-standard script")
+	scriptType, addrs, numRequired, err := dexdcr.ExtractScriptData(scriptHex, chainParams)
+	if err != nil {
+		return nil, -1, dex.UnsupportedScriptError
 	}
-	if scriptAddrs.NumPK != 0 {
-		return "", 0, -1, fmt.Errorf("pubkey addresses not supported for P2PKHDetails")
+
+	txOut = &TxOutData{
+		Value:        toAtoms(out.Value),
+		Addresses:    addrs,
+		SigsRequired: numRequired,
+		ScriptType:   scriptType,
 	}
-	if scriptAddrs.NumPKH != 1 {
-		return "", 0, -1, fmt.Errorf("multi-sig not supported for P2PKHDetails")
-	}
-	return scriptAddrs.PkHashes[0].String(), toAtoms(txOut.Value), txOut.Confirmations, nil
+
+	confs = verboseTx.Confirmations
+	return
 }
 
 // Get the Tx. Transaction info is not cached, so every call will result in a

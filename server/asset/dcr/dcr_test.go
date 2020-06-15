@@ -416,7 +416,6 @@ func newP2PKHScript(sigType dcrec.SignatureType) ([]byte, *testAuth) {
 	default:
 		fmt.Printf("NewAddressPubKeyHash unknown sigType")
 	}
-	var addr dcrutil.Address
 	addr, err := dcrutil.NewAddressPubKeyHash(auth.pkHash, chainParams, sigType)
 	if err != nil {
 		fmt.Printf("NewAddressPubKeyHash error: %v\n", err)
@@ -1250,12 +1249,11 @@ func TestAuxiliary(t *testing.T) {
 		t.Fatalf("utxo txid doesn't match")
 	}
 
-	// Check that values returned from UnspentCoinDetails are as set.
+	// Check that values returned from FeeCoin are as set.
 	cleanTestChain()
 	msg = testMsgTxRegular(dcrec.STEcdsaSecp256k1)
-	confs := int64(3)
-	txout := testAddTxOut(msg.tx, 0, txHash, blockHash, int64(txHeight), confs)
-	txout.Value = 8
+	msg.tx.TxOut[0].Value = 8 // for consistency with fake TxRawResult added below
+
 	scriptAddrs, nonStandard, err := dexdcr.ExtractScriptAddrs(msg.tx.TxOut[0].PkScript, chainParams)
 	if err != nil {
 		t.Fatalf("ExtractScriptAddrs error: %v", err)
@@ -1264,9 +1262,26 @@ func TestAuxiliary(t *testing.T) {
 		t.Errorf("vote output 0 was non-standard")
 	}
 	addr := scriptAddrs.PkHashes[0].String()
-	txAddr, v, confs, err := dcr.UnspentCoinDetails(toCoinID(txHash, 0))
+
+	msgHash := msg.tx.TxHash()
+	txHash = &msgHash
+	confs := int64(3)
+	verboseTx := testAddTxVerbose(msg.tx, txHash, blockHash, int64(txHeight), confs)
+	verboseTx.Vout = append(verboseTx.Vout, chainjson.Vout{
+		N:       0,
+		Value:   8,
+		Version: 0,
+		ScriptPubKey: chainjson.ScriptPubKeyResult{
+			Hex:       hex.EncodeToString(msg.tx.TxOut[0].PkScript),
+			ReqSigs:   1,
+			Type:      "pubkeyhash",
+			Addresses: []string{addr},
+		},
+	})
+
+	txAddr, v, confs, err := dcr.FeeCoin(toCoinID(txHash, 0))
 	if err != nil {
-		t.Fatalf("UnspentCoinDetails error: %v", err)
+		t.Fatalf("FeeCoin error: %v", err)
 	}
 	if txAddr != addr {
 		t.Fatalf("expected address %s, got %s", addr, txAddr)
@@ -1277,6 +1292,56 @@ func TestAuxiliary(t *testing.T) {
 	}
 	if confs != 3 {
 		t.Fatalf("expected 3 confirmations, got %d", confs)
+	}
+
+	txHashBad := txHash
+	txHashBad[0] = 22
+	_, _, _, err = dcr.FeeCoin(toCoinID(txHashBad, 0))
+	if err == nil {
+		t.Fatal("FeeCoin found for non-existent txid")
+	}
+
+	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 1))
+	if err == nil {
+		t.Fatal("FeeCoin found for non-existent output")
+	}
+
+	// make the output a stake hash
+	stakeScript, _ := newStakeP2PKHScript(txscript.OP_SSGEN)
+	verboseTx.Vout[0].ScriptPubKey.Hex = hex.EncodeToString(stakeScript)
+	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 0))
+	if err == nil {
+		t.Fatal("FeeCoin accepted a stake output")
+	}
+
+	// make a p2sh
+	msgP2SH := testMsgTxP2SHMofN(1, 2)
+	scriptAddrs, nonStandard, err = dexdcr.ExtractScriptAddrs(msgP2SH.tx.TxOut[0].PkScript, chainParams)
+	if err != nil {
+		t.Fatalf("ExtractScriptAddrs error: %v", err)
+	}
+	if nonStandard {
+		t.Errorf("output 0 was non-standard")
+	}
+	addr = scriptAddrs.PkHashes[0].String()
+	msgHash = msgP2SH.tx.TxHash()
+	txHash = &msgHash
+	confs = int64(3)
+	verboseTx = testAddTxVerbose(msgP2SH.tx, txHash, blockHash, int64(txHeight), confs)
+	verboseTx.Vout = append(verboseTx.Vout, chainjson.Vout{
+		N:       0,
+		Value:   8,
+		Version: 0,
+		ScriptPubKey: chainjson.ScriptPubKeyResult{
+			Hex:       hex.EncodeToString(msgP2SH.tx.TxOut[0].PkScript),
+			ReqSigs:   1,
+			Type:      "scripthash",
+			Addresses: []string{addr},
+		},
+	})
+	_, _, _, err = dcr.FeeCoin(toCoinID(txHash, 0))
+	if err == nil {
+		t.Fatal("FeeCoin accepted a p2sh output")
 	}
 }
 

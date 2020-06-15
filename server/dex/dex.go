@@ -382,7 +382,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		Signer:          cfg.DEXPrivKey,
 		RegistrationFee: cfg.RegFeeAmount,
 		FeeConfs:        cfg.RegFeeConfirms,
-		FeeChecker:      dcrBackend.UnspentCoinDetails,
+		FeeChecker:      dcrBackend.FeeCoin,
 		CancelThreshold: cfg.CancelThreshold,
 		Anarchy:         cfg.Anarchy,
 	}
