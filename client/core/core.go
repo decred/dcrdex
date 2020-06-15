@@ -693,6 +693,10 @@ func (c *Core) walletBalances(wallet *xcWallet) (*db.BalanceSet, error) {
 		Stamp:    time.Now(),
 	}
 	wallet.setBalance(coreBals)
+	err = c.db.UpdateBalanceSet(wallet.dbID, coreBals)
+	if err != nil {
+		return nil, fmt.Errorf("error updating %s balance in database: %v", unbip(wallet.AssetID), err)
+	}
 	c.notify(newBalanceNote(wallet.AssetID, coreBals))
 	return coreBals, nil
 }
@@ -711,14 +715,10 @@ func (c *Core) updateBalances(counts assetCounter) {
 			log.Errorf("non-existent wallet should exist")
 			continue
 		}
-		bals, err := c.walletBalances(w)
+		_, err := c.walletBalances(w)
 		if err != nil {
 			log.Error("error updateing balance after tick: %v", err)
 			continue
-		}
-		err = c.db.UpdateBalanceSet(w.dbID, bals)
-		if err != nil {
-			log.Errorf("error updating %s balance in database: %v", unbip(assetID), err)
 		}
 	}
 	c.refreshUser()
@@ -837,8 +837,11 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	dbWallet := &db.Wallet{
-		AssetID:     assetID,
-		Account:     form.Account,
+		AssetID: assetID,
+		Account: form.Account,
+		Balances: &db.BalanceSet{
+			ZeroConf: &asset.Balance{},
+		},
 		Settings:    settings,
 		EncryptedPW: encPW,
 	}
@@ -869,16 +872,18 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 	wallet.setAddress(dbWallet.Address)
 
-	balances, err := c.walletBalances(wallet)
-	if err != nil {
-		return initErr("error getting wallet balance for %s: %v", symbol, err)
-	}
-	dbWallet.Balances = balances
-
 	// Store the wallet in the database.
 	err = c.db.UpdateWallet(dbWallet)
 	if err != nil {
 		return initErr("error storing wallet credentials: %v", err)
+	}
+
+	// walletBalances will update the database record with the current balance.
+	// UpdateWallet must be called to create the database record before
+	// walletBalances is used.
+	balances, err := c.walletBalances(wallet)
+	if err != nil {
+		return initErr("error getting wallet balance for %s: %v", symbol, err)
 	}
 
 	log.Infof("Created %s wallet. Account %q balance available = %d / "+

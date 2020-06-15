@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex/order"
@@ -271,6 +272,11 @@ func TestWallets(t *testing.T) {
 	newBal.ZeroConf.Locked += 2e8
 	newBal.ZeroConf.Immature += 3e8
 	newBal.Stamp = newBal.Stamp.Add(time.Second)
+	newBal.XC = map[string]*asset.Balance{"somehost": &asset.Balance{
+		Available: 1,
+		Locked:    2,
+		Immature:  3,
+	}}
 	boltdb.UpdateBalanceSet(w.ID(), &newBal)
 	reW, err := boltdb.Wallet(w.ID())
 	if err != nil {

@@ -1315,7 +1315,7 @@ class BalanceWidget {
       Doc.show(side.newWalletRow)
       return
     }
-    const bal = wallet.balances.xc[this.dex.host]
+    const bal = wallet.balances.xc && wallet.balances.xc[this.dex.host]
     // Handle not connected and no balance known for the DEX.
     if (!bal && !wallet.running) {
       Doc.show(side.connect)
