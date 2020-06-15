@@ -59,7 +59,6 @@ func (s *WebServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	wsConn, err := ws.NewConnection(w, r, pongWait)
 	if err != nil {
 		log.Errorf("ws connection error: %v", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	go s.websocketHandler(wsConn, ip)
