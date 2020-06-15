@@ -11,7 +11,7 @@ Match notification via HTTP polling or other request interval-based methods are
 thus not suitable for the DEX system.
 Persistent, full-duplex communication is critical to minimizing communication
 latencies and wasted bandwidth.
-Websockets ([https://tools.ietf.org/html/rfc6455 &#91;4&#93;]) are chosen as the
+Websockets ([https://tools.ietf.org/html/rfc6455 &#91;3&#93;]) are chosen as the
 default and preferred communications protocol for
 the DEX exchange API.
 In addition to fulfilling the aforementioned needs, Websockets are now a
@@ -19,7 +19,7 @@ well-established technology with client software available for integration in
 virtually all popular programming languages.
 
 Websocket messages are secured by encryption on Transport Layer
-Security (TLS) [https://tools.ietf.org/html/rfc8446 &#91;5&#93;] connections.
+Security (TLS) [https://tools.ietf.org/html/rfc8446 &#91;4&#93;] connections.
 
 ==Encoding==
 
@@ -66,7 +66,7 @@ big-endian encoded output index as the last 4 bytes.
 
 ==Message Protocol==
 
-DEX messaging is JSON-formatted [https://tools.ietf.org/html/rfc8259 &#91;6&#93;].
+DEX messaging is JSON-formatted [https://tools.ietf.org/html/rfc8259 &#91;5&#93;].
 All messages, regardless of originating party, use a common top-level
 structure called a '''Message'''.
 

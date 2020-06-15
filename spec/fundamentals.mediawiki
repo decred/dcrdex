@@ -53,7 +53,7 @@ In particular, for ''lot size''  '''''l''''', the requested ''order quantity'',
 Every asset is assigned a unique integer ID that will be used to identify the
 asset in serialized structures. Whenever possible, the ID is the same as the
 BIP-0044 registered coin type index
-[https://github.com/satoshilabs/slips/blob/master/slip-0044.md &#91;7&#93;].
+[https://github.com/satoshilabs/slips/blob/master/slip-0044.md &#91;6&#93;].
 
 When the asset is the quote asset, a '''price increment''' is enforced.
 The '''rate''', '''''r''''', of a limit order must be an integer multiple of the

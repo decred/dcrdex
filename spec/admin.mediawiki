@@ -11,7 +11,7 @@ That said, changes to exchange or asset variables will often entail revocation
 of all existing orders on a market, so should be done as infrequently as
 possible.
 
-'''Exchange Variables'''
+==Exchange Variables==
 
 {|
 ! variable !! relevant section !! units || default
@@ -27,7 +27,7 @@ possible.
 | broadcast&nbsp;timeout || [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]] &amp; [[community.mediawiki/#rule-1-clients-must-respond-to-all-preimage-requests|Rule 1]] || milliseconds || 60,000
 |}
 
-'''Per-asset Variables'''
+==Per-asset Variables==
 
 {|
 ! variable !! units !! description

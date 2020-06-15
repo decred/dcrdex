@@ -59,7 +59,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 {|
 ! field    !! type !! description
 |-
-| marketid || string || An identifier used to identify this market in notifications
+| marketid || string || A unique market identifier, the market ID.
 |-
 | seq      || int    || A sequence ID
 |-
@@ -75,7 +75,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 |-
 | seq      || int   || A sequence ID || superceded in <code>orderbook</code> response
 |-
-| marketid || string || A unique market identifier ||
+| marketid || string || the market ID ||
 |-
 | oid     || string || the order ID ||
 |-
@@ -821,7 +821,7 @@ The client will respond with an acknowledgement.
 The taker will get the key from the maker's redemption and broadcast their own
 redemption transaction.
 
-==Match revocation==
+==Match Revocation==
 
 A match can be revoked by the server if a client fails to act within the
 [[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]]. A match revocation will result in
@@ -862,11 +862,9 @@ During trade suspension, standing limit orders are not necessarily revoked.
 If the server intentionally suspends operations, they should provide a
 notification to connected clients as early as possible, ideally with several
 epochs for the client to get their orders situated before matching ceases.
-The epoch specified in the suspension notification is the first epoch for which
-orders will no longer be accepted. Users should expect to lose connection
-during suspension. When possible, the server should settle all existing matches
-before closing connections. If that is not possible, clients will need to
-reconnect and complete settlement when the server comes back online.
+
+Clients should be prepared to lose connection during suspension. Clients will
+need to reconnect and complete settlement when the server comes back online.
 
 If the server disconnects without notice, it is expected that orders placed
 during the current epoch are revoked at no penalty to the client and that
@@ -884,9 +882,13 @@ does not reconnect before the next [[comm.mediawiki/#Session_Authentication|star
 
 <code>payload</code>
 {|
-! field      !! type   !! description
+! field       !! type   !! description
 |-
-| epoch      || int    || the epoch in which the suspension will start
+| marketid    || string || the market ID
 |-
-| persist    || bool   || whether standing limit orders will persist through the suspension
+| finalepoch  || uint64 || the last epoch during which orders will be collected and matched
+|-
+| suspendtime || uint64 || the UNIX timestamp corresponding to the end of the final epoch (milliseconds).
+|-
+| persistbook || bool   || whether standing limit orders will persist through the suspension
 |}
