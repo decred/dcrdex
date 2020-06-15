@@ -31,7 +31,6 @@ var (
 	pingPeriod = (pongWait * 9) / 10
 	// A client id counter.
 	cidCounter int32
-	unbip      = dex.BipIDSymbol
 )
 
 type wsClient struct {
@@ -61,7 +60,6 @@ func (s *RPCServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	wsConn, err := ws.NewConnection(w, r, pongWait)
 	if err != nil {
 		log.Errorf("ws connection error: %v", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	go s.websocketHandler(wsConn, ip)

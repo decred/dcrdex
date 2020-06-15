@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/gorilla/websocket"
 )
@@ -27,17 +28,14 @@ const writeWait = 5 * time.Second
 // websocket connection.
 var upgrader = websocket.Upgrader{}
 
-// Error is just a basic error.
-type Error string
+// Using errors.New prevents defining these as consts.
+const (
+	// ErrPeerDisconnected will be returned if Send or Request is called on a
+	// disconnected link.
+	ErrPeerDisconnected = dex.ErrorKind("peer disconnected")
 
-// Error satisfies the error interface.
-func (e Error) Error() string {
-	return string(e)
-}
-
-// ErrPeerDisconnected will be returned if Send or Request is called on a
-// disconnected link.
-const ErrPeerDisconnected = Error("peer disconnected")
+	ErrHandshake = dex.ErrorKind("handshake error")
+)
 
 // Connection represents a websocket connection to a remote peer. In practice,
 // it is satisfied by *websocket.Conn. For testing, a stub can be used.
@@ -388,21 +386,32 @@ func (c *WSLink) IP() string {
 	return c.ip
 }
 
-// NewConnection creates a new Connection by upgrading the http request to a
-// websocket.
+// NewConnection attempts to to upgrade the http connection to a websocket
+// Connection. If the upgrade fails, a reply will be sent with an appropriate
+// error code.
 func NewConnection(w http.ResponseWriter, r *http.Request, readTimeout time.Duration) (Connection, error) {
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		var hsErr websocket.HandshakeError
 		if errors.As(err, &hsErr) {
-			log.Errorf("Unexpected websocket error: %v",
-				err)
+			err = dex.NewError(ErrHandshake, hsErr.Error())
+			// gorilla already replies with an error in this case.
+		} else {
+			// No context to add to the error, so do not bother to wrap it, but
+			// no response has been sent by the Upgrader.
+
+			// Other than websocket.HandshakeError, there are only two possible
+			// non-nil error conditions: "client sent data before handshake is
+			// complete" and a write error with the "HTTP/1.1 101 Switching
+			// Protocols" response. In the first case, this is a client error,
+			// so we respond with a StatusBadRequest. In the second case, a
+			// failed write almost certainly indicates the connection is down.
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		}
-		// TODO: eliminate this http.Error since upgrader.Upgrade already calls
-		// http.Error in many paths where err!=nil and it is possible to write.
-		http.Error(w, "400 Bad Request.", http.StatusBadRequest)
+
 		return nil, err
 	}
+
 	// Configure the pong handler.
 	reqAddr := r.RemoteAddr
 	ws.SetPongHandler(func(string) error {

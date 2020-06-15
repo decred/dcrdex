@@ -218,7 +218,6 @@ func (s *Server) Run(ctx context.Context) {
 		wsConn, err := ws.NewConnection(w, r, pongWait)
 		if err != nil {
 			log.Errorf("ws connection error: %v", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
 
