@@ -9,14 +9,11 @@ import (
 	"time"
 )
 
-type Error string
-
-func (err Error) Error() string { return string(err) }
-
 const (
-	UnsupportedScriptError = Error("unsupported script type")
-	defaultLockTimeTaker   = 24 * time.Hour
-	defaultlockTimeMaker   = 48 * time.Hour
+	UnsupportedScriptError = ErrorKind("unsupported script type")
+
+	defaultLockTimeTaker = 24 * time.Hour
+	defaultlockTimeMaker = 48 * time.Hour
 )
 
 var (

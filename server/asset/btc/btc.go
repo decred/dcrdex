@@ -56,7 +56,7 @@ var (
 const (
 	assetName                = "btc"
 	btcToSatoshi             = 1e8
-	immatureTransactionError = dex.Error("immature output")
+	immatureTransactionError = dex.ErrorKind("immature output")
 )
 
 // btcNode represents a blockchain information fetcher. In practice, it is

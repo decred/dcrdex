@@ -16,7 +16,7 @@ import (
 	"github.com/btcsuite/btcutil"
 )
 
-const ErrReorgDetected = dex.Error("reorg detected")
+const ErrReorgDetected = dex.ErrorKind("reorg detected")
 
 // TXIO is common information stored with an Input or Output.
 type TXIO struct {
