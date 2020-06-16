@@ -1157,7 +1157,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 }
 
 // verifyRegistrationFee waits the required amount of confirmations for the
-// registration fee payment. Once the requirment is met the server is notified.
+// registration fee payment. Once the requirement is met the server is notified.
 // If the server acknowledgment is successfull, the account is set as 'paid' in
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.

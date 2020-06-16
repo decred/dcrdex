@@ -28,6 +28,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrjson"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v5"
@@ -1657,7 +1658,6 @@ func fees(tx *wire.MsgTx) (uint64, float64) {
 // isTxNotFoundErr will return true if the error indicates that the requested
 // transaction is not known.
 func isTxNotFoundErr(err error) bool {
-	// TODO: Could probably do this right with errors.As if we enforce an RPC
-	// version when connecting.
-	return strings.HasPrefix(err.Error(), "-5:")
+	var rpcErr *dcrjson.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCNoTxInfo
 }
