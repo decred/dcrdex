@@ -532,6 +532,8 @@ func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: txWaitExpiration * 5,
+		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
+		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
 	})
 	if err != nil {
 		panic(err.Error())
@@ -1195,9 +1197,9 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		id:        coinID,
 	}
 
-	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker))
+	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker(dex.Testnet)))
 	if user == matchInfo.maker {
-		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker))
+		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker(dex.Testnet)))
 	}
 
 	if !tLockTimeSpoofer.IsZero() {

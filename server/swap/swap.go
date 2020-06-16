@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -284,6 +283,9 @@ type Swapper struct {
 	orders *orderSwapTracker
 	// The broadcast timeout.
 	bTimeout time.Duration
+	// Expected locktimes for maker and taker swaps.
+	lockTimeTaker time.Duration
+	lockTimeMaker time.Duration
 	// latencyQ is a queue for coin waiters to deal with network latency.
 	latencyQ *wait.TickerQueue
 	// gracePeriod is a flag that indicates how long clients have to respond to
@@ -332,6 +334,10 @@ type Config struct {
 	// BroadcastTimeout is how long the Swapper will wait for expected swap
 	// transactions following new blocks.
 	BroadcastTimeout time.Duration
+	// LockTimeTaker is the locktime Swapper will use for auditing taker swaps.
+	LockTimeTaker time.Duration
+	// LockTimeTaker is the locktime Swapper will use for auditing maker swaps.
+	LockTimeMaker time.Duration
 }
 
 // NewSwapper is a constructor for a Swapper.
@@ -347,16 +353,18 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		dataDir:     cfg.DataDir,
-		coins:       cfg.Assets,
-		storage:     cfg.Storage,
-		authMgr:     authMgr,
-		latencyQ:    wait.NewTickerQueue(recheckInterval),
-		matches:     make(map[order.MatchID]*matchTracker),
-		orders:      newOrderSwapTracker(),
-		bTimeout:    cfg.BroadcastTimeout,
-		liveWaiters: make(map[waiterKey]*handlerArgs),
-		liveAckers:  make(map[uint64]*msgAckers),
+		dataDir:       cfg.DataDir,
+		coins:         cfg.Assets,
+		storage:       cfg.Storage,
+		authMgr:       authMgr,
+		latencyQ:      wait.NewTickerQueue(recheckInterval),
+		matches:       make(map[order.MatchID]*matchTracker),
+		orders:        newOrderSwapTracker(),
+		bTimeout:      cfg.BroadcastTimeout,
+		lockTimeTaker: cfg.LockTimeTaker,
+		lockTimeMaker: cfg.LockTimeMaker,
+		liveWaiters:   make(map[waiterKey]*handlerArgs),
+		liveAckers:    make(map[uint64]*msgAckers),
 	}
 
 	if cfg.State != nil {
@@ -1570,9 +1578,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		return wait.DontTryAgain
 	}
 
-	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeTaker))
+	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeTaker))
 	if stepInfo.actor.isMaker {
-		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeMaker))
+		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeMaker))
 	}
 	if contract.LockTime().Before(reqLockTime) {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,

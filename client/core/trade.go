@@ -37,6 +37,7 @@ func (err ExpirationErr) Error() string { return string(err) }
 type matchTracker struct {
 	db.MetaMatch
 	failErr     error
+	refundErr   error
 	prefix      *order.Prefix
 	trade       *order.Trade
 	counterSwap asset.AuditInfo
@@ -74,40 +75,46 @@ type trackedCancel struct {
 // match negotiation.
 type trackedTrade struct {
 	order.Order
-	mtx      sync.RWMutex
-	metaData *db.OrderMetaData
-	dc       *dexConnection
-	db       db.DB
-	latencyQ *wait.TickerQueue
-	wallets  *walletSet
-	preImg   order.Preimage
-	mktID    string
-	coins    map[string]asset.Coin
-	change   asset.Coin
-	cancel   *trackedCancel
-	matchMtx sync.RWMutex
-	matches  map[order.MatchID]*matchTracker
-	notify   func(Notification)
-	epochLen uint64
+	mtx           sync.RWMutex
+	metaData      *db.OrderMetaData
+	dc            *dexConnection
+	db            db.DB
+	latencyQ      *wait.TickerQueue
+	wallets       *walletSet
+	preImg        order.Preimage
+	mktID         string
+	coins         map[string]asset.Coin
+	lockTimeTaker time.Duration
+	lockTimeMaker time.Duration
+	change        asset.Coin
+	cancel        *trackedCancel
+	matchMtx      sync.RWMutex
+	matches       map[order.MatchID]*matchTracker
+	notify        func(Notification)
+	epochLen      uint64
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
-	db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet, coins asset.Coins, notify func(Notification)) *trackedTrade {
+	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
+	coins asset.Coins, notify func(Notification)) *trackedTrade {
+
 	ord := dbOrder.Order
 	return &trackedTrade{
-		Order:    ord,
-		metaData: dbOrder.MetaData,
-		dc:       dc,
-		db:       db,
-		latencyQ: latencyQ,
-		wallets:  wallets,
-		preImg:   preImg,
-		mktID:    marketName(ord.Base(), ord.Quote()),
-		coins:    mapifyCoins(coins),
-		matches:  make(map[order.MatchID]*matchTracker),
-		notify:   notify,
-		epochLen: epochLen,
+		Order:         ord,
+		metaData:      dbOrder.MetaData,
+		dc:            dc,
+		db:            db,
+		latencyQ:      latencyQ,
+		wallets:       wallets,
+		preImg:        preImg,
+		mktID:         marketName(ord.Base(), ord.Quote()),
+		coins:         mapifyCoins(coins),
+		lockTimeTaker: lockTimeTaker,
+		lockTimeMaker: lockTimeMaker,
+		matches:       make(map[order.MatchID]*matchTracker),
+		notify:        notify,
+		epochLen:      epochLen,
 	}
 }
 
@@ -477,7 +484,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 // party has not executed the required follow-up action (i.e. match status shows
 // our swap is the last action on the match) AND our swap's locktime has expired.
 func (t *trackedTrade) isRefundable(match *matchTracker) bool {
-	if match.failErr != nil || match.MetaData.Proof.RefundCoin != nil {
+	if match.refundErr != nil || match.MetaData.Proof.RefundCoin != nil {
 		return false
 	}
 
@@ -625,12 +632,12 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 			value = calc.BaseToQuote(dbMatch.Rate, dbMatch.Quantity)
 		}
 		matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
-		lockTime := matchTime.Add(dex.LockTimeTaker).UTC().Unix()
+		lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
 		if dbMatch.Side == order.Maker {
 			proof.Secret = encode.RandomBytes(32)
 			secretHash := sha256.Sum256(proof.Secret)
 			proof.SecretHash = secretHash[:]
-			lockTime = matchTime.Add(dex.LockTimeMaker).UTC().Unix()
+			lockTime = matchTime.Add(t.lockTimeMaker).UTC().Unix()
 		}
 
 		contract := &asset.Contract{
@@ -778,6 +785,13 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 			match.failErr = err
 			errs.add("error sending 'redeem' message for match %s, coin %x: %v",
 				match.id, coinIDString(redeemAsset.ID, coinID), err)
+			// TODO: Do not skip this match, set the status to MakerRedeemed.
+			// Redeem tx was broadcasted, and tests have shown cases where the
+			// server got the redeem request but the client did not receieve
+			// the server's ack. In such cases, the counter-party is notified
+			// of this redeem and the trade proceeds as it should. The described
+			// scenarios usually have err = "timed out waiting for 'redeem'
+			// response."
 			continue
 		}
 		sigMsg := msgRedeem.Serialize()
@@ -859,7 +873,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 			}
 			errs.add("error sending refund tx for match %s, swap coin %s: %v",
 				match.id, swapCoinString, err)
-			match.failErr = err
+			match.refundErr = err
 			continue
 		}
 		if t.Trade().Sell {
@@ -949,7 +963,7 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 	auth.AuditSig = audit.Sig
 	proof.CounterScript = audit.Contract
 	matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
-	reqLockTime := encode.DropMilliseconds(matchTime.Add(dex.LockTimeMaker)) // counterparty = maker, their locktime = 48 hours.
+	reqLockTime := encode.DropMilliseconds(matchTime.Add(t.lockTimeMaker)) // counterparty = maker, their locktime = 48 hours.
 	if dbMatch.Side == order.Maker {
 		// Check that the secret hash is correct.
 		if !bytes.Equal(proof.SecretHash, auditInfo.SecretHash()) {
@@ -958,7 +972,7 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 		match.setStatus(order.TakerSwapCast)
 		proof.TakerSwap = []byte(audit.CoinID)
 		// counterparty = taker, their locktime = 24 hours.
-		reqLockTime = encode.DropMilliseconds(matchTime.Add(dex.LockTimeTaker))
+		reqLockTime = encode.DropMilliseconds(matchTime.Add(t.lockTimeTaker))
 	} else {
 		proof.SecretHash = auditInfo.SecretHash()
 		match.setStatus(order.MakerSwapCast)
