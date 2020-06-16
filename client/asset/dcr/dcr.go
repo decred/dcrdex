@@ -28,6 +28,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/decred/dcrd/dcrjson"
 	"github.com/decred/dcrd/dcrutil/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v5"
@@ -888,6 +889,9 @@ func (dcr *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	// Get the wallet transaction.
 	tx, err := dcr.node.GetTransaction(txHash)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txHash, err)
 	}
 	if tx.Confirmations == 0 {
@@ -1144,6 +1148,9 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	}
 	tx, err := dcr.node.GetTransaction(txHash)
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return 0, asset.CoinNotFoundError
+		}
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
@@ -1646,4 +1653,11 @@ func fees(tx *wire.MsgTx) (uint64, float64) {
 	}
 	fees := in - out
 	return uint64(fees), float64(fees) / float64(tx.SerializeSize())
+}
+
+// isTxNotFoundErr will return true if the error indicates that the requested
+// transaction is not known.
+func isTxNotFoundErr(err error) bool {
+	var rpcErr *dcrjson.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == dcrjson.ErrRPCNoTxInfo
 }

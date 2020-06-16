@@ -1160,32 +1160,26 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success, dc.acct.host))
 
 	// Set up the coin waiter.
-	c.verifyRegistrationFee(wallet, dc, coin.ID(), regFeeAssetID)
+	c.verifyRegistrationFee(wallet, dc, coin.ID(), 0)
 	c.refreshUser()
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: dc.cfg.RegFeeConfirms}
 	return res, nil
 }
 
 // verifyRegistrationFee waits the required amount of confirmations for the
-// registration fee payment. Once the requirment is met the server is notified.
+// registration fee payment. Once the requirement is met the server is notified.
 // If the server acknowledgment is successfull, the account is set as 'paid' in
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.
-func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, assetID uint32) {
+func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, confs uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
 
-	regConfs, err := wallet.Confirmations(coinID)
-	if err != nil {
-		log.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
-		return
-	}
-
-	dc.setRegConfirms(regConfs)
+	dc.setRegConfirms(confs)
 	c.refreshUser()
 
 	trigger := func() (bool, error) {
 		confs, err := wallet.Confirmations(coinID)
-		if err != nil {
+		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
 		}
 		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, uint32(reqConfs))
@@ -1199,8 +1193,9 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		return confs >= uint32(reqConfs), nil
 	}
 
-	c.wait(assetID, trigger, func(err error) {
-		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(assetID, coinID), reqConfs)
+	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	c.wait(regFeeAssetID, trigger, func(err error) {
+		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(regFeeAssetID, coinID), reqConfs)
 		defer func() {
 			if err != nil {
 				details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.host, err)
@@ -2058,8 +2053,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		return
 	}
-	dcrID, _ := dex.BipSymbolID("dcr")
-	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, dcrID)
+	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, confs)
 }
 
 // dbTrackers prepares trackedTrades based on active orders and matches in the
