@@ -22,7 +22,6 @@ const (
 
 var (
 	archie            *Archiver
-	sqlDb             *sql.DB
 	mktInfo, mktInfo2 *dex.MarketInfo
 	numMarkets        int
 )
