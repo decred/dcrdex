@@ -767,6 +767,7 @@ func (c *Connect) Serialize() []byte {
 
 // ConnectResult is the result result for the ConnectRoute request.
 type ConnectResult struct {
+	Sig     Bytes    `json:"sig"`
 	Matches []*Match `json:"matches"`
 }
 
