@@ -17,7 +17,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page = Doc.parsePage(body, [
       'rightBox',
       // Table Rows
-      'assetArrow', 'balanceArrow', 'statusArrow', 'walletTable', 'txtStatus',
+      'assetArrow', 'balanceArrow', 'statusArrow', 'walletTable',
       // Available markets
       'markets', 'dexTitle', 'marketsBox', 'oneMarket', 'marketsFor',
       'marketsCard',
