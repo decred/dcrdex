@@ -176,6 +176,11 @@ func tNewUser(t *testing.T) *tUser {
 	}
 }
 
+func (u *tUser) randomSignature() *secp256k1.Signature {
+	sig, _ := u.privKey.Sign(randBytes(20))
+	return sig
+}
+
 type testRig struct {
 	mgr     *AuthManager
 	storage *TStorage
@@ -347,6 +352,7 @@ func TestConnect(t *testing.T) {
 	// Close account on connect with failing cancel ratio.
 	rig.mgr.cancelThresh = 0.2
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	tryConnectUser(t, user, false)
 	if rig.storage.closedID != user.acctID {
 		t.Fatalf("Expected account %v to be closed on connect, got %v", user.acctID, rig.storage.closedID)
@@ -593,14 +599,8 @@ func TestSign(t *testing.T) {
 		t.Fatalf("wrong error for forced key signing error: %v", err)
 	}
 
-	// Do a single signable
 	rig.signer.err = nil
-	sigMsg1 := randBytes(73)
-	privKey := tNewUser(t).privKey
-	sig1, err := privKey.Sign(sigMsg1)
-	if err != nil {
-		t.Fatalf("signing error: %v", err)
-	}
+	sig1 := tNewUser(t).randomSignature()
 	sig1Bytes := sig1.Serialize()
 	rig.signer.sig = sig1
 	s = &tSignable{b: randBytes(25)}
@@ -911,12 +911,7 @@ func TestHandleRegister(t *testing.T) {
 	ensureErr(do(msg), "DEX signature error", msgjson.RPCInternalError)
 	rig.signer.err = nil
 
-	sigMsg := randBytes(73)
-	sig, err := user.privKey.Sign(sigMsg)
-	if err != nil {
-		t.Fatalf("signing error: %v", err)
-	}
-	rig.signer.sig = sig
+	rig.signer.sig = user.randomSignature()
 
 	// Send a valid registration and check the response.
 	// Before starting, make sure there are no responses in the queue.
@@ -935,7 +930,7 @@ func TestHandleRegister(t *testing.T) {
 	}
 	resp, _ := respMsg.Response()
 	regRes := new(msgjson.RegisterResult)
-	err = json.Unmarshal(resp.Result, regRes)
+	err := json.Unmarshal(resp.Result, regRes)
 	if err != nil {
 		t.Fatalf("error unmarshaling payload")
 	}
@@ -1059,13 +1054,7 @@ func TestHandleNotifyFee(t *testing.T) {
 	rig.signer.err = dummyError
 	ensureErr(doWaiter(goodMsg), "DEX signature", msgjson.RPCInternalError)
 	rig.signer.err = nil
-
-	sigMsg := randBytes(73)
-	sig, err := user.privKey.Sign(sigMsg)
-	if err != nil {
-		t.Fatalf("signing error: %v", err)
-	}
-	rig.signer.sig = sig
+	rig.signer.sig = user.randomSignature()
 
 	// Send a valid notifyfee, and check the response.
 	rpcErr := doWaiter(goodMsg)

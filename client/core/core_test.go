@@ -666,7 +666,10 @@ func (rig *testRig) queueNotifyFee() {
 
 func (rig *testRig) queueConnect() {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
-		result := &msgjson.ConnectResult{}
+		connect := new(msgjson.Connect)
+		msg.Unmarshal(connect)
+		sign(tDexPriv, connect)
+		result := &msgjson.ConnectResult{Sig: connect.Sig}
 		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 		f(resp)
 		return nil

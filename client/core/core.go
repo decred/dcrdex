@@ -1854,8 +1854,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		APIVersion: 0,
 		Time:       encode.UnixMilliU(time.Now()),
 	}
-	b := payload.Serialize()
-	sig, err := dc.acct.sign(b)
+	sigMsg := payload.Serialize()
+	sig, err := dc.acct.sign(sigMsg)
 	if err != nil {
 		return fmt.Errorf("signing error: %v", err)
 	}
@@ -1878,6 +1878,11 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	err = extractError(errChan, requestTimeout, "connect")
 	if err != nil {
 		return fmt.Errorf("'connect' error: %v", err)
+	}
+	// Check the signature.
+	err = dc.acct.checkSig(sigMsg, result.Sig)
+	if err != nil {
+		return newError(signatureErr, "DEX signature validation error: %v", err)
 	}
 	log.Debugf("authenticated connection to %s", dc.acct.host)
 	// Set the account as authenticated.
