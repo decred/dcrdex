@@ -610,7 +610,7 @@ func TestOnline(t *testing.T) {
 
 	keyPath := filepath.Join(tempDir, "rpc.key")
 	certPath := filepath.Join(tempDir, "rpc.cert")
-	pongWait = time.Second
+	pongWait = time.Millisecond * 500
 	pingPeriod = (pongWait * 9) / 10
 	server, err := NewServer(&RPCConfig{
 		ListenAddrs: []string{":0"},
