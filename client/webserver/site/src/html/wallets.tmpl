@@ -6,13 +6,13 @@
     <span data-state="locked" class="ico-locked grey{{if or $ready (not $w.Running)}} d-hide{{end}}"></span>
     <span data-state="unlocked" class="ico-unlocked{{if not $ready}} d-hide{{end}}"></span>
     <span data-state="nowallet" class="ico-cross fs12 red d-hide"></span>
-    <span class="txt-status" id="txtStatus">{{walletStatusString $w}}</span>
+    <span data-state="status" class="txt-status">{{walletStatusString $w}}</span>
   {{else}}
     <span data-state="sleeping" class="ico-sleeping fs17 grey d-hide"></span>
     <span data-state="locked" class="ico-locked grey d-hide"></span>
     <span data-state="unlocked" class="ico-unlocked d-hide"></span>
     <span data-state="nowallet" class="ico-cross fs12 red"></span>
-    <span class="txt-status">no wallet</span>
+    <span data-state="status" class="txt-status">no wallet</span>
   {{end}}
 {{end}}
 
