@@ -156,7 +156,7 @@ independently verify matching.
 |}
 
 A client can '''unsubscribe''' from order book updates without closing the
-websocket connection.
+WebSocket connection.
 
 '''Request route:''' <code>unsub_orderbook</code>, '''originator: ''' client
 
@@ -633,7 +633,7 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | side      || int    || the client's side in the match. 0 = maker, 1 = taker
 |-
-| status    || int    || only provided in 'connect' response. See [[https://github.com/decred/dcrdex/blob/master/dex/order/match.go|match.go]] for codes.
+| status    || int    || only provided in 'connect' response. For 'match' requests, status is 0 = 'MakerSwapCast'. See [[https://github.com/decred/dcrdex/blob/master/dex/order/match.go|match.go]] for codes.
 |-
 | sig       || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
 |}

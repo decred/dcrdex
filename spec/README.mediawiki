@@ -10,8 +10,8 @@ with existing systems of exchange.
 
 Currently, the majority of cryptocurrency trading is performed via centralized,
 custodial exchanges.
-These exchanges have fill important role in the blockchain ecosystem, but are in
-many ways antithetical to the spirit of blockchain.
+These exchanges have filled an important role in the blockchain ecosystem, but
+are in many ways antithetical to the spirit of blockchain.
 Blockchain is decentralized, trustless, and enables self-custody, but when a
 user must send their coin to a third party in order to trade, all of those
 benefits are lost.
@@ -34,7 +34,7 @@ familiar interface based on markets and orders. Decred DEX's novel matching
 algorithm disincintevizes manipulative, abusive trading practices commonly seen
 on centralized exchanges. The epoch-based match cycle is difficult to game by
 the client, while for the server, cryptographic order commitments make
-censorship difficult.
+censorship and unfair matching difficult.
 
 While trades are fully trustless, steps are taken to discourage malicious
 clients from hindering normal trade activity.
@@ -58,7 +58,7 @@ of the specification laid out in this document.
 messaging protocols and communication layer technologies that are to be used
 for the DEX API.
 
-* [[comm.mediawiki#WebSockets|Websockets]]
+* [[comm.mediawiki#WebSockets|WebSockets]]
 * [[comm.mediawiki/#Encoding|Data Encodings]]
 ** [[comm.mediawiki/#Timestamps|Timestamps]]
 ** [[comm.mediawiki/#Rate_Encoding|Rate Encoding]]
@@ -87,7 +87,8 @@ the features described above.
 the tasks required to administer the exchange.
 
 * [[admin.mediawiki/#Exchange_Variables|Exchange Variables]]
-* [[admin.mediawiki/#Per_Asset_Variables|Per-asset Variables]]
+* [[admin.mediawiki/#Perasset_Variables|Per-asset Variables]]
+* [[admin.mediawiki/#Administration_API|Administration API]]
 
 '''&#91;4&#93; [[accounts.mediawiki|Client Accounts]]''' details account creation.
 
@@ -116,7 +117,7 @@ book and place orders.
 * [[orders.mediawiki/#Match_negotiation|Match Negotiation]]
 * [[orders.mediawiki/#Trade_Suspension|Trade Suspension]]
 
-'''&#91;6&#93; [[api.mediawiki| Data API]]''' defines http and websocket APIs to browse
+'''&#91;6&#93; [[api.mediawiki| Data API]]''' defines http and WebSocket APIs to browse
 trade history.
 
 '''&#91;7&#93; [[atomic.mediawiki|Atomic Settlement]]''' walks through the settlement

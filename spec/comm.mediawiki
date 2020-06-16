@@ -11,14 +11,14 @@ Match notification via HTTP polling or other request interval-based methods are
 thus not suitable for the DEX system.
 Persistent, full-duplex communication is critical to minimizing communication
 latencies and wasted bandwidth.
-Websockets ([https://tools.ietf.org/html/rfc6455 &#91;3&#93;]) are chosen as the
+WebSockets ([https://tools.ietf.org/html/rfc6455 &#91;3&#93;]) are chosen as the
 default and preferred communications protocol for
 the DEX exchange API.
 In addition to fulfilling the aforementioned needs, Websockets are now a
 well-established technology with client software available for integration in
 virtually all popular programming languages.
 
-Websocket messages are secured by encryption on Transport Layer
+WebSocket messages are secured by encryption on Transport Layer
 Security (TLS) [https://tools.ietf.org/html/rfc8446 &#91;4&#93;] connections.
 
 ==Encoding==
@@ -29,6 +29,9 @@ In all client-server messages that include a timestamp or duration field, the
 units of time are milliseconds unless otherwise specified. Location-independent
 timestamps are encoded as milliseconds since the UNIX epoch (Jan 01 00:00:00
 1970 UTC).
+
+If a timestamp must be converted to seconds, e.g. for encoding as a locktime in
+a swap contract, the timestamp should be rounded down.
 
 ===Rate Encoding===
 
@@ -145,7 +148,7 @@ The payload for a response has a structure that enables quick error checking.
 
 ==Session Authentication==
 
-Many DEX messages must be sent on an authenticated connection. Once a websocket
+Many DEX messages must be sent on an authenticated connection. Once a WebSocket
 connection is established, the client will supply their account ID and signature.
 
 '''Request route:''' <code>connect</code>, '''originator: ''' client
@@ -182,15 +185,17 @@ the client's absence. A list of any pending matches is included in the response.
 
 <code>result</code>
 {|
-! field      !! type   !! description
+! field   !! type   !! description
 |-
-| matches    || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
+| matches || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
+|-
+| sig     || string || hex-encoded server's signature of the serialized connection data
 |}
 
 ==HTTP==
 
 An API using HTTP for message transport may be provided for basic account
-management and server status queries, however websocket connections are to be
+management and server status queries, however webWebSocketsocket connections are to be
 the sole means for
 [[orders.mediawiki/#Client_Order_Management|placing, monitoring, and executing orders]].
 The primary reason for limiting the scope of the HTTP API is to eliminate client
