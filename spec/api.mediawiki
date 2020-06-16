@@ -2,4 +2,4 @@
 
 __TOC__
 
-Trade history will be made available to both websocket and HTTP clients.
+Trade history will be made available to both WebSocket and HTTP clients.

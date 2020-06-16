@@ -59,7 +59,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 {|
 ! field    !! type !! description
 |-
-| marketid || string || An identifier used to identify this market in notifications
+| marketid || string || A unique market identifier, the market ID.
 |-
 | seq      || int    || A sequence ID
 |-
@@ -75,7 +75,7 @@ re-subscribe to the market to synchronize the order book from scratch.
 |-
 | seq      || int   || A sequence ID || superceded in <code>orderbook</code> response
 |-
-| marketid || string || A unique market identifier ||
+| marketid || string || the market ID ||
 |-
 | oid     || string || the order ID ||
 |-
@@ -156,7 +156,7 @@ independently verify matching.
 |}
 
 A client can '''unsubscribe''' from order book updates without closing the
-websocket connection.
+WebSocket connection.
 
 '''Request route:''' <code>unsub_orderbook</code>, '''originator: ''' client
 
@@ -316,7 +316,7 @@ All order serializations have common '''prefix''' fields.
 |-
 | tserver    || 8  || int || the server's UNIX timestamp (milliseconds). zero for client signature
 |-
-| commitment || 32 || string || hex-encoded cryptographic commitment
+| com || 32 || string || hex-encoded cryptographic commitment
 |}
 
 ===Order ID===
@@ -530,7 +530,7 @@ This is by design and discourages certain types of spoofing.
 |-
 | colspan="3" align="center" | 9 prefix fields
 |-
-| orderid   || string || hex-encoded order ID
+| targetid  || string || hex-encoded order ID
 |-
 | sig       || string || client hex-encoded signature of the serialized order data. serialization described below
 |}
@@ -547,11 +547,11 @@ This is by design and discourages certain types of spoofing.
 
 <code>result</code>
 {|
-! field     !! type   !! description
+! field   !! type   !! description
 |-
-| sig       || string || server hex-encoded signature of the serialize order data, after adding the DEX timestamp
+| sig     || string || server hex-encoded signature of the serialize order data, after adding the DEX timestamp
 |-
-| server time || int  || the server's UNIX timestamp (milliseconds)
+| tserver || int    || the server's UNIX timestamp (milliseconds)
 |}
 
 ==Preimage Reveal==
@@ -591,7 +591,7 @@ the checksum generated from their local copy of the epoch queue.
 ==Match negotiation==
 
 Swap negotiation details will be relayed through the DEX with a series of
-notifications or progress reports.
+notifications.
 Both the DEX and the clients will need to serialize and sign the notification
 data. The originator includes their signature with the request, while the
 recipient will return an '''acknowledgement''', or a list of
@@ -623,13 +623,17 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | matchid   || string    || the match ID to use for progress notifications
 |-
-| quantity  || int    || the matched amount, in atoms of the base asset
+| qty       || int    || the matched amount, in atoms of the base asset
 |-
 | rate      || int    || the matched price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
-| timestamp || int    || server's UNIX timestamp (milliseconds)
+| tserver   || int    || server's UNIX timestamp (milliseconds)
 |-
 | address   || string || the counterparty's receiving address
+|-
+| side      || int    || the client's side in the match. 0 = maker, 1 = taker
+|-
+| status    || int    || only provided in 'connect' response. For 'match' requests, status is 0 = 'MakerSwapCast'. See [[https://github.com/decred/dcrdex/blob/master/dex/order/match.go|match.go]] for codes.
 |-
 | sig       || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
 |}
@@ -647,10 +651,14 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | rate       || 8  || the matched price rate. [[comm.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
-| timestamp  || 8  || server's UNIX timestamp (milliseconds)
+| tserver  || 8  || server's UNIX timestamp (milliseconds)
 |-
 | address    || varies || UTF-8 encoded receiving address for the match
 |}
+
+'''The <code>tserver</code> value is used as the basis for the the locktimes.'''
+If it is necessary to convert the time to seconds, the value should be rounded
+down.
 
 The client will respond with a list of signed match acknowledgements.
 
@@ -670,8 +678,6 @@ relay to the matching party.
 |-
 | coinid    || string || hex-encoded coin ID
 |-
-| timestamp  || int    || client's UNIX timestamp (milliseconds)
-|-
 | contract   || string || hex-encoded swap redeem script
 |-
 | sig        || string || client signature of the serialized notification. serialization described below
@@ -686,9 +692,7 @@ relay to the matching party.
 |-
 | matchid    || 32  || the ID assigned to this match
 |-
-| coin ID    || asset-dependent  || the coin ID
-|-
-| timestamp  || 8  || the client's UNIX timestamp (milliseconds)
+| coinid     || asset-dependent  || the coin ID
 |-
 | contract   || asset-dependent || swap redeem script
 |}
@@ -755,12 +759,10 @@ When a client has redeemed their contract, they will notify the server.
 |-
 | secret     || string || the hex-encoded swap contract secret
 |-
-| timestamp  || int    || client's UNIX timestamp (milliseconds)
-|-
 | sig        || string || client signature of the serialized notification. serialization described below
 |}
 
-<code>result</code>
+'''Redeem serialization'''
 {|
 ! field      !! size (bytes)  !! description
 |-
@@ -817,7 +819,7 @@ The client will respond with an acknowledgement.
 The taker will get the key from the maker's redemption and broadcast their own
 redemption transaction.
 
-==Match revocation==
+==Match Revocation==
 
 A match can be revoked by the server if a client fails to act within the
 [[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]]. A match revocation will result in
@@ -858,11 +860,9 @@ During trade suspension, standing limit orders are not necessarily revoked.
 If the server intentionally suspends operations, they should provide a
 notification to connected clients as early as possible, ideally with several
 epochs for the client to get their orders situated before matching ceases.
-The epoch specified in the suspension notification is the first epoch for which
-orders will no longer be accepted. Users should expect to lose connection
-during suspension. When possible, the server should settle all existing matches
-before closing connections. If that is not possible, clients will need to
-reconnect and complete settlement when the server comes back online.
+
+Clients should be prepared to lose connection during suspension. Clients will
+need to reconnect and complete settlement when the server comes back online.
 
 If the server disconnects without notice, it is expected that orders placed
 during the current epoch are revoked at no penalty to the client and that
@@ -880,9 +880,27 @@ does not reconnect before the next [[comm.mediawiki/#Session_Authentication|star
 
 <code>payload</code>
 {|
-! field      !! type   !! description
+! field       !! type   !! description
 |-
-| epoch      || int    || the epoch in which the suspension will start
+| marketid    || string || the market ID
 |-
-| persist    || bool   || whether standing limit orders will persist through the suspension
+| finalepoch  || uint64 || the last epoch during which orders will be collected and matched
+|-
+| suspendtime || uint64 || the UNIX timestamp corresponding to the end of the final epoch (milliseconds)
+|-
+| persistbook || bool   || whether standing limit orders will persist through the suspension
+|}
+
+Clients will also be informed when trading is resumed.
+
+'''Request route: ''' <code>resumption</code>, '''originator:''' DEX
+<code>payload</code>
+{|
+! field       !! type   !! description
+|-
+| marketid    || string || the market ID
+|-
+| startepoch  || uint64 || the epoch number at which trading did or will commence. May be in the future
+|-
+| epochlen || uint64 || the [[#Epochbased_Order_Matching|epoch duration]] (milliseconds)
 |}

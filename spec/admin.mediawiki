@@ -11,7 +11,7 @@ That said, changes to exchange or asset variables will often entail revocation
 of all existing orders on a market, so should be done as infrequently as
 possible.
 
-'''Exchange Variables'''
+==Exchange Variables==
 
 {|
 ! variable !! relevant section !! units || default
@@ -27,14 +27,14 @@ possible.
 | broadcast&nbsp;timeout || [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]] &amp; [[community.mediawiki/#rule-1-clients-must-respond-to-all-preimage-requests|Rule 1]] || milliseconds || 60,000
 |}
 
-'''Per-asset Variables'''
+==Per-asset Variables==
 
 {|
 ! variable !! units !! description
 |-
 | lot&nbsp;size  || atoms ||  the minimum order quantity and the order quantity increment when an asset is the base asset
 |-
-| rate&nbsp;step || atoms || The minimum price rate and the price rate increment when an asset is the quote asset. [[orders.mediawiki/#Rate_Encoding|message-rate encoding]]
+| rate&nbsp;step || atoms || the minimum price rate and the price rate increment when an asset is the quote asset. [[orders.mediawiki/#Rate_Encoding|message-rate encoding]]
 |-
 | fee&nbsp;rate  || atoms/byte || the minimum fee rate for swap transactions
 |-
@@ -45,4 +45,27 @@ possible.
 
 See also [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]].
 
-...
+==Administration API==
+
+The server will provide an HTTP API for performing various adminstrative tasks.
+
+'''API Endpoints'''
+{|
+! path      !! description
+|-
+| /config   || the current DEX configuration. See [[fundamentals.mediawiki/#Configuration_Data_Request|Configuration Data Request]]
+|-
+| /accounts || lists information about all known accounts
+|-
+| /accounts/{accountID} || list information about a specific account
+|-
+| /markets  || display status information for all markets
+|-
+| /market/{marketID} || display status information for a specific market
+|-
+| /market/{marketID}/suspend || schedule a market suspension at the end of the current epoch
+|-
+| /unban/{accountID} || clear an account's penalties and re-enable trading
+|-
+| /ban/{accountID}/{ruleNumber} || ban an account for violating [[community.mediawiki/#Rules_of_Community_Conduct|a rule]]
+|}

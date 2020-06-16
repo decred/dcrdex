@@ -1,112 +1,99 @@
-=Decred DEX=
-
-This is the repository for the Decred Distributed Exchange (DEX), for which this
-document provides the '''DRAFT''' specification.
+=Decred DEX Specification=
 
 __TOC__
 
-==Abstract==
-
-We propose here a decentralized, non-custodial, trustless, and intermediary-free
-cryptocurrency exchange platform.
-
-The primary service provided by the decentralized exchange (DEX) is to match
-clients who would like to trade an asset of one type for an asset of another
-type.
-Trades are facilitated by a trustless atomic swap negotiation process carried
-out with all the cryptographic security guarantees of the respective blockchains.
-
-A custom order matching procedure is offered to mitigate common abusive trading
-patterns associated with high-frequency trading (HFT) algorithms and other
-bot-driven trading.
-Elimination of per-trade fees disincentivizes deceptive bookkeeping practices
-commonly observed in centralized exchanges.
-
-To encourage open and active development, descriptions of critical protocol
-components and a full client-server API definition are provided.
-
 ==Introduction==
 
-Existing cryptocurrency exchange platforms fall into 4 overlapping categories:
-custodial corporate entities, services, tokens, and blockchains.
-The vast majority of cryptocurrency trading is currently performed via
-centralized, custodial exchanges.
-Since trades at these exchanges take place off-chain, they generally settle
-instantly to make funds available for further trading.
-This is a nice feature, but it practically guarantees that the market
-will be a target of HFT and algorithmic traders, which can be unpredictable and
-malicious.
-Additionally, such exchanges earn revenue by collecting trading fees.
-Such a model creates incentives for an exchange to artificially inflate their
-volume by wash trading &#91;1&#93;.
-By one study, it has been estimated that more than 95% of reported exchange
-volume is faked
-[https://www.sec.gov/comments/sr-nysearca-2019-01/srnysearca201901-5164833-183434.pdf &#91;2&#93;].
+Decred DEX is a decentralized, non-custodial, trustless, and intermediary-free
+cryptocurrency exchange platform. Decred DEX aims to solve a number of issues
+with existing systems of exchange.
 
-Several DEX projects have been created to address some of these issues by
+Currently, the majority of cryptocurrency trading is performed via centralized,
+custodial exchanges.
+These exchanges have filled an important role in the blockchain ecosystem, but
+are in many ways antithetical to the spirit of blockchain.
+Blockchain is decentralized, trustless, and enables self-custody, but when a
+user must send their coin to a third party in order to trade, all of those
+benefits are lost.
+
+Several projects have attempted to address this misalignment by
 replacing the exchange with a blockchain or a token, and they have met with
 varying degrees of success.
 While they remove the trusted third party (TTP), they insert their own products
-as a means to capture the trading fees, which replaces the TTP friction with a
+as a means to capture trading fees, which replaces the TTP friction with a
 new platform friction.
-The simple act of collecting trading fees serves to act as an incentive to
-centralize on a given solution, which runs counter to a system of open voluntary
-exchange.
-While a chain or token serves to remove the TTP, it also creates challenges with
-order matching, which typically occurs via the intermediate chain or token.
 
-The DEX described in this document is based on atomic swaps [https://github.com/decred/atomicswap &#91;3&#93;], signed and
-transmitted by the clients. Thus, the exchange of funds is trustless and secure.
-The purpose of the DEX is to facilitate such peer-to-peer trades, while
-disincentivizing manipulative or abusive trading patterns, and utilizing an
-independently verifiable order matching algorithm that is difficult to game by
-traders and operators alike.
+A more robust solution is based on atomic swap technology [https://github.com/decred/atomicswap &#91;2&#93;], 
+which enables trustless exchange directly between wallets. 
+Until recently, few blockchains supported atomic swaps, but the past few years
+have seen widespread adoption, and such an exchange is now possible.
+
+Decred DEX is the first exchange built on atomic swaps that doesn't collect
+trading fees. The primary service offered by DEX is to match traders through a
+familiar interface based on markets and orders. Decred DEX's novel matching
+algorithm disincintevizes manipulative, abusive trading practices commonly seen
+on centralized exchanges. The epoch-based match cycle is difficult to game by
+the client, while for the server, cryptographic order commitments make
+censorship and unfair matching difficult.
 
 While trades are fully trustless, steps are taken to discourage malicious
 clients from hindering normal trade activity.
-Registered clients are bound by the
+All clients pay a non-refundable registration fee.
+Registered clients are then bound to the
 [[community.mediawiki|rules of community conduct]], violation of which typically
-results in loss of trading privileges.
-Serious violations may result in a permanent ban, in which case the affected user
-must pay another registration fee to continue using the DEX.
+results in loss of trading privileges up to and including a permanent ban.
 
-The following list of non-negotiable, fundamental, DEX properties served as a
-basis for design.
+In the interest of maintaining active, open-source, community-driven
+development, this specification document describes the protocols necessary for
+implementation of both DEX clients and DEX servers.
 
-# Non-custodial. Assets must be traded directly between clients, without the exchange being in control of assets at any time.
+==Contents==
 
-# Intermediary-free. Trades must be executed in a secure and trustless manner.
-
-# Resistant to malicious or manipulative trading. Deliberately disruptive behavior should be disincentivized, and volume manipulation mitigated by pseudo-random epoch-based order matching.
-
-==Sections==
-
-The remainder of this document details the design of the proposed DEX.
+The remaining content details the Decred DEX protocol.
 It is intended as a first resource when implementing servers and clients.
 Continuing client-server interoperability will likely depend on subtle aspects
-of the specification laid out in this document, especially the following
-critical sections.
+of the specification laid out in this document.
 
 '''&#91;1&#93; [[comm.mediawiki|Communication Protocols]]''' describes the
 messaging protocols and communication layer technologies that are to be used
 for the DEX API.
 
+* [[comm.mediawiki#WebSockets|WebSockets]]
 * [[comm.mediawiki/#Encoding|Data Encodings]]
+** [[comm.mediawiki/#Timestamps|Timestamps]]
+** [[comm.mediawiki/#Rate_Encoding|Rate Encoding]]
+** [[comm.mediawiki/#Coin_ID|Coin ID]]
 * [[comm.mediawiki/#Message_Protocol|Message Protocol]]
 * [[comm.mediawiki/#Session_Authentication|Session Authentication]]
+* [[comm.mediawiki/#HTTP|HTTP]]
 
 '''&#91;2&#93; [[fundamentals.mediawiki|Distributed Exchange Design Fundamentals]]'''
 describes the notable design aspects that facilitate an exchange service with
 the features described above.
 
 * [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]]
+** [[fundamentals.mediawiki/#Global_Variables|Global Variables]]
+** [[fundamentals.mediawiki/#Asset_Variables|Asset Variables]]
+** [[fundamentals.mediawiki/#Market_Variables|Market Variables]]
+** [[fundamentals.mediawiki/#Configuration_Data_Request|Configuration Data Request]]
 * [[fundamentals.mediawiki/#Epochbased_Order_Matching|Epoch-based Order Matching]]
+** [[fundamentals.mediawiki/#Epoch_Time|Epoch Time]]
+** [[fundamentals.mediawiki/#Pseudorandom_Order_Matching|Pseudorandom Order Matching]]
 * [[fundamentals.mediawiki/#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|Identification]]
+* [[fundamentals.mediawiki/#Blockchain_Interaction|Blockchain Interaction]]
+* [[fundamentals.mediawiki/#Adding_New_Assets|Adding New Assets]]
 
 '''&#91;3&#93; [[admin.mediawiki|Distributed Exchange Administration]]''' describes
 the tasks required to administer the exchange.
 
+* [[admin.mediawiki/#Exchange_Variables|Exchange Variables]]
+* [[admin.mediawiki/#Perasset_Variables|Per-asset Variables]]
+* [[admin.mediawiki/#Administration_API|Administration API]]
+
 '''&#91;4&#93; [[accounts.mediawiki|Client Accounts]]''' details account creation.
+
+* [[accounts.mediawiki/#Step_1_Registration|Registration]]
+* [[accounts.mediawiki/#Step_2_Fee_Notification|Fee Notification]]
 
 '''&#91;5&#93; [[orders.mediawiki|Client Order Management]]''' details the different
 order types and the client/server workflows required to synchronize the order
@@ -114,11 +101,23 @@ book and place orders.
 
 * [[orders.mediawiki/#Connection_Persistence|Connection Persistence]]
 * [[orders.mediawiki/#Order_Book_Subscriptions|Order Book Subscriptions]]
+* [[orders.mediawiki/#Order_Preparation|Order Preparation]]
+** [[orders.mediawiki/#Calculating_Transaction_Fees|Calculating Transaction Fees]]
+** [[orders.mediawiki/#Coin_Preparation|Coin Preparation]]
+** [[orders.mediawiki/#Order_Commitment|Order Commitment]]
+** [[orders.mediawiki/#Order_Signing|Order Signing]]
+** [[orders.mediawiki/#Order_ID|Order ID]]
 * [[orders.mediawiki/#Order_Types|Order Types]]
+** [[orders.mediawiki/#Limit_Order|Limit Order]]
+** [[orders.mediawiki/#Market_Order|Market Order]]
+*** [[orders.mediawiki/#Market_Buy_Orders|Market Buy Orders]]
+** [[orders.mediawiki/#Cancel_Order|Cancel Order]]
 * [[orders.mediawiki/#Preimage_Reveal|Preimage Handling]]
+* [[orders.mediawiki/#Match_Revocation|Match Revocation]]
 * [[orders.mediawiki/#Match_negotiation|Match Negotiation]]
+* [[orders.mediawiki/#Trade_Suspension|Trade Suspension]]
 
-'''&#91;6&#93; [[api.mediawiki| Data API]]''' defines http and websocket APIs to browse
+'''&#91;6&#93; [[api.mediawiki| Data API]]''' defines http and WebSocket APIs to browse
 trade history.
 
 '''&#91;7&#93; [[atomic.mediawiki|Atomic Settlement]]''' walks through the settlement
@@ -126,6 +125,9 @@ process with a couple of examples to provide a high-level overview.
 
 '''&#91;8&#93; [[community.mediawiki|Community Conduct]]''' describes the system of rules
 to which clients interacting with the DEX must adhere.
+
+* [[community.mediawiki/#Rules_of_Community_Conduct|Rules of Community Conduct]]
+* [[community.mediawiki/#Penalties|Penalties]]
 
 '''&#91;9&#93; [[references.mediawiki|References]]''' lists references used in the development
 of the specification.
