@@ -1256,6 +1256,7 @@ func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
 // Create a closure that will call t.Fatal if an error is non-nil.
 func makeEnsureNilErr(t *testing.T) func(error) {
 	return func(err error) {
+		t.Helper()
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
@@ -1264,6 +1265,7 @@ func makeEnsureNilErr(t *testing.T) func(error) {
 
 func makeMustBeError(t *testing.T) func(error, string) {
 	return func(err error, tag string) {
+		t.Helper()
 		if err == nil {
 			t.Fatalf("no error for %s", tag)
 		}
@@ -1274,6 +1276,7 @@ func makeMustBeError(t *testing.T) func(error, string) {
 // msgjson.RPCError of the correct type.
 func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 	return func(user *tUser) {
+		t.Helper()
 		msg, resp := rig.auth.getResp(user.acct)
 		if msg == nil {
 			t.Fatalf("no response for %s", user.lbl)
@@ -1317,6 +1320,7 @@ func TestFatalStorageErr(t *testing.T) {
 }
 
 func testSwap(t *testing.T, rig *testRig) {
+	t.Helper()
 	ensureNilErr := makeEnsureNilErr(t)
 
 	// Step through the negotiation process. No errors should be generated.
@@ -1399,6 +1403,7 @@ func TestNoAck(t *testing.T) {
 	// Check that the response from the Swapper is an
 	// msgjson.SettlementSequenceError.
 	checkSeqError := func(user *tUser) {
+		t.Helper()
 		msg, resp := rig.auth.getResp(user.acct)
 		if msg == nil {
 			t.Fatalf("checkSeqError: no message")
@@ -1585,6 +1590,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		tickMempool()
 	}
 	checkRevokeMatch := func(user *tUser, i int) {
+		t.Helper()
 		req := rig.auth.getReq(user.acct)
 		if req == nil {
 			t.Fatalf("no match_cancellation")
@@ -1610,6 +1616,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 	// check that a penalty was assigned to the appropriate user, and that a
 	// revoke_match message is sent to both users.
 	tryExpire := func(i, j int, step order.MatchStatus, jerk, victim *tUser, node *TAsset) bool {
+		t.Helper()
 		if i != j {
 			return false
 		}
@@ -1714,6 +1721,7 @@ func TestSigErrors(t *testing.T) {
 		apply(user) // put them back now that we have a copy
 	}
 	testAction := func(stepFunc func(bool) error, user *tUser) {
+		t.Helper()
 		// First do it with an auth error.
 		rig.auth.authErr = dummyError
 		stash(user) // make a copy of this user's next req/resp pair
@@ -2517,6 +2525,7 @@ func TestTxMonitored(t *testing.T) {
 	// Confirm both redeem txns up to SwapConf so they are no longer monitored.
 	matchInfo.db.makerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
 	matchInfo.db.takerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
+	sendBlock(rig.abcNode) // trigger process block to remove them
 
 	if rig.swapper.TxMonitored(taker.acct, makerLockedAsset, takerRedeemTx) {
 		t.Errorf("taker redeem %s (asset %d) was still monitored",
@@ -2528,10 +2537,7 @@ func TestTxMonitored(t *testing.T) {
 			makerRedeemTx, takerLockedAsset)
 	}
 
-	// The match should also be gone from matchTracker, so the contracts should
-	// no longer be monitored either.
-
-	sendBlock(rig.abcNode)
+	// The contracts should no longer be monitored either.
 
 	if rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
 		t.Errorf("maker contract %s (asset %d) was still monitored",

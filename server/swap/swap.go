@@ -971,51 +971,43 @@ func (s *Swapper) processBlock(block *blockNotification) {
 func (s *Swapper) RedeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
 	mStatus.mtx.RLock()
 	defer mStatus.mtx.RUnlock()
+
+	// If there is no maker redeem, there is no taker redeem.
+	if mStatus.redeemTime.IsZero() {
+		return // both false
+	}
+
+	// Check maker's redemption confirmations.
+	confs, err := mStatus.redemption.Confirmations()
+	if err != nil {
+		log.Errorf("Confirmations failed for maker redemption %v: err",
+			mStatus.redemption.TxID(), err) // Severity?
+		return
+	}
+	makerRedeemComplete = confs >= int64(s.coins[mStatus.redeemAsset].SwapConf)
+
+	// Even if taker swap has enough confirms, taker is only complete if the
+	// maker is complete because MatchComplete follows MakerRedeemed.
+	if !makerRedeemComplete {
+		return
+	}
+
 	tStatus.mtx.RLock()
 	defer tStatus.mtx.RUnlock()
 
-	return s.redeemStatus(mStatus, tStatus)
-}
-
-// redeemStatus is not thread-safe with respect to the swapStatuses. The caller
-// must lock each swapStatus to guard concurrent status access.
-func (s *Swapper) redeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplete, takerRedeemComplete bool) {
-	makerRedeemComplete = s.makerRedeemStatus(mStatus)
-	// Taker is only complete if the maker is complete because
-	// order.MatchComplete follows order.MakerRedeemed.
-	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
-		confs, err := tStatus.redemption.Confirmations()
-		if err != nil {
-			log.Errorf("Confirmations failed for taker redemption %v: err",
-				tStatus.redemption.TxID(), err)
-			return
-		}
-		takerRedeemComplete = confs >= int64(s.coins[tStatus.redeemAsset].SwapConf)
+	// Maker redeem is complete => check taker redeem.
+	if tStatus.redeemTime.IsZero() {
+		return // no taker redeem
 	}
-	return
-}
 
-// MakerRedeemStatus checks maker redemption completion status The taker asset
-// is required to check the confirmation requirement.
-func (s *Swapper) MakerRedeemStatus(mStatus *swapStatus) (makerRedeemComplete bool) {
-	mStatus.mtx.RLock()
-	defer mStatus.mtx.RUnlock()
-
-	return s.makerRedeemStatus(mStatus)
-}
-
-// makerRedeemStatus is not thread-safe with respect to the swapStatus. The
-// caller must lock the swapStatus to guard concurrent status access.
-func (s *Swapper) makerRedeemStatus(mStatus *swapStatus) (makerRedeemComplete bool) {
-	if !mStatus.redeemTime.IsZero() {
-		confs, err := mStatus.redemption.Confirmations()
-		if err != nil {
-			log.Errorf("Confirmations failed for maker redemption %v: err",
-				mStatus.redemption.TxID(), err) // Severity?
-			return
-		}
-		makerRedeemComplete = confs >= int64(s.coins[mStatus.redeemAsset].SwapConf)
+	confs, err = tStatus.redemption.Confirmations()
+	if err != nil {
+		log.Errorf("Confirmations failed for taker redemption %v: err",
+			tStatus.redemption.TxID(), err)
+		return
 	}
+	takerRedeemComplete = confs >= int64(s.coins[tStatus.redeemAsset].SwapConf)
+
 	return
 }
 
@@ -1026,15 +1018,8 @@ func (s *Swapper) makerRedeemStatus(mStatus *swapStatus) (makerRedeemComplete bo
 // additional swaps prior to FundConf. e.g. OrderRouter may allow coins to fund
 // orders where: (coins.confs >= FundConf) OR TxMonitored(coins.tx).
 func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
-
 	checkMatch := func(match *matchTracker) bool {
-		// Both maker and taker statuses must be locked to check redeem status
-		// and swap tx id.
 		makerStatus, takerStatus := match.makerStatus, match.takerStatus
-		makerStatus.mtx.RLock()
-		defer makerStatus.mtx.RUnlock()
-		takerStatus.mtx.RLock()
-		defer takerStatus.mtx.RUnlock()
 
 		// The swap contract of either the maker or taker must correspond to
 		// specified asset to be of interest.
@@ -1044,21 +1029,14 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 
 			// For maker, check the swap txid.
 			if user == match.Maker.User() {
-				// The swap contract tx is considered monitored until the swap
-				// is complete, regardless of confirms.
+				makerStatus.mtx.RLock()
+				defer makerStatus.mtx.RUnlock()
 				return makerStatus.swap != nil && makerStatus.swap.TxID() == txid
 			}
 
-			// For taker, check the redeem txid, but only if it is not complete.
-			_, takerRedeemDone := s.redeemStatus(makerStatus, takerStatus)
-			if takerRedeemDone {
-				// Taker has a redemption that has reached required confirms.
-				return false // so no longer monitored?
-			}
-
-			// Taker either has not redeemed or the redemption has not reached
-			// the required confirmations. If the txid matches the immature
-			// redeem, it is considered monitored.
+			// Check taker's redeem txid.
+			takerStatus.mtx.RLock()
+			defer takerStatus.mtx.RUnlock()
 			return takerStatus.redemption != nil && takerStatus.redemption.TxID() == txid
 
 		case takerStatus.swapAsset:
@@ -1066,20 +1044,14 @@ func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string)
 
 			// For taker, check the swap txid.
 			if user == match.Taker.User() {
-				// The swap contract tx is considered monitored until the swap
-				// is complete, regardless of confirms.
+				takerStatus.mtx.RLock()
+				defer takerStatus.mtx.RUnlock()
 				return takerStatus.swap != nil && takerStatus.swap.TxID() == txid
 			}
 
-			// For maker, check the redeem txid, but only if it is not complete.
-			if s.makerRedeemStatus(makerStatus) {
-				// Maker has a redemption that has reached required confirms.
-				return false // so no longer monitored?
-			}
-
-			// Maker either has not redeemed or the redemption has not reached
-			// the required confirmations. If the txid matches the immature
-			// redeem, it is considered monitored.
+			// Check the maker's redeem txid.
+			makerStatus.mtx.RLock()
+			defer makerStatus.mtx.RUnlock()
 			return makerStatus.redemption != nil && makerStatus.redemption.TxID() == txid
 		}
 
