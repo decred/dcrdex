@@ -4,13 +4,25 @@ set -ex
 
 dir=$(pwd)
 # list of all modules to test
-modules=". client/cmd/dexcctl"
+modules=". server/cmd/dcrdex client/cmd/dexc client/cmd/dexcctl"
 
-# Test each module separately.
+# For each module, run go mod tidy, build and run test.
 for m in $modules
 do
 	cd $dir/$m
-	# run tests
+
+  # run `go mod tidy` and fail if the git status of go.mod and/or
+  # go.sum changes
+  MOD_STATUS=$(git status --porcelain go.mod go.sum)
+  go mod tidy
+  UPDATED_MOD_STATUS=$(git status --porcelain go.mod go.sum)
+  if [ "$UPDATED_MOD_STATUS" != "$MOD_STATUS" ]; then
+    echo "$m: running 'go mod tidy' modified go.mod and/or go.sum"
+    exit 1
+  fi
+
+	# build and run tests
+	if [ "$m" != '.' ]; then go build; fi
 	env GORACE="halt_on_error=1" go test -race -short ./...
 done
 
@@ -23,12 +35,6 @@ go test $dumptags harness ./client/core
 go test $dumptags dcrlive ./server/asset/dcr
 go test $dumptags btclive ./server/asset/btc
 go test $dumptags pgonline ./server/db/driver/pg
-
-for path in server/cmd/dcrdex client/cmd/dexc client/cmd/dexcctl
-do
-	cd $dir/$path
-	go build
-done
 
 # Return to initial directory.
 cd $dir
