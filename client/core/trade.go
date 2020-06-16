@@ -456,13 +456,7 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 		return false
 	}
 
-	walletLocked := !t.wallets.toWallet.unlocked()
 	if dbMatch.Side == order.Maker && metaData.Status == order.TakerSwapCast {
-		if walletLocked {
-			log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked",
-				t.ID(), match.id, unbip(t.wallets.toAsset.ID))
-			return false
-		}
 		coin := match.counterSwap.Coin()
 		confs, err := coin.Confirmations()
 		if err != nil {
@@ -474,11 +468,6 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 		return confs >= assetCfg.SwapConf
 	}
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
-		if walletLocked {
-			log.Errorf("cannot redeem order %s, match %s, because %s wallet is not unlocked",
-				t.ID(), match.id, unbip(t.wallets.toAsset.ID))
-			return false
-		}
 		return true
 	}
 	return false
@@ -528,9 +517,6 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 	counts := make(assetCounter)
 	errs := newErrorSet(t.dc.acct.host + " tick: ")
 
-	t.matchMtx.Lock()
-	defer t.matchMtx.Unlock()
-
 	// Check all matches for and resend pending requests as necessary.
 	if err := t.resendPendingRequests(); err != nil {
 		errs.addErr(err)
@@ -538,6 +524,8 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 
 	// Check all matches and send swap, redeem or refund as necessary.
 	var sent, quoteSent, received, quoteReceived uint64
+	t.matchMtx.Lock()
+	defer t.matchMtx.Unlock()
 	for _, match := range t.matches {
 		switch {
 		case t.isSwappable(match):
@@ -624,6 +612,8 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 func (t *trackedTrade) resendPendingRequests() error {
 	errs := newErrorSet("resendPendingRequest: order %s - ", t.ID())
 
+	t.matchMtx.Lock()
+	defer t.matchMtx.Unlock()
 	for _, match := range t.matches {
 		dbMatch, _, proof, auth := match.parts()
 		// do not resend pending requests for revoked matches or matches where
@@ -641,7 +631,7 @@ func (t *trackedTrade) resendPendingRequests() error {
 		case side == order.Maker && status == order.MakerRedeemed:
 			redeemCoinID = proof.MakerRedeem
 		case side == order.Taker && status == order.MatchComplete:
-			swapCoinID = proof.TakerRedeem
+			redeemCoinID = proof.TakerRedeem
 		}
 		var err error
 		if swapCoinID != nil && auth.InitSig == nil { // resend pending `init` request
@@ -842,7 +832,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 func (t *trackedTrade) finalizeRedeemAction(match *matchTracker, coinID []byte) error {
 	_, _, proof, auth := match.parts()
 	if auth.RedeemSig != nil {
-		return fmt.Errorf("'redeeem' already sent for match %v", match.id)
+		return fmt.Errorf("'redeem' already sent for match %v", match.id)
 	}
 	errs := newErrorSet("")
 
