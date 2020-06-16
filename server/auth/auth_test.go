@@ -115,7 +115,8 @@ func (c *TRPCClient) Request(msg *msgjson.Message, f func(comms.Link, *msgjson.M
 	})
 	return c.requestErr
 }
-func (c *TRPCClient) Banish() { c.banished = true }
+func (c *TRPCClient) Disconnect() {}
+func (c *TRPCClient) Banish()     { c.banished = true }
 func (c *TRPCClient) getReq() *tReq {
 	if len(c.reqs) == 0 {
 		return nil
@@ -343,10 +344,13 @@ func TestConnect(t *testing.T) {
 	}) // 50%
 	defer rig.storage.setRatioData(&ratioData{}) // clean slate
 
-	// Fail on account failing cancel ratio.
+	// Close account on connect with failing cancel ratio.
 	rig.mgr.cancelThresh = 0.2
 	user := tNewUser(t)
-	tryConnectUser(t, user, true)
+	tryConnectUser(t, user, false)
+	if rig.storage.closedID != user.acctID {
+		t.Fatalf("Expected account %v to be closed on connect, got %v", user.acctID, rig.storage.closedID)
+	}
 	rig.storage.closedID = account.AccountID{}
 	rig.mgr.cancelThresh = 0.8 // passable
 
@@ -421,7 +425,7 @@ func TestConnect(t *testing.T) {
 	reqID = comms.NextID()
 	a10 := &tPayload{A: 10}
 	msg, _ = msgjson.NewRequest(reqID, "request", a10)
-	rig.mgr.Request(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {})
+	rig.mgr.RequestWithTimeout(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {}, 0, func() {})
 	// The a10 message should be in the new connection
 	if user.conn.getReq() != nil {
 		t.Fatalf("old connection received a request after reconnection")
@@ -429,6 +433,8 @@ func TestConnect(t *testing.T) {
 	if reuser.conn.getReq() == nil {
 		t.Fatalf("new connection did not receive the request")
 	}
+
+	// TODO: test RequestWhenConnected
 }
 
 func TestAccountErrors(t *testing.T) {
@@ -493,16 +499,17 @@ func TestAccountErrors(t *testing.T) {
 			msgjson.AuthenticationError, rpcErr.Code)
 	}
 
-	// closed account
+	// closed accounts allowed to connect
+	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first
 	rig.storage.closed = true
 	rpcErr = rig.mgr.handleConnect(user.conn, connect)
 	rig.storage.closed = false
-	if rpcErr == nil {
-		t.Fatalf("no error for closed account")
+	if rpcErr != nil {
+		t.Fatalf("should be no error for closed account")
 	}
-	if rpcErr.Code != msgjson.AuthenticationError {
-		t.Fatalf("wrong error for closed account. wanted %d, got %d",
-			msgjson.AuthenticationError, rpcErr.Code)
+	client := rig.mgr.user(user.acctID)
+	if !client.isSuspended() {
+		t.Errorf("client should have been in suspended state")
 	}
 
 }
@@ -675,6 +682,8 @@ func TestSend(t *testing.T) {
 	if tr.A != 10 {
 		t.Fatalf("expected A = 10, got A = %d", tr.A)
 	}
+
+	// TODO: RequestWhenConnected
 }
 
 func TestPenalize(t *testing.T) {
@@ -682,11 +691,13 @@ func TestPenalize(t *testing.T) {
 	connectUser(t, user)
 	foreigner := tNewUser(t)
 
+	// Cannot set account as suspended in the clients map if they are not
+	// connected, but should still suspend in DB.
 	rig.mgr.Penalize(foreigner.acctID, 0)
 	var zeroAcct account.AccountID
-	if rig.storage.closedID != zeroAcct {
-		t.Fatalf("foreigner penalty stored")
-	}
+	// if rig.storage.closedID != zeroAcct {
+	// 	t.Fatalf("foreigner penalty stored")
+	// }
 	rig.mgr.Penalize(user.acctID, 0)
 	if rig.storage.closedID != user.acctID {
 		t.Fatalf("penalty not stored")

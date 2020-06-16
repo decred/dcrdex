@@ -18,13 +18,14 @@ const CoinNotFoundError = dex.Error("coin not found")
 // The Backend interface is an interface for a blockchain backend.
 type Backend interface {
 	dex.Runner
-	// Contract should return a Contract only for outputs that would be spendable
-	// on the blockchain immediately. The redeem script is required in order to
+	// Contract returns a Contract only for outputs that would be spendable on
+	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
 	Contract(coinID []byte, redeemScript []byte) (Contract, error)
 	// ValidateSecret checks that the secret satisfies the contract.
 	ValidateSecret(secret, contract []byte) bool
-	// Redemption returns the redemption at the specified location.
+	// Redemption returns a Coin for redemptionID, a transaction input, that
+	// spends contract ID, an output containing the swap contract.
 	Redemption(redemptionID, contractID []byte) (Coin, error)
 	// FundingCoin returns the unspent coin at the specified location. Coins
 	// with non-standard pkScripts or scripts that require zero signatures to
@@ -45,17 +46,26 @@ type Backend interface {
 	// ValidateContract ensures that the swap contract is constructed properly
 	// for the asset.
 	ValidateContract(contract []byte) error
+	// VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID
+	// and retrieving the corresponding Coin. If the coin is not found or no
+	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
+	// for more UTXO data.
+	VerifyUnspentCoin(coinID []byte) error
 }
 
-// Coin represents a transaction input or ouptut.
+// Coin represents a transaction input or output.
 type Coin interface {
-	// Confirmations returns the number of confirmations for a Coin's transaction.
-	// Because a Coin can become invalid after once being considered valid, this
-	// condition should be checked for during confirmation counting and an error
-	// returned if this Coin is no longer ready to spend. An unmined transaction
-	// should have zero confirmations. A transaction in the current best block
-	// should have one confirmation. A negative number can be returned if error
-	// is not nil.
+	// Confirmations returns the number of confirmations for a Coin's
+	// transaction. Because a Coin can become invalid after once being
+	// considered valid, this condition should be checked for during
+	// confirmation counting and an error returned if this Coin is no longer
+	// ready to spend. An unmined transaction should have zero confirmations. A
+	// transaction in the current best block should have one confirmation. A
+	// negative number can be returned if error is not nil.
+	//
+	// TODO: This really must get a timeout, and a short one, as the Swapper
+	// will block at inconvenient times. The timeout can be at the RPC client
+	// level or a wrapper around the underlying RPC calls
 	Confirmations() (int64, error)
 	// ID is the coin ID.
 	ID() []byte
@@ -63,6 +73,10 @@ type Coin interface {
 	TxID() string
 	// String is a human readable representation of the Coin.
 	String() string
+	// Value is the coin value.
+	Value() uint64
+	// FeeRate returns the transaction fee rate, in atoms/byte equivalent.
+	FeeRate() uint64
 }
 
 // FundingCoin is some unspent value on the blockchain.
@@ -76,21 +90,15 @@ type FundingCoin interface {
 	// SpendSize returns the size of the serialized input that spends this
 	// FundingCoin.
 	SpendSize() uint32
-	// Value is the output value.
-	Value() uint64
 }
 
 // Contract is an atomic swap contract.
 type Contract interface {
 	Coin
-	// Value is the contract value.
-	Value() uint64
-	// Address retrieves the receiving address of the contract.
-	Address() string
-	// FeeRate returns the transaction fee rate, in atoms/byte equivalent.
-	FeeRate() uint64
-	// Script is the contract redeem script.
-	Script() []byte
+	// SwapAddress is the receiving address of the swap contract.
+	SwapAddress() string
+	// RedeemScript is the contract redeem script.
+	RedeemScript() []byte
 	// LockTime is the refund locktime.
 	LockTime() time.Time
 }

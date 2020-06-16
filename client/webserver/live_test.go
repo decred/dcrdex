@@ -39,10 +39,12 @@ const (
 )
 
 var (
-	tCtx          context.Context
-	maxDelay      = time.Second * 2
-	epochDuration = time.Second * 30 // milliseconds
-	feedPeriod    = time.Second * 10
+	tCtx                  context.Context
+	maxDelay              = time.Second * 2
+	epochDuration         = time.Second * 30 // milliseconds
+	feedPeriod            = time.Second * 10
+	forceDisconnectWallet bool
+	wipeWalletBalance     bool
 )
 
 func randomDelay() {
@@ -113,7 +115,7 @@ func mkMrkt(base, quote string) *core.Market {
 	}
 }
 
-func mkSupportedAsset(symbol string, state *tWalletState, bal *core.BalanceSet) *core.SupportedAsset {
+func mkSupportedAsset(symbol string, state *tWalletState, bal *db.BalanceSet) *core.SupportedAsset {
 	assetID, _ := dex.BipSymbolID(symbol)
 	winfo := winfos[assetID]
 	var wallet *core.WalletState
@@ -206,16 +208,17 @@ var tExchanges = map[string]*core.Exchange{
 	secondDEX: {
 		Host: "thisdexwithalongname.com",
 		Assets: map[uint32]*dex.Asset{
-			0:  mkDexAsset("btc"),
-			2:  mkDexAsset("ltc"),
-			42: mkDexAsset("dcr"),
-			22: mkDexAsset("mona"),
-			28: mkDexAsset("vtc"),
+			0:   mkDexAsset("btc"),
+			2:   mkDexAsset("ltc"),
+			42:  mkDexAsset("dcr"),
+			22:  mkDexAsset("mona"),
+			28:  mkDexAsset("vtc"),
+			141: mkDexAsset("kmd"),
 		},
 		Markets: map[string]*core.Market{
-			mkid(42, 28): mkMrkt("dcr", "vtc"),
-			mkid(0, 2):   mkMrkt("btc", "ltc"),
-			mkid(22, 2):  mkMrkt("mona", "ltc"),
+			mkid(42, 28):  mkMrkt("dcr", "vtc"),
+			mkid(0, 2):    mkMrkt("btc", "ltc"),
+			mkid(22, 141): mkMrkt("mona", "kmd"),
 		},
 		Connected: true,
 	},
@@ -257,7 +260,7 @@ type TCore struct {
 	inited      bool
 	mtx         sync.RWMutex
 	wallets     map[uint32]*tWalletState
-	balances    map[uint32]*core.BalanceSet
+	balances    map[uint32]*db.BalanceSet
 	dexAddr     string
 	marketID    string
 	base        uint32
@@ -276,7 +279,7 @@ type TCore struct {
 func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
-		balances: map[uint32]*core.BalanceSet{
+		balances: map[uint32]*db.BalanceSet{
 			0:  randomBalanceSet(),
 			2:  randomBalanceSet(),
 			42: randomBalanceSet(),
@@ -439,7 +442,7 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {
 	}
 }
 
-func randomBalanceSet() *core.BalanceSet {
+func randomBalanceSet() *db.BalanceSet {
 	randVal := func() uint64 {
 		return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6))
 	}
@@ -450,12 +453,13 @@ func randomBalanceSet() *core.BalanceSet {
 			Locked:    randVal(),
 		}
 	}
-	return &core.BalanceSet{
+	return &db.BalanceSet{
 		ZeroConf: randBal(),
 		XC: map[string]*asset.Balance{
 			firstDEX:  randBal(),
 			secondDEX: randBal(),
 		},
+		Stamp: time.Now().Add(-time.Duration(int64(2 * float64(time.Hour) * rand.Float64()))),
 	}
 }
 
@@ -467,8 +471,14 @@ func randomBalanceNote(assetID uint32) *core.BalanceNote {
 	}
 }
 
-func (c *TCore) AssetBalances(assetID uint32) (*core.BalanceSet, error) {
-	return c.balances[assetID], nil
+func (c *TCore) AssetBalances(assetID uint32) (*db.BalanceSet, error) {
+	balNote := randomBalanceNote(assetID)
+	balNote.Balances.Stamp = time.Now()
+	c.noteFeed <- balNote
+	// c.mtx.Lock()
+	// c.balances[assetID] = balNote.Balances
+	// c.mtx.Unlock()
+	return balNote.Balances, nil
 }
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
@@ -527,9 +537,8 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 		return nil
 	}
 	return &core.WalletState{
-		Symbol:  unbip(assetID),
-		AssetID: assetID,
-
+		Symbol:   unbip(assetID),
+		AssetID:  assetID,
 		Open:     w.open,
 		Running:  w.running,
 		Address:  ordertest.RandomAddress(),
@@ -555,7 +564,7 @@ func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	defer c.mtx.RUnlock()
 	wallet := c.wallets[assetID]
 	if wallet == nil {
-		return fmt.Errorf("attempting to open non-existent test wallet")
+		return fmt.Errorf("attempting to open non-existent test wallet for asset ID %d", assetID)
 	}
 	wallet.running = true
 	wallet.open = true
@@ -567,7 +576,7 @@ func (c *TCore) ConnectWallet(assetID uint32) error {
 	defer c.mtx.RUnlock()
 	wallet := c.wallets[assetID]
 	if wallet == nil {
-		return fmt.Errorf("attempting to open non-existent test wallet")
+		return fmt.Errorf("attempting to connect to non-existent test wallet for asset ID %d", assetID)
 	}
 	wallet.running = true
 	return nil
@@ -580,6 +589,17 @@ func (c *TCore) CloseWallet(assetID uint32) error {
 	if wallet == nil {
 		return fmt.Errorf("attempting to close non-existent test wallet")
 	}
+
+	if wipeWalletBalance {
+		bals := c.balances[assetID]
+		delete(bals.XC, secondDEX)
+		delete(bals.XC, firstDEX)
+	}
+
+	if forceDisconnectWallet {
+		wallet.running = false
+	}
+
 	wallet.open = false
 	return nil
 }
@@ -634,7 +654,7 @@ func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	}
 }
 
-func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error) {
+func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
 	return &tCoin{id: []byte{0xde, 0xc7, 0xed}}, nil
 }
 
@@ -682,6 +702,14 @@ out:
 			mktID := c.marketID
 			baseID := c.base
 			quoteID := c.quote
+			baseConnected := false
+			if w := c.wallets[baseID]; w != nil && w.running {
+				baseConnected = true
+			}
+			quoteConnected := false
+			if w := c.wallets[quoteID]; w != nil && w.running {
+				quoteConnected = true
+			}
 			c.mtx.RUnlock()
 			c.noteFeed <- &core.EpochNotification{
 				Host:         dexAddr,
@@ -689,9 +717,14 @@ out:
 				Notification: db.NewNotification("epoch", "", "", db.Data),
 				Epoch:        getEpoch(),
 			}
-			// // randomize the balance
-			c.noteFeed <- randomBalanceNote(baseID)
-			c.noteFeed <- randomBalanceNote(quoteID)
+
+			// randomize the balance
+			if baseID != 141 && baseConnected { // komodo unsupported
+				c.noteFeed <- randomBalanceNote(baseID)
+			}
+			if quoteID != 141 && quoteConnected { // komodo unsupported
+				c.noteFeed <- randomBalanceNote(quoteID)
+			}
 
 			c.orderMtx.Lock()
 			// Send limit orders as newly booked.
@@ -721,6 +754,8 @@ func TestServer(t *testing.T) {
 	numSells = 0
 	feedPeriod = 500 * time.Millisecond
 	register := true
+	wipeWalletBalance = true
+	forceDisconnectWallet = true
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())

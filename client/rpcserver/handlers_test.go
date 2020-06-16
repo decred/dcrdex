@@ -10,7 +10,9 @@ import (
 	"reflect"
 	"testing"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 )
@@ -711,6 +713,75 @@ func TestHandleCancel(t *testing.T) {
 		tc := &TCore{cancelErr: test.cancelErr}
 		r := &RPCServer{core: tc}
 		payload := handleCancel(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// tCoin satifies the asset.Coin interface.
+type tCoin struct{}
+
+func (tCoin) ID() dex.Bytes {
+	return nil
+}
+func (tCoin) String() string {
+	return ""
+}
+func (tCoin) Value() uint64 {
+	return 0
+}
+func (tCoin) Confirmations() (uint32, error) {
+	return 0, nil
+}
+func (tCoin) Redeem() dex.Bytes {
+	return nil
+}
+
+func TestHandleWithdraw(t *testing.T) {
+	pw := encode.PassBytes("password123")
+	params := &RawParams{
+		PWArgs: []encode.PassBytes{pw},
+		Args: []string{
+			"42",
+			"1000",
+			"abc",
+		},
+	}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		walletState *core.WalletState
+		coin        asset.Coin
+		withdrawErr error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      params,
+		walletState: &core.WalletState{},
+		coin:        tCoin{},
+		wantErrCode: -1,
+	}, {
+		name:        "core.Withdraw error",
+		params:      params,
+		walletState: &core.WalletState{},
+		coin:        tCoin{},
+		withdrawErr: errors.New("error"),
+		wantErrCode: msgjson.RPCWithdrawError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			walletState: test.walletState,
+			coin:        test.coin,
+			withdrawErr: test.withdrawErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleWithdraw(r, test.params)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)

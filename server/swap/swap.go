@@ -6,10 +6,14 @@ package swap
 import (
 	"bytes"
 	"context"
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -19,6 +23,7 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
@@ -37,15 +42,19 @@ func unixMsNow() time.Time {
 	return time.Now().Truncate(time.Millisecond).UTC()
 }
 
-// The AuthManager handles client-related actions, including authorization and
+// AuthManager handles client-related actions, including authorization and
 // communications.
 type AuthManager interface {
 	Route(string, func(account.AccountID, *msgjson.Message) *msgjson.Error)
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...msgjson.Signable) error
-	Send(account.AccountID, *msgjson.Message)
+	Send(account.AccountID, *msgjson.Message) error
+	SendWhenConnected(account.AccountID, *msgjson.Message, time.Duration, func())
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
-	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
+	RequestWithTimeout(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
+		expireTimeout time.Duration, expireFunc func()) error
+	RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
+		expireTimeout, connectTimeout time.Duration, expireFunc func())
 	Penalize(account.AccountID, account.Rule)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
@@ -55,6 +64,7 @@ type AuthManager interface {
 type Storage interface {
 	db.SwapArchiver
 	LastErr() error
+	Fatal() <-chan struct{}
 	InsertMatch(match *order.Match) error
 	CancelOrder(*order.LimitOrder) error
 	RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error)
@@ -66,7 +76,8 @@ type Storage interface {
 // own swapStatus.
 type swapStatus struct {
 	// The asset to which the user broadcasts their swap transaction.
-	swapAsset uint32
+	swapAsset   uint32
+	redeemAsset uint32
 
 	mtx sync.RWMutex
 	// The time that the swap coordinator sees the transaction.
@@ -95,8 +106,8 @@ type matchTracker struct {
 // block.
 type blockNotification struct {
 	time    time.Time
-	err     error
 	assetID uint32
+	err     error
 }
 
 // A stepActor is a structure holding information about one party of a match.
@@ -106,12 +117,12 @@ type stepActor struct {
 	user account.AccountID
 	// swapAsset is the asset to which this actor broadcasts their swap tx.
 	swapAsset uint32
+	isMaker   bool
 	order     order.Order
 	// The swapStatus from the Match. Could be either the
 	// (matchTracker).makerStatus or (matchTracker).takerStatus, depending on who
 	// this actor is.
-	status  *swapStatus
-	isMaker bool
+	status *swapStatus
 }
 
 // stepInformation holds information about the current state of the swap
@@ -142,27 +153,14 @@ type LockableAsset struct {
 	coinlock.CoinLocker // should be *coinlock.AssetCoinLocker
 }
 
-// Config is the swapper configuration settings. A Config instance is the only
-// argument to the Swapper constructor.
-type Config struct {
-	// Assets is a map to all the asset information, including the asset backends,
-	// used by this Swapper.
-	Assets map[uint32]*LockableAsset
-	// Mgr is the AuthManager for client messaging and authentication.
-	AuthManager AuthManager
-	// A database backend.
-	Storage Storage
-	// BroadcastTimeout is how long the Swapper will wait for expected swap
-	// transactions following new blocks.
-	BroadcastTimeout time.Duration
-}
-
 type orderSwapStat struct {
-	swapCount int
-	offBook   bool
-	hasFailed bool
+	SwapCount int
+	OffBook   bool
+	HasFailed bool
 }
 
+// orderSwapTracker facilitates cancellation ratio computation without complex,
+// costly, and frequent DB queries.
 type orderSwapTracker struct {
 	mtx          sync.Mutex
 	orderMatches map[order.OrderID]*orderSwapStat
@@ -192,21 +190,21 @@ func (s *orderSwapTracker) decrementActiveSwapCount(ord order.Order, failed bool
 		return true
 	}
 
-	stat.hasFailed = stat.hasFailed || failed
+	stat.HasFailed = stat.HasFailed || failed
 
-	stat.swapCount--
-	if stat.swapCount != 0 {
+	stat.SwapCount--
+	if stat.SwapCount != 0 {
 		return false
 	}
 
 	// Remove the order's entry only if:
 	// - it has never failed OR
 	// - it is off-book, meaning it will never be seen again
-	if !stat.hasFailed || stat.offBook {
+	if !stat.HasFailed || stat.OffBook {
 		delete(s.orderMatches, oid)
 	}
 
-	return stat.offBook && !stat.hasFailed
+	return stat.OffBook && !stat.HasFailed
 }
 
 // swapSuccess decrements the active swap counter for an order. The return value
@@ -234,14 +232,14 @@ func (s *orderSwapTracker) incActiveSwapCount(ord order.Order, offBook bool) {
 	stat := s.orderMatches[oid]
 	if stat == nil {
 		s.orderMatches[oid] = &orderSwapStat{
-			swapCount: 1,
-			offBook:   offBook,
+			SwapCount: 1,
+			OffBook:   offBook,
 		}
 		return
 	}
 
-	stat.swapCount++
-	stat.offBook = offBook // should never change true to false
+	stat.SwapCount++
+	stat.OffBook = offBook // should never change true to false
 }
 
 // canceled records an order as off-book and failed if it exists in the active
@@ -262,14 +260,16 @@ func (s *orderSwapTracker) canceled(ord order.Order) {
 
 	// Prevent completion of active swaps from counting the order as
 	// successfully completed.
-	stat.offBook = true
-	stat.hasFailed = true
+	stat.OffBook = true
+	stat.HasFailed = true
 }
 
 // Swapper handles order matches by handling authentication and inter-party
 // communications between clients, or 'users'. The Swapper authenticates users
 // (vua AuthManager) and validates transactions as they are reported.
 type Swapper struct {
+	// Where state is dumped on shutdown.
+	dataDir string
 	// coins is a map to all the Asset information, including the asset backends,
 	// used by this Swapper.
 	coins map[uint32]*LockableAsset
@@ -279,31 +279,91 @@ type Swapper struct {
 	authMgr AuthManager
 	// The matches map and the contained matches are protected by the matchMtx.
 	matchMtx sync.RWMutex
-	matches  map[string]*matchTracker
+	matches  map[order.MatchID]*matchTracker
 	// orders tracks order status and active swaps.
 	orders *orderSwapTracker
-	// Each asset backend gets a goroutine to monitor for new blocks. When a new
-	// block is received, it is passed to the start loop through the block
-	// channel.
-	block chan *blockNotification
 	// The broadcast timeout.
 	bTimeout time.Duration
 	// latencyQ is a queue for coin waiters to deal with network latency.
 	latencyQ *wait.TickerQueue
+	// gracePeriod is a flag that indicates how long clients have to respond to
+	// requests before being penalized. A value of 1 indicates that the connect
+	// timeout should be used, while 0 indicates the shorter response timeout.
+	gracePeriod int32
+
+	// handlerMtx should be read-locked for the duration of the comms route
+	// handlers (handleInit and handleRedeem) and Negotiate. This blocks
+	// shutdown until any coin waiters are registered with latencyQ. It should
+	// be write-locked before setting the stop flag.
+	handlerMtx sync.RWMutex
+	// stop is used to prevent new handlers from starting coin waiters. It is
+	// set to true during shutdown of Run.
+	stop bool
+
+	// liveWaiters is used to track active coin waiters running in latencyQ.
+	liveWaitersMtx sync.Mutex
+	liveWaiters    map[waiterKey]*handlerArgs
+
+	// liveAckers is used to track acknowledgement requests that are waiting to
+	// be met with client responses. This applies to counterparty contract audit
+	// and redeem acks, and match acks.
+	liveAckersMtx sync.Mutex
+	liveAckers    map[uint64]*msgAckers // keyed by server generated message ID
+}
+
+// Config is the swapper configuration settings. A Config instance is the only
+// argument to the Swapper constructor.
+type Config struct {
+	// DataDir is the folder where swap state is stored.
+	DataDir string
+	// State is the state to restore in construction.
+	State *State
+	// AllowPartialRestore indicates if it is acceptable to load only part of
+	// the State if the Swapper's asset configuration lacks assets required to
+	// load all elements of State.
+	AllowPartialRestore bool
+	// Assets is a map to all the asset information, including the asset backends,
+	// used by this Swapper.
+	Assets map[uint32]*LockableAsset
+	// AuthManager is the auth manager for client messaging and authentication.
+	AuthManager AuthManager
+	// A database backend.
+	Storage Storage
+	// BroadcastTimeout is how long the Swapper will wait for expected swap
+	// transactions following new blocks.
+	BroadcastTimeout time.Duration
 }
 
 // NewSwapper is a constructor for a Swapper.
-func NewSwapper(cfg *Config) *Swapper {
+func NewSwapper(cfg *Config) (*Swapper, error) {
+	// Verify the directory where swap state will be saved.
+	inf, err := os.Stat(cfg.DataDir)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("data folder %q does not exist", cfg.DataDir)
+	}
+	if !inf.IsDir() {
+		return nil, fmt.Errorf("path %q is not a directory", cfg.DataDir)
+	}
+
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		coins:    cfg.Assets,
-		storage:  cfg.Storage,
-		authMgr:  authMgr,
-		latencyQ: wait.NewTickerQueue(recheckInterval),
-		matches:  make(map[string]*matchTracker),
-		orders:   newOrderSwapTracker(),
-		block:    make(chan *blockNotification, 8),
-		bTimeout: cfg.BroadcastTimeout,
+		dataDir:     cfg.DataDir,
+		coins:       cfg.Assets,
+		storage:     cfg.Storage,
+		authMgr:     authMgr,
+		latencyQ:    wait.NewTickerQueue(recheckInterval),
+		matches:     make(map[order.MatchID]*matchTracker),
+		orders:      newOrderSwapTracker(),
+		bTimeout:    cfg.BroadcastTimeout,
+		liveWaiters: make(map[waiterKey]*handlerArgs),
+		liveAckers:  make(map[uint64]*msgAckers),
+	}
+
+	if cfg.State != nil {
+		err = swapper.restoreState(cfg.State, cfg.AllowPartialRestore)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// The swapper is only concerned with two types of client-originating
@@ -311,13 +371,420 @@ func NewSwapper(cfg *Config) *Swapper {
 	authMgr.Route(msgjson.InitRoute, swapper.handleInit)
 	authMgr.Route(msgjson.RedeemRoute, swapper.handleRedeem)
 
-	return swapper
+	return swapper, nil
+}
+
+func (s *Swapper) restoreState(state *State, allowPartial bool) error {
+	// State binary version check should be done when State is loaded.
+
+	// Check that the assets required by State are included
+	missingAssets := make(map[uint32]bool)
+	for _, id := range state.Assets {
+		if s.coins[id] == nil {
+			if !allowPartial {
+				return fmt.Errorf("Unable to find backend for asset %d in restore state.", id)
+			}
+			log.Warnf("Unable to find backend for asset %d in restore state.", id)
+			missingAssets[id] = true
+		}
+	}
+
+	// Load the matchTrackers, calling the Contract and Redemption asset.Backend
+	// methods as needed.
+
+	translateSwapStatus := func(ss *swapStatus, ssd *swapStatusData) error {
+		swapCoin := ssd.ContractCoinOut
+		if len(swapCoin) > 0 {
+			assetID := ssd.SwapAsset
+			swap, err := s.coins[assetID].Backend.Contract(swapCoin, ssd.ContractScript)
+			if err != nil {
+				return fmt.Errorf("unable to find swap out coin %x for asset %d: %v", swapCoin, assetID, err)
+			}
+			ss.swap = swap
+			ss.swapTime = encode.UnixTimeMilli(ssd.SwapTime)
+		}
+
+		if ssd.SwapConfirmTime != 0 {
+			ss.swapConfirmed = encode.UnixTimeMilli(ssd.SwapConfirmTime)
+		}
+
+		if redeemCoin := ssd.RedeemCoinIn; len(redeemCoin) > 0 {
+			assetID := ssd.RedeemAsset
+			redeem, err := s.coins[assetID].Backend.Redemption(redeemCoin, swapCoin)
+			if err != nil {
+				return fmt.Errorf("unable to find redeem in coin %x for asset %d: %v", redeemCoin, assetID, err)
+			}
+			ss.redemption = redeem
+			ss.redeemTime = encode.UnixTimeMilli(ssd.RedeemTime)
+		}
+
+		return nil
+	}
+
+	s.matches = make(map[order.MatchID]*matchTracker, len(state.MatchTrackers))
+	for mid, mtd := range state.MatchTrackers {
+		// Check and skip matches for missing assets.
+		makerSwapAsset := mtd.MakerStatus.SwapAsset
+		makerRedeemAsset := mtd.MakerStatus.RedeemAsset
+		if missingAssets[makerSwapAsset] {
+			log.Infof("Skipping match %v with missing asset %d", mid, makerSwapAsset)
+			continue
+		}
+		if missingAssets[makerRedeemAsset] {
+			log.Infof("Skipping match %v with missing asset %d", mid, makerRedeemAsset)
+			continue
+		}
+
+		mt := &matchTracker{
+			Match: mtd.Match,
+			time:  encode.UnixTimeMilli(mtd.Time),
+			// matchTime TODO
+			makerStatus: &swapStatus{
+				swapAsset:   makerSwapAsset,
+				redeemAsset: makerRedeemAsset,
+			},
+			takerStatus: &swapStatus{
+				swapAsset:   makerRedeemAsset, // mtd.TakerStatus.SwapAsset
+				redeemAsset: makerSwapAsset,   // mtd.TakerStatus.RedeemAsset
+			},
+		}
+
+		if err := translateSwapStatus(mt.makerStatus, mtd.MakerStatus); err != nil {
+			log.Errorf("Loading match %v failed: %v", mtd.Match.ID(), err)
+			continue
+		}
+		if err := translateSwapStatus(mt.takerStatus, mtd.TakerStatus); err != nil {
+			log.Errorf("Loading match %v failed: %v", mtd.Match.ID(), err)
+			continue
+		}
+
+		s.matches[mid] = mt
+	}
+
+	// Order completion/failure tracking data
+	s.orders.orderMatches = state.OrderMatches
+
+	// Live ackers (active acknowledgement requests)
+	//
+	// Resend the RequestWithTimeout(..., processAck) for each acker as done in
+	// processRedeem (RedemptionRoute request), processInit (AuditRoute
+	// request), and revoke (RevokeMatchRoute). For match acks (MatchRoute
+	// request), resend the RequestWithTimeout(..., processMatchAcks) as done in
+	// Negotiate.
+	for _, ackData := range state.LiveAckers {
+		// Get a new request ID.
+		msgID := comms.NextID()
+		req := ackData.Request
+		req.ID = msgID // reset the ID
+		user := ackData.AckData[0].User
+
+		var handlerFun func(link comms.Link, resp *msgjson.Message)
+
+		if req.Route == msgjson.MatchRoute {
+			// Request with a processMatchAcks response handler and a
+			// []*messageAcker for a batch of matches.
+			acks := make([]*messageAcker, 0, len(ackData.AckData))
+			for _, dat := range ackData.AckData {
+				match := s.matches[dat.MatchID]
+				if match == nil {
+					log.Errorf("Unable to find match %v", dat.MatchID)
+					continue
+				}
+				acks = append(acks, &messageAcker{
+					user:    user,
+					match:   match,
+					params:  dat.Params,
+					isMaker: dat.IsMaker,
+					isAudit: req.Route == msgjson.AuditRoute,
+				})
+			}
+
+			s.setLiveAckers(req, acks)
+			handlerFun = func(_ comms.Link, resp *msgjson.Message) {
+				s.processMatchAcks(user, resp, acks) // resp.ID == req.ID == msgID
+			}
+		} else {
+			// Request with a processAck response handler and a single
+			// *messageAcker for the audit/redeem/revoke.
+			if len(ackData.AckData) != 1 {
+				log.Errorf("%v route request has %d data elements, need 1",
+					req.Route, len(ackData.AckData))
+				continue
+			}
+
+			dat := ackData.AckData[0]
+			match := s.matches[dat.MatchID]
+			if match == nil {
+				log.Errorf("Unable to find match %v", dat.MatchID)
+				continue
+			}
+			ack := &messageAcker{
+				user:    user,
+				match:   match,
+				params:  dat.Params,
+				isMaker: dat.IsMaker,
+				isAudit: req.Route == msgjson.AuditRoute,
+			}
+
+			handlerFun = func(_ comms.Link, resp *msgjson.Message) {
+				s.processAck(resp, ack) // resp.ID == req.ID == msgID
+			}
+		}
+
+		expireFunc := func() {
+			s.rmLiveAckers(msgID)
+			log.Errorf("Failed to send request to %v for %v ack", user, req.Route)
+		}
+		log.Infof("Sending %v request to user %v", req.Route, user)
+		log.Debug(req)
+		s.authMgr.RequestWhenConnected(user, req, handlerFun, auth.DefaultRequestTimeout,
+			auth.DefaultConnectTimeout, expireFunc)
+		// NOTE: The user must reconnect to send the ack request. processAck and
+		// processMatchAcks themselves won't require connectivity since there
+		// should be no error response (already validated by virtue of being in
+		// the state's live ackers) and they just save the ack signatures.
+	}
+
+	// Live coin waiters started by the comms handlers for client init and
+	// redeem messages
+	//
+	// Rerun handleInit or handleRedeem to revalidate the contract/redeem and
+	// start the coin waiters that trigger processInit and processRedeem.
+	// Alternatively, we could manually start a waiter. Manually creating a
+	// waiter requires (1) s.step to get stepInfo and (2) msg.Payload unmarshal
+	// into params, a msgjson.Init or msgjson.Redeem. Manually doing this would
+	// skip the msg and contract/redeem validation.
+	//
+	// The counter-party must be connected so the success function (processInit
+	// or processRedeem) called when the coin is found can send an ack request.
+	// Hence, processInit and processRedeem now use RequestWhenConnected in
+	// conjunction with a grace period where penalty timeout is increased to the
+	// reconnect timeout.
+
+	s.gracePeriod = 1
+	time.AfterFunc(2*auth.DefaultConnectTimeout, func() {
+		atomic.StoreInt32(&s.gracePeriod, 0)
+	})
+
+	for _, waitDat := range state.LiveWaiters {
+		var msgErr *msgjson.Error
+		rt := waitDat.Msg.Route
+		switch rt {
+		case msgjson.InitRoute:
+			msgErr = s.handleInit(waitDat.User, waitDat.Msg)
+		case msgjson.RedeemRoute:
+			msgErr = s.handleRedeem(waitDat.User, waitDat.Msg)
+		default:
+			log.Errorf("%s is not a route that starts coinwaiters!", rt)
+			continue
+		}
+
+		if msgErr != nil {
+			log.Errorf("Failed to reprocess %v message: %v", rt, msgErr)
+		}
+	}
+
+	return nil
+}
+
+func (s *Swapper) saveState() {
+	// Store state.
+	fName := fmt.Sprintf("swapState-%d.gob", encode.UnixMilli(time.Now()))
+	f, err := os.Create(filepath.Join(s.dataDir, fName))
+	if err != nil {
+		log.Errorf("Failed to create swap state file %v: %v", fName, err)
+		return
+	}
+	defer f.Close()
+
+	mtd := make(map[order.MatchID]*matchTrackerData, len(s.matches))
+	neededAssets := make(map[uint32]struct{}, len(s.coins))
+	for matchID, mt := range s.matches {
+		neededAssets[mt.Match.Maker.BaseAsset] = struct{}{}
+		neededAssets[mt.Match.Maker.QuoteAsset] = struct{}{}
+		mtd[matchID] = &matchTrackerData{
+			Match:       mt.Match,
+			Time:        encode.UnixMilli(mt.time),
+			MakerStatus: mt.makerStatus.Data(),
+			TakerStatus: mt.takerStatus.Data(),
+		}
+	}
+	assetIDs := make([]uint32, 0, len(neededAssets))
+	for id := range neededAssets {
+		assetIDs = append(assetIDs, id)
+	}
+
+	st := &State{
+		Version:       stateBinaryVersion,
+		Assets:        assetIDs,
+		MatchTrackers: mtd,
+		OrderMatches:  s.orders.orderMatches,
+		LiveAckers:    s.liveAckers,
+		LiveWaiters:   s.liveWaiters,
+	}
+
+	enc := gob.NewEncoder(f)
+	if err = enc.Encode(st); err != nil {
+		log.Errorf("Failed to save swap state to file %v: %v", fName, err)
+		return
+	}
+
+	if err = f.Sync(); err != nil {
+		log.Errorf("Failed to write swap state data to disk: %v", err)
+	} else {
+		log.Infof("Saved swap state to file %q, containing %d live matches with "+
+			"%d pending client acks and %d live coin waiters", fName,
+			len(st.MatchTrackers), len(st.LiveAckers), len(st.LiveWaiters))
+	}
+}
+
+type msgAckers struct {
+	Request *msgjson.Message // request to user, may not be nil
+	AckData []*ackerData
+}
+
+type ackerData struct {
+	User    account.AccountID
+	MatchID order.MatchID    // key for a *matchTrackers map
+	Params  msgjson.Signable // msgjson.{Match,Audit,Redemption,RevokeMatch}
+	IsMaker bool
+	//IsAudit bool // inferred if Params.(*msgjson.Audit)
+}
+
+func (s *Swapper) setLiveAckers(req *msgjson.Message, ackers []*messageAcker) {
+	ackDats := make([]*ackerData, len(ackers))
+	for i, ack := range ackers {
+		ackDats[i] = &ackerData{
+			User:    ack.user,
+			MatchID: ack.match.ID(),
+			Params:  ack.params,
+			IsMaker: ack.isMaker,
+		}
+	}
+	s.liveAckersMtx.Lock()
+	s.liveAckers[req.ID] = &msgAckers{
+		Request: req,
+		AckData: ackDats,
+	}
+	s.liveAckersMtx.Unlock()
+}
+
+func (s *Swapper) setLiveAcker(req *msgjson.Message, ackDat *messageAcker) {
+	s.setLiveAckers(req, []*messageAcker{ackDat})
+}
+
+func (s *Swapper) rmLiveAckers(msgID uint64) {
+	s.liveAckersMtx.Lock()
+	delete(s.liveAckers, msgID)
+	s.liveAckersMtx.Unlock()
+}
+
+// Data input to handleInit and handleRedeem, which both start coin waiters with
+// latencyQ. Store handlerArgs before starting the waiter, and remove them when
+// the waiter completes or expires. On Swapper shutdown, the stored handlerArgs
+// should be saved in the state data after stopping the latencyQ.
+type handlerArgs struct {
+	User account.AccountID
+	Msg  *msgjson.Message // init or redeem inferred from Msg.
+}
+
+// client generated message IDs are not globally unique.
+type waiterKey struct {
+	MsgID uint64
+	User  account.AccountID
+}
+
+func (s *Swapper) setLiveWaiter(user account.AccountID, msg *msgjson.Message) {
+	s.liveWaitersMtx.Lock()
+	key := waiterKey{msg.ID, user}
+	s.liveWaiters[key] = &handlerArgs{
+		User: user,
+		Msg:  msg,
+	}
+	s.liveWaitersMtx.Unlock()
+}
+
+func (s *Swapper) rmLiveWaiter(user account.AccountID, msgID uint64) {
+	s.liveWaitersMtx.Lock()
+	delete(s.liveWaiters, waiterKey{msgID, user})
+	s.liveWaitersMtx.Unlock()
 }
 
 // Run is the main Swapper loop.
 func (s *Swapper) Run(ctx context.Context) {
-	ctxSwap, cancel := context.WithCancel(ctx)
-	defer cancel()
+	// Permit internal cancel on anomaly such as storage failure.
+	ctxMaster, cancel := context.WithCancel(ctx)
+
+	// Graceful shutdown first allows active incoming messages to be handled,
+	// blocks more incoming messages in the handler functions, stops the helper
+	// goroutines (latency queue used by the handlers, and the block ntfn
+	// receiver), and finally the main loop via the mainLoop channel.
+	var wgHelpers, wgMain sync.WaitGroup
+	ctxHelpers, cancelHelpers := context.WithCancel(context.Background())
+	mainLoop := make(chan struct{}) // close after helpers stop for graceful shutdown
+	defer func() {
+		// Stop handlers receiving messages and queueing latency Waiters.
+		s.handlerMtx.Lock() // block until active handlers return
+		s.stop = true       // prevent new handlers from starting waiters
+		// NOTE: could also do authMgr.Route(msgjson.{InitRoute,RedeemRoute}, shuttingDownHandler)
+		s.handlerMtx.Unlock()
+
+		// Stop the latencyQ of Waiters and the block update goroutines that
+		// send to the main loop.
+		cancelHelpers()
+		wgHelpers.Wait()
+
+		// Now that handlers AND the coin waiter queue are stopped, the
+		// liveWaiters can be accessed without locking.
+
+		// Stop the main loop if if there was no internal error.
+		close(mainLoop)
+		wgMain.Wait()
+
+		s.saveState()
+
+	}()
+
+	// Start a listen loop for each asset's block channel. Normal shutdown stops
+	// this before the main loop since this sends to the main loop.
+	blockNotes := make(chan *blockNotification, 128)
+	for assetID, lockable := range s.coins {
+		wgHelpers.Add(1)
+		go func(assetID uint32, blockSource <-chan *asset.BlockUpdate) {
+			defer wgHelpers.Done()
+			for {
+				select {
+				case blk, ok := <-blockSource:
+					if !ok {
+						log.Errorf("Asset %d has closed the block channel.", assetID)
+						// Should not happen. Keep running until cancel.
+						continue
+					}
+					// Do not block on anomalous return of main loop, which is
+					// the s.block receiver.
+					select {
+					case <-mainLoop:
+						return // ctxHelpers is being canceled anyway
+					case blockNotes <- &blockNotification{
+						time:    time.Now().UTC(),
+						assetID: assetID,
+						err:     blk.Err,
+					}:
+					}
+				case <-ctxHelpers.Done():
+					return
+				}
+			}
+		}(assetID, lockable.Backend.BlockChannel(32))
+	}
+
+	// Start the queue of coinwaiters for the init and redeem handlers. The
+	// handlers must be stopped/blocked before stopping this.
+	wgHelpers.Add(1)
+	go func() {
+		s.latencyQ.Run(ctxHelpers)
+		wgHelpers.Done()
+	}()
 
 	// bcastTriggers is used to sequence an examination of an asset's related
 	// matches some time (bTimeout) after a block notification is received.
@@ -332,88 +799,80 @@ func (s *Swapper) Run(ctx context.Context) {
 		bcastTicker = time.NewTimer(timeTil)
 	}
 
-	// Start a listen loop for each asset's block channel.
-	var wg sync.WaitGroup
-	for assetID, lockable := range s.coins {
-		wg.Add(1)
-		go func(assetID uint32, blockSource <-chan *asset.BlockUpdate) {
-			defer wg.Done()
-		out:
-			for {
-				select {
-				case blk := <-blockSource:
-					s.block <- &blockNotification{
-						time:    time.Now().UTC(),
-						err:     blk.Err,
-						assetID: assetID,
-					}
-				case <-ctxSwap.Done():
-					break out
-				}
-			}
-		}(assetID, lockable.Backend.BlockChannel(5))
-	}
-
-	wg.Add(1)
+	// Main loop can stop on internal error via cancel(), or when the caller
+	// cancels the parent context triggering graceful shutdown.
+	wgMain.Add(1)
 	go func() {
-		s.latencyQ.Run(ctxSwap)
-		wg.Done()
+		defer wgMain.Done()
+		defer cancel() // ctxMaster for anomalous return
+		for {
+			select {
+			case <-s.storage.Fatal():
+				return
+			case block := <-blockNotes:
+				// Schedule a check of matches with one side equal to this
+				// block's asset by appending the block to the bcastTriggers.
+				if block.err != nil {
+					var connectionErr asset.ConnectionError
+					if errors.As(block.err, &connectionErr) {
+						// Connection issues handling can be triggered here.
+						log.Errorf("connection error detected for %d: %v", block.assetID, block.err)
+					} else {
+						log.Errorf("asset %d is reporting a block notification error: %v", block.assetID, block.err)
+					}
+					break
+				}
+				bcastTriggers = append(bcastTriggers, block)
+				// processBlock will update confirmation times in the swapStatus
+				// structs.
+				//
+				// WARNING! Confirmation checks in processBlock must be quick
+				// because either of the blockNotification or asset.BlockUpdate
+				// channels could fill up and we will miss blocks! The asset
+				// backends should allow a blocking channel, just retrying on
+				// the next block, but that is not a solution.
+				//
+				// TODO: Consider a timeout for the entire processBlock call:
+				//
+				//   ctxTime := context.WithTimeout(ctx, 2*time.Second)
+				//   s.processBlock(ctxTime, block)
+				//
+				// Presently, one stuck backend that hangs on Confirmations
+				// halts the whole DEX! So timeouts on Confirmations too.
+				s.processBlock(block)
+			case <-bcastTicker.C:
+				for {
+					// checkInaction will fail if the DB is failing.
+					if err := s.storage.LastErr(); err != nil {
+						return
+					}
+
+					if len(bcastTriggers) == 0 {
+						bcastTicker = time.NewTimer(s.bTimeout)
+						break
+					}
+					if time.Now().Before(bcastTriggers[0].time.Add(s.bTimeout)) {
+						setTimeout(bcastTriggers[0])
+						break
+					}
+					block := bcastTriggers[0]
+					bcastTriggers = bcastTriggers[1:]
+					s.checkInaction(block.assetID)
+					if len(bcastTriggers) == 0 {
+						bcastTicker = time.NewTimer(s.bTimeout)
+						break
+					} else {
+						setTimeout(bcastTriggers[0])
+					}
+				}
+			case <-mainLoop:
+				return
+			}
+		}
 	}()
 
-out:
-	for {
-		select {
-		case block := <-s.block:
-			// Schedule a check of matches with one side equal to this block's asset
-			// by appending the block to the bcastTriggers.
-			if block.err != nil {
-				var connectionErr asset.ConnectionError
-				if errors.As(block.err, &connectionErr) {
-					// Connection issues handling can be triggered here.
-					log.Errorf("connection error detected for %d: %v", block.assetID, block.err)
-				} else {
-					log.Errorf("asset %d is reporting a block notification error: %v", block.assetID, block.err)
-				}
-				break
-			}
-			bcastTriggers = append(bcastTriggers, block)
-			// processBlock will update confirmation times in the swapStatus structs.
-			s.processBlock(block)
-		case <-bcastTicker.C:
-			for {
-				// checkInaction will fail if the DB is failing. TODO: Consider
-				// a mechanism to complete existing swaps and then quit.
-				// Presently Negotiate denies new swaps and processInit responds
-				// with an error to clients attempting to start a swap.
-				if err := s.storage.LastErr(); err != nil {
-					cancel()
-					break out
-				}
-
-				if len(bcastTriggers) == 0 {
-					bcastTicker = time.NewTimer(s.bTimeout)
-					break
-				}
-				if time.Now().Before(bcastTriggers[0].time.Add(s.bTimeout)) {
-					setTimeout(bcastTriggers[0])
-					break
-				}
-				block := bcastTriggers[0]
-				bcastTriggers = bcastTriggers[1:]
-				s.checkInaction(block.assetID)
-				if len(bcastTriggers) == 0 {
-					bcastTicker = time.NewTimer(s.bTimeout)
-					break
-				} else {
-					setTimeout(bcastTriggers[0])
-				}
-			}
-		case <-ctxSwap.Done():
-			break out
-		}
-	}
-
-	wg.Wait()
+	// Wait for caller cancel or anomalous return from main loop.
+	<-ctxMaster.Done()
 }
 
 func (s *Swapper) tryConfirmSwap(status *swapStatus) {
@@ -503,7 +962,8 @@ func (s *Swapper) processBlock(block *blockNotification) {
 		// Remove the completed match. Note that checkInaction may also remove
 		// matches, so this entire function must lock even if there are no
 		// completions.
-		delete(s.matches, match.ID().String())
+		log.Debugf("Deleting completed match %v", match.ID())
+		delete(s.matches, match.ID())
 	}
 }
 
@@ -768,7 +1228,7 @@ func (s *Swapper) checkInaction(assetID uint32) {
 	}
 
 	for _, match := range deletions {
-		delete(s.matches, match.ID().String())
+		delete(s.matches, match.ID())
 	}
 }
 
@@ -782,7 +1242,10 @@ func (s *Swapper) respondError(id uint64, user account.AccountID, code int, errM
 	if err != nil {
 		log.Errorf("error creating error response with message '%s': %v", msg, err)
 	}
-	s.authMgr.Send(user, msg)
+	s.authMgr.SendWhenConnected(user, msg, auth.DefaultConnectTimeout, func() {
+		log.Infof("Unable to send error response (code %d) to disconnected user %v: %q",
+			code, user, errMsg)
+	})
 }
 
 // respondSuccess sends a successful response to a user.
@@ -791,14 +1254,16 @@ func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result inter
 	if err != nil {
 		log.Errorf("failed to send success: %v", err)
 	}
-	s.authMgr.Send(user, msg)
+	s.authMgr.SendWhenConnected(user, msg, auth.DefaultConnectTimeout, func() {
+		log.Infof("Unable to send success response to disconnected user %v", user)
+	})
 }
 
 // step creates a stepInformation structure for the specified match. A new
 // stepInformation should be created for every client communication. The user
 // is also validated as the actor. An error is returned if the user has not
 // acknowledged their previous DEX requests.
-func (s *Swapper) step(user account.AccountID, matchID string) (*stepInformation, *msgjson.Error) {
+func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInformation, *msgjson.Error) {
 	s.matchMtx.RLock()
 	match, found := s.matches[matchID]
 	s.matchMtx.RUnlock()
@@ -965,6 +1430,9 @@ type messageAcker struct {
 // signature and updating the (order.Match).Sigs record. This is required by
 // processInit, processRedeem, and revoke.
 func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
+	// Remove the live acker from Swapper's tracking.
+	defer s.rmLiveAckers(msg.ID)
+
 	// The time that the ack is received is stored for redeem acks to facilitate
 	// cancellation ratio enforcement.
 	tAck := time.Now()
@@ -994,17 +1462,26 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	acker.match.mtx.Lock()
 	defer acker.match.mtx.Unlock()
 
+	if rev, ok := acker.params.(*msgjson.RevokeMatch); ok {
+		log.Infof("Received revoke ack for match %v, order %v", rev.MatchID, rev.OrderID)
+		// TODO: do something in the DB for this??
+		return // drop the revoke ack sig for now
+	}
+
 	// This is an ack of either contract audit or redeem receipt.
 	if acker.isAudit {
+		// It's a contract audit ack.
 		if acker.isMaker {
 			acker.match.Sigs.MakerAudit = ack.Sig         // i.e. audited taker's contract
-			s.storage.SaveAuditAckSigA(mktMatch, ack.Sig) // TODO: check err and/or make the backend go fatal
+			s.storage.SaveAuditAckSigA(mktMatch, ack.Sig) // sql error makes backend go fatal
 		} else {
 			acker.match.Sigs.TakerAudit = ack.Sig
 			s.storage.SaveAuditAckSigB(mktMatch, ack.Sig)
 		}
 		return
 	}
+
+	// It's a redeem script ack.
 
 	// This is a redemption acknowledgement. Store the ack signature, and
 	// potentially record the order as complete with the auth manager and in
@@ -1075,15 +1552,16 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			return wait.TryAgain
 		}
 		log.Warnf("Contract error encountered for match %s, actor %s using coin ID %x and contract %x: %v",
-			stepInfo.match.ID(), actor, params.CoinID, params.Contract, err)
+			stepInfo.match.ID(), actor.user, params.CoinID, params.Contract, err)
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			"redemption error")
 		return wait.DontTryAgain
 	}
 
-	if contract.Address() != counterParty.order.Trade().SwapAddress() {
+	if contract.SwapAddress() != counterParty.order.Trade().SwapAddress() {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			fmt.Sprintf("incorrect recipient. expected %s. got %s", contract.Address(), counterParty.order.Trade().SwapAddress()))
+			fmt.Sprintf("incorrect recipient. expected %s. got %s",
+				contract.SwapAddress(), counterParty.order.Trade().SwapAddress()))
 		return wait.DontTryAgain
 	}
 	if contract.Value() != stepInfo.checkVal {
@@ -1143,6 +1621,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
+	// respondSuccess works with auth to send on connect like
+	// RequestWhenConnected. If the send fails due to the connect timeout, the
+	// user's client may not be satisfied. Deal with this client-side.
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
 		MatchID: matchID[:],
 		Sig:     params.Sig,
@@ -1156,12 +1637,14 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		CoinID:   params.CoinID,
 		Contract: params.Contract,
 	}
+	s.authMgr.Sign(auditParams)
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, auditParams)
 	if err != nil {
 		// This is likely an impossibly condition.
 		log.Errorf("error creating audit request: %v", err)
 		return wait.DontTryAgain
 	}
+
 	// Set up the acknowledgement for the callback.
 	ack := &messageAcker{
 		user:    counterParty.user,
@@ -1172,10 +1655,27 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	}
 	// Send the 'audit' request to the counter-party.
 	log.Debugf("processInit: sending contract 'audit' ack request to counterparty %v "+
-		"for match %v", counterParty.order.User(), matchID)
-	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
-		s.processAck(msg, ack)
-	})
+		"for match %v", ack.user, matchID)
+
+	// Register that there is an outstanding ack request. This is unregistered
+	// on completion of processAck or request expiry.
+	s.setLiveAcker(notification, ack)
+
+	// Expire function to unregister the outstanding request.
+	expireFunc := func() {
+		s.rmLiveAckers(notification.ID)
+		log.Infof("Failed to send request to %v (maker=%v) for init audit ack.",
+			ack.user, ack.isMaker)
+	}
+
+	// Send the ack request.
+
+	// A user gets responseTimeout to respond to a successfully sent request,
+	// and reconnectTimeout to connect and and have the request sent.
+	s.authMgr.RequestWhenConnected(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
+		s.processAck(resp, ack) // resp.ID == notification.ID
+	}, auth.DefaultRequestTimeout, auth.DefaultConnectTimeout, expireFunc)
+
 	return wait.DontTryAgain
 }
 
@@ -1194,7 +1694,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Make sure that the expected output is being spent.
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	counterParty.status.mtx.RLock()
-	cpContract := counterParty.status.swap.Script()
+	cpContract := counterParty.status.swap.RedeemScript()
 	cpSwapCoin := counterParty.status.swap.ID()
 	counterParty.status.mtx.RUnlock()
 
@@ -1231,9 +1731,9 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 			return s.storage.SaveRedeemA(mid, coinID, params.Secret, timestamp) // also sets match status to MakerRedeemed
 		}
 	}
-	swapTime := unixMsNow()
-	swapTimeMs := encode.UnixMilli(swapTime)
-	err = storFn(db.MatchID(match.Match), params.CoinID, swapTimeMs)
+	redeemTime := unixMsNow()
+	redeemTimeMs := encode.UnixMilli(redeemTime)
+	err = storFn(db.MatchID(match.Match), params.CoinID, redeemTimeMs)
 	if err != nil {
 		log.Errorf("saving redeem transaction (match id=%v, maker=%v) failed: %v",
 			matchID, actor.isMaker, err)
@@ -1244,7 +1744,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Modify the match's swapStatuses.
 	actor.status.mtx.Lock()
 	actor.status.redemption = redemption
-	actor.status.redeemTime = swapTime
+	actor.status.redeemTime = redeemTime
 	actor.status.mtx.Unlock()
 
 	match.mtx.Lock()
@@ -1252,10 +1752,13 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	match.mtx.Unlock()
 
 	log.Debugf("processRedeem: valid redemption received at %v from %v for match %v, "+
-		"swapStatus %v => %v", swapTime, actor.user, matchID, stepInfo.step, stepInfo.nextStep)
+		"swapStatus %v => %v", redeemTime, actor.user, matchID, stepInfo.step, stepInfo.nextStep)
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
+	// respondSuccess works with auth to send on connect like
+	// RequestWhenConnected. If the send fails due to the connect timeout, the
+	// user's client may not be satisfied. Deal with this client-side.
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
 		MatchID: matchID[:],
 		Sig:     params.Sig,
@@ -1269,9 +1772,9 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 			CoinID:  params.CoinID,
 			Secret:  params.Secret,
 		},
-		Time: uint64(encode.UnixMilli(swapTime)),
+		Time: uint64(redeemTimeMs),
 	}
-
+	s.authMgr.Sign(rParams)
 	notification, err := msgjson.NewRequest(comms.NextID(), msgjson.RedemptionRoute, rParams)
 	if err != nil {
 		log.Errorf("error creating redemption request: %v", err)
@@ -1286,11 +1789,28 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		isMaker: counterParty.isMaker,
 		// isAudit: false,
 	}
-	log.Debugf("processRedeem: sending contract 'redeem' ack request to counterparty %v "+
-		"for match %v", counterParty.order.User(), matchID)
-	s.authMgr.Request(counterParty.order.User(), notification, func(_ comms.Link, msg *msgjson.Message) {
-		s.processAck(msg, ack)
-	})
+	log.Debugf("processRedeem: sending 'redeem' ack request to counterparty %v "+
+		"for match %v", ack.user, matchID)
+
+	// Register that there is an outstanding ack request. This is unregistered
+	// on completion of processAck or request expiry.
+	s.setLiveAcker(notification, ack)
+
+	// Expire function to unregister the outstanding request.
+	expireFunc := func() {
+		s.rmLiveAckers(notification.ID)
+		log.Infof("redeem ack request failed for user %v (maker=%v).",
+			ack.user, ack.isMaker)
+	}
+
+	// Send the ack request.
+
+	// A user gets responseTimeout to respond to a successfully sent request,
+	// and reconnectTimeout to connect and and have the request sent.
+	s.authMgr.RequestWhenConnected(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
+		s.processAck(resp, ack) // resp.ID == notification.ID
+	}, auth.DefaultRequestTimeout, auth.DefaultConnectTimeout, expireFunc)
+
 	return wait.DontTryAgain
 }
 
@@ -1300,6 +1820,15 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 // performed by processInit, but the request is parsed and user is authenticated
 // first.
 func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+	s.handlerMtx.RLock()
+	defer s.handlerMtx.RUnlock() // block shutdown until registered with latencyQ
+	if s.stop {
+		return &msgjson.Error{
+			Code:    msgjson.TryAgainLaterError,
+			Message: "The swapper is stopping. Try again later.",
+		}
+	}
+
 	params := new(msgjson.Init)
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
@@ -1309,6 +1838,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 		}
 	}
 
+	// Verify the user's signature of params.
 	rpcErr := s.authUser(user, params)
 	if rpcErr != nil {
 		return rpcErr
@@ -1317,7 +1847,16 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	log.Debugf("handleInit: 'init' received from %v for match %v, order %v",
 		user, params.MatchID, params.OrderID)
 
-	stepInfo, rpcErr := s.step(user, params.MatchID.String())
+	if len(params.MatchID) != order.MatchIDSize {
+		return &msgjson.Error{
+			Code:    msgjson.RPCParseError,
+			Message: "Invalid 'matchid' in 'init' message",
+		}
+	}
+
+	var matchID order.MatchID
+	copy(matchID[:], params.MatchID)
+	stepInfo, rpcErr := s.step(user, matchID)
 	if rpcErr != nil {
 		return rpcErr
 	}
@@ -1369,15 +1908,24 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 	// checked in processInit. Note that value cannot be checked as transaction
 	// details, which includes the coin/output value, are not yet retrieved.
 
+	s.setLiveWaiter(user, msg)
+
 	// Since we have to consider broadcast latency of the asset's network, run
 	// this as a coin waiter.
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(txWaitExpiration),
 		TryFunc: func() bool {
-			return s.processInit(msg, params, stepInfo)
+			done := s.processInit(msg, params, stepInfo)
+			if done == wait.DontTryAgain {
+				// It is now either a live acker, or terminally failed.
+				s.rmLiveWaiter(user, msg.ID)
+			}
+			return done
 		},
 		ExpireFunc: func() {
-			s.coinNotFound(user, msg.ID, params.CoinID)
+			s.rmLiveWaiter(user, msg.ID)
+			s.respondError(msg.ID, user, msgjson.TransactionUndiscovered,
+				fmt.Sprintf("failed to find contract coin %v", coinStr))
 		},
 	})
 	return nil
@@ -1387,13 +1935,22 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 // performed by processRedeem, but the request is parsed and user is
 // authenticated first.
 func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *msgjson.Error {
+	s.handlerMtx.RLock()
+	defer s.handlerMtx.RUnlock() // block shutdown until registered with latencyQ
+	if s.stop {
+		return &msgjson.Error{
+			Code:    msgjson.TryAgainLaterError,
+			Message: "The swapper is stopping. Try again later.",
+		}
+	}
+
 	params := new(msgjson.Redeem)
 
 	err := json.Unmarshal(msg.Payload, &params)
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
-			Message: "Error decoding 'init' method params",
+			Message: "Error decoding 'redeem' method params",
 		}
 	}
 
@@ -1405,14 +1962,23 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 	log.Debugf("handleRedeem: 'redeem' received from %v for match %v, order %v",
 		user, params.MatchID, params.OrderID)
 
-	stepInfo, rpcErr := s.step(user, params.MatchID.String())
+	if len(params.MatchID) != order.MatchIDSize {
+		return &msgjson.Error{
+			Code:    msgjson.RPCParseError,
+			Message: "Invalid 'matchid' in 'redeem' message",
+		}
+	}
+
+	var matchID order.MatchID
+	copy(matchID[:], params.MatchID)
+	stepInfo, rpcErr := s.step(user, matchID)
 	if rpcErr != nil {
 		return rpcErr
 	}
 	// Validate the redeem coin ID before starting a wait. This does not
 	// check the blockchain, but does ensure the CoinID can be decoded for the
 	// asset before starting up a coin waiter.
-	_, err = stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
+	coinStr, err := stepInfo.asset.Backend.ValidateCoinID(params.CoinID)
 	if err != nil {
 		// TODO: ensure Backends provide sanitized errors or type information to
 		// provide more details to the client.
@@ -1422,39 +1988,37 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 		}
 	}
 
+	s.setLiveWaiter(user, msg)
+
 	// Since we have to consider latency, run this as a coin waiter.
 	s.latencyQ.Wait(&wait.Waiter{
 		Expiration: time.Now().Add(txWaitExpiration),
 		TryFunc: func() bool {
-			return s.processRedeem(msg, params, stepInfo)
+			done := s.processRedeem(msg, params, stepInfo)
+			if done == wait.DontTryAgain {
+				// It is now either a live acker, or terminally failed.
+				s.rmLiveWaiter(user, msg.ID)
+			}
+			return done
 		},
 		ExpireFunc: func() {
-			s.coinNotFound(user, msg.ID, params.CoinID)
+			s.rmLiveWaiter(user, msg.ID)
+			s.respondError(msg.ID, user, msgjson.TransactionUndiscovered,
+				fmt.Sprintf("failed to find redeemed coin %v", coinStr))
 		},
 	})
 	return nil
 }
 
-// coinNotFound sends an error response for a coin not found.
-func (s *Swapper) coinNotFound(acctID account.AccountID, msgID uint64, coinID []byte) {
-	resp, err := msgjson.NewResponse(msgID, nil, &msgjson.Error{
-		Code:    msgjson.TransactionUndiscovered,
-		Message: fmt.Sprintf("failed to find transaction %x", coinID),
-	})
-	if err != nil {
-		log.Error("NewResponse error in (Swapper).loop: %v", err)
-	}
-	s.authMgr.Send(acctID, resp)
-}
-
 // revocationRequests prepares a match revocation RPC request for each client.
 // Both the request and the *msgjson.RevokeMatchParams are returned, since they
 // cannot be accessed directly from the request (json.RawMessage).
-func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Message, *msgjson.RevokeMatch, *msgjson.Message, error) {
+func (s *Swapper) revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Message, *msgjson.RevokeMatch, *msgjson.Message, error) {
 	takerParams := &msgjson.RevokeMatch{
 		OrderID: idToBytes(match.Taker.ID()),
 		MatchID: idToBytes(match.ID()),
 	}
+	s.authMgr.Sign(takerParams)
 	takerReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RevokeMatchRoute, takerParams)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -1463,6 +2027,7 @@ func revocationRequests(match *matchTracker) (*msgjson.RevokeMatch, *msgjson.Mes
 		OrderID: idToBytes(match.Maker.ID()),
 		MatchID: idToBytes(match.ID()),
 	}
+	s.authMgr.Sign(makerParams)
 	makerReq, err := msgjson.NewRequest(comms.NextID(), msgjson.RevokeMatchRoute, makerParams)
 	if err != nil {
 		return nil, nil, nil, nil, err
@@ -1478,31 +2043,38 @@ func (s *Swapper) revoke(match *matchTracker) {
 	s.unlockOrderCoins(match.Taker)
 	s.unlockOrderCoins(match.Maker)
 
-	takerParams, takerReq, makerParams, makerReq, err := revocationRequests(match)
+	sendRevReq := func(user account.AccountID, isMaker bool, req *msgjson.Message, params *msgjson.RevokeMatch) {
+		ack := &messageAcker{
+			user:    user,
+			match:   match,
+			params:  params,
+			isMaker: isMaker,
+			// isAudit: false,
+		}
+		// Expire function to unregister the outstanding request.
+		expireFunc := func() {
+			s.rmLiveAckers(req.ID)
+			//s.authMgr.Penalize(ack.user, account.FailureToAct) // really penalize again?
+		}
+		// Register that there is an outstanding request.
+		s.setLiveAcker(req, ack)
+		err := s.authMgr.RequestWithTimeout(user, req, func(_ comms.Link, resp *msgjson.Message) {
+			s.processAck(resp, ack)
+		}, auth.DefaultRequestTimeout, expireFunc)
+		if err != nil {
+			expireFunc() // unregister request and penalize
+			log.Infof("revoke_match request failed for user %v (taker): %v", user, err)
+		}
+	}
+
+	takerParams, takerReq, makerParams, makerReq, err := s.revocationRequests(match)
 	if err != nil {
 		log.Errorf("error creating revocation requests: %v", err)
 		return
 	}
-	takerAck := &messageAcker{
-		user:    match.Taker.User(),
-		match:   match,
-		params:  takerParams,
-		isMaker: false,
-		// isAudit: false,
-	}
-	s.authMgr.Request(match.Taker.User(), takerReq, func(_ comms.Link, msg *msgjson.Message) {
-		s.processAck(msg, takerAck)
-	})
-	makerAck := &messageAcker{
-		user:    match.Maker.User(),
-		match:   match,
-		params:  makerParams,
-		isMaker: true,
-		// isAudit: false,
-	}
-	s.authMgr.Request(match.Maker.User(), makerReq, func(_ comms.Link, msg *msgjson.Message) {
-		s.processAck(msg, makerAck)
-	})
+
+	sendRevReq(match.Taker.User(), false, takerReq, takerParams)
+	sendRevReq(match.Maker.User(), true, makerReq, makerParams)
 }
 
 // readMatches translates a slice of raw matches from the market manager into
@@ -1529,10 +2101,12 @@ func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
 				time:      nowMs,
 				matchTime: match.Epoch.End(),
 				makerStatus: &swapStatus{
-					swapAsset: makerSwapAsset,
+					swapAsset:   makerSwapAsset,
+					redeemAsset: takerSwapAsset,
 				},
 				takerStatus: &swapStatus{
-					swapAsset: takerSwapAsset,
+					swapAsset:   takerSwapAsset,
+					redeemAsset: makerSwapAsset,
 				},
 			})
 		}
@@ -1596,6 +2170,9 @@ func newMatchAckers(match *matchTracker) (*messageAcker, *messageAcker) {
 // with signatures for each match ID. The match acknowledgements were requested
 // from each matched user in Negotiate.
 func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message, matches []*messageAcker) {
+	// Remove the live acker from Swapper's tracking.
+	defer s.rmLiveAckers(msg.ID)
+
 	var acks []msgjson.Acknowledgement
 	err := msg.UnmarshalResult(&acks)
 	if err != nil {
@@ -1668,6 +2245,18 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 	}
 }
 
+// CheckUnspent attempts to verify a coin ID for a given asset by retrieving the
+// corresponding asset.Coin. If the coin is not found or spent, an
+// asset.CoinNotFoundError is returned.
+func (s *Swapper) CheckUnspent(asset uint32, coinID []byte) error {
+	backend := s.coins[asset]
+	if backend == nil {
+		return fmt.Errorf("unknown asset %d", asset)
+	}
+
+	return backend.Backend.VerifyUnspentCoin(coinID)
+}
+
 // LockOrdersCoins locks the backing coins for the provided orders.
 func (s *Swapper) LockOrdersCoins(orders []order.Order) {
 	// Separate orders according to the asset of their locked coins.
@@ -1738,6 +2327,15 @@ func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
 // a swap A completes after Matching and creation of swap B but before Negotiate
 // has a chance to record the new swap.
 func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool) {
+	// If the Swapper is stopping, the Markets should also be stopping, but
+	// block this just in case.
+	s.handlerMtx.RLock()
+	defer s.handlerMtx.RUnlock()
+	if s.stop {
+		log.Errorf("Negotiate called on stopped swapper. Matches lost!")
+		return
+	}
+
 	// Lock trade order coins.
 	swapOrders := make([]order.Order, 0, 2*len(matchSets)) // size guess, with the single maker case
 	for _, match := range matchSets {
@@ -1783,8 +2381,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 	// required to process the acknowledgment to the userMatches map.
 	addUserMatch := func(acker *messageAcker) {
 		s.authMgr.Sign(acker.params)
-		l := userMatches[acker.user]
-		userMatches[acker.user] = append(l, acker)
+		userMatches[acker.user] = append(userMatches[acker.user], acker)
 	}
 
 	// Setting length to max possible, which is over-allocating by the number of
@@ -1829,7 +2426,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 	// Add the matches to the map.
 	s.matchMtx.Lock()
 	for _, match := range toMonitor {
-		s.matches[match.ID().String()] = match
+		s.matches[match.ID()] = match
 	}
 	s.matchMtx.Unlock()
 
@@ -1842,7 +2439,7 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 			msgs = append(msgs, m.params)
 		}
 
-		// Solicit match acknowledgments.
+		// Solicit match acknowledgments. Each Match is signed in addUserMatch.
 		req, err := msgjson.NewRequest(comms.NextID(), msgjson.MatchRoute, msgs)
 		if err != nil {
 			log.Errorf("error creating match notification request: %v", err)
@@ -1854,10 +2451,25 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 		// response handler.
 		u, m := user, matches
 		log.Debugf("Negotiate: sending 'match' ack request to user %v for %d matches",
-			user, len(matches))
-		s.authMgr.Request(user, req, func(_ comms.Link, msg *msgjson.Message) {
-			s.processMatchAcks(u, msg, m)
-		})
+			u, len(m))
+
+		// Register that there is an outstanding ack request. This is
+		// unregistered on completion of processAck or request expiry.
+		s.setLiveAckers(req, m)
+
+		// Expire function to unregister the outstanding request.
+		expireFunc := func() {
+			s.rmLiveAckers(req.ID)
+			log.Infof("Failed to send request to %v for match acks.", u)
+		}
+
+		// Send the ack request.
+
+		// A user gets responseTimeout to respond to a successfully sent request,
+		// and reconnectTimeout to connect and and have the request sent.
+		s.authMgr.RequestWhenConnected(u, req, func(_ comms.Link, resp *msgjson.Message) {
+			s.processMatchAcks(u, resp, m)
+		}, auth.DefaultRequestTimeout, auth.DefaultConnectTimeout, expireFunc)
 	}
 }
 

@@ -60,6 +60,10 @@ type DEXArchivist interface {
 	// unrecoverable error (disconnect, etc.).
 	LastErr() error
 
+	// Fatal provides select semantics like Context.Done when there is a fatal
+	// backend error. Use LastErr to get the error.
+	Fatal() <-chan struct{}
+
 	// Close should gracefully shutdown the backend, returning when complete.
 	Close() error
 
@@ -182,6 +186,9 @@ type AccountArchiver interface {
 
 	// Accounts returns data for all accounts.
 	Accounts() ([]*Account, error)
+
+	// AccountInfo returns data for an account.
+	AccountInfo(account.AccountID) (*Account, error)
 }
 
 // MatchData represents an order pair match, but with just the order IDs instead

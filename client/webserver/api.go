@@ -115,12 +115,15 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
-// apiConnect is the handler for the '/connectwallet' API request. Connects to
-// a specified wallet, but does not unlock it.
-func (s *WebServer) apiConnect(w http.ResponseWriter, r *http.Request) {
+// apiConnectWallet is the handler for the '/connectwallet' API request.
+// Connects to a specified wallet, but does not unlock it.
+func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
 		AssetID uint32 `json:"assetID"`
 	}{}
+	if !readPost(w, r, form) {
+		return
+	}
 	err := s.core.ConnectWallet(form.AssetID)
 	if err != nil {
 		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(form.AssetID), err)
@@ -233,6 +236,30 @@ func (s *WebServer) apiLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, response, s.indent)
 }
 
+// apiGetBalance handles the 'balance' API request.
+func (s *WebServer) apiGetBalance(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	bals, err := s.core.AssetBalances(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, "balance error: %v", err)
+		return
+	}
+	resp := &struct {
+		OK       bool           `json:"ok"`
+		Balances *db.BalanceSet `json:"balances"`
+	}{
+		OK:       true,
+		Balances: bals,
+	}
+	writeJSON(w, resp, s.indent)
+
+}
+
 // apiWithdraw handles the 'withdraw' API request.
 func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 	form := new(withdrawForm)
@@ -245,7 +272,7 @@ func (s *WebServer) apiWithdraw(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "no wallet found for %s", unbip(form.AssetID))
 		return
 	}
-	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value)
+	coin, err := s.core.Withdraw(form.Pass, form.AssetID, form.Value, form.Address)
 	if err != nil {
 		s.writeAPIError(w, "withdraw error: %v", err)
 		return

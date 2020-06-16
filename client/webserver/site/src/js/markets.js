@@ -1,4 +1,4 @@
-import Doc, { WalletIcons, BipIDs } from './doc'
+import Doc, { WalletIcons } from './doc'
 import State from './state'
 import BasePage from './basepage'
 import OrderBook from './orderbook'
@@ -45,6 +45,8 @@ const statusRevoked = 5
 
 const animationLength = 500
 
+const anHour = 60 * 60 * 1000 // milliseconds
+
 const check = document.createElement('span')
 check.classList.add('ico-check')
 
@@ -60,14 +62,13 @@ export default class MarketsPage extends BasePage {
       'registrationStatus', 'regStatusTitle', 'regStatusMessage', 'regStatusConfsDisplay',
       'regStatusDex', 'confReq',
       // Order form.
-      'orderForm', 'priceBox', 'buyBttn', 'sellBttn', 'baseBalance',
-      'quoteBalance', 'limitBttn', 'marketBttn', 'tifBox', 'submitBttn',
-      'qtyField', 'rateField', 'orderErr', 'baseBox', 'quoteBox', 'baseImg',
-      'quoteImg', 'baseNewButton', 'quoteNewButton', 'baseBalSpan',
-      'quoteBalSpan', 'lotSize', 'rateStep', 'lotField', 'tifNow', 'mktBuyBox',
-      'mktBuyLots', 'mktBuyField', 'minMktBuy', 'qtyBox', 'loaderMsg',
+      'orderForm', 'priceBox', 'buyBttn', 'sellBttn', 'limitBttn', 'marketBttn',
+      'tifBox', 'submitBttn', 'qtyField', 'rateField', 'orderErr',
+      'baseWalletIcons', 'quoteWalletIcons', 'lotSize', 'rateStep', 'lotField',
+      'tifNow', 'mktBuyBox', 'mktBuyLots', 'mktBuyField', 'minMktBuy', 'qtyBox',
+      'loaderMsg', 'balanceTable',
       // Wallet unlock form
-      'forms', 'openForm', 'walletPass',
+      'forms', 'openForm', 'uwAppPass',
       // Order submission is verified with the user's password.
       'verifyForm', 'vSide', 'vQty', 'vBase', 'vRate',
       'vTotal', 'vQuote', 'vPass', 'vSubmit', 'verifyLimit', 'verifyMarket',
@@ -92,6 +93,21 @@ export default class MarketsPage extends BasePage {
     }
     this.chart = new DepthChart(page.marketChart, reporters)
 
+    // Set up the BalanceWidget.
+    {
+      const wgt = this.balanceWgt = new BalanceWidget(page.balanceTable)
+      const baseIcons = wgt.base.stateIcons.icons
+      const quoteIcons = wgt.quote.stateIcons.icons
+      bind(wgt.base.connect, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
+      bind(wgt.quote.connect, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(baseIcons.sleeping, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
+      bind(quoteIcons.sleeping, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(baseIcons.locked, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
+      bind(quoteIcons.locked, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(wgt.base.newWalletBttn, 'click', () => { this.showCreate(this.market.base) })
+      bind(wgt.quote.newWalletBttn, 'click', () => { this.showCreate(this.market.quote) })
+    }
+
     // Prepare templates for the buy and sell tables and the user's order table.
     cleanTemplates(page.rowTemplate, page.liveTemplate)
 
@@ -110,12 +126,6 @@ export default class MarketsPage extends BasePage {
     this.quoteUnits = main.querySelectorAll('[data-unit=quote]')
     this.baseUnits = main.querySelectorAll('[data-unit=base]')
 
-    // The wallet-control icons.
-    this.walletIcons = {
-      base: new WalletIcons(page.baseBox),
-      quote: new WalletIcons(page.quoteBox)
-    }
-
     // Buttons to set order type and side.
     bind(page.buyBttn, 'click', () => {
       swapBttns(page.sellBttn, page.buyBttn)
@@ -133,6 +143,7 @@ export default class MarketsPage extends BasePage {
     bind(page.marketBttn, 'click', () => {
       swapBttns(page.limitBttn, page.marketBttn)
       this.setOrderVisibility()
+      this.setMarketBuyOrderEstimate()
     })
 
     Doc.disableMouseWheel(page.rateField, page.lotField, page.qtyField, page.mktBuyField)
@@ -165,15 +176,6 @@ export default class MarketsPage extends BasePage {
         }
       }
     })
-
-    // Wallet button callbacks.
-    bind(page.baseNewButton, 'click', () => { this.showCreate(this.market.base) })
-    bind(page.quoteNewButton, 'click', () => { this.showCreate(this.market.quote) })
-    const i = this.walletIcons
-    bind(i.base.icons.locked, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-    bind(i.quote.icons.locked, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
-    bind(i.base.icons.sleeping, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
-    bind(i.quote.icons.sleeping, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
 
     // Event listeners for interactions with the various input fields.
     bind(page.lotField, 'change', () => { this.lotChanged() })
@@ -228,7 +230,8 @@ export default class MarketsPage extends BasePage {
 
   /* hasFeePending is true if the fee payment is pending */
   hasFeePending () {
-    return typeof this.market.dex.confs === 'number'
+    const dex = this.market.dex
+    return typeof dex.confs === 'number' && dex.confs < dex.confsrequired
   }
 
   /* assetsAreSupported is true if all the assets of the current market are
@@ -249,11 +252,12 @@ export default class MarketsPage extends BasePage {
       Doc.show(page.priceBox, page.tifBox, page.qtyBox)
       Doc.hide(page.mktBuyBox)
     } else {
-      Doc.hide(page.priceBox)
       if (this.isSell()) {
+        Doc.show(page.priceBox)
         Doc.hide(page.mktBuyBox)
         Doc.show(page.qtyBox)
       } else {
+        Doc.hide(page.priceBox)
         Doc.show(page.mktBuyBox)
         Doc.hide(page.qtyBox)
       }
@@ -267,8 +271,11 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const feePaid = !this.hasFeePending()
     const assetsAreSupported = this.assetsAreSupported()
+    const base = this.market.base
+    const quote = this.market.quote
+    const hasWallets = base && app.assets[base.id].wallet && quote && app.assets[quote.id].wallet
 
-    if (feePaid && assetsAreSupported) {
+    if (feePaid && assetsAreSupported && hasWallets) {
       Doc.show(page.orderForm)
       return
     }
@@ -356,9 +363,11 @@ export default class MarketsPage extends BasePage {
   /* setMarket sets the currently displayed market. */
   async setMarket (host, base, quote) {
     const dex = app.user.exchanges[host]
+    const baseCfg = dex.assets[base]
+    const quoteCfg = dex.assets[quote]
     this.market = {
       dex: dex,
-      sid: marketID(base, quote), // A string market identifier used by the DEX.
+      sid: marketID(baseCfg.symbol, quoteCfg.symbol), // A string market identifier used by the DEX.
       // app.assets is a map of core.SupportedAsset type, which can be found at
       // client/core/types.go.
       base: app.assets[base],
@@ -431,7 +440,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBook accepts the data sent in the 'book' notification. */
   handleBook (data) {
-    this.book = new OrderBook(data)
+    this.book = new OrderBook(data, this.market.baseCfg.symbol, this.market.quoteCfg.symbol)
     this.loadTable()
     for (const order of (data.book.epoch || [])) {
       if (order.rate > 0) this.book.add(order)
@@ -482,56 +491,13 @@ export default class MarketsPage extends BasePage {
     }
   }
 
-  /* setBalance sets the balance display. */
-  setBalance (a, row, img, button, bal) {
-    img.src = Doc.logoPath(a.symbol)
-    if (a.wallet) {
-      Doc.hide(button)
-      Doc.show(row)
-      bal.textContent = Doc.formatCoinValue(a.wallet.balances.zeroConf.available / 1e8)
-      return
-    }
-    Doc.show(button)
-    Doc.hide(row)
-  }
-
-  /*
-   * updateWallet updates the displayed wallet information based on the
-   * core.Wallet state.
-   */
-  updateWallet (assetID) {
-    const page = this.page
-    const market = this.market
-    const asset = app.assets[assetID]
-    const [b, q] = [market.base, market.quote]
-    switch (assetID) {
-      case (market.baseCfg.id):
-        if (!b) {
-          Doc.hide(page.baseBox)
-          return
-        }
-        Doc.show(page.baseBox)
-        this.setBalance(asset, page.baseBalSpan, page.baseImg, page.baseNewButton, page.baseBalance)
-        this.walletIcons.base.readWallet(asset.wallet)
-        break
-      case (market.quoteCfg.id):
-        if (!q) {
-          Doc.hide(page.quoteBox)
-          return
-        }
-        Doc.show(page.quoteBox)
-        this.setBalance(asset, page.quoteBalSpan, page.quoteImg, page.quoteNewButton, page.quoteBalance)
-        this.walletIcons.quote.readWallet(asset.wallet)
-    }
-  }
-
   /* refreshActiveOrders refreshes the user's active order list. */
   refreshActiveOrders () {
     const page = this.page
     const orderRows = this.orderRows
     const market = this.market
     for (const oid in orderRows) delete orderRows[oid]
-    const orders = app.orders(market.dex.host, market.baseCfg.id, market.quoteCfg.id)
+    const orders = app.orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
     Doc.empty(page.liveList)
     for (const order of orders) {
       const row = page.liveTemplate.cloneNode(true)
@@ -576,8 +542,7 @@ export default class MarketsPage extends BasePage {
     page.rateStep.textContent = Doc.formatCoinValue(market.quoteCfg.rateStep / 1e8)
     this.baseUnits.forEach(el => { el.textContent = b.symbol.toUpperCase() })
     this.quoteUnits.forEach(el => { el.textContent = q.symbol.toUpperCase() })
-    this.updateWallet(b.id)
-    this.updateWallet(q.id)
+    this.balanceWgt.setWallets(host, b.id, q.id)
     this.setMarketBuyOrderEstimate()
     this.refreshActiveOrders()
   }
@@ -642,7 +607,7 @@ export default class MarketsPage extends BasePage {
     this.openFunc = f
     page.openForm.setAsset(app.assets[asset.id])
     this.showForm(page.openForm)
-    page.walletPass.focus()
+    page.uwAppPass.focus()
   }
 
   /* showVerify shows the form to accept the currently parsed order information
@@ -807,7 +772,7 @@ export default class MarketsPage extends BasePage {
 
   // handleBalanceNote handles notifications updating a wallet's balance.
   handleBalanceNote (note) {
-    this.updateWallet(note.assetID)
+    this.balanceWgt.updateAsset(note.assetID)
   }
 
   /*
@@ -835,8 +800,8 @@ export default class MarketsPage extends BasePage {
     const quoteWallet = app.walletMap[market.quote.id]
     await app.fetchUser()
     if (!baseWallet.open || !quoteWallet.open) {
-      this.updateWallet(market.base.id)
-      this.updateWallet(market.quote.id)
+      this.balanceWgt.updateAsset(market.base.id)
+      this.balanceWgt.updateAsset(market.quote.id)
     }
     this.refreshActiveOrders()
   }
@@ -850,7 +815,8 @@ export default class MarketsPage extends BasePage {
     const user = await app.fetchUser()
     const asset = user.assets[this.currentCreate.id]
     Doc.hide(this.page.forms)
-    this.updateWallet(asset.id)
+    this.balanceWgt.updateAsset(asset.id)
+    this.resolveOrderFormVisibility()
   }
 
   /*
@@ -861,7 +827,7 @@ export default class MarketsPage extends BasePage {
   async walletUnlocked () {
     Doc.hide(this.page.forms)
     await app.fetchUser()
-    this.updateWallet(this.openAsset.id)
+    this.balanceWgt.updateAsset(this.openAsset.id)
   }
 
   /* lotChanged is attached to the keyup and change events of the lots input. */
@@ -1259,6 +1225,146 @@ class MarketRow {
   }
 }
 
+/*
+ * BalanceWidget is a display of balance information. Because the wallet can be
+ * in any number of states, and because every exchange has different funding
+ * coin confirmation requirements, the BalanceWidget displays a number of state
+ * indicators and buttons, as well as tabulated balance data with rows for
+ * locked and immature balance.
+ */
+class BalanceWidget {
+  constructor (table) {
+    const els = Doc.parsePage(table, [
+      'baseAvail', 'quoteAvail', 'baseNewWalletRow', 'quoteNewWalletRow',
+      'baseNewButton', 'quoteNewButton', 'baseLocked', 'quoteLocked',
+      'baseImmature', 'quoteImmature', 'baseImg', 'quoteImg',
+      'quoteUnsupported', 'baseUnsupported', 'baseExpired', 'quoteExpired',
+      'baseConnect', 'quoteConnect', 'baseSpinner', 'quoteSpinner',
+      'baseWalletState', 'quoteWalletState'
+    ])
+    this.base = {
+      id: 0,
+      cfg: null,
+      logo: els.baseImg,
+      avail: els.baseAvail,
+      newWalletRow: els.baseNewWalletRow,
+      newWalletBttn: els.baseNewButton,
+      locked: els.baseLocked,
+      immature: els.baseImmature,
+      unsupported: els.baseUnsupported,
+      expired: els.baseExpired,
+      connect: els.baseConnect,
+      spinner: els.baseSpinner,
+      iconBox: els.baseWalletState,
+      stateIcons: new WalletIcons(els.baseWalletState)
+    }
+    this.quote = {
+      id: 0,
+      cfg: null,
+      logo: els.quoteImg,
+      avail: els.quoteAvail,
+      newWalletRow: els.quoteNewWalletRow,
+      newWalletBttn: els.quoteNewButton,
+      locked: els.quoteLocked,
+      immature: els.quoteImmature,
+      unsupported: els.quoteUnsupported,
+      expired: els.quoteExpired,
+      connect: els.quoteConnect,
+      spinner: els.quoteSpinner,
+      iconBox: els.quoteWalletState,
+      stateIcons: new WalletIcons(els.quoteWalletState)
+    }
+    this.dex = null
+  }
+
+  /*
+   * setWallet sets the balance widget to display data for specified market.
+   */
+  setWallets (host, baseID, quoteID) {
+    this.dex = app.user.exchanges[host]
+    this.base.id = baseID
+    this.base.cfg = this.dex.assets[baseID]
+    this.quote.id = quoteID
+    this.quote.cfg = this.dex.assets[quoteID]
+    this.updateWallet(this.base)
+    this.updateWallet(this.quote)
+  }
+
+  /*
+   * updateWallet updates the displayed wallet information based on the
+   * core.Wallet state.
+   */
+  updateWallet (side) {
+    const asset = app.assets[side.id]
+    // Just hide everything to start.
+    Doc.hide(
+      side.newWalletRow, side.avail, side.immature, side.locked,
+      side.expired, side.unsupported, side.connect, side.spinner, side.iconBox
+    )
+    side.logo.src = Doc.logoPath(side.cfg.symbol)
+    // Handle an unsupported asset.
+    if (!asset) {
+      Doc.show(side.unsupported)
+      return
+    }
+    Doc.show(side.iconBox)
+    const wallet = asset.wallet
+    side.stateIcons.readWallet(wallet)
+    // Handle no wallet configured.
+    if (!wallet) {
+      Doc.show(side.newWalletRow)
+      return
+    }
+    const bal = wallet.balances.xc[this.dex.host]
+    // Handle not connected and no balance known for the DEX.
+    if (!bal && !wallet.running) {
+      Doc.show(side.connect)
+      return
+    }
+    // If there is no balance, but the wallet is connected, show the loading
+    // icon while we fetch an update.
+    if (!bal) {
+      this.fetchBalance(side.id)
+      Doc.show(side.spinner)
+      return
+    }
+    // We have a wallet and a DEX-specific balance. Set all of the fields.
+    Doc.show(side.avail, side.immature, side.locked)
+    side.avail.textContent = Doc.formatCoinValue(bal.available / 1e8)
+    side.locked.textContent = Doc.formatCoinValue(bal.locked / 1e8)
+    side.immature.textContent = Doc.formatCoinValue(bal.immature / 1e8)
+    // If the current balance update time is older than an hour, show the
+    // expiration icon. Request a balance update, if possible.
+    const expired = new Date().getTime() - new Date(wallet.balances.stamp).getTime() > anHour
+    if (expired) {
+      Doc.show(side.expired)
+      if (wallet.running) this.fetchBalance(side.id)
+    } else Doc.hide(side.expired)
+  }
+
+  /*
+   * updateAsset updates the info for one side of the existing market. If the
+   * specified asset ID is not one of the current market's base or quote assets,
+   * it is silently ignored.
+   */
+  updateAsset (assetID) {
+    if (assetID === this.base.id) this.updateWallet(this.base)
+    else if (assetID === this.quote.id) this.updateWallet(this.quote)
+  }
+
+  /*
+   * fetchBalance requests a balance update from the API. The API response does
+   * include the balance, but we're ignoring it, since a balance update
+   * notification is received via the Application anyways.
+   */
+  async fetchBalance (assetID) {
+    const res = await postJSON('/api/balance', { assetID: assetID })
+    if (!app.checkResponse(res)) {
+      console.error('failed to fetch balance for asset ID', assetID)
+    }
+  }
+}
+
 /* makeMarket creates a market object that specifies basic market details. */
 function makeMarket (host, base, quote) {
   return {
@@ -1268,8 +1374,8 @@ function makeMarket (host, base, quote) {
   }
 }
 
-/* marketID creates a DEX-compatible market name from the BIP IDs. */
-export function marketID (b, q) { return `${BipIDs[b]}_${BipIDs[q]}` }
+/* marketID creates a DEX-compatible market name from the ticker symbols. */
+export function marketID (b, q) { return `${b}_${q}` }
 
 /* asAtoms converts the float string to atoms. */
 function asAtoms (s) {

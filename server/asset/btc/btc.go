@@ -89,7 +89,7 @@ type Backend struct {
 	// The backend provides block notification channels through it BlockChannel
 	// method. signalMtx locks the blockChans array.
 	signalMtx   sync.RWMutex
-	blockChans  []chan *asset.BlockUpdate
+	blockChans  map[chan *asset.BlockUpdate]struct{}
 	chainParams *chaincfg.Params
 	// A logger will be provided by the dex for this backend. All logging should
 	// use the provided logger.
@@ -165,22 +165,28 @@ func NewBTCClone(name, configPath string, logger dex.Logger, network dex.Network
 	return btc, nil
 }
 
-// Contract is part of the asset.Backend interface. An asset.Contract is a
-// utxo that has been validated as a swap contract for the passed redeem script.
+// Contract is part of the asset.Backend interface. An asset.Contract is an
+// output that has been validated as a swap contract for the passed redeem
+// script. A spendable output is one that can be spent in the next block. Every
+// output from a non-coinbase transaction is spendable immediately. Coinbase
+// outputs are only spendable after CoinbaseMaturity confirmations. Pubkey
+// scripts can be P2PKH or P2SH. Multi-sig P2SH redeem scripts are supported.
 func (btc *Backend) Contract(coinID []byte, redeemScript []byte) (asset.Contract, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
 	}
-	utxo, err := btc.utxo(txHash, vout, redeemScript)
+	output, err := btc.output(txHash, vout, redeemScript)
 	if err != nil {
 		return nil, err
 	}
-	err = utxo.auditContract()
+	contract := &Contract{Output: output}
+	// Verify contract and set refundAddress and swapAddress.
+	err = contract.auditContract()
 	if err != nil {
 		return nil, err
 	}
-	return utxo, nil
+	return contract, nil
 }
 
 // VerifySecret checks that the secret satisfies the contract.
@@ -246,6 +252,24 @@ func (btc *Backend) ValidateContract(contract []byte) error {
 	return err
 }
 
+// VerifyUnspentCoin attempts to verify a coin ID by decoding the coin ID and
+// retrieving the corresponding UTXO. If the coin is not found or no longer
+// unspent, an asset.CoinNotFoundError is returned.
+func (dcr *Backend) VerifyUnspentCoin(coinID []byte) error {
+	txHash, vout, err := decodeCoinID(coinID)
+	if err != nil {
+		return fmt.Errorf("error decoding coin ID %x: %v", coinID, err)
+	}
+	txOut, err := dcr.node.GetTxOut(txHash, vout, true)
+	if err != nil {
+		return fmt.Errorf("GetTxOut (%s:%d): %v", txHash.String(), vout, err)
+	}
+	if txOut == nil {
+		return asset.CoinNotFoundError
+	}
+	return nil
+}
+
 // BlockChannel creates and returns a new channel on which to receive block
 // updates. If the returned channel is ever blocking, there will be no error
 // logged from the btc package. Part of the asset.Backend interface.
@@ -253,7 +277,7 @@ func (btc *Backend) BlockChannel(size int) <-chan *asset.BlockUpdate {
 	c := make(chan *asset.BlockUpdate, size)
 	btc.signalMtx.Lock()
 	defer btc.signalMtx.Unlock()
-	btc.blockChans = append(btc.blockChans, c)
+	btc.blockChans[c] = struct{}{}
 	return c
 }
 
@@ -274,7 +298,7 @@ func newBTC(name string, chainParams *chaincfg.Params, logger dex.Logger, node b
 	btc := &Backend{
 		name:        name,
 		blockCache:  newBlockCache(),
-		blockChans:  make([]chan *asset.BlockUpdate, 0),
+		blockChans:  make(map[chan *asset.BlockUpdate]struct{}),
 		chainParams: chainParams,
 		log:         logger,
 		node:        node,
@@ -386,7 +410,7 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
 	}
 
-	return &UTXO{
+	out := &Output{
 		TXIO: TXIO{
 			btc:        btc,
 			tx:         tx,
@@ -403,35 +427,115 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		numSigs:           inputNfo.ScriptAddrs.NRequired,
 		spendSize:         inputNfo.VBytes(),
 		value:             uint64(txOut.Value * btcToSatoshi),
-	}, nil
+	}
+	return &UTXO{out}, nil
+}
+
+// newTXIO creates a TXIO for a transaction, spent or unspent.
+func (btc *Backend) newTXIO(txHash *chainhash.Hash) (*TXIO, int64, error) {
+	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
+	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, 0, asset.CoinNotFoundError
+		}
+		return nil, 0, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
+	}
+	tx, err := btc.transaction(txHash, verboseTx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error fetching verbose transaction data: %v", err)
+	}
+	blockHeight, blockHash, lastLookup, err := btc.blockInfo(verboseTx)
+	if err != nil {
+		return nil, 0, err
+	}
+	var maturity int32
+	if tx.isCoinbase {
+		maturity = int32(btc.chainParams.CoinbaseMaturity)
+	}
+	return &TXIO{
+		btc:        btc,
+		tx:         tx,
+		height:     blockHeight,
+		blockHash:  blockHash,
+		maturity:   maturity,
+		lastLookup: lastLookup,
+	}, int64(verboseTx.Confirmations), nil
 }
 
 // input gets the transaction input.
 func (btc *Backend) input(txHash *chainhash.Hash, vin uint32) (*Input, error) {
-	verboseTx, err := btc.node.GetRawTransactionVerbose(txHash)
-	if err != nil {
-		if isTxNotFoundErr(err) {
-			return nil, asset.CoinNotFoundError
-		}
-		return nil, fmt.Errorf("GetRawTransactionVerbose for txid %s: %v", txHash, err)
-	}
-	tx, err := btc.transaction(txHash, verboseTx)
-	if err != nil {
-		return nil, fmt.Errorf("error fetching verbose transaction data: %v", err)
-	}
-	blockHeight, blockHash, lastLookup, err := btc.blockInfo(verboseTx)
+	txio, _, err := btc.newTXIO(txHash)
 	if err != nil {
 		return nil, err
 	}
+	if int(vin) >= len(txio.tx.ins) {
+		return nil, fmt.Errorf("tx %v has %d outputs (no vin %d)", txHash, len(txio.tx.ins), vin)
+	}
 	return &Input{
-		TXIO: TXIO{
-			btc:        btc,
-			tx:         tx,
-			height:     blockHeight,
-			blockHash:  blockHash,
-			lastLookup: lastLookup,
-		},
-		vin: vin,
+		TXIO: *txio,
+		vin:  vin,
+	}, nil
+}
+
+// output gets the transaction output.
+func (btc *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []byte) (*Output, error) {
+	txio, confs, err := btc.newTXIO(txHash)
+	if err != nil {
+		return nil, err
+	}
+	if int(vout) >= len(txio.tx.outs) {
+		return nil, fmt.Errorf("tx %v has %d outputs (no vout %d)", txHash, len(txio.tx.outs), vout)
+	}
+
+	txOut := txio.tx.outs[vout]
+	pkScript := txOut.pkScript
+	inputNfo, err := dexbtc.InputInfo(pkScript, redeemScript, btc.chainParams)
+	if err != nil {
+		return nil, err
+	}
+	scriptType := inputNfo.ScriptType
+
+	// If it's a pay-to-script-hash, extract the script hash and check it against
+	// the hash of the user-supplied redeem script.
+	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
+		if scriptType.IsSegwit() {
+			scriptHash := extractWitnessScriptHash(pkScript)
+			shash := sha256.Sum256(redeemScript)
+			if !bytes.Equal(shash[:], scriptHash) {
+				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
+			}
+		} else {
+			//scriptHash, err := dexbtc.ExtractScriptHash(pkScript, btc.chainParams)
+			scriptHash := extractScriptHash(pkScript)
+			if !bytes.Equal(btcutil.Hash160(redeemScript), scriptHash) {
+				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
+			}
+		}
+	}
+
+	scrAddrs := inputNfo.ScriptAddrs
+	addresses := make([]string, scrAddrs.NumPK+scrAddrs.NumPKH)
+	for i, addr := range append(scrAddrs.PkHashes, scrAddrs.PubKeys...) {
+		addresses[i] = addr.String() // unconverted
+	}
+
+	// Coinbase transactions must mature before spending.
+	if confs < int64(txio.maturity) {
+		return nil, immatureTransactionError
+	}
+
+	return &Output{
+		TXIO:              *txio,
+		vout:              vout,
+		value:             txOut.value,
+		addresses:         addresses,
+		scriptType:        scriptType,
+		nonStandardScript: inputNfo.NonStandardScript,
+		pkScript:          pkScript,
+		redeemScript:      redeemScript,
+		numSigs:           scrAddrs.NRequired,
+		// The total size associated with the wire.TxIn.
+		spendSize: inputNfo.VBytes(),
 	}, nil
 }
 
@@ -482,8 +586,10 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 	// Parse inputs and outputs, storing only what's needed.
 	inputs := make([]txIn, 0, len(verboseTx.Vin))
 	var sumIn, sumOut, valIn uint64
+	var isCoinbase bool
 	for vin, input := range verboseTx.Vin {
-		if input.Coinbase != "" {
+		isCoinbase = input.Coinbase != ""
+		if isCoinbase {
 			valIn = uint64(verboseTx.Vout[0].Value * btcToSatoshi)
 		} else {
 			var err error
@@ -495,7 +601,8 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 		sumIn += valIn
 		if input.Txid == "" {
 			inputs = append(inputs, txIn{
-				vout: input.Vout,
+				vout:  input.Vout,
+				value: valIn,
 			})
 			continue
 		}
@@ -506,6 +613,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 		inputs = append(inputs, txIn{
 			prevTx: *hash,
 			vout:   input.Vout,
+			value:  valIn,
 		})
 	}
 
@@ -527,7 +635,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 	if verboseTx.Vsize > 0 {
 		feeRate = (sumIn - sumOut) / uint64(verboseTx.Vsize)
 	}
-	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, inputs, outputs, feeRate), nil
+	return newTransaction(btc, txHash, blockHash, lastLookup, blockHeight, isCoinbase, inputs, outputs, feeRate), nil
 }
 
 // Get information for an unspent transaction output and it's transaction.
@@ -594,7 +702,7 @@ func (btc *Backend) Run(ctx context.Context) {
 		btc.signalMtx.RLock()
 		btc.log.Debugf("Notifying %d %s asset consumers of new block at height %d",
 			len(btc.blockChans), btc.name, block.Height)
-		for _, c := range btc.blockChans {
+		for c := range btc.blockChans {
 			select {
 			case c <- &asset.BlockUpdate{
 				Err:   nil,
@@ -602,6 +710,13 @@ func (btc *Backend) Run(ctx context.Context) {
 			}:
 			default:
 				btc.log.Errorf("failed to send block update on blocking channel")
+				// Commented to try sends on future blocks.
+				// close(c)
+				// delete(btc.blockChans, c)
+				//
+				// TODO: Allow the receiver (e.g. Swapper.Run) to inform done
+				// status so the channels can be retired cleanly rather than
+				// trying them forever.
 			}
 		}
 		btc.signalMtx.RUnlock()
@@ -609,13 +724,15 @@ func (btc *Backend) Run(ctx context.Context) {
 
 	sendErr := func(err error) {
 		btc.log.Error(err)
-		for _, c := range btc.blockChans {
+		for c := range btc.blockChans {
 			select {
 			case c <- &asset.BlockUpdate{
 				Err: err,
 			}:
 			default:
 				btc.log.Errorf("failed to send sending block update on blocking channel")
+				// close(c)
+				// delete(btc.blockChans, c)
 			}
 		}
 	}

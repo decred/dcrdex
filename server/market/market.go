@@ -17,11 +17,13 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/account"
+	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
+	"github.com/decred/slog"
 )
 
 // Error is just a basic error.
@@ -40,6 +42,7 @@ const (
 	ErrDuplicateOrder         = Error("order already in epoch") // maybe remove since this is ill defined
 	ErrDuplicateCancelOrder   = Error("equivalent cancel order already in epoch")
 	ErrInvalidCancelOrder     = Error("cancel order account does not match targeted order account")
+	ErrSuspendedAccount       = Error("suspended account")
 	ErrMalformedOrderResponse = Error("malformed order response")
 	ErrInternalServer         = Error("internal server error")
 )
@@ -50,6 +53,7 @@ type Swapper interface {
 	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
 	LockOrdersCoins(orders []order.Order)
 	TxMonitored(user account.AccountID, asset uint32, txid string) bool
+	CheckUnspent(asset uint32, coinID []byte) error
 }
 
 // Market is the market manager. It should not be overly involved with details
@@ -116,35 +120,131 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 		return nil, err
 	}
 
-	// Lock coins backing active orders.
-	baseCoins, quoteCoins, err := storage.ActiveOrderCoins(mktInfo.Base, mktInfo.Quote)
-	if err != nil {
-		return nil, err
-	}
-	// TODO: first check that the coins aren't already locked by e.g. another market.
-	log.Debugf("Locking %d base asset coins.", len(baseCoins))
-	for oid, coins := range baseCoins {
-		log.Tracef(" - order %v: %v", oid, coins)
-	}
-	coinLockerBase.LockCoins(baseCoins)
-	log.Debugf("Locking %d quote asset coins.", len(quoteCoins))
-	for oid, coins := range quoteCoins {
-		log.Tracef(" - order %v: %v", oid, coins)
-	}
-	coinLockerQuote.LockCoins(quoteCoins)
-	// TODO: fail and archive orders that are in orderStatusEpoch, and unlock
-	// their coins.
-
 	// Load existing book orders from the DB.
-	bookOrders, err := storage.BookOrders(mktInfo.Base, mktInfo.Quote)
+	base, quote := mktInfo.Base, mktInfo.Quote
+	bookOrders, err := storage.BookOrders(base, quote)
 	if err != nil {
 		return nil, err
 	}
 
 	log.Infof("Loaded %d stored book orders.", len(bookOrders))
+	// Put the book orders in a map so orders that no longer have funding coins
+	// can be removed easily.
+	bookOrdersByID := make(map[order.OrderID]*order.LimitOrder, len(bookOrders))
+	for _, ord := range bookOrders {
+		bookOrdersByID[ord.ID()] = ord
+	}
+
+	baseCoins := make(map[order.OrderID][]order.CoinID)
+	quoteCoins := make(map[order.OrderID][]order.CoinID)
+
+ordersLoop:
+	for id, lo := range bookOrdersByID {
+		if lo.FillAmt > 0 {
+			// Order already matched with another trade, so it is expected that
+			// the funding coins are spent in a swap.
+			//
+			// In general, our position is that the server is not ultimately
+			// responsible for verifying that all orders have locked coins since
+			// the client will be penalized if they cannot complete the swap.
+			// The least the server can do is ensure funding coins for NEW
+			// orders are unspent and owned by the user.
+
+			// On to the next order. Do not lock coins that are spent or should
+			// be spent in a swap contract.
+			continue
+		}
+
+		// Verify all funding coins for this order.
+		assetID := quote
+		if lo.Sell {
+			assetID = base
+		}
+		for i := range lo.Coins {
+			err := swapper.CheckUnspent(assetID, lo.Coins[i])
+			if err == nil {
+				continue
+			}
+
+			if errors.Is(err, asset.CoinNotFoundError) {
+				// spent, exclude this order
+				coin, _ := asset.DecodeCoinID(dex.BipIDSymbol(assetID), lo.Coins[i]) // coin decoding succeeded in CheckUnspent
+				log.Warnf("Coin %s not unspent for unfilled order %v. "+
+					"Revoking the order.", coin, lo)
+			} else {
+				// other failure (coinID decode, RPC, etc.)
+				return nil, fmt.Errorf("unexpected error checking coinID %v for order %v: %v",
+					lo.Coins[i], lo, err)
+				// NOTE: This does not revoke orders from storage since this is
+				// likely to be a configuration or node issue.
+			}
+
+			delete(bookOrdersByID, id)
+			if _, _, err = storage.RevokeOrder(lo); err != nil {
+				log.Errorf("Failed to revoke order %v: %v", lo, err)
+			}
+			// No penalization here presently since the market was down, but if
+			// a suspend message with persist=true was sent, the users should
+			// have kept their coins locked. (TODO)
+			continue ordersLoop
+		}
+
+		// All coins are unspent. Lock them.
+		if lo.Sell {
+			baseCoins[id] = lo.Coins
+		} else {
+			quoteCoins[id] = lo.Coins
+		}
+	}
+
+	log.Debugf("Locking %d base asset (%d) coins.", len(baseCoins), base)
+	if log.Level() <= slog.LevelTrace {
+		for oid, coins := range baseCoins {
+			log.Tracef(" - order %v: %v", oid, coins)
+		}
+	}
+
+	log.Debugf("Locking %d quote asset (%d) coins.", len(quoteCoins), quote)
+	if log.Level() <= slog.LevelTrace {
+		for oid, coins := range quoteCoins {
+			log.Tracef(" - order %v: %v", oid, coins)
+		}
+	}
+
+	// Lock the coins, catching and removing orders where coins were already
+	// locked by another market.
+	failedOrderCoins := coinLockerBase.LockCoins(baseCoins)
+	// Merge base and quote asset coins.
+	for id, coins := range coinLockerQuote.LockCoins(quoteCoins) {
+		failedOrderCoins[id] = coins
+	}
+
+	for oid := range failedOrderCoins {
+		log.Warnf("Revoking book order %v with already locked coins.", oid)
+		bad := bookOrdersByID[oid]
+		delete(bookOrdersByID, oid)
+		if _, _, err = storage.RevokeOrder(bad); err != nil {
+			log.Errorf("Failed to revoke order %v: %v", bad, err)
+			// But still not added back on the book.
+		}
+	}
 
 	Book := book.New(mktInfo.LotSize)
-	for _, lo := range bookOrders {
+	for _, lo := range bookOrdersByID {
+		// Limit order amount requirements are simple unlike market buys.
+		if lo.Quantity%mktInfo.LotSize != 0 || lo.FillAmt%mktInfo.LotSize != 0 {
+			// To change market configuration, the operator should suspended the
+			// market with persist=false, but that may not have happened, or
+			// maybe a revoke failed.
+			log.Errorf("Not rebooking order %v with amount (%v/%v) incompatible with current lot size (%v)",
+				lo.FillAmt, lo.Quantity, mktInfo.LotSize)
+			if _, _, err = storage.RevokeOrder(lo); err != nil {
+				log.Errorf("Failed to revoke order %v: %v", lo, err)
+				// But still not added back on the book.
+			}
+			continue
+		}
+
 		if ok := Book.Insert(lo); !ok {
 			// This can only happen if one of the loaded orders has an
 			// incompatible lot size for the current market config.
@@ -157,6 +257,7 @@ func NewMarket(mktInfo *dex.MarketInfo, storage db.DEXArchivist, swapper Swapper
 		marketInfo:       mktInfo,
 		book:             Book,
 		matcher:          matcher.New(),
+		persistBook:      true,
 		epochCommitments: make(map[order.Commitment]order.OrderID),
 		epochOrders:      make(map[order.OrderID]order.Order),
 		swapper:          swapper,
@@ -815,6 +916,16 @@ func (m *Market) unlockOrderCoins(o order.Order) {
 // 5. Respond to the client that placed the order.
 // 6. Notify epoch queue event subscribers.
 func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan chan<- *updateSignal, errChan chan<- error) error {
+	// Disallow trade orders from suspended accounts. Cancel orders are allowed.
+	if rec.order.Type() != order.CancelOrderType {
+		// Do not bother the auth manager for cancel orders.
+		if _, suspended := m.auth.Suspended(rec.order.User()); suspended {
+			log.Debugf("Account %v not allowed to submit order %v", rec.order.User(), rec.order.ID())
+			errChan <- ErrSuspendedAccount
+			return nil
+		}
+	}
+
 	// Verify that an order with the same commitment is not already in the epoch
 	// queue. Since commitment is part of the order serialization and thus order
 	// ID, this also prevents orders with the same ID.
@@ -920,7 +1031,12 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 
 	// Inform the client that the order has been received, stamped, signed, and
 	// inserted into the current epoch queue.
-	m.auth.Send(ord.User(), respMsg)
+	user := ord.User()
+	m.auth.SendWhenConnected(user, respMsg, DefaultConnectTimeout, func() {
+		log.Infof("Failed to send signed new order response to disconnected user %v, order %v",
+			user, oid)
+		// The user may not respond to preimage requests...
+	})
 
 	// Send epoch update to epoch queue subscribers.
 	notifyChan <- &updateSignal{
@@ -930,6 +1046,8 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 			epochIdx: epoch.Epoch,
 		},
 	}
+	// With the notification sent to subscribers, this order must be included in
+	// the processing of this epoch.
 	return nil
 }
 
@@ -939,7 +1057,7 @@ func idToBytes(id [order.OrderIDSize]byte) []byte {
 
 // respondError sends an rpcError to a user.
 func (m *Market) respondError(id uint64, user account.AccountID, code int, errMsg string) {
-	log.Debugf("error going to user %x, code: %d, msg: %s", user, code, errMsg)
+	log.Debugf("sending error to user %v, code: %d, msg: %s", user, code, errMsg)
 	msg, err := msgjson.NewResponse(id, nil, &msgjson.Error{
 		Code:    code,
 		Message: errMsg,
@@ -947,7 +1065,10 @@ func (m *Market) respondError(id uint64, user account.AccountID, code int, errMs
 	if err != nil {
 		log.Errorf("error creating error response with message '%s': %v", msg, err)
 	}
-	m.auth.Send(user, msg)
+	m.auth.SendWhenConnected(user, msg, DefaultConnectTimeout, func() {
+		log.Infof("Unable to send error response (code %d) to disconnected user %v: %q",
+			code, user, errMsg)
+	})
 }
 
 // preimage request-response handling data
@@ -1043,7 +1164,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 		// The clients preimage response comes back via a channel, where nil
 		// indicates client failure to respond, either due to disconnection or
 		// no action.
-		piChan := make(chan *order.Preimage)
+		piChan := make(chan *order.Preimage, 1) // buffer so the link's in handler does not block
 
 		reqData := &piData{
 			ord:      ord,
@@ -1051,8 +1172,12 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 		}
 
 		// Failure to respond in time is a miss, signalled by a nil pointer.
+		var missOnce sync.Once // captured by miss
 		miss := func() {
-			piChan <- nil
+			// RequestWithTimeout should only call this on expire, not because
+			// of link or other errors, but put it in a sync.Once to be safe
+			// since it will block if run twice.
+			missOnce.Do(func() { piChan <- nil })
 		}
 
 		// Send the preimage request to the order's owner.
@@ -1060,6 +1185,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 			m.handlePreimageResp(msg, reqData)
 		}, piTimeout, miss)
 		if err != nil {
+			miss() // only called by RequestWithTimeout on expire, not send errors
 			if errors.Is(err, ws.ErrPeerDisconnected) {
 				misses = append(misses, ord)
 				log.Debug("Preimage request failed: client gone.")
@@ -1109,6 +1235,14 @@ func (m *Market) enqueueEpoch(eq *epochPump, epoch *EpochQueue) bool {
 	for _, ord := range orders {
 		delete(m.epochOrders, ord.ID())
 		delete(m.epochCommitments, ord.Commitment())
+		// Would be nice to remove orders from users that got suspended, but the
+		// epoch order notifications were sent to subscribers when the order was
+		// received, thus setting expectations for auditing the queue.
+		//
+		// Preimage collection for suspended users could be skipped, forcing
+		// them into the misses slice perhaps by passing user IDs to skip into
+		// epochStart, with a SPEC UPDATE noting that preimage requests are not
+		// sent to suspended accounts.
 	}
 	m.epochMtx.Unlock()
 
@@ -1133,7 +1267,19 @@ func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed [
 	// Penalize accounts with misses. TODO: consider if Penalize can be an async
 	// function call.
 	for _, ord := range misses {
+		log.Infof("No preimage received for order %v from user %v. Penalizing user and revoking order.",
+			ord.ID(), ord.User())
 		m.auth.Penalize(ord.User(), account.PreimageReveal)
+		// Unlock the order's coins locked in processOrder.
+		m.unlockOrderCoins(ord) // could also be done in processReadyEpoch
+		// Change the order status from orderStatusEpoch to orderStatusRevoked.
+		coid, revTime, err := m.storage.RevokeOrder(ord)
+		if err == nil {
+			m.auth.RecordCancel(ord.User(), coid, ord.ID(), revTime)
+		} else {
+			log.Errorf("Failed to revoke order %v with a new cancel order: %v",
+				ord.UID(), err)
+		}
 	}
 
 	return

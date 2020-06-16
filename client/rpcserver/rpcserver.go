@@ -20,7 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/dcrd/certgen"
@@ -51,7 +53,7 @@ var (
 
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
-	AssetBalances(assetID uint32) (*core.BalanceSet, error)
+	AssetBalances(assetID uint32) (*db.BalanceSet, error)
 	Book(host string, base, quote uint32) (orderBook *core.OrderBook, err error)
 	Cancel(appPass []byte, orderID string) error
 	CloseWallet(assetID uint32) error
@@ -66,6 +68,7 @@ type ClientCore interface {
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)
+	Withdraw(appPass []byte, assetID uint32, value uint64, addr string) (asset.Coin, error)
 }
 
 // marketSyncer is used to synchronize market subscriptions. The marketSyncer

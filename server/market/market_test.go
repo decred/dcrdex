@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,7 +39,8 @@ type TArchivist struct {
 	epochInserted        chan struct{}
 }
 
-func (ta *TArchivist) LastErr() error { return nil }
+func (ta *TArchivist) LastErr() error         { return nil }
+func (ta *TArchivist) Fatal() <-chan struct{} { return nil }
 func (ta *TArchivist) Order(oid order.OrderID, base, quote uint32) (order.Order, order.OrderStatus, error) {
 	return nil, order.OrderStatusUnknown, errors.New("boom")
 }
@@ -169,11 +172,12 @@ func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule) {}
 func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
 	return nil, false, false
 }
-func (ta *TArchivist) CreateAccount(*account.Account) (string, error)   { return "", nil }
-func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error) { return "", nil }
-func (ta *TArchivist) PayAccount(account.AccountID, []byte) error       { return nil }
-func (ta *TArchivist) Accounts() ([]*db.Account, error)                 { return nil, nil }
-func (ta *TArchivist) Close() error                                     { return nil }
+func (ta *TArchivist) CreateAccount(*account.Account) (string, error)     { return "", nil }
+func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error)   { return "", nil }
+func (ta *TArchivist) PayAccount(account.AccountID, []byte) error         { return nil }
+func (ta *TArchivist) Accounts() ([]*db.Account, error)                   { return nil, nil }
+func (ta *TArchivist) AccountInfo(account.AccountID) (*db.Account, error) { return nil, nil }
+func (ta *TArchivist) Close() error                                       { return nil }
 
 func randomOrderID() order.OrderID {
 	pk := randomBytes(order.OrderIDSize)
@@ -202,7 +206,13 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 		preimagesByMsgID: make(map[uint64]order.Preimage),
 		preimagesByOrdID: make(map[string]order.Preimage),
 	}
+
+	swapDataDir, err := ioutil.TempDir("", "swapstates")
+	if err != nil {
+		panic(err.Error())
+	}
 	swapperCfg := &swap.Config{
+		DataDir: swapDataDir,
 		Assets: map[uint32]*swap.LockableAsset{
 			assetDCR.ID: {BackedAsset: assetDCR, CoinLocker: swapLockerBase},
 			assetBTC.ID: {BackedAsset: assetBTC, CoinLocker: swapLockerQuote},
@@ -211,12 +221,16 @@ func newTestMarket(stor ...*TArchivist) (*Market, *TArchivist, *TAuth, func(), e
 		AuthManager:      authMgr,
 		BroadcastTimeout: 10 * time.Second,
 	}
-	swapper := swap.NewSwapper(swapperCfg)
+	swapper, err := swap.NewSwapper(swapperCfg)
+	if err != nil {
+		panic(err.Error())
+	}
 	ssw := dex.NewStartStopWaiter(swapper)
 	ssw.Start(testCtx)
 	cleanup := func() {
 		ssw.Stop()
 		ssw.WaitForShutdown()
+		os.RemoveAll(swapDataDir)
 	}
 
 	mbBuffer := 1.1
@@ -250,9 +264,23 @@ func TestMarket_NewMarket_BookOrders(t *testing.T) {
 	}
 	cleanup()
 
+	rand.Seed(12)
+
+	randCoinDCR := func() []byte {
+		coinID := make([]byte, 36)
+		rand.Read(coinID[:])
+		return coinID
+	}
+
 	// Now store some book orders to verify NewMarket sees them.
 	loBuy := makeLO(buyer3, mkRate3(0.8, 1.0), randLots(10), order.StandingTiF)
-	loSell := makeLO(seller3, mkRate3(1.0, 1.2), randLots(10), order.StandingTiF)
+	loBuy.FillAmt = mkt.marketInfo.LotSize // partial fill to cover utxo check alt. path
+	loSell := makeLO(seller3, mkRate3(1.0, 1.2), randLots(10)+1, order.StandingTiF)
+	fundingCoinDCR := randCoinDCR()
+	loSell.Coins = []order.CoinID{fundingCoinDCR}
+	// let VerifyUnspentCoin find this coin as unspent
+	oRig.dcr.addUTXO(&msgjson.Coin{ID: fundingCoinDCR}, 1234)
+
 	_ = storage.BookOrder(loBuy)  // the stub does not error
 	_ = storage.BookOrder(loSell) // the stub does not error
 

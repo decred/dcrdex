@@ -4,7 +4,6 @@
 package db
 
 import (
-	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 )
@@ -77,8 +76,8 @@ type DB interface {
 	// credentials if the wallet already exists. A wallet is specified by the
 	// pair (asset ID, account name).
 	UpdateWallet(wallet *Wallet) error
-	// UpdateBalance updates a wallet's balance.
-	UpdateBalance(wid []byte, balance *asset.Balance) error
+	// UpdateBalanceSet updates a wallet's balance.
+	UpdateBalanceSet(wid []byte, balance *BalanceSet) error
 	// Wallets lists all saved wallets.
 	Wallets() ([]*Wallet, error)
 	// Backup makes a copy of the database.

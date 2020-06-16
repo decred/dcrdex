@@ -56,14 +56,15 @@ var (
 		SwapConf: 1,
 		FundConf: 1,
 	}
-	tDexPriv       *secp256k1.PrivateKey
-	tDexKey        *secp256k1.PublicKey
-	tPW                   = []byte("dexpw")
-	wPW                   = "walletpw"
-	tDexHost              = "somedex.tld"
-	tDcrBtcMktName        = "dcr_btc"
-	tErr                  = fmt.Errorf("test error")
-	tFee           uint64 = 1e8
+	tDexPriv         *secp256k1.PrivateKey
+	tDexKey          *secp256k1.PublicKey
+	tPW                     = []byte("dexpw")
+	wPW                     = "walletpw"
+	tDexHost                = "somedex.tld"
+	tDcrBtcMktName          = "dcr_btc"
+	tErr                    = fmt.Errorf("test error")
+	tFee             uint64 = 1e8
+	tUnparseableHost        = string([]byte{0x7f})
 )
 
 type tMsg = *msgjson.Message
@@ -150,6 +151,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		QuoteSymbol:     tBTC.Symbol,
 		EpochLen:        60000,
 		MarketBuyBuffer: 1.1,
+		suspended:       false,
 	}
 	return &dexConnection{
 		WsConn:     conn,
@@ -308,7 +310,7 @@ func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
 	return tdb.updateWalletErr
 }
 
-func (tdb *TDB) UpdateBalance(wid []byte, balance *asset.Balance) error {
+func (tdb *TDB) UpdateBalanceSet(wid []byte, balance *db.BalanceSet) error {
 	return nil
 }
 
@@ -626,6 +628,45 @@ func newTestRig() *testRig {
 		acct:    acct,
 		crypter: crypter,
 	}
+}
+
+func (rig *testRig) queueConfig() {
+	rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, rig.dc.cfg, nil)
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueRegister(regRes *msgjson.RegisterResult) {
+	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueNotifyFee() {
+	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
+		req := new(msgjson.NotifyFee)
+		json.Unmarshal(msg.Payload, req)
+		sigMsg := req.Serialize()
+		sig, _ := tDexPriv.Sign(sigMsg)
+		// Shouldn't Sig be dex.Bytes?
+		result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
+		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueConnect() {
+	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
+		result := &msgjson.ConnectResult{}
+		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+		f(resp)
+		return nil
+	})
 }
 
 func tMarketID(base, quote uint32) string {
@@ -997,13 +1038,44 @@ func TestCreateWallet(t *testing.T) {
 	}
 }
 
+func TestGetFee(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+
+	// DEX already registered
+	_, err := tCore.GetFee(tDexHost, "")
+	if !errorHasCode(err, dupeDEXErr) {
+		t.Fatalf("wrong account exists error: %v", err)
+	}
+
+	// Lose the dexConnection
+	tCore.connMtx.Lock()
+	delete(tCore.conns, tDexHost)
+	tCore.connMtx.Unlock()
+
+	// connectDEX error
+	_, err = tCore.GetFee(tUnparseableHost, "")
+	if !errorHasCode(err, connectionErr) {
+		t.Fatalf("wrong connectDEX error: %v", err)
+	}
+
+	// Queue a config response for success
+	rig.queueConfig()
+
+	// Success
+	_, err = tCore.GetFee(tDexHost, "")
+	if err != nil {
+		t.Fatalf("GetFee error: %v", err)
+	}
+}
+
 func TestRegister(t *testing.T) {
 	// This test takes a little longer because the key is decrypted every time
 	// Register is called.
 	rig := newTestRig()
 	tCore := rig.core
 	dc := rig.dc
-	acct := dc.acct
+	delete(tCore.conns, tDexHost)
 
 	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
@@ -1013,40 +1085,13 @@ func TestRegister(t *testing.T) {
 	rig.db.acctErr = tErr
 
 	regRes := &msgjson.RegisterResult{
-		DEXPubKey:    acct.dexPubKey.Serialize(),
+		DEXPubKey:    rig.acct.dexPubKey.Serialize(),
 		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
 		Address:      "someaddr",
 		Fee:          tFee,
 		Time:         encode.UnixMilliU(time.Now()),
 	}
 	sign(tDexPriv, regRes)
-
-	queueRegister := func() {
-		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
-			resp, _ := msgjson.NewResponse(msg.ID, dc.cfg, nil)
-			f(resp)
-			return nil
-		})
-		rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
-			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
-			f(resp)
-			return nil
-		})
-	}
-
-	queueNotifyFee := func() {
-		rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
-			req := new(msgjson.NotifyFee)
-			json.Unmarshal(msg.Payload, req)
-			sigMsg := req.Serialize()
-			sig, _ := tDexPriv.Sign(sigMsg)
-			// Shouldn't Sig be dex.Bytes?
-			result := &msgjson.Acknowledgement{Sig: sig.Serialize()}
-			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-			f(resp)
-			return nil
-		})
-	}
 
 	queueTipChange := func() {
 		go func() {
@@ -1069,20 +1114,12 @@ func TestRegister(t *testing.T) {
 		}()
 	}
 
-	queueConnect := func() {
-		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
-			result := &msgjson.ConnectResult{}
-			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-			f(resp)
-			return nil
-		})
-	}
-
 	queueResponses := func() {
-		queueRegister()
+		rig.queueConfig()
+		rig.queueRegister(regRes)
 		queueTipChange()
-		queueNotifyFee()
-		queueConnect()
+		rig.queueNotifyFee()
+		rig.queueConnect()
 	}
 
 	form := &RegisterForm{
@@ -1152,89 +1189,142 @@ func TestRegister(t *testing.T) {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
 
+	// password error
+	rig.crypter.recryptErr = tErr
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, passwordErr) {
+		t.Fatalf("wrong password error: %v", err)
+	}
+	rig.crypter.recryptErr = nil
+
+	// no host error
+	form.Addr = ""
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, emptyHostErr) {
+		t.Fatalf("wrong empty host error: %v", err)
+	}
+	form.Addr = tDexHost
+
+	// account already exists
+	tCore.connMtx.Lock()
+	tCore.conns[tDexHost] = dc
+	tCore.connMtx.Unlock()
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, dupeDEXErr) {
+		t.Fatalf("wrong account exists error: %v", err)
+	}
+
 	// wallet not found
 	delete(tCore.wallets, tDCR.ID)
 	run()
-	if err == nil {
-		t.Fatalf("no error for missing wallet")
+	if !errorHasCode(err, walletErr) {
+		t.Fatalf("wrong missing wallet error: %v", err)
 	}
 	tCore.wallets[tDCR.ID] = wallet
 
-	// account already exists
-	rig.db.acct = &db.AccountInfo{
-		Host:      tDexHost,
-		EncKey:    acct.encKey,
-		DEXPubKey: acct.dexPubKey,
-		FeeCoin:   acct.feeCoin,
+	// Unlock wallet error
+	tWallet.unlockErr = tErr
+	wallet.lockTime = time.Time{}
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, walletAuthErr) {
+		t.Fatalf("wrong wallet auth error: %v", err)
 	}
-	rig.db.acctErr = nil
-	run()
-	if err == nil {
-		t.Fatalf("no error for account already exists")
+	tWallet.unlockErr = nil
+
+	// connectDEX error
+	form.Addr = tUnparseableHost
+	_, err = tCore.Register(form)
+	if !errorHasCode(err, connectionErr) {
+		t.Fatalf("wrong connectDEX error: %v", err)
 	}
-	rig.db.acct = nil
-	rig.db.acctErr = tErr
+	form.Addr = tDexHost
 
 	// asset not found
-	dcrAsset := dc.assets[tDCR.ID]
-	delete(dc.assets, tDCR.ID)
+	cfgAssets := dc.cfg.Assets
+	mkts := dc.cfg.Markets
+	dc.cfg.Assets = dc.cfg.Assets[1:]
+	dc.cfg.Markets = []*msgjson.Market{}
+	rig.queueConfig()
 	run()
-	if err == nil {
-		t.Fatalf("no error for missing asset")
+	if !errorHasCode(err, assetSupportErr) {
+		t.Fatalf("wrong error for missing asset: %v", err)
 	}
-	dc.assets[tDCR.ID] = dcrAsset
+	dc.cfg.Assets = cfgAssets
+	dc.cfg.Markets = mkts
+
+	// error creating signing key
+	rig.crypter.encryptErr = tErr
+	rig.queueConfig()
+	run()
+	if !errorHasCode(err, acctKeyErr) {
+		t.Fatalf("wrong account key error: %v", err)
+	}
+	rig.crypter.encryptErr = nil
 
 	// register request error
+	rig.queueConfig()
 	rig.ws.queueResponse(msgjson.RegisterRoute, func(msg *msgjson.Message, f msgFunc) error {
 		return tErr
 	})
 	run()
-	if err == nil {
-		t.Fatalf("no error for register request error")
+	if !errorHasCode(err, registerErr) {
+		t.Fatalf("wrong error for register request error: %v", err)
 	}
 
 	// signature error
 	goodSig := regRes.Sig
 	regRes.Sig = []byte("badsig")
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	run()
-	if err == nil {
-		t.Fatalf("no error for bad signature on register response")
+	if !errorHasCode(err, signatureErr) {
+		t.Fatalf("wrong error for bad signature on register response: %v", err)
 	}
 	regRes.Sig = goodSig
 
 	// zero fee error
 	goodFee := regRes.Fee
 	regRes.Fee = 0
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	run()
-	if err == nil {
-		t.Fatalf("no error for zero fee")
+	if !errorHasCode(err, zeroFeeErr) {
+		t.Fatalf("wrong error for zero fee: %v", err)
+	}
+
+	// wrong fee error
+	regRes.Fee = tFee + 1
+	rig.queueConfig()
+	rig.queueRegister(regRes)
+	run()
+	if !errorHasCode(err, feeMismatchErr) {
+		t.Fatalf("wrong error for wrong fee: %v", err)
 	}
 	regRes.Fee = goodFee
 
+	// Form fee error
+	form.Fee = tFee + 1
+	rig.queueConfig()
+	rig.queueRegister(regRes)
+	run()
+	if !errorHasCode(err, feeMismatchErr) {
+		t.Fatalf("wrong error for wrong fee in form: %v", err)
+	}
+	form.Fee = tFee
+
 	// PayFee error
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	tWallet.payFeeErr = tErr
 	run()
-	if err == nil {
+	if !errorHasCode(err, feeSendErr) {
 		t.Fatalf("no error for PayFee error")
 	}
 	tWallet.payFeeErr = nil
 
-	// May want to smarten up error handling in the coin waiter loop. If so
-	// this check can be re-implemented.
-	// // coin confirmation error
-	// queueRegister()
-	// tWallet.payFeeCoin.confsErr = tErr
-	// run()
-	// if err == nil {
-	// 	t.Fatalf("no error for coin confirmation error")
-	// }
-	// tWallet.payFeeCoin.confsErr = nil
-
 	// notifyfee response error
-	queueRegister()
+	rig.queueConfig()
+	rig.queueRegister(regRes)
 	queueTipChange()
 	rig.ws.queueResponse(msgjson.NotifyFeeRoute, func(msg *msgjson.Message, f msgFunc) error {
 		m, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(1, "test error message"))
@@ -1278,16 +1368,7 @@ func TestLogin(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	queueSuccess := func() {
-		rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
-			result := &msgjson.ConnectResult{}
-			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-			f(resp)
-			return nil
-		})
-	}
-
-	queueSuccess()
+	rig.queueConnect()
 	_, err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
@@ -1328,7 +1409,7 @@ func TestLogin(t *testing.T) {
 	}
 
 	// Success again.
-	queueSuccess()
+	rig.queueConnect()
 	_, err = tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
@@ -1343,25 +1424,14 @@ func TestConnectDEX(t *testing.T) {
 		Host: "somedex.com",
 	}
 
-	queueConfig := func() {
-		rig.ws.queueResponse(msgjson.ConfigRoute, func(msg *msgjson.Message, f msgFunc) error {
-			result := &msgjson.ConfigResult{
-				BroadcastTimeout: 5 * 60 * 1000,
-			}
-			resp, _ := msgjson.NewResponse(msg.ID, result, nil)
-			f(resp)
-			return nil
-		})
-	}
-
-	queueConfig()
+	rig.queueConfig()
 	_, err := tCore.connectDEX(ai)
 	if err != nil {
 		t.Fatalf("initial connectDEX error: %v", err)
 	}
 
 	// Bad URL.
-	ai.Host = ":::"
+	ai.Host = tUnparseableHost // Illegal ASCIII control character
 	_, err = tCore.connectDEX(ai)
 	if err == nil {
 		t.Fatalf("no error for bad URL")
@@ -1399,7 +1469,7 @@ func TestConnectDEX(t *testing.T) {
 	}
 
 	// Success again.
-	queueConfig()
+	rig.queueConfig()
 	_, err = tCore.connectDEX(ai)
 	if err != nil {
 		t.Fatalf("final connectDEX error: %v", err)
@@ -1440,39 +1510,48 @@ func TestInitializeClient(t *testing.T) {
 func TestWithdraw(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
-	wallet, xcWallet := newTWallet(tDCR.ID)
+	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
-	wallet.address = "addr"
+	address := "addr"
 
 	// Successful
-	_, err := tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	_, err := tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
 	if err != nil {
 		t.Fatalf("withdraw error: %v", err)
 	}
 
 	// 0 value
-	_, err = tCore.Withdraw(tPW, tDCR.ID, 0)
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 0, address)
 	if err == nil {
 		t.Fatalf("no error for zero value withdraw")
 	}
 
 	// no wallet
-	_, err = tCore.Withdraw(tPW, 12345, 1e8)
+	_, err = tCore.Withdraw(tPW, 12345, 1e8, address)
 	if err == nil {
 		t.Fatalf("no error for unknown wallet")
 	}
 
+	// connect error
+	wallet.hookedUp = false
+	tWallet.connectErr = tErr
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
+	if err == nil {
+		t.Fatalf("no error for wallet connect error")
+	}
+	tWallet.connectErr = nil
+
 	// Send error
-	xcWallet.payFeeErr = tErr
-	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	tWallet.payFeeErr = tErr
+	_, err = tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
 	if err == nil {
 		t.Fatalf("no error for wallet Send error")
 	}
-	xcWallet.payFeeErr = nil
+	tWallet.payFeeErr = nil
 
 	// Check the coin.
-	xcWallet.payFeeCoin = &tCoin{id: []byte{'a'}}
-	coin, err := tCore.Withdraw(tPW, tDCR.ID, 1e8)
+	tWallet.payFeeCoin = &tCoin{id: []byte{'a'}}
+	coin, err := tCore.Withdraw(tPW, tDCR.ID, 1e8, address)
 	if err != nil {
 		t.Fatalf("coin check error: %v", err)
 	}
@@ -3123,8 +3202,8 @@ func TestAssetBalances(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error retreiving asset balance: %v", err)
 	}
-	dbtest.MustCompareBalances(t, bals[0], balances.ZeroConf)
-	dbtest.MustCompareBalances(t, bals[1], balances.XC[tDexHost])
+	dbtest.MustCompareBalance(t, "zero-conf", bals[0], balances.ZeroConf)
+	dbtest.MustCompareBalance(t, tDexHost, bals[1], balances.XC[tDexHost])
 }
 
 func TestAssetCounter(t *testing.T) {
@@ -3150,5 +3229,84 @@ func TestAssetCounter(t *testing.T) {
 	}
 	if counts[1] != 104 {
 		t.Fatalf("absorbed counts not combined correctly")
+	}
+}
+
+func TestHandleTradeSuspensionMsg(t *testing.T) {
+	rig := newTestRig()
+
+	tCore := rig.core
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.Unlock(wPW, time.Hour)
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.Unlock(wPW, time.Hour)
+
+	// Ensure a non-existent market cannot be suspended.
+	payload := &msgjson.TradeSuspension{
+		MarketID: "dcr_dcr",
+	}
+
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err := handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeSuspensionMsg] expected a market " +
+			"ID not found error: %v")
+	}
+
+	mkt := tDcrBtcMktName
+
+	// Ensure a suspended market cannot be resuspended.
+	err = rig.dc.suspend(mkt)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	payload = &msgjson.TradeSuspension{
+		MarketID:    mkt,
+		FinalEpoch:  100,
+		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Millisecond * 20)),
+		Persist:     true,
+	}
+
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeSuspensionMsg] expected a market " +
+			"suspended error: %v")
+	}
+
+	// Suspend a market.
+	err = rig.dc.resume(mkt)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+
+	// Wait for the suspend to execute.
+	time.Sleep(time.Millisecond * 40)
+
+	// Ensure trades for a suspended market generate an error.
+	form := &TradeForm{
+		Host:    tDexHost,
+		IsLimit: true,
+		Sell:    true,
+		Base:    tDCR.ID,
+		Quote:   tBTC.ID,
+		Qty:     tDCR.LotSize * 10,
+		Rate:    tBTC.RateStep * 1000,
+		TifNow:  false,
+	}
+
+	_, err = rig.core.Trade(tPW, form)
+	if err == nil {
+		t.Fatalf("expected a suspension market error")
 	}
 }

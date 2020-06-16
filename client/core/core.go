@@ -38,8 +38,8 @@ const (
 	conversionFactor  = 1e8
 	regFeeAssetSymbol = "dcr" // Hard-coded to Decred for registration fees, for now.
 
-	// highest uint32 number to be assigned to 'regConfirms' in 'dexConnection'
-	// when the registration is completed
+	// regConfirmationsPaid is used to indicate completed registration to
+	// (*Core).setRegConfirms.
 	regConfirmationsPaid uint32 = math.MaxUint32
 )
 
@@ -75,7 +75,47 @@ type dexConnection struct {
 	connected bool
 
 	regConfMtx  sync.RWMutex
-	regConfirms uint32
+	regConfirms *uint32 // nil regConfirms means no pending registration.
+}
+
+// suspended returns the suspended status of the provided market.
+func (dc *dexConnection) suspended(mkt string) bool {
+	dc.marketMtx.Lock()
+	defer dc.marketMtx.Unlock()
+
+	market, ok := dc.marketMap[mkt]
+	if !ok {
+		return false
+	}
+	return market.Suspended()
+}
+
+// suspend halts trading for the provided market.
+func (dc *dexConnection) suspend(mkt string) error {
+	dc.marketMtx.Lock()
+	market, ok := dc.marketMap[mkt]
+	dc.marketMtx.Unlock()
+	if !ok {
+		return fmt.Errorf("no market found with ID %s", mkt)
+	}
+
+	market.setSuspended(true)
+
+	return nil
+}
+
+// resume commences trading for the provided market.
+func (dc *dexConnection) resume(mkt string) error {
+	dc.marketMtx.Lock()
+	market, ok := dc.marketMap[mkt]
+	dc.marketMtx.Unlock()
+	if !ok {
+		return fmt.Errorf("no market found with ID %s", mkt)
+	}
+
+	market.setSuspended(false)
+
+	return nil
 }
 
 // refreshMarkets rebuilds, saves, and returns the market map. The map itself
@@ -98,6 +138,7 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 			EpochLen:        mkt.EpochLen,
 			StartEpoch:      mkt.StartEpoch,
 			MarketBuyBuffer: mkt.MarketBuyBuffer,
+			suspended:       dc.suspended(mkt.Name),
 		}
 		mid := market.marketName()
 		dc.tradeMtx.RLock()
@@ -128,11 +169,7 @@ func (dc *dexConnection) markets() map[string]*Market {
 func (dc *dexConnection) getRegConfirms() *uint32 {
 	dc.regConfMtx.RLock()
 	defer dc.regConfMtx.RUnlock()
-	if dc.regConfirms == regConfirmationsPaid {
-		return nil
-	}
-	confs := dc.regConfirms
-	return &confs
+	return dc.regConfirms
 }
 
 // setRegConfirms sets the number of confirmations received
@@ -140,7 +177,12 @@ func (dc *dexConnection) getRegConfirms() *uint32 {
 func (dc *dexConnection) setRegConfirms(confs uint32) {
 	dc.regConfMtx.Lock()
 	defer dc.regConfMtx.Unlock()
-	dc.regConfirms = confs
+	if confs == regConfirmationsPaid {
+		// A nil regConfirms indicates that there is no pending registration.
+		dc.regConfirms = nil
+		return
+	}
+	dc.regConfirms = &confs
 }
 
 // hasOrders checks whether there are any open orders or negotiating matches for
@@ -603,8 +645,26 @@ func (c *Core) connectedWallet(assetID uint32) (*xcWallet, error) {
 	return wallet, nil
 }
 
+// Connect to the wallet if not already connected. Unlock the wallet if not
+// already unlocked.
+func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error {
+	if !wallet.connected() {
+		err := wallet.Connect(c.ctx)
+		if err != nil {
+			return fmt.Errorf("error connecting %s wallet: %v", unbip(wallet.AssetID), err)
+		}
+	}
+	if !wallet.unlocked() {
+		err := unlockWallet(wallet, crypter)
+		if err != nil {
+			return fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+		}
+	}
+	return nil
+}
+
 // walletBalances retrieves balances for the wallet.
-func (c *Core) walletBalances(wallet *xcWallet) (*BalanceSet, error) {
+func (c *Core) walletBalances(wallet *xcWallet) (*db.BalanceSet, error) {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	// Add a zero-conf entry.
@@ -627,11 +687,13 @@ func (c *Core) walletBalances(wallet *xcWallet) (*BalanceSet, error) {
 	for i, bal := range bals[1:] {
 		balMap[addrs[i]] = bal
 	}
-	coreBals := &BalanceSet{
+	coreBals := &db.BalanceSet{
 		ZeroConf: zeroConfBal,
 		XC:       balMap,
+		Stamp:    time.Now(),
 	}
 	wallet.setBalance(coreBals)
+	c.notify(newBalanceNote(wallet.AssetID, coreBals))
 	return coreBals, nil
 }
 
@@ -654,11 +716,10 @@ func (c *Core) updateBalances(counts assetCounter) {
 			log.Error("error updateing balance after tick: %v", err)
 			continue
 		}
-		err = c.db.UpdateBalance(w.dbID, bals.ZeroConf)
+		err = c.db.UpdateBalanceSet(w.dbID, bals)
 		if err != nil {
 			log.Errorf("error updating %s balance in database: %v", unbip(assetID), err)
 		}
-		c.notify(newBalanceNote(assetID, bals))
 	}
 	c.refreshUser()
 }
@@ -812,7 +873,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	if err != nil {
 		return initErr("error getting wallet balance for %s: %v", symbol, err)
 	}
-	dbWallet.Balance = balances.ZeroConf
+	dbWallet.Balances = balances
 
 	// Store the wallet in the database.
 	err = c.db.UpdateWallet(dbWallet)
@@ -822,7 +883,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	log.Infof("Created %s wallet. Account %q balance available = %d / "+
 		"locked = %d, Deposit address = %s",
-		symbol, form.Account, dbWallet.Balance, balances.ZeroConf.Locked, dbWallet.Address)
+		symbol, form.Account, balances.ZeroConf.Available, balances.ZeroConf.Locked, dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -837,15 +898,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
-		Account: dbWallet.Account,
-		AssetID: dbWallet.AssetID,
-		balances: &BalanceSet{
-			ZeroConf: dbWallet.Balance,
-		},
-		balUpdate: dbWallet.BalUpdate,
-		encPW:     dbWallet.EncryptedPW,
-		address:   dbWallet.Address,
-		dbID:      dbWallet.ID(),
+		Account:  dbWallet.Account,
+		AssetID:  dbWallet.AssetID,
+		balances: dbWallet.Balances,
+		encPW:    dbWallet.EncryptedPW,
+		address:  dbWallet.Address,
+		dbID:     dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
 		Account:  dbWallet.Account,
@@ -961,14 +1019,14 @@ func (c *Core) isRegistered(host string) bool {
 func (c *Core) GetFee(dexAddr, cert string) (uint64, error) {
 	host := addrHost(dexAddr)
 	if c.isRegistered(host) {
-		return 0, fmt.Errorf("already registered at %s", dexAddr)
+		return 0, newError(dupeDEXErr, "already registered at %s", dexAddr)
 	}
 	dc, err := c.connectDEX(&db.AccountInfo{
 		Host: host,
 		Cert: []byte(cert),
 	})
 	if err != nil {
-		return 0, err
+		return 0, codedError(connectionErr, err)
 	}
 	defer dc.connMaster.Disconnect()
 	return dc.cfg.Fee, nil
@@ -984,26 +1042,26 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Check the app password.
 	crypter, err := c.encryptionKey(form.AppPass)
 	if err != nil {
-		return nil, err
+		return nil, codedError(passwordErr, err)
 	}
 	if form.Addr == "" {
-		return nil, fmt.Errorf("no dex address specified")
+		return nil, newError(emptyHostErr, "no dex address specified")
 	}
 	host := addrHost(form.Addr)
 	if c.isRegistered(host) {
-		return nil, fmt.Errorf("already registered at %s", form.Addr)
+		return nil, newError(dupeDEXErr, "already registered at %s", form.Addr)
 	}
 
 	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
 	wallet, err := c.connectedWallet(regFeeAssetID)
 	if err != nil {
-		return nil, fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
+		return nil, newError(walletErr, "cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
 	}
 
 	if !wallet.unlocked() {
 		err = unlockWallet(wallet, crypter)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
+			return nil, newError(walletAuthErr, "failed to unlock %s wallet: %v", unbip(wallet.AssetID), err)
 		}
 	}
 
@@ -1012,7 +1070,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		Cert: []byte(form.Cert),
 	})
 	if err != nil {
-		return nil, err
+		return nil, codedError(connectionErr, err)
 	}
 
 	// close the connection to the dex server if the registration fails.
@@ -1025,12 +1083,12 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	regAsset, found := dc.assets[regFeeAssetID]
 	if !found {
-		return nil, fmt.Errorf("dex server does not support %s asset", regFeeAssetSymbol)
+		return nil, newError(assetSupportErr, "dex server does not support %s asset", regFeeAssetSymbol)
 	}
 
 	privKey, err := dc.acct.setupEncryption(crypter)
 	if err != nil {
-		return nil, err
+		return nil, codedError(acctKeyErr, err)
 	}
 
 	// Prepare and sign the registration payload.
@@ -1042,25 +1100,25 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	regRes := new(msgjson.RegisterResult)
 	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes)
 	if err != nil {
-		return nil, err
+		return nil, codedError(registerErr, err)
 	}
 
 	// Check the DEX server's signature.
 	msg := regRes.Serialize()
 	dexPubKey, err := checkSigS256(msg, regRes.DEXPubKey, regRes.Sig)
 	if err != nil {
-		return nil, fmt.Errorf("DEX signature validation error: %v", err)
+		return nil, newError(signatureErr, "DEX signature validation error: %v", err)
 	}
 
 	// Check that the fee is non-zero.
 	if regRes.Fee == 0 {
-		return nil, fmt.Errorf("zero registration fees not allowed")
+		return nil, newError(zeroFeeErr, "zero registration fees not allowed")
 	}
 	if regRes.Fee != dc.cfg.Fee {
-		return nil, fmt.Errorf("DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dc.cfg.Fee)
+		return nil, newError(feeMismatchErr, "DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dc.cfg.Fee)
 	}
 	if regRes.Fee != form.Fee {
-		return nil, fmt.Errorf("registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee)
+		return nil, newError(feeMismatchErr, "registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee)
 	}
 
 	// Pay the registration fee.
@@ -1068,7 +1126,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		regRes.Fee, regAsset.Symbol)
 	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, regAsset)
 	if err != nil {
-		return nil, fmt.Errorf("error paying registration fee: %v", err)
+		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
 
 	// Registration complete.
@@ -1426,8 +1484,8 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 
 // Withdraw initiates a withdraw from an exchange wallet. The client password
 // must be provided as an additional verification.
-func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, error) {
-	_, err := c.encryptionKey(pw)
+func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error) {
+	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, fmt.Errorf("Withdraw password error: %v", err)
 	}
@@ -1438,7 +1496,11 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64) (asset.Coin, er
 	if !found {
 		return nil, fmt.Errorf("%s wallet not found", unbip(assetID))
 	}
-	coin, err := wallet.Withdraw(wallet.address, value, wallet.Info().DefaultFeeRate)
+	err = c.connectAndUnlock(crypter, wallet)
+	if err != nil {
+		return nil, err
+	}
+	coin, err := wallet.Withdraw(address, value, wallet.Info().DefaultFeeRate)
 	if err != nil {
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote("Withdraw error", details, db.ErrorLevel))
@@ -1474,6 +1536,12 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 		return nil, fmt.Errorf("order placed for unknown market")
 	}
 
+	// Proceed with the order if there is no trade suspension
+	// scheduled for the market.
+	if mkt.Suspended() {
+		return nil, fmt.Errorf("suspended market")
+	}
+
 	rate, qty := form.Rate, form.Qty
 	if form.IsLimit && rate == 0 {
 		return nil, fmt.Errorf("zero-rate order not allowed")
@@ -1485,31 +1553,13 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
-	fromID, toID := fromWallet.AssetID, toWallet.AssetID
-
-	if !fromWallet.connected() {
-		err = fromWallet.Connect(c.ctx)
-		if err != nil {
-			return nil, fmt.Errorf("Error connecting wallet: %v", err)
-		}
+	err = c.connectAndUnlock(crypter, fromWallet)
+	if err != nil {
+		return nil, err
 	}
-	if !fromWallet.unlocked() {
-		err = unlockWallet(fromWallet, crypter)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(fromID), err)
-		}
-	}
-	if !toWallet.connected() {
-		err = toWallet.Connect(c.ctx)
-		if err != nil {
-			return nil, fmt.Errorf("Error connecting wallet: %v", err)
-		}
-	}
-	if !toWallet.unlocked() {
-		err = unlockWallet(toWallet, crypter)
-		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(toID), err)
-		}
+	err = c.connectAndUnlock(crypter, toWallet)
+	if err != nil {
+		return nil, err
 	}
 
 	// Get an address for the swap contract.
@@ -1838,7 +1888,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 }
 
 // AssetBalances retrieves the current wallet balance.
-func (c *Core) AssetBalances(assetID uint32) (*BalanceSet, error) {
+func (c *Core) AssetBalances(assetID uint32) (*db.BalanceSet, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
@@ -2439,6 +2489,82 @@ func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	return tracker.db.UpdateMatch(&revokedMatch.MetaMatch)
 }
 
+// handleTradeSuspensionMsg is called when a trade suspension notification is received.
+func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var sp msgjson.TradeSuspension
+	err := msg.Unmarshal(&sp)
+	if err != nil {
+		return fmt.Errorf("trade suspension unmarshal error: %v", err)
+	}
+
+	// Ensure the provided market exists for the dex.
+	dc.marketMtx.Lock()
+	mkt, ok := dc.marketMap[sp.MarketID]
+	dc.marketMtx.Unlock()
+	if !ok {
+		return fmt.Errorf("no market found with ID %s", sp.MarketID)
+	}
+
+	// Ensure the market is not already suspended.
+	mkt.mtx.Lock()
+	defer mkt.mtx.Unlock()
+
+	if mkt.suspended {
+		return fmt.Errorf("market %s for dex %s is already suspended",
+			sp.MarketID, dc.acct.host)
+	}
+
+	// Stop the current pending suspend.
+	if mkt.pendingSuspend != nil {
+		if !mkt.pendingSuspend.Stop() {
+			// TODO: too late, timer already fired. Need to request the
+			// current configuration for the market at this point.
+			return fmt.Errorf("unable to stop previously scheduled "+
+				"suspend for market %s on dex %s", sp.MarketID, dc.acct.host)
+		}
+	}
+
+	// Set a new scheduled suspend.
+	duration := time.Until(encode.UnixTimeMilli(int64(sp.SuspendTime)))
+	mkt.pendingSuspend = time.AfterFunc(duration, func() {
+		// Update the market as suspended.
+		err := dc.suspend(sp.MarketID)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+
+		// Clear the bookie associated with the suspended market.
+		dc.booksMtx.Lock()
+		if bookie := dc.books[sp.MarketID]; bookie != nil {
+			dc.books[sp.MarketID] = newBookie(func() { c.unsub(dc, sp.MarketID) })
+		}
+		dc.booksMtx.Unlock()
+
+		if !sp.Persist {
+			// Revoke all active orders of the suspended market for the dex.
+			dc.tradeMtx.RLock()
+			for _, tracker := range dc.trades {
+				if tracker.Order.Base() == mkt.BaseID &&
+					tracker.Order.Quote() == mkt.QuoteID &&
+					tracker.metaData.Host == dc.acct.host &&
+					(tracker.metaData.Status == order.OrderStatusEpoch ||
+						tracker.metaData.Status == order.OrderStatusBooked) {
+					metaOrder := tracker.metaOrder()
+					metaOrder.MetaData.Status = order.OrderStatusRevoked
+					err := tracker.db.UpdateOrder(metaOrder)
+					if err != nil {
+						log.Errorf("unable to update order: %v", err)
+					}
+				}
+			}
+			dc.tradeMtx.RUnlock()
+		}
+	})
+
+	return nil
+}
+
 // routeHandler is a handler for a message from the DEX.
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
@@ -2448,7 +2574,6 @@ var reqHandlers = map[string]routeHandler{
 	msgjson.AuditRoute:       handleAuditRoute,
 	msgjson.RedemptionRoute:  handleRedemptionRoute,
 	msgjson.RevokeMatchRoute: handleRevokeMatchMsg,
-	msgjson.SuspensionRoute:  nil,
 }
 
 var noteHandlers = map[string]routeHandler{
@@ -2457,6 +2582,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.EpochOrderRoute:      handleEpochOrderMsg,
 	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
+	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and

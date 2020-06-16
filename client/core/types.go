@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
@@ -60,15 +61,6 @@ func (set *errorSet) Error() string {
 	return set.prefix + strings.Join(errStrings, ", ")
 }
 
-// BalanceSet represents a wallet's balance in various contexts, which includes
-// the zero-conf case, and balances for all asset-supporting exchanges. The
-// separate balances are required because how much is available depends on an
-// exchange's FundConf setting.
-type BalanceSet struct {
-	ZeroConf *asset.Balance            `json:"zeroConf"`
-	XC       map[string]*asset.Balance `json:"xc"`
-}
-
 // WalletForm is information necessary to create a new exchange wallet.
 // The ConfigText, if provided, will be parsed for wallet connection settings.
 // If ConfigText is not provided, and a file exists at the `asset.DefaultConfigPath`,
@@ -81,15 +73,14 @@ type WalletForm struct {
 
 // WalletState is the current status of an exchange wallet.
 type WalletState struct {
-	Symbol   string      `json:"symbol"`
-	AssetID  uint32      `json:"assetID"`
-	Open     bool        `json:"open"`
-	Running  bool        `json:"running"`
-	Updated  uint64      `json:"updated"`
-	Balances *BalanceSet `json:"balances"`
-	Address  string      `json:"address"`
-	FeeRate  uint64      `json:"feerate"`
-	Units    string      `json:"units"`
+	Symbol   string         `json:"symbol"`
+	AssetID  uint32         `json:"assetID"`
+	Open     bool           `json:"open"`
+	Running  bool           `json:"running"`
+	Balances *db.BalanceSet `json:"balances"`
+	Address  string         `json:"address"`
+	FeeRate  uint64         `json:"feerate"`
+	Units    string         `json:"units"`
 }
 
 // User is information about the user's wallets and DEX accounts.
@@ -158,6 +149,9 @@ type Market struct {
 	StartEpoch      uint64   `json:"startepoch"`
 	MarketBuyBuffer float64  `json:"buybuffer"`
 	Orders          []*Order `json:"orders"`
+	pendingSuspend  *time.Timer
+	suspended       bool
+	mtx             sync.Mutex
 }
 
 // Display returns an ID string suitable for displaying in a UI.
@@ -168,6 +162,20 @@ func (m *Market) Display() string {
 // mktID is a string ID constructed from the asset IDs.
 func (m *Market) marketName() string {
 	return marketName(m.BaseID, m.QuoteID)
+}
+
+// suspended returns the market's suspended state.
+func (m *Market) Suspended() bool {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	return m.suspended
+}
+
+// setSuspended sets the market's suspended state.
+func (m *Market) setSuspended(state bool) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	m.suspended = state
 }
 
 // Exchange represents a single DEX with any number of markets.

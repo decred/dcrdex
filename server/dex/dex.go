@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	dcrasset "decred.org/dcrdex/server/asset/dcr"
 	"decred.org/dcrdex/server/auth"
@@ -87,6 +88,8 @@ func (lm *LoggerMaker) NewLogger(name string, level ...slog.Level) dex.Logger {
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
+	SwapState        *swap.State
+	DataDir          string
 	LogBackend       *dex.LoggerMaker
 	Markets          []*dex.MarketInfo
 	Assets           []*AssetConf
@@ -379,7 +382,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		Signer:          cfg.DEXPrivKey,
 		RegistrationFee: cfg.RegFeeAmount,
 		FeeConfs:        cfg.RegFeeConfirms,
-		FeeChecker:      dcrBackend.UnspentCoinDetails,
+		FeeChecker:      dcrBackend.FeeCoin,
 		CancelThreshold: cfg.CancelThreshold,
 		Anarchy:         cfg.Anarchy,
 	}
@@ -389,13 +392,19 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 	// Create the swapper.
 	swapperCfg := &swap.Config{
+		State:            cfg.SwapState,
+		DataDir:          cfg.DataDir,
 		Assets:           lockableAssets,
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: cfg.BroadcastTimeout,
 	}
 
-	swapper := swap.NewSwapper(swapperCfg)
+	swapper, err := swap.NewSwapper(swapperCfg)
+	if err != nil {
+		abort()
+		return nil, fmt.Errorf("NewSwapper: %v", err)
+	}
 	startSubSys("Swapper", swapper)
 
 	// Markets
@@ -551,4 +560,9 @@ func (dm *DEX) SuspendMarket(name string, tSusp time.Time, persistBooks bool) *m
 // Accounts returns data for all accounts.
 func (dm *DEX) Accounts() ([]*db.Account, error) {
 	return dm.storage.Accounts()
+}
+
+// AccountInfo returns data for an account.
+func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
+	return dm.storage.AccountInfo(aid)
 }

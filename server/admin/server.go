@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
 	"github.com/decred/slog"
@@ -30,7 +31,8 @@ const (
 	// is closed.
 	rpcTimeoutSeconds = 10
 
-	marketNameKey = "market"
+	marketNameKey  = "market"
+	accountNameKey = "account"
 )
 
 var (
@@ -40,6 +42,7 @@ var (
 // SvrCore is satisfied by server/dex.DEX.
 type SvrCore interface {
 	Accounts() ([]*db.Account, error)
+	AccountInfo(account.AccountID) (*db.Account, error)
 	ConfigMsg() json.RawMessage
 	MarketRunning(mktName string) (found, running bool)
 	MarketStatus(mktName string) *market.Status
@@ -121,6 +124,9 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Get("/ping", s.apiPing)
 		r.Get("/config", s.apiConfig)
 		r.Get("/accounts", s.apiAccounts)
+		r.Route("/account/{"+accountNameKey+"}", func(rm chi.Router) {
+			rm.Get("/", s.apiAccountInfo)
+		})
 
 		r.Get("/markets", s.apiMarkets)
 		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {

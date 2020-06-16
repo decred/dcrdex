@@ -53,18 +53,33 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 	}
 	defer rows.Close()
 	var accts []*db.Account
+	var feeAddress sql.NullString
 	for rows.Next() {
 		a := new(db.Account)
-		err = rows.Scan(&a.AccountID, &a.Pubkey, &a.FeeAddress, &a.FeeCoin, &a.BrokenRule)
+		err = rows.Scan(&a.AccountID, &a.Pubkey, &feeAddress, &a.FeeCoin, &a.BrokenRule)
 		if err != nil {
 			return nil, err
 		}
+		a.FeeAddress = feeAddress.String
 		accts = append(accts, a)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
 	}
 	return accts, nil
+}
+
+// AccountInfo returns data for an account.
+func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
+	stmt := fmt.Sprintf(internal.SelectAccountInfo, a.tables.accounts)
+	acct := new(db.Account)
+	var feeAddress sql.NullString
+	if err := a.db.QueryRow(stmt, aid).Scan(&acct.AccountID, &acct.Pubkey, &feeAddress,
+		&acct.FeeCoin, &acct.BrokenRule); err != nil {
+		return nil, err
+	}
+	acct.FeeAddress = feeAddress.String
+	return acct, nil
 }
 
 // CreateAccount creates an entry for a new account in the accounts table. A

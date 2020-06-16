@@ -59,6 +59,7 @@ var promptPasswords = map[string][]string{
 	"openwallet": {"App password:"},
 	"register":   {"App password:"},
 	"trade":      {"App password:"},
+	"withdraw":   {"App password:"},
 }
 
 // optionalTextFiles is a map of routes to arg index for routes that should read

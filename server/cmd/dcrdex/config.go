@@ -55,6 +55,7 @@ type procOpts struct {
 
 // dexConf is the data that is required to setup the dex.
 type dexConf struct {
+	DataDir          string
 	Network          dex.Network
 	DBName           string
 	DBUser           string
@@ -78,6 +79,7 @@ type dexConf struct {
 	SigningKeyPW     []byte
 	AdminSrvOn       bool
 	AdminSrvAddr     string
+	AdminSrvPW       []byte
 }
 
 type flagsData struct {
@@ -116,8 +118,9 @@ type flagsData struct {
 	PGHost             string `long:"pghost" description:"PostgreSQL server host:port or UNIX socket (e.g. /run/postgresql)."`
 	ShowPGConfig       bool   `long:"showpgconfig" description:"Logs the PostgreSQL db configuration on system start up."`
 	SigningKeyPassword string `long:"signingkeypass" description:"Password for encrypting/decrypting the dex privkey. INSECURE. Do not set unless absolutely necessary."`
-	AdminSrvOn         bool   `long:"adminsrvon" description:"turn on the admin server"`
-	AdminSrvAddr       string `long:"adminsrvaddr" description:"administration HTTPS server address (default: 127.0.0.1:6542)"`
+	AdminSrvOn         bool   `long:"adminsrvon" description:"Turn on the admin server"`
+	AdminSrvAddr       string `long:"adminsrvaddr" description:"Administration HTTPS server address (default: 127.0.0.1:6542)"`
+	AdminSrvPassword   string `long:"adminsrvpass" description:"Admin server password. INSECURE. Do not set unless absolutely necessary."`
 }
 
 // cleanAndExpandPath expands environment variables and leading ~ in the passed
@@ -469,7 +472,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	initLogRotator(filepath.Join(cfg.LogDir, defaultLogFilename), cfg.MaxLogZips)
 
 	log.Infof("App data folder: %s", cfg.AppDataDir)
-	//log.Infof("Data folder:    %s", cfg.DataDir) // TODO: remove DataDir if dcrdex does not need it
+	log.Infof("Data folder:     %s", cfg.DataDir)
 	log.Infof("Log folder:      %s", cfg.LogDir)
 	log.Infof("Config file:     %s", configFile)
 
@@ -514,6 +517,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	cfg.PGDBName = strings.Replace(cfg.PGDBName, "{netname}", network.String(), -1)
 
 	dexCfg := &dexConf{
+		DataDir:          cfg.DataDir,
 		Network:          network,
 		DBName:           cfg.PGDBName,
 		DBHost:           dbHost,
@@ -537,6 +541,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		SigningKeyPW:     []byte(cfg.SigningKeyPassword),
 		AdminSrvAddr:     adminSrvAddr,
 		AdminSrvOn:       cfg.AdminSrvOn,
+		AdminSrvPW:       []byte(cfg.AdminSrvPassword),
 	}
 
 	opts := &procOpts{

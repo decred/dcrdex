@@ -2,7 +2,7 @@ const parser = new window.DOMParser()
 
 const FPS = 30
 
-export const BipIDs = {
+const BipIDs = {
   0: 'btc',
   42: 'dcr',
   2: 'ltc',
@@ -10,6 +10,8 @@ export const BipIDs = {
   28: 'vtc',
   3: 'doge'
 }
+
+const BipSymbols = Object.values(BipIDs)
 
 // Parameters for printing asset values.
 const coinValueSpecs = {
@@ -51,6 +53,26 @@ export default class Doc {
     const rect = el.getBoundingClientRect()
     return e.pageX >= rect.left && e.pageX <= rect.right &&
       e.pageY >= rect.top && e.pageY <= rect.bottom
+  }
+
+  /*
+   * layoutMetrics gets information about the elements position on the page.
+   */
+  static layoutMetrics (el) {
+    var box = el.getBoundingClientRect()
+    var docEl = document.documentElement
+    const top = box.top + docEl.scrollTop
+    const left = box.left + docEl.scrollLeft
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    return {
+      bodyTop: top,
+      bodyLeft: left,
+      width: w,
+      height: h,
+      centerX: left + w / 2,
+      centerY: top + h / 2
+    }
   }
 
   /* empty removes all child nodes from the specified element. */
@@ -120,8 +142,13 @@ export default class Doc {
     return x.toLocaleString('en-us', coinValueSpecs)
   }
 
-  /* logoPath creates a path to a png logo for the specified ticker symbol. */
+  /*
+   * logoPath creates a path to a png logo for the specified ticker symbol. If
+   * the symbol is not a supported asset, the generic letter logo will be
+   * requested instead.
+   */
   static logoPath (symbol) {
+    if (BipSymbols.indexOf(symbol) === -1) symbol = symbol.substring(0, 1)
     return `/img/coins/${symbol}.png`
   }
 
