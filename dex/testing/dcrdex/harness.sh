@@ -105,6 +105,13 @@ nHxL8mYBatmh6kEt9Dsdyg+osByDRegiAmM7IVmBzw==
 -----END EC PRIVATE KEY-----
 EOF
 
+# DEX admin script
+cat > "${DCRDEX_DATA_DIR}/dexadm" <<EOF
+#!/bin/sh
+curl --cacert ${DCRDEX_DATA_DIR}/rpc.cert --basic -u u:adminpass https://127.0.0.1:16542/api/\$@
+EOF
+chmod +x "${DCRDEX_DATA_DIR}/dexadm"
+
 SESSION="dcrdex-harness"
 
 # Shutdown script

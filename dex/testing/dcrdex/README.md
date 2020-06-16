@@ -51,6 +51,9 @@ vF8Ti1x2vTkD
 -----END CERTIFICATE-----
 ```
 
+A `curl` script is created in `~/dextest/dcrdex/dexadm` for sending requests to
+the DEX API e.g. `~/dextest/dcrdex/dexadm ping`.
+
 ## Harness control
 
 To quit the harness, run `~/dextest/dcrdex/quit` from any terminal/tmux window,
