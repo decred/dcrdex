@@ -6,7 +6,6 @@ package core
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -1173,6 +1172,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 // events are broadcasted to all subscribers.
 func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, confs uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
+	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
 
 	dc.setRegConfirms(confs)
 	c.refreshUser()
@@ -1180,7 +1180,7 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 	trigger := func() (bool, error) {
 		confs, err := wallet.Confirmations(coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
-			return false, fmt.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
+			return false, fmt.Errorf("Error getting confirmations for %s: %v", coinIDString(regFeeAssetID, coinID), err)
 		}
 		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, uint32(reqConfs))
 
@@ -1193,7 +1193,6 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		return confs >= uint32(reqConfs), nil
 	}
 
-	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
 	c.wait(regFeeAssetID, trigger, func(err error) {
 		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(regFeeAssetID, coinID), reqConfs)
 		defer func() {
