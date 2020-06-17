@@ -1172,7 +1172,6 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 // events are broadcasted to all subscribers.
 func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, confs uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
-	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
 
 	dc.setRegConfirms(confs)
 	c.refreshUser()
@@ -1180,7 +1179,7 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 	trigger := func() (bool, error) {
 		confs, err := wallet.Confirmations(coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
-			return false, fmt.Errorf("Error getting confirmations for %s: %v", coinIDString(regFeeAssetID, coinID), err)
+			return false, fmt.Errorf("Error getting confirmations for %s: %v", coinIDString(wallet.AssetID, coinID), err)
 		}
 		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, uint32(reqConfs))
 
@@ -1193,8 +1192,8 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		return confs >= uint32(reqConfs), nil
 	}
 
-	c.wait(regFeeAssetID, trigger, func(err error) {
-		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(regFeeAssetID, coinID), reqConfs)
+	c.wait(wallet.AssetID, trigger, func(err error) {
+		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
 		defer func() {
 			if err != nil {
 				details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.host, err)
