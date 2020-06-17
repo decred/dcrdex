@@ -28,5 +28,5 @@ var (
 )
 
 func TestWallet(t *testing.T) {
-	Run(t, btc.NewWallet, "btc", alphaAddress, tBTC)
+	Run(t, btc.NewWallet, alphaAddress, tBTC)
 }
