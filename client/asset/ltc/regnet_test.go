@@ -32,7 +32,6 @@ var tLTC = &dex.Asset{
 	LotSize:  1e6,
 	RateStep: 10,
 	SwapConf: 1,
-	FundConf: 1,
 }
 
 func TestWallet(t *testing.T) {

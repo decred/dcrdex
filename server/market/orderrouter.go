@@ -66,10 +66,6 @@ type MarketTunnel interface {
 	// is a limit order with time-in-force standing either in the epoch queue or
 	// in the order book.
 	Cancelable(order.OrderID) bool
-	// TxMonitored determines whether the transaction for the given user is
-	// involved in a DEX-monitored trade. Change outputs from DEX-monitored trades
-	// can be used in other orders without waiting for fundConf confirmations.
-	TxMonitored(user account.AccountID, asset uint32, txid string) bool
 
 	// Suspend suspends the market as soon as a given time, returning the final
 	// epoch index and and time at which that epoch closes.
@@ -648,21 +644,8 @@ func (r *OrderRouter) checkPrefixTrade(user account.AccountID, tunnel MarketTunn
 			return errSet(msgjson.FundingError,
 				fmt.Sprintf("coin %v is locked", dexCoin))
 		}
-		// Make sure the UTXO has the requisite number of confirmations.
-		confs, err := dexCoin.Confirmations()
-		if err != nil {
-			log.Debugf("Confirmations error for %s coin %s: %v", assets.funding.Symbol, dexCoin, err)
-			return errSet(msgjson.FundingError,
-				fmt.Sprintf("coin confirmations error for %v: %v", dexCoin, err))
-		}
-		// Valid coins have either confs >= FundConf, or come from a
-		// DEX-monitored transaction.
-		if confs < int64(assets.funding.FundConf) &&
-			!tunnel.TxMonitored(user, assets.funding.ID, dexCoin.TxID()) {
-			return errSet(msgjson.FundingError,
-				fmt.Sprintf("not enough confirmations for %v. require %d, have %d",
-					coin.ID, assets.funding.FundConf, confs))
-		}
+
+		// Verify that the user controls the funding coins.
 		err = dexCoin.Auth(msgBytesToBytes(coin.PubKeys), msgBytesToBytes(coin.Sigs), coin.ID)
 		if err != nil {
 			log.Debugf("Auth error for %s coin %s: %v", assets.funding.Symbol, dexCoin, err)

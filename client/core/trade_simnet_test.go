@@ -760,11 +760,11 @@ func (client *tClient) updateBalances() error {
 	client.log("updating balances")
 	client.balances = make(map[uint32]uint64, len(client.wallets))
 	for assetID := range client.wallets {
-		balances, err := client.core.AssetBalances(assetID)
+		balances, err := client.core.AssetBalance(assetID)
 		if err != nil {
 			return err
 		}
-		client.balances[assetID] = balances.ZeroConf.Available + balances.ZeroConf.Locked
+		client.balances[assetID] = balances.Available + balances.Locked
 	}
 	return nil
 }

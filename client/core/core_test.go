@@ -45,7 +45,6 @@ var (
 		LotSize:  1e7,
 		RateStep: 100,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 
 	tBTC = &dex.Asset{
@@ -56,7 +55,6 @@ var (
 		LotSize:  1e6,
 		RateStep: 10,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 	tDexPriv         *secp256k1.PrivateKey
 	tDexKey          *secp256k1.PublicKey
@@ -81,7 +79,6 @@ func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 		FeeRate:  ai.FeeRate,
 		SwapSize: ai.SwapSize,
 		SwapConf: uint16(ai.SwapConf),
-		FundConf: uint16(ai.FundConf),
 	}
 }
 
@@ -317,7 +314,7 @@ func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
 	return tdb.updateWalletErr
 }
 
-func (tdb *TDB) UpdateBalanceSet(wid []byte, balance *db.BalanceSet) error {
+func (tdb *TDB) UpdateBalance(wid []byte, balance *db.Balance) error {
 	return nil
 }
 
@@ -435,7 +432,7 @@ type TXCWallet struct {
 	connectErr     error
 	unlockErr      error
 	balErr         error
-	bals           []*asset.Balance
+	bal            *asset.Balance
 	fundingCoins   asset.Coins
 	fundingCoinErr error
 	lockErr        error
@@ -463,18 +460,14 @@ func (w *TXCWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
-func (w *TXCWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
+func (w *TXCWallet) Balance() (*asset.Balance, error) {
 	if w.balErr != nil {
 		return nil, w.balErr
 	}
-	if w.bals != nil {
-		return w.bals, nil
+	if w.bal == nil {
+		w.bal = new(asset.Balance)
 	}
-	bals := make([]*asset.Balance, 0, len(confs))
-	for i := 0; i < len(confs); i++ {
-		bals = append(bals, new(asset.Balance))
-	}
-	return bals, nil
+	return w.bal, nil
 }
 
 func (w *TXCWallet) Fund(v uint64, _ *dex.Asset) (asset.Coins, error) {
@@ -1115,7 +1108,7 @@ func TestRegister(t *testing.T) {
 					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 {
-						tWallet.setConfs(tDCR.FundConf)
+						tWallet.setConfs(0)
 						tCore.tipChange(tDCR.ID, nil)
 						return
 					}
@@ -1152,7 +1145,7 @@ func TestRegister(t *testing.T) {
 		delete(tCore.conns, tDexHost)
 		tCore.connMtx.Unlock()
 
-		tWallet.setConfs(tDCR.FundConf)
+		tWallet.setConfs(0)
 		_, err = tCore.Register(form)
 	}
 
@@ -3236,31 +3229,23 @@ func TestAddrHost(t *testing.T) {
 	}
 }
 
-func TestAssetBalances(t *testing.T) {
+func TestAssetBalance(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 
 	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
-	bals := []*asset.Balance{
-		{
-			Available: 1e8,
-			Immature:  0,
-			Locked:    2e8,
-		},
-		{
-			Available: 4e7,
-			Immature:  6e7,
-			Locked:    2e8,
-		},
+	bal := &asset.Balance{
+		Available: 4e7,
+		Immature:  6e7,
+		Locked:    2e8,
 	}
-	tWallet.bals = bals
-	balances, err := tCore.AssetBalances(tDCR.ID)
+	tWallet.bal = bal
+	balances, err := tCore.AssetBalance(tDCR.ID)
 	if err != nil {
 		t.Fatalf("error retreiving asset balance: %v", err)
 	}
-	dbtest.MustCompareBalance(t, "zero-conf", bals[0], balances.ZeroConf)
-	dbtest.MustCompareBalance(t, tDexHost, bals[1], balances.XC[tDexHost])
+	dbtest.MustCompareAssetBalances(t, "zero-conf", bal, &balances.Balance)
 }
 
 func TestAssetCounter(t *testing.T) {

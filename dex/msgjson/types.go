@@ -869,7 +869,6 @@ type Asset struct {
 	FeeRate  uint64 `json:"feerate"`
 	SwapSize uint64 `json:"swapsize"`
 	SwapConf uint16 `json:"swapconf"`
-	FundConf uint16 `json:"fundconf"`
 }
 
 // ConfigResult is the successful result for the ConfigRoute.

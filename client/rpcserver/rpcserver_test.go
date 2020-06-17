@@ -69,7 +69,7 @@ func (c *TCore) Balance(uint32) (uint64, error) {
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return nil, nil
 }
-func (c *TCore) AssetBalances(uint32) (*db.BalanceSet, error) {
+func (c *TCore) AssetBalance(uint32) (*db.Balance, error) {
 	return nil, c.balanceErr
 }
 func (c *TCore) Cancel(pw []byte, sid string) error {

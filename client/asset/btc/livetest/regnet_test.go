@@ -23,7 +23,6 @@ var (
 		LotSize:  1e6,
 		RateStep: 10,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 )
 

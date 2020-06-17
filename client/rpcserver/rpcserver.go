@@ -44,7 +44,7 @@ const (
 )
 
 var (
-	// Check that core.Core satifies ClientCore.
+	// Check that core.Core satisfies ClientCore.
 	_   ClientCore = (*core.Core)(nil)
 	log slog.Logger
 	// errUnknownCmd is wrapped when the command is not know.
@@ -53,7 +53,7 @@ var (
 
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
-	AssetBalances(assetID uint32) (*db.BalanceSet, error)
+	AssetBalance(assetID uint32) (*db.Balance, error)
 	Book(host string, base, quote uint32) (orderBook *core.OrderBook, err error)
 	Cancel(appPass []byte, orderID string) error
 	CloseWallet(assetID uint32) error

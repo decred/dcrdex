@@ -86,7 +86,7 @@ func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.Boo
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return &core.OrderBook{}, nil
 }
-func (c *TCore) AssetBalances(assetID uint32) (*db.BalanceSet, error) { return nil, c.balanceErr }
+func (c *TCore) AssetBalance(assetID uint32) (*db.Balance, error) { return nil, c.balanceErr }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	if c.notHas {
 		return nil
@@ -698,7 +698,7 @@ func TestApiGetBalance(t *testing.T) {
 	ensure := func(want string) {
 		ensureResponse(t, s, s.apiGetBalance, want, reader, writer, struct{}{})
 	}
-	ensure(`{"ok":true,"balances":null}`)
+	ensure(`{"ok":true,"balance":null}`)
 
 	// Logout error
 	tCore.balanceErr = tErr

@@ -669,41 +669,24 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 }
 
 // walletBalances retrieves balances for the wallet.
-func (c *Core) walletBalances(wallet *xcWallet) (*db.BalanceSet, error) {
+func (c *Core) walletBalances(wallet *xcWallet) (*db.Balance, error) {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	// Add a zero-conf entry.
-	confs := make([]uint32, 1)
-	var addrs []string
-	for _, dc := range c.conns {
-		assetCfg, found := dc.assets[wallet.AssetID]
-		if !found {
-			continue
-		}
-		addrs = append(addrs, dc.acct.host)
-		confs = append(confs, assetCfg.FundConf)
-	}
-	bals, err := wallet.Balance(confs)
+	bal, err := wallet.Balance()
 	if err != nil {
 		return nil, err
 	}
-	zeroConfBal := bals[0]
-	balMap := make(map[string]*asset.Balance, len(addrs))
-	for i, bal := range bals[1:] {
-		balMap[addrs[i]] = bal
+	dbBal := &db.Balance{
+		Balance: *bal,
+		Stamp:   time.Now(),
 	}
-	coreBals := &db.BalanceSet{
-		ZeroConf: zeroConfBal,
-		XC:       balMap,
-		Stamp:    time.Now(),
-	}
-	wallet.setBalance(coreBals)
-	err = c.db.UpdateBalanceSet(wallet.dbID, coreBals)
+	wallet.setBalance(dbBal)
+	err = c.db.UpdateBalance(wallet.dbID, dbBal)
 	if err != nil {
 		return nil, fmt.Errorf("error updating %s balance in database: %v", unbip(wallet.AssetID), err)
 	}
-	c.notify(newBalanceNote(wallet.AssetID, coreBals))
-	return coreBals, nil
+	c.notify(newBalanceNote(wallet.AssetID, dbBal))
+	return dbBal, nil
 }
 
 // updateBalances updates the balance for every key in the counter map.
@@ -842,11 +825,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	dbWallet := &db.Wallet{
-		AssetID: assetID,
-		Account: form.Account,
-		Balances: &db.BalanceSet{
-			ZeroConf: &asset.Balance{},
-		},
+		AssetID:     assetID,
+		Account:     form.Account,
+		Balance:     &db.Balance{},
 		Settings:    settings,
 		EncryptedPW: encPW,
 	}
@@ -893,7 +874,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	log.Infof("Created %s wallet. Account %q balance available = %d / "+
 		"locked = %d, Deposit address = %s",
-		symbol, form.Account, balances.ZeroConf.Available, balances.ZeroConf.Locked, dbWallet.Address)
+		symbol, form.Account, balances.Available, balances.Locked, dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -908,12 +889,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
-		Account:  dbWallet.Account,
-		AssetID:  dbWallet.AssetID,
-		balances: dbWallet.Balances,
-		encPW:    dbWallet.EncryptedPW,
-		address:  dbWallet.Address,
-		dbID:     dbWallet.ID(),
+		Account: dbWallet.Account,
+		AssetID: dbWallet.AssetID,
+		balance: dbWallet.Balance,
+		encPW:   dbWallet.EncryptedPW,
+		address: dbWallet.Address,
+		dbID:    dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
 		Account:  dbWallet.Account,
@@ -966,7 +947,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	}
 	log.Infof("Connected to and unlocked %s wallet. Account %q balance available "+
 		"= %d / locked = %d, Deposit address = %s",
-		state.Symbol, wallet.Account, balances.ZeroConf.Available, balances.ZeroConf.Locked, state.Address)
+		state.Symbol, wallet.Account, balances.Available, balances.Locked, state.Address)
 
 	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
@@ -1898,8 +1879,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	return nil
 }
 
-// AssetBalances retrieves the current wallet balance.
-func (c *Core) AssetBalances(assetID uint32) (*db.BalanceSet, error) {
+// AssetBalance retrieves the current wallet balance.
+func (c *Core) AssetBalance(assetID uint32) (*db.Balance, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
@@ -2838,7 +2819,6 @@ func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {
 		FeeRate:  asset.FeeRate,
 		SwapSize: asset.SwapSize,
 		SwapConf: uint32(asset.SwapConf),
-		FundConf: uint32(asset.FundConf),
 	}
 }
 
