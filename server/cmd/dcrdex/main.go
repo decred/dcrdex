@@ -119,7 +119,7 @@ func mainCore(ctx context.Context) error {
 		fmt.Printf("Load swapper state from file %q with time stamp %v? (y, n, or enter to abort) ",
 			stateFile.Name, encode.UnixTimeMilli(stateFile.Stamp))
 		scanner := bufio.NewScanner(os.Stdin)
-		scan := make(chan bool)
+		scan := make(chan bool, 1)
 		go func() {
 			scan <- scanner.Scan()
 		}()
@@ -128,37 +128,32 @@ func mainCore(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-scan:
-			promptResp := scanner.Text()
-			err = scanner.Err()
+		}
+		promptResp := scanner.Text()
+		err = scanner.Err()
+		if err != nil {
+			return fmt.Errorf("input failed: %v", err)
+		}
+
+		var doLoad bool
+		switch strings.ToLower(promptResp) {
+		case "y", "yes":
+			doLoad = true
+		case "n", "no":
+		case "":
+			return errors.New("input aborted")
+		default:
+			return fmt.Errorf("invalid response: %q", promptResp)
+		}
+
+		if doLoad {
+			state, err = swap.LoadStateFile(stateFile.Name)
 			if err != nil {
-				return fmt.Errorf("input failed: %v", err)
+				return fmt.Errorf("failed to load swap state file %v: %v", stateFile.Name, err)
 			}
-			// reader := bufio.NewReader(os.Stdin)
-			// promptResp, err := reader.ReadString('\n')
-			// if err != nil {
-			// 	return fmt.Errorf("aborted input: %v", err)
-			// }
-
-			var doLoad bool
-			switch strings.ToLower(promptResp) {
-			case "y", "yes":
-				doLoad = true
-			case "n", "no":
-			case "":
-				return errors.New("input aborted")
-			default:
-				return fmt.Errorf("invalid response: %q", promptResp)
-			}
-
-			if doLoad {
-				state, err = swap.LoadStateFile(stateFile.Name)
-				if err != nil {
-					return fmt.Errorf("failed to load swap state file %v: %v", stateFile.Name, err)
-				}
-				log.Infof("Loaded swap state file %q, containing %d live matches with "+
-					"%d pending client acks and %d live coin waiters", stateFile.Name,
-					len(state.MatchTrackers), len(state.LiveAckers), len(state.LiveWaiters))
-			}
+			log.Infof("Loaded swap state file %q, containing %d live matches with "+
+				"%d pending client acks and %d live coin waiters", stateFile.Name,
+				len(state.MatchTrackers), len(state.LiveAckers), len(state.LiveWaiters))
 		}
 	} else {
 		log.Info("No swap state files found.")
