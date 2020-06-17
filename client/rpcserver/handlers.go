@@ -25,6 +25,7 @@ const (
 	logoutRoute      = "logout"
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
+	orderBookRoute   = "orderbook"
 	getFeeRoute      = "getfee"
 	registerRoute    = "register"
 	tradeRoute       = "trade"
@@ -72,6 +73,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	logoutRoute:      handleLogout,
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
+	orderBookRoute:   handleOrderBook,
 	getFeeRoute:      handleGetFee,
 	registerRoute:    handleRegister,
 	tradeRoute:       handleTrade,
@@ -424,6 +426,22 @@ func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(logoutRoute, &res, nil)
 }
 
+// handleOrderBook handles requests for orderbook.
+// *msgjson.ResponsePayload.Error is empty if successful.
+func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseOrderBookArgs(params)
+	if err != nil {
+		return usage(orderBookRoute, err)
+	}
+	book, err := s.core.Book(form.Host, form.Base, form.Quote)
+	if err != nil {
+		errMsg := fmt.Sprintf("unable to retrieve order book: %v", err)
+		resErr := msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
+		return createResponse(orderBookRoute, nil, resErr)
+	}
+	return createResponse(orderBookRoute, &book, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -767,5 +785,47 @@ Registration is complete after the fee transaction has been confirmed.`,
 		cmdSummary: `Logout the DEX cleint.`,
 		returns: `Returns:
     string: The message "` + logoutStr + `"`,
+	},
+	orderBookRoute: {
+		argsShort:  `"host" base quote`,
+		cmdSummary: `Retrieve all orders for a market.`,
+		argsLong: `Args:
+    host (string): The DEX to retrieve the order book from.
+    base (int): The BIP-44 coin index for the market's base asset.
+    quote (int): The BIP-44 coin index for the market's quote asset.`,
+		returns: `Returns:
+    obj: A map of orders.
+    {
+      "sells" (array): An array of sell orders.
+      [
+        {
+          "qty" (float): The number of coins base asset being sold.
+          "rate" (float): The coins quote asset to pay per coin base asset.
+          "epoch" (int): The number of epoch intervals since 00:00:00 Jan 1 1970.
+          "sell" (bool): Always true because this is a sell order.
+          "token" (string): The first 8 bytes of the order id, coded in hex.
+        },...
+      ],
+      "buys" (array): An array of buy orders
+      [
+        {
+          "qty" (float): The number of coins base asset being bought.
+          "rate" (float): The coins quote asset to accept per coin base asset.
+          "epoch" (int): The number of epoch intervals since 00:00:00 Jan 1 1970.
+          "sell" (bool): Always false because this is a buy order.
+          "token" (string): The first 8 bytes of the order id, coded in hex.
+        },...
+      ],
+      "epoch" (array): An array of epoch orders.
+      [
+        {
+          "qty" (float): The number of coins base asset being bought/sold.
+          "rate" (float): The coins quote asset to pay/accept per coin base asset.
+          "epoch" (int): The number of epoch intervals since 00:00:00 Jan 1 1970.
+          "sell" (bool): Whether this is and order to sell or buy.
+          "token" (string): The first 8 bytes of the order id, coded in hex.
+        },...
+      ],
+    }`,
 	},
 }

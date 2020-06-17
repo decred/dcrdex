@@ -61,13 +61,15 @@ type TCore struct {
 	coin                asset.Coin
 	withdrawErr         error
 	logoutErr           error
+	book                *core.OrderBook
+	bookErr             error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
 	return 0, c.balanceErr
 }
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
-	return nil, nil
+	return c.book, c.bookErr
 }
 func (c *TCore) AssetBalance(uint32) (*db.Balance, error) {
 	return nil, c.balanceErr

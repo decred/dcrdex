@@ -814,3 +814,40 @@ func TestHandleLogout(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleOrderBook(t *testing.T) {
+	params := &RawParams{Args: []string{"dex", "42", "0"}}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		book        *core.OrderBook
+		bookErr     error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		params:      params,
+		book:        new(core.OrderBook),
+		wantErrCode: -1,
+	}, {
+		name:        "core.Book error",
+		params:      params,
+		bookErr:     errors.New("error"),
+		wantErrCode: msgjson.RPCOrderBookError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			book:    test.book,
+			bookErr: test.bookErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleOrderBook(r, test.params)
+		res := new(core.OrderBook)
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -231,8 +231,10 @@ func (c *Core) unsub(dc *dexConnection, mkt string) {
 	}
 }
 
-// Book fetches the order book. Book must be called after Sync.
+// Book fetches the order book. If a subscriptions doesn't exist, one will be
+// attempted and immediately closed.
 func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
+	dex = addrHost(dex)
 	c.connMtx.RLock()
 	dc, found := c.conns[dex]
 	c.connMtx.RUnlock()
@@ -244,12 +246,17 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 	dc.booksMtx.RLock()
 	book, found := dc.books[mkt]
 	dc.booksMtx.RUnlock()
+	// If not found, attempt to make a temporary subscription and return the
+	// initial book.
 	if !found {
-		return nil, fmt.Errorf("no market %s", mkt)
+		book, bookFeed, err := c.Sync(dex, base, quote)
+		if err != nil {
+			return nil, fmt.Errorf("unable to sync book: %v", err)
+		}
+		bookFeed.Close()
+		return book, nil
 	}
-
 	buys, sells, epoch := book.Orders()
-
 	return &OrderBook{
 		Buys:  translateBookSide(buys),
 		Sells: translateBookSide(sells),

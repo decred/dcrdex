@@ -512,3 +512,49 @@ func TestParseWithdrawArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestParseOrderBookArgs(t *testing.T) {
+	paramsWithArgs := func(base, quote string) *RawParams {
+		args := []string{
+			"dex",
+			base,
+			quote,
+		}
+		return &RawParams{Args: args}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok",
+		params: paramsWithArgs("42", "0"),
+	}, {
+		name:    "base not int",
+		params:  paramsWithArgs("42.1", "0"),
+		wantErr: errArgs,
+	}, {
+		name:    "quote not int",
+		params:  paramsWithArgs("42", "0.1"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		res, err := parseOrderBookArgs(test.params)
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		if res.Host != test.params.Args[0] {
+			t.Fatalf("host doesn't match")
+		}
+		if fmt.Sprint(res.Base) != test.params.Args[1] {
+			t.Fatalf("base doesn't match")
+		}
+		if fmt.Sprint(res.Quote) != test.params.Args[2] {
+			t.Fatalf("quote doesn't match")
+		}
+	}
+}

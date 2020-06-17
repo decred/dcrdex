@@ -93,6 +93,13 @@ type withdrawForm struct {
 	Address string           `json:"address"`
 }
 
+// orderBookForm is information necessary to fetch an order book.
+type orderBookForm struct {
+	Host  string `json:"host"`
+	Base  uint32 `json:"base"`
+	Quote uint32 `json:"quote"`
+}
+
 // checkNArgs checks that args and pwArgs are the correct length.
 func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	// For want, one integer indicates an exact match, two are the min and max.
@@ -322,6 +329,26 @@ func parseWithdrawArgs(params *RawParams) (*withdrawForm, error) {
 		AssetID: uint32(assetID),
 		Value:   value,
 		Address: params.Args[2],
+	}
+	return req, nil
+}
+
+func parseOrderBookArgs(params *RawParams) (*orderBookForm, error) {
+	if err := checkNArgs(params, []int{0}, []int{3}); err != nil {
+		return nil, err
+	}
+	base, err := checkUIntArg(params.Args[1], "base", 32)
+	if err != nil {
+		return nil, err
+	}
+	quote, err := checkUIntArg(params.Args[2], "quote", 32)
+	if err != nil {
+		return nil, err
+	}
+	req := &orderBookForm{
+		Host:  params.Args[0],
+		Base:  uint32(base),
+		Quote: uint32(quote),
 	}
 	return req, nil
 }
