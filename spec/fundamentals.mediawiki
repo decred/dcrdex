@@ -67,14 +67,10 @@ The DEX operator specifies an on-chain transaction '''fee rate'''
 [[orders.mediawiki/#Calculating_Transaction_Fees|calculating the fees]] for
 initialization transactions.
 
-Each asset has two distinct '''minimum numbers of confirmations'''. The
-<code>fundconf</code> is the number of confirmations required for
-[[orders.mediawiki/#Order_Preparation|coins to fund an order]]. The
-<code>swapconf</code> is the number of confirmations required during settlement
-on the first swap transaction, before the second swap transaction is broadcast.
-
-The minimum confirmation rule is waived for a change output from a transaction
-involved in a DEX-monitored trade.
+The <code>swapconf</code> is the number of confirmations required during
+settlement on the first swap transaction, before the second swap transaction is
+broadcast, as well as on the second swap transaction, before the first
+redemption is broadcast.
 
 ===Market Variables===
 
@@ -131,8 +127,6 @@ respond with its current configuration.
 | swapsize || int || the size of the initialization transaction (bytes)
 |-
 | swapconf || int || minimum confirmations for swap transactions
-|-
-| fundconf || int || minimum confirmations for funding coins
 |}
 
 '''Market object'''
