@@ -38,8 +38,6 @@ possible.
 |-
 | fee&nbsp;rate  || atoms/byte || the minimum fee rate for swap transactions
 |-
-| coin&nbsp;confirmations|| count || the Minimum confirmations for backing coins
-|-
 | swap&nbsp;confirmations|| count || the Minimum confirmations before acting on a swap transaction
 |}
 

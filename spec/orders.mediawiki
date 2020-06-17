@@ -217,10 +217,6 @@ The DEX will verify the coin sum before accepting the order.
 
 ===Coin Preparation===
 
-All backing [[comm.mediawiki/#Coin_ID|coins]] must have a minimum number of confirmations. The exact number,
-<code>swapconf</code>, is an [[fundamentals.mediawiki/#Exchange_Variables|asset variable]] set by the
-DEX operator.
-
 With the exception of market buy orders, which are detailed below, for an order
 of quantity '''''Q''''', the sum value of the selected coins, '''''V''''',
 must satisfy the relation
