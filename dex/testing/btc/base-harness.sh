@@ -206,6 +206,7 @@ if [ "$RESTART_AFTER_ENCRYPT" ] ; then
       -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
       -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT}; tmux wait-for -S alphaltc" C-m
     sleep 3
+    tmux send-keys -t $SESSION:2 "./alpha loadwallet gamma${DONE}" C-m\; ${WAIT}
 fi
 
 # Create and encrypt the delta wallet
@@ -222,6 +223,7 @@ if [ "$RESTART_AFTER_ENCRYPT" = 1 ] ; then
       -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
       -port=${BETA_LISTEN_PORT}; tmux wait-for -S beta${SYMBOL}" C-m
     sleep 3
+    tmux send-keys -t $SESSION:2 "./beta loadwallet delta${DONE}" C-m\; ${WAIT}
 fi
 
 #  Send some bitcoin to gamma and delta wallets, mining some blocks too.
