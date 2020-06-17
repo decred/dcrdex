@@ -66,7 +66,7 @@ type clientCore interface {
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
 	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
-	AssetBalances(assetID uint32) (*db.BalanceSet, error)
+	AssetBalance(assetID uint32) (*db.Balance, error)
 	WalletState(assetID uint32) *core.WalletState
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error

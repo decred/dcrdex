@@ -509,8 +509,7 @@ func TestHandleExchanges(t *testing.T) {
         "rateStep": 100000,
         "feeRate": 100,
         "swapSize": 224,
-        "swapConf": 1,
-        "fundConf": 1
+        "swapConf": 1
       },
       "42": {
         "id": 42,
@@ -519,8 +518,7 @@ func TestHandleExchanges(t *testing.T) {
         "rateStep": 100000000,
         "feeRate": 10,
         "swapSize": 253,
-        "swapConf": 1,
-        "fundConf": 1
+        "swapConf": 1
       }
     },
 	"confsrequired": 1,
@@ -570,8 +568,7 @@ func TestHandleExchanges(t *testing.T) {
         "rateStep": 100000,
         "feeRate": 100,
         "swapSize": 224,
-        "swapConf": 1,
-        "fundConf": 1
+        "swapConf": 1
       },
       "42": {
         "symbol": "dcr",
@@ -579,8 +576,7 @@ func TestHandleExchanges(t *testing.T) {
         "rateStep": 100000000,
         "feeRate": 10,
         "swapSize": 253,
-        "swapConf": 1,
-        "fundConf": 1
+        "swapConf": 1
       }
     },
     "confsrequired": 1,

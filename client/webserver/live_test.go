@@ -115,20 +115,20 @@ func mkMrkt(base, quote string) *core.Market {
 	}
 }
 
-func mkSupportedAsset(symbol string, state *tWalletState, bal *db.BalanceSet) *core.SupportedAsset {
+func mkSupportedAsset(symbol string, state *tWalletState, bal *db.Balance) *core.SupportedAsset {
 	assetID, _ := dex.BipSymbolID(symbol)
 	winfo := winfos[assetID]
 	var wallet *core.WalletState
 	if state != nil {
 		wallet = &core.WalletState{
-			Symbol:   unbip(assetID),
-			AssetID:  assetID,
-			Open:     state.open,
-			Running:  state.running,
-			Address:  ordertest.RandomAddress(),
-			Balances: bal,
-			FeeRate:  winfo.DefaultFeeRate,
-			Units:    winfo.Units,
+			Symbol:  unbip(assetID),
+			AssetID: assetID,
+			Open:    state.open,
+			Running: state.running,
+			Address: ordertest.RandomAddress(),
+			Balance: bal,
+			FeeRate: winfo.DefaultFeeRate,
+			Units:   winfo.Units,
 		}
 	}
 	return &core.SupportedAsset{
@@ -150,7 +150,6 @@ func mkDexAsset(symbol string) *dex.Asset {
 		FeeRate:  uint64(rand.Intn(10) + 1),
 		SwapSize: uint64(rand.Intn(150) + 150),
 		SwapConf: uint32(rand.Intn(5) + 2),
-		FundConf: uint32(rand.Intn(5) + 2),
 	}
 }
 
@@ -260,7 +259,7 @@ type TCore struct {
 	inited      bool
 	mtx         sync.RWMutex
 	wallets     map[uint32]*tWalletState
-	balances    map[uint32]*db.BalanceSet
+	balances    map[uint32]*db.Balance
 	dexAddr     string
 	marketID    string
 	base        uint32
@@ -279,13 +278,13 @@ type TCore struct {
 func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
-		balances: map[uint32]*db.BalanceSet{
-			0:  randomBalanceSet(),
-			2:  randomBalanceSet(),
-			42: randomBalanceSet(),
-			22: randomBalanceSet(),
-			3:  randomBalanceSet(),
-			28: randomBalanceSet(),
+		balances: map[uint32]*db.Balance{
+			0:  randomBalance(),
+			2:  randomBalance(),
+			42: randomBalance(),
+			22: randomBalance(),
+			3:  randomBalance(),
+			28: randomBalance(),
 		},
 		noteFeed: make(chan core.Notification, 1),
 	}
@@ -442,22 +441,16 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {
 	}
 }
 
-func randomBalanceSet() *db.BalanceSet {
+func randomBalance() *db.Balance {
 	randVal := func() uint64 {
 		return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6))
 	}
-	randBal := func() *asset.Balance {
-		return &asset.Balance{
+
+	return &db.Balance{
+		Balance: asset.Balance{
 			Available: randVal(),
 			Immature:  randVal(),
 			Locked:    randVal(),
-		}
-	}
-	return &db.BalanceSet{
-		ZeroConf: randBal(),
-		XC: map[string]*asset.Balance{
-			firstDEX:  randBal(),
-			secondDEX: randBal(),
 		},
 		Stamp: time.Now().Add(-time.Duration(int64(2 * float64(time.Hour) * rand.Float64()))),
 	}
@@ -467,18 +460,18 @@ func randomBalanceNote(assetID uint32) *core.BalanceNote {
 	return &core.BalanceNote{
 		Notification: db.NewNotification("balance", "", "", db.Data),
 		AssetID:      assetID,
-		Balances:     randomBalanceSet(),
+		Balance:      randomBalance(),
 	}
 }
 
-func (c *TCore) AssetBalances(assetID uint32) (*db.BalanceSet, error) {
+func (c *TCore) AssetBalance(assetID uint32) (*db.Balance, error) {
 	balNote := randomBalanceNote(assetID)
-	balNote.Balances.Stamp = time.Now()
+	balNote.Balance.Stamp = time.Now()
 	c.noteFeed <- balNote
 	// c.mtx.Lock()
 	// c.balances[assetID] = balNote.Balances
 	// c.mtx.Unlock()
-	return balNote.Balances, nil
+	return balNote.Balance, nil
 }
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
@@ -537,14 +530,14 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 		return nil
 	}
 	return &core.WalletState{
-		Symbol:   unbip(assetID),
-		AssetID:  assetID,
-		Open:     w.open,
-		Running:  w.running,
-		Address:  ordertest.RandomAddress(),
-		Balances: c.balances[assetID],
-		FeeRate:  winfos[assetID].DefaultFeeRate,
-		Units:    winfos[assetID].Units,
+		Symbol:  unbip(assetID),
+		AssetID: assetID,
+		Open:    w.open,
+		Running: w.running,
+		Address: ordertest.RandomAddress(),
+		Balance: c.balances[assetID],
+		FeeRate: winfos[assetID].DefaultFeeRate,
+		Units:   winfos[assetID].Units,
 	}
 }
 
@@ -590,12 +583,6 @@ func (c *TCore) CloseWallet(assetID uint32) error {
 		return fmt.Errorf("attempting to close non-existent test wallet")
 	}
 
-	if wipeWalletBalance {
-		bals := c.balances[assetID]
-		delete(bals.XC, secondDEX)
-		delete(bals.XC, firstDEX)
-	}
-
 	if forceDisconnectWallet {
 		wallet.running = false
 	}
@@ -610,14 +597,14 @@ func (c *TCore) Wallets() []*core.WalletState {
 	stats := make([]*core.WalletState, 0, len(c.wallets))
 	for assetID, wallet := range c.wallets {
 		stats = append(stats, &core.WalletState{
-			Symbol:   unbip(assetID),
-			AssetID:  assetID,
-			Open:     wallet.open,
-			Running:  wallet.running,
-			Address:  ordertest.RandomAddress(),
-			Balances: c.balances[assetID],
-			FeeRate:  winfos[assetID].DefaultFeeRate,
-			Units:    winfos[assetID].Units,
+			Symbol:  unbip(assetID),
+			AssetID: assetID,
+			Open:    wallet.open,
+			Running: wallet.running,
+			Address: ordertest.RandomAddress(),
+			Balance: c.balances[assetID],
+			FeeRate: winfos[assetID].DefaultFeeRate,
+			Units:   winfos[assetID].Units,
 		})
 	}
 	return stats
@@ -754,7 +741,6 @@ func TestServer(t *testing.T) {
 	numSells = 0
 	feedPeriod = 500 * time.Millisecond
 	register := true
-	wipeWalletBalance = true
 	forceDisconnectWallet = true
 
 	var shutdown context.CancelFunc

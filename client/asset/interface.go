@@ -62,7 +62,7 @@ type Wallet interface {
 	// available, immature, and locked. Balance takes a list of minimum
 	// confirmations for which to calculate maturity, and returns a list of
 	// corresponding *Balance.
-	Balance(confs []uint32) ([]*Balance, error)
+	Balance() (*Balance, error)
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.

@@ -44,7 +44,6 @@ cat > "./markets.json" <<EOF
             "rateStep": 100000,
             "feeRate": 10,
             "swapConf": 1,
-            "fundConf": 1,
             "configPath": "${TEST_ROOT}/dcr/alpha/dcrd.conf"
         },
         "BTC_simnet": {
@@ -54,7 +53,6 @@ cat > "./markets.json" <<EOF
             "rateStep": 100,
             "feeRate": 100,
             "swapConf": 1,
-            "fundConf": 1,
             "configPath": "${TEST_ROOT}/btc/harness-ctl/alpha.conf"
         }
     }

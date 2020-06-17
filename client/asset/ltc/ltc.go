@@ -20,7 +20,7 @@ const (
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
 	defaultWithdrawalFee = 1
-	minNetworkVersion    = 170100
+	minNetworkVersion    = 180100
 )
 
 var (

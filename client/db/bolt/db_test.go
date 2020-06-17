@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex/order"
@@ -267,24 +266,19 @@ func TestWallets(t *testing.T) {
 	}
 	// Test changing the balance
 	w := reWallets[0]
-	newBal := *w.Balances
-	newBal.ZeroConf.Available += 1e8
-	newBal.ZeroConf.Locked += 2e8
-	newBal.ZeroConf.Immature += 3e8
+	newBal := *w.Balance
+	newBal.Available += 1e8
+	newBal.Locked += 2e8
+	newBal.Immature += 3e8
 	newBal.Stamp = newBal.Stamp.Add(time.Second)
-	newBal.XC = map[string]*asset.Balance{"somehost": &asset.Balance{
-		Available: 1,
-		Locked:    2,
-		Immature:  3,
-	}}
-	boltdb.UpdateBalanceSet(w.ID(), &newBal)
+	boltdb.UpdateBalance(w.ID(), &newBal)
 	reW, err := boltdb.Wallet(w.ID())
 	if err != nil {
 		t.Fatalf("failed to retreive wallet for balance check")
 	}
-	dbtest.MustCompareBalanceSet(t, reW.Balances, &newBal)
-	if !reW.Balances.Stamp.After(w.Balances.Stamp) {
-		t.Fatalf("update time can't be right: %s > %s", reW.Balances.Stamp, w.Balances.Stamp)
+	dbtest.MustCompareBalances(t, reW.Balance, &newBal)
+	if !reW.Balance.Stamp.After(w.Balance.Stamp) {
+		t.Fatalf("update time can't be right: %s > %s", reW.Balance.Stamp, w.Balance.Stamp)
 	}
 	t.Logf("%d milliseconds to read and compare %d Wallet", time.Since(tStart)/time.Millisecond, numToDo)
 

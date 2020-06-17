@@ -590,13 +590,10 @@ var helpMsgs = map[string]helpMsg{
         "running" (bool): Whether the wallet is running.
         "updated" (int): Unix time of last balance update. Seconds since 00:00:00 Jan 1 1970.
         "balance" (obj): {
-          "zeroConf" (obj): {
-            "available" (int): The balance available for the use in the zero-minconf case.
-            "immature" (int): Balance that requires confirmations before use. Can be non-zero for balances in the xc map.
-            "locked" (int): The total locked balance.
-	      },
-          "xc" (map string -> obj): Mapping of dex address to balance objects with the same structure as zeroConf.
-                                    The balance categorization is based on DEX asset variables.
+          "available" (int): The balance available for funding orders case.
+          "immature" (int): Balance that requires confirmations before use.
+          "locked" (int): The total locked balance.
+          "stamp" (string): Time stamp.
         }
         "address" (string): A wallet address.
         "feerate" (int): The fee rate.
@@ -671,8 +668,6 @@ Registration is complete after the fee transaction has been confirmed.`,
             "swapSize" (int): The size of a swap transaction in bytes.
             "swapConf" (int): The number of confirmations needed to confirm
 	      trade transactions.
-            "fundConf" (int): The number of confirmations needed before coins
-	      can be traded.
           },...
 		},
         "confsrequired": (int) The number of confirmations needed for the

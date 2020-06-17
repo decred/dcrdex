@@ -62,7 +62,7 @@
           </td>
           <td data-col="balance" data-balance-target="{{.ID}}">
             {{if .Wallet}}
-              {{printf "%.8f" (fromAtoms .Wallet.Balances.ZeroConf.Available)}}
+              {{printf "%.8f" (fromAtoms .Wallet.Balance.Available)}}
             {{else}}
               0.00000000
             {{end}}

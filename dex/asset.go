@@ -118,5 +118,4 @@ type Asset struct {
 	FeeRate  uint64 `json:"feeRate"`
 	SwapSize uint64 `json:"swapSize"`
 	SwapConf uint32 `json:"swapConf"`
-	FundConf uint32 `json:"fundConf"`
 }

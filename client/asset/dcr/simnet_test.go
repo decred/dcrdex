@@ -49,7 +49,6 @@ var (
 		LotSize:  1e7,
 		RateStep: 100,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 )
 
@@ -166,11 +165,10 @@ func TestWallet(t *testing.T) {
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		bals, err := wallet.Balance([]uint32{tDCR.FundConf})
+		bal, err := wallet.Balance()
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
 		}
-		bal := bals[0]
 		tLogger.Debugf("%s %f available, %f unconfirmed, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
 	}

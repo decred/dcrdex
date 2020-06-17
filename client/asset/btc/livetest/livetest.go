@@ -153,12 +153,11 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		bals, err := wallet.Balance([]uint32{dexAsset.FundConf})
+		bal, err := wallet.Balance()
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
 		}
-		bal := bals[0]
-		tLogger.Debugf("%s %f available, %f unconfirmed, %f locked",
+		tLogger.Debugf("%s %f available, %f immature, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
 	}
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only

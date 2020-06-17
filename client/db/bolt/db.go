@@ -606,8 +606,8 @@ func (db *BoltDB) matchesUpdate(f bucketFunc) error {
 
 // UpdateWallet adds a wallet to the database.
 func (db *BoltDB) UpdateWallet(wallet *dexdb.Wallet) error {
-	if wallet.Balances == nil {
-		return fmt.Errorf("cannot UpdateWallet with nil Balances field")
+	if wallet.Balance == nil {
+		return fmt.Errorf("cannot UpdateWallet with nil Balance field")
 	}
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt, err := master.CreateBucketIfNotExists(wallet.ID())
@@ -618,12 +618,12 @@ func (db *BoltDB) UpdateWallet(wallet *dexdb.Wallet) error {
 		if err != nil {
 			return err
 		}
-		return wBkt.Put(balanceKey, wallet.Balances.Encode())
+		return wBkt.Put(balanceKey, wallet.Balance.Encode())
 	})
 }
 
-// UpdateBalanceSet updates balance in the wallet bucket.
-func (db *BoltDB) UpdateBalanceSet(wid []byte, bal *db.BalanceSet) error {
+// UpdateBalance updates balance in the wallet bucket.
+func (db *BoltDB) UpdateBalance(wid []byte, bal *db.Balance) error {
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {
 		wBkt := master.Bucket(wid)
 		if wBkt == nil {
@@ -672,11 +672,11 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 	}
 	balB := wBkt.Get(balanceKey)
 	if balB != nil {
-		bals, err := db.DecodeBalanceSet(balB)
+		bal, err := db.DecodeBalance(balB)
 		if err != nil {
 			return nil, err
 		}
-		w.Balances = bals
+		w.Balance = bal
 	}
 	return w, nil
 }

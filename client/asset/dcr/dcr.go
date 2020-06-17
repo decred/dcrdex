@@ -59,6 +59,7 @@ var (
 type rpcClient interface {
 	SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
+	GetBalanceMinConf(account string, minConfirms int) (*walletjson.GetBalanceResult, error)
 	GetBestBlock() (*chainhash.Hash, int64, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
@@ -240,11 +241,11 @@ type ExchangeWallet struct {
 	tipChange    func(error)
 	hasConnected uint32
 
-	// The DEX specifies that change outputs from DEX-monitored transactions are
-	// exempt from minimum confirmation limits, so we must track those as they are
-	// created.
+	// In the future, the client may wish to specify minimum confirmations for
+	// utxos to fund orders, and allowing change outputs from DEX-related swap
+	// transaction may be part of this client policy.
 	changeMtx   sync.RWMutex
-	tradeChange map[string]time.Time
+	tradeChange map[string]time.Time // TODO: delete fully confirmed change
 
 	// Coins returned by Fund are cached for quick reference and for cleanup on
 	// shutdown.
@@ -360,14 +361,13 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
-// Balance should return the total available funds in the wallet.
-// Note that after calling Fund, the amount returned by Balance may change
-// by more than the value funded. Because of the DEX confirmation requirements,
-// a simple getbalance with a minconf argument is not sufficient to see all
-// balance available for the exchange. Instead, all wallet UTXOs are scanned
-// for those that match DEX requirements. Part of the asset.Wallet interface.
-func (dcr *ExchangeWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
-	balances, err := dcr.balances(confs)
+// Balance should return the total available funds in the wallet. Note that
+// after calling Fund, the amount returned by Balance may change by more than
+// the value funded. Part of the asset.Wallet interface. TODO: Since this
+// includes potentially untrusted 0-conf utxos, consider prioritizing confirmed
+// utxos when funding an order.
+func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
+	balances, err := dcr.node.GetBalanceMinConf(dcr.acct, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -375,10 +375,26 @@ func (dcr *ExchangeWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, balance := range balances {
-		balance.Locked = locked
+
+	var balance asset.Balance
+	var acctFound bool
+	for i := range balances.Balances {
+		ab := &balances.Balances[i]
+		if ab.AccountName == dcr.acct {
+			acctFound = true
+			balance.Available = toAtoms(ab.Spendable)
+			balance.Immature = toAtoms(ab.ImmatureCoinbaseRewards) +
+				toAtoms(ab.ImmatureStakeGeneration)
+			balance.Locked = locked + toAtoms(ab.LockedByTickets)
+			break
+		}
 	}
-	return balances, err
+
+	if !acctFound {
+		return nil, fmt.Errorf("account not found: %q", dcr.acct)
+	}
+
+	return &balance, err
 }
 
 // Fund selects coins for use in an order. The coins will be locked, and will
@@ -391,7 +407,7 @@ func (dcr *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		return sum+toAtoms(unspent.rpc.Amount) >= dcr.reqFunds(value, size+unspent.input.Size(), nfo)
 	}
-	coins, _, _, err := dcr.fund(nfo.FundConf, enough)
+	coins, err := dcr.fund(0, enough)
 	return coins, err
 }
 
@@ -399,17 +415,22 @@ func (dcr *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 // check whether adding the provided output would be enough to satisfy the
 // needed value.
 func (dcr *ExchangeWallet) fund(confs uint32,
-	enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, uint64, uint32, error) {
+	enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, error) {
 
 	unspents, err := dcr.node.ListUnspentMin(0)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, err
 	}
+	// Sort in ascending order by amount (smallest first).
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
-	utxos, _, _, err := dcr.spendableUTXOs(unspents, confs)
+	utxos, avail, err := dcr.spendableUTXOs(unspents, confs)
 	if err != nil {
-		return nil, 0, 0, fmt.Errorf("error parsing unspent outputs: %v", err)
+		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
+	if len(utxos) == 0 {
+		return nil, fmt.Errorf("insufficient funds. %.8f available", float64(avail)/1e8)
+	}
+
 	var sum uint64
 	var size uint32
 	var coins asset.Coins
@@ -423,7 +444,8 @@ func (dcr *ExchangeWallet) fund(confs uint32,
 		v := toAtoms(unspent.rpc.Amount)
 		redeemScript, err := hex.DecodeString(unspent.rpc.RedeemScript)
 		if err != nil {
-			return fmt.Errorf("error decoding redeem script for %s, script = %s: %v", unspent.rpc.TxID, unspent.rpc.RedeemScript, err)
+			return fmt.Errorf("error decoding redeem script for %s, script = %s: %v",
+				unspent.rpc.TxID, unspent.rpc.RedeemScript, err)
 		}
 		op := newOutput(dcr.node, txHash, unspent.rpc.Vout, v, unspent.rpc.Tree, redeemScript)
 		coins = append(coins, op)
@@ -436,38 +458,62 @@ func (dcr *ExchangeWallet) fund(confs uint32,
 		return nil
 	}
 
-out:
-	for {
-		// If there are none left, we don't have enough.
-		if len(utxos) == 0 {
-			return nil, 0, 0, fmt.Errorf("not enough to cover requested funds")
-		}
-		// On each loop, find the smallest UTXO that is enough. If no UTXO is large
-		// enough, add the largest and continue.
-		var txout *compositeUTXO
-		for _, txout = range utxos {
-			if enough(sum, size, txout) {
-				err = addUTXO(txout)
-				if err != nil {
-					return nil, 0, 0, err
-				}
-				break out
+	tryUTXOs := func(minconf int64) (ok bool, err error) {
+		sum, size = 0, 0
+		coins, spents = nil, nil
+
+		okUTXOs := make([]*compositeUTXO, 0, len(utxos)) // over-allocate
+		for _, cu := range utxos {
+			if cu.confs >= minconf {
+				okUTXOs = append(okUTXOs, cu)
 			}
 		}
-		// Append the last output, which is the largest.
-		err = addUTXO(txout)
-		if err != nil {
-			return nil, 0, 0, err
+
+		for {
+			// If there are none left, we don't have enough.
+			if len(okUTXOs) == 0 {
+				return false, nil
+			}
+			// On each loop, find the smallest UTXO that is enough.
+			for _, txout := range okUTXOs {
+				if enough(sum, size, txout) {
+					if err = addUTXO(txout); err != nil {
+						return false, err
+					}
+					return true, nil
+				}
+			}
+			// No single UTXO was large enough. Add the largest (the last
+			// output) and continue.
+			if err = addUTXO(okUTXOs[len(okUTXOs)-1]); err != nil {
+				return false, err
+			}
+			// Pop the utxo.
+			okUTXOs = okUTXOs[:len(okUTXOs)-1]
 		}
-		// Pop the utxo from the unspents
-		utxos = utxos[:len(utxos)-1]
+	}
+
+	// First try with confs>0.
+	ok, err := tryUTXOs(1)
+	if err != nil {
+		return nil, err
+	}
+	// Fallback to allowing 0-conf outputs.
+	if !ok {
+		ok, err = tryUTXOs(0)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("not enough to cover requested funds")
+		}
 	}
 
 	err = dcr.lockFundingCoins(spents)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, err
 	}
-	return coins, sum, size, nil
+	return coins, nil
 }
 
 // lockFundingCoins locks the funding coins via RPC and stores them in the map.
@@ -1192,28 +1238,24 @@ func (dcr *ExchangeWallet) shutdown() {
 type compositeUTXO struct {
 	rpc   walletjson.ListUnspentResult
 	input *dexdcr.SpendInfo
+	confs int64
+	// TODO: consider including isDexChange bool for consumer
 }
 
-// spendableUTXOs filters the RPC utxos for those that are spendable with
-// regards to the DEX's configuration. The UTXOs will be sorted by ascending
-// value.
-func (dcr *ExchangeWallet) spendableUTXOs(unspents []walletjson.ListUnspentResult, confs uint32) ([]*compositeUTXO, uint64, uint64, error) {
-	var sum, unconf uint64
+// spendableUTXOs filters the RPC utxos to those that are spendable according to
+// provided minimum confirmations. The UTXOs will be sorted by ascending value.
+func (dcr *ExchangeWallet) spendableUTXOs(unspents []walletjson.ListUnspentResult, confs uint32) ([]*compositeUTXO, uint64, error) {
+	var sum uint64
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	for _, txout := range unspents {
-		txHash, err := chainhash.NewHashFromStr(txout.TxID)
-		if err != nil {
-			return nil, 0, 0, fmt.Errorf("error decoding txid from rpc server %s: %v", txout.TxID, err)
-		}
-		// Change from a DEX-monitored transaction is exempt from the fundconf requirement.
-		if txout.Confirmations >= int64(confs) || dcr.isDEXChange(txHash, txout.Vout) {
+		if txout.Confirmations >= int64(confs) {
 			scriptPK, err := hex.DecodeString(txout.ScriptPubKey)
 			if err != nil {
-				return nil, 0, 0, fmt.Errorf("error decoding pubkey script for %s, script = %s: %v", txout.TxID, txout.ScriptPubKey, err)
+				return nil, 0, fmt.Errorf("error decoding pubkey script for %s, script = %s: %v", txout.TxID, txout.ScriptPubKey, err)
 			}
 			redeemScript, err := hex.DecodeString(txout.RedeemScript)
 			if err != nil {
-				return nil, 0, 0, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
+				return nil, 0, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
 			}
 
 			nfo, err := dexdcr.InputInfo(scriptPK, redeemScript, chainParams)
@@ -1221,52 +1263,21 @@ func (dcr *ExchangeWallet) spendableUTXOs(unspents []walletjson.ListUnspentResul
 				if errors.Is(err, dex.UnsupportedScriptError) {
 					continue
 				}
-				return nil, 0, 0, fmt.Errorf("error reading asset info: %v", err)
+				return nil, 0, fmt.Errorf("error reading asset info: %v", err)
 			}
 			utxos = append(utxos, &compositeUTXO{
 				rpc:   txout,
 				input: nfo,
+				confs: txout.Confirmations,
 			})
 			sum += toAtoms(txout.Amount)
-		} else {
-			unconf += toAtoms(txout.Amount)
 		}
 	}
-	return utxos, sum, unconf, nil
-}
-
-// balances creates a slice of *asset.Balance corresponding to the input slice
-// of minconf.
-func (dcr *ExchangeWallet) balances(confs []uint32) ([]*asset.Balance, error) {
-	if len(confs) == 0 {
-		return nil, fmt.Errorf("balances confs slice cannot be empty")
-	}
-	unspents, err := dcr.node.ListUnspentMin(0)
-	if err != nil {
-		return nil, err
-	}
-	balances := make([]*asset.Balance, len(confs))
-	for i := range balances {
-		balances[i] = new(asset.Balance)
-	}
-	for _, txout := range unspents {
-		txHash, err := chainhash.NewHashFromStr(txout.TxID)
-		if err != nil {
-			return nil, fmt.Errorf("error decoding txid from rpc server %s: %v", txout.TxID, err)
-		}
-		for i, balance := range balances {
-			// Change from a DEX-monitored transaction is exempt from the fundconf requirement.
-			if txout.Confirmations >= int64(confs[i]) || dcr.isDEXChange(txHash, txout.Vout) {
-				balance.Available += toAtoms(txout.Amount)
-			} else {
-				balance.Immature += toAtoms(txout.Amount)
-			}
-		}
-	}
-	return balances, nil
+	return utxos, sum, nil
 }
 
 // lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
+// TODO: handle multiple accounts!
 func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
 	lockedOutpoints, err := dcr.node.ListLockUnspent()
 	if err != nil {
@@ -1297,16 +1308,15 @@ func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
 }
 
 // addChange adds the output to the list of DEX-trade change outputs. These
-// outputs are tracked because change outputs from DEX-monitored trades are
-// exempt from the fundconf confirmations requirement.
+// outputs are tracked because the client may wish to exempt change outputs from
+// funding coin confirmation requirements.
 func (dcr *ExchangeWallet) addChange(txHash *chainhash.Hash, vout uint32) {
 	dcr.changeMtx.Lock()
 	defer dcr.changeMtx.Unlock()
 	dcr.tradeChange[outpointID(txHash, vout)] = time.Now()
 }
 
-// isDEXCange checks whether the specified output is a change output from a
-// DEX trade.
+// isDEXChange checks whether the specified output is change from a DEX trade.
 func (dcr *ExchangeWallet) isDEXChange(txHash *chainhash.Hash, vout uint32) bool {
 	dcr.changeMtx.RLock()
 	defer dcr.changeMtx.RUnlock()
@@ -1357,7 +1367,7 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		return sum+toAtoms(unspent.rpc.Amount) >= val
 	}
-	coins, _, _, err := dcr.fund(0, enough)
+	coins, err := dcr.fund(0, enough)
 	if err != nil {
 		return nil, 0, err
 	}
