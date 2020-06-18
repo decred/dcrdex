@@ -106,21 +106,21 @@ func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64
 }
 
 // Value returns the value of the output. Part of the asset.Coin interface.
-func (output *output) Value() uint64 {
-	return output.value
+func (op *output) Value() uint64 {
+	return op.value
 }
 
 // Confirmations is the number of confirmations on the output's block.
 // Confirmations always pulls the block information fresh from the blockchain,
 // and will return an error if the output has been spent. Part of the
 // asset.Coin interface.
-func (output *output) Confirmations() (uint32, error) {
-	txOut, err := output.node.GetTxOut(&output.txHash, output.vout, true)
+func (op *output) Confirmations() (uint32, error) {
+	txOut, err := op.node.GetTxOut(&op.txHash, op.vout, true)
 	if err != nil {
 		return 0, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if txOut == nil {
-		return 0, asset.CoinSpentError
+		return 0, asset.CoinNotFoundError
 	}
 	return uint32(txOut.Confirmations), nil
 }
@@ -1021,7 +1021,7 @@ func (dcr *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (d
 		return nil, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if utxo == nil {
-		return nil, asset.CoinSpentError
+		return nil, asset.CoinNotFoundError
 	}
 	val := toAtoms(utxo.Value)
 	sender, _, lockTime, _, err := dexdcr.ExtractSwapDetails(contract, chainParams)
@@ -1335,7 +1335,7 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 		return nil, fmt.Errorf("error finding unspent output %s:%d: %v", txHash, vout, err)
 	}
 	if txOut == nil {
-		return nil, asset.CoinSpentError
+		return nil, asset.CoinNotFoundError
 	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
