@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
-	dexltc "decred.org/dcrdex/dex/ltc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/asset/btc"
 	"github.com/btcsuite/btcd/chaincfg"

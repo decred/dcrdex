@@ -19,7 +19,7 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc/livetest"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
 const alphaAddress = "mt9hgfXXbM3x7hewgEAovBwqoMAAnctJ4V"

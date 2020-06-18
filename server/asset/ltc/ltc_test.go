@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	dexltc "decred.org/dcrdex/dex/ltc"
+	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"decred.org/dcrdex/server/asset/btc"
 )
 

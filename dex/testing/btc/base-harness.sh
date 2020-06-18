@@ -1,7 +1,6 @@
 #!/bin/sh
 # Tmux script that sets up a simnet harness.
-set -e
-set -x # for verbose output
+set -ex
 NODES_ROOT=~/dextest/${SYMBOL}
 rm -rf "${NODES_ROOT}"
 
@@ -67,7 +66,7 @@ tmux send-keys -t $SESSION:0 "cd ${ALPHA_DIR}" C-m
 echo "Starting simnet alpha node"
 tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
-  -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT}; tmux wait-for -S alpha${SYMBOL}" C-m
+  -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S alpha${SYMBOL}" C-m
 sleep 3
 
 ################################################################################
@@ -80,7 +79,7 @@ tmux send-keys -t $SESSION:1 "cd ${BETA_DIR}" C-m
 echo "Starting simnet beta node"
 tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
   -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
-  -port=${BETA_LISTEN_PORT}; tmux wait-for -S beta${SYMBOL}" C-m
+  -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S beta${SYMBOL}" C-m
 sleep 3
 
 ################################################################################
@@ -204,7 +203,7 @@ if [ "$RESTART_AFTER_ENCRYPT" ] ; then
     echo "Restarting alpha/gamma wallets."
     tmux send-keys -t $SESSION:0 "${DAEMON} -rpcuser=user -rpcpassword=pass \
       -rpcport=${ALPHA_RPC_PORT} -datadir=${ALPHA_DIR} \
-      -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT}; tmux wait-for -S alphaltc" C-m
+      -txindex=1 -regtest=1 -port=${ALPHA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S alphaltc" C-m
     sleep 3
     tmux send-keys -t $SESSION:2 "./alpha loadwallet gamma${DONE}" C-m\; ${WAIT}
 fi
@@ -221,7 +220,7 @@ if [ "$RESTART_AFTER_ENCRYPT" = 1 ] ; then
     echo "Restarting beta/delta wallets."
     tmux send-keys -t $SESSION:1 "${DAEMON} -rpcuser=user -rpcpassword=pass \
       -rpcport=${BETA_RPC_PORT} -datadir=${BETA_DIR} -txindex=1 -regtest=1 \
-      -port=${BETA_LISTEN_PORT}; tmux wait-for -S beta${SYMBOL}" C-m
+      -port=${BETA_LISTEN_PORT} -fallbackfee=0.00001; tmux wait-for -S beta${SYMBOL}" C-m
     sleep 3
     tmux send-keys -t $SESSION:2 "./beta loadwallet delta${DONE}" C-m\; ${WAIT}
 fi

@@ -7,7 +7,7 @@ import (
 
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 )
 
 const (

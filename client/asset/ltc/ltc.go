@@ -9,9 +9,9 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/dex/config"
-	dexltc "decred.org/dcrdex/dex/ltc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/chaincfg"
 )
 

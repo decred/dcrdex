@@ -4,7 +4,7 @@
 package ltc
 
 import (
-	"decred.org/dcrdex/dex/btc"
+	"decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/chaincfg"
 )
 
@@ -32,7 +32,10 @@ var (
 		Bech32HRPSegwit:  "rltc",
 		CoinbaseMaturity: 100,
 		// Net is not the standard for LTC simnet, since they never changed it
-		// from the BTC values and it must be unique. It's just random.
+		// from the BTC value. The only place we currently use Net is in
+		// btcd/chaincfg.Register, where it is checked to prevent duplicate
+		// registration, so our only requirement is that it is unique. This one
+		// was just generated with a prng.
 		Net: 0x9acb0442,
 	})
 )
