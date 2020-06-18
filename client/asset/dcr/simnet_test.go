@@ -27,7 +27,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
-	dexdcr "decred.org/dcrdex/dex/dcr"
+	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/slog"
 )

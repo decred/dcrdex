@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	dexbtc "decred.org/dcrdex/dex/btc"
+	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"decred.org/dcrdex/server/asset/btc"
 )
 
@@ -28,5 +28,5 @@ func TestCompatibility(t *testing.T) {
 		P2WSHScript:  fromHex("0020adb044cf4da15506e73c6d3928737229e64227f29cd86dcc34b7353c1f5560eb"),
 		WSHAddr:      "ltc1q4kcyfn6d592sdeeud5ujsumj98nyyfljnnvxmnp5ku6nc864vr4sawj2gw",
 	}
-	btc.CompatibilityCheck(items, dexbtc.ReadCloneParams(MainNetParams), t)
+	btc.CompatibilityCheck(items, dexltc.MainNetParams, t)
 }

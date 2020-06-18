@@ -5,16 +5,14 @@ package ltc
 
 import (
 	"fmt"
-	"os"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/dex/config"
-	"decred.org/dcrdex/server/asset/ltc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/wire"
 )
 
 const (
@@ -23,9 +21,6 @@ const (
 	// structure.
 	defaultWithdrawalFee = 1
 	minNetworkVersion    = 170100
-	// Litecoin Net parameters in terms of bitcoin's wire.
-	MainNet  wire.BitcoinNet = 0xdbb6c0fb
-	TestNet4 wire.BitcoinNet = 0xf1c8d2fd
 )
 
 var (
@@ -68,33 +63,16 @@ func (d *Driver) Info() *asset.WalletInfo {
 // canceled. The configPath can be an empty string, in which case the standard
 // system location of the litecoind config file is assumed.
 func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error) {
-	var params *dexbtc.CloneParams
+	var params *chaincfg.Params
 	switch network {
 	case dex.Mainnet:
-		params = ltc.MainNetParams
+		params = dexltc.MainNetParams
 	case dex.Testnet:
-		params = ltc.TestNet4Params
+		params = dexltc.TestNet4Params
 	case dex.Regtest:
-		params = ltc.RegressionNetParams
+		params = dexltc.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown network ID %v", network)
-	}
-
-	// Convert the ltcd params to btcd params.
-	btcParams := dexbtc.ReadCloneParams(params)
-
-	// ltc Net parameters are exactly the same as btc for everything but
-	// mainnet and testnet4 and so must be changed in order to register.
-	if btcParams.Net != MainNet && btcParams.Net != TestNet4 {
-		btcParams.Net = wire.BitcoinNet(BipID)
-	}
-
-	// In order to populate some maps inside of chaincfg, new params must
-	// be registered.
-	if err := chaincfg.Register(btcParams); err != nil {
-		// An error is expected when testing and several wallets are
-		// created.
-		fmt.Fprintf(os.Stderr, "err registering ltc params: %v", err)
 	}
 
 	// Designate the clone ports. These will be overwritten by any explicit
@@ -111,7 +89,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Symbol:            "btc",
 		Logger:            logger,
 		Network:           network,
-		ChainParams:       btcParams,
+		ChainParams:       params,
 		Ports:             ports,
 	}
 	return btc.BTCCloneWallet(cloneCFG)

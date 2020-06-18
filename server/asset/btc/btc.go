@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"

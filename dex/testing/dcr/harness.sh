@@ -1,7 +1,6 @@
 #!/bin/sh
 # Tmux script that sets up a simnet harness.
-set -e
-set -x # for verbose output
+set -ex
 SESSION="dcr-harness"
 RPC_USER="user"
 RPC_PASS="pass"
