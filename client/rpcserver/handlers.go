@@ -91,12 +91,12 @@ func handleHelp(_ *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return usage(helpRoute, err)
 	}
 	res := ""
-	if form.HelpWith == "" {
+	if form.helpWith == "" {
 		// List all commands if no arguments.
-		res = ListCommands(form.IncludePasswords)
+		res = ListCommands(form.includePasswords)
 	} else {
 		var err error
-		res, err = commandUsage(form.HelpWith, form.IncludePasswords)
+		res, err = commandUsage(form.helpWith, form.includePasswords)
 		if err != nil {
 			resErr := msgjson.NewError(msgjson.RPCUnknownRoute,
 				err.Error())
@@ -146,38 +146,38 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 
 	// zero password params in request payload when done handling this request
 	defer func() {
-		form.AppPass.Clear()
-		form.WalletPass.Clear()
+		form.appPass.Clear()
+		form.walletPass.Clear()
 	}()
 
-	if s.core.WalletState(form.AssetID) != nil {
+	if s.core.WalletState(form.assetID) != nil {
 		errMsg := fmt.Sprintf("error creating %s wallet: wallet already exists",
-			dex.BipIDSymbol(form.AssetID))
+			dex.BipIDSymbol(form.assetID))
 		resErr := msgjson.NewError(msgjson.RPCWalletExistsError, errMsg)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
 	// Wallet does not exist yet. Try to create it.
-	err = s.core.CreateWallet(form.AppPass, form.WalletPass, &core.WalletForm{
-		AssetID:    form.AssetID,
-		Account:    form.Account,
-		ConfigText: form.ConfigText,
+	err = s.core.CreateWallet(form.appPass, form.walletPass, &core.WalletForm{
+		AssetID:    form.assetID,
+		Account:    form.account,
+		ConfigText: form.configText,
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("error creating %s wallet: %v",
-			dex.BipIDSymbol(form.AssetID), err)
+			dex.BipIDSymbol(form.assetID), err)
 		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, errMsg)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
-	s.notifyWalletUpdate(form.AssetID)
-	err = s.core.OpenWallet(form.AssetID, form.AppPass)
+	s.notifyWalletUpdate(form.assetID)
+	err = s.core.OpenWallet(form.assetID, form.appPass)
 	if err != nil {
 		errMsg := fmt.Sprintf("wallet connected, but failed to open with provided password: %v",
 			err)
 		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, errMsg)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
-	s.notifyWalletUpdate(form.AssetID)
-	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(form.AssetID))
+	s.notifyWalletUpdate(form.assetID)
+	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(form.assetID))
 	return createResponse(newWalletRoute, &res, nil)
 }
 
@@ -190,16 +190,16 @@ func handleOpenWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 		return usage(openWalletRoute, err)
 	}
 
-	err = s.core.OpenWallet(form.AssetID, form.AppPass)
-	form.AppPass.Clear() // AppPass not needed after this, clear
+	err = s.core.OpenWallet(form.assetID, form.appPass)
+	form.appPass.Clear() // AppPass not needed after this, clear
 	if err != nil {
 		errMsg := fmt.Sprintf("error unlocking %s wallet: %v",
-			dex.BipIDSymbol(form.AssetID), err)
+			dex.BipIDSymbol(form.assetID), err)
 		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, errMsg)
 		return createResponse(openWalletRoute, nil, resErr)
 	}
-	s.notifyWalletUpdate(form.AssetID)
-	res := fmt.Sprintf(walletUnlockedStr, dex.BipIDSymbol(form.AssetID))
+	s.notifyWalletUpdate(form.assetID)
+	res := fmt.Sprintf(walletUnlockedStr, dex.BipIDSymbol(form.assetID))
 	return createResponse(openWalletRoute, &res, nil)
 }
 
@@ -364,8 +364,8 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(tradeRoute, err)
 	}
-	defer form.AppPass.Clear()
-	res, err := s.core.Trade(form.AppPass, form.SrvForm)
+	defer form.appPass.Clear()
+	res, err := s.core.Trade(form.appPass, form.srvForm)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to trade: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCTradeError, errMsg)
@@ -386,13 +386,13 @@ func handleCancel(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(cancelRoute, err)
 	}
-	defer form.AppPass.Clear()
-	if err := s.core.Cancel(form.AppPass, form.OrderID); err != nil {
-		errMsg := fmt.Sprintf("unable to cancel order %q: %v", form.OrderID, err)
+	defer form.appPass.Clear()
+	if err := s.core.Cancel(form.appPass, form.orderID); err != nil {
+		errMsg := fmt.Sprintf("unable to cancel order %q: %v", form.orderID, err)
 		resErr := msgjson.NewError(msgjson.RPCCancelError, errMsg)
 		return createResponse(cancelRoute, nil, resErr)
 	}
-	res := fmt.Sprintf(canceledOrderStr, form.OrderID)
+	res := fmt.Sprintf(canceledOrderStr, form.orderID)
 	return createResponse(cancelRoute, &res, nil)
 }
 
@@ -403,8 +403,8 @@ func handleWithdraw(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(withdrawRoute, err)
 	}
-	defer form.AppPass.Clear()
-	coin, err := s.core.Withdraw(form.AppPass, form.AssetID, form.Value, form.Address)
+	defer form.appPass.Clear()
+	coin, err := s.core.Withdraw(form.appPass, form.assetID, form.value, form.address)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to withdraw: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCWithdrawError, errMsg)
@@ -426,6 +426,57 @@ func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(logoutRoute, &res, nil)
 }
 
+// sortOrderBook converts a *core.OrderBook into an *Orderbook, setting
+// appropriate fields and sorting buys and sells by descending and ascending
+// rates respectively.
+func sortOrderBook(coreBook *core.OrderBook) *OrderBook {
+	book := new(OrderBook)
+	groupFn := func(orders []*core.MiniOrder, immediate bool) {
+		// Separate orders into buys and sells.
+		for _, order := range orders {
+			o := &MiniOrder{
+				Qty:       order.Qty,
+				Rate:      order.Rate,
+				Sell:      order.Sell,
+				Token:     order.Token,
+				Immediate: immediate,
+			}
+			if order.Sell {
+				book.Sells = append(book.Sells, o)
+				continue
+			}
+			book.Buys = append(book.Buys, o)
+		}
+	}
+	groupFn(coreBook.Epoch, true)
+	groupFn(coreBook.Buys, false)
+	groupFn(coreBook.Sells, false)
+	sortFn := func(orders []*MiniOrder, sell bool) func(i, j int) bool {
+		// High rate on top for buys and bottom for sells.
+		return func(i, j int) bool {
+			if sell {
+				return orders[i].Rate < orders[j].Rate
+			}
+			return orders[i].Rate > orders[j].Rate
+		}
+	}
+	sort.Slice(book.Buys, sortFn(book.Buys, false))
+	sort.Slice(book.Sells, sortFn(book.Sells, true))
+	return book
+}
+
+// truncateOrderBook truncates book to the top nOrders of buys and sells.
+func truncateOrderBook(book *OrderBook, nOrders uint64) {
+	truncFn := func(orders *[]*MiniOrder) {
+		if uint64(len(*orders)) < nOrders {
+			return
+		}
+		*orders = (*orders)[:nOrders]
+	}
+	truncFn(&book.Buys)
+	truncFn(&book.Sells)
+}
+
 // handleOrderBook handles requests for orderbook.
 // *msgjson.ResponsePayload.Error is empty if successful.
 func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
@@ -433,13 +484,17 @@ func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	if err != nil {
 		return usage(orderBookRoute, err)
 	}
-	book, err := s.core.Book(form.Host, form.Base, form.Quote)
+	book, err := s.core.Book(form.host, form.base, form.quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("unable to retrieve order book: %v", err)
 		resErr := msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
 		return createResponse(orderBookRoute, nil, resErr)
 	}
-	return createResponse(orderBookRoute, &book, nil)
+	res := sortOrderBook(book)
+	if form.nOrders > 0 {
+		truncateOrderBook(res, form.nOrders)
+	}
+	return createResponse(orderBookRoute, res, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -787,12 +842,14 @@ Registration is complete after the fee transaction has been confirmed.`,
     string: The message "` + logoutStr + `"`,
 	},
 	orderBookRoute: {
-		argsShort:  `"host" base quote`,
+		argsShort:  `"host" base quote nOrders`,
 		cmdSummary: `Retrieve all orders for a market.`,
 		argsLong: `Args:
     host (string): The DEX to retrieve the order book from.
     base (int): The BIP-44 coin index for the market's base asset.
-    quote (int): The BIP-44 coin index for the market's quote asset.`,
+    quote (int): The BIP-44 coin index for the market's quote asset.
+    nOrders (int): Optional. Default is 0. The number of orders from the top of
+      buys and sells to return. 0 returns all orders.`,
 		returns: `Returns:
     obj: A map of orders.
     {
@@ -801,9 +858,9 @@ Registration is complete after the fee transaction has been confirmed.`,
         {
           "qty" (float): The number of coins base asset being sold.
           "rate" (float): The coins quote asset to pay per coin base asset.
-          "epoch" (int): The number of epoch intervals since 00:00:00 Jan 1 1970.
           "sell" (bool): Always true because this is a sell order.
           "token" (string): The first 8 bytes of the order id, coded in hex.
+	  "immediate" (bool): Whether this order is good only for the current epoch.
         },...
       ],
       "buys" (array): An array of buy orders
@@ -811,19 +868,9 @@ Registration is complete after the fee transaction has been confirmed.`,
         {
           "qty" (float): The number of coins base asset being bought.
           "rate" (float): The coins quote asset to accept per coin base asset.
-          "epoch" (int): The number of epoch intervals since 00:00:00 Jan 1 1970.
           "sell" (bool): Always false because this is a buy order.
           "token" (string): The first 8 bytes of the order id, coded in hex.
-        },...
-      ],
-      "epoch" (array): An array of epoch orders.
-      [
-        {
-          "qty" (float): The number of coins base asset being bought/sold.
-          "rate" (float): The coins quote asset to pay/accept per coin base asset.
-          "epoch" (int): The number of epoch intervals since 00:00:00 Jan 1 1970.
-          "sell" (bool): Whether this is and order to sell or buy.
-          "token" (string): The first 8 bytes of the order id, coded in hex.
+	  "immediate" (bool): Whether this order is good only for the current epoch.
         },...
       ],
     }`,

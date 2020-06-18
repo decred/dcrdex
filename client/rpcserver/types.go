@@ -54,50 +54,66 @@ type tradeResponse struct {
 
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
-	AssetID uint32           `json:"assetID"`
-	AppPass encode.PassBytes `json:"appPass"`
+	assetID uint32
+	appPass encode.PassBytes
 }
 
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
-	AssetID    uint32           `json:"assetID"`
-	Account    string           `json:"account"`
-	ConfigText string           `json:"config"`
-	WalletPass encode.PassBytes `json:"walletPass"`
-	AppPass    encode.PassBytes `json:"appPass"`
+	assetID    uint32
+	account    string
+	configText string
+	walletPass encode.PassBytes
+	appPass    encode.PassBytes
 }
 
 // helpForm is information necessary to obtain help.
 type helpForm struct {
-	HelpWith         string `json:"helpwith"`
-	IncludePasswords bool   `json:"includepasswords"`
+	helpWith         string
+	includePasswords bool
 }
 
 // tradeForm combines the application password and the user's trade details.
 type tradeForm struct {
-	AppPass encode.PassBytes
-	SrvForm *core.TradeForm
+	appPass encode.PassBytes
+	srvForm *core.TradeForm
 }
 
 // cancelForm is information necessary to cancel a trade.
 type cancelForm struct {
-	AppPass encode.PassBytes `json:"appPass"`
-	OrderID string           `json:"orderID"`
+	appPass encode.PassBytes
+	orderID string
 }
 
 // withdrawForm is information necessary to withdraw funds.
 type withdrawForm struct {
-	AppPass encode.PassBytes `json:"appPass"`
-	AssetID uint32           `json:"assetID"`
-	Value   uint64           `json:"value"`
-	Address string           `json:"address"`
+	appPass encode.PassBytes
+	assetID uint32
+	value   uint64
+	address string
 }
 
 // orderBookForm is information necessary to fetch an order book.
 type orderBookForm struct {
-	Host  string `json:"host"`
-	Base  uint32 `json:"base"`
-	Quote uint32 `json:"quote"`
+	host    string
+	base    uint32
+	quote   uint32
+	nOrders uint64
+}
+
+// MiniOrder is minimal information about an order in a market's order book.
+type MiniOrder struct {
+	Qty       float64 `json:"qty"`
+	Rate      float64 `json:"rate"`
+	Sell      bool    `json:"sell"`
+	Token     string  `json:"token"`
+	Immediate bool    `json:"immediate"`
+}
+
+// OrderBook represents an order book, which are sorted buys and sells.
+type OrderBook struct {
+	Sells []*MiniOrder `json:"sells"`
+	Buys  []*MiniOrder `json:"buys"`
 }
 
 // checkNArgs checks that args and pwArgs are the correct length.
@@ -157,8 +173,8 @@ func parseHelpArgs(params *RawParams) (*helpForm, error) {
 		}
 	}
 	return &helpForm{
-		HelpWith:         helpWith,
-		IncludePasswords: includePasswords,
+		helpWith:         helpWith,
+		includePasswords: includePasswords,
 	}, nil
 }
 
@@ -185,13 +201,13 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		return nil, err
 	}
 	req := &newWalletForm{
-		AppPass:    params.PWArgs[0],
-		WalletPass: params.PWArgs[1],
-		AssetID:    uint32(assetID),
-		Account:    params.Args[1],
+		appPass:    params.PWArgs[0],
+		walletPass: params.PWArgs[1],
+		assetID:    uint32(assetID),
+		account:    params.Args[1],
 	}
 	if len(params.Args) > 2 {
-		req.ConfigText = params.Args[2]
+		req.configText = params.Args[2]
 	}
 	return req, nil
 }
@@ -204,7 +220,7 @@ func parseOpenWalletArgs(params *RawParams) (*openWalletForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	req := &openWalletForm{AppPass: params.PWArgs[0], AssetID: uint32(assetID)}
+	req := &openWalletForm{appPass: params.PWArgs[0], assetID: uint32(assetID)}
 	return req, nil
 }
 
@@ -283,8 +299,8 @@ func parseTradeArgs(params *RawParams) (*tradeForm, error) {
 		return nil, err
 	}
 	req := &tradeForm{
-		AppPass: params.PWArgs[0],
-		SrvForm: &core.TradeForm{
+		appPass: params.PWArgs[0],
+		srvForm: &core.TradeForm{
 			Host:    params.Args[0],
 			IsLimit: isLimit,
 			Sell:    sell,
@@ -309,7 +325,7 @@ func parseCancelArgs(params *RawParams) (*cancelForm, error) {
 	if _, err := hex.DecodeString(id); err != nil {
 		return nil, fmt.Errorf("%w: invalid order id hex", errArgs)
 	}
-	return &cancelForm{AppPass: params.PWArgs[0], OrderID: id}, nil
+	return &cancelForm{appPass: params.PWArgs[0], orderID: id}, nil
 }
 
 func parseWithdrawArgs(params *RawParams) (*withdrawForm, error) {
@@ -325,16 +341,16 @@ func parseWithdrawArgs(params *RawParams) (*withdrawForm, error) {
 		return nil, err
 	}
 	req := &withdrawForm{
-		AppPass: params.PWArgs[0],
-		AssetID: uint32(assetID),
-		Value:   value,
-		Address: params.Args[2],
+		appPass: params.PWArgs[0],
+		assetID: uint32(assetID),
+		value:   value,
+		address: params.Args[2],
 	}
 	return req, nil
 }
 
 func parseOrderBookArgs(params *RawParams) (*orderBookForm, error) {
-	if err := checkNArgs(params, []int{0}, []int{3}); err != nil {
+	if err := checkNArgs(params, []int{0}, []int{3, 4}); err != nil {
 		return nil, err
 	}
 	base, err := checkUIntArg(params.Args[1], "base", 32)
@@ -345,10 +361,18 @@ func parseOrderBookArgs(params *RawParams) (*orderBookForm, error) {
 	if err != nil {
 		return nil, err
 	}
+	var nOrders uint64
+	if len(params.Args) > 3 {
+		nOrders, err = checkUIntArg(params.Args[3], "nOrders", 64)
+		if err != nil {
+			return nil, err
+		}
+	}
 	req := &orderBookForm{
-		Host:  params.Args[0],
-		Base:  uint32(base),
-		Quote: uint32(quote),
+		host:    params.Args[0],
+		base:    uint32(base),
+		quote:   uint32(quote),
+		nOrders: nOrders,
 	}
 	return req, nil
 }
