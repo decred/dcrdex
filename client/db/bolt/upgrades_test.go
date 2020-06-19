@@ -18,10 +18,11 @@ import (
 
 var dbUpgradeTests = [...]struct {
 	name     string
+	upgrade  upgradefunc
 	verify   func(*testing.T, *bbolt.DB)
 	filename string // in testdata directory
 }{
-	{"upgradeFromV0", verifyV1Upgrade, "v0.db.gz"},
+	{"upgradeFromV0", v1Upgrade, verifyV1Upgrade, "v0.db.gz"},
 }
 
 func TestUpgrades(t *testing.T) {
@@ -59,7 +60,9 @@ func TestUpgrades(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			err = upgradeDB(db)
+			err = db.Update(func(dbtx *bbolt.Tx) error {
+				return tc.upgrade(dbtx)
+			})
 			if err != nil {
 				t.Fatalf("Upgrade failed: %v", err)
 			}
@@ -71,6 +74,7 @@ func TestUpgrades(t *testing.T) {
 }
 
 func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
+	expectedVersion := uint32(1)
 	err := db.View(func(dbtx *bbolt.Tx) error {
 		bkt := dbtx.Bucket(appBucket)
 		if bkt == nil {
@@ -81,9 +85,9 @@ func verifyV1Upgrade(t *testing.T, db *bbolt.DB) {
 			return fmt.Errorf("expected a non-nil version value")
 		}
 		version := intCoder.Uint32(versionB)
-		if version != versionedDBVersion {
+		if version != expectedVersion {
 			return fmt.Errorf("expected db version %d, got %d",
-				versionedDBVersion, version)
+				expectedVersion, version)
 		}
 		return nil
 	})

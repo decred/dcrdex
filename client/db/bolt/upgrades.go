@@ -10,25 +10,18 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-const (
-	initialVersion = 0
-
-	// versionedDBVersion is the second version of the database.
-	// The only change for this version is that the DB now stores
-	// it's version number.
-	versionedDBVersion = 1
-
-	// DBVersion is the latest version of the database that is understood.
-	// Databases with recorded versions higher than this will fail to
-	// open (meaning any upgrades prevent reverting to older software).
-	DBVersion = versionedDBVersion
-)
+type upgradefunc func(tx *bbolt.Tx) error
 
 // Each database upgrade function should be keyed by the database
 // version it upgrades.
-var upgrades = [...]func(tx *bbolt.Tx) error{
-	versionedDBVersion - 1: versionedDBUpgrade,
+var upgrades = [...]upgradefunc{
+	v1Upgrade, // v0 => v1 adds a version key.
 }
+
+// DBVersion is the latest version of the database that is understood. Databases
+// with recorded versions higher than this will fail to open (meaning any
+// upgrades prevent reverting to older software).
+const DBVersion = uint32(len(upgrades))
 
 func fetchDBVersion(tx *bbolt.Tx) (uint32, error) {
 	bucket := tx.Bucket(appBucket)
@@ -99,7 +92,7 @@ func upgradeDB(db *bbolt.DB) error {
 	})
 }
 
-func versionedDBUpgrade(dbtx *bbolt.Tx) error {
+func v1Upgrade(dbtx *bbolt.Tx) error {
 	const oldVersion = 0
 	const newVersion = 1
 

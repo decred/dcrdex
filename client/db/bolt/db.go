@@ -105,7 +105,7 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 				return fmt.Errorf("app bucket not found")
 			}
 
-			versionB := encode.Uint32Bytes(uint32(DBVersion))
+			versionB := encode.Uint32Bytes(DBVersion)
 			err := bkt.Put(versionKey, versionB)
 			if err != nil {
 				return err
