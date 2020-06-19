@@ -64,6 +64,18 @@ func testAddresses() *tAddrs {
 	}
 }
 
+func TestVarIntSizes(t *testing.T) {
+	got := wire.VarIntSerializeSize(uint64(RedeemP2PKHSigScriptSize))
+	if got != 1 {
+		t.Errorf("Incorrect opcode prefix size %d, want 1", got)
+	}
+
+	got = wire.VarIntSerializeSize(uint64(RedeemP2PKHSigScriptSize))
+	if got != 1 {
+		t.Errorf("Incorrect opcode prefix size %d, want 1", got)
+	}
+}
+
 func TestParseScriptType(t *testing.T) {
 	addrs := testAddresses()
 
@@ -324,6 +336,7 @@ func TestInputInfo(t *testing.T) {
 	var err error
 
 	check := func(name string, sigScriptSize, witnessSize uint32, scriptType BTCScriptType) {
+		t.Helper()
 		if spendInfo.SigScriptSize != sigScriptSize {
 			t.Fatalf("%s: wrong SigScriptSize, wanted %d, got %d", name, sigScriptSize, spendInfo.SigScriptSize)
 		}
@@ -337,6 +350,7 @@ func TestInputInfo(t *testing.T) {
 
 	var script []byte
 	payToAddr := func(addr btcutil.Address, redeem []byte) {
+		t.Helper()
 		script, _ = txscript.PayToAddrScript(addr)
 		spendInfo, err = InputInfo(script, redeem, tParams)
 		if err != nil {
@@ -425,33 +439,50 @@ func TestFindKeyPush(t *testing.T) {
 func TestExtractContractHash(t *testing.T) {
 	addrs := testAddresses()
 	// non-hex
-	_, err := ExtractContractHash("zz", tParams)
+	_, err := ExtractContractHash("zz")
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// invalid script
-	_, err = ExtractContractHash(hex.EncodeToString(invalidScript), tParams)
+	_, err = ExtractContractHash(hex.EncodeToString(invalidScript))
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// multi-sig
-	_, err = ExtractContractHash(hex.EncodeToString(addrs.multiSig), tParams)
+	_, err = ExtractContractHash(hex.EncodeToString(addrs.multiSig))
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// wrong script types
 	p2pkh, _ := txscript.PayToAddrScript(addrs.pkh)
-	_, err = ExtractContractHash(hex.EncodeToString(p2pkh), tParams)
+	_, err = ExtractContractHash(hex.EncodeToString(p2pkh))
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
-	// ok
+	// ok p2sh
 	p2sh, _ := txscript.PayToAddrScript(addrs.sh)
-	checkHash, err := ExtractContractHash(hex.EncodeToString(p2sh), tParams)
+	checkHash0 := ExtractScriptHash(p2sh)
+	if !bytes.Equal(checkHash0, addrs.sh.ScriptAddress()) {
+		t.Fatalf("hash mismatch. wanted %x, got %x", addrs.sh.ScriptAddress(), checkHash0)
+	}
+	checkHash, err := ExtractContractHash(hex.EncodeToString(p2sh))
 	if err != nil {
 		t.Fatalf("error extracting contract hash: %v", err)
 	}
 	if !bytes.Equal(checkHash, addrs.sh.ScriptAddress()) {
 		t.Fatalf("hash mismatch. wanted %x, got %x", addrs.sh.ScriptAddress(), checkHash)
+	}
+	// ok p2wsh
+	p2wsh, _ := txscript.PayToAddrScript(addrs.wsh)
+	checkHash0 = ExtractScriptHash(p2wsh)
+	if !bytes.Equal(checkHash0, addrs.wsh.ScriptAddress()) {
+		t.Fatalf("hash mismatch. wanted %x, got %x", addrs.wsh.ScriptAddress(), checkHash0)
+	}
+	checkHash, err = ExtractContractHash(hex.EncodeToString(p2wsh))
+	if err != nil {
+		t.Fatalf("error extracting contract hash: %v", err)
+	}
+	if !bytes.Equal(checkHash, addrs.wsh.ScriptAddress()) {
+		t.Fatalf("hash mismatch. wanted %x, got %x", addrs.wsh.ScriptAddress(), checkHash)
 	}
 }

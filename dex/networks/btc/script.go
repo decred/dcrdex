@@ -40,10 +40,11 @@ const (
 	// SwapContractSize is the worst case scenario size for a swap contract,
 	// which is the pk-script of the non-change output of an initialization
 	// transaction as used in execution of an atomic swap.
-	// See extractSwapAddresses for a breakdown of the bytes.
+	// See ExtractSwapDetails for a breakdown of the bytes.
 	SwapContractSize = 97
 
-	// DERSigLength is the maximum length of a DER encoded signature.
+	// DERSigLength is the maximum length of a DER encoded signature with a
+	// sighash type byte.
 	DERSigLength = 73
 
 	// RedeemSwapSigScriptSize is the worst case (largest) serialize size
@@ -59,7 +60,7 @@ const (
 	//   - OP_1
 	//   - varint 97
 	//   - 97 bytes secret key
-	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 1 + 97
+	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 2 + 97
 
 	// RefundSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that refunds a compressed P2PKH output.
@@ -70,17 +71,19 @@ const (
 	//   - OP_DATA_33
 	//   - 33 bytes serialized compressed pubkey
 	//   - OP_0
-	//   - varint 97
+	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
 	//   - 97 bytes contract
-	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 1 + 97
+	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 2 + 97
 
 	// Overhead for a wire.TxIn. See wire.TxIn.SerializeSize.
 	// hash 32 bytes + index 4 bytes + sequence 4 bytes.
-	TxInOverhead = 32 + 4 + 4
+	TxInOverhead = 32 + 4 + 4 // 40
 
 	// TxOutOverhead is the overhead associated with a transaction output.
 	// 8 bytes value + at least 1 byte varint script size
 	TxOutOverhead = 8 + 1
+
+	RedeemP2PKSigScriptSize = 1 + DERSigLength
 
 	// RedeemP2PKHSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that redeems a compressed P2PKH output.
@@ -90,7 +93,10 @@ const (
 	//   - 72 bytes DER signature + 1 byte sighash
 	//   - OP_DATA_33
 	//   - 33 bytes serialized compressed pubkey
-	RedeemP2PKHSigScriptSize = 1 + DERSigLength + 1 + 33
+	RedeemP2PKHSigScriptSize = 1 + DERSigLength + 1 + 33 // 108
+
+	// RedeemP2SHSigScriptSize does not include the redeem script.
+	//RedeemP2SHSigScriptSize = 1 + DERSigLength + 1 + 1 + 33 + 1 // + redeem script!
 
 	// P2PKHPkScriptSize is the size of a transaction output script that
 	// pays to a compressed pubkey hash.  It is calculated as:
@@ -101,10 +107,10 @@ const (
 	//   - 20 bytes pubkey hash
 	//   - OP_EQUALVERIFY
 	//   - OP_CHECKSIG
-	P2PKHPkScriptSize = 1 + 1 + 1 + 20 + 1 + 1
+	P2PKHPkScriptSize = 1 + 1 + 1 + 20 + 1 + 1 // 25
 
 	// P2PKHOutputSize is the size of the serialized P2PKH output.
-	P2PKHOutputSize = TxOutOverhead + P2PKHPkScriptSize
+	P2PKHOutputSize = TxOutOverhead + P2PKHPkScriptSize // 9 + 25 = 34
 
 	// P2SHPkScriptSize is the size of a transaction output script that
 	// pays to a redeem script.  It is calculated as:
@@ -116,7 +122,7 @@ const (
 	P2SHPkScriptSize = 1 + 1 + 20 + 1
 
 	// P2SHOutputSize is the size of the serialized P2SH output.
-	P2SHOutputSize = TxOutOverhead + P2SHPkScriptSize
+	P2SHOutputSize = TxOutOverhead + P2SHPkScriptSize // 9 + 23 = 32
 
 	// RedeemP2PKHInputSize is the worst case (largest) serialize size of a
 	// transaction input redeeming a compressed P2PKH output.  It is
@@ -124,10 +130,10 @@ const (
 	//
 	//   - 32 bytes previous tx
 	//   - 4 bytes output index
-	//   - 1 byte compact int encoding value 107
-	//   - 107 bytes signature script
 	//   - 4 bytes sequence
-	RedeemP2PKHInputSize = TxInOverhead + RedeemP2PKHSigScriptSize
+	//   - 1 byte compact int encoding value 108
+	//   - 108 bytes signature script
+	RedeemP2PKHInputSize = TxInOverhead + 1 + RedeemP2PKHSigScriptSize // 40 + 1 + 108 = 149
 
 	// RedeemP2WPKHInputSize is the worst case size of a transaction
 	// input redeeming a P2WPKH output. This does not account for witness data,
@@ -136,9 +142,9 @@ const (
 	//
 	//   - 32 bytes previous tx
 	//   - 4 bytes output index
-	//   - 1 byte encoding empty redeem script
-	//   - 0 bytes redeem script
 	//   - 4 bytes sequence
+	//   - 1 byte encoding empty redeem script
+	//   - 0 bytes signature script
 	RedeemP2WPKHInputSize = TxInOverhead + 1
 
 	// RedeemP2WPKHInputWitnessWeight is the worst case weight of
@@ -150,7 +156,13 @@ const (
 	//   - 72 wu DER signature + 1 wu sighash
 	//   - 1 wu compact int encoding value 33
 	//   - 33 wu serialized compressed pubkey
-	RedeemP2WPKHInputWitnessWeight = 1 + DERSigLength + 1 + 33
+	// NOTE: witness data is not script.
+	RedeemP2WPKHInputWitnessWeight = 1 + DERSigLength + 1 + 33 // 108
+
+	// RedeemP2WSHInputWitnessWeight depends on the number of redeem scrpit and
+	// number of signatures.
+	//  version + signatures + length of redeem script + redeemscript
+	// RedeemP2WSHInputWitnessWeight = 1 + N*DERSigLength + 1 + (redeem script bytes)
 
 	// P2WPKHPkScriptSize is the size of a transaction output script that
 	// pays to a witness pubkey hash. It is calculated as:
@@ -166,20 +178,24 @@ const (
 	//   - 8 bytes output value
 	//   - 1 byte compact int encoding value 22
 	//   - 22 bytes P2PKH output script
-	P2WPKHOutputSize = 8 + 1 + P2WPKHPkScriptSize
+	P2WPKHOutputSize = TxOutOverhead + P2WPKHPkScriptSize // 31
 
 	// MimimumTxOverhead is the size of an empty transaction.
 	// 4 bytes version + 4 bytes locktime + 2 bytes of varints for the number of
 	// transaction inputs and outputs
-	MimimumTxOverhead = 4 + 4 + 1 + 1
+	MimimumTxOverhead = 4 + 4 + 1 + 1 // 10
 
-	// InitTxSize is the size of a standard serialized atomic swap initialization
-	// transaction with one change output.
-	// MsgTx overhead is 4 bytes version + 4 bytes locktime + 2 bytes of varints
-	// for the number of transaction inputs and outputs (1 each here) + 1 P2PKH
-	// input (25) + 2 outputs (8 + 1 bytes overhead each): 1 P2PKH script (25) +
-	// 1 P2SH script (23).
-	InitTxSize = MimimumTxOverhead + RedeemP2PKHInputSize + P2PKHOutputSize + P2SHOutputSize
+	// InitTxSizeBase is the size of a standard serialized atomic swap
+	// initialization transaction with one change output and no inputs. This is
+	// MsgTx overhead + 1 P2PKH change output + 1 P2SH contract output. However,
+	// the change output might be P2WPKH, in which case it would be smaller.
+	InitTxSizeBase = MimimumTxOverhead + P2PKHOutputSize + P2SHOutputSize // 10 + 34 + 32 = 76
+	// leaner with P2WPKH+P2SH outputs: 10 + 31 + 32 = 73
+
+	// InitTxSize is InitTxBaseSize + 1 P2PKH input
+	InitTxSize = InitTxSizeBase + RedeemP2PKHInputSize // 76 + 149 = 225
+	// Varies greatly with some other input types, e.g nested witness (p2sh with
+	// p2wpkh redeem script): 23 byte scriptSig + 108 byte (75 vbyte) witness = ~50
 )
 
 // BTCScriptType holds details about a pubkey script and possibly it's redeem
@@ -257,6 +273,7 @@ func ParseScriptType(pkScript, redeemScript []byte) BTCScriptType {
 }
 
 // MakeContract creates an atomic swap contract.
+// TODO: P2WSH or P2WSH nested in P2SH?
 func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, chainParams *chaincfg.Params) ([]byte, error) {
 	rAddr, err := btcutil.DecodeAddress(recipient, chainParams)
 	if err != nil {
@@ -473,8 +490,8 @@ type SpendInfo struct {
 // weight/4 = vbytes to calculate contribution to block size limit and therefore
 // transaction fees.
 func (nfo *SpendInfo) VBytes() uint32 {
-	// Add 3 before dividing witness weight to force rounding up.
-	return nfo.SigScriptSize + (nfo.WitnessSize+3)/4 + TxInOverhead
+	return TxInOverhead + uint32(wire.VarIntSerializeSize(uint64(nfo.SigScriptSize))) +
+		nfo.SigScriptSize + (nfo.WitnessSize+3)/4 // Add 3 before dividing witness weight to force rounding up.
 }
 
 // InputInfo is some basic information about the input required to spend an
@@ -517,14 +534,22 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 		witnessWeight = RedeemP2WPKHInputWitnessWeight
 	case scriptType.IsP2SH():
 		// If it's a P2SH, the size must be calculated based on other factors.
-		// Start with the signatures.
-		sigScriptSize = (DERSigLength + 1) * scriptAddrs.NRequired // 73 max for sig, 1 for push code
+
+		// If the redeem script is P2SM, there is a leading OP_0 in Bitcoin.
+		if scriptType.IsMultiSig() {
+			sigScriptSize++
+		}
+
+		// The signatures.
+		sigScriptSize += (DERSigLength + 1) * scriptAddrs.NRequired // 73 max for sig, 1 for push code
+
 		// If there are pubkey-hash addresses, they'll need pubkeys.
 		if scriptAddrs.NumPKH > 0 {
 			sigScriptSize += scriptAddrs.NRequired * (PubKeyLength + 1)
 		}
-		// Then add the OP_0 + script_length(1) + len(script).
-		sigScriptSize += len(redeemScript) + 2
+
+		// Then add the script_length(1) + len(script).
+		sigScriptSize += len(redeemScript) + 1
 	case scriptType.IsP2WSH():
 		witnessWeight = (DERSigLength + 1) * scriptAddrs.NRequired
 		if scriptAddrs.NumPKH > 0 {
@@ -583,33 +608,58 @@ func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) (
 	return nil, fmt.Errorf("key not found")
 }
 
-// ExtractContractHash extracts the redeem script hash from the P2SH script.
-func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte, error) {
+// ExtractPubKeyHash extracts the pubkey hash from the passed script if it is a
+// standard pay-to-pubkey-hash script.  It will return nil otherwise.
+func ExtractPubKeyHash(script []byte) []byte {
+	// A pay-to-pubkey-hash script is of the form:
+	//  OP_DUP OP_HASH160 <20-byte hash> OP_EQUALVERIFY OP_CHECKSIG
+	if len(script) == 25 &&
+		script[0] == txscript.OP_DUP &&
+		script[1] == txscript.OP_HASH160 &&
+		script[2] == txscript.OP_DATA_20 &&
+		script[23] == txscript.OP_EQUALVERIFY &&
+		script[24] == txscript.OP_CHECKSIG {
+
+		return script[3:23]
+	}
+
+	return nil
+}
+
+// ExtractContractHash extracts the contract P2SH or P2WSH address from a
+// pkScript. A non-nil error is returned if the hexadecimal encoding of the
+// pkScript is invalid, or if the pkScript is not a P2SH or P2WSH script.
+func ExtractContractHash(scriptHex string) ([]byte, error) {
 	pkScript, err := hex.DecodeString(scriptHex)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %v",
 			scriptHex, err)
 	}
-	return ExtractScriptHash(pkScript, chainParams)
+	scriptHash := ExtractScriptHash(pkScript)
+	if scriptHash == nil {
+		return nil, fmt.Errorf("error extracting script hash")
+	}
+	return scriptHash, nil
 }
 
-// ExtractScriptHash attempts to extract the redeem script hash from pkScript.
-// The pkScript must be a a P2SH script, requiring only 1 pkh address, which
-// must be a script hash address.
-func ExtractScriptHash(pkScript []byte, chainParams *chaincfg.Params) ([]byte, error) {
-	scriptAddrs, _, err := ExtractScriptAddrs(pkScript, chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error extracting contract address: %v", err)
+// ExtractScriptHash attempts to extract the redeem script hash from a pkScript.
+// If it is not a P2SH or P2WSH pkScript, a nil slice is returned.
+func ExtractScriptHash(script []byte) []byte {
+	// A pay-to-script-hash pkScript is of the form:
+	//  OP_HASH160 <20-byte scripthash> OP_EQUAL
+	if len(script) == 23 &&
+		script[0] == txscript.OP_HASH160 &&
+		script[1] == txscript.OP_DATA_20 &&
+		script[22] == txscript.OP_EQUAL {
+
+		return script[2:22]
 	}
-	if scriptAddrs.NRequired != 1 || scriptAddrs.NumPKH != 1 {
-		return nil, fmt.Errorf("contract output has wrong number of required sigs(%d) or addresses(%d)",
-			scriptAddrs.NRequired, scriptAddrs.NumPKH)
+	// A pay-to-witness-script-hash pkScript is of the form:
+	//  OP_0 <32-byte scripthash>
+	if len(script) == 34 &&
+		script[0] == txscript.OP_0 &&
+		script[1] == txscript.OP_DATA_32 {
+		return script[2:34]
 	}
-	contractAddr := scriptAddrs.PkHashes[0]
-	_, ok := contractAddr.(*btcutil.AddressScriptHash)
-	if !ok {
-		return nil, fmt.Errorf("wrong contract address type %s: %T", contractAddr, contractAddr)
-	}
-	// ScriptAddress is really a.hash[:], not the encoded address.
-	return contractAddr.ScriptAddress(), nil
+	return nil
 }

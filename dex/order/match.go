@@ -146,24 +146,28 @@ type Match struct {
 	Rate     uint64
 
 	// The following fields are not part of the serialization of Match.
-	Epoch      EpochID
-	Status     MatchStatus
-	Sigs       Signatures
-	cachedHash MatchID
+	FeeRateBase  uint64
+	FeeRateQuote uint64
+	Epoch        EpochID
+	Status       MatchStatus
+	Sigs         Signatures
+	cachedHash   MatchID
 }
 
-// A UserMatch is similar to a match, but contains less information about the
+// A UserMatch is similar to a Match, but contains less information about the
 // counter-party, and is clarifies which side the user is on. This is the
 // information that might be provided to the client when they are resyncing
 // their matches after a reconnect.
 type UserMatch struct {
-	OrderID  OrderID
-	MatchID  MatchID
-	Quantity uint64
-	Rate     uint64
-	Address  string
-	Status   MatchStatus
-	Side     MatchSide
+	OrderID     OrderID
+	MatchID     MatchID
+	Quantity    uint64
+	Rate        uint64
+	Address     string
+	Status      MatchStatus
+	Side        MatchSide
+	FeeRateSwap uint64
+	// TODO: include Sell bool?
 }
 
 // A constructor for a Match with Status = NewlyMatched. This is the preferred
@@ -189,7 +193,7 @@ func (match *Match) ID() MatchID {
 	}
 	b := make([]byte, 0, 2*OrderIDSize+8+8)
 	b = appendOrderID(b, match.Taker)
-	b = appendOrderID(b, match.Maker)
+	b = appendOrderID(b, match.Maker) // this maker and taker may only be matched once
 	b = appendUint64Bytes(b, match.Quantity)
 	b = appendUint64Bytes(b, match.Rate)
 	match.cachedHash = blake256.Sum256(b)

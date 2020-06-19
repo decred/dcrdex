@@ -38,6 +38,8 @@ type Backend interface {
 	// transaction with 1 input spending a P2PKH utxo, 1 swap contract output and
 	// 1 change output.
 	InitTxSize() uint32
+	// InitTxSizeBase is InitTxSize not including an input.
+	InitTxSizeBase() uint32
 	// CheckAddress checks that the given address is parseable.
 	CheckAddress(string) bool
 	// ValidateCoinID checks the coinID to ensure it can be decoded, returning a
@@ -51,6 +53,8 @@ type Backend interface {
 	// longer unspent, an asset.CoinNotFoundError is returned. Use FundingCoin
 	// for more UTXO data.
 	VerifyUnspentCoin(coinID []byte) error
+	// FeeRate returns the current optimal fee rate in atoms / byte.
+	FeeRate() (uint64, error)
 }
 
 // Coin represents a transaction input or output.

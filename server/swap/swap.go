@@ -357,6 +357,12 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		return nil, fmt.Errorf("path %q is not a directory", cfg.DataDir)
 	}
 
+	for _, asset := range cfg.Assets {
+		if asset.MaxFeeRate == 0 {
+			return nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", asset.Symbol)
+		}
+	}
+
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
 		dataDir:       cfg.DataDir,
@@ -451,9 +457,9 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 		}
 
 		mt := &matchTracker{
-			Match: mtd.Match,
-			time:  encode.UnixTimeMilli(mtd.Time),
-			// matchTime TODO
+			Match:     mtd.Match,
+			time:      encode.UnixTimeMilli(mtd.Time),
+			matchTime: mtd.Match.Epoch.End(),
 			makerStatus: &swapStatus{
 				swapAsset:   makerSwapAsset,
 				redeemAsset: makerRedeemAsset,
@@ -1242,6 +1248,12 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 	match.mtx.RLock()
 	defer match.mtx.RUnlock()
 
+	// maker sell: base swap, quote redeem
+	// taker buy: quote swap, base redeem
+
+	// maker buy: quote swap, base redeem
+	// taker sell: base swap, quote redeem
+
 	// Maker broadcasts the swap contract. Sequence: NewlyMatched ->
 	// MakerSwapCast -> TakerSwapCast -> MakerRedeemed -> MatchComplete
 	switch match.Status {
@@ -1254,7 +1266,7 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 		actor.isMaker = true
 		if match.Status == order.NewlyMatched {
 			nextStep = order.MakerSwapCast
-			isBaseAsset = maker.Sell
+			isBaseAsset = maker.Sell // maker swap: base asset if sell
 			if len(match.Sigs.MakerMatch) == 0 {
 				log.Debugf("swap %v at status %v missing MakerMatch signature(s) needed for NewlyMatched->MakerSwapCast",
 					match.ID(), match.Status)
@@ -1262,7 +1274,7 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 			reqSigs = [][]byte{match.Sigs.MakerMatch}
 		} else /* TakerSwapCast */ {
 			nextStep = order.MakerRedeemed
-			isBaseAsset = !maker.Sell
+			isBaseAsset = !maker.Sell // maker redeem: base asset if buy
 			if len(match.Sigs.MakerAudit) == 0 {
 				log.Debugf("swap %v at status %v missing MakerAudit signature(s) needed for TakerSwapCast->MakerRedeemed",
 					match.ID(), match.Status)
@@ -1279,7 +1291,7 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 		counterParty.isMaker = true
 		if match.Status == order.MakerSwapCast {
 			nextStep = order.TakerSwapCast
-			isBaseAsset = !maker.Sell
+			isBaseAsset = !maker.Sell // taker swap: base asset if sell (maker buy)
 			if len(match.Sigs.TakerMatch) == 0 {
 				log.Debugf("swap %v at status %v missing TakerMatch signature(s) needed for MakerSwapCast->TakerSwapCast",
 					match.ID(), match.Status)
@@ -1294,7 +1306,7 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 			nextStep = order.MatchComplete
 			// Note that the swap is still considered "active" until both
 			// counterparties acknowledge the redemptions.
-			isBaseAsset = maker.Sell
+			isBaseAsset = maker.Sell // taker redeem: base asset if buy (maker sell)
 			if len(match.Sigs.TakerRedeem) == 0 {
 				log.Debugf("swap %v at status %v missing TakerRedeem signature(s) needed for MakerRedeemed->MatchComplete",
 					match.ID(), match.Status)
@@ -1513,7 +1525,16 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			"redemption error")
 		return wait.DontTryAgain
 	}
-
+	//actor.swapAsset
+	reqFeeRate := stepInfo.match.FeeRateQuote
+	if stepInfo.isBaseAsset {
+		reqFeeRate = stepInfo.match.FeeRateBase
+	}
+	if contract.FeeRate() < reqFeeRate {
+		// TODO: test this case
+		s.respondError(msg.ID, actor.user, msgjson.ContractError, "low tx fee")
+		return wait.DontTryAgain
+	}
 	if contract.SwapAddress() != counterParty.order.Trade().SwapAddress() {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("incorrect recipient. expected %s. got %s",
@@ -1676,6 +1697,9 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "redemption error")
 		return wait.DontTryAgain
 	}
+
+	// NOTE: redemption.FeeRate is not checked since the counter party is not
+	// inconvenienced by slow confirmation of the redemption.
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
 	// contract script hash. Maker is party A, the initiator, who first reveals
@@ -2029,43 +2053,6 @@ func (s *Swapper) revoke(match *matchTracker) {
 	sendRevReq(match.Maker.User(), true, makerReq, makerParams)
 }
 
-// readMatches translates a slice of raw matches from the market manager into
-// a slice of matchTrackers.
-func (s *Swapper) readMatches(matchSets []*order.MatchSet) []*matchTracker {
-	// The initial capacity guess here is a minimum, but will avoid a few
-	// reallocs.
-	nowMs := unixMsNow()
-	matches := make([]*matchTracker, 0, len(matchSets))
-	for _, matchSet := range matchSets {
-		for _, match := range matchSet.Matches() {
-			maker := match.Maker
-			var makerSwapAsset, takerSwapAsset uint32
-			if maker.Sell {
-				makerSwapAsset = maker.BaseAsset
-				takerSwapAsset = maker.QuoteAsset
-			} else {
-				makerSwapAsset = maker.QuoteAsset
-				takerSwapAsset = maker.BaseAsset
-			}
-
-			matches = append(matches, &matchTracker{
-				Match:     match,
-				time:      nowMs,
-				matchTime: match.Epoch.End(),
-				makerStatus: &swapStatus{
-					swapAsset:   makerSwapAsset,
-					redeemAsset: takerSwapAsset,
-				},
-				takerStatus: &swapStatus{
-					swapAsset:   takerSwapAsset,
-					redeemAsset: makerSwapAsset,
-				},
-			})
-		}
-	}
-	return matches
-}
-
 // extractAddress extracts the address from the order. If the order is a cancel
 // order, an empty string is returned.
 func extractAddress(ord order.Order) string {
@@ -2074,48 +2061,6 @@ func extractAddress(ord order.Order) string {
 		return ""
 	}
 	return trade.Address
-}
-
-// matchNotifications creates a pair of msgjson.MatchNotification from a
-// matchTracker.
-func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
-	stamp := encode.UnixMilliU(match.matchTime)
-	return &msgjson.Match{
-			OrderID:    idToBytes(match.Maker.ID()),
-			MatchID:    idToBytes(match.ID()),
-			Quantity:   match.Quantity,
-			Rate:       match.Rate,
-			Address:    extractAddress(match.Taker),
-			Side:       uint8(order.Maker),
-			ServerTime: stamp,
-		}, &msgjson.Match{
-			OrderID:    idToBytes(match.Taker.ID()),
-			MatchID:    idToBytes(match.ID()),
-			Quantity:   match.Quantity,
-			Rate:       match.Rate,
-			Address:    extractAddress(match.Maker),
-			Side:       uint8(order.Taker),
-			ServerTime: stamp,
-		}
-}
-
-// newMatchAckers creates a pair of matchAckers, which are used to validate each
-// user's msgjson.Acknowledgement response.
-func newMatchAckers(match *matchTracker) (*messageAcker, *messageAcker) {
-	makerMsg, takerMsg := matchNotifications(match)
-	return &messageAcker{
-			user:    match.Maker.User(),
-			match:   match,
-			params:  makerMsg,
-			isMaker: true,
-			// isAudit: false,
-		}, &messageAcker{
-			user:    match.Taker.User(),
-			match:   match,
-			params:  takerMsg,
-			isMaker: false,
-			// isAudit: false,
-		}
 }
 
 // For the 'match' request, the user returns a msgjson.Acknowledgement array
@@ -2268,6 +2213,86 @@ func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
 	assetLock.UnlockOrderCoins(oid)
 }
 
+// matchNotifications creates a pair of msgjson.Match from a matchTracker.
+func matchNotifications(match *matchTracker) (makerMsg *msgjson.Match, takerMsg *msgjson.Match) {
+	// NOTE: If we decide that msgjson.Match should just have a
+	// "FeeRateBaseSwap" field, this could be set according to the
+	// swapStatus.swapAsset field:
+	//
+	// base, quote := match.Maker.BaseAsset, match.Maker.QuoteAsset
+	// feeRate := func(assetID uint32) uint64 {
+	// 	if assetID == match.Maker.BaseAsset {
+	// 		return match.FeeRateBase
+	// 	}
+	// 	return match.FeeRateQuote
+	// }
+	// FeeRateMakerSwap := feeRate(match.makerStatus.swapAsset)
+
+	stamp := encode.UnixMilliU(match.matchTime)
+	return &msgjson.Match{
+			OrderID:      idToBytes(match.Maker.ID()),
+			MatchID:      idToBytes(match.ID()),
+			Quantity:     match.Quantity,
+			Rate:         match.Rate,
+			Address:      extractAddress(match.Taker),
+			ServerTime:   stamp,
+			FeeRateBase:  match.FeeRateBase,
+			FeeRateQuote: match.FeeRateQuote,
+			Side:         uint8(order.Maker),
+		}, &msgjson.Match{
+			OrderID:      idToBytes(match.Taker.ID()),
+			MatchID:      idToBytes(match.ID()),
+			Quantity:     match.Quantity,
+			Rate:         match.Rate,
+			Address:      extractAddress(match.Maker),
+			ServerTime:   stamp,
+			FeeRateBase:  match.FeeRateBase,
+			FeeRateQuote: match.FeeRateQuote,
+			Side:         uint8(order.Taker),
+		}
+}
+
+// readMatches translates a slice of raw matches from the market manager into
+// a slice of matchTrackers.
+func readMatches(matchSets []*order.MatchSet, feeRates map[uint32]uint64) []*matchTracker {
+	// The initial capacity guess here is a minimum, but will avoid a few
+	// reallocs.
+	nowMs := unixMsNow()
+	matches := make([]*matchTracker, 0, len(matchSets))
+	for _, matchSet := range matchSets {
+		for _, match := range matchSet.Matches( /* consider taking feeRates */ ) {
+			maker := match.Maker
+			base, quote := maker.BaseAsset, maker.QuoteAsset
+			var makerSwapAsset, takerSwapAsset uint32
+			if maker.Sell {
+				makerSwapAsset = base
+				takerSwapAsset = quote
+			} else {
+				makerSwapAsset = quote
+				takerSwapAsset = base
+			}
+
+			match.FeeRateBase = feeRates[base]
+			match.FeeRateQuote = feeRates[quote]
+
+			matches = append(matches, &matchTracker{
+				Match:     match,
+				time:      nowMs,
+				matchTime: match.Epoch.End(),
+				makerStatus: &swapStatus{
+					swapAsset:   makerSwapAsset,
+					redeemAsset: takerSwapAsset,
+				},
+				takerStatus: &swapStatus{
+					swapAsset:   takerSwapAsset,
+					redeemAsset: makerSwapAsset,
+				},
+			})
+		}
+	}
+	return matches
+}
+
 // Negotiate takes ownership of the matches and begins swap negotiation. For
 // reliable identification of completed orders when redeem acks are received and
 // processed by processAck, BeginMatchAndNegotiate should be called prior to
@@ -2278,7 +2303,7 @@ func (s *Swapper) unlockOrderIDCoins(asset uint32, oid order.OrderID) {
 // this is not done, it is possible that an order may be flagged as completed if
 // a swap A completes after Matching and creation of swap B but before Negotiate
 // has a chance to record the new swap.
-func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool) {
+func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.OrderID]bool) {
 	// If the Swapper is stopping, the Markets should also be stopping, but
 	// block this just in case.
 	s.handlerMtx.RLock()
@@ -2288,9 +2313,52 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 		return
 	}
 
-	// Lock trade order coins.
+	feeRates := make(map[uint32]uint64, 2) // should only be 2, but Negotiate might be called with matches with more than two assets in the future
+
+	getFeeRate := func(assetID uint32) (unsupported bool) {
+		if _, found := feeRates[assetID]; found {
+			return
+		}
+		asset := s.coins[assetID]
+		if asset == nil {
+			return true
+		}
+		maxFeeRate := asset.Asset.MaxFeeRate
+		feeRate, err := asset.Backend.FeeRate()
+		if err != nil {
+			feeRate = maxFeeRate
+			log.Warnf("Unable to determining optimal fee rate for %q, using fallback of %d. Err: %v",
+				asset.Symbol, feeRate, err)
+		} else {
+			log.Debugf("Optimal fee rate for %q: %d", asset.Symbol, feeRate)
+			if feeRate > maxFeeRate {
+				log.Warnf("Optimal fee rate %d > max fee rate %d, using max fee rate.",
+					feeRate, maxFeeRate)
+				feeRate = maxFeeRate
+			}
+		}
+		feeRates[assetID] = feeRate
+		return
+	}
+
+	// Lock trade order coins, and get current optimal fee rates. Also filter
+	// out matches with unsupported assets, which should not happen if the
+	// Market is behaving, but be defensive.
+	supportedMatchSets := matchSets[:0]                    // same buffer, start empty
 	swapOrders := make([]order.Order, 0, 2*len(matchSets)) // size guess, with the single maker case
 	for _, match := range matchSets {
+		// Do the fee rate requests first to verify asset support.
+		if base := match.Taker.Base(); getFeeRate(base) {
+			log.Errorf("Unsupported asset %d for order %v", base, match.Taker)
+			continue
+		}
+		if quote := match.Taker.Quote(); getFeeRate(quote) {
+			log.Errorf("Unsupported asset %d for order %v", quote, match.Taker)
+			continue
+		}
+
+		supportedMatchSets = append(supportedMatchSets, match)
+
 		if match.Taker.Type() == order.CancelOrderType {
 			continue
 		}
@@ -2300,11 +2368,12 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 			swapOrders = append(swapOrders, maker)
 		}
 	}
+	matchSets = supportedMatchSets
 
 	s.LockOrdersCoins(swapOrders)
 
 	// Set up the matchTrackers, which includes a slice of Matches.
-	matches := s.readMatches(matchSets)
+	matches := readMatches(matchSets, feeRates)
 
 	// Record the matches. If any DB updates fail, no swaps proceed. We could
 	// let the others proceed, but that could seem selective trickery to the
@@ -2359,14 +2428,26 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, offBook map[order.Order
 			}
 		} else {
 			toMonitor = append(toMonitor, match)
-			s.orders.incActiveSwapCount(match.Maker, offBook[match.Maker.ID()])
-			s.orders.incActiveSwapCount(match.Taker, offBook[match.Taker.ID()])
+			s.orders.incActiveSwapCount(match.Maker, finalSwap[match.Maker.ID()])
+			s.orders.incActiveSwapCount(match.Taker, finalSwap[match.Taker.ID()])
 		}
 
 		// Create an acker for maker and taker, sharing the same matchTracker.
-		makerAck, takerAck := newMatchAckers(match)
-		addUserMatch(makerAck)
-		addUserMatch(takerAck)
+		makerMsg, takerMsg := matchNotifications(match) // msgjson.Match for each party
+		addUserMatch(&messageAcker{
+			user:    match.Maker.User(),
+			match:   match,
+			params:  makerMsg,
+			isMaker: true,
+			// isAudit: false,
+		})
+		addUserMatch(&messageAcker{
+			user:    match.Taker.User(),
+			match:   match,
+			params:  takerMsg,
+			isMaker: false,
+			// isAudit: false,
+		})
 	}
 
 	// Flag the canceled orders as failed and off-book if they are involved in

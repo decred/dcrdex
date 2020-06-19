@@ -25,13 +25,14 @@ import (
 const alphaAddress = "mt9hgfXXbM3x7hewgEAovBwqoMAAnctJ4V"
 
 var tLTC = &dex.Asset{
-	ID:       2,
-	Symbol:   "ltc",
-	SwapSize: dexbtc.InitTxSize,
-	FeeRate:  10,
-	LotSize:  1e6,
-	RateStep: 10,
-	SwapConf: 1,
+	ID:           2,
+	Symbol:       "ltc",
+	SwapSize:     dexbtc.InitTxSize,
+	SwapSizeBase: dexbtc.InitTxSizeBase,
+	MaxFeeRate:   10,
+	LotSize:      1e6,
+	RateStep:     10,
+	SwapConf:     1,
 }
 
 func TestWallet(t *testing.T) {

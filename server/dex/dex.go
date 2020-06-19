@@ -34,7 +34,7 @@ type AssetConf struct {
 	Network    string `json:"network"`
 	LotSize    uint64 `json:"lotSize"`
 	RateStep   uint64 `json:"rateStep"`
-	FeeRate    uint64 `json:"feeRate"`
+	MaxFeeRate uint64 `json:"maxFeeRate"`
 	SwapConf   uint32 `json:"swapConf"`
 	ConfigPath string `json:"configPath"`
 }
@@ -286,6 +286,10 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 				symbol, assetConf.Network, cfg.Network.String())
 		}
 
+		if assetConf.MaxFeeRate == 0 {
+			return nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", symbol)
+		}
+
 		assetIDs[i] = ID
 	}
 
@@ -324,12 +328,12 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 		ba := &asset.BackedAsset{
 			Asset: dex.Asset{
-				ID:       ID,
-				Symbol:   symbol,
-				LotSize:  assetConf.LotSize,
-				RateStep: assetConf.RateStep,
-				FeeRate:  assetConf.FeeRate,
-				SwapConf: assetConf.SwapConf,
+				ID:         ID,
+				Symbol:     symbol,
+				LotSize:    assetConf.LotSize,
+				RateStep:   assetConf.RateStep,
+				MaxFeeRate: assetConf.MaxFeeRate,
+				SwapConf:   assetConf.SwapConf,
 			},
 			Backend: be,
 		}
@@ -341,13 +345,14 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		}
 
 		cfgAssets = append(cfgAssets, &msgjson.Asset{
-			Symbol:   assetConf.Symbol,
-			ID:       ID,
-			LotSize:  assetConf.LotSize,
-			RateStep: assetConf.RateStep,
-			FeeRate:  assetConf.FeeRate,
-			SwapSize: uint64(be.InitTxSize()),
-			SwapConf: uint16(assetConf.SwapConf),
+			Symbol:       assetConf.Symbol,
+			ID:           ID,
+			LotSize:      assetConf.LotSize,
+			RateStep:     assetConf.RateStep,
+			MaxFeeRate:   assetConf.MaxFeeRate,
+			SwapSize:     uint64(be.InitTxSize()),
+			SwapSizeBase: uint64(be.InitTxSizeBase()),
+			SwapConf:     uint16(assetConf.SwapConf),
 		})
 	}
 

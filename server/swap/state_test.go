@@ -25,6 +25,7 @@ func Test_matchTrackerData_GobEncodeDecode(t *testing.T) {
 	mt := &matchTracker{
 		Match: orderMatch,
 		time:  time.Unix(132412349, 0).Truncate(time.Millisecond).UTC(),
+		// matchTime is ignored by Data() since it should equal Match.Epoch.End()
 		makerStatus: &swapStatus{
 			swapAsset: 42,
 		},
@@ -69,6 +70,7 @@ func Test_state_GobEncodeDecode(t *testing.T) {
 	mt := &matchTracker{
 		Match: orderMatch,
 		time:  time.Unix(132412349, 0).Truncate(time.Millisecond).UTC(),
+		// matchTime is ignored by Data() since it should equal Match.Epoch.End()
 		makerStatus: &swapStatus{
 			swapAsset: 42,
 		},
@@ -120,27 +122,28 @@ func Test_State_ackers_GobEncodeDecode(t *testing.T) {
 
 	matchMsgs := []msgjson.Signable{
 		&msgjson.Match{
-			// signable: signable{
-			// 	Sig: nil,
-			// },
-			OrderID:    order[:],
-			MatchID:    matchIDs[0][:],
-			Quantity:   7890,
-			Rate:       6543,
-			Address:    "asdf",
-			ServerTime: 1324132412,
-			Status:     1,
-			Side:       1,
+			OrderID:      order[:],
+			MatchID:      matchIDs[0][:],
+			Quantity:     7890,
+			Rate:         6543,
+			Address:      "asdf",
+			ServerTime:   1324132412,
+			FeeRateBase:  10,
+			FeeRateQuote: 11,
+			Status:       1,
+			Side:         1,
 		},
 		&msgjson.Match{
-			OrderID:    order[:],
-			MatchID:    matchIDs[1][:],
-			Quantity:   81455,
-			Rate:       6666,
-			Address:    "qwerty",
-			ServerTime: 1324132499,
-			Status:     1,
-			Side:       1,
+			OrderID:      order[:],
+			MatchID:      matchIDs[1][:],
+			Quantity:     81455,
+			Rate:         6666,
+			Address:      "qwerty",
+			ServerTime:   1324132499,
+			FeeRateBase:  12,
+			FeeRateQuote: 13,
+			Status:       1,
+			Side:         1,
 		},
 	}
 
@@ -168,11 +171,6 @@ func Test_State_ackers_GobEncodeDecode(t *testing.T) {
 		AckData: ackerDatas,
 	}
 
-	// msgjson.Audit request
-	// auditMsgs := []msgjson.Signable{
-	// 	&msgjson.Audit{},
-	// }
-
 	st := &State{
 		LiveAckers: map[uint64]*msgAckers{
 			matchReqID: matchReqAckers,
@@ -196,7 +194,6 @@ func Test_State_ackers_GobEncodeDecode(t *testing.T) {
 	if liveAcker == nil {
 		t.Fatalf("Failed to find msgAckers for request id %d", matchReqID)
 	}
-	//spew.Dump(*liveAcker)
 
 	wantSigBytes := matchMsgs[0].(*msgjson.Match).SigBytes()
 	gotSigBytes := liveAcker.AckData[0].Params.(*msgjson.Match).SigBytes()
@@ -253,7 +250,6 @@ func Test_State_waiters_GobEncodeDecode(t *testing.T) {
 	if waiterArgsOut == nil {
 		t.Fatalf("Failed to find msgAckers for user request %v+%d", user, reqID)
 	}
-	//spew.Dump(*waiterArgsOut)
 
 	if !reflect.DeepEqual(stOut, st) {
 		t.Errorf("different")

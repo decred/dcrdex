@@ -3,8 +3,8 @@ module decred.org/dcrdex
 go 1.13
 
 require (
-	github.com/btcsuite/btcd v0.20.1-beta
-	github.com/btcsuite/btcutil v0.0.0-20190425235716-9e5f4b9a998d
+	github.com/btcsuite/btcd v0.20.1-beta.0.20200615134404-e4f59022a387
+	github.com/btcsuite/btcutil v1.0.2
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/blockchain/stake/v2 v2.0.2
 	github.com/decred/dcrd/certgen v1.1.0
@@ -30,7 +30,7 @@ require (
 	github.com/lib/pq v1.2.0
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	go.etcd.io/bbolt v1.3.5
-	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4
+	golang.org/x/crypto v0.0.0-20200510223506-06a226fb4e37
 	golang.org/x/sync v0.0.0-20190423024810-112230192c58
 	gopkg.in/go-ini/ini.v1 v1.55.0
 	gopkg.in/ini.v1 v1.55.0

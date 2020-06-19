@@ -16,13 +16,14 @@ const (
 
 var (
 	tBTC = &dex.Asset{
-		ID:       0,
-		Symbol:   "btc",
-		SwapSize: dexbtc.InitTxSize,
-		FeeRate:  2,
-		LotSize:  1e6,
-		RateStep: 10,
-		SwapConf: 1,
+		ID:           0,
+		Symbol:       "btc",
+		SwapSize:     dexbtc.InitTxSize,
+		SwapSizeBase: dexbtc.InitTxSizeBase,
+		MaxFeeRate:   2,
+		LotSize:      1e6,
+		RateStep:     10,
+		SwapConf:     1,
 	}
 )
 

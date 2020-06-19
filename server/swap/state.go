@@ -14,10 +14,6 @@ import (
 	"decred.org/dcrdex/dex/order"
 )
 
-// TODO: latencyQ halt and shutdown coordinated with state dump!
-//		- stop the expire timer (and verify it hadn't fired already)
-//		- stop the latencyQ (TickerQueue.Run)
-
 const stateBinaryVersion byte = 1
 
 // State contains the Swapper's state data, which is used to restart the Swapper
@@ -131,18 +127,16 @@ func init() {
 }
 
 type matchTrackerData struct {
-	Match *order.Match
-	Time  int64
-	// MatchTime int64 // TODO
+	Match       *order.Match
+	Time        int64
 	MakerStatus *swapStatusData
 	TakerStatus *swapStatusData
 }
 
 func (mt *matchTracker) Data() *matchTrackerData {
 	return &matchTrackerData{
-		Match: mt.Match,
-		Time:  encode.UnixMilli(mt.time),
-		// MatchTime: TODO
+		Match:       mt.Match,
+		Time:        encode.UnixMilli(mt.time),
 		MakerStatus: mt.makerStatus.Data(),
 		TakerStatus: mt.takerStatus.Data(),
 	}

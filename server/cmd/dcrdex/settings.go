@@ -56,10 +56,10 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 	log.Debug("")
 
 	log.Debug("ASSETS")
-	log.Debug("                  LotSize     RateStep   FeeRate   Network")
+	log.Debug("                  LotSize     RateStep   MaxFeeRate   Network")
 	for asset, assetConf := range conf.Assets {
-		log.Debugf("%-12s % 12d % 12d % 9d % 9s", asset, assetConf.LotSize,
-			assetConf.RateStep, assetConf.FeeRate, assetConf.Network)
+		log.Debugf("%-12s % 12d % 12d % 12d % 9s", asset, assetConf.LotSize,
+			assetConf.RateStep, assetConf.MaxFeeRate, assetConf.Network)
 	}
 	log.Debug("--------------------- END parsed markets.json ---------------------")
 
@@ -79,6 +79,10 @@ func loadMarketConf(network dex.Network, src io.Reader) ([]*dex.MarketInfo, []*d
 		_, found := dex.BipSymbolID(symbol)
 		if !found {
 			return nil, nil, fmt.Errorf("asset %q symbol %q unrecognized", assetName, assetConf.Symbol)
+		}
+
+		if assetConf.MaxFeeRate == 0 {
+			return nil, nil, fmt.Errorf("max fee rate of 0 is invalid for asset %q", assetConf.Symbol)
 		}
 
 		assets = append(assets, assetConf)

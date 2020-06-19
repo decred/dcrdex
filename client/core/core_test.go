@@ -38,23 +38,25 @@ import (
 var (
 	tCtx context.Context
 	tDCR = &dex.Asset{
-		ID:       42,
-		Symbol:   "dcr",
-		SwapSize: dexdcr.InitTxSize,
-		FeeRate:  10,
-		LotSize:  1e7,
-		RateStep: 100,
-		SwapConf: 1,
+		ID:           42,
+		Symbol:       "dcr",
+		SwapSize:     dexdcr.InitTxSize,
+		SwapSizeBase: dexdcr.InitTxSizeBase,
+		MaxFeeRate:   10,
+		LotSize:      1e7,
+		RateStep:     100,
+		SwapConf:     1,
 	}
 
 	tBTC = &dex.Asset{
-		ID:       0,
-		Symbol:   "btc",
-		SwapSize: dexbtc.InitTxSize,
-		FeeRate:  2,
-		LotSize:  1e6,
-		RateStep: 10,
-		SwapConf: 1,
+		ID:           0,
+		Symbol:       "btc",
+		SwapSize:     dexbtc.InitTxSize,
+		SwapSizeBase: dexbtc.InitTxSizeBase,
+		MaxFeeRate:   2,
+		LotSize:      1e6,
+		RateStep:     10,
+		SwapConf:     1,
 	}
 	tDexPriv         *secp256k1.PrivateKey
 	tDexKey          *secp256k1.PublicKey
@@ -72,13 +74,14 @@ type msgFunc = func(*msgjson.Message)
 
 func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 	return &msgjson.Asset{
-		Symbol:   ai.Symbol,
-		ID:       ai.ID,
-		LotSize:  ai.LotSize,
-		RateStep: ai.RateStep,
-		FeeRate:  ai.FeeRate,
-		SwapSize: ai.SwapSize,
-		SwapConf: uint16(ai.SwapConf),
+		Symbol:       ai.Symbol,
+		ID:           ai.ID,
+		LotSize:      ai.LotSize,
+		RateStep:     ai.RateStep,
+		MaxFeeRate:   ai.MaxFeeRate,
+		SwapSize:     ai.SwapSize,
+		SwapSizeBase: ai.SwapSizeBase,
+		SwapConf:     uint16(ai.SwapConf),
 	}
 }
 
@@ -390,6 +393,10 @@ func (r *tReceipt) Expiration() time.Time {
 	return r.expiration
 }
 
+func (r *tReceipt) String() string {
+	return r.coin.String()
+}
+
 type tAuditInfo struct {
 	recipient  string
 	expiration time.Time
@@ -470,7 +477,11 @@ func (w *TXCWallet) Balance() (*asset.Balance, error) {
 	return w.bal, nil
 }
 
-func (w *TXCWallet) Fund(v uint64, _ *dex.Asset) (asset.Coins, error) {
+func (w *TXCWallet) FeeRate() (uint64, error) {
+	return 24, nil
+}
+
+func (w *TXCWallet) FundOrder(v uint64, _ *dex.Asset) (asset.Coins, error) {
 	w.fundedVal = v
 	return w.fundCoins, w.fundErr
 }
@@ -498,11 +509,11 @@ func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 	return w.fundingCoins, w.fundingCoinErr
 }
 
-func (w *TXCWallet) Swap(swap *asset.Swaps, _ *dex.Asset) ([]asset.Receipt, asset.Coin, error) {
+func (w *TXCWallet) Swap(swap *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
 	return w.swapReceipts, &tCoin{id: []byte{0x0a, 0x0b}}, nil
 }
 
-func (w *TXCWallet) Redeem([]*asset.Redemption, *dex.Asset) ([]dex.Bytes, asset.Coin, error) {
+func (w *TXCWallet) Redeem([]*asset.Redemption) ([]dex.Bytes, asset.Coin, error) {
 	return w.redeemCoins, &tCoin{id: []byte{0x0c, 0x0d}}, nil
 }
 
@@ -522,7 +533,7 @@ func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.B
 	return nil, nil
 }
 
-func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes, *dex.Asset) (dex.Bytes, error) {
+func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes) (dex.Bytes, error) {
 	return w.refundCoin, w.refundErr
 }
 
@@ -552,11 +563,11 @@ func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) 
 	return time.Time{}, nil
 }
 
-func (w *TXCWallet) PayFee(address string, fee uint64, nfo *dex.Asset) (asset.Coin, error) {
+func (w *TXCWallet) PayFee(address string, fee uint64) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
 }
 
-func (w *TXCWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
+func (w *TXCWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
 	return w.payFeeCoin, w.payFeeErr
 }
 
@@ -687,10 +698,6 @@ func (rig *testRig) queueConnect() {
 		f(resp)
 		return nil
 	})
-}
-
-func tMarketID(base, quote uint32) string {
-	return strconv.Itoa(int(base)) + "-" + strconv.Itoa(int(quote))
 }
 
 func TestMain(m *testing.M) {

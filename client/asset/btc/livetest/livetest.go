@@ -42,6 +42,8 @@ func toSatoshi(v float64) uint64 {
 	return uint64(math.Round(v * 1e8))
 }
 
+const fallbackFeeRate uint64 = 20
+
 func tBackend(t testKiller, ctx context.Context, newWallet WalletConstructor, symbol, conf, name string,
 	logger dex.Logger, blkFunc func(string, error)) (*btc.ExchangeWallet, *dex.ConnectionMaster) {
 	user, err := user.Current()
@@ -54,8 +56,9 @@ func tBackend(t testKiller, ctx context.Context, newWallet WalletConstructor, sy
 		t.Fatalf("error reading config options: %v", err)
 	}
 	walletCfg := &asset.WalletConfig{
-		Settings: settings,
-		Account:  name,
+		Settings:        settings,
+		Account:         name,
+		FallbackFeeRate: fallbackFeeRate,
 		TipChange: func(err error) {
 			blkFunc(conf, err)
 		},
@@ -162,14 +165,14 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 	}
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only
 	// return 1 utxo.
-	utxos, err := rig.gamma().Fund(contractValue*3, dexAsset)
+	utxos, err := rig.gamma().FundOrder(contractValue*3, dexAsset)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// UTXOs should be locked
-	utxos, _ = rig.gamma().Fund(contractValue*3, dexAsset)
+	utxos, _ = rig.gamma().FundOrder(contractValue*3, dexAsset)
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
@@ -177,19 +180,19 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
-	utxos, _ = rig.gamma().Fund(contractValue*3, dexAsset)
+	utxos, _ = rig.gamma().FundOrder(contractValue*3, dexAsset)
 	if !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.gamma().ReturnCoins(utxos)
 
 	// Get a separate set of UTXOs for each contract.
-	utxos1, err := rig.gamma().Fund(contractValue, dexAsset)
+	utxos1, err := rig.gamma().FundOrder(contractValue, dexAsset)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
-	utxos2, err := rig.gamma().Fund(contractValue*2, dexAsset)
+	utxos2, err := rig.gamma().FundOrder(contractValue*2, dexAsset)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -223,7 +226,7 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 		Contracts: []*asset.Contract{contract1, contract2},
 	}
 
-	receipts, _, err := rig.gamma().Swap(swaps, dexAsset)
+	receipts, _, err := rig.gamma().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -280,7 +283,7 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	_, _, err = rig.alpha().Redeem(redemptions, dexAsset)
+	_, _, err = rig.alpha().Redeem(redemptions)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
@@ -322,7 +325,7 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 	lockTime = time.Now().Add(-24 * time.Hour)
 
 	// Have gamma send a swap contract to the alpha address.
-	utxos, _ = rig.gamma().Fund(contractValue, dexAsset)
+	utxos, _ = rig.gamma().FundOrder(contractValue, dexAsset)
 	contract := &asset.Contract{
 		Address:    address,
 		Value:      contractValue,
@@ -336,7 +339,7 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 
 	time.Sleep(time.Second)
 
-	receipts, _, err = rig.gamma().Swap(swaps, dexAsset)
+	receipts, _, err = rig.gamma().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -346,20 +349,20 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 	}
 	swapCoin = receipts[0].Coin()
 
-	_, err = rig.gamma().Refund(swapCoin.ID(), swapCoin.Redeem(), dexAsset)
+	_, err = rig.gamma().Refund(swapCoin.ID(), swapCoin.Redeem())
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
 
 	// Test PayFee
-	coin, err := rig.gamma().PayFee(address, 1e8, dexAsset)
+	coin, err := rig.gamma().PayFee(address, 1e8)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}
 	tLogger.Infof("fee paid with tx %s", coin.String())
 
 	// Test Withdraw
-	coin, err = rig.gamma().Withdraw(address, 5e7, 10)
+	coin, err = rig.gamma().Withdraw(address, 5e7)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
 	}

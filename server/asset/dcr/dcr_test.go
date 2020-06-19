@@ -179,6 +179,14 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 	return txHash.String() + ":" + strconv.Itoa(int(index))
 }
 
+const optimalFeeRate uint64 = 22
+
+func (testNode) EstimateSmartFee(confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error) {
+	optimalRate := float64(optimalFeeRate) * 1e-5
+	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00022)
+	return optimalRate, nil // optimalFeeRate: 22 atoms/byte = 0.00022 DCR/KB * 1e8 atoms/DCR * 1e-3 KB/Byte
+}
+
 // Part of the dcrNode interface.
 func (testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*chainjson.GetTxOutResult, error) {
 	outID := txOutID(txHash, index)
@@ -728,8 +736,9 @@ func TestUTXOs(t *testing.T) {
 	}
 	// While we're here, check the spend size and value are correct.
 	spendSize := utxo.SpendSize()
-	if spendSize != dexdcr.P2PKHSigScriptSize+dexdcr.TxInOverhead {
-		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", dexdcr.P2PKHSigScriptSize, spendSize)
+	wantSpendSize := uint32(dexdcr.TxInOverhead + 1 + dexdcr.P2PKHSigScriptSize)
+	if spendSize != wantSpendSize {
+		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", wantSpendSize, spendSize)
 	}
 	if utxo.Value() != 200_000_000 {
 		t.Fatalf("case 1 - unexpected output value. expected 200,000,000, got %d", utxo.Value())

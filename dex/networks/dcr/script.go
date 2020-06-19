@@ -20,9 +20,6 @@ import (
 )
 
 const (
-	P2PKHSigScriptSize = txsizes.RedeemP2PKHSigScriptSize
-	P2PKHOutputSize    = txsizes.P2PKHOutputSize
-
 	// SecretHashSize is the byte-length of the hash of the secret key used in an
 	// atomic swap.
 	SecretHashSize = 32
@@ -44,31 +41,40 @@ const (
 
 	// Overhead for a wire.TxIn with a scriptSig length < 254.
 	// prefix (41 bytes) + ValueIn (8 bytes) + BlockHeight (4 bytes)
-	// + BlockIndex (4 bytes) + sig script varint (at least 1 byte)
-	TxInOverhead = 58
+	// + BlockIndex (4 bytes) + sig script var int (at least 1 byte)
+	TxInOverhead = 41 + 8 + 4 + 4 // 57 + at least 1 more
+
+	P2PKHSigScriptSize = txsizes.RedeemP2PKHSigScriptSize
+	P2PKHInputSize     = TxInOverhead + 1 + P2PKHSigScriptSize // 57 + 1 + 108 = 166
+
+	// P2SHSigScriptSize and P2SHInputSize do not include the redeem script size
+	// (unknown), which is concatenated on execution with the p2sh pkScript.
+	//P2SHSigScriptSize = txsizes.RedeemP2SHSigScriptSize      // 110 + redeem script!
+	//P2SHInputSize     = TxInOverhead + 1 + P2SHSigScriptSize // 57 + 1 + 110 = 168 + redeem script!
 
 	// TxOutOverhead is the overhead associated with a transaction output.
 	// 8 bytes value + 2 bytes version + at least 1 byte varint script size
 	TxOutOverhead = 8 + 2 + 1
 
-	// MsgTx overhead is 4 bytes version + 4 bytes locktime + 4 bytes expiry 3
-	// bytes of varints for the number of transaction inputs (x2 for witness and
-	// prefix) and outputs
-	MsgTxOverhead = 4 + 4 + 4 + 3
+	P2PKHOutputSize = TxOutOverhead + txsizes.P2PKHPkScriptSize // 36
+	P2SHOutputSize  = TxOutOverhead + txsizes.P2SHPkScriptSize  // 34
 
-	// initTxSize is the size of a standard serialized atomic swap initialization
-	// transaction with one change output.
-	// MsgTx overhead is 4 bytes version + 4 bytes locktime + 4 bytes expiry 3
-	// bytes of varints for the number of transaction inputs (x2 for witness and
-	// prefix) and outputs
-	// A TxIn prefix is 41 bytes. TxIn witness is 8 bytes value + 4 bytes block
-	// height + 4 bytes block index + 1 byte varint sig script size + len(sig
-	// script)
-	// TxOut is 8 bytes value + 2 bytes version + 1 byte serialized varint length
-	// pubkey script + length of pubkey script. There is one P2SH outputs and one
-	// change output
-	InitTxSize = MsgTxOverhead + TxInOverhead + P2PKHSigScriptSize +
-		2*(P2PKHOutputSize)
+	// MsgTx overhead is 4 bytes version (lower 2 bytes for the real transaction
+	// version and upper 2 bytes for the serialization type) + 4 bytes locktime
+	// + 4 bytes expiry + 3 bytes of varints for the number of transaction
+	// inputs (x2 for witness and prefix) and outputs
+	MsgTxOverhead = 4 + 4 + 4 + 3 // 15
+
+	// InitTxSizeBase is the size of a standard serialized atomic swap
+	// initialization transaction with one change output and no inputs. MsgTx
+	// overhead is 4 bytes version + 4 bytes locktime + 4 bytes expiry + 3 bytes
+	// of varints for the number of transaction inputs (x2 for witness and
+	// prefix) and outputs. There is one P2SH output with a 23 byte pkScript,
+	// and one P2PKH change output with a 25 byte pkScript.
+	InitTxSizeBase = MsgTxOverhead + P2PKHOutputSize + P2SHOutputSize // 15 + 36 + 34 = 85
+
+	// InitTxSize is InitTxBaseSize + 1 P2PKH input
+	InitTxSize = InitTxSizeBase + P2PKHInputSize // 85(83) + 166 = 251
 
 	// DERSigLength is the maximum length of a DER encoded signature.
 	DERSigLength = 73
@@ -78,28 +84,28 @@ const (
 	// It is calculated as:
 	//
 	//   - OP_DATA_73
-	//   - 72 bytes DER signature + 1 byte sighash
+	//   - 72 bytes DER signature + 1 byte sighash type
 	//   - OP_DATA_33
 	//   - 33 bytes serialized compressed pubkey
 	//   - OP_DATA_32
 	//   - 32 bytes secret key
 	//   - OP_1
-	//   - varint 97
-	//   - 97 bytes secret key
-	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 1 + 97
+	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
+	//   - 97 bytes contract script
+	RedeemSwapSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 32 + 1 + 2 + SwapContractSize // 241
 
 	// RefundSigScriptSize is the worst case (largest) serialize size
 	// of a transaction input script that refunds a compressed P2PKH output.
 	// It is calculated as:
 	//
 	//   - OP_DATA_73
-	//   - 72 bytes DER signature + 1 byte sighash
+	//   - 72 bytes DER signature + 1 byte sighash type
 	//   - OP_DATA_33
 	//   - 33 bytes serialized compressed pubkey
 	//   - OP_0
-	//   - varint 97
-	//   - 97 bytes contract
-	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 1 + 97
+	//   - varint 97 => OP_PUSHDATA1(0x4c) + 0x61
+	//   - 97 bytes contract script
+	RefundSigScriptSize = 1 + DERSigLength + 1 + 33 + 1 + 2 + SwapContractSize // 208
 )
 
 // DCRScriptType is a bitmask with information about a pubkey script and
@@ -233,7 +239,8 @@ func ExtractPubKeyHash(script []byte) []byte {
 }
 
 // ExtractScriptHash extracts the script hash from the passed script if it is a
-// standard pay-to-script-hash script.  It will return nil otherwise.
+// standard pay-to-script-hash script. It will return nil otherwise. See
+// ExtractStakeScriptHash for stake transaction p2sh outputs.
 //
 // NOTE: This function is only valid for version 0 opcodes.  Since the function
 // does not accept a script version, the results are undefined for other script
@@ -621,9 +628,22 @@ type SpendInfo struct {
 	NonStandardScript bool
 }
 
+// DataPrefixSize returns the size of the size opcodes that would precede the
+// data in a script. Certain data of length 0 and 1 is represented with OP_# or
+// OP_1NEGATE codes directly without preceding OP_DATA_# OR OP_PUSHDATA# codes.
+func DataPrefixSize(data []byte) uint8 {
+	serSz := txscript.CanonicalDataSize(data)
+	sz := len(data)
+	prefixSize := serSz - sz
+	if sz == 0 {
+		prefixSize-- // empty array uses a byte
+	}
+	return uint8(prefixSize)
+}
+
 // Size is the serialized size of the input.
 func (nfo *SpendInfo) Size() uint32 {
-	return TxInOverhead + nfo.SigScriptSize
+	return TxInOverhead + uint32(wire.VarIntSerializeSize(uint64(nfo.SigScriptSize))) + nfo.SigScriptSize
 }
 
 // InputInfo is some basic information about the input required to spend an
@@ -667,7 +687,15 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 			sigScriptSize += scriptAddrs.NRequired * (pubkeyLength + 1)
 		}
 		// Then add the length of the script and another push opcode byte.
-		sigScriptSize += len(redeemScript) + 1
+		sigScriptSize += len(redeemScript) + int(DataPrefixSize(redeemScript)) // push data length op code might be >1 byte
+	} else if !scriptType.IsP2PKH() {
+		// Some defensive checks here.
+		if scriptType.IsMultiSig() {
+			// Should have been caught by ParseScriptType.
+			return nil, fmt.Errorf("bare multisig is unsupported")
+		}
+		// P2PK also should have been caught by ParseScriptType.
+		return nil, fmt.Errorf("unsupported pkScript: %d", scriptType)
 	}
 	return &SpendInfo{
 		SigScriptSize: uint32(sigScriptSize),
@@ -676,29 +704,20 @@ func InputInfo(pkScript, redeemScript []byte, chainParams *chaincfg.Params) (*Sp
 	}, nil
 }
 
-// ExtractContractHash extracts the contract P2SH address from a pkScript. If
-// the pkScript does not require only 1 signature, or pay to just 1 address, it
-// is an error. TODO: consider a more general function name.
-func ExtractContractHash(scriptHex string, chainParams *chaincfg.Params) ([]byte, error) {
+// ExtractContractHash extracts the contract P2SH address from a pkScript. A
+// non-nil error is returned if the hexadecimal encoding of the pkScript is
+// invalid, or if the pkScript is not a P2SH script.
+func ExtractContractHash(scriptHex string) ([]byte, error) {
 	pkScript, err := hex.DecodeString(scriptHex)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding scriptPubKey '%s': %v",
 			scriptHex, err)
 	}
-	scriptAddrs, _, err := ExtractScriptAddrs(pkScript, chainParams)
-	if err != nil {
-		return nil, fmt.Errorf("error extracting contract address: %v", err)
+	scriptHash := ExtractScriptHash(pkScript)
+	if scriptHash == nil {
+		return nil, fmt.Errorf("error extracting script hash")
 	}
-	if scriptAddrs.NRequired != 1 || scriptAddrs.NumPKH != 1 {
-		return nil, fmt.Errorf("contract output has wrong number of required sigs(%d) or addresses(%d)",
-			scriptAddrs.NRequired, scriptAddrs.NumPKH)
-	}
-	contractAddr := scriptAddrs.PkHashes[0]
-	_, ok := contractAddr.(*dcrutil.AddressScriptHash)
-	if !ok {
-		return nil, fmt.Errorf("wrong contract address type %s: %T", contractAddr, contractAddr)
-	}
-	return contractAddr.ScriptAddress(), nil
+	return scriptHash, nil
 }
 
 // FindKeyPush attempts to extract the secret key from the signature script. The

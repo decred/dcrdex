@@ -360,18 +360,17 @@ func (contract *Contract) auditContract() error {
 		return fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, contract.vout)
 	}
 	var scriptHash, hashed []byte
-	if scriptType.IsP2SH() {
+	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
+		scriptHash = dexbtc.ExtractScriptHash(output.pkScript)
 		if scriptType.IsSegwit() {
-			scriptHash = extractWitnessScriptHash(output.pkScript)
 			shash := sha256.Sum256(contract.redeemScript)
 			hashed = shash[:]
 		} else {
-			scriptHash = extractScriptHash(output.pkScript)
 			hashed = btcutil.Hash160(contract.redeemScript)
 		}
 	}
 	if scriptHash == nil {
-		return fmt.Errorf("specified output %s:%d is not P2SH", tx.hash, contract.vout)
+		return fmt.Errorf("specified output %s:%d is not P2SH or P2WSH", tx.hash, contract.vout)
 	}
 	if !bytes.Equal(hashed, scriptHash) {
 		return fmt.Errorf("swap contract hash mismatch for %s:%d", tx.hash, contract.vout)

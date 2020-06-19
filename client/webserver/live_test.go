@@ -143,13 +143,14 @@ func mkDexAsset(symbol string) *dex.Asset {
 	assetID, _ := dex.BipSymbolID(symbol)
 	assetOrder := rand.Intn(5) + 6
 	return &dex.Asset{
-		ID:       assetID,
-		Symbol:   symbol,
-		LotSize:  uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(10)),
-		RateStep: uint64(math.Pow10(assetOrder-2)) * uint64(rand.Intn(10)),
-		FeeRate:  uint64(rand.Intn(10) + 1),
-		SwapSize: uint64(rand.Intn(150) + 150),
-		SwapConf: uint32(rand.Intn(5) + 2),
+		ID:           assetID,
+		Symbol:       symbol,
+		LotSize:      uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(10)),
+		RateStep:     uint64(math.Pow10(assetOrder-2)) * uint64(rand.Intn(10)),
+		MaxFeeRate:   uint64(rand.Intn(10) + 1),
+		SwapSize:     uint64(rand.Intn(150) + 150),
+		SwapSizeBase: uint64(rand.Intn(150) + 15),
+		SwapConf:     uint32(rand.Intn(5) + 2),
 	}
 }
 

@@ -377,6 +377,8 @@ func (a *TAsset) ValidateContract(contract []byte) error {
 }
 func (a *TAsset) BlockChannel(size int) <-chan *asset.BlockUpdate { return a.bChan }
 func (a *TAsset) InitTxSize() uint32                              { return 100 }
+func (a *TAsset) InitTxSizeBase() uint32                          { return 66 }
+func (a *TAsset) FeeRate() (uint64, error)                        { return 10, nil }
 func (a *TAsset) CheckAddress(string) bool                        { return true }
 func (a *TAsset) Run(context.Context)                             {}
 func (a *TAsset) ValidateSecret(secret, contract []byte) bool     { return true }
@@ -453,7 +455,7 @@ func (coin *TCoin) SpendSize() uint32                             { return 0 }
 func (coin *TCoin) String() string                                { return hex.EncodeToString(coin.id) /* not txid:vout */ }
 
 func (coin *TCoin) FeeRate() uint64 {
-	return 1
+	return 72 // make sure it's at least the required fee if you want it to pass (test fail TODO)
 }
 
 func (coin *TCoin) RedeemScript() []byte { return nil }
@@ -461,7 +463,11 @@ func (coin *TCoin) RedeemScript() []byte { return nil }
 func TNewAsset(backend asset.Backend) *asset.BackedAsset {
 	return &asset.BackedAsset{
 		Backend: backend,
-		Asset:   dex.Asset{SwapConf: 2},
+		Asset: dex.Asset{
+			Symbol:     "qwe",
+			MaxFeeRate: 12,
+			SwapConf:   2,
+		},
 	}
 }
 
@@ -1259,6 +1265,7 @@ func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
 // Create a closure that will call t.Fatal if an error is non-nil.
 func makeEnsureNilErr(t *testing.T) func(error) {
 	return func(err error) {
+		t.Helper()
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
@@ -1267,6 +1274,7 @@ func makeEnsureNilErr(t *testing.T) func(error) {
 
 func makeMustBeError(t *testing.T) func(error, string) {
 	return func(err error, tag string) {
+		t.Helper()
 		if err == nil {
 			t.Fatalf("no error for %s", tag)
 		}
@@ -1277,6 +1285,7 @@ func makeMustBeError(t *testing.T) func(error, string) {
 // msgjson.RPCError of the correct type.
 func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 	return func(user *tUser) {
+		t.Helper()
 		msg, resp := rig.auth.getResp(user.acct)
 		if msg == nil {
 			t.Fatalf("no response for %s", user.lbl)
@@ -1320,6 +1329,7 @@ func TestFatalStorageErr(t *testing.T) {
 }
 
 func testSwap(t *testing.T, rig *testRig) {
+	t.Helper()
 	ensureNilErr := makeEnsureNilErr(t)
 
 	// Step through the negotiation process. No errors should be generated.
@@ -1828,6 +1838,9 @@ func TestCancel(t *testing.T) {
 	// The user should have two match requests.
 	user := matchInfo.maker
 	req := rig.auth.getReq(user.acct)
+	if req == nil {
+		t.Fatalf("no request sent from Negotiate")
+	}
 	matchNotes := make([]*msgjson.Match, 0)
 	err := json.Unmarshal(req.req.Payload, &matchNotes)
 	if err != nil {

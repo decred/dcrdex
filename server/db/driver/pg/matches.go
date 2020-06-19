@@ -47,17 +47,24 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 	for rows.Next() {
 		var m db.MatchData
 		var status uint8
+		var baseRate, quoteRate sql.NullInt64
+		var takerSell sql.NullBool
 		var takerAddr, makerAddr sql.NullString
-		err := rows.Scan(&m.ID, &m.Active,
+		err := rows.Scan(&m.ID, &takerSell, &m.Active,
 			&m.Taker, &m.TakerAcct, &takerAddr,
 			&m.Maker, &m.MakerAcct, &makerAddr,
-			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
+			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
+			&baseRate, &quoteRate, &status)
 		if err != nil {
 			return nil, err
 		}
 		m.Status = order.MatchStatus(status)
+		m.TakerSell = takerSell.Bool
 		m.TakerAddr = takerAddr.String
 		m.MakerAddr = makerAddr.String
+		m.BaseRate = uint64(baseRate.Int64)
+		m.QuoteRate = uint64(quoteRate.Int64)
+
 		ms = append(ms, &m)
 	}
 
@@ -99,10 +106,14 @@ func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid a
 	for rows.Next() {
 		var md db.MatchData
 		var status uint8
+		var baseRate, quoteRate sql.NullInt64
+		var takerSell sql.NullBool
 		var takerAddr, makerAddr sql.NullString
-		err := rows.Scan(&md.ID, &md.Taker, &md.TakerAcct, &takerAddr,
+		err := rows.Scan(&md.ID,
+			&takerSell, &md.Taker, &md.TakerAcct, &takerAddr,
 			&md.Maker, &md.MakerAcct, &makerAddr,
-			&md.Epoch.Idx, &md.Epoch.Dur, &md.Quantity, &md.Rate, &status)
+			&md.Epoch.Idx, &md.Epoch.Dur, &md.Quantity, &md.Rate,
+			&baseRate, &quoteRate, &status)
 		if err != nil {
 			return nil, err
 		}
@@ -111,27 +122,35 @@ func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid a
 		var addr string
 		var oid order.OrderID
 		var side order.MatchSide
+		feeRateContract := quoteRate.Int64 // if user is buying base asset
 		switch aid {
 		case md.TakerAcct:
 			addr = takerAddr.String
 			oid = md.Taker
 			side = order.Taker
+			if takerSell.Bool {
+				feeRateContract = baseRate.Int64 // selling base asset
+			}
 		case md.MakerAcct:
 			addr = makerAddr.String
 			oid = md.Maker
 			side = order.Maker
+			if !takerSell.Bool {
+				feeRateContract = baseRate.Int64 // selling base asset
+			}
 		default:
 			return nil, fmt.Errorf("loaded match %v not belonging to user %v", md.ID, aid)
 		}
 
 		um := &order.UserMatch{
-			OrderID:  oid,
-			MatchID:  md.ID,
-			Quantity: md.Quantity,
-			Rate:     md.Rate,
-			Address:  addr,
-			Side:     side,
-			Status:   md.Status,
+			OrderID:     oid,
+			MatchID:     md.ID,
+			Quantity:    md.Quantity,
+			Rate:        md.Rate,
+			Address:     addr,
+			Status:      md.Status,
+			Side:        side,
+			FeeRateSwap: uint64(feeRateContract),
 		}
 
 		ms = append(ms, um)
@@ -164,11 +183,12 @@ func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, 
 	}
 
 	stmt := fmt.Sprintf(internal.UpsertMatch, tableName)
-	return sqlExec(dbe, stmt, match.ID(),
+	return sqlExec(dbe, stmt, match.ID(), tt.Sell,
 		match.Taker.ID(), match.Taker.User(), takerAddr,
 		match.Maker.ID(), match.Maker.User(), match.Maker.Trade().SwapAddress(),
 		match.Epoch.Idx, match.Epoch.Dur,
-		int64(match.Quantity), int64(match.Rate), int8(match.Status))
+		int64(match.Quantity), int64(match.Rate),
+		match.FeeRateBase, match.FeeRateQuote, int8(match.Status))
 }
 
 // InsertMatch updates an existing match.
@@ -206,18 +226,24 @@ func (a *Archiver) MatchByID(mid order.MatchID, base, quote uint32) (*db.MatchDa
 func matchByID(dbe *sql.DB, tableName string, mid order.MatchID) (*db.MatchData, error) {
 	var m db.MatchData
 	var status uint8
+	var baseRate, quoteRate sql.NullInt64
 	var takerAddr, makerAddr sql.NullString
+	var takerSell sql.NullBool
 	stmt := fmt.Sprintf(internal.RetrieveMatchByID, tableName)
 	err := dbe.QueryRow(stmt, mid).
-		Scan(&m.ID, &m.Active,
+		Scan(&m.ID, &m.Active, &takerSell,
 			&m.Taker, &m.TakerAcct, &takerAddr,
 			&m.Maker, &m.MakerAcct, &makerAddr,
-			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate, &status)
+			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
+			&baseRate, &quoteRate, &status)
 	if err != nil {
 		return nil, err
 	}
+	m.TakerSell = takerSell.Bool
 	m.TakerAddr = takerAddr.String
 	m.MakerAddr = makerAddr.String
+	m.BaseRate = uint64(baseRate.Int64)
+	m.QuoteRate = uint64(quoteRate.Int64)
 	m.Status = order.MatchStatus(status)
 	return &m, nil
 }

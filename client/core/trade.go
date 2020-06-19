@@ -275,10 +275,18 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		if oid != t.ID() {
 			return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.ID())
 		}
+		// Contract txn asset: buy means quote, sell means base. NOTE:
+		// msgjson.Match could instead have just FeeRateSwap for the recipient,
+		// but the other fee rate this way could be of value for auditing the
+		// counter party's contract txn.
+		feeRateSwap := msgMatch.FeeRateQuote
+		if trade.Sell {
+			feeRateSwap = msgMatch.FeeRateBase
+		}
 		match := &matchTracker{
 			id:     mid,
 			prefix: t.Prefix(),
-			trade:  t.Trade(),
+			trade:  trade,
 			MetaMatch: db.MetaMatch{
 				MetaData: &db.MatchMetaData{
 					Status: order.NewlyMatched,
@@ -293,13 +301,14 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 					Quote: t.Quote(),
 				},
 				Match: &order.UserMatch{
-					OrderID:  oid,
-					MatchID:  mid,
-					Quantity: msgMatch.Quantity,
-					Rate:     msgMatch.Rate,
-					Address:  msgMatch.Address,
-					Status:   order.MatchStatus(msgMatch.Status),
-					Side:     order.MatchSide(msgMatch.Side),
+					OrderID:     oid,
+					MatchID:     mid,
+					Quantity:    msgMatch.Quantity,
+					Rate:        msgMatch.Rate,
+					Address:     msgMatch.Address,
+					Status:      order.MatchStatus(msgMatch.Status),
+					Side:        order.MatchSide(msgMatch.Side),
+					FeeRateSwap: feeRateSwap,
 				},
 			},
 		}
@@ -655,6 +664,8 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	errs := newErrorSet("swapMatches order %s - ", t.ID())
 	// Prepare the asset.Contracts.
 	swaps := new(asset.Swaps)
+	// These matches may have different fee rates, matched in different epochs.
+	var highestFeeRate uint64
 	for _, match := range matches {
 		dbMatch, _, proof, auth := match.parts()
 		value := dbMatch.Quantity
@@ -677,7 +688,13 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 			LockTime:   uint64(lockTime),
 		}
 		swaps.Contracts = append(swaps.Contracts, contract)
+
+		if match.Match.FeeRateSwap > highestFeeRate {
+			highestFeeRate = match.Match.FeeRateSwap
+		}
 	}
+
+	swaps.FeeRate = highestFeeRate
 
 	// Fund the swap. If this isn't the first swap, use the change coin from the
 	// previous swaps.
@@ -699,7 +716,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	// Send the swap. If the swap fails, set the failErr flag for all matches.
 	// A more sophisticated solution might involve tracking the error time too
 	// and trying again in certain circumstances.
-	receipts, change, err := t.wallets.fromWallet.Swap(swaps, t.wallets.fromAsset)
+	receipts, change, err := t.wallets.fromWallet.Swap(swaps)
 	if err != nil {
 		// Set the error on the matches.
 		for _, match := range matches {
@@ -707,28 +724,27 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		}
 		return errs.add("error sending swap transaction: %v", err)
 	}
+
+	log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts: %v",
+		len(receipts), t.ID(), swaps.FeeRate, receipts)
+
 	t.change = change
 	t.coins[hex.EncodeToString(change.ID())] = change
 	t.metaData.ChangeCoin = []byte(change.ID())
-	t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin)
+	t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin) // TODO: lock the change coin in the wallet if the order is still on the book
 
 	// Process the swap for each match by sending the `init` request
 	// to the DEX and updating the match with swap details.
 	// Add any errors encountered to `errs` and proceed to next match
 	// to ensure that swap details are saved for all matches.
-	coinStrs := make([]string, len(receipts))
 	for i, receipt := range receipts {
 		match := matches[i]
 		coin := receipt.Coin()
-		coinStrs[i] = coin.String()
 		err := t.finalizeSwapAction(match, coin.ID(), coin.Redeem())
 		if err != nil {
 			errs.addErr(err)
 		}
 	}
-
-	log.Infof("Broadcasted %d swap transactions for order %v. Contract coins: %v",
-		len(receipts), t.ID(), coinStrs)
 
 	return errs.ifany()
 }
@@ -796,7 +812,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 
 	// Send the transaction.
 	redeemWallet, redeemAsset := t.wallets.toWallet, t.wallets.toAsset // this is our redeem
-	coinIDs, outCoin, err := redeemWallet.Redeem(redemptions, redeemAsset)
+	coinIDs, outCoin, err := redeemWallet.Redeem(redemptions)
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {
@@ -805,6 +821,10 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		}
 		return errs.addErr(err)
 	}
+
+	log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s:%s",
+		len(redemptions), t.ID(), redeemAsset.Symbol, outCoin)
+
 	for _, match := range matches {
 		log.Infof("match %s complete: %s %d %s",
 			match.id, sellString(t.Trade().Sell), match.Match.Quantity, unbip(t.Prefix().BaseAsset),
@@ -818,9 +838,6 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 			errs.addErr(err)
 		}
 	}
-
-	log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s:%s",
-		len(redemptions), t.ID(), redeemAsset.Symbol, outCoin)
 
 	return errs.ifany()
 }
@@ -908,7 +925,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		log.Infof("failed match, %s, refunding %s contract %s",
 			matchFailureReason, unbip(refundAsset.ID), swapCoinString)
 
-		refundCoin, err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund, refundAsset)
+		refundCoin, err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund)
 		if err != nil {
 			if err == asset.CoinNotFoundError {
 				// Could not find the contract coin, which means it has been spent.
@@ -1002,6 +1019,14 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 	if auditInfo.Coin().Value() < auditQty {
 		return errs.add("swap contract value %d was lower than expected %d", auditInfo.Coin().Value(), auditQty)
 	}
+
+	// TODO: Consider having the server supply the contract txn's fee rate to
+	// improve the taker's audit with a check of the maker's contract fee rate.
+	// The server should be checking the fee rate, but the client should not
+	// trust it. The maker could also check the taker's contract txn fee rate,
+	// but their contract is already broadcasted, so the check is of less value
+	// as they can only wait for it to be mined to redeem it, in which case the
+	// fee rate no longer matters, or wait for the lock time to expire to refund.
 
 	// Check or store the secret hash and update the database.
 	auth.AuditStamp = audit.Time

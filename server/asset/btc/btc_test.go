@@ -301,6 +301,17 @@ func txOutID(txHash *chainhash.Hash, index uint32) string {
 	return txHash.String() + ":" + strconv.Itoa(int(index))
 }
 
+const optimalFeeRate uint64 = 24
+
+func (testNode) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error) {
+	optimalRate := float64(optimalFeeRate) * 1e-5
+	// fmt.Println((float64(optimalFeeRate)*1e-5)-0.00024)
+	return &btcjson.EstimateSmartFeeResult{
+		Blocks:  2,
+		FeeRate: &optimalRate,
+	}, nil
+}
+
 // Part of the btcNode interface.
 func (t testNode) GetTxOut(txHash *chainhash.Hash, index uint32, _ bool) (*btcjson.GetTxOutResult, error) {
 	testChainMtx.RLock()
@@ -775,8 +786,9 @@ func TestUTXOs(t *testing.T) {
 	}
 	// While we're here, check the spend script size and value are correct.
 	scriptSize := utxo.SpendSize()
-	if scriptSize != dexbtc.RedeemP2PKHSigScriptSize+dexbtc.TxInOverhead {
-		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", dexbtc.RedeemP2PKHSigScriptSize, scriptSize)
+	wantScriptSize := uint32(dexbtc.TxInOverhead + 1 + dexbtc.RedeemP2PKHSigScriptSize)
+	if scriptSize != wantScriptSize {
+		t.Fatalf("case 1 - unexpected spend script size reported. expected %d, got %d", wantScriptSize, scriptSize)
 	}
 	if utxo.Value() != 500_000_000 {
 		t.Fatalf("case 1 - unexpected output value. expected 500,000,000, got %d", utxo.Value())

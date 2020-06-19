@@ -295,6 +295,7 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			errs = append(errs, "order "+oid.String()+" not found")
 			continue
 		}
+		// TODO: consider checking the fee rates against the max fee rate
 		sigMsg := msgMatch.Serialize()
 		if checkSigs {
 			err := dc.acct.checkSig(sigMsg, msgMatch.Sig)
@@ -896,8 +897,13 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		dbID:    dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
-		Account:  dbWallet.Account,
-		Settings: dbWallet.Settings,
+		Account: dbWallet.Account,
+		// TODO: FallbackFeeRate:
+		// - Update the DB structure.
+		// - Allow it to be set on new wallet construction.
+		// - Allow it to be reconfigured.
+		FallbackFeeRate: 80,
+		Settings:        dbWallet.Settings,
 		TipChange: func(err error) {
 			c.tipChange(dbWallet.AssetID, err)
 		},
@@ -1114,7 +1120,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// Pay the registration fee.
 	log.Infof("Attempting registration fee payment for %s of %d units of %s", regRes.Address,
 		regRes.Fee, regAsset.Symbol)
-	coin, err := wallet.PayFee(regRes.Address, regRes.Fee, regAsset)
+	coin, err := wallet.PayFee(regRes.Address, regRes.Fee)
 	if err != nil {
 		return nil, newError(feeSendErr, "error paying registration fee: %v", err)
 	}
@@ -1148,7 +1154,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 // verifyRegistrationFee waits the required amount of confirmations for the
 // registration fee payment. Once the requirement is met the server is notified.
-// If the server acknowledgment is successfull, the account is set as 'paid' in
+// If the server acknowledgment is successful, the account is set as 'paid' in
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.
 func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, confs uint32) {
@@ -1484,7 +1490,7 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 	if err != nil {
 		return nil, err
 	}
-	coin, err := wallet.Withdraw(address, value, wallet.Info().DefaultFeeRate)
+	coin, err := wallet.Withdraw(address, value)
 	if err != nil {
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote("Withdraw error", details, db.ErrorLevel))
@@ -1557,7 +1563,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	if form.IsLimit && !form.Sell {
 		fundQty = calc.BaseToQuote(rate, fundQty)
 	}
-	coins, err := fromWallet.Fund(fundQty, wallets.fromAsset)
+	coins, err := fromWallet.FundOrder(fundQty, wallets.fromAsset)
 	if err != nil {
 		return nil, err
 	}
@@ -2879,13 +2885,14 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 // *dex.Asset.
 func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {
 	return &dex.Asset{
-		ID:       asset.ID,
-		Symbol:   asset.Symbol,
-		LotSize:  asset.LotSize,
-		RateStep: asset.RateStep,
-		FeeRate:  asset.FeeRate,
-		SwapSize: asset.SwapSize,
-		SwapConf: uint32(asset.SwapConf),
+		ID:           asset.ID,
+		Symbol:       asset.Symbol,
+		LotSize:      asset.LotSize,
+		RateStep:     asset.RateStep,
+		MaxFeeRate:   asset.MaxFeeRate,
+		SwapSize:     asset.SwapSize,
+		SwapSizeBase: asset.SwapSizeBase,
+		SwapConf:     uint32(asset.SwapConf),
 	}
 }
 

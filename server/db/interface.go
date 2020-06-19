@@ -204,12 +204,15 @@ type MatchData struct {
 	Taker     order.OrderID
 	TakerAcct account.AccountID
 	TakerAddr string
+	TakerSell bool
 	Maker     order.OrderID
 	MakerAcct account.AccountID
 	MakerAddr string
 	Epoch     order.EpochID
 	Quantity  uint64
 	Rate      uint64
+	BaseRate  uint64
+	QuoteRate uint64
 	Active    bool              // match negotiation in progress, not yet completed or failed
 	Status    order.MatchStatus // note that failed swaps, where Active=false, can have any status
 }

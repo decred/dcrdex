@@ -42,7 +42,7 @@ cat > "./markets.json" <<EOF
             "network": "simnet",
             "lotSize": 100000000,
             "rateStep": 100000,
-            "feeRate": 10,
+            "maxFeeRate": 10,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/dcr/alpha/dcrd.conf"
         },
@@ -51,7 +51,7 @@ cat > "./markets.json" <<EOF
             "network": "simnet",
             "lotSize": 100000,
             "rateStep": 100,
-            "feeRate": 100,
+            "maxFeeRate": 100,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/btc/harness-ctl/alpha.conf"
         }
