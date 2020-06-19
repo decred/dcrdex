@@ -119,17 +119,21 @@ func mainCore(ctx context.Context) error {
 		fmt.Printf("Load swapper state from file %q with time stamp %v? (y, n, or enter to abort) ",
 			stateFile.Name, encode.UnixTimeMilli(stateFile.Stamp))
 		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Scan()
+		scan := make(chan bool)
+		go func() {
+			scan <- scanner.Scan()
+		}()
+		// Wait for scanned line ending with newline or context done.
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-scan:
+		}
 		promptResp := scanner.Text()
 		err = scanner.Err()
 		if err != nil {
 			return fmt.Errorf("input failed: %v", err)
 		}
-		// reader := bufio.NewReader(os.Stdin)
-		// promptResp, err := reader.ReadString('\n')
-		// if err != nil {
-		// 	return fmt.Errorf("aborted input: %v", err)
-		// }
 
 		var doLoad bool
 		switch strings.ToLower(promptResp) {
