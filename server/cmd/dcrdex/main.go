@@ -119,11 +119,11 @@ func mainCore(ctx context.Context) error {
 		fmt.Printf("Load swapper state from file %q with time stamp %v? (y, n, or enter to abort) ",
 			stateFile.Name, encode.UnixTimeMilli(stateFile.Stamp))
 		scanner := bufio.NewScanner(os.Stdin)
-		scan := make(chan bool, 1)
+		scan := make(chan bool)
 		go func() {
 			scan <- scanner.Scan()
 		}()
-		// Wait for EOF or context done.
+		// Wait for scanned line ending with newline or context done.
 		select {
 		case <-ctx.Done():
 			return nil
