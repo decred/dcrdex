@@ -111,11 +111,12 @@ func NetFromString(net string) (Network, error) {
 
 // Asset is the configurable asset variables.
 type Asset struct {
-	ID       uint32 `json:"id"`
-	Symbol   string `json:"symbol"`
-	LotSize  uint64 `json:"lotSize"`
-	RateStep uint64 `json:"rateStep"`
-	FeeRate  uint64 `json:"feeRate"`
-	SwapSize uint64 `json:"swapSize"`
-	SwapConf uint32 `json:"swapConf"`
+	ID           uint32 `json:"id"`
+	Symbol       string `json:"symbol"`
+	LotSize      uint64 `json:"lotSize"`
+	RateStep     uint64 `json:"rateStep"`
+	MaxFeeRate   uint64 `json:"maxFeeRate"`
+	SwapSize     uint64 `json:"swapSize"`
+	SwapSizeBase uint64 `json:"swapSizeBase"`
+	SwapConf     uint32 `json:"swapConf"`
 }

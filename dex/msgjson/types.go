@@ -370,46 +370,44 @@ func (msg *Message) String() string {
 // Match is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	Signature
-	OrderID    Bytes  `json:"orderid"`
-	MatchID    Bytes  `json:"matchid"`
-	Quantity   uint64 `json:"qty"`
-	Rate       uint64 `json:"rate"`
-	Address    string `json:"address"`
-	ServerTime uint64 `json:"tserver"`
+	OrderID      Bytes  `json:"orderid"`
+	MatchID      Bytes  `json:"matchid"`
+	Quantity     uint64 `json:"qty"`
+	Rate         uint64 `json:"rate"`
+	ServerTime   uint64 `json:"tserver"`
+	Address      string `json:"address"`
+	FeeRateBase  uint64 `json:"feeratebase"`
+	FeeRateQuote uint64 `json:"feeratequote"`
 	// Status and Side are provided for convenience and are not part of the
 	// match serialization.
 	Status uint8 `json:"status"`
 	Side   uint8 `json:"side"`
 }
 
-var _ Stampable = (*Match)(nil)
+var _ Signable = (*Match)(nil)
 
 // Serialize serializes the Match data.
 func (m *Match) Serialize() []byte {
 	// Match serialization is orderid (32) + matchid (32) + quantity (8) + rate (8)
-	// + server time (8) + address (variable, guess 35). Sum = 123
-	s := make([]byte, 0, 123)
+	// + server time (8) + address (variable, guess 35) + base fee rate (8) +
+	// quote fee rate (8) = 139
+	s := make([]byte, 0, 139)
 	s = append(s, m.OrderID...)
 	s = append(s, m.MatchID...)
 	s = append(s, uint64Bytes(m.Quantity)...)
 	s = append(s, uint64Bytes(m.Rate)...)
 	s = append(s, uint64Bytes(m.ServerTime)...)
-	return append(s, []byte(m.Address)...)
-}
-
-// Stamp sets the server timestamp and epoch ID. Partially satisfies the
-// Stampable interface.
-func (m *Match) Stamp(t uint64) {
-	m.ServerTime = t
+	s = append(s, []byte(m.Address)...)
+	s = append(s, uint64Bytes(m.FeeRateBase)...)
+	return append(s, uint64Bytes(m.FeeRateQuote)...)
 }
 
 // Init is the payload for a client-originating InitRoute request.
 type Init struct {
 	Signature
-	OrderID Bytes `json:"orderid"`
-	MatchID Bytes `json:"matchid"`
-	CoinID  Bytes `json:"coinid"`
-	// Time     uint64 `json:"timestamp"` // client originating
+	OrderID  Bytes `json:"orderid"`
+	MatchID  Bytes `json:"matchid"`
+	CoinID   Bytes `json:"coinid"`
 	Contract Bytes `json:"contract"`
 }
 
@@ -417,13 +415,12 @@ var _ Signable = (*Init)(nil)
 
 // Serialize serializes the Init data.
 func (init *Init) Serialize() []byte {
-	// Init serialization is orderid (32) + matchid (32) + txid (probably 32) +
-	// vout (4) + contract (97 ish). Sum = 197
+	// Init serialization is orderid (32) + matchid (32) + coinid (probably 36)
+	// + contract (97 ish). Sum = 197
 	s := make([]byte, 0, 197)
 	s = append(s, init.OrderID...)
 	s = append(s, init.MatchID...)
 	s = append(s, init.CoinID...)
-	//s = append(s, uint64Bytes(init.Time)...)
 	return append(s, init.Contract...)
 }
 
@@ -475,20 +472,18 @@ type Redeem struct {
 	MatchID Bytes `json:"matchid"`
 	CoinID  Bytes `json:"coinid"`
 	Secret  Bytes `json:"secret"`
-	// Time    uint64 `json:"timestamp"`
 }
 
 var _ Signable = (*Redeem)(nil)
 
 // Serialize serializes the Redeem data.
 func (redeem *Redeem) Serialize() []byte {
-	// Redeem serialization is orderid (32) + matchid (32) + coin ID (36) + secret
-	// (32) = 132
-	s := make([]byte, 0, 100)
+	// Redeem serialization is orderid (32) + matchid (32) + coin ID (36) +
+	// secret (32) = 132
+	s := make([]byte, 0, 132)
 	s = append(s, redeem.OrderID...)
 	s = append(s, redeem.MatchID...)
 	s = append(s, redeem.CoinID...)
-	//s = append(s, uint64Bytes(redeem.Time)...)
 	return append(s, redeem.Secret...)
 }
 
@@ -818,9 +813,8 @@ type NotifyFee struct {
 
 // Serialize serializes the NotifyFee data.
 func (n *NotifyFee) Serialize() []byte {
-	// serialization: account id (32) + coinID (variable, ~32+2) + vout (4) +
-	// time (8) = 78
-	b := make([]byte, 0, 68)
+	// serialization: account id (32) + coinID (variable, ~36) + time (8) = 76
+	b := make([]byte, 0, 76)
 	b = append(b, n.AccountID...)
 	b = append(b, n.CoinID...)
 	return append(b, uint64Bytes(n.Time)...)
@@ -862,13 +856,14 @@ type Market struct {
 // Asset describes an asset and its variables, and is returned as part of a
 // ConfigResult.
 type Asset struct {
-	Symbol   string `json:"symbol"`
-	ID       uint32 `json:"id"`
-	LotSize  uint64 `json:"lotsize"`
-	RateStep uint64 `json:"ratestep"`
-	FeeRate  uint64 `json:"feerate"`
-	SwapSize uint64 `json:"swapsize"`
-	SwapConf uint16 `json:"swapconf"`
+	Symbol       string `json:"symbol"`
+	ID           uint32 `json:"id"`
+	LotSize      uint64 `json:"lotsize"`
+	RateStep     uint64 `json:"ratestep"`
+	MaxFeeRate   uint64 `json:"maxfeerate"`
+	SwapSize     uint64 `json:"swapsize"`
+	SwapSizeBase uint64 `json:"swapsizebase"`
+	SwapConf     uint16 `json:"swapconf"`
 }
 
 // ConfigResult is the successful result for the ConfigRoute.

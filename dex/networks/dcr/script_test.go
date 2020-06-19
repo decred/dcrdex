@@ -468,33 +468,109 @@ func TestFindKeyPush(t *testing.T) {
 func TestExtractContractHash(t *testing.T) {
 	addrs := testAddresses()
 	// non-hex
-	_, err := ExtractContractHash("zz", tParams)
+	_, err := ExtractContractHash("zz")
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// invalid script
-	_, err = ExtractContractHash(hex.EncodeToString(invalidScript), tParams)
+	_, err = ExtractContractHash(hex.EncodeToString(invalidScript))
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// multi-sig
-	_, err = ExtractContractHash(hex.EncodeToString(addrs.multiSig), tParams)
+	_, err = ExtractContractHash(hex.EncodeToString(addrs.multiSig))
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// wrong script types
 	p2pkh, _ := txscript.PayToAddrScript(addrs.pkh)
-	_, err = ExtractContractHash(hex.EncodeToString(p2pkh), tParams)
+	_, err = ExtractContractHash(hex.EncodeToString(p2pkh))
 	if err == nil {
 		t.Fatalf("no error for non-hex contract")
 	}
 	// ok
 	p2sh, _ := txscript.PayToAddrScript(addrs.sh)
-	checkHash, err := ExtractContractHash(hex.EncodeToString(p2sh), tParams)
+	checkHash, err := ExtractContractHash(hex.EncodeToString(p2sh))
 	if err != nil {
 		t.Fatalf("error extracting contract hash: %v", err)
 	}
 	if !bytes.Equal(checkHash, addrs.sh.ScriptAddress()) {
 		t.Fatalf("hash mismatch. wanted %x, got %x", addrs.sh.ScriptAddress(), checkHash)
+	}
+}
+
+func TestDataPrefixSize(t *testing.T) {
+	tests := []struct {
+		name    string
+		theData []byte
+		want    uint8
+	}{
+		{
+			name:    "empty",
+			theData: nil,
+			want:    0,
+		},
+		{
+			name:    "oneLow",
+			theData: []byte{16},
+			want:    0,
+		},
+		{
+			name:    "OP_1NEGATE",
+			theData: []byte{0x81},
+			want:    0,
+		},
+		{
+			name:    "oneHigh",
+			theData: []byte{17},
+			want:    1,
+		},
+		{
+			name:    "smallMultiByte0",
+			theData: make([]byte, 2),
+			want:    1,
+		},
+		{
+			name:    "smallMultiByte1",
+			theData: make([]byte, 75),
+			want:    1,
+		},
+		{
+			name:    "mediumMultiByte0",
+			theData: make([]byte, 76),
+			want:    2,
+		},
+		{
+			name:    "contract",
+			theData: make([]byte, SwapContractSize),
+			want:    2,
+		},
+		{
+			name:    "mediumMultiByte1",
+			theData: make([]byte, 255),
+			want:    2,
+		},
+		{
+			name:    "largeMultiByte0",
+			theData: make([]byte, 256),
+			want:    3,
+		},
+		{
+			name:    "largeMultiByte1",
+			theData: make([]byte, 65535),
+			want:    3,
+		},
+		{
+			name:    "megaMultiByte0",
+			theData: make([]byte, 65536),
+			want:    5,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DataPrefixSize(tt.theData); got != tt.want {
+				t.Errorf("DataPrefixSize() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

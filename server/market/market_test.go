@@ -1387,7 +1387,6 @@ func TestMarket_Cancelable(t *testing.T) {
 	<-auth.handlePreimageDone
 	// and for matching to complete (in processReadyEpoch).
 	<-storage.epochInserted
-	storage.epochInserted = nil
 
 	if !mkt.Cancelable(lo.ID()) {
 		t.Errorf("Cancelable failed to report order %v as cancelable, "+

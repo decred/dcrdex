@@ -32,8 +32,9 @@ type WalletInfo struct {
 	// description for each option. This can be used to request config info from
 	// users e.g. via dynamically generated GUI forms.
 	ConfigOpts []*config.Option `json:"configopts"`
-	// DefaultFeeRate is the default fee rate used for withdraws.
-	DefaultFeeRate uint64 `json:"feerate"`
+	// DefaultFeeRate is the default fee rate used for withdraws, refunds, and
+	// DEX fee payment transactions when optimal fee estimation is unavailable.
+	DefaultFeeRate uint64 `json:"defaultfeerate"` // TODO: remove
 }
 
 // WalletConfig is the configuration settings for the wallet. WalletConfig
@@ -42,6 +43,9 @@ type WalletConfig struct {
 	// Account is the name of the wallet account. The account and wallet must
 	// already exist.
 	Account string
+	// FallbackFeeRate is fee rate used for withdraws, refunds, and DEX fee
+	// payment transactions when optimal fee estimation is unavailable.
+	FallbackFeeRate uint64
 	// Settings is the key-value store of wallet connection parameters.
 	Settings map[string]string
 	// TipChange is a function that will be called when the blockchain monitoring
@@ -66,7 +70,7 @@ type Wallet interface {
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
-	Fund(uint64, *dex.Asset) (Coins, error)
+	FundOrder(uint64, *dex.Asset) (Coins, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
@@ -77,10 +81,10 @@ type Wallet interface {
 	FundingCoins([]dex.Bytes) (Coins, error)
 	// Swap sends the swaps in a single transaction. The Receipts returned can be
 	// used to refund a failed transaction.
-	Swap(*Swaps, *dex.Asset) ([]Receipt, Coin, error)
+	Swap(*Swaps) ([]Receipt, Coin, error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.
-	Redeem([]*Redemption, *dex.Asset) ([]dex.Bytes, Coin, error)
+	Redeem(redeems []*Redemption) ([]dex.Bytes, Coin, error)
 	// SignMessage signs the coin ID with the private key associated with the
 	// specified Coin. A slice of pubkeys required to spend the Coin and a
 	// signature for each pubkey are returned.
@@ -110,11 +114,11 @@ type Wallet interface {
 	FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded.
-	// NOTE: The contract cannot be retreived from the unspent coin info as the
+	// NOTE: The contract cannot be retrieved from the unspent coin info as the
 	// wallet does not store it, even though it was known when the init transaction
 	// was created. The client should store this information for persistence across
 	// sessions.
-	Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (dex.Bytes, error)
+	Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	// Address returns an address for the exchange wallet.
 	Address() (string, error)
 	// Unlock unlocks the exchange wallet.
@@ -123,14 +127,14 @@ type Wallet interface {
 	Lock() error
 	// PayFee sends the dex registration fee. Transaction fees are in addition to
 	// the registration fee, and the fee rate is taken from the DEX configuration.
-	PayFee(address string, fee uint64, nfo *dex.Asset) (Coin, error)
+	PayFee(address string, feeAmt uint64) (Coin, error)
 	// Confirmations gets the number of confirmations for the specified coin ID.
 	// The ID need not represent an unspent coin, but coin IDs unknown to this
 	// wallet may return an error.
 	Confirmations(id dex.Bytes) (uint32, error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
-	Withdraw(address string, value, feeRate uint64) (Coin, error)
+	Withdraw(address string, value uint64) (Coin, error)
 	// ValidateSecret checks that the secret hashes to the secret hash.
 	ValidateSecret(secret, secretHash []byte) bool
 }
@@ -172,6 +176,8 @@ type Receipt interface {
 	Expiration() time.Time
 	// Coin is the contract's coin.
 	Coin() Coin
+	// String provides a human-readable representation of the contract's Coin.
+	String() string
 }
 
 // AuditInfo is audit information about a swap contract needed to audit the
@@ -197,6 +203,8 @@ type Swaps struct {
 	Inputs Coins
 	// Contract is the contract data.
 	Contracts []*Contract
+	// FeeRate is the required fee rate in atoms/byte.
+	FeeRate uint64
 }
 
 // Contract is a swap contract.

@@ -14,12 +14,14 @@ func TestMatch(t *testing.T) {
 	oid, _ := hex.DecodeString("2219c5f3a03407c87211748c884404e2f466cba19616faca1cda0010ca5db0d3")
 	mid, _ := hex.DecodeString("4969784b00a59dd0340952c9b8f52840fbb32e9b51d4f6e18cbec7f50c8a3ed7")
 	match := &Match{
-		OrderID:    oid,
-		MatchID:    mid,
-		Quantity:   5e8,
-		Rate:       uint64(2e8),
-		ServerTime: 1585043380123,
-		Address:    "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+		OrderID:      oid,
+		MatchID:      mid,
+		Quantity:     5e8,
+		Rate:         uint64(2e8),
+		ServerTime:   1585043380123,
+		Address:      "DcqXswjTPnUcd4FRCkX4vRJxmVtfgGVa5ui",
+		FeeRateBase:  65536 + 255,
+		FeeRateQuote: (1 << 32) + 256 + 1,
 	}
 	exp := []byte{
 		// Order ID 32 bytes
@@ -40,6 +42,10 @@ func TestMatch(t *testing.T) {
 		0x44, 0x63, 0x71, 0x58, 0x73, 0x77, 0x6a, 0x54, 0x50, 0x6e, 0x55, 0x63, 0x64,
 		0x34, 0x46, 0x52, 0x43, 0x6b, 0x58, 0x34, 0x76, 0x52, 0x4a, 0x78, 0x6d, 0x56,
 		0x74, 0x66, 0x67, 0x47, 0x56, 0x61, 0x35, 0x75, 0x69,
+		// base fee rate 8 bytes
+		0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0xff,
+		// quote fee rate 8 bytes
+		0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x1, 0x1,
 	}
 
 	b := match.Serialize()

@@ -66,6 +66,7 @@ const (
 // satisfied by rpcclient.Client, and all methods are matches for Client
 // methods. For testing, it can be satisfied by a stub.
 type dcrNode interface {
+	EstimateSmartFee(confirmations int64, mode chainjson.EstimateSmartFeeMode) (float64, error)
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*chainjson.GetTxOutResult, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
@@ -158,6 +159,27 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 // standardized atomic swap initialization transaction.
 func (btc *Backend) InitTxSize() uint32 {
 	return dexdcr.InitTxSize
+}
+
+// InitTxSizeBase is InitTxSize not including an input.
+func (dcr *Backend) InitTxSizeBase() uint32 {
+	return dexdcr.InitTxSizeBase
+}
+
+// FeeRate returns the current optimal fee rate in atoms / byte.
+func (dcr *Backend) FeeRate() (uint64, error) {
+	// estimatesmartfee 1 returns extremely high rates on DCR.
+	dcrPerKB, err := dcr.node.EstimateSmartFee(2, chainjson.EstimateSmartFeeConservative)
+	if err != nil {
+		return 0, err
+	}
+	atomsPerKB, err := dcrutil.NewAmount(dcrPerKB)
+	if err != nil {
+		return 0, err
+	}
+	// Add 1 extra atom/byte, which is both extra conservative and prevents a
+	// zero value if the atoms/KB is less than 1000.
+	return 1 + uint64(atomsPerKB)/1000, nil
 }
 
 // BlockChannel creates and returns a new channel on which to receive block
@@ -713,7 +735,7 @@ func (dcr *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		redeemScript:      redeemScript,
 		numSigs:           inputNfo.ScriptAddrs.NRequired,
 		// The total size associated with the wire.TxIn.
-		spendSize: inputNfo.SigScriptSize + dexdcr.TxInOverhead,
+		spendSize: inputNfo.Size(),
 		value:     toAtoms(txOut.Value),
 	}
 	return &UTXO{out}, nil
@@ -819,7 +841,7 @@ func (dcr *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []b
 		redeemScript:      redeemScript,
 		numSigs:           scrAddrs.NRequired,
 		// The total size associated with the wire.TxIn.
-		spendSize: inputNfo.SigScriptSize + dexdcr.TxInOverhead,
+		spendSize: inputNfo.Size(),
 	}, nil
 }
 

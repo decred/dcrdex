@@ -102,7 +102,7 @@ var (
 		Addr:   "DsaAKsMvZ6HrqhmbhLjV9qVbPkkzF5daowT", // DCR
 		Acct:   ordertest.NextAccount(),
 		Sell:   true,
-		Market: mkt2,
+		Market: mkt3,
 	}
 )
 
@@ -331,6 +331,7 @@ func (b *TBackend) Redemption(redemptionID, contractID []byte) (asset.Coin, erro
 }
 func (b *TBackend) BlockChannel(size int) <-chan *asset.BlockUpdate { return nil }
 func (b *TBackend) InitTxSize() uint32                              { return dummySize }
+func (b *TBackend) InitTxSizeBase() uint32                          { return dummySize / 2 }
 func (b *TBackend) CheckAddress(string) bool                        { return b.addrChecks }
 func (b *TBackend) addUTXO(coin *msgjson.Coin, val uint64) {
 	b.utxos[hex.EncodeToString(coin.ID)] = val
@@ -347,6 +348,9 @@ func (b *TBackend) ValidateSecret(secret, contract []byte) bool { return true }
 func (b *TBackend) VerifyUnspentCoin(coinID []byte) error {
 	_, err := b.utxo(coinID)
 	return err
+}
+func (b *TBackend) FeeRate() (uint64, error) {
+	return 9, nil
 }
 
 type tUTXO struct {
@@ -409,37 +413,40 @@ func (rig *tOrderRig) signedUTXO(id int, val uint64, numSigs int) *msgjson.Coin 
 
 var assetBTC = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:       0,
-		Symbol:   "btc",
-		LotSize:  btcLotSize,
-		RateStep: btcRateStep,
-		FeeRate:  4,
-		SwapSize: dummySize,
-		SwapConf: 2,
+		ID:           0,
+		Symbol:       "btc",
+		LotSize:      btcLotSize,
+		RateStep:     btcRateStep,
+		MaxFeeRate:   14,
+		SwapSize:     dummySize,
+		SwapSizeBase: dummySize / 2,
+		SwapConf:     2,
 	},
 }
 
 var assetDCR = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:       42,
-		Symbol:   "dcr",
-		LotSize:  dcrLotSize,
-		RateStep: dcrRateStep,
-		FeeRate:  10,
-		SwapSize: dummySize,
-		SwapConf: 2,
+		ID:           42,
+		Symbol:       "dcr",
+		LotSize:      dcrLotSize,
+		RateStep:     dcrRateStep,
+		MaxFeeRate:   10,
+		SwapSize:     dummySize,
+		SwapSizeBase: dummySize / 2,
+		SwapConf:     2,
 	},
 }
 
 var assetUnknown = &asset.BackedAsset{
 	Asset: dex.Asset{
-		ID:       54321,
-		Symbol:   "buk",
-		LotSize:  1000,
-		RateStep: 100,
-		FeeRate:  10,
-		SwapSize: 1,
-		SwapConf: 0,
+		ID:           54321,
+		Symbol:       "buk",
+		LotSize:      1000,
+		RateStep:     100,
+		MaxFeeRate:   10,
+		SwapSize:     2,
+		SwapSizeBase: 1,
+		SwapConf:     0,
 	},
 }
 
@@ -1057,6 +1064,7 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 
 // Book Router Tests
 
+// nolint:unparm
 func randLots(max int) uint64 {
 	return uint64(rand.Intn(max) + 1)
 }

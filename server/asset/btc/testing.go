@@ -128,7 +128,7 @@ out:
 					case txscript.WitnessV0ScriptHashTy:
 						stats.p2wsh++
 					default:
-						_, _, err = extractSwapAddresses(redeemScript, btc.chainParams)
+						_, _, _, _, err = dexbtc.ExtractSwapDetails(redeemScript, btc.chainParams)
 						if err == nil {
 							stats.swaps++
 							continue
@@ -409,7 +409,7 @@ func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params,
 	}
 
 	// P2PKH
-	pkh := extractPubKeyHash(items.P2PKHScript)
+	pkh := dexbtc.ExtractPubKeyHash(items.P2PKHScript)
 	if pkh == nil {
 		t.Fatalf("incompatible P2PKH script")
 	}
@@ -427,17 +427,21 @@ func CompatibilityCheck(items *CompatibilityItems, chainParams *chaincfg.Params,
 	}
 
 	// P2SH
-	sh := extractScriptHash(items.P2SHScript)
+	sh := dexbtc.ExtractScriptHash(items.P2SHScript)
 	if sh == nil {
 		t.Fatalf("incompatible P2SH script")
 	}
 	checkAddr(items.P2SHScript, items.SHAddr)
 
 	// P2WSH
-	if items.P2WSHScript == nil {
+	if items.P2WSHScript != nil {
 		scriptClass := txscript.GetScriptClass(items.P2WSHScript)
 		if scriptClass != txscript.WitnessV0ScriptHashTy {
 			t.Fatalf("incompatible P2WPKH script")
+		}
+		wsh := dexbtc.ExtractScriptHash(items.P2WSHScript)
+		if wsh == nil {
+			t.Fatalf("incompatible P2WSH script")
 		}
 		checkAddr(items.P2WSHScript, items.WSHAddr)
 	}

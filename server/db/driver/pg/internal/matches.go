@@ -17,17 +17,18 @@ const (
 	CreateMatchesTable = `CREATE TABLE IF NOT EXISTS %s (
 		matchid BYTEA PRIMARY KEY,
 		active BOOL DEFAULT TRUE,    -- negotiation active, where FALSE includes failure, successful completion, or a taker cancel order
-		takerSell BOOL,        -- to identify asset of address and coinIDs
+		takerSell BOOL,        -- to identify asset of address and coinIDs, NULL for cancel orders
 		takerOrder BYTEA,      -- INDEX this
 		takerAccount BYTEA,    -- INDEX this
-		takerAddress TEXT,
+		takerAddress TEXT,     -- NULL for cancel orders
 		makerOrder BYTEA,      -- INDEX this
 		makerAccount BYTEA,    -- INDEX this
-		makerAddress TEXT,
+		makerAddress TEXT,     -- NULL for cancel orders
 		epochIdx INT8,
 		epochDur INT8,
 		quantity INT8,
 		rate INT8,
+		baseRate INT8, quoteRate INT8, -- contract tx fee rates, NULL for cancel orders
 		status INT2,           -- also updated during swap negotiation, independent from active for failed swaps
 
 		-- The remaining columns are only set during swap negotiation.
@@ -65,25 +66,25 @@ const (
 		bRedeemCoinID, bRedeemTime, aSigAckOfBRedeem
 	FROM %s WHERE matchid = $1;`
 
-	InsertMatch = `INSERT INTO %s (matchid,
+	InsertMatch = `INSERT INTO %s (matchid, takerSell,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
 		epochIdx, epochDur,
-		quantity, rate, status)
-	VALUES ($1,
-		$2, $3, $4,
-		$5, $6, $7,
-		$8, $9,
-		$10, $11, $12) `  // do not terminate with ;
+		quantity, rate, baseRate, quoteRate, status)
+	VALUES ($1, $2,
+		$3, $4, $5,
+		$6, $7, $8,
+		$9, $10,
+		$11, $12, $13, $14, $15) `  // do not terminate with ;
 
 	UpsertMatch = InsertMatch + ` ON CONFLICT (matchid) DO
-	UPDATE SET quantity = $10, status = $12;`
+	UPDATE SET quantity = $11, status = $15;`
 
-	InsertCancelMatch = `INSERT INTO %s (matchid, active,
+	InsertCancelMatch = `INSERT INTO %s (matchid, active, -- omit takerSell
 			takerOrder, takerAccount, -- no taker address for a cancel order
 			makerOrder, makerAccount, -- omit maker's swap address too
 			epochIdx, epochDur,
-			quantity, rate, status)
+			quantity, rate, status) -- omit base and quote fee rates
 		VALUES ($1, FALSE, -- no active swap for a cancel
 			$2, $3,
 			$4, $5,
@@ -92,23 +93,23 @@ const (
 
 	UpsertCancelMatch = InsertCancelMatch + ` ON CONFLICT (matchid) DO NOTHING;`
 
-	RetrieveMatchByID = `SELECT matchid, active,
+	RetrieveMatchByID = `SELECT matchid, active, takerSell,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
-		epochIdx, epochDur, quantity, rate, status
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
 	FROM %s WHERE matchid = $1;`
 
-	RetrieveUserMatches = `SELECT matchid, active,
+	RetrieveUserMatches = `SELECT matchid, active, takerSell,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
-		epochIdx, epochDur, quantity, rate, status
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
 	FROM %s
 	WHERE takerAccount = $1 OR makerAccount = $1;`
 
-	RetrieveActiveUserMatches = `SELECT matchid,
+	RetrieveActiveUserMatches = `SELECT matchid, takerSell,
 		takerOrder, takerAccount, takerAddress,
 		makerOrder, makerAccount, makerAddress,
-		epochIdx, epochDur, quantity, rate, status
+		epochIdx, epochDur, quantity, rate, baseRate, quoteRate, status
 	FROM %s
 	WHERE (takerAccount = $1 OR makerAccount = $1)
 		AND active;`

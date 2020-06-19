@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +64,7 @@ const (
 // satisfied by rpcclient.Client, and all methods are matches for Client
 // methods. For testing, it can be satisfied by a stub.
 type btcNode interface {
+	EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error)
 	GetBlockVerbose(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error)
@@ -287,6 +289,32 @@ func (btc *Backend) InitTxSize() uint32 {
 	return dexbtc.InitTxSize
 }
 
+// InitTxSizeBase is InitTxSize not including an input.
+func (btc *Backend) InitTxSizeBase() uint32 {
+	return dexbtc.InitTxSizeBase
+}
+
+// FeeRate returns the current optimal fee rate in sat / byte.
+func (btc *Backend) FeeRate() (uint64, error) {
+	feeResult, err := btc.node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
+	if err != nil {
+		return 0, err
+	}
+	if len(feeResult.Errors) > 0 {
+		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
+	}
+	if feeResult.FeeRate == nil {
+		return 0, fmt.Errorf("no fee rate available")
+	}
+	satPerKB, err := btcutil.NewAmount(*feeResult.FeeRate)
+	if err != nil {
+		return 0, err
+	}
+	// Add 1 extra sat/byte, which is both extra conservative and prevents a
+	// zero value if the sat/KB is less than 1000.
+	return 1 + uint64(satPerKB)/1000, nil
+}
+
 // CheckAddress checks that the given address is parseable.
 func (btc *Backend) CheckAddress(addr string) bool {
 	_, err := btcutil.DecodeAddress(addr, btc.chainParams)
@@ -304,41 +332,6 @@ func newBTC(name string, chainParams *chaincfg.Params, logger dex.Logger, node b
 		node:        node,
 	}
 	return btc
-}
-
-// validateTxOut validates an outpoint (txHash:out) by retrieving the associated
-// output's pkScript, and if the provided redeemScript is not empty, verifying
-// that the pkScript is a P2SH with a script hash to which the redeem script
-// hashes. This also screens out multi-sig scripts.
-func (btc *Backend) validateTxOut(txHash *chainhash.Hash, vout uint32, redeemScript []byte) error {
-	_, _, pkScript, err := btc.getTxOutInfo(txHash, vout)
-	if err != nil {
-		return err
-	}
-
-	scriptType := dexbtc.ParseScriptType(pkScript, redeemScript)
-	if scriptType == dexbtc.ScriptUnsupported {
-		return dex.UnsupportedScriptError
-	}
-
-	switch {
-	case scriptType.IsP2SH(): // regular or stake (vsp vote) p2sh
-		if len(redeemScript) == 0 {
-			return fmt.Errorf("no redeem script provided for P2SH pkScript")
-		}
-		scriptHash, err := dexbtc.ExtractScriptHash(pkScript, btc.chainParams)
-		if err != nil {
-			return fmt.Errorf("failed to extract script hash for P2SH pkScript: %v", err)
-		}
-		// Check the script hash against the hash of the redeem script.
-		if !bytes.Equal(btcutil.Hash160(redeemScript), scriptHash) {
-			return fmt.Errorf("redeem script does not match script hash from P2SH pkScript")
-		}
-	case len(redeemScript) > 0:
-		return fmt.Errorf("redeem script provided for non P2SH pubkey script")
-	}
-
-	return nil
 }
 
 // blockInfo returns block information for the verbose transaction data. The
@@ -376,14 +369,13 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 	// If it's a pay-to-script-hash, extract the script hash and check it against
 	// the hash of the user-supplied redeem script.
 	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
+		scriptHash := dexbtc.ExtractScriptHash(pkScript)
 		if scriptType.IsSegwit() {
-			scriptHash := extractWitnessScriptHash(pkScript)
 			shash := sha256.Sum256(redeemScript)
 			if !bytes.Equal(shash[:], scriptHash) {
 				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 			}
 		} else {
-			scriptHash := extractScriptHash(pkScript)
 			if !bytes.Equal(btcutil.Hash160(redeemScript), scriptHash) {
 				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 			}
@@ -498,15 +490,13 @@ func (btc *Backend) output(txHash *chainhash.Hash, vout uint32, redeemScript []b
 	// If it's a pay-to-script-hash, extract the script hash and check it against
 	// the hash of the user-supplied redeem script.
 	if scriptType.IsP2SH() || scriptType.IsP2WSH() {
+		scriptHash := dexbtc.ExtractScriptHash(pkScript)
 		if scriptType.IsSegwit() {
-			scriptHash := extractWitnessScriptHash(pkScript)
 			shash := sha256.Sum256(redeemScript)
 			if !bytes.Equal(shash[:], scriptHash) {
 				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 			}
 		} else {
-			//scriptHash, err := dexbtc.ExtractScriptHash(pkScript, btc.chainParams)
-			scriptHash := extractScriptHash(pkScript)
 			if !bytes.Equal(btcutil.Hash160(redeemScript), scriptHash) {
 				return nil, fmt.Errorf("script hash check failed for utxo %s,%d", txHash, vout)
 			}

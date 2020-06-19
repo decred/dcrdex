@@ -665,7 +665,8 @@ Registration is complete after the fee transaction has been confirmed.`,
             "lotSize" (int): The amount of units of a coin in one lot.
             "rateStep" (int): the price rate increment in atoms.
             "feeRate" (int): The transaction fee in atoms per byte.
-            "swapSize" (int): The size of a swap transaction in bytes.
+			"swapSize" (int): The size of a swap transaction in bytes.
+			"swapSizeBase" (int): The size of a swap transaction minus inputs in bytes.
             "swapConf" (int): The number of confirmations needed to confirm
 	      trade transactions.
           },...

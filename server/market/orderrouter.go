@@ -209,7 +209,8 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 	if !sell {
 		swapVal = matcher.BaseToQuote(limit.Rate, limit.Quantity)
 	}
-	reqVal := calc.RequiredFunds(swapVal, spendSize, &coins.funding.Asset)
+	fundAsset := &coins.funding.Asset
+	reqVal := calc.RequiredOrderFunds(swapVal, uint64(spendSize), fundAsset)
 	if valSum < reqVal {
 		return msgjson.NewError(msgjson.FundingError,
 			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
@@ -312,7 +313,8 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	}
 
 	// Calculate the fees and check that the utxo sum is enough.
-	reqVal := calc.RequiredFunds(market.Quantity, spendSize, &assets.funding.Asset)
+	fundAsset := &assets.funding.Asset
+	reqVal := calc.RequiredOrderFunds(market.Quantity, uint64(spendSize), fundAsset)
 	if !sell {
 		// This is a market buy order, so the quantity gets special handling.
 		// 1. The quantity is in units of the quote asset.

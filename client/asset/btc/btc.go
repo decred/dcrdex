@@ -45,9 +45,9 @@ const (
 	BipID                   = 0
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
-	defaultWithdrawalFee = 2
-	minNetworkVersion    = 190000
-	minProtocolVersion   = 70015
+	defaultFee         = 112
+	minNetworkVersion  = 190000
+	minProtocolVersion = 70015
 )
 
 var (
@@ -59,13 +59,14 @@ var (
 		Units:             "Satoshis",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
 		ConfigOpts:        config.Options(&dexbtc.Config{}),
-		DefaultFeeRate:    defaultWithdrawalFee,
+		DefaultFeeRate:    defaultFee,
 	}
 )
 
 // rpcClient is a wallet RPC client. In production, rpcClient is satisfied by
 // rpcclient.Client. A stub can be used for testing.
 type rpcClient interface {
+	EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
 	SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
@@ -203,6 +204,11 @@ func (r *swapReceipt) Coin() asset.Coin {
 	return r.output
 }
 
+// String provides a human-readable representation of the contract's Coin.
+func (r *swapReceipt) String() string {
+	return r.output.String()
+}
+
 // Driver implements asset.Driver.
 type Driver struct{}
 
@@ -244,6 +250,7 @@ type ExchangeWallet struct {
 	hasConnected      uint32
 	tipChange         func(error)
 	minNetworkVersion uint64
+	fallbackFeeRate   uint64
 
 	// In the future, the client may wish to specify minimum confirmations for
 	// utxos to fund orders, and allowing change outputs from DEX-related swap
@@ -323,8 +330,7 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
 func newWallet(cfg *BTCCloneCFG, node rpcClient) *ExchangeWallet {
-
-	wallet := &ExchangeWallet{
+	return &ExchangeWallet{
 		node:              node,
 		wallet:            newWalletClient(node, cfg.ChainParams),
 		symbol:            cfg.Symbol,
@@ -334,10 +340,9 @@ func newWallet(cfg *BTCCloneCFG, node rpcClient) *ExchangeWallet {
 		tipChange:         cfg.WalletCFG.TipChange,
 		fundingCoins:      make(map[string]*compositeUTXO),
 		minNetworkVersion: cfg.MinNetworkVersion,
+		fallbackFeeRate:   cfg.WalletCFG.FallbackFeeRate,
 		walletInfo:        cfg.WalletInfo,
 	}
-
-	return wallet
 }
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
@@ -401,9 +406,42 @@ func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
 	}, err
 }
 
-// Fund selects utxos (as asset.Coin) for use in an order. Any Coins returned
-// will be locked. Part of the asset.Wallet interface.
-func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, error) {
+// FeeRate returns the current optimal fee rate in sat / byte.
+func (btc *ExchangeWallet) FeeRate() (uint64, error) {
+	feeResult, err := btc.node.EstimateSmartFee(1, &btcjson.EstimateModeConservative)
+	if err != nil {
+		return 0, err
+	}
+	if len(feeResult.Errors) > 0 {
+		return 0, fmt.Errorf(strings.Join(feeResult.Errors, "; "))
+	}
+	if feeResult.FeeRate == nil {
+		return 0, fmt.Errorf("no fee rate available")
+	}
+	satPerKB, err := btcutil.NewAmount(*feeResult.FeeRate) // satPerKB is 0 when err != nil
+	if err != nil {
+		return 0, err
+	}
+	// Add 1 extra sat/byte, which is both extra conservative and prevents a
+	// zero value if the sat/KB is less than 1000.
+	return 1 + uint64(satPerKB)/1000, nil
+}
+
+// feeRateWithFallback attempts to get the optimal fee rate in sat / byte via
+// FeeRate. If that fails, it will return the configured fallback fee rate.
+func (btc *ExchangeWallet) feeRateWithFallback() uint64 {
+	feeRate, err := btc.FeeRate()
+	if err != nil {
+		feeRate = btc.fallbackFeeRate
+		btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
+			btc.fallbackFeeRate, err)
+	}
+	return feeRate
+}
+
+// FundOrder selects utxos (as asset.Coin) for use in an order. Any Coins
+// returned will be locked. Part of the asset.Wallet interface.
+func (btc *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins, error) {
 	if value == 0 {
 		return nil, fmt.Errorf("cannot fund value = 0")
 	}
@@ -422,8 +460,12 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 	var spents []*output
 	fundingCoins := make(map[string]*compositeUTXO)
 
+	// TODO: For the chained swaps, make sure that contract outputs are P2WSH,
+	// and that change outputs that fund further swaps are P2WPKH.
+
 	isEnoughWith := func(unspent *compositeUTXO) bool {
-		return sum+unspent.amount >= btc.reqFunds(value, size+unspent.input.VBytes(), nfo)
+		reqFunds := calc.RequiredOrderFunds(value, uint64(size+unspent.input.VBytes()), nfo)
+		return sum+unspent.amount >= reqFunds
 	}
 
 	addUTXO := func(unspent *compositeUTXO) {
@@ -441,7 +483,7 @@ out:
 		// If there are none left, we don't have enough.
 		if len(utxos) == 0 {
 			return nil, fmt.Errorf("not enough to cover requested funds + fees = %d",
-				btc.reqFunds(value, size, nfo))
+				calc.RequiredOrderFunds(value, uint64(size), nfo))
 		}
 		// On each loop, find the smallest UTXO that is enough for the value. If
 		// no UTXO is large enough, add the largest and continue.
@@ -570,7 +612,7 @@ func (btc *ExchangeWallet) Lock() error {
 }
 
 // Swap sends the swap contracts and prepares the receipts.
-func (btc *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Receipt, asset.Coin, error) {
+func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
 	var contracts [][]byte
 	var totalOut, totalIn uint64
 	// Start with an empty MsgTx.
@@ -592,6 +634,8 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 		opIDs = append(opIDs, outpointID(output.txHash.String(), output.vout))
 	}
 	// Add the contract outputs.
+	// TODO: Make P2WSH contract and P2WPKH change outputs instead of
+	// legacy/non-segwit swap contracts pkScripts.
 	for _, contract := range swaps.Contracts {
 		totalOut += contract.Value
 		// revokeAddr is the address that will receive the refund if the contract is
@@ -633,7 +677,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 		return nil, nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
 	}
 	// Sign, add change, and send the transaction.
-	msgTx, change, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, nfo)
+	msgTx, change, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -655,7 +699,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 }
 
 // Redeem sends the redemption transaction, completing the atomic swap.
-func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asset) ([]dex.Bytes, asset.Coin, error) {
+func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes, asset.Coin, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	var totalIn uint64
@@ -689,7 +733,8 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 
 	// Calculate the size and the fees.
 	size := msgTx.SerializeSize() + dexbtc.RedeemSwapSigScriptSize*len(redemptions) + dexbtc.P2WPKHOutputSize
-	fee := nfo.FeeRate * uint64(size)
+	feeRate := btc.feeRateWithFallback()
+	fee := feeRate * uint64(size)
 	if fee > totalIn {
 		return nil, nil, fmt.Errorf("redeem tx not worth the fees")
 	}
@@ -704,7 +749,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption, nfo *dex.Asse
 	}
 	txOut := wire.NewTxOut(int64(totalIn-fee), pkScript)
 	// One last check for dust.
-	if dexbtc.IsDust(txOut, nfo.FeeRate) {
+	if dexbtc.IsDust(txOut, feeRate) {
 		return nil, nil, fmt.Errorf("redeem output is dust")
 	}
 	msgTx.AddTxOut(txOut)
@@ -872,7 +917,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 		if int(vout) > len(rawTx.Vout)-1 {
 			return nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
 		}
-		contractHash, err := dexbtc.ExtractContractHash(rawTx.Vout[vout].ScriptPubKey.Hex, btc.chainParams)
+		contractHash, err := dexbtc.ExtractContractHash(rawTx.Vout[vout].ScriptPubKey.Hex)
 		if err != nil {
 			return nil, err
 		}
@@ -933,7 +978,7 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 					if len(vouts) < int(vout)+1 {
 						return nil, fmt.Errorf("vout %d not found in tx %s", vout, txid)
 					}
-					contractHash, err = dexbtc.ExtractContractHash(vouts[vout].ScriptPubKey.Hex, btc.chainParams)
+					contractHash, err = dexbtc.ExtractContractHash(vouts[vout].ScriptPubKey.Hex)
 					if err != nil {
 						return nil, err
 					}
@@ -974,11 +1019,11 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 
 // Refund revokes a contract. This can only be used after the time lock has
 // expired.
-// NOTE: The contract cannot be retreived from the unspent coin info as the
+// NOTE: The contract cannot be retrieved from the unspent coin info as the
 // wallet does not store it, even though it was known when the init transaction
 // was created. The client should store this information for persistence across
 // sessions.
-func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (dex.Bytes, error) {
+func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -996,7 +1041,9 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (d
 	if err != nil {
 		return nil, fmt.Errorf("error extracting swap addresses: %v", err)
 	}
+
 	// Create the transaction that spends the contract.
+	feeRate := btc.feeRateWithFallback()
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	msgTx.LockTime = uint32(lockTime)
 	prevOut := wire.NewOutPoint(txHash, vout)
@@ -1005,7 +1052,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (d
 	msgTx.AddTxIn(txIn)
 	// Calculate fees and add the change output.
 	size := msgTx.SerializeSize() + dexbtc.RefundSigScriptSize + dexbtc.P2WPKHOutputSize
-	fee := nfo.FeeRate * uint64(size)
+	fee := feeRate * uint64(size) // TODO: use btc.FeeRate in caller and fallback to nfo.MaxFeeRate
 	if fee > val {
 		return nil, fmt.Errorf("refund tx not worth the fees")
 	}
@@ -1019,7 +1066,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (d
 	}
 	txOut := wire.NewTxOut(int64(val-fee), pkScript)
 	// One last check for dust.
-	if dexbtc.IsDust(txOut, nfo.FeeRate) {
+	if dexbtc.IsDust(txOut, feeRate) {
 		return nil, fmt.Errorf("refund output is dust")
 	}
 	msgTx.AddTxOut(txOut)
@@ -1054,8 +1101,8 @@ func (btc *ExchangeWallet) Address() (string, error) {
 
 // PayFee sends the dex registration fee. Transaction fees are in addition to
 // the registration fee, and the fee rate is taken from the DEX configuration.
-func (btc *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, regFee, nfo.FeeRate, false)
+func (btc *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, regFee, btc.feeRateWithFallback(), false)
 	if err != nil {
 		btc.log.Errorf("PayFee error address = '%s', fee = %d: %v", address, regFee, err)
 		return nil, err
@@ -1065,8 +1112,8 @@ func (btc *ExchangeWallet) PayFee(address string, regFee uint64, nfo *dex.Asset)
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
 // the value. feeRate is in units of atoms/byte.
-func (btc *ExchangeWallet) Withdraw(address string, value, feeRate uint64) (asset.Coin, error) {
-	txHash, vout, sent, err := btc.send(address, value, feeRate, true)
+func (btc *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, error) {
+	txHash, vout, sent, err := btc.send(address, value, btc.feeRateWithFallback(), true)
 	if err != nil {
 		btc.log.Errorf("Withdraw error address = '%s', fee = %d: %v", address, value, err)
 		return nil, err
@@ -1148,12 +1195,6 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 	}
 }
 
-// reqFunds calculates the total total value needed to fund a swap of the
-// specified value, using a given total funding utxo input size (bytes).
-func (btc *ExchangeWallet) reqFunds(val uint64, funding uint32, nfo *dex.Asset) uint64 {
-	return calc.RequiredFunds(val, funding, nfo)
-}
-
 // convertCoin converts the asset.Coin to an output.
 func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 	op, _ := coin.(*output)
@@ -1169,15 +1210,15 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 
 // sendWithReturn sends the unsigned transaction with an added output (unless
 // dust) for the change.
-func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
-	addr btcutil.Address, totalIn, totalOut uint64, nfo *dex.Asset) (*wire.MsgTx, *output, error) {
+func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
+	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *output, error) {
 
 	msgTx, err := btc.wallet.SignTx(baseTx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("signing error: %v", err)
 	}
 	size := msgTx.SerializeSize()
-	minFee := nfo.FeeRate * uint64(size)
+	minFee := feeRate * uint64(size)
 	remaining := totalIn - totalOut
 	if minFee > remaining {
 		return nil, nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
@@ -1190,12 +1231,12 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 	changeIdx := len(baseTx.TxOut)
 	changeOutput := wire.NewTxOut(int64(remaining-minFee), changeScript)
 	var changeAdded bool
-	isDust := dexbtc.IsDust(changeOutput, nfo.FeeRate)
+	isDust := dexbtc.IsDust(changeOutput, feeRate)
 	sigCycles := 1
 	if !isDust {
 		// Add the change output with a recalculated fees
 		size += dexbtc.P2WPKHOutputSize
-		fee := nfo.FeeRate * uint64(size)
+		fee := feeRate * uint64(size)
 		changeOutput.Value = int64(remaining - fee)
 		baseTx.AddTxOut(changeOutput)
 		changeAdded = true
@@ -1208,7 +1249,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 				return nil, nil, fmt.Errorf("signing error: %v", err)
 			}
 			size := msgTx.SerializeSize()
-			reqFee := nfo.FeeRate * uint64(size)
+			reqFee := feeRate * uint64(size)
 			if reqFee > remaining {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
@@ -1226,7 +1267,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx,
 			tried[fee] = 1
 			fee = reqFee
 			changeOutput.Value = int64(remaining - fee)
-			if dexbtc.IsDust(changeOutput, nfo.FeeRate) {
+			if dexbtc.IsDust(changeOutput, feeRate) {
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.

@@ -6,22 +6,11 @@ package dcr
 import (
 	"fmt"
 
-	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/dcrec"
 	"github.com/decred/dcrd/dcrec/edwards/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2/schnorr"
 )
-
-// Extract the sender and receiver addresses from a swap contract. If the
-// provided script is not a swap contract, an error will be returned.
-func extractSwapAddresses(pkScript []byte) (string, string, error) {
-	s, r, _, _, err := dexdcr.ExtractSwapDetails(pkScript, chainParams)
-	if err != nil {
-		return "", "", err
-	}
-	return s.String(), r.String(), err
-}
 
 // checkSig checks the signature against the pubkey and message.
 func checkSig(msg, pkBytes, sigBytes []byte, sigType dcrec.SignatureType) error {

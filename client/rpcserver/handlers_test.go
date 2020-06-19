@@ -507,8 +507,9 @@ func TestHandleExchanges(t *testing.T) {
         "symbol": "btc",
         "lotSize": 100000,
         "rateStep": 100000,
-        "feeRate": 100,
-        "swapSize": 224,
+        "maxFeeRate": 100,
+        "swapSize": 225,
+        "swapSizeBase": 76,
         "swapConf": 1
       },
       "42": {
@@ -516,8 +517,9 @@ func TestHandleExchanges(t *testing.T) {
         "symbol": "dcr",
         "lotSize": 100000000,
         "rateStep": 100000000,
-        "feeRate": 10,
-        "swapSize": 253,
+        "maxFeeRate": 10,
+        "swapSize": 251,
+        "swapSizeBase": 85,
         "swapConf": 1
       }
     },
@@ -566,16 +568,18 @@ func TestHandleExchanges(t *testing.T) {
         "symbol": "btc",
         "lotSize": 100000,
         "rateStep": 100000,
-        "feeRate": 100,
-        "swapSize": 224,
+        "maxFeeRate": 100,
+        "swapSize": 225,
+        "swapSizeBase": 76,
         "swapConf": 1
       },
       "42": {
         "symbol": "dcr",
         "lotSize": 100000000,
         "rateStep": 100000000,
-        "feeRate": 10,
-        "swapSize": 253,
+        "maxFeeRate": 10,
+        "swapSize": 251,
+        "swapSizeBase": 85,
         "swapConf": 1
       }
     },

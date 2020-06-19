@@ -42,13 +42,14 @@ var (
 	tLogger dex.Logger
 	tCtx    context.Context
 	tDCR    = &dex.Asset{
-		ID:       42,
-		Symbol:   "dcr",
-		SwapSize: dexdcr.InitTxSize,
-		FeeRate:  10,
-		LotSize:  1e7,
-		RateStep: 100,
-		SwapConf: 1,
+		ID:           42,
+		Symbol:       "dcr",
+		SwapSize:     dexdcr.InitTxSize,
+		SwapSizeBase: dexdcr.InitTxSizeBase,
+		MaxFeeRate:   10,
+		LotSize:      1e7,
+		RateStep:     100,
+		SwapConf:     1,
 	}
 )
 
@@ -67,8 +68,9 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 		t.Fatalf("error reading config options: %v", err)
 	}
 	walletCfg := &asset.WalletConfig{
-		Settings: settings,
-		Account:  "default",
+		Settings:        settings,
+		Account:         "default",
+		FallbackFeeRate: 21,
 		TipChange: func(err error) {
 			blkFunc(name, err)
 		},
@@ -173,14 +175,14 @@ func TestWallet(t *testing.T) {
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
 	}
 	// Grab some coins.
-	utxos, err := rig.beta().Fund(contractValue*3, tDCR)
+	utxos, err := rig.beta().FundOrder(contractValue*3, tDCR)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// Coins should be locked
-	utxos, _ = rig.beta().Fund(contractValue*3, tDCR)
+	utxos, _ = rig.beta().FundOrder(contractValue*3, tDCR)
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
@@ -188,19 +190,19 @@ func TestWallet(t *testing.T) {
 	rig.beta().ReturnCoins([]asset.Coin{utxo})
 	rig.beta().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
-	utxos, _ = rig.beta().Fund(contractValue*3, tDCR)
+	utxos, _ = rig.beta().FundOrder(contractValue*3, tDCR)
 	if !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.beta().ReturnCoins(utxos)
 
 	// Get a separate set of UTXOs for each contract.
-	utxos1, err := rig.beta().Fund(contractValue, tDCR)
+	utxos1, err := rig.beta().FundOrder(contractValue, tDCR)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
-	utxos2, err := rig.beta().Fund(contractValue*2, tDCR)
+	utxos2, err := rig.beta().FundOrder(contractValue*2, tDCR)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -234,7 +236,7 @@ func TestWallet(t *testing.T) {
 		Contracts: []*asset.Contract{contract1, contract2},
 	}
 
-	receipts, _, err := rig.beta().Swap(swaps, tDCR)
+	receipts, _, err := rig.beta().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -292,7 +294,7 @@ func TestWallet(t *testing.T) {
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	_, _, err = rig.alpha().Redeem(redemptions, tDCR)
+	_, _, err = rig.alpha().Redeem(redemptions)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
@@ -334,7 +336,7 @@ func TestWallet(t *testing.T) {
 	lockTime = time.Now().Add(-24 * time.Hour)
 
 	// Have beta send a swap contract to the alpha address.
-	utxos, _ = rig.beta().Fund(contractValue, tDCR)
+	utxos, _ = rig.beta().FundOrder(contractValue, tDCR)
 	contract := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,
@@ -346,7 +348,7 @@ func TestWallet(t *testing.T) {
 		Contracts: []*asset.Contract{contract},
 	}
 
-	receipts, _, err = rig.beta().Swap(swaps, tDCR)
+	receipts, _, err = rig.beta().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -357,20 +359,20 @@ func TestWallet(t *testing.T) {
 	swapCoin = receipts[0].Coin()
 
 	waitNetwork()
-	_, err = rig.beta().Refund(swapCoin.ID(), swapCoin.Redeem(), tDCR)
+	_, err = rig.beta().Refund(swapCoin.ID(), swapCoin.Redeem())
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}
 
 	// Test PayFee
-	coin, err := rig.beta().PayFee(alphaAddress, 1e8, tDCR)
+	coin, err := rig.beta().PayFee(alphaAddress, 1e8)
 	if err != nil {
 		t.Fatalf("error paying fees: %v", err)
 	}
 	tLogger.Infof("fee paid with tx %s", coin.String())
 
 	// Test Withdraw
-	coin, err = rig.beta().Withdraw(alphaAddress, 5e7, 10)
+	coin, err = rig.beta().Withdraw(alphaAddress, 5e7)
 	if err != nil {
 		t.Fatalf("error withdrawing: %v", err)
 	}

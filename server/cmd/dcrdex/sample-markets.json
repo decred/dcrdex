@@ -19,7 +19,7 @@
             "network": "mainnet",
             "lotSize": 100000000,
             "rateStep": 100000000,
-            "feeRate": 10,
+            "maxFeeRate": 10,
             "swapConf": 4,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf"
         }, 
@@ -28,7 +28,7 @@
             "network": "testnet",
             "lotSize": 100000000,
             "rateStep": 100000000,
-            "feeRate": 10,
+            "maxFeeRate": 10,
             "swapConf": 1,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf"
         }, 
@@ -37,7 +37,7 @@
             "network": "mainnet",
             "lotSize": 100000,
             "rateStep": 100000,
-            "feeRate": 100,
+            "maxFeeRate": 100,
             "swapConf": 3
         },
         "BTC_testnet": {
@@ -45,7 +45,7 @@
             "network": "testnet",
             "lotSize": 100000,
             "rateStep": 100000,
-            "feeRate": 100,
+            "maxFeeRate": 100,
             "swapConf": 1
         },
         "LTC_mainnet": {
@@ -53,7 +53,7 @@
             "network": "mainnet",
             "lotSize": 1000000,
             "rateStep": 1000000,
-            "feeRate": 20,
+            "maxFeeRate": 20,
             "swapConf": 6
         },
         "LTC_testnet": {
@@ -61,7 +61,7 @@
             "network": "testnet",
             "lotSize": 1000000,
             "rateStep": 1000000,
-            "feeRate": 20,
+            "maxFeeRate": 20,
             "swapConf": 6
         }
     }

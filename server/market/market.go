@@ -1595,7 +1595,7 @@ func (m *Market) validateOrder(ord order.Order) error {
 	// First check the order commitment before bothering the Market's run loop.
 	c0 := order.Commitment{}
 	if ord.Commitment() == c0 {
-		log.Debugf("Received order %v with zero-value Commitment. Rejecting.", ord)
+		// Note that OrderID may not be valid if ServerTime has not been set.
 		return ErrInvalidCommitment
 	}
 

@@ -73,13 +73,15 @@ func mktConfig() (markets []*dex.MarketInfo) {
 
 func newMatch(maker *order.LimitOrder, taker order.Order, quantity uint64, epochID order.EpochID) *order.Match {
 	return &order.Match{
-		Maker:    maker,
-		Taker:    taker,
-		Quantity: quantity,
-		Rate:     maker.Rate,
-		Status:   order.NewlyMatched,
-		Sigs:     order.Signatures{},
-		Epoch:    epochID,
+		Maker:        maker,
+		Taker:        taker,
+		Quantity:     quantity,
+		Rate:         maker.Rate,
+		FeeRateBase:  12,
+		FeeRateQuote: 14,
+		Status:       order.NewlyMatched,
+		Sigs:         order.Signatures{},
+		Epoch:        epochID,
 	}
 }
 

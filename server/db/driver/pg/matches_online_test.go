@@ -22,6 +22,7 @@ func TestInsertMatch(t *testing.T) {
 	limitSellImmediate := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
 
 	epochID := order.EpochID{132412341, 10}
+	// Taker is selling.
 	matchA := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 
 	base, quote := limitBuyStanding.Base(), limitBuyStanding.Quote()
@@ -93,6 +94,25 @@ func TestInsertMatch(t *testing.T) {
 				if matchData.Active {
 					t.Errorf("Incorrect match active flag, got %v, expected false",
 						matchData.Active)
+				}
+				trade := tt.match.Taker.Trade()
+				if trade != nil {
+					if matchData.TakerSell != trade.Sell {
+						t.Errorf("expected takerSell = %v, got %v", trade.Sell, matchData.TakerSell)
+					}
+					if matchData.BaseRate != tt.match.FeeRateBase {
+						t.Errorf("expected base fee rate %d, got %d", tt.match.FeeRateBase, matchData.BaseRate)
+					}
+				} else {
+					if matchData.BaseRate != 0 {
+						t.Errorf("cancel order should have 0 base fee rate, got %d", matchData.BaseRate)
+					}
+					if matchData.QuoteRate != 0 {
+						t.Errorf("cancel order should have 0 quote fee rate, got %d", matchData.QuoteRate)
+					}
+					if matchData.TakerSell {
+						t.Errorf("cancel order should have false for takerSell")
+					}
 				}
 				if matchData.TakerAddr != "" {
 					t.Errorf("Expected empty taker address for cancel match, got %v", matchData.TakerAddr)
@@ -505,6 +525,7 @@ func TestActiveMatches(t *testing.T) {
 
 	// Make it complete and store it.
 	epochID := order.EpochID{132412341, 10}
+	// maker buy (quote swap asset), taker sell (base swap asset)
 	match := newMatch(limitBuyStanding, limitSellImmediate, limitSellImmediate.Quantity, epochID)
 	match.Status = order.TakerSwapCast // failed here
 	err := archie.InsertMatch(match)   // active by default
@@ -524,6 +545,7 @@ func TestActiveMatches(t *testing.T) {
 
 	// Store it.
 	epochID2 := order.EpochID{132412342, 10}
+	// maker buy (quote swap asset), taker sell (base swap asset)
 	match2 := newMatch(limitBuyStanding2, limitSellImmediate2, limitSellImmediate2.Quantity, epochID2)
 	err = archie.InsertMatch(match2)
 	if err != nil {
@@ -549,17 +571,19 @@ func TestActiveMatches(t *testing.T) {
 	}
 
 	tests := []struct {
-		name         string
-		acctID       account.AccountID
-		numExpected  int
-		wantMatchIDs []order.MatchID
-		wantedErr    error
+		name             string
+		acctID           account.AccountID
+		numExpected      int
+		wantMatchIDs     []order.MatchID
+		wantFeeRateSwaps []uint64
+		wantedErr        error
 	}{
 		{
 			"ok maker",
 			limitBuyStanding.User(),
 			2,
 			[]order.MatchID{match2.ID(), match3.ID()},
+			[]uint64{match2.FeeRateQuote, match3.FeeRateQuote},
 			nil,
 		},
 		{
@@ -567,6 +591,7 @@ func TestActiveMatches(t *testing.T) {
 			limitSellImmediate.User(),
 			2,
 			[]order.MatchID{match2.ID(), match3.ID()},
+			[]uint64{match2.FeeRateBase, match3.FeeRateBase},
 			nil,
 		},
 		{
@@ -575,30 +600,37 @@ func TestActiveMatches(t *testing.T) {
 			0,
 			nil,
 			nil,
+			nil,
 		},
 	}
 
-	idInSlice := func(mid order.MatchID, mids []order.MatchID) bool {
+	idInSlice := func(mid order.MatchID, mids []order.MatchID) int {
 		for i := range mids {
 			if mids[i] == mid {
-				return true
+				return i
 			}
 		}
-		return false
+		return -1
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			matchData, err := archie.ActiveMatches(tt.acctID)
+			userMatch, err := archie.ActiveMatches(tt.acctID)
 			if err != tt.wantedErr {
 				t.Fatal(err)
 			}
-			if len(matchData) != tt.numExpected {
-				t.Errorf("Retrieved %d matches for user %v, expected %d.", len(matchData), tt.acctID, tt.numExpected)
+			if len(userMatch) != tt.numExpected {
+				t.Errorf("Retrieved %d matches for user %v, expected %d.", len(userMatch), tt.acctID, tt.numExpected)
 			}
-			for i := range matchData {
-				if !idInSlice(matchData[i].MatchID, tt.wantMatchIDs) {
-					t.Errorf("Incorrect match ID retrieved. Got %v, expected %v.", matchData[i].MatchID, tt.wantMatchIDs[i])
+			for i := range userMatch {
+				loc := idInSlice(userMatch[i].MatchID, tt.wantMatchIDs)
+				if loc == -1 {
+					t.Errorf("Unknown match ID retrieved: %v.", userMatch[i].MatchID)
+					continue
+				}
+				if tt.wantFeeRateSwaps[loc] != userMatch[i].FeeRateSwap {
+					t.Errorf("incorrect swap fee rate. got %d, want %d",
+						userMatch[i].FeeRateSwap, tt.wantFeeRateSwaps[loc])
 				}
 			}
 		})
