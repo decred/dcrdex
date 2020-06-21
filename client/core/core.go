@@ -2398,6 +2398,44 @@ func (c *Core) handleReconnect(host string) {
 		log.Errorf("unable to authorize DEX at %s: %v", host, err)
 		return
 	}
+
+	dc.booksMtx.Lock()
+	defer dc.booksMtx.Unlock()
+	dc.marketMtx.RLock()
+	for mktKey, mkt := range dc.marketMap {
+		req, err := msgjson.NewRequest(dc.NextID(), msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{
+			Base:  mkt.BaseID,
+			Quote: mkt.QuoteID,
+		})
+		if err != nil {
+			log.Errorf("error encoding 'orderbook' request: %v", err)
+			continue
+		}
+
+		errChan := make(chan error, 1)
+		result := new(msgjson.OrderBook)
+		err = dc.Request(req, func(msg *msgjson.Message) {
+			errChan <- msg.UnmarshalResult(result)
+		})
+		if err != nil {
+			log.Errorf("error re-subscribing to %s orderbook: %v", mkt, err)
+			continue
+		}
+		err = extractError(errChan, requestTimeout, msgjson.OrderBookRoute)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+
+		booky := newBookie(func() { c.unsub(dc, mktKey) })
+		err = booky.Sync(result)
+		if err != nil {
+			log.Error(err)
+			continue
+		}
+		dc.books[mktKey] = booky
+	}
+	dc.marketMtx.RUnlock()
 }
 
 // handleConnectEvent is called when a WsConn indicates that a connection was
