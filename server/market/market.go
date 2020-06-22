@@ -52,7 +52,6 @@ type Swapper interface {
 	Negotiate(matchSets []*order.MatchSet, offBook map[order.OrderID]bool)
 	LockCoins(asset uint32, coins map[order.OrderID][]order.CoinID)
 	LockOrdersCoins(orders []order.Order)
-	TxMonitored(user account.AccountID, asset uint32, txid string) bool
 	CheckUnspent(asset uint32, coinID []byte) error
 }
 
@@ -437,12 +436,6 @@ func newOrderUpdateSignal(ord *orderRecord) *orderUpdateSignal {
 // the synchronous version of SubmitOrderAsync.
 func (m *Market) SubmitOrder(rec *orderRecord) error {
 	return <-m.SubmitOrderAsync(rec)
-}
-
-// TxMonitored checks if a user's transaction for a certain asset is being
-// monitored by the Swapper.
-func (m *Market) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
-	return m.swapper.TxMonitored(user, asset, txid)
 }
 
 // SubmitOrderAsync submits a new order for inclusion into the current epoch.

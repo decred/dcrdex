@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	methodGetBalances       = "getbalances"
 	methodListUnspent       = "listunspent"
 	methodLockUnspent       = "lockunspent"
 	methodListLockUnspent   = "listlockunspent"
@@ -52,6 +53,12 @@ func newWalletClient(node rpcClient, chainParams *chaincfg.Params) *walletClient
 // anylist is a list of RPC parameters to be converted to []json.RawMessage and
 // sent via RawRequest.
 type anylist []interface{}
+
+// Balances retrieves a wallet's balance details.
+func (wc *walletClient) Balances() (*GetBalancesResult, error) {
+	var balances GetBalancesResult
+	return &balances, wc.call(methodGetBalances, nil, &balances)
+}
 
 // ListUnspent retrieves a list of the wallet's UTXOs.
 func (wc *walletClient) ListUnspent() ([]*ListUnspentResult, error) {

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -56,7 +56,7 @@ var (
 const (
 	assetName                = "btc"
 	btcToSatoshi             = 1e8
-	immatureTransactionError = dex.Error("immature output")
+	immatureTransactionError = dex.ErrorKind("immature output")
 )
 
 // btcNode represents a blockchain information fetcher. In practice, it is

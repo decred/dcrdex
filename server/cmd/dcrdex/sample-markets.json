@@ -21,7 +21,6 @@
             "rateStep": 100000000,
             "feeRate": 10,
             "swapConf": 4,
-            "fundConf": 4,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf"
         }, 
         "DCR_testnet": {
@@ -31,7 +30,6 @@
             "rateStep": 100000000,
             "feeRate": 10,
             "swapConf": 1,
-            "fundConf": 1,
             "configPath": "/home/dcrd/.dcrd/dcrd.conf"
         }, 
         "BTC_mainnet": {
@@ -40,8 +38,7 @@
             "lotSize": 100000,
             "rateStep": 100000,
             "feeRate": 100,
-            "swapConf": 3,
-            "fundConf": 3
+            "swapConf": 3
         },
         "BTC_testnet": {
             "bip44symbol": "btc",
@@ -49,8 +46,7 @@
             "lotSize": 100000,
             "rateStep": 100000,
             "feeRate": 100,
-            "swapConf": 1,
-            "fundConf": 1
+            "swapConf": 1
         },
         "LTC_mainnet": {
             "bip44symbol": "ltc",
@@ -58,8 +54,7 @@
             "lotSize": 1000000,
             "rateStep": 1000000,
             "feeRate": 20,
-            "swapConf": 6,
-            "fundConf": 6
+            "swapConf": 6
         },
         "LTC_testnet": {
             "bip44symbol": "ltc",
@@ -67,8 +62,7 @@
             "lotSize": 1000000,
             "rateStep": 1000000,
             "feeRate": 20,
-            "swapConf": 6,
-            "fundConf": 6
+            "swapConf": 6
         }
     }
 }

@@ -14,6 +14,7 @@ require (
 	github.com/decred/dcrd/dcrec v1.0.0
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.0
 	github.com/decred/dcrd/dcrec/secp256k1/v2 v2.0.0
+	github.com/decred/dcrd/dcrjson/v3 v3.0.1
 	github.com/decred/dcrd/dcrutil/v2 v2.0.1
 	github.com/decred/dcrd/hdkeychain/v2 v2.1.0
 	github.com/decred/dcrd/rpc/jsonrpc/types/v2 v2.0.0
@@ -29,7 +30,8 @@ require (
 	github.com/lib/pq v1.2.0
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	go.etcd.io/bbolt v1.3.4
-	golang.org/x/crypto v0.0.0-20200115085410-6d4e4cb37c7d
+	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4
+	golang.org/x/sync v0.0.0-20190423024810-112230192c58
 	gopkg.in/go-ini/ini.v1 v1.55.0
 	gopkg.in/ini.v1 v1.55.0
 )

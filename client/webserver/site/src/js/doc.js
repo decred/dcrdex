@@ -209,12 +209,13 @@ var Easing = {
 /* WalletIcons are used for controlling wallets in various places. */
 export class WalletIcons {
   constructor (box) {
-    const stateIcon = (row, name) => row.querySelector(`[data-state=${name}]`)
+    const stateElement = (row, name) => row.querySelector(`[data-state=${name}]`)
     this.icons = {}
-    this.icons.sleeping = stateIcon(box, 'sleeping')
-    this.icons.locked = stateIcon(box, 'locked')
-    this.icons.unlocked = stateIcon(box, 'unlocked')
-    this.icons.nowallet = stateIcon(box, 'nowallet')
+    this.icons.sleeping = stateElement(box, 'sleeping')
+    this.icons.locked = stateElement(box, 'locked')
+    this.icons.unlocked = stateElement(box, 'unlocked')
+    this.icons.nowallet = stateElement(box, 'nowallet')
+    this.status = stateElement(box, 'status')
   }
 
   /* sleeping sets the icons to indicate that the wallet is not connected. */
@@ -222,6 +223,7 @@ export class WalletIcons {
     const i = this.icons
     Doc.hide(i.locked, i.unlocked, i.nowallet)
     Doc.show(i.sleeping)
+    if (this.status) this.status.textContent = 'off'
   }
 
   /*
@@ -231,6 +233,7 @@ export class WalletIcons {
     const i = this.icons
     Doc.hide(i.unlocked, i.nowallet, i.sleeping)
     Doc.show(i.locked)
+    if (this.status) this.status.textContent = 'locked'
   }
 
   /*
@@ -241,6 +244,7 @@ export class WalletIcons {
     const i = this.icons
     Doc.hide(i.locked, i.nowallet, i.sleeping)
     Doc.show(i.unlocked)
+    if (this.status) this.status.textContent = 'ready'
   }
 
   /* sleeping sets the icons to indicate that no wallet exists. */
@@ -248,6 +252,7 @@ export class WalletIcons {
     const i = this.icons
     Doc.hide(i.locked, i.unlocked, i.sleeping)
     Doc.show(i.nowallet)
+    if (this.status) this.status.textContent = 'no wallet'
   }
 
   /* reads the core.Wallet state and sets the icon visibility. */

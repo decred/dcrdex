@@ -76,8 +76,8 @@ type DB interface {
 	// credentials if the wallet already exists. A wallet is specified by the
 	// pair (asset ID, account name).
 	UpdateWallet(wallet *Wallet) error
-	// UpdateBalanceSet updates a wallet's balance.
-	UpdateBalanceSet(wid []byte, balance *BalanceSet) error
+	// UpdateBalance updates a wallet's balance.
+	UpdateBalance(wid []byte, balance *Balance) error
 	// Wallets lists all saved wallets.
 	Wallets() ([]*Wallet, error)
 	// Backup makes a copy of the database.

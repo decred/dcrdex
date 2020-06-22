@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -21,9 +22,9 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/config"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -45,7 +46,7 @@ const (
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
 	defaultWithdrawalFee = 2
-	minNetworkVersion    = 180100
+	minNetworkVersion    = 190000
 	minProtocolVersion   = 70015
 )
 
@@ -127,7 +128,7 @@ func (op *output) Confirmations() (uint32, error) {
 		return 0, fmt.Errorf("error finding coin: %v", err)
 	}
 	if txOut == nil {
-		return 0, asset.CoinSpentError
+		return 0, asset.CoinNotFoundError
 	}
 	return uint32(txOut.Confirmations), nil
 }
@@ -233,22 +234,25 @@ func init() {
 // client app communicates with the BTC blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	client       *rpcclient.Client
-	node         rpcClient
-	wallet       *walletClient
-	chainParams  *chaincfg.Params
-	log          dex.Logger
-	symbol       string
-	hasConnected uint32
-	// The DEX specifies that change outputs from DEX-monitored transactions are
-	// exempt from minimum confirmation limits, so we must track those as they are
-	// created.
-	changeMtx         sync.RWMutex
-	tradeChange       map[string]time.Time
+	client            *rpcclient.Client
+	node              rpcClient
+	wallet            *walletClient
+	walletInfo        *asset.WalletInfo
+	chainParams       *chaincfg.Params
+	log               dex.Logger
+	symbol            string
+	hasConnected      uint32
 	tipChange         func(error)
 	minNetworkVersion uint64
-	walletInfo        *asset.WalletInfo
 
+	// In the future, the client may wish to specify minimum confirmations for
+	// utxos to fund orders, and allowing change outputs from DEX-related swap
+	// transaction may be part of this client policy.
+	changeMtx   sync.RWMutex
+	tradeChange map[string]time.Time // TODO: delete fully confirmed change
+
+	// Coins returned by Fund are cached for quick reference and for cleanup on
+	// shutdown.
 	fundingMtx   sync.RWMutex
 	fundingCoins map[string]*compositeUTXO
 }
@@ -378,15 +382,10 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	return &wg, nil
 }
 
-// Balance should return the total available funds in the wallet. Balance takes
-// a list of minimum confirmations for which to calculate maturity, and returns
-// a list of corresponding *asset.Balance. Because of the DEX confirmation
-// requirements, a simple getbalance with a minconf argument is not sufficient
-// to see all balance available for the exchanges. Instead, all wallet UTXOs are
-// scanned for those that match confirmation requirements. Part of the
+// Balance returns the total available funds in the wallet. Part of the
 // asset.Wallet interface.
-func (btc *ExchangeWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
-	balances, err := btc.balances(confs)
+func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
+	balances, err := btc.wallet.Balances()
 	if err != nil {
 		return nil, err
 	}
@@ -394,10 +393,12 @@ func (btc *ExchangeWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, balance := range balances {
-		balance.Locked = locked
-	}
-	return balances, err
+
+	return &asset.Balance{
+		Available: toSatoshi(balances.Mine.Trusted),
+		Immature:  toSatoshi(balances.Mine.Immature + balances.Mine.Untrusted),
+		Locked:    locked,
+	}, err
 }
 
 // Fund selects utxos (as asset.Coin) for use in an order. Any Coins returned
@@ -406,12 +407,14 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 	if value == 0 {
 		return nil, fmt.Errorf("cannot fund value = 0")
 	}
-	utxos, _, _, unconf, err := btc.spendableUTXOs(nfo.FundConf)
+	// Now that we allow funding with 0 conf UTXOs, some more logic could be
+	// used out of caution, including preference for >0 confs.
+	utxos, _, avail, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
 	if len(utxos) == 0 {
-		return nil, fmt.Errorf("no funds ready to spend. %.8f unconfirmed", float64(unconf)/1e8)
+		return nil, fmt.Errorf("insufficient funds. %.8f available", float64(avail)/1e8)
 	}
 	var sum uint64
 	var size uint32
@@ -423,7 +426,7 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 		return sum+unspent.amount >= btc.reqFunds(value, size+unspent.input.VBytes(), nfo)
 	}
 
-	addUTXO := func(unspent *compositeUTXO) error {
+	addUTXO := func(unspent *compositeUTXO) {
 		v := unspent.amount
 		op := newOutput(btc.node, unspent.txHash, unspent.vout, v, unspent.redeemScript)
 		coins = append(coins, op)
@@ -431,7 +434,6 @@ func (btc *ExchangeWallet) Fund(value uint64, nfo *dex.Asset) (asset.Coins, erro
 		size += unspent.input.VBytes()
 		fundingCoins[op.String()] = unspent
 		sum += v
-		return nil
 	}
 
 out:
@@ -446,18 +448,12 @@ out:
 		var txout *compositeUTXO
 		for _, txout = range utxos {
 			if isEnoughWith(txout) {
-				err = addUTXO(txout)
-				if err != nil {
-					return nil, err
-				}
+				addUTXO(txout)
 				break out
 			}
 		}
 		// Append the last output, which is the largest.
-		err = addUTXO(txout)
-		if err != nil {
-			return nil, err
-		}
+		addUTXO(txout)
 		// Pop the utxo from the unspents
 		utxos = utxos[:len(utxos)-1]
 	}
@@ -522,7 +518,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	if len(notFound) == 0 {
 		return coins, nil
 	}
-	_, utxoMap, _, _, err := btc.spendableUTXOs(0)
+	_, utxoMap, _, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, err
 	}
@@ -793,9 +789,6 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 	if txOut == nil {
 		return nil, asset.CoinNotFoundError
 	}
-	if txOut == nil {
-		return nil, asset.CoinSpentError
-	}
 	pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %v",
@@ -864,6 +857,9 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	// Get the wallet transaction.
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
 		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txHash, err)
 	}
 	if tx.BlockIndex == 0 {
@@ -993,7 +989,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes, nfo *dex.Asset) (d
 		return nil, fmt.Errorf("error finding unspent contract: %v", err)
 	}
 	if utxo == nil {
-		return nil, asset.CoinSpentError
+		return nil, asset.CoinNotFoundError
 	}
 	val := toSatoshi(utxo.Value)
 	sender, _, lockTime, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
@@ -1094,7 +1090,9 @@ func (btc *ExchangeWallet) send(address string, val uint64, feeRate uint64, subt
 	}
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
-		// btc.log.Errorf("error getting transaction for successful fee: %v", err)
+		if isTxNotFoundErr(err) {
+			return nil, 0, 0, asset.CoinNotFoundError
+		}
 		return nil, 0, 0, fmt.Errorf("failed to fetch transaction after send: %v", err)
 	}
 	for _, details := range tx.Details {
@@ -1114,6 +1112,9 @@ func (btc *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	}
 	tx, err := btc.wallet.GetTransaction(txHash.String())
 	if err != nil {
+		if isTxNotFoundErr(err) {
+			return 0, asset.CoinNotFoundError
+		}
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
@@ -1280,27 +1281,27 @@ type compositeUTXO struct {
 	input        *dexbtc.SpendInfo
 }
 
-// spendableUTXOs filters the RPC utxos for those that are spendable with
-// with regards to the DEX's configuration. The UTXOs will be sorted by
-// ascending value.
-func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[string]*compositeUTXO, uint64, uint64, error) {
+// spendableUTXOs filters the RPC utxos for those that are spendable with with
+// regards to the DEX's configuration, and considered safe to spend according to
+// confirmations and coin source. The UTXOs will be sorted by ascending value.
+func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[string]*compositeUTXO, uint64, error) {
 	unspents, err := btc.wallet.ListUnspent()
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, 0, err
 	}
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
-	var sum, unconf uint64
+	var sum uint64
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	utxoMap := make(map[string]*compositeUTXO, len(unspents))
 	for _, txout := range unspents {
-		if txout.Confirmations >= confs || btc.isDEXChange(txout.TxID, txout.Vout) {
+		if txout.Confirmations >= confs && txout.Safe {
 			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, btc.chainParams)
 			if err != nil {
-				return nil, nil, 0, 0, fmt.Errorf("error reading asset info: %v", err)
+				return nil, nil, 0, fmt.Errorf("error reading asset info: %v", err)
 			}
 			txHash, err := chainhash.NewHashFromStr(txout.TxID)
 			if err != nil {
-				return nil, nil, 0, 0, fmt.Errorf("error decoding txid in ListUnspentResult: %v", err)
+				return nil, nil, 0, fmt.Errorf("error decoding txid in ListUnspentResult: %v", err)
 			}
 			utxo := &compositeUTXO{
 				txHash:       txHash,
@@ -1313,38 +1314,9 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[s
 			utxos = append(utxos, utxo)
 			utxoMap[outpointID(txout.TxID, txout.Vout)] = utxo
 			sum += toSatoshi(txout.Amount)
-		} else {
-			unconf += toSatoshi(txout.Amount)
 		}
 	}
-	return utxos, utxoMap, sum, unconf, nil
-}
-
-// balances creates a slice of *asset.Balance corresponding to the input slice
-// of minconf.
-func (btc *ExchangeWallet) balances(confs []uint32) ([]*asset.Balance, error) {
-	if len(confs) == 0 {
-		return nil, fmt.Errorf("balances confs slice cannot be empty")
-	}
-	unspents, err := btc.wallet.ListUnspent()
-	if err != nil {
-		return nil, err
-	}
-	balances := make([]*asset.Balance, len(confs))
-	for i := range balances {
-		balances[i] = new(asset.Balance)
-	}
-	for _, txout := range unspents {
-		for i, balance := range balances {
-			confReq := confs[i]
-			if txout.Confirmations >= confReq || btc.isDEXChange(txout.TxID, txout.Vout) {
-				balance.Available += toSatoshi(txout.Amount)
-			} else {
-				balance.Immature += toSatoshi(txout.Amount)
-			}
-		}
-	}
-	return balances, nil
+	return utxos, utxoMap, sum, nil
 }
 
 // lockedSats is the total value of locked outputs, as locked with LockUnspent.
@@ -1382,16 +1354,15 @@ func (btc *ExchangeWallet) lockedSats() (uint64, error) {
 }
 
 // addChange adds the output to the list of DEX-trade change outputs. These
-// outputs are tracked because change outputs from DEX-monitored trades are
-// exempt from the fundconf confirmations requirement.
+// outputs are tracked because the client may wish to exempt change outputs from
+// funding coin confirmation requirements.
 func (btc *ExchangeWallet) addChange(txid string, vout uint32) {
 	btc.changeMtx.Lock()
 	defer btc.changeMtx.Unlock()
 	btc.tradeChange[outpointID(txid, vout)] = time.Now()
 }
 
-// isDEXChange checks whether the specified output is a change output from a
-// DEX trade.
+// isDEXChange checks whether the specified output is change from a DEX trade.
 func (btc *ExchangeWallet) isDEXChange(txid string, vout uint32) bool {
 	btc.changeMtx.RLock()
 	_, found := btc.tradeChange[outpointID(txid, vout)]
@@ -1475,4 +1446,11 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 	var txHash chainhash.Hash
 	copy(txHash[:], coinID[:32])
 	return &txHash, binary.BigEndian.Uint32(coinID[32:]), nil
+}
+
+// isTxNotFoundErr will return true if the error indicates that the requested
+// transaction is not known.
+func isTxNotFoundErr(err error) bool {
+	var rpcErr *btcjson.RPCError
+	return errors.As(err, &rpcErr) && rpcErr.Code == btcjson.ErrRPCInvalidAddressOrKey
 }

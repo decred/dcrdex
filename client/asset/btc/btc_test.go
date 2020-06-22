@@ -17,7 +17,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -39,7 +39,6 @@ var (
 		LotSize:  1e6,
 		RateStep: 10,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 	tErr        = fmt.Errorf("test error")
 	tTxID       = "308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad9"
@@ -255,26 +254,27 @@ func TestAvailableFund(t *testing.T) {
 	// With an empty list returned, there should be no error, but the value zero
 	// should be returned.
 	unspents := make([]*ListUnspentResult, 0)
-	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents) // only needed for Fund, not Balance
 	node.rawRes[methodListLockUnspent] = mustMarshal(t, make([]*RPCOutpoint, 0))
-	balances, err := wallet.Balance([]uint32{tBTC.FundConf})
+	var bals GetBalancesResult
+	node.rawRes[methodGetBalances] = mustMarshal(t, &bals)
+	bal, err := wallet.Balance()
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
 	}
-	bal := balances[0]
 	if bal.Available != 0 {
 		t.Fatalf("expected available = 0, got %d", bal.Available)
 	}
 	if bal.Immature != 0 {
-		t.Fatalf("unconf unconf = 0, got %d", bal.Immature)
+		t.Fatalf("expected unconf = 0, got %d", bal.Immature)
 	}
 
-	node.rawErr[methodListUnspent] = tErr
-	_, err = wallet.Balance([]uint32{tBTC.FundConf})
+	node.rawErr[methodGetBalances] = tErr
+	_, err = wallet.Balance()
 	if err == nil {
 		t.Fatalf("no wallet error for rpc error")
 	}
-	node.rawErr[methodListUnspent] = nil
+	node.rawErr[methodGetBalances] = nil
 
 	littleBit := uint64(1e4)
 	littleUnspent := &ListUnspentResult{
@@ -283,9 +283,12 @@ func TestAvailableFund(t *testing.T) {
 		Amount:        float64(littleBit) / 1e8,
 		Confirmations: 0,
 		ScriptPubKey:  tP2PKH,
+		Safe:          true,
 	}
 	unspents = append(unspents, littleUnspent)
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	bals.Mine.Trusted = float64(littleBit) / 1e8
+	node.rawRes[methodGetBalances] = mustMarshal(t, &bals)
 	lockedVal := uint64(1e6)
 	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{
 		{
@@ -298,16 +301,15 @@ func TestAvailableFund(t *testing.T) {
 		Value:         float64(lockedVal) / 1e8,
 	}
 
-	balances, err = wallet.Balance([]uint32{tBTC.FundConf})
+	bal, err = wallet.Balance()
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
-	bal = balances[0]
-	if bal.Available != 0 {
-		t.Fatalf("expected available = 0 for unconf-only, got %d", bal.Available)
+	if bal.Available != littleBit {
+		t.Fatalf("expected available = %d for confirmed utxos, got %d", littleBit, bal.Available)
 	}
-	if bal.Immature != littleBit {
-		t.Fatalf("expected unconf = %d, got %d", littleBit, bal.Immature)
+	if bal.Immature != 0 {
+		t.Fatalf("expected immature = 0, got %d", bal.Immature)
 	}
 	if bal.Locked != lockedVal {
 		t.Fatalf("expected locked = %d, got %d", lockedVal, bal.Locked)
@@ -321,19 +323,21 @@ func TestAvailableFund(t *testing.T) {
 		Confirmations: 1,
 		Vout:          1,
 		ScriptPubKey:  tP2PKH,
+		Safe:          true,
 	})
 	littleUnspent.Confirmations = 1
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
-	balances, err = wallet.Balance([]uint32{tBTC.FundConf})
+	bals.Mine.Trusted += float64(lottaBit) / 1e8
+	node.rawRes[methodGetBalances] = mustMarshal(t, &bals)
+	bal, err = wallet.Balance()
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
-	bal = balances[0]
 	if bal.Available != littleBit+lottaBit {
 		t.Fatalf("expected available = %d for 2 outputs, got %d", littleBit+lottaBit, bal.Available)
 	}
 	if bal.Immature != 0 {
-		t.Fatalf("expected unconf = 0 for 2 outputs, got %d", bal.Immature)
+		t.Fatalf("expected immature = 0 for 2 outputs, got %d", bal.Immature)
 	}
 
 	// Zero value
@@ -366,7 +370,10 @@ func TestAvailableFund(t *testing.T) {
 	}
 	node.rawRes[methodLockUnspent] = []byte(`true`)
 
-	// Fund a little bit.
+	// Fund a little bit, with unsafe littleBit.
+	littleUnspent.Safe = false
+	littleUnspent.Confirmations = 0
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 	spendables, err := wallet.Fund(littleBit-300, tBTC)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
@@ -375,7 +382,22 @@ func TestAvailableFund(t *testing.T) {
 		t.Fatalf("expected 1 spendable, got %d", len(spendables))
 	}
 	v := spendables[0].Value()
-	if v != littleBit {
+	if v != lottaBit { // has to pick the larger output
+		t.Fatalf("expected spendable of value %d, got %d", lottaBit, v)
+	}
+
+	// Now with safe unconfirmed littleBit.
+	littleUnspent.Safe = true
+	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
+	spendables, err = wallet.Fund(littleBit-300, tBTC)
+	if err != nil {
+		t.Fatalf("error funding small amount: %v", err)
+	}
+	if len(spendables) != 1 {
+		t.Fatalf("expected 1 spendable, got %d", len(spendables))
+	}
+	v = spendables[0].Value()
+	if v != littleBit { // now picks the smaller output
 		t.Fatalf("expected spendable of value %d, got %d", littleBit, v)
 	}
 
@@ -459,6 +481,7 @@ func TestFundingCoins(t *testing.T) {
 		TxID:         tTxID,
 		Vout:         vout,
 		ScriptPubKey: tP2PKH,
+		Safe:         true,
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
@@ -526,6 +549,7 @@ func TestFundEdges(t *testing.T) {
 		Amount:        float64(swapVal+backingFees-1) / 1e8,
 		Confirmations: 5,
 		ScriptPubKey:  tP2PKH,
+		Safe:          true,
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
@@ -560,6 +584,7 @@ func TestFundEdges(t *testing.T) {
 		Confirmations: 10,
 		ScriptPubKey:  p2shScriptPubKey,
 		RedeemScript:  p2shRedeem,
+		Safe:          true,
 	}
 	p2pkhUnspent.Amount = float64(halfSwap+backingFees-1) / 1e8
 	unspents = []*ListUnspentResult{p2pkhUnspent, p2shUnspent}
@@ -587,6 +612,7 @@ func TestFundEdges(t *testing.T) {
 		Amount:        float64(swapVal+backingFees-1) / 1e8,
 		Confirmations: 3,
 		ScriptPubKey:  p2wpkhPkScript,
+		Safe:          true,
 	}
 	unspents = []*ListUnspentResult{p2wpkhUnspent}
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
@@ -617,6 +643,7 @@ func TestFundEdges(t *testing.T) {
 		Confirmations: 7,
 		ScriptPubKey:  p2wshPkScript,
 		RedeemScript:  p2wpkhRedeemScript,
+		Safe:          true,
 	}
 	unspents = []*ListUnspentResult{p2wpshUnspent}
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
@@ -1303,6 +1330,7 @@ func testSender(t *testing.T, senderType tSenderType) {
 		Confirmations: 1,
 		Vout:          1,
 		ScriptPubKey:  tP2PKH,
+		Safe:          true,
 	}}
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 

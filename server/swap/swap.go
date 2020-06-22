@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -284,6 +283,9 @@ type Swapper struct {
 	orders *orderSwapTracker
 	// The broadcast timeout.
 	bTimeout time.Duration
+	// Expected locktimes for maker and taker swaps.
+	lockTimeTaker time.Duration
+	lockTimeMaker time.Duration
 	// latencyQ is a queue for coin waiters to deal with network latency.
 	latencyQ *wait.TickerQueue
 	// gracePeriod is a flag that indicates how long clients have to respond to
@@ -332,6 +334,10 @@ type Config struct {
 	// BroadcastTimeout is how long the Swapper will wait for expected swap
 	// transactions following new blocks.
 	BroadcastTimeout time.Duration
+	// LockTimeTaker is the locktime Swapper will use for auditing taker swaps.
+	LockTimeTaker time.Duration
+	// LockTimeTaker is the locktime Swapper will use for auditing maker swaps.
+	LockTimeMaker time.Duration
 }
 
 // NewSwapper is a constructor for a Swapper.
@@ -347,16 +353,18 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 
 	authMgr := cfg.AuthManager
 	swapper := &Swapper{
-		dataDir:     cfg.DataDir,
-		coins:       cfg.Assets,
-		storage:     cfg.Storage,
-		authMgr:     authMgr,
-		latencyQ:    wait.NewTickerQueue(recheckInterval),
-		matches:     make(map[order.MatchID]*matchTracker),
-		orders:      newOrderSwapTracker(),
-		bTimeout:    cfg.BroadcastTimeout,
-		liveWaiters: make(map[waiterKey]*handlerArgs),
-		liveAckers:  make(map[uint64]*msgAckers),
+		dataDir:       cfg.DataDir,
+		coins:         cfg.Assets,
+		storage:       cfg.Storage,
+		authMgr:       authMgr,
+		latencyQ:      wait.NewTickerQueue(recheckInterval),
+		matches:       make(map[order.MatchID]*matchTracker),
+		orders:        newOrderSwapTracker(),
+		bTimeout:      cfg.BroadcastTimeout,
+		lockTimeTaker: cfg.LockTimeTaker,
+		lockTimeMaker: cfg.LockTimeMaker,
+		liveWaiters:   make(map[waiterKey]*handlerArgs),
+		liveAckers:    make(map[uint64]*msgAckers),
 	}
 
 	if cfg.State != nil {
@@ -1019,70 +1027,6 @@ func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRe
 	return
 }
 
-// TxMonitored determines whether the transaction for the given user is involved
-// in a DEX-monitored trade. Note that the swap contract tx is considered
-// monitored until the swap is complete, regardless of confirms. This allows
-// change outputs from a dex-monitored swap contract to be used to fund
-// additional swaps prior to FundConf. e.g. OrderRouter may allow coins to fund
-// orders where: (coins.confs >= FundConf) OR TxMonitored(coins.tx).
-func (s *Swapper) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
-
-	checkMatch := func(match *matchTracker) bool {
-		// Both maker and taker statuses must be locked to check redeem status
-		// and swap tx id.
-		match.makerStatus.mtx.RLock()
-		defer match.makerStatus.mtx.RUnlock()
-		match.takerStatus.mtx.RLock()
-		defer match.takerStatus.mtx.RUnlock()
-
-		// The swap contract of either the maker or taker must correspond to
-		// specified asset to be of interest.
-		switch asset {
-		case match.makerStatus.swapAsset:
-			// Maker's swap transaction is the asset of interest.
-			if user == match.Maker.User() {
-				// The swap contract tx is considered monitored until the swap
-				// is complete, regardless of confirms.
-				return match.makerStatus.swap != nil && match.makerStatus.swap.TxID() == txid
-			}
-
-			// Taker's redemption transaction is the asset of interest.
-			_, takerRedeemDone := s.redeemStatus(match.makerStatus, match.takerStatus)
-			if !takerRedeemDone && user == match.Taker.User() &&
-				match.takerStatus.redemption.TxID() == txid {
-				return true
-			}
-		case match.takerStatus.swapAsset:
-			// Taker's swap transaction is the asset of interest.
-			if user == match.Taker.User() {
-				// The swap contract tx is considered monitored until the swap
-				// is complete, regardless of confirms.
-				return match.takerStatus.swap != nil && match.takerStatus.swap.TxID() == txid
-			}
-
-			// Maker's redemption transaction is the asset of interest.
-			makerRedeemDone := s.makerRedeemStatus(match.makerStatus, match.takerStatus.swapAsset)
-			if !makerRedeemDone && user == match.Maker.User() &&
-				match.makerStatus.redemption.TxID() == txid {
-				return true
-			}
-		}
-
-		return false
-	}
-
-	s.matchMtx.RLock()
-	defer s.matchMtx.RUnlock()
-
-	for _, match := range s.matches {
-		if checkMatch(match) {
-			return true
-		}
-	}
-
-	return false
-}
-
 // checkInaction scans the swapStatus structures relevant to the specified
 // asset. If a client is found to have not acted when required, a match may be
 // revoked and a penalty assigned to the user.
@@ -1570,9 +1514,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		return wait.DontTryAgain
 	}
 
-	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeTaker))
+	reqLockTime := encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeTaker))
 	if stepInfo.actor.isMaker {
-		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(dex.LockTimeMaker))
+		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeMaker))
 	}
 	if contract.LockTime().Before(reqLockTime) {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,

@@ -60,6 +60,7 @@ type TCore struct {
 	cancelErr           error
 	coin                asset.Coin
 	withdrawErr         error
+	logoutErr           error
 }
 
 func (c *TCore) Balance(uint32) (uint64, error) {
@@ -68,7 +69,7 @@ func (c *TCore) Balance(uint32) (uint64, error) {
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return nil, nil
 }
-func (c *TCore) AssetBalances(uint32) (*db.BalanceSet, error) {
+func (c *TCore) AssetBalance(uint32) (*db.Balance, error) {
 	return nil, c.balanceErr
 }
 func (c *TCore) Cancel(pw []byte, sid string) error {
@@ -86,6 +87,9 @@ func (c *TCore) InitializeClient(pw []byte) error {
 }
 func (c *TCore) Login(appPass []byte) (*core.LoginResult, error) {
 	return c.loginResult, c.loginErr
+}
+func (c *TCore) Logout() error {
+	return c.logoutErr
 }
 func (c *TCore) OpenWallet(assetID uint32, pw []byte) error {
 	return c.openWalletErr

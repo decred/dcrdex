@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/server/asset"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcutil"
 )
 
-const ErrReorgDetected = dex.Error("reorg detected")
+const ErrReorgDetected = dex.ErrorKind("reorg detected")
 
 // TXIO is common information stored with an Input or Output.
 type TXIO struct {

@@ -757,7 +757,18 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Side:     uint8(match.Side),
 		})
 	}
+
+	sig, err := auth.signer.Sign(sigMsg)
+	if err != nil {
+		log.Errorf("handleConnect signature error: %v", err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "internal error",
+		}
+	}
+
 	resp := &msgjson.ConnectResult{
+		Sig:     sig.Serialize(),
 		Matches: msgMatches,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)

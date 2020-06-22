@@ -73,14 +73,14 @@ type WalletForm struct {
 
 // WalletState is the current status of an exchange wallet.
 type WalletState struct {
-	Symbol   string         `json:"symbol"`
-	AssetID  uint32         `json:"assetID"`
-	Open     bool           `json:"open"`
-	Running  bool           `json:"running"`
-	Balances *db.BalanceSet `json:"balances"`
-	Address  string         `json:"address"`
-	FeeRate  uint64         `json:"feerate"`
-	Units    string         `json:"units"`
+	Symbol  string      `json:"symbol"`
+	AssetID uint32      `json:"assetID"`
+	Open    bool        `json:"open"`
+	Running bool        `json:"running"`
+	Balance *db.Balance `json:"balance"`
+	Address string      `json:"address"`
+	FeeRate uint64      `json:"feerate"`
+	Units   string      `json:"units"`
 }
 
 // User is information about the user's wallets and DEX accounts.

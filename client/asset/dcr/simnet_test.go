@@ -27,7 +27,7 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
-	dexdcr "decred.org/dcrdex/dex/dcr"
+	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/slog"
 )
@@ -49,12 +49,11 @@ var (
 		LotSize:  1e7,
 		RateStep: 100,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 )
 
 func mineAlpha() error {
-	return exec.Command("tmux", "send-keys", "-t", "dcr-harness:4", "./mine-alpha 1", "C-m").Run()
+	return exec.Command("tmux", "send-keys", "-t", "dcr-harness:0", "./mine-alpha 1", "C-m").Run()
 }
 
 func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
@@ -166,11 +165,10 @@ func TestWallet(t *testing.T) {
 
 	// Check available amount.
 	for name, wallet := range rig.backends {
-		bals, err := wallet.Balance([]uint32{tDCR.FundConf})
+		bal, err := wallet.Balance()
 		if err != nil {
 			t.Fatalf("error getting available: %v", err)
 		}
-		bal := bals[0]
 		tLogger.Debugf("%s %f available, %f unconfirmed, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
 	}

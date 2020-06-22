@@ -23,44 +23,45 @@ const (
 	RPCInternalError                  // 7
 	RPCInitError                      // 8
 	RPCLoginError                     // 9
-	RPCCreateWalletError              // 10
-	RPCOpenWalletError                // 11
-	RPCWalletExistsError              // 12
-	RPCCloseWalletError               // 13
-	RPCGetFeeError                    // 14
-	RPCRegisterError                  // 15
-	RPCArgumentsError                 // 16
-	RPCTradeError                     // 17
-	RPCCancelError                    // 18
-	RPCWithdrawError                  // 19
-	SignatureError                    // 20
-	SerializationError                // 21
-	TransactionUndiscovered           // 22
-	ContractError                     // 23
-	SettlementSequenceError           // 24
-	ResultLengthError                 // 25
-	IDMismatchError                   // 26
-	RedemptionError                   // 27
-	IDTypeError                       // 28
-	AckCountError                     // 29
-	UnknownResponseID                 // 30
-	OrderParameterError               // 31
-	UnknownMarketError                // 32
-	ClockRangeError                   // 33
-	FundingError                      // 34
-	CoinAuthError                     // 35
-	UnknownMarket                     // 36
-	NotSubscribedError                // 37
-	UnauthorizedConnection            // 38
-	AuthenticationError               // 39
-	PubKeyParseError                  // 40
-	FeeError                          // 41
-	InvalidPreimage                   // 42
-	PreimageCommitmentMismatch        // 43
-	UnknownMessageType                // 44
-	AccountClosedError                // 45
-	MarketNotRunningError             // 46
-	TryAgainLaterError                // 47
+	RPCLogoutError                    // 10
+	RPCCreateWalletError              // 11
+	RPCOpenWalletError                // 12
+	RPCWalletExistsError              // 13
+	RPCCloseWalletError               // 14
+	RPCGetFeeError                    // 15
+	RPCRegisterError                  // 16
+	RPCArgumentsError                 // 17
+	RPCTradeError                     // 18
+	RPCCancelError                    // 19
+	RPCWithdrawError                  // 20
+	SignatureError                    // 21
+	SerializationError                // 22
+	TransactionUndiscovered           // 23
+	ContractError                     // 24
+	SettlementSequenceError           // 25
+	ResultLengthError                 // 26
+	IDMismatchError                   // 27
+	RedemptionError                   // 28
+	IDTypeError                       // 29
+	AckCountError                     // 30
+	UnknownResponseID                 // 31
+	OrderParameterError               // 32
+	UnknownMarketError                // 33
+	ClockRangeError                   // 34
+	FundingError                      // 35
+	CoinAuthError                     // 36
+	UnknownMarket                     // 37
+	NotSubscribedError                // 38
+	UnauthorizedConnection            // 39
+	AuthenticationError               // 40
+	PubKeyParseError                  // 41
+	FeeError                          // 42
+	InvalidPreimage                   // 43
+	PreimageCommitmentMismatch        // 44
+	UnknownMessageType                // 45
+	AccountClosedError                // 46
+	MarketNotRunningError             // 47
+	TryAgainLaterError                // 48
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -371,7 +372,7 @@ type Match struct {
 	Signature
 	OrderID    Bytes  `json:"orderid"`
 	MatchID    Bytes  `json:"matchid"`
-	Quantity   uint64 `json:"quantity"`
+	Quantity   uint64 `json:"qty"`
 	Rate       uint64 `json:"rate"`
 	Address    string `json:"address"`
 	ServerTime uint64 `json:"tserver"`
@@ -662,7 +663,7 @@ type OrderNote struct {
 // limit or market order.
 type TradeNote struct {
 	Side     uint8  `json:"side,omitempty"`
-	Quantity uint64 `json:"osize,omitempty"`
+	Quantity uint64 `json:"qty,omitempty"`
 	Rate     uint64 `json:"rate,omitempty"`
 	TiF      uint8  `json:"tif,omitempty"`
 	Time     uint64 `json:"time,omitempty"`
@@ -766,6 +767,7 @@ func (c *Connect) Serialize() []byte {
 
 // ConnectResult is the result result for the ConnectRoute request.
 type ConnectResult struct {
+	Sig     Bytes    `json:"sig"`
 	Matches []*Match `json:"matches"`
 }
 
@@ -867,7 +869,6 @@ type Asset struct {
 	FeeRate  uint64 `json:"feerate"`
 	SwapSize uint64 `json:"swapsize"`
 	SwapConf uint16 `json:"swapconf"`
-	FundConf uint16 `json:"fundconf"`
 }
 
 // ConfigResult is the successful result for the ConfigRoute.

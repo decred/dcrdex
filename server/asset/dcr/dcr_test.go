@@ -19,7 +19,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	dexdcr "decred.org/dcrdex/dex/dcr"
+	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrec"

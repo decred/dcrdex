@@ -509,8 +509,7 @@ func TestHandleExchanges(t *testing.T) {
         "rateStep": 100000,
         "feeRate": 100,
         "swapSize": 224,
-        "swapConf": 1,
-        "fundConf": 1
+        "swapConf": 1
       },
       "42": {
         "id": 42,
@@ -519,8 +518,7 @@ func TestHandleExchanges(t *testing.T) {
         "rateStep": 100000000,
         "feeRate": 10,
         "swapSize": 253,
-        "swapConf": 1,
-        "fundConf": 1
+        "swapConf": 1
       }
     },
 	"confsrequired": 1,
@@ -570,8 +568,7 @@ func TestHandleExchanges(t *testing.T) {
         "rateStep": 100000,
         "feeRate": 100,
         "swapSize": 224,
-        "swapConf": 1,
-        "fundConf": 1
+        "swapConf": 1
       },
       "42": {
         "symbol": "dcr",
@@ -579,8 +576,7 @@ func TestHandleExchanges(t *testing.T) {
         "rateStep": 100000000,
         "feeRate": 10,
         "swapSize": 253,
-        "swapConf": 1,
-        "fundConf": 1
+        "swapConf": 1
       }
     },
     "confsrequired": 1,
@@ -782,6 +778,32 @@ func TestHandleWithdraw(t *testing.T) {
 		}
 		r := &RPCServer{core: tc}
 		payload := handleWithdraw(r, test.params)
+		res := ""
+		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHandleLogout(t *testing.T) {
+	tests := []struct {
+		name        string
+		logoutErr   error
+		wantErrCode int
+	}{{
+		name:        "ok",
+		wantErrCode: -1,
+	}, {
+		name:        "core.Logout error",
+		logoutErr:   errors.New("error"),
+		wantErrCode: msgjson.RPCLogoutError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			logoutErr: test.logoutErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleLogout(r, nil)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatal(err)

@@ -9,15 +9,67 @@ import (
 	"time"
 )
 
-type Error string
-
-func (err Error) Error() string { return string(err) }
-
 const (
-	UnsupportedScriptError = Error("unsupported script type")
-	LockTimeTaker          = 24 * time.Hour
-	LockTimeMaker          = 48 * time.Hour
+	UnsupportedScriptError = ErrorKind("unsupported script type")
+
+	defaultLockTimeTaker = 24 * time.Hour
+	defaultlockTimeMaker = 48 * time.Hour
 )
+
+var (
+	// These string variables are defined to enable setting custom locktime values
+	// that may be used instead of `DefaultLockTimeTaker` and `DefaultLockTimeMaker`
+	// IF running on a test network (testnet or regtest) AND both values are set to
+	// valid duration strings.
+	// Values for both variables may be set at build time using linker flags e.g:
+	// go build -ldflags "-X 'decred.org/dcrdex/dex.testLockTimeTaker=10m' \
+	// -X 'decred.org/dcrdex/dex.testLockTimeMaker=20m'"
+	// Same values should be set when building server and client binaries.
+	testLockTimeTaker string
+	testLockTimeMaker string
+
+	testLockTime struct {
+		taker time.Duration
+		maker time.Duration
+	}
+)
+
+// Set test locktime values on init. Panics if invalid or 0-second duration
+// strings are provided.
+func init() {
+	if testLockTimeTaker == "" && testLockTimeMaker == "" {
+		testLockTime.taker, testLockTime.maker = defaultLockTimeTaker, defaultlockTimeMaker
+		return
+	}
+	testLockTime.taker, _ = time.ParseDuration(testLockTimeTaker)
+	if testLockTime.taker.Seconds() == 0 {
+		panic(fmt.Sprintf("invalid value for testLockTimeTaker: %q", testLockTimeTaker))
+	}
+	testLockTime.maker, _ = time.ParseDuration(testLockTimeMaker)
+	if testLockTime.maker.Seconds() == 0 {
+		panic(fmt.Sprintf("invalid value for testLockTimeMaker: %q", testLockTimeMaker))
+	}
+}
+
+// LockTimeTaker returns the taker locktime value that should be used by both
+// client and server for the specified network. Mainnet uses a constant value
+// while test networks support setting a custom value during build.
+func LockTimeTaker(network Network) time.Duration {
+	if network == Mainnet {
+		return defaultLockTimeTaker
+	}
+	return testLockTime.taker
+}
+
+// LockTimeMaker returns the maker locktime value that should be used by both
+// client and server for the specified network. Mainnet uses a constant value
+// while test networks support setting a custom value during build.
+func LockTimeMaker(network Network) time.Duration {
+	if network == Mainnet {
+		return defaultlockTimeMaker
+	}
+	return testLockTime.maker
+}
 
 // Network flags passed to asset backends to signify which network to use.
 type Network uint8
@@ -28,7 +80,7 @@ const (
 	Regtest
 )
 
-// The DEX recognizes only three networks. Simnet is a alias of Regtest.
+// The DEX recognizes only three networks. Simnet is an alias of Regtest.
 const Simnet = Regtest
 
 // String returns the string representation of a Network.
@@ -66,5 +118,4 @@ type Asset struct {
 	FeeRate  uint64 `json:"feeRate"`
 	SwapSize uint64 `json:"swapSize"`
 	SwapConf uint32 `json:"swapConf"`
-	FundConf uint32 `json:"fundConf"`
 }

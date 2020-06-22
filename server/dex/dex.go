@@ -35,7 +35,6 @@ type AssetConf struct {
 	RateStep   uint64 `json:"rateStep"`
 	FeeRate    uint64 `json:"feeRate"`
 	SwapConf   uint32 `json:"swapConf"`
-	FundConf   uint32 `json:"fundConf"`
 	ConfigPath string `json:"configPath"`
 }
 
@@ -330,7 +329,6 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 				RateStep: assetConf.RateStep,
 				FeeRate:  assetConf.FeeRate,
 				SwapConf: assetConf.SwapConf,
-				FundConf: assetConf.FundConf,
 			},
 			Backend: be,
 		}
@@ -349,7 +347,6 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 			FeeRate:  assetConf.FeeRate,
 			SwapSize: uint64(be.InitTxSize()),
 			SwapConf: uint16(assetConf.SwapConf),
-			FundConf: uint16(assetConf.FundConf),
 		})
 	}
 
@@ -398,6 +395,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: cfg.BroadcastTimeout,
+		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
+		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
 	}
 
 	swapper, err := swap.NewSwapper(swapperCfg)

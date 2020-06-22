@@ -532,6 +532,8 @@ func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
 		Storage:          storage,
 		AuthManager:      authMgr,
 		BroadcastTimeout: txWaitExpiration * 5,
+		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
+		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
 	})
 	if err != nil {
 		panic(err.Error())
@@ -1195,9 +1197,9 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		id:        coinID,
 	}
 
-	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker))
+	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker(dex.Testnet)))
 	if user == matchInfo.maker {
-		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker))
+		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker(dex.Testnet)))
 	}
 
 	if !tLockTimeSpoofer.IsZero() {
@@ -2407,140 +2409,4 @@ func TestState(t *testing.T) {
 	if rig.getTracker() != nil {
 		t.Fatalf("expected matchTracker to be removed")
 	}
-}
-
-func TestTxMonitored(t *testing.T) {
-	sendBlock := func(node *TAsset) {
-		node.bChan <- &asset.BlockUpdate{Err: nil}
-		tickMempool()
-	}
-
-	makerSell := true
-	set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), makerSell)
-	matchInfo := set.matchInfos[0]
-	rig, cleanup := tNewTestRig(matchInfo)
-	defer cleanup()
-
-	rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
-	ensureNilErr := makeEnsureNilErr(t)
-	maker, taker := matchInfo.maker, matchInfo.taker
-
-	makerLockedAsset := matchInfo.match.Maker.Base()  // maker sell locks base asset
-	takerLockedAsset := matchInfo.match.Taker.Quote() // taker buy locks quote asset
-	if !makerSell {
-		// maker buy locks quote asset, taker sell locks base asset
-		makerLockedAsset, takerLockedAsset = takerLockedAsset, makerLockedAsset
-	}
-
-	tracker := rig.getTracker()
-	if tracker.Status != order.NewlyMatched {
-		t.Fatalf("match not marked as NewlyMatched: %d", tracker.Status)
-	}
-
-	// Maker acks match and sends swap tx.
-	ensureNilErr(rig.ackMatch_maker(true))
-	ensureNilErr(rig.sendSwap_maker(true))
-	makerContractTx := rig.matchInfo.db.makerSwap.coin.TxID()
-	if !rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
-		t.Errorf("maker contract %s (asset %d) was not monitored",
-			makerContractTx, makerLockedAsset)
-	}
-
-	if tracker.Status != order.MakerSwapCast {
-		t.Fatalf("match not marked as MakerSwapCast: %d", tracker.Status)
-	}
-	matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
-	sendBlock(rig.abcNode)
-	sendBlock(rig.xyzNode)
-
-	// For the taker, there must be two acknowledgements before broadcasting the
-	// swap transaction, the match ack and the audit ack.
-	ensureNilErr(rig.ackMatch_taker(true))
-	ensureNilErr(rig.auditSwap_taker())
-	ensureNilErr(rig.ackAudit_taker(true))
-	ensureNilErr(rig.sendSwap_taker(true))
-
-	takerContractTx := rig.matchInfo.db.takerSwap.coin.TxID()
-	if !rig.swapper.TxMonitored(taker.acct, takerLockedAsset, takerContractTx) {
-		t.Errorf("taker contract %s (asset %d) was not monitored",
-			takerContractTx, takerLockedAsset)
-	}
-
-	if tracker.Status != order.TakerSwapCast {
-		t.Fatalf("match not marked as TakerSwapCast: %d", tracker.Status)
-	}
-	sendBlock(rig.abcNode)
-	sendBlock(rig.xyzNode)
-
-	ensureNilErr(rig.auditSwap_maker())
-	ensureNilErr(rig.ackAudit_maker(true))
-
-	// Set the number of confirmations on the contracts.
-	//tracker.makerStatus.swapTime
-	// tracker.makerStatus.swapConfirmed = time.Now()
-	// tracker.takerStatus.swapConfirmed = time.Now()
-	matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
-
-	// send a block through for either chain to trigger a swap check.
-	sendBlock(rig.abcNode)
-	sendBlock(rig.xyzNode)
-
-	// Now redeem
-
-	ensureNilErr(rig.redeem_maker(true))
-
-	makerRedeemTx := rig.matchInfo.db.makerRedeem.coin.TxID()
-	if !rig.swapper.TxMonitored(maker.acct, takerLockedAsset, makerRedeemTx) {
-		t.Errorf("maker redeem %s (asset %d) was not monitored",
-			makerRedeemTx, takerLockedAsset)
-	}
-
-	if tracker.Status != order.MakerRedeemed {
-		t.Fatalf("match not marked as MakerRedeemed: %d", tracker.Status)
-	}
-
-	ensureNilErr(rig.ackRedemption_taker(true))
-	ensureNilErr(rig.redeem_taker(true))
-
-	takerRedeemTx := rig.matchInfo.db.takerRedeem.coin.TxID()
-	if !rig.swapper.TxMonitored(taker.acct, makerLockedAsset, takerRedeemTx) {
-		t.Errorf("taker redeem %s (asset %d) was not monitored",
-			takerRedeemTx, makerLockedAsset)
-	}
-
-	if tracker.Status != order.MatchComplete {
-		t.Fatalf("match not marked as MatchComplete: %d", tracker.Status)
-	}
-
-	ensureNilErr(rig.ackRedemption_maker(true))
-
-	// Confirm both redeem txns up to SwapConf so they are no longer monitored.
-	matchInfo.db.makerRedeem.coin.setConfs(int64(rig.abc.SwapConf))
-	matchInfo.db.takerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
-
-	if rig.swapper.TxMonitored(taker.acct, makerLockedAsset, takerRedeemTx) {
-		t.Errorf("taker redeem %s (asset %d) was still monitored",
-			takerRedeemTx, makerLockedAsset)
-	}
-
-	if rig.swapper.TxMonitored(maker.acct, takerLockedAsset, makerRedeemTx) {
-		t.Errorf("maker redeem %s (asset %d) was still monitored",
-			makerRedeemTx, takerLockedAsset)
-	}
-
-	// The match should also be gone from matchTracker, so the contracts should
-	// no longer be monitored either.
-
-	sendBlock(rig.abcNode)
-
-	if rig.swapper.TxMonitored(maker.acct, makerLockedAsset, makerContractTx) {
-		t.Errorf("maker contract %s (asset %d) was still monitored",
-			makerContractTx, makerLockedAsset)
-	}
-
-	if rig.swapper.TxMonitored(taker.acct, takerLockedAsset, takerContractTx) {
-		t.Errorf("taker contract %s (asset %d) was still monitored",
-			takerContractTx, takerLockedAsset)
-	}
-
 }

@@ -17,7 +17,7 @@ export default class WalletsPage extends BasePage {
     const page = this.page = Doc.parsePage(body, [
       'rightBox',
       // Table Rows
-      'assetArrow', 'balanceArrow', 'statusArrow', 'walletTable', 'txtStatus',
+      'assetArrow', 'balanceArrow', 'statusArrow', 'walletTable',
       // Available markets
       'markets', 'dexTitle', 'marketsBox', 'oneMarket', 'marketsFor',
       'marketsCard',
@@ -231,7 +231,7 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     page.withdrawAddr.value = ''
     page.withdrawAmt.value = ''
-    page.withdrawAvail.textContent = (wallet.balances.zeroConf.available / 1e8).toFixed(8)
+    page.withdrawAvail.textContent = (wallet.balance.available / 1e8).toFixed(8)
     page.withdrawLogo.src = Doc.logoPath(asset.symbol)
     page.withdrawName.textContent = asset.info.name
     page.withdrawFee.textContent = wallet.feerate
@@ -312,7 +312,7 @@ export default class WalletsPage extends BasePage {
   /* handleBalance handles notifications updating a wallet's balance. */
   handleBalanceNote (note) {
     const td = this.page.walletTable.querySelector(`[data-balance-target="${note.assetID}"]`)
-    td.textContent = (note.balances.zeroConf.available / 1e8).toFixed(8)
+    td.textContent = (note.balance.available / 1e8).toFixed(8)
   }
 }
 

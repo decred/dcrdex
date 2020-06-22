@@ -13,7 +13,7 @@ string in API messages.
 
 ==Step 1: Registration==
 
-The user creates a websocket connection and sends their
+The user creates a WebSocket connection and sends their
 [[fundamentals.mediawiki/#Identities_based_on_Public_Key_Infrastructure_PKI_Key_Pairs|public account key]].
 The message is signed with the corresponding private account key. The response
 includes the server's public key. The server's public key will also be

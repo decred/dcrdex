@@ -75,7 +75,7 @@ export default class Application {
       this.assets[wallet.assetID].wallet = wallet
       this.walletMap[wallet.assetID] = wallet
       const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-      balances.forEach(el => { el.textContent = (wallet.balances.zeroConf.available / 1e8).toFixed(8) })
+      balances.forEach(el => { el.textContent = (wallet.balance.available / 1e8).toFixed(8) })
     })
     ws.registerRoute(notificationRoute, note => {
       this.notify(note)
@@ -326,7 +326,7 @@ export default class Application {
       }
       case 'balance': {
         const wallet = this.user.assets[note.assetID].wallet
-        if (wallet) wallet.balances = note.balances
+        if (wallet) wallet.balance = note.balance
         break
       }
       case 'feepayment':

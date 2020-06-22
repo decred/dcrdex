@@ -235,7 +235,6 @@ type TMarketTunnel struct {
 	epochIdx   uint64
 	epochDur   uint64
 	locked     bool
-	watched    bool
 	cancelable bool
 }
 
@@ -267,10 +266,6 @@ func (m *TMarketTunnel) MidGap() uint64 {
 
 func (m *TMarketTunnel) CoinLocked(assetID uint32, coinid order.CoinID) bool {
 	return m.locked
-}
-
-func (m *TMarketTunnel) TxMonitored(user account.AccountID, asset uint32, txid string) bool {
-	return m.watched
 }
 
 func (m *TMarketTunnel) MarketBuyBuffer() float64 {
@@ -416,7 +411,6 @@ var assetBTC = &asset.BackedAsset{
 		FeeRate:  4,
 		SwapSize: dummySize,
 		SwapConf: 2,
-		FundConf: 2,
 	},
 }
 
@@ -429,7 +423,6 @@ var assetDCR = &asset.BackedAsset{
 		FeeRate:  10,
 		SwapSize: dummySize,
 		SwapConf: 2,
-		FundConf: 2,
 	},
 }
 
@@ -442,7 +435,6 @@ var assetUnknown = &asset.BackedAsset{
 		FeeRate:  10,
 		SwapSize: 1,
 		SwapConf: 0,
-		FundConf: 0,
 	},
 }
 
@@ -454,6 +446,7 @@ func randomBytes(len int) []byte {
 
 func makeEnsureErr(t *testing.T) func(tag string, rpcErr *msgjson.Error, code int) {
 	return func(tag string, rpcErr *msgjson.Error, code int) {
+		t.Helper()
 		if rpcErr == nil {
 			if code == -1 {
 				return
@@ -1043,20 +1036,6 @@ func testPrefixTrade(prefix *msgjson.Prefix, trade *msgjson.Trade, fundingAsset,
 	checkCode("utxo auth error", msgjson.CoinAuthError)
 	utxoAuthErr = nil
 
-	// UTXO Confirmations error
-	utxoConfsErr = dummyError
-	checkCode("utxo confs error", msgjson.FundingError)
-	utxoConfsErr = nil
-
-	// Not enough confirmations
-	utxoConfs = 0
-	checkCode("utxo no confs", msgjson.FundingError)
-
-	// Check 0 confs, but DEX-monitored transaction.
-	oRig.market.watched = true
-	checkCode("dex-monitored unconfirmed", -1)
-	utxoConfs = 2
-	oRig.market.watched = false
 	// Clear the order from the epoch.
 	oRig.market.pop()
 
@@ -1239,6 +1218,7 @@ func findOrder(id msgjson.Bytes, books ...[]*order.LimitOrder) *order.LimitOrder
 }
 
 func getEpochNoteFromLink(t *testing.T, link *TLink) *msgjson.EpochOrderNote {
+	t.Helper()
 	noteMsg := link.getSend()
 	if noteMsg == nil {
 		t.Fatalf("no epoch notification sent")
@@ -1252,6 +1232,7 @@ func getEpochNoteFromLink(t *testing.T, link *TLink) *msgjson.EpochOrderNote {
 }
 
 func getBookNoteFromLink(t *testing.T, link *TLink) *msgjson.BookOrderNote {
+	t.Helper()
 	noteMsg := link.getSend()
 	if noteMsg == nil {
 		t.Fatalf("no epoch notification sent")
@@ -1265,6 +1246,7 @@ func getBookNoteFromLink(t *testing.T, link *TLink) *msgjson.BookOrderNote {
 }
 
 func getUpdateRemainingNoteFromLink(t *testing.T, link *TLink) *msgjson.UpdateRemainingNote {
+	t.Helper()
 	noteMsg := link.getSend()
 	if noteMsg == nil {
 		t.Fatalf("no epoch notification sent")
@@ -1278,6 +1260,7 @@ func getUpdateRemainingNoteFromLink(t *testing.T, link *TLink) *msgjson.UpdateRe
 }
 
 func getUnbookNoteFromLink(t *testing.T, link *TLink) *msgjson.UnbookOrderNote {
+	t.Helper()
 	noteMsg := link.getSend()
 	if noteMsg == nil {
 		t.Fatalf("no epoch notification sent")
@@ -1308,6 +1291,7 @@ func TestRouter(t *testing.T) {
 	router := rig.router
 
 	checkResponse := func(tag, mktName string, msgID uint64, conn *TLink) []*msgjson.BookOrderNote {
+		t.Helper()
 		respMsg := conn.getSend()
 		if respMsg == nil {
 			t.Fatalf("(%s): no response sent for subscription", tag)
@@ -1338,6 +1322,7 @@ func TestRouter(t *testing.T) {
 	}
 
 	compareTrade := func(msgOrder *msgjson.BookOrderNote, ord order.Order, tag string) {
+		t.Helper()
 		prefix, trade := ord.Prefix(), ord.Trade()
 		if trade.Sell != (msgOrder.Side == msgjson.SellOrderNum) {
 			t.Fatalf("%s: message order has wrong side marked. sell = %t, side = '%d'", tag, trade.Sell, msgOrder.Side)
@@ -1351,6 +1336,7 @@ func TestRouter(t *testing.T) {
 	}
 
 	compareLO := func(msgOrder *msgjson.BookOrderNote, lo *order.LimitOrder, tifFlag uint8, tag string) {
+		t.Helper()
 		if msgOrder.Rate != lo.Rate {
 			t.Fatalf("%s: message order rate incorrect. expected %d, got %d", tag, lo.Rate, msgOrder.Rate)
 		}
@@ -1363,6 +1349,7 @@ func TestRouter(t *testing.T) {
 	// A helper function to scan through the received msgjson.OrderBook.Orders and
 	// compare the orders to the order book.
 	checkBook := func(source *TBookSource, tifFlag uint8, tag string, msgOrders ...*msgjson.BookOrderNote) {
+		t.Helper()
 		for i, msgOrder := range msgOrders {
 			lo := findBookOrder(msgOrder.OrderID, source)
 			if lo == nil {
@@ -1610,6 +1597,7 @@ func TestBadMessages(t *testing.T) {
 	link, sub := newSubscriber(mkt1)
 
 	checkErr := func(tag string, rpcErr *msgjson.Error, code int) {
+		t.Helper()
 		if rpcErr == nil {
 			t.Fatalf("%s: no error", tag)
 		}

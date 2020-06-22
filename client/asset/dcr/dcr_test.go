@@ -15,7 +15,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
-	dexdcr "decred.org/dcrdex/dex/dcr"
+	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/chaincfg/v2"
 	"github.com/decred/dcrd/dcrec"
@@ -41,7 +41,6 @@ var (
 		LotSize:  tLotSize,
 		RateStep: 100,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 	tErr         = fmt.Errorf("test error")
 	tTxID        = "308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad9"
@@ -129,6 +128,8 @@ type tRPCClient struct {
 	rawTxErr        error
 	unspent         []walletjson.ListUnspentResult
 	unspentErr      error
+	balanceResult   *walletjson.GetBalanceResult
+	balanceErr      error
 	lockUnspentErr  error
 	changeAddr      dcrutil.Address
 	changeAddrErr   error
@@ -214,6 +215,10 @@ func (c *tRPCClient) addRawTx(blockHeight int64, tx *chainjson.TxRawResult) (*ch
 	return blkHash, block
 }
 
+func (c *tRPCClient) GetBalanceMinConf(account string, minConfirms int) (*walletjson.GetBalanceResult, error) {
+	return c.balanceResult, c.balanceErr
+}
+
 func (c *tRPCClient) ListUnspentMin(int) ([]walletjson.ListUnspentResult, error) {
 	return c.unspent, c.unspentErr
 }
@@ -284,19 +289,37 @@ func TestAvailableFund(t *testing.T) {
 	// should be returned.
 	unspents := make([]walletjson.ListUnspentResult, 0)
 	node.unspent = unspents
-	balances, err := wallet.Balance([]uint32{tDCR.FundConf})
+	balanceResult := &walletjson.GetBalanceResult{
+		Balances: []walletjson.GetAccountBalanceResult{
+			{
+				AccountName: wallet.acct,
+			},
+		},
+	}
+	node.balanceResult = balanceResult
+	bal, err := wallet.Balance()
 	if err != nil {
 		t.Fatalf("error for zero utxos: %v", err)
 	}
-	bal := balances[0]
 	if bal.Available != 0 {
 		t.Fatalf("expected available = 0, got %d", bal.Available)
 	}
 	if bal.Immature != 0 {
-		t.Fatalf("unconf unconf = 0, got %d", bal.Immature)
+		t.Fatalf("expected unconf = 0, got %d", bal.Immature)
 	}
 
 	littleBit := uint64(1e7)
+
+	balanceResult = &walletjson.GetBalanceResult{
+		Balances: []walletjson.GetAccountBalanceResult{
+			{
+				AccountName: wallet.acct,
+				Spendable:   float64(littleBit) / 1e8,
+			},
+		},
+	}
+	node.balanceResult = balanceResult
+
 	littleUnspent := walletjson.ListUnspentResult{
 		TxID:          tTxID,
 		Address:       tPKHAddr.String(),
@@ -313,23 +336,22 @@ func TestAvailableFund(t *testing.T) {
 	}
 	node.txOutRes[outpointID(tTxHash, 0)] = makeGetTxOutRes(1, 1, tP2PKHScript)
 
-	balances, err = wallet.Balance([]uint32{tDCR.FundConf})
+	bal, err = wallet.Balance()
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
-	bal = balances[0]
-	if bal.Available != 0 {
-		t.Fatalf("expected available = 0 for unconf-only, got %d", bal.Available)
+	if bal.Available != littleBit {
+		t.Fatalf("expected available = %d for confirmed utxos, got %d", littleBit, bal.Available)
 	}
-	if bal.Immature != littleBit {
-		t.Fatalf("expected unconf = %d, got %d", littleBit, bal.Immature)
+	if bal.Immature != 0 {
+		t.Fatalf("expected immature = %d, got %d", 0, bal.Immature)
 	}
 	if bal.Locked != tLotSize {
 		t.Fatalf("expected locked = %d, got %d", tLotSize, bal.Locked)
 	}
 
 	lottaBit := uint64(1e9)
-	littleUnspent.Confirmations = 1
+	balanceResult.Balances[0].Spendable += float64(lottaBit) / 1e8
 	unspents = []walletjson.ListUnspentResult{littleUnspent, {
 		TxID:          tTxID,
 		Address:       tPKHAddr.String(),
@@ -339,11 +361,10 @@ func TestAvailableFund(t *testing.T) {
 		ScriptPubKey:  hex.EncodeToString(tP2PKHScript),
 	}}
 	node.unspent = unspents
-	balances, err = wallet.Balance([]uint32{tDCR.FundConf})
+	bal, err = wallet.Balance()
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
-	bal = balances[0]
 	if bal.Available != littleBit+lottaBit {
 		t.Fatalf("expected available = %d for 2 outputs, got %d", littleBit+lottaBit, bal.Available)
 	}
@@ -381,7 +402,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 	node.lockUnspentErr = nil
 
-	// Fund a little bit.
+	// Fund a little bit, but small output is unconfirmed.
 	spendables, err := wallet.Fund(littleBit-5000, tDCR)
 	if err != nil {
 		t.Fatalf("error funding small amount: %v", err)
@@ -390,6 +411,21 @@ func TestAvailableFund(t *testing.T) {
 		t.Fatalf("expected 1 spendable, got %d", len(spendables))
 	}
 	v := spendables[0].Value()
+	if v != lottaBit {
+		t.Fatalf("expected spendable of value %d, got %d", lottaBit, v)
+	}
+
+	// Now confirm the little bit and have it selected.
+	unspents[0].Confirmations++
+	littleUnspent.Confirmations++ // for consistency (no indirection from unspents)
+	spendables, err = wallet.Fund(littleBit-5000, tDCR)
+	if err != nil {
+		t.Fatalf("error funding small amount: %v", err)
+	}
+	if len(spendables) != 1 {
+		t.Fatalf("expected 1 spendable, got %d", len(spendables))
+	}
+	v = spendables[0].Value()
 	if v != littleBit {
 		t.Fatalf("expected spendable of value %d, got %d", littleBit, v)
 	}

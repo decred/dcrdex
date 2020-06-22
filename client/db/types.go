@@ -346,16 +346,53 @@ func decodeOrderProof_v0(pushes [][]byte) (*OrderProof, error) {
 	}, nil
 }
 
-// encodeBalance serializes an asset.Balance.
-func encodeBalance(bal *asset.Balance) []byte {
+// encodeAssetBalance serializes an asset.Balance.
+func encodeAssetBalance(bal *asset.Balance) []byte {
 	return dbBytes{0}.
 		AddData(uint64Bytes(bal.Available)).
 		AddData(uint64Bytes(bal.Immature)).
 		AddData(uint64Bytes(bal.Locked))
 }
 
-// encodeBalance deserializes an asset.Balance.
-func decodeBalance(b []byte) (*asset.Balance, error) {
+// decodeAssetBalance deserializes an asset.Balance.
+func decodeAssetBalance(b []byte) (*asset.Balance, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeAssetBalance_v0(pushes)
+	}
+	return nil, fmt.Errorf("unknown Balance version %d", ver)
+}
+
+func decodeAssetBalance_v0(pushes [][]byte) (*asset.Balance, error) {
+	if len(pushes) != 3 {
+		return nil, fmt.Errorf("decodeBalance_v0: expected 3 push, got %d", len(pushes))
+	}
+	return &asset.Balance{
+		Available: intCoder.Uint64(pushes[0]),
+		Immature:  intCoder.Uint64(pushes[1]),
+		Locked:    intCoder.Uint64(pushes[2]),
+	}, nil
+}
+
+// Balance represents a wallet's balance in various contexts.
+type Balance struct {
+	asset.Balance
+	Stamp time.Time `json:"stamp"`
+}
+
+// Encode encodes the Balance to a versioned blob.
+func (b *Balance) Encode() []byte {
+	return dbBytes{0}.
+		AddData(encodeAssetBalance(&b.Balance)).
+		AddData(uint64Bytes(encode.UnixMilliU(b.Stamp)))
+}
+
+// DecodeBalance decodes the versioned blob to a *Balance.
+func DecodeBalance(b []byte) (*Balance, error) {
 	ver, pushes, err := encode.DecodeBlob(b)
 	if err != nil {
 		return nil, err
@@ -367,77 +404,22 @@ func decodeBalance(b []byte) (*asset.Balance, error) {
 	return nil, fmt.Errorf("unknown Balance version %d", ver)
 }
 
-func decodeBalance_v0(pushes [][]byte) (*asset.Balance, error) {
-	if len(pushes) != 3 {
-		return nil, fmt.Errorf("decodeBalance_v0: expected 3 push, got %d", len(pushes))
-	}
-	return &asset.Balance{
-		Available: intCoder.Uint64(pushes[0]),
-		Immature:  intCoder.Uint64(pushes[1]),
-		Locked:    intCoder.Uint64(pushes[2]),
-	}, nil
-}
-
-// BalanceSet represents a wallet's balance in various contexts, which includes
-// the zero-conf case, and balances for all asset-supporting exchanges. The
-// separate balances are required because how much is available depends on an
-// exchange's FundConf setting.
-type BalanceSet struct {
-	ZeroConf *asset.Balance            `json:"zeroConf"`
-	XC       map[string]*asset.Balance `json:"xc"`
-	Stamp    time.Time                 `json:"stamp"`
-}
-
-// Encode encodes the BalanceSet to a versioned blob.
-func (b *BalanceSet) Encode() []byte {
-	enc := dbBytes{0}.
-		AddData(encodeBalance(b.ZeroConf)).
-		AddData(uint64Bytes(encode.UnixMilliU(b.Stamp)))
-
-	for host, bal := range b.XC {
-		enc.AddData([]byte(host)).AddData(encodeBalance(bal))
-	}
-	return enc
-}
-
-// DecodeBalanceSet decodes the versioned blob to a *BalanceSet.
-func DecodeBalanceSet(b []byte) (*BalanceSet, error) {
-	ver, pushes, err := encode.DecodeBlob(b)
-	if err != nil {
-		return nil, err
-	}
-	switch ver {
-	case 0:
-		return decodeBalanceSet_v0(pushes)
-	}
-	return nil, fmt.Errorf("unknown Balance version %d", ver)
-}
-
-func decodeBalanceSet_v0(pushes [][]byte) (*BalanceSet, error) {
+func decodeBalance_v0(pushes [][]byte) (*Balance, error) {
 	if len(pushes) < 2 {
 		return nil, fmt.Errorf("decodeBalances_v0: expected >= 2 pushes. got %d", len(pushes))
 	}
 	if len(pushes)%2 != 0 {
 		return nil, fmt.Errorf("decodeBalances_v0: expected an even number of pushes, got %d", len(pushes))
 	}
-	zeroConf, err := decodeBalance(pushes[0])
+	bal, err := decodeAssetBalance(pushes[0])
 	if err != nil {
 		return nil, fmt.Errorf("decodeBalances_v0: error decoding zero conf balance: %v", err)
 	}
 
-	b := &BalanceSet{
-		ZeroConf: zeroConf,
-		Stamp:    encode.UnixTimeMilli(int64(intCoder.Uint64(pushes[1]))),
-	}
-	for i := 2; i < len(pushes); i += 2 {
-		host := string(pushes[i])
-		bal, err := decodeBalance(pushes[i+1])
-		if err != nil {
-			return nil, fmt.Errorf("decodeBalances_v0: error decoding balance for %s: %v", host, err)
-		}
-		b.XC[host] = bal
-	}
-	return b, nil
+	return &Balance{
+		Balance: *bal,
+		Stamp:   encode.UnixTimeMilli(int64(intCoder.Uint64(pushes[1]))),
+	}, nil
 }
 
 // Wallet is information necessary to create an asset.Wallet.
@@ -445,7 +427,7 @@ type Wallet struct {
 	AssetID     uint32
 	Account     string
 	Settings    map[string]string
-	Balances    *BalanceSet
+	Balance     *Balance
 	EncryptedPW []byte
 	Address     string
 }

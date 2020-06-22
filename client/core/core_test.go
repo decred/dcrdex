@@ -1,3 +1,5 @@
+// +build !harness
+
 package core
 
 import (
@@ -18,12 +20,12 @@ import (
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex"
-	dexbtc "decred.org/dcrdex/dex/btc"
 	"decred.org/dcrdex/dex/calc"
-	dexdcr "decred.org/dcrdex/dex/dcr"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
+	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/dex/wait"
@@ -43,7 +45,6 @@ var (
 		LotSize:  1e7,
 		RateStep: 100,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 
 	tBTC = &dex.Asset{
@@ -54,7 +55,6 @@ var (
 		LotSize:  1e6,
 		RateStep: 10,
 		SwapConf: 1,
-		FundConf: 1,
 	}
 	tDexPriv         *secp256k1.PrivateKey
 	tDexKey          *secp256k1.PublicKey
@@ -79,7 +79,6 @@ func uncovertAssetInfo(ai *dex.Asset) *msgjson.Asset {
 		FeeRate:  ai.FeeRate,
 		SwapSize: ai.SwapSize,
 		SwapConf: uint16(ai.SwapConf),
-		FundConf: uint16(ai.FundConf),
 	}
 }
 
@@ -98,6 +97,11 @@ func makeAcker(serializer func(msg *msgjson.Message) msgjson.Signable) func(msg 
 }
 
 var (
+	invalidAcker = func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, msg, nil)
+		f(resp)
+		return nil
+	}
 	initAcker = makeAcker(func(msg *msgjson.Message) msgjson.Signable {
 		init := new(msgjson.Init)
 		msg.Unmarshal(init)
@@ -310,7 +314,7 @@ func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
 	return tdb.updateWalletErr
 }
 
-func (tdb *TDB) UpdateBalanceSet(wid []byte, balance *db.BalanceSet) error {
+func (tdb *TDB) UpdateBalance(wid []byte, balance *db.Balance) error {
 	return nil
 }
 
@@ -347,10 +351,10 @@ func (tdb *TDB) Backup() error {
 func (tdb *TDB) AckNotification(id []byte) error { return nil }
 
 type tCoin struct {
-	id       []byte
-	confs    uint32
-	confsErr error
-	val      uint64
+	id, script []byte
+	confs      uint32
+	confsErr   error
+	val        uint64
 }
 
 func (c *tCoin) ID() dex.Bytes {
@@ -370,7 +374,7 @@ func (c *tCoin) Confirmations() (uint32, error) {
 }
 
 func (c *tCoin) Redeem() dex.Bytes {
-	return nil
+	return c.script
 }
 
 type tReceipt struct {
@@ -428,7 +432,7 @@ type TXCWallet struct {
 	connectErr     error
 	unlockErr      error
 	balErr         error
-	bals           []*asset.Balance
+	bal            *asset.Balance
 	fundingCoins   asset.Coins
 	fundingCoinErr error
 	lockErr        error
@@ -456,18 +460,14 @@ func (w *TXCWallet) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 
 func (w *TXCWallet) Run(ctx context.Context) { <-ctx.Done() }
 
-func (w *TXCWallet) Balance(confs []uint32) ([]*asset.Balance, error) {
+func (w *TXCWallet) Balance() (*asset.Balance, error) {
 	if w.balErr != nil {
 		return nil, w.balErr
 	}
-	if w.bals != nil {
-		return w.bals, nil
+	if w.bal == nil {
+		w.bal = new(asset.Balance)
 	}
-	bals := make([]*asset.Balance, 0, len(confs))
-	for i := 0; i < len(confs); i++ {
-		bals = append(bals, new(asset.Balance))
-	}
-	return bals, nil
+	return w.bal, nil
 }
 
 func (w *TXCWallet) Fund(v uint64, _ *dex.Asset) (asset.Coins, error) {
@@ -613,8 +613,10 @@ func newTestRig() *testRig {
 			conns: map[string]*dexConnection{
 				tDexHost: dc,
 			},
-			wallets:      make(map[uint32]*xcWallet),
-			blockWaiters: make(map[uint64]*blockWaiter),
+			lockTimeTaker: dex.LockTimeTaker(dex.Testnet),
+			lockTimeMaker: dex.LockTimeMaker(dex.Testnet),
+			wallets:       make(map[uint32]*xcWallet),
+			blockWaiters:  make(map[uint64]*blockWaiter),
 			wsConstructor: func(*comms.WsCfg) (comms.WsConn, error) {
 				return conn, nil
 			},
@@ -662,7 +664,10 @@ func (rig *testRig) queueNotifyFee() {
 
 func (rig *testRig) queueConnect() {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
-		result := &msgjson.ConnectResult{}
+		connect := new(msgjson.Connect)
+		msg.Unmarshal(connect)
+		sign(tDexPriv, connect)
+		result := &msgjson.ConnectResult{Sig: connect.Sig}
 		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
 		f(resp)
 		return nil
@@ -1103,7 +1108,7 @@ func TestRegister(t *testing.T) {
 					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
 					if waiterCount > 0 {
-						tWallet.setConfs(tDCR.FundConf)
+						tWallet.setConfs(0)
 						tCore.tipChange(tDCR.ID, nil)
 						return
 					}
@@ -1140,7 +1145,7 @@ func TestRegister(t *testing.T) {
 		delete(tCore.conns, tDexHost)
 		tCore.connMtx.Unlock()
 
-		tWallet.setConfs(tDCR.FundConf)
+		tWallet.setConfs(0)
 		_, err = tCore.Register(form)
 	}
 
@@ -1818,7 +1823,8 @@ func TestCancel(t *testing.T) {
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	oid := lo.ID()
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
 	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
@@ -1993,7 +1999,8 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("walletSet error: %v", err)
 	}
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -2018,10 +2025,11 @@ func TestTradeTracking(t *testing.T) {
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
 	sign(tDexPriv, msgMatch)
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
-	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	// queue an invalid DEX init ack
+	rig.ws.queueResponse(msgjson.InitRoute, invalidAcker)
 	err = handleMatchRoute(tCore, rig.dc, msg)
-	if err != nil {
-		t.Fatalf("match messages error: %v", err)
+	if err == nil {
+		t.Fatalf("no error for invalid server ack for init route")
 	}
 	match, found := tracker.matches[mid]
 	if !found {
@@ -2044,11 +2052,40 @@ func TestTradeTracking(t *testing.T) {
 	if len(proof.SecretHash) == 0 {
 		t.Fatalf("secret hash not set")
 	}
+	// auth.InitSig should be unset because our init request received
+	// an invalid ack
+	if len(auth.InitSig) != 0 {
+		t.Fatalf("init sig recorded for invalid init ack")
+	}
+
+	// requeue an invalid DEX init ack and re-send pending init request
+	rig.ws.queueResponse(msgjson.InitRoute, invalidAcker)
+	err = tracker.resendPendingRequests()
+	if err == nil {
+		t.Fatalf("no error for invalid server ack for resent init request")
+	}
+	// auth.InitSig should remain unset because our resent init request
+	// received an invalid ack still
+	if len(auth.InitSig) != 0 {
+		t.Fatalf("init sig recorded for second invalid init ack")
+	}
+
+	// queue a valid DEX init ack and re-send pending init request
+	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	err = tracker.resendPendingRequests()
+	if err != nil {
+		t.Fatalf("unexpected error for resent pending init request: %v", err)
+	}
+	// auth.InitSig should now be set because our init request received
+	// a valid ack
+	if len(auth.InitSig) == 0 {
+		t.Fatalf("init sig not recorded for valid init ack")
+	}
 
 	// Send the counter-party's init info.
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(dex.LockTimeTaker))
+	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeTaker))
 	tBtcWallet.auditInfo = auditInfo
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 
@@ -2190,7 +2227,7 @@ func TestTradeTracking(t *testing.T) {
 	// Now send through the audit request for the maker's init.
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(dex.LockTimeMaker))
+	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
@@ -2384,7 +2421,8 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("walletSet error: %v", err)
 	}
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 
 	// MAKER REFUND, INVALID TAKER COUNTERSWAP
@@ -2400,8 +2438,9 @@ func TestRefunds(t *testing.T) {
 		Side:       uint8(order.Maker),
 		ServerTime: encode.UnixMilliU(matchTime),
 	}
-	counterSwapID := encode.RandomBytes(36)
-	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}}}
+	swapID := encode.RandomBytes(36)
+	contract := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID, script: contract}}}
 	sign(tDexPriv, msgMatch)
 	msg, _ := msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
@@ -2417,12 +2456,15 @@ func TestRefunds(t *testing.T) {
 	// We're the maker, so the init transaction should be broadcast.
 	checkStatus("maker swapped", match, order.MakerSwapCast)
 	proof := &match.MetaData.Proof
+	if !bytes.Equal(proof.Script, contract) {
+		t.Fatalf("invalid contract recorded for Maker swap")
+	}
 
 	// Send the counter-party's init info.
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
 	tBtcWallet.auditInfo = auditInfo
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(dex.LockTimeMaker))
+	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 
 	// Check audit errors.
@@ -2464,7 +2506,7 @@ func TestRefunds(t *testing.T) {
 	// Send through the audit request for the maker's init.
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(dex.LockTimeMaker))
+	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
 	tBtcWallet.auditErr = nil
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
@@ -2473,11 +2515,16 @@ func TestRefunds(t *testing.T) {
 	}
 	checkStatus("taker counter-party swapped", match, order.MakerSwapCast)
 	auditInfo.coin.confs = tBTC.SwapConf
-	swapID := encode.RandomBytes(36)
-	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
+	counterSwapID := encode.RandomBytes(36)
+	counterScript := encode.RandomBytes(36)
+	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID, script: counterScript}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
 	dc.tickAsset(tBTC.ID)
+
 	checkStatus("taker swapped", match, order.TakerSwapCast)
+	if !bytes.Equal(match.MetaData.Proof.Script, counterScript) {
+		t.Fatalf("invalid contract recorded for Taker swap")
+	}
 
 	// Attempt refund.
 	checkRefund(tracker, match, matchSize)
@@ -2687,7 +2734,8 @@ func TestReadConnectMatches(t *testing.T) {
 		Order:    lo,
 	}
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, notify)
 	metaMatch := db.MetaMatch{
 		MetaData: &db.MatchMetaData{},
 		Match:    &order.UserMatch{},
@@ -3021,7 +3069,8 @@ func TestSetEpoch(t *testing.T) {
 	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
 	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, rig.core.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[lo.ID()] = tracker
 	metaData := tracker.metaData
 
@@ -3069,7 +3118,8 @@ func TestSetEpoch(t *testing.T) {
 		},
 		Order: mo,
 	}
-	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.db, rig.queue, nil, nil, rig.core.notify)
+	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, rig.core.notify)
 	metaData = tracker.metaData
 	dc.trades[mo.ID()] = tracker
 	ensureStatus("market order", order.OrderStatusExecuted)
@@ -3179,31 +3229,23 @@ func TestAddrHost(t *testing.T) {
 	}
 }
 
-func TestAssetBalances(t *testing.T) {
+func TestAssetBalance(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 
 	wallet, tWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
-	bals := []*asset.Balance{
-		{
-			Available: 1e8,
-			Immature:  0,
-			Locked:    2e8,
-		},
-		{
-			Available: 4e7,
-			Immature:  6e7,
-			Locked:    2e8,
-		},
+	bal := &asset.Balance{
+		Available: 4e7,
+		Immature:  6e7,
+		Locked:    2e8,
 	}
-	tWallet.bals = bals
-	balances, err := tCore.AssetBalances(tDCR.ID)
+	tWallet.bal = bal
+	balances, err := tCore.AssetBalance(tDCR.ID)
 	if err != nil {
 		t.Fatalf("error retreiving asset balance: %v", err)
 	}
-	dbtest.MustCompareBalance(t, "zero-conf", bals[0], balances.ZeroConf)
-	dbtest.MustCompareBalance(t, tDexHost, bals[1], balances.XC[tDexHost])
+	dbtest.MustCompareAssetBalances(t, "zero-conf", bal, &balances.Balance)
 }
 
 func TestAssetCounter(t *testing.T) {

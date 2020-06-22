@@ -6,7 +6,6 @@ package core
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -468,6 +467,9 @@ type Core struct {
 	cfg           *Config
 	db            db.DB
 	net           dex.Network
+	lockTimeTaker time.Duration
+	lockTimeMaker time.Duration
+
 	wsConstructor func(*comms.WsCfg) (comms.WsConn, error)
 	newCrypter    func([]byte) encrypt.Crypter
 	reCrypter     func([]byte, []byte) (encrypt.Crypter, error)
@@ -496,12 +498,14 @@ func New(cfg *Config) (*Core, error) {
 		return nil, fmt.Errorf("database initialization error: %v", err)
 	}
 	core := &Core{
-		cfg:          cfg,
-		db:           db,
-		conns:        make(map[string]*dexConnection),
-		wallets:      make(map[uint32]*xcWallet),
-		net:          cfg.Net,
-		blockWaiters: make(map[uint64]*blockWaiter),
+		cfg:           cfg,
+		db:            db,
+		conns:         make(map[string]*dexConnection),
+		wallets:       make(map[uint32]*xcWallet),
+		net:           cfg.Net,
+		lockTimeTaker: dex.LockTimeTaker(cfg.Net),
+		lockTimeMaker: dex.LockTimeMaker(cfg.Net),
+		blockWaiters:  make(map[uint64]*blockWaiter),
 		// Allowing to change the constructor makes testing a lot easier.
 		wsConstructor: comms.NewWsConn,
 		newCrypter:    encrypt.NewCrypter,
@@ -664,37 +668,24 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 }
 
 // walletBalances retrieves balances for the wallet.
-func (c *Core) walletBalances(wallet *xcWallet) (*db.BalanceSet, error) {
+func (c *Core) walletBalances(wallet *xcWallet) (*db.Balance, error) {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	// Add a zero-conf entry.
-	confs := make([]uint32, 1)
-	var addrs []string
-	for _, dc := range c.conns {
-		assetCfg, found := dc.assets[wallet.AssetID]
-		if !found {
-			continue
-		}
-		addrs = append(addrs, dc.acct.host)
-		confs = append(confs, assetCfg.FundConf)
-	}
-	bals, err := wallet.Balance(confs)
+	bal, err := wallet.Balance()
 	if err != nil {
 		return nil, err
 	}
-	zeroConfBal := bals[0]
-	balMap := make(map[string]*asset.Balance, len(addrs))
-	for i, bal := range bals[1:] {
-		balMap[addrs[i]] = bal
+	dbBal := &db.Balance{
+		Balance: *bal,
+		Stamp:   time.Now(),
 	}
-	coreBals := &db.BalanceSet{
-		ZeroConf: zeroConfBal,
-		XC:       balMap,
-		Stamp:    time.Now(),
+	wallet.setBalance(dbBal)
+	err = c.db.UpdateBalance(wallet.dbID, dbBal)
+	if err != nil {
+		return nil, fmt.Errorf("error updating %s balance in database: %v", unbip(wallet.AssetID), err)
 	}
-	wallet.setBalance(coreBals)
-	c.notify(newBalanceNote(wallet.AssetID, coreBals))
-	return coreBals, nil
+	c.notify(newBalanceNote(wallet.AssetID, dbBal))
+	return dbBal, nil
 }
 
 // updateBalances updates the balance for every key in the counter map.
@@ -711,14 +702,10 @@ func (c *Core) updateBalances(counts assetCounter) {
 			log.Errorf("non-existent wallet should exist")
 			continue
 		}
-		bals, err := c.walletBalances(w)
+		_, err := c.walletBalances(w)
 		if err != nil {
 			log.Error("error updateing balance after tick: %v", err)
 			continue
-		}
-		err = c.db.UpdateBalanceSet(w.dbID, bals)
-		if err != nil {
-			log.Errorf("error updating %s balance in database: %v", unbip(assetID), err)
 		}
 	}
 	c.refreshUser()
@@ -839,6 +826,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	dbWallet := &db.Wallet{
 		AssetID:     assetID,
 		Account:     form.Account,
+		Balance:     &db.Balance{},
 		Settings:    settings,
 		EncryptedPW: encPW,
 	}
@@ -869,21 +857,23 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 	wallet.setAddress(dbWallet.Address)
 
-	balances, err := c.walletBalances(wallet)
-	if err != nil {
-		return initErr("error getting wallet balance for %s: %v", symbol, err)
-	}
-	dbWallet.Balances = balances
-
 	// Store the wallet in the database.
 	err = c.db.UpdateWallet(dbWallet)
 	if err != nil {
 		return initErr("error storing wallet credentials: %v", err)
 	}
 
+	// walletBalances will update the database record with the current balance.
+	// UpdateWallet must be called to create the database record before
+	// walletBalances is used.
+	balances, err := c.walletBalances(wallet)
+	if err != nil {
+		return initErr("error getting wallet balance for %s: %v", symbol, err)
+	}
+
 	log.Infof("Created %s wallet. Account %q balance available = %d / "+
 		"locked = %d, Deposit address = %s",
-		symbol, form.Account, balances.ZeroConf.Available, balances.ZeroConf.Locked, dbWallet.Address)
+		symbol, form.Account, balances.Available, balances.Locked, dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -898,12 +888,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
-		Account:  dbWallet.Account,
-		AssetID:  dbWallet.AssetID,
-		balances: dbWallet.Balances,
-		encPW:    dbWallet.EncryptedPW,
-		address:  dbWallet.Address,
-		dbID:     dbWallet.ID(),
+		Account: dbWallet.Account,
+		AssetID: dbWallet.AssetID,
+		balance: dbWallet.Balance,
+		encPW:   dbWallet.EncryptedPW,
+		address: dbWallet.Address,
+		dbID:    dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
 		Account:  dbWallet.Account,
@@ -956,7 +946,7 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	}
 	log.Infof("Connected to and unlocked %s wallet. Account %q balance available "+
 		"= %d / locked = %d, Deposit address = %s",
-		state.Symbol, wallet.Account, balances.ZeroConf.Available, balances.ZeroConf.Locked, state.Address)
+		state.Symbol, wallet.Account, balances.Available, balances.Locked, state.Address)
 
 	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
@@ -1150,33 +1140,27 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success, dc.acct.host))
 
 	// Set up the coin waiter.
-	c.verifyRegistrationFee(wallet, dc, coin.ID(), regFeeAssetID)
+	c.verifyRegistrationFee(wallet, dc, coin.ID(), 0)
 	c.refreshUser()
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: dc.cfg.RegFeeConfirms}
 	return res, nil
 }
 
 // verifyRegistrationFee waits the required amount of confirmations for the
-// registration fee payment. Once the requirment is met the server is notified.
+// registration fee payment. Once the requirement is met the server is notified.
 // If the server acknowledgment is successfull, the account is set as 'paid' in
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.
-func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, assetID uint32) {
+func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, confs uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
 
-	regConfs, err := wallet.Confirmations(coinID)
-	if err != nil {
-		log.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
-		return
-	}
-
-	dc.setRegConfirms(regConfs)
+	dc.setRegConfirms(confs)
 	c.refreshUser()
 
 	trigger := func() (bool, error) {
 		confs, err := wallet.Confirmations(coinID)
-		if err != nil {
-			return false, fmt.Errorf("Error getting confirmations for %s: %v", hex.EncodeToString(coinID), err)
+		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
+			return false, fmt.Errorf("Error getting confirmations for %s: %v", coinIDString(wallet.AssetID, coinID), err)
 		}
 		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, uint32(reqConfs))
 
@@ -1189,8 +1173,8 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		return confs >= uint32(reqConfs), nil
 	}
 
-	c.wait(assetID, trigger, func(err error) {
-		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(assetID, coinID), reqConfs)
+	c.wait(wallet.AssetID, trigger, func(err error) {
+		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
 		defer func() {
 			if err != nil {
 				details := fmt.Sprintf("Error encountered while paying fees to %s: %v", dc.acct.host, err)
@@ -1675,7 +1659,8 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, wallets, coins, c.notify)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker, c.lockTimeMaker,
+		c.db, c.latencyQ, wallets, coins, c.notify)
 	corder, _ := tracker.coreOrder()
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -1848,8 +1833,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		APIVersion: 0,
 		Time:       encode.UnixMilliU(time.Now()),
 	}
-	b := payload.Serialize()
-	sig, err := dc.acct.sign(b)
+	sigMsg := payload.Serialize()
+	sig, err := dc.acct.sign(sigMsg)
 	if err != nil {
 		return fmt.Errorf("signing error: %v", err)
 	}
@@ -1873,6 +1858,11 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	if err != nil {
 		return fmt.Errorf("'connect' error: %v", err)
 	}
+	// Check the signature.
+	err = dc.acct.checkSig(sigMsg, result.Sig)
+	if err != nil {
+		return newError(signatureErr, "DEX signature validation error: %v", err)
+	}
 	log.Debugf("authenticated connection to %s", dc.acct.host)
 	// Set the account as authenticated.
 	dc.acct.auth()
@@ -1887,8 +1877,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	return nil
 }
 
-// AssetBalances retrieves the current wallet balance.
-func (c *Core) AssetBalances(assetID uint32) (*db.BalanceSet, error) {
+// AssetBalance retrieves the current wallet balance.
+func (c *Core) AssetBalance(assetID uint32) (*db.Balance, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)
@@ -2047,8 +2037,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		return
 	}
-	dcrID, _ := dex.BipSymbolID("dcr")
-	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, dcrID)
+	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, confs)
 }
 
 // dbTrackers prepares trackedTrades based on active orders and matches in the
@@ -2106,7 +2095,8 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		} else {
 			var preImg order.Preimage
 			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.db, c.latencyQ, nil, nil, c.notify)
+			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker,
+				c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify)
 		}
 	}
 	for oid := range cancels {
@@ -2827,7 +2817,6 @@ func convertAssetInfo(asset *msgjson.Asset) *dex.Asset {
 		FeeRate:  asset.FeeRate,
 		SwapSize: asset.SwapSize,
 		SwapConf: uint32(asset.SwapConf),
-		FundConf: uint32(asset.FundConf),
 	}
 }
 

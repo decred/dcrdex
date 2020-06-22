@@ -11,14 +11,11 @@ import (
 	"decred.org/dcrdex/dex/config"
 )
 
-// CoinNotFoundError is returned from AuditContract when the counter-party's
-// swap transaction coin cannot be found.
-const CoinNotFoundError = dex.Error("coin not found")
-
-// CoinSpentError is returned when an attempt is made to treat a spent coin as
-// unspent. This error may be returned from AuditContract, Refund and Redeem
-// as those methods expect the provided coin to be unspent.
-const CoinSpentError = dex.Error("coin has been spent")
+// CoinNotFoundError is returned when a coin cannot be found, either because it
+// has been spent or it never existed. This error may be returned from
+// AuditContract, Refund or Redeem as those methods expect the provided coin to
+// exist and be unspent.
+const CoinNotFoundError = dex.ErrorKind("coin not found")
 
 // WalletInfo is auxiliary information about an ExchangeWallet.
 type WalletInfo struct {
@@ -65,7 +62,7 @@ type Wallet interface {
 	// available, immature, and locked. Balance takes a list of minimum
 	// confirmations for which to calculate maturity, and returns a list of
 	// corresponding *Balance.
-	Balance(confs []uint32) ([]*Balance, error)
+	Balance() (*Balance, error)
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.

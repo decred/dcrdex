@@ -244,17 +244,17 @@ func (s *WebServer) apiGetBalance(w http.ResponseWriter, r *http.Request) {
 	if !readPost(w, r, form) {
 		return
 	}
-	bals, err := s.core.AssetBalances(form.AssetID)
+	bal, err := s.core.AssetBalance(form.AssetID)
 	if err != nil {
 		s.writeAPIError(w, "balance error: %v", err)
 		return
 	}
 	resp := &struct {
-		OK       bool           `json:"ok"`
-		Balances *db.BalanceSet `json:"balances"`
+		OK      bool        `json:"ok"`
+		Balance *db.Balance `json:"balance"`
 	}{
-		OK:       true,
-		Balances: bals,
+		OK:      true,
+		Balance: bal,
 	}
 	writeJSON(w, resp, s.indent)
 

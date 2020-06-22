@@ -1315,7 +1315,7 @@ class BalanceWidget {
       Doc.show(side.newWalletRow)
       return
     }
-    const bal = wallet.balances.xc[this.dex.host]
+    const bal = wallet.balance
     // Handle not connected and no balance known for the DEX.
     if (!bal && !wallet.running) {
       Doc.show(side.connect)
@@ -1335,7 +1335,7 @@ class BalanceWidget {
     side.immature.textContent = Doc.formatCoinValue(bal.immature / 1e8)
     // If the current balance update time is older than an hour, show the
     // expiration icon. Request a balance update, if possible.
-    const expired = new Date().getTime() - new Date(wallet.balances.stamp).getTime() > anHour
+    const expired = new Date().getTime() - new Date(wallet.balance.stamp).getTime() > anHour
     if (expired) {
       Doc.show(side.expired)
       if (wallet.running) this.fetchBalance(side.id)
