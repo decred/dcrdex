@@ -12,6 +12,7 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/slog"
@@ -212,7 +213,7 @@ func TestAccounts(t *testing.T) {
 	if zerothAcct.Paid {
 		t.Fatalf("Account marked as paid before account proof set")
 	}
-	boltdb.AccountPaid(&db.AccountProof{
+	boltdb.AccountPaid(&msgjson.AccountProof{
 		Host:  zerothAcct.Host,
 		Stamp: 123456789,
 		Sig:   []byte("some signature here"),

@@ -175,12 +175,13 @@ func (ta *TArchivist) CloseAccount(account.AccountID, account.Rule) {}
 func (ta *TArchivist) Account(account.AccountID) (acct *account.Account, paid, open bool) {
 	return nil, false, false
 }
-func (ta *TArchivist) CreateAccount(*account.Account) (string, error)     { return "", nil }
-func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error)   { return "", nil }
-func (ta *TArchivist) PayAccount(account.AccountID, []byte) error         { return nil }
-func (ta *TArchivist) Accounts() ([]*db.Account, error)                   { return nil, nil }
-func (ta *TArchivist) AccountInfo(account.AccountID) (*db.Account, error) { return nil, nil }
-func (ta *TArchivist) Close() error                                       { return nil }
+func (ta *TArchivist) CreateAccount(*account.Account) (string, error)          { return "", nil }
+func (ta *TArchivist) CreateAccountWithAddress(*account.Account, string) error { return nil }
+func (ta *TArchivist) AccountRegAddr(account.AccountID) (string, error)        { return "", nil }
+func (ta *TArchivist) PayAccount(account.AccountID, []byte) error              { return nil }
+func (ta *TArchivist) Accounts() ([]*db.Account, error)                        { return nil, nil }
+func (ta *TArchivist) AccountInfo(account.AccountID) (*db.Account, error)      { return nil, nil }
+func (ta *TArchivist) Close() error                                            { return nil }
 
 func randomOrderID() order.OrderID {
 	pk := randomBytes(order.OrderIDSize)

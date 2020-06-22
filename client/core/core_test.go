@@ -322,7 +322,7 @@ func (tdb *TDB) Wallets() ([]*db.Wallet, error) {
 	return nil, nil
 }
 
-func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
+func (tdb *TDB) AccountPaid(proof *msgjson.AccountProof) error {
 	return nil
 }
 
@@ -1365,6 +1365,43 @@ func TestRegister(t *testing.T) {
 	feeNote = getFeeNote()
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
+	}
+}
+
+func TestReinstate(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	dc := rig.dc
+	acct := dc.acct
+
+	dexStat := &DEXBrief{
+		Host: tDexHost,
+	}
+
+	wallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = wallet
+
+	regRes := &msgjson.RegisterResult{
+		DEXPubKey:    acct.dexPubKey.Serialize(),
+		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
+		Address:      "someaddr",
+		Fee:          tFee,
+		Time:         encode.UnixMilliU(time.Now()),
+	}
+	sign(tDexPriv, regRes)
+
+	queueRegister := func() {
+		rig.ws.queueResponse(msgjson.ReinstateRoute, func(msg *msgjson.Message, f msgFunc) error {
+			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
+			f(resp)
+			return nil
+		})
+	}
+
+	queueRegister()
+	_, err := tCore.reinstateDexAccount(dexStat, rig.crypter)
+	if err != nil {
+		t.Fatalf("reinstate error: %v", err)
 	}
 }
 

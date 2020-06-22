@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/wait"
@@ -68,6 +70,103 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		DEXPubKey:    auth.signer.PubKey().SerializeCompressed(),
 		ClientPubKey: register.PubKey,
 		Address:      feeAddr,
+		Fee:          auth.regFee,
+		Time:         encode.UnixMilliU((unixMsNow())),
+	}
+
+	err = auth.Sign(regRes)
+	if err != nil {
+		log.Errorf("error serializing register result: %v", err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "internal error",
+		}
+	}
+
+	resp, err := msgjson.NewResponse(msg.ID, regRes, nil)
+	if err != nil {
+		log.Errorf("error creating new response for registration result: %v", err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "internal error",
+		}
+	}
+
+	err = conn.Send(resp)
+	if err != nil {
+		log.Warnf("error sending register result to link: %v", err)
+	}
+
+	return nil
+}
+
+// handleReinstate handles requests to the 'register' route.
+func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	// Unmarshal.
+	reinstate := new(msgjson.Reinstate)
+	err := json.Unmarshal(msg.Payload, &reinstate)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.RPCParseError,
+			Message: "error parsing register: " + err.Error(),
+		}
+	}
+
+	pubKey, err := secp256k1.ParsePubKey(reinstate.ClientPubKey)
+
+	acct := &account.Account{
+		ID:     account.NewID(reinstate.ClientPubKey),
+		PubKey: pubKey,
+	}
+
+	// Check signature.
+	sigMsg := reinstate.Serialize()
+	err = checkSigS256(sigMsg, reinstate.SigBytes(), acct.PubKey)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.SignatureError,
+			Message: "signature error: " + err.Error(),
+		}
+	}
+
+	accountProof, err := msgjson.DecodeAccountProof(reinstate.AccountProof)
+
+	notifyFee := &msgjson.NotifyFee{
+		AccountID: acct.ID[:],
+		CoinID:    reinstate.CoinID,
+		Time:      accountProof.Stamp,
+	}
+
+	notifyFee.Sig = accountProof.Sig
+
+	err = checkSigS256(notifyFee.Serialize(), accountProof.Sig, auth.signer.PubKey())
+
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.SignatureError,
+			Message: "signature error: " + err.Error(),
+		}
+	}
+
+	addr, _, _, err := auth.checkFee(reinstate.CoinID)
+	log.Info(addr)
+
+	// Register account and get a fee payment address.
+	err = auth.storage.CreateAccountWithAddress(acct, addr)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "storage error: " + err.Error(),
+		}
+	}
+
+	err = auth.storage.PayAccount(acct.ID, reinstate.CoinID)
+
+	// Prepare, sign, and send response.
+	regRes := &msgjson.RegisterResult{
+		DEXPubKey:    auth.signer.PubKey().SerializeCompressed(),
+		ClientPubKey: reinstate.ClientPubKey,
+		Address:      addr,
 		Fee:          auth.regFee,
 		Time:         encode.UnixMilliU((unixMsNow())),
 	}

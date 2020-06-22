@@ -89,11 +89,18 @@ func (a *Archiver) CreateAccount(acct *account.Account) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error creating registration address: %v", err)
 	}
-	err = createAccount(a.db, a.tables.accounts, acct, regAddr)
+	err = a.CreateAccountWithAddress(acct, regAddr)
 	if err != nil {
 		return "", err
 	}
 	return regAddr, nil
+}
+
+// CreateAccountWithAddress creates an entry for a new account and Registration address
+// in the accounts table.
+func (a *Archiver) CreateAccountWithAddress(acct *account.Account, regAddr string) error {
+	err := createAccount(a.db, a.tables.accounts, acct, regAddr)
+	return err
 }
 
 // CreateKeyEntry creates an entry for the pubkey (hash) if one doesn't already

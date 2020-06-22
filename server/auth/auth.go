@@ -37,6 +37,7 @@ type Storage interface {
 	// ActiveMatches fetches the account's active matches.
 	ActiveMatches(account.AccountID) ([]*order.UserMatch, error)
 	CreateAccount(*account.Account) (string, error)
+	CreateAccountWithAddress(*account.Account, string) error
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
 }

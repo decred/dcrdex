@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"decred.org/dcrdex/dex/encode"
+
 	"decred.org/dcrdex/dex"
 )
 
@@ -123,6 +125,9 @@ const (
 	// RegisterRoute is the client-originating request-type message initiating a
 	// new client registration.
 	RegisterRoute = "register"
+	// ReinstateRoute is the client-originating request-type message reinstating a
+	// client registration.
+	ReinstateRoute = "reinstate"
 	// NotifyFeeRoute is the client-originating request-type message informing the
 	// DEX that the fee has been paid and has the requisite number of
 	// confirmations.
@@ -824,6 +829,71 @@ func (n *NotifyFee) Serialize() []byte {
 	b = append(b, n.AccountID...)
 	b = append(b, n.CoinID...)
 	return append(b, uint64Bytes(n.Time)...)
+}
+
+// Reinstate is the payload for the ReinstateRoute request.
+type Reinstate struct {
+	Signature
+	DEXPubKey    Bytes  `json:"dexpubkey"`
+	ClientPubKey Bytes  `json:"clientpubkey"`
+	AccountProof Bytes  `json:"accountproof"`
+	CoinID       Bytes  `json:"coinid"`
+	Time         uint64 `json:"timestamp"`
+}
+
+// Serialize serializes the Register data.
+func (r *Reinstate) Serialize() []byte {
+	// serialization: dexpubkey (33) + clientpubkey (33) +
+	// accountproof 96 + coinID (variable, ~32+2) + time (8) = 204
+	s := make([]byte, 0, 143)
+	s = append(s, r.DEXPubKey...)
+	s = append(s, r.ClientPubKey...)
+	s = append(s, []byte(r.AccountProof)...)
+	s = append(s, r.CoinID...)
+	return append(s, uint64Bytes(r.Time)...)
+}
+
+// Account proof is information necessary to prove that the DEX server accepted
+// the account's fee payment. The fee coin is not part of the proof, since it
+// is already stored as part of the AccountInfo blob.
+type AccountProof struct {
+	Host  string
+	Stamp uint64
+	Sig   []byte
+}
+
+// Encode encodes the AccountProof to a versioned blob.
+func (p *AccountProof) Encode() []byte {
+	data := encode.BuildyBytes{0}.
+		AddData([]byte(p.Host)).
+		AddData(uint64Bytes(p.Stamp)).
+		AddData(p.Sig)
+	return data
+}
+
+// DecodeAccountProof decodes the versioned blob to a *MatchProof.
+func DecodeAccountProof(b []byte) (*AccountProof, error) {
+	ver, pushes, err := encode.DecodeBlob(b)
+	if err != nil {
+		return nil, err
+	}
+	switch ver {
+	case 0:
+		return decodeAccountProof_v0(pushes)
+	}
+	return nil, fmt.Errorf("unknown AccountProof version %d", ver)
+}
+
+func decodeAccountProof_v0(pushes [][]byte) (*AccountProof, error) {
+	if len(pushes) != 3 {
+		return nil, fmt.Errorf("decodeAccountProof_v0: expected 3 pushes, got %d", len(pushes))
+	}
+	hostB, stampB := pushes[0], pushes[1]
+	return &AccountProof{
+		Host:  string(hostB),
+		Stamp: encode.IntCoder.Uint64(stampB),
+		Sig:   pushes[2],
+	}, nil
 }
 
 // Stamp satisfies the Stampable interface.

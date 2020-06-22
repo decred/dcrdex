@@ -1243,6 +1243,16 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	}
 
 	dexStats := c.initializeDEXConnections(crypter)
+
+	for _, dexStat := range dexStats {
+		if strings.Contains(dexStat.AuthErr, "no account info found for account") {
+			result, err := c.reinstateDexAccount(dexStat, crypter)
+			if err != nil {
+				return result, err
+			}
+		}
+	}
+
 	notes, err := c.db.NotificationsN(10)
 	if err != nil {
 		log.Errorf("Login -> NotificationsN error: %v", err)
@@ -1254,6 +1264,55 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		DEXes:         dexStats,
 	}
 	return result, nil
+}
+
+func (c *Core) reinstateDexAccount(dexStat *DEXBrief, crypter encrypt.Crypter) (*LoginResult, error) {
+
+	dc := c.conns[dexStat.Host]
+
+	// Prepare and sign the registration payload.
+	// The account ID is generated from the public key.
+	dexReg := &msgjson.Reinstate{
+		DEXPubKey:    dc.acct.dexPubKey.Serialize(),
+		ClientPubKey: dc.acct.privKey.PubKey().SerializeCompressed(),
+		AccountProof: dc.acct.accountProof,
+		CoinID:       dc.acct.feeCoin,
+		Time:         encode.UnixMilliU(time.Now()),
+	}
+	regRes := new(msgjson.RegisterResult)
+	err := dc.signAndRequest(dexReg, msgjson.ReinstateRoute, regRes)
+	if err != nil {
+		log.Errorf("error reinstating account on dex: %v", err)
+		return nil, err
+	}
+
+	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
+	dcrWallet, err := c.connectedWallet(regFeeAssetID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
+	}
+
+	if !dcrWallet.unlocked() {
+		err = unlockWallet(dcrWallet, crypter)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(dcrWallet.AssetID), err)
+		}
+	}
+
+	dc.setRegConfirms(regConfirmationsPaid)
+	c.refreshUser()
+	details := fmt.Sprintf("You may now trade at %s", dc.acct.host)
+	c.notify(newFeePaymentNote("Account reinstated", details, db.Success, dc.acct.host))
+
+	dc.acct.markFeePaid()
+	err = c.authDEX(dc)
+	if err != nil {
+		log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
+	}
+
+	c.refreshUser()
+
+	return nil, nil
 }
 
 // Logout logs the user out
@@ -1454,7 +1513,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		} else {
 			log.Warnf("Marking account as paid, even though the server's signature could not be validated.")
 		}
-		errChan <- c.db.AccountPaid(&db.AccountProof{
+		errChan <- c.db.AccountPaid(&msgjson.AccountProof{
 			Host:  dc.acct.host,
 			Stamp: req.Time,
 			Sig:   ack.Sig,

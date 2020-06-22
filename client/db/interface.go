@@ -5,6 +5,7 @@ package db
 
 import (
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
 
@@ -29,7 +30,7 @@ type DB interface {
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
 	// AccountPaid marks the account as paid.
-	AccountPaid(proof *AccountProof) error
+	AccountPaid(proof *msgjson.AccountProof) error
 	// UpdateOrder saves the order information in the database. Any existing
 	// order info will be overwritten without indication.
 	UpdateOrder(m *MetaOrder) error

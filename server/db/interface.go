@@ -183,6 +183,9 @@ type AccountArchiver interface {
 	// PayAccount is used to set the payment details.
 	CreateAccount(*account.Account) (string, error)
 
+	// CreateAccount stores a new account with a given address.
+	CreateAccountWithAddress(*account.Account, string) error
+
 	// AccountRegAddr gets the registration fee address assigned to the account.
 	AccountRegAddr(account.AccountID) (string, error)
 

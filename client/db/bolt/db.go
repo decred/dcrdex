@@ -15,6 +15,7 @@ import (
 	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"go.etcd.io/bbolt"
 )
@@ -187,6 +188,9 @@ func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 				return err
 			}
 			acctInfo.Paid = len(acct.Get(feeProofKey)) > 0
+			if acctInfo.Paid {
+				acctInfo.AccountProof = acct.Get(feeProofKey)
+			}
 			accounts = append(accounts, acctInfo)
 		}
 		return nil
@@ -246,7 +250,7 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 }
 
 // AccountPaid marks the account as paid by setting the "fee proof".
-func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof) error {
+func (db *BoltDB) AccountPaid(proof *msgjson.AccountProof) error {
 	acctKey := []byte(proof.Host)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct := accts.Bucket(acctKey)

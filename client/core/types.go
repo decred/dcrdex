@@ -241,28 +241,30 @@ type BookUpdate struct {
 // dexAccount is the core type to represent the client's account information for
 // a DEX.
 type dexAccount struct {
-	host      string
-	encKey    []byte
-	keyMtx    sync.RWMutex
-	privKey   *secp256k1.PrivateKey
-	id        account.AccountID
-	dexPubKey *secp256k1.PublicKey
-	feeCoin   []byte
-	cert      []byte
-	isPaid    bool
-	authMtx   sync.RWMutex
-	isAuthed  bool
+	host         string
+	encKey       []byte
+	keyMtx       sync.RWMutex
+	privKey      *secp256k1.PrivateKey
+	id           account.AccountID
+	dexPubKey    *secp256k1.PublicKey
+	feeCoin      []byte
+	cert         []byte
+	isPaid       bool
+	authMtx      sync.RWMutex
+	isAuthed     bool
+	accountProof []byte
 }
 
 // newDEXAccount is a constructor for a new *dexAccount.
 func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 	return &dexAccount{
-		host:      acctInfo.Host,
-		encKey:    acctInfo.EncKey,
-		dexPubKey: acctInfo.DEXPubKey,
-		isPaid:    acctInfo.Paid,
-		feeCoin:   acctInfo.FeeCoin,
-		cert:      acctInfo.Cert,
+		host:         acctInfo.Host,
+		encKey:       acctInfo.EncKey,
+		dexPubKey:    acctInfo.DEXPubKey,
+		isPaid:       acctInfo.Paid,
+		feeCoin:      acctInfo.FeeCoin,
+		cert:         acctInfo.Cert,
+		accountProof: acctInfo.AccountProof,
 	}
 }
 
