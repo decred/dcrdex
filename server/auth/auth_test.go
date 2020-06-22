@@ -947,6 +947,87 @@ func TestHandleRegister(t *testing.T) {
 	}
 }
 
+func TestHandleReinstate(t *testing.T) {
+	user := tNewUser(t)
+	clientPubKey := user.privKey.PubKey().SerializeCompressed()
+	dexPubKey := user.privKey.PubKey()
+
+	userAcct := &account.Account{
+		ID:     account.NewID(clientPubKey),
+		PubKey: dexPubKey,
+	}
+
+	rig.storage.acct = userAcct
+
+	coinid := []byte{
+		0xe2, 0x48, 0xd9, 0xea, 0xa1, 0xc4, 0x78, 0xd5, 0x31, 0xc2, 0x41, 0xb4,
+		0x5b, 0x7b, 0xd5, 0x8d, 0x7a, 0x06, 0x1a, 0xc6, 0x89, 0x0a, 0x86, 0x2b,
+		0x1e, 0x59, 0xb3, 0xc8, 0xf6, 0xad, 0xee, 0xc8, 0x00, 0x00, 0x00, 0x32,
+	}
+
+	stamp := encode.UnixMilliU(unixMsNow())
+	notify := &msgjson.NotifyFee{
+		AccountID: userAcct.ID[:],
+		CoinID:    coinid,
+		Time:      stamp,
+	}
+	notifyMsg := notify.Serialize()
+
+	notifySig, _ := user.privKey.Sign(notifyMsg)
+
+	var mgrSingerError error = nil
+
+	holdSigner := rig.mgr.signer
+
+	mgrSigner := &TSigner{
+		sig:    notifySig,
+		err:    mgrSingerError,
+		pubkey: dexPubKey,
+	}
+
+	rig.mgr.signer = mgrSigner
+
+	newReinstate := func() *msgjson.Reinstate {
+		host := "host"
+		accountProof := msgjson.AccountProof{
+			Host:  host,
+			Stamp: stamp,
+			Sig:   notifySig.Serialize(),
+		}
+		reg := &msgjson.Reinstate{
+			ClientPubKey: clientPubKey,
+			AccountProof: accountProof.Encode(),
+			CoinID:       coinid,
+			Time:         encode.UnixMilliU(unixMsNow()),
+		}
+		sigMsg := reg.Serialize()
+		sig, _ := user.privKey.Sign(sigMsg)
+		reg.SetSig(sig.Serialize())
+		return reg
+	}
+
+	newMsg := func(reg *msgjson.Reinstate) *msgjson.Message {
+		msg, err := msgjson.NewRequest(comms.NextID(), msgjson.ReinstateRoute, reg)
+		if err != nil {
+			t.Fatalf("NewRequest error: %v", err)
+		}
+		return msg
+	}
+
+	do := func(msg *msgjson.Message) *msgjson.Error {
+		return rig.mgr.handleReinstate(user.conn, msg)
+	}
+
+	msg := newMsg(newReinstate())
+	err := do(msg)
+
+	if err != nil {
+		t.Fatalf("error for valid reinstatement: %s", err.Message)
+	}
+
+	rig.mgr.signer = holdSigner
+}
+
 func TestHandleNotifyFee(t *testing.T) {
 	user := tNewUser(t)
 	userAcct := &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
@@ -1153,81 +1234,4 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	ord = client.recentOrders.orders[2]
 	client.mtx.Unlock()
 	checkOrd(ord, coid, true, encode.UnixMilli(tCompleted))
-}
-
-func TestHandleReinstate(t *testing.T) {
-	user := tNewUser(t)
-	clientPubKey := user.privKey.PubKey().SerializeCompressed()
-	dexPubKey := user.privKey.PubKey()
-
-	userAcct := &account.Account{
-		ID:     account.NewID(clientPubKey),
-		PubKey: dexPubKey,
-	}
-
-	rig.storage.acct = userAcct
-
-	coinid := []byte{
-		0xe2, 0x48, 0xd9, 0xea, 0xa1, 0xc4, 0x78, 0xd5, 0x31, 0xc2, 0x41, 0xb4,
-		0x5b, 0x7b, 0xd5, 0x8d, 0x7a, 0x06, 0x1a, 0xc6, 0x89, 0x0a, 0x86, 0x2b,
-		0x1e, 0x59, 0xb3, 0xc8, 0xf6, 0xad, 0xee, 0xc8, 0x00, 0x00, 0x00, 0x32,
-	}
-
-	stamp := encode.UnixMilliU(unixMsNow())
-	notify := &msgjson.NotifyFee{
-		AccountID: userAcct.ID[:],
-		CoinID:    coinid,
-		Time:      stamp,
-	}
-	notifyMsg := notify.Serialize()
-
-	notifySig, _ := user.privKey.Sign(notifyMsg)
-
-	var mgrSingerError error = nil
-
-	mgrSigner := &TSigner{
-		sig:    notifySig,
-		err:    mgrSingerError,
-		pubkey: dexPubKey,
-	}
-
-	rig.mgr.signer = mgrSigner
-
-	newReinstate := func() *msgjson.Reinstate {
-		host := "host"
-		accountProof := msgjson.AccountProof{
-			Host:  host,
-			Stamp: stamp,
-			Sig:   notifySig.Serialize(),
-		}
-		reg := &msgjson.Reinstate{
-			ClientPubKey: clientPubKey,
-			AccountProof: accountProof.Encode(),
-			CoinID:       coinid,
-			Time:         encode.UnixMilliU(unixMsNow()),
-		}
-		sigMsg := reg.Serialize()
-		sig, _ := user.privKey.Sign(sigMsg)
-		reg.SetSig(sig.Serialize())
-		return reg
-	}
-
-	newMsg := func(reg *msgjson.Reinstate) *msgjson.Message {
-		msg, err := msgjson.NewRequest(comms.NextID(), msgjson.ReinstateRoute, reg)
-		if err != nil {
-			t.Fatalf("NewRequest error: %v", err)
-		}
-		return msg
-	}
-
-	do := func(msg *msgjson.Message) *msgjson.Error {
-		return rig.mgr.handleReinstate(user.conn, msg)
-	}
-
-	msg := newMsg(newReinstate())
-	err := do(msg)
-
-	if err != nil {
-		t.Fatalf("error for valid reinstatement: %s", err.Message)
-	}
 }
