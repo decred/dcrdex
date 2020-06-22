@@ -204,6 +204,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
+	comms.Route(msgjson.ReinstateRoute, auth.handleReinstate)
 	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee)
 	return auth
 }
