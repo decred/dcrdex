@@ -45,7 +45,12 @@ func mainCore(ctx context.Context) error {
 
 	for _, file := range files {
 		if err == nil && !file.IsDir() && filepath.Ext(file.Name()) == ".so" {
-			plugin.Open(filepath.Join(cfg.AssetsDataDir, file.Name()))
+			_, err := plugin.Open(filepath.Join(cfg.AssetsDataDir, file.Name()))
+			if err == nil {
+				fmt.Printf("Loaded plugin %s successfully. \n", file.Name())
+			} else {
+				fmt.Printf("Loaded plugin %s failed. Error: %s \n", file.Name(), err.Error())
+			}
 		}
 	}
 

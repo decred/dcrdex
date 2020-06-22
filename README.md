@@ -145,11 +145,8 @@ Build the plugin assets and copy to resource application folder by running:
 ```
 go build -buildmode=plugin ./btc/
 cp ./btc.so ~/.dcrdex/assets/btc.so
-go build -buildmode=plugin ./dcr/
-cp ./dcr.so ~/.dcrdex/assets/dcr.so
-go build -buildmode=plugin ./ltc/
-cp ./ltc.so ~/.dcrdex/assets/ltc.so
 ```
+Similar with other assets. Or you can simply navigate to **server/cmd/dcrdex** and run the script __plugins_build.sh__. This script will build dcrdex and all the plugin in the asset folder and move it to app data folder at once time
 
 ### Build and run dcrdex
 
