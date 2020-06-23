@@ -746,7 +746,7 @@ func TestConnectErrors(t *testing.T) {
 	// user unknown to storage
 	encodeMsg()
 	rpcErr = rig.mgr.handleConnect(user.conn, msg)
-	ensureErr(rpcErr, "account unknown to storage", msgjson.AuthenticationError)
+	ensureErr(rpcErr, "account unknown to storage", msgjson.NoAccountFoundError)
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 
 	// User unpaid

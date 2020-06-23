@@ -709,8 +709,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	acctInfo, paid, open := auth.storage.Account(user)
 	if acctInfo == nil {
 		return &msgjson.Error{
-			Code:    msgjson.AuthenticationError,
-			Message: "no account info found for account ID" + connect.AccountID.String(),
+			Code:    msgjson.NoAccountFoundError,
+			Message: "no account found for account ID: " + connect.AccountID.String(),
 		}
 	}
 	if !paid {

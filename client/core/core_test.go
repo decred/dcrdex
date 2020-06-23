@@ -1458,6 +1458,26 @@ func TestLogin(t *testing.T) {
 	}
 }
 
+func TestInitializeDEXConnections(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.acct.markFeePaid()
+
+	rig.queueConnect()
+
+	dexStats := tCore.initializeDEXConnections(rig.crypter)
+
+	if dexStats == nil {
+		t.Fatal("initializeDEXConnections failure")
+	}
+
+	for _, dexStat := range dexStats {
+		if dexStat.AuthErr != "" {
+			t.Fatalf("initializeDEXConnections authorization error %v", dexStat.AuthErr)
+		}
+	}
+}
+
 func TestConnectDEX(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
