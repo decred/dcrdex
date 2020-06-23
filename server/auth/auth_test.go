@@ -949,12 +949,14 @@ func TestHandleRegister(t *testing.T) {
 
 func TestHandleReinstate(t *testing.T) {
 	user := tNewUser(t)
+	dummyError := fmt.Errorf("test error")
 	clientPubKey := user.privKey.PubKey().SerializeCompressed()
-	dexPubKey := user.privKey.PubKey()
+	DEXPrivKey, _ := secp256k1.GeneratePrivateKey()
+	DEXPubKey := DEXPrivKey.PubKey()
 
 	userAcct := &account.Account{
 		ID:     account.NewID(clientPubKey),
-		PubKey: dexPubKey,
+		PubKey: DEXPubKey,
 	}
 
 	rig.storage.acct = userAcct
@@ -973,7 +975,7 @@ func TestHandleReinstate(t *testing.T) {
 	}
 	notifyMsg := notify.Serialize()
 
-	notifySig, _ := user.privKey.Sign(notifyMsg)
+	notifySig, _ := DEXPrivKey.Sign(notifyMsg)
 
 	var mgrSingerError error = nil
 
@@ -982,7 +984,7 @@ func TestHandleReinstate(t *testing.T) {
 	mgrSigner := &TSigner{
 		sig:    notifySig,
 		err:    mgrSingerError,
-		pubkey: dexPubKey,
+		pubkey: DEXPubKey,
 	}
 
 	rig.mgr.signer = mgrSigner
@@ -994,16 +996,16 @@ func TestHandleReinstate(t *testing.T) {
 			Stamp: stamp,
 			Sig:   notifySig.Serialize(),
 		}
-		reg := &msgjson.Reinstate{
+		reinstate := &msgjson.Reinstate{
 			ClientPubKey: clientPubKey,
 			AccountProof: accountProof.Encode(),
 			CoinID:       coinid,
 			Time:         encode.UnixMilliU(unixMsNow()),
 		}
-		sigMsg := reg.Serialize()
+		sigMsg := reinstate.Serialize()
 		sig, _ := user.privKey.Sign(sigMsg)
-		reg.SetSig(sig.Serialize())
-		return reg
+		reinstate.SetSig(sig.Serialize())
+		return reinstate
 	}
 
 	newMsg := func(reg *msgjson.Reinstate) *msgjson.Message {
@@ -1018,11 +1020,62 @@ func TestHandleReinstate(t *testing.T) {
 		return rig.mgr.handleReinstate(user.conn, msg)
 	}
 
-	msg := newMsg(newReinstate())
-	err := do(msg)
+	ensureErr := makeEnsureErr(t)
 
+	msg := newMsg(newReinstate())
+	msg.Payload = []byte(`?`)
+	ensureErr(do(msg), "bad payload", msgjson.RPCParseError)
+
+	reinstate := newReinstate()
+	reinstate.ClientPubKey = []byte(`abcd`)
+	ensureErr(do(newMsg(reinstate)), "bad pubkey", msgjson.PubKeyParseError)
+
+	// Signature error
+	reinstate = newReinstate()
+	reinstate.Sig = []byte{0x01, 0x02}
+	ensureErr(do(newMsg(reinstate)), "bad signature", msgjson.SignatureError)
+
+	// storage.CreateAccount error
+	msg = newMsg(newReinstate())
+	rig.storage.acctErr = dummyError
+	ensureErr(do(msg), "CreateAccount error", msgjson.RPCInternalError)
+	rig.storage.acctErr = nil
+
+	// Sign error
+	mgrSigner.err = dummyError
+	ensureErr(do(msg), "DEX signature error", msgjson.RPCInternalError)
+	mgrSigner.err = nil
+
+	// Send a valid registration and check the response.
+	// Before starting, make sure there are no responses in the queue.
+
+	respMsg := user.conn.getSend()
+	if respMsg != nil {
+		b, _ := json.Marshal(respMsg)
+		t.Fatalf("unexpected response: %s", string(b))
+	}
+	msg = newMsg(newReinstate())
+	rpcErr := do(msg)
+	if rpcErr != nil {
+		t.Fatalf("error for valid registration: %s", rpcErr.Message)
+	}
+	respMsg = user.conn.getSend()
+	if respMsg == nil {
+		t.Fatalf("no register response")
+	}
+	resp, _ := respMsg.Response()
+	regRes := new(msgjson.RegisterResult)
+	err := json.Unmarshal(resp.Result, regRes)
 	if err != nil {
-		t.Fatalf("error for valid reinstatement: %s", err.Message)
+		t.Fatalf("error unmarshaling payload")
+	}
+
+	expectedRegisterResult := &msgjson.RegisterResult{
+		DEXPubKey: DEXPubKey.SerializeCompressed(),
+	}
+
+	if regRes.DEXPubKey.String() != expectedRegisterResult.DEXPubKey.String() {
+		t.Fatalf("wrong DEX pubkey. expected %s, got %s", expectedRegisterResult.DEXPubKey.String(), regRes.DEXPubKey.String())
 	}
 
 	rig.mgr.signer = holdSigner

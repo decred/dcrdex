@@ -108,11 +108,17 @@ func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) 
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.RPCParseError,
-			Message: "error parsing register: " + err.Error(),
+			Message: "error parsing reinstate: " + err.Error(),
 		}
 	}
 
 	pubKey, err := secp256k1.ParsePubKey(reinstate.ClientPubKey)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.PubKeyParseError,
+			Message: "error parsing pubkey: " + err.Error(),
+		}
+	}
 
 	acct := &account.Account{
 		ID:     account.NewID(reinstate.ClientPubKey),
@@ -151,7 +157,7 @@ func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) 
 	addr, _, _, err := auth.checkFee(reinstate.CoinID)
 	log.Info(addr)
 
-	// Register account and get a fee payment address.
+	// Reinstate account.
 	err = auth.storage.CreateAccountWithAddress(acct, addr)
 	if err != nil {
 		return &msgjson.Error{
@@ -173,7 +179,7 @@ func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) 
 
 	err = auth.Sign(regRes)
 	if err != nil {
-		log.Errorf("error serializing register result: %v", err)
+		log.Errorf("error serializing reinstate result: %v", err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "internal error",
@@ -182,7 +188,7 @@ func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) 
 
 	resp, err := msgjson.NewResponse(msg.ID, regRes, nil)
 	if err != nil {
-		log.Errorf("error creating new response for registration result: %v", err)
+		log.Errorf("error creating new response for reinstate result: %v", err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "internal error",
@@ -191,7 +197,7 @@ func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) 
 
 	err = conn.Send(resp)
 	if err != nil {
-		log.Warnf("error sending register result to link: %v", err)
+		log.Warnf("error sending reinstate result to link: %v", err)
 	}
 
 	return nil
