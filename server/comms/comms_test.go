@@ -704,8 +704,8 @@ func TestOnline(t *testing.T) {
 		return err
 	}
 
-	// Sleep for a few  pongs to make sure the client doesn't disconnect.
-	time.Sleep(pongWait * 3)
+	// Sleep for a couple of pongs to make sure the client doesn't disconnect.
+	time.Sleep(pongWait * 2)
 
 	// Positive path.
 	err = sendToDEX("ok", "{}")
