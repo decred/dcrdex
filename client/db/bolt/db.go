@@ -78,7 +78,7 @@ var _ dexdb.DB = (*BoltDB)(nil)
 // NewDB is a constructor for a *BoltDB.
 func NewDB(dbPath string) (dexdb.DB, error) {
 	_, err := os.Stat(dbPath)
-	exists := os.IsNotExist(err)
+	isNew := os.IsNotExist(err)
 
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
@@ -96,9 +96,8 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 		return nil, err
 	}
 
-	// If the db does not already exist, initialize it with
-	// the current DB version.
-	if !exists {
+	// If the db is a new one, initialize it with the current DB version.
+	if isNew {
 		err := bdb.DB.Update(func(dbTx *bbolt.Tx) error {
 			bkt := dbTx.Bucket(appBucket)
 			if bkt == nil {

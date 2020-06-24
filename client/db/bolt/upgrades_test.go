@@ -26,49 +26,51 @@ var dbUpgradeTests = [...]struct {
 }
 
 func TestUpgrades(t *testing.T) {
-	t.Parallel()
-
 	d, err := ioutil.TempDir("", "dcrdex_test_upgrades")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	for _, tc := range dbUpgradeTests {
-		t.Run(tc.name, func(t *testing.T) {
-			testFile, err := os.Open(filepath.Join("testdata", tc.filename))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer testFile.Close()
-			r, err := gzip.NewReader(testFile)
-			if err != nil {
-				t.Fatal(err)
-			}
-			dbPath := filepath.Join(d, tc.name+".db")
-			fi, err := os.Create(dbPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = io.Copy(fi, r)
-			fi.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
-			db, err := bbolt.Open(dbPath, 0600,
-				&bbolt.Options{Timeout: 1 * time.Second})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			err = db.Update(func(dbtx *bbolt.Tx) error {
-				return tc.upgrade(dbtx)
+	t.Run("group", func(t *testing.T) {
+		for _, tc := range dbUpgradeTests {
+			tc := tc // capture range variable
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				testFile, err := os.Open(filepath.Join("testdata", tc.filename))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer testFile.Close()
+				r, err := gzip.NewReader(testFile)
+				if err != nil {
+					t.Fatal(err)
+				}
+				dbPath := filepath.Join(d, tc.name+".db")
+				fi, err := os.Create(dbPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = io.Copy(fi, r)
+				fi.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				db, err := bbolt.Open(dbPath, 0600,
+					&bbolt.Options{Timeout: 1 * time.Second})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				err = db.Update(func(dbtx *bbolt.Tx) error {
+					return tc.upgrade(dbtx)
+				})
+				if err != nil {
+					t.Fatalf("Upgrade failed: %v", err)
+				}
+				tc.verify(t, db)
 			})
-			if err != nil {
-				t.Fatalf("Upgrade failed: %v", err)
-			}
-			tc.verify(t, db)
-		})
-	}
+		}
+	})
 
 	os.RemoveAll(d)
 }
