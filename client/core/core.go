@@ -1272,7 +1272,7 @@ func (c *Core) reinstateDexAccount(dexStat *DEXBrief, crypter encrypt.Crypter) e
 
 	// Prepare and sign the registration payload.
 	// The account ID is generated from the public key.
-	dexReg := &msgjson.Reinstate{
+	dexReinstate := &msgjson.Reinstate{
 		DEXPubKey:    dc.acct.dexPubKey.Serialize(),
 		ClientPubKey: dc.acct.privKey.PubKey().SerializeCompressed(),
 		AccountProof: dc.acct.accountProof,
@@ -1280,23 +1280,10 @@ func (c *Core) reinstateDexAccount(dexStat *DEXBrief, crypter encrypt.Crypter) e
 		Time:         encode.UnixMilliU(time.Now()),
 	}
 	regRes := new(msgjson.RegisterResult)
-	err := dc.signAndRequest(dexReg, msgjson.ReinstateRoute, regRes)
+	err := dc.signAndRequest(dexReinstate, msgjson.ReinstateRoute, regRes)
 	if err != nil {
 		log.Errorf("error reinstating account on dex: %v", err)
 		return err
-	}
-
-	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
-	dcrWallet, err := c.connectedWallet(regFeeAssetID)
-	if err != nil {
-		return fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
-	}
-
-	if !dcrWallet.unlocked() {
-		err = unlockWallet(dcrWallet, crypter)
-		if err != nil {
-			return fmt.Errorf("failed to unlock %s wallet: %v", unbip(dcrWallet.AssetID), err)
-		}
 	}
 
 	dc.setRegConfirms(regConfirmationsPaid)
