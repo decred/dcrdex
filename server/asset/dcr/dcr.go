@@ -54,9 +54,13 @@ var (
 )
 
 const (
-	AssetName                = "dcr"
+	assetName                = "dcr"
 	immatureTransactionError = dex.ErrorKind("immature output")
 )
+
+func init() {
+	asset.Register(assetName, &Driver{})
+}
 
 // dcrNode represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient.Client, and all methods are matches for Client

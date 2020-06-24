@@ -71,12 +71,12 @@ func loadConfig(configPath string, network dex.Network) (*DCRConfig, error) {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("no %q config file found at %s", AssetName, configPath)
+		return nil, fmt.Errorf("no %q config file found at %s", assetName, configPath)
 	} else {
 		// The config file exists, so attempt to parse it.
 		err = flags.NewIniParser(parser).ParseFile(configPath)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing %q ini file: %v", AssetName, err)
+			return nil, fmt.Errorf("error parsing %q ini file: %v", assetName, err)
 		}
 	}
 

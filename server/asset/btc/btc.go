@@ -50,10 +50,14 @@ var (
 )
 
 const (
-	AssetName                = "btc"
+	assetName                = "btc"
 	btcToSatoshi             = 1e8
 	immatureTransactionError = dex.ErrorKind("immature output")
 )
+
+func init() {
+	asset.Register(assetName, &Driver{})
+}
 
 // btcNode represents a blockchain information fetcher. In practice, it is
 // satisfied by rpcclient.Client, and all methods are matches for Client
@@ -115,7 +119,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		configPath = dexbtc.SystemConfigPath("bitcoin")
 	}
 
-	return NewBTCClone(AssetName, configPath, logger, network, params, dexbtc.RPCPorts)
+	return NewBTCClone(assetName, configPath, logger, network, params, dexbtc.RPCPorts)
 }
 
 // NewBTCClone creates a BTC backend for a set of network parameters and default
