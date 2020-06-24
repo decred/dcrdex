@@ -610,7 +610,7 @@ func TestOnline(t *testing.T) {
 
 	keyPath := filepath.Join(tempDir, "rpc.key")
 	certPath := filepath.Join(tempDir, "rpc.cert")
-	pongWait = 100 * time.Millisecond
+	pongWait = time.Millisecond * 500
 	pingPeriod = (pongWait * 9) / 10
 	server, err := NewServer(&RPCConfig{
 		ListenAddrs: []string{":0"},
@@ -704,8 +704,8 @@ func TestOnline(t *testing.T) {
 		return err
 	}
 
-	// Sleep for a few  pongs to make sure the client doesn't disconnect.
-	time.Sleep(pongWait * 3)
+	// Sleep for a couple of pongs to make sure the client doesn't disconnect.
+	time.Sleep(pongWait * 2)
 
 	// Positive path.
 	err = sendToDEX("ok", "{}")

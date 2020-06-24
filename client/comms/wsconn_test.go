@@ -75,7 +75,7 @@ func TestWsConn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pingWait := time.Millisecond * 200
+	pingWait := time.Second
 
 	type conn struct {
 		sync.WaitGroup
