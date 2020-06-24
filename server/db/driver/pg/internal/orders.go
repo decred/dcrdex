@@ -158,11 +158,11 @@ const (
 		account_id BYTEA,      -- TODO: INDEX
 		client_time TIMESTAMPTZ,
 		server_time TIMESTAMPTZ,
-		commit BYTEA UNIQUE,
+		commit BYTEA UNIQUE,   -- null for server-generated cancels (order revocations)
 		target_order BYTEA,    -- cancel orders ref another order
 		status INT2,
-		epoch_idx INT8, epoch_dur INT4,
-		preimage BYTEA UNIQUE
+		epoch_idx INT8, epoch_dur INT4, -- 0 for rule-based revocations, -1 for exempt (e.g. book purge)
+		preimage BYTEA UNIQUE  -- null before preimage collection, and all server-generated cancels (revocations)
 	);`
 
 	SelectCancelOrder = `SELECT oid, account_id, client_time, server_time,
@@ -170,7 +170,7 @@ const (
 	FROM %s WHERE oid = $1;`
 
 	// SelectRevokeCancels retrieves server-initiated cancels (revokes).
-	SelectRevokeCancels = `SELECT oid, target_order, server_time
+	SelectRevokeCancels = `SELECT oid, target_order, server_time, epoch_idx
 		FROM %s
 		WHERE account_id = $1 AND status = $2 -- use orderStatusRevoked
 		ORDER BY server_time DESC

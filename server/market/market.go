@@ -179,7 +179,8 @@ ordersLoop:
 			}
 
 			delete(bookOrdersByID, id)
-			if _, _, err = storage.RevokeOrder(lo); err != nil {
+			// Revoke the order, but do not count this against the user.
+			if _, _, err = storage.RevokeOrderUncounted(lo); err != nil {
 				log.Errorf("Failed to revoke order %v: %v", lo, err)
 			}
 			// No penalization here presently since the market was down, but if
@@ -222,7 +223,8 @@ ordersLoop:
 		log.Warnf("Revoking book order %v with already locked coins.", oid)
 		bad := bookOrdersByID[oid]
 		delete(bookOrdersByID, oid)
-		if _, _, err = storage.RevokeOrder(bad); err != nil {
+		// Revoke the order, but do not count this against the user.
+		if _, _, err = storage.RevokeOrderUncounted(bad); err != nil {
 			log.Errorf("Failed to revoke order %v: %v", bad, err)
 			// But still not added back on the book.
 		}
@@ -237,7 +239,8 @@ ordersLoop:
 			// maybe a revoke failed.
 			log.Errorf("Not rebooking order %v with amount (%v/%v) incompatible with current lot size (%v)",
 				lo.FillAmt, lo.Quantity, mktInfo.LotSize)
-			if _, _, err = storage.RevokeOrder(lo); err != nil {
+			// Revoke the order, but do not count this against the user.
+			if _, _, err = storage.RevokeOrderUncounted(lo); err != nil {
 				log.Errorf("Failed to revoke order %v: %v", lo, err)
 				// But still not added back on the book.
 			}

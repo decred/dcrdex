@@ -5,7 +5,6 @@ package pg
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"database/sql/driver"
 	"errors"
@@ -191,8 +190,6 @@ func (a *Archiver) NewEpochOrder(ord order.Order, epochIdx, epochDur int64) erro
 func makePseudoCancel(target order.OrderID, user account.AccountID, base, quote uint32, timeStamp time.Time) *order.CancelOrder {
 	// Create a server-generated cancel order to record the server's revoke
 	// order action.
-	var commit order.Commitment
-	rand.Read(commit[:])
 	return &order.CancelOrder{
 		P: order.Prefix{
 			AccountID:  user,
@@ -201,7 +198,8 @@ func makePseudoCancel(target order.OrderID, user account.AccountID, base, quote 
 			OrderType:  order.CancelOrderType,
 			ClientTime: timeStamp,
 			ServerTime: timeStamp,
-			Commit:     commit,
+			// The zero-value for Commitment is stored as NULL. See
+			// (Commitment).Value.
 		},
 		TargetOrderID: target,
 	}
@@ -270,8 +268,13 @@ func (a *Archiver) FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []or
 	cancelTable := fullCancelOrderTableName(a.dbName, marketSchema, orderStatusRevoked.active())
 	stmt = fmt.Sprintf(internal.InsertCancelOrder, cancelTable)
 	for _, co := range cos {
+		// Special values for this server-generate cancel order:
+		//  - Pass nil instead of the zero value Commitment to save a comparison
+		//    in (Commitment).Value with the zero value.
+		//  - Set epoch idx to exemptEpochIdx (-1) and dur to dummyEpochDur (1),
+		//    consistent with revokeOrder(..., exempt=true).
 		_, err = dbTx.Exec(stmt, co.ID(), co.AccountID, co.ClientTime,
-			co.ServerTime, co.Commit, co.TargetOrderID, orderStatusRevoked, 0, 0)
+			co.ServerTime, nil, co.TargetOrderID, orderStatusRevoked, exemptEpochIdx, dummyEpochDur)
 		if err != nil {
 			fail()
 			err = fmt.Errorf("failed to store pseudo-cancel order: %v", err)
@@ -394,6 +397,23 @@ func (a *Archiver) CancelOrder(lo *order.LimitOrder) error {
 // ErrUnknownOrder. This may change orders with status executed to revoked,
 // which may be unexpected.
 func (a *Archiver) RevokeOrder(ord order.Order) (cancelID order.OrderID, timeStamp time.Time, err error) {
+	return a.revokeOrder(ord, false)
+}
+
+// RevokeOrderUncounted is like RevokeOrder except that the generated cancel
+// order will not be counted against the user. i.e. ExecutedCancelsForUser
+// should not return the cancel orders created this way.
+func (a *Archiver) RevokeOrderUncounted(ord order.Order) (cancelID order.OrderID, timeStamp time.Time, err error) {
+	return a.revokeOrder(ord, true)
+}
+
+const (
+	exemptEpochIdx  int64 = -1
+	countedEpochIdx int64 = 0
+	dummyEpochDur   int64 = 1 // for idx*duration math
+)
+
+func (a *Archiver) revokeOrder(ord order.Order, exempt bool) (cancelID order.OrderID, timeStamp time.Time, err error) {
 	// Revoke the targeted order.
 	err = a.updateOrderStatus(ord, orderStatusRevoked)
 	if err != nil {
@@ -405,7 +425,11 @@ func (a *Archiver) RevokeOrder(ord order.Order) (cancelID order.OrderID, timeSta
 	timeStamp = time.Now().Truncate(time.Millisecond).UTC()
 	co := makePseudoCancel(ord.ID(), ord.User(), ord.Base(), ord.Quote(), timeStamp)
 	cancelID = co.ID()
-	err = a.storeOrder(co, 0, 0, orderStatusRevoked)
+	epochIdx := countedEpochIdx
+	if exempt {
+		epochIdx = exemptEpochIdx
+	}
+	err = a.storeOrder(co, epochIdx, dummyEpochDur, orderStatusRevoked)
 	return
 }
 
@@ -1029,6 +1053,8 @@ func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt
 	return
 }
 
+// revokeGeneratedCancelsForUser excludes exempt/uncounted cancels created with
+// RevokeOrderUncounted or revokeOrder(..., exempt=true).
 func (a *Archiver) revokeGeneratedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt string, aid account.AccountID, N int) (ords []cancelExecStamped, err error) {
 	var rows *sql.Rows
 	rows, err = dbe.QueryContext(ctx, stmt, aid, orderStatusRevoked, N)
@@ -1039,9 +1065,15 @@ func (a *Archiver) revokeGeneratedCancelsForUser(ctx context.Context, dbe *sql.D
 	for rows.Next() {
 		var oid, target order.OrderID
 		var revokeTime time.Time
-		err = rows.Scan(&oid, &target, &revokeTime)
+		var epochIdx int64
+		err = rows.Scan(&oid, &target, &revokeTime, &epochIdx)
 		if err != nil {
 			return
+		}
+
+		// only include non-exempt/counted cancels
+		if epochIdx == exemptEpochIdx {
+			continue
 		}
 
 		ords = append(ords, cancelExecStamped{oid, target, encode.UnixMilli(revokeTime)})

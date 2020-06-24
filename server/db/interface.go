@@ -138,10 +138,16 @@ type OrderArchiver interface {
 	// "revoked", and RevokeOrder should be used to set this status.
 	CancelOrder(*order.LimitOrder) error
 
-	// RevokeOrder puts an order into the revoked state. Orders should be
-	// revoked by the DEX according to policy on failed orders. For canceling an
-	// order that was matched with a cancel order, use CancelOrder.
+	// RevokeOrder puts an order into the revoked state, and generates a cancel
+	// order to record the action. Orders should be revoked by the DEX according
+	// to policy on failed orders. For canceling an order that was matched with
+	// a cancel order, use CancelOrder.
 	RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error)
+
+	// RevokeOrderUncounted is like RevokeOrder except that the generated cancel
+	// order will not be counted against the user. i.e. ExecutedCancelsForUser
+	// should not return the cancel orders created this way.
+	RevokeOrderUncounted(order.Order) (cancelID order.OrderID, t time.Time, err error)
 
 	// FailCancelOrder puts an unmatched cancel order into the executed state.
 	// For matched cancel orders, use ExecuteOrder.

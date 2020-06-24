@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
+	"decred.org/dcrdex/server/db/driver/pg/internal"
 	"github.com/davecgh/go-spew/spew"
 )
 
@@ -324,6 +326,9 @@ func TestRevokeOrder(t *testing.T) {
 	if coStatus != order.OrderStatusRevoked {
 		t.Errorf("got order status %v, expected %v", coStatus, order.OrderStatusRevoked)
 	}
+	if !coT.Commit.IsZero() {
+		t.Errorf("generated cancel order did not have NULL/zero-value commitment")
+	}
 
 	// Market orders may be revoked too, while swap is in progress.
 	// NOTE: executed -> revoked status change may be odd.
@@ -333,7 +338,7 @@ func TestRevokeOrder(t *testing.T) {
 		t.Fatalf("StoreOrder failed: %v", err)
 	}
 
-	cancelID, timeStamp, err = archie.RevokeOrder(mo)
+	cancelID, timeStamp, err = archie.RevokeOrderUncounted(mo)
 	if err != nil {
 		t.Fatalf("RevokeOrder failed: %v", err)
 	}
@@ -357,6 +362,9 @@ func TestRevokeOrder(t *testing.T) {
 	}
 	if coStatus != order.OrderStatusRevoked {
 		t.Errorf("got order status %v, expected %v", coStatus, order.OrderStatusRevoked)
+	}
+	if !coT.Commit.IsZero() {
+		t.Errorf("generated cancel order did not have NULL/zero-value commitment")
 	}
 
 	// Revoke an order not in the tables yet
@@ -432,15 +440,51 @@ func TestFlushBook(t *testing.T) {
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
-	if len(coids) != 1 {
-		t.Fatalf("got %d cancels, expected 1", len(coids))
+	// ExecutedCancelsForUser should not find the (exempt) cancels created by
+	// FlushBook.
+	if len(coids) != 0 {
+		t.Fatalf("got %d cancels, expected 0", len(coids))
 	}
-	if len(targets) != 1 {
-		t.Fatalf("got %d cancel targets, expected 1", len(targets))
+	if len(targets) != 0 {
+		t.Fatalf("got %d cancel targets, expected 0", len(targets))
 	}
 
-	if targets[0] != lo.ID() {
-		t.Fatalf("cancel order is targeting %v, expected %v", targets[0], lo.ID())
+	// Query for the revoke associated cancels without the exemption filter.
+	cancelTableName := fullCancelOrderTableName(archie.dbName, mktInfo.Name, false)
+	stmt := fmt.Sprintf(internal.SelectRevokeCancels, cancelTableName)
+	rows, err := archie.db.QueryContext(context.Background(), stmt, lo.User(), orderStatusRevoked, 25)
+	if err != nil {
+		t.Fatalf("QueryContext failed: %v", err)
+	}
+
+	var ords []cancelExecStamped
+	for rows.Next() {
+		var oid, target order.OrderID
+		var revokeTime time.Time
+		var epochIdx int64
+		err = rows.Scan(&oid, &target, &revokeTime, &epochIdx)
+		if err != nil {
+			rows.Close()
+			t.Fatalf("rows Scan failed")
+		}
+
+		if epochIdx != exemptEpochIdx {
+			t.Errorf("got epoch index %d, expected %d", epochIdx, exemptEpochIdx)
+		}
+
+		ords = append(ords, cancelExecStamped{oid, target, encode.UnixMilli(revokeTime)})
+	}
+
+	if err = rows.Err(); err != nil {
+		t.Fatalf("rows Scan failed")
+	}
+
+	if len(ords) != 1 {
+		t.Fatalf("found %d cancels, wanted 1", len(ords))
+	}
+
+	if ords[0].target != lo.ID() {
+		t.Fatalf("cancel order is targeting %v, expected %v", ords[0].target, lo.ID())
 	}
 
 	// Ensure market order is still there.
@@ -1482,6 +1526,23 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	})
 	if err != nil {
 		t.Errorf("InsertEpoch failed: %v", err)
+	}
+
+	// A revoked order (exempt cancel), which should NOT be found with
+	// ExecutedCancelsForUser.
+	lo2 := newLimitOrder(true, 4900000, 1, order.StandingTiF, 1)
+	lo2.AccountID = co.AccountID // same user
+	lo2.BaseAsset, lo2.QuoteAsset = mktInfo.Base, mktInfo.Quote
+	err = archie.StoreOrder(lo2, epochIdx, epochDur, order.OrderStatusBooked)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	// Revoke the order.
+	time.Sleep(time.Millisecond * 10)
+	_, _, err = archie.RevokeOrderUncounted(lo2)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
 	}
 
 	user := co.User()

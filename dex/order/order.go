@@ -204,21 +204,32 @@ const CommitmentSize = hashSize
 // Commitment is the Blake-256 hash of the Preimage.
 type Commitment hash
 
-// Value implements the sql/driver.Valuer interface.
-func (c Commitment) Value() (driver.Value, error) {
-	return c[:], nil // []byte
+var zeroCommit Commitment
+
+// IsZero indicates if the Commitment is the zero-value for the type.
+func (c *Commitment) IsZero() bool {
+	return *c == zeroCommit
 }
 
-// Scan implements the sql.Scanner interface.
+// Value implements the sql/driver.Valuer interface. The zero-value Commitment
+// returns nil rather than a byte slice of zeros.
+func (c Commitment) Value() (driver.Value, error) {
+	if c.IsZero() {
+		return nil, nil // nil => NULL
+	}
+	return c[:], nil // []byte => BYTEA
+}
+
+// Scan implements the sql.Scanner interface. NULL table values are scanned as
+// the zero-value Commitment.
 func (c *Commitment) Scan(src interface{}) error {
 	switch src := src.(type) {
 	case []byte:
 		copy(c[:], src)
 		return nil
-		//case string:
-		// case nil:
-		// 	*oid = nil
-		// 	return nil
+	case nil: // NULL in the table
+		*c = Commitment{}
+		return nil
 	}
 
 	return fmt.Errorf("cannot convert %T to Commitment", src)

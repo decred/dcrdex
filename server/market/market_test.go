@@ -124,6 +124,9 @@ func (ta *TArchivist) CancelOrder(*order.LimitOrder) error { return nil }
 func (ta *TArchivist) RevokeOrder(order.Order) (order.OrderID, time.Time, error) {
 	return order.OrderID{}, time.Now(), nil
 }
+func (ta *TArchivist) RevokeOrderUncounted(order.Order) (order.OrderID, time.Time, error) {
+	return order.OrderID{}, time.Now(), nil
+}
 func (ta *TArchivist) SetOrderCompleteTime(ord order.Order, compTime int64) error { return nil }
 func (ta *TArchivist) FailCancelOrder(*order.CancelOrder) error                   { return nil }
 func (ta *TArchivist) UpdateOrderFilled(*order.LimitOrder) error                  { return nil }
