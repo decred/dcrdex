@@ -662,13 +662,13 @@ func (rig *testRig) queueNotifyFee() {
 	})
 }
 
-func (rig *testRig) queueConnect() {
+func (rig *testRig) queueConnect(rpcErr *msgjson.Error) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
 		result := &msgjson.ConnectResult{Sig: connect.Sig}
-		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+		resp, _ := msgjson.NewResponse(msg.ID, result, rpcErr)
 		f(resp)
 		return nil
 	})
@@ -1124,7 +1124,7 @@ func TestRegister(t *testing.T) {
 		rig.queueRegister(regRes)
 		queueTipChange()
 		rig.queueNotifyFee()
-		rig.queueConnect()
+		rig.queueConnect(nil)
 	}
 
 	form := &RegisterForm{
@@ -1375,7 +1375,8 @@ func TestReinstate(t *testing.T) {
 	acct := dc.acct
 
 	dexStat := &DEXBrief{
-		Host: tDexHost,
+		Host:         tDexHost,
+		AcctNotFound: true,
 	}
 
 	wallet, _ := newTWallet(tDCR.ID)
@@ -1390,7 +1391,7 @@ func TestReinstate(t *testing.T) {
 	}
 	sign(tDexPriv, regRes)
 
-	queueRegister := func() {
+	queueReinstate := func() {
 		rig.ws.queueResponse(msgjson.ReinstateRoute, func(msg *msgjson.Message, f msgFunc) error {
 			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
 			f(resp)
@@ -1398,10 +1399,14 @@ func TestReinstate(t *testing.T) {
 		})
 	}
 
-	queueRegister()
-	_, err := tCore.reinstateDexAccount(dexStat, rig.crypter)
+	queueReinstate()
+	rig.queueConnect(nil)
+	err := tCore.reinstateDexAccount(dexStat, rig.crypter)
 	if err != nil {
 		t.Fatalf("reinstate error: %v", err)
+	}
+	if dexStat.AcctNotFound {
+		t.Fatal("account not found still true after reinstate")
 	}
 }
 
@@ -1410,7 +1415,7 @@ func TestLogin(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	rig.queueConnect()
+	rig.queueConnect(nil)
 	_, err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
@@ -1451,29 +1456,87 @@ func TestLogin(t *testing.T) {
 	}
 
 	// Success again.
-	rig.queueConnect()
+	rig.queueConnect(nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
 	}
 }
 
-func TestInitializeDEXConnections(t *testing.T) {
+func TestLoginAccountNotFoundError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.acct.markFeePaid()
+	dc := rig.dc
+	acct := dc.acct
+
+	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, "test account not found error")
+	rig.queueConnect(accountNotFoundError)
+
+	regRes := &msgjson.RegisterResult{
+		DEXPubKey:    acct.dexPubKey.Serialize(),
+		ClientPubKey: dex.Bytes{0x1}, // part of the serialization, but not the response
+		Address:      "someaddr",
+		Fee:          tFee,
+		Time:         encode.UnixMilliU(time.Now()),
+	}
+	queueReinstate := func() {
+		rig.ws.queueResponse(msgjson.ReinstateRoute, func(msg *msgjson.Message, f msgFunc) error {
+			resp, _ := msgjson.NewResponse(msg.ID, regRes, nil)
+			f(resp)
+			return nil
+		})
+	}
+	queueReinstate()
+
+	wallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = wallet
+	rig.queueConnect(nil)
+
+	result, err := tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("unexpected Login error: %v", err)
+	}
+	for _, dexStat := range result.DEXes {
+		if dexStat.AcctNotFound {
+			t.Fatalf("expected account not found error: %v", msgjson.AccountNotFoundError)
+		}
+	}
+}
+
+func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	rig.queueConnect()
-
+	rig.queueConnect(nil)
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
-
 	if dexStats == nil {
 		t.Fatal("initializeDEXConnections failure")
 	}
-
 	for _, dexStat := range dexStats {
 		if dexStat.AuthErr != "" {
 			t.Fatalf("initializeDEXConnections authorization error %v", dexStat.AuthErr)
+		}
+	}
+}
+
+func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.acct.markFeePaid()
+
+	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, "test account not found error"))
+	dexStats := tCore.initializeDEXConnections(rig.crypter)
+	if dexStats == nil {
+		t.Fatal("initializeDEXConnections failure")
+	}
+	for _, dexStat := range dexStats {
+		if dexStat.AuthErr == "" {
+			t.Fatalf("initializeDEXConnections authorization error %v", dexStat.AuthErr)
+		}
+		if !dexStat.AcctNotFound {
+			t.Fatal("initializeDEXConnections expected account not found")
 		}
 	}
 }

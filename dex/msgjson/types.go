@@ -64,7 +64,7 @@ const (
 	AccountClosedError                // 46
 	MarketNotRunningError             // 47
 	TryAgainLaterError                // 48
-	NoAccountFoundError               // 49
+	AccountNotFoundError              // 49
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

@@ -1245,10 +1245,10 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	dexStats := c.initializeDEXConnections(crypter)
 
 	for _, dexStat := range dexStats {
-		if strings.Contains(dexStat.AuthErr, "no account info found for account") {
-			result, err := c.reinstateDexAccount(dexStat, crypter)
+		if dexStat.AcctNotFound {
+			err := c.reinstateDexAccount(dexStat, crypter)
 			if err != nil {
-				return result, err
+				return nil, err
 			}
 		}
 	}
@@ -1266,7 +1266,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	return result, nil
 }
 
-func (c *Core) reinstateDexAccount(dexStat *DEXBrief, crypter encrypt.Crypter) (*LoginResult, error) {
+func (c *Core) reinstateDexAccount(dexStat *DEXBrief, crypter encrypt.Crypter) error {
 
 	dc := c.conns[dexStat.Host]
 
@@ -1283,19 +1283,19 @@ func (c *Core) reinstateDexAccount(dexStat *DEXBrief, crypter encrypt.Crypter) (
 	err := dc.signAndRequest(dexReg, msgjson.ReinstateRoute, regRes)
 	if err != nil {
 		log.Errorf("error reinstating account on dex: %v", err)
-		return nil, err
+		return err
 	}
 
 	regFeeAssetID, _ := dex.BipSymbolID(regFeeAssetSymbol)
 	dcrWallet, err := c.connectedWallet(regFeeAssetID)
 	if err != nil {
-		return nil, fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
+		return fmt.Errorf("cannot connect to %s wallet to pay fee: %v", regFeeAssetSymbol, err)
 	}
 
 	if !dcrWallet.unlocked() {
 		err = unlockWallet(dcrWallet, crypter)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unlock %s wallet: %v", unbip(dcrWallet.AssetID), err)
+			return fmt.Errorf("failed to unlock %s wallet: %v", unbip(dcrWallet.AssetID), err)
 		}
 	}
 
@@ -1307,12 +1307,13 @@ func (c *Core) reinstateDexAccount(dexStat *DEXBrief, crypter encrypt.Crypter) (
 	dc.acct.markFeePaid()
 	err = c.authDEX(dc)
 	if err != nil {
-		log.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
+		return fmt.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
 	}
 
+	dexStat.AcctNotFound = false
 	c.refreshUser()
 
-	return nil, nil
+	return nil
 }
 
 // Logout logs the user out
@@ -1422,6 +1423,9 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				details := fmt.Sprintf("%s: %v", dc.acct.host, err)
 				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
 				result.AuthErr = details
+				if strings.Contains(err.Error(), "rpc error: "+strconv.Itoa(msgjson.AccountNotFoundError)) {
+					result.AcctNotFound = true
+				}
 				return
 			}
 			result.Authed = true
