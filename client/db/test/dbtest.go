@@ -17,8 +17,9 @@ import (
 
 // Generate a public key on the secp256k1 curve.
 func randomPubKey() *secp256k1.PublicKey {
-	_, pub := secp256k1.PrivKeyFromBytes(randBytes(32))
-	return pub
+	// _, pub := secp256k1.PrivKeyFromBytes(randBytes(32))
+	// return pub
+	return secp256k1.NewPublicKey(secp256k1.S256().ScalarBaseMult(randBytes(32)))
 }
 
 func randString(maxLen int) string {
