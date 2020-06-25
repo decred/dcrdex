@@ -11,8 +11,9 @@ import (
 
 func TestAccountInfo(t *testing.T) {
 	spins := 10000
-	ais := make([]*db.AccountInfo, 0, spins)
-	nTimes(spins, func(int) { ais = append(ais, RandomAccountInfo()) })
+	if testing.Short() {
+		spins = 1000
+	}
 	tStart := time.Now()
 	nTimes(spins, func(i int) {
 		ai := RandomAccountInfo()
@@ -28,6 +29,9 @@ func TestAccountInfo(t *testing.T) {
 
 func TestMatchProof(t *testing.T) {
 	spins := 10000
+	if testing.Short() {
+		spins = 1000
+	}
 	proofs := make([]*db.MatchProof, 0, spins)
 	// Generate proofs with an average of 20% sparsity. Empty fields should not
 	// affect accurate encoding/decoding.
@@ -47,6 +51,9 @@ func TestMatchProof(t *testing.T) {
 
 func TestOrderProof(t *testing.T) {
 	spins := 10000
+	if testing.Short() {
+		spins = 1000
+	}
 	proofs := make([]*db.OrderProof, 0, spins)
 	nTimes(spins, func(int) {
 		proofs = append(proofs, &db.OrderProof{
