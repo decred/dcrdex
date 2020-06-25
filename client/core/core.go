@@ -2399,8 +2399,6 @@ func (c *Core) handleReconnect(host string) {
 		return
 	}
 
-	dc.booksMtx.Lock()
-	defer dc.booksMtx.Unlock()
 	dc.marketMtx.RLock()
 	for mktKey, mkt := range dc.marketMap {
 		req, err := msgjson.NewRequest(dc.NextID(), msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{
@@ -2433,7 +2431,9 @@ func (c *Core) handleReconnect(host string) {
 			log.Error(err)
 			continue
 		}
+		dc.booksMtx.Lock()
 		dc.books[mktKey] = booky
+		dc.booksMtx.Unlock()
 	}
 	dc.marketMtx.RUnlock()
 }
