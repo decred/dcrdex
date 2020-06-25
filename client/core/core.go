@@ -1245,7 +1245,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	dexStats := c.initializeDEXConnections(crypter)
 
 	for _, dexStat := range dexStats {
-		if dexStat.AcctNotFound {
+		if dexStat.AcctFound != nil && !*dexStat.AcctFound {
 			err := c.reinstateDexAccount(dexStat, crypter)
 			if err != nil {
 				return nil, err
@@ -1294,10 +1294,10 @@ func (c *Core) reinstateDexAccount(dexStat *DEXBrief, crypter encrypt.Crypter) e
 	dc.acct.markFeePaid()
 	err = c.authDEX(dc)
 	if err != nil {
-		return fmt.Errorf("fee paid, but failed to authenticate connection to %s: %v", dc.acct.host, err)
+		return fmt.Errorf("successful reinstate, but failed to authenticate connection to %s: %v", dc.acct.host, err)
 	}
-
-	dexStat.AcctNotFound = false
+	AcctFound := true
+	dexStat.AcctFound = &AcctFound
 	c.refreshUser()
 
 	return nil
@@ -1411,8 +1411,14 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
 				result.AuthErr = details
 				if strings.Contains(err.Error(), "rpc error: "+strconv.Itoa(msgjson.AccountNotFoundError)) {
-					result.AcctNotFound = true
+					AcctFound := false
+					result.AcctFound = &AcctFound
 				}
+				//var mErr *msgjson.Error
+				//if errors.As(err, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
+				//  AcctFound := false
+				//	result.AcctFound = &AcctFound
+				//}
 				return
 			}
 			result.Authed = true

@@ -1374,9 +1374,10 @@ func TestReinstate(t *testing.T) {
 	dc := rig.dc
 	acct := dc.acct
 
+	AcctFound := false
 	dexStat := &DEXBrief{
-		Host:         tDexHost,
-		AcctNotFound: true,
+		Host:      tDexHost,
+		AcctFound: &AcctFound,
 	}
 
 	wallet, _ := newTWallet(tDCR.ID)
@@ -1399,13 +1400,34 @@ func TestReinstate(t *testing.T) {
 		})
 	}
 
+	// reinstate error.
+	queueReinstate()
+	rig.queueConnect(msgjson.NewError(msgjson.InvalidAccountProof, "test reinstate error"))
+	err := tCore.reinstateDexAccount(dexStat, rig.crypter)
+	if err == nil {
+		t.Fatal("expected reinstate error")
+	}
+
+	// 'connect' route error.
+	queueReinstate()
+	rig.queueConnect(msgjson.NewError(msgjson.AuthenticationError, "test authentication error"))
+	err = tCore.reinstateDexAccount(dexStat, rig.crypter)
+	// Should be no error, but also not authed. Error is sent and logged
+	// as a notification.
+	if err == nil {
+		t.Fatal("expected authentication error")
+	}
+	if rig.acct.authed() {
+		t.Fatal("account authed after 'connect' error")
+	}
+
 	queueReinstate()
 	rig.queueConnect(nil)
-	err := tCore.reinstateDexAccount(dexStat, rig.crypter)
+	err = tCore.reinstateDexAccount(dexStat, rig.crypter)
 	if err != nil {
 		t.Fatalf("reinstate error: %v", err)
 	}
-	if dexStat.AcctNotFound {
+	if dexStat.AcctFound != nil && !*dexStat.AcctFound {
 		t.Fatal("account not found still true after reinstate")
 	}
 }
@@ -1498,8 +1520,8 @@ func TestLoginAccountNotFoundError(t *testing.T) {
 		t.Fatalf("unexpected Login error: %v", err)
 	}
 	for _, dexStat := range result.DEXes {
-		if dexStat.AcctNotFound {
-			t.Fatalf("expected account not found error: %v", msgjson.AccountNotFoundError)
+		if dexStat.AcctFound != nil && !*dexStat.AcctFound {
+			t.Fatalf("expected reinstate to indicate account found after handling account not found error")
 		}
 	}
 }
@@ -1535,7 +1557,7 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 		if dexStat.AuthErr == "" {
 			t.Fatalf("initializeDEXConnections authorization error %v", dexStat.AuthErr)
 		}
-		if !dexStat.AcctNotFound {
+		if dexStat.AcctFound != nil && *dexStat.AcctFound {
 			t.Fatal("initializeDEXConnections expected account not found")
 		}
 	}

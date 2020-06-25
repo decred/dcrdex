@@ -203,6 +203,11 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// Error returns the error message. Satisfies the error interface.
+func (e *Error) Error() string {
+	return e.Message
+}
+
 // String satisfies the Stringer interface for pretty printing.
 func (e Error) String() string {
 	return fmt.Sprintf("error code %d: %s", e.Code, e.Message)
@@ -875,7 +880,7 @@ func (p *AccountProof) Encode() []byte {
 	return data
 }
 
-// DecodeAccountProof decodes the versioned blob to a *MatchProof.
+// DecodeAccountProof decodes the versioned blob to a *AccountProof.
 func DecodeAccountProof(b []byte) (*AccountProof, error) {
 	ver, pushes, err := encode.DecodeBlob(b)
 	if err != nil {

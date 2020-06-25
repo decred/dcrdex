@@ -951,7 +951,10 @@ func TestHandleReinstate(t *testing.T) {
 	user := tNewUser(t)
 	dummyError := fmt.Errorf("test error")
 	clientPubKey := user.privKey.PubKey().SerializeCompressed()
-	DEXPrivKey, _ := secp256k1.GeneratePrivateKey()
+	DEXPrivKey, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatalf("GeneratePrivateKey error: %v", err)
+	}
 	DEXPubKey := DEXPrivKey.PubKey()
 
 	userAcct := &account.Account{
@@ -975,7 +978,10 @@ func TestHandleReinstate(t *testing.T) {
 	}
 	notifyMsg := notify.Serialize()
 
-	notifySig, _ := DEXPrivKey.Sign(notifyMsg)
+	notifySig, err := DEXPrivKey.Sign(notifyMsg)
+	if err != nil {
+		t.Fatalf("DEXPrivKey.Sign error: %v", err)
+	}
 
 	var mgrSingerError error = nil
 
@@ -1004,6 +1010,9 @@ func TestHandleReinstate(t *testing.T) {
 		}
 		sigMsg := reinstate.Serialize()
 		sig, _ := user.privKey.Sign(sigMsg)
+		if err != nil {
+			t.Fatalf("user.privKey.Sign error: %v", err)
+		}
 		reinstate.SetSig(sig.Serialize())
 		return reinstate
 	}
@@ -1081,13 +1090,13 @@ func TestHandleReinstate(t *testing.T) {
 	}
 	respMsg = user.conn.getSend()
 	if respMsg == nil {
-		t.Fatalf("no register response")
+		t.Fatal("no register response")
 	}
 	resp, _ := respMsg.Response()
 	regRes := new(msgjson.RegisterResult)
-	err := json.Unmarshal(resp.Result, regRes)
+	err = json.Unmarshal(resp.Result, regRes)
 	if err != nil {
-		t.Fatalf("error unmarshaling payload")
+		t.Fatal("error unmarshaling payload")
 	}
 
 	expectedRegisterResult := &msgjson.RegisterResult{

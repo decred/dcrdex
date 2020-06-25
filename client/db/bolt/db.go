@@ -187,9 +187,9 @@ func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 			if err != nil {
 				return err
 			}
-			acctInfo.Paid = len(acct.Get(feeProofKey)) > 0
-			if acctInfo.Paid {
-				acctInfo.AccountProof = acct.Get(feeProofKey)
+			acctInfo.AccountProof = acct.Get(feeProofKey)
+			if len(acctInfo.AccountProof) > 0 {
+				acctInfo.Paid = true
 			}
 			accounts = append(accounts, acctInfo)
 		}
