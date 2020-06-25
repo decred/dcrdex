@@ -1046,9 +1046,29 @@ func TestHandleReinstate(t *testing.T) {
 	ensureErr(do(msg), "DEX signature error", msgjson.RPCInternalError)
 	mgrSigner.err = nil
 
+	// InvalidAccountProof error
+	reinstate = newReinstate()
+	reinstate.AccountProof = []byte(`bad`)
+	msg = newMsg(reinstate)
+	ensureErr(do(msg), "DecodeAccountProof error", msgjson.InvalidAccountProof)
+
+	// Fee Address resolution error
+	reinstate = newReinstate()
+	tCheckFeeErrHolder := tCheckFeeErr
+	tCheckFeeErr = dummyError
+	msg = newMsg(reinstate)
+	ensureErr(do(msg), "checkFee error", msgjson.FeeAddressResolutionError)
+	tCheckFeeErr = tCheckFeeErrHolder
+
+	// Pay account error
+	reinstate = newReinstate()
+	rig.storage.payErr = dummyError
+	msg = newMsg(reinstate)
+	ensureErr(do(msg), "pay account error", msgjson.PayAccountError)
+	rig.storage.payErr = nil
+
 	// Send a valid registration and check the response.
 	// Before starting, make sure there are no responses in the queue.
-
 	respMsg := user.conn.getSend()
 	if respMsg != nil {
 		b, _ := json.Marshal(respMsg)

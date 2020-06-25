@@ -65,6 +65,9 @@ const (
 	MarketNotRunningError             // 47
 	TryAgainLaterError                // 48
 	AccountNotFoundError              // 49
+	InvalidAccountProof               // 50
+	FeeAddressResolutionError         // 51
+	PayAccountError                   // 52
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

@@ -100,7 +100,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 	return nil
 }
 
-// handleReinstate handles requests to the 'register' route.
+// handleReinstate handles requests to the 'reinstate' route.
 func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
 	// Unmarshal.
 	reinstate := new(msgjson.Reinstate)
@@ -135,18 +135,23 @@ func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) 
 		}
 	}
 
+	// Decode account proof.
 	accountProof, err := msgjson.DecodeAccountProof(reinstate.AccountProof)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.InvalidAccountProof,
+			Message: "DecodeAccountProof error: " + err.Error(),
+		}
+	}
 
+	// Verify NotifyFee receipt
 	notifyFee := &msgjson.NotifyFee{
 		AccountID: acct.ID[:],
 		CoinID:    reinstate.CoinID,
 		Time:      accountProof.Stamp,
 	}
-
 	notifyFee.Sig = accountProof.Sig
-
 	err = checkSigS256(notifyFee.Serialize(), accountProof.Sig, auth.signer.PubKey())
-
 	if err != nil {
 		return &msgjson.Error{
 			Code:    msgjson.SignatureError,
@@ -154,8 +159,14 @@ func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) 
 		}
 	}
 
+	//Resolve fee address
 	addr, _, _, err := auth.checkFee(reinstate.CoinID)
-	log.Info(addr)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.FeeAddressResolutionError,
+			Message: "checkFee error: " + err.Error(),
+		}
+	}
 
 	// Reinstate account.
 	err = auth.storage.CreateAccountWithAddress(acct, addr)
@@ -166,7 +177,14 @@ func (auth *AuthManager) handleReinstate(conn comms.Link, msg *msgjson.Message) 
 		}
 	}
 
+	//Mark account paid
 	err = auth.storage.PayAccount(acct.ID, reinstate.CoinID)
+	if err != nil {
+		return &msgjson.Error{
+			Code:    msgjson.PayAccountError,
+			Message: "pay account error: " + err.Error(),
+		}
+	}
 
 	// Prepare, sign, and send response.
 	regRes := &msgjson.RegisterResult{
