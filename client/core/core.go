@@ -1416,7 +1416,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				}
 				//var mErr *msgjson.Error
 				//if errors.As(err, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
-				//  AcctFound := false
+				//	AcctFound := false
 				//	result.AcctFound = &AcctFound
 				//}
 				return

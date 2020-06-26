@@ -205,7 +205,7 @@ type Error struct {
 
 // Error returns the error message. Satisfies the error interface.
 func (e *Error) Error() string {
-	return e.Message
+	return e.String()
 }
 
 // String satisfies the Stringer interface for pretty printing.
