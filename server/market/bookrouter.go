@@ -389,10 +389,10 @@ out:
 
 				// Depending on resume handling, maybe kill the book router.
 				// Presently the Market closes the order feed channels, so quit.
-				log.Infof("Book order feed closed for market %q after epoch %d, persist book = %v.",
+				log.Infof("Market %q suspended after epoch %d, persist book = %v.",
 					book.name, sigData.finalEpoch, sigData.persistBook)
+
 				// Stay running for Swapper unbook callbacks.
-				//break out
 
 			default:
 				panic(fmt.Sprintf("unknown orderbook update action %d", u.action))

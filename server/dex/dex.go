@@ -388,11 +388,12 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	authMgr := auth.NewAuthManager(&authCfg)
 	startSubSys("Auth manager", authMgr)
 
+	// Create an unbook dispatcher for the Swapper.
 	markets := make(map[string]*market.Market, len(cfg.Markets))
 	marketUnbookHook := func(lo *order.LimitOrder) bool {
 		name, err := dex.MarketName(lo.BaseAsset, lo.QuoteAsset)
 		if err != nil {
-			log.Error(err)
+			log.Errorf("unbook hook: %v", err)
 			return false
 		}
 

@@ -121,6 +121,8 @@ type TAuth struct {
 	preimagesByOrdID   map[string]order.Preimage
 	handlePreimageDone chan struct{}
 	suspensions        map[account.AccountID]bool
+	canceledOrder      order.OrderID
+	cancelOrder        order.OrderID
 }
 
 func (a *TAuth) Route(route string, handler func(account.AccountID, *msgjson.Message) *msgjson.Error) {
@@ -224,8 +226,11 @@ func (a *TAuth) Penalize(user account.AccountID, rule account.Rule) {
 	log.Infof("Penalize for user %v", user)
 }
 
-func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time)        {}
-func (a *TAuth) RecordCancel(account.AccountID, order.OrderID, order.OrderID, time.Time) {}
+func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}
+func (a *TAuth) RecordCancel(aid account.AccountID, coid, oid order.OrderID, t time.Time) {
+	a.cancelOrder = coid
+	a.canceledOrder = oid
+}
 
 type TMarketTunnel struct {
 	adds       []*orderRecord

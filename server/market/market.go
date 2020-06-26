@@ -424,21 +424,28 @@ func (m *Market) OrderFeed() <-chan *updateSignal {
 	return bookUpdates
 }
 
+// FeedDone informs the market that the caller is finished receiving from the
+// given channel, which should have been obtained from OrderFeed. If the channel
+// was a registered order feed channel from OrderFeed, it is closed and removed
+// so that no further signals will be send on the channel.
 func (m *Market) FeedDone(feed <-chan *updateSignal) bool {
 	m.orderFeedMtx.Lock()
 	defer m.orderFeedMtx.Unlock()
 	for i := range m.orderFeeds {
 		if m.orderFeeds[i] == feed {
 			close(m.orderFeeds[i])
+			// Order is not important to delete the channel without allocation.
 			m.orderFeeds[i] = m.orderFeeds[len(m.orderFeeds)-1]
+			m.orderFeeds[len(m.orderFeeds)-1] = nil // chan is a pointer
 			m.orderFeeds = m.orderFeeds[:len(m.orderFeeds)-1]
-			//m.orderFeeds = append(m.orderFeeds[:i], m.orderFeeds[i+1:]...)
 			return true
 		}
 	}
 	return false
 }
 
+// sendToFeeds sends an *updateSignal to all order feed channels created with
+// OrderFeed().
 func (m *Market) sendToFeeds(sig *updateSignal) {
 	m.orderFeedMtx.RLock()
 	for _, s := range m.orderFeeds {
@@ -1291,7 +1298,11 @@ func (m *Market) epochStart(orders []order.Order) (cSum []byte, ordersRevealed [
 	return
 }
 
-// Unbook is a callback for the swapper to request unbooking an order.
+// Unbook allows the DEX manager to remove unbook an order. This does: (1)
+// remove the order from the in-memory book, (2) set the order's status in the
+// DB to "revoked", (3) inform the auth manager of the action for cancellation
+// ratio accounting, and (4) send an 'unbook' notification to subscribers of
+// this market's order book.
 func (m *Market) Unbook(lo *order.LimitOrder) bool {
 	// Ensure we do not unbook during matching.
 	m.bookMtx.Lock()

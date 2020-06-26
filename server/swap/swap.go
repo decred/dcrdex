@@ -275,7 +275,11 @@ type Swapper struct {
 	// storage is a Database backend.
 	storage Storage
 	// authMgr is an AuthManager for client messaging and authentication.
-	authMgr    AuthManager
+	authMgr AuthManager
+	// unbookHook is a callback the the Swapper's controller (e.g. DEX manager)
+	// for removing an order from the book. This should be called when a swap is
+	// revoked due to failure of the order's owner to complete the necessary
+	// actions.
 	unbookHook func(lo *order.LimitOrder) bool
 	// The matches map and the contained matches are protected by the matchMtx.
 	matchMtx sync.RWMutex

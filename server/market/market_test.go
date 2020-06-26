@@ -37,6 +37,7 @@ type TArchivist struct {
 	commitForKnownOrder  order.Commitment
 	bookedOrders         []*order.LimitOrder
 	epochInserted        chan struct{}
+	revoked              order.Order
 }
 
 func (ta *TArchivist) LastErr() error         { return nil }
@@ -121,8 +122,9 @@ func (ta *TArchivist) BookOrder(lo *order.LimitOrder) error {
 }
 func (ta *TArchivist) ExecuteOrder(ord order.Order) error  { return nil }
 func (ta *TArchivist) CancelOrder(*order.LimitOrder) error { return nil }
-func (ta *TArchivist) RevokeOrder(order.Order) (order.OrderID, time.Time, error) {
-	return order.OrderID{}, time.Now(), nil
+func (ta *TArchivist) RevokeOrder(ord order.Order) (order.OrderID, time.Time, error) {
+	ta.revoked = ord
+	return ord.ID(), time.Now(), nil
 }
 func (ta *TArchivist) RevokeOrderUncounted(order.Order) (order.OrderID, time.Time, error) {
 	return order.OrderID{}, time.Now(), nil
@@ -332,7 +334,7 @@ func TestMarket_NewMarket_BookOrders(t *testing.T) {
 }
 
 func TestMarket_Book(t *testing.T) {
-	mkt, _, _, cleanup, err := newTestMarket()
+	mkt, storage, auth, cleanup, err := newTestMarket()
 	if err != nil {
 		t.Fatalf("newTestMarket failure: %v", err)
 	}
@@ -374,6 +376,55 @@ func TestMarket_Book(t *testing.T) {
 		t.Errorf("Incorrect best sell order. Got %v, expected %v",
 			sells[0], bestSell)
 	}
+
+	// unbook something not on the book
+	if mkt.Unbook(makeLO(buyer3, 100, 1, order.StandingTiF)) {
+		t.Fatalf("unbooked and order that was not on the book")
+	}
+
+	// unbook the best buy order
+	feed := mkt.OrderFeed()
+
+	if !mkt.Unbook(bestBuy) {
+		t.Fatalf("Failed to unbook order")
+	}
+
+	sig := <-feed
+	if sig.action != unbookAction {
+		t.Fatalf("did not receive unbookAction signal")
+	}
+	sigData, ok := sig.data.(sigDataUnbookedOrder)
+	if !ok {
+		t.Fatalf("incorrect sigdata type")
+	}
+	if sigData.epochIdx != -1 {
+		t.Fatalf("expected epoch index -1, got %d", sigData.epochIdx)
+	}
+	loUnbooked, ok := sigData.order.(*order.LimitOrder)
+	if !ok {
+		t.Fatalf("incorrect unbooked order type")
+	}
+	if loUnbooked.ID() != bestBuy.ID() {
+		t.Errorf("unbooked order %v, wanted %v", loUnbooked.ID(), bestBuy.ID())
+	}
+
+	if auth.canceledOrder != bestBuy.ID() {
+		t.Errorf("revoke not recorded with auth manager")
+	}
+
+	if storage.revoked.ID() != bestBuy.ID() {
+		t.Errorf("revoke not recorded in storage")
+	}
+
+	if lockedCoins := mkt.coinsLocked(bestBuy); lockedCoins != nil {
+		t.Errorf("unbooked order still has locked coins: %v", lockedCoins)
+	}
+
+	bestBuy2, _ := mkt.book.Best()
+	if bestBuy2 == bestBuy {
+		t.Errorf("failed to unbook order")
+	}
+
 }
 
 func TestMarket_Suspend(t *testing.T) {
