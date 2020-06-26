@@ -1410,15 +1410,11 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				details := fmt.Sprintf("%s: %v", dc.acct.host, err)
 				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
 				result.AuthErr = details
-				if strings.Contains(err.Error(), "rpc error: "+strconv.Itoa(msgjson.AccountNotFoundError)) {
+				var mErr *msgjson.Error
+				if errors.As(err, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
 					AcctFound := false
 					result.AcctFound = &AcctFound
 				}
-				//var mErr *msgjson.Error
-				//if errors.As(err, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
-				//	AcctFound := false
-				//	result.AcctFound = &AcctFound
-				//}
 				return
 			}
 			result.Authed = true
@@ -1912,7 +1908,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// Check the response error.
 	err = extractError(errChan, requestTimeout, "connect")
 	if err != nil {
-		return fmt.Errorf("'connect' error: %v", err)
+		return fmt.Errorf("'connect' error: %w", err)
 	}
 	// Check the signature.
 	err = dc.acct.checkSig(sigMsg, result.Sig)
