@@ -2009,17 +2009,13 @@ func (s *Swapper) revoke(match *matchTracker) {
 		// Expire function to unregister the outstanding request.
 		expireFunc := func() {
 			s.rmLiveAckers(req.ID)
-			//s.authMgr.Penalize(ack.user, account.FailureToAct) // really penalize again?
+			log.Infof("revoke_match request failed for user %v (taker)", user)
 		}
 		// Register that there is an outstanding request.
 		s.setLiveAcker(req, ack)
-		err := s.authMgr.RequestWithTimeout(user, req, func(_ comms.Link, resp *msgjson.Message) {
+		s.authMgr.RequestWhenConnected(user, req, func(_ comms.Link, resp *msgjson.Message) {
 			s.processAck(resp, ack)
-		}, auth.DefaultRequestTimeout, expireFunc)
-		if err != nil {
-			expireFunc() // unregister request and penalize
-			log.Infof("revoke_match request failed for user %v (taker): %v", user, err)
-		}
+		}, auth.DefaultRequestTimeout, auth.DefaultConnectTimeout, expireFunc)
 	}
 
 	takerParams, takerReq, makerParams, makerReq, err := s.revocationRequests(match)
