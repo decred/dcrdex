@@ -733,7 +733,7 @@ export default class MarketsPage extends BasePage {
 
   /*
    * handleFeePayment is the handler for the 'feepayment' notification type.
-   * This is used to update the registration status of the currrent exchange.
+   * This is used to update the registration status of the current exchange.
    */
   handleFeePayment (note) {
     const dexAddr = note.dex
@@ -751,6 +751,8 @@ export default class MarketsPage extends BasePage {
     const order = note.order
     if (order.targetID && note.subject === 'cancel') {
       this.orderRows[order.targetID].querySelector('[data-col=cancel]').textContent = 'canceled'
+    } else if (order.targetID && note.subject === 'revoke') {
+      this.orderRows[order.targetID].querySelector('[data-col=cancel]').textContent = 'revoked'
     } else {
       const row = this.orderRows[order.id]
       if (!row) return
