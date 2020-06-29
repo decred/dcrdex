@@ -138,6 +138,16 @@ A sample is given at
 [**Per-asset Variables**](spec/admin.mediawiki) section of the specification for
 more information on individual options.
 
+### Build and run assets backend plugin
+
+From a command prompt, navigate to **server/asset/build** .
+Build the plugin assets and copy to resource application folder by running:
+```
+go build -buildmode=plugin ./btc/
+cp ./btc.so ~/.dcrdex/assets/btc.so
+```
+Similar with other assets. Or you can simply navigate to **server/cmd/dcrdex** and run the script __plugins_build.sh__. This script will build dcrdex and all the plugin in the asset folder and move it to app data folder at once time
+
 ### Build and run dcrdex
 
 From a command prompt, navigate to **server/cmd/dcrdex**. Build the executable

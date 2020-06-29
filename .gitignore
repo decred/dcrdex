@@ -3,6 +3,7 @@
 *.log
 *.log.*.gz
 *.bak
+*.so
 .idea/
 debug
 *.cert
