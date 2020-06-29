@@ -373,6 +373,8 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		// Set the order status for both orders.
 		t.metaData.Status = order.OrderStatusCanceled
 		t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
+		// TODO: If the order's backing coins/change are unused, unlock them,
+		// otherwise they have been or will be spent by a swap.
 	}
 	if includesTrades {
 		fillRatio := float64(trade.Filled()) / float64(trade.Quantity)

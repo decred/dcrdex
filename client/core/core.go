@@ -2444,7 +2444,7 @@ func handleMatchProofMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 }
 
 // handleRevokeMatchMsg is called when a revoke_match message is received.
-func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) error {
+func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var revocation msgjson.RevokeMatch
 	err := msg.Unmarshal(&revocation)
 	if err != nil {
@@ -2457,6 +2457,10 @@ func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
 		return fmt.Errorf("no order found with id %s", oid.String())
+	}
+
+	if len(revocation.MatchID) != order.MatchIDSize {
+		return fmt.Errorf("invalid match ID %x", revocation.MatchID)
 	}
 
 	var matchID order.MatchID
@@ -2472,11 +2476,76 @@ func handleRevokeMatchMsg(_ *Core, dc *dexConnection, msg *msgjson.Message) erro
 	}
 	tracker.matchMtx.RUnlock()
 	if revokedMatch == nil {
-		return fmt.Errorf("no match found with id %s for order %s", matchID, oid.String())
+		return fmt.Errorf("no match found with id %s for order %v", matchID, oid)
 	}
 
+	errs := newErrorSet("handleRevokeMatchMsg (order %v, match %v): ", oid, matchID)
+
+	// Set the match as revoked.
 	revokedMatch.MetaMatch.MetaData.Proof.IsRevoked = true
-	return tracker.db.UpdateMatch(&revokedMatch.MetaMatch)
+	err = tracker.db.UpdateMatch(&revokedMatch.MetaMatch)
+	if err != nil {
+		errs.add("unable to update match: %v", err)
+	}
+
+	// Notify the user of the failed match.
+	corder, _ := tracker.coreOrder() // no cancel order
+	tracker.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
+		tracker.token()), db.WarningLevel, corder))
+
+	// Also set the order as revoked.
+	metaOrder := tracker.metaOrder()
+	metaOrder.MetaData.Status = order.OrderStatusRevoked
+	err = tracker.db.UpdateOrder(metaOrder)
+	if err != nil {
+		errs.add("unable to update order: %v", err)
+	}
+
+	// Notify the user of the revoked order.
+	details := fmt.Sprintf("%s order on %s-%s at %s has been revoked (%s)",
+		strings.Title(sellString(tracker.Trade().Sell)), unbip(tracker.Base()),
+		unbip(tracker.Quote()), dc.acct.host, tracker.token())
+	tracker.notify(newOrderNote("Order revoked", details, db.WarningLevel, corder))
+
+	// Send out a data notification with the revoke information.
+	cancelOrder := &Order{
+		Host:     tracker.dc.acct.host,
+		MarketID: tracker.mktID,
+		Type:     order.CancelOrderType,
+		Stamp:    encode.UnixMilliU(time.Now()),
+		Epoch:    corder.Epoch,
+		TargetID: corder.ID, // the important part for the frontend
+	}
+	tracker.notify(newOrderNote("revoke", "", db.Data, cancelOrder))
+
+	// Unlock funding coins if they are not already unlocked. Do this one at a
+	// time if wallet fails if just one cannot be unlocked.
+	for _, coin := range tracker.coins {
+		err = tracker.wallets.fromWallet.ReturnCoins(asset.Coins{coin})
+		if err != nil {
+			log.Warnf("unable to unlock funding coin %v: %v", coin, err)
+		}
+	}
+	if tracker.change != nil {
+		err = tracker.wallets.fromWallet.ReturnCoins(asset.Coins{tracker.change})
+		if err != nil {
+			log.Warnf("unable to unlock change coin %v: %v", tracker.change, err)
+		}
+	}
+
+	// Update market orders, and the balance to account for unlocked coins.
+	dc.refreshMarkets()
+	c.updateAssetBalance(tracker.wallets.fromAsset.ID)
+
+	log.Warnf("Match %v revoked in status %v for order %v", matchID, revokedMatch.Match.Status, oid)
+
+	// Respond to DEX.
+	err = dc.ack(msg.ID, matchID, &revocation)
+	if err != nil {
+		errs.add("Audit error: %v", err)
+	}
+
+	return errs.ifany()
 }
 
 // handleTradeSuspensionMsg is called when a trade suspension notification is received.
