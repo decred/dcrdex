@@ -365,9 +365,9 @@ func (auth *AuthManager) rmUserConnectMsgs(user account.AccountID) []*pendingMes
 	if userMsgs == nil {
 		return nil
 	}
-	msgs := make([]*pendingMessage, len(userMsgs))
-	for i, tr := range userMsgs {
-		msgs[i] = tr.pendingMessage
+	msgs := make([]*pendingMessage, 0, len(userMsgs))
+	for _, tr := range userMsgs {
+		msgs = append(msgs, tr.pendingMessage)
 		// Stop the timer. It's ok if already fired since this timedMessage
 		// would have been removed if we lost the race with AfterFunc's call to
 		// rmUserConnectMsg. Since we're here, we beat the timer.
@@ -507,9 +507,9 @@ func (auth *AuthManager) rmUserConnectReqs(user account.AccountID) []*pendingReq
 	if userReqs == nil {
 		return nil
 	}
-	reqs := make([]*pendingRequest, len(userReqs))
-	for i, tr := range userReqs {
-		reqs[i] = tr.pendingRequest
+	reqs := make([]*pendingRequest, 0, len(userReqs))
+	for _, tr := range userReqs {
+		reqs = append(reqs, tr.pendingRequest)
 		// Stop the timer. It's ok if already fired since this timedRequest
 		// would have been removed if we lost the race with AfterFunc's call to
 		// rmUserConnectReq. Since we're here, we beat the timer.
