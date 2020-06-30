@@ -2523,7 +2523,13 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	for _, coin := range tracker.coins {
 		err = tracker.wallets.fromWallet.ReturnCoins(asset.Coins{coin})
 		if err != nil {
-			log.Warnf("unable to unlock coin %v: %v", coin, err)
+			log.Warnf("unable to unlock funding coin %v: %v", coin, err)
+		}
+	}
+	if tracker.change != nil {
+		err = tracker.wallets.fromWallet.ReturnCoins(asset.Coins{tracker.change})
+		if err != nil {
+			log.Warnf("unable to unlock change coin %v: %v", tracker.change, err)
 		}
 	}
 
