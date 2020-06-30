@@ -2533,16 +2533,9 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 		}
 	}
 
-	// Tick asset to trigger recovery if the match was revoked during
-	// swap and either refund or redeem is needed. Or not?
-	counts, err := tracker.tick()
-	if err != nil {
-		errs.addErr(err)
-	}
-	if len(counts) > 0 {
-		dc.refreshMarkets()
-		c.updateBalances(counts)
-	}
+	// Update market orders, and the balance to account for unlocked coins.
+	dc.refreshMarkets()
+	c.updateAssetBalance(tracker.wallets.fromAsset.ID)
 
 	log.Warnf("Match %v revoked in status %v for order %v", matchID, revokedMatch.Match.Status, oid)
 
