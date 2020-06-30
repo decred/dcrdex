@@ -350,7 +350,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 				t.metaData.Status = order.OrderStatusExecuted
 			}
 		case order.CancelOrderType:
-			t.metaData.Status = order.OrderStatusCanceled
+			t.metaData.Status = order.OrderStatusCanceled // ?
 		case order.MarketOrderType:
 			t.metaData.Status = order.OrderStatusExecuted
 		}
@@ -373,8 +373,23 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		// Set the order status for both orders.
 		t.metaData.Status = order.OrderStatusCanceled
 		t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
-		// TODO: If the order's backing coins/change are unused, unlock them,
-		// otherwise they have been or will be spent by a swap.
+		// If the order's backing coins are unused, unlock them, otherwise they
+		// have been or will be spent by a swap.
+		if !includesTrades && initFilled == 0 {
+			for _, coin := range t.coins {
+				err = t.wallets.fromWallet.ReturnCoins(asset.Coins{coin})
+				if err != nil {
+					log.Warnf("unable to unlock funding coin %v: %v", coin, err)
+				}
+			}
+		}
+		// If there are change coins, unlock them too.
+		if t.change != nil {
+			err = t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
+			if err != nil {
+				log.Warnf("unable to unlock change coin %v: %v", t.change, err)
+			}
+		}
 	}
 	if includesTrades {
 		fillRatio := float64(trade.Filled()) / float64(trade.Quantity)
@@ -712,6 +727,15 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	t.metaData.ChangeCoin = []byte(change.ID())
 	t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin)
 
+	// Unlock the change coins in the wallet if the order is no longer on the
+	// book. It is not sufficient to check remaining amount.
+	if t.metaData.Status != order.OrderStatusBooked {
+		err = t.wallets.fromWallet.ReturnCoins(asset.Coins{change})
+		if err != nil {
+			errs.addErr(err)
+		}
+	}
+
 	// Process the swap for each match by sending the `init` request
 	// to the DEX and updating the match with swap details.
 	// Add any errors encountered to `errs` and proceed to next match
@@ -721,7 +745,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		match := matches[i]
 		coin := receipt.Coin()
 		coinStrs[i] = coin.String()
-		err := t.finalizeSwapAction(match, coin.ID(), coin.Redeem())
+		err = t.finalizeSwapAction(match, coin.ID(), coin.Redeem())
 		if err != nil {
 			errs.addErr(err)
 		}

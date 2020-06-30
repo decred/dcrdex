@@ -57,7 +57,8 @@ type DB interface {
 	// returned. since = 0 is equivalent to disabling the time filter, since
 	// no orders were created before before 1970.
 	MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*MetaOrder, error)
-	// SetChangeCoin stores the change coin for the order.
+	// SetChangeCoin stores the current change coin for the order. This coin
+	// will change each time a chained swap occurs for this order.
 	SetChangeCoin(order.OrderID, order.CoinID) error
 	// UpdateOrderStatus sets the order status for an order.
 	UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error

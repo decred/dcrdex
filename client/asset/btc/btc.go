@@ -569,7 +569,11 @@ func (btc *ExchangeWallet) Lock() error {
 	return btc.wallet.Lock()
 }
 
-// Swap sends the swap contracts and prepares the receipts.
+// Swap sends the swaps in a single transaction. The Receipts returned can be
+// used to refund a failed transaction. The change output is locked with the
+// wallet in case it is still required to fund chained swaps for an order. The
+// caller should unlock the change coin via ReturnCoins if it is no longer
+// required to fund additional swaps for the parent order.
 func (btc *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Receipt, asset.Coin, error) {
 	var contracts [][]byte
 	var totalOut, totalIn uint64
@@ -622,21 +626,40 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 	if totalIn < totalOut {
 		return nil, nil, fmt.Errorf("unfunded contract. %d < %d", totalIn, totalOut)
 	}
+	// Ensure we have enough outputs before broadcasting.
+	swapCount := len(swaps.Contracts)
+	if len(baseTx.TxOut) < swapCount {
+		return nil, nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
+	}
+
 	// Grab a change address.
 	changeAddr, err := btc.wallet.ChangeAddress()
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %v", err)
 	}
 	// Prepare the receipts.
-	swapCount := len(swaps.Contracts)
-	if len(baseTx.TxOut) < swapCount {
-		return nil, nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
-	}
+
 	// Sign, add change, and send the transaction.
 	msgTx, change, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, nfo)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Delete the utxos from the cache.
+	btc.fundingMtx.Lock()
+	for i := range opIDs {
+		delete(btc.fundingCoins, opIDs[i])
+	}
+	btc.fundingMtx.Unlock()
+
+	// Lock the change outpoint in case it is still required to fund chained
+	// swaps for an order.
+	err = btc.wallet.LockUnspent(false, []*output{change})
+	if err != nil {
+		// The swap transaction is already broadcasted, so don't fail now.
+		btc.log.Errorf("failed to lock change output: %v", err)
+	}
+
 	receipts := make([]asset.Receipt, 0, swapCount)
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
@@ -645,12 +668,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
 		})
 	}
-	// Delete the utxos from the cache.
-	btc.fundingMtx.Lock()
-	defer btc.fundingMtx.Unlock()
-	for i := range opIDs {
-		delete(btc.fundingCoins, opIDs[i])
-	}
+
 	return receipts, change, nil
 }
 

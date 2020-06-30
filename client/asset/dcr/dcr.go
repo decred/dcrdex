@@ -627,7 +627,10 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 }
 
 // Swap sends the swaps in a single transaction. The Receipts returned can be
-// used to refund a failed transaction.
+// used to refund a failed transaction. The change output is locked with the
+// wallet in case it is still required to fund chained swaps for an order. The
+// caller should unlock the change coin via ReturnCoins if it is no longer
+// required to fund additional swaps for the parent order.
 func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Receipt, asset.Coin, error) {
 	var totalOut uint64
 	// Start with an empty MsgTx.
@@ -669,6 +672,12 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 	if totalIn < totalOut {
 		return nil, nil, fmt.Errorf("unfunded contract. %d < %d", totalIn, totalOut)
 	}
+	// Ensure we have enough outputs before broadcasting.
+	swapCount := len(swaps.Contracts)
+	if len(baseTx.TxOut) < swapCount {
+		return nil, nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
+	}
+
 	// Grab a change address.
 	changeAddr, err := dcr.node.GetRawChangeAddress(dcr.acct, chainParams)
 	if err != nil {
@@ -679,11 +688,23 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 	if err != nil {
 		return nil, nil, err
 	}
-	// Prepare the receipts.
-	swapCount := len(swaps.Contracts)
-	if len(baseTx.TxOut) < swapCount {
-		return nil, nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
+
+	dcr.fundingMtx.Lock()
+	for _, coin := range swaps.Inputs {
+		delete(dcr.fundingCoins, coin.String())
 	}
+	dcr.fundingMtx.Unlock()
+
+	// Lock the change outpoint in case it is still required to fund chained
+	// swaps for an order.
+	changeOp := wire.NewOutPoint(&change.txHash, change.vout, change.tree)
+	err = dcr.node.LockUnspent(false, []*wire.OutPoint{changeOp})
+	if err != nil {
+		// The swap transaction is already broadcasted, so don't fail now.
+		dcr.log.Errorf("failed to lock change output: %v", err)
+	}
+
+	// Prepare the receipts.
 	receipts := make([]asset.Receipt, 0, swapCount)
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
@@ -692,11 +713,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps, nfo *dex.Asset) ([]asset.Rec
 			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
 		})
 	}
-	dcr.fundingMtx.Lock()
-	for _, coin := range swaps.Inputs {
-		delete(dcr.fundingCoins, coin.String())
-	}
-	dcr.fundingMtx.Unlock()
+
 	return receipts, change, nil
 }
 

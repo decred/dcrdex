@@ -178,7 +178,7 @@ type OrderMetaData struct {
 	// ChangeCoin is a change coin from a match. Change coins are "daisy-chained"
 	// for matches. All funding coins go into the first match, and the change coin
 	// from the initiation transaction is used to fund the next match. The
-	// change from that matches ini tx funds the next match, etc.
+	// change from that matches init tx funds the next match, etc.
 	ChangeCoin order.CoinID
 }
 
