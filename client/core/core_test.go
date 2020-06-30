@@ -475,7 +475,22 @@ func (w *TXCWallet) Fund(v uint64, _ *dex.Asset) (asset.Coins, error) {
 	return w.fundCoins, w.fundErr
 }
 
-func (w *TXCWallet) ReturnCoins(asset.Coins) error {
+func (w *TXCWallet) ReturnCoins(coins asset.Coins) error {
+	coinInSlice := func(coin asset.Coin) bool {
+		for _, c := range coins {
+			if bytes.Equal(c.ID(), coin.ID()) {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, c := range w.fundingCoins {
+		if coinInSlice(c) {
+			continue
+		}
+		return errors.New("not found")
+	}
 	return nil
 }
 
@@ -976,6 +991,7 @@ func TestCreateWallet(t *testing.T) {
 	}
 
 	ensureErr := func(tag string) {
+		t.Helper()
 		err := tCore.CreateWallet(tPW, []byte(wPW), form)
 		if err == nil {
 			t.Fatalf("no %s error", tag)
@@ -1100,6 +1116,7 @@ func TestRegister(t *testing.T) {
 
 	queueTipChange := func() {
 		go func() {
+			t.Helper()
 			timeout := time.NewTimer(time.Second * 2)
 			for {
 				select {
@@ -1113,7 +1130,7 @@ func TestRegister(t *testing.T) {
 						return
 					}
 				case <-timeout.C:
-					t.Fatalf("failed to find waiter before timeout")
+					t.Errorf("failed to find waiter before timeout")
 				}
 			}
 		}()
@@ -1150,6 +1167,7 @@ func TestRegister(t *testing.T) {
 	}
 
 	getNotification := func(tag string) interface{} {
+		t.Helper()
 		select {
 		case n := <-ch:
 			return n
@@ -1162,6 +1180,7 @@ func TestRegister(t *testing.T) {
 	}
 
 	getBalanceNote := func() *BalanceNote {
+		t.Helper()
 		note, ok := getNotification("balance").(*BalanceNote)
 		if !ok {
 			t.Fatalf("wrong notification. Expected BalanceNote")
@@ -1170,6 +1189,7 @@ func TestRegister(t *testing.T) {
 	}
 
 	getFeeNote := func() *FeePaymentNote {
+		t.Helper()
 		note, ok := getNotification("feepayment").(*FeePaymentNote)
 		if !ok {
 			t.Fatalf("wrong notification. Expected FeePaymentNote")
@@ -1635,6 +1655,7 @@ func TestTrade(t *testing.T) {
 	noID := false
 	badID := false
 	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
+		t.Helper()
 		// Need to stamp and sign the message with the server's key.
 		msgOrder := new(msgjson.LimitOrder)
 		err := msg.Unmarshal(msgOrder)
@@ -1647,6 +1668,7 @@ func TestTrade(t *testing.T) {
 	}
 
 	handleMarket := func(msg *msgjson.Message, f msgFunc) error {
+		t.Helper()
 		// Need to stamp and sign the message with the server's key.
 		msgOrder := new(msgjson.MarketOrder)
 		err := msg.Unmarshal(msgOrder)
@@ -1659,6 +1681,7 @@ func TestTrade(t *testing.T) {
 	}
 
 	ensureErr := func(tag string) {
+		t.Helper()
 		_, err = tCore.Trade(tPW, form)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
@@ -1828,6 +1851,7 @@ func TestCancel(t *testing.T) {
 	dc.trades[oid] = tracker
 
 	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
+		t.Helper()
 		// Need to stamp and sign the message with the server's key.
 		msgOrder := new(msgjson.CancelOrder)
 		err := msg.Unmarshal(msgOrder)
@@ -1852,6 +1876,7 @@ func TestCancel(t *testing.T) {
 	tracker.cancel = nil
 
 	ensureErr := func(tag string) {
+		t.Helper()
 		err := rig.core.Cancel(tPW, sid)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
@@ -1902,6 +1927,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 	}
 
 	ensureErr := func(tag string) {
+		t.Helper()
 		err := handlePreimageRequest(rig.core, rig.dc, req)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
@@ -1919,21 +1945,45 @@ func TestHandlePreimageRequest(t *testing.T) {
 
 func TestHandleRevokeMatchMsg(t *testing.T) {
 	rig := newTestRig()
-	ord := &order.LimitOrder{P: order.Prefix{ServerTime: time.Now()}}
-	oid := ord.ID()
-	mid := ordertest.RandomMatchID()
-	preImg := newPreimage()
-	payload := &msgjson.RevokeMatch{
-		OrderID: oid[:],
-		MatchID: mid[:],
-	}
-	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.RevokeMatchRoute, payload)
+	dc := rig.dc
+	tCore := rig.core
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.address = "DsVmA7aqqWeKWy461hXjytbZbgCqbB8g2dq"
+	dcrWallet.Unlock(wPW, time.Hour)
 
-	// Ensure revoking a non-existent order generates an error.
-	err := handleRevokeMatchMsg(rig.core, rig.dc, req)
-	if err == nil {
-		t.Fatal("[handleRevokeMatchMsg] expected a non-existent order")
+	fundCoinDcrID := encode.RandomBytes(36)
+	fundCoinDcr := &tCoin{id: fundCoinDcrID}
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
+	btcWallet.Unlock(wPW, time.Hour)
+
+	// fundCoinBID := encode.RandomBytes(36)
+	// fundCoinB := &tCoin{id: fundCoinBID}
+
+	matchSize := 4 * tDCR.LotSize
+	cancelledQty := tDCR.LotSize
+	qty := 2*matchSize + cancelledQty
+	//rate := tBTC.RateStep * 10
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, qty, tBTC.RateStep)
+	lo.Coins = []order.CoinID{fundCoinDcrID}
+	dbOrder.MetaData.Status = order.OrderStatusBooked
+	oid := lo.ID()
+
+	tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
+
+	mid := ordertest.RandomMatchID()
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
 	}
+	mkt := dc.market(tDcrBtcMktName)
+
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen,
+		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 
 	match := &matchTracker{
 		id: mid,
@@ -1942,19 +1992,20 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 			Match:    &order.UserMatch{},
 		},
 	}
+	tracker.matches[mid] = match
 
-	tracker := &trackedTrade{
-		db: rig.db,
-		metaData: &db.OrderMetaData{
-			Status: order.OrderStatusBooked,
-		},
-		Order: ord,
-		matches: map[order.MatchID]*matchTracker{
-			mid: match,
-		},
-		preImg: preImg,
-		dc:     rig.dc,
+	payload := &msgjson.RevokeMatch{
+		OrderID: oid[:],
+		MatchID: mid[:],
 	}
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.RevokeMatchRoute, payload)
+
+	// Ensure revoking a non-existent order generates an error.
+	err = handleRevokeMatchMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleRevokeMatchMsg] expected a non-existent order")
+	}
+
 	rig.dc.trades[oid] = tracker
 
 	err = handleRevokeMatchMsg(rig.core, rig.dc, req)
@@ -1966,6 +2017,10 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 	tracker, _, _ = rig.dc.findOrder(oid)
 	if tracker == nil {
 		t.Fatalf("expected to find an order with id %s", oid.String())
+	}
+	if tracker.metaData.Status != order.OrderStatusRevoked {
+		t.Errorf("incorrect order status. got %v, expected %v",
+			tracker.metaData.Status, order.OrderStatusRevoked)
 	}
 
 	if !match.MetaData.Proof.IsRevoked {
@@ -1992,7 +2047,13 @@ func TestTradeTracking(t *testing.T) {
 	qty := 2*matchSize + cancelledQty
 	rate := tBTC.RateStep * 10
 	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep)
+	// fundCoinDcrID := encode.RandomBytes(36)
+	// lo.Coins = []order.CoinID{fundCoinDcrID}
 	loid := lo.ID()
+
+	//fundCoinDcr := &tCoin{id: fundCoinDcrID}
+	//tDcrWallet.fundingCoins = asset.Coins{fundCoinDcr}
+
 	mid := ordertest.RandomMatchID()
 	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 	if err != nil {
@@ -2004,13 +2065,14 @@ func TestTradeTracking(t *testing.T) {
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
+		t.Helper()
 		if match.Match.Status != wantStatus {
-			t.Fatalf("%s: wrong status wanted %d, got %d", tag, match.Match.Status, wantStatus)
+			t.Fatalf("%s: wrong status wanted %v, got %v", tag,
+				wantStatus, match.Match.Status)
 		}
 	}
 
 	// MAKER MATCH
-	//
 	matchTime := time.Now()
 	msgMatch := &msgjson.Match{
 		OrderID:    loid[:],
@@ -2353,11 +2415,13 @@ func TestTradeTracking(t *testing.T) {
 
 func TestRefunds(t *testing.T) {
 	checkStatus := func(tag string, match *matchTracker, wantStatus order.MatchStatus) {
+		t.Helper()
 		if match.Match.Status != wantStatus {
 			t.Fatalf("%s: wrong status wanted %d, got %d", tag, match.Match.Status, wantStatus)
 		}
 	}
 	checkRefund := func(tracker *trackedTrade, match *matchTracker, expectAmt uint64) {
+		t.Helper()
 		// Confirm that the status is SwapCast.
 		if match.Match.Side == order.Maker {
 			checkStatus("maker swapped", match, order.MakerSwapCast)
@@ -2636,6 +2700,7 @@ func TestResolveActiveTrades(t *testing.T) {
 
 	// Ensure the order is good, and reset the state.
 	ensureGood := func(tag string) {
+		t.Helper()
 		_, err := tCore.Login(tPW)
 		if err != nil {
 			t.Fatalf("%s: login error: %v", tag, err)
@@ -2663,10 +2728,11 @@ func TestResolveActiveTrades(t *testing.T) {
 
 	ensureGood("initial")
 
-	// Ensure a failuare AND reset. err != nil just helps to make sure that we're
-	// hitting errors in resolveActiveTrades, which sends errors as notifications,
-	// vs somewhere else.
+	// Ensure a failure AND reset. err != nil just helps to make sure that we're
+	// hitting errors in resolveActiveTrades, which sends errors as
+	// notifications, vs somewhere else.
 	ensureFail := func(tag string) {
+		t.Helper()
 		_, err := tCore.Login(tPW)
 		if err != nil || len(rig.dc.trades) != 0 {
 			t.Fatalf("%s: no error. err = %v, len(trades) = %d", tag, err, len(rig.dc.trades))
@@ -3033,6 +3099,7 @@ func TestLogout(t *testing.T) {
 	}
 
 	ensureErr := func(tag string) {
+		t.Helper()
 		initUserAssets()
 		err := tCore.Logout()
 		if err == nil {
@@ -3085,6 +3152,7 @@ func TestSetEpoch(t *testing.T) {
 	}
 
 	ensureStatus := func(tag string, status order.OrderStatus) {
+		t.Helper()
 		err := handleMatchProofMsg(rig.core, rig.dc, nextReq())
 		if err != nil {
 			t.Fatalf("error setting epoch for %s: %v", tag, err)
