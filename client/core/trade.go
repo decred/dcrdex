@@ -324,8 +324,6 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		}
 	}
 
-	initFilled := trade.Filled()
-
 	// Calculate the new filled value for the order.
 	isMarketBuy := t.Type() == order.MarketOrderType && !trade.Sell
 	var filled uint64
@@ -375,16 +373,8 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		// Set the order status for both orders.
 		t.metaData.Status = order.OrderStatusCanceled
 		t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
-		// If the order's backing coins are unused, unlock them, otherwise they
-		// have been or will be spent by a swap.
-		if !includesTrades && initFilled == 0 {
-			for _, coin := range t.coins {
-				err = t.wallets.fromWallet.ReturnCoins(asset.Coins{coin})
-				if err != nil {
-					log.Warnf("unable to unlock coin %v: %v", coin, err)
-				}
-			}
-		}
+		// TODO: If the order's backing coins/change are unused, unlock them,
+		// otherwise they have been or will be spent by a swap.
 	}
 	if includesTrades {
 		fillRatio := float64(trade.Filled()) / float64(trade.Quantity)
