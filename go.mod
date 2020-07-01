@@ -29,7 +29,7 @@ require (
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/lib/pq v1.2.0
 	github.com/smartystreets/goconvey v1.6.4 // indirect
-	go.etcd.io/bbolt v1.3.4
+	go.etcd.io/bbolt v1.3.5
 	golang.org/x/crypto v0.0.0-20200311171314-f7b00557c8c4
 	golang.org/x/sync v0.0.0-20190423024810-112230192c58
 	gopkg.in/go-ini/ini.v1 v1.55.0
