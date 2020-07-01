@@ -2401,7 +2401,10 @@ func (c *Core) handleReconnect(host string) {
 
 	dc.marketMtx.RLock()
 	for mktKey, mkt := range dc.marketMap {
-		if !mkt.Subscribed() {
+		dc.booksMtx.Lock()
+		_, foundMkt := dc.books[mktKey]
+		dc.booksMtx.Unlock()
+		if !foundMkt {
 			continue
 		}
 		req, err := msgjson.NewRequest(dc.NextID(), msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{

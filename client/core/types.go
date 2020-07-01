@@ -151,7 +151,6 @@ type Market struct {
 	Orders          []*Order `json:"orders"`
 	pendingSuspend  *time.Timer
 	suspended       bool
-	subscribed      bool
 	mtx             sync.Mutex
 }
 
@@ -177,20 +176,6 @@ func (m *Market) setSuspended(state bool) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.suspended = state
-}
-
-// Subscribed returns the market's subscribed state.
-func (m *Market) Subscribed() bool {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	return m.subscribed
-}
-
-// setSubscribed sets the market's subscribed state.
-func (m *Market) setSubscribed(state bool) {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	m.subscribed = state
 }
 
 // Exchange represents a single DEX with any number of markets.

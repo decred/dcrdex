@@ -166,7 +166,7 @@ func (c *Core) Sync(host string, base, quote uint32) (*OrderBook, *BookFeed, err
 
 	// Make sure the market exists.
 	dc.marketMtx.RLock()
-	market, found := dc.marketMap[mkt]
+	_, found = dc.marketMap[mkt]
 	dc.marketMtx.RUnlock()
 	if !found {
 		return nil, nil, fmt.Errorf("unknown market %s", mkt)
@@ -199,7 +199,6 @@ func (c *Core) Sync(host string, base, quote uint32) (*OrderBook, *BookFeed, err
 		return nil, nil, err
 	}
 	dc.books[mkt] = booky
-	market.setSubscribed(true)
 
 	return booky.book(), booky.feed(), nil
 }
@@ -226,11 +225,6 @@ func (c *Core) unsub(dc *dexConnection, mkt string) {
 		if !res {
 			log.Errorf("error unsubscribing from %s", mkt)
 		}
-
-		dc.marketMtx.RLock()
-		market := dc.marketMap[mkt]
-		market.setSubscribed(false)
-		dc.marketMtx.RUnlock()
 	})
 	if err != nil {
 		log.Errorf("request error unsubscribing from %s orderbook: %v", mkt, err)
