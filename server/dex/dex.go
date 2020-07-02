@@ -174,14 +174,14 @@ func (cr *configResponse) setMktSuspend(name string, finalEpoch uint64, persist 
 		if mkt.Name == name {
 			mkt.MarketStatus.FinalEpoch = finalEpoch
 			mkt.MarketStatus.Persist = &persist
-			cr.remarshall()
+			cr.remarshal()
 			return
 		}
 	}
 	log.Errorf("Failed to set MarketStatus for market %q", name)
 }
 
-func (cr *configResponse) remarshall() {
+func (cr *configResponse) remarshal() {
 	encResult, err := json.Marshal(cr.configMsg)
 	if err != nil {
 		log.Errorf("failed to marshal config message: %v", err)
@@ -478,6 +478,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 	cfgResp, err := newConfigResponse(cfg, cfgAssets, cfgMarkets)
 	if err != nil {
+		abort()
 		return nil, err
 	}
 
@@ -506,7 +507,7 @@ func (dm *DEX) ConfigMsg() json.RawMessage {
 	return dm.configResp.configEnc
 }
 
-// TODO: for just market running status, the DEX manager should use it's
+// TODO: for just market running status, the DEX manager should use its
 // knowledge of Market subsystem state.
 func (dm *DEX) MarketRunning(mktName string) (found, running bool) {
 	mkt := dm.markets[mktName]
