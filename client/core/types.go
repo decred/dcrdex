@@ -271,11 +271,12 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 
 func (a *dexAccount) dbInfo() *db.AccountInfo {
 	return &db.AccountInfo{
-		Host:      a.host,
-		Cert:      a.cert,
-		EncKey:    a.encKey,
-		DEXPubKey: a.dexPubKey,
-		FeeCoin:   a.feeCoin,
+		Host:         a.host,
+		Cert:         a.cert,
+		EncKey:       a.encKey,
+		DEXPubKey:    a.dexPubKey,
+		FeeCoin:      a.feeCoin,
+		ClientPubKey: a.privKey.PubKey(),
 	}
 }
 
@@ -456,11 +457,12 @@ func coinIDString(assetID uint32, coinID []byte) string {
 
 // DEXBrief holds data returned from initializeDEXConnections.
 type DEXBrief struct {
-	Host     string   `json:"host"`
-	AcctID   string   `json:"acctID"`
-	Authed   bool     `json:"authed"`
-	AuthErr  string   `json:"autherr,omitempty"`
-	TradeIDs []string `json:"tradeIDs"`
+	Host      string   `json:"host"`
+	AcctID    string   `json:"acctID"`
+	AcctFound *bool    `json:"-"`
+	Authed    bool     `json:"authed"`
+	AuthErr   string   `json:"autherr,omitempty"`
+	TradeIDs  []string `json:"tradeIDs"`
 }
 
 // LoginResult holds data returned from Login.

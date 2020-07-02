@@ -63,6 +63,7 @@ const (
 	AccountClosedError                // 47
 	MarketNotRunningError             // 48
 	TryAgainLaterError                // 49
+	AccountNotFoundError              // 50
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -199,6 +200,11 @@ type Acknowledgement struct {
 type Error struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+// Error returns the error message. Satisfies the error interface.
+func (e *Error) Error() string {
+	return e.String()
 }
 
 // String satisfies the Stringer interface for pretty printing.

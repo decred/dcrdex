@@ -1494,6 +1494,17 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	}
 
 	dexStats := c.initializeDEXConnections(crypter)
+
+	for _, dexStat := range dexStats {
+		if dexStat.AcctFound != nil && !*dexStat.AcctFound {
+			acctInfo, err := c.db.Account(dexStat.Host)
+			c.db.DisableAccount(acctInfo)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	notes, err := c.db.NotificationsN(10)
 	if err != nil {
 		log.Errorf("Login -> NotificationsN error: %v", err)
@@ -1614,6 +1625,11 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				details := fmt.Sprintf("%s: %v", dc.acct.host, err)
 				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
 				result.AuthErr = details
+				var mErr *msgjson.Error
+				if errors.As(err, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
+					AcctFound := false
+					result.AcctFound = &AcctFound
+				}
 				return
 			}
 			result.Authed = true

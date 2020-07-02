@@ -71,7 +71,9 @@ type AccountInfo struct {
 	FeeCoin   []byte
 	// Paid will be set on retrieval based on whether there is an AccountProof
 	// set.
-	Paid bool
+	Paid         bool
+	ClientPubKey *secp256k1.PublicKey
+	Disabled     bool
 }
 
 // Encode the AccountInfo as bytes.

@@ -283,7 +283,7 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		return fmt.Errorf("zero-length EncKey not allowed")
 	}
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		acct, err := accts.CreateBucket([]byte(ai.Host))
+		acct, err := accts.CreateBucket([]byte(ai.Host + "-" + string(ai.DEXPubKey.Serialize()) + "-" + string(ai.ClientPubKey.Serialize())))
 		if err != nil {
 			return fmt.Errorf("failed to create account bucket")
 		}
@@ -296,6 +296,20 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 			return fmt.Errorf("activeKey put error: %v", err)
 		}
 		return nil
+	})
+}
+
+// DisableAccount corrupts the account key.
+func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
+	acctKey := []byte(ai.Host)
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(acctKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for %s", ai.Host)
+		}
+		ai.Disabled = true
+		err := acct.Put(accountKey, ai.Encode())
+		return err
 	})
 }
 
