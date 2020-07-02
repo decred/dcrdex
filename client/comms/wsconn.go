@@ -62,7 +62,9 @@ type responseHandler struct {
 type WsCfg struct {
 	// URL is the websocket endpoint URL.
 	URL string
-	// The maximum time in seconds to wait for a ping from the server.
+	// The maximum time in seconds to wait for a ping from the server. This
+	// should be larger than the server's ping interval to allow for network
+	// latency.
 	PingWait time.Duration
 	// The server's certificate.
 	Cert []byte
@@ -174,6 +176,14 @@ func (conn *wsConn) connect(ctx context.Context) error {
 			}
 			return ErrInvalidCert
 		}
+		return err
+	}
+
+	// Set the initial read deadline for the first ping. Subsequent read
+	// deadlines are set in the ping handler.
+	err = ws.SetReadDeadline(time.Now().Add(conn.cfg.PingWait))
+	if err != nil {
+		log.Errorf("set read deadline failed: %v", err)
 		return err
 	}
 
@@ -416,10 +426,14 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 	}
 
 	conn.wsMtx.Lock()
-	conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
+	defer conn.wsMtx.Unlock()
+	err := conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
+	if err != nil {
+		log.Errorf("failed to set write deadline: %v", err)
+		return err
+	}
 
-	err := conn.ws.WriteJSON(msg)
-	conn.wsMtx.Unlock()
+	err = conn.ws.WriteJSON(msg)
 	if err != nil {
 		log.Errorf("write error: %v", err)
 		return err
