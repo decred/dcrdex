@@ -33,16 +33,16 @@ const (
 	// epoch processing and with a time-in-force that forbids the order from
 	// entering the books. Orders in the first category (matched and
 	// subsequently removed from the book) include: a matched cancel order, a
-	// completely filled limit or market order, or a partially filled market buy
-	// order. Market and limit orders in the second category necessarily will
+	// completely filled limit or market order, or a partially filled market
+	// buy order. Market and limit orders in the second category will not
 	// necessarily be completely unfilled. Partially filled orders that are
 	// still on the order book remain in OrderStatusBooked.
 	//
 	// Note: The DB driver must be able to distinguish cancel orders that have
 	// not matched from those that were not matched, but OrderStatusExecuted
 	// will be returned for both such orders, although a new exported status may
-	// be added to the consumer can query this information (TODO). The DB knows
-	// the match status for cancel orders how the cancel order was finalized
+	// be added so the consumer can query this information (TODO). The DB knows
+	// the match status for cancel orders and how the cancel order was finalized
 	// (ExecuteOrder for matched, and FailCancelOrder for unmatched).
 	OrderStatusExecuted
 
@@ -53,7 +53,7 @@ const (
 	// OrderStatusRevoked is DEX-revoked orders that were not canceled by
 	// matching with the client's cancel order but by DEX policy. This includes
 	// standing limit orders that were matched, but have failed to swap.
-	// (neither executed or canceled).
+	// (neither executed nor canceled).
 	OrderStatusRevoked
 )
 
