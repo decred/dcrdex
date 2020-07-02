@@ -4,6 +4,7 @@
 package core
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"math"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -2891,6 +2893,75 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	}
 	c.connMtx.RUnlock()
 	c.updateBalances(counts)
+}
+
+// PromptShutdown asks confirmation to shutdown the dexc when has active orders.
+// If the user answers in the affirmative, the wallets are locked and true is
+// returned. The provided channel is used to allow an OS signal to break the
+// prompt and force the shutdown with out answering the prompt in the
+// affirmative.
+func (c *Core) PromptShutdown(killChan <-chan os.Signal) bool {
+	c.connMtx.Lock()
+	defer c.connMtx.Unlock()
+
+	lockWallets := func() {
+		// Lock wallets
+		for assetID := range c.User().Assets {
+			wallet, found := c.wallet(assetID)
+			if found && wallet.connected() {
+				if err := wallet.Lock(); err != nil {
+					log.Errorf("error locking wallet: %v", err)
+				}
+			}
+		}
+		// If all wallets locked, lock each dex account.
+		for _, dc := range c.conns {
+			dc.acct.lock()
+		}
+	}
+	ok := true
+
+	for _, dc := range c.conns {
+		if dc.hasActiveOrders() {
+			ok = false
+			break
+		}
+	}
+
+	if !ok {
+		fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization. " +
+			"Do you want to quit anyway? ('y' to quit, enter to abort):")
+		scanner := bufio.NewScanner(os.Stdin)
+		scan := make(chan bool)
+		go func() {
+			scan <- scanner.Scan()
+		}()
+		select {
+		case <-killChan:
+			lockWallets()
+			return true
+		case <-scan:
+		}
+
+		err := scanner.Err()
+		if err != nil {
+			fmt.Printf("input failed: %v", err)
+			return false
+		}
+
+		switch strings.ToLower(scanner.Text()) {
+		case "y", "yes":
+			ok = true
+		default:
+			fmt.Println("shutdown aborted")
+		}
+	}
+
+	if ok {
+		lockWallets()
+	}
+
+	return true
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical
