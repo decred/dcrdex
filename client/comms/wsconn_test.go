@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -75,8 +76,6 @@ func TestWsConn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pingWait := time.Second
-
 	type conn struct {
 		sync.WaitGroup
 		*websocket.Conn
@@ -99,6 +98,7 @@ func TestWsConn(t *testing.T) {
 	var id uint64
 	// server's "/ws" handler
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		t.Helper()
 		id := atomic.AddUint64(&id, 1) // shadow id
 		hCtx, hCancel := context.WithCancel(ctx)
 
@@ -151,8 +151,8 @@ func TestWsConn(t *testing.T) {
 			for {
 				mType, message, err := c.ReadMessage()
 				if err != nil {
-					c.Close()
 					hCancel()
+					c.Close()
 
 					// If the context has been canceled, don't do anything.
 					if hCtx.Err() != nil {
@@ -172,8 +172,8 @@ func TestWsConn(t *testing.T) {
 					msg, err := msgjson.DecodeMessage(message)
 					if err != nil {
 						t.Errorf("handler #%d: decode error: %v", id, err)
-						c.Close()
 						hCancel()
+						c.Close()
 						return
 					}
 
@@ -207,14 +207,14 @@ func TestWsConn(t *testing.T) {
 		t.Fatalf("file reading error: %v", err)
 	}
 
-	host := "127.0.0.1:6060"
+	host := "127.0.0.1:0"
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", handler)
 
+	// http server for the connect and upgrade
 	server := &http.Server{
-		WriteTimeout: time.Second * 5,
-		ReadTimeout:  time.Second * 5,
-		IdleTimeout:  time.Second * 5,
+		WriteTimeout: time.Second * 10,
+		ReadTimeout:  time.Second * 10,
 		Addr:         host,
 		Handler:      mux,
 	}
@@ -226,11 +226,14 @@ func TestWsConn(t *testing.T) {
 		defer wg.Done()
 
 		ln, err := net.Listen("tcp", server.Addr)
-		serverReady <- err
 		if err != nil {
+			serverReady <- err
 			return
 		}
 		defer ln.Close()
+		//log.Info(ln.Addr().(*net.TCPAddr).Port)
+		host = ln.Addr().String()
+		serverReady <- nil // after setting host
 
 		err = server.ServeTLS(ln, certFile.Name(), keyFile.Name())
 		if err != nil {
@@ -244,6 +247,7 @@ func TestWsConn(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	const pingWait = 500 * time.Millisecond
 	setupWsConn := func(cert []byte) (*wsConn, error) {
 		cfg := &WsCfg{
 			URL:      "wss://" + host + "/ws",
@@ -282,11 +286,16 @@ func TestWsConn(t *testing.T) {
 	}
 	waiter := dex.NewConnectionMaster(wsc)
 	err = waiter.Connect(ctx)
-	t.Log("Connect:", err)
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
 
 	reconnectAndPing := func() {
-		// Drop the connection and force a reconnect by waiting.
-		time.Sleep(pingWait * 2)
+		// Drop the connection and force a reconnect by waiting longer than the
+		// read deadline (the ping wait), plus a bit extra to allow the timeout
+		// to flip off the connection and queue a reconnect.
+		time.Sleep(pingWait * 3 / 2)
+		runtime.Gosched()
 
 		// Wait for a reconnection.
 		for !wsc.isConnected() {
