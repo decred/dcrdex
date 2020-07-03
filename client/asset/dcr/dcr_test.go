@@ -150,7 +150,8 @@ type tRPCClient struct {
 	verboseBlocks   map[string]*chainjson.GetBlockVerboseResult
 	mainchain       map[int64]*chainhash.Hash
 	bestHash        chainhash.Hash
-	locked          []*wire.OutPoint
+	lluCoins        []*wire.OutPoint // Returned from ListLockUnspent
+	lockedCoins     []*wire.OutPoint // Last submitted to LockUnspent
 	listLockedErr   error
 }
 
@@ -234,11 +235,12 @@ func (c *tRPCClient) ListUnspentMin(int) ([]walletjson.ListUnspentResult, error)
 }
 
 func (c *tRPCClient) LockUnspent(unlock bool, ops []*wire.OutPoint) error {
+	c.lockedCoins = ops
 	return c.lockUnspentErr
 }
 
 func (c *tRPCClient) ListLockUnspent() ([]*wire.OutPoint, error) {
-	return c.locked, c.listLockedErr
+	return c.lluCoins, c.listLockedErr
 }
 
 func (c *tRPCClient) GetRawChangeAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error) {
@@ -339,7 +341,7 @@ func TestAvailableFund(t *testing.T) {
 	}
 	node.unspent = []walletjson.ListUnspentResult{littleUnspent}
 
-	node.locked = []*wire.OutPoint{
+	node.lluCoins = []*wire.OutPoint{
 		{
 			Hash: *tTxHash,
 		},
@@ -716,9 +718,18 @@ func TestSwap(t *testing.T) {
 	node.signFunc = signFunc
 
 	// This time should succeed.
-	_, _, err := wallet.Swap(swaps)
+	_, changeCoin, err := wallet.Swap(swaps)
 	if err != nil {
 		t.Fatalf("swap error: %v", err)
+	}
+
+	// Make sure the change coin is locked.
+	if len(node.lockedCoins) != 1 {
+		t.Fatalf("change coin not locked")
+	}
+	txHash, _, _ := decodeCoinID(changeCoin.ID())
+	if txHash.String() != node.lockedCoins[0].Hash.String() {
+		t.Fatalf("wrong coin locked during swap")
 	}
 
 	// Not enough funds

@@ -362,19 +362,13 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			if trade.Filled() == trade.Quantity {
 				t.metaData.Status = order.OrderStatusExecuted
 			}
-		case order.CancelOrderType:
-			t.metaData.Status = order.OrderStatusCanceled
 		case order.MarketOrderType:
 			t.metaData.Status = order.OrderStatusExecuted
 		}
 	}
 	corder, cancelOrder := t.coreOrderInternal()
+	hasUnswapped := t.hasUnswappedMatches()
 	t.matchMtx.RUnlock()
-
-	err := t.db.UpdateOrder(t.metaOrder())
-	if err != nil {
-		return fmt.Errorf("Failed to update order in db")
-	}
 
 	// Send notifications.
 	if includesCancellation {
@@ -386,8 +380,21 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		// Set the order status for both orders.
 		t.metaData.Status = order.OrderStatusCanceled
 		t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
-		// TODO: If the order's backing coins/change are unused, unlock them,
+		// If the order's backing coins/change are unused, unlock them,
 		// otherwise they have been or will be spent by a swap.
+		if !includesTrades && !hasUnswapped {
+			if t.change == nil {
+				err := t.wallets.fromWallet.ReturnCoins(t.coinList())
+				if err != nil {
+					log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
+				}
+			} else {
+				err := t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
+				if err != nil {
+					log.Warnf("unable to return %s change coin %v: %v", unbip(t.wallets.fromAsset.ID), t.change, err)
+				}
+			}
+		}
 	}
 	if includesTrades {
 		fillRatio := float64(trade.Filled()) / float64(trade.Quantity)
@@ -396,6 +403,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		log.Debugf("trade order %v matched with %d orders", t.ID(), len(msgMatches))
 		t.notify(newOrderNote("Matches made", details, db.Poke, corder))
 	}
+
+	err := t.db.UpdateOrder(t.metaOrder())
+	if err != nil {
+		return fmt.Errorf("Failed to update order in db")
+	}
+
 	_, err = t.tick()
 	return err
 }
@@ -775,6 +788,12 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		if err != nil {
 			errs.addErr(err)
 		}
+	}
+
+	// Check if we need to return the change coin because the order has been
+	// canceled.
+	if t.metaData.Status == order.OrderStatusCanceled && !t.hasUnswappedMatches() {
+		t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
 	}
 
 	return errs.ifany()
@@ -1188,6 +1207,30 @@ func (t *trackedTrade) processEpoch(epochIdx uint64) bool {
 	}
 	t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
 	return true
+}
+
+// hasUnswappedMatches will be true if the order has any remaining matches for
+// which our swap has not been broadcast. hasUnswappedMatches should be called
+// with the matchMtx locked.
+func (t *trackedTrade) hasUnswappedMatches() bool {
+	for _, match := range t.matches {
+		dbMatch := match.Match
+		if (dbMatch.Side == order.Taker && dbMatch.Status < order.TakerSwapCast) ||
+			(dbMatch.Side == order.Maker && dbMatch.Status < order.MakerSwapCast) {
+
+			return true
+		}
+	}
+	return false
+}
+
+// coinList makes a slice of the coin map values.
+func (t *trackedTrade) coinList() []asset.Coin {
+	coins := make([]asset.Coin, 0, len(t.coins))
+	for _, coin := range t.coins {
+		coins = append(coins, coin)
+	}
+	return coins
 }
 
 // mapifyCoins converts the slice of coins to a map keyed by hex coin ID.

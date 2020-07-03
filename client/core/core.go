@@ -2537,19 +2537,23 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	tracker.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
 		tracker.token()), db.WarningLevel, corder))
 
-	// Also set the order as revoked.
-	metaOrder := tracker.metaOrder()
-	metaOrder.MetaData.Status = order.OrderStatusRevoked
-	err = tracker.db.UpdateOrder(metaOrder)
-	if err != nil {
-		errs.add("unable to update order: %v", err)
-	}
+	// Oops. Can't actually set the order revoked. Match revocations are sent to
+	// both parties. We need another way to inform the client that their order
+	// has been revoked.
 
-	// Notify the user of the revoked order.
-	details := fmt.Sprintf("%s order on %s-%s at %s has been revoked (%s)",
-		strings.Title(sellString(tracker.Trade().Sell)), unbip(tracker.Base()),
-		unbip(tracker.Quote()), dc.acct.host, tracker.token())
-	tracker.notify(newOrderNote("Order revoked", details, db.WarningLevel, corder))
+	// // Also set the order as revoked.
+	// metaOrder := tracker.metaOrder()
+	// metaOrder.MetaData.Status = order.OrderStatusRevoked
+	// err = tracker.db.UpdateOrder(metaOrder)
+	// if err != nil {
+	// 	errs.add("unable to update order: %v", err)
+	// }
+
+	// // Notify the user of the revoked order.
+	// details := fmt.Sprintf("%s order on %s-%s at %s has been revoked (%s)",
+	// 	strings.Title(sellString(tracker.Trade().Sell)), unbip(tracker.Base()),
+	// 	unbip(tracker.Quote()), dc.acct.host, tracker.token())
+	// tracker.notify(newOrderNote("Order revoked", details, db.WarningLevel, corder))
 
 	// Send out a data notification with the revoke information.
 	cancelOrder := &Order{
@@ -2630,6 +2634,9 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	// Set a new scheduled suspend.
 	duration := time.Until(encode.UnixTimeMilli(int64(sp.SuspendTime)))
 	mkt.pendingSuspend = time.AfterFunc(duration, func() {
+		mkt.mtx.Lock()
+		mkt.pendingSuspend = nil
+		mkt.mtx.Unlock()
 		// Update the market as suspended.
 		err := dc.suspend(sp.MarketID)
 		if err != nil {
@@ -2650,15 +2657,33 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 			for _, tracker := range dc.trades {
 				if tracker.Order.Base() == mkt.BaseID &&
 					tracker.Order.Quote() == mkt.QuoteID &&
-					tracker.metaData.Host == dc.acct.host &&
-					(tracker.metaData.Status == order.OrderStatusEpoch ||
-						tracker.metaData.Status == order.OrderStatusBooked) {
-					metaOrder := tracker.metaOrder()
-					metaOrder.MetaData.Status = order.OrderStatusRevoked
-					err := tracker.db.UpdateOrder(metaOrder)
-					if err != nil {
-						log.Errorf("unable to update order: %v", err)
+					tracker.metaData.Host == dc.acct.host {
+
+					if tracker.metaData.Status == order.OrderStatusEpoch ||
+						tracker.metaData.Status == order.OrderStatusBooked {
+
+						metaOrder := tracker.metaOrder()
+						metaOrder.MetaData.Status = order.OrderStatusRevoked
+						err := tracker.db.UpdateOrder(metaOrder)
+						if err != nil {
+							log.Errorf("unable to update order: %v", err)
+						}
 					}
+					tracker.matchMtx.RLock()
+					if !tracker.hasUnswappedMatches() {
+						var coins asset.Coins
+						if tracker.change == nil {
+							coins = tracker.coinList()
+						} else {
+							coins = asset.Coins{tracker.change}
+						}
+						err = tracker.wallets.fromWallet.ReturnCoins(coins)
+						if err != nil {
+							log.Warnf("unable to return %s funding coins: %v", unbip(tracker.wallets.fromAsset.ID), err)
+						}
+					}
+					tracker.matchMtx.RUnlock()
+
 				}
 			}
 			dc.tradeMtx.RUnlock()
