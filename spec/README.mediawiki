@@ -65,6 +65,7 @@ for the DEX API.
 ** [[comm.mediawiki/#Coin_ID|Coin ID]]
 * [[comm.mediawiki/#Message_Protocol|Message Protocol]]
 * [[comm.mediawiki/#Session_Authentication|Session Authentication]]
+* [[comm.mediawiki/#Acknowledgements|Acknowledgements]]
 * [[comm.mediawiki/#HTTP|HTTP]]
 
 '''&#91;2&#93; [[fundamentals.mediawiki|Distributed Exchange Design Fundamentals]]'''
@@ -114,8 +115,9 @@ book and place orders.
 ** [[orders.mediawiki/#Cancel_Order|Cancel Order]]
 * [[orders.mediawiki/#Preimage_Reveal|Preimage Handling]]
 * [[orders.mediawiki/#Unmatched_Orders|Unmatched Orders]]
+* [[orders.mediawiki/#Order_Revocation|Order Revocation]]
+* [[orders.mediawiki/#Match_Negotiation|Match Negotiation]]
 * [[orders.mediawiki/#Match_Revocation|Match Revocation]]
-* [[orders.mediawiki/#Match_negotiation|Match Negotiation]]
 * [[orders.mediawiki/#Trade_Suspension|Trade Suspension]]
 
 '''&#91;6&#93; [[api.mediawiki| Data API]]''' defines http and WebSocket APIs to browse

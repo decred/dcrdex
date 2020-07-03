@@ -189,11 +189,24 @@ of their penalization.
 {|
 ! field   !! type   !! description
 |-
-| matches || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
+| matches || &#91;object&#93; || list of [[orders.mediawiki/#Match_Negotiation|Match objects]]
 |-
 | penalty || object || a [[community.mediawiki/#Penalty_Object|Penalty Object]]. omitted if in good standing
 |-
 | sig     || string || hex-encoded server's signature of the serialized connection data
+|}
+
+==Acknowledgements==
+
+Often, the server only requires a simple signed acknowledgement for a request.
+The specification will provide instructions for serialization of the request
+data. The client will then sign the serialized data with their private key, and
+send an acknowledgement of the following form.
+
+{|
+! field !! type   !! description
+|-
+| sig   || string || hex-encoded signature of the notification data
 |}
 
 ==HTTP==

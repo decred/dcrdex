@@ -112,21 +112,21 @@ respond with its current configuration.
 '''Asset object'''
 
 {|
-! field    !! type !! description
+! field      !! type !! description
 |-
-| symbol   || string || ticker symbol
+| symbol     || string || ticker symbol
 |-
-| id       || int || a unique per-asset ID
+| id         || int || a unique per-asset ID
 |-
-| lotsize  || int || lot size (atoms)
+| lotsize    || int || lot size (atoms)
 |-
-| ratestep || int || the price rate increment (atoms)
+| ratestep   || int || the price rate increment (atoms)
 |-
-| feerate  || int || the fee rate for transactions (atoms/byte)
+| maxfeerate || int || the max on-chain transaction fee rate that can be assigned to matches (atoms/byte)
 |-
-| swapsize || int || the size of the initialization transaction (bytes)
+| swapsize   || int || the size of the initialization transaction (bytes)
 |-
-| swapconf || int || minimum confirmations for swap transactions
+| swapconf   || int || minimum confirmations for swap transactions
 |}
 
 '''Market object'''
