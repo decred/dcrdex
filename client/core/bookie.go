@@ -231,7 +231,7 @@ func (c *Core) unsub(dc *dexConnection, mkt string) {
 	}
 }
 
-// Book fetches the order book. If a subscriptions doesn't exist, one will be
+// Book fetches the order book. If a subscription doesn't exist, one will be
 // attempted and immediately closed.
 func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 	dex = addrHost(dex)
