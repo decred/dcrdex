@@ -845,51 +845,10 @@ func TestHandleOrderBook(t *testing.T) {
 		}
 		r := &RPCServer{core: tc}
 		payload := handleOrderBook(r, test.params)
-		res := new(OrderBook)
+		res := new(core.OrderBook)
 		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
 			t.Fatal(err)
 		}
-	}
-}
-
-func TestSortOrderBook(t *testing.T) {
-	lowRate := 1.0
-	medRate := 1.5
-	highRate := 2.0
-	lowRateBuy := &core.MiniOrder{Rate: lowRate}
-	medRateBuy := &core.MiniOrder{Rate: medRate}
-	highRateBuy := &core.MiniOrder{Rate: highRate}
-	lowRateSell := &core.MiniOrder{Rate: lowRate, Sell: true}
-	medRateSell := &core.MiniOrder{Rate: medRate, Sell: true}
-	highRateSell := &core.MiniOrder{Rate: highRate, Sell: true}
-	coreBook := &core.OrderBook{
-		Buys: [](*core.MiniOrder){
-			medRateBuy,
-			lowRateBuy,
-		},
-		Sells: [](*core.MiniOrder){
-			medRateSell,
-			lowRateSell,
-		},
-		Epoch: [](*core.MiniOrder){
-			highRateSell,
-			highRateBuy,
-		},
-	}
-	book := sortOrderBook(coreBook)
-	// Buys start with the highest rate.
-	if book.Buys[0].Rate != highRate {
-		t.Fatal("buys not sorted")
-	}
-	if !book.Buys[0].Immediate {
-		t.Fatal("immediate not true for epoch order")
-	}
-	// Sells start with the lowest rate
-	if book.Sells[0].Rate != lowRate {
-		t.Fatal("sells not sorted")
-	}
-	if book.Sells[0].Immediate {
-		t.Fatal("immediate not false for booked order")
 	}
 }
 
@@ -897,16 +856,16 @@ func TestTruncateOrderBook(t *testing.T) {
 	lowRate := 1.0
 	medRate := 1.5
 	highRate := 2.0
-	lowRateOrder := &MiniOrder{Rate: lowRate}
-	medRateOrder := &MiniOrder{Rate: medRate}
-	highRateOrder := &MiniOrder{Rate: highRate}
-	book := &OrderBook{
-		Buys: []*MiniOrder{
+	lowRateOrder := &core.MiniOrder{Rate: lowRate}
+	medRateOrder := &core.MiniOrder{Rate: medRate}
+	highRateOrder := &core.MiniOrder{Rate: highRate}
+	book := &core.OrderBook{
+		Buys: []*core.MiniOrder{
 			highRateOrder,
 			medRateOrder,
 			lowRateOrder,
 		},
-		Sells: []*MiniOrder{
+		Sells: []*core.MiniOrder{
 			lowRateOrder,
 			medRateOrder,
 		},

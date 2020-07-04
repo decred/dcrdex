@@ -101,21 +101,6 @@ type orderBookForm struct {
 	nOrders uint64
 }
 
-// MiniOrder is minimal information about an order in a market's order book.
-type MiniOrder struct {
-	Qty       float64 `json:"qty"`
-	Rate      float64 `json:"rate"`
-	Sell      bool    `json:"sell"`
-	Token     string  `json:"token"`
-	Immediate bool    `json:"immediate"`
-}
-
-// OrderBook represents an order book, which are sorted buys and sells.
-type OrderBook struct {
-	Sells []*MiniOrder `json:"sells"`
-	Buys  []*MiniOrder `json:"buys"`
-}
-
 // checkNArgs checks that args and pwArgs are the correct length.
 func checkNArgs(params *RawParams, nPWArgs, nArgs []int) error {
 	// For want, one integer indicates an exact match, two are the min and max.

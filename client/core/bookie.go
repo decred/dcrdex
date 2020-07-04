@@ -416,6 +416,6 @@ func minifyOrder(oid dex.Bytes, trade *msgjson.TradeNote, epoch uint64) *MiniOrd
 		Rate:  float64(trade.Rate) / conversionFactor,
 		Sell:  trade.Side == msgjson.SellOrderNum,
 		Token: token(oid),
-		Epoch: epoch,
+		Epoch: &epoch,
 	}
 }

@@ -426,48 +426,9 @@ func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 	return createResponse(logoutRoute, &res, nil)
 }
 
-// sortOrderBook converts a *core.OrderBook into an *Orderbook, setting
-// appropriate fields and sorting buys and sells by descending and ascending
-// rates respectively.
-func sortOrderBook(coreBook *core.OrderBook) *OrderBook {
-	book := new(OrderBook)
-	groupFn := func(orders []*core.MiniOrder, immediate bool) {
-		// Separate orders into buys and sells.
-		for _, order := range orders {
-			o := &MiniOrder{
-				Qty:       order.Qty,
-				Rate:      order.Rate,
-				Sell:      order.Sell,
-				Token:     order.Token,
-				Immediate: immediate,
-			}
-			if order.Sell {
-				book.Sells = append(book.Sells, o)
-				continue
-			}
-			book.Buys = append(book.Buys, o)
-		}
-	}
-	groupFn(coreBook.Epoch, true)
-	groupFn(coreBook.Buys, false)
-	groupFn(coreBook.Sells, false)
-	sortFn := func(orders []*MiniOrder, sell bool) func(i, j int) bool {
-		// High rate on top for buys and bottom for sells.
-		return func(i, j int) bool {
-			if sell {
-				return orders[i].Rate < orders[j].Rate
-			}
-			return orders[i].Rate > orders[j].Rate
-		}
-	}
-	sort.Slice(book.Buys, sortFn(book.Buys, false))
-	sort.Slice(book.Sells, sortFn(book.Sells, true))
-	return book
-}
-
 // truncateOrderBook truncates book to the top nOrders of buys and sells.
-func truncateOrderBook(book *OrderBook, nOrders uint64) {
-	truncFn := func(orders *[]*MiniOrder) {
+func truncateOrderBook(book *core.OrderBook, nOrders uint64) {
+	truncFn := func(orders *[]*core.MiniOrder) {
 		if uint64(len(*orders)) < nOrders {
 			return
 		}
@@ -490,11 +451,10 @@ func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
 		return createResponse(orderBookRoute, nil, resErr)
 	}
-	res := sortOrderBook(book)
 	if form.nOrders > 0 {
-		truncateOrderBook(res, form.nOrders)
+		truncateOrderBook(book, form.nOrders)
 	}
-	return createResponse(orderBookRoute, res, nil)
+	return createResponse(orderBookRoute, book, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -849,28 +809,39 @@ Registration is complete after the fee transaction has been confirmed.`,
     base (int): The BIP-44 coin index for the market's base asset.
     quote (int): The BIP-44 coin index for the market's quote asset.
     nOrders (int): Optional. Default is 0. The number of orders from the top of
-      buys and sells to return. 0 returns all orders.`,
+      buys and sells to return. 0 returns all orders. Epoch orders are not
+      truncated.`,
 		returns: `Returns:
     obj: A map of orders.
     {
-      "sells" (array): An array of sell orders.
+      "sells" (array): An array of booked sell orders.
       [
         {
           "qty" (float): The number of coins base asset being sold.
           "rate" (float): The coins quote asset to pay per coin base asset.
           "sell" (bool): Always true because this is a sell order.
           "token" (string): The first 8 bytes of the order id, coded in hex.
-	  "immediate" (bool): Whether this order is good only for the current epoch.
         },...
       ],
-      "buys" (array): An array of buy orders
+      "buys" (array): An array of booked buy orders.
       [
         {
           "qty" (float): The number of coins base asset being bought.
           "rate" (float): The coins quote asset to accept per coin base asset.
           "sell" (bool): Always false because this is a buy order.
           "token" (string): The first 8 bytes of the order id, coded in hex.
-	  "immediate" (bool): Whether this order is good only for the current epoch.
+        },...
+      ],
+      "epoch" (array): An array of epoch orders. Epoch orders include new limit
+        orders that have not been booked yet. They also contain orders that are
+	never booked: cancelations, market orders, and limit orders with
+	immediate=true. They are not truncated.
+      [
+        {
+          "qty" (float): The number of coins base asset being bought.
+          "rate" (float): The coins quote asset to accept per coin base asset.
+          "sell" (bool): Always false because this is a buy order.
+          "token" (string): The first 8 bytes of the order id, coded in hex.
         },...
       ],
     }`,
