@@ -38,6 +38,7 @@ var (
 	matchesBucket  = []byte("matches")
 	walletsBucket  = []byte("wallets")
 	notesBucket    = []byte("notes")
+	versionKey     = []byte("version")
 	feeProofKey    = []byte("feecoin")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
@@ -76,6 +77,9 @@ var _ dexdb.DB = (*BoltDB)(nil)
 
 // NewDB is a constructor for a *BoltDB.
 func NewDB(dbPath string) (dexdb.DB, error) {
+	_, err := os.Stat(dbPath)
+	isNew := os.IsNotExist(err)
+
 	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return nil, err
@@ -86,8 +90,38 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 		DB: db,
 	}
 
-	return bdb, bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket,
+	err = bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket,
 		ordersBucket, matchesBucket, walletsBucket, notesBucket})
+	if err != nil {
+		return nil, err
+	}
+
+	// If the db is a new one, initialize it with the current DB version.
+	if isNew {
+		err := bdb.DB.Update(func(dbTx *bbolt.Tx) error {
+			bkt := dbTx.Bucket(appBucket)
+			if bkt == nil {
+				return fmt.Errorf("app bucket not found")
+			}
+
+			versionB := encode.Uint32Bytes(DBVersion)
+			err := bkt.Put(versionKey, versionB)
+			if err != nil {
+				return err
+			}
+
+			log.Infof("creating new version %d database", DBVersion)
+
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		return bdb, nil
+	}
+
+	return bdb, upgradeDB(bdb.DB)
 }
 
 // Run waits for context cancellation and closes the database.
@@ -782,6 +816,7 @@ func (db *BoltDB) makeTopLevelBuckets(buckets [][]byte) error {
 				return err
 			}
 		}
+
 		return nil
 	})
 }
