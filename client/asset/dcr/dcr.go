@@ -1460,9 +1460,9 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 // change output.
 func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Address,
 	totalIn, totalOut, feeRate uint64, subtractee *wire.TxOut) (*wire.MsgTx, *output, error) {
-
 	// Sign the transaction to get an initial size estimate and calculate whether
 	// a change output would be dust.
+	sigCycles := 1
 	msgTx, signed, err := dcr.node.SignRawTransaction(baseTx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("signing error: %v", err)
@@ -1474,6 +1474,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	minFee := feeRate * uint64(size)
 	remaining := totalIn - totalOut
 	lastFee := remaining
+
 	// Create the change output.
 	changeScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
@@ -1481,7 +1482,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	}
 	changeIdx := len(baseTx.TxOut)
 	changeOutput := wire.NewTxOut(int64(remaining), changeScript)
-	var changeAdded bool
+
 	// The reservoir indicates the amount available to draw upon for fees.
 	reservoir := remaining
 	// If no subtractee was provided, subtract fees from the change output.
@@ -1495,21 +1496,27 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 		return nil, nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
 			minFee, reservoir)
 	}
-	isDust := dexdcr.IsDust(subtractee, feeRate)
-	sigCycles := 0
-	if !isDust {
+
+	// If the change is not dust, recompute the signed txn size and iterate on
+	// the fees vs. change amount.
+	changeAdded := !dexdcr.IsDust(subtractee, feeRate)
+	if changeAdded {
 		// Add the change output.
-		size += dexdcr.P2PKHOutputSize
+		size0 := baseTx.SerializeSize()
+		baseTx.AddTxOut(changeOutput)
+		changeSize := baseTx.SerializeSize() - size0 // may be dexdcr.P2PKHOutputSize
+		dcr.log.Debugf("Change output size = %d, addr = %s", changeSize, addr.String())
+
+		size += changeSize
 		lastFee = feeRate * uint64(size)
 		subtractee.Value = int64(reservoir - lastFee)
-		baseTx.AddTxOut(changeOutput)
-		changeAdded = true
+
 		// Find the best fee rate by closing in on it in a loop.
-		tried := map[uint64]uint8{}
+		tried := map[uint64]bool{}
 		for {
-			sigCycles++
 			// Each cycle, sign the transaction and see if there appears to be any
 			// room to lower the total fees.
+			sigCycles++
 			msgTx, signed, err = dcr.node.SignRawTransaction(baseTx)
 			if err != nil {
 				return nil, nil, fmt.Errorf("signing error: %v", err)
@@ -1518,41 +1525,44 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 				return nil, nil, fmt.Errorf("incomplete raw tx signature")
 			}
 			size = msgTx.SerializeSize()
-			// minFee is the lowest acceptable fee for a transaction of this size.
-			minFee := feeRate * uint64(size)
-			if minFee > reservoir {
+			// reqFee is the lowest acceptable fee for a transaction of this size.
+			reqFee := feeRate * uint64(size)
+			if reqFee > reservoir {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, minFee = %d, lastFee = %d",
-					totalIn, totalOut, minFee, lastFee)
+				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
+					totalIn, totalOut, reqFee, lastFee)
 				return nil, nil, fmt.Errorf("change error")
 			}
-			// If 1) lastFee == minFee, nothing changed since the last cycle.
-			// And there is likely no room for improvement. If 2) The minFee
+
+			// If 1) lastFee == reqFee, nothing changed since the last cycle.
+			// And there is likely no room for improvement. If 2) The reqFee
 			// required for a transaction of this size is less than the
 			// currently signed transaction fees, but we've already tried it,
 			// then it must have a larger serialize size, so the current fee is
 			// as good as it gets.
-			if lastFee == minFee || (minFee < lastFee && tried[minFee] == 1) {
+			if lastFee == reqFee || (lastFee > reqFee && tried[reqFee]) {
 				break
 			}
+
 			// The minimum fee for a transaction of this size is either higher or
 			// lower than the fee in the currently signed transaction, and it hasn't
 			// been tried yet, so try it now.
-			tried[lastFee] = 1
-			subtractee.Value = int64(reservoir - minFee)
-			lastFee = minFee
+			tried[lastFee] = true
+			lastFee = reqFee
+			subtractee.Value = int64(reservoir - lastFee)
 			if dexdcr.IsDust(subtractee, feeRate) {
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, minFee = %d, lastFee = %d",
-					totalIn, totalOut, minFee, lastFee)
+				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
+					totalIn, totalOut, reqFee, lastFee)
 				return nil, nil, fmt.Errorf("dust error")
 			}
 			continue
 		}
 	}
+
 	// A couple of additional checks on the fee rate.
 	checkFee, checkRate := fees(msgTx)
 	if checkFee != lastFee {
@@ -1560,21 +1570,24 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	}
 	// If the integer truncated fee rate is not the same as the fee rate provided,
 	// log a warning.
-	if checkRate < float64(feeRate) {
-		return nil, nil, fmt.Errorf("final fee rate for %s, %f, is lower than expected, %d",
+	if checkRate < feeRate {
+		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is lower than expected, %d",
 			msgTx.CachedTxHash(), checkRate, feeRate)
 	}
 	// This is a last ditch effort to catch ridiculously high fees. Right now,
-	// it's just erroring for fees more than double the expected rate, which is
+	// it's just erroring for fees more than tripple the expected rate, which is
 	// admittedly un-scientific. This should account for any signature length
 	// related variation as well as a potential dust change output with no
 	// subtractee specified, in which case the dust goes to the miner.
-	if checkRate > float64(feeRate*uint64(size)*2) {
-		return nil, nil, fmt.Errorf("final fee rate for %s, %f, is seemingly outrageous, %d",
+	if checkRate > feeRate*3 {
+		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is seemingly outrageous, target = %d",
 			msgTx.CachedTxHash(), checkRate, feeRate)
 	}
+
 	checkHash := msgTx.TxHash()
-	dcr.log.Debugf("%d signature cycles to converge on fees for tx %s", sigCycles, checkHash)
+	dcr.log.Debugf("%d signature cycles to converge on fees for tx %s: "+
+		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
+		sigCycles, checkHash, feeRate, checkRate, checkFee, size, changeAdded)
 	txHash, err := dcr.node.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return nil, nil, err
@@ -1583,11 +1596,10 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 		return nil, nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", *txHash, checkHash)
 	}
-	if !isDust {
-		dcr.addChange(txHash, uint32(changeIdx))
-	}
+
 	var change *output
 	if changeAdded {
+		dcr.addChange(txHash, uint32(changeIdx))
 		change = newOutput(dcr.node, txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), wire.TxTreeRegular, nil)
 	}
 	return msgTx, change, nil
@@ -1688,7 +1700,7 @@ func decodeCoinID(coinID dex.Bytes) (*chainhash.Hash, uint32, error) {
 }
 
 // Fees extracts the transaction fees and fee rate from the MsgTx.
-func fees(tx *wire.MsgTx) (uint64, float64) {
+func fees(tx *wire.MsgTx) (uint64, uint64) {
 	var in, out int64
 	for _, txIn := range tx.TxIn {
 		in += txIn.ValueIn
@@ -1696,8 +1708,8 @@ func fees(tx *wire.MsgTx) (uint64, float64) {
 	for _, txOut := range tx.TxOut {
 		out += txOut.Value
 	}
-	fees := in - out
-	return uint64(fees), float64(fees) / float64(tx.SerializeSize())
+	fees := uint64(in - out)
+	return fees, fees / uint64(tx.SerializeSize())
 }
 
 // isTxNotFoundErr will return true if the error indicates that the requested

@@ -234,6 +234,7 @@ func TestWallet(t *testing.T) {
 	swaps := &asset.Swaps{
 		Inputs:    append(utxos1, utxos2...),
 		Contracts: []*asset.Contract{contract1, contract2},
+		FeeRate:   tDCR.MaxFeeRate,
 	}
 
 	receipts, _, err := rig.beta().Swap(swaps)
@@ -346,6 +347,7 @@ func TestWallet(t *testing.T) {
 	swaps = &asset.Swaps{
 		Inputs:    utxos,
 		Contracts: []*asset.Contract{contract},
+		FeeRate:   tDCR.MaxFeeRate,
 	}
 
 	receipts, _, err = rig.beta().Swap(swaps)
