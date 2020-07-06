@@ -33,10 +33,12 @@ var (
 // Config holds the parameters needed to initialize an RPC connection to a dcr
 // wallet. Default values are used for RPCListen and/or RPCCert if not set.
 type Config struct {
-	RPCUser   string `ini:"username, RPC Username, dcrwallet's 'username' setting for JSON-RPC"`
-	RPCPass   string `ini:"password, RPC Password, dcrwallet's 'password' setting for JSON-RPC"`
-	RPCListen string `ini:"rpclisten, RPC Address (host or host:port), dcrwallet's address (default port: 9109, testnet: 19109)"`
-	RPCCert   string `ini:"rpccert, TLS Certificate, Path to the dcrwallet TLS certificate file"`
+	RPCUser         string `ini:"username"`
+	RPCPass         string `ini:"password"`
+	RPCListen       string `ini:"rpclisten"`
+	RPCCert         string `ini:"rpccert"`
+	UseSplitTx      bool   `ini:"txsplit"`
+	FallbackFeeRate uint64 `ini:"fallbackfee"`
 	// Context should be canceled when the application exits. This will cause
 	// some cleanup to be performed during shutdown.
 	Context context.Context `ini:"-"`
@@ -61,6 +63,10 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, error
 	}
 	if missing != "" {
 		return nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
+	}
+
+	if cfg.FallbackFeeRate == 0 {
+		cfg.FallbackFeeRate = defaultFee
 	}
 
 	// Get network settings. Zero value is mainnet, but unknown non-zero cfg.Net

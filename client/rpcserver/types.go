@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
@@ -62,7 +63,7 @@ type openWalletForm struct {
 type newWalletForm struct {
 	assetID    uint32
 	account    string
-	configText string
+	config     map[string]string
 	walletPass encode.PassBytes
 	appPass    encode.PassBytes
 }
@@ -192,7 +193,10 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		account:    params.Args[1],
 	}
 	if len(params.Args) > 2 {
-		req.configText = params.Args[2]
+		req.config, err = config.Parse([]byte(params.Args[2]))
+		if err != nil {
+			return nil, fmt.Errorf("config parse error: %v", err)
+		}
 	}
 	return req, nil
 }

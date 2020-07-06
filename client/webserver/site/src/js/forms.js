@@ -1,102 +1,159 @@
 import Doc from './doc'
 import { postJSON } from './http'
 
-var configInputField = (option, idx) => {
-  const id = `wcfg-${idx}`
-  return `
-  <div>
-    <label for="${id}" class="pl-1 mb-1 small">${option.displayname || option.key}</label>
-    <input id="${id}" type="text" class="form-control select" data-cfgkey="${option.key}" placeholder="${option.description}">
-  </div>
-  `
-}
+var app
 
 /*
  * bindNewWallet should be used with the "newWalletForm" template. The enclosing
  * <form> element should be the second argument.
  */
-export function bindNewWallet (app, form, success) {
-  const fields = Doc.parsePage(form, [
-    'nwAssetLogo', 'nwAssetName',
-    'acctName', 'newWalletPass', 'nwAppPass',
-    'walletSettings', 'walletSettingsInputs', 'selectCfgFile',
-    'walletConfig', 'cfgFile', 'selectedCfgFile', 'removeCfgFile',
-    'submitAdd', 'newWalletErr'
-  ])
+export class NewWalletForm {
+  constructor (application, form, success) {
+    this.form = form
+    this.currentAsset = null
+    const fields = this.fields = Doc.parsePage(form, [
+      'nwAssetLogo', 'nwAssetName',
+      'acctName', 'newWalletPass', 'nwAppPass',
+      'walletSettings', 'walletSettingsInputs', 'selectCfgFile',
+      'walletConfig', 'cfgFile', 'selectedCfgFile', 'removeCfgFile',
+      'submitAdd', 'newWalletErr'
+    ])
 
-  // wallet settings form
-  const resetWalletSettingsForm = (configOpts) => {
-    fields.walletSettingsInputs.innerHTML = configOpts.map(configInputField).join('\n')
-    Doc.show(fields.walletSettings)
-    Doc.hide(fields.walletConfig)
+    // WalletConfigForm will set the global app variable.
+    this.subform = new WalletConfigForm(application, fields.walletSettingsInputs)
+
+    Doc.bind(fields.selectCfgFile, 'click', () => fields.cfgFile.click())
+
+    // config file upload
+    Doc.bind(fields.cfgFile, 'change', async () => {
+      const files = fields.cfgFile.files
+      fields.selectedCfgFile.textContent = files[0].name
+      if (!fields.cfgFile.value) return
+      app.loading(form)
+      const config = await fields.cfgFile.files[0].text()
+      if (!config) return
+      const res = await postJSON('/api/parseconfig', {
+        configtext: config
+      })
+      app.loaded()
+      if (!app.checkResponse(res)) {
+        fields.newWalletErr.textContent = res.msg
+        Doc.show(fields.newWalletErr)
+        return
+      }
+      this.subform.setConfig(res.map)
+    })
+    Doc.bind(fields.removeCfgFile, 'click', () => {
+      fields.cfgFile.value = ''
+      fields.selectedCfgFile.textContent = ''
+      // Doc.show(fields.walletSettings)
+      // Doc.hide(fields.walletConfig)
+    })
+
+    bind(form, fields.submitAdd, async () => {
+      if (fields.newWalletPass.value === '') {
+        fields.newWalletErr.textContent = 'wallet password cannot be empty'
+        Doc.show(fields.newWalletErr)
+        return
+      }
+      if (fields.nwAppPass.value === '') {
+        fields.newWalletErr.textContent = 'app password cannot be empty'
+        Doc.show(fields.newWalletErr)
+        return
+      }
+      Doc.hide(fields.newWalletErr)
+
+      const createForm = {
+        assetID: parseInt(this.currentAsset.id),
+        pass: fields.newWalletPass.value,
+        account: fields.acctName.value,
+        config: this.subform.map(),
+        appPass: fields.nwAppPass.value
+      }
+      fields.nwAppPass.value = ''
+      app.loading(form)
+      var res = await postJSON('/api/newwallet', createForm)
+      app.loaded()
+      if (!app.checkResponse(res)) {
+        fields.newWalletErr.textContent = res.msg
+        Doc.show(fields.newWalletErr)
+        return
+      }
+      fields.newWalletPass.value = ''
+      success()
+    })
   }
-  Doc.bind(fields.selectCfgFile, 'click', () => fields.cfgFile.click())
 
-  // config file upload
-  Doc.bind(fields.cfgFile, 'change', () => {
-    const files = fields.cfgFile.files
-    fields.selectedCfgFile.textContent = files[0].name
-    Doc.show(fields.walletConfig)
-    Doc.hide(fields.walletSettings)
-  })
-  Doc.bind(fields.removeCfgFile, 'click', () => {
-    fields.cfgFile.value = ''
-    fields.selectedCfgFile.textContent = ''
-    Doc.show(fields.walletSettings)
-    Doc.hide(fields.walletConfig)
-  })
-
-  var currentAsset
-  form.setAsset = asset => {
-    if (currentAsset && currentAsset.id === asset.id) return
-    currentAsset = asset
+  async setAsset (asset) {
+    const fields = this.fields
+    if (this.currentAsset && this.currentAsset.id === asset.id) return
+    this.currentAsset = asset
     fields.nwAssetLogo.src = Doc.logoPath(asset.symbol)
     fields.nwAssetName.textContent = asset.info.name
     fields.acctName.value = ''
     fields.newWalletPass.value = ''
-    resetWalletSettingsForm(asset.info.configopts)
+    this.subform.update(asset.info)
     Doc.hide(fields.newWalletErr)
   }
-  bind(form, fields.submitAdd, async () => {
-    if (fields.newWalletPass.value === '') {
-      fields.newWalletErr.textContent = 'wallet password cannot be empty'
-      Doc.show(fields.newWalletErr)
-      return
+}
+
+/*
+ * WalletConfigForm is a dynamically generated sub-form for setting
+ * asset-specific wallet configuration options.
+*/
+export class WalletConfigForm {
+  constructor (application, form) {
+    app = application
+    this.form = form
+
+    // Get template elements
+
+    console.log(form)
+
+    this.textInputTmpl = Doc.tmplElement(form, 'textInput')
+    this.textInputTmpl.remove()
+    this.checkboxTmpl = Doc.tmplElement(form, 'checkbox')
+    this.checkboxTmpl.remove()
+  }
+
+  update (walletInfo) {
+    Doc.empty(this.form)
+    for (const opt of walletInfo.configopts) {
+      const elID = 'wcfg-' + opt.key
+      const el = opt.isboolean ? this.checkboxTmpl.cloneNode(true) : this.textInputTmpl.cloneNode(true)
+      const input = el.querySelector('input')
+      input.id = elID
+      input.configOpt = opt
+      const label = el.querySelector('label')
+      label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
+      label.prepend(opt.displayname)
+      this.form.appendChild(el)
+      if (opt.noecho) input.type = 'password'
+      if (opt.description) label.dataset.tooltip = opt.description
+      if (opt.isboolean) input.checked = opt.default
+      else input.value = opt.default ? opt.default : ''
     }
-    if (fields.nwAppPass.value === '') {
-      fields.newWalletErr.textContent = 'app password cannot be empty'
-      Doc.show(fields.newWalletErr)
-      return
-    }
-    Doc.hide(fields.newWalletErr)
-    var config = ''
-    if (fields.cfgFile.value) {
-      config = await fields.cfgFile.files[0].text()
-    } else {
-      config = currentAsset.info.configopts.map(option => {
-        const value = form.querySelector(`input[data-cfgkey="${option.key}"]`).value
-        return `${option.key}=${value}`
-      }).join('\n')
-    }
-    const create = {
-      assetID: parseInt(currentAsset.id),
-      pass: fields.newWalletPass.value,
-      account: fields.acctName.value,
-      config: config,
-      appPass: fields.nwAppPass.value
-    }
-    fields.nwAppPass.value = ''
-    app.loading(form)
-    var res = await postJSON('/api/newwallet', create)
-    app.loaded()
-    if (!app.checkResponse(res)) {
-      fields.newWalletErr.textContent = res.msg
-      Doc.show(fields.newWalletErr)
-      return
-    }
-    fields.newWalletPass.value = ''
-    success()
-  })
+    app.bindTooltips(this.form)
+  }
+
+  setConfig (configMap) {
+    this.form.querySelectorAll('input').forEach(input => {
+      const v = configMap[input.configOpt.key]
+      if (!v) return
+      if (input.configOpt.isboolean) input.checked = isTruthyString(v)
+      else input.value = v
+    })
+  }
+
+  map () {
+    const config = {}
+    this.form.querySelectorAll('input').forEach(input => {
+      if (input.configOpt.isboolean && input.configOpt.key) config[input.configOpt.key] = input.checked ? '1' : '0'
+      else if (input.value) config[input.configOpt.key] = input.value
+    })
+
+    return config
+  }
 }
 
 /*
@@ -150,4 +207,10 @@ export function bind (form, submitBttn, handler) {
   }
   Doc.bind(submitBttn, 'click', wrapper)
   Doc.bind(form, 'submit', wrapper)
+}
+
+// isTruthyString will be true if the provided string is recognized as a
+// value representing true.
+function isTruthyString (s) {
+  return s === '1' || s.toLowerCase() === 'true'
 }

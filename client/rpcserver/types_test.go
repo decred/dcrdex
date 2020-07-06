@@ -116,8 +116,12 @@ func TestParseNewWalletArgs(t *testing.T) {
 		if nwf.account != test.params.Args[1] {
 			t.Fatalf("account doesn't match")
 		}
-		if nwf.configText != test.params.Args[2] {
-			t.Fatalf("config doesn't match")
+		if len(nwf.config) != 1 {
+			t.Fatalf("config length mismatch. expected 1, got %d", len(nwf.config))
+		}
+		v, found := nwf.config["rpclisten"]
+		if !found || v != "127.0.0.0" {
+			t.Fatalf("config opt mismatch. %s != 127.0.0.0 (found = %t)", v, found)
 		}
 	}
 }

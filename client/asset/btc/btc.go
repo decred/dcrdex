@@ -23,7 +23,6 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -45,21 +44,56 @@ const (
 	BipID                   = 0
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
-	defaultFee         = 112
+	defaultFee         = 100
 	minNetworkVersion  = 190000
 	minProtocolVersion = 70015
 )
 
 var (
 	// blockTicker is the delay between calls to check for new blocks.
-	blockTicker = time.Second
+	blockTicker    = time.Second
+	fallbackFeeKey = "fallbackfee"
+	configOpts     = []*asset.ConfigOption{
+		{
+			Key:         "rpcuser",
+			DisplayName: "JSON-RPC Username",
+			Description: "Bitcoin's 'rpcuser' setting",
+		},
+		{
+			Key:         "rpcpassword",
+			DisplayName: "JSON-RPC Password",
+			Description: "Bitcoin's 'rpcpassword' setting",
+			NoEcho:      true,
+		},
+		{
+			Key:         "rpcbind",
+			DisplayName: "JSON-RPC Address",
+			Description: "<addr> or <addr>:<port> (default 'localhost')",
+		},
+		{
+			Key:         "rpcport",
+			DisplayName: "JSON-RPC Port",
+			Description: "Port for RPC connections (if not set in Address)",
+		},
+		{
+			Key:          fallbackFeeKey,
+			DisplayName:  "Fallback fee rate",
+			Description:  "Bitcoin's 'fallbackfee' rate. Units: Sats/kB",
+			DefaultValue: defaultFee,
+		},
+		{
+			Key:         "txsplit",
+			DisplayName: "Pre-split funding inputs",
+			Description: "Pre-split funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
+			IsBoolean:   true,
+		},
+	}
 	// walletInfo defines some general information about a Bitcoin wallet.
-	walletInfo = &asset.WalletInfo{
+	WalletInfo = &asset.WalletInfo{
 		Name:              "Bitcoin",
 		Units:             "Satoshis",
 		DefaultConfigPath: dexbtc.SystemConfigPath("bitcoin"),
-		ConfigOpts:        config.Options(&dexbtc.Config{}),
-		DefaultFeeRate:    defaultFee,
+		ConfigOpts:        configOpts,
 	}
 )
 
@@ -229,7 +263,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
-	return walletInfo
+	return WalletInfo
 }
 
 func init() {
@@ -251,6 +285,7 @@ type ExchangeWallet struct {
 	tipChange         func(error)
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
+	useSplitTx        bool
 
 	// In the future, the client may wish to specify minimum confirmations for
 	// utxos to fund orders, and allowing change outputs from DEX-related swap
@@ -286,13 +321,18 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	cloneCFG := &BTCCloneCFG{
 		WalletCFG:         cfg,
 		MinNetworkVersion: minNetworkVersion,
-		WalletInfo:        walletInfo,
+		WalletInfo:        WalletInfo,
 		Symbol:            "btc",
 		Logger:            logger,
 		Network:           network,
 		ChainParams:       params,
 		Ports:             dexbtc.RPCPorts,
 	}
+
+	if cfg.Settings[fallbackFeeKey] == "" {
+		cfg.Settings[fallbackFeeKey] = strconv.FormatUint(defaultFee, 10)
+	}
+
 	return BTCCloneWallet(cloneCFG)
 }
 
@@ -322,14 +362,14 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
 	}
 
-	btc := newWallet(cfg, client)
+	btc := newWallet(cfg, btcCfg, client)
 	btc.client = client
 
 	return btc, nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *BTCCloneCFG, node rpcClient) *ExchangeWallet {
+func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *ExchangeWallet {
 	return &ExchangeWallet{
 		node:              node,
 		wallet:            newWalletClient(node, cfg.ChainParams),
@@ -340,7 +380,8 @@ func newWallet(cfg *BTCCloneCFG, node rpcClient) *ExchangeWallet {
 		tipChange:         cfg.WalletCFG.TipChange,
 		fundingCoins:      make(map[string]*compositeUTXO),
 		minNetworkVersion: cfg.MinNetworkVersion,
-		fallbackFeeRate:   cfg.WalletCFG.FallbackFeeRate,
+		fallbackFeeRate:   btcCfg.FallbackFeeRate,
+		useSplitTx:        btcCfg.UseSplitTx,
 		walletInfo:        cfg.WalletInfo,
 	}
 }

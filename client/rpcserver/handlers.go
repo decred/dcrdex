@@ -158,9 +158,9 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	// Wallet does not exist yet. Try to create it.
 	err = s.core.CreateWallet(form.appPass, form.walletPass, &core.WalletForm{
-		AssetID:    form.assetID,
-		Account:    form.account,
-		ConfigText: form.configText,
+		AssetID: form.assetID,
+		Account: form.account,
+		Config:  form.config,
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("error creating %s wallet: %v",

@@ -42,8 +42,6 @@ func toSatoshi(v float64) uint64 {
 	return uint64(math.Round(v * 1e8))
 }
 
-const fallbackFeeRate uint64 = 20
-
 func tBackend(t testKiller, ctx context.Context, newWallet WalletConstructor, symbol, conf, name string,
 	logger dex.Logger, blkFunc func(string, error)) (*btc.ExchangeWallet, *dex.ConnectionMaster) {
 	user, err := user.Current()
@@ -56,9 +54,8 @@ func tBackend(t testKiller, ctx context.Context, newWallet WalletConstructor, sy
 		t.Fatalf("error reading config options: %v", err)
 	}
 	walletCfg := &asset.WalletConfig{
-		Settings:        settings,
-		Account:         name,
-		FallbackFeeRate: fallbackFeeRate,
+		Settings: settings,
+		Account:  name,
 		TipChange: func(err error) {
 			blkFunc(conf, err)
 		},

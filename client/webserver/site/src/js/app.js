@@ -141,7 +141,11 @@ export default class Application {
     this.loadedPage = new constructor(this, this.main, data) || {}
 
     // Bind the tooltips.
-    this.main.querySelectorAll('[data-tooltip]').forEach(el => {
+    this.bindTooltips(this.main)
+  }
+
+  bindTooltips (ancestor) {
+    ancestor.querySelectorAll('[data-tooltip]').forEach(el => {
       bind(el, 'mouseenter', () => {
         this.tooltip.textContent = el.dataset.tooltip
         const lyt = Doc.layoutMetrics(el)
@@ -422,9 +426,9 @@ export default class Application {
    * message will be displayed in the drop-down notifications and false will be
    * returned.
    */
-  checkResponse (resp) {
+  checkResponse (resp, skipNote) {
     if (!resp.requestSuccessful || !resp.ok) {
-      if (this.user.inited) this.notify(ntfn.make('API error', resp.msg, ntfn.ERROR))
+      if (this.user.inited && !skipNote) this.notify(ntfn.make('API error', resp.msg, ntfn.ERROR))
       return false
     }
     return true

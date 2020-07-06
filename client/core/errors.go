@@ -23,6 +23,10 @@ const (
 	connectionErr
 	acctKeyErr
 	unknownOrderErr
+	dbErr
+	authErr
+	connectErr
+	missingWalletErr
 )
 
 // Error is an error message and an error code.

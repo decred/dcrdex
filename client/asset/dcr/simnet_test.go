@@ -68,9 +68,8 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 		t.Fatalf("error reading config options: %v", err)
 	}
 	walletCfg := &asset.WalletConfig{
-		Settings:        settings,
-		Account:         "default",
-		FallbackFeeRate: 21,
+		Settings: settings,
+		Account:  "default",
 		TipChange: func(err error) {
 			blkFunc(name, err)
 		},

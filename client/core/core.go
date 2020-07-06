@@ -25,7 +25,6 @@ import (
 	"decred.org/dcrdex/client/db/bolt"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -876,16 +875,6 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return err
 	}
 
-	var settings map[string]string
-	if form.ConfigText == "" {
-		settings, err = config.Parse(walletInfo.DefaultConfigPath)
-	} else {
-		settings, err = config.Parse([]byte(form.ConfigText))
-	}
-	if err != nil {
-		return fmt.Errorf("error parsing config: %v", err)
-	}
-
 	// Remove unused key-values from parsed settings before saving to db.
 	// Especially necessary if settings was parsed from a config file, b/c
 	// config files usually define more key-values than we need.
@@ -895,9 +884,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	for _, option := range walletInfo.ConfigOpts {
 		expectedKeys[strings.ToLower(option.Key)] = true
 	}
-	for key := range settings {
+	for key := range form.Config {
 		if !expectedKeys[key] {
-			delete(settings, key)
+			delete(form.Config, key)
 		}
 	}
 
@@ -905,7 +894,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		AssetID:     assetID,
 		Account:     form.Account,
 		Balance:     &db.Balance{},
-		Settings:    settings,
+		Settings:    form.Config,
 		EncryptedPW: encPW,
 	}
 
@@ -974,13 +963,8 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		dbID:    dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
-		Account: dbWallet.Account,
-		// TODO: FallbackFeeRate:
-		// - Update the DB structure.
-		// - Allow it to be set on new wallet construction.
-		// - Allow it to be reconfigured.
-		FallbackFeeRate: 80,
-		Settings:        dbWallet.Settings,
+		Account:  dbWallet.Account,
+		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
 			c.tipChange(dbWallet.AssetID, err)
 		},
@@ -1077,6 +1061,70 @@ func (c *Core) CloseWallet(assetID uint32) error {
 func (c *Core) ConnectWallet(assetID uint32) error {
 	_, err := c.connectedWallet(assetID)
 	return err
+}
+
+// WalletSettings fetches the current wallet configuration details from the
+// database.
+func (c *Core) WalletSettings(assetID uint32) (map[string]string, error) {
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, codedError(missingWalletErr, fmt.Errorf("%d -> %s wallet not found", assetID, unbip(assetID)))
+	}
+	// Get the settings from the database.
+	dbWallet, err := c.db.Wallet(wallet.dbID)
+	if err != nil {
+		return nil, codedError(dbErr, err)
+	}
+	return dbWallet.Settings, nil
+}
+
+// ReconfigureWallet updates the wallet configuration settings.
+func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]string) error {
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return codedError(authErr, fmt.Errorf("ReconfigureWallet password error: %v", err))
+	}
+	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
+	oldWallet, found := c.wallets[assetID]
+	if !found {
+		return codedError(missingWalletErr, fmt.Errorf("%d -> %s wallet not found", assetID, unbip(assetID)))
+	}
+	dbWallet := &db.Wallet{
+		AssetID:     oldWallet.AssetID,
+		Account:     oldWallet.Account,
+		Settings:    cfg,
+		Balance:     oldWallet.balance,
+		EncryptedPW: oldWallet.encPW,
+		Address:     oldWallet.address,
+	}
+	// Reload the wallet with the new settings.
+	wallet, err := c.loadWallet(dbWallet)
+	if err != nil {
+		return codedError(walletErr, fmt.Errorf("error loading wallet for %d -> %s: %v", assetID, unbip(assetID), err))
+	}
+	// Must connect to ensure settings are good.
+	err = wallet.Connect(c.ctx)
+	if err != nil {
+		return codedError(connectErr, fmt.Errorf("error connecting wallet: %v", err))
+	}
+	if oldWallet.unlocked() {
+		err := unlockWallet(wallet, crypter)
+		if err != nil {
+			wallet.Disconnect()
+			return codedError(walletAuthErr, fmt.Errorf("wallet successfully connected, but errored unlocking. reconfiguration not saved: %v", err))
+		}
+	}
+	err = c.db.UpdateWallet(dbWallet)
+	if err != nil {
+		wallet.Disconnect()
+		return codedError(dbErr, fmt.Errorf("error saving wallet configuration: %v", err))
+	}
+	if oldWallet.connected() {
+		oldWallet.Disconnect()
+	}
+	c.wallets[assetID] = wallet
+	return nil
 }
 
 func (c *Core) isRegistered(host string) bool {

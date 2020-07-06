@@ -36,10 +36,15 @@ const (
 // wallet or backend. Default values are used for RPCBind and/or RPCPort if not
 // set.
 type Config struct {
-	RPCUser string `ini:"rpcuser, JSON-RPC Username, bitcoin's 'rpcuser' setting"`
-	RPCPass string `ini:"rpcpassword, JSON-RPC Password, bitcoin's 'rpcpassword' setting"`
-	RPCBind string `ini:"rpcbind, JSON-RPC Address, <addr> or <addr>:<port> (default 'localhost')"`
-	RPCPort int    `ini:"rpcport, JSON-RPC Port, Port for RPC connections (if not set in Address)"`
+	RPCUser string `ini:"rpcuser"`
+	RPCPass string `ini:"rpcpassword"`
+	RPCBind string `ini:"rpcbind"`
+	RPCPort int    `ini:"rpcport"`
+
+	// Below fields are only used on the client.
+
+	UseSplitTx      bool   `ini:"txsplit"`
+	FallbackFeeRate uint64 `ini:"fallbackfee"`
 }
 
 // LoadConfigFromPath loads the configuration settings from the specified filepath.

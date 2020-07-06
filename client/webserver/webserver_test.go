@@ -101,11 +101,13 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
 	return c.createWalletErr
 }
-func (c *TCore) OpenWallet(assetID uint32, pw []byte) error { return c.openWalletErr }
-func (c *TCore) CloseWallet(assetID uint32) error           { return c.closeWalletErr }
-func (c *TCore) ConnectWallet(assetID uint32) error         { return nil }
-func (c *TCore) Wallets() []*core.WalletState               { return nil }
-func (c *TCore) User() *core.User                           { return nil }
+func (c *TCore) OpenWallet(assetID uint32, pw []byte) error                               { return c.openWalletErr }
+func (c *TCore) CloseWallet(assetID uint32) error                                         { return c.closeWalletErr }
+func (c *TCore) ConnectWallet(assetID uint32) error                                       { return nil }
+func (c *TCore) Wallets() []*core.WalletState                                             { return nil }
+func (c *TCore) WalletSettings(uint32) (map[string]string, error)                         { return nil, nil }
+func (c *TCore) ReconfigureWallet(pw []byte, assetID uint32, cfg map[string]string) error { return nil }
+func (c *TCore) User() *core.User                                                         { return nil }
 func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	return make(map[uint32]*core.SupportedAsset)
 }

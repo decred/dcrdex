@@ -260,7 +260,7 @@ func TestHandleNewWallet(t *testing.T) {
 		Args: []string{
 			"42",
 			"default",
-			"/home/wallet.conf",
+			"username=satoshi",
 		},
 	}
 	tests := []struct {

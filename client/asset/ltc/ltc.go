@@ -5,11 +5,11 @@ package ltc
 
 import (
 	"fmt"
+	"strconv"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/config"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexltc "decred.org/dcrdex/dex/networks/ltc"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -19,18 +19,53 @@ const (
 	BipID = 2
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
-	defaultWithdrawalFee = 1
-	minNetworkVersion    = 180100
+	defaultFee        = 8
+	minNetworkVersion = 180100
 )
 
 var (
-	// walletInfo defines some general information about a Litecoin wallet.
-	walletInfo = &asset.WalletInfo{
+	fallbackFeeKey = "fallbackfee"
+	configOpts     = []*asset.ConfigOption{
+		{
+			Key:         "rpcuser",
+			DisplayName: "JSON-RPC Username",
+			Description: "Litecoin's 'rpcuser' setting",
+		},
+		{
+			Key:         "rpcpassword",
+			DisplayName: "JSON-RPC Password",
+			Description: "Litecoin's 'rpcpassword' setting",
+			NoEcho:      true,
+		},
+		{
+			Key:         "rpcbind",
+			DisplayName: "JSON-RPC Address",
+			Description: "<addr> or <addr>:<port> (default 'localhost')",
+		},
+		{
+			Key:         "rpcport",
+			DisplayName: "JSON-RPC Port",
+			Description: "Port for RPC connections (if not set in Address)",
+		},
+		{
+			Key:          fallbackFeeKey,
+			DisplayName:  "Fallback fee rate",
+			Description:  "Litecoin's 'fallbackfee' rate. Units: Sats/kB",
+			DefaultValue: defaultFee,
+		},
+		{
+			Key:         "utxoprep",
+			DisplayName: "Pre-split funding inputs",
+			Description: "Pre-split funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
+			IsBoolean:   true,
+		},
+	}
+	// WalletInfo defines some general information about a Litecoin wallet.
+	WalletInfo = &asset.WalletInfo{
 		Name:              "Litecoin",
 		Units:             "Litoshi",
 		DefaultConfigPath: dexbtc.SystemConfigPath("litecoin"),
-		ConfigOpts:        config.Options(&dexbtc.Config{}),
-		DefaultFeeRate:    defaultWithdrawalFee,
+		ConfigOpts:        configOpts,
 	}
 )
 
@@ -55,7 +90,7 @@ func (d *Driver) DecodeCoinID(coinID []byte) (string, error) {
 
 // Info returns basic information about the wallet and asset.
 func (d *Driver) Info() *asset.WalletInfo {
-	return walletInfo
+	return WalletInfo
 }
 
 // NewWallet is the exported constructor by which the DEX will import the
@@ -85,12 +120,17 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:         cfg,
 		MinNetworkVersion: minNetworkVersion,
-		WalletInfo:        walletInfo,
-		Symbol:            "btc",
+		WalletInfo:        WalletInfo,
+		Symbol:            "ltc",
 		Logger:            logger,
 		Network:           network,
 		ChainParams:       params,
 		Ports:             ports,
 	}
+
+	if cfg.Settings[fallbackFeeKey] == "" {
+		cfg.Settings[fallbackFeeKey] = strconv.FormatUint(defaultFee, 10)
+	}
+
 	return btc.BTCCloneWallet(cloneCFG)
 }

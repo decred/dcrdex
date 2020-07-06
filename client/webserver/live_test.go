@@ -20,14 +20,14 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/client/asset/dcr"
+	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
-	"decred.org/dcrdex/dex/networks/btc"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/slog"
@@ -46,6 +46,21 @@ var (
 	forceDisconnectWallet bool
 	wipeWalletBalance     bool
 )
+
+func dummySettings() map[string]string {
+	return map[string]string{
+		"rpcuser":     "dexuser",
+		"rpcpassword": "dexpass",
+		"rpcbind":     "127.0.0.1:54321",
+		"rpcport":     "",
+		"fallbackfee": "20",
+		"txsplit":     "0",
+		"username":    "dexuser",
+		"password":    "dexpass",
+		"rpclisten":   "127.0.0.1:54321",
+		"rpccert":     "/home/me/dex/rpc.cert",
+	}
+}
 
 func randomDelay() {
 	time.Sleep(time.Duration(rand.Float64() * float64(maxDelay)))
@@ -127,7 +142,6 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *db.Balance) *core
 			Running: state.running,
 			Address: ordertest.RandomAddress(),
 			Balance: bal,
-			FeeRate: winfo.DefaultFeeRate,
 			Units:   winfo.Units,
 		}
 	}
@@ -251,8 +265,9 @@ func (c *tCoin) Redeem() dex.Bytes {
 }
 
 type tWalletState struct {
-	open    bool
-	running bool
+	open     bool
+	running  bool
+	settings map[string]string
 }
 
 type TCore struct {
@@ -477,7 +492,7 @@ func (c *TCore) AssetBalance(assetID uint32) (*db.Balance, error) {
 
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
 
-var configOpts = []*config.Option{
+var configOpts = []*asset.ConfigOption{
 	{
 		DisplayName: "RPC Server",
 		Description: "RPC Server",
@@ -485,41 +500,23 @@ var configOpts = []*config.Option{
 	},
 }
 var winfos = map[uint32]*asset.WalletInfo{
-	0: {
-		DefaultFeeRate: 2,
-		Units:          "Satoshis",
-		Name:           "Bitcoin",
-		ConfigOpts:     config.Options(&btc.Config{}),
-	},
-	2: {
-		DefaultFeeRate: 100,
-		Units:          "litoshi", // Plural seemingly has no 's'.
-		Name:           "Litecoin",
-		ConfigOpts:     configOpts,
-	},
-	42: {
-		DefaultFeeRate: 10,
-		Units:          "atoms",
-		Name:           "Decred",
-		ConfigOpts:     config.Options(&dcr.Config{}),
-	},
+	0:  btc.WalletInfo,
+	2:  ltc.WalletInfo,
+	42: dcr.WalletInfo,
 	22: {
-		DefaultFeeRate: 50,
-		Units:          "atoms",
-		Name:           "Monacoin",
-		ConfigOpts:     configOpts,
+		Units:      "atoms",
+		Name:       "Monacoin",
+		ConfigOpts: configOpts,
 	},
 	3: {
-		DefaultFeeRate: 1000,
-		Units:          "atoms",
-		Name:           "Dogecoin",
-		ConfigOpts:     configOpts,
+		Units:      "atoms",
+		Name:       "Dogecoin",
+		ConfigOpts: configOpts,
 	},
 	28: {
-		DefaultFeeRate: 20,
-		Units:          "Satoshis",
-		Name:           "Vertcoin",
-		ConfigOpts:     configOpts,
+		Units:      "Satoshis",
+		Name:       "Vertcoin",
+		ConfigOpts: configOpts,
 	},
 }
 
@@ -537,7 +534,6 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 		Running: w.running,
 		Address: ordertest.RandomAddress(),
 		Balance: c.balances[assetID],
-		FeeRate: winfos[assetID].DefaultFeeRate,
 		Units:   winfos[assetID].Units,
 	}
 }
@@ -547,8 +543,9 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	c.wallets[form.AssetID] = &tWalletState{
-		running: true,
-		open:    true,
+		running:  true,
+		open:     true,
+		settings: dummySettings(),
 	}
 	return nil
 }
@@ -604,11 +601,18 @@ func (c *TCore) Wallets() []*core.WalletState {
 			Running: wallet.running,
 			Address: ordertest.RandomAddress(),
 			Balance: c.balances[assetID],
-			FeeRate: winfos[assetID].DefaultFeeRate,
 			Units:   winfos[assetID].Units,
 		})
 	}
 	return stats
+}
+
+func (c *TCore) WalletSettings(assetID uint32) (map[string]string, error) {
+	return c.wallets[assetID].settings, nil
+}
+func (c *TCore) ReconfigureWallet(pw []byte, assetID uint32, cfg map[string]string) error {
+	c.wallets[assetID].settings = cfg
+	return nil
 }
 
 func (c *TCore) User() *core.User {
@@ -741,7 +745,8 @@ func TestServer(t *testing.T) {
 	numBuys = 0
 	numSells = 0
 	feedPeriod = 500 * time.Millisecond
-	register := true
+	initialize := true
+	register := false
 	forceDisconnectWallet = true
 
 	var shutdown context.CancelFunc
@@ -751,8 +756,15 @@ func TestServer(t *testing.T) {
 	logger.SetLevel(slog.LevelTrace)
 	tCore := newTCore()
 
-	if register {
+	if initialize {
 		tCore.InitializeClient([]byte(""))
+	}
+
+	if register {
+		// initialize is implied and forced if register = true.
+		if !initialize {
+			tCore.InitializeClient([]byte(""))
+		}
 		tCore.Register(new(core.RegisterForm))
 	}
 

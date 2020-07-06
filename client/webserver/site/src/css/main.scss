@@ -304,6 +304,10 @@ hr.dashed {
   text-decoration: underline;
 }
 
+.hoverbg:hover {
+  background-color: #7775;
+}
+
 #profileBox.profile-box {
   max-width: 120px;
   text-align: center;
@@ -324,4 +328,11 @@ hr.dashed {
   background-color: #040012;
   border: 1px solid #333;
   color: white;
+}
+
+#walletSettingsInputs {
+  & > div {
+    min-height: 55px;
+    margin-top: 10px;
+  }
 }

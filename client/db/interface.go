@@ -84,6 +84,8 @@ type DB interface {
 	UpdateBalance(wid []byte, balance *Balance) error
 	// Wallets lists all saved wallets.
 	Wallets() ([]*Wallet, error)
+	// Wallet fetches the wallet for the specified asset by wallet ID.
+	Wallet(wid []byte) (*Wallet, error)
 	// Backup makes a copy of the database.
 	Backup() error
 	// SaveNotification saves the notification.

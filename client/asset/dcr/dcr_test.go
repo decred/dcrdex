@@ -106,12 +106,14 @@ func newTxOutResult(script []byte, value uint64, confs int64) *chainjson.GetTxOu
 func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
-		Account:         "default",
-		FallbackFeeRate: 10,
-		TipChange:       func(error) {},
+		Account:   "default",
+		TipChange: func(error) {},
+	}
+	dcrCfg := &Config{
+		FallbackFeeRate: defaultFee,
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	wallet := unconnectedWallet(walletCfg, tLogger)
+	wallet := unconnectedWallet(walletCfg, dcrCfg, tLogger)
 	wallet.node = client
 	go wallet.monitorBlocks(walletCtx)
 
