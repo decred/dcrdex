@@ -1212,7 +1212,9 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 // dust) for the change.
 func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
 	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *output, error) {
-
+	// Sign the transaction to get an initial size estimate and calculate whether
+	// a change output would be dust.
+	sigCycles := 1
 	msgTx, err := btc.wallet.SignTx(baseTx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("signing error: %v", err)
@@ -1224,31 +1226,39 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 		return nil, nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
 			totalIn, minFee+totalOut)
 	}
+
+	// Create a change output.
 	changeScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change script: %v", err)
 	}
 	changeIdx := len(baseTx.TxOut)
 	changeOutput := wire.NewTxOut(int64(remaining-minFee), changeScript)
-	var changeAdded bool
-	isDust := dexbtc.IsDust(changeOutput, feeRate)
-	sigCycles := 1
-	if !isDust {
-		// Add the change output with a recalculated fees
-		size += dexbtc.P2WPKHOutputSize
+
+	// If the change is not dust, recompute the signed txn size and iterate on
+	// the fees vs. change amount.
+	changeAdded := !dexbtc.IsDust(changeOutput, feeRate)
+	if changeAdded {
+		// Add the change output.
+		size0 := baseTx.SerializeSize()
+		baseTx.AddTxOut(changeOutput)
+		changeSize := baseTx.SerializeSize() - size0 // may be dexbtc.P2WPKHOutputSize
+		btc.log.Debugf("Change output size = %d, addr = %s", changeSize, addr.String())
+
+		size += changeSize
 		fee := feeRate * uint64(size)
 		changeOutput.Value = int64(remaining - fee)
-		baseTx.AddTxOut(changeOutput)
-		changeAdded = true
+
 		// Find the best fee rate by closing in on it in a loop.
-		tried := map[uint64]uint8{fee: 1}
+		tried := map[uint64]bool{}
 		for {
+			// Sign the transaction with the change output and compute new size.
 			sigCycles++
 			msgTx, err = btc.wallet.SignTx(baseTx)
 			if err != nil {
 				return nil, nil, fmt.Errorf("signing error: %v", err)
 			}
-			size := msgTx.SerializeSize()
+			size = msgTx.SerializeSize() // recompute the size with new tx signature
 			reqFee := feeRate * uint64(size)
 			if reqFee > remaining {
 				// I can't imagine a scenario where this condition would be true, but
@@ -1257,14 +1267,15 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 					totalIn, totalOut, reqFee, fee)
 				return nil, nil, fmt.Errorf("change error")
 			}
-			if fee == reqFee || (reqFee < fee && tried[reqFee] == 1) {
+			if fee == reqFee || (fee > reqFee && tried[reqFee]) {
 				// If a lower fee appears available, but it's already been attempted and
 				// had a longer serialized size, the current fee is likely as good as
 				// it gets.
 				break
 			}
-			// We must have some room for improvement
-			tried[fee] = 1
+
+			// We must have some room for improvement.
+			tried[fee] = true
 			fee = reqFee
 			changeOutput.Value = int64(remaining - fee)
 			if dexbtc.IsDust(changeOutput, feeRate) {
@@ -1277,9 +1288,17 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 			}
 			continue
 		}
+
+		totalOut += uint64(changeOutput.Value)
 	}
+
+	fee := totalIn - totalOut
+	actualFeeRate := fee / uint64(size)
 	checkHash := msgTx.TxHash()
-	btc.log.Debugf("%d signature cycles to converge on fees for tx %s", sigCycles, checkHash)
+	btc.log.Debugf("%d signature cycles to converge on fees for tx %s: "+
+		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
+		sigCycles, checkHash, feeRate, actualFeeRate, fee, size, changeAdded)
+
 	txHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return nil, nil, err
@@ -1288,12 +1307,11 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 		return nil, nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", checkHash, *txHash)
 	}
-	if !isDust {
-		btc.addChange(txHash.String(), uint32(changeIdx))
-	}
+
 	var change *output
 	if changeAdded {
-		change = newOutput(btc.node, txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), nil)
+		btc.addChange(txHash.String(), uint32(changeIdx))
+		change = newOutput(btc.node, txHash, uint32(changeIdx), uint64(changeOutput.Value), nil)
 	}
 	return msgTx, change, nil
 }

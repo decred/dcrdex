@@ -224,6 +224,7 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 	swaps := &asset.Swaps{
 		Inputs:    append(utxos1, utxos2...),
 		Contracts: []*asset.Contract{contract1, contract2},
+		FeeRate:   dexAsset.MaxFeeRate,
 	}
 
 	receipts, _, err := rig.gamma().Swap(swaps)
@@ -335,6 +336,7 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 	swaps = &asset.Swaps{
 		Inputs:    utxos,
 		Contracts: []*asset.Contract{contract},
+		FeeRate:   dexAsset.MaxFeeRate,
 	}
 
 	time.Sleep(time.Second)
