@@ -2507,16 +2507,6 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 	}
 }
 
-// Penalize calls Penalize on the AuthManager and penalizes user for breaking rule.
-func (s *Swapper) Penalize(user account.AccountID, rule account.Rule) error {
-	return s.authMgr.Penalize(user, rule)
-}
-
-// Unban calls Unban on the AuthManager and reverses a ban.
-func (s *Swapper) Unban(user account.AccountID) error {
-	return s.authMgr.Unban(user)
-}
-
 func idToBytes(id [order.OrderIDSize]byte) []byte {
 	return id[:]
 }
