@@ -46,7 +46,7 @@ if [ "${ENABLE_VOTING}" = "1" ]; then
   cat >> "${WALLET_DIR}/w-${NAME}.conf" <<EOF
 enablevoting=1
 enableticketbuyer=1
-ticketbuyer.limit=5
+ticketbuyer.limit=6
 ticketbuyer.balancetomaintainabsolute=1000
 EOF
 fi
