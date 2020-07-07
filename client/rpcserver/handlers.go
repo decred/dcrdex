@@ -834,7 +834,7 @@ Registration is complete after the fee transaction has been confirmed.`,
       ],
       "epoch" (array): An array of epoch orders. Epoch orders include new limit
         orders that have not been booked yet. They also contain orders that are
-	never booked: cancelations, market orders, and limit orders with
+	never booked: cancellations, market orders, and limit orders with
 	immediate=true. They are not truncated.
       [
         {
