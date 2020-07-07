@@ -598,3 +598,8 @@ func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule) error {
 func (dm *DEX) Unban(aid account.AccountID) error {
 	return dm.authMgr.Unban(aid)
 }
+
+// NotifyAll sends a text notification to all connected clients.
+func (dm *DEX) NotifyAll(msg *msgjson.Message) {
+	dm.server.Broadcast(msg)
+}

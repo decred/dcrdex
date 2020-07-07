@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 	"github.com/go-chi/chi"
 )
@@ -250,4 +251,20 @@ func (s *Server) apiUnban(w http.ResponseWriter, r *http.Request) {
 		UnbanTime: APITime{time.Now()},
 	}
 	writeJSON(w, res)
+}
+
+// apiNotifyAll is the handler for the '/nogifyall?message=MESSAGE' API request.
+func (s *Server) apiNotifyAll(w http.ResponseWriter, r *http.Request) {
+	msgStr := r.URL.Query().Get(messageToken)
+	if msgStr == "" {
+		http.Error(w, "no message to broadcast", http.StatusBadRequest)
+		return
+	}
+	msg, err := msgjson.NewNotification(msgjson.NotifyRoute, msgStr)
+	if msgStr == "" {
+		http.Error(w, fmt.Sprintf("unable to create notification: %v", err), http.StatusInternalServerError)
+		return
+	}
+	s.core.NotifyAll(msg)
+	w.WriteHeader(http.StatusOK)
 }

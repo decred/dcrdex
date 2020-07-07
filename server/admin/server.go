@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
@@ -34,6 +35,7 @@ const (
 	marketNameKey = "market"
 	accountIDKey  = "account"
 	ruleToken     = "rule"
+	messageToken  = "message"
 )
 
 var (
@@ -44,6 +46,7 @@ var (
 type SvrCore interface {
 	Accounts() ([]*db.Account, error)
 	AccountInfo(account.AccountID) (*db.Account, error)
+	NotifyAll(msg *msgjson.Message)
 	ConfigMsg() json.RawMessage
 	MarketRunning(mktName string) (found, running bool)
 	MarketStatus(mktName string) *market.Status
@@ -132,6 +135,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 			rm.Get("/ban", s.apiBan)
 			rm.Get("/unban", s.apiUnban)
 		})
+		r.Get("/notifyall", s.apiNotifyAll)
 		r.Get("/markets", s.apiMarkets)
 		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiMarketInfo)

@@ -66,4 +66,6 @@ The server will provide an HTTP API for performing various adminstrative tasks.
 | /market/{marketID} || display status information for a specific market
 |-
 | /market/{marketID}/suspend?t=EPOCH-MS&persist=BOOL || schedule a market suspension at the end of the current epoch
+|-
+| /notifyall?message=MESSAGE || send a notification containing MESSAGE to all connected clients
 |}

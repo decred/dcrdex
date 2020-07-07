@@ -24,6 +24,7 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/market"
@@ -151,6 +152,7 @@ func (c *TCore) Penalize(_ account.AccountID, _ account.Rule) error {
 func (c *TCore) Unban(_ account.AccountID) error {
 	return c.unbanErr
 }
+func (c *TCore) NotifyAll(msg *msgjson.Message) {}
 
 // genCertPair generates a key/cert pair to the paths provided.
 func genCertPair(certFile, keyFile string) error {
@@ -1079,6 +1081,39 @@ func TestUnban(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
 				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
 			}
+		}
+	}
+}
+
+func TestNotifyAll(t *testing.T) {
+	core := new(TCore)
+	srv := &Server{
+		core: core,
+	}
+	mux := chi.NewRouter()
+	mux.Route("/notifyall", func(rm chi.Router) {
+		rm.Get("/", srv.apiNotifyAll)
+	})
+	tests := []struct {
+		name, txt string
+		wantCode  int
+	}{{
+		name:     "ok",
+		txt:      "hello%20world",
+		wantCode: http.StatusOK,
+	}, {
+		name:     "no message",
+		wantCode: http.StatusBadRequest,
+	}}
+	for _, test := range tests {
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("GET", "https://localhost/notifyall?message="+test.txt, nil)
+		r.RemoteAddr = "localhost"
+
+		mux.ServeHTTP(w, r)
+
+		if w.Code != test.wantCode {
+			t.Fatalf("%q: apiNotifyAll returned code %d, expected %d", test.name, w.Code, test.wantCode)
 		}
 	}
 }
