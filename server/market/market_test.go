@@ -140,7 +140,7 @@ func (ta *TArchivist) MatchByID(mid order.MatchID, base, quote uint32) (*db.Matc
 func (ta *TArchivist) UserMatches(aid account.AccountID, base, quote uint32) ([]*db.MatchData, error) {
 	return nil, nil
 }
-func (ta *TArchivist) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) {
+func (ta *TArchivist) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return nil, nil
 }
 func (ta *TArchivist) SwapData(mid db.MarketMatchID) (order.MatchStatus, *db.SwapData, error) {

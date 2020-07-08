@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
@@ -42,7 +43,7 @@ type ratioData struct {
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct     *account.Account
-	matches  []*order.UserMatch
+	matches  []*db.MatchData
 	closedID account.AccountID
 	acctAddr string
 	acctErr  error
@@ -64,7 +65,7 @@ func (s *TStorage) RestoreAccount(_ account.AccountID) error {
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
 }
-func (s *TStorage) ActiveMatches(account.AccountID) ([]*order.UserMatch, error) {
+func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return s.matches, nil
 }
 func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
@@ -215,6 +216,7 @@ func tNewConnect(user *tUser) *msgjson.Connect {
 }
 
 func extractConnectResult(t *testing.T, msg *msgjson.Message) *msgjson.ConnectResult {
+	t.Helper()
 	if msg == nil {
 		t.Fatalf("no response from 'connect' request")
 	}
@@ -228,6 +230,7 @@ func extractConnectResult(t *testing.T, msg *msgjson.Message) *msgjson.ConnectRe
 }
 
 func queueUser(t *testing.T, user *tUser) *msgjson.Message {
+	t.Helper()
 	rig.storage.acct = &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 	connect := tNewConnect(user)
 	sigMsg := connect.Serialize()
@@ -241,10 +244,12 @@ func queueUser(t *testing.T, user *tUser) *msgjson.Message {
 }
 
 func connectUser(t *testing.T, user *tUser) *msgjson.Message {
+	t.Helper()
 	return tryConnectUser(t, user, false)
 }
 
 func tryConnectUser(t *testing.T, user *tUser, wantErr bool) *msgjson.Message {
+	t.Helper()
 	connect := queueUser(t, user)
 	err := rig.mgr.handleConnect(user.conn, connect)
 	if (err != nil) != wantErr {
@@ -264,6 +269,7 @@ func tryConnectUser(t *testing.T, user *tUser, wantErr bool) *msgjson.Message {
 
 func makeEnsureErr(t *testing.T) func(rpcErr *msgjson.Error, tag string, code int) {
 	return func(rpcErr *msgjson.Error, tag string, code int) {
+		t.Helper()
 		if rpcErr == nil {
 			t.Fatalf("no error for %s ID", tag)
 		}
@@ -328,24 +334,67 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
-func TestConnect(t *testing.T) {
-	// Before connecting, put an activeMatch in storage.
+func userMatchData(takerUser account.AccountID) (*db.MatchData, *order.UserMatch) {
+	var baseRate, quoteRate uint64 = 123, 73
+	side := order.Taker
+	takerSell := true
+	feeRateSwap := baseRate // user is selling
+
 	anyID := newAccountID()
 	var mid order.MatchID
 	copy(mid[:], anyID[:])
 	anyID = newAccountID()
 	var oid order.OrderID
 	copy(oid[:], anyID[:])
-	userMatch := &order.UserMatch{
-		OrderID:  oid,
-		MatchID:  mid,
-		Quantity: 1,
-		Rate:     2,
-		Address:  "anyaddress",
-		Status:   3,
-		Side:     4,
+	takerUserMatch := &order.UserMatch{
+		OrderID:     oid,
+		MatchID:     mid,
+		Quantity:    1,
+		Rate:        2,
+		Address:     "makerSwapAddress", // counterparty
+		Status:      order.MakerRedeemed,
+		Side:        side,
+		FeeRateSwap: feeRateSwap,
 	}
-	rig.storage.matches = []*order.UserMatch{userMatch}
+
+	var oid2 order.OrderID
+	anyID = newAccountID()
+	copy(oid2[:], anyID[:])
+	matchData := &db.MatchData{
+		ID:        mid,
+		Taker:     oid,
+		TakerAcct: takerUser,
+		TakerAddr: "takerSwapAddress",
+		TakerSell: takerSell,
+		Maker:     oid2,
+		MakerAcct: newAccountID(),
+		MakerAddr: takerUserMatch.Address,
+		Epoch: order.EpochID{
+			Dur: 10000,
+			Idx: 132412342,
+		},
+		Quantity:  takerUserMatch.Quantity,
+		Rate:      takerUserMatch.Rate,
+		BaseRate:  baseRate,
+		QuoteRate: quoteRate,
+		Active:    true,
+		Status:    takerUserMatch.Status,
+	}
+
+	//matchTime := matchData.Epoch.End()
+	return matchData, takerUserMatch
+}
+
+func TestConnect(t *testing.T) {
+	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
+
+	// Before connecting, put an activeMatch in storage.
+	matchData, userMatch := userMatchData(user.acctID)
+	matchTime := matchData.Epoch.End()
+
+	rig.storage.matches = []*db.MatchData{matchData}
+
 	rig.storage.setRatioData(&ratioData{
 		oidsCompleted:  []order.OrderID{{0x1}},
 		timesCompleted: []int64{1234},
@@ -357,8 +406,6 @@ func TestConnect(t *testing.T) {
 
 	// Close account on connect with failing cancel ratio.
 	rig.mgr.cancelThresh = 0.2
-	user := tNewUser(t)
-	rig.signer.sig = user.randomSignature()
 	tryConnectUser(t, user, false)
 	if rig.storage.closedID != user.acctID {
 		t.Fatalf("Expected account %v to be closed on connect, got %v", user.acctID, rig.storage.closedID)
@@ -367,7 +414,6 @@ func TestConnect(t *testing.T) {
 	rig.mgr.cancelThresh = 0.8 // passable
 
 	// Connect the user.
-	user = tNewUser(t)
 	respMsg := connectUser(t, user)
 	cResp := extractConnectResult(t, respMsg)
 	if len(cResp.Matches) != 1 {
@@ -395,6 +441,15 @@ func TestConnect(t *testing.T) {
 	}
 	if msgMatch.Side != uint8(userMatch.Side) {
 		t.Fatal("active match Side mismatch: ", msgMatch.Side, " != ", userMatch.Side)
+	}
+	if msgMatch.FeeRateQuote != matchData.QuoteRate {
+		t.Fatal("active match quote fee rate mismatch: ", msgMatch.FeeRateQuote, " != ", matchData.QuoteRate)
+	}
+	if msgMatch.FeeRateBase != matchData.BaseRate {
+		t.Fatal("active match base fee rate mismatch: ", msgMatch.FeeRateBase, " != ", matchData.BaseRate)
+	}
+	if msgMatch.ServerTime != encode.UnixMilliU(matchTime) {
+		t.Fatal("active match time mismatch: ", msgMatch.ServerTime, " != ", encode.UnixMilliU(matchTime))
 	}
 
 	// Send a request to the client.
@@ -451,22 +506,14 @@ func TestConnect(t *testing.T) {
 
 func TestAccountErrors(t *testing.T) {
 	user := tNewUser(t)
+	rig.signer.sig = user.randomSignature()
 	connect := queueUser(t, user)
+
 	// Put a match in storage
-	var oid order.OrderID
-	copy(oid[:], randBytes(32))
-	var mid order.MatchID
-	copy(mid[:], randBytes(32))
-	userMatch := &order.UserMatch{
-		OrderID:  oid,
-		MatchID:  mid,
-		Quantity: 123456,
-		Rate:     789123,
-		Address:  "anthing",
-		Status:   order.NewlyMatched,
-		Side:     order.Maker,
-	}
-	rig.storage.matches = []*order.UserMatch{userMatch}
+	matchData, userMatch := userMatchData(user.acctID)
+	matchTime := matchData.Epoch.End()
+	rig.storage.matches = []*db.MatchData{matchData}
+
 	rig.mgr.handleConnect(user.conn, connect)
 	rig.storage.matches = nil
 
@@ -497,6 +544,15 @@ func TestAccountErrors(t *testing.T) {
 	}
 	if match.Side != uint8(userMatch.Side) {
 		t.Fatal("wrong Side: ", match.Side, " != ", userMatch.OrderID)
+	}
+	if match.FeeRateQuote != matchData.QuoteRate {
+		t.Fatal("wrong quote fee rate: ", match.FeeRateQuote, " != ", matchData.QuoteRate)
+	}
+	if match.FeeRateBase != matchData.BaseRate {
+		t.Fatal("wrong base fee rate: ", match.FeeRateBase, " != ", matchData.BaseRate)
+	}
+	if match.ServerTime != encode.UnixMilliU(matchTime) {
+		t.Fatal("wrong match time: ", match.ServerTime, " != ", encode.UnixMilliU(matchTime))
 	}
 
 	// unpaid account.

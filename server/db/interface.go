@@ -265,8 +265,7 @@ type MatchArchiver interface {
 	InsertMatch(match *order.Match) error
 	MatchByID(mid order.MatchID, base, quote uint32) (*MatchData, error)
 	UserMatches(aid account.AccountID, base, quote uint32) ([]*MatchData, error)
-	// ActiveMatches retrieves the current active matches for an account.
-	ActiveMatches(account.AccountID) ([]*order.UserMatch, error)
+	AllActiveUserMatches(aid account.AccountID) ([]*MatchData, error)
 }
 
 // SwapArchiver is the interface required for storage and retrieval of swap

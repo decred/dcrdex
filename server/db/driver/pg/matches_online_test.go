@@ -514,7 +514,7 @@ func TestUserMatches(t *testing.T) {
 	}
 }
 
-func TestActiveMatches(t *testing.T) {
+func TestAllActiveUserMatches(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
 	}
@@ -571,27 +571,24 @@ func TestActiveMatches(t *testing.T) {
 	}
 
 	tests := []struct {
-		name             string
-		acctID           account.AccountID
-		numExpected      int
-		wantMatchIDs     []order.MatchID
-		wantFeeRateSwaps []uint64
-		wantedErr        error
+		name        string
+		acctID      account.AccountID
+		numExpected int
+		wantMatch   []*order.Match
+		wantedErr   error
 	}{
 		{
 			"ok maker",
 			limitBuyStanding.User(),
 			2,
-			[]order.MatchID{match2.ID(), match3.ID()},
-			[]uint64{match2.FeeRateQuote, match3.FeeRateQuote},
+			[]*order.Match{match2, match3},
 			nil,
 		},
 		{
 			"ok taker",
 			limitSellImmediate.User(),
 			2,
-			[]order.MatchID{match2.ID(), match3.ID()},
-			[]uint64{match2.FeeRateBase, match3.FeeRateBase},
+			[]*order.Match{match2, match3},
 			nil,
 		},
 		{
@@ -600,13 +597,12 @@ func TestActiveMatches(t *testing.T) {
 			0,
 			nil,
 			nil,
-			nil,
 		},
 	}
 
-	idInSlice := func(mid order.MatchID, mids []order.MatchID) int {
-		for i := range mids {
-			if mids[i] == mid {
+	idInMatchSlice := func(mid order.MatchID, ms []*order.Match) int {
+		for i := range ms {
+			if ms[i].ID() == mid {
 				return i
 			}
 		}
@@ -615,22 +611,38 @@ func TestActiveMatches(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			userMatch, err := archie.ActiveMatches(tt.acctID)
+			userMatch, err := archie.AllActiveUserMatches(tt.acctID)
 			if err != tt.wantedErr {
 				t.Fatal(err)
 			}
 			if len(userMatch) != tt.numExpected {
 				t.Errorf("Retrieved %d matches for user %v, expected %d.", len(userMatch), tt.acctID, tt.numExpected)
 			}
-			for i := range userMatch {
-				loc := idInSlice(userMatch[i].MatchID, tt.wantMatchIDs)
+			for _, match := range userMatch {
+				loc := idInMatchSlice(match.ID, tt.wantMatch)
 				if loc == -1 {
-					t.Errorf("Unknown match ID retrieved: %v.", userMatch[i].MatchID)
+					t.Errorf("Unknown match ID retrieved: %v.", match.ID)
 					continue
 				}
-				if tt.wantFeeRateSwaps[loc] != userMatch[i].FeeRateSwap {
-					t.Errorf("incorrect swap fee rate. got %d, want %d",
-						userMatch[i].FeeRateSwap, tt.wantFeeRateSwaps[loc])
+				if tt.wantMatch[loc].FeeRateBase != match.BaseRate {
+					t.Errorf("incorrect base fee rate. got %d, want %d",
+						match.BaseRate, tt.wantMatch[loc].FeeRateBase)
+				}
+				if tt.wantMatch[loc].FeeRateQuote != match.QuoteRate {
+					t.Errorf("incorrect quote fee rate. got %d, want %d",
+						match.QuoteRate, tt.wantMatch[loc].FeeRateQuote)
+				}
+				if tt.wantMatch[loc].Epoch.End() != match.Epoch.End() {
+					t.Errorf("incorrect match time. got %v, want %v",
+						match.Epoch.End(), tt.wantMatch[loc].Epoch.End())
+				}
+				if tt.wantMatch[loc].Taker.Trade().Address != match.TakerAddr {
+					t.Errorf("incorrect counterparty swap address. got %v, want %v",
+						match.TakerAddr, tt.wantMatch[loc].Taker.Trade().Address)
+				}
+				if tt.wantMatch[loc].Maker.Address != match.MakerAddr {
+					t.Errorf("incorrect counterparty swap address. got %v, want %v",
+						match.MakerAddr, tt.wantMatch[loc].Maker.Address)
 				}
 			}
 		})

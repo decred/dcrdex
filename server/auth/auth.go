@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
@@ -36,8 +37,7 @@ type Storage interface {
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
 	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
-	// ActiveMatches fetches the account's active matches.
-	ActiveMatches(account.AccountID) ([]*order.UserMatch, error)
+	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
@@ -767,28 +767,59 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		}
 	}
 
-	// Send the connect response, which includes a list of active matches.
-	matches, err := auth.storage.ActiveMatches(user)
+	// Get the list of active matches for this user.
+	matches, err := auth.storage.AllActiveUserMatches(user)
 	if err != nil {
-		log.Errorf("ActiveMatches(%x): %v", user, err)
+		log.Errorf("AllActiveUserMatches(%x): %v", user, err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "DB error",
 		}
 	}
+
+	// There may be as many as 2*len(matches) match messages if the user matched
+	// with themself, but this is likely to be very rare outside of tests.
 	msgMatches := make([]*msgjson.Match, 0, len(matches))
-	for _, match := range matches {
+
+	// msgMatchForSide checks if the user is on the given side of the match,
+	// appending the match to the slice if so. The Address and Side fields of
+	// msgjson.Match will differ depending on the side.
+	msgMatchForSide := func(match *db.MatchData, side order.MatchSide) {
+		var addr string
+		var oid []byte
+		switch {
+		case side == order.Maker && user == match.MakerAcct:
+			addr = match.TakerAddr // counterparty
+			oid = match.Maker[:]
+			// sell = !match.TakerSell{
+		case side == order.Taker && user == match.TakerAcct:
+			addr = match.MakerAddr // counterparty
+			oid = match.Taker[:]
+			// sell = match.TakerSell
+		default:
+			return
+		}
 		msgMatches = append(msgMatches, &msgjson.Match{
-			OrderID:  match.OrderID[:],
-			MatchID:  match.MatchID[:],
-			Quantity: match.Quantity,
-			Rate:     match.Rate,
-			Address:  match.Address,
-			Status:   uint8(match.Status),
-			Side:     uint8(match.Side),
+			OrderID:      oid,
+			MatchID:      match.ID[:],
+			Quantity:     match.Quantity,
+			Rate:         match.Rate,
+			ServerTime:   encode.UnixMilliU(match.Epoch.End()),
+			Address:      addr,
+			FeeRateBase:  match.BaseRate,  // contract txn fee rate if user is selling
+			FeeRateQuote: match.QuoteRate, // contract txn fee rate if user is buying
+			Status:       uint8(match.Status),
+			Side:         uint8(side),
 		})
 	}
 
+	// For each db match entry, create at least one msgjson.Match.
+	for _, match := range matches {
+		msgMatchForSide(match, order.Maker)
+		msgMatchForSide(match, order.Taker)
+	}
+
+	// Sign and send the connect response.
 	sig, err := auth.signer.Sign(sigMsg)
 	if err != nil {
 		log.Errorf("handleConnect signature error: %v", err)
