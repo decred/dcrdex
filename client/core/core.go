@@ -326,6 +326,11 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 		} else {
 			match.msgMatches = append(match.msgMatches, msgMatch)
 		}
+
+		status := order.MatchStatus(msgMatch.Status)
+		log.Debugf("registering match %v for order %v in status %v", msgMatch.MatchID, oid, status)
+		// mm, _ := json.MarshalIndent(msgMatch, "", "   ")
+		// log.Trace(string(mm))
 	}
 	var err error
 	if len(errs) > 0 {
@@ -1880,6 +1885,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 	dc.compareServerMatches(matches)
 
+	// for _, match := range matches {
+	// 	match.tracker.tick()
+	// }
 	return nil
 }
 
@@ -2056,6 +2064,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	if err != nil {
 		return nil, fmt.Errorf("database error when fetching orders for %s: %x", dc.acct.host, err)
 	}
+	log.Infof("Loaded %d active orders.", len(dbOrders))
 	// It's possible for an order to not be active, but still have active matches.
 	// Grab the orders for those too.
 	haveOrder := func(oid order.OrderID) bool {
@@ -2071,6 +2080,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	if err != nil {
 		return nil, fmt.Errorf("database error fetching active matches for %s: %v", dc.acct.host, err)
 	}
+	log.Infof("Loaded %d active matches.", len(activeDBMatches))
 	for _, dbMatch := range activeDBMatches {
 		oid := dbMatch.Match.OrderID
 		if !haveOrder(oid) {
@@ -2118,6 +2128,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		// Impossible for the tracker to not be here, since it would have errored
 		// in the previous activeDBMatches loop.
 		tracker := trackers[dbMatch.Match.OrderID]
+		//spew.Dump(dbMatch)
 		tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
 			id:        dbMatch.Match.MatchID,
 			prefix:    tracker.Prefix(),
@@ -2655,12 +2666,10 @@ var noteHandlers = map[string]routeHandler{
 func (c *Core) listen(dc *dexConnection) {
 	defer c.wg.Done()
 	msgs := dc.MessageSource()
-	// Lets run a match check every 1/3 broadcast timeout.
-	//
-	// DRAFT NOTE: This is set as seconds in server/dex/dex.go, but I think it
-	// should be milliseconds, no?
+	// Run a match check every 1/3 broadcast timeout.
 	bTimeout := time.Millisecond * time.Duration(dc.cfg.BroadcastTimeout)
 	ticker := time.NewTicker(bTimeout / 3)
+	log.Debugf("broadcast timeout = %v, ticking every %v", bTimeout, bTimeout/3)
 out:
 	for {
 		select {
@@ -2700,6 +2709,7 @@ out:
 		case <-ticker.C:
 			counts := make(assetCounter)
 			dc.tradeMtx.Lock()
+			log.Debugf("ticking %d trades", len(dc.trades))
 			for _, trade := range dc.trades {
 				newCounts, err := trade.tick()
 				if err != nil {

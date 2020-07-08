@@ -229,6 +229,7 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 	}
 	for _, match := range t.matches {
 		if !ids[match.id] {
+			log.Debugf("missing match: %v", match.id)
 			missing = append(missing, match.id)
 			match.failErr = fmt.Errorf("order not reported by the server on connect")
 		}
@@ -312,6 +313,8 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 				},
 			},
 		}
+		//spew.Dump(match)
+
 		// First check that this isn't a match on its own cancel order. I'm not crazy
 		// about this, but I am detecting this case right now based on the Address
 		// field being an empty string.
@@ -457,6 +460,7 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	dbMatch, metaData, proof, _ := match.parts()
 	if match.failErr != nil || proof.RefundCoin != nil {
+		log.Debugf("failErr = %v, RefundCoin = %v", match.failErr, proof.RefundCoin)
 		return false
 	}
 
@@ -476,11 +480,13 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 			return false
 		}
 		assetCfg := t.wallets.toAsset
+		log.Debugf("coin confs = %d, swapConf = %d", confs, assetCfg.SwapConf)
 		return confs >= assetCfg.SwapConf
 	}
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
 		return true
 	}
+	log.Debugf("match side = %v, status = %v", dbMatch.Side, metaData.Status)
 	return false
 }
 
@@ -540,17 +546,22 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 	for _, match := range t.matches {
 		switch {
 		case t.isSwappable(match):
+			log.Debugf("swappable match %v", match.id)
 			swaps = append(swaps, match)
 			sent += match.Match.Quantity
 			quoteSent += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
 
 		case t.isRedeemable(match):
+			log.Debugf("redeemable match %v", match.id)
 			redeems = append(redeems, match)
 			received += match.Match.Quantity
 			quoteReceived += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
 
 		case t.isRefundable(match):
+			log.Debugf("refundable match %v", match.id)
 			refunds = append(refunds, match)
+		default:
+			log.Debugf("match not ready for action: %v", match.id)
 		}
 	}
 
