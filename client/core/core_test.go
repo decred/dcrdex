@@ -2335,9 +2335,6 @@ func TestTradeTracking(t *testing.T) {
 	if len(proof.TakerSwap) != 0 {
 		t.Fatalf("swap broadcast before confirmations")
 	}
-	// Set the tracker status as cancelled, and make sure the change coin is
-	// returned
-	tracker.metaData.Status = order.OrderStatusCanceled
 	// Now with the confirmations.
 	auditInfo.coin.confs = tBTC.SwapConf
 	swapID := encode.RandomBytes(36)
@@ -2349,12 +2346,6 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("swap not broadcast with confirmations")
 	}
 
-	// Check that change coin was returned. Use the tradeMtx for synchronization.
-	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), tDcrWallet.changeCoin.id) {
-		t.Fatalf("change coin not returned")
-	}
-
-	tracker.metaData.Status = order.OrderStatusBooked
 	// Receive the maker's redemption.
 	redemptionCoin = encode.RandomBytes(36)
 	redemption = &msgjson.Redemption{

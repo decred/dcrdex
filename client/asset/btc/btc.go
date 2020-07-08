@@ -623,7 +623,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	baseTx := wire.NewMsgTx(wire.TxVersion)
 
 	// Add the funding utxos.
-	opIDs := make([]string, 0, len(swaps.Inputs))
+	spents := make([]*output, 0, len(swaps.Inputs))
 	for _, coin := range swaps.Inputs {
 		output, err := btc.convertCoin(coin)
 		if err != nil {
@@ -636,7 +636,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		prevOut := wire.NewOutPoint(&output.txHash, output.vout)
 		txIn := wire.NewTxIn(prevOut, []byte{}, nil)
 		baseTx.AddTxIn(txIn)
-		opIDs = append(opIDs, outpointID(output.txHash.String(), output.vout))
+		spents = append(spents, output)
 	}
 
 	// Add the contract outputs.
@@ -691,18 +691,19 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, err
 	}
 
-	// Lock the change outpoint in case it is still required to fund chained
-	// swaps for an order.
-	err = btc.wallet.LockUnspent(false, []*output{change})
-	if err != nil {
-		// The swap transaction is already broadcasted, so don't fail now.
-		btc.log.Errorf("failed to lock change output: %v", err)
+	if swaps.LockChange {
+		err = btc.wallet.LockUnspent(false, []*output{change})
+		if err != nil {
+			// The swap transaction is already broadcasted, so don't fail now.
+			btc.log.Errorf("failed to lock change output: %v", err)
+		}
 	}
 
 	// Delete the utxos from the cache.
 	btc.fundingMtx.Lock()
-	for i := range opIDs {
-		delete(btc.fundingCoins, opIDs[i])
+	btc.wallet.LockUnspent(true, spents)
+	for _, spent := range spents {
+		delete(btc.fundingCoins, outpointID(spent.txHash.String(), spent.vout))
 	}
 	btc.fundingMtx.Unlock()
 

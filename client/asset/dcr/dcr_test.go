@@ -694,8 +694,9 @@ func TestSwap(t *testing.T) {
 	}
 
 	swaps := &asset.Swaps{
-		Inputs:    coins,
-		Contracts: []*asset.Contract{contract},
+		Inputs:     coins,
+		Contracts:  []*asset.Contract{contract},
+		LockChange: true,
 	}
 
 	// Aim for 3 signature cycles.

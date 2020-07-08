@@ -87,6 +87,7 @@ type trackedTrade struct {
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
 	change        asset.Coin
+	changeLocked  bool
 	cancel        *trackedCancel
 	matchMtx      sync.RWMutex
 	matches       map[order.MatchID]*matchTracker
@@ -388,7 +389,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 				if err != nil {
 					log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
 				}
-			} else {
+			} else if t.changeLocked {
 				err := t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
 				if err != nil {
 					log.Warnf("unable to return %s change coin %v: %v", unbip(t.wallets.fromAsset.ID), t.change, err)
@@ -605,6 +606,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 			qty = quoteSent
 		}
 		err := t.swapMatches(swaps)
+
 		// swapMatches might modify the matches, so don't get the *Order for
 		// notifications before swapMatches.
 		corder, _ := t.coreOrderInternal()
@@ -703,14 +705,16 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	errs := newErrorSet("swapMatches order %s - ", t.ID())
 	// Prepare the asset.Contracts.
 	swaps := new(asset.Swaps)
+	trade := t.Trade()
 	// These matches may have different fee rates, matched in different epochs.
-	var highestFeeRate uint64
+	var highestFeeRate, swappedQty uint64
 	for _, match := range matches {
 		dbMatch, _, proof, auth := match.parts()
 		value := dbMatch.Quantity
 		if !match.trade.Sell {
 			value = calc.BaseToQuote(dbMatch.Rate, dbMatch.Quantity)
 		}
+		swappedQty += value
 		matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
 		lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
 		if dbMatch.Side == order.Maker {
@@ -735,9 +739,31 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 
 	swaps.FeeRate = highestFeeRate
 
+	// Figure out how many have already been swapped.
+	var alreadySwapped int
+	for _, match := range t.matches {
+		if (match.Match.Side == order.Maker && match.Match.Status >= order.MakerSwapCast) ||
+			(match.Match.Side == order.Taker && match.Match.Status >= order.TakerSwapCast) {
+
+			alreadySwapped += 1
+		}
+	}
+	// If these are the last swaps, and the order is filled or canceled or
+	// revoked, then we don't need to lock the change coin.
+	isLastSwaps := len(matches)+alreadySwapped == len(t.matches)
+	isFilled := trade.Filled()+swappedQty == trade.Quantity
+	isCanceled := t.metaData.Status == order.OrderStatusCanceled || t.metaData.Status == order.OrderStatusRevoked
+	skipChange := isLastSwaps && (isFilled || isCanceled)
+	if skipChange {
+		t.changeLocked = false
+	} else {
+		swaps.LockChange = true
+		t.changeLocked = true
+	}
+
 	// Fund the swap. If this isn't the first swap, use the change coin from the
 	// previous swaps.
-	coinIDs := t.Trade().Coins
+	coinIDs := trade.Coins
 	if len(t.metaData.ChangeCoin) > 0 {
 		coinIDs = []order.CoinID{t.metaData.ChangeCoin}
 	}
@@ -788,12 +814,6 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		if err != nil {
 			errs.addErr(err)
 		}
-	}
-
-	// Check if we need to return the change coin because the order has been
-	// canceled.
-	if t.metaData.Status == order.OrderStatusCanceled && !t.hasUnswappedMatches() {
-		t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
 	}
 
 	return errs.ifany()

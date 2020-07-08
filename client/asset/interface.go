@@ -208,6 +208,9 @@ type Swaps struct {
 	Contracts []*Contract
 	// FeeRate is the required fee rate in atoms/byte.
 	FeeRate uint64
+	// LockChange can be set to true if the change should be locked for
+	// subsequent matches.
+	LockChange bool
 }
 
 // Contract is a swap contract.

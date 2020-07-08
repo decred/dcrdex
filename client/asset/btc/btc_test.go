@@ -168,7 +168,9 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 	case methodLockUnspent:
 		coins := make([]*RPCOutpoint, 0)
 		_ = json.Unmarshal(params[1], &coins)
-		c.lockedCoins = coins
+		if string(params[0]) == "false" {
+			c.lockedCoins = coins
+		}
 	}
 	return c.rawRes[method], c.rawErr[method]
 }
@@ -726,8 +728,9 @@ func TestSwap(t *testing.T) {
 	}
 
 	swaps := &asset.Swaps{
-		Inputs:    coins,
-		Contracts: []*asset.Contract{contract},
+		Inputs:     coins,
+		Contracts:  []*asset.Contract{contract},
+		LockChange: true,
 	}
 
 	signTxRes := SignTxResult{
