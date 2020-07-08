@@ -182,14 +182,24 @@ connection is established, the client will supply their account ID and signature
 
 If a client unexpectedly disconnects with active orders, the orders may match in
 the client's absence. A list of any pending matches is included in the response.
+If the client has a broken rule, they will not be able to trade for the duration
+of their penalization.
 
 <code>result</code>
 {|
 ! field   !! type   !! description
 |-
-| matches || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
+| matches      || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
 |-
-| sig     || string || hex-encoded server's signature of the serialized connection data
+| broken rule  || int || the client's current [[community.mediawiki/#Rules_of_Community_Conduct|rule status]]
+|-
+| ban time     || int || the UNIX time in milliseconds at which the penalization occured if applicable
+|-
+| ban duration || int || the duration in milliseconds of the penalization if applicable
+|-
+| ban details  || string || a message describing the penalization if applicable
+|-
+| sig          || string || hex-encoded server's signature of the serialized connection data
 |}
 
 ==HTTP==
