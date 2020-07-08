@@ -250,13 +250,14 @@ func CompareTrade(t1, t2 *order.Trade) error {
 // RandomUserMatch creates a random UserMatch.
 func RandomUserMatch() *order.UserMatch {
 	return &order.UserMatch{
-		OrderID:  RandomOrderID(),
-		MatchID:  RandomMatchID(),
-		Quantity: randUint64(),
-		Rate:     randUint64(),
-		Address:  RandomAddress(),
-		Status:   order.MatchStatus(rand.Intn(5)),
-		Side:     order.MatchSide(rand.Intn(2)),
+		OrderID:     RandomOrderID(),
+		MatchID:     RandomMatchID(),
+		Quantity:    randUint64(),
+		Rate:        randUint64(),
+		Address:     RandomAddress(),
+		Status:      order.MatchStatus(rand.Intn(5)),
+		Side:        order.MatchSide(rand.Intn(2)),
+		FeeRateSwap: randUint64(),
 	}
 }
 
@@ -284,16 +285,21 @@ func CompareUserMatch(m1, m2 *order.UserMatch) error {
 	if m1.Side != m2.Side {
 		return fmt.Errorf("Side mismatch. %d != %d", m1.Side, m2.Side)
 	}
+	if m1.FeeRateSwap != m2.FeeRateSwap {
+		return fmt.Errorf("FeeRateSwap mismatch. %d != %d", m1.FeeRateSwap, m2.FeeRateSwap)
+	}
 	return nil
 }
 
 type testKiller interface {
+	Helper()
 	Fatalf(string, ...interface{})
 }
 
 // MustComparePrefix compares the Prefix field-by-field and calls the Fatalf
 // method on the supplied testKiller if a mismatch is encountered.
 func MustComparePrefix(t testKiller, p1, p2 *order.Prefix) {
+	t.Helper()
 	err := ComparePrefix(p1, p2)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -303,6 +309,7 @@ func MustComparePrefix(t testKiller, p1, p2 *order.Prefix) {
 // MustCompareTrade compares the MarketOrders field-by-field and calls the
 // Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareTrade(t testKiller, t1, t2 *order.Trade) {
+	t.Helper()
 	err := CompareTrade(t1, t2)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -312,6 +319,7 @@ func MustCompareTrade(t testKiller, t1, t2 *order.Trade) {
 // MustCompareUserMatch compares the UserMatches field-by-field and calls the
 // Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareUserMatch(t testKiller, m1, m2 *order.UserMatch) {
+	t.Helper()
 	err := CompareUserMatch(m1, m2)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -321,6 +329,7 @@ func MustCompareUserMatch(t testKiller, m1, m2 *order.UserMatch) {
 // MustCompareUserMatch compares the LimitOrders field-by-field and calls the
 // Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareLimitOrders(t testKiller, l1, l2 *order.LimitOrder) {
+	t.Helper()
 	MustComparePrefix(t, &l1.P, &l2.P)
 	MustCompareTrade(t, &l1.T, &l2.T)
 	if l1.Rate != l2.Rate {
@@ -341,6 +350,7 @@ func MustCompareMarketOrders(t testKiller, m1, m2 *order.MarketOrder) {
 // MustCompareCancelOrders compares the CancelOrders field-by-field and calls
 // the Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareCancelOrders(t testKiller, c1, c2 *order.CancelOrder) {
+	t.Helper()
 	MustComparePrefix(t, &c1.P, &c2.P)
 	if !bytes.Equal(c1.TargetOrderID[:], c2.TargetOrderID[:]) {
 		t.Fatalf("wrong target order ID. wanted %s, got %s", c1.TargetOrderID, c2.TargetOrderID)
@@ -350,6 +360,7 @@ func MustCompareCancelOrders(t testKiller, c1, c2 *order.CancelOrder) {
 // MustCompareOrders compares the Orders field-by-field and calls
 // the Fatalf method on the supplied testKiller if a mismatch is encountered.
 func MustCompareOrders(t testKiller, o1, o2 order.Order) {
+	t.Helper()
 	switch ord1 := o1.(type) {
 	case *order.LimitOrder:
 		ord2, ok := o2.(*order.LimitOrder)
