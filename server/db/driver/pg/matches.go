@@ -33,11 +33,15 @@ func (a *Archiver) UserMatches(aid account.AccountID, base, quote uint32) ([]*db
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 	defer cancel()
 
-	return userMatches(ctx, a.db, matchesTableName, aid)
+	return userMatches(ctx, a.db, matchesTableName, aid, true)
 }
 
-func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) ([]*db.MatchData, error) {
-	stmt := fmt.Sprintf(internal.RetrieveUserMatches, tableName)
+func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID, includeInactive bool) ([]*db.MatchData, error) {
+	query := internal.RetrieveActiveUserMatches
+	if includeInactive {
+		query = internal.RetrieveUserMatches
+	}
+	stmt := fmt.Sprintf(query, tableName)
 	rows, err := dbe.QueryContext(ctx, stmt, aid)
 	if err != nil {
 		return nil, err
@@ -50,13 +54,28 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 		var baseRate, quoteRate sql.NullInt64
 		var takerSell sql.NullBool
 		var takerAddr, makerAddr sql.NullString
-		err := rows.Scan(&m.ID, &takerSell, &m.Active,
-			&m.Taker, &m.TakerAcct, &takerAddr,
-			&m.Maker, &m.MakerAcct, &makerAddr,
-			&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
-			&baseRate, &quoteRate, &status)
-		if err != nil {
-			return nil, err
+		if includeInactive {
+			// "active" column SELECTed.
+			err = rows.Scan(&m.ID, &m.Active, &takerSell,
+				&m.Taker, &m.TakerAcct, &takerAddr,
+				&m.Maker, &m.MakerAcct, &makerAddr,
+				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
+				&baseRate, &quoteRate, &status)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			// "active" column not SELECTed.
+			err = rows.Scan(&m.ID, &takerSell,
+				&m.Taker, &m.TakerAcct, &takerAddr,
+				&m.Maker, &m.MakerAcct, &makerAddr,
+				&m.Epoch.Idx, &m.Epoch.Dur, &m.Quantity, &m.Rate,
+				&baseRate, &quoteRate, &status)
+			if err != nil {
+				return nil, err
+			}
+			// All are active.
+			m.Active = true
 		}
 		m.Status = order.MatchStatus(status)
 		m.TakerSell = takerSell.Bool
@@ -75,92 +94,25 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 	return ms, nil
 }
 
-// ActiveMatches retrieves a UserMatch slice for active matches involving the
-// given user. Swaps that have successfully completed or failed are not
-// included.
-func (a *Archiver) ActiveMatches(aid account.AccountID) ([]*order.UserMatch, error) {
+// AllActiveUserMatches retrieves a MatchData slice for active matches in all
+// markets involving the given user. Swaps that have successfully completed or
+// failed are not included.
+func (a *Archiver) AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
 	defer cancel()
 
-	var matches []*order.UserMatch
+	var matches []*db.MatchData
 	for m := range a.markets {
 		matchesTableName := fullMatchesTableName(a.dbName, m)
-		matchesM, err := activeUserMatches(ctx, a.db, matchesTableName, aid)
+		mdM, err := userMatches(ctx, a.db, matchesTableName, aid, false)
 		if err != nil {
 			return nil, err
 		}
-		matches = append(matches, matchesM...)
+
+		matches = append(matches, mdM...)
 	}
 
 	return matches, nil
-}
-
-func activeUserMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) ([]*order.UserMatch, error) {
-	stmt := fmt.Sprintf(internal.RetrieveActiveUserMatches, tableName)
-	rows, err := dbe.QueryContext(ctx, stmt, aid)
-	if err != nil {
-		return nil, err
-	}
-
-	var ms []*order.UserMatch
-	for rows.Next() {
-		var md db.MatchData
-		var status uint8
-		var baseRate, quoteRate sql.NullInt64
-		var takerSell sql.NullBool
-		var takerAddr, makerAddr sql.NullString
-		err := rows.Scan(&md.ID,
-			&takerSell, &md.Taker, &md.TakerAcct, &takerAddr,
-			&md.Maker, &md.MakerAcct, &makerAddr,
-			&md.Epoch.Idx, &md.Epoch.Dur, &md.Quantity, &md.Rate,
-			&baseRate, &quoteRate, &status)
-		if err != nil {
-			return nil, err
-		}
-		md.Status = order.MatchStatus(status)
-
-		var addr string
-		var oid order.OrderID
-		var side order.MatchSide
-		feeRateContract := quoteRate.Int64 // if user is buying base asset
-		switch aid {
-		case md.TakerAcct:
-			addr = takerAddr.String
-			oid = md.Taker
-			side = order.Taker
-			if takerSell.Bool {
-				feeRateContract = baseRate.Int64 // selling base asset
-			}
-		case md.MakerAcct:
-			addr = makerAddr.String
-			oid = md.Maker
-			side = order.Maker
-			if !takerSell.Bool {
-				feeRateContract = baseRate.Int64 // selling base asset
-			}
-		default:
-			return nil, fmt.Errorf("loaded match %v not belonging to user %v", md.ID, aid)
-		}
-
-		um := &order.UserMatch{
-			OrderID:     oid,
-			MatchID:     md.ID,
-			Quantity:    md.Quantity,
-			Rate:        md.Rate,
-			Address:     addr,
-			Status:      md.Status,
-			Side:        side,
-			FeeRateSwap: uint64(feeRateContract),
-		}
-
-		ms = append(ms, um)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return ms, nil
 }
 
 func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, error) {
