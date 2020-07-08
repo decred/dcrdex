@@ -147,7 +147,8 @@ func EncodeMatch(match *UserMatch) []byte {
 		AddData(uint64B(match.Rate)).
 		AddData([]byte(match.Address)).
 		AddData([]byte{byte(match.Status)}).
-		AddData([]byte{byte(match.Side)})
+		AddData([]byte{byte(match.Side)}).
+		AddData(uint64B(match.FeeRateSwap))
 }
 
 // DecodeMatch decodes the versioned blob into a UserMatch.
@@ -165,8 +166,8 @@ func DecodeMatch(b []byte) (match *UserMatch, err error) {
 
 // matchDecoder_v0 decodes the version 0 payload into a *UserMatch.
 func matchDecoder_v0(pushes [][]byte) (*UserMatch, error) {
-	if len(pushes) != 7 {
-		return nil, fmt.Errorf("matchDecoder_v0: expected 7 pushes, got %d", len(pushes))
+	if len(pushes) != 8 {
+		return nil, fmt.Errorf("matchDecoder_v0: expected 8 pushes, got %d", len(pushes))
 	}
 	oidB, midB := pushes[0], pushes[1]
 	if len(oidB) != OrderIDSize {
@@ -184,14 +185,20 @@ func matchDecoder_v0(pushes [][]byte) (*UserMatch, error) {
 	if len(statusB) != 1 || len(sideB) != 1 {
 		return nil, fmt.Errorf("matchDecoder_v0: status/side incorrect length %d/%d", len(statusB), len(sideB))
 	}
+	qtyB, rateB, swapFeeB := pushes[2], pushes[3], pushes[7]
+	if len(qtyB) != 8 || len(rateB) != 8 || len(swapFeeB) != 8 {
+		return nil, fmt.Errorf("matchDecoder_v0: quantity/rate/swapFee incorrect length %d/%d/%d",
+			len(qtyB), len(rateB), len(swapFeeB))
+	}
 	return &UserMatch{
-		OrderID:  oid,
-		MatchID:  mid,
-		Quantity: intCoder.Uint64(pushes[2]),
-		Rate:     intCoder.Uint64(pushes[3]),
-		Address:  string(pushes[4]),
-		Status:   MatchStatus(statusB[0]),
-		Side:     MatchSide(sideB[0]),
+		OrderID:     oid,
+		MatchID:     mid,
+		Quantity:    intCoder.Uint64(qtyB),
+		Rate:        intCoder.Uint64(rateB),
+		Address:     string(pushes[4]),
+		Status:      MatchStatus(statusB[0]),
+		Side:        MatchSide(sideB[0]),
+		FeeRateSwap: intCoder.Uint64(swapFeeB),
 	}, nil
 }
 
