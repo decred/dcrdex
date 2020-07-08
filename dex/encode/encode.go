@@ -104,7 +104,7 @@ func DecodeUTime(b []byte) time.Time {
 }
 
 // ExtractPushes parses the linearly-encoded 2D byte slice into a slice of
-// slices.
+// slices. Empty pushes are nil slices.
 func ExtractPushes(b []byte) ([][]byte, error) {
 	pushes := make([][]byte, 0)
 	for {
@@ -123,6 +123,11 @@ func ExtractPushes(b []byte) ([][]byte, error) {
 		if len(b) < l {
 			return nil, fmt.Errorf("data too short for pop of %d bytes", l)
 		}
+		if l == 0 {
+			// If data length is zero, append nil instead of an empty slice.
+			pushes = append(pushes, nil)
+			continue
+		}
 		pushes = append(pushes, b[:l])
 		b = b[l:]
 	}
@@ -130,7 +135,7 @@ func ExtractPushes(b []byte) ([][]byte, error) {
 }
 
 // DecodeBlob decodes a versioned blob into its version and the pushes extracted
-// from its data.
+// from its data. Empty pushes will be nil.
 func DecodeBlob(b []byte) (byte, [][]byte, error) {
 	if len(b) == 0 {
 		return 0, nil, fmt.Errorf("zero length blob not allowed")
