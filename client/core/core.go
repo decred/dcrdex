@@ -2402,43 +2402,22 @@ func (c *Core) handleReconnect(host string) {
 	dc.marketMtx.RLock()
 	for mktKey, mkt := range dc.marketMap {
 		dc.booksMtx.Lock()
-		_, foundMkt := dc.books[mktKey]
+		booky, foundMkt := dc.books[mktKey]
 		dc.booksMtx.Unlock()
 		if !foundMkt {
 			continue
 		}
-		req, err := msgjson.NewRequest(dc.NextID(), msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{
-			Base:  mkt.BaseID,
-			Quote: mkt.QuoteID,
-		})
+		feeds := booky.feeds
+		dc.booksMtx.Lock()
+		delete(dc.books, mktKey)
+		dc.booksMtx.Unlock()
+		_, _, err := c.Sync(host, mkt.BaseID, mkt.QuoteID)
 		if err != nil {
-			log.Errorf("error encoding 'orderbook' request: %v", err)
-			continue
-		}
-
-		errChan := make(chan error, 1)
-		result := new(msgjson.OrderBook)
-		err = dc.Request(req, func(msg *msgjson.Message) {
-			errChan <- msg.UnmarshalResult(result)
-		})
-		if err != nil {
-			log.Errorf("error re-subscribing to %s orderbook: %v", mkt, err)
-			continue
-		}
-		err = extractError(errChan, requestTimeout, msgjson.OrderBookRoute)
-		if err != nil {
-			log.Error(err)
-			continue
-		}
-
-		booky := newBookie(func() { c.unsub(dc, mktKey) })
-		err = booky.Sync(result)
-		if err != nil {
-			log.Error(err)
+			log.Errorf("error re-subscribing: %v", err)
 			continue
 		}
 		dc.booksMtx.Lock()
-		dc.books[mktKey] = booky
+		dc.books[mktKey].feeds = feeds
 		dc.booksMtx.Unlock()
 	}
 	dc.marketMtx.RUnlock()
