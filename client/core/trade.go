@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -75,7 +74,7 @@ type trackedCancel struct {
 // match negotiation.
 type trackedTrade struct {
 	order.Order
-	mtx           sync.RWMutex
+	// mtx           sync.RWMutex
 	metaData      *db.OrderMetaData
 	dc            *dexConnection
 	db            db.DB
@@ -89,10 +88,10 @@ type trackedTrade struct {
 	change        asset.Coin
 	changeLocked  bool
 	cancel        *trackedCancel
-	matchMtx      sync.RWMutex
-	matches       map[order.MatchID]*matchTracker
-	notify        func(Notification)
-	epochLen      uint64
+	// matchMtx      sync.RWMutex
+	matches  map[order.MatchID]*matchTracker
+	notify   func(Notification)
+	epochLen uint64
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
@@ -131,18 +130,6 @@ func (t *trackedTrade) rate() uint64 {
 // has a cancel order associated with it, the cancel order will be returned,
 // otherwise the second returned *Order will be nil.
 func (t *trackedTrade) coreOrder() (*Order, *Order) {
-	t.mtx.RLock()
-	defer t.mtx.RUnlock()
-	t.matchMtx.RLock()
-	defer t.matchMtx.RUnlock()
-	return t.coreOrderInternal()
-}
-
-// coreOrderInternal constructs a *core.Order for the tracked order.Order. If
-// the trade has a cancel order associated with it, the cancel order will be
-// returned, otherwise the second returned *Order will be nil. coreOrderInternal
-// should be called with both the mtx and the matchMtx locked.
-func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 	prefix, trade := t.Prefix(), t.Trade()
 	cancelling := t.cancel != nil
 	canceled := cancelling && t.cancel.matches.maker != nil
@@ -201,12 +188,42 @@ func (t *trackedTrade) token() string {
 
 // cancelTrade sets the cancellation data with the order and its preimage.
 func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage) {
-	t.mtx.Lock()
 	t.cancel = &trackedCancel{
 		CancelOrder: *co,
 		preImg:      preImg,
 	}
-	t.mtx.Unlock()
+}
+
+func (t *trackedTrade) nomatch(oid order.OrderID) error {
+	if t.ID() != oid {
+		if t.cancel.ID() != oid {
+			return fmt.Errorf("nomatch order ID %s does not match trade or cancel order", oid)
+		}
+		// TODO: Auto-resubmit missed cancel orders?
+		log.Warnf("cancel order %s did not match for order %s.", t.cancel.ID(), t.ID())
+		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade.", t.token())
+		corder, _ := t.coreOrder()
+		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, corder))
+		return t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
+	}
+	if t.metaData.Status != order.OrderStatusEpoch {
+		return fmt.Errorf("nomatch sent for non-epoch order %s", oid)
+	}
+	err := t.wallets.fromWallet.ReturnCoins(t.coinList())
+	if err != nil {
+		log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
+	}
+	if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
+		t.metaData.Status = order.OrderStatusBooked
+		corder, _ := t.coreOrder()
+		t.notify(newOrderNote("Order booked", "", db.Data, corder))
+	} else {
+		t.metaData.Status = order.OrderStatusExecuted
+		log.Infof("Non-standing order %s did not match.", t.token())
+		corder, _ := t.coreOrder()
+		t.notify(newOrderNote("No match", "", db.Data, corder))
+	}
+	return t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
 }
 
 // readConnectMatches resolves the matches reported by the server in the
@@ -216,8 +233,6 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 	var extras []*msgjson.Match
 	var missing []order.MatchID
 	corder, _ := t.coreOrder()
-	t.matchMtx.RLock()
-	defer t.matchMtx.RUnlock()
 	for _, msgMatch := range msgMatches {
 		var matchID order.MatchID
 		copy(matchID[:], msgMatch.MatchID)
@@ -260,8 +275,6 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 // calling (*trackedTrade).tick when a relevant event occurs, such as a request
 // from the DEX or a tip change. negotiate calls tick internally.
 func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
 	// Add the matches to the match map and update the database.
 	trade := t.Trade()
 	var includesCancellation, includesTrades bool
@@ -328,9 +341,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			t.cancel.matches.maker = msgMatch
 		} else {
 			includesTrades = true
-			t.matchMtx.Lock()
 			t.matches[match.id] = match
-			t.matchMtx.Unlock()
 		}
 		err := t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
@@ -345,7 +356,6 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	if t.cancel != nil && t.cancel.matches.maker != nil {
 		filled += t.cancel.matches.maker.Quantity
 	}
-	t.matchMtx.RLock()
 	for _, n := range t.matches {
 		if isMarketBuy {
 			filled += calc.BaseToQuote(n.Match.Rate, n.Match.Quantity)
@@ -358,18 +368,14 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	trade.SetFill(filled)
 	// Set the order as executed depending on type and fill.
 	if t.metaData.Status != order.OrderStatusCanceled {
-		switch t.Prefix().Type() {
-		case order.LimitOrderType:
-			if trade.Filled() == trade.Quantity {
-				t.metaData.Status = order.OrderStatusExecuted
-			}
-		case order.MarketOrderType:
+		if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF && filled < trade.Quantity {
+			t.metaData.Status = order.OrderStatusBooked
+		} else {
 			t.metaData.Status = order.OrderStatusExecuted
 		}
 	}
-	corder, cancelOrder := t.coreOrderInternal()
+	corder, cancelOrder := t.coreOrder()
 	hasUnswapped := t.hasUnswappedMatches()
-	t.matchMtx.RUnlock()
 
 	// Send notifications.
 	if includesCancellation {
@@ -424,8 +430,6 @@ func (t *trackedTrade) metaOrder() *db.MetaOrder {
 // processCancelMatch should be called with the message for the match on a
 // cancel order.
 func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
 	var oid order.OrderID
 	copy(oid[:], msgMatch.OrderID)
 	if oid != t.cancel.ID() {
@@ -570,8 +574,6 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 
 	// Check all matches and send swap, redeem or refund as necessary.
 	var sent, quoteSent, received, quoteReceived uint64
-	t.matchMtx.Lock()
-	defer t.matchMtx.Unlock()
 	for _, match := range t.matches {
 		switch {
 		case t.isSwappable(match):
@@ -609,7 +611,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 
 		// swapMatches might modify the matches, so don't get the *Order for
 		// notifications before swapMatches.
-		corder, _ := t.coreOrderInternal()
+		corder, _ := t.coreOrder()
 		if err != nil {
 			errs.addErr(err)
 			details := fmt.Sprintf("Error encountered sending a swap output(s) worth %.8f %s on order %s",
@@ -630,7 +632,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 			qty = quoteReceived
 		}
 		err := t.redeemMatches(redeems)
-		corder, _ := t.coreOrderInternal()
+		corder, _ := t.coreOrder()
 		if err != nil {
 			errs.addErr(err)
 			details := fmt.Sprintf("Error encountered sending redemptions worth %.8f %s on order %s",
@@ -645,7 +647,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 
 	if len(refunds) > 0 {
 		refunded, err := t.refundMatches(refunds)
-		corder, _ := t.coreOrderInternal()
+		corder, _ := t.coreOrder()
 		details := fmt.Sprintf("Refunded %.8f %s on order %s",
 			float64(refunded)/conversionFactor, unbip(fromID), t.token())
 		if err != nil {
@@ -664,8 +666,6 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 func (t *trackedTrade) resendPendingRequests() error {
 	errs := newErrorSet("resendPendingRequest: order %s - ", t.ID())
 
-	t.matchMtx.Lock()
-	defer t.matchMtx.Unlock()
 	for _, match := range t.matches {
 		dbMatch, _, proof, auth := match.parts()
 		// do not resend pending requests for revoked matches or matches where
@@ -1029,8 +1029,6 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 	var mid order.MatchID
 	copy(mid[:], audit.MatchID)
 	errs := newErrorSet("processAudit - order %s, match %s -", t.ID(), mid)
-	t.matchMtx.Lock()
-	defer t.matchMtx.Unlock()
 	match, found := t.matches[mid]
 	if !found {
 		return errs.add("match ID not known")
@@ -1144,8 +1142,6 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	var mid order.MatchID
 	copy(mid[:], redemption.MatchID)
 	errs := newErrorSet("processRedemption order %s, match %s - ", t.ID(), mid)
-	t.matchMtx.Lock()
-	defer t.matchMtx.Unlock()
 	match, found := t.matches[mid]
 	if !found {
 		return errs.add("match not known")
@@ -1215,8 +1211,6 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 // be assumed to have matched without error, and the status set to executed or
 // booked, depending on the order type.
 func (t *trackedTrade) processEpoch(epochIdx uint64) bool {
-	t.mtx.Lock()
-	defer t.mtx.Unlock()
 	tradeEpoch := uint64(t.Time()) / t.epochLen
 	if t.metaData.Status != order.OrderStatusEpoch || epochIdx <= tradeEpoch {
 		return false

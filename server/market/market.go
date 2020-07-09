@@ -1371,7 +1371,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	// Perform order matching using the preimages to shuffle the queue.
 	m.bookMtx.Lock()        // allow a coherent view of book orders with (*Market).Book
 	matchTime := time.Now() // considered as the time at which matched cancel orders are executed
-	seed, matches, _, failed, doneOK, partial, booked, unbooked, updates := m.matcher.Match(m.book, ordersRevealed)
+	seed, matches, _, failed, doneOK, partial, booked, nomatched, unbooked, updates := m.matcher.Match(m.book, ordersRevealed)
 	m.bookEpochIdx = epoch.Epoch + 1
 	m.bookMtx.Unlock()
 	if len(ordersRevealed) > 0 {
@@ -1568,6 +1568,20 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 			},
 		}
 		notifyChan <- sig
+	}
+
+	// Send "nomatch" notifications to order book subscribers.
+	for _, ord := range nomatched {
+		oid := ord.Order.ID()
+		msg, err := msgjson.NewNotification(msgjson.NomatchRoute, &msgjson.Nomatch{
+			OrderID: oid[:],
+		})
+		if err != nil {
+			// This is probably impossible in practice, but we'll log it anyway.
+			log.Errorf("Failed to encode 'nomatch' notification.")
+			continue
+		}
+		m.auth.Send(ord.Order.Prefix().AccountID, msg)
 	}
 
 	// Send "update_remaining" notifications to order book subscribers.

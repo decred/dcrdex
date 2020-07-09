@@ -3196,7 +3196,7 @@ func TestSetEpoch(t *testing.T) {
 		if metaData.Status != status {
 			t.Fatalf("wrong status for %s. expected %s, got %s", tag, status, metaData.Status)
 		}
-		corder, _ := tracker.coreOrderInternal()
+		corder, _ := tracker.coreOrder()
 		if corder.Status != status {
 			t.Fatalf("wrong core order status for %s. expected %s, got %s", tag, status, corder.Status)
 		}
