@@ -496,10 +496,6 @@ func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatche
 // Reported matches with missing trackers are already checked by parseMatches,
 // but we also must check for incomplete matches that the server is not
 // reporting.
-//
-// DRAFT NOTE: Right now, the matches are just checked and notifications sent,
-// but it may be a good place to trigger a FindRedemption if the conditions
-// warrant.
 func (dc *dexConnection) compareServerMatches(matches map[order.OrderID]*serverMatches) {
 	for _, match := range matches {
 		// readConnectMatches sends notifications for any problems encountered.

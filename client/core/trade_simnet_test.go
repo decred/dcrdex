@@ -1,3 +1,5 @@
+// +build harness
+
 package core
 
 // The btc, dcr and dcrdex harnesses should be running before executing this
@@ -183,7 +185,7 @@ func TestTrading(t *testing.T) {
 		"no maker swap":            testNoMakerSwap,
 		"no taker swap":            testNoTakerSwap,
 		"no maker redeem":          testNoMakerRedeem,
-		"maker ghost after redeem": testMakerRedeemRunAway,
+		"maker ghost after redeem": testMakerGhostingAfterTakerRedeem,
 	}
 
 	for test, testFn := range tests {
@@ -226,9 +228,13 @@ func testNoTakerSwap(t *testing.T) {
 }
 
 // testNoMakerRedeem runs a simple trade test and ensures that the resulting
-// trades fail because of Maker not sending their redemption of Taker's swap.
+// trades fail because of Maker not redeeming Taker's swap.
 // Also ensures that both Maker and Taker's funds are refunded after their
 // respective swap locktime expires.
+// Cases where Maker actually redeemed Taker's swap but did not notify Taker
+// are handled in testMakerGhostingAfterTakerRedeem which ensures that Taker
+// auto-finds Maker's redeem and completes the trade by redeeming Maker's
+// swap.
 func testNoMakerRedeem(t *testing.T) {
 	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
@@ -237,7 +243,15 @@ func testNoMakerRedeem(t *testing.T) {
 	}
 }
 
-func testMakerRedeemRunAway(t *testing.T) {
+// testMakerGhostingAfterTakerRedeem places simple orders for clients 1 and 2,
+// neogiates the resulting trades smoothly till TakerSwapCast, Maker redeems
+// taker's swap without notifying Taker.
+// Also ensures that Taker auto-finds Maker's redeem, extracts the secret key
+// and redeems Maker's swap to complete the trade.
+// Cases where Maker actually did NOT redeem Taker's swap are handled in
+// testNoMakerRedeem which ensures that both parties are able to refund their
+// swaps.
+func testMakerGhostingAfterTakerRedeem(t *testing.T) {
 	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
 
@@ -269,7 +283,10 @@ func testMakerRedeemRunAway(t *testing.T) {
 		finalStatus := order.MatchComplete
 		dc.tradeMtx.Lock()
 		for _, match := range tracker.matches {
-			if match.Match.Side == order.Maker {
+			side, status := match.Match.Side, match.Match.Status
+			client.log("%s: trade %s paused at %s", token(match.ID()), status)
+			if side == order.Maker {
+				client.log("%s: disconnecting DEX before redeeming Taker's swap", side)
 				client.dc().connMaster.Disconnect()
 				finalStatus = order.MakerRedeemed // maker shouldn't get past this state
 			}
@@ -278,7 +295,7 @@ func testMakerRedeemRunAway(t *testing.T) {
 		dc.tradeMtx.Unlock()
 		// force next action since trade.tick() will not be called for disconnected dcs.
 		tracker.tick()
-		return monitorTrackedTrade(ctx, client, tracker, finalStatus)
+		return monitorTrackedTrade(ctx, client, tracker, order.TakerSwapCast, finalStatus)
 	}
 	resumeTrades, ctx := errgroup.WithContext(context.Background())
 	resumeTrades.Go(func() error {
@@ -300,7 +317,7 @@ func testMakerRedeemRunAway(t *testing.T) {
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
-			t.Fatalf("client %d balance check error: %v", client.id, err)
+			t.Fatal(err)
 		}
 	}
 
@@ -352,7 +369,7 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 
 	for _, client := range clients {
 		if err = client.assertBalanceChanges(); err != nil {
-			return fmt.Errorf("client %d balance check error: %v", client.id, err)
+			return err
 		}
 	}
 
@@ -440,10 +457,10 @@ func monitorOrderMatchingAndTradeNeg(ctx context.Context, client *tClient, order
 	}
 	tracker.mtx.RUnlock()
 
-	return monitorTrackedTrade(ctx, client, tracker, finalStatus)
+	return monitorTrackedTrade(ctx, client, tracker, order.NewlyMatched, finalStatus)
 }
 
-func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedTrade, finalStatus order.MatchStatus) error {
+func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedTrade, initialStatus, finalStatus order.MatchStatus) error {
 	makerAtFault := finalStatus == order.NewlyMatched || finalStatus == order.TakerSwapCast
 	takerAtFault := finalStatus == order.MakerSwapCast || finalStatus == order.MakerRedeemed
 
@@ -467,6 +484,9 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 	dc := client.dc()
 	dc.tradeMtx.RLock()
 	lastProcessedStatus := make(map[order.MatchID]order.MatchStatus, len(tracker.matches))
+	for _, match := range tracker.matches {
+		lastProcessedStatus[match.id] = initialStatus
+	}
 	dc.tradeMtx.RUnlock()
 
 	// run a repeated check for match status changes to mine blocks as necessary.
@@ -487,11 +507,7 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 				}
 				completedTrades++
 			}
-			if status > finalStatus {
-				continue
-			}
-			lastStatus, wasProcessed := lastProcessedStatus[match.id]
-			if wasProcessed && status == lastStatus {
+			if status == lastProcessedStatus[match.id] || status > finalStatus {
 				continue
 			}
 			lastProcessedStatus[match.id] = status
