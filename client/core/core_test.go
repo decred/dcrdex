@@ -577,8 +577,7 @@ func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
 	return true, time.Now().Add(-time.Minute), nil
 }
 
-func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error) {
-	return nil, nil
+func (w *TXCWallet) FindRedemption(coinIDs []dex.Bytes, resultChan chan asset.FindRedemptionResult) {
 }
 
 func (w *TXCWallet) Refund(dex.Bytes, dex.Bytes) (dex.Bytes, error) {

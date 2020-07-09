@@ -327,6 +327,8 @@ type ExchangeWallet struct {
 	log               dex.Logger
 	symbol            string
 	hasConnected      uint32
+	tipMtx            sync.RWMutex
+	currentTipHash    string
 	tipChange         func(error)
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
@@ -337,6 +339,22 @@ type ExchangeWallet struct {
 	// shutdown.
 	fundingMtx   sync.RWMutex
 	fundingCoins map[outPoint]*compositeUTXO
+
+	findRedemptionMtx   sync.RWMutex
+	findRedemptionQueue map[string]findRedemptionReq
+}
+
+type block struct {
+	height int64
+	hash   string
+}
+
+type findRedemptionReq struct {
+	contractTxHash *chainhash.Hash
+	contractTxOut  uint32
+	contractHash   []byte
+	contractBlock  *block // for mined contracts, nil for contracts stil in mempool
+	resultChan     chan asset.FindRedemptionResult
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -417,18 +435,19 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 	cfg.Logger.Tracef("fallback fees set at %d %s/byte", fallbackFeesPerByte, cfg.WalletInfo.Units)
 
 	return &ExchangeWallet{
-		node:              node,
-		wallet:            newWalletClient(node, cfg.ChainParams),
-		symbol:            cfg.Symbol,
-		chainParams:       cfg.ChainParams,
-		log:               cfg.Logger,
-		tipChange:         cfg.WalletCFG.TipChange,
-		fundingCoins:      make(map[outPoint]*compositeUTXO),
-		minNetworkVersion: cfg.MinNetworkVersion,
-		fallbackFeeRate:   fallbackFeesPerByte,
-		useSplitTx:        btcCfg.UseSplitTx,
-		useLegacyBalance:  cfg.LegacyBalance,
-		walletInfo:        cfg.WalletInfo,
+		node:                node,
+		wallet:              newWalletClient(node, cfg.ChainParams),
+		symbol:              cfg.Symbol,
+		chainParams:         cfg.ChainParams,
+		log:                 cfg.Logger,
+		tipChange:           cfg.WalletCFG.TipChange,
+		fundingCoins:        make(map[outPoint]*compositeUTXO),
+		findRedemptionQueue: make(map[string]findRedemptionReq),
+		minNetworkVersion:   cfg.MinNetworkVersion,
+		fallbackFeeRate:     fallbackFeesPerByte,
+		useSplitTx:          btcCfg.UseSplitTx,
+		useLegacyBalance:    cfg.LegacyBalance,
+		walletInfo:          cfg.WalletInfo,
 	}
 }
 
@@ -470,6 +489,11 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		if err != nil {
 			btc.log.Errorf("failed to unlock %s outputs on shutdown: %v", btc.symbol, err)
 		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		btc.processFindRedemptionRequests(ctx)
 	}()
 	return &wg, nil
 }
@@ -1166,132 +1190,245 @@ func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 	return bestBlockMedianTime.After(contractExpiry), contractExpiry, nil
 }
 
-// FindRedemption attempts to find the input that spends the specified output,
-// and returns the secret key if it does. The inputs are the txid and vout of
-// the contract output that was redeemed. This method only works with contracts
-// sent from the wallet.
-func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error) {
-	txHash, vout, err := decodeCoinID(coinID)
-	if err != nil {
-		return nil, err
-	}
-	txid := txHash.String()
-	// Get the wallet transaction.
-	tx, err := btc.wallet.GetTransaction(txHash.String())
-	if err != nil {
-		if isTxNotFoundErr(err) {
-			return nil, asset.CoinNotFoundError
+// FindRedemption attempts to find the input that spends the specified coins,
+// and return the secret key when it does.
+// Every input of every block starting at the contract block is scanned in a
+// background process until the spending input is found or an error occurs.
+// The result channel is used to notify callers when the secret key is found
+// or if an error occurs during the search.
+//
+// NOTE: FindRedemption is necessary to deal with the case of a maker
+// redeeming but not forwarding their redemption information. The DEX does not
+// monitor for this case. While it will result in the counter-party being
+// penalized, the input still needs to be found so the swap can be completed.
+// This could potentially be an expensive operation if performed long after
+// the swap is broadcast. Realistically, though, the taker should start
+// looking for the maker's redemption beginning at swapconf confirmations
+// regardless of whether the server sends the 'redemption' message or not.
+func (btc *ExchangeWallet) FindRedemption(coinIDs []dex.Bytes, resultChan chan asset.FindRedemptionResult) {
+	handleError := func(coinID dex.Bytes, err error) {
+		resultChan <- asset.FindRedemptionResult{
+			ContractCoinID: coinID,
+			Err:            err,
 		}
-		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txHash, err)
 	}
-	if tx.BlockIndex == 0 {
-		// This is a mempool transaction, GetRawTransactionVerbose works on mempool
-		// transactions, so grab the contract from there and prepare a hash.
+
+	btc.findRedemptionMtx.Lock()
+	defer btc.findRedemptionMtx.Unlock()
+	for _, coinID := range coinIDs {
+		if _, inQueue := btc.findRedemptionQueue[coinID.String()]; inQueue {
+			continue
+		}
+		txHash, vout, err := decodeCoinID(coinID)
+		if err != nil {
+			handleError(coinID, fmt.Errorf("cannot decode contract coin id: %v", err))
+			continue
+		}
 		rawTx, err := btc.node.GetRawTransactionVerbose(txHash)
 		if err != nil {
-			return nil, fmt.Errorf("error getting contract details from mempool")
+			handleError(coinID, fmt.Errorf("error getting contract details: %v", err))
+			continue
 		}
 		if int(vout) > len(rawTx.Vout)-1 {
-			return nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
+			handleError(coinID, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash))
+			continue
 		}
 		contractHash, err := dexbtc.ExtractContractHash(rawTx.Vout[vout].ScriptPubKey.Hex)
 		if err != nil {
-			return nil, err
+			handleError(coinID, err)
+			continue
 		}
-		// Only need to look at other mempool transactions. For each txid, get the
-		// verbose transaction and check each input's previous outpoint.
-		txs, err := btc.node.GetRawMempool()
-		if err != nil {
-			return nil, fmt.Errorf("error retrieve mempool transactions")
+		req := findRedemptionReq{
+			contractTxHash: txHash,
+			contractTxOut:  vout,
+			contractHash:   contractHash,
+			resultChan:     resultChan,
 		}
-		for _, txHash := range txs {
-			tx, err := btc.node.GetRawTransactionVerbose(txHash)
+		if rawTx.BlockHash != "" {
+			blk, err := btc.getBlockHeader(rawTx.BlockHash)
 			if err != nil {
-				return nil, fmt.Errorf("error encountered retreving mempool transaction %s: %v", txHash, err)
+				handleError(coinID, fmt.Errorf("getBlockHeader error for hash %q: %v", rawTx.BlockHash, err))
+				continue
 			}
-			for i := range tx.Vin {
-				if tx.Vin[i].Txid == txid && tx.Vin[i].Vout == vout {
-					// Found it. Extract the key.
-					vin := tx.Vin[i]
-					sigScript, err := hex.DecodeString(vin.ScriptSig.Hex)
-					if err != nil {
-						return nil, fmt.Errorf("error decoding scriptSig '%s': %v", vin.ScriptSig.Hex, err)
-					}
-					key, err := dexbtc.FindKeyPush(sigScript, contractHash, btc.chainParams)
-					if err != nil {
-						return nil, fmt.Errorf("found spending input at %s:%d, but error extracting key from '%s': %v",
-							txHash, i, vin.ScriptSig.Hex, err)
-					}
-					return key, nil
-				}
+			req.contractBlock = &block{hash: rawTx.BlockHash, height: blk.Height}
+		}
+		btc.findRedemptionQueue[coinID.String()] = req
+	}
+}
+
+// processFindRedemptionRequests attempts to find spending info for contracts
+// by scanning every input of every block starting from the block in which the
+// contract was mined (and mempool txs for unmined contracts). If the spending
+// input for a contract is not found after scanning the best block, this method
+// waits for new blocks to scan to ensure that spending info is found for all
+// contracts, parsing and returning the secret from the spending input's sig.
+func (btc *ExchangeWallet) processFindRedemptionRequests(ctx context.Context) {
+	processingQueue := make(map[string]findRedemptionReq)
+
+	// errorAll is used if/when this contract monitoring goroutine
+	// hits an unexpected error and cannot continue to reliably
+	// track contract redemption. The error encountered is sent to
+	// all callers via the registered channel for find redemption
+	// results and the requests removed from the processing queue.
+	// If a client wishes to repeat find redemption attempts for any
+	// of the deleted requests, client may re-call btc.FindRedemption.
+	errorAll := func(err error) {
+		for _, req := range processingQueue {
+			req.resultChan <- asset.FindRedemptionResult{
+				ContractCoinID: toCoinID(req.contractTxHash, req.contractTxOut),
+				Err:            err,
 			}
 		}
-		return nil, fmt.Errorf("no key found")
+		processingQueue = make(map[string]findRedemptionReq)
 	}
-	// Since it's not a mempool transaction, start scanning blocks at the height
-	// of the swap.
-	blockHash, err := chainhash.NewHashFromStr(tx.BlockHash)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding block hash: %v", err)
+
+	// findRedeemsInTx checks if any input of the provided tx spends any
+	// contract from the processing queue. If any such spending is found,
+	// the spent contract is deleted from the processing queue, the spending
+	// input's sig is parsed to retreive the secret and the secret is sent
+	// to the caller via the channel for registered find redemption results.
+	// If an error is encountered while trying to extract the secret, the
+	// error is communicated to the requester via the registered result chan.
+	findRedeemsInTx := func(tx *btcjson.TxRawResult) {
+		for i, input := range tx.Vin {
+			for k, req := range processingQueue {
+				if input.Txid != req.contractTxHash.String() || input.Vout != req.contractTxOut {
+					// input doesn't spend this contract, check next contract.
+					continue
+				}
+				// Found contract spender, delete from map and parse out secret.
+				delete(processingQueue, k)
+				var sigScript, secret []byte
+				redeemTxHash, err := chainhash.NewHashFromStr(tx.Txid)
+				if err == nil {
+					sigScript, err = hex.DecodeString(input.ScriptSig.Hex)
+				}
+				if err == nil {
+					secret, err = dexbtc.FindKeyPush(sigScript, req.contractHash, btc.chainParams)
+				}
+				if err != nil {
+					req.resultChan <- asset.FindRedemptionResult{
+						ContractCoinID: toCoinID(req.contractTxHash, req.contractTxOut),
+						Err:            fmt.Errorf("error extracting key from %s:%d, %v", tx.Txid, i, err),
+					}
+				} else {
+					req.resultChan <- asset.FindRedemptionResult{
+						ContractCoinID:   toCoinID(req.contractTxHash, req.contractTxOut),
+						RedemptionCoinID: toCoinID(redeemTxHash, uint32(i)),
+						Secret:           secret,
+						Err:              err,
+					}
+				}
+				break // skip checking other contracts for this input and check next input
+			}
+		}
 	}
-	contractBlock := *blockHash
-	var contractHash []byte
-	blockHeight := tx.BlockIndex
+
+	var lastSearchedBlockHeight int64 = -1
+	var nextBlockToSearch *block
+
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("redemption search canceled")
+			return
 		default:
 		}
-		block, err := btc.getVerboseBlockTxs(blockHash.String())
-		if err != nil {
-			return nil, fmt.Errorf("error fetching verbose block '%s': %v", blockHash, err)
+
+		// Copy new requests over to processing queue and determine
+		// lowest block hash to scan in this iteration.
+		var newUnminedContracts bool
+		btc.findRedemptionMtx.Lock()
+		for k, req := range btc.findRedemptionQueue {
+			processingQueue[k] = req
+			if req.contractBlock == nil {
+				newUnminedContracts = true
+				continue
+			}
+			if nextBlockToSearch == nil || req.contractBlock.height < nextBlockToSearch.height {
+				nextBlockToSearch = req.contractBlock
+			}
 		}
-		// If this is the swap contract's block, grab the contract hash.
-		if *blockHash == contractBlock {
-			for i := range block.Tx {
-				if block.Tx[i].Txid == txid {
-					vouts := block.Tx[i].Vout
-					if len(vouts) < int(vout)+1 {
-						return nil, fmt.Errorf("vout %d not found in tx %s", vout, txid)
-					}
-					contractHash, err = dexbtc.ExtractContractHash(vouts[vout].ScriptPubKey.Hex)
+		btc.findRedemptionQueue = make(map[string]findRedemptionReq)
+		btc.findRedemptionMtx.Unlock()
+
+		if len(processingQueue) == 0 {
+			continue
+		}
+
+		if nextBlockToSearch == nil {
+			// Must have exhausted all mined blocks in last loop run
+			// or the processing queue has no mined contracts.
+			// Either way, check if there's a new block that can be
+			// searched.
+
+			btc.tipMtx.RLock()
+			currentTipHash := btc.currentTipHash
+			btc.tipMtx.RUnlock()
+			if currentTipHash == "" {
+				continue
+			}
+			if lastSearchedBlockHeight == -1 {
+				// No previous scan, start scanning at this current tip.
+				nextBlockToSearch = &block{hash: currentTipHash} // don't really need the height to scan
+			} else {
+				// Check if this new block is more than 1 block ahead of the
+				// last scanned block.
+				latestBlock, err := btc.getBlockHeader(currentTipHash)
+				if err != nil {
+					errorAll(fmt.Errorf("unexpected getBlockHeader error for hash %q: %v", currentTipHash, err))
+					continue
+				}
+				if latestBlock.Height == lastSearchedBlockHeight+1 {
+					nextBlockToSearch = &block{hash: currentTipHash, height: latestBlock.Height}
+				} else if latestBlock.Height > lastSearchedBlockHeight+1 {
+					nextBlockHeight := lastSearchedBlockHeight + 1
+					nextBlockHash, err := btc.node.GetBlockHash(nextBlockHeight)
 					if err != nil {
-						return nil, err
+						errorAll(fmt.Errorf("unexpected GetBlockHash error for height %d: %v", nextBlockHeight, err))
+						continue
 					}
+					nextBlockToSearch = &block{hash: nextBlockHash.String(), height: nextBlockHeight}
 				}
 			}
 		}
-		if len(contractHash) == 0 {
-			return nil, fmt.Errorf("no secret hash found at %s:%d", txid, vout)
-		}
-		// Look at the previous outpoint of each input of each transaction in the
-		// block.
-		for i := range block.Tx {
-			for j := range block.Tx[i].Vin {
-				if block.Tx[i].Vin[j].Txid == txid && block.Tx[i].Vin[j].Vout == vout {
-					// Found it. Extract the key.
-					vin := block.Tx[i].Vin[j]
-					sigScript, err := hex.DecodeString(vin.ScriptSig.Hex)
-					if err != nil {
-						return nil, fmt.Errorf("error decoding scriptSig '%s': %v", vin.ScriptSig.Hex, err)
-					}
-					key, err := dexbtc.FindKeyPush(sigScript, contractHash, btc.chainParams)
-					if err != nil {
-						return nil, fmt.Errorf("error extracting key from '%s': %v", vin.ScriptSig.Hex, err)
-					}
-					return key, nil
-				}
+
+		if nextBlockToSearch != nil {
+			blk, err := btc.getVerboseBlockTxs(nextBlockToSearch.hash)
+			if err != nil {
+				errorAll(fmt.Errorf("error fetching verbose block '%s': %v", nextBlockToSearch.hash, err))
+				continue
+			}
+			for _, tx := range blk.Tx {
+				findRedeemsInTx(&tx)
+			}
+			lastSearchedBlockHeight = int64(blk.Height)
+			nextBlockHeight := lastSearchedBlockHeight + 1
+			nextBlockHash, err := btc.node.GetBlockHash(nextBlockHeight)
+			if err == nil {
+				nextBlockToSearch = &block{hash: nextBlockHash.String(), height: nextBlockHeight}
+			} else {
+				nextBlockToSearch = nil
 			}
 		}
-		// Not found in this block. Get the next block
-		blockHeight++
-		blockHash, err = btc.node.GetBlockHash(blockHeight)
-		if err != nil {
-			return nil, fmt.Errorf("spending transaction not found")
+
+		// Newly reported mempool contracts may only have been spent
+		// by another mempool tx, so check mempool for potential spends.
+		if newUnminedContracts {
+			mempoolTxs, err := btc.node.GetRawMempool()
+			if err != nil {
+				errorAll(fmt.Errorf("error retrieving mempool transactions"))
+				continue
+			}
+			for _, txHash := range mempoolTxs {
+				tx, err := btc.node.GetRawTransactionVerbose(txHash)
+				if err != nil {
+					errorAll(fmt.Errorf("error encountered retreving mempool transaction %s: %v", txHash, err))
+					continue
+				}
+				findRedeemsInTx(tx)
+			}
 		}
 	}
-	// No viable way to get here.
 }
 
 // Refund revokes a contract. This can only be used after the time lock has
@@ -1451,19 +1588,24 @@ func (btc *ExchangeWallet) run(ctx context.Context) {
 	if err != nil {
 		btc.tipChange(fmt.Errorf("error initializing best block for %s: %v", btc.symbol, err))
 	}
-	tipHash := *h
+	btc.tipMtx.Lock()
+	btc.currentTipHash = h.String()
+	btc.tipMtx.Unlock()
+
 	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			h, err := btc.node.GetBestBlockHash()
+			newTip, err := btc.node.GetBestBlockHash()
 			if err != nil {
 				btc.tipChange(fmt.Errorf("failed to get best block hash from %s node", btc.symbol))
 				continue
 			}
-			if *h != tipHash {
-				tipHash = *h
+			if newTip.String() != btc.currentTipHash {
+				btc.tipMtx.Lock()
+				btc.currentTipHash = newTip.String()
+				btc.tipMtx.Unlock()
 				btc.tipChange(nil)
 			}
 		case <-ctx.Done():
@@ -1725,7 +1867,7 @@ func toSatoshi(v float64) uint64 {
 type blockHeader struct {
 	Hash          string `json:"hash"`
 	Confirmations int64  `json:"confirmations"`
-	Height        int32  `json:"height"`
+	Height        int64  `json:"height"`
 	Time          int64  `json:"time"`
 	MedianTime    int64  `json:"mediantime"`
 }

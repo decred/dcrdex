@@ -4,7 +4,6 @@
 package asset
 
 import (
-	"context"
 	"time"
 
 	"decred.org/dcrdex/dex"
@@ -104,20 +103,22 @@ type Wallet interface {
 	// lock. For example, in Bitcoin the median of the last 11 blocks must be
 	// past the expiry time, not the current time.
 	LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
-	// FindRedemption should attempt to find the input that spends the specified
-	// coin, and return the secret key if it does.
+	// FindRedemption attempts to find the input that spends the specified coins,
+	// and return the secret key when it does.
+	// For typical blockchains, every input of every block starting at the
+	// contract block will need to be scanned until the spending input is found.
+	// The result channel is used to notify callers when the secret key is found
+	// or if an error occurs during the search.
 	//
 	// NOTE: FindRedemption is necessary to deal with the case of a maker
 	// redeeming but not forwarding their redemption information. The DEX does not
 	// monitor for this case. While it will result in the counter-party being
 	// penalized, the input still needs to be found so the swap can be completed.
-	// For typical blockchains, every input of every block starting at the
-	// contract block will need to be scanned until the spending input is found.
 	// This could potentially be an expensive operation if performed long after
 	// the swap is broadcast. Realistically, though, the taker should start
 	// looking for the maker's redemption beginning at swapconf confirmations
 	// regardless of whether the server sends the 'redemption' message or not.
-	FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error)
+	FindRedemption(coinIDs []dex.Bytes, resultChan chan FindRedemptionResult)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded.
 	// NOTE: The contract cannot be retrieved from the unspent coin info as the
@@ -235,6 +236,16 @@ type Redemption struct {
 	Spends AuditInfo
 	// Secret is the secret key needed to satisfy the swap contract.
 	Secret dex.Bytes
+}
+
+// FindRedemptionResult models the result of a FindRedemption attempt, returning
+// either the secret extracted from the redemption (when found) or any unexpected
+// error that occurs during the FindRedemption attempt.
+type FindRedemptionResult struct {
+	ContractCoinID   dex.Bytes
+	RedemptionCoinID dex.Bytes
+	Secret           dex.Bytes
+	Err              error
 }
 
 // Order is order details needed for FundOrder.
