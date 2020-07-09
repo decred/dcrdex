@@ -1,5 +1,3 @@
-// +build harness
-
 package core
 
 // The btc, dcr and dcrdex harnesses should be running before executing this
@@ -181,10 +179,11 @@ func TestTrading(t *testing.T) {
 
 	// run subtests
 	tests := map[string]func(*testing.T){
-		"success":         testTradeSuccess,
-		"no maker swap":   testNoMakerSwap,
-		"no taker swap":   testNoTakerSwap,
-		"no maker redeem": testNoMakerRedeem,
+		"success":                  testTradeSuccess,
+		"no maker swap":            testNoMakerSwap,
+		"no taker swap":            testNoTakerSwap,
+		"no maker redeem":          testNoMakerRedeem,
+		"maker ghost after redeem": testMakerRedeemRunAway,
 	}
 
 	for test, testFn := range tests {
@@ -238,6 +237,77 @@ func testNoMakerRedeem(t *testing.T) {
 	}
 }
 
+func testMakerRedeemRunAway(t *testing.T) {
+	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
+	client1.isSeller, client2.isSeller = true, false
+
+	c1OrderID, c2OrderID, err := placeTestOrders(qty, rate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Monitor trades and stop at order.TakerSwapCast
+	monitorTrades, ctx := errgroup.WithContext(context.Background())
+	monitorTrades.Go(func() error {
+		return monitorOrderMatchingAndTradeNeg(ctx, client1, c1OrderID, order.TakerSwapCast)
+	})
+	monitorTrades.Go(func() error {
+		return monitorOrderMatchingAndTradeNeg(ctx, client2, c2OrderID, order.TakerSwapCast)
+	})
+	if err = monitorTrades.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resume trades but disable Maker's ability to notify the server
+	// after redeming Taker's swap.
+	resumeTrade := func(ctx context.Context, client *tClient, orderID string) error {
+		dc := client.dc()
+		tracker, err := client.findOrder(orderID)
+		if err != nil {
+			return err
+		}
+		finalStatus := order.MatchComplete
+		dc.tradeMtx.Lock()
+		for _, match := range tracker.matches {
+			if match.Match.Side == order.Maker {
+				client.dc().connMaster.Disconnect()
+				finalStatus = order.MakerRedeemed // maker shouldn't get past this state
+			}
+			match.failErr = nil // remove next action blocker on match
+		}
+		dc.tradeMtx.Unlock()
+		// force next action since trade.tick() will not be called for disconnected dcs.
+		tracker.tick()
+		return monitorTrackedTrade(ctx, client, tracker, finalStatus)
+	}
+	resumeTrades, ctx := errgroup.WithContext(context.Background())
+	resumeTrades.Go(func() error {
+		return resumeTrade(ctx, client1, c1OrderID)
+	})
+	resumeTrades.Go(func() error {
+		return resumeTrade(ctx, client2, c2OrderID)
+	})
+	if err = resumeTrades.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Allow some time for balance changes to be properly reported.
+	// There is usually a split-second window where a locked output
+	// has been spent but the spending tx is still in mempool. This
+	// will cause the txout to be included in the wallets locked
+	// balance, causing a higher than actual balance report.
+	time.Sleep(1 * time.Second)
+
+	for _, client := range clients {
+		if err = client.assertBalanceChanges(); err != nil {
+			t.Fatalf("client %d balance check error: %v", client.id, err)
+		}
+	}
+
+	tLog.Infof("Trades completed. Maker went dark at %s, Taker continued till %s.",
+		order.MakerRedeemed, order.MatchComplete)
+}
+
 // simpleTradeTest uses client1 and client2 to place similar orders but on
 // either sides that get matched and monitors the resulting trades up till the
 // specified final status.
@@ -248,32 +318,9 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 		return fmt.Errorf("both client 1 and 2 cannot be sellers")
 	}
 
-	// Unlock wallets to place orders.
-	// Also update starting balances for wallets to enable accurate
-	// balance change assertion after the test completes.
-	for _, client := range clients {
-		if err := client.unlockWallets(); err != nil {
-			return fmt.Errorf("client %d unlock wallet error: %v", client.id, err)
-		}
-		if client.atFault {
-			client.log("reconnecting DEX for at fault client")
-			err := client.connectDEX(context.Background())
-			if err != nil {
-				return fmt.Errorf("client %d re-connect DEX error: %v", client.id, err)
-			}
-		}
-		if err := client.updateBalances(); err != nil {
-			return fmt.Errorf("client %d balance update error: %v", client.id, err)
-		}
-	}
-
-	c1OrderID, err := client1.placeOrder(qty, rate)
+	c1OrderID, c2OrderID, err := placeTestOrders(qty, rate)
 	if err != nil {
-		return fmt.Errorf("client1 place %s order error: %v", sellString(client1.isSeller), err)
-	}
-	c2OrderID, err := client2.placeOrder(qty, rate)
-	if err != nil {
-		return fmt.Errorf("client2 place %s order error: %v", sellString(client2.isSeller), err)
+		return err
 	}
 
 	if finalStatus == order.NewlyMatched {
@@ -287,10 +334,10 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 
 	monitorTrades, ctx := errgroup.WithContext(context.Background())
 	monitorTrades.Go(func() error {
-		return monitorTradeForTestOrder(ctx, client1, c1OrderID, finalStatus)
+		return monitorOrderMatchingAndTradeNeg(ctx, client1, c1OrderID, finalStatus)
 	})
 	monitorTrades.Go(func() error {
-		return monitorTradeForTestOrder(ctx, client2, c2OrderID, finalStatus)
+		return monitorOrderMatchingAndTradeNeg(ctx, client2, c2OrderID, finalStatus)
 	})
 	if err = monitorTrades.Wait(); err != nil {
 		return err
@@ -328,21 +375,52 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 	return nil
 }
 
-func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID string, finalStatus order.MatchStatus) error {
-	errs := newErrorSet("[client %d] ", client.id)
-	dc := client.dc()
-
-	oid, err := order.IDFromHex(orderID)
-	if err != nil {
-		return errs.add("error parsing order id %s -> %v", orderID, err)
+func placeTestOrders(qty, rate uint64) (string, string, error) {
+	// Unlock wallets to place orders.
+	// Also update starting balances for wallets to enable accurate
+	// balance change assertion after the test completes.
+	for _, client := range clients {
+		if err := client.unlockWallets(); err != nil {
+			return "", "", fmt.Errorf("client %d unlock wallet error: %v", client.id, err)
+		}
+		if client.atFault {
+			client.log("reconnecting DEX for at fault client")
+			err := client.connectDEX(context.Background())
+			if err != nil {
+				return "", "", fmt.Errorf("client %d re-connect DEX error: %v", client.id, err)
+			}
+		}
+		if err := client.updateBalances(); err != nil {
+			return "", "", fmt.Errorf("client %d balance update error: %v", client.id, err)
+		}
+		// Reset the expected balance changes for this client, to be updated
+		// later in the monitorTrackedTrade function as swaps and redeems are
+		// executed.
+		client.expectBalanceDiffs = map[uint32]int64{dcr.BipID: 0, btc.BipID: 0}
 	}
 
-	oidShort := token(oid.Bytes())
-	tracker, _, _ := dc.findOrder(oid)
+	c1OrderID, err := client1.placeOrder(qty, rate)
+	if err != nil {
+		return "", "", fmt.Errorf("client1 place %s order error: %v", sellString(client1.isSeller), err)
+	}
+	c2OrderID, err := client2.placeOrder(qty, rate)
+	if err != nil {
+		return "", "", fmt.Errorf("client2 place %s order error: %v", sellString(client2.isSeller), err)
+	}
+	return c1OrderID, c2OrderID, nil
+}
+
+func monitorOrderMatchingAndTradeNeg(ctx context.Context, client *tClient, orderID string, finalStatus order.MatchStatus) error {
+	errs := newErrorSet("[client %d] ", client.id)
+
+	tracker, err := client.findOrder(orderID)
+	if err != nil {
+		return errs.addErr(err)
+	}
 
 	// Wait a max of 2 epochLen durations for this order to get matched.
 	maxMatchDuration := 2 * time.Duration(tracker.epochLen) * time.Millisecond
-	client.log("Waiting %s for matches on order %s", maxMatchDuration, oidShort)
+	client.log("Waiting %s for matches on order %s", maxMatchDuration, tracker.token())
 	matched := client.findNotification(ctx, maxMatchDuration, func(n Notification) bool {
 		orderNote, isOrderNote := n.(*OrderNote)
 		return isOrderNote && n.Subject() == "Matches made" && orderNote.Order.ID == orderID
@@ -351,30 +429,24 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		return nil
 	}
 	if !matched {
-		return errs.add("order %s not matched after %s", oidShort, maxMatchDuration)
+		return errs.add("order %s not matched after %s", tracker.token(), maxMatchDuration)
 	}
 
 	tracker.mtx.RLock()
-	client.log("%d match(es) received for order %s", len(tracker.matches), oidShort)
+	client.log("%d match(es) received for order %s", len(tracker.matches), tracker.token())
 	for _, match := range tracker.matches {
 		client.log("%s on match %s, amount %.8f %s", match.Match.Side.String(),
 			token(match.id.Bytes()), fmtAmt(match.Match.Quantity), unbip(tracker.Base()))
 	}
-
-	// Save last processed status for each match to accurately identify status
-	// changes and prevent re-processing the same status for a match.
-	// Set the initial processed match statuses to order.NewlyMatched to ignore
-	// matches whose status have not progressed beyond the matched stage until
-	// their status changes.
-	lastProcessedStatus := make(map[order.MatchID]order.MatchStatus, len(tracker.matches))
-	for _, match := range tracker.matches {
-		lastProcessedStatus[match.id] = order.NewlyMatched
-	}
 	tracker.mtx.RUnlock()
 
-	// the expected balance changes for this client will be updated
-	// as swaps and redeems are executed
-	client.expectBalanceDiffs = map[uint32]int64{dcr.BipID: 0, btc.BipID: 0}
+	return monitorTrackedTrade(ctx, client, tracker, finalStatus)
+}
+
+func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedTrade, finalStatus order.MatchStatus) error {
+	makerAtFault := finalStatus == order.NewlyMatched || finalStatus == order.TakerSwapCast
+	takerAtFault := finalStatus == order.MakerSwapCast || finalStatus == order.MakerRedeemed
+
 	recordBalanceChanges := func(assetID uint32, isSwap bool, qty, rate uint64) {
 		amt := qty
 		if client.isSeller != isSwap {
@@ -390,8 +462,12 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		}
 	}
 
-	makerAtFault := finalStatus == order.NewlyMatched || finalStatus == order.TakerSwapCast
-	takerAtFault := finalStatus == order.MakerSwapCast || finalStatus == order.MakerRedeemed
+	// Save last processed status for each match to accurately identify status
+	// changes and prevent re-processing the same status for a match.
+	dc := client.dc()
+	dc.tradeMtx.RLock()
+	lastProcessedStatus := make(map[order.MatchID]order.MatchStatus, len(tracker.matches))
+	dc.tradeMtx.RUnlock()
 
 	// run a repeated check for match status changes to mine blocks as necessary.
 	maxTradeDuration := 2 * time.Minute
@@ -411,7 +487,11 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 				}
 				completedTrades++
 			}
-			if status == lastProcessedStatus[match.id] || status > finalStatus {
+			if status > finalStatus {
+				continue
+			}
+			lastStatus, wasProcessed := lastProcessedStatus[match.id]
+			if wasProcessed && status == lastStatus {
 				continue
 			}
 			lastProcessedStatus[match.id] = status
@@ -471,14 +551,14 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	for _, match := range tracker.matches {
 		if match.Match.Status < finalStatus {
 			incompleteTrades++
-			client.log("incomplete trade: order %s, match %s, status %s, side %s", oidShort,
+			client.log("incomplete trade: order %s, match %s, status %s, side %s", tracker.token(),
 				token(match.ID()), match.Match.Status, match.Match.Side)
 		}
 	}
 	tracker.mtx.RUnlock()
 	if incompleteTrades > 0 {
 		return fmt.Errorf("client %d reported %d incomplete trades for order %s after %s",
-			client.id, incompleteTrades, oidShort, maxTradeDuration)
+			client.id, incompleteTrades, tracker.token(), maxTradeDuration)
 	}
 
 	return nil
@@ -496,13 +576,13 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 		return sentSwap && noRedeems
 	}
 
-	oid, err := order.IDFromHex(orderID)
+	tracker, err := client.findOrder(orderID)
 	if err != nil {
-		return fmt.Errorf("client %d: error parsing order id %s -> %v", client.id, orderID, err)
+		return err
 	}
 
-	tracker, _, _ := client.dc().findOrder(oid)
-	tracker.mtx.RLock()
+	dc := client.dc()
+	dc.tradeMtx.RLock()
 	for _, match := range tracker.matches {
 		if !hasRefundableSwap(match) {
 			continue
@@ -524,7 +604,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 			furthestLockTime = swapLockTime
 		}
 	}
-	tracker.mtx.RUnlock()
+	dc.tradeMtx.RUnlock()
 
 	if ctx.Err() != nil { // context canceled
 		return nil
@@ -870,6 +950,15 @@ func (client *tClient) dc() *dexConnection {
 	client.core.connMtx.RLock()
 	defer client.core.connMtx.RUnlock()
 	return client.core.conns[dexHost]
+}
+
+func (client *tClient) findOrder(orderID string) (*trackedTrade, error) {
+	oid, err := order.IDFromHex(orderID)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing order id %s -> %v", orderID, err)
+	}
+	tracker, _, _ := client.dc().findOrder(oid)
+	return tracker, nil
 }
 
 func (client *tClient) dcrw() *tWallet {
