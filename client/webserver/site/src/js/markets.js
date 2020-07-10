@@ -676,10 +676,10 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const remaining = order.qty - order.filled
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining / 1e8)
-    const symbol = isMarketBuy(order) ? this.market.quote.symbol : this.market.base.symbol
+    const symbol = order.sell ? this.market.base.symbol : this.market.quote.symbol
     page.cancelUnit.textContent = symbol.toUpperCase()
     this.showForm(page.cancelForm)
-    bind(page.cancelSubmit, 'click', async () => {
+    page.cancelSubmit.addEventListener('click', async function handler () {
       const pw = page.cancelPass.value
       page.cancelPass.value = ''
       const req = {
@@ -692,7 +692,14 @@ export default class MarketsPage extends BasePage {
       if (!app.checkResponse(res)) return
       bttn.parentNode.textContent = 'cancelling'
       order.cancelling = true
-    })
+
+      // If "once" option is not supported by most browsers, we will need to
+      // unbind this function:
+      // Doc.unbind(page.cancelSubmit,'click', handler)
+
+      // What if the user clicks off the cancel form instead?  The cancelSubmit
+      // would bind another listener.
+    }, { once: true })
   }
 
   /* showCreate shows the new wallet creation form. */
