@@ -701,7 +701,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const remaining = order.qty - order.filled
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining / 1e8)
-    const symbol = order.sell ? this.market.base.symbol : this.market.quote.symbol
+    const symbol = isMarketBuy(order) ? this.market.quote.symbol : this.market.base.symbol
     page.cancelUnit.textContent = symbol.toUpperCase()
     this.showForm(page.cancelForm)
     // Provide data to the event handler via the cancelSubmit object. This
