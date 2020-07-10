@@ -165,14 +165,21 @@ export default class MarketsPage extends BasePage {
     // Main order form
     forms.bind(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form
-    forms.bind(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
+    forms.bind(page.verifyForm, page.vSubmit, async () => { this.submitOrder() }) // why not just ..., this.submitOrder)?
+    // Cancel order form
+    bind(page.cancelSubmit, 'click', this.submitCancel)
 
     // If the user clicks outside of a form, it should close the page overlay.
     bind(page.forms, 'mousedown', e => {
       if (!Doc.mouseInElement(e, this.currentForm)) {
         Doc.hide(page.forms)
-        if (this.currentForm.id === 'verifyForm') {
-          page.vPass.value = ''
+        switch (this.currentForm.id) {
+          case 'verifyForm':
+            page.vPass.value = ''
+            break
+          case 'cancelForm':
+            page.cancelPass.value = ''
+            break
         }
       }
     })
@@ -671,6 +678,24 @@ export default class MarketsPage extends BasePage {
     this.showForm(page.verifyForm)
   }
 
+  async submitCancel () {
+    // this will be the page.cancelSubmit button (evt.currentTarget)
+    console.log(this)
+    const page = this.page
+    const order = this.cancelData.order
+    const req = {
+      orderID: order.id,
+      pw: page.cancelPass.value
+    }
+    page.cancelPass.value = ''
+    var res = await postJSON('/api/cancel', req)
+    app.loaded()
+    Doc.hide(page.forms)
+    if (!app.checkResponse(res)) return
+    this.cancelData.bttn.parentNode.textContent = 'cancelling'
+    order.cancelling = true
+  }
+
   /* showCancel shows a form to confirm submission of a cancel order. */
   showCancel (bttn, order) {
     const page = this.page
@@ -679,27 +704,13 @@ export default class MarketsPage extends BasePage {
     const symbol = order.sell ? this.market.base.symbol : this.market.quote.symbol
     page.cancelUnit.textContent = symbol.toUpperCase()
     this.showForm(page.cancelForm)
-    page.cancelSubmit.addEventListener('click', async function handler () {
-      const pw = page.cancelPass.value
-      page.cancelPass.value = ''
-      const req = {
-        orderID: order.id,
-        pw: pw
-      }
-      var res = await postJSON('/api/cancel', req)
-      app.loaded()
-      Doc.hide(page.forms)
-      if (!app.checkResponse(res)) return
-      bttn.parentNode.textContent = 'cancelling'
-      order.cancelling = true
-
-      // If "once" option is not supported by most browsers, we will need to
-      // unbind this function:
-      // Doc.unbind(page.cancelSubmit,'click', handler)
-
-      // What if the user clicks off the cancel form instead?  The cancelSubmit
-      // would bind another listener.
-    }, { once: true })
+    // Provide data to the event handler via the cancelSubmit object. This
+    // allows duplicate handlers to be automatically removed.
+    page.cancelSubmit.page = page
+    page.cancelSubmit.cancelData = {
+      bttn: bttn,
+      order: order
+    }
   }
 
   /* showCreate shows the new wallet creation form. */
@@ -1092,7 +1103,7 @@ function tmplElement (ancestor, s) {
 }
 
 /*
- * MarketList respresents the list of exchanges and markets on the left side of
+ * MarketList represents the list of exchanges and markets on the left side of
  * markets view. The MarketList provides utilities for adjusting the visibility
  * and sort order of markets.
  */
