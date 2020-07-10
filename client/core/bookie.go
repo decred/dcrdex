@@ -387,8 +387,9 @@ func handleEpochOrderMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error
 
 	err = book.Enqueue(note)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to Enqueue epoch order: %v", err)
 	}
+
 	// Send a mini-order for book updates.
 	book.send(&BookUpdate{
 		Action:   msg.Route,

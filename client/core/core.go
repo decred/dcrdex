@@ -1523,7 +1523,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	mktID := marketName(form.Base, form.Quote)
 	mkt := dc.market(mktID)
 	if mkt == nil {
-		return nil, fmt.Errorf("order placed for unknown market")
+		return nil, fmt.Errorf("order placed for unknown market %q", mktID)
 	}
 
 	// Proceed with the order if there is no trade suspension
@@ -1744,7 +1744,7 @@ func (c *Core) Cancel(pw []byte, tradeID string) error {
 	// Check the user password.
 	_, err := c.encryptionKey(pw)
 	if err != nil {
-		return fmt.Errorf("Trade password error: %v", err)
+		return fmt.Errorf("Cancel password error: %v", err)
 	}
 
 	// Find the order. Make sure it's a limit order.
@@ -1758,6 +1758,16 @@ func (c *Core) Cancel(pw []byte, tradeID string) error {
 	}
 	if tracker.Type() != order.LimitOrderType {
 		return fmt.Errorf("cannot cancel non-limit order %s of type %s", oid, tracker.Type())
+	}
+
+	// Proceed with the order if the market is not suspended.
+	mktID := marketName(tracker.Base(), tracker.Quote())
+	mkt := dc.market(mktID)
+	if mkt == nil {
+		return fmt.Errorf("unknown market %q", mktID)
+	}
+	if mkt.Suspended() {
+		return fmt.Errorf("suspended market")
 	}
 
 	// Construct the order.
