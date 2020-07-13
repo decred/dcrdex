@@ -73,6 +73,11 @@ adminsrvpass=adminpass
 adminsrvaddr=127.0.0.1:16542
 EOF
 
+# Set the postgres user pass if provided. 
+if [ -n "${PG_PASS}" ]; then
+echo pgpass=${PG_PASS} >> ./dcrdex.conf
+fi
+
 # Write rpc.cert and rpc.key.
 cat > "./rpc.cert" <<EOF
 -----BEGIN CERTIFICATE-----
