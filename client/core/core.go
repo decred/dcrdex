@@ -2398,6 +2398,29 @@ func (c *Core) handleReconnect(host string) {
 		log.Errorf("unable to authorize DEX at %s: %v", host, err)
 		return
 	}
+
+	dc.marketMtx.RLock()
+	for mktKey, mkt := range dc.marketMap {
+		dc.booksMtx.Lock()
+		booky, foundMkt := dc.books[mktKey]
+		dc.booksMtx.Unlock()
+		if !foundMkt {
+			continue
+		}
+		feeds := booky.feeds
+		dc.booksMtx.Lock()
+		delete(dc.books, mktKey)
+		dc.booksMtx.Unlock()
+		_, _, err := c.Sync(host, mkt.BaseID, mkt.QuoteID)
+		if err != nil {
+			log.Errorf("error re-subscribing: %v", err)
+			continue
+		}
+		dc.booksMtx.Lock()
+		dc.books[mktKey].feeds = feeds
+		dc.booksMtx.Unlock()
+	}
+	dc.marketMtx.RUnlock()
 }
 
 // handleConnectEvent is called when a WsConn indicates that a connection was
