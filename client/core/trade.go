@@ -582,6 +582,12 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 	// Check all matches and send swap, redeem or refund as necessary.
 	var sent, quoteSent, received, quoteReceived uint64
 	for _, match := range t.matches {
+		if (match.Match.Side == order.Maker && match.MetaData.Status >= order.MakerRedeemed) ||
+			(match.Match.Side == order.Taker && match.MetaData.Status >= order.MatchComplete) {
+
+			continue
+		}
+
 		switch {
 		case t.isSwappable(match):
 			log.Debugf("swappable match %v", match.id)
