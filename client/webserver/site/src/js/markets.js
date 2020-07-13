@@ -165,7 +165,7 @@ export default class MarketsPage extends BasePage {
     // Main order form
     forms.bind(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form
-    forms.bind(page.verifyForm, page.vSubmit, async () => { this.submitOrder() }) // why not just ..., this.submitOrder)?
+    forms.bind(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
     // Cancel order form
     bind(page.cancelSubmit, 'click', this.submitCancel)
 
@@ -680,7 +680,6 @@ export default class MarketsPage extends BasePage {
 
   async submitCancel () {
     // this will be the page.cancelSubmit button (evt.currentTarget)
-    console.log(this)
     const page = this.page
     const order = this.cancelData.order
     const req = {
