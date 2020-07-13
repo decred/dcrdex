@@ -74,7 +74,6 @@ type trackedCancel struct {
 // match negotiation.
 type trackedTrade struct {
 	order.Order
-	// mtx           sync.RWMutex
 	metaData      *db.OrderMetaData
 	dc            *dexConnection
 	db            db.DB
@@ -88,10 +87,9 @@ type trackedTrade struct {
 	change        asset.Coin
 	changeLocked  bool
 	cancel        *trackedCancel
-	// matchMtx      sync.RWMutex
-	matches  map[order.MatchID]*matchTracker
-	notify   func(Notification)
-	epochLen uint64
+	matches       map[order.MatchID]*matchTracker
+	notify        func(Notification)
+	epochLen      uint64
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
@@ -194,18 +192,26 @@ func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage)
 	}
 }
 
+// nomatch sets the appropriate order status and returns funding coins.
 func (t *trackedTrade) nomatch(oid order.OrderID) error {
+	// Check if this is the cancel order.
 	if t.ID() != oid {
-		if t.cancel.ID() != oid {
-			return fmt.Errorf("nomatch order ID %s does not match trade or cancel order", oid)
+		if t.cancel == nil || t.cancel.ID() != oid {
+			return newError(unknownOrderErr, "nomatch order ID %s does not match trade or cancel order", oid)
 		}
-		// TODO: Auto-resubmit missed cancel orders?
+		// This is a cancel order. Status goes to Executed, but the order status
+		// will not be Canceled.
 		log.Warnf("cancel order %s did not match for order %s.", t.cancel.ID(), t.ID())
 		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade.", t.token())
 		corder, _ := t.coreOrder()
 		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, corder))
-		return t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
+		t.metaData.Status = order.OrderStatusExecuted
+		return t.db.UpdateOrderStatus(t.cancel.ID(), t.metaData.Status)
+		// TODO: Auto-resubmit missed cancel orders if they were the same epoch
+		// as the trade?
 	}
+	// This is the trade. Return coins and set status based on whether this is
+	// a standing limit order or not.
 	if t.metaData.Status != order.OrderStatusEpoch {
 		return fmt.Errorf("nomatch sent for non-epoch order %s", oid)
 	}
@@ -214,12 +220,13 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 		log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
 	}
 	if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
+		log.Infof("Standing order %s did not match and is now booked.", t.token())
 		t.metaData.Status = order.OrderStatusBooked
 		corder, _ := t.coreOrder()
 		t.notify(newOrderNote("Order booked", "", db.Data, corder))
 	} else {
-		t.metaData.Status = order.OrderStatusExecuted
 		log.Infof("Non-standing order %s did not match.", t.token())
+		t.metaData.Status = order.OrderStatusExecuted
 		corder, _ := t.coreOrder()
 		t.notify(newOrderNote("No match", "", db.Data, corder))
 	}
@@ -366,8 +373,8 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	// The filled amount includes all of the trackedTrade's matches, so the
 	// filled amount must be set, not just increased.
 	trade.SetFill(filled)
-	// Set the order as executed depending on type and fill.
-	if t.metaData.Status != order.OrderStatusCanceled {
+	// Set the order as executed depending on type and fill. Skip this if the
+	if t.metaData.Status != order.OrderStatusCanceled && t.metaData.Status != order.OrderStatusRevoked {
 		if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF && filled < trade.Quantity {
 			t.metaData.Status = order.OrderStatusBooked
 		} else {
@@ -1204,23 +1211,6 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 		return errs.add("error storing match info in database: %v", err)
 	}
 	return nil
-}
-
-// processEpoch processes the new epoch index. If an existing trade has an epoch
-// index < the new index and has a status of OrderStatusEpoch, the order will
-// be assumed to have matched without error, and the status set to executed or
-// booked, depending on the order type.
-func (t *trackedTrade) processEpoch(epochIdx uint64) bool {
-	tradeEpoch := uint64(t.Time()) / t.epochLen
-	if t.metaData.Status != order.OrderStatusEpoch || epochIdx <= tradeEpoch {
-		return false
-	}
-	t.metaData.Status = order.OrderStatusExecuted
-	if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
-		t.metaData.Status = order.OrderStatusBooked
-	}
-	t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
-	return true
 }
 
 // hasUnswappedMatches will be true if the order has any remaining matches for

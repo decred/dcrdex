@@ -80,10 +80,7 @@ type Wallet interface {
 	// transaction outputs.
 	FundingCoins([]dex.Bytes) (Coins, error)
 	// Swap sends the swaps in a single transaction. The Receipts returned can
-	// be used to refund a failed transaction. The change coin is locked with
-	// the wallet in case it is still required to fund chained swaps for an
-	// order. The caller should unlock the change coin via ReturnCoins if it is
-	// no longer required to fund additional swaps for the parent order.
+	// be used to refund a failed transaction.
 	Swap(*Swaps) ([]Receipt, Coin, error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.

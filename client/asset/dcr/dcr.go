@@ -668,10 +668,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 }
 
 // Swap sends the swaps in a single transaction. The Receipts returned can be
-// used to refund a failed transaction. The change output is locked with the
-// wallet in case it is still required to fund chained swaps for an order. The
-// caller should unlock the change coin via ReturnCoins if it is no longer
-// required to fund additional swaps for the parent order.
+// used to refund a failed transaction.
 func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
 	var totalOut uint64
 	// Start with an empty MsgTx.
@@ -745,8 +742,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 	dcr.fundingMtx.Unlock()
 
-	// Lock the change coin, as it's expected that it will be used in another
-	// swap.
+	// Lock the change coin, if requested.
 	if swaps.LockChange {
 		err = dcr.lockFundingCoins([]*fundingCoin{{
 			op:   change,

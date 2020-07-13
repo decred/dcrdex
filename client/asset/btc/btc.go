@@ -612,10 +612,7 @@ func (btc *ExchangeWallet) Lock() error {
 }
 
 // Swap sends the swaps in a single transaction. The Receipts returned can be
-// used to refund a failed transaction. The change output is locked with the
-// wallet in case it is still required to fund chained swaps for an order. The
-// caller should unlock the change coin via ReturnCoins if it is no longer
-// required to fund additional swaps for the parent order.
+// used to refund a failed transaction.
 func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
 	var contracts [][]byte
 	var totalOut, totalIn uint64
@@ -699,9 +696,12 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		}
 	}
 
-	// Delete the utxos from the cache.
+	// Unlock the utxos and delete them from the cache.
+	err = btc.wallet.LockUnspent(true, spents)
+	if err != nil {
+		btc.log.Errorf("failed to unlock spent outputs: %v", err)
+	}
 	btc.fundingMtx.Lock()
-	btc.wallet.LockUnspent(true, spents)
 	for _, spent := range spents {
 		delete(btc.fundingCoins, outpointID(spent.txHash.String(), spent.vout))
 	}

@@ -245,6 +245,8 @@ type TDB struct {
 	matchesForOIDErr       error
 	activeMatchesForDEX    []*db.MetaMatch
 	activeMatchesForDEXErr error
+	lastStatusID           order.OrderID
+	lastStatus             order.OrderStatus
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -294,6 +296,8 @@ func (tdb *TDB) SetChangeCoin(order.OrderID, order.CoinID) error {
 }
 
 func (tdb *TDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error {
+	tdb.lastStatusID = oid
+	tdb.lastStatus = status
 	return nil
 }
 
@@ -2020,24 +2024,11 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 
 	rig.dc.trades[oid] = tracker
 
+	// Success
 	err = handleRevokeMatchMsg(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("handleRevokeMatchMsg error: %v", err)
 	}
-
-	// // Ensure the order status has been updated to revoked.
-	// tracker, _, _ = rig.dc.findOrder(oid)
-	// if tracker == nil {
-	// 	t.Fatalf("expected to find an order with id %s", oid.String())
-	// }
-	// if tracker.metaData.Status != order.OrderStatusRevoked {
-	// 	t.Errorf("incorrect order status. got %v, expected %v",
-	// 		tracker.metaData.Status, order.OrderStatusRevoked)
-	// }
-
-	// if !match.MetaData.Proof.IsRevoked {
-	// 	t.Fatal("match not revoked")
-	// }
 }
 
 func TestTradeTracking(t *testing.T) {
@@ -2443,7 +2434,6 @@ func TestTradeTracking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handleMatchRoute error (cancel without swaps): %v", err)
 	}
-	// Since there are no unswapped orders, the change coin should be returned.
 	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), fundCoinDcrID) {
 		t.Fatalf("change coin not returned")
 	}
@@ -3169,70 +3159,36 @@ func TestLogout(t *testing.T) {
 func TestSetEpoch(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
-	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
-	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
-	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, rig.core.notify)
-	dc.trades[lo.ID()] = tracker
-	metaData := tracker.metaData
+	dc.books[tDcrBtcMktName] = newBookie(func() {})
+
+	mktEpoch := func() uint64 {
+		dc.epochMtx.RLock()
+		defer dc.epochMtx.RUnlock()
+		return dc.epoch[tDcrBtcMktName]
+	}
 
 	payload := &msgjson.MatchProofNote{
 		MarketID: tDcrBtcMktName,
-		Epoch:    uint64(tracker.Time()) / tracker.epochLen,
+		Epoch:    1,
 	}
-	nextReq := func() *msgjson.Message {
-		payload.Epoch++
-		req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
-		return req
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
+	err := handleMatchProofMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("error advancing epoch: %v", err)
 	}
-
-	ensureStatus := func(tag string, status order.OrderStatus) {
-		t.Helper()
-		err := handleMatchProofMsg(rig.core, rig.dc, nextReq())
-		if err != nil {
-			t.Fatalf("error setting epoch for %s: %v", tag, err)
-		}
-		if metaData.Status != status {
-			t.Fatalf("wrong status for %s. expected %s, got %s", tag, status, metaData.Status)
-		}
-		corder, _ := tracker.coreOrder()
-		if corder.Status != status {
-			t.Fatalf("wrong core order status for %s. expected %s, got %s", tag, status, corder.Status)
-		}
+	if mktEpoch() != 2 {
+		t.Fatalf("expected epoch 1, got %d", mktEpoch())
 	}
 
-	// Immediate limit order
-	ensureStatus("immediate limit order", order.OrderStatusExecuted)
-
-	// Standing limit order
-	metaData.Status = order.OrderStatusEpoch
-	lo.Force = order.StandingTiF
-	ensureStatus("standing limit order", order.OrderStatusBooked)
-
-	// Market order
-	mo := &order.MarketOrder{
-		P: lo.P,
-		T: *lo.T.Copy(),
+	payload.Epoch = 0
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
+	err = handleMatchProofMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("error handling match proof: %v", err)
 	}
-	mo.P.OrderType = order.LimitOrderType
-	dbOrder = &db.MetaOrder{
-		MetaData: &db.OrderMetaData{
-			Status: order.OrderStatusEpoch,
-		},
-		Order: mo,
+	if mktEpoch() != 2 {
+		t.Fatalf("epoch decremented")
 	}
-	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, rig.core.notify)
-	metaData = tracker.metaData
-	dc.trades[mo.ID()] = tracker
-	ensureStatus("market order", order.OrderStatusExecuted)
-
-	// Same epoch shouldn't result in change.
-	payload.Epoch--
-	metaData.Status = order.OrderStatusEpoch
-	ensureStatus("market order unchanged", order.OrderStatusEpoch)
-
 }
 
 func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
@@ -3465,7 +3421,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	}
 	dc.tradeMtx.Unlock()
 
-	// Make sure a trade with a change coin is returned.
+	// Make sure the change coin is returned for a trade with a change coin.
 	delete(dc.trades, freshTracker.ID())
 	swappedTracker := addTracker(nil)
 	changeCoinID := encode.RandomBytes(36)
@@ -3492,7 +3448,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 		id: mid,
 		MetaMatch: db.MetaMatch{
 			MetaData: &db.MatchMetaData{},
-			Match:    &order.UserMatch{},
+			Match:    &order.UserMatch{}, // Default status = NewlyMatched
 		},
 	}
 	swappedTracker.matches[mid] = match
@@ -3525,5 +3481,99 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	_, err = rig.core.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("expected a suspension market error")
+	}
+}
+
+func TestHandleNomatch(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	dc := rig.dc
+	mkt := dc.market(tDcrBtcMktName)
+
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+
+	// Four types of order to check
+
+	// 1. Immediate limit order
+	loImmediate, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	loImmediate.Force = order.ImmediateTiF
+	immediateOID := loImmediate.ID()
+	immediateTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	dc.trades[immediateOID] = immediateTracker
+
+	// 2. Standing limit order
+	loStanding, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	loStanding.Force = order.StandingTiF
+	standingOID := loStanding.ID()
+	standingTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	dc.trades[standingOID] = standingTracker
+
+	// 3. Cancel order.
+	cancelOrder := &order.CancelOrder{
+		P: order.Prefix{
+			ServerTime: time.Now(),
+		},
+	}
+	cancelOID := cancelOrder.ID()
+	standingTracker.cancel = &trackedCancel{
+		CancelOrder: *cancelOrder,
+	}
+
+	// 4. Market order.
+	loWillBeMarket, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	mktOrder := &order.MarketOrder{
+		P: loWillBeMarket.P,
+		T: *loWillBeMarket.Trade().Copy(),
+	}
+	dbOrder.Order = mktOrder
+	marketOID := mktOrder.ID()
+	marketTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	dc.trades[marketOID] = marketTracker
+
+	runNomatch := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
+		payload := &msgjson.Nomatch{OrderID: oid[:]}
+		req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NomatchRoute, payload)
+		err := handleNomatchRoute(tCore, dc, req)
+		if err != nil {
+			t.Fatalf("handleNomatchRoute error: %v", err)
+		}
+		tracker, _, _ := dc.findOrder(oid)
+		if tracker == nil {
+			t.Fatalf("%s: order ID not found", tag)
+		}
+		if tracker.metaData.Status != expStatus {
+			t.Fatalf("%s: wrong status. expected %s, got %s", tag, expStatus, tracker.metaData.Status)
+		}
+		if rig.db.lastStatusID != oid {
+			t.Fatalf("%s: order status not stored", tag)
+		}
+		if rig.db.lastStatus != expStatus {
+			t.Fatalf("%s: wrong order status stored", tag)
+		}
+	}
+
+	runNomatch("standing limit", standingOID, order.OrderStatusBooked)
+	runNomatch("cancel", cancelOID, order.OrderStatusExecuted)
+	runNomatch("immediate", immediateOID, order.OrderStatusExecuted)
+	runNomatch("market", marketOID, order.OrderStatusExecuted)
+
+	// Unknown order should error.
+	oid := ordertest.RandomOrderID()
+	payload := &msgjson.Nomatch{OrderID: oid[:]}
+	req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NomatchRoute, payload)
+	err = handleNomatchRoute(tCore, dc, req)
+	if !errorHasCode(err, unknownOrderErr) {
+		t.Fatalf("wrong error for unknown order ID: %v", err)
 	}
 }

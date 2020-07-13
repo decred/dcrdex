@@ -79,6 +79,7 @@ type dexConnection struct {
 	regConfirms *uint32 // nil regConfirms means no pending registration.
 }
 
+// Add a trade to the trades map under tradeMtx.Lock.
 func (dc *dexConnection) addTrade(tracker *trackedTrade) {
 	dc.tradeMtx.Lock()
 	dc.trades[tracker.ID()] = tracker
@@ -164,15 +165,11 @@ func (dc *dexConnection) refreshMarkets() map[string]*Market {
 	return marketMap
 }
 
-// markets returns a copy of the current market map.
+// markets returns the current market map.
 func (dc *dexConnection) markets() map[string]*Market {
 	dc.marketMtx.RLock()
 	defer dc.marketMtx.RUnlock()
-	m := make(map[string]*Market, len(dc.marketMap))
-	for mktID, mkt := range dc.marketMap {
-		m[mktID] = mkt
-	}
-	return m
+	return dc.marketMap
 }
 
 // getRegConfirms returns the number of confirmations received for the
@@ -418,14 +415,20 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	return matches, acks, err
 }
 
+// processNomatch finds the specified trackedTrade and runs its nomatch method.
 func (dc *dexConnection) processNomatch(oid order.OrderID) error {
 	dc.tradeMtx.Lock()
 	defer dc.tradeMtx.Unlock()
 	tracker, _, _ := dc.findOrder(oid)
 	if tracker == nil {
-		return fmt.Errorf("No order found for 'nomatch' request from %s with order id %s", dc.acct.host, oid)
+		return newError(unknownOrderErr, "No order found for 'nomatch' request from %s with order id %s", dc.acct.host, oid)
 	}
-	return tracker.nomatch(oid)
+	err := tracker.nomatch(oid)
+	if err != nil {
+		return err
+	}
+	dc.refreshMarkets()
+	return nil
 }
 
 // runMatches runs the sorted matches returned from parseMatches.
@@ -502,21 +505,6 @@ func (dc *dexConnection) setEpoch(mktID string, epochIdx uint64) bool {
 	if epochIdx > dc.epoch[mktID] {
 		dc.epoch[mktID] = epochIdx
 		dc.notify(newEpochNotification(dc.acct.host, mktID, epochIdx))
-
-		// TODO LIKE NOW: Move this logic to processNomatch/runMatches.
-		var updateCount int
-		dc.tradeMtx.Lock()
-		defer dc.tradeMtx.Unlock()
-		for _, trade := range dc.trades {
-			if trade.processEpoch(epochIdx) {
-				updateCount++
-			}
-		}
-		if updateCount > 0 {
-			dc.refreshMarkets()
-			return true
-		}
-
 	}
 	return false
 }
@@ -1868,20 +1856,6 @@ func (c *Core) Cancel(pw []byte, tradeID string) error {
 	return fmt.Errorf("Cancel: failed to find order %s", tradeID)
 }
 
-// // findDEXOrder finds the dexConnection and order for the order ID. A boolean is
-// // returned indicating whether this is the cancel order for the trade.
-// func (c *Core) findDEXOrder(oid order.OrderID) (*dexConnection, *trackedTrade, bool) {
-// 	c.connMtx.RLock()
-// 	defer c.connMtx.RUnlock()
-// 	for _, dc := range c.conns {
-// 		tracker, _, isCancel := dc.findOrder(oid) // Not OK
-// 		if tracker != nil {
-// 			return dc, tracker, isCancel
-// 		}
-// 	}
-// 	return nil, nil, false
-// }
-
 // authDEX authenticates the connection for a DEX.
 func (c *Core) authDEX(dc *dexConnection) error {
 	// Prepare and sign the message for the 'connect' route.
@@ -2571,26 +2545,8 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 
 	// Notify the user of the failed match.
 	corder, _ := tracker.coreOrder() // no cancel order
-	tracker.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
+	c.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
 		tracker.token()), db.WarningLevel, corder))
-
-	// Oops. Can't actually set the order revoked. Match revocations are sent to
-	// both parties. We need another way to inform the client that their order
-	// has been revoked.
-
-	// // Also set the order as revoked.
-	// metaOrder := tracker.metaOrder()
-	// metaOrder.MetaData.Status = order.OrderStatusRevoked
-	// err = tracker.db.UpdateOrder(metaOrder)
-	// if err != nil {
-	// 	errs.add("unable to update order: %v", err)
-	// }
-
-	// // Notify the user of the revoked order.
-	// details := fmt.Sprintf("%s order on %s-%s at %s has been revoked (%s)",
-	// 	strings.Title(sellString(tracker.Trade().Sell)), unbip(tracker.Base()),
-	// 	unbip(tracker.Quote()), dc.acct.host, tracker.token())
-	// tracker.notify(newOrderNote("Order revoked", details, db.WarningLevel, corder))
 
 	// Send out a data notification with the revoke information.
 	cancelOrder := &Order{
@@ -2601,22 +2557,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 		Epoch:    corder.Epoch,
 		TargetID: corder.ID, // the important part for the frontend
 	}
-	tracker.notify(newOrderNote("revoke", "", db.Data, cancelOrder))
-
-	// Unlock funding coins if they are not already unlocked. Do this one at a
-	// time if wallet fails if just one cannot be unlocked.
-	for _, coin := range tracker.coins {
-		err = tracker.wallets.fromWallet.ReturnCoins(asset.Coins{coin})
-		if err != nil {
-			log.Warnf("unable to unlock funding coin %v: %v", coin, err)
-		}
-	}
-	if tracker.change != nil {
-		err = tracker.wallets.fromWallet.ReturnCoins(asset.Coins{tracker.change})
-		if err != nil {
-			log.Warnf("unable to unlock change coin %v: %v", tracker.change, err)
-		}
-	}
+	c.notify(newOrderNote("revoke", "", db.Data, cancelOrder))
 
 	// Update market orders, and the balance to account for unlocked coins.
 	dc.refreshMarkets()
@@ -2895,6 +2836,8 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	return dc.runMatches(matches)
 }
 
+// handleNomatchRoute handles the DEX-originating nomatch request, which is sent
+// when an order does not match during the epoch match cycle.
 func handleNomatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	nomatchMsg := new(msgjson.Nomatch)
 	err := msg.Unmarshal(&nomatchMsg)
@@ -2903,11 +2846,7 @@ func handleNomatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	}
 	var oid order.OrderID
 	copy(oid[:], nomatchMsg.OrderID)
-	err = dc.processNomatch(oid)
-	if err != nil {
-		return err
-	}
-	return nil
+	return dc.processNomatch(oid)
 }
 
 // handleAuditRoute handles the DEX-originating audit request, which is sent

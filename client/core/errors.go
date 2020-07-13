@@ -22,6 +22,7 @@ const (
 	emptyHostErr
 	connectionErr
 	acctKeyErr
+	unknownOrderErr
 )
 
 // Error is an error message and an error code.
