@@ -102,9 +102,8 @@ class MessageSocket {
         this.connected = false
         forward('close', null, this.handlers)
         retrys++
-        // 1.2, 1.6, 2.0, 2.4, 3.1, 3.8, 4.8, 6.0, 7.5, 9.3, 11.6, 14.6, 18.2,
-        // 22.7, 28.4, 30, 30 ...
-        const delay = Math.min(Math.pow(1.25, retrys), 30)
+        // 1.2, 1.6, 2.0, 2.4, 3.1, 3.8, 4.8, 6.0, 7.5, 9.3, ...
+        const delay = Math.min(Math.pow(1.25, retrys), 10)
         console.log(`websocket disconnected, trying again in ${delay.toFixed(1)} seconds`)
         setTimeout(() => {
           go()
