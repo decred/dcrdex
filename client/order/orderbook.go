@@ -62,6 +62,9 @@ type OrderBook struct {
 func NewOrderBook() *OrderBook {
 	ob := &OrderBook{
 		noteQueue:  make([]*cachedOrderNote, 0, defaultQueueCapacity),
+		orders:     make(map[order.OrderID]*Order),
+		buys:       NewBookSide(descending),
+		sells:      NewBookSide(ascending),
 		epochQueue: NewEpochQueue(),
 	}
 	return ob
@@ -181,6 +184,8 @@ func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 	ob.seqMtx.Unlock()
 
 	ob.marketID = snapshot.MarketID
+
+	// Clear all orders, if any.
 	ob.orders = make(map[order.OrderID]*Order)
 	ob.buys = NewBookSide(descending)
 	ob.sells = NewBookSide(ascending)
