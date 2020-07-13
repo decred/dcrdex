@@ -108,8 +108,8 @@ func TestAccounts(t *testing.T) {
 		t.Fatal("closed account still marked as open")
 	}
 
-	// Open the account.
-	if err = archie.OpenAccount(tAcctID); err != nil {
+	// Restore the account.
+	if err = archie.RestoreAccount(tAcctID); err != nil {
 		t.Fatalf("error opening account: %v", err)
 	}
 	_, _, open = archie.Account(tAcctID)

@@ -186,18 +186,16 @@ func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, acctInfo)
 }
 
-// decodeAccountID checks a string as being both hex and the right length and
+// decodeAcctID checks a string as being both hex and the right length and
 // returns its bytes encoded as an account.AccountID.
 func decodeAcctID(acctIDStr string) (account.AccountID, error) {
 	var acctID account.AccountID
-	acctIDSlice, err := hex.DecodeString(acctIDStr)
-	if err != nil {
-		return acctID, fmt.Errorf("could not decode accout id: %v", err)
-	}
-	if len(acctIDSlice) != account.HashSize {
+	if len(acctIDStr) != account.HashSize*2 {
 		return acctID, errors.New("account id has incorrect length")
 	}
-	copy(acctID[:], acctIDSlice)
+	if _, err := hex.Decode(acctID[:], []byte(acctIDStr)); err != nil {
+		return acctID, fmt.Errorf("could not decode accout id: %v", err)
+	}
 	return acctID, nil
 }
 

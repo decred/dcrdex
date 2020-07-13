@@ -58,7 +58,7 @@ func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) error {
 	s.closedID = id
 	return nil
 }
-func (s *TStorage) OpenAccount(_ account.AccountID) error {
+func (s *TStorage) RestoreAccount(_ account.AccountID) error {
 	return nil
 }
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
