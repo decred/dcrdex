@@ -332,9 +332,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	}
 
 	oidShort := token(oid.Bytes())
-	dc.tradeMtx.RLock()
 	tracker, _, _ := dc.findOrder(oid)
-	dc.tradeMtx.RUnlock()
 
 	// Wait a max of 2 epochLen durations for this order to get matched.
 	maxMatchDuration := 2 * time.Duration(tracker.epochLen) * time.Millisecond
@@ -492,8 +490,8 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 		return fmt.Errorf("client %d: error parsing order id %s -> %v", client.id, orderID, err)
 	}
 
-	dc.tradeMtx.RLock()
 	tracker, _, _ := client.dc().findOrder(oid)
+	tracker.mtx.RLock()
 	for _, match := range tracker.matches {
 		if !hasRefundableSwap(match) {
 			continue
@@ -515,7 +513,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 			furthestLockTime = swapLockTime
 		}
 	}
-	dc.tradeMtx.RUnlock()
+	tracker.mtx.RUnlock()
 
 	if ctx.Err() != nil { // context canceled
 		return nil

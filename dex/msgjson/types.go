@@ -408,7 +408,7 @@ func (m *Match) Serialize() []byte {
 	return append(s, uint64Bytes(m.FeeRateQuote)...)
 }
 
-// Nomatch is the payload for a server-originating NomatchRoute request.
+// Nomatch is the payload for a server-originating NomatchRoute notification.
 type Nomatch struct {
 	OrderID Bytes `json:"orderid"`
 }
