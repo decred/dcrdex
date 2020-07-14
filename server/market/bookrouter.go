@@ -344,6 +344,7 @@ out:
 					epochNote.BookOrderNote = *marketOrderToMsgOrder(o, book.name)
 					epochNote.OrderType = msgjson.MarketOrderNum
 				case *order.CancelOrder:
+					epochNote.BookOrderNote = *cancelOrderToMsgOrder(o, book.name)
 					epochNote.OrderType = msgjson.CancelOrderNum
 					epochNote.TargetID = o.TargetOrderID[:]
 				}
@@ -533,6 +534,23 @@ func (r *BookRouter) sendNote(route string, subs *subscribers, note interface{})
 			delete(subs.conns, id)
 		}
 		subs.mtx.Unlock()
+	}
+}
+
+// cancelOrderToMsgOrder converts an *order.CancelOrder to a
+// *msgjson.BookOrderNote.
+func cancelOrderToMsgOrder(o *order.CancelOrder, mkt string) *msgjson.BookOrderNote {
+	oid := o.ID()
+	return &msgjson.BookOrderNote{
+		OrderNote: msgjson.OrderNote{
+			// Seq is set by book router.
+			MarketID: mkt,
+			OrderID:  oid[:],
+		},
+		TradeNote: msgjson.TradeNote{
+			// Side is 0 (neither buy or sell), so omitted.
+			Time: encode.UnixMilliU(o.ServerTime),
+		},
 	}
 }
 

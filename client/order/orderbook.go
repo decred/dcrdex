@@ -456,9 +456,25 @@ func (ob *OrderBook) IsEpochEntry(oid order.OrderID) bool {
 // ValidateMatchProof ensures the match proof data provided is correct by
 // comparing it to a locally generated proof from the same epoch queue.
 func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
+	localSize := ob.epochQueue.Size()
+	noteSize := len(note.Preimages) + len(note.Misses)
+	if noteSize > 0 {
+		log.Debugf("Validating match proof note with %d preimages and %d misses.",
+			len(note.Preimages), len(note.Misses))
+	}
+	if noteSize != localSize {
+		return fmt.Errorf("match proof note references %d orders, but local epoch queue has %d",
+			noteSize, localSize)
+	}
+
 	if len(note.Preimages) == 0 {
+		if noteSize > 0 {
+			log.Debugf("Match proof note contains only misses (%d) for %v epoch %v",
+				noteSize, note.MarketID, note.Epoch)
+		}
 		return nil
 	}
+
 	pimgs := make([]order.Preimage, 0, len(note.Preimages))
 	for _, entry := range note.Preimages {
 		var pimg order.Preimage
@@ -481,14 +497,12 @@ func (ob *OrderBook) ValidateMatchProof(note msgjson.MatchProofNote) error {
 
 	if !bytes.Equal(seed, note.Seed) {
 		return fmt.Errorf("match proof seed mismatch for epoch %d: "+
-			"expected %s, got %s", note.Epoch, note.Seed.String(),
-			seed.String())
+			"expected %s, got %s", note.Epoch, note.Seed, seed)
 	}
 
 	if !bytes.Equal(csum, note.CSum) {
 		return fmt.Errorf("match proof csum mismatch for epoch %d: "+
-			"expected %s, got %s", note.Epoch, note.CSum.String(),
-			csum.String())
+			"expected %s, got %s", note.Epoch, note.CSum, csum)
 	}
 
 	return nil
