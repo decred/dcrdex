@@ -428,14 +428,20 @@ func handleLogout(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 
 // truncateOrderBook truncates book to the top nOrders of buys and sells.
 func truncateOrderBook(book *core.OrderBook, nOrders uint64) {
-	truncFn := func(orders *[]*core.MiniOrder) {
-		if uint64(len(*orders)) < nOrders {
-			return
+	truncFn := func(orders []*core.MiniOrder) []*core.MiniOrder {
+		if uint64(len(orders)) > nOrders {
+			// Nullify pointers stored in the unused part of the
+			// underlying array to allow for GC.
+			for i := nOrders; i < uint64(len(orders)); i++ {
+				orders[i] = nil
+			}
+			orders = orders[:nOrders]
+
 		}
-		*orders = (*orders)[:nOrders]
+		return orders
 	}
-	truncFn(&book.Buys)
-	truncFn(&book.Sells)
+	book.Buys = truncFn(book.Buys)
+	book.Sells = truncFn(book.Sells)
 }
 
 // handleOrderBook handles requests for orderbook.
@@ -797,7 +803,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     string: "[coin ID]"`,
 	},
 	logoutRoute: {
-		cmdSummary: `Logout the DEX cleint.`,
+		cmdSummary: `Logout the DEX client.`,
 		returns: `Returns:
     string: The message "` + logoutStr + `"`,
 	},
@@ -808,8 +814,8 @@ Registration is complete after the fee transaction has been confirmed.`,
     host (string): The DEX to retrieve the order book from.
     base (int): The BIP-44 coin index for the market's base asset.
     quote (int): The BIP-44 coin index for the market's quote asset.
-    nOrders (int): Optional. Default is 0. The number of orders from the top of
-      buys and sells to return. 0 returns all orders. Epoch orders are not
+    nOrders (int): Optional. Default is 0, which returns all orders. The number
+      of orders from the top of buys and sells to return. Epoch orders are not
       truncated.`,
 		returns: `Returns:
     obj: A map of orders.
@@ -832,15 +838,14 @@ Registration is complete after the fee transaction has been confirmed.`,
           "token" (string): The first 8 bytes of the order id, coded in hex.
         },...
       ],
-      "epoch" (array): An array of epoch orders. Epoch orders include new limit
-        orders that have not been booked yet. They also contain orders that are
-	never booked: cancellations, market orders, and limit orders with
-	immediate=true. They are not truncated.
+      "epoch" (array): An array of epoch orders. Epoch orders include all kinds
+        of orders, even those that cannot or may not be booked. They are not
+        truncated.
       [
         {
-          "qty" (float): The number of coins base asset being bought.
+          "qty" (float): The number of coins base asset being bought or sold.
           "rate" (float): The coins quote asset to accept per coin base asset.
-          "sell" (bool): Always false because this is a buy order.
+          "sell" (bool): Whether this order is a sell order.
           "token" (string): The first 8 bytes of the order id, coded in hex.
         },...
       ],
