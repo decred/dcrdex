@@ -122,7 +122,7 @@ respond with its current configuration.
 |-
 | ratestep   || int || the price rate increment (atoms)
 |-
-| maxfeerate || int || the max on-chain transaction fee rate that can be assigned to matches (atoms/byte)
+| maxfeerate || int || the max on-chain transaction fee rate [[orders.mediawiki/#Match_Negotiation|that can be assigned to matches]] (atoms/byte)
 |-
 | swapsize   || int || the size of the initialization transaction (bytes)
 |-

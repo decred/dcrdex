@@ -198,10 +198,10 @@ of their penalization.
 
 ==Acknowledgements==
 
-Often, the server only requires a simple signed acknowledgement for a request.
-The specification will provide instructions for serialization of the request
-data. The client will then sign the serialized data with their private key, and
-send an acknowledgement of the following form.
+Often, message only requires a simple signed acknowledgement. The specification
+will provide instructions for serialization of the message data. The recipient
+will then sign the serialized data with their private key, and send an
+acknowledgement of the following form.
 
 {|
 ! field !! type   !! description
