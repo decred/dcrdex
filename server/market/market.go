@@ -1570,7 +1570,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		notifyChan <- sig
 	}
 
-	// Send "nomatch" notifications to order book subscribers.
+	// Send "nomatch" notifications.
 	for _, ord := range nomatched {
 		oid := ord.Order.ID()
 		msg, err := msgjson.NewNotification(msgjson.NomatchRoute, &msgjson.Nomatch{

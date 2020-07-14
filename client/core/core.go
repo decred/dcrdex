@@ -78,13 +78,6 @@ type dexConnection struct {
 	regConfirms *uint32 // nil regConfirms means no pending registration.
 }
 
-// Add a trade to the trades map under tradeMtx.Lock.
-func (dc *dexConnection) addTrade(tracker *trackedTrade) {
-	dc.tradeMtx.Lock()
-	dc.trades[tracker.ID()] = tracker
-	dc.tradeMtx.Unlock()
-}
-
 // suspended returns the suspended status of the provided market.
 func (dc *dexConnection) suspended(mkt string) bool {
 	dc.marketMtx.Lock()
@@ -1593,42 +1586,58 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 		return nil, fmt.Errorf("unknown DEX %s", form.Host)
 	}
 
+	corder, fromID, err := c.prepareTrackedTrade(dc, form, crypter)
+
+	if err != nil {
+		return nil, err
+	}
+
+	c.updateAssetBalance(fromID)
+
+	// Refresh the markets.
+	dc.refreshMarkets()
+
+	return corder, nil
+}
+
+// Send an order, process result, prepare and store the trackedTrade.
+func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter encrypt.Crypter) (*Order, uint32, error) {
 	mktID := marketName(form.Base, form.Quote)
 	mkt := dc.market(mktID)
 	if mkt == nil {
-		return nil, fmt.Errorf("order placed for unknown market %q", mktID)
+		return nil, 0, fmt.Errorf("order placed for unknown market %q", mktID)
 	}
 
 	// Proceed with the order if there is no trade suspension
 	// scheduled for the market.
 	if mkt.Suspended() {
-		return nil, fmt.Errorf("suspended market")
+		return nil, 0, fmt.Errorf("suspended market")
 	}
 
 	rate, qty := form.Rate, form.Qty
 	if form.IsLimit && rate == 0 {
-		return nil, fmt.Errorf("zero-rate order not allowed")
+		return nil, 0, fmt.Errorf("zero-rate order not allowed")
 	}
 
 	wallets, err := c.walletSet(dc, form.Base, form.Quote, form.Sell)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 	err = c.connectAndUnlock(crypter, fromWallet)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	err = c.connectAndUnlock(crypter, toWallet)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Get an address for the swap contract.
 	addr, err := toWallet.Address()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Fund the order and prepare the coins.
@@ -1638,15 +1647,11 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 	coins, err := fromWallet.FundOrder(fundQty, wallets.fromAsset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {
 		coinIDs = append(coinIDs, []byte(coins[i].ID()))
-	}
-	msgCoins, err := messageCoins(fromWallet, coins)
-	if err != nil {
-		return nil, err
 	}
 
 	// Construct the order.
@@ -1690,8 +1695,18 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 	err = order.ValidateOrder(ord, order.OrderStatusEpoch, wallets.baseAsset.LotSize)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+
+	msgCoins, err := messageCoins(wallets.fromWallet, coins)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Must be locked here and held until at least the trade is added to the
+	// dc.trades map.
+	dc.tradeMtx.Lock()
+	defer dc.tradeMtx.Unlock()
 
 	// Everything is ready. Send the order.
 	route, msgOrder := messageOrder(ord, msgCoins)
@@ -1700,7 +1715,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	var result = new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	// If we encounter an error, perform some basic logging.
@@ -1716,7 +1731,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	if err != nil {
 		log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
 			preImg[:], result.ServerTime, err)
-		return nil, err
+		return nil, 0, err
 	}
 
 	// Store the order.
@@ -1734,20 +1749,17 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	err = c.db.UpdateOrder(dbOrder)
 	if err != nil {
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
-		return nil, fmt.Errorf("Database error. order abandoned")
+		return nil, 0, fmt.Errorf("Database error. order abandoned")
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker, c.lockTimeMaker,
 		c.db, c.latencyQ, wallets, coins, c.notify)
-	corder, _ := tracker.coreOrder()
 
-	dc.addTrade(tracker)
-
-	// Refresh the markets.
-	dc.refreshMarkets()
+	dc.trades[tracker.ID()] = tracker
 
 	// Send a low-priority notification.
+	corder, _ := tracker.coreOrder()
 	details := fmt.Sprintf("%sing %.8f %s (%s)",
 		sellString(corder.Sell), float64(corder.Qty)/conversionFactor, unbip(form.Base), tracker.token())
 	if !form.IsLimit && !form.Sell {
@@ -1756,9 +1768,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 	c.notify(newOrderNote("Order placed", details, db.Poke, corder))
 
-	c.updateAssetBalance(wallets.fromWallet.AssetID)
-
-	return corder, nil
+	return corder, wallets.fromWallet.AssetID, nil
 }
 
 // walletSet is a pair of wallets with asset configurations identified in useful
