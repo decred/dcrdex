@@ -696,11 +696,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		}
 	}
 
-	// Unlock the utxos and delete them from the cache.
-	err = btc.wallet.LockUnspent(true, spents)
-	if err != nil {
-		btc.log.Errorf("failed to unlock spent outputs: %v", err)
-	}
+	// Delete the UTXOs from the cache.
 	btc.fundingMtx.Lock()
 	for _, spent := range spents {
 		delete(btc.fundingCoins, outpointID(spent.txHash.String(), spent.vout))

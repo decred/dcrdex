@@ -1596,6 +1596,7 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 
 	// Refresh the markets.
 	dc.refreshMarkets()
+	c.refreshUser()
 
 	return corder, nil
 }
@@ -2636,6 +2637,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
 	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
 	msgjson.NotifyRoute:          handleNotifyMsg,
+	msgjson.NomatchRoute:         handleNomatchRoute,
 }
 
 // listen monitors the DEX websocket connection for server requests and
