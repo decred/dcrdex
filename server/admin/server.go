@@ -50,6 +50,7 @@ type SvrCore interface {
 	MarketStatuses() map[string]*market.Status
 	SuspendMarket(name string, tSusp time.Time, persistBooks bool) *market.SuspendEpoch
 	Penalize(aid account.AccountID, rule account.Rule) error
+	Unban(aid account.AccountID) error
 }
 
 // Server is a multi-client https server.
@@ -129,6 +130,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 		r.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiAccountInfo)
 			rm.Get("/ban", s.apiBan)
+			rm.Get("/unban", s.apiUnban)
 		})
 		r.Get("/markets", s.apiMarkets)
 		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {

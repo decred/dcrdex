@@ -201,6 +201,7 @@ func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule) error {
 
 func (m *TAuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {}
 func (m *TAuthManager) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time)            {}
+func (m *TAuthManager) Unban(account.AccountID) error                                               { return nil }
 
 func (m *TAuthManager) flushPenalty(user account.AccountID) (found bool, rule account.Rule) {
 	m.mtx.Lock()

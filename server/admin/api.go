@@ -6,6 +6,7 @@ package admin
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -185,16 +186,25 @@ func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, acctInfo)
 }
 
+// decodeAcctID checks a string as being both hex and the right length and
+// returns its bytes encoded as an account.AccountID.
+func decodeAcctID(acctIDStr string) (account.AccountID, error) {
+	var acctID account.AccountID
+	if len(acctIDStr) != account.HashSize*2 {
+		return acctID, errors.New("account id has incorrect length")
+	}
+	if _, err := hex.Decode(acctID[:], []byte(acctIDStr)); err != nil {
+		return acctID, fmt.Errorf("could not decode accout id: %v", err)
+	}
+	return acctID, nil
+}
+
 // apiBan is the handler for the '/account/{accountID}/ban?rule=RULE' API request.
 func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
 	acctIDStr := chi.URLParam(r, accountIDKey)
-	acctIDSlice, err := hex.DecodeString(acctIDStr)
+	acctID, err := decodeAcctID(acctIDStr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("could not decode accout id: %v", err), http.StatusBadRequest)
-		return
-	}
-	if len(acctIDSlice) != account.HashSize {
-		http.Error(w, "account id has incorrect length", http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	ruleStr := r.URL.Query().Get(ruleToken)
@@ -211,8 +221,6 @@ func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad rule: not known or not punishable", http.StatusBadRequest)
 		return
 	}
-	var acctID account.AccountID
-	copy(acctID[:], acctIDSlice)
 	if err := s.core.Penalize(acctID, account.Rule(ruleInt)); err != nil {
 		http.Error(w, fmt.Sprintf("failed to ban account: %v", err), http.StatusInternalServerError)
 		return
@@ -221,6 +229,25 @@ func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
 		AccountID:  acctIDStr,
 		BrokenRule: byte(ruleInt),
 		BanTime:    APITime{time.Now()},
+	}
+	writeJSON(w, res)
+}
+
+// apiUnBan is the handler for the '/account/{accountID}/unban' API request.
+func (s *Server) apiUnban(w http.ResponseWriter, r *http.Request) {
+	acctIDStr := chi.URLParam(r, accountIDKey)
+	acctID, err := decodeAcctID(acctIDStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.core.Unban(acctID); err != nil {
+		http.Error(w, fmt.Sprintf("failed to unban account: %v", err), http.StatusInternalServerError)
+		return
+	}
+	res := UnbanResult{
+		AccountID: acctIDStr,
+		UnbanTime: APITime{time.Now()},
 	}
 	writeJSON(w, res)
 }

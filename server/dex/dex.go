@@ -117,6 +117,7 @@ type DEX struct {
 	markets     map[string]*market.Market
 	assets      map[uint32]*swap.LockableAsset
 	storage     db.DEXArchivist
+	authMgr     *auth.AuthManager
 	swapper     *swap.Swapper
 	orderRouter *market.OrderRouter
 	bookRouter  *market.BookRouter
@@ -492,6 +493,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		markets:     markets,
 		assets:      lockableAssets,
 		swapper:     swapper,
+		authMgr:     authMgr,
 		storage:     storage,
 		orderRouter: orderRouter,
 		bookRouter:  bookRouter,
@@ -589,5 +591,10 @@ func (dm *DEX) AccountInfo(aid account.AccountID) (*db.Account, error) {
 // Penalize bans an account by canceling the client's orders and setting their rule
 // status to rule.
 func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule) error {
-	return dm.swapper.Penalize(aid, rule)
+	return dm.authMgr.Penalize(aid, rule)
+}
+
+// Unban reverses a ban and allows a client to resume trading.
+func (dm *DEX) Unban(aid account.AccountID) error {
+	return dm.authMgr.Unban(aid)
 }

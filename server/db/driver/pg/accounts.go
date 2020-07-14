@@ -16,16 +16,28 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v2"
 )
 
-// CloseAccount closes the account by setting the value of the rule column.
+// CloseAccount closes the account by setting the value of the rule column to
+// the passed rule.
 func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) error {
-	err := closeAccount(a.db, a.tables.accounts, aid, rule)
+	return a.setAccountRule(aid, rule)
+}
+
+// RestoreAccount reopens the account by setting the value of the rule column
+// to account.NoRule.
+func (a *Archiver) RestoreAccount(aid account.AccountID) error {
+	return a.setAccountRule(aid, account.NoRule)
+}
+
+// setAccountRule closes or restores the account by setting the value of the
+// rule column.
+func (a *Archiver) setAccountRule(aid account.AccountID, rule account.Rule) error {
+	err := setRule(a.db, a.tables.accounts, aid, rule)
 	if err != nil {
-		// fatal unless 0 matching rows found because that means at least the
-		// targeted account is not still open.
+		// fatal unless 0 matching rows found.
 		if !errors.Is(err, errNoRows) {
 			a.fatalBackendErr(err)
 		}
-		return fmt.Errorf("error closing account %s (rule %d): %v", aid, rule, err)
+		return fmt.Errorf("error setting account rule %s: %v", aid, err)
 	}
 	return nil
 }
@@ -178,8 +190,8 @@ func createAccountTables(db *sql.DB) error {
 	return nil
 }
 
-// closeAccount closes the account by setting the rule column value.
-func closeAccount(dbe sqlExecutor, tableName string, aid account.AccountID, rule account.Rule) error {
+// setRule sets the rule column value.
+func setRule(dbe sqlExecutor, tableName string, aid account.AccountID, rule account.Rule) error {
 	stmt := fmt.Sprintf(internal.CloseAccount, tableName)
 	N, err := sqlExec(dbe, stmt, rule, aid)
 	if err != nil {

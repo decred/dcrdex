@@ -174,6 +174,9 @@ type AccountArchiver interface {
 	// CloseAccount closes an account for violating a rule of community conduct.
 	CloseAccount(account.AccountID, account.Rule) error
 
+	// RestoreAccount opens an account that was previously closed by CloseAccount.
+	RestoreAccount(account.AccountID) error
+
 	// Account retrieves the account information for the specified account ID.
 	// The registration fee payment status is returned as well. A nil pointer
 	// will be returned for unknown or closed accounts.
