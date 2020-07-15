@@ -4,8 +4,8 @@
 set -e
 
 # Rebuild dcrdex with the required simnet locktime settings.
-HARNESS_DIR=$(dirname $0)
-(cd $HARNESS_DIR && cd ../../../server/cmd/dcrdex && go install -ldflags \
+HARNESS_DIR=$(dirname "$0")
+(cd "$HARNESS_DIR" && cd ../../../server/cmd/dcrdex && go install -ldflags \
 "-X 'decred.org/dcrdex/dex.testLockTimeTaker=30s' \
 -X 'decred.org/dcrdex/dex.testLockTimeMaker=1m'")
 
@@ -73,6 +73,11 @@ adminsrvpass=adminpass
 adminsrvaddr=127.0.0.1:16542
 EOF
 
+# Set the postgres user pass if provided. 
+if [ -n "${PG_PASS}" ]; then
+echo pgpass="${PG_PASS}" >> ./dcrdex.conf
+fi
+
 # Write rpc.cert and rpc.key.
 cat > "./rpc.cert" <<EOF
 -----BEGIN CERTIFICATE-----
@@ -124,5 +129,5 @@ chmod +x "${DCRDEX_DATA_DIR}/quit"
 echo "Starting dcrdex"
 tmux new-session -d -s $SESSION
 tmux rename-window -t $SESSION:0 'dcrdex'
-tmux send-keys -t $SESSION:0 "dcrdex --appdata=$(pwd) $@; tmux wait-for -S donedex" C-m
+tmux send-keys -t $SESSION:0 "dcrdex --appdata=$(pwd) $*; tmux wait-for -S donedex" C-m
 tmux attach-session -t $SESSION
