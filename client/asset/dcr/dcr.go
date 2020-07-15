@@ -472,7 +472,7 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 		ab := &balances.Balances[i]
 		if ab.AccountName == dcr.acct {
 			acctFound = true
-			balance.Available = toAtoms(ab.Spendable)
+			balance.Available = toAtoms(ab.Spendable) - locked
 			balance.Immature = toAtoms(ab.ImmatureCoinbaseRewards) +
 				toAtoms(ab.ImmatureStakeGeneration)
 			balance.Locked = locked + toAtoms(ab.LockedByTickets)

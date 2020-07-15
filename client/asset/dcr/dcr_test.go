@@ -352,8 +352,9 @@ func TestAvailableFund(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error for 1 utxo: %v", err)
 	}
-	if bal.Available != littleFunds {
-		t.Fatalf("expected available = %d for confirmed utxos, got %d", littleFunds, bal.Available)
+	// 1*tLotSize is locked, available balance should be total balance - locked
+	if bal.Available != littleFunds-tLotSize {
+		t.Fatalf("expected available = %d for confirmed utxos, got %d", littleFunds-tLotSize, bal.Available)
 	}
 	if bal.Immature != 0 {
 		t.Fatalf("expected immature = %d, got %d", 0, bal.Immature)
@@ -380,8 +381,9 @@ func TestAvailableFund(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error for 2 utxos: %v", err)
 	}
-	if bal.Available != littleFunds+lottaFunds {
-		t.Fatalf("expected available = %d for 2 outputs, got %d", littleFunds+lottaFunds, bal.Available)
+	// locked balance is still 1*tLotSize
+	if bal.Available != littleFunds+lottaFunds-tLotSize {
+		t.Fatalf("expected available = %d for 2 outputs, got %d", littleFunds+lottaFunds-tLotSize, bal.Available)
 	}
 	if bal.Immature != 0 {
 		t.Fatalf("expected unconf = 0 for 2 outputs, got %d", bal.Immature)
