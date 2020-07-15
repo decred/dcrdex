@@ -817,6 +817,7 @@ func TestHandleLogout(t *testing.T) {
 
 func TestHandleOrderBook(t *testing.T) {
 	params := &RawParams{Args: []string{"dex", "42", "0"}}
+	paramsNOrders := &RawParams{Args: []string{"dex", "42", "0", "1"}}
 	tests := []struct {
 		name        string
 		params      *RawParams
@@ -824,8 +825,13 @@ func TestHandleOrderBook(t *testing.T) {
 		bookErr     error
 		wantErrCode int
 	}{{
-		name:        "ok",
+		name:        "ok no nOrders",
 		params:      params,
+		book:        new(core.OrderBook),
+		wantErrCode: -1,
+	}, {
+		name:        "ok with nOrders",
+		params:      paramsNOrders,
 		book:        new(core.OrderBook),
 		wantErrCode: -1,
 	}, {
@@ -871,6 +877,11 @@ func TestTruncateOrderBook(t *testing.T) {
 		},
 	}
 	truncateOrderBook(book, 4)
+	// no change
+	if len(book.Buys) != 3 && len(book.Sells) != 2 {
+		t.Fatal("no change was expected")
+	}
+	truncateOrderBook(book, 3)
 	// no change
 	if len(book.Buys) != 3 && len(book.Sells) != 2 {
 		t.Fatal("no change was expected")
