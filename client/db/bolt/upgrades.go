@@ -15,7 +15,7 @@ type upgradefunc func(tx *bbolt.Tx) error
 // Each database upgrade function should be keyed by the database
 // version it upgrades.
 var upgrades = [...]upgradefunc{
-	v1Upgrade, // v0 => v1 adds a version key.
+	//v1Upgrade, // v0 => v1 adds a version key.
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
