@@ -13,32 +13,11 @@ export class NewWalletForm {
     this.currentAsset = null
     const fields = this.fields = Doc.parsePage(form, [
       'nwAssetLogo', 'nwAssetName', 'newWalletPass', 'nwAppPass',
-      'walletSettings', 'walletSettingsInputs', 'selectCfgFile',
-      'cfgFile', 'submitAdd', 'newWalletErr'
+      'walletSettings', 'selectCfgFile', 'cfgFile', 'submitAdd', 'newWalletErr'
     ])
 
     // WalletConfigForm will set the global app variable.
-    this.subform = new WalletConfigForm(application, fields.walletSettingsInputs)
-
-    Doc.bind(fields.selectCfgFile, 'click', () => fields.cfgFile.click())
-
-    // config file upload
-    Doc.bind(fields.cfgFile, 'change', async () => {
-      if (!fields.cfgFile.value) return
-      app.loading(form)
-      const config = await fields.cfgFile.files[0].text()
-      if (!config) return
-      const res = await postJSON('/api/parseconfig', {
-        configtext: config
-      })
-      app.loaded()
-      if (!app.checkResponse(res)) {
-        fields.newWalletErr.textContent = res.msg
-        Doc.show(fields.newWalletErr)
-        return
-      }
-      this.subform.setConfig(res.map)
-    })
+    this.subform = new WalletConfigForm(application, fields.walletSettings)
 
     bind(form, fields.submitAdd, async () => {
       if (fields.newWalletPass.value === '') {
@@ -95,17 +74,38 @@ export class WalletConfigForm {
     this.form = form
 
     // Get template elements
-
-    console.log(form)
-
+    this.dynamicOpts = Doc.tmplElement(form, 'dynamicOpts')
     this.textInputTmpl = Doc.tmplElement(form, 'textInput')
     this.textInputTmpl.remove()
     this.checkboxTmpl = Doc.tmplElement(form, 'checkbox')
     this.checkboxTmpl.remove()
+    this.fileSelector = Doc.tmplElement(form, 'fileSelector')
+    this.fileInput = Doc.tmplElement(form, 'fileInput')
+    this.errMsg = Doc.tmplElement(form, 'errMsg')
+
+    Doc.bind(this.fileSelector, 'click', () => this.fileInput.click())
+
+    // config file upload
+    Doc.bind(this.fileInput, 'change', async () => {
+      if (!this.fileInput.value) return
+      app.loading(form)
+      const config = await this.fileInput.files[0].text()
+      if (!config) return
+      const res = await postJSON('/api/parseconfig', {
+        configtext: config
+      })
+      app.loaded()
+      if (!app.checkResponse(res)) {
+        this.errMsg.textContent = res.msg
+        Doc.show(this.errMsg)
+        return
+      }
+      this.setConfig(res.map)
+    })
   }
 
   update (walletInfo) {
-    Doc.empty(this.form)
+    Doc.empty(this.dynamicOpts)
     for (const opt of walletInfo.configopts) {
       const elID = 'wcfg-' + opt.key
       const el = opt.isboolean ? this.checkboxTmpl.cloneNode(true) : this.textInputTmpl.cloneNode(true)
@@ -115,17 +115,18 @@ export class WalletConfigForm {
       const label = el.querySelector('label')
       label.htmlFor = elID // 'for' attribute, but 'for' is a keyword
       label.prepend(opt.displayname)
-      this.form.appendChild(el)
+      this.dynamicOpts.appendChild(el)
       if (opt.noecho) input.type = 'password'
       if (opt.description) label.dataset.tooltip = opt.description
       if (opt.isboolean) input.checked = opt.default
       else input.value = opt.default ? opt.default : ''
     }
+    Doc.hide(this.errMsg)
     app.bindTooltips(this.form)
   }
 
   setConfig (configMap) {
-    this.form.querySelectorAll('input').forEach(input => {
+    this.dynamicOpts.querySelectorAll('input').forEach(input => {
       const v = configMap[input.configOpt.key]
       if (!v) return
       if (input.configOpt.isboolean) input.checked = isTruthyString(v)
@@ -135,7 +136,7 @@ export class WalletConfigForm {
 
   map () {
     const config = {}
-    this.form.querySelectorAll('input').forEach(input => {
+    this.dynamicOpts.querySelectorAll('input').forEach(input => {
       if (input.configOpt.isboolean && input.configOpt.key) config[input.configOpt.key] = input.checked ? '1' : '0'
       else if (input.value) config[input.configOpt.key] = input.value
     })

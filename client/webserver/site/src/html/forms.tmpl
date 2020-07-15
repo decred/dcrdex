@@ -1,14 +1,22 @@
 {{define "walletConfigTemplates"}}
-<div data-tmpl="textInput" class="col-12 pl-0 d-flex flex-column justify-content-end">
-  <label class="pl-1 mb-1 small"> <span class="ico-info"></span></label>
-  <input type="text" class="form-control select">
+<div class="py-2 px-1 d-flex justify-content-between align-items-center">
+  Wallet Settings
+  <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile mr-1"></span> load from file</div>
+  <input data-tmpl="fileInput" type="file" class="form-control select d-none">
 </div>
-<div data-tmpl="checkbox" class="col-12 pl-0 pl-4 d-flex align-items-center justify-content-center">
-  <div>
-    <input class="form-check-input" type="checkbox" value="">
-    <label class="form-check-label fs14"> <span class="ico-info fs13"></span></label>
-  </div>        
+<div data-tmpl="dynamicOpts" class="d-flex align-items-stretch justify-content-between flex-wrap dynamicopts">
+  <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end">
+    <label class="pl-1 mb-1 small"> <span class="ico-info"></span></label>
+    <input type="text" class="form-control select">
+  </div>
+  <div data-tmpl="checkbox" class="pl-4 d-flex align-items-center justify-content-center">
+    <div>
+      <input class="form-check-input" type="checkbox" value="">
+      <label class="form-check-label fs14"> <span class="ico-info fs13"></span></label>
+    </div>        
+  </div>
 </div>
+<div data-tmpl="errMsg" class="fs15 pt-3 text-center d-hide errcolor"></div>
 {{end}}
 
 {{define "newWalletForm"}}
@@ -24,15 +32,8 @@
     <hr class="dashed mt-4">
   {{end}}
   <div id="walletSettings">
-    <div class="pt-2 pb-1 px-1 d-flex justify-content-between align-items-center">
-      Wallet Settings
-      <div class="d-inline-block hoverbg pointer fs14" id="selectCfgFile"><span class="ico-textfile"></span> load from file</div>
-    </div>
-    <div id="walletSettingsInputs" class="d-flex align-items-stretch flex-wrap">
-      {{template "walletConfigTemplates"}}
-    </div>
+    {{template "walletConfigTemplates"}}
   </div>
-  <input type="file" class="form-control select d-none" id="cfgFile">
   <hr class="dashed my-2">
   <div>
     {{if .}}
