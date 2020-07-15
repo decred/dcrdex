@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"decred.org/dcrdex/server/account"
 	"errors"
 	"fmt"
 	"math"
@@ -18,8 +19,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"decred.org/dcrdex/server/account"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
@@ -1496,18 +1495,33 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 	}
 
 	dexStats := c.initializeDEXConnections(crypter)
-
+	var authenticatedAtLeastOnce = false
+	authenticationErrors := []string{"authentication error(s):"}
 	for _, dexStat := range dexStats {
-		if dexStat.AcctFound != nil && !*dexStat.AcctFound {
-			var accountID account.AccountID
-			copy(accountID[:], dexStat.AcctID)
-			acctInfo, err := c.db.Account(accountID)
-			c.db.DisableAccount(acctInfo)
-			if err != nil {
-				return nil, err
+		if !dexStat.Authed {
+			if dexStat.AuthErr != "" {
+				authenticationErrors = append(authenticationErrors, dexStat.AuthErr)
+			} else {
+				authenticationErrors = append(authenticationErrors, "dex authentication failed")
 			}
-			c.refreshUser()
+			if dexStat.AcctFound != nil && !*dexStat.AcctFound {
+				var accountID account.AccountID
+				copy(accountID[:], dexStat.AcctID)
+				acctInfo, err := c.db.Account(accountID)
+				if err != nil {
+					authenticationErrors = append(authenticationErrors, err.Error())
+				}
+				err = c.db.DisableAccount(acctInfo)
+				if err != nil {
+					authenticationErrors = append(authenticationErrors, err.Error())
+				}
+			}
+			continue
 		}
+		authenticatedAtLeastOnce = true
+	}
+	if !authenticatedAtLeastOnce {
+		return nil, errors.New(strings.Join(authenticationErrors, "\n"))
 	}
 
 	notes, err := c.db.NotificationsN(10)
@@ -1520,7 +1534,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		Notifications: notes,
 		DEXes:         dexStats,
 	}
-	return result, nil
+	return result, err
 }
 
 // Logout logs the user out
@@ -1634,6 +1648,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				if errors.As(err, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
 					AcctFound := false
 					result.AcctFound = &AcctFound
+					result.AuthErr = details
 				}
 				return
 			}
