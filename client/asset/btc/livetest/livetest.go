@@ -53,9 +53,9 @@ func tBackend(t testKiller, ctx context.Context, newWallet WalletConstructor, sy
 	if err != nil {
 		t.Fatalf("error reading config options: %v", err)
 	}
+	settings["walletname"] = name
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
-		Account:  name,
 		TipChange: func(err error) {
 			blkFunc(conf, err)
 		},

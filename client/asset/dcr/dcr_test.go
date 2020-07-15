@@ -106,7 +106,6 @@ func newTxOutResult(script []byte, value uint64, confs int64) *chainjson.GetTxOu
 func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
-		Account:   "default",
 		TipChange: func(error) {},
 	}
 	dcrCfg := &Config{

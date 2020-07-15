@@ -67,7 +67,6 @@ func (set *errorSet) Error() string {
 // that file will be parsed for wallet connection settings.
 type WalletForm struct {
 	AssetID uint32
-	Account string
 	Config  map[string]string
 }
 

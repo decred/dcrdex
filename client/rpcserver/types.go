@@ -62,7 +62,6 @@ type openWalletForm struct {
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
 	assetID    uint32
-	account    string
 	config     map[string]string
 	walletPass encode.PassBytes
 	appPass    encode.PassBytes
@@ -179,7 +178,7 @@ func parseLoginArgs(params *RawParams) (encode.PassBytes, error) {
 }
 
 func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
-	if err := checkNArgs(params, []int{2}, []int{2, 3}); err != nil {
+	if err := checkNArgs(params, []int{2}, []int{1, 2}); err != nil {
 		return nil, err
 	}
 	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
@@ -190,10 +189,9 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		appPass:    params.PWArgs[0],
 		walletPass: params.PWArgs[1],
 		assetID:    uint32(assetID),
-		account:    params.Args[1],
 	}
-	if len(params.Args) > 2 {
-		req.config, err = config.Parse([]byte(params.Args[2]))
+	if len(params.Args) > 1 {
+		req.config, err = config.Parse([]byte(params.Args[1]))
 		if err != nil {
 			return nil, fmt.Errorf("config parse error: %v", err)
 		}

@@ -46,9 +46,6 @@ type ConfigOption struct {
 // WalletConfig is the configuration settings for the wallet. WalletConfig
 // is passed to the wallet constructor.
 type WalletConfig struct {
-	// Account is the name of the wallet account. The account and wallet must
-	// already exist.
-	Account string
 	// Settings is the key-value store of wallet connection parameters.
 	Settings map[string]string
 	// TipChange is a function that will be called when the blockchain monitoring

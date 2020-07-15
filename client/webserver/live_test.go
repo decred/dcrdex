@@ -745,7 +745,7 @@ func TestServer(t *testing.T) {
 	numBuys = 0
 	numSells = 0
 	feedPeriod = 500 * time.Millisecond
-	initialize := true
+	initialize := false
 	register := false
 	forceDisconnectWallet = true
 

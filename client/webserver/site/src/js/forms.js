@@ -12,11 +12,9 @@ export class NewWalletForm {
     this.form = form
     this.currentAsset = null
     const fields = this.fields = Doc.parsePage(form, [
-      'nwAssetLogo', 'nwAssetName',
-      'acctName', 'newWalletPass', 'nwAppPass',
+      'nwAssetLogo', 'nwAssetName', 'newWalletPass', 'nwAppPass',
       'walletSettings', 'walletSettingsInputs', 'selectCfgFile',
-      'walletConfig', 'cfgFile', 'selectedCfgFile', 'removeCfgFile',
-      'submitAdd', 'newWalletErr'
+      'cfgFile', 'submitAdd', 'newWalletErr'
     ])
 
     // WalletConfigForm will set the global app variable.
@@ -26,8 +24,6 @@ export class NewWalletForm {
 
     // config file upload
     Doc.bind(fields.cfgFile, 'change', async () => {
-      const files = fields.cfgFile.files
-      fields.selectedCfgFile.textContent = files[0].name
       if (!fields.cfgFile.value) return
       app.loading(form)
       const config = await fields.cfgFile.files[0].text()
@@ -42,12 +38,6 @@ export class NewWalletForm {
         return
       }
       this.subform.setConfig(res.map)
-    })
-    Doc.bind(fields.removeCfgFile, 'click', () => {
-      fields.cfgFile.value = ''
-      fields.selectedCfgFile.textContent = ''
-      // Doc.show(fields.walletSettings)
-      // Doc.hide(fields.walletConfig)
     })
 
     bind(form, fields.submitAdd, async () => {
@@ -66,7 +56,6 @@ export class NewWalletForm {
       const createForm = {
         assetID: parseInt(this.currentAsset.id),
         pass: fields.newWalletPass.value,
-        account: fields.acctName.value,
         config: this.subform.map(),
         appPass: fields.nwAppPass.value
       }
@@ -90,7 +79,6 @@ export class NewWalletForm {
     this.currentAsset = asset
     fields.nwAssetLogo.src = Doc.logoPath(asset.symbol)
     fields.nwAssetName.textContent = asset.info.name
-    fields.acctName.value = ''
     fields.newWalletPass.value = ''
     this.subform.update(asset.info)
     Doc.hide(fields.newWalletErr)

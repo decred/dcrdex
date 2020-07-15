@@ -1023,7 +1023,6 @@ func TestCreateWallet(t *testing.T) {
 	// Create registration form.
 	form := &WalletForm{
 		AssetID: tILT.ID,
-		Account: "default",
 		Config: map[string]string{
 			"rpclisten": "localhost",
 		},

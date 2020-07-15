@@ -27,6 +27,11 @@ var (
 	fallbackFeeKey = "fallbackfee"
 	configOpts     = []*asset.ConfigOption{
 		{
+			Key:         "walletname",
+			DisplayName: "Wallet Name",
+			Description: "The wallet name",
+		},
+		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
 			Description: "Litecoin's 'rpcuser' setting",

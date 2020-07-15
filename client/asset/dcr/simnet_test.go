@@ -67,9 +67,9 @@ func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*Exchange
 	if err != nil {
 		t.Fatalf("error reading config options: %v", err)
 	}
+	settings["account"] = "default"
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
-		Account:  "default",
 		TipChange: func(err error) {
 			blkFunc(name, err)
 		},

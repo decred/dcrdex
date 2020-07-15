@@ -330,9 +330,8 @@ hr.dashed {
   color: white;
 }
 
-#walletSettingsInputs {
-  & > div {
-    min-height: 55px;
-    margin-top: 10px;
-  }
+#walletSettingsInputs > div,
+#reconfigInputs > div {
+  min-height: 55px;
+  margin-top: 10px;
 }

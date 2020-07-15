@@ -39,10 +39,9 @@ type newWalletForm struct {
 	AssetID uint32 `json:"assetID"`
 	// These are only used if the Decred wallet does not already exist. In that
 	// case, these parameters will be used to create the wallet.
-	Account string            `json:"account"`
-	Config  map[string]string `json:"config"`
-	Pass    encode.PassBytes  `json:"pass"`
-	AppPW   encode.PassBytes  `json:"appPass"`
+	Config map[string]string `json:"config"`
+	Pass   encode.PassBytes  `json:"pass"`
+	AppPW  encode.PassBytes  `json:"appPass"`
 }
 
 // openWalletForm is information necessary to open a wallet.

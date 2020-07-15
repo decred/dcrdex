@@ -78,7 +78,6 @@ func TestParseNewWalletArgs(t *testing.T) {
 		pwArgs := []encode.PassBytes{pw, pw}
 		args := []string{
 			id,
-			"default",
 			"rpclisten=127.0.0.0",
 		}
 		return &RawParams{PWArgs: pwArgs, Args: args}
@@ -112,9 +111,6 @@ func TestParseNewWalletArgs(t *testing.T) {
 		}
 		if fmt.Sprint(nwf.assetID) != test.params.Args[0] {
 			t.Fatalf("assetID doesn't match")
-		}
-		if nwf.account != test.params.Args[1] {
-			t.Fatalf("account doesn't match")
 		}
 		if len(nwf.config) != 1 {
 			t.Fatalf("config length mismatch. expected 1, got %d", len(nwf.config))

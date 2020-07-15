@@ -17,7 +17,6 @@ import (
 type xcWallet struct {
 	asset.Wallet
 	connector *dex.ConnectionMaster
-	Account   string
 	AssetID   uint32
 	mtx       sync.RWMutex
 	lockTime  time.Time

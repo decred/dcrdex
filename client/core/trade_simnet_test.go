@@ -94,6 +94,8 @@ func readWalletCfgsAndDexCert() error {
 		if err != nil {
 			return err
 		}
+		dcrw.config["account"] = "default"
+		btcw.config["account"] = btcw.name
 	}
 
 	dexCertPath := filepath.Join(user.HomeDir, "dextest", "dcrdex", "rpc.cert")
@@ -122,7 +124,6 @@ func startClients(ctx context.Context) error {
 		for assetID, wallet := range c.wallets {
 			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
 				AssetID: assetID,
-				Account: wallet.account,
 				Config:  wallet.config,
 			})
 			if err != nil {

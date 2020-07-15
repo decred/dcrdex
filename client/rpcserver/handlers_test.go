@@ -259,7 +259,6 @@ func TestHandleNewWallet(t *testing.T) {
 		PWArgs: []encode.PassBytes{pw, pw},
 		Args: []string{
 			"42",
-			"default",
 			"username=satoshi",
 		},
 	}

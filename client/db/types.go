@@ -429,7 +429,6 @@ func decodeBalance_v0(pushes [][]byte) (*Balance, error) {
 // Wallet is information necessary to create an asset.Wallet.
 type Wallet struct {
 	AssetID     uint32
-	Account     string
 	Settings    map[string]string
 	Balance     *Balance
 	EncryptedPW []byte
@@ -440,7 +439,6 @@ type Wallet struct {
 func (w *Wallet) Encode() []byte {
 	return dbBytes{0}.
 		AddData(uint32Bytes(w.AssetID)).
-		AddData([]byte(w.Account)).
 		AddData(config.Data(w.Settings)).
 		AddData(w.EncryptedPW).
 		AddData([]byte(w.Address))
@@ -460,18 +458,16 @@ func DecodeWallet(b []byte) (*Wallet, error) {
 }
 
 func decodeWallet_v0(pushes [][]byte) (*Wallet, error) {
-	if len(pushes) != 5 {
-		return nil, fmt.Errorf("decodeWallet_v0: expected 5 pushes, got %d", len(pushes))
+	if len(pushes) != 4 {
+		return nil, fmt.Errorf("decodeWallet_v0: expected 4 pushes, got %d", len(pushes))
 	}
-	idB, acctB, settingsB := pushes[0], pushes[1], pushes[2]
-	keyB, addressB := pushes[3], pushes[4]
+	idB, settingsB, keyB, addressB := pushes[0], pushes[1], pushes[2], pushes[3]
 	settings, err := config.Parse(settingsB)
 	if err != nil {
 		return nil, fmt.Errorf("unable to decode wallet settings")
 	}
 	return &Wallet{
 		AssetID:     intCoder.Uint32(idB),
-		Account:     string(acctB),
 		Settings:    settings,
 		EncryptedPW: keyB,
 		Address:     string(addressB),

@@ -892,7 +892,6 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	dbWallet := &db.Wallet{
 		AssetID:     assetID,
-		Account:     form.Account,
 		Balance:     &db.Balance{},
 		Settings:    form.Config,
 		EncryptedPW: encPW,
@@ -938,9 +937,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return initErr("error getting wallet balance for %s: %v", symbol, err)
 	}
 
-	log.Infof("Created %s wallet. Account %q balance available = %d / "+
+	log.Infof("Created %s wallet. Balance available = %d / "+
 		"locked = %d, Deposit address = %s",
-		symbol, form.Account, balances.Available, balances.Locked, dbWallet.Address)
+		symbol, balances.Available, balances.Locked, dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -955,7 +954,6 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
-		Account: dbWallet.Account,
 		AssetID: dbWallet.AssetID,
 		balance: dbWallet.Balance,
 		encPW:   dbWallet.EncryptedPW,
@@ -963,7 +961,6 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		dbID:    dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
-		Account:  dbWallet.Account,
 		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
 			c.tipChange(dbWallet.AssetID, err)
@@ -1011,9 +1008,9 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("Connected to and unlocked %s wallet. Account %q balance available "+
+	log.Infof("Connected to and unlocked %s wallet. Balance available "+
 		"= %d / locked = %d, Deposit address = %s",
-		state.Symbol, wallet.Account, balances.Available, balances.Locked, state.Address)
+		state.Symbol, balances.Available, balances.Locked, state.Address)
 
 	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
@@ -1092,7 +1089,6 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	}
 	dbWallet := &db.Wallet{
 		AssetID:     oldWallet.AssetID,
-		Account:     oldWallet.Account,
 		Settings:    cfg,
 		Balance:     oldWallet.balance,
 		EncryptedPW: oldWallet.encPW,
@@ -2039,8 +2035,8 @@ func (c *Core) initialize() {
 			continue
 		}
 		// Wallet is loaded from the DB, but not yet connected.
-		log.Infof("Loaded %s wallet configuration. Account %q, Deposit address = %s",
-			unbip(aid), dbWallet.Account, dbWallet.Address)
+		log.Infof("Loaded %s wallet configuration. Deposit address = %s",
+			unbip(aid), dbWallet.Address)
 		c.wallets[dbWallet.AssetID] = wallet
 	}
 	numWallets := len(c.wallets)

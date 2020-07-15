@@ -227,7 +227,6 @@ func newTxOutResult(script []byte, value uint64, confs int64) *btcjson.GetTxOutR
 func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
-		Account:   "testwallet",
 		TipChange: func(error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)

@@ -55,6 +55,11 @@ var (
 	fallbackFeeKey = "fallbackfee"
 	configOpts     = []*asset.ConfigOption{
 		{
+			Key:         "walletname",
+			DisplayName: "Wallet Name",
+			Description: "The wallet name",
+		},
+		{
 			Key:         "rpcuser",
 			DisplayName: "JSON-RPC Username",
 			Description: "Bitcoin's 'rpcuser' setting",
@@ -348,7 +353,7 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		return nil, err
 	}
 
-	endpoint := btcCfg.RPCBind + "/wallet/" + cfg.WalletCFG.Account
+	endpoint := btcCfg.RPCBind + "/wallet/" + cfg.WalletCFG.Settings["walletname"]
 	cfg.Logger.Infof("Setting up new %s wallet at %s.", cfg.Symbol, endpoint)
 
 	client, err := rpcclient.New(&rpcclient.ConnConfig{

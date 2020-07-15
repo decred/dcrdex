@@ -47,6 +47,11 @@ var (
 	fallbackFeeKey = "fallbackfee"
 	configOpts     = []*asset.ConfigOption{
 		{
+			Key:         "account",
+			DisplayName: "Account Name",
+			Description: "dcrwallet account name",
+		},
+		{
 			Key:         "username",
 			DisplayName: "RPC Username",
 			Description: "dcrwallet's 'username' setting for JSON-RPC",
@@ -310,9 +315,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Account == "" {
-		cfg.Account = defaultAccountName
-	}
 	dcr := unconnectedWallet(cfg, walletCfg, logger)
 
 	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
@@ -333,7 +335,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logger) *ExchangeWallet {
 	return &ExchangeWallet{
 		log:             logger,
-		acct:            cfg.Account,
+		acct:            cfg.Settings["account"],
 		tradeChange:     make(map[string]time.Time),
 		tipChange:       cfg.TipChange,
 		fundingCoins:    make(map[string]*fundingCoin),
