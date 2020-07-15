@@ -6,6 +6,7 @@ package db
 import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/server/account"
 )
 
 // DB is an interface that must be satisfied by a DEX client persistent storage
@@ -25,13 +26,13 @@ type DB interface {
 	// Accounts retrieves all accounts.
 	Accounts() ([]*AccountInfo, error)
 	// Account gets the AccountInfo associated with the specified DEX node.
-	Account(url string) (*AccountInfo, error)
+	Account(account.AccountID) (*AccountInfo, error)
 	// CreateAccount saves the AccountInfo.
 	CreateAccount(ai *AccountInfo) error
 	// DisableAccount sets the AccountInfo disabled status to true.
 	DisableAccount(ai *AccountInfo) error
 	// AccountPaid marks the account as paid.
-	AccountPaid(proof *AccountProof) error
+	AccountPaid(proof *AccountProof, ai *AccountInfo) error
 	// UpdateOrder saves the order information in the database. Any existing
 	// order info will be overwritten without indication.
 	UpdateOrder(m *MetaOrder) error

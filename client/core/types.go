@@ -277,6 +277,7 @@ func (a *dexAccount) dbInfo() *db.AccountInfo {
 		DEXPubKey:    a.dexPubKey,
 		FeeCoin:      a.feeCoin,
 		ClientPubKey: a.privKey.PubKey(),
+		ID:           a.id,
 	}
 }
 

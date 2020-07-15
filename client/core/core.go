@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/server/account"
+
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
@@ -1497,11 +1499,14 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 
 	for _, dexStat := range dexStats {
 		if dexStat.AcctFound != nil && !*dexStat.AcctFound {
-			acctInfo, err := c.db.Account(dexStat.Host)
+			var accountID account.AccountID
+			copy(accountID[:], dexStat.AcctID)
+			acctInfo, err := c.db.Account(accountID)
 			c.db.DisableAccount(acctInfo)
 			if err != nil {
 				return nil, err
 			}
+			c.refreshUser()
 		}
 	}
 
@@ -1723,7 +1728,8 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 			Host:  dc.acct.host,
 			Stamp: req.Time,
 			Sig:   ack.Sig,
-		})
+		},
+		dc.acct.dbInfo())
 	}, timeout, func() {
 		errChan <- fmt.Errorf("timed out waiting for '%s' response.", msgjson.NotifyFeeRoute)
 	})
@@ -2232,7 +2238,7 @@ func (c *Core) checkUnpaidFees(dcrWallet *xcWallet) {
 // requisite confirmations for the 'notifyfee' message to be sent to the server.
 func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 	// Get the database account info.
-	acctInfo, err := c.db.Account(dc.acct.host)
+	acctInfo, err := c.db.Account(dc.acct.id)
 	if err != nil {
 		log.Errorf("reFee %s - error retrieving account info: %v", dc.acct.host, err)
 		return

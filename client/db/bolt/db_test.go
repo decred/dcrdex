@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/decred/dcrd/crypto/blake256"
+
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex"
@@ -23,6 +25,8 @@ var (
 	tCtx     context.Context
 	tCounter int
 )
+
+var HashFunc = blake256.Sum256
 
 func newTestDB(t *testing.T) *BoltDB {
 	tCounter++
@@ -135,7 +139,7 @@ func TestAccounts(t *testing.T) {
 	nTimes(numToDo, func(int) {
 		acct := dbtest.RandomAccountInfo()
 		accts = append(accts, acct)
-		acctMap[acct.Host] = acct
+		acctMap[acct.ID.String()] = acct
 	})
 	tStart := time.Now()
 	nTimes(numToDo, func(i int) {
@@ -146,7 +150,7 @@ func TestAccounts(t *testing.T) {
 	tStart = time.Now()
 	nTimes(numToDo, func(i int) {
 		ai := accts[i]
-		reAI, err := boltdb.Account(ai.Host)
+		reAI, err := boltdb.Account(ai.ID)
 		if err != nil {
 			t.Fatalf("error fetching AccountInfo")
 		}
@@ -161,9 +165,9 @@ func TestAccounts(t *testing.T) {
 	}
 	nTimes(numToDo, func(i int) {
 		reAI := readAccts[i]
-		ai, found := acctMap[reAI.Host]
+		ai, found := acctMap[reAI.ID.String()]
 		if !found {
-			t.Fatalf("no account found in map for %s", reAI.Host)
+			t.Fatalf("no account found in map for %s", reAI.ID)
 		}
 		dbtest.MustCompareAccountInfo(t, ai, reAI)
 	})
@@ -206,8 +210,8 @@ func TestAccounts(t *testing.T) {
 	}
 
 	// Test account proofs.
-	zerothHost := accts[0].Host
-	zerothAcct, _ := boltdb.Account(zerothHost)
+	zerothID := accts[0].ID
+	zerothAcct, _ := boltdb.Account(zerothID)
 	if zerothAcct.Paid {
 		t.Fatalf("Account marked as paid before account proof set")
 	}
@@ -215,8 +219,9 @@ func TestAccounts(t *testing.T) {
 		Host:  zerothAcct.Host,
 		Stamp: 123456789,
 		Sig:   []byte("some signature here"),
-	})
-	reAcct, _ := boltdb.Account(zerothHost)
+	},
+		zerothAcct)
+	reAcct, _ := boltdb.Account(zerothID)
 	if !reAcct.Paid {
 		t.Fatalf("Account not marked as paid after account proof set")
 	}

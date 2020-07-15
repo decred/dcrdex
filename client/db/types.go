@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"decred.org/dcrdex/server/account"
+	"github.com/decred/dcrd/crypto/blake256"
+
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
@@ -73,6 +76,7 @@ type AccountInfo struct {
 	// set.
 	Paid         bool
 	ClientPubKey *secp256k1.PublicKey
+	ID           account.AccountID
 	Disabled     bool
 }
 
@@ -83,7 +87,8 @@ func (ai *AccountInfo) Encode() []byte {
 		AddData(ai.EncKey).
 		AddData(ai.DEXPubKey.Serialize()).
 		AddData(ai.FeeCoin).
-		AddData(ai.Cert)
+		AddData(ai.Cert).
+		AddData(ai.ID[:])
 }
 
 // DecodeAccountInfo decodes the versioned blob into an *AccountInfo. The byte
@@ -101,7 +106,7 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 }
 
 func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
-	if len(pushes) != 5 {
+	if len(pushes) != 6 {
 		return nil, fmt.Errorf("decodeAccountInfo: expected 5 data pushes, got %d", len(pushes))
 	}
 	hostB, keyB, dexB := pushes[0], pushes[1], pushes[2]
@@ -110,12 +115,15 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	var id [blake256.Size]byte
+	copy(id[:], pushes[5])
 	return &AccountInfo{
 		Host:      string(hostB),
 		EncKey:    keyB,
 		DEXPubKey: pk,
 		FeeCoin:   coinB,
 		Cert:      certB,
+		ID:        id,
 	}, nil
 }
 

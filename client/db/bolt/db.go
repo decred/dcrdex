@@ -12,6 +12,8 @@ import (
 	"sort"
 	"time"
 
+	"decred.org/dcrdex/server/account"
+
 	"decred.org/dcrdex/client/db"
 	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/encode"
@@ -248,17 +250,17 @@ func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 }
 
 // Account gets the AccountInfo associated with the specified DEX address.
-func (db *BoltDB) Account(url string) (*dexdb.AccountInfo, error) {
+func (db *BoltDB) Account(accountID account.AccountID) (*dexdb.AccountInfo, error) {
 	var acctInfo *dexdb.AccountInfo
-	acctKey := []byte(url)
+	acctKey := accountInfoKey(accountID)
 	return acctInfo, db.acctsView(func(accts *bbolt.Bucket) error {
 		acct := accts.Bucket(acctKey)
 		if acct == nil {
-			return fmt.Errorf("account not found for %s", url)
+			return fmt.Errorf("account not found for %s", accountID)
 		}
 		acctB := getCopy(acct, accountKey)
 		if acctB == nil {
-			return fmt.Errorf("empty account found for %s", url)
+			return fmt.Errorf("empty account found for %s", accountID)
 		}
 		var err error
 		acctInfo, err = dexdb.DecodeAccountInfo(acctB)
@@ -283,7 +285,7 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 		return fmt.Errorf("zero-length EncKey not allowed")
 	}
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
-		acct, err := accts.CreateBucket([]byte(ai.Host + "-" + string(ai.DEXPubKey.Serialize()) + "-" + string(ai.ClientPubKey.Serialize())))
+		acct, err := accts.CreateBucket(accountInfoKey(ai.ID))
 		if err != nil {
 			return fmt.Errorf("failed to create account bucket")
 		}
@@ -299,7 +301,14 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	})
 }
 
-// DisableAccount corrupts the account key.
+// Make account info key from client pub key
+func accountInfoKey(accountID account.AccountID) []byte {
+	acctKey := make([]byte, len(accountID))
+	copy(acctKey, accountID.String())
+	return acctKey
+}
+
+// DisableAccount sets account info disabled flag to true
 func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	acctKey := []byte(ai.Host)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
@@ -314,8 +323,8 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 }
 
 // AccountPaid marks the account as paid by setting the "fee proof".
-func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof) error {
-	acctKey := []byte(proof.Host)
+func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof, ai *dexdb.AccountInfo) error {
+	acctKey := accountInfoKey(ai.ID)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct := accts.Bucket(acctKey)
 		if acct == nil {
