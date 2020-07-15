@@ -281,7 +281,7 @@ export default class WalletsPage extends BasePage {
     const open = {
       assetID: assetID,
       address: page.withdrawAddr.value,
-      value: parseInt(page.withdrawAmt.value * 1e8),
+      value: parseInt(Math.round(page.withdrawAmt.value * 1e8)),
       pw: page.withdrawPW.value
     }
     app.loading(page.withdrawForm)

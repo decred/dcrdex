@@ -58,9 +58,10 @@ func randBytes(l int) []byte {
 }
 
 func makeGetTxOutRes(confs, lots int64, pkScript []byte) *chainjson.GetTxOutResult {
+	val := dcrutil.Amount(lots * int64(tLotSize)).ToCoin()
 	return &chainjson.GetTxOutResult{
 		Confirmations: confs,
-		Value:         float64(lots*int64(tLotSize)) / 1e8,
+		Value:         val,
 		ScriptPubKey: chainjson.ScriptPubKeyResult{
 			Hex: hex.EncodeToString(pkScript),
 		},

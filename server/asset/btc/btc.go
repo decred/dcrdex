@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -56,7 +57,6 @@ var (
 
 const (
 	assetName                = "btc"
-	btcToSatoshi             = 1e8
 	immatureTransactionError = dex.ErrorKind("immature output")
 )
 
@@ -418,7 +418,7 @@ func (btc *Backend) utxo(txHash *chainhash.Hash, vout uint32, redeemScript []byt
 		redeemScript:      redeemScript,
 		numSigs:           inputNfo.ScriptAddrs.NRequired,
 		spendSize:         inputNfo.VBytes(),
-		value:             uint64(txOut.Value * btcToSatoshi),
+		value:             toSat(txOut.Value),
 	}
 	return &UTXO{out}, nil
 }
@@ -543,8 +543,7 @@ func (btc *Backend) prevOutputValue(txid string, vout int) (uint64, error) {
 		return 0, fmt.Errorf("prevOutput: vout index out of range")
 	}
 	output := verboseTx.Vout[vout]
-	v := uint64(output.Value * btcToSatoshi)
-	return v, nil
+	return toSat(output.Value), nil
 }
 
 // Get the Tx. Transaction info is not cached, so every call will result in a
@@ -580,7 +579,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 	for vin, input := range verboseTx.Vin {
 		isCoinbase = input.Coinbase != ""
 		if isCoinbase {
-			valIn = uint64(verboseTx.Vout[0].Value * btcToSatoshi)
+			valIn = toSat(verboseTx.Vout[0].Value)
 		} else {
 			var err error
 			valIn, err = btc.prevOutputValue(input.Txid, int(input.Vout))
@@ -614,7 +613,7 @@ func (btc *Backend) transaction(txHash *chainhash.Hash, verboseTx *btcjson.TxRaw
 			return nil, fmt.Errorf("error decoding pubkey script from %s for transaction %d:%d: %v",
 				output.ScriptPubKey.Hex, txHash, vout, err)
 		}
-		vOut := uint64(output.Value * btcToSatoshi)
+		vOut := toSat(output.Value)
 		sumOut += vOut
 		outputs = append(outputs, txOut{
 			value:    vOut,
@@ -835,6 +834,11 @@ func toCoinID(txHash *chainhash.Hash, vout uint32) []byte {
 	copy(b[:hashLen], txHash[:])
 	binary.BigEndian.PutUint32(b[hashLen:], vout)
 	return b
+}
+
+// Convert the BTC value to satoshis.
+func toSat(v float64) uint64 {
+	return uint64(math.Round(v * 1e8))
 }
 
 // isTxNotFoundErr will return true if the error indicates that the requested

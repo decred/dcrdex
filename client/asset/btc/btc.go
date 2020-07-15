@@ -452,7 +452,7 @@ func (btc *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins,
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
 	if len(utxos) == 0 {
-		return nil, fmt.Errorf("insufficient funds. %.8f available", float64(avail)/1e8)
+		return nil, fmt.Errorf("insufficient funds. %.8f available", btcutil.Amount(avail).ToBTC())
 	}
 	var sum uint64
 	var size uint32
