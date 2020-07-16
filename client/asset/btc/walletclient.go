@@ -203,8 +203,8 @@ func (wc *walletClient) SendToAddress(address string, value, feeRate uint64, sub
 	}
 	var txid string
 	// Last boolean argument is to subtract the fee from the amount.
-	btc := btcutil.Amount(value).ToBTC()
-	err = wc.call(methodSendToAddress, anylist{address, btc, "dcrdex", "", subtract}, &txid)
+	coinValue := btcutil.Amount(value).ToBTC()
+	err = wc.call(methodSendToAddress, anylist{address, coinValue, "dcrdex", "", subtract}, &txid)
 	if err != nil {
 		return nil, err
 	}
