@@ -728,10 +728,13 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts: %v",
 		len(receipts), t.ID(), swaps.FeeRate, receipts)
 
-	t.change = change
-	t.coins[hex.EncodeToString(change.ID())] = change
-	t.metaData.ChangeCoin = []byte(change.ID())
-	t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin) // TODO: lock the change coin in the wallet if the order is still on the book
+	if change != nil {
+		log.Debugf("storing change coin %v", change.String())
+		t.change = change
+		t.coins[hex.EncodeToString(change.ID())] = change
+		t.metaData.ChangeCoin = []byte(change.ID())
+		t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin) // TODO: lock the change coin in the wallet if the order is still on the book
+	}
 
 	// Process the swap for each match by sending the `init` request
 	// to the DEX and updating the match with swap details.

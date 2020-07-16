@@ -695,7 +695,12 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	for i := range opIDs {
 		delete(btc.fundingCoins, opIDs[i])
 	}
-	return receipts, change, nil
+	// If change is nil, return a nil asset.Coin.
+	var changeCoin asset.Coin
+	if change != nil {
+		changeCoin = change
+	}
+	return receipts, changeCoin, nil
 }
 
 // Redeem sends the redemption transaction, completing the atomic swap.

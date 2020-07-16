@@ -700,12 +700,12 @@ func (c *Core) updateBalances(counts assetCounter) {
 		if !exists {
 			// This should never be the case, but log an error in case I'm
 			// wrong or something changes.
-			log.Errorf("non-existent wallet should exist")
+			log.Errorf("non-existent %d wallet should exist", assetID)
 			continue
 		}
 		_, err := c.walletBalances(w)
 		if err != nil {
-			log.Error("error updateing balance after tick: %v", err)
+			log.Errorf("error updating %q balance: %v", unbip(assetID), err)
 			continue
 		}
 	}

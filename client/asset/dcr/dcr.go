@@ -738,7 +738,12 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		delete(dcr.fundingCoins, coin.String())
 	}
 	dcr.fundingMtx.Unlock()
-	return receipts, change, nil
+	// If change is nil, return a nil asset.Coin.
+	var changeCoin asset.Coin
+	if change != nil {
+		changeCoin = change
+	}
+	return receipts, changeCoin, nil
 }
 
 // Redeem sends the redemption transaction, which may contain more than one
@@ -1563,19 +1568,18 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 		}
 	}
 
-	// A couple of additional checks on the fee rate.
+	// Double check the resulting txns fee and fee rate.
 	checkFee, checkRate := fees(msgTx)
 	if checkFee != lastFee {
 		return nil, nil, fmt.Errorf("fee mismatch! %d != %d", checkFee, lastFee)
 	}
-	// If the integer truncated fee rate is not the same as the fee rate provided,
-	// log a warning.
+	// Ensure the effective fee rate is at least the required fee rate.
 	if checkRate < feeRate {
 		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is lower than expected, %d",
 			msgTx.CachedTxHash(), checkRate, feeRate)
 	}
 	// This is a last ditch effort to catch ridiculously high fees. Right now,
-	// it's just erroring for fees more than tripple the expected rate, which is
+	// it's just erroring for fees more than triple the expected rate, which is
 	// admittedly un-scientific. This should account for any signature length
 	// related variation as well as a potential dust change output with no
 	// subtractee specified, in which case the dust goes to the miner.
