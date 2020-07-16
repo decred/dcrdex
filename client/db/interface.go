@@ -80,6 +80,8 @@ type DB interface {
 	// credentials if the wallet already exists. A wallet is specified by the
 	// pair (asset ID, account name).
 	UpdateWallet(wallet *Wallet) error
+	// SetWalletPassword sets the encrypted password for the wallet.
+	SetWalletPassword(wid []byte, newPW []byte) error
 	// UpdateBalance updates a wallet's balance.
 	UpdateBalance(wid []byte, balance *Balance) error
 	// Wallets lists all saved wallets.

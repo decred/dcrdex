@@ -22,9 +22,13 @@ export default class WalletsPage extends BasePage {
       'markets', 'dexTitle', 'marketsBox', 'oneMarket', 'marketsFor',
       'marketsCard',
       // New wallet, unlock wallet, wallet settings
-      'walletForm', 'acctName', 'openForm', 'walletReconfig', 'recfgAssetLogo',
-      'recfgAssetName', 'reconfigInputs', 'submitReconfig', 'reconfigErr',
-      'reconfigPW',
+      'walletForm', 'openForm',
+      // Wallet configuration
+      'walletReconfig', 'recfgAssetLogo', 'recfgAssetName', 'reconfigInputs',
+      'submitReconfig', 'reconfigErr', 'reconfigPW', 'changePW',
+      // Wallet password change
+      'walletRepw', 'repwAssetLogo', 'repwAssetName', 'repwNewPw', 'repwAppPw',
+      'submitRepw', 'repwErr',
       // Deposit
       'deposit', 'depositName', 'depositAddress',
       // Withdraw
@@ -120,6 +124,13 @@ export default class WalletsPage extends BasePage {
       page.withdrawAmt.value = page.withdrawAvail.textContent
     })
 
+    // A link on the wallet reconfiguration form to show the password change
+    // form.
+    bind(page.changePW, 'click', () => { this.showChangePW() })
+
+    // Submit the password change form.
+    bindForm(page.walletRepw, page.submitRepw, () => { this.submitChangePW() })
+
     if (!firstRow) return
     this.showMarkets(firstRow.assetID)
 
@@ -200,7 +211,7 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     this.walletAsset = assetID
     this.walletForm.setAsset(asset)
-    this.animation = this.showBox(box, page.acctName)
+    this.animation = this.showBox(box)
   }
 
   /* Show the form used to unlock a wallet. */
@@ -234,6 +245,46 @@ export default class WalletsPage extends BasePage {
       return
     }
     this.walletReconfig.setConfig(res.map)
+  }
+
+  /* showChangePW shows the form to change the wallet password. */
+  async showChangePW () {
+    const page = this.page
+    Doc.hide(page.repwErr)
+    const assetID = this.reconfigAsset
+    const asset = app.assets[assetID]
+    page.repwAssetLogo.src = Doc.logoPath(asset.symbol)
+    page.repwAssetName.textContent = asset.info.name
+    await this.hideBox()
+    this.animation = this.showBox(page.walletRepw)
+  }
+
+  /*
+   * submitChangePW is called when the wallet password change form is submitted.
+   */
+  async submitChangePW () {
+    const page = this.page
+    Doc.hide(page.repwErr)
+    if (!page.repwAppPw.value) {
+      page.repwErr.textContent = 'app password cannot be empty'
+      Doc.show(page.repwErr)
+      return
+    }
+    app.loading(page.walletRepw)
+    var res = await postJSON('/api/setwalletpass', {
+      assetID: this.reconfigAsset,
+      newPW: page.repwNewPw.value,
+      appPW: page.repwAppPw.value
+    })
+    page.repwNewPw.value = ''
+    page.repwAppPw.value = ''
+    app.loaded()
+    if (!app.checkResponse(res, true)) {
+      page.repwErr.textContent = res.msg
+      Doc.show(page.repwErr)
+      return
+    }
+    this.showMarkets(this.reconfigAsset)
   }
 
   /* Display a deposit address. */
@@ -337,7 +388,7 @@ export default class WalletsPage extends BasePage {
       Doc.show(page.reconfigErr)
       return
     }
-    app.loading(page.reconfigErr)
+    app.loading(page.walletReconfig)
     var res = await postJSON('/api/reconfigurewallet', {
       assetID: this.reconfigAsset,
       config: this.walletReconfig.map(),

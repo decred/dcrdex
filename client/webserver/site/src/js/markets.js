@@ -75,7 +75,7 @@ export default class MarketsPage extends BasePage {
       'vTotal', 'vQuote', 'vPass', 'vSubmit', 'verifyLimit', 'verifyMarket',
       'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore',
       // Create wallet form
-      'walletForm', 'acctName',
+      'walletForm',
       // Active orders
       'liveTemplate', 'liveList',
       // Cancel order form

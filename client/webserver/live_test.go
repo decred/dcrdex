@@ -615,6 +615,8 @@ func (c *TCore) ReconfigureWallet(pw []byte, assetID uint32, cfg map[string]stri
 	return nil
 }
 
+func (c *TCore) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error { return nil }
+
 func (c *TCore) User() *core.User {
 	exchanges := map[string]*core.Exchange{}
 	if c.reg != nil {

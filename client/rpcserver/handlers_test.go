@@ -259,7 +259,7 @@ func TestHandleNewWallet(t *testing.T) {
 		PWArgs: []encode.PassBytes{pw, pw},
 		Args: []string{
 			"42",
-			"username=satoshi",
+			"username=tacotime",
 		},
 	}
 	tests := []struct {

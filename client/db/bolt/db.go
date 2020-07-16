@@ -726,6 +726,22 @@ func (db *BoltDB) UpdateWallet(wallet *dexdb.Wallet) error {
 	})
 }
 
+// SetWalletPassword set the encrypted password field for the wallet.
+func (db *BoltDB) SetWalletPassword(wid []byte, newPW []byte) error {
+	return db.walletsUpdate(func(master *bbolt.Bucket) error {
+		wBkt := master.Bucket(wid)
+		if wBkt == nil {
+			return fmt.Errorf("wallet with ID is %x not known", wid)
+		}
+		wallet, err := makeWallet(wBkt)
+		if err != nil {
+			return err
+		}
+		wallet.EncryptedPW = newPW
+		return wBkt.Put(walletKey, wallet.Encode())
+	})
+}
+
 // UpdateBalance updates balance in the wallet bucket.
 func (db *BoltDB) UpdateBalance(wid []byte, bal *db.Balance) error {
 	return db.walletsUpdate(func(master *bbolt.Bucket) error {

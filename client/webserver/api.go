@@ -306,6 +306,26 @@ func (s *WebServer) apiWalletSettings(w http.ResponseWriter, r *http.Request) {
 	}, s.indent)
 }
 
+// apiSetWalletPass updates the current password for the specified wallet.
+func (s *WebServer) apiSetWalletPass(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32           `json:"assetID"`
+		NewPW   encode.PassBytes `json:"newPW"`
+		AppPW   encode.PassBytes `json:"appPW"`
+	}{}
+	defer form.NewPW.Clear()
+	defer form.AppPW.Clear()
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.SetWalletPassword(form.AppPW, form.AssetID, form.NewPW)
+	if err != nil {
+		s.writeAPIError(w, "password change error: %v", err)
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
 // apiReconfig sets new configuration details for the wallet.
 func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	form := &struct {

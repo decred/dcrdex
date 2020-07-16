@@ -27,6 +27,7 @@ const (
 	authErr
 	connectErr
 	missingWalletErr
+	encryptionErr
 )
 
 // Error is an error message and an error code.

@@ -75,6 +75,7 @@ type clientCore interface {
 	Wallets() []*core.WalletState
 	WalletSettings(uint32) (map[string]string, error)
 	ReconfigureWallet([]byte, uint32, map[string]string) error
+	SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error
 	User() *core.User
 	GetFee(url, cert string) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
@@ -255,6 +256,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		r.Post("/parseconfig", s.apiParseConfig)
 		r.Post("/reconfigurewallet", s.apiReconfig)
 		r.Post("/walletsettings", s.apiWalletSettings)
+		r.Post("/setwalletpass", s.apiSetWalletPass)
 	})
 
 	// Files

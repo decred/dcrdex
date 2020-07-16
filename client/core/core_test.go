@@ -249,6 +249,7 @@ type TDB struct {
 	lastStatus         order.OrderStatus
 	wallet             *db.Wallet
 	walletErr          error
+	setWalletPwErr     error
 	orderOrders        map[order.OrderID]*db.MetaOrder
 	orderErr           error
 }
@@ -331,6 +332,10 @@ func (tdb *TDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error) 
 func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
 	tdb.wallet = wallet
 	return tdb.updateWalletErr
+}
+
+func (tdb *TDB) SetWalletPassword(wid []byte, newPW []byte) error {
+	return tdb.setWalletPwErr
 }
 
 func (tdb *TDB) UpdateBalance(wid []byte, balance *db.Balance) error {
@@ -3691,12 +3696,6 @@ func TestReconfigureWallet(t *testing.T) {
 		t.Fatalf("wrong error for missing wallet: %v", err)
 	}
 
-	// loadWallet db error
-	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
-	if !errorHasCode(err, missingWalletErr) {
-		t.Fatalf("wrong error for missing wallet: %v", err)
-	}
-
 	xyzWallet, tXyzWallet := newTWallet(assetID)
 	tCore.wallets[assetID] = xyzWallet
 	asset.Register(assetID, &tDriver{
@@ -3732,5 +3731,51 @@ func TestReconfigureWallet(t *testing.T) {
 	settings := rig.db.wallet.Settings
 	if len(settings) != 1 || settings["def"] != "456" {
 		t.Fatalf("settings not stored")
+	}
+}
+
+func TestSetWalletPassword(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.db.wallet = &db.Wallet{
+		EncryptedPW: []byte("abc"),
+	}
+	newPW := []byte("def")
+	var assetID uint32 = 54321
+
+	// Password error
+	rig.crypter.recryptErr = tErr
+	err := tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, authErr) {
+		t.Fatalf("wrong error for password error: %v", err)
+	}
+	rig.crypter.recryptErr = nil
+
+	// Missing wallet error
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, missingWalletErr) {
+		t.Fatalf("wrong error for missing wallet: %v", err)
+	}
+
+	xyzWallet, _ := newTWallet(assetID)
+	tCore.wallets[assetID] = xyzWallet
+
+	// SetWalletPassword db error
+	rig.db.setWalletPwErr = tErr
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, dbErr) {
+		t.Fatalf("wrong error for missing wallet: %v", err)
+	}
+	rig.db.setWalletPwErr = nil
+
+	// Success
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if err != nil {
+		t.Fatalf("SetWalletPassword error: %v", err)
+	}
+
+	// Check that the xcWallet was updated.
+	if !bytes.Equal(xyzWallet.encPW, newPW) {
+		t.Fatalf("xcWallet encPW field not updated")
 	}
 }
