@@ -106,7 +106,11 @@ EOF
 # DEX admin script
 cat > "${DCRDEX_DATA_DIR}/dexadm" <<EOF
 #!/bin/sh
-curl --cacert ${DCRDEX_DATA_DIR}/rpc.cert --basic -u u:adminpass https://127.0.0.1:16542/api/\$@
+if [[ "\$#" -eq "2" ]]; then
+    curl --cacert ${DCRDEX_DATA_DIR}/rpc.cert --basic -u u:adminpass --header "Content-Type: text/plain" --data-binary "\$2" https://127.0.0.1:16542/api/\$1
+else
+    curl --cacert ${DCRDEX_DATA_DIR}/rpc.cert --basic -u u:adminpass https://127.0.0.1:16542/api/\$1
+fi
 EOF
 chmod +x "${DCRDEX_DATA_DIR}/dexadm"
 

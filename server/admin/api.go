@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,7 +21,8 @@ import (
 )
 
 const (
-	pongStr = "pong"
+	pongStr   = "pong"
+	maxUInt16 = int(^uint16(0))
 )
 
 // writeJSON marshals the provided interface and writes the bytes to the
@@ -253,15 +255,24 @@ func (s *Server) apiUnban(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-// apiNotifyAll is the handler for the '/nogifyall?message=MESSAGE' API request.
+// apiNotifyAll is the handler for the '/notifyall' API request.
 func (s *Server) apiNotifyAll(w http.ResponseWriter, r *http.Request) {
-	msgStr := r.URL.Query().Get(messageToken)
-	if msgStr == "" {
+	body, err := ioutil.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unable to read request body: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(body) == 0 {
 		http.Error(w, "no message to broadcast", http.StatusBadRequest)
 		return
 	}
-	msg, err := msgjson.NewNotification(msgjson.NotifyRoute, msgStr)
-	if msgStr == "" {
+	if len(body) > maxUInt16 {
+		http.Error(w, fmt.Sprintf("cannot send messages larger than %d bytes", maxUInt16), http.StatusBadRequest)
+		return
+	}
+	msg, err := msgjson.NewNotification(msgjson.NotifyRoute, string(body))
+	if err != nil {
 		http.Error(w, fmt.Sprintf("unable to create notification: %v", err), http.StatusInternalServerError)
 		return
 	}

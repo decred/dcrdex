@@ -52,7 +52,8 @@ vF8Ti1x2vTkD
 ```
 
 A `curl` script is created in `~/dextest/dcrdex/dexadm` for sending requests to
-the DEX API e.g. `~/dextest/dcrdex/dexadm ping`.
+the DEX API e.g. `~/dextest/dcrdex/dexadm ping` or
+`~/dextest/dcrdex/dexadm notifyall @path/to/file.txt`.
 
 ## Harness control
 

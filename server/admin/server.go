@@ -126,7 +126,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 
 	// api endpoints
 	mux.Route("/api", func(r chi.Router) {
-		r.Use(middleware.AllowContentType("application/json"))
+		r.Use(middleware.AllowContentType("text/plain"))
 		r.Get("/ping", s.apiPing)
 		r.Get("/config", s.apiConfig)
 		r.Get("/accounts", s.apiAccounts)
@@ -135,7 +135,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 			rm.Get("/ban", s.apiBan)
 			rm.Get("/unban", s.apiUnban)
 		})
-		r.Get("/notifyall", s.apiNotifyAll)
+		r.Post("/notifyall", s.apiNotifyAll)
 		r.Get("/markets", s.apiMarkets)
 		r.Route("/market/{"+marketNameKey+"}", func(rm chi.Router) {
 			rm.Get("/", s.apiMarketInfo)

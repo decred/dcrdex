@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"crypto/elliptic"
 	"crypto/sha256"
@@ -1092,22 +1093,31 @@ func TestNotifyAll(t *testing.T) {
 	}
 	mux := chi.NewRouter()
 	mux.Route("/notifyall", func(rm chi.Router) {
-		rm.Get("/", srv.apiNotifyAll)
+		rm.Post("/", srv.apiNotifyAll)
 	})
 	tests := []struct {
 		name, txt string
 		wantCode  int
 	}{{
 		name:     "ok",
-		txt:      "hello%20world",
+		txt:      "Hello world.\nAll your base are belong to us.",
 		wantCode: http.StatusOK,
+	}, {
+		name:     "ok at max size",
+		txt:      string(make([]byte, maxUInt16)),
+		wantCode: http.StatusOK,
+	}, {
+		name:     "message too long",
+		txt:      string(make([]byte, maxUInt16+1)),
+		wantCode: http.StatusBadRequest,
 	}, {
 		name:     "no message",
 		wantCode: http.StatusBadRequest,
 	}}
 	for _, test := range tests {
 		w := httptest.NewRecorder()
-		r, _ := http.NewRequest("GET", "https://localhost/notifyall?message="+test.txt, nil)
+		br := bytes.NewReader([]byte(test.txt))
+		r, _ := http.NewRequest("POST", "https://localhost/notifyall", br)
 		r.RemoteAddr = "localhost"
 
 		mux.ServeHTTP(w, r)
