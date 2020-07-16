@@ -231,9 +231,9 @@ func testNoTakerSwap(t *testing.T) {
 // trades fail because of Maker not redeeming Taker's swap.
 // Also ensures that both Maker and Taker's funds are refunded after their
 // respective swap locktime expires.
-// Cases where Maker actually redeemed Taker's swap but did not notify Taker
-// are handled in testMakerGhostingAfterTakerRedeem which ensures that Taker
-// auto-finds Maker's redeem and completes the trade by redeeming Maker's
+// A scenario where Maker actually redeemed Taker's swap but did not notify
+// Taker is handled in testMakerGhostingAfterTakerRedeem which ensures that
+// Taker auto-finds Maker's redeem and completes the trade by redeeming Maker's
 // swap.
 func testNoMakerRedeem(t *testing.T) {
 	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
@@ -244,13 +244,14 @@ func testNoMakerRedeem(t *testing.T) {
 }
 
 // testMakerGhostingAfterTakerRedeem places simple orders for clients 1 and 2,
-// neogiates the resulting trades smoothly till TakerSwapCast, Maker redeems
-// taker's swap without notifying Taker.
-// Also ensures that Taker auto-finds Maker's redeem, extracts the secret key
-// and redeems Maker's swap to complete the trade.
-// Cases where Maker actually did NOT redeem Taker's swap are handled in
+// neogiates the resulting trades smoothly till TakerSwapCast, then Maker goes
+// AWOL after redeeming taker's swap without notifying Taker. This test ensures
+// that Taker auto-finds Maker's redeem, extracts the secret key and redeems
+// Maker's swap to complete the trade.
+// A scenario where Maker actually did NOT redeem Taker's swap is handled in
 // testNoMakerRedeem which ensures that both parties are able to refund their
 // swaps.
+// TODO: What happens if FindRedemption encounters a refund instead of a redeem?
 func testMakerGhostingAfterTakerRedeem(t *testing.T) {
 	var qty, rate uint64 = 5 * 1e8, 2.5 * 1e4 // 5DCR at 0.00025 BTC/DCR
 	client1.isSeller, client2.isSeller = true, false
@@ -275,16 +276,15 @@ func testMakerGhostingAfterTakerRedeem(t *testing.T) {
 	// Resume trades but disable Maker's ability to notify the server
 	// after redeming Taker's swap.
 	resumeTrade := func(ctx context.Context, client *tClient, orderID string) error {
-		dc := client.dc()
 		tracker, err := client.findOrder(orderID)
 		if err != nil {
 			return err
 		}
 		finalStatus := order.MatchComplete
-		dc.tradeMtx.Lock()
+		tracker.mtx.Lock()
 		for _, match := range tracker.matches {
 			side, status := match.Match.Side, match.Match.Status
-			client.log("%s: trade %s paused at %s", token(match.ID()), status)
+			client.log("trade %s paused at %s", token(match.ID()), status)
 			if side == order.Maker {
 				client.log("%s: disconnecting DEX before redeeming Taker's swap", side)
 				client.dc().connMaster.Disconnect()
@@ -292,7 +292,7 @@ func testMakerGhostingAfterTakerRedeem(t *testing.T) {
 			}
 			match.failErr = nil // remove next action blocker on match
 		}
-		dc.tradeMtx.Unlock()
+		tracker.mtx.Unlock()
 		// force next action since trade.tick() will not be called for disconnected dcs.
 		tracker.tick()
 		return monitorTrackedTrade(ctx, client, tracker, order.TakerSwapCast, finalStatus)
@@ -481,13 +481,12 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 
 	// Save last processed status for each match to accurately identify status
 	// changes and prevent re-processing the same status for a match.
-	dc := client.dc()
-	dc.tradeMtx.RLock()
+	tracker.mtx.RLock()
 	lastProcessedStatus := make(map[order.MatchID]order.MatchStatus, len(tracker.matches))
 	for _, match := range tracker.matches {
 		lastProcessedStatus[match.id] = initialStatus
 	}
-	dc.tradeMtx.RUnlock()
+	tracker.mtx.RUnlock()
 
 	// run a repeated check for match status changes to mine blocks as necessary.
 	maxTradeDuration := 2 * time.Minute
@@ -597,8 +596,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 		return err
 	}
 
-	dc := client.dc()
-	dc.tradeMtx.RLock()
+	tracker.mtx.RLock()
 	for _, match := range tracker.matches {
 		if !hasRefundableSwap(match) {
 			continue
@@ -620,7 +618,7 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 			furthestLockTime = swapLockTime
 		}
 	}
-	dc.tradeMtx.RUnlock()
+	tracker.mtx.RUnlock()
 
 	if ctx.Err() != nil { // context canceled
 		return nil

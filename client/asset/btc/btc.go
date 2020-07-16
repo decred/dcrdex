@@ -1190,12 +1190,12 @@ func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 	return bestBlockMedianTime.After(contractExpiry), contractExpiry, nil
 }
 
-// FindRedemption attempts to find the input that spends the specified coins,
-// and return the secret key when it does.
-// Every input of every block starting at the contract block is scanned in a
-// background process until the spending input is found or an error occurs.
-// The result channel is used to notify callers when the secret key is found
-// or if an error occurs during the search.
+// FindRedemption attempts to find the inputs that spend the specified coins,
+// and return the secret key for each contract when it does.
+// Every input of every block starting at the earliest mined contract block is
+// scanned in a goroutine until the spending inputs are found or an error occurs.
+// The result channel is used to notify the caller when a secret key is found for
+// a contract or if an error occurs during the search.
 //
 // NOTE: FindRedemption is necessary to deal with the case of a maker
 // redeeming but not forwarding their redemption information. The DEX does not
@@ -1216,9 +1216,6 @@ func (btc *ExchangeWallet) FindRedemption(coinIDs []dex.Bytes, resultChan chan a
 	btc.findRedemptionMtx.Lock()
 	defer btc.findRedemptionMtx.Unlock()
 	for _, coinID := range coinIDs {
-		if _, inQueue := btc.findRedemptionQueue[coinID.String()]; inQueue {
-			continue
-		}
 		txHash, vout, err := decodeCoinID(coinID)
 		if err != nil {
 			handleError(coinID, fmt.Errorf("cannot decode contract coin id: %v", err))
@@ -1258,10 +1255,11 @@ func (btc *ExchangeWallet) FindRedemption(coinIDs []dex.Bytes, resultChan chan a
 
 // processFindRedemptionRequests attempts to find spending info for contracts
 // by scanning every input of every block starting from the block in which the
-// contract was mined (and mempool txs for unmined contracts). If the spending
-// input for a contract is not found after scanning the best block, this method
-// waits for new blocks to scan to ensure that spending info is found for all
-// contracts, parsing and returning the secret from the spending input's sig.
+// contract was mined (and mempool txs for unmined contracts).
+// If the spending input for any contract is not found after searching the best
+// block, this method waits for new blocks to search to ensure that redemption
+// info is found for all contracts, parsing and returning the secret from the
+// spending input's sig.
 func (btc *ExchangeWallet) processFindRedemptionRequests(ctx context.Context) {
 	processingQueue := make(map[string]findRedemptionReq)
 
@@ -1339,9 +1337,14 @@ func (btc *ExchangeWallet) processFindRedemptionRequests(ctx context.Context) {
 		var newUnminedContracts bool
 		btc.findRedemptionMtx.Lock()
 		for k, req := range btc.findRedemptionQueue {
+			// Repeated requests for contracts already in the processing
+			// queue should not affect the nextBlockToSearch. We do not
+			// want to revert to the block in which the contract was mined
+			// as we would have searched that block upwards in previous
+			// iterations.
+			_, previouslyProcessed := processingQueue[k]
 			processingQueue[k] = req
-			if req.contractBlock == nil {
-				newUnminedContracts = true
+			if previouslyProcessed || req.contractBlock == nil {
 				continue
 			}
 			if nextBlockToSearch == nil || req.contractBlock.height < nextBlockToSearch.height {

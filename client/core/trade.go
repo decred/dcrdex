@@ -112,7 +112,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 	}
 
 	ord := dbOrder.Order
-	return &trackedTrade{
+	t := &trackedTrade{
 		Order:               ord,
 		metaData:            dbOrder.MetaData,
 		dc:                  dc,
@@ -131,6 +131,8 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		epochLen:            epochLen,
 		fromAssetID:         fromID,
 	}
+	go t.waitForRedemptions()
+	return t
 }
 
 // rate returns the order's rate, or zero if a market or cancel order.
@@ -703,20 +705,26 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	return false
 }
 
-// shouldBeginFindRedemption will be true if the we are the Taker on this
-// match, we've broadcasted a swap, our swap has gotten the required confs,
-// we've not been notified of Maker's redeem and we've not refunded our swap.
+// shouldBeginFindRedemption will be true if we are the Taker on this match,
+// we've broadcasted a swap, our swap has gotten the required confs, we've
+// not been notified of Maker's redeem and we've not refunded our swap.
 func (t *trackedTrade) shouldBeginFindRedemption(match *matchTracker) bool {
 	dbMatch, _, proof, _ := match.parts()
 	swapCoinID := proof.TakerSwap
-	if match.failErr != nil || dbMatch.Side != order.Taker || swapCoinID == nil ||
-		t.findRedemptionQueue[swapCoinID.String()] != nil || proof.RefundCoin != nil {
+	if match.failErr != nil || dbMatch.Side != order.Taker || len(swapCoinID) == 0 ||
+		len(proof.MakerRedeem) > 0 || len(proof.RefundCoin) > 0 {
+		log.Tracef(
+			"Not finding redemption for match %v: side = %s, failErr = %v, TakerSwap = %v, RefundCoin = %v",
+			match.id, dbMatch.Side, match.failErr, proof.TakerSwap, proof.RefundCoin)
+		return false
+	}
+	if _, alreadyFinding := t.findRedemptionQueue[swapCoinID.String()]; alreadyFinding {
 		return false
 	}
 
 	confs, err := t.wallets.fromWallet.Confirmations([]byte(swapCoinID))
 	if err != nil {
-		log.Errorf("error getting confirmations for match %s on order %s for coin %s",
+		log.Errorf("error getting confirmations for match %s on order %s for taker swap %s",
 			match.id, t.UID(), swapCoinID)
 		return false
 	}
@@ -1006,7 +1014,7 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID) error {
 	// Notify the user of the failed match.
 	corder, _ := t.coreOrderInternal() // no cancel order
 	t.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
-		t.token()), db.WarningLevel, corder))
+		matchID), db.WarningLevel, corder))
 
 	// Send out a data notification with the revoke information.
 	cancelOrder := &Order{
@@ -1569,8 +1577,9 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	// Validate that this request satisfies expected preconditions if
 	// we're the Taker. Not necessary if we're maker as redemption
 	// requests are pretty much just a formality for Maker. Also, if
-	// the order was loaded from the DB and we've already redeemed,
-	// the counterSwap (AuditInfo) will not have been retrieved.
+	// the order was loaded from the DB and we've already redeemed
+	// Taker's swap, the counterSwap (AuditInfo for Taker's swap) will
+	// not have been retrieved.
 	if dbMatch.Side == order.Taker {
 		switch {
 		case match.counterSwap == nil:
@@ -1578,7 +1587,7 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 		case dbMatch.Status == order.TakerSwapCast:
 			// redemption requests should typically arrive when the match
 			// is at TakerSwapCast
-		case dbMatch.Status > order.TakerSwapCast && auth.RedemptionSig == nil:
+		case dbMatch.Status > order.TakerSwapCast && len(auth.RedemptionSig) == 0:
 			// status might have moved 1+ steps forward if this redemption
 			// request is received after we've already found the redemption
 		default:

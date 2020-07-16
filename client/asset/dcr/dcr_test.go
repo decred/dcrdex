@@ -1325,7 +1325,7 @@ func TestFindRedemption(t *testing.T) {
 
 	_, bestBlockHeight, err := node.GetBestBlock()
 	if err != nil {
-		t.Fatalf("unexpected best block error: %v", err)
+		t.Fatalf("unexpected GetBestBlock error: %v", err)
 	}
 	contractHeight := bestBlockHeight + 1
 	contractTxid := "e1b7c47df70d7d8f4c9c26f8ba9a59102c10885bd49024d32fdef08242f0c26c"

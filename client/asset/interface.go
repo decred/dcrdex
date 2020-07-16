@@ -103,11 +103,11 @@ type Wallet interface {
 	// lock. For example, in Bitcoin the median of the last 11 blocks must be
 	// past the expiry time, not the current time.
 	LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
-	// FindRedemption attempts to find the input that spends the specified coins,
-	// and return the secret key when it does.
+	// FindRedemption attempts to find the inputs that spend the specified coins,
+	// and return the secret key for each contract when it does.
 	// For typical blockchains, every input of every block starting at the
-	// contract block will need to be scanned until the spending input is found.
-	// The result channel is used to notify callers when the secret key is found
+	// contract block will need to be scanned until a spending input is found.
+	// The result channel is used to notify callers when a secret key is found
 	// or if an error occurs during the search.
 	//
 	// NOTE: FindRedemption is necessary to deal with the case of a maker
