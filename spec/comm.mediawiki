@@ -189,17 +189,11 @@ of their penalization.
 {|
 ! field   !! type   !! description
 |-
-| matches          || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
+| matches || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
 |-
-| broken rule      || int || the client's last broken [[community.mediawiki/#Rules_of_Community_Conduct|rule]]. omitted if in good standing
+| penalty || object || the client's most recent [[community.mediawiki/#Rules_of_Community_Conduct|broken rule]]. omitted if in good standing
 |-
-| penalty time     || int || the UNIX time in milliseconds at which the penalization occured. omitted if in good standing
-|-
-| penalty duration || int || the duration in milliseconds of the penalization. omitted if in good standing
-|-
-| penalty details  || string || a message describing the penalization. omitted if in good standing
-|-
-| sig              || string || hex-encoded server's signature of the serialized connection data
+| sig     || string || hex-encoded server's signature of the serialized connection data
 |}
 
 ==HTTP==
