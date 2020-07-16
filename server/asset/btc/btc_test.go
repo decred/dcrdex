@@ -363,8 +363,9 @@ func (t testNode) GetBestBlockHash() (*chainhash.Hash, error) {
 }
 
 // Create a btcjson.GetTxOutResult such as is returned from GetTxOut.
-func testGetTxOut(confirmations int64, pkScript []byte) *btcjson.GetTxOutResult {
+func testGetTxOut(confirmations, value int64, pkScript []byte) *btcjson.GetTxOutResult {
 	return &btcjson.GetTxOutResult{
+		Value:         float64(value) / 1e8,
 		Confirmations: confirmations,
 		ScriptPubKey: btcjson.ScriptPubKeyResult{
 			Hex: hex.EncodeToString(pkScript),
@@ -400,7 +401,7 @@ func testRawTransactionVerbose(msgTx *wire.MsgTx, txid, blockHash *chainhash.Has
 func testAddTxOut(msgTx *wire.MsgTx, vout uint32, txHash, blockHash *chainhash.Hash, blockHeight, confirmations int64) *btcjson.GetTxOutResult {
 	testChainMtx.Lock()
 	defer testChainMtx.Unlock()
-	txOut := testGetTxOut(confirmations, msgTx.TxOut[vout].PkScript)
+	txOut := testGetTxOut(confirmations, msgTx.TxOut[vout].Value, msgTx.TxOut[vout].PkScript)
 	testChain.txOuts[txOutID(txHash, vout)] = txOut
 	testAddTxVerbose(msgTx, txHash, blockHash, confirmations)
 	return txOut
@@ -1003,13 +1004,14 @@ func TestUTXOs(t *testing.T) {
 	}
 
 	// CASE 11: A swap contract
-	val := uint64(5)
+	val := int64(5)
 	cleanTestChain()
 	txHash = randomHash()
 	blockHash = randomHash()
-	swap := testMsgTxSwapInit(int64(val))
+	swap := testMsgTxSwapInit(val)
 	testAddBlockVerbose(blockHash, nil, 1, txHeight)
-	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1).Value = float64(val) / 1e8
+	btcVal := btcutil.Amount(val).ToBTC()
+	testAddTxOut(swap.tx, 0, txHash, blockHash, int64(txHeight), 1).Value = btcVal
 	verboseTx := testChain.txRaws[*txHash]
 
 	spentTxHash := randomHash()
@@ -1020,7 +1022,8 @@ func TestUTXOs(t *testing.T) {
 	spentTx := testAddTxVerbose(spentMsg.tx, spentTxHash, blockHash, 2)
 	spentTx.Vout = []btcjson.Vout{testVout(1, nil)}
 	swapOut := swap.tx.TxOut[0]
-	verboseTx.Vout = append(verboseTx.Vout, testVout(float64(swapOut.Value)/btcToSatoshi, swapOut.PkScript))
+	btcVal = btcutil.Amount(swapOut.Value).ToBTC()
+	verboseTx.Vout = append(verboseTx.Vout, testVout(btcVal, swapOut.PkScript))
 	utxo, err = btc.utxo(txHash, 0, swap.contract)
 	if err != nil {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
@@ -1236,18 +1239,41 @@ func TestAuxiliary(t *testing.T) {
 	cleanTestChain()
 	maturity := int64(testParams.CoinbaseMaturity)
 	msg := testMakeMsgTx(false)
+	valueSats := int64(29e6)
+	msg.tx.TxOut[0].Value = valueSats
 	txid := hex.EncodeToString(randomBytes(32))
 	txHash, _ := chainhash.NewHashFromStr(txid)
 	txHeight := rand.Uint32()
 	blockHash := testAddBlockVerbose(nil, nil, 1, txHeight)
 	testAddTxOut(msg.tx, msg.vout, txHash, blockHash, int64(txHeight), maturity)
 	coinID := toCoinID(txHash, msg.vout)
+
+	verboseTx := testChain.txRaws[*txHash]
+	vout := btcjson.Vout{
+		Value: 0.29,
+		N:     0,
+		//ScriptPubKey
+	}
+	verboseTx.Vout = append(verboseTx.Vout, vout)
+
 	utxo, err := btc.FundingCoin(coinID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if utxo.TxID() != txid {
 		t.Fatalf("utxo txid doesn't match")
+	}
+
+	if utxo.(*UTXO).value != uint64(msg.tx.TxOut[0].Value) {
+		t.Errorf("incorrect value. got %d, wanted %d", utxo.(*UTXO).value, msg.tx.TxOut[0].Value)
+	}
+
+	voutVal, err := btc.prevOutputValue(txid, 0)
+	if err != nil {
+		t.Fatalf("prevOutputValue: %v", err)
+	}
+	if voutVal != uint64(msg.tx.TxOut[0].Value) {
+		t.Errorf("incorrect value. got %d, wanted %d", utxo.(*UTXO).value, msg.tx.TxOut[0].Value)
 	}
 }
 
