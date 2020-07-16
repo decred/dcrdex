@@ -425,7 +425,7 @@ func (db *BoltDB) newestOrders(n int, filter func(*bbolt.Bucket) bool) ([]*dexdb
 func (db *BoltDB) filteredOrders(filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
 	return orders, db.ordersView(func(master *bbolt.Bucket) error {
-		master.ForEach(func(oid, _ []byte) error {
+		return master.ForEach(func(oid, _ []byte) error {
 			oBkt := master.Bucket(oid)
 			if oBkt == nil {
 				return fmt.Errorf("order %x bucket is not a bucket", oid)
@@ -439,7 +439,6 @@ func (db *BoltDB) filteredOrders(filter func(*bbolt.Bucket) bool) ([]*dexdb.Meta
 			}
 			return nil
 		})
-		return nil
 	})
 }
 
@@ -476,12 +475,17 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding order proof for %x: %v", oid, err)
 	}
+	// Stored nil gets loaded as []byte{}.
+	changeCoin := oBkt.Get(changeKey)
+	if len(changeCoin) == 0 {
+		changeCoin = nil
+	}
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:      *proof,
 			Status:     order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
 			Host:       string(oBkt.Get(dexKey)),
-			ChangeCoin: oBkt.Get(changeKey),
+			ChangeCoin: changeCoin,
 		},
 		Order: ord,
 	}, nil
@@ -584,7 +588,7 @@ func (db *BoltDB) MatchesForOrder(oid order.OrderID) ([]*dexdb.MetaMatch, error)
 func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaMatch, error) {
 	var matches []*dexdb.MetaMatch
 	return matches, db.matchesView(func(master *bbolt.Bucket) error {
-		master.ForEach(func(k, _ []byte) error {
+		return master.ForEach(func(k, _ []byte) error {
 			mBkt := master.Bucket(k)
 			if mBkt == nil {
 				return fmt.Errorf("match %x bucket is not a bucket", k)
@@ -624,7 +628,6 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 			}
 			return nil
 		})
-		return nil
 	})
 }
 

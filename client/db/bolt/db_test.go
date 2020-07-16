@@ -1,6 +1,7 @@
 package bolt
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -274,7 +275,7 @@ func TestWallets(t *testing.T) {
 	boltdb.UpdateBalance(w.ID(), &newBal)
 	reW, err := boltdb.Wallet(w.ID())
 	if err != nil {
-		t.Fatalf("failed to retreive wallet for balance check")
+		t.Fatalf("failed to retrieve wallet for balance check")
 	}
 	dbtest.MustCompareBalances(t, reW.Balance, &newBal)
 	if !reW.Balance.Stamp.After(w.Balance.Stamp) {
@@ -509,25 +510,80 @@ func TestOrders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error setting order status: %v", err)
 	}
-	mord, _ = boltdb.Order(activeOrder.ID())
+	mord, err = boltdb.Order(activeOrder.ID())
 	if mord.MetaData.Status != order.OrderStatusExecuted {
 		t.Fatalf("failed to update order status")
+	}
+	if err != nil {
+		t.Fatalf("failed to load order: %v", err)
 	}
 	// random id should be an error
 	err = boltdb.UpdateOrderStatus(ordertest.RandomOrderID(), order.OrderStatusExecuted)
 	if err == nil {
 		t.Fatalf("no error encountered for updating unknown order's status")
 	}
+}
 
-	// Set the change coin.
-	err = boltdb.SetChangeCoin(activeOrder.ID(), []byte("abc"))
+func TestOrderChange(t *testing.T) {
+	boltdb := newTestDB(t)
+	// Create an account to use.
+	acct := dbtest.RandomAccountInfo()
+	err := boltdb.CreateAccount(acct)
+	if err != nil {
+		t.Fatalf("CreateAccount error: %v", err)
+	}
+
+	ord := randOrderForMarket(randU32(), randU32())
+	mordIn := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: 3,
+			Host:   acct.Host,
+			Proof:  db.OrderProof{DEXSig: randBytes(73)},
+		},
+		Order: ord,
+	}
+	// fmt.Printf("%#v\n", mordIn.MetaData.ChangeCoin) // order.CoinID(nil)
+
+	err = boltdb.UpdateOrder(mordIn)
+	if err != nil {
+		t.Fatalf("error inserting order: %v", err)
+	}
+
+	mord, err := boltdb.Order(ord.ID())
+	if err != nil {
+		t.Fatalf("unable to retrieve order by id")
+	}
+	if mord.MetaData.ChangeCoin != nil {
+		t.Errorf("ChangeCoin was not nil: %#v", mord.MetaData.ChangeCoin)
+	}
+
+	// non-nil empty loads as nil too
+	err = boltdb.SetChangeCoin(ord.ID(), []byte{})
 	if err != nil {
 		t.Fatalf("error setting change coin: %v", err)
 	}
-	mord, _ = boltdb.Order(activeOrder.ID())
-	if string(mord.MetaData.ChangeCoin) != "abc" {
-		t.Fatalf("failed to set change coin")
+	mord, err = boltdb.Order(ord.ID())
+	if err != nil {
+		t.Fatalf("failed to load order: %v", err)
 	}
+	if mord.MetaData.ChangeCoin != nil {
+		t.Fatalf("failed to set change coin, got %#v, want <nil>", mord.MetaData.ChangeCoin)
+	}
+
+	// now some data
+	someChange := []byte{1, 2, 3}
+	err = boltdb.SetChangeCoin(ord.ID(), someChange)
+	if err != nil {
+		t.Fatalf("error setting change coin: %v", err)
+	}
+	mord, err = boltdb.Order(ord.ID())
+	if err != nil {
+		t.Fatalf("failed to load order: %v", err)
+	}
+	if !bytes.Equal(someChange, mord.MetaData.ChangeCoin) {
+		t.Fatalf("failed to set change coin, got %#v, want %#v", mord.MetaData.ChangeCoin, someChange)
+	}
+
 	// random id should be an error
 	err = boltdb.SetChangeCoin(ordertest.RandomOrderID(), []byte("abc"))
 	if err == nil {
@@ -690,7 +746,7 @@ func TestNotifications(t *testing.T) {
 
 	for _, note := range fetched {
 		if !note.Ack {
-			t.Fatalf("order acknowledgedgement not recorded")
+			t.Fatalf("order acknowledgement not recorded")
 		}
 	}
 
