@@ -366,7 +366,7 @@ func (msg *Message) UnmarshalResult(result interface{}) error {
 		return err
 	}
 	if resp.Error != nil {
-		return fmt.Errorf("rpc error: %d: %s", resp.Error.Code, resp.Error.Message)
+		return fmt.Errorf("rpc error: %w", resp.Error)
 	}
 	return json.Unmarshal(resp.Result, result)
 }

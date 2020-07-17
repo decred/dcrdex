@@ -7,7 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"decred.org/dcrdex/server/account"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -19,6 +19,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"decred.org/dcrdex/server/account"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/comms"
@@ -1505,8 +1507,9 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 				authenticationErrors = append(authenticationErrors, "dex authentication failed")
 			}
 			if dexStat.AcctFound != nil && !*dexStat.AcctFound {
+				accountIDAsBytes, _ := hex.DecodeString(dexStat.AcctID)
 				var accountID account.AccountID
-				copy(accountID[:], dexStat.AcctID)
+				copy(accountID[:], accountIDAsBytes)
 				acctInfo, err := c.db.Account(accountID)
 				if err != nil {
 					authenticationErrors = append(authenticationErrors, err.Error())
@@ -1520,7 +1523,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		}
 		authenticatedAtLeastOnce = true
 	}
-	if !authenticatedAtLeastOnce {
+	if !authenticatedAtLeastOnce && len(authenticationErrors) > 1 {
 		return nil, errors.New(strings.Join(authenticationErrors, "\n"))
 	}
 
@@ -1633,7 +1636,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				}
 			}
 			c.reFee(dcrWallet, dc)
-			continue
+			//continue
 		}
 
 		wg.Add(1)
@@ -2108,7 +2111,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// Check the response error.
 	err = <-errChan
 	if err != nil {
-		return fmt.Errorf("'connect' error: %v", err)
+		return fmt.Errorf("'connect' error: %w", err)
 	}
 
 	// Check the servers response signature.
@@ -2148,11 +2151,17 @@ func (c *Core) initialize() {
 	if err != nil {
 		log.Errorf("Error retrieve accounts from database: %v", err)
 	}
+	var enabledAccts []*db.AccountInfo
 	var wg sync.WaitGroup
 	for _, acct := range accts {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
+			if acct.Disabled {
+				log.Infof("Account with id %v disabled", acct.ID)
+				return
+			}
+			enabledAccts = append(enabledAccts, acct)
 			dc, err := c.connectDEX(acct)
 			if err != nil {
 				log.Errorf("error connecting to DEX %s: %v", acct.Host, err)
@@ -2181,6 +2190,8 @@ func (c *Core) initialize() {
 			log.Debugf("dex connection to %s ready", acct.Host)
 		}(acct)
 	}
+	//Discard disabled accounts
+	accts = enabledAccts
 	// If there were accounts, wait until they are loaded and log a messsage.
 	if len(accts) > 0 {
 		go func() {

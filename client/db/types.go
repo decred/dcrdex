@@ -82,13 +82,18 @@ type AccountInfo struct {
 
 // Encode the AccountInfo as bytes.
 func (ai *AccountInfo) Encode() []byte {
+	Disabled := encode.ByteFalse
+	if ai.Disabled {
+		Disabled = encode.ByteTrue
+	}
 	return dbBytes{0}.
 		AddData([]byte(ai.Host)).
 		AddData(ai.EncKey).
 		AddData(ai.DEXPubKey.Serialize()).
 		AddData(ai.FeeCoin).
 		AddData(ai.Cert).
-		AddData(ai.ID[:])
+		AddData(ai.ID[:]).
+		AddData(Disabled)
 }
 
 // DecodeAccountInfo decodes the versioned blob into an *AccountInfo. The byte
@@ -106,8 +111,8 @@ func DecodeAccountInfo(b []byte) (*AccountInfo, error) {
 }
 
 func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
-	if len(pushes) != 6 {
-		return nil, fmt.Errorf("decodeAccountInfo: expected 5 data pushes, got %d", len(pushes))
+	if len(pushes) != 7 {
+		return nil, fmt.Errorf("decodeAccountInfo: expected 7 data pushes, got %d", len(pushes))
 	}
 	hostB, keyB, dexB := pushes[0], pushes[1], pushes[2]
 	coinB, certB := pushes[3], pushes[4]
@@ -124,6 +129,7 @@ func decodeAccountInfo_v0(pushes [][]byte) (*AccountInfo, error) {
 		FeeCoin:   coinB,
 		Cert:      certB,
 		ID:        id,
+		Disabled:  bytes.Equal(pushes[6], encode.ByteTrue),
 	}, nil
 }
 

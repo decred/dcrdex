@@ -252,9 +252,8 @@ func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 // Account gets the AccountInfo associated with the specified DEX address.
 func (db *BoltDB) Account(accountID account.AccountID) (*dexdb.AccountInfo, error) {
 	var acctInfo *dexdb.AccountInfo
-	acctKey := accountInfoKey(accountID)
 	return acctInfo, db.acctsView(func(accts *bbolt.Bucket) error {
-		acct := accts.Bucket(acctKey)
+		acct := accts.Bucket(accountInfoKey(accountID))
 		if acct == nil {
 			return fmt.Errorf("account not found for %s", accountID)
 		}
@@ -310,7 +309,7 @@ func accountInfoKey(accountID account.AccountID) []byte {
 
 // DisableAccount sets account info disabled flag to true
 func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
-	acctKey := []byte(ai.Host)
+	acctKey := accountInfoKey(ai.ID)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		acct := accts.Bucket(acctKey)
 		if acct == nil {

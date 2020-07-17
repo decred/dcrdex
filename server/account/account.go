@@ -32,6 +32,11 @@ func (aid AccountID) String() string {
 	return hex.EncodeToString(aid[:])
 }
 
+func (aid AccountID) Bytes() []byte {
+	bytes, _ := hex.DecodeString(aid.String())
+	return bytes
+}
+
 // MarshalJSON satisfies the json.Marshaller interface, and will marshal the
 // id to a hex string.
 func (aid AccountID) MarshalJSON() ([]byte, error) {

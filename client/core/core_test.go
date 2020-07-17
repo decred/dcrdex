@@ -1459,7 +1459,7 @@ func TestLogin(t *testing.T) {
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
 	_, err = tCore.Login(tPW)
-	if err != nil || rig.acct.authed() {
+	if err == nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
 	}
 	if rig.acct.locked() {
@@ -1475,9 +1475,12 @@ func TestLogin(t *testing.T) {
 		return nil
 	})
 	_, err = tCore.Login(tPW)
-	// Should be no error, but also not authed. Error is sent and logged
-	// as a notification.
-	if err != nil || rig.acct.authed() {
+	// Should be an error.
+	if err == nil {
+		t.Fatalf("no error after 'connect' error")
+	}
+	// Should not be authed.
+	if rig.acct.authed() {
 		t.Fatalf("account authed after 'connect' error")
 	}
 
