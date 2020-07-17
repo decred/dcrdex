@@ -2670,7 +2670,7 @@ func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return fmt.Errorf("notify unmarshal error: %v", err)
 	}
-	txt = fmt.Sprintf("Message from DEX at %s: %s", dc.acct.host, txt)
+	txt = fmt.Sprintf("Message from DEX at %s:\n\n\"%s\"\n", dc.acct.host, txt)
 	note := db.NewNotification("notify", dc.acct.host, txt, db.WarningLevel)
 	c.notify(&note)
 	return nil

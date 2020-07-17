@@ -49,7 +49,7 @@ The server will provide an HTTP API for performing various adminstrative tasks.
 
 '''API Endpoints'''
 {|
-! path      !! type !! description
+! path      !! method !! description
 |-
 | /config   || GET || the current DEX configuration. See [[fundamentals.mediawiki/#Configuration_Data_Request|Configuration Data Request]]
 |-

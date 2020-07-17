@@ -267,6 +267,11 @@ func (s *Server) apiNotifyAll(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no message to broadcast", http.StatusBadRequest)
 		return
 	}
+	// Remove trailing newline if present. A newline is added by the curl
+	// command when sending from file.
+	if body[len(body)-1] == '\n' {
+		body = body[:len(body)-1]
+	}
 	if len(body) > maxUInt16 {
 		http.Error(w, fmt.Sprintf("cannot send messages larger than %d bytes", maxUInt16), http.StatusBadRequest)
 		return
