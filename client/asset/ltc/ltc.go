@@ -78,9 +78,9 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	// Designate the clone ports. These will be overwritten by any explicit
 	// settings in the configuration file.
 	ports := dexbtc.NetPorts{
-		Mainnet: "9333",
-		Testnet: "19335",
-		Simnet:  "18444",
+		Mainnet: "9332",
+		Testnet: "19332",
+		Simnet:  "19443",
 	}
 	cloneCFG := &btc.BTCCloneCFG{
 		WalletCFG:         cfg,
