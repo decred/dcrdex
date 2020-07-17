@@ -144,6 +144,9 @@ const (
 	// client of an upcoming trade resumption. This is part of the
 	// subscription-based orderbook notification feed.
 	ResumptionRoute = "resumption"
+	// NotifyRoute is the DEX-originating notification-type message
+	// delivering text messages from the operator.
+	NotifyRoute = "notify"
 )
 
 type Bytes = dex.Bytes

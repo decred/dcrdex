@@ -2668,6 +2668,19 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 	return nil
 }
 
+// handleNotifyMsg is called when a notify notification is received.
+func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var txt string
+	err := msg.Unmarshal(&txt)
+	if err != nil {
+		return fmt.Errorf("notify unmarshal error: %v", err)
+	}
+	txt = fmt.Sprintf("Message from DEX at %s:\n\n\"%s\"\n", dc.acct.host, txt)
+	note := db.NewNotification("notify", dc.acct.host, txt, db.WarningLevel)
+	c.notify(&note)
+	return nil
+}
+
 // routeHandler is a handler for a message from the DEX.
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
@@ -2686,6 +2699,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.UnbookOrderRoute:     handleUnbookOrderMsg,
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
 	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
+	msgjson.NotifyRoute:          handleNotifyMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and

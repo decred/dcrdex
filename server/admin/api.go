@@ -8,18 +8,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 	"github.com/go-chi/chi"
 )
 
 const (
-	pongStr = "pong"
+	pongStr   = "pong"
+	maxUInt16 = int(^uint16(0))
 )
 
 // writeJSON marshals the provided interface and writes the bytes to the
@@ -250,4 +253,34 @@ func (s *Server) apiUnban(w http.ResponseWriter, r *http.Request) {
 		UnbanTime: APITime{time.Now()},
 	}
 	writeJSON(w, res)
+}
+
+// apiNotifyAll is the handler for the '/notifyall' API request.
+func (s *Server) apiNotifyAll(w http.ResponseWriter, r *http.Request) {
+	body, err := ioutil.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unable to read request body: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if len(body) == 0 {
+		http.Error(w, "no message to broadcast", http.StatusBadRequest)
+		return
+	}
+	// Remove trailing newline if present. A newline is added by the curl
+	// command when sending from file.
+	if body[len(body)-1] == '\n' {
+		body = body[:len(body)-1]
+	}
+	if len(body) > maxUInt16 {
+		http.Error(w, fmt.Sprintf("cannot send messages larger than %d bytes", maxUInt16), http.StatusBadRequest)
+		return
+	}
+	msg, err := msgjson.NewNotification(msgjson.NotifyRoute, string(body))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("unable to create notification: %v", err), http.StatusInternalServerError)
+		return
+	}
+	s.core.NotifyAll(msg)
+	w.WriteHeader(http.StatusOK)
 }
