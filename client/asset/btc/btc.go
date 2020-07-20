@@ -1354,6 +1354,8 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	if changeAdded {
 		btc.addChange(txHash.String(), uint32(changeIdx))
 		change = newOutput(btc.node, txHash, uint32(changeIdx), uint64(changeOutput.Value), nil)
+	} else {
+		changeScript = nil
 	}
 	return msgTx, change, changeScript, nil
 }

@@ -432,6 +432,7 @@ type TXCWallet struct {
 	fundErr        error
 	addrErr        error
 	signCoinErr    error
+	lastSwaps      *asset.Swaps
 	swapReceipts   []asset.Receipt
 	auditInfo      asset.AuditInfo
 	auditErr       error
@@ -518,7 +519,8 @@ func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 	return w.fundingCoins, w.fundingCoinErr
 }
 
-func (w *TXCWallet) Swap(swap *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
+func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
+	w.lastSwaps = swaps
 	return w.swapReceipts, w.changeCoin, nil
 }
 
@@ -2051,6 +2053,7 @@ func TestTradeTracking(t *testing.T) {
 	qty := 2*matchSize + cancelledQty
 	rate := tBTC.RateStep * 10
 	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep)
+	lo.Force = order.StandingTiF
 	// fundCoinDcrID := encode.RandomBytes(36)
 	// lo.Coins = []order.CoinID{fundCoinDcrID}
 	loid := lo.ID()
@@ -2400,7 +2403,6 @@ func TestTradeTracking(t *testing.T) {
 		OrderID:  coid[:],
 		MatchID:  mid[:],
 		Quantity: cancelledQty,
-		Rate:     rate,
 		Address:  "testaddr",
 	}
 	sign(tDexPriv, m1)
@@ -2424,10 +2426,15 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("change coin not returned")
 	}
 
+	resetMatches := func() {
+		tracker.matches = make(map[order.MatchID]*matchTracker)
+		tracker.change = nil
+		tracker.metaData.ChangeCoin = nil
+	}
+
 	// If there is no change coin and no matches, the funding coin should be
 	// returned instead.
-	tracker.matches = make(map[order.MatchID]*matchTracker)
-	tracker.change = nil
+	resetMatches()
 	// The change coins would also have been added to the coins map, so delete
 	// that too.
 	delete(tracker.coins, tDcrWallet.changeCoin.String())
@@ -2436,7 +2443,26 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("handleMatchRoute error (cancel without swaps): %v", err)
 	}
 	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), fundCoinDcrID) {
-		t.Fatalf("change coin not returned")
+		t.Fatalf("change coin not returned (cancel without swaps)")
+	}
+
+	// If the order is an immediate order, the asset.Swaps.LockChange should be
+	// false regardless of whether the order is filled.
+	resetMatches()
+	tracker.cancel = nil
+	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	msgMatch.Side = uint8(order.Maker)
+	sign(tDexPriv, msgMatch)
+	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+
+	tracker.metaData.Status = order.OrderStatusEpoch
+	lo.Force = order.ImmediateTiF
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("handleMatchRoute error (immediate partial fill): %v", err)
+	}
+	if tDcrWallet.lastSwaps.LockChange != false {
+		t.Fatalf("change locked for executed non-standing order (immediate partial fill)")
 	}
 }
 

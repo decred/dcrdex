@@ -837,14 +837,13 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	swaps := new(asset.Swaps)
 	trade := t.Trade()
 	// These matches may have different fee rates, matched in different epochs.
-	var highestFeeRate, swappedQty uint64
+	var highestFeeRate uint64
 	for _, match := range matches {
 		dbMatch, _, proof, auth := match.parts()
 		value := dbMatch.Quantity
 		if !match.trade.Sell {
 			value = calc.BaseToQuote(dbMatch.Rate, dbMatch.Quantity)
 		}
-		swappedQty += value
 		matchTime := encode.UnixTimeMilli(int64(auth.MatchStamp))
 		lockTime := matchTime.Add(t.lockTimeTaker).UTC().Unix()
 		if dbMatch.Side == order.Maker {
@@ -881,9 +880,9 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	// If these are the last swaps, and the order is filled or canceled or
 	// revoked, then we don't need to lock the change coin.
 	isLastSwaps := len(matches)+alreadySwapped == len(t.matches)
-	isFilled := trade.Filled()+swappedQty == trade.Quantity
-	isCanceled := t.metaData.Status == order.OrderStatusCanceled || t.metaData.Status == order.OrderStatusRevoked
-	skipChange := isLastSwaps && (isFilled || isCanceled)
+	isFilled := trade.Filled() == trade.Quantity
+	notMatchable := t.metaData.Status > order.OrderStatusBooked
+	skipChange := isLastSwaps && (isFilled || notMatchable)
 	if skipChange {
 		t.changeLocked = false
 	} else {
