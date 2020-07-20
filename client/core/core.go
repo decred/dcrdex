@@ -1451,11 +1451,11 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 // orders and orders with active matches are loaded. Also, only active matches
 // are loaded, even if there are inactive matches for the same order, but it may
 // be desirable to load all matches, so this behavior may change.
-func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) int {
+func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 	failed := make(map[uint32]struct{})
+	relocks := make(assetCounter)
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
-	var loaded int
 	for _, dc := range c.conns {
 		// loadDBTrades can add to the failed map.
 		ready, err := c.loadDBTrades(dc, crypter, failed)
@@ -1464,15 +1464,17 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) int {
 			c.notify(newOrderNote("Order load failure", details, db.ErrorLevel, nil))
 		}
 		if len(ready) > 0 {
-			err = c.resumeTrades(dc, ready)
+			locks, err := c.resumeTrades(dc, ready)
 			if err != nil {
 				details := fmt.Sprintf("Some active orders failed to resume: %v", err)
 				c.notify(newOrderNote("Order resumption error", details, db.ErrorLevel, nil))
 			}
+			relocks.absorb(locks)
 		}
 		loaded += len(ready)
 		dc.refreshMarkets()
 	}
+	c.updateBalances(relocks)
 	return loaded
 }
 
@@ -2216,13 +2218,14 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 // resumeTrades recovers the states of active trades and matches, including
 // loading audit info needed to finish swaps and funding coins needed to create
 // new matches on an order.
-func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) error {
+func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) (assetCounter, error) {
 	var tracker *trackedTrade
 	notifyErr := func(subject, s string, a ...interface{}) {
 		detail := fmt.Sprintf(s, a...)
 		corder, _ := tracker.coreOrder()
 		c.notify(newOrderNote(subject, detail, db.ErrorLevel, corder))
 	}
+	relocks := make(assetCounter)
 	dc.tradeMtx.Lock()
 	defer dc.tradeMtx.Unlock()
 	for _, tracker = range trackers {
@@ -2298,12 +2301,13 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) error {
 				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
+			relocks.add(wallets.fromAsset.ID, 1)
 			tracker.coins = mapifyCoins(coins)
 		}
 
 		dc.trades[tracker.ID()] = tracker
 	}
-	return nil
+	return relocks, nil
 }
 
 // connectDEX establishes a ws connection to a DEX server using the provided
