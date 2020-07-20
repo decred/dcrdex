@@ -449,6 +449,12 @@ func (dcr *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins,
 		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
 	}
 	coins, err := dcr.fund(0, enough)
+	if err != nil {
+		return nil, err
+	}
+
+	dcr.log.Debugf("funding %d atom order with coins %v", value, coins)
+
 	return coins, err
 }
 
@@ -583,6 +589,7 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	}
 	ops := make([]*wire.OutPoint, 0, len(unspents))
 
+	dcr.log.Debugf("returning coins %s", unspents)
 	dcr.fundingMtx.Lock()
 	defer dcr.fundingMtx.Unlock()
 	for _, unspent := range unspents {
@@ -664,6 +671,9 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	dcr.log.Debugf("locking coins %v", coins)
+
 	return coins, nil
 }
 
@@ -674,7 +684,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	// Start with an empty MsgTx.
 	baseTx := wire.NewMsgTx()
 	// Add the funding utxos.
-	totalIn, err := dcr.addInputCoins(baseTx, swaps.Inputs)
+	totalIn, wireOPs, err := dcr.addInputCoins(baseTx, swaps.Inputs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -710,21 +720,50 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	if totalIn < totalOut {
 		return nil, nil, fmt.Errorf("unfunded contract. %d < %d", totalIn, totalOut)
 	}
+
+	// Ensure we have enough outputs before broadcasting.
+	swapCount := len(swaps.Contracts)
+	if len(baseTx.TxOut) < swapCount {
+		return nil, nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
+	}
+
 	// Grab a change address.
 	changeAddr, err := dcr.node.GetRawChangeAddress(dcr.acct, chainParams)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change address: %v", err)
 	}
+
 	// Add change, sign, and send the transaction.
 	msgTx, change, err := dcr.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Prepare the receipts.
-	swapCount := len(swaps.Contracts)
-	if len(baseTx.TxOut) < swapCount {
-		return nil, nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
+
+	// Unlock the spent outputs.
+	err = dcr.node.LockUnspent(true, wireOPs)
+	if err != nil {
+		dcr.log.Errorf("failed to unlock spent coins %v", wireOPs)
 	}
+
+	// Delete the utxos from the cache.
+	dcr.fundingMtx.Lock()
+	for _, coin := range swaps.Inputs {
+		delete(dcr.fundingCoins, coin.String())
+	}
+	dcr.fundingMtx.Unlock()
+
+	// Lock the change coin, if requested.
+	if swaps.LockChange {
+		dcr.log.Debugf("locking change coin %s", change)
+		err = dcr.lockFundingCoins([]*fundingCoin{{
+			op:   change,
+			addr: changeAddr.String(),
+		}})
+		if err != nil {
+			dcr.log.Warnf("Failed to lock dcr change coin %s", change)
+		}
+	}
+
 	receipts := make([]asset.Receipt, 0, swapCount)
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
@@ -733,11 +772,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
 		})
 	}
-	dcr.fundingMtx.Lock()
-	for _, coin := range swaps.Inputs {
-		delete(dcr.fundingCoins, coin.String())
-	}
-	dcr.fundingMtx.Unlock()
+
 	// If change is nil, return a nil asset.Coin.
 	var changeCoin asset.Coin
 	if change != nil {
@@ -1249,22 +1284,24 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.
-func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (uint64, error) {
+func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (uint64, []*wire.OutPoint, error) {
 	var totalIn uint64
+	wireOPs := make([]*wire.OutPoint, 0, len(coins))
 	for _, coin := range coins {
 		output, err := dcr.convertCoin(coin)
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		if output.value == 0 {
-			return 0, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
+			return 0, nil, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
 		}
 		totalIn += output.value
 		prevOut := wire.NewOutPoint(&output.txHash, output.vout, output.tree)
+		wireOPs = append(wireOPs, prevOut)
 		txIn := wire.NewTxIn(prevOut, int64(output.value), []byte{})
 		msgTx.AddTxIn(txIn)
 	}
-	return totalIn, nil
+	return totalIn, wireOPs, nil
 }
 
 // Shutdown down the rpcclient.Client.
@@ -1434,7 +1471,7 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regfee, netFeeRate u
 // the sent value, otherwise it will taken from the change output.
 func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, val, feeRate uint64, subtract bool) (*wire.MsgTx, uint64, error) {
 	baseTx := wire.NewMsgTx()
-	totalIn, err := dcr.addInputCoins(baseTx, coins)
+	totalIn, _, err := dcr.addInputCoins(baseTx, coins)
 	if err != nil {
 		return nil, 0, err
 	}

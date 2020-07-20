@@ -139,9 +139,11 @@ func (ou *OrdersUpdated) String() string {
 // orders from the book are removed from the book. The EpochID of the MatchSet
 // is not set. passed = booked + doneOK. queue = passed + failed. unbooked may
 // include orders that are not in the queue. Each of partial are in passed.
+// nomatched are orders that did not match anything, and discludes booked
+// limit orders that only matched as makers to down-queue takers.
 //
 // TODO: Eliminate order slice return args in favor of just the *OrdersUpdated.
-func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, matches []*order.MatchSet, passed, failed, doneOK, partial, booked []*OrderRevealed, unbooked []*order.LimitOrder, updates *OrdersUpdated) {
+func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, matches []*order.MatchSet, passed, failed, doneOK, partial, booked, nomatched []*OrderRevealed, unbooked []*order.LimitOrder, updates *OrdersUpdated) {
 	// Apply the deterministic pseudorandom shuffling.
 	seed = shuffleQueue(queue)
 
@@ -150,6 +152,23 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 	// Store partially filled limit orders in a map to avoid duplicate
 	// entries.
 	partialMap := make(map[order.OrderID]*order.LimitOrder)
+
+	// Track initially unmatched standing limit orders and remove them if they
+	// are matched down-queue so that they aren't added to the nomatched slice.
+	nomatchStanding := make(map[order.OrderID]*OrderRevealed)
+
+	tallyMakers := func(makers []*order.LimitOrder) {
+		for _, maker := range makers {
+			delete(nomatchStanding, maker.ID())
+			if maker.Remaining() == 0 {
+				unbooked = append(unbooked, maker)
+				updates.TradesCompleted = append(updates.TradesCompleted, maker)
+				delete(partialMap, maker.ID())
+			} else {
+				partialMap[maker.ID()] = maker
+			}
+		}
+	}
 
 	// For each order in the queue, find the best match in the book.
 	for _, q := range queue {
@@ -190,28 +209,26 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 			// limit-limit order matching
 			var makers []*order.LimitOrder
 			matchSet := matchLimitOrder(book, o)
+
 			if matchSet != nil {
 				matches = append(matches, matchSet)
 				makers = matchSet.Makers
-			} else if o.Force == order.ImmediateTiF {
-				// There was no match and TiF is Immediate. Fail.
-				failed = append(failed, q)
-				updates.TradesFailed = append(updates.TradesFailed, o)
-				break
+			} else {
+				if o.Force == order.ImmediateTiF {
+					nomatched = append(nomatched, q)
+					// There was no match and TiF is Immediate. Fail.
+					failed = append(failed, q)
+					updates.TradesFailed = append(updates.TradesFailed, o)
+					break
+				} else {
+					nomatchStanding[q.Order.ID()] = q
+				}
 			}
 
 			// Either matched or standing unmatched => passed.
 			passed = append(passed, q)
 
-			// Unbook matched makers with no remaining amount.
-			for _, maker := range makers {
-				if maker.Remaining() == 0 {
-					unbooked = append(unbooked, maker)
-					updates.TradesCompleted = append(updates.TradesCompleted, maker)
-				} else {
-					partialMap[maker.ID()] = maker
-				}
-			}
+			tallyMakers(makers)
 
 			var wasBooked bool
 			if o.Remaining() > 0 {
@@ -254,17 +271,11 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 				// There was no match and this is a market order. Fail.
 				failed = append(failed, q)
 				updates.TradesFailed = append(updates.TradesFailed, o)
+				nomatched = append(nomatched, q)
 				break
 			}
 
-			for _, maker := range matchSet.Makers {
-				if maker.Remaining() == 0 {
-					unbooked = append(unbooked, maker)
-					updates.TradesCompleted = append(updates.TradesCompleted, maker)
-				} else {
-					partialMap[maker.ID()] = maker
-				}
-			}
+			tallyMakers(matchSet.Makers)
 
 			// Regardless of remaining amount, market orders never go on the book.
 		}
@@ -272,11 +283,11 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 	}
 
 	for _, lo := range partialMap {
-		// Ignore orders with zero remainder. An order can be added to the partials
-		// map, but fill on a later order.
-		if lo.Remaining() > 0 {
-			updates.TradesPartial = append(updates.TradesPartial, lo)
-		}
+		updates.TradesPartial = append(updates.TradesPartial, lo)
+	}
+
+	for _, q := range nomatchStanding {
+		nomatched = append(nomatched, q)
 	}
 
 	return

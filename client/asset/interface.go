@@ -79,8 +79,8 @@ type Wallet interface {
 	// externally. This method will only return funding coins, e.g. unspent
 	// transaction outputs.
 	FundingCoins([]dex.Bytes) (Coins, error)
-	// Swap sends the swaps in a single transaction. The Receipts returned can be
-	// used to refund a failed transaction.
+	// Swap sends the swaps in a single transaction. The Receipts returned can
+	// be used to refund a failed transaction.
 	Swap(*Swaps) ([]Receipt, Coin, error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.
@@ -205,6 +205,9 @@ type Swaps struct {
 	Contracts []*Contract
 	// FeeRate is the required fee rate in atoms/byte.
 	FeeRate uint64
+	// LockChange can be set to true if the change should be locked for
+	// subsequent matches.
+	LockChange bool
 }
 
 // Contract is a swap contract.

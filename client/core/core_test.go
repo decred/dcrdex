@@ -245,6 +245,8 @@ type TDB struct {
 	matchesForOIDErr       error
 	activeMatchesForDEX    []*db.MetaMatch
 	activeMatchesForDEXErr error
+	lastStatusID           order.OrderID
+	lastStatus             order.OrderStatus
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -294,6 +296,8 @@ func (tdb *TDB) SetChangeCoin(order.OrderID, order.CoinID) error {
 }
 
 func (tdb *TDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error {
+	tdb.lastStatusID = oid
+	tdb.lastStatus = status
 	return nil
 }
 
@@ -428,6 +432,7 @@ type TXCWallet struct {
 	fundErr        error
 	addrErr        error
 	signCoinErr    error
+	lastSwaps      *asset.Swaps
 	swapReceipts   []asset.Receipt
 	auditInfo      asset.AuditInfo
 	auditErr       error
@@ -441,12 +446,16 @@ type TXCWallet struct {
 	balErr         error
 	bal            *asset.Balance
 	fundingCoins   asset.Coins
+	returnedCoins  asset.Coins
 	fundingCoinErr error
 	lockErr        error
+	changeCoin     *tCoin
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
-	w := new(TXCWallet)
+	w := &TXCWallet{
+		changeCoin: &tCoin{id: []byte{0x0a, 0x0b}},
+	}
 	return &xcWallet{
 		Wallet:    w,
 		connector: dex.NewConnectionMaster(w),
@@ -487,6 +496,7 @@ func (w *TXCWallet) FundOrder(v uint64, _ *dex.Asset) (asset.Coins, error) {
 }
 
 func (w *TXCWallet) ReturnCoins(coins asset.Coins) error {
+	w.returnedCoins = coins
 	coinInSlice := func(coin asset.Coin) bool {
 		for _, c := range coins {
 			if bytes.Equal(c.ID(), coin.ID()) {
@@ -509,8 +519,9 @@ func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 	return w.fundingCoins, w.fundingCoinErr
 }
 
-func (w *TXCWallet) Swap(swap *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
-	return w.swapReceipts, &tCoin{id: []byte{0x0a, 0x0b}}, nil
+func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
+	w.lastSwaps = swaps
+	return w.swapReceipts, w.changeCoin, nil
 }
 
 func (w *TXCWallet) Redeem([]*asset.Redemption) ([]dex.Bytes, asset.Coin, error) {
@@ -1851,6 +1862,7 @@ func TestCancel(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
+	lo.Force = order.StandingTiF
 	oid := lo.ID()
 	mkt := dc.market(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
@@ -2015,23 +2027,10 @@ func TestHandleRevokeMatchMsg(t *testing.T) {
 
 	rig.dc.trades[oid] = tracker
 
+	// Success
 	err = handleRevokeMatchMsg(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("handleRevokeMatchMsg error: %v", err)
-	}
-
-	// Ensure the order status has been updated to revoked.
-	tracker, _, _ = rig.dc.findOrder(oid)
-	if tracker == nil {
-		t.Fatalf("expected to find an order with id %s", oid.String())
-	}
-	if tracker.metaData.Status != order.OrderStatusRevoked {
-		t.Errorf("incorrect order status. got %v, expected %v",
-			tracker.metaData.Status, order.OrderStatusRevoked)
-	}
-
-	if !match.MetaData.Proof.IsRevoked {
-		t.Fatal("match not revoked")
 	}
 }
 
@@ -2054,6 +2053,7 @@ func TestTradeTracking(t *testing.T) {
 	qty := 2*matchSize + cancelledQty
 	rate := tBTC.RateStep * 10
 	lo, dbOrder, preImgL, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep)
+	lo.Force = order.StandingTiF
 	// fundCoinDcrID := encode.RandomBytes(36)
 	// lo.Coins = []order.CoinID{fundCoinDcrID}
 	loid := lo.ID()
@@ -2067,8 +2067,10 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("walletSet error: %v", err)
 	}
 	mkt := dc.market(tDcrBtcMktName)
+	fundCoinDcrID := encode.RandomBytes(36)
+	fundingCoins := asset.Coins{&tCoin{id: fundCoinDcrID}}
 	tracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+		rig.db, rig.queue, walletSet, fundingCoins, rig.core.notify)
 	rig.dc.trades[tracker.ID()] = tracker
 	var match *matchTracker
 	checkStatus := func(tag string, wantStatus order.MatchStatus) {
@@ -2338,6 +2340,7 @@ func TestTradeTracking(t *testing.T) {
 	if len(proof.TakerSwap) == 0 {
 		t.Fatalf("swap not broadcast with confirmations")
 	}
+
 	// Receive the maker's redemption.
 	redemptionCoin = encode.RandomBytes(36)
 	redemption = &msgjson.Redemption{
@@ -2373,6 +2376,7 @@ func TestTradeTracking(t *testing.T) {
 
 	// CANCEL ORDER MATCH
 	//
+	tDcrWallet.returnedCoins = nil
 	copy(mid[:], encode.RandomBytes(32))
 	preImgC := newPreimage()
 	co := &order.CancelOrder{
@@ -2399,7 +2403,6 @@ func TestTradeTracking(t *testing.T) {
 		OrderID:  coid[:],
 		MatchID:  mid[:],
 		Quantity: cancelledQty,
-		Rate:     rate,
 		Address:  "testaddr",
 	}
 	sign(tDexPriv, m1)
@@ -2407,16 +2410,59 @@ func TestTradeTracking(t *testing.T) {
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{m1, m2})
 	err = handleMatchRoute(tCore, rig.dc, msg)
 	if err != nil {
-		t.Fatalf("match messages error: %v", err)
+		t.Fatalf("handleMatchRoute error (cancel with swaps): %v", err)
 	}
 	if tracker.cancel.matches.maker == nil {
 		t.Fatalf("cancelMatches.maker not set")
 	}
 	if tracker.Trade().Filled() != qty {
-		t.Fatalf("fill not set")
+		t.Fatalf("fill not set. %d != %d", tracker.Trade().Filled(), qty)
 	}
 	if tracker.cancel.matches.taker == nil {
 		t.Fatalf("cancelMatches.taker not set")
+	}
+	// Since there are no unswapped orders, the change coin should be returned.
+	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), tDcrWallet.changeCoin.id) {
+		t.Fatalf("change coin not returned")
+	}
+
+	resetMatches := func() {
+		tracker.matches = make(map[order.MatchID]*matchTracker)
+		tracker.change = nil
+		tracker.metaData.ChangeCoin = nil
+	}
+
+	// If there is no change coin and no matches, the funding coin should be
+	// returned instead.
+	resetMatches()
+	// The change coins would also have been added to the coins map, so delete
+	// that too.
+	delete(tracker.coins, tDcrWallet.changeCoin.String())
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("handleMatchRoute error (cancel without swaps): %v", err)
+	}
+	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), fundCoinDcrID) {
+		t.Fatalf("change coin not returned (cancel without swaps)")
+	}
+
+	// If the order is an immediate order, the asset.Swaps.LockChange should be
+	// false regardless of whether the order is filled.
+	resetMatches()
+	tracker.cancel = nil
+	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
+	msgMatch.Side = uint8(order.Maker)
+	sign(tDexPriv, msgMatch)
+	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
+
+	tracker.metaData.Status = order.OrderStatusEpoch
+	lo.Force = order.ImmediateTiF
+	err = handleMatchRoute(tCore, rig.dc, msg)
+	if err != nil {
+		t.Fatalf("handleMatchRoute error (immediate partial fill): %v", err)
+	}
+	if tDcrWallet.lastSwaps.LockChange != false {
+		t.Fatalf("change locked for executed non-standing order (immediate partial fill)")
 	}
 }
 
@@ -3140,70 +3186,36 @@ func TestLogout(t *testing.T) {
 func TestSetEpoch(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
-	rig.dc.books[tDcrBtcMktName] = newBookie(func() {})
-	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
-	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, rig.core.notify)
-	dc.trades[lo.ID()] = tracker
-	metaData := tracker.metaData
+	dc.books[tDcrBtcMktName] = newBookie(func() {})
+
+	mktEpoch := func() uint64 {
+		dc.epochMtx.RLock()
+		defer dc.epochMtx.RUnlock()
+		return dc.epoch[tDcrBtcMktName]
+	}
 
 	payload := &msgjson.MatchProofNote{
 		MarketID: tDcrBtcMktName,
-		Epoch:    uint64(tracker.Time()) / tracker.epochLen,
+		Epoch:    1,
 	}
-	nextReq := func() *msgjson.Message {
-		payload.Epoch++
-		req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
-		return req
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
+	err := handleMatchProofMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("error advancing epoch: %v", err)
 	}
-
-	ensureStatus := func(tag string, status order.OrderStatus) {
-		t.Helper()
-		err := handleMatchProofMsg(rig.core, rig.dc, nextReq())
-		if err != nil {
-			t.Fatalf("error setting epoch for %s: %v", tag, err)
-		}
-		if metaData.Status != status {
-			t.Fatalf("wrong status for %s. expected %s, got %s", tag, status, metaData.Status)
-		}
-		corder, _ := tracker.coreOrderInternal()
-		if corder.Status != status {
-			t.Fatalf("wrong core order status for %s. expected %s, got %s", tag, status, corder.Status)
-		}
+	if mktEpoch() != 2 {
+		t.Fatalf("expected epoch 1, got %d", mktEpoch())
 	}
 
-	// Immediate limit order
-	ensureStatus("immediate limit order", order.OrderStatusExecuted)
-
-	// Standing limit order
-	metaData.Status = order.OrderStatusEpoch
-	lo.Force = order.StandingTiF
-	ensureStatus("standing limit order", order.OrderStatusBooked)
-
-	// Market order
-	mo := &order.MarketOrder{
-		P: lo.P,
-		T: *lo.T.Copy(),
+	payload.Epoch = 0
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.MatchProofRoute, payload)
+	err = handleMatchProofMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("error handling match proof: %v", err)
 	}
-	mo.P.OrderType = order.LimitOrderType
-	dbOrder = &db.MetaOrder{
-		MetaData: &db.OrderMetaData{
-			Status: order.OrderStatusEpoch,
-		},
-		Order: mo,
+	if mktEpoch() != 2 {
+		t.Fatalf("epoch decremented")
 	}
-	tracker = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, rig.core.notify)
-	metaData = tracker.metaData
-	dc.trades[mo.ID()] = tracker
-	ensureStatus("market order", order.OrderStatusExecuted)
-
-	// Same epoch shouldn't result in change.
-	payload.Epoch--
-	metaData.Status = order.OrderStatusEpoch
-	ensureStatus("market order unchanged", order.OrderStatusEpoch)
-
 }
 
 func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.LimitOrder, *db.MetaOrder, order.Preimage, string) {
@@ -3353,13 +3365,31 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	rig := newTestRig()
 
 	tCore := rig.core
-	dcrWallet, _ := newTWallet(tDCR.ID)
+	dc := rig.dc
+	dcrWallet, tDcrWallet := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = dcrWallet
 	dcrWallet.Unlock(wPW, time.Hour)
 
 	btcWallet, _ := newTWallet(tBTC.ID)
 	tCore.wallets[tBTC.ID] = btcWallet
 	btcWallet.Unlock(wPW, time.Hour)
+
+	mkt := dc.market(tDcrBtcMktName)
+	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+
+	addTracker := func(coins asset.Coins) *trackedTrade {
+		lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
+		oid := lo.ID()
+		tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+			rig.db, rig.queue, walletSet, coins, rig.core.notify)
+		dc.trades[oid] = tracker
+		return tracker
+	}
+
+	// Make a trade that has a single funding coin, no change coin, and no
+	// active matches.
+	fundCoinDcrID := encode.RandomBytes(36)
+	freshTracker := addTracker(asset.Coins{&tCoin{id: fundCoinDcrID}})
 
 	// Ensure a non-existent market cannot be suspended.
 	payload := &msgjson.TradeSuspension{
@@ -3373,22 +3403,22 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 			"ID not found error: %v")
 	}
 
-	mkt := tDcrBtcMktName
-
 	// Ensure a suspended market cannot be resuspended.
-	err = rig.dc.suspend(mkt)
+	err = rig.dc.suspend(tDcrBtcMktName)
 	if err != nil {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
 
-	payload = &msgjson.TradeSuspension{
-		MarketID:    mkt,
-		FinalEpoch:  100,
-		SuspendTime: encode.UnixMilliU(time.Now().Add(time.Millisecond * 20)),
-		Persist:     true,
+	newPayload := func() *msgjson.TradeSuspension {
+		return &msgjson.TradeSuspension{
+			MarketID:    tDcrBtcMktName,
+			FinalEpoch:  100,
+			SuspendTime: encode.UnixMilliU(time.Now().Add(time.Millisecond * 20)),
+			Persist:     false, // Make sure the coins are returned.
+		}
 	}
 
-	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, newPayload())
 	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
 	if err == nil {
 		t.Fatal("[handleTradeSuspensionMsg] expected a market " +
@@ -3396,12 +3426,12 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	}
 
 	// Suspend a market.
-	err = rig.dc.resume(mkt)
+	err = rig.dc.resume(tDcrBtcMktName)
 	if err != nil {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
 	}
 
-	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, payload)
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, newPayload())
 	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
 	if err != nil {
 		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
@@ -3409,6 +3439,59 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 
 	// Wait for the suspend to execute.
 	time.Sleep(time.Millisecond * 40)
+
+	// Check that the funding coin was returned. Use the tradeMtx for
+	// synchronization.
+	dc.tradeMtx.Lock()
+	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), fundCoinDcrID) {
+		t.Fatalf("funding coin not returned")
+	}
+	dc.tradeMtx.Unlock()
+
+	// Make sure the change coin is returned for a trade with a change coin.
+	delete(dc.trades, freshTracker.ID())
+	swappedTracker := addTracker(nil)
+	changeCoinID := encode.RandomBytes(36)
+	swappedTracker.change = &tCoin{id: changeCoinID}
+	_ = rig.dc.resume(tDcrBtcMktName)
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, newPayload())
+	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+	// Wait for the suspend to execute.
+	time.Sleep(time.Millisecond * 40)
+	// Check that the funding coin was returned.
+	dc.tradeMtx.Lock()
+	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), changeCoinID) {
+		t.Fatalf("funding coin not returned")
+	}
+	tDcrWallet.returnedCoins = nil
+	dc.tradeMtx.Unlock()
+
+	// Make sure the coin isn't returned if there are unswapped matches.
+	mid := ordertest.RandomMatchID()
+	match := &matchTracker{
+		id: mid,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{}, // Default status = NewlyMatched
+		},
+	}
+	swappedTracker.matches[mid] = match
+	_ = rig.dc.resume(tDcrBtcMktName)
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, newPayload())
+	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeSuspensionMsg] unexpected error: %v", err)
+	}
+	// Wait for the suspend to execute.
+	time.Sleep(time.Millisecond * 40)
+	dc.tradeMtx.Lock()
+	if tDcrWallet.returnedCoins != nil {
+		t.Fatalf("change coin returned with active matches")
+	}
+	dc.tradeMtx.Unlock()
 
 	// Ensure trades for a suspended market generate an error.
 	form := &TradeForm{
@@ -3425,5 +3508,99 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	_, err = rig.core.Trade(tPW, form)
 	if err == nil {
 		t.Fatalf("expected a suspension market error")
+	}
+}
+
+func TestHandleNomatch(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	dc := rig.dc
+	mkt := dc.market(tDcrBtcMktName)
+
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+
+	walletSet, err := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+
+	// Four types of order to check
+
+	// 1. Immediate limit order
+	loImmediate, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	loImmediate.Force = order.ImmediateTiF
+	immediateOID := loImmediate.ID()
+	immediateTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	dc.trades[immediateOID] = immediateTracker
+
+	// 2. Standing limit order
+	loStanding, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	loStanding.Force = order.StandingTiF
+	standingOID := loStanding.ID()
+	standingTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	dc.trades[standingOID] = standingTracker
+
+	// 3. Cancel order.
+	cancelOrder := &order.CancelOrder{
+		P: order.Prefix{
+			ServerTime: time.Now(),
+		},
+	}
+	cancelOID := cancelOrder.ID()
+	standingTracker.cancel = &trackedCancel{
+		CancelOrder: *cancelOrder,
+	}
+
+	// 4. Market order.
+	loWillBeMarket, dbOrder, preImgL, _ := makeLimitOrder(dc, true, tDCR.LotSize*100, tBTC.RateStep)
+	mktOrder := &order.MarketOrder{
+		P: loWillBeMarket.P,
+		T: *loWillBeMarket.Trade().Copy(),
+	}
+	dbOrder.Order = mktOrder
+	marketOID := mktOrder.ID()
+	marketTracker := newTrackedTrade(dbOrder, preImgL, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+	dc.trades[marketOID] = marketTracker
+
+	runNomatch := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
+		payload := &msgjson.NoMatch{OrderID: oid[:]}
+		req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NoMatchRoute, payload)
+		err := handleNoMatchRoute(tCore, dc, req)
+		if err != nil {
+			t.Fatalf("handleNoMatchRoute error: %v", err)
+		}
+		tracker, _, _ := dc.findOrder(oid)
+		if tracker == nil {
+			t.Fatalf("%s: order ID not found", tag)
+		}
+		if tracker.metaData.Status != expStatus {
+			t.Fatalf("%s: wrong status. expected %s, got %s", tag, expStatus, tracker.metaData.Status)
+		}
+		if rig.db.lastStatusID != oid {
+			t.Fatalf("%s: order status not stored", tag)
+		}
+		if rig.db.lastStatus != expStatus {
+			t.Fatalf("%s: wrong order status stored", tag)
+		}
+	}
+
+	runNomatch("standing limit", standingOID, order.OrderStatusBooked)
+	runNomatch("cancel", cancelOID, order.OrderStatusExecuted)
+	runNomatch("immediate", immediateOID, order.OrderStatusExecuted)
+	runNomatch("market", marketOID, order.OrderStatusExecuted)
+
+	// Unknown order should error.
+	oid := ordertest.RandomOrderID()
+	payload := &msgjson.NoMatch{OrderID: oid[:]}
+	req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NoMatchRoute, payload)
+	err = handleNoMatchRoute(tCore, dc, req)
+	if !errorHasCode(err, unknownOrderErr) {
+		t.Fatalf("wrong error for unknown order ID: %v", err)
 	}
 }

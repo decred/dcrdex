@@ -75,6 +75,7 @@ type tRPCClient struct {
 	mpErr         error
 	mpVerboseTxs  map[string]*btcjson.TxRawResult
 	rawVerboseErr error
+	lockedCoins   []*RPCOutpoint
 }
 
 func newTRPCClient() *tRPCClient {
@@ -164,6 +165,12 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 			Tx:     block.RawTx,
 		})
 		return b, nil
+	case methodLockUnspent:
+		coins := make([]*RPCOutpoint, 0)
+		_ = json.Unmarshal(params[1], &coins)
+		if string(params[0]) == "false" {
+			c.lockedCoins = coins
+		}
 	}
 	return c.rawRes[method], c.rawErr[method]
 }
@@ -230,6 +237,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		Symbol:      "btc",
 		Logger:      tLogger,
 		ChainParams: &chaincfg.MainNetParams,
+		WalletInfo:  walletInfo,
 	}
 	wallet := newWallet(cfg, client)
 	go wallet.run(walletCtx)
@@ -721,8 +729,9 @@ func TestSwap(t *testing.T) {
 	}
 
 	swaps := &asset.Swaps{
-		Inputs:    coins,
-		Contracts: []*asset.Contract{contract},
+		Inputs:     coins,
+		Contracts:  []*asset.Contract{contract},
+		LockChange: true,
 	}
 
 	signTxRes := SignTxResult{
@@ -764,9 +773,18 @@ func TestSwap(t *testing.T) {
 	}
 
 	// This time should succeed.
-	_, _, err := wallet.Swap(swaps)
+	_, changeCoin, err := wallet.Swap(swaps)
 	if err != nil {
 		t.Fatalf("swap error: %v", err)
+	}
+
+	// Make sure the change coin is locked.
+	if len(node.lockedCoins) != 1 {
+		t.Fatalf("did not lock change coin")
+	}
+	txHash, _, _ := decodeCoinID(changeCoin.ID())
+	if node.lockedCoins[0].TxID != txHash.String() {
+		t.Fatalf("wrong coin locked during swap")
 	}
 
 	// Not enough funds
