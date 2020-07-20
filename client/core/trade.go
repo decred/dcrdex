@@ -880,10 +880,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	// If these are the last swaps, and the order is filled or canceled or
 	// revoked, then we don't need to lock the change coin.
 	isLastSwaps := len(matches)+alreadySwapped == len(t.matches)
-	isFilled := trade.Filled() == trade.Quantity
-	notMatchable := t.metaData.Status > order.OrderStatusBooked
-	skipChange := isLastSwaps && (isFilled || notMatchable)
-	if skipChange {
+	if isLastSwaps && t.metaData.Status > order.OrderStatusBooked {
 		t.changeLocked = false
 	} else {
 		swaps.LockChange = true
