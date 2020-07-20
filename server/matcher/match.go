@@ -155,11 +155,11 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 
 	// Track initially unmatched standing limit orders and remove them if they
 	// are matched down-queue so that they aren't added to the nomatched slice.
-	nomatchLimits := make(map[order.OrderID]*OrderRevealed)
+	nomatchStanding := make(map[order.OrderID]*OrderRevealed)
 
 	tallyMakers := func(makers []*order.LimitOrder) {
 		for _, maker := range makers {
-			delete(nomatchLimits, maker.ID())
+			delete(nomatchStanding, maker.ID())
 			if maker.Remaining() == 0 {
 				unbooked = append(unbooked, maker)
 				updates.TradesCompleted = append(updates.TradesCompleted, maker)
@@ -214,12 +214,14 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 				matches = append(matches, matchSet)
 				makers = matchSet.Makers
 			} else {
-				nomatchLimits[q.Order.ID()] = q
 				if o.Force == order.ImmediateTiF {
+					nomatched = append(nomatched, q)
 					// There was no match and TiF is Immediate. Fail.
 					failed = append(failed, q)
 					updates.TradesFailed = append(updates.TradesFailed, o)
 					break
+				} else {
+					nomatchStanding[q.Order.ID()] = q
 				}
 			}
 
@@ -284,7 +286,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 		updates.TradesPartial = append(updates.TradesPartial, lo)
 	}
 
-	for _, q := range nomatchLimits {
+	for _, q := range nomatchStanding {
 		nomatched = append(nomatched, q)
 	}
 

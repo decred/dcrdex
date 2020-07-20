@@ -583,6 +583,7 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	}
 	ops := make([]*wire.OutPoint, 0, len(unspents))
 
+	dcr.log.Debugf("returning coins %s", unspents)
 	dcr.fundingMtx.Lock()
 	defer dcr.fundingMtx.Unlock()
 	for _, unspent := range unspents {
@@ -744,6 +745,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 
 	// Lock the change coin, if requested.
 	if swaps.LockChange {
+		dcr.log.Debugf("locking change coin %s", change)
 		err = dcr.lockFundingCoins([]*fundingCoin{{
 			op:   change,
 			addr: changeAddr.String(),

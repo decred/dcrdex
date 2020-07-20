@@ -521,6 +521,7 @@ func (btc *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 		return fmt.Errorf("cannot return zero coins")
 	}
 	ops := make([]*output, 0, len(unspents))
+	btc.log.Debugf("returning coins %s", unspents)
 	btc.fundingMtx.Lock()
 	defer btc.fundingMtx.Unlock()
 	for _, unspent := range unspents {
@@ -708,6 +709,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	defer btc.fundingMtx.Unlock()
 	if swaps.LockChange {
 		// Lock the change output
+		btc.log.Debugf("locking change coin %s", change)
 		err = btc.wallet.LockUnspent(false, []*output{change})
 		if err != nil {
 			// The swap transaction is already broadcasted, so don't fail now.
