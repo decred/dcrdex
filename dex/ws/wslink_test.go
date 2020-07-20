@@ -57,8 +57,8 @@ func (c *ConnStub) ReadMessage() (int, []byte, error) {
 }
 
 const (
-	stdDev = 500.0
-	min    = int64(50)
+	stdDev      = 500.0
+	minInterval = int64(50)
 )
 
 func microSecDelay(stdDev float64, min int64) time.Duration {
@@ -79,9 +79,7 @@ func (c *ConnStub) WriteMessage(_ int, b []byte) error {
 		return fmt.Errorf("sent out of sequence. got %d, want %v", msg.ID, uint64(lastID+1))
 	}
 	lastID++
-	//writeDuration := time.Microsecond * time.Duration(1+rand.Int63n(40000))
-	writeDuration := microSecDelay(stdDev, min)
-	//fmt.Printf(" <ConnStub> writing message in %v: %v\n", writeDuration, string(b))
+	writeDuration := microSecDelay(stdDev, minInterval)
 	time.Sleep(writeDuration)
 	return nil
 }
@@ -100,14 +98,15 @@ func (c *ConnStub) WriteControl(messageType int, data []byte, deadline time.Time
 }
 
 func TestWSLink_send(t *testing.T) {
-	//rand.Seed(int64(time.Now().Nanosecond()))
 	backendLogger := slog.NewBackend(os.Stdout)
 	defer os.Stdout.Sync()
 	log := backendLogger.Logger("ws_TEST")
 	log.SetLevel(slog.LevelTrace)
 	UseLogger(log)
 
+	handlerChan := make(chan struct{}, 1)
 	inMsgHandler := func(msg *msgjson.Message) *msgjson.Error {
+		handlerChan <- struct{}{}
 		return nil
 	}
 
@@ -133,7 +132,14 @@ func TestWSLink_send(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// give something for inHandler to read
 	conn.inMsg <- b
+	// ensure that the handler was called
+	select {
+	case <-handlerChan:
+	case <-time.NewTimer(time.Second).C:
+		t.Fatal("in handler not called")
+	}
 
 	// sends
 	stuff := struct {
@@ -152,7 +158,7 @@ func TestWSLink_send(t *testing.T) {
 
 	// slightly slower than send rate, bouncing off of 0 queue length
 	sendStdDev := stdDev * 20 / 19
-	sendMin := min
+	sendMin := minInterval
 
 	sendCount := 10000
 	if testing.Short() {
@@ -170,7 +176,7 @@ func TestWSLink_send(t *testing.T) {
 
 	// send much faster briefly, building queue up a bit to be drained on disconnect
 	sendStdDev = stdDev * 4 / 5
-	sendMin = min / 2
+	sendMin = minInterval / 2
 	t.Logf("Sending %v messages faster than the average write latency.", sendCount)
 	for i := 0; i < sendCount; i++ {
 		err = wsLink.Send(msg)
@@ -181,12 +187,9 @@ func TestWSLink_send(t *testing.T) {
 		time.Sleep(microSecDelay(sendStdDev, sendMin))
 	}
 
-	// This message may be sent by the main write loop in (*WSLink).outHandler,
-	// or in the deferred drain/send of queued messages.
-	// err = wsLink.Send(msg)
-	// if err != nil {
-	// 	t.Error(err)
-	// }
+	// NOTE: The following message may be sent by the main write loop in
+	// (*WSLink).outHandler, or in the deferred drain/send of queued messages.
+	// _ = wsLink.Send(msg)
 
 	wsLink.Disconnect()
 
