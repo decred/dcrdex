@@ -449,6 +449,12 @@ func (dcr *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins,
 		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
 	}
 	coins, err := dcr.fund(0, enough)
+	if err != nil {
+		return nil, err
+	}
+
+	dcr.log.Debugf("funding %d atom order with coins %v", value, coins)
+
 	return coins, err
 }
 
@@ -665,6 +671,9 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	dcr.log.Debugf("locking coins %v", coins)
+
 	return coins, nil
 }
 

@@ -511,6 +511,8 @@ out:
 	}
 	btc.fundingMtx.Unlock()
 
+	btc.log.Debugf("funding %d %s order with coins %v", value, btc.walletInfo.Units, coins)
+
 	return coins, nil
 }
 
@@ -598,6 +600,9 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	btc.log.Debugf("locking coins %v", coins)
+
 	return coins, nil
 }
 

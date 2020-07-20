@@ -507,8 +507,6 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 	if dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched {
 		return true
 	}
-	log.Tracef("Match %v not swappable: match side = %v, status = %v",
-		match.id, dbMatch.Side, metaData.Status)
 	return false
 }
 
@@ -562,8 +560,6 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
 		return true
 	}
-	log.Tracef("Match %v not redeemable: match side = %v, status = %v",
-		match.id, dbMatch.Side, metaData.Status)
 	return false
 }
 
@@ -603,9 +599,6 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 		log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
 			dbMatch.Side, t.ID(), match.id, err)
 		return false
-	}
-	if !swapLocktimeExpired {
-		log.Tracef("Match %v not refundable: lock time not expired.", match.id)
 	}
 	return swapLocktimeExpired
 }

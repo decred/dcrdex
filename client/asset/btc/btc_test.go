@@ -237,6 +237,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		Symbol:      "btc",
 		Logger:      tLogger,
 		ChainParams: &chaincfg.MainNetParams,
+		WalletInfo:  walletInfo,
 	}
 	wallet := newWallet(cfg, client)
 	go wallet.run(walletCtx)
