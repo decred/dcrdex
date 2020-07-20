@@ -36,6 +36,7 @@ const (
 	accountIDKey  = "account"
 	ruleToken     = "rule"
 	messageToken  = "message"
+	timeoutToken  = "timeout"
 )
 
 var (
@@ -44,8 +45,9 @@ var (
 
 // SvrCore is satisfied by server/dex.DEX.
 type SvrCore interface {
-	Accounts() ([]*db.Account, error)
-	AccountInfo(account.AccountID) (*db.Account, error)
+	Accounts() (accts []*db.Account, err error)
+	AccountInfo(acctID account.AccountID) (*db.Account, error)
+	Notify(acctID account.AccountID, msg *msgjson.Message, timeout time.Duration)
 	NotifyAll(msg *msgjson.Message)
 	ConfigMsg() json.RawMessage
 	MarketRunning(mktName string) (found, running bool)
@@ -134,6 +136,7 @@ func NewServer(cfg *SrvConfig) (*Server, error) {
 			rm.Get("/", s.apiAccountInfo)
 			rm.Get("/ban", s.apiBan)
 			rm.Get("/unban", s.apiUnban)
+			rm.Post("/notify", s.apiNotify)
 		})
 		r.Post("/notifyall", s.apiNotifyAll)
 		r.Get("/markets", s.apiMarkets)

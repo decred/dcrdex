@@ -636,6 +636,16 @@ func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson
 	return auth.request(user, msg, f, expireTimeout, 0, expire)
 }
 
+// Notify sends a message to a client. The message should be a notification.
+// See msgjson.NewNotification. The notification is abandoned upon timeout
+// being reached.
+func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message, timeout time.Duration) {
+	missedFn := func() {
+		log.Warnf("user %s missed notification: \n%v", acctID, msg)
+	}
+	auth.SendWhenConnected(acctID, msg, timeout, missedFn)
+}
+
 // Penalize signals that a user has broken a rule of community conduct, and that
 // their account should be penalized.
 func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) error {
