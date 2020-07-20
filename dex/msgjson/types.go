@@ -72,9 +72,9 @@ const (
 	// MatchRoute is the route of a DEX-originating request-type message notifying
 	// the client of a match and initiating swap negotiation.
 	MatchRoute = "match"
-	// NomatchRoute is the route of a DEX-originating notification-type message
+	// NoMatchRoute is the route of a DEX-originating notification-type message
 	// notifying the client that an order did not match during its match cycle.
-	NomatchRoute = "nomatch"
+	NoMatchRoute = "nomatch"
 	// InitRoute is the route of a client-originating request-type message
 	// notifying the DEX, and subsequently the match counter-party, of the details
 	// of a swap contract.
@@ -408,8 +408,8 @@ func (m *Match) Serialize() []byte {
 	return append(s, uint64Bytes(m.FeeRateQuote)...)
 }
 
-// Nomatch is the payload for a server-originating NomatchRoute notification.
-type Nomatch struct {
+// Nomatch is the payload for a server-originating NoMatchRoute notification.
+type NoMatch struct {
 	OrderID Bytes `json:"orderid"`
 }
 

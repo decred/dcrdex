@@ -1573,7 +1573,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	// Send "nomatch" notifications.
 	for _, ord := range nomatched {
 		oid := ord.Order.ID()
-		msg, err := msgjson.NewNotification(msgjson.NomatchRoute, &msgjson.Nomatch{
+		msg, err := msgjson.NewNotification(msgjson.NoMatchRoute, &msgjson.NoMatch{
 			OrderID: oid[:],
 		})
 		if err != nil {
@@ -1581,7 +1581,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 			log.Errorf("Failed to encode 'nomatch' notification.")
 			continue
 		}
-		m.auth.Send(ord.Order.Prefix().AccountID, msg)
+		m.auth.Send(ord.Order.User(), msg)
 	}
 
 	// Send "update_remaining" notifications to order book subscribers.

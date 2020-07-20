@@ -212,8 +212,7 @@ func (dc *dexConnection) hasActiveOrders() bool {
 }
 
 // findOrder returns the tracker and preimage for an order ID, and a boolean
-// indicating whether this is a cancel order. findOrder should be called with
-// the tradeMtx at least RLocked.
+// indicating whether this is a cancel order.
 func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
@@ -236,8 +235,8 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 	}
 	found = true
 
-	if tracker.Type() != order.LimitOrderType {
-		err = fmt.Errorf("cannot cancel non-limit order %s of type %s", oid, tracker.Type())
+	if lo, ok := tracker.Order.(*order.LimitOrder); !ok || lo.Force != order.StandingTiF {
+		err = fmt.Errorf("cannot cancel %s order %s that is not a standing limit order", tracker.Type(), oid)
 		return
 	}
 
@@ -259,6 +258,10 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 	if err != nil {
 		return
 	}
+
+	// Lock at least until the cancel is added to the trackedTrade struct.
+	dc.tradeMtx.Lock()
+	defer dc.tradeMtx.Unlock()
 
 	// Create and send the order message. Check the response before using it.
 	route, msgOrder := messageOrder(co, nil)
@@ -2637,7 +2640,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
 	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
 	msgjson.NotifyRoute:          handleNotifyMsg,
-	msgjson.NomatchRoute:         handleNomatchRoute,
+	msgjson.NoMatchRoute:         handleNoMatchRoute,
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -2772,11 +2775,11 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	return dc.runMatches(matches)
 }
 
-// handleNomatchRoute handles the DEX-originating nomatch request, which is sent
+// handleNoMatchRoute handles the DEX-originating nomatch request, which is sent
 // when an order does not match during the epoch match cycle.
-func handleNomatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
-	nomatchMsg := new(msgjson.Nomatch)
-	err := msg.Unmarshal(&nomatchMsg)
+func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	nomatchMsg := new(msgjson.NoMatch)
+	err := msg.Unmarshal(nomatchMsg)
 	if err != nil {
 		return fmt.Errorf("nomatch request parsing error: %v", err)
 	}

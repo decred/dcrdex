@@ -220,7 +220,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 		// This is a cancel order. Status goes to Executed, but the order status
 		// will not be Canceled.
 		log.Warnf("cancel order %s did not match for order %s.", t.cancel.ID(), t.ID())
-		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade.", t.token())
+		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.", t.token())
 		corder, _ := t.coreOrderInternal()
 		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, corder))
 		t.metaData.Status = order.OrderStatusExecuted
@@ -233,16 +233,16 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 	if t.metaData.Status != order.OrderStatusEpoch {
 		return fmt.Errorf("nomatch sent for non-epoch order %s", oid)
 	}
-	err := t.wallets.fromWallet.ReturnCoins(t.coinList())
-	if err != nil {
-		log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
-	}
 	if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
 		log.Infof("Standing order %s did not match and is now booked.", t.token())
 		t.metaData.Status = order.OrderStatusBooked
 		corder, _ := t.coreOrderInternal()
 		t.notify(newOrderNote("Order booked", "", db.Data, corder))
 	} else {
+		err := t.wallets.fromWallet.ReturnCoins(t.coinList())
+		if err != nil {
+			log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
+		}
 		log.Infof("Non-standing order %s did not match.", t.token())
 		t.metaData.Status = order.OrderStatusExecuted
 		corder, _ := t.coreOrderInternal()
@@ -258,6 +258,8 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 	var extras []*msgjson.Match
 	var missing []order.MatchID
 	corder, _ := t.coreOrder()
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
 	for _, msgMatch := range msgMatches {
 		var matchID order.MatchID
 		copy(matchID[:], msgMatch.MatchID)
@@ -269,8 +271,6 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 		}
 	}
 
-	t.mtx.RLock()
-	defer t.mtx.RUnlock()
 	for _, match := range t.matches {
 		if !ids[match.id] {
 			log.Debugf("missing match: %v", match.id)
@@ -522,7 +522,7 @@ func (t *trackedTrade) isActive() bool {
 		return true
 	}
 	for _, match := range t.matches {
-		if match.MetaData.Status < order.MakerRedeemed {
+		if match.MetaData.Status < order.MatchComplete {
 			return true
 		}
 	}

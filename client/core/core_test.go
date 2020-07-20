@@ -1860,6 +1860,7 @@ func TestCancel(t *testing.T) {
 	rig := newTestRig()
 	dc := rig.dc
 	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 0, 0)
+	lo.Force = order.StandingTiF
 	oid := lo.ID()
 	mkt := dc.market(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
@@ -3542,11 +3543,11 @@ func TestHandleNomatch(t *testing.T) {
 	dc.trades[marketOID] = marketTracker
 
 	runNomatch := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
-		payload := &msgjson.Nomatch{OrderID: oid[:]}
-		req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NomatchRoute, payload)
-		err := handleNomatchRoute(tCore, dc, req)
+		payload := &msgjson.NoMatch{OrderID: oid[:]}
+		req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NoMatchRoute, payload)
+		err := handleNoMatchRoute(tCore, dc, req)
 		if err != nil {
-			t.Fatalf("handleNomatchRoute error: %v", err)
+			t.Fatalf("handleNoMatchRoute error: %v", err)
 		}
 		tracker, _, _ := dc.findOrder(oid)
 		if tracker == nil {
@@ -3570,9 +3571,9 @@ func TestHandleNomatch(t *testing.T) {
 
 	// Unknown order should error.
 	oid := ordertest.RandomOrderID()
-	payload := &msgjson.Nomatch{OrderID: oid[:]}
-	req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NomatchRoute, payload)
-	err = handleNomatchRoute(tCore, dc, req)
+	payload := &msgjson.NoMatch{OrderID: oid[:]}
+	req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NoMatchRoute, payload)
+	err = handleNoMatchRoute(tCore, dc, req)
 	if !errorHasCode(err, unknownOrderErr) {
 		t.Fatalf("wrong error for unknown order ID: %v", err)
 	}
