@@ -815,7 +815,7 @@ The client will respond with an acknowledgement.
 The taker will get the key from the maker's redemption and broadcast their own
 redemption transaction.
 
-It is also possible for an  order to go through the matching cycle without
+It is also possible for an order to go through the matching cycle without
 generating a match. This will be common for limit orders, but can also occur for
 market orders if there are no booked orders to match with. When the server fails
 to find any matches, a <code>nomatch</code> notification will be sent to the
