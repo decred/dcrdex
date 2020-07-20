@@ -113,6 +113,7 @@ book and place orders.
 *** [[orders.mediawiki/#Market_Buy_Orders|Market Buy Orders]]
 ** [[orders.mediawiki/#Cancel_Order|Cancel Order]]
 * [[orders.mediawiki/#Preimage_Reveal|Preimage Handling]]
+* [[orders.mediawiki/#Unmatched_Orders|Unmatched Orders]]
 * [[orders.mediawiki/#Match_Revocation|Match Revocation]]
 * [[orders.mediawiki/#Match_negotiation|Match Negotiation]]
 * [[orders.mediawiki/#Trade_Suspension|Trade Suspension]]
