@@ -545,7 +545,7 @@ func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) erro
 	c.wallets[form.AssetID] = &tWalletState{
 		running:  true,
 		open:     true,
-		settings: dummySettings(),
+		settings: form.Config,
 	}
 	return nil
 }

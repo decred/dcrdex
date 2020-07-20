@@ -235,7 +235,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		Symbol:      "btc",
 		Logger:      tLogger,
 		ChainParams: &chaincfg.MainNetParams,
-		WalletInfo:  walletInfo,
+		WalletInfo:  WalletInfo,
 	}
 	btcCfg := &dexbtc.Config{
 		FallbackFeeRate: defaultFee,
