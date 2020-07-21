@@ -23,6 +23,7 @@ const bookUpdateRoute = 'bookupdate'
 const unmarketRoute = 'unmarket'
 
 const lastMarketKey = 'selectedMarket'
+const chartRatioKey = 'chartRatio'
 
 /* The match statuses are a mirror of dex/order.MatchStatus. */
 // const newlyMatched = 0
@@ -57,7 +58,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page = Doc.parsePage(main, [
       // Templates, loaders, chart div...
       'marketLoader', 'marketChart', 'marketList', 'rowTemplate', 'buyRows',
-      'sellRows', 'marketSearch',
+      'sellRows', 'marketSearch', 'chartResizer', 'rightSide',
       // Registration status
       'registrationStatus', 'regStatusTitle', 'regStatusMessage', 'regStatusConfsDisplay',
       'regStatusDex', 'confReq',
@@ -198,6 +199,36 @@ export default class MarketsPage extends BasePage {
     bind(page.marketSearch, 'change', () => { this.filterMarkets() })
     bind(page.marketSearch, 'keyup', () => { this.filterMarkets() })
 
+    // Load the user's layout preferences.
+    const setChartRatio = r => {
+      if (r > 0.7) r = 0.7
+      else if (r < 0.25) r = 0.25
+      page.marketChart.style.height = `${r * 100}%`
+      this.chart.resize()
+    }
+    const chartDivRatio = State.fetch(chartRatioKey)
+    if (chartDivRatio) {
+      setChartRatio(chartDivRatio)
+    }
+    // Bind chart resizing.
+    bind(page.chartResizer, 'mousedown', e => {
+      if (e.button !== 0) return
+      e.preventDefault()
+      // console.log("--startX", startX, "startY", startY)
+      const trackMouse = ee => {
+        ee.preventDefault()
+        const box = page.rightSide.getBoundingClientRect()
+        const h = box.bottom - box.top
+        var chartRatio = (ee.pageY - box.top) / h
+        setChartRatio(chartRatio)
+        State.store(chartRatioKey, chartRatio)
+      }
+      bind(document, 'mousemove', trackMouse)
+      bind(document, 'mouseup', () => {
+        Doc.unbind(document, 'mousemove', trackMouse)
+      })
+    })
+
     // Notification filters.
     this.notifiers = {
       order: note => { this.handleOrderNote(note) },
@@ -261,13 +292,13 @@ export default class MarketsPage extends BasePage {
       Doc.hide(page.mktBuyBox)
       this.previewOrder(true)
     } else {
+      Doc.hide(page.tifBox)
+      Doc.hide(page.priceBox)
       if (this.isSell()) {
-        Doc.show(page.priceBox)
         Doc.hide(page.mktBuyBox)
         Doc.show(page.qtyBox)
         this.previewOrder(true)
       } else {
-        Doc.hide(page.priceBox)
         Doc.show(page.mktBuyBox)
         Doc.hide(page.qtyBox)
         this.previewOrder(false)

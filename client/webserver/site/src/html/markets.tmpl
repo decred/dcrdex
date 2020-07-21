@@ -36,280 +36,287 @@
   </div>
 
   {{- /* RIGHT COLUMN */ -}}
-  <div class="d-flex flex-column flex-grow-1">
+  <div id="rightSide" class="d-flex flex-column flex-grow-1">
 
     {{- /* CHART */ -}}
+
     <div id="marketChart" class="w-100">
       <div id="marketLoader" class="fill-abs flex-center">
         <div class="ico-spinner spinner"></div>
 
       </div>
+      <div id="chartResizer"></div>
     </div>
 
     {{- /* ORDERS */ -}}
-    <div id="orders" class="overflow-auto w-100 d-flex flex-grow-1 bg1">
+    <div id="orders" class="w-100 d-flex flex-grow-1 bg1">
 
-      <div class="col-14 d-flex justify-content-around align-items-stretch p-0">
+      <div class="col-14 p-0">
+        <div class="fill-abs d-flex justify-content-around align-items-stretch">
 
-        {{- /* BUY ORDER LIST */ -}}
-        <div class="marketorders col-7 p-0 bg1">
-          <div class="market-header text-center fs14 py-1">Buy Orders</div>
-          <table class="ordertable bg0">
-            {{block "thead" .}}
-            <thead>
-              <tr>
-                <th class="text-left pl-2">Quantity</th>
-                <th class="text-right pr-2">Rate</th>
-                <th class="text-right pr-2">Epoch</th>
-              </tr>
-            </thead>
-            {{end}}
-            <tbody id="buyRows">
-              {{- /* This row is used by the app as a template. */ -}}
-              <tr id="rowTemplate">
-                <td class="text-left pl-2" data-type="qty">-</td>
-                <td class="text-right pr-2" data-type="rate">-</td>
-                <td class="text-right pr-3" data-type="epoch"></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {{- /* ORDER PANEL */ -}}
-        <div class="col-10 p-0 brdrleft brdrright">
-          <div class="market-header fs14 d-flex justify-content-start pl-4 align-items-stretch">
-            <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft selected">Limit Order</button>
-            <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft brdrright">Market Order</button>
+          {{- /* BUY ORDER LIST */ -}}
+          <div class="marketorders col-7 p-0 bg1">
+            <div class="market-header text-center fs14 py-1">Buy Orders</div>
+            <table class="ordertable bg0">
+              {{block "thead" .}}
+              <thead>
+                <tr>
+                  <th class="text-left pl-2">Quantity</th>
+                  <th class="text-right pr-2">Rate</th>
+                  <th class="text-right pr-2">Epoch</th>
+                </tr>
+              </thead>
+              {{end}}
+              <tbody id="buyRows">
+                {{- /* This row is used by the app as a template. */ -}}
+                <tr id="rowTemplate">
+                  <td class="text-left pl-2" data-type="qty">-</td>
+                  <td class="text-right pr-2" data-type="rate">-</td>
+                  <td class="text-right pr-3" data-type="epoch"></td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          <div class="px-4">
-
-            <div class="fs15 pt-3 text-center d-hide" id="loaderMsg"></div>
-            
-            {{- /* REGISTRATION STATUS */ -}}
-            <div class="d-hide p-2 mt-2" id="registrationStatus">
-              <div class="p-0 w-100">
-                <div class="d-flex flex-column justify-content-center align-items-center">
-                  <span id="regStatusTitle" class="title"></span>
-                  <p id="regStatusMessage">In order to trade at <span id="regStatusDex"></span>, the registration fee payment
-                    needs <span id="confReq"></span> confirmations.
-                  </p>
-                  <span id="regStatusConfsDisplay"></span>
-                </div>
-              </div>
+          {{- /* ORDER PANEL */ -}}
+          <div class="col-10 p-0 brdrleft brdrright d-flex flex-column">
+            <div class="market-header fs14 d-flex justify-content-start pl-4 align-items-stretch">
+              <button id="limitBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft selected">Limit Order</button>
+              <button id="marketBttn" type="button" class="flex-center px-3 py-0 markettab brdrleft brdrright">Market Order</button>
             </div>
 
-            {{- /* ORDER FORM */ -}}
-            <form id="orderForm" class="bg1">
-              <div class="p-0 w-100">
+            <div class="flex-grow-1 position-relative">
+              <div class="fill-abs px-4 stylish-overflow">
 
-                {{- /* BUY - SELL SELECTOR */ -}}
-                <div class="d-flex justify-content-start pt-4 pb-2 fs14">
-                  <button id="buyBttn" type="button" class="bg2 selected">
-                    Buy
-                    <span data-unit="base"></span>
-                  </button>
-                  <button id="sellBttn" type="button" class="bg2 ml-2">
-                    Sell
-                    <span data-unit="base"></span>
-                  </button>
-                  <span></span>
-                </div>
+                <div class="fs15 pt-3 text-center d-hide" id="loaderMsg"></div>
 
-                {{- /* MARKET CONFIG */ -}}
-                <div class="d-flex justify-content-between my-2 fs14">
-                  <div>
-                    Lot Size:
-                    <span id="lotSize"></span>
-                    <span data-unit="base"></span>
-                  </div>
-                  <div>
-                    Rate Step:
-                    <span id="rateStep"></span>
-                    <span data-unit="quote"></span>
-                  </div>
-                </div>
-
-                {{- /* RATE AND QUANTITY INPUTS */ -}}
-                <div class="d-flex mt-3" id="priceBox">
-                  <label for="rateField" class="col-6 d-flex align-items-center p-0">Price</label>
-                  <div class="col-18 p-0 position-relative">
-                    <input type="number" class="form-control select bg1" id="rateField">
-                    <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
-                  </div>
-                </div>
-                <div class="d-flex mt-4" id="qtyBox">
-                  <label for="qtyField" class="col-6 d-flex align-items-center p-0">Quantity</label>
-                  <div class="col-6 p-0 position-relative">
-                    <input type="number" class="form-control select bg1" id="lotField">
-                    <span class="unit unitbox">Lots</span>
-                  </div>
-                  <div class="col-1 p-0"></div> {{/* spacer */}}
-                  <div class="col-11 p-0">
-                    <input type="number" class="form-control select bg1" id="qtyField">
-                    <span class="unit unitbox" data-unit="base"></span>
-                  </div>
-                </div>
-
-                {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
-                <div id="mktBuyBox" class="d-hide">
-                  <div class="text-center mt-2 fs15">
-                    min trade is about <span id="minMktBuy"></span> <span data-unit="quote"></span>
-                  </div>
-                  <div class="d-flex justify-content-center mt-2">
-                    <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
-                    <div class="col-12 p-0 position-relative">
-                      <input type="number" class="form-control select bg1" id="mktBuyField">
-                      <span class="unit unitbox" data-unit="quote"></span>
+                {{- /* REGISTRATION STATUS */ -}}
+                <div class="d-hide p-2 mt-2" id="registrationStatus">
+                  <div class="p-0 w-100">
+                    <div class="d-flex flex-column justify-content-center align-items-center">
+                      <span id="regStatusTitle" class="title"></span>
+                      <p id="regStatusMessage">In order to trade at <span id="regStatusDex"></span>, the registration fee payment
+                        needs <span id="confReq"></span> confirmations.
+                      </p>
+                      <span id="regStatusConfsDisplay"></span>
                     </div>
                   </div>
-                  <div class="p-0 fs14 flex-center mt-1">
-                    <span>
-                      ~ <span id="mktBuyScore">0</span> <span data-unit="base"></span>
-                      @ <span id="mktBuyLots">0</span> <span >Lots</span><br>
+                </div>
 
-                    </span>
+                {{- /* ORDER FORM */ -}}
+                <form id="orderForm" class="bg1">
+                  <div class="p-0 w-100">
+
+                    {{- /* BUY - SELL SELECTOR */ -}}
+                    <div class="d-flex justify-content-start pt-4 pb-2 fs14">
+                      <button id="buyBttn" type="button" class="bg2 selected">
+                        Buy
+                        <span data-unit="base"></span>
+                      </button>
+                      <button id="sellBttn" type="button" class="bg2 ml-2">
+                        Sell
+                        <span data-unit="base"></span>
+                      </button>
+                      <span></span>
+                    </div>
+
+                    {{- /* MARKET CONFIG */ -}}
+                    <div class="d-flex justify-content-between my-2 fs14">
+                      <div>
+                        Lot Size:
+                        <span id="lotSize"></span>
+                        <span data-unit="base"></span>
+                      </div>
+                      <div>
+                        Rate Step:
+                        <span id="rateStep"></span>
+                        <span data-unit="quote"></span>
+                      </div>
+                    </div>
+
+                    {{- /* RATE AND QUANTITY INPUTS */ -}}
+                    <div class="d-flex mt-3" id="priceBox">
+                      <label for="rateField" class="col-6 d-flex align-items-center p-0">Price</label>
+                      <div class="col-18 p-0 position-relative">
+                        <input type="number" class="form-control select bg1" id="rateField">
+                        <span class="unitbox"><span class="unit" data-unit="quote"></span>/<span class="unit" data-unit="base"></span></span>
+                      </div>
+                    </div>
+                    <div class="d-flex mt-4" id="qtyBox">
+                      <label for="qtyField" class="col-6 d-flex align-items-center p-0">Quantity</label>
+                      <div class="col-6 p-0 position-relative">
+                        <input type="number" class="form-control select bg1" id="lotField">
+                        <span class="unit unitbox">Lots</span>
+                      </div>
+                      <div class="col-1 p-0"></div> {{/* spacer */}}
+                      <div class="col-11 p-0">
+                        <input type="number" class="form-control select bg1" id="qtyField">
+                        <span class="unit unitbox" data-unit="base"></span>
+                      </div>
+                    </div>
+
+                    {{- /* MARKET BUY ORDER QUANTITY INPUT */ -}}
+                    <div id="mktBuyBox" class="d-hide">
+                      <div class="text-center mt-2 fs15">
+                        min trade is about <span id="minMktBuy"></span> <span data-unit="quote"></span>
+                      </div>
+                      <div class="d-flex justify-content-center mt-2">
+                        <!-- <label for="mktBuyField" class="flex-center col-12 p-0">Trading</label> -->
+                        <div class="col-12 p-0 position-relative">
+                          <input type="number" class="form-control select bg1" id="mktBuyField">
+                          <span class="unit unitbox" data-unit="quote"></span>
+                        </div>
+                      </div>
+                      <div class="p-0 fs14 flex-center mt-1">
+                        <span>
+                          ~ <span id="mktBuyScore">0</span> <span data-unit="base"></span>
+                          @ <span id="mktBuyLots">0</span> <span >Lots</span><br>
+
+                        </span>
+                      </div>
+                    </div>
+
+                    {{- /* ORDER PREVIEW */ -}}
+                    <div class="mt-2 fs14 text-right" id="orderPreview"></div>
+
+                    {{- /* TIME-IN-FORCE CHECK BOX */ -}}
+                    <div class="mt-2 text-left pl-4" id="tifBox">
+                      <input id="tifNow" class="form-check-input" type="checkbox" value="">
+                      <label class="form-check-label" for="tifNow">
+                        Match for one epoch only
+                      </label>
+                    </div>
+
+                    {{- /* SUBMIT ORDER BUTTON */ -}}
+                    <div class="text-right">
+                      <button id="submitBttn" type="button" class="my-1 fs14 submit text-center">Submit Order</button>
+                    </div>
                   </div>
-                </div>
+                  <div class="fs15 pt-3 text-center d-hide errcolor" id="orderErr"></div>
+                </form>
 
-                {{- /* ORDER PREVIEW */ -}}
-                <div class="mt-2 fs14 text-right" id="orderPreview"></div>
-
-                {{- /* TIME-IN-FORCE CHECK BOX */ -}}
-                <div class="mt-2 text-left pl-4" id="tifBox">
-                  <input id="tifNow" class="form-check-input" type="checkbox" value="">
-                  <label class="form-check-label" for="tifNow">
-                    Match for one epoch only
-                  </label>
-                </div>
-
-                {{- /* SUBMIT ORDER BUTTON */ -}}
-                <div class="text-right">
-                  <button id="submitBttn" type="button" class="my-1 fs14 submit text-center">Submit Order</button>
+                {{- /* BALANCES */ -}}
+                <div class="market-bal pt-2 pb-1 my-3 position-relative">
+                  <span class="market-bal-lbl">Balances</span>
+                  <table class="balance-table" id="balanceTable">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>
+                          <div class="d-flex align-items-center pb-1" id="baseWalletIcons">
+                            <img id="baseImg" class="micro-icon mr-1">
+                            <span data-unit="base"></span>
+                            <div class="flex-grow-1"></div>
+                            <div id="baseWalletState" class="fs12">{{template "walletIcons"}}</div>
+                            <span class="ico-expired fs16 pl-1" id="baseExpired" data-tooltip="Balance may be outdated. Connect to the wallet to refresh."></span>
+                          </div>
+                        </th>
+                        <th>
+                          <div class="d-flex align-items-center pb-1" id="quoteWalletIcons">
+                            <img id="quoteImg" class="micro-icon mr-1">
+                            <span data-unit="quote"></span>
+                            <div class="flex-grow-1"></div>
+                            <div id="quoteWalletState" class="fs12">{{template "walletIcons"}}</div>
+                            <span class="ico-expired fs16 pl-1" id="quoteExpired" data-tooltip="Balance may be outdated. Connect to the wallet to refresh."></span>
+                          </div>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="fs16">available</td>
+                        <td id="baseUnsupported" rowspan="3">
+                          <div class="ico-cross"></div>
+                        </td>
+                        <td id="baseConnect" rowspan="3" class="pointer" data-tooltip="Click to connect and refresh">
+                          <div class="ico-sleeping"></div>
+                        </td>
+                        <td id="baseSpinner" rowspan="3">
+                          <div class="ico-spinner spinner"></div>
+                        </td>
+                        <td id="baseNewWalletRow" rowspan="3">
+                          <button id="baseNewButton" type="button" class="newwallet bg1 text-center">Add a<br><span data-unit="base"></span><br>wallet</button>
+                        </td>
+                        <td id="baseAvail" class="fs16"></td>
+                        <td id="quoteUnsupported" rowspan="3">
+                          <div class="ico-cross"></div>
+                        </td>
+                        <td id="quoteConnect" rowspan="3" class="pointer" data-tooltip="Click to connect and refresh">
+                          <div class="ico-sleeping"></div>
+                        </td>
+                        <td id="quoteSpinner" rowspan="3">
+                          <div class="ico-spinner spinner"></div>
+                        </td>
+                        <td id="quoteNewWalletRow" rowspan="3" class="brdr-left">
+                          <button id="quoteNewButton" type="button" class="newwallet bg1 text-center">Add a<br><span data-unit="quote"></span><br>wallet</button>
+                        </td>
+                        <td id="quoteAvail" class="brdr-left fs16"></td>
+                      </tr>
+                      <tr>
+                        <td>locked</td>
+                        <td id="baseLocked"></td>
+                        <td id="quoteLocked" class="brdr-left"></td>
+                      </tr>
+                      <tr>
+                        <td>immature</td>
+                        <td id="baseImmature"></td>
+                        <td id="quoteImmature" class="brdr-left"></td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
-              <div class="fs15 pt-3 text-center d-hide errcolor" id="orderErr"></div>
-            </form>
-
-            {{- /* BALANCES */ -}}
-            <div class="market-bal pt-2 pb-1 mt-3 position-relative">
-              <span class="market-bal-lbl">Balances</span>
-              <table class="balance-table" id="balanceTable">
-                <thead>
-                  <tr>
-                    <th></th>
-                    <th>
-                      <div class="d-flex align-items-center pb-1" id="baseWalletIcons">
-                        <img id="baseImg" class="micro-icon mr-1">
-                        <span data-unit="base"></span>
-                        <div class="flex-grow-1"></div>
-                        <div id="baseWalletState" class="fs12">{{template "walletIcons"}}</div>
-                        <span class="ico-expired fs16 pl-1" id="baseExpired" data-tooltip="Balance may be outdated. Connect to the wallet to refresh."></span>
-                      </div>
-                    </th>
-                    <th>
-                      <div class="d-flex align-items-center pb-1" id="quoteWalletIcons">
-                        <img id="quoteImg" class="micro-icon mr-1">
-                        <span data-unit="quote"></span>
-                        <div class="flex-grow-1"></div>
-                        <div id="quoteWalletState" class="fs12">{{template "walletIcons"}}</div>
-                        <span class="ico-expired fs16 pl-1" id="quoteExpired" data-tooltip="Balance may be outdated. Connect to the wallet to refresh."></span>
-                      </div>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td class="fs16">available</td>
-                    <td id="baseUnsupported" rowspan="3">
-                      <div class="ico-cross"></div>
-                    </td>
-                    <td id="baseConnect" rowspan="3" class="pointer" data-tooltip="Click to connect and refresh">
-                      <div class="ico-sleeping"></div>
-                    </td>
-                    <td id="baseSpinner" rowspan="3">
-                      <div class="ico-spinner spinner"></div>
-                    </td>
-                    <td id="baseNewWalletRow" rowspan="3">
-                      <button id="baseNewButton" type="button" class="newwallet bg1 text-center">Add a<br><span data-unit="base"></span><br>wallet</button>
-                    </td>
-                    <td id="baseAvail" class="fs16"></td>
-                    <td id="quoteUnsupported" rowspan="3">
-                      <div class="ico-cross"></div>
-                    </td>
-                    <td id="quoteConnect" rowspan="3" class="pointer" data-tooltip="Click to connect and refresh">
-                      <div class="ico-sleeping"></div>
-                    </td>
-                    <td id="quoteSpinner" rowspan="3">
-                      <div class="ico-spinner spinner"></div>
-                    </td>
-                    <td id="quoteNewWalletRow" rowspan="3" class="brdr-left">
-                      <button id="quoteNewButton" type="button" class="newwallet bg1 text-center">Add a<br><span data-unit="quote"></span><br>wallet</button>
-                    </td>
-                    <td id="quoteAvail" class="brdr-left fs16"></td>
-                  </tr>
-                  <tr>
-                    <td>locked</td>
-                    <td id="baseLocked"></td>
-                    <td id="quoteLocked" class="brdr-left"></td>
-                  </tr>
-                  <tr>
-                    <td>immature</td>
-                    <td id="baseImmature"></td>
-                    <td id="quoteImmature" class="brdr-left"></td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
+          </div>
 
+          {{- /* SELL ORDER LIST */ -}}
+          <div class="marketorders col-7 p-0 bg1">
+            <div class="market-header text-center fs14 py-1">Sell Orders</div>
+            <table class="ordertable bg0">
+              {{template "thead"}}
+              <tbody id="sellRows"></tbody>
+            </table>
           </div>
         </div>
-
-        {{- /* SELL ORDER LIST */ -}}
-        <div class="marketorders col-7 p-0 bg1">
-          <div class="market-header text-center fs14 py-1">Sell Orders</div>
-          <table class="ordertable bg0">
-            {{template "thead"}}
-            <tbody id="sellRows"></tbody>
-          </table>
-        </div>
-
       </div>
 
       {{- /* USER ORDERS: TODO */ -}}
       <div class="bg0 p-0 col-10 d-flex flex-column align-items-stretch">
         <div class="market-header text-center fs14 py-1 brdrleft">Your Orders</div>
-        <div class="brdrleft flex-grow-1 bg1">
-          <table id="liveTable" class="ordertable">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Side</th>
-                <th>Age</th>
-                <th>Rate</th>
-                <th>Quantity</th>
-                <th>Filled</th>
-                <th>Settled</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="liveList">
-              <tr id="liveTemplate">
-                <td data-col="type"></td>
-                <td data-col="side"></td>
-                <td data-col="age"></td>
-                <td data-col="rate"></td>
-                <td data-col="qty"></td>
-                <td data-col="filled"></td>
-                <td data-col="settled"></td>
-                <td data-col="status"></td>
-                <td data-col="cancel" class="text-center">
-                  <span class="ico-cross d-hide"></span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div class="brdrleft flex-grow-1 bg1 position-relative">
+
+          <div class="fill-abs px-4 stylish-overflow">
+            <table id="liveTable" class="ordertable">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Side</th>
+                  <th>Age</th>
+                  <th>Rate</th>
+                  <th>Quantity</th>
+                  <th>Filled</th>
+                  <th>Settled</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="liveList">
+                <tr id="liveTemplate">
+                  <td data-col="type"></td>
+                  <td data-col="side"></td>
+                  <td data-col="age"></td>
+                  <td data-col="rate"></td>
+                  <td data-col="qty"></td>
+                  <td data-col="filled"></td>
+                  <td data-col="settled"></td>
+                  <td data-col="status"></td>
+                  <td data-col="cancel" class="text-center">
+                    <span class="ico-cross d-hide"></span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
