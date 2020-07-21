@@ -66,6 +66,14 @@ be sent in the [[comm.mediawiki/#Session_Authentication|connect response]].
 
 <code>payload</code>
 {|
+! field   !! type   !! description
+|-
+| penalty || object || a Penalty object (definition below)
+|}
+
+
+====Penalty object====
+{|
 ! field      !! type   !! description
 |-
 | brokenrule || int    || the rule that was broken

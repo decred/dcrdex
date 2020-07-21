@@ -191,7 +191,7 @@ of their penalization.
 |-
 | matches || &#91;object&#93; || list of [[orders.mediawiki/#Match_negotiation|Match objects]]
 |-
-| penalty || object || the client's most recent [[community.mediawiki/#Rules_of_Community_Conduct|broken rule]]. omitted if in good standing
+| penalty || object || a [[community.mediawiki/#Penalty_object|Penalty object]]. omitted if in good standing
 |-
 | sig     || string || hex-encoded server's signature of the serialized connection data
 |}
