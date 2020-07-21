@@ -244,7 +244,20 @@ func (c *WSLink) outHandler(ctx context.Context) {
 	// Ensure the connection is closed.
 	defer c.wg.Done()
 	defer c.conn.Close() // close the Conn
-	defer c.stop()       // in the event of context cancellation vs Disconnect call
+	var writeFailed bool
+	defer func() {
+		// Unless we are returning because of a write error, try to send a Close
+		// control message before closing the connection.
+		if writeFailed {
+			log.Debugf("Connection already dead. Not sending Close control message.")
+			return
+		}
+		log.Debug("Sending close 1000 (normal) message.")
+		_ = c.conn.WriteControl(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye"),
+			time.Now().Add(time.Second))
+	}()
+	defer c.stop() // in the event of context cancellation vs Disconnect call
 
 	// Synchronize access to the output queue and the trigger channel.
 	var mtx sync.Mutex
@@ -259,16 +272,29 @@ func (c *WSLink) outHandler(ctx context.Context) {
 		}
 	}
 
+	var writeCount, lostCount int
 	write := func(sd *sendData) {
+		// If the link is shutting down with previous write errors, skip
+		// attempting to send and reply to the sender with an error.
+		if writeFailed {
+			lostCount++
+			relayError(sd.ret, errors.New("connection closed"))
+			return
+		}
 		c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 		err := c.conn.WriteMessage(websocket.TextMessage, sd.data)
 		if err != nil {
+			lostCount++
 			relayError(sd.ret, err)
-			// No more Sends should queue messages, and goroutines should return
-			// gracefully.
+			// The connection is now considered dead: No more Sends should queue
+			// messages, goroutines should return gracefully, queued messages
+			// will error quickly, and shutdown will not try to send a Close
+			// control frame.
+			writeFailed = true
 			c.stop()
 			return
 		}
+		writeCount++
 		if sd.ret != nil {
 			close(sd.ret)
 		}
@@ -277,9 +303,9 @@ func (c *WSLink) outHandler(ctx context.Context) {
 	// On shutdown, process any queued senders before closing the connection, if
 	// it is still up.
 	defer func() {
-		log.Infof("Shutting down link for %v with %v queued messages.", c.ip, len(outQueue))
-		// Drain the buffered channel of data sent prior to stop, but before it
-		// could be put in the outQueue.
+		// Send any messages in the outQueue or outChan. First drain the
+		// buffered channel of data sent prior to stop, but before it could be
+		// put in the outQueue.
 	out:
 		for {
 			select {
@@ -290,11 +316,15 @@ func (c *WSLink) outHandler(ctx context.Context) {
 			}
 		}
 		// Attempt sending all queued outgoing messages.
+		log.Infof("Sending %d queued outgoing messages for %v.", len(outQueue), c.ip)
 		for _, sd := range outQueue {
 			write(sd)
 		}
 		// NOTE: This also addresses a full trigger channel, but their is no
 		// need to drain it, just the outQueue so SendNow never hangs.
+
+		log.Debugf("Sent %d and dropped %d messages to %v before shutdown.",
+			writeCount, lostCount, c.ip)
 	}()
 
 	// Top of defer stack: before clean-up, wait for writer goroutine
@@ -338,7 +368,23 @@ func (c *WSLink) outHandler(ctx context.Context) {
 		case sd := <-c.outChan:
 			mtx.Lock()
 			// push back
+			initCap := cap(outQueue)
 			outQueue = append(outQueue, sd)
+			if newCap := cap(outQueue); newCap > initCap {
+				log.Infof("Outgoing message queue capacity increased from %d to %d for %v.",
+					initCap, newCap, c.ip)
+				// The capacity 7168 is a heuristic for when the slice shift on
+				// the pop front operation starts to become a performance issue.
+				// It is also a reasonable queue size limitation to prevent
+				// excessive memory use. If there are thousands of queued
+				// messages, something is wrong with the client, or the server
+				// is spamming excessively.
+				if newCap >= 7168 {
+					log.Warnf("Stopping client %v with outgoing message queue of length %d, capacity %d",
+						c.ip, len(outQueue), newCap)
+					c.stop()
+				}
+			}
 			// If we just repopulated an empty queue, trigger the writer,
 			// otherwise the writer will trigger itself until the queue is
 			// empty.
