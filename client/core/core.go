@@ -1561,13 +1561,13 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 		result := &DEXBrief{
 			Host:     dc.acct.host,
 			TradeIDs: tradeIDs,
+			Authed:   false,
 		}
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
 			// Copy the iterator for use in the authDEX goroutine.
 			if dc.acct.authed() {
-				result.Authed = false
 				result.AcctID = dc.acct.ID().String()
 				return
 			}
@@ -1617,7 +1617,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			if err != nil {
 				details := fmt.Sprintf("error unlocking account for %s: %v", dc.acct.host, err)
 				c.notify(newFeePaymentNote("Account unlock error", details, db.ErrorLevel, dc.acct.host))
-				result.AuthErr = details
 				return
 			}
 			authDEXerr := c.authDEX(dc)
