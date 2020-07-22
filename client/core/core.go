@@ -1552,67 +1552,22 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	results := make([]*DEXBrief, 0, len(c.conns))
 	var enabledDEXConnections = make(map[string]*dexConnection)
 	for host, dc := range c.conns {
-		dc.tradeMtx.RLock()
-		tradeIDs := make([]string, 0, len(dc.trades))
-		for tradeID := range dc.trades {
-			tradeIDs = append(tradeIDs, tradeID.String())
-		}
-		dc.tradeMtx.RUnlock()
-		result := &DEXBrief{
-			Host:     dc.acct.host,
-			TradeIDs: tradeIDs,
-			Authed:   false,
-		}
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
-			// Copy the iterator for use in the authDEX goroutine.
-			if dc.acct.authed() {
-				result.AcctID = dc.acct.ID().String()
-				return
+			dc.tradeMtx.RLock()
+			tradeIDs := make([]string, 0, len(dc.trades))
+			for tradeID := range dc.trades {
+				tradeIDs = append(tradeIDs, tradeID.String())
 			}
-			err := dc.acct.unlock(crypter)
-			if err != nil {
-				details := fmt.Sprintf("error unlocking account for %s: %v", dc.acct.host, err)
-				c.notify(newFeePaymentNote("Account unlock error", details, db.ErrorLevel, dc.acct.host))
-				result.AuthErr = details
-				return
+			dc.tradeMtx.RUnlock()
+			result := &DEXBrief{
+				AcctID:   dc.acct.ID().String(),
+				Host:     dc.acct.host,
+				TradeIDs: tradeIDs,
+				Authed:   false,
 			}
-			result.AcctID = dc.acct.ID().String()
-			dcrID, _ := dex.BipSymbolID("dcr")
-			if !dc.acct.feePaid() {
-				if len(dc.acct.feeCoin) == 0 {
-					details := fmt.Sprintf("Empty fee coin for %s.", dc.acct.host)
-					c.notify(newFeePaymentNote("Fee coin error", details, db.ErrorLevel, dc.acct.host))
-					result.AuthErr = details
-					return
-				}
-				// Try to unlock the Decred wallet, which should run the reFee cycle, and
-				// in turn will run authDEX.
-				dcrWallet, err := c.connectedWallet(dcrID)
-				if err != nil {
-					log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.host, err)
-					details := fmt.Sprintf("Incomplete registration detected for %s, but failed to connect to the Decred wallet", dc.acct.host)
-					c.notify(newFeePaymentNote("Wallet connection warning", details, db.WarningLevel, dc.acct.host))
-					result.AuthErr = details
-					return
-				}
-				if !dcrWallet.unlocked() {
-					err = unlockWallet(dcrWallet, crypter)
-					if err != nil {
-						details := fmt.Sprintf("Connected to Decred wallet to complete registration at %s, but failed to unlock: %v", dc.acct.host, err)
-						c.notify(newFeePaymentNote("Wallet unlock error", details, db.ErrorLevel, dc.acct.host))
-						result.AuthErr = details
-						return
-					}
-				}
-				c.reFee(dcrWallet, dc)
-				return
-			}
-		}(dc)
-		wg.Add(1)
-		go func(dc *dexConnection) {
-			defer wg.Done()
+			results = append(results, result)
 			err := dc.acct.unlock(crypter)
 			if err != nil {
 				details := fmt.Sprintf("error unlocking account for %s: %v", dc.acct.host, err)
@@ -1620,8 +1575,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				return
 			}
 			authDEXerr := c.authDEX(dc)
+			var mErr *msgjson.Error
 			if authDEXerr != nil {
-				var mErr *msgjson.Error
 				if errors.As(authDEXerr, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
 					acctInfo, err := c.db.Account(dc.acct.id)
 					if err != nil {
@@ -1637,21 +1592,54 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 						}
 					}
 					return
-				} else if errors.As(authDEXerr, &mErr) && mErr.Code == msgjson.UnpaidAccountError {
-					log.Infof("DEX auth error: %v", authDEXerr)
 				}
 			}
 			result.Authed = true
-		}(dc)
-		wg.Wait()
-		results = append(results, result)
-		if result.Authed {
 			enabledDEXConnections[host] = dc
-		}
+			// The user is authed if the dex account is successfully authenticated against
+			// Now do some house cleaning in regard to registration fee payment
+			if errors.As(authDEXerr, &mErr) && mErr.Code == msgjson.UnpaidAccountError {
+				details := fmt.Sprintf("%s: %v", dc.acct.host, authDEXerr)
+				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
+				result.AuthErr += details
+			}
+			if dc.acct.authed() {
+				return
+			}
+			dcrID, _ := dex.BipSymbolID("dcr")
+			if !dc.acct.feePaid() {
+				if len(dc.acct.feeCoin) == 0 {
+					details := fmt.Sprintf("Empty fee coin for %s.", dc.acct.host)
+					c.notify(newFeePaymentNote("Fee coin error", details, db.ErrorLevel, dc.acct.host))
+					result.AuthErr += details
+					return
+				}
+				// Try to unlock the Decred wallet, which should run the reFee cycle, and
+				// in turn will run authDEX.
+				dcrWallet, err := c.connectedWallet(dcrID)
+				if err != nil {
+					log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.host, err)
+					details := fmt.Sprintf("Incomplete registration detected for %s, but failed to connect to the Decred wallet", dc.acct.host)
+					c.notify(newFeePaymentNote("Wallet connection warning", details, db.WarningLevel, dc.acct.host))
+					result.AuthErr += details
+					return
+				}
+				if !dcrWallet.unlocked() {
+					err = unlockWallet(dcrWallet, crypter)
+					if err != nil {
+						details := fmt.Sprintf("Connected to Decred wallet to complete registration at %s, but failed to unlock: %v", dc.acct.host, err)
+						c.notify(newFeePaymentNote("Wallet unlock error", details, db.ErrorLevel, dc.acct.host))
+						result.AuthErr += details
+						return
+					}
+				}
+				c.reFee(dcrWallet, dc)
+				return
+			}
+		}(dc)
 	}
+	wg.Wait()
 	c.conns = enabledDEXConnections
-	c.refreshUser()
-
 	return results
 }
 
