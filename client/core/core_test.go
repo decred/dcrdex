@@ -2940,7 +2940,6 @@ func TestReadConnectMatches(t *testing.T) {
 	if notes["order"][1].Subject() != "Match resolution error" {
 		t.Fatalf("no core notification sent for unknown matches")
 	}
-
 }
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {
