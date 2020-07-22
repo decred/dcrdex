@@ -19,6 +19,22 @@ import (
 	"go.etcd.io/bbolt"
 )
 
+// getCopy returns a copy of the value for the given key and provided bucket. If
+// the key is not found or if an empty slice was loaded, nil is returned. Thus,
+// use bkt.Get(key) == nil directly to test for existence of the key. This
+// function should be used instead of bbolt.(*Bucket).Get when the read value
+// needs to be kept after the transaction, at which time the buffer from Get is
+// no longer safe to use.
+func getCopy(bkt *bbolt.Bucket, key []byte) []byte {
+	b := bkt.Get(key)
+	if len(b) == 0 {
+		return nil
+	}
+	val := make([]byte, len(b))
+	copy(val, b)
+	return val
+}
+
 // Short names for some commonly used imported functions.
 var (
 	intCoder    = encode.IntCoder
@@ -26,7 +42,6 @@ var (
 	uint16Bytes = encode.Uint16Bytes
 	uint32Bytes = encode.Uint32Bytes
 	uint64Bytes = encode.Uint64Bytes
-	bCopy       = encode.CopySlice
 )
 
 // Bolt works on []byte keys and values. These are some commonly used key and
@@ -172,9 +187,13 @@ func (db *BoltDB) Get(k string) ([]byte, error) {
 		if bucket == nil {
 			return fmt.Errorf("app bucket not found")
 		}
-		v = bucket.Get(keyB)
-		if v == nil {
+		vx := bucket.Get(keyB)
+		if vx == nil {
 			return fmt.Errorf("no value found for %s", k)
+		}
+		// An empty non-nil slice is returned nil without error.
+		if len(vx) > 0 {
+			v = encode.CopySlice(vx)
 		}
 		return nil
 	})
@@ -212,11 +231,11 @@ func (db *BoltDB) Accounts() ([]*dexdb.AccountInfo, error) {
 			if acct == nil {
 				return fmt.Errorf("account bucket %s value not a nested bucket", string(acctKey))
 			}
-			acctB := acct.Get(accountKey)
-			if acct == nil {
+			acctB := getCopy(acct, accountKey)
+			if acctB == nil {
 				return fmt.Errorf("empty account found for %s", string(acctKey))
 			}
-			acctInfo, err := dexdb.DecodeAccountInfo(bCopy(acctB))
+			acctInfo, err := dexdb.DecodeAccountInfo(acctB)
 			if err != nil {
 				return err
 			}
@@ -236,12 +255,12 @@ func (db *BoltDB) Account(url string) (*dexdb.AccountInfo, error) {
 		if acct == nil {
 			return fmt.Errorf("account not found for %s", url)
 		}
-		acctB := acct.Get(accountKey)
-		if acct == nil {
+		acctB := getCopy(acct, accountKey)
+		if acctB == nil {
 			return fmt.Errorf("empty account found for %s", url)
 		}
 		var err error
-		acctInfo, err = dexdb.DecodeAccountInfo(bCopy(acctB))
+		acctInfo, err = dexdb.DecodeAccountInfo(acctB)
 		if err != nil {
 			return err
 		}
@@ -459,33 +478,29 @@ func (db *BoltDB) Order(oid order.OrderID) (mord *dexdb.MetaOrder, err error) {
 
 // decodeOrderBucket decodes the order's *bbolt.Bucket into a *MetaOrder.
 func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error) {
-	orderB := oBkt.Get(orderKey)
+	orderB := getCopy(oBkt, orderKey)
 	if orderB == nil {
 		return nil, fmt.Errorf("nil order bytes for order %x", oid)
 	}
-	ord, err := order.DecodeOrder(bCopy(orderB))
+	ord, err := order.DecodeOrder(orderB)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding order %x: %v", oid, err)
 	}
-	proofB := oBkt.Get(proofKey)
+	proofB := getCopy(oBkt, proofKey)
 	if proofB == nil {
 		return nil, fmt.Errorf("nil proof for order %x", oid)
 	}
-	proof, err := dexdb.DecodeOrderProof(bCopy(proofB))
+	proof, err := dexdb.DecodeOrderProof(proofB)
 	if err != nil {
 		return nil, fmt.Errorf("error decoding order proof for %x: %v", oid, err)
 	}
-	// Stored nil gets loaded as []byte{}.
-	changeCoin := oBkt.Get(changeKey)
-	if len(changeCoin) == 0 {
-		changeCoin = nil
-	}
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
 			Proof:      *proof,
 			Status:     order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
-			Host:       string(oBkt.Get(dexKey)),
-			ChangeCoin: changeCoin,
+			Host:       string(getCopy(oBkt, dexKey)),
+			ChangeCoin: getCopy(oBkt, changeKey),
 		},
 		Order: ord,
 	}, nil
@@ -595,19 +610,19 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 			}
 			if filter(mBkt) {
 				var proof *dexdb.MatchProof
-				matchB := mBkt.Get(matchKey)
+				matchB := getCopy(mBkt, matchKey)
 				if matchB == nil {
 					return fmt.Errorf("nil match bytes for %x", k)
 				}
-				match, err := order.DecodeMatch(bCopy(matchB))
+				match, err := order.DecodeMatch(matchB)
 				if err != nil {
 					return fmt.Errorf("error decoding match %x: %v", k, err)
 				}
-				proofB := mBkt.Get(proofKey)
+				proofB := getCopy(mBkt, proofKey)
 				if len(proofB) == 0 {
 					return fmt.Errorf("empty proof")
 				}
-				proof, err = dexdb.DecodeMatchProof(bCopy(proofB))
+				proof, err = dexdb.DecodeMatchProof(proofB)
 				if err != nil {
 					return fmt.Errorf("error decoding proof: %v", err)
 				}
@@ -619,7 +634,7 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 					MetaData: &dexdb.MatchMetaData{
 						Proof:  *proof,
 						Status: order.MatchStatus(statusB[0]),
-						DEX:    string(mBkt.Get(dexKey)),
+						DEX:    string(getCopy(mBkt, dexKey)),
 						Base:   intCoder.Uint32(mBkt.Get(baseKey)),
 						Quote:  intCoder.Uint32(mBkt.Get(quoteKey)),
 					},
@@ -699,7 +714,7 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 	if wBkt == nil {
 		return nil, fmt.Errorf("wallets bucket value not a nested bucket")
 	}
-	b := wBkt.Get(walletKey)
+	b := getCopy(wBkt, walletKey)
 	if b == nil {
 		return nil, fmt.Errorf("no wallet found in bucket")
 	}
@@ -707,7 +722,7 @@ func makeWallet(wBkt *bbolt.Bucket) (*dexdb.Wallet, error) {
 	if err != nil {
 		return nil, err
 	}
-	balB := wBkt.Get(balanceKey)
+	balB := getCopy(wBkt, balanceKey)
 	if balB != nil {
 		bal, err := db.DecodeBalance(balB)
 		if err != nil {
@@ -770,7 +785,7 @@ func (db *BoltDB) NotificationsN(n int) ([]*dexdb.Notification, error) {
 		pairs := newestBuckets(master, n, stampKey, nil)
 		for _, pair := range pairs {
 			noteBkt := master.Bucket(pair.k)
-			note, err := dexdb.DecodeNotification(noteBkt.Get(noteKey))
+			note, err := dexdb.DecodeNotification(getCopy(noteBkt, noteKey))
 			if err != nil {
 				return err
 			}
@@ -799,8 +814,7 @@ func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func(*bbo
 	idx := newTimeIndexNewest(n)
 	master.ForEach(func(k, _ []byte) error {
 		bkt := master.Bucket(k)
-		timeB := bkt.Get(timeKey)
-		stamp := intCoder.Uint64(timeB)
+		stamp := intCoder.Uint64(bkt.Get(timeKey))
 		if filter == nil || filter(bkt) {
 			idx.add(stamp, k)
 		}
