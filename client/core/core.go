@@ -1553,7 +1553,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	var enabledDEXConnections = make(map[string]*dexConnection)
 	for host, dc := range c.conns {
 		wg.Add(1)
-		go func(dc *dexConnection) {
+		go func(host string, dc *dexConnection) {
 			defer wg.Done()
 			dc.tradeMtx.RLock()
 			tradeIDs := make([]string, 0, len(dc.trades))
@@ -1636,7 +1636,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				c.reFee(dcrWallet, dc)
 				return
 			}
-		}(dc)
+		}(host, dc)
 	}
 	wg.Wait()
 	c.conns = enabledDEXConnections
