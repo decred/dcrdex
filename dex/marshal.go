@@ -40,11 +40,20 @@ func (b *Bytes) Scan(src interface{}) error {
 }
 
 // UnmarshalJSON satisfies the json.Unmarshaler interface, and expects a UTF-8
-// encoding of a hex string.
+// encoding of a hex string in double quotes.
 func (b *Bytes) UnmarshalJSON(encHex []byte) (err error) {
 	if len(encHex) < 2 {
-		return fmt.Errorf("marshalled Bytes, '%s', not valid", string(encHex))
+		return fmt.Errorf("marshalled Bytes, %q, not valid", string(encHex))
 	}
-	*b, err = hex.DecodeString(string(encHex[1 : len(encHex)-1]))
+	if encHex[0] != '"' || encHex[len(encHex)-1] != '"' {
+		return fmt.Errorf("marshalled Bytes, %q, not quoted", string(encHex))
+	}
+	// DecodeString overallocates by at least double, and it makes a copy.
+	src := encHex[1 : len(encHex)-1]
+	dst := make([]byte, len(src)/2)
+	_, err = hex.Decode(dst, src)
+	if err == nil {
+		*b = dst
+	}
 	return err
 }
