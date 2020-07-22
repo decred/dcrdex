@@ -1643,7 +1643,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			}
 			result.Authed = true
 		}(dc)
-
 		wg.Wait()
 		results = append(results, result)
 		if result.Authed {
