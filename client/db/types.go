@@ -193,6 +193,12 @@ type MetaMatch struct {
 	Match *order.UserMatch
 }
 
+// SetStatus sets the match status in both the UserMatch and the MatchMetaData.
+func (m *MetaMatch) SetStatus(status order.MatchStatus) {
+	m.MetaData.Status = status
+	m.Match.Status = status
+}
+
 // ID is a unique ID for the match-order pair.
 func (m *MetaMatch) ID() []byte {
 	return hashKey(append(m.Match.MatchID[:], m.Match.OrderID[:]...))

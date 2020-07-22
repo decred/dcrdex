@@ -443,7 +443,11 @@ func (auth *AuthManager) send(user account.AccountID, msg *msgjson.Message, conn
 }
 
 // Send sends the non-Request-type msgjson.Message to the client identified by
-// the specified account ID.
+// the specified account ID. The message is sent asynchronously, so an error is
+// only generated if the specified user is not connected and authorized, if the
+// message fails marshalling, or if the link is in a failing state. See
+// dex/ws.(*WSLink).Send for more information. Use SendWhenConnected to
+// continually retry until a timeout is reached.
 func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) error {
 	return auth.send(user, msg, 0, func() {})
 }
@@ -753,6 +757,9 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		}
 	}
 	if !paid {
+		// TODO: Send pending responses (e.g. a 'register` response that
+		// contains the fee address and amount for the user). Use
+		// rmUserConnectMsgs and rmUserConnectReqs to get them by account ID.
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
 			Message: "unpaid account",

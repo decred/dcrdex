@@ -44,7 +44,7 @@ func (set *errorSet) addErr(err error) *errorSet {
 }
 
 // If any returns the error set if there are any errors, else nil.
-func (set *errorSet) ifany() error {
+func (set *errorSet) ifAny() error {
 	if len(set.errs) > 0 {
 		return set
 	}
@@ -58,7 +58,7 @@ func (set *errorSet) Error() string {
 	for i := range set.errs {
 		errStrings = append(errStrings, set.errs[i].Error())
 	}
-	return set.prefix + strings.Join(errStrings, ", ")
+	return set.prefix + "{" + strings.Join(errStrings, ", ") + "}"
 }
 
 // WalletForm is information necessary to create a new exchange wallet.

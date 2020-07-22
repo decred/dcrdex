@@ -44,9 +44,8 @@ const (
 )
 
 var (
-	unbip          = dex.BipIDSymbol
-	aYear          = time.Hour * 24 * 365
-	requestTimeout = 10 * time.Second
+	unbip = dex.BipIDSymbol
+	aYear = time.Hour * 24 * 365
 	// The coin waiters will query for transaction data every recheckInterval.
 	recheckInterval = time.Second * 5
 )
@@ -78,6 +77,10 @@ type dexConnection struct {
 	regConfMtx  sync.RWMutex
 	regConfirms *uint32 // nil regConfirms means no pending registration.
 }
+
+// DefaultResponseTimeout is the default timeout for responses after a request is
+// successfully sent.
+const DefaultResponseTimeout = comms.DefaultResponseTimeout
 
 // suspended returns the suspended status of the provided market.
 func (dc *dexConnection) suspended(mkt string) bool {
@@ -267,7 +270,7 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 	// Create and send the order message. Check the response before using it.
 	route, msgOrder := messageOrder(co, nil)
 	var result = new(msgjson.OrderResult)
-	err = dc.signAndRequest(msgOrder, route, result)
+	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
 		return
 	}
@@ -308,7 +311,7 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 
 // signAndRequest signs and sends the request, unmarshaling the response into
 // the provided interface.
-func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result interface{}) error {
+func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string, result interface{}, timeout time.Duration) error {
 	if dc.acct.locked() {
 		return fmt.Errorf("cannot sign: %s account locked", dc.acct.host)
 	}
@@ -316,7 +319,7 @@ func (dc *dexConnection) signAndRequest(signable msgjson.Signable, route string,
 	if err != nil {
 		return fmt.Errorf("error signing %s message: %v", route, err)
 	}
-	return sendRequest(dc.WsConn, route, signable, result)
+	return sendRequest(dc.WsConn, route, signable, result, timeout)
 }
 
 // ack sends an Acknowledgement for a match-related request.
@@ -366,7 +369,9 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 		if checkSigs {
 			err := dc.acct.checkSig(sigMsg, msgMatch.Sig)
 			if err != nil {
-				return nil, nil, fmt.Errorf("parseMatches: %v", err)
+				// If the caller (e.g. handleMatchRoute) requests signature
+				// verification, this is fatal.
+				return nil, nil, fmt.Errorf("parseMatches: match signature verification failed: %w", err)
 			}
 		}
 		sig, err := dc.acct.sign(sigMsg)
@@ -374,6 +379,8 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			errs = append(errs, err.Error())
 			continue
 		}
+
+		// Success. Add the serverMatch and the Acknowledgement.
 		acks = append(acks, msgjson.Acknowledgement{
 			MatchID: msgMatch.MatchID,
 			Sig:     sig,
@@ -388,18 +395,22 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 			matches[trackerID] = match
 		}
 		if isCancel {
-			match.cancel = msgMatch
+			match.cancel = msgMatch // taker match
 		} else {
 			match.msgMatches = append(match.msgMatches, msgMatch)
 		}
 
 		status := order.MatchStatus(msgMatch.Status)
-		log.Debugf("registering match %v for order %v in status %v", msgMatch.MatchID, oid, status)
+		log.Debugf("Registering match %v for order %v (%v) in status %v",
+			msgMatch.MatchID, oid, order.MatchSide(msgMatch.Side), status)
 	}
+
 	var err error
 	if len(errs) > 0 {
-		err = fmt.Errorf("match errors: %s", strings.Join(errs, ", "))
+		err = fmt.Errorf("parseMatches errors: %s", strings.Join(errs, ", "))
 	}
+	// A non-nil error only means that at least one match failed to parse, so we
+	// must return the successful matches and acks for further processing.
 	return matches, acks, err
 }
 
@@ -418,29 +429,57 @@ func (dc *dexConnection) processNomatch(oid order.OrderID) error {
 }
 
 // runMatches runs the sorted matches returned from parseMatches.
-func (dc *dexConnection) runMatches(matches map[order.OrderID]*serverMatches) error {
-	for _, match := range matches {
-		tracker := match.tracker
-		if len(match.msgMatches) > 0 {
-			err := tracker.negotiate(match.msgMatches)
+func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatches) error {
+	runMatch := func(sm *serverMatches) error {
+		tracker := sm.tracker
+		oid := tracker.ID()
+
+		// Verify and record any cancel Match targeting this trade.
+		if sm.cancel != nil {
+			err := tracker.processCancelMatch(sm.cancel)
 			if err != nil {
-				return err
+				return fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %v",
+					sm.cancel.OrderID, oid, err)
 			}
-			_, err = tracker.tick()
+		}
+
+		// Begin negotiation for any trade Matches.
+		if len(sm.msgMatches) > 0 {
+			err := tracker.negotiate(sm.msgMatches)
 			if err != nil {
-				return err
+				return fmt.Errorf("negotiate order %v matches failed: %v", oid, err)
 			}
 
-		}
-		if match.cancel != nil {
-			err := tracker.processCancelMatch(match.cancel)
+			// Try to tick the trade now, but do not interrupt on error. The
+			// trade will tick again automatically.
+			_, err = tracker.tick()
 			if err != nil {
-				return err
+				return fmt.Errorf("tick of order %v failed: %v", oid, err)
 			}
 		}
+
+		return nil
 	}
+
+	// Process the trades concurrently.
+	errChan := make(chan error)
+	for _, trade := range tradeMatches {
+		go func(trade *serverMatches) {
+			errChan <- runMatch(trade)
+		}(trade)
+	}
+
+	errs := newErrorSet("runMatches - ")
+	for range tradeMatches {
+		if err := <-errChan; err != nil {
+			errs.addErr(err)
+		}
+	}
+
+	// Update Market.Orders for each market.
 	dc.refreshMarkets()
-	return nil
+
+	return errs.ifAny()
 }
 
 // compareServerMatches resolves the matches reported by the server in the
@@ -451,7 +490,7 @@ func (dc *dexConnection) runMatches(matches map[order.OrderID]*serverMatches) er
 // reporting.
 //
 // DRAFT NOTE: Right now, the matches are just checked and notifications sent,
-// but it may be a good  place to trigger a FindRedemption if the conditions
+// but it may be a good place to trigger a FindRedemption if the conditions
 // warrant.
 func (dc *dexConnection) compareServerMatches(matches map[order.OrderID]*serverMatches) {
 	for _, match := range matches {
@@ -1293,7 +1332,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		Time:   encode.UnixMilliU(time.Now()),
 	}
 	regRes := new(msgjson.RegisterResult)
-	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes)
+	err = dc.signAndRequest(dexReg, msgjson.RegisterRoute, regRes, DefaultResponseTimeout)
 	if err != nil {
 		return nil, codedError(registerErr, err)
 	}
@@ -1344,7 +1383,9 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", dc.cfg.RegFeeConfirms, dc.acct.host)
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success, dc.acct.host))
 
-	// Set up the coin waiter.
+	// Set up the coin waiter, which waits for the required number of
+	// confirmations to notify the DEX and establish an authenticated
+	// connection.
 	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
 	c.refreshUser()
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: dc.cfg.RegFeeConfirms}
@@ -1597,11 +1638,11 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 			c.notify(newOrderNote("Order load failure", details, db.ErrorLevel, nil))
 		}
 		if len(ready) > 0 {
-			locks, err := c.resumeTrades(dc, ready)
-			if err != nil {
-				details := fmt.Sprintf("Some active orders failed to resume: %v", err)
-				c.notify(newOrderNote("Order resumption error", details, db.ErrorLevel, nil))
-			}
+			locks := c.resumeTrades(dc, ready)
+			// if err != nil {
+			// 	details := fmt.Sprintf("Some active orders failed to resume: %v", err)
+			// 	c.notify(newOrderNote("Order resumption error", details, db.ErrorLevel, nil))
+			// }
 			relocks.absorb(locks)
 		}
 		loaded += len(ready)
@@ -1625,17 +1666,15 @@ func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(er
 
 func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	if dc.acct.locked() {
-		return fmt.Errorf("%s account locked. cannot notify fee.", dc.acct.host)
+		return fmt.Errorf("%s account locked. cannot notify fee. log in first.", dc.acct.host)
 	}
 	// Notify the server of the fee coin once there are enough confirmations.
 	req := &msgjson.NotifyFee{
 		AccountID: dc.acct.id[:],
 		CoinID:    coinID,
 	}
-	// We'll need this to validate the server's acknowledgement.
-	reqB := req.Serialize()
-	// Sign the request and send it.
-	err := stamp(dc.acct.privKey, req)
+	// Timestamp and sign the request.
+	err := stampAndSign(dc.acct.privKey, req)
 	if err != nil {
 		return err
 	}
@@ -1644,36 +1683,38 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 		return fmt.Errorf("failed to create notifyfee request: %v", err)
 	}
 
+	// Make the 'notifyfee' request and wait for the response. The server waits
+	// an unspecified amount of time to discover the transaction, so time out
+	// after this DEX's configured broadcast timeout plus a healthy buffer for
+	// communication and server processing latencies. There is no reason to give
+	// up too soon.
+	timeout := time.Millisecond*time.Duration(dc.cfg.BroadcastTimeout) + 10*time.Second
 	errChan := make(chan error, 1)
-	err = dc.Request(msg, func(resp *msgjson.Message) {
+	err = dc.RequestWithTimeout(msg, func(resp *msgjson.Message) {
 		ack := new(msgjson.Acknowledgement)
-		err := resp.UnmarshalResult(ack)
-		if err != nil {
+		// Do NOT capture err in this closure.
+		if err := resp.UnmarshalResult(ack); err != nil {
 			errChan <- fmt.Errorf("notify fee result error: %v", err)
 			return
 		}
-		// If there was a serialization error, validation is skipped. A warning
-		// message was already logged.
-		if len(reqB) > 0 {
-			// redefining err here, since these errors won't be sent over the
-			// response channel.
-			err := dc.acct.checkSig(reqB, ack.Sig)
-			if err != nil {
-				log.Warnf("account was registered, but DEX signature could not be verified: %v", err)
-			}
-		} else {
-			log.Warnf("Marking account as paid, even though the server's signature could not be validated.")
+		err := dc.acct.checkSig(req.Serialize(), ack.Sig)
+		if err != nil {
+			log.Warnf("Account was registered, but DEX signature could not be verified: %v", err)
 		}
 		errChan <- c.db.AccountPaid(&db.AccountProof{
 			Host:  dc.acct.host,
 			Stamp: req.Time,
 			Sig:   ack.Sig,
 		})
+	}, timeout, func() {
+		errChan <- fmt.Errorf("timed out waiting for '%s' response.", msgjson.NotifyFeeRoute)
 	})
 	if err != nil {
-		return fmt.Errorf("'notifyfee' request error: %v", err)
+		return fmt.Errorf("Sending the 'notifyfee' request failed: %v", err)
 	}
-	return extractError(errChan, requestTimeout, "notifyfee")
+
+	// The request was sent. Wait for a response or timeout.
+	return <-errChan
 }
 
 // Withdraw initiates a withdraw from an exchange wallet. The client password
@@ -1851,8 +1892,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	route, msgOrder := messageOrder(ord, msgCoins)
 
 	// Send and get the result.
-	var result = new(msgjson.OrderResult)
-	err = dc.signAndRequest(msgOrder, route, result)
+	result := new(msgjson.OrderResult)
+	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2005,6 +2046,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		return fmt.Errorf("signing error: %v", err)
 	}
 	payload.SetSig(sig)
+
 	// Send the 'connect' request.
 	req, err := msgjson.NewRequest(dc.NextID(), msgjson.ConnectRoute, payload)
 	if err != nil {
@@ -2012,27 +2054,32 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 	errChan := make(chan error, 1)
 	result := new(msgjson.ConnectResult)
-	err = dc.Request(req, func(msg *msgjson.Message) {
+	err = dc.RequestWithTimeout(req, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(result)
+	}, DefaultResponseTimeout, func() {
+		errChan <- fmt.Errorf("timed out waiting for '%s' response.", msgjson.ConnectRoute)
 	})
 	// Check the request error.
 	if err != nil {
 		return err
 	}
 	// Check the response error.
-	err = extractError(errChan, requestTimeout, "connect")
+	err = <-errChan
 	if err != nil {
 		return fmt.Errorf("'connect' error: %v", err)
 	}
-	// Check the signature.
+
+	// Check the servers response signature.
 	err = dc.acct.checkSig(sigMsg, result.Sig)
 	if err != nil {
 		return newError(signatureErr, "DEX signature validation error: %v", err)
 	}
-	log.Debugf("authenticated connection to %s, %d active matches", dc.acct.host, len(result.Matches))
+
 	// Set the account as authenticated.
+	log.Debugf("Authenticated connection to %s, %d active matches", dc.acct.host, len(result.Matches))
 	dc.acct.auth()
 
+	// Associate the matches with known trades.
 	matches, _, err := dc.parseMatches(result.Matches, false)
 	if err != nil {
 		log.Error(err)
@@ -2366,13 +2413,13 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 		}
 		ready = append(ready, trade)
 	}
-	return ready, errs.ifany()
+	return ready, errs.ifAny()
 }
 
 // resumeTrades recovers the states of active trades and matches, including
 // loading audit info needed to finish swaps and funding coins needed to create
 // new matches on an order.
-func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) (assetCounter, error) {
+func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetCounter {
 	var tracker *trackedTrade
 	notifyErr := func(subject, s string, a ...interface{}) {
 		detail := fmt.Sprintf(s, a...)
@@ -2463,7 +2510,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) (assetC
 
 		dc.trades[tracker.ID()] = tracker
 	}
-	return relocks, nil
+	return relocks
 }
 
 // connectDEX establishes a ws connection to a DEX server using the provided
@@ -2506,7 +2553,7 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	// Request the market configuration. Disconnect from the DEX server if the
 	// configuration cannot be retrieved.
 	dexCfg := new(msgjson.ConfigResult)
-	err = sendRequest(conn, msgjson.ConfigRoute, nil, dexCfg)
+	err = sendRequest(conn, msgjson.ConfigRoute, nil, dexCfg, DefaultResponseTimeout)
 	if err != nil {
 		connMaster.Disconnect()
 		return nil, fmt.Errorf("Error fetching DEX server config: %v", err)
@@ -2841,6 +2888,28 @@ func (c *Core) listen(dc *dexConnection) {
 	bTimeout := time.Millisecond * time.Duration(dc.cfg.BroadcastTimeout)
 	ticker := time.NewTicker(bTimeout / 3)
 	log.Debugf("broadcast timeout = %v, ticking every %v", bTimeout, bTimeout/3)
+
+	// Messages must be run in the order in which they are received, but they
+	// should not be blocking or run concurrently.
+	type msgJob struct {
+		hander routeHandler
+		msg    *msgjson.Message
+	}
+	// Start a single runner goroutine to run jobs one at a time in the order
+	// that they were received. Include the handler goroutine in the WaitGroup
+	// to allow it to complete if the connection master desires.
+	nextJob := make(chan *msgJob, 1024) // start blocking at this cap
+	defer close(nextJob)
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		for job := range nextJob {
+			if err := job.hander(c, dc, job.msg); err != nil {
+				log.Errorf("route '%v' %v handler error: %v", job.msg.Route, job.msg.Type, err)
+			}
+		}
+	}()
+
 out:
 	for {
 		select {
@@ -2863,20 +2932,22 @@ out:
 			case msgjson.Notification:
 				handler, found = noteHandlers[msg.Route]
 			case msgjson.Response:
+				// client/comms.wsConn handles responses to requests we sent.
 				log.Errorf("A response was received in the message queue: %s", msg)
+				continue
 			default:
 				log.Errorf("invalid message type %d from MessageSource", msg.Type)
 				continue
 			}
 			// Until all the routes have handlers, check for nil too.
 			if !found || handler == nil {
-				log.Errorf("no handler found for route %s", msg.Route)
+				log.Errorf("no handler found for route '%s'", msg.Route)
 				continue
 			}
-			err := handler(c, dc, msg)
-			if err != nil {
-				log.Error(err)
-			}
+
+			// Queue the handling of this message.
+			nextJob <- &msgJob{handler, msg}
+
 		case <-ticker.C:
 			counts := make(assetCounter)
 			dc.tradeMtx.RLock()
@@ -2945,22 +3016,47 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return fmt.Errorf("match request parsing error: %v", err)
 	}
+
+	// TODO: If the dexConnection.acct is locked, prompt the user to login.
+	// Maybe even spin here before failing with no hope of retrying the match
+	// request handling.
+
+	// Acknowledgements MUST be in the same orders as the msgjson.Matches.
 	matches, acks, err := dc.parseMatches(msgMatches, true)
 	if err != nil {
+		// Even one failed match fails them all since the server requires acks
+		// for them all, and in the same order. TODO: consider lifting this
+		// requirement, which requires changes to the server's handling.
 		return err
 	}
-
 	resp, err := msgjson.NewResponse(msg.ID, acks, nil)
 	if err != nil {
 		return err
 	}
+
+	// Send the match acknowledgments.
+	// TODO: Consider a "QueueSend" or similar, but do not bail on the matches.
 	err = dc.Send(resp)
 	if err != nil {
-		return err
+		log.Errorf("Send match response: %v", err)
+		// dc.addPendingSend(resp) // e.g.
 	}
 
-	defer c.refreshUser()
+	defer c.refreshUser() // update WalletState
 
+	// Begin match negotiation.
+	//
+	// TODO: We need to know that the server has first recorded the ack
+	// signature, otherwise 'init' will fail. Until this is solved with a
+	// response to the ack, sleep for a moment if we are the maker on any of the
+	// orders. However, resendPendingRequests will retry the request when the
+	// trackedTrade ticks again when the timer fires in listen.
+	for _, m := range msgMatches {
+		if m.Side == uint8(order.Maker) {
+			time.Sleep(250 * time.Millisecond)
+			break
+		}
+	}
 	return dc.runMatches(matches)
 }
 
@@ -3181,39 +3277,34 @@ func sign(privKey *secp256k1.PrivateKey, payload msgjson.Signable) error {
 	return nil
 }
 
-// stamp adds a timestamp and signature to the msgjson.Stampable.
-func stamp(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) error {
+// stampAndSign time stamps the msgjson.Stampable, and signs it with the given
+// private key.
+func stampAndSign(privKey *secp256k1.PrivateKey, payload msgjson.Stampable) error {
 	payload.Stamp(encode.UnixMilliU(time.Now()))
 	return sign(privKey, payload)
 }
 
 // sendRequest sends a request via the specified ws connection and unmarshals
 // the response into the provided interface.
-func sendRequest(conn comms.WsConn, route string, request, response interface{}) error {
+func sendRequest(conn comms.WsConn, route string, request, response interface{}, timeout time.Duration) error {
 	reqMsg, err := msgjson.NewRequest(conn.NextID(), route, request)
 	if err != nil {
 		return fmt.Errorf("error encoding %s request: %v", route, err)
 	}
 
 	errChan := make(chan error, 1)
-	err = conn.Request(reqMsg, func(msg *msgjson.Message) {
+	err = conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(response)
+	}, timeout, func() {
+		errChan <- fmt.Errorf("timed out waiting for '%s' response.", route)
 	})
+	// Check the request error.
 	if err != nil {
 		return err
 	}
 
-	return extractError(errChan, requestTimeout, route)
-}
-
-// extractError extracts the error from the channel with a timeout.
-func extractError(errChan <-chan error, delay time.Duration, route string) error {
-	select {
-	case err := <-errChan:
-		return err
-	case <-time.NewTimer(delay).C:
-		return fmt.Errorf("timed out waiting for '%s' response.", route)
-	}
+	// Check the response error.
+	return <-errChan
 }
 
 // newPreimage creates a random order commitment. If you require a matching

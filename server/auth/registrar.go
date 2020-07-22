@@ -63,6 +63,8 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 		}
 	}
 
+	log.Infof("Created new user account %v with fee address %v", acct.ID, feeAddr)
+
 	// Prepare, sign, and send response.
 	regRes := &msgjson.RegisterResult{
 		DEXPubKey:    auth.signer.PubKey().SerializeCompressed(),
@@ -74,7 +76,7 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 
 	err = auth.Sign(regRes)
 	if err != nil {
-		log.Errorf("error serializing register result: %v", err)
+		log.Errorf("error serializing register result: %v, data = %#v", err, regRes)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "internal error",
@@ -92,7 +94,12 @@ func (auth *AuthManager) handleRegister(conn comms.Link, msg *msgjson.Message) *
 
 	err = conn.Send(resp)
 	if err != nil {
-		log.Warnf("error sending register result to link: %v", err)
+		log.Warnf("Error sending register result to link: %v", err)
+		// TODO: allow sending pending requests on connect to unpaid users.
+		// auth.SendWhenConnected(acct.ID, resp, DefaultConnectTimeout, func() {
+		// 	log.Infof("Unable to send register response to disconnected user %v", acct.ID)
+		// })
+		// log.Warnf("Error sending register result to link, queueing the response on connect: %v", err)
 	}
 
 	return nil
@@ -171,7 +178,8 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 	return nil
 }
 
-// validateFee is a coin waiter that validates a client's notifyFee request.
+// validateFee is a coin waiter that validates a client's notifyFee request and
+// responds with an Acknowledgement.
 func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, notifyFee *msgjson.NotifyFee, msgID uint64, coinID []byte, regAddr string) bool {
 	addr, val, confs, err := auth.checkFee(coinID)
 	if err != nil || confs < auth.feeConfs {
@@ -216,7 +224,7 @@ func (auth *AuthManager) validateFee(conn comms.Link, acctID account.AccountID, 
 		return wait.DontTryAgain
 	}
 
-	log.Info("new user registered")
+	log.Infof("New user registered: acct %v, paid %d to %v", acctID, val, addr)
 
 	// Create, sign, and send the the response.
 	err = auth.Sign(notifyFee)

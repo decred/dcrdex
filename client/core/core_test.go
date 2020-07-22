@@ -16,6 +16,9 @@ import (
 	"time"
 
 	"decred.org/dcrdex/client/asset"
+	_ "decred.org/dcrdex/client/asset/btc" // register btc asset driver for coinIDString
+	_ "decred.org/dcrdex/client/asset/dcr" // ditto dcr
+	_ "decred.org/dcrdex/client/asset/ltc" // ditto ltc
 	"decred.org/dcrdex/client/comms"
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
@@ -171,7 +174,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		books: make(map[string]*bookie),
 		cfg: &msgjson.ConfigResult{
 			CancelMax:        0.8,
-			BroadcastTimeout: 5 * 60 * 1000,
+			BroadcastTimeout: 1000, // 1000 ms for faster expiration, but ticker fires fast
 			Assets: []*msgjson.Asset{
 				uncovertAssetInfo(tDCR),
 				uncovertAssetInfo(tBTC),
@@ -218,6 +221,9 @@ func (conn *TWebsocket) NextID() uint64 {
 }
 func (conn *TWebsocket) Send(msg *msgjson.Message) error { return conn.sendErr }
 func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
+	return conn.RequestWithTimeout(msg, f, 0, func() {})
+}
+func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), _ time.Duration, _ func()) error {
 	handlers := conn.getHandlers(msg.Route)
 	if len(handlers) > 0 {
 		handler := handlers[0]
@@ -475,7 +481,7 @@ type TXCWallet struct {
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
 	w := &TXCWallet{
-		changeCoin: &tCoin{id: []byte{0x0a, 0x0b}},
+		changeCoin: &tCoin{id: encode.RandomBytes(36)},
 	}
 	return &xcWallet{
 		Wallet:    w,
@@ -658,7 +664,6 @@ func newTestRig() *testRig {
 	}
 
 	// Set the global waiter expiration, and start the waiter.
-	txWaitExpiration = time.Millisecond * 10
 	queue := wait.NewTickerQueue(time.Millisecond * 5)
 	go queue.Run(tCtx)
 
@@ -2127,7 +2132,8 @@ func TestTradeTracking(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error for invalid server ack for init route")
 	}
-	match, found := tracker.matches[mid]
+	var found bool
+	match, found = tracker.matches[mid]
 	if !found {
 		t.Fatalf("match not found")
 	}

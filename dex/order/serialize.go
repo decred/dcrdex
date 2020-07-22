@@ -128,6 +128,12 @@ func decodeTrade_v0(pushes [][]byte) (mrkt *Trade, err error) {
 	if bEqual(sellB, encode.ByteFalse) {
 		sell = false
 	}
+	if len(qtyB) != 8 {
+		return nil, fmt.Errorf("quantity bytes length %v, expected 8", len(qtyB))
+	}
+	if len(filledB) != 8 {
+		return nil, fmt.Errorf("filled amount bytes length %v, expected 8", len(filledB))
+	}
 	return &Trade{
 		Coins:    coins,
 		Sell:     sell,
