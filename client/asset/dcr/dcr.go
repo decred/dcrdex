@@ -37,8 +37,13 @@ import (
 )
 
 const (
-	BipID      = 42
+	// BipID is the BIP-0044 asset ID.
+	BipID = 42
+	// defaultFee is the default value for the fallbackfee.
 	defaultFee = 20
+	// splitTxBaggage is the total number of additional bytes associated with
+	// using a split transaction to fund a swap.
+	splitTxBaggage = dexdcr.MsgTxOverhead + 1 + dexdcr.P2PKHInputSize + 2*(1+dexdcr.P2PKHOutputSize)
 )
 
 var (
@@ -300,6 +305,7 @@ type ExchangeWallet struct {
 	// shutdown.
 	fundingMtx   sync.RWMutex
 	fundingCoins map[string]*fundingCoin
+	splitFunds   map[string]asset.Coins
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -348,6 +354,7 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 		tradeChange:     make(map[string]time.Time),
 		tipChange:       cfg.TipChange,
 		fundingCoins:    make(map[string]*fundingCoin),
+		splitFunds:      make(map[string]asset.Coins),
 		fallbackFeeRate: fallbackFeesPerByte,
 		useSplitTx:      dcrCfg.UseSplitTx,
 	}
@@ -489,20 +496,27 @@ func (dcr *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins,
 	if value == 0 {
 		return nil, fmt.Errorf("cannot fund value = 0")
 	}
+
 	//oneInputSize := dexdcr.P2PKHInputSize
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		reqFunds := calc.RequiredOrderFunds(value, uint64(size+unspent.input.Size()), nfo)
 		// needed fees are reqFunds - value
 		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
 	}
-	coins, err := dcr.fund(0, enough)
+
+	coins, inputsSize, fundingCoins, err := dcr.fund(0, enough)
 	if err != nil {
 		return nil, err
 	}
 
+	// Send a split, if preferred.
+	if dcr.useSplitTx {
+		return dcr.split(value, coins, inputsSize, fundingCoins, nfo)
+	}
+
 	dcr.log.Debugf("funding %d atom order with coins %v", value, coins)
 
-	return coins, err
+	return coins, nil
 }
 
 // unspents fetches unspent outputs for the ExchangeWallet account.
@@ -527,21 +541,21 @@ func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
 // check whether adding the provided output would be enough to satisfy the
 // needed value.
 func (dcr *ExchangeWallet) fund(confs uint32,
-	enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, error) {
+	enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, uint64, []*fundingCoin, error) {
 
 	unspents, err := dcr.unspents()
 	if err != nil {
-		return nil, err
+		return nil, 0, nil, err
 	}
 
 	// Sort in ascending order by amount (smallest first).
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
 	utxos, avail, err := dcr.spendableUTXOs(unspents, confs)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
+		return nil, 0, nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
 	if len(utxos) == 0 {
-		return nil, fmt.Errorf("insufficient funds. %.8f available", float64(avail)/1e8)
+		return nil, 0, nil, fmt.Errorf("insufficient funds. %.8f available", float64(avail)/1e8)
 	}
 
 	var sum uint64
@@ -609,24 +623,97 @@ func (dcr *ExchangeWallet) fund(confs uint32,
 	// First try with confs>0.
 	ok, err := tryUTXOs(1)
 	if err != nil {
-		return nil, err
+		return nil, 0, nil, err
 	}
 	// Fallback to allowing 0-conf outputs.
 	if !ok {
 		ok, err = tryUTXOs(0)
 		if err != nil {
-			return nil, err
+			return nil, 0, nil, err
 		}
 		if !ok {
-			return nil, fmt.Errorf("not enough to cover requested funds")
+			return nil, 0, nil, fmt.Errorf("not enough to cover requested funds")
 		}
 	}
 
 	err = dcr.lockFundingCoins(spents)
 	if err != nil {
-		return nil, err
+		return nil, 0, nil, err
 	}
-	return coins, nil
+	return coins, uint64(size), spents, nil
+}
+
+// split will send a split transaction and return the sized output. If the
+// split transaction is determined to be un-economical, it will not be sent,
+// there is no error, and the input coins will be returned unmodified, but an
+// info message will be logged.
+//
+// A split transaction nets 1 extra transaction, 1 extra signed p2pkh-spending
+// input, and two additional p2pkh outputs. If the fees associated with this
+// extra baggage are more than the excess amount that would be locked if a split
+// transaction were not used, then the split transaction is pointless. This
+// might be common, for instance, if an order is canceled partially filled, and
+// then the remainder resubmitted. We would already have an output of just the
+// right size, and that would be recognized here.
+func (dcr *ExchangeWallet) split(value uint64, coins asset.Coins, inputsSize uint64, fundingCoins []*fundingCoin, nfo *dex.Asset) (asset.Coins, error) {
+
+	// Calculate the extra fees associated with the additional inputs, outputs,
+	// and transaction overhead, and compare to the excess that would be locked.
+	baggageFees := nfo.MaxFeeRate * splitTxBaggage
+
+	var coinSum uint64
+	for _, coin := range coins {
+		coinSum += coin.Value()
+	}
+
+	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, nfo)
+	if baggageFees > excess {
+		dcr.log.Infof("skipping split transaction because cost is greater than potential over-lock. %d > %d.", baggageFees, excess)
+		dcr.log.Debugf("funding %d atom order with coins %v", value, coins)
+		return coins, nil
+	}
+
+	// Use an internal address for the sized output.
+	addr, err := dcr.node.GetRawChangeAddress(dcr.acct, chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error creating split transaction address: %v", err)
+	}
+
+	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, nfo)
+
+	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, dcr.feeRateWithFallback(), false)
+	if err != nil {
+		return nil, fmt.Errorf("error sending split transaction: %v", err)
+	}
+
+	op := newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular, nil)
+
+	// Lock the funding coin.
+	err = dcr.lockFundingCoins([]*fundingCoin{{
+		op:   op,
+		addr: addr.String(),
+	}})
+	if err != nil {
+		dcr.log.Errorf("error locking funding coin from split transaction %s", op)
+	}
+
+	// NOTE: Can't return coins yet, because dcrwallet doesn't recognize them as
+	// spent immediately, so subsequent calls to FundOrder might result in a
+	// `-4: rejected transaction: transaction in the pool already spends the
+	// same coins` error.
+	// // Unlock the spent coins.
+	// err = dcr.ReturnCoins(coins)
+	// if err != nil {
+	// 	dcr.log.Errorf("error locking coins spent in split transaction %v", coins)
+	// }
+
+	dcr.logSplitFunds(op, append(coins, op))
+
+	dcr.log.Debugf("funding %d atom order with split output coin %v from original coins %v", value, op, coins)
+	dcr.log.Infof("sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash, value, reqFunds)
+
+	return asset.Coins{op}, nil
+
 }
 
 // lockFundingCoins locks the funding coins via RPC and stores them in the map.
@@ -647,6 +734,17 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	return nil
 }
 
+// logSplitFunds associates the funding coins with the split tx output, so that
+// the coins can be unlocked when the swap is sent. The helps to deal with a
+// timing issue with dcrwallet where listunspent might still return outputs that were
+// just spent in a transaction broadcast with sendrawtransaction. Instead, we'll
+// lock them until the split output is spent.
+func (dcr *ExchangeWallet) logSplitFunds(op *output, coins asset.Coins) {
+	dcr.fundingMtx.Lock()
+	defer dcr.fundingMtx.Unlock()
+	dcr.splitFunds[op.String()] = coins
+}
+
 // ReturnCoins unlocks coins. This would be necessary in the case of a
 // canceled order.
 func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
@@ -665,6 +763,17 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 		}
 		ops = append(ops, wire.NewOutPoint(&op.txHash, op.vout, op.tree))
 		delete(dcr.fundingCoins, outpointID(&op.txHash, op.vout))
+		splitFunds, found := dcr.splitFunds[unspent.String()]
+		if found {
+			for _, c := range splitFunds {
+				delete(dcr.splitFunds, c.String())
+				op, err := dcr.convertCoin(c)
+				if err != nil {
+					return fmt.Errorf("error converting split funds coin: %v", err)
+				}
+				ops = append(ops, wire.NewOutPoint(&op.txHash, op.vout, op.tree))
+			}
+		}
 	}
 	return dcr.node.LockUnspent(true, ops)
 }
@@ -750,7 +859,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	// Start with an empty MsgTx.
 	baseTx := wire.NewMsgTx()
 	// Add the funding utxos.
-	totalIn, wireOPs, err := dcr.addInputCoins(baseTx, swaps.Inputs)
+	totalIn, err := dcr.addInputCoins(baseTx, swaps.Inputs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -805,18 +914,11 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		return nil, nil, err
 	}
 
-	// Unlock the spent outputs.
-	err = dcr.node.LockUnspent(true, wireOPs)
+	// Return spent outputs.
+	err = dcr.ReturnCoins(swaps.Inputs)
 	if err != nil {
-		dcr.log.Errorf("failed to unlock spent coins %v", wireOPs)
+		dcr.log.Errorf("error unlocking swapped coins", swaps.Inputs)
 	}
-
-	// Delete the utxos from the cache.
-	dcr.fundingMtx.Lock()
-	for _, coin := range swaps.Inputs {
-		delete(dcr.fundingCoins, coin.String())
-	}
-	dcr.fundingMtx.Unlock()
 
 	// Lock the change coin, if requested.
 	if swaps.LockChange {
@@ -1350,24 +1452,22 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.
-func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (uint64, []*wire.OutPoint, error) {
+func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (uint64, error) {
 	var totalIn uint64
-	wireOPs := make([]*wire.OutPoint, 0, len(coins))
 	for _, coin := range coins {
 		output, err := dcr.convertCoin(coin)
 		if err != nil {
-			return 0, nil, err
+			return 0, err
 		}
 		if output.value == 0 {
-			return 0, nil, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
+			return 0, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
 		}
 		totalIn += output.value
 		prevOut := wire.NewOutPoint(&output.txHash, output.vout, output.tree)
-		wireOPs = append(wireOPs, prevOut)
 		txIn := wire.NewTxIn(prevOut, int64(output.value), []byte{})
 		msgTx.AddTxIn(txIn)
 	}
-	return totalIn, wireOPs, nil
+	return totalIn, nil
 }
 
 // Shutdown down the rpcclient.Client.
@@ -1510,7 +1610,7 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		return sum+toAtoms(unspent.rpc.Amount) >= val
 	}
-	coins, err := dcr.fund(0, enough)
+	coins, _, _, err := dcr.fund(0, enough)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1525,7 +1625,7 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regfee, netFeeRate u
 		txFee := uint64(size+unspent.input.Size()) * netFeeRate
 		return sum+toAtoms(unspent.rpc.Amount) >= regfee+txFee
 	}
-	coins, err := dcr.fund(0, enough)
+	coins, _, _, err := dcr.fund(0, enough)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1534,10 +1634,11 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regfee, netFeeRate u
 
 // sendCoins sends the amount to the address as the zeroth output, spending the
 // specified coins. If subtract is true, the transaction fees will be taken from
-// the sent value, otherwise it will taken from the change output.
+// the sent value, otherwise it will taken from the change output. If there is
+// change, it will be at index 1.
 func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, val, feeRate uint64, subtract bool) (*wire.MsgTx, uint64, error) {
 	baseTx := wire.NewMsgTx()
-	totalIn, _, err := dcr.addInputCoins(baseTx, coins)
+	totalIn, err := dcr.addInputCoins(baseTx, coins)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1558,6 +1659,7 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 	if subtract {
 		subtractee = txOut
 	}
+
 	tx, _, err := dcr.sendWithReturn(baseTx, changeAddr, totalIn, val, feeRate, subtractee)
 	return tx, uint64(txOut.Value), err
 }
@@ -1694,7 +1796,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	// admittedly un-scientific. This should account for any signature length
 	// related variation as well as a potential dust change output with no
 	// subtractee specified, in which case the dust goes to the miner.
-	if checkRate > feeRate*3 {
+	if changeAdded && checkRate > feeRate*3 {
 		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is seemingly outrageous, target = %d, raw tx = %x",
 			msgTx.CachedTxHash(), checkRate, feeRate, dcr.wireBytes(msgTx))
 	}

@@ -30,6 +30,8 @@ import (
 	"decred.org/dcrdex/dex/config"
 )
 
+const tPW = "abc"
+
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
 // Convert the BTC value to satoshi.
@@ -38,7 +40,8 @@ func toSatoshi(v float64) uint64 {
 }
 
 func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, symbol, conf, name string,
-	logger dex.Logger, blkFunc func(string, error)) (*btc.ExchangeWallet, *dex.ConnectionMaster) {
+	logger dex.Logger, blkFunc func(string, error), splitTx bool) (*btc.ExchangeWallet, *dex.ConnectionMaster) {
+
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
@@ -49,6 +52,9 @@ func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, sy
 		t.Fatalf("error reading config options: %v", err)
 	}
 	settings["walletname"] = name
+	if splitTx {
+		settings["txsplit"] = "1"
+	}
 	walletCfg := &asset.WalletConfig{
 		Settings: settings,
 		TipChange: func(err error) {
@@ -109,7 +115,7 @@ func randBytes(l int) []byte {
 	return b
 }
 
-func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *dex.Asset) {
+func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *dex.Asset, splitTx bool) {
 	tLogger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	tCtx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
@@ -130,9 +136,9 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		backends:          make(map[string]*btc.ExchangeWallet),
 		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
 	}
-	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "alpha", "", tLogger, blkFunc)
-	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "beta", "", tLogger, blkFunc)
-	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "alpha", "gamma", tLogger, blkFunc)
+	rig.backends["alpha"], rig.connectionMasters["alpha"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "alpha", "", tLogger, blkFunc, splitTx)
+	rig.backends["beta"], rig.connectionMasters["beta"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "beta", "", tLogger, blkFunc, splitTx)
+	rig.backends["gamma"], rig.connectionMasters["gamma"] = tBackend(t, tCtx, newWallet, dexAsset.Symbol, "alpha", "gamma", tLogger, blkFunc, splitTx)
 	defer rig.close()
 	contractValue := 2 * dexAsset.LotSize
 
@@ -154,6 +160,13 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		tLogger.Debugf("%s %f available, %f immature, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
 	}
+
+	// Unlock the wallet for use.
+	err := rig.gamma().Unlock(walletPassword, time.Hour*24)
+	if err != nil {
+		t.Fatalf("error unlocking gamma wallet: %v", err)
+	}
+
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only
 	// return 1 utxo.
 	utxos, err := rig.gamma().FundOrder(contractValue*3, dexAsset)
@@ -167,12 +180,11 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
-	// Unlock
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
 	utxos, _ = rig.gamma().FundOrder(contractValue*3, dexAsset)
-	if !inUTXOs(utxo, utxos) {
+	if !splitTx && !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.gamma().ReturnCoins(utxos)
@@ -186,12 +198,6 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	utxos2, err := rig.gamma().FundOrder(contractValue*2, dexAsset)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
-	}
-
-	// Unlock the wallet for use.
-	err = rig.gamma().Unlock(walletPassword, time.Hour*24)
-	if err != nil {
-		t.Fatalf("error unlocking gamma wallet: %v", err)
 	}
 
 	secretKey1 := randBytes(32)

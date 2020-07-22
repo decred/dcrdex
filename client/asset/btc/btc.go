@@ -41,12 +41,16 @@ const (
 	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
 	methodGetNetworkInfo    = "getnetworkinfo"
-	BipID                   = 0
+	// BipID is the BIP-0044 asset ID.
+	BipID = 0
 	// The default fee is passed to the user as part of the asset.WalletInfo
 	// structure.
 	defaultFee         = 100
 	minNetworkVersion  = 190000
 	minProtocolVersion = 70015
+	// splitTxBaggage is the total number of additional bytes associated with
+	// using a split transaction to fund a swap.
+	splitTxBaggage = dexbtc.MimimumTxOverhead + 1 + dexbtc.RedeemP2WPKHInputSize + 2*(1+dexbtc.P2PKHOutputSize)
 )
 
 var (
@@ -535,8 +539,8 @@ out:
 	for {
 		// If there are none left, we don't have enough.
 		if len(utxos) == 0 {
-			return nil, fmt.Errorf("not enough to cover requested funds + fees = %d",
-				calc.RequiredOrderFunds(value, uint64(size), nfo))
+			return nil, fmt.Errorf("not enough to cover requested funds + fees. need %d, have %d",
+				calc.RequiredOrderFunds(value, uint64(size), nfo), sum)
 		}
 		// On each loop, find the smallest UTXO that is enough for the value. If
 		// no UTXO is large enough, add the largest and continue.
@@ -553,6 +557,10 @@ out:
 		utxos = utxos[:len(utxos)-1]
 	}
 
+	if btc.useSplitTx {
+		return btc.split(value, spents, uint64(size), fundingCoins, nfo)
+	}
+
 	err = btc.wallet.LockUnspent(false, spents)
 	if err != nil {
 		return nil, err
@@ -567,6 +575,103 @@ out:
 	btc.log.Debugf("funding %d %s order with coins %v", value, btc.walletInfo.Units, coins)
 
 	return coins, nil
+}
+
+// split will send a split transaction and return the sized output. If the
+// split transaction is determined to be un-economical, it will not be sent,
+// there is no error, and the input coins will be returned unmodified, but an
+// info message will be logged.
+//
+// A split transaction nets 1 extra transaction, 1 extra signed p2pkh-spending
+// input, and two additional p2pkh outputs. If the fees associated with this
+// extra baggage are more than the excess amount that would be locked if a split
+// transaction were not used, then the split transaction is pointless. This
+// might be common, for instance, if an order is canceled partially filled, and
+// then the remainder resubmitted. We would already have an output of just the
+// right size, and that would be recognized here.
+func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uint64, fundingCoins map[string]*compositeUTXO, nfo *dex.Asset) (asset.Coins, error) {
+	var err error
+	defer func() {
+		if err != nil {
+			return
+		}
+		btc.fundingMtx.Lock()
+		for _, fCoin := range fundingCoins {
+			btc.fundingCoins[outpointID(fCoin.txHash.String(), fCoin.vout)] = fCoin
+		}
+		btc.fundingMtx.Unlock()
+		err = btc.wallet.LockUnspent(false, outputs)
+		if err != nil {
+			btc.log.Errorf("error locking unspent outputs: %v", err)
+		}
+	}()
+
+	// Calculate the extra fees associated with the additional inputs, outputs,
+	// and transaction overhead, and compare to the excess that would be locked.
+	baggageFees := nfo.MaxFeeRate * splitTxBaggage
+
+	var coinSum uint64
+	coins := make(asset.Coins, 0, len(outputs))
+	for _, op := range outputs {
+		coins = append(coins, op)
+		coinSum += op.value
+	}
+
+	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, nfo)
+	if baggageFees > excess {
+		btc.log.Infof("skipping split transaction because cost is greater than potential over-lock. %d > %d", baggageFees, excess)
+		return coins, nil
+	}
+
+	// Use an internal address for the sized output.
+	addr, err := btc.wallet.ChangeAddress()
+	if err != nil {
+		return nil, fmt.Errorf("error creating split transaction address: %v", err)
+	}
+
+	reqFunds := calc.RequiredOrderFunds(value, dexbtc.RedeemP2WPKHInputSize, nfo)
+
+	baseTx, _, _, err := btc.fundedTx(coins)
+	splitScript, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, fmt.Errorf("error creating split tx script: %v", err)
+	}
+	baseTx.AddTxOut(wire.NewTxOut(int64(reqFunds), splitScript))
+
+	// Grab a change address.
+	changeAddr, err := btc.wallet.ChangeAddress()
+	if err != nil {
+		return nil, fmt.Errorf("error creating change address: %v", err)
+	}
+
+	// Sign, add change, and send the transaction.
+	msgTx, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, btc.feeRateWithFallback())
+	if err != nil {
+		return nil, err
+	}
+	txHash := msgTx.TxHash()
+
+	op := newOutput(btc.node, &txHash, 0, reqFunds, nil)
+
+	// Need to save one funding coin (in the deferred function).
+	spendInfo, err := dexbtc.InputInfo(msgTx.TxOut[0].PkScript, nil, btc.chainParams)
+	if err != nil {
+		return nil, fmt.Errorf("error reading asset info: %v", err)
+	}
+	fundingCoins = map[string]*compositeUTXO{outpointID(txHash.String(), 0): {
+		txHash:       &op.txHash,
+		vout:         op.vout,
+		address:      addr.String(),
+		redeemScript: nil,
+		amount:       reqFunds,
+		input:        spendInfo,
+	}}
+
+	btc.log.Infof("sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash, value, reqFunds)
+
+	// Assign to coins so the deferred function will lock the output.
+	outputs = []*output{op}
+	return asset.Coins{op}, nil
 }
 
 // ReturnCoins unlocks coins. This would be used in the case of a
@@ -670,31 +775,38 @@ func (btc *ExchangeWallet) Lock() error {
 	return btc.wallet.Lock()
 }
 
-// Swap sends the swaps in a single transaction. The Receipts returned can be
-// used to refund a failed transaction.
-func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
-	var contracts [][]byte
-	var totalOut, totalIn uint64
-	// Start with an empty MsgTx.
+// fundedTx creates and returns a new MsgTx with the provided coins as inputs.
+func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []string, error) {
 	baseTx := wire.NewMsgTx(wire.TxVersion)
-
+	var totalIn uint64
 	// Add the funding utxos.
-	spents := make([]*output, 0, len(swaps.Inputs))
-	for _, coin := range swaps.Inputs {
-		output, err := btc.convertCoin(coin)
+	opIDs := make([]string, 0, len(coins))
+	for _, coin := range coins {
+		op, err := btc.convertCoin(coin)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error converting coin: %v", err)
+			return nil, 0, nil, fmt.Errorf("error converting coin: %v", err)
 		}
-		if output.value == 0 {
-			return nil, nil, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
+		if op.value == 0 {
+			return nil, 0, nil, fmt.Errorf("zero-valued output detected for %s:%d", op.txHash, op.vout)
 		}
-		totalIn += output.value
-		prevOut := wire.NewOutPoint(&output.txHash, output.vout)
+		totalIn += op.value
+		prevOut := wire.NewOutPoint(&op.txHash, op.vout)
 		txIn := wire.NewTxIn(prevOut, []byte{}, nil)
 		baseTx.AddTxIn(txIn)
-		spents = append(spents, output)
+		opIDs = append(opIDs, outpointID(op.txHash.String(), op.vout))
 	}
+	return baseTx, totalIn, opIDs, nil
+}
 
+// Swap sends the swap contracts and prepares the receipts.
+func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
+	var contracts [][]byte
+	var totalOut uint64
+	// Start with an empty MsgTx.
+	baseTx, totalIn, opIDs, err := btc.fundedTx(swaps.Inputs)
+	if err != nil {
+		return nil, nil, err
+	}
 	// Add the contract outputs.
 	// TODO: Make P2WSH contract and P2WPKH change outputs instead of
 	// legacy/non-segwit swap contracts pkScripts.
@@ -793,8 +905,8 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Delete the UTXOs from the cache.
-	for _, spent := range spents {
-		delete(btc.fundingCoins, outpointID(spent.txHash.String(), spent.vout))
+	for _, opID := range opIDs {
+		delete(btc.fundingCoins, opID)
 	}
 
 	return receipts, changeCoin, nil

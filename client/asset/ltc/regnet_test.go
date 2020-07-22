@@ -36,5 +36,5 @@ var tLTC = &dex.Asset{
 }
 
 func TestWallet(t *testing.T) {
-	livetest.Run(t, NewWallet, alphaAddress, tLTC)
+	livetest.Run(t, NewWallet, alphaAddress, tLTC, false)
 }
