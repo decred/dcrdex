@@ -31,6 +31,10 @@ const (
 
 	// maxReconnetInterval is the maximum allowed reconnect interval.
 	maxReconnectInterval = time.Minute
+
+	// DefaultResponseTimeout is the default timeout for responses after a
+	// request is successfully sent.
+	DefaultResponseTimeout = 30 * time.Second
 )
 
 // ErrInvalidCert is the error returned when attempting to use an invalid cert
@@ -45,7 +49,8 @@ var ErrCertRequired = fmt.Errorf("certificate required")
 type WsConn interface {
 	NextID() uint64
 	Send(msg *msgjson.Message) error
-	Request(msg *msgjson.Message, f func(*msgjson.Message)) error
+	Request(msg *msgjson.Message, respHandler func(*msgjson.Message)) error
+	RequestWithTimeout(msg *msgjson.Message, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) error
 	Connect(ctx context.Context) (*sync.WaitGroup, error)
 	MessageSource() <-chan *msgjson.Message
 }
@@ -412,7 +417,11 @@ func (conn *wsConn) Stop() {
 	conn.cancel()
 }
 
-// Send pushes outgoing messages over the websocket connection.
+// Send pushes outgoing messages over the websocket connection. Sending of the
+// message is synchronous, so a nil error guarantees that the message was
+// successfully sent. A non-nil error may indicate that the connection is known
+// to be down, the message failed to marshall to JSON, or writing to the
+// websocket link failed.
 func (conn *wsConn) Send(msg *msgjson.Message) error {
 	if !conn.isConnected() {
 		return fmt.Errorf("cannot send on a broken connection")
@@ -427,7 +436,7 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 	}
 
 	// Marshal the Message first so that we don't send junk to the peer even if
-	// it fails to marshal completely, which WriteJSON does.
+	// it fails to marshal completely, which gorilla/websocket.WriteJSON does.
 	b, err := json.Marshal(msg)
 	if err != nil {
 		log.Errorf("Failed to marshal message: %v", err)
@@ -441,28 +450,81 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 	return nil
 }
 
-// Request sends the message with Send, but keeps a record of the callback
-// function to run when a response is received.
+// Request sends the Request-type msgjson.Message to the server and does not
+// wait for a response, but records a callback function to run when a response
+// is received. A response must be received within DefaultResponseTimeout of the
+// request, after which the response handler expires and any late response will
+// be ignored. To handle expiration or to set the timeout duration, use
+// RequestWithTimeout. Sending of the request is synchronous, so a nil error
+// guarantees that the request message was successfully sent.
 func (conn *wsConn) Request(msg *msgjson.Message, f func(*msgjson.Message)) error {
-	// Log the message sent if it is a request.
-	if msg.Type == msgjson.Request {
-		conn.logReq(msg.ID, f)
+	return conn.RequestWithTimeout(msg, f, DefaultResponseTimeout, func() {})
+}
+
+// RequestWithTimeout sends the Request-type message and does not wait for a
+// response, but records a callback function to run when a response is received.
+// If the server responds within expireTime of the request, the response handler
+// is called, otherwise the expire function is called. If the response handler
+// is called, it is guaranteed that the response Message.ID is equal to the
+// request Message.ID. Sending of the request is synchronous, so a nil error
+// guarantees that the request message was successfully sent and that either the
+// response handler or expire function will be run; a non-nil error guarantees
+// that neither function will run.
+//
+// For example, to wait on a response or timeout:
+//
+// errChan := make(chan error, 1)
+// err := conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
+//     errChan <- msg.UnmarshalResult(responseStructPointer)
+// }, timeout, func() {
+//     errChan <- fmt.Errorf("timed out waiting for '%s' response.", route)
+// })
+// if err != nil {
+//     return err // request error
+// }
+// return <-errChan // timeout or response error
+func (conn *wsConn) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), expireTime time.Duration, expire func()) error {
+	if msg.Type != msgjson.Request {
+		return fmt.Errorf("Message is not a request: %v", msg.Type)
 	}
-	return conn.Send(msg)
+	// Register the response and expire handlers for this request.
+	conn.logReq(msg.ID, f, expireTime, expire)
+	err := conn.Send(msg)
+	if err != nil {
+		// Neither expire nor the handler should run. Stop the expire timer
+		// created by logReq and delete the response handler it added. The
+		// caller receives a non-nil error to deal with it.
+		log.Debugf("(*wsConn).Request(route '%s') Send error, unregistering msg ID %d handler",
+			msg.Route, msg.ID)
+		conn.respHandler(msg.ID) // drop the responseHandler logged by logReq that is no longer necessary
+	}
+	return err
+}
+
+func (conn *wsConn) expire(id uint64) bool {
+	conn.reqMtx.Lock()
+	defer conn.reqMtx.Unlock()
+	_, removed := conn.respHandlers[id]
+	delete(conn.respHandlers, id)
+	return removed
 }
 
 // logReq stores the response handler in the respHandlers map. Requests to the
 // client are associated with a response handler.
-func (conn *wsConn) logReq(id uint64, respHandler func(*msgjson.Message)) {
+func (conn *wsConn) logReq(id uint64, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) {
 	conn.reqMtx.Lock()
 	defer conn.reqMtx.Unlock()
+	doExpire := func() {
+		// Delete the response handler, and call the provided expire function if
+		// (*wsLink).respHandler has not already retrieved the handler function
+		// for execution.
+		if conn.expire(id) {
+			expire()
+		}
+	}
 	conn.respHandlers[id] = &responseHandler{
-		expiration: time.AfterFunc(time.Minute*5, func() {
-			conn.reqMtx.Lock()
-			delete(conn.respHandlers, id)
-			conn.reqMtx.Unlock()
-		}),
-		f: respHandler,
+		expiration: time.AfterFunc(expireTime, doExpire),
+		f:          respHandler,
 	}
 }
 

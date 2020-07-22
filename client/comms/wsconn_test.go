@@ -418,12 +418,12 @@ func TestWsConn(t *testing.T) {
 	// Ensure the response handler is unlogged.
 	hndlr = wsc.respHandler(mId)
 	if hndlr != nil {
-		t.Fatal("expected an error for unlogged id")
+		t.Fatal("found a response handler for an unlogged request id")
 	}
 
 	pingCh <- struct{}{}
 
-	// Ensure a malformed request data (a send failure) does not leave a
+	// Ensure malformed request data (a send failure) does not leave a
 	// registered response handler or kill the connection.
 	sent.ID = wsc.NextID()
 	sent.Payload = []byte("{notjson")

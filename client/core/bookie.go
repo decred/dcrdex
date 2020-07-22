@@ -216,13 +216,15 @@ func (dc *dexConnection) subscribe(base, quote uint32) (*msgjson.OrderBook, erro
 	}
 	errChan := make(chan error, 1)
 	result := new(msgjson.OrderBook)
-	err = dc.Request(req, func(msg *msgjson.Message) {
+	err = dc.RequestWithTimeout(req, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(result)
+	}, DefaultResponseTimeout, func() {
+		errChan <- fmt.Errorf("timed out waiting for '%s' response.", msgjson.OrderBookRoute)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error subscribing to %s orderbook: %v", mkt, err)
 	}
-	err = extractError(errChan, requestTimeout, msgjson.OrderBookRoute)
+	err = <-errChan
 	if err != nil {
 		return nil, err
 	}
@@ -265,9 +267,10 @@ func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 	if err != nil {
 		return fmt.Errorf("unsub_orderbook message encoding error: %w", err)
 	}
+	// Request to unsubscribe. NOTE: does not wait for response.
 	err = dc.Request(req, func(msg *msgjson.Message) {
 		var res bool
-		msg.UnmarshalResult(&res)
+		_ = msg.UnmarshalResult(&res) // res==false if unmarshal fails
 		if !res {
 			log.Errorf("error unsubscribing from %s", mkt)
 		}

@@ -90,7 +90,7 @@ func (ob *OrderBook) setSeq(seq uint64) {
 	ob.seqMtx.Lock()
 	defer ob.seqMtx.Unlock()
 	if seq != ob.seq+1 {
-		log.Errorf("notification received out of sync. %d != %d - 1\n", ob.seq, seq)
+		log.Errorf("notification received out of sync. %d != %d - 1", ob.seq, seq)
 	}
 	if seq > ob.seq {
 		ob.seq = seq
