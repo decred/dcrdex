@@ -2145,15 +2145,20 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		tracker.cancelTrade(cancels[oid], cancelPreimages[oid])
 	}
 
-	for _, dbMatch := range activeDBMatches {
-		// Impossible for the tracker to not be here, since it would have errored
-		// in the previous activeDBMatches loop.
-		tracker := trackers[dbMatch.Match.OrderID]
-		tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
-			id:        dbMatch.Match.MatchID,
-			prefix:    tracker.Prefix(),
-			trade:     tracker.Trade(),
-			MetaMatch: *dbMatch,
+	// We must load all matches for each order, regardless of whether they are
+	// active or not.
+	for _, tracker := range trackers {
+		dbMatches, err := c.db.MatchesForOrder(tracker.ID())
+		if err != nil {
+			return nil, fmt.Errorf("error loading matches for order %s: %v", tracker.ID(), err)
+		}
+		for _, dbMatch := range dbMatches {
+			tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
+				id:        dbMatch.Match.MatchID,
+				prefix:    tracker.Prefix(),
+				trade:     tracker.Trade(),
+				MetaMatch: *dbMatch,
+			}
 		}
 	}
 

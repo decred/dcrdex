@@ -2739,6 +2739,7 @@ func TestResolveActiveTrades(t *testing.T) {
 		},
 	}
 	rig.db.activeMatchesForDEX = []*db.MetaMatch{match}
+	rig.db.matchesForOID = []*db.MetaMatch{match}
 	tDcrWallet.fundingCoins = asset.Coins{changeCoin}
 	_, auditInfo := tMsgAudit(oid, mid, addr, qty, nil)
 	tBtcWallet.auditInfo = auditInfo
