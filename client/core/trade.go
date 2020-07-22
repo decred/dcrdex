@@ -301,25 +301,28 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 // negotiate creates and stores matchTrackers for the []*msgjson.Match, and
 // updates (UserMatch).Filled. Match negotiation can then be progressed by
 // calling (*trackedTrade).tick when a relevant event occurs, such as a request
-// from the DEX or a tip change. negotiate calls tick internally.
+// from the DEX or a tip change.
 func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	// Add the matches to the match map and update the database.
-	var err error
+	errs := newErrorSet("negotiate for trade %v: ", t.ID())
 	var includesCancellation, includesTrades bool
 	trade := t.Trade()
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
+	var newFill uint64
 	for _, msgMatch := range msgMatches {
 		if len(msgMatch.MatchID) != order.MatchIDSize {
-			return fmt.Errorf("match id of incorrect length. expected %d, got %d",
+			errs.add("match id of incorrect length. expected %d, got %d",
 				order.MatchIDSize, len(msgMatch.MatchID))
+			continue
 		}
 		var mid order.MatchID
 		copy(mid[:], msgMatch.MatchID)
 		var oid order.OrderID
 		copy(oid[:], msgMatch.OrderID)
 		if oid != t.ID() {
-			return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.ID())
+			errs.add("wrong order %s", oid)
+			continue
 		}
 		// Contract txn asset: buy means quote, sell means base. NOTE:
 		// msgjson.Match could instead have just FeeRateSwap for the recipient,
@@ -329,8 +332,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		if trade.Sell {
 			feeRateSwap = msgMatch.FeeRateBase
 		}
-		log.Infof("Starting negotiation for match %v for order %v with feeRateSwap = %v",
-			mid, oid, feeRateSwap)
+
 		match := &matchTracker{
 			id:     mid,
 			prefix: t.Prefix(),
@@ -361,6 +363,15 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			},
 		}
 
+		var qty uint64
+		if t.Type() == order.MarketOrderType && !trade.Sell {
+			qty = calc.BaseToQuote(msgMatch.Rate, msgMatch.Quantity)
+		} else {
+			qty = msgMatch.Quantity
+			// Note that this includes when msgMatch is a cancel.
+		}
+		newFill += qty
+
 		// First check that this isn't a match on its own cancel order. I'm not crazy
 		// about this, but I am detecting this case right now based on the Address
 		// field being an empty string.
@@ -368,9 +379,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		if isCancel {
 			match.setStatus(order.MatchComplete)
 			includesCancellation = true
-			log.Infof("maker notification for cancel order received for order %s. match id = %s", oid, msgMatch.MatchID)
+			log.Infof("Maker notification for cancel order received for order %s. match id = %s",
+				oid, msgMatch.MatchID)
 			t.cancel.matches.maker = msgMatch
 		} else {
+			log.Infof("Starting negotiation for match %v for order %v with feeRateSwap = %v, quantity = %v",
+				mid, oid, feeRateSwap, qty)
 			includesTrades = true
 			t.matches[match.id] = match
 		}
@@ -380,23 +394,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		}
 	}
 
-	// Calculate the new filled value for the order.
-	isMarketBuy := t.Type() == order.MarketOrderType && !trade.Sell
-	var filled uint64
-	// If the order has been canceled, add that to the filled.
-	if t.cancel != nil && t.cancel.matches.maker != nil {
-		filled += t.cancel.matches.maker.Quantity
-	}
-	for _, n := range t.matches {
-		if isMarketBuy {
-			filled += calc.BaseToQuote(n.Match.Rate, n.Match.Quantity)
-		} else {
-			filled += n.Match.Quantity
-		}
-	}
-	// The filled amount includes all of the trackedTrade's matches, so the
-	// filled amount must be set, not just increased.
-	trade.SetFill(filled)
+	// NOTE: If Core was restarted, previously inactive matches are no longer in
+	// the t.matches map, preventing correct fill computation by summation of
+	// all match quantities for partially filled orders with inactive matches
+	// that had partially filled the order.
+	filled := trade.AddFill(newFill)
+
 	// Set the order as executed depending on type and fill. Skip this if the
 	if t.metaData.Status != order.OrderStatusCanceled && t.metaData.Status != order.OrderStatusRevoked {
 		if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF && filled < trade.Quantity {
@@ -424,30 +427,31 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			if t.change == nil && len(t.matches) == 0 {
 				err := t.wallets.fromWallet.ReturnCoins(t.coinList())
 				if err != nil {
-					log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
+					log.Warnf("Unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
 				}
 			} else if t.changeLocked {
 				err := t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
 				if err != nil {
-					log.Warnf("unable to return %s change coin %v: %v", unbip(t.wallets.fromAsset.ID), t.change, err)
+					log.Warnf("Unable to return %s change coin %v: %v", unbip(t.wallets.fromAsset.ID), t.change, err)
 				}
 			}
 		}
 	}
 	if includesTrades {
-		fillRatio := float64(trade.Filled()) / float64(trade.Quantity)
+		fillPct := 100 * float64(filled) / float64(trade.Quantity)
 		details := fmt.Sprintf("%s order on %s-%s %.1f%% filled (%s)",
-			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillRatio*100, t.token())
-		log.Debugf("trade order %v matched with %d orders", t.ID(), len(msgMatches))
+			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillPct, t.token())
+		log.Debugf("Trade order %v matched with %d orders: +%d filled, total fill %d / %d (%.1f%%)",
+			t.ID(), len(msgMatches), newFill, filled, trade.Quantity, fillPct)
 		t.notify(newOrderNote("Matches made", details, db.Poke, corder))
 	}
 
-	err = t.db.UpdateOrder(t.metaOrder())
+	err := t.db.UpdateOrder(t.metaOrder())
 	if err != nil {
-		return fmt.Errorf("Failed to update order in db")
+		errs.add("failed to update order in db: %v", err)
 	}
 
-	return nil
+	return errs.ifany()
 }
 
 func (t *trackedTrade) metaOrder() *db.MetaOrder {

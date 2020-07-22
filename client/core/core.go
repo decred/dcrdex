@@ -2111,6 +2111,8 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		}
 	}
 
+	// NOTE: We have not loaded old/inactive matches for active dex orders.
+
 	cancels := make(map[order.OrderID]*order.CancelOrder)
 	cancelPreimages := make(map[order.OrderID]order.Preimage)
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
