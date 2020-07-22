@@ -202,12 +202,11 @@ func newDisplayIDFromSymbols(base, quote string) string {
 
 // MiniOrder is minimal information about an order in a market's order book.
 type MiniOrder struct {
-	Qty      float64 `json:"qty"`
-	Rate     float64 `json:"rate"`
-	Epoch    uint64  `json:"epoch"`
-	Sell     bool    `json:"sell"`
-	Token    string  `json:"token"`
-	MarketID string  `json:"marketID"`
+	Qty   float64 `json:"qty"`
+	Rate  float64 `json:"rate"`
+	Epoch *uint64 `json:"epoch,omitempty"`
+	Sell  bool    `json:"sell"`
+	Token string  `json:"token"`
 }
 
 // RemainingUpdate is an update to the quantity for an order on the order book.

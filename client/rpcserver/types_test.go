@@ -104,19 +104,19 @@ func TestParseNewWalletArgs(t *testing.T) {
 			}
 			continue
 		}
-		if !bytes.Equal(nwf.AppPass, test.params.PWArgs[0]) {
+		if !bytes.Equal(nwf.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
 		}
-		if !bytes.Equal(nwf.WalletPass, test.params.PWArgs[1]) {
+		if !bytes.Equal(nwf.walletPass, test.params.PWArgs[1]) {
 			t.Fatalf("walletPass doesn't match")
 		}
-		if fmt.Sprint(nwf.AssetID) != test.params.Args[0] {
+		if fmt.Sprint(nwf.assetID) != test.params.Args[0] {
 			t.Fatalf("assetID doesn't match")
 		}
-		if nwf.Account != test.params.Args[1] {
+		if nwf.account != test.params.Args[1] {
 			t.Fatalf("account doesn't match")
 		}
-		if nwf.ConfigText != test.params.Args[2] {
+		if nwf.configText != test.params.Args[2] {
 			t.Fatalf("config doesn't match")
 		}
 	}
@@ -150,10 +150,10 @@ func TestParseOpenWalletArgs(t *testing.T) {
 			}
 			continue
 		}
-		if !bytes.Equal(owf.AppPass, test.params.PWArgs[0]) {
+		if !bytes.Equal(owf.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
 		}
-		if fmt.Sprint(owf.AssetID) != test.params.Args[0] {
+		if fmt.Sprint(owf.assetID) != test.params.Args[0] {
 			t.Fatalf("assetID doesn't match")
 		}
 	}
@@ -299,11 +299,11 @@ func TestParseHelpArgs(t *testing.T) {
 	}, {
 		name: "ok help with",
 		args: []string{"thing"},
-		want: &helpForm{HelpWith: "thing"},
+		want: &helpForm{helpWith: "thing"},
 	}, {
 		name: "ok help with include passwords",
 		args: []string{"thing", "true"},
-		want: &helpForm{HelpWith: "thing", IncludePasswords: true},
+		want: &helpForm{helpWith: "thing", includePasswords: true},
 	}, {
 		name:    "include passwords not boolean",
 		args:    []string{"thing", "thing2"},
@@ -318,10 +318,10 @@ func TestParseHelpArgs(t *testing.T) {
 			}
 			continue
 		}
-		if len(test.args) > 0 && form.HelpWith != test.args[0] {
+		if len(test.args) > 0 && form.helpWith != test.args[0] {
 			t.Fatalf("helpwith doesn't match")
 		}
-		if len(test.args) > 1 && fmt.Sprint(form.IncludePasswords) != test.args[1] {
+		if len(test.args) > 1 && fmt.Sprint(form.includePasswords) != test.args[1] {
 			t.Fatalf("includepasswords doesn't match")
 		}
 	}
@@ -396,31 +396,31 @@ func TestTradeArgs(t *testing.T) {
 			}
 			continue
 		}
-		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
+		if !bytes.Equal(reg.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("AppPass doesn't match")
 		}
-		if reg.SrvForm.Host != test.params.Args[0] {
+		if reg.srvForm.Host != test.params.Args[0] {
 			t.Fatalf("Host doesn't match")
 		}
-		if fmt.Sprint(reg.SrvForm.IsLimit) != test.params.Args[1] {
+		if fmt.Sprint(reg.srvForm.IsLimit) != test.params.Args[1] {
 			t.Fatalf("IsLimit doesn't match")
 		}
-		if fmt.Sprint(reg.SrvForm.Sell) != test.params.Args[2] {
+		if fmt.Sprint(reg.srvForm.Sell) != test.params.Args[2] {
 			t.Fatalf("Sell doesn't match")
 		}
-		if fmt.Sprint(reg.SrvForm.Base) != test.params.Args[3] {
+		if fmt.Sprint(reg.srvForm.Base) != test.params.Args[3] {
 			t.Fatalf("Base doesn't match")
 		}
-		if fmt.Sprint(reg.SrvForm.Quote) != test.params.Args[4] {
+		if fmt.Sprint(reg.srvForm.Quote) != test.params.Args[4] {
 			t.Fatalf("Quote doesn't match")
 		}
-		if fmt.Sprint(reg.SrvForm.Qty) != test.params.Args[5] {
+		if fmt.Sprint(reg.srvForm.Qty) != test.params.Args[5] {
 			t.Fatalf("Qty doesn't match")
 		}
-		if fmt.Sprint(reg.SrvForm.Rate) != test.params.Args[6] {
+		if fmt.Sprint(reg.srvForm.Rate) != test.params.Args[6] {
 			t.Fatalf("Rate doesn't match")
 		}
-		if fmt.Sprint(reg.SrvForm.TifNow) != test.params.Args[7] {
+		if fmt.Sprint(reg.srvForm.TifNow) != test.params.Args[7] {
 			t.Fatalf("TifNow doesn't match")
 		}
 	}
@@ -457,10 +457,10 @@ func TestParseCancelArgs(t *testing.T) {
 			}
 			continue
 		}
-		if !bytes.Equal(reg.AppPass, test.params.PWArgs[0]) {
+		if !bytes.Equal(reg.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
 		}
-		if fmt.Sprint(reg.OrderID) != test.params.Args[0] {
+		if fmt.Sprint(reg.orderID) != test.params.Args[0] {
 			t.Fatalf("order ID doesn't match")
 		}
 	}
@@ -498,17 +498,76 @@ func TestParseWithdrawArgs(t *testing.T) {
 			}
 			continue
 		}
-		if !bytes.Equal(res.AppPass, test.params.PWArgs[0]) {
+		if !bytes.Equal(res.appPass, test.params.PWArgs[0]) {
 			t.Fatalf("appPass doesn't match")
 		}
-		if fmt.Sprint(res.AssetID) != test.params.Args[0] {
+		if fmt.Sprint(res.assetID) != test.params.Args[0] {
 			t.Fatalf("assetID doesn't match")
 		}
-		if fmt.Sprint(res.Value) != test.params.Args[1] {
+		if fmt.Sprint(res.value) != test.params.Args[1] {
 			t.Fatalf("value doesn't match")
 		}
-		if res.Address != test.params.Args[2] {
+		if res.address != test.params.Args[2] {
 			t.Fatalf("address doesn't match")
+		}
+	}
+}
+
+func TestParseOrderBookArgs(t *testing.T) {
+	paramsWithArgs := func(base, quote, nOrders string) *RawParams {
+		args := []string{
+			"dex",
+			base,
+			quote,
+			nOrders,
+		}
+		return &RawParams{Args: args}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok with nOrders",
+		params: paramsWithArgs("42", "0", "1"),
+	}, {
+		name:   "ok no nOrders",
+		params: &RawParams{Args: []string{"dex", "42", "0"}},
+	}, {
+		name:    "base not int",
+		params:  paramsWithArgs("42.1", "0", "1"),
+		wantErr: errArgs,
+	}, {
+		name:    "quote not int",
+		params:  paramsWithArgs("42", "0.1", "1"),
+		wantErr: errArgs,
+	}, {
+		name:    "nOrders not int",
+		params:  paramsWithArgs("42", "0.1", "1.1"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		res, err := parseOrderBookArgs(test.params)
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		if res.host != test.params.Args[0] {
+			t.Fatalf("host doesn't match")
+		}
+		if fmt.Sprint(res.base) != test.params.Args[1] {
+			t.Fatalf("base doesn't match")
+		}
+		if fmt.Sprint(res.quote) != test.params.Args[2] {
+			t.Fatalf("quote doesn't match")
+		}
+		if len(test.params.Args) > 3 {
+			if fmt.Sprint(res.nOrders) != test.params.Args[3] {
+				t.Fatalf("nOrders doesn't match")
+			}
 		}
 	}
 }

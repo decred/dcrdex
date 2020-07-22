@@ -34,34 +34,35 @@ const (
 	RPCTradeError                     // 18
 	RPCCancelError                    // 19
 	RPCWithdrawError                  // 20
-	SignatureError                    // 21
-	SerializationError                // 22
-	TransactionUndiscovered           // 23
-	ContractError                     // 24
-	SettlementSequenceError           // 25
-	ResultLengthError                 // 26
-	IDMismatchError                   // 27
-	RedemptionError                   // 28
-	IDTypeError                       // 29
-	AckCountError                     // 30
-	UnknownResponseID                 // 31
-	OrderParameterError               // 32
-	UnknownMarketError                // 33
-	ClockRangeError                   // 34
-	FundingError                      // 35
-	CoinAuthError                     // 36
-	UnknownMarket                     // 37
-	NotSubscribedError                // 38
-	UnauthorizedConnection            // 39
-	AuthenticationError               // 40
-	PubKeyParseError                  // 41
-	FeeError                          // 42
-	InvalidPreimage                   // 43
-	PreimageCommitmentMismatch        // 44
-	UnknownMessageType                // 45
-	AccountClosedError                // 46
-	MarketNotRunningError             // 47
-	TryAgainLaterError                // 48
+	RPCOrderBookError                 // 21
+	SignatureError                    // 22
+	SerializationError                // 23
+	TransactionUndiscovered           // 24
+	ContractError                     // 25
+	SettlementSequenceError           // 26
+	ResultLengthError                 // 27
+	IDMismatchError                   // 28
+	RedemptionError                   // 29
+	IDTypeError                       // 30
+	AckCountError                     // 31
+	UnknownResponseID                 // 32
+	OrderParameterError               // 33
+	UnknownMarketError                // 34
+	ClockRangeError                   // 35
+	FundingError                      // 36
+	CoinAuthError                     // 37
+	UnknownMarket                     // 38
+	NotSubscribedError                // 39
+	UnauthorizedConnection            // 40
+	AuthenticationError               // 41
+	PubKeyParseError                  // 42
+	FeeError                          // 43
+	InvalidPreimage                   // 44
+	PreimageCommitmentMismatch        // 45
+	UnknownMessageType                // 46
+	AccountClosedError                // 47
+	MarketNotRunningError             // 48
+	TryAgainLaterError                // 49
 )
 
 // Routes are destinations for a "payload" of data. The type of data being

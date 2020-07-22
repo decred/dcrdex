@@ -814,3 +814,92 @@ func TestHandleLogout(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleOrderBook(t *testing.T) {
+	params := &RawParams{Args: []string{"dex", "42", "0"}}
+	paramsNOrders := &RawParams{Args: []string{"dex", "42", "0", "1"}}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		book        *core.OrderBook
+		bookErr     error
+		wantErrCode int
+	}{{
+		name:        "ok no nOrders",
+		params:      params,
+		book:        new(core.OrderBook),
+		wantErrCode: -1,
+	}, {
+		name:        "ok with nOrders",
+		params:      paramsNOrders,
+		book:        new(core.OrderBook),
+		wantErrCode: -1,
+	}, {
+		name:        "core.Book error",
+		params:      params,
+		bookErr:     errors.New("error"),
+		wantErrCode: msgjson.RPCOrderBookError,
+	}, {
+		name:        "bad params",
+		params:      &RawParams{},
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{
+			book:    test.book,
+			bookErr: test.bookErr,
+		}
+		r := &RPCServer{core: tc}
+		payload := handleOrderBook(r, test.params)
+		res := new(core.OrderBook)
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestTruncateOrderBook(t *testing.T) {
+	lowRate := 1.0
+	medRate := 1.5
+	highRate := 2.0
+	lowRateOrder := &core.MiniOrder{Rate: lowRate}
+	medRateOrder := &core.MiniOrder{Rate: medRate}
+	highRateOrder := &core.MiniOrder{Rate: highRate}
+	book := &core.OrderBook{
+		Buys: []*core.MiniOrder{
+			highRateOrder,
+			medRateOrder,
+			lowRateOrder,
+		},
+		Sells: []*core.MiniOrder{
+			lowRateOrder,
+			medRateOrder,
+		},
+	}
+	truncateOrderBook(book, 4)
+	// no change
+	if len(book.Buys) != 3 && len(book.Sells) != 2 {
+		t.Fatal("no change was expected")
+	}
+	truncateOrderBook(book, 3)
+	// no change
+	if len(book.Buys) != 3 && len(book.Sells) != 2 {
+		t.Fatal("no change was expected")
+	}
+	truncateOrderBook(book, 2)
+	// buys truncated
+	if len(book.Buys) != 2 && len(book.Sells) != 2 {
+		t.Fatal("buys not truncated")
+	}
+	truncateOrderBook(book, 1)
+	// buys and sells truncated
+	if len(book.Buys) != 1 && len(book.Sells) != 1 {
+		t.Fatal("buys and sells not truncated")
+	}
+	if book.Buys[0].Rate != highRate {
+		t.Fatal("expected high rate order")
+	}
+	if book.Sells[0].Rate != lowRate {
+		t.Fatal("expected low rate order")
+	}
+}
