@@ -562,7 +562,7 @@ func TestAccountErrors(t *testing.T) {
 	if rpcErr == nil {
 		t.Fatalf("no error for unpaid account")
 	}
-	if rpcErr.Code != msgjson.AuthenticationError {
+	if rpcErr.Code != msgjson.UnpaidAccountError {
 		t.Fatalf("wrong error for unpaid account. wanted %d, got %d",
 			msgjson.AuthenticationError, rpcErr.Code)
 	}
@@ -814,7 +814,7 @@ func TestConnectErrors(t *testing.T) {
 	encodeMsg()
 	rig.storage.unpaid = true
 	rpcErr = rig.mgr.handleConnect(user.conn, msg)
-	ensureErr(rpcErr, "account unpaid", msgjson.AuthenticationError)
+	ensureErr(rpcErr, "account unpaid", msgjson.UnpaidAccountError)
 	rig.storage.unpaid = false
 
 	// bad signature
