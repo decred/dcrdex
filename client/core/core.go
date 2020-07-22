@@ -1116,6 +1116,23 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 		wallet.Disconnect()
 		return newError(dbErr, "error saving wallet configuration: %v", err)
 	}
+
+	c.connMtx.RLock()
+	for _, dc := range c.conns {
+		dc.tradeMtx.RLock()
+		for _, tracker := range dc.trades {
+			tracker.mtx.Lock()
+			if tracker.wallets.fromWallet.AssetID == assetID {
+				tracker.wallets.fromWallet = wallet
+			} else if tracker.wallets.toWallet.AssetID == assetID {
+				tracker.wallets.toWallet = wallet
+			}
+			tracker.mtx.Unlock()
+		}
+		dc.tradeMtx.RUnlock()
+	}
+	c.connMtx.RUnlock()
+
 	if oldWallet.connected() {
 		oldWallet.Disconnect()
 	}
@@ -1306,7 +1323,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success, dc.acct.host))
 
 	// Set up the coin waiter.
-	c.verifyRegistrationFee(wallet, dc, coin.ID(), 0)
+	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
 	c.refreshUser()
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: dc.cfg.RegFeeConfirms}
 	return res, nil
@@ -1317,13 +1334,15 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 // If the server acknowledgment is successful, the account is set as 'paid' in
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.
-func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, confs uint32) {
+func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID []byte, confs uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
 
 	dc.setRegConfirms(confs)
 	c.refreshUser()
 
 	trigger := func() (bool, error) {
+		// We already know the wallet is there by now.
+		wallet, _ := c.wallet(assetID)
 		confs, err := wallet.Confirmations(coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %v", coinIDString(wallet.AssetID, coinID), err)
@@ -1339,7 +1358,8 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		return confs >= uint32(reqConfs), nil
 	}
 
-	c.wait(wallet.AssetID, trigger, func(err error) {
+	c.wait(assetID, trigger, func(err error) {
+		wallet, _ := c.wallet(assetID)
 		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
 		defer func() {
 			if err != nil {
@@ -2161,7 +2181,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		return
 	}
-	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, confs)
+	c.verifyRegistrationFee(dcrWallet.AssetID, dc, acctInfo.FeeCoin, confs)
 }
 
 // dbTrackers prepares trackedTrades based on active orders and matches in the
@@ -2349,7 +2369,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) (assetC
 			notifyErr("Wallet missing", "Wallet retrieval error for active order %s: %v", tracker.token(), err)
 			continue
 		}
+		tracker.mtx.Lock()
 		tracker.wallets = wallets
+		tracker.mtx.Unlock()
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
@@ -2645,7 +2667,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 
 	// Update market orders, and the balance to account for unlocked coins.
 	dc.refreshMarkets()
-	c.updateAssetBalance(tracker.wallets.fromAsset.ID)
+	c.updateAssetBalance(tracker.fromAssetID)
 	// Respond to DEX.
 	return dc.ack(msg.ID, matchID, &revocation)
 }
