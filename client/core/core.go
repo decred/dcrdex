@@ -1505,7 +1505,7 @@ func (c *Core) Login(pw []byte) (*LoginResult, error) {
 		Notifications: notes,
 		DEXes:         dexStats,
 	}
-	return result, err
+	return result, nil
 }
 
 // Logout logs the user out
@@ -1548,7 +1548,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	// errorSet.
 	var wg sync.WaitGroup
 	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
 	results := make([]*DEXBrief, 0, len(c.conns))
 	var enabledDEXConnections = make(map[string]*dexConnection)
 	for host, dc := range c.conns {
@@ -1574,39 +1573,38 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				c.notify(newFeePaymentNote("Account unlock error", details, db.ErrorLevel, dc.acct.host))
 				return
 			}
-			authDEXerr := c.authDEX(dc)
+			acctInfo, err := c.db.Account(dc.acct.id)
+			if err != nil {
+				log.Errorf("Error retrieving account: %v", err)
+				return
+			}
+			if acctInfo.Disabled {
+				return
+			}
+			authDEXErr := c.authDEX(dc)
 			var mErr *msgjson.Error
-			if authDEXerr != nil {
-				if errors.As(authDEXerr, &mErr) && mErr.Code == msgjson.AccountNotFoundError {
-					acctInfo, err := c.db.Account(dc.acct.id)
-					if err != nil {
-						log.Errorf("Error retrieving account: %v", err)
-					}
-					if !acctInfo.Disabled {
-						details := fmt.Sprintf("%s: %v", dc.acct.host, authDEXerr)
-						c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
-						result.AuthErr = details
-						err = c.db.DisableAccount(acctInfo)
-						if err != nil {
-							log.Errorf("Error disabling account: %v", err)
-						}
-					}
-					return
+			// Disable account on all authentication errors, including when the server account is
+			// marked as unpaid while the client account is marked as paid
+			if errors.As(authDEXErr, &mErr) &&
+				(mErr.Code != msgjson.UnpaidAccountError ||
+					(mErr.Code == msgjson.UnpaidAccountError && dc.acct.feePaid())) {
+				details := fmt.Sprintf("%s: %v", dc.acct.host, authDEXErr)
+				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
+				result.AuthErr = details
+				err = c.db.DisableAccount(acctInfo)
+				if err != nil {
+					log.Errorf("Error disabling account: %v", err)
 				}
+				return
 			}
 			result.Authed = true
 			enabledDEXConnections[host] = dc
-			// The user is authed if the dex account is successfully authenticated against
-			// Now do some house cleaning in regard to registration fee payment
-			if errors.As(authDEXerr, &mErr) && mErr.Code == msgjson.UnpaidAccountError {
-				details := fmt.Sprintf("%s: %v", dc.acct.host, authDEXerr)
-				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
-				result.AuthErr += details
-			}
+			// The user is authed if the account is successfully authenticated with the dex.
+			// Even unpaid accounts are authenticated, but with limited exchange capabilities.
+			// Now do some house cleaning in regard to registration fee payment.
 			if dc.acct.authed() {
 				return
 			}
-			dcrID, _ := dex.BipSymbolID("dcr")
 			if !dc.acct.feePaid() {
 				if len(dc.acct.feeCoin) == 0 {
 					details := fmt.Sprintf("Empty fee coin for %s.", dc.acct.host)
@@ -1616,6 +1614,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				}
 				// Try to unlock the Decred wallet, which should run the reFee cycle, and
 				// in turn will run authDEX.
+				dcrID, _ := dex.BipSymbolID("dcr")
 				dcrWallet, err := c.connectedWallet(dcrID)
 				if err != nil {
 					log.Debugf("Failed to connect for reFee at %s with error: %v", dc.acct.host, err)
@@ -1639,7 +1638,10 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 		}(host, dc)
 	}
 	wg.Wait()
+	c.connMtx.RUnlock()
+	c.connMtx.Lock()
 	c.conns = enabledDEXConnections
+	c.connMtx.Unlock()
 	return results
 }
 
@@ -2137,6 +2139,9 @@ func (c *Core) initialize() {
 		wg.Add(1)
 		go func(acct *db.AccountInfo) {
 			defer wg.Done()
+			if acct.Disabled {
+				return
+			}
 			host := addrHost(acct.Host)
 			dc, err := c.connectDEX(acct)
 			if err != nil {
@@ -2144,10 +2149,7 @@ func (c *Core) initialize() {
 				return
 			}
 			log.Debugf("connectDEX for %s completed, checking account...", acct.Host)
-			if acct.Disabled {
-				return
-			}
-			if !acct.Disabled && c.conns[host] != nil && c.conns[host].acct != nil {
+			if c.conns[host] != nil && c.conns[host].acct != nil {
 				err = c.db.DisableAccount(acct)
 				acct.Disabled = true
 				if err != nil {
