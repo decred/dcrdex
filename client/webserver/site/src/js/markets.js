@@ -34,7 +34,7 @@ const makerRedeemed = 3
 
 /* The time-in-force specifiers are a mirror of dex/order.TimeInForce. */
 const immediateTiF = 0
-// const standingTiF = 1
+const standingTiF = 1
 
 /* The order statuses are a mirror of dex/order.OrderStatus. */
 const statusUnknown = 0
@@ -88,7 +88,7 @@ export default class MarketsPage extends BasePage {
     this.openFunc = null
     this.currentCreate = null
     this.book = null
-    this.orderRows = {}
+    this.metaOrders = {}
     const reporters = {
       price: p => { this.reportPrice(p) }
     }
@@ -214,7 +214,6 @@ export default class MarketsPage extends BasePage {
     bind(page.chartResizer, 'mousedown', e => {
       if (e.button !== 0) return
       e.preventDefault()
-      // console.log("--startX", startX, "startY", startY)
       const trackMouse = ee => {
         ee.preventDefault()
         const box = page.rightSide.getBoundingClientRect()
@@ -248,9 +247,10 @@ export default class MarketsPage extends BasePage {
 
     // Start a ticker to update time-since values.
     this.secondTicker = setInterval(() => {
-      this.page.liveList.querySelectorAll('[data-col=age]').forEach(td => {
-        td.textContent = Doc.timeSince(td.parentNode.order.stamp)
-      })
+      for (const metaOrder of Object.values(this.metaOrders)) {
+        const td = metaOrder.row.querySelector('[data-col=age]')
+        td.textContent = Doc.timeSince(metaOrder.order.stamp)
+      }
     }, 1000)
 
     // set the initial state for the registration status
@@ -552,23 +552,26 @@ export default class MarketsPage extends BasePage {
   /* refreshActiveOrders refreshes the user's active order list. */
   refreshActiveOrders () {
     const page = this.page
-    const orderRows = this.orderRows
+    const metaOrders = this.metaOrders
     const market = this.market
-    for (const oid in orderRows) delete orderRows[oid]
+    for (const oid in metaOrders) delete metaOrders[oid]
     const orders = app.orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
+
     Doc.empty(page.liveList)
     for (const order of orders) {
       const row = page.liveTemplate.cloneNode(true)
-      row.order = order
-      orderRows[order.id] = row
+      metaOrders[order.id] = {
+        row: row,
+        order: order
+      }
       updateUserOrderRow(row, order)
       if (order.type === LIMIT) {
-        if (!order.cancelling && order.filled !== order.qty) {
+        if (order.tif === standingTiF && order.status < statusExecuted) {
           const icon = row.querySelector('[data-col=cancel] > span')
           Doc.show(icon)
           bind(icon, 'click', e => {
             e.stopPropagation()
-            this.showCancel(icon, order)
+            this.showCancel(icon, order.id)
           })
         }
       }
@@ -727,7 +730,8 @@ export default class MarketsPage extends BasePage {
   }
 
   /* showCancel shows a form to confirm submission of a cancel order. */
-  showCancel (bttn, order) {
+  showCancel (bttn, orderID) {
+    const order = this.metaOrders[orderID].order
     const page = this.page
     const remaining = order.qty - order.filled
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining / 1e8)
@@ -798,16 +802,17 @@ export default class MarketsPage extends BasePage {
   handleOrderNote (note) {
     const order = note.order
     if (order.targetID && note.subject === 'cancel') {
-      this.orderRows[order.targetID].querySelector('[data-col=cancel]').textContent = 'canceled'
+      this.metaOrders[order.targetID].row.querySelector('[data-col=cancel]').textContent = 'canceled'
     } else if (order.targetID && note.subject === 'revoke') {
-      this.orderRows[order.targetID].querySelector('[data-col=cancel]').textContent = 'revoked'
+      this.metaOrders[order.targetID].row.querySelector('[data-col=cancel]').textContent = 'revoked'
     } else {
-      const row = this.orderRows[order.id]
-      if (!row) return
-      updateUserOrderRow(row, order)
+      const metaOrder = this.metaOrders[order.id]
+      if (!metaOrder) return
+      metaOrder.order = order
+      updateUserOrderRow(metaOrder.row, order)
       if (order.filled === order.qty) {
         // Remove the cancellation button.
-        updateDataCol(row, 'cancel', '')
+        updateDataCol(metaOrder.row, 'cancel', '')
       }
     }
   }
@@ -822,10 +827,10 @@ export default class MarketsPage extends BasePage {
       this.chart.draw()
     }
     this.clearOrderTableEpochs(note.epoch)
-    for (const tr of Array.from(this.page.liveList.children)) {
-      const order = tr.order
+    for (const metaOrder of Object.values(this.metaOrders)) {
+      const order = metaOrder.order
       const alreadyMatched = note.epoch > order.epoch
-      const statusTD = tr.querySelector('[data-col=status]')
+      const statusTD = metaOrder.row.querySelector('[data-col=status]')
       switch (true) {
         case order.type === LIMIT && order.status === statusEpoch && alreadyMatched:
           statusTD.textContent = order.tif === immediateTiF ? 'executed' : 'booked'
