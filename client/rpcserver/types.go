@@ -5,6 +5,7 @@ package rpcserver
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -178,7 +179,7 @@ func parseLoginArgs(params *RawParams) (encode.PassBytes, error) {
 }
 
 func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
-	if err := checkNArgs(params, []int{2}, []int{1, 2}); err != nil {
+	if err := checkNArgs(params, []int{2}, []int{1, 3}); err != nil {
 		return nil, err
 	}
 	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
@@ -194,6 +195,13 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		req.config, err = config.Parse([]byte(params.Args[1]))
 		if err != nil {
 			return nil, fmt.Errorf("config parse error: %v", err)
+		}
+	}
+	if len(params.Args) > 2 {
+		cfg := make(map[string]string)
+		err := json.Unmarshal([]byte(params.Args[2]), &cfg)
+		if err != nil {
+			return nil, fmt.Errorf("JSON parse error: %v", err)
 		}
 	}
 	return req, nil
