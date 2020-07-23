@@ -69,20 +69,20 @@ be sent in the [[comm.mediawiki/#Session_Authentication|connect response]].
 ! field   !! type   !! description
 |-
 | penalty || object || a Penalty object (definition below)
+|-
+| sig     || string || hex-encoded server's signature of the serialized penalization data
 |}
 
-
 ====Penalty object====
+
 {|
-! field      !! type   !! description
+! field !! size (bytes) !! type !! description
 |-
-| brokenrule || int    || the rule that was broken
+| brokenrule || 1      || int    || the rule that was broken
 |-
-| timestamp  || int    || the UNIX timestamp in milliseconds at which the penalization occured
+| timestamp  || 8      || int    || the UNIX timestamp in milliseconds at which the penalization occured
 |-
-| duration   || int    || the duration in milliseconds of the penalization
+| duration   || 8      || int    || the duration in milliseconds of the penalization
 |-
-| details    || string || a message describing the penalization
-|-
-| sig        || string || hex-encoded server's signature of the serialized penalization data
+| details    || string || string || a message describing the penalization
 |}
