@@ -76,9 +76,20 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 	cl = newWSClient(ip, conn, func(msg *msgjson.Message) *msgjson.Error {
 		return s.handleMessage(cl, msg)
 	})
+
+	cm := dex.NewConnectionMaster(cl)
+	err := cm.Connect(s.ctx)
+	if err != nil {
+		log.Errorf("websocketHandler client Connect: %v")
+		return
+	}
+
+	// Add the client to the map only after it is connected so that notify does
+	// not attempt to send to this client before the wsClient is ready.
 	s.mtx.Lock()
 	s.clients[cl.cid] = cl
 	s.mtx.Unlock()
+
 	defer func() {
 		cl.mtx.Lock()
 		if cl.feedLoop != nil {
@@ -90,12 +101,7 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 		delete(s.clients, cl.cid)
 		s.mtx.Unlock()
 	}()
-	cm := dex.NewConnectionMaster(cl)
-	err := cm.Connect(s.ctx)
-	if err != nil {
-		log.Errorf("websocketHandler client Connect: %v")
-		return
-	}
+
 	cm.Wait()
 	log.Tracef("Disconnected websocket client %s", ip)
 }
@@ -110,7 +116,10 @@ func (s *WebServer) notify(route string, payload interface{}) {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	for _, cl := range s.clients {
-		cl.Send(msg)
+		if err = cl.Send(msg); err != nil {
+			log.Warnf("Failed to send %v notification to client %v at %v: %v",
+				msg.Route, cl.cid, cl.IP(), err)
+		}
 	}
 }
 
@@ -195,7 +204,10 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		log.Errorf("error encoding loadmarkets response: %v", err)
 		return msgjson.NewError(msgjson.RPCInternal, "error encoding order book: "+err.Error())
 	}
-	cl.Send(note)
+	if err = cl.Send(note); err != nil {
+		log.Warnf("Failed to send %v notification to client %v at %v: %v",
+			note.Route, cl.cid, cl.IP(), err)
+	}
 	return nil
 }
 
