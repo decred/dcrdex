@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -94,12 +93,6 @@ type wsConn struct {
 	connected    bool
 	connectedMtx sync.RWMutex
 	respHandlers map[uint64]*responseHandler
-}
-
-// filesExists reports whether the named file or directory exists.
-func fileExists(name string) bool {
-	_, err := os.Stat(name)
-	return !os.IsNotExist(err)
 }
 
 // NewWsConn creates a client websocket connection.
@@ -433,7 +426,14 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 		return err
 	}
 
-	err = conn.ws.WriteJSON(msg)
+	// Marshal the Message first so that we don't send junk to the peer even if
+	// it fails to marshal completely, which WriteJSON does.
+	b, err := json.Marshal(msg)
+	if err != nil {
+		log.Errorf("Failed to marshal message: %v", err)
+		return err
+	}
+	err = conn.ws.WriteMessage(websocket.TextMessage, b)
 	if err != nil {
 		log.Errorf("write error: %v", err)
 		return err
