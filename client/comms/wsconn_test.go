@@ -126,7 +126,10 @@ func TestWsConn(t *testing.T) {
 					err := c.WriteControl(websocket.PingMessage, []byte{},
 						time.Now().Add(writeWait))
 					if err != nil {
-						t.Errorf("handler #%d: ping error: %v", id, err)
+						if hCtx.Err() == nil {
+							// Only a failure if the server isn't shutting down.
+							t.Errorf("handler #%d: ping error: %v", id, err)
+						}
 						return
 					}
 
@@ -172,9 +175,7 @@ func TestWsConn(t *testing.T) {
 					msg, err := msgjson.DecodeMessage(message)
 					if err != nil {
 						t.Errorf("handler #%d: decode error: %v", id, err)
-						hCancel()
-						c.Close()
-						return
+						continue // Don't hang up.
 					}
 
 					writePumpCh <- msg
@@ -404,7 +405,7 @@ func TestWsConn(t *testing.T) {
 		t.Fatalf("expected next id to be %d, got %d", 2, next)
 	}
 
-	// Ensure the request got logged.
+	// Ensure the request got logged, also unregistering the response handler.
 	hndlr := wsc.respHandler(mId)
 	if hndlr == nil {
 		t.Fatalf("no handler found")
@@ -414,12 +415,53 @@ func TestWsConn(t *testing.T) {
 		t.Fatalf("wrong handler retrieved")
 	}
 
-	// Lookup an unlogged request id.
-	hndlr = wsc.respHandler(next)
+	// Ensure the response handler is unlogged.
+	hndlr = wsc.respHandler(mId)
 	if hndlr != nil {
 		t.Fatal("expected an error for unlogged id")
 	}
 
+	pingCh <- struct{}{}
+
+	// Ensure a malformed request data (a send failure) does not leave a
+	// registered response handler or kill the connection.
+	sent.ID = wsc.NextID()
+	sent.Payload = []byte("{notjson")
+	err = wsc.Request(sent, func(*msgjson.Message) {})
+	if err == nil {
+		t.Fatalf("expected error with malformed request payload")
+	}
+
+	// Ensure the response handler is unregistered.
+	if wsc.respHandler(mId) != nil {
+		t.Fatal("response handler was still registered")
+	}
+
+	// New request to test expiration.
+	mId = next
+	sent = makeRequest(mId, msgjson.InitRoute, init)
+	expiring := make(chan struct{}, 1)
+	expTime := 50 * time.Millisecond // way shorter than pingWait
+	err = wsc.RequestWithTimeout(sent, func(*msgjson.Message) {}, expTime, func() {
+		expiring <- struct{}{}
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	<-writePumpCh
+
+	pingCh <- struct{}{}
+
+	// Yield to the comms goroutine in case this machine is poor.
+	runtime.Gosched()
+	select {
+	case <-expiring:
+	case <-time.NewTimer(time.Second).C: // >> expTime
+		t.Fatalf("didn't expire") // conn will be dead by this time without pings
+	}
+
+	// Clean up.
+	time.Sleep(50 * time.Millisecond) // let pings and pongs flush, but it's not a problem if they bomb
 	waiter.Disconnect()
 
 	select {
