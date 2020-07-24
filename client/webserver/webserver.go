@@ -351,7 +351,6 @@ func (s *WebServer) readNotifications(ctx context.Context) {
 		select {
 		case n := <-ch:
 			s.notify(notifyRoute, n)
-			// log.Trace("%s: %s: %s", n.Severity(), n.Subject(), n.Details())
 		case <-ctx.Done():
 			return
 		}

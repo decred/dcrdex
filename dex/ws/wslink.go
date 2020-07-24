@@ -142,7 +142,8 @@ func (c *WSLink) SendError(id uint64, rpcErr *msgjson.Error) {
 	}
 }
 
-// Connect begins processing input and output messages.
+// Connect begins processing input and output messages. Do not send messages
+// until connected.
 func (c *WSLink) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Set the initial read deadline now that the ping ticker is about to be
 	// started. The pong handler will set subsequent read deadlines. 2x ping
