@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	pongStr   = "pong"
-	maxUInt16 = int(^uint16(0))
+	pongStr        = "pong"
+	maxUInt16      = int(^uint16(0))
+	defaultTimeout = time.Hour * 72
 )
 
 // writeJSON marshals the provided interface and writes the bytes to the
@@ -255,17 +256,14 @@ func (s *Server) apiUnban(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-// apiNotifyAll is the handler for the '/notifyall' API request.
-func (s *Server) apiNotifyAll(w http.ResponseWriter, r *http.Request) {
+func toNote(r *http.Request) (*msgjson.Message, int, error) {
 	body, err := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
-		http.Error(w, fmt.Sprintf("unable to read request body: %v", err), http.StatusInternalServerError)
-		return
+		return nil, http.StatusInternalServerError, fmt.Errorf("unable to read request body: %v", err)
 	}
 	if len(body) == 0 {
-		http.Error(w, "no message to broadcast", http.StatusBadRequest)
-		return
+		return nil, http.StatusBadRequest, errors.New("no message to broadcast")
 	}
 	// Remove trailing newline if present. A newline is added by the curl
 	// command when sending from file.
@@ -273,12 +271,47 @@ func (s *Server) apiNotifyAll(w http.ResponseWriter, r *http.Request) {
 		body = body[:len(body)-1]
 	}
 	if len(body) > maxUInt16 {
-		http.Error(w, fmt.Sprintf("cannot send messages larger than %d bytes", maxUInt16), http.StatusBadRequest)
-		return
+		return nil, http.StatusBadRequest, fmt.Errorf("cannot send messages larger than %d bytes", maxUInt16)
 	}
 	msg, err := msgjson.NewNotification(msgjson.NotifyRoute, string(body))
 	if err != nil {
-		http.Error(w, fmt.Sprintf("unable to create notification: %v", err), http.StatusInternalServerError)
+		return nil, http.StatusInternalServerError, fmt.Errorf("unable to create notification: %v", err)
+	}
+	return msg, 0, nil
+}
+
+// apiNotify is the handler for the '/account/{accountID}/notify?timeout=TIMEOUT'
+// API request.
+func (s *Server) apiNotify(w http.ResponseWriter, r *http.Request) {
+	acctIDStr := chi.URLParam(r, accountIDKey)
+	acctID, err := decodeAcctID(acctIDStr)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	timeout := defaultTimeout
+	if timeoutStr := r.URL.Query().Get(timeoutToken); timeoutStr != "" {
+		var err error
+		timeout, err = time.ParseDuration(timeoutStr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid timeout %q: %v", timeoutStr, err), http.StatusBadRequest)
+			return
+		}
+	}
+	msg, errCode, err := toNote(r)
+	if err != nil {
+		http.Error(w, err.Error(), errCode)
+		return
+	}
+	s.core.Notify(acctID, msg, timeout)
+	w.WriteHeader(http.StatusOK)
+}
+
+// apiNotifyAll is the handler for the '/notifyall' API request.
+func (s *Server) apiNotifyAll(w http.ResponseWriter, r *http.Request) {
+	msg, errCode, err := toNote(r)
+	if err != nil {
+		http.Error(w, err.Error(), errCode)
 		return
 	}
 	s.core.NotifyAll(msg)

@@ -599,6 +599,13 @@ func (dm *DEX) Unban(aid account.AccountID) error {
 	return dm.authMgr.Unban(aid)
 }
 
+// Notify sends a text notification to a connected client. If not currently
+// connected, sending will be attempted on connection unless the duration of
+// timeout has passed.
+func (dm *DEX) Notify(acctID account.AccountID, msg *msgjson.Message, timeout time.Duration) {
+	dm.authMgr.Notify(acctID, msg, timeout)
+}
+
 // NotifyAll sends a text notification to all connected clients.
 func (dm *DEX) NotifyAll(msg *msgjson.Message) {
 	dm.server.Broadcast(msg)

@@ -61,6 +61,8 @@ The server will provide an HTTP API for performing various adminstrative tasks.
 |-
 | /account/{accountID}/ban?rule=RULE || GET || ban an account for violating [[community.mediawiki/#Rules_of_Community_Conduct|a rule]]
 |-
+| /account/{accountID}/notify?timeout=TIMEOUT || POST || send a notification containing text in the request body to account. If not currently connected, the notification will be sent upon reconnect unless timeout duration has passed. default timeout is 72 hours. timeout should be of the form #h#m#s (i.e. "2h" or "5h30m"). Header Content-Type must be set to "text/plain"
+|-
 | /markets  || GET || display status information for all markets
 |-
 | /market/{marketID} || GET || display status information for a specific market
