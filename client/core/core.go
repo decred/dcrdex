@@ -2927,7 +2927,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 // returned. The provided channel is used to allow an OS signal to break the
 // prompt and force the shutdown with out answering the prompt in the
 // affirmative.
-func (c *Core) PromptShutdown(killChan <-chan os.Signal) bool {
+func (c *Core) PromptShutdown() bool {
 	c.connMtx.Lock()
 	defer c.connMtx.Unlock()
 
@@ -2946,8 +2946,8 @@ func (c *Core) PromptShutdown(killChan <-chan os.Signal) bool {
 			dc.acct.lock()
 		}
 	}
-	ok := true
 
+	ok := true
 	for _, dc := range c.conns {
 		if dc.hasActiveOrders() {
 			ok = false
@@ -2956,31 +2956,22 @@ func (c *Core) PromptShutdown(killChan <-chan os.Signal) bool {
 	}
 
 	if !ok {
-		fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization. " +
-			"Do you want to quit anyway? ('y' to quit, enter to abort):")
+		fmt.Print("You have active orders. Shutting down now may result in failed swaps and account penalization.\n" +
+			"Do you want to quit anyway? ('y' to quit, 'n' or enter to abort shutdown):")
 		scanner := bufio.NewScanner(os.Stdin)
-		scan := make(chan bool)
-		go func() {
-			scan <- scanner.Scan()
-		}()
-		select {
-		case <-killChan:
-			lockWallets()
-			return true
-		case <-scan:
-		}
-
-		err := scanner.Err()
-		if err != nil {
-			fmt.Printf("input failed: %v", err)
+		scanner.Scan()
+		if err := scanner.Err(); err != nil {
+			fmt.Printf("Input error: %v", err)
 			return false
 		}
 
 		switch strings.ToLower(scanner.Text()) {
 		case "y", "yes":
 			ok = true
+		case "n", "no":
+			fallthrough
 		default:
-			fmt.Println("shutdown aborted")
+			fmt.Println("Shutdown aborted.")
 		}
 	}
 
@@ -2988,7 +2979,7 @@ func (c *Core) PromptShutdown(killChan <-chan os.Signal) bool {
 		lockWallets()
 	}
 
-	return true
+	return ok
 }
 
 // convertAssetInfo converts from a *msgjson.Asset to the nearly identical

@@ -25,22 +25,6 @@ var log slog.Logger
 
 func main() {
 	appCtx, cancel := context.WithCancel(context.Background())
-	// Catch ctrl+c. This will need to be smarter eventually, probably displaying
-	// a modal dialog to confirm closing, especially if servers are running or if
-	// swaps are in negotiation.
-	killChan := make(chan os.Signal, 1)
-	signal.Notify(killChan, os.Interrupt)
-	var clientCore *core.Core
-	var shutdown func()
-	shutdown = func() {
-		<-killChan
-		if clientCore == nil || clientCore.PromptShutdown(killChan) {
-			cancel()
-			return
-		}
-		go shutdown()
-	}
-	go shutdown()
 
 	// Parse configuration and set up initial logging.
 	//
@@ -75,7 +59,7 @@ func main() {
 	core.UseLoggerMaker(logMaker)
 	log = logMaker.Logger("DEXC")
 
-	clientCore, err = core.New(&core.Config{
+	clientCore, err := core.New(&core.Config{
 		DBPath: cfg.DBPath, // global set in config.go
 		Net:    cfg.Net,
 	})
@@ -83,6 +67,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "error creating client core: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Catch interrupt signal (e.g. ctrl+c), prompting to shutdown if the user
+	// is logged in, and there are active orders or matches.
+	killChan := make(chan os.Signal)
+	signal.Notify(killChan, os.Interrupt)
+	go func() {
+		for range killChan {
+			if clientCore.PromptShutdown() {
+				cancel()
+				return
+			}
+		}
+	}()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
