@@ -64,7 +64,7 @@ export default class OrderBook {
    * setEpoch sets the current epoch and clear any orders from previous epochs.
    */
   setEpoch (epochIdx) {
-    const approve = ord => ord.epoch === 0 || ord.epoch === epochIdx
+    const approve = ord => ord.epoch === undefined || ord.epoch === 0 || ord.epoch === epochIdx
     this.sells = this.sells.filter(approve)
     this.buys = this.buys.filter(approve)
   }
