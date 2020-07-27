@@ -718,7 +718,28 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) err
 	// should be appropriate checks on order submission and match/swap
 	// initiation (TODO).
 
-	// TODO: notify client of penalty / account status change?
+	// Notify user of penalty.
+	details := "You may no longer trade. Leave your client running to complete outstanding trades."
+	penalty := &msgjson.Penalty{
+		Rule:     dex.Bytes([]byte{byte(rule)}),
+		Time:     uint64(unixMsNow().Unix()),
+		Duration: uint64(time.Hour * 24 * 365 * 100), // 100 years
+		Details:  details,
+	}
+	sig, err := auth.signer.Sign(penalty.Serialize())
+	if err != nil {
+		return fmt.Errorf("signature error: %v", err)
+	}
+	penaltyNote := &msgjson.PenaltyNote{
+		Sig:     sig.Serialize(),
+		Penalty: penalty,
+	}
+	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
+	if err != nil {
+		return fmt.Errorf("error creating penalty notification: %v", err)
+	}
+	auth.Send(user, note)
+
 	return nil
 }
 

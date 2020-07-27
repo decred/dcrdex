@@ -3276,6 +3276,27 @@ func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	return nil
 }
 
+// handlePenaltyMsg is called when a notify notification is received.
+func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var note msgjson.PenaltyNote
+	err := msg.Unmarshal(&note)
+	if err != nil {
+		return fmt.Errorf("penalty note unmarshal error: %v", err)
+	}
+	// Check the signature.
+	err = dc.acct.checkSig(note.Penalty.Serialize(), note.Sig)
+	if err != nil {
+		return newError(signatureErr, "DEX signature validation error: %v", err)
+	}
+	t := encode.UnixTimeMilli(int64(note.Penalty.Time) * 1000)
+	d := time.Duration(note.Penalty.Duration)
+	details := fmt.Sprintf("Penalty from DEX at %s\nbroken rule: %d\ntime: %v\nduration: %v\ndetails: \"%s\"\n",
+		dc.acct.host, note.Penalty.Rule, t, d, note.Penalty.Details)
+	n := db.NewNotification("penalty", dc.acct.host, details, db.WarningLevel)
+	c.notify(&n)
+	return nil
+}
+
 // routeHandler is a handler for a message from the DEX.
 type routeHandler func(*Core, *dexConnection, *msgjson.Message) error
 
@@ -3295,6 +3316,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.UpdateRemainingRoute: handleUpdateRemainingMsg,
 	msgjson.SuspensionRoute:      handleTradeSuspensionMsg,
 	msgjson.NotifyRoute:          handleNotifyMsg,
+	msgjson.PenaltyRoute:         handlePenaltyMsg,
 	msgjson.NoMatchRoute:         handleNoMatchRoute,
 }
 
