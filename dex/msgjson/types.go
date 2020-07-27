@@ -160,6 +160,9 @@ const (
 	// NotifyRoute is the DEX-originating notification-type message
 	// delivering text messages from the operator.
 	NotifyRoute = "notify"
+	// PenaltyRoute is the DEX-originating notification-type message
+	// informing of a broken rule and the subsequent penalty.
+	PenaltyRoute = "penalty"
 )
 
 type Bytes = dex.Bytes
@@ -845,10 +848,37 @@ func (c *Connect) Serialize() []byte {
 	return append(s, uint64Bytes(c.Time)...)
 }
 
-// ConnectResult is the result result for the ConnectRoute request.
+// ConnectResult is the result for the ConnectRoute request.
 type ConnectResult struct {
 	Sig     Bytes    `json:"sig"`
 	Matches []*Match `json:"matches"`
+}
+
+// PenaltyNote is the payload of a Penalty notification.
+type PenaltyNote struct {
+	Sig     Bytes    `json:"sig"`
+	Penalty *Penalty `json:"penalty"`
+}
+
+// Penalty is part of the payload for a dex-originating Penalty notification
+// and part of the connect response.
+type Penalty struct {
+	Signature
+	Rule     Bytes  `json:"rule"`
+	Time     uint64 `json:"timestamp"`
+	Duration uint64 `json:"duration"`
+	Details  string `json:"details"`
+}
+
+// Serialize serializes the Penalty data.
+func (p *Penalty) Serialize() []byte {
+	// serialization: rule(1) + time (8) + duration (8) details (variable,
+	// ~100) = 117 bytes
+	b := make([]byte, 0, 117)
+	b = append(b, p.Rule...)
+	b = append(b, uint64Bytes(p.Time)...)
+	b = append(b, uint64Bytes(p.Duration)...)
+	return append(b, []byte(p.Details)...)
 }
 
 // Register is the payload for the RegisterRoute request.

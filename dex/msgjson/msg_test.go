@@ -817,6 +817,64 @@ func TestConnect(t *testing.T) {
 	}
 }
 
+func TestPenalty(t *testing.T) {
+	// serialization: rule(1) + time (8) + duration (8) details (variable,
+	// ~100) = 117 bytes
+	penalty := &Penalty{
+		Rule:     []byte{1},
+		Time:     uint64(1598929305),
+		Duration: uint64(3153600000000000000),
+		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
+	}
+
+	exp := []byte{
+		// Rule 1 byte.
+		0x01,
+		// Time 8 bytes.
+		0x00, 0x00, 0x00, 0x00, 0x5f, 0x4d, 0xb9, 0x99,
+		// Duration 8 bytes.
+		0x2b, 0xc3, 0xd6, 0x7d, 0xd3, 0xac, 0x00, 0x00,
+		// Details 76 bytes.
+		0x59, 0x6f, 0x75, 0x20, 0x6d, 0x61, 0x79, 0x20, 0x6e, 0x6f,
+		0x20, 0x6c, 0x6f, 0x6e, 0x67, 0x65, 0x72, 0x20, 0x74, 0x72,
+		0x61, 0x64, 0x65, 0x2e, 0x20, 0x4c, 0x65, 0x61, 0x76, 0x65,
+		0x20, 0x79, 0x6f, 0x75, 0x72, 0x20, 0x63, 0x6c, 0x69, 0x65,
+		0x6e, 0x74, 0x20, 0x72, 0x75, 0x6e, 0x6e, 0x69, 0x6e, 0x67,
+		0x20, 0x74, 0x6f, 0x20, 0x66, 0x69, 0x6e, 0x69, 0x73, 0x68,
+		0x20, 0x70, 0x65, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x20, 0x74,
+		0x72, 0x61, 0x64, 0x65, 0x73, 0x2e,
+	}
+
+	b := penalty.Serialize()
+	if !bytes.Equal(b, exp) {
+		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
+	}
+
+	penaltyB, err := json.Marshal(penalty)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var penaltyBack Penalty
+	err = json.Unmarshal(penaltyB, &penaltyBack)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if !bytes.Equal(penaltyBack.Rule, penalty.Rule) {
+		t.Fatal(penaltyBack.Rule, penalty.Rule)
+	}
+	if penaltyBack.Time != penalty.Time {
+		t.Fatal(penaltyBack.Time, penalty.Time)
+	}
+	if penaltyBack.Duration != penalty.Duration {
+		t.Fatal(penaltyBack.Duration, penalty.Duration)
+	}
+	if penaltyBack.Details != penalty.Details {
+		t.Fatal(penaltyBack.Details, penalty.Details)
+	}
+}
+
 func TestRegister(t *testing.T) {
 	// serialization: pubkey (33) + time (8) = 41
 	pk, _ := hex.DecodeString("f06e5cf13fc6debb8b90776da6624991ba50a11e784efed53d0a81c3be98397982")
