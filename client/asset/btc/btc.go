@@ -84,14 +84,14 @@ var (
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
 			Description:  "Bitcoin's 'fallbackfee' rate. Units: Sats/kB",
-			DefaultValue: defaultFee,
+			DefaultValue: defaultFee * 1000,
 		},
-		{
-			Key:         "txsplit",
-			DisplayName: "Pre-split funding inputs",
-			Description: "Pre-split funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
-			IsBoolean:   true,
-		},
+		// {
+		// 	Key:         "txsplit",
+		// 	DisplayName: "Pre-split funding inputs",
+		// 	Description: "Pre-split funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
+		// 	IsBoolean:   true,
+		// },
 	}
 	// walletInfo defines some general information about a Bitcoin wallet.
 	WalletInfo = &asset.WalletInfo{
@@ -334,10 +334,6 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Ports:             dexbtc.RPCPorts,
 	}
 
-	if cfg.Settings[fallbackFeeKey] == "" {
-		cfg.Settings[fallbackFeeKey] = strconv.FormatUint(defaultFee, 10)
-	}
-
 	return BTCCloneWallet(cloneCFG)
 }
 
@@ -367,14 +363,20 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
 	}
 
-	btc := newWallet(cfg, btcCfg, client)
+	feesPerByte := toSatoshi(btcCfg.FallbackFeeRate * 1000)
+	if feesPerByte == 0 {
+		feesPerByte = defaultFee
+	}
+
+	btc := newWallet(cfg, btcCfg, feesPerByte, client)
 	btc.client = client
 
 	return btc, nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *ExchangeWallet {
+func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, fallbackFeesPerByte uint64, node rpcClient) *ExchangeWallet {
+
 	return &ExchangeWallet{
 		node:              node,
 		wallet:            newWalletClient(node, cfg.ChainParams),
@@ -385,7 +387,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		tipChange:         cfg.WalletCFG.TipChange,
 		fundingCoins:      make(map[string]*compositeUTXO),
 		minNetworkVersion: cfg.MinNetworkVersion,
-		fallbackFeeRate:   btcCfg.FallbackFeeRate,
+		fallbackFeeRate:   fallbackFeesPerByte,
 		useSplitTx:        btcCfg.UseSplitTx,
 		walletInfo:        cfg.WalletInfo,
 	}

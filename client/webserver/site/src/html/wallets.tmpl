@@ -177,7 +177,9 @@
       <div class="pt-2 pl-1">
         <span class="mx-4">Or, you can...</span>
         <ul class="fs15 mt-3 mr-4">
-          <li id="changePW" class="hoverbg pointer">Change the wallet password</li>
+          <li id="changePW" class="hoverbg pointer">
+            Update the wallet password
+            <span class="ico-info fs13" data-tooltip="Update the stored wallet password. Change the password directly with your wallet software first."></span></li>
         </ul>
       </div>
     </form>
@@ -190,13 +192,18 @@
         <span id="repwAssetName"></span>
         Wallet Password
       </div>
+      <div class="px-4 pt-3 fs15">
+        Changing the password below does not change the password for your wallet software.
+        Use this form to update the DEX client after you have changed your password
+        with the wallet software directly.
+      </div>
       <div class="px-4 pt-3">
-        <label for="repwNewPw" class="pl-1 mb-1">New Wallet Password</label>
+        <label for="repwNewPw" class="mb-1">New Wallet Password</label>
         <input type="password" class="form-control select" id="repwNewPw" autocomplete="off">
       </div>
       <div class="d-flex px-4 mt-1">
         <div class="col-12 p-0">
-          <label for="repwAppPw" class="pl-1 mb-1">App Password</label>
+          <label for="repwAppPw" class="mb-1">App Password</label>
           <input type="password" class="form-control select" id="repwAppPw" autocomplete="off">
         </div>
         <div class="col-12 p-0 text-right">

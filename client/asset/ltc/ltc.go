@@ -56,14 +56,14 @@ var (
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
 			Description:  "Litecoin's 'fallbackfee' rate. Units: Sats/kB",
-			DefaultValue: defaultFee,
+			DefaultValue: defaultFee * 1000,
 		},
-		{
-			Key:         "utxoprep",
-			DisplayName: "Pre-split funding inputs",
-			Description: "Pre-split funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
-			IsBoolean:   true,
-		},
+		// {
+		// 	Key:         "txsplit",
+		// 	DisplayName: "Pre-split funding inputs",
+		// 	Description: "Pre-split funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
+		// 	IsBoolean:   true,
+		// },
 	}
 	// WalletInfo defines some general information about a Litecoin wallet.
 	WalletInfo = &asset.WalletInfo{
@@ -134,7 +134,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	}
 
 	if cfg.Settings[fallbackFeeKey] == "" {
-		cfg.Settings[fallbackFeeKey] = strconv.FormatUint(defaultFee, 10)
+		cfg.Settings[fallbackFeeKey] = strconv.FormatUint(defaultFee*1000, 10)
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

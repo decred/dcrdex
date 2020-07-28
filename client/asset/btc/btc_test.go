@@ -237,10 +237,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		ChainParams: &chaincfg.MainNetParams,
 		WalletInfo:  WalletInfo,
 	}
-	btcCfg := &dexbtc.Config{
-		FallbackFeeRate: defaultFee,
-	}
-	wallet := newWallet(cfg, btcCfg, client)
+	wallet := newWallet(cfg, &dexbtc.Config{}, defaultFee, client)
 	go wallet.run(walletCtx)
 
 	return wallet, client, shutdown

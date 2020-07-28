@@ -76,14 +76,14 @@ var (
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
 			Description:  "Decred's 'fallbackfee' rate. Units: atoms/kB",
-			DefaultValue: defaultFee,
+			DefaultValue: defaultFee * 1000,
 		},
-		{
-			Key:         "txsplit",
-			DisplayName: "Pre-size funding inputs",
-			Description: "Pre-size funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
-			IsBoolean:   true,
-		},
+		// {
+		// 	Key:         "txsplit",
+		// 	DisplayName: "Pre-size funding inputs",
+		// 	Description: "Pre-size funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
+		// 	IsBoolean:   true,
+		// },
 	}
 	// walletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
@@ -315,7 +315,13 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 	if err != nil {
 		return nil, err
 	}
-	dcr := unconnectedWallet(cfg, walletCfg, logger)
+
+	feesPerByte := toAtoms(walletCfg.FallbackFeeRate * 1000)
+	if feesPerByte == 0 {
+		feesPerByte = defaultFee
+	}
+
+	dcr := unconnectedWallet(cfg, walletCfg, feesPerByte, logger)
 
 	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
 		walletCfg.RPCListen, walletCfg.RPCCert)
@@ -332,14 +338,14 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 // unconnectedWallet returns an ExchangeWallet without a node. The node should
 // be set before use.
-func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logger) *ExchangeWallet {
+func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, fallbackFeesPerByte uint64, logger dex.Logger) *ExchangeWallet {
 	return &ExchangeWallet{
 		log:             logger,
 		acct:            cfg.Settings["account"],
 		tradeChange:     make(map[string]time.Time),
 		tipChange:       cfg.TipChange,
 		fundingCoins:    make(map[string]*fundingCoin),
-		fallbackFeeRate: dcrCfg.FallbackFeeRate,
+		fallbackFeeRate: fallbackFeesPerByte,
 		useSplitTx:      dcrCfg.UseSplitTx,
 	}
 }

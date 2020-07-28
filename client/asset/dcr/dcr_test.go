@@ -108,11 +108,8 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	walletCfg := &asset.WalletConfig{
 		TipChange: func(error) {},
 	}
-	dcrCfg := &Config{
-		FallbackFeeRate: defaultFee,
-	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
-	wallet := unconnectedWallet(walletCfg, dcrCfg, tLogger)
+	wallet := unconnectedWallet(walletCfg, &Config{}, defaultFee, tLogger)
 	wallet.node = client
 	go wallet.monitorBlocks(walletCtx)
 

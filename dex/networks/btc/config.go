@@ -43,8 +43,8 @@ type Config struct {
 
 	// Below fields are only used on the client.
 
-	UseSplitTx      bool   `ini:"txsplit"`
-	FallbackFeeRate uint64 `ini:"fallbackfee"`
+	UseSplitTx      bool    `ini:"txsplit"`
+	FallbackFeeRate float64 `ini:"fallbackfee"`
 }
 
 // LoadConfigFromPath loads the configuration settings from the specified filepath.

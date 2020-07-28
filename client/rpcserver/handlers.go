@@ -592,7 +592,8 @@ var helpMsgs = map[string]helpMsg{
      path (string): Optional. The path to a configuration file.
      settings (string): A JSON-encoded string->string mapping of additional
        configuration settings. These settings take precedence over any settings
-       parsed from file. e.g. '{"account":"default"}'`,
+       parsed from file. e.g. '{"account":"default"}' for Decred accounts, and
+       '{"walletname":""}' for the default Bitcoin wallet where bitcoind's listwallets RPC gives possible walletnames.`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
 	},
