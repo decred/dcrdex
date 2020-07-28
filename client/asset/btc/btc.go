@@ -90,12 +90,15 @@ var (
 			Description:  "Bitcoin's 'fallbackfee' rate. Units: BTC/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
-		// {
-		// 	Key:         "txsplit",
-		// 	DisplayName: "Pre-split funding inputs",
-		// 	Description: "Pre-split funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
-		// 	IsBoolean:   true,
-		// },
+		{
+			Key:         "txsplit",
+			DisplayName: "Pre-split funding inputs",
+			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
+				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
+				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
+				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
+			IsBoolean: true,
+		},
 	}
 	// walletInfo defines some general information about a Bitcoin wallet.
 	WalletInfo = &asset.WalletInfo{
@@ -498,7 +501,7 @@ func (btc *ExchangeWallet) feeRateWithFallback() uint64 {
 
 // FundOrder selects utxos (as asset.Coin) for use in an order. Any Coins
 // returned will be locked. Part of the asset.Wallet interface.
-func (btc *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins, error) {
+func (btc *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asset) (asset.Coins, error) {
 	if value == 0 {
 		return nil, fmt.Errorf("cannot fund value = 0")
 	}
@@ -557,7 +560,7 @@ out:
 		utxos = utxos[:len(utxos)-1]
 	}
 
-	if btc.useSplitTx {
+	if btc.useSplitTx && !immediate {
 		return btc.split(value, spents, uint64(size), fundingCoins, nfo)
 	}
 
@@ -800,7 +803,7 @@ func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []s
 
 // Swap sends the swap contracts and prepares the receipts.
 func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
-	var contracts [][]byte
+	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
 	baseTx, totalIn, opIDs, err := btc.fundedTx(swaps.Inputs)

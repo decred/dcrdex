@@ -57,12 +57,15 @@ var (
 			Description:  "Litecoin's 'fallbackfee' rate. Units: LTC/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
-		// {
-		// 	Key:         "txsplit",
-		// 	DisplayName: "Pre-split funding inputs",
-		// 	Description: "Pre-split funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
-		// 	IsBoolean:   true,
-		// },
+		{
+			Key:         "txsplit",
+			DisplayName: "Pre-split funding inputs",
+			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
+				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
+				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
+				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
+			IsBoolean: true,
+		},
 	}
 	// WalletInfo defines some general information about a Litecoin wallet.
 	WalletInfo = &asset.WalletInfo{

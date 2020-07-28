@@ -513,7 +513,7 @@ func (w *TXCWallet) FeeRate() (uint64, error) {
 	return 24, nil
 }
 
-func (w *TXCWallet) FundOrder(v uint64, _ *dex.Asset) (asset.Coins, error) {
+func (w *TXCWallet) FundOrder(v uint64, _ bool, _ *dex.Asset) (asset.Coins, error) {
 	w.fundedVal = v
 	return w.fundCoins, w.fundErr
 }

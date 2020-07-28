@@ -72,7 +72,7 @@ type Wallet interface {
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
-	FundOrder(uint64, *dex.Asset) (Coins, error)
+	FundOrder(value uint64, immediate bool, nfo *dex.Asset) (Coins, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error

@@ -80,15 +80,18 @@ var (
 		{
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
-			Description:  "Decred's 'fallbackfee' rate. Units: DCR/kB",
+			Description:  "The fee rate to use for fee payment and withdrawals when estimatesmartfee is not available. Units: DCR/kB",
 			DefaultValue: defaultFee * 1000 / 1e8,
 		},
-		// {
-		// 	Key:         "txsplit",
-		// 	DisplayName: "Pre-size funding inputs",
-		// 	Description: "Pre-size funding inputs to prevent locking funds into an order for which a change output may not be immediately available. Only used for standing-type orders.",
-		// 	IsBoolean:   true,
-		// },
+		{
+			Key:         "txsplit",
+			DisplayName: "Pre-size funding inputs",
+			Description: "When placing an order, create a \"split\" transaction to fund the order without locking more of the wallet balance than " +
+				"necessary. Otherwise, excess funds may be reserved to fund the order until the first swap contract is broadcast " +
+				"during match settlement, or the order is canceled. This an extra transaction for which network mining fees are paid. " +
+				"Used only for standing-type orders, e.g. limit orders without immediate time-in-force.",
+			IsBoolean: true,
+		},
 	}
 	// walletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
@@ -492,7 +495,7 @@ func (dcr *ExchangeWallet) feeRateWithFallback() uint64 {
 // FundOrder selects coins for use in an order. The coins will be locked, and
 // will not be returned in subsequent calls to Fund or calculated in calls to
 // Available, unless they are unlocked with ReturnCoins.
-func (dcr *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins, error) {
+func (dcr *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asset) (asset.Coins, error) {
 	if value == 0 {
 		return nil, fmt.Errorf("cannot fund value = 0")
 	}
@@ -510,7 +513,7 @@ func (dcr *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins,
 	}
 
 	// Send a split, if preferred.
-	if dcr.useSplitTx {
+	if dcr.useSplitTx && !immediate {
 		return dcr.split(value, coins, inputsSize, fundingCoins, nfo)
 	}
 
