@@ -143,6 +143,10 @@ export default class Doc {
     var [whole, frac] = x.toLocaleString('en-us', fullPrecisionSpecs).split('.')
     // toLocalString gives precedence to minimumSignificantDigits, so the result
     // can be > 8 fractional digits. Trim the extras.
+    if (!frac) {
+      console.error(`formatCoinValue has bad fractional part. input = ${x}`)
+      return 'NaN'
+    }
     frac = frac.substring(0, 8)
     if (frac === '00000000') return whole
     // Trim trailing zeros.

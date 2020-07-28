@@ -214,16 +214,17 @@ export default class MarketsPage extends BasePage {
     bind(page.chartResizer, 'mousedown', e => {
       if (e.button !== 0) return
       e.preventDefault()
+      var chartRatio
       const trackMouse = ee => {
         ee.preventDefault()
         const box = page.rightSide.getBoundingClientRect()
         const h = box.bottom - box.top
-        var chartRatio = (ee.pageY - box.top) / h
+        chartRatio = (ee.pageY - box.top) / h
         setChartRatio(chartRatio)
-        State.store(chartRatioKey, chartRatio)
       }
       bind(document, 'mousemove', trackMouse)
       bind(document, 'mouseup', () => {
+        if (chartRatio) State.store(chartRatioKey, chartRatio)
         Doc.unbind(document, 'mousemove', trackMouse)
       })
     })
