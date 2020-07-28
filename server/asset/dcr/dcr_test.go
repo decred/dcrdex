@@ -1303,9 +1303,9 @@ func TestAuxiliary(t *testing.T) {
 		t.Fatalf("expected 3 confirmations, got %d", confs)
 	}
 
-	txHashBad := txHash
-	txHashBad[0] = 22
-	_, _, _, err = dcr.FeeCoin(toCoinID(txHashBad, 0))
+	var txHashBad chainhash.Hash
+	copy(txHashBad[:], randomBytes(32))
+	_, _, _, err = dcr.FeeCoin(toCoinID(&txHashBad, 0))
 	if err == nil {
 		t.Fatal("FeeCoin found for non-existent txid")
 	}

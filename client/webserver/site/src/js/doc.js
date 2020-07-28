@@ -14,9 +14,10 @@ const BipIDs = {
 const BipSymbols = Object.values(BipIDs)
 
 // Parameters for printing asset values.
-const coinValueSpecs = {
+const fullPrecisionSpecs = {
   minimumSignificantDigits: 4,
-  maximumSignificantDigits: 6,
+  maximumSignificantDigits: 8,
+  minimumFractionDigits: 8,
   maximumFractionDigits: 8
 }
 
@@ -139,7 +140,16 @@ export default class Doc {
 
   // formatCoinValue formats the asset value to a string.
   static formatCoinValue (x) {
-    return x.toLocaleString('en-us', coinValueSpecs)
+    var [whole, frac] = x.toLocaleString('en-us', fullPrecisionSpecs).split('.')
+    // toLocalString gives precedence to minimumSignificantDigits, so the result
+    // can have no fractional part, despite the minimumFractionDigits setting.
+    if (!frac) return whole
+    // ... or it can have more than 8 fractional digits, despite of the
+    // maximumFractionDigits setting.
+    frac = frac.substring(0, 8)
+    if (frac === '00000000') return whole
+    // Trim trailing zeros.
+    return `${whole}.${frac.replace(/,+$/, '')}`
   }
 
   /*

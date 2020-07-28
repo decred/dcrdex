@@ -74,12 +74,10 @@ export class DepthChart {
     this.wheeled = () => {
       this.wheelLimiter = setTimeout(() => { this.wheelLimiter = null }, 100)
     }
-    this.wheel = this.wheel_.bind(this)
-    bind(this.canvas, 'wheel', this.wheel)
-    this.resize = this.resize_.bind(this)
-    bind(window, 'resize', this.resize)
-    this.click = this.click_.bind(this)
-    bind(this.canvas, 'click', this.click)
+
+    bind(this.canvas, 'wheel', e => { this.wheel(e) })
+    bind(window, 'resize', e => { this.resize(e) })
+    bind(this.canvas, 'click', e => { this.click(e) })
     this.resize()
   }
 
@@ -89,7 +87,7 @@ export class DepthChart {
   }
 
   // resize_ is a 'resize' event handler.
-  resize_ () {
+  resize () {
     this.canvas.width = this.parent.clientWidth
     this.canvas.height = this.parent.clientHeight
     const xLblHeight = 30
@@ -107,8 +105,8 @@ export class DepthChart {
     if (this.book) this.draw()
   }
 
-  // wheel_ is a mousewheel event handler.
-  wheel_ (e) {
+  // wheel is a mousewheel event handler.
+  wheel (e) {
     this.zoom(e.deltaY < 0)
   }
 
@@ -135,8 +133,8 @@ export class DepthChart {
     this.draw()
   }
 
-  // click_ is the canvas 'click' event handler.
-  click_ (e) {
+  // click is the canvas 'click' event handler.
+  click (e) {
     if (!this.dataExtents) return
     const x = e.clientX - this.rect.left
     const y = e.clientY - this.rect.y

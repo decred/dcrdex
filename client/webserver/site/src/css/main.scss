@@ -152,6 +152,26 @@ input[type=number] {
   right: 0;
 }
 
+.stylish-overflow {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #7774 #7771;
+
+  /* Works on Chrome/Edge/Safari */
+  &::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: #7771;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: #7774;
+    border-radius: 4px;
+  }
+}
+
 div.note-indicator {
   width: 8px;
   height: 8px;

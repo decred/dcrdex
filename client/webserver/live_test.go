@@ -59,7 +59,7 @@ func randomMagnitude(low, high int) float64 {
 }
 
 func userOrders() (ords []*core.Order) {
-	orderCount := rand.Intn(5)
+	orderCount := rand.Intn(50)
 	for i := 0; i < orderCount; i++ {
 		qty := uint64(randomMagnitude(7, 11))
 		filled := uint64(rand.Float64() * float64(qty))
@@ -85,7 +85,7 @@ func userOrders() (ords []*core.Order) {
 			Stamp:  encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*600_000),
 			Status: status,
 			Epoch:  epoch,
-			Rate:   uint64(randomMagnitude(-2, 4)),
+			Rate:   uint64(randomMagnitude(4, 12)),
 			Qty:    qty,
 			Sell:   rand.Intn(2) > 0,
 			Filled: filled,
