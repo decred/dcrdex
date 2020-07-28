@@ -802,14 +802,19 @@ func TestMain(m *testing.M) {
 func TestMarkets(t *testing.T) {
 	rig := newTestRig()
 	// The test rig's dexConnection comes with a market. Clear that for this test.
+	rig.dc.cfgMtx.Lock()
 	rig.dc.cfg.Markets = nil
+	rig.dc.cfgMtx.Unlock()
+
 	tCore := rig.core
 	// Simulate 10 markets.
 	marketIDs := make(map[string]struct{})
 	for i := 0; i < 10; i++ {
 		base, quote := randomMsgMarket()
 		marketIDs[marketName(base.ID, quote.ID)] = struct{}{}
+		rig.dc.cfgMtx.RLock()
 		cfg := rig.dc.cfg
+		rig.dc.cfgMtx.RUnlock()
 		cfg.Markets = append(cfg.Markets, &msgjson.Market{
 			Name:            base.Symbol + quote.Symbol,
 			Base:            base.ID,
@@ -817,8 +822,10 @@ func TestMarkets(t *testing.T) {
 			EpochLen:        5000,
 			MarketBuyBuffer: 1.4,
 		})
+		rig.dc.assetsMtx.Lock()
 		rig.dc.assets[base.ID] = convertAssetInfo(base)
 		rig.dc.assets[quote.ID] = convertAssetInfo(quote)
+		rig.dc.assetsMtx.Unlock()
 	}
 	rig.dc.refreshMarkets()
 
@@ -827,6 +834,10 @@ func TestMarkets(t *testing.T) {
 	if len(xcs) != 1 {
 		t.Fatalf("expected 1 MarketInfo, got %d", len(xcs))
 	}
+
+	rig.dc.assetsMtx.RLock()
+	defer rig.dc.assetsMtx.RUnlock()
+
 	assets := rig.dc.assets
 	for _, xc := range xcs {
 		for _, market := range xc.Markets {
@@ -3556,12 +3567,14 @@ func TestLogout(t *testing.T) {
 	dc, _, _ := testDexConnection()
 	initUserAssets := func() {
 		tCore.user = new(User)
+		dc.assetsMtx.Lock()
 		tCore.user.Assets = make(map[uint32]*SupportedAsset, len(dc.assets))
 		for assetsID := range dc.assets {
 			tCore.user.Assets[assetsID] = &SupportedAsset{
 				ID: assetsID,
 			}
 		}
+		dc.assetsMtx.Unlock()
 	}
 
 	ensureErr := func(tag string) {
@@ -4204,6 +4217,99 @@ func TestSetWalletPassword(t *testing.T) {
 	// Check that the xcWallet was updated.
 	if !bytes.Equal(xyzWallet.encPW, newPW) {
 		t.Fatalf("xcWallet encPW field not updated")
+	}
+}
+
+func TestHandleTradeResumptionMsg(t *testing.T) {
+	rig := newTestRig()
+
+	tCore := rig.core
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	dcrWallet.Unlock(wPW, time.Hour)
+
+	btcWallet, _ := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	btcWallet.Unlock(wPW, time.Hour)
+
+	handleLimit := func(msg *msgjson.Message, f msgFunc) error {
+		// Need to stamp and sign the message with the server's key.
+		msgOrder := new(msgjson.LimitOrder)
+		err := msg.Unmarshal(msgOrder)
+		if err != nil {
+			t.Fatalf("unmarshal error: %v", err)
+		}
+		lo := convertMsgLimitOrder(msgOrder)
+		f(orderResponse(msg.ID, msgOrder, lo, false, false, false))
+		return nil
+	}
+
+	rig.ws.queueResponse(msgjson.LimitRoute, handleLimit)
+
+	// Ensure a non-existent market cannot be suspended.
+	payload := &msgjson.TradeResumption{
+		MarketID: "dcr_dcr",
+	}
+
+	req, _ := msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, payload)
+	err := handleTradeResumptionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeResumptionMsg] expected a market " +
+			"ID not found error: %v")
+	}
+
+	mkt := tDcrBtcMktName
+
+	// Ensure an already resumed market cannot be re-resumed.
+	err = rig.dc.resume(mkt)
+	if err != nil {
+		t.Fatalf("[handleTradeResumptionMsg] unexpected error: %v", err)
+	}
+
+	newPayload := func() *msgjson.TradeResumption {
+		return &msgjson.TradeResumption{
+			MarketID:   tDcrBtcMktName,
+			EpochLen:   100,
+			StartEpoch: encode.UnixMilliU(time.Now().Add(time.Millisecond*20)) / uint64(100),
+		}
+	}
+
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, newPayload())
+	err = handleTradeResumptionMsg(rig.core, rig.dc, req)
+	if err == nil {
+		t.Fatal("[handleTradeResumptionMsg] expected a market resumption error")
+	}
+
+	// Resume a market.
+	err = rig.dc.suspend(mkt)
+	if err != nil {
+		t.Fatalf("[handleTradeResumptionMsg] unexpected error: %v", err)
+	}
+
+	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.ResumptionRoute, newPayload())
+	err = handleTradeResumptionMsg(rig.core, rig.dc, req)
+	if err != nil {
+		t.Fatalf("[handleTradeResumptionMsg] unexpected error: %v", err)
+	}
+
+	// Wait for the resume to execute.
+	time.Sleep(time.Millisecond * 40)
+
+	// Ensure trades for a resumed market are processed without error.
+	form := &TradeForm{
+		Host:    tDexHost,
+		IsLimit: true,
+		Sell:    true,
+		Base:    tDCR.ID,
+		Quote:   tBTC.ID,
+		Qty:     tDCR.LotSize * 10,
+		Rate:    tBTC.RateStep * 1000,
+		TifNow:  false,
+	}
+
+	_, err = rig.core.Trade(tPW, form)
+	if err != nil {
+		t.Fatalf("unexpected trade error %v", err)
 	}
 }
 

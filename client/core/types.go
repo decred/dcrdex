@@ -262,6 +262,7 @@ type Market struct {
 	MarketBuyBuffer float64  `json:"buybuffer"`
 	Orders          []*Order `json:"orders"`
 	pendingSuspend  *time.Timer
+	pendingResume   *time.Timer
 	suspended       bool
 	mtx             sync.Mutex
 }

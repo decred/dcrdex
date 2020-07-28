@@ -55,11 +55,15 @@ var (
 type dexConnection struct {
 	comms.WsConn
 	connMaster   *dex.ConnectionMaster
-	assets       map[uint32]*dex.Asset
-	cfg          *msgjson.ConfigResult
 	tickInterval time.Duration
 	acct         *dexAccount
 	notify       func(Notification)
+
+	assetsMtx sync.RWMutex
+	assets    map[uint32]*dex.Asset
+
+	cfgMtx sync.RWMutex
+	cfg    *msgjson.ConfigResult
 
 	booksMtx sync.RWMutex
 	books    map[string]*bookie
@@ -91,7 +95,6 @@ const (
 func (dc *dexConnection) suspended(mkt string) bool {
 	dc.marketMtx.Lock()
 	defer dc.marketMtx.Unlock()
-
 	market, ok := dc.marketMap[mkt]
 	if !ok {
 		return false
@@ -133,11 +136,16 @@ func (dc *dexConnection) resume(mkt string) error {
 // dexConnection.markets. refreshMarkets is used when a change to the status of
 // a market or the user's orders on a market has changed.
 func (dc *dexConnection) refreshMarkets() map[string]*Market {
+	dc.cfgMtx.RLock()
+	defer dc.cfgMtx.RUnlock()
+
 	marketMap := make(map[string]*Market, len(dc.cfg.Markets))
 	for _, mkt := range dc.cfg.Markets {
 		// The presence of the asset for every market was already verified when the
 		// dexConnection was created in connectDEX.
+		dc.assetsMtx.RLock()
 		base, quote := dc.assets[mkt.Base], dc.assets[mkt.Quote]
+		dc.assetsMtx.RUnlock()
 		market := &Market{
 			Name:            mkt.Name,
 			BaseID:          base.ID,
@@ -844,15 +852,20 @@ func (c *Core) Exchanges() map[string]*Exchange {
 	defer c.connMtx.RUnlock()
 	infos := make(map[string]*Exchange, len(c.conns))
 	for host, dc := range c.conns {
+		dc.cfgMtx.RLock()
+		dc.assetsMtx.RLock()
+		requiredConfs := uint32(dc.cfg.RegFeeConfirms)
 		infos[host] = &Exchange{
 			Host:          host,
 			Markets:       dc.markets(),
 			Assets:        dc.assets,
 			FeePending:    dc.acct.feePending(),
 			Connected:     dc.connected,
-			ConfsRequired: uint32(dc.cfg.RegFeeConfirms),
+			ConfsRequired: requiredConfs,
 			RegConfirms:   dc.getRegConfirms(),
 		}
+		dc.cfgMtx.RUnlock()
+		dc.assetsMtx.RUnlock()
 	}
 	return infos
 }
@@ -1455,6 +1468,10 @@ func (c *Core) GetFee(dexAddr, cert string) (uint64, error) {
 		return 0, codedError(connectionErr, err)
 	}
 	defer dc.connMaster.Disconnect()
+
+	dc.cfgMtx.RLock()
+	defer dc.cfgMtx.RUnlock()
+
 	return dc.cfg.Fee, nil
 }
 
@@ -1516,7 +1533,9 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		}
 	}()
 
+	dc.assetsMtx.RLock()
 	regAsset, found := dc.assets[regFeeAssetID]
+	dc.assetsMtx.RUnlock()
 	if !found {
 		return nil, newError(assetSupportErr, "dex server does not support %s asset", regFeeAssetSymbol)
 	}
@@ -1545,12 +1564,16 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 		return nil, newError(signatureErr, "DEX signature validation error: %v", err)
 	}
 
+	dc.cfgMtx.RLock()
+	fee := dc.cfg.Fee
+	dc.cfgMtx.RUnlock()
+
 	// Check that the fee is non-zero.
 	if regRes.Fee == 0 {
 		return nil, newError(zeroFeeErr, "zero registration fees not allowed")
 	}
-	if regRes.Fee != dc.cfg.Fee {
-		return nil, newError(feeMismatchErr, "DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, dc.cfg.Fee)
+	if regRes.Fee != fee {
+		return nil, newError(feeMismatchErr, "DEX 'register' result fee doesn't match the 'config' value. %d != %d", regRes.Fee, fee)
 	}
 	if regRes.Fee != form.Fee {
 		return nil, newError(feeMismatchErr, "registration fee provided to Register does not match the DEX registration fee. %d != %d", form.Fee, regRes.Fee)
@@ -1581,7 +1604,11 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 
 	c.updateAssetBalance(regFeeAssetID)
 
-	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", dc.cfg.RegFeeConfirms, dc.acct.host)
+	dc.cfgMtx.RLock()
+	requiredConfs := dc.cfg.RegFeeConfirms
+	dc.cfgMtx.RUnlock()
+
+	details := fmt.Sprintf("Waiting for %d confirmations before trading at %s", requiredConfs, dc.acct.host)
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success, dc.acct.host))
 
 	// Set up the coin waiter, which waits for the required number of
@@ -1589,7 +1616,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	// connection.
 	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
 	c.refreshUser()
-	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: dc.cfg.RegFeeConfirms}
+	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: requiredConfs}
 	return res, nil
 }
 
@@ -1599,7 +1626,9 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.
 func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID []byte, confs uint32) {
-	reqConfs := dc.cfg.RegFeeConfirms
+	dc.cfgMtx.RLock()
+	reqConfs := uint32(dc.cfg.RegFeeConfirms)
+	dc.cfgMtx.RUnlock()
 
 	dc.setRegConfirms(confs)
 	c.refreshUser()
@@ -1611,15 +1640,15 @@ func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID [
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %v", coinIDString(wallet.AssetID, coinID), err)
 		}
-		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, uint32(reqConfs))
+		details := fmt.Sprintf("Fee payment confirmations %v/%v", confs, reqConfs)
 
-		if confs < uint32(reqConfs) {
+		if confs < reqConfs {
 			dc.setRegConfirms(confs)
 			c.refreshUser()
 			c.notify(newFeePaymentNoteWithConfirmations("regupdate", details, db.Data, confs, dc.acct.host))
 		}
 
-		return confs >= uint32(reqConfs), nil
+		return confs >= reqConfs, nil
 	}
 
 	c.wait(assetID, trigger, func(err error) {
@@ -2378,11 +2407,15 @@ type walletSet struct {
 
 // walletSet constructs a walletSet.
 func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (*walletSet, error) {
+	dc.assetsMtx.RLock()
 	baseAsset, found := dc.assets[baseID]
+	dc.assetsMtx.RUnlock()
 	if !found {
 		return nil, fmt.Errorf("unknown base asset %d -> %s for %s", baseID, unbip(baseID), dc.acct.host)
 	}
+	dc.assetsMtx.RLock()
 	quoteAsset, found := dc.assets[quoteID]
+	dc.assetsMtx.RUnlock()
 	if !found {
 		return nil, fmt.Errorf("unknown quote asset %d -> %s for %s", quoteID, unbip(quoteID), dc.acct.host)
 	}
@@ -2697,7 +2730,11 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		log.Errorf("reFee %s - error getting coin confirmations: %v", dc.acct.host, err)
 		return
 	}
-	if confs >= uint32(dc.cfg.RegFeeConfirms) {
+	dc.cfgMtx.RLock()
+	requiredConfs := uint32(dc.cfg.RegFeeConfirms)
+	dc.cfgMtx.RUnlock()
+
+	if confs >= requiredConfs {
 		err := c.notifyFee(dc, acctInfo.FeeCoin)
 		if err != nil {
 			log.Errorf("reFee %s - notifyfee error: %v", dc.acct.host, err)
@@ -3005,6 +3042,48 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 	return relocks
 }
 
+// generateDEXMaps creates the associated assets, market and epoch maps of
+// the dexs from the provided configuration.
+func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.Asset, map[string]*Market, map[string]uint64, error) {
+	assets := make(map[uint32]*dex.Asset, len(cfg.Assets))
+	for _, asset := range cfg.Assets {
+		assets[asset.ID] = convertAssetInfo(asset)
+	}
+	// Validate the markets so we don't have to check every time later.
+	for _, mkt := range cfg.Markets {
+		_, ok := assets[mkt.Base]
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("%s reported a market with base "+
+				"asset %d, but did not provide the asset info.", host, mkt.Base)
+		}
+		_, ok = assets[mkt.Quote]
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("%s reported a market with quote "+
+				"asset %d, but did not provide the asset info.", host, mkt.Quote)
+		}
+	}
+
+	marketMap := make(map[string]*Market)
+	epochMap := make(map[string]uint64)
+	for _, mkt := range cfg.Markets {
+		base, quote := assets[mkt.Base], assets[mkt.Quote]
+		market := &Market{
+			Name:            mkt.Name,
+			BaseID:          base.ID,
+			BaseSymbol:      base.Symbol,
+			QuoteID:         quote.ID,
+			QuoteSymbol:     quote.Symbol,
+			EpochLen:        mkt.EpochLen,
+			StartEpoch:      mkt.StartEpoch,
+			MarketBuyBuffer: mkt.MarketBuyBuffer,
+		}
+		marketMap[mkt.Name] = market
+		epochMap[mkt.Name] = 0
+	}
+
+	return assets, marketMap, epochMap, nil
+}
+
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
 // route.
@@ -3051,40 +3130,9 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 		return nil, fmt.Errorf("Error fetching DEX server config: %v", err)
 	}
 
-	assets := make(map[uint32]*dex.Asset, len(dexCfg.Assets))
-	for _, asset := range dexCfg.Assets {
-		assets[asset.ID] = convertAssetInfo(asset)
-	}
-	// Validate the markets so we don't have to check every time later.
-	for _, mkt := range dexCfg.Markets {
-		_, ok := assets[mkt.Base]
-		if !ok {
-			log.Errorf("%s reported a market with base asset %d, "+
-				"but did not provide the asset info.", host, mkt.Base)
-		}
-		_, ok = assets[mkt.Quote]
-		if !ok {
-			log.Errorf("%s reported a market with quote asset %d, "+
-				"but did not provide the asset info.", host, mkt.Quote)
-		}
-	}
-
-	marketMap := make(map[string]*Market)
-	epochMap := make(map[string]uint64)
-	for _, mkt := range dexCfg.Markets {
-		base, quote := assets[mkt.Base], assets[mkt.Quote]
-		market := &Market{
-			Name:            mkt.Name,
-			BaseID:          base.ID,
-			BaseSymbol:      base.Symbol,
-			QuoteID:         quote.ID,
-			QuoteSymbol:     quote.Symbol,
-			EpochLen:        mkt.EpochLen,
-			StartEpoch:      mkt.StartEpoch,
-			MarketBuyBuffer: mkt.MarketBuyBuffer,
-		}
-		marketMap[mkt.Name] = market
-		epochMap[mkt.Name] = 0
+	assets, marketMap, epochMap, err := generateDEXMaps(host, dexCfg)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create the dexConnection and listen for incoming messages.
@@ -3357,6 +3405,94 @@ func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	return nil
 }
 
+// handleTradeResumptionMsg is called when a trade resumption notification is received.
+func handleTradeResumptionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
+	var rs msgjson.TradeResumption
+	err := msg.Unmarshal(&rs)
+	if err != nil {
+		return fmt.Errorf("trade resumption unmarshal error: %v", err)
+	}
+
+	// Ensure the provided market exists for the dex.
+	dc.marketMtx.RLock()
+	mkt, ok := dc.marketMap[rs.MarketID]
+	dc.marketMtx.RUnlock()
+	if !ok {
+		return fmt.Errorf("no market found with ID %s", rs.MarketID)
+	}
+
+	// Ensure the market is suspended.
+	mkt.mtx.Lock()
+	defer mkt.mtx.Unlock()
+
+	if !mkt.suspended {
+		return fmt.Errorf("market %s for dex %s is not suspended",
+			rs.MarketID, dc.acct.host)
+	}
+
+	// Stop the current pending resume.
+	if mkt.pendingResume != nil {
+		if !mkt.pendingResume.Stop() {
+			// TODO: too late, timer already fired. The market has resumed.
+			return fmt.Errorf("unable to stop previously scheduled "+
+				"resume for market %s on dex %s", rs.MarketID, dc.acct.host)
+		}
+	}
+
+	// TODO: the server on sending the resumption message would know the exact
+	// resumption time, perhaps the message should send that instead of the
+	// EpochLen here?
+	resumeTime := rs.StartEpoch * rs.EpochLen
+
+	// Set the new scheduled resume.
+	duration := time.Until(encode.UnixTimeMilli(int64(resumeTime)))
+	mkt.pendingSuspend = time.AfterFunc(duration, func() {
+		mkt.mtx.Lock()
+		mkt.pendingSuspend = nil
+		mkt.mtx.Unlock()
+
+		// Update the market as resumed.
+		err := dc.resume(rs.MarketID)
+		if err != nil {
+			log.Error(err)
+			return
+		}
+
+		// Fetch the updated DEX configuration.
+		cfg := new(msgjson.ConfigResult)
+		err = sendRequest(dc.WsConn, msgjson.ConfigRoute, nil, cfg, DefaultResponseTimeout)
+		if err != nil {
+			dc.connMaster.Disconnect()
+			log.Errorf("unable to fetch DEX server config: %v", err)
+			return
+		}
+
+		assets, markets, epochs, err := generateDEXMaps(dc.acct.host, cfg)
+		if err != nil {
+			log.Error(err)
+		}
+
+		// Update the dex connection wih the new config details.
+		dc.cfgMtx.Lock()
+		dc.cfg = cfg
+		dc.cfgMtx.Unlock()
+
+		dc.marketMtx.Lock()
+		dc.marketMap = markets
+		dc.marketMtx.Unlock()
+
+		dc.epochMtx.Lock()
+		dc.epoch = epochs
+		dc.epochMtx.Unlock()
+
+		dc.assetsMtx.Lock()
+		dc.assets = assets
+		dc.assetsMtx.Unlock()
+	})
+
+	return nil
+}
+
 // handlePenaltyMsg is called when a Penalty notification is received.
 //
 // TODO: Consider other steps needed to take immediately after being banned.
@@ -3401,6 +3537,7 @@ var noteHandlers = map[string]routeHandler{
 	msgjson.NotifyRoute:          handleNotifyMsg,
 	msgjson.PenaltyRoute:         handlePenaltyMsg,
 	msgjson.NoMatchRoute:         handleNoMatchRoute,
+	msgjson.ResumptionRoute:      handleTradeResumptionMsg,
 }
 
 // listen monitors the DEX websocket connection for server requests and
@@ -3408,7 +3545,8 @@ var noteHandlers = map[string]routeHandler{
 func (c *Core) listen(dc *dexConnection) {
 	defer c.wg.Done()
 	msgs := dc.MessageSource()
-	// Run a match check at the tick interval.
+	// Run a match check at the tick interval. NOTE: It's possible for the
+	// broadcast timeout to change when the DEX config is updated.
 	ticker := time.NewTicker(dc.tickInterval)
 	defer ticker.Stop()
 	lastTick := time.Now()
