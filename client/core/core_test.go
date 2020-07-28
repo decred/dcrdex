@@ -3757,8 +3757,26 @@ func TestSetWalletPassword(t *testing.T) {
 		t.Fatalf("wrong error for missing wallet: %v", err)
 	}
 
-	xyzWallet, _ := newTWallet(assetID)
+	xyzWallet, tXyzWallet := newTWallet(assetID)
 	tCore.wallets[assetID] = xyzWallet
+
+	// Connection error
+	xyzWallet.hookedUp = false
+	tXyzWallet.connectErr = tErr
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, connectionErr) {
+		t.Fatalf("wrong error for connection error: %v", err)
+	}
+	xyzWallet.hookedUp = true
+	tXyzWallet.connectErr = nil
+
+	// Unlock error
+	tXyzWallet.unlockErr = tErr
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, authErr) {
+		t.Fatalf("wrong error for auth error: %v", err)
+	}
+	tXyzWallet.unlockErr = nil
 
 	// SetWalletPassword db error
 	rig.db.setWalletPwErr = tErr

@@ -590,9 +590,9 @@ var helpMsgs = map[string]helpMsg{
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
      path (string): Optional. The path to a configuration file.
-	 settings (string): A JSON-encoded string->string mapping of additional
+     settings (string): A JSON-encoded string->string mapping of additional
        configuration settings. These settings take precedence over any settings
-       parsed from file`,
+       parsed from file. e.g. '{"account":"default"}'`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
 	},

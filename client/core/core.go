@@ -1160,6 +1160,28 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 		return newError(missingWalletErr, "wallet for %s (%d) is not known", unbip(assetID), assetID)
 	}
 
+	// Connect if necessary.
+	wasConnected := wallet.connected()
+	if !wasConnected {
+		err := wallet.Connect(c.ctx)
+		if err != nil {
+			return newError(connectionErr, "SetWalletPassword connection error: %v", err)
+		}
+	}
+
+	// Check that the new password works.
+	wasUnlocked := wallet.unlocked()
+	err = wallet.Unlock(string(newPW), aYear)
+	if err != nil {
+		return newError(authErr, "Error unlocking wallet. Is the new password correct?: %v", err)
+	}
+
+	if !wasConnected {
+		wallet.Disconnect()
+	} else if !wasUnlocked {
+		wallet.Lock()
+	}
+
 	// Encrypt the password.
 	encPW, err := crypter.Encrypt(newPW)
 	if err != nil {
