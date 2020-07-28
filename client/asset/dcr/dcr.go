@@ -43,7 +43,7 @@ const (
 	defaultFee = 20
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
-	splitTxBaggage = dexdcr.MsgTxOverhead + 1 + dexdcr.P2PKHInputSize + 2*(1+dexdcr.P2PKHOutputSize)
+	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
 )
 
 var (
@@ -126,16 +126,29 @@ type rpcClient interface {
 	Disconnected() bool
 }
 
-// outpointID creates a unique string for a transaction output.
-func outpointID(txHash *chainhash.Hash, vout uint32) string {
-	return txHash.String() + ":" + strconv.Itoa(int(vout))
+// outPoint is the hash and output index of a transaction output.
+type outPoint struct {
+	txHash chainhash.Hash
+	vout   uint32
+}
+
+// newOutPoint is the constructor for a new outPoint.
+func newOutPoint(txHash *chainhash.Hash, vout uint32) outPoint {
+	return outPoint{
+		txHash: *txHash,
+		vout:   vout,
+	}
+}
+
+// String is a human-readable string representation of the outPoint.
+func (pt *outPoint) String() string {
+	return pt.txHash.String() + ":" + strconv.Itoa(int(pt.vout))
 }
 
 // output is information about a transaction output. output satisfies the
 // asset.Coin interface.
 type output struct {
-	txHash chainhash.Hash
-	vout   uint32
+	pt     outPoint
 	value  uint64
 	redeem dex.Bytes
 	tree   int8
@@ -145,8 +158,10 @@ type output struct {
 // newOutput is the constructor for an output.
 func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64, tree int8, redeem dex.Bytes) *output {
 	return &output{
-		txHash: *txHash,
-		vout:   vout,
+		pt: outPoint{
+			txHash: *txHash,
+			vout:   vout,
+		},
 		value:  value,
 		redeem: redeem,
 		tree:   tree,
@@ -164,7 +179,7 @@ func (op *output) Value() uint64 {
 // and will return an error if the output has been spent. Part of the
 // asset.Coin interface.
 func (op *output) Confirmations() (uint32, error) {
-	txOut, err := op.node.GetTxOut(&op.txHash, op.vout, true)
+	txOut, err := op.node.GetTxOut(op.txHash(), op.vout(), true)
 	if err != nil {
 		return 0, fmt.Errorf("error finding unspent contract: %v", err)
 	}
@@ -177,18 +192,33 @@ func (op *output) Confirmations() (uint32, error) {
 // ID is the output's coin ID. Part of the asset.Coin interface. For DCR, the
 // coin ID is 36 bytes = 32 bytes tx hash + 4 bytes big-endian vout.
 func (op *output) ID() dex.Bytes {
-	return toCoinID(&op.txHash, op.vout)
+	return toCoinID(op.txHash(), op.vout())
 }
 
 // String is a string representation of the coin.
 func (op *output) String() string {
-	return outpointID(&op.txHash, op.vout)
+	return op.pt.String()
 }
 
 // Redeem is any known redeem script required to spend this output. Part of the
 // asset.Coin interface.
 func (op *output) Redeem() dex.Bytes {
 	return op.redeem
+}
+
+// txHash returns the pointer of the outPoint's txHash.
+func (op *output) txHash() *chainhash.Hash {
+	return &op.pt.txHash
+}
+
+// vout returns the outPoint's vout.
+func (op *output) vout() uint32 {
+	return op.pt.vout
+}
+
+// wireOutPoint creates and returns a new *wire.OutPoint for the output.
+func (op *output) wireOutPoint() *wire.OutPoint {
+	return wire.NewOutPoint(op.txHash(), op.vout(), op.tree)
 }
 
 // auditInfo is information about a swap contract on the blockchain, not
@@ -298,17 +328,11 @@ type ExchangeWallet struct {
 	fallbackFeeRate uint64
 	useSplitTx      bool
 
-	// In the future, the client may wish to specify minimum confirmations for
-	// utxos to fund orders, and allowing change outputs from DEX-related swap
-	// transaction may be part of this client policy.
-	changeMtx   sync.RWMutex
-	tradeChange map[string]time.Time // TODO: delete fully confirmed change
-
 	// Coins returned by Fund are cached for quick reference and for cleanup on
 	// shutdown.
 	fundingMtx   sync.RWMutex
-	fundingCoins map[string]*fundingCoin
-	splitFunds   map[string]asset.Coins
+	fundingCoins map[outPoint]*fundingCoin
+	splitFunds   map[outPoint][]*fundingCoin
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -354,10 +378,9 @@ func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logge
 	return &ExchangeWallet{
 		log:             logger,
 		acct:            cfg.Settings["account"],
-		tradeChange:     make(map[string]time.Time),
 		tipChange:       cfg.TipChange,
-		fundingCoins:    make(map[string]*fundingCoin),
-		splitFunds:      make(map[string]asset.Coins),
+		fundingCoins:    make(map[outPoint]*fundingCoin),
+		splitFunds:      make(map[outPoint][]*fundingCoin),
 		fallbackFeeRate: fallbackFeesPerByte,
 		useSplitTx:      dcrCfg.UseSplitTx,
 	}
@@ -651,13 +674,19 @@ func (dcr *ExchangeWallet) fund(confs uint32,
 // there is no error, and the input coins will be returned unmodified, but an
 // info message will be logged.
 //
-// A split transaction nets 1 extra transaction, 1 extra signed p2pkh-spending
-// input, and two additional p2pkh outputs. If the fees associated with this
-// extra baggage are more than the excess amount that would be locked if a split
-// transaction were not used, then the split transaction is pointless. This
-// might be common, for instance, if an order is canceled partially filled, and
-// then the remainder resubmitted. We would already have an output of just the
-// right size, and that would be recognized here.
+// A split transaction nets additional network bytes consisting of
+// - overhead from 1 transaction
+// - 1 extra signed p2pkh-spending input. The split tx has the fundingCoins as
+//   inputs now, but we'll add the input that spends the sized coin that will go
+//   into the first swap
+// - 2 additional p2pkh outputs for the split tx sized output and change
+//
+// If the fees associated with this extra baggage are more than the excess
+// amount that would be locked if a split transaction were not used, then the
+// split transaction is pointless. This might be common, for instance, if an
+// order is canceled partially filled, and then the remainder resubmitted. We
+// would already have an output of just the right size, and that would be
+// recognized here.
 func (dcr *ExchangeWallet) split(value uint64, coins asset.Coins, inputsSize uint64, fundingCoins []*fundingCoin, nfo *dex.Asset) (asset.Coins, error) {
 
 	// Calculate the extra fees associated with the additional inputs, outputs,
@@ -689,6 +718,10 @@ func (dcr *ExchangeWallet) split(value uint64, coins asset.Coins, inputsSize uin
 		return nil, fmt.Errorf("error sending split transaction: %v", err)
 	}
 
+	if net != reqFunds {
+		dcr.log.Errorf("split - total sent %d does not match expected %d", net, reqFunds)
+	}
+
 	op := newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular, nil)
 
 	// Lock the funding coin.
@@ -710,10 +743,10 @@ func (dcr *ExchangeWallet) split(value uint64, coins asset.Coins, inputsSize uin
 	// 	dcr.log.Errorf("error locking coins spent in split transaction %v", coins)
 	// }
 
-	dcr.logSplitFunds(op, append(coins, op))
+	dcr.logSplitFunds(op, fundingCoins)
 
 	dcr.log.Debugf("funding %d atom order with split output coin %v from original coins %v", value, op, coins)
-	dcr.log.Infof("sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash, value, reqFunds)
+	dcr.log.Infof("sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash(), value, reqFunds)
 
 	return asset.Coins{op}, nil
 
@@ -723,7 +756,7 @@ func (dcr *ExchangeWallet) split(value uint64, coins asset.Coins, inputsSize uin
 func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	wireOPs := make([]*wire.OutPoint, 0, len(fCoins))
 	for _, c := range fCoins {
-		wireOPs = append(wireOPs, wire.NewOutPoint(&c.op.txHash, c.op.vout, c.op.tree))
+		wireOPs = append(wireOPs, wire.NewOutPoint(c.op.txHash(), c.op.vout(), c.op.tree))
 	}
 	err := dcr.node.LockUnspent(false, wireOPs)
 	if err != nil {
@@ -732,7 +765,7 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	dcr.fundingMtx.Lock()
 	defer dcr.fundingMtx.Unlock()
 	for _, c := range fCoins {
-		dcr.fundingCoins[c.op.String()] = c
+		dcr.fundingCoins[c.op.pt] = c
 	}
 	return nil
 }
@@ -741,11 +774,11 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 // the coins can be unlocked when the swap is sent. The helps to deal with a
 // timing issue with dcrwallet where listunspent might still return outputs that were
 // just spent in a transaction broadcast with sendrawtransaction. Instead, we'll
-// lock them until the split output is spent.
-func (dcr *ExchangeWallet) logSplitFunds(op *output, coins asset.Coins) {
+// keep them locked until the split output is spent.
+func (dcr *ExchangeWallet) logSplitFunds(op *output, fCoins []*fundingCoin) {
 	dcr.fundingMtx.Lock()
 	defer dcr.fundingMtx.Unlock()
-	dcr.splitFunds[op.String()] = coins
+	dcr.splitFunds[op.pt] = fCoins
 }
 
 // ReturnCoins unlocks coins. This would be necessary in the case of a
@@ -764,18 +797,14 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 		if err != nil {
 			return fmt.Errorf("error converting coin: %v", err)
 		}
-		ops = append(ops, wire.NewOutPoint(&op.txHash, op.vout, op.tree))
-		delete(dcr.fundingCoins, outpointID(&op.txHash, op.vout))
-		splitFunds, found := dcr.splitFunds[unspent.String()]
+		ops = append(ops, wire.NewOutPoint(op.txHash(), op.vout(), op.tree))
+		delete(dcr.fundingCoins, op.pt)
+		splitFunds, found := dcr.splitFunds[op.pt]
 		if found {
 			for _, c := range splitFunds {
-				delete(dcr.splitFunds, c.String())
-				op, err := dcr.convertCoin(c)
-				if err != nil {
-					return fmt.Errorf("error converting split funds coin: %v", err)
-				}
-				ops = append(ops, wire.NewOutPoint(&op.txHash, op.vout, op.tree))
+				ops = append(ops, c.op.wireOutPoint())
 			}
+			delete(dcr.splitFunds, op.pt)
 		}
 	}
 	return dcr.node.LockUnspent(true, ops)
@@ -787,7 +816,7 @@ func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	// First check if we have the coins in cache.
 	coins := make(asset.Coins, 0, len(ids))
-	notFound := make(map[string]bool)
+	notFound := make(map[outPoint]bool)
 	dcr.fundingMtx.RLock()
 	for _, id := range ids {
 		txHash, vout, err := decodeCoinID(id)
@@ -795,13 +824,13 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			dcr.fundingMtx.RUnlock()
 			return nil, err
 		}
-		opID := outpointID(txHash, vout)
-		fundingCoin, found := dcr.fundingCoins[opID]
+		pt := newOutPoint(txHash, vout)
+		fundingCoin, found := dcr.fundingCoins[pt]
 		if found {
 			coins = append(coins, fundingCoin.op)
 			continue
 		}
-		notFound[opID] = true
+		notFound[pt] = true
 	}
 	dcr.fundingMtx.RUnlock()
 	if len(notFound) == 0 {
@@ -819,8 +848,8 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error decoding txid from rpc server %s: %v", txout.TxID, err)
 		}
-		opID := outpointID(txHash, txout.Vout)
-		if notFound[opID] {
+		pt := newOutPoint(txHash, txout.Vout)
+		if notFound[pt] {
 			redeemScript, err := hex.DecodeString(txout.RedeemScript)
 			if err != nil {
 				return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
@@ -828,11 +857,11 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			lockers = append(lockers, wire.NewOutPoint(txHash, txout.Vout, txout.Tree))
 			coin := newOutput(dcr.node, txHash, txout.Vout, toAtoms(txout.Amount), txout.Tree, redeemScript)
 			coins = append(coins, coin)
-			dcr.fundingCoins[opID] = &fundingCoin{
+			dcr.fundingCoins[pt] = &fundingCoin{
 				op:   coin,
 				addr: txout.Address,
 			}
-			delete(notFound, opID)
+			delete(notFound, pt)
 			if len(notFound) == 0 {
 				break
 			}
@@ -840,8 +869,8 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	}
 	if len(notFound) != 0 {
 		ids := make([]string, 0, len(notFound))
-		for opID := range notFound {
-			ids = append(ids, opID)
+		for pt := range notFound {
+			ids = append(ids, pt.String())
 		}
 		return nil, fmt.Errorf("coins not found: %s", strings.Join(ids, ", "))
 	}
@@ -977,7 +1006,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		}
 		addresses = append(addresses, receiver)
 		contracts = append(contracts, cinfo.output.redeem)
-		prevOut := wire.NewOutPoint(&cinfo.output.txHash, cinfo.output.vout, wire.TxTreeRegular)
+		prevOut := cinfo.output.wireOutPoint()
 		txIn := wire.NewTxIn(prevOut, int64(cinfo.output.value), []byte{})
 		// Sequence = 0xffffffff - 1 is special value that marks the transaction as
 		// irreplaceable and enables the use of lock time.
@@ -1038,8 +1067,6 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
 	}
 
-	// Log the change output.
-	dcr.addChange(txHash, 0)
 	return coinIDs, newOutput(dcr.node, txHash, 0, uint64(txOut.Value), wire.TxTreeRegular, nil), nil
 }
 
@@ -1047,7 +1074,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 // specified funding Coin. A slice of pubkeys required to spend the Coin and a
 // signature for each pubkey are returned.
 func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
-	output, err := dcr.convertCoin(coin)
+	op, err := dcr.convertCoin(coin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error converting coin: %v", err)
 	}
@@ -1055,14 +1082,14 @@ func (dcr *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 	// First check if we have the funding coin cached. If so, grab the address
 	// from there.
 	dcr.fundingMtx.RLock()
-	fCoin, found := dcr.fundingCoins[coin.String()]
+	fCoin, found := dcr.fundingCoins[op.pt]
 	dcr.fundingMtx.RUnlock()
 	var addr string
 	if found {
 		addr = fCoin.addr
 	} else {
 		// Check if we can get the address from gettxout.
-		txOut, err := dcr.node.GetTxOut(&output.txHash, output.vout, true)
+		txOut, err := dcr.node.GetTxOut(op.txHash(), op.vout(), true)
 		if err == nil && txOut != nil {
 			addrs := txOut.ScriptPubKey.Addresses
 			if len(addrs) != 1 {
@@ -1458,16 +1485,16 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (uint64, error) {
 	var totalIn uint64
 	for _, coin := range coins {
-		output, err := dcr.convertCoin(coin)
+		op, err := dcr.convertCoin(coin)
 		if err != nil {
 			return 0, err
 		}
-		if output.value == 0 {
-			return 0, fmt.Errorf("zero-valued output detected for %s:%d", output.txHash, output.vout)
+		if op.value == 0 {
+			return 0, fmt.Errorf("zero-valued output detected for %s:%d", op.txHash(), op.vout())
 		}
-		totalIn += output.value
-		prevOut := wire.NewOutPoint(&output.txHash, output.vout, output.tree)
-		txIn := wire.NewTxIn(prevOut, int64(output.value), []byte{})
+		totalIn += op.value
+		prevOut := op.wireOutPoint()
+		txIn := wire.NewTxIn(prevOut, int64(op.value), []byte{})
 		msgTx.AddTxIn(txIn)
 	}
 	return totalIn, nil
@@ -1538,42 +1565,25 @@ func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
 	var sum uint64
 	dcr.fundingMtx.Lock()
 	defer dcr.fundingMtx.Unlock()
-	for _, outPoint := range lockedOutpoints {
-		opID := outpointID(&outPoint.Hash, outPoint.Index)
-		utxo, found := dcr.fundingCoins[opID]
+	for _, wireOP := range lockedOutpoints {
+		pt := newOutPoint(&wireOP.Hash, wireOP.Index)
+		utxo, found := dcr.fundingCoins[pt]
 		if found {
 			sum += utxo.op.value
 			continue
 		}
-		txOut, err := dcr.node.GetTxOut(&outPoint.Hash, outPoint.Index, true)
+		txOut, err := dcr.node.GetTxOut(&wireOP.Hash, wireOP.Index, true)
 		if err != nil {
 			return 0, err
 		}
 		if txOut == nil {
 			// Must be spent now?
-			dcr.log.Debugf("ignoring output from listlockunspent that wasn't found with gettxout. %s", opID)
+			dcr.log.Debugf("ignoring output from listlockunspent that wasn't found with gettxout. %s", pt)
 			continue
 		}
 		sum += toAtoms(txOut.Value)
 	}
 	return sum, nil
-}
-
-// addChange adds the output to the list of DEX-trade change outputs. These
-// outputs are tracked because the client may wish to exempt change outputs from
-// funding coin confirmation requirements.
-func (dcr *ExchangeWallet) addChange(txHash *chainhash.Hash, vout uint32) {
-	dcr.changeMtx.Lock()
-	defer dcr.changeMtx.Unlock()
-	dcr.tradeChange[outpointID(txHash, vout)] = time.Now()
-}
-
-// isDEXChange checks whether the specified output is change from a DEX trade.
-func (dcr *ExchangeWallet) isDEXChange(txHash *chainhash.Hash, vout uint32) bool {
-	dcr.changeMtx.RLock()
-	defer dcr.changeMtx.RUnlock()
-	_, found := dcr.tradeChange[outpointID(txHash, vout)]
-	return found
 }
 
 // convertCoin converts the asset.Coin to an unspent output.
@@ -1704,7 +1714,6 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating change script for address '%s': %v", addr, err)
 	}
-	changeIdx := len(baseTx.TxOut)
 	changeOutput := wire.NewTxOut(int64(remaining), changeScript)
 
 	// The reservoir indicates the amount available to draw upon for fees.
@@ -1819,7 +1828,6 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 
 	var change *output
 	if changeAdded {
-		dcr.addChange(txHash, uint32(changeIdx))
 		change = newOutput(dcr.node, txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), wire.TxTreeRegular, nil)
 	}
 	return msgTx, change, nil

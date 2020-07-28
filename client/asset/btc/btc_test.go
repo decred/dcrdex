@@ -643,7 +643,7 @@ func TestFundingCoins(t *testing.T) {
 
 	ensureErr := func(tag string) {
 		// Clear the cache.
-		wallet.fundingCoins = make(map[string]*compositeUTXO)
+		wallet.fundingCoins = make(map[wire.OutPoint]*compositeUTXO)
 		_, err := wallet.FundingCoins(coinIDs)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
@@ -1048,9 +1048,9 @@ func TestSignMessage(t *testing.T) {
 	}
 	sig := signature.Serialize()
 
-	opID := outpointID(tTxID, vout)
+	pt := newOutPoint(tTxHash, vout)
 	utxo := &compositeUTXO{address: tP2PKHAddr}
-	wallet.fundingCoins[opID] = utxo
+	wallet.fundingCoins[pt] = utxo
 	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
 	node.signMsgFunc = func(params []json.RawMessage) (json.RawMessage, error) {
 		if len(params) != 2 {
@@ -1094,12 +1094,12 @@ func TestSignMessage(t *testing.T) {
 	}
 
 	// Unknown UTXO
-	delete(wallet.fundingCoins, opID)
+	delete(wallet.fundingCoins, pt)
 	_, _, err = wallet.SignMessage(coin, msg)
 	if err == nil {
 		t.Fatalf("no error for unknown utxo")
 	}
-	wallet.fundingCoins[opID] = utxo
+	wallet.fundingCoins[pt] = utxo
 
 	// dumpprivkey error
 	node.rawErr[methodPrivKeyForAddress] = tErr

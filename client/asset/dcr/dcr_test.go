@@ -120,7 +120,7 @@ type tRPCClient struct {
 	sendRawHash     *chainhash.Hash
 	sendRawErr      error
 	sentRawTx       *wire.MsgTx
-	txOutRes        map[string]*chainjson.GetTxOutResult
+	txOutRes        map[outPoint]*chainjson.GetTxOutResult
 	txOutErr        error
 	bestBlockHash   *chainhash.Hash
 	bestBlockHeight int64
@@ -156,7 +156,7 @@ type tRPCClient struct {
 
 func newTRPCClient() *tRPCClient {
 	return &tRPCClient{
-		txOutRes:      make(map[string]*chainjson.GetTxOutResult),
+		txOutRes:      make(map[outPoint]*chainjson.GetTxOutResult),
 		verboseBlocks: make(map[string]*chainjson.GetBlockVerboseResult),
 		mainchain:     make(map[int64]*chainhash.Hash),
 		bestHash:      chainhash.Hash{},
@@ -181,7 +181,7 @@ func (c *tRPCClient) SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*ch
 }
 
 func (c *tRPCClient) GetTxOut(txHash *chainhash.Hash, vout uint32, mempool bool) (*chainjson.GetTxOutResult, error) {
-	return c.txOutRes[outpointID(txHash, vout)], c.txOutErr
+	return c.txOutRes[newOutPoint(txHash, vout)], c.txOutErr
 }
 
 func (c *tRPCClient) GetBestBlock() (*chainhash.Hash, int64, error) {
@@ -346,7 +346,7 @@ func TestAvailableFund(t *testing.T) {
 			Hash: *tTxHash,
 		},
 	}
-	node.txOutRes[outpointID(tTxHash, 0)] = makeGetTxOutRes(1, 1, tP2PKHScript)
+	node.txOutRes[newOutPoint(tTxHash, 0)] = makeGetTxOutRes(1, 1, tP2PKHScript)
 
 	bal, err = wallet.Balance()
 	if err != nil {
@@ -536,7 +536,7 @@ func TestAvailableFund(t *testing.T) {
 	// Not enough funds, because littleUnspent is a different account.
 	littleUTXO.Account = "wrong account" // for consistency
 	node.unspent = []walletjson.ListUnspentResult{littleUTXO, lottaUTXO}
-	_, err = wallet.FundOrder(extraLottaOrder, tDCR)
+	_, err = wallet.FundOrder(extraLottaOrder, false, tDCR)
 	if err == nil {
 		t.Fatalf("no error for wrong account")
 	}
@@ -603,7 +603,7 @@ func TestReturnCoins(t *testing.T) {
 		t.Fatalf("no error for missing txout")
 	}
 
-	node.txOutRes[outpointID(tTxHash, 0)] = makeGetTxOutRes(1, 1, tP2PKHScript)
+	node.txOutRes[newOutPoint(tTxHash, 0)] = makeGetTxOutRes(1, 1, tP2PKHScript)
 	err = wallet.ReturnCoins(coins)
 	if err != nil {
 		t.Fatalf("error with custom coin type: %v", err)
@@ -640,7 +640,7 @@ func TestFundingCoins(t *testing.T) {
 
 	// Clear the RPC coins, but add a coin to the cache.
 	node.unspent = nil
-	opID := outpointID(tTxHash, vout)
+	opID := newOutPoint(tTxHash, vout)
 	wallet.fundingCoins[opID] = &fundingCoin{
 		op: newOutput(node, tTxHash, vout, 0, 0, nil),
 	}
@@ -1006,14 +1006,14 @@ func TestSignMessage(t *testing.T) {
 
 	node.privWIF = dcrutil.NewWIF(privKey, chainParams.PrivateKeyID, dcrec.STEcdsaSecp256k1)
 
-	var coin asset.Coin = newOutput(node, tTxHash, vout, 5e7, wire.TxTreeRegular, nil)
+	op := newOutput(node, tTxHash, vout, 5e7, wire.TxTreeRegular, nil)
 
-	wallet.fundingCoins[coin.String()] = &fundingCoin{
+	wallet.fundingCoins[op.pt] = &fundingCoin{
 		addr: tPKHAddr.String(),
 	}
 
 	check := func() {
-		pubkeys, sigs, err := wallet.SignMessage(coin, msg)
+		pubkeys, sigs, err := wallet.SignMessage(op, msg)
 		if err != nil {
 			t.Fatalf("SignMessage error: %v", err)
 		}
@@ -1032,15 +1032,15 @@ func TestSignMessage(t *testing.T) {
 	}
 
 	check()
-	delete(wallet.fundingCoins, coin.String())
+	delete(wallet.fundingCoins, op.pt)
 	txOut := makeGetTxOutRes(1, 5, nil)
 	txOut.ScriptPubKey.Addresses = []string{tPKHAddr.String()}
-	node.txOutRes[outpointID(tTxHash, vout)] = txOut
+	node.txOutRes[newOutPoint(tTxHash, vout)] = txOut
 	check()
 
 	// gettransaction error
 	node.txOutErr = tErr
-	_, _, err = wallet.SignMessage(coin, msg)
+	_, _, err = wallet.SignMessage(op, msg)
 	if err == nil {
 		t.Fatalf("no error for gettxout rpc error")
 	}
@@ -1048,7 +1048,7 @@ func TestSignMessage(t *testing.T) {
 
 	// dumpprivkey error
 	node.privWIFErr = tErr
-	_, _, err = wallet.SignMessage(coin, msg)
+	_, _, err = wallet.SignMessage(op, msg)
 	if err == nil {
 		t.Fatalf("no error for dumpprivkey rpc error")
 	}
@@ -1076,7 +1076,7 @@ func TestAuditContract(t *testing.T) {
 	addr, _ := dcrutil.NewAddressScriptHash(contract, chainParams)
 	pkScript, _ := txscript.PayToAddrScript(addr)
 
-	node.txOutRes[outpointID(tTxHash, vout)] = makeGetTxOutRes(1, 5, pkScript)
+	node.txOutRes[newOutPoint(tTxHash, vout)] = makeGetTxOutRes(1, 5, pkScript)
 
 	audit, err := wallet.AuditContract(toCoinID(tTxHash, vout), contract)
 	if err != nil {
@@ -1249,7 +1249,7 @@ func TestRefund(t *testing.T) {
 	}
 
 	bigTxOut := makeGetTxOutRes(2, 5, nil)
-	bigOutID := outpointID(tTxHash, 0)
+	bigOutID := newOutPoint(tTxHash, 0)
 	node.txOutRes[bigOutID] = bigTxOut
 	node.changeAddr = tPKHAddr
 	node.newAddr = tPKHAddr
