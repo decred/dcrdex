@@ -318,6 +318,18 @@ func TestHandleNewWallet(t *testing.T) {
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
 			t.Fatalf("%s: %v", test.name, err)
 		}
+		if test.wantErrCode == -1 {
+			if tc.newWalletForm.AssetID != 42 {
+				t.Fatalf("assetID not parsed correctly")
+			}
+			cfg := tc.newWalletForm.Config
+			if cfg["username"] != "tacotime" {
+				t.Fatalf("file config not parsed correctly")
+			}
+			if cfg["field"] != "value" {
+				t.Fatalf("custom config not parsed correctly")
+			}
+		}
 	}
 }
 

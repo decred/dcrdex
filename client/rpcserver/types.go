@@ -203,6 +203,12 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		if err != nil {
 			return nil, fmt.Errorf("JSON parse error: %v", err)
 		}
+		for key, val := range cfg {
+			if fileVal, found := req.config[key]; found {
+				log.Infof("Overriding config file setting %s=%s with %s", key, fileVal, val)
+			}
+			req.config[key] = val
+		}
 	}
 	return req, nil
 }
