@@ -231,11 +231,12 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	cfg := &BTCCloneCFG{
-		WalletCFG:   walletCfg,
-		Symbol:      "btc",
-		Logger:      tLogger,
-		ChainParams: &chaincfg.MainNetParams,
-		WalletInfo:  WalletInfo,
+		WalletCFG:          walletCfg,
+		Symbol:             "btc",
+		Logger:             tLogger,
+		ChainParams:        &chaincfg.MainNetParams,
+		WalletInfo:         WalletInfo,
+		DefaultFallbackFee: defaultFee,
 	}
 	wallet := newWallet(cfg, &dexbtc.Config{}, defaultFee, client)
 	go wallet.run(walletCtx)

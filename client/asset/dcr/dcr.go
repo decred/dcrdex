@@ -316,7 +316,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	feesPerByte := toAtoms(walletCfg.FallbackFeeRate * 1000)
+	feesPerByte := toAtoms(walletCfg.FallbackFeeRate / 1000)
 	if feesPerByte == 0 {
 		feesPerByte = defaultFee
 	}

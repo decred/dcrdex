@@ -5,7 +5,6 @@ package ltc
 
 import (
 	"fmt"
-	"strconv"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/asset/btc"
@@ -123,18 +122,15 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		Simnet:  "19443",
 	}
 	cloneCFG := &btc.BTCCloneCFG{
-		WalletCFG:         cfg,
-		MinNetworkVersion: minNetworkVersion,
-		WalletInfo:        WalletInfo,
-		Symbol:            "ltc",
-		Logger:            logger,
-		Network:           network,
-		ChainParams:       params,
-		Ports:             ports,
-	}
-
-	if cfg.Settings[fallbackFeeKey] == "" {
-		cfg.Settings[fallbackFeeKey] = strconv.FormatUint(defaultFee*1000, 10)
+		WalletCFG:          cfg,
+		MinNetworkVersion:  minNetworkVersion,
+		WalletInfo:         WalletInfo,
+		Symbol:             "ltc",
+		Logger:             logger,
+		Network:            network,
+		ChainParams:        params,
+		Ports:              ports,
+		DefaultFallbackFee: defaultFee,
 	}
 
 	return btc.BTCCloneWallet(cloneCFG)

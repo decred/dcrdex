@@ -117,14 +117,15 @@ type rpcClient interface {
 
 // BTCCloneCFG holds clone specific parameters.
 type BTCCloneCFG struct {
-	WalletCFG         *asset.WalletConfig
-	MinNetworkVersion uint64
-	WalletInfo        *asset.WalletInfo
-	Symbol            string
-	Logger            dex.Logger
-	Network           dex.Network
-	ChainParams       *chaincfg.Params
-	Ports             dexbtc.NetPorts
+	WalletCFG          *asset.WalletConfig
+	MinNetworkVersion  uint64
+	WalletInfo         *asset.WalletInfo
+	Symbol             string
+	Logger             dex.Logger
+	Network            dex.Network
+	ChainParams        *chaincfg.Params
+	Ports              dexbtc.NetPorts
+	DefaultFallbackFee uint64 // sats/byte
 }
 
 // outpointID creates a unique string for a transaction output.
@@ -324,14 +325,15 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, fmt.Errorf("unknown network ID %v", network)
 	}
 	cloneCFG := &BTCCloneCFG{
-		WalletCFG:         cfg,
-		MinNetworkVersion: minNetworkVersion,
-		WalletInfo:        WalletInfo,
-		Symbol:            "btc",
-		Logger:            logger,
-		Network:           network,
-		ChainParams:       params,
-		Ports:             dexbtc.RPCPorts,
+		WalletCFG:          cfg,
+		MinNetworkVersion:  minNetworkVersion,
+		WalletInfo:         WalletInfo,
+		Symbol:             "btc",
+		Logger:             logger,
+		Network:            network,
+		ChainParams:        params,
+		Ports:              dexbtc.RPCPorts,
+		DefaultFallbackFee: defaultFee,
 	}
 
 	return BTCCloneWallet(cloneCFG)
@@ -363,9 +365,9 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
 	}
 
-	feesPerByte := toSatoshi(btcCfg.FallbackFeeRate * 1000)
+	feesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
 	if feesPerByte == 0 {
-		feesPerByte = defaultFee
+		feesPerByte = cfg.DefaultFallbackFee
 	}
 
 	btc := newWallet(cfg, btcCfg, feesPerByte, client)
