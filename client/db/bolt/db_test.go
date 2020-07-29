@@ -576,12 +576,21 @@ func TestOrderChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error setting change coin: %v", err)
 	}
+	// Add a linked order ID.
+	linkedID := ordertest.RandomOrderID()
+	err = boltdb.LinkOrder(ord.ID(), linkedID)
+	if err != nil {
+		t.Fatalf("error setting linked order: %v", err)
+	}
 	mord, err = boltdb.Order(ord.ID())
 	if err != nil {
 		t.Fatalf("failed to load order: %v", err)
 	}
 	if !bytes.Equal(someChange, mord.MetaData.ChangeCoin) {
 		t.Fatalf("failed to set change coin, got %#v, want %#v", mord.MetaData.ChangeCoin, someChange)
+	}
+	if mord.MetaData.LinkedOrder != linkedID {
+		t.Fatalf("wrong linked ID. expected %s, got %s", linkedID, mord.MetaData.LinkedOrder)
 	}
 
 	// random id should be an error

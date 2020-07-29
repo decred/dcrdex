@@ -199,13 +199,19 @@ func (t *trackedTrade) token() string {
 }
 
 // cancelTrade sets the cancellation data with the order and its preimage.
-func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage) {
+func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage) error {
 	t.mtx.Lock()
+	defer t.mtx.Unlock()
 	t.cancel = &trackedCancel{
 		CancelOrder: *co,
 		preImg:      preImg,
 	}
-	t.mtx.Unlock()
+	err := t.db.LinkOrder(t.ID(), co.ID())
+	if err != nil {
+		return fmt.Errorf("error linking cancel order ID %s for order %s", co.ID(), t.ID())
+	}
+	t.metaData.LinkedOrder = co.ID()
+	return nil
 }
 
 // nomatch sets the appropriate order status and returns funding coins.

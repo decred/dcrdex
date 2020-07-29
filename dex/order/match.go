@@ -50,7 +50,7 @@ func (mid *MatchID) Scan(src interface{}) error {
 	return fmt.Errorf("cannot convert %T to OrderID", src)
 }
 
-var zeroID = MatchID{}
+var zeroMatchID = MatchID{}
 
 // MatchStatus represents the current negotiation step for a match.
 type MatchStatus uint8
@@ -188,7 +188,7 @@ func newMatch(taker Order, maker *LimitOrder, qty, rate uint64, epochID EpochID)
 // ID computes the match ID and stores it for future calls.
 // BLAKE256([maker order id] + [taker order id] + [match qty] + [match rate])
 func (match *Match) ID() MatchID {
-	if match.cachedHash != zeroID {
+	if match.cachedHash != zeroMatchID {
 		return match.cachedHash
 	}
 	b := make([]byte, 0, 2*OrderIDSize+8+8)

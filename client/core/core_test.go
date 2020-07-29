@@ -306,6 +306,10 @@ func (tdb *TDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) e
 	return nil
 }
 
+func (tdb *TDB) LinkOrder(oid, linkedID order.OrderID) error {
+	return nil
+}
+
 func (tdb *TDB) UpdateMatch(m *db.MetaMatch) error {
 	return nil
 }

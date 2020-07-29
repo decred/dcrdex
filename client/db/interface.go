@@ -61,6 +61,9 @@ type DB interface {
 	SetChangeCoin(order.OrderID, order.CoinID) error
 	// UpdateOrderStatus sets the order status for an order.
 	UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error
+	// LinkOrder sets the LinkedOrder field of the specified order's
+	// OrderMetaData.
+	LinkOrder(oid, linkedID order.OrderID) error
 	// UpdateMatch updates the match information in the database. Any existing
 	// entry for the match will be overwritten without indication.
 	UpdateMatch(m *MetaMatch) error

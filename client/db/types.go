@@ -180,6 +180,9 @@ type OrderMetaData struct {
 	// from the initiation transaction is used to fund the next match. The
 	// change from that matches ini tx funds the next match, etc.
 	ChangeCoin order.CoinID
+	// LinkedOrder is used to specify the cancellation order for a trade, or
+	// vice-versa.
+	LinkedOrder order.OrderID
 }
 
 // MetaMatch is the match and its metadata.

@@ -54,6 +54,7 @@ var (
 	walletsBucket  = []byte("wallets")
 	notesBucket    = []byte("notes")
 	versionKey     = []byte("version")
+	linkedKey      = []byte("linked")
 	feeProofKey    = []byte("feecoin")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
@@ -344,6 +345,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
 			put(changeKey, md.ChangeCoin).
+			put(linkedKey, md.LinkedOrder[:]).
 			put(orderKey, order.EncodeOrder(ord)).
 			err()
 	})
@@ -495,12 +497,16 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		return nil, fmt.Errorf("error decoding order proof for %x: %v", oid, err)
 	}
 
+	var linkedID order.OrderID
+	copy(linkedID[:], getCopy(oBkt, linkedKey))
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
-			Proof:      *proof,
-			Status:     order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
-			Host:       string(getCopy(oBkt, dexKey)),
-			ChangeCoin: getCopy(oBkt, changeKey),
+			Proof:       *proof,
+			Status:      order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
+			Host:        string(getCopy(oBkt, dexKey)),
+			ChangeCoin:  getCopy(oBkt, changeKey),
+			LinkedOrder: linkedID,
 		},
 		Order: ord,
 	}, nil
@@ -526,6 +532,17 @@ func (db *BoltDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus)
 			return fmt.Errorf("UpdateOrderStatus - order %s not found", oid)
 		}
 		return oBkt.Put(statusKey, uint16Bytes(uint16(status)))
+	})
+}
+
+// LinkOrder sets the linked order.
+func (db *BoltDB) LinkOrder(oid, linkedID order.OrderID) error {
+	return db.ordersUpdate(func(master *bbolt.Bucket) error {
+		oBkt := master.Bucket(oid[:])
+		if oBkt == nil {
+			return fmt.Errorf("LinkOrder - order %s not found", oid)
+		}
+		return oBkt.Put(linkedKey, linkedID[:])
 	})
 }
 
