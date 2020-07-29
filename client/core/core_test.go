@@ -232,21 +232,23 @@ func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 }
 
 type TDB struct {
-	updateWalletErr        error
-	acct                   *db.AccountInfo
-	acctErr                error
-	getErr                 error
-	storeErr               error
-	encKeyErr              error
-	accts                  []*db.AccountInfo
-	updateOrderErr         error
-	activeDEXOrders        []*db.MetaOrder
-	matchesForOID          []*db.MetaMatch
-	matchesForOIDErr       error
-	activeMatchesForDEX    []*db.MetaMatch
-	activeMatchesForDEXErr error
-	lastStatusID           order.OrderID
-	lastStatus             order.OrderStatus
+	updateWalletErr    error
+	acct               *db.AccountInfo
+	acctErr            error
+	getErr             error
+	storeErr           error
+	encKeyErr          error
+	accts              []*db.AccountInfo
+	updateOrderErr     error
+	activeDEXOrders    []*db.MetaOrder
+	matchesForOID      []*db.MetaMatch
+	matchesForOIDErr   error
+	activeMatchOIDs    []order.OrderID
+	activeMatchOIDSErr error
+	lastStatusID       order.OrderID
+	lastStatus         order.OrderStatus
+	orderOrders        map[order.OrderID]*db.MetaOrder
+	orderErr           error
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -283,8 +285,11 @@ func (tdb *TDB) AccountOrders(dex string, n int, since uint64) ([]*db.MetaOrder,
 	return nil, nil
 }
 
-func (tdb *TDB) Order(order.OrderID) (*db.MetaOrder, error) {
-	return nil, nil
+func (tdb *TDB) Order(oid order.OrderID) (*db.MetaOrder, error) {
+	if tdb.orderErr != nil {
+		return nil, tdb.orderErr
+	}
+	return tdb.orderOrders[oid], nil
 }
 
 func (tdb *TDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*db.MetaOrder, error) {
@@ -301,6 +306,10 @@ func (tdb *TDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) e
 	return nil
 }
 
+func (tdb *TDB) LinkOrder(oid, linkedID order.OrderID) error {
+	return nil
+}
+
 func (tdb *TDB) UpdateMatch(m *db.MetaMatch) error {
 	return nil
 }
@@ -313,8 +322,8 @@ func (tdb *TDB) MatchesForOrder(oid order.OrderID) ([]*db.MetaMatch, error) {
 	return tdb.matchesForOID, tdb.matchesForOIDErr
 }
 
-func (tdb *TDB) ActiveDEXMatches(dex string) ([]*db.MetaMatch, error) {
-	return tdb.activeMatchesForDEX, tdb.activeMatchesForDEXErr
+func (tdb *TDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error) {
+	return tdb.activeMatchOIDs, tdb.activeMatchOIDSErr
 }
 
 func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
@@ -631,7 +640,9 @@ type testRig struct {
 }
 
 func newTestRig() *testRig {
-	db := new(TDB)
+	db := &TDB{
+		orderOrders: make(map[order.OrderID]*db.MetaOrder),
+	}
 
 	// Set the global waiter expiration, and start the waiter.
 	txWaitExpiration = time.Millisecond * 10
@@ -2698,18 +2709,19 @@ func TestResolveActiveTrades(t *testing.T) {
 	changeCoinID := encode.RandomBytes(32)
 	changeCoin := &tCoin{id: changeCoinID}
 
-	// Need to return an order from db.ActiveDEXOrders
-	rig.db.activeDEXOrders = []*db.MetaOrder{
-		{
-			MetaData: &db.OrderMetaData{
-				Status:     order.OrderStatusBooked,
-				Host:       tDexHost,
-				Proof:      db.OrderProof{},
-				ChangeCoin: changeCoinID,
-			},
-			Order: lo,
+	dbOrder := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status:     order.OrderStatusBooked,
+			Host:       tDexHost,
+			Proof:      db.OrderProof{},
+			ChangeCoin: changeCoinID,
 		},
+		Order: lo,
 	}
+
+	// Need to return an order from db.ActiveDEXOrders
+	rig.db.activeDEXOrders = []*db.MetaOrder{dbOrder}
+	rig.db.orderOrders[oid] = dbOrder
 
 	mid := ordertest.RandomMatchID()
 	addr := ordertest.RandomAddress()
@@ -2738,7 +2750,8 @@ func TestResolveActiveTrades(t *testing.T) {
 			Side:     order.Taker,
 		},
 	}
-	rig.db.activeMatchesForDEX = []*db.MetaMatch{match}
+	rig.db.activeMatchOIDs = []order.OrderID{oid}
+	rig.db.matchesForOID = []*db.MetaMatch{match}
 	tDcrWallet.fundingCoins = asset.Coins{changeCoin}
 	_, auditInfo := tMsgAudit(oid, mid, addr, qty, nil)
 	tBtcWallet.auditInfo = auditInfo
@@ -2819,9 +2832,9 @@ func TestResolveActiveTrades(t *testing.T) {
 	tDcrWallet.fundingCoinErr = nil
 
 	// No matches
-	rig.db.activeMatchesForDEXErr = tErr
+	rig.db.activeMatchOIDSErr = tErr
 	ensureFail("matches error")
-	rig.db.activeMatchesForDEXErr = nil
+	rig.db.activeMatchOIDSErr = nil
 
 	// Success again
 	ensureGood("final")

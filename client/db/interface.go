@@ -61,15 +61,19 @@ type DB interface {
 	SetChangeCoin(order.OrderID, order.CoinID) error
 	// UpdateOrderStatus sets the order status for an order.
 	UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) error
+	// LinkOrder sets the LinkedOrder field of the specified order's
+	// OrderMetaData.
+	LinkOrder(oid, linkedID order.OrderID) error
 	// UpdateMatch updates the match information in the database. Any existing
 	// entry for the match will be overwritten without indication.
 	UpdateMatch(m *MetaMatch) error
 	// ActiveMatches retrieves the matches that are in an active state, which is
 	// any state except order.MatchComplete.
 	ActiveMatches() ([]*MetaMatch, error)
-	// ActiveDEXMatches retrieves the matches that are in an active state for a
-	// specified DEX, which is any state except order.MatchComplete.
-	ActiveDEXMatches(dex string) ([]*MetaMatch, error)
+	// DEXOrdersWithActiveMatches retrieves order IDs for any order that has
+	// active matches, regardless of whether the order itself is in an active
+	// state.
+	DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error)
 	// MatchesForOrder gets the matches for the order ID.
 	MatchesForOrder(oid order.OrderID) ([]*MetaMatch, error)
 	// Update wallets adds a wallet to the database, or updates the wallet

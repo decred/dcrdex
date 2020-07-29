@@ -279,7 +279,14 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 		return
 	}
 
-	// Store the order.
+	// Store the cancel order with the tracker.
+	err = tracker.cancelTrade(co, preImg)
+	if err != nil {
+		err = fmt.Errorf("error storing cancel order info %s: %w", co.ID(), err)
+		return
+	}
+
+	// Store the cancel order.
 	err = tracker.db.UpdateOrder(&db.MetaOrder{
 		MetaData: &db.OrderMetaData{
 			Status: order.OrderStatusEpoch,
@@ -288,6 +295,7 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 				DEXSig:   result.Sig,
 				Preimage: preImg[:],
 			},
+			LinkedOrder: oid,
 		},
 		Order: co,
 	})
@@ -296,8 +304,6 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 		return
 	}
 
-	// Store the cancel order with the tracker.
-	tracker.cancelTrade(co, preImg)
 	return
 }
 
@@ -2086,6 +2092,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		return nil, fmt.Errorf("database error when fetching orders for %s: %x", dc.acct.host, err)
 	}
 	log.Infof("Loaded %d active orders.", len(dbOrders))
+
 	// It's possible for an order to not be active, but still have active matches.
 	// Grab the orders for those too.
 	haveOrder := func(oid order.OrderID) bool {
@@ -2097,64 +2104,84 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		return false
 	}
 
-	activeDBMatches, err := c.db.ActiveDEXMatches(dc.acct.host)
+	activeMatchOrders, err := c.db.DEXOrdersWithActiveMatches(dc.acct.host)
 	if err != nil {
-		return nil, fmt.Errorf("database error fetching active matches for %s: %v", dc.acct.host, err)
+		return nil, fmt.Errorf("database error fetching active match orders for %s: %v", dc.acct.host, err)
 	}
-	log.Infof("Loaded %d active matches.", len(activeDBMatches))
-	for _, dbMatch := range activeDBMatches {
-		oid := dbMatch.Match.OrderID
-		if !haveOrder(oid) {
-			dbOrder, err := c.db.Order(oid)
-			if err != nil {
-				return nil, fmt.Errorf("database error fetching order %s for active match %s at %s: %v", oid, dbMatch.Match.MatchID, dc.acct.host, err)
-			}
-			dbOrders = append(dbOrders, dbOrder)
+	log.Infof("Loaded %d active match orders", len(activeMatchOrders))
+	for _, oid := range activeMatchOrders {
+		if haveOrder(oid) {
+			continue
 		}
+		dbOrder, err := c.db.Order(oid)
+		if err != nil {
+			return nil, fmt.Errorf("database error fetching order %s for %s: %v", oid, dc.acct.host, err)
+		}
+		dbOrders = append(dbOrders, dbOrder)
 	}
 
-	cancels := make(map[order.OrderID]*order.CancelOrder)
-	cancelPreimages := make(map[order.OrderID]order.Preimage)
 	trackers := make(map[order.OrderID]*trackedTrade, len(dbOrders))
 	for _, dbOrder := range dbOrders {
-		ord, md := dbOrder.Order, dbOrder.MetaData
+		ord := dbOrder.Order
+		oid := ord.ID()
+		// Ignore cancel orders here. They'll be retrieved below.
+		if ord.Type() == order.CancelOrderType {
+			continue
+		}
 		mktID := marketName(ord.Base(), ord.Quote())
 		mkt := dc.market(mktID)
 		if mkt == nil {
-			log.Errorf("active %s order retrieved for unknown market %s", ord.ID(), mktID)
+			log.Errorf("active %s order retrieved for unknown market %s", oid, mktID)
 			continue
 		}
 		var preImg order.Preimage
-		copy(preImg[:], md.Proof.Preimage)
-		if co, ok := ord.(*order.CancelOrder); ok {
-			cancels[co.TargetOrderID] = co
-			cancelPreimages[co.TargetOrderID] = preImg
-		} else {
-			var preImg order.Preimage
-			copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
-			trackers[dbOrder.Order.ID()] = newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker,
-				c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify)
+		copy(preImg[:], dbOrder.MetaData.Proof.Preimage)
+		tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, c.lockTimeTaker,
+			c.lockTimeMaker, c.db, c.latencyQ, nil, nil, c.notify)
+		trackers[dbOrder.Order.ID()] = tracker
+
+		// Get matches.
+		dbMatches, err := c.db.MatchesForOrder(oid)
+		if err != nil {
+			return nil, fmt.Errorf("error loading matches for order %s: %v", oid, err)
 		}
-	}
-	for oid := range cancels {
-		tracker, found := trackers[oid]
-		if !found {
-			log.Errorf("unmatched active cancel order: %s", oid)
+		for _, dbMatch := range dbMatches {
+			tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
+				id:        dbMatch.Match.MatchID,
+				prefix:    tracker.Prefix(),
+				trade:     tracker.Trade(),
+				MetaMatch: *dbMatch,
+			}
+		}
+
+		// Load any linked cancel order.
+		cancelID := tracker.metaData.LinkedOrder
+		if cancelID.IsZero() {
 			continue
 		}
-		tracker.cancelTrade(cancels[oid], cancelPreimages[oid])
-	}
-
-	for _, dbMatch := range activeDBMatches {
-		// Impossible for the tracker to not be here, since it would have errored
-		// in the previous activeDBMatches loop.
-		tracker := trackers[dbMatch.Match.OrderID]
-		tracker.matches[dbMatch.Match.MatchID] = &matchTracker{
-			id:        dbMatch.Match.MatchID,
-			prefix:    tracker.Prefix(),
-			trade:     tracker.Trade(),
-			MetaMatch: *dbMatch,
+		metaCancel, err := c.db.Order(cancelID)
+		if err != nil {
+			log.Errorf("cancel order %s not found for trade %s", cancelID, oid)
+			continue
 		}
+		co, ok := metaCancel.Order.(*order.CancelOrder)
+		if !ok {
+			log.Errorf("linked order %s is not a cancel order", cancelID)
+			continue
+		}
+		var pimg order.Preimage
+		copy(pimg[:], metaCancel.MetaData.Proof.Preimage)
+		err = tracker.cancelTrade(co, pimg)
+		if err != nil {
+			log.Errorf("error setting cancel order info %s: %w", co.ID(), err)
+		}
+		// TODO: The trackedTrade.cancel.matches is not being repopulated on
+		// startup. The consequences are that the Filled value will not include
+		// the canceled portion, and the *CoreOrder generated by
+		// coreOrderInternal will be Cancelling, but not Canceled. Instead of
+		// using the matchTracker.matches msgjson.Match fields, we should be
+		// storing the match data in the OrderMetaData so that it can be
+		// tracked across sessions.
 	}
 
 	return trackers, nil

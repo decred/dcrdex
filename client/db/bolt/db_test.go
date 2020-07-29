@@ -576,12 +576,21 @@ func TestOrderChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error setting change coin: %v", err)
 	}
+	// Add a linked order ID.
+	linkedID := ordertest.RandomOrderID()
+	err = boltdb.LinkOrder(ord.ID(), linkedID)
+	if err != nil {
+		t.Fatalf("error setting linked order: %v", err)
+	}
 	mord, err = boltdb.Order(ord.ID())
 	if err != nil {
 		t.Fatalf("failed to load order: %v", err)
 	}
 	if !bytes.Equal(someChange, mord.MetaData.ChangeCoin) {
 		t.Fatalf("failed to set change coin, got %#v, want %#v", mord.MetaData.ChangeCoin, someChange)
+	}
+	if mord.MetaData.LinkedOrder != linkedID {
+		t.Fatalf("wrong linked ID. expected %s, got %s", linkedID, mord.MetaData.LinkedOrder)
 	}
 
 	// random id should be an error
@@ -639,12 +648,27 @@ func TestMatches(t *testing.T) {
 	if len(activeMatches) != numActive {
 		t.Fatalf("expected %d active matches, got %d", numActive, len(activeMatches))
 	}
+	activeOrders := make(map[order.OrderID]bool)
 	for _, m1 := range activeMatches {
+		activeOrders[m1.Match.OrderID] = true
 		m2 := matchIndex[m1.Match.MatchID]
 		ordertest.MustCompareUserMatch(t, m1.Match, m2.Match)
 		dbtest.MustCompareMatchProof(t, &m1.MetaData.Proof, &m2.MetaData.Proof)
 	}
 	t.Logf("%d milliseconds to retrieve and compare %d active MetaMatch", time.Since(tStart)/time.Millisecond, numActive)
+
+	activeMatchOrders, err := boltdb.DEXOrdersWithActiveMatches(acct.Host)
+	if err != nil {
+		t.Fatalf("error retrieving active match orders: %v", err)
+	}
+	if len(activeMatchOrders) != len(activeOrders) {
+		t.Fatalf("wrong number of DEXOrdersWithActiveMatches returned. expected %d, got %d", len(activeOrders), len(activeMatchOrders))
+	}
+	for _, oid := range activeMatchOrders {
+		if !activeOrders[oid] {
+			t.Fatalf("active match order ID mismatch")
+		}
+	}
 
 	m := &db.MetaMatch{
 		MetaData: &db.MatchMetaData{

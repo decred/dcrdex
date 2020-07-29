@@ -54,6 +54,7 @@ var (
 	walletsBucket  = []byte("wallets")
 	notesBucket    = []byte("notes")
 	versionKey     = []byte("version")
+	linkedKey      = []byte("linked")
 	feeProofKey    = []byte("feecoin")
 	statusKey      = []byte("status")
 	baseKey        = []byte("base")
@@ -336,6 +337,11 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 		if err != nil {
 			return fmt.Errorf("order bucket error: %v", err)
 		}
+		var linkedB []byte
+		if !md.LinkedOrder.IsZero() {
+			linkedB = md.LinkedOrder[:]
+		}
+
 		return newBucketPutter(oBkt).
 			put(baseKey, uint32Bytes(ord.Base())).
 			put(quoteKey, uint32Bytes(ord.Quote())).
@@ -344,6 +350,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
 			put(changeKey, md.ChangeCoin).
+			put(linkedKey, linkedB).
 			put(orderKey, order.EncodeOrder(ord)).
 			err()
 	})
@@ -495,12 +502,16 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 		return nil, fmt.Errorf("error decoding order proof for %x: %v", oid, err)
 	}
 
+	var linkedID order.OrderID
+	copy(linkedID[:], oBkt.Get(linkedKey))
+
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
-			Proof:      *proof,
-			Status:     order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
-			Host:       string(getCopy(oBkt, dexKey)),
-			ChangeCoin: getCopy(oBkt, changeKey),
+			Proof:       *proof,
+			Status:      order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
+			Host:        string(getCopy(oBkt, dexKey)),
+			ChangeCoin:  getCopy(oBkt, changeKey),
+			LinkedOrder: linkedID,
 		},
 		Order: ord,
 	}, nil
@@ -526,6 +537,17 @@ func (db *BoltDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus)
 			return fmt.Errorf("UpdateOrderStatus - order %s not found", oid)
 		}
 		return oBkt.Put(statusKey, uint16Bytes(uint16(status)))
+	})
+}
+
+// LinkOrder sets the linked order.
+func (db *BoltDB) LinkOrder(oid, linkedID order.OrderID) error {
+	return db.ordersUpdate(func(master *bbolt.Bucket) error {
+		oBkt := master.Bucket(oid[:])
+		if oBkt == nil {
+			return fmt.Errorf("LinkOrder - order %s not found", oid)
+		}
+		return oBkt.Put(linkedKey, linkedID[:])
 	})
 }
 
@@ -578,14 +600,44 @@ func (db *BoltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 	})
 }
 
-// ActiveDEXMatches retrieves the matches that are in an active state for a
-// specified DEX, which is any state except order.MatchComplete.
-func (db *BoltDB) ActiveDEXMatches(dex string) ([]*dexdb.MetaMatch, error) {
+// DEXOrdersWithActiveMatches retrieves order IDs for any order that has active
+// matches, regardless of whether the order itself is in an active state.
+func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error) {
 	dexB := []byte(dex)
-	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
-		status := mBkt.Get(statusKey)
-		return bytes.Equal(dexB, mBkt.Get(dexKey)) && (len(status) != 1 || status[0] != uint8(order.MatchComplete))
+	idMap := make(map[order.OrderID]bool)
+	err := db.matchesView(func(master *bbolt.Bucket) error {
+		return master.ForEach(func(k, _ []byte) error {
+			mBkt := master.Bucket(k)
+			if mBkt == nil {
+				return fmt.Errorf("match %x bucket is not a bucket", k)
+			}
+			if !bytes.Equal(dexB, mBkt.Get(dexKey)) {
+				return nil
+			}
+			status := mBkt.Get(statusKey)
+			if len(status) != 1 {
+				log.Errorf("match %x has no status set", k)
+				return nil
+			}
+			if status[0] == uint8(order.MatchComplete) {
+				return nil
+			}
+			oidB := mBkt.Get(orderIDKey)
+			var oid order.OrderID
+			copy(oid[:], oidB)
+			idMap[oid] = true
+			return nil
+		})
 	})
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]order.OrderID, 0, len(idMap))
+	for id := range idMap {
+		ids = append(ids, id)
+	}
+	return ids, nil
+
 }
 
 // MatchesForOrder retrieves the matches for the specified order ID.
