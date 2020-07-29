@@ -13,8 +13,7 @@ const (
 		account_id BYTEA PRIMARY KEY,  -- UNIQUE INDEX
 		pubkey BYTEA,
 		fee_address TEXT,
-		fee_coin BYTEA,
-		broken_rule INT2 DEFAULT 0
+		fee_coin BYTEA
 		);`
 
 	// InsertKeyIfMissing creates an entry for the specified key hash, if it
@@ -29,14 +28,10 @@ const (
 		WHERE key_hash = $1
 		RETURNING child;`
 
-	// CloseAccount sets the broken_rule column for the account, which signifies
-	// that the account is closed.
-	CloseAccount = `UPDATE %s SET broken_rule = $1 WHERE account_id = $2;`
-
 	// SelectAccount gathers account details for the specified accound ID. The
 	// details returned from this query are sufficient to determine 1) whether the
 	// registration fee has been paid, or 2) whether the account has been closed.
-	SelectAccount = `SELECT pubkey, fee_coin, broken_rule
+	SelectAccount = `SELECT pubkey, fee_coin
 		FROM %s
 		WHERE account_id = $1;`
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
@@ -18,7 +19,7 @@ import (
 // fields are ignored.
 func (a *Archiver) InsertPenalty(penalty *db.Penalty) error {
 	stmt := fmt.Sprintf(internal.InsertPenalty, penaltiesTableName)
-	_, err := a.db.Exec(stmt, penalty.AccountID, penalty.BrokenRule, penalty.Time, penalty.Duration, penalty.Details)
+	_, err := a.db.Exec(stmt, penalty.AccountID, penalty.BrokenRule, int64(penalty.Time), penalty.Duration, penalty.Details)
 	return err
 }
 
@@ -58,14 +59,19 @@ func penalties(dbe *sql.DB, stmt string, args ...interface{}) ([]*db.Penalty, er
 		return nil, err
 	}
 	defer rows.Close()
-	var penalties []*db.Penalty
-	var details sql.NullString
+	var (
+		penalties []*db.Penalty
+		details   sql.NullString
+		t         int64
+	)
 	for rows.Next() {
-		p := new(db.Penalty)
-		err = rows.Scan(&p.ID, &p.AccountID, &p.BrokenRule, &p.Time, &p.Duration, &details, &p.Forgiven)
+		p := &db.Penalty{Penalty: new(msgjson.Penalty)}
+
+		err = rows.Scan(&p.ID, &p.AccountID, &p.BrokenRule, &t, &p.Duration, &details, &p.Forgiven)
 		if err != nil {
 			return nil, err
 		}
+		p.Time = uint64(t)
 		p.Details = details.String
 		penalties = append(penalties, p)
 	}

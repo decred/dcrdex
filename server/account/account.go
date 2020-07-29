@@ -42,6 +42,22 @@ func (aid AccountID) MarshalJSON() ([]byte, error) {
 	return json.Marshal(aid.String())
 }
 
+// UnarshalJSON satisfies the json.Unmarshaller interface, and will unmarshal
+// the id.
+func (aid *AccountID) UnmarshalJSON(data []byte) error {
+	// Unmarshalling from the byte representation of the hex string.
+	s := ""
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return err
+	}
+	copy(aid[:], b)
+	return nil
+}
+
 // Value implements the sql/driver.Valuer interface.
 func (aid AccountID) Value() (driver.Value, error) {
 	return aid[:], nil // []byte

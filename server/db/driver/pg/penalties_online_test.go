@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"github.com/davecgh/go-spew/spew"
@@ -32,29 +33,35 @@ func TestPenalties(t *testing.T) {
 		0xda, 0x90, 0x74, 0xde, 0x0a, 0xe2, 0x3b, 0x06, 0x54, 0x89, 0xa9, 0x91, 0x99,
 		0xba, 0xd7, 0x63, 0xf1, 0x02, 0xcc,
 	}
-	twoSecs := (time.Second * 2).Milliseconds()
-	tenSecs := (time.Second * 10).Milliseconds()
-	nowInMS := encode.UnixMilli(time.Now())
+	twoSecs := uint64((time.Second * 2).Milliseconds())
+	tenSecs := uint64((time.Second * 10).Milliseconds())
+	nowInMS := encode.UnixMilliU(time.Now())
 	penaltyTwoSec := &db.Penalty{
-		AccountID:  acctID,
-		BrokenRule: 1,
-		Time:       nowInMS,
-		Duration:   twoSecs,
-		Details:    "details",
+		Penalty: &msgjson.Penalty{
+			AccountID:  acctID,
+			BrokenRule: 1,
+			Time:       nowInMS,
+			Duration:   twoSecs,
+			Details:    "details",
+		},
 	}
 	penaltyTenSec := &db.Penalty{
-		AccountID:  acctID,
-		BrokenRule: 1,
-		Time:       nowInMS,
-		Duration:   tenSecs,
-		Details:    "details",
+		Penalty: &msgjson.Penalty{
+			AccountID:  acctID,
+			BrokenRule: 1,
+			Time:       nowInMS,
+			Duration:   tenSecs,
+			Details:    "details",
+		},
 	}
 	penaltyTenSecDiffUser := &db.Penalty{
-		AccountID:  anotherAcctID,
-		BrokenRule: 1,
-		Time:       nowInMS,
-		Duration:   tenSecs,
-		Details:    "details",
+		Penalty: &msgjson.Penalty{
+			AccountID:  anotherAcctID,
+			BrokenRule: 1,
+			Time:       nowInMS,
+			Duration:   tenSecs,
+			Details:    "details",
+		},
 	}
 	// Add penalties.
 	if err := archie.InsertPenalty(penaltyTwoSec); err != nil {

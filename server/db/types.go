@@ -5,6 +5,7 @@ package db
 
 import (
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/server/account"
 )
 
@@ -14,16 +15,11 @@ type Account struct {
 	Pubkey     dex.Bytes         `json:"pubkey"`
 	FeeAddress string            `json:"feeaddress"`
 	FeeCoin    dex.Bytes         `json:"feecoin"`
-	BrokenRule account.Rule      `json:"brokenrule"`
 }
 
 // Penalty holds data stored in the Penalty table.
 type Penalty struct {
-	ID         int64             `json:"id"`
-	AccountID  account.AccountID `json:"accountid"`
-	BrokenRule account.Rule      `json:"brokenrule"`
-	Time       int64             `json:"timestamp"`
-	Duration   int64             `json:"duration"`
-	Details    string            `json:"details"`
-	Forgiven   bool              `json:"forgiven"`
+	*msgjson.Penalty
+	ID       int64 `json:"id"`
+	Forgiven bool  `json:"forgiven"`
 }

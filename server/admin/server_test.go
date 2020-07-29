@@ -775,7 +775,6 @@ func TestAccounts(t *testing.T) {
 		Pubkey:     dex.Bytes(pubkey),
 		FeeAddress: "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
 		FeeCoin:    dex.Bytes(feeCoin),
-		BrokenRule: account.Rule(byte(255)),
 	}
 	core.accounts = append(core.accounts, acct)
 
@@ -794,8 +793,7 @@ func TestAccounts(t *testing.T) {
         "accountid": "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc",
         "pubkey": "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19",
         "feeaddress": "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-        "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005",
-        "brokenrule": 255
+        "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005"
     }
 ]
 `

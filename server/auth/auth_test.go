@@ -43,29 +43,22 @@ type ratioData struct {
 
 // TStorage satisfies the Storage interface
 type TStorage struct {
-	acct     *account.Account
-	matches  []*db.MatchData
-	closedID account.AccountID
-	statuses []*db.MatchStatus
-	acctAddr string
-	acctErr  error
-	regAddr  string
-	regErr   error
-	payErr   error
-	unpaid   bool
-	closed   bool
-	ratio    ratioData
+	acct      *account.Account
+	matches   []*db.MatchData
+	closedID  account.AccountID
+	statuses  []*db.MatchStatus
+	acctAddr  string
+	acctErr   error
+	regAddr   string
+	regErr    error
+	payErr    error
+	unpaid    bool
+	penalties []*db.Penalty
+	ratio     ratioData
 }
 
-func (s *TStorage) CloseAccount(id account.AccountID, _ account.Rule) error {
-	s.closedID = id
-	return nil
-}
-func (s *TStorage) RestoreAccount(_ account.AccountID) error {
-	return nil
-}
-func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
-	return s.acct, !s.unpaid, !s.closed
+func (s *TStorage) Account(account.AccountID) (*account.Account, bool) {
+	return s.acct, !s.unpaid
 }
 func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return s.matches, nil
@@ -85,11 +78,19 @@ func (s *TStorage) CompletedUserOrders(aid account.AccountID, N int) (oids []ord
 func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
 	return s.ratio.oidsCancels, s.ratio.oidsCanceled, s.ratio.timesCanceled, nil
 }
-func (s *TStorage) InsertPenalty(penalty *db.Penalty) error      { return nil }
-func (s *TStorage) ForgivePenalty(id int64) error                { return nil }
-func (s *TStorage) ForgivePenalties(aid account.AccountID) error { return nil }
+func (s *TStorage) InsertPenalty(penalty *db.Penalty) error {
+	s.closedID = penalty.AccountID
+	s.penalties = []*db.Penalty{penalty}
+	return nil
+}
+func (s *TStorage) ForgivePenalty(id int64) error { return nil }
+func (s *TStorage) ForgivePenalties(aid account.AccountID) error {
+	s.closedID = account.AccountID{}
+	s.penalties = nil
+	return nil
+}
 func (s *TStorage) Penalties(aid account.AccountID) (penalties []*db.Penalty, err error) {
-	return nil, nil
+	return s.penalties, nil
 }
 func (s *TStorage) AllPenalties(aid account.AccountID) (penalties []*db.Penalty, err error) {
 	return nil, nil
@@ -271,14 +272,20 @@ func tryConnectUser(t *testing.T, user *tUser, wantErr bool) *msgjson.Message {
 	}
 
 	// Check the response.
-	respMsg := user.conn.getSend()
-	if respMsg == nil {
-		t.Fatalf("no response from 'connect' request")
+	for {
+		respMsg := user.conn.getSend()
+		if respMsg == nil {
+			t.Fatalf("no response from 'connect' request")
+		}
+		// Ignore notifications.
+		if respMsg.Type == msgjson.Notification {
+			continue
+		}
+		if respMsg.ID != connect.ID {
+			t.Fatalf("'connect' response has wrong ID. expected %d, got %d", connect.ID, respMsg.ID)
+		}
+		return respMsg
 	}
-	if respMsg.ID != connect.ID {
-		t.Fatalf("'connect' response has wrong ID. expected %d, got %d", connect.ID, respMsg.ID)
-	}
-	return respMsg
 }
 
 func makeEnsureErr(t *testing.T) func(rpcErr *msgjson.Error, tag string, code int) {
@@ -457,8 +464,8 @@ func TestConnect(t *testing.T) {
 	}
 
 	// Try again just meeting cancel ratio.
-	rig.storage.closedID = account.AccountID{} // unclose the account in db
-	rig.mgr.cancelThresh = 0.6                 // passable threshold for 1 cancel : 1 completion (0.5)
+	rig.storage.ForgivePenalties(user.acctID) // unclose the account in db
+	rig.mgr.cancelThresh = 0.6                // passable threshold for 1 cancel : 1 completion (0.5)
 
 	connectUser(t, user)
 	if rig.storage.closedID == user.acctID {
@@ -784,9 +791,9 @@ func TestAccountErrors(t *testing.T) {
 
 	// closed accounts allowed to connect
 	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first
-	rig.storage.closed = true
+	rig.storage.penalties = make([]*db.Penalty, 1)
 	rpcErr = rig.mgr.handleConnect(user.conn, connect)
-	rig.storage.closed = false
+	rig.storage.penalties = nil
 	if rpcErr != nil {
 		t.Fatalf("should be no error for closed account")
 	}
@@ -1224,6 +1231,7 @@ func TestHandleRegister(t *testing.T) {
 }
 
 func TestHandleNotifyFee(t *testing.T) {
+	resetStorage()
 	user := tNewUser(t)
 	userAcct := &account.Account{ID: user.acctID, PubKey: user.privKey.PubKey()}
 	rig.storage.acct = userAcct
@@ -1237,7 +1245,6 @@ func TestHandleNotifyFee(t *testing.T) {
 	defer func() {
 		rig.storage.unpaid = false
 	}()
-	defer resetStorage()
 
 	newNotify := func() *msgjson.NotifyFee {
 		notify := &msgjson.NotifyFee{

@@ -36,12 +36,8 @@ func unixMsNow() time.Time {
 // Storage updates and fetches account-related data from what is presumably a
 // database.
 type Storage interface {
-	// CloseAccount closes the account for violation of the specified rule.
-	CloseAccount(account.AccountID, account.Rule) error
-	// RestoreAccount opens an account that was closed by CloseAccount.
-	RestoreAccount(account.AccountID) error
 	// Account retrieves account info for the specified account ID.
-	Account(account.AccountID) (acct *account.Account, paid, open bool)
+	Account(account.AccountID) (acct *account.Account, paid bool)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
 	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
@@ -288,7 +284,7 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 		log.Infof("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
 			"(%d cancels : %d successes => %.2f%% )", user, auth.cancelThresh, cancels, completions, 100*rate)
 		client.suspended = true
-		auth.storage.CloseAccount(user, account.CancellationRate)
+		auth.Penalize(user, account.CancellationRate, "")
 	}
 }
 
@@ -705,11 +701,11 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	}
 	details = fmt.Sprintf("%s\nRule Details: %s\n%s", details, rule.Description(), extraDetails)
 	penalty := &msgjson.Penalty{
-		Rule:      rule,
-		Time:      uint64(unixMsNow().Unix()),
-		Duration:  uint64(rule.Duration()),
-		AccountID: user[:],
-		Details:   details,
+		BrokenRule: rule,
+		Time:       uint64(unixMsNow().Unix()),
+		Duration:   uint64(rule.Duration()),
+		AccountID:  user,
+		Details:    details,
 	}
 	penaltyNote := &msgjson.PenaltyNote{
 		Penalty: penalty,
@@ -739,20 +735,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 		client.suspend()
 	}
 
-	if err := auth.storage.CloseAccount(user /*client.acct.ID*/, rule); err != nil {
-		log.Error(err)
-		return err
-	}
-
-	penalty := &db.Penalty{
-		AccountID:  user,
-		BrokenRule: rule,
-		Time:       encode.UnixMilli(time.Now()),
-		Duration:   (time.Second * 30).Milliseconds(),
-		Details:    "TODO",
-	}
-
-	if err := auth.storage.InsertPenalty(penalty); err != nil {
+	if err := auth.storage.InsertPenalty(&db.Penalty{Penalty: penalty}); err != nil {
 		log.Error(err)
 		return err
 	}
@@ -772,10 +755,6 @@ func (auth *AuthManager) Unban(user account.AccountID) error {
 	client := auth.user(user)
 	if client != nil {
 		client.restore()
-	}
-
-	if err := auth.storage.RestoreAccount(user /*client.acct.ID*/); err != nil {
-		return err
 	}
 
 	if err := auth.storage.ForgivePenalties(user); err != nil {
@@ -838,7 +817,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 	var user account.AccountID
 	copy(user[:], connect.AccountID[:])
-	acctInfo, paid, open := auth.storage.Account(user)
+	acctInfo, paid := auth.storage.Account(user)
 	if acctInfo == nil {
 		return &msgjson.Error{
 			Code:    msgjson.AccountNotFoundError,
@@ -854,6 +833,15 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Message: "unpaid account",
 		}
 	}
+	penalties, err := auth.storage.Penalties(user)
+	if err != nil {
+		log.Errorf("Penalties(%x): %v", user, err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "DB error",
+		}
+	}
+	open := len(penalties) == 0
 	// Commented to allow suspended accounts to connect and complete swaps, etc.
 	// but not place orders.
 	// if !open {
@@ -994,7 +982,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		client.suspended = true
 		// The account might now be closed if the cancellation rate was
 		// exceeded while the server was running in anarchy mode.
-		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRate)
+		auth.Penalize(acctInfo.ID, account.CancellationRate, "")
 		log.Debugf("Suspended account %v (cancellation rate = %.2f%%, %d cancels : %d successes) connected.",
 			acctInfo.ID, cancels, completions, 100*rate)
 	}

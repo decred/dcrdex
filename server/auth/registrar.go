@@ -127,23 +127,31 @@ func (auth *AuthManager) handleNotifyFee(conn comms.Link, msg *msgjson.Message) 
 
 	var acctID account.AccountID
 	copy(acctID[:], notifyFee.AccountID)
-	acct, paid, open := auth.storage.Account(acctID)
+	acct, paid := auth.storage.Account(acctID)
 	if acct == nil {
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
 			Message: "no account found for ID " + notifyFee.AccountID.String(),
 		}
 	}
-	if !open {
-		return &msgjson.Error{
-			Code:    msgjson.AuthenticationError,
-			Message: "account closed and cannot be reopen",
-		}
-	}
 	if paid {
 		return &msgjson.Error{
 			Code:    msgjson.AuthenticationError,
 			Message: "'notifyfee' send for paid account",
+		}
+	}
+	penalties, err := auth.storage.Penalties(acctID)
+	if err != nil {
+		log.Errorf("Penalties(%x): %v", acctID, err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "DB error",
+		}
+	}
+	if len(penalties) > 0 {
+		return &msgjson.Error{
+			Code:    msgjson.AuthenticationError,
+			Message: "account closed and cannot be reopen",
 		}
 	}
 

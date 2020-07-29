@@ -59,7 +59,7 @@ func TestAccounts(t *testing.T) {
 	}
 
 	// Get the account. It should be unpaid.
-	acct, paid, _ := archie.Account(tAcctID)
+	acct, paid := archie.Account(tAcctID)
 	if paid {
 		t.Fatalf("account marked as paid before setting tx details")
 	}
@@ -71,12 +71,9 @@ func TestAccounts(t *testing.T) {
 	}
 
 	// The account should not be marked paid.
-	_, paid, open := archie.Account(tAcctID)
+	_, paid = archie.Account(tAcctID)
 	if !paid {
 		t.Fatalf("account not marked as paid after setting reg tx details")
-	}
-	if !open {
-		t.Fatalf("newly paid account marked as closed")
 	}
 
 	accts, err := archie.Accounts()
@@ -86,8 +83,7 @@ func TestAccounts(t *testing.T) {
 	if accts[0].AccountID.String() != "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc" ||
 		accts[0].Pubkey.String() != "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19" ||
 		accts[0].FeeAddress != "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k" ||
-		accts[0].FeeCoin.String() != "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005" ||
-		byte(accts[0].BrokenRule) != byte(0) {
+		accts[0].FeeCoin.String() != "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005" {
 		t.Fatal("accounts has unexpected data")
 	}
 
@@ -99,26 +95,7 @@ func TestAccounts(t *testing.T) {
 		t.Fatal("error getting account info: actual does not equal expected")
 	}
 
-	// Close the account for failure to complete a swap.
-	if err := archie.CloseAccount(tAcctID, account.FailureToAct); err != nil {
-		t.Fatalf("error closing account: %v", err)
-	}
-	_, _, open = archie.Account(tAcctID)
-	if open {
-		t.Fatal("closed account still marked as open")
-	}
-
-	// Restore the account.
-	if err = archie.RestoreAccount(tAcctID); err != nil {
-		t.Fatalf("error opening account: %v", err)
-	}
-	_, _, open = archie.Account(tAcctID)
-	if !open {
-		t.Fatal("open account still marked as closed")
-	}
-
-	// The Account ID cannot be null. broken_rule has a default value of 0
-	// and is unexpected to become null.
+	// The Account ID cannot be null.
 	nullAccounts := `UPDATE %s
 		SET
 		pubkey = null ,
@@ -139,8 +116,7 @@ func TestAccounts(t *testing.T) {
 	if accts[0].AccountID.String() != "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc" ||
 		accts[0].Pubkey.String() != "" ||
 		accts[0].FeeAddress != "" ||
-		accts[0].FeeCoin.String() != "" ||
-		byte(accts[0].BrokenRule) != byte(0) {
+		accts[0].FeeCoin.String() != "" {
 		t.Fatal("accounts has unexpected data")
 	}
 
@@ -166,15 +142,12 @@ func TestWrongAccount(t *testing.T) {
 		t.Fatalf("no error fetching registration address for unknown account")
 	}
 
-	acct, paid, open := archie.Account(tAcctID)
+	acct, paid := archie.Account(tAcctID)
 	if acct != nil {
 		t.Fatalf("account retrieved for unknown account ID")
 	}
 	if paid {
 		t.Fatalf("unknown account marked as paid")
-	}
-	if open {
-		t.Fatalf("unknown account marked as open")
 	}
 
 	err = archie.PayAccount(tAcctID, tCoinID)

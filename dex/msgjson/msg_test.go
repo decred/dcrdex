@@ -821,13 +821,15 @@ func TestConnect(t *testing.T) {
 
 func TestPenalty(t *testing.T) {
 	// serialization: rule(1) + time (8) + duration (8) + accountid (32) + details (variable, ~100) = 149 bytes
-	acctID, _ := hex.DecodeString("14ae3cbc703587122d68ac6fa9194dfdc8466fb5dec9f47d2805374adff3e016")
+	acctIDSlice, _ := hex.DecodeString("14ae3cbc703587122d68ac6fa9194dfdc8466fb5dec9f47d2805374adff3e016")
+	acctID := account.AccountID{}
+	copy(acctID[:], acctIDSlice)
 	penalty := &Penalty{
-		Rule:      account.Rule(1),
-		Time:      uint64(1598929305),
-		Duration:  uint64(3153600000000000000),
-		AccountID: acctID,
-		Details:   "You may no longer trade. Leave your client running to finish pending trades.",
+		BrokenRule: account.Rule(1),
+		Time:       uint64(1598929305),
+		Duration:   uint64(3153600000000000000),
+		AccountID:  acctID,
+		Details:    "You may no longer trade. Leave your client running to finish pending trades.",
 	}
 	penaltyNote := &PenaltyNote{Penalty: penalty}
 
@@ -870,8 +872,8 @@ func TestPenalty(t *testing.T) {
 		t.Fatalf("unmarshal error: %v", err)
 	}
 
-	if penaltyBack.Rule != penalty.Rule {
-		t.Fatal(penaltyBack.Rule, penalty.Rule)
+	if penaltyBack.BrokenRule != penalty.BrokenRule {
+		t.Fatal(penaltyBack.BrokenRule, penalty.BrokenRule)
 	}
 	if penaltyBack.Time != penalty.Time {
 		t.Fatal(penaltyBack.Time, penalty.Time)

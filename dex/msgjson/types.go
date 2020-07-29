@@ -848,11 +848,11 @@ type PenaltyNote struct {
 // Penalty is part of the payload for a dex-originating Penalty notification
 // and part of the connect response.
 type Penalty struct {
-	Rule      account.Rule `json:"rule"`
-	Time      uint64       `json:"timestamp"`
-	Duration  uint64       `json:"duration"`
-	AccountID Bytes        `json:"accountid"`
-	Details   string       `json:"details"`
+	BrokenRule account.Rule      `json:"brokenrule"`
+	Time       uint64            `json:"timestamp"`
+	Duration   uint64            `json:"duration"`
+	AccountID  account.AccountID `json:"accountid"`
+	Details    string            `json:"details"`
 }
 
 // Serialize serializes the PenaltyNote data.
@@ -861,10 +861,10 @@ func (n *PenaltyNote) Serialize() []byte {
 	// serialization: rule(1) + time (8) + duration (8) + accountid (32) +
 	// details (variable, ~100) = 149 bytes
 	b := make([]byte, 0, 117)
-	b = append(b, byte(p.Rule))
+	b = append(b, byte(p.BrokenRule))
 	b = append(b, uint64Bytes(p.Time)...)
 	b = append(b, uint64Bytes(p.Duration)...)
-	b = append(b, p.AccountID...)
+	b = append(b, p.AccountID[:]...)
 	return append(b, []byte(p.Details)...)
 }
 

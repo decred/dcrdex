@@ -5,7 +5,6 @@ package pg
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"decred.org/dcrdex/server/account"
@@ -16,45 +15,19 @@ import (
 	"github.com/decred/dcrd/hdkeychain/v2"
 )
 
-// CloseAccount closes the account by setting the value of the rule column to
-// the passed rule.
-func (a *Archiver) CloseAccount(aid account.AccountID, rule account.Rule) error {
-	return a.setAccountRule(aid, rule)
-}
-
-// RestoreAccount reopens the account by setting the value of the rule column
-// to account.NoRule.
-func (a *Archiver) RestoreAccount(aid account.AccountID) error {
-	return a.setAccountRule(aid, account.NoRule)
-}
-
-// setAccountRule closes or restores the account by setting the value of the
-// rule column.
-func (a *Archiver) setAccountRule(aid account.AccountID, rule account.Rule) error {
-	err := setRule(a.db, a.tables.accounts, aid, rule)
-	if err != nil {
-		// fatal unless 0 matching rows found.
-		if !errors.Is(err, errNoRows) {
-			a.fatalBackendErr(err)
-		}
-		return fmt.Errorf("error setting account rule %s: %v", aid, err)
-	}
-	return nil
-}
-
-// Account retrieves the account pubkey, whether the account is paid, and
-// whether the account is open, in that order.
-func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool, bool) {
-	acct, isPaid, isOpen, err := getAccount(a.db, a.tables.accounts, aid)
+// Account retrieves the account pubkey and whether the account is paid in that
+// order.
+func (a *Archiver) Account(aid account.AccountID) (*account.Account, bool) {
+	acct, isPaid, err := getAccount(a.db, a.tables.accounts, aid)
 	switch err {
 	case sql.ErrNoRows:
-		return nil, false, false
+		return nil, false
 	case nil:
 	default:
 		log.Errorf("getAccount error: %v", err)
-		return nil, false, false
+		return nil, false
 	}
-	return acct, isPaid, isOpen
+	return acct, isPaid
 }
 
 // Accounts returns data for all accounts.
@@ -69,7 +42,7 @@ func (a *Archiver) Accounts() ([]*db.Account, error) {
 	var feeAddress sql.NullString
 	for rows.Next() {
 		a := new(db.Account)
-		err = rows.Scan(&a.AccountID, &a.Pubkey, &feeAddress, &a.FeeCoin, &a.BrokenRule)
+		err = rows.Scan(&a.AccountID, &a.Pubkey, &feeAddress, &a.FeeCoin)
 		if err != nil {
 			return nil, err
 		}
@@ -88,7 +61,7 @@ func (a *Archiver) AccountInfo(aid account.AccountID) (*db.Account, error) {
 	acct := new(db.Account)
 	var feeAddress sql.NullString
 	if err := a.db.QueryRow(stmt, aid).Scan(&acct.AccountID, &acct.Pubkey, &feeAddress,
-		&acct.FeeCoin, &acct.BrokenRule); err != nil {
+		&acct.FeeCoin); err != nil {
 		return nil, err
 	}
 	acct.FeeAddress = feeAddress.String
@@ -190,35 +163,17 @@ func createAccountTables(db *sql.DB) error {
 	return nil
 }
 
-// setRule sets the rule column value.
-func setRule(dbe sqlExecutor, tableName string, aid account.AccountID, rule account.Rule) error {
-	stmt := fmt.Sprintf(internal.CloseAccount, tableName)
-	N, err := sqlExec(dbe, stmt, rule, aid)
-	if err != nil {
-		return err
-	}
-	switch N {
-	case 0:
-		return errNoRows
-	case 1:
-		return nil
-	default:
-		return NewDetailedError(errTooManyRows, fmt.Sprint(N, "rows updated instead of 1"))
-	}
-}
-
 // getAccount gets the account pubkey, whether the account has been
-// registered, and whether the account is still open, in that order.
-func getAccount(dbe *sql.DB, tableName string, aid account.AccountID) (*account.Account, bool, bool, error) {
+// registered, in that order.
+func getAccount(dbe *sql.DB, tableName string, aid account.AccountID) (*account.Account, bool, error) {
 	var coinID, pubkey []byte
-	var rule uint8
 	stmt := fmt.Sprintf(internal.SelectAccount, tableName)
-	err := dbe.QueryRow(stmt, aid).Scan(&pubkey, &coinID, &rule)
+	err := dbe.QueryRow(stmt, aid).Scan(&pubkey, &coinID)
 	if err != nil {
-		return nil, false, false, err
+		return nil, false, err
 	}
 	acct, err := account.NewAccountFromPubKey(pubkey)
-	return acct, len(coinID) > 1, rule == 0, err
+	return acct, len(coinID) > 1, err
 }
 
 // createAccount creates an entry for the account in the accounts table.

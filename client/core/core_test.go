@@ -4190,13 +4190,14 @@ func TestHandlePenaltyMsg(t *testing.T) {
 	tCore := rig.core
 	dc := rig.dc
 	penalty := &msgjson.Penalty{
-		Rule:     account.Rule(1),
-		Time:     uint64(1598929305),
-		Duration: uint64(3153600000000000000),
-		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
+		BrokenRule: account.Rule(1),
+		Time:       uint64(1598929305),
+		Duration:   uint64(3153600000000000000),
+		Details:    "You may no longer trade. Leave your client running to finish pending trades.",
 	}
-	rigAcctID := rig.dc.acct.id[:]
-	diffAcctID := append(rig.dc.acct.id[1:], 1)
+	rigAcctID := rig.dc.acct.id
+	diffAcctID := account.AccountID{}
+	copy(diffAcctID[:], append(rig.dc.acct.id[1:], 1))
 	diffKey, _ := secp256k1.GeneratePrivateKey()
 	noMatch, err := msgjson.NewNotification(msgjson.NoMatchRoute, "fake")
 	if err != nil {
@@ -4206,7 +4207,7 @@ func TestHandlePenaltyMsg(t *testing.T) {
 		name    string
 		key     *secp256k1.PrivateKey
 		payload interface{}
-		acctID  []byte
+		acctID  account.AccountID
 		wantErr bool
 	}{{
 		name:    "ok",
