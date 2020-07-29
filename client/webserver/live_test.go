@@ -45,6 +45,7 @@ var (
 	feedPeriod            = time.Second * 10
 	forceDisconnectWallet bool
 	wipeWalletBalance     bool
+	gapWidthFactor        = 1.0 // Should be 0 < gapWidthFactor <= 1.0
 )
 
 func dummySettings() map[string]string {
@@ -362,7 +363,7 @@ func (c *TCore) Sync(dexAddr string, base, quote uint32) (*core.OrderBook, *core
 				case r < 0.80:
 					// Book order
 					sell := rand.Float32() < 0.5
-					ord := randomOrder(sell, c.maxQty, c.midGap, 0.05*c.midGap, true)
+					ord := randomOrder(sell, c.maxQty, c.midGap, gapWidthFactor*c.midGap, true)
 					c.orderMtx.Lock()
 					side := c.buys
 					if sell {
@@ -425,20 +426,19 @@ func (c *TCore) book() *core.OrderBook {
 	midGap := c.midGap
 	maxQty := c.maxQty
 	// Set the market width to about 5% of midGap.
-	marketWidth := 0.05 * midGap
 	var buys, sells []*core.MiniOrder
 	c.orderMtx.Lock()
 	c.buys = make(map[string]*core.MiniOrder, numBuys)
 	c.sells = make(map[string]*core.MiniOrder, numSells)
 	c.epochOrders = nil
 	for i := 0; i < numSells; i++ {
-		ord := randomOrder(true, maxQty, midGap, marketWidth, false)
+		ord := randomOrder(true, maxQty, midGap, gapWidthFactor*c.midGap, false)
 		sells = append(sells, ord)
 		c.sells[ord.Token] = ord
 	}
 	for i := 0; i < numBuys; i++ {
 		// For buys the rate must be smaller than midGap.
-		ord := randomOrder(false, maxQty, midGap, marketWidth, false)
+		ord := randomOrder(false, maxQty, midGap, gapWidthFactor*c.midGap, false)
 		buys = append(buys, ord)
 		c.buys[ord.Token] = ord
 	}
@@ -744,8 +744,8 @@ out:
 }
 
 func TestServer(t *testing.T) {
-	numBuys = 0
-	numSells = 0
+	numBuys = 150
+	numSells = 150
 	feedPeriod = 500 * time.Millisecond
 	initialize := false
 	register := false

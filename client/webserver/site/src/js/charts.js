@@ -188,8 +188,8 @@ export class DepthChart {
     var low = zoom.low || (lastBuy ? lastBuy.rate : midGap)
 
     // Clamp the zoom between 0.5% and 100% of mid-gap.
-    const minRange = Math.max(gapWidth * 2, midGap * 0.005)
-    const halfRange = clamp(high - low, minRange, midGap) / 2
+    const minHalfRange = Math.max(gapWidth, midGap * 0.0025)
+    const halfRange = clamp((high - low) / 2, minHalfRange, midGap)
     zoom.high = high = midGap + halfRange
     zoom.low = low = midGap - halfRange
     const buyDepth = []
