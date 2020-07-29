@@ -98,5 +98,5 @@ be sent in the [[comm.mediawiki/#Session_Authentication|connect response]].
 |-
 | duration   || 8            || duration (milliseconds)
 |-
-| details    || string       || a message
+| details    || string       || a message (UTF-8)
 |}
