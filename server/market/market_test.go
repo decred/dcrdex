@@ -190,6 +190,16 @@ func (ta *TArchivist) Close() error                                       { retu
 func (ta *TArchivist) GetStateHash() ([]byte, error)                      { return nil, nil }
 func (ta *TArchivist) SetStateHash([]byte) error                          { return nil }
 
+func (ta *TArchivist) InsertPenalty(penalty *db.Penalty) error      { return nil }
+func (ta *TArchivist) ForgivePenalty(id int64) error                { return nil }
+func (ta *TArchivist) ForgivePenalties(aid account.AccountID) error { return nil }
+func (ta *TArchivist) Penalties(aid account.AccountID) (penalties []*db.Penalty, err error) {
+	return nil, nil
+}
+func (ta *TArchivist) AllPenalties(aid account.AccountID) (penalties []*db.Penalty, err error) {
+	return nil, nil
+}
+
 func randomOrderID() order.OrderID {
 	pk := randomBytes(order.OrderIDSize)
 	var id order.OrderID

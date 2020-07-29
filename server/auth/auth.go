@@ -49,6 +49,11 @@ type Storage interface {
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
+	InsertPenalty(penalty *db.Penalty) error
+	ForgivePenalty(id int64) error
+	ForgivePenalties(aid account.AccountID) error
+	Penalties(aid account.AccountID) (penalties []*db.Penalty, err error)
+	AllPenalties(aid account.AccountID) (penalties []*db.Penalty, err error)
 }
 
 // Signer signs messages. It is likely a secp256k1.PrivateKey.
@@ -739,6 +744,19 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 		return err
 	}
 
+	penalty := &db.Penalty{
+		AccountID:  user,
+		BrokenRule: rule,
+		Time:       encode.UnixMilli(time.Now()),
+		Duration:   (time.Second * 30).Milliseconds(),
+		Details:    "TODO",
+	}
+
+	if err := auth.storage.InsertPenalty(penalty); err != nil {
+		log.Error(err)
+		return err
+	}
+
 	log.Debugf("user %v penalized for rule %v", user, rule)
 
 	// We do NOT want to do disconnect if the user has active swaps.  However,
@@ -757,6 +775,10 @@ func (auth *AuthManager) Unban(user account.AccountID) error {
 	}
 
 	if err := auth.storage.RestoreAccount(user /*client.acct.ID*/); err != nil {
+		return err
+	}
+
+	if err := auth.storage.ForgivePenalties(user); err != nil {
 		return err
 	}
 

@@ -55,7 +55,7 @@ The server will provide an HTTP API for performing various adminstrative tasks.
 |-
 | /accounts || GET || lists information about all known accounts
 |-
-| /account/{accountID} || GET || list information about a specific account
+| /account/{accountID}?verbose=BOOL || GET || list information about a specific account. verbose will report extended information, such as expired penalties
 |-
 | /account/{accountID}/unban || GET || clear an account's penalties and re-enable trading
 |-

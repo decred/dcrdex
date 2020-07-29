@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	marketsTableName  = "markets"
-	metaTableName     = "meta"
-	feeKeysTableName  = "fee_keys"
-	accountsTableName = "accounts"
+	marketsTableName   = "markets"
+	metaTableName      = "meta"
+	feeKeysTableName   = "fee_keys"
+	accountsTableName  = "accounts"
+	penaltiesTableName = "penalties"
 )
 
 type tableStmt struct {
@@ -31,6 +32,10 @@ var createDEXTableStatements = []tableStmt{
 var createAccountTableStatements = []tableStmt{
 	{feeKeysTableName, internal.CreateFeeKeysTable},
 	{accountsTableName, internal.CreateAccountsTable},
+}
+
+var createPenaltyTableStatements = []tableStmt{
+	{penaltiesTableName, internal.CreatePenaltyTable},
 }
 
 var createMarketTableStatements = []tableStmt{
@@ -52,6 +57,9 @@ var tableMap = func() map[string]string {
 		m[pair.name] = pair.stmt
 	}
 	for _, pair := range createAccountTableStatements {
+		m[pair.name] = pair.stmt
+	}
+	for _, pair := range createPenaltyTableStatements {
 		m[pair.name] = pair.stmt
 	}
 	return m
@@ -137,6 +145,11 @@ func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
 
 	// Prepare the account and registration key counter tables.
 	err = createAccountTables(db)
+	if err != nil {
+		return err
+	}
+
+	_, err = CreateTable(db, "", penaltiesTableName)
 	if err != nil {
 		return err
 	}

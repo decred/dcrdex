@@ -37,6 +37,7 @@ const (
 	ruleToken     = "rule"
 	messageToken  = "message"
 	timeoutToken  = "timeout"
+	verboseToken  = "verbose"
 )
 
 var (
@@ -48,6 +49,7 @@ type SvrCore interface {
 	Accounts() (accts []*db.Account, err error)
 	AccountInfo(acctID account.AccountID) (*db.Account, error)
 	Notify(acctID account.AccountID, msg *msgjson.Message, timeout time.Duration)
+	Penalties(acctID account.AccountID, all bool) ([]*db.Penalty, error)
 	NotifyAll(msg *msgjson.Message)
 	ConfigMsg() json.RawMessage
 	MarketRunning(mktName string) (found, running bool)

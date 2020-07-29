@@ -2,6 +2,8 @@ package admin
 
 import (
 	"time"
+
+	"decred.org/dcrdex/server/db"
 )
 
 // MarketStatus summarizes the operational status of a market.
@@ -65,4 +67,10 @@ type BanResult struct {
 type UnbanResult struct {
 	AccountID string  `json:"accountid"`
 	UnbanTime APITime `json:"unbantime"`
+}
+
+// AccountInfoResult holds the result of apiAccountInfo.
+type AccountInfoResult struct {
+	*db.Account
+	Penalties []*db.Penalty `json:"penalties,omitempty"`
 }

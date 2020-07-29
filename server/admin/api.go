@@ -168,24 +168,36 @@ func (s *Server) apiAccounts(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, accts)
 }
 
-// apiAccountInfo is the handler for the '/account/{account id}' API request.
+// apiAccountInfo is the handler for the '/account/{account id}?verbose=BOOL' API request.
 func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
 	acctIDStr := chi.URLParam(r, accountIDKey)
-	acctIDSlice, err := hex.DecodeString(acctIDStr)
+	acctID, err := decodeAcctID(acctIDStr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("could not decode accout id: %v", err), http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if len(acctIDSlice) != account.HashSize {
-		http.Error(w, "account id has incorrect length", http.StatusBadRequest)
-		return
+	var verbose bool
+	if verboseStr := r.URL.Query().Get(verboseToken); verboseStr != "" {
+		verbose, err = strconv.ParseBool(verboseStr)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("invalid verbose boolean %q: %v", verboseStr, err), http.StatusBadRequest)
+			return
+		}
 	}
-	var acctID account.AccountID
-	copy(acctID[:], acctIDSlice)
-	acctInfo, err := s.core.AccountInfo(acctID)
+	dbAcctInfo, err := s.core.AccountInfo(acctID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to retrieve account: %v", err), http.StatusInternalServerError)
 		return
+	}
+	// If verbose expired and forgiven penalties will be included.
+	dbPenalties, err := s.core.Penalties(acctID, verbose)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to retrieve penalties: %v", err), http.StatusInternalServerError)
+		return
+	}
+	acctInfo := &AccountInfoResult{
+		Account:   dbAcctInfo,
+		Penalties: dbPenalties,
 	}
 	writeJSON(w, acctInfo)
 }

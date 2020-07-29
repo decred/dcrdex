@@ -48,13 +48,15 @@ type TMarket struct {
 }
 
 type TCore struct {
-	markets     map[string]*TMarket
-	accounts    []*db.Account
-	accountsErr error
-	account     *db.Account
-	accountErr  error
-	penalizeErr error
-	unbanErr    error
+	markets        map[string]*TMarket
+	accounts       []*db.Account
+	accountsErr    error
+	accountInfo    *db.Account
+	accountInfoErr error
+	penalties      []*db.Penalty
+	penaltiesErr   error
+	penalizeErr    error
+	unbanErr       error
 }
 
 func (c *TCore) ConfigMsg() json.RawMessage { return nil }
@@ -145,7 +147,10 @@ func (w *tResponseWriter) WriteHeader(statusCode int) {
 
 func (c *TCore) Accounts() ([]*db.Account, error) { return c.accounts, c.accountsErr }
 func (c *TCore) AccountInfo(_ account.AccountID) (*db.Account, error) {
-	return c.account, c.accountErr
+	return c.accountInfo, c.accountInfoErr
+}
+func (c *TCore) Penalties(_ account.AccountID, _ bool) ([]*db.Penalty, error) {
+	return c.penalties, c.penaltiesErr
 }
 func (c *TCore) Penalize(_ account.AccountID, _ account.Rule, _ string) error {
 	return c.penalizeErr
@@ -813,126 +818,76 @@ func TestAccounts(t *testing.T) {
 }
 
 func TestAccountInfo(t *testing.T) {
+
 	core := new(TCore)
 	srv := &Server{
 		core: core,
 	}
-
-	acctIDStr := "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc"
-
 	mux := chi.NewRouter()
 	mux.Route("/account/{"+accountIDKey+"}", func(rm chi.Router) {
 		rm.Get("/", srv.apiAccountInfo)
 	})
+	acctIDStr := "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc"
 
-	// No account.
-	w := httptest.NewRecorder()
-	r, _ := http.NewRequest("GET", "https://localhost/account/"+acctIDStr, nil)
-	r.RemoteAddr = "localhost"
+	tests := []struct {
+		name, acctID, verbose        string
+		accountInfoErr, penaltiesErr error
+		wantCode                     int
+	}{{
+		name:     "ok hex lower case",
+		acctID:   acctIDStr,
+		wantCode: http.StatusOK,
+	}, {
+		name:     "ok verbose",
+		acctID:   acctIDStr,
+		verbose:  "true",
+		wantCode: http.StatusOK,
+	}, {
+		name:     "ok hex upper case",
+		acctID:   strings.ToUpper(acctIDStr),
+		wantCode: http.StatusOK,
+	}, {
+		name:     "account id not hex",
+		acctID:   "nothex",
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:     "account id wrong length",
+		acctID:   acctIDStr[2:],
+		wantCode: http.StatusBadRequest,
+	}, {
+		name:           "core.AccountInfo error",
+		acctID:         acctIDStr,
+		accountInfoErr: errors.New("error"),
+		wantCode:       http.StatusInternalServerError,
+	}, {
+		name:         "core.Penalties error",
+		acctID:       acctIDStr,
+		penaltiesErr: errors.New("error"),
+		wantCode:     http.StatusInternalServerError,
+	}, {
+		name:     "bad verbose",
+		acctID:   acctIDStr,
+		verbose:  "42",
+		wantCode: http.StatusBadRequest,
+	}}
 
-	mux.ServeHTTP(w, r)
+	for _, test := range tests {
+		core.accountInfoErr, core.penaltiesErr = test.accountInfoErr, test.penaltiesErr
+		w := httptest.NewRecorder()
+		r, _ := http.NewRequest("GET", "https://localhost/account/"+test.acctID+"?verbose="+test.verbose, nil)
+		r.RemoteAddr = "localhost"
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("apiAccounts returned code %d, expected %d", w.Code, http.StatusOK)
-	}
-	respBody := w.Body.String()
-	if respBody != "null\n" {
-		t.Errorf("incorrect response body: %q", respBody)
-	}
+		mux.ServeHTTP(w, r)
 
-	accountIDSlice, err := hex.DecodeString(acctIDStr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var accountID account.AccountID
-	copy(accountID[:], accountIDSlice)
-	pubkey, err := hex.DecodeString("0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19")
-	if err != nil {
-		t.Fatal(err)
-	}
-	feeCoin, err := hex.DecodeString("6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// An account.
-	core.account = &db.Account{
-		AccountID:  accountID,
-		Pubkey:     dex.Bytes(pubkey),
-		FeeAddress: "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-		FeeCoin:    dex.Bytes(feeCoin),
-		BrokenRule: account.Rule(byte(255)),
-	}
-
-	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/"+acctIDStr, nil)
-	r.RemoteAddr = "localhost"
-
-	mux.ServeHTTP(w, r)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusOK)
-	}
-
-	exp := `{
-    "accountid": "0a9912205b2cbab0c25c2de30bda9074de0ae23b065489a99199bad763f102cc",
-    "pubkey": "0204988a498d5d19514b217e872b4dbd1cf071d365c4879e64ed5919881c97eb19",
-    "feeaddress": "DsdQFmH3azyoGKJHt2ArJNxi35LCEgMqi8k",
-    "feecoin": "6e515ff861f2016fd0da2f3eccdf8290c03a9d116bfba2f6729e648bdc6e5aed00000005",
-    "brokenrule": 255
-}
-`
-	if exp != w.Body.String() {
-		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
-	}
-
-	// ok, upper case account id
-	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/"+strings.ToUpper(acctIDStr), nil)
-	r.RemoteAddr = "localhost"
-
-	mux.ServeHTTP(w, r)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusOK)
-	}
-	if exp != w.Body.String() {
-		t.Errorf("unexpected response %q, wanted %q", w.Body.String(), exp)
-	}
-
-	// acct id is not hex
-	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/nothex", nil)
-	r.RemoteAddr = "localhost"
-
-	mux.ServeHTTP(w, r)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusBadRequest)
-	}
-
-	// acct id wrong length
-	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/"+acctIDStr[2:], nil)
-	r.RemoteAddr = "localhost"
-
-	mux.ServeHTTP(w, r)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusBadRequest)
-	}
-
-	// core.Account error
-	core.accountErr = errors.New("error")
-
-	w = httptest.NewRecorder()
-	r, _ = http.NewRequest("GET", "https://localhost/account/"+acctIDStr, nil)
-	r.RemoteAddr = "localhost"
-
-	mux.ServeHTTP(w, r)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("apiAccount returned code %d, expected %d", w.Code, http.StatusInternalServerError)
+		if w.Code != test.wantCode {
+			t.Fatalf("%q: apiAccountInfo returned code %d, expected %d", test.name, w.Code, test.wantCode)
+		}
+		if w.Code == http.StatusOK {
+			res := new(AccountInfoResult)
+			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
+				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
+			}
+		}
 	}
 }
 

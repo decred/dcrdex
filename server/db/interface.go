@@ -80,6 +80,7 @@ type DEXArchivist interface {
 	AccountArchiver
 	MatchArchiver
 	SwapArchiver
+	PenaltyArchiver
 }
 
 // OrderArchiver is the interface required for storage and retrieval of all
@@ -384,4 +385,22 @@ func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInf
 	}
 
 	return order.ValidateOrder(ord, status, mkt.LotSize) == nil
+}
+
+// PenaltyArchiver is the interface required for storage and retrieval of all
+// Penalty data.
+type PenaltyArchiver interface {
+	// InsertPenalty adds penalty to the penalties table. The passed ID and
+	// Forgiven fields are ignored.
+	InsertPenalty(penalty *Penalty) error
+	// ForgivePenalty forgives a penalty.
+	ForgivePenalty(id int64) error
+	// ForgivePenalties forgives all penalties currenty held by a user.
+	ForgivePenalties(aid account.AccountID) error
+	// Penalties returns penalties that are currently in effect for a user.
+	// Forgiven and expired penalties are not included.
+	Penalties(aid account.AccountID) (penalties []*Penalty, err error)
+	// AllPenalties returns all penalties for a user, even those that are
+	// forgiven or expired.
+	AllPenalties(aid account.AccountID) (penalties []*Penalty, err error)
 }
