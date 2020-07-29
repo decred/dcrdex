@@ -578,14 +578,44 @@ func (db *BoltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 	})
 }
 
-// ActiveDEXMatches retrieves the matches that are in an active state for a
-// specified DEX, which is any state except order.MatchComplete.
-func (db *BoltDB) ActiveDEXMatches(dex string) ([]*dexdb.MetaMatch, error) {
+// DEXOrdersWithActiveMatches retrieves order IDs for any order that has active
+// matches, regardless of whether the order itself is in an active state.
+func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error) {
 	dexB := []byte(dex)
-	return db.filteredMatches(func(mBkt *bbolt.Bucket) bool {
-		status := mBkt.Get(statusKey)
-		return bytes.Equal(dexB, mBkt.Get(dexKey)) && (len(status) != 1 || status[0] != uint8(order.MatchComplete))
+	idMap := make(map[order.OrderID]bool)
+	err := db.matchesView(func(master *bbolt.Bucket) error {
+		return master.ForEach(func(k, _ []byte) error {
+			mBkt := master.Bucket(k)
+			if mBkt == nil {
+				return fmt.Errorf("match %x bucket is not a bucket", k)
+			}
+			if !bytes.Equal(dexB, mBkt.Get(dexKey)) {
+				return nil
+			}
+			status := mBkt.Get(statusKey)
+			if len(status) != 1 {
+				log.Errorf("match %x has no status set", k)
+				return nil
+			}
+			if status[0] == uint8(order.MatchComplete) {
+				return nil
+			}
+			oidB := mBkt.Get(orderIDKey)
+			var oid order.OrderID
+			copy(oid[:], oidB)
+			idMap[oid] = true
+			return nil
+		})
 	})
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]order.OrderID, 0, len(idMap))
+	for id := range idMap {
+		ids = append(ids, id)
+	}
+	return ids, nil
+
 }
 
 // MatchesForOrder retrieves the matches for the specified order ID.

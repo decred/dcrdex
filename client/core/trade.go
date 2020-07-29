@@ -272,7 +272,7 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 	}
 
 	for _, match := range t.matches {
-		if !ids[match.id] {
+		if !ids[match.id] && match.MetaData.Status < order.MatchComplete {
 			log.Debugf("missing match: %v", match.id)
 			missing = append(missing, match.id)
 			match.failErr = fmt.Errorf("order not reported by the server on connect")

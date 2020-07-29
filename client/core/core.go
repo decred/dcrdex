@@ -2086,6 +2086,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		return nil, fmt.Errorf("database error when fetching orders for %s: %x", dc.acct.host, err)
 	}
 	log.Infof("Loaded %d active orders.", len(dbOrders))
+
 	// It's possible for an order to not be active, but still have active matches.
 	// Grab the orders for those too.
 	haveOrder := func(oid order.OrderID) bool {
@@ -2097,20 +2098,20 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 		return false
 	}
 
-	activeDBMatches, err := c.db.ActiveDEXMatches(dc.acct.host)
+	activeMatchOrders, err := c.db.DEXOrdersWithActiveMatches(dc.acct.host)
 	if err != nil {
-		return nil, fmt.Errorf("database error fetching active matches for %s: %v", dc.acct.host, err)
+		return nil, fmt.Errorf("database error fetching active match orders for %s: %v", dc.acct.host, err)
 	}
-	log.Infof("Loaded %d active matches.", len(activeDBMatches))
-	for _, dbMatch := range activeDBMatches {
-		oid := dbMatch.Match.OrderID
-		if !haveOrder(oid) {
-			dbOrder, err := c.db.Order(oid)
-			if err != nil {
-				return nil, fmt.Errorf("database error fetching order %s for active match %s at %s: %v", oid, dbMatch.Match.MatchID, dc.acct.host, err)
-			}
-			dbOrders = append(dbOrders, dbOrder)
+	log.Infof("Loaded %d active match orders", len(activeMatchOrders))
+	for _, oid := range activeMatchOrders {
+		if haveOrder(oid) {
+			continue
 		}
+		dbOrder, err := c.db.Order(oid)
+		if err != nil {
+			return nil, fmt.Errorf("database error fetching order %s for %s: %v", oid, dc.acct.host, err)
+		}
+		dbOrders = append(dbOrders, dbOrder)
 	}
 
 	cancels := make(map[order.OrderID]*order.CancelOrder)
