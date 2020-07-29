@@ -50,7 +50,7 @@ func (mid *MatchID) Scan(src interface{}) error {
 	return fmt.Errorf("cannot convert %T to OrderID", src)
 }
 
-var zeroMatchID = MatchID{}
+var zeroMatchID MatchID
 
 // MatchStatus represents the current negotiation step for a match.
 type MatchStatus uint8

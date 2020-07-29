@@ -75,7 +75,7 @@ func (oid *OrderID) Scan(src interface{}) error {
 	return fmt.Errorf("cannot convert %T to OrderID", src)
 }
 
-var zeroOrderID = OrderID{}
+var zeroOrderID OrderID
 
 // IsZero returns true if the order ID is zeros.
 func (oid OrderID) IsZero() bool {

@@ -337,6 +337,11 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 		if err != nil {
 			return fmt.Errorf("order bucket error: %v", err)
 		}
+		var linkedB []byte
+		if !md.LinkedOrder.IsZero() {
+			linkedB = md.LinkedOrder[:]
+		}
+
 		return newBucketPutter(oBkt).
 			put(baseKey, uint32Bytes(ord.Base())).
 			put(quoteKey, uint32Bytes(ord.Quote())).
@@ -345,7 +350,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(updateTimeKey, uint64Bytes(timeNow())).
 			put(proofKey, md.Proof.Encode()).
 			put(changeKey, md.ChangeCoin).
-			put(linkedKey, md.LinkedOrder[:]).
+			put(linkedKey, linkedB).
 			put(orderKey, order.EncodeOrder(ord)).
 			err()
 	})
@@ -498,7 +503,7 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 	}
 
 	var linkedID order.OrderID
-	copy(linkedID[:], getCopy(oBkt, linkedKey))
+	copy(linkedID[:], oBkt.Get(linkedKey))
 
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
