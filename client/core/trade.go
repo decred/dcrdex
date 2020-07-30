@@ -660,11 +660,21 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	// Issue a refund if our swap's locktime has expired.
-	swapLocktimeExpired, err := wallet.LocktimeExpired(proof.Script)
+	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(proof.Script)
 	if err != nil {
 		log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
 			dbMatch.Side, t.ID(), match.id, err)
 		return false
+	}
+	if !swapLocktimeExpired {
+		swapCoinID := proof.TakerSwap
+		if dbMatch.Side == order.Maker {
+			swapCoinID = proof.MakerSwap
+		}
+		from := t.wallets.fromAsset
+		log.Infof("Contract for match %v with swap coin %v (%s) has an expiry time of %v (%v), not yet expired.",
+			match.id, coinIDString(from.ID, swapCoinID), from.Symbol,
+			contractExpiry, time.Until(contractExpiry).Round(time.Second))
 	}
 	return swapLocktimeExpired
 }
@@ -1201,7 +1211,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		}
 
 		swapCoinString := coinIDString(refundAsset.ID, swapCoinID)
-		log.Infof("failed match, %s, refunding %s contract %s",
+		log.Infof("Failed match, %s, refunding %s contract %s",
 			matchFailureReason, unbip(refundAsset.ID), swapCoinString)
 
 		refundCoin, err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund)
