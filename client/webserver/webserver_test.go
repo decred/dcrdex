@@ -253,13 +253,11 @@ func newLink() *tLink {
 	}
 }
 
-var tPort int = 5142
-
 func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
-	s, err := New(c, fmt.Sprintf("localhost:%d", tPort), tLogger, false)
+	s, err := New(c, "127.0.0.1:0", tLogger, false)
 	if err != nil {
 		t.Errorf("error creating server: %v", err)
 	}
@@ -326,10 +324,11 @@ func TestConnectStart(t *testing.T) {
 }
 
 func TestConnectBindError(t *testing.T) {
-	_, _, shutdown, _ := newTServer(t, true)
+	s0, _, shutdown, _ := newTServer(t, true)
 	defer shutdown()
 
-	s, err := New(&TCore{}, fmt.Sprintf("localhost:%d", tPort), tLogger, false)
+	tAddr := s0.addr
+	s, err := New(&TCore{}, tAddr, tLogger, false)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}
@@ -653,7 +652,6 @@ func TestClientMap(t *testing.T) {
 	// RPCServer's client map.
 	<-resp
 
-	// While we're here, check that the client is properly mapped.
 	var cl *wsClient
 	s.mtx.Lock()
 	i := len(s.clients)

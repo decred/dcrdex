@@ -77,16 +77,21 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 		return s.handleMessage(cl, msg)
 	})
 
+	// Lock the clients map before starting the connection listening so that
+	// synchronized map accesses are guaranteed to reflect this connection.
+	// Also, ensuring only live connections are in the clients map notify from
+	// sending before it is connected.
+	s.mtx.Lock()
 	cm := dex.NewConnectionMaster(cl)
 	err := cm.Connect(s.ctx)
 	if err != nil {
+		s.mtx.Unlock()
 		log.Errorf("websocketHandler client Connect: %v")
 		return
 	}
 
 	// Add the client to the map only after it is connected so that notify does
-	// not attempt to send to this client before the wsClient is ready.
-	s.mtx.Lock()
+	// not attempt to send to non-existent connection.
 	s.clients[cl.cid] = cl
 	s.mtx.Unlock()
 
