@@ -16,7 +16,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -270,6 +269,8 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Can't listen on %s. web server quitting: %v", s.addr, err)
 	}
+	// Update the listening address in case a :0 was provided.
+	s.addr = listener.Addr().String()
 
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
@@ -473,15 +474,4 @@ func writeJSONWithStatus(w http.ResponseWriter, thing interface{}, code int, ind
 	if err := encoder.Encode(thing); err != nil {
 		log.Infof("JSON encode error: %v", err)
 	}
-}
-
-// filesExists reports whether the named file or directory exists.
-func fileExists(name string) bool {
-	_, err := os.Stat(name)
-	return !os.IsNotExist(err)
-}
-
-// Create a unique ID for a market.
-func marketID(base, quote uint32) string {
-	return strconv.Itoa(int(base)) + "_" + strconv.Itoa(int(quote))
 }
