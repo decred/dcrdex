@@ -76,6 +76,7 @@ const (
 	// their redemption transaction. The DEX has validated the redemption and
 	// sent the details to the maker.
 	MatchComplete // 4
+	//MatchRefunded // 5?
 )
 
 // String satisfies fmt.Stringer.

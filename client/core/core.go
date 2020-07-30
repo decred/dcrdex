@@ -2374,6 +2374,11 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 	errs := newErrorSet(dc.acct.host + ": ")
 	ready := make([]*trackedTrade, 0, len(dc.trades))
 	for _, trade := range trades {
+		// The DB loads refunded and revoked matches, so filter those out.
+		if !trade.isActive() {
+			log.Tracef("Loaded inactive trade %v from the DB.", trade.ID())
+			continue
+		}
 		base, quote := trade.Base(), trade.Quote()
 		_, baseFailed := failed[base]
 		_, quoteFailed := failed[quote]
@@ -2952,7 +2957,12 @@ out:
 			counts := make(assetCounter)
 			dc.tradeMtx.RLock()
 			log.Debugf("ticking %d trades", len(dc.trades))
-			for _, trade := range dc.trades {
+			for oid, trade := range dc.trades {
+				if !trade.isActive() {
+					log.Infof("Retiring inactive order %v", oid)
+					delete(dc.trades, oid)
+					continue
+				}
 				newCounts, err := trade.tick()
 				if err != nil {
 					log.Error(err)

@@ -579,13 +579,41 @@ func (t *trackedTrade) isActive() bool {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 
+	// Status of the order itself.
 	if t.metaData.Status == order.OrderStatusBooked || t.metaData.Status == order.OrderStatusEpoch {
 		return true
 	}
+
+	// Status of all matches for the order.
 	for _, match := range t.matches {
-		if match.MetaData.Status < order.MatchComplete {
-			return true
+		// log.Tracef("Checking match %v (%v) in status %v. Refund coin: %v, Script: %x", match.id,
+		// 	match.Match.Side, match.MetaData.Status, match.MetaData.Proof.RefundCoin, match.MetaData.Proof.Script)
+		if match.MetaData.Status == order.MatchComplete {
+			continue
 		}
+
+		// Refunded matches are inactive regardless of status.
+		if len(match.MetaData.Proof.RefundCoin) > 0 {
+			continue
+		}
+
+		// Revoked matches may need to be refunded or auto-redeemed first.
+		if match.MetaData.Proof.IsRevoked {
+			// - NewlyMatched requires no further action from either side
+			// - MakerSwapCast requires no further action from the taker
+			// - (TakerSwapCast requires action on both sides)
+			// - MakerRedeemed requires no further action from the maker
+			status, side := match.MetaData.Status, match.Match.Side
+			if status == order.NewlyMatched ||
+				(status == order.MakerSwapCast && side == order.Taker) ||
+				(status == order.MakerRedeemed && side == order.Maker) {
+				log.Debugf("Revoked match %v (%v) in status %v considered inactive.",
+					match.id, side, status)
+				continue
+			}
+		}
+
+		return true
 	}
 	return false
 }
@@ -1233,6 +1261,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 			refundedQty += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
 		}
 		proof.RefundCoin = []byte(refundCoin)
+		//match.SetStatus(order.MatchRefunded)
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			errs.add("error storing match info in database: %v", err)

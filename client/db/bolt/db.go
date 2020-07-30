@@ -622,6 +622,25 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 			if status[0] == uint8(order.MatchComplete) {
 				return nil
 			}
+
+			// Exclude refunded swaps.
+			// proofB := getCopy(mBkt, proofKey)
+			// if len(proofB) == 0 {
+			// 	log.Errorf("empty match proof")
+			// 	return nil
+			// }
+			// proof, errM := dexdb.DecodeMatchProof(proofB)
+			// if errM != nil {
+			// 	log.Errorf("error decoding proof: %v", errM)
+			// 	return nil
+			// }
+			// if len(proof.RefundCoin) > 0 {
+			// 	return nil
+			// }
+
+			// TODO: Could also filter out certain revoked matches depending on
+			// status. See (*trackedTrade).isActive.
+
 			oidB := mBkt.Get(orderIDKey)
 			var oid order.OrderID
 			copy(oid[:], oidB)
