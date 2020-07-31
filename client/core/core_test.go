@@ -276,7 +276,6 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 }
 
 func (tdb *TDB) DisableAccount(ai *db.AccountInfo) error {
-	tdb.acct.Disabled = true
 	return nil
 }
 
@@ -669,6 +668,7 @@ func newTestRig() *testRig {
 		Host: "somedex.com",
 	}
 	tdb.acct = ai
+	tdb.accts = append(tdb.accts, ai)
 
 	// Set the global waiter expiration, and start the waiter.
 	queue := wait.NewTickerQueue(time.Millisecond * 5)
@@ -1467,7 +1467,7 @@ func TestLogin(t *testing.T) {
 	rig.acct.isPaid = false
 	rig.queueConnect(nil)
 	_, err = tCore.Login(tPW)
-	if err != nil || !rig.acct.authed() {
+	if err != nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
 	}
 	if rig.acct.locked() {
@@ -1561,12 +1561,6 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 		if dexStat.Authed || dexStat.AuthErr == "" || !strings.Contains(dexStat.AuthErr, expectedErrorMessage) {
 			t.Fatalf("expected account not found error")
 		}
-	}
-	if !rig.db.acct.Disabled {
-		t.Fatalf("expected client account to be disabled")
-	}
-	if len(tCore.conns) > 0 {
-		t.Fatalf("expected empty dex connections")
 	}
 }
 
@@ -3015,6 +3009,7 @@ func TestReadConnectMatches(t *testing.T) {
 	if notes["order"][1].Subject() != "Match resolution error" {
 		t.Fatalf("no core notification sent for unknown matches")
 	}
+
 }
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {

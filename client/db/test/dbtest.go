@@ -9,16 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"decred.org/dcrdex/server/account"
-	"github.com/decred/dcrd/crypto/blake256"
-
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/db"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
-
-var HashFunc = blake256.Sum256
 
 // Generate a public key on the secp256k1 curve.
 func randomPubKey() *secp256k1.PublicKey {
@@ -37,18 +32,12 @@ func randString(maxLen int) string {
 
 // RandomAccountInfo creates an AccountInfo with random values.
 func RandomAccountInfo() *db.AccountInfo {
-	clientPubKey := randomPubKey()
-	h := HashFunc(clientPubKey.Serialize())
-	clientPubKeyHashed := HashFunc(h[:])
-	var id account.AccountID = clientPubKeyHashed
 	return &db.AccountInfo{
-		Host:         ordertest.RandomAddress(),
-		EncKey:       randBytes(32),
-		DEXPubKey:    randomPubKey(),
-		FeeCoin:      randBytes(32),
-		Cert:         randBytes(100),
-		ClientPubKey: clientPubKey,
-		ID:           id,
+		Host:      ordertest.RandomAddress(),
+		EncKey:    randBytes(32),
+		DEXPubKey: randomPubKey(),
+		FeeCoin:   randBytes(32),
+		Cert:      randBytes(100),
 	}
 }
 

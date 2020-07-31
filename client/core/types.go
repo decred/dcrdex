@@ -271,13 +271,11 @@ func newDEXAccount(acctInfo *db.AccountInfo) *dexAccount {
 
 func (a *dexAccount) dbInfo() *db.AccountInfo {
 	return &db.AccountInfo{
-		Host:         a.host,
-		Cert:         a.cert,
-		EncKey:       a.encKey,
-		DEXPubKey:    a.dexPubKey,
-		FeeCoin:      a.feeCoin,
-		ClientPubKey: a.privKey.PubKey(),
-		ID:           a.id,
+		Host:      a.host,
+		Cert:      a.cert,
+		EncKey:    a.encKey,
+		DEXPubKey: a.dexPubKey,
+		FeeCoin:   a.feeCoin,
 	}
 }
 
