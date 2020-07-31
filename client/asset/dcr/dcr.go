@@ -75,8 +75,8 @@ var (
 		{
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
-			Description:  "Decred's 'fallbackfee' rate. Units: atoms/kB",
-			DefaultValue: defaultFee * 1000,
+			Description:  "Decred's 'fallbackfee' rate. Units: DCR/kB",
+			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		// {
 		// 	Key:         "txsplit",
@@ -316,12 +316,7 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 		return nil, err
 	}
 
-	feesPerByte := toAtoms(walletCfg.FallbackFeeRate / 1000)
-	if feesPerByte == 0 {
-		feesPerByte = defaultFee
-	}
-
-	dcr := unconnectedWallet(cfg, walletCfg, feesPerByte, logger)
+	dcr := unconnectedWallet(cfg, walletCfg, logger)
 
 	logger.Infof("Setting up new DCR wallet at %s with TLS certificate %q.",
 		walletCfg.RPCListen, walletCfg.RPCCert)
@@ -338,7 +333,15 @@ func NewWallet(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) 
 
 // unconnectedWallet returns an ExchangeWallet without a node. The node should
 // be set before use.
-func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, fallbackFeesPerByte uint64, logger dex.Logger) *ExchangeWallet {
+func unconnectedWallet(cfg *asset.WalletConfig, dcrCfg *Config, logger dex.Logger) *ExchangeWallet {
+	// If set in the user config, the fallback fee will be in units of DCR/kB.
+	// Convert to atoms/B.
+	fallbackFeesPerByte := toAtoms(dcrCfg.FallbackFeeRate / 1000)
+	if fallbackFeesPerByte == 0 {
+		fallbackFeesPerByte = defaultFee
+	}
+	logger.Tracef("fallback fees set at %d atoms/byte", fallbackFeesPerByte)
+
 	return &ExchangeWallet{
 		log:             logger,
 		acct:            cfg.Settings["account"],

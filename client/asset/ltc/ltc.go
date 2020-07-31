@@ -54,8 +54,8 @@ var (
 		{
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
-			Description:  "Litecoin's 'fallbackfee' rate. Units: Sats/kB",
-			DefaultValue: defaultFee * 1000,
+			Description:  "Litecoin's 'fallbackfee' rate. Units: LTC/kB",
+			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		// {
 		// 	Key:         "txsplit",

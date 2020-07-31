@@ -238,7 +238,7 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		WalletInfo:         WalletInfo,
 		DefaultFallbackFee: defaultFee,
 	}
-	wallet := newWallet(cfg, &dexbtc.Config{}, defaultFee, client)
+	wallet := newWallet(cfg, &dexbtc.Config{}, client)
 	go wallet.run(walletCtx)
 
 	return wallet, client, shutdown

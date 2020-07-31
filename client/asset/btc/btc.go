@@ -83,8 +83,8 @@ var (
 		{
 			Key:          fallbackFeeKey,
 			DisplayName:  "Fallback fee rate",
-			Description:  "Bitcoin's 'fallbackfee' rate. Units: Sats/kB",
-			DefaultValue: defaultFee * 1000,
+			Description:  "Bitcoin's 'fallbackfee' rate. Units: BTC/kB",
+			DefaultValue: defaultFee * 1000 / 1e8,
 		},
 		// {
 		// 	Key:         "txsplit",
@@ -365,19 +365,22 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 		return nil, fmt.Errorf("error creating BTC RPC client: %v", err)
 	}
 
-	feesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
-	if feesPerByte == 0 {
-		feesPerByte = cfg.DefaultFallbackFee
-	}
-
-	btc := newWallet(cfg, btcCfg, feesPerByte, client)
+	btc := newWallet(cfg, btcCfg, client)
 	btc.client = client
 
 	return btc, nil
 }
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
-func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, fallbackFeesPerByte uint64, node rpcClient) *ExchangeWallet {
+func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *ExchangeWallet {
+
+	// If set in the user config, the fallback fee will be in conventional units
+	// per kB, e.g. BTC/kB. Translate that to sats/B.
+	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
+	if fallbackFeesPerByte == 0 {
+		fallbackFeesPerByte = cfg.DefaultFallbackFee
+	}
+	cfg.Logger.Tracef("fallback fees set at %d %s/byte", fallbackFeesPerByte, cfg.WalletInfo.Units)
 
 	return &ExchangeWallet{
 		node:              node,
