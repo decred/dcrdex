@@ -276,6 +276,7 @@ func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
 }
 
 func (tdb *TDB) DisableAccount(ai *db.AccountInfo) error {
+	tdb.accts = nil
 	return nil
 }
 
@@ -1561,6 +1562,9 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 		if dexStat.Authed || dexStat.AuthErr == "" || !strings.Contains(dexStat.AuthErr, expectedErrorMessage) {
 			t.Fatalf("expected account not found error")
 		}
+	}
+	if len(rig.core.conns) > 0 {
+		t.Fatalf("expected rig.core.conns to be empty due to disabling the account")
 	}
 }
 
