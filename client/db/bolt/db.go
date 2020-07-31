@@ -337,6 +337,28 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	return nil
 }
 
+// DisabledAccount gets the AccountInfo from disabledAccount associated with
+// the specified EncKey.
+func (db *BoltDB) DisabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
+	var acctInfo *dexdb.AccountInfo
+	return acctInfo, db.disabledAcctsView(func(accts *bbolt.Bucket) error {
+		acct := accts.Bucket(encKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for key")
+		}
+		acctB := getCopy(acct, accountKey)
+		if acctB == nil {
+			return fmt.Errorf("empty account found for key")
+		}
+		var err error
+		acctInfo, err = dexdb.DecodeAccountInfo(acctB)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 // AccountPaid marks the account as paid by setting the "fee proof".
 func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof) error {
 	acctKey := []byte(proof.Host)
@@ -357,6 +379,11 @@ func (db *BoltDB) acctsView(f bucketFunc) error {
 // acctsUpdate is a convenience function for updating the account bucket.
 func (db *BoltDB) acctsUpdate(f bucketFunc) error {
 	return db.withBucket(accountsBucket, db.Update, f)
+}
+
+// disabledAcctsView is a convenience function for reading from the disabledAccounts bucket.
+func (db *BoltDB) disabledAcctsView(f bucketFunc) error {
+	return db.withBucket(disabledAccountsBucket, db.View, f)
 }
 
 // acctsDisable is a convenience function for inserting into the disabledAccounts bucket.
