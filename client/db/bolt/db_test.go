@@ -223,17 +223,16 @@ func TestAccounts(t *testing.T) {
 }
 
 func TestDeleteAccount(t *testing.T) {
-
 	boltdb := newTestDB(t)
 	acct := dbtest.RandomAccountInfo()
 	host := acct.Host
 	boltdb.CreateAccount(acct)
 
 	err := boltdb.DeleteAccount(acct)
+
 	if err != nil {
 		t.Fatalf("Unexpected DeleteAccount error: %v", err)
 	}
-
 	actualAccount, err := boltdb.Account(host)
 	if err == nil {
 		t.Fatalf("Expected account not found error")
@@ -251,6 +250,7 @@ func TestDisableAccount(t *testing.T) {
 	boltdb.CreateAccount(acct)
 
 	err := boltdb.DisableAccount(acct)
+
 	if err != nil {
 		t.Fatalf("Unexpected DisableAccount error: %v", err)
 	}
@@ -273,10 +273,10 @@ func TestDisabledAccount(t *testing.T) {
 	boltdb.CreateAccount(acct)
 
 	err := boltdb.DisableAccount(acct)
+
 	if err != nil {
 		t.Fatalf("Unexpected DisableAccount error: %v", err)
 	}
-
 	actualDisabledAccount, err := boltdb.DisabledAccount(acct.EncKey)
 	if err != nil {
 		t.Fatalf("Unexpected DisabledAccount error: %v", err)
