@@ -217,8 +217,9 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 }
 
 // wsUnmarket is the handler for the 'unmarket' websocket endpoint. This empty
-// message is sent when the user leaves the markets page. Unsubscribes from the
-// current market.
+// message is sent when the user leaves the markets page. This closes the feed,
+// and potentially unsubscribes from orderbook with the server if there are no
+// other consumers
 func wsUnmarket(_ *WebServer, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 	cl.mtx.Lock()
 	defer cl.mtx.Unlock()
