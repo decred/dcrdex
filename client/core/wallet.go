@@ -17,7 +17,6 @@ import (
 type xcWallet struct {
 	asset.Wallet
 	connector *dex.ConnectionMaster
-	Account   string
 	AssetID   uint32
 	mtx       sync.RWMutex
 	lockTime  time.Time
@@ -67,7 +66,6 @@ func (w *xcWallet) state() *WalletState {
 		Running: w.connector.On(),
 		Balance: w.balance,
 		Address: w.address,
-		FeeRate: winfo.DefaultFeeRate, // Withdraw fee, not swap.
 		Units:   winfo.Units,
 	}
 }

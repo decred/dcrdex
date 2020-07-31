@@ -53,7 +53,6 @@ func RandomBalance() *asset.Balance {
 func RandomWallet() *db.Wallet {
 	return &db.Wallet{
 		AssetID: rand.Uint32(),
-		Account: ordertest.RandomAddress(),
 		Settings: map[string]string{
 			ordertest.RandomAddress(): ordertest.RandomAddress(),
 			ordertest.RandomAddress(): ordertest.RandomAddress(),
@@ -245,9 +244,6 @@ func MustCompareOrderProof(t testKiller, p1, p2 *db.OrderProof) {
 func MustCompareWallets(t testKiller, w1, w2 *db.Wallet) {
 	if w1.AssetID != w2.AssetID {
 		t.Fatalf("AssetID mismatch. %d != %d", w1.AssetID, w2.AssetID)
-	}
-	if w1.Account != w2.Account {
-		t.Fatalf("Account mismatch. %s != %s", w1.Account, w2.Account)
 	}
 	if len(w1.Settings) != len(w2.Settings) {
 		t.Fatalf("Settings mismatch. %d != %s", len(w1.Settings), len(w2.Settings))

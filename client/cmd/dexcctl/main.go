@@ -68,7 +68,7 @@ var promptPasswords = map[string][]string{
 var optionalTextFiles = map[string]int{
 	"getfee":    1,
 	"register":  2,
-	"newwallet": 2,
+	"newwallet": 1,
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting

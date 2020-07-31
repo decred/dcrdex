@@ -5,11 +5,13 @@ package rpcserver
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 )
@@ -61,8 +63,7 @@ type openWalletForm struct {
 // newWalletForm is information necessary to create a new wallet.
 type newWalletForm struct {
 	assetID    uint32
-	account    string
-	configText string
+	config     map[string]string
 	walletPass encode.PassBytes
 	appPass    encode.PassBytes
 }
@@ -178,7 +179,7 @@ func parseLoginArgs(params *RawParams) (encode.PassBytes, error) {
 }
 
 func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
-	if err := checkNArgs(params, []int{2}, []int{2, 3}); err != nil {
+	if err := checkNArgs(params, []int{2}, []int{1, 3}); err != nil {
 		return nil, err
 	}
 	assetID, err := checkUIntArg(params.Args[0], "assetID", 32)
@@ -189,10 +190,25 @@ func parseNewWalletArgs(params *RawParams) (*newWalletForm, error) {
 		appPass:    params.PWArgs[0],
 		walletPass: params.PWArgs[1],
 		assetID:    uint32(assetID),
-		account:    params.Args[1],
+	}
+	if len(params.Args) > 1 {
+		req.config, err = config.Parse([]byte(params.Args[1]))
+		if err != nil {
+			return nil, fmt.Errorf("config parse error: %v", err)
+		}
 	}
 	if len(params.Args) > 2 {
-		req.configText = params.Args[2]
+		cfg := make(map[string]string)
+		err := json.Unmarshal([]byte(params.Args[2]), &cfg)
+		if err != nil {
+			return nil, fmt.Errorf("JSON parse error: %v", err)
+		}
+		for key, val := range cfg {
+			if fileVal, found := req.config[key]; found {
+				log.Infof("Overriding config file setting %s=%s with %s", key, fileVal, val)
+			}
+			req.config[key] = val
+		}
 	}
 	return req, nil
 }

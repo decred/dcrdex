@@ -11,6 +11,8 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/config"
+	"decred.org/dcrdex/dex/encode"
 )
 
 // apiGetFee is the handler for the '/getfee' API request.
@@ -81,9 +83,8 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 	}
 	// Wallet does not exist yet. Try to create it.
 	err := s.core.CreateWallet(form.AppPW, form.Pass, &core.WalletForm{
-		AssetID:    form.AssetID,
-		Account:    form.Account,
-		ConfigText: form.Config,
+		AssetID: form.AssetID,
+		Config:  form.Config,
 	})
 	if err != nil {
 		s.writeAPIError(w, "error creating %s wallet: %v", unbip(form.AssetID), err)
@@ -258,6 +259,90 @@ func (s *WebServer) apiGetBalance(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, resp, s.indent)
 
+}
+
+// apiParseConfig parses an INI config file into a map[string]string.
+func (s *WebServer) apiParseConfig(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		ConfigText string `json:"configtext"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	configMap, err := config.Parse([]byte(form.ConfigText))
+	if err != nil {
+		s.writeAPIError(w, "parse error: %v", err)
+		return
+	}
+	resp := &struct {
+		OK  bool              `json:"ok"`
+		Map map[string]string `json:"map"`
+	}{
+		OK:  true,
+		Map: configMap,
+	}
+	writeJSON(w, resp, s.indent)
+}
+
+// apiWalletSettings fetches the currently stored wallet configuration settings.
+func (s *WebServer) apiWalletSettings(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	settings, err := s.core.WalletSettings(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, "error setting wallet settings: %v", err)
+		return
+	}
+	writeJSON(w, &struct {
+		OK  bool              `json:"ok"`
+		Map map[string]string `json:"map"`
+	}{
+		OK:  true,
+		Map: settings,
+	}, s.indent)
+}
+
+// apiSetWalletPass updates the current password for the specified wallet.
+func (s *WebServer) apiSetWalletPass(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32           `json:"assetID"`
+		NewPW   encode.PassBytes `json:"newPW"`
+		AppPW   encode.PassBytes `json:"appPW"`
+	}{}
+	defer form.NewPW.Clear()
+	defer form.AppPW.Clear()
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.SetWalletPassword(form.AppPW, form.AssetID, form.NewPW)
+	if err != nil {
+		s.writeAPIError(w, "password change error: %v", err)
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
+}
+
+// apiReconfig sets new configuration details for the wallet.
+func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32            `json:"assetID"`
+		Config  map[string]string `json:"config"`
+		AppPW   encode.PassBytes  `json:"pw"`
+	}{}
+	defer form.AppPW.Clear()
+	if !readPost(w, r, form) {
+		return
+	}
+	err := s.core.ReconfigureWallet(form.AppPW, form.AssetID, form.Config)
+	if err != nil {
+		s.writeAPIError(w, "reconfig error: %v", err)
+		return
+	}
+	writeJSON(w, simpleAck(), s.indent)
 }
 
 // apiWithdraw handles the 'withdraw' API request.

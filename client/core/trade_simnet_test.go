@@ -34,6 +34,7 @@ import (
 	"decred.org/dcrdex/client/asset/dcr"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
@@ -86,13 +87,15 @@ func readWalletCfgsAndDexCert() error {
 	fp := filepath.Join
 	for _, client := range clients {
 		dcrw, btcw := client.dcrw(), client.btcw()
-		dcrw.config, err = readText(fp(user.HomeDir, "dextest", "dcr", dcrw.name, "w-"+dcrw.name+".conf"))
+		dcrw.config, err = config.Parse(fp(user.HomeDir, "dextest", "dcr", dcrw.name, "w-"+dcrw.name+".conf"))
 		if err == nil {
-			btcw.config, err = readText(fp(user.HomeDir, "dextest", "btc", "harness-ctl", btcw.name+".conf"))
+			btcw.config, err = config.Parse(fp(user.HomeDir, "dextest", "btc", "harness-ctl", btcw.name+".conf"))
 		}
 		if err != nil {
 			return err
 		}
+		dcrw.config["account"] = "default"
+		btcw.config["account"] = btcw.name
 	}
 
 	dexCertPath := filepath.Join(user.HomeDir, "dextest", "dcrdex", "rpc.cert")
@@ -120,9 +123,8 @@ func startClients(ctx context.Context) error {
 		// connect wallets
 		for assetID, wallet := range c.wallets {
 			err = c.core.CreateWallet(c.appPass, wallet.pass, &WalletForm{
-				AssetID:    assetID,
-				Account:    wallet.account,
-				ConfigText: wallet.config,
+				AssetID: assetID,
+				Config:  wallet.config,
 			})
 			if err != nil {
 				return err
@@ -619,7 +621,7 @@ type tWallet struct {
 	name    string
 	account string
 	pass    []byte
-	config  string
+	config  map[string]string
 }
 
 func dcrWallet(name string) *tWallet {

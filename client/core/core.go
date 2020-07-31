@@ -25,7 +25,6 @@ import (
 	"decred.org/dcrdex/client/db/bolt"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
-	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -876,16 +875,6 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return err
 	}
 
-	var settings map[string]string
-	if form.ConfigText == "" {
-		settings, err = config.Parse(walletInfo.DefaultConfigPath)
-	} else {
-		settings, err = config.Parse([]byte(form.ConfigText))
-	}
-	if err != nil {
-		return fmt.Errorf("error parsing config: %v", err)
-	}
-
 	// Remove unused key-values from parsed settings before saving to db.
 	// Especially necessary if settings was parsed from a config file, b/c
 	// config files usually define more key-values than we need.
@@ -895,17 +884,16 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	for _, option := range walletInfo.ConfigOpts {
 		expectedKeys[strings.ToLower(option.Key)] = true
 	}
-	for key := range settings {
+	for key := range form.Config {
 		if !expectedKeys[key] {
-			delete(settings, key)
+			delete(form.Config, key)
 		}
 	}
 
 	dbWallet := &db.Wallet{
 		AssetID:     assetID,
-		Account:     form.Account,
 		Balance:     &db.Balance{},
-		Settings:    settings,
+		Settings:    form.Config,
 		EncryptedPW: encPW,
 	}
 
@@ -949,9 +937,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 		return initErr("error getting wallet balance for %s: %v", symbol, err)
 	}
 
-	log.Infof("Created %s wallet. Account %q balance available = %d / "+
+	log.Infof("Created %s wallet. Balance available = %d / "+
 		"locked = %d, Deposit address = %s",
-		symbol, form.Account, balances.Available, balances.Locked, dbWallet.Address)
+		symbol, balances.Available, balances.Locked, dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -966,7 +954,6 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 	wallet := &xcWallet{
-		Account: dbWallet.Account,
 		AssetID: dbWallet.AssetID,
 		balance: dbWallet.Balance,
 		encPW:   dbWallet.EncryptedPW,
@@ -974,13 +961,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 		dbID:    dbWallet.ID(),
 	}
 	walletCfg := &asset.WalletConfig{
-		Account: dbWallet.Account,
-		// TODO: FallbackFeeRate:
-		// - Update the DB structure.
-		// - Allow it to be set on new wallet construction.
-		// - Allow it to be reconfigured.
-		FallbackFeeRate: 80,
-		Settings:        dbWallet.Settings,
+		Settings: dbWallet.Settings,
 		TipChange: func(err error) {
 			c.tipChange(dbWallet.AssetID, err)
 		},
@@ -1027,9 +1008,9 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("Connected to and unlocked %s wallet. Account %q balance available "+
+	log.Infof("Connected to and unlocked %s wallet. Balance available "+
 		"= %d / locked = %d, Deposit address = %s",
-		state.Symbol, wallet.Account, balances.Available, balances.Locked, state.Address)
+		state.Symbol, balances.Available, balances.Locked, state.Address)
 
 	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)
@@ -1077,6 +1058,147 @@ func (c *Core) CloseWallet(assetID uint32) error {
 func (c *Core) ConnectWallet(assetID uint32) error {
 	_, err := c.connectedWallet(assetID)
 	return err
+}
+
+// WalletSettings fetches the current wallet configuration details from the
+// database.
+func (c *Core) WalletSettings(assetID uint32) (map[string]string, error) {
+	wallet, found := c.wallet(assetID)
+	if !found {
+		return nil, newError(missingWalletErr, "%d -> %s wallet not found", assetID, unbip(assetID))
+	}
+	// Get the settings from the database.
+	dbWallet, err := c.db.Wallet(wallet.dbID)
+	if err != nil {
+		return nil, codedError(dbErr, err)
+	}
+	return dbWallet.Settings, nil
+}
+
+// ReconfigureWallet updates the wallet configuration settings.
+func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]string) error {
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return newError(authErr, "ReconfigureWallet password error: %v", err)
+	}
+	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
+	oldWallet, found := c.wallets[assetID]
+	if !found {
+		return newError(missingWalletErr, "%d -> %s wallet not found", assetID, unbip(assetID))
+	}
+	dbWallet := &db.Wallet{
+		AssetID:     oldWallet.AssetID,
+		Settings:    cfg,
+		Balance:     oldWallet.balance,
+		EncryptedPW: oldWallet.encPW,
+		Address:     oldWallet.address,
+	}
+	// Reload the wallet with the new settings.
+	wallet, err := c.loadWallet(dbWallet)
+	if err != nil {
+		return newError(walletErr, "error loading wallet for %d -> %s: %v", assetID, unbip(assetID), err)
+	}
+	// Must connect to ensure settings are good.
+	err = wallet.Connect(c.ctx)
+	if err != nil {
+		return newError(connectErr, "error connecting wallet: %v", err)
+	}
+	if oldWallet.unlocked() {
+		err := unlockWallet(wallet, crypter)
+		if err != nil {
+			wallet.Disconnect()
+			return newError(walletAuthErr, "wallet successfully connected, but errored unlocking. reconfiguration not saved: %v", err)
+		}
+	}
+	err = c.db.UpdateWallet(dbWallet)
+	if err != nil {
+		wallet.Disconnect()
+		return newError(dbErr, "error saving wallet configuration: %v", err)
+	}
+
+	c.connMtx.RLock()
+	for _, dc := range c.conns {
+		dc.tradeMtx.RLock()
+		for _, tracker := range dc.trades {
+			tracker.mtx.Lock()
+			if tracker.wallets.fromWallet.AssetID == assetID {
+				tracker.wallets.fromWallet = wallet
+			} else if tracker.wallets.toWallet.AssetID == assetID {
+				tracker.wallets.toWallet = wallet
+			}
+			tracker.mtx.Unlock()
+		}
+		dc.tradeMtx.RUnlock()
+	}
+	c.connMtx.RUnlock()
+
+	if oldWallet.connected() {
+		oldWallet.Disconnect()
+	}
+	c.wallets[assetID] = wallet
+
+	details := fmt.Sprintf("Configuration for %s wallet has been updated.", unbip(assetID))
+	c.notify(newWalletConfigNote("Wallet Configuration Updated", details, db.Success, wallet.state()))
+
+	return nil
+}
+
+// SetWalletPassword updates the (encrypted) password for the wallet.
+func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error {
+	// Check the app password and get the crypter.
+	crypter, err := c.encryptionKey(appPW)
+	if err != nil {
+		return newError(authErr, "SetWalletPassword password error: %v", err)
+	}
+
+	// Check that the specified wallet exists.
+	c.walletMtx.Lock()
+	defer c.walletMtx.Unlock()
+	wallet, found := c.wallets[assetID]
+	if !found {
+		return newError(missingWalletErr, "wallet for %s (%d) is not known", unbip(assetID), assetID)
+	}
+
+	// Connect if necessary.
+	wasConnected := wallet.connected()
+	if !wasConnected {
+		err := wallet.Connect(c.ctx)
+		if err != nil {
+			return newError(connectionErr, "SetWalletPassword connection error: %v", err)
+		}
+	}
+
+	// Check that the new password works.
+	wasUnlocked := wallet.unlocked()
+	err = wallet.Unlock(string(newPW), aYear)
+	if err != nil {
+		return newError(authErr, "Error unlocking wallet. Is the new password correct?: %v", err)
+	}
+
+	if !wasConnected {
+		wallet.Disconnect()
+	} else if !wasUnlocked {
+		wallet.Lock()
+	}
+
+	// Encrypt the password.
+	encPW, err := crypter.Encrypt(newPW)
+	if err != nil {
+		return newError(encryptionErr, "encryption error: %v", err)
+	}
+
+	err = c.db.SetWalletPassword(wallet.dbID, encPW)
+	if err != nil {
+		return codedError(dbErr, err)
+	}
+
+	wallet.encPW = encPW
+
+	details := fmt.Sprintf("Password for %s wallet has been updated.", unbip(assetID))
+	c.notify(newWalletConfigNote("Wallet Password Updated", details, db.Success, wallet.state()))
+
+	return nil
 }
 
 func (c *Core) isRegistered(host string) bool {
@@ -1223,7 +1345,7 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 	c.notify(newFeePaymentNote("Fee payment in progress", details, db.Success, dc.acct.host))
 
 	// Set up the coin waiter.
-	c.verifyRegistrationFee(wallet, dc, coin.ID(), 0)
+	c.verifyRegistrationFee(wallet.AssetID, dc, coin.ID(), 0)
 	c.refreshUser()
 	res := &RegisterResult{FeeID: coin.String(), ReqConfirms: dc.cfg.RegFeeConfirms}
 	return res, nil
@@ -1234,13 +1356,15 @@ func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
 // If the server acknowledgment is successful, the account is set as 'paid' in
 // the database. Notifications about confirmations increase, errors and success
 // events are broadcasted to all subscribers.
-func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID []byte, confs uint32) {
+func (c *Core) verifyRegistrationFee(assetID uint32, dc *dexConnection, coinID []byte, confs uint32) {
 	reqConfs := dc.cfg.RegFeeConfirms
 
 	dc.setRegConfirms(confs)
 	c.refreshUser()
 
 	trigger := func() (bool, error) {
+		// We already know the wallet is there by now.
+		wallet, _ := c.wallet(assetID)
 		confs, err := wallet.Confirmations(coinID)
 		if err != nil && !errors.Is(err, asset.CoinNotFoundError) {
 			return false, fmt.Errorf("Error getting confirmations for %s: %v", coinIDString(wallet.AssetID, coinID), err)
@@ -1256,7 +1380,8 @@ func (c *Core) verifyRegistrationFee(wallet *xcWallet, dc *dexConnection, coinID
 		return confs >= uint32(reqConfs), nil
 	}
 
-	c.wait(wallet.AssetID, trigger, func(err error) {
+	c.wait(assetID, trigger, func(err error) {
+		wallet, _ := c.wallet(assetID)
 		log.Debugf("Registration fee txn %s now has %d confirmations.", coinIDString(wallet.AssetID, coinID), reqConfs)
 		defer func() {
 			if err != nil {
@@ -1991,8 +2116,8 @@ func (c *Core) initialize() {
 			continue
 		}
 		// Wallet is loaded from the DB, but not yet connected.
-		log.Infof("Loaded %s wallet configuration. Account %q, Deposit address = %s",
-			unbip(aid), dbWallet.Account, dbWallet.Address)
+		log.Infof("Loaded %s wallet configuration. Deposit address = %s",
+			unbip(aid), dbWallet.Address)
 		c.wallets[dbWallet.AssetID] = wallet
 	}
 	numWallets := len(c.wallets)
@@ -2078,7 +2203,7 @@ func (c *Core) reFee(dcrWallet *xcWallet, dc *dexConnection) {
 		}
 		return
 	}
-	c.verifyRegistrationFee(dcrWallet, dc, acctInfo.FeeCoin, confs)
+	c.verifyRegistrationFee(dcrWallet.AssetID, dc, acctInfo.FeeCoin, confs)
 }
 
 // dbTrackers prepares trackedTrades based on active orders and matches in the
@@ -2266,7 +2391,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) (assetC
 			notifyErr("Wallet missing", "Wallet retrieval error for active order %s: %v", tracker.token(), err)
 			continue
 		}
+		tracker.mtx.Lock()
 		tracker.wallets = wallets
+		tracker.mtx.Unlock()
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
@@ -2562,7 +2689,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 
 	// Update market orders, and the balance to account for unlocked coins.
 	dc.refreshMarkets()
-	c.updateAssetBalance(tracker.wallets.fromAsset.ID)
+	c.updateAssetBalance(tracker.fromAssetID)
 	// Respond to DEX.
 	return dc.ack(msg.ID, matchID, &revocation)
 }

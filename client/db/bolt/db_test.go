@@ -281,6 +281,17 @@ func TestWallets(t *testing.T) {
 	if !reW.Balance.Stamp.After(w.Balance.Stamp) {
 		t.Fatalf("update time can't be right: %s > %s", reW.Balance.Stamp, w.Balance.Stamp)
 	}
+
+	// Test changing the password.
+	newPW := randBytes(32)
+	boltdb.SetWalletPassword(w.ID(), newPW)
+	reW, err = boltdb.Wallet(w.ID())
+	if err != nil {
+		t.Fatalf("failed to retreive wallet for new password check")
+	}
+	if !bytes.Equal(newPW, reW.EncryptedPW) {
+		t.Fatalf("failed to set password. wanted %x, got %x", newPW, reW.EncryptedPW)
+	}
 	t.Logf("%d milliseconds to read and compare %d Wallet", time.Since(tStart)/time.Millisecond, numToDo)
 
 }

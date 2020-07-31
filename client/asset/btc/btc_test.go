@@ -227,19 +227,18 @@ func newTxOutResult(script []byte, value uint64, confs int64) *btcjson.GetTxOutR
 func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	client := newTRPCClient()
 	walletCfg := &asset.WalletConfig{
-		Account:         "testwallet",
-		FallbackFeeRate: 20,
-		TipChange:       func(error) {},
+		TipChange: func(error) {},
 	}
 	walletCtx, shutdown := context.WithCancel(tCtx)
 	cfg := &BTCCloneCFG{
-		WalletCFG:   walletCfg,
-		Symbol:      "btc",
-		Logger:      tLogger,
-		ChainParams: &chaincfg.MainNetParams,
-		WalletInfo:  walletInfo,
+		WalletCFG:          walletCfg,
+		Symbol:             "btc",
+		Logger:             tLogger,
+		ChainParams:        &chaincfg.MainNetParams,
+		WalletInfo:         WalletInfo,
+		DefaultFallbackFee: defaultFee,
 	}
-	wallet := newWallet(cfg, client)
+	wallet := newWallet(cfg, &dexbtc.Config{}, client)
 	go wallet.run(walletCtx)
 
 	return wallet, client, shutdown

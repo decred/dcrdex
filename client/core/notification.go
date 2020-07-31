@@ -202,3 +202,17 @@ func newBalanceNote(assetID uint32, bal *db.Balance) *BalanceNote {
 		Balance:      bal,
 	}
 }
+
+// WalletConfigNote is a notification regarding a change in wallet
+// configuration settings.
+type WalletConfigNote struct {
+	db.Notification
+	Wallet *WalletState `json:"wallet"`
+}
+
+func newWalletConfigNote(subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
+	return &WalletConfigNote{
+		Notification: db.NewNotification("walletconfig", subject, details, severity),
+		Wallet:       walletState,
+	}
+}

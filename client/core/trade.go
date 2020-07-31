@@ -94,12 +94,18 @@ type trackedTrade struct {
 	matches       map[order.MatchID]*matchTracker
 	notify        func(Notification)
 	epochLen      uint64
+	fromAssetID   uint32
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
 func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnection, epochLen uint64,
 	lockTimeTaker, lockTimeMaker time.Duration, db db.DB, latencyQ *wait.TickerQueue, wallets *walletSet,
 	coins asset.Coins, notify func(Notification)) *trackedTrade {
+
+	fromID := dbOrder.Order.Quote()
+	if dbOrder.Order.Trade().Sell {
+		fromID = dbOrder.Order.Base()
+	}
 
 	ord := dbOrder.Order
 	return &trackedTrade{
@@ -117,6 +123,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		matches:       make(map[order.MatchID]*matchTracker),
 		notify:        notify,
 		epochLen:      epochLen,
+		fromAssetID:   fromID,
 	}
 }
 

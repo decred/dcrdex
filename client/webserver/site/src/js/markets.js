@@ -4,7 +4,7 @@ import BasePage from './basepage'
 import OrderBook from './orderbook'
 import { DepthChart } from './charts'
 import { postJSON } from './http'
-import * as forms from './forms'
+import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
 import ws from './ws'
 
 var app
@@ -75,7 +75,7 @@ export default class MarketsPage extends BasePage {
       'vTotal', 'vQuote', 'vPass', 'vSubmit', 'verifyLimit', 'verifyMarket',
       'vmTotal', 'vmAsset', 'vmLots', 'mktBuyScore',
       // Create wallet form
-      'walletForm', 'acctName',
+      'walletForm',
       // Active orders
       'liveTemplate', 'liveList',
       // Cancel order form
@@ -160,13 +160,13 @@ export default class MarketsPage extends BasePage {
     // Handle the new order for the order book on the 'epoch_order' route.
     ws.registerRoute(epochOrderRoute, data => { this.handleEpochOrderRoute(data) })
     // Bind the wallet unlock form.
-    forms.bindOpenWallet(app, page.openForm, async () => { this.openFunc() })
+    bindOpenWallet(app, page.openForm, async () => { this.openFunc() })
     // Create a wallet
-    forms.bindNewWallet(app, page.walletForm, async () => { this.createWallet() })
+    this.walletForm = new NewWalletForm(app, page.walletForm, async () => { this.createWallet() })
     // Main order form
-    forms.bind(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
+    bindForm(page.orderForm, page.submitBttn, async () => { this.stepSubmit() })
     // Order verification form
-    forms.bind(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
+    bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
     // Cancel order form
     bind(page.cancelSubmit, 'click', this.submitCancel)
 
@@ -752,9 +752,8 @@ export default class MarketsPage extends BasePage {
   showCreate (asset) {
     const page = this.page
     this.currentCreate = asset
-    page.walletForm.setAsset(asset)
+    this.walletForm.setAsset(asset)
     this.showForm(page.walletForm)
-    page.acctName.focus()
   }
 
   /*
@@ -1131,22 +1130,14 @@ export default class MarketsPage extends BasePage {
 }
 
 /*
- * tmplElement is a helper function for grabbing sub-elements of the market list
- * template.
- */
-function tmplElement (ancestor, s) {
-  return ancestor.querySelector(`[data-tmpl="${s}"]`)
-}
-
-/*
- * MarketList represents the list of exchanges and markets on the left side of
+ *  MarketList represents the list of exchanges and markets on the left side of
  * markets view. The MarketList provides utilities for adjusting the visibility
  * and sort order of markets.
  */
 class MarketList {
   constructor (div) {
     this.selected = null
-    const xcTmpl = tmplElement(div, 'xc')
+    const xcTmpl = Doc.tmplElement(div, 'xc')
     cleanTemplates(xcTmpl)
     this.xcSections = []
     for (const dex of Object.values(app.user.exchanges)) {
@@ -1226,14 +1217,14 @@ class ExchangeSection {
     this.host = dex.host
     const box = tmpl.cloneNode(true)
     this.box = box
-    const header = tmplElement(box, 'header')
-    this.disconnectedIcon = tmplElement(header, 'disconnected')
+    const header = Doc.tmplElement(box, 'header')
+    this.disconnectedIcon = Doc.tmplElement(header, 'disconnected')
     if (dex.connected) Doc.hide(this.disconnectedIcon)
     header.append(dex.host)
 
     this.marketRows = []
-    this.rows = tmplElement(box, 'mkts')
-    const rowTmpl = tmplElement(this.rows, 'mktrow')
+    this.rows = Doc.tmplElement(box, 'mkts')
+    const rowTmpl = Doc.tmplElement(this.rows, 'mktrow')
     this.rows.removeChild(rowTmpl)
     for (const mkt of Object.values(dex.markets)) {
       this.marketRows.push(new MarketRow(rowTmpl, mkt))
@@ -1298,8 +1289,8 @@ class MarketRow {
     this.quoteID = mkt.quoteid
     const row = tmpl.cloneNode(true)
     this.row = row
-    tmplElement(row, 'baseicon').src = Doc.logoPath(mkt.basesymbol)
-    tmplElement(row, 'quoteicon').src = Doc.logoPath(mkt.quotesymbol)
+    Doc.tmplElement(row, 'baseicon').src = Doc.logoPath(mkt.basesymbol)
+    Doc.tmplElement(row, 'quoteicon').src = Doc.logoPath(mkt.quotesymbol)
     row.append(`${mkt.basesymbol.toUpperCase()}-${mkt.quotesymbol.toUpperCase()}`)
   }
 }

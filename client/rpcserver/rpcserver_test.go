@@ -45,6 +45,7 @@ type TCore struct {
 	syncFeed            *core.BookFeed
 	syncErr             error
 	createWalletErr     error
+	newWalletForm       *core.WalletForm
 	openWalletErr       error
 	walletState         *core.WalletState
 	closeWalletErr      error
@@ -78,6 +79,7 @@ func (c *TCore) Cancel(pw []byte, sid string) error {
 	return c.cancelErr
 }
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {
+	c.newWalletForm = form
 	return c.createWalletErr
 }
 func (c *TCore) CloseWallet(assetID uint32) error {

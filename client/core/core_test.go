@@ -247,6 +247,9 @@ type TDB struct {
 	activeMatchOIDSErr error
 	lastStatusID       order.OrderID
 	lastStatus         order.OrderStatus
+	wallet             *db.Wallet
+	walletErr          error
+	setWalletPwErr     error
 	orderOrders        map[order.OrderID]*db.MetaOrder
 	orderErr           error
 }
@@ -327,7 +330,12 @@ func (tdb *TDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error) 
 }
 
 func (tdb *TDB) UpdateWallet(wallet *db.Wallet) error {
+	tdb.wallet = wallet
 	return tdb.updateWalletErr
+}
+
+func (tdb *TDB) SetWalletPassword(wid []byte, newPW []byte) error {
+	return tdb.setWalletPwErr
 }
 
 func (tdb *TDB) UpdateBalance(wid []byte, balance *db.Balance) error {
@@ -336,6 +344,10 @@ func (tdb *TDB) UpdateBalance(wid []byte, balance *db.Balance) error {
 
 func (tdb *TDB) Wallets() ([]*db.Wallet, error) {
 	return nil, nil
+}
+
+func (tdb *TDB) Wallet([]byte) (*db.Wallet, error) {
+	return tdb.wallet, tdb.walletErr
 }
 
 func (tdb *TDB) AccountPaid(proof *db.AccountProof) error {
@@ -642,6 +654,7 @@ type testRig struct {
 func newTestRig() *testRig {
 	db := &TDB{
 		orderOrders: make(map[order.OrderID]*db.MetaOrder),
+		wallet:      &db.Wallet{},
 	}
 
 	// Set the global waiter expiration, and start the waiter.
@@ -1014,9 +1027,10 @@ func TestCreateWallet(t *testing.T) {
 
 	// Create registration form.
 	form := &WalletForm{
-		AssetID:    tILT.ID,
-		Account:    "default",
-		ConfigText: "rpclisten=localhost",
+		AssetID: tILT.ID,
+		Config: map[string]string{
+			"rpclisten": "localhost",
+		},
 	}
 
 	ensureErr := func(tag string) {
@@ -3615,5 +3629,171 @@ func TestHandleNomatch(t *testing.T) {
 	err = handleNoMatchRoute(tCore, dc, req)
 	if !errorHasCode(err, unknownOrderErr) {
 		t.Fatalf("wrong error for unknown order ID: %v", err)
+	}
+}
+
+func TestWalletSettings(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.db.wallet = &db.Wallet{
+		Settings: map[string]string{
+			"abc": "123",
+		},
+	}
+	var assetID uint32 = 54321
+
+	// wallet not found
+	_, err := tCore.WalletSettings(assetID)
+	if !errorHasCode(err, missingWalletErr) {
+		t.Fatalf("wrong error for missing wallet: %v", err)
+	}
+
+	tCore.wallets[assetID] = &xcWallet{}
+
+	// db error
+	rig.db.walletErr = tErr
+	_, err = tCore.WalletSettings(assetID)
+	if !errorHasCode(err, dbErr) {
+		t.Fatalf("wrong error when expected db error: %v", err)
+	}
+	rig.db.walletErr = nil
+
+	// success
+	returnedSettings, err := tCore.WalletSettings(assetID)
+	if err != nil {
+		t.Fatalf("WalletSettings error: %v", err)
+	}
+
+	if len(returnedSettings) != 1 || returnedSettings["abc"] != "123" {
+		t.Fatalf("returned wallet settings are not correct: %v", returnedSettings)
+	}
+}
+
+func TestReconfigureWallet(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.db.wallet = &db.Wallet{
+		Settings: map[string]string{
+			"abc": "123",
+		},
+	}
+	newSettings := map[string]string{
+		"def": "456",
+	}
+	var assetID uint32 = 54321
+
+	// Password error
+	rig.crypter.recryptErr = tErr
+	err := tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	if !errorHasCode(err, authErr) {
+		t.Fatalf("wrong error for password error: %v", err)
+	}
+	rig.crypter.recryptErr = nil
+
+	// Missing wallet error
+	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	if !errorHasCode(err, missingWalletErr) {
+		t.Fatalf("wrong error for missing wallet: %v", err)
+	}
+
+	xyzWallet, tXyzWallet := newTWallet(assetID)
+	tCore.wallets[assetID] = xyzWallet
+	asset.Register(assetID, &tDriver{
+		f: func(wCfg *asset.WalletConfig, logger dex.Logger, net dex.Network) (asset.Wallet, error) {
+			return xyzWallet.Wallet, nil
+		},
+	})
+	xyzWallet.Connect(tCtx)
+
+	// Connect error
+	tXyzWallet.connectErr = tErr
+	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	if !errorHasCode(err, connectErr) {
+		t.Fatalf("wrong error when expecting connection error: %v", err)
+	}
+	tXyzWallet.connectErr = nil
+
+	// Unlock error
+	tXyzWallet.Unlock(wPW, time.Hour)
+	tXyzWallet.unlockErr = tErr
+	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	if !errorHasCode(err, walletAuthErr) {
+		t.Fatalf("wrong error when expecting connection error: %v", err)
+	}
+	tXyzWallet.unlockErr = nil
+
+	// Success
+	err = tCore.ReconfigureWallet(tPW, assetID, newSettings)
+	if err != nil {
+		t.Fatalf("ReconfigureWallet error: %v", err)
+	}
+
+	settings := rig.db.wallet.Settings
+	if len(settings) != 1 || settings["def"] != "456" {
+		t.Fatalf("settings not stored")
+	}
+}
+
+func TestSetWalletPassword(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.db.wallet = &db.Wallet{
+		EncryptedPW: []byte("abc"),
+	}
+	newPW := []byte("def")
+	var assetID uint32 = 54321
+
+	// Password error
+	rig.crypter.recryptErr = tErr
+	err := tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, authErr) {
+		t.Fatalf("wrong error for password error: %v", err)
+	}
+	rig.crypter.recryptErr = nil
+
+	// Missing wallet error
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, missingWalletErr) {
+		t.Fatalf("wrong error for missing wallet: %v", err)
+	}
+
+	xyzWallet, tXyzWallet := newTWallet(assetID)
+	tCore.wallets[assetID] = xyzWallet
+
+	// Connection error
+	xyzWallet.hookedUp = false
+	tXyzWallet.connectErr = tErr
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, connectionErr) {
+		t.Fatalf("wrong error for connection error: %v", err)
+	}
+	xyzWallet.hookedUp = true
+	tXyzWallet.connectErr = nil
+
+	// Unlock error
+	tXyzWallet.unlockErr = tErr
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, authErr) {
+		t.Fatalf("wrong error for auth error: %v", err)
+	}
+	tXyzWallet.unlockErr = nil
+
+	// SetWalletPassword db error
+	rig.db.setWalletPwErr = tErr
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if !errorHasCode(err, dbErr) {
+		t.Fatalf("wrong error for missing wallet: %v", err)
+	}
+	rig.db.setWalletPwErr = nil
+
+	// Success
+	err = tCore.SetWalletPassword(tPW, assetID, newPW)
+	if err != nil {
+		t.Fatalf("SetWalletPassword error: %v", err)
+	}
+
+	// Check that the xcWallet was updated.
+	if !bytes.Equal(xyzWallet.encPW, newPW) {
+		t.Fatalf("xcWallet encPW field not updated")
 	}
 }

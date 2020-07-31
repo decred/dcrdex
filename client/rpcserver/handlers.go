@@ -158,9 +158,8 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	}
 	// Wallet does not exist yet. Try to create it.
 	err = s.core.CreateWallet(form.appPass, form.walletPass, &core.WalletForm{
-		AssetID:    form.assetID,
-		Account:    form.account,
-		ConfigText: form.configText,
+		AssetID: form.assetID,
+		Config:  form.config,
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("error creating %s wallet: %v",
@@ -582,7 +581,7 @@ var helpMsgs = map[string]helpMsg{
 	},
 	newWalletRoute: {
 		pwArgsShort: `"appPass" "walletPass"`,
-		argsShort:   `assetID "account" ("config")`,
+		argsShort:   `assetID ("path" "settings")`,
 		cmdSummary:  `Connect to a new wallet.`,
 		pwArgsLong: `Password Args:
     appPass (string): The DEX client password.
@@ -590,8 +589,11 @@ var helpMsgs = map[string]helpMsg{
 		argsLong: `Args:
     assetID (int): The asset's BIP-44 registered coin index. e.g. 42 for DCR.
       See https://github.com/satoshilabs/slips/blob/master/slip-0044.md
-    account (string): The account or wallet name, depending on wallet software.
-    config (string): Optional. The path to the wallet's config file.`,
+     path (string): Optional. The path to a configuration file.
+     settings (string): A JSON-encoded string->string mapping of additional
+       configuration settings. These settings take precedence over any settings
+       parsed from file. e.g. '{"account":"default"}' for Decred accounts, and
+       '{"walletname":""}' for the default Bitcoin wallet where bitcoind's listwallets RPC gives possible walletnames.`,
 		returns: `Returns:
     string: The message "` + fmt.Sprintf(walletCreatedStr, "[coin symbol]") + `"`,
 	},

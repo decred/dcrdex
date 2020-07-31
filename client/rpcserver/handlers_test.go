@@ -259,8 +259,16 @@ func TestHandleNewWallet(t *testing.T) {
 		PWArgs: []encode.PassBytes{pw, pw},
 		Args: []string{
 			"42",
-			"default",
-			"/home/wallet.conf",
+			"username=tacotime",
+			`{"field":"value"}`,
+		},
+	}
+	badJSONParams := &RawParams{
+		PWArgs: []encode.PassBytes{pw, pw},
+		Args: []string{
+			"42",
+			"username=tacotime",
+			`{"field":  value"}`,
 		},
 	}
 	tests := []struct {
@@ -290,6 +298,10 @@ func TestHandleNewWallet(t *testing.T) {
 		openWalletErr: errors.New("error"),
 		wantErrCode:   msgjson.RPCOpenWalletError,
 	}, {
+		name:        "bad JSON error",
+		params:      badJSONParams,
+		wantErrCode: msgjson.RPCArgumentsError,
+	}, {
 		name:        "bad params",
 		params:      &RawParams{},
 		wantErrCode: msgjson.RPCArgumentsError,
@@ -304,7 +316,19 @@ func TestHandleNewWallet(t *testing.T) {
 		payload := handleNewWallet(r, test.params)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if test.wantErrCode == -1 {
+			if tc.newWalletForm.AssetID != 42 {
+				t.Fatalf("assetID not parsed correctly")
+			}
+			cfg := tc.newWalletForm.Config
+			if cfg["username"] != "tacotime" {
+				t.Fatalf("file config not parsed correctly")
+			}
+			if cfg["field"] != "value" {
+				t.Fatalf("custom config not parsed correctly")
+			}
 		}
 	}
 }

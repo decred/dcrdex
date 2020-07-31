@@ -1,7 +1,7 @@
 import Doc, { WalletIcons } from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import * as forms from './forms'
+import { NewWalletForm, WalletConfigForm, bindOpenWallet, bind as bindForm } from './forms'
 import * as ntfn from './notifications'
 
 const bind = Doc.bind
@@ -21,15 +21,19 @@ export default class WalletsPage extends BasePage {
       // Available markets
       'markets', 'dexTitle', 'marketsBox', 'oneMarket', 'marketsFor',
       'marketsCard',
-      // New wallet form
-      'walletForm', 'acctName',
-      // Unlock wallet form
-      'openForm',
+      // New wallet, unlock wallet, wallet settings
+      'walletForm', 'openForm',
+      // Wallet configuration
+      'walletReconfig', 'recfgAssetLogo', 'recfgAssetName', 'reconfigInputs',
+      'submitReconfig', 'reconfigErr', 'reconfigPW', 'changePW',
+      // Wallet password change
+      'walletRepw', 'repwAssetLogo', 'repwAssetName', 'repwNewPw', 'repwAppPw',
+      'submitRepw', 'repwErr',
       // Deposit
       'deposit', 'depositName', 'depositAddress',
       // Withdraw
       'withdrawForm', 'withdrawLogo', 'withdrawName', 'withdrawAddr',
-      'withdrawAmt', 'withdrawAvail', 'submitWithdraw', 'withdrawFee',
+      'withdrawAmt', 'withdrawAvail', 'submitWithdraw', // 'withdrawFee',
       'withdrawUnit', 'withdrawPW', 'withdrawErr'
     ])
 
@@ -53,7 +57,8 @@ export default class WalletsPage extends BasePage {
         withdraw: getAction(tr, 'withdraw'),
         deposit: getAction(tr, 'deposit'),
         create: getAction(tr, 'create'),
-        lock: getAction(tr, 'lock')
+        lock: getAction(tr, 'lock'),
+        settings: getAction(tr, 'settings')
       }
     }
 
@@ -72,15 +77,22 @@ export default class WalletsPage extends BasePage {
 
     this.openAsset = null
     this.walletAsset = null
+    this.reconfigAsset = null
 
     // Bind the new wallet form.
-    forms.bindNewWallet(app, page.walletForm, () => { this.createWalletSuccess() })
+    this.walletForm = new NewWalletForm(app, page.walletForm, () => { this.createWalletSuccess() })
+
+    // Bind the wallet reconfig form.
+    this.walletReconfig = new WalletConfigForm(app, page.reconfigInputs)
 
     // Bind the wallet unlock form.
-    forms.bindOpenWallet(app, page.openForm, () => { this.openWalletSuccess() })
+    bindOpenWallet(app, page.openForm, () => { this.openWalletSuccess() })
 
     // Bind the withdraw form.
-    forms.bind(page.withdrawForm, page.submitWithdraw, () => { this.withdraw() })
+    bindForm(page.withdrawForm, page.submitWithdraw, () => { this.withdraw() })
+
+    // Bind the wallet reconfiguration submission.
+    bindForm(page.walletReconfig, page.submitReconfig, () => this.reconfig())
 
     // Bind the row clicks, which shows the available markets for the asset.
     for (const rowInfo of Object.values(rowInfos)) {
@@ -103,6 +115,7 @@ export default class WalletsPage extends BasePage {
       bind(a.create, 'click', e => { run(e, this.showNewWallet.bind(this)) })
       bind(a.unlock, 'click', e => { run(e, this.showOpen.bind(this)) })
       bind(a.lock, 'click', async e => { run(e, this.lock.bind(this)) })
+      bind(a.settings, 'click', e => { run(e, this.showReconfig.bind(this)) })
     }
 
     // Clicking on the available amount on the withdraw form populates the
@@ -110,6 +123,13 @@ export default class WalletsPage extends BasePage {
     bind(page.withdrawAvail, 'click', () => {
       page.withdrawAmt.value = page.withdrawAvail.textContent
     })
+
+    // A link on the wallet reconfiguration form to show the password change
+    // form.
+    bind(page.changePW, 'click', () => { this.showChangePW() })
+
+    // Submit the password change form.
+    bindForm(page.walletRepw, page.submitRepw, () => { this.submitChangePW() })
 
     if (!firstRow) return
     this.showMarkets(firstRow.assetID)
@@ -190,8 +210,8 @@ export default class WalletsPage extends BasePage {
     const asset = app.assets[assetID]
     await this.hideBox()
     this.walletAsset = assetID
-    page.walletForm.setAsset(asset)
-    this.animation = this.showBox(box, page.acctName)
+    this.walletForm.setAsset(asset)
+    this.animation = this.showBox(box)
   }
 
   /* Show the form used to unlock a wallet. */
@@ -201,6 +221,70 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     page.openForm.setAsset(app.assets[assetID])
     this.animation = this.showBox(page.openForm, page.walletPass)
+  }
+
+  /* Show the form used to change wallet configuration settings. */
+  async showReconfig (assetID) {
+    const page = this.page
+    Doc.hide(page.reconfigErr)
+    const asset = app.assets[assetID]
+    this.walletReconfig.update(asset.info)
+    page.recfgAssetLogo.src = Doc.logoPath(asset.symbol)
+    page.recfgAssetName.textContent = asset.info.name
+    this.reconfigAsset = assetID
+    await this.hideBox()
+    this.animation = this.showBox(page.walletReconfig)
+    app.loading(page.walletReconfig)
+    var res = await postJSON('/api/walletsettings', {
+      assetID: assetID
+    })
+    app.loaded()
+    if (!app.checkResponse(res, true)) {
+      page.reconfigErr.textContent = res.msg
+      Doc.show(page.reconfigErr)
+      return
+    }
+    this.walletReconfig.setConfig(res.map)
+  }
+
+  /* showChangePW shows the form to change the wallet password. */
+  async showChangePW () {
+    const page = this.page
+    Doc.hide(page.repwErr)
+    const assetID = this.reconfigAsset
+    const asset = app.assets[assetID]
+    page.repwAssetLogo.src = Doc.logoPath(asset.symbol)
+    page.repwAssetName.textContent = asset.info.name
+    await this.hideBox()
+    this.animation = this.showBox(page.walletRepw)
+  }
+
+  /*
+   * submitChangePW is called when the wallet password change form is submitted.
+   */
+  async submitChangePW () {
+    const page = this.page
+    Doc.hide(page.repwErr)
+    if (!page.repwAppPw.value) {
+      page.repwErr.textContent = 'app password cannot be empty'
+      Doc.show(page.repwErr)
+      return
+    }
+    app.loading(page.walletRepw)
+    var res = await postJSON('/api/setwalletpass', {
+      assetID: this.reconfigAsset,
+      newPW: page.repwNewPw.value,
+      appPW: page.repwAppPw.value
+    })
+    page.repwNewPw.value = ''
+    page.repwAppPw.value = ''
+    app.loaded()
+    if (!app.checkResponse(res, true)) {
+      page.repwErr.textContent = res.msg
+      Doc.show(page.repwErr)
+      return
+    }
+    this.showMarkets(this.reconfigAsset)
   }
 
   /* Display a deposit address. */
@@ -216,7 +300,7 @@ export default class WalletsPage extends BasePage {
     await this.hideBox()
     page.depositName.textContent = asset.info.name
     page.depositAddress.textContent = wallet.address
-    this.animation = this.showBox(box, page.walletPass)
+    this.animation = this.showBox(box)
   }
 
   /* Show the form to withdraw funds. */
@@ -234,8 +318,8 @@ export default class WalletsPage extends BasePage {
     page.withdrawAvail.textContent = (wallet.balance.available / 1e8).toFixed(8)
     page.withdrawLogo.src = Doc.logoPath(asset.symbol)
     page.withdrawName.textContent = asset.info.name
-    page.withdrawFee.textContent = wallet.feerate
-    page.withdrawUnit.textContent = wallet.units
+    // page.withdrawFee.textContent = wallet.feerate
+    // page.withdrawUnit.textContent = wallet.units
     box.dataset.assetID = assetID
     this.animation = this.showBox(box, page.walletPass)
   }
@@ -259,7 +343,7 @@ export default class WalletsPage extends BasePage {
     this.showMarkets(rowInfo.assetID)
     const a = rowInfo.actions
     Doc.hide(a.create)
-    Doc.show(a.withdraw, a.deposit, a.lock)
+    Doc.show(a.withdraw, a.deposit, a.lock, a.settings)
     rowInfo.stateIcons.unlocked()
   }
 
@@ -287,12 +371,37 @@ export default class WalletsPage extends BasePage {
     app.loading(page.withdrawForm)
     var res = await postJSON('/api/withdraw', open)
     app.loaded()
-    if (!app.checkResponse(res)) {
+    if (!app.checkResponse(res, true)) {
       page.withdrawErr.textContent = res.msg
       Doc.show(page.withdrawErr)
       return
     }
     this.showMarkets(assetID)
+  }
+
+  /* update wallet configuration */
+  async reconfig () {
+    const page = this.page
+    Doc.hide(page.reconfigErr)
+    if (!page.reconfigPW.value) {
+      page.reconfigErr.textContent = 'app password cannot be empty'
+      Doc.show(page.reconfigErr)
+      return
+    }
+    app.loading(page.walletReconfig)
+    var res = await postJSON('/api/reconfigurewallet', {
+      assetID: this.reconfigAsset,
+      config: this.walletReconfig.map(),
+      pw: page.reconfigPW.value
+    })
+    page.reconfigPW.value = ''
+    app.loaded()
+    if (!app.checkResponse(res, true)) {
+      page.reconfigErr.textContent = res.msg
+      Doc.show(page.reconfigErr)
+      return
+    }
+    this.showMarkets(this.reconfigAsset)
   }
 
   /* lock instructs the API to lock the wallet. */

@@ -163,6 +163,14 @@ export default class Doc {
   }
 
   /*
+  * tmplElement is a helper function for grabbing sub-elements of the market list
+  * template.
+  */
+  static tmplElement (ancestor, s) {
+    return ancestor.querySelector(`[data-tmpl="${s}"]`)
+  }
+
+  /*
    * timeSince returns a string representation of the duration since the specified
    * unix timestamp.
    */

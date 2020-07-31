@@ -63,12 +63,9 @@ func (set *errorSet) Error() string {
 
 // WalletForm is information necessary to create a new exchange wallet.
 // The ConfigText, if provided, will be parsed for wallet connection settings.
-// If ConfigText is not provided, and a file exists at the `asset.DefaultConfigPath`,
-// that file will be parsed for wallet connection settings.
 type WalletForm struct {
-	AssetID    uint32
-	Account    string
-	ConfigText string
+	AssetID uint32
+	Config  map[string]string
 }
 
 // WalletState is the current status of an exchange wallet.
@@ -79,7 +76,6 @@ type WalletState struct {
 	Running bool        `json:"running"`
 	Balance *db.Balance `json:"balance"`
 	Address string      `json:"address"`
-	FeeRate uint64      `json:"feerate"`
 	Units   string      `json:"units"`
 }
 

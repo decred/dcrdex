@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/config"
 )
 
 // CoinNotFoundError is returned when a coin cannot be found, either because it
@@ -31,22 +30,25 @@ type WalletInfo struct {
 	// name, config key (for parsing the option from a config file/text) and
 	// description for each option. This can be used to request config info from
 	// users e.g. via dynamically generated GUI forms.
-	ConfigOpts []*config.Option `json:"configopts"`
-	// DefaultFeeRate is the default fee rate used for withdraws, refunds, and
-	// DEX fee payment transactions when optimal fee estimation is unavailable.
-	DefaultFeeRate uint64 `json:"defaultfeerate"` // TODO: remove
+	ConfigOpts []*ConfigOption `json:"configopts"`
+}
+
+// ConfigOption is a wallet configuration option.
+type ConfigOption struct {
+	Key          string      `json:"key"`
+	DisplayName  string      `json:"displayname"`
+	Description  string      `json:"description"`
+	DefaultValue interface{} `json:"default"`
+	NoEcho       bool        `json:"noecho"`
+	IsBoolean    bool        `json:"isboolean"`
 }
 
 // WalletConfig is the configuration settings for the wallet. WalletConfig
 // is passed to the wallet constructor.
 type WalletConfig struct {
-	// Account is the name of the wallet account. The account and wallet must
-	// already exist.
-	Account string
-	// FallbackFeeRate is fee rate used for withdraws, refunds, and DEX fee
-	// payment transactions when optimal fee estimation is unavailable.
-	FallbackFeeRate uint64
-	// Settings is the key-value store of wallet connection parameters.
+	// Settings is the key-value store of wallet connection parameters. The
+	// Settings are supplied by the user according the the WalletInfo's
+	// ConfigOpts.
 	Settings map[string]string
 	// TipChange is a function that will be called when the blockchain monitoring
 	// loop detects a new block. If the error supplied is nil, the client should

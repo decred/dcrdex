@@ -1,7 +1,7 @@
 import Doc from './doc'
 import BasePage from './basepage'
 import { postJSON } from './http'
-import * as forms from './forms'
+import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
 
 const DCR_ID = 42
 const animationLength = 300
@@ -29,18 +29,18 @@ export default class RegistrationPage extends BasePage {
     ])
 
     // SET APP PASSWORD
-    forms.bind(page.appPWForm, page.appPWSubmit, () => { this.setAppPass() })
+    bindForm(page.appPWForm, page.appPWSubmit, () => { this.setAppPass() })
 
     // NEW DCR WALLET
     // This form is only shown if there is no DCR wallet yet.
-    forms.bindNewWallet(app, page.newWalletForm, () => {
+    this.walletForm = new NewWalletForm(app, page.newWalletForm, () => {
       this.changeForm(page.newWalletForm, page.dexAddrForm)
     })
-    page.newWalletForm.setAsset(app.assets[DCR_ID])
+    this.walletForm.setAsset(app.assets[DCR_ID])
 
     // OPEN DCR WALLET
     // This form is only shown if there is a wallet, but it's not open.
-    forms.bindOpenWallet(app, page.unlockWalletForm, () => {
+    bindOpenWallet(app, page.unlockWalletForm, () => {
       this.changeForm(page.unlockWalletForm, page.dexAddrForm)
     })
     page.unlockWalletForm.setAsset(app.assets[DCR_ID])
@@ -52,10 +52,10 @@ export default class RegistrationPage extends BasePage {
     Doc.bind(page.certFile, 'change', () => this.readCert())
     Doc.bind(page.removeCert, 'click', () => this.resetCert())
     Doc.bind(page.addCert, 'click', () => this.page.certFile.click())
-    forms.bind(page.dexAddrForm, page.submitDEXAddr, () => { this.checkDEX() })
+    bindForm(page.dexAddrForm, page.submitDEXAddr, () => { this.checkDEX() })
 
     // SUBMIT DEX REGISTRATION
-    forms.bind(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
+    bindForm(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
   }
 
   /* Swap this currently displayed form1 for form2 with an animation. */
