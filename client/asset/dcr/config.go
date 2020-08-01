@@ -15,10 +15,9 @@ import (
 )
 
 const (
-	defaultMainnet     = "localhost:9110"
-	defaultTestnet3    = "localhost:19110"
-	defaultSimnet      = "localhost:19557"
-	defaultAccountName = "default"
+	defaultMainnet  = "localhost:9110"
+	defaultTestnet3 = "localhost:19110"
+	defaultSimnet   = "localhost:19557"
 )
 
 var (
@@ -63,10 +62,6 @@ func loadConfig(settings map[string]string, network dex.Network) (*Config, error
 	}
 	if missing != "" {
 		return nil, fmt.Errorf("missing dcrwallet rpc credentials:%s", missing)
-	}
-
-	if cfg.FallbackFeeRate == 0 {
-		cfg.FallbackFeeRate = defaultFee
 	}
 
 	// Get network settings. Zero value is mainnet, but unknown non-zero cfg.Net
