@@ -116,7 +116,8 @@ func (b *bookie) closeFeed(feed *BookFeed) {
 		}
 		b.closeTimer = time.AfterFunc(bookFeedTimeout, func() {
 			b.mtx.Lock()
-			defer b.mtx.Unlock()
+			numFeeds := len(b.feeds)
+			b.mtx.Unlock() // cannot be locked for b.close
 			// Note that it is possible that the timer fired as b.feed() was
 			// about to stop it before inserting a new BookFeed. If feed() got
 			// the mutex first, there will be a feed to prevent b.close below.
@@ -125,7 +126,7 @@ func (b *bookie) closeFeed(feed *BookFeed) {
 			// must synchronize with the close func to prevent this.
 
 			// Call the close func if there are no more feeds.
-			if len(b.feeds) == 0 {
+			if numFeeds == 0 {
 				b.close()
 			}
 		})
@@ -289,7 +290,7 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 	// If not found, attempt to make a temporary subscription and return the
 	// initial book.
 	if !found {
-		book, bookFeed, err := c.Sync(dex, base, quote)
+		book, bookFeed, err := dc.sync(base, quote)
 		if err != nil {
 			return nil, fmt.Errorf("unable to sync book: %v", err)
 		}
