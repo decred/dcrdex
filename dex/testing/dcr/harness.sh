@@ -146,6 +146,7 @@ tmux send-keys -t $SESSION:1 "dcrd --appdata=${NODES_ROOT}/alpha \
 --miningaddr=${ALPHA_MINING_ADDR} --rpclisten=127.0.0.1:${ALPHA_RPC_PORT} \
 --txindex --listen=127.0.0.1:${ALPHA_PORT} \
 --debuglevel=debug \
+--whitelist=127.0.0.0/8 --whitelist=::1 \
 --simnet; tmux wait-for -S alphadcr" C-m
 
 tmux new-window -t $SESSION:2 -n 'beta'
@@ -158,6 +159,7 @@ tmux send-keys -t $SESSION:2 "dcrd --appdata=${NODES_ROOT}/beta \
 --miningaddr=${BETA_MINING_ADDR} \
 --txindex --connect=127.0.0.1:${ALPHA_PORT} \
 --debuglevel=debug \
+--whitelist=127.0.0.0/8 --whitelist=::1 \
 --simnet; tmux wait-for -S betadcr" C-m
 
 sleep 3
