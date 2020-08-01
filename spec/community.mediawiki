@@ -73,7 +73,7 @@ be sent in the [[comm.mediawiki/#Session_Authentication|connect response]].
 | sig     || string || hex-encoded signature of the serialized Penalty object
 |}
 
-====Penalty object====
+====Penalty Object====
 
 {|
 ! field      !! type   !! description
