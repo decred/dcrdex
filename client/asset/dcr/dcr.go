@@ -505,16 +505,35 @@ func (dcr *ExchangeWallet) FundOrder(value uint64, nfo *dex.Asset) (asset.Coins,
 	return coins, err
 }
 
+// unspents fetches unspent outputs for the ExchangeWallet account.
+func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
+	walletUnspents, err := dcr.node.ListUnspentMin(0)
+	if err != nil {
+		return nil, fmt.Errorf("ListUnspentMin error: %w", err)
+	}
+
+	// Filter out the unspents for other accounts.
+	var unspents []walletjson.ListUnspentResult
+	for _, unspent := range walletUnspents {
+		if unspent.Account != dcr.acct {
+			continue
+		}
+		unspents = append(unspents, unspent)
+	}
+	return unspents, nil
+}
+
 // fund finds coins for the specified value. A function is provided that can
 // check whether adding the provided output would be enough to satisfy the
 // needed value.
 func (dcr *ExchangeWallet) fund(confs uint32,
 	enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, error) {
 
-	unspents, err := dcr.node.ListUnspentMin(0)
+	unspents, err := dcr.unspents()
 	if err != nil {
 		return nil, err
 	}
+
 	// Sort in ascending order by amount (smallest first).
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
 	utxos, avail, err := dcr.spendableUTXOs(unspents, confs)
@@ -676,7 +695,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	if len(notFound) == 0 {
 		return coins, nil
 	}
-	unspents, err := dcr.node.ListUnspentMin(0)
+	unspents, err := dcr.unspents()
 	if err != nil {
 		return nil, err
 	}

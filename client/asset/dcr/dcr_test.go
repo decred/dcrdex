@@ -460,6 +460,15 @@ func TestAvailableFund(t *testing.T) {
 	if err == nil {
 		t.Fatalf("no error when not enough to cover tx fees")
 	}
+
+	// Not enough funds, because littleUnspent is a different account.
+	unspents[0].Account = "wrong account"
+	littleUnspent.Account = "wrong account" // for consistency
+	_, err = wallet.FundOrder(lottaBit+littleBit-tLotSize, tDCR)
+	if err == nil {
+		t.Fatalf("no error for wrong account")
+	}
+
 }
 
 // Since ReturnCoins takes the wallet.Coin interface, make sure any interface
