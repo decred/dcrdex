@@ -1548,10 +1548,11 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.markFeePaid()
-
 	expectedErrorMessage := "test account not found error"
 	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage))
+
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
+
 	if dexStats == nil {
 		t.Fatal("initializeDEXConnections failure")
 	}
