@@ -27,6 +27,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2/schnorr"
 	"github.com/decred/dcrd/dcrutil/v2"
+	"github.com/decred/dcrd/hdkeychain/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
@@ -1385,6 +1386,48 @@ func TestCheckAddress(t *testing.T) {
 	}
 }
 
+func TestValidateXPub(t *testing.T) {
+	seed := randomBytes(hdkeychain.MinSeedBytes)
+	master, err := hdkeychain.NewMaster(seed, chainParams)
+	if err != nil {
+		t.Fatalf("failed to generate master extended key: %v", err)
+	}
+
+	be := &Backend{}
+
+	// fail for private key
+	xprivStr := master.String()
+	if err = be.ValidateXPub(xprivStr); err == nil {
+		t.Errorf("no error for extended private key")
+	}
+
+	xpub, err := master.Neuter()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// succeed for public key
+	xpubStr := xpub.String()
+	if err = be.ValidateXPub(xpubStr); err != nil {
+		t.Error(err)
+	}
+
+	// fail for invalid key of wrong length
+	if err = be.ValidateXPub(xpubStr[2:]); err == nil {
+		t.Errorf("no error for invalid key")
+	}
+
+	// fail for wrong network
+	masterTestnet, err := hdkeychain.NewMaster(seed, chaincfg.TestNet3Params())
+	if err != nil {
+		t.Fatalf("failed to generate master extended key: %v", err)
+	}
+	xpubTestnet, _ := masterTestnet.Neuter()
+	if err = be.ValidateXPub(xpubTestnet.String()); err == nil {
+		t.Errorf("no error for invalid wrong network")
+	}
+}
+
 func TestDriver_DecodeCoinID(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1421,6 +1464,21 @@ func TestDriver_DecodeCoinID(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			d := &Driver{}
 			got, err := d.DecodeCoinID(tt.coinID)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Driver.DecodeCoinID() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("Driver.DecodeCoinID() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	// Same tests with ValidateCoinID
+	be := &Backend{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := be.ValidateCoinID(tt.coinID)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Driver.DecodeCoinID() error = %v, wantErr %v", err, tt.wantErr)
 				return
