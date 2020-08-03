@@ -1531,9 +1531,10 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.markFeePaid()
-
 	rig.queueConnect(nil)
+
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
+
 	if dexStats == nil {
 		t.Fatal("initializeDEXConnections failure")
 	}
