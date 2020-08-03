@@ -1554,15 +1554,17 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	var initializeWg sync.WaitGroup
 	initializeWg.Add(1)
 	accountDisabledChan := make(chan bool)
-	initialized := false
+	initialize := false
 	// If an account has been disabled this will trigger core initialization.
 	go func() {
 		defer initializeWg.Done()
 		for accountDisabled := range accountDisabledChan {
-			if !initialized && accountDisabled {
-				initialized = true
-				c.initialize()
+			if !initialize && accountDisabled {
+				initialize = true
 			}
+		}
+		if initialize {
+			c.initialize()
 		}
 	}()
 	for _, dc := range c.conns {
