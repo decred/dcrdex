@@ -357,6 +357,16 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		})
 	}
 
+	// Ensure their is a DCR asset backend.
+	if dcrBackend == nil {
+		abort()
+		return nil, fmt.Errorf("no DCR backend configured")
+	}
+	// Validate the registration fee extended public key.
+	if err := dcrBackend.ValidateXPub(cfg.RegFeeXPub); err != nil {
+		return nil, fmt.Errorf("invalid regfeexpub: %w", err)
+	}
+
 	for _, mkt := range cfg.Markets {
 		mkt.Name = strings.ToLower(mkt.Name)
 	}

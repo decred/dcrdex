@@ -24,6 +24,7 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	"github.com/decred/dcrd/dcrjson/v3"
 	"github.com/decred/dcrd/dcrutil/v2"
+	"github.com/decred/dcrd/hdkeychain/v2"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/rpcclient/v5"
 	"github.com/decred/dcrd/wire"
@@ -264,6 +265,20 @@ func (dcr *Backend) FundingCoin(coinID []byte, redeemScript []byte) (asset.Fundi
 		return nil, fmt.Errorf("non-standard script")
 	}
 	return utxo, nil
+}
+
+// ValidateXPub validates the base-58 encoded extended key, and ensures that it
+// is an extended public, not private, key.
+func (dcr *Backend) ValidateXPub(xpub string) error {
+	xp, err := hdkeychain.NewKeyFromString(xpub, chainParams)
+	if err != nil {
+		return err
+	}
+	if xp.IsPrivate() {
+		xp.Zero()
+		return fmt.Errorf("extended key is a private key")
+	}
+	return nil
 }
 
 // ValidateCoinID attempts to decode the coinID.
