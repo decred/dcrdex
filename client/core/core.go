@@ -2589,49 +2589,38 @@ func (c *Core) handleReconnect(host string) {
 	resubMkt := func(mkt *Market) {
 		// Locate any bookie for this market.
 		dc.booksMtx.Lock()
-		defer dc.booksMtx.Unlock() // keep it locked for the whole operation to sync with dc.unsub
+		defer dc.booksMtx.Unlock()
 		booky := dc.books[mkt.Name]
 		if booky == nil {
-			// Not subscribed with the server for this market.
+			// Was not previously subscribed with the server for this market.
 			return
 		}
 
-		// Unregister the bookie.
-		delete(dc.books, mkt.Name)
-
-		// Deep copy the old BookFeeds map.
-		booky.mtx.Lock()
-		feeds := make(map[uint32]*BookFeed, len(booky.feeds)+1) // allocate for at least one feed
-		for id, feed := range booky.feeds {
-			feeds[id] = feed
-		}
-		booky.mtx.Unlock()
-
-		// Resubscribe to orderbook with the server, registering a new bookie in
-		// the dc.books map.
-		_, _, err := dc.sync(mkt.BaseID, mkt.QuoteID)
+		// Resubscribe since our old subscription was probably lost by the
+		// server when the connection dropped.
+		snap, err := dc.Subscribe(mkt.BaseID, mkt.QuoteID)
 		if err != nil {
-			log.Errorf("handleReconnect: Failed to resubscribe to market %q 'orderbook': %v", mkt.Name, err)
+			log.Errorf("handleReconnect: Failed to Subscribe to market %q 'orderbook': %v", mkt.Name, err)
 			return
 		}
 
-		if len(feeds) == 0 {
-			return
+		// Create a fresh OrderBook for the bookie.
+		err = booky.reset(snap)
+		if err != nil {
+			log.Errorf("handleReconnect: Failed to Sync market %q order book snapshot: %v", mkt.Name, err)
 		}
 
-		// Set the new bookie's BookFeeds map.
-		booky = dc.books[mkt.Name]
-		if booky == nil {
-			// Should not happen, but let's not panic.
-			log.Errorf("handleReconnect: sync failed to create a new bookie for %s", mkt.Name)
-			return
-		}
-		booky.mtx.Lock()
-		// Do not need to call (*bookie).close(feed) for each feed since that
-		// just removes them from the bookie.feeds map one by one and sets an
-		// unsubscribe timer that we do not want. Just replace the map.
-		booky.feeds = feeds
-		booky.mtx.Unlock()
+		// Send a FreshBookAction to the subscribers.
+		booky.send(&BookUpdate{
+			Action:   FreshBookAction,
+			Host:     dc.acct.host,
+			MarketID: mkt.Name,
+			Payload: &MarketOrderBook{
+				Base:  mkt.BaseID,
+				Quote: mkt.QuoteID,
+				Book:  booky.book(),
+			},
+		})
 	}
 
 	// For each market, resubscribe to any market books.
@@ -2779,7 +2768,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		if bookie := dc.books[sp.MarketID]; bookie != nil {
 			// Old bookie and it's feeds get garbage collected. Any orderbook
 			// subscriptions remain, and are handled by the new bookie.
-			dc.books[sp.MarketID] = newBookie(func() { dc.Unsub(sp.MarketID) })
+			dc.books[sp.MarketID] = newBookie(func() { dc.StopBook(mkt.BaseID, mkt.QuoteID) })
 		}
 		dc.booksMtx.Unlock()
 

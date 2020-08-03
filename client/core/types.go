@@ -219,7 +219,15 @@ type OrderBook struct {
 	Epoch []*MiniOrder `json:"epoch"`
 }
 
+// MarketOrderBook is used as the BookUpdate's Payload with the FreshBookAction.
+// The subscriber will likely need to translate into a JSON tagged type.
+type MarketOrderBook struct {
+	Base, Quote uint32
+	Book        *OrderBook
+}
+
 const (
+	FreshBookAction   = "book"
 	BookOrderAction   = "book_order"
 	EpochOrderAction  = "epoch_order"
 	UnbookOrderAction = "unbook_order"

@@ -84,6 +84,7 @@ func (s *RPCServer) websocketHandler(conn ws.Connection, ip string) {
 		cl.mtx.Lock()
 		if cl.feedLoop != nil {
 			cl.feedLoop.Stop()
+			cl.feedLoop.WaitForShutdown()
 		}
 		cl.mtx.Unlock()
 		s.mtx.Lock()
@@ -198,7 +199,7 @@ func wsHandleRequest(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.
 }
 
 // wsLoadMarket is the handler for the 'loadmarket' websocket endpoint.
-// Subscribes the client to the notification feed by sends the order book.
+// Subscribes the client to the notification feed and sends the order book.
 func wsLoadMarket(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
 	market := new(marketLoad)
 	err := json.Unmarshal(msg.Payload, market)
@@ -218,11 +219,12 @@ func wsLoadMarket(s *RPCServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 	cl.mtx.Lock()
 	if cl.feedLoop != nil {
 		cl.feedLoop.Stop()
+		cl.feedLoop.WaitForShutdown()
 	}
 	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed)
 	cl.mtx.Unlock()
 
-	note, err := msgjson.NewNotification("book", &marketResponse{
+	note, err := msgjson.NewNotification(core.FreshBookAction, &marketResponse{
 		Book:  book,
 		Base:  market.Base,
 		Quote: market.Quote,
@@ -244,6 +246,7 @@ func wsUnmarket(_ *RPCServer, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 	defer cl.mtx.Unlock()
 	if cl.feedLoop != nil {
 		cl.feedLoop.Stop()
+		cl.feedLoop.WaitForShutdown()
 		cl.feedLoop = nil
 	}
 	return nil
