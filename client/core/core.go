@@ -1551,6 +1551,20 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	var wg sync.WaitGroup
 	c.connMtx.RLock()
 	results := make([]*DEXBrief, 0, len(c.conns))
+	var initializeWg sync.WaitGroup
+	initializeWg.Add(1)
+	accountDisabledChan := make(chan bool)
+	initialized := false
+	// If an account has been disabled this will trigger core initialization.
+	go func() {
+		defer initializeWg.Done()
+		for accountDisabled := range accountDisabledChan {
+			if !initialized && accountDisabled {
+				initialized = true
+				c.initialize()
+			}
+		}
+	}()
 	for _, dc := range c.conns {
 		dc.tradeMtx.RLock()
 		tradeIDs := make([]string, 0, len(dc.trades))
@@ -1627,6 +1641,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 						return
 					}
 					err = c.db.DisableAccount(acctInfo)
+					accountDisabledChan <- true
 					if err != nil {
 						log.Errorf("Error disabling account: %v", err)
 					}
@@ -1638,18 +1653,9 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 		}(dc)
 	}
 	wg.Wait()
-	// Determine if any accounts have been disabled.
-	accts, err := c.db.Accounts()
-	if err != nil {
-		log.Errorf("Error retrieve accounts from database: %v", err)
-	}
-	connsLen := len(c.conns)
 	c.connMtx.RUnlock()
-	// If any accounts have been disabled then trigger initialize so that c.conns
-	// will accurately reflect the contents of db.Accounts.
-	if connsLen != len(accts) {
-		c.initialize()
-	}
+	close(accountDisabledChan)
+	initializeWg.Wait()
 	return results
 }
 
