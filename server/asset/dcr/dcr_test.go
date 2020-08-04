@@ -713,7 +713,12 @@ func TestUTXOs(t *testing.T) {
 	// A general reset function that clears the testBlockchain and the blockCache.
 	reset := func() {
 		cleanTestChain()
-		dcr.blockCache = newBlockCache(dcr.log)
+		blockCache := newBlockCache(dcr.log)
+		dcr.blockCache.mtx.Lock()
+		dcr.blockCache.blocks = blockCache.blocks
+		dcr.blockCache.mainchain = blockCache.mainchain
+		dcr.blockCache.best = blockCache.best
+		dcr.blockCache.mtx.Unlock()
 	}
 
 	// CASE 1: A valid UTXO in a mempool transaction. This UTXO will have zero
