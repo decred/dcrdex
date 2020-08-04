@@ -32,12 +32,13 @@ func (err ExpirationErr) Error() string { return string(err) }
 // A matchTracker is used to negotiate a match.
 type matchTracker struct {
 	db.MetaMatch
-	failErr     error
-	refundErr   error
-	prefix      *order.Prefix
-	trade       *order.Trade
-	counterSwap asset.AuditInfo
-	id          order.MatchID
+	failErr        error
+	refundErr      error
+	prefix         *order.Prefix
+	trade          *order.Trade
+	counterSwap    asset.AuditInfo
+	contractExpiry time.Time // for one time logging in isRefundable, may never be set
+	id             order.MatchID
 }
 
 // parts is a getter for pointers to commonly used struct fields in the
@@ -607,7 +608,7 @@ func (t *trackedTrade) isActive() bool {
 			if status == order.NewlyMatched ||
 				(status == order.MakerSwapCast && side == order.Taker) ||
 				(status == order.MakerRedeemed && side == order.Maker) {
-				log.Debugf("Revoked match %v (%v) in status %v considered inactive.",
+				log.Tracef("Revoked match %v (%v) in status %v considered inactive.",
 					match.id, side, status)
 				continue
 			}
@@ -694,7 +695,8 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 			dbMatch.Side, t.ID(), match.id, err)
 		return false
 	}
-	if !swapLocktimeExpired {
+	if !swapLocktimeExpired && match.contractExpiry.IsZero() {
+		match.contractExpiry = contractExpiry
 		swapCoinID := proof.TakerSwap
 		if dbMatch.Side == order.Maker {
 			swapCoinID = proof.MakerSwap
