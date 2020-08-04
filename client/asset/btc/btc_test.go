@@ -643,7 +643,7 @@ func TestFundingCoins(t *testing.T) {
 
 	ensureErr := func(tag string) {
 		// Clear the cache.
-		wallet.fundingCoins = make(map[wire.OutPoint]*compositeUTXO)
+		wallet.fundingCoins = make(map[outPoint]*compositeUTXO)
 		_, err := wallet.FundingCoins(coinIDs)
 		if err == nil {
 			t.Fatalf("%s: no error", tag)

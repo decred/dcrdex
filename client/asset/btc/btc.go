@@ -135,18 +135,29 @@ type BTCCloneCFG struct {
 	DefaultFallbackFee uint64 // sats/byte
 }
 
-// newOutPoint is the constructor for a new wire.OutPoint (non-pointer).
-func newOutPoint(txHash *chainhash.Hash, vout uint32) wire.OutPoint {
-	return wire.OutPoint{
-		Hash:  *txHash,
-		Index: vout,
+// outPoint is the hash and output index of a transaction output.
+type outPoint struct {
+	txHash chainhash.Hash
+	vout   uint32
+}
+
+// newOutPoint is the constructor for a new outPoint.
+func newOutPoint(txHash *chainhash.Hash, vout uint32) outPoint {
+	return outPoint{
+		txHash: *txHash,
+		vout:   vout,
 	}
+}
+
+// String is a string representation of the outPoint.
+func (pt *outPoint) String() string {
+	return pt.txHash.String() + ":" + strconv.Itoa(int(pt.vout))
 }
 
 // output is information about a transaction output. output satisfies the
 // asset.Coin interface.
 type output struct {
-	pt     wire.OutPoint
+	pt     outPoint
 	value  uint64
 	redeem dex.Bytes
 	node   rpcClient // for calculating confirmations.
@@ -190,7 +201,7 @@ func (op *output) ID() dex.Bytes {
 
 // String is a string representation of the coin.
 func (op *output) String() string {
-	return op.pt.Hash.String() + ":" + strconv.Itoa(int(op.pt.Index))
+	return op.pt.String()
 }
 
 // Redeem is any known redeem script required to spend this output. Part of the
@@ -201,12 +212,17 @@ func (op *output) Redeem() dex.Bytes {
 
 // txHash returns the pointer of the wire.OutPoint's Hash.
 func (op *output) txHash() *chainhash.Hash {
-	return &op.pt.Hash
+	return &op.pt.txHash
 }
 
 // vout returns the wire.OutPoint's Index.
 func (op *output) vout() uint32 {
-	return op.pt.Index
+	return op.pt.vout
+}
+
+// wireOutPoint creates and returns a new *wire.OutPoint for the output.
+func (op *output) wireOutPoint() *wire.OutPoint {
+	return wire.NewOutPoint(op.txHash(), op.vout())
 }
 
 // auditInfo is information about a swap contract on that blockchain, not
@@ -314,7 +330,7 @@ type ExchangeWallet struct {
 	// Coins returned by Fund are cached for quick reference and for cleanup on
 	// shutdown.
 	fundingMtx   sync.RWMutex
-	fundingCoins map[wire.OutPoint]*compositeUTXO
+	fundingCoins map[outPoint]*compositeUTXO
 }
 
 // Check that ExchangeWallet satisfies the Wallet interface.
@@ -401,7 +417,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		chainParams:       cfg.ChainParams,
 		log:               cfg.Logger,
 		tipChange:         cfg.WalletCFG.TipChange,
-		fundingCoins:      make(map[wire.OutPoint]*compositeUTXO),
+		fundingCoins:      make(map[outPoint]*compositeUTXO),
 		minNetworkVersion: cfg.MinNetworkVersion,
 		fallbackFeeRate:   fallbackFeesPerByte,
 		useSplitTx:        btcCfg.UseSplitTx,
@@ -522,7 +538,7 @@ func (btc *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asse
 	var size uint32
 	var coins asset.Coins
 	var spents []*output
-	fundingCoins := make(map[wire.OutPoint]*compositeUTXO)
+	fundingCoins := make(map[outPoint]*compositeUTXO)
 
 	// TODO: For the chained swaps, make sure that contract outputs are P2WSH,
 	// and that change outputs that fund further swaps are P2WPKH.
@@ -602,7 +618,7 @@ out:
 // order is canceled partially filled, and then the remainder resubmitted. We
 // would already have an output of just the right size, and that would be
 // recognized here.
-func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uint64, fundingCoins map[wire.OutPoint]*compositeUTXO, nfo *dex.Asset) (asset.Coins, error) {
+func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uint64, fundingCoins map[outPoint]*compositeUTXO, nfo *dex.Asset) (asset.Coins, error) {
 	var err error
 	defer func() {
 		if err != nil {
@@ -671,7 +687,7 @@ func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uin
 	if err != nil {
 		return nil, fmt.Errorf("error reading asset info: %v", err)
 	}
-	fundingCoins = map[wire.OutPoint]*compositeUTXO{op.pt: {
+	fundingCoins = map[outPoint]*compositeUTXO{op.pt: {
 		txHash:       op.txHash(),
 		vout:         op.vout(),
 		address:      addr.String(),
@@ -714,7 +730,7 @@ func (btc *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	// First check if we have the coins in cache.
 	coins := make(asset.Coins, 0, len(ids))
-	notFound := make(map[wire.OutPoint]struct{})
+	notFound := make(map[outPoint]struct{})
 	btc.fundingMtx.RLock()
 	for _, id := range ids {
 		txHash, vout, err := decodeCoinID(id)
@@ -789,11 +805,11 @@ func (btc *ExchangeWallet) Lock() error {
 }
 
 // fundedTx creates and returns a new MsgTx with the provided coins as inputs.
-func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []wire.OutPoint, error) {
+func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []outPoint, error) {
 	baseTx := wire.NewMsgTx(wire.TxVersion)
 	var totalIn uint64
 	// Add the funding utxos.
-	pts := make([]wire.OutPoint, 0, len(coins))
+	pts := make([]outPoint, 0, len(coins))
 	for _, coin := range coins {
 		op, err := btc.convertCoin(coin)
 		if err != nil {
@@ -803,7 +819,7 @@ func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []w
 			return nil, 0, nil, fmt.Errorf("zero-valued output detected for %s:%d", op.txHash(), op.vout())
 		}
 		totalIn += op.value
-		txIn := wire.NewTxIn(&op.pt, []byte{}, nil)
+		txIn := wire.NewTxIn(op.wireOutPoint(), []byte{}, nil)
 		baseTx.AddTxIn(txIn)
 		pts = append(pts, op.pt)
 	}
@@ -948,7 +964,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		}
 		addresses = append(addresses, receiver)
 		contracts = append(contracts, cinfo.output.redeem)
-		txIn := wire.NewTxIn(&cinfo.output.pt, []byte{}, nil)
+		txIn := wire.NewTxIn(cinfo.output.wireOutPoint(), []byte{}, nil)
 		// Enable locktime
 		// https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#Spending_wallet_policy
 		txIn.Sequence = wire.MaxTxInSequenceNum - 1
@@ -1568,7 +1584,7 @@ type compositeUTXO struct {
 // spendableUTXOs filters the RPC utxos for those that are spendable with with
 // regards to the DEX's configuration, and considered safe to spend according to
 // confirmations and coin source. The UTXOs will be sorted by ascending value.
-func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[wire.OutPoint]*compositeUTXO, uint64, error) {
+func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[outPoint]*compositeUTXO, uint64, error) {
 	unspents, err := btc.wallet.ListUnspent()
 	if err != nil {
 		return nil, nil, 0, err
@@ -1576,7 +1592,7 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[w
 	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
 	var sum uint64
 	utxos := make([]*compositeUTXO, 0, len(unspents))
-	utxoMap := make(map[wire.OutPoint]*compositeUTXO, len(unspents))
+	utxoMap := make(map[outPoint]*compositeUTXO, len(unspents))
 	for _, txout := range unspents {
 		if txout.Confirmations >= confs && txout.Safe {
 			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, btc.chainParams)
