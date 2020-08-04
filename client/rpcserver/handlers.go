@@ -291,18 +291,6 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 		}
 		return m
 	}
-	// Convert something to a []interface{}.
-	convA := func(in interface{}) []interface{} {
-		var a []interface{}
-		b, err := json.Marshal(in)
-		if err != nil {
-			panic(err)
-		}
-		if err = json.Unmarshal(b, &a); err != nil {
-			panic(err)
-		}
-		return a
-	}
 	res := s.core.Exchanges()
 	exchanges := convM(res)
 	// Interate through exchanges converting structs into maps in order to
@@ -317,16 +305,7 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 			marketDetails := convM(market)
 			// Remove redundant name field.
 			delete(marketDetails, "name")
-			orders := convA(marketDetails["orders"])
-			for i, order := range orders {
-				orderDetails := convM(order)
-				// Remove redundant address field.
-				delete(orderDetails, "dex")
-				// Remove redundant market name field.
-				delete(orderDetails, "market")
-				orders[i] = orderDetails
-			}
-			marketDetails["orders"] = orders
+			delete(marketDetails, "orders")
 			markets[k] = marketDetails
 		}
 		assets := convM(exchangeDetails["assets"])
@@ -736,29 +715,6 @@ Registration is complete after the fee transaction has been confirmed.`,
             "startepoch" (int): Time of start of the last epoch in milliseconds
 	      since 00:00:00 Jan 1 1970.
             "buybuffer" (float): The minimum order size for a market buy order.
-            "orders" (map): {
-              "type" (int): 0 for market or 1 for limit.
-              "id" (string): A unique trade ID.
-              "stamp" (int): The unix trade timestamp. Seconds since 00:00:00
-	        Jan 1 1970.
-              "qty" (bool): Number of units offered in the trade.
-              "sell" (bool): Whether this is a sell order.
-              "filled" (int): How much of the order has been filled.
-              "matches": [
-	        {
-                  "matchID" (string): A unique match ID.
-                  "status" (string): The match status.
-                  "rate" (int): Atoms quote asset per unit base asset.
-                  "qty" (int): Number of units offered in the trade.
-		},...
-	      ]
-              "cancelling" (bool): Whether this trade is in the process of being
-	        cancelled.
-              "canceled" (bool): Whether this trade has been canceled.
-              "rate" (int): Atoms quote asset per unit base asset.
-              "tif" (int): The number of epochs this trade is good for.
-              "targetID" (string): The order ID of the order being canceled.
-	      },...
           },...
         },
         "assets": {

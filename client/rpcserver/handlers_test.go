@@ -471,20 +471,46 @@ func TestHandleRegister(t *testing.T) {
 }
 
 /*
-   handleExchanges removes some redundant fields from the response.
-   $ diff in out
-   3d2
-   <     "host": "https://127.0.0.1:7232",
-   6d4
-   <         "name": "dcr_btc",
-   16,17d13
-   <             "dex": "https://127.0.0.1:7232",
-   <             "market": "dcr_btc",
-   42d37
-   <         "id": 0,
-   52d46
-   <         "id": 42,
+  $diff exchangeIn exchangeOut
+  3d2
+  <     "host": "https://127.0.0.1:7232",
+  6d4
+  <         "name": "dcr_btc",
+  13,38c11
+  <         "buybuffer": 1.25,
+  <         "orders": [
+  <           {
+  <             "dex": "https://127.0.0.1:7232",
+  <             "market": "dcr_btc",
+  <             "type": 1,
+  <             "id": "e016a563ff5b845e9af20718af72224af630e65ca53edf2a3342d175dc6d3738",
+  <             "stamp": 1588913556583,
+  <             "qty": 100000000,
+  <             "sell": false,
+  <             "sig": "3045022100c5ef66cbf3c2d305408b666108ae384478f22b558893942b8f66abfb613a5bf802205eb22a0250e5286244b2f5205f0b6d6b4fa6a60930be2ff30f35c3cf6bf969c8",
+  <             "filled": 0,
+  <             "matches": [
+  <               {
+  <                 "matchID": "1472deb169fb359a48676161be8ca81983201f28abe8cc9b504950032d6f14ec",
+  <                 "qty": 100000000,
+  <                 "rate": 100000000,
+  <                 "step": 1
+  <               }
+  <             ],
+  <             "cancelling": false,
+  <             "canceled": false,
+  <             "rate": 100000000,
+  <             "tif": 1
+  <           }
+  <         ]
+  ---
+  >         "buybuffer": 1.25
+  43d15
+  <         "id": 0,
+  53d24
+  <         "id": 42,
 */
+
 const exchangeIn = `{
   "https://127.0.0.1:7232": {
     "host": "https://127.0.0.1:7232",
@@ -547,10 +573,11 @@ const exchangeIn = `{
         "swapConf": 1
       }
     },
-	"confsrequired": 1,
-	"confs": null
+    "confsrequired": 1,
+    "confs": null
   }
 }`
+
 const exchangeOut = `{
   "https://127.0.0.1:7232": {
     "markets": {
@@ -561,30 +588,7 @@ const exchangeOut = `{
         "quotesymbol": "btc",
         "epochlen": 10000,
         "startepoch": 158891349,
-        "buybuffer": 1.25,
-        "orders": [
-          {
-            "type": 1,
-            "id": "e016a563ff5b845e9af20718af72224af630e65ca53edf2a3342d175dc6d3738",
-            "stamp": 1588913556583,
-            "qty": 100000000,
-            "sell": false,
-            "sig": "3045022100c5ef66cbf3c2d305408b666108ae384478f22b558893942b8f66abfb613a5bf802205eb22a0250e5286244b2f5205f0b6d6b4fa6a60930be2ff30f35c3cf6bf969c8",
-            "filled": 0,
-            "matches": [
-              {
-                "matchID": "1472deb169fb359a48676161be8ca81983201f28abe8cc9b504950032d6f14ec",
-                "qty": 100000000,
-                "rate": 100000000,
-                "step": 1
-              }
-            ],
-            "cancelling": false,
-            "canceled": false,
-            "rate": 100000000,
-            "tif": 1
-          }
-        ]
+        "buybuffer": 1.25
       }
     },
     "assets": {
@@ -629,7 +633,7 @@ func TestHandleExchanges(t *testing.T) {
 		panic(err)
 	}
 	if !reflect.DeepEqual(res, exchangesOut) {
-		t.Fatal("result does not have expected fields removed")
+		t.Fatalf("expected %v but got %v", spew.Sdump(exchangesOut), spew.Sdump(res))
 	}
 }
 
