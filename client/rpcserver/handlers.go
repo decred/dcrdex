@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 )
 
 // routes
@@ -23,6 +25,7 @@ const (
 	initRoute        = "init"
 	loginRoute       = "login"
 	logoutRoute      = "logout"
+	myOrdersRoute    = "myorders"
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
 	orderBookRoute   = "orderbook"
@@ -71,6 +74,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	initRoute:        handleInit,
 	loginRoute:       handleLogin,
 	logoutRoute:      handleLogout,
+	myOrdersRoute:    handleMyOrders,
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
 	orderBookRoute:   handleOrderBook,
@@ -462,6 +466,63 @@ func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 	return createResponse(orderBookRoute, book, nil)
 }
 
+// parseCoreOrder converts a *core.Order into a *myOrder.
+func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
+	// settled calculates how much of the order has been finalized.
+	settled := func(qty uint64, matches []*core.Match) (settled uint64) {
+		for _, match := range matches {
+			if match.Status >= order.MakerRedeemed {
+				settled += match.Qty
+			}
+		}
+		return settled
+	}
+	// Time is sent in milliseconds. Convert to nanoseconds in order to do
+	// math using the time package.
+	srvTime := time.Unix(0, int64(co.Stamp)*1e6)
+	return &myOrder{
+		Host:       co.Host,
+		MarketName: co.MarketID,
+		BaseID:     b,
+		QuoteID:    q,
+		ID:         co.ID,
+		Type:       co.Type.String(),
+		Sell:       co.Sell,
+		Age:        uint64(time.Since(srvTime).Milliseconds()),
+		Rate:       co.Rate,
+		Quantity:   co.Qty,
+		Filled:     co.Filled,
+		Settled:    settled(co.Qty, co.Matches),
+		Status:     co.Status.String(),
+	}
+}
+
+// handleMyOrders handles requests for myorders. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseMyOrdersArgs(params)
+	if err != nil {
+		return usage(myOrdersRoute, err)
+	}
+	var myOrders myOrdersResponse
+	filterMkts := form.base != nil && form.quote != nil
+	exchanges := s.core.Exchanges()
+	for host, exchange := range exchanges {
+		if form.host != "" && form.host != host {
+			continue
+		}
+		for _, market := range exchange.Markets {
+			if filterMkts && (market.BaseID != *form.base || market.QuoteID != *form.quote) {
+				continue
+			}
+			for _, order := range market.Orders {
+				myOrders = append(myOrders, parseCoreOrder(order, market.BaseID, market.QuoteID))
+			}
+		}
+	}
+	return createResponse(myOrdersRoute, myOrders, nil)
+}
+
 // format concatenates thing and tail. If thing is empty, returns an empty
 // string.
 func format(thing, tail string) string {
@@ -810,7 +871,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     string: The message "` + logoutStr + `"`,
 	},
 	orderBookRoute: {
-		argsShort:  `"host" base quote nOrders`,
+		argsShort:  `"host" base quote (nOrders)`,
 		cmdSummary: `Retrieve all orders for a market.`,
 		argsLong: `Args:
     host (string): The DEX to retrieve the order book from.
@@ -852,5 +913,35 @@ Registration is complete after the fee transaction has been confirmed.`,
         },...
       ],
     }`,
+	},
+	myOrdersRoute: {
+		argsShort: `("host") (base) (quote)`,
+		cmdSummary: `Fetch all active and recently executed orders
+    belonging to the user.`,
+		argsLong: `Args:
+    host (string): Optional. The DEX to show orders from.
+    base (int): Optional. The BIP-44 coin index for the market's base asset.
+    quote (int): Optional. The BIP-44 coin index for the market's quote asset.`,
+		returns: `Returns:
+  array: An array of my orders.
+  [
+    {
+      "host" (string): The DEX address.,
+      "marketName" (string): The market's name. e.g. "DCR_BTC".
+      "baseID" (int): The market's base ID. e.g. 42 for DCR.
+      "quoteID" (int): The market's quote ID. e.g. 0 for BTC.
+      "id" (string): The order's unique hex ID.
+      "type" (string): The type of order. "limit", "market", or "cancel".
+      "sell" (string): Whether this order is selling.
+      "age" (int): The time in milliseconds that this order has been active.
+      "rate" (int): The coins quote asset to accept per coin base asset.
+      "quantity" (int): The number of coins base asset being traded.
+      "filled" (int): The number of coins base asset that are filled by orders.
+      "settled" (int): The number of coins base asset whose trades have been
+        completed.
+      "status" (string): The status of the order. "epoch", "booked", "executed",
+        "canceled", or "revoked".
+    },...
+  ]`,
 	},
 }
