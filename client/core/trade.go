@@ -573,7 +573,7 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 	return false
 }
 
-// isActive will be true if the trade is <= OrderStatusBooked, or if any of the
+// isActive will be true if the trade is booked or epoch, or if any of the
 // matches are still negotiating.
 func (t *trackedTrade) isActive() bool {
 	t.mtx.RLock()

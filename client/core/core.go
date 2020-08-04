@@ -189,13 +189,14 @@ func (dc *dexConnection) setRegConfirms(confs uint32) {
 	dc.regConfirms = &confs
 }
 
-// hasOrders checks whether there are any open orders or negotiating matches for
-// the specified asset.
-func (dc *dexConnection) hasOrders(assetID uint32) bool {
+// hasActiveAssetOrders checks whether there are any active orders or negotiating
+// matches for the specified asset.
+func (dc *dexConnection) hasActiveAssetOrders(assetID uint32) bool {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for _, trade := range dc.trades {
-		if trade.Base() == assetID || trade.Quote() == assetID {
+		if (trade.Base() == assetID || trade.Quote() == assetID) &&
+			trade.isActive() {
 			return true
 		}
 	}
@@ -1077,13 +1078,13 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	for _, dc := range c.conns {
-		if dc.hasOrders(assetID) {
-			return fmt.Errorf("cannot lock %s wallet with active orders or negotiations", unbip(assetID))
+		if dc.hasActiveAssetOrders(assetID) {
+			return fmt.Errorf("cannot lock %s wallet with active swap negotiations", unbip(assetID))
 		}
 	}
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return fmt.Errorf("CloseWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
+		return fmt.Errorf("wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
 	err = wallet.Lock()
 	if err != nil {
