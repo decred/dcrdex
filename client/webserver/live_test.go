@@ -91,8 +91,12 @@ func userOrders() (ords []*core.Order) {
 			}
 		}
 		var tif order.TimeInForce
-		if isLimit && rand.Float32() > 0.66 {
-			tif = order.StandingTiF
+		if isLimit {
+			if rand.Float32() < 0.25 {
+				tif = order.ImmediateTiF
+			} else {
+				tif = order.StandingTiF
+			}
 		}
 		ords = append(ords, &core.Order{
 			ID:     ordertest.RandomOrderID().String(),
