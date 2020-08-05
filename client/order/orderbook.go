@@ -170,8 +170,7 @@ func (ob *OrderBook) processCachedNotes() error {
 	return nil
 }
 
-// Sync updates a client tracked order book with an order
-// book snapshot.
+// Sync updates a client tracked order book with an order book snapshot.
 func (ob *OrderBook) Sync(snapshot *msgjson.OrderBook) error {
 	if ob.isSynced() {
 		return fmt.Errorf("order book is already synced")

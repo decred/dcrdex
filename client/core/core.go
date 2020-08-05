@@ -2578,36 +2578,57 @@ func (c *Core) handleReconnect(host string) {
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
 	if !found {
-		log.Errorf("unable to find previous connection to DEX at %s", host)
+		log.Errorf("handleReconnect: Unable to find previous connection to DEX at %s", host)
 		return
 	}
 	if err := c.authDEX(dc); err != nil {
-		log.Errorf("unable to authorize DEX at %s: %v", host, err)
+		log.Errorf("handleReconnect: Unable to authorize DEX at %s: %v", host, err)
 		return
 	}
 
-	dc.marketMtx.RLock()
-	for mktKey, mkt := range dc.marketMap {
+	resubMkt := func(mkt *Market) {
+		// Locate any bookie for this market.
 		dc.booksMtx.Lock()
-		booky, foundMkt := dc.books[mktKey]
-		dc.booksMtx.Unlock()
-		if !foundMkt {
-			continue
+		defer dc.booksMtx.Unlock()
+		booky := dc.books[mkt.Name]
+		if booky == nil {
+			// Was not previously subscribed with the server for this market.
+			return
 		}
-		feeds := booky.feeds
-		dc.booksMtx.Lock()
-		delete(dc.books, mktKey)
-		dc.booksMtx.Unlock()
-		_, _, err := c.Sync(host, mkt.BaseID, mkt.QuoteID)
+
+		// Resubscribe since our old subscription was probably lost by the
+		// server when the connection dropped.
+		snap, err := dc.subscribe(mkt.BaseID, mkt.QuoteID)
 		if err != nil {
-			log.Errorf("error re-subscribing: %v", err)
-			continue
+			log.Errorf("handleReconnect: Failed to Subscribe to market %q 'orderbook': %v", mkt.Name, err)
+			return
 		}
-		dc.booksMtx.Lock()
-		dc.books[mktKey].feeds = feeds
-		dc.booksMtx.Unlock()
+
+		// Create a fresh OrderBook for the bookie.
+		err = booky.reset(snap)
+		if err != nil {
+			log.Errorf("handleReconnect: Failed to Sync market %q order book snapshot: %v", mkt.Name, err)
+		}
+
+		// Send a FreshBookAction to the subscribers.
+		booky.send(&BookUpdate{
+			Action:   FreshBookAction,
+			Host:     dc.acct.host,
+			MarketID: mkt.Name,
+			Payload: &MarketOrderBook{
+				Base:  mkt.BaseID,
+				Quote: mkt.QuoteID,
+				Book:  booky.book(),
+			},
+		})
 	}
-	dc.marketMtx.RUnlock()
+
+	// For each market, resubscribe to any market books.
+	dc.marketMtx.RLock()
+	defer dc.marketMtx.RUnlock()
+	for _, mkt := range dc.marketMap {
+		resubMkt(mkt)
+	}
 }
 
 // handleConnectEvent is called when a WsConn indicates that a connection was
@@ -2745,7 +2766,15 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		// Clear the bookie associated with the suspended market.
 		dc.booksMtx.Lock()
 		if bookie := dc.books[sp.MarketID]; bookie != nil {
-			dc.books[sp.MarketID] = newBookie(func() { c.unsub(dc, sp.MarketID) })
+			// TODO: This is wrong. The server subscription remains. Also the
+			// BookFeed receivers are still waiting on the old bookie. Fixing
+			// this will require some thought to keep the bookie, but signal to
+			// the receivers of an empty book, while maintaining the proper
+			// order book message seq.
+
+			// Old bookie and it's feeds get garbage collected. Any orderbook
+			// subscriptions remain, and are handled by the new bookie.
+			dc.books[sp.MarketID] = newBookie(func() { dc.stopBook(mkt.BaseID, mkt.QuoteID) })
 		}
 		dc.booksMtx.Unlock()
 

@@ -80,7 +80,7 @@ func (c *TCore) GetFee(string, string) (uint64, error)                       { r
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
 func (c *TCore) InitializeClient(pw []byte) error                            { return c.initErr }
 func (c *TCore) Login(pw []byte) (*core.LoginResult, error)                  { return &core.LoginResult{}, c.loginErr }
-func (c *TCore) Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
+func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	return c.syncBook, c.syncFeed, c.syncErr
 }
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
@@ -245,6 +245,7 @@ type tLink struct {
 func newLink() *tLink {
 	conn := &TConn{
 		respReady: make(chan []byte, 1),
+		close:     make(chan struct{}, 1),
 	}
 	cl := newWSClient("", conn, func(*msgjson.Message) *msgjson.Error { return nil })
 	return &tLink{
@@ -346,11 +347,21 @@ func TestLoadMarket(t *testing.T) {
 	link := newLink()
 	s, tCore, shutdown, _ := newTServer(t, false)
 	defer shutdown()
-	_, err := link.cl.Connect(tCtx)
+	linkWg, err := link.cl.Connect(tCtx)
 	if err != nil {
 		t.Fatalf("WSLink Start: %v", err)
 	}
-	defer link.cl.Disconnect()
+
+	// This test is not running WebServer or calling handleWS/websocketHandler,
+	// so manually stop the marketSyncer started by wsLoadMarket and the WSLink
+	// before returning from this test.
+	defer func() {
+		link.cl.feedLoop.Stop()
+		link.cl.feedLoop.WaitForShutdown()
+		link.cl.Disconnect()
+		linkWg.Wait()
+	}()
+
 	params := &marketLoad{
 		Host:  "abc",
 		Base:  uint32(1),
@@ -361,6 +372,7 @@ func TestLoadMarket(t *testing.T) {
 	tCore.syncBook = &core.OrderBook{}
 
 	extractMessage := func() *msgjson.Message {
+		t.Helper()
 		select {
 		case msgB := <-link.conn.respReady:
 			msg := new(msgjson.Message)
@@ -373,6 +385,7 @@ func TestLoadMarket(t *testing.T) {
 	}
 
 	ensureGood := func() {
+		t.Helper()
 		// Create a new feed for every request because a Close()d feed cannot be
 		// reused.
 		tCore.syncFeed = core.NewBookFeed(func(feed *core.BookFeed) {})
@@ -599,6 +612,10 @@ func TestHandleMessage(t *testing.T) {
 	link := newLink()
 	s, _, shutdown, _ := newTServer(t, false)
 	defer shutdown()
+
+	// NOTE: link is not started because the handlers in this test do not
+	// actually use it.
+
 	var msg *msgjson.Message
 
 	ensureErr := func(name string, wantCode int) {

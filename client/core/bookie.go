@@ -25,7 +25,6 @@ var (
 // longer using the feed.
 type BookFeed struct {
 	C     chan *BookUpdate
-	off   chan struct{}
 	id    uint32
 	close func(*BookFeed)
 }
@@ -35,7 +34,6 @@ type BookFeed struct {
 func NewBookFeed(close func(feed *BookFeed)) *BookFeed {
 	return &BookFeed{
 		C:     make(chan *BookUpdate, 256),
-		off:   make(chan struct{}),
 		id:    atomic.AddUint32(&feederID, 1),
 		close: close,
 	}
@@ -43,18 +41,7 @@ func NewBookFeed(close func(feed *BookFeed)) *BookFeed {
 
 // Close the BookFeed.
 func (f *BookFeed) Close() {
-	f.close(f)
-	close(f.off)
-}
-
-// on is used internally to see whether the caller has Close()d the feed.
-func (f *BookFeed) on() bool {
-	select {
-	case <-f.off:
-		return false
-	default:
-	}
-	return true
+	f.close(f) // i.e. (*bookie).closeFeed(feed *BookFeed)
 }
 
 // bookie is a BookFeed manager. bookie will maintain any number of order book
@@ -66,7 +53,7 @@ type bookie struct {
 	orderbook.OrderBook
 	mtx        sync.Mutex
 	feeds      map[uint32]*BookFeed
-	close      func()
+	close      func() // e.g. dexConnection.StopBook
 	closeTimer *time.Timer
 }
 
@@ -81,35 +68,69 @@ func newBookie(close func()) *bookie {
 	}
 }
 
+// resets the bookie with a new OrderBook based on the provided book snapshot
+// from the server.
+func (b *bookie) reset(snapshot *msgjson.OrderBook) error {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	b.OrderBook = *orderbook.NewOrderBook()
+	return b.OrderBook.Sync(snapshot)
+}
+
 // feed gets a new *BookFeed and cancels the close timer.
 func (b *bookie) feed() *BookFeed {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	if b.closeTimer != nil {
+		// If Stop returns true, the timer did not fire. If false, the timer
+		// already fired and the close func was called. The caller of feed()
+		// must be OK with that, or the close func must be able to detect when
+		// new feeds exist and abort. To solve the race, the caller of feed()
+		// must synchronize with the close func. e.g. Sync locks bookMtx before
+		// creating new feeds, and StopBook locks bookMtx to check for feeds
+		// before unsubscribing.
 		b.closeTimer.Stop()
 		b.closeTimer = nil
 	}
-	feed := NewBookFeed(b.closeFeed)
+	feed := NewBookFeed(b.CloseFeed)
 	b.feeds[feed.id] = feed
 	return feed
 }
 
-// closeFeed is ultimately called when the BookFeed subscriber closes the feed.
+// CloseFeed is ultimately called when the BookFeed subscriber closes the feed.
 // If this was the last feed for this bookie aka market, set a timer to
 // unsubscribe unless another feed is requested.
-func (b *bookie) closeFeed(feed *BookFeed) {
+func (b *bookie) CloseFeed(feed *BookFeed) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
-	beforeLen := len(b.feeds)
+	_, found := b.feeds[feed.id]
+	if !found {
+		return
+	}
+	b.closeFeed(feed)
+}
+
+func (b *bookie) closeFeed(feed *BookFeed) {
 	delete(b.feeds, feed.id)
-	if beforeLen == 1 && len(b.feeds) == 0 {
+
+	// If that was the last BookFeed, set a timer to unsubscribe w/ server.
+	if len(b.feeds) == 0 {
 		if b.closeTimer != nil {
 			b.closeTimer.Stop()
 		}
 		b.closeTimer = time.AfterFunc(bookFeedTimeout, func() {
 			b.mtx.Lock()
-			defer b.mtx.Unlock()
-			if len(b.feeds) == 0 {
+			numFeeds := len(b.feeds)
+			b.mtx.Unlock() // cannot be locked for b.close
+			// Note that it is possible that the timer fired as b.feed() was
+			// about to stop it before inserting a new BookFeed. If feed() got
+			// the mutex first, there will be a feed to prevent b.close below.
+			// If closeFeed() got the mutex first, feed() will fail to stop the
+			// timer but still register a new BookFeed. The caller of feed()
+			// must synchronize with the close func to prevent this.
+
+			// Call the close func if there are no more feeds.
+			if numFeeds == 0 {
 				b.close()
 			}
 		})
@@ -121,15 +142,12 @@ func (b *bookie) send(u *BookUpdate) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	for fid, feed := range b.feeds {
-		if !feed.on() {
-			delete(b.feeds, fid)
-			continue
-		}
 		select {
 		case feed.C <- u:
 		default:
-			log.Errorf("closing blocking book update channel")
-			delete(b.feeds, fid)
+			log.Warnf("bookie %p: Closing book update feed %d with no receiver. "+
+				"The receiver should have closed the feed before going away.", b, fid)
+			b.closeFeed(feed) // delete it and maybe start a delayed bookie close
 		}
 	}
 }
@@ -144,23 +162,17 @@ func (b *bookie) book() *OrderBook {
 	}
 }
 
-// Sync subscribes to the order book and returns the book and a BookFeed to
+// syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
-// longer in use.
-func (c *Core) Sync(host string, base, quote uint32) (*OrderBook, *BookFeed, error) {
-	// Need to send the 'orderbook' message and parse the results.
-	c.connMtx.RLock()
-	dc, found := c.conns[host]
-	c.connMtx.RUnlock()
-	if !found {
-		return nil, nil, fmt.Errorf("unknown DEX '%s'", host)
-	}
-
-	mkt := marketName(base, quote)
+// longer in use. Use stopBook to unsubscribed and clean up the feed.
+func (dc *dexConnection) syncBook(base, quote uint32) (*OrderBook, *BookFeed, error) {
 	dc.booksMtx.Lock()
 	defer dc.booksMtx.Unlock()
+
+	mkt := marketName(base, quote)
 	booky, found := dc.books[mkt]
 	if found {
+		// Get the order book and a NEW feed.
 		return booky.book(), booky.feed(), nil
 	}
 
@@ -172,29 +184,13 @@ func (c *Core) Sync(host string, base, quote uint32) (*OrderBook, *BookFeed, err
 		return nil, nil, fmt.Errorf("unknown market %s", mkt)
 	}
 
-	// Subscribe
-	req, err := msgjson.NewRequest(dc.NextID(), msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{
-		Base:  base,
-		Quote: quote,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("error encoding 'orderbook' request: %v", err)
-	}
-	errChan := make(chan error, 1)
-	result := new(msgjson.OrderBook)
-	err = dc.Request(req, func(msg *msgjson.Message) {
-		errChan <- msg.UnmarshalResult(result)
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("error subscribing to %s orderbook: %v", mkt, err)
-	}
-	err = extractError(errChan, requestTimeout, msgjson.OrderBookRoute)
+	obRes, err := dc.subscribe(base, quote)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	booky = newBookie(func() { c.unsub(dc, mkt) })
-	err = booky.Sync(result)
+	booky = newBookie(func() { dc.stopBook(base, quote) })
+	err = booky.Sync(obRes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -203,21 +199,71 @@ func (c *Core) Sync(host string, base, quote uint32) (*OrderBook, *BookFeed, err
 	return booky.book(), booky.feed(), nil
 }
 
-// unsub is the close callback passed to the bookie, and will be called when
+// subscribe subscribes to the given market's order book via the 'orderbook'
+// request. The response, which includes book's snapshot, is returned. Proper
+// synchronization is required by the caller to ensure that order feed messages
+// aren't processed before they are prepared to handle this subscription.
+func (dc *dexConnection) subscribe(base, quote uint32) (*msgjson.OrderBook, error) {
+	mkt := marketName(base, quote)
+	// Subscribe via the 'orderbook' request.
+	log.Debugf("Subscribing to the %v order book for %v", mkt, dc.acct.host)
+	req, err := msgjson.NewRequest(dc.NextID(), msgjson.OrderBookRoute, &msgjson.OrderBookSubscription{
+		Base:  base,
+		Quote: quote,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error encoding 'orderbook' request: %v", err)
+	}
+	errChan := make(chan error, 1)
+	result := new(msgjson.OrderBook)
+	err = dc.Request(req, func(msg *msgjson.Message) {
+		errChan <- msg.UnmarshalResult(result)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error subscribing to %s orderbook: %v", mkt, err)
+	}
+	err = extractError(errChan, requestTimeout, msgjson.OrderBookRoute)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// stopBook is the close callback passed to the bookie, and will be called when
 // there are no more subscribers and the close delay period has expired.
-func (c *Core) unsub(dc *dexConnection, mkt string) {
-	log.Debugf("unsubscribing from %s", mkt)
-
+func (dc *dexConnection) stopBook(base, quote uint32) {
+	mkt := marketName(base, quote)
 	dc.booksMtx.Lock()
-	delete(dc.books, mkt)
-	dc.booksMtx.Unlock()
+	defer dc.booksMtx.Unlock() // hold it locked until unsubscribe request is completed
 
+	// Abort the unsubscribe if feeds exist for the bookie. This can happen if a
+	// bookie's close func is called while a new BookFeed is generated elsewhere.
+	if booky, found := dc.books[mkt]; found {
+		booky.mtx.Lock()
+		numFeeds := len(booky.feeds)
+		booky.mtx.Unlock()
+		if numFeeds > 0 {
+			log.Warnf("Aborting booky %p unsubscribe for market %s with active feeds", booky, mkt)
+			return
+		}
+		// No BookFeeds, delete the bookie.
+		delete(dc.books, mkt)
+	}
+
+	if err := dc.unsubscribe(base, quote); err != nil {
+		log.Error(err)
+	}
+}
+
+// unsubscribe unsubscribes from to the given market's order book.
+func (dc *dexConnection) unsubscribe(base, quote uint32) error {
+	mkt := marketName(base, quote)
+	log.Debugf("Unsubscribing from the %v order book for %v", mkt, dc.acct.host)
 	req, err := msgjson.NewRequest(dc.NextID(), msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
 		MarketID: mkt,
 	})
 	if err != nil {
-		log.Errorf("unsub_orderbook message encoding error: %v", err)
-		return
+		return fmt.Errorf("unsub_orderbook message encoding error: %w", err)
 	}
 	err = dc.Request(req, func(msg *msgjson.Message) {
 		var res bool
@@ -227,8 +273,23 @@ func (c *Core) unsub(dc *dexConnection, mkt string) {
 		}
 	})
 	if err != nil {
-		log.Errorf("request error unsubscribing from %s orderbook: %v", mkt, err)
+		return fmt.Errorf("request error unsubscribing from %s orderbook: %w", mkt, err)
 	}
+	return nil
+}
+
+// SyncBook subscribes to the order book and returns the book and a BookFeed to
+// receive order book updates. The BookFeed must be Close()d when it is no
+// longer in use.
+func (c *Core) SyncBook(host string, base, quote uint32) (*OrderBook, *BookFeed, error) {
+	c.connMtx.RLock()
+	dc, found := c.conns[host]
+	c.connMtx.RUnlock()
+	if !found {
+		return nil, nil, fmt.Errorf("unknown DEX '%s'", host)
+	}
+
+	return dc.syncBook(base, quote)
 }
 
 // Book fetches the order book. If a subscription doesn't exist, one will be
@@ -244,19 +305,29 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 
 	mkt := marketName(base, quote)
 	dc.booksMtx.RLock()
+	defer dc.booksMtx.RUnlock() // hold it locked until any transient sub/unsub is completed
 	book, found := dc.books[mkt]
-	dc.booksMtx.RUnlock()
+	var ob *orderbook.OrderBook
 	// If not found, attempt to make a temporary subscription and return the
 	// initial book.
 	if !found {
-		book, bookFeed, err := c.Sync(dex, base, quote)
+		snap, err := dc.subscribe(base, quote)
 		if err != nil {
+			return nil, fmt.Errorf("unable to subscribe to book: %v", err)
+		}
+		err = dc.unsubscribe(base, quote)
+		if err != nil {
+			log.Errorf("Failed to unsubscribe to %q book: %v", mkt, err)
+		}
+		ob = orderbook.NewOrderBook()
+		if err = ob.Sync(snap); err != nil {
 			return nil, fmt.Errorf("unable to sync book: %v", err)
 		}
-		bookFeed.Close()
-		return book, nil
+	} else {
+		ob = &book.OrderBook
 	}
-	buys, sells, epoch := book.Orders()
+
+	buys, sells, epoch := ob.Orders()
 	return &OrderBook{
 		Buys:  translateBookSide(buys),
 		Sells: translateBookSide(sells),

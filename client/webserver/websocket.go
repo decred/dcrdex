@@ -99,6 +99,7 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 		cl.mtx.Lock()
 		if cl.feedLoop != nil {
 			cl.feedLoop.Stop()
+			cl.feedLoop.WaitForShutdown()
 		}
 		cl.mtx.Unlock()
 
@@ -149,9 +150,12 @@ func (s *WebServer) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson
 	return msgjson.NewError(msgjson.UnknownMessageType, "web server only handles requests")
 }
 
+// All request handlers must be defined with this signature.
+type wsHandler func(*WebServer, *wsClient, *msgjson.Message) *msgjson.Error
+
 // wsHandlers is the map used by the server to locate the router handler for a
 // request.
-var wsHandlers = map[string]func(*WebServer, *wsClient, *msgjson.Message) *msgjson.Error{
+var wsHandlers = map[string]wsHandler{
 	"loadmarket": wsLoadMarket,
 	"unmarket":   wsUnmarket,
 	"acknotes":   wsAckNotes,
@@ -175,7 +179,7 @@ type marketResponse struct {
 }
 
 // wsLoadMarket is the handler for the 'loadmarket' websocket endpoint.
-// Subscribes the client to the notification feed by sends the order book.
+// Subscribes the client to the notification feed and sends the order book.
 func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
 	market := new(marketLoad)
 	err := json.Unmarshal(msg.Payload, market)
@@ -185,7 +189,7 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
-	book, feed, err := s.core.Sync(market.Host, market.Base, market.Quote)
+	book, feed, err := s.core.SyncBook(market.Host, market.Base, market.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
 		log.Errorf(errMsg)
@@ -195,11 +199,12 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 	cl.mtx.Lock()
 	if cl.feedLoop != nil {
 		cl.feedLoop.Stop()
+		cl.feedLoop.WaitForShutdown()
 	}
 	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed)
 	cl.mtx.Unlock()
 
-	note, err := msgjson.NewNotification("book", &marketResponse{
+	note, err := msgjson.NewNotification(core.FreshBookAction, &marketResponse{
 		Host:  market.Host,
 		Book:  book,
 		Base:  market.Base,
@@ -217,13 +222,15 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 }
 
 // wsUnmarket is the handler for the 'unmarket' websocket endpoint. This empty
-// message is sent when the user leaves the markets page. Unsubscribes from the
-// current market.
+// message is sent when the user leaves the markets page. This closes the feed,
+// and potentially unsubscribes from orderbook with the server if there are no
+// other consumers
 func wsUnmarket(_ *WebServer, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 	cl.mtx.Lock()
 	defer cl.mtx.Unlock()
 	if cl.feedLoop != nil {
 		cl.feedLoop.Stop()
+		cl.feedLoop.WaitForShutdown()
 		cl.feedLoop = nil
 	}
 	return nil

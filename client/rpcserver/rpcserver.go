@@ -65,7 +65,7 @@ type ClientCore interface {
 	OpenWallet(assetID uint32, appPass []byte) error
 	GetFee(addr, cert string) (fee uint64, err error)
 	Register(form *core.RegisterForm) (*core.RegisterResult, error)
-	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
+	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)
@@ -95,7 +95,28 @@ func (m *marketSyncer) Run(ctx context.Context) {
 out:
 	for {
 		select {
-		case update := <-m.feed.C:
+		case update, ok := <-m.feed.C:
+			if !ok {
+				// Should not happen, but don't spin furiously.
+				log.Warnf("marketSyncer stopping on feed closed")
+				return
+			}
+			if update.Action == core.FreshBookAction {
+				// For FreshBookAction, translate the *core.MarketOrderBook
+				// payload into a *marketResponse.
+				mob, ok := update.Payload.(*core.MarketOrderBook)
+				if !ok {
+					log.Errorf("FreshBookAction payload not a *MarketOrderBook")
+					continue
+				}
+				update.Payload = &marketResponse{
+					Host:  update.Host,
+					Book:  mob.Book,
+					Base:  mob.Base,
+					Quote: mob.Quote,
+				}
+				log.Tracef("FreshBookAction: %v", update.MarketID)
+			}
 			note, err := msgjson.NewNotification(update.Action, update)
 			if err != nil {
 				log.Errorf("error encoding notification message: %v", err)

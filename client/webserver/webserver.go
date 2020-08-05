@@ -64,7 +64,7 @@ type clientCore interface {
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
-	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
+	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	AssetBalance(assetID uint32) (*db.Balance, error)
 	WalletState(assetID uint32) *core.WalletState
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
@@ -107,12 +107,35 @@ func newMarketSyncer(ctx context.Context, cl *wsClient, feed *core.BookFeed) *de
 	return ssWaiter
 }
 
+// Run starts the marketSyncer listening for BookUpdates, which it relays to the
+// websocket client as notifications.
 func (m *marketSyncer) Run(ctx context.Context) {
 	defer m.feed.Close()
 out:
 	for {
 		select {
-		case update := <-m.feed.C:
+		case update, ok := <-m.feed.C:
+			if !ok {
+				// Should not happen, but don't spin furiously.
+				log.Warnf("marketSyncer stopping on feed closed")
+				return
+			}
+			if update.Action == core.FreshBookAction {
+				// For FreshBookAction, translate the *core.MarketOrderBook
+				// payload into a *marketResponse.
+				mob, ok := update.Payload.(*core.MarketOrderBook)
+				if !ok {
+					log.Errorf("FreshBookAction payload not a *MarketOrderBook")
+					continue
+				}
+				update.Payload = &marketResponse{
+					Host:  update.Host,
+					Book:  mob.Book,
+					Base:  mob.Base,
+					Quote: mob.Quote,
+				}
+				log.Tracef("FreshBookAction: %v", update.MarketID)
+			}
 			note, err := msgjson.NewNotification(update.Action, update)
 			if err != nil {
 				log.Errorf("error encoding notification message: %v", err)
@@ -120,7 +143,7 @@ out:
 			}
 			err = m.cl.Send(note)
 			if err != nil {
-				log.Debug("send error. ending market feed")
+				log.Debug("Send to browser error. Ending market feed: %v", err)
 				break out
 			}
 		case <-ctx.Done():
