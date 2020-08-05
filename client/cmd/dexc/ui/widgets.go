@@ -12,6 +12,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
+	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 	"github.com/gdamore/tcell"
@@ -46,6 +47,7 @@ var (
 	offColor          = blurColor
 	colorBlack        = tcell.GetColor("black")
 	notificationCount uint32
+	wsServer          *websocket.Server
 )
 
 // For brevity, a commonly used tview callback.
@@ -59,8 +61,14 @@ func Run(ctx context.Context) {
 	InitLogging(func(p []byte) {
 		appJournal.Write(p)
 	}, cfg.DebugLevel)
-	// Close closes the log rotator.
-	defer Close()
+	defer func() {
+		// Close closes the log rotator.
+		Close()
+		// Disconnect ws listeners.
+		if wsServer != nil {
+			wsServer.Shutdown()
+		}
+	}()
 	// Create the UI and start the app.
 	createApp()
 	if err := app.SetRoot(screen, true).SetFocus(mainMenu).Run(); err != nil {
@@ -115,6 +123,8 @@ func createApp() {
 		log.Errorf("error creating client core: %v", err)
 		return
 	}
+	wsServer = websocket.New(appCtx, clientCore)
+	wsServer.SetLogger(lm.Logger("WS"))
 	go clientCore.Run(appCtx)
 	createWidgets()
 	// Create the Screen, which is the top-level layout manager.
@@ -157,7 +167,7 @@ func createWidgets() {
 	webView = newServerView("Web", cfg.WebAddr, func(ctx context.Context, addr string, logger slog.Logger) {
 		setWebLabelOn(true)
 		defer setWebLabelOn(false)
-		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logger, cfg.ReloadHTML)
+		webSrv, err := webserver.New(clientCore, cfg.WebAddr, wsServer, logger, cfg.ReloadHTML)
 		if err != nil {
 			log.Errorf("Error creating web server: %v", err)
 			return

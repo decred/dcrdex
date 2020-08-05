@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/rpcserver"
 	"decred.org/dcrdex/client/webserver"
+	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"github.com/decred/slog"
 )
@@ -88,6 +89,15 @@ func main() {
 		wg.Done()
 	}()
 
+	wsServer := websocket.New(appCtx, clientCore)
+	wsServer.SetLogger(logMaker.Logger("WS"))
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-appCtx.Done()
+		wsServer.Shutdown()
+	}()
+
 	if cfg.RPCOn {
 		rpcserver.SetLogger(logMaker.Logger("RPC"))
 		rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
@@ -112,7 +122,7 @@ func main() {
 
 	if !cfg.NoWeb {
 		wg.Add(1)
-		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
+		webSrv, err := webserver.New(clientCore, cfg.WebAddr, wsServer, logMaker.Logger("WEB"), cfg.ReloadHTML)
 		if err != nil {
 			log.Errorf("Error creating web server: %v", err)
 			cancel()
