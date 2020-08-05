@@ -53,11 +53,12 @@ var (
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
 	comms.WsConn
-	connMaster *dex.ConnectionMaster
-	assets     map[uint32]*dex.Asset
-	cfg        *msgjson.ConfigResult
-	acct       *dexAccount
-	notify     func(Notification)
+	connMaster   *dex.ConnectionMaster
+	assets       map[uint32]*dex.Asset
+	cfg          *msgjson.ConfigResult
+	tickInterval time.Duration
+	acct         *dexAccount
+	notify       func(Notification)
 
 	booksMtx sync.RWMutex
 	books    map[string]*bookie
@@ -2603,19 +2604,23 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	}
 
 	// Create the dexConnection and listen for incoming messages.
+	bTimeout := time.Millisecond * time.Duration(dexCfg.BroadcastTimeout)
 	dc := &dexConnection{
-		WsConn:     conn,
-		connMaster: connMaster,
-		assets:     assets,
-		cfg:        dexCfg,
-		books:      make(map[string]*bookie),
-		acct:       newDEXAccount(acctInfo),
-		marketMap:  marketMap,
-		trades:     make(map[order.OrderID]*trackedTrade),
-		notify:     c.notify,
-		epoch:      epochMap,
-		connected:  true,
+		WsConn:       conn,
+		connMaster:   connMaster,
+		assets:       assets,
+		cfg:          dexCfg,
+		tickInterval: bTimeout / 3,
+		books:        make(map[string]*bookie),
+		acct:         newDEXAccount(acctInfo),
+		marketMap:    marketMap,
+		trades:       make(map[order.OrderID]*trackedTrade),
+		notify:       c.notify,
+		epoch:        epochMap,
+		connected:    true,
 	}
+
+	log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
 
 	dc.refreshMarkets()
 	c.wg.Add(1)
@@ -2891,10 +2896,9 @@ var noteHandlers = map[string]routeHandler{
 func (c *Core) listen(dc *dexConnection) {
 	defer c.wg.Done()
 	msgs := dc.MessageSource()
-	// Run a match check every 1/3 broadcast timeout.
-	bTimeout := time.Millisecond * time.Duration(dc.cfg.BroadcastTimeout)
-	ticker := time.NewTicker(bTimeout / 3)
-	log.Debugf("broadcast timeout = %v, ticking every %v", bTimeout, bTimeout/3)
+	// Run a match check at the tick interval.
+	ticker := time.NewTicker(dc.tickInterval)
+	defer ticker.Stop()
 
 	// Messages must be run in the order in which they are received, but they
 	// should not be blocking or run concurrently.
@@ -2943,12 +2947,12 @@ out:
 				log.Errorf("A response was received in the message queue: %s", msg)
 				continue
 			default:
-				log.Errorf("invalid message type %d from MessageSource", msg.Type)
+				log.Errorf("Invalid message type %d from MessageSource", msg.Type)
 				continue
 			}
 			// Until all the routes have handlers, check for nil too.
 			if !found || handler == nil {
-				log.Errorf("no handler found for route '%s'", msg.Route)
+				log.Errorf("No handler found for route '%s'", msg.Route)
 				continue
 			}
 
@@ -2957,8 +2961,8 @@ out:
 
 		case <-ticker.C:
 			counts := make(assetCounter)
-			dc.tradeMtx.RLock()
-			log.Debugf("ticking %d trades", len(dc.trades))
+			dc.tradeMtx.Lock()
+			log.Debugf("Ticking %d trades", len(dc.trades))
 			for oid, trade := range dc.trades {
 				if !trade.isActive() {
 					log.Infof("Retiring inactive order %v", oid)
@@ -2971,7 +2975,7 @@ out:
 				}
 				counts.absorb(newCounts)
 			}
-			dc.tradeMtx.RUnlock()
+			dc.tradeMtx.Unlock()
 			if len(counts) > 0 {
 				dc.refreshMarkets()
 				c.updateBalances(counts)

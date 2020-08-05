@@ -695,18 +695,29 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 			dbMatch.Side, t.ID(), match.id, err)
 		return false
 	}
-	if !swapLocktimeExpired && match.contractExpiry.IsZero() {
-		match.contractExpiry = contractExpiry
-		swapCoinID := proof.TakerSwap
-		if dbMatch.Side == order.Maker {
-			swapCoinID = proof.MakerSwap
-		}
-		from := t.wallets.fromAsset
-		log.Infof("Contract for match %v with swap coin %v (%s) has an expiry time of %v (%v), not yet expired.",
-			match.id, coinIDString(from.ID, swapCoinID), from.Symbol,
-			contractExpiry, time.Until(contractExpiry).Round(time.Second))
+	if swapLocktimeExpired {
+		return true
 	}
-	return swapLocktimeExpired
+
+	// For the first check or hourly tick, log the time until expiration.
+	if match.contractExpiry.IsZero() {
+		// First check for this match.
+		match.contractExpiry = contractExpiry
+	} else if (time.Until(contractExpiry) % time.Hour) > t.dc.tickInterval {
+		// Already logged, and it's not the first tick of the hour.
+		return false
+	}
+
+	swapCoinID := proof.TakerSwap
+	if dbMatch.Side == order.Maker {
+		swapCoinID = proof.MakerSwap
+	}
+	from := t.wallets.fromAsset
+	log.Infof("Contract for match %v with swap coin %v (%s) has an expiry time of %v (%v), not yet expired.",
+		match.id, coinIDString(from.ID, swapCoinID), from.Symbol,
+		contractExpiry, time.Until(contractExpiry).Round(time.Second))
+
+	return false
 }
 
 // tick will check for and perform any match actions necessary.
