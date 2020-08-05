@@ -744,12 +744,13 @@ out:
 }
 
 func TestServer(t *testing.T) {
-	numBuys = 150
-	numSells = 150
-	feedPeriod = 500 * time.Millisecond
+	numBuys = 10
+	numSells = 10
+	feedPeriod = 2000 * time.Millisecond
 	initialize := false
-	register := false
+	register := true
 	forceDisconnectWallet = true
+	gapWidthFactor = 0.2
 
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())

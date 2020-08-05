@@ -118,18 +118,15 @@ export class DepthChart {
     this.wheeled()
     const zoom = this.zoomState
     // If the current window already contains all available data, do nothing.
-    const lastSell = last(this.book.sells) || false
-    const lastBuy = last(this.book.buys) || false
     const midGap = this.gap()[0]
-    const low = lastBuy ? lastBuy.rate : midGap
-    const high = lastSell ? lastSell.rate : midGap
-    if (!bigger && zoom.high > high && zoom.low < low) return
+    const high = 2 * midGap
+    if (!bigger && zoom.high >= high && zoom.low <= 0) return
     // Zoom in to 66%, but out to 150% = 1 / (2/3) so that the same zoom levels
     // are hit when reversing direction.
     const zoomRange = zoom.high - zoom.low
     const bump = bigger ? -1 / 6 * zoomRange : 1 / 4 * zoomRange
-    this.zoomState.low = zoom.low - bump
-    this.zoomState.high = zoom.high + bump
+    this.zoomState.low = Math.max(zoom.low - bump, 0)
+    this.zoomState.high = Math.min(zoom.high + bump, high)
     this.draw()
   }
 
@@ -185,13 +182,14 @@ export class DepthChart {
     const lastSell = last(sells) || false
     const lastBuy = last(buys) || false
     var high = zoom.high || (lastSell ? lastSell.rate : midGap)
-    var low = zoom.low || (lastBuy ? lastBuy.rate : midGap)
+    var low = typeof zoom.low === 'number' ? zoom.low : (lastBuy ? lastBuy.rate : midGap)
 
     // Clamp the zoom between 0.5% and 100% of mid-gap.
     const minHalfRange = Math.max(gapWidth, midGap * 0.0025)
     const halfRange = clamp((high - low) / 2, minHalfRange, midGap)
     zoom.high = high = midGap + halfRange
     zoom.low = low = midGap - halfRange
+
     const buyDepth = []
     const buyEpoch = []
     const sellDepth = []
@@ -211,9 +209,9 @@ export class DepthChart {
       if (pt.rate < zoom.low) break
     }
     const buySum = buyDepth.length ? last(buyDepth)[1] : 0
-    buyDepth.push([low - halfRange, buySum])
+    buyDepth.push([low, buySum])
     const epochBuySum = buyEpoch.length ? last(buyEpoch)[1] : 0
-    buyEpoch.push([low - halfRange, epochBuySum])
+    buyEpoch.push([low, epochBuySum])
 
     sum = 0
     epochSum = 0
@@ -230,9 +228,9 @@ export class DepthChart {
     // Add a data point going to the left so that the data doesn't end with a
     // vertical line.
     const sellSum = sellDepth.length ? last(sellDepth)[1] : 0
-    sellDepth.push([high + halfRange, sellSum])
+    sellDepth.push([high, sellSum])
     const epochSellSum = sellEpoch.length ? last(sellEpoch)[1] : 0
-    sellEpoch.push([high + halfRange, epochSellSum])
+    sellEpoch.push([high, epochSellSum])
 
     // Add 5% padding to the top of the chart.
     const maxY = epochSellSum && epochBuySum ? Math.max(epochBuySum, epochSellSum) * 1.05 : epochSellSum || epochBuySum || 1
