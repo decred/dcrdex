@@ -628,7 +628,7 @@ func dcrWallet(name string) *tWallet {
 	return &tWallet{
 		name:    name,
 		account: "default",
-		pass:    []byte("123"),
+		pass:    []byte("abc"),
 	}
 }
 

@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	walletPassword = "123"
+	walletPassword = "abc"
 	alphaAddress   = "SsonWQK6xkLSYm7VttCddHWkWWhETFMdR4Y"
 	betaAddress    = "Ssb7Peny8omFwicUi8hC6hCALhcEp59p7UK"
 )

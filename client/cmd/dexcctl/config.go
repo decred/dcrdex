@@ -32,17 +32,18 @@ var (
 
 // config defines the configuration options for dexcctl.
 type config struct {
-	ShowVersion  bool   `short:"V" long:"version" description:"Display version information and exit"`
-	ListCommands bool   `short:"l" long:"listcommands" description:"List all of the supported commands and exit"`
-	Config       string `short:"C" long:"config" description:"Path to configuration file"`
-	RPCUser      string `short:"u" long:"rpcuser" description:"RPC username"`
-	RPCPass      string `short:"P" long:"rpcpass" default-mask:"-" description:"RPC password"`
-	RPCAddr      string `short:"a" long:"rpcaddr" description:"RPC server to connect to"`
-	RPCCert      string `short:"c" long:"rpccert" description:"RPC server certificate chain for validation"`
-	PrintJSON    bool   `short:"j" long:"json" description:"Print json messages sent and received"`
-	Proxy        string `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
-	ProxyUser    string `long:"proxyuser" description:"Username for proxy server"`
-	ProxyPass    string `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
+	ShowVersion  bool     `short:"V" long:"version" description:"Display version information and exit"`
+	ListCommands bool     `short:"l" long:"listcommands" description:"List all of the supported commands and exit"`
+	Config       string   `short:"C" long:"config" description:"Path to configuration file"`
+	RPCUser      string   `short:"u" long:"rpcuser" description:"RPC username"`
+	RPCPass      string   `short:"P" long:"rpcpass" default-mask:"-" description:"RPC password"`
+	RPCAddr      string   `short:"a" long:"rpcaddr" description:"RPC server to connect to"`
+	RPCCert      string   `short:"c" long:"rpccert" description:"RPC server certificate chain for validation"`
+	PrintJSON    bool     `short:"j" long:"json" description:"Print json messages sent and received"`
+	Proxy        string   `long:"proxy" description:"Connect via SOCKS5 proxy (eg. 127.0.0.1:9050)"`
+	ProxyUser    string   `long:"proxyuser" description:"Username for proxy server"`
+	ProxyPass    string   `long:"proxypass" default-mask:"-" description:"Password for proxy server"`
+	PasswordArgs []string `short:"p" long:"passarg" description:"Password arguments to bypass stdin prompts."`
 }
 
 // fileExists reports whether the named file or directory exists.
