@@ -317,7 +317,7 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 		}
 		err = dc.Unsubscribe(base, quote)
 		if err != nil {
-			log.Errorf("failed to subscribe to book: %v", err)
+			log.Errorf("Failed to unsubscribe to %q book: %v", mkt, err)
 		}
 		ob = orderbook.NewOrderBook()
 		if err = ob.Sync(snap); err != nil {
