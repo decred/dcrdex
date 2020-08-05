@@ -1562,6 +1562,20 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 	return tx, uint64(txOut.Value), err
 }
 
+// signTx attempts to sign all transaction inputs.
+func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
+	msgTx, signed, err := dcr.node.SignRawTransaction(baseTx)
+	if err != nil {
+		dcr.log.Errorf("error encountered signing raw transaction (raw tx: %x): %v", dcr.wireBytes(baseTx), err)
+		return nil, fmt.Errorf("signing error: %v", err)
+	}
+	if !signed {
+		dcr.log.Errorf("incomplete raw transaction signatures (raw tx: %x): ", dcr.wireBytes(msgTx))
+		return nil, fmt.Errorf("incomplete raw tx signatures")
+	}
+	return msgTx, nil
+}
+
 // sendWithReturn sends the unsigned transaction with an added output (unless
 // dust) for the change. If a subtractee output is specified, fees will be
 // subtracted from that output, otherwise they will be subtracted from the
@@ -1571,12 +1585,9 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	// Sign the transaction to get an initial size estimate and calculate whether
 	// a change output would be dust.
 	sigCycles := 1
-	msgTx, signed, err := dcr.node.SignRawTransaction(baseTx)
+	msgTx, err := dcr.signTx(baseTx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("signing error: %v", err)
-	}
-	if !signed {
-		return nil, nil, fmt.Errorf("incomplete raw tx signature")
+		return nil, nil, err
 	}
 	size := msgTx.SerializeSize()
 	minFee := feeRate * uint64(size)
@@ -1625,12 +1636,9 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 			// Each cycle, sign the transaction and see if there appears to be any
 			// room to lower the total fees.
 			sigCycles++
-			msgTx, signed, err = dcr.node.SignRawTransaction(baseTx)
+			msgTx, err = dcr.signTx(baseTx)
 			if err != nil {
-				return nil, nil, fmt.Errorf("signing error: %v", err)
-			}
-			if !signed {
-				return nil, nil, fmt.Errorf("incomplete raw tx signature")
+				return nil, nil, err
 			}
 			size = msgTx.SerializeSize()
 			// reqFee is the lowest acceptable fee for a transaction of this size.
@@ -1638,8 +1646,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 			if reqFee > reservoir {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
-					totalIn, totalOut, reqFee, lastFee)
+				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
+					totalIn, totalOut, reqFee, lastFee, dcr.wireBytes(msgTx))
 				return nil, nil, fmt.Errorf("change error")
 			}
 
@@ -1663,8 +1671,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
-					totalIn, totalOut, reqFee, lastFee)
+				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
+					totalIn, totalOut, reqFee, lastFee, dcr.wireBytes(msgTx))
 				return nil, nil, fmt.Errorf("dust error")
 			}
 			continue
@@ -1674,12 +1682,12 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	// Double check the resulting txns fee and fee rate.
 	checkFee, checkRate := fees(msgTx)
 	if checkFee != lastFee {
-		return nil, nil, fmt.Errorf("fee mismatch! %d != %d", checkFee, lastFee)
+		return nil, nil, fmt.Errorf("fee mismatch! %d != %d, raw tx: %x", checkFee, lastFee, dcr.wireBytes(msgTx))
 	}
 	// Ensure the effective fee rate is at least the required fee rate.
 	if checkRate < feeRate {
-		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is lower than expected, %d",
-			msgTx.CachedTxHash(), checkRate, feeRate)
+		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is lower than expected, %d. raw tx: %x",
+			msgTx.CachedTxHash(), checkRate, feeRate, dcr.wireBytes(msgTx))
 	}
 	// This is a last ditch effort to catch ridiculously high fees. Right now,
 	// it's just erroring for fees more than triple the expected rate, which is
@@ -1687,8 +1695,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	// related variation as well as a potential dust change output with no
 	// subtractee specified, in which case the dust goes to the miner.
 	if checkRate > feeRate*3 {
-		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is seemingly outrageous, target = %d",
-			msgTx.CachedTxHash(), checkRate, feeRate)
+		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is seemingly outrageous, target = %d, raw tx = %x",
+			msgTx.CachedTxHash(), checkRate, feeRate, dcr.wireBytes(msgTx))
 	}
 
 	checkHash := msgTx.TxHash()
@@ -1697,11 +1705,11 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 		sigCycles, checkHash, feeRate, checkRate, checkFee, size, changeAdded)
 	txHash, err := dcr.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, dcr.wireBytes(msgTx))
 	}
 	if *txHash != checkHash {
 		return nil, nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *txHash, checkHash)
+			"expected %s, got %s, raw tx: %x", *txHash, checkHash, dcr.wireBytes(msgTx))
 	}
 
 	var change *output
@@ -1781,6 +1789,17 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// wireBytes dumps the serialized transaction bytes.
+func (dcr *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
+	s, err := tx.Bytes()
+	// wireBytes is just used for logging, and a serialization error is
+	// extremely unlikely, so just log the error and return the nil bytes.
+	if err != nil {
+		dcr.log.Errorf("error serializing transaction: %v", err)
+	}
+	return s
 }
 
 // Convert the DCR value to atoms.
