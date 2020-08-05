@@ -2375,9 +2375,10 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 	errs := newErrorSet(dc.acct.host + ": ")
 	ready := make([]*trackedTrade, 0, len(dc.trades))
 	for _, trade := range trades {
-		// The DB loads refunded and revoked matches, so filter those out.
 		if !trade.isActive() {
-			log.Tracef("Loaded inactive trade %v from the DB.", trade.ID())
+			// In this event, there is a discrepancy between the active criteria
+			// between dbTrackers and isActive that should be resolved.
+			log.Warnf("Loaded inactive trade %v from the DB.", trade.ID())
 			continue
 		}
 		base, quote := trade.Base(), trade.Quote()

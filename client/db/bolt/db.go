@@ -604,6 +604,7 @@ func (db *BoltDB) ActiveMatches() ([]*dexdb.MetaMatch, error) {
 // matches, regardless of whether the order itself is in an active state.
 func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error) {
 	dexB := []byte(dex)
+	// For each match for this DEX, pick the active ones.
 	idMap := make(map[order.OrderID]bool)
 	err := db.matchesView(func(master *bbolt.Bucket) error {
 		return master.ForEach(func(k, _ []byte) error {
@@ -614,33 +615,59 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 			if !bytes.Equal(dexB, mBkt.Get(dexKey)) {
 				return nil
 			}
-			status := mBkt.Get(statusKey)
-			if len(status) != 1 {
+			// Inactive with MatchComplete status.
+			statusB := mBkt.Get(statusKey)
+			if len(statusB) != 1 {
 				log.Errorf("match %x has no status set", k)
 				return nil
 			}
-			if status[0] == uint8(order.MatchComplete) {
+			status := order.MatchStatus(statusB[0])
+			if status == order.MatchComplete {
 				return nil
 			}
 
-			// Exclude refunded swaps.
-			// proofB := getCopy(mBkt, proofKey)
-			// if len(proofB) == 0 {
-			// 	log.Errorf("empty match proof")
-			// 	return nil
-			// }
-			// proof, errM := dexdb.DecodeMatchProof(proofB)
-			// if errM != nil {
-			// 	log.Errorf("error decoding proof: %v", errM)
-			// 	return nil
-			// }
-			// if len(proof.RefundCoin) > 0 {
-			// 	return nil
-			// }
+			// Inactive if refunded.
+			proofB := getCopy(mBkt, proofKey)
+			if len(proofB) == 0 {
+				log.Errorf("empty match proof")
+				return nil
+			}
+			proof, errM := dexdb.DecodeMatchProof(proofB)
+			if errM != nil {
+				log.Errorf("error decoding proof: %v", errM)
+				return nil
+			}
+			if len(proof.RefundCoin) > 0 {
+				return nil
+			}
 
-			// TODO: Could also filter out certain revoked matches depending on
-			// status. See (*trackedTrade).isActive.
+			// Some revoked matches are inactive depending on match status and
+			// party side. They may need to be refunded or redeemed first.
+			// TakerSwapCast match status requires action on both sides.
+			if proof.IsRevoked && status != order.TakerSwapCast {
+				// Load the UserMatch to check the match Side.
+				matchB := mBkt.Get(matchKey) // no copy, just need Side
+				if matchB == nil {
+					log.Errorf("nil match bytes for %x", k)
+					return nil
+				}
+				match, err := order.DecodeMatch(matchB)
+				if err != nil {
+					log.Errorf("error decoding match %x: %v", k, err)
+					return nil
+				}
+				side := match.Side // done with match and matchB
+				// - NewlyMatched requires no further action from either side
+				// - MakerSwapCast requires no further action from the taker
+				// - MakerRedeemed requires no further action from the maker
+				if status == order.NewlyMatched ||
+					(status == order.MakerSwapCast && side == order.Taker) ||
+					(status == order.MakerRedeemed && side == order.Maker) {
+					return nil
+				}
+			}
 
+			// The match is active.
 			oidB := mBkt.Get(orderIDKey)
 			var oid order.OrderID
 			copy(oid[:], oidB)
