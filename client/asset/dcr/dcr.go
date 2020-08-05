@@ -1566,13 +1566,11 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
 	msgTx, signed, err := dcr.node.SignRawTransaction(baseTx)
 	if err != nil {
-		b, _ := baseTx.Bytes()
-		dcr.log.Errorf("error encountered signing raw transaction (raw tx: %x): %v", b, err)
+		dcr.log.Errorf("error encountered signing raw transaction (raw tx: %x): %v", dcr.wireBytes(baseTx), err)
 		return nil, fmt.Errorf("signing error: %v", err)
 	}
 	if !signed {
-		b, _ := msgTx.Bytes()
-		dcr.log.Errorf("incomplete raw transaction signatures (raw tx: %x): ", b)
+		dcr.log.Errorf("incomplete raw transaction signatures (raw tx: %x): ", dcr.wireBytes(msgTx))
 		return nil, fmt.Errorf("incomplete raw tx signatures")
 	}
 	return msgTx, nil
@@ -1648,8 +1646,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 			if reqFee > reservoir {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
-					totalIn, totalOut, reqFee, lastFee)
+				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
+					totalIn, totalOut, reqFee, lastFee, dcr.wireBytes(msgTx))
 				return nil, nil, fmt.Errorf("change error")
 			}
 
@@ -1673,8 +1671,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
-				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
-					totalIn, totalOut, reqFee, lastFee)
+				dcr.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
+					totalIn, totalOut, reqFee, lastFee, dcr.wireBytes(msgTx))
 				return nil, nil, fmt.Errorf("dust error")
 			}
 			continue
@@ -1684,12 +1682,12 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	// Double check the resulting txns fee and fee rate.
 	checkFee, checkRate := fees(msgTx)
 	if checkFee != lastFee {
-		return nil, nil, fmt.Errorf("fee mismatch! %d != %d", checkFee, lastFee)
+		return nil, nil, fmt.Errorf("fee mismatch! %d != %d, raw tx: %x", checkFee, lastFee, dcr.wireBytes(msgTx))
 	}
 	// Ensure the effective fee rate is at least the required fee rate.
 	if checkRate < feeRate {
-		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is lower than expected, %d",
-			msgTx.CachedTxHash(), checkRate, feeRate)
+		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is lower than expected, %d. raw tx: %x",
+			msgTx.CachedTxHash(), checkRate, feeRate, dcr.wireBytes(msgTx))
 	}
 	// This is a last ditch effort to catch ridiculously high fees. Right now,
 	// it's just erroring for fees more than triple the expected rate, which is
@@ -1697,8 +1695,8 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 	// related variation as well as a potential dust change output with no
 	// subtractee specified, in which case the dust goes to the miner.
 	if checkRate > feeRate*3 {
-		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is seemingly outrageous, target = %d",
-			msgTx.CachedTxHash(), checkRate, feeRate)
+		return nil, nil, fmt.Errorf("final fee rate for %s, %d, is seemingly outrageous, target = %d, raw tx = %x",
+			msgTx.CachedTxHash(), checkRate, feeRate, dcr.wireBytes(msgTx))
 	}
 
 	checkHash := msgTx.TxHash()
@@ -1707,11 +1705,11 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 		sigCycles, checkHash, feeRate, checkRate, checkFee, size, changeAdded)
 	txHash, err := dcr.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, dcr.wireBytes(msgTx))
 	}
 	if *txHash != checkHash {
 		return nil, nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", *txHash, checkHash)
+			"expected %s, got %s, raw tx: %x", *txHash, checkHash, dcr.wireBytes(msgTx))
 	}
 
 	var change *output
@@ -1791,6 +1789,17 @@ func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// wireBytes dumps the serialized transaction bytes.
+func (dcr *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
+	s, err := tx.Bytes()
+	// wireBytes is just used for logging, and a serialization error is
+	// extremely unlikely, so just log the error and return the nil bytes.
+	if err != nil {
+		dcr.log.Errorf("error serializing transaction: %v", err)
+	}
+	return s
 }
 
 // Convert the DCR value to atoms.

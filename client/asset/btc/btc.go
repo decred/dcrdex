@@ -1319,14 +1319,14 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	sigCycles := 1
 	msgTx, err := btc.wallet.SignTx(baseTx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("signing error: %v", err)
+		return nil, nil, nil, fmt.Errorf("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 	}
 	size := msgTx.SerializeSize()
 	minFee := feeRate * uint64(size)
 	remaining := totalIn - totalOut
 	if minFee > remaining {
-		return nil, nil, nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d",
-			totalIn, minFee+totalOut)
+		return nil, nil, nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d, raw tx: %x",
+			totalIn, minFee+totalOut, btc.wireBytes(baseTx))
 	}
 
 	// Create a change output.
@@ -1358,15 +1358,15 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 			sigCycles++
 			msgTx, err = btc.wallet.SignTx(baseTx)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("signing error: %v", err)
+				return nil, nil, nil, fmt.Errorf("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 			}
 			size = msgTx.SerializeSize() // recompute the size with new tx signature
 			reqFee := feeRate * uint64(size)
 			if reqFee > remaining {
 				// I can't imagine a scenario where this condition would be true, but
 				// I'd hate to be wrong.
-				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
-					totalIn, totalOut, reqFee, fee)
+				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
+					totalIn, totalOut, reqFee, fee, btc.wireBytes(msgTx))
 				return nil, nil, nil, fmt.Errorf("change error")
 			}
 			if fee == reqFee || (fee > reqFee && tried[reqFee]) {
@@ -1384,8 +1384,8 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 				// Another condition that should be impossible, but check anyway in case
 				// the maximum fee was underestimated causing the first check to be
 				// missed.
-				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d",
-					totalIn, totalOut, reqFee, fee)
+				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
+					totalIn, totalOut, reqFee, fee, btc.wireBytes(msgTx))
 				return nil, nil, nil, fmt.Errorf("dust error")
 			}
 			continue
@@ -1403,11 +1403,11 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 
 	txHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(msgTx))
 	}
 	if *txHash != checkHash {
 		return nil, nil, nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
-			"expected %s, got %s", checkHash, *txHash)
+			"expected %s, got %s. raw tx: %x", checkHash, *txHash, btc.wireBytes(msgTx))
 	}
 
 	var change *output
@@ -1531,6 +1531,19 @@ func (btc *ExchangeWallet) isDEXChange(txid string, vout uint32) bool {
 	_, found := btc.tradeChange[outpointID(txid, vout)]
 	btc.changeMtx.RUnlock()
 	return found
+}
+
+// wireBytes dumps the serialized transaction bytes.
+func (btc *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
+	buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
+	err := tx.Serialize(buf)
+	// wireBytes is just used for logging, and a serialization error is
+	// extremely unlikely, so just log the error and return the nil bytes.
+	if err != nil {
+		btc.log.Errorf("error serializing %s transaction: %v", btc.symbol, err)
+		return nil
+	}
+	return buf.Bytes()
 }
 
 // Convert the BTC value to satoshi.
