@@ -18,7 +18,6 @@ server/cmd/dcrdex/dcrdex
 markets.json
 dist/
 node_modules/
-package-lock.json
 client/cmd/dexc/dexc
 client/cmd/dexcctl/dexcctl
 wiki
