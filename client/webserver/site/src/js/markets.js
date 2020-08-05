@@ -1508,7 +1508,7 @@ function updateDataCol (tr, col, s) {
  * updateUserOrderRow sets the td contents of the user's order table row.
  */
 function updateUserOrderRow (tr, order) {
-  updateDataCol(tr, 'type', order.type === LIMIT ? 'limit' : 'market')
+  updateDataCol(tr, 'type', order.type === LIMIT ? (order.tif === immediateTiF ? 'limit (i)' : 'limit') : 'market')
   updateDataCol(tr, 'side', order.sell ? 'sell' : 'buy')
   updateDataCol(tr, 'age', Doc.timeSince(order.stamp))
   updateDataCol(tr, 'rate', Doc.formatCoinValue(order.rate / 1e8))
