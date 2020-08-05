@@ -162,10 +162,10 @@ func (b *bookie) book() *OrderBook {
 	}
 }
 
-// SyncBook subscribes to the order book and returns the book and a BookFeed to
+// syncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
-// longer in use. Use StopBook to unsubscribed and clean up the feed.
-func (dc *dexConnection) SyncBook(base, quote uint32) (*OrderBook, *BookFeed, error) {
+// longer in use. Use stopBook to unsubscribed and clean up the feed.
+func (dc *dexConnection) syncBook(base, quote uint32) (*OrderBook, *BookFeed, error) {
 	dc.booksMtx.Lock()
 	defer dc.booksMtx.Unlock()
 
@@ -184,12 +184,12 @@ func (dc *dexConnection) SyncBook(base, quote uint32) (*OrderBook, *BookFeed, er
 		return nil, nil, fmt.Errorf("unknown market %s", mkt)
 	}
 
-	obRes, err := dc.Subscribe(base, quote)
+	obRes, err := dc.subscribe(base, quote)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	booky = newBookie(func() { dc.StopBook(base, quote) })
+	booky = newBookie(func() { dc.stopBook(base, quote) })
 	err = booky.Sync(obRes)
 	if err != nil {
 		return nil, nil, err
@@ -199,11 +199,11 @@ func (dc *dexConnection) SyncBook(base, quote uint32) (*OrderBook, *BookFeed, er
 	return booky.book(), booky.feed(), nil
 }
 
-// Subscribe subscribes to the given market's order book via the 'orderbook'
+// subscribe subscribes to the given market's order book via the 'orderbook'
 // request. The response, which includes book's snapshot, is returned. Proper
 // synchronization is required by the caller to ensure that order feed messages
 // aren't processed before they are prepared to handle this subscription.
-func (dc *dexConnection) Subscribe(base, quote uint32) (*msgjson.OrderBook, error) {
+func (dc *dexConnection) subscribe(base, quote uint32) (*msgjson.OrderBook, error) {
 	mkt := marketName(base, quote)
 	// Subscribe via the 'orderbook' request.
 	log.Debugf("Subscribing to the %v order book for %v", mkt, dc.acct.host)
@@ -229,15 +229,15 @@ func (dc *dexConnection) Subscribe(base, quote uint32) (*msgjson.OrderBook, erro
 	return result, nil
 }
 
-// StopBook is the close callback passed to the bookie, and will be called when
+// stopBook is the close callback passed to the bookie, and will be called when
 // there are no more subscribers and the close delay period has expired.
-func (dc *dexConnection) StopBook(base, quote uint32) {
+func (dc *dexConnection) stopBook(base, quote uint32) {
 	mkt := marketName(base, quote)
 	dc.booksMtx.Lock()
 	defer dc.booksMtx.Unlock() // hold it locked until unsubscribe request is completed
 
 	// Abort the unsubscribe if feeds exist for the bookie. This can happen if a
-	// bookie's close func is called while a new BookFeed is generated via Sync.
+	// bookie's close func is called while a new BookFeed is generated elsewhere.
 	if booky, found := dc.books[mkt]; found {
 		booky.mtx.Lock()
 		numFeeds := len(booky.feeds)
@@ -250,13 +250,13 @@ func (dc *dexConnection) StopBook(base, quote uint32) {
 		delete(dc.books, mkt)
 	}
 
-	if err := dc.Unsubscribe(base, quote); err != nil {
+	if err := dc.unsubscribe(base, quote); err != nil {
 		log.Error(err)
 	}
 }
 
-// Unsubscribe unsubscribes from to the given market's order book.
-func (dc *dexConnection) Unsubscribe(base, quote uint32) error {
+// unsubscribe unsubscribes from to the given market's order book.
+func (dc *dexConnection) unsubscribe(base, quote uint32) error {
 	mkt := marketName(base, quote)
 	log.Debugf("Unsubscribing from the %v order book for %v", mkt, dc.acct.host)
 	req, err := msgjson.NewRequest(dc.NextID(), msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
@@ -278,10 +278,10 @@ func (dc *dexConnection) Unsubscribe(base, quote uint32) error {
 	return nil
 }
 
-// Sync subscribes to the order book and returns the book and a BookFeed to
+// SyncBook subscribes to the order book and returns the book and a BookFeed to
 // receive order book updates. The BookFeed must be Close()d when it is no
 // longer in use.
-func (c *Core) Sync(host string, base, quote uint32) (*OrderBook, *BookFeed, error) {
+func (c *Core) SyncBook(host string, base, quote uint32) (*OrderBook, *BookFeed, error) {
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
 	c.connMtx.RUnlock()
@@ -289,7 +289,7 @@ func (c *Core) Sync(host string, base, quote uint32) (*OrderBook, *BookFeed, err
 		return nil, nil, fmt.Errorf("unknown DEX '%s'", host)
 	}
 
-	return dc.SyncBook(base, quote)
+	return dc.syncBook(base, quote)
 }
 
 // Book fetches the order book. If a subscription doesn't exist, one will be
@@ -311,11 +311,11 @@ func (c *Core) Book(dex string, base, quote uint32) (*OrderBook, error) {
 	// If not found, attempt to make a temporary subscription and return the
 	// initial book.
 	if !found {
-		snap, err := dc.Subscribe(base, quote)
+		snap, err := dc.subscribe(base, quote)
 		if err != nil {
 			return nil, fmt.Errorf("unable to subscribe to book: %v", err)
 		}
-		err = dc.Unsubscribe(base, quote)
+		err = dc.unsubscribe(base, quote)
 		if err != nil {
 			log.Errorf("Failed to unsubscribe to %q book: %v", mkt, err)
 		}

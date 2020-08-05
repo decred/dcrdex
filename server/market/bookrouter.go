@@ -394,6 +394,7 @@ out:
 					book.name, sigData.finalEpoch, sigData.persistBook)
 
 				// Stay running for Swapper unbook callbacks.
+				continue // no note to send presently, but need one
 
 			default:
 				panic(fmt.Sprintf("unknown orderbook update action %d", u.action))

@@ -848,11 +848,11 @@ func TestDexConnectionOrderBook(t *testing.T) {
 	}
 
 	// Sync to unknown dex
-	_, _, err = tCore.Sync("unknown dex", tDCR.ID, tBTC.ID)
+	_, _, err = tCore.SyncBook("unknown dex", tDCR.ID, tBTC.ID)
 	if err == nil {
 		t.Fatalf("no error for unknown dex")
 	}
-	_, _, err = tCore.Sync(tDexHost, tDCR.ID, 12345)
+	_, _, err = tCore.SyncBook(tDexHost, tDCR.ID, 12345)
 	if err == nil {
 		t.Fatalf("no error for nonsense market")
 	}
@@ -862,13 +862,13 @@ func TestDexConnectionOrderBook(t *testing.T) {
 		f(bookMsg)
 		return nil
 	})
-	_, feed1, err := tCore.Sync(tDexHost, tDCR.ID, tBTC.ID)
+	_, feed1, err := tCore.SyncBook(tDexHost, tDCR.ID, tBTC.ID)
 	if err != nil {
-		t.Fatalf("Sync 1 error: %v", err)
+		t.Fatalf("SyncBook 1 error: %v", err)
 	}
-	_, feed2, err := tCore.Sync(tDexHost, tDCR.ID, tBTC.ID)
+	_, feed2, err := tCore.SyncBook(tDexHost, tDCR.ID, tBTC.ID)
 	if err != nil {
-		t.Fatalf("Sync 2 error: %v", err)
+		t.Fatalf("SyncBook 2 error: %v", err)
 	}
 
 	// Should be able to retrieve the book now.

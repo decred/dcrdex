@@ -64,7 +64,7 @@ type clientCore interface {
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
-	Sync(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
+	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	AssetBalance(assetID uint32) (*db.Balance, error)
 	WalletState(assetID uint32) *core.WalletState
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error

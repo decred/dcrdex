@@ -332,7 +332,7 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
 func (c *TCore) Logout() error                           { return nil }
 
-func (c *TCore) Sync(dexAddr string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
+func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	c.midGap = randomMagnitude(-2, 4)
 	c.maxQty = randomMagnitude(-2, 4)
 	mktID, _ := dex.MarketName(base, quote)

@@ -189,7 +189,7 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
-	book, feed, err := s.core.Sync(market.Host, market.Base, market.Quote)
+	book, feed, err := s.core.SyncBook(market.Host, market.Base, market.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
 		log.Errorf(errMsg)

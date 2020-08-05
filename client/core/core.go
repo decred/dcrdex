@@ -2598,7 +2598,7 @@ func (c *Core) handleReconnect(host string) {
 
 		// Resubscribe since our old subscription was probably lost by the
 		// server when the connection dropped.
-		snap, err := dc.Subscribe(mkt.BaseID, mkt.QuoteID)
+		snap, err := dc.subscribe(mkt.BaseID, mkt.QuoteID)
 		if err != nil {
 			log.Errorf("handleReconnect: Failed to Subscribe to market %q 'orderbook': %v", mkt.Name, err)
 			return
@@ -2766,9 +2766,15 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 		// Clear the bookie associated with the suspended market.
 		dc.booksMtx.Lock()
 		if bookie := dc.books[sp.MarketID]; bookie != nil {
+			// TODO: This is wrong. The server subscription remains. Also the
+			// BookFeed receivers are still waiting on the old bookie. Fixing
+			// this will require some thought to keep the bookie, but signal to
+			// the receivers of an empty book, while maintaining the proper
+			// order book message seq.
+
 			// Old bookie and it's feeds get garbage collected. Any orderbook
 			// subscriptions remain, and are handled by the new bookie.
-			dc.books[sp.MarketID] = newBookie(func() { dc.StopBook(mkt.BaseID, mkt.QuoteID) })
+			dc.books[sp.MarketID] = newBookie(func() { dc.stopBook(mkt.BaseID, mkt.QuoteID) })
 		}
 		dc.booksMtx.Unlock()
 
