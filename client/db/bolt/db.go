@@ -645,6 +645,11 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 			// party side. They may need to be refunded or redeemed first.
 			// TakerSwapCast match status requires action on both sides.
 			if proof.IsRevoked && status != order.TakerSwapCast {
+				// NewlyMatched requires no further action from either side.
+				if status == order.NewlyMatched {
+					return nil
+				}
+
 				// Load the UserMatch to check the match Side.
 				matchB := mBkt.Get(matchKey) // no copy, just need Side
 				if matchB == nil {
@@ -657,11 +662,10 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 					return nil
 				}
 				side := match.Side // done with match and matchB
-				// - NewlyMatched requires no further action from either side
-				// - MakerSwapCast requires no further action from the taker
-				// - MakerRedeemed requires no further action from the maker
-				if status == order.NewlyMatched ||
-					(status == order.MakerSwapCast && side == order.Taker) ||
+
+				// MakerSwapCast requires no further action from the taker.
+				// MakerRedeemed requires no further action from the maker.
+				if (status == order.MakerSwapCast && side == order.Taker) ||
 					(status == order.MakerRedeemed && side == order.Maker) {
 					return nil
 				}
