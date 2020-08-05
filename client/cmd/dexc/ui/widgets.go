@@ -184,7 +184,15 @@ func createWidgets() {
 		setRPCLabelOn(true)
 		defer setRPCLabelOn(false)
 		rpcserver.SetLogger(logger)
-		rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
+		rpcCfg := &rpcserver.Config{
+			Core:     clientCore,
+			WSServer: wsServer,
+			Addr:     cfg.RPCAddr,
+			User:     cfg.RPCUser,
+			Pass:     cfg.RPCPass,
+			Cert:     cfg.RPCCert,
+			Key:      cfg.RPCKey,
+		}
 		rpcSrv, err := rpcserver.New(rpcCfg)
 		if err != nil {
 			log.Errorf("Error starting rpc server: %v", err)

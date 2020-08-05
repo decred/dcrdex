@@ -167,7 +167,7 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCCreateWalletError, errMsg)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
-	s.notifyWalletUpdate(form.assetID)
+	s.wsServer.NotifyWalletUpdate(form.assetID)
 	err = s.core.OpenWallet(form.assetID, form.appPass)
 	if err != nil {
 		errMsg := fmt.Sprintf("wallet connected, but failed to open with provided password: %v",
@@ -175,7 +175,7 @@ func handleNewWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, errMsg)
 		return createResponse(newWalletRoute, nil, resErr)
 	}
-	s.notifyWalletUpdate(form.assetID)
+	s.wsServer.NotifyWalletUpdate(form.assetID)
 	res := fmt.Sprintf(walletCreatedStr, dex.BipIDSymbol(form.assetID))
 	return createResponse(newWalletRoute, &res, nil)
 }
@@ -197,7 +197,7 @@ func handleOpenWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload 
 		resErr := msgjson.NewError(msgjson.RPCOpenWalletError, errMsg)
 		return createResponse(openWalletRoute, nil, resErr)
 	}
-	s.notifyWalletUpdate(form.assetID)
+	s.wsServer.NotifyWalletUpdate(form.assetID)
 	res := fmt.Sprintf(walletUnlockedStr, dex.BipIDSymbol(form.assetID))
 	return createResponse(openWalletRoute, &res, nil)
 }
@@ -215,7 +215,7 @@ func handleCloseWallet(s *RPCServer, params *RawParams) *msgjson.ResponsePayload
 		resErr := msgjson.NewError(msgjson.RPCCloseWalletError, errMsg)
 		return createResponse(closeWalletRoute, nil, resErr)
 	}
-	s.notifyWalletUpdate(assetID)
+	s.wsServer.NotifyWalletUpdate(assetID)
 	res := fmt.Sprintf(walletLockedStr, dex.BipIDSymbol(assetID))
 	return createResponse(closeWalletRoute, &res, nil)
 }

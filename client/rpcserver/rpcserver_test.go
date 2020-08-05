@@ -16,11 +16,11 @@ import (
 	"net/http"
 	"os"
 	"testing"
-	"time"
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/slog"
@@ -41,8 +41,6 @@ type TCore struct {
 	regFee              uint64
 	getFeeErr           error
 	balanceErr          error
-	syncBook            *core.OrderBook
-	syncFeed            *core.BookFeed
 	syncErr             error
 	createWalletErr     error
 	newWalletForm       *core.WalletForm
@@ -72,6 +70,7 @@ func (c *TCore) Balance(uint32) (uint64, error) {
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return c.book, c.bookErr
 }
+func (c *TCore) AckNotes(ids []dex.Bytes) {}
 func (c *TCore) AssetBalance(uint32) (*db.Balance, error) {
 	return nil, c.balanceErr
 }
@@ -159,84 +158,6 @@ func (r *TReader) Read(p []byte) (n int, err error) {
 
 func (r *TReader) Close() error { return nil }
 
-type TConn struct {
-	msg       []byte
-	reads     [][]byte      // data for ReadMessage
-	respReady chan []byte   // signal from WriteMessage
-	close     chan struct{} // Close tells ReadMessage to return with error
-}
-
-// ReadMessage must not return constantly with nothing
-var readTimeout = 10 * time.Second
-
-func (c *TConn) ReadMessage() (int, []byte, error) {
-	if len(c.reads) > 0 {
-		var read []byte
-		// pop front
-		read, c.reads = c.reads[0], c.reads[1:]
-		return len(read), read, nil
-	}
-
-	select {
-	case <-c.close: // receive from nil channel blocks
-		return 0, nil, fmt.Errorf("closed")
-	case <-time.After(readTimeout):
-		return 0, nil, fmt.Errorf("read timeout")
-	}
-}
-
-func (c *TConn) addRead(read []byte) {
-	// push back
-	c.reads = append(c.reads, read)
-}
-
-func (c *TConn) WriteMessage(_ int, msg []byte) error {
-	c.msg = msg
-	select {
-	case c.respReady <- msg:
-	default:
-	}
-	return nil
-}
-
-func (c *TConn) SetWriteDeadline(_ time.Time) error {
-	return nil
-}
-
-func (c *TConn) WriteControl(messageType int, data []byte, deadline time.Time) error {
-	return nil
-}
-
-func (c *TConn) SetReadDeadline(t time.Time) error {
-	return nil
-}
-
-func (c *TConn) Close() error {
-	// If the test has a non-nil close channel, signal close.
-	select {
-	case c.close <- struct{}{}:
-	default:
-	}
-	return nil
-}
-
-type tLink struct {
-	cl   *wsClient
-	conn *TConn
-}
-
-func newLink() *tLink {
-	conn := &TConn{
-		respReady: make(chan []byte, 1),
-	}
-	cl := newWSClient("", conn,
-		func(*msgjson.Message) *msgjson.Error { return nil })
-	return &tLink{
-		cl:   cl,
-		conn: conn,
-	}
-}
-
 var tPort = 5555
 
 func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
@@ -251,8 +172,15 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 	cert, key := tmp+"/cert.cert", tmp+"/key.key"
 	defer os.Remove(cert)
 	defer os.Remove(key)
-	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), user, pass, cert,
-		key}
+	cfg := &Config{
+		Core:     c,
+		WSServer: websocket.New(ctx, c),
+		Addr:     fmt.Sprintf("localhost:%d", tPort),
+		User:     user,
+		Pass:     pass,
+		Cert:     cert,
+		Key:      key,
+	}
 	s, err := New(cfg)
 	if err != nil {
 		t.Errorf("error creating server: %v", err)
@@ -261,7 +189,7 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 		cm := dex.NewConnectionMaster(s)
 		err := cm.Connect(ctx)
 		if err != nil {
-			t.Errorf("Error starting WebServer: %v", err)
+			t.Errorf("Error starting RPCServer: %v", err)
 		}
 		shutdown = func() {
 			killCtx()
@@ -269,7 +197,6 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 		}
 	} else {
 		shutdown = killCtx
-		s.ctx = ctx
 	}
 	return s, c, shutdown, err
 }
@@ -327,8 +254,15 @@ func TestConnectBindError(t *testing.T) {
 	cert, key := tmp+"/cert.cert", tmp+"/key.key"
 	defer os.Remove(cert)
 	defer os.Remove(key)
-	cfg := &Config{c, fmt.Sprintf("localhost:%d", tPort), "", "", cert,
-		key}
+	cfg := &Config{
+		Core:     c,
+		WSServer: websocket.New(nil, c),
+		Addr:     fmt.Sprintf("localhost:%d", tPort),
+		User:     "",
+		Pass:     "",
+		Cert:     cert,
+		Key:      key,
+	}
 	s, err := New(cfg)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
@@ -339,116 +273,6 @@ func TestConnectBindError(t *testing.T) {
 		shutdown() // shutdown both servers with shared context
 		cm.Disconnect()
 		t.Fatal("should have failed to bind")
-	}
-}
-
-func TestLoadMarket(t *testing.T) {
-	link := newLink()
-	s, tCore, shutdown, _ := newTServer(t, false, "", "")
-	defer shutdown()
-	_, err := link.cl.Connect(tCtx)
-	if err != nil {
-		t.Fatalf("WSLink Start: %v", err)
-	}
-	defer link.cl.Disconnect()
-	params := &marketLoad{
-		Host:  "abc",
-		Base:  uint32(1),
-		Quote: uint32(2),
-	}
-
-	subscription, _ := msgjson.NewRequest(1, "loadmarket", params)
-	tCore.syncBook = &core.OrderBook{}
-
-	extractMessage := func() *msgjson.Message {
-		select {
-		case msgB := <-link.conn.respReady:
-			msg := new(msgjson.Message)
-			json.Unmarshal(msgB, &msg)
-			return msg
-		case <-time.NewTimer(time.Millisecond * 100).C:
-			t.Fatalf("extractMessage got nothing")
-		}
-		return nil
-	}
-
-	ensureGood := func() {
-		// Create a new feed for every request because a Close()d feed cannot be
-		// reused.
-		tCore.syncFeed = core.NewBookFeed(func(feed *core.BookFeed) {})
-		msgErr := s.handleMessage(link.cl, subscription)
-		if msgErr != nil {
-			t.Fatalf("'loadmarket' error: %d: %s", msgErr.Code, msgErr.Message)
-		}
-		msg := extractMessage()
-		if msg.Route != "book" {
-			t.Fatalf("wrong message received. Expected 'book', got %s", msg.Route)
-		}
-		if link.cl.feedLoop == nil {
-			t.Fatalf("nil book feed waiter after 'loadmarket'")
-		}
-	}
-
-	// Initial success.
-	ensureGood()
-
-	// Unsubscribe.
-	unsub, _ := msgjson.NewRequest(2, "unmarket", nil)
-	msgErr := s.handleMessage(link.cl, unsub)
-	if msgErr != nil {
-		t.Fatalf("'unmarket' error: %d: %s", msgErr.Code, msgErr.Message)
-	}
-
-	if link.cl.feedLoop != nil {
-		t.Fatalf("non-nil book feed waiter after 'unmarket'")
-	}
-
-	// Make sure a sync error propagates.
-	tCore.syncErr = fmt.Errorf("test error")
-	msgErr = s.handleMessage(link.cl, subscription)
-	if msgErr == nil {
-		t.Fatalf("no handleMessage error from Sync error")
-	}
-	tCore.syncErr = nil
-
-	// Success again.
-	ensureGood()
-}
-
-func TestHandleMessage(t *testing.T) {
-	link := newLink()
-	s, _, shutdown, _ := newTServer(t, false, "", "")
-	defer shutdown()
-	var msg *msgjson.Message
-
-	ensureErr := func(name string, wantCode int) {
-		got := s.handleMessage(link.cl, msg)
-		if got == nil {
-			t.Fatalf("%s: no error", name)
-		}
-		if wantCode != got.Code {
-			t.Fatalf("%s, wanted %d, got %d",
-				name, wantCode, got.Code)
-		}
-	}
-
-	// Send a response, which is unsupported on the server.
-	msg, _ = msgjson.NewResponse(1, nil, nil)
-	ensureErr("bad route", msgjson.UnknownMessageType)
-
-	// Unknown route.
-	msg, _ = msgjson.NewRequest(1, "123", nil)
-	ensureErr("bad route", msgjson.RPCUnknownRoute)
-
-	// Set the route correctly.
-	wsHandlers["123"] = func(*RPCServer, *wsClient, *msgjson.Message) *msgjson.Error {
-		return nil
-	}
-
-	rpcErr := s.handleMessage(link.cl, msg)
-	if rpcErr != nil {
-		t.Fatalf("error for good message: %d: %s",
-			rpcErr.Code, rpcErr.Message)
 	}
 }
 
@@ -626,42 +450,5 @@ func TestAuthMiddleware(t *testing.T) {
 		}
 		r.Header = requestHeader
 		wantAuthError(test.name, test.wantErr)
-	}
-}
-
-func TestClientMap(t *testing.T) {
-	s, _, shutdown, _ := newTServer(t, true, "", "")
-	resp := make(chan []byte, 1)
-	conn := &TConn{
-		respReady: resp,
-		close:     make(chan struct{}, 1),
-	}
-	// msg.ID == 0 gets an error response, which can be discarded.
-	read, _ := json.Marshal(msgjson.Message{ID: 0})
-	conn.addRead(read)
-
-	go s.websocketHandler(conn, "someip")
-
-	// When a response to our dummy message is received, the client should
-	// be in RPCServer's client map.
-	<-resp
-
-	// While we're here, check that the client is properly mapped.
-	var cl *wsClient
-	s.mtx.Lock()
-	i := len(s.clients)
-	if i != 1 {
-		t.Fatalf("expected 1 client in server map, found %d", i)
-	}
-	for _, c := range s.clients {
-		cl = c
-		break
-	}
-	s.mtx.Unlock()
-
-	// Close the server and make sure the connection is closed.
-	shutdown()
-	if !cl.Off() {
-		t.Fatalf("connection not closed on server shutdown")
 	}
 }

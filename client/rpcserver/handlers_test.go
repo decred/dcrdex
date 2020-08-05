@@ -12,6 +12,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -32,6 +33,8 @@ func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCo
 	}
 	return nil
 }
+
+var wsServer = websocket.New(nil, &TCore{})
 
 type Dummy struct {
 	Status string
@@ -312,7 +315,7 @@ func TestHandleNewWallet(t *testing.T) {
 			createWalletErr: test.createWalletErr,
 			openWalletErr:   test.openWalletErr,
 		}
-		r := &RPCServer{core: tc}
+		r := &RPCServer{core: tc, wsServer: wsServer}
 		payload := handleNewWallet(r, test.params)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
@@ -362,7 +365,7 @@ func TestHandleOpenWallet(t *testing.T) {
 	}}
 	for _, test := range tests {
 		tc := &TCore{openWalletErr: test.openWalletErr}
-		r := &RPCServer{core: tc}
+		r := &RPCServer{core: tc, wsServer: wsServer}
 		payload := handleOpenWallet(r, test.params)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
@@ -393,7 +396,7 @@ func TestHandleCloseWallet(t *testing.T) {
 	}}
 	for _, test := range tests {
 		tc := &TCore{closeWalletErr: test.closeWalletErr}
-		r := &RPCServer{core: tc}
+		r := &RPCServer{core: tc, wsServer: wsServer}
 		payload := handleCloseWallet(r, test.params)
 		res := ""
 		if err := verifyResponse(payload, &res, test.wantErrCode); err != nil {
