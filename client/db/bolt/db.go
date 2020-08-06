@@ -300,8 +300,8 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	})
 }
 
-// DeleteAccount removes the account by host.
-func (db *BoltDB) DeleteAccount(ai *dexdb.AccountInfo) error {
+// deleteAccount removes the account by host.
+func (db *BoltDB) deleteAccount(ai *dexdb.AccountInfo) error {
 	acctKey := []byte(ai.Host)
 	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
 		return accts.DeleteBucket(acctKey)
@@ -326,7 +326,7 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	if err != nil {
 		return err
 	}
-	err = db.DeleteAccount(ai)
+	err = db.deleteAccount(ai)
 	if err != nil {
 		if err == bbolt.ErrBucketNotFound {
 			log.Warnf("failed to to delete account: %s err: %v", ai.Host, err)

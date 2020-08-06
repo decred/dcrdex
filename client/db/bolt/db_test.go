@@ -228,10 +228,10 @@ func TestDeleteAccount(t *testing.T) {
 	host := acct.Host
 	boltdb.CreateAccount(acct)
 
-	err := boltdb.DeleteAccount(acct)
+	err := boltdb.deleteAccount(acct)
 
 	if err != nil {
-		t.Fatalf("Unexpected DeleteAccount error: %v", err)
+		t.Fatalf("Unexpected deleteAccount error: %v", err)
 	}
 	actualAccount, err := boltdb.Account(host)
 	if err == nil {
