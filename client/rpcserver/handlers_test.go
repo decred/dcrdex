@@ -470,47 +470,6 @@ func TestHandleRegister(t *testing.T) {
 	}
 }
 
-/*
-  $diff exchangeIn exchangeOut
-  3d2
-  <     "host": "https://127.0.0.1:7232",
-  6d4
-  <         "name": "dcr_btc",
-  13,38c11
-  <         "buybuffer": 1.25,
-  <         "orders": [
-  <           {
-  <             "dex": "https://127.0.0.1:7232",
-  <             "market": "dcr_btc",
-  <             "type": 1,
-  <             "id": "e016a563ff5b845e9af20718af72224af630e65ca53edf2a3342d175dc6d3738",
-  <             "stamp": 1588913556583,
-  <             "qty": 100000000,
-  <             "sell": false,
-  <             "sig": "3045022100c5ef66cbf3c2d305408b666108ae384478f22b558893942b8f66abfb613a5bf802205eb22a0250e5286244b2f5205f0b6d6b4fa6a60930be2ff30f35c3cf6bf969c8",
-  <             "filled": 0,
-  <             "matches": [
-  <               {
-  <                 "matchID": "1472deb169fb359a48676161be8ca81983201f28abe8cc9b504950032d6f14ec",
-  <                 "qty": 100000000,
-  <                 "rate": 100000000,
-  <                 "step": 1
-  <               }
-  <             ],
-  <             "cancelling": false,
-  <             "canceled": false,
-  <             "rate": 100000000,
-  <             "tif": 1
-  <           }
-  <         ]
-  ---
-  >         "buybuffer": 1.25
-  43d15
-  <         "id": 0,
-  53d24
-  <         "id": 42,
-*/
-
 const exchangeIn = `{
   "https://127.0.0.1:7232": {
     "host": "https://127.0.0.1:7232",
@@ -1024,11 +983,13 @@ func TestParseCoreOrder(t *testing.T) {
     "type": "limit",
     "sell": false,
     "age": 2664424,
+    "agestr": "2.664424s",
     "rate": 200000000,
     "quantity": 400000000,
     "filled": 300000000,
     "settled": 100000000,
-    "status": "booked"
+    "status": "booked",
+    "tif": "standing"
   }`
 	coreOrder := new(core.Order)
 	if err := json.Unmarshal([]byte(co), coreOrder); err != nil {
@@ -1042,6 +1003,7 @@ func TestParseCoreOrder(t *testing.T) {
 	res := parseCoreOrder(coreOrder, 42, 0)
 	// Age will differ as it is based on the current time.
 	myOrder.Age = res.Age
+	myOrder.AgeStr = res.AgeStr
 	if !reflect.DeepEqual(myOrder, res) {
 		t.Fatalf("expected %v but got %v", spew.Sdump(myOrder), spew.Sdump(res))
 	}

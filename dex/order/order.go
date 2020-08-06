@@ -139,6 +139,17 @@ const (
 	StandingTiF
 )
 
+// String satisfies the Stringer interface.
+func (t TimeInForce) String() string {
+	switch t {
+	case ImmediateTiF:
+		return "immediate"
+	case StandingTiF:
+		return "standing"
+	}
+	return string(t)
+}
+
 // Order specifies the methods required for a type to function as a DEX order.
 // See the concrete implementations of MarketOrder, LimitOrder, and CancelOrder.
 type Order interface {

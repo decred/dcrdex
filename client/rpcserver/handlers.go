@@ -12,6 +12,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 )
@@ -450,29 +451,39 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 	// settled calculates how much of the order has been finalized.
 	settled := func(qty uint64, matches []*core.Match) (settled uint64) {
 		for _, match := range matches {
-			if match.Status >= order.MakerRedeemed {
+			if (match.Side == order.Maker && match.Status >= order.MakerRedeemed) ||
+				(match.Side == order.Taker && match.Status >= order.MatchComplete) {
 				settled += match.Qty
 			}
 		}
 		return settled
 	}
-	// Time is sent in milliseconds. Convert to nanoseconds in order to do
-	// math using the time package.
-	srvTime := time.Unix(0, int64(co.Stamp)*1e6)
+	srvTime := encode.UnixTimeMilli(int64(co.Stamp))
+	age := time.Since(srvTime).Round(time.Millisecond)
+	cancelling := co.Cancelling
+	// If the order is executed, canceled, or revoked, it is no longer cancelling.
+	if co.Status >= order.OrderStatusExecuted {
+		cancelling = false
+	}
 	return &myOrder{
-		Host:       co.Host,
-		MarketName: co.MarketID,
-		BaseID:     b,
-		QuoteID:    q,
-		ID:         co.ID,
-		Type:       co.Type.String(),
-		Sell:       co.Sell,
-		Age:        uint64(time.Since(srvTime).Milliseconds()),
-		Rate:       co.Rate,
-		Quantity:   co.Qty,
-		Filled:     co.Filled,
-		Settled:    settled(co.Qty, co.Matches),
-		Status:     co.Status.String(),
+		Host:        co.Host,
+		MarketName:  co.MarketID,
+		BaseID:      b,
+		QuoteID:     q,
+		ID:          co.ID,
+		Type:        co.Type.String(),
+		Sell:        co.Sell,
+		Age:         age.Milliseconds(),
+		AgeStr:      age.String(),
+		Rate:        co.Rate,
+		Quantity:    co.Qty,
+		Filled:      co.Filled,
+		Settled:     settled(co.Qty, co.Matches),
+		Status:      co.Status.String(),
+		Cancelling:  cancelling,
+		Canceled:    co.Canceled,
+		TimeInForce: co.TimeInForce.String(),
+		TargetID:    co.TargetID, // cancel orders are not shown, so always zero value
 	}
 }
 
@@ -879,24 +890,30 @@ Registration is complete after the fee transaction has been confirmed.`,
     base (int): Optional. The BIP-44 coin index for the market's base asset.
     quote (int): Optional. The BIP-44 coin index for the market's quote asset.`,
 		returns: `Returns:
-  array: An array of my orders.
+  array: An array of orders.
   [
     {
       "host" (string): The DEX address.,
       "marketName" (string): The market's name. e.g. "DCR_BTC".
-      "baseID" (int): The market's base ID. e.g. 42 for DCR.
-      "quoteID" (int): The market's quote ID. e.g. 0 for BTC.
+      "baseID" (int): The market's base asset BIP-44 coin index. e.g. 42 for DCR.
+      "quoteID" (int): The market's quote asset BIP-44 coin index. e.g. 0 for BTC.
       "id" (string): The order's unique hex ID.
       "type" (string): The type of order. "limit", "market", or "cancel".
       "sell" (string): Whether this order is selling.
       "age" (int): The time in milliseconds that this order has been active.
-      "rate" (int): The coins quote asset to accept per coin base asset.
-      "quantity" (int): The number of coins base asset being traded.
-      "filled" (int): The number of coins base asset that are filled by orders.
-      "settled" (int): The number of coins base asset whose trades have been
-        completed.
+      "agestr" (string): The time that this order has been active in human
+        readable form.
+      "rate" (int): The exchange rate limit. Limit orders only. Units: quote
+        asset per unit base asset.
+      "quantity" (int): The amount being traded.
+      "filled" (int): The order quantity that has matched.
+      "settled" (int): The sum quantity of all completed matches.
       "status" (string): The status of the order. "epoch", "booked", "executed",
         "canceled", or "revoked".
+      "cancelling" (bool): Whether this order is in the process of cancelling.
+      "canceled" (bool): Whether this order has been canceled.
+      "tif" (string): "immediate" if this order is for only one epoch. "standing"
+        if this order is or will be recorded on the books.
     },...
   ]`,
 	},

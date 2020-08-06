@@ -58,19 +58,24 @@ type tradeResponse struct {
 type myOrdersResponse []*myOrder
 
 type myOrder struct {
-	Host       string `json:"host"`
-	MarketName string `json:"marketName"`
-	BaseID     uint32 `json:"baseID"`
-	QuoteID    uint32 `json:"quoteID"`
-	ID         string `json:"id"`
-	Type       string `json:"type"`
-	Sell       bool   `json:"sell"`
-	Age        uint64 `json:"age"`
-	Rate       uint64 `json:"rate"`
-	Quantity   uint64 `json:"quantity"`
-	Filled     uint64 `json:"filled"`
-	Settled    uint64 `json:"settled"`
-	Status     string `json:"status"`
+	Host        string `json:"host"`
+	MarketName  string `json:"marketName"`
+	BaseID      uint32 `json:"baseID"`
+	QuoteID     uint32 `json:"quoteID"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Sell        bool   `json:"sell"`
+	Age         int64  `json:"age"`
+	AgeStr      string `json:"agestr"`
+	Rate        uint64 `json:"rate,omitempty"`
+	Quantity    uint64 `json:"quantity"`
+	Filled      uint64 `json:"filled"`
+	Settled     uint64 `json:"settled"`
+	Status      string `json:"status"`
+	Cancelling  bool   `json:"cancelling,omitempty"`
+	Canceled    bool   `json:"canceled,omitempty"`
+	TimeInForce string `json:"tif,omitempty"`
+	TargetID    string `json:"targetID,omitempty"`
 }
 
 // openWalletForm is information necessary to open a wallet.
