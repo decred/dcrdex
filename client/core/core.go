@@ -1641,8 +1641,6 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 				var mErr *msgjson.Error
 				if errors.As(err, &mErr) &&
 					mErr.Code == msgjson.AccountNotFoundError {
-					details := fmt.Sprintf("%s: %v", dc.acct.host, err)
-					result.AuthErr = details
 					acctInfo, err := c.db.Account(dc.acct.host)
 					if err != nil {
 						log.Errorf("Error retrieving account: %v", err)
