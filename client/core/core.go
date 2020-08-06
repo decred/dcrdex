@@ -1647,10 +1647,11 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 						return
 					}
 					err = c.db.DisableAccount(acctInfo)
-					disabledAccountHostChan <- dc.acct.host
 					if err != nil {
 						log.Errorf("Error disabling account: %v", err)
+						return
 					}
+					disabledAccountHostChan <- dc.acct.host
 					return
 				}
 				return
