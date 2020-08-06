@@ -1542,8 +1542,8 @@ func (c *Core) Logout() error {
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
-// If an account is not found at the dex server upon dex authentication the
-// account is disabled, initialize() will be trigger which will result in the
+// If an account is not found on the dex server upon dex authentication the
+// account is disabled, initialize() will be triggered which will result in the
 // user being prompted to register again.
 func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	// Connections will be attempted in parallel, so we'll need to protect the
