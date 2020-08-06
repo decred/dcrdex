@@ -1551,20 +1551,26 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	var wg sync.WaitGroup
 	c.connMtx.RLock()
 	results := make([]*DEXBrief, 0, len(c.conns))
-	var initializeWg sync.WaitGroup
-	initializeWg.Add(1)
-	accountDisabledChan := make(chan bool)
-	initialize := false
+	var reconcileConnectionsWg sync.WaitGroup
+	reconcileConnectionsWg.Add(1)
+	disabledAccountHostChan := make(chan string)
+	disabledAccountHosts := make(map[string]bool)
 	// If an account has been disabled this will trigger core initialization.
 	go func() {
-		defer initializeWg.Done()
-		for accountDisabled := range accountDisabledChan {
-			if !initialize && accountDisabled {
-				initialize = true
-			}
+		defer reconcileConnectionsWg.Done()
+		for disabledAccountHost := range disabledAccountHostChan {
+			disabledAccountHosts[disabledAccountHost] = true
 		}
-		if initialize {
-			c.initialize()
+		if len(disabledAccountHosts) > 0 {
+			var enabledDEXConnections = make(map[string]*dexConnection)
+			for _, dc := range c.conns {
+				if _, ok := disabledAccountHosts[dc.acct.host]; !ok {
+					enabledDEXConnections[dc.acct.host] = dc
+				}
+			}
+			c.connMtx.Lock()
+			c.conns = enabledDEXConnections
+			c.connMtx.Unlock()
 		}
 	}()
 	for _, dc := range c.conns {
@@ -1643,7 +1649,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 						return
 					}
 					err = c.db.DisableAccount(acctInfo)
-					accountDisabledChan <- true
+					disabledAccountHostChan <- dc.acct.host
 					if err != nil {
 						log.Errorf("Error disabling account: %v", err)
 					}
@@ -1656,8 +1662,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	}
 	wg.Wait()
 	c.connMtx.RUnlock()
-	close(accountDisabledChan)
-	initializeWg.Wait()
+	close(disabledAccountHostChan)
+	reconcileConnectionsWg.Wait()
 	return results
 }
 
@@ -2145,11 +2151,6 @@ func (c *Core) AssetBalance(assetID uint32) (*db.Balance, error) {
 // initialize pulls the known DEXes from the database and attempts to connect
 // and retrieve the DEX configuration.
 func (c *Core) initialize() {
-	// Clear the contents of c.conns so that it will always be initialized with the
-	// contents of db.Accounts.
-	c.connMtx.Lock()
-	c.conns = make(map[string]*dexConnection)
-	c.connMtx.Unlock()
 	accts, err := c.db.Accounts()
 	if err != nil {
 		log.Errorf("Error retrieve accounts from database: %v", err)
