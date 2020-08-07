@@ -45,10 +45,11 @@ const (
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
-	// Use RawRequest to list unspent outputs in an account.
-	methodListUnspent = "listunspent"
-	// Use RawRequest to list an account's locked unspent outputs.
-	methodListLockUnspent = "listlockunspent"
+
+	// RawRequest RPC methods
+	methodListUnspent        = "listunspent"
+	methodListLockUnspent    = "listlockunspent"
+	methodSignRawTransaction = "signrawtransaction"
 )
 
 var (
@@ -121,7 +122,6 @@ type rpcClient interface {
 	LockUnspent(unlock bool, ops []*wire.OutPoint) error
 	GetRawChangeAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error)
 	GetNewAddressGapPolicy(string, rpcclient.GapPolicy, dcrutil.AddressParams) (dcrutil.Address, error)
-	SignRawTransaction(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
 	DumpPrivKey(address dcrutil.Address, net [2]byte) (*dcrutil.WIF, error)
 	GetTransaction(txHash *chainhash.Hash) (*walletjson.GetTransactionResult, error)
 	WalletLock() error
@@ -153,9 +153,9 @@ func (pt *outPoint) String() string {
 // asset.Coin interface.
 type output struct {
 	pt     outPoint
+	tree   int8
 	value  uint64
 	redeem dex.Bytes
-	tree   int8
 	node   rpcClient // for calculating confirmations.
 }
 
@@ -1658,18 +1658,76 @@ func (dcr *ExchangeWallet) sendCoins(addr dcrutil.Address, coins asset.Coins, va
 	return tx, uint64(txOut.Value), err
 }
 
-// signTx attempts to sign all transaction inputs.
-func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
-	msgTx, signed, err := dcr.node.SignRawTransaction(baseTx)
-	if err != nil {
-		dcr.log.Errorf("error encountered signing raw transaction (raw tx: %x): %v", dcr.wireBytes(baseTx), err)
-		return nil, fmt.Errorf("signing error: %v", err)
-	}
-	if !signed {
-		dcr.log.Errorf("incomplete raw transaction signatures (raw tx: %x): ", dcr.wireBytes(msgTx))
-		return nil, fmt.Errorf("incomplete raw tx signatures")
+// msgTxFromHex creates a wire.MsgTx by deserializing the hex transaction.
+func msgTxFromHex(txHex string) (*wire.MsgTx, error) {
+	msgTx := wire.NewMsgTx()
+	if err := msgTx.Deserialize(hex.NewDecoder(strings.NewReader(txHex))); err != nil {
+		return nil, err
 	}
 	return msgTx, nil
+}
+
+func msgTxToHex(msgTx *wire.MsgTx) string {
+	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
+	if err := msgTx.Serialize(buf); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(buf.Bytes())
+}
+
+// signTx attempts to sign all transaction inputs. It will make multiple
+// attempts to sign the transaction. If it fails to completely sign the
+// transaction, it is an error and a nil *wire.MsgTx is returned.
+func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
+	var err error
+	var signedTx *wire.MsgTx
+	var signed bool
+
+	trySign := func() {
+		var res walletjson.SignRawTransactionResult
+		err = dcr.nodeRawRequest(methodSignRawTransaction, anylist{msgTxToHex(baseTx)}, &res)
+		if err != nil {
+			dcr.log.Errorf("error encountered signing raw transaction (raw tx: %x): %v", dcr.wireBytes(baseTx), err)
+			err = fmt.Errorf("rawrequest error: %v", err)
+			return
+		}
+
+		if len(res.Errors) > 0 {
+			for i := range res.Errors {
+				sigErr := &res.Errors[i]
+				dcr.log.Errorf("Signing %v:%d, seq = %d, sigScript = %v, failed: %v",
+					sigErr.TxID, sigErr.Vout, sigErr.Sequence, sigErr.ScriptSig, sigErr.Error)
+				// will be unsigned below, so log each SignRawTransactionError and move on
+			}
+		}
+
+		signedTx, err = msgTxFromHex(res.Hex)
+		if err != nil {
+			err = fmt.Errorf("failed to deserialize signed MsgTx: %w", err)
+			dcr.log.Error(err)
+			return
+		}
+
+		signed = res.Complete
+		if !signed {
+			dcr.log.Errorf("incomplete raw transaction signatures (input tx: %x / incomplete signed tx: %x): ",
+				dcr.wireBytes(baseTx), dcr.wireBytes(signedTx))
+			signedTx = nil // do not return the partially signed tx
+			err = fmt.Errorf("incomplete raw tx signatures")
+			return
+		}
+
+	}
+
+	maxTries := 3
+	for i := 0; !signed && i < maxTries; i++ {
+		if i > 0 {
+			time.Sleep(250 * time.Millisecond)
+		}
+		trySign()
+	}
+
+	return signedTx, err
 }
 
 // sendWithReturn sends the unsigned transaction with an added output (unless
@@ -1900,7 +1958,7 @@ func (dcr *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
 // sent via nodeRawRequest.
 type anylist []interface{}
 
-// nodeRawRequest is used to  marshal parameters and send requests to the RPC
+// nodeRawRequest is used to marshal parameters and send requests to the RPC
 // server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
 // will be marshaled into `thing`.
 func (dcr *ExchangeWallet) nodeRawRequest(method string, args anylist, thing interface{}) error {
