@@ -62,12 +62,12 @@ var (
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {
+	websocket.Core
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
 	AssetBalance(assetID uint32) (*db.Balance, error)
-	WalletState(assetID uint32) *core.WalletState
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
 	CloseWallet(assetID uint32) error
@@ -102,7 +102,7 @@ type WebServer struct {
 }
 
 // New is the constructor for a new WebServer.
-func New(core clientCore, addr string, wsServer *websocket.Server, logger slog.Logger, reloadHTML bool) (*WebServer, error) {
+func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*WebServer, error) {
 	log = logger
 
 	folderExists := func(fp string) bool {
@@ -142,6 +142,9 @@ func New(core clientCore, addr string, wsServer *websocket.Server, logger slog.L
 		ReadTimeout:  httpConnTimeoutSeconds * time.Second, // slow requests should not hold connections opened
 		WriteTimeout: httpConnTimeoutSeconds * time.Second, // hung responses must die
 	}
+
+	// Context is set during Connect.
+	wsServer := websocket.New(nil, core)
 
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
@@ -233,6 +236,8 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Update the listening address in case a :0 was provided.
 	s.addr = listener.Addr().String()
 
+	s.wsServer.SetContext(ctx)
+
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -252,6 +257,9 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Warnf("unexpected (http.Server).Serve error: %v", err)
 		}
+		// Disconnect the websocket clients since Shutdown does not deal with
+		// hijacked websocket connections.
+		s.wsServer.Shutdown()
 		log.Infof("Web server off")
 	}()
 

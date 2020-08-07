@@ -25,7 +25,6 @@ import (
 	"decred.org/dcrdex/client/asset/ltc"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
-	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
@@ -775,9 +774,8 @@ func TestServer(t *testing.T) {
 		}
 		tCore.Register(new(core.RegisterForm))
 	}
-	wsServer := websocket.New(tCtx, tCore)
 
-	s, err := New(tCore, ":54321", wsServer, logger, true)
+	s, err := New(tCore, ":54321", logger, true)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}

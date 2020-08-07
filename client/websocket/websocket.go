@@ -63,6 +63,11 @@ func New(ctx context.Context, core Core) *Server {
 	}
 }
 
+// Set the server's context. Must be called before using and never during use.
+func (s *Server) SetContext(ctx context.Context) {
+	s.ctx = ctx
+}
+
 type wsClient struct {
 	*ws.WSLink
 	mtx      sync.RWMutex

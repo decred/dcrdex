@@ -16,7 +16,6 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
-	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -239,7 +238,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
-	s, err := New(c, "127.0.0.1:0", websocket.New(ctx, c), tLogger, false)
+	s, err := New(c, "127.0.0.1:0", tLogger, false)
 	if err != nil {
 		t.Errorf("error creating server: %v", err)
 	}
@@ -309,7 +308,7 @@ func TestConnectBindError(t *testing.T) {
 	defer shutdown()
 
 	tAddr := s0.addr
-	s, err := New(&TCore{}, tAddr, websocket.New(nil, &TCore{}), tLogger, false)
+	s, err := New(&TCore{}, tAddr, tLogger, false)
 	if err != nil {
 		t.Fatalf("error creating server: %v", err)
 	}

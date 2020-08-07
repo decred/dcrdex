@@ -20,7 +20,6 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
-	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/slog"
@@ -173,13 +172,12 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 	defer os.Remove(cert)
 	defer os.Remove(key)
 	cfg := &Config{
-		Core:     c,
-		WSServer: websocket.New(ctx, c),
-		Addr:     fmt.Sprintf("localhost:%d", tPort),
-		User:     user,
-		Pass:     pass,
-		Cert:     cert,
-		Key:      key,
+		Core: c,
+		Addr: fmt.Sprintf("localhost:%d", tPort),
+		User: user,
+		Pass: pass,
+		Cert: cert,
+		Key:  key,
 	}
 	s, err := New(cfg)
 	if err != nil {
@@ -255,13 +253,12 @@ func TestConnectBindError(t *testing.T) {
 	defer os.Remove(cert)
 	defer os.Remove(key)
 	cfg := &Config{
-		Core:     c,
-		WSServer: websocket.New(nil, c),
-		Addr:     fmt.Sprintf("localhost:%d", tPort),
-		User:     "",
-		Pass:     "",
-		Cert:     cert,
-		Key:      key,
+		Core: c,
+		Addr: fmt.Sprintf("localhost:%d", tPort),
+		User: "",
+		Pass: "",
+		Cert: cert,
+		Key:  key,
 	}
 	s, err := New(cfg)
 	if err != nil {

@@ -58,6 +58,7 @@ var (
 
 // ClientCore is satisfied by core.Core.
 type ClientCore interface {
+	websocket.Core
 	AssetBalance(assetID uint32) (*db.Balance, error)
 	Book(host string, base, quote uint32) (orderBook *core.OrderBook, err error)
 	Cancel(appPass []byte, orderID string) error
@@ -71,7 +72,6 @@ type ClientCore interface {
 	GetFee(addr, cert string) (fee uint64, err error)
 	Register(form *core.RegisterForm) (*core.RegisterResult, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
-	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)
 	Withdraw(appPass []byte, assetID uint32, value uint64, addr string) (asset.Coin, error)
 }
@@ -161,7 +161,6 @@ func (s *RPCServer) handleJSON(w http.ResponseWriter, r *http.Request) {
 // Config holds variables neede to create a new RPC Server.
 type Config struct {
 	Core                        ClientCore
-	WSServer                    *websocket.Server
 	Addr, User, Pass, Cert, Key string
 }
 
@@ -204,13 +203,16 @@ func New(cfg *Config) (*RPCServer, error) {
 		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
 	}
 
+	// Context is set during Connect.
+	wsServer := websocket.New(nil, cfg.Core)
+
 	// Make the server.
 	s := &RPCServer{
 		core:      cfg.Core,
 		srv:       httpServer,
 		addr:      cfg.Addr,
 		tlsConfig: tlsConfig,
-		wsServer:  cfg.WSServer,
+		wsServer:  wsServer,
 	}
 
 	// Create authsha to verify requests against.
@@ -243,6 +245,8 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
 	}
 
+	s.wsServer.SetContext(ctx)
+
 	// Close the listener on context cancellation.
 	s.wg.Add(1)
 	go func() {
@@ -261,6 +265,9 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		if err := s.srv.Serve(listener); err != http.ErrServerClosed {
 			log.Warnf("unexpected (http.Server).Serve error: %v", err)
 		}
+		// Disconnect the websocket clients since Shutdown does not deal with
+		// hijacked websocket connections.
+		s.wsServer.Shutdown()
 		log.Infof("RPC server off")
 	}()
 	log.Infof("RPC server listening on %s", s.addr)
