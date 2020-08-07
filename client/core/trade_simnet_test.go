@@ -437,7 +437,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 			// up action. Mining now without waiting may cause the other client
 			// to perform the follow up action before the goroutine captures
 			// this status change.
-			time.Sleep(1 * time.Second)
+			time.Sleep(5 * time.Second)
 
 			assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)
 			err := mineBlocks(assetID, nBlocks)
@@ -773,6 +773,8 @@ func (client *tClient) updateBalances() error {
 			return err
 		}
 		client.balances[assetID] = balances.Available + balances.Locked
+		client.log("%s available %f, locked %f", unbip(assetID),
+			fmtAmt(balances.Available), fmtAmt(balances.Locked))
 	}
 	return nil
 }
@@ -797,8 +799,8 @@ func (client *tClient) assertBalanceChanges() error {
 		}
 		balanceDiff := int64(client.balances[assetID] - prevBalances[assetID])
 		if balanceDiff < minExpectedDiff || balanceDiff > maxExpectedDiff {
-			return fmt.Errorf("client %d %s balance change not in expected range %.8f - %.8f, got %.8f",
-				client.id, unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
+			return fmt.Errorf("%s balance change not in expected range %.8f - %.8f, got %.8f",
+				unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
 		}
 		client.log("%s balance change %.8f is in expected range of %.8f - %.8f",
 			unbip(assetID), fmtAmt(balanceDiff), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff))
