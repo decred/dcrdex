@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"os"
@@ -146,6 +147,8 @@ type tRPCClient struct {
 	lockErr         error
 	passErr         error
 	disconnected    bool
+	rawRes          map[string]json.RawMessage
+	rawErr          map[string]error
 	verboseBlocks   map[string]*chainjson.GetBlockVerboseResult
 	mainchain       map[int64]*chainhash.Hash
 	bestHash        chainhash.Hash
@@ -230,10 +233,6 @@ func (c *tRPCClient) GetBalanceMinConf(account string, minConfirms int) (*wallet
 	return c.balanceResult, c.balanceErr
 }
 
-func (c *tRPCClient) ListUnspentMin(int) ([]walletjson.ListUnspentResult, error) {
-	return c.unspent, c.unspentErr
-}
-
 func (c *tRPCClient) LockUnspent(unlock bool, ops []*wire.OutPoint) error {
 	if unlock == false {
 		c.lockedCoins = ops
@@ -275,6 +274,31 @@ func (c *tRPCClient) WalletPassphrase(passphrase string, timeoutSecs int64) erro
 
 func (c *tRPCClient) Disconnected() bool {
 	return c.disconnected
+}
+
+func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
+	switch method {
+	case methodListUnspent:
+		if c.unspentErr != nil {
+			return nil, c.unspentErr
+		}
+		var unspents []walletjson.ListUnspentResult
+		if len(params) < 4 {
+			// no acct param, return all unspent
+			unspents = c.unspent
+		} else {
+			var acct string
+			_ = json.Unmarshal(params[3], &acct)
+			for _, unspent := range c.unspent {
+				if unspent.Account == acct {
+					unspents = append(unspents, unspent)
+				}
+			}
+		}
+		response, _ := json.Marshal(unspents)
+		return response, nil
+	}
+	return c.rawRes[method], c.rawErr[method]
 }
 
 func TestMain(m *testing.M) {
