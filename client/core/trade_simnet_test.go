@@ -87,15 +87,15 @@ func readWalletCfgsAndDexCert() error {
 	fp := filepath.Join
 	for _, client := range clients {
 		dcrw, btcw := client.dcrw(), client.btcw()
-		dcrw.config, err = config.Parse(fp(user.HomeDir, "dextest", "dcr", dcrw.name, "w-"+dcrw.name+".conf"))
+		dcrw.config, err = config.Parse(fp(user.HomeDir, "dextest", "dcr", dcrw.daemon, "w-"+dcrw.daemon+".conf"))
 		if err == nil {
-			btcw.config, err = config.Parse(fp(user.HomeDir, "dextest", "btc", "harness-ctl", btcw.name+".conf"))
+			btcw.config, err = config.Parse(fp(user.HomeDir, "dextest", "btc", "harness-ctl", btcw.daemon+".conf"))
 		}
 		if err != nil {
 			return err
 		}
-		dcrw.config["account"] = "default"
-		btcw.config["account"] = btcw.name
+		dcrw.config["account"] = dcrw.account
+		btcw.config["walletname"] = btcw.walletName
 	}
 
 	dexCertPath := filepath.Join(user.HomeDir, "dextest", "dcrdex", "rpc.cert")
@@ -617,25 +617,26 @@ HELPER TYPES, FUNCTIONS AND METHODS
 ************************************/
 
 type tWallet struct {
-	name    string
-	account string
-	pass    []byte
-	config  map[string]string
+	daemon     string
+	account    string // for dcr wallets
+	walletName string // for btc wallets
+	pass       []byte
+	config     map[string]string
 }
 
-func dcrWallet(name string) *tWallet {
+func dcrWallet(daemon string) *tWallet {
 	return &tWallet{
-		name:    name,
+		daemon:  daemon,
 		account: "default",
 		pass:    []byte("abc"),
 	}
 }
 
-func btcWallet(name, account string) *tWallet {
+func btcWallet(daemon, walletName string) *tWallet {
 	return &tWallet{
-		name:    name,
-		account: account,
-		pass:    []byte("abc"),
+		daemon:     daemon,
+		walletName: walletName,
+		pass:       []byte("abc"),
 	}
 }
 
@@ -822,27 +823,27 @@ func (client *tClient) btcw() *tWallet {
 func (client *tClient) lockWallets() error {
 	client.log("locking wallets")
 	dcrw := client.dcrw()
-	lockCmd := fmt.Sprintf("./%s walletlock", dcrw.name)
+	lockCmd := fmt.Sprintf("./%s walletlock", dcrw.daemon)
 	if err := tmuxSendKeys("dcr-harness:0", lockCmd); err != nil {
 		return err
 	}
 	time.Sleep(500 * time.Millisecond)
 	btcw := client.btcw()
-	lockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletlock", btcw.name, btcw.account)
+	lockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletlock", btcw.daemon, btcw.walletName)
 	return tmuxSendKeys("btc-harness:2", lockCmd)
 }
 
 func (client *tClient) unlockWallets() error {
 	client.log("unlocking wallets")
 	dcrw := client.dcrw()
-	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 300", dcrw.name, string(dcrw.pass))
+	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 300", dcrw.daemon, string(dcrw.pass))
 	if err := tmuxSendKeys("dcr-harness:0", unlockCmd); err != nil {
 		return err
 	}
 	time.Sleep(500 * time.Millisecond)
 	btcw := client.btcw()
 	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 300",
-		btcw.name, btcw.account, string(btcw.pass))
+		btcw.daemon, btcw.walletName, string(btcw.pass))
 	return tmuxSendKeys("btc-harness:2", unlockCmd)
 }
 
