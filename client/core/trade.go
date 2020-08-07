@@ -32,12 +32,13 @@ func (err ExpirationErr) Error() string { return string(err) }
 // A matchTracker is used to negotiate a match.
 type matchTracker struct {
 	db.MetaMatch
-	failErr     error
-	refundErr   error
-	prefix      *order.Prefix
-	trade       *order.Trade
-	counterSwap asset.AuditInfo
-	id          order.MatchID
+	failErr        error
+	refundErr      error
+	prefix         *order.Prefix
+	trade          *order.Trade
+	counterSwap    asset.AuditInfo
+	contractExpiry time.Time // for one time logging in isRefundable, may never be set
+	id             order.MatchID
 }
 
 // parts is a getter for pointers to commonly used struct fields in the
@@ -573,19 +574,47 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 	return false
 }
 
-// isActive will be true if the trade is <= OrderStatusBooked, or if any of the
+// isActive will be true if the trade is booked or epoch, or if any of the
 // matches are still negotiating.
 func (t *trackedTrade) isActive() bool {
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
 
+	// Status of the order itself.
 	if t.metaData.Status == order.OrderStatusBooked || t.metaData.Status == order.OrderStatusEpoch {
 		return true
 	}
+
+	// Status of all matches for the order.
 	for _, match := range t.matches {
-		if match.MetaData.Status < order.MatchComplete {
-			return true
+		// log.Tracef("Checking match %v (%v) in status %v. Refund coin: %v, Script: %x", match.id,
+		// 	match.Match.Side, match.MetaData.Status, match.MetaData.Proof.RefundCoin, match.MetaData.Proof.Script)
+		if match.MetaData.Status == order.MatchComplete {
+			continue
 		}
+
+		// Refunded matches are inactive regardless of status.
+		if len(match.MetaData.Proof.RefundCoin) > 0 {
+			continue
+		}
+
+		// Revoked matches may need to be refunded or auto-redeemed first.
+		if match.MetaData.Proof.IsRevoked {
+			// - NewlyMatched requires no further action from either side
+			// - MakerSwapCast requires no further action from the taker
+			// - (TakerSwapCast requires action on both sides)
+			// - MakerRedeemed requires no further action from the maker
+			status, side := match.MetaData.Status, match.Match.Side
+			if status == order.NewlyMatched ||
+				(status == order.MakerSwapCast && side == order.Taker) ||
+				(status == order.MakerRedeemed && side == order.Maker) {
+				log.Tracef("Revoked match %v (%v) in status %v considered inactive.",
+					match.id, side, status)
+				continue
+			}
+		}
+
+		return true
 	}
 	return false
 }
@@ -660,13 +689,35 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	// Issue a refund if our swap's locktime has expired.
-	swapLocktimeExpired, err := wallet.LocktimeExpired(proof.Script)
+	swapLocktimeExpired, contractExpiry, err := wallet.LocktimeExpired(proof.Script)
 	if err != nil {
 		log.Errorf("error checking if locktime has expired for %s contract on order %s, match %s: %v",
 			dbMatch.Side, t.ID(), match.id, err)
 		return false
 	}
-	return swapLocktimeExpired
+	if swapLocktimeExpired {
+		return true
+	}
+
+	// For the first check or hourly tick, log the time until expiration.
+	if match.contractExpiry.IsZero() {
+		// First check for this match.
+		match.contractExpiry = contractExpiry
+	} else if (time.Until(contractExpiry) % time.Hour) > t.dc.tickInterval {
+		// Already logged, and it's not the first tick of the hour.
+		return false
+	}
+
+	swapCoinID := proof.TakerSwap
+	if dbMatch.Side == order.Maker {
+		swapCoinID = proof.MakerSwap
+	}
+	from := t.wallets.fromAsset
+	log.Infof("Contract for match %v with swap coin %v (%s) has an expiry time of %v (%v), not yet expired.",
+		match.id, coinIDString(from.ID, swapCoinID), from.Symbol,
+		contractExpiry, time.Until(contractExpiry).Round(time.Second))
+
+	return false
 }
 
 // tick will check for and perform any match actions necessary.
@@ -1201,7 +1252,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		}
 
 		swapCoinString := coinIDString(refundAsset.ID, swapCoinID)
-		log.Infof("failed match, %s, refunding %s contract %s",
+		log.Infof("Failed match, %s, refunding %s contract %s",
 			matchFailureReason, unbip(refundAsset.ID), swapCoinString)
 
 		refundCoin, err := refundWallet.Refund(dex.Bytes(swapCoinID), contractToRefund)
@@ -1223,6 +1274,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 			refundedQty += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
 		}
 		proof.RefundCoin = []byte(refundCoin)
+		//match.SetStatus(order.MatchRefunded)
 		err = t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
 			errs.add("error storing match info in database: %v", err)

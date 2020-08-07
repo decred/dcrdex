@@ -98,8 +98,12 @@ type Wallet interface {
 	// to properly handle network latency.
 	AuditContract(coinID, contract dex.Bytes) (AuditInfo, error)
 	// LocktimeExpired returns true if the specified contract's locktime has
-	// expired, making it possible to issue a Refund.
-	LocktimeExpired(contract dex.Bytes) (bool, error)
+	// expired, making it possible to issue a Refund. The contract expiry time
+	// is also returned, but reaching this time does not necessarily mean the
+	// contract can be refunded since assets have different rules to satisfy the
+	// lock. For example, in Bitcoin the median of the last 11 blocks must be
+	// past the expiry time, not the current time.
+	LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
 	// FindRedemption should attempt to find the input that spends the specified
 	// coin, and return the secret key if it does.
 	//

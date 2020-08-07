@@ -563,8 +563,8 @@ func (w *TXCWallet) AuditContract(coinID, contract dex.Bytes) (asset.AuditInfo, 
 	return w.auditInfo, w.auditErr
 }
 
-func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, error) {
-	return true, nil
+func (w *TXCWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
+	return true, time.Now().Add(-time.Minute), nil
 }
 
 func (w *TXCWallet) FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error) {

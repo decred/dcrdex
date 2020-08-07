@@ -53,11 +53,12 @@ var (
 // dexConnection is the websocket connection and the DEX configuration.
 type dexConnection struct {
 	comms.WsConn
-	connMaster *dex.ConnectionMaster
-	assets     map[uint32]*dex.Asset
-	cfg        *msgjson.ConfigResult
-	acct       *dexAccount
-	notify     func(Notification)
+	connMaster   *dex.ConnectionMaster
+	assets       map[uint32]*dex.Asset
+	cfg          *msgjson.ConfigResult
+	tickInterval time.Duration
+	acct         *dexAccount
+	notify       func(Notification)
 
 	booksMtx sync.RWMutex
 	books    map[string]*bookie
@@ -189,13 +190,14 @@ func (dc *dexConnection) setRegConfirms(confs uint32) {
 	dc.regConfirms = &confs
 }
 
-// hasOrders checks whether there are any open orders or negotiating matches for
-// the specified asset.
-func (dc *dexConnection) hasOrders(assetID uint32) bool {
+// hasActiveAssetOrders checks whether there are any active orders or negotiating
+// matches for the specified asset.
+func (dc *dexConnection) hasActiveAssetOrders(assetID uint32) bool {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for _, trade := range dc.trades {
-		if trade.Base() == assetID || trade.Quote() == assetID {
+		if (trade.Base() == assetID || trade.Quote() == assetID) &&
+			trade.isActive() {
 			return true
 		}
 	}
@@ -1077,13 +1079,13 @@ func (c *Core) CloseWallet(assetID uint32) error {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	for _, dc := range c.conns {
-		if dc.hasOrders(assetID) {
-			return fmt.Errorf("cannot lock %s wallet with active orders or negotiations", unbip(assetID))
+		if dc.hasActiveAssetOrders(assetID) {
+			return fmt.Errorf("cannot lock %s wallet with active swap negotiations", unbip(assetID))
 		}
 	}
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
-		return fmt.Errorf("CloseWallet wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
+		return fmt.Errorf("wallet not found for %d -> %s: %v", assetID, unbip(assetID), err)
 	}
 	err = wallet.Lock()
 	if err != nil {
@@ -2374,6 +2376,12 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 	errs := newErrorSet(dc.acct.host + ": ")
 	ready := make([]*trackedTrade, 0, len(dc.trades))
 	for _, trade := range trades {
+		if !trade.isActive() {
+			// In this event, there is a discrepancy between the active criteria
+			// between dbTrackers and isActive that should be resolved.
+			log.Warnf("Loaded inactive trade %v from the DB.", trade.ID())
+			continue
+		}
 		base, quote := trade.Base(), trade.Quote()
 		_, baseFailed := failed[base]
 		_, quoteFailed := failed[quote]
@@ -2596,19 +2604,23 @@ func (c *Core) connectDEX(acctInfo *db.AccountInfo) (*dexConnection, error) {
 	}
 
 	// Create the dexConnection and listen for incoming messages.
+	bTimeout := time.Millisecond * time.Duration(dexCfg.BroadcastTimeout)
 	dc := &dexConnection{
-		WsConn:     conn,
-		connMaster: connMaster,
-		assets:     assets,
-		cfg:        dexCfg,
-		books:      make(map[string]*bookie),
-		acct:       newDEXAccount(acctInfo),
-		marketMap:  marketMap,
-		trades:     make(map[order.OrderID]*trackedTrade),
-		notify:     c.notify,
-		epoch:      epochMap,
-		connected:  true,
+		WsConn:       conn,
+		connMaster:   connMaster,
+		assets:       assets,
+		cfg:          dexCfg,
+		tickInterval: bTimeout / 3,
+		books:        make(map[string]*bookie),
+		acct:         newDEXAccount(acctInfo),
+		marketMap:    marketMap,
+		trades:       make(map[order.OrderID]*trackedTrade),
+		notify:       c.notify,
+		epoch:        epochMap,
+		connected:    true,
 	}
+
+	log.Debugf("Broadcast timeout = %v, ticking every %v", bTimeout, dc.tickInterval)
 
 	dc.refreshMarkets()
 	c.wg.Add(1)
@@ -2884,10 +2896,9 @@ var noteHandlers = map[string]routeHandler{
 func (c *Core) listen(dc *dexConnection) {
 	defer c.wg.Done()
 	msgs := dc.MessageSource()
-	// Run a match check every 1/3 broadcast timeout.
-	bTimeout := time.Millisecond * time.Duration(dc.cfg.BroadcastTimeout)
-	ticker := time.NewTicker(bTimeout / 3)
-	log.Debugf("broadcast timeout = %v, ticking every %v", bTimeout, bTimeout/3)
+	// Run a match check at the tick interval.
+	ticker := time.NewTicker(dc.tickInterval)
+	defer ticker.Stop()
 
 	// Messages must be run in the order in which they are received, but they
 	// should not be blocking or run concurrently.
@@ -2936,12 +2947,12 @@ out:
 				log.Errorf("A response was received in the message queue: %s", msg)
 				continue
 			default:
-				log.Errorf("invalid message type %d from MessageSource", msg.Type)
+				log.Errorf("Invalid message type %d from MessageSource", msg.Type)
 				continue
 			}
 			// Until all the routes have handlers, check for nil too.
 			if !found || handler == nil {
-				log.Errorf("no handler found for route '%s'", msg.Route)
+				log.Errorf("No handler found for route '%s'", msg.Route)
 				continue
 			}
 
@@ -2950,16 +2961,21 @@ out:
 
 		case <-ticker.C:
 			counts := make(assetCounter)
-			dc.tradeMtx.RLock()
-			log.Debugf("ticking %d trades", len(dc.trades))
-			for _, trade := range dc.trades {
+			dc.tradeMtx.Lock()
+			log.Debugf("Ticking %d trades", len(dc.trades))
+			for oid, trade := range dc.trades {
+				if !trade.isActive() {
+					log.Infof("Retiring inactive order %v", oid)
+					delete(dc.trades, oid)
+					continue
+				}
 				newCounts, err := trade.tick()
 				if err != nil {
 					log.Error(err)
 				}
 				counts.absorb(newCounts)
 			}
-			dc.tradeMtx.RUnlock()
+			dc.tradeMtx.Unlock()
 			if len(counts) > 0 {
 				dc.refreshMarkets()
 				c.updateBalances(counts)

@@ -973,22 +973,22 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 
 // LocktimeExpired returns true if the specified contract's locktime has
 // expired, making it possible to issue a Refund.
-func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, error) {
+func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time, error) {
 	_, _, locktime, _, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
 	if err != nil {
-		return false, fmt.Errorf("error extracting contract locktime: %v", err)
+		return false, time.Time{}, fmt.Errorf("error extracting contract locktime: %v", err)
 	}
 	contractExpiry := time.Unix(int64(locktime), 0).UTC()
 	bestBlockHash, err := btc.node.GetBestBlockHash()
 	if err != nil {
-		return false, fmt.Errorf("get best block hash error: %v", err)
+		return false, time.Time{}, fmt.Errorf("get best block hash error: %v", err)
 	}
 	bestBlockHeader, err := btc.getBlockHeader(bestBlockHash.String())
 	if err != nil {
-		return false, fmt.Errorf("get best block header error: %v", err)
+		return false, time.Time{}, fmt.Errorf("get best block header error: %v", err)
 	}
 	bestBlockMedianTime := time.Unix(bestBlockHeader.MedianTime, 0).UTC()
-	return bestBlockMedianTime.After(contractExpiry), nil
+	return bestBlockMedianTime.After(contractExpiry), contractExpiry, nil
 }
 
 // FindRedemption attempts to find the input that spends the specified output,
