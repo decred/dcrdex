@@ -45,8 +45,10 @@ const (
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
-	// Use RawRequest to unspent outputs in an account.
+	// Use RawRequest to list unspent outputs in an account.
 	methodListUnspent = "listunspent"
+	// Use RawRequest to list an account's locked unspent outputs.
+	methodListLockUnspent = "listlockunspent"
 )
 
 var (
@@ -117,7 +119,6 @@ type rpcClient interface {
 	GetRawMempool(txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
 	LockUnspent(unlock bool, ops []*wire.OutPoint) error
-	ListLockUnspent() ([]*wire.OutPoint, error)
 	GetRawChangeAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error)
 	GetNewAddressGapPolicy(string, rpcclient.GapPolicy, dcrutil.AddressParams) (dcrutil.Address, error)
 	SignRawTransaction(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
@@ -1552,32 +1553,16 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 }
 
 // lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
-// TODO: handle multiple accounts!
 func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
-	lockedOutpoints, err := dcr.node.ListLockUnspent()
+	// Fetch locked outputs for the ExchangeWallet account using RawRequest.
+	var lockedOutpoints []chainjson.TransactionInput
+	err := dcr.nodeRawRequest(methodListLockUnspent, anylist{dcr.acct}, &lockedOutpoints)
 	if err != nil {
 		return 0, err
 	}
 	var sum uint64
-	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock()
-	for _, wireOP := range lockedOutpoints {
-		pt := newOutPoint(&wireOP.Hash, wireOP.Index)
-		utxo, found := dcr.fundingCoins[pt]
-		if found {
-			sum += utxo.op.value
-			continue
-		}
-		txOut, err := dcr.node.GetTxOut(&wireOP.Hash, wireOP.Index, true)
-		if err != nil {
-			return 0, err
-		}
-		if txOut == nil {
-			// Must be spent now?
-			dcr.log.Debugf("ignoring output from listlockunspent that wasn't found with gettxout. %s", pt)
-			continue
-		}
-		sum += toAtoms(txOut.Value)
+	for _, op := range lockedOutpoints {
+		sum += toAtoms(op.Amount)
 	}
 	return sum, nil
 }
