@@ -12,8 +12,11 @@ package core
 //
 // Some errors you might encounter (especially after running this test
 // multiple times):
-// - error placing order rpc error: 22: coin locked
-//   clear the dcrdex db and restart the dcrdex harness
+// - error placing order rpc error: 36: coin locked
+//   likely that the DEX has not revoked a previously failed match that locked
+//   the coin that was about to be reused, waiting a couple seconds before retrying
+//   should eliminate the error. Otherwise, clear the dcrdex db and restart the
+//   dcrdex harness
 // - error placing order not enough to cover requested funds
 //   use the affected asset harness to send funds to the affected wallet
 // - occasional issue with fee payment confirmation
@@ -159,8 +162,8 @@ func TestTrading(t *testing.T) {
 
 	UseLoggerMaker(&dex.LoggerMaker{
 		Backend:      slog.NewBackend(os.Stdout),
-		DefaultLevel: slog.LevelError,
-	}) // core log on error only
+		DefaultLevel: slog.LevelTrace,
+	})
 
 	tLog = dex.StdOutLogger("TEST", dex.LevelTrace)
 
@@ -394,7 +397,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	takerAtFault := finalStatus == order.MakerSwapCast || finalStatus == order.MakerRedeemed
 
 	// run a repeated check for match status changes to mine blocks as necessary.
-	maxTradeDuration := 1 * time.Minute
+	maxTradeDuration := 2 * time.Minute
 	tryUntil(ctx, maxTradeDuration, func() bool {
 		var completedTrades int
 		dc.tradeMtx.Lock()
@@ -417,37 +420,45 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 			lastProcessedStatus[match.id] = status
 			client.log("NOW =====> %s", status)
 
-			// check for and mine client's swap or redeem
-			var assetToMine *dex.Asset
-			var swapOrRedeem string
+			// If the new status shows that we've just sent a swap or redeem,
+			// let's record appropriate balance change expectations.
 			switch {
 			case side == order.Maker && status == order.MakerSwapCast,
 				side == order.Taker && status == order.TakerSwapCast:
-				assetToMine, swapOrRedeem = tracker.wallets.fromAsset, "swap"
+				recordBalanceChanges(tracker.wallets.fromAsset.ID, true, match.Match.Quantity, match.Match.Rate)
+				continue // no need to mine blocks until counter-party captures status change
 			case side == order.Maker && status == order.MakerRedeemed,
 				side == order.Taker && status == order.MatchComplete:
-				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "redeem"
+				recordBalanceChanges(tracker.wallets.toAsset.ID, false, match.Match.Quantity, match.Match.Rate)
+				continue // no need to mine blocks until counter-party captures status change
+			}
+
+			// Check for and mine counter-party's swap or redeem.
+			// This enables us to proceed with the required follow-up action.
+			var assetToMine *dex.Asset // toAsset for counter-party's swap and fromAsset for redeem
+			var swapOrRedeem string
+			switch {
+			case side == order.Maker && status == order.TakerSwapCast,
+				side == order.Taker && status == order.MakerSwapCast:
+				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "swap"
+			case side == order.Maker && status == order.MatchComplete,
+				side == order.Taker && status == order.MakerRedeemed:
+				assetToMine, swapOrRedeem = tracker.wallets.fromAsset, "redeem"
 			default:
 				continue
 			}
 
-			// Wait briefly before mining swap or redeem tx. This allows the
-			// monitor trade goroutine for the other client to capture and
-			// handle the status change before performing the required follow
-			// up action. Mining now without waiting may cause the other client
-			// to perform the follow up action before the goroutine captures
-			// this status change.
-			time.Sleep(5 * time.Second)
-
 			assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)
 			err := mineBlocks(assetID, nBlocks)
 			if err == nil {
-				client.log("Mined %d blocks for %s's %s, match %s", nBlocks, side, swapOrRedeem, token(match.id.Bytes()))
+				otherSide := order.Maker
+				if side == order.Maker {
+					otherSide = order.Taker
+				}
+				client.log("Mined %d blocks for %s's %s, match %s", nBlocks, otherSide, swapOrRedeem, token(match.id.Bytes()))
 			} else {
 				client.log("%s mine error %v", unbip(assetID), err)
 			}
-
-			recordBalanceChanges(assetToMine.ID, swapOrRedeem == "swap", match.Match.Quantity, match.Match.Rate)
 		}
 		return completedTrades == len(tracker.matches)
 	})
@@ -705,7 +716,8 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 	client.log("connected DEX %s", dexHost)
 
 	// mine drc block(s) to mark fee as paid
-	err = mineBlocks(dcr.BipID, regRes.ReqConfirms)
+	// sometimes need to mine an extra block for fee tx to get req. confs
+	err = mineBlocks(dcr.BipID, regRes.ReqConfirms+1)
 	if err != nil {
 		return err
 	}
