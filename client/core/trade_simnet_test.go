@@ -40,7 +40,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
-	"decred.org/dcrdex/dex/wait"
 	"github.com/decred/slog"
 	"golang.org/x/sync/errgroup"
 )
@@ -341,14 +340,9 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	// Wait a max of 2 epochLen durations for this order to get matched.
 	maxMatchDuration := 2 * time.Duration(tracker.epochLen) * time.Millisecond
 	client.log("Waiting %s for matches on order %s", maxMatchDuration, oidShort)
-	matched := tryUntil(ctx, maxMatchDuration, func() bool {
-		select {
-		case n := <-client.notifications:
-			orderNote, isOrderNote := n.(*OrderNote)
-			return isOrderNote && n.Subject() == "Matches made" && orderNote.Order.ID == orderID
-		default:
-			return wait.TryAgain
-		}
+	matched := client.findNotification(ctx, maxMatchDuration, func(n Notification) bool {
+		orderNote, isOrderNote := n.(*OrderNote)
+		return isOrderNote && n.Subject() == "Matches made" && orderNote.Order.ID == orderID
 	})
 	if ctx.Err() != nil { // context canceled
 		return nil
@@ -608,14 +602,18 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 
 func tryUntil(ctx context.Context, tryDuration time.Duration, tryFn func() bool) bool {
 	expire := time.NewTimer(tryDuration)
-	defer expire.Stop()
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer func() {
+		expire.Stop()
+		tick.Stop()
+	}()
 	for {
 		select {
 		case <-ctx.Done():
 			return false
 		case <-expire.C:
 			return false
-		default:
+		case <-tick.C:
 			if tryFn() {
 				return true
 			}
@@ -727,13 +725,8 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 	feeTimeout := 12 * time.Second
 	client.log("waiting %s for fee confirmation notice", feeTimeout)
 	client.notifications = client.core.NotificationFeed()
-	feePaid := tryUntil(ctx, feeTimeout, func() bool {
-		select {
-		case n := <-client.notifications:
-			return n.Type() == "feepayment" && n.Subject() == "Account registered"
-		default:
-			return wait.TryAgain
-		}
+	feePaid := client.findNotification(ctx, feeTimeout, func(n Notification) bool {
+		return n.Type() == "feepayment" && n.Subject() == "Account registered"
 	})
 	if !feePaid {
 		return fmt.Errorf("fee payment not confirmed after %s", feeTimeout)
@@ -741,6 +734,23 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 
 	client.log("fee payment confirmed")
 	return nil
+}
+
+func (client *tClient) findNotification(ctx context.Context, waitDuration time.Duration, check func(Notification) bool) bool {
+	expire := time.NewTimer(waitDuration)
+	defer expire.Stop()
+	for {
+		select {
+		case n := <-client.notifications:
+			if check(n) {
+				return true
+			}
+		case <-expire.C:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
 }
 
 func (client *tClient) placeOrder(qty, rate uint64) (string, error) {
