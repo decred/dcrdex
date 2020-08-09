@@ -19,8 +19,7 @@ import (
 	"decred.org/dcrdex/dex/ws"
 )
 
-// updateWalletRoute is a notification route that updates the state of a
-// wallet.
+// updateWalletRoute is a notification route that updates the state of a wallet.
 const updateWalletRoute = "update_wallet"
 
 var (
@@ -36,8 +35,7 @@ var (
 	cidCounter int32
 )
 
-// Core specifies the needed functions from core.Core that allow the websocket
-// server to operate.
+// Core specifies the needed methods for Server to operate. Satisfied by *core.Core.
 type Core interface {
 	WalletState(assetID uint32) *core.WalletState
 	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)

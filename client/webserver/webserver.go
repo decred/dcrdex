@@ -51,12 +51,8 @@ const (
 )
 
 var (
-	// Time allowed to read the next pong message from the peer. The
-	// default is intended for production, but leaving as a var instead of const
-	// to facilitate testing.
-	pongWait = 60 * time.Second
-	log      dex.Logger
-	unbip    = dex.BipIDSymbol
+	log   dex.Logger
+	unbip = dex.BipIDSymbol
 )
 
 // clientCore is satisfied by core.Core.
