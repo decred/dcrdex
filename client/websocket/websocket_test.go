@@ -238,11 +238,21 @@ func TestLoadMarket(t *testing.T) {
 	link := newLink()
 	s, tCore, shutdown := newTServer(t)
 	defer shutdown()
-	_, err := link.cl.Connect(tCtx)
+	linkWg, err := link.cl.Connect(tCtx)
 	if err != nil {
 		t.Fatalf("WSLink Start: %v", err)
 	}
-	defer link.cl.Disconnect()
+
+	// This test is not running WebServer or calling handleWS/websocketHandler,
+	// so manually stop the marketSyncer started by wsLoadMarket and the WSLink
+	// before returning from this test.
+	defer func() {
+		link.cl.feedLoop.Stop()
+		link.cl.feedLoop.WaitForShutdown()
+		link.cl.Disconnect()
+		linkWg.Wait()
+	}()
+
 	params := &marketLoad{
 		Host:  "abc",
 		Base:  uint32(1),
@@ -253,6 +263,7 @@ func TestLoadMarket(t *testing.T) {
 	tCore.syncBook = &core.OrderBook{}
 
 	extractMessage := func() *msgjson.Message {
+		t.Helper()
 		select {
 		case msgB := <-link.conn.respReady:
 			msg := new(msgjson.Message)
@@ -265,6 +276,7 @@ func TestLoadMarket(t *testing.T) {
 	}
 
 	ensureGood := func() {
+		t.Helper()
 		// Create a new feed for every request because a Close()d feed cannot be
 		// reused.
 		tCore.syncFeed = core.NewBookFeed(func(feed *core.BookFeed) {})
