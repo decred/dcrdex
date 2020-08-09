@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -759,8 +758,7 @@ func TestServer(t *testing.T) {
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
 	time.AfterFunc(time.Minute*59, func() { shutdown() })
-	logger := slog.NewBackend(os.Stdout).Logger("TEST")
-	logger.SetLevel(slog.LevelTrace)
+	logger := dex.StdOutLogger("TEST", slog.LevelTrace)
 	tCore := newTCore()
 
 	if initialize {

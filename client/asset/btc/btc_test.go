@@ -253,8 +253,7 @@ func mustMarshal(t *testing.T, thing interface{}) []byte {
 }
 
 func TestMain(m *testing.M) {
-	tLogger = slog.NewBackend(os.Stdout).Logger("TEST")
-	tLogger.SetLevel(slog.LevelTrace)
+	tLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tTxHash, _ = chainhash.NewHashFromStr(tTxID)

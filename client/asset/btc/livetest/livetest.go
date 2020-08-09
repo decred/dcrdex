@@ -18,7 +18,6 @@ import (
 	"crypto/sha256"
 	"math"
 	"math/rand"
-	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
@@ -112,8 +111,7 @@ func randBytes(l int) []byte {
 }
 
 func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *dex.Asset) {
-	tLogger := slog.NewBackend(os.Stdout).Logger("TEST")
-	tLogger.SetLevel(slog.LevelTrace)
+	tLogger := dex.StdOutLogger("TEST", slog.LevelTrace)
 	tCtx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 

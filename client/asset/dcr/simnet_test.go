@@ -138,8 +138,7 @@ func waitNetwork() {
 
 func TestMain(m *testing.M) {
 	chainParams = chaincfg.SimNetParams()
-	tLogger = slog.NewBackend(os.Stdout).Logger("TEST")
-	tLogger.SetLevel(slog.LevelTrace)
+	tLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	doIt := func() int {

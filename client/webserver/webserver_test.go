@@ -282,7 +282,7 @@ func ensureResponse(t *testing.T, s *WebServer, f func(w http.ResponseWriter, r 
 }
 
 func TestMain(m *testing.M) {
-	tLogger = slog.NewBackend(os.Stdout).Logger("TEST")
+	tLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
 	tLogger.SetLevel(slog.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())

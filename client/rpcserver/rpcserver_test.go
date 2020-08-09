@@ -26,14 +26,13 @@ import (
 )
 
 func init() {
-	log = slog.NewBackend(os.Stdout).Logger("TEST")
+	log = dex.StdOutLogger("TEST", slog.LevelTrace)
 	log.SetLevel(slog.LevelTrace)
 }
 
 var (
-	errT    = fmt.Errorf("test error")
-	tLogger dex.Logger
-	tCtx    context.Context
+	errT = fmt.Errorf("test error")
+	tCtx context.Context
 )
 
 type TCore struct {
@@ -220,8 +219,6 @@ func ensureResponse(t *testing.T, s *RPCServer, f func(w http.ResponseWriter,
 }
 
 func TestMain(m *testing.M) {
-	tLogger = slog.NewBackend(os.Stdout).Logger("TEST")
-	tLogger.SetLevel(slog.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	doIt := func() int {

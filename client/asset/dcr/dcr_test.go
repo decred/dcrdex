@@ -276,8 +276,7 @@ func (c *tRPCClient) Disconnected() bool {
 func TestMain(m *testing.M) {
 	chainParams = chaincfg.MainNetParams()
 	tPKHAddr, _ = dcrutil.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", chainParams)
-	tLogger = slog.NewBackend(os.Stdout).Logger("TEST")
-	tLogger.SetLevel(slog.LevelTrace)
+	tLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tTxHash, _ = chainhash.NewHashFromStr(tTxID)

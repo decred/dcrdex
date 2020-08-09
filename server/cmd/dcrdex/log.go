@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/admin"
@@ -50,21 +51,29 @@ var (
 	// or data races and/or nil pointer dereferences will occur.
 	backendLog = slog.NewBackend(logWriter{})
 
+	lm = func() *dex.LoggerMaker {
+		lm, err := dex.NewLoggerMaker(backendLog, defaultLogLevel)
+		if err != nil {
+			panic(err)
+		}
+		return lm
+	}()
+
 	// logRotator is one of the logging outputs. Use initLogRotator to set it.
 	// It should be closed on application shutdown.
 	logRotator *rotator.Rotator
 
-	log           = backendLog.Logger("MAIN")
-	dbLogger      = backendLog.Logger("DB")
-	dexmanLogger  = backendLog.Logger("DEX")
-	commsLogger   = backendLog.Logger("COMM")
-	authLogger    = backendLog.Logger("AUTH")
-	swapLogger    = backendLog.Logger("SWAP")
-	marketLogger  = backendLog.Logger("MKT")
-	bookLogger    = backendLog.Logger("BOOK")
-	matcherLogger = backendLog.Logger("MTCH")
-	waiterLogger  = backendLog.Logger("CHWT")
-	adminLogger   = backendLog.Logger("ADMN")
+	log           = lm.Logger("MAIN")
+	dbLogger      = lm.Logger("DB")
+	dexmanLogger  = lm.Logger("DEX")
+	commsLogger   = lm.Logger("COMM")
+	authLogger    = lm.Logger("AUTH")
+	swapLogger    = lm.Logger("SWAP")
+	marketLogger  = lm.Logger("MKT")
+	bookLogger    = lm.Logger("BOOK")
+	matcherLogger = lm.Logger("MTCH")
+	waiterLogger  = lm.Logger("CHWT")
+	adminLogger   = lm.Logger("ADMN")
 )
 
 func init() {

@@ -35,12 +35,12 @@ import (
 	flags "github.com/jessevdk/go-flags"
 )
 
-var testLogger slog.Logger
+var testLogger dex.Logger
 
 func TestMain(m *testing.M) {
 	// Set the global chainParams.
 	chainParams = chaincfg.MainNetParams()
-	testLogger = slog.NewBackend(os.Stdout).Logger("TEST")
+	testLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
 	os.Exit(m.Run())
 }
 

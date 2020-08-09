@@ -17,7 +17,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
-	"github.com/decred/slog"
 )
 
 // updateWalletRoute is a notification route that updates the state of a
@@ -35,7 +34,6 @@ var (
 	pingPeriod = (pongWait * 9) / 10
 	// A client id counter.
 	cidCounter int32
-	log        slog.Logger
 )
 
 // Core specifies the needed functions from core.Core that allow the websocket
@@ -48,18 +46,22 @@ type Core interface {
 
 // Server contains fields used by the websocket server.
 type Server struct {
-	core    Core
-	ctx     context.Context
-	mtx     sync.RWMutex
-	clients map[int32]*wsClient
+	core       Core
+	log        dex.Logger
+	mSyncerLog dex.Logger
+	ctx        context.Context
+	mtx        sync.RWMutex
+	clients    map[int32]*wsClient
 }
 
 // New returns a new websocket Server.
-func New(ctx context.Context, core Core) *Server {
+func New(ctx context.Context, core Core, log dex.Logger) *Server {
 	return &Server{
-		core:    core,
-		ctx:     ctx,
-		clients: make(map[int32]*wsClient),
+		core:       core,
+		log:        log,
+		mSyncerLog: log.SubLogger("MSYNC"),
+		ctx:        ctx,
+		clients:    make(map[int32]*wsClient),
 	}
 }
 
@@ -80,11 +82,6 @@ func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message)
 		WSLink: ws.NewWSLink(ip, conn, pingPeriod, hndlr),
 		cid:    atomic.AddInt32(&cidCounter, 1),
 	}
-}
-
-// SetLogger sets the package level logger.
-func (s *Server) SetLogger(logger slog.Logger) {
-	log = logger
 }
 
 // Shutdown disconnects all connected clients.
@@ -108,7 +105,7 @@ func (s *Server) HandleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	wsConn, err := ws.NewConnection(w, r, pongWait)
 	if err != nil {
-		log.Errorf("ws connection error: %v", err)
+		s.log.Errorf("ws connection error: %v", err)
 		return
 	}
 	go s.connect(wsConn, ip)
@@ -118,7 +115,7 @@ func (s *Server) HandleConnect(w http.ResponseWriter, r *http.Request) {
 // it, and blocking until the connection closes. This method should be
 // run as a goroutine.
 func (s *Server) connect(conn ws.Connection, ip string) {
-	log.Debugf("New websocket client %s", ip)
+	s.log.Debugf("New websocket client %s", ip)
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
@@ -136,7 +133,7 @@ func (s *Server) connect(conn ws.Connection, ip string) {
 	err := cm.Connect(s.ctx)
 	if err != nil {
 		s.mtx.Unlock()
-		log.Errorf("websocketHandler client Connect: %v")
+		s.log.Errorf("websocketHandler client Connect: %v")
 		return
 	}
 
@@ -159,21 +156,21 @@ func (s *Server) connect(conn ws.Connection, ip string) {
 	}()
 
 	cm.Wait()
-	log.Tracef("Disconnected websocket client %s", ip)
+	s.log.Tracef("Disconnected websocket client %s", ip)
 }
 
 // Notify sends a notification to the websocket client.
 func (s *Server) Notify(route string, payload interface{}) {
 	msg, err := msgjson.NewNotification(route, payload)
 	if err != nil {
-		log.Errorf("notification encoding error: %v", err)
+		s.log.Errorf("notification encoding error: %v", err)
 		return
 	}
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	for _, cl := range s.clients {
 		if err = cl.Send(msg); err != nil {
-			log.Warnf("Failed to send %v notification to client %v at %v: %v",
+			s.log.Warnf("Failed to send %v notification to client %v at %v: %v",
 				msg.Route, cl.cid, cl.IP(), err)
 		}
 	}
@@ -188,7 +185,7 @@ func (s *Server) NotifyWalletUpdate(assetID uint32) {
 // handleMessage handles the websocket message, calling the right handler for
 // the route.
 func (s *Server) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson.Error {
-	log.Tracef("message of type %d received for route %s", msg.Type, msg.Route)
+	s.log.Tracef("message of type %d received for route %s", msg.Type, msg.Route)
 	if msg.Type == msgjson.Request {
 		handler, found := wsHandlers[msg.Route]
 		if !found {
@@ -233,16 +230,18 @@ type marketResponse struct {
 // manages a map of clients who are subscribed to the market, and distributes
 // order book updates when received.
 type marketSyncer struct {
+	log  dex.Logger
 	feed *core.BookFeed
 	cl   *wsClient
 }
 
 // newMarketSyncer is the constructor for a marketSyncer, returned as a running
 // *dex.StartStopWaiter.
-func newMarketSyncer(ctx context.Context, cl *wsClient, feed *core.BookFeed) *dex.StartStopWaiter {
+func newMarketSyncer(ctx context.Context, cl *wsClient, feed *core.BookFeed, log dex.Logger) *dex.StartStopWaiter {
 	ssWaiter := dex.NewStartStopWaiter(&marketSyncer{
 		feed: feed,
 		cl:   cl,
+		log:  log,
 	})
 	ssWaiter.Start(ctx)
 	return ssWaiter
@@ -257,12 +256,12 @@ out:
 		case update := <-m.feed.C:
 			note, err := msgjson.NewNotification(update.Action, update)
 			if err != nil {
-				log.Errorf("error encoding notification message: %v", err)
+				m.log.Errorf("error encoding notification message: %v", err)
 				break out
 			}
 			err = m.cl.Send(note)
 			if err != nil {
-				log.Debug("send error. ending market feed")
+				m.log.Debug("send error. ending market feed")
 				break out
 			}
 		case <-ctx.Done():
@@ -278,14 +277,14 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 	err := json.Unmarshal(msg.Payload, market)
 	if err != nil {
 		errMsg := fmt.Sprintf("error unmarshaling marketload payload: %v", err)
-		log.Errorf(errMsg)
+		s.log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
 	book, feed, err := s.core.SyncBook(market.Host, market.Base, market.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
-		log.Errorf(errMsg)
+		s.log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
@@ -294,7 +293,7 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 		cl.feedLoop.Stop()
 		cl.feedLoop.WaitForShutdown()
 	}
-	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed)
+	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed, s.mSyncerLog)
 	cl.mtx.Unlock()
 
 	note, err := msgjson.NewNotification(core.FreshBookAction, &marketResponse{
@@ -304,11 +303,11 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 		Quote: market.Quote,
 	})
 	if err != nil {
-		log.Errorf("error encoding loadmarkets response: %v", err)
+		s.log.Errorf("error encoding loadmarkets response: %v", err)
 		return msgjson.NewError(msgjson.RPCInternal, "error encoding order book: "+err.Error())
 	}
 	if err = cl.Send(note); err != nil {
-		log.Warnf("Failed to send %v notification to client %v at %v: %v",
+		s.log.Warnf("Failed to send %v notification to client %v at %v: %v",
 			note.Route, cl.cid, cl.IP(), err)
 	}
 	return nil
@@ -337,7 +336,7 @@ func wsAckNotes(s *Server, _ *wsClient, msg *msgjson.Message) *msgjson.Error {
 	ids := make(ackNoteIDs, 0)
 	err := msg.Unmarshal(&ids)
 	if err != nil {
-		log.Errorf("error acking notifications: %v", err)
+		s.log.Errorf("error acking notifications: %v", err)
 		return nil
 	}
 	s.core.AckNotes(ids)

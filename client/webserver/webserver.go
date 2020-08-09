@@ -25,7 +25,6 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
-	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
@@ -56,7 +55,7 @@ var (
 	// default is intended for production, but leaving as a var instead of const
 	// to facilitate testing.
 	pongWait = 60 * time.Second
-	log      slog.Logger
+	log      dex.Logger
 	unbip    = dex.BipIDSymbol
 )
 
@@ -102,7 +101,7 @@ type WebServer struct {
 }
 
 // New is the constructor for a new WebServer.
-func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*WebServer, error) {
+func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*WebServer, error) {
 	log = logger
 
 	folderExists := func(fp string) bool {
@@ -144,7 +143,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	}
 
 	// Context is set during Connect.
-	wsServer := websocket.New(nil, core)
+	wsServer := websocket.New(nil, core, log.SubLogger("WS"))
 
 	// Make the server here so its methods can be registered.
 	s := &WebServer{

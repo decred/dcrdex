@@ -162,8 +162,7 @@ func TestTrading(t *testing.T) {
 		DefaultLevel: slog.LevelError,
 	}) // core log on error only
 
-	tLog = slog.NewBackend(os.Stdout).Logger("TEST")
-	tLog.SetLevel(slog.LevelTrace)
+	tLog = dex.StdOutLogger("TEST", slog.LevelTrace)
 
 	// setup
 	tLog.Info("=== SETUP")

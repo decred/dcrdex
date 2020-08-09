@@ -1304,8 +1304,7 @@ func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 func TestMain(m *testing.M) {
 	recheckInterval = time.Millisecond * 20
 	txWaitExpiration = recheckInterval * 10
-	logger := slog.NewBackend(os.Stdout).Logger("SWAPTEST")
-	logger.SetLevel(slog.LevelTrace)
+	logger := dex.StdOutLogger("TEST", slog.LevelTrace)
 	UseLogger(logger)
 	db.UseLogger(logger)
 	matcher.UseLogger(logger)

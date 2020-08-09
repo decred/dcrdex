@@ -20,11 +20,6 @@ import (
 	"github.com/decred/slog"
 )
 
-func init() {
-	log = slog.NewBackend(os.Stdout).Logger("TEST")
-	log.SetLevel(slog.LevelTrace)
-}
-
 var (
 	tErr  = fmt.Errorf("test error")
 	tCtx  context.Context
@@ -202,7 +197,7 @@ func newLink() *tLink {
 func newTServer(t *testing.T) (*Server, *TCore, func()) {
 	c := &TCore{}
 	ctx, killCtx := context.WithCancel(tCtx)
-	s := New(ctx, c)
+	s := New(ctx, c, dex.StdOutLogger("TEST", slog.LevelTrace))
 	return s, c, killCtx
 }
 

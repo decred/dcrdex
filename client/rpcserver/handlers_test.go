@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"github.com/decred/slog"
 )
 
 func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCode int) error {
@@ -34,7 +35,7 @@ func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCo
 	return nil
 }
 
-var wsServer = websocket.New(nil, &TCore{})
+var wsServer = websocket.New(nil, &TCore{}, dex.StdOutLogger("TEST", slog.LevelTrace))
 
 type Dummy struct {
 	Status string

@@ -7,7 +7,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/decred/slog"
+	"decred.org/dcrdex/dex"
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
 )
@@ -22,7 +22,7 @@ type serverView struct {
 
 // newServerView is a constructor for the server view. The server view's only
 // job is to run the supplied runFunc and display its log output.
-func newServerView(tag, addr string, runFunc func(context.Context, string, slog.Logger)) *serverView {
+func newServerView(tag, addr string, runFunc func(context.Context, string, dex.Logger)) *serverView {
 	// A journal to display log output from the server.
 	var serverJournal *journal
 	serverJournal = newJournal(tag+" Journal", func(e *tcell.EventKey) *tcell.EventKey {

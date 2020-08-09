@@ -48,7 +48,7 @@ var (
 func TestMain(m *testing.M) {
 	// Wrap everything for defers.
 	doIt := func() int {
-		logger := slog.NewBackend(os.Stdout).Logger("DCRTEST")
+		logger := dex.StdOutLogger("DCRTEST", slog.LevelTrace)
 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())

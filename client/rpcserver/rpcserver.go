@@ -24,9 +24,9 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/websocket"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/dcrd/certgen"
-	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
@@ -51,7 +51,7 @@ const (
 var (
 	// Check that core.Core satisfies ClientCore.
 	_   ClientCore = (*core.Core)(nil)
-	log slog.Logger
+	log dex.Logger
 	// errUnknownCmd is wrapped when the command is not know.
 	errUnknownCmd = errors.New("unknown command")
 )
@@ -165,7 +165,7 @@ type Config struct {
 }
 
 // SetLogger sets the logger for the RPCServer package.
-func SetLogger(logger slog.Logger) {
+func SetLogger(logger dex.Logger) {
 	log = logger
 }
 
@@ -204,7 +204,7 @@ func New(cfg *Config) (*RPCServer, error) {
 	}
 
 	// Context is set during Connect.
-	wsServer := websocket.New(nil, cfg.Core)
+	wsServer := websocket.New(nil, cfg.Core, log.SubLogger("WS"))
 
 	// Make the server.
 	s := &RPCServer{
