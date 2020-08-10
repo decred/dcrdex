@@ -105,8 +105,8 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		return err == nil && stat.IsDir()
 	}
 
-	// Right now, it is expected that the working directory is either in the
-	// current working directory or the dcrdex root directory.
+	// Look for the "site" folder in the current working directory or in the
+	// source path relative to [repo root]/client/cmd/dexc.
 	root := "site"
 	if !folderExists(root) {
 		root = "../../webserver/site"
