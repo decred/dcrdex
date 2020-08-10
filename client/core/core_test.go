@@ -742,7 +742,12 @@ func (rig *testRig) queueConnect(rpcErr *msgjson.Error) {
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
 		result := &msgjson.ConnectResult{Sig: connect.Sig}
-		resp, _ := msgjson.NewResponse(msg.ID, result, rpcErr)
+		var resp *msgjson.Message
+		if rpcErr != nil {
+			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
+		} else {
+			resp, _ = msgjson.NewResponse(msg.ID, result, nil)
+		}
 		f(resp)
 		return nil
 	})
