@@ -313,15 +313,7 @@ func (db *BoltDB) deleteAccount(ai *dexdb.AccountInfo) error {
 func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	// Copy AccountInfo to disabledAccounts
 	err := db.acctsDisable(func(disabledAccounts *bbolt.Bucket) error {
-		acct, err := disabledAccounts.CreateBucket(ai.EncKey)
-		if err != nil {
-			return fmt.Errorf("failed to create disabledAccount bucket")
-		}
-		err = acct.Put(accountKey, ai.Encode())
-		if err != nil {
-			return fmt.Errorf("accountKey put error: %v", err)
-		}
-		return err
+		return disabledAccounts.Put(ai.EncKey, ai.Encode())
 	})
 	if err != nil {
 		return err
@@ -342,16 +334,12 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 func (db *BoltDB) disabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
 	var acctInfo *dexdb.AccountInfo
 	return acctInfo, db.disabledAcctsView(func(accts *bbolt.Bucket) error {
-		acct := accts.Bucket(encKey)
+		acct := accts.Get(encKey)
 		if acct == nil {
 			return fmt.Errorf("account not found for key")
 		}
-		acctB := getCopy(acct, accountKey)
-		if acctB == nil {
-			return fmt.Errorf("empty account found for key")
-		}
 		var err error
-		acctInfo, err = dexdb.DecodeAccountInfo(acctB)
+		acctInfo, err = dexdb.DecodeAccountInfo(acct)
 		if err != nil {
 			return err
 		}
