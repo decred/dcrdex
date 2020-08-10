@@ -129,6 +129,8 @@ to which clients interacting with the DEX must adhere.
 
 * [[community.mediawiki/#Rules_of_Community_Conduct|Rules of Community Conduct]]
 * [[community.mediawiki/#Penalties|Penalties]]
+** [[community.mediawiki/#Penalization_Notification|Penalization Notification]]
+*** [[community.mediawiki/#Penalty_Object|Penalty Object]]
 
 '''&#91;9&#93; [[references.mediawiki|References]]''' lists references used in the development
 of the specification.

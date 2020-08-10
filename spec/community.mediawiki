@@ -55,3 +55,48 @@ of any unfilled orders.
 
 Less drastic punitive measures such as a cool-down period may be considered
 for minor, first-time or infrequent conduct violations.
+
+===Penalization Notification===
+
+In the event that a rule is broken, the client will be sent a notification that
+includes penalization details. If the client is offline, this information will
+be sent in the [[comm.mediawiki/#Session_Authentication|connect response]].
+
+'''Notification route:''' <code>penalty</code>, '''originator: ''' DEX
+
+<code>payload</code>
+{|
+! field   !! type   !! description
+|-
+| penalty || object || a Penalty object (definition below)
+|-
+| sig     || string || hex-encoded signature of the serialized Penalty object
+|}
+
+====Penalty Object====
+
+{|
+! field      !! type   !! description
+|-
+| brokenrule || int    || the rule that was broken
+|-
+| timestamp  || int    || the UNIX timestamp in milliseconds at which the penalization occured
+|-
+| duration   || int    || the duration in milliseconds of the penalization
+|-
+| details    || string || a message describing the penalization
+|}
+
+'''Penalty serialization'''
+
+{|
+! field      !! size (bytes) !! description
+|-
+| brokenrule || 1            || the rule
+|-
+| timestamp  || 8            || server's UNIX timestamp (milliseconds)
+|-
+| duration   || 8            || duration (milliseconds)
+|-
+| details    || string       || a message (UTF-8)
+|}
