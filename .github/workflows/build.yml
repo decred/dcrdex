@@ -35,9 +35,9 @@ jobs:
       uses: actions/setup-node@v1
       with:
         node-version: ${{ matrix.node-version }}
-    - name: npm install
+    - name: npm clean-install
       working-directory: ./client/webserver/site
-      run: npm install
+      run: npm ci
     - name: npm run build
       working-directory: ./client/webserver/site
       run: npm run build

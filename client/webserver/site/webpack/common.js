@@ -22,7 +22,9 @@ module.exports = {
           {
             loader: 'css-loader',
             options: {
-              modules: false, url: false, sourceMap: true
+              modules: false,
+              url: false,
+              sourceMap: true
             }
           },
           {
