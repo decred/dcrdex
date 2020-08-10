@@ -337,9 +337,9 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	return nil
 }
 
-// DisabledAccount gets the AccountInfo from disabledAccount associated with
+// disabledAccount gets the AccountInfo from disabledAccount associated with
 // the specified EncKey.
-func (db *BoltDB) DisabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
+func (db *BoltDB) disabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
 	var acctInfo *dexdb.AccountInfo
 	return acctInfo, db.disabledAcctsView(func(accts *bbolt.Bucket) error {
 		acct := accts.Bucket(encKey)

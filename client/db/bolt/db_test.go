@@ -258,7 +258,7 @@ func TestDisableAccount(t *testing.T) {
 	if actualAcct != nil {
 		t.Fatalf("Expected retrieval of deleted account to be nil")
 	}
-	actualDisabledAccount, err := boltdb.DisabledAccount(acct.EncKey)
+	actualDisabledAccount, err := boltdb.disabledAccount(acct.EncKey)
 	if err != nil {
 		t.Fatalf("Unexpected DisabledAccount error: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestDisabledAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected DisableAccount error: %v", err)
 	}
-	actualDisabledAccount, err := boltdb.DisabledAccount(acct.EncKey)
+	actualDisabledAccount, err := boltdb.disabledAccount(acct.EncKey)
 	if err != nil {
 		t.Fatalf("Unexpected DisabledAccount error: %v", err)
 	}
