@@ -321,7 +321,8 @@ func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	err = db.deleteAccount(ai)
 	if err != nil {
 		if err == bbolt.ErrBucketNotFound {
-			log.Warnf("failed to to delete account: %s err: %v", ai.Host, err)
+			log.Warnf("Cannot delete account from active accounts"+
+				" table. Host: not found. %s err: %v", ai.Host, err)
 		} else {
 			return err
 		}
