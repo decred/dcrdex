@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -290,6 +292,23 @@ func TestMain(m *testing.M) {
 		return m.Run()
 	}
 	os.Exit(doIt())
+}
+
+func TestNew_siteError(t *testing.T) {
+	// Change to a directory with no "site" or ""../../webserver/site" folder.
+	dir, _ := ioutil.TempDir("", "test")
+	defer os.RemoveAll(dir)
+	err := os.Chdir(dir)
+	if err != nil {
+		t.Fatalf("Cannot cd to %q", dir)
+	}
+
+	c := &TCore{}
+	_, err = New(c, "127.0.0.1:0", tLogger, false)
+	if err == nil && !strings.HasPrefix(err.Error(), "no HTML template files found") {
+		t.Errorf("Should have failed to start with no site folder.")
+	}
+	t.Log(err)
 }
 
 func TestConnectStart(t *testing.T) {

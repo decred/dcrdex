@@ -105,21 +105,22 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		return err == nil && stat.IsDir()
 	}
 
-	// Right now, it is expected that the working directory
-	// is either the dcrdex root directory, or the WebServer directory itself.
-	root := "../../webserver/site"
+	// Right now, it is expected that the working directory is either in the
+	// current working directory or the dcrdex root directory.
+	root := "site"
 	if !folderExists(root) {
-		root = "site"
+		root = "../../webserver/site"
 		if !folderExists(root) {
-			return nil, fmt.Errorf("no HTML template files found")
+			cwd, _ := os.Getwd()
+			return nil, fmt.Errorf("no HTML template files found. "+
+				"Place the 'site' folder in the program's working directory %q "+
+				"or run dexc from within the client/cmd/dexc source workspace folder.", cwd)
 		}
 	}
 
-	join := filepath.Join
-
 	// Prepare the templates.
 	bb := "bodybuilder"
-	tmpl := newTemplates(join(root, "src/html"), reloadHTML).
+	tmpl := newTemplates(filepath.Join(root, "src/html"), reloadHTML).
 		addTemplate("login", bb).
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
@@ -212,10 +213,10 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	})
 
 	// Files
-	fileServer(mux, "/js", join(root, "dist"))
-	fileServer(mux, "/css", join(root, "dist"))
-	fileServer(mux, "/img", join(root, "src/img"))
-	fileServer(mux, "/font", join(root, "src/font"))
+	fileServer(mux, "/js", filepath.Join(root, "dist"))
+	fileServer(mux, "/css", filepath.Join(root, "dist"))
+	fileServer(mux, "/img", filepath.Join(root, "src/img"))
+	fileServer(mux, "/font", filepath.Join(root, "src/font"))
 
 	return s, nil
 }
