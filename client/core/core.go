@@ -1543,8 +1543,8 @@ func (c *Core) Logout() error {
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
 // If an account is not found on the dex server upon dex authentication the
-// account is disabled, initialize() will be triggered which will result in the
-// user being prompted to register again.
+// account is disabled and the corresponding entry in c.conns is removed
+// which will result in the user being prompted to register again.
 func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	// Connections will be attempted in parallel, so we'll need to protect the
 	// errorSet.
@@ -1555,7 +1555,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	reconcileConnectionsWg.Add(1)
 	disabledAccountHostChan := make(chan string)
 	disabledAccountHosts := make(map[string]bool)
-	// If an account has been disabled this will trigger core initialization.
+	// If an account has been disabled the entry is removed from c.conns.
 	go func() {
 		defer reconcileConnectionsWg.Done()
 		for disabledAccountHost := range disabledAccountHostChan {
