@@ -197,20 +197,14 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 	}, conn, acct
 }
 
-func (conn *TWebsocket) getHandlers(route string) []func(*msgjson.Message, msgFunc) error {
-	conn.mtx.RLock()
-	defer conn.mtx.RUnlock()
-	return conn.handlers[route]
-}
-
 func (conn *TWebsocket) queueResponse(route string, handler func(*msgjson.Message, msgFunc) error) {
-	handlers := conn.getHandlers(route)
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
+	handlers := conn.handlers[route]
 	if handlers == nil {
 		handlers = make([]func(*msgjson.Message, msgFunc) error, 0, 1)
 	}
-	conn.mtx.Lock()
 	conn.handlers[route] = append(handlers, handler)
-	conn.mtx.Unlock()
 }
 
 func (conn *TWebsocket) NextID() uint64 {
@@ -224,7 +218,9 @@ func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.RequestWithTimeout(msg, f, 0, func() {})
 }
 func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), _ time.Duration, _ func()) error {
-	handlers := conn.getHandlers(msg.Route)
+	conn.mtx.Lock()
+	defer conn.mtx.Unlock()
+	handlers := conn.handlers[msg.Route]
 	if len(handlers) > 0 {
 		handler := handlers[0]
 		conn.handlers[msg.Route] = handlers[1:]
