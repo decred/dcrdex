@@ -295,11 +295,17 @@ func TestMain(m *testing.M) {
 }
 
 func TestNew_siteError(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("cannot get current directory: %v", err)
+	}
+
 	// Change to a directory with no "site" or ""../../webserver/site" folder.
 	dir, _ := ioutil.TempDir("", "test")
 	defer os.RemoveAll(dir)
-	err := os.Chdir(dir)
-	if err != nil {
+	defer os.Chdir(cwd) // leave the temp dir before trying to delete it
+
+	if err = os.Chdir(dir); err != nil {
 		t.Fatalf("Cannot cd to %q", dir)
 	}
 
