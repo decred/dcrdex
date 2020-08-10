@@ -227,9 +227,19 @@ func TestDisableAccount(t *testing.T) {
 	boltdb := newTestDB(t)
 	acct := dbtest.RandomAccountInfo()
 	host := acct.Host
-	boltdb.CreateAccount(acct)
+	err := boltdb.CreateAccount(acct)
+	if err != nil {
+		t.Fatalf("Unexpected CreateAccount error: %v", err)
+	}
+	actualDisabledAccount, err := boltdb.disabledAccount(acct.EncKey)
+	if err == nil {
+		t.Fatalf("Expected disabledAccount error but there was none.")
+	}
+	if actualDisabledAccount != nil {
+		t.Fatalf("Expected not to retrieve a disabledAccount.")
+	}
 
-	err := boltdb.DisableAccount(acct)
+	err = boltdb.DisableAccount(acct)
 
 	if err != nil {
 		t.Fatalf("Unexpected DisableAccount error: %v", err)
@@ -238,9 +248,9 @@ func TestDisableAccount(t *testing.T) {
 	if actualAcct != nil {
 		t.Fatalf("Expected retrieval of deleted account to be nil")
 	}
-	actualDisabledAccount, err := boltdb.disabledAccount(acct.EncKey)
+	actualDisabledAccount, err = boltdb.disabledAccount(acct.EncKey)
 	if err != nil {
-		t.Fatalf("Unexpected DisabledAccount error: %v", err)
+		t.Fatalf("Unexpected disabledAccount error: %v", err)
 	}
 	if actualDisabledAccount == nil {
 		t.Fatalf("Expected to retrieve a disabledAccount.")
