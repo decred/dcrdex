@@ -1566,6 +1566,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			for _, disabledAccountHost := range disabledAccountHosts {
 				c.conns[disabledAccountHost].connMaster.Disconnect()
 				delete(c.conns, disabledAccountHost)
+				log.Warnf("Host: %v account disconnected and removed from core "+
+					"connections.", disabledAccountHost)
 			}
 			c.connMtx.Unlock()
 		}
