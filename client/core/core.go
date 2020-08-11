@@ -1703,6 +1703,13 @@ var waiterID uint64
 func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(error)) {
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
+	// TODO: While under lock, check the trigger before adding the waiter in
+	// case it is already satisfied.
+	// if ok, _ := trigger(); ok {
+	// 	log.Debugf("Got it on the first try. No waiter needed.")
+	// 	action(nil)
+	// 	return
+	// }
 	c.blockWaiters[atomic.AddUint64(&waiterID, 1)] = &blockWaiter{
 		assetID: assetID,
 		trigger: trigger,
@@ -1812,7 +1819,6 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 
 	corder, fromID, err := c.prepareTrackedTrade(dc, form, crypter)
-
 	if err != nil {
 		return nil, err
 	}
@@ -1929,7 +1935,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	msgCoins, err := messageCoins(wallets.fromWallet, coins)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
 	}
 
 	// Must be locked here and held until at least the trade is added to the
@@ -1944,7 +1950,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	result := new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("new order request with DEX server %v failed: %w", dc.acct.host, err)
 	}
 
 	// If we encounter an error, perform some basic logging.

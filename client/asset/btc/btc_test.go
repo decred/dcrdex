@@ -336,6 +336,8 @@ func TestAvailableFund(t *testing.T) {
 		Amount:        float64(littleFunds) / 1e8,
 		Confirmations: 0,
 		ScriptPubKey:  tP2PKH,
+		Spendable:     true,
+		Solvable:      true,
 		Safe:          true,
 	}
 	unspents = append(unspents, littleUTXO)
@@ -378,6 +380,8 @@ func TestAvailableFund(t *testing.T) {
 		Confirmations: 1,
 		Vout:          1,
 		ScriptPubKey:  tP2PKH,
+		Spendable:     true,
+		Solvable:      true,
 		Safe:          true,
 	}
 	unspents = append(unspents, lottaUTXO)
@@ -623,6 +627,8 @@ func TestFundingCoins(t *testing.T) {
 		TxID:         tTxID,
 		Vout:         vout,
 		ScriptPubKey: tP2PKH,
+		Spendable:    true,
+		Solvable:     true,
 		Safe:         true,
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
@@ -701,6 +707,8 @@ func TestFundEdges(t *testing.T) {
 		Amount:        float64(swapVal+backingFees-1) / 1e8,
 		Confirmations: 5,
 		ScriptPubKey:  tP2PKH,
+		Spendable:     true,
+		Solvable:      true,
 		Safe:          true,
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
@@ -736,6 +744,8 @@ func TestFundEdges(t *testing.T) {
 		Confirmations: 10,
 		ScriptPubKey:  p2shScriptPubKey,
 		RedeemScript:  p2shRedeem,
+		Spendable:     true,
+		Solvable:      true,
 		Safe:          true,
 	}
 	p2pkhUnspent.Amount = float64(halfSwap+backingFees-1) / 1e8
@@ -765,6 +775,8 @@ func TestFundEdges(t *testing.T) {
 		Amount:        float64(swapVal+backingFees-1) / 1e8,
 		Confirmations: 3,
 		ScriptPubKey:  p2wpkhPkScript,
+		Spendable:     true,
+		Solvable:      true,
 		Safe:          true,
 	}
 	unspents = []*ListUnspentResult{p2wpkhUnspent}
@@ -797,6 +809,8 @@ func TestFundEdges(t *testing.T) {
 		Confirmations: 7,
 		ScriptPubKey:  p2wshPkScript,
 		RedeemScript:  p2wpkhRedeemScript,
+		Spendable:     true,
+		Solvable:      true,
 		Safe:          true,
 	}
 	unspents = []*ListUnspentResult{p2wpshUnspent}

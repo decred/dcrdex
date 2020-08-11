@@ -63,6 +63,7 @@ func (wc *walletClient) Balances() (*GetBalancesResult, error) {
 // ListUnspent retrieves a list of the wallet's UTXOs.
 func (wc *walletClient) ListUnspent() ([]*ListUnspentResult, error) {
 	unspents := make([]*ListUnspentResult, 0)
+	// TODO: listunspent 0 9999999 []string{}, include_unsafe=false
 	return unspents, wc.call(methodListUnspent, anylist{uint8(0)}, &unspents)
 }
 

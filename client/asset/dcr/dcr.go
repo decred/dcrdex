@@ -565,6 +565,11 @@ func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
 // falling back to 0-conf coins where there are not enough 1+ confs coins.
 func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, uint64, []*fundingCoin, error) {
 
+	// Keep a consistent view of spendable and locked coins in the wallet and
+	// the fundingCoins map to make this safe for concurrent use.
+	dcr.fundingMtx.Lock()
+	defer dcr.fundingMtx.Unlock() // stay locked until we update the map at the end
+
 	unspents, err := dcr.unspents()
 	if err != nil {
 		return nil, 0, nil, err
@@ -749,6 +754,8 @@ func (dcr *ExchangeWallet) split(value uint64, coins asset.Coins, inputsSize uin
 }
 
 // lockFundingCoins locks the funding coins via RPC and stores them in the map.
+// This function is not safe for concurrent use. The caller should lock
+// dcr.fundingMtx.
 func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	wireOPs := make([]*wire.OutPoint, 0, len(fCoins))
 	for _, c := range fCoins {
@@ -758,8 +765,6 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	if err != nil {
 		return err
 	}
-	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock()
 	for _, c := range fCoins {
 		dcr.fundingCoins[c.op.pt] = c
 	}
@@ -813,11 +818,11 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	// First check if we have the coins in cache.
 	coins := make(asset.Coins, 0, len(ids))
 	notFound := make(map[outPoint]bool)
-	dcr.fundingMtx.RLock()
+	dcr.fundingMtx.Lock()
+	defer dcr.fundingMtx.Unlock() // stay locked until we update the map at the end
 	for _, id := range ids {
 		txHash, vout, err := decodeCoinID(id)
 		if err != nil {
-			dcr.fundingMtx.RUnlock()
 			return nil, err
 		}
 		pt := newOutPoint(txHash, vout)
@@ -828,7 +833,6 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		}
 		notFound[pt] = true
 	}
-	dcr.fundingMtx.RUnlock()
 	if len(notFound) == 0 {
 		return coins, nil
 	}
@@ -837,8 +841,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		return nil, err
 	}
 	lockers := make([]*wire.OutPoint, 0, len(notFound))
-	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock()
+
 	for _, txout := range unspents {
 		txHash, err := chainhash.NewHashFromStr(txout.TxID)
 		if err != nil {
@@ -959,6 +962,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			dcr.log.Warnf("Failed to lock dcr change coin %s", change)
 		}
 	}
+	// TODO: dcr.fundingMtx.Unlock()
 
 	receipts := make([]asset.Receipt, 0, swapCount)
 	txHash := msgTx.TxHash()

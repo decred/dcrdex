@@ -522,11 +522,14 @@ func (btc *ExchangeWallet) feeRateWithFallback() uint64 {
 // FundOrder selects utxos (as asset.Coin) for use in an order. Any Coins
 // returned will be locked. Part of the asset.Wallet interface.
 func (btc *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asset) (asset.Coins, error) {
+	btc.log.Debugf("Attempting to fund order for %d based units of %s", value, nfo.Symbol)
 	if value == 0 {
 		return nil, fmt.Errorf("cannot fund value = 0")
 	}
 	// Now that we allow funding with 0 conf UTXOs, some more logic could be
 	// used out of caution, including preference for >0 confs.
+	btc.fundingMtx.Lock()
+	defer btc.fundingMtx.Unlock() // stay locked until we update the map at the end
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
@@ -589,11 +592,9 @@ out:
 		return nil, err
 	}
 
-	btc.fundingMtx.Lock()
 	for pt, utxo := range fundingCoins {
 		btc.fundingCoins[pt] = utxo
 	}
-	btc.fundingMtx.Unlock()
 
 	btc.log.Debugf("funding %d %s order with coins %v", value, btc.walletInfo.Units, coins)
 
@@ -731,11 +732,11 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	// First check if we have the coins in cache.
 	coins := make(asset.Coins, 0, len(ids))
 	notFound := make(map[outPoint]struct{})
-	btc.fundingMtx.RLock()
+	btc.fundingMtx.Lock()
+	defer btc.fundingMtx.Unlock() // stay locked until we update the map at the end
 	for _, id := range ids {
 		txHash, vout, err := decodeCoinID(id)
 		if err != nil {
-			btc.fundingMtx.RUnlock()
 			return nil, err
 		}
 		pt := newOutPoint(txHash, vout)
@@ -746,7 +747,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		}
 		notFound[pt] = struct{}{}
 	}
-	btc.fundingMtx.RUnlock()
+
 	if len(notFound) == 0 {
 		return coins, nil
 	}
@@ -754,9 +755,9 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	lockers := make([]*output, 0, len(ids))
-	btc.fundingMtx.Lock()
-	defer btc.fundingMtx.Unlock()
+
 	for _, id := range ids {
 		txHash, vout, err := decodeCoinID(id)
 		if err != nil {
@@ -1594,7 +1595,13 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[o
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	utxoMap := make(map[outPoint]*compositeUTXO, len(unspents))
 	for _, txout := range unspents {
-		if txout.Confirmations >= confs && txout.Safe {
+		if txout.Confirmations >= confs && txout.Safe && txout.Spendable {
+			// TODO when the map keys change to the outpoint struct:
+			// opID := outpointID(txout.TxID, txout.Vout)
+			// if btc.fundingCoins[opID] != nil {
+			// 	btc.log.Warnf("Skipping known order-funding coin %v returned by listunspent!", opID)
+			// 	continue
+			// }
 			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, btc.chainParams)
 			if err != nil {
 				return nil, nil, 0, fmt.Errorf("error reading asset info: %v", err)
