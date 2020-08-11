@@ -55,6 +55,7 @@ type TCore struct {
 	accountInfoErr error
 	penalties      []*db.Penalty
 	penaltiesErr   error
+	penalize       *db.Penalty
 	penalizeErr    error
 	unbanErr       error
 }
@@ -152,8 +153,8 @@ func (c *TCore) AccountInfo(_ account.AccountID) (*db.Account, error) {
 func (c *TCore) Penalties(_ account.AccountID, _ bool) ([]*db.Penalty, error) {
 	return c.penalties, c.penaltiesErr
 }
-func (c *TCore) Penalize(_ account.AccountID, _ account.Rule, _ string) error {
-	return c.penalizeErr
+func (c *TCore) Penalize(_ account.AccountID, _ account.Rule, _ string) (*db.Penalty, error) {
+	return c.penalize, c.penalizeErr
 }
 func (c *TCore) Unban(_ account.AccountID) error {
 	return c.unbanErr
@@ -961,7 +962,7 @@ func TestBan(t *testing.T) {
 			t.Fatalf("%q: apiBan returned code %d, expected %d", test.name, w.Code, test.wantCode)
 		}
 		if w.Code == http.StatusOK {
-			res := new(BanResult)
+			res := new(db.Penalty)
 			if err := json.Unmarshal(w.Body.Bytes(), res); err != nil {
 				t.Errorf("%q: unexpected response %v: %v", test.name, w.Body.String(), err)
 			}

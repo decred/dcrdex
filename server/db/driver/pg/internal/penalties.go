@@ -16,7 +16,8 @@ const (
 	// InsertPenalty inserts a row. The id is assigned automatically, and
 	// forgiven is left as the default of 0.
 	InsertPenalty = `INSERT INTO %s (account_id, broken_rule, time, duration, details)
-		VALUES ($1, $2, $3, $4, $5);`
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id;`
 
 	// ForgivePenalty sets forgiven for a record with id to 1.
 	ForgivePenalty = `UPDATE %s

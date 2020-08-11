@@ -239,14 +239,10 @@ func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// TODO: Allow operator supplied details to go with the ban.
-	if err := s.core.Penalize(acctID, account.Rule(ruleInt), ""); err != nil {
+	res, err := s.core.Penalize(acctID, account.Rule(ruleInt), "")
+	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to ban account: %v", err), http.StatusInternalServerError)
 		return
-	}
-	res := BanResult{
-		AccountID:  acctIDStr,
-		BrokenRule: byte(ruleInt),
-		BanTime:    APITime{time.Now()},
 	}
 	writeJSON(w, res)
 }

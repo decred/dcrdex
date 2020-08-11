@@ -78,10 +78,10 @@ func (s *TStorage) CompletedUserOrders(aid account.AccountID, N int) (oids []ord
 func (s *TStorage) ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error) {
 	return s.ratio.oidsCancels, s.ratio.oidsCanceled, s.ratio.timesCanceled, nil
 }
-func (s *TStorage) InsertPenalty(penalty *db.Penalty) error {
+func (s *TStorage) InsertPenalty(penalty *db.Penalty) int64 {
 	s.closedID = penalty.AccountID
 	s.penalties = []*db.Penalty{penalty}
-	return nil
+	return 0
 }
 func (s *TStorage) ForgivePenalty(id int64) error { return nil }
 func (s *TStorage) ForgivePenalties(aid account.AccountID) error {

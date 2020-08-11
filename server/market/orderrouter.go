@@ -17,6 +17,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 )
 
@@ -33,7 +34,7 @@ type AuthManager interface {
 	SendWhenConnected(account.AccountID, *msgjson.Message, time.Duration, func())
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
-	Penalize(user account.AccountID, rule account.Rule, details string) error
+	Penalize(user account.AccountID, rule account.Rule, details string) (*db.Penalty, error)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 }
 

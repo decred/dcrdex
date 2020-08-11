@@ -21,6 +21,7 @@ import (
 	"decred.org/dcrdex/server/asset"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
@@ -221,9 +222,9 @@ func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message,
 	}
 	return nil
 }
-func (a *TAuth) Penalize(user account.AccountID, rule account.Rule, _ string) error {
+func (a *TAuth) Penalize(user account.AccountID, rule account.Rule, _ string) (*db.Penalty, error) {
 	log.Infof("Penalize for user %v", user)
-	return nil
+	return nil, nil
 }
 
 func (a *TAuth) RecordCompletedOrder(account.AccountID, order.OrderID, time.Time) {}

@@ -385,8 +385,8 @@ func ValidateOrder(ord order.Order, status order.OrderStatus, mkt *dex.MarketInf
 // Penalty data.
 type PenaltyArchiver interface {
 	// InsertPenalty adds penalty to the penalties table. The passed ID and
-	// Forgiven fields are ignored.
-	InsertPenalty(penalty *Penalty) error
+	// Forgiven fields are ignored. The db decided id is returned.
+	InsertPenalty(penalty *Penalty) (id int64)
 	// ForgivePenalty forgives a penalty.
 	ForgivePenalty(id int64) error
 	// ForgivePenalties forgives all penalties currenty held by a user.

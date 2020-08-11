@@ -45,7 +45,7 @@ type Storage interface {
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
-	InsertPenalty(penalty *db.Penalty) error
+	InsertPenalty(penalty *db.Penalty) (id int64)
 	ForgivePenalty(id int64) error
 	ForgivePenalties(aid account.AccountID) error
 	Penalties(aid account.AccountID) (penalties []*db.Penalty, err error)
@@ -692,15 +692,15 @@ func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message, 
 }
 
 // Penalize signals that a user has broken a rule of community conduct, and that
-// their account should be penalized.
-func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, extraDetails string) error {
+// their account should be penalized. The penalty is returned.
+func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, extraDetails string) (*db.Penalty, error) {
 	// Notify user of penalty.
 	details := "Ordering has been suspended for this account. Contact the exchange operator to reinstate privileges."
 	if auth.anarchy {
 		details = "You were penalized but the penalty will not be counted against you."
 	}
 	details = fmt.Sprintf("%s\nRule Details: %s\n%s", details, rule.Description(), extraDetails)
-	penalty := &msgjson.Penalty{
+	penaltyMsg := &msgjson.Penalty{
 		BrokenRule: rule,
 		Time:       uint64(unixMsNow().Unix()),
 		Duration:   uint64(rule.Duration()),
@@ -708,16 +708,16 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 		Details:    details,
 	}
 	penaltyNote := &msgjson.PenaltyNote{
-		Penalty: penalty,
+		Penalty: penaltyMsg,
 	}
 	sig, err := auth.signer.Sign(penaltyNote.Serialize())
 	if err != nil {
-		return fmt.Errorf("signature error: %v", err)
+		return nil, fmt.Errorf("signature error: %v", err)
 	}
 	penaltyNote.Sig = sig.Serialize()
 	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
 	if err != nil {
-		return fmt.Errorf("error creating penalty notification: %v", err)
+		return nil, fmt.Errorf("error creating penalty notification: %v", err)
 	}
 	// TODO: verify that we are not sending a note over max uint16 as it
 	// cannot be sent over ws.
@@ -725,7 +725,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	if auth.anarchy {
 		err := fmt.Errorf("user %v penalized for rule %v, but not enforcing it", user, rule)
 		log.Error(err)
-		return err
+		return nil, err
 	}
 
 	// TODO: option to close permanently or suspend for a certain time.
@@ -735,10 +735,8 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 		client.suspend()
 	}
 
-	if err := auth.storage.InsertPenalty(&db.Penalty{Penalty: penalty}); err != nil {
-		log.Error(err)
-		return err
-	}
+	penalty := &db.Penalty{Penalty: penaltyMsg}
+	penalty.ID = auth.storage.InsertPenalty(penalty)
 
 	log.Debugf("user %v penalized for rule %v", user, rule)
 
@@ -747,7 +745,7 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, ext
 	// should be appropriate checks on order submission and match/swap
 	// initiation (TODO).
 
-	return nil
+	return penalty, nil
 }
 
 // Unban forgives a user, allowing them to resume trading.

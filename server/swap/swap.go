@@ -62,7 +62,7 @@ type AuthManager interface {
 		expireTimeout time.Duration, expireFunc func()) error
 	RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout, connectTimeout time.Duration, expireFunc func())
-	Penalize(user account.AccountID, rule account.Rule, details string) error
+	Penalize(user account.AccountID, rule account.Rule, details string) (*db.Penalty, error)
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
 	Unban(user account.AccountID) error

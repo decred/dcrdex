@@ -191,11 +191,11 @@ func (m *TAuthManager) Route(string,
 	func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 }
 
-func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule, _ string) error {
+func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule, _ string) (*db.Penalty, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.suspensions[id] = rule
-	return nil
+	return nil, nil
 }
 
 func (m *TAuthManager) RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time) {}

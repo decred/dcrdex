@@ -16,11 +16,12 @@ import (
 )
 
 // InsertPenalty adds penalty to the penalties table. The passed ID and Forgiven
-// fields are ignored.
-func (a *Archiver) InsertPenalty(penalty *db.Penalty) error {
+// fields are ignored. The db decided id is returned.
+func (a *Archiver) InsertPenalty(penalty *db.Penalty) (id int64) {
 	stmt := fmt.Sprintf(internal.InsertPenalty, penaltiesTableName)
-	_, err := a.db.Exec(stmt, penalty.AccountID, penalty.BrokenRule, int64(penalty.Time), penalty.Duration, penalty.Details)
-	return err
+	a.db.QueryRow(stmt, penalty.AccountID, penalty.BrokenRule,
+		int64(penalty.Time), penalty.Duration, penalty.Details).Scan(&id)
+	return id
 }
 
 // ForgivePenalties forgives all penalties currenty held by a user.

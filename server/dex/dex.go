@@ -580,8 +580,8 @@ func (dm *DEX) Penalties(aid account.AccountID, all bool) ([]*db.Penalty, error)
 }
 
 // Penalize bans an account by canceling the client's orders and setting their rule
-// status to rule.
-func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule, details string) error {
+// status to rule. The penalty is returned.
+func (dm *DEX) Penalize(aid account.AccountID, rule account.Rule, details string) (*db.Penalty, error) {
 	return dm.authMgr.Penalize(aid, rule, details)
 }
 

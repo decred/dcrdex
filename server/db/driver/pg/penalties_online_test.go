@@ -64,15 +64,9 @@ func TestPenalties(t *testing.T) {
 		},
 	}
 	// Add penalties.
-	if err := archie.InsertPenalty(penaltyTwoSec); err != nil {
-		t.Fatal(err)
-	}
-	if err := archie.InsertPenalty(penaltyTenSec); err != nil {
-		t.Fatal(err)
-	}
-	if err := archie.InsertPenalty(penaltyTenSecDiffUser); err != nil {
-		t.Fatal(err)
-	}
+	idTwoSec := archie.InsertPenalty(penaltyTwoSec)
+	idTenSec := archie.InsertPenalty(penaltyTenSec)
+	archie.InsertPenalty(penaltyTenSecDiffUser)
 	// Check penalties
 	penalties, err := archie.Penalties(acctID)
 	if err != nil {
@@ -82,8 +76,8 @@ func TestPenalties(t *testing.T) {
 		t.Fatal("wrong number of penalties")
 	}
 	// IDs were added upon inserting.
-	penaltyTwoSec.ID = penalties[0].ID
-	penaltyTenSec.ID = penalties[1].ID
+	penaltyTwoSec.ID = idTwoSec
+	penaltyTenSec.ID = idTenSec
 	if !reflect.DeepEqual(penalties[0], penaltyTwoSec) {
 		t.Fatalf("first penalty not equal: expected %v got %v", spew.Sdump(penaltyTwoSec), spew.Sdump(penalties[0]))
 	}
@@ -104,8 +98,7 @@ func TestPenalties(t *testing.T) {
 		t.Fatalf("first penalty not equal: expected %v got %v", spew.Sdump(penaltyTenSec), spew.Sdump(penalties[0]))
 	}
 	// Forgive the active penalty.
-	id := penaltyTenSec.ID
-	if err := archie.ForgivePenalty(id); err != nil {
+	if err := archie.ForgivePenalty(idTenSec); err != nil {
 		t.Fatal(err)
 	}
 	// Check penalties. One is expired and the other forgiven, so none
@@ -126,12 +119,8 @@ func TestPenalties(t *testing.T) {
 		t.Fatal("wrong number of penalties")
 	}
 	// Add two more.
-	if err := archie.InsertPenalty(penaltyTenSec); err != nil {
-		t.Fatal(err)
-	}
-	if err := archie.InsertPenalty(penaltyTenSec); err != nil {
-		t.Fatal(err)
-	}
+	archie.InsertPenalty(penaltyTenSec)
+	archie.InsertPenalty(penaltyTenSec)
 	// They are currently in effect.
 	penalties, err = archie.Penalties(acctID)
 	if err != nil {
