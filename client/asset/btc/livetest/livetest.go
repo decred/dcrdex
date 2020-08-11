@@ -28,7 +28,6 @@ import (
 	"decred.org/dcrdex/client/asset/btc"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
-	"github.com/decred/slog"
 )
 
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
@@ -111,7 +110,7 @@ func randBytes(l int) []byte {
 }
 
 func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *dex.Asset) {
-	tLogger := dex.StdOutLogger("TEST", slog.LevelTrace)
+	tLogger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	tCtx, shutdown := context.WithCancel(context.Background())
 	defer shutdown()
 

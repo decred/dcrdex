@@ -23,7 +23,6 @@ import (
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
-	"github.com/decred/slog"
 )
 
 // Error is just a basic error.
@@ -196,14 +195,14 @@ ordersLoop:
 	}
 
 	log.Debugf("Locking %d base asset (%d) coins.", len(baseCoins), base)
-	if log.Level() <= slog.LevelTrace {
+	if log.Level() <= dex.LevelTrace {
 		for oid, coins := range baseCoins {
 			log.Tracef(" - order %v: %v", oid, coins)
 		}
 	}
 
 	log.Debugf("Locking %d quote asset (%d) coins.", len(quoteCoins), quote)
-	if log.Level() <= slog.LevelTrace {
+	if log.Level() <= dex.LevelTrace {
 		for oid, coins := range quoteCoins {
 			log.Tracef(" - order %v: %v", oid, coins)
 		}

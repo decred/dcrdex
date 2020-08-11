@@ -194,10 +194,6 @@ func supportedSubsystems() []string {
 // the levels accordingly.  An appropriate error is returned if anything is
 // invalid.
 func parseAndSetDebugLevels(debugLevel string) (*dex.LoggerMaker, error) {
-	lm, err := dex.NewLoggerMaker(backendLog, debugLevel)
-	if err != nil {
-		return nil, err
-	}
 	setLogLevels(lm.DefaultLevel)
 	for subsysID, lvl := range lm.Levels {
 		if _, exists := subsystemLoggers[subsysID]; !exists {

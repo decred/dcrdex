@@ -4,16 +4,15 @@ package integ_test
 
 import (
 	"math/rand"
-	"os"
 	"reflect"
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/matcher"
-	"github.com/decred/slog"
 )
 
 // An arbitrary account ID for test orders.
@@ -32,12 +31,10 @@ const (
 )
 
 func startLogger() {
-	logger := slog.NewBackend(os.Stdout).Logger("MATCHTEST - book")
-	logger.SetLevel(slog.LevelDebug)
+	logger := dex.StdOutLogger("MATCHTEST - book", dex.LevelTrace)
 	book.UseLogger(logger)
 
-	logger = slog.NewBackend(os.Stdout).Logger("MATCHTEST - matcher")
-	logger.SetLevel(slog.LevelDebug)
+	logger = dex.StdOutLogger("MATCHTEST - matcher", dex.LevelTrace)
 	matcher.UseLogger(logger)
 }
 

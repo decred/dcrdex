@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"decred.org/dcrdex/dex"
-	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 )
 
@@ -17,7 +16,7 @@ var (
 	// application shutdown.
 	logRotator   *rotator.Rotator
 	debugLevel   string
-	log          slog.Logger
+	log          dex.Logger
 	masterLogger = func([]byte) {}
 )
 
@@ -67,8 +66,7 @@ func CustomLogMaker(f func(p []byte)) (*dex.LoggerMaker, error) {
 	if f == nil {
 		f = func([]byte) {}
 	}
-	backendLog := slog.NewBackend(logWriter{f: f})
-	return dex.NewLoggerMaker(backendLog, debugLevel)
+	return dex.NewLoggerMaker(logWriter{f: f}, debugLevel)
 }
 
 // Close closes the log rotator.

@@ -6,7 +6,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
-	"github.com/decred/slog"
 )
 
 const (
@@ -23,7 +22,7 @@ var (
 )
 
 func startLogger() {
-	logger := dex.StdOutLogger("ORDER_DB_TEST", slog.LevelTrace)
+	logger := dex.StdOutLogger("ORDER_DB_TEST", dex.LevelTrace)
 	UseLogger(logger)
 }
 

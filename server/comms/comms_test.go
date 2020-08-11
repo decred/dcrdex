@@ -232,7 +232,7 @@ func TestMain(m *testing.M) {
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
 	// logger := slog.NewBackend(os.Stdout).Logger("COMMSTEST")
-	// logger.SetLevel(slog.LevelTrace)
+	// logger.SetLevel(dex.LevelTrace)
 	// UseLogger(logger)
 	// ws.UseLogger(logger)
 	os.Exit(m.Run())

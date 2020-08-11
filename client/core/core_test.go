@@ -739,7 +739,7 @@ func (rig *testRig) queueConnect() {
 func TestMain(m *testing.M) {
 	UseLoggerMaker(&dex.LoggerMaker{
 		Backend:      slog.NewBackend(os.Stdout),
-		DefaultLevel: slog.LevelTrace,
+		DefaultLevel: dex.LevelTrace,
 	})
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())

@@ -46,22 +46,20 @@ func (logWriter) Write(p []byte) (n int, err error) {
 // log file. This must be performed early during application startup by calling
 // initLogRotator.
 var (
-	// backendLog is the logging backend used to create all subsystem loggers.
-	// The backend must not be used before the log rotator has been initialized,
-	// or data races and/or nil pointer dereferences will occur.
-	backendLog = slog.NewBackend(logWriter{})
+	// logRotator is one of the logging outputs. Use initLogRotator to set it.
+	// It should be closed on application shutdown.
+	logRotator *rotator.Rotator
 
+	// lm is used to create dex.Loggers for all DEX subsystems. Loggers must
+	// not be used before the log rotator has been initialized, or data
+	// races and/or nil pointer dereferences will occur.
 	lm = func() *dex.LoggerMaker {
-		lm, err := dex.NewLoggerMaker(backendLog, defaultLogLevel)
+		lm, err := dex.NewLoggerMaker(logWriter{}, defaultLogLevel)
 		if err != nil {
 			panic(err)
 		}
 		return lm
 	}()
-
-	// logRotator is one of the logging outputs. Use initLogRotator to set it.
-	// It should be closed on application shutdown.
-	logRotator *rotator.Rotator
 
 	log           = lm.Logger("MAIN")
 	dbLogger      = lm.Logger("DB")

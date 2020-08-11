@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
-	"github.com/decred/slog"
 	"github.com/gorilla/websocket"
 )
 
@@ -98,10 +98,8 @@ func (c *ConnStub) WriteControl(messageType int, data []byte, deadline time.Time
 }
 
 func TestWSLink_send(t *testing.T) {
-	backendLogger := slog.NewBackend(os.Stdout)
 	defer os.Stdout.Sync()
-	log := backendLogger.Logger("ws_TEST")
-	log.SetLevel(slog.LevelTrace)
+	log := dex.StdOutLogger("ws_TEST", dex.LevelTrace)
 	UseLogger(log)
 
 	handlerChan := make(chan struct{}, 1)

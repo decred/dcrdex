@@ -25,7 +25,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/slog"
 )
 
 var (
@@ -253,7 +252,7 @@ func mustMarshal(t *testing.T, thing interface{}) []byte {
 }
 
 func TestMain(m *testing.M) {
-	tLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
+	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tTxHash, _ = chainhash.NewHashFromStr(tTxID)

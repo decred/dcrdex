@@ -13,7 +13,6 @@ import (
 // log is a logger that is initialized with no output filters. This means the
 // package will not perform any logging by default until the caller requests it.
 var log = dex.Disabled
-var loggerMaker *dex.LoggerMaker
 
 // DisableLog disables all library log output.  Logging output is disabled
 // by default until UseLogger is called.
@@ -23,7 +22,6 @@ func DisableLog() {
 
 // UseLogger uses a specified Logger to output package logging info.
 func UseLoggerMaker(maker *dex.LoggerMaker) {
-	loggerMaker = maker
 	log = maker.Logger("CORE")
 	orderbook.UseLogger(maker.Logger("ORDBOOK"))
 	comms.UseLogger(maker.Logger("COMMS"))

@@ -26,7 +26,6 @@ import (
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
 	walletjson "github.com/decred/dcrwallet/rpc/jsonrpc/types"
-	"github.com/decred/slog"
 )
 
 var (
@@ -276,7 +275,7 @@ func (c *tRPCClient) Disconnected() bool {
 func TestMain(m *testing.M) {
 	chainParams = chaincfg.MainNetParams()
 	tPKHAddr, _ = dcrutil.DecodeAddress("DsTya4cCFBgtofDLiRhkyPYEQjgs3HnarVP", chainParams)
-	tLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
+	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	tTxHash, _ = chainhash.NewHashFromStr(tTxID)

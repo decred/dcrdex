@@ -22,12 +22,10 @@ import (
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
-	"github.com/decred/slog"
 )
 
 func init() {
-	log = dex.StdOutLogger("TEST", slog.LevelTrace)
-	log.SetLevel(slog.LevelTrace)
+	log = dex.StdOutLogger("TEST", dex.LevelTrace)
 }
 
 var (

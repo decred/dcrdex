@@ -19,7 +19,6 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
-	"github.com/decred/slog"
 )
 
 var (
@@ -282,8 +281,7 @@ func ensureResponse(t *testing.T, s *WebServer, f func(w http.ResponseWriter, r 
 }
 
 func TestMain(m *testing.M) {
-	tLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
-	tLogger.SetLevel(slog.LevelTrace)
+	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	doIt := func() int {

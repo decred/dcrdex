@@ -17,7 +17,6 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
-	"github.com/decred/slog"
 )
 
 var (
@@ -197,7 +196,7 @@ func newLink() *tLink {
 func newTServer(t *testing.T) (*Server, *TCore, func()) {
 	c := &TCore{}
 	ctx, killCtx := context.WithCancel(tCtx)
-	s := New(ctx, c, dex.StdOutLogger("TEST", slog.LevelTrace))
+	s := New(ctx, c, dex.StdOutLogger("TEST", dex.LevelTrace))
 	return s, c, killCtx
 }
 

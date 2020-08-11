@@ -31,7 +31,6 @@ import (
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/txscript/v2"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/slog"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -40,7 +39,7 @@ var testLogger dex.Logger
 func TestMain(m *testing.M) {
 	// Set the global chainParams.
 	chainParams = chaincfg.MainNetParams()
-	testLogger = dex.StdOutLogger("TEST", slog.LevelTrace)
+	testLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 	os.Exit(m.Run())
 }
 

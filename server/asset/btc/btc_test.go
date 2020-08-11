@@ -31,7 +31,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/slog"
 	"gopkg.in/ini.v1"
 )
 
@@ -721,7 +720,7 @@ func testMsgTxP2SHMofN(m, n int, segwit bool) *testMsgTxP2SH {
 
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
-	logger := dex.StdOutLogger("TEST", slog.LevelTrace)
+	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	btc := newBTC("btc", testParams, logger, testNode{})
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
