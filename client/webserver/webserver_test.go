@@ -592,7 +592,7 @@ func TestAPINewWallet(t *testing.T) {
 	}
 
 	body = &newWalletForm{
-		Pass: encode.PassBytes("123"),
+		Pass: encode.PassBytes("abc"),
 	}
 	tCore.notHas = true
 	ensure(`{"ok":true}`)

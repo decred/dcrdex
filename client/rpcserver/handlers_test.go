@@ -632,7 +632,7 @@ func TestHandleExchanges(t *testing.T) {
 }
 
 func TestHandleLogin(t *testing.T) {
-	params := &RawParams{PWArgs: []encode.PassBytes{encode.PassBytes("123")}}
+	params := &RawParams{PWArgs: []encode.PassBytes{encode.PassBytes("abc")}}
 	tests := []struct {
 		name        string
 		params      *RawParams
@@ -668,7 +668,7 @@ func TestHandleLogin(t *testing.T) {
 
 func TestHandleTrade(t *testing.T) {
 	params := &RawParams{
-		PWArgs: []encode.PassBytes{encode.PassBytes("123")}, // 0. AppPass
+		PWArgs: []encode.PassBytes{encode.PassBytes("abc")}, // 0. AppPass
 		Args: []string{
 			"1.2.3.4:3000", // 0. DEX
 			"true",         // 1. IsLimit
@@ -711,7 +711,7 @@ func TestHandleTrade(t *testing.T) {
 
 func TestHandleCancel(t *testing.T) {
 	params := &RawParams{
-		PWArgs: []encode.PassBytes{encode.PassBytes("123")},
+		PWArgs: []encode.PassBytes{encode.PassBytes("abc")},
 		Args:   []string{"fb94fe99e4e32200a341f0f1cb33f34a08ac23eedab636e8adb991fa76343e1e"},
 	}
 	tests := []struct {

@@ -6,7 +6,7 @@ RPC_USER="user"
 RPC_PASS="pass"
 ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
 BETA_WALLET_SEED="aabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbc"
-WALLET_PASS=123
+WALLET_PASS=abc
 ALPHA_MINING_ADDR="SspUvSyDGSzvPz2NfdZ5LW15uq6rmuGZyhL"
 BETA_MINING_ADDR="SsiuwSRYvH7pqWmRxFJWR8Vmqc3AWsjmK2Y"
 ALPHA_WALLET_PORT="19567"
@@ -103,6 +103,11 @@ chmod +x "${NODES_ROOT}/harness-ctl/reorg"
 # Shutdown script
 cat > "${NODES_ROOT}/harness-ctl/quit" <<EOF
 #!/bin/sh
+tmux send-keys -t $SESSION:3 C-c
+tmux send-keys -t $SESSION:4 C-c
+tmux send-keys -t $SESSION:5 C-c
+tmux send-keys -t $SESSION:6 C-c
+sleep 0.2
 tmux send-keys -t $SESSION:1 C-c
 tmux send-keys -t $SESSION:2 C-c
 tmux wait-for alphadcr

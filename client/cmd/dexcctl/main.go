@@ -72,14 +72,27 @@ var optionalTextFiles = map[string]int{
 }
 
 // promptPWs prompts for passwords on stdin and returns an error if prompting
-// fails or a password is empty. Returns passwords as a slice of []byte.
-func promptPWs(ctx context.Context, cmd string) ([]encode.PassBytes, error) {
+// fails or a password is empty. Returns passwords as a slice of []byte. If
+// cmdPWs is provided, the passwords will be drawn from cmdPWs instead of stdin
+// prompts.
+func promptPWs(ctx context.Context, cmd string, cmdPWs []string) ([]encode.PassBytes, error) {
 	prompts, exists := promptPasswords[cmd]
 	if !exists {
 		return nil, nil
 	}
 	var err error
 	pws := make([]encode.PassBytes, len(prompts))
+
+	if len(cmdPWs) > 0 {
+		if len(prompts) != len(cmdPWs) {
+			return nil, fmt.Errorf("Wrong number of command-line passwords, expected %d, got %d. Prompts = %v", len(prompts), len(cmdPWs), prompts)
+		}
+		for i, strPW := range cmdPWs {
+			pws[i] = encode.PassBytes(strPW)
+		}
+		return pws, nil
+	}
+
 	// Prompt for passwords one at a time.
 	for i, prompt := range prompts {
 		pws[i], err = admin.PasswordPrompt(ctx, prompt)
@@ -149,7 +162,7 @@ func run(ctx context.Context) error {
 	}
 
 	// Prompt for passwords.
-	pws, err := promptPWs(ctx, args[0])
+	pws, err := promptPWs(ctx, args[0], cfg.PasswordArgs)
 	if err != nil {
 		return err
 	}
