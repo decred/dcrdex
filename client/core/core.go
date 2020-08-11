@@ -1872,15 +1872,53 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	// Fund the order and prepare the coins.
 	fundQty := qty
+	lots := qty / wallets.baseAsset.LotSize
 	if form.IsLimit && !form.Sell {
 		fundQty = calc.BaseToQuote(rate, fundQty)
 	}
 
 	isImmediate := (!form.IsLimit || form.TifNow)
 
-	coins, err := fromWallet.FundOrder(fundQty, isImmediate, wallets.fromAsset)
+	// Market buy order
+	if !form.IsLimit && !form.Sell {
+		// There is some ambiguity here about whether the specified quantity for
+		// a market buy order should include projected fees, or whether fees
+		// should be in addition to the quantity. If the fees should be
+		// additional to the order quantity (the approach taken here), we should
+		// try to estimate the number of lots based on the current market. If
+		// the market is not synced, fall back to a single-lot estimate, with
+		// the knowledge that such an estimate means that the specified amount
+		// might not all be available for matching once fees are considered.
+		lots = 1
+		book, found := dc.books[mktID]
+		if found {
+			midGap, err := book.MidGap()
+			// An error is only returned when there are no orders on the book.
+			// In that case, fall back to the 1 lot estimate for now.
+			if err == nil {
+				baseQty := calc.QuoteToBase(midGap, fundQty)
+				lots = baseQty / wallets.baseAsset.LotSize
+				if lots == 0 {
+					return nil, 0, fmt.Errorf("order quantity is too low for current market rates. qty = %d %s, mid-gap = %d, base-qty = %d %s, lot size = %d",
+						qty, wallets.quoteAsset.Symbol, midGap, baseQty, wallets.baseAsset.Symbol, wallets.baseAsset.LotSize)
+				}
+			}
+		}
+	}
+
+	if lots == 0 {
+		return nil, 0, fmt.Errorf("order quantity < 1 lot. qty = %d %s, rate = %d, lot size = %d",
+			qty, wallets.baseAsset.Symbol, rate, wallets.baseAsset.LotSize)
+	}
+
+	coins, err := fromWallet.FundOrder(&asset.Order{
+		Value:        fundQty,
+		MaxSwapCount: lots,
+		DEXConfig:    wallets.fromAsset,
+		Immediate:    isImmediate,
+	})
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("FundOrder error for %s, funding quantity %d (%d lots): %w", wallets.fromAsset.Symbol, fundQty, lots, err)
 	}
 	coinIDs := make([]order.CoinID, 0, len(coins))
 	for i := range coins {

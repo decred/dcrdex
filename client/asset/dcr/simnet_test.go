@@ -162,6 +162,7 @@ func runTest(t *testing.T, splitTx bool) {
 	})
 	defer rig.close(t)
 	contractValue := toAtoms(2)
+	lots := contractValue / tDCR.LotSize
 
 	inUTXOs := func(utxo asset.Coin, utxos []asset.Coin) bool {
 		for _, u := range utxos {
@@ -189,34 +190,46 @@ func runTest(t *testing.T, splitTx bool) {
 		t.Fatalf("error unlocking beta wallet: %v", err)
 	}
 
+	ord := &asset.Order{
+		Value:        contractValue * 3,
+		MaxSwapCount: lots * 3,
+		DEXConfig:    tDCR,
+	}
+	setOrderValue := func(v uint64) {
+		ord.Value = v
+		ord.MaxSwapCount = v / tDCR.LotSize
+	}
+
 	// Grab some coins.
-	utxos, err := rig.beta().FundOrder(contractValue*3, false, tDCR)
+	utxos, err := rig.beta().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// Coins should be locked
-	utxos, _ = rig.beta().FundOrder(contractValue*3, false, tDCR)
+	utxos, _ = rig.beta().FundOrder(ord)
 	if !splitTx && inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
 	rig.beta().ReturnCoins([]asset.Coin{utxo})
 	rig.beta().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
-	utxos, _ = rig.beta().FundOrder(contractValue*3, false, tDCR)
+	utxos, _ = rig.beta().FundOrder(ord)
 	if !splitTx && !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.beta().ReturnCoins(utxos)
 
 	// Get a separate set of UTXOs for each contract.
-	utxos1, err := rig.beta().FundOrder(contractValue, false, tDCR)
+	setOrderValue(contractValue)
+	utxos1, err := rig.beta().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
-	utxos2, err := rig.beta().FundOrder(contractValue*2, false, tDCR)
+	setOrderValue(contractValue * 2)
+	utxos2, err := rig.beta().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -354,7 +367,8 @@ func runTest(t *testing.T, splitTx bool) {
 	lockTime = time.Now().Add(-24 * time.Hour)
 
 	// Have beta send a swap contract to the alpha address.
-	utxos, _ = rig.beta().FundOrder(contractValue, false, tDCR)
+	setOrderValue(contractValue)
+	utxos, _ = rig.beta().FundOrder(ord)
 	contract := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,

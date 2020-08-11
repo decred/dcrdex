@@ -72,7 +72,7 @@ type Wallet interface {
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
-	FundOrder(value uint64, immediate bool, nfo *dex.Asset) (Coins, error)
+	FundOrder(*Order) (Coins, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
@@ -235,4 +235,28 @@ type Redemption struct {
 	Spends AuditInfo
 	// Secret is the secret key needed to satisfy the swap contract.
 	Secret dex.Bytes
+}
+
+// Order is order details needed for FundOrder.
+type Order struct {
+	// Value is the amount required to satisfy the order. The Value does not
+	// include fees. Fees will be calculated internally based on the number of
+	// possible swaps (MaxSwapCount) and the exchange's configuration
+	// (DEXConfig).
+	Value uint64
+	// MaxSwapCount is the number of lots in the order, which is also the
+	// maximum number of transaction that an order could potentially generate
+	// in a worst-case scenario of all 1-lot matches. Note that if requesting
+	// funding for the quote asset's wallet, the number of lots will not be
+	// Value / DEXConfig.LotSize, because an order is quantified in the base
+	// asset, so lots is always (order quantity) / (base asset lot size).
+	MaxSwapCount uint64 // uint64 for compatibility with quantity and lot size.
+	// DEXConfig holds values specific to and provided by a particular server.
+	// Info about fee rates and swap transaction sizes is used internally to
+	// calculate the funding required to cover fees.
+	DEXConfig *dex.Asset
+	// Immediate should be set to true if this is for an order that is not a
+	// standing order, likely a market order or a limit order with immediate
+	// time-in-force.
+	Immediate bool
 }

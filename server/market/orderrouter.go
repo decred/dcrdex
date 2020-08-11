@@ -206,11 +206,12 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 
 	// Calculate the fees and check that the utxo sum is enough.
 	swapVal := limit.Quantity
+	lots := swapVal / coins.base.LotSize
 	if !sell {
 		swapVal = matcher.BaseToQuote(limit.Rate, limit.Quantity)
 	}
 	fundAsset := &coins.funding.Asset
-	reqVal := calc.RequiredOrderFunds(swapVal, uint64(spendSize), fundAsset)
+	reqVal := calc.RequiredOrderFunds(swapVal, uint64(spendSize), lots, fundAsset)
 	if valSum < reqVal {
 		return msgjson.NewError(msgjson.FundingError,
 			fmt.Sprintf("not enough funds. need at least %d, got %d", reqVal, valSum))
@@ -314,8 +315,11 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 
 	// Calculate the fees and check that the utxo sum is enough.
 	fundAsset := &assets.funding.Asset
-	reqVal := calc.RequiredOrderFunds(market.Quantity, uint64(spendSize), fundAsset)
-	if !sell {
+	var reqVal uint64
+	if sell {
+		lots := market.Quantity / assets.base.LotSize
+		reqVal = calc.RequiredOrderFunds(market.Quantity, uint64(spendSize), lots, fundAsset)
+	} else {
 		// This is a market buy order, so the quantity gets special handling.
 		// 1. The quantity is in units of the quote asset.
 		// 2. The quantity has to satisfy the market buy buffer.
@@ -323,13 +327,14 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 		buyBuffer := tunnel.MarketBuyBuffer()
 		lotWithBuffer := uint64(float64(assets.base.LotSize) * buyBuffer)
 		minReq := matcher.BaseToQuote(midGap, lotWithBuffer)
+		reqVal = calc.RequiredOrderFunds(minReq, uint64(spendSize), 1, &assets.base.Asset)
 
 		// TODO: I'm pretty sure that if there are no orders on the book, the
 		// midGap will be zero, and so will minReq, meaning any Quantity would
 		// be accepted. Is this a security concern?
 
 		if market.Quantity < minReq {
-			errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", reqVal, minReq, midGap)
+			errStr := fmt.Sprintf("order quantity does not satisfy market buy buffer. %d < %d. midGap = %d", market.Quantity, minReq, midGap)
 			return msgjson.NewError(msgjson.FundingError, errStr)
 		}
 	}
