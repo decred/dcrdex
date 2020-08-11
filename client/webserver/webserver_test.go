@@ -311,10 +311,9 @@ func TestNew_siteError(t *testing.T) {
 
 	c := &TCore{}
 	_, err = New(c, "127.0.0.1:0", tLogger, false)
-	if err == nil && !strings.HasPrefix(err.Error(), "no HTML template files found") {
+	if err == nil || !strings.HasPrefix(err.Error(), "no HTML template files found") {
 		t.Errorf("Should have failed to start with no site folder.")
 	}
-	t.Log(err)
 }
 
 func TestConnectStart(t *testing.T) {
