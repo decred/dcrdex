@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"testing"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -31,10 +32,6 @@ import (
 	"github.com/decred/slog"
 )
 
-type testKiller interface {
-	Fatalf(string, ...interface{})
-}
-
 type WalletConstructor func(cfg *asset.WalletConfig, logger dex.Logger, network dex.Network) (asset.Wallet, error)
 
 // Convert the BTC value to satoshi.
@@ -42,7 +39,7 @@ func toSatoshi(v float64) uint64 {
 	return uint64(math.Round(v * 1e8))
 }
 
-func tBackend(t testKiller, ctx context.Context, newWallet WalletConstructor, symbol, conf, name string,
+func tBackend(t *testing.T, ctx context.Context, newWallet WalletConstructor, symbol, conf, name string,
 	logger dex.Logger, blkFunc func(string, error)) (*btc.ExchangeWallet, *dex.ConnectionMaster) {
 	user, err := user.Current()
 	if err != nil {
@@ -74,7 +71,7 @@ func tBackend(t testKiller, ctx context.Context, newWallet WalletConstructor, sy
 }
 
 type testRig struct {
-	t                 testKiller
+	t                 *testing.T
 	symbol            string
 	backends          map[string]*btc.ExchangeWallet
 	connectionMasters map[string]*dex.ConnectionMaster
@@ -114,7 +111,7 @@ func randBytes(l int) []byte {
 	return b
 }
 
-func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *dex.Asset) {
+func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *dex.Asset) {
 	tLogger := slog.NewBackend(os.Stdout).Logger("TEST")
 	tLogger.SetLevel(slog.LevelTrace)
 	tCtx, shutdown := context.WithCancel(context.Background())
@@ -235,6 +232,7 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 
 	confCoin := receipts[0].Coin()
 	checkConfs := func(n uint32) {
+		t.Helper()
 		confs, err := rig.gamma().Confirmations(confCoin.ID())
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
@@ -247,6 +245,7 @@ func Run(t testKiller, newWallet WalletConstructor, address string, dexAsset *de
 	checkConfs(0)
 
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
+		t.Helper()
 		// Alpha should be able to redeem.
 		swapOutput := receipt.Coin()
 		ci, err := rig.alpha().AuditContract(swapOutput.ID(), swapOutput.Redeem())

@@ -58,6 +58,7 @@ func mineAlpha() error {
 }
 
 func tBackend(t *testing.T, name string, blkFunc func(string, error)) (*ExchangeWallet, *dex.ConnectionMaster) {
+	t.Helper()
 	user, err := user.Current()
 	if err != nil {
 		t.Fatalf("error getting current user: %v", err)
@@ -93,6 +94,7 @@ type testRig struct {
 }
 
 func newTestRig(t *testing.T, blkFunc func(string, error)) *testRig {
+	t.Helper()
 	rig := &testRig{
 		backends:          make(map[string]*ExchangeWallet),
 		connectionMasters: make(map[string]*dex.ConnectionMaster, 3),
@@ -109,6 +111,7 @@ func (rig *testRig) beta() *ExchangeWallet {
 	return rig.backends["beta"]
 }
 func (rig *testRig) close(t *testing.T) {
+	t.Helper()
 	for name, cm := range rig.connectionMasters {
 		closed := make(chan struct{})
 		go func() {
@@ -247,6 +250,7 @@ func TestWallet(t *testing.T) {
 
 	confCoin := receipts[0].Coin()
 	checkConfs := func(n uint32) {
+		t.Helper()
 		confs, err := rig.beta().Confirmations(confCoin.ID())
 		if err != nil {
 			t.Fatalf("error getting %d confs: %v", n, err)
@@ -261,6 +265,7 @@ func TestWallet(t *testing.T) {
 	checkConfs(0)
 
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
+		t.Helper()
 		swapOutput := receipt.Coin()
 		ci, err := rig.alpha().AuditContract(swapOutput.ID(), swapOutput.Redeem())
 		if err != nil {
