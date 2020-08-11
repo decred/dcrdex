@@ -53,28 +53,34 @@ var (
 	// lm is used to create dex.Loggers for all DEX subsystems. Loggers must
 	// not be used before the log rotator has been initialized, or data
 	// races and/or nil pointer dereferences will occur.
-	lm = func() *dex.LoggerMaker {
-		lm, err := dex.NewLoggerMaker(logWriter{}, defaultLogLevel)
-		if err != nil {
-			panic(err)
-		}
-		return lm
-	}()
+	lm *dex.LoggerMaker
 
-	log           = lm.Logger("MAIN")
-	dbLogger      = lm.Logger("DB")
-	dexmanLogger  = lm.Logger("DEX")
-	commsLogger   = lm.Logger("COMM")
-	authLogger    = lm.Logger("AUTH")
-	swapLogger    = lm.Logger("SWAP")
-	marketLogger  = lm.Logger("MKT")
-	bookLogger    = lm.Logger("BOOK")
-	matcherLogger = lm.Logger("MTCH")
-	waiterLogger  = lm.Logger("CHWT")
-	adminLogger   = lm.Logger("ADMN")
+	// These are subsystem loggers.
+	log, dbLogger, dexmanLogger, commsLogger, authLogger, swapLogger,
+	marketLogger, bookLogger, matcherLogger, waiterLogger, adminLogger dex.Logger
 )
 
 func init() {
+	// lm is used to create dex.Loggers for all DEX subsystems. Loggers must
+	// not be used before the log rotator has been initialized, or data
+	// races and/or nil pointer dereferences will occur.
+	lm, err := dex.NewLoggerMaker(logWriter{}, defaultLogLevel)
+	if err != nil {
+		panic(err)
+	}
+
+	log = lm.Logger("MAIN")
+	dbLogger = lm.Logger("DB")
+	dexmanLogger = lm.Logger("DEX")
+	commsLogger = lm.Logger("COMM")
+	authLogger = lm.Logger("AUTH")
+	swapLogger = lm.Logger("SWAP")
+	marketLogger = lm.Logger("MKT")
+	bookLogger = lm.Logger("BOOK")
+	matcherLogger = lm.Logger("MTCH")
+	waiterLogger = lm.Logger("CHWT")
+	adminLogger = lm.Logger("ADMN")
+
 	auth.UseLogger(authLogger)
 	comms.UseLogger(commsLogger)
 	ws.UseLogger(commsLogger)
