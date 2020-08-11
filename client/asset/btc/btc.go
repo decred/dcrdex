@@ -521,15 +521,18 @@ func (btc *ExchangeWallet) feeRateWithFallback() uint64 {
 
 // FundOrder selects utxos (as asset.Coin) for use in an order. Any Coins
 // returned will be locked. Part of the asset.Wallet interface.
-func (btc *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asset) (asset.Coins, error) {
-	btc.log.Debugf("Attempting to fund order for %d based units of %s", value, nfo.Symbol)
-	if value == 0 {
+func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
+	btc.log.Debugf("Attempting to fund order for %d based units of %s", ord.Value, btc.symbol)
+
+	if ord.Value == 0 {
 		return nil, fmt.Errorf("cannot fund value = 0")
+	}
+	if ord.MaxSwapCount == 0 {
+		return nil, fmt.Errorf("cannot fund a zero-lot order")
 	}
 
 	btc.fundingMtx.Lock()         // before getting spendable utxos from wallet
 	defer btc.fundingMtx.Unlock() // after we update the map and lock in the wallet
-
 	// Now that we allow funding with 0 conf UTXOs, some more logic could be
 	// used out of caution, including preference for >0 confs.
 	utxos, _, avail, err := btc.spendableUTXOs(0)
@@ -549,7 +552,7 @@ func (btc *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asse
 	// and that change outputs that fund further swaps are P2WPKH.
 
 	isEnoughWith := func(unspent *compositeUTXO) bool {
-		reqFunds := calc.RequiredOrderFunds(value, uint64(size+unspent.input.VBytes()), nfo)
+		reqFunds := calc.RequiredOrderFunds(ord.Value, uint64(size+unspent.input.VBytes()), ord.MaxSwapCount, ord.DEXConfig)
 		return sum+unspent.amount >= reqFunds
 	}
 
@@ -568,7 +571,7 @@ out:
 		// If there are none left, we don't have enough.
 		if len(utxos) == 0 {
 			return nil, fmt.Errorf("not enough to cover requested funds + fees. need %d, have %d",
-				calc.RequiredOrderFunds(value, uint64(size), nfo), sum)
+				calc.RequiredOrderFunds(ord.Value, uint64(size), ord.MaxSwapCount, ord.DEXConfig), sum)
 		}
 		// On each loop, find the smallest UTXO that is enough for the value. If
 		// no UTXO is large enough, add the largest and continue.
@@ -585,8 +588,10 @@ out:
 		utxos = utxos[:len(utxos)-1]
 	}
 
-	if btc.useSplitTx && !immediate {
-		return btc.split(value, spents, uint64(size), fundingCoins, nfo)
+	btc.log.Debugf("funding %d %s order with coins %v worth %d", ord.Value, btc.walletInfo.Units, coins, sum)
+
+	if btc.useSplitTx && !ord.Immediate {
+		return btc.split(ord.Value, ord.MaxSwapCount, spents, uint64(size), fundingCoins, ord.DEXConfig)
 	}
 
 	err = btc.wallet.LockUnspent(false, spents)
@@ -597,8 +602,6 @@ out:
 	for pt, utxo := range fundingCoins {
 		btc.fundingCoins[pt] = utxo
 	}
-
-	btc.log.Debugf("funding %d %s order with coins %v", value, btc.walletInfo.Units, coins)
 
 	return coins, nil
 }
@@ -621,10 +624,7 @@ out:
 // order is canceled partially filled, and then the remainder resubmitted. We
 // would already have an output of just the right size, and that would be
 // recognized here.
-//
-// NOTE: This function is not safe for concurrent access to fundingCoins. The
-// caller must lock fundingMtx.
-func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uint64, fundingCoins map[outPoint]*compositeUTXO, nfo *dex.Asset) (asset.Coins, error) {
+func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, inputsSize uint64, fundingCoins map[outPoint]*compositeUTXO, nfo *dex.Asset) (asset.Coins, error) {
 	var err error
 	defer func() {
 		if err != nil {
@@ -650,7 +650,7 @@ func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uin
 		coinSum += op.value
 	}
 
-	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, nfo)
+	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, nfo)
 	if baggageFees > excess {
 		btc.log.Infof("skipping split transaction because cost is greater than potential over-lock. %d > %d", baggageFees, excess)
 		return coins, nil
@@ -662,7 +662,7 @@ func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uin
 		return nil, fmt.Errorf("error creating split transaction address: %v", err)
 	}
 
-	reqFunds := calc.RequiredOrderFunds(value, dexbtc.RedeemP2WPKHInputSize, nfo)
+	reqFunds := calc.RequiredOrderFunds(value, dexbtc.RedeemP2WPKHInputSize, lots, nfo)
 
 	baseTx, _, _, err := btc.fundedTx(coins)
 	splitScript, err := txscript.PayToAddrScript(addr)
@@ -707,8 +707,8 @@ func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uin
 	return asset.Coins{op}, nil
 }
 
-// ReturnCoins unlocks coins. This would be used in the case of a
-// canceled or partially filled order. Part of the asset.Wallet interface.
+// ReturnCoins unlocks coins. This would be used in the case of a canceled or
+// partially filled order. Part of the asset.Wallet interface.
 func (btc *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 	if len(unspents) == 0 {
 		return fmt.Errorf("cannot return zero coins")

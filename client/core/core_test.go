@@ -474,6 +474,7 @@ type TXCWallet struct {
 	redeemCoins    []dex.Bytes
 	badSecret      bool
 	fundedVal      uint64
+	fundedSwaps    uint64
 	connectErr     error
 	unlockErr      error
 	balErr         error
@@ -523,8 +524,9 @@ func (w *TXCWallet) FeeRate() (uint64, error) {
 	return 24, nil
 }
 
-func (w *TXCWallet) FundOrder(v uint64, _ bool, _ *dex.Asset) (asset.Coins, error) {
-	w.fundedVal = v
+func (w *TXCWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
+	w.fundedVal = ord.Value
+	w.fundedSwaps = ord.MaxSwapCount
 	return w.fundCoins, w.fundErr
 }
 
@@ -1737,7 +1739,8 @@ func TestTrade(t *testing.T) {
 	btcWallet.address = "12DXGkvxFjuq5btXYkwWfBZaz1rVwFgini"
 	btcWallet.Unlock(wPW, time.Hour)
 
-	qty := tDCR.LotSize * 10
+	var lots uint64 = 10
+	qty := tDCR.LotSize * lots
 	rate := tBTC.RateStep * 1000
 
 	form := &TradeForm{
@@ -1839,6 +1842,10 @@ func TestTrade(t *testing.T) {
 		t.Fatalf("limit sell expected funded value %d, got %d", qty, tDcrWallet.fundedVal)
 	}
 	tDcrWallet.fundedVal = 0
+	if tDcrWallet.fundedSwaps != lots {
+		t.Fatalf("limit sell expected %d max swaps, got %d", lots, tDcrWallet.fundedSwaps)
+	}
+	tDcrWallet.fundedSwaps = 0
 
 	// Should not be able to close wallet now, since there are orders.
 	if tCore.CloseWallet(tDCR.ID) == nil {
@@ -1948,9 +1955,15 @@ func TestTrade(t *testing.T) {
 		t.Fatalf("limit buy expected funded value %d, got %d", expQty, tBtcWallet.fundedVal)
 	}
 	tBtcWallet.fundedVal = 0
+	// The number of lots should still be the same as for a sell order.
+	if tBtcWallet.fundedSwaps != lots {
+		t.Fatalf("limit buy expected %d max swaps, got %d", lots, tBtcWallet.fundedSwaps)
+	}
+	tBtcWallet.fundedSwaps = 0
 
 	// Successful market buy order
 	form.IsLimit = false
+	form.Qty = calc.BaseToQuote(rate, qty)
 	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
 	_, err = tCore.Trade(tPW, form)
 	if err != nil {
@@ -1958,13 +1971,18 @@ func TestTrade(t *testing.T) {
 	}
 
 	// The funded qty for a market buy should not be adjusted.
-	if tBtcWallet.fundedVal != qty {
+	if tBtcWallet.fundedVal != form.Qty {
 		t.Fatalf("market buy expected funded value %d, got %d", qty, tBtcWallet.fundedVal)
 	}
 	tBtcWallet.fundedVal = 0
+	if tBtcWallet.fundedSwaps != lots {
+		t.Fatalf("market buy expected %d max swaps, got %d", lots, tBtcWallet.fundedSwaps)
+	}
+	tBtcWallet.fundedSwaps = 0
 
 	// Successful market sell order.
 	form.Sell = true
+	form.Qty = qty
 	rig.ws.queueResponse(msgjson.MarketRoute, handleMarket)
 	_, err = tCore.Trade(tPW, form)
 	if err != nil {
@@ -1975,7 +1993,9 @@ func TestTrade(t *testing.T) {
 	if tDcrWallet.fundedVal != qty {
 		t.Fatalf("market sell expected funded value %d, got %d", qty, tDcrWallet.fundedVal)
 	}
-	tDcrWallet.fundedVal = 0
+	if tDcrWallet.fundedSwaps != lots {
+		t.Fatalf("market sell expected %d max swaps, got %d", lots, tDcrWallet.fundedSwaps)
+	}
 }
 
 func TestCancel(t *testing.T) {
