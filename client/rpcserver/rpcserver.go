@@ -49,15 +49,15 @@ const (
 )
 
 var (
-	// Check that core.Core satisfies ClientCore.
-	_   ClientCore = (*core.Core)(nil)
+	// Check that core.Core satisfies clientCore.
+	_   clientCore = (*core.Core)(nil)
 	log dex.Logger
 	// errUnknownCmd is wrapped when the command is not know.
 	errUnknownCmd = errors.New("unknown command")
 )
 
-// ClientCore is satisfied by core.Core.
-type ClientCore interface {
+// clientCore is satisfied by core.Core.
+type clientCore interface {
 	websocket.Core
 	AssetBalance(assetID uint32) (*db.Balance, error)
 	Book(host string, base, quote uint32) (orderBook *core.OrderBook, err error)
@@ -79,7 +79,7 @@ type ClientCore interface {
 // RPCServer is a single-client http and websocket server enabling a JSON
 // interface to the DEX client.
 type RPCServer struct {
-	core      ClientCore
+	core      clientCore
 	wsServer  *websocket.Server
 	addr      string
 	tlsConfig *tls.Config
@@ -160,7 +160,7 @@ func (s *RPCServer) handleJSON(w http.ResponseWriter, r *http.Request) {
 
 // Config holds variables neede to create a new RPC Server.
 type Config struct {
-	Core                        ClientCore
+	Core                        clientCore
 	Addr, User, Pass, Cert, Key string
 }
 
@@ -203,8 +203,7 @@ func New(cfg *Config) (*RPCServer, error) {
 		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
 	}
 
-	// Context is set during Connect.
-	wsServer := websocket.New(nil, cfg.Core, log.SubLogger("WS"))
+	wsServer := websocket.New(cfg.Core, log.SubLogger("WS"))
 
 	// Make the server.
 	s := &RPCServer{
@@ -245,7 +244,7 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		return nil, fmt.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
 	}
 
-	s.wsServer.SetContext(ctx)
+	s.wsServer.Run(ctx)
 
 	// Close the listener on context cancellation.
 	s.wg.Add(1)

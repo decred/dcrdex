@@ -34,7 +34,7 @@ func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCo
 	return nil
 }
 
-var wsServer = websocket.New(nil, &TCore{}, dex.StdOutLogger("TEST", dex.LevelTrace))
+var wsServer = websocket.New(&TCore{}, dex.StdOutLogger("TEST", dex.LevelTrace))
 
 type Dummy struct {
 	Status string

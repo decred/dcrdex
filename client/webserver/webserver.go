@@ -138,8 +138,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		WriteTimeout: httpConnTimeoutSeconds * time.Second, // hung responses must die
 	}
 
-	// Context is set during Connect.
-	wsServer := websocket.New(nil, core, log.SubLogger("WS"))
+	wsServer := websocket.New(core, log.SubLogger("WS"))
 
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
@@ -231,7 +230,7 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Update the listening address in case a :0 was provided.
 	s.addr = listener.Addr().String()
 
-	s.wsServer.SetContext(ctx)
+	s.wsServer.Run(ctx)
 
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup

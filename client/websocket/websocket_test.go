@@ -196,7 +196,8 @@ func newLink() *tLink {
 func newTServer(t *testing.T) (*Server, *TCore, func()) {
 	c := &TCore{}
 	ctx, killCtx := context.WithCancel(tCtx)
-	s := New(ctx, c, dex.StdOutLogger("TEST", dex.LevelTrace))
+	s := New(c, dex.StdOutLogger("TEST", dex.LevelTrace))
+	s.Run(ctx)
 	return s, c, killCtx
 }
 

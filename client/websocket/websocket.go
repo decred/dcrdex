@@ -52,19 +52,19 @@ type Server struct {
 	clients    map[int32]*wsClient
 }
 
-// New returns a new websocket Server.
-func New(ctx context.Context, core Core, log dex.Logger) *Server {
+// New returns a new websocket Server. The server ctx is not set upon
+// initiation. It must be set before use by calling Run.
+func New(core Core, log dex.Logger) *Server {
 	return &Server{
 		core:       core,
 		log:        log,
 		mSyncerLog: log.SubLogger("MSYNC"),
-		ctx:        ctx,
 		clients:    make(map[int32]*wsClient),
 	}
 }
 
-// Set the server's context. Must be called before using and never during use.
-func (s *Server) SetContext(ctx context.Context) {
+// Run sets the server's context.
+func (s *Server) Run(ctx context.Context) {
 	s.ctx = ctx
 }
 
