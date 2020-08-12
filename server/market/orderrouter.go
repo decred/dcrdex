@@ -188,7 +188,7 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 
 	// Check that OrderType is set correctly
 	if limit.OrderType != msgjson.LimitOrderNum {
-		return msgjson.NewError(msgjson.OrderParameterError, "wrong order type set for limit order")
+		return msgjson.NewError(msgjson.OrderParameterError, "wrong order type set for limit order. wanted %d, got %d", msgjson.LimitOrderNum, limit.OrderType)
 	}
 
 	valSum, spendSize, utxos, rpcErr := r.checkPrefixTrade(user, tunnel, coins, &limit.Prefix, &limit.Trade, true)
@@ -201,7 +201,8 @@ func (r *OrderRouter) handleLimit(user account.AccountID, msg *msgjson.Message) 
 		return msgjson.NewError(msgjson.OrderParameterError, "rate = 0 not allowed")
 	}
 	if limit.Rate%coins.quote.RateStep != 0 {
-		return msgjson.NewError(msgjson.OrderParameterError, "rate not a multiple of ratestep")
+		return msgjson.NewError(msgjson.OrderParameterError, "rate (%d) not a multiple of ratestep (%d)",
+			limit.Rate, coins.quote.RateStep)
 	}
 
 	// Calculate the fees and check that the utxo sum is enough.
@@ -298,7 +299,8 @@ func (r *OrderRouter) handleMarket(user account.AccountID, msg *msgjson.Message)
 	}
 
 	if !tunnel.Running() {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders")
+		mktName, _ := dex.MarketName(market.Base, market.Quote)
+		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders", mktName)
 	}
 
 	// Check that OrderType is set correctly
@@ -410,7 +412,8 @@ func (r *OrderRouter) handleCancel(user account.AccountID, msg *msgjson.Message)
 	}
 
 	if !tunnel.Running() {
-		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders")
+		mktName, _ := dex.MarketName(cancel.Base, cancel.Quote)
+		return msgjson.NewError(msgjson.MarketNotRunningError, "market %s closed to new orders", mktName)
 	}
 
 	if len(cancel.TargetID) != order.OrderIDSize {
