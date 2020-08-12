@@ -358,7 +358,8 @@ func (t testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 func (t testNode) GetBestBlockHash() (*chainhash.Hash, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
-	return &testBestBlock.hash, nil
+	bbHash := testBestBlock.hash
+	return &bbHash, nil
 }
 
 // Create a btcjson.GetTxOutResult such as is returned from GetTxOut.
