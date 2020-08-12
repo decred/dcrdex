@@ -147,7 +147,7 @@ func (t TimeInForce) String() string {
 	case StandingTiF:
 		return "standing"
 	}
-	return string(t)
+	return fmt.Sprintf("unknown (%d)", t)
 }
 
 // Order specifies the methods required for a type to function as a DEX order.

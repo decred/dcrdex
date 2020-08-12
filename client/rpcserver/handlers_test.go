@@ -982,8 +982,8 @@ func TestParseCoreOrder(t *testing.T) {
     "id": "ca0097c87dbf01169d76b6f2a318f88fe0ea678df3139f09d756d7d3e2c602dd",
     "type": "limit",
     "sell": false,
-    "age": 2664424,
-    "agestr": "2.664424s",
+    "stamp": 1596500829705,
+    "age": "2.664424s",
     "rate": 200000000,
     "quantity": 400000000,
     "filled": 300000000,
@@ -1003,7 +1003,6 @@ func TestParseCoreOrder(t *testing.T) {
 	res := parseCoreOrder(coreOrder, 42, 0)
 	// Age will differ as it is based on the current time.
 	myOrder.Age = res.Age
-	myOrder.AgeStr = res.AgeStr
 	if !reflect.DeepEqual(myOrder, res) {
 		t.Fatalf("expected %v but got %v", spew.Sdump(myOrder), spew.Sdump(res))
 	}

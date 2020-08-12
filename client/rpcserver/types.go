@@ -65,8 +65,8 @@ type myOrder struct {
 	ID          string `json:"id"`
 	Type        string `json:"type"`
 	Sell        bool   `json:"sell"`
-	Age         int64  `json:"age"`
-	AgeStr      string `json:"agestr"`
+	Stamp       uint64 `json:"stamp"`
+	Age         string `json:"age"`
 	Rate        uint64 `json:"rate,omitempty"`
 	Quantity    uint64 `json:"quantity"`
 	Filled      uint64 `json:"filled"`

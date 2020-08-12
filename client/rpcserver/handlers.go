@@ -473,8 +473,8 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 		ID:          co.ID,
 		Type:        co.Type.String(),
 		Sell:        co.Sell,
-		Age:         age.Milliseconds(),
-		AgeStr:      age.String(),
+		Stamp:       co.Stamp,
+		Age:         age.String(),
 		Rate:        co.Rate,
 		Quantity:    co.Qty,
 		Filled:      co.Filled,
@@ -900,9 +900,8 @@ Registration is complete after the fee transaction has been confirmed.`,
       "id" (string): The order's unique hex ID.
       "type" (string): The type of order. "limit", "market", or "cancel".
       "sell" (string): Whether this order is selling.
-      "age" (int): The time in milliseconds that this order has been active.
-      "agestr" (string): The time that this order has been active in human
-        readable form.
+      "stamp" (int): Time the order was made in milliseconds since 00:00:00 Jan 1 1970.
+      "age" (string): The time that this order has been active in human readable form.
       "rate" (int): The exchange rate limit. Limit orders only. Units: quote
         asset per unit base asset.
       "quantity" (int): The amount being traded.
@@ -912,8 +911,8 @@ Registration is complete after the fee transaction has been confirmed.`,
         "canceled", or "revoked".
       "cancelling" (bool): Whether this order is in the process of cancelling.
       "canceled" (bool): Whether this order has been canceled.
-      "tif" (string): "immediate" if this order is for only one epoch. "standing"
-        if this order is or will be recorded on the books.
+      "tif" (string): "immediate" if this limit order will only match for one epoch.
+        "standing" if the order can continue matching until filled or cancelled.
     },...
   ]`,
 	},
