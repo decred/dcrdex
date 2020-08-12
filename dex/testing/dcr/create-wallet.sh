@@ -66,13 +66,20 @@ dcrctl -C "${WALLET_DIR}/${NAME}-ctl.conf" --wallet \$*
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/${NAME}"
 
+# wallet setup data
+cat > "${WALLET_DIR}/wallet.answers" <<EOF
+y
+n
+y
+${SEED}
+EOF
+
 # create and unlock the wallet
 tmux new-window -t $TMUX_WIN_ID -n "w-${NAME}"
 tmux send-keys -t $TMUX_WIN_ID "cd ${WALLET_DIR}" C-m
-tmux send-keys -t $TMUX_WIN_ID "dcrwallet -C w-${NAME}.conf --create" C-m
 echo "Creating simnet ${NAME} wallet"
-sleep 1
-tmux send-keys -t $TMUX_WIN_ID "${PASS}" C-m "${PASS}" C-m "n" C-m "y" C-m
-sleep 1
-tmux send-keys -t $TMUX_WIN_ID "${SEED}" C-m C-m
+tmux send-keys -t $TMUX_WIN_ID "dcrwallet -C w-${NAME}.conf --create < wallet.answers; tmux wait-for -S w-${NAME}" C-m
+tmux wait-for w-${NAME}
+
+echo "Starting simnet ${NAME} wallet"
 tmux send-keys -t $TMUX_WIN_ID "dcrwallet -C w-${NAME}.conf" C-m
