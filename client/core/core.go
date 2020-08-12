@@ -914,13 +914,13 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 	encPW, err := crypter.Encrypt(walletPW)
 	if err != nil {
-		return fmt.Errorf("Wallet password encryption error: %v", err)
+		return fmt.Errorf("wallet password encryption error: %v", err)
 	}
 
 	walletInfo, err := asset.Info(assetID)
 	if err != nil {
 		// Only possible error is unknown asset.
-		return fmt.Errorf("Asset with BIP ID %d is unknown. Did you _ import your asset packages?", assetID)
+		return fmt.Errorf("asset with BIP ID %d is unknown. Did you _ import your asset packages?", assetID)
 	}
 
 	// Remove unused key-values from parsed settings before saving to db.
@@ -947,12 +947,12 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	wallet, err := c.loadWallet(dbWallet)
 	if err != nil {
-		return fmt.Errorf("Error loading wallet for %d -> %s: %v", assetID, symbol, err)
+		return fmt.Errorf("error loading wallet for %d -> %s: %v", assetID, symbol, err)
 	}
 
 	err = wallet.Connect(c.ctx)
 	if err != nil {
-		return fmt.Errorf("Error connecting wallet: %v", err)
+		return fmt.Errorf("error connecting wallet: %v", err)
 	}
 
 	initErr := func(s string, a ...interface{}) error {
@@ -967,14 +967,14 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	dbWallet.Address, err = wallet.Address()
 	if err != nil {
-		return initErr("Error getting deposit address for %s: %v", symbol, err)
+		return initErr("error getting deposit address for %s: %v", symbol, err)
 	}
 	wallet.setAddress(dbWallet.Address)
 
 	// Store the wallet in the database.
 	err = c.db.UpdateWallet(dbWallet)
 	if err != nil {
-		return initErr("Error storing wallet credentials: %v", err)
+		return initErr("error storing wallet credentials: %v", err)
 	}
 
 	// walletBalances will update the database record with the current balance.
@@ -982,7 +982,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	// walletBalances is used.
 	balances, err := c.walletBalances(wallet)
 	if err != nil {
-		return initErr("Error getting wallet balance for %s: %v", symbol, err)
+		return initErr("error getting wallet balance for %s: %v", symbol, err)
 	}
 
 	log.Infof("Created %s wallet. Balance available = %d / "+
