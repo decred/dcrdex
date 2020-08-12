@@ -55,61 +55,74 @@ var (
 	// races and/or nil pointer dereferences will occur.
 	lm *dex.LoggerMaker
 
-	// These are subsystem loggers.
-	log, dbLogger, dexmanLogger, commsLogger, authLogger, swapLogger,
-	marketLogger, bookLogger, matcherLogger, waiterLogger, adminLogger dex.Logger
+	// package main's Logger
+	log dex.Logger
+
+	// subsystemLoggers maps each subsystem identifier to its associated logger.
+	subsystemLoggers map[string]dex.Logger
 )
 
 func init() {
 	// lm is used to create dex.Loggers for all DEX subsystems. Loggers must
 	// not be used before the log rotator has been initialized, or data
 	// races and/or nil pointer dereferences will occur.
-	lm, err := dex.NewLoggerMaker(logWriter{}, defaultLogLevel)
+	var err error
+	lm, err = dex.NewLoggerMaker(logWriter{}, defaultLogLevel)
 	if err != nil {
 		panic(err)
 	}
 
+	// main's Logger
 	log = lm.Logger("MAIN")
-	dbLogger = lm.Logger("DB")
-	dexmanLogger = lm.Logger("DEX")
-	commsLogger = lm.Logger("COMM")
-	authLogger = lm.Logger("AUTH")
-	swapLogger = lm.Logger("SWAP")
-	marketLogger = lm.Logger("MKT")
-	bookLogger = lm.Logger("BOOK")
-	matcherLogger = lm.Logger("MTCH")
-	waiterLogger = lm.Logger("CHWT")
-	adminLogger = lm.Logger("ADMN")
 
-	auth.UseLogger(authLogger)
+	// subsystem loggers
+	dexmanLogger := lm.Logger("DEX")
+	dexsrv.UseLogger(dexmanLogger)
+
+	dbLogger := lm.Logger("DB")
+	db.UseLogger(dbLogger)
+
+	commsLogger := lm.Logger("COMM")
 	comms.UseLogger(commsLogger)
 	ws.UseLogger(commsLogger)
-	db.UseLogger(dbLogger)
-	dexsrv.UseLogger(dexmanLogger)
-	market.UseLogger(marketLogger)
-	swap.UseLogger(swapLogger)
-	book.UseLogger(bookLogger)
-	matcher.UseLogger(matcherLogger)
-	wait.UseLogger(waiterLogger)
-	admin.UseLogger(adminLogger)
-}
 
-// subsystemLoggers maps each subsystem identifier to its associated logger.
-var subsystemLoggers = map[string]slog.Logger{
-	"MAIN": log,
-	"DB":   dbLogger,
-	"DEX":  dexmanLogger,
-	"COMM": commsLogger,
-	"AUTH": authLogger,
-	"SWAP": swapLogger,
-	"MKT":  marketLogger,
-	// Individual assets get their own subsystem loggers. This is here to
-	// register the ASSET subsystem ID, allowing the user to set the log level
-	// for the asset subsystems.
-	"ASSET": slog.Disabled,
-	"BOOK":  bookLogger,
-	"MTCH":  matcherLogger,
-	"ADMN":  adminLogger,
+	authLogger := lm.Logger("AUTH")
+	auth.UseLogger(authLogger)
+
+	swapLogger := lm.Logger("SWAP")
+	swap.UseLogger(swapLogger)
+
+	marketLogger := lm.Logger("MKT")
+	market.UseLogger(marketLogger)
+
+	bookLogger := lm.Logger("BOOK")
+	book.UseLogger(bookLogger)
+
+	matcherLogger := lm.Logger("MTCH")
+	matcher.UseLogger(matcherLogger)
+
+	waiterLogger := lm.Logger("CHWT")
+	wait.UseLogger(waiterLogger)
+
+	adminLogger := lm.Logger("ADMN")
+	admin.UseLogger(adminLogger)
+
+	subsystemLoggers = map[string]dex.Logger{
+		"MAIN": log,
+		"DB":   dbLogger,
+		"DEX":  dexmanLogger,
+		"COMM": commsLogger,
+		"AUTH": authLogger,
+		"SWAP": swapLogger,
+		"MKT":  marketLogger,
+		// Individual assets get their own subsystem loggers. This is here to
+		// register the ASSET subsystem ID, allowing the user to set the log level
+		// for the asset subsystems.
+		"ASSET": dex.Disabled,
+		"BOOK":  bookLogger,
+		"MTCH":  matcherLogger,
+		"ADMN":  adminLogger,
+	}
 }
 
 // initLogRotator initializes the logging rotater to write logs to logFile and

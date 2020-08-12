@@ -94,19 +94,35 @@ func StdOutLogger(name string, lvl slog.Level) Logger {
 	}
 }
 
-// NewLoggerMaker parses the debug level string into a new *LoggerMaker. The
-// debugLevel string can specify a single verbosity for the entire system:
-// "trace", "debug", "info", "warn", "error", "critical", "off".
-//
-// Or the verbosity can be specified for individual subsystems, separating
-// subsystems by commas and assigning each specifically, A command line might
-// look like `--degublevel=CORE=debug,SWAP=trace`.
+// NewLoggerMaker creates a new LoggerMaker from the provided io.Writer and
+// debug level string. See SetLevels for details on the debug level string.
 func NewLoggerMaker(writer io.Writer, debugLevel string) (*LoggerMaker, error) {
 	lm := &LoggerMaker{
 		Backend:      slog.NewBackend(writer),
 		Levels:       make(map[string]slog.Level),
-		DefaultLevel: LevelDebug,
+		DefaultLevel: LevelDebug, // TODO: back to LevelInfo at some point
 	}
+
+	err := lm.SetLevels(debugLevel)
+	if err != nil {
+		return nil, err
+	}
+
+	return lm, nil
+}
+
+// SetLevels either set the DefaultLevel or resets the Levels map for future
+// subsystems created with the LoggerMaker.
+//
+// The debugLevel string can specify a single verbosity for the entire system:
+// "trace", "debug", "info", "warn", "error", "critical", "off". The Levels map
+// is not modified with this syntax.
+//
+// Or the verbosity can be specified for individual subsystems, separating
+// subsystems by commas and assigning each specifically. Such a debugLevel
+// string might look like `CORE=debug,SWAP=trace`. The DefaultLevel is not
+// modified with this syntax.
+func (lm *LoggerMaker) SetLevels(debugLevel string) error {
 	// When the specified string doesn't have any delimiters, treat it as
 	// the log level for all subsystems.
 	if !strings.Contains(debugLevel, ",") && !strings.Contains(debugLevel, "=") {
@@ -114,20 +130,22 @@ func NewLoggerMaker(writer io.Writer, debugLevel string) (*LoggerMaker, error) {
 		lvl, ok := slog.LevelFromString(debugLevel)
 		if !ok {
 			str := "The specified debug level [%v] is invalid"
-			return nil, fmt.Errorf(str, debugLevel)
+			return fmt.Errorf(str, debugLevel)
 		}
 		lm.DefaultLevel = lvl
-		return lm, nil
+		return nil
 	}
 
 	// Split the specified string into subsystem/level pairs while detecting
 	// issues and update the log levels accordingly.
 	levelPairs := strings.Split(debugLevel, ",")
+	lm.Levels = make(map[string]slog.Level, len(levelPairs))
 	for _, logLevelPair := range levelPairs {
 		if !strings.Contains(logLevelPair, "=") {
+			// Mixed defaults and key=val pairs are not permitted.
 			str := "The specified debug level contains an invalid " +
 				"subsystem/level pair [%v]"
-			return nil, fmt.Errorf(str, logLevelPair)
+			return fmt.Errorf(str, logLevelPair)
 		}
 
 		// Extract the specified subsystem and log level.
@@ -138,12 +156,11 @@ func NewLoggerMaker(writer io.Writer, debugLevel string) (*LoggerMaker, error) {
 		lvl, ok := slog.LevelFromString(logLevel)
 		if !ok {
 			str := "The specified debug level [%v] is invalid"
-			return nil, fmt.Errorf(str, logLevel)
+			return fmt.Errorf(str, logLevel)
 		}
 		lm.Levels[subsysID] = lvl
 	}
-
-	return lm, nil
+	return nil
 }
 
 // NewLogger creates a new Logger for the subsystem with the given name. If a
