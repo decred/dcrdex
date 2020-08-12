@@ -1007,7 +1007,7 @@ func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
 			c.tipChange(dbWallet.AssetID, err)
 		},
 	}
-	logger := loggerMaker.SubLogger("CORE", unbip(dbWallet.AssetID))
+	logger := log.SubLogger(unbip(dbWallet.AssetID))
 	w, err := asset.Setup(dbWallet.AssetID, walletCfg, logger, c.net)
 	if err != nil {
 		return nil, fmt.Errorf("error creating wallet: %v", err)

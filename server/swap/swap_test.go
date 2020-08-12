@@ -31,7 +31,6 @@ import (
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/matcher"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/slog"
 )
 
 const (
@@ -1304,8 +1303,7 @@ func rpcErrorChecker(t *testing.T, rig *testRig, code int) func(*tUser) {
 func TestMain(m *testing.M) {
 	recheckInterval = time.Millisecond * 20
 	txWaitExpiration = recheckInterval * 10
-	logger := slog.NewBackend(os.Stdout).Logger("SWAPTEST")
-	logger.SetLevel(slog.LevelTrace)
+	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	UseLogger(logger)
 	db.UseLogger(logger)
 	matcher.UseLogger(logger)
@@ -1313,9 +1311,6 @@ func TestMain(m *testing.M) {
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
 	defer shutdown()
-	// logger := slog.NewBackend(os.Stdout).Logger("COMMSTEST")
-	// logger.SetLevel(slog.LevelTrace)
-	// UseLogger(logger)
 	os.Exit(m.Run())
 }
 

@@ -154,7 +154,7 @@ func createWidgets() {
 	app = tview.NewApplication()
 	acctsView = newAccountsView()
 	marketView = newMarketView()
-	webView = newServerView("Web", cfg.WebAddr, func(ctx context.Context, addr string, logger slog.Logger) {
+	webView = newServerView("Web", cfg.WebAddr, func(ctx context.Context, addr string, logger dex.Logger) {
 		setWebLabelOn(true)
 		defer setWebLabelOn(false)
 		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logger, cfg.ReloadHTML)
@@ -170,11 +170,18 @@ func createWidgets() {
 		}
 		cm.Wait()
 	})
-	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context, _ string, logger slog.Logger) {
+	rpcView = newServerView("RPC", cfg.RPCAddr, func(ctx context.Context, _ string, logger dex.Logger) {
 		setRPCLabelOn(true)
 		defer setRPCLabelOn(false)
 		rpcserver.SetLogger(logger)
-		rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
+		rpcCfg := &rpcserver.Config{
+			Core: clientCore,
+			Addr: cfg.RPCAddr,
+			User: cfg.RPCUser,
+			Pass: cfg.RPCPass,
+			Cert: cfg.RPCCert,
+			Key:  cfg.RPCKey,
+		}
 		rpcSrv, err := rpcserver.New(rpcCfg)
 		if err != nil {
 			log.Errorf("Error starting rpc server: %v", err)

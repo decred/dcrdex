@@ -90,7 +90,14 @@ func main() {
 
 	if cfg.RPCOn {
 		rpcserver.SetLogger(logMaker.Logger("RPC"))
-		rpcCfg := &rpcserver.Config{clientCore, cfg.RPCAddr, cfg.RPCUser, cfg.RPCPass, cfg.RPCCert, cfg.RPCKey}
+		rpcCfg := &rpcserver.Config{
+			Core: clientCore,
+			Addr: cfg.RPCAddr,
+			User: cfg.RPCUser,
+			Pass: cfg.RPCPass,
+			Cert: cfg.RPCCert,
+			Key:  cfg.RPCKey,
+		}
 		rpcSrv, err := rpcserver.New(rpcCfg)
 		if err != nil {
 			log.Errorf("Error creating rpc server: %v", err)

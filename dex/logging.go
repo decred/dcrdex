@@ -5,13 +5,41 @@ package dex
 
 import (
 	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/decred/slog"
 )
 
+func init() {
+	Disabled = &logger{
+		Logger:  slog.Disabled,
+		level:   LevelOff,
+		backend: slog.NewBackend(ioutil.Discard),
+	}
+}
+
+// Disabled is a Logger that will never output anything.
+var Disabled Logger
+
+// Level constants.
+const (
+	LevelTrace    = slog.LevelTrace
+	LevelDebug    = slog.LevelDebug
+	LevelInfo     = slog.LevelInfo
+	LevelWarn     = slog.LevelWarn
+	LevelError    = slog.LevelError
+	LevelCritical = slog.LevelCritical
+	LevelOff      = slog.LevelOff
+)
+
 // Logger is a logger. Many dcrdex types will take a logger as an argument.
-type Logger = slog.Logger
+type Logger interface {
+	slog.Logger
+	SubLogger(name string) Logger
+}
 
 // LoggerMaker allows creation of new log subsystems with predefined levels.
 type LoggerMaker struct {
@@ -20,19 +48,81 @@ type LoggerMaker struct {
 	Levels       map[string]slog.Level
 }
 
-// NewLoggerMaker parses the debug level string into a new *LoggerMaker. The
-// debugLevel string can specify a single verbosity for the entire system:
-// "trace", "debug", "info", "warn", "error", "critical", "off".
+// logger contains the slog.Logger and fields needed to spawn subloggers. It
+// satisfies the Logger interface.
+type logger struct {
+	slog.Logger
+	name    string
+	level   slog.Level
+	levels  map[string]slog.Level
+	backend *slog.Backend
+}
+
+// SubLogger creates a new Logger for the subsystem with the given name. If name
+// exists in the levels map, use that level, otherwise the parent's log level is
+// used.
+func (lggr *logger) SubLogger(name string) Logger {
+	combinedName := fmt.Sprintf("%s[%s]", lggr.name, name)
+	newLggr := lggr.backend.Logger(combinedName)
+	level := lggr.level
+	// If name is in the levels map, use that level.
+	if lvl, ok := lggr.levels[name]; ok {
+		level = lvl
+	}
+	newLggr.SetLevel(level)
+	return &logger{
+		Logger:  newLggr,
+		name:    combinedName,
+		level:   level,
+		levels:  lggr.levels,
+		backend: lggr.backend,
+	}
+}
+
+// StdOutLogger creates a Logger with the provided name with lvl as the log
+// level and prints to standard out.
+func StdOutLogger(name string, lvl slog.Level) Logger {
+	backend := slog.NewBackend(os.Stdout)
+	lggr := backend.Logger(name)
+	lggr.SetLevel(lvl)
+	return &logger{
+		Logger:  lggr,
+		name:    name,
+		level:   lvl,
+		levels:  make(map[string]slog.Level),
+		backend: backend,
+	}
+}
+
+// NewLoggerMaker creates a new LoggerMaker from the provided io.Writer and
+// debug level string. See SetLevels for details on the debug level string.
+func NewLoggerMaker(writer io.Writer, debugLevel string) (*LoggerMaker, error) {
+	lm := &LoggerMaker{
+		Backend:      slog.NewBackend(writer),
+		Levels:       make(map[string]slog.Level),
+		DefaultLevel: LevelDebug, // TODO: back to LevelInfo at some point
+	}
+
+	err := lm.SetLevels(debugLevel)
+	if err != nil {
+		return nil, err
+	}
+
+	return lm, nil
+}
+
+// SetLevels either set the DefaultLevel or resets the Levels map for future
+// subsystems created with the LoggerMaker.
+//
+// The debugLevel string can specify a single verbosity for the entire system:
+// "trace", "debug", "info", "warn", "error", "critical", "off". The Levels map
+// is not modified with this syntax.
 //
 // Or the verbosity can be specified for individual subsystems, separating
-// subsystems by commas and assigning each specifically, A command line might
-// look like `--degublevel=CORE=debug,SWAP=trace`.
-func NewLoggerMaker(be *slog.Backend, debugLevel string) (*LoggerMaker, error) {
-	lm := &LoggerMaker{
-		Backend:      be,
-		Levels:       make(map[string]slog.Level),
-		DefaultLevel: slog.LevelDebug,
-	}
+// subsystems by commas and assigning each specifically. Such a debugLevel
+// string might look like `CORE=debug,SWAP=trace`. The DefaultLevel is not
+// modified with this syntax.
+func (lm *LoggerMaker) SetLevels(debugLevel string) error {
 	// When the specified string doesn't have any delimiters, treat it as
 	// the log level for all subsystems.
 	if !strings.Contains(debugLevel, ",") && !strings.Contains(debugLevel, "=") {
@@ -40,20 +130,22 @@ func NewLoggerMaker(be *slog.Backend, debugLevel string) (*LoggerMaker, error) {
 		lvl, ok := slog.LevelFromString(debugLevel)
 		if !ok {
 			str := "The specified debug level [%v] is invalid"
-			return nil, fmt.Errorf(str, debugLevel)
+			return fmt.Errorf(str, debugLevel)
 		}
 		lm.DefaultLevel = lvl
-		return lm, nil
+		return nil
 	}
 
 	// Split the specified string into subsystem/level pairs while detecting
 	// issues and update the log levels accordingly.
 	levelPairs := strings.Split(debugLevel, ",")
+	lm.Levels = make(map[string]slog.Level, len(levelPairs))
 	for _, logLevelPair := range levelPairs {
 		if !strings.Contains(logLevelPair, "=") {
+			// Mixed defaults and key=val pairs are not permitted.
 			str := "The specified debug level contains an invalid " +
 				"subsystem/level pair [%v]"
-			return nil, fmt.Errorf(str, logLevelPair)
+			return fmt.Errorf(str, logLevelPair)
 		}
 
 		// Extract the specified subsystem and log level.
@@ -64,21 +156,11 @@ func NewLoggerMaker(be *slog.Backend, debugLevel string) (*LoggerMaker, error) {
 		lvl, ok := slog.LevelFromString(logLevel)
 		if !ok {
 			str := "The specified debug level [%v] is invalid"
-			return nil, fmt.Errorf(str, logLevel)
+			return fmt.Errorf(str, logLevel)
 		}
 		lm.Levels[subsysID] = lvl
 	}
-
-	return lm, nil
-}
-
-// SubLogger creates a Logger with a subsystem name "parent[name]", using any
-// known log level for the parent subsystem, defaulting to the DefaultLevel if
-// the parent does not have an explicitly set level.
-func (lm *LoggerMaker) SubLogger(parent, name string) Logger {
-	logger := lm.Backend.Logger(fmt.Sprintf("%s[%s]", parent, name))
-	logger.SetLevel(lm.bestLevel(parent, name))
-	return logger
+	return nil
 }
 
 // NewLogger creates a new Logger for the subsystem with the given name. If a
@@ -89,18 +171,31 @@ func (lm *LoggerMaker) NewLogger(name string, level ...slog.Level) Logger {
 	if len(level) > 0 {
 		lvl = level[0]
 	}
-	logger := lm.Backend.Logger(name)
-	logger.SetLevel(lvl)
-	return logger
+	lggr := lm.Backend.Logger(name)
+	lggr.SetLevel(lvl)
+	return &logger{
+		Logger:  lggr,
+		name:    name,
+		level:   lvl,
+		levels:  lm.Levels,
+		backend: lm.Backend,
+	}
 }
 
 // Logger creates a logger with the provided name, using the log level for that
 // name if it was set, otherwise the default log level. This differs from
 // NewLogger, which does not look in the Level map for the name.
 func (lm *LoggerMaker) Logger(name string) Logger {
-	logger := lm.Backend.Logger(name)
-	logger.SetLevel(lm.bestLevel(name))
-	return logger
+	lggr := lm.Backend.Logger(name)
+	lvl := lm.bestLevel(name)
+	lggr.SetLevel(lvl)
+	return &logger{
+		Logger:  lggr,
+		name:    name,
+		level:   lvl,
+		levels:  lm.Levels,
+		backend: lm.Backend,
+	}
 }
 
 // bestLevel takes a hierarchical list of logger names, least important to most

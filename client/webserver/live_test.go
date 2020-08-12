@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"os"
 	"sort"
 	"strconv"
 	"sync"
@@ -30,7 +29,6 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
-	"github.com/decred/slog"
 )
 
 const (
@@ -759,8 +757,7 @@ func TestServer(t *testing.T) {
 	var shutdown context.CancelFunc
 	tCtx, shutdown = context.WithCancel(context.Background())
 	time.AfterFunc(time.Minute*59, func() { shutdown() })
-	logger := slog.NewBackend(os.Stdout).Logger("TEST")
-	logger.SetLevel(slog.LevelTrace)
+	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	tCore := newTCore()
 
 	if initialize {

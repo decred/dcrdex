@@ -13,9 +13,9 @@ import (
 
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
-	"github.com/decred/slog"
 )
 
 var (
@@ -40,10 +40,8 @@ func newTestDB(t *testing.T) *BoltDB {
 }
 
 func TestMain(m *testing.M) {
-	backendLogger := slog.NewBackend(os.Stdout)
 	defer os.Stdout.Sync()
-	log := backendLogger.Logger("Debug")
-	log.SetLevel(slog.LevelTrace)
+	log := dex.StdOutLogger("TEST", dex.LevelTrace)
 	UseLogger(log)
 
 	doIt := func() int {

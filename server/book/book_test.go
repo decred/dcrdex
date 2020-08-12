@@ -4,13 +4,12 @@
 package book
 
 import (
-	"os"
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
-	"github.com/decred/slog"
 )
 
 // An arbitrary account ID for test orders.
@@ -28,8 +27,7 @@ const (
 )
 
 func startLogger() {
-	logger := slog.NewBackend(os.Stdout).Logger("BOOKTEST")
-	logger.SetLevel(slog.LevelDebug)
+	logger := dex.StdOutLogger("BOOKTEST", dex.LevelTrace)
 	UseLogger(logger)
 }
 

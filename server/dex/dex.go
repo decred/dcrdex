@@ -24,7 +24,6 @@ import (
 	"decred.org/dcrdex/server/market"
 	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
-	"github.com/decred/slog"
 )
 
 // AssetConf is like dex.Asset except it lacks the BIP44 integer ID, has Network
@@ -51,40 +50,6 @@ type DBConf struct {
 
 // RPCConfig is an alias for the comms Server's RPC config struct.
 type RPCConfig = comms.RPCConfig
-
-// LoggerMaker allows creation of new log subsystems with predefined levels.
-type LoggerMaker struct {
-	*slog.Backend
-	DefaultLevel slog.Level
-	Levels       map[string]slog.Level
-}
-
-// SubLogger creates a Logger with a subsystem name "parent[name]", using any
-// known log level for the parent subsystem, defaulting to the DefaultLevel if
-// the parent does not have an explicitly set level.
-func (lm *LoggerMaker) SubLogger(parent, name string) dex.Logger {
-	// Use the parent logger's log level, if set.
-	level, ok := lm.Levels[parent]
-	if !ok {
-		level = lm.DefaultLevel
-	}
-	logger := lm.Backend.Logger(fmt.Sprintf("%s[%s]", parent, name))
-	logger.SetLevel(level)
-	return logger
-}
-
-// NewLogger creates a new Logger for the subsystem with the given name. If a
-// log level is specified, it is used for the Logger. Otherwise the DefaultLevel
-// is used.
-func (lm *LoggerMaker) NewLogger(name string, level ...slog.Level) dex.Logger {
-	lvl := lm.DefaultLevel
-	if len(level) > 0 {
-		lvl = level[0]
-	}
-	logger := lm.Backend.Logger(name)
-	logger.SetLevel(lvl)
-	return logger
-}
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
@@ -302,6 +267,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 	lockableAssets := make(map[uint32]*swap.LockableAsset, len(cfg.Assets))
 	backedAssets := make(map[uint32]*asset.BackedAsset, len(cfg.Assets))
 	cfgAssets := make([]*msgjson.Asset, 0, len(cfg.Assets))
+	assetLogger := cfg.LogBackend.Logger("ASSET")
 	for i, assetConf := range cfg.Assets {
 		symbol := strings.ToLower(assetConf.Symbol)
 		ID := assetIDs[i]
@@ -309,7 +275,7 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		// Create a new asset backend. An asset driver with a name matching the
 		// asset symbol must be available.
 		log.Infof("Starting asset backend %q...", symbol)
-		logger := cfg.LogBackend.SubLogger("ASSET", symbol)
+		logger := assetLogger.SubLogger(symbol)
 		be, err := asset.Setup(symbol, assetConf.ConfigPath, logger, cfg.Network)
 		if err != nil {
 			abort()

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/admin"
@@ -45,58 +46,83 @@ func (logWriter) Write(p []byte) (n int, err error) {
 // log file. This must be performed early during application startup by calling
 // initLogRotator.
 var (
-	// backendLog is the logging backend used to create all subsystem loggers.
-	// The backend must not be used before the log rotator has been initialized,
-	// or data races and/or nil pointer dereferences will occur.
-	backendLog = slog.NewBackend(logWriter{})
-
 	// logRotator is one of the logging outputs. Use initLogRotator to set it.
 	// It should be closed on application shutdown.
 	logRotator *rotator.Rotator
 
-	log           = backendLog.Logger("MAIN")
-	dbLogger      = backendLog.Logger("DB")
-	dexmanLogger  = backendLog.Logger("DEX")
-	commsLogger   = backendLog.Logger("COMM")
-	authLogger    = backendLog.Logger("AUTH")
-	swapLogger    = backendLog.Logger("SWAP")
-	marketLogger  = backendLog.Logger("MKT")
-	bookLogger    = backendLog.Logger("BOOK")
-	matcherLogger = backendLog.Logger("MTCH")
-	waiterLogger  = backendLog.Logger("CHWT")
-	adminLogger   = backendLog.Logger("ADMN")
+	// lm is used to create dex.Loggers for all DEX subsystems. Loggers must
+	// not be used before the log rotator has been initialized, or data
+	// races and/or nil pointer dereferences will occur.
+	lm *dex.LoggerMaker
+
+	// package main's Logger
+	log dex.Logger
+
+	// subsystemLoggers maps each subsystem identifier to its associated logger.
+	subsystemLoggers map[string]dex.Logger
 )
 
 func init() {
-	auth.UseLogger(authLogger)
+	// lm is used to create dex.Loggers for all DEX subsystems. Loggers must
+	// not be used before the log rotator has been initialized, or data
+	// races and/or nil pointer dereferences will occur.
+	var err error
+	lm, err = dex.NewLoggerMaker(logWriter{}, defaultLogLevel)
+	if err != nil {
+		panic(err)
+	}
+
+	// main's Logger
+	log = lm.Logger("MAIN")
+
+	// subsystem loggers
+	dexmanLogger := lm.Logger("DEX")
+	dexsrv.UseLogger(dexmanLogger)
+
+	dbLogger := lm.Logger("DB")
+	db.UseLogger(dbLogger)
+
+	commsLogger := lm.Logger("COMM")
 	comms.UseLogger(commsLogger)
 	ws.UseLogger(commsLogger)
-	db.UseLogger(dbLogger)
-	dexsrv.UseLogger(dexmanLogger)
-	market.UseLogger(marketLogger)
-	swap.UseLogger(swapLogger)
-	book.UseLogger(bookLogger)
-	matcher.UseLogger(matcherLogger)
-	wait.UseLogger(waiterLogger)
-	admin.UseLogger(adminLogger)
-}
 
-// subsystemLoggers maps each subsystem identifier to its associated logger.
-var subsystemLoggers = map[string]slog.Logger{
-	"MAIN": log,
-	"DB":   dbLogger,
-	"DEX":  dexmanLogger,
-	"COMM": commsLogger,
-	"AUTH": authLogger,
-	"SWAP": swapLogger,
-	"MKT":  marketLogger,
-	// Individual assets get their own subsystem loggers. This is here to
-	// register the ASSET subsystem ID, allowing the user to set the log level
-	// for the asset subsystems.
-	"ASSET": slog.Disabled,
-	"BOOK":  bookLogger,
-	"MTCH":  matcherLogger,
-	"ADMN":  adminLogger,
+	authLogger := lm.Logger("AUTH")
+	auth.UseLogger(authLogger)
+
+	swapLogger := lm.Logger("SWAP")
+	swap.UseLogger(swapLogger)
+
+	marketLogger := lm.Logger("MKT")
+	market.UseLogger(marketLogger)
+
+	bookLogger := lm.Logger("BOOK")
+	book.UseLogger(bookLogger)
+
+	matcherLogger := lm.Logger("MTCH")
+	matcher.UseLogger(matcherLogger)
+
+	waiterLogger := lm.Logger("CHWT")
+	wait.UseLogger(waiterLogger)
+
+	adminLogger := lm.Logger("ADMN")
+	admin.UseLogger(adminLogger)
+
+	subsystemLoggers = map[string]dex.Logger{
+		"MAIN": log,
+		"DB":   dbLogger,
+		"DEX":  dexmanLogger,
+		"COMM": commsLogger,
+		"AUTH": authLogger,
+		"SWAP": swapLogger,
+		"MKT":  marketLogger,
+		// Individual assets get their own subsystem loggers. This is here to
+		// register the ASSET subsystem ID, allowing the user to set the log level
+		// for the asset subsystems.
+		"ASSET": dex.Disabled,
+		"BOOK":  bookLogger,
+		"MTCH":  matcherLogger,
+		"ADMN":  adminLogger,
+	}
 }
 
 // initLogRotator initializes the logging rotater to write logs to logFile and

@@ -36,7 +36,6 @@ import (
 	"github.com/decred/dcrd/chaincfg/chainhash"
 	chainjson "github.com/decred/dcrd/rpc/jsonrpc/types/v2"
 	"github.com/decred/dcrd/wire"
-	"github.com/decred/slog"
 )
 
 var (
@@ -48,7 +47,7 @@ var (
 func TestMain(m *testing.M) {
 	// Wrap everything for defers.
 	doIt := func() int {
-		logger := slog.NewBackend(os.Stdout).Logger("DCRTEST")
+		logger := dex.StdOutLogger("DCRTEST", dex.LevelTrace)
 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(context.Background())

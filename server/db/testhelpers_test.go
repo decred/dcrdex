@@ -1,12 +1,11 @@
 package db
 
 import (
-	"os"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
-	"github.com/decred/slog"
 )
 
 const (
@@ -23,8 +22,7 @@ var (
 )
 
 func startLogger() {
-	logger := slog.NewBackend(os.Stdout).Logger("ORDER_DB_TEST")
-	logger.SetLevel(slog.LevelDebug)
+	logger := dex.StdOutLogger("ORDER_DB_TEST", dex.LevelTrace)
 	UseLogger(logger)
 }
 

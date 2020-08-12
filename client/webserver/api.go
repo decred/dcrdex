@@ -90,7 +90,7 @@ func (s *WebServer) apiNewWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "error creating %s wallet: %v", unbip(form.AssetID), err)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID)
+	s.wsServer.NotifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -112,7 +112,7 @@ func (s *WebServer) apiOpenWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "error unlocking %s wallet: %v", unbip(form.AssetID), err)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID)
+	s.wsServer.NotifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -130,7 +130,7 @@ func (s *WebServer) apiConnectWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "error connecting to %s wallet: %v", unbip(form.AssetID), err)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID)
+	s.wsServer.NotifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 
@@ -184,7 +184,7 @@ func (s *WebServer) apiCloseWallet(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, "error locking %s wallet: %v", unbip(form.AssetID), err)
 		return
 	}
-	s.notifyWalletUpdate(form.AssetID)
+	s.wsServer.NotifyWalletUpdate(form.AssetID)
 	writeJSON(w, simpleAck(), s.indent)
 }
 

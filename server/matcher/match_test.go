@@ -5,14 +5,13 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/rand"
-	"os"
 	"reflect"
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
-	"github.com/decred/slog"
 )
 
 // An arbitrary account ID for test orders.
@@ -36,8 +35,7 @@ func randomPreimage() (pe order.Preimage) {
 }
 
 func startLogger() {
-	logger := slog.NewBackend(os.Stdout).Logger("MATCHTEST")
-	logger.SetLevel(slog.LevelDebug)
+	logger := dex.StdOutLogger("MATCHTEST", dex.LevelTrace)
 	UseLogger(logger)
 }
 

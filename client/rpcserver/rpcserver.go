@@ -23,15 +23,20 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
 	"github.com/decred/dcrd/certgen"
-	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
 
 const (
+	// Time allowed to read the next pong message from the peer. The
+	// default is intended for production, but leaving as a var instead of const
+	// to facilitate testing.
+	pongWait = 60 * time.Second
+
 	// rpcTimeoutSeconds is the number of seconds a connection to the
 	// RPC server is allowed to stay open without authenticating before it
 	// is closed.
@@ -44,15 +49,16 @@ const (
 )
 
 var (
-	// Check that core.Core satisfies ClientCore.
-	_   ClientCore = (*core.Core)(nil)
-	log slog.Logger
+	// Check that core.Core satisfies clientCore.
+	_   clientCore = (*core.Core)(nil)
+	log dex.Logger
 	// errUnknownCmd is wrapped when the command is not know.
 	errUnknownCmd = errors.New("unknown command")
 )
 
-// ClientCore is satisfied by core.Core.
-type ClientCore interface {
+// clientCore is satisfied by core.Core.
+type clientCore interface {
+	websocket.Core
 	AssetBalance(assetID uint32) (*db.Balance, error)
 	Book(host string, base, quote uint32) (orderBook *core.OrderBook, err error)
 	Cancel(appPass []byte, orderID string) error
@@ -65,86 +71,20 @@ type ClientCore interface {
 	OpenWallet(assetID uint32, appPass []byte) error
 	GetFee(addr, cert string) (fee uint64, err error)
 	Register(form *core.RegisterForm) (*core.RegisterResult, error)
-	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
-	WalletState(assetID uint32) (walletState *core.WalletState)
 	Wallets() (walletsStates []*core.WalletState)
 	Withdraw(appPass []byte, assetID uint32, value uint64, addr string) (asset.Coin, error)
-}
-
-// marketSyncer is used to synchronize market subscriptions. The marketSyncer
-// manages a map of clients who are subscribed to the market, and distributes
-// order book updates when received.
-type marketSyncer struct {
-	feed *core.BookFeed
-	cl   *wsClient
-}
-
-// newMarketSyncer is the constructor for a marketSyncer.
-func newMarketSyncer(ctx context.Context, cl *wsClient, feed *core.BookFeed) *dex.StartStopWaiter {
-	ssWaiter := dex.NewStartStopWaiter(&marketSyncer{
-		feed: feed,
-		cl:   cl,
-	})
-	ssWaiter.Start(ctx)
-	return ssWaiter
-}
-
-func (m *marketSyncer) Run(ctx context.Context) {
-	defer m.feed.Close()
-out:
-	for {
-		select {
-		case update, ok := <-m.feed.C:
-			if !ok {
-				// Should not happen, but don't spin furiously.
-				log.Warnf("marketSyncer stopping on feed closed")
-				return
-			}
-			if update.Action == core.FreshBookAction {
-				// For FreshBookAction, translate the *core.MarketOrderBook
-				// payload into a *marketResponse.
-				mob, ok := update.Payload.(*core.MarketOrderBook)
-				if !ok {
-					log.Errorf("FreshBookAction payload not a *MarketOrderBook")
-					continue
-				}
-				update.Payload = &marketResponse{
-					Host:  update.Host,
-					Book:  mob.Book,
-					Base:  mob.Base,
-					Quote: mob.Quote,
-				}
-				log.Tracef("FreshBookAction: %v", update.MarketID)
-			}
-			note, err := msgjson.NewNotification(update.Action, update)
-			if err != nil {
-				log.Errorf("error encoding notification message: %v", err)
-				break out
-			}
-			err = m.cl.Send(note)
-			if err != nil {
-				log.Debug("send error. ending market feed")
-				break out
-			}
-		case <-ctx.Done():
-			break out
-		}
-	}
 }
 
 // RPCServer is a single-client http and websocket server enabling a JSON
 // interface to the DEX client.
 type RPCServer struct {
-	ctx       context.Context
-	core      ClientCore
+	core      clientCore
+	wsServer  *websocket.Server
 	addr      string
 	tlsConfig *tls.Config
 	srv       *http.Server
 	authsha   [32]byte
-	mtx       sync.RWMutex
-	syncers   map[string]*marketSyncer
-	clients   map[int32]*wsClient
 	wg        sync.WaitGroup
 }
 
@@ -220,12 +160,12 @@ func (s *RPCServer) handleJSON(w http.ResponseWriter, r *http.Request) {
 
 // Config holds variables neede to create a new RPC Server.
 type Config struct {
-	Core                        ClientCore
+	Core                        clientCore
 	Addr, User, Pass, Cert, Key string
 }
 
 // SetLogger sets the logger for the RPCServer package.
-func SetLogger(logger slog.Logger) {
+func SetLogger(logger dex.Logger) {
 	log = logger
 }
 
@@ -263,14 +203,15 @@ func New(cfg *Config) (*RPCServer, error) {
 		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
 	}
 
+	wsServer := websocket.New(cfg.Core, log.SubLogger("WS"))
+
 	// Make the server.
 	s := &RPCServer{
 		core:      cfg.Core,
 		srv:       httpServer,
 		addr:      cfg.Addr,
 		tlsConfig: tlsConfig,
-		syncers:   make(map[string]*marketSyncer),
-		clients:   make(map[int32]*wsClient),
+		wsServer:  wsServer,
 	}
 
 	// Create authsha to verify requests against.
@@ -287,7 +228,7 @@ func New(cfg *Config) (*RPCServer, error) {
 	mux.Use(s.authMiddleware)
 
 	// Websocket endpoint
-	mux.Get("/ws", s.handleWS)
+	mux.Get("/ws", s.wsServer.HandleConnect)
 
 	// https endpoint
 	mux.Post("/", s.handleJSON)
@@ -297,14 +238,13 @@ func New(cfg *Config) (*RPCServer, error) {
 
 // Connect starts the RPC server. Satisfies the dex.Connector interface.
 func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	// ctx passed to newMarketSyncer when making new market syncers.
-	s.ctx = ctx
-
 	// Create listener.
 	listener, err := tls.Listen("tcp", s.addr, s.tlsConfig)
 	if err != nil {
 		return nil, fmt.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
 	}
+
+	s.wsServer.Run(ctx)
 
 	// Close the listener on context cancellation.
 	s.wg.Add(1)
@@ -324,11 +264,9 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		if err := s.srv.Serve(listener); err != http.ErrServerClosed {
 			log.Warnf("unexpected (http.Server).Serve error: %v", err)
 		}
-		s.mtx.Lock()
-		for _, cl := range s.clients {
-			cl.Disconnect()
-		}
-		s.mtx.Unlock()
+		// Disconnect the websocket clients since Shutdown does not deal with
+		// hijacked websocket connections.
+		s.wsServer.Shutdown()
 		log.Infof("RPC server off")
 	}()
 	log.Infof("RPC server listening on %s", s.addr)

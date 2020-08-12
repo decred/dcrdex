@@ -31,7 +31,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcutil"
-	"github.com/decred/slog"
 	"gopkg.in/ini.v1"
 )
 
@@ -359,7 +358,8 @@ func (t testNode) GetBlockHash(blockHeight int64) (*chainhash.Hash, error) {
 func (t testNode) GetBestBlockHash() (*chainhash.Hash, error) {
 	testChainMtx.RLock()
 	defer testChainMtx.RUnlock()
-	return &testBestBlock.hash, nil
+	bbHash := testBestBlock.hash
+	return &bbHash, nil
 }
 
 // Create a btcjson.GetTxOutResult such as is returned from GetTxOut.
@@ -721,7 +721,7 @@ func testMsgTxP2SHMofN(m, n int, segwit bool) *testMsgTxP2SH {
 
 // Make a backend that logs to stdout.
 func testBackend() (*Backend, func()) {
-	logger := slog.NewBackend(os.Stdout).Logger("TEST")
+	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	btc := newBTC("btc", testParams, logger, testNode{})
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup

@@ -22,7 +22,6 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/ws"
 	"github.com/decred/dcrd/certgen"
-	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
@@ -325,7 +324,7 @@ func (s *Server) Broadcast(msg *msgjson.Message) {
 	defer s.clientMtx.RUnlock()
 
 	log.Infof("Broadcasting %s for route %s to %d clients...", msg.Type, msg.Route, len(s.clients))
-	if log.Level() <= slog.LevelTrace { // don't marshal unless needed
+	if log.Level() <= dex.LevelTrace { // don't marshal unless needed
 		log.Tracef("Broadcast: %q", msg.String())
 	}
 

@@ -23,9 +23,8 @@ import (
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
+	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/msgjson"
-	"github.com/decred/slog"
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
 )
@@ -47,26 +46,23 @@ const (
 	// ctxKeyUserInfo is used in the authorization middleware for saving user
 	// info in http request contexts.
 	ctxKeyUserInfo = contextKey("userinfo")
-	// updateWalletRoute is a notification route that updates the state of a
-	// wallet.
-	updateWalletRoute = "update_wallet"
 	// notifyRoute is a route used for general notifications.
 	notifyRoute = "notify"
 )
 
 var (
-	log slog.Logger
+	log   dex.Logger
+	unbip = dex.BipIDSymbol
 )
 
 // clientCore is satisfied by core.Core.
 type clientCore interface {
+	websocket.Core
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
 	InitializeClient(pw []byte) error
-	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
 	AssetBalance(assetID uint32) (*db.Balance, error)
-	WalletState(assetID uint32) *core.WalletState
 	CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error
 	OpenWallet(assetID uint32, pw []byte) error
 	CloseWallet(assetID uint32) error
@@ -82,80 +78,15 @@ type clientCore interface {
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
 	Cancel(pw []byte, sid string) error
 	NotificationFeed() <-chan core.Notification
-	AckNotes([]dex.Bytes)
 	Logout() error
 }
 
 var _ clientCore = (*core.Core)(nil)
 
-// marketSyncer is used to synchronize market subscriptions. The marketSyncer
-// manages a map of clients who are subscribed to the market, and distributes
-// order book updates when received.
-type marketSyncer struct {
-	feed *core.BookFeed
-	cl   *wsClient
-}
-
-// newMarketSyncer is the constructor for a marketSyncer, returned as a running
-// *dex.StartStopWaiter.
-func newMarketSyncer(ctx context.Context, cl *wsClient, feed *core.BookFeed) *dex.StartStopWaiter {
-	ssWaiter := dex.NewStartStopWaiter(&marketSyncer{
-		feed: feed,
-		cl:   cl,
-	})
-	ssWaiter.Start(ctx)
-	return ssWaiter
-}
-
-// Run starts the marketSyncer listening for BookUpdates, which it relays to the
-// websocket client as notifications.
-func (m *marketSyncer) Run(ctx context.Context) {
-	defer m.feed.Close()
-out:
-	for {
-		select {
-		case update, ok := <-m.feed.C:
-			if !ok {
-				// Should not happen, but don't spin furiously.
-				log.Warnf("marketSyncer stopping on feed closed")
-				return
-			}
-			if update.Action == core.FreshBookAction {
-				// For FreshBookAction, translate the *core.MarketOrderBook
-				// payload into a *marketResponse.
-				mob, ok := update.Payload.(*core.MarketOrderBook)
-				if !ok {
-					log.Errorf("FreshBookAction payload not a *MarketOrderBook")
-					continue
-				}
-				update.Payload = &marketResponse{
-					Host:  update.Host,
-					Book:  mob.Book,
-					Base:  mob.Base,
-					Quote: mob.Quote,
-				}
-				log.Tracef("FreshBookAction: %v", update.MarketID)
-			}
-			note, err := msgjson.NewNotification(update.Action, update)
-			if err != nil {
-				log.Errorf("error encoding notification message: %v", err)
-				break out
-			}
-			err = m.cl.Send(note)
-			if err != nil {
-				log.Debug("Send to browser error. Ending market feed: %v", err)
-				break out
-			}
-		case <-ctx.Done():
-			break out
-		}
-	}
-}
-
 // WebServer is a single-client http and websocket server enabling a browser
 // interface to the DEX client.
 type WebServer struct {
-	ctx            context.Context
+	wsServer       *websocket.Server
 	core           clientCore
 	addr           string
 	srv            *http.Server
@@ -163,12 +94,10 @@ type WebServer struct {
 	indent         bool
 	mtx            sync.RWMutex
 	validAuthToken string
-	syncers        map[string]*marketSyncer
-	clients        map[int32]*wsClient
 }
 
 // New is the constructor for a new WebServer.
-func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*WebServer, error) {
+func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*WebServer, error) {
 	log = logger
 
 	folderExists := func(fp string) bool {
@@ -209,14 +138,15 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 		WriteTimeout: httpConnTimeoutSeconds * time.Second, // hung responses must die
 	}
 
+	wsServer := websocket.New(core, log.SubLogger("WS"))
+
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
-		core:    core,
-		srv:     httpServer,
-		addr:    addr,
-		html:    tmpl,
-		syncers: make(map[string]*marketSyncer),
-		clients: make(map[int32]*wsClient),
+		core:     core,
+		srv:      httpServer,
+		addr:     addr,
+		html:     tmpl,
+		wsServer: wsServer,
 	}
 
 	// Middleware
@@ -225,7 +155,7 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 	mux.Use(s.authMiddleware)
 
 	// Websocket endpoint
-	mux.Get("/ws", s.handleWS)
+	mux.Get("/ws", s.wsServer.HandleConnect)
 
 	// Webpages
 	mux.Group(func(web chi.Router) {
@@ -292,8 +222,6 @@ func New(core clientCore, addr string, logger slog.Logger, reloadHTML bool) (*We
 
 // Connect starts the web server. Satisfies the dex.Connector interface.
 func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
-	// We'll use the context for market syncers.
-	s.ctx = ctx
 	// Start serving.
 	listener, err := net.Listen("tcp", s.addr)
 	if err != nil {
@@ -301,6 +229,8 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	}
 	// Update the listening address in case a :0 was provided.
 	s.addr = listener.Addr().String()
+
+	s.wsServer.Run(ctx)
 
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
@@ -321,14 +251,10 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Warnf("unexpected (http.Server).Serve error: %v", err)
 		}
-		log.Infof("Web server off")
 		// Disconnect the websocket clients since Shutdown does not deal with
 		// hijacked websocket connections.
-		s.mtx.Lock()
-		for _, cl := range s.clients {
-			cl.Disconnect()
-		}
-		s.mtx.Unlock()
+		s.wsServer.Shutdown()
+		log.Infof("Web server off")
 	}()
 
 	wg.Add(1)
@@ -381,7 +307,7 @@ func (s *WebServer) readNotifications(ctx context.Context) {
 	for {
 		select {
 		case n := <-ch:
-			s.notify(notifyRoute, n)
+			s.wsServer.Notify(notifyRoute, n)
 		case <-ctx.Done():
 			return
 		}

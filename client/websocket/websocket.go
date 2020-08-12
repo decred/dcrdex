@@ -1,9 +1,10 @@
 // This code is available on the terms of the project LICENSE.md file,
 // also available online at https://blueoakcouncil.org/license/1.0.0.
 
-package webserver
+package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -18,6 +19,9 @@ import (
 	"decred.org/dcrdex/dex/ws"
 )
 
+// updateWalletRoute is a notification route that updates the state of a wallet.
+const updateWalletRoute = "update_wallet"
+
 var (
 	// Time allowed to read the next pong message from the peer. The
 	// default is intended for production, but leaving as a var instead of const
@@ -29,8 +33,40 @@ var (
 	pingPeriod = (pongWait * 9) / 10
 	// A client id counter.
 	cidCounter int32
-	unbip      = dex.BipIDSymbol
 )
+
+// Core specifies the needed methods for Server to operate. Satisfied by *core.Core.
+type Core interface {
+	WalletState(assetID uint32) *core.WalletState
+	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
+	AckNotes([]dex.Bytes)
+}
+
+// Server contains fields used by the websocket server.
+type Server struct {
+	core       Core
+	log        dex.Logger
+	mSyncerLog dex.Logger
+	ctx        context.Context
+	mtx        sync.RWMutex
+	clients    map[int32]*wsClient
+}
+
+// New returns a new websocket Server. The server ctx is not set upon
+// initiation. It must be set before use by calling Run.
+func New(core Core, log dex.Logger) *Server {
+	return &Server{
+		core:       core,
+		log:        log,
+		mSyncerLog: log.SubLogger("MSYNC"),
+		clients:    make(map[int32]*wsClient),
+	}
+}
+
+// Run sets the server's context.
+func (s *Server) Run(ctx context.Context) {
+	s.ctx = ctx
+}
 
 type wsClient struct {
 	*ws.WSLink
@@ -46,9 +82,18 @@ func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message)
 	}
 }
 
-// handleWS handles the websocket connection request, creating a ws.Connection
-// and a websocketHandler thread.
-func (s *WebServer) handleWS(w http.ResponseWriter, r *http.Request) {
+// Shutdown disconnects all connected clients.
+func (s *Server) Shutdown() {
+	s.mtx.Lock()
+	for _, cl := range s.clients {
+		cl.Disconnect()
+	}
+	s.mtx.Unlock()
+}
+
+// HandleConnect handles the websocket connection request, creating a ws.Connection
+// and a connect thread.
+func (s *Server) HandleConnect(w http.ResponseWriter, r *http.Request) {
 	// If the IP address includes a port, remove it.
 	ip := r.RemoteAddr
 	// If a host:port can be parsed, the IP is only the host portion.
@@ -58,17 +103,17 @@ func (s *WebServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	wsConn, err := ws.NewConnection(w, r, pongWait)
 	if err != nil {
-		log.Errorf("ws connection error: %v", err)
+		s.log.Errorf("ws connection error: %v", err)
 		return
 	}
-	go s.websocketHandler(wsConn, ip)
+	go s.connect(wsConn, ip)
 }
 
-// websocketHandler handles a new websocket client by creating a new wsClient,
-// starting it, and blocking until the connection closes. This method should be
+// connect handles a new websocket client by creating a new wsClient, starting
+// it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
-	log.Debugf("New websocket client %s", ip)
+func (s *Server) connect(conn ws.Connection, ip string) {
+	s.log.Debugf("New websocket client %s", ip)
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
@@ -86,7 +131,7 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 	err := cm.Connect(s.ctx)
 	if err != nil {
 		s.mtx.Unlock()
-		log.Errorf("websocketHandler client Connect: %v")
+		s.log.Errorf("websocketHandler client Connect: %v")
 		return
 	}
 
@@ -109,35 +154,36 @@ func (s *WebServer) websocketHandler(conn ws.Connection, ip string) {
 	}()
 
 	cm.Wait()
-	log.Tracef("Disconnected websocket client %s", ip)
+	s.log.Tracef("Disconnected websocket client %s", ip)
 }
 
-// notify sends a notification to the websocket client.
-func (s *WebServer) notify(route string, payload interface{}) {
+// Notify sends a notification to the websocket client.
+func (s *Server) Notify(route string, payload interface{}) {
 	msg, err := msgjson.NewNotification(route, payload)
 	if err != nil {
-		log.Errorf("notification encoding error: %v", err)
+		s.log.Errorf("notification encoding error: %v", err)
 		return
 	}
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	for _, cl := range s.clients {
 		if err = cl.Send(msg); err != nil {
-			log.Warnf("Failed to send %v notification to client %v at %v: %v",
+			s.log.Warnf("Failed to send %v notification to client %v at %v: %v",
 				msg.Route, cl.cid, cl.IP(), err)
 		}
 	}
 }
 
-func (s *WebServer) notifyWalletUpdate(assetID uint32) {
+// NotifyWalletUpdate sends a wallet update notification.
+func (s *Server) NotifyWalletUpdate(assetID uint32) {
 	walletUpdate := s.core.WalletState(assetID)
-	s.notify(updateWalletRoute, walletUpdate)
+	s.Notify(updateWalletRoute, walletUpdate)
 }
 
 // handleMessage handles the websocket message, calling the right handler for
 // the route.
-func (s *WebServer) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson.Error {
-	log.Tracef("message of type %d received for route %s", msg.Type, msg.Route)
+func (s *Server) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson.Error {
+	s.log.Tracef("message of type %d received for route %s", msg.Type, msg.Route)
 	if msg.Type == msgjson.Request {
 		handler, found := wsHandlers[msg.Route]
 		if !found {
@@ -151,7 +197,7 @@ func (s *WebServer) handleMessage(conn *wsClient, msg *msgjson.Message) *msgjson
 }
 
 // All request handlers must be defined with this signature.
-type wsHandler func(*WebServer, *wsClient, *msgjson.Message) *msgjson.Error
+type wsHandler func(*Server, *wsClient, *msgjson.Message) *msgjson.Error
 
 // wsHandlers is the map used by the server to locate the router handler for a
 // request.
@@ -178,21 +224,87 @@ type marketResponse struct {
 	Quote uint32          `json:"quote"`
 }
 
+// marketSyncer is used to synchronize market subscriptions. The marketSyncer
+// manages a map of clients who are subscribed to the market, and distributes
+// order book updates when received.
+type marketSyncer struct {
+	log  dex.Logger
+	feed *core.BookFeed
+	cl   *wsClient
+}
+
+// newMarketSyncer is the constructor for a marketSyncer, returned as a running
+// *dex.StartStopWaiter.
+func newMarketSyncer(ctx context.Context, cl *wsClient, feed *core.BookFeed, log dex.Logger) *dex.StartStopWaiter {
+	ssWaiter := dex.NewStartStopWaiter(&marketSyncer{
+		feed: feed,
+		cl:   cl,
+		log:  log,
+	})
+	ssWaiter.Start(ctx)
+	return ssWaiter
+}
+
+// Run starts the marketSyncer listening for BookUpdates, which it relays to the
+// websocket client as notifications.
+func (m *marketSyncer) Run(ctx context.Context) {
+	defer m.feed.Close()
+out:
+	for {
+		select {
+		case update, ok := <-m.feed.C:
+			if !ok {
+				// Should not happen, but don't spin furiously.
+				m.log.Warnf("marketSyncer stopping on feed closed")
+				return
+			}
+			if update.Action == core.FreshBookAction {
+				// For FreshBookAction, translate the *core.MarketOrderBook
+				// payload into a *marketResponse.
+				mob, ok := update.Payload.(*core.MarketOrderBook)
+				if !ok {
+					m.log.Errorf("FreshBookAction payload not a *MarketOrderBook")
+					continue
+				}
+				update.Payload = &marketResponse{
+					Host:  update.Host,
+					Book:  mob.Book,
+					Base:  mob.Base,
+					Quote: mob.Quote,
+				}
+				m.log.Tracef("FreshBookAction: %v", update.MarketID)
+			}
+			note, err := msgjson.NewNotification(update.Action, update)
+			if err != nil {
+				m.log.Errorf("error encoding notification message: %v", err)
+				break out
+			}
+			err = m.cl.Send(note)
+			if err != nil {
+				m.log.Debug("send error. ending market feed: %v", err)
+				break out
+			}
+		case <-ctx.Done():
+			break out
+		}
+	}
+}
+
 // wsLoadMarket is the handler for the 'loadmarket' websocket endpoint.
 // Subscribes the client to the notification feed and sends the order book.
-func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
+func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
 	market := new(marketLoad)
 	err := json.Unmarshal(msg.Payload, market)
 	if err != nil {
 		errMsg := fmt.Sprintf("error unmarshaling marketload payload: %v", err)
-		log.Errorf(errMsg)
+		s.log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
 	book, feed, err := s.core.SyncBook(market.Host, market.Base, market.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
-		log.Errorf(errMsg)
+		s.log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
 	}
 
@@ -201,7 +313,7 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		cl.feedLoop.Stop()
 		cl.feedLoop.WaitForShutdown()
 	}
-	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed)
+	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed, s.mSyncerLog)
 	cl.mtx.Unlock()
 
 	note, err := msgjson.NewNotification(core.FreshBookAction, &marketResponse{
@@ -211,11 +323,11 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 		Quote: market.Quote,
 	})
 	if err != nil {
-		log.Errorf("error encoding loadmarkets response: %v", err)
+		s.log.Errorf("error encoding loadmarkets response: %v", err)
 		return msgjson.NewError(msgjson.RPCInternal, "error encoding order book: "+err.Error())
 	}
 	if err = cl.Send(note); err != nil {
-		log.Warnf("Failed to send %v notification to client %v at %v: %v",
+		s.log.Warnf("Failed to send %v notification to client %v at %v: %v",
 			note.Route, cl.cid, cl.IP(), err)
 	}
 	return nil
@@ -225,7 +337,7 @@ func wsLoadMarket(s *WebServer, cl *wsClient, msg *msgjson.Message) *msgjson.Err
 // message is sent when the user leaves the markets page. This closes the feed,
 // and potentially unsubscribes from orderbook with the server if there are no
 // other consumers
-func wsUnmarket(_ *WebServer, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
+func wsUnmarket(_ *Server, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 	cl.mtx.Lock()
 	defer cl.mtx.Unlock()
 	if cl.feedLoop != nil {
@@ -240,11 +352,11 @@ type ackNoteIDs []dex.Bytes
 
 // wsAckNotes is the handler for the 'acknotes' websocket endpoint. Informs the
 // Core that the user has seen the specified notifications.
-func wsAckNotes(s *WebServer, _ *wsClient, msg *msgjson.Message) *msgjson.Error {
+func wsAckNotes(s *Server, _ *wsClient, msg *msgjson.Message) *msgjson.Error {
 	ids := make(ackNoteIDs, 0)
 	err := msg.Unmarshal(&ids)
 	if err != nil {
-		log.Errorf("error acking notifications: %v", err)
+		s.log.Errorf("error acking notifications: %v", err)
 		return nil
 	}
 	s.core.AckNotes(ids)

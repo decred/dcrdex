@@ -29,7 +29,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"github.com/decred/dcrd/chaincfg/v2"
-	"github.com/decred/slog"
 )
 
 const (
@@ -138,8 +137,7 @@ func waitNetwork() {
 
 func TestMain(m *testing.M) {
 	chainParams = chaincfg.SimNetParams()
-	tLogger = slog.NewBackend(os.Stdout).Logger("TEST")
-	tLogger.SetLevel(slog.LevelTrace)
+	tLogger = dex.StdOutLogger("TEST", dex.LevelTrace)
 	var shutdown func()
 	tCtx, shutdown = context.WithCancel(context.Background())
 	doIt := func() int {

@@ -27,7 +27,6 @@ import (
 
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/server/asset/btc"
-	"github.com/decred/slog"
 )
 
 var (
@@ -46,7 +45,7 @@ func TestMain(m *testing.M) {
 			wg.Wait()
 		}()
 
-		logger := slog.NewBackend(os.Stdout).Logger("LTCTEST")
+		logger := dex.StdOutLogger("LTCTEST", dex.LevelTrace)
 		dexAsset, err := NewBackend("", logger, dex.Mainnet)
 		if err != nil {
 			fmt.Printf("NewBackend error: %v\n", err)
