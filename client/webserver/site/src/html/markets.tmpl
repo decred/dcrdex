@@ -302,16 +302,17 @@
               </thead>
               <tbody id="liveList">
                 <tr id="liveTemplate">
-                  <td data-col="type"></td>
-                  <td data-col="side"></td>
-                  <td data-col="age"></td>
-                  <td data-col="rate"></td>
-                  <td data-col="qty"></td>
-                  <td data-col="filled"></td>
-                  <td data-col="settled"></td>
-                  <td data-col="status"></td>
-                  <td data-col="cancel" class="text-center">
-                    <span class="ico-cross d-hide"></span>
+                  <td data-tmpl="type"></td>
+                  <td data-tmpl="side"></td>
+                  <td data-tmpl="age"></td>
+                  <td data-tmpl="rate"></td>
+                  <td data-tmpl="qty"></td>
+                  <td data-tmpl="filled"></td>
+                  <td data-tmpl="settled"></td>
+                  <td data-tmpl="status"></td>
+                  <td class="text-center">
+                    <span data-tmpl="cancelBttn" class="ico-cross d-hide"></span>
+                    <span data-tmpl="cancelStatus" class="d-hide"></span>
                   </td>
                 </tr>
               </tbody>

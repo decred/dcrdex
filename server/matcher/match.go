@@ -188,6 +188,7 @@ func (m *Matcher) Match(book Booker, queue []*OrderRevealed) (seed []byte, match
 					o.ID(), o.TargetOrderID)
 				failed = append(failed, q)
 				updates.CancelsFailed = append(updates.CancelsFailed, o)
+				nomatched = append(nomatched, q)
 				continue
 			}
 

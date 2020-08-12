@@ -1266,8 +1266,8 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 		newCancel(bookSellOrders[nSell-1].ID(), cancelTime), // 15
 	}
 	// cancel some the epoch queue orders too
-	epochQueue = append(epochQueue, newCancel(epochQueue[7].Order.ID(), cancelTime)) // 16
-	epochQueue = append(epochQueue, newCancel(epochQueue[5].Order.ID(), cancelTime)) // 17
+	epochQueue = append(epochQueue, newCancel(epochQueue[7].Order.ID(), cancelTime)) // 16 cancels 7 (miss)
+	epochQueue = append(epochQueue, newCancel(epochQueue[5].Order.ID(), cancelTime)) // 17 cancels 5 (miss)
 
 	epochQueueInit := make([]*matcher.OrderRevealed, len(epochQueue))
 	copy(epochQueueInit, epochQueue)
@@ -1299,7 +1299,7 @@ func TestMatchWithBook_everything_multipleQueued(t *testing.T) {
 	expectedPartial := []int{}
 	expectedBooked := []int{5, 7, 1} // all StandingTiF
 	expectedNumUnbooked := 8
-	expectedNumNomatched := 4
+	expectedNumNomatched := 6
 
 	// order book from bookBuyOrders and bookSellOrders
 	b := newBook(t)

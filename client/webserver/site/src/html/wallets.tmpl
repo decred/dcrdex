@@ -62,17 +62,17 @@
             <span class="fs20">{{.Info.Name}}</span>
             <span class="fs15">({{toUpper .Symbol}})</span>
           </td>
-          <td data-col="balance" data-balance-target="{{.ID}}">
+          <td data-balance-target="{{.ID}}">
             {{if .Wallet}}
               {{printf "%.8f" (fromAtoms .Wallet.Balance.Available)}}
             {{else}}
               0.00000000
             {{end}}
           </td>
-          <td data-col="status" class="status-col fs16">
+          <td class="status-col fs16">
             {{template "stateIcons" .}}
           </td>
-          <td data-col="actions">
+          <td">
             {{template "actionButtons" .}}
           </td>
         </tr>

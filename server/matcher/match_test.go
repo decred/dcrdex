@@ -560,6 +560,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 		wantNumUnbooked        int
 		wantNumCancelsExecuted int
 		wantNumTradesCanceled  int
+		wantNumNomatched       int
 	}{
 		{
 			name: "cancel standing ok",
@@ -612,6 +613,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 			wantNumUnbooked:        0,
 			wantNumCancelsExecuted: 0,
 			wantNumTradesCanceled:  0,
+			wantNumNomatched:       1,
 		},
 	}
 	for _, tt := range tests {
@@ -621,7 +623,7 @@ func TestMatch_cancelOnly(t *testing.T) {
 
 			numBuys0 := tt.args.book.BuyCount()
 
-			seed, matches, passed, failed, doneOK, partial, booked, _, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
+			seed, matches, passed, failed, doneOK, partial, booked, nomatched, unbooked, updates := me.Match(tt.args.book, tt.args.queue)
 			matchMade := len(matches) > 0 && matches[0] != nil
 			if tt.doesMatch != matchMade {
 				t.Errorf("Match expected = %v, got = %v", tt.doesMatch, matchMade)
@@ -654,6 +656,9 @@ func TestMatch_cancelOnly(t *testing.T) {
 			}
 			if len(unbooked) != tt.wantNumUnbooked {
 				t.Errorf("number unbooked %d, expected %d", len(unbooked), tt.wantNumUnbooked)
+			}
+			if len(nomatched) != tt.wantNumNomatched {
+				t.Errorf("number nomatched %d, expected %d", len(nomatched), tt.wantNumNomatched)
 			}
 
 			if len(updates.CancelsExecuted) != tt.wantNumCancelsExecuted {

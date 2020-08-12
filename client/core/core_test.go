@@ -2007,8 +2007,6 @@ func TestCancel(t *testing.T) {
 	if tracker.cancel == nil {
 		t.Fatalf("cancel order not found")
 	}
-	// remove the cancel order so we can check its nilness on error.
-	tracker.cancel = nil
 
 	ensureErr := func(tag string) {
 		t.Helper()
@@ -2016,6 +2014,15 @@ func TestCancel(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
 		}
+	}
+
+	// Should get an error for existing cancel order.
+	ensureErr("second cancel")
+
+	// remove the cancel order so we can check its nilness on error.
+	tracker.cancel = nil
+
+	ensureNilCancel := func(tag string) {
 		if tracker.cancel != nil {
 			t.Fatalf("%s: cancel order found", tag)
 		}
@@ -2025,16 +2032,19 @@ func TestCancel(t *testing.T) {
 	ogID := sid
 	sid = "badid"
 	ensureErr("bad id")
+	ensureNilCancel("bad id")
 	sid = ogID
 
 	// Order not found
 	delete(dc.trades, oid)
 	ensureErr("no order")
+	ensureNilCancel("no order")
 	dc.trades[oid] = tracker
 
 	// Send error
 	rig.ws.reqErr = tErr
 	ensureErr("Request error")
+	ensureNilCancel("Request error")
 	rig.ws.reqErr = nil
 
 }
@@ -3687,17 +3697,21 @@ func TestHandleNomatch(t *testing.T) {
 		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	dc.trades[marketOID] = marketTracker
 
-	runNomatch := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
+	runNomatch := func(tag string, oid order.OrderID) {
+		tracker, _, _ := dc.findOrder(oid)
+		if tracker == nil {
+			t.Fatalf("%s: order ID not found", tag)
+		}
 		payload := &msgjson.NoMatch{OrderID: oid[:]}
 		req, _ := msgjson.NewRequest(dc.NextID(), msgjson.NoMatchRoute, payload)
 		err := handleNoMatchRoute(tCore, dc, req)
 		if err != nil {
 			t.Fatalf("handleNoMatchRoute error: %v", err)
 		}
+	}
+
+	checkTradeStatus := func(tag string, oid order.OrderID, expStatus order.OrderStatus) {
 		tracker, _, _ := dc.findOrder(oid)
-		if tracker == nil {
-			t.Fatalf("%s: order ID not found", tag)
-		}
 		if tracker.metaData.Status != expStatus {
 			t.Fatalf("%s: wrong status. expected %s, got %s", tag, expStatus, tracker.metaData.Status)
 		}
@@ -3705,14 +3719,23 @@ func TestHandleNomatch(t *testing.T) {
 			t.Fatalf("%s: order status not stored", tag)
 		}
 		if rig.db.lastStatus != expStatus {
-			t.Fatalf("%s: wrong order status stored", tag)
+			t.Fatalf("%s: wrong order status stored. expected %s, got %s", tag, expStatus, rig.db.lastStatus)
 		}
 	}
 
-	runNomatch("standing limit", standingOID, order.OrderStatusBooked)
-	runNomatch("cancel", cancelOID, order.OrderStatusExecuted)
-	runNomatch("immediate", immediateOID, order.OrderStatusExecuted)
-	runNomatch("market", marketOID, order.OrderStatusExecuted)
+	runNomatch("cancel", cancelOID)
+	if rig.db.lastStatusID != cancelOID || rig.db.lastStatus != order.OrderStatusExecuted {
+		t.Fatalf("cancel status not updated")
+	}
+
+	runNomatch("standing limit", standingOID)
+	checkTradeStatus("standing limit", standingOID, order.OrderStatusBooked)
+
+	runNomatch("immediate", immediateOID)
+	checkTradeStatus("immediate", immediateOID, order.OrderStatusExecuted)
+
+	runNomatch("market", marketOID)
+	checkTradeStatus("market", marketOID, order.OrderStatusExecuted)
 
 	// Unknown order should error.
 	oid := ordertest.RandomOrderID()

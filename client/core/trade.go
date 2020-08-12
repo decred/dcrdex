@@ -210,7 +210,7 @@ func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage)
 	}
 	err := t.db.LinkOrder(t.ID(), co.ID())
 	if err != nil {
-		return fmt.Errorf("error linking cancel order ID %s for order %s", co.ID(), t.ID())
+		return fmt.Errorf("error linking cancel order %s for trade %s: %w", co.ID(), t.ID(), err)
 	}
 	t.metaData.LinkedOrder = co.ID()
 	return nil
@@ -225,16 +225,23 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 		if t.cancel == nil || t.cancel.ID() != oid {
 			return newError(unknownOrderErr, "nomatch order ID %s does not match trade or cancel order", oid)
 		}
-		// This is a cancel order. Status goes to Executed, but the order status
-		// will not be Canceled.
-		log.Warnf("cancel order %s did not match for order %s.", t.cancel.ID(), t.ID())
+		// This is a cancel order. Cancel status goes to executed, but the trade
+		// status will not be canceled. Remove the trackedCancel and remove the
+		// DB linked order from the trade, but not the cancel.
+		cid := t.cancel.ID()
+		log.Warnf("cancel order %s did not match for order %s.", cid, t.ID())
+		err := t.db.LinkOrder(cid, order.OrderID{})
+		if err != nil {
+			log.Errorf("DB error unlinking cancel order %s for trade %s: %w", cid, t.ID(), err)
+		}
+		// Clearing the trackedCancel allows this order to be canceled again.
+		t.cancel = nil
+		t.metaData.LinkedOrder = order.OrderID{}
+
 		details := fmt.Sprintf("Cancel order did not match for order %s. This can happen if the cancel order is submitted in the same epoch as the trade or if the target order is fully executed before matching with the cancel order.", t.token())
 		corder, _ := t.coreOrderInternal()
 		t.notify(newOrderNote("Missed cancel", details, db.WarningLevel, corder))
-		t.metaData.Status = order.OrderStatusExecuted
-		return t.db.UpdateOrderStatus(t.cancel.ID(), t.metaData.Status)
-		// TODO: Auto-resubmit missed cancel orders if they were the same epoch
-		// as the trade?
+		return t.db.UpdateOrderStatus(cid, order.OrderStatusExecuted)
 	}
 	// This is the trade. Return coins and set status based on whether this is
 	// a standing limit order or not.
