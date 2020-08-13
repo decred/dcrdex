@@ -148,6 +148,13 @@ func TestMain(m *testing.M) {
 }
 
 func TestWallet(t *testing.T) {
+	tLogger.Infof("////////// WITHOUT SPLIT FUNDING TRANSACTIONS //////////")
+	runTest(t, false)
+	tLogger.Infof("////////// WITH SPLIT FUNDING TRANSACTIONS //////////")
+	runTest(t, true)
+}
+
+func runTest(t *testing.T, splitTx bool) {
 	blockReported := false
 	rig := newTestRig(t, func(name string, err error) {
 		blockReported = true
@@ -173,44 +180,45 @@ func TestWallet(t *testing.T) {
 		}
 		tLogger.Debugf("%s %f available, %f unconfirmed, %f locked",
 			name, float64(bal.Available)/1e8, float64(bal.Immature)/1e8, float64(bal.Locked)/1e8)
+		wallet.useSplitTx = splitTx
 	}
+
+	// Unlock the wallet for use.
+	err := rig.beta().Unlock(walletPassword, time.Hour*24)
+	if err != nil {
+		t.Fatalf("error unlocking beta wallet: %v", err)
+	}
+
 	// Grab some coins.
-	utxos, err := rig.beta().FundOrder(contractValue*3, tDCR)
+	utxos, err := rig.beta().FundOrder(contractValue*3, false, tDCR)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// Coins should be locked
-	utxos, _ = rig.beta().FundOrder(contractValue*3, tDCR)
-	if inUTXOs(utxo, utxos) {
+	utxos, _ = rig.beta().FundOrder(contractValue*3, false, tDCR)
+	if !splitTx && inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
-	// Unlock
 	rig.beta().ReturnCoins([]asset.Coin{utxo})
 	rig.beta().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
-	utxos, _ = rig.beta().FundOrder(contractValue*3, tDCR)
-	if !inUTXOs(utxo, utxos) {
+	utxos, _ = rig.beta().FundOrder(contractValue*3, false, tDCR)
+	if !splitTx && !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
 	rig.beta().ReturnCoins(utxos)
 
 	// Get a separate set of UTXOs for each contract.
-	utxos1, err := rig.beta().FundOrder(contractValue, tDCR)
+	utxos1, err := rig.beta().FundOrder(contractValue, false, tDCR)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
-	utxos2, err := rig.beta().FundOrder(contractValue*2, tDCR)
+	utxos2, err := rig.beta().FundOrder(contractValue*2, false, tDCR)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
-	}
-
-	// Unlock the wallet for use.
-	err = rig.beta().Unlock(walletPassword, time.Hour*24)
-	if err != nil {
-		t.Fatalf("error unlocking beta wallet: %v", err)
 	}
 
 	secretKey1 := randBytes(32)
@@ -339,7 +347,7 @@ func TestWallet(t *testing.T) {
 	lockTime = time.Now().Add(-24 * time.Hour)
 
 	// Have beta send a swap contract to the alpha address.
-	utxos, _ = rig.beta().FundOrder(contractValue, tDCR)
+	utxos, _ = rig.beta().FundOrder(contractValue, false, tDCR)
 	contract := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,

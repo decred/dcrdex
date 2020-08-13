@@ -1827,7 +1827,10 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if form.IsLimit && !form.Sell {
 		fundQty = calc.BaseToQuote(rate, fundQty)
 	}
-	coins, err := fromWallet.FundOrder(fundQty, wallets.fromAsset)
+
+	isImmediate := (!form.IsLimit || form.TifNow)
+
+	coins, err := fromWallet.FundOrder(fundQty, isImmediate, wallets.fromAsset)
 	if err != nil {
 		return nil, 0, err
 	}

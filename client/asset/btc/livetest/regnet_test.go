@@ -3,6 +3,7 @@
 package livetest
 
 import (
+	"fmt"
 	"testing"
 
 	"decred.org/dcrdex/client/asset/btc"
@@ -20,7 +21,7 @@ var (
 		Symbol:       "btc",
 		SwapSize:     dexbtc.InitTxSize,
 		SwapSizeBase: dexbtc.InitTxSizeBase,
-		MaxFeeRate:   2,
+		MaxFeeRate:   10,
 		LotSize:      1e6,
 		RateStep:     10,
 		SwapConf:     1,
@@ -28,5 +29,8 @@ var (
 )
 
 func TestWallet(t *testing.T) {
-	Run(t, btc.NewWallet, alphaAddress, tBTC)
+	fmt.Println("////////// WITHOUT SPLIT FUNDING TRANSACTIONS //////////")
+	Run(t, btc.NewWallet, alphaAddress, tBTC, false)
+	fmt.Println("////////// WITH SPLIT FUNDING TRANSACTIONS //////////")
+	Run(t, btc.NewWallet, alphaAddress, tBTC, true)
 }

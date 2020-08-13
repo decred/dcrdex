@@ -73,8 +73,8 @@ func (wc *walletClient) LockUnspent(unlock bool, ops []*output) error {
 	var rpcops []*RPCOutpoint // To clear all, this must be nil, not empty slice.
 	for _, op := range ops {
 		rpcops = append(rpcops, &RPCOutpoint{
-			TxID: op.txHash.String(),
-			Vout: op.vout,
+			TxID: op.txHash().String(),
+			Vout: op.vout(),
 		})
 	}
 	var success bool
