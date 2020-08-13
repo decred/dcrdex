@@ -19,9 +19,6 @@ import (
 	"decred.org/dcrdex/dex/ws"
 )
 
-// updateWalletRoute is a notification route that updates the state of a wallet.
-const updateWalletRoute = "update_wallet"
-
 var (
 	// Time allowed to read the next pong message from the peer. The
 	// default is intended for production, but leaving as a var instead of const
@@ -35,44 +32,13 @@ var (
 	cidCounter int32
 )
 
-// Core specifies the needed methods for Server to operate. Satisfied by *core.Core.
-type Core interface {
-	WalletState(assetID uint32) *core.WalletState
-	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
-	AckNotes([]dex.Bytes)
-}
-
-// Server contains fields used by the websocket server.
-type Server struct {
-	core       Core
-	log        dex.Logger
-	mSyncerLog dex.Logger
-	ctx        context.Context
-	mtx        sync.RWMutex
-	clients    map[int32]*wsClient
-}
-
-// New returns a new websocket Server. The server ctx is not set upon
-// initiation. It must be set before use by calling Run.
-func New(core Core, log dex.Logger) *Server {
-	return &Server{
-		core:       core,
-		log:        log,
-		mSyncerLog: log.SubLogger("MSYNC"),
-		clients:    make(map[int32]*wsClient),
-	}
-}
-
-// Run sets the server's context.
-func (s *Server) Run(ctx context.Context) {
-	s.ctx = ctx
-}
-
+// wsClient is a persistent websocket connection to a client.
 type wsClient struct {
 	*ws.WSLink
-	mtx      sync.RWMutex
-	cid      int32
-	feedLoop *dex.StartStopWaiter
+	cid int32
+
+	feedLoopMtx sync.RWMutex
+	feedLoop    *dex.StartStopWaiter
 }
 
 func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message) *msgjson.Error) *wsClient {
@@ -82,18 +48,54 @@ func newWSClient(ip string, conn ws.Connection, hndlr func(msg *msgjson.Message)
 	}
 }
 
-// Shutdown disconnects all connected clients.
+// Core specifies the needed methods for Server to operate. Satisfied by *core.Core.
+type Core interface {
+	SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error)
+	AckNotes([]dex.Bytes)
+}
+
+// Server is a websocket hub that tracks all running websocket clients, allows
+// sending notifications to all of them, and manages per-client order book
+// subscriptions.
+type Server struct {
+	core Core
+	log  dex.Logger
+	wg   sync.WaitGroup
+
+	clientsMtx sync.RWMutex
+	clients    map[int32]*wsClient
+}
+
+// New returns a new websocket Server.
+func New(core Core, log dex.Logger) *Server {
+	return &Server{
+		core:    core,
+		log:     log,
+		clients: make(map[int32]*wsClient),
+	}
+}
+
+// Shutdown gracefully shuts down all connected clients, waiting for them to
+// disconnect and any running goroutines and message handlers to return.
 func (s *Server) Shutdown() {
-	s.mtx.Lock()
+	s.clientsMtx.Lock()
 	for _, cl := range s.clients {
 		cl.Disconnect()
 	}
-	s.mtx.Unlock()
+	s.clientsMtx.Unlock()
+	// Each upgraded connection handler must return. This also waits for running
+	// marketSyncers and response handlers as long as dex/ws.(*WSLink) operates
+	// as designed and each (*Server).connect goroutine waits for the link's
+	// WaitGroup before returning.
+	s.wg.Wait()
 }
 
-// HandleConnect handles the websocket connection request, creating a ws.Connection
-// and a connect thread.
-func (s *Server) HandleConnect(w http.ResponseWriter, r *http.Request) {
+// HandleConnect handles the websocket connection request, creating a
+// ws.Connection and a connect thread. Since the http.Request's Context is
+// canceled after ServerHTTP returns, a separate context must be provided to be
+// able to cancel the hijacked connection handler at a later time since this
+// function is not blocking.
+func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	// If the IP address includes a port, remove it.
 	ip := r.RemoteAddr
 	// If a host:port can be parsed, the IP is only the host portion.
@@ -106,13 +108,22 @@ func (s *Server) HandleConnect(w http.ResponseWriter, r *http.Request) {
 		s.log.Errorf("ws connection error: %v", err)
 		return
 	}
-	go s.connect(wsConn, ip)
+
+	// Launch the handler for the upgraded connection. Shutdown will wait for
+	// these to return.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.connect(ctx, wsConn, ip)
+	}()
+
+	s.log.Info("HandleConnect done.")
 }
 
 // connect handles a new websocket client by creating a new wsClient, starting
 // it, and blocking until the connection closes. This method should be
 // run as a goroutine.
-func (s *Server) connect(conn ws.Connection, ip string) {
+func (s *Server) connect(ctx context.Context, conn ws.Connection, ip string) {
 	s.log.Debugf("New websocket client %s", ip)
 	// Create a new websocket client to handle the new websocket connection
 	// and wait for it to shutdown.  Once it has shutdown (and hence
@@ -126,11 +137,11 @@ func (s *Server) connect(conn ws.Connection, ip string) {
 	// synchronized map accesses are guaranteed to reflect this connection.
 	// Also, ensuring only live connections are in the clients map notify from
 	// sending before it is connected.
-	s.mtx.Lock()
+	s.clientsMtx.Lock()
 	cm := dex.NewConnectionMaster(cl)
-	err := cm.Connect(s.ctx)
+	err := cm.Connect(ctx)
 	if err != nil {
-		s.mtx.Unlock()
+		s.clientsMtx.Unlock()
 		s.log.Errorf("websocketHandler client Connect: %v")
 		return
 	}
@@ -138,22 +149,22 @@ func (s *Server) connect(conn ws.Connection, ip string) {
 	// Add the client to the map only after it is connected so that notify does
 	// not attempt to send to non-existent connection.
 	s.clients[cl.cid] = cl
-	s.mtx.Unlock()
+	s.clientsMtx.Unlock()
 
 	defer func() {
-		cl.mtx.Lock()
+		cl.feedLoopMtx.Lock()
 		if cl.feedLoop != nil {
 			cl.feedLoop.Stop()
 			cl.feedLoop.WaitForShutdown()
 		}
-		cl.mtx.Unlock()
+		cl.feedLoopMtx.Unlock()
 
-		s.mtx.Lock()
+		s.clientsMtx.Lock()
 		delete(s.clients, cl.cid)
-		s.mtx.Unlock()
+		s.clientsMtx.Unlock()
 	}()
 
-	cm.Wait()
+	cm.Wait() // also waits for any handleMessage calls in (*WSLink).inHandler
 	s.log.Tracef("Disconnected websocket client %s", ip)
 }
 
@@ -164,20 +175,14 @@ func (s *Server) Notify(route string, payload interface{}) {
 		s.log.Errorf("notification encoding error: %v", err)
 		return
 	}
-	s.mtx.RLock()
-	defer s.mtx.RUnlock()
+	s.clientsMtx.RLock()
+	defer s.clientsMtx.RUnlock()
 	for _, cl := range s.clients {
 		if err = cl.Send(msg); err != nil {
 			s.log.Warnf("Failed to send %v notification to client %v at %v: %v",
 				msg.Route, cl.cid, cl.IP(), err)
 		}
 	}
-}
-
-// NotifyWalletUpdate sends a wallet update notification.
-func (s *Server) NotifyWalletUpdate(assetID uint32) {
-	walletUpdate := s.core.WalletState(assetID)
-	s.Notify(updateWalletRoute, walletUpdate)
 }
 
 // handleMessage handles the websocket message, calling the right handler for
@@ -235,13 +240,13 @@ type marketSyncer struct {
 
 // newMarketSyncer is the constructor for a marketSyncer, returned as a running
 // *dex.StartStopWaiter.
-func newMarketSyncer(ctx context.Context, cl *wsClient, feed *core.BookFeed, log dex.Logger) *dex.StartStopWaiter {
+func newMarketSyncer(cl *wsClient, feed *core.BookFeed, log dex.Logger) *dex.StartStopWaiter {
 	ssWaiter := dex.NewStartStopWaiter(&marketSyncer{
 		feed: feed,
 		cl:   cl,
 		log:  log,
 	})
-	ssWaiter.Start(ctx)
+	ssWaiter.Start(context.Background()) // wrapping Run with a cancel bound to Stop
 	return ssWaiter
 }
 
@@ -290,31 +295,38 @@ out:
 	}
 }
 
-// wsLoadMarket is the handler for the 'loadmarket' websocket endpoint.
-// Subscribes the client to the notification feed and sends the order book.
+// wsLoadMarket is the handler for the 'loadmarket' websocket route. Subscribes
+// the client to the notification feed and sends the order book.
 func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error {
 	market := new(marketLoad)
 	err := json.Unmarshal(msg.Payload, market)
 	if err != nil {
-		errMsg := fmt.Sprintf("error unmarshaling marketload payload: %v", err)
+		errMsg := fmt.Sprintf("error unmarshalling marketload payload: %v", err)
 		s.log.Errorf(errMsg)
 		return msgjson.NewError(msgjson.RPCInternal, errMsg)
+	}
+
+	name, err := dex.MarketName(market.Base, market.Quote)
+	if err != nil {
+		errMsg := fmt.Sprintf("unknown market: %v", err)
+		s.log.Errorf(errMsg)
+		return msgjson.NewError(msgjson.UnknownMarketError, errMsg)
 	}
 
 	book, feed, err := s.core.SyncBook(market.Host, market.Base, market.Quote)
 	if err != nil {
 		errMsg := fmt.Sprintf("error getting order feed: %v", err)
 		s.log.Errorf(errMsg)
-		return msgjson.NewError(msgjson.RPCInternal, errMsg)
+		return msgjson.NewError(msgjson.RPCOrderBookError, errMsg)
 	}
 
-	cl.mtx.Lock()
+	cl.feedLoopMtx.Lock()
 	if cl.feedLoop != nil {
 		cl.feedLoop.Stop()
 		cl.feedLoop.WaitForShutdown()
 	}
-	cl.feedLoop = newMarketSyncer(s.ctx, cl, feed, s.mSyncerLog)
-	cl.mtx.Unlock()
+	cl.feedLoop = newMarketSyncer(cl, feed, s.log.SubLogger(name))
+	cl.feedLoopMtx.Unlock()
 
 	note, err := msgjson.NewNotification(core.FreshBookAction, &marketResponse{
 		Host:  market.Host,
@@ -333,13 +345,13 @@ func wsLoadMarket(s *Server, cl *wsClient, msg *msgjson.Message) *msgjson.Error 
 	return nil
 }
 
-// wsUnmarket is the handler for the 'unmarket' websocket endpoint. This empty
+// wsUnmarket is the handler for the 'unmarket' websocket route. This empty
 // message is sent when the user leaves the markets page. This closes the feed,
 // and potentially unsubscribes from orderbook with the server if there are no
 // other consumers
 func wsUnmarket(_ *Server, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
-	cl.mtx.Lock()
-	defer cl.mtx.Unlock()
+	cl.feedLoopMtx.Lock()
+	defer cl.feedLoopMtx.Unlock()
 	if cl.feedLoop != nil {
 		cl.feedLoop.Stop()
 		cl.feedLoop.WaitForShutdown()
@@ -350,7 +362,7 @@ func wsUnmarket(_ *Server, cl *wsClient, _ *msgjson.Message) *msgjson.Error {
 
 type ackNoteIDs []dex.Bytes
 
-// wsAckNotes is the handler for the 'acknotes' websocket endpoint. Informs the
+// wsAckNotes is the handler for the 'acknotes' websocket route. It informs the
 // Core that the user has seen the specified notifications.
 func wsAckNotes(s *Server, _ *wsClient, msg *msgjson.Message) *msgjson.Error {
 	ids := make(ackNoteIDs, 0)

@@ -712,7 +712,7 @@ func TestHandleCancel(t *testing.T) {
 	}
 }
 
-// tCoin satifies the asset.Coin interface.
+// tCoin satisfies the asset.Coin interface.
 type tCoin struct{}
 
 func (tCoin) ID() dex.Bytes {

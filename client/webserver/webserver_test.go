@@ -24,7 +24,7 @@ import (
 )
 
 var (
-	tErr    = fmt.Errorf("test error")
+	tErr    = fmt.Errorf("expected dummy error")
 	tLogger dex.Logger
 	tCtx    context.Context
 )
@@ -175,66 +175,6 @@ func (r *TReader) Read(p []byte) (n int, err error) {
 
 func (r *TReader) Close() error { return nil }
 
-type TConn struct {
-	msg       []byte
-	reads     [][]byte      // data for ReadMessage
-	respReady chan []byte   // signal from WriteMessage
-	close     chan struct{} // Close tells ReadMessage to return with error
-}
-
-var readTimeout = 10 * time.Second // ReadMessage must not return constantly with nothing
-
-func (c *TConn) ReadMessage() (int, []byte, error) {
-	if len(c.reads) > 0 {
-		var read []byte
-		// pop front
-		read, c.reads = c.reads[0], c.reads[1:]
-		return len(read), read, nil
-	}
-
-	select {
-	case <-c.close: // receive from nil channel blocks
-		return 0, nil, fmt.Errorf("closed")
-	case <-time.After(readTimeout):
-		return 0, nil, fmt.Errorf("read timeout")
-	}
-}
-
-func (c *TConn) addRead(read []byte) {
-	// push back
-	c.reads = append(c.reads, read)
-}
-
-func (c *TConn) SetWriteDeadline(t time.Time) error {
-	return nil
-}
-
-func (c *TConn) WriteControl(messageType int, data []byte, deadline time.Time) error {
-	return nil
-}
-
-func (c *TConn) SetReadDeadline(t time.Time) error {
-	return nil
-}
-
-func (c *TConn) WriteMessage(_ int, msg []byte) error {
-	c.msg = msg
-	select {
-	case c.respReady <- msg:
-	default:
-	}
-	return nil
-}
-
-func (c *TConn) Close() error {
-	// If the test has a non-nil close channel, signal close.
-	select {
-	case c.close <- struct{}{}:
-	default:
-	}
-	return nil
-}
-
 func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 	t.Helper()
 	c := &TCore{}
@@ -261,7 +201,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 	return s, c, shutdown, err
 }
 
-func ensureResponse(t *testing.T, s *WebServer, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
+func ensureResponse(t *testing.T, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
 	t.Helper()
 	var err error
 	reader.msg, err = json.Marshal(body)
@@ -354,7 +294,7 @@ func TestAPIRegister(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiRegister, want, reader, writer, body)
+		ensureResponse(t, s.apiRegister, want, reader, writer, body)
 	}
 
 	goodBody := &core.RegisterForm{
@@ -376,7 +316,7 @@ func TestAPIRegister(t *testing.T) {
 
 	// Registration error
 	tCore.regErr = tErr
-	ensure(`{"ok":false,"msg":"registration error: test error"}`)
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"registration error: %s"}`, tErr))
 	tCore.regErr = nil
 }
 
@@ -388,7 +328,7 @@ func TestAPILogin(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiLogin, want, reader, writer, body)
+		ensureResponse(t, s.apiLogin, want, reader, writer, body)
 	}
 
 	goodBody := &loginForm{
@@ -399,7 +339,7 @@ func TestAPILogin(t *testing.T) {
 
 	// Login error
 	tCore.loginErr = tErr
-	ensure(`{"ok":false,"msg":"login error: test error"}`)
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"login error: %s"}`, tErr))
 	tCore.loginErr = nil
 }
 
@@ -463,7 +403,7 @@ func TestAPIInit(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiInit, want, reader, writer, body)
+		ensureResponse(t, s.apiInit, want, reader, writer, body)
 	}
 
 	goodBody := &loginForm{
@@ -474,7 +414,7 @@ func TestAPIInit(t *testing.T) {
 
 	// Initialization error
 	tCore.initErr = tErr
-	ensure(`{"ok":false,"msg":"initialization error: test error"}`)
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"initialization error: %s"}`, tErr))
 	tCore.initErr = nil
 }
 
@@ -486,7 +426,7 @@ func TestAPIGetFee(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiGetFee, want, reader, writer, body)
+		ensureResponse(t, s.apiGetFee, want, reader, writer, body)
 	}
 
 	body = &registration{Addr: "somedexaddress.org"}
@@ -494,7 +434,7 @@ func TestAPIGetFee(t *testing.T) {
 
 	// getFee error
 	tCore.getFeeErr = tErr
-	ensure(`{"ok":false,"msg":"test error"}`)
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"%s"}`, tErr))
 	tCore.getFeeErr = nil
 }
 
@@ -506,7 +446,7 @@ func TestAPINewWallet(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiNewWallet, want, reader, writer, body)
+		ensureResponse(t, s.apiNewWallet, want, reader, writer, body)
 	}
 
 	body = &newWalletForm{
@@ -520,7 +460,7 @@ func TestAPINewWallet(t *testing.T) {
 	tCore.notHas = true
 
 	tCore.createWalletErr = tErr
-	ensure(`{"ok":false,"msg":"error creating btc wallet: test error"}`)
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"error creating btc wallet: %s"}`, tErr))
 	tCore.createWalletErr = nil
 
 	tCore.notHas = false
@@ -533,13 +473,13 @@ func TestAPILogout(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiLogout, want, reader, writer, nil)
+		ensureResponse(t, s.apiLogout, want, reader, writer, nil)
 	}
 	ensure(`{"ok":true}`)
 
 	// Logout error
 	tCore.logoutErr = tErr
-	ensure(`{"ok":false,"msg":"logout error: test error"}`)
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"logout error: %s"}`, tErr))
 	tCore.logoutErr = nil
 }
 
@@ -550,12 +490,12 @@ func TestApiGetBalance(t *testing.T) {
 	defer shutdown()
 
 	ensure := func(want string) {
-		ensureResponse(t, s, s.apiGetBalance, want, reader, writer, struct{}{})
+		ensureResponse(t, s.apiGetBalance, want, reader, writer, struct{}{})
 	}
 	ensure(`{"ok":true,"balance":null}`)
 
 	// Logout error
 	tCore.balanceErr = tErr
-	ensure(`{"ok":false,"msg":"balance error: test error"}`)
+	ensure(fmt.Sprintf(`{"ok":false,"msg":"balance error: %s"}`, tErr))
 	tCore.balanceErr = nil
 }

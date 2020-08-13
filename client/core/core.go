@@ -995,6 +995,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	c.walletMtx.Unlock()
 
 	c.refreshUser()
+
+	c.notify(newWalletStateNote(wallet.state()))
+
 	return nil
 }
 
@@ -1064,6 +1067,9 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 		go c.checkUnpaidFees(wallet)
 	}
 	c.refreshUser()
+
+	c.notify(newWalletStateNote(state))
+
 	return nil
 }
 
@@ -1099,12 +1105,16 @@ func (c *Core) CloseWallet(assetID uint32) error {
 		return err
 	}
 	c.refreshUser()
+
+	c.notify(newWalletStateNote(wallet.state()))
+
 	return nil
 }
 
 // ConnectWallet connects to the wallet without unlocking.
 func (c *Core) ConnectWallet(assetID uint32) error {
-	_, err := c.connectedWallet(assetID)
+	wallet, err := c.connectedWallet(assetID)
+	c.notify(newWalletStateNote(wallet.state()))
 	return err
 }
 
@@ -2982,8 +2992,7 @@ func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 		return fmt.Errorf("notify unmarshal error: %v", err)
 	}
 	txt = fmt.Sprintf("Message from DEX at %s:\n\n\"%s\"\n", dc.acct.host, txt)
-	note := db.NewNotification("notify", dc.acct.host, txt, db.WarningLevel)
-	c.notify(&note)
+	c.notify(newServerNotifyNote(dc.acct.host, txt, db.WarningLevel))
 	return nil
 }
 

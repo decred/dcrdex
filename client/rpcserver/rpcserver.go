@@ -16,7 +16,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -32,11 +31,6 @@ import (
 )
 
 const (
-	// Time allowed to read the next pong message from the peer. The
-	// default is intended for production, but leaving as a var instead of const
-	// to facilitate testing.
-	pongWait = 60 * time.Second
-
 	// rpcTimeoutSeconds is the number of seconds a connection to the
 	// RPC server is allowed to stay open without authenticating before it
 	// is closed.
@@ -73,6 +67,7 @@ type clientCore interface {
 	Register(form *core.RegisterForm) (*core.RegisterResult, error)
 	Trade(appPass []byte, form *core.TradeForm) (order *core.Order, err error)
 	Wallets() (walletsStates []*core.WalletState)
+	WalletState(assetID uint32) *core.WalletState
 	Withdraw(appPass []byte, assetID uint32, value uint64, addr string) (asset.Coin, error)
 }
 
@@ -80,6 +75,7 @@ type clientCore interface {
 // interface to the DEX client.
 type RPCServer struct {
 	core      clientCore
+	mux       *chi.Mux
 	wsServer  *websocket.Server
 	addr      string
 	tlsConfig *tls.Config
@@ -203,15 +199,14 @@ func New(cfg *Config) (*RPCServer, error) {
 		WriteTimeout: rpcTimeoutSeconds * time.Second, // hung responses must die
 	}
 
-	wsServer := websocket.New(cfg.Core, log.SubLogger("WS"))
-
 	// Make the server.
 	s := &RPCServer{
 		core:      cfg.Core,
+		mux:       mux,
 		srv:       httpServer,
 		addr:      cfg.Addr,
 		tlsConfig: tlsConfig,
-		wsServer:  wsServer,
+		wsServer:  websocket.New(cfg.Core, log.SubLogger("WS")),
 	}
 
 	// Create authsha to verify requests against.
@@ -227,10 +222,9 @@ func New(cfg *Config) (*RPCServer, error) {
 	mux.Use(middleware.RealIP)
 	mux.Use(s.authMiddleware)
 
-	// Websocket endpoint
-	mux.Get("/ws", s.wsServer.HandleConnect)
+	// The WebSocket handler is mounted on /ws in Connect.
 
-	// https endpoint
+	// HTTPS endpoint
 	mux.Post("/", s.handleJSON)
 
 	return s, nil
@@ -243,8 +237,8 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	if err != nil {
 		return nil, fmt.Errorf("can't listen on %s. rpc server quitting: %v", s.addr, err)
 	}
-
-	s.wsServer.Run(ctx)
+	// Update the listening address in case a :0 was provided.
+	s.addr = listener.Addr().String()
 
 	// Close the listener on context cancellation.
 	s.wg.Add(1)
@@ -258,14 +252,19 @@ func (s *RPCServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}()
 
+	// Configure the websocket handler before starting the server.
+	s.mux.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+		s.wsServer.HandleConnect(ctx, w, r)
+	})
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		if err := s.srv.Serve(listener); err != http.ErrServerClosed {
 			log.Warnf("unexpected (http.Server).Serve error: %v", err)
 		}
-		// Disconnect the websocket clients since Shutdown does not deal with
-		// hijacked websocket connections.
+		// Disconnect the websocket clients since http.(*Server).Shutdown does
+		// not deal with hijacked websocket connections.
 		s.wsServer.Shutdown()
 		log.Infof("RPC server off")
 	}()
@@ -334,9 +333,4 @@ func (s *RPCServer) authMiddleware(next http.Handler) http.Handler {
 func fileExists(name string) bool {
 	_, err := os.Stat(name)
 	return !os.IsNotExist(err)
-}
-
-// Create a unique ID for a market.
-func marketID(base, quote uint32) string {
-	return strconv.Itoa(int(base)) + "_" + strconv.Itoa(int(quote))
 }

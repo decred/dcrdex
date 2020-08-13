@@ -4,11 +4,8 @@ package websocket
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"sync"
 	"testing"
@@ -20,36 +17,9 @@ import (
 )
 
 var (
-	tErr  = fmt.Errorf("test error")
 	tCtx  context.Context
 	unbip = dex.BipIDSymbol
 )
-
-type tCoin struct {
-	id       []byte
-	confs    uint32
-	confsErr error
-}
-
-func (c *tCoin) ID() dex.Bytes {
-	return c.id
-}
-
-func (c *tCoin) String() string {
-	return hex.EncodeToString(c.id)
-}
-
-func (c *tCoin) Value() uint64 {
-	return 0
-}
-
-func (c *tCoin) Confirmations() (uint32, error) {
-	return c.confs, c.confsErr
-}
-
-func (c *tCoin) Redeem() dex.Bytes {
-	return nil
-}
 
 type TCore struct {
 	syncBook   *core.OrderBook
@@ -75,46 +45,6 @@ func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	}
 }
 func (c *TCore) AckNotes(ids []dex.Bytes) {}
-
-type TWriter struct {
-	b []byte
-}
-
-func (*TWriter) Header() http.Header {
-	return http.Header{}
-}
-
-func (w *TWriter) Write(b []byte) (int, error) {
-	w.b = b
-	return len(b), nil
-}
-
-func (w *TWriter) WriteHeader(int) {}
-
-type TReader struct {
-	msg []byte
-	err error
-}
-
-func (r *TReader) Read(p []byte) (n int, err error) {
-	if r.err != nil {
-		return 0, r.err
-	}
-	if len(r.msg) == 0 {
-		return 0, io.EOF
-	}
-	copy(p, r.msg)
-	if len(p) < len(r.msg) {
-		r.msg = r.msg[:len(p)]
-		return len(p), nil
-	} else {
-		l := len(r.msg)
-		r.msg = nil
-		return l, io.EOF
-	}
-}
-
-func (r *TReader) Close() error { return nil }
 
 type TConn struct {
 	msg       []byte
@@ -186,41 +116,16 @@ func newLink() *tLink {
 		respReady: make(chan []byte, 1),
 		close:     make(chan struct{}, 1),
 	}
-	cl := newWSClient("", conn, func(*msgjson.Message) *msgjson.Error { return nil })
+	cl := newWSClient("localhost", conn, func(*msgjson.Message) *msgjson.Error { return nil })
 	return &tLink{
 		cl:   cl,
 		conn: conn,
 	}
 }
 
-func newTServer(t *testing.T) (*Server, *TCore, func()) {
+func newTServer() (*Server, *TCore) {
 	c := &TCore{}
-	ctx, killCtx := context.WithCancel(tCtx)
-	s := New(c, dex.StdOutLogger("TEST", dex.LevelTrace))
-	s.Run(ctx)
-	return s, c, killCtx
-}
-
-func ensureResponse(t *testing.T, s *Server, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
-	var err error
-	reader.msg, err = json.Marshal(body)
-	if err != nil {
-		t.Fatalf("error marshalling request body: %v", err)
-	}
-	req, err := http.NewRequest("GET", "/", reader)
-	if err != nil {
-		t.Fatalf("error creating request: %v", err)
-	}
-	f(writer, req)
-	if len(writer.b) == 0 {
-		t.Fatalf("no response")
-	}
-	// Drop the line feed.
-	errMsg := string(writer.b[:len(writer.b)-1])
-	if errMsg != want {
-		t.Fatalf("wrong response. expected %s, got %s", want, errMsg)
-	}
-	writer.b = nil
+	return New(c, dex.StdOutLogger("TEST", dex.LevelTrace)), c
 }
 
 func TestMain(m *testing.M) {
@@ -235,9 +140,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestLoadMarket(t *testing.T) {
+	srv, tCore := newTServer()
+	// NOTE that Server is not running. We are just using the handleMessage
+	// method to route to the proper handler with a configured logger and Core.
+
 	link := newLink()
-	s, tCore, shutdown := newTServer(t)
-	defer shutdown()
 	linkWg, err := link.cl.Connect(tCtx)
 	if err != nil {
 		t.Fatalf("WSLink Start: %v", err)
@@ -280,7 +187,7 @@ func TestLoadMarket(t *testing.T) {
 		// Create a new feed for every request because a Close()d feed cannot be
 		// reused.
 		tCore.syncFeed = core.NewBookFeed(func(feed *core.BookFeed) {})
-		msgErr := s.handleMessage(link.cl, subscription)
+		msgErr := srv.handleMessage(link.cl, subscription)
 		if msgErr != nil {
 			t.Fatalf("'loadmarket' error: %d: %s", msgErr.Code, msgErr.Message)
 		}
@@ -298,7 +205,7 @@ func TestLoadMarket(t *testing.T) {
 
 	// Unsubscribe.
 	unsub, _ := msgjson.NewRequest(2, "unmarket", nil)
-	msgErr := s.handleMessage(link.cl, unsub)
+	msgErr := srv.handleMessage(link.cl, unsub)
 	if msgErr != nil {
 		t.Fatalf("'unmarket' error: %d: %s", msgErr.Code, msgErr.Message)
 	}
@@ -308,8 +215,8 @@ func TestLoadMarket(t *testing.T) {
 	}
 
 	// Make sure a sync error propagates.
-	tCore.syncErr = tErr
-	msgErr = s.handleMessage(link.cl, subscription)
+	tCore.syncErr = fmt.Errorf("expected dummy error")
+	msgErr = srv.handleMessage(link.cl, subscription)
 	if msgErr == nil {
 		t.Fatalf("no handleMessage error from Sync error")
 	}
@@ -321,8 +228,7 @@ func TestLoadMarket(t *testing.T) {
 
 func TestHandleMessage(t *testing.T) {
 	link := newLink()
-	s, _, shutdown := newTServer(t)
-	defer shutdown()
+	srv, _ := newTServer()
 
 	// NOTE: link is not started because the handlers in this test do not
 	// actually use it.
@@ -330,7 +236,7 @@ func TestHandleMessage(t *testing.T) {
 	var msg *msgjson.Message
 
 	ensureErr := func(name string, wantCode int) {
-		got := s.handleMessage(link.cl, msg)
+		got := srv.handleMessage(link.cl, msg)
 		if got == nil {
 			t.Fatalf("%s: no error", name)
 		}
@@ -352,14 +258,14 @@ func TestHandleMessage(t *testing.T) {
 		return nil
 	}
 
-	rpcErr := s.handleMessage(link.cl, msg)
+	rpcErr := srv.handleMessage(link.cl, msg)
 	if rpcErr != nil {
 		t.Fatalf("error for good message: %d: %s", rpcErr.Code, rpcErr.Message)
 	}
 }
 
 func TestClientMap(t *testing.T) {
-	s, _, shutdown := newTServer(t)
+	srv, _ := newTServer()
 	resp := make(chan []byte, 1)
 	conn := &TConn{
 		respReady: resp,
@@ -369,10 +275,12 @@ func TestClientMap(t *testing.T) {
 	read, _ := json.Marshal(msgjson.Message{ID: 0})
 	conn.addRead(read)
 
+	// Create the context that the http request handler would receive.
+	ctx, shutdown := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		s.connect(conn, "someip")
+		srv.connect(ctx, conn, "someip")
 		wg.Done()
 	}()
 
@@ -381,16 +289,16 @@ func TestClientMap(t *testing.T) {
 	<-resp
 
 	var cl *wsClient
-	s.mtx.Lock()
-	i := len(s.clients)
+	srv.clientsMtx.Lock()
+	i := len(srv.clients)
 	if i != 1 {
 		t.Fatalf("expected 1 client in server map, found %d", i)
 	}
-	for _, c := range s.clients {
+	for _, c := range srv.clients {
 		cl = c
 		break
 	}
-	s.mtx.Unlock()
+	srv.clientsMtx.Unlock()
 
 	// Close the server and make sure the connection is closed.
 	shutdown()
