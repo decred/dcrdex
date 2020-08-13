@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 )
@@ -62,9 +63,9 @@ func shutdownListener() {
 	// Listen for the initial shutdown signal.
 	select {
 	case sig := <-interruptChannel:
-		log.Infof("Received signal (%s). Shutting down...", sig)
+		fmt.Printf("Received signal (%s). Shutting down...\n", sig)
 	case <-shutdownRequest:
-		log.Info("Shutdown requested. Shutting down...")
+		fmt.Println("Shutdown requested. Shutting down...")
 	}
 
 	// Cancel all contexts created from withShutdownCancel.

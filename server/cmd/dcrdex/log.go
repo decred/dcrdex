@@ -9,18 +9,6 @@ import (
 	"path/filepath"
 
 	"decred.org/dcrdex/dex"
-	"decred.org/dcrdex/dex/wait"
-	"decred.org/dcrdex/dex/ws"
-	"decred.org/dcrdex/server/admin"
-	"decred.org/dcrdex/server/auth"
-	"decred.org/dcrdex/server/book"
-	"decred.org/dcrdex/server/comms"
-	"decred.org/dcrdex/server/db"
-	dexsrv "decred.org/dcrdex/server/dex"
-	"decred.org/dcrdex/server/market"
-	"decred.org/dcrdex/server/matcher"
-	"decred.org/dcrdex/server/swap"
-	"github.com/decred/slog"
 	"github.com/jrick/logrotate/rotator"
 )
 
@@ -34,15 +22,17 @@ func (logWriter) Write(p []byte) (n int, err error) {
 		return os.Stdout.Write(p)
 	}
 	os.Stdout.Write(p)
-	return logRotator.Write(p)
+	return logRotator.Write(p) // not safe concurrent writes, so only one logWriter{} allowed!
 }
 
 // Loggers per subsystem. A single backend logger is created and all subsystem
 // loggers created from it will write to the backend. When adding new
-// subsystems, add the subsystem logger variable here and to the
-// subsystemLoggers map.
+// subsystems, define it in the subsystemLoggers map.
 //
-// Loggers can not be used before the log rotator has been initialized with a
+// For packages with package-level loggers, subsystem logging calls should not
+// be done before actually setting the logger in parseAndSetDebugLevels.
+//
+// Loggers should not be used before the log rotator has been initialized with a
 // log file. This must be performed early during application startup by calling
 // initLogRotator.
 var (
@@ -50,80 +40,30 @@ var (
 	// It should be closed on application shutdown.
 	logRotator *rotator.Rotator
 
-	// lm is used to create dex.Loggers for all DEX subsystems. Loggers must
-	// not be used before the log rotator has been initialized, or data
-	// races and/or nil pointer dereferences will occur.
-	lm *dex.LoggerMaker
-
-	// package main's Logger
-	log dex.Logger
+	// package main's Logger.
+	log = dex.Disabled
 
 	// subsystemLoggers maps each subsystem identifier to its associated logger.
-	subsystemLoggers map[string]dex.Logger
-)
-
-func init() {
-	// lm is used to create dex.Loggers for all DEX subsystems. Loggers must
-	// not be used before the log rotator has been initialized, or data
-	// races and/or nil pointer dereferences will occur.
-	var err error
-	lm, err = dex.NewLoggerMaker(logWriter{}, defaultLogLevel)
-	if err != nil {
-		panic(err)
-	}
-
-	// main's Logger
-	log = lm.Logger("MAIN")
-
-	// subsystem loggers
-	dexmanLogger := lm.Logger("DEX")
-	dexsrv.UseLogger(dexmanLogger)
-
-	dbLogger := lm.Logger("DB")
-	db.UseLogger(dbLogger)
-
-	commsLogger := lm.Logger("COMM")
-	comms.UseLogger(commsLogger)
-	ws.UseLogger(commsLogger)
-
-	authLogger := lm.Logger("AUTH")
-	auth.UseLogger(authLogger)
-
-	swapLogger := lm.Logger("SWAP")
-	swap.UseLogger(swapLogger)
-
-	marketLogger := lm.Logger("MKT")
-	market.UseLogger(marketLogger)
-
-	bookLogger := lm.Logger("BOOK")
-	book.UseLogger(bookLogger)
-
-	matcherLogger := lm.Logger("MTCH")
-	matcher.UseLogger(matcherLogger)
-
-	waiterLogger := lm.Logger("CHWT")
-	wait.UseLogger(waiterLogger)
-
-	adminLogger := lm.Logger("ADMN")
-	admin.UseLogger(adminLogger)
-
+	// The loggers are disabled until parseAndSetDebugLevels is called.
 	subsystemLoggers = map[string]dex.Logger{
-		"MAIN": log,
-		"DB":   dbLogger,
-		"DEX":  dexmanLogger,
-		"COMM": commsLogger,
-		"AUTH": authLogger,
-		"SWAP": swapLogger,
-		"MKT":  marketLogger,
+		"MAIN": dex.Disabled,
+		"DEX":  dex.Disabled,
+		"DB":   dex.Disabled,
+		"COMM": dex.Disabled,
+		"AUTH": dex.Disabled,
+		"SWAP": dex.Disabled,
+		"MKT":  dex.Disabled,
+		"BOOK": dex.Disabled,
+		"MTCH": dex.Disabled,
+		"WAIT": dex.Disabled,
+		"ADMN": dex.Disabled,
+
 		// Individual assets get their own subsystem loggers. This is here to
-		// register the ASSET subsystem ID, allowing the user to set the log level
-		// for the asset subsystems.
+		// register the ASSET subsystem ID, allowing the user to set the log
+		// level for the asset subsystems.
 		"ASSET": dex.Disabled,
-		"BOOK":  bookLogger,
-		"MTCH":  matcherLogger,
-		"ADMN":  adminLogger,
 	}
-}
+)
 
 // initLogRotator initializes the logging rotater to write logs to logFile and
 // create roll files in the same directory.  It must be called before the
@@ -139,25 +79,5 @@ func initLogRotator(logFile string, maxRolls int) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create file rotator: %v\n", err)
 		os.Exit(1)
-	}
-}
-
-// setLogLevel sets the logging level for provided subsystem. Invalid subsystems
-// are ignored.
-func setLogLevel(subsystemID string, level slog.Level) {
-	// Ignore invalid subsystems.
-	logger, ok := subsystemLoggers[subsystemID]
-	if !ok {
-		return
-	}
-	logger.SetLevel(level)
-}
-
-// setLogLevels sets the log level for all subsystem loggers to the passed
-// level.
-func setLogLevels(level slog.Level) {
-	// Configure all sub-systems with the new logging level.
-	for subsystemID := range subsystemLoggers {
-		setLogLevel(subsystemID, level)
 	}
 }
