@@ -10,6 +10,19 @@ import (
 	"decred.org/dcrdex/dex"
 )
 
+// Notifications should use the following note type strings.
+const (
+	NoteTypeFeePayment   = "feepayment"
+	NoteTypeWithdraw     = "withdraw"
+	NoteTypeOrder        = "order"
+	NoteTypeEpoch        = "epoch"
+	NoteTypeConnEvent    = "conn"
+	NoteTypeBalance      = "balance"
+	NoteTypeWalletConfig = "walletconfig"
+	NoteTypeWalletState  = "walletstate"
+	NoteTypeServerNotify = "notify"
+)
+
 // notify sends a notification to all subscribers. If the notification is of
 // sufficient severity, it is stored in the database.
 func (c *Core) notify(n Notification) {
@@ -106,7 +119,7 @@ type FeePaymentNote struct {
 
 func newFeePaymentNote(subject, details string, severity db.Severity, dexAddr string) *FeePaymentNote {
 	return &FeePaymentNote{
-		Notification: db.NewNotification("feepayment", subject, details, severity),
+		Notification: db.NewNotification(NoteTypeFeePayment, subject, details, severity),
 		Dex:          addrHost(dexAddr),
 	}
 }
@@ -124,7 +137,7 @@ type WithdrawNote struct {
 
 func newWithdrawNote(subject, details string, severity db.Severity) *WithdrawNote {
 	return &WithdrawNote{
-		Notification: db.NewNotification("withdraw", subject, details, severity),
+		Notification: db.NewNotification(NoteTypeWithdraw, subject, details, severity),
 	}
 }
 
@@ -136,7 +149,7 @@ type OrderNote struct {
 
 func newOrderNote(subject, details string, severity db.Severity, corder *Order) *OrderNote {
 	return &OrderNote{
-		Notification: db.NewNotification("order", subject, details, severity),
+		Notification: db.NewNotification(NoteTypeOrder, subject, details, severity),
 		Order:        corder,
 	}
 }
@@ -163,7 +176,7 @@ func newEpochNotification(host, mktID string, epochIdx uint64) *EpochNotificatio
 	return &EpochNotification{
 		Host:         host,
 		MarketID:     mktID,
-		Notification: db.NewNotification("epoch", "", "", db.Data),
+		Notification: db.NewNotification(NoteTypeEpoch, "", "", db.Data),
 		Epoch:        epochIdx,
 	}
 }
@@ -182,7 +195,7 @@ type ConnEventNote struct {
 
 func newConnEventNote(subject, host string, connected bool, details string, severity db.Severity) *ConnEventNote {
 	return &ConnEventNote{
-		Notification: db.NewNotification("conn", subject, details, severity),
+		Notification: db.NewNotification(NoteTypeConnEvent, subject, details, severity),
 		Host:         host,
 		Connected:    connected,
 	}
@@ -197,7 +210,7 @@ type BalanceNote struct {
 
 func newBalanceNote(assetID uint32, bal *db.Balance) *BalanceNote {
 	return &BalanceNote{
-		Notification: db.NewNotification("balance", "balance updated", "", db.Data),
+		Notification: db.NewNotification(NoteTypeBalance, "balance updated", "", db.Data),
 		AssetID:      assetID,
 		Balance:      bal,
 	}
@@ -219,7 +232,7 @@ func newDEXAuthNote(subject, host string, authenticated bool, details string, se
 }
 
 // WalletConfigNote is a notification regarding a change in wallet
-// configuration settings.
+// configuration.
 type WalletConfigNote struct {
 	db.Notification
 	Wallet *WalletState `json:"wallet"`
@@ -227,7 +240,30 @@ type WalletConfigNote struct {
 
 func newWalletConfigNote(subject, details string, severity db.Severity, walletState *WalletState) *WalletConfigNote {
 	return &WalletConfigNote{
-		Notification: db.NewNotification("walletconfig", subject, details, severity),
+		Notification: db.NewNotification(NoteTypeWalletConfig, subject, details, severity),
 		Wallet:       walletState,
+	}
+}
+
+// WalletStateNote is a notification regarding a change in wallet state,
+// including: creation, locking, unlocking, and connect. This is intended to be
+// a Data Severity notification.
+type WalletStateNote WalletConfigNote
+
+func newWalletStateNote(walletState *WalletState) *WalletStateNote {
+	return &WalletStateNote{
+		Notification: db.NewNotification(NoteTypeWalletState, "", "", db.Data),
+		Wallet:       walletState,
+	}
+}
+
+// ServerNotifyNote is a notification containing a server-originating message.
+type ServerNotifyNote struct {
+	db.Notification
+}
+
+func newServerNotifyNote(subject, details string, severity db.Severity) *ServerNotifyNote {
+	return &ServerNotifyNote{
+		Notification: db.NewNotification(NoteTypeServerNotify, subject, details, severity),
 	}
 }

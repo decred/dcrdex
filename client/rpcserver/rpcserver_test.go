@@ -11,8 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"testing"
@@ -29,7 +28,6 @@ func init() {
 }
 
 var (
-	errT = fmt.Errorf("test error")
 	tCtx context.Context
 )
 
@@ -115,62 +113,21 @@ func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, addr string) (
 	return c.coin, c.withdrawErr
 }
 
-type TWriter struct {
-	b []byte
-}
+func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, func()) {
+	t.Helper()
 
-func (*TWriter) Header() http.Header {
-	return http.Header{}
-}
-
-func (w *TWriter) Write(b []byte) (int, error) {
-	w.b = b
-	return len(b), nil
-}
-
-func (w *TWriter) WriteHeader(int) {}
-
-type TReader struct {
-	msg []byte
-	err error
-}
-
-func (r *TReader) Read(p []byte) (n int, err error) {
-	if r.err != nil {
-		return 0, r.err
-	}
-	if len(r.msg) == 0 {
-		return 0, io.EOF
-	}
-	copy(p, r.msg)
-	if len(p) < len(r.msg) {
-		r.msg = r.msg[:len(p)]
-		return len(p), nil
-	}
-	l := len(r.msg)
-	r.msg = nil
-	return l, io.EOF
-}
-
-func (r *TReader) Close() error { return nil }
-
-var tPort = 5555
-
-func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
-	*TCore, func(), error) {
-	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
-	tmp, err := os.Getwd()
+	tempDir, err := ioutil.TempDir("", "rpcservertest")
 	if err != nil {
-		t.Errorf("error getting current directory: %v", err)
+		t.Fatalf("error creating temporary directory: %v", err)
 	}
-	cert, key := tmp+"/cert.cert", tmp+"/key.key"
-	defer os.Remove(cert)
-	defer os.Remove(key)
+	defer os.RemoveAll(tempDir)
+
+	cert, key := tempDir+"/cert.cert", tempDir+"/key.key"
 	cfg := &Config{
-		Core: c,
-		Addr: fmt.Sprintf("localhost:%d", tPort),
+		Core: &TCore{},
+		Addr: "127.0.0.1:0",
 		User: user,
 		Pass: pass,
 		Cert: cert,
@@ -178,13 +135,13 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 	}
 	s, err := New(cfg)
 	if err != nil {
-		t.Errorf("error creating server: %v", err)
+		t.Fatalf("error creating server: %v", err)
 	}
 	if start {
 		cm := dex.NewConnectionMaster(s)
 		err := cm.Connect(ctx)
 		if err != nil {
-			t.Errorf("Error starting RPCServer: %v", err)
+			t.Fatalf("Error starting RPCServer: %v", err)
 		}
 		shutdown = func() {
 			killCtx()
@@ -193,27 +150,7 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer,
 	} else {
 		shutdown = killCtx
 	}
-	return s, c, shutdown, err
-}
-
-func ensureResponse(t *testing.T, s *RPCServer, f func(w http.ResponseWriter,
-	r *http.Request), want string, reader *TReader, writer *TWriter,
-	body interface{}) {
-	reader.msg, _ = json.Marshal(body)
-	req, err := http.NewRequest("POST", "/", reader)
-	if err != nil {
-		t.Fatalf("error creating request: %v", err)
-	}
-	f(writer, req)
-	if len(writer.b) == 0 {
-		t.Fatalf("no response")
-	}
-	// Drop the line feed.
-	errMsg := string(writer.b[:len(writer.b)-1])
-	if errMsg != want {
-		t.Fatalf("wrong response. expected %s, got %s", want, errMsg)
-	}
-	writer.b = nil
+	return s, shutdown
 }
 
 func TestMain(m *testing.M) {
@@ -226,30 +163,20 @@ func TestMain(m *testing.M) {
 	os.Exit(doIt())
 }
 
-func TestConnectStart(t *testing.T) {
-	_, _, shutdown, err := newTServer(t, true, "", "")
-	defer shutdown()
-
-	if err != nil {
-		t.Fatalf("error starting web server: %s", err)
-	}
-}
-
 func TestConnectBindError(t *testing.T) {
-	_, _, shutdown, _ := newTServer(t, true, "", "")
+	s0, shutdown := newTServer(t, true, "", "")
 	defer shutdown()
 
-	c := &TCore{}
-	tmp, err := os.Getwd()
+	tempDir, err := ioutil.TempDir("", "rpcservertest")
 	if err != nil {
-		t.Error(err)
+		t.Fatalf("error creating temporary directory: %v", err)
 	}
-	cert, key := tmp+"/cert.cert", tmp+"/key.key"
-	defer os.Remove(cert)
-	defer os.Remove(key)
+	defer os.RemoveAll(tempDir)
+
+	cert, key := tempDir+"/cert.cert", tempDir+"/key.key"
 	cfg := &Config{
-		Core: c,
-		Addr: fmt.Sprintf("localhost:%d", tPort),
+		Core: &TCore{},
+		Addr: s0.addr,
 		User: "",
 		Pass: "",
 		Cert: cert,
@@ -285,20 +212,22 @@ func (w *tResponseWriter) WriteHeader(statusCode int) {
 }
 
 func TestParseHTTPRequest(t *testing.T) {
-	s, _, shutdown, _ := newTServer(t, false, "", "")
+	s, shutdown := newTServer(t, false, "", "")
 	defer shutdown()
 	var r *http.Request
 
 	ensureHTTPError := func(name string, wantCode int) {
+		t.Helper()
 		w := &tResponseWriter{}
 		s.handleJSON(w, r)
 		if w.code != wantCode {
-			t.Fatalf("Expected HTTP error %d, got %d",
-				wantCode, w.code)
+			t.Fatalf("%s: Expected HTTP error %d, got %d",
+				name, wantCode, w.code)
 		}
 	}
 
 	ensureMsgErr := func(name string, wantCode int) {
+		t.Helper()
 		w := &tResponseWriter{}
 		s.handleJSON(w, r)
 		if w.code != 200 {
@@ -321,6 +250,7 @@ func TestParseHTTPRequest(t *testing.T) {
 		}
 	}
 	ensureNoErr := func(name string) {
+		t.Helper()
 		w := &tResponseWriter{}
 		s.handleJSON(w, r)
 		if w.code != 200 {
@@ -381,7 +311,7 @@ func TestNew(t *testing.T) {
 			"Te4g4+Ke9Q07MYo3iT1OCqq5qXX2ZcB47FBiVaT41hQ="},
 	}
 	for _, test := range authTests {
-		s, _, shutdown, _ := newTServer(t, false, test[0], test[1])
+		s, shutdown := newTServer(t, false, test[0], test[1])
 		auth := base64.StdEncoding.EncodeToString((s.authsha[:]))
 		if auth != test[2] {
 			t.Fatalf("expected auth %s but got %s", test[2], auth)
@@ -391,7 +321,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestAuthMiddleware(t *testing.T) {
-	s, _, shutdown, _ := newTServer(t, false, "", "")
+	s, shutdown := newTServer(t, false, "", "")
 	defer shutdown()
 	am := s.authMiddleware(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
@@ -400,6 +330,7 @@ func TestAuthMiddleware(t *testing.T) {
 	r, _ := http.NewRequest("GET", "", nil)
 
 	wantAuthError := func(name string, want bool) {
+		t.Helper()
 		w := &tResponseWriter{}
 		am.ServeHTTP(w, r)
 		if w.code != http.StatusUnauthorized && w.code != http.StatusOK {

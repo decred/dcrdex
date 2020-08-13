@@ -13,7 +13,6 @@ export default class WalletsPage extends BasePage {
     super()
     app = application
     this.body = body
-    this.notifiers = {}
     const page = this.page = Doc.parsePage(body, [
       'rightBox',
       // Table Rows

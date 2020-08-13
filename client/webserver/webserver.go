@@ -35,9 +35,9 @@ import (
 type contextKey string
 
 const (
-	// httpConnTimeoutSeconds is the maximum number of seconds allowed for reading
-	// an http request or writing the response, beyond which the http connection is
-	// terminated.
+	// httpConnTimeoutSeconds is the maximum number of seconds allowed for
+	// reading an http request or writing the response, beyond which the http
+	// connection is terminated.
 	httpConnTimeoutSeconds = 10
 	// darkModeCK is the cookie key for dark mode.
 	darkModeCK = "darkMode"
@@ -68,6 +68,7 @@ type clientCore interface {
 	CloseWallet(assetID uint32) error
 	ConnectWallet(assetID uint32) error
 	Wallets() []*core.WalletState
+	WalletState(assetID uint32) *core.WalletState
 	WalletSettings(uint32) (map[string]string, error)
 	ReconfigureWallet([]byte, uint32, map[string]string) error
 	SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error
@@ -87,6 +88,7 @@ var _ clientCore = (*core.Core)(nil)
 // interface to the DEX client.
 type WebServer struct {
 	wsServer       *websocket.Server
+	mux            *chi.Mux
 	core           clientCore
 	addr           string
 	srv            *http.Server
@@ -161,15 +163,14 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		WriteTimeout: httpConnTimeoutSeconds * time.Second, // hung responses must die
 	}
 
-	wsServer := websocket.New(core, log.SubLogger("WS"))
-
 	// Make the server here so its methods can be registered.
 	s := &WebServer{
 		core:     core,
+		mux:      mux,
 		srv:      httpServer,
 		addr:     addr,
 		html:     tmpl,
-		wsServer: wsServer,
+		wsServer: websocket.New(core, log.SubLogger("WS")),
 	}
 
 	// Middleware
@@ -177,8 +178,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	mux.Use(middleware.Recoverer)
 	mux.Use(s.authMiddleware)
 
-	// Websocket endpoint
-	mux.Get("/ws", s.wsServer.HandleConnect)
+	// The WebSocket handler is mounted on /ws in Connect.
 
 	// Webpages
 	mux.Group(func(web chi.Router) {
@@ -253,8 +253,6 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 	// Update the listening address in case a :0 was provided.
 	s.addr = listener.Addr().String()
 
-	s.wsServer.Run(ctx)
-
 	// Shutdown the server on context cancellation.
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -267,6 +265,11 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		}
 	}()
 
+	// Configure the websocket handler before starting the server.
+	s.mux.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+		s.wsServer.HandleConnect(ctx, w, r)
+	})
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -274,8 +277,8 @@ func (s *WebServer) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		if !errors.Is(err, http.ErrServerClosed) {
 			log.Warnf("unexpected (http.Server).Serve error: %v", err)
 		}
-		// Disconnect the websocket clients since Shutdown does not deal with
-		// hijacked websocket connections.
+		// Disconnect the websocket clients since http.(*Server).Shutdown does
+		// not deal with hijacked websocket connections.
 		s.wsServer.Shutdown()
 		log.Infof("Web server off")
 	}()

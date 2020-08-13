@@ -476,7 +476,7 @@ func randomBalance() *db.Balance {
 
 func randomBalanceNote(assetID uint32) *core.BalanceNote {
 	return &core.BalanceNote{
-		Notification: db.NewNotification("balance", "", "", db.Data),
+		Notification: db.NewNotification(core.NoteTypeBalance, "", "", db.Data),
 		AssetID:      assetID,
 		Balance:      randomBalance(),
 	}
@@ -710,7 +710,7 @@ out:
 			c.noteFeed <- &core.EpochNotification{
 				Host:         dexAddr,
 				MarketID:     mktID,
-				Notification: db.NewNotification("epoch", "", "", db.Data),
+				Notification: db.NewNotification(core.NoteTypeEpoch, "", "", db.Data),
 				Epoch:        getEpoch(),
 			}
 

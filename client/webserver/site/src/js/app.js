@@ -14,7 +14,6 @@ const idel = Doc.idel // = element by id
 const bind = Doc.bind
 const unbind = Doc.unbind
 
-const updateWalletRoute = 'update_wallet'
 const notificationRoute = 'notify'
 
 /* constructors is a map to page constructors. */
@@ -69,14 +68,8 @@ export default class Application {
     // Load recent notifications from Window.localStorage.
     const notes = State.fetch('notifications')
     this.setNotes(notes || [])
-    // Connect the websocket and register for a couple of routes.
+    // Connect the websocket and register the notification route.
     ws.connect(getSocketURI(), this.reconnected)
-    ws.registerRoute(updateWalletRoute, wallet => {
-      this.assets[wallet.assetID].wallet = wallet
-      this.walletMap[wallet.assetID] = wallet
-      const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
-      balances.forEach(el => { el.textContent = (wallet.balance.available / 1e8).toFixed(8) })
-    })
     ws.registerRoute(notificationRoute, note => {
       this.notify(note)
     })
@@ -335,6 +328,14 @@ export default class Application {
       }
       case 'feepayment':
         this.handleFeePaymentNote(note)
+        break
+      case 'walletstate': {
+        const wallet = note.wallet
+        this.assets[wallet.assetID].wallet = wallet
+        this.walletMap[wallet.assetID] = wallet
+        const balances = this.main.querySelectorAll(`[data-balance-target="${wallet.assetID}"]`)
+        balances.forEach(el => { el.textContent = (wallet.balance.available / 1e8).toFixed(8) })
+      }
     }
 
     // Inform the page.
