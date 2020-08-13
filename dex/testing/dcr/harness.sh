@@ -60,6 +60,8 @@ cat > "${NODES_ROOT}/harness-ctl/mine-alpha" <<EOF
       *) NUM=\$1 ;;
   esac
   for i in \$(seq \$NUM) ; do
+    dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf regentemplate
+    sleep 0.1
     dcrctl -C ${NODES_ROOT}/alpha/alpha-ctl.conf generate 1
     sleep 0.5
   done
@@ -75,6 +77,8 @@ NUM=1
       *) NUM=\$1 ;;
   esac
   for i in \$(seq \$NUM) ; do
+    dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf regentemplate
+    sleep 0.1
     dcrctl -C ${NODES_ROOT}/beta/beta-ctl.conf generate 1
     sleep 0.5
   done
@@ -193,7 +197,7 @@ ENABLE_TICKET_BUYER="0"
 "${HARNESS_DIR}/create-wallet.sh" "$SESSION:6" "trading2" ${TRADING_WALLET2_SEED} \
 ${WALLET_PASS} ${RPC_USER} ${RPC_PASS} ${TRADING_WALLET2_PORT} ${ENABLE_TICKET_BUYER}
 
-sleep 30
+sleep 15
 
 ################################################################################
 # Prepare the wallets
