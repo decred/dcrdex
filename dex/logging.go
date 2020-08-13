@@ -13,16 +13,12 @@ import (
 	"github.com/decred/slog"
 )
 
-func init() {
-	Disabled = &logger{
-		Logger:  slog.Disabled,
-		level:   LevelOff,
-		backend: slog.NewBackend(ioutil.Discard),
-	}
-}
-
 // Disabled is a Logger that will never output anything.
-var Disabled Logger
+var Disabled Logger = &logger{
+	Logger:  slog.Disabled,
+	level:   LevelOff,
+	backend: slog.NewBackend(ioutil.Discard),
+}
 
 // Level constants.
 const (
@@ -33,6 +29,8 @@ const (
 	LevelError    = slog.LevelError
 	LevelCritical = slog.LevelCritical
 	LevelOff      = slog.LevelOff
+
+	DefaultLogLevel = LevelDebug // TODO: back to LevelInfo at some point
 )
 
 // Logger is a logger. Many dcrdex types will take a logger as an argument.
@@ -79,6 +77,20 @@ func (lggr *logger) SubLogger(name string) Logger {
 	}
 }
 
+// NewLogger creates a new Logger with the given name, log level, and io.Writer.
+func NewLogger(name string, lvl slog.Level, writer io.Writer) Logger {
+	backend := slog.NewBackend(writer)
+	lggr := backend.Logger(name)
+	lggr.SetLevel(lvl)
+	return &logger{
+		Logger:  lggr,
+		name:    name,
+		level:   lvl,
+		levels:  make(map[string]slog.Level),
+		backend: backend,
+	}
+}
+
 // StdOutLogger creates a Logger with the provided name with lvl as the log
 // level and prints to standard out.
 func StdOutLogger(name string, lvl slog.Level) Logger {
@@ -100,7 +112,7 @@ func NewLoggerMaker(writer io.Writer, debugLevel string) (*LoggerMaker, error) {
 	lm := &LoggerMaker{
 		Backend:      slog.NewBackend(writer),
 		Levels:       make(map[string]slog.Level),
-		DefaultLevel: LevelDebug, // TODO: back to LevelInfo at some point
+		DefaultLevel: DefaultLogLevel,
 	}
 
 	err := lm.SetLevels(debugLevel)
@@ -161,6 +173,16 @@ func (lm *LoggerMaker) SetLevels(debugLevel string) error {
 		lm.Levels[subsysID] = lvl
 	}
 	return nil
+}
+
+// Level returns the log level for the named subsystem. If a level is not
+// configured for this subsystem, the LoggerMaker's DefaultLevel is returned.
+func (lm *LoggerMaker) Level(name string) slog.Level {
+	level, found := lm.Levels[name]
+	if found {
+		return level
+	}
+	return lm.DefaultLevel
 }
 
 // NewLogger creates a new Logger for the subsystem with the given name. If a

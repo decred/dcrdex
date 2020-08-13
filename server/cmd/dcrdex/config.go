@@ -16,6 +16,17 @@ import (
 	"time"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/wait"
+	"decred.org/dcrdex/dex/ws"
+	"decred.org/dcrdex/server/admin"
+	"decred.org/dcrdex/server/auth"
+	"decred.org/dcrdex/server/book"
+	"decred.org/dcrdex/server/comms"
+	"decred.org/dcrdex/server/db"
+	dexsrv "decred.org/dcrdex/server/dex"
+	"decred.org/dcrdex/server/market"
+	"decred.org/dcrdex/server/matcher"
+	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrutil/v2"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -26,7 +37,7 @@ const (
 	defaultRPCCertFilename     = "rpc.cert"
 	defaultRPCKeyFilename      = "rpc.key"
 	defaultDataDirname         = "data"
-	defaultLogLevel            = "info"
+	defaultLogLevel            = "debug"
 	defaultLogDirname          = "logs"
 	defaultMarketsConfFilename = "markets.json"
 	defaultMaxLogZips          = 16
@@ -199,24 +210,33 @@ func supportedSubsystems() []string {
 // the levels accordingly. An appropriate error is returned if anything is
 // invalid.
 func parseAndSetDebugLevels(debugLevel string) (*dex.LoggerMaker, error) {
-	// Configure the LoggerMaker's DefaultLevel or the individual Levels.
-	if err := lm.SetLevels(debugLevel); err != nil {
+	// Create a LoggerMaker with the level string.
+	lm, err := dex.NewLoggerMaker(logWriter{}, debugLevel)
+	if err != nil {
 		return nil, err
 	}
-	// SetLevels parsed debugLevel into lm.DefaultLevel or lm.Levels.
 
-	// Apply the uniform default level.
-	setLogLevels(lm.DefaultLevel)
-
-	// Then apply any subsystem-specific logging levels.
-	for subsysID, lvl := range lm.Levels {
-		if _, exists := subsystemLoggers[subsysID]; !exists {
-			str := "The specified subsystem [%v] is invalid -- " +
-				"supported subsystems %v"
-			return nil, fmt.Errorf(str, subsysID, supportedSubsystems())
-		}
-		setLogLevel(subsysID, lvl)
+	// Create subsystem loggers.
+	for subsysID := range subsystemLoggers {
+		subsystemLoggers[subsysID] = lm.Logger(subsysID)
 	}
+
+	// Set main's Logger.
+	log = subsystemLoggers["MAIN"]
+
+	// Set package-level loggers. TODO: eliminate these by replacing them with
+	// loggers provided to constructors.
+	dexsrv.UseLogger(subsystemLoggers["DEX"])
+	db.UseLogger(subsystemLoggers["DB"])
+	comms.UseLogger(subsystemLoggers["COMM"])
+	ws.UseLogger(subsystemLoggers["COMM"].SubLogger("WS"))
+	auth.UseLogger(subsystemLoggers["AUTH"])
+	swap.UseLogger(subsystemLoggers["SWAP"])
+	market.UseLogger(subsystemLoggers["MKT"])
+	book.UseLogger(subsystemLoggers["BOOK"])
+	matcher.UseLogger(subsystemLoggers["MTCH"])
+	wait.UseLogger(subsystemLoggers["WAIT"])
+	admin.UseLogger(subsystemLoggers["ADMN"])
 
 	return lm, nil
 }
@@ -475,25 +495,28 @@ func loadConfig() (*dexConf, *procOpts, error) {
 		RPCListen = append(RPCListen, listen)
 	}
 
-	// Initialize log rotation. After log rotation has been initialized, the
-	// logger variables may be used. This creates the LogDir if needed.
+	// Initialize log rotation. This creates the LogDir if needed.
 	if cfg.MaxLogZips < 0 {
 		cfg.MaxLogZips = 0
 	}
 	initLogRotator(filepath.Join(cfg.LogDir, defaultLogFilename), cfg.MaxLogZips)
 
-	log.Infof("App data folder: %s", cfg.AppDataDir)
-	log.Infof("Data folder:     %s", cfg.DataDir)
-	log.Infof("Log folder:      %s", cfg.LogDir)
-	log.Infof("Config file:     %s", configFile)
-
-	// Parse, validate, and set debug log level(s).
+	// Create the loggers: Parse and validate the debug level string, create the
+	// subsystem loggers, and set package level loggers. The generated
+	// LoggerMaker is used by other subsystems to create new loggers with the
+	// same backend.
 	logMaker, err := parseAndSetDebugLevels(cfg.DebugLevel)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		parser.WriteHelp(os.Stderr)
 		return loadConfigError(err)
 	}
+	// Only now can any of the loggers be used.
+
+	log.Infof("App data folder: %s", cfg.AppDataDir)
+	log.Infof("Data folder:     %s", cfg.DataDir)
+	log.Infof("Log folder:      %s", cfg.LogDir)
+	log.Infof("Config file:     %s", configFile)
 
 	var dbPort uint16
 	dbHost := cfg.PGHost
