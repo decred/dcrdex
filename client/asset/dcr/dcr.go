@@ -47,6 +47,11 @@ const (
 )
 
 var (
+	requiredWalletVersion = dex.Semver{Major: 8, Minor: 2, Patch: 0}
+	requiredNodeVersion   = dex.Semver{Major: 6, Minor: 1, Patch: 2}
+)
+
+var (
 	// blockTicker is the delay between calls to check for new blocks.
 	blockTicker    = time.Second
 	fallbackFeeKey = "fallbackfee"
@@ -424,15 +429,40 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if err != nil {
 		return nil, fmt.Errorf("Decred Wallet connect error: %v", err)
 	}
-	// Check the min api versions.
+
+	// Check the required API versions.
 	versions, err := dcr.client.Version()
 	if err != nil {
 		return nil, fmt.Errorf("DCR ExchangeWallet version fetch error: %v", err)
 	}
-	err = checkVersionInfo(versions)
-	if err != nil {
-		return nil, fmt.Errorf("DCR ExchangeWallet version check failed: %v", err)
+
+	ver, exists := versions["dcrwalletjsonrpcapi"]
+	if !exists {
+		return nil, fmt.Errorf("dcrwallet.Version response missing 'dcrwalletjsonrpcapi'")
 	}
+	walletSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
+	if !dex.SemverCompatible(requiredWalletVersion, walletSemver) {
+		return nil, fmt.Errorf("dcrwallet has an incompatible JSON-RPC version: got %s, expected %s",
+			walletSemver, requiredWalletVersion)
+	}
+	ver, exists = versions["dcrdjsonrpcapi"]
+	if !exists {
+		return nil, fmt.Errorf("dcrwallet.Version response missing 'dcrdjsonrpcapi'")
+	}
+	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
+	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
+			nodeSemver, requiredNodeVersion)
+	}
+
+	curnet, err := dcr.client.GetCurrentNet()
+	if err != nil {
+		return nil, fmt.Errorf("getcurrentnet failure: %v", err)
+	}
+
+	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
+		walletSemver, nodeSemver, curnet)
+
 	// If this is the first time connecting, clear the locked coins. This should
 	// have been done at shutdown, but shutdown may not have been clean.
 	if atomic.SwapUint32(&dcr.hasConnected, 1) == 0 {
