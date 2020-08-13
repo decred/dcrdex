@@ -85,6 +85,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		clientCore.Run(appCtx)
+		cancel() // in the event that Run returns prematurely prior to context cancellation
 		wg.Done()
 	}()
 
@@ -102,6 +103,7 @@ func main() {
 		if err != nil {
 			log.Errorf("Error creating rpc server: %v", err)
 			cancel()
+			goto done
 		}
 		cm := dex.NewConnectionMaster(rpcSrv)
 		wg.Add(1)
@@ -118,13 +120,14 @@ func main() {
 	}
 
 	if !cfg.NoWeb {
-		wg.Add(1)
 		webSrv, err := webserver.New(clientCore, cfg.WebAddr, logMaker.Logger("WEB"), cfg.ReloadHTML)
 		if err != nil {
 			log.Errorf("Error creating web server: %v", err)
 			cancel()
+			goto done
 		}
 		cm := dex.NewConnectionMaster(webSrv)
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			err = cm.Connect(appCtx)
@@ -137,6 +140,7 @@ func main() {
 		}()
 	}
 
+done:
 	wg.Wait()
 	ui.Close()
 	log.Info("Exiting dexc main.")
