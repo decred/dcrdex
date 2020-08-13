@@ -483,7 +483,6 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 		Cancelling:  cancelling,
 		Canceled:    co.Canceled,
 		TimeInForce: co.TimeInForce.String(),
-		TargetID:    co.TargetID, // cancel orders are not shown, so always zero value
 	}
 }
 

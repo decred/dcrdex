@@ -75,7 +75,6 @@ type myOrder struct {
 	Cancelling  bool   `json:"cancelling,omitempty"`
 	Canceled    bool   `json:"canceled,omitempty"`
 	TimeInForce string `json:"tif,omitempty"`
-	TargetID    string `json:"targetID,omitempty"`
 }
 
 // openWalletForm is information necessary to open a wallet.
