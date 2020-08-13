@@ -1,6 +1,6 @@
 module decred.org/dcrdex/server/cmd/dcrdex
 
-go 1.13
+go 1.14
 
 replace decred.org/dcrdex => ../../..
 

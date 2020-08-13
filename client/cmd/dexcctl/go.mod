@@ -1,6 +1,6 @@
 module decred.org/dcrdex/client/cmd/dexcctl
 
-go 1.13
+go 1.14
 
 replace decred.org/dcrdex => ../../../
 
