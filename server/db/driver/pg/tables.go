@@ -13,6 +13,7 @@ import (
 
 const (
 	marketsTableName  = "markets"
+	metaTableName     = "meta"
 	feeKeysTableName  = "fee_keys"
 	accountsTableName = "accounts"
 )
@@ -24,6 +25,7 @@ type tableStmt struct {
 
 var createDEXTableStatements = []tableStmt{
 	{marketsTableName, internal.CreateMarketsTable},
+	{metaTableName, internal.CreateMetaTable},
 }
 
 var createAccountTableStatements = []tableStmt{
@@ -103,8 +105,22 @@ func CreateTable(db *sql.DB, schema, tableName string) (bool, error) {
 // PrepareTables ensures that all tables required by the DEX market config,
 // mktConfig, are ready.
 func PrepareTables(db *sql.DB, mktConfig []*dex.MarketInfo) error {
+	// Create the meta table in the public schema.
+	created, err := CreateTable(db, publicSchema, metaTableName)
+	if err != nil {
+		return fmt.Errorf("failed to create meta table: %v", err)
+	}
+	if created {
+		log.Trace("Creating new meta table.")
+		_, err := db.Exec(internal.CreateMetaRow)
+		if err != nil {
+			return fmt.Errorf("failed to create row for meta table")
+		}
+
+	}
+
 	// Create the markets table in the public schema.
-	created, err := CreateTable(db, publicSchema, marketsTableName)
+	created, err = CreateTable(db, publicSchema, marketsTableName)
 	if err != nil {
 		return fmt.Errorf("failed to create markets table: %v", err)
 	}

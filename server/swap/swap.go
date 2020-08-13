@@ -69,6 +69,8 @@ type Storage interface {
 	CancelOrder(*order.LimitOrder) error
 	RevokeOrder(order.Order) (cancelID order.OrderID, t time.Time, err error)
 	SetOrderCompleteTime(ord order.Order, compTimeMs int64) error
+	GetStateHash() ([]byte, error)
+	SetStateHash([]byte) error
 }
 
 // swapStatus is information related to the completion or incompletion of each
@@ -324,8 +326,6 @@ type Swapper struct {
 type Config struct {
 	// DataDir is the folder where swap state is stored.
 	DataDir string
-	// State is the state to restore in construction.
-	State *State
 	// AllowPartialRestore indicates if it is acceptable to load only part of
 	// the State if the Swapper's asset configuration lacks assets required to
 	// load all elements of State.
@@ -344,7 +344,17 @@ type Config struct {
 	LockTimeTaker time.Duration
 	// LockTimeTaker is the locktime Swapper will use for auditing maker swaps.
 	LockTimeMaker time.Duration
-	UnbookHook    func(lo *order.LimitOrder) bool
+	// IgnoreState indicates that the swapper should not load the latest state
+	// from file.
+	IgnoreState bool
+	// StatePath is a path to a swap state file from which the swapper state
+	// will be loaded. If StatePath is not set, and IgnoreState if false, the
+	// most recent stored state file will be loaded. StatePath supercedes
+	// IgnoreState.
+	StatePath string
+	// UnbookHook informs the DEX manager that the specified order should be
+	// removed from the order book.
+	UnbookHook func(lo *order.LimitOrder) bool
 }
 
 // NewSwapper is a constructor for a Swapper.
@@ -381,8 +391,57 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		liveAckers:    make(map[uint64]*msgAckers),
 	}
 
-	if cfg.State != nil {
-		err = swapper.restoreState(cfg.State, cfg.AllowPartialRestore)
+	// Load the initial state.
+	var state *State
+	if cfg.StatePath != "" {
+		log.Infof("attempting to load the swap state from user-specified file at %s", cfg.StatePath)
+		state, err = LoadStateFile(cfg.StatePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load specified state file %s", cfg.StatePath)
+		}
+
+	} else if !cfg.IgnoreState {
+		log.Infof("searching for swap state files in %q", cfg.DataDir)
+		stateFile, err := LatestStateFile(cfg.DataDir)
+		if err != nil {
+			return nil, fmt.Errorf("unable to read datadir: %v", err)
+		}
+		if stateFile != nil {
+			// Get the last stored state file hash, and check it against the
+			// most recent state file.
+			stateHash, err := swapper.storage.GetStateHash()
+			if err != nil {
+				return nil, fmt.Errorf("error getting stateHash")
+			}
+
+			// If stateHash is empty, there has never been a state hash stored,
+			// so there is nothing to do.
+			if len(stateHash) > 0 {
+				fileHash, err := encode.FileHash(stateFile.Name)
+				if err != nil {
+					return nil, fmt.Errorf("FileHash error: %w", err)
+				}
+
+				if !bytes.Equal(stateHash, fileHash) {
+					return nil, fmt.Errorf("latest swap %s file failed consistency check", stateFile.Name)
+				}
+
+				state, err = LoadStateFile(stateFile.Name)
+				if err != nil {
+					return nil, fmt.Errorf("failed to load swap state file %v: %v", stateFile.Name, err)
+				}
+				log.Infof("most recent swap state file is %q", stateFile.Name)
+			}
+
+		} else {
+			log.Info("no swap state files found")
+		}
+	}
+
+	if state != nil {
+		log.Infof("loaded swap state contains %d live matches with %d pending client acks and %d live coin waiters",
+			len(state.MatchTrackers), len(state.LiveAckers), len(state.LiveWaiters))
+		err = swapper.restoreState(state, cfg.AllowPartialRestore)
 		if err != nil {
 			return nil, err
 		}
@@ -620,7 +679,8 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 func (s *Swapper) saveState() {
 	// Store state.
 	fName := fmt.Sprintf("swapState-%d.gob", encode.UnixMilli(time.Now()))
-	f, err := os.Create(filepath.Join(s.dataDir, fName))
+	fPath := filepath.Join(s.dataDir, fName)
+	f, err := os.Create(fPath)
 	if err != nil {
 		log.Errorf("Failed to create swap state file %v: %v", fName, err)
 		return
@@ -665,6 +725,18 @@ func (s *Swapper) saveState() {
 		log.Infof("Saved swap state to file %q, containing %d live matches with "+
 			"%d pending client acks and %d live coin waiters", fName,
 			len(st.MatchTrackers), len(st.LiveAckers), len(st.LiveWaiters))
+	}
+
+	// Save the filehash of the state file for a consistency check on startup.
+	fileHash, err := encode.FileHash(fPath)
+	if err != nil {
+		log.Errorf("error hashing swap state file: %v", err)
+		return
+	}
+
+	err = s.storage.SetStateHash(fileHash)
+	if err != nil {
+		log.Errorf("error storing swap hash to disk: %v", err)
 	}
 }
 

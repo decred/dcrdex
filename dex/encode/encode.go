@@ -6,8 +6,11 @@ package encode
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"os"
 	"time"
 )
 
@@ -176,4 +179,18 @@ func (b BuildyBytes) AddData(d []byte) BuildyBytes {
 		lBytes = []byte{byte(l)}
 	}
 	return append(b, append(lBytes, d...)...)
+}
+
+// FileHash generates the SHA256 hash of the specified file.
+func FileHash(name string) ([]byte, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, fmt.Errorf("error opening file %s for hashing: %w", name, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return nil, fmt.Errorf("error copying file %s for hashing: %w", name, err)
+	}
+	return h.Sum(nil), nil
 }

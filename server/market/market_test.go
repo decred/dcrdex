@@ -184,6 +184,8 @@ func (ta *TArchivist) PayAccount(account.AccountID, []byte) error         { retu
 func (ta *TArchivist) Accounts() ([]*db.Account, error)                   { return nil, nil }
 func (ta *TArchivist) AccountInfo(account.AccountID) (*db.Account, error) { return nil, nil }
 func (ta *TArchivist) Close() error                                       { return nil }
+func (ta *TArchivist) GetStateHash() ([]byte, error)                      { return nil, nil }
+func (ta *TArchivist) SetStateHash([]byte) error                          { return nil }
 
 func randomOrderID() order.OrderID {
 	pk := randomBytes(order.OrderIDSize)
