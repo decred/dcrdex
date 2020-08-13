@@ -105,8 +105,8 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		return err == nil && stat.IsDir()
 	}
 
-	// Look for the "site" folder in the executable's path or in the source path
-	// relative to [repo root]/client/cmd/dexc.
+	// Look for the "site" folder in the executable's path, the working
+	// directory, or the source path relative to [repo root]/client/cmd/dexc.
 	execPath, err := os.Executable() // e.g. /usr/bin/dexc
 	if err != nil {
 		return nil, fmt.Errorf("unable to locate executable path: %w", err)
@@ -115,17 +115,27 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	if err != nil {
 		return nil, fmt.Errorf("unable to locate executable path: %w", err)
 	}
-	execPath = filepath.Dir(execPath)          // e.g. /opt/decred/dex
+	execPath = filepath.Dir(execPath) // e.g. /opt/decred/dex
+
+	// executable path
 	siteDir := filepath.Join(execPath, "site") // e.g. /opt/decred/dex/site
 	log.Debugf("Looking for site in %v", siteDir)
 	if !folderExists(siteDir) {
-		siteDir = filepath.Clean(filepath.Join(execPath, "../../webserver/site"))
+
+		// working directory
+		siteDir, _ = filepath.Abs("site")
 		log.Debugf("Looking for site in %v", siteDir)
 		if !folderExists(siteDir) {
-			cwd, _ := os.Getwd()
-			return nil, fmt.Errorf("no HTML template files found. "+
-				"Place the 'site' folder in the executable's directory %q "+
-				"or run dexc from within the client/cmd/dexc source workspace folder.", cwd)
+
+			// repo
+			siteDir = filepath.Clean(filepath.Join(execPath, "../../webserver/site"))
+			log.Debugf("Looking for site in %v", siteDir)
+			if !folderExists(siteDir) {
+
+				return nil, fmt.Errorf("no HTML template files found. "+
+					"Place the 'site' folder in the executable's directory %q or the working directory, "+
+					"or run dexc from within the client/cmd/dexc source workspace folder.", execPath)
+			}
 		}
 	}
 	log.Infof("Located \"site\" folder at %v", siteDir)

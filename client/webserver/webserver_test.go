@@ -236,19 +236,20 @@ func (c *TConn) Close() error {
 }
 
 func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
+	t.Helper()
 	c := &TCore{}
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
 	s, err := New(c, "127.0.0.1:0", tLogger, false)
 	if err != nil {
-		t.Errorf("error creating server: %v", err)
+		t.Fatalf("error creating server: %v", err)
 	}
 
 	if start {
 		cm := dex.NewConnectionMaster(s)
 		err := cm.Connect(ctx)
 		if err != nil {
-			t.Errorf("Error starting WebServer: %v", err)
+			t.Fatalf("Error starting WebServer: %v", err)
 		}
 		shutdown = func() {
 			killCtx()
@@ -261,6 +262,7 @@ func newTServer(t *testing.T, start bool) (*WebServer, *TCore, func(), error) {
 }
 
 func ensureResponse(t *testing.T, s *WebServer, f func(w http.ResponseWriter, r *http.Request), want string, reader *TReader, writer *TWriter, body interface{}) {
+	t.Helper()
 	var err error
 	reader.msg, err = json.Marshal(body)
 	if err != nil {
@@ -300,7 +302,7 @@ func TestNew_siteError(t *testing.T) {
 		t.Fatalf("cannot get current directory: %v", err)
 	}
 
-	// Change to a directory with no "site" or ""../../webserver/site" folder.
+	// Change to a directory with no "site" or "../../webserver/site" folder.
 	dir, _ := ioutil.TempDir("", "test")
 	defer os.RemoveAll(dir)
 	defer os.Chdir(cwd) // leave the temp dir before trying to delete it
