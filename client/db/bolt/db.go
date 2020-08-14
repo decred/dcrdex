@@ -308,8 +308,11 @@ func (db *BoltDB) deleteAccount(host string) error {
 	})
 }
 
-// DisableAccount copies the AccountInfo to disabledAccounts and deletes
-// the AccountInfo from accounts.
+// DisableAccount account disables the given account and archives it. The
+// Accounts and Account methods will no longer find the disabled account.
+//
+// TODO: Add disabledAccounts method for retrieval of a disabled account and
+// possible recovery of the account data.
 func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	// Copy AccountInfo to disabledAccounts
 	err := db.acctsDisable(func(disabledAccounts *bbolt.Bucket) error {
