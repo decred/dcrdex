@@ -310,15 +310,17 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 
 	// Check if any refunds are necessary and wait to ensure the refunds
 	// are completed.
-	refundsWaiter, ctx := errgroup.WithContext(context.Background())
-	refundsWaiter.Go(func() error {
-		return checkAndWaitForRefunds(ctx, client1, c1OrderID)
-	})
-	refundsWaiter.Go(func() error {
-		return checkAndWaitForRefunds(ctx, client2, c2OrderID)
-	})
-	if err = refundsWaiter.Wait(); err != nil {
-		return err
+	if finalStatus != order.MatchComplete {
+		refundsWaiter, ctx := errgroup.WithContext(context.Background())
+		refundsWaiter.Go(func() error {
+			return checkAndWaitForRefunds(ctx, client1, c1OrderID)
+		})
+		refundsWaiter.Go(func() error {
+			return checkAndWaitForRefunds(ctx, client2, c2OrderID)
+		})
+		if err = refundsWaiter.Wait(); err != nil {
+			return err
+		}
 	}
 
 	tLog.Infof("Trades ended at %s.", finalStatus)
