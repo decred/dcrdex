@@ -1566,12 +1566,14 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			for _, disabledAccountHost := range disabledAccountHosts {
 				c.conns[disabledAccountHost].connMaster.Disconnect()
 				delete(c.conns, disabledAccountHost)
-				log.Warnf("Host: %v account disconnected and removed from core "+
+				log.Warnf("Account at dex: %v not found. The account has been "+
+					"disabled. It is disconnected and has been removed from core "+
 					"connections.", disabledAccountHost)
 			}
 			c.connMtx.Unlock()
 		}
 	}()
+
 	for _, dc := range c.conns {
 		dc.tradeMtx.RLock()
 		tradeIDs := make([]string, 0, len(dc.trades))
