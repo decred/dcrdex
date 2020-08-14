@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -44,6 +45,10 @@ const (
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
 	splitTxBaggage = dexdcr.MsgTxOverhead + dexdcr.P2PKHInputSize + 2*dexdcr.P2PKHOutputSize
+	// Use RawRequest to list unspent outputs in an account.
+	methodListUnspent = "listunspent"
+	// Use RawRequest to list an account's locked unspent outputs.
+	methodListLockUnspent = "listlockunspent"
 )
 
 var (
@@ -113,9 +118,7 @@ type rpcClient interface {
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetRawMempool(txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
-	ListUnspentMin(minConf int) ([]walletjson.ListUnspentResult, error)
 	LockUnspent(unlock bool, ops []*wire.OutPoint) error
-	ListLockUnspent() ([]*wire.OutPoint, error)
 	GetRawChangeAddress(account string, net dcrutil.AddressParams) (dcrutil.Address, error)
 	GetNewAddressGapPolicy(string, rpcclient.GapPolicy, dcrutil.AddressParams) (dcrutil.Address, error)
 	SignRawTransaction(tx *wire.MsgTx) (*wire.MsgTx, bool, error)
@@ -124,6 +127,7 @@ type rpcClient interface {
 	WalletLock() error
 	WalletPassphrase(passphrase string, timeoutSecs int64) error
 	Disconnected() bool
+	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -472,7 +476,7 @@ func (dcr *ExchangeWallet) Balance() (*asset.Balance, error) {
 		ab := &balances.Balances[i]
 		if ab.AccountName == dcr.acct {
 			acctFound = true
-			balance.Available = toAtoms(ab.Spendable)
+			balance.Available = toAtoms(ab.Spendable) - locked
 			balance.Immature = toAtoms(ab.ImmatureCoinbaseRewards) +
 				toAtoms(ab.ImmatureStakeGeneration)
 			balance.Locked = locked + toAtoms(ab.LockedByTickets)
@@ -530,7 +534,7 @@ func (dcr *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asse
 		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
 	}
 
-	coins, inputsSize, fundingCoins, err := dcr.fund(0, enough)
+	coins, inputsSize, fundingCoins, err := dcr.fund(enough)
 	if err != nil {
 		return nil, err
 	}
@@ -545,43 +549,35 @@ func (dcr *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asse
 	return coins, nil
 }
 
-// unspents fetches unspent outputs for the ExchangeWallet account.
+// unspents fetches unspent outputs for the ExchangeWallet account using rpc
+// RawRequest.
 func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
-	walletUnspents, err := dcr.node.ListUnspentMin(0)
-	if err != nil {
-		return nil, fmt.Errorf("ListUnspentMin error: %w", err)
-	}
-
-	// Filter out the unspents for other accounts.
 	var unspents []walletjson.ListUnspentResult
-	for _, unspent := range walletUnspents {
-		if unspent.Account != dcr.acct {
-			continue
-		}
-		unspents = append(unspents, unspent)
-	}
-	return unspents, nil
+	// minconf, maxconf (rpcdefault=9999999), [address], account
+	params := anylist{0, 9999999, nil, dcr.acct}
+	err := dcr.nodeRawRequest(methodListUnspent, params, &unspents)
+	return unspents, err
 }
 
 // fund finds coins for the specified value. A function is provided that can
 // check whether adding the provided output would be enough to satisfy the
-// needed value.
-func (dcr *ExchangeWallet) fund(confs uint32,
-	enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, uint64, []*fundingCoin, error) {
+// needed value. Preference is given to selecting coins with 1 or more confs,
+// falling back to 0-conf coins where there are not enough 1+ confs coins.
+func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, uint64, []*fundingCoin, error) {
 
 	unspents, err := dcr.unspents()
 	if err != nil {
 		return nil, 0, nil, err
 	}
+	if len(unspents) == 0 {
+		return nil, 0, nil, fmt.Errorf("insufficient funds. 0 DCR available in %q account", dcr.acct)
+	}
 
-	// Sort in ascending order by amount (smallest first).
-	sort.Slice(unspents, func(i, j int) bool { return unspents[i].Amount < unspents[j].Amount })
-	utxos, avail, err := dcr.spendableUTXOs(unspents, confs)
+	// Parse utxos to include script size for spending input.
+	// Returned utxos will be sorted in ascending order by amount (smallest first).
+	utxos, _, err := dcr.parseUTXOs(unspents)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("error parsing unspent outputs: %v", err)
-	}
-	if len(utxos) == 0 {
-		return nil, 0, nil, fmt.Errorf("insufficient funds. %.8f available", float64(avail)/1e8)
 	}
 
 	var sum uint64
@@ -1521,67 +1517,52 @@ type compositeUTXO struct {
 	// TODO: consider including isDexChange bool for consumer
 }
 
-// spendableUTXOs filters the RPC utxos to those that are spendable according to
-// provided minimum confirmations. The UTXOs will be sorted by ascending value.
-func (dcr *ExchangeWallet) spendableUTXOs(unspents []walletjson.ListUnspentResult, confs uint32) ([]*compositeUTXO, uint64, error) {
+// parseUTXOs constructs and returns a list of compositeUTXOs from the provided
+// set of RPC utxos, including basic information required to spend each rpc utxo.
+// The returned list is sorted by ascending value.
+func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) ([]*compositeUTXO, uint64, error) {
 	var sum uint64
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	for _, txout := range unspents {
-		if txout.Confirmations >= int64(confs) {
-			scriptPK, err := hex.DecodeString(txout.ScriptPubKey)
-			if err != nil {
-				return nil, 0, fmt.Errorf("error decoding pubkey script for %s, script = %s: %v", txout.TxID, txout.ScriptPubKey, err)
-			}
-			redeemScript, err := hex.DecodeString(txout.RedeemScript)
-			if err != nil {
-				return nil, 0, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
-			}
-
-			nfo, err := dexdcr.InputInfo(scriptPK, redeemScript, chainParams)
-			if err != nil {
-				if errors.Is(err, dex.UnsupportedScriptError) {
-					continue
-				}
-				return nil, 0, fmt.Errorf("error reading asset info: %v", err)
-			}
-			utxos = append(utxos, &compositeUTXO{
-				rpc:   txout,
-				input: nfo,
-				confs: txout.Confirmations,
-			})
-			sum += toAtoms(txout.Amount)
+		scriptPK, err := hex.DecodeString(txout.ScriptPubKey)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error decoding pubkey script for %s, script = %s: %v", txout.TxID, txout.ScriptPubKey, err)
 		}
+		redeemScript, err := hex.DecodeString(txout.RedeemScript)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
+		}
+
+		nfo, err := dexdcr.InputInfo(scriptPK, redeemScript, chainParams)
+		if err != nil {
+			if errors.Is(err, dex.UnsupportedScriptError) {
+				continue
+			}
+			return nil, 0, fmt.Errorf("error reading asset info: %v", err)
+		}
+		utxos = append(utxos, &compositeUTXO{
+			rpc:   txout,
+			input: nfo,
+			confs: txout.Confirmations,
+		})
+		sum += toAtoms(txout.Amount)
 	}
+	// Sort in ascending order by amount (smallest first).
+	sort.Slice(utxos, func(i, j int) bool { return utxos[i].rpc.Amount < utxos[j].rpc.Amount })
 	return utxos, sum, nil
 }
 
 // lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
-// TODO: handle multiple accounts!
 func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
-	lockedOutpoints, err := dcr.node.ListLockUnspent()
+	// Fetch locked outputs for the ExchangeWallet account using RawRequest.
+	var lockedOutpoints []chainjson.TransactionInput
+	err := dcr.nodeRawRequest(methodListLockUnspent, anylist{dcr.acct}, &lockedOutpoints)
 	if err != nil {
 		return 0, err
 	}
 	var sum uint64
-	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock()
-	for _, wireOP := range lockedOutpoints {
-		pt := newOutPoint(&wireOP.Hash, wireOP.Index)
-		utxo, found := dcr.fundingCoins[pt]
-		if found {
-			sum += utxo.op.value
-			continue
-		}
-		txOut, err := dcr.node.GetTxOut(&wireOP.Hash, wireOP.Index, true)
-		if err != nil {
-			return 0, err
-		}
-		if txOut == nil {
-			// Must be spent now?
-			dcr.log.Debugf("ignoring output from listlockunspent that wasn't found with gettxout. %s", pt)
-			continue
-		}
-		sum += toAtoms(txOut.Value)
+	for _, op := range lockedOutpoints {
+		sum += toAtoms(op.Amount)
 	}
 	return sum, nil
 }
@@ -1623,7 +1604,7 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		return sum+toAtoms(unspent.rpc.Amount) >= val
 	}
-	coins, _, _, err := dcr.fund(0, enough)
+	coins, _, _, err := dcr.fund(enough)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1638,7 +1619,7 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regfee, netFeeRate u
 		txFee := uint64(size+unspent.input.Size()) * netFeeRate
 		return sum+toAtoms(unspent.rpc.Amount) >= regfee+txFee
 	}
-	coins, _, _, err := dcr.fund(0, enough)
+	coins, _, _, err := dcr.fund(enough)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1913,6 +1894,32 @@ func (dcr *ExchangeWallet) wireBytes(tx *wire.MsgTx) []byte {
 		dcr.log.Errorf("error serializing transaction: %v", err)
 	}
 	return s
+}
+
+// anylist is a list of RPC parameters to be converted to []json.RawMessage and
+// sent via nodeRawRequest.
+type anylist []interface{}
+
+// nodeRawRequest is used to  marshal parameters and send requests to the RPC
+// server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
+// will be marshaled into `thing`.
+func (dcr *ExchangeWallet) nodeRawRequest(method string, args anylist, thing interface{}) error {
+	params := make([]json.RawMessage, 0, len(args))
+	for i := range args {
+		p, err := json.Marshal(args[i])
+		if err != nil {
+			return err
+		}
+		params = append(params, p)
+	}
+	b, err := dcr.node.RawRequest(method, params)
+	if err != nil {
+		return fmt.Errorf("rawrequest error: %v", err)
+	}
+	if thing != nil {
+		return json.Unmarshal(b, thing)
+	}
+	return nil
 }
 
 // Convert the DCR value to atoms.

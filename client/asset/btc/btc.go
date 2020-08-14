@@ -480,7 +480,7 @@ func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
 	}
 
 	return &asset.Balance{
-		Available: toSatoshi(balances.Mine.Trusted),
+		Available: toSatoshi(balances.Mine.Trusted) - locked,
 		Immature:  toSatoshi(balances.Mine.Immature + balances.Mine.Untrusted),
 		Locked:    locked,
 	}, err
