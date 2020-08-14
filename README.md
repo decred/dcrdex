@@ -164,7 +164,7 @@ Please ensure you are building from a current snapshot of the master branch.
 1. [Go >= 1.14](https://golang.org/doc/install)
 2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface.
 3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV) built from the `master` branch.
-4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet.
+4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.
 
 See the [wiki](../../wiki/Testnet-Testing) for details on preparing the wallets.
 
