@@ -1636,7 +1636,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			err := c.authDEX(dc)
 			if err != nil {
 				details := fmt.Sprintf("%s: %v", dc.acct.host, err)
-				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
+				c.notify(newDEXAuthNote("DEX auth error", dc.acct.host, false, details, db.ErrorLevel))
 				result.AuthErr = details
 				// Disable account on AccountNotFoundError.
 				var mErr *msgjson.Error

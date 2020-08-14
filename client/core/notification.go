@@ -203,6 +203,21 @@ func newBalanceNote(assetID uint32, bal *db.Balance) *BalanceNote {
 	}
 }
 
+// DEXAuthNote is a notification regarding individual DEX authentication status.
+type DEXAuthNote struct {
+	db.Notification
+	Host          string `json:"host"`
+	Authenticated bool   `json:"authenticated"`
+}
+
+func newDEXAuthNote(subject, host string, authenticated bool, details string, severity db.Severity) *DEXAuthNote {
+	return &DEXAuthNote{
+		Notification:  db.NewNotification("dex_auth", subject, details, severity),
+		Host:          host,
+		Authenticated: authenticated,
+	}
+}
+
 // WalletConfigNote is a notification regarding a change in wallet
 // configuration settings.
 type WalletConfigNote struct {
