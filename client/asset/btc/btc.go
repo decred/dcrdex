@@ -526,10 +526,12 @@ func (btc *ExchangeWallet) FundOrder(value uint64, immediate bool, nfo *dex.Asse
 	if value == 0 {
 		return nil, fmt.Errorf("cannot fund value = 0")
 	}
+
+	btc.fundingMtx.Lock()         // before getting spendable utxos from wallet
+	defer btc.fundingMtx.Unlock() // after we update the map and lock in the wallet
+
 	// Now that we allow funding with 0 conf UTXOs, some more logic could be
 	// used out of caution, including preference for >0 confs.
-	btc.fundingMtx.Lock()
-	defer btc.fundingMtx.Unlock() // stay locked until we update the map at the end
 	utxos, _, avail, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
@@ -619,17 +621,18 @@ out:
 // order is canceled partially filled, and then the remainder resubmitted. We
 // would already have an output of just the right size, and that would be
 // recognized here.
+//
+// NOTE: This function is not safe for concurrent access to fundingCoins. The
+// caller must lock fundingMtx.
 func (btc *ExchangeWallet) split(value uint64, outputs []*output, inputsSize uint64, fundingCoins map[outPoint]*compositeUTXO, nfo *dex.Asset) (asset.Coins, error) {
 	var err error
 	defer func() {
 		if err != nil {
 			return
 		}
-		btc.fundingMtx.Lock()
 		for pt, fCoin := range fundingCoins {
 			btc.fundingCoins[pt] = fCoin
 		}
-		btc.fundingMtx.Unlock()
 		err = btc.wallet.LockUnspent(false, outputs)
 		if err != nil {
 			btc.log.Errorf("error locking unspent outputs: %v", err)

@@ -567,8 +567,8 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 
 	// Keep a consistent view of spendable and locked coins in the wallet and
 	// the fundingCoins map to make this safe for concurrent use.
-	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock() // stay locked until we update the map at the end
+	dcr.fundingMtx.Lock()         // before listing unspents in wallet
+	defer dcr.fundingMtx.Unlock() // hold until lockFundingCoins (wallet and map)
 
 	unspents, err := dcr.unspents()
 	if err != nil {
@@ -714,6 +714,9 @@ func (dcr *ExchangeWallet) split(value uint64, coins asset.Coins, inputsSize uin
 
 	reqFunds := calc.RequiredOrderFunds(value, dexdcr.P2PKHInputSize, nfo)
 
+	dcr.fundingMtx.Lock()         // before generating the new output in sendCoins
+	defer dcr.fundingMtx.Unlock() // after locking it (wallet and map) and storing the previous funding coins in splitFunds
+
 	msgTx, net, err := dcr.sendCoins(addr, coins, reqFunds, dcr.feeRateWithFallback(), false)
 	if err != nil {
 		return nil, fmt.Errorf("error sending split transaction: %v", err)
@@ -739,12 +742,17 @@ func (dcr *ExchangeWallet) split(value uint64, coins asset.Coins, inputsSize uin
 	// `-4: rejected transaction: transaction in the pool already spends the
 	// same coins` error.
 	// // Unlock the spent coins.
-	// err = dcr.ReturnCoins(coins)
+	// err = dcr.returnCoins(coins)
 	// if err != nil {
 	// 	dcr.log.Errorf("error locking coins spent in split transaction %v", coins)
 	// }
 
-	dcr.logSplitFunds(op, fundingCoins)
+	// Associate the funding coins with the split tx output, so that the coins
+	// can be unlocked when the swap is sent. The helps to deal with a timing
+	// issue with dcrwallet where listunspent might still return outputs that
+	// were just spent in a transaction broadcast with sendrawtransaction.
+	// Instead, we'll keep them locked until the split output is spent.
+	dcr.splitFunds[op.pt] = fundingCoins
 
 	dcr.log.Debugf("funding %d atom order with split output coin %v from original coins %v", value, op, coins)
 	dcr.log.Infof("sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash(), value, reqFunds)
@@ -771,28 +779,22 @@ func (dcr *ExchangeWallet) lockFundingCoins(fCoins []*fundingCoin) error {
 	return nil
 }
 
-// logSplitFunds associates the funding coins with the split tx output, so that
-// the coins can be unlocked when the swap is sent. The helps to deal with a
-// timing issue with dcrwallet where listunspent might still return outputs that were
-// just spent in a transaction broadcast with sendrawtransaction. Instead, we'll
-// keep them locked until the split output is spent.
-func (dcr *ExchangeWallet) logSplitFunds(op *output, fCoins []*fundingCoin) {
-	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock()
-	dcr.splitFunds[op.pt] = fCoins
-}
-
 // ReturnCoins unlocks coins. This would be necessary in the case of a
 // canceled order.
 func (dcr *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
+	dcr.fundingMtx.Lock()
+	defer dcr.fundingMtx.Unlock()
+	return dcr.returnCoins(unspents)
+}
+
+// returnCoins is ReturnCoins but without locking fundingMtx.
+func (dcr *ExchangeWallet) returnCoins(unspents asset.Coins) error {
 	if len(unspents) == 0 {
 		return fmt.Errorf("cannot return zero coins")
 	}
 	ops := make([]*wire.OutPoint, 0, len(unspents))
 
 	dcr.log.Debugf("returning coins %s", unspents)
-	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock()
 	for _, unspent := range unspents {
 		op, err := dcr.convertCoin(unspent)
 		if err != nil {
@@ -819,7 +821,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	coins := make(asset.Coins, 0, len(ids))
 	notFound := make(map[outPoint]bool)
 	dcr.fundingMtx.Lock()
-	defer dcr.fundingMtx.Unlock() // stay locked until we update the map at the end
+	defer dcr.fundingMtx.Unlock() // stay locked until we update the map and lock them in the wallet
 	for _, id := range ids {
 		txHash, vout, err := decodeCoinID(id)
 		if err != nil {
@@ -940,13 +942,15 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Add change, sign, and send the transaction.
+	dcr.fundingMtx.Lock()         // before generating change output
+	defer dcr.fundingMtx.Unlock() // hold until after returnCoins and lockFundingCoins(change)
 	msgTx, change, err := dcr.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Return spent outputs.
-	err = dcr.ReturnCoins(swaps.Inputs)
+	err = dcr.returnCoins(swaps.Inputs)
 	if err != nil {
 		dcr.log.Errorf("error unlocking swapped coins", swaps.Inputs)
 	}
@@ -962,7 +966,6 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			dcr.log.Warnf("Failed to lock dcr change coin %s", change)
 		}
 	}
-	// TODO: dcr.fundingMtx.Unlock()
 
 	receipts := make([]asset.Receipt, 0, swapCount)
 	txHash := msgTx.TxHash()
