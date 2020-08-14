@@ -1542,13 +1542,38 @@ func (c *Core) Logout() error {
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
+// If an account is not found on the dex server upon dex authentication the
+// account is disabled and the corresponding entry in c.conns is removed
+// which will result in the user being prompted to register again.
 func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	// Connections will be attempted in parallel, so we'll need to protect the
 	// errorSet.
 	var wg sync.WaitGroup
 	c.connMtx.RLock()
-	defer c.connMtx.RUnlock()
 	results := make([]*DEXBrief, 0, len(c.conns))
+	var reconcileConnectionsWg sync.WaitGroup
+	reconcileConnectionsWg.Add(1)
+	disabledAccountHostChan := make(chan string)
+	// If an account has been disabled the entry is removed from c.conns.
+	go func() {
+		defer reconcileConnectionsWg.Done()
+		var disabledAccountHosts []string
+		for disabledAccountHost := range disabledAccountHostChan {
+			disabledAccountHosts = append(disabledAccountHosts, disabledAccountHost)
+		}
+		if len(disabledAccountHosts) > 0 {
+			c.connMtx.Lock()
+			for _, disabledAccountHost := range disabledAccountHosts {
+				c.conns[disabledAccountHost].connMaster.Disconnect()
+				delete(c.conns, disabledAccountHost)
+				log.Warnf("Account at dex: %v not found. The account has been "+
+					"disabled. It is disconnected and has been removed from core "+
+					"connections.", disabledAccountHost)
+			}
+			c.connMtx.Unlock()
+		}
+	}()
+
 	for _, dc := range c.conns {
 		dc.tradeMtx.RLock()
 		tradeIDs := make([]string, 0, len(dc.trades))
@@ -1605,21 +1630,40 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			c.reFee(dcrWallet, dc)
 			continue
 		}
-
 		wg.Add(1)
 		go func(dc *dexConnection) {
 			defer wg.Done()
 			err := c.authDEX(dc)
 			if err != nil {
 				details := fmt.Sprintf("%s: %v", dc.acct.host, err)
-				c.notify(newFeePaymentNote("DEX auth error", details, db.ErrorLevel, dc.acct.host))
+				c.notify(newDEXAuthNote("DEX auth error", dc.acct.host, false, details, db.ErrorLevel))
 				result.AuthErr = details
+				// Disable account on AccountNotFoundError.
+				var mErr *msgjson.Error
+				if errors.As(err, &mErr) &&
+					mErr.Code == msgjson.AccountNotFoundError {
+					acctInfo, err := c.db.Account(dc.acct.host)
+					if err != nil {
+						log.Errorf("Error retrieving account: %v", err)
+						return
+					}
+					err = c.db.DisableAccount(acctInfo)
+					if err != nil {
+						log.Errorf("Error disabling account: %v", err)
+						return
+					}
+					disabledAccountHostChan <- dc.acct.host
+					return
+				}
 				return
 			}
 			result.Authed = true
 		}(dc)
 	}
 	wg.Wait()
+	c.connMtx.RUnlock()
+	close(disabledAccountHostChan)
+	reconcileConnectionsWg.Wait()
 	return results
 }
 
@@ -2071,7 +2115,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	// Check the response error.
 	err = <-errChan
 	if err != nil {
-		return fmt.Errorf("'connect' error: %v", err)
+		return fmt.Errorf("'connect' error: %w", err)
 	}
 
 	// Check the servers response signature.

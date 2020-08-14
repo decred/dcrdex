@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -271,6 +272,11 @@ func (tdb *TDB) Account(url string) (*db.AccountInfo, error) {
 }
 
 func (tdb *TDB) CreateAccount(ai *db.AccountInfo) error {
+	return nil
+}
+
+func (tdb *TDB) DisableAccount(ai *db.AccountInfo) error {
+	tdb.accts = nil
 	return nil
 }
 
@@ -654,10 +660,16 @@ type testRig struct {
 }
 
 func newTestRig() *testRig {
-	db := &TDB{
+	tdb := &TDB{
 		orderOrders: make(map[order.OrderID]*db.MetaOrder),
 		wallet:      &db.Wallet{},
 	}
+
+	ai := &db.AccountInfo{
+		Host: "somedex.com",
+	}
+	tdb.acct = ai
+	tdb.accts = append(tdb.accts, ai)
 
 	// Set the global waiter expiration, and start the waiter.
 	queue := wait.NewTickerQueue(time.Millisecond * 5)
@@ -670,7 +682,7 @@ func newTestRig() *testRig {
 	return &testRig{
 		core: &Core{
 			ctx:      tCtx,
-			db:       db,
+			db:       tdb,
 			latencyQ: queue,
 			conns: map[string]*dexConnection{
 				tDexHost: dc,
@@ -685,7 +697,7 @@ func newTestRig() *testRig {
 			newCrypter: func([]byte) encrypt.Crypter { return crypter },
 			reCrypter:  func([]byte, []byte) (encrypt.Crypter, error) { return crypter, crypter.recryptErr },
 		},
-		db:      db,
+		db:      tdb,
 		queue:   queue,
 		ws:      conn,
 		dc:      dc,
@@ -724,13 +736,18 @@ func (rig *testRig) queueNotifyFee() {
 	})
 }
 
-func (rig *testRig) queueConnect() {
+func (rig *testRig) queueConnect(rpcErr *msgjson.Error) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
 		result := &msgjson.ConnectResult{Sig: connect.Sig}
-		resp, _ := msgjson.NewResponse(msg.ID, result, nil)
+		var resp *msgjson.Message
+		if rpcErr != nil {
+			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
+		} else {
+			resp, _ = msgjson.NewResponse(msg.ID, result, nil)
+		}
 		f(resp)
 		return nil
 	})
@@ -1185,7 +1202,7 @@ func TestRegister(t *testing.T) {
 		rig.queueRegister(regRes)
 		queueTipChange()
 		rig.queueNotifyFee()
-		rig.queueConnect()
+		rig.queueConnect(nil)
 	}
 
 	form := &RegisterForm{
@@ -1437,7 +1454,7 @@ func TestLogin(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	rig.queueConnect()
+	rig.queueConnect(nil)
 	_, err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
@@ -1454,6 +1471,7 @@ func TestLogin(t *testing.T) {
 
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
+	rig.queueConnect(nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
@@ -1464,6 +1482,8 @@ func TestLogin(t *testing.T) {
 	rig.acct.markFeePaid()
 
 	// 'connect' route error.
+	rig = newTestRig()
+	tCore = rig.core
 	rig.acct.unauth()
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		resp, _ := msgjson.NewResponse(msg.ID, nil, msgjson.NewError(1, "test error"))
@@ -1478,10 +1498,80 @@ func TestLogin(t *testing.T) {
 	}
 
 	// Success again.
-	rig.queueConnect()
+	rig = newTestRig()
+	tCore = rig.core
+	rig.acct.markFeePaid()
+	rig.queueConnect(nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
+	}
+}
+
+func TestLoginAccountNotFoundError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.acct.markFeePaid()
+
+	expectedErrorMessage := "test account not found error"
+	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage)
+	rig.queueConnect(accountNotFoundError)
+
+	wallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = wallet
+	rig.queueConnect(nil)
+
+	result, err := tCore.Login(tPW)
+	if err != nil {
+		t.Fatalf("unexpected Login error: %v", err)
+	}
+	for _, dexStat := range result.DEXes {
+		if dexStat.Authed || dexStat.AuthErr == "" || !strings.Contains(dexStat.AuthErr, expectedErrorMessage) {
+			t.Fatalf("expected account not found error")
+		}
+	}
+}
+
+func TestInitializeDEXConnectionsSuccess(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.acct.markFeePaid()
+	rig.queueConnect(nil)
+
+	dexStats := tCore.initializeDEXConnections(rig.crypter)
+
+	if dexStats == nil {
+		t.Fatal("initializeDEXConnections failure")
+	}
+	for _, dexStat := range dexStats {
+		if dexStat.AuthErr != "" {
+			t.Fatalf("initializeDEXConnections authorization error %v", dexStat.AuthErr)
+		}
+	}
+}
+
+func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	rig.acct.markFeePaid()
+	expectedErrorMessage := "test account not found error"
+	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage))
+
+	dexStats := tCore.initializeDEXConnections(rig.crypter)
+
+	if dexStats == nil {
+		t.Fatal("initializeDEXConnections failure")
+	}
+	for _, dexStat := range dexStats {
+		if dexStat.AuthErr == "" {
+			t.Fatalf("initializeDEXConnections authorization error %v", dexStat.AuthErr)
+		}
+		if dexStat.Authed || dexStat.AuthErr == "" || !strings.Contains(dexStat.AuthErr, expectedErrorMessage) {
+			t.Fatalf("expected account not found error")
+		}
+	}
+	if len(rig.core.conns) > 0 {
+		t.Fatalf("expected rig.core.conns to be empty due to disabling the account")
 	}
 }
 

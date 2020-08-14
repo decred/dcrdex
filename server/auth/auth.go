@@ -752,8 +752,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	acctInfo, paid, open := auth.storage.Account(user)
 	if acctInfo == nil {
 		return &msgjson.Error{
-			Code:    msgjson.AuthenticationError,
-			Message: "no account info found for account ID" + connect.AccountID.String(),
+			Code:    msgjson.AccountNotFoundError,
+			Message: "no account found for account ID: " + connect.AccountID.String(),
 		}
 	}
 	if !paid {
@@ -761,7 +761,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		// contains the fee address and amount for the user). Use
 		// rmUserConnectMsgs and rmUserConnectReqs to get them by account ID.
 		return &msgjson.Error{
-			Code:    msgjson.AuthenticationError,
+			Code:    msgjson.UnpaidAccountError,
 			Message: "unpaid account",
 		}
 	}

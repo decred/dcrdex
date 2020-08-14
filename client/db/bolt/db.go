@@ -47,39 +47,40 @@ var (
 // Bolt works on []byte keys and values. These are some commonly used key and
 // value encodings.
 var (
-	appBucket      = []byte("appBucket")
-	accountsBucket = []byte("accounts")
-	ordersBucket   = []byte("orders")
-	matchesBucket  = []byte("matches")
-	walletsBucket  = []byte("wallets")
-	notesBucket    = []byte("notes")
-	versionKey     = []byte("version")
-	linkedKey      = []byte("linked")
-	feeProofKey    = []byte("feecoin")
-	statusKey      = []byte("status")
-	baseKey        = []byte("base")
-	quoteKey       = []byte("quote")
-	orderKey       = []byte("order")
-	matchKey       = []byte("match")
-	orderIDKey     = []byte("orderID")
-	matchIDKey     = []byte("matchID")
-	proofKey       = []byte("proof")
-	activeKey      = []byte("active")
-	dexKey         = []byte("dex")
-	updateTimeKey  = []byte("utime")
-	accountKey     = []byte("account")
-	balanceKey     = []byte("balance")
-	walletKey      = []byte("wallet")
-	changeKey      = []byte("change")
-	noteKey        = []byte("note")
-	stampKey       = []byte("stamp")
-	severityKey    = []byte("severity")
-	ackKey         = []byte("ack")
-	byteTrue       = encode.ByteTrue
-	byteFalse      = encode.ByteFalse
-	byteEpoch      = uint16Bytes(uint16(order.OrderStatusEpoch))
-	byteBooked     = uint16Bytes(uint16(order.OrderStatusBooked))
-	backupDir      = "backup"
+	appBucket              = []byte("appBucket")
+	accountsBucket         = []byte("accounts")
+	disabledAccountsBucket = []byte("disabledAccounts")
+	ordersBucket           = []byte("orders")
+	matchesBucket          = []byte("matches")
+	walletsBucket          = []byte("wallets")
+	notesBucket            = []byte("notes")
+	versionKey             = []byte("version")
+	linkedKey              = []byte("linked")
+	feeProofKey            = []byte("feecoin")
+	statusKey              = []byte("status")
+	baseKey                = []byte("base")
+	quoteKey               = []byte("quote")
+	orderKey               = []byte("order")
+	matchKey               = []byte("match")
+	orderIDKey             = []byte("orderID")
+	matchIDKey             = []byte("matchID")
+	proofKey               = []byte("proof")
+	activeKey              = []byte("active")
+	dexKey                 = []byte("dex")
+	updateTimeKey          = []byte("utime")
+	accountKey             = []byte("account")
+	balanceKey             = []byte("balance")
+	walletKey              = []byte("wallet")
+	changeKey              = []byte("change")
+	noteKey                = []byte("note")
+	stampKey               = []byte("stamp")
+	severityKey            = []byte("severity")
+	ackKey                 = []byte("ack")
+	byteTrue               = encode.ByteTrue
+	byteFalse              = encode.ByteFalse
+	byteEpoch              = uint16Bytes(uint16(order.OrderStatusEpoch))
+	byteBooked             = uint16Bytes(uint16(order.OrderStatusBooked))
+	backupDir              = "backup"
 )
 
 // BoltDB is a bbolt-based database backend for a DEX client. BoltDB satisfies
@@ -106,7 +107,7 @@ func NewDB(dbPath string) (dexdb.DB, error) {
 		DB: db,
 	}
 
-	err = bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket,
+	err = bdb.makeTopLevelBuckets([][]byte{appBucket, accountsBucket, disabledAccountsBucket,
 		ordersBucket, matchesBucket, walletsBucket, notesBucket})
 	if err != nil {
 		return nil, err
@@ -299,6 +300,57 @@ func (db *BoltDB) CreateAccount(ai *dexdb.AccountInfo) error {
 	})
 }
 
+// deleteAccount removes the account by host.
+func (db *BoltDB) deleteAccount(host string) error {
+	acctKey := []byte(host)
+	return db.acctsUpdate(func(accts *bbolt.Bucket) error {
+		return accts.DeleteBucket(acctKey)
+	})
+}
+
+// DisableAccount account disables the given account and archives it. The
+// Accounts and Account methods will no longer find the disabled account.
+//
+// TODO: Add disabledAccounts method for retrieval of a disabled account and
+// possible recovery of the account data.
+func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
+	// Copy AccountInfo to disabledAccounts
+	err := db.disabledAcctsUpdate(func(disabledAccounts *bbolt.Bucket) error {
+		return disabledAccounts.Put(ai.EncKey, ai.Encode())
+	})
+	if err != nil {
+		return err
+	}
+	err = db.deleteAccount(ai.Host)
+	if err != nil {
+		if err == bbolt.ErrBucketNotFound {
+			log.Warnf("Cannot delete account from active accounts"+
+				" table. Host: not found. %s err: %v", ai.Host, err)
+		} else {
+			return err
+		}
+	}
+	return nil
+}
+
+// disabledAccount gets the AccountInfo from disabledAccount associated with
+// the specified EncKey.
+func (db *BoltDB) disabledAccount(encKey []byte) (*dexdb.AccountInfo, error) {
+	var acctInfo *dexdb.AccountInfo
+	return acctInfo, db.disabledAcctsView(func(accts *bbolt.Bucket) error {
+		acct := accts.Get(encKey)
+		if acct == nil {
+			return fmt.Errorf("account not found for key")
+		}
+		var err error
+		acctInfo, err = dexdb.DecodeAccountInfo(acct)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 // AccountPaid marks the account as paid by setting the "fee proof".
 func (db *BoltDB) AccountPaid(proof *dexdb.AccountProof) error {
 	acctKey := []byte(proof.Host)
@@ -319,6 +371,16 @@ func (db *BoltDB) acctsView(f bucketFunc) error {
 // acctsUpdate is a convenience function for updating the account bucket.
 func (db *BoltDB) acctsUpdate(f bucketFunc) error {
 	return db.withBucket(accountsBucket, db.Update, f)
+}
+
+// disabledAcctsView is a convenience function for reading from the disabledAccounts bucket.
+func (db *BoltDB) disabledAcctsView(f bucketFunc) error {
+	return db.withBucket(disabledAccountsBucket, db.View, f)
+}
+
+// disabledAcctsUpdate is a convenience function for inserting into the disabledAccounts bucket.
+func (db *BoltDB) disabledAcctsUpdate(f bucketFunc) error {
+	return db.withBucket(disabledAccountsBucket, db.Update, f)
 }
 
 // UpdateOrder saves the order information in the database. Any existing order
