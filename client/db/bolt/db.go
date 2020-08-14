@@ -315,7 +315,7 @@ func (db *BoltDB) deleteAccount(host string) error {
 // possible recovery of the account data.
 func (db *BoltDB) DisableAccount(ai *dexdb.AccountInfo) error {
 	// Copy AccountInfo to disabledAccounts
-	err := db.acctsDisable(func(disabledAccounts *bbolt.Bucket) error {
+	err := db.disabledAcctsUpdate(func(disabledAccounts *bbolt.Bucket) error {
 		return disabledAccounts.Put(ai.EncKey, ai.Encode())
 	})
 	if err != nil {
@@ -378,8 +378,8 @@ func (db *BoltDB) disabledAcctsView(f bucketFunc) error {
 	return db.withBucket(disabledAccountsBucket, db.View, f)
 }
 
-// acctsDisable is a convenience function for inserting into the disabledAccounts bucket.
-func (db *BoltDB) acctsDisable(f bucketFunc) error {
+// disabledAcctsUpdate is a convenience function for inserting into the disabledAccounts bucket.
+func (db *BoltDB) disabledAcctsUpdate(f bucketFunc) error {
 	return db.withBucket(disabledAccountsBucket, db.Update, f)
 }
 
