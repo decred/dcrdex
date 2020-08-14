@@ -97,8 +97,6 @@ type tRPCClient struct {
 	txOutErr      error
 	rawRes        map[string]json.RawMessage
 	rawErr        map[string]error
-	lastMethod    string
-	lastParams    []json.RawMessage
 	signFunc      func([]json.RawMessage) (json.RawMessage, error)
 	signMsgFunc   func([]json.RawMessage) (json.RawMessage, error)
 	blockchainMtx sync.RWMutex
@@ -211,8 +209,6 @@ func (c *tRPCClient) GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.
 }
 
 func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.RawMessage, error) {
-	c.lastMethod = method
-	c.lastParams = params
 	switch method {
 	case methodSignTx:
 		if c.rawErr[method] == nil {
@@ -329,7 +325,6 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	}
 	wallet := newWallet(cfg, &dexbtc.Config{}, client)
 	go wallet.run(walletCtx)
-	go wallet.processFindRedemptionRequests(walletCtx)
 
 	return wallet, client, shutdown
 }

@@ -117,7 +117,6 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 	wallet := unconnectedWallet(walletCfg, &Config{}, tLogger)
 	wallet.node = client
 	go wallet.monitorBlocks(walletCtx)
-	go wallet.processFindRedemptionRequests(walletCtx)
 
 	return wallet, client, shutdown
 }
@@ -1435,7 +1434,7 @@ func TestFindRedemption(t *testing.T) {
 			t.Fatalf("error after clearing errors: %v", frr.Err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatalf("redemption not found after 2 seconds")
+		t.Fatalf("redemption (re-check) not found after 2 seconds")
 	}
 }
 
