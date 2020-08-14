@@ -1679,55 +1679,31 @@ func msgTxToHex(msgTx *wire.MsgTx) string {
 // attempts to sign the transaction. If it fails to completely sign the
 // transaction, it is an error and a nil *wire.MsgTx is returned.
 func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
-	var err error
-	var signedTx *wire.MsgTx
-	var signed bool
-
-	trySign := func() {
-		var res walletjson.SignRawTransactionResult
-		err = dcr.nodeRawRequest(methodSignRawTransaction, anylist{msgTxToHex(baseTx)}, &res)
-		if err != nil {
-			dcr.log.Errorf("error encountered signing raw transaction (raw tx: %x): %v", dcr.wireBytes(baseTx), err)
-			err = fmt.Errorf("rawrequest error: %v", err)
-			return
-		}
-
-		if len(res.Errors) > 0 {
-			for i := range res.Errors {
-				sigErr := &res.Errors[i]
-				dcr.log.Errorf("Signing %v:%d, seq = %d, sigScript = %v, failed: %v",
-					sigErr.TxID, sigErr.Vout, sigErr.Sequence, sigErr.ScriptSig, sigErr.Error)
-				// will be unsigned below, so log each SignRawTransactionError and move on
-			}
-		}
-
-		signedTx, err = msgTxFromHex(res.Hex)
-		if err != nil {
-			err = fmt.Errorf("failed to deserialize signed MsgTx: %w", err)
-			dcr.log.Error(err)
-			return
-		}
-
-		signed = res.Complete
-		if !signed {
-			dcr.log.Errorf("incomplete raw transaction signatures (input tx: %x / incomplete signed tx: %x): ",
-				dcr.wireBytes(baseTx), dcr.wireBytes(signedTx))
-			signedTx = nil // do not return the partially signed tx
-			err = fmt.Errorf("incomplete raw tx signatures")
-			return
-		}
-
+	var res walletjson.SignRawTransactionResult
+	err := dcr.nodeRawRequest(methodSignRawTransaction, anylist{msgTxToHex(baseTx)}, &res)
+	if err != nil {
+		return nil, fmt.Errorf("rawrequest error: %v", err)
 	}
 
-	maxTries := 3
-	for i := 0; !signed && i < maxTries; i++ {
-		if i > 0 {
-			time.Sleep(250 * time.Millisecond)
-		}
-		trySign()
+	for i := range res.Errors {
+		sigErr := &res.Errors[i]
+		dcr.log.Errorf("Signing %v:%d, seq = %d, sigScript = %v, failed: %v",
+			sigErr.TxID, sigErr.Vout, sigErr.Sequence, sigErr.ScriptSig, sigErr.Error)
+		// Will be incomplete below, so log each SignRawTransactionError and move on.
 	}
 
-	return signedTx, err
+	signedTx, err := msgTxFromHex(res.Hex)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize signed MsgTx: %w", err)
+	}
+
+	if !res.Complete {
+		dcr.log.Errorf("Incomplete raw transaction signatures (input tx: %x / incomplete signed tx: %x): ",
+			dcr.wireBytes(baseTx), dcr.wireBytes(signedTx))
+		return nil, fmt.Errorf("incomplete raw tx signatures")
+	}
+
+	return signedTx, nil
 }
 
 // sendWithReturn sends the unsigned transaction with an added output (unless
