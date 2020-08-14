@@ -98,7 +98,7 @@ var (
 			IsBoolean: true,
 		},
 	}
-	// walletInfo defines some general information about a Decred wallet.
+	// WalletInfo defines some general information about a Decred wallet.
 	WalletInfo = &asset.WalletInfo{
 		Name:              "Decred",
 		Units:             "atoms",
