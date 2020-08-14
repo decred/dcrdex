@@ -1554,10 +1554,10 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 	var reconcileConnectionsWg sync.WaitGroup
 	reconcileConnectionsWg.Add(1)
 	disabledAccountHostChan := make(chan string)
-	var disabledAccountHosts []string
 	// If an account has been disabled the entry is removed from c.conns.
 	go func() {
 		defer reconcileConnectionsWg.Done()
+		var disabledAccountHosts []string
 		for disabledAccountHost := range disabledAccountHostChan {
 			disabledAccountHosts = append(disabledAccountHosts, disabledAccountHost)
 		}
