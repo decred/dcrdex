@@ -416,44 +416,47 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 			lastProcessedStatus[match.id] = status
 			client.log("NOW =====> %s", status)
 
-			// If the new status shows that we've just sent a swap or redeem,
-			// let's record appropriate balance change expectations.
+			var assetToMine *dex.Asset
+			var swapOrRedeem string
+
 			switch {
 			case side == order.Maker && status == order.MakerSwapCast,
 				side == order.Taker && status == order.TakerSwapCast:
+				// Record expected balance changes if we've just sent a swap.
+				// Do NOT mine blocks until counter-party captures status change.
 				recordBalanceChanges(tracker.wallets.fromAsset.ID, true, match.Match.Quantity, match.Match.Rate)
-				continue // no need to mine blocks until counter-party captures status change
+
+			case side == order.Maker && status == order.TakerSwapCast,
+				side == order.Taker && status == order.MakerSwapCast:
+				// Mine block for counter-party's swap. This enables us to
+				// proceed with the required follow-up action.
+				// Our toAsset == counter-party's fromAsset.
+				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "swap"
+
 			case side == order.Maker && status == order.MakerRedeemed,
 				side == order.Taker && status == order.MatchComplete:
 				recordBalanceChanges(tracker.wallets.toAsset.ID, false, match.Match.Quantity, match.Match.Rate)
-				continue // no need to mine blocks until counter-party captures status change
+				// Mine blocks for redemption since counter-party does not wait
+				// for redeem tx confirmations before performing follow-up action.
+				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "redeem"
 			}
 
-			// Check for and mine counter-party's swap or redeem.
-			// This enables us to proceed with the required follow-up action.
-			var assetToMine *dex.Asset // toAsset for counter-party's swap and fromAsset for redeem
-			var swapOrRedeem string
-			switch {
-			case side == order.Maker && status == order.TakerSwapCast,
-				side == order.Taker && status == order.MakerSwapCast:
-				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "swap"
-			case side == order.Maker && status == order.MatchComplete,
-				side == order.Taker && status == order.MakerRedeemed:
-				assetToMine, swapOrRedeem = tracker.wallets.fromAsset, "redeem"
-			default:
-				continue
-			}
-
-			assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)
-			err := mineBlocks(assetID, nBlocks)
-			if err == nil {
-				otherSide := order.Maker
-				if side == order.Maker {
-					otherSide = order.Taker
+			if assetToMine != nil {
+				assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)+1 // mine 1 extra to ensure tx gets req. confs
+				err := mineBlocks(assetID, nBlocks)
+				if err == nil {
+					var actor order.MatchSide
+					if swapOrRedeem == "redeem" {
+						actor = side // this client
+					} else if side == order.Maker {
+						actor = order.Taker // counter-party
+					} else {
+						actor = order.Maker
+					}
+					client.log("Mined %d blocks for %s's %s, match %s", nBlocks, actor, swapOrRedeem, token(match.id.Bytes()))
+				} else {
+					client.log("%s mine error %v", unbip(assetID), err)
 				}
-				client.log("Mined %d blocks for %s's %s, match %s", nBlocks, otherSide, swapOrRedeem, token(match.id.Bytes()))
-			} else {
-				client.log("%s mine error %v", unbip(assetID), err)
 			}
 		}
 		return completedTrades == len(tracker.matches)
@@ -862,13 +865,13 @@ func (client *tClient) lockWallets() error {
 func (client *tClient) unlockWallets() error {
 	client.log("unlocking wallets")
 	dcrw := client.dcrw()
-	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 300", dcrw.daemon, string(dcrw.pass))
+	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 600", dcrw.daemon, string(dcrw.pass))
 	if err := tmuxSendKeys("dcr-harness:0", unlockCmd); err != nil {
 		return err
 	}
 	time.Sleep(500 * time.Millisecond)
 	btcw := client.btcw()
-	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 300",
+	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 600",
 		btcw.daemon, btcw.walletName, string(btcw.pass))
 	return tmuxSendKeys("btc-harness:2", unlockCmd)
 }
