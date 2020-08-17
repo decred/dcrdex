@@ -1667,20 +1667,23 @@ func msgTxFromHex(txHex string) (*wire.MsgTx, error) {
 	return msgTx, nil
 }
 
-func msgTxToHex(msgTx *wire.MsgTx) string {
-	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
-	if err := msgTx.Serialize(buf); err != nil {
-		return ""
+func msgTxToHex(msgTx *wire.MsgTx) (string, error) {
+	b, err := msgTx.Bytes()
+	if err != nil {
+		return "", err
 	}
-	return hex.EncodeToString(buf.Bytes())
+	return hex.EncodeToString(b), nil
 }
 
-// signTx attempts to sign all transaction inputs. It will make multiple
-// attempts to sign the transaction. If it fails to completely sign the
-// transaction, it is an error and a nil *wire.MsgTx is returned.
+// signTx attempts to sign all transaction inputs. If it fails to completely
+// sign the transaction, it is an error and a nil *wire.MsgTx is returned.
 func (dcr *ExchangeWallet) signTx(baseTx *wire.MsgTx) (*wire.MsgTx, error) {
+	txHex, err := msgTxToHex(baseTx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode MsgTx: %w", err)
+	}
 	var res walletjson.SignRawTransactionResult
-	err := dcr.nodeRawRequest(methodSignRawTransaction, anylist{msgTxToHex(baseTx)}, &res)
+	err = dcr.nodeRawRequest(methodSignRawTransaction, anylist{txHex}, &res)
 	if err != nil {
 		return nil, fmt.Errorf("rawrequest error: %v", err)
 	}

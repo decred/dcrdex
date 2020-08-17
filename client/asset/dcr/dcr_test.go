@@ -368,8 +368,13 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 			return json.Marshal(&res)
 		}
 
+		txHex, err := msgTxToHex(signedTx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode MsgTx: %w", err)
+		}
+
 		res := walletjson.SignRawTransactionResult{
-			Hex:      msgTxToHex(signedTx),
+			Hex:      txHex,
 			Complete: complete,
 		}
 		return json.Marshal(&res)
