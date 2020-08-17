@@ -609,7 +609,11 @@ func (db *BoltDB) LinkOrder(oid, linkedID order.OrderID) error {
 		if oBkt == nil {
 			return fmt.Errorf("LinkOrder - order %s not found", oid)
 		}
-		return oBkt.Put(linkedKey, linkedID[:])
+		linkedB := linkedID[:]
+		if linkedID.IsZero() {
+			linkedB = nil
+		}
+		return oBkt.Put(linkedKey, linkedB)
 	})
 }
 

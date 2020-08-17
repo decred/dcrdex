@@ -79,7 +79,8 @@ export default class MarketsPage extends BasePage {
       // Active orders
       'liveTemplate', 'liveList',
       // Cancel order form
-      'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit'
+      'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit',
+      'cancelStatus'
     ])
     this.market = null
     this.registrationStatus = {}
@@ -88,6 +89,7 @@ export default class MarketsPage extends BasePage {
     this.openFunc = null
     this.currentCreate = null
     this.book = null
+    this.cancelData = null
     this.metaOrders = {}
     const reporters = {
       price: p => { this.reportPrice(p) }
@@ -168,7 +170,7 @@ export default class MarketsPage extends BasePage {
     // Order verification form
     bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
     // Cancel order form
-    bind(page.cancelSubmit, 'click', this.submitCancel)
+    bind(page.cancelSubmit, 'click', async () => { this.submitCancel() })
 
     // If the user clicks outside of a form, it should close the page overlay.
     bind(page.forms, 'mousedown', e => {
@@ -249,7 +251,7 @@ export default class MarketsPage extends BasePage {
     // Start a ticker to update time-since values.
     this.secondTicker = setInterval(() => {
       for (const metaOrder of Object.values(this.metaOrders)) {
-        const td = metaOrder.row.querySelector('[data-col=age]')
+        const td = Doc.tmplElement(metaOrder.row, 'age')
         td.textContent = Doc.timeSince(metaOrder.order.stamp)
       }
     }, 1000)
@@ -568,11 +570,11 @@ export default class MarketsPage extends BasePage {
       updateUserOrderRow(row, order)
       if (order.type === LIMIT) {
         if (order.tif === standingTiF && order.status < statusExecuted) {
-          const icon = row.querySelector('[data-col=cancel] > span')
+          const icon = Doc.tmplElement(row, 'cancelBttn')
           Doc.show(icon)
           bind(icon, 'click', e => {
             e.stopPropagation()
-            this.showCancel(icon, order.id)
+            this.showCancel(row, order.id)
           })
         }
       }
@@ -716,7 +718,8 @@ export default class MarketsPage extends BasePage {
   async submitCancel () {
     // this will be the page.cancelSubmit button (evt.currentTarget)
     const page = this.page
-    const order = this.cancelData.order
+    const cancelData = this.cancelData
+    const order = cancelData.order
     const req = {
       orderID: order.id,
       pw: page.cancelPass.value
@@ -724,14 +727,15 @@ export default class MarketsPage extends BasePage {
     page.cancelPass.value = ''
     var res = await postJSON('/api/cancel', req)
     app.loaded()
-    Doc.hide(page.forms)
     if (!app.checkResponse(res)) return
-    this.cancelData.bttn.parentNode.textContent = 'cancelling'
+    cancelData.status.textContent = 'cancelling'
+    Doc.hide(cancelData.bttn, page.forms)
+    Doc.show(cancelData.status)
     order.cancelling = true
   }
 
   /* showCancel shows a form to confirm submission of a cancel order. */
-  showCancel (bttn, orderID) {
+  showCancel (row, orderID) {
     const order = this.metaOrders[orderID].order
     const page = this.page
     const remaining = order.qty - order.filled
@@ -739,11 +743,9 @@ export default class MarketsPage extends BasePage {
     const symbol = isMarketBuy(order) ? this.market.quote.symbol : this.market.base.symbol
     page.cancelUnit.textContent = symbol.toUpperCase()
     this.showForm(page.cancelForm)
-    // Provide data to the event handler via the cancelSubmit object. This
-    // allows duplicate handlers to be automatically removed.
-    page.cancelSubmit.page = page
-    page.cancelSubmit.cancelData = {
-      bttn: bttn,
+    this.cancelData = {
+      bttn: Doc.tmplElement(row, 'cancelBttn'),
+      status: Doc.tmplElement(row, 'cancelStatus'),
       order: order
     }
   }
@@ -801,20 +803,30 @@ export default class MarketsPage extends BasePage {
    */
   handleOrderNote (note) {
     const order = note.order
-    if (order.targetID && note.subject === 'cancel') {
-      this.metaOrders[order.targetID].row.querySelector('[data-col=cancel]').textContent = 'canceled'
-    } else if (order.targetID && note.subject === 'revoke') {
-      this.metaOrders[order.targetID].row.querySelector('[data-col=cancel]').textContent = 'revoked'
-    } else {
-      const metaOrder = this.metaOrders[order.id]
-      if (!metaOrder) return
-      metaOrder.order = order
-      updateUserOrderRow(metaOrder.row, order)
-      if (order.filled === order.qty) {
-        // Remove the cancellation button.
-        updateDataCol(metaOrder.row, 'cancel', '')
+    if (order.targetID) {
+      const status = Doc.tmplElement(this.metaOrders[order.targetID].row, 'cancelStatus')
+      if (note.subject === 'cancel') {
+        Doc.hide(status)
+        status.textContent = 'canceled'
+      } else if (note.subject === 'revoke') {
+        status.textContent = 'revoked'
+        Doc.show(status)
       }
+      return
     }
+    const metaOrder = this.metaOrders[order.id]
+    if (!metaOrder) return
+    metaOrder.order = order
+    const bttn = Doc.tmplElement(metaOrder.row, 'cancelBttn')
+    if (note.subject === 'Missed cancel') {
+      Doc.hide(Doc.tmplElement(metaOrder.row, 'cancelStatus'))
+      Doc.show(bttn)
+    }
+    if (order.filled === order.qty) {
+      // Remove the cancellation button.
+      Doc.hide(bttn)
+    }
+    updateUserOrderRow(metaOrder.row, order)
   }
 
   /*
@@ -830,7 +842,7 @@ export default class MarketsPage extends BasePage {
     for (const metaOrder of Object.values(this.metaOrders)) {
       const order = metaOrder.order
       const alreadyMatched = note.epoch > order.epoch
-      const statusTD = metaOrder.row.querySelector('[data-col=status]')
+      const statusTD = Doc.tmplElement(metaOrder.row, 'status')
       switch (true) {
         case order.type === LIMIT && order.status === statusEpoch && alreadyMatched:
           statusTD.textContent = order.tif === immediateTiF ? 'executed' : 'booked'
@@ -1497,11 +1509,10 @@ function statusString (order) {
 }
 
 /*
- * updateDataCol sets the value of data-col=[col] <td> element that is a child
- * of the specified <tr>.
+ * updateDataCol sets the textContent of descendent template element.
  */
 function updateDataCol (tr, col, s) {
-  tr.querySelector(`[data-col=${col}]`).textContent = s
+  Doc.tmplElement(tr, col).textContent = s
 }
 
 /*

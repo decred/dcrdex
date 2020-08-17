@@ -32,7 +32,7 @@ cat > "./markets.json" <<EOF
         {
             "base": "DCR_simnet",
             "quote": "BTC_simnet",
-            "epochDuration": 6000,
+            "epochDuration": 15000,
             "marketBuyBuffer": 1.2
         }
     ],
