@@ -160,6 +160,8 @@ type tRPCClient struct {
 	listLockedErr   error
 }
 
+func defaultSignFunc(tx *wire.MsgTx) (*wire.MsgTx, bool, error) { return tx, true, nil }
+
 func newTRPCClient() *tRPCClient {
 	return &tRPCClient{
 		txOutRes:      make(map[outPoint]*chainjson.GetTxOutResult),
@@ -167,7 +169,9 @@ func newTRPCClient() *tRPCClient {
 		mainchain:     make(map[int64]*chainhash.Hash),
 		bestHash:      chainhash.Hash{},
 		bestBlockHash: &chainhash.Hash{},
-		signFunc:      func(tx *wire.MsgTx) (*wire.MsgTx, bool, error) { return tx, true, nil },
+		signFunc:      defaultSignFunc,
+		rawRes:        make(map[string]json.RawMessage),
+		rawErr:        make(map[string]error),
 	}
 }
 
@@ -251,10 +255,6 @@ func (c *tRPCClient) GetNewAddressGapPolicy(account string, gapPolicy rpcclient.
 	return c.newAddr, c.newAddrErr
 }
 
-func (c *tRPCClient) SignRawTransaction(tx *wire.MsgTx) (*wire.MsgTx, bool, error) {
-	return c.signFunc(tx)
-}
-
 func (c *tRPCClient) DumpPrivKey(address dcrutil.Address, net [2]byte) (*dcrutil.WIF, error) {
 	return c.privWIF, c.privWIFErr
 }
@@ -322,8 +322,72 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 		}
 		response, _ := json.Marshal(locked)
 		return response, nil
+
+	case methodSignRawTransaction:
+		if len(params) != 1 {
+			return nil, fmt.Errorf("needed 1 param")
+		}
+
+		var msgTxHex string
+		err := json.Unmarshal(params[0], &msgTxHex)
+		if err != nil {
+			return nil, err
+		}
+
+		msgTx, err := msgTxFromHex(msgTxHex)
+		if err != nil {
+			res := walletjson.SignRawTransactionResult{
+				Hex: msgTxHex,
+				Errors: []walletjson.SignRawTransactionError{
+					{
+						TxID:  msgTx.CachedTxHash().String(),
+						Error: err.Error(),
+					},
+				},
+				// Complete stays false.
+			}
+			return json.Marshal(&res)
+		}
+
+		if c.signFunc == nil {
+			return nil, fmt.Errorf("no signFunc configured")
+		}
+
+		signedTx, complete, err := c.signFunc(msgTx)
+		if err != nil {
+			res := walletjson.SignRawTransactionResult{
+				Hex: msgTxHex,
+				Errors: []walletjson.SignRawTransactionError{
+					{
+						TxID:  msgTx.CachedTxHash().String(),
+						Error: err.Error(),
+					},
+				},
+				// Complete stays false.
+			}
+			return json.Marshal(&res)
+		}
+
+		txHex, err := msgTxToHex(signedTx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode MsgTx: %w", err)
+		}
+
+		res := walletjson.SignRawTransactionResult{
+			Hex:      txHex,
+			Complete: complete,
+		}
+		return json.Marshal(&res)
 	}
-	return c.rawRes[method], c.rawErr[method]
+
+	if rr, found := c.rawRes[method]; found {
+		return rr, c.rawErr[method] // err probably should be nil, but respect the config
+	}
+	if re, found := c.rawErr[method]; found {
+		return nil, re
+	}
+
+	return nil, fmt.Errorf("method %v not implemented by (*tRPCClient).RawRequest", method)
 }
 
 func TestMain(m *testing.M) {
@@ -865,6 +929,8 @@ func TestSwap(t *testing.T) {
 	}
 
 	node.signFunc = signFunc
+	// reset the signFunc after this test so captured variables are free
+	defer func() { node.signFunc = defaultSignFunc }()
 
 	// This time should succeed.
 	_, changeCoin, err := wallet.Swap(swaps)
