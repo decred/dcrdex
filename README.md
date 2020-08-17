@@ -156,7 +156,8 @@ from **server/cmd/dcrdex**.
 
 ## Client Installation
 
-The client is still immature and changing rapidly, but it is fully functional.
+The client is still immature and changing rapidly, but it is mostly functional.
+There are a few incomplete items, so **do not use it on Mainnet yet**.
 Please ensure you are building from a current snapshot of the master branch.
 
 ### Dependencies
