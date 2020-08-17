@@ -225,5 +225,6 @@ done
 
 # Create fee account on alpha wallet for use by dcrdex simnet instances.
 tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
+tmux send-keys -t $SESSION:0 "./alpha getmasterpubkey server_fees${WAIT}" C-m\; wait-for donedcr
 
 tmux attach-session -t $SESSION
