@@ -255,6 +255,8 @@ type TDB struct {
 	setWalletPwErr     error
 	orderOrders        map[order.OrderID]*db.MetaOrder
 	orderErr           error
+	linkedFromID       order.OrderID
+	linkedToID         order.OrderID
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -318,6 +320,8 @@ func (tdb *TDB) UpdateOrderStatus(oid order.OrderID, status order.OrderStatus) e
 }
 
 func (tdb *TDB) LinkOrder(oid, linkedID order.OrderID) error {
+	tdb.linkedFromID = oid
+	tdb.linkedToID = linkedID
 	return nil
 }
 
@@ -3726,6 +3730,10 @@ func TestHandleNomatch(t *testing.T) {
 	runNomatch("cancel", cancelOID)
 	if rig.db.lastStatusID != cancelOID || rig.db.lastStatus != order.OrderStatusExecuted {
 		t.Fatalf("cancel status not updated")
+	}
+	if rig.db.linkedFromID != standingOID || !rig.db.linkedToID.IsZero() {
+		t.Fatalf("missed cancel not unlinked. wanted trade ID %s, got %s. wanted zeroed linked ID, got %s",
+			standingOID, rig.db.linkedFromID, rig.db.linkedToID)
 	}
 
 	runNomatch("standing limit", standingOID)

@@ -230,7 +230,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 		// DB linked order from the trade, but not the cancel.
 		cid := t.cancel.ID()
 		log.Warnf("cancel order %s did not match for order %s.", cid, t.ID())
-		err := t.db.LinkOrder(cid, order.OrderID{})
+		err := t.db.LinkOrder(t.ID(), order.OrderID{})
 		if err != nil {
 			log.Errorf("DB error unlinking cancel order %s for trade %s: %w", cid, t.ID(), err)
 		}

@@ -572,7 +572,7 @@ export default class MarketsPage extends BasePage {
         if (order.tif === standingTiF && order.status < statusExecuted) {
           const icon = Doc.tmplElement(row, 'cancelBttn')
           Doc.show(icon)
-          bind(row, 'click', e => {
+          bind(icon, 'click', e => {
             e.stopPropagation()
             this.showCancel(row, order.id)
           })
