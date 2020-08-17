@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"decred.org/dcrdex/dex/order"
 )
 
 // routes
@@ -23,6 +26,7 @@ const (
 	initRoute        = "init"
 	loginRoute       = "login"
 	logoutRoute      = "logout"
+	myOrdersRoute    = "myorders"
 	newWalletRoute   = "newwallet"
 	openWalletRoute  = "openwallet"
 	orderBookRoute   = "orderbook"
@@ -71,6 +75,7 @@ var routes = map[string]func(s *RPCServer, params *RawParams) *msgjson.ResponseP
 	initRoute:        handleInit,
 	loginRoute:       handleLogin,
 	logoutRoute:      handleLogout,
+	myOrdersRoute:    handleMyOrders,
 	newWalletRoute:   handleNewWallet,
 	openWalletRoute:  handleOpenWallet,
 	orderBookRoute:   handleOrderBook,
@@ -287,18 +292,6 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 		}
 		return m
 	}
-	// Convert something to a []interface{}.
-	convA := func(in interface{}) []interface{} {
-		var a []interface{}
-		b, err := json.Marshal(in)
-		if err != nil {
-			panic(err)
-		}
-		if err = json.Unmarshal(b, &a); err != nil {
-			panic(err)
-		}
-		return a
-	}
 	res := s.core.Exchanges()
 	exchanges := convM(res)
 	// Interate through exchanges converting structs into maps in order to
@@ -313,16 +306,7 @@ func handleExchanges(s *RPCServer, _ *RawParams) *msgjson.ResponsePayload {
 			marketDetails := convM(market)
 			// Remove redundant name field.
 			delete(marketDetails, "name")
-			orders := convA(marketDetails["orders"])
-			for i, order := range orders {
-				orderDetails := convM(order)
-				// Remove redundant address field.
-				delete(orderDetails, "dex")
-				// Remove redundant market name field.
-				delete(orderDetails, "market")
-				orders[i] = orderDetails
-			}
-			marketDetails["orders"] = orders
+			delete(marketDetails, "orders")
 			markets[k] = marketDetails
 		}
 		assets := convM(exchangeDetails["assets"])
@@ -460,6 +444,72 @@ func handleOrderBook(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		truncateOrderBook(book, form.nOrders)
 	}
 	return createResponse(orderBookRoute, book, nil)
+}
+
+// parseCoreOrder converts a *core.Order into a *myOrder.
+func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
+	// settled calculates how much of the order has been finalized.
+	settled := func(qty uint64, matches []*core.Match) (settled uint64) {
+		for _, match := range matches {
+			if (match.Side == order.Maker && match.Status >= order.MakerRedeemed) ||
+				(match.Side == order.Taker && match.Status >= order.MatchComplete) {
+				settled += match.Qty
+			}
+		}
+		return settled
+	}
+	srvTime := encode.UnixTimeMilli(int64(co.Stamp))
+	age := time.Since(srvTime).Round(time.Millisecond)
+	cancelling := co.Cancelling
+	// If the order is executed, canceled, or revoked, it is no longer cancelling.
+	if co.Status >= order.OrderStatusExecuted {
+		cancelling = false
+	}
+	return &myOrder{
+		Host:        co.Host,
+		MarketName:  co.MarketID,
+		BaseID:      b,
+		QuoteID:     q,
+		ID:          co.ID,
+		Type:        co.Type.String(),
+		Sell:        co.Sell,
+		Stamp:       co.Stamp,
+		Age:         age.String(),
+		Rate:        co.Rate,
+		Quantity:    co.Qty,
+		Filled:      co.Filled,
+		Settled:     settled(co.Qty, co.Matches),
+		Status:      co.Status.String(),
+		Cancelling:  cancelling,
+		Canceled:    co.Canceled,
+		TimeInForce: co.TimeInForce.String(),
+	}
+}
+
+// handleMyOrders handles requests for myorders. *msgjson.ResponsePayload.Error
+// is empty if successful.
+func handleMyOrders(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
+	form, err := parseMyOrdersArgs(params)
+	if err != nil {
+		return usage(myOrdersRoute, err)
+	}
+	var myOrders myOrdersResponse
+	filterMkts := form.base != nil && form.quote != nil
+	exchanges := s.core.Exchanges()
+	for host, exchange := range exchanges {
+		if form.host != "" && form.host != host {
+			continue
+		}
+		for _, market := range exchange.Markets {
+			if filterMkts && (market.BaseID != *form.base || market.QuoteID != *form.quote) {
+				continue
+			}
+			for _, order := range market.Orders {
+				myOrders = append(myOrders, parseCoreOrder(order, market.BaseID, market.QuoteID))
+			}
+		}
+	}
+	return createResponse(myOrdersRoute, myOrders, nil)
 }
 
 // format concatenates thing and tail. If thing is empty, returns an empty
@@ -675,29 +725,6 @@ Registration is complete after the fee transaction has been confirmed.`,
             "startepoch" (int): Time of start of the last epoch in milliseconds
 	      since 00:00:00 Jan 1 1970.
             "buybuffer" (float): The minimum order size for a market buy order.
-            "orders" (map): {
-              "type" (int): 0 for market or 1 for limit.
-              "id" (string): A unique trade ID.
-              "stamp" (int): The unix trade timestamp. Seconds since 00:00:00
-	        Jan 1 1970.
-              "qty" (bool): Number of units offered in the trade.
-              "sell" (bool): Whether this is a sell order.
-              "filled" (int): How much of the order has been filled.
-              "matches": [
-	        {
-                  "matchID" (string): A unique match ID.
-                  "status" (string): The match status.
-                  "rate" (int): Atoms quote asset per unit base asset.
-                  "qty" (int): Number of units offered in the trade.
-		},...
-	      ]
-              "cancelling" (bool): Whether this trade is in the process of being
-	        cancelled.
-              "canceled" (bool): Whether this trade has been canceled.
-              "rate" (int): Atoms quote asset per unit base asset.
-              "tif" (int): The number of epochs this trade is good for.
-              "targetID" (string): The order ID of the order being canceled.
-	      },...
           },...
         },
         "assets": {
@@ -810,7 +837,7 @@ Registration is complete after the fee transaction has been confirmed.`,
     string: The message "` + logoutStr + `"`,
 	},
 	orderBookRoute: {
-		argsShort:  `"host" base quote nOrders`,
+		argsShort:  `"host" base quote (nOrders)`,
 		cmdSummary: `Retrieve all orders for a market.`,
 		argsLong: `Args:
     host (string): The DEX to retrieve the order book from.
@@ -852,5 +879,40 @@ Registration is complete after the fee transaction has been confirmed.`,
         },...
       ],
     }`,
+	},
+	myOrdersRoute: {
+		argsShort: `("host") (base) (quote)`,
+		cmdSummary: `Fetch all active and recently executed orders
+    belonging to the user.`,
+		argsLong: `Args:
+    host (string): Optional. The DEX to show orders from.
+    base (int): Optional. The BIP-44 coin index for the market's base asset.
+    quote (int): Optional. The BIP-44 coin index for the market's quote asset.`,
+		returns: `Returns:
+  array: An array of orders.
+  [
+    {
+      "host" (string): The DEX address.,
+      "marketName" (string): The market's name. e.g. "DCR_BTC".
+      "baseID" (int): The market's base asset BIP-44 coin index. e.g. 42 for DCR.
+      "quoteID" (int): The market's quote asset BIP-44 coin index. e.g. 0 for BTC.
+      "id" (string): The order's unique hex ID.
+      "type" (string): The type of order. "limit", "market", or "cancel".
+      "sell" (string): Whether this order is selling.
+      "stamp" (int): Time the order was made in milliseconds since 00:00:00 Jan 1 1970.
+      "age" (string): The time that this order has been active in human readable form.
+      "rate" (int): The exchange rate limit. Limit orders only. Units: quote
+        asset per unit base asset.
+      "quantity" (int): The amount being traded.
+      "filled" (int): The order quantity that has matched.
+      "settled" (int): The sum quantity of all completed matches.
+      "status" (string): The status of the order. "epoch", "booked", "executed",
+        "canceled", or "revoked".
+      "cancelling" (bool): Whether this order is in the process of cancelling.
+      "canceled" (bool): Whether this order has been canceled.
+      "tif" (string): "immediate" if this limit order will only match for one epoch.
+        "standing" if the order can continue matching until filled or cancelled.
+    },...
+  ]`,
 	},
 }

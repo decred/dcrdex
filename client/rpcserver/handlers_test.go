@@ -16,6 +16,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
+	"github.com/davecgh/go-spew/spew"
 )
 
 func verifyResponse(payload *msgjson.ResponsePayload, res interface{}, wantErrCode int) error {
@@ -472,23 +473,7 @@ func TestHandleRegister(t *testing.T) {
 	}
 }
 
-func TestHandleExchanges(t *testing.T) {
-	/*
-	   handleExchanges removes some redundant fields from the response.
-	   $ diff in out
-	   3d2
-	   <     "host": "https://127.0.0.1:7232",
-	   6d4
-	   <         "name": "dcr_btc",
-	   16,17d13
-	   <             "dex": "https://127.0.0.1:7232",
-	   <             "market": "dcr_btc",
-	   42d37
-	   <         "id": 0,
-	   52d46
-	   <         "id": 42,
-	*/
-	in := `{
+const exchangeIn = `{
   "https://127.0.0.1:7232": {
     "host": "https://127.0.0.1:7232",
     "markets": {
@@ -550,11 +535,12 @@ func TestHandleExchanges(t *testing.T) {
         "swapConf": 1
       }
     },
-	"confsrequired": 1,
-	"confs": null
+    "confsrequired": 1,
+    "confs": null
   }
 }`
-	out := `{
+
+const exchangeOut = `{
   "https://127.0.0.1:7232": {
     "markets": {
       "dcr_btc": {
@@ -564,30 +550,7 @@ func TestHandleExchanges(t *testing.T) {
         "quotesymbol": "btc",
         "epochlen": 10000,
         "startepoch": 158891349,
-        "buybuffer": 1.25,
-        "orders": [
-          {
-            "type": 1,
-            "id": "e016a563ff5b845e9af20718af72224af630e65ca53edf2a3342d175dc6d3738",
-            "stamp": 1588913556583,
-            "qty": 100000000,
-            "sell": false,
-            "sig": "3045022100c5ef66cbf3c2d305408b666108ae384478f22b558893942b8f66abfb613a5bf802205eb22a0250e5286244b2f5205f0b6d6b4fa6a60930be2ff30f35c3cf6bf969c8",
-            "filled": 0,
-            "matches": [
-              {
-                "matchID": "1472deb169fb359a48676161be8ca81983201f28abe8cc9b504950032d6f14ec",
-                "qty": 100000000,
-                "rate": 100000000,
-                "step": 1
-              }
-            ],
-            "cancelling": false,
-            "canceled": false,
-            "rate": 100000000,
-            "tif": 1
-          }
-        ]
+        "buybuffer": 1.25
       }
     },
     "assets": {
@@ -614,8 +577,10 @@ func TestHandleExchanges(t *testing.T) {
     "confs": null
   }
 }`
+
+func TestHandleExchanges(t *testing.T) {
 	var exchangesIn map[string]*core.Exchange
-	if err := json.Unmarshal([]byte(in), &exchangesIn); err != nil {
+	if err := json.Unmarshal([]byte(exchangeIn), &exchangesIn); err != nil {
 		panic(err)
 	}
 	tc := &TCore{exchanges: exchangesIn}
@@ -626,11 +591,11 @@ func TestHandleExchanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	var exchangesOut map[string]*core.Exchange
-	if err := json.Unmarshal([]byte(out), &exchangesOut); err != nil {
+	if err := json.Unmarshal([]byte(exchangeOut), &exchangesOut); err != nil {
 		panic(err)
 	}
 	if !reflect.DeepEqual(res, exchangesOut) {
-		t.Fatal("result does not have expected fields removed")
+		t.Fatalf("expected %v but got %v", spew.Sdump(exchangesOut), spew.Sdump(res))
 	}
 }
 
@@ -928,5 +893,120 @@ func TestTruncateOrderBook(t *testing.T) {
 	}
 	if book.Sells[0].Rate != lowRate {
 		t.Fatal("expected low rate order")
+	}
+}
+
+func TestHandleMyOrders(t *testing.T) {
+	var exchangesIn map[string]*core.Exchange
+	if err := json.Unmarshal([]byte(exchangeIn), &exchangesIn); err != nil {
+		panic(err)
+	}
+	paramsWithArgs := func(ss ...string) *RawParams {
+		args := []string{}
+		args = append(args, ss...)
+		return &RawParams{Args: args}
+	}
+	tests := []struct {
+		name        string
+		params      *RawParams
+		wantErrCode int
+	}{{
+		name:        "ok no params",
+		params:      paramsWithArgs(),
+		wantErrCode: -1,
+	}, {
+		name:        "ok with host param",
+		params:      paramsWithArgs("127.0.0.1:7232"),
+		wantErrCode: -1,
+	}, {
+		name:        "ok with host and baseID/quoteID params",
+		params:      paramsWithArgs("127.0.0.1:7232", "42", "0"),
+		wantErrCode: -1,
+	}, {
+		name:        "ok with no host and baseID/quoteID params",
+		params:      paramsWithArgs("", "42", "0"),
+		wantErrCode: -1,
+	}, {
+		name:        "bad params",
+		params:      paramsWithArgs("", "42"), // missing quote ID
+		wantErrCode: msgjson.RPCArgumentsError,
+	}}
+	for _, test := range tests {
+		tc := &TCore{exchanges: exchangesIn}
+		r := &RPCServer{core: tc}
+		payload := handleMyOrders(r, test.params)
+		res := new(myOrdersResponse)
+		if err := verifyResponse(payload, res, test.wantErrCode); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestParseCoreOrder(t *testing.T) {
+	co := `{
+    "canceled": false,
+    "cancelling": false,
+    "epoch": 159650082,
+    "filled": 300000000,
+    "host": "127.0.0.1:7232",
+    "id": "ca0097c87dbf01169d76b6f2a318f88fe0ea678df3139f09d756d7d3e2c602dd",
+    "market": "dcr_btc",
+    "matches": [
+      {
+        "matchID": "992f15e89bbd670663b690b4da4a859609d83866e200f3c4cd5c916442b8ea46",
+        "qty": 100000000,
+        "rate": 200000000,
+        "side": 0,
+        "status": 4
+      },
+      {
+        "matchID": "69d7453d8ad3b52851c2c9925499a1b158301e8a08da594428ef0ad4cd6fd3a5",
+        "qty": 200000000,
+        "rate": 200000000,
+        "side": 0,
+        "status": 1
+      }
+    ],
+    "qty": 400000000,
+    "rate": 200000000,
+    "sell": false,
+    "sig": "30450221008eaf7fa3e5b4374800d11e50af419d3fa7c75362dce136df98a25eccc84e61380220458132451b40aa6951ab5b61d6b55c478fd9535c3d24fd4957070c7879e465ff",
+    "stamp": 1596500829705,
+    "status": 2,
+    "tif": 1,
+    "type": 1
+  }`
+
+	mo := `{
+    "host": "127.0.0.1:7232",
+    "marketName": "dcr_btc",
+    "baseID": 42,
+    "quoteID": 0,
+    "id": "ca0097c87dbf01169d76b6f2a318f88fe0ea678df3139f09d756d7d3e2c602dd",
+    "type": "limit",
+    "sell": false,
+    "stamp": 1596500829705,
+    "age": "2.664424s",
+    "rate": 200000000,
+    "quantity": 400000000,
+    "filled": 300000000,
+    "settled": 100000000,
+    "status": "booked",
+    "tif": "standing"
+  }`
+	coreOrder := new(core.Order)
+	if err := json.Unmarshal([]byte(co), coreOrder); err != nil {
+		panic(err)
+	}
+	myOrder := new(myOrder)
+	if err := json.Unmarshal([]byte(mo), myOrder); err != nil {
+		panic(err)
+	}
+
+	res := parseCoreOrder(coreOrder, 42, 0)
+	// Age will differ as it is based on the current time.
+	myOrder.Age = res.Age
+	if !reflect.DeepEqual(myOrder, res) {
+		t.Fatalf("expected %v but got %v", spew.Sdump(myOrder), spew.Sdump(res))
 	}
 }

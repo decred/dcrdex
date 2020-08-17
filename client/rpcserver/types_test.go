@@ -571,3 +571,59 @@ func TestParseOrderBookArgs(t *testing.T) {
 		}
 	}
 }
+
+func TestMyOrdersArgs(t *testing.T) {
+	paramsWithArgs := func(ss ...string) *RawParams {
+		args := []string{}
+		args = append(args, ss...)
+		return &RawParams{Args: args}
+	}
+	tests := []struct {
+		name    string
+		params  *RawParams
+		wantErr error
+	}{{
+		name:   "ok no params",
+		params: paramsWithArgs(),
+	}, {
+		name:   "ok with host",
+		params: paramsWithArgs("host"),
+	}, {
+		name:   "ok with host, base, and quote",
+		params: paramsWithArgs("host", "0", "42"),
+	}, {
+		name:   "ok with blank host, base, and quote",
+		params: paramsWithArgs("", "0", "42"),
+	}, {
+		name:    "base but no quote",
+		params:  paramsWithArgs("host", "0"),
+		wantErr: errArgs,
+	}, {
+		name:    "base not uint32",
+		params:  paramsWithArgs("host", "0.1", "42"),
+		wantErr: errArgs,
+	}, {
+		name:    "quote not uint32",
+		params:  paramsWithArgs("host", "0", "blue"),
+		wantErr: errArgs,
+	}}
+	for _, test := range tests {
+		res, err := parseMyOrdersArgs(test.params)
+		if err != nil {
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("unexpected error %v for test %s",
+					err, test.name)
+			}
+			continue
+		}
+		if len(test.params.Args) > 0 && res.host != test.params.Args[0] {
+			t.Fatalf("host doesn't match")
+		}
+		if len(test.params.Args) > 1 && fmt.Sprint(*res.base) != test.params.Args[1] {
+			t.Fatalf("base doesn't match")
+		}
+		if len(test.params.Args) > 2 && fmt.Sprint(*res.quote) != test.params.Args[2] {
+			t.Fatalf("quote doesn't match")
+		}
+	}
+}

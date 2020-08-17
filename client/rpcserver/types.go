@@ -54,6 +54,29 @@ type tradeResponse struct {
 	Stamp   uint64 `json:"stamp"`
 }
 
+// myOrdersResponse is used when responding to the myorders route.
+type myOrdersResponse []*myOrder
+
+type myOrder struct {
+	Host        string `json:"host"`
+	MarketName  string `json:"marketName"`
+	BaseID      uint32 `json:"baseID"`
+	QuoteID     uint32 `json:"quoteID"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Sell        bool   `json:"sell"`
+	Stamp       uint64 `json:"stamp"`
+	Age         string `json:"age"`
+	Rate        uint64 `json:"rate,omitempty"`
+	Quantity    uint64 `json:"quantity"`
+	Filled      uint64 `json:"filled"`
+	Settled     uint64 `json:"settled"`
+	Status      string `json:"status"`
+	Cancelling  bool   `json:"cancelling,omitempty"`
+	Canceled    bool   `json:"canceled,omitempty"`
+	TimeInForce string `json:"tif,omitempty"`
+}
+
 // openWalletForm is information necessary to open a wallet.
 type openWalletForm struct {
 	assetID uint32
@@ -100,6 +123,13 @@ type orderBookForm struct {
 	base    uint32
 	quote   uint32
 	nOrders uint64
+}
+
+// myOrdersForm is information necessary to fetch the user's orders.
+type myOrdersForm struct {
+	host  string
+	base  *uint32
+	quote *uint32
 }
 
 // checkNArgs checks that args and pwArgs are the correct length.
@@ -374,6 +404,38 @@ func parseOrderBookArgs(params *RawParams) (*orderBookForm, error) {
 		base:    uint32(base),
 		quote:   uint32(quote),
 		nOrders: nOrders,
+	}
+	return req, nil
+}
+
+func parseMyOrdersArgs(params *RawParams) (*myOrdersForm, error) {
+	if err := checkNArgs(params, []int{0}, []int{0, 3}); err != nil {
+		return nil, err
+	}
+	req := new(myOrdersForm)
+	switch len(params.Args) {
+	case 3:
+		// Args 1 and 2 should be base ID and quote ID. If present,
+		// they are a pair.
+		quote, err := checkUIntArg(params.Args[2], "quote", 32)
+		if err != nil {
+			return nil, err
+		}
+		q := uint32(quote)
+		req.quote = &q
+
+		base, err := checkUIntArg(params.Args[1], "base", 32)
+		if err != nil {
+			return nil, err
+		}
+		b := uint32(base)
+		req.base = &b
+		fallthrough
+	case 1:
+		req.host = params.Args[0]
+	case 2:
+		// Received a base ID but no quote ID.
+		return nil, fmt.Errorf("%w: no market quote ID", errArgs)
 	}
 	return req, nil
 }
