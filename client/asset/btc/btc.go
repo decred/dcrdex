@@ -1599,20 +1599,26 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[o
 	utxoMap := make(map[outPoint]*compositeUTXO, len(unspents))
 	for _, txout := range unspents {
 		if txout.Confirmations >= confs && txout.Safe && txout.Spendable {
-			// TODO when the map keys change to the outpoint struct:
-			// opID := outpointID(txout.TxID, txout.Vout)
-			// if btc.fundingCoins[opID] != nil {
-			// 	btc.log.Warnf("Skipping known order-funding coin %v returned by listunspent!", opID)
-			// 	continue
-			// }
-			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, btc.chainParams)
-			if err != nil {
-				return nil, nil, 0, fmt.Errorf("error reading asset info: %v", err)
-			}
 			txHash, err := chainhash.NewHashFromStr(txout.TxID)
 			if err != nil {
 				return nil, nil, 0, fmt.Errorf("error decoding txid in ListUnspentResult: %v", err)
 			}
+
+			// Guard against inconsistencies between the wallet's view of
+			// spendable unlocked UTXOs and ExchangeWallet's. e.g. User manually
+			// unlocked something or even restarted the wallet software.
+			pt := newOutPoint(txHash, txout.Vout)
+			if btc.fundingCoins[pt] != nil {
+				btc.log.Warnf("Known order-funding coin %v returned by listunspent!", pt)
+				// TODO: Consider relocking the coin in the wallet.
+				//continue
+			}
+
+			nfo, err := dexbtc.InputInfo(txout.ScriptPubKey, txout.RedeemScript, btc.chainParams)
+			if err != nil {
+				return nil, nil, 0, fmt.Errorf("error reading asset info: %v", err)
+			}
+
 			utxo := &compositeUTXO{
 				txHash:       txHash,
 				vout:         txout.Vout,
@@ -1622,7 +1628,7 @@ func (btc *ExchangeWallet) spendableUTXOs(confs uint32) ([]*compositeUTXO, map[o
 				input:        nfo,
 			}
 			utxos = append(utxos, utxo)
-			utxoMap[newOutPoint(txHash, txout.Vout)] = utxo
+			utxoMap[pt] = utxo
 			sum += toSatoshi(txout.Amount)
 		}
 	}
