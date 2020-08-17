@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/decred/dcrd/chaincfg/chainhash"
@@ -369,9 +370,21 @@ func TestExtractSwapDetails(t *testing.T) {
 		t.Fatalf("wrong secret hash. wanted %x, got %x", keyHash, secretHash)
 	}
 
+	// incorrect length
 	_, _, _, _, err = ExtractSwapDetails(contract[:len(contract)-1], tParams)
 	if err == nil {
 		t.Fatalf("no error for vandalized contract")
+	} else if !strings.HasPrefix(err.Error(), "incorrect swap contract length") {
+		t.Errorf("incorrect error for incorrect swap contract length: %v", err)
+	}
+
+	// bad secret size
+	contract[3] = 250
+	_, _, _, _, err = ExtractSwapDetails(contract, tParams)
+	if err == nil {
+		t.Fatalf("no error for contract with invalid secret size")
+	} else if !strings.HasPrefix(err.Error(), "invalid secret size") {
+		t.Errorf("incorrect error for invalid secret size: %v", err)
 	}
 }
 
