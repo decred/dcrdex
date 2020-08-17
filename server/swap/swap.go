@@ -430,7 +430,7 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 				if err != nil {
 					return nil, fmt.Errorf("failed to load swap state file %v: %v", stateFile.Name, err)
 				}
-				log.Infof("most recent swap state file is %q", stateFile.Name)
+				log.Infof("loaded the most recent swap state file from %q", stateFile.Name)
 			}
 
 		} else {

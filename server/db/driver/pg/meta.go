@@ -5,7 +5,6 @@ package pg
 
 import (
 	"decred.org/dcrdex/server/db/driver/pg/internal"
-	_ "github.com/lib/pq" // Start the PostgreSQL sql driver
 )
 
 // GetStateHash retrieves that last stored swap state file hash.
