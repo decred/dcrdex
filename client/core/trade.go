@@ -1045,7 +1045,6 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	if change == nil {
 		t.metaData.ChangeCoin = nil
 	} else {
-		log.Debugf("Storing change coin %v", change.String())
 		t.coins[hex.EncodeToString(change.ID())] = change
 		t.metaData.ChangeCoin = []byte(change.ID())
 	}
