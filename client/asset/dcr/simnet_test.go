@@ -33,8 +33,8 @@ import (
 
 const (
 	walletPassword = "abc"
-	alphaAddress   = "SsonWQK6xkLSYm7VttCddHWkWWhETFMdR4Y"
-	betaAddress    = "Ssb7Peny8omFwicUi8hC6hCALhcEp59p7UK"
+	alphaAddress   = "SsWKp7wtdTZYabYFYSc9cnxhwFEjA5g4pFc"
+	betaAddress    = "Ssge52jCzbixgFC736RSTrwAnvH3a4hcPRX"
 )
 
 var (
