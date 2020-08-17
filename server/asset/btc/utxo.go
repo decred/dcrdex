@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"decred.org/dcrdex/dex"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
@@ -177,16 +176,6 @@ type Output struct {
 	spendSize uint32
 }
 
-// Contract is a transaction output containing a swap contract.
-type Contract struct {
-	*Output
-	swapAddress   string
-	refundAddress string
-	lockTime      time.Time
-}
-
-var _ asset.Contract = (*Contract)(nil)
-
 // Confirmations returns the number of confirmations on this output's
 // transaction.
 func (output *Output) Confirmations(context.Context) (int64, error) {
@@ -339,25 +328,4 @@ func pkMatches(pubkeys [][]byte, addrs []btcutil.Address, hasher func([]byte) []
 		}
 	}
 	return matches
-}
-
-// RefundAddress is the refund address of this swap contract.
-func (contract *Contract) RefundAddress() string {
-	return contract.refundAddress
-}
-
-// SwapAddress is the receiving address of this swap contract.
-func (contract *Contract) SwapAddress() string {
-	return contract.swapAddress
-}
-
-// RedeemScript returns the Contract's redeem script.
-func (contract *Contract) RedeemScript() []byte {
-	return contract.redeemScript
-}
-
-// LockTime is a method on the asset.Contract interface for reading the locktime
-// in the contract script.
-func (contract *Contract) LockTime() time.Time {
-	return contract.lockTime
 }

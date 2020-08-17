@@ -25,7 +25,7 @@ type Backend interface {
 	// Contract returns a Contract only for outputs that would be spendable on
 	// the blockchain immediately. The redeem script is required in order to
 	// calculate sigScript length and verify pubkeys.
-	Contract(coinID []byte, redeemScript []byte) (Contract, error)
+	Contract(coinID []byte, redeemScript []byte) (*Contract, error)
 	// ValidateSecret checks that the secret satisfies the contract.
 	ValidateSecret(secret, contract []byte) bool
 	// Redemption returns a Coin for redemptionID, a transaction input, that
@@ -100,14 +100,14 @@ type FundingCoin interface {
 }
 
 // Contract is an atomic swap contract.
-type Contract interface {
+type Contract struct {
 	Coin
 	// SwapAddress is the receiving address of the swap contract.
-	SwapAddress() string
+	SwapAddress string
 	// RedeemScript is the contract redeem script.
-	RedeemScript() []byte
+	RedeemScript []byte
 	// LockTime is the refund locktime.
-	LockTime() time.Time
+	LockTime time.Time
 }
 
 // BlockUpdate is sent over the update channel when a tip change is detected.

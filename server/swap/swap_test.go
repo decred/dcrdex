@@ -343,7 +343,7 @@ type redeemKey struct {
 // This stub satisfies asset.Backend.
 type TAsset struct {
 	mtx           sync.RWMutex
-	contracts     map[string]asset.Contract
+	contracts     map[string]*asset.Contract
 	contractErr   error
 	funds         asset.FundingCoin
 	fundsErr      error
@@ -357,7 +357,7 @@ func newTAsset(lbl string) *TAsset {
 	return &TAsset{
 		bChan:       make(chan *asset.BlockUpdate, 5),
 		lbl:         lbl,
-		contracts:   make(map[string]asset.Contract),
+		contracts:   make(map[string]*asset.Contract),
 		redemptions: make(map[redeemKey]asset.Coin),
 		fundsErr:    asset.CoinNotFoundError,
 	}
@@ -368,7 +368,7 @@ func (a *TAsset) FundingCoin(_ context.Context, coinID, redeemScript []byte) (as
 	defer a.mtx.RUnlock()
 	return a.funds, a.fundsErr
 }
-func (a *TAsset) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
+func (a *TAsset) Contract(coinID, redeemScript []byte) (*asset.Contract, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	if a.contractErr != nil {
@@ -378,6 +378,7 @@ func (a *TAsset) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
 	if !found || contract == nil {
 		return nil, asset.CoinNotFoundError
 	}
+
 	return contract, nil
 }
 func (a *TAsset) Redemption(redemptionID, cpSwapCoinID []byte) (asset.Coin, error) {
@@ -413,7 +414,7 @@ func (a *TAsset) setContractErr(err error) {
 	defer a.mtx.Unlock()
 	a.contractErr = err
 }
-func (a *TAsset) setContract(contract asset.Contract, resetErr bool) {
+func (a *TAsset) setContract(contract *asset.Contract, resetErr bool) {
 	a.mtx.Lock()
 	a.contracts[string(contract.ID())] = contract
 	if resetErr {
@@ -444,7 +445,6 @@ type TCoin struct {
 	confsErr  error
 	auditAddr string
 	auditVal  uint64
-	lockTime  time.Time
 }
 
 func (coin *TCoin) Confirmations(context.Context) (int64, error) {
@@ -453,16 +453,8 @@ func (coin *TCoin) Confirmations(context.Context) (int64, error) {
 	return coin.confs, coin.confsErr
 }
 
-func (coin *TCoin) SwapAddress() string {
-	return coin.auditAddr
-}
-
 func (coin *TCoin) Addresses() []string {
 	return []string{coin.auditAddr}
-}
-
-func (coin *TCoin) LockTime() time.Time {
-	return coin.lockTime
 }
 
 func (coin *TCoin) setConfs(confs int64) {
@@ -481,8 +473,6 @@ func (coin *TCoin) String() string                                { return hex.E
 func (coin *TCoin) FeeRate() uint64 {
 	return 72 // make sure it's at least the required fee if you want it to pass (test fail TODO)
 }
-
-func (coin *TCoin) RedeemScript() []byte { return nil }
 
 func TNewAsset(backend asset.Backend) *asset.BackedAsset {
 	return &asset.BackedAsset{
@@ -1200,7 +1190,7 @@ func tMultiMatchSet(matchQtys, rates []uint64, makerSell bool, isMarket bool) *t
 
 // tSwap is the information needed for spoofing a swap transaction.
 type tSwap struct {
-	coin     *TCoin
+	coin     *asset.Contract
 	req      *msgjson.Message
 	contract string
 }
@@ -1215,36 +1205,41 @@ func tNewSwap(matchInfo *tMatch, oid order.OrderID, recipient string, user *tUse
 		auditVal = matcher.BaseToQuote(matchInfo.rate, matchInfo.qty)
 	}
 	coinID := randBytes(36)
-	swap := &TCoin{
+	coin := &TCoin{
 		confs:     0,
 		auditAddr: recipient + tRecipientSpoofer,
 		auditVal:  auditVal * tValSpoofer,
 		id:        coinID,
 	}
 
-	swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker(dex.Testnet)))
+	contract := &asset.Contract{
+		Coin:        coin,
+		SwapAddress: recipient + tRecipientSpoofer,
+	}
+
+	contract.LockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeTaker(dex.Testnet)))
 	if user == matchInfo.maker {
-		swap.lockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker(dex.Testnet)))
+		contract.LockTime = encode.DropMilliseconds(matchInfo.match.Epoch.End().Add(dex.LockTimeMaker(dex.Testnet)))
 	}
 
 	if !tLockTimeSpoofer.IsZero() {
-		swap.lockTime = tLockTimeSpoofer
+		contract.LockTime = tLockTimeSpoofer
 	}
 
-	contract := "01234567" + user.sigHex
+	script := "01234567" + user.sigHex
 	req, _ := msgjson.NewRequest(nextID(), msgjson.InitRoute, &msgjson.Init{
 		OrderID: oid[:],
 		MatchID: matchInfo.matchID[:],
 		// We control what the backend returns, so the txid doesn't matter right now.
 		CoinID: coinID,
 		//Time:     encode.UnixMilliU(unixMsNow()),
-		Contract: dirtyEncode(contract),
+		Contract: dirtyEncode(script),
 	})
 
 	return &tSwap{
-		coin:     swap,
+		coin:     contract,
 		req:      req,
-		contract: contract,
+		contract: script,
 	}
 }
 
@@ -1264,7 +1259,7 @@ func randBytes(len int) []byte {
 type tRedeem struct {
 	req        *msgjson.Message
 	coin       *TCoin
-	cpSwapCoin *TCoin
+	cpSwapCoin *asset.Contract
 }
 
 func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
@@ -1275,7 +1270,7 @@ func tNewRedeem(matchInfo *tMatch, oid order.OrderID, user *tUser) *tRedeem {
 		CoinID:  coinID,
 		//Time:    encode.UnixMilliU(unixMsNow()),
 	})
-	var cpSwapCoin *TCoin
+	var cpSwapCoin *asset.Contract
 	switch user.acct {
 	case matchInfo.maker.acct:
 		cpSwapCoin = matchInfo.db.takerSwap.coin
@@ -1372,12 +1367,12 @@ func testSwap(t *testing.T, rig *testRig) {
 		ensureNilErr(rig.sendSwap_maker(true))
 		ensureNilErr(rig.auditSwap_taker())
 		ensureNilErr(rig.ackAudit_taker(true))
-		matchInfo.db.makerSwap.coin.setConfs(int64(makerSwapAsset.SwapConf))
+		matchInfo.db.makerSwap.coin.Coin.(*TCoin).setConfs(int64(makerSwapAsset.SwapConf))
 		sendBlock(makerSwapAsset.Backend.(*TAsset))
 		ensureNilErr(rig.sendSwap_taker(true))
 		ensureNilErr(rig.auditSwap_maker())
 		ensureNilErr(rig.ackAudit_maker(true))
-		matchInfo.db.takerSwap.coin.setConfs(int64(takerSwapAsset.SwapConf))
+		matchInfo.db.takerSwap.coin.Coin.(*TCoin).setConfs(int64(takerSwapAsset.SwapConf))
 		sendBlock(takerSwapAsset.Backend.(*TAsset))
 		ensureNilErr(rig.redeem_maker(true))
 		ensureNilErr(rig.ackRedemption_taker(true))
@@ -1429,6 +1424,7 @@ func TestSwaps(t *testing.T) {
 				rates := []uint64{uint64(10e8), uint64(11e8), uint64(12e8)}
 				// one taker, 3 makers => 4 'match' requests
 				rig.matches = tMultiMatchSet(matchQtys, rates, makerSell, isMarket)
+
 				rig.swapper.Negotiate([]*order.MatchSet{rig.matches.matchSet})
 				testSwap(t, rig)
 			})
@@ -1492,7 +1488,7 @@ func TestTxWaiters(t *testing.T) {
 	if err := rig.sendSwap_maker(true); err != nil {
 		t.Fatal(err)
 	}
-	matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
+	matchInfo.db.makerSwap.coin.Coin.(*TCoin).setConfs(int64(rig.abc.SwapConf))
 	sendBlock(rig.abc.Backend.(*TAsset))
 	if err := rig.auditSwap_taker(); err != nil {
 		t.Fatal(err)
@@ -1528,7 +1524,7 @@ func TestTxWaiters(t *testing.T) {
 		t.Fatalf("unexpected rpc error for ok taker swap. code: %d, msg: %s",
 			resp.Error.Code, resp.Error.Message)
 	}
-	matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
+	matchInfo.db.takerSwap.coin.Coin.(*TCoin).setConfs(int64(rig.xyz.SwapConf))
 	sendBlock(rig.xyz.Backend.(*TAsset))
 
 	ensureNilErr(rig.auditSwap_maker())
@@ -1681,7 +1677,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		ensureNilErr(rig.ackAudit_taker(true))
 
 		// Maker's swap reaches swapConf.
-		matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
+		matchInfo.db.makerSwap.coin.Coin.(*TCoin).setConfs(int64(rig.abc.SwapConf))
 		sendBlock(rig.abcNode) // tryConfirmSwap
 		// With maker swap confirmed, inaction happens bTimeout after
 		// swapConfirmed time.
@@ -1700,7 +1696,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		ensureNilErr(rig.ackAudit_maker(true))
 
 		// Taker's swap reaches swapConf.
-		matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
+		matchInfo.db.takerSwap.coin.Coin.(*TCoin).setConfs(int64(rig.xyz.SwapConf))
 		sendBlock(rig.xyzNode)
 		// With taker swap confirmed, inaction happens bTimeout after
 		// swapConfirmed time.

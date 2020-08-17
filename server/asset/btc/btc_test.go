@@ -741,7 +741,13 @@ func testBackend(segwit bool) (*Backend, func()) {
 	logger := dex.StdOutLogger("TEST", dex.LevelTrace)
 	// skip both loading config file and rpcclient.New in Connect. Manually
 	// create the Backend and set the node to our node stub.
-	btc := newBTC("btc", segwit, testParams, logger, nil)
+	btc := newBTC(&BackendCloneConfig{
+		Name:           "btc",
+		Segwit:         segwit,
+		AddressDecoder: btcutil.DecodeAddress,
+		Logger:         logger,
+		ChainParams:    testParams,
+	}, nil)
 	btc.node = &testNode{}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1050,18 +1056,13 @@ func TestUTXOs(t *testing.T) {
 		t.Fatalf("case 11 - received error for utxo: %v", err)
 	}
 
-	contract := &Contract{Output: utxo.Output}
-
 	// Now try again with the correct vout.
-	err = btc.auditContract(contract) // sets refund and swap addresses
+	contract, err := btc.auditContract(utxo.Output) // sets refund and swap addresses
 	if err != nil {
 		t.Fatalf("case 11 - unexpected error auditing contract: %v", err)
 	}
-	if contract.SwapAddress() != swap.recipient.String() {
-		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", contract.SwapAddress(), swap.recipient.String())
-	}
-	if contract.RefundAddress() != swap.refund.String() {
-		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", contract.RefundAddress(), swap.refund.String())
+	if contract.SwapAddress != swap.recipient.String() {
+		t.Fatalf("case 11 - wrong recipient. wanted '%s' got '%s'", contract.SwapAddress, swap.recipient.String())
 	}
 	if contract.Value() != 5 {
 		t.Fatalf("case 11 - unexpected output value. wanted 5, got %d", contract.Value())
@@ -1373,9 +1374,9 @@ func TestAuxiliary(t *testing.T) {
 // TestCheckAddress checks that addresses are parsing or not parsing as
 // expected.
 func TestCheckAddress(t *testing.T) {
-	btc := &Backend{
-		chainParams: &chaincfg.MainNetParams,
-	}
+	btc, shutdown := testBackend(false)
+	defer shutdown()
+
 	type test struct {
 		addr    string
 		wantErr bool

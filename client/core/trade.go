@@ -74,7 +74,7 @@ type matchTracker struct {
 	refundErr   error
 	prefix      *order.Prefix
 	trade       *order.Trade
-	counterSwap asset.AuditInfo
+	counterSwap *asset.AuditInfo
 
 	// cancelRedemptionSearch should be set when taker starts searching for
 	// maker's redemption. Required to cancel a find redemption attempt if
@@ -616,7 +616,7 @@ func (t *trackedTrade) counterPartyConfirms(ctx context.Context, match *matchTra
 		t.dc.log.Warnf("counterPartyConfirms: No AuditInfo available to check!")
 		return
 	}
-	coin := match.counterSwap.Coin()
+	coin := match.counterSwap.Coin
 
 	var err error
 	have, spent, err = t.wallets.toWallet.Confirmations(ctx, coin.ID())
@@ -1969,9 +1969,9 @@ func (t *trackedTrade) processAuditMsg(msgID uint64, audit *msgjson.Audit) error
 // counterparty contract data again except on reconnect. This may block for a
 // long time and should be run in a goroutine. The trackedTrade mtx must NOT be
 // locked.
-func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contract []byte) (asset.AuditInfo, error) {
+func (t *trackedTrade) searchAuditInfo(match *matchTracker, coinID []byte, contract []byte) (*asset.AuditInfo, error) {
 	errChan := make(chan error, 1)
-	var auditInfo asset.AuditInfo
+	var auditInfo *asset.AuditInfo
 	var tries int
 	contractID, contractSymb := coinIDString(t.wallets.toAsset.ID, coinID), t.wallets.toAsset.Symbol
 	t.latencyQ.Wait(&wait.Waiter{
@@ -2040,9 +2040,9 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	// 1. Recipient Address
 	// 2. Contract value
 	// 3. Secret hash: maker compares, taker records
-	if auditInfo.Recipient() != t.Trade().Address {
+	if auditInfo.Recipient != t.Trade().Address {
 		return fmt.Errorf("swap recipient %s in contract coin %v (%s) is not the order address %s",
-			auditInfo.Recipient(), contractID, contractSymb, t.Trade().Address)
+			auditInfo.Recipient, contractID, contractSymb, t.Trade().Address)
 	}
 
 	dbMatch := match.Match
@@ -2050,9 +2050,9 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	if t.Trade().Sell {
 		auditQty = calc.BaseToQuote(dbMatch.Rate, auditQty)
 	}
-	if auditInfo.Coin().Value() < auditQty {
+	if auditInfo.Coin.Value() < auditQty {
 		return fmt.Errorf("swap contract coin %v (%s) value %d was lower than expected %d",
-			contractID, contractSymb, auditInfo.Coin().Value(), auditQty)
+			contractID, contractSymb, auditInfo.Coin.Value(), auditQty)
 	}
 
 	// TODO: Consider having the server supply the contract txn's fee rate to
@@ -2069,8 +2069,8 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	if dbMatch.Side == order.Maker {
 		reqLockTime = encode.DropMilliseconds(matchTime.Add(t.lockTimeTaker)) // counterparty == taker
 	}
-	if auditInfo.Expiration().Before(reqLockTime) {
-		return fmt.Errorf("lock time too early. Need %s, got %s", reqLockTime, auditInfo.Expiration())
+	if auditInfo.Expiration.Before(reqLockTime) {
+		return fmt.Errorf("lock time too early. Need %s, got %s", reqLockTime, auditInfo.Expiration)
 	}
 
 	t.mtx.Lock()
@@ -2078,15 +2078,15 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	proof := &match.MetaData.Proof
 	if dbMatch.Side == order.Maker {
 		// Check that the secret hash is correct.
-		if !bytes.Equal(proof.SecretHash, auditInfo.SecretHash()) {
+		if !bytes.Equal(proof.SecretHash, auditInfo.SecretHash) {
 			return fmt.Errorf("secret hash mismatch for contract coin %v (%s), contract %v. expected %x, got %v",
-				auditInfo.Coin(), t.wallets.toAsset.Symbol, contract, proof.SecretHash, auditInfo.SecretHash())
+				auditInfo.Coin, t.wallets.toAsset.Symbol, contract, proof.SecretHash, auditInfo.SecretHash)
 		}
 		// Audit successful. Update status and other match data.
 		match.SetStatus(order.TakerSwapCast)
 		proof.TakerSwap = coinID
 	} else {
-		proof.SecretHash = auditInfo.SecretHash()
+		proof.SecretHash = auditInfo.SecretHash
 		match.SetStatus(order.MakerSwapCast)
 		proof.MakerSwap = coinID
 	}
@@ -2099,7 +2099,7 @@ func (t *trackedTrade) auditContract(match *matchTracker, coinID []byte, contrac
 	}
 
 	t.dc.log.Infof("Audited contract (%s: %v) paying to %s for order %s, match %s",
-		t.wallets.toAsset.Symbol, auditInfo.Coin(), auditInfo.Recipient(), t.ID(), match.id)
+		t.wallets.toAsset.Symbol, auditInfo.Coin, auditInfo.Recipient, t.ID(), match.id)
 
 	return nil
 }

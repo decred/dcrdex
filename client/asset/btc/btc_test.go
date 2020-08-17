@@ -53,6 +53,16 @@ var (
 	tP2WPKHAddr    = "bc1qq49ypf420s0kh52l9pk7ha8n8nhsugdpculjas"
 )
 
+func btcAddr(segwit bool) btcutil.Address {
+	var addr btcutil.Address
+	if segwit {
+		addr, _ = btcutil.DecodeAddress(tP2WPKHAddr, &chaincfg.MainNetParams)
+	} else {
+		addr, _ = btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
+	}
+	return addr
+}
+
 func randBytes(l int) []byte {
 	b := make([]byte, l)
 	rand.Read(b)
@@ -1411,22 +1421,19 @@ func testRedeem(t *testing.T, segwit bool) {
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
 	lockTime := time.Now().Add(time.Hour * 12)
-	addrStr := tP2PKHAddr
-	if segwit {
-		addrStr = tP2WPKHAddr
-	}
+	addr := btcAddr(segwit)
 
-	contract, err := dexbtc.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
+	contract, err := dexbtc.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
 
-	addr, _ := btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
-	ci := &auditInfo{
-		output:     newOutput(tTxHash, 0, swapVal),
-		contract:   contract,
-		recipient:  addr,
-		expiration: lockTime,
+	coin := newOutput(tTxHash, 0, swapVal)
+	ci := &asset.AuditInfo{
+		Coin:       coin,
+		Contract:   contract,
+		Recipient:  addr.String(),
+		Expiration: lockTime,
 	}
 
 	redemption := &asset.Redemption{
@@ -1441,7 +1448,7 @@ func testRedeem(t *testing.T, segwit bool) {
 		t.Fatalf("error encoding wif: %v", err)
 	}
 
-	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
+	node.rawRes[methodChangeAddress] = mustMarshal(t, addr.String())
 	node.rawRes[methodPrivKeyForAddress] = mustMarshal(t, wif.String())
 
 	redemptions := &asset.RedeemForm{
@@ -1468,7 +1475,7 @@ func testRedeem(t *testing.T, segwit bool) {
 	redemption.Spends = ci
 
 	// Spoofing AuditInfo is not allowed.
-	redemption.Spends = &TAuditInfo{}
+	redemption.Spends = &asset.AuditInfo{}
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for spoofed AuditInfo")
@@ -1484,12 +1491,12 @@ func testRedeem(t *testing.T, segwit bool) {
 	redemption.Secret = secret
 
 	// too low of value
-	ci.output.value = 200
+	coin.value = 200
 	_, _, _, err = wallet.Redeem(redemptions)
 	if err == nil {
 		t.Fatalf("no error for redemption not worth the fees")
 	}
-	ci.output.value = swapVal
+	coin.value = swapVal
 
 	// Change address error
 	node.rawErr[methodChangeAddress] = tErr
@@ -1637,12 +1644,9 @@ func testAuditContract(t *testing.T, segwit bool) {
 	swapVal := toSatoshi(5)
 	secretHash, _ := hex.DecodeString("5124208c80d33507befa517c08ed01aa8d33adbf37ecd70fb5f9352f7a51a88d")
 	lockTime := time.Now().Add(time.Hour * 12)
-	addrStr := tP2PKHAddr
-	if segwit {
-		addrStr = tP2WPKHAddr
-	}
+	addr := btcAddr(segwit)
 
-	contract, err := dexbtc.MakeContract(addrStr, addrStr, secretHash, lockTime.Unix(), segwit, &chaincfg.MainNetParams)
+	contract, err := dexbtc.MakeContract(addr, addr, secretHash, lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
@@ -1668,14 +1672,14 @@ func testAuditContract(t *testing.T, segwit bool) {
 	if err != nil {
 		t.Fatalf("audit error: %v", err)
 	}
-	if audit.Recipient() != addrStr {
-		t.Fatalf("wrong recipient. wanted '%s', got '%s'", addrStr, audit.Recipient())
+	if audit.Recipient != addr.String() {
+		t.Fatalf("wrong recipient. wanted '%s', got '%s'", addr, audit.Recipient)
 	}
-	if !bytes.Equal(audit.Contract(), contract) {
+	if !bytes.Equal(audit.Contract, contract) {
 		t.Fatalf("contract not set to coin redeem script")
 	}
-	if audit.Expiration().Equal(lockTime) {
-		t.Fatalf("wrong lock time. wanted %d, got %d", lockTime.Unix(), audit.Expiration().Unix())
+	if audit.Expiration.Equal(lockTime) {
+		t.Fatalf("wrong lock time. wanted %d, got %d", lockTime.Unix(), audit.Expiration.Unix())
 	}
 
 	// Invalid txid
@@ -1751,21 +1755,17 @@ func testFindRedemption(t *testing.T, segwit bool) {
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
 
-	addrStr := tP2PKHAddr
-	if segwit {
-		addrStr = tP2WPKHAddr
-	}
+	addr := btcAddr(segwit)
 
 	lockTime := time.Now().Add(time.Hour * 12)
-	contract, err := dexbtc.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
+	contract, err := dexbtc.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
 	contractAddr, _ := wallet.scriptHashAddress(contract)
 	pkScript, _ := txscript.PayToAddrScript(contractAddr)
 
-	otherAddr, _ := btcutil.DecodeAddress(addrStr, &chaincfg.MainNetParams)
-	otherScript, _ := txscript.PayToAddrScript(otherAddr)
+	otherScript, _ := txscript.PayToAddrScript(addr)
 
 	var redemptionWitness, otherWitness [][]byte
 	var redemptionSigScript, otherSigScript []byte
@@ -1905,19 +1905,16 @@ func testRefund(t *testing.T, segwit bool) {
 	secretHash := sha256.Sum256(secret)
 	lockTime := time.Now().Add(time.Hour * 12)
 
-	addrStr := tP2PKHAddr
-	if segwit {
-		addrStr = tP2WPKHAddr
-	}
+	addr := btcAddr(segwit)
 
-	contract, err := dexbtc.MakeContract(addrStr, addrStr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
+	contract, err := dexbtc.MakeContract(addr, addr, secretHash[:], lockTime.Unix(), segwit, &chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatalf("error making swap contract: %v", err)
 	}
 
 	bigTxOut := newTxOutResult(nil, 1e8, 2)
 	node.txOutRes = bigTxOut
-	node.rawRes[methodChangeAddress] = mustMarshal(t, addrStr)
+	node.rawRes[methodChangeAddress] = mustMarshal(t, addr.String())
 
 	privBytes, _ := hex.DecodeString("b07209eec1a8fb6cfe5cb6ace36567406971a75c330db7101fb21bc679bc5330")
 	privKey, _ := btcec.PrivKeyFromBytes(btcec.S256(), privBytes)
@@ -2202,14 +2199,14 @@ func testSendEdges(t *testing.T, segwit bool) {
 	var addr, contractAddr btcutil.Address
 	var dexReqFees, dustCoverage uint64
 
+	addr = btcAddr(segwit)
+
 	if segwit {
-		addr, _ = btcutil.DecodeAddress(tP2WPKHAddr, &chaincfg.MainNetParams)
 		contractAddr, _ = btcutil.NewAddressWitnessScriptHash(randBytes(32), &chaincfg.MainNetParams)
 		// See dexbtc.IsDust for the source of this dustCoverage voodoo.
 		dustCoverage = (dexbtc.P2WPKHOutputSize + 41 + (107 / 4)) * feeRate * 3
 		dexReqFees = dexbtc.InitTxSizeSegwit * feeRate
 	} else {
-		addr, _ = btcutil.DecodeAddress(tP2PKHAddr, &chaincfg.MainNetParams)
 		contractAddr, _ = btcutil.NewAddressScriptHash(randBytes(20), &chaincfg.MainNetParams)
 		dustCoverage = (dexbtc.P2PKHOutputSize + 41 + 107) * feeRate * 3
 		dexReqFees = dexbtc.InitTxSize * feeRate

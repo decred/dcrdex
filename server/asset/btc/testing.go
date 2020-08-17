@@ -19,8 +19,7 @@ import (
 // examined to ensure the backend understands what they are and can extract
 // addresses. Ideally, the stats will show no scripts which were unparseable by
 // the backend, but the presence of unknowns is not an error.
-func LiveP2SHStats(btc *Backend, t *testing.T) {
-	numToDo := 10000
+func LiveP2SHStats(btc *Backend, t *testing.T, numToDo int) {
 	type scriptStats struct {
 		unknown      int
 		p2pk         int

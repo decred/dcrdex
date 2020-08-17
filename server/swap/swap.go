@@ -81,7 +81,7 @@ type swapStatus struct {
 	mtx sync.RWMutex
 	// The time that the swap coordinator sees the transaction.
 	swapTime time.Time
-	swap     asset.Contract
+	swap     *asset.Contract
 	// The time that the transaction receives its SwapConf'th confirmation.
 	swapConfirmed time.Time
 	// The time that the swap coordinator sees the user's redemption
@@ -1265,10 +1265,10 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		s.respondError(msg.ID, actor.user, msgjson.ContractError, "low tx fee")
 		return wait.DontTryAgain
 	}
-	if contract.SwapAddress() != counterParty.order.Trade().SwapAddress() {
+	if contract.SwapAddress != counterParty.order.Trade().SwapAddress() {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
 			fmt.Sprintf("incorrect recipient. expected %s. got %s",
-				contract.SwapAddress(), counterParty.order.Trade().SwapAddress()))
+				contract.SwapAddress, counterParty.order.Trade().SwapAddress()))
 		return wait.DontTryAgain
 	}
 	if contract.Value() != stepInfo.checkVal {
@@ -1281,9 +1281,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	if stepInfo.actor.isMaker {
 		reqLockTime = encode.DropMilliseconds(stepInfo.match.matchTime.Add(s.lockTimeMaker))
 	}
-	if contract.LockTime().Before(reqLockTime) {
+	if contract.LockTime.Before(reqLockTime) {
 		s.respondError(msg.ID, actor.user, msgjson.ContractError,
-			fmt.Sprintf("contract error. expected lock time >= %s, got %s", reqLockTime, contract.LockTime()))
+			fmt.Sprintf("contract error. expected lock time >= %s, got %s", reqLockTime, contract.LockTime))
 		return wait.DontTryAgain
 	}
 
@@ -1407,7 +1407,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Make sure that the expected output is being spent.
 	actor, counterParty := stepInfo.actor, stepInfo.counterParty
 	counterParty.status.mtx.RLock()
-	cpContract := counterParty.status.swap.RedeemScript()
+	cpContract := counterParty.status.swap.RedeemScript
 	cpSwapCoin := counterParty.status.swap.ID()
 	cpSwapStr := counterParty.status.swap.String()
 	counterParty.status.mtx.RUnlock()

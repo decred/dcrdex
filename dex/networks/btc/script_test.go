@@ -152,42 +152,26 @@ func testMakeContract(t *testing.T, segwit bool) {
 		p2pkh, _ = btcutil.NewAddressWitnessPubKeyHash(randBytes(20), tParams)
 	}
 
-	recipient := ra.String()
-	sender := sa.String()
-	badAddr := "notanaddress"
-
-	// Bad recipient
-	_, err := MakeContract(badAddr, sender, randBytes(32), tStamp, segwit, tParams)
-	if err == nil {
-		t.Fatalf("no error for bad recipient")
-	}
 	// Wrong recipient address type
-
-	_, err = MakeContract(p2sh.String(), sender, randBytes(32), tStamp, segwit, tParams)
+	_, err := MakeContract(p2sh, sa, randBytes(32), tStamp, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for wrong recipient address type")
 	}
 
-	// Bad sender
-	_, err = MakeContract(recipient, badAddr, randBytes(32), tStamp, segwit, tParams)
-	if err == nil {
-		t.Fatalf("no error for bad sender")
-	}
 	// Wrong sender address type.
-
-	_, err = MakeContract(recipient, p2pkh.String(), randBytes(32), tStamp, segwit, tParams)
+	_, err = MakeContract(ra, p2pkh, randBytes(32), tStamp, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for wrong sender address type")
 	}
 
 	// Bad secret hash
-	_, err = MakeContract(recipient, sender, randBytes(10), tStamp, segwit, tParams)
+	_, err = MakeContract(ra, sa, randBytes(10), tStamp, segwit, tParams)
 	if err == nil {
 		t.Fatalf("no error for bad secret hash")
 	}
 
 	// Good to go
-	_, err = MakeContract(recipient, sender, randBytes(32), tStamp, segwit, tParams)
+	_, err = MakeContract(ra, sa, randBytes(32), tStamp, segwit, tParams)
 	if err != nil {
 		t.Fatalf("error for valid contract parameters: %v", err)
 	}
@@ -337,10 +321,8 @@ func testExtractSwapDetails(t *testing.T, segwit bool) {
 		sAddr, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
 	}
 
-	recipient := rAddr.String()
-	sender := sAddr.String()
 	keyHash := randBytes(32)
-	contract, err := MakeContract(recipient, sender, keyHash, tStamp, segwit, tParams)
+	contract, err := MakeContract(rAddr, sAddr, keyHash, tStamp, segwit, tParams)
 	if err != nil {
 		t.Fatalf("error creating contract: %v", err)
 	}
@@ -349,11 +331,11 @@ func testExtractSwapDetails(t *testing.T, segwit bool) {
 	if err != nil {
 		t.Fatalf("error for valid contract: %v", err)
 	}
-	if sa.String() != sender {
-		t.Fatalf("sender address mismatch. wanted %s, got %s", sender, sa.String())
+	if sa.String() != sAddr.String() {
+		t.Fatalf("sender address mismatch. wanted %s, got %s", sAddr.String(), sa.String())
 	}
-	if ra.String() != recipient {
-		t.Fatalf("recipient address mismatch. wanted %s, got %s", recipient, ra.String())
+	if ra.String() != rAddr.String() {
+		t.Fatalf("recipient address mismatch. wanted %s, got %s", rAddr.String(), ra.String())
 	}
 	if lockTime != uint64(tStamp) {
 		t.Fatalf("incorrect lock time. wanted 5, got %d", lockTime)
@@ -458,13 +440,11 @@ func testFindKeyPush(t *testing.T, segwit bool) {
 		rAddr, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
 		sAddr, _ = btcutil.NewAddressPubKeyHash(randBytes(20), tParams)
 	}
-	recipient := rAddr.String()
-	sender := sAddr.String()
 
 	secret := randBytes(32)
 	secretHash := sha256.Sum256(secret)
-	contract, _ := MakeContract(recipient, sender, secretHash[:], tStamp, segwit, tParams)
-	randomContract, _ := MakeContract(recipient, sender, randBytes(32), tStamp, segwit, tParams)
+	contract, _ := MakeContract(rAddr, sAddr, secretHash[:], tStamp, segwit, tParams)
+	randomContract, _ := MakeContract(rAddr, sAddr, randBytes(32), tStamp, segwit, tParams)
 
 	var sigScript, contractHash, randoSigScript []byte
 	var witness, randoWitness [][]byte

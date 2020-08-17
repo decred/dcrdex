@@ -23,6 +23,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
+	"github.com/btcsuite/btcd/btcec"
 	"github.com/btcsuite/btcd/btcjson"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -144,6 +145,8 @@ var (
 	}
 )
 
+type TxInSigner func(tx *wire.MsgTx, idx int, subScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, val uint64) ([]byte, error)
+
 // BTCCloneCFG holds clone specific parameters.
 type BTCCloneCFG struct {
 	WalletCFG           *asset.WalletConfig
@@ -165,6 +168,19 @@ type BTCCloneCFG struct {
 	// LegacyRawFeeLimit can be true if the RPC only supports the boolean
 	// allowHighFees argument to the sendrawtransaction RPC.
 	LegacyRawFeeLimit bool
+	// AddressDecoder is an optional argument that can decode an address string
+	// into btcutil.Address. If AddressDecoder is not supplied,
+	// btcutil.DecodeAddress will be used.
+	AddressDecoder dexbtc.AddressDecoder
+	// ArglessChangeAddrRPC can be true if the getrawchangeaddress takes no
+	// address-type argument.
+	ArglessChangeAddrRPC bool
+	// NonSegwitSigner can be true if the transaction signature hash data is not
+	// the standard for non-segwit Bitcoin. If nil, txscript.
+	NonSegwitSigner TxInSigner
+	// FeeEstimator provides a way to get fees given an RawRequest-enabled
+	// client and a confirmation target.
+	FeeEstimator func(context.Context, RawRequester, uint64) (uint64, error)
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -232,9 +248,7 @@ func (op *output) wireOutPoint() *wire.OutPoint {
 	return wire.NewOutPoint(op.txHash(), op.vout())
 }
 
-// auditInfo is information about a swap contract on that blockchain, not
-// necessarily created by this wallet, as would be returned from AuditContract.
-// auditInfo satisfies the asset.AuditInfo interface.
+// auditInfo is information about a swap contract on that blockchain.
 type auditInfo struct {
 	output     *output
 	recipient  btcutil.Address
@@ -350,6 +364,9 @@ type ExchangeWallet struct {
 	useLegacyBalance  bool
 	segwit            bool
 	legacyRawFeeLimit bool
+	nonSegwitSigner   TxInSigner
+	estimateFee       func(context.Context, RawRequester, uint64) (uint64, error)
+	addrDecoder       dexbtc.AddressDecoder
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -459,6 +476,10 @@ func BTCCloneWallet(cfg *BTCCloneCFG) (*ExchangeWallet, error) {
 
 // newWallet creates the ExchangeWallet and starts the block monitor.
 func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) (*ExchangeWallet, error) {
+	addrDecoder := cfg.AddressDecoder
+	if addrDecoder == nil {
+		addrDecoder = btcutil.DecodeAddress
+	}
 	// If set in the user config, the fallback fee will be in conventional units
 	// per kB, e.g. BTC/kB. Translate that to sats/byte.
 	fallbackFeesPerByte := toSatoshi(btcCfg.FallbackFeeRate / 1000)
@@ -486,8 +507,13 @@ func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) 
 	}
 	cfg.Logger.Tracef("Redeem conf target set to %d blocks", redeemConfTarget)
 
-	return &ExchangeWallet{
-		node:                newWalletClient(requester, cfg.Segwit, cfg.ChainParams),
+	nonSegwitSigner := cfg.NonSegwitSigner
+	if nonSegwitSigner == nil {
+		nonSegwitSigner = rawTxInSig
+	}
+
+	w := &ExchangeWallet{
+		node:                newWalletClient(requester, cfg.Segwit, addrDecoder, cfg.ArglessChangeAddrRPC, cfg.ChainParams),
 		symbol:              cfg.Symbol,
 		chainParams:         cfg.ChainParams,
 		log:                 cfg.Logger,
@@ -502,8 +528,17 @@ func newWallet(requester RawRequester, cfg *BTCCloneCFG, btcCfg *dexbtc.Config) 
 		useLegacyBalance:    cfg.LegacyBalance,
 		segwit:              cfg.Segwit,
 		legacyRawFeeLimit:   cfg.LegacyRawFeeLimit,
+		nonSegwitSigner:     nonSegwitSigner,
+		estimateFee:         cfg.FeeEstimator,
+		addrDecoder:         addrDecoder,
 		walletInfo:          cfg.WalletInfo,
-	}, nil
+	}
+
+	if w.estimateFee == nil {
+		w.estimateFee = w.feeRate
+	}
+
+	return w, nil
 }
 
 var _ asset.Wallet = (*ExchangeWallet)(nil)
@@ -511,6 +546,12 @@ var _ asset.Wallet = (*ExchangeWallet)(nil)
 // Info returns basic information about the wallet and asset.
 func (btc *ExchangeWallet) Info() *asset.WalletInfo {
 	return btc.walletInfo
+}
+
+// Net returns the ExchangeWallet's *chaincfg.Params. This is not part of the
+// asset.Wallet interface, but is provided as a convenience for embedding types.
+func (btc *ExchangeWallet) Net() *chaincfg.Params {
+	return btc.chainParams
 }
 
 // Connect connects the wallet to the RPC server. Satisfies the dex.Connector
@@ -651,10 +692,10 @@ func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
 	}, nil
 }
 
-// FeeRate returns the current optimal fee rate in sat / byte.
-func (btc *ExchangeWallet) feeRate(confTarget uint64) (uint64, error) {
-	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget),
-		&btcjson.EstimateModeConservative)
+// feeRate returns the current optimal fee rate in sat / byte using the
+// estimatesmartfee RPC.
+func (btc *ExchangeWallet) feeRate(ctx context.Context, _ RawRequester, confTarget uint64) (uint64, error) {
+	feeResult, err := btc.node.EstimateSmartFee(int64(confTarget), &btcjson.EstimateModeConservative)
 	if err != nil {
 		return 0, err
 	}
@@ -682,7 +723,7 @@ func (a amount) String() string {
 // feeRateWithFallback attempts to get the optimal fee rate in sat / byte via
 // FeeRate. If that fails, it will return the configured fallback fee rate.
 func (btc *ExchangeWallet) feeRateWithFallback(confTarget uint64) uint64 {
-	feeRate, err := btc.feeRate(confTarget)
+	feeRate, err := btc.estimateFee(btc.node.ctx, btc.node.requester, confTarget)
 	if err != nil {
 		feeRate = btc.fallbackFeeRate
 		btc.log.Warnf("Unable to get optimal fee rate, using fallback of %d: %v",
@@ -705,7 +746,7 @@ func (btc *ExchangeWallet) MaxOrder(lotSize uint64, nfo *dex.Asset) (*asset.Swap
 // []*compositeUTXO to be used for further order estimation without additional
 // calls to listunspent.
 func (btc *ExchangeWallet) maxOrder(lotSize uint64, nfo *dex.Asset) (utxos []*compositeUTXO, feeRate uint64, est *asset.SwapEstimate, err error) {
-	networkFeeRate, err := btc.feeRate(1)
+	networkFeeRate, err := btc.estimateFee(btc.node.ctx, btc.node.requester, 1)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("error getting network fee estimate: %w", err)
 	}
@@ -1061,7 +1102,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output,
 
 	// This must fund swaps, so don't under-pay. TODO: get and use a fee rate
 	// from server, and have server check fee rate on unconf funding coins.
-	estFeeRate, err := btc.feeRate(1)
+	estFeeRate, err := btc.estimateFee(btc.node.ctx, btc.node.requester, 1)
 	if err != nil {
 		// Fallback fee rate is NO GOOD here.
 		return nil, false, fmt.Errorf("unable to get optimal fee rate for pre-split transaction "+
@@ -1293,8 +1334,14 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %w", err)
 		}
+
+		contractAddr, err := btc.addrDecoder(contract.Address, btc.chainParams)
+		if err != nil {
+			return nil, nil, 0, fmt.Errorf("address decode error: %v", err)
+		}
+
 		// Create the contract, a P2SH redeem script.
-		contractScript, err := dexbtc.MakeContract(contract.Address, revokeAddr.String(),
+		contractScript, err := dexbtc.MakeContract(contractAddr, revokeAddr,
 			contract.SecretHash, int64(contract.LockTime), btc.segwit, btc.chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("unable to create pubkey script for address %s: %w", contract.Address, err)
@@ -1393,13 +1440,18 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	var addresses []btcutil.Address
 	var values []uint64
 	for _, r := range form.Redemptions {
-		cinfo, ok := r.Spends.(*auditInfo)
-		if !ok {
-			return nil, nil, 0, fmt.Errorf("Redemption contract info of wrong type")
+		if r.Spends == nil {
+			return nil, nil, 0, fmt.Errorf("no audit info")
 		}
+
+		cinfo, err := btc.convertAuditInfo(r.Spends)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+
 		// Extract the swap contract recipient and secret hash and check the secret
 		// hash against the hash of the provided secret.
-		contract := r.Spends.Contract()
+		contract := cinfo.contract
 		_, receiver, _, secretHash, err := dexbtc.ExtractSwapDetails(contract, btc.segwit, btc.chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error extracting swap addresses: %w", err)
@@ -1464,7 +1516,7 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 	} else {
 		for i, r := range form.Redemptions {
 			contract := contracts[i]
-			redeemSig, redeemPubKey, err := btc.createSig(msgTx, i, contract, addresses[i])
+			redeemSig, redeemPubKey, err := btc.createSig(msgTx, i, contract, addresses[i], values[i])
 			if err != nil {
 				return nil, nil, 0, err
 			}
@@ -1491,6 +1543,32 @@ func (btc *ExchangeWallet) Redeem(form *asset.RedeemForm) ([]dex.Bytes, asset.Co
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
 	}
 	return coinIDs, newOutput(txHash, 0, uint64(txOut.Value)), fee, nil
+}
+
+// convertAuditInfo converts from the common *asset.AuditInfo type to our
+// internal *auditInfo type.
+func (btc *ExchangeWallet) convertAuditInfo(ai *asset.AuditInfo) (*auditInfo, error) {
+	if ai.Coin == nil {
+		return nil, fmt.Errorf("no coin")
+	}
+
+	txHash, vout, err := decodeCoinID(ai.Coin.ID())
+	if err != nil {
+		return nil, err
+	}
+
+	recip, err := btc.addrDecoder(ai.Recipient, btc.chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return &auditInfo{
+		output:     newOutput(txHash, vout, ai.Coin.Value()), //     *output
+		recipient:  recip,                                    //  btcutil.Address
+		contract:   ai.Contract,                              //   []byte
+		secretHash: ai.SecretHash,                            // []byte
+		expiration: ai.Expiration,                            // time.Time
+	}, nil
 }
 
 // SignMessage signs the message with the private key associated with the
@@ -1524,7 +1602,7 @@ func (btc *ExchangeWallet) SignMessage(coin asset.Coin, msg dex.Bytes) (pubkeys,
 // AuditContract retrieves information about a swap contract on the blockchain.
 // AuditContract would be used to audit the counter-party's contract during a
 // swap.
-func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (asset.AuditInfo, error) {
+func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (*asset.AuditInfo, error) {
 	txHash, vout, err := decodeCoinID(coinID)
 	if err != nil {
 		return nil, err
@@ -1582,12 +1660,12 @@ func (btc *ExchangeWallet) AuditContract(coinID dex.Bytes, contract dex.Bytes) (
 		return nil, fmt.Errorf("contract hash doesn't match script address. %x != %x",
 			contractHash, addr.ScriptAddress())
 	}
-	return &auditInfo{
-		output:     newOutput(txHash, vout, toSatoshi(txOut.Value)),
-		recipient:  receiver,
-		contract:   contract,
-		secretHash: secretHash,
-		expiration: time.Unix(int64(stamp), 0).UTC(),
+	return &asset.AuditInfo{
+		Coin:       newOutput(txHash, vout, toSatoshi(txOut.Value)),
+		Recipient:  receiver.String(),
+		Contract:   contract,
+		SecretHash: secretHash,
+		Expiration: time.Unix(int64(stamp), 0).UTC(),
 	}, nil
 }
 
@@ -2022,7 +2100,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 		txIn.Witness = dexbtc.RefundP2WSHContract(contract, refundSig, refundPubKey)
 
 	} else {
-		refundSig, refundPubKey, err := btc.createSig(msgTx, 0, contract, sender)
+		refundSig, refundPubKey, err := btc.createSig(msgTx, 0, contract, sender, val)
 		if err != nil {
 			return nil, fmt.Errorf("createSig: %w", err)
 		}
@@ -2395,12 +2473,12 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 
 // createSig creates and returns the serialized raw signature and compressed
 // pubkey for a transaction input signature.
-func (btc *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address) (sig, pubkey []byte, err error) {
+func (btc *ExchangeWallet) createSig(tx *wire.MsgTx, idx int, pkScript []byte, addr btcutil.Address, val uint64) (sig, pubkey []byte, err error) {
 	privKey, err := btc.node.PrivKeyForAddress(addr.String())
 	if err != nil {
 		return nil, nil, err
 	}
-	sig, err = txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, privKey)
+	sig, err = btc.nonSegwitSigner(tx, idx, pkScript, txscript.SigHashAll, privKey, val)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2629,7 +2707,6 @@ func (btc *ExchangeWallet) scriptHashAddress(contract []byte) (btcutil.Address, 
 		return btcutil.NewAddressWitnessScriptHash(btc.hashContract(contract), btc.chainParams)
 	}
 	return btcutil.NewAddressScriptHash(contract, btc.chainParams)
-
 }
 
 // toCoinID converts the tx hash and vout to a coin ID, as a []byte.
@@ -2660,4 +2737,10 @@ func isTxNotFoundErr(err error) bool {
 // toBTC returns a float representation in conventional units for the sats.
 func toBTC(v uint64) float64 {
 	return btcutil.Amount(v).ToBTC()
+}
+
+// rawTxInSig signs the transaction in input using the standard bitcoin
+// signature hash and ECDSA algorithm.
+func rawTxInSig(tx *wire.MsgTx, idx int, pkScript []byte, hashType txscript.SigHashType, key *btcec.PrivateKey, _ uint64) ([]byte, error) {
+	return txscript.RawTxInSignature(tx, idx, pkScript, txscript.SigHashAll, key)
 }

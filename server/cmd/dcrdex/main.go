@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/server/admin"
+	_ "decred.org/dcrdex/server/asset/bch"
 	_ "decred.org/dcrdex/server/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset

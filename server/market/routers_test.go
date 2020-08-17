@@ -345,8 +345,12 @@ func (b *TBackend) utxo(coinID []byte) (*tUTXO, error) {
 	}
 	return &tUTXO{val: v, decoded: str}, b.utxoErr
 }
-func (b *TBackend) Contract(coinID, redeemScript []byte) (asset.Contract, error) {
-	return b.utxo(coinID)
+func (b *TBackend) Contract(coinID, redeemScript []byte) (*asset.Contract, error) {
+	c, err := b.utxo(coinID)
+	if err != nil {
+		return nil, err
+	}
+	return &asset.Contract{Coin: c}, nil
 }
 func (b *TBackend) FundingCoin(ctx context.Context, coinID, redeemScript []byte) (asset.FundingCoin, error) {
 	return b.utxo(coinID)

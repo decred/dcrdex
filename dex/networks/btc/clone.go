@@ -6,7 +6,11 @@ package btc
 import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcutil"
 )
+
+// AddressDecoder decodes a string address to a btcutil.Address.
+type AddressDecoder func(addr string, net *chaincfg.Params) (btcutil.Address, error)
 
 // ReadCloneParams translates a CloneParams into a btcsuite chaincfg.Params.
 func ReadCloneParams(cloneParams *CloneParams) *chaincfg.Params {

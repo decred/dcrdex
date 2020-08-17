@@ -99,7 +99,7 @@ func TestUTXOStats(t *testing.T) {
 // enabling use by bitcoin clone backends during compatibility testing. See
 // LiveP2SHStats in testing.go for an explanation of the test.
 func TestP2SHStats(t *testing.T) {
-	LiveP2SHStats(btc, t)
+	LiveP2SHStats(btc, t, 10000)
 }
 
 // TestBlockMonitor is a live test that connects to bitcoind and listens for

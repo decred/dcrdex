@@ -62,5 +62,13 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (asse
 		configPath = dexbtc.SystemConfigPath("litecoin")
 	}
 
-	return btc.NewBTCClone(assetName, false, configPath, logger, network, params, ports)
+	return btc.NewBTCClone(&btc.BackendCloneConfig{
+		Name:        assetName,
+		Segwit:      false, // TODO: Change to true.
+		ConfigPath:  configPath,
+		Logger:      logger,
+		Net:         network,
+		ChainParams: params,
+		Ports:       ports,
+	})
 }

@@ -500,34 +500,6 @@ func (r *tReceipt) String() string {
 	return r.coin.String()
 }
 
-type tAuditInfo struct {
-	recipient  string
-	expiration time.Time
-	coin       *tCoin
-	contract   []byte
-	secretHash []byte
-}
-
-func (ai *tAuditInfo) Recipient() string {
-	return ai.recipient
-}
-
-func (ai *tAuditInfo) Expiration() time.Time {
-	return ai.expiration
-}
-
-func (ai *tAuditInfo) Coin() asset.Coin {
-	return ai.coin
-}
-
-func (ai *tAuditInfo) Contract() dex.Bytes {
-	return ai.contract
-}
-
-func (ai *tAuditInfo) SecretHash() dex.Bytes {
-	return ai.secretHash
-}
-
 type TXCWallet struct {
 	mtx               sync.RWMutex
 	payFeeCoin        *tCoin
@@ -538,7 +510,7 @@ type TXCWallet struct {
 	swapReceipts      []asset.Receipt
 	swapCounter       int
 	swapErr           error
-	auditInfo         asset.AuditInfo
+	auditInfo         *asset.AuditInfo
 	auditErr          error
 	auditChan         chan struct{}
 	refundCoin        dex.Bytes
@@ -687,7 +659,7 @@ func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Byte
 	return nil, nil, w.signCoinErr
 }
 
-func (w *TXCWallet) AuditContract(coinID, contract dex.Bytes) (asset.AuditInfo, error) {
+func (w *TXCWallet) AuditContract(coinID, contract dex.Bytes) (*asset.AuditInfo, error) {
 	defer func() {
 		if w.auditChan != nil {
 			w.auditChan <- struct{}{}
@@ -1768,7 +1740,7 @@ func TestLogin(t *testing.T) {
 	// The extra match is already at MakerSwapCast, and we're the taker, which
 	// will invoke match status conflict resolution and a contract audit.
 	_, auditInfo := tMsgAudit(oid, extraID, addr, qty, encode.RandomBytes(32))
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
 	tBtcWallet.auditInfo = auditInfo
 	missedContract := encode.RandomBytes(50)
 	rig.ws.queueResponse(msgjson.MatchStatusRoute, func(msg *msgjson.Message, f msgFunc) error {
@@ -2840,7 +2812,7 @@ func TestTradeTracking(t *testing.T) {
 	// Send the counter-party's init info.
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeTaker))
+	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeTaker))
 	tBtcWallet.auditInfo = auditInfo
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 
@@ -2865,33 +2837,33 @@ func TestTradeTracking(t *testing.T) {
 	tBtcWallet.auditErr = nil
 	match.MetaData.Proof.SelfRevoked = false
 
-	auditInfo.coin.val = auditQty - 1
+	auditInfo.Coin.(*tCoin).val = auditQty - 1
 	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for low value")
 	}
-	auditInfo.coin.val = auditQty
+	auditInfo.Coin.(*tCoin).val = auditQty
 
-	auditInfo.secretHash = []byte{0x01}
+	auditInfo.SecretHash = []byte{0x01}
 	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for wrong secret hash")
 	}
-	auditInfo.secretHash = proof.SecretHash
+	auditInfo.SecretHash = proof.SecretHash
 
-	auditInfo.recipient = "wrong address"
+	auditInfo.Recipient = "wrong address"
 	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for wrong address")
 	}
-	auditInfo.recipient = addr
+	auditInfo.Recipient = addr
 
-	auditInfo.expiration = matchTime.Add(tracker.lockTimeTaker - time.Hour)
+	auditInfo.Expiration = matchTime.Add(tracker.lockTimeTaker - time.Hour)
 	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no maker error for early lock time")
 	}
-	auditInfo.expiration = matchTime.Add(tracker.lockTimeTaker)
+	auditInfo.Expiration = matchTime.Add(tracker.lockTimeTaker)
 
 	// success, full handleAuditRoute>processAuditMsg>auditContract
 	rig.db.setUpdateMatchHook(mid, make(chan order.MatchStatus, 1))
@@ -2922,7 +2894,7 @@ func TestTradeTracking(t *testing.T) {
 	}
 
 	// Confirming the counter-swap triggers a redemption.
-	tBtcWallet.setConfs(auditInfo.coin.ID(), tBTC.SwapConf, nil)
+	tBtcWallet.setConfs(auditInfo.Coin.ID(), tBTC.SwapConf, nil)
 	redeemCoin := encode.RandomBytes(36)
 	//<-tBtcWallet.redeemErrChan
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
@@ -2998,14 +2970,14 @@ func TestTradeTracking(t *testing.T) {
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
 	// early lock time
-	auditInfo.expiration = matchTime.Add(tracker.lockTimeMaker - time.Hour)
+	auditInfo.Expiration = matchTime.Add(tracker.lockTimeMaker - time.Hour)
 	err = tracker.auditContract(match, audit.CoinID, audit.Contract)
 	if err == nil {
 		t.Fatalf("no taker error for early lock time")
 	}
 
 	// success, full handleAuditRoute>processAuditMsg>auditContract
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
@@ -3035,7 +3007,7 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("swap broadcast before confirmations")
 	}
 	// confirming maker's swap should trigger taker's swap bcast
-	tBtcWallet.setConfs(auditInfo.coin.ID(), tBTC.SwapConf, nil)
+	tBtcWallet.setConfs(auditInfo.Coin.ID(), tBTC.SwapConf, nil)
 	swapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
@@ -3541,7 +3513,7 @@ func TestRefunds(t *testing.T) {
 	auditQty := calc.BaseToQuote(rate, matchSize)
 	audit, auditInfo := tMsgAudit(loid, mid, addr, auditQty, proof.SecretHash)
 	tBtcWallet.auditInfo = auditInfo
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
 
 	// Check audit errors.
 	tBtcWallet.auditErr = tErr
@@ -3591,7 +3563,7 @@ func TestRefunds(t *testing.T) {
 	rig.db.setUpdateMatchHook(mid, make(chan order.MatchStatus, 1))
 	audit, auditInfo = tMsgAudit(loid, mid, addr, matchSize, nil)
 	tBtcWallet.auditInfo = auditInfo
-	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	auditInfo.Expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
 	tBtcWallet.auditErr = nil
 	msg, _ = msgjson.NewRequest(1, msgjson.AuditRoute, audit)
 	err = handleAuditRoute(tCore, rig.dc, msg)
@@ -3610,7 +3582,7 @@ func TestRefunds(t *testing.T) {
 	}
 	tracker.mtx.RUnlock()
 	// maker's swap confirmation should trigger taker's swap bcast
-	tBtcWallet.setConfs(auditInfo.coin.ID(), tBTC.SwapConf, nil)
+	tBtcWallet.setConfs(auditInfo.Coin.ID(), tBTC.SwapConf, nil)
 	counterSwapID := encode.RandomBytes(36)
 	counterScript := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
@@ -4137,7 +4109,7 @@ func orderResponse(msgID uint64, msgPrefix msgjson.Stampable, ord order.Order, b
 	return resp
 }
 
-func tMsgAudit(oid order.OrderID, mid order.MatchID, recipient string, val uint64, secretHash []byte) (*msgjson.Audit, *tAuditInfo) {
+func tMsgAudit(oid order.OrderID, mid order.MatchID, recipient string, val uint64, secretHash []byte) (*msgjson.Audit, *asset.AuditInfo) {
 	auditID := encode.RandomBytes(36)
 	auditContract := encode.RandomBytes(75)
 	if secretHash == nil {
@@ -4153,11 +4125,11 @@ func tMsgAudit(oid order.OrderID, mid order.MatchID, recipient string, val uint6
 	}
 	sign(tDexPriv, audit)
 	auditCoin := &tCoin{id: auditID, val: val}
-	auditInfo := &tAuditInfo{
-		recipient:  recipient,
-		coin:       auditCoin,
-		contract:   auditContract,
-		secretHash: secretHash,
+	auditInfo := &asset.AuditInfo{
+		Recipient:  recipient,
+		Coin:       auditCoin,
+		Contract:   auditContract,
+		SecretHash: secretHash,
 	}
 	return audit, auditInfo
 }
@@ -5406,9 +5378,9 @@ func TestMatchStatusResolution(t *testing.T) {
 		proof := &match.MetaData.Proof
 
 		if isMaker {
-			auditInfo.expiration = matchTime.Add(trade.lockTimeTaker)
+			auditInfo.Expiration = matchTime.Add(trade.lockTimeTaker)
 		} else {
-			auditInfo.expiration = matchTime.Add(trade.lockTimeMaker)
+			auditInfo.Expiration = matchTime.Add(trade.lockTimeMaker)
 		}
 
 		if status >= order.MakerSwapCast {
@@ -5619,7 +5591,7 @@ func TestMatchStatusResolution(t *testing.T) {
 			servers: order.MakerSwapCast,
 			side:    order.Taker,
 			tweaker: func() {
-				auditInfo.expiration = matchTime
+				auditInfo.Expiration = matchTime
 			},
 			countStatusUpdates: 2, // async auditContract -> revoke and db update
 		},
@@ -5654,7 +5626,7 @@ func TestMatchStatusResolution(t *testing.T) {
 			servers: order.TakerSwapCast,
 			side:    order.Maker,
 			tweaker: func() {
-				auditInfo.expiration = matchTime
+				auditInfo.Expiration = matchTime
 			},
 			countStatusUpdates: 2, // async auditContract -> revoke and db update
 		},
@@ -5852,10 +5824,10 @@ func TestSuspectTrades(t *testing.T) {
 
 		// Set counterswaps for both swaps.
 		_, auditInfo := tMsgAudit(oid, swappableMatch2.id, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
-		tBtcWallet.setConfs(auditInfo.coin.ID(), tDCR.SwapConf, nil)
+		tBtcWallet.setConfs(auditInfo.Coin.ID(), tDCR.SwapConf, nil)
 		swappableMatch2.counterSwap = auditInfo
 		_, auditInfo = tMsgAudit(oid, swappableMatch1.id, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
-		tBtcWallet.setConfs(auditInfo.coin.ID(), tDCR.SwapConf, nil)
+		tBtcWallet.setConfs(auditInfo.Coin.ID(), tDCR.SwapConf, nil)
 		swappableMatch1.counterSwap = auditInfo
 
 		tDcrWallet.swapCounter = 0
@@ -5923,7 +5895,7 @@ func TestSuspectTrades(t *testing.T) {
 		redeemableMatch1 = newMatch(order.Maker, order.TakerSwapCast)
 		redeemableMatch2 = newMatch(order.Taker, order.MakerRedeemed)
 		_, auditInfo := tMsgAudit(oid, redeemableMatch1.id, ordertest.RandomAddress(), 1, encode.RandomBytes(32))
-		tBtcWallet.setConfs(auditInfo.coin.ID(), tBTC.SwapConf, nil)
+		tBtcWallet.setConfs(auditInfo.Coin.ID(), tBTC.SwapConf, nil)
 		redeemableMatch1.counterSwap = auditInfo
 		tBtcWallet.redeemCounter = 0
 		tracker.matches = map[order.MatchID]*matchTracker{
