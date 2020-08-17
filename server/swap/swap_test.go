@@ -254,9 +254,10 @@ func (m *TAuthManager) getResp(id account.AccountID) (*msgjson.Message, *msgjson
 }
 
 type TStorage struct {
-	fatalMtx sync.RWMutex
-	fatal    chan struct{}
-	fatalErr error
+	fatalMtx  sync.RWMutex
+	fatal     chan struct{}
+	fatalErr  error
+	stateHash []byte
 }
 
 func (ts *TStorage) LastErr() error {
@@ -317,6 +318,15 @@ func (s *TStorage) SaveRedeemAckSigA(mid db.MarketMatchID, sig []byte) error {
 	return nil
 }
 func (s *TStorage) SetMatchInactive(mid db.MarketMatchID) error { return nil }
+
+func (s *TStorage) GetStateHash() ([]byte, error) {
+	return s.stateHash, nil
+}
+
+func (s *TStorage) SetStateHash(h []byte) error {
+	s.stateHash = h
+	return nil
+}
 
 // This stub satisfies asset.Backend.
 type TAsset struct {
@@ -496,23 +506,32 @@ type testRig struct {
 	matches       *tMatchSet
 	matchInfo     *tMatch
 	swapDataDir   string
+	statePath     string
+	ignoreState   bool
 }
 
-type rigData struct {
-	state    *State
-	abc, xyz *TAsset
-}
-
-func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
+func tNewTestRig(matchInfo *tMatch, seed ...*testRig) (*testRig, func()) {
 	var abcBackend, xyzBackend *TAsset
-	var state *State
-	manualMode := len(conf) > 0
-	if manualMode && conf[0] != nil {
-		abcBackend, xyzBackend = conf[0].abc, conf[0].xyz
-		state = conf[0].state
+	storage := &TStorage{}
+	var swapDataDir, statePath string
+	var ignoreState bool
+	manualMode := len(seed) > 0
+	if manualMode && seed[0] != nil {
+		seedRig := seed[0]
+		abcBackend, xyzBackend = seedRig.abcNode, seedRig.xyzNode
+		storage = seedRig.storage
+		// state := conf[0].state
+		swapDataDir = seedRig.swapDataDir
+		statePath = seedRig.statePath
+		ignoreState = seedRig.ignoreState
 	} else {
 		abcBackend = newTAsset("abc")
 		xyzBackend = newTAsset("xyz")
+		var err error
+		swapDataDir, err = ioutil.TempDir("", "swapstates")
+		if err != nil {
+			panic(err.Error())
+		}
 	}
 
 	abcAsset := TNewAsset(abcBackend)
@@ -522,15 +541,8 @@ func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
 	xyzCoinLocker := coinlock.NewAssetCoinLocker()
 
 	authMgr := newTAuthManager()
-	storage := &TStorage{}
-
-	swapDataDir, err := ioutil.TempDir("", "swapstates")
-	if err != nil {
-		panic(err.Error())
-	}
 
 	swapper, err := NewSwapper(&Config{
-		State:   state,
 		DataDir: swapDataDir,
 		Assets: map[uint32]*LockableAsset{
 			ABCID: {abcAsset, abcCoinLocker},
@@ -542,6 +554,8 @@ func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
 		LockTimeTaker:    dex.LockTimeTaker(dex.Testnet),
 		LockTimeMaker:    dex.LockTimeMaker(dex.Testnet),
 		UnbookHook:       func(*order.LimitOrder) bool { return true },
+		IgnoreState:      ignoreState,
+		StatePath:        statePath,
 	})
 	if err != nil {
 		panic(err.Error())
@@ -573,6 +587,8 @@ func tNewTestRig(matchInfo *tMatch, conf ...*rigData) (*testRig, func()) {
 		storage:       storage,
 		matchInfo:     matchInfo,
 		swapDataDir:   swapDataDir,
+		statePath:     statePath,
+		ignoreState:   ignoreState,
 	}, cleanup
 }
 
@@ -1927,7 +1943,45 @@ func TestState(t *testing.T) {
 		}
 	}
 
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
+	// Loading with ignoreState = true should result in no matches being loaded.
+	// Set a different swapDataDir so the temporary rig doesn't dump it's empty
+	// state file on stop().
+	ogSwapDir := rig.swapDataDir
+	ogHash := rig.storage.stateHash
+	otherDir, err := ioutil.TempDir("", "otherstate")
+	if err != nil {
+		panic(err.Error())
+	}
+	rig.swapDataDir = otherDir
+	rig.ignoreState = true
+	rig, stop = tNewTestRig(matchInfo, rig)
+	rig.ignoreState = false
+	defer os.RemoveAll(otherDir)
+	defer stop()
+
+	if len(rig.swapper.matches) != 0 {
+		t.Errorf("expected 0 tracked matches for ignoreState = true, got %d", len(rig.swapper.matches))
+	}
+	stop()
+
+	// Loading the file from a different location should work as well.
+	stateFile, err := LatestStateFile(ogSwapDir)
+	if err != nil {
+		t.Errorf("unable to read datadir: %v", err)
+	}
+	rig.statePath = stateFile.Name
+	rig, stop = tNewTestRig(matchInfo, rig)
+	rig.statePath = ""
+	defer stop()
+	if len(rig.swapper.matches) != 1 {
+		t.Errorf("expected 1 tracked match for custom state file, got %d", len(rig.swapper.matches))
+	}
+	stop()
+	rig.swapDataDir = ogSwapDir
+	rig.storage.stateHash = ogHash
+
+	// Now load the state in the default way.
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer os.RemoveAll(rig.swapDataDir)
 	defer stop()
 
@@ -1970,8 +2024,7 @@ func TestState(t *testing.T) {
 	}
 
 	// Start the swapper back up.
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	if len(rig.swapper.matches) != 1 {
@@ -1995,8 +2048,7 @@ func TestState(t *testing.T) {
 		t.Fatalf("expected 0 live ackers, got %d", len(state.LiveAckers))
 	}
 
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	if len(rig.swapper.matches) != 1 {
@@ -2032,8 +2084,7 @@ func TestState(t *testing.T) {
 
 	// Restarting the swapper should call handleInit again with the same args to
 	// recreate the same coinwaiter.
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	if len(rig.swapper.matches) != 1 {
@@ -2090,8 +2141,7 @@ func TestState(t *testing.T) {
 		}
 	}
 
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	if len(rig.swapper.matches) != 1 {
@@ -2142,8 +2192,7 @@ func TestState(t *testing.T) {
 
 	// Restarting the swapper should call handleInit again with the same args to
 	// recreate the same coinwaiter.
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	// Should still be MakerSwapCast since the contract has not been bcasted yet.
@@ -2196,8 +2245,7 @@ func TestState(t *testing.T) {
 		}
 	}
 
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	tracker = rig.getTracker()
@@ -2241,8 +2289,7 @@ func TestState(t *testing.T) {
 
 	// Restarting the swapper should call handleRedeem again with the same args to
 	// recreate the same coinwaiter.
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	if len(rig.swapper.matches) != 1 {
@@ -2300,8 +2347,7 @@ func TestState(t *testing.T) {
 		}
 	}
 
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	tracker = rig.getTracker()
@@ -2342,8 +2388,7 @@ func TestState(t *testing.T) {
 
 	// Restarting the swapper should call handleRedeem again with the same args to
 	// recreate the same coinwaiter.
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	// Should still be MakerRedeemed since the taker's redeem has not been bcasted yet.
@@ -2397,8 +2442,7 @@ func TestState(t *testing.T) {
 		}
 	}
 
-	rig, stop = tNewTestRig(matchInfo, &rigData{state, abc, xyz})
-	defer os.RemoveAll(rig.swapDataDir)
+	rig, stop = tNewTestRig(matchInfo, rig)
 	defer stop()
 
 	if len(rig.swapper.matches) != 1 {

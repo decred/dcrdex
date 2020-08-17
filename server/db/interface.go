@@ -70,6 +70,12 @@ type DEXArchivist interface {
 	// InsertEpoch stores the results of a newly-processed epoch.
 	InsertEpoch(ed *EpochResults) error
 
+	// GetStateHash retrieves that last stored swap state file hash.
+	GetStateHash() ([]byte, error)
+
+	// SetStateHash stores the swap state file hash.
+	SetStateHash([]byte) error
+
 	OrderArchiver
 	AccountArchiver
 	MatchArchiver

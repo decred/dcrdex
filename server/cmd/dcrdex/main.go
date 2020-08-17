@@ -4,10 +4,8 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -24,7 +22,6 @@ import (
 	_ "decred.org/dcrdex/server/asset/dcr" // register dcr asset
 	_ "decred.org/dcrdex/server/asset/ltc" // register ltc asset
 	dexsrv "decred.org/dcrdex/server/dex"
-	"decred.org/dcrdex/server/swap"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
@@ -107,61 +104,8 @@ func mainCore(ctx context.Context) error {
 		return err
 	}
 
-	// TODO: add dcrdex flags and config options: 1) specify state file, 2) do
-	// not load state, 3) load latest state without prompt.
-	log.Infof("Searching for swap state files in %q", cfg.DataDir)
-	stateFile, err := swap.LatestStateFile(cfg.DataDir)
-	if err != nil {
-		return fmt.Errorf("unable to read datadir: %v", err)
-	}
-	var state *swap.State
-	if stateFile != nil {
-		fmt.Printf("Load swapper state from file %q with time stamp %v? (y, n, or enter to abort) ",
-			stateFile.Name, encode.UnixTimeMilli(stateFile.Stamp))
-		scanner := bufio.NewScanner(os.Stdin)
-		scan := make(chan bool)
-		go func() {
-			scan <- scanner.Scan()
-		}()
-		// Wait for scanned line ending with newline or context done.
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-scan:
-		}
-		promptResp := scanner.Text()
-		err = scanner.Err()
-		if err != nil {
-			return fmt.Errorf("input failed: %v", err)
-		}
-
-		var doLoad bool
-		switch strings.ToLower(promptResp) {
-		case "y", "yes":
-			doLoad = true
-		case "n", "no":
-		case "":
-			return errors.New("input aborted")
-		default:
-			return fmt.Errorf("invalid response: %q", promptResp)
-		}
-
-		if doLoad {
-			state, err = swap.LoadStateFile(stateFile.Name)
-			if err != nil {
-				return fmt.Errorf("failed to load swap state file %v: %v", stateFile.Name, err)
-			}
-			log.Infof("Loaded swap state file %q, containing %d live matches with "+
-				"%d pending client acks and %d live coin waiters", stateFile.Name,
-				len(state.MatchTrackers), len(state.LiveAckers), len(state.LiveWaiters))
-		}
-	} else {
-		log.Info("No swap state files found.")
-	}
-
 	// Create the DEX manager.
 	dexConf := &dexsrv.DexConf{
-		SwapState:  state,
 		DataDir:    cfg.DataDir,
 		LogBackend: cfg.LogMaker,
 		Markets:    markets,
@@ -188,6 +132,8 @@ func mainCore(ctx context.Context) error {
 			ListenAddrs: cfg.RPCListen,
 			AltDNSNames: cfg.AltDNSNames,
 		},
+		IgnoreState: cfg.IgnoreState,
+		StatePath:   cfg.StatePath,
 	}
 	dexMan, err := dexsrv.NewDEX(dexConf)
 	if err != nil {

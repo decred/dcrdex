@@ -53,7 +53,6 @@ type RPCConfig = comms.RPCConfig
 
 // DexConf is the configuration data required to create a new DEX.
 type DexConf struct {
-	SwapState        *swap.State
 	DataDir          string
 	LogBackend       *dex.LoggerMaker
 	Markets          []*dex.MarketInfo
@@ -68,6 +67,8 @@ type DexConf struct {
 	Anarchy          bool
 	DEXPrivKey       *secp256k1.PrivateKey
 	CommsCfg         *RPCConfig
+	IgnoreState      bool
+	StatePath        string
 }
 
 type subsystem struct {
@@ -384,7 +385,6 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 
 	// Create the swapper.
 	swapperCfg := &swap.Config{
-		State:            cfg.SwapState,
 		DataDir:          cfg.DataDir,
 		Assets:           lockableAssets,
 		Storage:          storage,
@@ -393,6 +393,8 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		LockTimeTaker:    dex.LockTimeTaker(cfg.Network),
 		LockTimeMaker:    dex.LockTimeMaker(cfg.Network),
 		UnbookHook:       marketUnbookHook,
+		IgnoreState:      cfg.IgnoreState,
+		StatePath:        cfg.StatePath,
 	}
 
 	swapper, err := swap.NewSwapper(swapperCfg)
