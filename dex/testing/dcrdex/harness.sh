@@ -59,9 +59,9 @@ cat > "./markets.json" <<EOF
 }
 EOF
 
-# Write dcrdex.conf.
+# Write dcrdex.conf. The regfeexpub comes from the alpha>server_fees account.
 cat > "./dcrdex.conf" <<EOF
-regfeexpub=spubVWHTkHRefqHpw3qMN2VTWqnT9rMuqDZrbdgxp8QzGBvXCYfdUuk2VKFnsPHE1CBBNSZjrwHTx2LrM9LbXbGH7gb9qLCYc3JUkLW883SeQ2H
+regfeexpub=spubVWKGn9TGzyo7M4b5xubB5UV4joZ5HBMNBmMyGvYEaoZMkSxVG4opckpmQ26E85iHg8KQxrSVTdex56biddqtXBerG9xMN8Dvb3eNQVFFwpE
 pgdbname=${TEST_DB}
 simnet=1
 rpclisten=127.0.0.1:17273
