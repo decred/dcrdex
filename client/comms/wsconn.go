@@ -398,6 +398,7 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		defer conn.wg.Done()
 		<-ctxInternal.Done()
 		conn.setConnected(false)
+		conn.wsMtx.Lock()
 		if conn.ws != nil {
 			log.Debug("Sending close 1000 (normal) message.")
 			msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye")
@@ -405,6 +406,7 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 				time.Now().Add(writeWait))
 			conn.ws.Close()
 		}
+		conn.wsMtx.Unlock()
 		close(conn.readCh) // signal to receivers that the wsConn is dead
 	}()
 

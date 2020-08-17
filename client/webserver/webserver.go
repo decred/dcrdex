@@ -105,27 +105,50 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		return err == nil && stat.IsDir()
 	}
 
-	// Right now, it is expected that the working directory
-	// is either the dcrdex root directory, or the WebServer directory itself.
-	root := "../../webserver/site"
-	if !folderExists(root) {
-		root = "site"
-		if !folderExists(root) {
-			return nil, fmt.Errorf("no HTML template files found")
+	// Look for the "site" folder in the executable's path, the working
+	// directory, or the source path relative to [repo root]/client/cmd/dexc.
+	execPath, err := os.Executable() // e.g. /usr/bin/dexc
+	if err != nil {
+		return nil, fmt.Errorf("unable to locate executable path: %w", err)
+	}
+	execPath, err = filepath.EvalSymlinks(execPath) // e.g. /opt/decred/dex/dexc
+	if err != nil {
+		return nil, fmt.Errorf("unable to locate executable path: %w", err)
+	}
+	execPath = filepath.Dir(execPath) // e.g. /opt/decred/dex
+
+	// executable path
+	siteDir := filepath.Join(execPath, "site") // e.g. /opt/decred/dex/site
+	log.Debugf("Looking for site in %v", siteDir)
+	if !folderExists(siteDir) {
+
+		// working directory
+		siteDir, _ = filepath.Abs("site")
+		log.Debugf("Looking for site in %v", siteDir)
+		if !folderExists(siteDir) {
+
+			// repo
+			siteDir = filepath.Clean(filepath.Join(execPath, "../../webserver/site"))
+			log.Debugf("Looking for site in %v", siteDir)
+			if !folderExists(siteDir) {
+
+				return nil, fmt.Errorf("no HTML template files found. "+
+					"Place the 'site' folder in the executable's directory %q or the working directory, "+
+					"or run dexc from within the client/cmd/dexc source workspace folder.", execPath)
+			}
 		}
 	}
-
-	join := filepath.Join
+	log.Infof("Located \"site\" folder at %v", siteDir)
 
 	// Prepare the templates.
 	bb := "bodybuilder"
-	tmpl := newTemplates(join(root, "src/html"), reloadHTML).
+	tmpl := newTemplates(filepath.Join(siteDir, "src/html"), reloadHTML).
 		addTemplate("login", bb).
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
 		addTemplate("wallets", bb, "forms").
 		addTemplate("settings", bb, "forms")
-	err := tmpl.buildErr()
+	err = tmpl.buildErr()
 	if err != nil {
 		return nil, err
 	}
@@ -212,10 +235,10 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 	})
 
 	// Files
-	fileServer(mux, "/js", join(root, "dist"))
-	fileServer(mux, "/css", join(root, "dist"))
-	fileServer(mux, "/img", join(root, "src/img"))
-	fileServer(mux, "/font", join(root, "src/font"))
+	fileServer(mux, "/js", filepath.Join(siteDir, "dist"))
+	fileServer(mux, "/css", filepath.Join(siteDir, "dist"))
+	fileServer(mux, "/img", filepath.Join(siteDir, "src/img"))
+	fileServer(mux, "/font", filepath.Join(siteDir, "src/font"))
 
 	return s, nil
 }
