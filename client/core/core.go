@@ -1817,7 +1817,6 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	}
 
 	corder, fromID, err := c.prepareTrackedTrade(dc, form, crypter)
-
 	if err != nil {
 		return nil, err
 	}
@@ -1934,7 +1933,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	msgCoins, err := messageCoins(wallets.fromWallet, coins)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
 	}
 
 	// Must be locked here and held until at least the trade is added to the
@@ -1949,7 +1948,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	result := new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("new order request with DEX server %v failed: %w", dc.acct.host, err)
 	}
 
 	// If we encounter an error, perform some basic logging.

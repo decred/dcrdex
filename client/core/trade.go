@@ -594,8 +594,8 @@ func (t *trackedTrade) isActive() bool {
 
 	// Status of all matches for the order.
 	for _, match := range t.matches {
-		// log.Tracef("Checking match %v (%v) in status %v. Refund coin: %v, Script: %x", match.id,
-		// 	match.Match.Side, match.MetaData.Status, match.MetaData.Proof.RefundCoin, match.MetaData.Proof.Script)
+		log.Tracef("Checking match %v (%v) in status %v. Order: %v, Refund coin: %v, Script: %x", match.id,
+			match.Match.Side, match.MetaData.Status, t.ID(), match.MetaData.Proof.RefundCoin, match.MetaData.Proof.Script)
 		if match.MetaData.Status == order.MatchComplete {
 			continue
 		}

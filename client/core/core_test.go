@@ -3305,7 +3305,17 @@ func TestLogout(t *testing.T) {
 			MetaData: &db.MatchMetaData{
 				Status: order.NewlyMatched,
 			},
+			Match: &order.UserMatch{
+				OrderID: ord.ID(),
+				MatchID: mid,
+				Status:  order.NewlyMatched,
+				Side:    order.Maker,
+			},
 		},
+		prefix:         ord.Prefix(),
+		trade:          ord.Trade(),
+		contractExpiry: time.Now().Add(time.Hour).UTC(),
+		id:             mid,
 	}
 	// Active orders with matches error.
 	ensureErr("active orders matches")
