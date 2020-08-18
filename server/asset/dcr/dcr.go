@@ -56,6 +56,8 @@ var (
 	// The blockPollInterval is the delay between calls to GetBestBlockHash to
 	// check for new blocks.
 	blockPollInterval = time.Second
+
+	requiredNodeVersion = dex.Semver{Major: 6, Minor: 1, Patch: 2}
 )
 
 const (
@@ -141,6 +143,24 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 		return nil, fmt.Errorf("wrong net %v", net.String())
 	}
 
+	// Check the required API versions.
+	versions, err := dcr.client.Version()
+	if err != nil {
+		return nil, fmt.Errorf("DCR node version fetch error: %v", err)
+	}
+
+	ver, exists := versions["dcrdjsonrpcapi"]
+	if !exists {
+		return nil, fmt.Errorf("dcrd.Version response missing 'dcrdjsonrpcapi'")
+	}
+	nodeSemver := dex.NewSemver(ver.Major, ver.Minor, ver.Patch)
+	if !dex.SemverCompatible(requiredNodeVersion, nodeSemver) {
+		return nil, fmt.Errorf("dcrd has an incompatible JSON-RPC version: got %s, expected %s",
+			nodeSemver, requiredNodeVersion)
+	}
+
+	dcr.log.Infof("Connected to dcrd (JSON-RPC API v%s) on %v", nodeSemver, net)
+
 	dcr.node = dcr.client
 	// Prime the cache with the best block.
 	bestHash, _, err := dcr.client.GetBestBlock()
@@ -158,7 +178,7 @@ func NewBackend(configPath string, logger dex.Logger, network dex.Network) (*Bac
 
 // InitTxSize is an asset.Backend method that must produce the max size of a
 // standardized atomic swap initialization transaction.
-func (btc *Backend) InitTxSize() uint32 {
+func (dcr *Backend) InitTxSize() uint32 {
 	return dexdcr.InitTxSize
 }
 

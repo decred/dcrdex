@@ -270,6 +270,12 @@ func runTest(t *testing.T, splitTx bool) {
 	// Check that there are 0 confirmations.
 	checkConfs(0)
 
+	// Unlock the wallet for use.
+	err = rig.alpha().Unlock(walletPassword, time.Hour*24)
+	if err != nil {
+		t.Fatalf("error unlocking alpha wallet: %v", err)
+	}
+
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		swapOutput := receipt.Coin()
@@ -330,6 +336,7 @@ func runTest(t *testing.T, splitTx bool) {
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
+	ctx, _ = context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	_, err = rig.beta().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
