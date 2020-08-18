@@ -247,7 +247,7 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 	}
 
 	if tracker.cancel != nil {
-		err = fmt.Errorf("order %s - only one cancel order can be submitted per epoch. still waiting on cancel order %s to match", oid, tracker.cancel.ID())
+		err = fmt.Errorf("order %s - only one cancel order can be submitted per order per epoch. still waiting on cancel order %s to match", oid, tracker.cancel.ID())
 		return
 	}
 
