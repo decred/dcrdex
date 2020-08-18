@@ -12,8 +12,11 @@ package core
 //
 // Some errors you might encounter (especially after running this test
 // multiple times):
-// - error placing order rpc error: 22: coin locked
-//   clear the dcrdex db and restart the dcrdex harness
+// - error placing order rpc error: 36: coin locked
+//   likely that the DEX has not revoked a previously failed match that locked
+//   the coin that was about to be reused, waiting a couple seconds before retrying
+//   should eliminate the error. Otherwise, clear the dcrdex db and restart the
+//   dcrdex harness
 // - error placing order not enough to cover requested funds
 //   use the affected asset harness to send funds to the affected wallet
 // - occasional issue with fee payment confirmation
@@ -27,6 +30,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,7 +41,6 @@ import (
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
-	"decred.org/dcrdex/dex/wait"
 	"github.com/decred/slog"
 	"golang.org/x/sync/errgroup"
 )
@@ -87,15 +90,15 @@ func readWalletCfgsAndDexCert() error {
 	fp := filepath.Join
 	for _, client := range clients {
 		dcrw, btcw := client.dcrw(), client.btcw()
-		dcrw.config, err = config.Parse(fp(user.HomeDir, "dextest", "dcr", dcrw.name, "w-"+dcrw.name+".conf"))
+		dcrw.config, err = config.Parse(fp(user.HomeDir, "dextest", "dcr", dcrw.daemon, "w-"+dcrw.daemon+".conf"))
 		if err == nil {
-			btcw.config, err = config.Parse(fp(user.HomeDir, "dextest", "btc", "harness-ctl", btcw.name+".conf"))
+			btcw.config, err = config.Parse(fp(user.HomeDir, "dextest", "btc", "harness-ctl", btcw.daemon+".conf"))
 		}
 		if err != nil {
 			return err
 		}
-		dcrw.config["account"] = "default"
-		btcw.config["account"] = btcw.name
+		dcrw.config["account"] = dcrw.account
+		btcw.config["walletname"] = btcw.walletName
 	}
 
 	dexCertPath := filepath.Join(user.HomeDir, "dextest", "dcrdex", "rpc.cert")
@@ -105,7 +108,7 @@ func readWalletCfgsAndDexCert() error {
 
 func startClients(ctx context.Context) error {
 	for _, c := range clients {
-		err := c.init()
+		err := c.init(ctx)
 		c.log("core created")
 
 		go func() {
@@ -159,8 +162,8 @@ func TestTrading(t *testing.T) {
 
 	UseLoggerMaker(&dex.LoggerMaker{
 		Backend:      slog.NewBackend(os.Stdout),
-		DefaultLevel: slog.LevelError,
-	}) // core log on error only
+		DefaultLevel: slog.LevelTrace,
+	})
 
 	tLog = dex.StdOutLogger("TEST", dex.LevelTrace)
 
@@ -308,15 +311,17 @@ func simpleTradeTest(qty, rate uint64, finalStatus order.MatchStatus) error {
 
 	// Check if any refunds are necessary and wait to ensure the refunds
 	// are completed.
-	refundsWaiter, ctx := errgroup.WithContext(context.Background())
-	refundsWaiter.Go(func() error {
-		return checkAndWaitForRefunds(ctx, client1, c1OrderID)
-	})
-	refundsWaiter.Go(func() error {
-		return checkAndWaitForRefunds(ctx, client2, c2OrderID)
-	})
-	if err = refundsWaiter.Wait(); err != nil {
-		return err
+	if finalStatus != order.MatchComplete {
+		refundsWaiter, ctx := errgroup.WithContext(context.Background())
+		refundsWaiter.Go(func() error {
+			return checkAndWaitForRefunds(ctx, client1, c1OrderID)
+		})
+		refundsWaiter.Go(func() error {
+			return checkAndWaitForRefunds(ctx, client2, c2OrderID)
+		})
+		if err = refundsWaiter.Wait(); err != nil {
+			return err
+		}
 	}
 
 	tLog.Infof("Trades ended at %s.", finalStatus)
@@ -338,14 +343,9 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	// Wait a max of 2 epochLen durations for this order to get matched.
 	maxMatchDuration := 2 * time.Duration(tracker.epochLen) * time.Millisecond
 	client.log("Waiting %s for matches on order %s", maxMatchDuration, oidShort)
-	matched := tryUntil(ctx, maxMatchDuration, func() bool {
-		select {
-		case n := <-client.notifications:
-			orderNote, isOrderNote := n.(*OrderNote)
-			return isOrderNote && n.Subject() == "Matches made" && orderNote.Order.ID == orderID
-		default:
-			return wait.TryAgain
-		}
+	matched := client.findNotification(ctx, maxMatchDuration, func(n Notification) bool {
+		orderNote, isOrderNote := n.(*OrderNote)
+		return isOrderNote && n.Subject() == "Matches made" && orderNote.Order.ID == orderID
 	})
 	if ctx.Err() != nil { // context canceled
 		return nil
@@ -354,7 +354,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		return errs.add("order %s not matched after %s", oidShort, maxMatchDuration)
 	}
 
-	dc.tradeMtx.RLock()
+	tracker.mtx.RLock()
 	client.log("%d match(es) received for order %s", len(tracker.matches), oidShort)
 	for _, match := range tracker.matches {
 		client.log("%s on match %s, amount %.8f %s", match.Match.Side.String(),
@@ -370,7 +370,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	for _, match := range tracker.matches {
 		lastProcessedStatus[match.id] = order.NewlyMatched
 	}
-	dc.tradeMtx.RUnlock()
+	tracker.mtx.RUnlock()
 
 	// the expected balance changes for this client will be updated
 	// as swaps and redeems are executed
@@ -394,11 +394,11 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	takerAtFault := finalStatus == order.MakerSwapCast || finalStatus == order.MakerRedeemed
 
 	// run a repeated check for match status changes to mine blocks as necessary.
-	maxTradeDuration := 1 * time.Minute
+	maxTradeDuration := 2 * time.Minute
 	tryUntil(ctx, maxTradeDuration, func() bool {
 		var completedTrades int
-		dc.tradeMtx.Lock()
-		defer dc.tradeMtx.Unlock()
+		tracker.mtx.Lock()
+		defer tracker.mtx.Unlock()
 		for _, match := range tracker.matches {
 			side, status := match.Match.Side, match.Match.Status
 			if status >= finalStatus {
@@ -417,37 +417,48 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 			lastProcessedStatus[match.id] = status
 			client.log("NOW =====> %s", status)
 
-			// check for and mine client's swap or redeem
 			var assetToMine *dex.Asset
 			var swapOrRedeem string
+
 			switch {
 			case side == order.Maker && status == order.MakerSwapCast,
 				side == order.Taker && status == order.TakerSwapCast:
-				assetToMine, swapOrRedeem = tracker.wallets.fromAsset, "swap"
+				// Record expected balance changes if we've just sent a swap.
+				// Do NOT mine blocks until counter-party captures status change.
+				recordBalanceChanges(tracker.wallets.fromAsset.ID, true, match.Match.Quantity, match.Match.Rate)
+
+			case side == order.Maker && status == order.TakerSwapCast,
+				side == order.Taker && status == order.MakerSwapCast:
+				// Mine block for counter-party's swap. This enables us to
+				// proceed with the required follow-up action.
+				// Our toAsset == counter-party's fromAsset.
+				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "swap"
+
 			case side == order.Maker && status == order.MakerRedeemed,
 				side == order.Taker && status == order.MatchComplete:
+				recordBalanceChanges(tracker.wallets.toAsset.ID, false, match.Match.Quantity, match.Match.Rate)
+				// Mine blocks for redemption since counter-party does not wait
+				// for redeem tx confirmations before performing follow-up action.
 				assetToMine, swapOrRedeem = tracker.wallets.toAsset, "redeem"
-			default:
-				continue
 			}
 
-			// Wait briefly before mining swap or redeem tx. This allows the
-			// monitor trade goroutine for the other client to capture and
-			// handle the status change before performing the required follow
-			// up action. Mining now without waiting may cause the other client
-			// to perform the follow up action before the goroutine captures
-			// this status change.
-			time.Sleep(1 * time.Second)
-
-			assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)
-			err := mineBlocks(assetID, nBlocks)
-			if err == nil {
-				client.log("Mined %d blocks for %s's %s, match %s", nBlocks, side, swapOrRedeem, token(match.id.Bytes()))
-			} else {
-				client.log("%s mine error %v", unbip(assetID), err)
+			if assetToMine != nil {
+				assetID, nBlocks := assetToMine.ID, uint16(assetToMine.SwapConf)+1 // mine 1 extra to ensure tx gets req. confs
+				err := mineBlocks(assetID, nBlocks)
+				if err == nil {
+					var actor order.MatchSide
+					if swapOrRedeem == "redeem" {
+						actor = side // this client
+					} else if side == order.Maker {
+						actor = order.Taker // counter-party
+					} else {
+						actor = order.Maker
+					}
+					client.log("Mined %d blocks for %s's %s, match %s", nBlocks, actor, swapOrRedeem, token(match.id.Bytes()))
+				} else {
+					client.log("%s mine error %v", unbip(assetID), err)
+				}
 			}
-
-			recordBalanceChanges(assetToMine.ID, swapOrRedeem == "swap", match.Match.Quantity, match.Match.Rate)
 		}
 		return completedTrades == len(tracker.matches)
 	})
@@ -456,7 +467,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	}
 
 	var incompleteTrades int
-	dc.tradeMtx.RLock()
+	tracker.mtx.RLock()
 	for _, match := range tracker.matches {
 		if match.Match.Status < finalStatus {
 			incompleteTrades++
@@ -464,7 +475,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 				token(match.ID()), match.Match.Status, match.Match.Side)
 		}
 	}
-	dc.tradeMtx.RUnlock()
+	tracker.mtx.RUnlock()
 	if incompleteTrades > 0 {
 		return fmt.Errorf("client %d reported %d incomplete trades for order %s after %s",
 			client.id, incompleteTrades, oidShort, maxTradeDuration)
@@ -476,7 +487,6 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string) error {
 	// check if client has pending refunds
 	client.log("checking if refunds are necessary")
-	dc := client.dc()
 	refundAmts := map[uint32]int64{dcr.BipID: 0, btc.BipID: 0}
 	var furthestLockTime time.Time
 
@@ -559,8 +569,8 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 	var notRefundedSwaps int
 	refundWaitTimeout := 30 * time.Second
 	refundedSwaps := tryUntil(ctx, refundWaitTimeout, func() bool {
-		dc.tradeMtx.RLock()
-		defer dc.tradeMtx.RUnlock()
+		tracker.mtx.RLock()
+		defer tracker.mtx.RUnlock()
 		notRefundedSwaps = 0
 		for _, match := range tracker.matches {
 			if hasRefundableSwap(match) && match.MetaData.Proof.RefundCoin == nil {
@@ -597,14 +607,18 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 
 func tryUntil(ctx context.Context, tryDuration time.Duration, tryFn func() bool) bool {
 	expire := time.NewTimer(tryDuration)
-	defer expire.Stop()
+	tick := time.NewTicker(250 * time.Millisecond)
+	defer func() {
+		expire.Stop()
+		tick.Stop()
+	}()
 	for {
 		select {
 		case <-ctx.Done():
 			return false
 		case <-expire.C:
 			return false
-		default:
+		case <-tick.C:
 			if tryFn() {
 				return true
 			}
@@ -617,36 +631,38 @@ HELPER TYPES, FUNCTIONS AND METHODS
 ************************************/
 
 type tWallet struct {
-	name    string
-	account string
-	pass    []byte
-	config  map[string]string
+	daemon     string
+	account    string // for dcr wallets
+	walletName string // for btc wallets
+	pass       []byte
+	config     map[string]string
 }
 
-func dcrWallet(name string) *tWallet {
+func dcrWallet(daemon string) *tWallet {
 	return &tWallet{
-		name:    name,
+		daemon:  daemon,
 		account: "default",
 		pass:    []byte("abc"),
 	}
 }
 
-func btcWallet(name, account string) *tWallet {
+func btcWallet(daemon, walletName string) *tWallet {
 	return &tWallet{
-		name:    name,
-		account: account,
-		pass:    []byte("abc"),
+		daemon:     daemon,
+		walletName: walletName,
+		pass:       []byte("abc"),
 	}
 }
 
 type tClient struct {
-	id            int
-	core          *Core
-	notifications <-chan Notification
-	appPass       []byte
-	wallets       map[uint32]*tWallet
-	balances      map[uint32]uint64
-	isSeller      bool
+	id               int
+	core             *Core
+	notificationsMtx sync.Mutex
+	notifications    []Notification
+	appPass          []byte
+	wallets          map[uint32]*tWallet
+	balances         map[uint32]uint64
+	isSeller         bool
 	// Update after each test run to perform post-test balance
 	// change validation. Set to nil to NOT perform balance checks.
 	expectBalanceDiffs map[uint32]int64
@@ -660,7 +676,7 @@ func (client *tClient) log(format string, args ...interface{}) {
 	tLog.Infof("[client %d] "+format, args...)
 }
 
-func (client *tClient) init() error {
+func (client *tClient) init(ctx context.Context) error {
 	db, err := ioutil.TempFile("", "dexc.db")
 	if err != nil {
 		return err
@@ -674,6 +690,9 @@ func (client *tClient) init() error {
 	}
 	client.core.lockTimeTaker = tLockTimeTaker
 	client.core.lockTimeMaker = tLockTimeMaker
+	// keep client notification channel constantly drained to avoid
+	// 'blocking notification channel' error logs.
+	go client.monitorNotificationFeed(ctx)
 	return nil
 }
 
@@ -704,7 +723,8 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 	client.log("connected DEX %s", dexHost)
 
 	// mine drc block(s) to mark fee as paid
-	err = mineBlocks(dcr.BipID, regRes.ReqConfirms)
+	// sometimes need to mine an extra block for fee tx to get req. confs
+	err = mineBlocks(dcr.BipID, regRes.ReqConfirms+1)
 	if err != nil {
 		return err
 	}
@@ -713,14 +733,8 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 	// wait 12 seconds for fee payment, notifyfee times out after 10 seconds
 	feeTimeout := 12 * time.Second
 	client.log("waiting %s for fee confirmation notice", feeTimeout)
-	client.notifications = client.core.NotificationFeed()
-	feePaid := tryUntil(ctx, feeTimeout, func() bool {
-		select {
-		case n := <-client.notifications:
-			return n.Type() == "feepayment" && n.Subject() == "Account registered"
-		default:
-			return wait.TryAgain
-		}
+	feePaid := client.findNotification(ctx, feeTimeout, func(n Notification) bool {
+		return n.Type() == "feepayment" && n.Subject() == "Account registered"
 	})
 	if !feePaid {
 		return fmt.Errorf("fee payment not confirmed after %s", feeTimeout)
@@ -728,6 +742,51 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 
 	client.log("fee payment confirmed")
 	return nil
+}
+
+// monitorNotificationFeed monitors the client's NotificationFeed for new
+// notifications to prevent the channel from blocking. Notifications received
+// are added to the tClient.notifications slice to be read by consumers
+// subsequently.
+func (client *tClient) monitorNotificationFeed(ctx context.Context) {
+	notificationFeed := client.core.NotificationFeed()
+	for {
+		select {
+		case n := <-notificationFeed:
+			client.notificationsMtx.Lock()
+			client.notifications = append(client.notifications, n)
+			client.notificationsMtx.Unlock()
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// readNotifications returns the slice of notification objects read from the
+// client's NotificationFeed and clears the notifications slice to receive new
+// notifications.
+func (client *tClient) readNotifications() []Notification {
+	client.notificationsMtx.Lock()
+	notifications := client.notifications
+	client.notifications = nil // mark as "read"
+	client.notificationsMtx.Unlock()
+	return notifications
+}
+
+// findNotification repeatedly checks the client.notifications slice for a
+// particular notification until the notification is found or the specified
+// waitDuration elapses.
+func (client *tClient) findNotification(ctx context.Context, waitDuration time.Duration, check func(Notification) bool) bool {
+	return tryUntil(ctx, waitDuration, func() bool {
+		notifications := client.readNotifications()
+		for _, n := range notifications {
+			if check(n) {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func (client *tClient) placeOrder(qty, rate uint64) (string, error) {
@@ -772,6 +831,8 @@ func (client *tClient) updateBalances() error {
 			return err
 		}
 		client.balances[assetID] = balances.Available + balances.Locked
+		client.log("%s available %f, locked %f", unbip(assetID),
+			fmtAmt(balances.Available), fmtAmt(balances.Locked))
 	}
 	return nil
 }
@@ -796,8 +857,8 @@ func (client *tClient) assertBalanceChanges() error {
 		}
 		balanceDiff := int64(client.balances[assetID] - prevBalances[assetID])
 		if balanceDiff < minExpectedDiff || balanceDiff > maxExpectedDiff {
-			return fmt.Errorf("client %d %s balance change not in expected range %.8f - %.8f, got %.8f",
-				client.id, unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
+			return fmt.Errorf("%s balance change not in expected range %.8f - %.8f, got %.8f",
+				unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
 		}
 		client.log("%s balance change %.8f is in expected range of %.8f - %.8f",
 			unbip(assetID), fmtAmt(balanceDiff), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff))
@@ -822,27 +883,27 @@ func (client *tClient) btcw() *tWallet {
 func (client *tClient) lockWallets() error {
 	client.log("locking wallets")
 	dcrw := client.dcrw()
-	lockCmd := fmt.Sprintf("./%s walletlock", dcrw.name)
+	lockCmd := fmt.Sprintf("./%s walletlock", dcrw.daemon)
 	if err := tmuxSendKeys("dcr-harness:0", lockCmd); err != nil {
 		return err
 	}
 	time.Sleep(500 * time.Millisecond)
 	btcw := client.btcw()
-	lockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletlock", btcw.name, btcw.account)
+	lockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletlock", btcw.daemon, btcw.walletName)
 	return tmuxSendKeys("btc-harness:2", lockCmd)
 }
 
 func (client *tClient) unlockWallets() error {
 	client.log("unlocking wallets")
 	dcrw := client.dcrw()
-	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 300", dcrw.name, string(dcrw.pass))
+	unlockCmd := fmt.Sprintf("./%s walletpassphrase %q 600", dcrw.daemon, string(dcrw.pass))
 	if err := tmuxSendKeys("dcr-harness:0", unlockCmd); err != nil {
 		return err
 	}
 	time.Sleep(500 * time.Millisecond)
 	btcw := client.btcw()
-	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 300",
-		btcw.name, btcw.account, string(btcw.pass))
+	unlockCmd = fmt.Sprintf("./%s -rpcwallet=%s walletpassphrase %q 600",
+		btcw.daemon, btcw.walletName, string(btcw.pass))
 	return tmuxSendKeys("btc-harness:2", unlockCmd)
 }
 
