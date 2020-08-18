@@ -2148,7 +2148,11 @@ func (s *Swapper) revoke(match *matchTracker) {
 		// Expire function to unregister the outstanding request.
 		expireFunc := func() {
 			s.rmLiveAckers(req.ID)
-			log.Infof("revoke_match request failed for user %v (taker)", user)
+			side := order.Taker
+			if isMaker {
+				side = order.Maker
+			}
+			log.Infof("revoke_match request failed for user %v (%s)", user, side)
 		}
 		// Register that there is an outstanding request.
 		s.setLiveAcker(req, ack)
