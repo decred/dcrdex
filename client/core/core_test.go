@@ -195,6 +195,7 @@ func testDexConnection() (*dexConnection, *TWebsocket, *dexAccount) {
 		marketMap: map[string]*Market{tDcrBtcMktName: mkt},
 		trades:    make(map[order.OrderID]*trackedTrade),
 		epoch:     map[string]uint64{tDcrBtcMktName: 0},
+		connected: true,
 	}, conn, acct
 }
 
@@ -257,6 +258,7 @@ type TDB struct {
 	orderErr           error
 	linkedFromID       order.OrderID
 	linkedToID         order.OrderID
+	existValues        map[string]bool
 }
 
 func (tdb *TDB) Run(context.Context) {}
@@ -374,7 +376,7 @@ func (tdb *TDB) Store(k string, b []byte) error {
 }
 
 func (tdb *TDB) ValueExists(k string) (bool, error) {
-	return false, nil
+	return tdb.existValues[k], nil
 }
 
 func (tdb *TDB) Get(k string) ([]byte, error) {
@@ -669,6 +671,9 @@ func newTestRig() *testRig {
 	tdb := &TDB{
 		orderOrders: make(map[order.OrderID]*db.MetaOrder),
 		wallet:      &db.Wallet{},
+		existValues: map[string]bool{
+			keyParamsKey: true,
+		},
 	}
 
 	ai := &db.AccountInfo{
@@ -1644,6 +1649,7 @@ func TestConnectDEX(t *testing.T) {
 func TestInitializeClient(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
+	rig.db.existValues[keyParamsKey] = false
 
 	err := tCore.InitializeClient(tPW)
 	if err != nil {
@@ -1862,6 +1868,22 @@ func TestTrade(t *testing.T) {
 		t.Fatalf("no error for unknown dex")
 	}
 	form.Host = tDexHost
+
+	// Account locked = probably not logged in
+	rig.dc.acct.lock()
+	_, err = tCore.Trade(tPW, form)
+	if err == nil {
+		t.Fatalf("no error for disconnected dex")
+	}
+	rig.dc.acct.unlock(rig.crypter)
+
+	// DEX not connected
+	rig.dc.connected = false
+	_, err = tCore.Trade(tPW, form)
+	if err == nil {
+		t.Fatalf("no error for disconnected dex")
+	}
+	rig.dc.connected = true
 
 	// No base asset
 	form.Base = 12345

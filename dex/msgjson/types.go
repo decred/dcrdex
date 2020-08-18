@@ -214,10 +214,10 @@ func (e Error) String() string {
 }
 
 // NewError is a constructor for an Error.
-func NewError(code int, msg string) *Error {
+func NewError(code int, format string, a ...interface{}) *Error {
 	return &Error{
 		Code:    code,
-		Message: msg,
+		Message: fmt.Sprintf(format, a...),
 	}
 }
 

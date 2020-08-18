@@ -569,7 +569,8 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
 
 	coins, sum, inputsSize, fundingCoins, err := dcr.fund(enough)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error funding order value of %d DCR: %w",
+			ord.Value, err)
 	}
 
 	dcr.log.Debugf("funding %d atom order with coins %v worth %d", ord.Value, coins, sum)
@@ -613,9 +614,12 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 
 	// Parse utxos to include script size for spending input.
 	// Returned utxos will be sorted in ascending order by amount (smallest first).
-	utxos, _, err := dcr.parseUTXOs(unspents)
+	utxos, err := dcr.parseUTXOs(unspents)
 	if err != nil {
 		return nil, 0, 0, nil, fmt.Errorf("error parsing unspent outputs: %v", err)
+	}
+	if len(utxos) == 0 {
+		return nil, 0, 0, nil, fmt.Errorf("no funds available")
 	}
 
 	var sum uint64
@@ -692,7 +696,7 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 			return nil, 0, 0, nil, err
 		}
 		if !ok {
-			return nil, 0, 0, nil, fmt.Errorf("not enough to cover requested funds")
+			return nil, 0, 0, nil, fmt.Errorf("not enough to cover requested funds. %v available", sum)
 		}
 	}
 
@@ -1560,17 +1564,16 @@ type compositeUTXO struct {
 // parseUTXOs constructs and returns a list of compositeUTXOs from the provided
 // set of RPC utxos, including basic information required to spend each rpc utxo.
 // The returned list is sorted by ascending value.
-func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) ([]*compositeUTXO, uint64, error) {
-	var sum uint64
+func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) ([]*compositeUTXO, error) {
 	utxos := make([]*compositeUTXO, 0, len(unspents))
 	for _, txout := range unspents {
 		scriptPK, err := hex.DecodeString(txout.ScriptPubKey)
 		if err != nil {
-			return nil, 0, fmt.Errorf("error decoding pubkey script for %s, script = %s: %v", txout.TxID, txout.ScriptPubKey, err)
+			return nil, fmt.Errorf("error decoding pubkey script for %s, script = %s: %v", txout.TxID, txout.ScriptPubKey, err)
 		}
 		redeemScript, err := hex.DecodeString(txout.RedeemScript)
 		if err != nil {
-			return nil, 0, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
+			return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
 		}
 
 		nfo, err := dexdcr.InputInfo(scriptPK, redeemScript, chainParams)
@@ -1578,18 +1581,17 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 			if errors.Is(err, dex.UnsupportedScriptError) {
 				continue
 			}
-			return nil, 0, fmt.Errorf("error reading asset info: %v", err)
+			return nil, fmt.Errorf("error reading asset info: %v", err)
 		}
 		utxos = append(utxos, &compositeUTXO{
 			rpc:   txout,
 			input: nfo,
 			confs: txout.Confirmations,
 		})
-		sum += toAtoms(txout.Amount)
 	}
 	// Sort in ascending order by amount (smallest first).
 	sort.Slice(utxos, func(i, j int) bool { return utxos[i].rpc.Amount < utxos[j].rpc.Amount })
-	return utxos, sum, nil
+	return utxos, nil
 }
 
 // lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
@@ -1646,7 +1648,8 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	}
 	coins, _, _, _, err := dcr.fund(enough)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("error funding request for %d DCR to address %s with feeRate %d: %w",
+			val, addr, feeRate, err)
 	}
 	return dcr.sendCoins(addr, coins, val, feeRate, true)
 }
@@ -1654,16 +1657,17 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 // sendRegFee sends the registration fee to the address. Transaction fees will
 // be in addition to the registration fee and the output will be the zeroth
 // output.
-func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regfee, netFeeRate uint64) (*wire.MsgTx, uint64, error) {
+func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regFee, netFeeRate uint64) (*wire.MsgTx, uint64, error) {
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		txFee := uint64(size+unspent.input.Size()) * netFeeRate
-		return sum+toAtoms(unspent.rpc.Amount) >= regfee+txFee
+		return sum+toAtoms(unspent.rpc.Amount) >= regFee+txFee
 	}
 	coins, _, _, _, err := dcr.fund(enough)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("error funding fee of %d DCR to address %s with feeRate %d: %w",
+			regFee, addr, netFeeRate, err)
 	}
-	return dcr.sendCoins(addr, coins, regfee, netFeeRate, false)
+	return dcr.sendCoins(addr, coins, regFee, netFeeRate, false)
 }
 
 // sendCoins sends the amount to the address as the zeroth output, spending the

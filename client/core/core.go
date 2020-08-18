@@ -247,7 +247,7 @@ func (dc *dexConnection) tryCancel(oid order.OrderID) (found bool, err error) {
 	}
 
 	if tracker.cancel != nil {
-		err = fmt.Errorf("order %s - only one cancel order can be submitted per epoch. still waiting on cancel order %s to match", oid, tracker.cancel.ID())
+		err = fmt.Errorf("order %s - only one cancel order can be submitted per order per epoch. still waiting on cancel order %s to match", oid, tracker.cancel.ID())
 		return
 	}
 
@@ -900,6 +900,7 @@ func (c *Core) refreshUser() {
 
 // CreateWallet creates a new exchange wallet.
 func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
+
 	assetID := form.AssetID
 	symbol := unbip(assetID)
 	_, exists := c.wallet(assetID)
@@ -918,7 +919,8 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	walletInfo, err := asset.Info(assetID)
 	if err != nil {
-		return err
+		// Only possible error is unknown asset.
+		return fmt.Errorf("asset with BIP ID %d is unknown. Did you _ import your asset packages?", assetID)
 	}
 
 	// Remove unused key-values from parsed settings before saving to db.
@@ -950,7 +952,7 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 
 	err = wallet.Connect(c.ctx)
 	if err != nil {
-		return fmt.Errorf("Error connecting wallet: %v", err)
+		return fmt.Errorf("error connecting wallet: %v", err)
 	}
 
 	initErr := func(s string, a ...interface{}) error {
@@ -1280,6 +1282,15 @@ func (c *Core) GetFee(dexAddr, cert string) (uint64, error) {
 // the fee notification to the server. Any error returned from that thread is
 // sent as a notification.
 func (c *Core) Register(form *RegisterForm) (*RegisterResult, error) {
+	// Make sure the app has been initialized. This condition would error when
+	// attempting to retrieve the encryption key below as well, but the
+	// messaging may be confusing.
+	if initialized, err := c.IsInitialized(); err != nil {
+		return nil, fmt.Errorf("error checking if app is initialized: %v", err)
+	} else if !initialized {
+		return nil, fmt.Errorf("cannot register DEX because app has not been initialized")
+	}
+
 	// Check the app password.
 	crypter, err := c.encryptionKey(form.AppPass)
 	if err != nil {
@@ -1488,6 +1499,15 @@ func (c *Core) InitializeClient(pw []byte) error {
 
 // Login logs the user in, decrypting the account keys for all known DEXes.
 func (c *Core) Login(pw []byte) (*LoginResult, error) {
+	// Make sure the app has been initialized. This condition would error when
+	// attempting to retrieve the encryption key below as well, but the
+	// messaging may be confusing.
+	if initialized, err := c.IsInitialized(); err != nil {
+		return nil, fmt.Errorf("error checking if app is initialized: %v", err)
+	} else if !initialized {
+		return nil, fmt.Errorf("cannot log in because app has not been initialized")
+	}
+
 	crypter, err := c.encryptionKey(pw)
 	if err != nil {
 		return nil, err
@@ -1811,9 +1831,18 @@ func (c *Core) Trade(pw []byte, form *TradeForm) (*Order, error) {
 	// Get the dexConnection and the dex.Asset for each asset.
 	c.connMtx.RLock()
 	dc, found := c.conns[host]
+	connected := found && dc.connected
 	c.connMtx.RUnlock()
 	if !found {
 		return nil, fmt.Errorf("unknown DEX %s", form.Host)
+	}
+
+	if dc.acct.locked() {
+		return nil, fmt.Errorf("cannot place order on a locked %s account. Are you logged in?", dc.acct.host)
+	}
+
+	if !connected {
+		return nil, fmt.Errorf("currently disconnected from %s. Cannot place order", dc.acct.host)
 	}
 
 	corder, fromID, err := c.prepareTrackedTrade(dc, form, crypter)
@@ -1841,7 +1870,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	// Proceed with the order if there is no trade suspension
 	// scheduled for the market.
 	if mkt.Suspended() {
-		return nil, 0, fmt.Errorf("suspended market")
+		return nil, 0, fmt.Errorf("%s market suspended", mktID)
 	}
 
 	rate, qty := form.Rate, form.Qty
@@ -1857,17 +1886,17 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	fromWallet, toWallet := wallets.fromWallet, wallets.toWallet
 	err = c.connectAndUnlock(crypter, fromWallet)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("%s connectAndUnlock error: %w", wallets.fromAsset.Symbol, err)
 	}
 	err = c.connectAndUnlock(crypter, toWallet)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("%s connectAndUnlock error: %w", wallets.toAsset.Symbol, err)
 	}
 
 	// Get an address for the swap contract.
 	addr, err := toWallet.Address()
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("%s Address error: %w", wallets.toAsset.Symbol, err)
 	}
 
 	// Fund the order and prepare the coins.
@@ -1966,7 +1995,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	err = order.ValidateOrder(ord, order.OrderStatusEpoch, wallets.baseAsset.LotSize)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("ValidateOrder error: %w", err)
 	}
 
 	msgCoins, err := messageCoins(wallets.fromWallet, coins)
@@ -2002,7 +2031,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	if err != nil {
 		log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
 			preImg[:], result.ServerTime, err)
-		return nil, 0, err
+		return nil, 0, fmt.Errorf("validateOrderResponse error: %w", err)
 	}
 
 	// Store the order.
@@ -2020,7 +2049,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	err = c.db.UpdateOrder(dbOrder)
 	if err != nil {
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
-		return nil, 0, fmt.Errorf("Database error. order abandoned")
+		return nil, 0, fmt.Errorf("Order abandoned due to database error: %w", err)
 	}
 
 	// Prepare and store the tracker and get the core.Order to return.
@@ -3460,7 +3489,7 @@ func messageCoins(wallet *xcWallet, coins asset.Coins) ([]*msgjson.Coin, error) 
 		coinID := coin.ID()
 		pubKeys, sigs, err := wallet.SignMessage(coin, coinID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s SignMessage error: %w", unbip(wallet.AssetID), err)
 		}
 		msgCoins = append(msgCoins, &msgjson.Coin{
 			ID:      coinID,

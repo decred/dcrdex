@@ -539,8 +539,9 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
-	if len(utxos) == 0 {
-		return nil, fmt.Errorf("insufficient funds. %.8f available", btcutil.Amount(avail).ToBTC())
+	if avail < ord.Value {
+		return nil, fmt.Errorf("insufficient funds. %.8f requested, %.8f available",
+			btcutil.Amount(ord.Value).ToBTC(), btcutil.Amount(avail).ToBTC())
 	}
 	var sum uint64
 	var size uint32
@@ -569,9 +570,11 @@ func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
 out:
 	for {
 		// If there are none left, we don't have enough.
+		reqFunds := calc.RequiredOrderFunds(ord.Value, uint64(size), ord.MaxSwapCount, ord.DEXConfig)
+		fees := reqFunds - ord.Value
 		if len(utxos) == 0 {
-			return nil, fmt.Errorf("not enough to cover requested funds + fees. need %d, have %d",
-				calc.RequiredOrderFunds(ord.Value, uint64(size), ord.MaxSwapCount, ord.DEXConfig), sum)
+			return nil, fmt.Errorf("not enough to cover requested funds (%d) + fees (%d) = %d",
+				ord.Value, fees, reqFunds)
 		}
 		// On each loop, find the smallest UTXO that is enough for the value. If
 		// no UTXO is large enough, add the largest and continue.
