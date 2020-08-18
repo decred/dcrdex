@@ -538,6 +538,7 @@ func (dc *dexConnection) setEpoch(mktID string, epochIdx uint64) bool {
 	if epochIdx > dc.epoch[mktID] {
 		dc.epoch[mktID] = epochIdx
 		dc.notify(newEpochNotification(dc.acct.host, mktID, epochIdx))
+		return true
 	}
 	return false
 }
@@ -1747,7 +1748,7 @@ func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(er
 
 func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 	if dc.acct.locked() {
-		return fmt.Errorf("%s account locked. cannot notify fee. log in first.", dc.acct.host)
+		return fmt.Errorf("%s account locked. cannot notify fee. log in first", dc.acct.host)
 	}
 	// Notify the server of the fee coin once there are enough confirmations.
 	req := &msgjson.NotifyFee{
@@ -1788,7 +1789,7 @@ func (c *Core) notifyFee(dc *dexConnection, coinID []byte) error {
 			Sig:   ack.Sig,
 		})
 	}, timeout, func() {
-		errChan <- fmt.Errorf("timed out waiting for '%s' response.", msgjson.NotifyFeeRoute)
+		errChan <- fmt.Errorf("timed out waiting for '%s' response", msgjson.NotifyFeeRoute)
 	})
 	if err != nil {
 		return fmt.Errorf("Sending the 'notifyfee' request failed: %v", err)
@@ -1821,10 +1822,11 @@ func (c *Core) Withdraw(pw []byte, assetID uint32, value uint64, address string)
 		details := fmt.Sprintf("Error encountered during %s withdraw: %v", unbip(assetID), err)
 		c.notify(newWithdrawNote("Withdraw error", details, db.ErrorLevel))
 		return nil, err
-	} else {
-		details := fmt.Sprintf("Withdraw of %s has completed successfully. Coin ID = %s", unbip(assetID), coin)
-		c.notify(newWithdrawNote("Withdraw sent", details, db.Success))
 	}
+
+	details := fmt.Sprintf("Withdraw of %s has completed successfully. Coin ID = %s", unbip(assetID), coin)
+	c.notify(newWithdrawNote("Withdraw sent", details, db.Success))
+
 	c.updateAssetBalance(assetID)
 	return coin, nil
 }
@@ -2187,7 +2189,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	err = dc.RequestWithTimeout(req, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(result)
 	}, DefaultResponseTimeout, func() {
-		errChan <- fmt.Errorf("timed out waiting for '%s' response.", msgjson.ConnectRoute)
+		errChan <- fmt.Errorf("timed out waiting for '%s' response", msgjson.ConnectRoute)
 	})
 	// Check the request error.
 	if err != nil {
@@ -3439,7 +3441,7 @@ func sendRequest(conn comms.WsConn, route string, request, response interface{},
 	err = conn.RequestWithTimeout(reqMsg, func(msg *msgjson.Message) {
 		errChan <- msg.UnmarshalResult(response)
 	}, timeout, func() {
-		errChan <- fmt.Errorf("timed out waiting for '%s' response.", route)
+		errChan <- fmt.Errorf("timed out waiting for '%s' response", route)
 	})
 	// Check the request error.
 	if err != nil {
