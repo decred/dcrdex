@@ -133,6 +133,9 @@ type BTCCloneCFG struct {
 	ChainParams        *chaincfg.Params
 	Ports              dexbtc.NetPorts
 	DefaultFallbackFee uint64 // sats/byte
+	// LegacyBalance is for clones that don't yet support the 'getbalances' RPC
+	// call.
+	LegacyBalance bool
 }
 
 // outPoint is the hash and output index of a transaction output.
@@ -326,6 +329,7 @@ type ExchangeWallet struct {
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
 	useSplitTx        bool
+	useLegacyBalance  bool
 
 	// Coins returned by Fund are cached for quick reference and for cleanup on
 	// shutdown.
@@ -421,6 +425,7 @@ func newWallet(cfg *BTCCloneCFG, btcCfg *dexbtc.Config, node rpcClient) *Exchang
 		minNetworkVersion: cfg.MinNetworkVersion,
 		fallbackFeeRate:   fallbackFeesPerByte,
 		useSplitTx:        btcCfg.UseSplitTx,
+		useLegacyBalance:  cfg.LegacyBalance,
 		walletInfo:        cfg.WalletInfo,
 	}
 }
@@ -441,7 +446,7 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("error getting version: %v", err)
 	}
 	if netVer < btc.minNetworkVersion {
-		return nil, fmt.Errorf("reported node version %d is less than minimum %d", netVer, minNetworkVersion)
+		return nil, fmt.Errorf("reported node version %d is less than minimum %d", netVer, btc.minNetworkVersion)
 	}
 	if codeVer < minProtocolVersion {
 		return nil, fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
@@ -470,6 +475,9 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 // Balance returns the total available funds in the wallet. Part of the
 // asset.Wallet interface.
 func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
+	if btc.useLegacyBalance {
+		return btc.legacyBalance()
+	}
 	balances, err := btc.wallet.Balances()
 	if err != nil {
 		return nil, err
@@ -483,7 +491,27 @@ func (btc *ExchangeWallet) Balance() (*asset.Balance, error) {
 		Available: toSatoshi(balances.Mine.Trusted) - locked,
 		Immature:  toSatoshi(balances.Mine.Immature + balances.Mine.Untrusted),
 		Locked:    locked,
-	}, err
+	}, nil
+}
+
+// legacyBalance is used for clones that are < node version 0.18 and so don't
+// have 'getbalances'.
+func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
+	walletInfo, err := btc.wallet.GetWalletInfo()
+	if err != nil {
+		return nil, fmt.Errorf("(legacy) GetWalletInfo error: %w", err)
+	}
+
+	locked, err := btc.lockedSats()
+	if err != nil {
+		return nil, fmt.Errorf("(legacy) lockedSats error: %w", err)
+	}
+
+	return &asset.Balance{
+		Available: toSatoshi(walletInfo.Balance+walletInfo.UnconfirmedBalance) - locked,
+		Immature:  toSatoshi(walletInfo.ImmatureBalance),
+		Locked:    locked,
+	}, nil
 }
 
 // FeeRate returns the current optimal fee rate in sat / byte.

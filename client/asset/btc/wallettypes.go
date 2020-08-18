@@ -95,3 +95,20 @@ type RPCOutpoint struct {
 	TxID string `json:"txid"`
 	Vout uint32 `json:"vout"`
 }
+
+// GetWalletInfoResult models the data from the getwalletinfo command.
+type GetWalletInfoResult struct {
+	WalletName            string  `json:"walletname"`
+	WalletVersion         int     `json:"walletversion"`
+	Balance               float64 `json:"balance"`
+	UnconfirmedBalance    float64 `json:"unconfirmed_balance"`
+	ImmatureBalance       float64 `json:"immature_balance"`
+	TxCount               int     `json:"txcount"`
+	KeyPoolOldest         uint64  `json:"keypoololdest"`
+	KeyPoolSize           int     `json:"keypoolsize"`
+	KeyPoolSizeHDInternal int     `json:"keypoolsize_hd_internal"`
+	PayTxFee              float64 `json:"paytxfee"`
+	HdSeedID              string  `json:"hdseedid"`
+	HdMasterKeyID         string  `json:"hdmasterkeyid"`
+	PriveyKeysEnabled     bool    `json:"private_keys_enabled"`
+}
