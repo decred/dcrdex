@@ -1703,13 +1703,6 @@ var waiterID uint64
 func (c *Core) wait(assetID uint32, trigger func() (bool, error), action func(error)) {
 	c.waiterMtx.Lock()
 	defer c.waiterMtx.Unlock()
-	// TODO: While under lock, check the trigger before adding the waiter in
-	// case it is already satisfied.
-	// if ok, _ := trigger(); ok {
-	// 	log.Debugf("Got it on the first try. No waiter needed.")
-	// 	action(nil)
-	// 	return
-	// }
 	c.blockWaiters[atomic.AddUint64(&waiterID, 1)] = &blockWaiter{
 		assetID: assetID,
 		trigger: trigger,
