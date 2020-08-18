@@ -30,6 +30,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,7 +108,7 @@ func readWalletCfgsAndDexCert() error {
 
 func startClients(ctx context.Context) error {
 	for _, c := range clients {
-		err := c.init()
+		err := c.init(ctx)
 		c.log("core created")
 
 		go func() {
@@ -655,13 +656,14 @@ func btcWallet(daemon, walletName string) *tWallet {
 }
 
 type tClient struct {
-	id            int
-	core          *Core
-	notifications <-chan Notification
-	appPass       []byte
-	wallets       map[uint32]*tWallet
-	balances      map[uint32]uint64
-	isSeller      bool
+	id               int
+	core             *Core
+	notificationsMtx sync.Mutex
+	notifications    []Notification
+	appPass          []byte
+	wallets          map[uint32]*tWallet
+	balances         map[uint32]uint64
+	isSeller         bool
 	// Update after each test run to perform post-test balance
 	// change validation. Set to nil to NOT perform balance checks.
 	expectBalanceDiffs map[uint32]int64
@@ -675,7 +677,7 @@ func (client *tClient) log(format string, args ...interface{}) {
 	tLog.Infof("[client %d] "+format, args...)
 }
 
-func (client *tClient) init() error {
+func (client *tClient) init(ctx context.Context) error {
 	db, err := ioutil.TempFile("", "dexc.db")
 	if err != nil {
 		return err
@@ -689,6 +691,9 @@ func (client *tClient) init() error {
 	}
 	client.core.lockTimeTaker = tLockTimeTaker
 	client.core.lockTimeMaker = tLockTimeMaker
+	// keep client notification channel constantly drained to avoid
+	// 'blocking notification channel' error logs.
+	go client.monitorNotificationFeed(ctx)
 	return nil
 }
 
@@ -729,7 +734,6 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 	// wait 12 seconds for fee payment, notifyfee times out after 10 seconds
 	feeTimeout := 12 * time.Second
 	client.log("waiting %s for fee confirmation notice", feeTimeout)
-	client.notifications = client.core.NotificationFeed()
 	feePaid := client.findNotification(ctx, feeTimeout, func(n Notification) bool {
 		return n.Type() == "feepayment" && n.Subject() == "Account registered"
 	})
@@ -741,21 +745,48 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 	return nil
 }
 
-func (client *tClient) findNotification(ctx context.Context, waitDuration time.Duration, check func(Notification) bool) bool {
-	expire := time.NewTimer(waitDuration)
-	defer expire.Stop()
+// monitorNotificationFeed monitors the client's NotificationFeed for new
+// notifications to prevent the channel from blocking. Notifications received
+// are added to the tClient.notifications slice to be read by consumers
+// subsequently.
+func (client *tClient) monitorNotificationFeed(ctx context.Context) {
 	for {
 		select {
-		case n := <-client.notifications:
+		case n := <-client.core.NotificationFeed():
+			client.notificationsMtx.Lock()
+			client.notifications = append(client.notifications, n)
+			client.notificationsMtx.Unlock()
+
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// readNotifications returns the slice of notification objects read from the
+// client's NotificationFeed and clears the notifications slice to receive new
+// notifications.
+func (client *tClient) readNotifications() []Notification {
+	client.notificationsMtx.Lock()
+	notifications := client.notifications
+	client.notifications = nil // mark as "read"
+	client.notificationsMtx.Unlock()
+	return notifications
+}
+
+// findNotification repeatedly checks the client.notifications slice for a
+// particular notification until the notification is found or the specified
+// waitDuration elapses.
+func (client *tClient) findNotification(ctx context.Context, waitDuration time.Duration, check func(Notification) bool) bool {
+	return tryUntil(ctx, waitDuration, func() bool {
+		notifications := client.readNotifications()
+		for _, n := range notifications {
 			if check(n) {
 				return true
 			}
-		case <-expire.C:
-			return false
-		case <-ctx.Done():
-			return false
 		}
-	}
+		return false
+	})
 }
 
 func (client *tClient) placeOrder(qty, rate uint64) (string, error) {
