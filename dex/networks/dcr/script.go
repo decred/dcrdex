@@ -334,7 +334,9 @@ func ExtractStakeScriptHash(script []byte, stakeOpcode byte) []byte {
 	return nil
 }
 
-// MakeContract creates an atomic swap contract.
+// MakeContract creates an atomic swap contract. The secretHash MUST be computed
+// from a secret of length SecretKeySize bytes or the resulting contract will be
+// invalid.
 func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, chainParams *chaincfg.Params) ([]byte, error) {
 	rAddr, err := dcrutil.DecodeAddress(recipient, chainParams)
 	if err != nil {
@@ -366,7 +368,7 @@ func MakeContract(recipient, sender string, secretHash []byte, lockTime int64, c
 		AddOps([]byte{
 			txscript.OP_IF,
 			txscript.OP_SIZE,
-		}).AddInt64(32).
+		}).AddInt64(SecretKeySize).
 		AddOps([]byte{
 			txscript.OP_EQUALVERIFY,
 			txscript.OP_SHA256,
@@ -420,31 +422,37 @@ func RefundP2SHContract(contract, sig, pubkey []byte) ([]byte, error) {
 // contract. If the provided script is not a swap contract, an error will be
 // returned.
 func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
-	sender dcrutil.Address, receiver dcrutil.Address, lockTime uint64, secretHash []byte, err error) {
+	sender, receiver dcrutil.Address, lockTime uint64, secretHash []byte, err error) {
 	// A swap redemption sigScript is <pubkey> <secret> and satisfies the
-	// following swap contract.
+	// following swap contract, allowing only for a secret of size
 	//
 	// OP_IF
-	//  OP_SIZE hashSize OP_EQUALVERIFY OP_SHA256 OP_DATA_32 secretHash OP_EQUALVERIFY OP_DUP OP_HASH160 OP_DATA20 pkHashReceiver
-	//     1   +   2    +      1       +    1    +   1      +   32     +      1       +   1  +   1      +    1    +    20
+	//  OP_SIZE OP_DATA_1 secretSize OP_EQUALVERIFY OP_SHA256 OP_DATA_32 secretHash OP_EQUALVERIFY OP_DUP OP_HASH160 OP_DATA20 pkHashReceiver
+	//     1   +   1     +    1     +      1       +    1    +    1     +    32    +      1       +   1  +    1     +    1    +    20
 	// OP_ELSE
-	//  OP_DATA4 locktime OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 OP_DATA_20 pkHashSender
+	//  OP_DATA4 lockTime OP_CHECKLOCKTIMEVERIFY OP_DROP OP_DUP OP_HASH160 OP_DATA_20 pkHashSender
 	//     1    +    4   +           1          +   1   +  1   +    1     +   1      +    20
 	// OP_ENDIF
 	// OP_EQUALVERIFY
 	// OP_CHECKSIG
 	//
 	// 5 bytes if-else-endif-equalverify-checksig
-	// 1 + 2 + 1 + 1 + 1 + 32 + 1 + 1 + 1 + 1 + 20 = 62 bytes for redeem block
+	// 1 + 1 + 1 + 1 + 1 + 1 + 32 + 1 + 1 + 1 + 1 + 20 = 62 bytes for redeem block
 	// 1 + 4 + 1 + 1 + 1 + 1 + 1 + 20 = 30 bytes for refund block
 	// 5 + 62 + 30 = 97 bytes
+	//
+	// Note that this allows for a secret size of up to 75 bytes, but the secret
+	// must be 32 bytes to be considered valid.
 	if len(pkScript) != SwapContractSize {
-		return nil, nil, 0, nil, fmt.Errorf("incorrect swap contract length. expected %d, got %d", SwapContractSize, len(pkScript))
+		err = fmt.Errorf("incorrect swap contract length. expected %d, got %d",
+			SwapContractSize, len(pkScript))
+		return
 	}
 
 	if pkScript[0] == txscript.OP_IF &&
 		pkScript[1] == txscript.OP_SIZE &&
-		// secret key hash size (2 bytes)
+		pkScript[2] == txscript.OP_DATA_1 &&
+		// secretSize (1 bytes)
 		pkScript[4] == txscript.OP_EQUALVERIFY &&
 		pkScript[5] == txscript.OP_SHA256 &&
 		pkScript[6] == txscript.OP_DATA_32 &&
@@ -456,7 +464,7 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 		// receiver's pkh (20 bytes)
 		pkScript[63] == txscript.OP_ELSE &&
 		pkScript[64] == txscript.OP_DATA_4 &&
-		// time (4 bytes)
+		// lockTime (4 bytes)
 		pkScript[69] == txscript.OP_CHECKLOCKTIMEVERIFY &&
 		pkScript[70] == txscript.OP_DROP &&
 		pkScript[71] == txscript.OP_DUP &&
@@ -467,19 +475,28 @@ func ExtractSwapDetails(pkScript []byte, chainParams *chaincfg.Params) (
 		pkScript[95] == txscript.OP_EQUALVERIFY &&
 		pkScript[96] == txscript.OP_CHECKSIG {
 
-		receiverAddr, err := dcrutil.NewAddressPubKeyHash(pkScript[43:63], chainParams, dcrec.STEcdsaSecp256k1)
+		if ssz := pkScript[3]; ssz != SecretKeySize {
+			return nil, nil, 0, nil, fmt.Errorf("invalid secret size %d", ssz)
+		}
+
+		receiver, err = dcrutil.NewAddressPubKeyHash(pkScript[43:63], chainParams, dcrec.STEcdsaSecp256k1)
 		if err != nil {
 			return nil, nil, 0, nil, fmt.Errorf("error decoding address from recipient's pubkey hash")
 		}
 
-		senderAddr, err := dcrutil.NewAddressPubKeyHash(pkScript[74:94], chainParams, dcrec.STEcdsaSecp256k1)
+		sender, err = dcrutil.NewAddressPubKeyHash(pkScript[74:94], chainParams, dcrec.STEcdsaSecp256k1)
 		if err != nil {
 			return nil, nil, 0, nil, fmt.Errorf("error decoding address from sender's pubkey hash")
 		}
 
-		return senderAddr, receiverAddr, uint64(binary.LittleEndian.Uint32(pkScript[65:69])), pkScript[7:39], nil
+		lockTime = uint64(binary.LittleEndian.Uint32(pkScript[65:69]))
+		secretHash = pkScript[7:39]
+
+		return
 	}
-	return nil, nil, 0, nil, fmt.Errorf("invalid swap contract")
+
+	err = fmt.Errorf("invalid swap contract")
+	return
 }
 
 // IsDust returns whether or not the passed transaction output amount is
@@ -722,7 +739,8 @@ func ExtractContractHash(scriptHex string) ([]byte, error) {
 
 // FindKeyPush attempts to extract the secret key from the signature script. The
 // contract must be provided for the search algorithm to verify the correct data
-// push.
+// push. Only contracts of length SwapContractSize that can be validated by
+// ExtractSwapDetails are recognized.
 func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) ([]byte, error) {
 	dataPushes, err := txscript.PushedData(sigScript)
 	if err != nil {
@@ -736,26 +754,27 @@ func FindKeyPush(sigScript, contractHash []byte, chainParams *chaincfg.Params) (
 	var keyHash []byte
 	for i := len(dataPushes) - 1; i >= 0; i-- {
 		push := dataPushes[i]
-		if len(keyHash) == 0 && len(push) != SwapContractSize {
-			continue
-		}
-		h := dcrutil.Hash160(push)
-		if bytes.Equal(h, contractHash) {
-			_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
-			if err != nil {
-				return nil, fmt.Errorf("error extracting atomic swap details: %v", err)
-			}
-			continue
-		}
-		// If we've found the keyhash, starting hashing the push to find the key.
-		if len(keyHash) > 0 {
-			if len(push) != SecretKeySize {
+
+		// First locate the swap contract.
+		if len(keyHash) == 0 {
+			// Skip hashing if ExtractSwapDetails will not recognize it.
+			if len(push) != SwapContractSize {
 				continue
 			}
-			h := sha256.Sum256(push)
-			if bytes.Equal(h[:], keyHash) {
-				return push, nil
+			h := dcrutil.Hash160(push)
+			if bytes.Equal(h, contractHash) {
+				_, _, _, keyHash, err = ExtractSwapDetails(push, chainParams)
+				if err != nil {
+					return nil, fmt.Errorf("error extracting atomic swap details: %v", err)
+				}
 			}
+			continue
+		}
+
+		// We have the key hash from the contract. See if this is the key.
+		h := sha256.Sum256(push)
+		if bytes.Equal(h[:], keyHash) {
+			return push, nil
 		}
 	}
 	return nil, fmt.Errorf("key not found")
