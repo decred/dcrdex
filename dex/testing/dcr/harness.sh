@@ -4,22 +4,23 @@ set -ex
 SESSION="dcr-harness"
 RPC_USER="user"
 RPC_PASS="pass"
-ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
-BETA_WALLET_SEED="aabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbcaabbc"
 WALLET_PASS=abc
-ALPHA_MINING_ADDR="SspUvSyDGSzvPz2NfdZ5LW15uq6rmuGZyhL"
-BETA_MINING_ADDR="SsiuwSRYvH7pqWmRxFJWR8Vmqc3AWsjmK2Y"
+ALPHA_WALLET_SEED="b280922d2cffda44648346412c5ec97f429938105003730414f10b01e1402eac"
+ALPHA_MINING_ADDR="SsXciQNTo3HuV5tX3yy4hXndRWgLMRVC7Ah"
+ALPHA_NODE_PORT="19571"
 ALPHA_WALLET_PORT="19567"
-BETA_WALLET_PORT="19568"
 ALPHA_RPC_PORT="19570"
+BETA_WALLET_SEED="3285a47d6a59f9c548b2a72c2c34a2de97967bede3844090102bbba76707fe9d"
+BETA_MINING_ADDR="Ssge52jCzbixgFC736RSTrwAnvH3a4hcPRX"
+BETA_NODE_PORT="19559"
+BETA_WALLET_PORT="19568"
 BETA_RPC_PORT="19569"
-ALPHA_PORT="19571"
 
 TRADING_WALLET1_SEED="31cc0eeb220aa5b1f1ab3b6c47529d737976af1a556b156a665408f1711c962f"
-TRADING_WALLET1_ADDRESS="SsZFpS6iDJS2dEFa4i4azCTgjbv6zrEbos9"
+TRADING_WALLET1_ADDRESS="SsjTp2QaT8qkPGWKKSeFi4DtaZsgkoPbgXt"
 TRADING_WALLET1_PORT="19581"
 TRADING_WALLET2_SEED="3db72efa55b9e6cce9c27dde9bea848c6199004f9b1ae2add3b04389495edb9c"
-TRADING_WALLET2_ADDRESS="SsYeg8owvUbE2crm61E3ePcvNtAestYfZYR"
+TRADING_WALLET2_ADDRESS="SsYW5LPmGCvvHuWok8U9FQu1kotv8LpvoEt"
 TRADING_WALLET2_PORT="19582"
 
 # WAIT can be used in a send-keys call along with a `wait-for donedcr` command to
@@ -90,7 +91,7 @@ cat > "${NODES_ROOT}/harness-ctl/reorg" <<EOF
 #!/bin/sh
 echo "Disconnecting beta from alpha"
 sleep 1
-./beta addnode 127.0.0.1:${ALPHA_PORT} remove
+./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} remove
 echo "Mining a block on alpha"
 sleep 1
 ./mine-alpha 1
@@ -98,7 +99,7 @@ echo "Mining 3 blocks on beta"
 ./mine-beta 3
 sleep 2
 echo "Reconnecting beta to alpha"
-./beta addnode 127.0.0.1:${ALPHA_PORT} add
+./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} add
 sleep 2
 grep REORG ${NODES_ROOT}/alpha/logs/simnet/dcrd.log
 EOF
@@ -153,7 +154,7 @@ echo "Starting simnet alpha node"
 tmux send-keys -t $SESSION:1 "dcrd --appdata=${NODES_ROOT}/alpha \
 --rpcuser=${RPC_USER} --rpcpass=${RPC_PASS} \
 --miningaddr=${ALPHA_MINING_ADDR} --rpclisten=127.0.0.1:${ALPHA_RPC_PORT} \
---txindex --listen=127.0.0.1:${ALPHA_PORT} \
+--txindex --listen=127.0.0.1:${ALPHA_NODE_PORT} \
 --debuglevel=debug \
 --whitelist=127.0.0.0/8 --whitelist=::1 \
 --simnet; tmux wait-for -S alphadcr" C-m
@@ -164,9 +165,9 @@ tmux send-keys -t $SESSION:2 "cd ${NODES_ROOT}/beta" C-m
 echo "Starting simnet beta node"
 tmux send-keys -t $SESSION:2 "dcrd --appdata=${NODES_ROOT}/beta \
 --rpcuser=${RPC_USER} --rpcpass=${RPC_PASS} \
---listen=127.0.0.1:19559 --rpclisten=127.0.0.1:${BETA_RPC_PORT} \
+--listen=127.0.0.1:${BETA_NODE_PORT} --rpclisten=127.0.0.1:${BETA_RPC_PORT} \
 --miningaddr=${BETA_MINING_ADDR} \
---txindex --connect=127.0.0.1:${ALPHA_PORT} \
+--txindex --connect=127.0.0.1:${ALPHA_NODE_PORT} \
 --debuglevel=debug \
 --whitelist=127.0.0.0/8 --whitelist=::1 \
 --simnet; tmux wait-for -S betadcr" C-m
@@ -224,5 +225,6 @@ done
 
 # Create fee account on alpha wallet for use by dcrdex simnet instances.
 tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
+tmux send-keys -t $SESSION:0 "./alpha getmasterpubkey server_fees${WAIT}" C-m\; wait-for donedcr
 
 tmux attach-session -t $SESSION
