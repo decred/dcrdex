@@ -354,7 +354,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 		return errs.add("order %s not matched after %s", oidShort, maxMatchDuration)
 	}
 
-	dc.tradeMtx.RLock()
+	tracker.mtx.RLock()
 	client.log("%d match(es) received for order %s", len(tracker.matches), oidShort)
 	for _, match := range tracker.matches {
 		client.log("%s on match %s, amount %.8f %s", match.Match.Side.String(),
@@ -370,7 +370,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	for _, match := range tracker.matches {
 		lastProcessedStatus[match.id] = order.NewlyMatched
 	}
-	dc.tradeMtx.RUnlock()
+	tracker.mtx.RUnlock()
 
 	// the expected balance changes for this client will be updated
 	// as swaps and redeems are executed
@@ -397,8 +397,8 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	maxTradeDuration := 2 * time.Minute
 	tryUntil(ctx, maxTradeDuration, func() bool {
 		var completedTrades int
-		dc.tradeMtx.Lock()
-		defer dc.tradeMtx.Unlock()
+		tracker.mtx.Lock()
+		defer tracker.mtx.Unlock()
 		for _, match := range tracker.matches {
 			side, status := match.Match.Side, match.Match.Status
 			if status >= finalStatus {
@@ -467,7 +467,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	}
 
 	var incompleteTrades int
-	dc.tradeMtx.RLock()
+	tracker.mtx.RLock()
 	for _, match := range tracker.matches {
 		if match.Match.Status < finalStatus {
 			incompleteTrades++
@@ -475,7 +475,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 				token(match.ID()), match.Match.Status, match.Match.Side)
 		}
 	}
-	dc.tradeMtx.RUnlock()
+	tracker.mtx.RUnlock()
 	if incompleteTrades > 0 {
 		return fmt.Errorf("client %d reported %d incomplete trades for order %s after %s",
 			client.id, incompleteTrades, oidShort, maxTradeDuration)
@@ -487,7 +487,6 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string) error {
 	// check if client has pending refunds
 	client.log("checking if refunds are necessary")
-	dc := client.dc()
 	refundAmts := map[uint32]int64{dcr.BipID: 0, btc.BipID: 0}
 	var furthestLockTime time.Time
 
@@ -570,8 +569,8 @@ func checkAndWaitForRefunds(ctx context.Context, client *tClient, orderID string
 	var notRefundedSwaps int
 	refundWaitTimeout := 30 * time.Second
 	refundedSwaps := tryUntil(ctx, refundWaitTimeout, func() bool {
-		dc.tradeMtx.RLock()
-		defer dc.tradeMtx.RUnlock()
+		tracker.mtx.RLock()
+		defer tracker.mtx.RUnlock()
 		notRefundedSwaps = 0
 		for _, match := range tracker.matches {
 			if hasRefundableSwap(match) && match.MetaData.Proof.RefundCoin == nil {
@@ -750,9 +749,10 @@ func (client *tClient) connectDEX(ctx context.Context) error {
 // are added to the tClient.notifications slice to be read by consumers
 // subsequently.
 func (client *tClient) monitorNotificationFeed(ctx context.Context) {
+	notificationFeed := client.core.NotificationFeed()
 	for {
 		select {
-		case n := <-client.core.NotificationFeed():
+		case n := <-notificationFeed:
 			client.notificationsMtx.Lock()
 			client.notifications = append(client.notifications, n)
 			client.notificationsMtx.Unlock()
