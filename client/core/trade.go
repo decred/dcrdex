@@ -1345,6 +1345,13 @@ func (t *trackedTrade) waitForRedemptions() {
 			continue
 		}
 
+		if match.Match.Status != order.TakerSwapCast {
+			t.mtx.Unlock()
+			log.Errorf("received find redemption result at wrong step, order %s, match %s, status %s",
+				t.ID(), match.id, match.Match.Status)
+			continue
+		}
+
 		_, _, proof, _ := match.parts()
 		// TODO: Is this validation necessary?
 		if !t.wallets.toWallet.ValidateSecret(frr.Secret, proof.SecretHash) {
