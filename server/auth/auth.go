@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -21,6 +22,10 @@ import (
 )
 
 const cancelThreshWindow = 25 // spec
+
+var (
+	ErrUserNotConnected = dex.ErrorKind("user not connected")
+)
 
 func unixMsNow() time.Time {
 	return time.Now().Truncate(time.Millisecond).UTC()
@@ -287,7 +292,7 @@ func (auth *AuthManager) Route(route string, handler func(account.AccountID, *ms
 func (auth *AuthManager) Auth(user account.AccountID, msg, sig []byte) error {
 	client := auth.user(user)
 	if client == nil {
-		return fmt.Errorf("user %x not found", user[:])
+		return dex.NewError(ErrUserNotConnected, user.String())
 	}
 	return checkSigS256(msg, sig, client.acct.PubKey)
 }
@@ -421,7 +426,7 @@ func (auth *AuthManager) send(user account.AccountID, msg *msgjson.Message, conn
 			return nil
 		}
 		log.Errorf("Send requested for unknown user %v", user)
-		return fmt.Errorf("unknown user")
+		return dex.NewError(ErrUserNotConnected, user.String())
 	}
 
 	err := client.conn.Send(msg)
@@ -574,7 +579,7 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 			return nil
 		}
 		log.Errorf("Send requested for unknown user %v", user)
-		return fmt.Errorf("unknown user")
+		return dex.NewError(ErrUserNotConnected, user.String())
 	}
 	// log.Tracef("Registering '%s' request ID %d for user %v (auth clientInfo)", msg.Route, msg.ID, user)
 	client.logReq(msg.ID, f, expireTimeout, expire)

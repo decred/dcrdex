@@ -18,6 +18,7 @@ import (
 	"decred.org/dcrdex/dex/ws"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
+	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/book"
 	"decred.org/dcrdex/server/coinlock"
 	"decred.org/dcrdex/server/comms"
@@ -1150,7 +1151,7 @@ func (m *Market) handlePreimageResp(msg *msgjson.Message, reqData *piData) {
 // collectPreimages solicits preimages from the owners of each of the orders in
 // the provided queue with a 'preimage' ntfn/request via AuthManager.Request,
 // and returns the preimages contained in the client responses. This function
-// can block for up to 5 seconds (piTimeout) to allow clients time to respond.
+// can block for up to 20 seconds (piTimeout) to allow clients time to respond.
 // Clients that fail to respond, or respond with invalid data (see
 // handlePreimageResp), are counted as misses.
 func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersRevealed []*matcher.OrderRevealed, misses []order.Order) {
@@ -1158,7 +1159,7 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 	cSum = matcher.CSum(orders)
 
 	// Request preimages from the clients.
-	piTimeout := 5 * time.Second
+	piTimeout := 20 * time.Second
 	preimages := make(map[order.Order]chan *order.Preimage, len(orders))
 	for _, ord := range orders {
 		// Make the 'preimage' request.
@@ -1185,30 +1186,27 @@ func (m *Market) collectPreimages(orders []order.Order) (cSum []byte, ordersReve
 			preimage: piChan,
 		}
 
-		// Failure to respond in time is a miss, signalled by a nil pointer.
-		var missOnce sync.Once // captured by miss
-		miss := func() {
-			// RequestWithTimeout should only call this on expire, not because
-			// of link or other errors, but put it in a sync.Once to be safe
-			// since it will block if run twice.
-			missOnce.Do(func() { piChan <- nil })
-		}
+		// Failure to respond in time or an async link write error is a miss,
+		// signalled by a nil pointer. Request errors returned by
+		// RequestWithTimeout instead register a miss immediately.
+		miss := func() { piChan <- nil }
 
 		// Send the preimage request to the order's owner.
 		err = m.auth.RequestWithTimeout(ord.User(), req, func(_ comms.Link, msg *msgjson.Message) {
-			m.handlePreimageResp(msg, reqData)
+			m.handlePreimageResp(msg, reqData) // sends on piChan
 		}, piTimeout, miss)
 		if err != nil {
-			miss() // only called by RequestWithTimeout on expire, not send errors
-			if errors.Is(err, ws.ErrPeerDisconnected) {
-				misses = append(misses, ord)
-				log.Debug("Preimage request failed: client gone.")
+			if errors.Is(err, ws.ErrPeerDisconnected) || errors.Is(err, auth.ErrUserNotConnected) {
+				log.Debugf("Preimage request failed, client gone: %v", err)
 			} else {
-				// Server error should not count as a miss. We may need a way to
-				// identify server connectivity problems to clients are not
-				// penalized when it is not their fault.
-				log.Warnf("Preimage request failed: %v", err) // maybe Debugf if there is nothing unexpected
+				// We may need a way to identify server connectivity problems so
+				// clients are not penalized when it is not their fault. For
+				// now, log this at warning level since the error is not novel.
+				log.Warnf("Preimage request failed: %v", err)
 			}
+
+			// Register the miss now, no channel receive for this order.
+			misses = append(misses, ord)
 			continue
 		}
 
