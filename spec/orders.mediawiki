@@ -701,7 +701,7 @@ When the taker receives the <code>audit</code> notification, they will audit the
 maker's contract and after that contract asset's configured swap confirmation
 requirement is reached, broadcast their own initialization.
 When the maker receives the <code>audit</code> notification, they will audit the
-taker's contract and after the required confirmations, issue their own redemption.
+taker's contract and after the required confirmations, issue their redemption.
 
 '''Request route:''' <code>audit</code>, '''originator:''' DEX
 
