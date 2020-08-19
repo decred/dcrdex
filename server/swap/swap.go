@@ -1475,9 +1475,10 @@ type messageAcker struct {
 	isAudit bool
 }
 
-// processAck processes a match msgjson.Acknowledgement, validating the
-// signature and updating the (order.Match).Sigs record. This is required by
-// processInit, processRedeem, and revoke.
+// processAck processes a msgjson.Acknowledgement to the audit, redeem, and
+// revoke_match requests, validating the signature and updating the
+// (order.Match).Sigs record. This is required by processInit, processRedeem,
+// and revoke. Match Acknowledgements are handled by processMatchAck.
 func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	// Remove the live acker from Swapper's tracking.
 	defer s.rmLiveAckers(msg.ID)

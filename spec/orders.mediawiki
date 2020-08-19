@@ -698,9 +698,10 @@ The DEX will respond with an acknowledgement.
 The DEX will send each client a notification when the counterparty has broadcast
 their initialization transaction.
 When the taker receives the <code>audit</code> notification, they will audit the
-contract and broadcast their own initialization.
+maker's contract and after that contract asset's configured swap confirmation
+requirement is reached, broadcast their own initialization.
 When the maker receives the <code>audit</code> notification, they will audit the
-contract and issue their redemption.
+taker's contract and after the required confirmations, issue their own redemption.
 
 '''Request route:''' <code>audit</code>, '''originator:''' DEX
 
