@@ -554,19 +554,19 @@ This is by design and discourages certain types of spoofing.
 
 ==Preimage Reveal==
 
-At the expiration of the epoch, the DEX sends out a <code>preimage</code>
-request for each order in the epoch queue. The match cycle begins 5 seconds
+At the expiration of the epoch, the DEX initiate a <code>preimage</code>
+dialogue for each order in the epoch queue. The match cycle begins 5 seconds
 after the last <code>preimage</code> request is sent by the server, so clients
 must respond before then.
 
 A '''''commitment checksum''''' is included as part of the
-<code>preimage</code> request.
+<code>preimage</code> dialogue initiation.
 The checksum is the Blake-256 hash of the concatenated, lexicographically-sorted
 commitments for every order in the epoch. For clients subscribed to the order
 book for the entire duration of the epoch, the checksum can be validated against
 the checksum generated from their local copy of the epoch queue.
 
-'''Request route:''' <code>preimage</code>, '''originator:''' DEX
+'''Dialogue route:''' <code>preimage</code>, '''originator:''' DEX
 
 <code>payload</code>
 {|
@@ -577,21 +577,17 @@ the checksum generated from their local copy of the epoch queue.
 | csum    || string || the commitment checksum
 |}
 
-'''Preimage response'''
+'''Dialogue step 2: preimage reveal''', '''originator:''' client
 
 <code>result</code>
 {|
 ! field   !! size (bytes)  !! description
 |-
 | pimg    || string || hex-encoded preimage for the order's commitment
-|-
-| ackid   || int || the message ID to be used for the server's preimage acknowledgement
 |}
 
 The server will send an [[comm.mediawiki/#Acknowledgements|acknowledgement]] of
-their receipt of the preimage. The message ID of the acknowledgement will be set
-to the specified <code>ackid</code>. The signature message is the byte-encoded
-preimage.
+their receipt of the preimage.
 
 ==Order Revocation==
 

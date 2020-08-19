@@ -78,18 +78,20 @@ structure called a '''Message'''.
 {|
 ! field    !! type !! description
 |-
-| type    || int || message type
+| type     || int || message type
 |-
-| payload || any || the data being transmitted
+| payload  || any || the data being transmitted
 |-
-| route   || string || the route identifier. requests and notifications only
+| route    || string || the route identifier. requests and notifications only
 |-
-| id      || int > 0 || the request ID. requests and responses only
+| id       || int > 0 || the message ID. not set for notifications.
+|-
+| returnid || int > 0 || the return ID. dialogue-type messages only
 |}
 
 There are three anticipated message types.
 
-'''Message types'''
+===Message types===
 
 {|
 | type         || id || description
@@ -99,9 +101,11 @@ There are three anticipated message types.
 | response     || 2 || a response to a request
 |-
 | notification || 3 || usually part of a data feed. requires no response
+|-
+| dialogue     || 4 || used for more complicated, multi-step data transactions
 |}
 
-'''Example request'''
+===Request===
 
 The payload for a request can be of any type.
 
@@ -114,7 +118,7 @@ The payload for a request can be of any type.
 }
 </pre>
 
-'''Response payload'''
+===Response Payload===
 
 The payload for a response has a structure that enables quick error checking.
 
@@ -126,7 +130,7 @@ The payload for a response has a structure that enables quick error checking.
 | error   || string or null || the error. field is null or missing if no error was encountered
 |}
 
-'''Example response'''
+===Response===
 
 <pre>
 {
@@ -136,7 +140,7 @@ The payload for a response has a structure that enables quick error checking.
 }
 </pre>
 
-'''Example notification'''
+===Notification===
 
 <pre>
 {
@@ -145,6 +149,43 @@ The payload for a response has a structure that enables quick error checking.
 	"payload": [1, 5, 3, 9]
 }
 </pre>
+
+===Dialogue===
+
+A dialogue type message is initiated the same as a request. The initiator
+will set the ID, which they will then use to identify dialogue messages from the
+other party. The primary difference between a dialogue and a request is that the
+non-initiator must set a `returnid` in their first response. Any subsequent
+dialogue messages from the initiator will use this `returnid` as the message ID.
+
+'''Dialogue initiation'''
+
+<pre>
+{
+	"type": 4,
+	"id": 100,
+	"route" "exchangeinfo",
+	"payload": {"info": "initiator_data_1"},
+}
+</pre>
+
+'''Dialogue initiation response'''
+
+<pre>
+{
+	"type": 4,
+	"id": 100,
+	"returnid": 200,
+	"route" "exchangeinfo",
+	"payload": {"info"; "recipient_data_1"},
+}
+</pre>
+
+The dialogue can then continue, with the initiator addressing messages to the
+specified <code>returnid</code>, and the non-initiator addressing messages to
+the original message ID. The <code>returnid</code> is only expected to be set in
+the first non-initiator message. The initiator will continue to use that ID for
+all subsequent messaging.
 
 ==Session Authentication==
 
