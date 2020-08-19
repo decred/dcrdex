@@ -82,8 +82,9 @@ poke around and offer feedback, there are a number of ways to do that.
 ### Dependencies
 
 1. Linux or MacOS
-2. [Go >= 1.13](https://golang.org/doc/install)
+2. [Go >= 1.14](https://golang.org/doc/install)
 3. [PostgreSQL 11+](https://www.postgresql.org/download/), [tuned](https://pgtune.leopard.in.ua/) and running.
+4. Decred (dcrd) and Bitcoin (bitcoind) full nodes, both with `txindex` enabled.
 
 ### Set up the database
 
@@ -155,18 +156,23 @@ from **server/cmd/dcrdex**.
 
 ## Client Installation
 
-The client is in early development, and is not fully functional. Instructions
-are listed for development purposes.
+The client is still immature and changing rapidly, but it is mostly functional.
+There are a few incomplete items, so **do not use it on Mainnet yet**.
+Please ensure you are building from a current snapshot of the master branch.
 
 ### Dependencies
 
-1. [Go >= 1.13](https://golang.org/doc/install)
+1. [Go >= 1.14](https://golang.org/doc/install)
 2. [Node 12+](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) is used to bundle resources for the browser interface.
+3. [dcrd](https://github.com/decred/dcrd/tree/master) and [dcrwallet](https://github.com/decred/dcrwallet/tree/master) (non-SPV) built from the `master` branch.
+4. [Bitcoin Core v0.20.x](https://bitcoincore.org/en/download/) (bitcoind or bitcoin-qt) wallet, **encrypted**.
+
+See the [wiki](../../wiki/Testnet-Testing) for details on preparing the wallets.
 
 **Build the web assets** from *client/webserver/site/*.
 
 ```
-npm install
+npm clean-install
 npm run build
 ```
 
@@ -178,6 +184,11 @@ go build
 ```
 
 Connect to the client from your browser at `localhost:5758`.
+
+While `dexc` may be run from within the git workspace as described above, the
+`dexc` binary executable generated with `go build` and the entire `site` folder
+may be copied into a different folder as long as `site` is in the same directory
+as `dexc` (e.g. `/opt/dcrdex/dexc` and `/opt/dcrdex/site`).
 
 ## Contribute
 
