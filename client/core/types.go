@@ -105,18 +105,55 @@ type RegisterForm struct {
 
 // Match represents a match on an order. An order may have many matches.
 type Match struct {
-	MatchID string            `json:"matchID"`
-	Status  order.MatchStatus `json:"status"`
-	Rate    uint64            `json:"rate"`
-	Qty     uint64            `json:"qty"`
-	Side    order.MatchSide   `json:"side"`
-	FeeRate uint64            `json:"feeRate"`
+	MatchID       dex.Bytes         `json:"matchID"`
+	Status        order.MatchStatus `json:"status"`
+	Rate          uint64            `json:"rate"`
+	Qty           uint64            `json:"qty"`
+	Side          order.MatchSide   `json:"side"`
+	FeeRate       uint64            `json:"feeRate"`
+	Swap          dex.Bytes         `json:"swap"`
+	CounterSwap   dex.Bytes         `json:"counterSwap"`
+	Redeem        dex.Bytes         `json:"redeem"`
+	CounterRedeem dex.Bytes         `json:"counterRedeem"`
+	Refund        dex.Bytes         `json:"refund"`
+}
+
+// matchFromMetaMatch constructs a *Match from an *db.MetaMatch
+func matchFromMetaMatch(metaMatch *db.MetaMatch) *Match {
+	userMatch, proof := metaMatch.Match, &metaMatch.MetaData.Proof
+	match := &Match{
+		MatchID: userMatch.MatchID[:],
+		Status:  userMatch.Status,
+		Rate:    userMatch.Rate,
+		Qty:     userMatch.Quantity,
+		Side:    userMatch.Side,
+		FeeRate: userMatch.FeeRateSwap,
+		Refund:  []byte(proof.RefundCoin),
+	}
+
+	if userMatch.Side == order.Maker {
+		match.Swap = []byte(proof.MakerSwap)
+		match.CounterSwap = []byte(proof.TakerSwap)
+		match.Redeem = []byte(proof.MakerRedeem)
+		match.CounterRedeem = []byte(proof.TakerRedeem)
+	} else {
+		match.Swap = []byte(proof.TakerSwap)
+		match.CounterSwap = []byte(proof.MakerSwap)
+		match.Redeem = []byte(proof.TakerRedeem)
+		match.CounterRedeem = []byte(proof.MakerRedeem)
+	}
+
+	return match
 }
 
 // Order is core's general type for an order. An order may be a market, limit,
 // or cancel order. Some fields are only relevant to particular order types.
 type Order struct {
 	Host        string            `json:"host"`
+	BaseID      uint32            `json:"baseID"`
+	BaseSymbol  string            `json:"baseSymbol"`
+	QuoteID     uint32            `json:"quoteID"`
+	QuoteSymbol string            `json:"quoteSymbol"`
 	MarketID    string            `json:"market"`
 	Type        order.OrderType   `json:"type"`
 	ID          string            `json:"id"`
@@ -140,6 +177,57 @@ type Order struct {
 type FeeBreakdown struct {
 	Swap       uint64 `json:"swap"`
 	Redemption uint64 `json:"redemption"`
+}
+
+// coreOrderFromTrade constructs an *Order from the supplied limit or market
+// order and associated metadata.
+func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
+	prefix, trade := ord.Prefix(), ord.Trade()
+
+	var rate uint64
+	var tif order.TimeInForce
+	if lo, ok := ord.(*order.LimitOrder); ok {
+		rate = lo.Rate
+		tif = lo.Force
+	}
+
+	var cancelling, canceled bool
+	if !metaData.LinkedOrder.IsZero() {
+		if trade.Filled() == trade.Quantity {
+			canceled = true
+		} else {
+			cancelling = true
+		}
+	}
+
+	baseID, quoteID := ord.Base(), ord.Quote()
+
+	corder := &Order{
+		Host:        metaData.Host,
+		BaseID:      baseID,
+		BaseSymbol:  unbip(baseID),
+		QuoteID:     quoteID,
+		QuoteSymbol: unbip(quoteID),
+		MarketID:    marketName(baseID, quoteID),
+		Type:        prefix.OrderType,
+		ID:          ord.ID().String(),
+		Stamp:       encode.UnixMilliU(prefix.ServerTime),
+		Sig:         metaData.Proof.DEXSig,
+		Status:      metaData.Status,
+		Rate:        rate,
+		Qty:         trade.Quantity,
+		Sell:        trade.Sell,
+		Filled:      trade.Filled(),
+		TimeInForce: tif,
+		Canceled:    canceled,
+		Cancelling:  cancelling,
+		FeesPaid: &FeeBreakdown{
+			Swap:       metaData.SwapFeesPaid,
+			Redemption: metaData.RedemptionFeesPaid,
+		},
+	}
+
+	return corder
 }
 
 // Market is market info.
@@ -481,6 +569,16 @@ type LoginResult struct {
 type RegisterResult struct {
 	FeeID       string `json:"feeID"`
 	ReqConfirms uint16 `json:"reqConfirms"`
+}
+
+// OrderFilter is almost the same as db.OrderFilter, except the Offset order ID
+// is a dex.Bytes instead of a order.OrderID.
+type OrderFilter struct {
+	N        int                 `json:"n"`
+	Offset   dex.Bytes           `json:"offset"`
+	Hosts    []string            `json:"hosts"`
+	Assets   []uint32            `json:"assets"`
+	Statuses []order.OrderStatus `json:"statuses"`
 }
 
 // assetMap tracks a series of assets and provides methods for registering an

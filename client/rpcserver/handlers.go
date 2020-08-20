@@ -36,6 +36,7 @@ const (
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
 	withdrawRoute    = "withdraw"
+	marketsRoute     = "markets"
 )
 
 const (

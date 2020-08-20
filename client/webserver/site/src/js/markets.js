@@ -5,14 +5,11 @@ import OrderBook from './orderbook'
 import { DepthChart } from './charts'
 import { postJSON } from './http'
 import { NewWalletForm, bindOpenWallet, bind as bindForm } from './forms'
+import * as Order from './orderutil'
 import ws from './ws'
 
 var app
 const bind = Doc.bind
-
-const LIMIT = 1
-const MARKET = 2
-// const CANCEL = 3
 
 const bookRoute = 'book'
 const bookOrderRoute = 'book_order'
@@ -24,25 +21,6 @@ const unmarketRoute = 'unmarket'
 
 const lastMarketKey = 'selectedMarket'
 const chartRatioKey = 'chartRatio'
-
-/* The match statuses are a mirror of dex/order.MatchStatus. */
-// const newlyMatched = 0
-// const makerSwapCast = 1
-// const takerSwapCast = 2
-const makerRedeemed = 3
-// const matchComplete = 4
-
-/* The time-in-force specifiers are a mirror of dex/order.TimeInForce. */
-const immediateTiF = 0
-const standingTiF = 1
-
-/* The order statuses are a mirror of dex/order.OrderStatus. */
-const statusUnknown = 0
-const statusEpoch = 1
-const statusBooked = 2
-const statusExecuted = 3
-const statusCanceled = 4
-const statusRevoked = 5
 
 const animationLength = 500
 
@@ -565,24 +543,28 @@ export default class MarketsPage extends BasePage {
     const orders = app.orders(market.dex.host, marketID(market.baseCfg.symbol, market.quoteCfg.symbol))
 
     Doc.empty(page.liveList)
-    for (const order of orders) {
+    for (const ord of orders) {
       const row = page.liveTemplate.cloneNode(true)
-      metaOrders[order.id] = {
+      metaOrders[ord.id] = {
         row: row,
-        order: order
+        order: ord
       }
-      updateUserOrderRow(row, order)
-      if (order.type === LIMIT) {
-        if (order.tif === standingTiF && order.status < statusExecuted) {
+      updateUserOrderRow(row, ord)
+      if (ord.type === Order.Limit) {
+        if (ord.tif === Order.StandingTiF && ord.status < Order.StatusExecuted) {
           const icon = Doc.tmplElement(row, 'cancelBttn')
           Doc.show(icon)
           bind(icon, 'click', e => {
             e.stopPropagation()
-            this.showCancel(row, order.id)
+            this.showCancel(row, ord.id)
           })
         }
       }
+      const link = Doc.tmplElement(row, 'link')
+      link.href = `order/${ord.id}`
+      app.bindInternalNavigation(row)
       page.liveList.appendChild(row)
+      app.bindTooltips(row)
     }
   }
 
@@ -751,7 +733,7 @@ export default class MarketsPage extends BasePage {
     const page = this.page
     const remaining = order.qty - order.filled
     page.cancelRemain.textContent = Doc.formatCoinValue(remaining / 1e8)
-    const symbol = isMarketBuy(order) ? this.market.quote.symbol : this.market.base.symbol
+    const symbol = Order.isMarketBuy(order) ? this.market.quote.symbol : this.market.base.symbol
     page.cancelUnit.textContent = symbol.toUpperCase()
     this.showForm(page.cancelForm)
     this.cancelData = {
@@ -855,14 +837,14 @@ export default class MarketsPage extends BasePage {
       const alreadyMatched = note.epoch > order.epoch
       const statusTD = Doc.tmplElement(metaOrder.row, 'status')
       switch (true) {
-        case order.type === LIMIT && order.status === statusEpoch && alreadyMatched:
-          statusTD.textContent = order.tif === immediateTiF ? 'executed' : 'booked'
-          order.status = order.tif === immediateTiF ? statusExecuted : statusBooked
+        case order.type === Order.Limit && order.status === Order.StatusEpoch && alreadyMatched:
+          statusTD.textContent = order.tif === Order.ImmediateTiF ? 'executed' : 'booked'
+          order.status = order.tif === Order.ImmediateTiF ? Order.StatusExecuted : Order.StatusBooked
           break
-        case order.type === MARKET && order.status === statusEpoch:
+        case order.type === Order.Market && order.status === Order.StatusEpoch:
           // Technically don't know if this should be 'executed' or 'settling'.
           statusTD.textContent = 'executed'
-          order.status = statusExecuted
+          order.status = Order.StatusExecuted
           break
       }
     }
@@ -1482,44 +1464,6 @@ function swapBttns (before, now) {
   now.classList.add('selected')
 }
 
-/* sumSettled sums the quantities of the matches that have completed. */
-function sumSettled (order) {
-  if (!order.matches) return 0
-  const qty = isMarketBuy(order) ? m => m.qty * m.rate * 1e-8 : m => m.qty
-  return order.matches.reduce((settled, match) => {
-    // >= makerRedeemed is used because the maker never actually goes to
-    // matchComplete (once at makerRedeemed, nothing left to do), and the taker
-    // never goes to makerRedeemed, since at that point, they just complete the
-    // swap.
-    return (match.status >= makerRedeemed) ? settled + qty(match) : settled
-  }, 0)
-}
-
-/*
- * hasLiveMatches returns true if the order has matches that have not completed
- * settlement yet.
- */
-function hasLiveMatches (order) {
-  if (!order.matches) return false
-  for (const match of order.matches) {
-    if (match.status < makerRedeemed) return true
-  }
-  return false
-}
-
-/* statusString converts the order status to a string */
-function statusString (order) {
-  const isLive = hasLiveMatches(order)
-  switch (order.status) {
-    case statusUnknown: return 'unknown'
-    case statusEpoch: return 'epoch'
-    case statusBooked: return order.cancelling ? 'cancelling' : 'booked'
-    case statusExecuted: return isLive ? 'settling' : 'executed'
-    case statusCanceled: return isLive ? 'canceled/settling' : 'canceled'
-    case statusRevoked: return isLive ? 'revoked/settling' : 'revoked'
-  }
-}
-
 /*
  * updateDataCol sets the textContent of descendent template element.
  */
@@ -1530,20 +1474,15 @@ function updateDataCol (tr, col, s) {
 /*
  * updateUserOrderRow sets the td contents of the user's order table row.
  */
-function updateUserOrderRow (tr, order) {
-  updateDataCol(tr, 'type', order.type === LIMIT ? (order.tif === immediateTiF ? 'limit (i)' : 'limit') : 'market')
-  updateDataCol(tr, 'side', order.sell ? 'sell' : 'buy')
-  updateDataCol(tr, 'age', Doc.timeSince(order.stamp))
-  updateDataCol(tr, 'rate', Doc.formatCoinValue(order.rate / 1e8))
-  updateDataCol(tr, 'qty', Doc.formatCoinValue(order.qty / 1e8))
-  updateDataCol(tr, 'filled', `${(order.filled / order.qty * 100).toFixed(1)}%`)
-  updateDataCol(tr, 'settled', `${(sumSettled(order) / order.qty * 100).toFixed(1)}%`)
-  updateDataCol(tr, 'status', statusString(order))
-}
-
-/* isMarketBuy will return true if the order is a market buy order. */
-function isMarketBuy (order) {
-  return order.type === MARKET && !order.sell
+function updateUserOrderRow (tr, ord) {
+  updateDataCol(tr, 'type', Order.typeString(ord))
+  updateDataCol(tr, 'side', Order.sellString(ord))
+  updateDataCol(tr, 'age', Doc.timeSince(ord.stamp))
+  updateDataCol(tr, 'rate', Doc.formatCoinValue(ord.rate / 1e8))
+  updateDataCol(tr, 'qty', Doc.formatCoinValue(ord.qty / 1e8))
+  updateDataCol(tr, 'filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
+  updateDataCol(tr, 'settled', `${(Order.settled(ord) / ord.qty * 100).toFixed(1)}%`)
+  updateDataCol(tr, 'status', Order.statusString(ord))
 }
 
 /*

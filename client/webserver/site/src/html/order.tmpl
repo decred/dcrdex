@@ -1,0 +1,130 @@
+{{define "microIcon"}}
+<img src="/img/coins/{{.}}.png" class="micro-icon">
+{{end}}
+
+{{define "order"}}
+{{template "top" .}}
+{{$ord := .Order}}
+<div id="main" data-handler="order" class="main w-100 overflow-y-auto">
+  <div class="w-100 px-5">
+    <div class="px-1 py-2">
+      <span class="fs22 demi mr-2">Order</span> 
+      <span class="fs18">{{$ord.ID}}</span>
+    </div>
+
+    {{- /* DATA CARDS */ -}}
+    <div class="d-flex flex-wrap">
+      <div class="order-datum">
+        <div>Exchange</div>
+        <div>{{$ord.Host}}</div>
+      </div>
+      <div class="order-datum">
+        <div>Market</div>
+        <div>{{template "microIcon" $ord.BaseSymbol}} {{template "microIcon" $ord.QuoteSymbol}} {{toUpper $ord.BaseSymbol}}-{{toUpper $ord.QuoteSymbol}}</div>
+      </div>
+      <div class="order-datum">
+        <div>Type</div>
+        <div>{{ $ord.TypeString }}</div>
+      </div>
+      <div class="order-datum">
+        <div>Status</div>
+        <div>{{$ord.StatusString}}</div>
+      </div>
+      <div class="order-datum">
+        <div>Offering</div>
+        <div>{{$ord.OfferString}} {{$ord.FromSymbol}} {{template "microIcon" $ord.FromSymbol}}</div>
+      </div>
+      <div class="order-datum">
+        <div>Asking</div>
+        <div>
+          {{if (not $ord.IsMarketOrder)}}
+            {{$ord.AskString}}
+          {{end}}
+          {{$ord.ToSymbol}} {{template "microIcon" $ord.ToSymbol}}
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Rate</div>
+        <div>{{$ord.RateString}}</div>
+      </div>
+      <div class="order-datum">
+        <div>Filled</div>
+        <div>
+          {{$ord.FilledPercent}}%
+          ({{$ord.FilledFrom}} {{template "microIcon" $ord.FromSymbol}}
+          &rarr;
+          {{$ord.FilledTo}} {{template "microIcon" $ord.ToSymbol}})
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Settled</div>
+        <div>
+          {{$ord.SettledPercent}}%
+          ({{$ord.SettledFrom}} {{template "microIcon" $ord.FromSymbol}}
+          &rarr;
+          {{$ord.SettledTo}} {{template "microIcon" $ord.ToSymbol}})
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Fees <span class="ico-info fs12" data-tooltip="On-chain transaction fees, typically collected by the miner. Decred DEX collects no trading fees."></span></div>
+        <div>
+          {{$ord.SwapFeesString}} {{template "microIcon" $ord.FromSymbol}},
+          {{$ord.RedemptionFeesString}} {{template "microIcon" $ord.ToSymbol}}
+        </div>
+      </div>
+      <div class="order-datum">
+        <div>Age</div>
+        <div id="sinceOrder" data-stamp="{{$ord.Stamp}}"></div>
+      </div>
+    </div> {{- /* END DATA CARDS */ -}}
+
+    {{- /* MATCHES */ -}}
+    <div class="fs18 demi pt-4 pb-2">Matches</div>
+    <table class="matches-table">
+      <thead>
+        <tr>
+          <th>Match ID</th>
+          <th>Status</th>
+          <th>Rate</th>
+          <th>Quantity</th>
+          <th>Swaps</th>
+          <th>Redemptions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range $match := $ord.MatchReaders}}
+          <tr>
+            <td>{{$match.MatchID}}</td>
+            <td>{{$match.Status}}</td>
+            <td>{{$match.RateString}}</td>
+            <td>
+              <span>{{$match.QuantityString}} {{$ord.BaseSymbol}}</span><br>
+              <span>{{$match.QuoteQuantityString}} {{$ord.QuoteSymbol}}</span>
+            </td>
+            <td>
+              {{if len $match.Swap}}
+              <span>{{$ord.FromSymbol}} {{$match.SwapString}}</span><br>
+              {{end}}
+              {{if len $match.CounterSwap}}
+              <span>{{$ord.ToSymbol}} {{$match.CounterSwapString}}</span>
+              {{end}}
+            </td>
+            <td>
+              {{if len $match.Redeem}}
+              <span>{{$ord.ToSymbol}} {{$match.RedeemString}}</span><br>
+              {{end}}
+              {{if len $match.CounterRedeem}}
+              <span>{{$ord.FromSymbol}} {{$match.CounterRedeemString}}</span>
+              {{end}}
+              {{if len $match.Refund}}
+              <span><span class="red">refund:</span> {{$ord.FromSymbol}} {{$match.RefundString}}</span>
+              {{end}}
+            </td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{template "bottom"}}
+{{end}}

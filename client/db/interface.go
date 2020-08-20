@@ -48,6 +48,11 @@ type DB interface {
 	AccountOrders(dex string, n int, since uint64) ([]*MetaOrder, error)
 	// Order fetches a MetaOrder by order ID.
 	Order(order.OrderID) (*MetaOrder, error)
+	// Orders fetches a slice of orders, sorted by descending time. count is the
+	// maximum number of orders that will be returned. If before is non-zero it
+	// will be interpreted as a UNIX timestamp, and any order with a client
+	// timestamp >= before will be omitted.
+	Orders(*OrderFilter) ([]*MetaOrder, error)
 	// ActiveDEXOrders retrieves orders for a particular dex, specified by its
 	// URL.
 	ActiveDEXOrders(dex string) ([]*MetaOrder, error)

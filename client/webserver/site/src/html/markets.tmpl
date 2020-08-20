@@ -282,7 +282,9 @@
 
       {{- /* USER ORDERS: TODO */ -}}
       <div class="bg0 p-0 col-10 d-flex flex-column align-items-stretch">
-        <div class="market-header text-center fs14 py-1 brdrleft">Your Orders</div>
+        <div class="market-header text-center fs14 py-1 brdrleft">
+          Your Orders
+        </div>
         <div class="brdrleft flex-grow-1 bg1 position-relative">
 
           <div class="fill-abs stylish-overflow">
@@ -310,9 +312,17 @@
                   <td data-tmpl="filled"></td>
                   <td data-tmpl="settled"></td>
                   <td data-tmpl="status"></td>
-                  <td class="text-center">
-                    <span data-tmpl="cancelBttn" class="ico-cross d-hide"></span>
+                  <td class="text-right">
+                    <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="cancel order"></span>
                     <span data-tmpl="cancelStatus" class="d-hide"></span>
+                    <a data-tmpl="link" class="ico-open fs13 pointer ml-2 plainlink" data-tooltip="order details"></a>
+                  </td>
+                </tr>
+              </tbody>
+              <tbody>
+                <tr>
+                  <td colspan="9" class="text-center">
+                    <a href="/orders" class="d-block fs14 px-2 plainlink">view order history</a>
                   </td>
                 </tr>
               </tbody>

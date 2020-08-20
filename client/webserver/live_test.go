@@ -7,6 +7,7 @@ package webserver
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -25,6 +26,7 @@ import (
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -211,11 +213,13 @@ var tExchanges = map[string]*core.Exchange{
 	firstDEX: {
 		Host: "somedex.com",
 		Assets: map[uint32]*dex.Asset{
-			0:  mkDexAsset("btc"),
-			2:  mkDexAsset("ltc"),
-			42: mkDexAsset("dcr"),
-			22: mkDexAsset("mona"),
-			3:  mkDexAsset("doge"),
+			0:   mkDexAsset("btc"),
+			2:   mkDexAsset("ltc"),
+			42:  mkDexAsset("dcr"),
+			22:  mkDexAsset("mona"),
+			28:  mkDexAsset("vtc"),
+			141: mkDexAsset("kmd"),
+			3:   mkDexAsset("doge"),
 		},
 		Markets: map[string]*core.Market{
 			mkid(42, 0): mkMrkt("dcr", "btc"),
@@ -233,6 +237,7 @@ var tExchanges = map[string]*core.Exchange{
 			22:  mkDexAsset("mona"),
 			28:  mkDexAsset("vtc"),
 			141: mkDexAsset("kmd"),
+			3:   mkDexAsset("doge"),
 		},
 		Markets: map[string]*core.Market{
 			mkid(42, 28):  mkMrkt("dcr", "vtc"),
@@ -296,6 +301,21 @@ type TCore struct {
 	epochOrders []*core.BookUpdate
 }
 
+// TDriver implements the interface required of all exchange wallets.
+type TDriver struct{}
+
+func (*TDriver) Setup(*asset.WalletConfig, dex.Logger, dex.Network) (asset.Wallet, error) {
+	return nil, nil
+}
+
+func (*TDriver) DecodeCoinID(coinID []byte) (string, error) {
+	return asset.DecodeCoinID(0, coinID) // btc decoder
+}
+
+func (*TDriver) Info() *asset.WalletInfo {
+	return nil
+}
+
 func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
@@ -336,6 +356,134 @@ func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) {
 }
 func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginResult{}, nil }
 func (c *TCore) Logout() error                           { return nil }
+
+var orderAssets = []string{"dcr", "btc", "ltc", "doge", "mona", "vtc"}
+
+func (c *TCore) Orders(filter *core.OrderFilter) ([]*core.Order, error) {
+	var spacing uint64 = 60 * 60 * 1000 / 2 // half an hour
+	t := encode.UnixMilliU(time.Now())
+
+	cords := make([]*core.Order, 0, filter.N)
+	for i := 0; i < int(filter.N); i++ {
+		cord := makeCoreOrder()
+
+		cord.Stamp = t
+		// Make it a little older.
+		t -= spacing
+
+		cords = append(cords, cord)
+	}
+	return cords, nil
+}
+
+func utxoID() []byte {
+	vout := uint32(rand.Intn(15))
+	txHash := encode.RandomBytes(32)
+	b := make([]byte, 36)
+	copy(b[:], txHash)
+	binary.BigEndian.PutUint32(b[32:], vout)
+	return b
+}
+
+func makeCoreOrder() *core.Order {
+	// sell := rand.Float32() < 0.5
+	// center := randomMagnitude(-2, 4)
+	// ord := randomOrder(sell, randomMagnitude(-2, 4), center, gapWidthFactor*center, true)
+	var ord order.Order
+	var tif order.TimeInForce
+	host := firstDEX
+	if rand.Float32() > 0.5 {
+		host = secondDEX
+	}
+	baseIdx := rand.Intn(len(orderAssets))
+	baseSymbol := orderAssets[baseIdx]
+	quoteSymbol := orderAssets[(baseIdx+1)%len(orderAssets)]
+	baseID, _ := dex.BipSymbolID(baseSymbol)
+	quoteID, _ := dex.BipSymbolID(quoteSymbol)
+	lotSize := tExchanges[host].Assets[baseID].LotSize
+	rateStep := tExchanges[host].Assets[quoteID].RateStep
+	rate := uint64(rand.Intn(1e3)) * rateStep
+	qty := uint64(rand.Intn(1e3)) * lotSize
+	isMarket := rand.Float32() > 0.5
+	if isMarket {
+		ord, _ = ordertest.RandomMarketOrder()
+	} else {
+		lo, _ := ordertest.RandomLimitOrder()
+		ord = lo
+		tif = lo.Force
+	}
+
+	status := order.OrderStatus(rand.Intn(int(order.OrderStatusRevoked-1))) + 1
+
+	trade := ord.Trade()
+
+	cord := &core.Order{
+		Host:        host,
+		BaseID:      baseID,
+		BaseSymbol:  baseSymbol,
+		QuoteID:     quoteID,
+		QuoteSymbol: quoteSymbol,
+		MarketID:    baseSymbol + "_" + quoteSymbol,
+		Type:        ord.Type(),
+		Stamp:       encode.UnixMilliU(time.Now().Add(-time.Second * time.Duration(rand.Intn(60*60)))),
+		ID:          ord.ID().String(),
+		Status:      status,
+		Qty:         qty,
+		Sell:        trade.Sell,
+		Filled:      uint64(rand.Float64() * float64(qty)),
+		Canceled:    status == order.OrderStatusCanceled,
+		Rate:        rate,
+		TimeInForce: tif,
+		FeesPaid: &core.FeeBreakdown{
+			Swap:       qty / 99,
+			Redemption: rateStep * 100,
+		},
+	}
+
+	numMatches := rand.Intn(13)
+
+	matchQ := (qty / 13)
+	matchQ -= matchQ % lotSize
+
+	if isMarket && !trade.Sell {
+		matchQ = calc.QuoteToBase(rate, matchQ)
+	}
+
+	for i := 0; i < numMatches; i++ {
+		userMatch := ordertest.RandomUserMatch()
+		matchQty := matchQ
+		if i == numMatches-1 {
+			matchQty = qty - (matchQ * (uint64(numMatches) - 1))
+		}
+		match := &core.Match{
+			MatchID: userMatch.MatchID[:],
+			Status:  userMatch.Status,
+			Rate:    rate,
+			Qty:     matchQty,
+			Side:    userMatch.Side,
+		}
+
+		if rand.Float32() < 0.75 {
+			match.Swap = utxoID()
+			if rand.Float32() < 0.75 {
+				match.CounterSwap = utxoID()
+				if rand.Float32() < 0.75 {
+					match.Redeem = utxoID()
+					match.CounterRedeem = utxoID()
+				} else if rand.Float32() < 0.2 {
+					match.Refund = utxoID()
+				}
+			}
+		}
+
+		cord.Matches = append(cord.Matches, match)
+	}
+	return cord
+}
+
+func (c *TCore) Order(oidStr string) (*core.Order, error) {
+	return makeCoreOrder(), nil
+}
 
 func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
 	quoteAsset := tExchanges[dexAddr].Assets[quote]
@@ -757,6 +905,12 @@ out:
 }
 
 func TestServer(t *testing.T) {
+	// Register dummy drivers for unimplemented assets.
+	asset.Register(22, &TDriver{})  // mona
+	asset.Register(28, &TDriver{})  // vtc
+	asset.Register(141, &TDriver{}) // kmd
+	asset.Register(3, &TDriver{})   // doge
+
 	numBuys = 10
 	numSells = 10
 	feedPeriod = 2000 * time.Millisecond

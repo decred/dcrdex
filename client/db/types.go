@@ -730,6 +730,25 @@ func (n *Notification) Encode() []byte {
 		AddData(uint64Bytes(n.TimeStamp))
 }
 
+// OrderFilter is used to limit the results returned by a query to (DB).Orders.
+type OrderFilter struct {
+	// N is the number of orders to return in the set.
+	N int
+	// Offset can be used to shift the window of the time-sorted orders such
+	// that any orders that would sort to index <= the order specified by Offset
+	// will be rejected. Enables
+	Offset order.OrderID
+	// Hosts is a list of acceptable hosts. A zero-length Hosts means all
+	// hosts are accepted.
+	Hosts []string
+	// Assets is a list of BIP IDs for acceptable assets. A zero-length Assets
+	// means all assets are accepted.
+	Assets []uint32
+	// Statuses is a list of acceptable statuses. A zero-length Statuses means
+	// all statuses are accepted.
+	Statuses []order.OrderStatus
+}
+
 // noteKeySize must be <= 32.
 const noteKeySize = 8
 

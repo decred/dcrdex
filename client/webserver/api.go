@@ -349,6 +349,27 @@ func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) 
 	}, s.indent)
 }
 
+// apiOrders get a list of user orders.
+func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
+	filter := new(core.OrderFilter)
+	if !readPost(w, r, filter) {
+		return
+	}
+
+	ords, err := s.core.Orders(filter)
+	if err != nil {
+		s.writeAPIError(w, "password change error: %v", err)
+		return
+	}
+	writeJSON(w, &struct {
+		OK     bool          `json:"ok"`
+		Orders []*core.Order `json:"orders"`
+	}{
+		OK:     true,
+		Orders: ords,
+	}, s.indent)
+}
+
 // apiReconfig sets new configuration details for the wallet.
 func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	form := &struct {

@@ -137,6 +137,9 @@ func (c *TCore) AckNotes(ids []dex.Bytes) {}
 
 func (c *TCore) Logout() error { return c.logoutErr }
 
+func (c *TCore) Orders(*core.OrderFilter) ([]*core.Order, error) { return nil, nil }
+func (c *TCore) Order(oidStr string) (*core.Order, error)        { return nil, nil }
+
 type TWriter struct {
 	b []byte
 }

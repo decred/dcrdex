@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -1591,6 +1592,74 @@ func (c *Core) Logout() error {
 	}
 
 	return nil
+}
+
+// Orders fetches a batch of user orders, filtered with the provided
+// OrderFilter.
+func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
+	var oid order.OrderID
+	if len(filter.Offset) > 0 {
+		if len(filter.Offset) != order.OrderIDSize*2 {
+			return nil, fmt.Errorf("invalid offset order ID length. wanted %d, got %d", order.OrderIDSize*2, len(filter.Offset))
+		}
+		copy(oid[:], filter.Offset)
+	}
+
+	ords, err := c.db.Orders(&db.OrderFilter{
+		N:        filter.N,
+		Offset:   oid,
+		Hosts:    filter.Hosts,
+		Assets:   filter.Assets,
+		Statuses: filter.Statuses,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("UserOrders error: %v", err)
+	}
+
+	cords := make([]*Order, 0, len(ords))
+	for _, mOrd := range ords {
+		corder, err := c.coreOrderFromMetaOrder(mOrd)
+		if err != nil {
+			return nil, err
+		}
+		cords = append(cords, corder)
+	}
+
+	return cords, nil
+}
+
+// coreOrderFromMetaOrder creates an *Order from a *db.MetaOrder, including
+// loading matches from the database.
+func (c *Core) coreOrderFromMetaOrder(mOrd *db.MetaOrder) (*Order, error) {
+	corder := coreOrderFromTrade(mOrd.Order, mOrd.MetaData)
+	oid := mOrd.Order.ID()
+	matches, err := c.db.MatchesForOrder(oid)
+	if err != nil {
+		return nil, fmt.Errorf("MatchesForOrder error loading matches for %s: %v", oid, err)
+	}
+	corder.Matches = make([]*Match, 0, len(matches))
+	for _, match := range matches {
+		corder.Matches = append(corder.Matches, matchFromMetaMatch(match))
+	}
+	return corder, nil
+}
+
+// Order fetches a single user order.
+func (c *Core) Order(oidStr string) (*Order, error) {
+	if len(oidStr) != order.OrderIDSize*2 {
+		return nil, fmt.Errorf("wrong oid string length. wanted %d, got %d", order.OrderIDSize*2, len(oidStr))
+	}
+	oidB, err := hex.DecodeString(oidStr)
+	if err != nil {
+		return nil, fmt.Errorf("error decoding order id string %q: %w", oidStr, err)
+	}
+	var oid order.OrderID
+	copy(oid[:], oidB)
+	mOrd, err := c.db.Order(oid)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving order %s: %w", oid, err)
+	}
+	return c.coreOrderFromMetaOrder(mOrd)
 }
 
 // initializeDEXConnections connects to the DEX servers in the conns map and

@@ -1,0 +1,57 @@
+.filter-display {
+  padding: 5px 10px;
+  border-radius: 3px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.orders-left-side {
+  border-right: 1px solid black;
+}
+
+.filter-opts {
+  padding: 10px 5px 30px 5px;
+  position: relative;
+}
+
+.apply-bttn {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+
+  button {
+    font-size: 13px;
+    font-family: $demi-sans;
+    padding: 2px 8px;
+    border: 1px solid #7777;
+    border-radius: 2px;
+  }
+}
+
+#ordersTable {
+  width: 100%;
+  // max-width: 90%;
+  margin: 0 auto;
+
+  thead {
+    th {
+      padding: 10px;
+    }
+  }
+
+  tbody {
+    font-size: 15px;
+
+    td {
+      padding: 3px 10px;
+    }
+
+    tr:nth-child(even) {
+      background-color: #7772;
+    }
+
+    tr:hover {
+      background-color: #7774;
+    }
+  }
+}

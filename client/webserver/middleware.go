@@ -2,7 +2,16 @@ package webserver
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+
+	"github.com/go-chi/chi"
+)
+
+type ctxID int
+
+const (
+	ctxOID ctxID = iota
 )
 
 // securityMiddleware adds security headers to the server responses.
@@ -85,4 +94,21 @@ func (s *WebServer) requireDEXConnection(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// orderIDCtx embeds order ID into the request context
+func orderIDCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		oid := chi.URLParam(r, "oid")
+		ctx := context.WithValue(r.Context(), ctxOID, oid)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func getOrderIDCtx(r *http.Request) (string, error) {
+	oidStr, ok := r.Context().Value(ctxOID).(string)
+	if !ok {
+		return "", fmt.Errorf("type assertion failed")
+	}
+	return oidStr, nil
 }

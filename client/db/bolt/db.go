@@ -78,6 +78,7 @@ var (
 	ackKey                 = []byte("ack")
 	swapFeesKey            = []byte("swapFees")
 	redemptionFeesKey      = []byte("redeemFees")
+	typeKey                = []byte("type")
 	byteTrue               = encode.ByteTrue
 	byteFalse              = encode.ByteFalse
 	byteEpoch              = uint16Bytes(uint16(order.OrderStatusEpoch))
@@ -415,6 +416,7 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(proofKey, md.Proof.Encode()).
 			put(changeKey, md.ChangeCoin).
 			put(linkedKey, linkedB).
+			put(typeKey, []byte{byte(ord.Type())}).
 			put(orderKey, order.EncodeOrder(ord)).
 			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
 			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
@@ -442,7 +444,7 @@ func (db *BoltDB) AccountOrders(dex string, n int, since uint64) ([]*dexdb.MetaO
 		})
 	}
 	sinceB := uint64Bytes(since)
-	return db.newestOrders(n, func(oBkt *bbolt.Bucket) bool {
+	return db.newestOrders(n, func(_ []byte, oBkt *bbolt.Bucket) bool {
 		timeB := oBkt.Get(updateTimeKey)
 		return bEqual(dexB, oBkt.Get(dexKey)) && bytes.Compare(timeB, sinceB) >= 0
 	})
@@ -484,7 +486,7 @@ func (db *BoltDB) marketOrdersAll(dexB, baseB, quoteB []byte) ([]*dexdb.MetaOrde
 // use marketOrdersAll instead.
 func (db *BoltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uint64) ([]*dexdb.MetaOrder, error) {
 	sinceB := uint64Bytes(since)
-	return db.newestOrders(n, func(oBkt *bbolt.Bucket) bool {
+	return db.newestOrders(n, func(_ []byte, oBkt *bbolt.Bucket) bool {
 		timeB := oBkt.Get(updateTimeKey)
 		return bEqual(dexB, oBkt.Get(dexKey)) && bEqual(baseB, oBkt.Get(baseKey)) &&
 			bEqual(quoteB, oBkt.Get(quoteKey)) && bytes.Compare(timeB, sinceB) >= 0
@@ -495,7 +497,7 @@ func (db *BoltDB) marketOrdersSince(dexB, baseB, quoteB []byte, n int, since uin
 // function. Each order's bucket is provided to the filter, and a boolean true
 // return value indicates the order should is eligible to be decoded and
 // returned.
-func (db *BoltDB) newestOrders(n int, filter func(*bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
+func (db *BoltDB) newestOrders(n int, filter func([]byte, *bbolt.Bucket) bool) ([]*dexdb.MetaOrder, error) {
 	var orders []*dexdb.MetaOrder
 	return orders, db.ordersView(func(master *bbolt.Bucket) error {
 		pairs := newestBuckets(master, n, updateTimeKey, filter)
@@ -547,6 +549,91 @@ func (db *BoltDB) Order(oid order.OrderID) (mord *dexdb.MetaOrder, err error) {
 		return err
 	})
 	return mord, err
+}
+
+// filterSet is a set of bucket filtering functions. Each function takes a
+// bucket key and the associated bucket, and should return true if the bucket
+// passes the filter.
+type filterSet []func(oidB []byte, oBkt *bbolt.Bucket) bool
+
+// check runs the bucket through all filters, and will return false if the
+// bucket fails to pass any one filter.
+func (fs filterSet) check(oidB []byte, oBkt *bbolt.Bucket) bool {
+	for _, f := range fs {
+		if !f(oidB, oBkt) {
+			return false
+		}
+	}
+	return true
+}
+
+// Orders fetches a slice of orders, sorted by descending time. count is the
+// maximum number of orders that will be returned. If before is non-zero it will
+// be interpreted as a UNIX timestamp, and any order with a client timestamp >=
+// before will be omitted.
+func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, err error) {
+	filters := make(filterSet, 0)
+
+	if len(orderFilter.Hosts) > 0 {
+		hosts := make(map[string]bool, len(orderFilter.Hosts))
+		for _, host := range orderFilter.Hosts {
+			hosts[host] = true
+		}
+		filters = append(filters, func(_ []byte, oBkt *bbolt.Bucket) bool {
+			return hosts[string(oBkt.Get(dexKey))]
+		})
+	}
+
+	if len(orderFilter.Assets) > 0 {
+		assetIDs := make(map[uint32]bool, len(orderFilter.Assets))
+		for _, assetID := range orderFilter.Assets {
+			assetIDs[assetID] = true
+		}
+		filters = append(filters, func(_ []byte, oBkt *bbolt.Bucket) bool {
+			return assetIDs[intCoder.Uint32(oBkt.Get(baseKey))] || assetIDs[intCoder.Uint32(oBkt.Get(quoteKey))]
+		})
+	}
+
+	if len(orderFilter.Statuses) > 0 {
+		filters = append(filters, func(_ []byte, oBkt *bbolt.Bucket) bool {
+			status := order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey)))
+			for _, acceptable := range orderFilter.Statuses {
+				if status == acceptable {
+					return true
+				}
+			}
+			return false
+		})
+	}
+
+	if !orderFilter.Offset.IsZero() {
+		offsetOID := orderFilter.Offset[:]
+		var offsetBucket *bbolt.Bucket
+		var stampB []byte
+		err := db.ordersView(func(master *bbolt.Bucket) error {
+			offsetBucket = master.Bucket(offsetOID)
+			if offsetBucket == nil {
+				return fmt.Errorf("order %s not found", offsetOID)
+			}
+			stampB = getCopy(offsetBucket, updateTimeKey)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		filters = append(filters, func(oidB []byte, oBkt *bbolt.Bucket) bool {
+			comp := bytes.Compare(oBkt.Get(updateTimeKey), stampB)
+			return comp < 0 || (comp == 0 && bytes.Compare(offsetOID, oidB) < 0)
+		})
+	}
+
+	filter := func(oidB []byte, oBkt *bbolt.Bucket) bool { return true }
+	if len(filters) > 0 {
+		filter = filters.check
+	}
+
+	return db.newestOrders(orderFilter.N, filter)
 }
 
 // decodeOrderBucket decodes the order's *bbolt.Bucket into a *MetaOrder.
@@ -1013,12 +1100,12 @@ func (db *BoltDB) notesUpdate(f bucketFunc) error {
 // Newest buckets gets the nested buckets with the hightest timestamp from the
 // specified master bucket. The nested bucket should have an encoded uint64 at
 // the timeKey. An optional filter function can be used to reject buckets.
-func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func(*bbolt.Bucket) bool) []*keyTimePair {
+func newestBuckets(master *bbolt.Bucket, n int, timeKey []byte, filter func([]byte, *bbolt.Bucket) bool) []*keyTimePair {
 	idx := newTimeIndexNewest(n)
 	master.ForEach(func(k, _ []byte) error {
 		bkt := master.Bucket(k)
 		stamp := intCoder.Uint64(bkt.Get(timeKey))
-		if filter == nil || filter(bkt) {
+		if filter == nil || filter(k, bkt) {
 			idx.add(stamp, k)
 		}
 		return nil
@@ -1144,7 +1231,10 @@ func (idx *timeIndexNewest) add(t uint64, k []byte) {
 		}
 	}
 	sort.Slice(idx.pairs, func(i, j int) bool {
-		return idx.pairs[i].t > idx.pairs[j].t
+		// newest (highest t) first, or by lexicographically by key if the times
+		// are equal.
+		t1, t2 := idx.pairs[i].t, idx.pairs[j].t
+		return t1 > t2 || (t1 == t2 && bytes.Compare(idx.pairs[i].k, idx.pairs[j].k) == 1)
 	})
 }
 

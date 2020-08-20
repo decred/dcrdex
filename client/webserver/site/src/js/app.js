@@ -5,6 +5,8 @@ import LoginPage from './login'
 import WalletsPage from './wallets'
 import SettingsPage from './settings'
 import MarketsPage from './markets'
+import OrdersPage from './orders'
+import OrderPage from './order'
 import { getJSON, postJSON } from './http'
 import commitHash from 'commitHash'
 import * as ntfn from './notifications'
@@ -22,7 +24,9 @@ const constructors = {
   register: RegistrationPage,
   markets: MarketsPage,
   wallets: WalletsPage,
-  settings: SettingsPage
+  settings: SettingsPage,
+  orders: OrdersPage,
+  order: OrderPage
 }
 
 // Application is the main javascript web application for the Decred DEX client.
@@ -50,7 +54,7 @@ export default class Application {
     bind(window, 'popstate', (e) => {
       const page = e.state.page
       if (!page && page !== '') return
-      this.loadPage(page)
+      this.loadPage(page, e.state.data, true)
     })
     // The main element is the interchangeable part of the page that doesn't
     // include the header. Main should define a data-handler attribute
@@ -60,7 +64,12 @@ export default class Application {
     // The application is free to respond with a page that differs from the
     // one requested in the omnibox, e.g. routing though a login page. Set the
     // current URL state based on the actual page.
-    window.history.replaceState({ page: handler }, '', `/${handler}`)
+    const url = new URL(window.location)
+    if (handlerFromPath(url.pathname) !== handler) {
+      url.pathname = `/${handler}`
+      url.search = ''
+      window.history.replaceState({ page: handler }, '', url)
+    }
     // Attach stuff.
     this.attachHeader()
     this.attachCommon(this.header)
@@ -103,14 +112,28 @@ export default class Application {
   }
 
   /* Load the page from the server. Insert and bind the DOM. */
-  async loadPage (page, data) {
-    const response = await window.fetch(`/${page}`)
+  async loadPage (page, data, skipPush) {
+    // Close some menus and tooltips.
+    this.tooltip.style.left = '-10000px'
+    this.page.noteBox.style.display = 'none'
+    this.page.noteIndicator.style.display = 'none'
+    this.page.profileBox.style.display = 'none'
+    // Parse the request.
+    const url = new URL(`/${page}`, window.location.origin)
+    const requestedHandler = handlerFromPath(page)
+    // Fetch and parse the page.
+    const response = await window.fetch(url)
     if (!response.ok) return false
     const html = await response.text()
     const doc = Doc.noderize(html)
     const main = idel(doc, 'main')
     const delivered = main.dataset.handler
-    window.history.pushState({ page: delivered }, delivered, `/${delivered}`)
+    // Append the request to the page history.
+    if (!skipPush) {
+      const path = delivered === requestedHandler ? url.toString() : `/${delivered}`
+      window.history.pushState({ page: page, data: data }, delivered, path)
+    }
+    // Insert page and attach handlers.
     document.title = doc.title
     this.main.replaceWith(main)
     this.main = main
@@ -126,12 +149,10 @@ export default class Application {
       return
     }
     this.attachCommon(this.main)
-    var constructor = constructors[handlerID]
-    if (!constructor) {
-      console.error(`no constructor for ${handlerID}`)
-    }
     if (this.loadedPage) this.loadedPage.unload()
-    this.loadedPage = new constructor(this, this.main, data) || {}
+    var constructor = constructors[handlerID]
+    if (constructor) this.loadedPage = new constructor(this, this.main, data)
+    else this.loadedPage = null
 
     // Bind the tooltips.
     this.bindTooltips(this.main)
@@ -143,12 +164,12 @@ export default class Application {
         this.tooltip.textContent = el.dataset.tooltip
         const lyt = Doc.layoutMetrics(el)
         var left = lyt.centerX - this.tooltip.offsetWidth / 2
-        if (left < 0) left = 0
+        if (left < 0) left = 5
         if (left + this.tooltip.offsetWidth > document.body.offsetWidth) {
-          left = document.body.offsetWidth - this.tooltip.offsetWidth
+          left = document.body.offsetWidth - this.tooltip.offsetWidth - 5
         }
         this.tooltip.style.left = `${left}px`
-        this.tooltip.style.top = `${lyt.bodyTop - this.tooltip.offsetHeight}px`
+        this.tooltip.style.top = `${lyt.bodyTop - this.tooltip.offsetHeight - 5}px`
       })
       bind(el, 'mouseleave', () => {
         this.tooltip.style.left = '-10000px'
@@ -209,6 +230,31 @@ export default class Application {
   }
 
   /*
+   * bindInternalNavigation hijacks navigation by click on any local links that
+   * are descendents of ancestor.
+   * */
+  bindInternalNavigation (ancestor) {
+    const pageURL = new URL(window.location)
+    ancestor.querySelectorAll('a').forEach(a => {
+      if (!a.href) return
+      const url = new URL(a.href)
+      if (url.origin === pageURL.origin) {
+        const token = url.pathname.substring(1)
+        var params = {}
+        if (url.search) {
+          url.searchParams.forEach((v, k) => {
+            params[k] = v
+          })
+        }
+        Doc.bind(a, 'click', e => {
+          e.preventDefault()
+          this.loadPage(token, params)
+        })
+      }
+    })
+  }
+
+  /*
    * storeNotes stores the list of notifications in Window.localStorage. The
    * actual stored list is stripped of information not necessary for display.
    */
@@ -250,12 +296,7 @@ export default class Application {
 
   /* attachCommon scans the provided node and handles some common bindings. */
   attachCommon (node) {
-    node.querySelectorAll('[data-pagelink]').forEach(link => {
-      const page = link.dataset.pagelink
-      bind(link, 'click', async () => {
-        await this.loadPage(page)
-      })
-    })
+    this.bindInternalNavigation(node)
   }
 
   /*
@@ -339,7 +380,7 @@ export default class Application {
     }
 
     // Inform the page.
-    this.loadedPage.notify(note)
+    if (this.loadedPage) this.loadedPage.notify(note)
     // Discard data notifications.
     if (note.severity < ntfn.POKE) return
     // Poke notifications have their own display.
@@ -477,4 +518,9 @@ function setSeverityClass (el, severity) {
   const cls = severityClassMap[severity]
   if (cls) el.classList.add(cls)
   el.style.display = cls ? 'block' : 'none'
+}
+
+/* handlerFromPath parses the handler name from the path. */
+function handlerFromPath (path) {
+  return path.replace(/^\//, '').split('/')[0].split('?')[0].split('#')[0]
 }

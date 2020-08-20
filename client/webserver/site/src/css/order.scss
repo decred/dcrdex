@@ -1,0 +1,51 @@
+div.order-datum {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: start;
+  text-align: center;
+  border: 1px solid #777a;
+  font-size: 15px;
+  margin: 5px 10px 5px 0;
+
+  div:first-child {
+    padding: 2px 15px;
+    border-bottom: 1px solid #777a;
+    font-family: $demi-sans;
+    background-color: #7772;
+  }
+
+  div:last-child {
+    padding: 8px 15px;
+  }
+
+  .micro-icon {
+    position: relative;
+    bottom: 2px;
+  }
+}
+
+table.matches-table {
+  max-width: 100%;
+
+  th {
+    background-color: #7772;
+  }
+
+  td,
+  th {
+    text-align: left;
+    border: 1px solid #777a;
+    font-size: 14px;
+    padding: 5px 10px;
+  }
+
+  td > span {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .red {
+    color: #bd4646;
+  }
+}

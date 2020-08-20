@@ -309,6 +309,10 @@ func (tdb *TDB) Order(oid order.OrderID) (*db.MetaOrder, error) {
 	return tdb.orderOrders[oid], nil
 }
 
+func (tdb *TDB) Orders(*db.OrderFilter) ([]*db.MetaOrder, error) {
+	return nil, nil
+}
+
 func (tdb *TDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*db.MetaOrder, error) {
 	return nil, nil
 }

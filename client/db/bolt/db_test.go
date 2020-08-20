@@ -14,8 +14,10 @@ import (
 	"decred.org/dcrdex/client/db"
 	dbtest "decred.org/dcrdex/client/db/test"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	ordertest "decred.org/dcrdex/dex/order/test"
+	"go.etcd.io/bbolt"
 )
 
 var (
@@ -412,6 +414,10 @@ func TestOrders(t *testing.T) {
 		orderIndex[ord.ID()] = ord
 	})
 
+	// // Grab a stamp to filter the call the Orders.
+	// beforeStamp := orders[0].Order.Prefix().ClientTime
+	// beforders := make(map[order.OrderID]struct{}, 0)
+
 	tStart := time.Now()
 	// Grab a timestamp halfway through.
 	var tMid uint64
@@ -421,10 +427,14 @@ func TestOrders(t *testing.T) {
 		if i == iMid {
 			tMid = timeNow()
 		}
-		err := boltdb.UpdateOrder(orders[i])
+		mOrd := orders[i]
+		err := boltdb.UpdateOrder(mOrd)
 		if err != nil {
 			t.Fatalf("error inserting order: %v", err)
 		}
+		// if mOrd.Order.Prefix().ClientTime.Before(beforeStamp) {
+		// 	beforders[mOrd.Order.ID()] = struct{}{}
+		// }
 	})
 	t.Logf("~ %d milliseconds to insert %d MetaOrder", int(time.Since(tStart)/time.Millisecond)-numToDo, numToDo)
 	tStart = time.Now()
@@ -526,6 +536,23 @@ func TestOrders(t *testing.T) {
 		ordertest.MustCompareOrders(t, nOrders[i].Order, sinceOrders[i].Order)
 	}
 
+	// // Check that Orders returns the correct list.
+	// ords, err := boltdb.Orders(&db.OrderFilter{
+	// 	N:      int(numToDo),
+	// 	Offset: offsetOrder.ID(),
+	// })
+	// if err != nil {
+	// 	t.Fatalf("Orders error: %v", err)
+	// }
+	// if len(ords) != len(beforders) {
+	// 	t.Fatalf("Orders: wrong number of orders returned. wanted %d, got %d", len(beforders), len(ords))
+	// }
+	// for _, mOrd := range ords {
+	// 	if _, found := beforders[mOrd.Order.ID()]; !found {
+	// 		t.Fatalf("Orders: expected order not found")
+	// 	}
+	// }
+
 	// Make a MetaOrder and check insertion errors.
 	m := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
@@ -574,6 +601,145 @@ func TestOrders(t *testing.T) {
 	err = boltdb.UpdateOrderStatus(ordertest.RandomOrderID(), order.OrderStatusExecuted)
 	if err == nil {
 		t.Fatalf("no error encountered for updating unknown order's status")
+	}
+}
+
+func TestOrderFilters(t *testing.T) {
+	boltdb := newTestDB(t)
+
+	makeOrder := func(host string, base, quote uint32, stamp int64, status order.OrderStatus) *db.MetaOrder {
+		mord := &db.MetaOrder{
+			MetaData: &db.OrderMetaData{
+				Status: status,
+				Host:   host,
+				Proof:  db.OrderProof{DEXSig: randBytes(73)},
+			},
+			Order: &order.LimitOrder{
+				P: order.Prefix{
+					BaseAsset:  base,
+					QuoteAsset: quote,
+					ServerTime: encode.UnixTimeMilli(stamp),
+				},
+			},
+		}
+		oid := mord.Order.ID()
+
+		err := boltdb.UpdateOrder(mord)
+		if err != nil {
+			t.Fatalf("error inserting order: %v", err)
+		}
+
+		// Set the update time.
+		boltdb.ordersUpdate(func(master *bbolt.Bucket) error {
+			oBkt := master.Bucket(oid[:])
+			if oBkt == nil {
+				t.Fatalf("order %s not found", oid)
+			}
+			oBkt.Put(updateTimeKey, uint64Bytes(uint64(stamp)))
+			return nil
+		})
+
+		return mord
+	}
+
+	var start int64
+	host1 := "somehost.co"
+	host2 := "antoherhost.org"
+	var asset1 uint32 = 1
+	var asset2 uint32 = 2
+	var asset3 uint32 = 3
+	orders := []*db.MetaOrder{
+		makeOrder(host1, asset1, asset2, start, order.OrderStatusExecuted),   // 0, oid: 95318d1d4d1d19348d96f260e6d54eca942ce9bf0760f43edc7afa2c0173a401
+		makeOrder(host2, asset2, asset3, start+1, order.OrderStatusRevoked),  // 1, oid: 58148721dd3109647fd912fb1b3e29be7c72e72cf589dcbe5d0697735e1df8bb
+		makeOrder(host1, asset3, asset1, start+2, order.OrderStatusCanceled), // 2, oid: feea1852996c042174a40a88e74175f95009ce72b31d51402f452b28f2618a13
+		makeOrder(host2, asset1, asset3, start+3, order.OrderStatusEpoch),    // 3, oid: 8707caf2e70bc615845673cf30e44c67dec972064ab137a321d9ee98e8c96fe3
+		makeOrder(host1, asset2, asset3, start+4, order.OrderStatusBooked),   // 4, oid: e2fe7b28eae9a4511013ecb35be58e8031e5f7ec9f3a0e2f6411ec58efd4464a
+		makeOrder(host2, asset3, asset1, start+4, order.OrderStatusExecuted), // 5, oid: c76d4dfbc4ea8e0e8065e809f9c3ebfca98a1053a42f464e7632f79126f752d0
+	}
+	orderCount := len(orders)
+
+	for i, ord := range orders {
+		fmt.Println(i, ord.Order.ID().String())
+	}
+
+	tests := []struct {
+		name     string
+		filter   *db.OrderFilter
+		expected []int
+	}{
+		{
+			name: "zero-filter",
+			filter: &db.OrderFilter{
+				N: orderCount,
+			},
+			expected: []int{4, 5, 3, 2, 1, 0},
+		},
+		{
+			name: "all-hosts",
+			filter: &db.OrderFilter{
+				N:     orderCount,
+				Hosts: []string{host1, host2},
+			},
+			expected: []int{4, 5, 3, 2, 1, 0},
+		},
+		{
+			name: "host1",
+			filter: &db.OrderFilter{
+				N:     orderCount,
+				Hosts: []string{host1},
+			},
+			expected: []int{4, 2, 0},
+		},
+		{
+			name: "host1 + asset1",
+			filter: &db.OrderFilter{
+				N:      orderCount,
+				Hosts:  []string{host1},
+				Assets: []uint32{asset1},
+			},
+			expected: []int{2, 0},
+		},
+		{
+			name: "asset1",
+			filter: &db.OrderFilter{
+				N:      orderCount,
+				Assets: []uint32{asset1},
+			},
+			expected: []int{5, 3, 2, 0},
+		},
+		// Open filter with last order as Offset should return all but that
+		// order, since order 5 is lexicographically after order 4.
+		{
+			name: "offset",
+			filter: &db.OrderFilter{
+				N:      orderCount,
+				Offset: orders[5].Order.ID(),
+			},
+			expected: []int{4, 3, 2, 1, 0},
+		},
+		{
+			name: "epoch & booked",
+			filter: &db.OrderFilter{
+				N:        orderCount,
+				Statuses: []order.OrderStatus{order.OrderStatusEpoch, order.OrderStatusBooked},
+			},
+			expected: []int{4, 3},
+		},
+	}
+
+	for _, test := range tests {
+		ords, err := boltdb.Orders(test.filter)
+		if err != nil {
+			t.Fatalf("%s: Orders error: %v", test.name, err)
+		}
+		if len(ords) != len(test.expected) {
+			t.Fatalf("%s: wrong number of orders. wanted %d, got %d", test.name, len(test.expected), len(ords))
+		}
+		for i, j := range test.expected {
+			if ords[i].Order.ID() != orders[j].Order.ID() {
+				t.Fatalf("%s: index %d wrong ID. wanted %s, got %s", test.name, i, orders[j].Order.ID(), ords[i].Order.ID())
+			}
+		}
 	}
 }
 
