@@ -99,16 +99,23 @@ type RPCOutpoint struct {
 // GetWalletInfoResult models the data from the getwalletinfo command.
 type GetWalletInfoResult struct {
 	WalletName            string  `json:"walletname"`
-	WalletVersion         int     `json:"walletversion"`
+	WalletVersion         uint32  `json:"walletversion"`
 	Balance               float64 `json:"balance"`
 	UnconfirmedBalance    float64 `json:"unconfirmed_balance"`
 	ImmatureBalance       float64 `json:"immature_balance"`
-	TxCount               int     `json:"txcount"`
+	TxCount               uint32  `json:"txcount"`
 	KeyPoolOldest         uint64  `json:"keypoololdest"`
-	KeyPoolSize           int     `json:"keypoolsize"`
-	KeyPoolSizeHDInternal int     `json:"keypoolsize_hd_internal"`
+	KeyPoolSize           uint32  `json:"keypoolsize"`
+	KeyPoolSizeHDInternal uint32  `json:"keypoolsize_hd_internal"`
 	PayTxFee              float64 `json:"paytxfee"`
 	HdSeedID              string  `json:"hdseedid"`
-	HdMasterKeyID         string  `json:"hdmasterkeyid"`
-	PriveyKeysEnabled     bool    `json:"private_keys_enabled"`
+	// HDMasterKeyID is dropped in Bitcoin Core 0.18
+	HdMasterKeyID     string `json:"hdmasterkeyid"`
+	PriveyKeysEnabled bool   `json:"private_keys_enabled"`
+	// AvoidReuse and Scanning were added in Bitcoin Core 0.19
+	AvoidReuse bool `json:"avoid_reuse"`
+	Scanning   struct {
+		Duration uint32  `json:"duration"`
+		Progress float32 `json:"progress"`
+	} `json:"scanning"`
 }
