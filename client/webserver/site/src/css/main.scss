@@ -69,6 +69,7 @@ div.main {
   flex-grow: 1;
   min-height: 0;
   position: relative;
+  opacity: 0; // Set by animation upon initial loading.
 }
 
 button.selected {
