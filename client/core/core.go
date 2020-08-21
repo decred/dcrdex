@@ -2411,7 +2411,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 	// Prepare active orders, according to the DB.
 	dbOrders, err := c.db.ActiveDEXOrders(dc.acct.host)
 	if err != nil {
-		return nil, fmt.Errorf("database error when fetching orders for %s: %x", dc.acct.host, err)
+		return nil, fmt.Errorf("database error when fetching orders for %s: %v", dc.acct.host, err)
 	}
 	log.Infof("Loaded %d active orders.", len(dbOrders))
 
@@ -2908,7 +2908,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	}
 
 	if len(revocation.MatchID) != order.MatchIDSize {
-		return fmt.Errorf("invalid match ID %x", revocation.MatchID)
+		return fmt.Errorf("invalid match ID %v", revocation.MatchID)
 	}
 
 	var matchID order.MatchID
