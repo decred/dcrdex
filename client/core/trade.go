@@ -628,34 +628,42 @@ func (t *trackedTrade) isActive() bool {
 	for _, match := range t.matches {
 		log.Tracef("Checking match %v (%v) in status %v. Order: %v, Refund coin: %v, Script: %x", match.id,
 			match.Match.Side, match.MetaData.Status, t.ID(), match.MetaData.Proof.RefundCoin, match.MetaData.Proof.Script)
-		if match.MetaData.Status == order.MatchComplete {
-			continue
+		if match.isActive() {
+			return true
 		}
-
-		// Refunded matches are inactive regardless of status.
-		if len(match.MetaData.Proof.RefundCoin) > 0 {
-			continue
-		}
-
-		// Revoked matches may need to be refunded or auto-redeemed first.
-		if match.MetaData.Proof.IsRevoked {
-			// - NewlyMatched requires no further action from either side
-			// - MakerSwapCast requires no further action from the taker
-			// - (TakerSwapCast requires action on both sides)
-			// - MakerRedeemed requires no further action from the maker
-			status, side := match.MetaData.Status, match.Match.Side
-			if status == order.NewlyMatched ||
-				(status == order.MakerSwapCast && side == order.Taker) ||
-				(status == order.MakerRedeemed && side == order.Maker) {
-				log.Tracef("Revoked match %v (%v) in status %v considered inactive.",
-					match.id, side, status)
-				continue
-			}
-		}
-
-		return true
 	}
 	return false
+}
+
+// Matches are inactive if: (1) status is complete, (2) it is refunded, or (3)
+// it is revoked and this side of the match requires no further action like
+// refund or auto-redeem.
+func (match *matchTracker) isActive() bool {
+	if match.MetaData.Status == order.MatchComplete {
+		return false
+	}
+
+	// Refunded matches are inactive regardless of status.
+	if len(match.MetaData.Proof.RefundCoin) > 0 {
+		return false
+	}
+
+	// Revoked matches may need to be refunded or auto-redeemed first.
+	if match.MetaData.Proof.IsRevoked {
+		// - NewlyMatched requires no further action from either side
+		// - MakerSwapCast requires no further action from the taker
+		// - (TakerSwapCast requires action on both sides)
+		// - MakerRedeemed requires no further action from the maker
+		status, side := match.MetaData.Status, match.Match.Side
+		if status == order.NewlyMatched ||
+			(status == order.MakerSwapCast && side == order.Taker) ||
+			(status == order.MakerRedeemed && side == order.Maker) {
+			log.Tracef("Revoked match %v (%v) in status %v considered inactive.",
+				match.id, side, status)
+			return false
+		}
+	}
+	return true
 }
 
 // isRedeemable will be true if the match is ready for our redemption to be
@@ -785,6 +793,9 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 		}
 		if match.Match.Address == "" {
 			continue // a cancel order match
+		}
+		if !match.isActive() {
+			continue // either refunded or revoked requiring no action on this side of the match
 		}
 
 		switch {
@@ -1368,8 +1379,8 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 			return wait.DontTryAgain
 		},
 		ExpireFunc: func() {
-			errChan <- ExpirationErr(fmt.Sprintf("timed out waiting for AuditContract coin %x",
-				coinIDString(t.wallets.fromAsset.ID, audit.CoinID)))
+			errChan <- ExpirationErr(fmt.Sprintf("timed out waiting for AuditContract coin %v",
+				coinIDString(t.wallets.toAsset.ID, audit.CoinID)))
 		},
 	})
 	// Wait for the coin waiter to find and audit the contract coin, or timeout.
@@ -1413,7 +1424,8 @@ func (t *trackedTrade) processAudit(msgID uint64, audit *msgjson.Audit) error {
 	if dbMatch.Side == order.Maker {
 		// Check that the secret hash is correct.
 		if !bytes.Equal(proof.SecretHash, auditInfo.SecretHash()) {
-			return errs.add("secret hash mismatch. expected %x, got %x", proof.SecretHash, auditInfo.SecretHash())
+			return errs.add("secret hash mismatch for contract coin %v (%s), contract %v. expected %x, got %v",
+				auditInfo.Coin(), t.wallets.toAsset.Symbol, audit.Contract, proof.SecretHash, auditInfo.SecretHash())
 		}
 		match.SetStatus(order.TakerSwapCast)
 		proof.TakerSwap = []byte(audit.CoinID)
