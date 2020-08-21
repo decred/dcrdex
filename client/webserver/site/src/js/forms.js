@@ -43,8 +43,7 @@ export class NewWalletForm {
       var res = await postJSON('/api/newwallet', createForm)
       app.loaded()
       if (!app.checkResponse(res)) {
-        fields.newWalletErr.textContent = res.msg
-        Doc.show(fields.newWalletErr)
+        this.setError(res.msg)
         return
       }
       fields.newWalletPass.value = ''
@@ -61,6 +60,28 @@ export class NewWalletForm {
     fields.newWalletPass.value = ''
     this.subform.update(asset.info)
     Doc.hide(fields.newWalletErr)
+  }
+
+  /* setError sets and shows the in-form error message. */
+  async setError (errMsg) {
+    this.fields.newWalletErr.textContent = errMsg
+    Doc.show(this.fields.newWalletErr)
+  }
+
+  /*
+   * loadDefaults attempts to load the ExchangeWallet configuration from the
+   * default wallet config path on the server and will auto-fill the fields on
+   * the subform if settings are found.
+   */
+  async loadDefaults () {
+    app.loading(this.form)
+    var res = await postJSON('/api/defaultwalletcfg', { assetID: this.currentAsset.id })
+    app.loaded()
+    if (!app.checkResponse(res)) {
+      this.setError(res.msg)
+      return
+    }
+    this.subform.setConfig(res.config)
   }
 }
 

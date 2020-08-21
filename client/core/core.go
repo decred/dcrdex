@@ -25,6 +25,7 @@ import (
 	"decred.org/dcrdex/client/db/bolt"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
+	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/encrypt"
 	"decred.org/dcrdex/dex/msgjson"
@@ -1258,6 +1259,22 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	c.notify(newWalletConfigNote("Wallet Password Updated", details, db.Success, wallet.state()))
 
 	return nil
+}
+
+// DefaultWalletConfig attempts to load setting from a wallet package's
+// asset.WalletInfo.DefaultConfigPath. If settings are not found, an empty map
+// is returned.
+func (c *Core) DefaultWalletConfig(assetID uint32) (map[string]string, error) {
+	winfo, err := asset.Info(assetID)
+	if err != nil {
+		return nil, fmt.Errorf("asset.Info error: %w", err)
+	}
+	settings, err := config.Parse(winfo.DefaultConfigPath)
+	if err != nil {
+		log.Debug("config.Parse could not load settings from default path")
+		return make(map[string]string), nil
+	}
+	return settings, nil
 }
 
 func (c *Core) isRegistered(host string) bool {

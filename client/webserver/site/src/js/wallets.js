@@ -211,6 +211,7 @@ export default class WalletsPage extends BasePage {
     this.walletAsset = assetID
     this.walletForm.setAsset(asset)
     this.animation = this.showBox(box)
+    await this.walletForm.loadDefaults()
   }
 
   /* Show the form used to unlock a wallet. */

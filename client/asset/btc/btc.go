@@ -80,9 +80,10 @@ var (
 			Description: "<addr> or <addr>:<port> (default 'localhost')",
 		},
 		{
-			Key:         "rpcport",
-			DisplayName: "JSON-RPC Port",
-			Description: "Port for RPC connections (if not set in Address)",
+			Key:          "rpcport",
+			DisplayName:  "JSON-RPC Port",
+			Description:  "Port for RPC connections (if not set in rpcbind)",
+			DefaultValue: "8332",
 		},
 		{
 			Key:          fallbackFeeKey,

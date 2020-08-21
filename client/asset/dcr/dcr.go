@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -63,9 +64,10 @@ var (
 	fallbackFeeKey = "fallbackfee"
 	configOpts     = []*asset.ConfigOption{
 		{
-			Key:         "account",
-			DisplayName: "Account Name",
-			Description: "dcrwallet account name",
+			Key:          "account",
+			DisplayName:  "Account Name",
+			Description:  "dcrwallet account name",
+			DefaultValue: "default",
 		},
 		{
 			Key:         "username",
@@ -79,14 +81,16 @@ var (
 			NoEcho:      true,
 		},
 		{
-			Key:         "rpclisten",
-			DisplayName: "RPC Address",
-			Description: "dcrwallet's address (host or host:port) (default port: 9109, testnet: 19109)",
+			Key:          "rpclisten",
+			DisplayName:  "RPC Address",
+			Description:  "dcrwallet's address (host or host:port) (default port: 9110)",
+			DefaultValue: "127.0.0.1:9110",
 		},
 		{
-			Key:         "rpccert",
-			DisplayName: "TLS Certificate",
-			Description: "Path to the dcrwallet TLS certificate file",
+			Key:          "rpccert",
+			DisplayName:  "TLS Certificate",
+			Description:  "Path to the dcrwallet TLS certificate file",
+			DefaultValue: filepath.Join(dcrwHomeDir, "rpc.cert"),
 		},
 		{
 			Key:          fallbackFeeKey,

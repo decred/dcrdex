@@ -56,6 +56,9 @@ export default class RegistrationPage extends BasePage {
 
     // SUBMIT DEX REGISTRATION
     bindForm(page.confirmRegForm, page.submitConfirm, () => { this.registerDEX() })
+
+    // Attempt to load the dcrwallet configuration from the default location.
+    this.walletForm.loadDefaults()
   }
 
   /* Swap this currently displayed form1 for form2 with an animation. */
