@@ -1,7 +1,7 @@
 package internal
 
 const (
-	// CreatePenaltyTable created the penalties table. It is keyed by id
+	// CreatePenaltyTable creates the penalties table. It is keyed by id
 	// which is an int64 that is incremented automatically by the database.
 	CreatePenaltyTable = `CREATE TABLE IF NOT EXISTS %s (
 		id BIGSERIAL PRIMARY KEY,   -- UNIQUE INDEX

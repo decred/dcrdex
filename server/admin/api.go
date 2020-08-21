@@ -189,7 +189,7 @@ func (s *Server) apiAccountInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("failed to retrieve account: %v", err), http.StatusInternalServerError)
 		return
 	}
-	// If verbose expired and forgiven penalties will be included.
+	// If verbose, expired and forgiven penalties will be included.
 	dbPenalties, err := s.core.Penalties(acctID, verbose)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to retrieve penalties: %v", err), http.StatusInternalServerError)

@@ -19,8 +19,11 @@ import (
 // fields are ignored. The db decided id is returned.
 func (a *Archiver) InsertPenalty(penalty *db.Penalty) (id int64) {
 	stmt := fmt.Sprintf(internal.InsertPenalty, penaltiesTableName)
-	a.db.QueryRow(stmt, penalty.AccountID, penalty.BrokenRule,
-		int64(penalty.Time), penalty.Duration, penalty.Details).Scan(&id)
+	if err := a.db.QueryRow(stmt, penalty.AccountID, penalty.BrokenRule,
+		int64(penalty.Time), penalty.Duration, penalty.Details).Scan(&id); err != nil {
+		a.fatalBackendErr(err)
+		return 0
+	}
 	return id
 }
 
