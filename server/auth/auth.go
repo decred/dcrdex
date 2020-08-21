@@ -913,6 +913,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	// Send pending requests for this user.
 	for _, pr := range pendingReqs {
+		log.Debugf("Sending pending '%s' request to user %v: %v", pr.req.Route, pr.user, pr.req.String())
 		// Use the AuthManager method to send so that failed requests, which
 		// result in client removal, will go back into the client's pending
 		// requests. Subsequent requests that follow removal also fail and go
@@ -931,6 +932,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	// Send pending messages for this user.
 	for _, pr := range pendingMsgs {
+		log.Debugf("Sending pending %s to user %v: %v", pr.msg.Type, pr.user, pr.msg.String())
 		connectTimeout := DefaultConnectTimeout
 		// Decrement the connect timeout for repeated attempts.
 		if !pr.lastAttempt.IsZero() {
