@@ -312,7 +312,7 @@ func TestNew(t *testing.T) {
 	}
 	for _, test := range authTests {
 		s, shutdown := newTServer(t, false, test[0], test[1])
-		auth := base64.StdEncoding.EncodeToString((s.authsha[:]))
+		auth := base64.StdEncoding.EncodeToString((s.authSHA[:]))
 		if auth != test[2] {
 			t.Fatalf("expected auth %s but got %s", test[2], auth)
 		}
@@ -355,7 +355,7 @@ func TestAuthMiddleware(t *testing.T) {
 	login := user + ":" + pass
 	h := "Basic "
 	auth := h + base64.StdEncoding.EncodeToString([]byte(login))
-	s.authsha = sha256.Sum256([]byte(auth))
+	s.authSHA = sha256.Sum256([]byte(auth))
 
 	tests := []authMiddlewareTest{
 		{"auth ok", user, pass, h, true, false},
