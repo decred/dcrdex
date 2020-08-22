@@ -169,6 +169,10 @@ func SetLogger(logger dex.Logger) {
 // New is the constructor for an RPCServer.
 func New(cfg *Config) (*RPCServer, error) {
 
+	if cfg.Pass == "" {
+		return nil, fmt.Errorf("missing RPC password")
+	}
+
 	// Find or create the key pair.
 	keyExists := fileExists(cfg.Key)
 	certExists := fileExists(cfg.Cert)
@@ -211,12 +215,10 @@ func New(cfg *Config) (*RPCServer, error) {
 	}
 
 	// Create authSHA to verify requests against.
-	if cfg.User != "" && cfg.Pass != "" {
-		login := cfg.User + ":" + cfg.Pass
-		auth := "Basic " +
-			base64.StdEncoding.EncodeToString([]byte(login))
-		s.authSHA = sha256.Sum256([]byte(auth))
-	}
+	login := cfg.User + ":" + cfg.Pass
+	auth := "Basic " +
+		base64.StdEncoding.EncodeToString([]byte(login))
+	s.authSHA = sha256.Sum256([]byte(auth))
 
 	// Middleware
 	mux.Use(middleware.Recoverer)
