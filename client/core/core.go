@@ -1270,8 +1270,9 @@ func (c *Core) AutoWalletConfig(assetID uint32) (map[string]string, error) {
 		return nil, fmt.Errorf("asset.Info error: %w", err)
 	}
 	settings, err := config.Parse(winfo.DefaultConfigPath)
+	log.Infof("%d %s configuration settings loaded from file at default location %s", len(settings), unbip(assetID), winfo.DefaultConfigPath)
 	if err != nil {
-		log.Debug("config.Parse could not load settings from default path")
+		log.Debugf("config.Parse could not load settings from default path: %v", err)
 		return make(map[string]string), nil
 	}
 	return settings, nil
