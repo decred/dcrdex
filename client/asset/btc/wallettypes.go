@@ -114,8 +114,10 @@ type GetWalletInfoResult struct {
 	PriveyKeysEnabled bool   `json:"private_keys_enabled"`
 	// AvoidReuse and Scanning were added in Bitcoin Core 0.19
 	AvoidReuse bool `json:"avoid_reuse"`
-	Scanning   struct {
-		Duration uint32  `json:"duration"`
-		Progress float32 `json:"progress"`
-	} `json:"scanning"`
+	// Scanning is either a struct or boolean false, and since we're not using
+	// it, commenting avoids having to deal with marshaling for now.
+	// Scanning   struct {
+	// 	Duration uint32  `json:"duration"`
+	// 	Progress float32 `json:"progress"`
+	// } `json:"scanning"`
 }
