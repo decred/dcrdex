@@ -1362,9 +1362,10 @@ func TestFindRedemption(t *testing.T) {
 	node.rawTx = contractTx
 
 	// Begin find redemption.
-	findRedemptionResultCh := make(chan asset.FindRedemptionResult)
-	go wallet.FindRedemption([]dex.Bytes{coinID}, findRedemptionResultCh)
-
+	findRedemptionResultCh, err := wallet.FindRedemption(coinID)
+	if err != nil {
+		t.Errorf("unexpected FindRedemption error: %v", err)
+	}
 	// Expect to NOT find redemption yet.
 	select {
 	case frr := <-findRedemptionResultCh:
@@ -1402,7 +1403,10 @@ func TestFindRedemption(t *testing.T) {
 
 	// Expect FindRedemption to error because of bad input sig.
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(randBytes(100))
-	go wallet.FindRedemption([]dex.Bytes{coinID}, findRedemptionResultCh)
+	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
+	if err != nil {
+		t.Errorf("unexpected FindRedemption error: %v", err)
+	}
 	select {
 	case frr := <-findRedemptionResultCh:
 		if frr.Err == nil {
@@ -1415,19 +1419,17 @@ func TestFindRedemption(t *testing.T) {
 
 	// Expect FindRedemption to error because of wrong script type for contract output
 	contractBlock.RawTx[0].Vout[1].ScriptPubKey.Hex = hex.EncodeToString(otherScript)
-	go wallet.FindRedemption([]dex.Bytes{coinID}, findRedemptionResultCh)
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err == nil {
-			t.Fatalf("no error for wrong script type")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("no error for wrong script type after 2 seconds")
+	_, err = wallet.FindRedemption(coinID)
+	if err == nil {
+		t.Fatalf("no error for wrong script type")
 	}
 	contractBlock.RawTx[0].Vout[1].ScriptPubKey.Hex = hex.EncodeToString(pkScript)
 
 	// Sanity check to make sure it passes again.
-	go wallet.FindRedemption([]dex.Bytes{coinID}, findRedemptionResultCh)
+	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
+	if err != nil {
+		t.Errorf("unexpected FindRedemption error: %v", err)
+	}
 	select {
 	case frr := <-findRedemptionResultCh:
 		if frr.Err != nil {

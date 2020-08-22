@@ -79,26 +79,25 @@ type trackedTrade struct {
 	order.Order
 	// mtx protects all read-write fields of the trackedTrade and the
 	// matchTrackers in the matches map.
-	mtx                 sync.RWMutex
-	metaData            *db.OrderMetaData
-	dc                  *dexConnection
-	db                  db.DB
-	latencyQ            *wait.TickerQueue
-	wallets             *walletSet
-	preImg              order.Preimage
-	mktID               string
-	coins               map[string]asset.Coin
-	lockTimeTaker       time.Duration
-	lockTimeMaker       time.Duration
-	change              asset.Coin
-	changeLocked        bool
-	cancel              *trackedCancel
-	matches             map[order.MatchID]*matchTracker
-	findRedemptionQueue map[string]*matchTracker
-	redemptionChan      chan asset.FindRedemptionResult
-	notify              func(Notification)
-	epochLen            uint64
-	fromAssetID         uint32
+	mtx                sync.RWMutex
+	metaData           *db.OrderMetaData
+	dc                 *dexConnection
+	db                 db.DB
+	latencyQ           *wait.TickerQueue
+	wallets            *walletSet
+	preImg             order.Preimage
+	mktID              string
+	coins              map[string]asset.Coin
+	lockTimeTaker      time.Duration
+	lockTimeMaker      time.Duration
+	change             asset.Coin
+	changeLocked       bool
+	cancel             *trackedCancel
+	matches            map[order.MatchID]*matchTracker
+	awaitingRedemption map[string]order.MatchID
+	notify             func(Notification)
+	epochLen           uint64
+	fromAssetID        uint32
 }
 
 // newTrackedTrade is a constructor for a trackedTrade.
@@ -113,25 +112,22 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 
 	ord := dbOrder.Order
 	t := &trackedTrade{
-		Order:               ord,
-		metaData:            dbOrder.MetaData,
-		dc:                  dc,
-		db:                  db,
-		latencyQ:            latencyQ,
-		wallets:             wallets,
-		preImg:              preImg,
-		mktID:               marketName(ord.Base(), ord.Quote()),
-		coins:               mapifyCoins(coins),
-		lockTimeTaker:       lockTimeTaker,
-		lockTimeMaker:       lockTimeMaker,
-		matches:             make(map[order.MatchID]*matchTracker),
-		findRedemptionQueue: make(map[string]*matchTracker),
-		redemptionChan:      make(chan asset.FindRedemptionResult),
-		notify:              notify,
-		epochLen:            epochLen,
-		fromAssetID:         fromID,
+		Order:         ord,
+		metaData:      dbOrder.MetaData,
+		dc:            dc,
+		db:            db,
+		latencyQ:      latencyQ,
+		wallets:       wallets,
+		preImg:        preImg,
+		mktID:         marketName(ord.Base(), ord.Quote()),
+		coins:         mapifyCoins(coins),
+		lockTimeTaker: lockTimeTaker,
+		lockTimeMaker: lockTimeMaker,
+		matches:       make(map[order.MatchID]*matchTracker),
+		notify:        notify,
+		epochLen:      epochLen,
+		fromAssetID:   fromID,
 	}
-	go t.waitForRedemptions()
 	return t
 }
 
@@ -709,16 +705,16 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 // we've broadcasted a swap, our swap has gotten the required confs, we've
 // not been notified of Maker's redeem and we've not refunded our swap.
 func (t *trackedTrade) shouldBeginFindRedemption(match *matchTracker) bool {
-	dbMatch, _, proof, _ := match.parts()
+	proof := &match.MetaData.Proof
 	swapCoinID := proof.TakerSwap
-	if match.failErr != nil || dbMatch.Side != order.Taker || len(swapCoinID) == 0 ||
+	if match.failErr != nil || match.Match.Side != order.Taker || len(swapCoinID) == 0 ||
 		len(proof.MakerRedeem) > 0 || len(proof.RefundCoin) > 0 {
 		log.Tracef(
-			"Not finding redemption for match %v: side = %s, failErr = %v, TakerSwap = %v, RefundCoin = %v",
-			match.id, dbMatch.Side, match.failErr, proof.TakerSwap, proof.RefundCoin)
+			"Not finding redemption for match %v: side = %s, failErr = %v, TakerSwap = %v RefundCoin = %v",
+			match.id, match.Match.Side, match.failErr, proof.TakerSwap, proof.RefundCoin)
 		return false
 	}
-	if _, alreadyFinding := t.findRedemptionQueue[swapCoinID.String()]; alreadyFinding {
+	if _, alreadyFinding := t.awaitingRedemption[swapCoinID.String()]; alreadyFinding {
 		return false
 	}
 
@@ -806,7 +802,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 func (t *trackedTrade) tick() (assetMap, error) {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
-	var swaps, findRedemption, redeems, refunds []*matchTracker
+	var swaps, redeems, refunds []*matchTracker
 	assets := make(assetMap)
 	errs := newErrorSet(t.dc.acct.host + " tick: ")
 
@@ -844,7 +840,7 @@ func (t *trackedTrade) tick() (assetMap, error) {
 			quoteReceived += calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
 
 		case t.shouldBeginFindRedemption(match):
-			findRedemption = append(findRedemption, match)
+			t.beginFindRedemption(match)
 
 		case t.isRefundable(match):
 			log.Debugf("Refundable match %v for order %v (%v)", match.id, t.ID(), side)
@@ -898,10 +894,6 @@ func (t *trackedTrade) tick() (assetMap, error) {
 				float64(qty)/conversionFactor, unbip(toAsset), t.token())
 			t.notify(newOrderNote("Match complete", details, db.Poke, corder))
 		}
-	}
-
-	if len(findRedemption) > 0 {
-		t.beginFindRedemption(findRedemption)
 	}
 
 	if len(refunds) > 0 {
@@ -1306,76 +1298,81 @@ func (t *trackedTrade) finalizeRedeemAction(match *matchTracker, coinID []byte) 
 	return errs.ifAny()
 }
 
-func (t *trackedTrade) beginFindRedemption(matches []*matchTracker) {
-	contracts := make([]dex.Bytes, 0, len(matches))
-	for _, match := range matches {
-		swapCoinID := match.MetaData.Proof.TakerSwap
-		contracts = append(contracts, dex.Bytes(swapCoinID))
-		t.findRedemptionQueue[swapCoinID.String()] = match
+func (t *trackedTrade) beginFindRedemption(match *matchTracker) {
+	swapCoinID := dex.Bytes(match.MetaData.Proof.TakerSwap)
+	fromAsset := t.wallets.fromAsset.ID
+	resultChan, err := t.wallets.fromWallet.FindRedemption(swapCoinID)
+	if err != nil {
+		log.Errorf("failed to start redemption search for match %v, %s contract %s: %v",
+			match.id, unbip(fromAsset), coinIDString(fromAsset, swapCoinID), err)
+		return
 	}
-	t.wallets.fromWallet.FindRedemption(contracts, t.redemptionChan)
+	// Redemption search started, start goroutine to monitor result channel.
+	t.awaitingRedemption[swapCoinID.String()] = match.id
+	go t.waitForRedemption(resultChan)
 }
 
-// waitForRedemptions waits on the `redemptionChan` for FindRedemption results.
-// Requires FindRedemption to have been called with coin IDs of unredeemed swaps.
-// This method blocks, should be run as a goroutine.
-func (t *trackedTrade) waitForRedemptions() {
-	for {
-		frr := <-t.redemptionChan
-		fromAsset := t.wallets.fromAsset
-
-		// `match` is a pointer that may be concurrently accessed from the
-		// t.matches map, so keep matchMtx locked until we're done with the
-		// `match` object and the findRedemptionQueue map.
-		t.mtx.Lock()
-
-		match, found := t.findRedemptionQueue[frr.ContractCoinID.String()]
-		delete(t.findRedemptionQueue, frr.ContractCoinID.String())
-		if !found {
-			t.mtx.Unlock()
-			log.Warnf("received find redemption result for unknown contract coin (%s: %s) on order %s",
-				fromAsset.Symbol, coinIDString(fromAsset.ID, frr.ContractCoinID), t.ID())
-			continue
-		}
-
-		if frr.Err != nil {
-			t.mtx.Unlock()
-			log.Errorf("FindRedemption error: coin (%s: %s), order %s, match %s",
-				fromAsset.Symbol, coinIDString(fromAsset.ID, frr.ContractCoinID), t.ID(), match.id)
-			continue
-		}
-
-		if match.Match.Status != order.TakerSwapCast {
-			t.mtx.Unlock()
-			log.Errorf("received find redemption result at wrong step, order %s, match %s, status %s",
-				t.ID(), match.id, match.Match.Status)
-			continue
-		}
-
-		_, _, proof, _ := match.parts()
-		// TODO: Is this validation necessary?
-		if !t.wallets.toWallet.ValidateSecret(frr.Secret, proof.SecretHash) {
-			t.mtx.Unlock()
-			log.Errorf("FindRedemption error: coin (%s: %s), order %s, match %s, invalid secret %s, hash %s",
-				fromAsset.Symbol, coinIDString(fromAsset.ID, frr.ContractCoinID), t.ID(), match.id,
-				frr.Secret, proof.SecretHash)
-			continue
-		}
-
-		log.Infof("Found maker's redemption (%s: %v) and validated secret for order %s, match %s",
-			fromAsset.Symbol, coinIDString(fromAsset.ID, frr.RedemptionCoinID), t.ID(), match.id)
-
-		// Update the match status and set the secret so that Maker's swap
-		// will be redeemed in the next call to trade.tick().
-		match.SetStatus(order.MakerRedeemed)
-		proof.MakerRedeem = []byte(frr.RedemptionCoinID)
-		proof.Secret = frr.Secret
-		err := t.db.UpdateMatch(&match.MetaMatch)
-		if err != nil {
-			log.Errorf("waitForRedemptions: error storing match info in database: %v", err)
-		}
-		t.mtx.Unlock()
+// waitForRedemption waits on the passed `redemptionChan` for FindRedemption
+// results. Should be run as a goroutine.
+func (t *trackedTrade) waitForRedemption(redemptionChan chan *asset.FindRedemptionResult) {
+	frr := <-redemptionChan
+	if frr == nil {
+		return // channel closed without data
 	}
+
+	fromAsset := t.wallets.fromAsset
+	var match *matchTracker
+
+	t.mtx.Lock()
+	orderID, found := t.awaitingRedemption[frr.ContractCoinID.String()]
+	if found {
+		delete(t.awaitingRedemption, frr.ContractCoinID.String())
+		match, found = t.matches[orderID]
+	}
+	if !found {
+		t.mtx.Unlock()
+		log.Warnf("received find redemption result for unknown contract coin (%s: %s) on order %s",
+			fromAsset.Symbol, coinIDString(fromAsset.ID, frr.ContractCoinID), t.ID())
+		return
+	}
+
+	if frr.Err != nil {
+		t.mtx.Unlock()
+		log.Errorf("FindRedemption error: coin (%s: %s), order %s, match %s",
+			fromAsset.Symbol, coinIDString(fromAsset.ID, frr.ContractCoinID), t.ID(), match.id)
+		return
+	}
+
+	if match.Match.Status != order.TakerSwapCast {
+		t.mtx.Unlock()
+		log.Errorf("received find redemption result at wrong step, order %s, match %s, status %s",
+			t.ID(), match.id, match.Match.Status)
+		return
+	}
+
+	_, _, proof, _ := match.parts()
+	// TODO: Is this validation necessary?
+	if !t.wallets.toWallet.ValidateSecret(frr.Secret, proof.SecretHash) {
+		t.mtx.Unlock()
+		log.Errorf("FindRedemption error: coin (%s: %s), order %s, match %s, invalid secret %s, hash %s",
+			fromAsset.Symbol, coinIDString(fromAsset.ID, frr.ContractCoinID), t.ID(), match.id,
+			frr.Secret, proof.SecretHash)
+		return
+	}
+
+	log.Infof("Found maker's redemption (%s: %v) and validated secret for order %s, match %s",
+		fromAsset.Symbol, coinIDString(fromAsset.ID, frr.RedemptionCoinID), t.ID(), match.id)
+
+	// Update the match status and set the secret so that Maker's swap
+	// will be redeemed in the next call to trade.tick().
+	match.SetStatus(order.MakerRedeemed)
+	proof.MakerRedeem = []byte(frr.RedemptionCoinID)
+	proof.Secret = frr.Secret
+	err := t.db.UpdateMatch(&match.MetaMatch)
+	if err != nil {
+		log.Errorf("waitForRedemptions: error storing match info in database: %v", err)
+	}
+	t.mtx.Unlock()
 }
 
 // refundMatches will send refund transactions for the specified matches.
@@ -1421,7 +1418,7 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 				// Could not find the contract coin, which means it has been spent.
 				// We should have already started FindRedemption for this contract,
 				// but let's do it again to ensure we find the secret.
-				t.wallets.fromWallet.FindRedemption([]dex.Bytes{swapCoinID}, t.redemptionChan)
+				t.beginFindRedemption(match)
 			}
 			errs.add("error sending refund tx for match %s, swap coin %s: %v",
 				match.id, swapCoinString, err)

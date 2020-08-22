@@ -103,11 +103,11 @@ type Wallet interface {
 	// lock. For example, in Bitcoin the median of the last 11 blocks must be
 	// past the expiry time, not the current time.
 	LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
-	// FindRedemption attempts to find the inputs that spend the specified coins,
-	// and return the secret key for each contract when it does.
+	// FindRedemption starts a goroutine to attempt finding the inputs that spends
+	// the specified coin, and return the secret key for the contract when it does.
 	// For typical blockchains, every input of every block starting at the
 	// contract block will need to be scanned until a spending input is found.
-	// The result channel is used to notify callers when a secret key is found
+	// The returned channel is used to notify callers when a secret key is found
 	// or if an error occurs during the search.
 	//
 	// NOTE: FindRedemption is necessary to deal with the case of a maker
@@ -118,7 +118,7 @@ type Wallet interface {
 	// the swap is broadcast. Realistically, though, the taker should start
 	// looking for the maker's redemption beginning at swapconf confirmations
 	// regardless of whether the server sends the 'redemption' message or not.
-	FindRedemption(coinIDs []dex.Bytes, resultChan chan FindRedemptionResult)
+	FindRedemption(coinID dex.Bytes) (chan *FindRedemptionResult, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded.
 	// NOTE: The contract cannot be retrieved from the unspent coin info as the
