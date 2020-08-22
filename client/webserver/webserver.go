@@ -72,7 +72,7 @@ type clientCore interface {
 	WalletSettings(uint32) (map[string]string, error)
 	ReconfigureWallet([]byte, uint32, map[string]string) error
 	SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error
-	DefaultWalletConfig(assetID uint32) (map[string]string, error)
+	AutoWalletConfig(assetID uint32) (map[string]string, error)
 	User() *core.User
 	GetFee(url, cert string) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset

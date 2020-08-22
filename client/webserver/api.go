@@ -335,7 +335,7 @@ func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) 
 	if !readPost(w, r, form) {
 		return
 	}
-	cfg, err := s.core.DefaultWalletConfig(form.AssetID)
+	cfg, err := s.core.AutoWalletConfig(form.AssetID)
 	if err != nil {
 		s.writeAPIError(w, "error getting wallet config: %v", err)
 		return

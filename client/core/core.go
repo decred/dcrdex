@@ -1261,10 +1261,10 @@ func (c *Core) SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) err
 	return nil
 }
 
-// DefaultWalletConfig attempts to load setting from a wallet package's
+// AutoWalletConfig attempts to load setting from a wallet package's
 // asset.WalletInfo.DefaultConfigPath. If settings are not found, an empty map
 // is returned.
-func (c *Core) DefaultWalletConfig(assetID uint32) (map[string]string, error) {
+func (c *Core) AutoWalletConfig(assetID uint32) (map[string]string, error) {
 	winfo, err := asset.Info(assetID)
 	if err != nil {
 		return nil, fmt.Errorf("asset.Info error: %w", err)

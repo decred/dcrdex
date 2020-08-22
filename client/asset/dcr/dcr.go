@@ -64,10 +64,9 @@ var (
 	fallbackFeeKey = "fallbackfee"
 	configOpts     = []*asset.ConfigOption{
 		{
-			Key:          "account",
-			DisplayName:  "Account Name",
-			Description:  "dcrwallet account name",
-			DefaultValue: "default",
+			Key:         "account",
+			DisplayName: "Account Name",
+			Description: "dcrwallet account name",
 		},
 		{
 			Key:         "username",

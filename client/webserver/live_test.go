@@ -637,13 +637,10 @@ func (c *TCore) User() *core.User {
 	return user
 }
 
-func (c *TCore) DefaultWalletConfig(assetID uint32) (map[string]string, error) {
+func (c *TCore) AutoWalletConfig(assetID uint32) (map[string]string, error) {
 	return map[string]string{
-		"account":   "default",
-		"username":  "tacotime",
-		"password":  "abc123",
-		"rpclisten": "localhost:9109",
-		"rpccert":   "/home/you/.dcrwallet/rpc.cert",
+		"username": "tacotime",
+		"password": "abc123",
 	}, nil
 }
 

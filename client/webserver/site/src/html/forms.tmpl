@@ -4,16 +4,29 @@
   <div data-tmpl="fileSelector" class="d-inline-block hoverbg pointer fs14"><span class="ico-textfile mr-1"></span> load from file</div>
   <input data-tmpl="fileInput" type="file" class="form-control select d-none">
 </div>
-<div data-tmpl="dynamicOpts" class="d-flex align-items-stretch justify-content-between flex-wrap dynamicopts">
-  <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end">
-    <label class="pl-1 mb-1 small"> <span class="ico-info"></span></label>
-    <input type="text" class="form-control select">
+<div data-tmpl="allSettings">
+  <div data-tmpl="dynamicOpts" class="dynamicopts">
+    <div data-tmpl="textInput" class="px-0 d-flex flex-column justify-content-end">
+      <label class="pl-1 mb-1 small"> <span class="ico-info"></span></label>
+      <input type="text" class="form-control select">
+    </div>
+    <div data-tmpl="checkbox" class="pl-4 d-flex align-items-center justify-content-center">
+      <div>
+        <input class="form-check-input" type="checkbox" value="">
+        <label class="form-check-label fs14"> <span class="ico-info fs13"></span></label>
+      </div>
+    </div>
   </div>
-  <div data-tmpl="checkbox" class="pl-4 d-flex align-items-center justify-content-center">
-    <div>
-      <input class="form-check-input" type="checkbox" value="">
-      <label class="form-check-label fs14"> <span class="ico-info fs13"></span></label>
-    </div>        
+  <div data-tmpl="showOther" class="d-hide mt-3 mb-1 pointer d-flex align-items-center justify-content-start">
+    <span data-tmpl="showIcon" class="ico-plus fs8 pl-1"></span>
+    <span data-tmpl="hideIcon" class="ico-minus fs8 pl-1"></span>
+    <span data-tmpl="showHideMsg" class="d-inline-block pl-1 pb-1"></span>
+  </div>
+  <div data-tmpl="otherSettings" class="d-hide">
+    <div data-tmpl="loadedSettingsMsg" class="fs15 pt-3 pb-1 pl-1">&mdash; loaded from file &mdash;</div>
+    <div data-tmpl="loadedSettings" class="dynamicopts"></div>
+    <div data-tmpl="defaultSettingsMsg" class="fs15 pt-3 pb-1 pl-1">&mdash; defaults &mdash;</div>
+    <div data-tmpl="defaultSettings" class="dynamicopts"></div>
   </div>
 </div>
 <div data-tmpl="errMsg" class="fs15 pt-3 text-center d-hide errcolor"></div>

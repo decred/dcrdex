@@ -42,9 +42,10 @@ var (
 			NoEcho:      true,
 		},
 		{
-			Key:         "rpcbind",
-			DisplayName: "JSON-RPC Address",
-			Description: "<addr> or <addr>:<port> (default 'localhost')",
+			Key:          "rpcbind",
+			DisplayName:  "JSON-RPC Address",
+			Description:  "<addr> or <addr>:<port> (default 'localhost')",
+			DefaultValue: "127.0.0.1",
 		},
 		{
 			Key:          "rpcport",

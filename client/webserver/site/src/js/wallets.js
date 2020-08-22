@@ -82,7 +82,7 @@ export default class WalletsPage extends BasePage {
     this.walletForm = new NewWalletForm(app, page.walletForm, () => { this.createWalletSuccess() })
 
     // Bind the wallet reconfig form.
-    this.walletReconfig = new WalletConfigForm(app, page.reconfigInputs)
+    this.walletReconfig = new WalletConfigForm(app, page.reconfigInputs, false)
 
     // Bind the wallet unlock form.
     bindOpenWallet(app, page.openForm, () => { this.openWalletSuccess() })
