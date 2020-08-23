@@ -332,6 +332,11 @@ hr.dashed {
 }
 
 .dynamicopts {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  flex-wrap: wrap;
+
   & > div {
     min-height: 55px;
     margin-top: 10px;

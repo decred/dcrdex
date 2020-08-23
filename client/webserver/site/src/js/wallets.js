@@ -82,7 +82,7 @@ export default class WalletsPage extends BasePage {
     this.walletForm = new NewWalletForm(app, page.walletForm, () => { this.createWalletSuccess() })
 
     // Bind the wallet reconfig form.
-    this.walletReconfig = new WalletConfigForm(app, page.reconfigInputs)
+    this.walletReconfig = new WalletConfigForm(app, page.reconfigInputs, false)
 
     // Bind the wallet unlock form.
     bindOpenWallet(app, page.openForm, () => { this.openWalletSuccess() })
@@ -211,6 +211,7 @@ export default class WalletsPage extends BasePage {
     this.walletAsset = assetID
     this.walletForm.setAsset(asset)
     this.animation = this.showBox(box)
+    await this.walletForm.loadDefaults()
   }
 
   /* Show the form used to unlock a wallet. */

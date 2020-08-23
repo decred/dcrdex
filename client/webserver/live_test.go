@@ -637,6 +637,13 @@ func (c *TCore) User() *core.User {
 	return user
 }
 
+func (c *TCore) AutoWalletConfig(assetID uint32) (map[string]string, error) {
+	return map[string]string{
+		"username": "tacotime",
+		"password": "abc123",
+	}, nil
+}
+
 func (c *TCore) SupportedAssets() map[uint32]*core.SupportedAsset {
 	c.mtx.RLock()
 	defer c.mtx.RUnlock()
@@ -750,7 +757,7 @@ func TestServer(t *testing.T) {
 	numSells = 10
 	feedPeriod = 2000 * time.Millisecond
 	initialize := false
-	register := true
+	register := false
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 

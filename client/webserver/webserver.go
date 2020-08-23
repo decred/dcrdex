@@ -72,6 +72,7 @@ type clientCore interface {
 	WalletSettings(uint32) (map[string]string, error)
 	ReconfigureWallet([]byte, uint32, map[string]string) error
 	SetWalletPassword(appPW []byte, assetID uint32, newPW []byte) error
+	AutoWalletConfig(assetID uint32) (map[string]string, error)
 	User() *core.User
 	GetFee(url, cert string) (uint64, error)
 	SupportedAssets() map[uint32]*core.SupportedAsset
@@ -232,6 +233,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		r.Post("/reconfigurewallet", s.apiReconfig)
 		r.Post("/walletsettings", s.apiWalletSettings)
 		r.Post("/setwalletpass", s.apiSetWalletPass)
+		r.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 	})
 
 	// Files

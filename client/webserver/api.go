@@ -326,6 +326,29 @@ func (s *WebServer) apiSetWalletPass(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, simpleAck(), s.indent)
 }
 
+// apiDefaultWalletCfg attempts to load configuration settings from the
+// asset's default path on the server.
+func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) {
+	form := &struct {
+		AssetID uint32 `json:"assetID"`
+	}{}
+	if !readPost(w, r, form) {
+		return
+	}
+	cfg, err := s.core.AutoWalletConfig(form.AssetID)
+	if err != nil {
+		s.writeAPIError(w, "error getting wallet config: %v", err)
+		return
+	}
+	writeJSON(w, struct {
+		OK     bool              `json:"ok"`
+		Config map[string]string `json:"config"`
+	}{
+		OK:     true,
+		Config: cfg,
+	}, s.indent)
+}
+
 // apiReconfig sets new configuration details for the wallet.
 func (s *WebServer) apiReconfig(w http.ResponseWriter, r *http.Request) {
 	form := &struct {
