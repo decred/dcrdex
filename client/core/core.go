@@ -3337,6 +3337,9 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 		}
 	}
 	c.connMtx.RUnlock()
+	// Ensure we always at least update this asset's balance regardless of trade
+	// status changes.
+	counts[assetID]++
 	c.updateBalances(counts)
 }
 
