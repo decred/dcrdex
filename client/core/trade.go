@@ -1105,7 +1105,8 @@ func (t *trackedTrade) finalizeSwapAction(match *matchTracker, coinID, contract 
 	// penalized).
 	timeout := t.broadcastTimeout()
 	if err := t.dc.signAndRequest(init, msgjson.InitRoute, ack, timeout); err != nil {
-		errs.add("error sending 'init' message for match %s: %v", match.id, err)
+		return fmt.Errorf("error sending 'init' message for match %s: %v", match.id, err)
+		// Do not continue to update match status if the init was not sent.
 	} else if err := t.dc.acct.checkSig(init.Serialize(), ack.Sig); err != nil {
 		errs.add("'init' ack signature error for match %s: %v", match.id, err)
 	}
@@ -1200,7 +1201,8 @@ func (t *trackedTrade) finalizeRedeemAction(match *matchTracker, coinID []byte) 
 	// that long for a response.
 	timeout := t.broadcastTimeout()
 	if err := t.dc.signAndRequest(msgRedeem, msgjson.RedeemRoute, ack, timeout); err != nil {
-		errs.add("error sending 'redeem' message for match %s: %v", match.id, err)
+		return fmt.Errorf("error sending 'redeem' message for match %s: %v", match.id, err)
+		// Do not continue to update match status if the redeem was not sent.
 	} else if err := t.dc.acct.checkSig(msgRedeem.Serialize(), ack.Sig); err != nil {
 		errs.add("'redeem' ack signature error for match %s: %v", match.id, err)
 	}
