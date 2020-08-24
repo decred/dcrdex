@@ -34,6 +34,12 @@ cat > "./markets.json" <<EOF
             "quote": "BTC_simnet",
             "epochDuration": 15000,
             "marketBuyBuffer": 1.2
+        },
+        {
+            "base": "DCR_simnet",
+            "quote": "LTC_simnet",
+            "epochDuration": 15000,
+            "marketBuyBuffer": 1.2
         }
     ],
     "assets": {
@@ -54,6 +60,15 @@ cat > "./markets.json" <<EOF
             "maxFeeRate": 100,
             "swapConf": 1,
             "configPath": "${TEST_ROOT}/btc/harness-ctl/alpha.conf"
+        },
+        "LTC_simnet": {
+            "bip44symbol": "ltc",
+            "network": "simnet",
+            "lotSize": 1000000,
+            "rateStep": 1000000,
+            "maxFeeRate": 20,
+            "swapConf": 2,
+            "configPath": "${TEST_ROOT}/ltc/harness-ctl/alpha.conf"
         }
     }
 }

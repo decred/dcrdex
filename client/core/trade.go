@@ -567,7 +567,7 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 				match.id, t.UID(), coin)
 			return false
 		}
-		assetCfg := t.wallets.fromAsset
+		assetCfg := t.wallets.toAsset
 		ok := confs >= assetCfg.SwapConf
 		if !ok {
 			log.Debugf("Match %v not yet swappable: current confs = %d, required confs = %d",
