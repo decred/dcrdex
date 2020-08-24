@@ -3038,8 +3038,9 @@ func TestReadConnectMatches(t *testing.T) {
 	// Store a match
 	knownID := ordertest.RandomMatchID()
 	knownMatch := &matchTracker{
-		id:        knownID,
-		MetaMatch: metaMatch,
+		id:              knownID,
+		MetaMatch:       metaMatch,
+		counterConfirms: -1,
 	}
 	tracker.matches[knownID] = knownMatch
 	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: knownID[:]}
@@ -3354,10 +3355,10 @@ func TestLogout(t *testing.T) {
 				Side:    order.Maker,
 			},
 		},
-		prefix:         ord.Prefix(),
-		trade:          ord.Trade(),
-		contractExpiry: time.Now().Add(time.Hour).UTC(),
-		id:             mid,
+		prefix:          ord.Prefix(),
+		trade:           ord.Trade(),
+		counterConfirms: -1,
+		id:              mid,
 	}
 	// Active orders with matches error.
 	ensureErr("active orders matches")
@@ -3662,6 +3663,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 			MetaData: &db.MatchMetaData{},
 			Match:    &order.UserMatch{}, // Default status = NewlyMatched
 		},
+		counterConfirms: -1,
 	}
 	swappedTracker.matches[mid] = match
 	_ = rig.dc.resume(tDcrBtcMktName)
