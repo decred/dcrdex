@@ -110,6 +110,7 @@ type Match struct {
 	Rate    uint64            `json:"rate"`
 	Qty     uint64            `json:"qty"`
 	Side    order.MatchSide   `json:"side"`
+	FeeRate uint64            `json:"feeRate"`
 }
 
 // Order is core's general type for an order. An order may be a market, limit,
@@ -129,9 +130,16 @@ type Order struct {
 	Matches     []*Match          `json:"matches"`
 	Cancelling  bool              `json:"cancelling"`
 	Canceled    bool              `json:"canceled"`
+	FeesPaid    *FeeBreakdown     `json:"feesPaid"`
 	Rate        uint64            `json:"rate"`               // limit only
 	TimeInForce order.TimeInForce `json:"tif"`                // limit only
 	TargetID    string            `json:"targetID,omitempty"` // cancel only
+}
+
+// FeeBreakdown is categorized fee information.
+type FeeBreakdown struct {
+	Swap       uint64 `json:"swap"`
+	Redemption uint64 `json:"redemption"`
 }
 
 // Market is market info.

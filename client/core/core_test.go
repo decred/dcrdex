@@ -62,15 +62,17 @@ var (
 		RateStep:     10,
 		SwapConf:     1,
 	}
-	tDexPriv         *secp256k1.PrivateKey
-	tDexKey          *secp256k1.PublicKey
-	tPW                     = []byte("dexpw")
-	wPW                     = "walletpw"
-	tDexHost                = "somedex.tld"
-	tDcrBtcMktName          = "dcr_btc"
-	tErr                    = fmt.Errorf("test error")
-	tFee             uint64 = 1e8
-	tUnparseableHost        = string([]byte{0x7f})
+	tDexPriv            *secp256k1.PrivateKey
+	tDexKey             *secp256k1.PublicKey
+	tPW                        = []byte("dexpw")
+	wPW                        = "walletpw"
+	tDexHost                   = "somedex.tld"
+	tDcrBtcMktName             = "dcr_btc"
+	tErr                       = fmt.Errorf("test error")
+	tFee                uint64 = 1e8
+	tUnparseableHost           = string([]byte{0x7f})
+	tSwapFeesPaid       uint64 = 500
+	tRedemptionFeesPaid uint64 = 350
 )
 
 type tMsg = *msgjson.Message
@@ -311,7 +313,7 @@ func (tdb *TDB) MarketOrders(dex string, base, quote uint32, n int, since uint64
 	return nil, nil
 }
 
-func (tdb *TDB) SetChangeCoin(order.OrderID, order.CoinID) error {
+func (tdb *TDB) UpdateOrderMetaData(order.OrderID, *db.OrderMetaData) error {
 	return nil
 }
 
@@ -556,13 +558,13 @@ func (w *TXCWallet) FundingCoins([]dex.Bytes) (asset.Coins, error) {
 	return w.fundingCoins, w.fundingCoinErr
 }
 
-func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
+func (w *TXCWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	w.lastSwaps = swaps
-	return w.swapReceipts, w.changeCoin, nil
+	return w.swapReceipts, w.changeCoin, tSwapFeesPaid, nil
 }
 
-func (w *TXCWallet) Redeem([]*asset.Redemption) ([]dex.Bytes, asset.Coin, error) {
-	return w.redeemCoins, &tCoin{id: []byte{0x0c, 0x0d}}, nil
+func (w *TXCWallet) Redeem([]*asset.Redemption) ([]dex.Bytes, asset.Coin, uint64, error) {
+	return w.redeemCoins, &tCoin{id: []byte{0x0c, 0x0d}}, tRedemptionFeesPaid, nil
 }
 
 func (w *TXCWallet) SignMessage(asset.Coin, dex.Bytes) (pubkeys, sigs []dex.Bytes, err error) {
@@ -2436,6 +2438,15 @@ func TestTradeTracking(t *testing.T) {
 	checkStatus("maker match complete", order.MatchComplete)
 	if !bytes.Equal(redemptionCoin, proof.TakerRedeem) {
 		t.Fatalf("taker redemption coin not recorded")
+	}
+
+	// Check that fees were incremented appropriately.
+	if tracker.metaData.SwapFeesPaid != tSwapFeesPaid {
+		t.Fatalf("wrong fees recorded for swap. expected %d, got %d", tSwapFeesPaid, tracker.metaData.SwapFeesPaid)
+	}
+	// Check that fees were incremented appropriately.
+	if tracker.metaData.RedemptionFeesPaid != tRedemptionFeesPaid {
+		t.Fatalf("wrong fees recorded for redemption. expected %d, got %d", tRedemptionFeesPaid, tracker.metaData.SwapFeesPaid)
 	}
 
 	// TAKER MATCH

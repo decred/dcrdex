@@ -258,7 +258,7 @@ func runTest(t *testing.T, splitTx bool) {
 		FeeRate:   tDCR.MaxFeeRate,
 	}
 
-	receipts, _, err := rig.beta().Swap(swaps)
+	receipts, _, _, err := rig.beta().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -324,7 +324,7 @@ func runTest(t *testing.T, splitTx bool) {
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	_, _, err = rig.alpha().Redeem(redemptions)
+	_, _, _, err = rig.alpha().Redeem(redemptions)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
@@ -381,7 +381,7 @@ func runTest(t *testing.T, splitTx bool) {
 		FeeRate:   tDCR.MaxFeeRate,
 	}
 
-	receipts, _, err = rig.beta().Swap(swaps)
+	receipts, _, _, err = rig.beta().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}

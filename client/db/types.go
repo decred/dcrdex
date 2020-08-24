@@ -183,6 +183,11 @@ type OrderMetaData struct {
 	// LinkedOrder is used to specify the cancellation order for a trade, or
 	// vice-versa.
 	LinkedOrder order.OrderID
+	// SwapFeesPaid is the sum of the actual fees paid for all swaps.
+	SwapFeesPaid uint64
+	// RedemptionFeesPaid is the sum of the actual fees paid for all
+	// redemptions.
+	RedemptionFeesPaid uint64
 }
 
 // MetaMatch is the match and its metadata.

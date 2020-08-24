@@ -181,6 +181,10 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 		Cancelling:  cancelling,
 		Canceled:    canceled,
 		TimeInForce: tif,
+		FeesPaid: &FeeBreakdown{
+			Swap:       t.metaData.SwapFeesPaid,
+			Redemption: t.metaData.RedemptionFeesPaid,
+		},
 	}
 	for _, match := range t.matches {
 		dbMatch := match.Match
@@ -190,6 +194,7 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 			Rate:    dbMatch.Rate,
 			Qty:     dbMatch.Quantity,
 			Side:    dbMatch.Side,
+			FeeRate: dbMatch.FeeRateSwap,
 		})
 	}
 	var cancelOrder *Order
@@ -1073,7 +1078,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		FeeRate:    highestFeeRate,
 		LockChange: t.changeLocked,
 	}
-	receipts, change, err := t.wallets.fromWallet.Swap(swaps)
+	receipts, change, fees, err := t.wallets.fromWallet.Swap(swaps)
 	if err != nil {
 		// Set the error on the matches.
 		for _, match := range matches {
@@ -1085,6 +1090,8 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts: %v",
 		len(receipts), t.ID(), swaps.FeeRate, receipts)
 
+	t.metaData.SwapFeesPaid += fees
+
 	if change == nil {
 		t.metaData.ChangeCoin = nil
 	} else {
@@ -1094,7 +1101,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	t.change = change
 	log.Debugf("Saving change coin %v (%v) to DB for order %v",
 		coinIDString(fromAsset.ID, t.metaData.ChangeCoin), fromAsset.Symbol, t.ID())
-	t.db.SetChangeCoin(t.ID(), t.metaData.ChangeCoin)
+	t.db.UpdateOrderMetaData(t.ID(), t.metaData)
 
 	// Process the swap for each match by sending the `init` request
 	// to the DEX and updating the match with swap details.
@@ -1188,7 +1195,7 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 
 	// Send the transaction.
 	redeemWallet, redeemAsset := t.wallets.toWallet, t.wallets.toAsset // this is our redeem
-	coinIDs, outCoin, err := redeemWallet.Redeem(redemptions)
+	coinIDs, outCoin, fees, err := redeemWallet.Redeem(redemptions)
 	// If an error was encountered, fail all of the matches. A failed match will
 	// not run again on during ticks.
 	if err != nil {
@@ -1200,6 +1207,13 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 
 	log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s:%s",
 		len(redemptions), t.ID(), redeemAsset.Symbol, outCoin)
+
+	t.metaData.RedemptionFeesPaid += fees
+
+	err = t.db.UpdateOrderMetaData(t.ID(), t.metaData)
+	if err != nil {
+		log.Errorf("error updating order metadata for order %s: %w", t.ID(), err)
+	}
 
 	for _, match := range matches {
 		log.Infof("Match %s complete: %s %d %s", match.id,

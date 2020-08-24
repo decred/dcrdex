@@ -76,6 +76,8 @@ var (
 	stampKey               = []byte("stamp")
 	severityKey            = []byte("severity")
 	ackKey                 = []byte("ack")
+	swapFeesKey            = []byte("swapFees")
+	redemptionFeesKey      = []byte("redeemFees")
 	byteTrue               = encode.ByteTrue
 	byteFalse              = encode.ByteFalse
 	byteEpoch              = uint16Bytes(uint16(order.OrderStatusEpoch))
@@ -414,6 +416,8 @@ func (db *BoltDB) UpdateOrder(m *dexdb.MetaOrder) error {
 			put(changeKey, md.ChangeCoin).
 			put(linkedKey, linkedB).
 			put(orderKey, order.EncodeOrder(ord)).
+			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
+			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
 			err()
 	})
 }
@@ -569,25 +573,40 @@ func decodeOrderBucket(oid []byte, oBkt *bbolt.Bucket) (*dexdb.MetaOrder, error)
 
 	return &dexdb.MetaOrder{
 		MetaData: &dexdb.OrderMetaData{
-			Proof:       *proof,
-			Status:      order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
-			Host:        string(getCopy(oBkt, dexKey)),
-			ChangeCoin:  getCopy(oBkt, changeKey),
-			LinkedOrder: linkedID,
+			Proof:              *proof,
+			Status:             order.OrderStatus(intCoder.Uint16(oBkt.Get(statusKey))),
+			Host:               string(getCopy(oBkt, dexKey)),
+			ChangeCoin:         getCopy(oBkt, changeKey),
+			LinkedOrder:        linkedID,
+			SwapFeesPaid:       intCoder.Uint64(oBkt.Get(swapFeesKey)),
+			RedemptionFeesPaid: intCoder.Uint64(oBkt.Get(redemptionFeesKey)),
 		},
 		Order: ord,
 	}, nil
 }
 
-// SetChangeCoin sets the current change coin on an order. Change coins are
-// chained for matches, so only the last change coin needs to be saved.
-func (db *BoltDB) SetChangeCoin(oid order.OrderID, changeCoin order.CoinID) error {
+// UpdateOrderMetaData updates the order metadata, not including the Host.
+func (db *BoltDB) UpdateOrderMetaData(oid order.OrderID, md *db.OrderMetaData) error {
 	return db.ordersUpdate(func(master *bbolt.Bucket) error {
 		oBkt := master.Bucket(oid[:])
 		if oBkt == nil {
-			return fmt.Errorf("SetChangeCoin - order %s not found", oid)
+			return fmt.Errorf("UpdateOrderMetaData - order %s not found", oid)
 		}
-		return oBkt.Put(changeKey, changeCoin)
+
+		var linkedB []byte
+		if !md.LinkedOrder.IsZero() {
+			linkedB = md.LinkedOrder[:]
+		}
+
+		return newBucketPutter(oBkt).
+			put(statusKey, uint16Bytes(uint16(md.Status))).
+			put(updateTimeKey, uint64Bytes(timeNow())).
+			put(proofKey, md.Proof.Encode()).
+			put(changeKey, md.ChangeCoin).
+			put(linkedKey, linkedB).
+			put(swapFeesKey, uint64Bytes(md.SwapFeesPaid)).
+			put(redemptionFeesKey, uint64Bytes(md.RedemptionFeesPaid)).
+			err()
 	})
 }
 
