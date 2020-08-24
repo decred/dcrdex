@@ -46,6 +46,7 @@ func userMatches(ctx context.Context, dbe *sql.DB, tableName string, aid account
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var ms []*db.MatchData
 	for rows.Next() {

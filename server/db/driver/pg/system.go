@@ -97,13 +97,9 @@ func namespacedTableExists(db *sql.DB, schema, tableName string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	defer rows.Close()
 
-	defer func() {
-		if e := rows.Close(); e != nil {
-			log.Errorf("Close of Query failed: %v", e)
-		}
-	}()
-	return rows.Next(), nil
+	return rows.Next(), rows.Err()
 }
 
 // tableExists checks if the specified table exists.
@@ -113,13 +109,9 @@ func tableExists(db *sql.DB, tableName string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	defer rows.Close()
 
-	defer func() {
-		if e := rows.Close(); e != nil {
-			log.Errorf("Close of Query failed: %v", e)
-		}
-	}()
-	return rows.Next(), nil
+	return rows.Next(), rows.Err()
 }
 
 // schemaExists checks if the specified schema exists.
@@ -129,13 +121,9 @@ func schemaExists(db *sql.DB, tableName string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	defer rows.Close()
 
-	defer func() {
-		if e := rows.Close(); e != nil {
-			log.Errorf("Close of Query failed: %v", e)
-		}
-	}()
-	return rows.Next(), nil
+	return rows.Next(), rows.Err()
 }
 
 // createTable creates a table with the given name using the provided SQL

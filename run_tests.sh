@@ -53,4 +53,6 @@ golangci-lint run --disable-all --deadline=10m \
   --enable=unconvert \
   --enable=structcheck \
   --enable=ineffassign \
-  --enable=asciicheck
+  --enable=asciicheck \
+  --enable=rowserrcheck \
+  --enable=sqlclosecheck

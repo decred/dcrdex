@@ -240,6 +240,7 @@ func (a *Archiver) FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []or
 		fail()
 		return
 	}
+	defer rows.Close()
 
 	var cos []*order.CancelOrder
 	for rows.Next() {
@@ -247,7 +248,6 @@ func (a *Archiver) FlushBook(base, quote uint32) (sellsRemoved, buysRemoved []or
 		var sell bool
 		var aid account.AccountID
 		if err = rows.Scan(&oid, &sell, &aid); err != nil {
-			rows.Close()
 			fail()
 			return
 		}
@@ -713,6 +713,7 @@ func completedUserOrders(ctx context.Context, dbe *sql.DB, tableName string, aid
 	if err != nil {
 		return
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var oid order.OrderID
@@ -1035,6 +1036,7 @@ func (a *Archiver) executedCancelsForUser(ctx context.Context, dbe *sql.DB, stmt
 	if err != nil {
 		return
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var oid, target order.OrderID
@@ -1061,6 +1063,7 @@ func (a *Archiver) revokeGeneratedCancelsForUser(ctx context.Context, dbe *sql.D
 	if err != nil {
 		return
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var oid, target order.OrderID
@@ -1229,6 +1232,7 @@ func ordersByStatusFromTable(ctx context.Context, dbe *sql.DB, fullTable string,
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	var orders []order.Order
 
@@ -1284,6 +1288,7 @@ func userOrdersFromTable(ctx context.Context, dbe *sql.DB, fullTable string, bas
 	if err != nil {
 		return nil, nil, err
 	}
+	defer rows.Close()
 
 	var orders []order.Order
 	var statuses []pgOrderStatus
