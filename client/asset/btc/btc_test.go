@@ -44,7 +44,7 @@ var (
 		SwapConf:     1,
 	}
 	optimalFeeRate uint64 = 24
-	tErr                  = fmt.Errorf("test error")
+	tErr                  = fmt.Errorf("expected test error")
 	tTxID                 = "308e9a3675fc3ea3862b7863eeead08c621dcc37ff59de597dd3cdab41450ad9"
 	tTxHash        *chainhash.Hash
 	tP2PKHAddr     = "1Bggq7Vu5oaoLFV1NNp5KhAzcku83qQhgi"
@@ -147,15 +147,6 @@ func (c *tRPCClient) EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSm
 		Blocks:  2,
 		FeeRate: &optimalRate,
 	}, nil
-}
-
-func (c *tRPCClient) SendRawTransaction(tx *wire.MsgTx, _ bool) (*chainhash.Hash, error) {
-	c.sentRawTx = tx
-	if c.sendErr == nil && c.sendHash == nil {
-		h := tx.TxHash()
-		return &h, nil
-	}
-	return c.sendHash, c.sendErr
 }
 
 func (c *tRPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error) {
@@ -275,6 +266,21 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 		if string(params[0]) == "false" {
 			c.lockedCoins = coins
 		}
+	case methodSendRawTx:
+		var txid string
+		_ = json.Unmarshal(params[0], &txid)
+		tx, err := msgTxFromHex(txid)
+		if err != nil {
+			return nil, fmt.Errorf("invalid tx: %w", err)
+		}
+		c.sentRawTx = tx
+		var b json.RawMessage
+		if c.sendHash == nil {
+			b, _ = json.Marshal(tx.TxHash().String())
+		} else {
+			b, _ = json.Marshal(c.sendHash.String())
+		}
+		return b, c.sendErr
 	}
 	return c.rawRes[method], c.rawErr[method]
 }

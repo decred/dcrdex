@@ -39,6 +39,7 @@ const (
 	// rpcclient.Client's GetBlockVerboseTx appears to be busted.
 	methodGetBlockVerboseTx = "getblock"
 	methodGetNetworkInfo    = "getnetworkinfo"
+	methodSendRawTx         = "sendrawtransaction"
 	// BipID is the BIP-0044 asset ID.
 	BipID = 0
 
@@ -50,8 +51,9 @@ const (
 	// redeem transaction.
 	defaultRedeemConfTarget = 2
 
-	minNetworkVersion  = 190000
-	minProtocolVersion = 70015
+	minNetworkVersion      = 190000
+	minProtocolVersion     = 70015
+	newSendrawtxNetVersion = 190000
 
 	// splitTxBaggage is the total number of additional bytes associated with
 	// using a split transaction to fund a swap.
@@ -129,13 +131,34 @@ var (
 // rpcclient.Client. A stub can be used for testing.
 type rpcClient interface {
 	EstimateSmartFee(confTarget int64, mode *btcjson.EstimateSmartFeeMode) (*btcjson.EstimateSmartFeeResult, error)
-	SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error)
 	GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool) (*btcjson.GetTxOutResult, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
 	GetBestBlockHash() (*chainhash.Hash, error)
 	GetRawMempool() ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*btcjson.TxRawResult, error)
 	RawRequest(method string, params []json.RawMessage) (json.RawMessage, error)
+}
+
+// call marshals parmeters and send requests to the RPC server via
+// rpcclient.RawRequest. If thing is non-nil, the result will be unmarshaled
+// into thing.
+func call(client rpcClient, method string, args anylist, thing interface{}) error {
+	params := make([]json.RawMessage, 0, len(args))
+	for i := range args {
+		p, err := json.Marshal(args[i])
+		if err != nil {
+			return err
+		}
+		params = append(params, p)
+	}
+	b, err := client.RawRequest(method, params)
+	if err != nil {
+		return fmt.Errorf("rawrequest error: %v", err)
+	}
+	if thing != nil {
+		return json.Unmarshal(b, thing)
+	}
+	return nil
 }
 
 // BTCCloneCFG holds clone specific parameters.
@@ -340,20 +363,21 @@ func init() {
 // client app communicates with the BTC blockchain and wallet. ExchangeWallet
 // satisfies the dex.Wallet interface.
 type ExchangeWallet struct {
-	client            *rpcclient.Client
-	node              rpcClient
-	wallet            *walletClient
-	walletInfo        *asset.WalletInfo
-	chainParams       *chaincfg.Params
-	log               dex.Logger
-	symbol            string
-	tipChange         func(error)
-	minNetworkVersion uint64
-	fallbackFeeRate   uint64
-	redeemConfTarget  uint64
-	useSplitTx        bool
-	useLegacyBalance  bool
-	segwit            bool
+	client             *rpcclient.Client
+	node               rpcClient
+	wallet             *walletClient
+	walletInfo         *asset.WalletInfo
+	chainParams        *chaincfg.Params
+	log                dex.Logger
+	symbol             string
+	tipChange          func(error)
+	minNetworkVersion  uint64
+	fallbackFeeRate    uint64
+	redeemConfTarget   uint64
+	useSplitTx         bool
+	useLegacyBalance   bool
+	useLegacySendRawTx bool
+	segwit             bool
 
 	tipMtx     sync.RWMutex
 	currentTip *block
@@ -508,6 +532,13 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if codeVer < minProtocolVersion {
 		return nil, fmt.Errorf("node software out of date. version %d is less than minimum %d", codeVer, minProtocolVersion)
 	}
+	if netVer < newSendrawtxNetVersion {
+		btc.log.Debugf("Using legacy sendrawtransaction syntax.")
+		btc.useLegacySendRawTx = true
+	} else {
+		btc.log.Debugf("Using new sendrawtransaction syntax.")
+		btc.useLegacySendRawTx = false
+	}
 	// Initialize the best block.
 	h, err := btc.node.GetBestBlockHash()
 	if err != nil {
@@ -581,6 +612,48 @@ func (btc *ExchangeWallet) legacyBalance() (*asset.Balance, error) {
 		Immature:  toSatoshi(walletInfo.ImmatureBalance),
 		Locked:    locked,
 	}, nil
+}
+
+func msgTxToHex(msgTx *wire.MsgTx) (string, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
+	if err := msgTx.Serialize(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf.Bytes()), nil
+}
+
+// SendRawTransaction broadcasts a transaction. From node version 0.19, the
+// sendrawtransaction RPC changed the allowHighFees boolean argument to a
+// maxFeeRate numeric argument. btcd's rpclient detects which to use depending
+// on the version obtained from getnetworkinfo, however this detection is broken
+// for nodes that report a subversion that is not of the form
+// "/Satoshi:0.20.1/". For example, rpcclient fails to recognize
+// "/LitecoinCore:0.20.1/" as requiring the integer argument. This method will
+// use the correct argument type according to the integer network version (e.g.
+// 200100) detected on ExchangeWallet connection.
+func (btc *ExchangeWallet) SendRawTransaction(msgTx *wire.MsgTx, allowHighFees bool) (*chainhash.Hash, error) {
+	txHexBytes, err := msgTxToHex(msgTx)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tx: %w", err)
+	}
+
+	args := anylist{txHexBytes}
+	if btc.useLegacySendRawTx {
+		// Default is false, but always be explicit with this form
+		args = append(args, allowHighFees)
+	} else if allowHighFees {
+		// maxfeerate of 0 means accept any fee rate. When omitted, a
+		// node-defined default max is used (bitcoind says 0.1).
+		args = append(args, 0.0)
+	}
+
+	var txid string
+	err = call(btc.node, methodSendRawTx, args, &txid)
+	if err != nil {
+		return nil, err
+	}
+
+	return chainhash.NewHashFromStr(txid)
 }
 
 // FeeRate returns the current optimal fee rate in sat / byte.
@@ -1184,7 +1257,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 
 	// Send the transaction.
 	checkHash := msgTx.TxHash()
-	txHash, err := btc.node.SendRawTransaction(msgTx, false)
+	txHash, err := btc.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1729,7 +1802,7 @@ func (btc *ExchangeWallet) Refund(coinID, contract dex.Bytes) (dex.Bytes, error)
 	}
 	// Send it.
 	checkHash := msgTx.TxHash()
-	refundHash, err := btc.node.SendRawTransaction(msgTx, false)
+	refundHash, err := btc.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return nil, fmt.Errorf("SendRawTransaction: %v", err)
 	}
@@ -2046,7 +2119,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 		"min rate = %d, actual fee rate = %d (%v for %v bytes), change = %v",
 		sigCycles, checkHash, feeRate, actualFeeRate, fee, vSize, changeAdded)
 
-	txHash, err := btc.node.SendRawTransaction(msgTx, false)
+	txHash, err := btc.SendRawTransaction(msgTx, false)
 	if err != nil {
 		return makeErr("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(msgTx))
 	}

@@ -6,7 +6,6 @@ package btc
 import (
 	"bytes"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -225,26 +224,11 @@ func (wc *walletClient) GetWalletInfo() (*GetWalletInfoResult, error) {
 	return wi, wc.call(methodGetWalletInfo, nil, wi)
 }
 
-// call is used internally to  marshal parmeters and send requests to  the RPC
-// server via (*rpcclient.Client).RawRequest. If `thing` is non-nil, the result
-// will be marshaled into `thing`.
+// call marshals parmeters and send requests to the RPC server via
+// rpcclient.RawRequest. If thing is non-nil, the result will be unmarshaled
+// into thing.
 func (wc *walletClient) call(method string, args anylist, thing interface{}) error {
-	params := make([]json.RawMessage, 0, len(args))
-	for i := range args {
-		p, err := json.Marshal(args[i])
-		if err != nil {
-			return err
-		}
-		params = append(params, p)
-	}
-	b, err := wc.node.RawRequest(method, params)
-	if err != nil {
-		return fmt.Errorf("rawrequest error: %v", err)
-	}
-	if thing != nil {
-		return json.Unmarshal(b, thing)
-	}
-	return nil
+	return call(wc.node, method, args, thing)
 }
 
 // serializeMsgTx serializes the wire.MsgTx.
