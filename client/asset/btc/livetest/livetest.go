@@ -238,7 +238,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		FeeRate:   dexAsset.MaxFeeRate,
 	}
 
-	receipts, _, err := rig.gamma().Swap(swaps)
+	receipts, _, _, err := rig.gamma().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}
@@ -297,7 +297,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 		makeRedemption(contractValue*2, receipts[1], secretKey2),
 	}
 
-	_, _, err = rig.alpha().Redeem(redemptions)
+	_, _, _, err = rig.alpha().Redeem(redemptions)
 	if err != nil {
 		t.Fatalf("redemption error: %v", err)
 	}
@@ -355,7 +355,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 
 	time.Sleep(time.Second)
 
-	receipts, _, err = rig.gamma().Swap(swaps)
+	receipts, _, _, err = rig.gamma().Swap(swaps)
 	if err != nil {
 		t.Fatalf("error sending swap transaction: %v", err)
 	}

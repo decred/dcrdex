@@ -156,7 +156,7 @@ type Match struct {
 }
 
 // A UserMatch is similar to a Match, but contains less information about the
-// counter-party, and is clarifies which side the user is on. This is the
+// counter-party, and it clarifies which side the user is on. This is the
 // information that might be provided to the client when they are resyncing
 // their matches after a reconnect.
 type UserMatch struct {

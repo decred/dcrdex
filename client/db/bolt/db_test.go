@@ -401,9 +401,11 @@ func TestOrders(t *testing.T) {
 
 		orders[i] = &db.MetaOrder{
 			MetaData: &db.OrderMetaData{
-				Status: status,
-				Host:   acct.Host,
-				Proof:  db.OrderProof{DEXSig: randBytes(73)},
+				Status:             status,
+				Host:               acct.Host,
+				Proof:              db.OrderProof{DEXSig: randBytes(73)},
+				SwapFeesPaid:       rand.Uint64(),
+				RedemptionFeesPaid: rand.Uint64(),
 			},
 			Order: ord,
 		}
@@ -428,12 +430,19 @@ func TestOrders(t *testing.T) {
 	tStart = time.Now()
 
 	// Grab an order by ID.
-	firstOrd := orders[0].Order
-	mord, err := boltdb.Order(firstOrd.ID())
+
+	firstOrd := orders[0]
+	mord, err := boltdb.Order(firstOrd.Order.ID())
 	if err != nil {
 		t.Fatalf("unable to retrieve order by id")
 	}
-	ordertest.MustCompareOrders(t, firstOrd, mord.Order)
+	ordertest.MustCompareOrders(t, firstOrd.Order, mord.Order)
+	if firstOrd.MetaData.SwapFeesPaid != mord.MetaData.SwapFeesPaid {
+		t.Fatalf("wrong SwapFeesPaid. wanted %d, got %d", firstOrd.MetaData.SwapFeesPaid, mord.MetaData.SwapFeesPaid)
+	}
+	if firstOrd.MetaData.RedemptionFeesPaid != mord.MetaData.RedemptionFeesPaid {
+		t.Fatalf("wrong RedemptionFeesPaid. wanted %d, got %d", firstOrd.MetaData.RedemptionFeesPaid, mord.MetaData.RedemptionFeesPaid)
+	}
 
 	// Check the active orders.
 	activeOrders, err := boltdb.ActiveOrders()
@@ -602,7 +611,8 @@ func TestOrderChange(t *testing.T) {
 	}
 
 	// non-nil empty loads as nil too
-	err = boltdb.SetChangeCoin(ord.ID(), []byte{})
+	mord.MetaData.ChangeCoin = []byte{}
+	err = boltdb.UpdateOrderMetaData(ord.ID(), mord.MetaData)
 	if err != nil {
 		t.Fatalf("error setting change coin: %v", err)
 	}
@@ -616,7 +626,8 @@ func TestOrderChange(t *testing.T) {
 
 	// now some data
 	someChange := []byte{1, 2, 3}
-	err = boltdb.SetChangeCoin(ord.ID(), someChange)
+	mord.MetaData.ChangeCoin = someChange
+	err = boltdb.UpdateOrderMetaData(ord.ID(), mord.MetaData)
 	if err != nil {
 		t.Fatalf("error setting change coin: %v", err)
 	}
@@ -638,7 +649,7 @@ func TestOrderChange(t *testing.T) {
 	}
 
 	// random id should be an error
-	err = boltdb.SetChangeCoin(ordertest.RandomOrderID(), []byte("abc"))
+	err = boltdb.UpdateOrderMetaData(ordertest.RandomOrderID(), mord.MetaData)
 	if err == nil {
 		t.Fatalf("no error encountered for updating unknown order change coin")
 	}

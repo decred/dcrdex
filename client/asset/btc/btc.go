@@ -711,7 +711,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	}
 
 	// Sign, add change, and send the transaction.
-	msgTx, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, btc.feeRateWithFallback())
+	msgTx, _, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, btc.feeRateWithFallback())
 	if err != nil {
 		return nil, err
 	}
@@ -864,13 +864,13 @@ func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []o
 }
 
 // Swap sends the swap contracts and prepares the receipts.
-func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, error) {
+func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
 	baseTx, totalIn, pts, err := btc.fundedTx(swaps.Inputs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	// Add the contract outputs.
 	// TODO: Make P2WSH contract and P2WPKH change outputs instead of
@@ -881,47 +881,47 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		// abandoned.
 		revokeAddr, err := btc.wallet.AddressPKH()
 		if err != nil {
-			return nil, nil, fmt.Errorf("error creating revocation address: %v", err)
+			return nil, nil, 0, fmt.Errorf("error creating revocation address: %v", err)
 		}
 		// Create the contract, a P2SH redeem script.
 		pkScript, err := dexbtc.MakeContract(contract.Address, revokeAddr.String(), contract.SecretHash, int64(contract.LockTime), btc.chainParams)
 		if err != nil {
-			return nil, nil, fmt.Errorf("unable to create pubkey script for address %s: %v", contract.Address, err)
+			return nil, nil, 0, fmt.Errorf("unable to create pubkey script for address %s: %v", contract.Address, err)
 		}
 		contracts = append(contracts, pkScript)
 		// Make the P2SH address and pubkey script.
 		scriptAddr, err := btcutil.NewAddressScriptHash(pkScript, btc.chainParams)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error encoding script address: %v", err)
+			return nil, nil, 0, fmt.Errorf("error encoding script address: %v", err)
 		}
 		p2shScript, err := txscript.PayToAddrScript(scriptAddr)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error creating P2SH script: %v", err)
+			return nil, nil, 0, fmt.Errorf("error creating P2SH script: %v", err)
 		}
 		// Add the transaction output.
 		txOut := wire.NewTxOut(int64(contract.Value), p2shScript)
 		baseTx.AddTxOut(txOut)
 	}
 	if totalIn < totalOut {
-		return nil, nil, fmt.Errorf("unfunded contract. %d < %d", totalIn, totalOut)
+		return nil, nil, 0, fmt.Errorf("unfunded contract. %d < %d", totalIn, totalOut)
 	}
 
 	// Ensure we have enough outputs before broadcasting.
 	swapCount := len(swaps.Contracts)
 	if len(baseTx.TxOut) < swapCount {
-		return nil, nil, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
+		return nil, nil, 0, fmt.Errorf("fewer outputs than swaps. %d < %d", len(baseTx.TxOut), swapCount)
 	}
 
 	// Grab a change address.
 	changeAddr, err := btc.wallet.ChangeAddress()
 	if err != nil {
-		return nil, nil, fmt.Errorf("error creating change address: %v", err)
+		return nil, nil, 0, fmt.Errorf("error creating change address: %v", err)
 	}
 
 	// Sign, add change, and send the transaction.
-	msgTx, change, changeScript, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate)
+	msgTx, change, changeScript, fees, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 
 	// Prepare the receipts.
@@ -956,7 +956,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		nfo, err := dexbtc.InputInfo(changeScript, nil, btc.chainParams)
 		if err != nil {
 			// This would be virtually impossible at this point.
-			return nil, nil, fmt.Errorf("error getting spend info: %v", err)
+			return nil, nil, 0, fmt.Errorf("error getting spend info: %v", err)
 		}
 
 		btc.fundingCoins[change.pt] = &compositeUTXO{
@@ -974,11 +974,11 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		delete(btc.fundingCoins, pt)
 	}
 
-	return receipts, changeCoin, nil
+	return receipts, changeCoin, fees, nil
 }
 
 // Redeem sends the redemption transaction, completing the atomic swap.
-func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes, asset.Coin, error) {
+func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes, asset.Coin, uint64, error) {
 	// Create a transaction that spends the referenced contract.
 	msgTx := wire.NewMsgTx(wire.TxVersion)
 	var totalIn uint64
@@ -987,17 +987,17 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	for _, r := range redemptions {
 		cinfo, ok := r.Spends.(*auditInfo)
 		if !ok {
-			return nil, nil, fmt.Errorf("Redemption contract info of wrong type")
+			return nil, nil, 0, fmt.Errorf("Redemption contract info of wrong type")
 		}
 		// Extract the swap contract recipient and secret hash and check the secret
 		// hash against the hash of the provided secret.
 		_, receiver, _, secretHash, err := dexbtc.ExtractSwapDetails(cinfo.output.redeem, btc.chainParams)
 		if err != nil {
-			return nil, nil, fmt.Errorf("error extracting swap addresses: %v", err)
+			return nil, nil, 0, fmt.Errorf("error extracting swap addresses: %v", err)
 		}
 		checkSecretHash := sha256.Sum256(r.Secret)
 		if !bytes.Equal(checkSecretHash[:], secretHash) {
-			return nil, nil, fmt.Errorf("secret hash mismatch")
+			return nil, nil, 0, fmt.Errorf("secret hash mismatch")
 		}
 		addresses = append(addresses, receiver)
 		contracts = append(contracts, cinfo.output.redeem)
@@ -1014,21 +1014,21 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	feeRate := btc.feeRateWithFallback()
 	fee := feeRate * uint64(size)
 	if fee > totalIn {
-		return nil, nil, fmt.Errorf("redeem tx not worth the fees")
+		return nil, nil, 0, fmt.Errorf("redeem tx not worth the fees")
 	}
 	// Send the funds back to the exchange wallet.
 	redeemAddr, err := btc.wallet.ChangeAddress()
 	if err != nil {
-		return nil, nil, fmt.Errorf("error getting new address from the wallet: %v", err)
+		return nil, nil, 0, fmt.Errorf("error getting new address from the wallet: %v", err)
 	}
 	pkScript, err := txscript.PayToAddrScript(redeemAddr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error creating change script: %v", err)
+		return nil, nil, 0, fmt.Errorf("error creating change script: %v", err)
 	}
 	txOut := wire.NewTxOut(int64(totalIn-fee), pkScript)
 	// One last check for dust.
 	if dexbtc.IsDust(txOut, feeRate) {
-		return nil, nil, fmt.Errorf("redeem output is dust")
+		return nil, nil, 0, fmt.Errorf("redeem output is dust")
 	}
 	msgTx.AddTxOut(txOut)
 	// Sign the inputs.
@@ -1036,11 +1036,11 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		contract := contracts[i]
 		redeemSig, redeemPubKey, err := btc.createSig(msgTx, i, contract, addresses[i])
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		redeemSigScript, err := dexbtc.RedeemP2SHContract(contract, redeemSig, redeemPubKey, r.Secret)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
 		}
 		msgTx.TxIn[i].SignatureScript = redeemSigScript
 	}
@@ -1048,10 +1048,10 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	checkHash := msgTx.TxHash()
 	txHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	if *txHash != checkHash {
-		return nil, nil, fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
+		return nil, nil, 0, fmt.Errorf("redemption sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s", *txHash, checkHash)
 	}
 	// Log the change output.
@@ -1059,7 +1059,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 	for i := range redemptions {
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
 	}
-	return coinIDs, newOutput(btc.node, txHash, 0, uint64(txOut.Value), nil), nil
+	return coinIDs, newOutput(btc.node, txHash, 0, uint64(txOut.Value), nil), fee, nil
 }
 
 // SignMessage signs the message with the private key associated with the
@@ -1488,26 +1488,30 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 // sendWithReturn sends the unsigned transaction with an added output (unless
 // dust) for the change.
 func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
-	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *output, []byte, error) {
+	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *output, []byte, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate whether
 	// a change output would be dust.
+	makeErr := func(s string, a ...interface{}) (*wire.MsgTx, *output, []byte, uint64, error) {
+		return nil, nil, nil, 0, fmt.Errorf(s, a...)
+	}
+
 	sigCycles := 1
 	msgTx, err := btc.wallet.SignTx(baseTx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
+		return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 	}
 	size := msgTx.SerializeSize()
 	minFee := feeRate * uint64(size)
 	remaining := totalIn - totalOut
 	if minFee > remaining {
-		return nil, nil, nil, fmt.Errorf("not enough funds to cover minimum fee rate. %d < %d, raw tx: %x",
+		return makeErr("not enough funds to cover minimum fee rate. %d < %d, raw tx: %x",
 			totalIn, minFee+totalOut, btc.wireBytes(baseTx))
 	}
 
 	// Create a change output.
 	changeScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error creating change script: %v", err)
+		return makeErr("error creating change script: %v", err)
 	}
 	changeIdx := len(baseTx.TxOut)
 	changeOutput := wire.NewTxOut(int64(remaining-minFee), changeScript)
@@ -1533,7 +1537,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 			sigCycles++
 			msgTx, err = btc.wallet.SignTx(baseTx)
 			if err != nil {
-				return nil, nil, nil, fmt.Errorf("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
+				return makeErr("signing error: %v, raw tx: %x", err, btc.wireBytes(baseTx))
 			}
 			size = msgTx.SerializeSize() // recompute the size with new tx signature
 			reqFee := feeRate * uint64(size)
@@ -1542,7 +1546,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 				// I'd hate to be wrong.
 				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
 					totalIn, totalOut, reqFee, fee, btc.wireBytes(msgTx))
-				return nil, nil, nil, fmt.Errorf("change error")
+				return makeErr("change error")
 			}
 			if fee == reqFee || (fee > reqFee && tried[reqFee]) {
 				// If a lower fee appears available, but it's already been attempted and
@@ -1561,7 +1565,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 				// missed.
 				btc.log.Errorf("reached the impossible place. in = %d, out = %d, reqFee = %d, lastFee = %d, raw tx = %x",
 					totalIn, totalOut, reqFee, fee, btc.wireBytes(msgTx))
-				return nil, nil, nil, fmt.Errorf("dust error")
+				return makeErr("dust error")
 			}
 			continue
 		}
@@ -1578,10 +1582,10 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 
 	txHash, err := btc.node.SendRawTransaction(msgTx, false)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(msgTx))
+		return makeErr("sendrawtx error: %v, raw tx: %x", err, btc.wireBytes(msgTx))
 	}
 	if *txHash != checkHash {
-		return nil, nil, nil, fmt.Errorf("transaction sent, but received unexpected transaction ID back from RPC server. "+
+		return makeErr("transaction sent, but received unexpected transaction ID back from RPC server. "+
 			"expected %s, got %s. raw tx: %x", checkHash, *txHash, btc.wireBytes(msgTx))
 	}
 
@@ -1591,7 +1595,7 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	} else {
 		changeScript = nil
 	}
-	return msgTx, change, changeScript, nil
+	return msgTx, change, changeScript, fee, nil
 }
 
 // createSig creates and returns the serialized raw signature and compressed
