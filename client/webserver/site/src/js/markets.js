@@ -82,6 +82,9 @@ export default class MarketsPage extends BasePage {
       'cancelForm', 'cancelRemain', 'cancelUnit', 'cancelPass', 'cancelSubmit',
       'cancelStatus'
     ])
+    this.main = main
+    app.loading(this.main.parentElement)
+    this.loaded = false
     this.market = null
     this.registrationStatus = {}
     this.currentForm = null
@@ -609,6 +612,13 @@ export default class MarketsPage extends BasePage {
     this.balanceWgt.setWallets(host, b.id, q.id)
     this.setMarketBuyOrderEstimate()
     this.refreshActiveOrders()
+    if (!this.loaded) {
+      this.loaded = true
+      app.loaded()
+      Doc.animate(250, progress => {
+        this.main.style.opacity = progress
+      })
+    }
   }
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */

@@ -71,6 +71,10 @@ div.main {
   position: relative;
 }
 
+div.clear {
+  opacity: 0; // Set by animation upon initial loading.
+}
+
 button.selected {
   background-color: #38cfb0;
 }
