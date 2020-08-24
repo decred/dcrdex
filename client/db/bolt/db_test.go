@@ -800,10 +800,8 @@ func TestNotifications(t *testing.T) {
 		t.Fatalf("fetched wrong number of notifications. %d != %d", len(fetched), numToFetch)
 	}
 
-	var ids [][]byte
 	for i, note := range fetched {
 		dbtest.MustCompareNotifications(t, note, fetches[i])
-		ids = append(ids, note.ID())
 		boltdb.AckNotification(note.ID())
 	}
 
@@ -817,5 +815,4 @@ func TestNotifications(t *testing.T) {
 			t.Fatalf("order acknowledgement not recorded")
 		}
 	}
-
 }
