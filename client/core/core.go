@@ -3113,7 +3113,6 @@ out:
 		case <-ticker.C:
 			counts := make(assetCounter)
 			dc.tradeMtx.Lock()
-			log.Tracef("Ticking %d trades", len(dc.trades))
 			for oid, trade := range dc.trades {
 				if !trade.isActive() {
 					log.Infof("Retiring inactive order %v", oid)

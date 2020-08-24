@@ -201,7 +201,6 @@ func (conn *wsConn) connect(ctx context.Context) error {
 			log.Errorf("pong error: %v", err)
 			return err
 		}
-		log.Tracef("got pinged, and ponged the server")
 
 		return nil
 	})
