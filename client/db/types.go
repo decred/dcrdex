@@ -573,7 +573,7 @@ func decodeAccountBackup(b []byte) (*AccountBackup, error) {
 // Save persists an account backup to file.
 func (ab *AccountBackup) Save(path string) error {
 	backup := ab.Serialize()
-	return ioutil.WriteFile(path, backup, 0644)
+	return ioutil.WriteFile(path, backup, 0o600)
 }
 
 // RestoreAccountBackup generates a user account from a backup file.
