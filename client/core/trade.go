@@ -369,7 +369,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			trade:           trade,
 			MetaMatch:       *t.makeMetaMatch(msgMatch),
 			counterConfirms: -1,
-			lastExpireDur:    365 * 24 * time.Hour,
+			lastExpireDur:   365 * 24 * time.Hour,
 		}
 
 		var qty uint64
@@ -734,7 +734,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 
 	// For the first check or hourly tick, log the time until expiration.
 	expiresIn := time.Until(contractExpiry) // may be negative
-	if d := match.lastExpireDur - expiresIn; d > time.Hour || d < time.Hour {
+	if d := match.lastExpireDur - expiresIn; d > time.Hour || d < -time.Hour {
 		// Logged less than an hour ago.
 		return false
 	}
