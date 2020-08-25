@@ -20,7 +20,7 @@ import (
 	"decred.org/dcrdex/server/matcher"
 )
 
-const maxClockOffset = 10_000 // milliseconds
+const maxClockOffset = 600_000 // milliseconds => 600 sec => 10 minutes
 
 // The AuthManager handles client-related actions, including authorization and
 // communications.
