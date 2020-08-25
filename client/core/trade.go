@@ -112,21 +112,22 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 
 	ord := dbOrder.Order
 	t := &trackedTrade{
-		Order:         ord,
-		metaData:      dbOrder.MetaData,
-		dc:            dc,
-		db:            db,
-		latencyQ:      latencyQ,
-		wallets:       wallets,
-		preImg:        preImg,
-		mktID:         marketName(ord.Base(), ord.Quote()),
-		coins:         mapifyCoins(coins),
-		lockTimeTaker: lockTimeTaker,
-		lockTimeMaker: lockTimeMaker,
-		matches:       make(map[order.MatchID]*matchTracker),
-		notify:        notify,
-		epochLen:      epochLen,
-		fromAssetID:   fromID,
+		Order:              ord,
+		metaData:           dbOrder.MetaData,
+		dc:                 dc,
+		db:                 db,
+		latencyQ:           latencyQ,
+		wallets:            wallets,
+		preImg:             preImg,
+		mktID:              marketName(ord.Base(), ord.Quote()),
+		coins:              mapifyCoins(coins),
+		lockTimeTaker:      lockTimeTaker,
+		lockTimeMaker:      lockTimeMaker,
+		matches:            make(map[order.MatchID]*matchTracker),
+		awaitingRedemption: make(map[string]order.MatchID),
+		notify:             notify,
+		epochLen:           epochLen,
+		fromAssetID:        fromID,
 	}
 	return t
 }
