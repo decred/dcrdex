@@ -41,9 +41,11 @@ An order book can be viewed and tracked by subscribing to a market.
 {|
 ! field !! type   !! description
 |-
-| base  || string || currency code for the market's base asset
+| base   || string || currency code for the market's base asset
 |-
-| quote || string || currency code for the market's quote asset
+| quote  || string || currency code for the market's quote asset
+|-
+| nofeed || bool || If set to true, client will not receive order book updates
 |}
 
 The response will contain the complete market order book.
@@ -552,19 +554,19 @@ This is by design and discourages certain types of spoofing.
 
 ==Preimage Reveal==
 
-At the expiration of the epoch, the DEX sends out a <code>preimage</code>
-request for each order in the epoch queue. The match cycle begins 5 seconds
+At the expiration of the epoch, the DEX initiate a <code>preimage</code>
+dialogue for each order in the epoch queue. The match cycle begins 5 seconds
 after the last <code>preimage</code> request is sent by the server, so clients
 must respond before then.
 
 A '''''commitment checksum''''' is included as part of the
-<code>preimage</code> request.
+<code>preimage</code> dialogue initiation.
 The checksum is the Blake-256 hash of the concatenated, lexicographically-sorted
 commitments for every order in the epoch. For clients subscribed to the order
 book for the entire duration of the epoch, the checksum can be validated against
 the checksum generated from their local copy of the epoch queue.
 
-'''Request route:''' <code>preimage</code>, '''originator:''' DEX
+'''Dialogue route:''' <code>preimage</code>, '''originator:''' DEX
 
 <code>payload</code>
 {|
@@ -575,7 +577,7 @@ the checksum generated from their local copy of the epoch queue.
 | csum    || string || the commitment checksum
 |}
 
-'''Preimage response'''
+'''Dialogue step 2: preimage reveal''', '''originator:''' client
 
 <code>result</code>
 {|
@@ -584,27 +586,59 @@ the checksum generated from their local copy of the epoch queue.
 | pimg    || string || hex-encoded preimage for the order's commitment
 |}
 
-==Match negotiation==
+The server will send an [[comm.mediawiki/#Acknowledgements|acknowledgement]] of
+their receipt of the preimage.
 
-Swap negotiation details will be relayed through the DEX with a series of
-notifications.
-Both the DEX and the clients will need to serialize and sign the notification
-data. The originator includes their signature with the request, while the
-recipient will return an '''acknowledgement''', or a list of
-acknowledgements, as the <code>result</code> of their response payload.
+==Order Revocation==
 
-'''Acknowledgement'''
+In a couple of situations, the server will revoke a client's orders.
 
+1. A client in violation of the rules of community conduct may have their existing orders revoked. In this case, the revocation will count against the client's cancellation statistics.
+
+2. If a client does not reconnect after a trade suspension with <code>persist = true</code>, the client's orders will be revoked. This revocation does not count against the client's cancellation statistics.
+
+The server will send a <code>revoke_order</code> request to the client when an
+order is revoked.
+
+'''Request route:''' <code>revoke_order</code>, '''originator:''' DEX
+
+<code>payload</code>
 {|
-! field     !! type   !! description
+! field   !! type   !! description
 |-
-| matchid   ||  string  || the match ID
+| orderid || string || order ID
 |-
-| sig       ||  string || hex-encoded signature of the notification data
+| reason  || string || the reason the order is being revoked
+|-
+| sig     || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
 |}
 
+'''Order revocation serialization'''
+
+{|
+! field   !! size (bytes)  !! description
+|-
+| orderid || 32 || the order ID
+|-
+| reason  || varies || the UTF-8 encoded reason
+|}
+
+The client will respond with an
+[[comm.mediawiki/#Acknowledgements|acknowledgement]].
+
+==Match Negotiation==
+
+Swap negotiation details will be relayed through the DEX with a series of
+notifications. Both the DEX and the clients will need to serialize and sign the
+notification data. The originator includes their signature with the request,
+while the recipient will return an
+[[comm.mediawiki/#Acknowledgements|acknowledgement]], or a list of
+acknowledgements, as the <code>result</code> of their response payload.
+
 If the client's order has one or more matches at the end of a match cycle, the
-DEX will send a list of '''match objects'''. The maker is the first to act, so
+DEX will send a list of '''match objects'''.
+
+The maker is the first to act, so
 after sending their acknowledgement, they should broadcast their initialization
 transaction and inform the server with an <code>init</code> notification
 (described after).
@@ -631,6 +665,10 @@ transaction and inform the server with an <code>init</code> notification
 |-
 | status    || int    || only provided in 'connect' response. For 'match' requests, status is 0 = 'MakerSwapCast'. See [[https://github.com/decred/dcrdex/blob/master/dex/order/match.go|match.go]] for codes.
 |-
+| feeratebase  || int || the fee rate assigned to the swap transaction broadcast on the base asset blockchain. units: atoms/byte
+|-
+| feeratequote || int || the fee rate assigned to the swap transaction broadcast on the quote asset blockchain. units: atoms/byte
+|-
 | sig       || string || DEX's hex-encoded signature of the serialized notification data. serialization described below
 |}
 
@@ -652,15 +690,22 @@ transaction and inform the server with an <code>init</code> notification
 | address    || varies || UTF-8 encoded receiving address for the match
 |}
 
+The client will respond with a list of signed match acknowledgements.
+
 '''The <code>tserver</code> value is used as the basis for the the locktimes.'''
 If it is necessary to convert the time to seconds, the value should be rounded
 down.
 
-The client will respond with a list of signed match acknowledgements.
+The match object includes fields specifying the required transaction fee rates
+for both blockchains. These rates will be at or below the
+<code>maxfeerate</code> specified in the
+[[fundamentals.mediawiki/#Configuration_Data_Request|asset configuration]]. The
+actual rates comes from the server asset backends, so the algorithm is
+implementation-specific.
 
-After a client broadcasts their initialization transaction, they are
-expected to report the transaction details to the server for verification and
-relay to the matching party.
+After a client broadcasts their initialization transaction, they will report the
+transaction details to the server for verification. The server will relay the
+details to the counter-party.
 
 '''Request route:''' <code>init</code>, '''originator:''' client
 
@@ -670,7 +715,7 @@ relay to the matching party.
 |-
 | orderid    || string || the order ID
 |-
-| matchid    || string    || the matchid, retrieved from the [[#Match_negotiation|match notification]]
+| matchid    || string    || the matchid, retrieved from the [[#Match_Negotiation|match notification]]
 |-
 | coinid    || string || hex-encoded coin ID
 |-
@@ -816,6 +861,8 @@ The client will respond with an acknowledgement.
 The taker will get the key from the maker's redemption and broadcast their own
 redemption transaction.
 
+==Unmatched Orders==
+
 It is also possible for an epoch order to go through the matching cycle without
 generating a match. This will be common for limit orders, but can also occur for
 market orders if there are no booked orders to match with. When the server fails
@@ -833,7 +880,7 @@ client.
 
 ==Match Revocation==
 
-A match can be revoked by the server if a client fails to act within the
+A match can be revoked by the server if one party fails to act within the
 [[fundamentals.mediawiki/#Exchange_Variables|broadcast timeout]]. A match revocation will result in
 penalties for the violating party only.
 The revoked match quantity is not added back to the order book in any form.
@@ -851,7 +898,7 @@ The revoked match quantity is not added back to the order book in any form.
 | sig      || string || DEX's hex-encoded signature of serialized revocation. serialization described below
 |}
 
-'''Revocation serialization'''
+'''Match revocation serialization'''
 
 {|
 ! field      !! size (bytes)  !! description

@@ -192,7 +192,7 @@ type Stampable interface {
 // requires an acknowledgement. It is typically a signature of some serialized
 // data associated with the request.
 type Acknowledgement struct {
-	MatchID Bytes `json:"matchid"`
+	MatchID Bytes `json:"matchid"` // TODO: Remove this field.
 	Sig     Bytes `json:"sig"`
 }
 
