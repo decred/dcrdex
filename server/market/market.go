@@ -786,6 +786,8 @@ func (m *Market) Run(ctx context.Context) {
 			// Open up SubmitOrderAsync.
 			close(m.running)
 			running = true
+			log.Infof("Market %s now accepting orders, epoch %d:%d", m.marketInfo.Name,
+				currentEpoch.Epoch, epochDuration)
 		}
 
 		// Replace the next epoch and set the cycle Timer.

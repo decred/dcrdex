@@ -50,7 +50,7 @@ type matchTracker struct {
 	// is not yet refundable due to other consensus rules. This is set in
 	// isRefundable. Initialize this to a very large value to guarantee that it
 	// will be logged on the first check or when 0.
-	lastExireDur time.Duration
+	lastExpireDur time.Duration
 }
 
 // parts is a getter for pointers to commonly used struct fields in the
@@ -369,7 +369,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			trade:           trade,
 			MetaMatch:       *t.makeMetaMatch(msgMatch),
 			counterConfirms: -1,
-			lastExireDur:    365 * 24 * time.Hour,
+			lastExpireDur:    365 * 24 * time.Hour,
 		}
 
 		var qty uint64
@@ -556,7 +556,7 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 
 // Get the required and current confirmation count on the counterparty's swap
 // contract transaction for the provided match. If the count has not changed
-// since the previously check, changed will be false.
+// since the previous check, changed will be false.
 func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed uint32, changed bool) {
 	// Counter-party's swap is the "to" asset.
 	needed = t.wallets.toAsset.SwapConf
@@ -734,13 +734,13 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 
 	// For the first check or hourly tick, log the time until expiration.
 	expiresIn := time.Until(contractExpiry) // may be negative
-	if d := match.lastExireDur - expiresIn; d > time.Hour || d < time.Hour {
+	if d := match.lastExpireDur - expiresIn; d > time.Hour || d < time.Hour {
 		// Logged less than an hour ago.
 		return false
 	}
 
 	// Record this log event's expiry duration.
-	match.lastExireDur = expiresIn
+	match.lastExpireDur = expiresIn
 
 	swapCoinID := proof.TakerSwap
 	if dbMatch.Side == order.Maker {

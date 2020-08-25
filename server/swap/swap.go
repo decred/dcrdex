@@ -1513,7 +1513,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	defer acker.match.mtx.Unlock()
 
 	if rev, ok := acker.params.(*msgjson.RevokeMatch); ok {
-		log.Infof("Received revoke ack for match %v, order %v", rev.MatchID, rev.OrderID)
+		log.Infof("Received revoke ack for match %v, order %v, user %v", rev.MatchID, rev.OrderID, acker.user)
 		// TODO: do something in the DB for this??
 		return // drop the revoke ack sig for now
 	}

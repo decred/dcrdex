@@ -2476,7 +2476,7 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 				// Ensure logging on the first check of counterparty contract
 				// confirms and own contract expiry.
 				counterConfirms: -1,
-				lastExireDur:    365 * 24 * time.Hour,
+				lastExpireDur:   365 * 24 * time.Hour,
 			}
 		}
 
