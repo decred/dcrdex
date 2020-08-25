@@ -2473,6 +2473,10 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 				prefix:    tracker.Prefix(),
 				trade:     tracker.Trade(),
 				MetaMatch: *dbMatch,
+				// Ensure logging on the first check of counterparty contract
+				// confirms and own contract expiry.
+				counterConfirms: -1,
+				lastExpireDur:   365 * 24 * time.Hour,
 			}
 		}
 
@@ -3109,7 +3113,6 @@ out:
 		case <-ticker.C:
 			counts := make(assetCounter)
 			dc.tradeMtx.Lock()
-			log.Tracef("Ticking %d trades", len(dc.trades))
 			for oid, trade := range dc.trades {
 				if !trade.isActive() {
 					log.Infof("Retiring inactive order %v", oid)

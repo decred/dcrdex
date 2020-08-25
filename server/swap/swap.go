@@ -1088,7 +1088,7 @@ func (s *Swapper) redeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplet
 	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
 		confs, err := tStatus.redemption.Confirmations()
 		if err != nil {
-			log.Errorf("Confirmations failed for taker redemption %v: err",
+			log.Errorf("Confirmations failed for taker redemption %v: %v",
 				tStatus.redemption.TxID(), err)
 			return
 		}
@@ -1112,7 +1112,7 @@ func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRe
 	if !mStatus.redeemTime.IsZero() {
 		confs, err := mStatus.redemption.Confirmations()
 		if err != nil {
-			log.Errorf("Confirmations failed for maker redemption %v: err",
+			log.Errorf("Confirmations failed for maker redemption %v: %v",
 				mStatus.redemption.TxID(), err) // Severity?
 			return
 		}
@@ -1513,7 +1513,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	defer acker.match.mtx.Unlock()
 
 	if rev, ok := acker.params.(*msgjson.RevokeMatch); ok {
-		log.Infof("Received revoke ack for match %v, order %v", rev.MatchID, rev.OrderID)
+		log.Infof("Received revoke ack for match %v, order %v, user %v", rev.MatchID, rev.OrderID, acker.user)
 		// TODO: do something in the DB for this??
 		return // drop the revoke ack sig for now
 	}

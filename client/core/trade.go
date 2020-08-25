@@ -32,13 +32,25 @@ func (err ExpirationErr) Error() string { return string(err) }
 // A matchTracker is used to negotiate a match.
 type matchTracker struct {
 	db.MetaMatch
-	failErr        error
-	refundErr      error
-	prefix         *order.Prefix
-	trade          *order.Trade
-	counterSwap    asset.AuditInfo
-	contractExpiry time.Time // for one time logging in isRefundable, may never be set
-	id             order.MatchID
+	id          order.MatchID
+	failErr     error
+	refundErr   error
+	prefix      *order.Prefix
+	trade       *order.Trade
+	counterSwap asset.AuditInfo
+
+	// The following fields facilitate useful logging, while not being spammy.
+
+	// counterConfirms records the last known confirms of the counterparty swap.
+	// This is set in isSwappable for taker, isRedeemable for maker. -1 means
+	// the confirms have not yet been checked (or logged).
+	counterConfirms int64
+	// lastExpireDur is the most recently logged time until expiry of the
+	// party's own contract. This may be negative if expiry has passed, but it
+	// is not yet refundable due to other consensus rules. This is set in
+	// isRefundable. Initialize this to a very large value to guarantee that it
+	// will be logged on the first check or when 0.
+	lastExpireDur time.Duration
 }
 
 // parts is a getter for pointers to commonly used struct fields in the
@@ -352,10 +364,12 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		}
 
 		match := &matchTracker{
-			id:        mid,
-			prefix:    t.Prefix(),
-			trade:     trade,
-			MetaMatch: *t.makeMetaMatch(msgMatch),
+			id:              mid,
+			prefix:          t.Prefix(),
+			trade:           trade,
+			MetaMatch:       *t.makeMetaMatch(msgMatch),
+			counterConfirms: -1,
+			lastExpireDur:   365 * 24 * time.Hour,
 		}
 
 		var qty uint64
@@ -540,6 +554,32 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 	return nil
 }
 
+// Get the required and current confirmation count on the counterparty's swap
+// contract transaction for the provided match. If the count has not changed
+// since the previous check, changed will be false.
+func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed uint32, changed bool) {
+	// Counter-party's swap is the "to" asset.
+	needed = t.wallets.toAsset.SwapConf
+
+	// Check the confirmations on the counter-party's swap.
+	coin := match.counterSwap.Coin()
+	var err error
+	have, err = coin.Confirmations()
+	if err != nil {
+		log.Errorf("error getting confirmations for match %s on order %s for coin %s",
+			match.id, t.UID(), coin)
+		have = 0 // should already be
+		return
+	}
+
+	// Log the pending swap status at new heights only.
+	if match.counterConfirms != int64(have) {
+		match.counterConfirms = int64(have)
+		changed = true
+	}
+	return
+}
+
 // isSwappable will be true if the match is ready for a swap transaction to be
 // broadcast.
 func (t *trackedTrade) isSwappable(match *matchTracker) bool {
@@ -558,22 +598,14 @@ func (t *trackedTrade) isSwappable(match *matchTracker) bool {
 	}
 
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerSwapCast {
-		// This might be ready to swap. Check the confirmations on the maker's
-		// swap.
-		coin := match.counterSwap.Coin()
-		confs, err := coin.Confirmations()
-		if err != nil {
-			log.Errorf("error getting confirmations for match %s on order %s for coin %s",
-				match.id, t.UID(), coin)
-			return false
-		}
-		assetCfg := t.wallets.toAsset
-		ok := confs >= assetCfg.SwapConf
-		if !ok {
+		// Check the confirmations on the maker's swap.
+		confs, req, changed := t.counterPartyConfirms(match)
+		ready := confs >= req
+		if changed && !ready {
 			log.Debugf("Match %v not yet swappable: current confs = %d, required confs = %d",
-				match.id, confs, assetCfg.SwapConf)
+				match.id, confs, req)
 		}
-		return ok
+		return ready
 	}
 	if dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched {
 		return true
@@ -644,20 +676,14 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 	}
 
 	if dbMatch.Side == order.Maker && metaData.Status == order.TakerSwapCast {
-		coin := match.counterSwap.Coin()
-		confs, err := coin.Confirmations()
-		if err != nil {
-			log.Errorf("error getting confirmations for match %s on order %s for coin %s",
-				match.id, t.UID(), coin)
-			return false
-		}
-		assetCfg := t.wallets.toAsset
-		ok := confs >= assetCfg.SwapConf
-		if !ok {
+		// Check the confirmations on the taker's swap.
+		confs, req, changed := t.counterPartyConfirms(match)
+		ready := confs >= req
+		if changed && !ready {
 			log.Debugf("Match %v not yet redeemable: current confs = %d, required confs = %d",
-				match.id, confs, assetCfg.SwapConf)
+				match.id, confs, req)
 		}
-		return ok
+		return ready
 	}
 	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
 		return true
@@ -707,22 +733,31 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 	}
 
 	// For the first check or hourly tick, log the time until expiration.
-	if match.contractExpiry.IsZero() {
-		// First check for this match.
-		match.contractExpiry = contractExpiry
-	} else if (time.Until(contractExpiry) % time.Hour) > t.dc.tickInterval {
-		// Already logged, and it's not the first tick of the hour.
+	expiresIn := time.Until(contractExpiry) // may be negative
+	if match.lastExpireDur-expiresIn > time.Hour {
+		// Logged less than an hour ago.
 		return false
 	}
+
+	// Record this log event's expiry duration.
+	match.lastExpireDur = expiresIn
 
 	swapCoinID := proof.TakerSwap
 	if dbMatch.Side == order.Maker {
 		swapCoinID = proof.MakerSwap
 	}
 	from := t.wallets.fromAsset
-	log.Infof("Contract for match %v with swap coin %v (%s) has an expiry time of %v (%v), not yet expired.",
+	remainingTime := expiresIn.Round(time.Second)
+	var but string
+	if remainingTime <= 0 {
+		// Since reaching expiry time does not necessarily mean it is spendable
+		// by consensus rules (e.g. 11 block median time must be greater than
+		// lock time with BTC), include a "but" in the message.
+		but = "but "
+	}
+	log.Infof("Contract for match %v with swap coin %v (%s) has an expiry time of %v (%v), %snot yet expired.",
 		match.id, coinIDString(from.ID, swapCoinID), from.Symbol,
-		contractExpiry, time.Until(contractExpiry).Round(time.Second))
+		contractExpiry, remainingTime, but)
 
 	return false
 }
@@ -768,8 +803,6 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 		case t.isRefundable(match):
 			log.Debugf("Refundable match %v for order %v (%v)", match.id, t.ID(), side)
 			refunds = append(refunds, match)
-		default:
-			log.Tracef("Match not ready for action as %v: %v", side, match.id)
 		}
 	}
 
