@@ -475,21 +475,18 @@ type RegisterResult struct {
 	ReqConfirms uint16 `json:"reqConfirms"`
 }
 
-// assetCounter tracks a count for a series of assets and provides methods for
-// adding to the count and combining assetCounters. Methods return the receiver
-// for convenience.
-type assetCounter map[uint32]int
+// assetMap tracks a series of assets and provides methods for registering an
+// asset and merging with another assetMap.
+type assetMap map[uint32]struct{}
 
-// add increments the count for a specific asset.
-func (c assetCounter) add(assetID uint32, increment int) assetCounter {
-	c[assetID] = c[assetID] + increment
-	return c
+// count registers a new asset.
+func (c assetMap) count(assetID uint32) {
+	c[assetID] = struct{}{}
 }
 
-// absorb adds the counts from another assetCounter to the current counts.
-func (c assetCounter) absorb(otherCounter assetCounter) assetCounter {
-	for assetID, count := range otherCounter {
-		c.add(assetID, count)
+// merge merges the entries of another assetMap.
+func (c assetMap) merge(other assetMap) {
+	for assetID := range other {
+		c[assetID] = struct{}{}
 	}
-	return c
 }

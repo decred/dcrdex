@@ -771,11 +771,11 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 }
 
 // tick will check for and perform any match actions necessary.
-func (t *trackedTrade) tick() (assetCounter, error) {
+func (t *trackedTrade) tick() (assetMap, error) {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 	var swaps, redeems, refunds []*matchTracker
-	counts := make(assetCounter)
+	assets := make(assetMap)
 	errs := newErrorSet(t.dc.acct.host + " tick: ")
 
 	// Check all matches for and resend pending requests as necessary.
@@ -818,9 +818,8 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 	}
 
 	fromID := t.wallets.fromAsset.ID
-	nSwapsAndRefunds := len(swaps) + len(refunds)
-	if nSwapsAndRefunds > 0 {
-		counts[fromID] = nSwapsAndRefunds
+	if len(swaps) > 0 || len(refunds) > 0 {
+		assets.count(fromID)
 	}
 
 	if len(swaps) > 0 {
@@ -847,7 +846,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 
 	if len(redeems) > 0 {
 		toAsset := t.wallets.toAsset.ID
-		counts[toAsset] = len(redeems)
+		assets.count(toAsset)
 		qty := received
 		if t.Trade().Sell {
 			qty = quoteReceived
@@ -879,7 +878,7 @@ func (t *trackedTrade) tick() (assetCounter, error) {
 		}
 	}
 
-	return counts, errs.ifAny()
+	return assets, errs.ifAny()
 }
 
 // resendPendingRequests checks all matches for this order to re-attempt

@@ -1223,7 +1223,7 @@ func TestRegister(t *testing.T) {
 		Cert:    "required",
 	}
 
-	tWallet.payFeeCoin = &tCoin{id: []byte("abcdef")}
+	tWallet.payFeeCoin = &tCoin{id: encode.RandomBytes(36)}
 
 	ch := tCore.NotificationFeed()
 
@@ -1253,18 +1253,21 @@ func TestRegister(t *testing.T) {
 
 	getBalanceNote := func() *BalanceNote {
 		t.Helper()
-		note, ok := getNotification("balance").(*BalanceNote)
+
+		ntfn := getNotification("balance")
+		note, ok := ntfn.(*BalanceNote)
 		if !ok {
-			t.Fatalf("wrong notification. Expected BalanceNote")
+			t.Fatalf("wrong notification (%T). Expected BalanceNote", ntfn)
 		}
 		return note
 	}
 
 	getFeeNote := func() *FeePaymentNote {
 		t.Helper()
-		note, ok := getNotification("feepayment").(*FeePaymentNote)
+		ntfn := getNotification("feepayment")
+		note, ok := ntfn.(*FeePaymentNote)
 		if !ok {
-			t.Fatalf("wrong notification. Expected FeePaymentNote")
+			t.Fatalf("wrong notification (%T). Expected FeePaymentNote", ntfn)
 		}
 		return note
 	}
@@ -1281,6 +1284,7 @@ func TestRegister(t *testing.T) {
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
+	getBalanceNote()
 	feeNote = getFeeNote()
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
@@ -1441,6 +1445,7 @@ func TestRegister(t *testing.T) {
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
+	getBalanceNote()
 	// 2nd note is fee error
 	feeNote = getFeeNote()
 	if feeNote.Severity() != db.ErrorLevel {
@@ -2868,7 +2873,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 
 	oid := lo.ID()
-	changeCoinID := encode.RandomBytes(32)
+	changeCoinID := encode.RandomBytes(36)
 	changeCoin := &tCoin{id: changeCoinID}
 
 	dbOrder := &db.MetaOrder{
@@ -3522,28 +3527,19 @@ func TestAssetBalance(t *testing.T) {
 }
 
 func TestAssetCounter(t *testing.T) {
-	counts := make(assetCounter)
-	counts.add(1, 1)
-	if len(counts) != 1 {
+	assets := make(assetMap)
+	assets.count(1)
+	if len(assets) != 1 {
 		t.Fatalf("count not added")
 	}
-	counts.add(1, 3)
-	if counts[1] != 4 {
-		t.Fatalf("counts not incremented properly")
+
+	newCounts := assetMap{
+		1: struct{}{},
+		2: struct{}{},
 	}
-	newCounts := assetCounter{
-		1: 100,
-		2: 2,
-	}
-	counts.absorb(newCounts)
-	if len(counts) != 2 {
+	assets.merge(newCounts)
+	if len(assets) != 2 {
 		t.Fatalf("counts not absorbed properly")
-	}
-	if counts[2] != 2 {
-		t.Fatalf("absorbed counts not set correctly")
-	}
-	if counts[1] != 104 {
-		t.Fatalf("absorbed counts not combined correctly")
 	}
 }
 
