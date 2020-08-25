@@ -238,7 +238,7 @@ func runTest(t *testing.T, splitTx bool) {
 	keyHash1 := sha256.Sum256(secretKey1)
 	secretKey2 := randBytes(32)
 	keyHash2 := sha256.Sum256(secretKey2)
-	lockTime := time.Now().Add(time.Hour * 24).UTC()
+	lockTime := time.Now().Add(time.Hour * 8).UTC()
 	// Have beta send a swap contract to the alpha address.
 	contract1 := &asset.Contract{
 		Address:    alphaAddress,
@@ -364,7 +364,7 @@ func runTest(t *testing.T, splitTx bool) {
 	// Now send another one with lockTime = now and try to refund it.
 	secretKey := randBytes(32)
 	keyHash := sha256.Sum256(secretKey)
-	lockTime = time.Now().Add(-24 * time.Hour)
+	lockTime = time.Now().Add(-8 * time.Hour)
 
 	// Have beta send a swap contract to the alpha address.
 	setOrderValue(contractValue)

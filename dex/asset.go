@@ -12,8 +12,8 @@ import (
 const (
 	UnsupportedScriptError = ErrorKind("unsupported script type")
 
-	defaultLockTimeTaker = 24 * time.Hour
-	defaultlockTimeMaker = 48 * time.Hour
+	defaultLockTimeTaker = 8 * time.Hour
+	defaultlockTimeMaker = 20 * time.Hour
 )
 
 var (

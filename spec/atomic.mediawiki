@@ -74,7 +74,7 @@ hash.
 
 In addition, Alice constructs the contract with a second, alternative lock
 that allows her to spend the output herself, but only if the output remains
-unspent for a specified amount of time. Alice sets her timelock to 48 hours.
+unspent for a specified amount of time. Alice sets her timelock to 20 hours.
 
 '''Alice broadcasts her initialization transaction''' to the Decred network.
 She informs the DEX of the transaction details and sends the lock, which the
@@ -87,8 +87,8 @@ After the requisite number of confirmations, Bob prepares his initialization
 transaction'''. He uses Alice's lock here as well, and creates a swap contract
 satisfied by Alice&#x2019;s key and the pubkey for Alice&#x2019;s address.
 
-Bob sets his timelock to 24 hours.
-Bob should also check that the timelock in Alice's initialization is set to 48
+Bob sets his timelock to 8 hours.
+Bob should also check that the timelock in Alice's initialization is set to 20
 hours.
 If Alice&#x2019;s timelock duration is set near or below Bob&#x2019;s timelock duration, Alice
 could potentially spend the DCR output before Bob.
@@ -144,7 +144,7 @@ order is returned to the order book and is immediately able to match again.
 <img src="images/a-init-bc.png" align="right">
 '''B4''': As the maker, Alice goes first again.
 She groups her matches from the epoch and creates two different keys, one for
-Bob and one for Carl. She sets her timelocks to 48 hours.
+Bob and one for Carl. She sets her timelocks to 20 hours.
 '''Alice broadcasts her initialization transaction''' to the Decred network and
 informs the DEX about the transaction details, which the DEX relays to Bob and
 Carl.

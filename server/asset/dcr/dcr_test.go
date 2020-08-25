@@ -470,7 +470,7 @@ type testMsgTxSwap struct {
 // Create a swap (initialization) contract with random pubkeys and return the
 // pubkey script and addresses.
 func testSwapContract() ([]byte, dcrutil.Address, dcrutil.Address) {
-	lockTime := time.Now().Add(time.Hour * 24).Unix()
+	lockTime := time.Now().Add(time.Hour * 8).Unix()
 	secretKey := randomBytes(32)
 	_, receiverPKH := genPubkey()
 	_, senderPKH := genPubkey()
