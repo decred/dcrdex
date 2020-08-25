@@ -1088,7 +1088,7 @@ func (s *Swapper) redeemStatus(mStatus, tStatus *swapStatus) (makerRedeemComplet
 	if makerRedeemComplete && !tStatus.redeemTime.IsZero() {
 		confs, err := tStatus.redemption.Confirmations()
 		if err != nil {
-			log.Errorf("Confirmations failed for taker redemption %v: err",
+			log.Errorf("Confirmations failed for taker redemption %v: %v",
 				tStatus.redemption.TxID(), err)
 			return
 		}
@@ -1112,7 +1112,7 @@ func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRe
 	if !mStatus.redeemTime.IsZero() {
 		confs, err := mStatus.redemption.Confirmations()
 		if err != nil {
-			log.Errorf("Confirmations failed for maker redemption %v: err",
+			log.Errorf("Confirmations failed for maker redemption %v: %v",
 				mStatus.redemption.TxID(), err) // Severity?
 			return
 		}
