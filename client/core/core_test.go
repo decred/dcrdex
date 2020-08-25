@@ -2384,12 +2384,12 @@ func TestTradeTracking(t *testing.T) {
 	}
 	auditInfo.recipient = addr
 
-	auditInfo.expiration = matchTime.Add(time.Hour * 23)
+	auditInfo.expiration = matchTime.Add(tracker.lockTimeTaker - time.Hour)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err == nil {
 		t.Fatalf("no maker error for early lock time")
 	}
-	auditInfo.expiration = matchTime.Add(time.Hour * 24)
+	auditInfo.expiration = matchTime.Add(tracker.lockTimeTaker)
 
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err != nil {
@@ -2494,12 +2494,12 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("taker's match message error: %v", err)
 	}
 
-	auditInfo.expiration = matchTime.Add(time.Hour * 47)
+	auditInfo.expiration = matchTime.Add(tracker.lockTimeMaker - time.Hour)
 	err = handleAuditRoute(tCore, rig.dc, msg)
 	if err == nil {
 		t.Fatalf("no taker error for early lock time")
 	}
-	auditInfo.expiration = matchTime.Add(time.Hour * 48)
+	auditInfo.expiration = matchTime.Add(tracker.lockTimeMaker)
 
 	checkStatus("taker counter-party swapped", order.MakerSwapCast)
 	if len(proof.SecretHash) == 0 {

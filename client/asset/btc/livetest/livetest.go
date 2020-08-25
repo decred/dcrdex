@@ -218,7 +218,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	keyHash1 := sha256.Sum256(secretKey1)
 	secretKey2 := randBytes(32)
 	keyHash2 := sha256.Sum256(secretKey2)
-	lockTime := time.Now().Add(time.Hour * 24).UTC()
+	lockTime := time.Now().Add(time.Hour * 8).UTC()
 	// Have gamma send a swap contract to the alpha address.
 	contract1 := &asset.Contract{
 		Address:    address,
@@ -336,7 +336,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	// Now send another one with lockTime = now and try to refund it.
 	secretKey := randBytes(32)
 	keyHash := sha256.Sum256(secretKey)
-	lockTime = time.Now().Add(-24 * time.Hour)
+	lockTime = time.Now().Add(-8 * time.Hour)
 
 	// Have gamma send a swap contract to the alpha address.
 	setOrderValue(contractValue)
