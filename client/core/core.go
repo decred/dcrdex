@@ -508,20 +508,20 @@ func (dc *dexConnection) compareServerMatches(matches map[order.OrderID]*serverM
 }
 
 // tickAsset checks open matches related to a specific asset for needed action.
-func (dc *dexConnection) tickAsset(assetID uint32) assetCounter {
-	counts := make(assetCounter)
+func (dc *dexConnection) tickAsset(assetID uint32) assetMap {
+	updated := make(assetMap)
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for _, trade := range dc.trades {
 		if trade.Base() == assetID || trade.Quote() == assetID {
-			newCounts, err := trade.tick()
+			newUpdates, err := trade.tick()
 			if err != nil {
 				log.Errorf("%s tick error: %v", dc.acct.host, err)
 			}
-			counts.absorb(newCounts)
+			updated.merge(newUpdates)
 		}
 	}
-	return counts
+	return updated
 }
 
 // market gets the *Market from the marketMap, or nil if mktID is unknown.
@@ -815,11 +815,11 @@ func (c *Core) walletBalances(wallet *xcWallet) (*db.Balance, error) {
 
 // updateBalances updates the balance for every key in the counter map.
 // Notifications are sent and refreshUser is called.
-func (c *Core) updateBalances(counts assetCounter) {
-	if len(counts) == 0 {
+func (c *Core) updateBalances(assets assetMap) {
+	if len(assets) == 0 {
 		return
 	}
-	for assetID := range counts {
+	for assetID := range assets {
 		w, exists := c.wallet(assetID)
 		if !exists {
 			// This should never be the case, but log an error in case I'm
@@ -839,7 +839,7 @@ func (c *Core) updateBalances(counts assetCounter) {
 // updateAssetBalance updates the balance for the specified asset. A
 // notification is sent and refreshUser is called.
 func (c *Core) updateAssetBalance(assetID uint32) {
-	c.updateBalances(make(assetCounter).add(assetID, 1))
+	c.updateBalances(assetMap{assetID: struct{}{}})
 }
 
 // Wallets creates a slice of WalletState for all known wallets.
@@ -1726,8 +1726,8 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 // are loaded, even if there are inactive matches for the same order, but it may
 // be desirable to load all matches, so this behavior may change.
 func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
-	failed := make(map[uint32]struct{})
-	relocks := make(assetCounter)
+	failed := make(map[uint32]struct{}) // TODO: use this after loadDBTrades!
+	relocks := make(assetMap)
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	for _, dc := range c.conns {
@@ -1743,7 +1743,7 @@ func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
 			// 	details := fmt.Sprintf("Some active orders failed to resume: %v", err)
 			// 	c.notify(newOrderNote("Order resumption error", details, db.ErrorLevel, nil))
 			// }
-			relocks.absorb(locks)
+			relocks.merge(locks)
 		}
 		loaded += len(ready)
 		dc.refreshMarkets()
@@ -2579,14 +2579,14 @@ func (c *Core) loadDBTrades(dc *dexConnection, crypter encrypt.Crypter, failed m
 // resumeTrades recovers the states of active trades and matches, including
 // loading audit info needed to finish swaps and funding coins needed to create
 // new matches on an order.
-func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetCounter {
+func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMap {
 	var tracker *trackedTrade
 	notifyErr := func(subject, s string, a ...interface{}) {
 		detail := fmt.Sprintf(s, a...)
 		corder, _ := tracker.coreOrder()
 		c.notify(newOrderNote(subject, detail, db.ErrorLevel, corder))
 	}
-	relocks := make(assetCounter)
+	relocks := make(assetMap)
 	dc.tradeMtx.Lock()
 	defer dc.tradeMtx.Unlock()
 	for _, tracker = range trackers {
@@ -2664,7 +2664,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetCo
 				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
-			relocks.add(wallets.fromAsset.ID, 1)
+			relocks.count(wallets.fromAsset.ID)
 			tracker.coins = mapifyCoins(coins)
 		}
 
@@ -3111,7 +3111,7 @@ out:
 			nextJob <- &msgJob{handler, msg}
 
 		case <-ticker.C:
-			counts := make(assetCounter)
+			updatedAssets := make(assetMap)
 			dc.tradeMtx.Lock()
 			for oid, trade := range dc.trades {
 				if !trade.isActive() {
@@ -3119,16 +3119,16 @@ out:
 					delete(dc.trades, oid)
 					continue
 				}
-				newCounts, err := trade.tick()
+				newUpdates, err := trade.tick()
 				if err != nil {
 					log.Error(err)
 				}
-				counts.absorb(newCounts)
+				updatedAssets.merge(newUpdates)
 			}
 			dc.tradeMtx.Unlock()
-			if len(counts) > 0 {
+			if len(updatedAssets) > 0 {
 				dc.refreshMarkets()
-				c.updateBalances(counts)
+				c.updateBalances(updatedAssets)
 			}
 		case <-c.ctx.Done():
 			break out
@@ -3258,10 +3258,10 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return err
 	}
-	counts, err := tracker.tick()
-	if len(counts) > 0 {
+	assets, err := tracker.tick()
+	if len(assets) > 0 {
 		dc.refreshMarkets()
-		c.updateBalances(counts)
+		c.updateBalances(assets)
 	}
 	return err
 }
@@ -3285,10 +3285,10 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return err
 	}
-	counts, err := tracker.tick()
-	if len(counts) > 0 {
+	assets, err := tracker.tick()
+	if len(assets) > 0 {
 		dc.refreshMarkets()
-		c.updateBalances(counts)
+		c.updateBalances(assets)
 	}
 	return err
 }
@@ -3328,19 +3328,19 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	}
 	c.waiterMtx.Unlock()
 	c.connMtx.RLock()
-	counts := make(assetCounter)
+	assets := make(assetMap)
 	for _, dc := range c.conns {
-		newCounts := dc.tickAsset(assetID)
-		if len(newCounts) > 0 {
+		newUpdates := dc.tickAsset(assetID)
+		if len(newUpdates) > 0 {
 			dc.refreshMarkets()
-			counts.absorb(newCounts)
+			assets.merge(newUpdates)
 		}
 	}
 	c.connMtx.RUnlock()
 	// Ensure we always at least update this asset's balance regardless of trade
 	// status changes.
-	counts[assetID]++
-	c.updateBalances(counts)
+	assets.count(assetID)
+	c.updateBalances(assets)
 }
 
 // PromptShutdown asks confirmation to shutdown the dexc when has active orders.

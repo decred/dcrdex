@@ -3527,28 +3527,19 @@ func TestAssetBalance(t *testing.T) {
 }
 
 func TestAssetCounter(t *testing.T) {
-	counts := make(assetCounter)
-	counts.add(1, 1)
-	if len(counts) != 1 {
+	assets := make(assetMap)
+	assets.count(1)
+	if len(assets) != 1 {
 		t.Fatalf("count not added")
 	}
-	counts.add(1, 3)
-	if counts[1] != 4 {
-		t.Fatalf("counts not incremented properly")
+
+	newCounts := assetMap{
+		1: struct{}{},
+		2: struct{}{},
 	}
-	newCounts := assetCounter{
-		1: 100,
-		2: 2,
-	}
-	counts.absorb(newCounts)
-	if len(counts) != 2 {
+	assets.merge(newCounts)
+	if len(assets) != 2 {
 		t.Fatalf("counts not absorbed properly")
-	}
-	if counts[2] != 2 {
-		t.Fatalf("absorbed counts not set correctly")
-	}
-	if counts[1] != 104 {
-		t.Fatalf("absorbed counts not combined correctly")
 	}
 }
 
