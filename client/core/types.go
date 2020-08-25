@@ -475,8 +475,8 @@ type RegisterResult struct {
 	ReqConfirms uint16 `json:"reqConfirms"`
 }
 
-// assetMap tracks a series of assets and provides methods for adding and asset
-// and merging with another assetMap.
+// assetMap tracks a series of assets and provides methods for registering an
+// asset and merging with another assetMap.
 type assetMap map[uint32]struct{}
 
 // count registers a new asset.

@@ -1726,7 +1726,7 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 // are loaded, even if there are inactive matches for the same order, but it may
 // be desirable to load all matches, so this behavior may change.
 func (c *Core) resolveActiveTrades(crypter encrypt.Crypter) (loaded int) {
-	failed := make(map[uint32]struct{}) // TODO: use this after loadDBTrades!
+	failed := make(map[uint32]struct{}) // TODO: either remove this or use it after loadDBTrades
 	relocks := make(assetMap)
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
