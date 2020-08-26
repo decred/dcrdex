@@ -153,7 +153,14 @@ func (c *tRPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool
 func (c *tRPCClient) getBlock(blockHash string) *btcjson.GetBlockVerboseResult {
 	c.blockchainMtx.RLock()
 	defer c.blockchainMtx.RUnlock()
-	return c.verboseBlocks[blockHash]
+	blk, found := c.verboseBlocks[blockHash]
+	if !found {
+		return nil
+	}
+	if nextHash, exists := c.mainchain[blk.Height+1]; exists {
+		blk.NextHash = nextHash.String()
+	}
+	return blk
 }
 
 func (c *tRPCClient) GetBlockVerboseTx(blockHash *chainhash.Hash) (*btcjson.GetBlockVerboseResult, error) {
@@ -226,9 +233,10 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 			return nil, fmt.Errorf("no block verbose found")
 		}
 		b, _ := json.Marshal(&verboseBlockTxs{
-			Hash:   block.Hash,
-			Height: uint64(block.Height),
-			Tx:     block.RawTx,
+			Hash:     block.Hash,
+			Height:   uint64(block.Height),
+			NextHash: block.NextHash,
+			Tx:       block.RawTx,
 		})
 		return b, nil
 	case methodGetBlockHeader:
@@ -324,6 +332,11 @@ func tNewWallet() (*ExchangeWallet, *tRPCClient, func()) {
 		DefaultFallbackFee: defaultFee,
 	}
 	wallet := newWallet(cfg, &dexbtc.Config{}, client)
+	// Initialize the best block.
+	bestHash, _ := client.GetBestBlockHash() // does not return error
+	wallet.tipMtx.Lock()
+	wallet.currentTip = &block{height: client.GetBestBlockHeight(), hash: bestHash.String()}
+	wallet.tipMtx.Unlock()
 	go wallet.run(walletCtx)
 
 	return wallet, client, shutdown
@@ -1311,21 +1324,29 @@ func TestFindRedemption(t *testing.T) {
 	// Prepare the "blockchain"
 	inputs := []btcjson.Vin{makeRPCVin(otherTxid, 0, otherSpendScript)}
 	// Add the contract transaction. Put the pay-to-contract script at index 1.
-	contractTx := makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs)
-	blockHash, contractBlock := node.addRawTx(contractHeight, contractTx)
-	contractTx.BlockHash = blockHash.String()
-	contractTx.Blocktime = contractBlock.Time
-	node.mpVerboseTxs[contractTxid] = contractTx
+	blockHash, _ := node.addRawTx(contractHeight, makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs))
+	getTxRes := &GetTransactionResult{
+		BlockHash:  blockHash.String(),
+		BlockIndex: contractHeight,
+		Details: []*WalletTxDetails{
+			{
+				Address:  contractAddr.String(),
+				Category: TxCatSend,
+				Vout:     contractVout,
+			},
+		},
+	}
+	node.rawRes[methodGetTransaction] = mustMarshal(t, getTxRes)
 
 	// Begin find redemption.
-	findRedemptionResultCh, err := wallet.FindRedemption(coinID)
+	findRedemptionResultCh, err := wallet.FindRedemption(coinID, contract)
 	if err != nil {
-		t.Errorf("unexpected FindRedemption error: %v", err)
+		t.Fatalf("unexpected FindRedemption error: %v", err)
 	}
 	// Expect to NOT find redemption yet.
 	select {
 	case frr := <-findRedemptionResultCh:
-		t.Errorf("unexpected FindRedemption result %v", frr)
+		t.Fatalf("unexpected FindRedemption result %v", frr)
 	case <-time.After(2 * time.Second):
 	}
 
@@ -1357,11 +1378,19 @@ func TestFindRedemption(t *testing.T) {
 		t.Fatalf("redemption not found after 2 seconds")
 	}
 
+	// gettransaction error
+	node.rawErr[methodGetTransaction] = tErr
+	_, err = wallet.FindRedemption(coinID, contract)
+	if err == nil {
+		t.Fatalf("no error for gettransaction rpc error")
+	}
+	node.rawErr[methodGetTransaction] = nil
+
 	// Expect FindRedemption to error because of bad input sig.
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(randBytes(100))
-	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
+	findRedemptionResultCh, err = wallet.FindRedemption(coinID, contract)
 	if err != nil {
-		t.Errorf("unexpected FindRedemption error: %v", err)
+		t.Fatalf("unexpected FindRedemption error: %v", err)
 	}
 	select {
 	case frr := <-findRedemptionResultCh:
@@ -1373,18 +1402,10 @@ func TestFindRedemption(t *testing.T) {
 	}
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(redemptionScript)
 
-	// Expect FindRedemption to error because of wrong script type for contract output
-	contractBlock.RawTx[0].Vout[1].ScriptPubKey.Hex = hex.EncodeToString(otherScript)
-	_, err = wallet.FindRedemption(coinID)
-	if err == nil {
-		t.Fatalf("no error for wrong script type")
-	}
-	contractBlock.RawTx[0].Vout[1].ScriptPubKey.Hex = hex.EncodeToString(pkScript)
-
 	// Sanity check to make sure it passes again.
-	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
+	findRedemptionResultCh, err = wallet.FindRedemption(coinID, contract)
 	if err != nil {
-		t.Errorf("unexpected FindRedemption error: %v", err)
+		t.Fatalf("unexpected FindRedemption error: %v", err)
 	}
 	select {
 	case frr := <-findRedemptionResultCh:
@@ -1392,7 +1413,7 @@ func TestFindRedemption(t *testing.T) {
 			t.Fatalf("error after clearing errors: %v", frr.Err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatalf("refind redemption: not found after 2 seconds")
+		t.Fatalf("redemption (re-check) not found after 2 seconds")
 	}
 }
 

@@ -484,6 +484,14 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 		return nil, fmt.Errorf("getcurrentnet failure: %v", err)
 	}
 
+	// Initialize the best block.
+	dcr.tipMtx.Lock()
+	dcr.currentTip, err = dcr.getBestBlock()
+	dcr.tipMtx.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("error initializing best block for DCR: %v", err)
+	}
+
 	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
 		walletSemver, nodeSemver, curnet)
 
@@ -1257,16 +1265,7 @@ func (dcr *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 // best block.
 // The returned channel is used to notify the caller when the secret key is found
 // or if an error occurs during the search.
-//
-// NOTE: FindRedemption is necessary to deal with the case of a maker
-// redeeming but not forwarding their redemption information. The DEX does not
-// monitor for this case. While it will result in the counter-party being
-// penalized, the input still needs to be found so the swap can be completed.
-// This could potentially be an expensive operation if performed long after
-// the swap is broadcast. Realistically, though, the taker should start
-// looking for the maker's redemption beginning at swapconf confirmations
-// regardless of whether the server sends the 'redemption' message or not.
-func (dcr *ExchangeWallet) FindRedemption(coinID dex.Bytes) (chan *asset.FindRedemptionResult, error) {
+func (dcr *ExchangeWallet) FindRedemption(coinID, contract dex.Bytes) (chan *asset.FindRedemptionResult, error) {
 	dcr.findRedemptionMtx.Lock()
 	defer dcr.findRedemptionMtx.Unlock()
 
@@ -1279,29 +1278,29 @@ func (dcr *ExchangeWallet) FindRedemption(coinID dex.Bytes) (chan *asset.FindRed
 		dcr.log.Debugf("duplicate FindRedemption request for %s", contractOp.String())
 		return existingReq.resultChan, nil
 	}
-	rawTx, err := dcr.node.GetRawTransactionVerbose(txHash)
+	tx, err := dcr.node.GetTransaction(txHash)
 	if err != nil {
-		return nil, fmt.Errorf("error getting contract details: %v", err)
-	}
-	if int(vout) > len(rawTx.Vout)-1 {
-		return nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
-	}
-	contractHash, err := dexdcr.ExtractContractHash(rawTx.Vout[vout].ScriptPubKey.Hex)
-	if err != nil {
-		return nil, err
+		if isTxNotFoundErr(err) {
+			return nil, asset.CoinNotFoundError
+		}
+		return nil, fmt.Errorf("error finding transaction %s in wallet: %v", txHash, err)
 	}
 	var contractBlock *block
-	if rawTx.BlockHash != "" {
-		blockHash, err := chainhash.NewHashFromStr(rawTx.BlockHash)
+	if tx.BlockHash != "" {
+		blockHash, err := chainhash.NewHashFromStr(tx.BlockHash)
 		if err != nil {
-			return nil, fmt.Errorf("invalid blockhash %s for contract %s: %v", rawTx.BlockHash, contractOp.String(), err)
+			return nil, fmt.Errorf("invalid blockhash %s for contract %s: %v", tx.BlockHash, contractOp.String(), err)
 		}
-		contractBlock = &block{height: rawTx.BlockHeight, hash: blockHash}
+		txBlock, err := dcr.node.GetBlockVerbose(blockHash, false)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching verbose block %s for contract %s: %v", tx.BlockHash, contractOp.String(), err)
+		}
+		contractBlock = &block{height: txBlock.Height, hash: blockHash}
 	}
 
 	resultChan := make(chan *asset.FindRedemptionResult, 1)
 	dcr.findRedemptionQueue[contractOp] = &findRedemptionReq{
-		contractHash: contractHash,
+		contractHash: dcrutil.Hash160(contract),
 		resultChan:   resultChan,
 	}
 
@@ -1316,16 +1315,15 @@ func (dcr *ExchangeWallet) FindRedemption(coinID dex.Bytes) (chan *asset.FindRed
 	dcr.tipMtx.RLock()
 	bestBlock := dcr.currentTip
 	dcr.tipMtx.RUnlock()
-	go dcr.findRedemptionInBlockRange(contractBlock, bestBlock, contractOp)
+	go dcr.findRedemptionsInBlockRange(contractBlock, bestBlock, []outPoint{contractOp})
 	return resultChan, nil
 }
 
 // findRedemptionInMempool attempts to find spending info for the specified
 // contract by searching every input of all txs in the mempool.
-// If found, the contract's secret  or any error encountered while trying to
-// parse the contract's secret is returned to the caller via the registered
-// result chan. The contract is only retained in the findRedemptionQueue if
-// no mempool tx was found that redeems it.
+// If found, the contract is purged from the findRedemptionQueue and its secret
+// (if successfully parsed) or any error that occurs during parsing is returned
+// to the redemption finder via the registered result chan.
 func (dcr *ExchangeWallet) findRedemptionInMempool(contractOp outPoint) {
 	dcr.log.Debugf("finding redemption for contract %s in mempool", contractOp.String())
 
@@ -1338,12 +1336,6 @@ func (dcr *ExchangeWallet) findRedemptionInMempool(contractOp outPoint) {
 		return
 	}
 
-	dcr.findRedemptionMtx.Lock()
-	defer dcr.findRedemptionMtx.Unlock()
-	req, exists := dcr.findRedemptionQueue[contractOp]
-	if !exists {
-		return // must have been found in a new block already, though unlikely
-	}
 	for _, txHash := range mempoolTxs {
 		tx, err := dcr.node.GetRawTransactionVerbose(txHash)
 		if err != nil {
@@ -1353,21 +1345,8 @@ func (dcr *ExchangeWallet) findRedemptionInMempool(contractOp outPoint) {
 			dcr.log.Debugf("error finding redemption for %s in mempool: %v", contractOp.String(), err)
 			return
 		}
-		for i := range tx.Vin {
-			input := &tx.Vin[i]
-			if input.Vout != contractOp.vout || input.Txid != contractOp.txHash.String() {
-				continue // check next input
-			}
-			var secret []byte
-			sigScript, err := hex.DecodeString(input.ScriptSig.Hex)
-			if err == nil {
-				secret, err = dexdcr.FindKeyPush(sigScript, req.contractHash, chainParams)
-			}
-			if err != nil {
-				dcr.findRedemptionError(contractOp, "mempool", err)
-			} else if secret != nil {
-				dcr.foundRedemption("mempool", contractOp, tx.Txid, i, secret)
-			}
+		foundRedemptions := dcr.findRedemptionsInTx("mempool", tx, []outPoint{contractOp})
+		if foundRedemptions == 1 {
 			return // contract spender found, nothing else to do.
 		}
 	}
@@ -1375,209 +1354,146 @@ func (dcr *ExchangeWallet) findRedemptionInMempool(contractOp outPoint) {
 	dcr.log.Debugf("redemption for contract %s not found in mempool", contractOp.String())
 }
 
-// findRedemptionInBlockRange attempts to find spending info for the specified
-// contract by searching every input of all txs in the provided block range.
-// If found, the contract's secret  or any error encountered while trying to
-// parse the contract's secret is returned to the caller via the registered
-// result chan. The contract is only retained in the findRedemptionQueue if
-// no tx was found in the specified block range that redeems it.
-func (dcr *ExchangeWallet) findRedemptionInBlockRange(startBlock, endBlock *block, contractOp outPoint) {
-	if endBlock == nil {
-		dcr.log.Debugf("finding redemption for contract %s in block %d - best block",
-			contractOp.String(), startBlock.height)
-	} else {
-		dcr.log.Debugf("finding redemption for contract %s in blocks %d - %d",
-			contractOp.String(), startBlock.height, endBlock.height)
-	}
+// findRedemptionsInBlockRange attempts to find spending info for the specified
+// contracts by searching every input of all txs in the provided block range.
+// If spending info is found for any contract, the contract is purged from the
+// findRedemptionQueue and the contract's secret (if successfully parsed) or any
+// error that occurs during parsing is returned to the redemption finder via the
+// registered result chan.
+func (dcr *ExchangeWallet) findRedemptionsInBlockRange(startBlock, endBlock *block, contractOps []outPoint) {
+	contractsCount := len(contractOps)
+	dcr.log.Debugf("finding redemptions for %d contracts in blocks %d - %d",
+		contractsCount, startBlock.height, endBlock.height)
 
-	var lastScannedBlock int64
-	var spenderFound bool
-	searchTxsForRedemption := func(blkHeight int64, txs []chainjson.TxRawResult) bool {
-		lastScannedBlock = blkHeight
-		dcr.findRedemptionMtx.Lock()
-		defer dcr.findRedemptionMtx.Unlock()
-		req, exists := dcr.findRedemptionQueue[contractOp]
-		if !exists {
-			return true // stop fetching more block txs
-		}
-		scanPoint := fmt.Sprintf("block %d", blkHeight)
-		for t := range txs {
-			tx := &txs[t]
-			for i := range tx.Vin {
-				input := &tx.Vin[i]
-				if input.Vout != contractOp.vout || input.Txid != contractOp.txHash.String() {
-					continue // check next input
-				}
-				spenderFound = true
-				var secret []byte
-				sigScript, err := hex.DecodeString(input.ScriptSig.Hex)
-				if err == nil {
-					secret, err = dexdcr.FindKeyPush(sigScript, req.contractHash, chainParams)
-				}
-				if err != nil {
-					dcr.findRedemptionError(contractOp, scanPoint, err)
-				} else if secret != nil {
-					dcr.foundRedemption(scanPoint, contractOp, tx.Txid, i, secret)
-				}
-				return true // stop fetching more block txs
-			}
-		}
-		return false
-	}
-	err := dcr.rangeBlockTxs(startBlock, endBlock, searchTxsForRedemption)
-	if err != nil {
-		scannedBlocks := fmt.Sprintf("blocks %d to %d", startBlock.height, lastScannedBlock)
-		dcr.findRedemptionMtx.Lock()
-		dcr.findRedemptionError(contractOp, scannedBlocks, err)
-		dcr.findRedemptionMtx.Unlock()
-	} else if !spenderFound {
-		dcr.log.Debugf("redemption for contract %s not found in blocks %d - %d",
-			contractOp.String(), startBlock.height, lastScannedBlock)
-	}
-}
-
-// findRedemptionsInBlockRange is called when a new tip is reported, to attempt
-// finding spending info for contracts in the findRedemptionQueue by searching
-// every input of all txs in the provided block range.
-// If found, the contract's secret  or any error encountered while trying to
-// parse the contract's secret is returned to the caller via the registered
-// result chan. The contract is only retained in the findRedemptionQueue if
-// no tx was found in the specified block range that redeems it.
-// If a general, unexpected error occurs, the error is sent to all callers via
-// the registered result channels for all contracts in the queue, and the queue
-// is purged.
-func (dcr *ExchangeWallet) findRedemptionsInBlockRange(startBlock, endBlock *block) {
-	dcr.findRedemptionMtx.RLock()
-	pendingContractsCount := len(dcr.findRedemptionQueue)
-	dcr.findRedemptionMtx.RUnlock()
-	if pendingContractsCount == 0 {
-		return
-	}
-
-	dcr.log.Debugf("finding redemptions for %d contracts in queue in new blocks %d - %d",
-		pendingContractsCount, startBlock.height, endBlock.height)
-
-	var lastScannedBlock int64
-	searchTxsForRedemption := func(blkHeight int64, txs []chainjson.TxRawResult) bool {
-		lastScannedBlock = blkHeight
-		dcr.findRedemptionMtx.Lock()
-		defer dcr.findRedemptionMtx.Unlock()
-		scanPoint := fmt.Sprintf("block %d", blkHeight)
-		for t := range txs {
-			tx := &txs[t]
-			for i := range tx.Vin {
-				input := &tx.Vin[i]
-				for contractOp, req := range dcr.findRedemptionQueue {
-					if input.Vout != contractOp.vout || input.Txid != contractOp.txHash.String() {
-						continue // check this input against next contract
-					}
-					var secret []byte
-					sigScript, err := hex.DecodeString(input.ScriptSig.Hex)
-					if err == nil {
-						secret, err = dexdcr.FindKeyPush(sigScript, req.contractHash, chainParams)
-					}
-					if err != nil {
-						dcr.findRedemptionError(contractOp, scanPoint, err)
-					} else if secret != nil {
-						dcr.foundRedemption(scanPoint, contractOp, tx.Txid, i, secret)
-					}
-					break // skip checking other contracts for this input and check next input
-				}
-			}
-		}
-		pendingContractsCount = len(dcr.findRedemptionQueue)
-		return pendingContractsCount == 0 // stop fetching more block txs if queue is empty.
-	}
-	err := dcr.rangeBlockTxs(startBlock, endBlock, searchTxsForRedemption)
-	if err != nil {
-		// An error occurred during find redemption and redemption
-		// search cannot continue reliably. Notify callers of error
-		// and delete all find redemption requests. If a caller wishes
-		// to repeat find redemption attempts for any of the deleted
-		// requests, caller may re-call dcr.FindRedemption.
-		scannedBlocks := fmt.Sprintf("new blocks %d to %d", startBlock.height, lastScannedBlock)
-		dcr.findRedemptionMtx.Lock()
-		for contractOp := range dcr.findRedemptionQueue {
-			dcr.findRedemptionError(contractOp, scannedBlocks, err)
-		}
-		dcr.findRedemptionMtx.Unlock()
-	} else if pendingContractsCount == 0 {
-		dcr.log.Debugf("found redemptions for all contracts in queue in new blocks %d - %d",
-			startBlock.height, lastScannedBlock)
-	} else {
-		dcr.log.Debugf("redemptions not found for %d contracts in queue in new blocks %d - %d",
-			pendingContractsCount, startBlock.height, lastScannedBlock)
-	}
-}
-
-func (dcr *ExchangeWallet) rangeBlockTxs(startBlock, endBlock *block, f func(blkHeight int64, txs []chainjson.TxRawResult) bool) error {
 	nextBlockHash := startBlock.hash
-	for {
+	var lastScannedBlockHeight int64
+	var redemptionsFound int
+
+rangeBlocks:
+	for nextBlockHash != nil && lastScannedBlockHeight < endBlock.height {
 		blk, err := dcr.node.GetBlockVerbose(nextBlockHash, true)
 		if err != nil {
-			return fmt.Errorf("error fetching verbose block %s: %v", nextBlockHash, err)
+			// Redemption search for this set of contracts is compromised. Notify
+			// the redemption finder(s) of this fatal error and cancel redemption
+			// search for these contracts. The redemption finder(s) may re-call
+			// dcr.FindRedemption to restart find redemption attempts for any of
+			// these contracts.
+			err = fmt.Errorf("error fetching verbose block %s: %v", nextBlockHash, err)
+			dcr.fatalFindRedemptionsError(err, contractOps)
+			return
 		}
-		if f(blk.Height, blk.RawTx) {
-			return nil
+		scanPoint := fmt.Sprintf("block %d", blk.Height)
+		lastScannedBlockHeight = blk.Height
+		blkTxs := append(blk.RawTx, blk.RawSTx...)
+		for t := range blkTxs {
+			tx := &blkTxs[t]
+			redemptionsFound += dcr.findRedemptionsInTx(scanPoint, tx, contractOps)
+			if redemptionsFound == contractsCount {
+				break rangeBlocks
+			}
 		}
-		if f(blk.Height, blk.RawSTx) {
-			return nil
+		if blk.NextHash == "" {
+			nextBlockHash = nil
+		} else {
+			nextBlockHash, err = chainhash.NewHashFromStr(blk.NextHash)
+			if err != nil {
+				err = fmt.Errorf("hash decode error %s: %v", blk.NextHash, err)
+				dcr.fatalFindRedemptionsError(err, contractOps)
+				return
+			}
 		}
-		if blk.NextHash == "" || (endBlock != nil && blk.Height >= endBlock.height) {
-			return nil
-		}
-		nextBlockHash, err = chainhash.NewHashFromStr(blk.NextHash)
-		if err != nil {
-			return fmt.Errorf("hash decode error %s: %v", blk.NextHash, err)
-		}
+	}
+
+	dcr.findRedemptionMtx.RLock()
+	contractsInQueue := len(dcr.findRedemptionQueue)
+	dcr.findRedemptionMtx.RUnlock()
+
+	if redemptionsFound > 0 {
+		dcr.log.Debugf("found redemptions for %d contracts in blocks %d - %d, %d contracts left in queue",
+			redemptionsFound, startBlock.height, lastScannedBlockHeight, contractsInQueue)
+	} else {
+		dcr.log.Debugf("redemptions not found for %d contracts in blocks %d - %d, %d contracts left in queue",
+			contractsCount, startBlock.height, lastScannedBlockHeight, contractsInQueue)
 	}
 }
 
-// foundRedemption returns the specified contract's secret and the txid, input
-// id of the spending input via the contract's registered result channel. Also
-// purges the contract from the findRedemptionQueue.
-// This method MUST be called with the findRedemptionMtx lock held for writes.
-func (dcr *ExchangeWallet) foundRedemption(foundIn string, contractOp outPoint, redeemTxId string, inputIndex int, secret []byte) {
-	redeemTxHash, err := chainhash.NewHashFromStr(redeemTxId)
-	if err != nil {
-		dcr.findRedemptionError(contractOp, foundIn, err)
-		return
+// findRedemptionsInTx checks if any input of the passed tx spends any of the
+// specified contract outpoints. If spending info is found for any contract, the
+// contract's secret or any error encountered while trying to parse the secret
+// is returned to the redemption finder via the registered result chan; and the
+// contract is purged from the findRedemptionQueue.
+// Returns the number of redemptions found.
+func (dcr *ExchangeWallet) findRedemptionsInTx(scanPoint string, tx *chainjson.TxRawResult, contractOps []outPoint) int {
+	dcr.findRedemptionMtx.Lock()
+	defer dcr.findRedemptionMtx.Unlock()
+
+	contractsCount := len(contractOps)
+	var redemptionsFound int
+
+	for inputIndex := 0; inputIndex < len(tx.Vin) && redemptionsFound < contractsCount; inputIndex++ {
+		input := &tx.Vin[inputIndex]
+		for _, contractOp := range contractOps {
+			req, exists := dcr.findRedemptionQueue[contractOp]
+			if !exists || input.Vout != contractOp.vout || input.Txid != contractOp.txHash.String() {
+				continue // check this input against next contract
+			}
+
+			redemptionsFound++
+			var sigScript, secret []byte
+			redeemTxHash, err := chainhash.NewHashFromStr(tx.Txid)
+			if err == nil {
+				sigScript, err = hex.DecodeString(input.ScriptSig.Hex)
+			}
+			if err == nil {
+				secret, err = dexdcr.FindKeyPush(sigScript, req.contractHash, chainParams)
+			}
+
+			if err != nil {
+				dcr.log.Debugf("error parsing contract secret for %s from tx input %s:%d in %s: %v",
+					contractOp.String(), tx.Txid, inputIndex, scanPoint, err)
+				req.resultChan <- &asset.FindRedemptionResult{
+					ContractCoinID: toCoinID(&contractOp.txHash, contractOp.vout),
+					Err:            err,
+				}
+			} else {
+				dcr.log.Debugf("redemption for contract %s found in tx input %s:%d in %s",
+					contractOp.String(), tx.Txid, inputIndex, scanPoint)
+				req.resultChan <- &asset.FindRedemptionResult{
+					ContractCoinID:   toCoinID(&contractOp.txHash, contractOp.vout),
+					RedemptionCoinID: toCoinID(redeemTxHash, uint32(inputIndex)),
+					Secret:           secret,
+				}
+			}
+			close(req.resultChan)
+			delete(dcr.findRedemptionQueue, contractOp)
+			break // skip checking other contracts for this input and check next input
+		}
 	}
 
-	req, exists := dcr.findRedemptionQueue[contractOp]
-	if !exists {
-		dcr.log.Debugf("missing request for found redemption (%s, found in %s)", contractOp.String(), foundIn)
-		return
-	}
-
-	dcr.log.Debugf("redemption for contract %s found in %s", contractOp.String(), foundIn)
-	req.resultChan <- &asset.FindRedemptionResult{
-		ContractCoinID:   toCoinID(&contractOp.txHash, contractOp.vout),
-		RedemptionCoinID: toCoinID(redeemTxHash, uint32(inputIndex)),
-		Secret:           secret,
-	}
-	close(req.resultChan)
-	delete(dcr.findRedemptionQueue, contractOp)
+	return redemptionsFound
 }
 
-// findRedemptionError returns any error encountered while attempting to find
-// redemption info for the specified contract via the contract's registered
-// result channel.
-// This method MUST be called with the findRedemptionMtx lock held for writes.
-func (dcr *ExchangeWallet) findRedemptionError(contractOp outPoint, lastScanned string, err error) {
-	req, exists := dcr.findRedemptionQueue[contractOp]
-	if !exists {
-		dcr.log.Debugf("missing request for find redemption error (%s, %s): %v", contractOp.String(), lastScanned, err)
-		return
+// fatalFindRedemptionsError should be called when an error occurs that prevents
+// redemption search for the specified contracts from continuing reliably. The
+// error will be propagated to the seeker(s) of these contracts' redemptions via
+// the registered result channels and the contracts will be removed from the
+// findRedemptionQueue.
+func (dcr *ExchangeWallet) fatalFindRedemptionsError(err error, contractOps []outPoint) {
+	dcr.findRedemptionMtx.Lock()
+	dcr.log.Debugf("stopping redemption search for %d contracts in queue: %v", len(contractOps), err)
+	for _, contractOp := range contractOps {
+		req, exists := dcr.findRedemptionQueue[contractOp]
+		if !exists {
+			continue
+		}
+		req.resultChan <- &asset.FindRedemptionResult{
+			ContractCoinID: toCoinID(&contractOp.txHash, contractOp.vout),
+			Err:            err,
+		}
+		close(req.resultChan)
+		delete(dcr.findRedemptionQueue, contractOp)
 	}
-
-	dcr.log.Debugf("error finding redemption for %s in %s: %v", contractOp.String(), lastScanned, err)
-	req.resultChan <- &asset.FindRedemptionResult{
-		ContractCoinID: toCoinID(&contractOp.txHash, contractOp.vout),
-		Err:            err,
-	}
-	close(req.resultChan)
-	delete(dcr.findRedemptionQueue, contractOp)
+	dcr.findRedemptionMtx.Unlock()
 }
 
 // Refund refunds a contract. This can only be used after the time lock has
@@ -2165,97 +2081,111 @@ func (dcr *ExchangeWallet) getKeys(addr dcrutil.Address) (*secp256k1.PrivateKey,
 // when the block changes. New blocks are also scanned for potential contract
 // redeems.
 func (dcr *ExchangeWallet) monitorBlocks(ctx context.Context) {
-	getBestBlock := func() (*block, error) {
-		hash, height, err := dcr.node.GetBestBlock()
-		if err != nil {
-			return nil, err
-		}
-		return &block{hash: hash, height: height}, nil
-	}
-
-	var err error
-	dcr.tipMtx.Lock()
-	dcr.currentTip, err = getBestBlock()
-	dcr.tipMtx.Unlock()
-	if err != nil {
-		dcr.tipChange(fmt.Errorf("error initializing best block for DCR: %v", err))
-	}
-
 	ticker := time.NewTicker(blockTicker)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			newTip, err := getBestBlock()
-			if err != nil {
-				dcr.tipChange(fmt.Errorf("failed to get best block hash from DCR node"))
-				continue
-			}
-
-			dcr.tipMtx.RLock()
-			sameTip := dcr.currentTip != nil && newTip.hash.IsEqual(dcr.currentTip.hash)
-			dcr.tipMtx.RUnlock()
-			if sameTip {
-				continue
-			}
-
-			var prevTipHash *chainhash.Hash
-			dcr.tipMtx.Lock()
-			if dcr.currentTip != nil {
-				prevTipHash = dcr.currentTip.hash
-			}
-			dcr.currentTip = newTip
-			dcr.tipMtx.Unlock()
-			dcr.log.Debugf("new tip: height %d, hash %s, previously %s", newTip.height, newTip.hash, prevTipHash)
-			dcr.tipChange(nil)
-
-			// Search for contract redemption in new blocks if there
-			// are contracts pending redemption.
-			dcr.findRedemptionMtx.RLock()
-			pendingContractsCount := len(dcr.findRedemptionQueue)
-			dcr.findRedemptionMtx.RUnlock()
-			if pendingContractsCount == 0 {
-				continue
-			}
-
-			// Use the previous tip hash to determine the starting point
-			// for the redemption search.
-			// If the starting point cannot be determined because previous
-			// tip was not set or some other reason, use the new tip as the
-			// starting point to search the new tip alone.
-			start := newTip
-			if prevTipHash != nil {
-				prevTip, err := dcr.node.GetBlockVerbose(prevTipHash, false)
-				if err != nil {
-					dcr.log.Errorf("getBlockVerbose error for prev tip hash %s: %v", prevTipHash, err)
-				} else if prevTip.Confirmations < 0 {
-					// There's been a re-org, common ancestor will be height
-					// plus negative confirmation e.g. 155 + (-3) = 152.
-					reorgHeight := prevTip.Height + prevTip.Confirmations
-					reorgHash, err := dcr.node.GetBlockHash(reorgHeight)
-					if err != nil {
-						dcr.log.Errorf("getBlockHash error for reorg height %d: %v", reorgHeight, err)
-					} else {
-						start = &block{hash: reorgHash, height: reorgHeight}
-					}
-				} else if newTip.height-prevTip.Height > 1 {
-					// more than 1 block mined since last tip, start at
-					// prev tip height + 1.
-					afterPrivTip := prevTip.Height + 1
-					hashAfterPrevTip, err := dcr.node.GetBlockHash(afterPrivTip)
-					if err != nil {
-						dcr.log.Errorf("getBlockHash error for height %d: %v", afterPrivTip, err)
-					} else {
-						start = &block{hash: hashAfterPrevTip, height: afterPrivTip}
-					}
-				}
-			}
-			go dcr.findRedemptionsInBlockRange(start, newTip)
-
+			dcr.checkForNewBlocks()
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+// checkForNewBlocks checks for new blocks. When a tip change is detected, the
+// tipChange callback function is invoked and a goroutine is started to check
+// if any contracts in the findRedemptionQueue are redeemed in the new blocks.
+func (dcr *ExchangeWallet) checkForNewBlocks() {
+	newTip, err := dcr.getBestBlock()
+	if err != nil {
+		dcr.tipChange(fmt.Errorf("failed to get best block from DCR node"))
+		return
+	}
+
+	// This method is called frequently. Don't hold write lock
+	// unless tip has changed.
+	dcr.tipMtx.RLock()
+	sameTip := dcr.currentTip.hash.IsEqual(newTip.hash)
+	dcr.tipMtx.RUnlock()
+	if sameTip {
+		return // tip has not changed
+	}
+
+	dcr.tipMtx.Lock()
+	defer dcr.tipMtx.Unlock()
+
+	prevTip := dcr.currentTip
+	dcr.currentTip = newTip
+	dcr.log.Debugf("tip change: %d (%s) => %d (%s)", prevTip.height, prevTip.hash, newTip.height, newTip.hash)
+	dcr.tipChange(nil)
+
+	// Search for contract redemption in new blocks if there
+	// are contracts pending redemption.
+	dcr.findRedemptionMtx.RLock()
+	pendingContractsCount := len(dcr.findRedemptionQueue)
+	contractOps := make([]outPoint, 0, pendingContractsCount)
+	for contractOp := range dcr.findRedemptionQueue {
+		contractOps = append(contractOps, contractOp)
+	}
+	dcr.findRedemptionMtx.RUnlock()
+	if pendingContractsCount == 0 {
+		return
+	}
+
+	// Use the previous tip hash to determine the starting point for
+	// the redemption search. If there was a re-org, the starting point
+	// would be the common ancestor of the previous tip and the new tip.
+	// Otherwise, the starting point would be the block at previous tip
+	// height + 1.
+	var startPoint *block
+	var startPointErr error
+	prevTipBlock, err := dcr.node.GetBlockVerbose(prevTip.hash, false)
+	switch {
+	case err != nil:
+		startPointErr = fmt.Errorf("getBlockHeader error for prev tip hash %s: %v", prevTip.hash, err)
+	case prevTipBlock.Confirmations < 0:
+		// There's been a re-org, common ancestor will be height
+		// plus negative confirmation e.g. 155 + (-3) = 152.
+		reorgHeight := prevTipBlock.Height + prevTipBlock.Confirmations
+		dcr.log.Debugf("reorg detected from height %d to %d", reorgHeight, newTip.height)
+		reorgHash, err := dcr.node.GetBlockHash(reorgHeight)
+		if err != nil {
+			startPointErr = fmt.Errorf("getBlockHash error for reorg height %d: %v", reorgHeight, err)
+		} else {
+			startPoint = &block{hash: reorgHash, height: reorgHeight}
+		}
+	case newTip.height-prevTipBlock.Height > 1:
+		// 2 or more blocks mined since last tip, start at prevTip height + 1.
+		afterPrivTip := prevTipBlock.Height + 1
+		hashAfterPrevTip, err := dcr.node.GetBlockHash(afterPrivTip)
+		if err != nil {
+			startPointErr = fmt.Errorf("getBlockHash error for height %d: %v", afterPrivTip, err)
+		} else {
+			startPoint = &block{hash: hashAfterPrevTip, height: afterPrivTip}
+		}
+	default:
+		// Just 1 new block since last tip report, search the lone block.
+		startPoint = newTip
+	}
+
+	// Redemption search would be compromised if the starting point cannot
+	// be determined, as searching just the new tip might result in blocks
+	// being omitted from the search operation. If that happens, cancel all
+	// find redemption requests in queue.
+	if startPointErr != nil {
+		dcr.fatalFindRedemptionsError(fmt.Errorf("new blocks handler error: %v", startPointErr), contractOps)
+	} else {
+		go dcr.findRedemptionsInBlockRange(startPoint, newTip, contractOps)
+	}
+}
+
+func (dcr *ExchangeWallet) getBestBlock() (*block, error) {
+	hash, height, err := dcr.node.GetBestBlock()
+	if err != nil {
+		return nil, err
+	}
+	return &block{hash: hash, height: height}, nil
 }
 
 // wireBytes dumps the serialized transaction bytes.

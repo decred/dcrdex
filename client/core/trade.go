@@ -1301,11 +1301,12 @@ func (t *trackedTrade) finalizeRedeemAction(match *matchTracker, coinID []byte) 
 
 func (t *trackedTrade) beginFindRedemption(match *matchTracker) {
 	swapCoinID := dex.Bytes(match.MetaData.Proof.TakerSwap)
-	fromAsset := t.wallets.fromAsset.ID
-	resultChan, err := t.wallets.fromWallet.FindRedemption(swapCoinID)
+	contract := dex.Bytes(match.MetaData.Proof.CounterScript)
+	fromID := t.wallets.fromAsset.ID
+	resultChan, err := t.wallets.fromWallet.FindRedemption(swapCoinID, contract)
 	if err != nil {
 		log.Errorf("failed to start redemption search for match %v, %s contract %s: %v",
-			match.id, unbip(fromAsset), coinIDString(fromAsset, swapCoinID), err)
+			match.id, unbip(fromID), coinIDString(fromID, swapCoinID), err)
 		return
 	}
 	// Redemption search started, start goroutine to monitor result channel.
@@ -1352,7 +1353,6 @@ func (t *trackedTrade) waitForRedemption(redemptionChan chan *asset.FindRedempti
 	}
 
 	_, _, proof, _ := match.parts()
-	// TODO: Is this validation necessary?
 	if !t.wallets.toWallet.ValidateSecret(frr.Secret, proof.SecretHash) {
 		t.mtx.Unlock()
 		log.Errorf("FindRedemption error: coin (%s: %s), order %s, match %s, invalid secret %s, hash %s",

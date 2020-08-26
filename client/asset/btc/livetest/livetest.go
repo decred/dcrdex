@@ -304,7 +304,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 
 	// Find the redemption
 	swapCoin := receipts[0].Coin()
-	findRedemptionResultCh, err := rig.gamma().FindRedemption(swapCoin.ID())
+	findRedemptionResultCh, err := rig.gamma().FindRedemption(swapCoin.ID(), swapCoin.Redeem())
 	if err != nil {
 		t.Errorf("unexpected find unconfirmed redemption error: %v", err)
 	}
@@ -328,7 +328,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(1)
-	findRedemptionResultCh, err = rig.gamma().FindRedemption(swapCoin.ID())
+	findRedemptionResultCh, err = rig.gamma().FindRedemption(swapCoin.ID(), swapCoin.Redeem())
 	if err != nil {
 		t.Errorf("unexpected find confirmed redemption error: %v", err)
 	}
