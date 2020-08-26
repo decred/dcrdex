@@ -49,7 +49,7 @@ const (
 	defaultRPCPort             = "7232"
 	defaultAdminSrvAddr        = "127.0.0.1:6542"
 
-	defaultCancelThresh     = 0.6
+	defaultCancelThresh     = 8.0
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
 	defaultBroadcastTimeout = time.Minute

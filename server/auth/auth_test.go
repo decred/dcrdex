@@ -326,7 +326,7 @@ func TestMain(m *testing.M) {
 			RegistrationFee: tRegFee,
 			FeeConfs:        tCheckFeeConfs,
 			FeeChecker:      tCheckFee,
-			CancelThreshold: 0.8,
+			CancelThreshold: 6.2,
 		})
 		go authMgr.Run(ctx)
 		rig = &testRig{
@@ -408,17 +408,65 @@ func TestConnect(t *testing.T) {
 		oidsCancels:    []order.OrderID{{0x2}},
 		oidsCanceled:   []order.OrderID{{0x1}},
 		timesCanceled:  []int64{1235},
-	}) // 50%
+	}) // 1:1
 	defer rig.storage.setRatioData(&ratioData{}) // clean slate
 
 	// Close account on connect with failing cancel ratio.
-	rig.mgr.cancelThresh = 0.2
-	connectUser(t, user)
+	rig.mgr.cancelThresh = 0.99 // need more completions than cancels
+	tryConnectUser(t, user, false)
 	if rig.storage.closedID != user.acctID {
 		t.Fatalf("Expected account %v to be closed on connect, got %v", user.acctID, rig.storage.closedID)
 	}
-	rig.storage.closedID = account.AccountID{}
-	rig.mgr.cancelThresh = 0.8 // passable
+
+	// Try again just meeting cancel ratio.
+	rig.storage.closedID = account.AccountID{} // unclose the account in db
+	rig.mgr.cancelThresh = 1.0                 // just passable threshold for 1 cancel : 1 completion
+
+	connectUser(t, user)
+	if rig.storage.closedID == user.acctID {
+		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
+	}
+
+	// Add another cancel, bringing cancels to 2, completions 1 for a ratio of
+	// 2:1 (2.0), and total of 3 > threshold, so no grace period.
+	rig.storage.ratio.oidsCanceled = append(rig.storage.ratio.oidsCanceled, order.OrderID{0x3})
+	rig.storage.ratio.oidsCancels = append(rig.storage.ratio.oidsCancels, order.OrderID{0x4})
+	rig.storage.ratio.timesCanceled = append(rig.storage.ratio.timesCanceled, 12341234)
+
+	tryConnectUser(t, user, false)
+	if rig.storage.closedID != user.acctID {
+		t.Fatalf("Expected account %v to be closed on connect, got %v", user.acctID, rig.storage.closedID)
+	}
+
+	// Try again just meeting cancel ratio.
+	rig.storage.closedID = account.AccountID{} // unclose the account in db
+	rig.mgr.cancelThresh = 2.0                 // just passable threshold for 2 cancel : 1 completion
+
+	tryConnectUser(t, user, false)
+	if rig.storage.closedID == user.acctID {
+		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
+	}
+
+	// Test the grace period (total <= floor(threshold) and no completions)
+	rig.mgr.cancelThresh = 2.0 // total == cancelThresh
+	rig.storage.ratio.timesCompleted = nil
+	rig.storage.ratio.oidsCompleted = nil
+	tryConnectUser(t, user, false)
+	if rig.storage.closedID == user.acctID {
+		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
+	}
+
+	rig.mgr.cancelThresh = 2.2 // total == floor(cancelThresh)
+	tryConnectUser(t, user, false)
+	if rig.storage.closedID == user.acctID {
+		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
+	}
+
+	rig.mgr.cancelThresh = 3 // total < floor(cancelThresh)
+	tryConnectUser(t, user, false)
+	if rig.storage.closedID == user.acctID {
+		t.Fatalf("Expected account %v to NOT be closed on connect, but it was.", user)
+	}
 
 	// Connect the user.
 	respMsg := connectUser(t, user)

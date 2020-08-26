@@ -22,7 +22,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
-const cancelThreshWindow = 25 // spec
+const cancelThreshWindow = 100 // spec
 
 var (
 	ErrUserNotConnected = dex.ErrorKind("user not connected")
@@ -79,12 +79,13 @@ type clientInfo struct {
 	suspended    bool // penalized, disallow new orders
 }
 
-func (client *clientInfo) cancelRatio() float64 {
+// ratio will be NaN if total is 0, Inf if completed is 0 but cancels > 0.
+func (client *clientInfo) cancelRatio() (float64, int) {
 	client.mtx.Lock()
 	total, cancels := client.recentOrders.counts()
 	client.mtx.Unlock()
-	// completed = total - cancels
-	return float64(cancels) / float64(total)
+	completed := total - cancels
+	return float64(cancels) / float64(completed), total
 }
 
 func (client *clientInfo) suspend() {
@@ -918,7 +919,9 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		recentOrders: latestFinished,
 		suspended:    !open,
 	}
-	if cancelRatio := client.cancelRatio(); !auth.anarchy && cancelRatio > auth.cancelThresh {
+	if cancelRatio, total := client.cancelRatio(); !auth.anarchy &&
+		cancelRatio > auth.cancelThresh && // NaN cancelRatio compares false, Inf true
+		total > int(auth.cancelThresh) /* floor */ {
 		// Account should already be closed, but perhaps the server crashed
 		// or the account was not penalized before shutdown.
 		client.suspended = true
