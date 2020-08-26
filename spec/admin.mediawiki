@@ -22,7 +22,7 @@ possible.
 |-
 | registration&nbsp;fees || [[fundamentals.mediawiki/#Fees|Fees]] || atoms || 1e8 (1 DCR)
 |-
-| cancellation&nbsp;threshold || [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|Rule 3]] || unitless ratio || 0.6
+| cancellation&nbsp;threshold || [[community.mediawiki/#Rule_3_An_accounts_cancellation_rate_must_not_exceed_the_threshold|Rule 3]] || unitless ratio || 0.6
 |-
 | broadcast&nbsp;timeout || [[fundamentals.mediawiki/#Exchange_Variables|Exchange Variables]] &amp; [[community.mediawiki/#rule-1-clients-must-respond-to-all-preimage-requests|Rule 1]] || milliseconds || 60,000
 |}

@@ -22,9 +22,9 @@ by the user immediately after connecting via the
 
 ===Global Variables===
 
-The cancellation ratio for a user is the ratio of their canceled order count to
-completed order count. A user's cancellation ratio must remain below the configured
-[[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|'''cancellation threshold''']]
+The cancellation rate for a user is the ratio of their canceled order count to
+completed order count. A user's cancellation rate must remain below the configured
+[[community.mediawiki/#Rule_3_An_accounts_cancellation_rate_must_not_exceed_the_threshold|'''cancellation threshold''']]
 (<code>cancelmax</code>) to avoid penalty.
 
 The '''broadcast timeout''' (<code>btimeout</code>) is the amount of time a
@@ -96,7 +96,7 @@ respond with its current configuration.
 {|
 ! field          !! type  !! description
 |-
-| cancelmax      || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_remain_below_the_threshold|cancellation threshold]]
+| cancelmax      || float || the [[community.mediawiki/#Rule_3_An_accounts_cancellation_ratio_must_not_exceed_the_threshold|cancellation threshold]]
 |-
 | btimeout       || int   || the broadcast timeout
 |-
