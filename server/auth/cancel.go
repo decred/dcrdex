@@ -97,11 +97,10 @@ func (lo *latestOrders) add(o *oidStamped) {
 	if i == int(lo.cap) /* i == n && n == int(lo.cap) */ {
 		// The new one is the oldest/smallest, but already at capacity.
 		return
-	} else {
-		// Insert at proper location.
-		i = n - i // i-1 is first location that stays
-		lo.orders = append(lo.orders[:i], append([]*oidStamped{o}, lo.orders[i:]...)...)
 	}
+	// Insert at proper location.
+	i = n - i // i-1 is first location that stays
+	lo.orders = append(lo.orders[:i], append([]*oidStamped{o}, lo.orders[i:]...)...)
 
 	// Pop one order if the slice was at capacity prior to pushing the new one.
 	if len(lo.orders) > int(lo.cap) {

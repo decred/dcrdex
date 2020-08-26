@@ -358,16 +358,19 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("db.Open: %v", err)
 	}
 
+	cancelThresh := cfg.CancelThreshold
 	authCfg := auth.Config{
 		Storage:         storage,
 		Signer:          cfg.DEXPrivKey,
 		RegistrationFee: cfg.RegFeeAmount,
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.FeeCoin,
-		CancelThreshold: cfg.CancelThreshold,
+		CancelThreshold: cancelThresh,
 		Anarchy:         cfg.Anarchy,
 	}
 
+	log.Infof("Cancellation ratio threshold %f, new user grace period %d cancels",
+		cancelThresh, int(cancelThresh))
 	authMgr := auth.NewAuthManager(&authCfg)
 	startSubSys("Auth manager", authMgr)
 

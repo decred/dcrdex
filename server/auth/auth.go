@@ -79,13 +79,15 @@ type clientInfo struct {
 	suspended    bool // penalized, disallow new orders
 }
 
-// ratio will be NaN if total is 0, Inf if completed is 0 but cancels > 0.
-func (client *clientInfo) cancelRatio() (float64, int) {
-	client.mtx.Lock()
-	total, cancels := client.recentOrders.counts()
-	client.mtx.Unlock()
-	completed := total - cancels
-	return float64(cancels) / float64(completed), total
+func (auth *AuthManager) checkCancelRatio(client *clientInfo) (cancels, completions int, ratio float64, penalize bool) {
+	var total int
+	total, cancels = client.recentOrders.counts()
+	completions = total - cancels
+	// ratio will be NaN if total is 0, Inf if completed is 0 but cancels > 0.
+	ratio = float64(cancels) / float64(completions)
+	penalize = ratio > auth.cancelThresh && // NaN cancelRatio compares false, Inf true
+		total > int(auth.cancelThresh) // floor(thresh)
+	return
 }
 
 func (client *clientInfo) suspend() {
@@ -161,17 +163,19 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // the 'connect' route.
 type AuthManager struct {
 	anarchy      bool
-	connMtx      sync.RWMutex
 	cancelThresh float64
-	users        map[account.AccountID]*clientInfo
-	conns        map[uint64]*clientInfo
 	storage      Storage
 	signer       Signer
 	regFee       uint64
 	checkFee     FeeChecker
 	feeConfs     int64
+
 	// latencyQ is a queue for coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
+
+	connMtx sync.RWMutex
+	users   map[account.AccountID]*clientInfo
+	conns   map[uint64]*clientInfo
 
 	pendingRequestsMtx sync.Mutex
 	pendingRequests    map[account.AccountID]map[uint64]*timedRequest
@@ -245,27 +249,35 @@ func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.
 // to the ID of the cancel order itself, while target is non-nil for cancel
 // orders.
 func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, tMS int64) {
-	auth.connMtx.RLock()
-	defer auth.connMtx.RUnlock()
-
-	client := auth.users[user]
+	client := auth.user(user)
 	if client == nil {
 		log.Errorf("unknown client for user %v", user)
 		return
 	}
 
+	// Update recent orders and check/set suspended status atomically.
 	client.mtx.Lock()
+	defer client.mtx.Unlock()
+
 	client.recentOrders.add(&oidStamped{
 		OrderID: oid,
 		time:    tMS,
 		target:  target,
 	})
-	client.mtx.Unlock()
 
 	log.Debugf("Recorded order %v that has finished processing: user=%v, time=%v, target=%v",
 		oid, user, tMS, target)
 
-	// TODO: decide when and where to count and penalize
+	// Recompute cancellation and penalize violation.
+	cancels, completions, ratio, penalize := auth.checkCancelRatio(client)
+	log.Tracef("User %v cancellation ratio is now %v (%d:%d). Violation = %v", user,
+		ratio, cancels, completions, penalize)
+	if penalize && !auth.anarchy && !client.suspended {
+		log.Infof("Suspending user %v for exceeding the cancellation ratio threshold %f. "+
+			"(%d cancels : %d completions => %f)", user, auth.cancelThresh, cancels, completions, ratio)
+		client.suspended = true
+		auth.storage.CloseAccount(user, account.CancellationRatio)
+	}
 }
 
 // Run runs the AuthManager until the context is canceled. Satisfies the
@@ -919,22 +931,21 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		recentOrders: latestFinished,
 		suspended:    !open,
 	}
-	if cancelRatio, total := client.cancelRatio(); !auth.anarchy &&
-		cancelRatio > auth.cancelThresh && // NaN cancelRatio compares false, Inf true
-		total > int(auth.cancelThresh) /* floor */ {
+	cancels, completions, ratio, penalize := auth.checkCancelRatio(client)
+	if penalize && !auth.anarchy {
 		// Account should already be closed, but perhaps the server crashed
 		// or the account was not penalized before shutdown.
 		client.suspended = true
 		// The account might now be closed if the cancellation ratio was
 		// exceeded while the server was running in anarchy mode.
 		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRatio)
-		log.Debugf("Suspended account %v (cancellation ratio = %f) connected.",
-			acctInfo.ID, cancelRatio)
+		log.Debugf("Suspended account %v (cancellation ratio = %d:%d = %f) connected.",
+			acctInfo.ID, cancels, completions, ratio)
 	}
 
 	pendingReqs, pendingMsgs := auth.addClient(client)
-	log.Debugf("User %s connected from %s with %d pending requests and %d pending responses/notifications.",
-		acctInfo.ID, conn.IP(), len(pendingReqs), len(pendingMsgs))
+	log.Debugf("User %s connected from %s with %d pending requests and %d pending responses/notifications, cancel ratio = %d:%d (%v)",
+		acctInfo.ID, conn.IP(), len(pendingReqs), len(pendingMsgs), cancels, completions, ratio)
 
 	// Send pending requests for this user.
 	for _, pr := range pendingReqs {
