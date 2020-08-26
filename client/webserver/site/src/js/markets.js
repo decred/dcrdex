@@ -1045,12 +1045,13 @@ export default class MarketsPage extends BasePage {
 
   /* removeTableOrder removes a single order from its table. */
   removeTableOrder (order) {
-    const tbody = order.sell ? this.page.sellRows : this.page.buyRows
     const token = order.token
-    for (const tr of Array.from(tbody.children)) {
-      if (tr.order.token === token) {
-        tr.remove()
-        return
+    for (const tbody of [this.page.sellRows, this.page.buyRows]) {
+      for (const tr of Array.from(tbody.children)) {
+        if (tr.order.token === token) {
+          tr.remove()
+          return
+        }
       }
     }
   }
