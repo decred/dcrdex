@@ -1198,7 +1198,7 @@ func TestRegister(t *testing.T) {
 					tCore.waiterMtx.Lock()
 					waiterCount := len(tCore.blockWaiters)
 					tCore.waiterMtx.Unlock()
-					if waiterCount > 0 {
+					if waiterCount > 0 { // when verifyRegistrationFee adds a waiter, then we can trigger tip change
 						tWallet.setConfs(0)
 						tCore.tipChange(tDCR.ID, nil)
 						return
@@ -1253,25 +1253,25 @@ func TestRegister(t *testing.T) {
 		return nil
 	}
 
-	getBalanceNote := func() *BalanceNote {
+	// The feepayment note for mined fee payment txn notification to server, and
+	// the balance note from tip change are concurrent and thus come in no
+	// guaranteed order.
+	getFeeAndBalanceNote := func() *FeePaymentNote {
 		t.Helper()
-
-		ntfn := getNotification("balance")
-		note, ok := ntfn.(*BalanceNote)
-		if !ok {
-			t.Fatalf("wrong notification (%T). Expected BalanceNote", ntfn)
+		var feeNote *FeePaymentNote
+		var balanceNote *BalanceNote
+		for feeNote == nil || balanceNote == nil {
+			ntfn := getNotification("feepayment or balance")
+			switch note := ntfn.(type) {
+			case *FeePaymentNote:
+				feeNote = note
+			case *BalanceNote:
+				balanceNote = note
+			default:
+				t.Fatalf("wrong notification (%T). Expected FeePaymentNote or BalanceNote", ntfn)
+			}
 		}
-		return note
-	}
-
-	getFeeNote := func() *FeePaymentNote {
-		t.Helper()
-		ntfn := getNotification("feepayment")
-		note, ok := ntfn.(*FeePaymentNote)
-		if !ok {
-			t.Fatalf("wrong notification (%T). Expected FeePaymentNote", ntfn)
-		}
-		return note
+		return feeNote
 	}
 
 	queueResponses()
@@ -1280,14 +1280,12 @@ func TestRegister(t *testing.T) {
 		t.Fatalf("registration error: %v", err)
 	}
 	// Should be two success notifications. One for fee paid on-chain, one for
-	// fee notification sent.
-	getBalanceNote()
-	feeNote := getFeeNote()
+	// fee notification sent, each along with a balance note.
+	feeNote := getFeeAndBalanceNote() // payment in progress
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
-	getBalanceNote()
-	feeNote = getFeeNote()
+	feeNote = getFeeAndBalanceNote() // balance note concurrent with fee note (Account registered)
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
@@ -1440,16 +1438,13 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error for notifyfee response error: %v", err)
 	}
-	// 1st note is balance.
-	getBalanceNote()
-	// 2nd is feepayment.
-	feeNote = getFeeNote()
+	// register: balance note followed by fee payment note
+	feeNote = getFeeAndBalanceNote() // Fee payment in progress
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
-	getBalanceNote()
-	// 2nd note is fee error
-	feeNote = getFeeNote()
+	// fee error. fee and balance note from tip change in no guaranteed order.
+	feeNote = getFeeAndBalanceNote() // Fee payment error "test error message"
 	if feeNote.Severity() != db.ErrorLevel {
 		t.Fatalf("non-error fee payment notification for notifyfee response error: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
@@ -1460,8 +1455,7 @@ func TestRegister(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error after regaining valid state: %v", err)
 	}
-	getBalanceNote()
-	feeNote = getFeeNote()
+	feeNote = getFeeAndBalanceNote() // Fee payment in progress
 	if feeNote.Severity() != db.Success {
 		t.Fatalf("fee payment error notification: %s: %s", feeNote.Subject(), feeNote.Details())
 	}
