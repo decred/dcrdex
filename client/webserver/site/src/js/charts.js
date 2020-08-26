@@ -53,7 +53,9 @@ export class DepthChart {
     this.ctx.textBaseline = 'middle'
     this.book = null
     this.dataExtents = null
-    this.zoomState = {}
+    this.zoomLevel = null
+    this.lotSize = null
+    this.rateStep = null
     parent.appendChild(this.canvas)
     // Mouse handling
     this.mousePos = null
@@ -112,21 +114,14 @@ export class DepthChart {
 
   // zoom zooms the current view in or out. bigger=true is zoom in.
   zoom (bigger) {
-    if (!this.zoomState) return
+    if (!this.zoomLevel) return
     if (this.wheelLimiter) return
     if (!this.book.buys || !this.book.sells) return
     this.wheeled()
-    const zoom = this.zoomState
-    // If the current window already contains all available data, do nothing.
-    const midGap = this.gap()[0]
-    const high = 2 * midGap
-    if (!bigger && zoom.high >= high && zoom.low <= 0) return
     // Zoom in to 66%, but out to 150% = 1 / (2/3) so that the same zoom levels
     // are hit when reversing direction.
-    const zoomRange = zoom.high - zoom.low
-    const bump = bigger ? -1 / 6 * zoomRange : 1 / 4 * zoomRange
-    this.zoomState.low = Math.max(zoom.low - bump, 0)
-    this.zoomState.high = Math.min(zoom.high + bump, high)
+    this.zoomLevel *= bigger ? 2 / 3 : 3 / 2
+    this.zoomLevel = clamp(this.zoomLevel, 0.005, 2)
     this.draw()
   }
 
@@ -147,11 +142,17 @@ export class DepthChart {
   }
 
   // set sets the current data set and draws.
-  set (book) {
+  set (book, lotSize, rateStep) {
     this.book = book
+    this.lotSize = lotSize / 1e8
+    this.rateStep = rateStep / 1e8
     this.baseTicker = book.baseSymbol.toUpperCase()
     this.quoteTicker = book.quoteSymbol.toUpperCase()
-    this.zoomState = {}
+    const [midGap, gapWidth] = this.gap()
+    // Default to 5% zoom, but with a minimum of 5 * midGap, but still observing
+    // the hard cap of 200%.
+    const minZoom = Math.max(gapWidth / midGap * 5, 0.05)
+    this.zoomLevel = Math.min(minZoom, 2)
     this.draw()
   }
 
@@ -167,28 +168,17 @@ export class DepthChart {
   draw () {
     this.clear()
     // if (!this.book || this.book.empty()) return
-    const zoom = this.zoomState
 
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
     const mousePos = this.mousePos
     const buys = this.book.buys
     const sells = this.book.sells
-    // The zoomState stores these high and low values to facilitate zooming. It
-    // has to be high and low rather than leftEdge and rightEdge since the draw
-    // loop adds some padding and extends horizontal lines outward for
-    // aesthetics.
     const [midGap, gapWidth] = this.gap()
-    const lastSell = last(sells) || false
-    const lastBuy = last(buys) || false
-    var high = zoom.high || (lastSell ? lastSell.rate : midGap)
-    var low = typeof zoom.low === 'number' ? zoom.low : (lastBuy ? lastBuy.rate : midGap)
 
-    // Clamp the zoom between 0.5% and 100% of mid-gap.
-    const minHalfRange = Math.max(gapWidth, midGap * 0.0025)
-    const halfRange = clamp((high - low) / 2, minHalfRange, midGap)
-    zoom.high = high = midGap + halfRange
-    zoom.low = low = midGap - halfRange
+    const halfWindow = this.zoomLevel * midGap / 2
+    const high = midGap + halfWindow
+    const low = midGap - halfWindow
 
     const buyDepth = []
     const buyEpoch = []
@@ -206,7 +196,7 @@ export class DepthChart {
         sum += pt.qty
         buyDepth.push([pt.rate, sum])
       }
-      if (pt.rate < zoom.low) break
+      if (pt.rate < low) break
     }
     const buySum = buyDepth.length ? last(buyDepth)[1] : 0
     buyDepth.push([low, buySum])
@@ -223,7 +213,7 @@ export class DepthChart {
         sum += pt.qty
         sellDepth.push([pt.rate, sum])
       }
-      if (pt.rate > zoom.high) break
+      if (pt.rate > high) break
     }
     // Add a data point going to the left so that the data doesn't end with a
     // vertical line.
@@ -235,7 +225,7 @@ export class DepthChart {
     // Add 5% padding to the top of the chart.
     const maxY = epochSellSum && epochBuySum ? Math.max(epochBuySum, epochSellSum) * 1.05 : epochSellSum || epochBuySum || 1
 
-    const dataExtents = new Extents(zoom.low, zoom.high, 0, maxY)
+    const dataExtents = new Extents(low, high, 0, maxY)
     this.dataExtents = dataExtents
 
     // Draw the axis tick labels.
@@ -243,13 +233,13 @@ export class DepthChart {
     ctx.font = '12px \'sans\', sans-serif'
     ctx.fillStyle = this.theme.axisLabel
 
-    const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50)
+    const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50, this.lotSize)
     // Reassign the width of the y-label column to accommodate the widest text.
     const newWidth = yLabels.widest * 1.5
     this.yRegion.extents.x.max = newWidth
     this.plotRegion.extents.x.min = newWidth
     this.xRegion.extents.x.min = newWidth
-    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min, dataExtents.x.max, 100)
+    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min, dataExtents.x.max, 100, this.rateStep)
 
     // A function to be run at the end if there is legend data to display.
     var legendData
@@ -382,7 +372,7 @@ export class DepthChart {
     }, true)
 
     // Print the x labels
-    this.xRegion.plot(new Extents(zoom.low, zoom.high, 0, 1), (ctx, tools) => {
+    this.xRegion.plot(new Extents(low, high, 0, 1), (ctx, tools) => {
       xLabels.lbls.forEach(lbl => {
         ctx.fillText(lbl.txt, tools.x(lbl.val), tools.y(0.5))
       })
@@ -671,12 +661,14 @@ class Region {
 
 // makeLabels attempts to create the appropriate labels for the specified
 // screen size, context, and label spacing.
-function makeLabels (ctx, screenW, min, max, spacingGuess) {
+function makeLabels (ctx, screenW, min, max, spacingGuess, step) {
   var n = screenW / spacingGuess
   const diff = max - min
-  const tick = Number((diff / n).toPrecision(2))
+  var tickGuess = diff / n
+  // make the tick spacing a multiple of the step
+  const tick = tickGuess + step - (tickGuess % step)
   var x = min + tick - (min % tick)
-  var absMax = Math.max.apply(null, [max, min].map(Math.abs))
+  var absMax = Math.max(Math.abs(max), Math.abs(min))
   // The Math.round part is the minimum precision required to see the change in the numbers.
   // The 2 accounts for the precision of the tick.
   var sigFigs = Math.round(Math.log10(absMax / tick)) + 2
