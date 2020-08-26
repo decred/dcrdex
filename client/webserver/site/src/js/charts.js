@@ -54,6 +54,8 @@ export class DepthChart {
     this.book = null
     this.dataExtents = null
     this.zoomLevel = null
+    this.lotSize = null
+    this.rateStep = null
     parent.appendChild(this.canvas)
     // Mouse handling
     this.mousePos = null
@@ -140,8 +142,10 @@ export class DepthChart {
   }
 
   // set sets the current data set and draws.
-  set (book) {
+  set (book, lotSize, rateStep) {
     this.book = book
+    this.lotSize = lotSize / 1e8
+    this.rateStep = rateStep / 1e8
     this.baseTicker = book.baseSymbol.toUpperCase()
     this.quoteTicker = book.quoteSymbol.toUpperCase()
     const [midGap, gapWidth] = this.gap()
@@ -229,13 +233,13 @@ export class DepthChart {
     ctx.font = '12px \'sans\', sans-serif'
     ctx.fillStyle = this.theme.axisLabel
 
-    const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50)
+    const yLabels = makeLabels(ctx, this.plotRegion.height(), dataExtents.y.min, dataExtents.y.max, 50, this.lotSize)
     // Reassign the width of the y-label column to accommodate the widest text.
     const newWidth = yLabels.widest * 1.5
     this.yRegion.extents.x.max = newWidth
     this.plotRegion.extents.x.min = newWidth
     this.xRegion.extents.x.min = newWidth
-    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min, dataExtents.x.max, 100)
+    const xLabels = makeLabels(ctx, this.plotRegion.width(), dataExtents.x.min, dataExtents.x.max, 100, this.rateStep)
 
     // A function to be run at the end if there is legend data to display.
     var legendData
@@ -657,12 +661,14 @@ class Region {
 
 // makeLabels attempts to create the appropriate labels for the specified
 // screen size, context, and label spacing.
-function makeLabels (ctx, screenW, min, max, spacingGuess) {
+function makeLabels (ctx, screenW, min, max, spacingGuess, step) {
   var n = screenW / spacingGuess
   const diff = max - min
-  const tick = Number((diff / n).toPrecision(2))
+  var tickGuess = diff / n
+  // make the tick spacing a multiple of the step
+  const tick = tickGuess + step - (tickGuess % step)
   var x = min + tick - (min % tick)
-  var absMax = Math.max.apply(null, [max, min].map(Math.abs))
+  var absMax = Math.max(Math.abs(max), Math.abs(min))
   // The Math.round part is the minimum precision required to see the change in the numbers.
   // The 2 accounts for the precision of the tick.
   var sigFigs = Math.round(Math.log10(absMax / tick)) + 2

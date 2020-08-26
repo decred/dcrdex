@@ -504,7 +504,8 @@ export default class MarketsPage extends BasePage {
 
   /* handleBook accepts the data sent in the 'book' notification. */
   handleBook (data) {
-    this.book = new OrderBook(data, this.market.baseCfg.symbol, this.market.quoteCfg.symbol)
+    const [b, q] = [this.market.baseCfg, this.market.quoteCfg]
+    this.book = new OrderBook(data, b.symbol, q.symbol)
     this.loadTable()
     for (const order of (data.book.epoch || [])) {
       if (order.rate > 0) this.book.add(order)
@@ -516,7 +517,7 @@ export default class MarketsPage extends BasePage {
       Doc.empty(this.page.sellRows)
       return
     }
-    this.chart.set(this.book)
+    this.chart.set(this.book, b.lotSize, q.rateStep)
   }
 
   /*

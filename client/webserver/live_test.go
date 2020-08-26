@@ -159,16 +159,18 @@ func mkSupportedAsset(symbol string, state *tWalletState, bal *db.Balance) *core
 func mkDexAsset(symbol string) *dex.Asset {
 	assetID, _ := dex.BipSymbolID(symbol)
 	assetOrder := rand.Intn(5) + 6
-	return &dex.Asset{
+	lotSize := uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(9)+1)
+	a := &dex.Asset{
 		ID:           assetID,
 		Symbol:       symbol,
-		LotSize:      uint64(math.Pow10(assetOrder)) * uint64(rand.Intn(10)),
-		RateStep:     uint64(math.Pow10(assetOrder-2)) * uint64(rand.Intn(10)),
+		LotSize:      lotSize,
+		RateStep:     lotSize / 1e3,
 		MaxFeeRate:   uint64(rand.Intn(10) + 1),
 		SwapSize:     uint64(rand.Intn(150) + 150),
 		SwapSizeBase: uint64(rand.Intn(150) + 15),
 		SwapConf:     uint32(rand.Intn(5) + 2),
 	}
+	return a
 }
 
 func mkid(b, q uint32) string {
@@ -336,8 +338,10 @@ func (c *TCore) Login([]byte) (*core.LoginResult, error) { return &core.LoginRes
 func (c *TCore) Logout() error                           { return nil }
 
 func (c *TCore) SyncBook(dexAddr string, base, quote uint32) (*core.OrderBook, *core.BookFeed, error) {
-	c.midGap = randomMagnitude(-2, 4)
-	c.maxQty = randomMagnitude(-2, 4)
+	quoteAsset := tExchanges[dexAddr].Assets[quote]
+	baseAsset := tExchanges[dexAddr].Assets[base]
+	c.midGap = float64(quoteAsset.RateStep) / 1e8 * float64(rand.Intn(1e6))
+	c.maxQty = float64(baseAsset.LotSize) / 1e8 * float64(rand.Intn(1e3))
 	mktID, _ := dex.MarketName(base, quote)
 	c.mtx.Lock()
 	c.dexAddr = dexAddr
@@ -757,7 +761,7 @@ func TestServer(t *testing.T) {
 	numSells = 10
 	feedPeriod = 2000 * time.Millisecond
 	initialize := false
-	register := false
+	register := true
 	forceDisconnectWallet = true
 	gapWidthFactor = 0.2
 
