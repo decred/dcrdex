@@ -289,6 +289,8 @@ func testMakerGhostingAfterTakerRedeem(t *testing.T) {
 				client.log("%s: disconnecting DEX before redeeming Taker's swap", side)
 				client.dc().connMaster.Disconnect()
 				finalStatus = order.MakerRedeemed // maker shouldn't get past this state
+			} else {
+				client.log("%s: resuming trade negotiations to audit Maker's redeem", side)
 			}
 			match.failErr = nil // remove next action blocker on match
 		}
@@ -567,6 +569,9 @@ func monitorTrackedTrade(ctx context.Context, client *tClient, tracker *trackedT
 		if match.Match.Status < finalStatus {
 			incompleteTrades++
 			client.log("incomplete trade: order %s, match %s, status %s, side %s", tracker.token(),
+				token(match.ID()), match.Match.Status, match.Match.Side)
+		} else {
+			client.log("trade for order %s, match %s monitored successfully till %s, side %s", tracker.token(),
 				token(match.ID()), match.Match.Status, match.Match.Side)
 		}
 	}

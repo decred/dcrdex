@@ -332,7 +332,7 @@ func runTest(t *testing.T, splitTx bool) {
 	// Find the redemption
 	swapCoin := receipts[0].Coin()
 	waitNetwork()
-	findRedemptionResultCh, err := rig.beta().FindRedemption(swapCoin.ID(), swapCoin.Redeem())
+	findRedemptionResultCh, err := rig.beta().FindRedemption(swapCoin.ID())
 	if err != nil {
 		t.Errorf("unexpected find unconfirmed redemption error: %v", err)
 	}
@@ -356,7 +356,7 @@ func runTest(t *testing.T, splitTx bool) {
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
-	findRedemptionResultCh, err = rig.beta().FindRedemption(swapCoin.ID(), swapCoin.Redeem())
+	findRedemptionResultCh, err = rig.beta().FindRedemption(swapCoin.ID())
 	if err != nil {
 		t.Errorf("unexpected find confirmed redemption error: %v", err)
 	}

@@ -85,6 +85,37 @@ func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) *chai
 	return tx
 }
 
+func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) ([]byte, error) {
+	msgTx := wire.NewMsgTx()
+	for _, input := range inputs {
+		prevOutHash, err := chainhash.NewHashFromStr(input.Txid)
+		if err != nil {
+			return nil, err
+		}
+		prevOut := wire.NewOutPoint(prevOutHash, input.Vout, input.Tree)
+		amountIn, err := dcrutil.NewAmount(input.AmountIn)
+		if err != nil {
+			return nil, err
+		}
+		sigScript, err := hex.DecodeString(input.ScriptSig.Hex)
+		if err != nil {
+			return nil, err
+		}
+		txIn := wire.NewTxIn(prevOut, int64(amountIn), sigScript)
+		msgTx.AddTxIn(txIn)
+	}
+	for _, pkScript := range pkScripts {
+		txOut := wire.NewTxOut(100000000, pkScript)
+		msgTx.AddTxOut(txOut)
+	}
+	txBuf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
+	err := msgTx.Serialize(txBuf)
+	if err != nil {
+		return nil, err
+	}
+	return txBuf.Bytes(), nil
+}
+
 func makeRPCVin(txid string, vout uint32, sigScript []byte) chainjson.Vin {
 	return chainjson.Vin{
 		Txid: txid,
@@ -1362,6 +1393,10 @@ func TestFindRedemption(t *testing.T) {
 	inputs := []chainjson.Vin{makeRPCVin(otherTxid, 0, otherSpendScript)}
 	// Add the contract transaction. Put the pay-to-contract script at index 1.
 	blockHash, _ := node.addRawTx(contractHeight, makeRawTx(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs))
+	txHex, err := makeTxHex(contractTxid, []dex.Bytes{otherScript, pkScript}, inputs)
+	if err != nil {
+		t.Fatalf("error generating hex for contract tx: %v", err)
+	}
 	getTxRes := &walletjson.GetTransactionResult{
 		BlockHash:     blockHash.String(),
 		Confirmations: 1,
@@ -1372,11 +1407,12 @@ func TestFindRedemption(t *testing.T) {
 				Vout:     contractVout,
 			},
 		},
+		Hex: hex.EncodeToString(txHex),
 	}
 	node.walletTx = getTxRes
 
 	// Begin find redemption.
-	findRedemptionResultCh, err := wallet.FindRedemption(coinID, contract)
+	findRedemptionResultCh, err := wallet.FindRedemption(coinID)
 	if err != nil {
 		t.Fatalf("unexpected FindRedemption error: %v", err)
 	}
@@ -1417,7 +1453,7 @@ func TestFindRedemption(t *testing.T) {
 
 	// gettransaction error
 	node.walletTxErr = tErr
-	_, err = wallet.FindRedemption(coinID, contract)
+	_, err = wallet.FindRedemption(coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
@@ -1425,7 +1461,7 @@ func TestFindRedemption(t *testing.T) {
 
 	// Expect FindRedemption to error because of bad input sig.
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(randBytes(100))
-	findRedemptionResultCh, err = wallet.FindRedemption(coinID, contract)
+	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
 	if err != nil {
 		t.Fatalf("unexpected FindRedemption error: %v", err)
 	}
@@ -1440,7 +1476,7 @@ func TestFindRedemption(t *testing.T) {
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(redemptionScript)
 
 	// Sanity check to make sure it passes again.
-	findRedemptionResultCh, err = wallet.FindRedemption(coinID, contract)
+	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
 	if err != nil {
 		t.Fatalf("unexpected FindRedemption error: %v", err)
 	}

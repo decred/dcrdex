@@ -118,7 +118,7 @@ type Wallet interface {
 	// the swap is broadcast. Realistically, though, the taker should start
 	// looking for the maker's redemption beginning at swapconf confirmations
 	// regardless of whether the server sends the 'redemption' message or not.
-	FindRedemption(coinID, contract dex.Bytes) (chan *FindRedemptionResult, error)
+	FindRedemption(coinID dex.Bytes) (chan *FindRedemptionResult, error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded.
 	// NOTE: The contract cannot be retrieved from the unspent coin info as the
