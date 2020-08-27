@@ -28,29 +28,28 @@ import (
 )
 
 const (
-	dummySize     = 50
-	btcLotSize    = 100_000
-	btcRateStep   = 1_000
-	dcrLotSize    = 10_000_000
-	dcrRateStep   = 100_000
-	btcID         = 0
-	dcrID         = 42
-	btcAddr       = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
-	dcrAddr       = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
-	mktName1      = "btc_ltc"
-	mkt1BaseRate  = 5e7
-	mktName2      = "dcr_doge"
-	mkt2BaseRate  = 8e9
-	mktName3      = "dcr_btc"
-	mkt3BaseRate  = 3e9
-	responseDelay = 20 // milliseconds
+	dummySize    = 50
+	btcLotSize   = 100_000
+	btcRateStep  = 1_000
+	dcrLotSize   = 10_000_000
+	dcrRateStep  = 100_000
+	btcID        = 0
+	dcrID        = 42
+	btcAddr      = "18Zpft83eov56iESWuPpV8XFLJ1b8gMZy7"
+	dcrAddr      = "DsYXjAK3UiTVN9js8v9G21iRbr2wPty7f12"
+	mktName1     = "btc_ltc"
+	mkt1BaseRate = 5e7
+	mktName2     = "dcr_doge"
+	mkt2BaseRate = 8e9
+	mktName3     = "dcr_btc"
+	mkt3BaseRate = 3e9
 
 	clientPreimageDelay = 75 * time.Millisecond
 )
 
 var (
 	oRig       *tOrderRig
-	dummyError = fmt.Errorf("test error")
+	dummyError = fmt.Errorf("expected test error")
 	testCtx    context.Context
 	rig        *testRig
 	mkt1       = &ordertest.Market{
@@ -546,6 +545,7 @@ func TestMain(m *testing.M) {
 			rig.router.Run(testCtx)
 			wg.Done()
 		}()
+		time.Sleep(100 * time.Millisecond) // let the router actually start in runBook
 		defer func() {
 			shutdown()
 			wg.Wait()
@@ -1124,12 +1124,13 @@ func (s *TBookSource) OrderFeed() <-chan *updateSignal {
 }
 
 type TLink struct {
-	mtx      sync.Mutex
-	id       uint64
-	ip       string
-	sends    []*msgjson.Message
-	sendErr  error
-	banished bool
+	mtx         sync.Mutex
+	id          uint64
+	ip          string
+	sends       []*msgjson.Message
+	sendErr     error
+	sendTrigger chan struct{}
+	banished    bool
 }
 
 var linkCounter uint64
@@ -1137,9 +1138,10 @@ var linkCounter uint64
 func tNewLink() *TLink {
 	linkCounter++
 	return &TLink{
-		id:    linkCounter,
-		ip:    "[1:800:dex:rules::]",
-		sends: make([]*msgjson.Message, 0),
+		id:          linkCounter,
+		ip:          "[1:800:dex:rules::]",
+		sends:       make([]*msgjson.Message, 0),
+		sendTrigger: make(chan struct{}, 1),
 	}
 }
 
@@ -1148,8 +1150,12 @@ func (conn *TLink) IP() string { return conn.ip }
 func (conn *TLink) Send(msg *msgjson.Message) error {
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()
+	if conn.sendErr != nil {
+		return conn.sendErr
+	}
 	conn.sends = append(conn.sends, msg)
-	return conn.sendErr
+	conn.sendTrigger <- struct{}{}
+	return nil
 }
 func (conn *TLink) SendError(id uint64, msgErr *msgjson.Error) {
 	msg, err := msgjson.NewResponse(id, nil, msgErr)
@@ -1159,9 +1165,16 @@ func (conn *TLink) SendError(id uint64, msgErr *msgjson.Error) {
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()
 	conn.sends = append(conn.sends, msg)
+	conn.sendTrigger <- struct{}{}
 }
 
 func (conn *TLink) getSend() *msgjson.Message {
+	select {
+	case <-conn.sendTrigger:
+	case <-time.NewTimer(2 * time.Second).C:
+		panic("no send")
+	}
+
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()
 	if len(conn.sends) == 0 {
@@ -1318,6 +1331,9 @@ func TestRouter(t *testing.T) {
 		if err != nil {
 			t.Fatalf("(%s): error parsing response: %v", tag, err)
 		}
+		if resp.Error != nil {
+			t.Fatalf("response is error: %v", resp.Error)
+		}
 		book := new(msgjson.OrderBook)
 		err = json.Unmarshal(resp.Result, book)
 		if err != nil {
@@ -1378,15 +1394,17 @@ func TestRouter(t *testing.T) {
 	// Have a subscriber connect and pull the orders from market 1.
 	// The format used here is link[market]_[count]
 	link1, sub := newSubscriber(mkt1)
-	router.handleOrderBook(link1, sub)
-	tick(responseDelay)
+	if err := router.handleOrderBook(link1, sub); err != nil {
+		t.Fatalf("handleOrderBook: %v", err)
+	}
 	orders := checkResponse("first link, market 1", mktName1, sub.ID, link1)
 	checkBook(src1, msgjson.StandingOrderNum, "first link, market 1", orders...)
 
 	// Another subscriber to the same market should behave identically.
 	link2, sub := newSubscriber(mkt1)
-	router.handleOrderBook(link2, sub)
-	tick(responseDelay)
+	if err := router.handleOrderBook(link2, sub); err != nil {
+		t.Fatalf("handleOrderBook: %v", err)
+	}
 	orders = checkResponse("second link, market 1", mktName1, sub.ID, link2)
 	checkBook(src1, msgjson.StandingOrderNum, "second link, market 1", orders...)
 
@@ -1401,7 +1419,6 @@ func TestRouter(t *testing.T) {
 		},
 	}
 	src1.feed <- sig
-	tick(responseDelay) // let (*BookRouter).runBook receive the signal and send on the subscriber links
 
 	epochNote := getEpochNoteFromLink(t, link1)
 	compareLO(&epochNote.BookOrderNote, lo, msgjson.ImmediateOrderNum, "epoch notification, link1")
@@ -1420,9 +1437,12 @@ func TestRouter(t *testing.T) {
 
 	// Have both subscribers subscribe to market 2.
 	sub = newSubscription(mkt2)
-	router.handleOrderBook(link1, sub)
-	router.handleOrderBook(link2, sub)
-	tick(responseDelay)
+	if err := router.handleOrderBook(link1, sub); err != nil {
+		t.Fatalf("handleOrderBook: %v", err)
+	}
+	if err := router.handleOrderBook(link2, sub); err != nil {
+		t.Fatalf("handleOrderBook: %v", err)
+	}
 	orders = checkResponse("first link, market 2", mktName2, sub.ID, link1)
 	checkBook(src2, msgjson.StandingOrderNum, "first link, market 2", orders...)
 	orders = checkResponse("second link, market 2", mktName2, sub.ID, link2)
@@ -1438,7 +1458,6 @@ func TestRouter(t *testing.T) {
 		},
 	}
 	src2.feed <- sig
-	tick(responseDelay)
 
 	epochNote = getEpochNoteFromLink(t, link1)
 	compareTrade(&epochNote.BookOrderNote, mo, "link 1 market 2 epoch update (market order)")
@@ -1446,14 +1465,12 @@ func TestRouter(t *testing.T) {
 	epochNote = getEpochNoteFromLink(t, link2)
 	compareTrade(&epochNote.BookOrderNote, mo, "link 2 market 2 epoch update (market order)")
 
-	// Grab a random order from the market 2 sell book. Fill 1 lot and send a
-	// bookAction update.
-	for _, o := range src2.sells {
-		lo = o
-		break
-	}
-
+	// Make a new standing limit order with a quantity of at least 3 lots for
+	// the market 2 sell book. Book it with a bookAction, fill 1 lot, and send
+	// an updateRemainingAction update.
+	lo = makeLO(seller2, mkRate2(1.0, 1.2), randLots(10)+1, order.StandingTiF)
 	lo.FillAmt = mkt2.LotSize
+
 	sig = &updateSignal{
 		action: bookAction,
 		data: sigDataBookedOrder{
@@ -1462,7 +1479,6 @@ func TestRouter(t *testing.T) {
 		},
 	}
 	src2.feed <- sig
-	tick(responseDelay)
 
 	bookNote := getBookNoteFromLink(t, link1)
 	compareLO(bookNote, lo, msgjson.StandingOrderNum, "book notification, link1, market 2")
@@ -1477,7 +1493,7 @@ func TestRouter(t *testing.T) {
 		t.Fatalf("wrong quantity in book update. expected %d, got %d", lo.Remaining(), bookNote.Quantity)
 	}
 
-	// Update the order's remaining quantity. Leave one lot.
+	// Update the order's remaining quantity. Leave one lot remaining.
 	lo.FillAmt = lo.Quantity - mkt2.LotSize
 
 	sig = &updateSignal{
@@ -1489,7 +1505,6 @@ func TestRouter(t *testing.T) {
 	}
 
 	src2.feed <- sig
-	tick(responseDelay)
 
 	urNote := getUpdateRemainingNoteFromLink(t, link2)
 	if urNote.Remaining != lo.Remaining() {
@@ -1507,7 +1522,6 @@ func TestRouter(t *testing.T) {
 		},
 	}
 	src2.feed <- sig
-	tick(responseDelay)
 
 	unbookNote := getUnbookNoteFromLink(t, link1)
 	if lo.ID().String() != unbookNote.OrderID.String() {
@@ -1528,8 +1542,9 @@ func TestRouter(t *testing.T) {
 	unsub, _ := msgjson.NewRequest(10, msgjson.UnsubOrderBookRoute, &msgjson.UnsubOrderBook{
 		MarketID: mktName1,
 	})
-	router.handleUnsubOrderBook(link1, unsub)
-	tick(responseDelay)
+	if err := router.handleUnsubOrderBook(link1, unsub); err != nil {
+		t.Fatalf("handleUnsubOrderBook: %v", err)
+	}
 
 	// Client 1 should have an unsub response from the server.
 	respMsg := link1.getSend()
@@ -1555,24 +1570,21 @@ func TestRouter(t *testing.T) {
 		},
 	}
 	src1.feed <- sig
-	tick(responseDelay)
-
-	// client 1 should not have a message, but client 2 should.
-	if link1.getSend() != nil {
-		t.Fatalf("client 1 received update after unsubbing")
-	}
 
 	if link2.getSend() == nil {
 		t.Fatalf("client 2 didn't receive an update after client 1 unsubbed")
 	}
+	select {
+	case <-link1.sendTrigger:
+		t.Fatalf("client 1 should not have received an update after unsubscribing")
+	case <-time.NewTimer(20 * time.Millisecond).C:
+		// Client 2 already got a send, so we should not need to wait much if at
+		// all since BookRouter.sendNote is already running or done.
+	}
 
 	// Now epoch a cancel order to client 2.
-	for _, o := range src1.buys {
-		lo = o
-		break
-	}
-	oid := lo.ID()
-	co := makeCO(buyer1, oid)
+	targetID := src1.buys[0].ID()
+	co := makeCO(buyer1, targetID)
 	sig = &updateSignal{
 		action: epochAction,
 		data: sigDataEpochOrder{
@@ -1581,7 +1593,6 @@ func TestRouter(t *testing.T) {
 		},
 	}
 	src1.feed <- sig
-	tick(responseDelay)
 
 	epochNote = getEpochNoteFromLink(t, link2)
 	if epochNote.OrderType != msgjson.CancelOrderNum {
@@ -1589,15 +1600,18 @@ func TestRouter(t *testing.T) {
 			msgjson.CancelOrderNum, epochNote.OrderType)
 	}
 
-	if epochNote.TargetID.String() != oid.String() {
+	if epochNote.TargetID.String() != targetID.String() {
 		t.Fatalf("epoch cancel notification has wrong order ID. expected %s, got %s",
-			oid, epochNote.TargetID)
+			targetID, epochNote.TargetID)
 	}
 
 	// Send another, but err on the send. Check for unsubscribed
-	link2.sendErr = fmt.Errorf("test error")
+	link2.sendErr = dummyError
 	src1.feed <- sig
-	tick(responseDelay)
+
+	// Wait for (*BookRouter).sendNote to remove the erroring link from the
+	// subscription conns map.
+	time.Sleep(50 * time.Millisecond)
 
 	subs := router.books[mktName1].subs
 	subs.mtx.RLock()
