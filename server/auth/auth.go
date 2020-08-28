@@ -284,7 +284,11 @@ func (auth *AuthManager) Route(route string, handler func(account.AccountID, *ms
 				Message: "cannot use route '" + route + "' on an unauthorized connection",
 			}
 		}
-		return handler(client.acct.ID, msg)
+		msgErr := handler(client.acct.ID, msg)
+		if msgErr != nil {
+			log.Debugf("Handling of '%s' request for user %v failed: %v", route, client.acct.ID, msgErr)
+		}
+		return msgErr
 	})
 }
 

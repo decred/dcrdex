@@ -1038,7 +1038,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	for _, match := range t.matches {
 		if (match.Match.Side == order.Maker && match.Match.Status >= order.MakerSwapCast) ||
 			(match.Match.Side == order.Taker && match.Match.Status >= order.TakerSwapCast) {
-			alreadySwapped += 1
+			alreadySwapped++
 		}
 	}
 	// If these are the last swaps, and the order is filled or canceled or
@@ -1087,8 +1087,8 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		return errs.add("error sending swap transaction: %v", err)
 	}
 
-	log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts: %v",
-		len(receipts), t.ID(), swaps.FeeRate, receipts)
+	log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts (%s): %v",
+		len(receipts), t.ID(), swaps.FeeRate, t.wallets.fromAsset.Symbol, receipts)
 
 	t.metaData.SwapFeesPaid += fees
 
@@ -1205,8 +1205,8 @@ func (t *trackedTrade) redeemMatches(matches []*matchTracker) error {
 		return errs.addErr(err)
 	}
 
-	log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s:%s",
-		len(redemptions), t.ID(), redeemAsset.Symbol, outCoin)
+	log.Infof("Broadcasted redeem transaction spending %d contracts for order %v, paying to %s (%s)",
+		len(redemptions), t.ID(), outCoin, redeemAsset.Symbol)
 
 	t.metaData.RedemptionFeesPaid += fees
 

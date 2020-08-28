@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -39,6 +40,13 @@ var (
 
 func unixMsNow() time.Time {
 	return time.Now().Truncate(time.Millisecond).UTC()
+}
+
+func makerTaker(isMaker bool) string {
+	if isMaker {
+		return "maker"
+	}
+	return "taker"
 }
 
 // AuthManager handles client-related actions, including authorization and
@@ -990,7 +998,10 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 	}
 	// If a swapStatus was created, the asset.Asset is already known to be in
 	// the map.
-	if confs >= int64(s.coins[status.swapAsset].SwapConf) {
+	swapConf := s.coins[status.swapAsset].SwapConf
+	if confs >= int64(swapConf) {
+		log.Debugf("Swap %v (%s) has reached %d confirmations (%d required)",
+			status.swap, dex.BipIDSymbol(status.swapAsset), confs, swapConf)
 		status.swapConfirmed = time.Now().UTC()
 	}
 }
@@ -1277,13 +1288,14 @@ func (s *Swapper) checkInaction(assetID uint32) {
 
 // respondError sends an rpcError to a user.
 func (s *Swapper) respondError(id uint64, user account.AccountID, code int, errMsg string) {
-	log.Debugf("error going to user %x, code: %d, msg: %s", user, code, errMsg)
+	log.Debugf("Error going to user %v, code: %d, msg: %s", user, code, errMsg)
 	msg, err := msgjson.NewResponse(id, nil, &msgjson.Error{
 		Code:    code,
 		Message: errMsg,
 	})
 	if err != nil {
-		log.Errorf("error creating error response with message '%s': %v", msg, err)
+		log.Errorf("Failed to create error response with message '%s': %v", msg, err)
+		return // this should not be possible, but don't pass nil msg to SendWhenConnected
 	}
 	s.authMgr.SendWhenConnected(user, msg, auth.DefaultConnectTimeout, func() {
 		log.Infof("Unable to send error response (code %d) to disconnected user %v: %q",
@@ -1296,6 +1308,7 @@ func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result inter
 	msg, err := msgjson.NewResponse(id, result, nil)
 	if err != nil {
 		log.Errorf("failed to send success: %v", err)
+		return // this should not be possible, but don't pass nil msg to SendWhenConnected
 	}
 	s.authMgr.SendWhenConnected(user, msg, auth.DefaultConnectTimeout, func() {
 		log.Infof("Unable to send success response to disconnected user %v", user)
@@ -1432,9 +1445,6 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 		checkVal = matcher.BaseToQuote(maker.Rate, match.Quantity)
 	}
 
-	log.Debugf("step(user=%v, match=%v): ready for user %v action, status %v, next %v",
-		actor.user, matchID, counterParty.user, match.Status, nextStep)
-
 	return &stepInformation{
 		match: match,
 		actor: actor,
@@ -1513,13 +1523,16 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	defer acker.match.mtx.Unlock()
 
 	if rev, ok := acker.params.(*msgjson.RevokeMatch); ok {
-		log.Infof("Received revoke ack for match %v, order %v, user %v", rev.MatchID, rev.OrderID, acker.user)
+		log.Infof("Received revoke_match ack for match %v, order %v, user %v",
+			rev.MatchID, rev.OrderID, acker.user)
 		// TODO: do something in the DB for this??
 		return // drop the revoke ack sig for now
 	}
 
 	// This is an ack of either contract audit or redeem receipt.
 	if acker.isAudit {
+		log.Debugf("Received contract audit acknowledgement from user %v (%s) for match %v (%v)",
+			acker.user, makerTaker(acker.isMaker), acker.match.Match.ID(), acker.match.Status)
 		// It's a contract audit ack.
 		if acker.isMaker {
 			acker.match.Sigs.MakerAudit = ack.Sig         // i.e. audited taker's contract
@@ -1531,7 +1544,9 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 		return
 	}
 
-	// It's a redeem script ack.
+	// It's a redeem ack.
+	log.Debugf("Received redemption acknowledgement from user %v (%s) for match %v (%s)",
+		acker.user, makerTaker(acker.isMaker), acker.match.Match.ID(), acker.match.Status)
 
 	// This is a redemption acknowledgement. Store the ack signature, and
 	// potentially record the order as complete with the auth manager and in
@@ -1691,8 +1706,9 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// request counterparty audit.
 	s.matchMtx.RUnlock()
 
-	log.Debugf("processInit: valid contract received at %v from %v for match %v, "+
-		"swapStatus %v => %v", swapTime, actor.user, matchID, stepInfo.step, stepInfo.nextStep)
+	log.Debugf("processInit: valid contract %v (%s) received at %v from user %v (%s) for match %v, "+
+		"swapStatus %v => %v", contract, stepInfo.asset.Symbol, swapTime, actor.user,
+		makerTaker(actor.isMaker), matchID, stepInfo.step, stepInfo.nextStep)
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
@@ -1729,8 +1745,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 		isAudit: true,
 	}
 	// Send the 'audit' request to the counter-party.
-	log.Debugf("processInit: sending contract 'audit' ack request to counterparty %v "+
-		"for match %v", ack.user, matchID)
+	log.Debugf("processInit: sending contract 'audit' ack request to counterparty %v (%s) "+
+		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 
 	// Register that there is an outstanding ack request. This is unregistered
 	// on completion of processAck or request expiry.
@@ -1739,8 +1755,8 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Expire function to unregister the outstanding request.
 	expireFunc := func() {
 		s.rmLiveAckers(notification.ID)
-		log.Infof("Failed to send request to %v (maker=%v) for init audit ack.",
-			ack.user, ack.isMaker)
+		log.Infof("Timeout waiting for contract audit request from user %v (%s).",
+			ack.user, makerTaker(ack.isMaker))
 	}
 
 	// Send the ack request.
@@ -1779,7 +1795,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	matchID := match.ID()
 	chain := stepInfo.asset.Backend
 	if !chain.ValidateSecret(params.Secret, cpContract) {
-		log.Errorf("secret validation failed (match id=%v, maker=%v, secret=%x)",
+		log.Errorf("Secret validation failed (match id=%v, maker=%v, secret=%x)",
 			matchID, actor.isMaker, params.Secret)
 		s.respondError(msg.ID, actor.user, msgjson.UnknownMarketError, "secret validation failed")
 		return wait.DontTryAgain
@@ -1791,7 +1807,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		if err == asset.CoinNotFoundError {
 			return wait.TryAgain
 		}
-		log.Warnf("Redemption error encountered for match %s, actor %s using coin ID %x to satisfy contract at %x: %v",
+		log.Warnf("Redemption error encountered for match %s, actor %s, using coin ID %v to satisfy contract at %x: %v",
 			stepInfo.match.ID(), actor, params.CoinID, cpSwapCoin, err)
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "redemption error")
 		return wait.DontTryAgain
@@ -1805,7 +1821,7 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	s.matchMtx.RLock()
 	if _, found := s.matches[matchID]; !found {
 		s.matchMtx.RUnlock()
-		log.Errorf("redeem txn found after match was revoked (match id=%v, maker=%v)",
+		log.Errorf("Redeem txn found after match was revoked (match id=%v, maker=%v)",
 			matchID, actor.isMaker)
 		s.respondError(msg.ID, actor.user, msgjson.RedemptionError, "match already revoked due to inaction")
 		return wait.DontTryAgain
@@ -1825,8 +1841,9 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// ensuring that checkInaction will not revoke the match as we respond.
 	s.matchMtx.RUnlock()
 
-	log.Debugf("processRedeem: valid redemption received at %v from %v for match %v, "+
-		"swapStatus %v => %v", redeemTime, actor.user, matchID, stepInfo.step, stepInfo.nextStep)
+	log.Debugf("processRedeem: valid redemption %v (%s) received at %v from %v (%s) for match %v, "+
+		"swapStatus %v => %v", redemption, stepInfo.asset.Symbol, redeemTime, actor.user,
+		makerTaker(actor.isMaker), matchID, stepInfo.step, stepInfo.nextStep)
 
 	// Store the swap contract and the coinID (e.g. txid:vout) containing the
 	// contract script hash. Maker is party A, the initiator, who first reveals
@@ -1882,8 +1899,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 		isMaker: counterParty.isMaker,
 		// isAudit: false,
 	}
-	log.Debugf("processRedeem: sending 'redeem' ack request to counterparty %v "+
-		"for match %v", ack.user, matchID)
+	log.Debugf("processRedeem: sending 'redeem' ack request to counterparty %v (%s)"+
+		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 
 	// Register that there is an outstanding ack request. This is unregistered
 	// on completion of processAck or request expiry.
@@ -1892,8 +1909,8 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	// Expire function to unregister the outstanding request.
 	expireFunc := func() {
 		s.rmLiveAckers(notification.ID)
-		log.Infof("redeem ack request failed for user %v (maker=%v).",
-			ack.user, ack.isMaker)
+		log.Infof("Timeout waiting for redeem ack request from user %v (%s).",
+			ack.user, makerTaker(ack.isMaker))
 	}
 
 	// Send the ack request.
@@ -1937,7 +1954,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 		return rpcErr
 	}
 
-	log.Debugf("handleInit: 'init' received from %v for match %v, order %v",
+	log.Debugf("handleInit: 'init' received from user %v for match %v, order %v",
 		user, params.MatchID, params.OrderID)
 
 	if len(params.MatchID) != order.MatchIDSize {
@@ -1997,6 +2014,7 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 			Message: "invalid swap contract",
 		}
 	}
+
 	// TODO: consider also checking recipient of contract here, but it is also
 	// checked in processInit. Note that value cannot be checked as transaction
 	// details, which includes the coin/output value, are not yet retrieved.

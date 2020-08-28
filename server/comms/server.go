@@ -299,7 +299,7 @@ func (s *Server) websocketHandler(ctx context.Context, conn ws.Connection, ip st
 	// and wait for it to shutdown.  Once it has shutdown (and hence
 	// disconnected), remove it.
 	client := newWSLink(ip, conn)
-	cm, err := s.addClient(client, ctx)
+	cm, err := s.addClient(ctx, client)
 	if err != nil {
 		log.Errorf("Failed to add client %s", ip)
 		return
@@ -348,7 +348,7 @@ func (s *Server) disconnectClients() {
 
 // addClient assigns the client an ID, adds it to the map, and attempts to
 // connect.
-func (s *Server) addClient(client *wsLink, ctx context.Context) (*dex.ConnectionMaster, error) {
+func (s *Server) addClient(ctx context.Context, client *wsLink) (*dex.ConnectionMaster, error) {
 	s.clientMtx.Lock()
 	defer s.clientMtx.Unlock()
 	client.id = s.counter

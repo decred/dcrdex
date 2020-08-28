@@ -460,9 +460,7 @@ func NewConnection(w http.ResponseWriter, r *http.Request, readTimeout time.Dura
 	}
 
 	// Configure the pong handler.
-	reqAddr := r.RemoteAddr
 	ws.SetPongHandler(func(string) error {
-		log.Tracef("got pong from %v", reqAddr)
 		return ws.SetReadDeadline(time.Now().Add(readTimeout))
 	})
 

@@ -689,7 +689,7 @@ func (btc *Backend) Run(ctx context.Context) {
 			btc.log.Errorf("error adding new best block to cache: %v", err)
 		}
 		btc.signalMtx.RLock()
-		btc.log.Debugf("Notifying %d %s asset consumers of new block at height %d",
+		btc.log.Tracef("Notifying %d %s asset consumers of new block at height %d",
 			len(btc.blockChans), btc.name, block.Height)
 		for c := range btc.blockChans {
 			select {
@@ -757,7 +757,7 @@ out:
 			}
 			// If it builds on the best block or the cache is empty, it's good to add.
 			if *prevHash == tip.hash || tip.height == 0 {
-				btc.log.Debugf("Run: Processing new block %s", bestHash)
+				btc.log.Debugf("New block %s (%d)", bestHash, block.Height)
 				addBlock(block, false)
 				continue
 			}
