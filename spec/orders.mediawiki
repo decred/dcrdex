@@ -41,9 +41,9 @@ An order book can be viewed and tracked by subscribing to a market.
 {|
 ! field !! type   !! description
 |-
-| base  || string || currency code for the market's base asset
+| base  || int || the base asset ID
 |-
-| quote || string || currency code for the market's quote asset
+| quote || int || the quote asset ID
 |}
 
 The response will contain the complete market order book.
@@ -830,6 +830,64 @@ client.
 |-
 | orderid || string || order ID
 |}
+
+A client can request the current match status using the
+<code>match_status</code> request. Note that the route is provided as a
+convenience, and persistence of match data may be subject to the operator's
+archiving policy. <code>match_status</code> can be used to recover after a
+temporary disconnection, but should not be relied on as a source of historical
+match data.
+
+'''Notification route:''' <code>match_status</code>, '''originator:''' client
+
+<code>payload</code>
+{|
+! field    !! type     !! description
+|-
+| matches  || [<code>MatchRequest</code>] || an array of <code>MatchRequest</code> objects
+|}
+
+'''<code>MatchRequest</code> object'''
+
+{|
+! field   !! type   !! description
+|-
+| base    || int    || the base asset ID
+|-
+| quote   || int    || the quote asset ID
+|-
+| matchid || string || hex-encoded Match ID
+|}
+
+<code>result</code>: an array of <code>MatchStatus</code> objects
+
+'''<code>MatchStatus</code> object'''
+
+{|
+! field         !! type   !! description
+|-
+| matchid       || string || the match ID
+|-
+| status        || int    || See [[https://github.com/decred/dcrdex/blob/master/dex/order/match.go|match.go]] for codes.
+|-
+| makercontract || string || the swap contract broadcast by the maker
+|-
+| takercontract || string || the swap contract broadcast by the taker
+|-
+| makerswap     || string || the coin ID for the swap broadcast by the maker
+|-
+| takerswap     || string || the coin ID for the swap broadcast by the taker
+|-
+| makerredeem   || string || the coin ID for the maker's redemption
+|-
+| takerredeem   || string || the coin ID for the taker's redemption
+|-
+| secret        || string || the swap contract secret
+|}
+
+Empty fields may be omitted from the encoded <code>MatchStatus</code> object.
+Results are only returned for matches that could be found in the server
+records. No error is set in the case of unfound matches.
 
 ==Match Revocation==
 
