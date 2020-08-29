@@ -2662,6 +2662,7 @@ func TestTradeTracking(t *testing.T) {
 		tracker.matches = make(map[order.MatchID]*matchTracker)
 		tracker.change = nil
 		tracker.metaData.ChangeCoin = nil
+		tracker.coinsLocked = true
 	}
 
 	// If there is no change coin and no matches, the funding coin should be
@@ -3828,6 +3829,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	swappedTracker := addTracker(nil)
 	changeCoinID := encode.RandomBytes(36)
 	swappedTracker.change = &tCoin{id: changeCoinID}
+	swappedTracker.changeLocked = true
 	_ = rig.dc.resume(tDcrBtcMktName)
 	req, _ = msgjson.NewRequest(rig.dc.NextID(), msgjson.SuspensionRoute, newPayload())
 	err = handleTradeSuspensionMsg(rig.core, rig.dc, req)
@@ -3839,7 +3841,7 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 	// Check that the funding coin was returned.
 	dc.tradeMtx.Lock()
 	if len(tDcrWallet.returnedCoins) != 1 || !bytes.Equal(tDcrWallet.returnedCoins[0].ID(), changeCoinID) {
-		t.Fatalf("funding coin not returned")
+		t.Fatalf("change coin not returned")
 	}
 	tDcrWallet.returnedCoins = nil
 	dc.tradeMtx.Unlock()

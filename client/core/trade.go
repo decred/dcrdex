@@ -94,6 +94,7 @@ type trackedTrade struct {
 	preImg        order.Preimage
 	mktID         string
 	coins         map[string]asset.Coin
+	coinsLocked   bool
 	lockTimeTaker time.Duration
 	lockTimeMaker time.Duration
 	change        asset.Coin
@@ -126,6 +127,7 @@ func newTrackedTrade(dbOrder *db.MetaOrder, preImg order.Preimage, dc *dexConnec
 		preImg:        preImg,
 		mktID:         marketName(ord.Base(), ord.Quote()),
 		coins:         mapifyCoins(coins),
+		coinsLocked:   true,
 		lockTimeTaker: lockTimeTaker,
 		lockTimeMaker: lockTimeMaker,
 		matches:       make(map[order.MatchID]*matchTracker),
@@ -278,10 +280,7 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 		corder, _ := t.coreOrderInternal()
 		t.notify(newOrderNote("Order booked", "", db.Data, corder))
 	} else {
-		err := t.wallets.fromWallet.ReturnCoins(t.coinList())
-		if err != nil {
-			log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
-		}
+		t.returnCoins()
 		log.Infof("Non-standing order %s did not match.", t.token())
 		t.metaData.Status = order.OrderStatusExecuted
 		corder, _ := t.coreOrderInternal()
@@ -422,21 +421,9 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote("cancel", "", db.Data, cancelOrder))
 
-		// If the order's backing coins/change are unused, unlock them,
-		// otherwise they have been or will be spent by a swap.
-		if !haveNewSwaps && !t.hasUnswappedMatches() {
-			if t.change == nil && len(t.matches) == 0 {
-				err := t.wallets.fromWallet.ReturnCoins(t.coinList())
-				if err != nil {
-					log.Warnf("Unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
-				}
-			} else if t.changeLocked {
-				err := t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
-				if err != nil {
-					log.Warnf("Unable to return %s change coin %v: %v", unbip(t.wallets.fromAsset.ID), t.change, err)
-				}
-			}
-		}
+		// Order is canceled, return coins if there are no matches in the trade
+		// that MAY later require sending swaps.
+		t.maybeReturnCoins()
 	}
 	if haveNewSwaps {
 		fillPct := 100 * float64(filled) / float64(trade.Quantity)
@@ -963,33 +950,30 @@ func (t *trackedTrade) resendPendingRequests() error {
 	return errs.ifAny()
 }
 
-// revoke sets the status as revoked. If there are no unswapped matches, the
-// trades funding coins or change coin will be returned.
+// revoke sets the trade status as revoked, either because of market suspension
+// with persist=false or a server-initiated order revocation because of client
+// inaction on one of this trade's matches.
+// Funding coins or change coin will be returned IF there are no matches that
+// MAY later require sending swaps.
 func (t *trackedTrade) revoke() {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
 
-	if t.metaData.Status == order.OrderStatusEpoch ||
-		t.metaData.Status == order.OrderStatusBooked {
+	if t.metaData.Status >= order.OrderStatusExecuted {
+		// Executed, canceled or already revoked orders cannot be (re)revoked.
+		log.Errorf("attempted revoking an order with status %s", t.metaData.Status)
+		return
+	}
 
-		metaOrder := t.metaOrder()
-		metaOrder.MetaData.Status = order.OrderStatusRevoked
-		err := t.db.UpdateOrder(metaOrder)
-		if err != nil {
-			log.Errorf("unable to update order: %v", err)
-		}
+	metaOrder := t.metaOrder()
+	metaOrder.MetaData.Status = order.OrderStatusRevoked
+	err := t.db.UpdateOrder(metaOrder)
+	if err != nil {
+		log.Errorf("unable to update order: %v", err)
 	}
-	if !t.hasUnswappedMatches() {
-		var err error
-		if t.change == nil {
-			err = t.wallets.fromWallet.ReturnCoins(t.coinList())
-		} else {
-			err = t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
-		}
-		if err != nil {
-			log.Warnf("unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
-		}
-	}
+
+	// Return coins if there are no matches that MAY later require sending swaps.
+	t.maybeReturnCoins()
 }
 
 // revokeMatch sets the status as revoked for the specified match.
@@ -1029,6 +1013,11 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID) error {
 		TargetID: corder.ID, // the important part for the frontend
 	}
 	t.notify(newOrderNote("revoke", "", db.Data, cancelOrder))
+
+	// Unlock coins if we're not expecting future matches for this
+	// trade and there are no matches that MAY later require sending
+	// swaps.
+	t.maybeReturnCoins()
 
 	log.Warnf("Match %v revoked in status %v for order %v", matchID, revokedMatch.Match.Status, t.ID())
 	return nil
@@ -1130,6 +1119,9 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	log.Infof("Broadcasted transaction with %d swap contracts for order %v. Fee rate = %d. Receipts (%s): %v",
 		len(receipts), t.ID(), swaps.FeeRate, t.wallets.fromAsset.Symbol, receipts)
 
+	// If this is the first swap (and even if not), the funding coins
+	// would have been spent and unlocked.
+	t.coinsLocked = false
 	t.metaData.SwapFeesPaid += fees
 
 	if change == nil {
@@ -1215,6 +1207,11 @@ func (t *trackedTrade) finalizeSwapAction(match *matchTracker, coinID, contract 
 	if len(ack.Sig) != 0 {
 		auth.InitSig = ack.Sig
 		auth.InitStamp = encode.UnixMilliU(time.Now())
+
+		// Server has acked the swap. Unlock the change coin if we're
+		// not expecting future matches for this trade and there are no
+		// matches that MAY later require sending swaps.
+		t.maybeReturnCoins()
 	}
 	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 		errs.add("error storing swap details in database for match %s, coin %s: %v",
@@ -1688,28 +1685,75 @@ func (t *trackedTrade) processRedemption(msgID uint64, redemption *msgjson.Redem
 	return nil
 }
 
-// hasUnswappedMatches will be true if the order has any remaining matches for
-// which our swap has not been broadcast. hasUnswappedMatches should be called
-// with the matchMtx locked.
-func (t *trackedTrade) hasUnswappedMatches() bool {
-	for _, match := range t.matches {
-		dbMatch := match.Match
-		if (dbMatch.Side == order.Taker && dbMatch.Status < order.TakerSwapCast) ||
-			(dbMatch.Side == order.Maker && dbMatch.Status < order.MakerSwapCast) {
+// Coins will be returned if
+// - the trade status is not OrderStatusEpoch or OrderStatusBooked, that is to
+//   say, there won't be future matches for this order.
+// - there are no matches in the trade that MAY later require sending swaps,
+//   that is to say, all matches have been either swapped or revoked.
+//
+// This method modifies match fields and MUST be called with the trackedTrade
+// mutex lock held for writes.
+func (t *trackedTrade) maybeReturnCoins() bool {
+	// Status of the order itself.
+	if t.metaData.Status < order.OrderStatusExecuted {
+		// Booked and epoch orders may get matched any moment from
+		// now, keep the coins locked.
+		log.Tracef("not unlocking coins for order with status %s", t.metaData.Status)
+		return false
+	}
 
-			return true
+	// Status of all matches for the order. If a match exists for
+	// which a swap MAY be sent later, keep the coins locked.
+	for _, match := range t.matches {
+		if match.MetaData.Proof.IsRevoked {
+			// Won't be sending swap for this match regardless of
+			// the match's status.
+			continue
+		}
+
+		status, side := match.Match.Status, match.Match.Side
+		if side == order.Maker && status < order.MakerSwapCast ||
+			side == order.Taker && status < order.TakerSwapCast {
+			// Match is active (not revoked, not refunded) and client
+			// is yet to execute swap. Keep coins locked.
+			log.Tracef("not unlocking coins for order with match side %s, status", side, status)
+			return false
 		}
 	}
-	return false
+
+	// Safe to unlock coins now.
+	t.returnCoins()
+	return true
 }
 
-// coinList makes a slice of the coin map values.
-func (t *trackedTrade) coinList() []asset.Coin {
-	coins := make([]asset.Coin, 0, len(t.coins))
-	for _, coin := range t.coins {
-		coins = append(coins, coin)
+// returnCoins unlocks this trade's funding coins (if unspent) or the change
+// coin if a previous swap created a change coin that is locked.
+// Coins are auto-unlocked once spent in a swap tx, including intermediate
+// change coins, such that only the last change coin (if locked), will need
+// to be unlocked.
+//
+// This method modifies match fields and MUST be called with the trackedTrade
+// mutex lock held for writes.
+func (t *trackedTrade) returnCoins() {
+	if t.change == nil && t.coinsLocked {
+		fundingCoins := make([]asset.Coin, 0, len(t.coins))
+		for _, coin := range t.coins {
+			fundingCoins = append(fundingCoins, coin)
+		}
+		err := t.wallets.fromWallet.ReturnCoins(fundingCoins)
+		if err != nil {
+			log.Warnf("Unable to return %s funding coins: %v", unbip(t.wallets.fromAsset.ID), err)
+		} else {
+			t.coinsLocked = false
+		}
+	} else if t.change != nil && t.changeLocked {
+		err := t.wallets.fromWallet.ReturnCoins(asset.Coins{t.change})
+		if err != nil {
+			log.Warnf("Unable to return %s change coin %v: %v", unbip(t.wallets.fromAsset.ID), t.change, err)
+		} else {
+			t.changeLocked = false
+		}
 	}
-	return coins
 }
 
 // mapifyCoins converts the slice of coins to a map keyed by hex coin ID.

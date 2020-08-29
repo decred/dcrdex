@@ -82,7 +82,10 @@ type Wallet interface {
 	// transaction outputs.
 	FundingCoins([]dex.Bytes) (Coins, error)
 	// Swap sends the swaps in a single transaction. The Receipts returned can
-	// be used to refund a failed transaction.
+	// be used to refund a failed transaction. The Input coins are perfunctorily
+	// unlocked to ensure accurate balance reporting in cases where the wallet
+	// includes spent coins as part of the locked balance just because they were
+	// previously locked.
 	Swap(*Swaps) (receipts []Receipt, changeCoin Coin, feesPaid uint64, err error)
 	// Redeem sends the redemption transaction, which may contain more than one
 	// redemption. The input coin IDs and the output Coin are returned.
