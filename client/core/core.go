@@ -2604,20 +2604,29 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 		// If matches haven't redeemed, but the counter-swap has been received,
 		// reload the audit info.
 		isActive := tracker.metaData.Status == order.OrderStatusBooked || tracker.metaData.Status == order.OrderStatusEpoch
-		var stillNeedsCoins bool
+		var needsCoins bool
 		for _, match := range tracker.matches {
 			dbMatch, metaData := match.Match, match.MetaData
+			var needsAuditInfo bool
 			var counterSwap []byte
-			takerNeedsSwap := dbMatch.Side == order.Taker && dbMatch.Status >= order.MakerSwapCast && dbMatch.Status < order.MatchComplete
-			if takerNeedsSwap {
-				stillNeedsCoins = true
-				counterSwap = metaData.Proof.MakerSwap
+			if dbMatch.Side == order.Maker {
+				if dbMatch.Status < order.MakerSwapCast {
+					needsCoins = true
+				}
+				if dbMatch.Status < order.MakerRedeemed && dbMatch.Status >= order.TakerSwapCast {
+					needsAuditInfo = true
+					counterSwap = metaData.Proof.TakerSwap
+				}
+			} else { // Taker
+				if dbMatch.Status < order.TakerSwapCast {
+					needsCoins = true
+				}
+				if dbMatch.Status < order.MatchComplete && dbMatch.Status >= order.MakerSwapCast {
+					needsAuditInfo = true
+					counterSwap = metaData.Proof.MakerSwap
+				}
 			}
-			makerNeedsSwap := dbMatch.Side == order.Maker && dbMatch.Status >= order.TakerSwapCast && dbMatch.Status < order.MakerRedeemed
-			if makerNeedsSwap {
-				counterSwap = metaData.Proof.TakerSwap
-			}
-			if takerNeedsSwap || makerNeedsSwap {
+			if needsAuditInfo {
 				if len(counterSwap) == 0 {
 					match.failErr = fmt.Errorf("missing counter-swap, order %s, match %s", tracker.ID(), match.id)
 					notifyErr("Match status error", "Match %s for order %s is in state %s, but has no maker swap coin.", dbMatch.Side, tracker.token(), dbMatch.Status)
@@ -2642,7 +2651,7 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 
 		// Active orders and orders with matches with unsent swaps need the funding
 		// coin(s).
-		if isActive || stillNeedsCoins {
+		if isActive || needsCoins {
 			coinIDs := trade.Coins
 			if len(tracker.metaData.ChangeCoin) != 0 {
 				coinIDs = []order.CoinID{tracker.metaData.ChangeCoin}
