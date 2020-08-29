@@ -2937,34 +2937,41 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 
 	// Ensure the order is good, and reset the state.
-	ensureGood := func(tag string) {
+	ensureGood := func(tag string, expCoinsLoaded int) {
 		t.Helper()
+		description := fmt.Sprintf("%s: side = %s, order status = %s, match status = %s",
+			tag, match.Match.Side, dbOrder.MetaData.Status, match.Match.Status)
 		_, err := tCore.Login(tPW)
 		if err != nil {
-			t.Fatalf("%s: login error: %v", tag, err)
+			t.Fatalf("%s: login error: %v", description, err)
 		}
 
 		if !btcWallet.unlocked() {
-			t.Fatalf("%s: btc wallet not unlocked", tag)
+			t.Fatalf("%s: btc wallet not unlocked", description)
 		}
 
 		if !dcrWallet.unlocked() {
-			t.Fatalf("%s: dcr wallet not unlocked", tag)
+			t.Fatalf("%s: dcr wallet not unlocked", description)
 		}
 
 		trade, found := rig.dc.trades[oid]
 		if !found {
-			t.Fatalf("%s: trade with expected order id not found. len(trades) = %d", tag, len(rig.dc.trades))
+			t.Fatalf("%s: trade with expected order id not found. len(trades) = %d", description, len(rig.dc.trades))
 		}
 
 		_, found = trade.matches[mid]
 		if !found {
-			t.Fatalf("%s: trade with expected order id not found. len(matches) = %d", tag, len(trade.matches))
+			t.Fatalf("%s: trade with expected order id not found. len(matches) = %d", description, len(trade.matches))
 		}
+
+		if len(trade.coins) != expCoinsLoaded {
+			t.Fatalf("%s: expected %d coin loaded, got %d", description, expCoinsLoaded, len(trade.coins))
+		}
+
 		reset()
 	}
 
-	ensureGood("initial")
+	ensureGood("initial", 1)
 
 	// Ensure a failure AND reset. err != nil just helps to make sure that we're
 	// hitting errors in resolveActiveTrades, which sends errors as
@@ -2977,6 +2984,8 @@ func TestResolveActiveTrades(t *testing.T) {
 		}
 		reset()
 	}
+
+	// NEGATIVE PATHS
 
 	// No base wallet
 	delete(tCore.wallets, tDCR.ID)
@@ -3008,8 +3017,76 @@ func TestResolveActiveTrades(t *testing.T) {
 	ensureFail("matches error")
 	rig.db.activeMatchOIDSErr = nil
 
-	// Success again
-	ensureGood("final")
+	// POSITIVE PATHS
+
+	activeStatuses := []order.OrderStatus{order.OrderStatusEpoch, order.OrderStatusBooked}
+	inactiveStatuses := []order.OrderStatus{order.OrderStatusExecuted, order.OrderStatusCanceled, order.OrderStatusRevoked}
+
+	tests := []struct {
+		name          string
+		side          []order.MatchSide
+		orderStatuses []order.OrderStatus
+		matchStatuses []order.MatchStatus
+		expectedCoins int
+	}{
+		// With an active order, the change coin should always be loaded.
+		{
+			name:          "active-order",
+			side:          []order.MatchSide{order.Taker, order.Maker},
+			orderStatuses: activeStatuses,
+			matchStatuses: []order.MatchStatus{order.NewlyMatched, order.MakerSwapCast,
+				order.TakerSwapCast, order.MakerRedeemed, order.MatchComplete},
+			expectedCoins: 1,
+		},
+		// With an inactive order, as taker, if match is >= TakerSwapCast, there
+		// will be no funding coin fetched.
+		{
+			name:          "inactive taker > MakerSwapCast",
+			side:          []order.MatchSide{order.Taker},
+			orderStatuses: inactiveStatuses,
+			matchStatuses: []order.MatchStatus{order.TakerSwapCast, order.MakerRedeemed,
+				order.MatchComplete},
+			expectedCoins: 0,
+		},
+		// But there will be for NewlyMatched && MakerSwapCast
+		{
+			name:          "inactive taker < TakerSwapCast",
+			side:          []order.MatchSide{order.Taker},
+			orderStatuses: inactiveStatuses,
+			matchStatuses: []order.MatchStatus{order.NewlyMatched, order.MakerSwapCast},
+			expectedCoins: 1,
+		},
+		// For a maker with an inactive order, only NewlyMatched would
+		// necessitate fetching of coins.
+		{
+			name:          "inactive maker NewlyMatched",
+			side:          []order.MatchSide{order.Maker},
+			orderStatuses: inactiveStatuses,
+			matchStatuses: []order.MatchStatus{order.NewlyMatched},
+			expectedCoins: 1,
+		},
+		{
+			name:          "inactive maker > NewlyMatched",
+			side:          []order.MatchSide{order.Maker},
+			orderStatuses: inactiveStatuses,
+			matchStatuses: []order.MatchStatus{order.MakerSwapCast, order.TakerSwapCast,
+				order.MakerRedeemed, order.MatchComplete},
+			expectedCoins: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		for _, side := range tt.side {
+			match.Match.Side = side
+			for _, orderStatus := range tt.orderStatuses {
+				dbOrder.MetaData.Status = orderStatus
+				for _, matchStatus := range tt.matchStatuses {
+					match.Match.Status = matchStatus
+					ensureGood(tt.name, tt.expectedCoins)
+				}
+			}
+		}
+	}
 }
 
 func TestReadConnectMatches(t *testing.T) {
