@@ -72,11 +72,7 @@ func (txio *TXIO) confirmations(checkApproval bool) (int64, error) {
 		// The tx was included in a block, but make sure that the tx's block has
 		// not been orphaned or voted as invalid.
 		mainchainBlock, found := txio.dcr.blockCache.atHeight(txio.height)
-		if !found {
-			return -1, fmt.Errorf("no mainchain block for tx %s at height %d", txio.tx.hash.String(), txio.height)
-		}
-		// If the tx's block has been orphaned, check for a new containing block.
-		if mainchainBlock.hash != txio.blockHash {
+		if !found || mainchainBlock.hash != txio.blockHash {
 			return -1, ErrReorgDetected
 		}
 		if mainchainBlock != nil && checkApproval {
