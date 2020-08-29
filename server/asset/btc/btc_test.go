@@ -266,15 +266,14 @@ type testBlockChain struct {
 
 // The testChain is a "blockchain" to store RPC responses for the Backend
 // node stub to request.
-var testChain testBlockChain
 var testChainMtx sync.RWMutex
+var testChain testBlockChain
+var testBestBlock testBlock
 
 type testBlock struct {
 	hash   chainhash.Hash
 	height uint32
 }
-
-var testBestBlock testBlock
 
 // This must be called before using the testNode.
 func cleanTestChain() {
@@ -1178,9 +1177,12 @@ func TestReorg(t *testing.T) {
 			if err != nil {
 				t.Fatalf("error retrieving sidechain block to set confirmations: %v", err)
 			}
-			testChainMtx.Lock()
+			// Set Confirmations
+			btc.blockCache.mtx.Lock() // read from (*blockCache).add in cache.go
+			testChainMtx.Lock()       // field of testChain
 			blk.Confirmations = -1
 			testChainMtx.Unlock()
+			btc.blockCache.mtx.Unlock()
 		}
 	}
 
