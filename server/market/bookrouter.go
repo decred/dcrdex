@@ -179,13 +179,34 @@ func (book *msgBook) epoch() int64 {
 	return book.epochIdx
 }
 
-// Update updates the order book with the new order information. If an order
-// with the same ID already exists in the book, it is overwritten without
-// warning.  Such a case would be typical when an order's filled amount changes.
-func (book *msgBook) update(lo *order.LimitOrder) *msgjson.BookOrderNote {
+// insert adds the information for a new order into the order book. If the order
+// is already found, it is inserted, but an error is logged since update should
+// be used in that case.
+func (book *msgBook) insert(lo *order.LimitOrder) *msgjson.BookOrderNote {
+	msgOrder := limitOrderToMsgOrder(lo, book.name)
 	book.mtx.Lock()
 	defer book.mtx.Unlock()
+	if _, found := book.orders[lo.ID()]; found {
+		log.Errorf("Found existing order %v in book router when inserting a new one. "+
+			"Overwriting, but this should not happen.", lo.ID())
+		//panic("bad insert")
+	}
+	book.orders[lo.ID()] = msgOrder
+	return msgOrder
+}
+
+// update updates the order book with the new order information, such as when an
+// order's filled amount changes. If the order is not found, it is inserted, but
+// an error is logged since insert should be used in that case.
+func (book *msgBook) update(lo *order.LimitOrder) *msgjson.BookOrderNote {
 	msgOrder := limitOrderToMsgOrder(lo, book.name)
+	book.mtx.Lock()
+	defer book.mtx.Unlock()
+	if _, found := book.orders[lo.ID()]; !found {
+		log.Errorf("Did NOT find existing order %v in book router while attempting to update it. "+
+			"Adding a new entry, but this should not happen", lo.ID())
+		//panic("bad update")
+	}
 	book.orders[lo.ID()] = msgOrder
 	return msgOrder
 }
@@ -301,7 +322,7 @@ out:
 				if !ok {
 					panic("non-limit order received with bookAction")
 				}
-				n := book.update(lo)
+				n := book.insert(lo)
 				n.Seq = subs.nextSeq()
 				note = n
 
@@ -433,7 +454,7 @@ func (r *BookRouter) sendBook(conn comms.Link, book *msgBook, msgID uint64) {
 		return
 	}
 
-	err = conn.Send(msg)
+	err = conn.Send(msg) // consider a synchronous send here
 	if err != nil {
 		log.Debugf("error sending 'orderbook' response: %v", err)
 	}
@@ -520,7 +541,7 @@ func (r *BookRouter) sendNote(route string, subs *subscribers, note interface{})
 		return
 	}
 
-	deletes := make([]uint64, 0)
+	var deletes []uint64
 	subs.mtx.RLock()
 	for _, conn := range subs.conns {
 		err := conn.Send(msg)

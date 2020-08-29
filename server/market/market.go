@@ -553,9 +553,8 @@ func (m *Market) Cancelable(oid order.OrderID) bool {
 	ord := m.epochOrders[oid]
 	m.epochMtx.RUnlock()
 
-	switch o := ord.(type) {
-	case *order.LimitOrder:
-		return o.Force == order.StandingTiF
+	if lo, ok := ord.(*order.LimitOrder); ok {
+		return lo.Force == order.StandingTiF
 	}
 	return false
 }
@@ -575,9 +574,8 @@ func (m *Market) CancelableBy(oid order.OrderID, aid account.AccountID) bool {
 	ord := m.epochOrders[oid]
 	m.epochMtx.RUnlock()
 
-	switch o := ord.(type) {
-	case *order.LimitOrder:
-		return o.Force == order.StandingTiF && o.AccountID == aid
+	if lo, ok := ord.(*order.LimitOrder); ok {
+		return lo.Force == order.StandingTiF && lo.AccountID == aid
 	}
 	return false
 }
@@ -1557,7 +1555,19 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 		notifyChan <- sig
 	}
 
-	// Send "unbook" notifications to order book subscribers.
+	// Send "update_remaining" notifications to order book subscribers.
+	for _, lo := range updates.TradesPartial {
+		notifyChan <- &updateSignal{
+			action: updateRemainingAction,
+			data: sigDataUpdateRemaining{
+				order:    lo,
+				epochIdx: epoch.Epoch,
+			},
+		}
+	}
+
+	// Send "unbook" notifications to order book subscribers. This must be after
+	// update_remaining.
 	for _, ord := range unbooked {
 		sig := &updateSignal{
 			action: unbookAction,
@@ -1581,17 +1591,6 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 			continue
 		}
 		m.auth.Send(ord.Order.User(), msg)
-	}
-
-	// Send "update_remaining" notifications to order book subscribers.
-	for _, lo := range updates.TradesPartial {
-		notifyChan <- &updateSignal{
-			action: updateRemainingAction,
-			data: sigDataUpdateRemaining{
-				order:    lo,
-				epochIdx: epoch.Epoch,
-			},
-		}
 	}
 
 	// Initiate the swaps.
