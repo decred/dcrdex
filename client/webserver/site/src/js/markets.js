@@ -591,6 +591,7 @@ export default class MarketsPage extends BasePage {
    * the entire order book.
    */
   handleBookRoute (data) {
+    app.log('book', 'handleOrderBook:', data)
     const market = this.market
     const page = this.page
     const host = market.dex.host
@@ -624,6 +625,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleBookOrderRoute is the handler for 'book_order' notifications. */
   handleBookOrderRoute (data) {
+    app.log('book', 'handleBookOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
@@ -633,6 +635,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleUnbookOrderRoute is the handler for 'unbook_order' notifications. */
   handleUnbookOrderRoute (data) {
+    app.log('book', 'handleUnbookOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     this.book.remove(order.token)
@@ -645,6 +648,7 @@ export default class MarketsPage extends BasePage {
    * notifications.
    */
   handleUpdateRemainingRoute (data) {
+    app.log('book', 'handleUpdateRemainingRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const update = data.payload
     this.book.updateRemaining(update.token, update.qty)
@@ -654,6 +658,7 @@ export default class MarketsPage extends BasePage {
 
   /* handleEpochOrderRoute is the handler for 'epoch_order' notifications. */
   handleEpochOrderRoute (data) {
+    app.log('book', 'handleEpochOrderRoute:', data)
     if (data.host !== this.market.dex.host || data.marketID !== this.market.sid) return
     const order = data.payload
     if (order.rate > 0) this.book.add(order)
