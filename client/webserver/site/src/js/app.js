@@ -15,6 +15,7 @@ const bind = Doc.bind
 const unbind = Doc.unbind
 
 const notificationRoute = 'notify'
+const loggersKey = 'loggers'
 
 /* constructors is a map to page constructors. */
 const constructors = {
@@ -42,6 +43,16 @@ export default class Application {
    * point. Read the id = main element and attach handlers.
    */
   async start () {
+    // Loggers can be enabled by setting a truthy value to the loggerID using
+    // enableLogger. Settings are stored across sessions. See docstring for the
+    // log method for more info.
+    this.loggers = State.fetch(loggersKey) || {}
+    window.enableLogger = (loggerID, state) => {
+      if (state) this.loggers[loggerID] = true
+      else delete this.loggers[loggerID]
+      State.store(loggersKey, this.loggers)
+      return `[${loggerID}] logger ${state ? 'enabled' : 'disabled'}`
+    }
     // The "user" is a large data structure that contains nearly all state
     // information, including exchanges, markets, wallets, and orders. It must
     // be loaded immediately.
@@ -297,6 +308,7 @@ export default class Application {
    * display.
    */
   setNotes (notes) {
+    this.log('notes', 'setNotes', notes)
     this.notes = notes
     this.setNoteElements()
   }
@@ -307,6 +319,7 @@ export default class Application {
    */
   notify (note) {
     // Handle type-specific updates.
+    this.log('notes', 'notify', note)
     switch (note.type) {
       case 'order': {
         const order = note.order
@@ -358,6 +371,23 @@ export default class Application {
     // Success and higher severity go to the bell dropdown.
     this.notes.push(note)
     this.setNoteElements()
+  }
+
+  /*
+   * log prints to the console if a logger has been enabled. Loggers are created
+   * implicitly by passing a loggerID to log. i.e. you don't create a logger,
+   * you just log to it. Loggers are enabled by invoking a global function,
+   * enableLogger(loggerID, onOffBoolean), from the browser's js console. Your
+   * choices are stored across sessions. Some common and useful loggers are
+   * listed below, but this list is not meant to be comprehensive.
+   *
+   * LoggerID   Description
+   * --------   -----------
+   * notes      Notifications of all levels.
+   * book       Order book feed.
+   */
+  log (loggerID, ...msg) {
+    if (this.loggers[loggerID]) console.log(`[${loggerID}]:`, ...msg)
   }
 
   /* setNoteElements re-builds the drop-down notification list. */
