@@ -2177,7 +2177,7 @@ func (s *Swapper) revoke(match *matchTracker) {
 		s.setLiveAcker(req, ack)
 		s.authMgr.RequestWhenConnected(user, req, func(_ comms.Link, resp *msgjson.Message) {
 			s.processAck(resp, ack)
-		}, auth.DefaultRequestTimeout, auth.DefaultConnectTimeout, expireFunc)
+		}, auth.DefaultRequestTimeout, 4*time.Hour, expireFunc)
 	}
 
 	takerParams, takerReq, makerParams, makerReq, err := s.revocationRequests(match)
