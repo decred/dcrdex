@@ -305,9 +305,14 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 
 	for _, match := range t.matches {
 		if !ids[match.id] && match.MetaData.Status < order.MatchComplete {
-			log.Debugf("missing match: %v", match.id)
 			missing = append(missing, match.id)
 			match.failErr = fmt.Errorf("order not reported by the server on connect")
+			// Must have been revoked while we were gone. Flag to allow recovery
+			// and subsequent retirement of the match and parent trade.
+			match.MetaData.Proof.IsRevoked = true
+			if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
+				log.Errorf("Failed to update missing/revoked match: %v", err)
+			}
 		}
 	}
 
@@ -318,12 +323,13 @@ func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
 		corder, _ := t.coreOrderInternal()
 		t.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
 		for _, mid := range missing {
-			log.Errorf("%s did not report active match %s on order %s", host, mid, t.ID())
+			log.Warnf("%s did not report active match %s on order %s", host, mid, t.ID())
 		}
 	}
 	if len(extras) > 0 {
 		details := fmt.Sprintf("%d matches reported by %s were not found for %s.", len(extras), host, t.token())
 		t.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
+		// t.negotiate(extras) // missed match message request, but match not revoked (?!)
 		for _, extra := range extras {
 			log.Errorf("%s reported match %s which is not a known active match for order %s", host, extra.MatchID, extra.OrderID)
 		}
@@ -353,6 +359,14 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		copy(oid[:], msgMatch.OrderID)
 		if oid != t.ID() {
 			return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.ID())
+		}
+		// Do not process matches with existing matchTrackers. e.g. In case we
+		// start "extra" matches from the 'connect' response negotiating via
+		// authDEX>readConnectMatches, and a subsequent resent 'match' request
+		// leads us here again or vice versa. Or just duplicate match requests.
+		if t.matches[mid] != nil {
+			log.Warnf("Skipping match %v that is already negotiating.", mid)
+			continue
 		}
 
 		// First check if this is a match with a cancel order, in which case the
@@ -475,7 +489,7 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		details := fmt.Sprintf("%s order on %s-%s %.1f%% filled (%s)",
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillPct, t.token())
 		log.Debugf("Trade order %v matched with %d orders: +%d filled, total fill %d / %d (%.1f%%)",
-			t.ID(), len(msgMatches), newFill, filled, trade.Quantity, fillPct)
+			t.ID(), len(newTrackers), newFill, filled, trade.Quantity, fillPct)
 		t.notify(newOrderNote("Matches made", details, db.Poke, corder))
 	}
 
