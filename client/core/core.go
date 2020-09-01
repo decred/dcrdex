@@ -507,13 +507,17 @@ func (dc *dexConnection) compareServerMatches(matches map[order.OrderID]*serverM
 	}
 }
 
-// tickAsset checks open matches related to a specific asset for needed action.
-func (dc *dexConnection) tickAsset(assetID uint32) assetMap {
+// handleTipChange triggers swap confirmation checks on all matches related to
+// an asset when the asset reports a tip change. Also ticks the related matches
+// to check for and perform any needed action, particularly if the new block(s)
+// results in a swap receiving the required confirmations.
+func (dc *dexConnection) handleTipChange(assetID uint32) assetMap {
 	updated := make(assetMap)
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for _, trade := range dc.trades {
 		if trade.Base() == assetID || trade.Quote() == assetID {
+			trade.checkSwapConfirmations()
 			newUpdates, err := trade.tick()
 			if err != nil {
 				log.Errorf("%s tick error: %v", dc.acct.host, err)
@@ -2473,10 +2477,11 @@ func (c *Core) dbTrackers(dc *dexConnection) (map[order.OrderID]*trackedTrade, e
 				prefix:    tracker.Prefix(),
 				trade:     tracker.Trade(),
 				MetaMatch: *dbMatch,
-				// Ensure logging on the first check of counterparty contract
-				// confirms and own contract expiry.
-				counterConfirms: -1,
-				lastExpireDur:   365 * 24 * time.Hour,
+				// Ensure logging on the first check of swap confirms
+				// and own contract expiry.
+				makerSwapConfs: -1,
+				takerSwapConfs: -1,
+				lastExpireDur:  365 * 24 * time.Hour,
 			}
 		}
 
@@ -3339,7 +3344,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	c.connMtx.RLock()
 	assets := make(assetMap)
 	for _, dc := range c.conns {
-		newUpdates := dc.tickAsset(assetID)
+		newUpdates := dc.handleTipChange(assetID)
 		if len(newUpdates) > 0 {
 			dc.refreshMarkets()
 			assets.merge(newUpdates)

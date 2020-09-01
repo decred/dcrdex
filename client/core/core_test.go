@@ -488,6 +488,8 @@ type TXCWallet struct {
 	fundingCoinErr error
 	lockErr        error
 	changeCoin     *tCoin
+	confirmedCoins map[string]*tCoin
+	confirmTimeErr error
 }
 
 func newTWallet(assetID uint32) (*xcWallet, *TXCWallet) {
@@ -609,8 +611,27 @@ func (w *TXCWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	return 0, nil
 }
 
-func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, error) {
-	return time.Time{}, nil
+func (w *TXCWallet) confirmSwap(coin *tCoin, confs uint32) {
+	coin.confs = tBTC.SwapConf
+	if w.confirmedCoins == nil {
+		w.confirmedCoins = make(map[string]*tCoin)
+	}
+	w.confirmedCoins[coin.ID().String()] = coin
+}
+
+func (w *TXCWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, uint32, error) {
+	if w.confirmedCoins == nil || w.confirmTimeErr != nil {
+		return time.Time{}, 0, w.confirmTimeErr
+	} else {
+		coin, found := w.confirmedCoins[id.String()]
+		if !found {
+			return time.Time{}, 0, asset.CoinNotFoundError
+		} else if coin.confs < nConfs || coin.confsErr != nil {
+			return time.Time{}, 0, coin.confsErr
+		} else {
+			return time.Now().Add(-time.Minute), coin.confs, nil
+		}
+	}
 }
 
 func (w *TXCWallet) PayFee(address string, fee uint64) (asset.Coin, error) {
@@ -2406,11 +2427,11 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("audit time not set")
 	}
 	// Confirming the counter-swap triggers a redemption.
-	auditInfo.coin.confs = tBTC.SwapConf
+	tBtcWallet.confirmSwap(auditInfo.coin, tBTC.SwapConf)
 	redeemCoin := encode.RandomBytes(36)
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
-	dc.tickAsset(tBTC.ID)
+	dc.handleTipChange(tBTC.ID)
 	checkStatus("maker redeemed", order.MakerRedeemed)
 	if !bytes.Equal(proof.MakerRedeem, redeemCoin) {
 		t.Fatalf("redeem coin ID not logged")
@@ -2514,11 +2535,12 @@ func TestTradeTracking(t *testing.T) {
 		t.Fatalf("swap broadcast before confirmations")
 	}
 	// Now with the confirmations.
-	auditInfo.coin.confs = tBTC.SwapConf
+	tBtcWallet.confirmSwap(auditInfo.coin, tBTC.SwapConf)
 	swapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-	dc.tickAsset(tBTC.ID)
+	dc.handleTipChange(tBTC.ID)
+	time.Sleep(10 * time.Second)
 	checkStatus("taker swapped", order.TakerSwapCast)
 	if len(proof.TakerSwap) == 0 {
 		t.Fatalf("swap not broadcast with confirmations")
@@ -2653,8 +2675,9 @@ func TestRefunds(t *testing.T) {
 	checkStatus := func(tag string, match *matchTracker, wantStatus order.MatchStatus) {
 		t.Helper()
 		if match.Match.Status != wantStatus {
-			t.Fatalf("%s: wrong status wanted %d, got %d", tag, match.Match.Status, wantStatus)
+			t.Fatalf("%s: wrong status, wanted %s, got %s", tag, wantStatus, match.Match.Status)
 		}
+		t.Log(tag)
 	}
 	checkRefund := func(tracker *trackedTrade, match *matchTracker, expectAmt uint64) {
 		t.Helper()
@@ -2814,12 +2837,13 @@ func TestRefunds(t *testing.T) {
 		t.Fatalf("taker's match message error: %v", err)
 	}
 	checkStatus("taker counter-party swapped", match, order.MakerSwapCast)
-	auditInfo.coin.confs = tBTC.SwapConf
+	// Confirm maker's swap.
+	tBtcWallet.confirmSwap(auditInfo.coin, tBTC.SwapConf)
 	counterSwapID := encode.RandomBytes(36)
 	counterScript := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID, script: counterScript}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-	dc.tickAsset(tBTC.ID)
+	dc.handleTipChange(tBTC.ID)
 
 	checkStatus("taker swapped", match, order.TakerSwapCast)
 	if !bytes.Equal(match.MetaData.Proof.Script, counterScript) {
@@ -3125,9 +3149,10 @@ func TestReadConnectMatches(t *testing.T) {
 	// Store a match
 	knownID := ordertest.RandomMatchID()
 	knownMatch := &matchTracker{
-		id:              knownID,
-		MetaMatch:       metaMatch,
-		counterConfirms: -1,
+		id:             knownID,
+		MetaMatch:      metaMatch,
+		makerSwapConfs: -1,
+		takerSwapConfs: -1,
 	}
 	tracker.matches[knownID] = knownMatch
 	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: knownID[:]}
@@ -3442,10 +3467,11 @@ func TestLogout(t *testing.T) {
 				Side:    order.Maker,
 			},
 		},
-		prefix:          ord.Prefix(),
-		trade:           ord.Trade(),
-		counterConfirms: -1,
-		id:              mid,
+		prefix:         ord.Prefix(),
+		trade:          ord.Trade(),
+		makerSwapConfs: -1,
+		takerSwapConfs: -1,
+		id:             mid,
 	}
 	// Active orders with matches error.
 	ensureErr("active orders matches")
@@ -3741,7 +3767,8 @@ func TestHandleTradeSuspensionMsg(t *testing.T) {
 			MetaData: &db.MatchMetaData{},
 			Match:    &order.UserMatch{}, // Default status = NewlyMatched
 		},
-		counterConfirms: -1,
+		makerSwapConfs: -1,
+		takerSwapConfs: -1,
 	}
 	swappedTracker.matches[mid] = match
 	_ = rig.dc.resume(tDcrBtcMktName)

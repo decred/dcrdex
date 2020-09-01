@@ -138,6 +138,11 @@ type Wallet interface {
 	// The ID need not represent an unspent coin, but coin IDs unknown to this
 	// wallet may return an error.
 	Confirmations(id dex.Bytes) (uint32, error)
+	// ConfirmTime returns the UTC time the passed coin ID received the specified
+	// number of confirmations. Also returns the current coin confirmation count.
+	// A zero time value is returned if the coin's current confirmation count is
+	// less than requested.
+	ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, uint32, error)
 	// Withdraw withdraws funds to the specified address. Fees are subtracted from
 	// the value.
 	Withdraw(address string, value uint64) (Coin, error)

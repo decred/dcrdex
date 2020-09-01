@@ -124,6 +124,7 @@ type rpcClient interface {
 	GetBalanceMinConf(account string, minConfirms int) (*walletjson.GetBalanceResult, error)
 	GetBestBlock() (*chainhash.Hash, int64, error)
 	GetBlockHash(blockHeight int64) (*chainhash.Hash, error)
+	GetBlockHeaderVerbose(hash *chainhash.Hash) (*chainjson.GetBlockHeaderVerboseResult, error)
 	GetBlockVerbose(blockHash *chainhash.Hash, verboseTx bool) (*chainjson.GetBlockVerboseResult, error)
 	GetRawMempool(txType chainjson.GetRawMempoolTxTypeCmd) ([]*chainhash.Hash, error)
 	GetRawTransactionVerbose(txHash *chainhash.Hash) (*chainjson.TxRawResult, error)
@@ -1522,6 +1523,54 @@ func (dcr *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 		return 0, err
 	}
 	return uint32(tx.Confirmations), nil
+}
+
+// ConfirmTime returns the UTC time the passed coin ID received the specified
+// number of confirmations. Also returns the current coin confirmation count.
+// A zero time value is returned if the coin's current confirmation count is
+// less than requested.
+func (dcr *ExchangeWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, uint32, error) {
+	zeroTime := time.Time{}
+
+	txHash, _, err := decodeCoinID(id)
+	if err != nil {
+		return zeroTime, 0, err
+	}
+	tx, err := dcr.node.GetTransaction(txHash)
+	if err != nil {
+		return zeroTime, 0, err
+	}
+	currentConfs := uint32(tx.Confirmations)
+	if currentConfs < nConfs {
+		return zeroTime, currentConfs, nil
+	}
+	if nConfs == 1 {
+		return time.Unix(tx.BlockTime, 0).UTC(), currentConfs, nil
+	}
+
+	blockHashAt1Conf, err := chainhash.NewHashFromStr(tx.BlockHash)
+	if err != nil {
+		return zeroTime, currentConfs, err
+	}
+	blockHeaderAt1Conf, err := dcr.node.GetBlockHeaderVerbose(blockHashAt1Conf)
+	if err != nil {
+		return zeroTime, currentConfs, err
+	}
+	var blockHashAtNConfs *chainhash.Hash
+	if nConfs == 2 {
+		blockHashAtNConfs, err = chainhash.NewHashFromStr(blockHeaderAt1Conf.NextHash)
+	} else {
+		blockHeightAtNConfs := int64(blockHeaderAt1Conf.Height) + int64(nConfs-1)
+		blockHashAtNConfs, err = dcr.node.GetBlockHash(blockHeightAtNConfs)
+	}
+	if err != nil {
+		return zeroTime, currentConfs, err
+	}
+	blockHeaderAtNConfs, err := dcr.node.GetBlockHeaderVerbose(blockHashAtNConfs)
+	if err != nil {
+		return zeroTime, currentConfs, err
+	}
+	return time.Unix(blockHeaderAtNConfs.Time, 0).UTC(), currentConfs, nil
 }
 
 // addInputCoins adds inputs to the MsgTx to spend the specified outputs.

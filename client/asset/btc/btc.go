@@ -1444,6 +1444,52 @@ func (btc *ExchangeWallet) Confirmations(id dex.Bytes) (uint32, error) {
 	return uint32(tx.Confirmations), nil
 }
 
+// ConfirmTime returns the UTC time the passed coin ID received the specified
+// number of confirmations. Also returns the current coin confirmation count.
+// A zero time value is returned if the coin's current confirmation count is
+// less than requested.
+func (btc *ExchangeWallet) ConfirmTime(id dex.Bytes, nConfs uint32) (time.Time, uint32, error) {
+	zeroTime := time.Time{}
+
+	txHash, _, err := decodeCoinID(id)
+	if err != nil {
+		return zeroTime, 0, err
+	}
+	tx, err := btc.wallet.GetTransaction(txHash.String())
+	if err != nil {
+		return zeroTime, 0, err
+	}
+	currentConfs := uint32(tx.Confirmations)
+	if currentConfs < nConfs {
+		return zeroTime, currentConfs, err
+	}
+	if nConfs == 1 {
+		return time.Unix(int64(tx.BlockTime), 0).UTC(), currentConfs, nil
+	}
+
+	blockHeaderAt1Conf, err := btc.getBlockHeader(tx.BlockHash)
+	if err != nil {
+		return zeroTime, currentConfs, err
+	}
+	var blockHashAtNConfs string
+	if nConfs == 2 {
+		blockHashAtNConfs = blockHeaderAt1Conf.NextHash
+	} else {
+		blockHeightAtNConfs := blockHeaderAt1Conf.Height + int64(nConfs-1)
+		hashAtNConfs, err := btc.node.GetBlockHash(blockHeightAtNConfs)
+		if err != nil {
+			return zeroTime, currentConfs, err
+		}
+		blockHashAtNConfs = hashAtNConfs.String()
+	}
+
+	blockHeaderAtNConfs, err := btc.getBlockHeader(blockHashAtNConfs)
+	if err != nil {
+		return zeroTime, currentConfs, err
+	}
+	return time.Unix(blockHeaderAtNConfs.Time, 0).UTC(), currentConfs, nil
+}
+
 // run pings for new blocks and runs the tipChange callback function when the
 // block changes.
 func (btc *ExchangeWallet) run(ctx context.Context) {
@@ -1729,9 +1775,11 @@ func toSatoshi(v float64) uint64 {
 type blockHeader struct {
 	Hash          string `json:"hash"`
 	Confirmations int64  `json:"confirmations"`
-	Height        int32  `json:"height"`
+	Height        int64  `json:"height"`
 	Time          int64  `json:"time"`
 	MedianTime    int64  `json:"mediantime"`
+	PreviousHash  string `json:"previousblockhash,omitempty"`
+	NextHash      string `json:"nextblockhash,omitempty"`
 }
 
 // getBlockHeader gets the block header for the specified block hash.

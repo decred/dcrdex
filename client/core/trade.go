@@ -39,12 +39,23 @@ type matchTracker struct {
 	trade       *order.Trade
 	counterSwap asset.AuditInfo
 
+	// makerSwapConfirmTime is the time that the maker's swap received its
+	// SwapConf'th confirmation.
+	makerSwapConfirmTime time.Time
+	// takerSwapConfirmTime is the time that the taker's swap received its
+	// SwapConf'th confirmation.
+	takerSwapConfirmTime time.Time
+
 	// The following fields facilitate useful logging, while not being spammy.
 
-	// counterConfirms records the last known confirms of the counterparty swap.
-	// This is set in isSwappable for taker, isRedeemable for maker. -1 means
-	// the confirms have not yet been checked (or logged).
-	counterConfirms int64
+	// makerSwapConfs is the confirmation count on maker's swap as at last
+	// check time. Recorded to prevent spammy logging. Set to -1 to ensure
+	// initial logging.
+	makerSwapConfs int32
+	// takerSwapConfs is the confirmation count on taker's swap as at last
+	// check time. Recorded to prevent spammy logging. Set to -1 to ensure
+	// initial logging.
+	takerSwapConfs int32
 	// lastExpireDur is the most recently logged time until expiry of the
 	// party's own contract. This may be negative if expiry has passed, but it
 	// is not yet refundable due to other consensus rules. This is set in
@@ -369,12 +380,13 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 		}
 
 		match := &matchTracker{
-			id:              mid,
-			prefix:          t.Prefix(),
-			trade:           trade,
-			MetaMatch:       *t.makeMetaMatch(msgMatch),
-			counterConfirms: -1,
-			lastExpireDur:   365 * 24 * time.Hour,
+			id:             mid,
+			prefix:         t.Prefix(),
+			trade:          trade,
+			MetaMatch:      *t.makeMetaMatch(msgMatch),
+			makerSwapConfs: -1,
+			takerSwapConfs: -1,
+			lastExpireDur:  365 * 24 * time.Hour,
 		}
 
 		var qty uint64
@@ -559,65 +571,6 @@ func (t *trackedTrade) processCancelMatch(msgMatch *msgjson.Match) error {
 	return nil
 }
 
-// Get the required and current confirmation count on the counterparty's swap
-// contract transaction for the provided match. If the count has not changed
-// since the previous check, changed will be false.
-func (t *trackedTrade) counterPartyConfirms(match *matchTracker) (have, needed uint32, changed bool) {
-	// Counter-party's swap is the "to" asset.
-	needed = t.wallets.toAsset.SwapConf
-
-	// Check the confirmations on the counter-party's swap.
-	coin := match.counterSwap.Coin()
-	var err error
-	have, err = coin.Confirmations()
-	if err != nil {
-		log.Errorf("error getting confirmations for match %s on order %s for coin %s",
-			match.id, t.UID(), coin)
-		have = 0 // should already be
-		return
-	}
-
-	// Log the pending swap status at new heights only.
-	if match.counterConfirms != int64(have) {
-		match.counterConfirms = int64(have)
-		changed = true
-	}
-	return
-}
-
-// isSwappable will be true if the match is ready for a swap transaction to be
-// broadcast.
-func (t *trackedTrade) isSwappable(match *matchTracker) bool {
-	dbMatch, metaData, proof, _ := match.parts()
-	if match.failErr != nil || proof.IsRevoked {
-		log.Debugf("Match %v not swappable: failErr = %v, revoked = %v",
-			match.id, match.failErr, proof.IsRevoked)
-		return false
-	}
-
-	wallet := t.wallets.fromWallet
-	if !wallet.unlocked() {
-		log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
-			t.ID(), match.id, unbip(wallet.AssetID))
-		return false
-	}
-
-	if dbMatch.Side == order.Taker && metaData.Status == order.MakerSwapCast {
-		// Check the confirmations on the maker's swap.
-		confs, req, changed := t.counterPartyConfirms(match)
-		ready := confs >= req
-		if changed && !ready {
-			log.Debugf("Match %v not yet swappable: current confs = %d, required confs = %d",
-				match.id, confs, req)
-		}
-		return ready
-	}
-	if dbMatch.Side == order.Maker && metaData.Status == order.NewlyMatched {
-		return true
-	}
-	return false
-}
-
 // isActive will be true if the trade is booked or epoch, or if any of the
 // matches are still negotiating.
 func (t *trackedTrade) isActive() bool {
@@ -671,10 +624,105 @@ func (match *matchTracker) isActive() bool {
 	return true
 }
 
+// checkSwapConfirmations checks for matches whose maker or taker swap have
+// received the reqiured confirmations and records the swap confirmation time.
+func (t *trackedTrade) checkSwapConfirmations() {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	checkConfs := func(coinID order.CoinID, wallet *xcWallet, asset *dex.Asset) (time.Time, int32) {
+		confirmTime, currentConfs, err := wallet.ConfirmTime(dex.Bytes(coinID), asset.SwapConf)
+		if err != nil {
+			log.Errorf("error checking time for %d confirms on swap %s: %v",
+				asset.SwapConf, coinIDString(asset.ID, coinID), err)
+			return time.Time{}, 0
+		}
+		return confirmTime, int32(currentConfs)
+	}
+
+	for _, match := range t.matches {
+		proof := match.MetaData.Proof
+		if proof.IsRevoked || len(proof.RefundCoin) > 0 {
+			continue // no point checking swap confirm time on revoked or refunded matches.
+		}
+
+		status, side := match.Match.Status, match.Match.Side
+		var swapWallet *xcWallet
+		var swapAsset *dex.Asset
+		switch {
+		case status == order.MakerSwapCast && match.makerSwapConfirmTime.IsZero():
+			if side == order.Maker {
+				swapWallet, swapAsset = t.wallets.fromWallet, t.wallets.fromAsset
+			} else {
+				swapWallet, swapAsset = t.wallets.toWallet, t.wallets.toAsset
+			}
+			lastMakerConfs := match.makerSwapConfs
+			match.makerSwapConfirmTime, match.makerSwapConfs = checkConfs(proof.MakerSwap, swapWallet, swapAsset)
+			if match.makerSwapConfirmTime.IsZero() && match.makerSwapConfs != lastMakerConfs {
+				log.Debugf("Match %v not ready for taker's swap: maker's swap confs = %d, required confs = %d",
+					match.id, match.makerSwapConfs, swapAsset.SwapConf)
+			}
+
+		case status == order.TakerSwapCast && match.takerSwapConfirmTime.IsZero():
+			if side == order.Maker {
+				swapWallet, swapAsset = t.wallets.toWallet, t.wallets.toAsset
+			} else {
+				swapWallet, swapAsset = t.wallets.fromWallet, t.wallets.fromAsset
+			}
+			lastTakerConfs := match.takerSwapConfs
+			match.takerSwapConfirmTime, match.takerSwapConfs = checkConfs(proof.TakerSwap, swapWallet, swapAsset)
+			if match.takerSwapConfirmTime.IsZero() && match.takerSwapConfs != lastTakerConfs {
+				log.Debugf("Match %v not ready for maker's redeem: taker's swap confs = %d, required confs = %d",
+					match.id, match.takerSwapConfs, swapAsset.SwapConf)
+			}
+		}
+	}
+}
+
+// isSwappable will be true if the match is ready for a swap transaction to be
+// broadcast. Assuming the fromWallet is unlocked, the match will be ready for
+// - maker's swap if the status is NewlyMatched.
+// - taker's swap if the status is MakerSwapCast and maker's swap has received
+//   the required minimum number of confirms.
+//
+// This method accesses match fields and MUST be called with the trackedTrade
+// mutex lock held for reads.
+func (t *trackedTrade) isSwappable(match *matchTracker) bool {
+	proof := match.MetaData.Proof
+	if match.failErr != nil || proof.IsRevoked {
+		log.Debugf("Match %v not swappable: failErr = %v, revoked = %v",
+			match.id, match.failErr, proof.IsRevoked)
+		return false
+	}
+
+	wallet := t.wallets.fromWallet
+	if !wallet.unlocked() {
+		log.Errorf("cannot swap order %s, match %s, because %s wallet is not unlocked",
+			t.ID(), match.id, unbip(wallet.AssetID))
+		return false
+	}
+
+	status, side := match.Match.Status, match.Match.Side
+	switch {
+	case side == order.Maker && status == order.NewlyMatched:
+		return true
+	case side == order.Taker && status == order.MakerSwapCast:
+		return !match.makerSwapConfirmTime.IsZero()
+	default:
+		return false
+	}
+}
+
 // isRedeemable will be true if the match is ready for our redemption to be
-// broadcast.
+// broadcast. Assuming the toWallet is unlocked, the match will be ready for
+// - maker's redeem if the status is TakerSwapCast and taker's swap has
+//   received the required minimum number of confirms.
+// - taker's redeem if the status is MakerRedeemed.
+//
+// This method accesses match fields and MUST be called with the trackedTrade
+// mutex lock held for reads.
 func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
-	dbMatch, metaData, proof, _ := match.parts()
+	proof := match.MetaData.Proof
 	if match.failErr != nil || len(proof.RefundCoin) != 0 {
 		log.Debugf("Match %v not redeemable: failErr = %v, RefundCoin = %v",
 			match.id, match.failErr, proof.RefundCoin)
@@ -688,20 +736,15 @@ func (t *trackedTrade) isRedeemable(match *matchTracker) bool {
 		return false
 	}
 
-	if dbMatch.Side == order.Maker && metaData.Status == order.TakerSwapCast {
-		// Check the confirmations on the taker's swap.
-		confs, req, changed := t.counterPartyConfirms(match)
-		ready := confs >= req
-		if changed && !ready {
-			log.Debugf("Match %v not yet redeemable: current confs = %d, required confs = %d",
-				match.id, confs, req)
-		}
-		return ready
-	}
-	if dbMatch.Side == order.Taker && metaData.Status == order.MakerRedeemed {
+	status, side := match.Match.Status, match.Match.Side
+	switch {
+	case side == order.Maker && status == order.TakerSwapCast:
+		return !match.takerSwapConfirmTime.IsZero()
+	case side == order.Taker && status == order.MakerRedeemed:
 		return true
+	default:
+		return false
 	}
-	return false
 }
 
 // isRefundable will be true if all of the following are true:
