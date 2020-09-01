@@ -1287,7 +1287,7 @@ func (dcr *ExchangeWallet) FindRedemption(coinID dex.Bytes) (chan *asset.FindRed
 	}
 	msgTx, err := msgTxFromHex(tx.Hex)
 	if err != nil {
-		return nil, fmt.Errorf("invalid contract tx hex: %v", err)
+		return nil, fmt.Errorf("invalid contract tx hex %s: %v", tx.Hex, err)
 	}
 	if int(vout) > len(msgTx.TxOut)-1 {
 		return nil, fmt.Errorf("vout index %d out of range for transaction %s", vout, txHash)
