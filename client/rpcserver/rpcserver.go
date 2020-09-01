@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/elliptic"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -80,7 +81,7 @@ type RPCServer struct {
 	addr      string
 	tlsConfig *tls.Config
 	srv       *http.Server
-	authsha   [32]byte
+	authSHA   [32]byte
 	wg        sync.WaitGroup
 }
 
@@ -168,6 +169,10 @@ func SetLogger(logger dex.Logger) {
 // New is the constructor for an RPCServer.
 func New(cfg *Config) (*RPCServer, error) {
 
+	if cfg.Pass == "" {
+		return nil, fmt.Errorf("missing RPC password")
+	}
+
 	// Find or create the key pair.
 	keyExists := fileExists(cfg.Key)
 	certExists := fileExists(cfg.Cert)
@@ -209,13 +214,11 @@ func New(cfg *Config) (*RPCServer, error) {
 		wsServer:  websocket.New(cfg.Core, log.SubLogger("WS")),
 	}
 
-	// Create authsha to verify requests against.
-	if cfg.User != "" && cfg.Pass != "" {
-		login := cfg.User + ":" + cfg.Pass
-		auth := "Basic " +
-			base64.StdEncoding.EncodeToString([]byte(login))
-		s.authsha = sha256.Sum256([]byte(auth))
-	}
+	// Create authSHA to verify requests against.
+	login := cfg.User + ":" + cfg.Pass
+	auth := "Basic " +
+		base64.StdEncoding.EncodeToString([]byte(login))
+	s.authSHA = sha256.Sum256([]byte(auth))
 
 	// Middleware
 	mux.Use(middleware.Recoverer)
@@ -317,11 +320,19 @@ func (s *RPCServer) parseHTTPRequest(w http.ResponseWriter, req *msgjson.Message
 // authMiddleware checks incoming requests for authentication.
 func (s *RPCServer) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header["Authorization"]
-		if len(auth) == 0 || s.authsha != sha256.Sum256([]byte(auth[0])) {
-			log.Warnf("authentication failure from ip: %s with auth: %s", r.RemoteAddr, auth)
+		fail := func() {
+			log.Warnf("authentication failure from ip: %s", r.RemoteAddr)
 			w.Header().Add("WWW-Authenticate", `Basic realm="dex RPC"`)
 			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		}
+		auth := r.Header["Authorization"]
+		if len(auth) == 0 {
+			fail()
+			return
+		}
+		authSHA := sha256.Sum256([]byte(auth[0]))
+		if subtle.ConstantTimeCompare(s.authSHA[:], authSHA[:]) != 1 {
+			fail()
 			return
 		}
 		log.Debugf("authenticated user with ip: %s", r.RemoteAddr)

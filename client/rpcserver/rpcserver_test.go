@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -114,13 +115,21 @@ func (c *TCore) Withdraw(pw []byte, assetID uint32, value uint64, addr string) (
 }
 
 func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, func()) {
+	tSrv, fn, err := newTServerWErr(t, start, user, pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tSrv, fn
+}
+func newTServerWErr(t *testing.T, start bool, user, pass string) (*RPCServer, func(), error) {
 	t.Helper()
 
 	var shutdown func()
 	ctx, killCtx := context.WithCancel(tCtx)
 	tempDir, err := ioutil.TempDir("", "rpcservertest")
 	if err != nil {
-		t.Fatalf("error creating temporary directory: %v", err)
+		killCtx()
+		return nil, nil, fmt.Errorf("error creating temporary directory: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
@@ -135,13 +144,15 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, func()
 	}
 	s, err := New(cfg)
 	if err != nil {
-		t.Fatalf("error creating server: %v", err)
+		killCtx()
+		return nil, nil, fmt.Errorf("error creating server: %v", err)
 	}
 	if start {
 		cm := dex.NewConnectionMaster(s)
 		err := cm.Connect(ctx)
 		if err != nil {
-			t.Fatalf("Error starting RPCServer: %v", err)
+			killCtx()
+			return nil, nil, fmt.Errorf("error starting RPCServer: %v", err)
 		}
 		shutdown = func() {
 			killCtx()
@@ -150,7 +161,7 @@ func newTServer(t *testing.T, start bool, user, pass string) (*RPCServer, func()
 	} else {
 		shutdown = killCtx
 	}
-	return s, shutdown
+	return s, shutdown, nil
 }
 
 func TestMain(m *testing.M) {
@@ -164,7 +175,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestConnectBindError(t *testing.T) {
-	s0, shutdown := newTServer(t, true, "", "")
+	s0, shutdown := newTServer(t, true, "", "abc")
 	defer shutdown()
 
 	tempDir, err := ioutil.TempDir("", "rpcservertest")
@@ -178,7 +189,7 @@ func TestConnectBindError(t *testing.T) {
 		Core: &TCore{},
 		Addr: s0.addr,
 		User: "",
-		Pass: "",
+		Pass: "abc",
 		Cert: cert,
 		Key:  key,
 	}
@@ -212,7 +223,7 @@ func (w *tResponseWriter) WriteHeader(statusCode int) {
 }
 
 func TestParseHTTPRequest(t *testing.T) {
-	s, shutdown := newTServer(t, false, "", "")
+	s, shutdown := newTServer(t, false, "", "abc")
 	defer shutdown()
 	var r *http.Request
 
@@ -298,30 +309,46 @@ func TestParseHTTPRequest(t *testing.T) {
 	ensureMsgErr("bad params", msgjson.RPCParseError)
 }
 
-type authMiddlewareTest struct {
-	name, user, pass, header string
-	hasAuth, wantErr         bool
-}
-
 func TestNew(t *testing.T) {
-	authTests := [][]string{
-		{"user", "pass", "AK+rg3mIGeouojwZwNRMjBjZouASr4mu4FWMTXQQcD0="},
-		{"", "", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="},
-		{`&!"#$%&'()~=`, `+<>*?,:.;/][{}`,
-			"Te4g4+Ke9Q07MYo3iT1OCqq5qXX2ZcB47FBiVaT41hQ="},
-	}
+	authTests := []struct {
+		name, user, pass, wantAuth string
+		wantErr                    bool
+	}{{
+		name:     "ok",
+		user:     "user",
+		pass:     "pass",
+		wantAuth: "AK+rg3mIGeouojwZwNRMjBjZouASr4mu4FWMTXQQcD0=",
+	}, {
+		name:     "ok various input",
+		user:     `&!"#$%&'()~=`,
+		pass:     `+<>*?,:.;/][{}`,
+		wantAuth: "Te4g4+Ke9Q07MYo3iT1OCqq5qXX2ZcB47FBiVaT41hQ=",
+	}, {
+		name:    "no password",
+		user:    "user",
+		wantErr: true,
+	}}
 	for _, test := range authTests {
-		s, shutdown := newTServer(t, false, test[0], test[1])
-		auth := base64.StdEncoding.EncodeToString((s.authsha[:]))
-		if auth != test[2] {
-			t.Fatalf("expected auth %s but got %s", test[2], auth)
+		s, shutdown, err := newTServerWErr(t, false, test.user, test.pass)
+		if test.wantErr {
+			if err == nil {
+				t.Fatalf("expected error for test %s", test.name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("unexpected error for test %s: %v", test.name, err)
+		}
+		auth := base64.StdEncoding.EncodeToString((s.authSHA[:]))
+		if auth != test.wantAuth {
+			t.Fatalf("expected auth %s but got %s", test.wantAuth, auth)
 		}
 		shutdown()
 	}
 }
 
 func TestAuthMiddleware(t *testing.T) {
-	s, shutdown := newTServer(t, false, "", "")
+	s, shutdown := newTServer(t, false, "", "abc")
 	defer shutdown()
 	am := s.authMiddleware(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
@@ -355,15 +382,47 @@ func TestAuthMiddleware(t *testing.T) {
 	login := user + ":" + pass
 	h := "Basic "
 	auth := h + base64.StdEncoding.EncodeToString([]byte(login))
-	s.authsha = sha256.Sum256([]byte(auth))
+	s.authSHA = sha256.Sum256([]byte(auth))
 
-	tests := []authMiddlewareTest{
-		{"auth ok", user, pass, h, true, false},
-		{"wrong pass", user, "password123", h, true, true},
-		{"unknown user", "Jules", pass, h, true, true},
-		{"no header", user, pass, h, false, true},
-		{"malformed header", user, pass, "basic ", true, true},
-	}
+	tests := []struct {
+		name, user, pass, header string
+		hasAuth, wantErr         bool
+	}{{
+		name:    "auth ok",
+		user:    user,
+		pass:    pass,
+		header:  h,
+		hasAuth: true,
+		wantErr: false,
+	}, {
+		name:    "wrong pass",
+		user:    user,
+		pass:    "password123",
+		header:  h,
+		hasAuth: true,
+		wantErr: true,
+	}, {
+		name:    "unknown user",
+		user:    "Jules",
+		pass:    pass,
+		header:  h,
+		hasAuth: true,
+		wantErr: true,
+	}, {
+		name:    "no header",
+		user:    user,
+		pass:    pass,
+		header:  h,
+		hasAuth: false,
+		wantErr: true,
+	}, {
+		name:    "malformed header",
+		user:    user,
+		pass:    pass,
+		header:  "basic ",
+		hasAuth: true,
+		wantErr: true,
+	}}
 	for _, test := range tests {
 		login = test.user + ":" + test.pass
 		auth = test.header + base64.StdEncoding.EncodeToString([]byte(login))
