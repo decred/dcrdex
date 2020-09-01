@@ -8,6 +8,7 @@ import (
 	"decred.org/dcrdex/client/db/bolt"
 	orderbook "decred.org/dcrdex/client/order"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/ws"
 )
 
 // log is a logger that is initialized with no output filters. This means the
@@ -23,6 +24,7 @@ func DisableLog() {
 // UseLogger uses a specified Logger to output package logging info.
 func UseLoggerMaker(maker *dex.LoggerMaker) {
 	log = maker.Logger("CORE")
+	ws.UseLogger(maker.Logger("WS"))
 	orderbook.UseLogger(maker.Logger("ORDBOOK"))
 	comms.UseLogger(maker.Logger("COMMS"))
 	bolt.UseLogger(maker.Logger("DB"))

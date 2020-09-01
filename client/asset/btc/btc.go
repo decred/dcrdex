@@ -621,11 +621,12 @@ out:
 		utxos = utxos[:len(utxos)-1]
 	}
 
-	btc.log.Debugf("funding %d %s order with coins %v worth %d", ord.Value, btc.walletInfo.Units, coins, sum)
-
 	if btc.useSplitTx && !ord.Immediate {
 		return btc.split(ord.Value, ord.MaxSwapCount, spents, uint64(size), fundingCoins, ord.DEXConfig)
 	}
+
+	btc.log.Infof("Funding %d %s order with coins %v worth %d",
+		ord.Value, btc.walletInfo.Units, coins, sum)
 
 	err = btc.wallet.LockUnspent(false, spents)
 	if err != nil {
@@ -685,7 +686,10 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 
 	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, nfo)
 	if baggageFees > excess {
-		btc.log.Infof("skipping split transaction because cost is greater than potential over-lock. %d > %d", baggageFees, excess)
+		btc.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. "+
+			"%d > %d", baggageFees, excess)
+		btc.log.Infof("Funding %d %s order with coins %v worth %d",
+			value, btc.walletInfo.Units, coins, coinSum)
 		return coins, nil
 	}
 
@@ -733,7 +737,10 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 		input:        spendInfo,
 	}}
 
-	btc.log.Infof("sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash(), value, reqFunds)
+	btc.log.Infof("Funding %d %s order with split output coin %v from original coins %v",
+		value, btc.walletInfo.Units, op, coins)
+	btc.log.Infof("Sent split transaction %s to accommodate swap of size %d + fees = %d",
+		op.txHash(), value, reqFunds)
 
 	// Assign to coins so the deferred function will lock the output.
 	outputs = []*output{op}

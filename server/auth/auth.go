@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -284,7 +285,11 @@ func (auth *AuthManager) Route(route string, handler func(account.AccountID, *ms
 				Message: "cannot use route '" + route + "' on an unauthorized connection",
 			}
 		}
-		return handler(client.acct.ID, msg)
+		msgErr := handler(client.acct.ID, msg)
+		if msgErr != nil {
+			log.Debugf("Handling of '%s' request for user %v failed: %v", route, client.acct.ID, msgErr)
+		}
+		return msgErr
 	})
 }
 
@@ -386,6 +391,13 @@ func (auth *AuthManager) rmUserConnectMsgs(user account.AccountID) []*pendingMes
 		// rmUserConnectMsg. Since we're here, we beat the timer.
 		tr.T.Stop()
 	}
+	// Non-request message IDs can be server-generated IDs for notifications, or
+	// client-generated request IDs for responses, so this sort only ensures
+	// that the same kind of messages (responses or notifications) are in order
+	// from oldest to newest, but the two types are potentially interleaved.
+	sort.Slice(msgs, func(i, j int) bool {
+		return msgs[i].msg.ID < msgs[j].msg.ID
+	})
 	delete(auth.pendingMessages, user)
 	return msgs
 }
@@ -533,6 +545,11 @@ func (auth *AuthManager) rmUserConnectReqs(user account.AccountID) []*pendingReq
 		tr.T.Stop()
 	}
 	delete(auth.pendingRequests, user)
+	// Request IDs are server generated and monotonically increasing, so this
+	// puts the requests in order from oldest to newest.
+	sort.Slice(reqs, func(i, j int) bool {
+		return reqs[i].req.ID < reqs[j].req.ID
+	})
 	return reqs
 }
 
@@ -564,18 +581,21 @@ const DefaultRequestTimeout = 30 * time.Second
 
 func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
 	expireTimeout, connectTimeout time.Duration, expire func()) error {
-	stamp := time.Now().UTC()
+	addPending := func() {
+		auth.addUserConnectReq(&pendingRequest{
+			user:            user,
+			req:             msg,
+			handlerFunc:     f,
+			responseTimeout: expireTimeout,
+			lastAttempt:     time.Now().UTC(),
+			expireFunc:      expire,
+		}, connectTimeout)
+	}
+
 	client := auth.user(user)
 	if client == nil {
 		if connectTimeout > 0 {
-			auth.addUserConnectReq(&pendingRequest{
-				user:            user,
-				req:             msg,
-				handlerFunc:     f,
-				responseTimeout: expireTimeout,
-				lastAttempt:     stamp,
-				expireFunc:      expire,
-			}, connectTimeout)
+			addPending()
 			return nil
 		}
 		log.Errorf("Send requested for unknown user %v", user)
@@ -595,14 +615,7 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 		// Remove client asssuming connection is broken, requiring reconnect.
 		auth.removeClient(client)
 		if connectTimeout > 0 {
-			auth.addUserConnectReq(&pendingRequest{
-				user:            user,
-				req:             msg,
-				handlerFunc:     f,
-				responseTimeout: expireTimeout,
-				lastAttempt:     stamp,
-				expireFunc:      expire,
-			}, connectTimeout)
+			addPending()
 			return nil
 		}
 	}
@@ -813,7 +826,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		case side == order.Maker && user == match.MakerAcct:
 			addr = match.TakerAddr // counterparty
 			oid = match.Maker[:]
-			// sell = !match.TakerSell{
+			// sell = !match.TakerSell
 		case side == order.Taker && user == match.TakerAcct:
 			addr = match.MakerAddr // counterparty
 			oid = match.Taker[:]
@@ -836,7 +849,9 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 	}
 
 	// For each db match entry, create at least one msgjson.Match.
+	activeMatchIDs := make(map[order.MatchID]bool, len(matches))
 	for _, match := range matches {
+		activeMatchIDs[match.ID] = true
 		msgMatchForSide(match, order.Maker)
 		msgMatchForSide(match, order.Taker)
 	}
@@ -918,12 +933,33 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	// Send pending requests for this user.
 	for _, pr := range pendingReqs {
+		// Certain match-related messages should only be sent if the match is
+		// still active.
+		mid, err := pr.req.ExtractMatchID()
+		if err != nil {
+			log.Errorf("Failed to read matchid field from '%s' payload: %v", pr.req.Route, err)
+			// just send it
+		} else if mid != nil && pr.req.Route != msgjson.RevokeMatchRoute {
+			// Always send revoke_match, but only send others with matchid set
+			// if the match is still active.
+			var matchID order.MatchID
+			copy(matchID[:], mid)
+			if !activeMatchIDs[matchID] {
+				log.Debugf("Not sending pending '%s' request to %v for inactive match %v.",
+					pr.req.Route, user, matchID)
+				continue // don't send this request
+			}
+		}
+
 		log.Debugf("Sending pending '%s' request to user %v: %v", pr.req.Route, pr.user, pr.req.String())
 		// Use the AuthManager method to send so that failed requests, which
 		// result in client removal, will go back into the client's pending
 		// requests. Subsequent requests that follow removal also fail and go
 		// back into the pending requests.
 		connectTimeout := DefaultConnectTimeout
+		if pr.req.Route == msgjson.RevokeMatchRoute {
+			connectTimeout = 4 * time.Hour // a little extra time for revoke_match to be courteous
+		}
 		// Decrement the connect timeout for repeated attempts.
 		if !pr.lastAttempt.IsZero() {
 			connectTimeout -= time.Since(pr.lastAttempt)
@@ -937,6 +973,8 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	// Send pending messages for this user.
 	for _, pr := range pendingMsgs {
+		// The only match-related response is Acknowledgement (to an init or
+		// redeem request from client), which are harmless for inactive matches.
 		log.Debugf("Sending pending %s to user %v: %v", pr.msg.Type, pr.user, pr.msg.String())
 		connectTimeout := DefaultConnectTimeout
 		// Decrement the connect timeout for repeated attempts.

@@ -576,12 +576,12 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
 			ord.Value, err)
 	}
 
-	dcr.log.Debugf("funding %d atom order with coins %v worth %d", ord.Value, coins, sum)
-
 	// Send a split, if preferred.
 	if dcr.useSplitTx && !ord.Immediate {
 		return dcr.split(ord.Value, ord.MaxSwapCount, coins, inputsSize, fundingCoins, ord.DEXConfig)
 	}
+
+	dcr.log.Infof("Funding %d atom order with coins %v worth %d", ord.Value, coins, sum)
 
 	return coins, nil
 }
@@ -741,8 +741,8 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 
 	excess := coinSum - calc.RequiredOrderFunds(value, inputsSize, lots, nfo)
 	if baggageFees > excess {
-		dcr.log.Infof("skipping split transaction because cost is greater than potential over-lock. %d > %d.", baggageFees, excess)
-		dcr.log.Debugf("funding %d atom order with coins %v", value, coins)
+		dcr.log.Debugf("Skipping split transaction because cost is greater than potential over-lock. %d > %d.", baggageFees, excess)
+		dcr.log.Infof("Funding %d atom order with coins %v worth", value, coins, coinSum)
 		return coins, nil
 	}
 
@@ -794,8 +794,8 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	// Instead, we'll keep them locked until the split output is spent.
 	dcr.splitFunds[op.pt] = fundingCoins
 
-	dcr.log.Debugf("funding %d atom order with split output coin %v from original coins %v", value, op, coins)
-	dcr.log.Infof("sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash(), value, reqFunds)
+	dcr.log.Infof("Funding %d atom order with split output coin %v from original coins %v", value, op, coins)
+	dcr.log.Infof("Sent split transaction %s to accommodate swap of size %d + fees = %d", op.txHash(), value, reqFunds)
 
 	return asset.Coins{op}, nil
 

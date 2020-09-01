@@ -521,7 +521,7 @@ func (dcr *Backend) Run(ctx context.Context) {
 			dcr.log.Errorf("error adding new best block to cache: %v", err)
 		}
 		dcr.signalMtx.Lock()
-		dcr.log.Debugf("Notifying %d dcr asset consumers of new block at height %d",
+		dcr.log.Tracef("Notifying %d dcr asset consumers of new block at height %d",
 			len(dcr.blockChans), block.Height)
 		for c := range dcr.blockChans {
 			select {
@@ -592,10 +592,11 @@ out:
 			}
 			// If it builds on the best block or the cache is empty, it's good to add.
 			if *prevHash == tip.hash || tip.height == 0 {
-				dcr.log.Debugf("Run: Processing new block %s", bestHash)
+				dcr.log.Debugf("New block %s (%d)", bestHash, block.Height)
 				addBlock(block, false)
 				continue
 			}
+
 			// It is either a reorg, or the previous block is not the cached
 			// best block. Crawl blocks backwards until finding a mainchain
 			// block, flagging blocks from the cache as orphans along the way.
@@ -629,13 +630,15 @@ out:
 					break
 				}
 			}
+
 			var reorg bool
 			if reorgHeight > 0 {
 				reorg = true
-				dcr.log.Infof("Reorg from %s (%d) to %s (%d) detected.",
+				dcr.log.Infof("Tip change from %s (%d) to %s (%d) detected (reorg or just fast blocks).",
 					tip.hash, tip.height, bestHash, block.Height)
 				dcr.blockCache.reorg(reorgHeight)
 			}
+
 			// Now add the new block.
 			addBlock(block, reorg)
 

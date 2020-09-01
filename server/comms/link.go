@@ -96,11 +96,7 @@ func handleMessage(c *wsLink, msg *msgjson.Message) *msgjson.Error {
 			return msgjson.NewError(msgjson.RPCUnknownRoute, "unknown route "+msg.Route)
 		}
 		// Handle the request.
-		rpcError := handler(c, msg)
-		if rpcError != nil {
-			return rpcError
-		}
-		return nil
+		return handler(c, msg)
 	case msgjson.Response:
 		// NOTE: In the event of an error, we respond to a response, which makes
 		// no sense. A new mechanism is needed with appropriate client handling.

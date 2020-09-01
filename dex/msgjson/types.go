@@ -381,6 +381,28 @@ func (msg *Message) String() string {
 	return string(b)
 }
 
+// ExtractMatchID attempts to extract a "matchid" value from a request-typed
+// Message's Payload. The request must have one of the following routes:
+// AuditRoute, RedemptionRoute, RedeemRoute, MatchRoute, or RevokeMatchRoute.
+// A non-nil error is only returned if unmarshalling the payload fails.
+func (msg *Message) ExtractMatchID() (Bytes, error) {
+	// Name the targeted request routes.
+	switch msg.Route {
+	case AuditRoute, RedemptionRoute, RedeemRoute, MatchRoute,
+		RevokeMatchRoute:
+	default:
+		return nil, nil
+	}
+
+	var payload struct {
+		MatchID dex.Bytes `json:"matchid"`
+	}
+	if err := msg.Unmarshal(&payload); err != nil {
+		return nil, err
+	}
+	return payload.MatchID, nil
+}
+
 // Match is the params for a DEX-originating MatchRoute request.
 type Match struct {
 	Signature

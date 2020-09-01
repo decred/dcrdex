@@ -8,6 +8,74 @@ import (
 	"testing"
 )
 
+func TestExtractMatchID(t *testing.T) {
+	mustMarshal := func(payload interface{}) []byte {
+		t.Helper()
+		b, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	matchA := randomBytes(32)
+
+	tests := []struct {
+		name    string
+		msg     *Message
+		want    Bytes
+		wantErr bool
+	}{
+		{
+			name: "has match",
+			msg: &Message{
+				Type:  Request,
+				Route: AuditRoute,
+				ID:    1,
+				Payload: json.RawMessage(mustMarshal(&Audit{
+					MatchID: matchA,
+				})),
+			},
+			want:    matchA,
+			wantErr: false,
+		},
+		{
+			name: "no match",
+			msg: &Message{
+				Type:    Request,
+				Route:   AuditRoute,
+				ID:      1,
+				Payload: json.RawMessage(mustMarshal(&NoMatch{})),
+			},
+			want:    nil,
+			wantErr: false,
+		},
+		{
+			name: "bad json",
+			msg: &Message{
+				Type:    Request,
+				Route:   AuditRoute,
+				ID:      1,
+				Payload: json.RawMessage(`{asdf`),
+			},
+			want:    nil,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tt.msg.ExtractMatchID()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ExtractMatchID() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !bytes.Equal(tt.want, got) {
+				t.Errorf("ExtractMatchID() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatch(t *testing.T) {
 	// serialization: orderid (32) + matchid (8) + qty (8) + rate (8)
 	// + address (varies)

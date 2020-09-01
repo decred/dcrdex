@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
@@ -309,6 +310,7 @@ func resetStorage() {
 
 func TestMain(m *testing.M) {
 	doIt := func() int {
+		UseLogger(dex.StdOutLogger("AUTH_TEST", dex.LevelTrace))
 		ctx, shutdown := context.WithCancel(context.Background())
 		defer shutdown()
 		storage := &TStorage{acctAddr: tFeeAddr, regAddr: tCheckFeeAddr}
@@ -394,6 +396,7 @@ func TestConnect(t *testing.T) {
 	matchTime := matchData.Epoch.End()
 
 	rig.storage.matches = []*db.MatchData{matchData}
+	defer func() { rig.storage.matches = nil }()
 
 	rig.storage.setRatioData(&ratioData{
 		oidsCompleted:  []order.OrderID{{0x1}},
@@ -406,7 +409,7 @@ func TestConnect(t *testing.T) {
 
 	// Close account on connect with failing cancel ratio.
 	rig.mgr.cancelThresh = 0.2
-	tryConnectUser(t, user, false)
+	connectUser(t, user)
 	if rig.storage.closedID != user.acctID {
 		t.Fatalf("Expected account %v to be closed on connect, got %v", user.acctID, rig.storage.closedID)
 	}
@@ -419,7 +422,6 @@ func TestConnect(t *testing.T) {
 	if len(cResp.Matches) != 1 {
 		t.Fatalf("no active matches")
 	}
-	rig.storage.matches = nil
 	msgMatch := cResp.Matches[0]
 	if msgMatch.OrderID.String() != userMatch.OrderID.String() {
 		t.Fatal("active match OrderID mismatch: ", msgMatch.OrderID.String(), " != ", userMatch.OrderID.String())
@@ -485,14 +487,15 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("responded flag not set")
 	}
 
-	reuser := tNewUser(t)
-	reuser.acctID = user.acctID
-	reuser.privKey = user.privKey
+	reuser := &tUser{
+		acctID:  user.acctID,
+		privKey: user.privKey,
+		conn:    tNewRPCClient(),
+	}
 	connectUser(t, reuser)
-	reqID = comms.NextID()
 	a10 := &tPayload{A: 10}
-	msg, _ = msgjson.NewRequest(reqID, "request", a10)
-	rig.mgr.RequestWithTimeout(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {}, 0, func() {})
+	msg, _ = msgjson.NewRequest(comms.NextID(), "request", a10)
+	rig.mgr.RequestWithTimeout(reuser.acctID, msg, func(comms.Link, *msgjson.Message) {}, time.Minute, func() {})
 	// The a10 message should be in the new connection
 	if user.conn.getReq() != nil {
 		t.Fatalf("old connection received a request after reconnection")
@@ -501,7 +504,128 @@ func TestConnect(t *testing.T) {
 		t.Fatalf("new connection did not receive the request")
 	}
 
-	// TODO: test RequestWhenConnected
+	// SendWhenConnected / RequestWhenConnected
+
+	rig.mgr.removeClient(rig.mgr.user(user.acctID)) // disconnect first
+
+	// random notification
+	ntfn, _ := msgjson.NewNotification(msgjson.NotifyRoute, `"this is json"`)
+	rig.mgr.Notify(user.acctID, ntfn, time.Minute) // =>SendWhenConnected
+
+	// random non-match request
+	blahMsg, _ := msgjson.NewRequest(comms.NextID(), "blah", a10)
+	rig.mgr.RequestWhenConnected(user.acctID, blahMsg, func(comms.Link, *msgjson.Message) {},
+		time.Minute, time.Minute, func() {}) // addUserConnectReq
+	if user.conn.getReq() != nil {
+		t.Fatalf("user sent a request while not connected")
+	}
+
+	// audit (match-related) request for match included in connect response.
+	audit := &msgjson.Audit{
+		MatchID: userMatch.MatchID[:],
+		OrderID: userMatch.OrderID[:],
+	}
+	auditMsg, _ := msgjson.NewRequest(comms.NextID(), msgjson.AuditRoute, audit)
+	rig.mgr.RequestWhenConnected(user.acctID, auditMsg, func(comms.Link, *msgjson.Message) {},
+		time.Minute, time.Minute, func() {}) // addUserConnectReq
+	if user.conn.getReq() != nil {
+		t.Fatalf("user sent a request while not connected")
+	}
+
+	// redeem (match-related) request for match NOT included in connect response
+	// is filtered out of pending requests.
+	redeem := &msgjson.Redeem{
+		MatchID: userMatch.MatchID[:],
+		OrderID: userMatch.OrderID[:],
+	}
+	redeem.MatchID[0]++
+	redeemMsg, _ := msgjson.NewRequest(comms.NextID(), msgjson.RedeemRoute, redeem)
+	rig.mgr.RequestWhenConnected(user.acctID, redeemMsg, func(comms.Link, *msgjson.Message) {},
+		time.Minute, time.Minute, func() {}) // addUserConnectReq
+	if user.conn.getReq() != nil {
+		t.Fatalf("user sent a request while not connected")
+	}
+
+	// revoke_match request for match NOT included in connect response is NOT
+	// filtered out of pending requests.
+	revoke := &msgjson.RevokeMatch{
+		MatchID: userMatch.MatchID[:],
+		OrderID: userMatch.OrderID[:],
+	}
+	redeem.MatchID[0]++
+	revokeMsg, _ := msgjson.NewRequest(comms.NextID(), msgjson.RevokeMatchRoute, revoke)
+	rig.mgr.RequestWhenConnected(user.acctID, revokeMsg, func(comms.Link, *msgjson.Message) {},
+		time.Minute, time.Minute, func() {}) // addUserConnectReq
+	if user.conn.getReq() != nil {
+		t.Fatalf("user sent a request while not connected")
+	}
+
+	respMsg = connectUser(t, user) // rmUserConnectReqs
+	cResp = extractConnectResult(t, respMsg)
+	if len(cResp.Matches) != 1 {
+		t.Fatalf("no active matches")
+	}
+
+	ntfnSent := user.conn.getSend()
+	if ntfnSent == nil {
+		t.Fatalf("no pending messages")
+	}
+	if ntfnSent.Route != msgjson.NotifyRoute {
+		t.Errorf("pending message was for route %q, expected %q", ntfnSent.Route, msgjson.NotifyRoute)
+	}
+	if ntfnSent.ID != ntfn.ID {
+		t.Errorf("notification ID incorrect")
+	}
+
+	if len(user.conn.reqs) != 3 {
+		t.Fatalf("Incorrect number of requests")
+	}
+
+	// Pull the first request, should be the "blah"
+	req = user.conn.getReq()
+	if req == nil {
+		t.Fatalf("no request, expected a \"blah\"")
+	}
+	if req.msg.Route != "blah" {
+		t.Fatalf("expected a \"blah\" request, got %q", req.msg.Route)
+	}
+	if req.msg.ID != blahMsg.ID {
+		t.Fatalf("expected request ID %d, got %d", blahMsg.ID, req.msg.ID)
+	}
+	a = tPayload{}
+	err = json.Unmarshal(req.msg.Payload, &a)
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if a.A != 10 {
+		t.Fatalf("wrong value for A. expected 10, got %d", a.A)
+	}
+
+	// Next should be the audit for an active match.
+	req = user.conn.getReq()
+	if req == nil {
+		t.Fatalf("no request, expected a %q", auditMsg.Route)
+	}
+	if req.msg.Route != auditMsg.Route {
+		t.Fatalf("expected a %q request, got %q", auditMsg.Route, req.msg.Route)
+	}
+	if req.msg.ID != auditMsg.ID {
+		t.Fatalf("expected request ID %d, got %d", auditMsg.ID, req.msg.ID)
+	}
+
+	// Redeem for inactive match should not be included.
+
+	// Next should be the revoke_message for an inactive match.
+	req = user.conn.getReq()
+	if req == nil {
+		t.Fatalf("no request, expected a %q", revokeMsg.Route)
+	}
+	if req.msg.Route != revokeMsg.Route {
+		t.Fatalf("expected a %q request, got %q", revokeMsg.Route, req.msg.Route)
+	}
+	if req.msg.ID != revokeMsg.ID {
+		t.Fatalf("expected request ID %d, got %d", revokeMsg.ID, req.msg.ID)
+	}
 }
 
 func TestAccountErrors(t *testing.T) {

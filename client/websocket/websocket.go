@@ -117,7 +117,7 @@ func (s *Server) HandleConnect(ctx context.Context, w http.ResponseWriter, r *ht
 		s.connect(ctx, wsConn, ip)
 	}()
 
-	s.log.Info("HandleConnect done.")
+	s.log.Trace("HandleConnect done.")
 }
 
 // connect handles a new websocket client by creating a new wsClient, starting

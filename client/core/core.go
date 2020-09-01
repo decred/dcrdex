@@ -1620,9 +1620,9 @@ func (c *Core) initializeDEXConnections(crypter encrypt.Crypter) []*DEXBrief {
 			for _, disabledAccountHost := range disabledAccountHosts {
 				c.conns[disabledAccountHost].connMaster.Disconnect()
 				delete(c.conns, disabledAccountHost)
-				log.Warnf("Account at dex: %v not found. The account has been "+
-					"disabled. It is disconnected and has been removed from core "+
-					"connections.", disabledAccountHost)
+				log.Warnf("Account at dex %v not found. The account has been disabled. "+
+					"It is disconnected and has been removed from core connections.",
+					disabledAccountHost)
 			}
 			c.connMtx.Unlock()
 		}
