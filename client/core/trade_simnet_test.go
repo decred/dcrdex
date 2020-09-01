@@ -180,17 +180,20 @@ func TestTrading(t *testing.T) {
 	tLog.Info("=== SETUP COMPLETED")
 
 	// run subtests
-	tests := map[string]func(*testing.T){
-		"success":                  testTradeSuccess,
-		"no maker swap":            testNoMakerSwap,
-		"no taker swap":            testNoTakerSwap,
-		"no maker redeem":          testNoMakerRedeem,
-		"maker ghost after redeem": testMakerGhostingAfterTakerRedeem,
+	tests := []struct {
+		name string
+		fn   func(*testing.T)
+	}{
+		{"success", testTradeSuccess},
+		{"no maker swap", testNoMakerSwap},
+		{"no taker swap", testNoTakerSwap},
+		{"no maker redeem", testNoMakerRedeem},
+		{"maker ghost after redeem", testMakerGhostingAfterTakerRedeem},
 	}
 
-	for test, testFn := range tests {
+	for _, test := range tests {
 		fmt.Println() // empty line to separate test logs for better readability
-		if !t.Run(test, testFn) {
+		if !t.Run(test.name, test.fn) {
 			break
 		}
 	}
@@ -274,7 +277,7 @@ func testMakerGhostingAfterTakerRedeem(t *testing.T) {
 	}
 
 	// Resume trades but disable Maker's ability to notify the server
-	// after redeming Taker's swap.
+	// after redeeming Taker's swap.
 	resumeTrade := func(ctx context.Context, client *tClient, orderID string) error {
 		tracker, err := client.findOrder(orderID)
 		if err != nil {

@@ -1275,7 +1275,7 @@ func (dcr *ExchangeWallet) FindRedemption(coinID dex.Bytes) (chan *asset.FindRed
 	}
 	contractOutpoint := newOutPoint(txHash, vout)
 	if existingReq, inQueue := dcr.findRedemptionQueue[contractOutpoint]; inQueue {
-		dcr.log.Debugf("duplicate FindRedemption request for %s", contractOutpoint.String())
+		dcr.log.Warnf("duplicate FindRedemption request for %s", contractOutpoint.String())
 		return existingReq.resultChan, nil
 	}
 	tx, err := dcr.node.GetTransaction(txHash)
@@ -1419,13 +1419,8 @@ rangeBlocks:
 	contractsInQueue := len(dcr.findRedemptionQueue)
 	dcr.findRedemptionMtx.RUnlock()
 
-	if redemptionsFound > 0 {
-		dcr.log.Debugf("found redemptions for %d contracts in blocks %d - %d, %d contracts left in queue",
-			redemptionsFound, startBlock.height, lastScannedBlockHeight, contractsInQueue)
-	} else {
-		dcr.log.Debugf("redemptions not found for %d contracts in blocks %d - %d, %d contracts left in queue",
-			contractsCount, startBlock.height, lastScannedBlockHeight, contractsInQueue)
-	}
+	dcr.log.Debugf("%d redemptions out of %d contracts found in blocks %d - %d",
+		redemptionsFound, redemptionsFound+contractsInQueue, startBlock.height, lastScannedBlockHeight)
 }
 
 // findRedemptionsInTx checks if any input of the passed tx spends any of the
@@ -1690,7 +1685,8 @@ func (dcr *ExchangeWallet) shutdown() {
 		dcr.log.Errorf("failed to unlock DCR outputs on shutdown: %v", err)
 	}
 	// Close all open channels for contract redemption searches
-	// to prevent leakages.
+	// to prevent leakages and ensure goroutines that are started
+	// to wait on these channels end gracefully.
 	dcr.findRedemptionMtx.Lock()
 	for contractOutpoint, req := range dcr.findRedemptionQueue {
 		close(req.resultChan)

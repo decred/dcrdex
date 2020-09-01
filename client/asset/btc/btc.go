@@ -472,11 +472,12 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	}
 	// Initialize the best block.
 	h, err := btc.node.GetBestBlockHash()
-	if err == nil {
-		btc.tipMtx.Lock()
-		btc.currentTip, err = btc.blockFromHash(h.String())
-		btc.tipMtx.Unlock()
+	if err != nil {
+		return nil, fmt.Errorf("error initializing best block for %s: %v", btc.symbol, err)
 	}
+	btc.tipMtx.Lock()
+	btc.currentTip, err = btc.blockFromHash(h.String())
+	btc.tipMtx.Unlock()
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for %s: %v", btc.symbol, err)
 	}
@@ -505,7 +506,8 @@ func (btc *ExchangeWallet) shutdown() {
 		btc.log.Errorf("failed to unlock %s outputs on shutdown: %v", btc.symbol, err)
 	}
 	// Close all open channels for contract redemption searches
-	// to prevent leakages.
+	// to prevent leakages and ensure goroutines that are started
+	// to wait on these channels end gracefully.
 	btc.findRedemptionMtx.Lock()
 	for contractOutpoint, req := range btc.findRedemptionQueue {
 		close(req.resultChan)
@@ -1225,7 +1227,7 @@ func (btc *ExchangeWallet) FindRedemption(coinID dex.Bytes) (chan *asset.FindRed
 	}
 	contractOutpoint := newOutPoint(txHash, vout)
 	if existingReq, inQueue := btc.findRedemptionQueue[contractOutpoint]; inQueue {
-		btc.log.Debugf("duplicate FindRedemption request for %s", contractOutpoint.String())
+		btc.log.Warnf("duplicate FindRedemption request for %s", contractOutpoint.String())
 		return existingReq.resultChan, nil
 	}
 	tx, err := btc.wallet.GetTransaction(txHash.String())
@@ -1354,13 +1356,8 @@ rangeBlocks:
 	contractsInQueue := len(btc.findRedemptionQueue)
 	btc.findRedemptionMtx.RUnlock()
 
-	if redemptionsFound > 0 {
-		btc.log.Debugf("found redemptions for %d contracts in blocks %d - %d, %d contracts left in queue",
-			redemptionsFound, startBlock.height, lastScannedBlockHeight, contractsInQueue)
-	} else {
-		btc.log.Debugf("redemptions not found for %d contracts in blocks %d - %d, %d contracts left in queue",
-			contractsCount, startBlock.height, lastScannedBlockHeight, contractsInQueue)
-	}
+	btc.log.Debugf("%d redemptions out of %d contracts found in blocks %d - %d",
+		redemptionsFound, redemptionsFound+contractsInQueue, startBlock.height, lastScannedBlockHeight)
 }
 
 // findRedemptionsInTx checks if any input of the passed tx spends any of the
