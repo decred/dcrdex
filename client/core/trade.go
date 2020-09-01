@@ -20,6 +20,7 @@ import (
 	"decred.org/dcrdex/dex/msgjson"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/dex/wait"
+	"decred.org/dcrdex/server/auth"
 )
 
 // ExpirationErr indicates that the wait.TickerQueue has expired a waiter, e.g.
@@ -624,6 +625,217 @@ func (match *matchTracker) isActive() bool {
 	return true
 }
 
+// maybeRevoke attempts to detect if the specified match is revoked by the
+// server by estimating the max time the server would wait for the next action
+// on the match and if that time is past, assumes the match is revoked by the
+// server and revokes it on the client.
+//
+// This method modifies match fields and MUST be called with the trackedTrade
+// mutex lock held for writes.
+func (t *trackedTrade) maybeRevoke(match *matchTracker) {
+	if match.Match.Status == order.MatchComplete || match.MetaData.Proof.IsRevoked {
+		return
+	}
+
+	status, side := match.Match.Status, match.Match.Side
+	proof := match.MetaData.Proof
+	bTimeout := t.broadcastTimeout()
+
+	var nextAction struct {
+		action        string
+		referenceTime time.Time
+		maxWindow     time.Duration
+	}
+
+	// Determine earliest time server expects next action.
+	// The maximum duration the server waits for the next action
+	// will be determined below.
+	switch status {
+	case order.NewlyMatched:
+		// Server expects next action (maker's swap) from match time.
+		nextAction.action = "maker's swap"
+		nextAction.referenceTime = encode.UnixTimeMilli(int64(proof.Auth.MatchStamp))
+	case order.MakerSwapCast:
+		// Server expects next action (taker's swap) from the time of
+		// maker's swap swapConf'th confirmations.
+		nextAction.action = "taker's swap"
+		nextAction.referenceTime = match.makerSwapConfirmTime
+	case order.TakerSwapCast:
+		// Server expects next action (maker's redemption) from the time
+		// of taker's swap swapConf'th confirmations.
+		nextAction.action = "maker's redemption"
+		nextAction.referenceTime = match.takerSwapConfirmTime
+	case order.MakerRedeemed:
+		// Server expects taker's redemption from the time the server acked
+		// maker's redemption. The server sends this time value to taker as
+		// part of the server-originating redemption request and taker stores
+		// it in proof.Auth.RedemptionStamp. Maker manually stores the time in
+		// proof.Auth.RedeemStamp after receiving server's ack of their redeem
+		// request.
+		nextAction.action = "taker's redemption"
+		if side == order.Maker {
+			nextAction.referenceTime = encode.UnixTimeMilli(int64(proof.Auth.RedeemStamp))
+		} else {
+			nextAction.referenceTime = encode.UnixTimeMilli(int64(proof.Auth.RedemptionStamp))
+		}
+	}
+
+	if nextAction.referenceTime.IsZero() {
+		return // not yet time for next expected action
+	}
+
+	// Estimate the maximum amount of time that this client has to perform the
+	// expected next action. The estimation done below takes into account the
+	// various activities that would typically be carried out by the match actors
+	// and the server following the previous step.
+	switch {
+	case status == order.NewlyMatched && side == order.Maker:
+		// Maximum time server will wait for maker's init request before
+		// revoking the match:
+		// - defaultConnectTimeout=10 minutes; for match request to reach
+		//   maker, assuming maker was temporarily disconnected.
+		// - broadcastTimeout; for maker to ack the match request.
+		// - another broadcastTimeout; for maker to send init request.
+		// The match may be revoked sooner if maker does not receive the
+		// match request after 10 minutes, or if maker does not ack the
+		// request broadcastTimeout after receiving the request; but the
+		// maker can only be certain of a revocation if the match remains
+		// at NewlyMatched after the MatchTime+MaxActionWindow below:
+		nextAction.maxWindow = auth.DefaultConnectTimeout + bTimeout*2
+
+	case status == order.NewlyMatched && side == order.Taker:
+		nextAction.action = "maker's swap"
+		matchTimeStamp := proof.Auth.MatchStamp
+		nextAction.referenceTime = encode.UnixTimeMilli(int64(matchTimeStamp))
+		// In additon to waiting the above-estimated max duration for
+		// maker's init (i.e. defaultConnectTimeout+broadcastTimeout*2),
+		// AND assuming the server does receive maker's init within that
+		// timeframe, taker can expect to wait the following additional
+		// durations before receiving audit request from the server:
+		// - txWaitExpiration=1 minute; for server to find and validate the
+		//   swap.
+		// - defaultConnectTimeout=10 minutes; for audit request to reach
+		//   taker, assuming taker was temporarily disconnected.
+		//
+		// Also, the server will wait the following before revoking the match:
+		// - txWaitExpiration=1 minute; for taker to find and validate maker's
+		//   swap.
+		// - broadcastTimeout for taker's ack of the audit request.
+		//
+		// While the match may be revoked sooner, (e.g. if the server fails
+		// to find and validate the maker's contract after txWaitExpiration),
+		// taker can only be certain of a revocation if the match remains at
+		// NewlyMatched after the MatchTime+MaxActionWindow below:
+		nextAction.maxWindow = auth.DefaultConnectTimeout + bTimeout*2 + // max time for maker's init to reach server
+			time.Minute + auth.DefaultConnectTimeout + // max time for server to validate maker's swap and notify taker
+			time.Minute + bTimeout // max time for taker to validate maker's swap and ack audit request.
+
+	case status == order.MakerSwapCast && side == order.Taker:
+		// Server will wait a maximum of broadcastTimeout for taker's init,
+		// counting from the time of maker's swap swapConf'th confirmations.
+		nextAction.maxWindow = bTimeout
+
+	case status == order.MakerSwapCast && side == order.Maker:
+		// In additon to waiting the above-estimated max duration for taker's
+		// init (i.e. broadcastTimeout, counting from the time of maker's swap
+		// swapConf'th confirmations), AND assuming the server does receive
+		// taker's init within that timeframe, maker can expect to wait the
+		// following additional durations before receiving audit request from
+		// the server:
+		// - txWaitExpiration=1 minute; for server to find and validate the
+		//   swap.
+		// - defaultConnectTimeout=10 minutes; for audit request to reach
+		//   maker, assuming maker was temporarily disconnected.
+		//
+		// Also, the server will wait the following before revoking the match:
+		// - txWaitExpiration=1 minute; for maker to find and validate taker's
+		//   swap.
+		// - broadcastTimeout for maker's ack of the audit request.
+		//
+		// While the match may be revoked sooner, (e.g. if the server never
+		// received taker's init request within broadcastTimeout of maker's swap
+		// swapConf'th confirmations), maker can only be certain of a revocation
+		// if the match remains at MakerSwapCast after the below max duration,
+		// counting from the time of maker's swap swapConf'th confirmations:
+		nextAction.maxWindow = bTimeout + // max time for taker's init to reach server
+			time.Minute + auth.DefaultConnectTimeout + // max time for server to validate taker's swap and notify maker
+			time.Minute + bTimeout // max time for taker to validate maker's swap and ack audit request.
+
+	case status == order.TakerSwapCast && side == order.Maker:
+		// Server will wait a maximum of broadcastTimeout for maker's redeem,
+		// counting from the time of taker's swap swapConf'th confirmations.
+		nextAction.maxWindow = bTimeout
+
+	case status == order.TakerSwapCast && side == order.Taker:
+		// In additon to waiting the above-estimated max duration for maker's
+		// redeem, AND assuming the server does receive maker's redeem within
+		// that timeframe, taker can expect to wait the following additional
+		// durations before receiving redemption request from the server:
+		// - txWaitExpiration=1 minute; for server to find and validate maker's
+		//   redemption.
+		// - defaultConnectTimeout=10 minutes; for redemption request to reach
+		//   taker, assuming taker was temporarily disconnected.
+		//
+		// Also, the server will wait the following before revoking the match:
+		// - txWaitExpiration=1 minute; for taker to find and validate maker's
+		//   redemption.
+		// - broadcastTimeout for taker's ack of the redemption request.
+		//
+		// While the match may be revoked sooner, (e.g. if taker is disconnected
+		// for longer than 10 minutes and thus does not receive the redemption
+		// request), taker can only be certain of a revocation if the match remains
+		// at TakerSwapCast after the below max duration, counting from the time of
+		// taker's swap swapConf'th confirmations:
+		nextAction.maxWindow = bTimeout + // max time for maker's redeem to reach server
+			time.Minute + auth.DefaultConnectTimeout + // max time for server to validate maker's redeem and notify taker
+			time.Minute + bTimeout // max time for taker to validate maker's redeem and ack redemption request.
+
+	case status == order.MakerRedeemed && side == order.Taker:
+		// Server will wait a maximum of broadcastTimeout for taker's redeem,
+		// counting from the time the server acked maker's redemption. This
+		// time is communicated to taker in the server-originating redemption
+		// request.
+		nextAction.maxWindow = bTimeout
+
+	case status == order.MakerRedeemed && side == order.Maker:
+		// In additon to waiting the above-estimated max duration for taker's
+		// redeem, AND assuming the server does receive taker's redeem within
+		// that timeframe, maker can expect to wait the following additional
+		// durations before receiving redemption request from the server:
+		// - txWaitExpiration=1 minute; for server to find and validate taker's
+		//   redemption.
+		// - defaultConnectTimeout=10 minutes; for redemption request to reach
+		//   maker, assuming maker was temporarily disconnected.
+		//
+		// Also, the server will wait the following before revoking the match:
+		// - txWaitExpiration=1 minute; for maker to find and validate taker's
+		//   redemption.
+		// - broadcastTimeout for maker's ack of the redemption request.
+		//
+		// While the match may be revoked sooner, (e.g. if maker is disconnected
+		// for longer than 10 minutes and thus does not receive the redemption
+		// request), maker can only be certain of a revocation if the match remains
+		// at MakerRedeemed after the below max duration, counting from the time
+		// the server acked maker's redemption:
+		nextAction.maxWindow = bTimeout + // max time for taker's redeem to reach server
+			time.Minute + auth.DefaultConnectTimeout + // max time for server to validate taker's redeem and notify maker
+			time.Minute + bTimeout // max time for maker to validate taker's redeem and ack redemption request.
+	}
+
+	// Allow additional time for next action to prevent prematurely revoking this
+	// trade.
+	// TODO: Implement a match_status route to confirm match revocation with server
+	// before proceeding.
+	allowance := 10 * time.Minute
+	maxActionTime := nextAction.referenceTime.Add(nextAction.maxWindow).Add(allowance)
+	now := time.Now().Truncate(time.Millisecond).UTC()
+	if now.After(maxActionTime) {
+		log.Debugf("Auto-revoking match %v, status %s, side %s. Expected %s between %s and %s.",
+			match.id, status, side, nextAction.action, nextAction.referenceTime, maxActionTime)
+		t.setRevoked(match)
+	}
+}
+
 // checkSwapConfirmations checks for matches whose maker or taker swap have
 // received the reqiured confirmations and records the swap confirmation time.
 func (t *trackedTrade) checkSwapConfirmations() {
@@ -842,6 +1054,10 @@ func (t *trackedTrade) tick() (assetMap, error) {
 		if match.Match.Address == "" {
 			continue // a cancel order match
 		}
+		// Revoke this match if conditions warrant. If revoked, the following
+		// match.isActive() check will determine if it is necessary to refund
+		// or auto-redeem (not yet implemented).
+		t.maybeRevoke(match)
 		if !match.isActive() {
 			continue // either refunded or revoked requiring no action on this side of the match
 		}
@@ -996,7 +1212,7 @@ func (t *trackedTrade) revoke() {
 	}
 }
 
-// revokeMatch sets the status as revoked for the specified match.
+// revokeMatch sets the status as revoked for the match with the specified ID.
 func (t *trackedTrade) revokeMatch(matchID order.MatchID) error {
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
@@ -1011,19 +1227,24 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID) error {
 		return fmt.Errorf("no match found with id %s for order %v", matchID, t.ID())
 	}
 
-	errs := newErrorSet("handleRevokeMatchMsg (order %v, match %v): ", t.ID(), matchID)
+	t.setRevoked(revokedMatch)
+	return nil
+}
 
-	// Set the match as revoked.
-	revokedMatch.MetaMatch.MetaData.Proof.IsRevoked = true
-	err := t.db.UpdateMatch(&revokedMatch.MetaMatch)
+// setRevoked sets the status as revoked for the specified match.
+// This method modifies match fields and MUST be called with the trackedTrade
+// mutex lock held for writes.
+func (t *trackedTrade) setRevoked(match *matchTracker) {
+	match.MetaMatch.MetaData.Proof.IsRevoked = true
+	err := t.db.UpdateMatch(&match.MetaMatch)
 	if err != nil {
-		errs.add("unable to update match: %v", err)
+		log.Errorf("db update for revoked match failed: %v", err)
 	}
 
 	// Notify the user of the failed match.
 	corder, _ := t.coreOrderInternal() // no cancel order
-	t.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked",
-		t.token()), db.WarningLevel, corder))
+	t.notify(newOrderNote("Match revoked", fmt.Sprintf("Match %s has been revoked", match.id),
+		db.WarningLevel, corder))
 
 	// Send out a data notification with the revoke information.
 	cancelOrder := &Order{
@@ -1036,8 +1257,7 @@ func (t *trackedTrade) revokeMatch(matchID order.MatchID) error {
 	}
 	t.notify(newOrderNote("revoke", "", db.Data, cancelOrder))
 
-	log.Warnf("Match %v revoked in status %v for order %v", matchID, revokedMatch.Match.Status, t.ID())
-	return nil
+	log.Warnf("Match %v revoked in status %v for order %v", match.id, match.Match.Status, t.ID())
 }
 
 // swapMatches will send a transaction with swap outputs for the specified

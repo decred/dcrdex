@@ -2808,12 +2808,13 @@ func TestRefunds(t *testing.T) {
 	//
 	mid = ordertest.RandomMatchID()
 	msgMatch = &msgjson.Match{
-		OrderID:  loid[:],
-		MatchID:  mid[:],
-		Quantity: matchSize,
-		Rate:     rate,
-		Address:  "counterparty-address",
-		Side:     uint8(order.Taker),
+		OrderID:    loid[:],
+		MatchID:    mid[:],
+		Quantity:   matchSize,
+		Rate:       rate,
+		Address:    "counterparty-address",
+		Side:       uint8(order.Taker),
+		ServerTime: encode.UnixMilliU(matchTime),
 	}
 	sign(tDexPriv, msgMatch)
 	msg, _ = msgjson.NewRequest(1, msgjson.MatchRoute, []*msgjson.Match{msgMatch})
