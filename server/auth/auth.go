@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -78,14 +80,20 @@ type clientInfo struct {
 	suspended    bool // penalized, disallow new orders
 }
 
-func (auth *AuthManager) checkCancelRatio(client *clientInfo) (cancels, completions int, ratio float64, penalize bool) {
+// GraceLimit returns the number of initial orders allowed for a new user before
+// the cancellation rate threshold is enforced.
+func (auth *AuthManager) GraceLimit() int {
+	// Grace period if: total/(1+total) <= thresh OR total <= thresh/(1-thresh).
+	return int(math.Round(1e8*auth.cancelThresh/(1-auth.cancelThresh))) / 1e8
+}
+
+func (auth *AuthManager) checkCancelRate(client *clientInfo) (cancels, completions int, rate float64, penalize bool) {
 	var total int
 	total, cancels = client.recentOrders.counts()
 	completions = total - cancels
-	// ratio will be NaN if total is 0, Inf if completed is 0 but cancels > 0.
-	ratio = float64(cancels) / float64(completions)
-	penalize = ratio > auth.cancelThresh && // NaN cancelRatio compares false, Inf true
-		total > int(auth.cancelThresh) // floor(thresh)
+	rate = float64(cancels) / float64(total) // rate will be NaN if total is 0
+	penalize = rate > auth.cancelThresh &&   // NaN cancelRate compares false
+		total > auth.GraceLimit()
 	return
 }
 
@@ -268,14 +276,14 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 		oid, user, tMS, target)
 
 	// Recompute cancellation and penalize violation.
-	cancels, completions, ratio, penalize := auth.checkCancelRatio(client)
-	log.Tracef("User %v cancellation ratio is now %v (%d:%d). Violation = %v", user,
-		ratio, cancels, completions, penalize)
+	cancels, completions, rate, penalize := auth.checkCancelRate(client)
+	log.Tracef("User %v cancellation rate is now %v (%d:%d). Violation = %v", user,
+		rate, cancels, completions, penalize)
 	if penalize && !auth.anarchy && !client.suspended {
-		log.Infof("Suspending user %v for exceeding the cancellation ratio threshold %f. "+
-			"(%d cancels : %d completions => %f)", user, auth.cancelThresh, cancels, completions, ratio)
+		log.Infof("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
+			"(%d cancels : %d successes => %.2f%% )", user, auth.cancelThresh, cancels, completions, 100*rate)
 		client.suspended = true
-		auth.storage.CloseAccount(user, account.CancellationRatio)
+		auth.storage.CloseAccount(user, account.CancellationRate)
 	}
 }
 
@@ -930,21 +938,21 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		recentOrders: latestFinished,
 		suspended:    !open,
 	}
-	cancels, completions, ratio, penalize := auth.checkCancelRatio(client)
+	cancels, completions, rate, penalize := auth.checkCancelRate(client)
 	if penalize && !auth.anarchy {
 		// Account should already be closed, but perhaps the server crashed
 		// or the account was not penalized before shutdown.
 		client.suspended = true
-		// The account might now be closed if the cancellation ratio was
+		// The account might now be closed if the cancellation rate was
 		// exceeded while the server was running in anarchy mode.
-		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRatio)
-		log.Debugf("Suspended account %v (cancellation ratio = %d:%d = %f) connected.",
-			acctInfo.ID, cancels, completions, ratio)
+		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRate)
+		log.Debugf("Suspended account %v (cancellation rate = %d:%d = %.2f%%) connected.",
+			acctInfo.ID, cancels, completions, 100*rate)
 	}
 
 	pendingReqs, pendingMsgs := auth.addClient(client)
-	log.Debugf("User %s connected from %s with %d pending requests and %d pending responses/notifications, cancel ratio = %d:%d (%v)",
-		acctInfo.ID, conn.IP(), len(pendingReqs), len(pendingMsgs), cancels, completions, ratio)
+	log.Debugf("User %s connected from %s with %d pending requests and %d pending responses/notifications, cancel rate = %d:%d (%.2f%%)",
+		acctInfo.ID, conn.IP(), len(pendingReqs), len(pendingMsgs), cancels, completions, 100*rate)
 
 	// Send pending requests for this user.
 	for _, pr := range pendingReqs {

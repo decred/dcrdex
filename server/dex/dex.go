@@ -369,10 +369,11 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		Anarchy:         cfg.Anarchy,
 	}
 
-	log.Infof("Cancellation ratio threshold %f, new user grace period %d cancels",
-		cancelThresh, int(cancelThresh))
 	authMgr := auth.NewAuthManager(&authCfg)
 	startSubSys("Auth manager", authMgr)
+
+	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
+		cancelThresh, authMgr.GraceLimit())
 
 	// Create an unbook dispatcher for the Swapper.
 	markets := make(map[string]*market.Market, len(cfg.Markets))

@@ -49,7 +49,7 @@ const (
 	defaultRPCPort             = "7232"
 	defaultAdminSrvAddr        = "127.0.0.1:6542"
 
-	defaultCancelThresh     = 8.0
+	defaultCancelThresh     = 0.95 // 19 cancels : 1 success
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
 	defaultBroadcastTimeout = time.Minute
@@ -118,7 +118,7 @@ type flagsData struct {
 	RegFeeXPub       string        `long:"regfeexpub" description:"The extended public key for deriving Decred addresses to which DEX registration fees should be paid."`
 	RegFeeConfirms   int64         `long:"regfeeconfirms" description:"The number of confirmations required to consider a registration fee paid."`
 	RegFeeAmount     uint64        `long:"regfeeamount" description:"The registration fee amount in atoms."`
-	CancelThreshold  float64       `long:"cancelthresh" description:"Cancellation ratio threshold (cancels/completed)."`
+	CancelThreshold  float64       `long:"cancelthresh" description:"Cancellation rate threshold (cancels/all_completed)."`
 	Anarchy          bool          `long:"anarchy" description:"Do not enforce any rules."`
 	DEXPrivKeyPath   string        `long:"dexprivkeypath" description:"The path to a file containing the DEX private key for message signing."`
 
