@@ -3,15 +3,14 @@ package pg
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
+	"github.com/lib/pq"
 )
 
 func (a *Archiver) matchTableName(match *order.Match) (string, error) {
@@ -221,22 +220,15 @@ func matchByID(dbe *sql.DB, tableName string, mid order.MatchID) (*db.MatchData,
 	return &m, nil
 }
 
-// encodeMatchIDs encodes the match IDs in a string suitable for a query using
-// the IN operator. The result is comma-delimited, with \x prefixed to
-// hexadecimal in single-quotes. e.g `'\x1a05','\xb250'`
-func encodeMatchIDs(matchIDs []order.MatchID) string {
-	stringIDs := make([]string, 0, len(matchIDs))
-	for i := range matchIDs {
-		stringIDs = append(stringIDs, `'\x`+hex.EncodeToString(matchIDs[i][:])+"'")
-	}
-	return strings.Join(stringIDs, ",")
-}
-
 // matchStatusesByID retrieves the []*db.MatchStatus for the requested matchIDs.
 // See docs for MatchStatuses.
 func matchStatusesByID(ctx context.Context, dbe *sql.DB, aid account.AccountID, tableName string, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
-	stmt := fmt.Sprintf(internal.SelectMatchStatuses, tableName, encodeMatchIDs(matchIDs))
-	rows, err := dbe.QueryContext(ctx, stmt, aid)
+	stmt := fmt.Sprintf(internal.SelectMatchStatuses, tableName)
+	pqArr := make(pq.ByteaArray, 0, len(matchIDs))
+	for i := range matchIDs {
+		pqArr = append(pqArr, matchIDs[i][:])
+	}
+	rows, err := dbe.QueryContext(ctx, stmt, aid, pqArr)
 	if err != nil {
 		return nil, err
 	}

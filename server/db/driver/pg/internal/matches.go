@@ -154,6 +154,6 @@ const (
 	SelectMatchStatuses = `SELECT matchid, status, aContract, bContract, aContractCoinID,
 		bContractCoinID, aRedeemCoinID, bRedeemCoinID, aRedeemSecret
 		FROM %s
-		WHERE matchid IN (%s)
+		WHERE matchid = ANY($2)
 		AND (takerAccount = $1 OR makerAccount = $1);`
 )
