@@ -349,7 +349,7 @@ func (s *WebServer) apiDefaultWalletCfg(w http.ResponseWriter, r *http.Request) 
 	}, s.indent)
 }
 
-// apiOrders get a list of user orders.
+// apiOrders responds with a filtered list of user orders.
 func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 	filter := new(core.OrderFilter)
 	if !readPost(w, r, filter) {

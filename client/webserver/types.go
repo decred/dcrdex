@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -64,7 +65,7 @@ type tradeForm struct {
 
 type cancelForm struct {
 	Pass    encode.PassBytes `json:"pw"`
-	OrderID string           `json:"orderID"`
+	OrderID dex.Bytes        `json:"orderID"`
 }
 
 // withdrawForm is sent to initiate a withdraw.
@@ -95,6 +96,22 @@ func (ord *orderReader) ToSymbol() string {
 		return ord.QuoteSymbol
 	}
 	return ord.BaseSymbol
+}
+
+// FromID is the asset ID of the asset which will be sent.
+func (ord *orderReader) FromID() uint32 {
+	if ord.Sell {
+		return ord.BaseID
+	}
+	return ord.QuoteID
+}
+
+// FromID is the asset ID of the asset which will be received.
+func (ord *orderReader) ToID() uint32 {
+	if ord.Sell {
+		return ord.QuoteID
+	}
+	return ord.BaseID
 }
 
 // TypeString combines the order type and side into a single string.
@@ -269,6 +286,14 @@ func (ord *orderReader) RedemptionFeesString() string {
 	return precision8(ord.FeesPaid.Redemption)
 }
 
+func (ord *orderReader) FundingCoinIDs() []string {
+	ids := make([]string, 0, len(ord.FundingCoins))
+	for i := range ord.FundingCoins {
+		ids = append(ids, decodeCoinID(ord.FromID(), ord.FundingCoins[i]))
+	}
+	return ids
+}
+
 // matchReader wraps a core.Match and provides methods for info display.
 // Whenever possible, add an matchReader methods rather than a template func.
 type matchReader struct {
@@ -283,20 +308,45 @@ func newMatchReader(match *core.Match, ord *orderReader) *matchReader {
 	}
 }
 
+// StatusString is a formatted string of the match status.
+func (m *matchReader) StatusString() string {
+	switch m.Status {
+	case order.NewlyMatched:
+		return "(0 / 4) Newly Matched"
+	case order.MakerSwapCast:
+		return "(1 / 4) First Swap Sent"
+	case order.TakerSwapCast:
+		return "(2 / 4) Second Swap Sent"
+	case order.MakerRedeemed:
+		if m.Side == order.Maker {
+			return "Match Complete"
+		}
+		return "(3 / 4) Maker Redeemed"
+	case order.MatchComplete:
+		return "Match Complete"
+	}
+	return "Unknown Order Status"
+}
+
 // RateString is the formatted match rate, with units.
 func (m *matchReader) RateString() string {
 	return fmt.Sprintf("%s %s/%s", precision8(m.Rate), m.ord.QuoteSymbol, m.ord.BaseSymbol)
 }
 
-// QuantityString is the formatted quantity.
-func (m *matchReader) QuantityString() string {
-	return precision8(m.Qty)
+// FromQuantityString is the formatted quantity.
+func (m *matchReader) FromQuantityString() string {
+	if m.ord.Sell {
+		return precision8(m.Qty)
+	}
+	return precision8(calc.BaseToQuote(m.Rate, m.Qty))
 }
 
-// QuoteQuantityString is the formatted quantity, converted to units of the
-// quote asset.
-func (m *matchReader) QuoteQuantityString() string {
-	return precision8(calc.BaseToQuote(m.Rate, m.Qty))
+// ToQuantityString is the formatted quantity.
+func (m *matchReader) ToQuantityString() string {
+	if m.ord.Sell {
+		return precision8(calc.BaseToQuote(m.Rate, m.Qty))
+	}
+	return precision8(m.Qty)
 }
 
 // SwapString is the outgoing swap coin ID, formatted according to asset.
@@ -358,6 +408,23 @@ func (m *matchReader) RefundString() string {
 		fromID = m.ord.BaseID
 	}
 	return decodeCoinID(fromID, m.Refund)
+}
+
+// OrderPortion is the percent of the order that this match represents, without
+// percent sign.
+func (m *matchReader) OrderPortion() string {
+	qty := m.ord.Qty
+	matchQty := m.Qty
+	if m.ord.IsMarketBuy() {
+		matchQty = calc.BaseToQuote(matchQty, m.Rate)
+	}
+	return strconv.FormatFloat((float64(matchQty)/float64(qty))*100, 'f', 1, 64)
+}
+
+// TimeString is a formatted string of the match's timestamp.
+func (m *matchReader) TimeString() string {
+	t := encode.UnixTimeMilli(int64(m.Stamp)).Local()
+	return t.Format("Jan 2 2008, 15:04:05 MST")
 }
 
 func decodeCoinID(assetID uint32, coinID []byte) string {

@@ -193,17 +193,19 @@ func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
 type orderTmplData struct {
 	CommonArguments
 	Order *orderReader
+	// Don't use dex.Network because the template parser will use the Stringer.
+	Net uint8
 }
 
 // handleOrder is the handler for the /order/{oid} page request.
 func (s *WebServer) handleOrder(w http.ResponseWriter, r *http.Request) {
-	oidStr, err := getOrderIDCtx(r)
+	oid, err := getOrderIDCtx(r)
 	if err != nil {
 		log.Errorf("error retrieving order ID from request context: %v", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
-	ord, err := s.core.Order(oidStr)
+	ord, err := s.core.Order(oid)
 	if err != nil {
 		log.Errorf("error retrieving order ID from request context: %v", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -212,5 +214,6 @@ func (s *WebServer) handleOrder(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "order", &orderTmplData{
 		CommonArguments: *commonArgs(r, "Order | Decred DEX"),
 		Order:           &orderReader{Order: ord},
+		Net:             uint8(s.core.Network()),
 	})
 }

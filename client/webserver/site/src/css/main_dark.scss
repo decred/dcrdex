@@ -49,6 +49,18 @@ body.dark {
     background-color: $dark_bg_3;
   }
 
+  .subtlelink,
+  .subtlelink:visited {
+    text-decoration: none;
+    color: #e6e6ff;
+  }
+
+  .subtlelink:hover {
+    color: #d1d1ff;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
   button.selected {
     background-color: #0b5831;
   }

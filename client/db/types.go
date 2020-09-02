@@ -221,6 +221,9 @@ type MatchMetaData struct {
 	Base uint32
 	// Quote is the quote asset of the exchange market.
 	Quote uint32
+	// Stamp is the match time (ms UNIX), according to the server's 'match'
+	// request timestamp.
+	Stamp uint64
 }
 
 // MatchAuth holds the DEX signatures and timestamps associated with the
@@ -736,7 +739,7 @@ type OrderFilter struct {
 	N int
 	// Offset can be used to shift the window of the time-sorted orders such
 	// that any orders that would sort to index <= the order specified by Offset
-	// will be rejected. Enables
+	// will be rejected.
 	Offset order.OrderID
 	// Hosts is a list of acceptable hosts. A zero-length Hosts means all
 	// hosts are accepted.

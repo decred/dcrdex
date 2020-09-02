@@ -95,19 +95,32 @@ export default class OrdersPage extends BasePage {
     for (const ord of orders) {
       const tr = this.orderTmpl.cloneNode(true)
       const set = (tmplID, s) => { Doc.tmplElement(tr, tmplID).textContent = s }
-      set('host', `${ord.market} @ ${ord.host}`)
-      var qtyAsset = ord.baseSymbol
-      var [from, to] = [ord.quoteSymbol, ord.baseSymbol]
+      const mktID = `${ord.baseSymbol.toUpperCase()}-${ord.baseSymbol.toUpperCase()}`
+      set('host', `${mktID} @ ${ord.host}`)
+      var from, to, fromQty
+      var toQty = ''
       if (ord.sell) {
         [from, to] = [ord.baseSymbol, ord.quoteSymbol]
-      } else if (ord.type === Order.Market) {
-        qtyAsset = ord.quoteSymbol
+        fromQty = Doc.formatCoinValue(ord.qty / 1e8)
+        if (ord.type === Order.Limit) {
+          toQty = Doc.formatCoinValue(ord.qty / 1e8 * ord.rate / 1e8)
+        }
+      } else {
+        [from, to] = [ord.quoteSymbol, ord.baseSymbol]
+        if (ord.type === Order.Market) {
+          fromQty = Doc.formatCoinValue(ord.qty / 1e8)
+        } else {
+          fromQty = Doc.formatCoinValue(ord.qty / 1e8 * ord.rate / 1e8)
+          toQty = Doc.formatCoinValue(ord.qty / 1e8)
+        }
       }
-      Doc.tmplElement(tr, 'fromImg').src = Doc.logoPath(from)
+
+      set('fromQty', fromQty)
+      Doc.tmplElement(tr, 'fromLogo').src = Doc.logoPath(from)
       set('fromSymbol', from)
-      Doc.tmplElement(tr, 'toImg').src = Doc.logoPath(to)
+      set('toQty', toQty)
+      Doc.tmplElement(tr, 'toLogo').src = Doc.logoPath(to)
       set('toSymbol', to)
-      set('quantity', `${Doc.formatCoinValue(ord.qty / 1e8)} ${qtyAsset}`)
       set('type', `${Order.typeString(ord)} ${Order.sellString(ord)}`)
       set('rate', Order.rateString(ord))
       set('status', Order.statusString(ord))

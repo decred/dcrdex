@@ -49,3 +49,22 @@ table.matches-table {
     color: #bd4646;
   }
 }
+
+div.match-header {
+  padding: 10px 0;
+  background-color: #7772;
+}
+
+div.match-card {
+  display: flex;
+  flex-direction: column;
+  margin: 10px 20px 10px 0;
+  align-items: stretch;
+  border: 1px solid #777a;
+  font-size: 14px;
+}
+
+.match-data-label {
+  opacity: 0.5;
+  font-family: $demi-sans;
+}

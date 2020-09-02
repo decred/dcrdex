@@ -44,7 +44,6 @@
             <th>Market</th>
             <th>Type</th>
             <th>Status</th>
-            <th class="text-right">Quantity</th>
             <th class="text-right">Rate</th>
             <th class="text-right">Filled</th>
             <th class="text-right">Settled</th>
@@ -54,16 +53,17 @@
         <tbody id="tableBody">
           <tr id="rowTmpl">
             <td data-tmpl="trade">
-              <img data-tmpl="fromImg" class="micro-icon">
+              <span data-tmpl="fromQty"></span>
+              <img data-tmpl="fromLogo" class="micro-icon">
               <span data-tmpl="fromSymbol"></span>
-              <span class="mx-2">for</span>
-              <img data-tmpl="toImg" class="micro-icon">
+              <span class="mx-1">&rarr;</span>
+              <span data-tmpl="toQty"></span>
+              <img data-tmpl="toLogo" class="micro-icon">
               <span data-tmpl="toSymbol"></span>
             </td>
             <td data-tmpl="host"></td>
             <td data-tmpl="type"></td>
             <td data-tmpl="status"></td>
-            <td data-tmpl="quantity" class="text-right"></td>
             <td data-tmpl="rate" class="text-right"></td>
             <td data-tmpl="filled" class="text-right"></td>
             <td data-tmpl="settled" class="text-right"></td>

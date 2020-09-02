@@ -74,6 +74,7 @@ type TCore struct {
 	notOpen         bool
 }
 
+func (c *TCore) Network() dex.Network                                        { return dex.Mainnet }
 func (c *TCore) Exchanges() map[string]*core.Exchange                        { return nil }
 func (c *TCore) GetFee(string, string) (uint64, error)                       { return 1e8, c.getFeeErr }
 func (c *TCore) Register(r *core.RegisterForm) (*core.RegisterResult, error) { return nil, c.regErr }
@@ -129,7 +130,7 @@ func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	}, nil
 }
 
-func (c *TCore) Cancel(pw []byte, sid string) error { return nil }
+func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error { return nil }
 
 func (c *TCore) NotificationFeed() <-chan core.Notification { return make(chan core.Notification, 1) }
 
@@ -138,7 +139,7 @@ func (c *TCore) AckNotes(ids []dex.Bytes) {}
 func (c *TCore) Logout() error { return c.logoutErr }
 
 func (c *TCore) Orders(*core.OrderFilter) ([]*core.Order, error) { return nil, nil }
-func (c *TCore) Order(oidStr string) (*core.Order, error)        { return nil, nil }
+func (c *TCore) Order(oid dex.Bytes) (*core.Order, error)        { return nil, nil }
 
 type TWriter struct {
 	b []byte

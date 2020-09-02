@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/config"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -106,7 +107,7 @@ type tradeForm struct {
 // cancelForm is information necessary to cancel a trade.
 type cancelForm struct {
 	appPass encode.PassBytes
-	orderID string
+	orderID dex.Bytes
 }
 
 // withdrawForm is information necessary to withdraw funds.
@@ -353,10 +354,11 @@ func parseCancelArgs(params *RawParams) (*cancelForm, error) {
 	if len(id) != orderIdLen {
 		return nil, fmt.Errorf("%w: orderID has incorrect length", errArgs)
 	}
-	if _, err := hex.DecodeString(id); err != nil {
+	oidB, err := hex.DecodeString(id)
+	if err != nil {
 		return nil, fmt.Errorf("%w: invalid order id hex", errArgs)
 	}
-	return &cancelForm{appPass: params.PWArgs[0], orderID: id}, nil
+	return &cancelForm{appPass: params.PWArgs[0], orderID: oidB}, nil
 }
 
 func parseWithdrawArgs(params *RawParams) (*withdrawForm, error) {

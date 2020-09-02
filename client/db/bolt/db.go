@@ -567,10 +567,8 @@ func (fs filterSet) check(oidB []byte, oBkt *bbolt.Bucket) bool {
 	return true
 }
 
-// Orders fetches a slice of orders, sorted by descending time. count is the
-// maximum number of orders that will be returned. If before is non-zero it will
-// be interpreted as a UNIX timestamp, and any order with a client timestamp >=
-// before will be omitted.
+// Orders fetches a slice of orders, sorted by descending time, and filtered
+// with the provided OrderFilter.
 func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, err error) {
 	filters := make(filterSet, 0)
 
@@ -759,6 +757,7 @@ func (db *BoltDB) UpdateMatch(m *dexdb.MetaMatch) error {
 			put(orderIDKey, match.OrderID[:]).
 			put(matchIDKey, match.MatchID[:]).
 			put(matchKey, order.EncodeMatch(match)).
+			put(stampKey, uint64Bytes(md.Stamp)).
 			err()
 	})
 }
@@ -911,6 +910,7 @@ func (db *BoltDB) filteredMatches(filter func(*bbolt.Bucket) bool) ([]*dexdb.Met
 						DEX:    string(getCopy(mBkt, dexKey)),
 						Base:   intCoder.Uint32(mBkt.Get(baseKey)),
 						Quote:  intCoder.Uint32(mBkt.Get(quoteKey)),
+						Stamp:  intCoder.Uint64(mBkt.Get(stampKey)),
 					},
 					Match: match,
 				})

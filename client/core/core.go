@@ -7,7 +7,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -707,6 +706,11 @@ func addrHost(addr string) string {
 		host = defaultHost
 	}
 	return net.JoinHostPort(host, port)
+}
+
+// Network returns the current DEX network.
+func (c *Core) Network() dex.Network {
+	return c.net
 }
 
 // Exchanges returns a map of Exchange keyed by host, including a list of markets
@@ -1645,13 +1649,9 @@ func (c *Core) coreOrderFromMetaOrder(mOrd *db.MetaOrder) (*Order, error) {
 }
 
 // Order fetches a single user order.
-func (c *Core) Order(oidStr string) (*Order, error) {
-	if len(oidStr) != order.OrderIDSize*2 {
-		return nil, fmt.Errorf("wrong oid string length. wanted %d, got %d", order.OrderIDSize*2, len(oidStr))
-	}
-	oidB, err := hex.DecodeString(oidStr)
-	if err != nil {
-		return nil, fmt.Errorf("error decoding order id string %q: %w", oidStr, err)
+func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
+	if len(oidB) != order.OrderIDSize {
+		return nil, fmt.Errorf("wrong oid string length. wanted %d, got %d", order.OrderIDSize, len(oidB))
 	}
 	var oid order.OrderID
 	copy(oid[:], oidB)
@@ -2222,18 +2222,18 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 }
 
 // Cancel is used to send a cancel order which cancels a limit order.
-func (c *Core) Cancel(pw []byte, tradeID string) error {
+func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	// Check the user password.
 	_, err := c.encryptionKey(pw)
 	if err != nil {
 		return fmt.Errorf("Cancel password error: %v", err)
 	}
 
-	// Find the order. Make sure it's a limit order.
-	oid, err := order.IDFromHex(tradeID)
-	if err != nil {
-		return err
+	if len(oidB) != order.OrderIDSize {
+		return fmt.Errorf("wrong order ID length. wanted %d, got %d", order.OrderIDSize, len(oidB))
 	}
+	var oid order.OrderID
+	copy(oid[:], oidB)
 
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
@@ -2247,7 +2247,7 @@ func (c *Core) Cancel(pw []byte, tradeID string) error {
 		}
 	}
 
-	return fmt.Errorf("Cancel: failed to find order %s", tradeID)
+	return fmt.Errorf("Cancel: failed to find order %s", oidB)
 }
 
 // authDEX authenticates the connection for a DEX.

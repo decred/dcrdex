@@ -2,9 +2,12 @@ package webserver
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
 	"github.com/go-chi/chi"
 )
 
@@ -105,10 +108,23 @@ func orderIDCtx(next http.Handler) http.Handler {
 	})
 }
 
-func getOrderIDCtx(r *http.Request) (string, error) {
+func getOrderIDCtx(r *http.Request) (dex.Bytes, error) {
 	oidStr, ok := r.Context().Value(ctxOID).(string)
 	if !ok {
-		return "", fmt.Errorf("type assertion failed")
+		log.Errorf("getOrderIDCtx type assertion failed. Expected string, got %T", r.Context().Value(ctxOID))
+		return nil, fmt.Errorf("type assertion failed")
 	}
-	return oidStr, nil
+	if len(oidStr) != order.OrderIDSize*2 {
+		log.Errorf("getOrderIDCtx received order ID string of wrong length. wanted %d, got %d",
+			order.OrderIDSize*2, len(oidStr))
+		return nil, fmt.Errorf("invalid order ID")
+	}
+	oidB, err := hex.DecodeString(oidStr)
+	if err != nil {
+		log.Errorf("getOrderIDCtx received invalid hex for order ID %q", oidStr)
+		return nil, fmt.Errorf("")
+	}
+	var oid dex.Bytes
+	copy(oid[:], oidB[:])
+	return oid, nil
 }

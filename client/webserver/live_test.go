@@ -100,7 +100,7 @@ func userOrders() (ords []*core.Order) {
 			}
 		}
 		ords = append(ords, &core.Order{
-			ID:     ordertest.RandomOrderID().String(),
+			ID:     ordertest.RandomOrderID().Bytes(),
 			Type:   orderType,
 			Stamp:  encode.UnixMilliU(time.Now()) - uint64(rand.Float64()*600_000),
 			Status: status,
@@ -338,6 +338,8 @@ func (c *TCore) trySend(u *core.BookUpdate) {
 	}
 }
 
+func (c *TCore) Network() dex.Network { return dex.Mainnet }
+
 func (c *TCore) Exchanges() map[string]*core.Exchange { return tExchanges }
 
 func (c *TCore) InitializeClient(pw []byte) error {
@@ -389,8 +391,6 @@ func makeCoreOrder() *core.Order {
 	// sell := rand.Float32() < 0.5
 	// center := randomMagnitude(-2, 4)
 	// ord := randomOrder(sell, randomMagnitude(-2, 4), center, gapWidthFactor*center, true)
-	var ord order.Order
-	var tif order.TimeInForce
 	host := firstDEX
 	if rand.Float32() > 0.5 {
 		host = secondDEX
@@ -403,19 +403,37 @@ func makeCoreOrder() *core.Order {
 	lotSize := tExchanges[host].Assets[baseID].LotSize
 	rateStep := tExchanges[host].Assets[quoteID].RateStep
 	rate := uint64(rand.Intn(1e3)) * rateStep
-	qty := uint64(rand.Intn(1e3)) * lotSize
+	baseQty := uint64(rand.Intn(1e3)) * lotSize
 	isMarket := rand.Float32() > 0.5
+	sell := rand.Float32() > 0.5
+	numMatches := rand.Intn(13)
+	orderQty := baseQty
+	orderRate := rate
+	matchQ := baseQty / 13
+	matchQ -= matchQ % lotSize
+	tif := order.TimeInForce(rand.Intn(int(order.StandingTiF)))
+
 	if isMarket {
-		ord, _ = ordertest.RandomMarketOrder()
-	} else {
-		lo, _ := ordertest.RandomLimitOrder()
-		ord = lo
-		tif = lo.Force
+		orderRate = 0
+		if !sell {
+			orderQty = calc.BaseToQuote(rate, baseQty)
+		}
+	}
+
+	numCoins := rand.Intn(5) + 1
+	fundingCoins := make([]dex.Bytes, 0, numCoins)
+	for i := 0; i < numCoins; i++ {
+		coinID := make([]byte, 36)
+		copy(coinID[:], encode.RandomBytes(32))
+		coinID[35] = byte(rand.Intn(8))
+		fundingCoins = append(fundingCoins, coinID)
 	}
 
 	status := order.OrderStatus(rand.Intn(int(order.OrderStatusRevoked-1))) + 1
 
-	trade := ord.Trade()
+	stamp := func() uint64 {
+		return encode.UnixMilliU(time.Now().Add(-time.Second * time.Duration(rand.Intn(60*60))))
+	}
 
 	cord := &core.Order{
 		Host:        host,
@@ -424,36 +442,28 @@ func makeCoreOrder() *core.Order {
 		QuoteID:     quoteID,
 		QuoteSymbol: quoteSymbol,
 		MarketID:    baseSymbol + "_" + quoteSymbol,
-		Type:        ord.Type(),
-		Stamp:       encode.UnixMilliU(time.Now().Add(-time.Second * time.Duration(rand.Intn(60*60)))),
-		ID:          ord.ID().String(),
+		Type:        order.OrderType(rand.Intn(int(order.MarketOrderType))) + 1,
+		Stamp:       stamp(),
+		ID:          ordertest.RandomOrderID().Bytes(),
 		Status:      status,
-		Qty:         qty,
-		Sell:        trade.Sell,
-		Filled:      uint64(rand.Float64() * float64(qty)),
+		Qty:         orderQty,
+		Sell:        sell,
+		Filled:      uint64(rand.Float64() * float64(orderQty)),
 		Canceled:    status == order.OrderStatusCanceled,
-		Rate:        rate,
+		Rate:        orderRate,
 		TimeInForce: tif,
 		FeesPaid: &core.FeeBreakdown{
-			Swap:       qty / 99,
+			Swap:       orderQty / 100,
 			Redemption: rateStep * 100,
 		},
-	}
-
-	numMatches := rand.Intn(13)
-
-	matchQ := (qty / 13)
-	matchQ -= matchQ % lotSize
-
-	if isMarket && !trade.Sell {
-		matchQ = calc.QuoteToBase(rate, matchQ)
+		FundingCoins: fundingCoins,
 	}
 
 	for i := 0; i < numMatches; i++ {
 		userMatch := ordertest.RandomUserMatch()
 		matchQty := matchQ
 		if i == numMatches-1 {
-			matchQty = qty - (matchQ * (uint64(numMatches) - 1))
+			matchQty = baseQty - (matchQ * (uint64(numMatches) - 1))
 		}
 		match := &core.Match{
 			MatchID: userMatch.MatchID[:],
@@ -461,6 +471,7 @@ func makeCoreOrder() *core.Order {
 			Rate:    rate,
 			Qty:     matchQty,
 			Side:    userMatch.Side,
+			Stamp:   stamp(),
 		}
 
 		if rand.Float32() < 0.75 {
@@ -481,7 +492,7 @@ func makeCoreOrder() *core.Order {
 	return cord
 }
 
-func (c *TCore) Order(oidStr string) (*core.Order, error) {
+func (c *TCore) Order(dex.Bytes) (*core.Order, error) {
 	return makeCoreOrder(), nil
 }
 
@@ -821,7 +832,7 @@ func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 		oType = order.MarketOrderType
 	}
 	return &core.Order{
-		ID:    ordertest.RandomOrderID().String(),
+		ID:    ordertest.RandomOrderID().Bytes(),
 		Type:  oType,
 		Stamp: encode.UnixMilliU(time.Now()),
 		Rate:  form.Rate,
@@ -830,11 +841,11 @@ func (c *TCore) Trade(pw []byte, form *core.TradeForm) (*core.Order, error) {
 	}, nil
 }
 
-func (c *TCore) Cancel(pw []byte, sid string) error {
+func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error {
 	for _, xc := range tExchanges {
 		for _, mkt := range xc.Markets {
 			for _, ord := range mkt.Orders {
-				if ord.ID == sid {
+				if ord.ID.String() == oid.String() {
 					ord.Cancelling = true
 				}
 			}

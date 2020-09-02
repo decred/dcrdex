@@ -158,6 +158,18 @@ header.maintop a:hover,
   color: inherit;
 }
 
+.subtlelink,
+.subtlelink:visited {
+  text-decoration: none;
+  color: #05053b;
+}
+
+.subtlelink:hover {
+  text-decoration: underline;
+  color: #07075e;
+  cursor: pointer;
+}
+
 div.mainlinks .hoverbright:hover {
   color: $dark_bg_3;
 }

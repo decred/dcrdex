@@ -345,7 +345,7 @@ func monitorTradeForTestOrder(ctx context.Context, client *tClient, orderID stri
 	client.log("Waiting %s for matches on order %s", maxMatchDuration, oidShort)
 	matched := client.findNotification(ctx, maxMatchDuration, func(n Notification) bool {
 		orderNote, isOrderNote := n.(*OrderNote)
-		return isOrderNote && n.Subject() == "Matches made" && orderNote.Order.ID == orderID
+		return isOrderNote && n.Subject() == "Matches made" && orderNote.Order.ID.String() == orderID
 	})
 	if ctx.Err() != nil { // context canceled
 		return nil
@@ -819,7 +819,7 @@ func (client *tClient) placeOrder(qty, rate uint64) (string, error) {
 	}
 
 	client.log("placed order %sing %s at %s (%s)", sellString(client.isSeller), qtyStr, rateStr, ord.ID[:8])
-	return ord.ID, nil
+	return ord.ID.String(), nil
 }
 
 func (client *tClient) updateBalances() error {

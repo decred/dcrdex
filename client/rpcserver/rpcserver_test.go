@@ -68,7 +68,7 @@ func (c *TCore) AckNotes(ids []dex.Bytes) {}
 func (c *TCore) AssetBalance(uint32) (*db.Balance, error) {
 	return nil, c.balanceErr
 }
-func (c *TCore) Cancel(pw []byte, sid string) error {
+func (c *TCore) Cancel(pw []byte, oid dex.Bytes) error {
 	return c.cancelErr
 }
 func (c *TCore) CreateWallet(appPW, walletPW []byte, form *core.WalletForm) error {

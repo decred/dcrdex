@@ -414,10 +414,6 @@ func TestOrders(t *testing.T) {
 		orderIndex[ord.ID()] = ord
 	})
 
-	// // Grab a stamp to filter the call the Orders.
-	// beforeStamp := orders[0].Order.Prefix().ClientTime
-	// beforders := make(map[order.OrderID]struct{}, 0)
-
 	tStart := time.Now()
 	// Grab a timestamp halfway through.
 	var tMid uint64
@@ -427,14 +423,10 @@ func TestOrders(t *testing.T) {
 		if i == iMid {
 			tMid = timeNow()
 		}
-		mOrd := orders[i]
-		err := boltdb.UpdateOrder(mOrd)
+		err := boltdb.UpdateOrder(orders[i])
 		if err != nil {
 			t.Fatalf("error inserting order: %v", err)
 		}
-		// if mOrd.Order.Prefix().ClientTime.Before(beforeStamp) {
-		// 	beforders[mOrd.Order.ID()] = struct{}{}
-		// }
 	})
 	t.Logf("~ %d milliseconds to insert %d MetaOrder", int(time.Since(tStart)/time.Millisecond)-numToDo, numToDo)
 	tStart = time.Now()
@@ -536,23 +528,6 @@ func TestOrders(t *testing.T) {
 		ordertest.MustCompareOrders(t, nOrders[i].Order, sinceOrders[i].Order)
 	}
 
-	// // Check that Orders returns the correct list.
-	// ords, err := boltdb.Orders(&db.OrderFilter{
-	// 	N:      int(numToDo),
-	// 	Offset: offsetOrder.ID(),
-	// })
-	// if err != nil {
-	// 	t.Fatalf("Orders error: %v", err)
-	// }
-	// if len(ords) != len(beforders) {
-	// 	t.Fatalf("Orders: wrong number of orders returned. wanted %d, got %d", len(beforders), len(ords))
-	// }
-	// for _, mOrd := range ords {
-	// 	if _, found := beforders[mOrd.Order.ID()]; !found {
-	// 		t.Fatalf("Orders: expected order not found")
-	// 	}
-	// }
-
 	// Make a MetaOrder and check insertion errors.
 	m := &db.MetaOrder{
 		MetaData: &db.OrderMetaData{
@@ -644,7 +619,7 @@ func TestOrderFilters(t *testing.T) {
 
 	var start int64
 	host1 := "somehost.co"
-	host2 := "antoherhost.org"
+	host2 := "anotherhost.org"
 	var asset1 uint32 = 1
 	var asset2 uint32 = 2
 	var asset3 uint32 = 3
@@ -846,6 +821,7 @@ func TestMatches(t *testing.T) {
 				DEX:    acct.Host,
 				Base:   base,
 				Quote:  quote,
+				Stamp:  rand.Uint64(),
 			},
 			Match: ordertest.RandomUserMatch(),
 		}
@@ -874,7 +850,7 @@ func TestMatches(t *testing.T) {
 		activeOrders[m1.Match.OrderID] = true
 		m2 := matchIndex[m1.Match.MatchID]
 		ordertest.MustCompareUserMatch(t, m1.Match, m2.Match)
-		dbtest.MustCompareMatchProof(t, &m1.MetaData.Proof, &m2.MetaData.Proof)
+		dbtest.MustCompareMatchMetaData(t, m1.MetaData, m2.MetaData)
 	}
 	t.Logf("%d milliseconds to retrieve and compare %d active MetaMatch", time.Since(tStart)/time.Millisecond, numActive)
 
@@ -898,6 +874,7 @@ func TestMatches(t *testing.T) {
 			DEX:    acct.Host,
 			Base:   base,
 			Quote:  quote,
+			Stamp:  rand.Uint64(),
 		},
 		Match: ordertest.RandomUserMatch(),
 	}

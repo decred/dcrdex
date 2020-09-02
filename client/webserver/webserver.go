@@ -58,6 +58,7 @@ var (
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	websocket.Core
+	Network() dex.Network
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
@@ -78,11 +79,11 @@ type clientCore interface {
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
-	Cancel(pw []byte, sid string) error
+	Cancel(pw []byte, oid dex.Bytes) error
 	NotificationFeed() <-chan core.Notification
 	Logout() error
 	Orders(*core.OrderFilter) ([]*core.Order, error)
-	Order(oidStr string) (*core.Order, error)
+	Order(oid dex.Bytes) (*core.Order, error)
 }
 
 var _ clientCore = (*core.Core)(nil)

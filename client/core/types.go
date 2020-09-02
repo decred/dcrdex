@@ -116,6 +116,7 @@ type Match struct {
 	Redeem        dex.Bytes         `json:"redeem"`
 	CounterRedeem dex.Bytes         `json:"counterRedeem"`
 	Refund        dex.Bytes         `json:"refund"`
+	Stamp         uint64            `json:"stamp"`
 }
 
 // matchFromMetaMatch constructs a *Match from an *db.MetaMatch
@@ -129,6 +130,7 @@ func matchFromMetaMatch(metaMatch *db.MetaMatch) *Match {
 		Side:    userMatch.Side,
 		FeeRate: userMatch.FeeRateSwap,
 		Refund:  []byte(proof.RefundCoin),
+		Stamp:   metaMatch.MetaData.Stamp,
 	}
 
 	if userMatch.Side == order.Maker {
@@ -149,28 +151,29 @@ func matchFromMetaMatch(metaMatch *db.MetaMatch) *Match {
 // Order is core's general type for an order. An order may be a market, limit,
 // or cancel order. Some fields are only relevant to particular order types.
 type Order struct {
-	Host        string            `json:"host"`
-	BaseID      uint32            `json:"baseID"`
-	BaseSymbol  string            `json:"baseSymbol"`
-	QuoteID     uint32            `json:"quoteID"`
-	QuoteSymbol string            `json:"quoteSymbol"`
-	MarketID    string            `json:"market"`
-	Type        order.OrderType   `json:"type"`
-	ID          string            `json:"id"`
-	Stamp       uint64            `json:"stamp"`
-	Sig         dex.Bytes         `json:"sig"`
-	Status      order.OrderStatus `json:"status"`
-	Epoch       uint64            `json:"epoch"`
-	Qty         uint64            `json:"qty"`
-	Sell        bool              `json:"sell"`
-	Filled      uint64            `json:"filled"`
-	Matches     []*Match          `json:"matches"`
-	Cancelling  bool              `json:"cancelling"`
-	Canceled    bool              `json:"canceled"`
-	FeesPaid    *FeeBreakdown     `json:"feesPaid"`
-	Rate        uint64            `json:"rate"`               // limit only
-	TimeInForce order.TimeInForce `json:"tif"`                // limit only
-	TargetID    string            `json:"targetID,omitempty"` // cancel only
+	Host         string            `json:"host"`
+	BaseID       uint32            `json:"baseID"`
+	BaseSymbol   string            `json:"baseSymbol"`
+	QuoteID      uint32            `json:"quoteID"`
+	QuoteSymbol  string            `json:"quoteSymbol"`
+	MarketID     string            `json:"market"`
+	Type         order.OrderType   `json:"type"`
+	ID           dex.Bytes         `json:"id"`
+	Stamp        uint64            `json:"stamp"`
+	Sig          dex.Bytes         `json:"sig"`
+	Status       order.OrderStatus `json:"status"`
+	Epoch        uint64            `json:"epoch"`
+	Qty          uint64            `json:"qty"`
+	Sell         bool              `json:"sell"`
+	Filled       uint64            `json:"filled"`
+	Matches      []*Match          `json:"matches"`
+	Cancelling   bool              `json:"cancelling"`
+	Canceled     bool              `json:"canceled"`
+	FeesPaid     *FeeBreakdown     `json:"feesPaid"`
+	FundingCoins []dex.Bytes       `json:"fundingCoins"`
+	Rate         uint64            `json:"rate"`               // limit only
+	TimeInForce  order.TimeInForce `json:"tif"`                // limit only
+	TargetID     dex.Bytes         `json:"targetID,omitempty"` // cancel only
 }
 
 // FeeBreakdown is categorized fee information.
@@ -200,6 +203,11 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		}
 	}
 
+	fundingCoins := make([]dex.Bytes, 0, len(trade.Coins))
+	for i := range trade.Coins {
+		fundingCoins = append(fundingCoins, []byte(trade.Coins[i]))
+	}
+
 	baseID, quoteID := ord.Base(), ord.Quote()
 
 	corder := &Order{
@@ -210,7 +218,7 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 		QuoteSymbol: unbip(quoteID),
 		MarketID:    marketName(baseID, quoteID),
 		Type:        prefix.OrderType,
-		ID:          ord.ID().String(),
+		ID:          ord.ID().Bytes(),
 		Stamp:       encode.UnixMilliU(prefix.ServerTime),
 		Sig:         metaData.Proof.DEXSig,
 		Status:      metaData.Status,
@@ -225,6 +233,7 @@ func coreOrderFromTrade(ord order.Order, metaData *db.OrderMetaData) *Order {
 			Swap:       metaData.SwapFeesPaid,
 			Redemption: metaData.RedemptionFeesPaid,
 		},
+		FundingCoins: fundingCoins,
 	}
 
 	return corder

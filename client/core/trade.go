@@ -170,7 +170,7 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 			Type:     order.CancelOrderType,
 			Stamp:    encode.UnixMilliU(t.cancel.ServerTime),
 			Epoch:    t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime),
-			TargetID: t.cancel.TargetOrderID.String(),
+			TargetID: t.cancel.TargetOrderID[:],
 		}
 	}
 	return corder, cancelOrder
@@ -483,6 +483,7 @@ func (t *trackedTrade) makeMetaMatch(msgMatch *msgjson.Match) *db.MetaMatch {
 			DEX:   t.dc.acct.host,
 			Base:  t.Base(),
 			Quote: t.Quote(),
+			Stamp: msgMatch.ServerTime,
 		},
 		Match: &order.UserMatch{
 			OrderID:     oid,

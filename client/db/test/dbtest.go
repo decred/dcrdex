@@ -183,6 +183,27 @@ func MustCompareMatchAuth(t testKiller, a1, a2 *db.MatchAuth) {
 	}
 }
 
+// MustCompareMatchMetaData ensure the two MatchMetaData are identical, calling
+// the Fatalf method of the testKiller if not.
+func MustCompareMatchMetaData(t testKiller, m1, m2 *db.MatchMetaData) {
+	if m1.Status != m2.Status {
+		t.Fatalf("Status mismatch. %d != %d", m1.Status, m2.Status)
+	}
+	if m1.DEX != m2.DEX {
+		t.Fatalf("DEX mismatch. %d != %d", m1.DEX, m2.DEX)
+	}
+	if m1.Base != m2.Base {
+		t.Fatalf("Base mismatch. %d != %d", m1.Base, m2.Base)
+	}
+	if m1.Quote != m2.Quote {
+		t.Fatalf("Quote mismatch. %d != %d", m1.Quote, m2.Quote)
+	}
+	if m1.Stamp != m2.Stamp {
+		t.Fatalf("Stamp mismatch. %d != %d", m1.Stamp, m2.Stamp)
+	}
+	MustCompareMatchProof(t, &m1.Proof, &m2.Proof)
+}
+
 // MustCompareMatchProof ensures the two MatchProof are identical, calling the
 // Fatalf method of the testKiller if not.
 func MustCompareMatchProof(t testKiller, m1, m2 *db.MatchProof) {
