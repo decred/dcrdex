@@ -65,6 +65,7 @@ const (
 	TryAgainLaterError                // 49
 	AccountNotFoundError              // 50
 	UnpaidAccountError                // 51
+	InvalidRequestError               // 52
 )
 
 // Routes are destinations for a "payload" of data. The type of data being
@@ -78,6 +79,9 @@ const (
 	// NoMatchRoute is the route of a DEX-originating notification-type message
 	// notifying the client that an order did not match during its match cycle.
 	NoMatchRoute = "nomatch"
+	// MatchStatusRoute is the route of a client-originating request-type
+	// message to retrieve match data from the DEX.
+	MatchStatusRoute = "match_status"
 	// InitRoute is the route of a client-originating request-type message
 	// notifying the DEX, and subsequently the match counter-party, of the details
 	// of a swap contract.
@@ -441,6 +445,27 @@ func (m *Match) Serialize() []byte {
 // Nomatch is the payload for a server-originating NoMatchRoute notification.
 type NoMatch struct {
 	OrderID Bytes `json:"orderid"`
+}
+
+// MatchRequest details a match for the MatchStatusRoute request. The actual
+// payload is a []MatchRequest.
+type MatchRequest struct {
+	Base    uint32 `json:"base"`
+	Quote   uint32 `json:"quote"`
+	MatchID Bytes  `json:"matchid"`
+}
+
+// MatchStatus is the successful result for the MatchStatusRoute request.
+type MatchStatusResult struct {
+	MatchID       Bytes `json:"matchid"`
+	Status        uint8 `json:"status"`
+	MakerContract Bytes `json:"makercontract,omitempty"`
+	TakerContract Bytes `json:"takercontract,omitempty"`
+	MakerSwap     Bytes `json:"makerswap,omitempty"`
+	TakerSwap     Bytes `json:"takerswap,omitempty"`
+	MakerRedeem   Bytes `json:"makerredeem,omitempty"`
+	TakerRedeem   Bytes `json:"takerredeem,omitempty"`
+	Secret        Bytes `json:"secret,omitempty"`
 }
 
 // Init is the payload for a client-originating InitRoute request.

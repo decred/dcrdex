@@ -46,6 +46,7 @@ type TStorage struct {
 	acct     *account.Account
 	matches  []*db.MatchData
 	closedID account.AccountID
+	statuses []*db.MatchStatus
 	acctAddr string
 	acctErr  error
 	regAddr  string
@@ -68,6 +69,9 @@ func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 }
 func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return s.matches, nil
+}
+func (s *TStorage) MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
+	return s.statuses, nil
 }
 func (s *TStorage) CreateAccount(*account.Account) (string, error)   { return s.acctAddr, s.acctErr }
 func (s *TStorage) AccountRegAddr(account.AccountID) (string, error) { return s.regAddr, s.regErr }
@@ -1338,4 +1342,45 @@ func TestAuthManager_RecordCancel_RecordCompletedOrder(t *testing.T) {
 	ord = client.recentOrders.orders[2]
 	client.mtx.Unlock()
 	checkOrd(ord, coid, true, encode.UnixMilli(tCompleted))
+}
+
+func TestMatchStatus(t *testing.T) {
+	resetStorage()
+	user := tNewUser(t)
+	connectUser(t, user)
+
+	rig.storage.statuses = []*db.MatchStatus{{}}
+
+	reqPayload := []msgjson.MatchRequest{
+		{
+			MatchID: encode.RandomBytes(32),
+		},
+	}
+
+	req, _ := msgjson.NewRequest(1, msgjson.MatchStatusRoute, reqPayload)
+
+	msgErr := rig.mgr.handleMatchStatus(user.conn, req)
+	if msgErr != nil {
+		t.Fatalf("handleMatchStatus error: %v", msgErr)
+	}
+
+	resp := user.conn.getSend()
+	if resp == nil {
+		t.Fatalf("no matches sent")
+	}
+
+	statuses := []msgjson.MatchStatusResult{}
+	err := resp.UnmarshalResult(&statuses)
+	if err != nil {
+		t.Fatalf("UnmarshalResult error: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(statuses))
+	}
+
+	reqPayload[0].MatchID = []byte{}
+	err = rig.mgr.handleMatchStatus(user.conn, req)
+	if err == nil {
+		t.Fatalf("no error for bad match ID")
+	}
 }

@@ -150,4 +150,10 @@ const (
 
 	SetSwapDone = `UPDATE %s SET active = FALSE
 		WHERE matchid = $1;`
+
+	SelectMatchStatuses = `SELECT matchid, status, aContract, bContract, aContractCoinID,
+		bContractCoinID, aRedeemCoinID, bRedeemCoinID, aRedeemSecret
+		FROM %s
+		WHERE matchid IN (%s)
+		AND (takerAccount = $1 OR makerAccount = $1);`
 )
