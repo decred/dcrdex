@@ -239,4 +239,6 @@ do
   tmux send-keys -t $SESSION:2 "./mine-alpha 1${DONE}" C-m\; ${WAIT}
 done
 
+# Reenable history and attach to the control session.
+tmux send-keys -t $SESSION:2 "set -o history" C-m
 tmux attach-session -t $SESSION

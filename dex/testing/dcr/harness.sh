@@ -149,7 +149,7 @@ tmux send-keys -t $SESSION:0 "cd ${NODES_ROOT}/harness-ctl" C-m
 ################################################################################
 
 tmux new-window -t $SESSION:1 -n 'alpha'
-tmux send-keys -t $SESSION:0 "set +o history" C-m
+tmux send-keys -t $SESSION:1 "set +o history" C-m
 tmux send-keys -t $SESSION:1 "cd ${NODES_ROOT}/alpha" C-m
 
 echo "Starting simnet alpha node"
@@ -230,4 +230,6 @@ done
 tmux send-keys -t $SESSION:0 "./alpha createnewaccount server_fees${WAIT}" C-m\; wait-for donedcr
 tmux send-keys -t $SESSION:0 "./alpha getmasterpubkey server_fees${WAIT}" C-m\; wait-for donedcr
 
+# Reenable history and attach to the control session.
+tmux send-keys -t $SESSION:0 "set -o history" C-m
 tmux attach-session -t $SESSION
