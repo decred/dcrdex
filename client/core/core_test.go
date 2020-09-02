@@ -3089,83 +3089,83 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 }
 
-func TestReadConnectMatches(t *testing.T) {
-	rig := newTestRig()
-	preImg := newPreimage()
-	dc := rig.dc
+// func TestReadConnectMatches(t *testing.T) {
+// 	rig := newTestRig()
+// 	preImg := newPreimage()
+// 	dc := rig.dc
 
-	notes := make(map[string][]Notification)
-	notify := func(note Notification) {
-		notes[note.Type()] = append(notes[note.Type()], note)
-	}
+// 	notes := make(map[string][]Notification)
+// 	notify := func(note Notification) {
+// 		notes[note.Type()] = append(notes[note.Type()], note)
+// 	}
 
-	lo := &order.LimitOrder{
-		P: order.Prefix{
-			// 	OrderType:  order.LimitOrderType,
-			// 	BaseAsset:  tDCR.ID,
-			// 	QuoteAsset: tBTC.ID,
-			// 	ClientTime: time.Now(),
-			ServerTime: time.Now(),
-			// 	Commit:     preImg.Commit(),
-		},
-	}
-	oid := lo.ID()
-	dbOrder := &db.MetaOrder{
-		MetaData: &db.OrderMetaData{},
-		Order:    lo,
-	}
-	mkt := dc.market(tDcrBtcMktName)
-	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, notify)
-	metaMatch := db.MetaMatch{
-		MetaData: &db.MatchMetaData{},
-		Match:    &order.UserMatch{},
-	}
+// 	lo := &order.LimitOrder{
+// 		P: order.Prefix{
+// 			// 	OrderType:  order.LimitOrderType,
+// 			// 	BaseAsset:  tDCR.ID,
+// 			// 	QuoteAsset: tBTC.ID,
+// 			// 	ClientTime: time.Now(),
+// 			ServerTime: time.Now(),
+// 			// 	Commit:     preImg.Commit(),
+// 		},
+// 	}
+// 	oid := lo.ID()
+// 	dbOrder := &db.MetaOrder{
+// 		MetaData: &db.OrderMetaData{},
+// 		Order:    lo,
+// 	}
+// 	mkt := dc.market(tDcrBtcMktName)
+// 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+// 		rig.db, rig.queue, nil, nil, notify)
+// 	metaMatch := db.MetaMatch{
+// 		MetaData: &db.MatchMetaData{},
+// 		Match:    &order.UserMatch{},
+// 	}
 
-	// Store a match
-	knownID := ordertest.RandomMatchID()
-	knownMatch := &matchTracker{
-		id:              knownID,
-		MetaMatch:       metaMatch,
-		counterConfirms: -1,
-	}
-	tracker.matches[knownID] = knownMatch
-	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: knownID[:]}
+// 	// Store a match
+// 	knownID := ordertest.RandomMatchID()
+// 	knownMatch := &matchTracker{
+// 		id:              knownID,
+// 		MetaMatch:       metaMatch,
+// 		counterConfirms: -1,
+// 	}
+// 	tracker.matches[knownID] = knownMatch
+// 	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: knownID[:]}
 
-	missingID := ordertest.RandomMatchID()
-	missingMatch := &matchTracker{
-		id:        missingID,
-		MetaMatch: metaMatch,
-	}
-	tracker.matches[missingID] = missingMatch
+// 	missingID := ordertest.RandomMatchID()
+// 	missingMatch := &matchTracker{
+// 		id:        missingID,
+// 		MetaMatch: metaMatch,
+// 	}
+// 	tracker.matches[missingID] = missingMatch
 
-	extraID := ordertest.RandomMatchID()
-	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
+// 	extraID := ordertest.RandomMatchID()
+// 	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
 
-	matches := []*msgjson.Match{knownMsgMatch, extraMsgMatch}
-	tracker.readConnectMatches(matches)
+// 	matches := []*msgjson.Match{knownMsgMatch, extraMsgMatch}
+// 	tracker.readConnectMatches(matches)
 
-	if knownMatch.failErr != nil {
-		t.Fatalf("error set for known and reported match")
-	}
+// 	if knownMatch.failErr != nil {
+// 		t.Fatalf("error set for known and reported match")
+// 	}
 
-	if missingMatch.failErr == nil {
-		t.Fatalf("error not set for missing match")
-	}
+// 	if missingMatch.failErr == nil {
+// 		t.Fatalf("error not set for missing match")
+// 	}
 
-	if len(notes["order"]) != 2 {
-		t.Fatalf("expected 2 core 'order'-type notifications, got %d", len(notes["order"]))
-	}
+// 	if len(notes["order"]) != 2 {
+// 		t.Fatalf("expected 2 core 'order'-type notifications, got %d", len(notes["order"]))
+// 	}
 
-	if notes["order"][0].Subject() != "Missing matches" {
-		t.Fatalf("no core notification sent for missing matches")
-	}
+// 	if notes["order"][0].Subject() != "Missing matches" {
+// 		t.Fatalf("no core notification sent for missing matches")
+// 	}
 
-	if notes["order"][1].Subject() != "Match resolution error" {
-		t.Fatalf("no core notification sent for unknown matches")
-	}
+// 	if notes["order"][1].Subject() != "Match resolution error" {
+// 		t.Fatalf("no core notification sent for unknown matches")
+// 	}
 
-}
+// }
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {
 	tif := order.ImmediateTiF

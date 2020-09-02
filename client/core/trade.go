@@ -290,59 +290,6 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 	return t.db.UpdateOrderStatus(t.ID(), t.metaData.Status)
 }
 
-// readConnectMatches resolves the matches reported by the server in the
-// 'connect' response against those in the match tracker map.
-func (t *trackedTrade) readConnectMatches(msgMatches []*msgjson.Match) {
-	ids := make(map[order.MatchID]bool)
-	var extras []*msgjson.Match
-	var missing []order.MatchID
-	corder, _ := t.coreOrder()
-	t.mtx.RLock()
-	defer t.mtx.RUnlock()
-	for _, msgMatch := range msgMatches {
-		var matchID order.MatchID
-		copy(matchID[:], msgMatch.MatchID)
-		ids[matchID] = true
-		_, found := t.matches[matchID]
-		if !found {
-			extras = append(extras, msgMatch)
-			continue
-		}
-	}
-
-	for _, match := range t.matches {
-		if !ids[match.id] && match.MetaData.Status < order.MatchComplete {
-			missing = append(missing, match.id)
-			match.failErr = fmt.Errorf("order not reported by the server on connect")
-			// Must have been revoked while we were gone. Flag to allow recovery
-			// and subsequent retirement of the match and parent trade.
-			match.MetaData.Proof.IsRevoked = true
-			if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
-				log.Errorf("Failed to update missing/revoked match: %v", err)
-			}
-		}
-	}
-
-	host := t.dc.acct.host
-	if len(missing) > 0 {
-		details := fmt.Sprintf("%d matches for order %s were not reported by %q and are in a failed state",
-			len(missing), t.ID(), host)
-		corder, _ := t.coreOrderInternal()
-		t.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
-		for _, mid := range missing {
-			log.Warnf("%s did not report active match %s on order %s", host, mid, t.ID())
-		}
-	}
-	if len(extras) > 0 {
-		details := fmt.Sprintf("%d matches reported by %s were not found for %s.", len(extras), host, t.token())
-		t.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
-		// t.negotiate(extras) // missed match message request, but match not revoked (?!)
-		for _, extra := range extras {
-			log.Errorf("%s reported match %s which is not a known active match for order %s", host, extra.MatchID, extra.OrderID)
-		}
-	}
-}
-
 // negotiate creates and stores matchTrackers for the []*msgjson.Match, and
 // updates (UserMatch).Filled. Match negotiation can then be progressed by
 // calling (*trackedTrade).tick when a relevant event occurs, such as a request
@@ -660,6 +607,18 @@ func (match *matchTracker) isActive() bool {
 		}
 	}
 	return true
+}
+
+func (t *trackedTrade) activeMatches() []*matchTracker {
+	var actives []*matchTracker
+	t.mtx.RLock()
+	defer t.mtx.RUnlock()
+	for _, match := range t.matches {
+		if match.isActive() {
+			actives = append(actives, match)
+		}
+	}
+	return actives
 }
 
 // isSwappable will be true if the match is ready for a swap transaction to be
