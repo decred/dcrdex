@@ -151,8 +151,8 @@ func (c *tRPCClient) GetTxOut(txHash *chainhash.Hash, index uint32, mempool bool
 }
 
 func (c *tRPCClient) getBlock(blockHash string) *btcjson.GetBlockVerboseResult {
-	c.blockchainMtx.RLock()
-	defer c.blockchainMtx.RUnlock()
+	c.blockchainMtx.Lock()
+	defer c.blockchainMtx.Unlock()
 	blk, found := c.verboseBlocks[blockHash]
 	if !found {
 		return nil
@@ -232,13 +232,16 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 		if block == nil {
 			return nil, fmt.Errorf("no block verbose found")
 		}
-		b, _ := json.Marshal(&verboseBlockTxs{
+		// block may get modified concurrently, lock mtx before reading fields.
+		c.blockchainMtx.RLock()
+		blkVerbose := &verboseBlockTxs{
 			Hash:     block.Hash,
 			Height:   uint64(block.Height),
 			NextHash: block.NextHash,
 			Tx:       block.RawTx,
-		})
-		return b, nil
+		}
+		c.blockchainMtx.RUnlock()
+		return json.Marshal(blkVerbose)
 	case methodGetBlockHeader:
 		var blkHash string
 		_ = json.Unmarshal(params[0], &blkHash)
@@ -246,13 +249,16 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 		if block == nil {
 			return nil, fmt.Errorf("no block verbose found")
 		}
-		b, _ := json.Marshal(&blockHeader{
+		// block may get modified concurrently, lock mtx before reading fields.
+		c.blockchainMtx.RLock()
+		blkHeader := &blockHeader{
 			Hash:          block.Hash,
 			Height:        block.Height,
 			Confirmations: block.Confirmations,
 			Time:          block.Time,
-		})
-		return b, nil
+		}
+		c.blockchainMtx.RUnlock()
+		return json.Marshal(blkHeader)
 	case methodLockUnspent:
 		coins := make([]*RPCOutpoint, 0)
 		_ = json.Unmarshal(params[1], &coins)
@@ -1376,82 +1382,76 @@ func TestFindRedemption(t *testing.T) {
 	}
 	node.rawRes[methodGetTransaction] = mustMarshal(t, getTxRes)
 
-	// Begin find redemption.
-	findRedemptionResultCh, err := wallet.FindRedemption(coinID)
-	if err != nil {
-		t.Fatalf("unexpected FindRedemption error: %v", err)
-	}
-	// Expect to NOT find redemption yet.
-	select {
-	case frr := <-findRedemptionResultCh:
-		t.Fatalf("unexpected FindRedemption result %v", frr)
-	case <-time.After(2 * time.Second):
-	}
-
 	// Add an intermediate block for good measure.
 	node.addRawTx(contractHeight+1, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
-
-	// Expect to NOT find redemption still.
-	select {
-	case frr := <-findRedemptionResultCh:
-		t.Fatalf("unexpected FindRedemption result %v", frr)
-	case <-time.After(2 * time.Second):
-	}
 
 	// Now add the redemption.
 	inputs = append(inputs, makeRPCVin(contractTxid, contractVout, redemptionScript))
 	rawRedeem := makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs)
 	_, redeemBlock := node.addRawTx(contractHeight+2, rawRedeem)
 
-	// Expect to find redemption now.
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err != nil {
-			t.Fatalf("error finding redemption: %v", frr.Err)
-		}
-		if !bytes.Equal(frr.Secret, secret) {
-			t.Fatalf("wrong secret. expected %x, got %x", secret, frr.Secret)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("redemption not found after 2 seconds")
+	// Check find redemption result.
+	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
+	if err != nil {
+		t.Fatalf("error finding redemption: %v", err)
+	}
+	if !bytes.Equal(checkSecret, secret) {
+		t.Fatalf("wrong secret. expected %x, got %x", secret, checkSecret)
 	}
 
 	// gettransaction error
 	node.rawErr[methodGetTransaction] = tErr
-	_, err = wallet.FindRedemption(coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
 	node.rawErr[methodGetTransaction] = nil
 
+	// missing redemption
+	redeemBlock.RawTx[0].Vin[1].Txid = otherTxid
+	ctx, cancel := context.WithTimeout(tCtx, 2*time.Second)
+	defer cancel() // ctx should auto-cancel after 2 seconds, but this is apparently good practice to prevent leak
+	_, k, err := wallet.FindRedemption(ctx, coinID)
+	if ctx.Err() == nil || k != nil {
+		// Expected ctx to cancel after timeout and no secret should be found.
+		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
+	}
+	redeemBlock.RawTx[0].Vin[1].Txid = contractTxid
+
+	// Canceled context
+	deadCtx, cancelCtx := context.WithCancel(tCtx)
+	cancelCtx()
+	_, _, err = wallet.FindRedemption(deadCtx, coinID)
+	if err == nil {
+		t.Fatalf("no error for canceled context")
+	}
+
 	// Expect FindRedemption to error because of bad input sig.
+	node.blockchainMtx.Lock()
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(randBytes(100))
-	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
-	if err != nil {
-		t.Fatalf("unexpected FindRedemption error: %v", err)
+	node.blockchainMtx.Unlock()
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	if err == nil {
+		t.Fatalf("no error for wrong redemption")
 	}
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err == nil {
-			t.Fatalf("no error for wrong redemption")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("no error for wrong redemption after 2 seconds")
-	}
+	node.blockchainMtx.Lock()
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(redemptionScript)
+	node.blockchainMtx.Unlock()
+
+	// Wrong script type for output
+	getTxRes.Hex, _ = makeTxHex(contractTxid, []dex.Bytes{otherScript, otherScript}, inputs)
+	node.rawRes[methodGetTransaction] = mustMarshal(t, getTxRes)
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	if err == nil {
+		t.Fatalf("no error for wrong script type")
+	}
+	getTxRes.Hex = txHex
+	node.rawRes[methodGetTransaction] = mustMarshal(t, getTxRes)
 
 	// Sanity check to make sure it passes again.
-	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err != nil {
-		t.Fatalf("unexpected FindRedemption error: %v", err)
-	}
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err != nil {
-			t.Fatalf("error after clearing errors: %v", frr.Err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("redemption (re-check) not found after 2 seconds")
+		t.Fatalf("error after clearing errors: %v", err)
 	}
 }
 

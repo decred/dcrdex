@@ -304,20 +304,14 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 
 	// Find the redemption
 	swapCoin := receipts[0].Coin()
-	findRedemptionResultCh, err := rig.gamma().FindRedemption(swapCoin.ID())
+	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
+	defer cancel()
+	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
-		t.Errorf("unexpected find unconfirmed redemption error: %v", err)
+		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err != nil {
-			t.Fatalf("error finding unconfirmed redemption: %v", frr.Err)
-		}
-		if !bytes.Equal(frr.Secret, secretKey1) {
-			t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", frr.Secret, secretKey1)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("findRedemption (unconfirmed): not found after 2 seconds")
+	if !bytes.Equal(checkKey, secretKey1) {
+		t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", checkKey, secretKey1)
 	}
 
 	// Mine a block and find the redemption again.
@@ -328,17 +322,9 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(1)
-	findRedemptionResultCh, err = rig.gamma().FindRedemption(swapCoin.ID())
+	_, _, err = rig.gamma().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
-		t.Errorf("unexpected find confirmed redemption error: %v", err)
-	}
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err != nil {
-			t.Fatalf("error finding confirmed redemption: %v", frr.Err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("findRedemption (confirmed): not found after 2 seconds")
+		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
 
 	// Confirmations should now be an error, since the swap output has been spent.

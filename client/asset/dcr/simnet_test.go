@@ -332,20 +332,14 @@ func runTest(t *testing.T, splitTx bool) {
 	// Find the redemption
 	swapCoin := receipts[0].Coin()
 	waitNetwork()
-	findRedemptionResultCh, err := rig.beta().FindRedemption(swapCoin.ID())
+	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
+	defer cancel()
+	_, checkKey, err := rig.beta().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
-		t.Errorf("unexpected find unconfirmed redemption error: %v", err)
+		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err != nil {
-			t.Fatalf("error finding unconfirmed redemption: %v", frr.Err)
-		}
-		if !bytes.Equal(frr.Secret, secretKey1) {
-			t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", frr.Secret, secretKey1)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("findRedemption (unconfirmed): not found after 2 seconds")
+	if !bytes.Equal(checkKey, secretKey1) {
+		t.Fatalf("findRedemption (unconfirmed) key mismatch. %x != %x", checkKey, secretKey1)
 	}
 
 	// Mine a block and find the redemption again.
@@ -356,17 +350,11 @@ func runTest(t *testing.T, splitTx bool) {
 	if !blockReported {
 		t.Fatalf("no block reported")
 	}
-	findRedemptionResultCh, err = rig.beta().FindRedemption(swapCoin.ID())
+	ctx, cancel2 := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
+	defer cancel2()
+	_, _, err = rig.beta().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
-		t.Errorf("unexpected find confirmed redemption error: %v", err)
-	}
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err != nil {
-			t.Fatalf("error finding confirmed redemption: %v", frr.Err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("findRedemption (confirmed): not found after 2 seconds")
+		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
 
 	// Confirmations should now be an error, since the swap output has been spent.

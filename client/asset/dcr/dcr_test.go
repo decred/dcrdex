@@ -85,21 +85,21 @@ func makeRawTx(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) *chai
 	return tx
 }
 
-func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) ([]byte, error) {
+func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) (string, error) {
 	msgTx := wire.NewMsgTx()
 	for _, input := range inputs {
 		prevOutHash, err := chainhash.NewHashFromStr(input.Txid)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		prevOut := wire.NewOutPoint(prevOutHash, input.Vout, input.Tree)
 		amountIn, err := dcrutil.NewAmount(input.AmountIn)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		sigScript, err := hex.DecodeString(input.ScriptSig.Hex)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		txIn := wire.NewTxIn(prevOut, int64(amountIn), sigScript)
 		msgTx.AddTxIn(txIn)
@@ -111,9 +111,13 @@ func makeTxHex(txid string, pkScripts []dex.Bytes, inputs []chainjson.Vin) ([]by
 	txBuf := bytes.NewBuffer(make([]byte, 0, msgTx.SerializeSize()))
 	err := msgTx.Serialize(txBuf)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return txBuf.Bytes(), nil
+	txHex, err := txBuf.Bytes(), nil
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(txHex), nil
 }
 
 func makeRPCVin(txid string, vout uint32, sigScript []byte) chainjson.Vin {
@@ -1397,7 +1401,7 @@ func TestFindRedemption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error generating hex for contract tx: %v", err)
 	}
-	getTxRes := &walletjson.GetTransactionResult{
+	node.walletTx = &walletjson.GetTransactionResult{
 		BlockHash:     blockHash.String(),
 		Confirmations: 1,
 		Details: []walletjson.GetTransactionDetailsResult{
@@ -1407,86 +1411,73 @@ func TestFindRedemption(t *testing.T) {
 				Vout:     contractVout,
 			},
 		},
-		Hex: hex.EncodeToString(txHex),
-	}
-	node.walletTx = getTxRes
-
-	// Begin find redemption.
-	findRedemptionResultCh, err := wallet.FindRedemption(coinID)
-	if err != nil {
-		t.Fatalf("unexpected FindRedemption error: %v", err)
-	}
-	// Expect to NOT find redemption yet.
-	select {
-	case frr := <-findRedemptionResultCh:
-		t.Fatalf("unexpected FindRedemption result %v", frr)
-	case <-time.After(2 * time.Second):
+		Hex: txHex,
 	}
 
 	// Add an intermediate block for good measure.
 	node.addRawTx(contractHeight+1, makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs))
-
-	// Expect to NOT find redemption still.
-	select {
-	case frr := <-findRedemptionResultCh:
-		t.Fatalf("unexpected FindRedemption result %v", frr)
-	case <-time.After(2 * time.Second):
-	}
 
 	// Now add the redemption.
 	inputs = append(inputs, makeRPCVin(contractTxid, contractVout, redemptionScript))
 	rawRedeem := makeRawTx(otherTxid, []dex.Bytes{otherScript}, inputs)
 	_, redeemBlock := node.addRawTx(contractHeight+2, rawRedeem)
 
-	// Expect to find redemption now.
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err != nil {
-			t.Fatalf("error finding redemption: %v", frr.Err)
-		}
-		if !bytes.Equal(frr.Secret, secret) {
-			t.Fatalf("wrong secret. expected %x, got %x", secret, frr.Secret)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("redemption not found after 2 seconds")
+	// Check find redemption result.
+	_, checkSecret, err := wallet.FindRedemption(tCtx, coinID)
+	if err != nil {
+		t.Fatalf("error finding redemption: %v", err)
+	}
+	if !bytes.Equal(checkSecret, secret) {
+		t.Fatalf("wrong secret. expected %x, got %x", secret, checkSecret)
 	}
 
 	// gettransaction error
 	node.walletTxErr = tErr
-	_, err = wallet.FindRedemption(coinID)
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
 	if err == nil {
 		t.Fatalf("no error for gettransaction rpc error")
 	}
 	node.walletTxErr = nil
 
+	// missing redemption
+	redeemBlock.RawTx[0].Vin[1].Txid = otherTxid
+	ctx, cancel := context.WithTimeout(tCtx, 2*time.Second)
+	defer cancel() // ctx should auto-cancel after 2 seconds, but this is apparently good practice to prevent leak
+	_, k, err := wallet.FindRedemption(ctx, coinID)
+	if ctx.Err() == nil || k != nil {
+		// Expected ctx to cancel after timeout and no secret should be found.
+		t.Fatalf("unexpected result for missing redemption: secret: %v, err: %v", k, err)
+	}
+	redeemBlock.RawTx[0].Vin[1].Txid = contractTxid
+
+	// Canceled context
+	deadCtx, cancelCtx := context.WithCancel(tCtx)
+	cancelCtx()
+	_, _, err = wallet.FindRedemption(deadCtx, coinID)
+	if err == nil {
+		t.Fatalf("no error for canceled context")
+	}
+
 	// Expect FindRedemption to error because of bad input sig.
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(randBytes(100))
-	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
-	if err != nil {
-		t.Fatalf("unexpected FindRedemption error: %v", err)
-	}
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err == nil {
-			t.Fatalf("no error for wrong redemption")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("no error for wrong redemption after 2 seconds")
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	if err == nil {
+		t.Fatalf("no error for wrong redemption")
 	}
 	redeemBlock.RawTx[0].Vin[1].ScriptSig.Hex = hex.EncodeToString(redemptionScript)
 
-	// Sanity check to make sure it passes again.
-	findRedemptionResultCh, err = wallet.FindRedemption(coinID)
-	if err != nil {
-		t.Fatalf("unexpected FindRedemption error: %v", err)
+	// Wrong script type for output
+	node.walletTx.Hex, _ = makeTxHex(contractTxid, []dex.Bytes{otherScript, otherScript}, inputs)
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	if err == nil {
+		t.Fatalf("no error for wrong script type")
 	}
-	select {
-	case frr := <-findRedemptionResultCh:
-		if frr.Err != nil {
-			t.Fatalf("error after clearing errors: %v", frr.Err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("redemption (re-check) not found after 2 seconds")
+	node.walletTx.Hex = txHex
+
+	// Sanity check to make sure it passes again.
+	_, _, err = wallet.FindRedemption(tCtx, coinID)
+	if err != nil {
+		t.Fatalf("error after clearing errors: %v", err)
 	}
 }
 
