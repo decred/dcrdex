@@ -840,12 +840,7 @@ match data.
 
 '''Notification route:''' <code>match_status</code>, '''originator:''' client
 
-<code>payload</code>
-{|
-! field    !! type     !! description
-|-
-| matches  || [<code>MatchRequest</code>] || an array of <code>MatchRequest</code> objects
-|}
+<code>payload</code>: an array of <code>MatchRequest</code> objects
 
 '''<code>MatchRequest</code> object'''
 
