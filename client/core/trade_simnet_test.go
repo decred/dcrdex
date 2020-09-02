@@ -932,9 +932,9 @@ func (client *tClient) updateBalances() error {
 		if err != nil {
 			return err
 		}
-		client.balances[assetID] = balances.Available + balances.Locked
-		client.log("%s available %f, locked %f", unbip(assetID),
-			fmtAmt(balances.Available), fmtAmt(balances.Locked))
+		client.balances[assetID] = balances.Available + balances.Immature + balances.Locked
+		client.log("%s available %f, immature %f, locked %f", unbip(assetID),
+			fmtAmt(balances.Available), fmtAmt(balances.Immature), fmtAmt(balances.Locked))
 	}
 	return nil
 }
@@ -959,8 +959,8 @@ func (client *tClient) assertBalanceChanges() error {
 		}
 		balanceDiff := int64(client.balances[assetID] - prevBalances[assetID])
 		if balanceDiff < minExpectedDiff || balanceDiff > maxExpectedDiff {
-			return fmt.Errorf("%s balance change not in expected range %.8f - %.8f, got %.8f",
-				unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
+			return fmt.Errorf("[client %d] %s balance change not in expected range %.8f - %.8f, got %.8f",
+				client.id, unbip(assetID), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff), fmtAmt(balanceDiff))
 		}
 		client.log("%s balance change %.8f is in expected range of %.8f - %.8f",
 			unbip(assetID), fmtAmt(balanceDiff), fmtAmt(minExpectedDiff), fmtAmt(maxExpectedDiff))

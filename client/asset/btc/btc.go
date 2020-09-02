@@ -1225,7 +1225,8 @@ func (btc *ExchangeWallet) LocktimeExpired(contract dex.Bytes) (bool, time.Time,
 // mempool tx inputs in an attempt to find the input that spends the contract
 // coin. If the contract is mined, the initial search goroutine scans every
 // input of every block starting at the block in which the contract was mined
-// up till the current best block.
+// up till the current best block, including mempool txs if redemption info is
+// not found in the searched block txs.
 // More search goroutines are started for every detected tip change, to handle
 // cases where the contract is redeemed in a transaction mined after the current
 // best block.
@@ -1251,10 +1252,12 @@ func (btc *ExchangeWallet) FindRedemption(ctx context.Context, coinID dex.Bytes)
 	// continued search for redemption on new or re-orged blocks.
 	if contractBlock == nil {
 		// Mempool contracts may only be spent by another mempool tx.
-		go btc.findRedemptionInMempool(contractOutpoint)
+		go btc.findRedemptionsInMempool([]outPoint{contractOutpoint})
 	} else {
 		// Begin searching for redemption for this contract from the block
 		// in which this contract was mined up till the current best block.
+		// Mempool txs will also be scanned if the contract's redemption is
+		// not found in the block range.
 		btc.tipMtx.RLock()
 		bestBlock := btc.currentTip
 		btc.tipMtx.RUnlock()
@@ -1332,39 +1335,49 @@ func (btc *ExchangeWallet) queueFindRedemptionRequest(contractOutpoint outPoint)
 	return resultChan, contractBlock, nil
 }
 
-// findRedemptionInMempool attempts to find spending info for the specified
-// contract by searching every input of all txs in the mempool.
-// If found, the contract is purged from the findRedemptionQueue and its secret
-// (if successfully parsed) or any error that occurs during parsing is returned
-// to the redemption finder via the registered result chan.
-func (btc *ExchangeWallet) findRedemptionInMempool(contractOutpoint outPoint) {
-	btc.log.Debugf("finding redemption for contract %s in mempool", contractOutpoint.String())
+// findRedemptionsInMempool attempts to find spending info for the specified
+// contracts by searching every input of all txs in the mempool.
+// If spending info is found for any contract, the contract is purged from the
+// findRedemptionQueue and the contract's secret (if successfully parsed) or any
+// error that occurs during parsing is returned to the redemption finder via the
+// registered result chan.
+func (btc *ExchangeWallet) findRedemptionsInMempool(contractOutpoints []outPoint) {
+	contractsCount := len(contractOutpoints)
+	btc.log.Debugf("finding redemptions for %d contracts in mempool", contractsCount)
+
+	var redemptionsFound int
+	logAbandon := func(reason string) {
+		// Do not remove the contracts from the findRedemptionQueue
+		// as they could be subsequently redeemed in some mined tx(s),
+		// which would be captured when a new tip is reported.
+		if redemptionsFound > 0 {
+			btc.log.Debugf("%d redemptions out of %d contracts found in mempool",
+				redemptionsFound, contractsCount)
+		}
+		btc.log.Errorf("abandoning mempool redemption search for %d contracts because of %s",
+			contractsCount-redemptionsFound, reason)
+	}
 
 	mempoolTxs, err := btc.node.GetRawMempool()
 	if err != nil {
-		// Do not remove the contract from the findRedemptionQueue
-		// as it could be subsequently redeemed in a mined tx, which
-		// would be captured when a new tip is reported.
-		btc.log.Debugf("error retrieving mempool transactions: %v", err)
+		logAbandon(fmt.Sprintf("error retrieving transactions: %v", err))
 		return
 	}
 
 	for _, txHash := range mempoolTxs {
 		tx, err := btc.node.GetRawTransactionVerbose(txHash)
 		if err != nil {
-			// Do not remove the contract from the findRedemptionQueue
-			// as it could be subsequently redeemed in a mined tx, which
-			// would be captured when a new tip is reported.
-			btc.log.Debugf("error finding redemption for %s in mempool: %v", contractOutpoint.String(), err)
+			logAbandon(fmt.Sprintf("getrawtxverbose error for tx hash %v: %v", txHash, err))
 			return
 		}
-		foundRedemptions := btc.findRedemptionsInTx("mempool", tx, []outPoint{contractOutpoint})
-		if foundRedemptions == 1 {
-			return // contract spender found, nothing else to do.
+		redemptionsFound += btc.findRedemptionsInTx("mempool", tx, contractOutpoints)
+		if redemptionsFound == contractsCount {
+			break
 		}
 	}
 
-	btc.log.Debugf("redemption for contract %s not found in mempool", contractOutpoint.String())
+	btc.log.Debugf("%d redemptions out of %d contracts found in mempool",
+		redemptionsFound, contractsCount)
 }
 
 // findRedemptionsInBlockRange attempts to find spending info for the specified
@@ -1373,6 +1386,8 @@ func (btc *ExchangeWallet) findRedemptionInMempool(contractOutpoint outPoint) {
 // findRedemptionQueue and the contract's secret (if successfully parsed) or any
 // error that occurs during parsing is returned to the redemption finder via the
 // registered result chan.
+// Also checks mempool for potential redemptions if spending info is not found
+// for any of these contracts in the specified block range.
 func (btc *ExchangeWallet) findRedemptionsInBlockRange(startBlock, endBlock *block, contractOutpoints []outPoint) {
 	contractsCount := len(contractOutpoints)
 	btc.log.Debugf("finding redemptions for %d contracts in blocks %d - %d",
@@ -1407,12 +1422,23 @@ rangeBlocks:
 		nextBlockHash = blk.NextHash
 	}
 
-	btc.findRedemptionMtx.RLock()
-	contractsInQueue := len(btc.findRedemptionQueue)
-	btc.findRedemptionMtx.RUnlock()
-
 	btc.log.Debugf("%d redemptions out of %d contracts found in blocks %d - %d",
-		redemptionsFound, redemptionsFound+contractsInQueue, startBlock.height, lastScannedBlockHeight)
+		redemptionsFound, contractsCount, startBlock.height, lastScannedBlockHeight)
+
+	// Search for redemptions in mempool if there are yet unredeemed
+	// contracts after searching this block range.
+	pendingContractsCount := contractsCount - redemptionsFound
+	if pendingContractsCount > 0 {
+		btc.findRedemptionMtx.RLock()
+		pendingContracts := make([]outPoint, 0, pendingContractsCount)
+		for _, contractOutpoint := range contractOutpoints {
+			if _, pending := btc.findRedemptionQueue[contractOutpoint]; pending {
+				pendingContracts = append(pendingContracts, contractOutpoint)
+			}
+		}
+		btc.findRedemptionMtx.RUnlock()
+		btc.findRedemptionsInMempool(pendingContracts)
+	}
 }
 
 // findRedemptionsInTx checks if any input of the passed tx spends any of the

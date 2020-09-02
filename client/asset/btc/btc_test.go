@@ -234,14 +234,13 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 		}
 		// block may get modified concurrently, lock mtx before reading fields.
 		c.blockchainMtx.RLock()
-		blkVerbose := &verboseBlockTxs{
+		defer c.blockchainMtx.RUnlock()
+		return json.Marshal(&verboseBlockTxs{
 			Hash:     block.Hash,
 			Height:   uint64(block.Height),
 			NextHash: block.NextHash,
 			Tx:       block.RawTx,
-		}
-		c.blockchainMtx.RUnlock()
-		return json.Marshal(blkVerbose)
+		})
 	case methodGetBlockHeader:
 		var blkHash string
 		_ = json.Unmarshal(params[0], &blkHash)
@@ -251,14 +250,13 @@ func (c *tRPCClient) RawRequest(method string, params []json.RawMessage) (json.R
 		}
 		// block may get modified concurrently, lock mtx before reading fields.
 		c.blockchainMtx.RLock()
-		blkHeader := &blockHeader{
+		defer c.blockchainMtx.RUnlock()
+		return json.Marshal(&blockHeader{
 			Hash:          block.Hash,
 			Height:        block.Height,
 			Confirmations: block.Confirmations,
 			Time:          block.Time,
-		}
-		c.blockchainMtx.RUnlock()
-		return json.Marshal(blkHeader)
+		})
 	case methodLockUnspent:
 		coins := make([]*RPCOutpoint, 0)
 		_ = json.Unmarshal(params[1], &coins)
