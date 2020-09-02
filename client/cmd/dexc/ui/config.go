@@ -71,6 +71,7 @@ type Config struct {
 	Simnet     bool   `long:"simnet" description:"use simnet"`
 	ReloadHTML bool   `long:"reload-html" description:"Reload the webserver's page template with every request. For development purposes."`
 	DebugLevel string `long:"log" description:"Logging level {trace, debug, info, warn, error, critical}"`
+	LocalLogs  bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 	Net        dex.Network
 }
 

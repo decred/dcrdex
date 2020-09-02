@@ -102,6 +102,7 @@ type flagsData struct {
 	DataDir     string `short:"b" long:"datadir" description:"Directory to store data"`
 	LogDir      string `long:"logdir" description:"Directory to log output."`
 	DebugLevel  string `short:"d" long:"debuglevel" description:"Logging level {trace, debug, info, warn, error, critical}"`
+	LocalLogs   bool   `long:"loglocal" description:"Use local time zone time stamps in log entries."`
 	MaxLogZips  int    `long:"maxlogzips" description:"The number of zipped log files created by the log rotator to be retained. Setting to 0 will keep all."`
 	ShowVersion bool   `short:"V" long:"version" description:"Display version information and exit"`
 
@@ -209,9 +210,13 @@ func supportedSubsystems() []string {
 // parseAndSetDebugLevels attempts to parse the specified debug level and set
 // the levels accordingly. An appropriate error is returned if anything is
 // invalid.
-func parseAndSetDebugLevels(debugLevel string) (*dex.LoggerMaker, error) {
+func parseAndSetDebugLevels(debugLevel string, UTC bool) (*dex.LoggerMaker, error) {
 	// Create a LoggerMaker with the level string.
-	lm, err := dex.NewLoggerMaker(logWriter{}, debugLevel)
+	var opts []dex.BackendOption
+	if UTC {
+		opts = append(opts, dex.InUTC())
+	}
+	lm, err := dex.NewLoggerMaker(logWriter{}, debugLevel, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -505,7 +510,7 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	// subsystem loggers, and set package level loggers. The generated
 	// LoggerMaker is used by other subsystems to create new loggers with the
 	// same backend.
-	logMaker, err := parseAndSetDebugLevels(cfg.DebugLevel)
+	logMaker, err := parseAndSetDebugLevels(cfg.DebugLevel, !cfg.LocalLogs)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		parser.WriteHelp(os.Stderr)
@@ -517,6 +522,10 @@ func loadConfig() (*dexConf, *procOpts, error) {
 	log.Infof("Data folder:     %s", cfg.DataDir)
 	log.Infof("Log folder:      %s", cfg.LogDir)
 	log.Infof("Config file:     %s", configFile)
+
+	if !cfg.LocalLogs {
+		log.Infof("Logging with UTC time stamps. Current local time is %v", time.Now().Local().Format("15:04:05 MST"))
+	}
 
 	var dbPort uint16
 	dbHost := cfg.PGHost

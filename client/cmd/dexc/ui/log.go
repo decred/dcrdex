@@ -38,7 +38,7 @@ func (w logWriter) Write(p []byte) (n int, err error) {
 // create roll files in the same directory. All output will also be provided to
 // the provided function. It must be called before the package-global log
 // rotator variables are used.
-func InitLogging(masterLog func([]byte), lvl string) *dex.LoggerMaker {
+func InitLogging(masterLog func([]byte), lvl string, utc bool) *dex.LoggerMaker {
 	debugLevel = lvl
 	err := os.MkdirAll(logDirectory, 0700)
 	if err != nil {
@@ -51,7 +51,7 @@ func InitLogging(masterLog func([]byte), lvl string) *dex.LoggerMaker {
 		os.Exit(1)
 	}
 	masterLogger = masterLog
-	lm, err := CustomLogMaker(nil)
+	lm, err := CustomLogMaker(nil, utc)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create custom logger: %v\n", err)
 		os.Exit(1)
@@ -62,11 +62,15 @@ func InitLogging(masterLog func([]byte), lvl string) *dex.LoggerMaker {
 
 // CustomLogger creates a new logger backend that writes to the central rotating
 // log file and also the provided function.
-func CustomLogMaker(f func(p []byte)) (*dex.LoggerMaker, error) {
+func CustomLogMaker(f func(p []byte), utc bool) (*dex.LoggerMaker, error) {
 	if f == nil {
 		f = func([]byte) {}
 	}
-	return dex.NewLoggerMaker(logWriter{f: f}, debugLevel)
+	var opts []dex.BackendOption
+	if utc {
+		opts = append(opts, dex.InUTC())
+	}
+	return dex.NewLoggerMaker(logWriter{f: f}, debugLevel, opts...)
 }
 
 // Close closes the log rotator.
@@ -76,11 +80,15 @@ func Close() {
 	}
 }
 
-// mustLogger panics if there is an error creating the LoggerMaker. mustLogger should
-// only be used during start up, and not, for example, when creating a new server from
-// the TUI.
-func mustLogger(name string, f func(p []byte)) dex.Logger {
-	lm, err := CustomLogMaker(f)
+// mustLogger panics if there is an error creating the LoggerMaker. mustLogger
+// should only be used during start up, and not, for example, when creating a
+// new server from the TUI.
+func mustLogger(name string, f func(p []byte), utc ...bool) dex.Logger {
+	var utcOpt bool
+	if len(utc) > 0 {
+		utcOpt = utc[0]
+	}
+	lm, err := CustomLogMaker(f, utcOpt)
 	if err != nil {
 		panic("error creating logger " + name)
 	}

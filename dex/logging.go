@@ -77,9 +77,15 @@ func (lggr *logger) SubLogger(name string) Logger {
 	}
 }
 
+type BackendOption = slog.BackendOption
+
+func InUTC() BackendOption {
+	return slog.WithFlags(slog.LUTC)
+}
+
 // NewLogger creates a new Logger with the given name, log level, and io.Writer.
-func NewLogger(name string, lvl slog.Level, writer io.Writer) Logger {
-	backend := slog.NewBackend(writer)
+func NewLogger(name string, lvl slog.Level, writer io.Writer, backendOpts ...BackendOption) Logger {
+	backend := slog.NewBackend(writer, backendOpts...)
 	lggr := backend.Logger(name)
 	lggr.SetLevel(lvl)
 	return &logger{
@@ -93,8 +99,8 @@ func NewLogger(name string, lvl slog.Level, writer io.Writer) Logger {
 
 // StdOutLogger creates a Logger with the provided name with lvl as the log
 // level and prints to standard out.
-func StdOutLogger(name string, lvl slog.Level) Logger {
-	backend := slog.NewBackend(os.Stdout)
+func StdOutLogger(name string, lvl slog.Level, backendOpts ...BackendOption) Logger {
+	backend := slog.NewBackend(os.Stdout, backendOpts...)
 	lggr := backend.Logger(name)
 	lggr.SetLevel(lvl)
 	return &logger{
@@ -108,9 +114,9 @@ func StdOutLogger(name string, lvl slog.Level) Logger {
 
 // NewLoggerMaker creates a new LoggerMaker from the provided io.Writer and
 // debug level string. See SetLevels for details on the debug level string.
-func NewLoggerMaker(writer io.Writer, debugLevel string) (*LoggerMaker, error) {
+func NewLoggerMaker(writer io.Writer, debugLevel string, backendOpts ...BackendOption) (*LoggerMaker, error) {
 	lm := &LoggerMaker{
-		Backend:      slog.NewBackend(writer),
+		Backend:      slog.NewBackend(writer, backendOpts...),
 		Levels:       make(map[string]slog.Level),
 		DefaultLevel: DefaultLogLevel,
 	}
