@@ -3235,50 +3235,47 @@ func Test_compareServerMatches(t *testing.T) {
 	}
 
 	exceptions := dc.compareServerMatches(srvMatches)
-	for oidExc, discrep := range exceptions {
-		t.Logf("%v: %#v\n", oidExc, discrep)
-	}
-
 	if len(exceptions) != 2 {
 		t.Fatalf("exceptions did not include both trades, just %d", len(exceptions))
 	}
 
-	if exc, ok := exceptions[oid]; !ok {
+	exc, ok := exceptions[oid]
+	if !ok {
 		t.Fatalf("exceptions did not include trade %v", oid)
-	} else {
-		if exc.trade.ID() != oid {
-			t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oid)
-		}
-		if len(exc.missing) != 1 {
-			t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
-		}
-		if exc.missing[0].id != missingID {
-			t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
-		}
-		if len(exc.extra) != 1 {
-			t.Errorf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
-		}
-		if !bytes.Equal(exc.extra[0].MatchID, extraID[:]) {
-			t.Errorf("wrong extra match, got %v, expected %v", exc.extra[0].MatchID, extraID)
-		}
+	}
+	if exc.trade.ID() != oid {
+		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oid)
+	}
+	if len(exc.missing) != 1 {
+		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+	}
+	if exc.missing[0].id != missingID {
+		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
+	}
+	if len(exc.extra) != 1 {
+		t.Errorf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
+	}
+	if !bytes.Equal(exc.extra[0].MatchID, extraID[:]) {
+		t.Errorf("wrong extra match, got %v, expected %v", exc.extra[0].MatchID, extraID)
 	}
 
-	if exc, ok := exceptions[oidMissing]; !ok {
+	exc, ok = exceptions[oidMissing]
+	if !ok {
 		t.Fatalf("exceptions did not include trade %v", oidMissing)
-	} else {
-		if exc.trade.ID() != oidMissing {
-			t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
-		}
-		if len(exc.missing) != 1 { // no matchIDMissingInactive
-			t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
-		}
-		if exc.missing[0].id != matchIDMissing {
-			t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
-		}
-		if len(exc.extra) != 0 {
-			t.Errorf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
-		}
 	}
+	if exc.trade.ID() != oidMissing {
+		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
+	}
+	if len(exc.missing) != 1 { // no matchIDMissingInactive
+		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+	}
+	if exc.missing[0].id != matchIDMissing {
+		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
+	}
+	if len(exc.extra) != 0 {
+		t.Errorf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
+	}
+
 }
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {
