@@ -749,12 +749,12 @@ func (rig *testRig) queueNotifyFee() {
 	})
 }
 
-func (rig *testRig) queueConnect(rpcErr *msgjson.Error) {
+func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
-		result := &msgjson.ConnectResult{Sig: connect.Sig}
+		result := &msgjson.ConnectResult{Sig: connect.Sig, Matches: matches}
 		var resp *msgjson.Message
 		if rpcErr != nil {
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
@@ -1215,7 +1215,7 @@ func TestRegister(t *testing.T) {
 		rig.queueRegister(regRes)
 		queueTipChange()
 		rig.queueNotifyFee()
-		rig.queueConnect(nil)
+		rig.queueConnect(nil, nil)
 	}
 
 	form := &RegisterForm{
@@ -1466,7 +1466,7 @@ func TestLogin(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, nil)
 	_, err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
@@ -1483,7 +1483,7 @@ func TestLogin(t *testing.T) {
 
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
@@ -1509,14 +1509,63 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("account authed after 'connect' error")
 	}
 
-	// Success again.
+	// Success with some matches in the response.
 	rig = newTestRig()
+	dc := rig.dc
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 3*tDCR.LotSize, tBTC.RateStep*10)
+	oid := lo.ID()
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, nil)
+	matchID := ordertest.RandomMatchID()
+	match := &matchTracker{
+		id: matchID,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{},
+		},
+	}
+	tracker.matches[matchID] = match
+	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: matchID[:]}
+
+	// Known trade, but missing match
+	missingID := ordertest.RandomMatchID()
+	missingMatch := &matchTracker{
+		id: missingID,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{},
+		},
+	}
+	tracker.matches[missingID] = missingMatch
+
+	// extra match
+	extraID := ordertest.RandomMatchID()
+	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
+
+	dc.trades = map[order.OrderID]*trackedTrade{
+		oid: tracker,
+	}
+
 	tCore = rig.core
 	rig.acct.markFeePaid()
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch})
 	_, err = tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
+	}
+
+	if tracker.matches[missingID].failErr == nil {
+		t.Errorf("failErr not set for missing match tracker")
+	}
+	if !tracker.matches[missingID].MetaData.Proof.IsRevoked {
+		t.Errorf("IsRevoked not true for missing match tracker")
+	}
+	if tracker.matches[matchID].failErr != nil {
+		t.Errorf("failErr set for non-missing match tracker")
+	}
+	if tracker.matches[matchID].MetaData.Proof.IsRevoked {
+		t.Errorf("IsRevoked true for non-missing match tracker")
 	}
 }
 
@@ -1527,11 +1576,11 @@ func TestLoginAccountNotFoundError(t *testing.T) {
 
 	expectedErrorMessage := "test account not found error"
 	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage)
-	rig.queueConnect(accountNotFoundError)
+	rig.queueConnect(accountNotFoundError, nil)
 
 	wallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, nil)
 
 	result, err := tCore.Login(tPW)
 	if err != nil {
@@ -1548,7 +1597,7 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.markFeePaid()
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, nil)
 
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
 
@@ -1567,7 +1616,7 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 	expectedErrorMessage := "test account not found error"
-	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage))
+	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage), nil)
 
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
 
@@ -3116,7 +3165,7 @@ func Test_compareServerMatches(t *testing.T) {
 	}
 	mkt := dc.market(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, notify)
+		rig.db, rig.queue, nil, nil, nil)
 	metaMatch := db.MetaMatch{
 		MetaData: &db.MatchMetaData{},
 		Match:    &order.UserMatch{},
@@ -3140,6 +3189,7 @@ func Test_compareServerMatches(t *testing.T) {
 	}
 	tracker.matches[missingID] = missingMatch
 
+	// extra match
 	extraID := ordertest.RandomMatchID()
 	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
 
