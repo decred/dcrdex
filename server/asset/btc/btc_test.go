@@ -1228,6 +1228,64 @@ func TestReorg(t *testing.T) {
 			test(a, b)
 		}
 	}
+
+	// Create a transaction at the tip, then orphan the block and move the
+	// transaction to mempool.
+	reset()
+	setChain(chainA)
+	tipHeight := btc.blockCache.tipHeight()
+	txHash := randomHash()
+	tip, _ := btc.blockCache.atHeight(tipHeight)
+	msg := testMakeMsgTx(false)
+	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
+	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+	utxo, err := btc.utxo(txHash, msg.vout, nil)
+	if err != nil {
+		t.Fatalf("utxo error 1: %v", err)
+	}
+	confs, err := utxo.Confirmations()
+	if err != nil {
+		t.Fatalf("Confirmations error: %v", err)
+	}
+	if confs != 1 {
+		t.Fatalf("wrong number of confirmations. expected 1, got %d", confs)
+	}
+
+	// Orphan the block and move the transaction to mempool.
+	btc.blockCache.reorg(int64(ancestorHeight))
+	testAddTxOut(msg.tx, 0, txHash, nil, 0, 0)
+	confs, err = utxo.Confirmations()
+	if err != nil {
+		t.Fatalf("Confirmations error after reorg: %v", err)
+	}
+	if confs != 0 {
+		t.Fatalf("Expected zero confirmations after reorg, found %d", confs)
+	}
+
+	// Start over, but put it in a lower block instead.
+	reset()
+	setChain(chainA)
+	tip, _ = btc.blockCache.atHeight(tipHeight)
+	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
+	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+	utxo, err = btc.utxo(txHash, msg.vout, nil)
+	if err != nil {
+		t.Fatalf("utxo error 2: %v", err)
+	}
+
+	// Reorg and add a single block with the transaction.
+	btc.blockCache.reorg(int64(ancestorHeight))
+	newBlockHash := randomHash()
+	testAddTxOut(msg.tx, 0, txHash, newBlockHash, int64(ancestorHeight+1), 1)
+	testAddBlockVerbose(newBlockHash, ancestorHash, 1, ancestorHeight+1)
+	time.Sleep(blockPollDelay)
+	confs, err = utxo.Confirmations()
+	if err != nil {
+		t.Fatalf("Confirmations error after reorg to lower block: %v", err)
+	}
+	if confs != 1 {
+		t.Fatalf("Expected zero confirmations after reorg to lower block, found %d", confs)
+	}
 }
 
 // TestAuxiliary checks the UTXO convenience functions like TxHash, Vout, and

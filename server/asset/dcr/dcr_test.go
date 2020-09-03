@@ -1153,13 +1153,13 @@ func TestReorg(t *testing.T) {
 	defer shutdown()
 
 	// A general reset function that clears the testBlockchain and the blockCache.
-	tipHeight := 10
+	var tipHeight uint32 = 10
 	var tipHash *chainhash.Hash
 	reset := func() {
 		cleanTestChain()
 		dcr.blockCache = newBlockCache(dcr.log)
-		for h := 0; h <= tipHeight; h++ {
-			blockHash := testAddBlockVerbose(nil, int64(tipHeight-h+1), uint32(h), 1)
+		for h := uint32(0); h <= tipHeight; h++ {
+			blockHash := testAddBlockVerbose(nil, int64(tipHeight-h+1), h, 1)
 			// force dcr to get and cache the block
 			_, err := dcr.getDcrBlock(blockHash)
 			if err != nil {
@@ -1167,7 +1167,7 @@ func TestReorg(t *testing.T) {
 			}
 		}
 		// Check that the tip is at the expected height and the block is mainchain.
-		block, found := dcr.blockCache.mainchain[uint32(tipHeight)]
+		block, found := dcr.blockCache.atHeight(tipHeight)
 		if !found {
 			t.Fatalf("tip block not found in cache mainchain")
 		}
@@ -1181,7 +1181,7 @@ func TestReorg(t *testing.T) {
 		tipHash = &block.hash
 	}
 
-	ensureOrphaned := func(hash *chainhash.Hash, height int) {
+	ensureOrphaned := func(hash *chainhash.Hash, height uint32) {
 		// Make sure mainchain is empty at the tip height.
 		block, found := dcr.blockCache.block(hash)
 		if !found {
@@ -1195,12 +1195,12 @@ func TestReorg(t *testing.T) {
 	// A one-block reorg.
 	reset()
 	// Add a replacement blocks
-	newHash := testAddBlockVerbose(nil, 1, uint32(tipHeight), 1)
+	newHash := testAddBlockVerbose(nil, 1, tipHeight, 1)
 	// Passing the hash to anyQ triggers the reorganization.
 	dcr.blockCache.reorg(int64(tipHeight))
 	dcr.blockCache.add(testChain.blocks[*newHash])
 	ensureOrphaned(tipHash, tipHeight)
-	newTip, found := dcr.blockCache.mainchain[uint32(tipHeight)]
+	newTip, found := dcr.blockCache.atHeight(tipHeight)
 	if !found {
 		t.Fatalf("3-deep reorg-causing new tip block not found on mainchain")
 	}
@@ -1210,28 +1210,85 @@ func TestReorg(t *testing.T) {
 
 	// A 3-block reorg
 	reset()
-	tip, found1 := dcr.blockCache.mainchain[uint32(tipHeight)]
-	oneDeep, found2 := dcr.blockCache.mainchain[uint32(tipHeight-1)]
-	twoDeep, found3 := dcr.blockCache.mainchain[uint32(tipHeight-2)]
+	tip, found1 := dcr.blockCache.atHeight(tipHeight)
+	oneDeep, found2 := dcr.blockCache.atHeight(tipHeight - 1)
+	twoDeep, found3 := dcr.blockCache.atHeight(tipHeight - 2)
 	if !found1 || !found2 || !found3 {
 		t.Fatalf("not all block found for 3-block reorg (%t, %t, %t)", found1, found2, found3)
 	}
-	newHash = testAddBlockVerbose(nil, 1, uint32(tipHeight-2), 1)
+	newHash = testAddBlockVerbose(nil, 1, tipHeight-2, 1)
 	dcr.blockCache.reorg(int64(tipHeight - 2))
 	dcr.blockCache.add(testChain.blocks[*newHash])
-	ensureOrphaned(&tip.hash, int(tip.height))
-	ensureOrphaned(&oneDeep.hash, int(tip.height))
-	ensureOrphaned(&twoDeep.hash, int(tip.height))
+	ensureOrphaned(&tip.hash, tip.height)
+	ensureOrphaned(&oneDeep.hash, tip.height)
+	ensureOrphaned(&twoDeep.hash, tip.height)
 	newHeight := int64(dcr.blockCache.tipHeight())
 	if newHeight != int64(twoDeep.height) {
 		t.Fatalf("from tip height after 3-block reorg. expected %d, saw %d", twoDeep.height-1, newHeight)
 	}
-	newTip, found = dcr.blockCache.mainchain[uint32(newHeight)]
+	newTip, found = dcr.blockCache.atHeight(uint32(newHeight))
 	if !found {
 		t.Fatalf("3-deep reorg-causing new tip block not found on mainchain")
 	}
 	if newTip.hash != *newHash {
 		t.Fatalf("tip hash mismatch after 3-block reorg")
+	}
+
+	// Create a transaction at the tip, then orphan the block and move the
+	// transaction to mempool.
+	reset()
+	txHash := randomHash()
+	tip, _ = dcr.blockCache.atHeight(tipHeight)
+	msg := testMsgTxRegular(dcrec.STEcdsaSecp256k1)
+
+	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+
+	utxo, err := dcr.utxo(txHash, msg.vout, nil)
+	if err != nil {
+		t.Fatalf("utxo error: %v", err)
+	}
+	confs, err := utxo.Confirmations()
+	if err != nil {
+		t.Fatalf("Confirmations error: %v", err)
+	}
+	if confs != 1 {
+		t.Fatalf("wrong number of confirmations. expected 1, got %d", confs)
+	}
+
+	// Orphan the block and move the transaction to mempool.
+	dcr.blockCache.reorg(int64(tipHeight - 2))
+	testAddTxOut(msg.tx, 0, txHash, nil, 0, 0)
+	confs, err = utxo.Confirmations()
+	if err != nil {
+		t.Fatalf("Confirmations error after reorg: %v", err)
+	}
+	if confs != 0 {
+		t.Fatalf("Expected zero confirmations after reorg, found %d", confs)
+	}
+
+	// Start over, but put it in a lower block instead.
+	reset()
+	tip, _ = dcr.blockCache.atHeight(tipHeight)
+	testAddBlockVerbose(&tip.hash, 1, tipHeight, 1)
+	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+	utxo, err = dcr.utxo(txHash, msg.vout, nil)
+	if err != nil {
+		t.Fatalf("utxo error 2: %v", err)
+	}
+
+	// Reorg and add a single block with the transaction.
+	var reorgHeight uint32 = 5
+	dcr.blockCache.reorg(int64(reorgHeight))
+	newBlockHash := randomHash()
+	testAddTxOut(msg.tx, 0, txHash, newBlockHash, int64(reorgHeight+1), 1)
+	testAddBlockVerbose(newBlockHash, 1, reorgHeight+1, 1)
+	dcr.getDcrBlock(newBlockHash) // Force blockCache update
+	confs, err = utxo.Confirmations()
+	if err != nil {
+		t.Fatalf("Confirmations error after reorg to lower block: %v", err)
+	}
+	if confs != 1 {
+		t.Fatalf("Expected zero confirmations after reorg to lower block, found %d", confs)
 	}
 }
 
