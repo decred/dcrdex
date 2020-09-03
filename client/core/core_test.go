@@ -3089,83 +3089,147 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 }
 
-// func TestReadConnectMatches(t *testing.T) {
-// 	rig := newTestRig()
-// 	preImg := newPreimage()
-// 	dc := rig.dc
+func Test_compareServerMatches(t *testing.T) {
+	rig := newTestRig()
+	preImg := newPreimage()
+	dc := rig.dc
 
-// 	notes := make(map[string][]Notification)
-// 	notify := func(note Notification) {
-// 		notes[note.Type()] = append(notes[note.Type()], note)
-// 	}
+	notes := make(map[string][]Notification)
+	notify := func(note Notification) {
+		notes[note.Type()] = append(notes[note.Type()], note)
+	}
 
-// 	lo := &order.LimitOrder{
-// 		P: order.Prefix{
-// 			// 	OrderType:  order.LimitOrderType,
-// 			// 	BaseAsset:  tDCR.ID,
-// 			// 	QuoteAsset: tBTC.ID,
-// 			// 	ClientTime: time.Now(),
-// 			ServerTime: time.Now(),
-// 			// 	Commit:     preImg.Commit(),
-// 		},
-// 	}
-// 	oid := lo.ID()
-// 	dbOrder := &db.MetaOrder{
-// 		MetaData: &db.OrderMetaData{},
-// 		Order:    lo,
-// 	}
-// 	mkt := dc.market(tDcrBtcMktName)
-// 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-// 		rig.db, rig.queue, nil, nil, notify)
-// 	metaMatch := db.MetaMatch{
-// 		MetaData: &db.MatchMetaData{},
-// 		Match:    &order.UserMatch{},
-// 	}
+	lo := &order.LimitOrder{
+		P: order.Prefix{
+			// 	OrderType:  order.LimitOrderType,
+			// 	BaseAsset:  tDCR.ID,
+			// 	QuoteAsset: tBTC.ID,
+			// 	ClientTime: time.Now(),
+			ServerTime: time.Now(),
+			// 	Commit:     preImg.Commit(),
+		},
+	}
+	oid := lo.ID()
+	dbOrder := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{},
+		Order:    lo,
+	}
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, notify)
+	metaMatch := db.MetaMatch{
+		MetaData: &db.MatchMetaData{},
+		Match:    &order.UserMatch{},
+	}
 
-// 	// Store a match
-// 	knownID := ordertest.RandomMatchID()
-// 	knownMatch := &matchTracker{
-// 		id:              knownID,
-// 		MetaMatch:       metaMatch,
-// 		counterConfirms: -1,
-// 	}
-// 	tracker.matches[knownID] = knownMatch
-// 	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: knownID[:]}
+	// Known trade, and known match
+	knownID := ordertest.RandomMatchID()
+	knownMatch := &matchTracker{
+		id:              knownID,
+		MetaMatch:       metaMatch,
+		counterConfirms: -1,
+	}
+	tracker.matches[knownID] = knownMatch
+	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: knownID[:]}
 
-// 	missingID := ordertest.RandomMatchID()
-// 	missingMatch := &matchTracker{
-// 		id:        missingID,
-// 		MetaMatch: metaMatch,
-// 	}
-// 	tracker.matches[missingID] = missingMatch
+	// Known trade, but missing match
+	missingID := ordertest.RandomMatchID()
+	missingMatch := &matchTracker{
+		id:        missingID,
+		MetaMatch: metaMatch,
+	}
+	tracker.matches[missingID] = missingMatch
 
-// 	extraID := ordertest.RandomMatchID()
-// 	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
+	extraID := ordertest.RandomMatchID()
+	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
 
-// 	matches := []*msgjson.Match{knownMsgMatch, extraMsgMatch}
-// 	tracker.readConnectMatches(matches)
+	// Entirely missing order
+	loMissing, dbOrderMissing, preImgMissing, _ := makeLimitOrder(dc, true, 3*tDCR.LotSize, tBTC.RateStep*10)
+	trackerMissing := newTrackedTrade(dbOrderMissing, preImgMissing, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, notify)
+	oidMissing := loMissing.ID()
+	// an active match for the missing trade
+	matchIDMissing := ordertest.RandomMatchID()
+	missingTradeMatch := &matchTracker{
+		id: matchIDMissing,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{},
+		},
+		counterConfirms: -1,
+	}
+	trackerMissing.matches[knownID] = missingTradeMatch
+	// an inactive match for the missing trade
+	matchIDMissingInactive := ordertest.RandomMatchID()
+	missingTradeMatchInactive := &matchTracker{
+		id: matchIDMissingInactive,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{Status: order.MatchComplete},
+			Match:    &order.UserMatch{Status: order.MatchComplete},
+		},
+		counterConfirms: 1,
+	}
+	trackerMissing.matches[matchIDMissingInactive] = missingTradeMatchInactive
 
-// 	if knownMatch.failErr != nil {
-// 		t.Fatalf("error set for known and reported match")
-// 	}
+	srvMatches := map[order.OrderID]*serverMatches{
+		oid: {
+			tracker:    tracker,
+			msgMatches: []*msgjson.Match{knownMsgMatch, extraMsgMatch},
+		},
+		// oidMissing not included (missing!)
+	}
 
-// 	if missingMatch.failErr == nil {
-// 		t.Fatalf("error not set for missing match")
-// 	}
+	dc.trades = map[order.OrderID]*trackedTrade{
+		oid:        tracker,
+		oidMissing: trackerMissing,
+	}
 
-// 	if len(notes["order"]) != 2 {
-// 		t.Fatalf("expected 2 core 'order'-type notifications, got %d", len(notes["order"]))
-// 	}
+	exceptions := dc.compareServerMatches(srvMatches)
+	for oidExc, discrep := range exceptions {
+		t.Logf("%v: %#v\n", oidExc, discrep)
+	}
 
-// 	if notes["order"][0].Subject() != "Missing matches" {
-// 		t.Fatalf("no core notification sent for missing matches")
-// 	}
+	if len(exceptions) != 2 {
+		t.Fatalf("exceptions did not include both trades, just %d", len(exceptions))
+	}
 
-// 	if notes["order"][1].Subject() != "Match resolution error" {
-// 		t.Fatalf("no core notification sent for unknown matches")
-// 	}
+	if exc, ok := exceptions[oid]; !ok {
+		t.Fatalf("exceptions did not include trade %v", oid)
+	} else {
+		if exc.trade.ID() != oid {
+			t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oid)
+		}
+		if len(exc.missing) != 1 {
+			t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+		}
+		if exc.missing[0].id != missingID {
+			t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
+		}
+		if len(exc.extra) != 1 {
+			t.Errorf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
+		}
+		if !bytes.Equal(exc.extra[0].MatchID, extraID[:]) {
+			t.Errorf("wrong extra match, got %v, expected %v", exc.extra[0].MatchID, extraID)
+		}
+	}
 
-// }
+	if exc, ok := exceptions[oidMissing]; !ok {
+		t.Fatalf("exceptions did not include trade %v", oidMissing)
+	} else {
+		if exc.trade.ID() != oidMissing {
+			t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
+		}
+		if len(exc.missing) != 1 { // no matchIDMissingInactive
+			t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+		}
+		if exc.missing[0].id != matchIDMissing {
+			t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
+		}
+		if len(exc.extra) != 0 {
+			t.Errorf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
+		}
+	}
+}
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {
 	tif := order.ImmediateTiF
