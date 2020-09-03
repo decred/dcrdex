@@ -104,20 +104,20 @@ type Wallet interface {
 	// lock. For example, in Bitcoin the median of the last 11 blocks must be
 	// past the expiry time, not the current time.
 	LocktimeExpired(contract dex.Bytes) (bool, time.Time, error)
-	// FindRedemption should attempt to find the input that spends the specified
-	// coin, and return the secret key if it does.
+	// FindRedemption watches for the input that spends the specified contract
+	// coin, and returns the spending input and the contract's secret key when
+	// it finds a spender.
+	// For typical blockchains, every input of every block tx (starting at the
+	// contract block) will need to be scanned until a spending input is found.
 	//
-	// NOTE: FindRedemption is necessary to deal with the case of a maker
-	// redeeming but not forwarding their redemption information. The DEX does not
-	// monitor for this case. While it will result in the counter-party being
-	// penalized, the input still needs to be found so the swap can be completed.
-	// For typical blockchains, every input of every block starting at the
-	// contract block will need to be scanned until the spending input is found.
-	// This could potentially be an expensive operation if performed long after
-	// the swap is broadcast. Realistically, though, the taker should start
-	// looking for the maker's redemption beginning at swapconf confirmations
-	// regardless of whether the server sends the 'redemption' message or not.
-	FindRedemption(ctx context.Context, coinID dex.Bytes) (dex.Bytes, error)
+	// FindRedemption is necessary to deal with the case of a maker redeeming but
+	// not forwarding their redemption information. The DEX does not monitor for
+	// this case. While it will result in the counter-party being penalized, the
+	// input still needs to be found so the swap can be completed.
+	//
+	// NOTE: This could potentially be a long and expensive operation if performed
+	// long after the swap is broadcast; might be better executed from a goroutine.
+	FindRedemption(ctx context.Context, coinID dex.Bytes) (redemptionCoin, secret dex.Bytes, err error)
 	// Refund refunds a contract. This can only be used after the time lock has
 	// expired AND if the contract has not been redeemed/refunded.
 	// NOTE: The contract cannot be retrieved from the unspent coin info as the

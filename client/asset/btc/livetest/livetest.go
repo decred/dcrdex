@@ -306,7 +306,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	swapCoin := receipts[0].Coin()
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel()
-	checkKey, err := rig.gamma().FindRedemption(ctx, swapCoin.ID())
+	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -322,7 +322,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(1)
-	_, err = rig.gamma().FindRedemption(ctx, swapCoin.ID())
+	_, _, err = rig.gamma().FindRedemption(ctx, swapCoin.ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}

@@ -64,7 +64,7 @@ type GetTransactionResult struct {
 	Time           uint64             `json:"time"`
 	TimeReceived   uint64             `json:"timereceived"`
 	BipReplaceable string             `json:"bip125-replaceable"`
-	Hex            dex.Bytes          `json:"dex"`
+	Hex            dex.Bytes          `json:"hex"`
 	Details        []*WalletTxDetails `json:"details"`
 }
 
