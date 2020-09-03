@@ -742,7 +742,7 @@ func (t *trackedTrade) isRefundable(match *matchTracker) bool {
 
 	// For the first check or hourly tick, log the time until expiration.
 	expiresIn := time.Until(contractExpiry) // may be negative
-	if match.lastExpireDur-expiresIn > time.Hour {
+	if match.lastExpireDur-expiresIn < time.Hour {
 		// Logged less than an hour ago.
 		return false
 	}
