@@ -299,7 +299,7 @@ func TestWsConn(t *testing.T) {
 		runtime.Gosched()
 
 		// Wait for a reconnection.
-		for !wsc.isConnected() {
+		for wsc.IsDown() {
 			time.Sleep(time.Millisecond * 10)
 			continue
 		}

@@ -317,7 +317,7 @@ func (c *WSLink) outHandler(ctx context.Context) {
 			}
 		}
 		// Attempt sending all queued outgoing messages.
-		log.Infof("Sending %d queued outgoing messages for %v.", len(outQueue), c.ip)
+		log.Tracef("Sending %d queued outgoing messages for %v.", len(outQueue), c.ip)
 		for _, sd := range outQueue {
 			write(sd)
 		}

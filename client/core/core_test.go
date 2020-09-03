@@ -233,6 +233,9 @@ func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson
 	return conn.reqErr
 }
 func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
+func (conn *TWebsocket) IsDown() bool {
+	return false
+}
 func (conn *TWebsocket) Connect(context.Context) (*sync.WaitGroup, error) {
 	return &sync.WaitGroup{}, conn.connectErr
 }
