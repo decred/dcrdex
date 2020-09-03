@@ -563,14 +563,17 @@ func (t *trackedTrade) isActive() bool {
 	defer t.mtx.RUnlock()
 
 	// Status of the order itself.
-	if t.metaData.Status == order.OrderStatusBooked || t.metaData.Status == order.OrderStatusEpoch {
+	if t.metaData.Status == order.OrderStatusBooked ||
+		t.metaData.Status == order.OrderStatusEpoch {
 		return true
 	}
 
 	// Status of all matches for the order.
 	for _, match := range t.matches {
-		log.Tracef("Checking match %v (%v) in status %v. Order: %v, Refund coin: %v, Script: %x", match.id,
-			match.Match.Side, match.MetaData.Status, t.ID(), match.MetaData.Proof.RefundCoin, match.MetaData.Proof.Script)
+		log.Tracef("Checking match %v (%v) in status %v. "+
+			"Order: %v, Refund coin: %v, Script: %x", match.id,
+			match.Match.Side, match.MetaData.Status, t.ID(),
+			match.MetaData.Proof.RefundCoin, match.MetaData.Proof.Script)
 		if match.isActive() {
 			return true
 		}

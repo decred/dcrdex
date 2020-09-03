@@ -490,7 +490,7 @@ func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatche
 	return errs.ifAny()
 }
 
-type tradeTrackers struct {
+type matchDiscreps struct {
 	trade   *trackedTrade
 	missing []*matchTracker
 	extra   []*msgjson.Match
@@ -502,8 +502,8 @@ type tradeTrackers struct {
 // Reported matches with missing trackers are already checked by parseMatches,
 // but we also must check for incomplete matches that the server is not
 // reporting.
-func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serverMatches) (exceptions map[order.OrderID]*tradeTrackers) {
-	exceptions = make(map[order.OrderID]*tradeTrackers)
+func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serverMatches) (exceptions map[order.OrderID]*matchDiscreps) {
+	exceptions = make(map[order.OrderID]*matchDiscreps)
 
 	// Identify extra matches named by the server response that we do not
 	// recognize.
@@ -519,7 +519,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 		}
 		match.tracker.mtx.RUnlock()
 		if len(extra) > 0 {
-			exceptions[match.tracker.ID()] = &tradeTrackers{
+			exceptions[match.tracker.ID()] = &matchDiscreps{
 				trade: match.tracker,
 				extra: extra,
 			}
@@ -539,7 +539,7 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 		if tt, found := exceptions[trade.ID()]; found {
 			tt.missing = missing
 		} else {
-			exceptions[trade.ID()] = &tradeTrackers{
+			exceptions[trade.ID()] = &matchDiscreps{
 				trade:   trade,
 				missing: missing,
 			}
@@ -550,24 +550,27 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
 	for oid, trade := range dc.trades {
-		if !trade.isActive() {
-			continue // all of this trade's matches are inactive
+		activeMatches := trade.activeMatches()
+		if len(activeMatches) == 0 {
+			continue
 		}
 		tradeMatches, found := srvMatches[oid]
 		if !found {
 			// ALL of this trade's active matches are missing.
-			setMissing(trade, trade.activeMatches())
+			setMissing(trade, activeMatches)
 			continue // check next local trade
 		}
 		// Check this local trade's active matches against server's reported
 		// matches for this trade.
 		var missing []*matchTracker
-		for _, match := range trade.activeMatches() { // each local match
+		for _, match := range activeMatches { // each local match
 			if !in(tradeMatches.msgMatches, match.id[:]) { // against reported matches
 				missing = append(missing, match)
 			}
 		}
-		setMissing(trade, missing)
+		if len(missing) > 0 {
+			setMissing(trade, missing)
+		}
 	}
 
 	return
