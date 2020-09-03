@@ -223,10 +223,13 @@ func (dc *dexConnection) hasActiveOrders() bool {
 func (dc *dexConnection) findOrder(oid order.OrderID) (tracker *trackedTrade, preImg order.Preimage, isCancel bool) {
 	dc.tradeMtx.RLock()
 	defer dc.tradeMtx.RUnlock()
+	// Try to find the order as a trade.
+	if tracker, found := dc.trades[oid]; found {
+		return tracker, tracker.preImg, false
+	}
+	// Search the cancel order IDs.
 	for _, tracker := range dc.trades {
-		if tracker.ID() == oid {
-			return tracker, tracker.preImg, false
-		} else if tracker.cancel != nil && tracker.cancel.ID() == oid {
+		if tracker.cancel != nil && tracker.cancel.ID() == oid {
 			return tracker, tracker.cancel.preImg, true
 		}
 	}
