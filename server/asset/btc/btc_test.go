@@ -1233,13 +1233,13 @@ func TestReorg(t *testing.T) {
 	setChain(chainA)
 	tipHeight := btc.blockCache.tipHeight()
 	txHash := randomHash()
-	tip := btc.blockCache.mainchain[uint32(tipHeight)]
+	tip, _ := btc.blockCache.atHeight(tipHeight)
 	msg := testMakeMsgTx(false)
-	testAddBlockVerbose(&tip.hash, nil, 1, uint32(tipHeight))
+	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
 	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
 	utxo, err := btc.utxo(txHash, msg.vout, nil)
 	if err != nil {
-		t.Fatalf("utxo error: %v", err)
+		t.Fatalf("utxo error 1: %v", err)
 	}
 	confs, err := utxo.Confirmations()
 	if err != nil {
@@ -1258,6 +1258,31 @@ func TestReorg(t *testing.T) {
 	}
 	if confs != 0 {
 		t.Fatalf("Expected zero confirmations after reorg, found %d", confs)
+	}
+
+	// Start over, but put it in a lower block instead.
+	reset()
+	setChain(chainA)
+	tip, _ = btc.blockCache.atHeight(tipHeight)
+	testAddBlockVerbose(&tip.hash, nil, 1, tipHeight)
+	testAddTxOut(msg.tx, 0, txHash, &tip.hash, int64(tipHeight), 1)
+	utxo, err = btc.utxo(txHash, msg.vout, nil)
+	if err != nil {
+		t.Fatalf("utxo error 2: %v", err)
+	}
+
+	// Reorg and add a single block with the transaction.
+	btc.blockCache.reorg(int64(ancestorHeight))
+	newBlockHash := randomHash()
+	testAddTxOut(msg.tx, 0, txHash, newBlockHash, int64(ancestorHeight+1), 1)
+	testAddBlockVerbose(newBlockHash, ancestorHash, 1, ancestorHeight+1)
+	time.Sleep(blockPollDelay)
+	confs, err = utxo.Confirmations()
+	if err != nil {
+		t.Fatalf("Confirmations error after reorg to lower block: %v", err)
+	}
+	if confs != 1 {
+		t.Fatalf("Expected zero confirmations after reorg to lower block, found %d", confs)
 	}
 }
 
