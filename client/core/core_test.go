@@ -749,12 +749,12 @@ func (rig *testRig) queueNotifyFee() {
 	})
 }
 
-func (rig *testRig) queueConnect(rpcErr *msgjson.Error) {
+func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
-		result := &msgjson.ConnectResult{Sig: connect.Sig}
+		result := &msgjson.ConnectResult{Sig: connect.Sig, Matches: matches}
 		var resp *msgjson.Message
 		if rpcErr != nil {
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
@@ -1215,7 +1215,7 @@ func TestRegister(t *testing.T) {
 		rig.queueRegister(regRes)
 		queueTipChange()
 		rig.queueNotifyFee()
-		rig.queueConnect(nil)
+		rig.queueConnect(nil, nil)
 	}
 
 	form := &RegisterForm{
@@ -1466,7 +1466,7 @@ func TestLogin(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, nil)
 	_, err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
@@ -1483,7 +1483,7 @@ func TestLogin(t *testing.T) {
 
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
@@ -1509,14 +1509,63 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("account authed after 'connect' error")
 	}
 
-	// Success again.
+	// Success with some matches in the response.
 	rig = newTestRig()
+	dc := rig.dc
+	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 3*tDCR.LotSize, tBTC.RateStep*10)
+	oid := lo.ID()
+	mkt := dc.market(tDcrBtcMktName)
+	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, nil)
+	matchID := ordertest.RandomMatchID()
+	match := &matchTracker{
+		id: matchID,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{},
+		},
+	}
+	tracker.matches[matchID] = match
+	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: matchID[:]}
+
+	// Known trade, but missing match
+	missingID := ordertest.RandomMatchID()
+	missingMatch := &matchTracker{
+		id: missingID,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{},
+		},
+	}
+	tracker.matches[missingID] = missingMatch
+
+	// extra match
+	extraID := ordertest.RandomMatchID()
+	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
+
+	dc.trades = map[order.OrderID]*trackedTrade{
+		oid: tracker,
+	}
+
 	tCore = rig.core
 	rig.acct.markFeePaid()
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch})
 	_, err = tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
+	}
+
+	if tracker.matches[missingID].failErr == nil {
+		t.Errorf("failErr not set for missing match tracker")
+	}
+	if !tracker.matches[missingID].MetaData.Proof.IsRevoked {
+		t.Errorf("IsRevoked not true for missing match tracker")
+	}
+	if tracker.matches[matchID].failErr != nil {
+		t.Errorf("failErr set for non-missing match tracker")
+	}
+	if tracker.matches[matchID].MetaData.Proof.IsRevoked {
+		t.Errorf("IsRevoked true for non-missing match tracker")
 	}
 }
 
@@ -1527,11 +1576,11 @@ func TestLoginAccountNotFoundError(t *testing.T) {
 
 	expectedErrorMessage := "test account not found error"
 	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage)
-	rig.queueConnect(accountNotFoundError)
+	rig.queueConnect(accountNotFoundError, nil)
 
 	wallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, nil)
 
 	result, err := tCore.Login(tPW)
 	if err != nil {
@@ -1548,7 +1597,7 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.markFeePaid()
-	rig.queueConnect(nil)
+	rig.queueConnect(nil, nil)
 
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
 
@@ -1567,7 +1616,7 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 	expectedErrorMessage := "test account not found error"
-	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage))
+	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage), nil)
 
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
 
@@ -3089,7 +3138,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 }
 
-func TestReadConnectMatches(t *testing.T) {
+func Test_compareServerMatches(t *testing.T) {
 	rig := newTestRig()
 	preImg := newPreimage()
 	dc := rig.dc
@@ -3116,13 +3165,13 @@ func TestReadConnectMatches(t *testing.T) {
 	}
 	mkt := dc.market(tDcrBtcMktName)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, notify)
+		rig.db, rig.queue, nil, nil, nil)
 	metaMatch := db.MetaMatch{
 		MetaData: &db.MatchMetaData{},
 		Match:    &order.UserMatch{},
 	}
 
-	// Store a match
+	// Known trade, and known match
 	knownID := ordertest.RandomMatchID()
 	knownMatch := &matchTracker{
 		id:              knownID,
@@ -3132,6 +3181,7 @@ func TestReadConnectMatches(t *testing.T) {
 	tracker.matches[knownID] = knownMatch
 	knownMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: knownID[:]}
 
+	// Known trade, but missing match
 	missingID := ordertest.RandomMatchID()
 	missingMatch := &matchTracker{
 		id:        missingID,
@@ -3139,30 +3189,91 @@ func TestReadConnectMatches(t *testing.T) {
 	}
 	tracker.matches[missingID] = missingMatch
 
+	// extra match
 	extraID := ordertest.RandomMatchID()
 	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
 
-	matches := []*msgjson.Match{knownMsgMatch, extraMsgMatch}
-	tracker.readConnectMatches(matches)
+	// Entirely missing order
+	loMissing, dbOrderMissing, preImgMissing, _ := makeLimitOrder(dc, true, 3*tDCR.LotSize, tBTC.RateStep*10)
+	trackerMissing := newTrackedTrade(dbOrderMissing, preImgMissing, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, nil, nil, notify)
+	oidMissing := loMissing.ID()
+	// an active match for the missing trade
+	matchIDMissing := ordertest.RandomMatchID()
+	missingTradeMatch := &matchTracker{
+		id: matchIDMissing,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{},
+			Match:    &order.UserMatch{},
+		},
+		counterConfirms: -1,
+	}
+	trackerMissing.matches[knownID] = missingTradeMatch
+	// an inactive match for the missing trade
+	matchIDMissingInactive := ordertest.RandomMatchID()
+	missingTradeMatchInactive := &matchTracker{
+		id: matchIDMissingInactive,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{Status: order.MatchComplete},
+			Match:    &order.UserMatch{Status: order.MatchComplete},
+		},
+		counterConfirms: 1,
+	}
+	trackerMissing.matches[matchIDMissingInactive] = missingTradeMatchInactive
 
-	if knownMatch.failErr != nil {
-		t.Fatalf("error set for known and reported match")
+	srvMatches := map[order.OrderID]*serverMatches{
+		oid: {
+			tracker:    tracker,
+			msgMatches: []*msgjson.Match{knownMsgMatch, extraMsgMatch},
+		},
+		// oidMissing not included (missing!)
 	}
 
-	if missingMatch.failErr == nil {
-		t.Fatalf("error not set for missing match")
+	dc.trades = map[order.OrderID]*trackedTrade{
+		oid:        tracker,
+		oidMissing: trackerMissing,
 	}
 
-	if len(notes["order"]) != 2 {
-		t.Fatalf("expected 2 core 'order'-type notifications, got %d", len(notes["order"]))
+	exceptions := dc.compareServerMatches(srvMatches)
+	if len(exceptions) != 2 {
+		t.Fatalf("exceptions did not include both trades, just %d", len(exceptions))
 	}
 
-	if notes["order"][0].Subject() != "Missing matches" {
-		t.Fatalf("no core notification sent for missing matches")
+	exc, ok := exceptions[oid]
+	if !ok {
+		t.Fatalf("exceptions did not include trade %v", oid)
+	}
+	if exc.trade.ID() != oid {
+		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oid)
+	}
+	if len(exc.missing) != 1 {
+		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+	}
+	if exc.missing[0].id != missingID {
+		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, missingID)
+	}
+	if len(exc.extra) != 1 {
+		t.Errorf("found %d extra matches for trade %v, expected 1", len(exc.extra), oid)
+	}
+	if !bytes.Equal(exc.extra[0].MatchID, extraID[:]) {
+		t.Errorf("wrong extra match, got %v, expected %v", exc.extra[0].MatchID, extraID)
 	}
 
-	if notes["order"][1].Subject() != "Match resolution error" {
-		t.Fatalf("no core notification sent for unknown matches")
+	exc, ok = exceptions[oidMissing]
+	if !ok {
+		t.Fatalf("exceptions did not include trade %v", oidMissing)
+	}
+	if exc.trade.ID() != oidMissing {
+		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
+	}
+	if len(exc.missing) != 1 { // no matchIDMissingInactive
+		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+	}
+	if exc.missing[0].id != matchIDMissing {
+		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
+	}
+	if len(exc.extra) != 0 {
+		t.Errorf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
 	}
 
 }
