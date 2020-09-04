@@ -76,6 +76,7 @@ EOF
 
 # create and unlock the wallet
 tmux new-window -t $TMUX_WIN_ID -n "w-${NAME}"
+tmux send-keys -t $TMUX_WIN_ID "set +o history" C-m
 tmux send-keys -t $TMUX_WIN_ID "cd ${WALLET_DIR}" C-m
 echo "Creating simnet ${NAME} wallet"
 tmux send-keys -t $TMUX_WIN_ID "dcrwallet -C w-${NAME}.conf --create < wallet.answers; tmux wait-for -S w-${NAME}" C-m
