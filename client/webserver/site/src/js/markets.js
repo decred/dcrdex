@@ -1220,7 +1220,7 @@ class MarketList {
     this.selected.row.classList.add('selected')
   }
 
-  /* setConnectionStatus sets the visiblity of the disconnected icon based
+  /* setConnectionStatus sets the visibility of the disconnected icon based
    * on the core.ConnEventNote.
    */
   setConnectionStatus (note) {
