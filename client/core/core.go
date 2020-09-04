@@ -3252,6 +3252,7 @@ out:
 					}
 					trade.mtx.RUnlock()
 					delete(dc.trades, oid)
+					updatedAssets.count(trade.wallets.fromAsset.ID)
 					continue
 				}
 				newUpdates, err := trade.tick()
