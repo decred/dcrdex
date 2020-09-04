@@ -90,7 +90,7 @@ export default class Application {
    * reconnected is called by the websocket client when a reconnection is made.
    */
   reconnected () {
-    window.location.reload()
+    window.location.reload() // This triggers another websocket disconnect/connect (!)
   }
 
   /*
@@ -466,9 +466,9 @@ export default class Application {
   }
 
   /**
-   * signOut call to /api/logout, if response with no errors occured clear all store,
-   * remove auth, darkMode cookies and reload the page,
-   * otherwise will show a notification
+   * signOut call to /api/logout, if response with no errors occurred clear all
+   * store, remove auth, darkMode cookies and reload the page, otherwise will
+   * show a notification
    */
   async signOut () {
     const res = await postJSON('/api/logout')
