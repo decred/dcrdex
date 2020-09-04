@@ -106,6 +106,8 @@ export default class MarketsPage extends BasePage {
       const quoteIcons = wgt.quote.stateIcons.icons
       bind(wgt.base.connect, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
       bind(wgt.quote.connect, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
+      bind(wgt.base.expired, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
+      bind(wgt.quote.expired, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
       bind(baseIcons.sleeping, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
       bind(quoteIcons.sleeping, 'click', () => { this.showOpen(this.market.quote, this.walletUnlocked) })
       bind(baseIcons.locked, 'click', () => { this.showOpen(this.market.base, this.walletUnlocked) })
