@@ -294,11 +294,15 @@ func (t *trackedTrade) nomatch(oid order.OrderID) error {
 // calling (*trackedTrade).tick when a relevant event occurs, such as a request
 // from the DEX or a tip change.
 func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
-	// Add the matches to the match map and update the database.
-	trade := t.Trade()
 	t.mtx.Lock()
 	defer t.mtx.Unlock()
-	var newFill uint64
+
+	trade := t.Trade()
+	isMarketBuy := t.Type() == order.MarketOrderType && !trade.Sell
+
+	// Validate matches and check if a cancel match is included.
+	// Non-cancel matches should be negotiated and are added to
+	// the newTrackers slice.
 	var cancelMatch *msgjson.Match
 	newTrackers := make([]*matchTracker, 0, len(msgMatches))
 	for _, msgMatch := range msgMatches {
@@ -306,13 +310,14 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			return fmt.Errorf("match id of incorrect length. expected %d, got %d",
 				order.MatchIDSize, len(msgMatch.MatchID))
 		}
-		var mid order.MatchID
-		copy(mid[:], msgMatch.MatchID)
 		var oid order.OrderID
 		copy(oid[:], msgMatch.OrderID)
 		if oid != t.ID() {
 			return fmt.Errorf("negotiate called for wrong order. %s != %s", oid, t.ID())
 		}
+
+		var mid order.MatchID
+		copy(mid[:], msgMatch.MatchID)
 		// Do not process matches with existing matchTrackers. e.g. In case we
 		// start "extra" matches from the 'connect' response negotiating via
 		// authDEX>readConnectMatches, and a subsequent resent 'match' request
@@ -322,16 +327,13 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			continue
 		}
 
-		// First check if this is a match with a cancel order, in which case the
+		// Check if this is a match with a cancel order, in which case the
 		// counterparty Address field would be empty. If the user placed a
-		// cancel order, that order will be recorded in t.cancel on cancel order
-		// creation via (*dexConnection).tryCancel or restore from DB via
-		// (*Core).dbTrackers.
+		// cancel order, that order will be recorded in t.cancel on cancel
+		// order creation via (*dexConnection).tryCancel or restored from DB
+		// via (*Core).dbTrackers.
 		if t.cancel != nil && msgMatch.Address == "" {
-			log.Infof("Maker notification for cancel order received for order %s. match id = %s",
-				oid, msgMatch.MatchID)
 			cancelMatch = msgMatch
-			newFill += msgMatch.Quantity // should push this trade to 100% filled
 			continue
 		}
 
@@ -343,26 +345,25 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			counterConfirms: -1,
 			lastExpireDur:   365 * 24 * time.Hour,
 		}
-
-		var qty uint64
-		if t.Type() == order.MarketOrderType && !trade.Sell {
-			qty = calc.BaseToQuote(msgMatch.Rate, msgMatch.Quantity)
-		} else {
-			qty = msgMatch.Quantity
-		}
-		newFill += qty
-
-		log.Infof("Starting negotiation for match %v for order %v with swap fee rate = %v, quantity = %v",
-			mid, oid, match.MetaMatch.Match.FeeRateSwap, qty)
 		match.SetStatus(order.NewlyMatched) // these must be new matches
 		newTrackers = append(newTrackers, match)
 	}
 
 	// Record any cancel order Match and update order status.
 	if cancelMatch != nil {
-		t.cancel.matches.maker = cancelMatch // taker is stored via processCancelMatch before negotiate
-		// Set the order status for both orders.
+		log.Infof("Maker notification for cancel order received for order %s. match id = %s",
+			t.ID(), cancelMatch.MatchID)
+
+		// Set this order status to Canceled and unlock any locked coins
+		// if there are no new matches and there's no need to send swap
+		// for any previous match.
 		t.metaData.Status = order.OrderStatusCanceled
+		if len(newTrackers) == 0 {
+			t.maybeReturnCoins()
+		}
+
+		t.cancel.matches.maker = cancelMatch // taker is stored via processCancelMatch before negotiate
+		// Set the order status for the canceled order.
 		t.db.UpdateOrderStatus(t.cancel.ID(), order.OrderStatusExecuted)
 		// Store a completed maker cancel match in the DB.
 		makerCancelMeta := t.makeMetaMatch(cancelMatch)
@@ -374,22 +375,38 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 	}
 
 	// Now that each Match in msgMatches has been validated, store them in the
-	// trackedTrade and the DB, and update each order's status and fill amount.
+	// trackedTrade and the DB, and update the newFill amount.
+	var newFill uint64
 	for _, match := range newTrackers {
-		t.matches[match.id] = match
+		var qty uint64
+		if isMarketBuy {
+			qty = calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
+		} else {
+			qty = match.Match.Quantity
+		}
+		newFill += qty
+
 		err := t.db.UpdateMatch(&match.MetaMatch)
 		if err != nil {
-			return fmt.Errorf("failed to update match in db: %w", err)
+			// Don't abandon other matches because of this error, attempt
+			// to negotiate the other matches.
+			log.Errorf("failed to update match %s in db: %v", match.id, err)
+			continue
 		}
+
+		// Only add this match to the map if the db update succeeds, so
+		// funds don't get stuck if user restarts Core after sending a
+		// swap because negotiations will not be resumed for this match
+		// and auto-refund cannot be performed.
+		// TODO: Maybe allow? This match can be restored from the DEX's
+		// connect response on restart IF it is not revoked.
+		t.matches[match.id] = match
+		log.Infof("Starting negotiation for match %v for order %v with swap fee rate = %v, quantity = %v",
+			match.id, t.ID(), match.Match.FeeRateSwap, qty)
 	}
 
-	// Calculate the new filled value for the order.
-	isMarketBuy := t.Type() == order.MarketOrderType && !trade.Sell
+	// Calculate and set the new filled value for the order.
 	var filled uint64
-	// If the order has been canceled, add that to the filled.
-	if cancelMatch != nil {
-		filled += cancelMatch.Quantity
-	}
 	for _, mt := range t.matches {
 		if isMarketBuy {
 			filled += calc.BaseToQuote(mt.Match.Rate, mt.Match.Quantity)
@@ -397,7 +414,11 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 			filled += mt.Match.Quantity
 		}
 	}
-
+	// If the order has been canceled, add that to filled and newFill.
+	if cancelMatch != nil {
+		filled += cancelMatch.Quantity
+		newFill += cancelMatch.Quantity
+	}
 	// The filled amount includes all of the trackedTrade's matches, so the
 	// filled amount must be set, not just increased.
 	trade.SetFill(filled)
@@ -413,19 +434,14 @@ func (t *trackedTrade) negotiate(msgMatches []*msgjson.Match) error {
 
 	// Send notifications.
 	corder, cancelOrder := t.coreOrderInternal()
-	haveNewSwaps := len(newTrackers) > 0
 	if cancelMatch != nil {
 		details := fmt.Sprintf("%s order on %s-%s at %s has been canceled (%s)",
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), t.dc.acct.host, t.token())
 		t.notify(newOrderNote("Order canceled", details, db.Success, corder))
 		// Also send out a data notification with the cancel order information.
 		t.notify(newOrderNote("cancel", "", db.Data, cancelOrder))
-
-		// Order is canceled, return coins if there are no matches in the trade
-		// that MAY later require sending swaps.
-		t.maybeReturnCoins()
 	}
-	if haveNewSwaps {
+	if len(newTrackers) > 0 {
 		fillPct := 100 * float64(filled) / float64(trade.Quantity)
 		details := fmt.Sprintf("%s order on %s-%s %.1f%% filled (%s)",
 			strings.Title(sellString(trade.Sell)), unbip(t.Base()), unbip(t.Quote()), fillPct, t.token())
@@ -950,9 +966,9 @@ func (t *trackedTrade) resendPendingRequests() error {
 	return errs.ifAny()
 }
 
-// revoke sets the trade status as revoked, either because of market suspension
-// with persist=false or a server-initiated order revocation because of client
-// inaction on one of this trade's matches.
+// revoke sets the trade status to Revoked, either because the market is
+// suspended with persist=false or because the order is revoked and unbooked
+// by the server.
 // Funding coins or change coin will be returned IF there are no matches that
 // MAY later require sending swaps.
 func (t *trackedTrade) revoke() {
@@ -961,7 +977,7 @@ func (t *trackedTrade) revoke() {
 
 	if t.metaData.Status >= order.OrderStatusExecuted {
 		// Executed, canceled or already revoked orders cannot be (re)revoked.
-		log.Errorf("attempted revoking an order with status %s", t.metaData.Status)
+		log.Errorf("revoke() wrongly called for order %v, status %s", t.ID(), t.metaData.Status)
 		return
 	}
 

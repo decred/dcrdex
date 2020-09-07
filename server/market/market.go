@@ -1307,6 +1307,10 @@ func (m *Market) Unbook(lo *order.LimitOrder) bool {
 	_, removed := m.book.Remove(lo.ID())
 	m.bookMtx.Unlock()
 
+	// TODO: Should not unlock coins if there are active/unrevoked
+	// matches for this order and no swaps have been sent.
+	// If any swap has been sent, the funding coins would have been
+	// spent and it would be theoretically safe to unlock the coins.
 	m.unlockOrderCoins(lo)
 
 	if !removed {
