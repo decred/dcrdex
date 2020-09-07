@@ -1078,21 +1078,24 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		}
 	}
 
-	// Figure out how many have already been swapped.
-	var alreadySwapped int
-	for _, match := range t.matches {
-		if (match.Match.Side == order.Maker && match.Match.Status >= order.MakerSwapCast) ||
-			(match.Match.Side == order.Taker && match.Match.Status >= order.TakerSwapCast) {
-			alreadySwapped++
+	lockChange := true
+	// If the order is filled, canceled or revoked, and these are the
+	// last swaps, then we don't need to lock the change coin.
+	if t.metaData.Status > order.OrderStatusBooked {
+		var matchesRequiringSwaps int
+		for _, match := range t.matches {
+			if match.MetaData.Proof.IsRevoked {
+				// Revoked matches don't require swaps.
+				continue
+			}
+			if (match.Match.Side == order.Maker && match.Match.Status < order.MakerSwapCast) ||
+				(match.Match.Side == order.Taker && match.Match.Status < order.TakerSwapCast) {
+				matchesRequiringSwaps++
+			}
 		}
-	}
-	// If these are the last swaps, and the order is filled or canceled or
-	// revoked, then we don't need to lock the change coin.
-	isLastSwaps := len(matches)+alreadySwapped == len(t.matches)
-	if isLastSwaps && t.metaData.Status > order.OrderStatusBooked {
-		t.changeLocked = false
-	} else {
-		t.changeLocked = true
+		if len(matches) == matchesRequiringSwaps { // last swaps
+			lockChange = false
+		}
 	}
 
 	// Fund the swap. If this isn't the first swap, use the change coin from the
@@ -1121,7 +1124,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		Inputs:     inputs,
 		Contracts:  contracts,
 		FeeRate:    highestFeeRate,
-		LockChange: t.changeLocked,
+		LockChange: lockChange,
 	}
 	receipts, change, fees, err := t.wallets.fromWallet.Swap(swaps)
 	if err != nil {
@@ -1138,6 +1141,7 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	// If this is the first swap (and even if not), the funding coins
 	// would have been spent and unlocked.
 	t.coinsLocked = false
+	t.changeLocked = lockChange
 	t.metaData.SwapFeesPaid += fees
 
 	if change == nil {
@@ -1223,11 +1227,6 @@ func (t *trackedTrade) finalizeSwapAction(match *matchTracker, coinID, contract 
 	if len(ack.Sig) != 0 {
 		auth.InitSig = ack.Sig
 		auth.InitStamp = encode.UnixMilliU(time.Now())
-
-		// Server has acked the swap. Unlock the change coin if we're
-		// not expecting future matches for this trade and there are no
-		// matches that MAY later require sending swaps.
-		t.maybeReturnCoins()
 	}
 	if err := t.db.UpdateMatch(&match.MetaMatch); err != nil {
 		errs.add("error storing swap details in database for match %s, coin %s: %v",
