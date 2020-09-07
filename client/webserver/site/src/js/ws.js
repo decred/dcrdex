@@ -78,7 +78,7 @@ class MessageSocket {
   }
 
   close (reason) {
-    console.log('close, reason:', reason, this.handlers)
+    window.log('ws', 'close, reason:', reason, this.handlers)
     this.handlers = {}
     this.connection.close()
   }
@@ -88,6 +88,7 @@ class MessageSocket {
     this.reloader = reloader
     var retrys = 0
     const go = () => {
+      window.log('ws', `connecting to ${uri}`)
       var conn = this.connection = new window.WebSocket(uri)
       var timeout = setTimeout(() => {
         // readyState is still WebSocket.CONNECTING. Cancel and trigger onclose.
@@ -102,6 +103,7 @@ class MessageSocket {
 
       // Stub out standard functions
       conn.onclose = (evt) => {
+        window.log('ws', 'onclose')
         clearTimeout(timeout)
         conn = this.connection = null
         forward('close', null, this.handlers)
@@ -115,6 +117,7 @@ class MessageSocket {
       }
 
       conn.onopen = () => {
+        window.log('ws', 'onopen')
         clearTimeout(timeout)
         if (retrys > 0) {
           retrys = 0
@@ -128,6 +131,7 @@ class MessageSocket {
       }
 
       conn.onerror = (evt) => {
+        window.log('ws', 'onerror:', evt)
         forward('error', evt, this.handlers)
       }
     }
