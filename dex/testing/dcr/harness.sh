@@ -115,19 +115,53 @@ chmod +x "${NODES_ROOT}/harness-ctl/mine-beta"
 # Reorg script
 cat > "${NODES_ROOT}/harness-ctl/reorg" <<EOF
 #!/usr/bin/env bash
+REORG_NODE="alpha"
+VALID_NODE="beta"
+REORG_DEPTH=1
+
+if [ "\$1" = "beta" ]; then
+  REORG_NODE="beta"
+  VALID_NODE="alpha"
+  REORG_DEPTH=3
+fi
+
+if [ "\$2" != "" ]; then
+  REORG_DEPTH=\$2
+fi
+
+# TODO: Cannot currently cause a 1+ block re-org on alpha because
+# beta cannot mine more than 1 main chain block while disconnected
+# from alpha.
+if [ "\${REORG_NODE}" = "alpha" ] && [ \${REORG_DEPTH} -gt 1 ]; then
+  echo "Cannot cause a re-org of more than 1 block on alpha."
+  exit 1
+fi
+
+echo "Current alpha, beta best blocks"
+./alpha getbestblock && ./beta getbestblock
+
 echo "Disconnecting beta from alpha"
-sleep 1
 ./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} remove
-echo "Mining a block on alpha"
 sleep 1
-./mine-alpha 1
-echo "Mining 3 blocks on beta"
-./mine-beta 3
-sleep 2
+
+# Mine equal number of blocks while disconnected.
+for NODE in \${REORG_NODE} \${VALID_NODE}; do
+  echo "Mining \${REORG_DEPTH} blocks on \${NODE}"
+  ./mine-\${NODE} \${REORG_DEPTH}
+  sleep 1
+done
+echo "Diverged alpha, beta best blocks" && ./alpha getbestblock && ./beta getbestblock
+
 echo "Reconnecting beta to alpha"
 ./beta addnode 127.0.0.1:${ALPHA_NODE_PORT} add
+sleep 1
+
+echo "Mining 1 more block on \${VALID_NODE} to trigger re-org on \${REORG_NODE}"
+./mine-\${VALID_NODE} 1
 sleep 2
-grep REORG ${NODES_ROOT}/alpha/logs/simnet/dcrd.log
+echo "Reconnected alpha, beta best blocks" && ./alpha getbestblock && ./beta getbestblock
+
+grep REORG ${NODES_ROOT}/\${REORG_NODE}/logs/simnet/dcrd.log
 EOF
 chmod +x "${NODES_ROOT}/harness-ctl/reorg"
 
