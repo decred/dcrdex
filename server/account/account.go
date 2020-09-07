@@ -5,13 +5,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"decred.org/dcrdex/server/account/pki"
 	"github.com/decred/dcrd/crypto/blake256"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
-var HashFunc = blake256.Sum256
+var (
+	HashFunc = blake256.Sum256
+	century  = time.Hour * 24 * 365 * 100
+)
 
 const (
 	HashSize = blake256.Size
@@ -107,3 +111,59 @@ const (
 	// definition in this list.
 	MaxRule
 )
+
+// ruleNames is a map of rules to names.
+var ruleNames = map[Rule]string{
+	NoRule:            "NoRule",
+	FailureToAct:      "FailureToAct",
+	CancellationRatio: "CancellationRatio",
+	LowFees:           "LowFees",
+	PreimageReveal:    "PreimageReveal",
+}
+
+// String satisfies the Stringer interface.
+func (r Rule) String() string {
+	if name, ok := ruleNames[r]; ok {
+		return name
+	}
+	return "unknown rule"
+}
+
+// ruleDetails is a map of rules to details.
+var ruleDetails = map[Rule]string{
+	NoRule:            "no rules have been broken",
+	FailureToAct:      "did not follow through on a swap negotiation step",
+	CancellationRatio: "cancellation rate dropped below the acceptable level",
+	LowFees:           "did not pay transaction mining fees at the requisite level",
+	PreimageReveal:    "failed to respond with a valid preimage for an order during epoch processing",
+}
+
+// Details returns details about the rule.
+func (r Rule) Details() string {
+	if details, ok := ruleDetails[r]; ok {
+		return details
+	}
+	return "details not specified"
+}
+
+// ruleDuration is a map of rules to penalty durations.
+var ruleDurations = map[Rule]time.Duration{
+	NoRule:            0,
+	FailureToAct:      century,
+	CancellationRatio: century,
+	LowFees:           century,
+	PreimageReveal:    century,
+}
+
+// Duration returns the penalty duration of the rule being broken.
+func (r Rule) Duration() time.Duration {
+	if duration, ok := ruleDurations[r]; ok {
+		return duration
+	}
+	return century
+}
+
+// Punishable returns whether breaking this rule incurs a penalty.
+func (r Rule) Punishable() bool {
+	return r > NoRule && r < MaxRule
+}

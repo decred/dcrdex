@@ -3276,7 +3276,7 @@ func handleNotifyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	return nil
 }
 
-// handlePenaltyMsg is called when a notify notification is received.
+// handlePenaltyMsg is called when a Penalty notification is received.
 func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	var note msgjson.PenaltyNote
 	err := msg.Unmarshal(&note)
@@ -3290,8 +3290,8 @@ func handlePenaltyMsg(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	}
 	t := encode.UnixTimeMilli(int64(note.Penalty.Time) * 1000)
 	d := time.Duration(note.Penalty.Duration)
-	details := fmt.Sprintf("Penalty from DEX at %s\nbroken rule: %d\ntime: %v\nduration: %v\ndetails: \"%s\"\n",
-		dc.acct.host, note.Penalty.Rule, t, d, note.Penalty.Details)
+	details := fmt.Sprintf("Penalty from DEX at %s\nbroken rule: %s\ntime: %v\nduration: %v\ndetails: \"%s\"\n",
+		dc.acct.host, note.Penalty.Rule, t, d, fmt.Sprintf("%s\n%s", note.Penalty.Rule.Details(), note.Penalty.Details))
 	n := db.NewNotification("penalty", dc.acct.host, details, db.WarningLevel)
 	c.notify(&n)
 	return nil

@@ -693,6 +693,27 @@ func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message, 
 // Penalize signals that a user has broken a rule of community conduct, and that
 // their account should be penalized.
 func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) error {
+	// Notify user of penalty.
+	details := "You may no longer trade. Leave your client running to complete outstanding trades."
+	penalty := &msgjson.Penalty{
+		Rule:     rule,
+		Time:     uint64(unixMsNow().Unix()),
+		Duration: uint64(time.Hour * 24 * 365 * 100), // 100 years
+		Details:  details,
+	}
+	sig, err := auth.signer.Sign(penalty.Serialize())
+	if err != nil {
+		return fmt.Errorf("signature error: %v", err)
+	}
+	penaltyNote := &msgjson.PenaltyNote{
+		Sig:     sig.Serialize(),
+		Penalty: penalty,
+	}
+	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
+	if err != nil {
+		return fmt.Errorf("error creating penalty notification: %v", err)
+	}
+	auth.Notify(user, note, time.Hour*72)
 	if auth.anarchy {
 		err := fmt.Errorf("user %v penalized for rule %v, but not enforcing it", user, rule)
 		log.Error(err)
@@ -717,28 +738,6 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) err
 	// we do not want the user to initiate a swap or place a new order, so there
 	// should be appropriate checks on order submission and match/swap
 	// initiation (TODO).
-
-	// Notify user of penalty.
-	details := "You may no longer trade. Leave your client running to complete outstanding trades."
-	penalty := &msgjson.Penalty{
-		Rule:     dex.Bytes([]byte{byte(rule)}),
-		Time:     uint64(unixMsNow().Unix()),
-		Duration: uint64(time.Hour * 24 * 365 * 100), // 100 years
-		Details:  details,
-	}
-	sig, err := auth.signer.Sign(penalty.Serialize())
-	if err != nil {
-		return fmt.Errorf("signature error: %v", err)
-	}
-	penaltyNote := &msgjson.PenaltyNote{
-		Sig:     sig.Serialize(),
-		Penalty: penalty,
-	}
-	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
-	if err != nil {
-		return fmt.Errorf("error creating penalty notification: %v", err)
-	}
-	auth.Send(user, note)
 
 	return nil
 }

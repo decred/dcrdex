@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/server/account"
 )
 
 // Error codes
@@ -846,10 +847,10 @@ type PenaltyNote struct {
 // and part of the connect response.
 type Penalty struct {
 	Signature
-	Rule     Bytes  `json:"rule"`
-	Time     uint64 `json:"timestamp"`
-	Duration uint64 `json:"duration"`
-	Details  string `json:"details"`
+	Rule     account.Rule `json:"rule"`
+	Time     uint64       `json:"timestamp"`
+	Duration uint64       `json:"duration"`
+	Details  string       `json:"details"`
 }
 
 // Serialize serializes the Penalty data.
@@ -857,7 +858,7 @@ func (p *Penalty) Serialize() []byte {
 	// serialization: rule(1) + time (8) + duration (8) details (variable,
 	// ~100) = 117 bytes
 	b := make([]byte, 0, 117)
-	b = append(b, p.Rule...)
+	b = append(b, byte(p.Rule))
 	b = append(b, uint64Bytes(p.Time)...)
 	b = append(b, uint64Bytes(p.Duration)...)
 	return append(b, []byte(p.Details)...)
