@@ -466,6 +466,7 @@ type MatchStatusResult struct {
 	MakerRedeem   Bytes `json:"makerredeem,omitempty"`
 	TakerRedeem   Bytes `json:"takerredeem,omitempty"`
 	Secret        Bytes `json:"secret,omitempty"`
+	Active        bool  `json:"active"`
 }
 
 // Init is the payload for a client-originating InitRoute request.

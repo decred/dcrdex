@@ -687,8 +687,16 @@ func TestMatchStatuses(t *testing.T) {
 			Base:    loBuy.Base(),
 			Quote:   loBuy.Quote(),
 		}
-		status := new(db.MatchStatus)
-		status.Status = matchStatus
+		// Just alternate the active state.
+		active := matchStatus%2 == 0
+		status := &db.MatchStatus{
+			Status: matchStatus,
+			Active: active,
+		}
+		if !active {
+			archie.SetMatchInactive(mktMatchID)
+
+		}
 		for iStatus := order.NewlyMatched; iStatus <= matchStatus; iStatus++ {
 			switch iStatus {
 			case order.MakerSwapCast:
@@ -813,6 +821,9 @@ func TestMatchStatuses(t *testing.T) {
 				}
 				if !bytes.Equal(status.Secret, expStatus.Secret) {
 					t.Fatalf("%s: wrong Secret. expected %x, got %x", tt.name, expStatus.Secret, status.Secret)
+				}
+				if status.Active != expStatus.Active {
+					t.Fatalf("%s: wrong Active. expected %t, got %t", tt.name, expStatus.Active, status.Active)
 				}
 				continue top
 			}
