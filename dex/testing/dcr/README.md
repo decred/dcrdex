@@ -30,8 +30,14 @@ allow you to perform RPC calls against each wallet.
 wallets.
 Try `./alpha getbalance`, for example.
 
-`./reorg` will step through a script that causes the alpha node to undergo a
-1-deep reorganization.
+`./reorg` will step through a script that causes the alpha or beta node to
+undergo a 1-deep reorganization. The script takes the following optional
+arguments: `./reorg {node} {depth}`, where:
+- `node` is the node that should undergo a reorg, either "alpha" or "beta" (default: alpha)
+- `depth` is the number of blocks that should be reorged into `node` (default: 1 for alpha, 3 for beta).
+Currently, only 1 block (instead of `depth` blocks) can be purged from either
+nodes during reorg, but the reorged node will always see `depth` new blocks
+after the reorg.
 
 `./quit` shuts down the nodes and closes the tmux session.
 
