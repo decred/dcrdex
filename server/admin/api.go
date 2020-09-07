@@ -221,8 +221,9 @@ func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("bad rule: %v", err), http.StatusBadRequest)
 		return
 	}
-	if ruleInt < 1 || ruleInt >= int(account.MaxRule) {
-		http.Error(w, "bad rule: not known or not punishable", http.StatusBadRequest)
+	if !account.Rule(ruleInt).Punishable() {
+		msg := fmt.Sprintf("bad rule (%d): not known or not punishable", ruleInt)
+		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 	if err := s.core.Penalize(acctID, account.Rule(ruleInt)); err != nil {

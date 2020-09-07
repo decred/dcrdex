@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"math/rand"
 	"testing"
+
+	"decred.org/dcrdex/server/account"
 )
 
 func TestExtractMatchID(t *testing.T) {
@@ -821,7 +823,7 @@ func TestPenalty(t *testing.T) {
 	// serialization: rule(1) + time (8) + duration (8) details (variable,
 	// ~100) = 117 bytes
 	penalty := &Penalty{
-		Rule:     []byte{1},
+		Rule:     account.Rule(1),
 		Time:     uint64(1598929305),
 		Duration: uint64(3153600000000000000),
 		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
@@ -861,7 +863,7 @@ func TestPenalty(t *testing.T) {
 		t.Fatalf("unmarshal error: %v", err)
 	}
 
-	if !bytes.Equal(penaltyBack.Rule, penalty.Rule) {
+	if penaltyBack.Rule != penalty.Rule {
 		t.Fatal(penaltyBack.Rule, penalty.Rule)
 	}
 	if penaltyBack.Time != penalty.Time {

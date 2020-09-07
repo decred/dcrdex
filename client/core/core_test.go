@@ -4190,7 +4190,7 @@ func TestHandlePenaltyMsg(t *testing.T) {
 	tCore := rig.core
 	dc := rig.dc
 	penalty := &msgjson.Penalty{
-		Rule:     []byte{1},
+		Rule:     account.Rule(1),
 		Time:     uint64(1598929305),
 		Duration: uint64(3153600000000000000),
 		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
