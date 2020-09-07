@@ -961,10 +961,9 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 }
 
 // Swap sends the swaps in a single transaction. The Receipts returned can be
-// used to refund a failed transaction. The Input coins are perfunctorily
-// unlocked to ensure accurate balance reporting in cases where the wallet
-// includes spent coins as part of the locked balance just because they were
-// previously locked.
+// used to refund a failed transaction. The Input coins are manually unlocked
+// because they're not auto-unlocked by the wallet and therefore inaccurately
+// included as part of the locked balance despite being spent.
 func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	var totalOut uint64
 	// Start with an empty MsgTx.

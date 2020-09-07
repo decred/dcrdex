@@ -901,11 +901,11 @@ func (btc *ExchangeWallet) Lock() error {
 }
 
 // fundedTx creates and returns a new MsgTx with the provided coins as inputs.
-func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []*output, error) {
+func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []outPoint, error) {
 	baseTx := wire.NewMsgTx(wire.TxVersion)
 	var totalIn uint64
 	// Add the funding utxos.
-	pts := make([]*output, 0, len(coins))
+	pts := make([]outPoint, 0, len(coins))
 	for _, coin := range coins {
 		op, err := btc.convertCoin(coin)
 		if err != nil {
@@ -917,21 +917,20 @@ func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []*
 		totalIn += op.value
 		txIn := wire.NewTxIn(op.wireOutPoint(), []byte{}, nil)
 		baseTx.AddTxIn(txIn)
-		pts = append(pts, op)
+		pts = append(pts, op.pt)
 	}
 	return baseTx, totalIn, pts, nil
 }
 
-// Swap sends the swaps in a single transaction. The Receipts returned can be
-// used to refund a failed transaction. The Input coins are perfunctorily
-// unlocked to ensure accurate balance reporting in cases where the wallet
-// includes spent coins as part of the locked balance just because they were
-// previously locked.
+// Swap sends the swaps in a single transaction and prepares the receipts. The
+// Receipts returned can be used to refund a failed transaction. The Input coins
+// are NOT manually unlocked because they're auto-unlocked when the transaction
+// is broadcasted.
 func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
-	baseTx, totalIn, spentOps, err := btc.fundedTx(swaps.Inputs)
+	baseTx, totalIn, pts, err := btc.fundedTx(swaps.Inputs)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -1033,10 +1032,9 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Delete the UTXOs from the cache.
-	for _, spentOp := range spentOps {
-		delete(btc.fundingCoins, spentOp.pt)
+	for _, pt := range pts {
+		delete(btc.fundingCoins, pt)
 	}
-	btc.wallet.LockUnspent(true, spentOps)
 
 	return receipts, changeCoin, fees, nil
 }
