@@ -207,7 +207,7 @@ func (s *WebServer) handleOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	ord, err := s.core.Order(oid)
 	if err != nil {
-		log.Errorf("error retrieving order ID from request context: %v", err)
+		log.Errorf("error retrieving order: %v", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}

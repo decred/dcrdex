@@ -3,6 +3,7 @@
 package webserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -21,6 +22,7 @@ import (
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
+	"github.com/go-chi/chi"
 )
 
 var (
@@ -503,4 +505,72 @@ func TestApiGetBalance(t *testing.T) {
 	tCore.balanceErr = tErr
 	ensure(fmt.Sprintf(`{"ok":false,"msg":"balance error: %s"}`, tErr))
 	tCore.balanceErr = nil
+}
+
+type tHTTPHandler struct {
+	req *http.Request
+}
+
+func (h *tHTTPHandler) ServeHTTP(_ http.ResponseWriter, req *http.Request) {
+	h.req = req
+}
+
+func TestOrderIDCtx(t *testing.T) {
+	hexOID := hex.EncodeToString(encode.RandomBytes(32))
+	req := (&http.Request{}).WithContext(context.WithValue(context.Background(), chi.RouteCtxKey, &chi.Context{
+		URLParams: chi.RouteParams{
+			Keys:   []string{"oid"},
+			Values: []string{hexOID},
+		},
+	}))
+
+	tNextHandler := &tHTTPHandler{}
+	handlerFunc := orderIDCtx(tNextHandler)
+	handlerFunc.ServeHTTP(nil, req)
+
+	reqCtx := tNextHandler.req.Context()
+	untypedOID := reqCtx.Value(ctxOID)
+	if untypedOID == nil {
+		t.Fatalf("oid not embedded in request context")
+	}
+	oidStr, ok := untypedOID.(string)
+	if !ok {
+		t.Fatalf("string type assertion failed")
+	}
+
+	if oidStr != hexOID {
+		t.Fatalf("wrong value embedded in request context. wanted %s, got %s", hexOID, oidStr)
+	}
+}
+
+func TestGetOrderIDCtx(t *testing.T) {
+	oid := encode.RandomBytes(32)
+	hexOID := hex.EncodeToString(oid)
+
+	r := (&http.Request{}).WithContext(context.WithValue(context.Background(), ctxOID, hexOID))
+
+	bytesOut, err := getOrderIDCtx(r)
+	if err != nil {
+		t.Fatalf("getOrderIDCtx error: %v", err)
+	}
+	if len(bytesOut) == 0 {
+		t.Fatalf("empty oid")
+	}
+	if !bytes.Equal(oid, bytesOut) {
+		t.Fatalf("wrong bytes. wanted %x, got %s", oid, bytesOut)
+	}
+
+	// Test some negative paths
+	for name, v := range map[string]interface{}{
+		"nil":          nil,
+		"int":          5,
+		"wrong length": "abc",
+		"not hex":      "zyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxwzyxw",
+	} {
+		r := (&http.Request{}).WithContext(context.WithValue(context.Background(), ctxOID, v))
+		_, err := getOrderIDCtx(r)
+		if err == nil {
+			t.Fatalf("no error for %v", name)
+		}
+	}
 }

@@ -108,23 +108,27 @@ func orderIDCtx(next http.Handler) http.Handler {
 	})
 }
 
+// getOrderIDCtx interprets the context value at ctxOID as a dex.Bytes order ID.
 func getOrderIDCtx(r *http.Request) (dex.Bytes, error) {
-	oidStr, ok := r.Context().Value(ctxOID).(string)
+	untypedOID := r.Context().Value(ctxOID)
+	if untypedOID == nil {
+		log.Errorf("nil value for order ID context value")
+	}
+	hexID, ok := untypedOID.(string)
 	if !ok {
-		log.Errorf("getOrderIDCtx type assertion failed. Expected string, got %T", r.Context().Value(ctxOID))
+		log.Errorf("getOrderIDCtx type assertion failed. Expected string, got %T", untypedOID)
 		return nil, fmt.Errorf("type assertion failed")
 	}
-	if len(oidStr) != order.OrderIDSize*2 {
+
+	if len(hexID) != order.OrderIDSize*2 {
 		log.Errorf("getOrderIDCtx received order ID string of wrong length. wanted %d, got %d",
-			order.OrderIDSize*2, len(oidStr))
+			order.OrderIDSize*2, len(hexID))
 		return nil, fmt.Errorf("invalid order ID")
 	}
-	oidB, err := hex.DecodeString(oidStr)
+	oidB, err := hex.DecodeString(hexID)
 	if err != nil {
-		log.Errorf("getOrderIDCtx received invalid hex for order ID %q", oidStr)
+		log.Errorf("getOrderIDCtx received invalid hex for order ID %q", hexID)
 		return nil, fmt.Errorf("")
 	}
-	var oid dex.Bytes
-	copy(oid[:], oidB[:])
-	return oid, nil
+	return oidB, nil
 }
