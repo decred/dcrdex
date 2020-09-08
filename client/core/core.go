@@ -3256,17 +3256,10 @@ out:
 			dc.tradeMtx.Lock()
 			for oid, trade := range dc.trades {
 				if !trade.isActive() {
-					log.Infof("Retiring inactive order %v", oid)
-					trade.mtx.RLock()
-					if trade.change != nil {
-						changeCoins := asset.Coins{trade.change}
-						err := trade.wallets.fromWallet.ReturnCoins(changeCoins)
-						log.Debugf("Unlocked order %v change coins: %v (wallet error = %v)", oid, changeCoins, err)
-					}
-					tradeCoins := trade.coinList()
-					err := trade.wallets.fromWallet.ReturnCoins(tradeCoins)
-					log.Debugf("Unlocked funding coins for order %v: %v (wallet error = %v)", oid, tradeCoins, err)
-					trade.mtx.RUnlock()
+					trade.mtx.Lock()
+					log.Infof("Retiring inactive order %v in status %v", oid, trade.metaData.Status)
+					trade.returnCoins()
+					trade.mtx.Unlock()
 					delete(dc.trades, oid)
 					updatedAssets.count(trade.wallets.fromAsset.ID)
 					continue
