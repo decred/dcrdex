@@ -878,6 +878,8 @@ match data.
 | takerredeem   || string || the coin ID for the taker's redemption
 |-
 | secret        || string || the swap contract secret
+|-
+| active        || bool   || whether the match is still active
 |}
 
 Empty fields may be omitted from the encoded <code>MatchStatus</code> object.
