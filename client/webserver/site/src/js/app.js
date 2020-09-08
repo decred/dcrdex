@@ -389,12 +389,13 @@ export default class Application {
    * ws.........Websocket connection status changes.
    */
   log (loggerID, ...msg) {
+    if (!this.loggers[loggerID]) return
     const stamp = new Date()
     const h = stamp.getHours().toString().padStart(2, '0')
     const m = stamp.getMinutes().toString().padStart(2, '0')
     const s = stamp.getSeconds().toString().padStart(2, '0')
     const ms = stamp.getMilliseconds().toString().padStart(3, '0')
-    if (this.loggers[loggerID]) console.log(`${`${h}:${m}:${s}:${ms}`}[${loggerID}]:`, ...msg)
+    console.log(`${`${h}:${m}:${s}.${ms}`}[${loggerID}]:`, ...msg)
   }
 
   /* setNoteElements re-builds the drop-down notification list. */
