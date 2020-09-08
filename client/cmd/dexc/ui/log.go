@@ -66,11 +66,7 @@ func CustomLogMaker(f func(p []byte), utc bool) (*dex.LoggerMaker, error) {
 	if f == nil {
 		f = func([]byte) {}
 	}
-	var opts []dex.BackendOption
-	if utc {
-		opts = append(opts, dex.InUTC())
-	}
-	return dex.NewLoggerMaker(logWriter{f: f}, debugLevel, opts...)
+	return dex.NewLoggerMaker(logWriter{f: f}, debugLevel, utc)
 }
 
 // Close closes the log rotator.

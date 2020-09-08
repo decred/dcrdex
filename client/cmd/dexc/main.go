@@ -56,11 +56,16 @@ func main() {
 	logStdout := func(msg []byte) {
 		os.Stdout.Write(msg)
 	}
-	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel, !cfg.LocalLogs)
+	utc := !cfg.LocalLogs
+	if cfg.Net == dex.Simnet {
+		utc = false
+	}
+	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel, utc)
 	core.UseLoggerMaker(logMaker)
 	log = logMaker.Logger("DEXC")
-	if !cfg.LocalLogs {
-		log.Infof("Logging with UTC time stamps. Current local time is %v", time.Now().Local().Format("15:04:05 MST"))
+	if utc {
+		log.Infof("Logging with UTC time stamps. Current local time is %v",
+			time.Now().Local().Format("15:04:05 MST"))
 	}
 
 	clientCore, err := core.New(&core.Config{
