@@ -939,7 +939,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		suspended:    !open,
 	}
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
-	if penalize && !auth.anarchy {
+	if penalize && open && !auth.anarchy {
 		// Account should already be closed, but perhaps the server crashed
 		// or the account was not penalized before shutdown.
 		client.suspended = true
