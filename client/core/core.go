@@ -2327,6 +2327,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		trade := matchAnomalies.trade
 		missing, extras := matchAnomalies.missing, matchAnomalies.extra
 
+		trade.mtx.Lock()
+
 		// Flag each of the missing matches as revoked.
 		for _, match := range missing {
 			log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked.",
@@ -2340,10 +2342,13 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			}
 		}
 
-		corder, _ := trade.coreOrder()
+		corder, _ := trade.coreOrderInternal()
 
 		// Send a "Missing matches" order note if there are missing match message.
+		// Also, check if the now-Revoked matches were the last set of matches that
+		// required sending swaps, and unlock coins if so.
 		if len(missing) > 0 {
+			trade.maybeReturnCoins()
 			details := fmt.Sprintf("%d matches for order %s were not reported by %q and are considered revoked",
 				len(missing), trade.token(), dc.acct.host)
 			c.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
@@ -2360,6 +2365,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 					dc.acct.host, extra.MatchID, extra.OrderID)
 			}
 		}
+
+		trade.mtx.Unlock()
 	}
 
 	return nil
