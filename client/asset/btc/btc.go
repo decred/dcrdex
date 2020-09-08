@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -326,7 +325,6 @@ type ExchangeWallet struct {
 	chainParams       *chaincfg.Params
 	log               dex.Logger
 	symbol            string
-	hasConnected      uint32
 	tipChange         func(error)
 	minNetworkVersion uint64
 	fallbackFeeRate   uint64
@@ -336,8 +334,7 @@ type ExchangeWallet struct {
 	tipMtx     sync.RWMutex
 	currentTip *block
 
-	// Coins returned by Fund are cached for quick reference and for cleanup on
-	// shutdown.
+	// Coins returned by Fund are cached for quick reference.
 	fundingMtx   sync.RWMutex
 	fundingCoins map[outPoint]*compositeUTXO
 
@@ -491,14 +488,6 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	if err != nil {
 		return nil, fmt.Errorf("error initializing best block for %s: %v", btc.symbol, err)
 	}
-	// If this is the first time connecting, clear the locked coins. This should
-	// have been done at shutdown, but shutdown may not have been clean.
-	if atomic.SwapUint32(&btc.hasConnected, 1) == 0 {
-		err := btc.wallet.LockUnspent(true, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -510,11 +499,6 @@ func (btc *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 }
 
 func (btc *ExchangeWallet) shutdown() {
-	// Unlock any locked outputs.
-	err := btc.wallet.LockUnspent(true, nil)
-	if err != nil {
-		btc.log.Errorf("failed to unlock %s outputs on shutdown: %v", btc.symbol, err)
-	}
 	// Close all open channels for contract redemption searches
 	// to prevent leakages and ensure goroutines that are started
 	// to wait on these channels end gracefully.
