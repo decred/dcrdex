@@ -263,6 +263,7 @@ out:
 				m.log.Warnf("marketSyncer stopping on feed closed")
 				return
 			}
+			var payload interface{} = update
 			if update.Action == core.FreshBookAction {
 				// For FreshBookAction, translate the *core.MarketOrderBook
 				// payload into a *marketResponse.
@@ -271,7 +272,8 @@ out:
 					m.log.Errorf("FreshBookAction payload not a *MarketOrderBook")
 					continue
 				}
-				update.Payload = &marketResponse{
+				// The outgoing payload is not a BookUpdate for this signal.
+				payload = &marketResponse{
 					Host:  update.Host,
 					Book:  mob.Book,
 					Base:  mob.Base,
@@ -279,7 +281,7 @@ out:
 				}
 				m.log.Tracef("FreshBookAction: %v", update.MarketID)
 			}
-			note, err := msgjson.NewNotification(update.Action, update)
+			note, err := msgjson.NewNotification(update.Action, payload)
 			if err != nil {
 				m.log.Errorf("error encoding notification message: %v", err)
 				break out
