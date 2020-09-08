@@ -840,12 +840,7 @@ match data.
 
 '''Notification route:''' <code>match_status</code>, '''originator:''' client
 
-<code>payload</code>
-{|
-! field    !! type     !! description
-|-
-| matches  || [<code>MatchRequest</code>] || an array of <code>MatchRequest</code> objects
-|}
+<code>payload</code>: an array of <code>MatchRequest</code> objects
 
 '''<code>MatchRequest</code> object'''
 
@@ -883,6 +878,8 @@ match data.
 | takerredeem   || string || the coin ID for the taker's redemption
 |-
 | secret        || string || the swap contract secret
+|-
+| active        || bool   || whether the match is still active
 |}
 
 Empty fields may be omitted from the encoded <code>MatchStatus</code> object.
