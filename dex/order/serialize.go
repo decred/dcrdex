@@ -1,5 +1,5 @@
-// Copyright (c) 2019, The Decred developers
-// See LICENSE for details.
+// This code is available on the terms of the project LICENSE.md file,
+// also available online at https://blueoakcouncil.org/license/1.0.0.
 
 // Package order defines the Order and Match types used throughout the DEX.
 package order
