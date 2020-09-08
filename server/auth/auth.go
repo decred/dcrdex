@@ -44,6 +44,7 @@ type Storage interface {
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
 	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
+	MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error)
 	CreateAccount(*account.Account) (string, error)
 	AccountRegAddr(account.AccountID) (string, error)
 	PayAccount(account.AccountID, []byte) error
@@ -218,6 +219,7 @@ func NewAuthManager(cfg *Config) *AuthManager {
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
 	comms.Route(msgjson.RegisterRoute, auth.handleRegister)
 	comms.Route(msgjson.NotifyFeeRoute, auth.handleNotifyFee)
+	comms.Route(msgjson.MatchStatusRoute, auth.handleMatchStatus)
 	return auth
 }
 
@@ -1051,6 +1053,108 @@ func (auth *AuthManager) handleResponse(conn comms.Link, msg *msgjson.Message) {
 		return
 	}
 	handler.f(conn, msg)
+}
+
+// marketMatches is an index of match IDs associated with a particular market.
+type marketMatches struct {
+	base     uint32
+	quote    uint32
+	matchIDs map[order.MatchID]bool
+}
+
+// add adds a match ID to the marketMatches.
+func (mm *marketMatches) add(matchID order.MatchID) bool {
+	_, found := mm.matchIDs[matchID]
+	mm.matchIDs[matchID] = true
+	return !found
+}
+
+// idList generates a []order.MatchID from the currently indexed match IDs.
+func (mm *marketMatches) idList() []order.MatchID {
+	ids := make([]order.MatchID, 0, len(mm.matchIDs))
+	for matchID := range mm.matchIDs {
+		ids = append(ids, matchID)
+	}
+	return ids
+}
+
+// handleMatchStatus handles requests to the 'match_status' route.
+func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message) *msgjson.Error {
+	client := auth.conn(conn)
+	if client == nil {
+		return msgjson.NewError(msgjson.UnauthorizedConnection,
+			"cannot use route 'match_status' on an unauthorized connection")
+	}
+	var matchReqs []msgjson.MatchRequest
+	err := json.Unmarshal(msg.Payload, &matchReqs)
+	if err != nil {
+		return msgjson.NewError(msgjson.RPCParseError, "error parsing match_status: %v", err)
+	}
+
+	mkts := make(map[string]*marketMatches)
+	var count int
+	for _, req := range matchReqs {
+		mkt, err := dex.MarketName(req.Base, req.Quote)
+		if err != nil {
+			return msgjson.NewError(msgjson.InvalidRequestError, "market with base=%d, quote=%d is not known", req.Base, req.Quote)
+		}
+		if len(req.MatchID) != order.MatchIDSize {
+			return msgjson.NewError(msgjson.InvalidRequestError, "match ID is wrong length: %s", req.MatchID)
+		}
+		mktMatches, found := mkts[mkt]
+		if !found {
+			mktMatches = &marketMatches{
+				base:     req.Base,
+				quote:    req.Quote,
+				matchIDs: make(map[order.MatchID]bool),
+			}
+			mkts[mkt] = mktMatches
+		}
+		var matchID order.MatchID
+		copy(matchID[:], req.MatchID)
+		if mktMatches.add(matchID) {
+			count++
+		}
+	}
+
+	results := make([]*msgjson.MatchStatusResult, 0, count)
+	for _, mm := range mkts {
+		statuses, err := auth.storage.MatchStatuses(client.acct.ID, mm.base, mm.quote, mm.idList())
+		// no results is not an error
+		if err != nil {
+			log.Errorf("MatchStatuses error: acct = %s, base = %d, quote = %d, matchIDs = %v: %v",
+				client.acct.ID, mm.base, mm.quote, mm.matchIDs, err)
+			return msgjson.NewError(msgjson.RPCInternalError, "DB error")
+		}
+		for _, status := range statuses {
+			results = append(results, &msgjson.MatchStatusResult{
+				MatchID:       status.ID.Bytes(),
+				Status:        uint8(status.Status),
+				MakerContract: status.MakerContract,
+				TakerContract: status.TakerContract,
+				MakerSwap:     status.MakerSwap,
+				TakerSwap:     status.TakerSwap,
+				MakerRedeem:   status.MakerRedeem,
+				TakerRedeem:   status.TakerRedeem,
+				Secret:        status.Secret,
+			})
+		}
+	}
+
+	log.Tracef("%d results for %d requested match statuses, acct = %s",
+		len(results), len(matchReqs), client.acct.ID)
+
+	resp, err := msgjson.NewResponse(msg.ID, results, nil)
+	if err != nil {
+		log.Errorf("NewResponse error: %v", err)
+		return msgjson.NewError(msgjson.RPCInternalError, "Internal error")
+	}
+
+	err = conn.Send(resp)
+	if err != nil {
+		log.Error("error sending match_status response: " + err.Error())
+	}
+	return nil
 }
 
 // checkSigS256 checks that the message's signature was created with the

@@ -10,6 +10,7 @@ import (
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
 	"decred.org/dcrdex/server/db/driver/pg/internal"
+	"github.com/lib/pq"
 )
 
 func (a *Archiver) matchTableName(match *order.Match) (string, error) {
@@ -116,6 +117,24 @@ func (a *Archiver) AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData,
 	return matches, nil
 }
 
+// MatchStatuses retrieves a *db.MatchStatus for every match in matchIDs for
+// which there is data, and for which the user is at least one of the parties.
+// It is not an error if a match ID in matchIDs does not match, i.e. the
+// returned slice need not be the same length as matchIDs.
+func (a *Archiver) MatchStatuses(aid account.AccountID, base, quote uint32, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+	defer cancel()
+
+	marketSchema, err := a.marketSchema(base, quote)
+	if err != nil {
+		return nil, err
+	}
+
+	matchesTableName := fullMatchesTableName(a.dbName, marketSchema)
+	return matchStatusesByID(ctx, a.db, aid, matchesTableName, matchIDs)
+
+}
+
 func upsertMatch(dbe sqlExecutor, tableName string, match *order.Match) (int64, error) {
 	var takerAddr string
 	tt := match.Taker.Trade()
@@ -199,6 +218,39 @@ func matchByID(dbe *sql.DB, tableName string, mid order.MatchID) (*db.MatchData,
 	m.QuoteRate = uint64(quoteRate.Int64)
 	m.Status = order.MatchStatus(status)
 	return &m, nil
+}
+
+// matchStatusesByID retrieves the []*db.MatchStatus for the requested matchIDs.
+// See docs for MatchStatuses.
+func matchStatusesByID(ctx context.Context, dbe *sql.DB, aid account.AccountID, tableName string, matchIDs []order.MatchID) ([]*db.MatchStatus, error) {
+	stmt := fmt.Sprintf(internal.SelectMatchStatuses, tableName)
+	pqArr := make(pq.ByteaArray, 0, len(matchIDs))
+	for i := range matchIDs {
+		pqArr = append(pqArr, matchIDs[i][:])
+	}
+	rows, err := dbe.QueryContext(ctx, stmt, aid, pqArr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	statuses := make([]*db.MatchStatus, 0, len(matchIDs))
+	for rows.Next() {
+		status := new(db.MatchStatus)
+		err := rows.Scan(&status.ID, &status.Status, &status.MakerContract,
+			&status.TakerContract, &status.MakerSwap, &status.TakerSwap,
+			&status.MakerRedeem, &status.TakerRedeem, &status.Secret, &status.Active)
+		if err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, status)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return statuses, nil
 }
 
 // Swap Data

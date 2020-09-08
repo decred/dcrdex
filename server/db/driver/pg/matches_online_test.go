@@ -4,9 +4,11 @@ package pg
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"testing"
 
+	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/db"
@@ -647,4 +649,186 @@ func TestAllActiveUserMatches(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMatchStatuses(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// Unknown market
+	aid := randomAccountID()
+	var mid order.MatchID
+	copy(mid[:], encode.RandomBytes(32))
+	_, err := archie.MatchStatuses(aid, 100, 101, []order.MatchID{mid})
+	noMktErr := new(db.ArchiveError)
+	if !errors.As(err, noMktErr) || noMktErr.Code != db.ErrUnsupportedMarket {
+		t.Fatalf("incorrect error for unsupported market: %v", err)
+	}
+
+	type matchPair struct {
+		match  *order.Match
+		status *db.MatchStatus
+	}
+
+	generateMatch := func(matchStatus order.MatchStatus, buyer, seller account.AccountID) *matchPair {
+		loBuy := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
+		loBuy.P.AccountID = buyer
+		loSell := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 10)
+		loSell.P.AccountID = seller
+		match := newMatch(loBuy, loSell, loSell.Quantity, order.EpochID{132412341, 10})
+		err = archie.InsertMatch(match)
+		if err != nil {
+			t.Fatalf("InsertMatch() failed: %v", err)
+		}
+		matchID := match.ID()
+		mktMatchID := db.MarketMatchID{
+			MatchID: matchID,
+			Base:    loBuy.Base(),
+			Quote:   loBuy.Quote(),
+		}
+		// Just alternate the active state.
+		active := matchStatus%2 == 0
+		status := &db.MatchStatus{
+			Status: matchStatus,
+			Active: active,
+		}
+		if !active {
+			archie.SetMatchInactive(mktMatchID)
+
+		}
+		for iStatus := order.NewlyMatched; iStatus <= matchStatus; iStatus++ {
+			switch iStatus {
+			case order.MakerSwapCast:
+				status.MakerContract = encode.RandomBytes(50)
+				status.MakerSwap = encode.RandomBytes(36)
+				err := archie.SaveContractA(mktMatchID, status.MakerContract, status.MakerSwap, 0)
+				if err != nil {
+					t.Fatalf("SaveContractA error: %v", err)
+				}
+			case order.TakerSwapCast:
+				status.TakerContract = encode.RandomBytes(50)
+				status.TakerSwap = encode.RandomBytes(36)
+				err := archie.SaveContractB(mktMatchID, status.TakerContract, status.TakerSwap, 0)
+				if err != nil {
+					t.Fatalf("SaveContractB error: %v", err)
+				}
+			case order.MakerRedeemed:
+				status.MakerRedeem = encode.RandomBytes(36)
+				status.Secret = encode.RandomBytes(32)
+				err := archie.SaveRedeemA(mktMatchID, status.MakerRedeem, status.Secret, 0)
+				if err != nil {
+					t.Fatalf("SaveContractB error: %v", err)
+				}
+			case order.MatchComplete:
+				status.TakerRedeem = encode.RandomBytes(36)
+				err := archie.SaveRedeemB(mktMatchID, status.TakerRedeem, 0)
+				if err != nil {
+					t.Fatalf("SaveContractB error: %v", err)
+				}
+			}
+		}
+		return &matchPair{match: match, status: status}
+	}
+
+	user1 := randomAccountID()
+	user2 := randomAccountID()
+
+	matches := []*matchPair{
+		generateMatch(order.NewlyMatched, user1, user2),                          // 0
+		generateMatch(order.MakerSwapCast, user1, user2),                         // 1
+		generateMatch(order.TakerSwapCast, user1, user2),                         // 2
+		generateMatch(order.MakerRedeemed, user1, user2),                         // 3
+		generateMatch(order.MatchComplete, user1, user2),                         // 4
+		generateMatch(order.MatchComplete, randomAccountID(), randomAccountID()), // 5
+	}
+
+	idList := func(idxs ...int) []order.MatchID {
+		ids := make([]order.MatchID, 0, len(idxs))
+		for _, i := range idxs {
+			ids = append(ids, matches[i].match.ID())
+		}
+		return ids
+	}
+
+	tests := []struct {
+		name string
+		user account.AccountID
+		req  []order.MatchID
+		exp  []int // matches index
+	}{
+		// user 1: 1 hit
+		{
+			name: "find1",
+			user: user1,
+			req:  idList(0),
+			exp:  []int{0},
+		},
+		// user 1: 1 hit + 1 miss.
+		{
+			name: "find1-miss1",
+			user: user1,
+			req:  idList(1, 5),
+			exp:  []int{1},
+		},
+		// user 2 hit 5
+		{
+			name: "find5",
+			user: user2,
+			req:  idList(0, 1, 2, 3, 4),
+			exp:  []int{0, 1, 2, 3, 4},
+		},
+	}
+
+	for _, tt := range tests {
+		statuses, err := archie.MatchStatuses(tt.user, AssetDCR, AssetBTC, tt.req)
+		if err != nil {
+			t.Fatalf("%s: error getting order statuses: %v", tt.name, err)
+		}
+		if len(statuses) != len(tt.exp) {
+			t.Fatalf("%s: wrongs number of statuses returned. expected %d, got %d", tt.name, len(tt.exp), len(statuses))
+		}
+	top:
+		for _, expIdx := range tt.exp {
+			matchPair := matches[expIdx]
+			expStatus := matchPair.status
+			matchID := matchPair.match.ID()
+			// Find the status
+			for _, status := range statuses {
+				if status.ID != matchID {
+					continue
+				}
+				if status.Status != expStatus.Status {
+					t.Fatalf("%s: expIdx = %d, wrong status. expected %s, got %s", tt.name, expIdx, expStatus.Status, status.Status)
+				}
+				if !bytes.Equal(status.MakerContract, expStatus.MakerContract) {
+					t.Fatalf("%s: wrong MakerContract. expected %x, got %x", tt.name, expStatus.MakerContract, status.MakerContract)
+				}
+				if !bytes.Equal(status.TakerContract, expStatus.TakerContract) {
+					t.Fatalf("%s: wrong TakerContract. expected %x, got %x", tt.name, expStatus.TakerContract, status.TakerContract)
+				}
+				if !bytes.Equal(status.MakerSwap, expStatus.MakerSwap) {
+					t.Fatalf("%s: wrong MakerSwap. expected %x, got %x", tt.name, expStatus.MakerSwap, status.MakerSwap)
+				}
+				if !bytes.Equal(status.TakerSwap, expStatus.TakerSwap) {
+					t.Fatalf("%s: wrong TakerSwap. expected %x, got %x", tt.name, expStatus.TakerSwap, status.TakerSwap)
+				}
+				if !bytes.Equal(status.MakerRedeem, expStatus.MakerRedeem) {
+					t.Fatalf("%s: wrong MakerRedeem. expected %x, got %x", tt.name, expStatus.MakerRedeem, status.MakerRedeem)
+				}
+				if !bytes.Equal(status.TakerRedeem, expStatus.TakerRedeem) {
+					t.Fatalf("%s: wrong TakerRedeem. expected %x, got %x", tt.name, expStatus.TakerRedeem, status.TakerRedeem)
+				}
+				if !bytes.Equal(status.Secret, expStatus.Secret) {
+					t.Fatalf("%s: wrong Secret. expected %x, got %x", tt.name, expStatus.Secret, status.Secret)
+				}
+				if status.Active != expStatus.Active {
+					t.Fatalf("%s: wrong Active. expected %t, got %t", tt.name, expStatus.Active, status.Active)
+				}
+				continue top
+			}
+			t.Fatalf("%s: expected match at index %d not found in results", tt.name, expIdx)
+		}
+	}
+
 }
