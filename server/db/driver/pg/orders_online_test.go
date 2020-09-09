@@ -1419,6 +1419,125 @@ func TestUserOrders(t *testing.T) {
 	}
 }
 
+func TestAllActiveUserOrders(t *testing.T) {
+	if err := cleanTables(archie.db); err != nil {
+		t.Fatalf("cleanTables: %v", err)
+	}
+
+	// Two orders, different accounts, DCR-BTC.
+	maker := newLimitOrder(false, 4500000, 1, order.StandingTiF, 0)
+	taker := newLimitOrder(true, 4490000, 1, order.StandingTiF, 10)
+
+	var epochIdx, epochDur int64 = 13245678, 6000
+	err := archie.StoreOrder(maker, epochIdx, epochDur, order.OrderStatusBooked)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+	err = archie.StoreOrder(taker, epochIdx, epochDur, order.OrderStatusBooked)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	// Second order from the same maker account.
+	maker2 := newLimitOrder(false, 4500000, 1, order.ImmediateTiF, 20)
+	maker2.AccountID = maker.AccountID
+
+	// Store it.
+	err = archie.StoreOrder(maker2, epochIdx, epochDur, order.OrderStatusEpoch)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	// Same taker account, different market (BTC-LTC).
+	taker2 := newLimitOrder(true, 4490000, 1, order.ImmediateTiF, 30)
+	taker2.BaseAsset = AssetBTC
+	taker2.QuoteAsset = AssetLTC
+	taker2.AccountID = taker.AccountID
+
+	// Store it.
+	err = archie.StoreOrder(taker2, epochIdx, epochDur, order.OrderStatusEpoch)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	// Store cancel order for taker account.
+	taker2Incomplete := newLimitOrder(true, 4390000, 1, order.StandingTiF, 20)
+	taker2Incomplete.AccountID = taker.AccountID
+	err = archie.StoreOrder(taker2Incomplete, epochIdx, epochDur, order.OrderStatusCanceled)
+	if err != nil {
+		t.Fatalf("StoreOrder failed: %v", err)
+	}
+
+	// Maker should have 2 active orders in 1 market.
+	// Taker should have 2 active orders in 2 markets and 1 inactive (canceled) order.
+
+	tests := []struct {
+		name              string
+		acctID            account.AccountID
+		numExpected       int
+		wantOrderIDs      []order.OrderID
+		wantOrderStatuses []order.OrderStatus
+		wantedErr         error
+	}{
+		{
+			"ok maker",
+			maker.User(),
+			2,
+			[]order.OrderID{maker.ID(), maker2.ID()},
+			[]order.OrderStatus{order.OrderStatusBooked, order.OrderStatusEpoch},
+			nil,
+		},
+		{
+			"ok taker",
+			taker.User(),
+			2,
+			[]order.OrderID{taker.ID(), taker2.ID()},
+			[]order.OrderStatus{order.OrderStatusBooked, order.OrderStatusEpoch},
+			nil,
+		},
+		{
+			"nope",
+			randomAccountID(),
+			0,
+			nil,
+			nil,
+			nil,
+		},
+	}
+
+	idInSlice := func(oid order.OrderID, oids []order.OrderID) int {
+		for i := range oids {
+			if oids[i] == oid {
+				return i
+			}
+		}
+		return -1
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			orders, err := archie.AllActiveUserOrders(tt.acctID)
+			if err != tt.wantedErr {
+				t.Fatal(err)
+			}
+			if len(orders) != tt.numExpected {
+				t.Errorf("Retrieved %d active orders for user %v, expected %d.", len(orders), tt.acctID, tt.numExpected)
+			}
+			for oid, status := range orders {
+				wantId := idInSlice(oid, tt.wantOrderIDs)
+				if wantId == -1 {
+					t.Errorf("Unexpected order ID %v retrieved.", oid)
+					continue
+				}
+				if status != tt.wantOrderStatuses[wantId] {
+					t.Errorf("Incorrect order status for order %v. Got %d, want %d.",
+						oid, status, tt.wantOrderStatuses[wantId])
+				}
+			}
+		})
+	}
+}
+
 func TestCompletedUserOrders(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
@@ -1569,7 +1688,7 @@ func TestCompletedUserOrders(t *testing.T) {
 					t.Errorf("Unexpected order ID %v retrieved.", oids[i])
 					continue
 				}
-				if compTimes[loc] != tt.wantCompTimes[i] {
+				if compTimes[i] != tt.wantCompTimes[loc] {
 					t.Errorf("Incorrect order completion time. Got %d, want %d.",
 						compTimes[loc], tt.wantCompTimes[i])
 				}

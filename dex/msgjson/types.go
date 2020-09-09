@@ -845,9 +845,17 @@ func (c *Connect) Serialize() []byte {
 	return append(s, uint64Bytes(c.Time)...)
 }
 
+// Order describes an order and its status, and is returned as part of a
+// ConnectResult.
+type Order struct {
+	OrderID Bytes
+	Status  uint8
+}
+
 // ConnectResult is the result result for the ConnectRoute request.
 type ConnectResult struct {
 	Sig     Bytes    `json:"sig"`
+	Orders  []*Order `json:"orders"`
 	Matches []*Match `json:"matches"`
 }
 

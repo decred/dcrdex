@@ -66,6 +66,9 @@ func (ta *TArchivist) FlushBook(base, quote uint32) (sells, buys []order.OrderID
 func (ta *TArchivist) ActiveOrderCoins(base, quote uint32) (baseCoins, quoteCoins map[order.OrderID][]order.CoinID, err error) {
 	return make(map[order.OrderID][]order.CoinID), make(map[order.OrderID][]order.CoinID), nil
 }
+func (ta *TArchivist) AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error) {
+	return make(map[order.OrderID]order.OrderStatus), nil
+}
 func (ta *TArchivist) UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error) {
 	return nil, nil, errors.New("boom")
 }

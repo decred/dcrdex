@@ -109,6 +109,10 @@ type OrderArchiver interface {
 	// specified by a base and quote asset.
 	UserOrders(ctx context.Context, aid account.AccountID, base, quote uint32) ([]order.Order, []order.OrderStatus, error)
 
+	// AllActiveUserOrders retrieves all active orders for a user across all
+	// markets.
+	AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error)
+
 	// CompletedUserOrders retrieves the N most recently completed orders for a
 	// user across all markets.
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)

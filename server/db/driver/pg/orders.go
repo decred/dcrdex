@@ -670,6 +670,52 @@ func (a *Archiver) SetOrderCompleteTime(ord order.Order, compTimeMs int64) error
 	return nil
 }
 
+// AllActiveUserOrders retrieves all active orders for a user across all
+// markets.
+func (a *Archiver) AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error) {
+	orders := make(map[order.OrderID]order.OrderStatus)
+	for m := range a.markets {
+		tableName := fullOrderTableName(a.dbName, m, true) // active table
+		ctx, cancel := context.WithTimeout(a.ctx, a.queryTimeout)
+		mktOrders, err := userOrderStatuses(ctx, a.db, tableName, aid)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		for oid, status := range mktOrders {
+			orders[oid] = status
+		}
+	}
+	return orders, nil
+}
+
+func userOrderStatuses(ctx context.Context, dbe *sql.DB, tableName string, aid account.AccountID) (map[order.OrderID]order.OrderStatus, error) {
+	stmt := fmt.Sprintf(internal.SelectUserOrderStatuses, tableName)
+	var rows *sql.Rows
+	rows, err := dbe.QueryContext(ctx, stmt, aid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	orders := make(map[order.OrderID]order.OrderStatus)
+	for rows.Next() {
+		var oid order.OrderID
+		var status pgOrderStatus
+		err = rows.Scan(&oid, &status)
+		if err != nil {
+			return nil, err
+		}
+		orders[oid] = pgToMarketStatus(status)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return orders, nil
+}
+
 type orderCompStamped struct {
 	oid order.OrderID
 	t   int64

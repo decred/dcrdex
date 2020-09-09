@@ -53,6 +53,10 @@ const (
 		commit, coins, quantity, rate, force, status, filled
 	FROM %s WHERE account_id = $1;`
 
+	// SelectUserOrderStatuses retrieves the order ID and status for all orders
+	// for the given account ID. Only applies to market and limit orders.
+	SelectUserOrderStatuses = `SELECT oid, status FROM %s WHERE account_id = $1;`
+
 	// SelectCanceledUserOrders gets the ID of orders that were either canceled
 	// by the user or revoked/canceled by the server, but these statuses can be
 	// set by the caller. Note that revoked orders can be market or immediate

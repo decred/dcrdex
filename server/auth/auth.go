@@ -41,6 +41,7 @@ type Storage interface {
 	RestoreAccount(account.AccountID) error
 	// Account retrieves account info for the specified account ID.
 	Account(account.AccountID) (acct *account.Account, paid, open bool)
+	AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error)
 	CompletedUserOrders(aid account.AccountID, N int) (oids []order.OrderID, compTimes []int64, err error)
 	ExecutedCancelsForUser(aid account.AccountID, N int) (oids, targets []order.OrderID, execTimes []int64, err error)
 	AllActiveUserMatches(aid account.AccountID) ([]*db.MatchData, error)
@@ -595,6 +596,23 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			acctInfo.ID, cancels, completions, 100*rate)
 	}
 
+	// Get the list of active orders for this user.
+	orders, err := auth.storage.AllActiveUserOrders(user)
+	if err != nil {
+		log.Errorf("ActiveUserOrders(%x): %v", user, err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "DB error",
+		}
+	}
+	msgOrders := make([]*msgjson.Order, 0, len(orders))
+	for oid, status := range orders {
+		msgOrders = append(msgOrders, &msgjson.Order{
+			OrderID: oid[:],
+			Status:  uint8(status),
+		})
+	}
+
 	// Get the list of active matches for this user.
 	matches, err := auth.storage.AllActiveUserMatches(user)
 	if err != nil {
@@ -661,10 +679,12 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	resp := &msgjson.ConnectResult{
 		Sig:     sig.Serialize(),
+		Orders:  msgOrders,
 		Matches: msgMatches,
 	}
 	respMsg, err := msgjson.NewResponse(msg.ID, resp, nil)
 	if err != nil {
+		log.Errorf("handleConnect prepare response error: %v", err)
 		return &msgjson.Error{
 			Code:    msgjson.RPCInternalError,
 			Message: "internal error",
@@ -673,6 +693,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 
 	err = conn.Send(respMsg)
 	if err != nil {
+		log.Errorf("handleConnect send response error: %v", err)
 		log.Error("error sending connect response: " + err.Error())
 		return nil
 	}

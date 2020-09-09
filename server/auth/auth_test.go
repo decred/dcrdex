@@ -44,6 +44,7 @@ type ratioData struct {
 // TStorage satisfies the Storage interface
 type TStorage struct {
 	acct          *account.Account
+	activeOrders  map[order.OrderID]order.OrderStatus
 	matches       []*db.MatchData
 	closedID      account.AccountID
 	matchStatuses []*db.MatchStatus
@@ -67,6 +68,9 @@ func (s *TStorage) RestoreAccount(_ account.AccountID) error {
 }
 func (s *TStorage) Account(account.AccountID) (*account.Account, bool, bool) {
 	return s.acct, !s.unpaid, !s.closed
+}
+func (s *TStorage) AllActiveUserOrders(aid account.AccountID) (map[order.OrderID]order.OrderStatus, error) {
+	return s.activeOrders, nil
 }
 func (s *TStorage) AllActiveUserMatches(account.AccountID) ([]*db.MatchData, error) {
 	return s.matches, nil
@@ -428,9 +432,14 @@ func TestConnect(t *testing.T) {
 	user := tNewUser(t)
 	rig.signer.sig = user.randomSignature()
 
-	// Before connecting, put an activeMatch in storage.
+	// Before connecting, put an activeOrder and activeMatch in storage.
 	matchData, userMatch := userMatchData(user.acctID)
 	matchTime := matchData.Epoch.End()
+
+	rig.storage.activeOrders = map[order.OrderID]order.OrderStatus{
+		userMatch.OrderID: order.OrderStatusBooked,
+	}
+	defer func() { rig.storage.activeOrders = nil }()
 
 	rig.storage.matches = []*db.MatchData{matchData}
 	defer func() { rig.storage.matches = nil }()
@@ -505,6 +514,16 @@ func TestConnect(t *testing.T) {
 	// Connect the user.
 	respMsg := connectUser(t, user)
 	cResp := extractConnectResult(t, respMsg)
+	if len(cResp.Orders) != 1 {
+		t.Fatalf("no active orders")
+	}
+	msgOrder := cResp.Orders[0]
+	if msgOrder.OrderID.String() != userMatch.OrderID.String() {
+		t.Fatal("active order ID mismatch: ", msgOrder.OrderID.String(), " != ", userMatch.OrderID.String())
+	}
+	if msgOrder.Status != uint8(order.OrderStatusBooked) {
+		t.Fatal("active order Status mismatch: ", msgOrder.Status, " != ", order.OrderStatusBooked)
+	}
 	if len(cResp.Matches) != 1 {
 		t.Fatalf("no active matches")
 	}
