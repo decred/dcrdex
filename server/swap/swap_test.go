@@ -68,7 +68,7 @@ func timeOutMempool() {
 
 func timeoutBroadcast() {
 	// swapper.bTimeout is 5*txWaitExpiration for testing
-	time.Sleep(txWaitExpiration * 6)
+	time.Sleep(txWaitExpiration * 6) // 200 ms txWaitExpiration => 1 sec bTimeout => 1.2 sec timeout sleep
 }
 
 func dirtyEncode(s string) []byte {
@@ -751,8 +751,10 @@ func (rig *testRig) sendSwap(user *tUser, oid order.OrderID, recipient string) (
 	matchInfo := rig.matchInfo
 	swap := tNewSwap(matchInfo, oid, recipient, user)
 	if isQuoteSwap(user, matchInfo.match) {
+		fmt.Println("xyz contract")
 		rig.xyzNode.setContract(swap.coin, false)
 	} else {
+		fmt.Println("abc contract")
 		rig.abcNode.setContract(swap.coin, false)
 	}
 	rpcErr := rig.swapper.handleInit(user.acct, swap.req)
@@ -1326,8 +1328,9 @@ func TestMain(m *testing.M) {
 	comms.UseLogger(logger)
 	var shutdown func()
 	testCtx, shutdown = context.WithCancel(context.Background())
-	defer shutdown()
-	os.Exit(m.Run())
+	code := m.Run()
+	shutdown()
+	os.Exit(code)
 }
 
 func TestFatalStorageErr(t *testing.T) {
@@ -1345,6 +1348,11 @@ func testSwap(t *testing.T, rig *testRig) {
 	t.Helper()
 	ensureNilErr := makeEnsureNilErr(t)
 
+	sendBlock := func(node *TAsset) {
+		node.bChan <- &asset.BlockUpdate{Err: nil}
+		tickMempool()
+	}
+
 	// Step through the negotiation process. No errors should be generated.
 	var takerAcked bool
 	for _, matchInfo := range rig.matches.matchInfos {
@@ -1354,12 +1362,23 @@ func testSwap(t *testing.T, rig *testRig) {
 			ensureNilErr(rig.ackMatch_taker(true))
 			takerAcked = true
 		}
+
+		// Assuming market's base asset is abc, quote is xyz
+		makerSwapAsset, takerSwapAsset := rig.xyz, rig.abc
+		if matchInfo.match.Maker.Sell {
+			makerSwapAsset, takerSwapAsset = rig.abc, rig.xyz
+		}
+
 		ensureNilErr(rig.sendSwap_maker(true))
 		ensureNilErr(rig.auditSwap_taker())
 		ensureNilErr(rig.ackAudit_taker(true))
+		matchInfo.db.makerSwap.coin.setConfs(int64(makerSwapAsset.SwapConf))
+		sendBlock(makerSwapAsset.Backend.(*TAsset))
 		ensureNilErr(rig.sendSwap_taker(true))
 		ensureNilErr(rig.auditSwap_maker())
 		ensureNilErr(rig.ackAudit_maker(true))
+		matchInfo.db.takerSwap.coin.setConfs(int64(takerSwapAsset.SwapConf))
+		sendBlock(takerSwapAsset.Backend.(*TAsset))
 		ensureNilErr(rig.redeem_maker(true))
 		ensureNilErr(rig.ackRedemption_taker(true))
 		ensureNilErr(rig.redeem_taker(true))
@@ -1425,6 +1444,7 @@ func TestNoAck(t *testing.T) {
 	// Check that the response from the Swapper is an
 	// msgjson.SettlementSequenceError.
 	checkSeqError := func(user *tUser) {
+		t.Helper()
 		msg, resp := rig.auth.getResp(user.acct)
 		if msg == nil {
 			t.Fatalf("checkSeqError: no message")
@@ -1437,6 +1457,11 @@ func TestNoAck(t *testing.T) {
 		}
 	}
 
+	sendBlock := func(node *TAsset) {
+		node.bChan <- &asset.BlockUpdate{Err: nil}
+		tickMempool()
+	}
+
 	// Don't acknowledge from either side yet. Have the maker broadcast their swap
 	// transaction
 	mustBeError(rig.sendSwap_maker(true), "maker swap send")
@@ -1444,6 +1469,8 @@ func TestNoAck(t *testing.T) {
 	ensureNilErr(rig.ackMatch_maker(true))
 	// Should be good to send the swap now.
 	ensureNilErr(rig.sendSwap_maker(true))
+	matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
+	sendBlock(rig.abc.Backend.(*TAsset))
 	// For the taker, there must be two acknowledgements before broadcasting the
 	// swap transaction, the match ack and the audit ack.
 	mustBeError(rig.sendSwap_taker(true), "no match-ack taker swap send")
@@ -1455,6 +1482,8 @@ func TestNoAck(t *testing.T) {
 	ensureNilErr(rig.auditSwap_taker())
 	ensureNilErr(rig.ackAudit_taker(true))
 	ensureNilErr(rig.sendSwap_taker(true))
+	matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
+	sendBlock(rig.xyz.Backend.(*TAsset))
 	// The maker should have received an 'audit' request. Don't acknowledge yet.
 	mustBeError(rig.redeem_maker(true), "maker redeem")
 	checkSeqError(maker)
@@ -1479,6 +1508,11 @@ func TestTxWaiters(t *testing.T) {
 	ensureNilErr := makeEnsureNilErr(t)
 	dummyError := fmt.Errorf("test error")
 
+	sendBlock := func(node *TAsset) {
+		node.bChan <- &asset.BlockUpdate{Err: nil}
+		tickMempool()
+	}
+
 	// Get the MatchNotifications that the swapper sent to the clients and check
 	// the match notification length, content, IDs, etc.
 	if err := rig.ackMatch_maker(true); err != nil {
@@ -1490,9 +1524,9 @@ func TestTxWaiters(t *testing.T) {
 	// Set a non-latency error.
 	rig.abcNode.setContractErr(dummyError)
 	rig.sendSwap_maker(false)
-	msg, resp := rig.auth.getResp(matchInfo.maker.acct)
+	msg, _ := rig.auth.getResp(matchInfo.maker.acct)
 	if msg == nil {
-		t.Fatalf("no response for erroneous maker swap")
+		t.Fatalf("no response for erroneous maker swap. err")
 	}
 	// Set an error for the maker's swap asset
 	rig.abcNode.setContractErr(asset.CoinNotFoundError)
@@ -1503,7 +1537,7 @@ func TestTxWaiters(t *testing.T) {
 	}
 	timeOutMempool()
 	// Should have an rpc error.
-	msg, resp = rig.auth.getResp(matchInfo.maker.acct)
+	msg, resp := rig.auth.getResp(matchInfo.maker.acct)
 	if msg == nil {
 		t.Fatalf("no response for missing tx after timeout")
 	}
@@ -1516,6 +1550,8 @@ func TestTxWaiters(t *testing.T) {
 	if err := rig.sendSwap_maker(true); err != nil {
 		t.Fatal(err)
 	}
+	matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
+	sendBlock(rig.abc.Backend.(*TAsset))
 	if err := rig.auditSwap_taker(); err != nil {
 		t.Fatal(err)
 	}
@@ -1544,12 +1580,15 @@ func TestTxWaiters(t *testing.T) {
 	tickMempool()
 	msg, resp = rig.auth.getResp(matchInfo.taker.acct)
 	if msg == nil {
-		t.Fatalf("no response for erroneous taker swap")
+		t.Fatalf("no response for ok taker swap")
 	}
 	if resp.Error != nil {
-		t.Fatalf("unexpected rpc error for erroneous taker swap. code: %d, msg: %s",
+		t.Fatalf("unexpected rpc error for ok taker swap. code: %d, msg: %s",
 			resp.Error.Code, resp.Error.Message)
 	}
+	matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
+	sendBlock(rig.xyz.Backend.(*TAsset))
+
 	ensureNilErr(rig.auditSwap_maker())
 	ensureNilErr(rig.ackAudit_maker(true))
 
@@ -1611,6 +1650,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		tickMempool()
 	}
 	checkRevokeMatch := func(user *tUser, i int) {
+		t.Helper()
 		req := rig.auth.getReq(user.acct)
 		if req == nil {
 			t.Fatalf("no match_cancellation")
@@ -1618,7 +1658,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 		params := new(msgjson.RevokeMatch)
 		err := json.Unmarshal(req.req.Payload, &params)
 		if err != nil {
-			t.Fatalf("unmarshal error for %s at step %d: %s", user.lbl, i, string(req.req.Payload))
+			t.Fatalf("unmarshal error for %s at step %d: %s (%v)", user.lbl, i, string(req.req.Payload), err)
 		}
 		if err = checkSigS256(params, rig.auth.privkey.PubKey()); err != nil {
 			t.Fatalf("incorrect server signature: %v", err)
@@ -1636,6 +1676,7 @@ func TestBroadcastTimeouts(t *testing.T) {
 	// check that a penalty was assigned to the appropriate user, and that a
 	// revoke_match message is sent to both users.
 	tryExpire := func(i, j int, step order.MatchStatus, jerk, victim *tUser, node *TAsset) bool {
+		t.Helper()
 		if i != j {
 			return false
 		}
@@ -1656,55 +1697,74 @@ func TestBroadcastTimeouts(t *testing.T) {
 		return true
 	}
 	// Run a timeout test after every important step.
-	for i := 0; i <= 7; i++ {
+	for i := 0; i <= 3; i++ {
 		set := tPerfectLimitLimit(uint64(1e8), uint64(1e8), true) // same orders, different users
 		matchInfo := set.matchInfos[0]
 		rig.matchInfo = matchInfo
 		rig.swapper.Negotiate([]*order.MatchSet{set.matchSet}, nil)
 		// Step through the negotiation process. No errors should be generated.
+		// TODO: timeout each match ack, not block based inaction.
+
 		ensureNilErr(rig.ackMatch_maker(true))
 		ensureNilErr(rig.ackMatch_taker(true))
+
+		// Timeout waiting for maker swap.
 		if tryExpire(i, 0, order.NewlyMatched, matchInfo.maker, matchInfo.taker, rig.abcNode) {
 			continue
 		}
-		if tryExpire(i, 1, order.NewlyMatched, matchInfo.maker, matchInfo.taker, rig.abcNode) {
-			continue
-		}
+
 		ensureNilErr(rig.sendSwap_maker(true))
-		matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
-		// Do the audit here to clear the 'audit' request from the comms queue.
+
+		// Pull the server's 'audit' request from the comms queue.
 		ensureNilErr(rig.auditSwap_taker())
-		sendBlock(rig.abcNode)
-		if tryExpire(i, 2, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, rig.xyzNode) {
-			continue
-		}
+
+		// NOTE: timeout on the taker's audit ack response itself does not cause
+		// a revocation. The taker not broadcasting their swap when maker's swap
+		// reaches swapconf plus bTimeout is the trigger.
 		ensureNilErr(rig.ackAudit_taker(true))
-		if tryExpire(i, 3, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, rig.xyzNode) {
+
+		// Maker's swap reaches swapConf.
+		matchInfo.db.makerSwap.coin.setConfs(int64(rig.abc.SwapConf))
+		sendBlock(rig.abcNode) // tryConfirmSwap
+		// With maker swap confirmed, inaction happens bTimeout after
+		// swapConfirmed time.
+		if tryExpire(i, 1, order.MakerSwapCast, matchInfo.taker, matchInfo.maker, rig.xyzNode) {
 			continue
 		}
+
 		ensureNilErr(rig.sendSwap_taker(true))
-		matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
-		// Do the audit here to clear the 'audit' request from the comms queue.
+
+		// Pull the server's 'audit' request from the comms queue
 		ensureNilErr(rig.auditSwap_maker())
-		sendBlock(rig.xyzNode)
-		if tryExpire(i, 4, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, rig.xyzNode) {
-			continue
-		}
+
+		// NOTE: timeout on the maker's audit ack response itself does not cause
+		// a revocation. The maker not broadcasting their redeem when taker's
+		// swap reaches swapconf plus bTimeout is the trigger.
 		ensureNilErr(rig.ackAudit_maker(true))
-		if tryExpire(i, 5, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, rig.xyzNode) {
-			continue
-		}
-		ensureNilErr(rig.redeem_maker(true))
-		matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
-		// Ack the redemption here to clear the 'audit' request from the comms queue.
-		ensureNilErr(rig.ackRedemption_taker(true))
+
+		// Taker's swap reaches swapConf.
+		matchInfo.db.takerSwap.coin.setConfs(int64(rig.xyz.SwapConf))
 		sendBlock(rig.xyzNode)
-		if tryExpire(i, 6, order.MakerRedeemed, matchInfo.taker, matchInfo.maker, rig.abcNode) {
+		// With taker swap confirmed, inaction happens bTimeout after
+		// swapConfirmed time.
+		if tryExpire(i, 2, order.TakerSwapCast, matchInfo.maker, matchInfo.taker, rig.xyzNode) {
 			continue
 		}
-		if tryExpire(i, 7, order.MakerRedeemed, matchInfo.taker, matchInfo.maker, rig.abcNode) {
+
+		ensureNilErr(rig.redeem_maker(true))
+
+		// Pull the server's 'redemption' request from the comms queue
+		ensureNilErr(rig.ackRedemption_taker(true))
+
+		// Maker's redeem reaches swapConf. Not necessary for taker redeem.
+		// matchInfo.db.makerRedeem.coin.setConfs(int64(rig.xyz.SwapConf))
+		// sendBlock(rig.xyzNode)
+		if tryExpire(i, 3, order.MakerRedeemed, matchInfo.taker, matchInfo.maker, rig.abcNode) {
 			continue
 		}
+
+		// Next is redeem_taker... not a block-based inaction.
+
 		return
 	}
 }
@@ -1893,7 +1953,7 @@ func TestState(t *testing.T) {
 			return nil, fmt.Errorf("error finding swap state files: %v", err)
 		}
 		if stateFile == nil {
-			return nil, fmt.Errorf("no swap state file found.")
+			return nil, fmt.Errorf("no swap state file found")
 		}
 		state, err := LoadStateFile(stateFile.Name)
 		if err != nil {

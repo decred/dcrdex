@@ -35,7 +35,7 @@ var (
 	recheckInterval = time.Second * 5
 	// txWaitExpiration is the longest the Swapper will wait for a coin waiter.
 	// This could be thought of as the maximum allowable backend latency.
-	txWaitExpiration = time.Minute
+	txWaitExpiration = 2 * time.Minute
 )
 
 func unixMsNow() time.Time {
@@ -399,6 +399,10 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		liveAckers:    make(map[uint64]*msgAckers),
 	}
 
+	if sensible := swapper.bTimeout; txWaitExpiration > sensible {
+		txWaitExpiration = sensible
+	}
+
 	// Load the initial state.
 	var state *State
 	if cfg.StatePath != "" {
@@ -471,7 +475,7 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	for _, id := range state.Assets {
 		if s.coins[id] == nil {
 			if !allowPartial {
-				return fmt.Errorf("Unable to find backend for asset %d in restore state.", id)
+				return fmt.Errorf("unable to find backend for asset %d in restore state", id)
 			}
 			log.Warnf("Unable to find backend for asset %d in restore state.", id)
 			missingAssets[id] = true
@@ -896,18 +900,55 @@ func (s *Swapper) Run(ctx context.Context) {
 		wgHelpers.Done()
 	}()
 
-	// bcastTriggers is used to sequence an examination of an asset's related
-	// matches some time (bTimeout) after a block notification is received.
-	bcastTriggers := make([]*blockNotification, 0, 16)
-	bcastTicker := time.NewTimer(s.bTimeout)
-	minTimeout := s.bTimeout / 10
-	setTimeout := func(block *blockNotification) {
-		timeTil := time.Until(block.time.Add(s.bTimeout))
-		if timeTil < minTimeout {
-			timeTil = minTimeout
+	log.Debugf("Swapper started with %v broadcast timeout.", s.bTimeout)
+
+	// Block-based inaction checks are started with Timers. Track them so that
+	// they may be stopped on shutdown.
+	var timerID uint32
+	var checkTimerMtx sync.Mutex
+	checkTimers := make(map[uint32]*time.Timer)
+
+	// On shutdown, stop any unfired check timers.
+	defer func() {
+		checkTimerMtx.Lock()
+		for id, t := range checkTimers {
+			t.Stop()
+			delete(checkTimers, id)
 		}
-		bcastTicker = time.NewTimer(timeTil)
+		checkTimerMtx.Unlock()
+	}()
+
+	startCheckTimer := func(assetID uint32) {
+		id := timerID
+		timerID++
+		checkTimerMtx.Lock()
+		checkTimers[id] = time.AfterFunc(s.bTimeout, func() {
+			checkTimerMtx.Lock()
+			if _, ok := checkTimers[id]; !ok {
+				checkTimerMtx.Unlock()
+				return // shutdown removed us first
+			}
+			// Unregister the timer and start the check.
+			delete(checkTimers, id)
+			wgHelpers.Add(1) // while locked so none can start after the shutdown defer
+			checkTimerMtx.Unlock()
+			s.checkInactionBlockBased(assetID)
+			wgHelpers.Done()
+		})
+		checkTimerMtx.Unlock()
 	}
+
+	// On startup, schedule an inaction check for each asset. Ideally these
+	// would start bTimeout after the best block times.
+	for assetID := range s.coins {
+		startCheckTimer(assetID)
+	}
+
+	// For actions that are expected some time after other events, just have a
+	// ticker. Each event could make an AfterFunc, but this allows match checks
+	// to be batched, and it's simpler.
+	bcastEventTicker := time.NewTicker(s.bTimeout / 4)
+	defer bcastEventTicker.Stop()
 
 	// Main loop can stop on internal error via cancel(), or when the caller
 	// cancels the parent context triggering graceful shutdown.
@@ -930,9 +971,9 @@ func (s *Swapper) Run(ctx context.Context) {
 					} else {
 						log.Errorf("asset %d is reporting a block notification error: %v", block.assetID, block.err)
 					}
-					break
+					continue
 				}
-				bcastTriggers = append(bcastTriggers, block)
+
 				// processBlock will update confirmation times in the swapStatus
 				// structs.
 				//
@@ -950,31 +991,15 @@ func (s *Swapper) Run(ctx context.Context) {
 				// Presently, one stuck backend that hangs on Confirmations
 				// halts the whole DEX! So timeouts on Confirmations too.
 				s.processBlock(block)
-			case <-bcastTicker.C:
-				for {
-					// checkInaction will fail if the DB is failing.
-					if err := s.storage.LastErr(); err != nil {
-						return
-					}
 
-					if len(bcastTriggers) == 0 {
-						bcastTicker = time.NewTimer(s.bTimeout)
-						break
-					}
-					if time.Now().Before(bcastTriggers[0].time.Add(s.bTimeout)) {
-						setTimeout(bcastTriggers[0])
-						break
-					}
-					block := bcastTriggers[0]
-					bcastTriggers = bcastTriggers[1:]
-					s.checkInaction(block.assetID)
-					if len(bcastTriggers) == 0 {
-						bcastTicker = time.NewTimer(s.bTimeout)
-						break
-					} else {
-						setTimeout(bcastTriggers[0])
-					}
-				}
+				// Schedule an inaction check for matches that involve this
+				// asset, as they could be expecting user action within bTimeout
+				// of this event.
+				startCheckTimer(block.assetID)
+
+			case <-bcastEventTicker.C:
+				s.checkInactionEventsBased()
+
 			case <-mainLoop:
 				return
 			}
@@ -985,7 +1010,7 @@ func (s *Swapper) Run(ctx context.Context) {
 	<-ctxMaster.Done()
 }
 
-func (s *Swapper) tryConfirmSwap(status *swapStatus) {
+func (s *Swapper) tryConfirmSwap(status *swapStatus, confTime time.Time) {
 	status.mtx.Lock()
 	defer status.mtx.Unlock()
 	if status.swapTime.IsZero() || !status.swapConfirmed.IsZero() {
@@ -1002,7 +1027,7 @@ func (s *Swapper) tryConfirmSwap(status *swapStatus) {
 	if confs >= int64(swapConf) {
 		log.Debugf("Swap %v (%s) has reached %d confirmations (%d required)",
 			status.swap, dex.BipIDSymbol(status.swapAsset), confs, swapConf)
-		status.swapConfirmed = time.Now().UTC()
+		status.swapConfirmed = confTime.UTC()
 	}
 }
 
@@ -1035,7 +1060,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			}
 			// If the maker has broadcast their transaction, the taker's broadcast
 			// timeout starts once the maker's swap has SwapConf confs.
-			s.tryConfirmSwap(match.makerStatus)
+			s.tryConfirmSwap(match.makerStatus, block.time)
 		case order.TakerSwapCast:
 			if match.takerStatus.swapAsset != block.assetID {
 				break statusSwitch
@@ -1043,7 +1068,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 			// If the taker has broadcast their transaction, the maker's broadcast
 			// timeout (for redemption) starts once the maker's swap has SwapConf
 			// confs.
-			s.tryConfirmSwap(match.takerStatus)
+			s.tryConfirmSwap(match.takerStatus, block.time)
 		case order.MakerRedeemed:
 			// It's the taker's turn to redeem. Nothing to do here.
 			break statusSwitch
@@ -1132,10 +1157,64 @@ func (s *Swapper) makerRedeemStatus(mStatus *swapStatus, tAsset uint32) (makerRe
 	return
 }
 
-// checkInaction scans the swapStatus structures relevant to the specified
-// asset. If a client is found to have not acted when required, a match may be
-// revoked and a penalty assigned to the user.
-func (s *Swapper) checkInaction(assetID uint32) {
+func (s *Swapper) failMatch(match *matchTracker, makerFault bool) {
+	orderAtFault, otherOrder := match.Taker, order.Order(match.Maker) // an order.Order
+	if makerFault {
+		orderAtFault, otherOrder = match.Maker, match.Taker
+	}
+	log.Debugf("failMatch: swap %v failing (maker fault = %v) at %v",
+		match.ID(), makerFault, match.Status)
+
+	// Record the end of this match's processing.
+	s.storage.SetMatchInactive(db.MatchID(match.Match))
+
+	// If the at-fault order is a limit order, signal that if it is
+	// still on the book is should be unbooked, changed to revoked
+	// status, counted against the user's cancellation ratio, and a
+	// server-generated cancel order recorded.
+	if lo, isLimit := orderAtFault.(*order.LimitOrder); isLimit {
+		if s.unbookHook(lo) {
+			s.orders.canceled(orderAtFault) // set as off-book and failed
+		}
+	}
+
+	// That's one less active swap for this order, and a failure. If
+	// this order has no other active swaps, it will be removed from the
+	// order swap tracker by decrementActiveSwapCount since it is
+	// off-book and no new swap negotiations can begin for this order.
+	s.orders.swapFailure(orderAtFault)
+
+	// The other order now has one less active swap too.
+	if s.orders.swapSuccess(otherOrder) {
+		// TODO: We should count this as a successful swap, but should
+		// it only be a completed order with the extra stipulation that
+		// it had already completed another swap?
+		compTime := time.Now().UTC()
+		s.authMgr.RecordCompletedOrder(otherOrder.User(), otherOrder.ID(), compTime)
+		if err := s.storage.SetOrderCompleteTime(otherOrder, encode.UnixMilli(compTime)); err != nil {
+			if db.IsErrGeneralFailure(err) {
+				log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", otherOrder.UID(), err)
+			} else {
+				log.Warnf("SetOrderCompleteTime for %v: %v", otherOrder.UID(), err)
+			}
+		}
+	}
+
+	// Penalize for failure to act.
+	//
+	// TODO: Arguably, this obviates the RecordCancel above since this
+	// closes the account before the possibility of a cancellation ratio
+	// penalty. I'm keeping it this way for now however since penalties
+	// may become less severe than account closure (e.g. temporary
+	// suspension, cool down, or order throttling), and restored
+	// accounts will still require a record of the revoked order.
+	s.authMgr.Penalize(orderAtFault.User(), account.FailureToAct)
+
+	// Send the revoke_match messages, and solicit acks.
+	s.revoke(match)
+}
+
+func (s *Swapper) checkInactionEventsBased() {
 	// If the DB is failing, do not penalize or attempt to start revocations.
 	if err := s.storage.LastErr(); err != nil {
 		log.Errorf("DB in failing state.")
@@ -1143,7 +1222,74 @@ func (s *Swapper) checkInaction(assetID uint32) {
 	}
 
 	var deletions []*matchTracker
-	oldestAllowed := time.Now().Add(-s.bTimeout).UTC()
+
+	// Do time.Since(event) with the same now time for each match.
+	now := time.Now()
+	tooOld := func(evt time.Time) bool {
+		return now.Sub(evt) >= s.bTimeout
+	}
+
+	checkMatch := func(match *matchTracker) {
+		// Lock entire matchTracker so the following is atomic with respect to
+		// Status.
+		match.mtx.RLock()
+		defer match.mtx.RUnlock()
+
+		log.Tracef("checkInactionEventsBased() => checkMatch(%v, %v)",
+			match.ID(), match.Status)
+
+		failMatch := func(makerFault bool) {
+			s.failMatch(match, makerFault)
+			deletions = append(deletions, match)
+		}
+
+		switch match.Status {
+		case order.NewlyMatched:
+			// Maker has not broadcast their swap. They have until match time
+			// plus bTimeout.
+			if tooOld(match.time) {
+				failMatch(true) // maker should have swapped
+			}
+		case order.MakerRedeemed:
+			// If the maker has redeemed, the taker can redeem immediately, so
+			// check the timeout against the time the Swapper received the
+			// maker's `redeem` request (and sent the taker's 'redemption').
+			match.makerStatus.mtx.RLock()
+			defer match.makerStatus.mtx.RUnlock()
+			if tooOld(match.makerStatus.redeemTime) {
+				failMatch(false) // taker should have redeemed
+			}
+		}
+	}
+
+	s.matchMtx.Lock()
+	defer s.matchMtx.Unlock()
+
+	for _, match := range s.matches {
+		checkMatch(match)
+	}
+
+	for _, match := range deletions {
+		delete(s.matches, match.ID())
+	}
+}
+
+// checkInaction scans the swapStatus structures relevant to the specified
+// asset. If a client is found to have not acted when required, a match may be
+// revoked and a penalty assigned to the user.
+func (s *Swapper) checkInactionBlockBased(assetID uint32) {
+	// If the DB is failing, do not penalize or attempt to start revocations.
+	if err := s.storage.LastErr(); err != nil {
+		log.Errorf("DB in failing state.")
+		return
+	}
+
+	var deletions []*matchTracker
+	// Do time.Since(event) with the same now time for each match.
+	now := time.Now()
+	tooOld := func(evt time.Time) bool {
+		return !evt.IsZero() && now.Sub(evt) >= s.bTimeout
+	}
 
 	checkMatch := func(match *matchTracker) {
 		// Lock entire matchTracker so the following is atomic with respect to
@@ -1155,122 +1301,28 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			return
 		}
 
+		log.Tracef("checkInactionBlockBased(%d) => checkMatch(%v, %v): assets %d / %d",
+			assetID, match.ID(), match.Status,
+			match.makerStatus.swapAsset, match.takerStatus.swapAsset)
+
 		failMatch := func(makerFault bool) {
-			orderAtFault, otherOrder := match.Taker, order.Order(match.Maker) // an order.Order
-			if makerFault {
-				orderAtFault, otherOrder = match.Maker, match.Taker
-			}
-			log.Debugf("checkInaction(failMatch): swap %v failing (maker fault = %v) at %v",
-				match.ID(), makerFault, match.Status)
-
+			s.failMatch(match, makerFault)
 			deletions = append(deletions, match)
-
-			// Record the end of this match's processing.
-			s.storage.SetMatchInactive(db.MatchID(match.Match))
-
-			// If the at-fault order is a limit order, signal that if it is
-			// still on the book is should be unbooked, changed to revoked
-			// status, counted against the user's cancellation ratio, and a
-			// server-generated cancel order recorded.
-			if lo, isLimit := orderAtFault.(*order.LimitOrder); isLimit {
-				if s.unbookHook(lo) {
-					s.orders.canceled(orderAtFault) // set as off-book and failed
-				}
-			}
-
-			// That's one less active swap for this order, and a failure. If
-			// this order has no other active swaps, it will be removed from the
-			// order swap tracker by decrementActiveSwapCount since it is
-			// off-book and no new swap negotiations can begin for this order.
-			s.orders.swapFailure(orderAtFault)
-
-			// The other order now has one less active swap too.
-			if s.orders.swapSuccess(otherOrder) {
-				// TODO: We should count this as a successful swap, but should
-				// it only be a completed order with the extra stipulation that
-				// it had already completed another swap?
-				compTime := time.Now().UTC()
-				s.authMgr.RecordCompletedOrder(otherOrder.User(), otherOrder.ID(), compTime)
-				if err := s.storage.SetOrderCompleteTime(otherOrder, encode.UnixMilli(compTime)); err != nil {
-					if db.IsErrGeneralFailure(err) {
-						log.Errorf("fatal error with SetOrderCompleteTime for order %v: %v", otherOrder.UID(), err)
-					} else {
-						log.Warnf("SetOrderCompleteTime for %v: %v", otherOrder.UID(), err)
-					}
-				}
-			}
-
-			// Penalize for failure to act.
-			//
-			// TODO: Arguably, this obviates the RecordCancel above since this
-			// closes the account before the possibility of a cancellation ratio
-			// penalty. I'm keeping it this way for now however since penalties
-			// may become less severe than account closure (e.g. temporary
-			// suspension, cool down, or order throttling), and restored
-			// accounts will still require a record of the revoked order.
-			s.authMgr.Penalize(orderAtFault.User(), account.FailureToAct)
-
-			// Send the revoke_match messages, and solicit acks.
-			s.revoke(match)
 		}
 
-		match.makerStatus.mtx.RLock()
-		defer match.makerStatus.mtx.RUnlock()
-		match.takerStatus.mtx.RLock()
-		defer match.takerStatus.mtx.RUnlock()
-
 		switch match.Status {
-		case order.NewlyMatched:
-			if match.makerStatus.swapAsset != assetID {
-				return
-			}
-			// If the maker is not acting, the swapTime won't be set. Check against
-			// the time the match notification was sent (match.time) for the broadcast
-			// timeout.
-			if match.makerStatus.swapTime.IsZero() && match.time.Before(oldestAllowed) {
-				failMatch(true)
-			}
 		case order.MakerSwapCast:
-			if match.takerStatus.swapAsset != assetID {
-				return
-			}
-			// If the maker has sent their swap tx, check the taker's broadcast
-			// timeout against the time of the swap's SwapConf'th confirmation.
-			if match.takerStatus.swapTime.IsZero() &&
-				!match.makerStatus.swapConfirmed.IsZero() &&
-				match.makerStatus.swapConfirmed.Before(oldestAllowed) {
-				failMatch(false)
+			match.makerStatus.mtx.RLock()
+			defer match.makerStatus.mtx.RUnlock()
+			if tooOld(match.makerStatus.swapConfirmed) {
+				failMatch(false) // taker should have swapped
 			}
 		case order.TakerSwapCast:
-			if match.takerStatus.swapAsset != assetID {
-				return
+			match.takerStatus.mtx.RLock()
+			defer match.takerStatus.mtx.RUnlock()
+			if tooOld(match.takerStatus.swapConfirmed) {
+				failMatch(true) // maker should have redeemed
 			}
-			// If the taker has sent their swap tx, check the maker's broadcast
-			// timeout (for redemption) against the time of the swap's SwapConf'th
-			// confirmation.
-			if match.makerStatus.redeemTime.IsZero() &&
-				!match.takerStatus.swapConfirmed.IsZero() &&
-				match.takerStatus.swapConfirmed.Before(oldestAllowed) {
-				failMatch(true)
-			}
-		case order.MakerRedeemed:
-			if match.takerStatus.swapAsset != assetID {
-				return
-			}
-			// If the maker has redeemed, the taker can redeem immediately, so
-			// check the timeout against the time the Swapper received the
-			// maker's `redeem` request (and sent the taker's 'redemption').
-			if match.takerStatus.redeemTime.IsZero() &&
-				!match.makerStatus.redeemTime.IsZero() &&
-				match.makerStatus.redeemTime.Before(oldestAllowed) {
-				failMatch(false)
-			}
-		case order.MatchComplete:
-			// Nothing to do here right now.
-
-			// Note: clients still must ack the counterparty's redeem for the
-			// swap to be flagged as done/inactive in the DB, but the match may
-			// be deleted from s.matches if the redeem txns fully confirm first.
 		}
 	}
 
@@ -1485,7 +1537,7 @@ type messageAcker struct {
 	isAudit bool
 }
 
-// processAck processes a msgjson.Acknowledgement to the audit, redeem, and
+// processAck processes a msgjson.Acknowledgement to the audit, redemption, and
 // revoke_match requests, validating the signature and updating the
 // (order.Match).Sigs record. This is required by processInit, processRedeem,
 // and revoke. Match Acknowledgements are handled by processMatchAck.
@@ -1529,7 +1581,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 		return // drop the revoke ack sig for now
 	}
 
-	// This is an ack of either contract audit or redeem receipt.
+	// This is an ack of either contract audit or redemption receipt.
 	if acker.isAudit {
 		log.Debugf("Received contract audit acknowledgement from user %v (%s) for match %v (%v)",
 			acker.user, makerTaker(acker.isMaker), acker.match.Match.ID(), acker.match.Status)
@@ -1544,7 +1596,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 		return
 	}
 
-	// It's a redeem ack.
+	// It's a redemption ack.
 	log.Debugf("Received redemption acknowledgement from user %v (%s) for match %v (%s)",
 		acker.user, makerTaker(acker.isMaker), acker.match.Match.ID(), acker.match.Status)
 
@@ -1622,7 +1674,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 			"redemption error")
 		return wait.DontTryAgain
 	}
-	//actor.swapAsset
 	reqFeeRate := stepInfo.match.FeeRateQuote
 	if stepInfo.isBaseAsset {
 		reqFeeRate = stepInfo.match.FeeRateBase
@@ -2021,10 +2072,27 @@ func (s *Swapper) handleInit(user account.AccountID, msg *msgjson.Message) *msgj
 
 	s.setLiveWaiter(user, msg)
 
+	// Do not search for the transaction past the inaction deadline. For maker,
+	// this is bTimeout after match request. For taker, this is bTimeout after
+	// maker's swap reached swapConfs.
+	lastEvent := stepInfo.match.time // NewlyMatched - the match request time, not matchTime
+	if stepInfo.step == order.MakerSwapCast {
+		lastEvent = stepInfo.match.makerStatus.swapConfirmed
+	}
+	expireTime := time.Now().Add(txWaitExpiration).UTC()
+	if lastEvent.IsZero() {
+		log.Warnf("Prematurely received 'init' from %v at step %v", makerTaker(stepInfo.actor.isMaker), stepInfo.step)
+	} else if deadline := lastEvent.Add(s.bTimeout); expireTime.After(deadline) {
+		expireTime = deadline
+	}
+	log.Debugf("Waiting until %v (%v) to locate contract from %v (%v), match %v",
+		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
+		stepInfo.step, matchID)
+
 	// Since we have to consider broadcast latency of the asset's network, run
 	// this as a coin waiter.
 	s.latencyQ.Wait(&wait.Waiter{
-		Expiration: time.Now().Add(txWaitExpiration),
+		Expiration: expireTime,
 		TryFunc: func() bool {
 			done := s.processInit(msg, params, stepInfo)
 			if done == wait.DontTryAgain {
@@ -2103,9 +2171,26 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 
 	s.setLiveWaiter(user, msg)
 
+	// Do not search for the transaction past the inaction deadline. For maker,
+	// this is bTimeout after taker's swap reached swapConfs. For taker, this is
+	// bTimeout after maker's redeem cast (and redemption request time).
+	lastEvent := stepInfo.match.takerStatus.swapConfirmed // TakerSwapCast
+	if stepInfo.step == order.MakerRedeemed {
+		lastEvent = stepInfo.match.makerStatus.redeemTime
+	}
+	expireTime := time.Now().Add(txWaitExpiration).UTC()
+	if lastEvent.IsZero() {
+		log.Warnf("Prematurely received 'redeem' from %v at step %v", makerTaker(stepInfo.actor.isMaker), stepInfo.step)
+	} else if deadline := lastEvent.Add(s.bTimeout); expireTime.After(deadline) {
+		expireTime = deadline
+	}
+	log.Debugf("Waiting until %v (%v) to locate redeem from %v (%v), match %v",
+		expireTime, time.Until(expireTime), makerTaker(stepInfo.actor.isMaker),
+		stepInfo.step, matchID)
+
 	// Since we have to consider latency, run this as a coin waiter.
 	s.latencyQ.Wait(&wait.Waiter{
-		Expiration: time.Now().Add(txWaitExpiration),
+		Expiration: expireTime,
 		TryFunc: func() bool {
 			done := s.processRedeem(msg, params, stepInfo)
 			if done == wait.DontTryAgain {
@@ -2118,6 +2203,7 @@ func (s *Swapper) handleRedeem(user account.AccountID, msg *msgjson.Message) *ms
 			s.rmLiveWaiter(user, msg.ID)
 			s.respondError(msg.ID, user, msgjson.TransactionUndiscovered,
 				fmt.Sprintf("failed to find redeemed coin %v", coinStr))
+			// Client should retry the redeem request, maybe even rebroadcast.
 		},
 	})
 	return nil

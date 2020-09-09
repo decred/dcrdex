@@ -52,7 +52,7 @@ const (
 	defaultCancelThresh     = 0.95 // 19 cancels : 1 success
 	defaultRegFeeConfirms   = 4
 	defaultRegFeeAmount     = 1e8
-	defaultBroadcastTimeout = time.Minute
+	defaultBroadcastTimeout = 5 * time.Minute
 )
 
 var (
