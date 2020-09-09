@@ -358,7 +358,7 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 
 	ords, err := s.core.Orders(filter)
 	if err != nil {
-		s.writeAPIError(w, "password change error: %v", err)
+		s.writeAPIError(w, "Orders error: %v", err)
 		return
 	}
 	writeJSON(w, &struct {
@@ -367,6 +367,27 @@ func (s *WebServer) apiOrders(w http.ResponseWriter, r *http.Request) {
 	}{
 		OK:     true,
 		Orders: ords,
+	}, s.indent)
+}
+
+// apiOrder responds with data for an order.
+func (s *WebServer) apiOrder(w http.ResponseWriter, r *http.Request) {
+	var oid dex.Bytes
+	if !readPost(w, r, &oid) {
+		return
+	}
+
+	ord, err := s.core.Order(oid)
+	if err != nil {
+		s.writeAPIError(w, "Order error: %v", err)
+		return
+	}
+	writeJSON(w, &struct {
+		OK    bool        `json:"ok"`
+		Order *core.Order `json:"order"`
+	}{
+		OK:    true,
+		Order: ord,
 	}, s.indent)
 }
 

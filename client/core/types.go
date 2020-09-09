@@ -117,20 +117,22 @@ type Match struct {
 	CounterRedeem dex.Bytes         `json:"counterRedeem"`
 	Refund        dex.Bytes         `json:"refund"`
 	Stamp         uint64            `json:"stamp"`
+	IsCancel      bool              `json:"isCancel"`
 }
 
 // matchFromMetaMatch constructs a *Match from an *db.MetaMatch
 func matchFromMetaMatch(metaMatch *db.MetaMatch) *Match {
 	userMatch, proof := metaMatch.Match, &metaMatch.MetaData.Proof
 	match := &Match{
-		MatchID: userMatch.MatchID[:],
-		Status:  userMatch.Status,
-		Rate:    userMatch.Rate,
-		Qty:     userMatch.Quantity,
-		Side:    userMatch.Side,
-		FeeRate: userMatch.FeeRateSwap,
-		Refund:  []byte(proof.RefundCoin),
-		Stamp:   metaMatch.MetaData.Stamp,
+		MatchID:  userMatch.MatchID[:],
+		Status:   userMatch.Status,
+		Rate:     userMatch.Rate,
+		Qty:      userMatch.Quantity,
+		Side:     userMatch.Side,
+		FeeRate:  userMatch.FeeRateSwap,
+		Refund:   []byte(proof.RefundCoin),
+		Stamp:    metaMatch.MetaData.Stamp,
+		IsCancel: userMatch.Address == "",
 	}
 
 	if userMatch.Side == order.Maker {

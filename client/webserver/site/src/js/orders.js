@@ -95,7 +95,7 @@ export default class OrdersPage extends BasePage {
     for (const ord of orders) {
       const tr = this.orderTmpl.cloneNode(true)
       const set = (tmplID, s) => { Doc.tmplElement(tr, tmplID).textContent = s }
-      const mktID = `${ord.baseSymbol.toUpperCase()}-${ord.baseSymbol.toUpperCase()}`
+      const mktID = `${ord.baseSymbol.toUpperCase()}-${ord.quoteSymbol.toUpperCase()}`
       set('host', `${mktID} @ ${ord.host}`)
       var from, to, fromQty
       var toQty = ''
@@ -126,6 +126,8 @@ export default class OrdersPage extends BasePage {
       set('status', Order.statusString(ord))
       set('filled', `${(ord.filled / ord.qty * 100).toFixed(1)}%`)
       set('settled', `${(Order.settled(ord) / ord.qty * 100).toFixed(1)}%`)
+      const dateTime = new Date(ord.stamp).toLocaleString()
+      set('time', `${Doc.timeSince(ord.stamp)} ago, ${dateTime}`)
       const link = Doc.tmplElement(tr, 'link')
       link.href = `order/${ord.id}`
       app.bindInternalNavigation(tr)

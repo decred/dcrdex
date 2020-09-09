@@ -568,9 +568,20 @@ func (fs filterSet) check(oidB []byte, oBkt *bbolt.Bucket) bool {
 }
 
 // Orders fetches a slice of orders, sorted by descending time, and filtered
-// with the provided OrderFilter.
+// with the provided OrderFilter. Orders does not return cancel orders.
 func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, err error) {
-	filters := make(filterSet, 0)
+	// Default filter is just to exclude cancel orders.
+	filters := filterSet{
+		func(oidB []byte, oBkt *bbolt.Bucket) bool {
+			oTypeB := oBkt.Get(typeKey)
+			if len(oTypeB) != 1 {
+				log.Error("encountered order type encoded with wrong number of bytes = %d for order %x", len(oTypeB), oidB)
+				return false
+			}
+			oType := order.OrderType(oTypeB[0])
+			return oType != order.CancelOrderType
+		},
+	}
 
 	if len(orderFilter.Hosts) > 0 {
 		hosts := make(map[string]bool, len(orderFilter.Hosts))
@@ -626,12 +637,7 @@ func (db *BoltDB) Orders(orderFilter *db.OrderFilter) (ords []*dexdb.MetaOrder, 
 		})
 	}
 
-	filter := func(oidB []byte, oBkt *bbolt.Bucket) bool { return true }
-	if len(filters) > 0 {
-		filter = filters.check
-	}
-
-	return db.newestOrders(orderFilter.N, filter)
+	return db.newestOrders(orderFilter.N, filters.check)
 }
 
 // decodeOrderBucket decodes the order's *bbolt.Bucket into a *MetaOrder.

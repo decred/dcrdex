@@ -5,7 +5,7 @@
 {{define "order"}}
 {{template "top" .}}
 {{$ord := .Order}}
-<div id="main" data-handler="order" class="main w-100 overflow-y-auto" data-net="{{.Net}}">
+<div id="main" data-handler="order" class="main w-100 overflow-y-auto" data-net="{{.Net}}" data-oid="{{$ord.ID}}">
   <div class="px-5">
     <div class="px-1 py-2">
       <span class="fs22 demi mr-2">Order</span>
@@ -21,7 +21,9 @@
       </div>
       <div class="order-datum">
         <div>Market</div>
-        <div>{{template "microIcon" $ord.BaseSymbol}} {{template "microIcon" $ord.QuoteSymbol}} {{toUpper $ord.BaseSymbol}}-{{toUpper $ord.QuoteSymbol}}</div>
+        <a href="/markets?host={{$ord.Host}}&base={{$ord.BaseID}}&quote={{$ord.QuoteID}}" class="plainlink hoverbg">
+          {{template "microIcon" $ord.BaseSymbol}} {{template "microIcon" $ord.QuoteSymbol}} {{toUpper $ord.BaseSymbol}}-{{toUpper $ord.QuoteSymbol}}
+        </a>
       </div>
       <div class="order-datum">
         <div>Type</div>
@@ -29,7 +31,12 @@
       </div>
       <div class="order-datum">
         <div>Status</div>
-        <div>{{$ord.StatusString}}</div>
+        <div>
+          <span id="status">{{$ord.StatusString}}</span>
+          {{if $ord.Cancelable}}
+            <span id="cancelBttn" class="ico-cross fs12 ml-1 pointer hoverbg" data-tooltip="cancel order"></span>
+          {{end}}
+        </div>
       </div>
       <div class="order-datum">
         <div>Offering</div>
@@ -86,7 +93,10 @@
       {{range $match := $ord.MatchReaders}}
         <div class="match-card">
           <div class="match-header">
-            <span class="match-data-label mx-3">Match ID</span>
+            <div class="d-flex justify-content-between align-items-center">
+              <span class="match-data-label ml-3">Match ID</span>
+              {{if $match.IsCancel}}<span class="red mr-3">cancellation</span>{{end}}
+            </div>
             <div class="mono mx-3 fs15">{{$match.MatchID}}</div>
           </div>
 
@@ -134,35 +144,35 @@
             {{if len $match.Swap}}
             <div class="px-3 pb-3">
               <span class="match-data-label">Swap ({{$ord.FromSymbol}}, you)</span><br>
-              <a class="mono subtlelink" data-explorer-id="{{$ord.FromID}}"
+              <a class="mono plainlink" data-explorer-id="{{$ord.FromID}}"
                 data-explorer-coin="{{$match.SwapString}}">{{$match.SwapString}}</a>
             </div>
             {{end}}
             {{if len $match.CounterSwap}}
             <div class="px-3 pb-3">
               <span class="match-data-label">Swap ({{$ord.ToSymbol}}, them)</span><br>
-              <a class="mono subtlelink" data-explorer-id="{{$ord.ToID}}"
+              <a class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
                 data-explorer-coin="{{$match.CounterSwapString}}">{{$match.CounterSwapString}}</a>
             </div>
             {{end}}
             {{if len $match.Redeem}}
             <div class="px-3 pb-3">
               <span class="match-data-label">Redemption ({{$ord.ToSymbol}}, you)</span><br>
-              <a class="mono subtlelink" data-explorer-id="{{$ord.ToID}}"
+              <a class="mono plainlink" data-explorer-id="{{$ord.ToID}}"
                 data-explorer-coin="{{$match.RedeemString}}">{{$match.RedeemString}}</a>
             </div>
             {{end}}
             {{if len $match.CounterRedeem}}
             <div class="px-3 pb-3">
               <span class="match-data-label">Redemption ({{$ord.FromSymbol}}, them)</span><br>
-              <a class="mono subtlelink" data-explorer-id="{{$ord.FromID}}"
+              <a class="mono plainlink" data-explorer-id="{{$ord.FromID}}"
                 data-explorer-coin="{{$match.CounterRedeemString}}">{{$match.CounterRedeemString}}</a>
             </div>
             {{end}}
             {{if len $match.Refund}}
             <div class="px-3 pb-3">
               <span class="match-data-label red">Refund ({{$ord.FromSymbol}}, you)</span><br>
-              <a class="mono subtlelink red" data-explorer-id="{{$ord.FromID}}"
+              <a class="mono plainlink red" data-explorer-id="{{$ord.FromID}}"
                 data-explorer-coin="{{$match.RefundString}}">{{$match.RefundString}}</a>
             </div>
             {{end}}
@@ -175,14 +185,20 @@
 
     {{- /* FUNDING COINS */ -}}
     <div class="order-datum d-inline-block my-3">
-      <div class="text-left">FundingCoins</div>
+      <div class="text-left">Funding Coins</div>
       <div class="fs14 text-left">
         {{range $ord.FundingCoinIDs}}
-          <a class="subtlelink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.}}">{{.}}</a><br>
+          <a class="plainlink mono" data-explorer-id="{{$ord.FromID}}" data-explorer-coin="{{.}}">{{.}}</a><br>
         {{end}}
       </div>
     </div>
 
+  </div>
+
+  <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
+    <form class="card bg1 d-hide" id="cancelForm" autocomplete="off">
+      {{template "cancelOrderForm"}}
+    </form>
   </div>
 </div>
 {{template "bottom"}}

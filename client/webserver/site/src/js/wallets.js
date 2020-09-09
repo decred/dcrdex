@@ -194,7 +194,7 @@ export default class WalletsPage extends BasePage {
         if (market.baseid === assetID) counterSymbol = market.quotesymbol
         mBox.querySelector('img').src = Doc.logoPath(counterSymbol)
         // Bind the click to a load of the markets page.
-        const pageData = { market: makeMarket(host, market.baseid, market.quoteid) }
+        const pageData = { host: host, base: market.baseid, quote: market.quoteid }
         bind(mBox, 'click', () => { app.loadPage('markets', pageData) })
         marketsBox.appendChild(mBox)
       }
@@ -432,15 +432,4 @@ export default class WalletsPage extends BasePage {
  */
 function prettyMarketName (market) {
   return `${market.basesymbol.toUpperCase()}-${market.quotesymbol.toUpperCase()}`
-}
-
-/*
- * makeMarket creates a market object.
- */
-function makeMarket (host, base, quote) {
-  return {
-    host: host,
-    base: base,
-    quote: quote
-  }
 }

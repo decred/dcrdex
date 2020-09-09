@@ -462,6 +462,18 @@ export default class Application {
     return o
   }
 
+  /* order attempts to locate an order by order ID. */
+  order (oid) {
+    for (const xc of Object.values(this.user.exchanges)) {
+      for (const market of Object.values(xc.markets)) {
+        if (!market.orders) continue
+        for (const ord of market.orders) {
+          if (ord.id === oid) return ord
+        }
+      }
+    }
+  }
+
   /*
    * checkResponse checks the response object as returned from the functions in
    * the http module. If the response indicates that the request failed, a

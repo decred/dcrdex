@@ -151,7 +151,7 @@ export default class MarketsPage extends BasePage {
     // Order verification form
     bindForm(page.verifyForm, page.vSubmit, async () => { this.submitOrder() })
     // Cancel order form
-    bind(page.cancelSubmit, 'click', async () => { this.submitCancel() })
+    bindForm(page.cancelForm, page.cancelSubmit, async () => { this.submitCancel() })
 
     // If the user clicks outside of a form, it should close the page overlay.
     bind(page.forms, 'mousedown', e => {
@@ -223,7 +223,12 @@ export default class MarketsPage extends BasePage {
 
     // Fetch the first market in the list, or the users last selected market, if
     // it exists.
-    var selected = (data && data.market) ? data.market : State.fetch(lastMarketKey)
+    var selected
+    if (data && data.host && typeof data.base !== 'undefined' && typeof data.quote !== 'undefined') {
+      selected = makeMarket(data.host, parseInt(data.base), parseInt(data.quote))
+    } else {
+      selected = State.fetch(lastMarketKey)
+    }
     if (!selected || !this.marketList.exists(selected.host, selected.base, selected.quote)) {
       selected = this.marketList.first()
     }

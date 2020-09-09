@@ -114,6 +114,13 @@ func (ord *orderReader) ToID() uint32 {
 	return ord.BaseID
 }
 
+// Cancelable will be true for standing limit orders in status epoch or booked.
+func (ord *orderReader) Cancelable() bool {
+	return ord.Type == order.LimitOrderType &&
+		ord.TimeInForce == order.StandingTiF &&
+		ord.Status <= order.OrderStatusBooked
+}
+
 // TypeString combines the order type and side into a single string.
 func (ord *orderReader) TypeString() string {
 	s := "market"
@@ -251,12 +258,46 @@ func (ord *orderReader) sumTo(filter func(match *core.Match) bool) uint64 {
 	return v
 }
 
+// hasLiveMatches will be true if there are any matches < MakerRedeemed.
+func (ord *orderReader) hasLiveMatches() bool {
+	for _, match := range ord.Matches {
+		if match.Status < order.MakerRedeemed {
+			return true
+		}
+	}
+	return false
+}
+
 // StatusString is the order status.
 func (ord *orderReader) StatusString() string {
-	if ord.Cancelling {
-		return "cancelling"
+	isLive := ord.hasLiveMatches()
+	switch ord.Status {
+	case order.OrderStatusUnknown:
+		return "unknown"
+	case order.OrderStatusEpoch:
+		return "epoch"
+	case order.OrderStatusBooked:
+		if ord.Cancelling {
+			return "cancelling"
+		}
+		return "booked"
+	case order.OrderStatusExecuted:
+		if isLive {
+			return "settling"
+		}
+		return "executed"
+	case order.OrderStatusCanceled:
+		if isLive {
+			return "canceled/settling"
+		}
+		return "canceled"
+	case order.OrderStatusRevoked:
+		if isLive {
+			return "revoked/settling"
+		}
+		return "revoked"
 	}
-	return ord.Status.String()
+	return "unknown"
 }
 
 // RateString is a formatted rate with units.

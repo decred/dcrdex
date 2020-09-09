@@ -155,7 +155,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		addTemplate("wallets", bb, "forms").
 		addTemplate("settings", bb, "forms").
 		addTemplate("orders", bb).
-		addTemplate("order", bb)
+		addTemplate("order", bb, "forms")
 	err = tmpl.buildErr()
 	if err != nil {
 		return nil, err
@@ -242,6 +242,7 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		r.Post("/setwalletpass", s.apiSetWalletPass)
 		r.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
 		r.Post("/orders", s.apiOrders)
+		r.Post("/order", s.apiOrder)
 	})
 
 	// Files
