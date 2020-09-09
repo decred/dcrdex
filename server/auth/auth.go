@@ -696,21 +696,25 @@ func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message, 
 // their account should be penalized.
 func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) error {
 	// Notify user of penalty.
-	details := "You may no longer trade. Leave your client running to complete outstanding trades."
+	details := "Ordering has been suspended for this account. Contact the exchange operator to reinstate privileges."
+	if auth.anarchy {
+		details = "You were penalized but the penalty will not be counted against you."
+	}
+	details = fmt.Sprintf("%s\n%s", details, rule.Details())
 	penalty := &msgjson.Penalty{
 		Rule:     rule,
 		Time:     uint64(unixMsNow().Unix()),
-		Duration: uint64(time.Hour * 24 * 365 * 100), // 100 years
+		Duration: uint64(rule.Duration()),
 		Details:  details,
 	}
-	sig, err := auth.signer.Sign(penalty.Serialize())
+	penaltyNote := &msgjson.PenaltyNote{
+		Penalty: penalty,
+	}
+	sig, err := auth.signer.Sign(penaltyNote.Serialize())
 	if err != nil {
 		return fmt.Errorf("signature error: %v", err)
 	}
-	penaltyNote := &msgjson.PenaltyNote{
-		Sig:     sig.Serialize(),
-		Penalty: penalty,
-	}
+	penaltyNote.Sig = sig.Serialize()
 	note, err := msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
 	if err != nil {
 		return fmt.Errorf("error creating penalty notification: %v", err)
