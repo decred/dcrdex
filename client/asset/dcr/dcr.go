@@ -919,6 +919,40 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	if len(notFound) == 0 {
 		return coins, nil
 	}
+
+	// Check locked outputs for not found coins.
+	lockedOutputs, err := dcr.lockedOutputs()
+	if err != nil {
+		return nil, err
+	}
+	for _, output := range lockedOutputs {
+		txHash, err := chainhash.NewHashFromStr(output.Txid)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding txid from rpc server %s: %v", output.Txid, err)
+		}
+		pt := newOutPoint(txHash, output.Vout)
+		if notFound[pt] {
+			txOut, err := dcr.node.GetTxOut(txHash, output.Vout, true)
+			if err != nil {
+				return nil, fmt.Errorf("gettxout error for locked output %v: %v", pt.String(), err)
+			}
+			var address string
+			if len(txOut.ScriptPubKey.Addresses) > 0 {
+				address = txOut.ScriptPubKey.Addresses[0]
+			}
+			coin := newOutput(dcr.node, txHash, output.Vout, toAtoms(output.Amount), output.Tree, nil)
+			coins = append(coins, coin)
+			dcr.fundingCoins[pt] = &fundingCoin{
+				op:   coin,
+				addr: address,
+			}
+			delete(notFound, pt)
+			if len(notFound) == 0 {
+				return coins, nil
+			}
+		}
+	}
+
 	unspents, err := dcr.unspents()
 	if err != nil {
 		return nil, err
@@ -1824,11 +1858,17 @@ func (dcr *ExchangeWallet) parseUTXOs(unspents []walletjson.ListUnspentResult) (
 	return utxos, nil
 }
 
+// lockedOutputs fetches locked outputs for the ExchangeWallet account using
+// rpc RawRequest.
+func (dcr *ExchangeWallet) lockedOutputs() ([]chainjson.TransactionInput, error) {
+	var locked []chainjson.TransactionInput
+	err := dcr.nodeRawRequest(methodListLockUnspent, anylist{dcr.acct}, &locked)
+	return locked, err
+}
+
 // lockedAtoms is the total value of locked outputs, as locked with LockUnspent.
 func (dcr *ExchangeWallet) lockedAtoms() (uint64, error) {
-	// Fetch locked outputs for the ExchangeWallet account using RawRequest.
-	var lockedOutpoints []chainjson.TransactionInput
-	err := dcr.nodeRawRequest(methodListLockUnspent, anylist{dcr.acct}, &lockedOutpoints)
+	lockedOutpoints, err := dcr.lockedOutputs()
 	if err != nil {
 		return 0, err
 	}

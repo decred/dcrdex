@@ -810,7 +810,7 @@ func (btc *ExchangeWallet) ReturnCoins(unspents asset.Coins) error {
 func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 	// First check if we have the coins in cache.
 	coins := make(asset.Coins, 0, len(ids))
-	notFound := make(map[outPoint]struct{})
+	notFound := make(map[outPoint]bool)
 	btc.fundingMtx.Lock()
 	defer btc.fundingMtx.Unlock() // stay locked until we update the map at the end
 	for _, id := range ids {
@@ -824,12 +824,59 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			coins = append(coins, newOutput(btc.node, txHash, vout, fundingCoin.amount, fundingCoin.redeemScript))
 			continue
 		}
-		notFound[pt] = struct{}{}
+		notFound[pt] = true
 	}
-
 	if len(notFound) == 0 {
 		return coins, nil
 	}
+
+	// Check locked outputs for not found coins.
+	lockedOutpoints, err := btc.wallet.ListLockUnspent()
+	if err != nil {
+		return nil, err
+	}
+	for _, rpcOP := range lockedOutpoints {
+		txHash, err := chainhash.NewHashFromStr(rpcOP.TxID)
+		if err != nil {
+			return nil, fmt.Errorf("error decoding txid from rpc server %s: %v", rpcOP.TxID, err)
+		}
+		pt := newOutPoint(txHash, rpcOP.Vout)
+		if notFound[pt] {
+			txOut, err := btc.node.GetTxOut(txHash, rpcOP.Vout, true)
+			if err != nil {
+				return nil, fmt.Errorf("gettxout error for locked outpoint %v: %v", pt.String(), err)
+			}
+			var address string
+			if len(txOut.ScriptPubKey.Addresses) > 0 {
+				address = txOut.ScriptPubKey.Addresses[0]
+			}
+			pkScript, err := hex.DecodeString(txOut.ScriptPubKey.Hex)
+			if err != nil {
+				return nil, fmt.Errorf("error decoding pubkey script from hex '%s': %v",
+					txOut.ScriptPubKey.Hex, err)
+			}
+			nfo, err := dexbtc.InputInfo(pkScript, nil, btc.chainParams)
+			if err != nil {
+				return nil, fmt.Errorf("error reading asset info: %v", err)
+			}
+			utxo := &compositeUTXO{
+				txHash:       txHash,
+				vout:         rpcOP.Vout,
+				address:      address,
+				redeemScript: nil,
+				amount:       toSatoshi(txOut.Value),
+				input:        nfo,
+			}
+			coin := newOutput(btc.node, txHash, rpcOP.Vout, toSatoshi(txOut.Value), nil)
+			coins = append(coins, coin)
+			btc.fundingCoins[pt] = utxo
+			delete(notFound, pt)
+			if len(notFound) == 0 {
+				return coins, nil
+			}
+		}
+	}
+
 	_, utxoMap, _, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, err
@@ -837,12 +884,7 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 
 	lockers := make([]*output, 0, len(ids))
 
-	for _, id := range ids {
-		txHash, vout, err := decodeCoinID(id)
-		if err != nil {
-			return nil, err
-		}
-		pt := newOutPoint(txHash, vout)
+	for pt := range notFound {
 		utxo, found := utxoMap[pt]
 		if !found {
 			return nil, fmt.Errorf("funding coin %s not found", pt.String())

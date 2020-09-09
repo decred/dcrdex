@@ -754,6 +754,7 @@ func TestFundingCoins(t *testing.T) {
 		Safe:         true,
 	}
 	unspents := []*ListUnspentResult{p2pkhUnspent}
+	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{})
 	node.rawRes[methodListUnspent] = mustMarshal(t, unspents)
 	node.rawRes[methodLockUnspent] = mustMarshal(t, true)
 	coinIDs := []dex.Bytes{coinID}
@@ -794,6 +795,18 @@ func TestFundingCoins(t *testing.T) {
 	ensureErr("bad coin ID")
 	coinIDs = ogIDs
 
+	// Coins locked but not in wallet.fundingCoins.
+	node.rawRes[methodListLockUnspent] = mustMarshal(t, []*RPCOutpoint{
+		{TxID: p2pkhUnspent.TxID, Vout: p2pkhUnspent.Vout},
+	})
+	node.rawRes[methodListUnspent] = mustMarshal(t, []*ListUnspentResult{})
+	node.txOutRes = &btcjson.GetTxOutResult{
+		Value: p2pkhUnspent.Amount,
+		ScriptPubKey: btcjson.ScriptPubKeyResult{
+			Hex:       hex.EncodeToString(p2pkhUnspent.ScriptPubKey),
+			Addresses: []string{p2pkhUnspent.Address},
+		},
+	}
 	ensureGood()
 }
 
