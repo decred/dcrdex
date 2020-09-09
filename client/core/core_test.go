@@ -4203,8 +4203,7 @@ func TestHandlePenaltyMsg(t *testing.T) {
 	tests := []struct {
 		name    string
 		key     *secp256k1.PrivateKey
-		note    *msgjson.Message
-		payload msgjson.Signable
+		payload interface{}
 		wantErr bool
 	}{{
 		name:    "ok",
@@ -4213,7 +4212,7 @@ func TestHandlePenaltyMsg(t *testing.T) {
 	}, {
 		name:    "bad note",
 		key:     tDexPriv,
-		note:    noMatch,
+		payload: noMatch,
 		wantErr: true,
 	}, {
 		name:    "wrong sig",
@@ -4222,19 +4221,24 @@ func TestHandlePenaltyMsg(t *testing.T) {
 		wantErr: true,
 	}}
 	for _, test := range tests {
-		note := test.note
 		var err error
-		if note == nil {
-			sign(test.key, test.payload)
+		var note *msgjson.Message
+		switch v := test.payload.(type) {
+		case *msgjson.Penalty:
 			penaltyNote := &msgjson.PenaltyNote{
-				Penalty: penalty,
-				Sig:     penalty.Sig,
+				Penalty: v,
 			}
+			sign(test.key, penaltyNote)
 			note, err = msgjson.NewNotification(msgjson.PenaltyRoute, penaltyNote)
 			if err != nil {
 				t.Fatalf("error creating penalty notification: %v", err)
 			}
+		case *msgjson.Message:
+			note = v
+		default:
+			t.Fatalf("unknown payload type: %T", v)
 		}
+
 		err = handlePenaltyMsg(tCore, dc, note)
 		if test.wantErr {
 			if err == nil {

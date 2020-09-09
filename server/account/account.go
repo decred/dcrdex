@@ -96,6 +96,10 @@ const (
 	NoRule Rule = iota
 	// FailureToAct means that an account has not followed through on one of their
 	// swap negotiation steps.
+	PreimageReveal
+	// MaxRule in not an actual rule. It is a placeholder that is used to
+	// determine the total number of rules. It must always be the last
+	// definition in this list.
 	FailureToAct
 	// CancellationRate means the account's cancellation rate  has dropped below
 	// the acceptable level.
@@ -105,20 +109,16 @@ const (
 	LowFees
 	// PreimageReveal means an account failed to respond with a valid preimage
 	// for their order during epoch processing.
-	PreimageReveal
-	// MaxRule in not an actual rule. It is a placeholder that is used to
-	// determine the total number of rules. It must always be the last
-	// definition in this list.
 	MaxRule
 )
 
 // ruleNames is a map of rules to names.
 var ruleNames = map[Rule]string{
 	NoRule:            "NoRule",
+	PreimageReveal:    "PreimageReveal",
 	FailureToAct:      "FailureToAct",
 	CancellationRatio: "CancellationRatio",
 	LowFees:           "LowFees",
-	PreimageReveal:    "PreimageReveal",
 }
 
 // String satisfies the Stringer interface.
@@ -132,10 +132,10 @@ func (r Rule) String() string {
 // ruleDetails is a map of rules to details.
 var ruleDetails = map[Rule]string{
 	NoRule:            "no rules have been broken",
+	PreimageReveal:    "failed to respond with a valid preimage for an order during epoch processing",
 	FailureToAct:      "did not follow through on a swap negotiation step",
 	CancellationRatio: "cancellation rate dropped below the acceptable level",
 	LowFees:           "did not pay transaction mining fees at the requisite level",
-	PreimageReveal:    "failed to respond with a valid preimage for an order during epoch processing",
 }
 
 // Details returns details about the rule.
@@ -149,10 +149,10 @@ func (r Rule) Details() string {
 // ruleDuration is a map of rules to penalty durations.
 var ruleDurations = map[Rule]time.Duration{
 	NoRule:            0,
+	PreimageReveal:    century,
 	FailureToAct:      century,
 	CancellationRatio: century,
 	LowFees:           century,
-	PreimageReveal:    century,
 }
 
 // Duration returns the penalty duration of the rule being broken.

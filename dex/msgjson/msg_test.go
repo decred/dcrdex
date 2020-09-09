@@ -828,6 +828,7 @@ func TestPenalty(t *testing.T) {
 		Duration: uint64(3153600000000000000),
 		Details:  "You may no longer trade. Leave your client running to finish pending trades.",
 	}
+	penaltyNote := &PenaltyNote{Penalty: penalty}
 
 	exp := []byte{
 		// Rule 1 byte.
@@ -847,7 +848,7 @@ func TestPenalty(t *testing.T) {
 		0x72, 0x61, 0x64, 0x65, 0x73, 0x2e,
 	}
 
-	b := penalty.Serialize()
+	b := penaltyNote.Serialize()
 	if !bytes.Equal(b, exp) {
 		t.Fatalf("unexpected serialization. Wanted %x, got %x", exp, b)
 	}

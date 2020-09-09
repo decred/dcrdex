@@ -159,7 +159,7 @@ const (
 	// delivering text messages from the operator.
 	NotifyRoute = "notify"
 	// PenaltyRoute is the DEX-originating notification-type message
-	// informing of a broken rule and the subsequent penalty.
+	// informing of a broken rule and the resulting penalty.
 	PenaltyRoute = "penalty"
 )
 
@@ -832,6 +832,8 @@ func (c *Connect) Serialize() []byte {
 }
 
 // ConnectResult is the result for the ConnectRoute request.
+//
+// TODO: Include penalty data as specified in the spec.
 type ConnectResult struct {
 	Sig     Bytes    `json:"sig"`
 	Matches []*Match `json:"matches"`
@@ -839,22 +841,22 @@ type ConnectResult struct {
 
 // PenaltyNote is the payload of a Penalty notification.
 type PenaltyNote struct {
-	Sig     Bytes    `json:"sig"`
+	Signature
 	Penalty *Penalty `json:"penalty"`
 }
 
 // Penalty is part of the payload for a dex-originating Penalty notification
 // and part of the connect response.
 type Penalty struct {
-	Signature
 	Rule     account.Rule `json:"rule"`
 	Time     uint64       `json:"timestamp"`
 	Duration uint64       `json:"duration"`
 	Details  string       `json:"details"`
 }
 
-// Serialize serializes the Penalty data.
-func (p *Penalty) Serialize() []byte {
+// Serialize serializes the PenaltyNote data.
+func (n *PenaltyNote) Serialize() []byte {
+	p := n.Penalty
 	// serialization: rule(1) + time (8) + duration (8) details (variable,
 	// ~100) = 117 bytes
 	b := make([]byte, 0, 117)
