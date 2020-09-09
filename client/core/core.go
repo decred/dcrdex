@@ -2056,6 +2056,15 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 		coinIDs = append(coinIDs, []byte(coins[i].ID()))
 	}
 
+	// The coins selected for this order will need to be unlocked
+	// if the order does not get to the server successfully.
+	unlockCoins := func() {
+		err := fromWallet.ReturnCoins(coins)
+		if err != nil {
+			log.Warnf("Unable to return %s funding coins: %v", unbip(fromWallet.AssetID), err)
+		}
+	}
+
 	// Construct the order.
 	preImg := newPreimage()
 	prefix := &order.Prefix{
@@ -2097,11 +2106,13 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	err = order.ValidateOrder(ord, order.OrderStatusEpoch, wallets.baseAsset.LotSize)
 	if err != nil {
+		unlockCoins()
 		return nil, 0, fmt.Errorf("ValidateOrder error: %w", err)
 	}
 
 	msgCoins, err := messageCoins(wallets.fromWallet, coins)
 	if err != nil {
+		unlockCoins()
 		return nil, 0, fmt.Errorf("wallet %v failed to sign coins: %w", wallets.fromAsset.ID, err)
 	}
 
@@ -2117,6 +2128,8 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	result := new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
+		// Do NOT unlock the coins because the request may have actually reached
+		// the server.
 		return nil, 0, fmt.Errorf("new order request with DEX server %v failed: %w", dc.acct.host, err)
 	}
 
@@ -2131,6 +2144,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 
 	err = validateOrderResponse(dc, result, ord, msgOrder)
 	if err != nil {
+		unlockCoins()
 		log.Errorf("Abandoning order. preimage: %x, server time: %d: %v",
 			preImg[:], result.ServerTime, err)
 		return nil, 0, fmt.Errorf("validateOrderResponse error: %w", err)
@@ -2150,6 +2164,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	err = c.db.UpdateOrder(dbOrder)
 	if err != nil {
+		// Do NOT unlock the coins, they're already locked by server.
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
 		return nil, 0, fmt.Errorf("Order abandoned due to database error: %w", err)
 	}
@@ -2312,6 +2327,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		trade := matchAnomalies.trade
 		missing, extras := matchAnomalies.missing, matchAnomalies.extra
 
+		trade.mtx.Lock()
+
 		// Flag each of the missing matches as revoked.
 		for _, match := range missing {
 			log.Warnf("DEX %s did not report active match %s on order %s - assuming revoked.",
@@ -2325,10 +2342,13 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			}
 		}
 
-		corder, _ := trade.coreOrder()
+		corder, _ := trade.coreOrderInternal()
 
 		// Send a "Missing matches" order note if there are missing match message.
+		// Also, check if the now-Revoked matches were the last set of matches that
+		// required sending swaps, and unlock coins if so.
 		if len(missing) > 0 {
+			trade.maybeReturnCoins()
 			details := fmt.Sprintf("%d matches for order %s were not reported by %q and are considered revoked",
 				len(missing), trade.token(), dc.acct.host)
 			c.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
@@ -2345,6 +2365,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 					dc.acct.host, extra.MatchID, extra.OrderID)
 			}
 		}
+
+		trade.mtx.Unlock()
 	}
 
 	return nil
@@ -3234,17 +3256,10 @@ out:
 			dc.tradeMtx.Lock()
 			for oid, trade := range dc.trades {
 				if !trade.isActive() {
-					log.Infof("Retiring inactive order %v", oid)
-					trade.mtx.RLock()
-					if trade.change != nil {
-						changeCoins := asset.Coins{trade.change}
-						err := trade.wallets.fromWallet.ReturnCoins(changeCoins)
-						log.Debugf("Unlocked order %v change coins: %v (wallet error = %v)", oid, changeCoins, err)
-					}
-					tradeCoins := trade.coinList()
-					err := trade.wallets.fromWallet.ReturnCoins(tradeCoins)
-					log.Debugf("Unlocked funding coins for order %v: %v (wallet error = %v)", oid, tradeCoins, err)
-					trade.mtx.RUnlock()
+					trade.mtx.Lock()
+					log.Infof("Retiring inactive order %v in status %v", oid, trade.metaData.Status)
+					trade.returnCoins()
+					trade.mtx.Unlock()
 					delete(dc.trades, oid)
 					updatedAssets.count(trade.wallets.fromAsset.ID)
 					continue

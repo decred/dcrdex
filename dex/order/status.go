@@ -22,7 +22,7 @@ const (
 	// such, when an order with this "booked" status is matched with another
 	// order, it should have its filled amount updated, and its status should
 	// only be changed to OrderStatusExecuted if the remaining quantity becomes
-	// less than the lot size, or perhaps to OrderStatusCanceled if the swap has
+	// less than the lot size, or perhaps to OrderStatusRevoked if the swap has
 	// failed and DEX conduct policy requires that it be removed from the order
 	// book.
 	OrderStatusBooked

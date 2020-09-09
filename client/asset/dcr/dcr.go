@@ -19,7 +19,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"decred.org/dcrdex/client/asset"
@@ -336,15 +335,13 @@ type ExchangeWallet struct {
 	log             dex.Logger
 	acct            string
 	tipChange       func(error)
-	hasConnected    uint32
 	fallbackFeeRate uint64
 	useSplitTx      bool
 
 	tipMtx     sync.RWMutex
 	currentTip *block
 
-	// Coins returned by Fund are cached for quick reference and for cleanup on
-	// shutdown.
+	// Coins returned by Fund are cached for quick reference.
 	fundingMtx   sync.RWMutex
 	fundingCoins map[outPoint]*fundingCoin
 	splitFunds   map[outPoint][]*fundingCoin
@@ -505,14 +502,6 @@ func (dcr *ExchangeWallet) Connect(ctx context.Context) (*sync.WaitGroup, error)
 	dcr.log.Infof("Connected to dcrwallet (JSON-RPC API v%s) proxying dcrd (JSON-RPC API v%s) on %v",
 		walletSemver, nodeSemver, curnet)
 
-	// If this is the first time connecting, clear the locked coins. This should
-	// have been done at shutdown, but shutdown may not have been clean.
-	if atomic.SwapUint32(&dcr.hasConnected, 1) == 0 {
-		err := dcr.node.LockUnspent(true, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -613,7 +602,11 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
 
 	// Send a split, if preferred.
 	if dcr.useSplitTx && !ord.Immediate {
-		return dcr.split(ord.Value, ord.MaxSwapCount, coins, inputsSize, fundingCoins, ord.DEXConfig)
+		splitCoins, err := dcr.split(ord.Value, ord.MaxSwapCount, coins, inputsSize, fundingCoins, ord.DEXConfig)
+		if err != nil {
+			dcr.returnCoins(coins)
+		}
+		return splitCoins, err
 	}
 
 	dcr.log.Infof("Funding %d atom order with coins %v worth %d", ord.Value, coins, sum)
@@ -816,6 +809,19 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 	// spent immediately, so subsequent calls to FundOrder might result in a
 	// `-4: rejected transaction: transaction in the pool already spends the
 	// same coins` error.
+	// TODO: Could this cause balance report inaccuracy, where the locked atoms
+	// returned by dcrwallet includes both the funding coins and the split tx
+	// output?
+	// E.g. total of 100 DCR (locked) split to produce a desired output of 40 DCR
+	// that is also locked:
+	// dcr balance before split, total = 200 DCR, locked = 0
+	// dcr balance after split, total = 199 DCR (-split tx fee), locked = 140 DCR
+	// If this inaccurate report is a possibility, might be better to unlock the
+	// funding coins sooner rather than later and prevent FundOrder double spends
+	// by checking listunspent results against `dcr.splitFunds`.
+	// If the split fund txout is later unlocked without being spent, the initial
+	// funding coins will be deleted from dcr.splitFunds, making them re-spendable
+	// by dcr.FundOrder.
 	// // Unlock the spent coins.
 	// err = dcr.returnCoins(coins)
 	// if err != nil {
@@ -961,7 +967,9 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 }
 
 // Swap sends the swaps in a single transaction. The Receipts returned can be
-// used to refund a failed transaction.
+// used to refund a failed transaction. The Input coins are manually unlocked
+// because they're not auto-unlocked by the wallet and therefore inaccurately
+// included as part of the locked balance despite being spent.
 func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
 	var totalOut uint64
 	// Start with an empty MsgTx.
@@ -1757,13 +1765,7 @@ func (dcr *ExchangeWallet) addInputCoins(msgTx *wire.MsgTx, coins asset.Coins) (
 	return totalIn, nil
 }
 
-// Shutdown down the rpcclient.Client.
 func (dcr *ExchangeWallet) shutdown() {
-	// Unlock any locked outputs.
-	err := dcr.node.LockUnspent(true, nil)
-	if err != nil {
-		dcr.log.Errorf("failed to unlock DCR outputs on shutdown: %v", err)
-	}
 	// Close all open channels for contract redemption searches
 	// to prevent leakages and ensure goroutines that are started
 	// to wait on these channels end gracefully.
@@ -1773,6 +1775,8 @@ func (dcr *ExchangeWallet) shutdown() {
 		delete(dcr.findRedemptionQueue, contractOutpoint)
 	}
 	dcr.findRedemptionMtx.Unlock()
+
+	// Shut down the rpcclient.Client.
 	if dcr.client != nil {
 		dcr.client.Shutdown()
 		dcr.client.WaitForShutdown()
