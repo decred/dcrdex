@@ -202,7 +202,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		// Respond with a pong.
 		err = ws.WriteControl(websocket.PongMessage, []byte{}, now.Add(writeWait))
 		if err != nil {
-			conn.close() // read loop handles reconnect unless context is cancelled
+			// read loop handles reconnect
 			log.Errorf("pong write error: %v", err)
 			return err
 		}
@@ -437,14 +437,12 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 	err = conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
 	if err != nil {
 		log.Errorf("Send: failed to set write deadline: %v", err)
-		conn.close() // read loop handles reconnect unless context is cancelled
 		return err
 	}
 
 	err = conn.ws.WriteMessage(websocket.TextMessage, b)
 	if err != nil {
 		log.Errorf("Send: WriteMessage error: %v", err)
-		conn.close() // read loop handles reconnect unless context is cancelled
 		return err
 	}
 	return nil
