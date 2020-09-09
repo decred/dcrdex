@@ -207,6 +207,96 @@ func (t *trackedTrade) cancelTrade(co *order.CancelOrder, preImg order.Preimage)
 	return nil
 }
 
+// reconcile compares the server-reported order status and activeness state of
+// this order against the currently recorded status and activeness state and
+// updates the trade's status where necessary:
+// - Update status to Booked if currently recorded as Epoch and server reports
+//   status as Booked.
+// - Update status to Executed, Canceled or Revoked if currently recorded as
+//   active but the order isn't reported as active by the server.
+func (t *trackedTrade) reconcile(serverStatus order.OrderStatus, isServerActive bool) bool {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+
+	oid := t.ID()
+	dexHost := t.dc.acct.host
+	currentStatus, isCurrentlyActive := t.metaData.Status, t.metaData.Status <= order.OrderStatusBooked
+
+	switch {
+	case isServerActive && serverStatus < currentStatus:
+		log.Warnf("Inconsistent status %v reported for order %v by DEX %s, client status = %v",
+			serverStatus, oid, dexHost, currentStatus)
+
+	case isServerActive && serverStatus > currentStatus:
+		// Typically for orders previously in Epoch status but are now Booked.
+		// It's possible that the order was not matched and the nomatch request
+		// was missed or the order was matched, we missed the match request and
+		// the matches were revoked before we re-connected.
+		// Only applicable to standing orders.
+		if lo, ok := t.Order.(*order.LimitOrder); ok && lo.Force == order.StandingTiF {
+			t.metaData.Status = serverStatus
+			log.Debugf("Order %v updated from recorded status %v to new status %v reported by DEX %s",
+				oid, currentStatus, serverStatus, dexHost)
+		} else {
+			log.Warnf("Incorrect status %v reported for non-standing order %v by DEX %s, client status = %v",
+				serverStatus, oid, dexHost, currentStatus)
+		}
+
+	case !isServerActive && isCurrentlyActive:
+		// TODO: Implement an `order_status` route to accurately determine new
+		// status. If Canceled, might need to call tracker.processCancelMatch.
+		if currentStatus == order.OrderStatusEpoch {
+			// Epoch orders that are now inactive may be executed, revoked or canceled.
+			// - Set to canceled if the preimage was not revealed.
+			// - Set to executed if preimage was revealed and order is a non-standing order.
+			// - Standing limit orders are special cases. They may be Executed without the
+			//   client being aware of the final matches or they may have been matched to a
+			//   client's cancel order (i.e. Canceled) or they may have been Revoked. For now,
+			//   pending `order_status` implementation, assume Canceled if a cancel order is
+			//   set, Revoked otherwise.
+			if !t.metaData.Proof.PreimageRevealed {
+				t.metaData.Status = order.OrderStatusRevoked
+			} else if lo, ok := t.Order.(*order.LimitOrder); !ok || lo.Force == order.ImmediateTiF {
+				t.metaData.Status = order.OrderStatusExecuted
+			} else if t.cancel != nil {
+				t.metaData.Status = order.OrderStatusCanceled
+			} else {
+				t.metaData.Status = order.OrderStatusRevoked
+			}
+		} else {
+			// Booked orders that are now inactive are either revoked or canceled.
+			if t.cancel != nil {
+				t.metaData.Status = order.OrderStatusCanceled
+			} else {
+				t.metaData.Status = order.OrderStatusRevoked
+			}
+		}
+		log.Debugf("Order %v updated from recorded status %v to inactive status %v",
+			oid, currentStatus, t.metaData.Status)
+		// Attempt to return locked coins now that the order is set to inactive status.
+		t.maybeReturnCoins()
+
+	default:
+		if isServerActive {
+			log.Tracef("Status reconciliation not required for order %v, status %v, server-reported status %v",
+				oid, t.metaData.Status, serverStatus)
+		} else {
+			log.Tracef("Status reconciliation not required for server-reported inactive order %v, status %v",
+				oid, t.metaData.Status)
+		}
+	}
+
+	statusUpdated := currentStatus != t.metaData.Status
+	if statusUpdated {
+		err := t.db.UpdateOrder(t.metaOrder())
+		if err != nil {
+			log.Errorf("unable to update order: %v", err)
+		}
+	}
+
+	return statusUpdated
+}
+
 // nomatch sets the appropriate order status and returns funding coins.
 func (t *trackedTrade) nomatch(oid order.OrderID) (assetMap, error) {
 	assets := make(assetMap)
@@ -1744,7 +1834,7 @@ func (t *trackedTrade) maybeReturnCoins() bool {
 			side == order.Taker && status < order.TakerSwapCast {
 			// Match is active (not revoked, not refunded) and client
 			// is yet to execute swap. Keep coins locked.
-			log.Tracef("not unlocking coins for order with match side %s, status", side, status)
+			log.Tracef("not unlocking coins for order %v with match side %s, status %s", t.ID(), side, status)
 			return false
 		}
 	}

@@ -31,6 +31,7 @@ import (
 	dexbtc "decred.org/dcrdex/dex/networks/btc"
 	dexdcr "decred.org/dcrdex/dex/networks/dcr"
 	"decred.org/dcrdex/dex/order"
+	"decred.org/dcrdex/dex/order/test"
 	ordertest "decred.org/dcrdex/dex/order/test"
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
@@ -763,12 +764,12 @@ func (rig *testRig) queueNotifyFee() {
 	})
 }
 
-func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match) {
+func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match, orders []*msgjson.Order) {
 	rig.ws.queueResponse(msgjson.ConnectRoute, func(msg *msgjson.Message, f msgFunc) error {
 		connect := new(msgjson.Connect)
 		msg.Unmarshal(connect)
 		sign(tDexPriv, connect)
-		result := &msgjson.ConnectResult{Sig: connect.Sig, Matches: matches}
+		result := &msgjson.ConnectResult{Sig: connect.Sig, Matches: matches, Orders: orders}
 		var resp *msgjson.Message
 		if rpcErr != nil {
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
@@ -1241,7 +1242,7 @@ func TestRegister(t *testing.T) {
 		rig.queueRegister(regRes)
 		queueTipChange()
 		rig.queueNotifyFee()
-		rig.queueConnect(nil, nil)
+		rig.queueConnect(nil, nil, nil)
 	}
 
 	form := &RegisterForm{
@@ -1492,7 +1493,7 @@ func TestLogin(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 
-	rig.queueConnect(nil, nil)
+	rig.queueConnect(nil, nil, nil)
 	_, err := tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("initial Login error: %v", err)
@@ -1509,7 +1510,7 @@ func TestLogin(t *testing.T) {
 
 	// Account not Paid. No error, and account should be unlocked.
 	rig.acct.isPaid = false
-	rig.queueConnect(nil, nil)
+	rig.queueConnect(nil, nil, nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || rig.acct.authed() {
 		t.Fatalf("error for unpaid account: %v", err)
@@ -1575,7 +1576,7 @@ func TestLogin(t *testing.T) {
 
 	tCore = rig.core
 	rig.acct.markFeePaid()
-	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch})
+	rig.queueConnect(nil, []*msgjson.Match{knownMsgMatch /* missing missingMatch! */, extraMsgMatch}, nil)
 	_, err = tCore.Login(tPW)
 	if err != nil || !rig.acct.authed() {
 		t.Fatalf("final Login error: %v", err)
@@ -1602,11 +1603,11 @@ func TestLoginAccountNotFoundError(t *testing.T) {
 
 	expectedErrorMessage := "test account not found error"
 	accountNotFoundError := msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage)
-	rig.queueConnect(accountNotFoundError, nil)
+	rig.queueConnect(accountNotFoundError, nil, nil)
 
 	wallet, _ := newTWallet(tDCR.ID)
 	tCore.wallets[tDCR.ID] = wallet
-	rig.queueConnect(nil, nil)
+	rig.queueConnect(nil, nil, nil)
 
 	result, err := tCore.Login(tPW)
 	if err != nil {
@@ -1623,7 +1624,7 @@ func TestInitializeDEXConnectionsSuccess(t *testing.T) {
 	rig := newTestRig()
 	tCore := rig.core
 	rig.acct.markFeePaid()
-	rig.queueConnect(nil, nil)
+	rig.queueConnect(nil, nil, nil)
 
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
 
@@ -1642,7 +1643,7 @@ func TestInitializeDEXConnectionsAccountNotFoundError(t *testing.T) {
 	tCore := rig.core
 	rig.acct.markFeePaid()
 	expectedErrorMessage := "test account not found error"
-	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage), nil)
+	rig.queueConnect(msgjson.NewError(msgjson.AccountNotFoundError, expectedErrorMessage), nil, nil)
 
 	dexStats := tCore.initializeDEXConnections(rig.crypter)
 
@@ -2185,6 +2186,7 @@ func TestHandlePreimageRequest(t *testing.T) {
 	tracker := &trackedTrade{
 		Order:    ord,
 		preImg:   preImg,
+		db:       rig.db,
 		dc:       rig.dc,
 		metaData: &db.OrderMetaData{},
 	}
@@ -2724,6 +2726,190 @@ func TestTradeTracking(t *testing.T) {
 	if tDcrWallet.lastSwaps.LockChange != false {
 		t.Fatalf("change locked for executed non-standing order (immediate partial fill)")
 	}
+}
+
+func TestOrderStatusReconciliation(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+
+	mkt := rig.dc.market(tDcrBtcMktName)
+	rig.core.wallets[mkt.BaseID], _ = newTWallet(mkt.BaseID)
+	rig.core.wallets[mkt.QuoteID], _ = newTWallet(mkt.QuoteID)
+	walletSet, err := rig.core.walletSet(dc, mkt.BaseID, mkt.QuoteID, true)
+	if err != nil {
+		t.Fatalf("walletSet error: %v", err)
+	}
+
+	type orderSet struct {
+		epoch               *trackedTrade // preimage not yet revealed
+		epochPreimaged      *trackedTrade // preimage revealed
+		booked              *trackedTrade // standing limit orders only
+		bookedPendingCancel *trackedTrade // standing limit orders only
+		executed            *trackedTrade
+	}
+	makeOrderSet := func(force order.TimeInForce, nMatches int) *orderSet {
+		orders := &orderSet{
+			epoch:          makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch, nMatches),
+			epochPreimaged: makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusEpoch, nMatches),
+			executed:       makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusExecuted, nMatches),
+		}
+		orders.epochPreimaged.metaData.Proof.PreimageRevealed = true
+		if force == order.StandingTiF {
+			orders.booked = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked, nMatches)
+			orders.bookedPendingCancel = makeTradeTracker(rig, mkt, walletSet, force, order.OrderStatusBooked, nMatches)
+			orders.bookedPendingCancel.cancel = &trackedCancel{
+				CancelOrder: order.CancelOrder{
+					P: order.Prefix{
+						ServerTime: time.Now(),
+					},
+				},
+			}
+		}
+		return orders
+	}
+
+	standingOrders := makeOrderSet(order.StandingTiF, 0)
+	immediateOrders := makeOrderSet(order.ImmediateTiF, 0)
+
+	tests := []struct {
+		name                string
+		clientOrders        []*trackedTrade  // orders known to the client
+		serverOrders        []*msgjson.Order // orders considered active by the server
+		serverMatches       []*msgjson.Match // matches considered active by the server
+		expectOrderStatuses map[order.OrderID]order.OrderStatus
+	}{
+		{
+			name:         "server orders unknown to client",
+			clientOrders: []*trackedTrade{},
+			serverOrders: []*msgjson.Order{
+				{
+					OrderID: test.RandomOrderID().Bytes(),
+					Status:  uint8(order.OrderStatusBooked),
+				},
+			},
+			expectOrderStatuses: map[order.OrderID]order.OrderStatus{},
+		},
+		{
+			name: "different server-client statuses",
+			clientOrders: []*trackedTrade{
+				standingOrders.epoch,
+				standingOrders.booked,
+				standingOrders.bookedPendingCancel,
+				immediateOrders.epoch,
+				immediateOrders.executed,
+			},
+			serverOrders: []*msgjson.Order{
+				{
+					OrderID: standingOrders.epoch.ID().Bytes(),
+					Status:  uint8(order.OrderStatusBooked), // now booked
+				},
+				{
+					OrderID: standingOrders.booked.ID().Bytes(),
+					Status:  uint8(order.OrderStatusEpoch), // invald! booked orders cannot return to epoch!
+				},
+				{
+					OrderID: standingOrders.bookedPendingCancel.ID().Bytes(),
+					Status:  uint8(order.OrderStatusBooked), // still booked
+				},
+				{
+					OrderID: immediateOrders.epoch.ID().Bytes(),
+					Status:  uint8(order.OrderStatusBooked), // invalid, immediate orders cannot be booked!
+				},
+				{
+					OrderID: immediateOrders.executed.ID().Bytes(),
+					Status:  uint8(order.OrderStatusBooked), // invalid, inactive orders should not be returned by DEX!
+				},
+			},
+			expectOrderStatuses: map[order.OrderID]order.OrderStatus{
+				standingOrders.epoch.ID():               order.OrderStatusBooked,   // epoch => booked
+				standingOrders.booked.ID():              order.OrderStatusBooked,   // should not change, cannot return to epoch
+				standingOrders.bookedPendingCancel.ID(): order.OrderStatusBooked,   // no status change
+				immediateOrders.epoch.ID():              order.OrderStatusEpoch,    // should not change, cannot be booked
+				immediateOrders.executed.ID():           order.OrderStatusExecuted, // should not change, inactive cannot become active
+			},
+		},
+		{
+			name: "active becomes inactive",
+			clientOrders: []*trackedTrade{
+				standingOrders.epoch,
+				standingOrders.epochPreimaged,
+				standingOrders.booked,
+				standingOrders.bookedPendingCancel,
+				standingOrders.executed,
+				immediateOrders.epoch,
+				immediateOrders.epochPreimaged,
+				immediateOrders.executed,
+			},
+			serverOrders: []*msgjson.Order{}, // no active order reported by server
+			expectOrderStatuses: map[order.OrderID]order.OrderStatus{
+				standingOrders.epoch.ID():               order.OrderStatusRevoked,  // preimage miss = revoked
+				standingOrders.epochPreimaged.ID():      order.OrderStatusRevoked,  // preimage sent, not booked, not canceled = revoked (maybe executed)
+				standingOrders.booked.ID():              order.OrderStatusRevoked,  // booked, not canceled = revoked (maybe executed)
+				standingOrders.bookedPendingCancel.ID(): order.OrderStatusCanceled, // booked pending canceled = canceled (may actually be revoked or executed)
+				standingOrders.executed.ID():            order.OrderStatusExecuted, // should not change
+				immediateOrders.epoch.ID():              order.OrderStatusRevoked,  // preimage miss = revoked
+				immediateOrders.epochPreimaged.ID():     order.OrderStatusExecuted, // preimage sent, not canceled = executed
+				immediateOrders.executed.ID():           order.OrderStatusExecuted, // should not change
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		fmt.Printf("\n==== %s\n", tt.name) // makes reading log messages easier when testing with -v
+
+		// Track client orders in dc.trades.
+		dc.trades = make(map[order.OrderID]*trackedTrade)
+		for _, tracker := range tt.clientOrders {
+			dc.trades[tracker.ID()] = tracker
+		}
+
+		// Queue connect response and send connect request.
+		rig.queueConnect(nil, tt.serverMatches, tt.serverOrders)
+		if err := rig.core.authDEX(dc); err != nil {
+			t.Fatalf("%s: unexpected authDEX error: %v", tt.name, err)
+		}
+
+		if len(dc.trades) != len(tt.expectOrderStatuses) {
+			t.Fatalf("%s: post-connect order count mismatch. expected %d, got %d",
+				tt.name, len(tt.expectOrderStatuses), len(dc.trades))
+		}
+
+		for oid, tracker := range dc.trades {
+			expectedStatus, expected := tt.expectOrderStatuses[oid]
+			if !expected {
+				t.Fatalf("%s: unexpected order %v tracked by client", tt.name, oid)
+			}
+			if tracker.metaData.Status != expectedStatus {
+				t.Fatalf("%s: client reported wrong order status %v, expected %v",
+					tt.name, tracker.metaData.Status, expectedStatus)
+			}
+		}
+	}
+}
+
+func makeTradeTracker(rig *testRig, mkt *Market, walletSet *walletSet, force order.TimeInForce, status order.OrderStatus, nMatches int) *trackedTrade {
+	qty := 4 * tDCR.LotSize
+	lo, dbOrder, preImg, _ := makeLimitOrder(rig.dc, true, qty, tBTC.RateStep)
+	lo.Force = force
+	dbOrder.MetaData.Status = status
+
+	tracker := newTrackedTrade(dbOrder, preImg, rig.dc, mkt.EpochLen,
+		rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+
+	for i := 1; i <= nMatches; i++ {
+		mid := ordertest.RandomMatchID()
+		match := &matchTracker{
+			id: mid,
+			MetaMatch: db.MetaMatch{
+				MetaData: &db.MatchMetaData{},
+				Match:    &order.UserMatch{},
+			},
+		}
+		tracker.matches[mid] = match
+	}
+
+	return tracker
 }
 
 func TestRefunds(t *testing.T) {

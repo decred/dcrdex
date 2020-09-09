@@ -591,6 +591,49 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 	return
 }
 
+// reconcileTrades compares the statuses of orders in the dc.trades map to the
+// statuses returned by the server on `connect`, updating the statuses of the
+// tracked trades where applicable e.g.
+// - Booked orders that were tracked as Epoch are updated to status Booked.
+// - Orders thought to be active in the dc.trades map but not returned by the
+//   server are updated to Executed, Canceled or Revoked.
+// Setting the order status appropriately now, especially for inactive orders,
+// ensures that...
+// - the affected trades can be retired once the trade ticker (in core.listen)
+//   observes that there are no active matches for the trades.
+// - coins are unlocked either as the affected trades' matches are swapped or
+//   revoked (for trades with active matches), or when the trades are retired.
+func (dc *dexConnection) reconcileTrades(serverOrders []*msgjson.Order) (unknownOrdersCount, reconciledOrdersCount int) {
+	dc.tradeMtx.RLock()
+	defer dc.tradeMtx.RUnlock()
+
+	// Check for unknown orders reported as active by the server. If such
+	// exists, could be that they were known to the client but were thought
+	// to be inactive and thus were not loaded from db or were retired.
+	serverOrderStatuses := make(map[order.OrderID]order.OrderStatus, len(serverOrders))
+	for _, msgOrder := range serverOrders {
+		var oid order.OrderID
+		copy(oid[:], msgOrder.OrderID)
+		if _, tracked := dc.trades[oid]; tracked {
+			serverOrderStatuses[oid] = order.OrderStatus(msgOrder.Status)
+		} else {
+			log.Errorf("DEX %s reported order %v which is not known to be active", dc.acct.host, oid)
+			unknownOrdersCount++
+		}
+	}
+
+	// Compare server-reported status against currently recorded status for
+	// each trade in the dc.trades map.
+	for oid, t := range dc.trades {
+		serverStatus, isServerActive := serverOrderStatuses[oid]
+		if t.reconcile(serverStatus, isServerActive) {
+			reconciledOrdersCount++
+		}
+	}
+
+	return
+}
+
 // tickAsset checks open matches related to a specific asset for needed action.
 func (dc *dexConnection) tickAsset(assetID uint32) assetMap {
 	dc.tradeMtx.RLock()
@@ -2430,8 +2473,22 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	// Set the account as authenticated.
-	log.Debugf("Authenticated connection to %s, %d active matches", dc.acct.host, len(result.Matches))
+	log.Debugf("Authenticated connection to %s, %d active orders, %d active matches",
+		dc.acct.host, len(result.Orders), len(result.Matches))
 	dc.acct.auth()
+
+	// Compare the server-returned active orders with tracked trades, updating
+	// the trade statuses where necessary.
+	unknownOrdersCount, reconciledOrdersCount := dc.reconcileTrades(result.Orders)
+	if unknownOrdersCount > 0 {
+		details := fmt.Sprintf("%d active orders reported by %s were not found.",
+			unknownOrdersCount, dc.acct.host)
+		c.notify(newDEXAuthNote("DEX reported unknown orders", dc.acct.host, false, details, db.Poke))
+	}
+	if reconciledOrdersCount > 0 {
+		details := fmt.Sprintf("Statuses updated for %d orders.", reconciledOrdersCount)
+		c.notify(newDEXAuthNote("Orders reconciled with DEX", dc.acct.host, false, details, db.Poke))
+	}
 
 	// Associate the matches with known trades.
 	matches, _, err := dc.parseMatches(result.Matches, false)
@@ -2545,17 +2602,6 @@ func (c *Core) initialize() {
 			log.Debugf("dex connection to %s ready", acct.Host)
 		}(acct)
 	}
-	// If there were accounts, wait until they are loaded and log a messsage.
-	if len(accts) > 0 {
-		go func() {
-			wg.Wait()
-			c.connMtx.RLock()
-			log.Infof("Successfully connected to %d out of %d "+
-				"DEX servers", len(c.conns), len(accts))
-			c.connMtx.RUnlock()
-			c.refreshUser()
-		}()
-	}
 	dbWallets, err := c.db.Wallets()
 	if err != nil {
 		log.Errorf("error loading wallets from database: %v", err)
@@ -2578,6 +2624,12 @@ func (c *Core) initialize() {
 	if len(dbWallets) > 0 {
 		log.Infof("successfully loaded %d of %d wallets", numWallets, len(dbWallets))
 	}
+	// Wait for DEXes to be connected to ensure DEXes are ready
+	// for authentication when Login is triggered.
+	wg.Wait()
+	c.connMtx.RLock()
+	log.Infof("Successfully connected to %d out of %d DEX servers", len(c.conns), len(accts))
+	c.connMtx.RUnlock()
 	c.refreshUser()
 }
 
@@ -3492,7 +3544,9 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return fmt.Errorf("preimage send error: %v", err)
 	}
-	corder, cancelOrder := tracker.coreOrder()
+
+	tracker.mtx.Lock()
+	corder, cancelOrder := tracker.coreOrderInternal()
 	var details string
 	if isCancel {
 		corder = cancelOrder
@@ -3501,6 +3555,15 @@ func handlePreimageRequest(c *Core, dc *dexConnection, msg *msgjson.Message) err
 		details = fmt.Sprintf("match cycle has begun for order %s", tracker.token())
 	}
 	c.notify(newOrderNote("Preimage sent", details, db.Poke, corder))
+
+	metaOrder := tracker.metaOrder()
+	metaOrder.MetaData.Proof.PreimageRevealed = true
+	err = tracker.db.UpdateOrder(metaOrder)
+	if err != nil {
+		log.Errorf("unable to update order with PreimageRevealed=true: %v", err)
+	}
+	tracker.mtx.Unlock()
+
 	return nil
 }
 
