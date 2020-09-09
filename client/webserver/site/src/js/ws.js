@@ -110,7 +110,7 @@ class MessageSocket {
         retrys++
         // 1.2, 1.6, 2.0, 2.4, 3.1, 3.8, 4.8, 6.0, 7.5, 9.3, ...
         const delay = Math.min(Math.pow(1.25, retrys), 10)
-        console.log(`websocket disconnected (${evt.code}), trying again in ${delay.toFixed(1)} seconds`)
+        console.error(`websocket disconnected (${evt.code}), trying again in ${delay.toFixed(1)} seconds`)
         setTimeout(() => {
           go()
         }, delay * 1000)
