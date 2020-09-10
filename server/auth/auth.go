@@ -277,7 +277,7 @@ func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.Order
 
 	// Recompute cancellation and penalize violation.
 	cancels, completions, rate, penalize := auth.checkCancelRate(client)
-	log.Tracef("User %v cancellation rate is now %v (%d:%d). Violation = %v", user,
+	log.Tracef("User %v cancellation rate is now %v (%d cancels : %d successes). Violation = %v", user,
 		rate, cancels, completions, penalize)
 	if penalize && !auth.anarchy && !client.suspended {
 		log.Infof("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
@@ -946,7 +946,7 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		// The account might now be closed if the cancellation rate was
 		// exceeded while the server was running in anarchy mode.
 		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRate)
-		log.Debugf("Suspended account %v (cancellation rate = %d:%d = %.2f%%) connected.",
+		log.Debugf("Suspended account %v (cancellation rate = %.2f%%, %d cancels : %d successes) connected.",
 			acctInfo.ID, cancels, completions, 100*rate)
 	}
 
