@@ -48,6 +48,7 @@ var ErrCertRequired = fmt.Errorf("certificate required")
 // WsConn is an interface for a websocket client.
 type WsConn interface {
 	NextID() uint64
+	IsDown() bool
 	Send(msg *msgjson.Message) error
 	Request(msg *msgjson.Message, respHandler func(*msgjson.Message)) error
 	RequestWithTimeout(msg *msgjson.Message, respHandler func(*msgjson.Message), expireTime time.Duration, expire func()) error
@@ -84,20 +85,23 @@ type WsCfg struct {
 
 // wsConn represents a client websocket connection.
 type wsConn struct {
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	reconnects   uint64
-	rID          uint64
-	cfg          *WsCfg
-	ws           *websocket.Conn
-	wsMtx        sync.Mutex
-	tlsCfg       *tls.Config
-	readCh       chan *msgjson.Message
-	reconnectCh  chan struct{}
-	reqMtx       sync.RWMutex
-	connected    bool
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	rID    uint64
+	cfg    *WsCfg
+	tlsCfg *tls.Config
+	readCh chan *msgjson.Message
+
+	wsMtx sync.Mutex
+	ws    *websocket.Conn
+
 	connectedMtx sync.RWMutex
+	connected    bool
+
+	reqMtx       sync.RWMutex
 	respHandlers map[uint64]*responseHandler
+
+	reconnectCh chan struct{} // trigger for immediate reconnect
 }
 
 // NewWsConn creates a client websocket connection.
@@ -134,16 +138,16 @@ func NewWsConn(cfg *WsCfg) (WsConn, error) {
 		cfg:          cfg,
 		tlsCfg:       tlsConfig,
 		readCh:       make(chan *msgjson.Message, readBuffSize),
-		reconnectCh:  make(chan struct{}, 1),
 		respHandlers: make(map[uint64]*responseHandler),
+		reconnectCh:  make(chan struct{}, 1),
 	}, nil
 }
 
-// isConnected returns the connection connected state.
-func (conn *wsConn) isConnected() bool {
+// IsDown indicates if the connection is known to be down.
+func (conn *wsConn) IsDown() bool {
 	conn.connectedMtx.RLock()
 	defer conn.connectedMtx.RUnlock()
-	return conn.connected
+	return !conn.connected
 }
 
 // setConnected updates the connection's connected state and runs the
@@ -198,7 +202,8 @@ func (conn *wsConn) connect(ctx context.Context) error {
 		// Respond with a pong.
 		err = ws.WriteControl(websocket.PongMessage, []byte{}, now.Add(writeWait))
 		if err != nil {
-			log.Errorf("pong error: %v", err)
+			// read loop handles reconnect
+			log.Errorf("pong write error: %v", err)
 			return err
 		}
 
@@ -209,12 +214,7 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	// If keepAlive called connect, the wsConn's current websocket.Conn may need
 	// to be closed depending on the error that triggered the reconnect.
 	if conn.ws != nil {
-		// Attempt to send a close message in case the connection is still live.
-		msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye")
-		conn.ws.WriteControl(websocket.CloseMessage, msg,
-			time.Now().Add(50*time.Millisecond)) // ignore any error
-		// Forcibly close the underlying connection.
-		conn.ws.Close()
+		conn.close()
 	}
 	conn.ws = ws
 	conn.wsMtx.Unlock()
@@ -229,9 +229,23 @@ func (conn *wsConn) connect(ctx context.Context) error {
 	return nil
 }
 
+func (conn *wsConn) close() {
+	// Attempt to send a close message in case the connection is still live.
+	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye")
+	_ = conn.ws.WriteControl(websocket.CloseMessage, msg,
+		time.Now().Add(50*time.Millisecond)) // ignore any error
+	// Forcibly close the underlying connection.
+	conn.ws.Close()
+}
+
 // read fetches and parses incoming messages for processing. This should be
 // run as a goroutine. Increment the wg before calling read.
 func (conn *wsConn) read(ctx context.Context) {
+	reconnect := func() {
+		conn.setConnected(false)
+		conn.reconnectCh <- struct{}{}
+	}
+
 	for {
 		msg := new(msgjson.Message)
 
@@ -248,6 +262,14 @@ func (conn *wsConn) read(ctx context.Context) {
 			return
 		}
 		if err != nil {
+			// Read timeout should flag the connection as down asap.
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				log.Errorf("Read timeout on connection to %s.", conn.cfg.URL)
+				reconnect()
+				return
+			}
+
 			var mErr *json.UnmarshalTypeError
 			if errors.As(err, &mErr) {
 				// JSON decode errors are not fatal, log and proceed.
@@ -265,7 +287,7 @@ func (conn *wsConn) read(ctx context.Context) {
 			if websocket.IsCloseError(err, websocket.CloseGoingAway,
 				websocket.CloseNormalClosure) ||
 				strings.Contains(err.Error(), "websocket: close sent") {
-				conn.reconnect()
+				reconnect()
 				return
 			}
 
@@ -273,15 +295,15 @@ func (conn *wsConn) read(ctx context.Context) {
 			if errors.As(err, &opErr) && opErr.Op == "read" {
 				if strings.Contains(opErr.Err.Error(),
 					"use of closed network connection") {
-					log.Errorf("read quiting: %v", err)
-					conn.reconnect()
+					log.Errorf("read quitting: %v", err)
+					reconnect()
 					return
 				}
 			}
 
 			// Log all other errors and trigger a reconnection.
 			log.Errorf("read error (%v), attempting reconnection", err)
-			conn.reconnect()
+			reconnect()
 			// Successful reconnect via connect() will start read() again.
 			return
 		}
@@ -311,7 +333,6 @@ func (conn *wsConn) read(ctx context.Context) {
 // keepAlive maintains an active websocket connection by reconnecting when
 // the established connection is broken. This should be run as a goroutine.
 func (conn *wsConn) keepAlive(ctx context.Context) {
-	maxReconnects := uint64(20000000) // TODO: reason to limit this?
 	rcInt := reconnectInterval
 	for {
 		select {
@@ -322,31 +343,22 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 				return
 			}
 
-			if conn.reconnects >= maxReconnects {
-				log.Error("Max reconnection attempts reached. Stopping connection.")
-				conn.cancel()
-				// The WaitGroup provided to the consumer by Connect will start
-				// to be decremented as goroutines shutdown.
-				return
-			}
-
 			log.Infof("Attempting to reconnect to %s...", conn.cfg.URL)
 			err := conn.connect(ctx)
 			if err != nil {
-				log.Errorf("Reconnect failed: %v", err)
-				conn.reconnects++
-				if conn.reconnects+1 < maxReconnects {
-					conn.queueReconnect(rcInt)
-					// Increment the wait up to PingWait.
-					if rcInt < maxReconnectInterval {
-						rcInt += reconnectInterval
-					}
+				log.Errorf("Reconnect failed. Scheduling reconnect to %s in %.1f seconds.",
+					conn.cfg.URL, rcInt.Seconds())
+				time.AfterFunc(rcInt, func() {
+					conn.reconnectCh <- struct{}{}
+				})
+				// Increment the wait up to PingWait.
+				if rcInt < maxReconnectInterval {
+					rcInt += reconnectInterval
 				}
 				continue
 			}
 
 			log.Info("Successfully reconnected.")
-			conn.reconnects = 0
 			rcInt = reconnectInterval
 
 			// Synchronize after a reconnection.
@@ -358,19 +370,6 @@ func (conn *wsConn) keepAlive(ctx context.Context) {
 			return
 		}
 	}
-}
-
-// reconnect begins reconnection immediately.
-func (conn *wsConn) reconnect() {
-	conn.setConnected(false)
-	conn.reconnectCh <- struct{}{}
-}
-
-// queueReconnect queues a reconnection attempt.
-func (conn *wsConn) queueReconnect(wait time.Duration) {
-	conn.setConnected(false)
-	log.Infof("Attempting reconnect to %s in %d seconds.", conn.cfg.URL, wait/time.Second)
-	time.AfterFunc(wait, func() { conn.reconnectCh <- struct{}{} })
 }
 
 // NextID returns the next request id.
@@ -400,10 +399,7 @@ func (conn *wsConn) Connect(ctx context.Context) (*sync.WaitGroup, error) {
 		conn.wsMtx.Lock()
 		if conn.ws != nil {
 			log.Debug("Sending close 1000 (normal) message.")
-			msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "bye")
-			conn.ws.WriteControl(websocket.CloseMessage, msg,
-				time.Now().Add(writeWait))
-			conn.ws.Close()
+			conn.close()
 		}
 		conn.wsMtx.Unlock()
 		close(conn.readCh) // signal to receivers that the wsConn is dead
@@ -424,16 +420,8 @@ func (conn *wsConn) Stop() {
 // to be down, the message failed to marshall to JSON, or writing to the
 // websocket link failed.
 func (conn *wsConn) Send(msg *msgjson.Message) error {
-	if !conn.isConnected() {
+	if conn.IsDown() {
 		return fmt.Errorf("cannot send on a broken connection")
-	}
-
-	conn.wsMtx.Lock()
-	defer conn.wsMtx.Unlock()
-	err := conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
-	if err != nil {
-		log.Errorf("failed to set write deadline: %v", err)
-		return err
 	}
 
 	// Marshal the Message first so that we don't send junk to the peer even if
@@ -443,9 +431,18 @@ func (conn *wsConn) Send(msg *msgjson.Message) error {
 		log.Errorf("Failed to marshal message: %v", err)
 		return err
 	}
+
+	conn.wsMtx.Lock()
+	defer conn.wsMtx.Unlock()
+	err = conn.ws.SetWriteDeadline(time.Now().Add(writeWait))
+	if err != nil {
+		log.Errorf("Send: failed to set write deadline: %v", err)
+		return err
+	}
+
 	err = conn.ws.WriteMessage(websocket.TextMessage, b)
 	if err != nil {
-		log.Errorf("write error: %v", err)
+		log.Errorf("Send: WriteMessage error: %v", err)
 		return err
 	}
 	return nil

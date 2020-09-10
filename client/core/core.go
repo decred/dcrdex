@@ -2772,8 +2772,9 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				}
 				auditInfo, err := wallets.toWallet.AuditContract(counterSwap, counterContract)
 				if err != nil {
+					log.Debugf("Match %v status %v, refunded = %v, revoked = %v", match.id, match.MetaData.Status, len(match.MetaData.Proof.RefundCoin) > 0, match.MetaData.Proof.IsRevoked)
 					match.failErr = fmt.Errorf("audit error, order %s, match %s: %v", tracker.ID(), match.id, err)
-					notifyErr("Match recovery error", "Error auditing counter-parties swap contract during swap recovery on order %s: %v", tracker.token(), err)
+					notifyErr("Match recovery error", "Error auditing counter-party's swap contract (%v) during swap recovery on order %s: %v", tracker.token(), coinIDString(wallets.toAsset.ID, counterSwap), err)
 					continue
 				}
 				match.counterSwap = auditInfo
@@ -3191,6 +3192,7 @@ func (c *Core) listen(dc *dexConnection) {
 	// Run a match check at the tick interval.
 	ticker := time.NewTicker(dc.tickInterval)
 	defer ticker.Stop()
+	lastTick := time.Now()
 
 	// Messages must be run in the order in which they are received, but they
 	// should not be blocking or run concurrently.
@@ -3252,6 +3254,15 @@ out:
 			nextJob <- &msgJob{handler, msg}
 
 		case <-ticker.C:
+			sinceLast := time.Since(lastTick)
+			lastTick = time.Now()
+			if sinceLast >= 2*dc.tickInterval {
+				// The app likely just woke up from being suspended. Skip this
+				// tick to let DEX connections reconnect and resync matches.
+				log.Warnf("Long delay since previous trade check (just resumed?): %v. "+
+					"Skipping this check to allow reconnect.", sinceLast)
+				continue
+			}
 			updatedAssets := make(assetMap)
 			dc.tradeMtx.Lock()
 			for oid, trade := range dc.trades {

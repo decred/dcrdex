@@ -573,10 +573,11 @@ func (t *trackedTrade) isActive() bool {
 
 	// Status of all matches for the order.
 	for _, match := range t.matches {
+		proof := &match.MetaData.Proof
 		log.Tracef("Checking match %v (%v) in status %v. "+
-			"Order: %v, Refund coin: %v, Script: %x", match.id,
+			"Order: %v, Refund coin: %v, Script: %x, Revoked: %v", match.id,
 			match.Match.Side, match.MetaData.Status, t.ID(),
-			match.MetaData.Proof.RefundCoin, match.MetaData.Proof.Script)
+			proof.RefundCoin, proof.Script, proof.IsRevoked)
 		if match.isActive() {
 			return true
 		}
@@ -1079,8 +1080,8 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 	}
 
 	lockChange := true
-	// If the order is filled, canceled or revoked, and these are the
-	// last swaps, then we don't need to lock the change coin.
+	// If the order is executed, canceled or revoked, and these are the last
+	// swaps, then we don't need to lock the change coin.
 	if t.metaData.Status > order.OrderStatusBooked {
 		var matchesRequiringSwaps int
 		for _, match := range t.matches {
@@ -1116,6 +1117,11 @@ func (t *trackedTrade) swapMatches(matches []*matchTracker) error {
 		}
 		inputs[i] = coin
 	}
+
+	if t.dc.IsDown() {
+		return errs.add("not broadcasting swap while DEX %s connection is down (could be revoked)", t.dc.acct.host)
+	}
+	// swapMatches is no longer idempotent after this point.
 
 	// Send the swap. If the swap fails, set the failErr flag for all matches.
 	// A more sophisticated solution might involve tracking the error time too
@@ -1452,8 +1458,8 @@ func (t *trackedTrade) refundMatches(matches []*matchTracker) (uint64, error) {
 		}
 
 		swapCoinString := coinIDString(refundAsset.ID, swapCoinID)
-		log.Infof("Failed match, %s, refunding %s contract %s",
-			matchFailureReason, refundAsset.Symbol, swapCoinString)
+		log.Infof("Refunding %s contract %s for match %v (%s)",
+			refundAsset.Symbol, swapCoinString, match.id, matchFailureReason)
 
 		refundCoin, err := refundWallet.Refund(swapCoinID, contractToRefund)
 		if err != nil {
