@@ -425,23 +425,10 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	return matches, acks, err
 }
 
-// processNomatch finds the specified trackedTrade and runs its nomatch method.
-func (dc *dexConnection) processNomatch(oid order.OrderID) error {
-	tracker, _, _ := dc.findOrder(oid)
-	if tracker == nil {
-		return newError(unknownOrderErr, "No order found for 'nomatch' request from %s with order id %s", dc.acct.host, oid)
-	}
-	err := tracker.nomatch(oid)
-	if err != nil {
-		return err
-	}
-	dc.refreshMarkets()
-	return nil
-}
-
 // runMatches runs the sorted matches returned from parseMatches.
-func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatches) error {
-	runMatch := func(sm *serverMatches) error {
+func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetMap, error) {
+	runMatch := func(sm *serverMatches) (assetMap, error) {
+		updatedAssets := make(assetMap)
 		tracker := sm.tracker
 		oid := tracker.ID()
 
@@ -449,7 +436,7 @@ func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatche
 		if sm.cancel != nil {
 			err := tracker.processCancelMatch(sm.cancel)
 			if err != nil {
-				return fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %v",
+				return updatedAssets, fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %v",
 					sm.cancel.OrderID, oid, err)
 			}
 		}
@@ -458,39 +445,68 @@ func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatche
 		if len(sm.msgMatches) > 0 {
 			err := tracker.negotiate(sm.msgMatches)
 			if err != nil {
-				return fmt.Errorf("negotiate order %v matches failed: %v", oid, err)
+				return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %v", oid, err)
 			}
+
+			// Coins may be returned for canceled orders.
+			tracker.mtx.RLock()
+			if tracker.metaData.Status == order.OrderStatusCanceled {
+				updatedAssets.count(tracker.fromAssetID)
+			}
+			tracker.mtx.RUnlock()
 
 			// Try to tick the trade now, but do not interrupt on error. The
 			// trade will tick again automatically.
-			_, err = tracker.tick()
+			tickUpdatedAssets, err := tracker.tick()
+			updatedAssets.merge(tickUpdatedAssets)
 			if err != nil {
-				return fmt.Errorf("tick of order %v failed: %v", oid, err)
+				return updatedAssets, fmt.Errorf("tick of order %v failed: %v", oid, err)
 			}
 		}
 
-		return nil
+		return updatedAssets, nil
 	}
 
 	// Process the trades concurrently.
 	errChan := make(chan error)
+	assetsUpdatedChan := make(chan assetMap)
 	for _, trade := range tradeMatches {
 		go func(trade *serverMatches) {
-			errChan <- runMatch(trade)
+			assetsUpdated, err := runMatch(trade)
+			assetsUpdatedChan <- assetsUpdated
+			errChan <- err
 		}(trade)
 	}
 
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	errs := newErrorSet("runMatches - ")
-	for range tradeMatches {
-		if err := <-errChan; err != nil {
-			errs.addErr(err)
+	go func() {
+		defer wg.Done()
+		for range tradeMatches {
+			if err := <-errChan; err != nil {
+				errs.addErr(err)
+			}
 		}
-	}
+	}()
+
+	wg.Add(1)
+	assetsUpdated := make(assetMap)
+	go func() {
+		defer wg.Done()
+		for range tradeMatches {
+			tradeUpdates := <-assetsUpdatedChan
+			assetsUpdated.merge(tradeUpdates)
+		}
+	}()
+
+	wg.Wait()
 
 	// Update Market.Orders for each market.
 	dc.refreshMarkets()
 
-	return errs.ifAny()
+	return assetsUpdated, errs.ifAny()
 }
 
 type matchDiscreps struct {
@@ -2332,6 +2348,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}
 
 	exceptions := dc.compareServerMatches(matches)
+	updatedAssets := make(assetMap)
 	for oid, matchAnomalies := range exceptions {
 		trade := matchAnomalies.trade
 		missing, extras := matchAnomalies.missing, matchAnomalies.extra
@@ -2357,7 +2374,9 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		// Also, check if the now-Revoked matches were the last set of matches that
 		// required sending swaps, and unlock coins if so.
 		if len(missing) > 0 {
-			trade.maybeReturnCoins()
+			if trade.maybeReturnCoins() {
+				updatedAssets.count(trade.wallets.fromAsset.ID)
+			}
 			details := fmt.Sprintf("%d matches for order %s were not reported by %q and are considered revoked",
 				len(missing), trade.token(), dc.acct.host)
 			c.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
@@ -2376,6 +2395,10 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		}
 
 		trade.mtx.Unlock()
+	}
+
+	if len(updatedAssets) > 0 {
+		c.updateBalances(updatedAssets)
 	}
 
 	return nil
@@ -3142,6 +3165,7 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 
 		if !sp.Persist {
 			// Revoke all active orders of the suspended market for the dex.
+			updatedAssets := make(assetMap)
 			dc.tradeMtx.RLock()
 			for _, tracker := range dc.trades {
 
@@ -3150,9 +3174,13 @@ func handleTradeSuspensionMsg(c *Core, dc *dexConnection, msg *msgjson.Message) 
 					tracker.metaData.Host == dc.acct.host {
 
 					tracker.revoke()
+					updatedAssets.count(tracker.fromAssetID)
 				}
 			}
 			dc.tradeMtx.RUnlock()
+
+			dc.refreshMarkets()
+			c.updateBalances(updatedAssets)
 		}
 	})
 
@@ -3388,7 +3416,13 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 			break
 		}
 	}
-	return dc.runMatches(matches)
+
+	updatedAssets, err := dc.runMatches(matches)
+	if len(updatedAssets) > 0 {
+		c.updateBalances(updatedAssets)
+	}
+
+	return err
 }
 
 // handleNoMatchRoute handles the DEX-originating nomatch request, which is sent
@@ -3401,7 +3435,17 @@ func handleNoMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error 
 	}
 	var oid order.OrderID
 	copy(oid[:], nomatchMsg.OrderID)
-	return dc.processNomatch(oid)
+
+	tracker, _, _ := dc.findOrder(oid)
+	if tracker == nil {
+		return newError(unknownOrderErr, "nomatch request received for unknown order %v from %s", oid, dc.acct.host)
+	}
+	updatedAssets, err := tracker.nomatch(oid)
+	if len(updatedAssets) > 0 {
+		c.updateBalances(updatedAssets)
+	}
+	dc.refreshMarkets()
+	return err
 }
 
 // handleAuditRoute handles the DEX-originating audit request, which is sent
