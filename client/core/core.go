@@ -3259,6 +3259,8 @@ out:
 			if sinceLast >= 2*dc.tickInterval {
 				// The app likely just woke up from being suspended. Skip this
 				// tick to let DEX connections reconnect and resync matches.
+				log.Warnf("Long delay since previous trade check (just resumed?): %v. "+
+					"Skipping this check to allow reconnect.", sinceLast)
 				continue
 			}
 			updatedAssets := make(assetMap)
