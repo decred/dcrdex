@@ -81,6 +81,7 @@ pgdbname=${TEST_DB}
 simnet=1
 rpclisten=127.0.0.1:17273
 debuglevel=trace
+loglocal=true
 regfeeconfirms=1
 signingkeypass=keypass
 adminsrvon=1
