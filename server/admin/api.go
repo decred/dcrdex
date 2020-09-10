@@ -226,7 +226,8 @@ func (s *Server) apiBan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
-	if err := s.core.Penalize(acctID, account.Rule(ruleInt)); err != nil {
+	// TODO: Allow operator supplied details to go with the ban.
+	if err := s.core.Penalize(acctID, account.Rule(ruleInt), ""); err != nil {
 		http.Error(w, fmt.Sprintf("failed to ban account: %v", err), http.StatusInternalServerError)
 		return
 	}

@@ -97,12 +97,11 @@ const (
 	// NoRule indicates that no rules have been broken. This may be an invalid
 	// value in some contexts.
 	NoRule Rule = iota
+	// PreimageReveal means an account failed to respond with a valid preimage
+	// for their order during epoch processing.
+	PreimageReveal
 	// FailureToAct means that an account has not followed through on one of their
 	// swap negotiation steps.
-	PreimageReveal
-	// MaxRule in not an actual rule. It is a placeholder that is used to
-	// determine the total number of rules. It must always be the last
-	// definition in this list.
 	FailureToAct
 	// CancellationRate means the account's cancellation rate  has dropped below
 	// the acceptable level.
@@ -110,58 +109,67 @@ const (
 	// LowFees means an account made a transaction that didn't pay fees at the
 	// requisite level.
 	LowFees
-	// PreimageReveal means an account failed to respond with a valid preimage
-	// for their order during epoch processing.
+	// MaxRule in not an actual rule. It is a placeholder that is used to
+	// determine the total number of rules. It must always be the last
+	// definition in this list.
 	MaxRule
 )
 
-// ruleNames is a map of rules to names.
-var ruleNames = map[Rule]string{
-	NoRule:            "NoRule",
-	PreimageReveal:    "PreimageReveal",
-	FailureToAct:      "FailureToAct",
-	CancellationRatio: "CancellationRatio",
-	LowFees:           "LowFees",
+// details holds rule specific details.
+type details struct {
+	name, details string
+	duration      time.Duration
+}
+
+// ruleDetails maps rules to rule details.
+var ruleDetails = map[Rule]details{
+	NoRule: {
+		name:     "NoRule",
+		details:  "no rules have been broken",
+		duration: 0,
+	},
+	PreimageReveal: {
+		name:     "PreimageReveal",
+		details:  "failed to respond with a valid preimage for an order during epoch processing",
+		duration: century,
+	},
+	FailureToAct: {
+		name:     "FailureToAct",
+		details:  "did not follow through on a swap negotiation step",
+		duration: century,
+	},
+	CancellationRate: {
+		name:     "CancellationRate",
+		details:  "cancellation rate dropped below the acceptable level",
+		duration: century,
+	},
+	LowFees: {
+		name:     "LowFees",
+		details:  "did not pay transaction mining fees at the requisite level",
+		duration: century,
+	},
 }
 
 // String satisfies the Stringer interface.
 func (r Rule) String() string {
-	if name, ok := ruleNames[r]; ok {
-		return name
+	if d, ok := ruleDetails[r]; ok {
+		return d.name
 	}
 	return "unknown rule"
 }
 
-// ruleDetails is a map of rules to details.
-var ruleDetails = map[Rule]string{
-	NoRule:            "no rules have been broken",
-	PreimageReveal:    "failed to respond with a valid preimage for an order during epoch processing",
-	FailureToAct:      "did not follow through on a swap negotiation step",
-	CancellationRatio: "cancellation rate dropped below the acceptable level",
-	LowFees:           "did not pay transaction mining fees at the requisite level",
-}
-
 // Details returns details about the rule.
 func (r Rule) Details() string {
-	if details, ok := ruleDetails[r]; ok {
-		return details
+	if d, ok := ruleDetails[r]; ok {
+		return d.details
 	}
 	return "details not specified"
 }
 
-// ruleDuration is a map of rules to penalty durations.
-var ruleDurations = map[Rule]time.Duration{
-	NoRule:            0,
-	PreimageReveal:    century,
-	FailureToAct:      century,
-	CancellationRatio: century,
-	LowFees:           century,
-}
-
 // Duration returns the penalty duration of the rule being broken.
 func (r Rule) Duration() time.Duration {
-	if duration, ok := ruleDurations[r]; ok {
-		return duration
+	if d, ok := ruleDetails[r]; ok {
+		return d.duration
 	}
 	return century
 }
