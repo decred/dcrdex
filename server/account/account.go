@@ -93,9 +93,9 @@ const (
 	// FailureToAct means that an account has not followed through on one of their
 	// swap negotiation steps.
 	FailureToAct
-	// CancellationRatio means the account's cancellation ratio has dropped below
+	// CancellationRate means the account's cancellation rate  has dropped below
 	// the acceptable level.
-	CancellationRatio
+	CancellationRate
 	// LowFees means an account made a transaction that didn't pay fees at the
 	// requisite level.
 	LowFees

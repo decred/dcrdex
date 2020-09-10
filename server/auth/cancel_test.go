@@ -14,7 +14,7 @@ func randomOrderID() (oid order.OrderID) {
 }
 
 func Test_latestOrders(t *testing.T) {
-	cap := int16(25)
+	cap := int16(cancelThreshWindow)
 	ordList := newLatestOrders(cap)
 
 	maybeCancel := func() *order.OrderID {

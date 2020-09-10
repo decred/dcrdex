@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
 )
 
-const cancelThreshWindow = 25 // spec
+const cancelThreshWindow = 100 // spec
 
 var (
 	ErrUserNotConnected = dex.ErrorKind("user not connected")
@@ -79,12 +80,21 @@ type clientInfo struct {
 	suspended    bool // penalized, disallow new orders
 }
 
-func (client *clientInfo) cancelRatio() float64 {
-	client.mtx.Lock()
-	total, cancels := client.recentOrders.counts()
-	client.mtx.Unlock()
-	// completed = total - cancels
-	return float64(cancels) / float64(total)
+// GraceLimit returns the number of initial orders allowed for a new user before
+// the cancellation rate threshold is enforced.
+func (auth *AuthManager) GraceLimit() int {
+	// Grace period if: total/(1+total) <= thresh OR total <= thresh/(1-thresh).
+	return int(math.Round(1e8*auth.cancelThresh/(1-auth.cancelThresh))) / 1e8
+}
+
+func (auth *AuthManager) checkCancelRate(client *clientInfo) (cancels, completions int, rate float64, penalize bool) {
+	var total int
+	total, cancels = client.recentOrders.counts()
+	completions = total - cancels
+	rate = float64(cancels) / float64(total) // rate will be NaN if total is 0
+	penalize = rate > auth.cancelThresh &&   // NaN cancelRate compares false
+		total > auth.GraceLimit()
+	return
 }
 
 func (client *clientInfo) suspend() {
@@ -160,17 +170,19 @@ func (client *clientInfo) respHandler(id uint64) *respHandler {
 // the 'connect' route.
 type AuthManager struct {
 	anarchy      bool
-	connMtx      sync.RWMutex
 	cancelThresh float64
-	users        map[account.AccountID]*clientInfo
-	conns        map[uint64]*clientInfo
 	storage      Storage
 	signer       Signer
 	regFee       uint64
 	checkFee     FeeChecker
 	feeConfs     int64
+
 	// latencyQ is a queue for coin waiters to deal with latency.
 	latencyQ *wait.TickerQueue
+
+	connMtx sync.RWMutex
+	users   map[account.AccountID]*clientInfo
+	conns   map[uint64]*clientInfo
 
 	pendingRequestsMtx sync.Mutex
 	pendingRequests    map[account.AccountID]map[uint64]*timedRequest
@@ -244,27 +256,35 @@ func (auth *AuthManager) RecordCompletedOrder(user account.AccountID, oid order.
 // to the ID of the cancel order itself, while target is non-nil for cancel
 // orders.
 func (auth *AuthManager) recordOrderDone(user account.AccountID, oid order.OrderID, target *order.OrderID, tMS int64) {
-	auth.connMtx.RLock()
-	defer auth.connMtx.RUnlock()
-
-	client := auth.users[user]
+	client := auth.user(user)
 	if client == nil {
 		log.Errorf("unknown client for user %v", user)
 		return
 	}
 
+	// Update recent orders and check/set suspended status atomically.
 	client.mtx.Lock()
+	defer client.mtx.Unlock()
+
 	client.recentOrders.add(&oidStamped{
 		OrderID: oid,
 		time:    tMS,
 		target:  target,
 	})
-	client.mtx.Unlock()
 
 	log.Debugf("Recorded order %v that has finished processing: user=%v, time=%v, target=%v",
 		oid, user, tMS, target)
 
-	// TODO: decide when and where to count and penalize
+	// Recompute cancellation and penalize violation.
+	cancels, completions, rate, penalize := auth.checkCancelRate(client)
+	log.Tracef("User %v cancellation rate is now %v (%d cancels : %d successes). Violation = %v", user,
+		rate, cancels, completions, penalize)
+	if penalize && !auth.anarchy && !client.suspended {
+		log.Infof("Suspending user %v for exceeding the cancellation rate threshold %.2f%%. "+
+			"(%d cancels : %d successes => %.2f%% )", user, auth.cancelThresh, cancels, completions, 100*rate)
+		client.suspended = true
+		auth.storage.CloseAccount(user, account.CancellationRate)
+	}
 }
 
 // Run runs the AuthManager until the context is canceled. Satisfies the
@@ -918,20 +938,21 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 		recentOrders: latestFinished,
 		suspended:    !open,
 	}
-	if cancelRatio := client.cancelRatio(); !auth.anarchy && cancelRatio > auth.cancelThresh {
+	cancels, completions, rate, penalize := auth.checkCancelRate(client)
+	if penalize && open && !auth.anarchy {
 		// Account should already be closed, but perhaps the server crashed
 		// or the account was not penalized before shutdown.
 		client.suspended = true
-		// The account might now be closed if the cancellation ratio was
+		// The account might now be closed if the cancellation rate was
 		// exceeded while the server was running in anarchy mode.
-		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRatio)
-		log.Debugf("Suspended account %v (cancellation ratio = %f) connected.",
-			acctInfo.ID, cancelRatio)
+		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRate)
+		log.Debugf("Suspended account %v (cancellation rate = %.2f%%, %d cancels : %d successes) connected.",
+			acctInfo.ID, cancels, completions, 100*rate)
 	}
 
 	pendingReqs, pendingMsgs := auth.addClient(client)
-	log.Debugf("User %s connected from %s with %d pending requests and %d pending responses/notifications.",
-		acctInfo.ID, conn.IP(), len(pendingReqs), len(pendingMsgs))
+	log.Debugf("User %s connected from %s with %d pending requests and %d pending responses/notifications, cancel rate = %d:%d (%.2f%%)",
+		acctInfo.ID, conn.IP(), len(pendingReqs), len(pendingMsgs), cancels, completions, 100*rate)
 
 	// Send pending requests for this user.
 	for _, pr := range pendingReqs {

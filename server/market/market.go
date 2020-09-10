@@ -1314,7 +1314,7 @@ func (m *Market) Unbook(lo *order.LimitOrder) bool {
 	}
 
 	// Create the server-generated cancel order, and register it with
-	// the AuthManager for cancellation ratio computation.
+	// the AuthManager for cancellation rate computation.
 	coid, revTime, err := m.storage.RevokeOrder(lo)
 	if err == nil {
 		m.auth.RecordCancel(lo.User(), coid, lo.ID(), revTime)
@@ -1382,7 +1382,7 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 	}
 
 	// Store data in epochs table, including matchTime so that cancel execution
-	// times can be obtained from the DB for cancellation ratio computation.
+	// times can be obtained from the DB for cancellation rate computation.
 	oidsRevealed := make([]order.OrderID, 0, len(ordersRevealed))
 	for _, or := range ordersRevealed {
 		oidsRevealed = append(oidsRevealed, or.Order.ID())

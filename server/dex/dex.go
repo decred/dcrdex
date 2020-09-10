@@ -358,18 +358,22 @@ func NewDEX(cfg *DexConf) (*DEX, error) {
 		return nil, fmt.Errorf("db.Open: %v", err)
 	}
 
+	cancelThresh := cfg.CancelThreshold
 	authCfg := auth.Config{
 		Storage:         storage,
 		Signer:          cfg.DEXPrivKey,
 		RegistrationFee: cfg.RegFeeAmount,
 		FeeConfs:        cfg.RegFeeConfirms,
 		FeeChecker:      dcrBackend.FeeCoin,
-		CancelThreshold: cfg.CancelThreshold,
+		CancelThreshold: cancelThresh,
 		Anarchy:         cfg.Anarchy,
 	}
 
 	authMgr := auth.NewAuthManager(&authCfg)
 	startSubSys("Auth manager", authMgr)
+
+	log.Infof("Cancellation rate threshold %f, new user grace period %d cancels",
+		cancelThresh, authMgr.GraceLimit())
 
 	// Create an unbook dispatcher for the Swapper.
 	markets := make(map[string]*market.Market, len(cfg.Markets))

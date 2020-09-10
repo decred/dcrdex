@@ -18,6 +18,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
+const cancelThreshWindow = 100 // spec
+
 func TestStoreOrder(t *testing.T) {
 	if err := cleanTables(archie.db); err != nil {
 		t.Fatalf("cleanTables: %v", err)
@@ -436,7 +438,7 @@ func TestFlushBook(t *testing.T) {
 		t.Fatalf("got %d user orders, expected %d", len(ordersOut), wantNumOrders)
 	}
 
-	coids, targets, _, err := archie.ExecutedCancelsForUser(lo.User(), 25)
+	coids, targets, _, err := archie.ExecutedCancelsForUser(lo.User(), cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
@@ -452,7 +454,7 @@ func TestFlushBook(t *testing.T) {
 	// Query for the revoke associated cancels without the exemption filter.
 	cancelTableName := fullCancelOrderTableName(archie.dbName, mktInfo.Name, false)
 	stmt := fmt.Sprintf(internal.SelectRevokeCancels, cancelTableName)
-	rows, err := archie.db.QueryContext(context.Background(), stmt, lo.User(), orderStatusRevoked, 25)
+	rows, err := archie.db.QueryContext(context.Background(), stmt, lo.User(), orderStatusRevoked, cancelThreshWindow)
 	if err != nil {
 		t.Fatalf("QueryContext failed: %v", err)
 	}
@@ -1430,7 +1432,7 @@ func TestCompletedUserOrders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oids, compTimes, err := archie.CompletedUserOrders(tt.acctID, 25)
+			oids, compTimes, err := archie.CompletedUserOrders(tt.acctID, cancelThreshWindow)
 			if err != tt.wantedErr {
 				t.Fatal(err)
 			}
@@ -1546,7 +1548,7 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	user := co.User()
-	oids, targets, compTimes, err := archie.ExecutedCancelsForUser(user, 25)
+	oids, targets, compTimes, err := archie.ExecutedCancelsForUser(user, cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
@@ -1595,7 +1597,7 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	user2 := co2.User()
-	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user2, 25)
+	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user2, cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
@@ -1631,7 +1633,7 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	user3 := co3.User()
-	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user3, 25)
+	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user3, cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}
@@ -1653,7 +1655,7 @@ func TestExecutedCancelsForUser(t *testing.T) {
 	}
 
 	user4 := co4.User()
-	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user4, 25)
+	oids, targets, compTimes, err = archie.ExecutedCancelsForUser(user4, cancelThreshWindow)
 	if err != nil {
 		t.Errorf("ExecutedCancelsForUser failed: %v", err)
 	}

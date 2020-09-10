@@ -169,7 +169,7 @@ type orderSwapStat struct {
 	HasFailed bool
 }
 
-// orderSwapTracker facilitates cancellation ratio computation without complex,
+// orderSwapTracker facilitates cancellation rate computation without complex,
 // costly, and frequent DB queries.
 type orderSwapTracker struct {
 	mtx          sync.Mutex
@@ -1068,7 +1068,7 @@ func (s *Swapper) processBlock(block *blockNotification) {
 
 	for _, match := range completions {
 		// Note that orders are not considered completed for the purposes of
-		// cancellation ratio until the user sends their redeem ack.
+		// cancellation rate until the user sends their redeem ack.
 
 		s.unlockOrderCoins(match.Taker)
 		s.unlockOrderCoins(match.Maker)
@@ -1494,7 +1494,7 @@ func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
 	defer s.rmLiveAckers(msg.ID)
 
 	// The time that the ack is received is stored for redeem acks to facilitate
-	// cancellation ratio enforcement.
+	// cancellation rate enforcement.
 	tAck := time.Now()
 
 	ack := new(msgjson.Acknowledgement)
