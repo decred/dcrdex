@@ -62,7 +62,7 @@ type AuthManager interface {
 		expireTimeout time.Duration, expireFunc func()) error
 	RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout, connectTimeout time.Duration, expireFunc func())
-	Penalize(user account.AccountID, rule account.Rule) error
+	Penalize(user account.AccountID, rule account.Rule, details string) error
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
 	Unban(user account.AccountID) error
@@ -1208,7 +1208,8 @@ func (s *Swapper) checkInaction(assetID uint32) {
 			// may become less severe than account closure (e.g. temporary
 			// suspension, cool down, or order throttling), and restored
 			// accounts will still require a record of the revoked order.
-			s.authMgr.Penalize(orderAtFault.User(), account.FailureToAct)
+			details := fmt.Sprintf("Match ID: %s", match.ID())
+			s.authMgr.Penalize(orderAtFault.User(), account.FailureToAct, details)
 
 			// Send the revoke_match messages, and solicit acks.
 			s.revoke(match)

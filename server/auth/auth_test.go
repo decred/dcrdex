@@ -961,12 +961,12 @@ func TestPenalize(t *testing.T) {
 
 	// Cannot set account as suspended in the clients map if they are not
 	// connected, but should still suspend in DB.
-	rig.mgr.Penalize(foreigner.acctID, 0)
+	rig.mgr.Penalize(foreigner.acctID, 0, "details")
 	var zeroAcct account.AccountID
 	// if rig.storage.closedID != zeroAcct {
 	// 	t.Fatalf("foreigner penalty stored")
 	// }
-	rig.mgr.Penalize(user.acctID, 0)
+	rig.mgr.Penalize(user.acctID, 0, "details")
 	if rig.storage.closedID != user.acctID {
 		t.Fatalf("penalty not stored")
 	}

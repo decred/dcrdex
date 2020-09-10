@@ -84,6 +84,8 @@ be sent in the [[comm.mediawiki/#Session_Authentication|connect response]].
 |-
 | duration   || int    || the duration in milliseconds of the penalization
 |-
+| accountid  || string || account ID
+|-
 | details    || string || a message describing the penalization
 |}
 
@@ -97,6 +99,8 @@ be sent in the [[comm.mediawiki/#Session_Authentication|connect response]].
 | timestamp  || 8            || server's UNIX timestamp (milliseconds)
 |-
 | duration   || 8            || duration (milliseconds)
+|-
+| account ID || 32           || client [[accounts.mediawiki/#Step_1_Registration|account ID]]
 |-
 | details    || string       || a message (UTF-8)
 |}

@@ -692,18 +692,19 @@ func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message, 
 
 // Penalize signals that a user has broken a rule of community conduct, and that
 // their account should be penalized.
-func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) error {
+func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule, extraDetails string) error {
 	// Notify user of penalty.
 	details := "Ordering has been suspended for this account. Contact the exchange operator to reinstate privileges."
 	if auth.anarchy {
 		details = "You were penalized but the penalty will not be counted against you."
 	}
-	details = fmt.Sprintf("%s\n%s", details, rule.Details())
+	details = fmt.Sprintf("%s\nRule Details: %s\n%s", details, rule.Details(), extraDetails)
 	penalty := &msgjson.Penalty{
-		Rule:     rule,
-		Time:     uint64(unixMsNow().Unix()),
-		Duration: uint64(rule.Duration()),
-		Details:  details,
+		Rule:      rule,
+		Time:      uint64(unixMsNow().Unix()),
+		Duration:  uint64(rule.Duration()),
+		AccountID: user[:],
+		Details:   details,
 	}
 	penaltyNote := &msgjson.PenaltyNote{
 		Penalty: penalty,
@@ -717,6 +718,8 @@ func (auth *AuthManager) Penalize(user account.AccountID, rule account.Rule) err
 	if err != nil {
 		return fmt.Errorf("error creating penalty notification: %v", err)
 	}
+	// TODO: verify that we are not sending a note over max uint16 as it
+	// cannot be sent over ws.
 	auth.Notify(user, note, time.Hour*72)
 	if auth.anarchy {
 		err := fmt.Errorf("user %v penalized for rule %v, but not enforcing it", user, rule)

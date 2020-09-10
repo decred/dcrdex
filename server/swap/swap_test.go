@@ -191,7 +191,7 @@ func (m *TAuthManager) Route(string,
 	func(account.AccountID, *msgjson.Message) *msgjson.Error) {
 }
 
-func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule) error {
+func (m *TAuthManager) Penalize(id account.AccountID, rule account.Rule, _ string) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	m.suspensions[id] = rule
