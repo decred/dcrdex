@@ -1432,11 +1432,11 @@ class BalanceWidget {
     // We have a wallet and a DEX-specific balance. Set all of the fields.
     Doc.show(side.avail, side.immature, side.locked)
     side.avail.textContent = Doc.formatCoinValue(bal.available / 1e8)
-    side.locked.textContent = Doc.formatCoinValue(bal.locked / 1e8)
+    side.locked.textContent = Doc.formatCoinValue((bal.locked + bal.contractlocked) / 1e8)
     side.immature.textContent = Doc.formatCoinValue(bal.immature / 1e8)
     // If the current balance update time is older than an hour, show the
     // expiration icon. Request a balance update, if possible.
-    const expired = new Date().getTime() - new Date(wallet.balance.stamp).getTime() > anHour
+    const expired = new Date().getTime() - new Date(bal.stamp).getTime() > anHour
     if (expired) {
       Doc.show(side.expired)
       if (wallet.running) this.fetchBalance(side.id)

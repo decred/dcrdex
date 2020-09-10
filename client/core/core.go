@@ -876,6 +876,13 @@ func (c *Core) walletBalances(wallet *xcWallet) (*db.Balance, error) {
 		Balance: *bal,
 		Stamp:   time.Now(),
 	}
+	for _, dc := range c.conns {
+		dc.tradeMtx.RLock()
+		for _, tracker := range dc.trades {
+			dbBal.ContractLocked += tracker.unspentContractAmounts(wallet.AssetID)
+		}
+		dc.tradeMtx.RUnlock()
+	}
 	wallet.setBalance(dbBal)
 	err = c.db.UpdateBalance(wallet.dbID, dbBal)
 	if err != nil {
@@ -1060,8 +1067,9 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 	}
 
 	log.Infof("Created %s wallet. Balance available = %d / "+
-		"locked = %d, Deposit address = %s",
-		symbol, balances.Available, balances.Locked, dbWallet.Address)
+		"locked = %d / locked in contracts = %d, Deposit address = %s",
+		symbol, balances.Available, balances.Locked, balances.ContractLocked,
+		dbWallet.Address)
 
 	// The wallet has been successfully created. Store it.
 	c.walletMtx.Lock()
@@ -1134,8 +1142,9 @@ func (c *Core) OpenWallet(assetID uint32, appPW []byte) error {
 		return err
 	}
 	log.Infof("Connected to and unlocked %s wallet. Balance available "+
-		"= %d / locked = %d, Deposit address = %s",
-		state.Symbol, balances.Available, balances.Locked, state.Address)
+		"= %d / locked = %d / locked in contracts = %d, Deposit address = %s",
+		state.Symbol, balances.Available, balances.Locked, balances.ContractLocked,
+		state.Address)
 
 	if dcrID, _ := dex.BipSymbolID("dcr"); assetID == dcrID {
 		go c.checkUnpaidFees(wallet)

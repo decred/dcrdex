@@ -396,13 +396,17 @@ func decodeAssetBalance_v0(pushes [][]byte) (*asset.Balance, error) {
 // Balance represents a wallet's balance in various contexts.
 type Balance struct {
 	asset.Balance
-	Stamp time.Time `json:"stamp"`
+	// ContractLocked is the total amount of funds locked in unspent
+	// (i.e. unredeemed / unrefunded) swap contracts.
+	ContractLocked uint64    `json:"contractlocked"`
+	Stamp          time.Time `json:"stamp"`
 }
 
 // Encode encodes the Balance to a versioned blob.
 func (b *Balance) Encode() []byte {
 	return dbBytes{0}.
 		AddData(encodeAssetBalance(&b.Balance)).
+		AddData(uint64Bytes(b.ContractLocked)).
 		AddData(uint64Bytes(encode.UnixMilliU(b.Stamp)))
 }
 
@@ -420,20 +424,18 @@ func DecodeBalance(b []byte) (*Balance, error) {
 }
 
 func decodeBalance_v0(pushes [][]byte) (*Balance, error) {
-	if len(pushes) < 2 {
-		return nil, fmt.Errorf("decodeBalances_v0: expected >= 2 pushes. got %d", len(pushes))
-	}
-	if len(pushes)%2 != 0 {
-		return nil, fmt.Errorf("decodeBalances_v0: expected an even number of pushes, got %d", len(pushes))
+	if len(pushes) != 3 {
+		return nil, fmt.Errorf("decodeBalances_v0: expected 3 pushes. got %d", len(pushes))
 	}
 	bal, err := decodeAssetBalance(pushes[0])
 	if err != nil {
-		return nil, fmt.Errorf("decodeBalances_v0: error decoding zero conf balance: %v", err)
+		return nil, fmt.Errorf("decodeBalances_v0: error decoding asset balance: %v", err)
 	}
 
 	return &Balance{
-		Balance: *bal,
-		Stamp:   encode.UnixTimeMilli(int64(intCoder.Uint64(pushes[1]))),
+		Balance:        *bal,
+		ContractLocked: intCoder.Uint64(pushes[1]),
+		Stamp:          encode.UnixTimeMilli(int64(intCoder.Uint64(pushes[2]))),
 	}, nil
 }
 
