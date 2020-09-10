@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"time"
 
 	_ "decred.org/dcrdex/client/asset/btc" // register btc asset
 	_ "decred.org/dcrdex/client/asset/dcr" // register dcr asset
@@ -55,9 +56,17 @@ func main() {
 	logStdout := func(msg []byte) {
 		os.Stdout.Write(msg)
 	}
-	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel)
+	utc := !cfg.LocalLogs
+	if cfg.Net == dex.Simnet {
+		utc = false
+	}
+	logMaker := ui.InitLogging(logStdout, cfg.DebugLevel, utc)
 	core.UseLoggerMaker(logMaker)
 	log = logMaker.Logger("DEXC")
+	if utc {
+		log.Infof("Logging with UTC time stamps. Current local time is %v",
+			time.Now().Local().Format("15:04:05 MST"))
+	}
 
 	clientCore, err := core.New(&core.Config{
 		DBPath: cfg.DBPath, // global set in config.go

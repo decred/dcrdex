@@ -58,7 +58,7 @@ func Run(ctx context.Context) {
 	appJournal = newJournal("Application Log", handleAppLogKey)
 	InitLogging(func(p []byte) {
 		appJournal.Write(p)
-	}, cfg.DebugLevel)
+	}, cfg.DebugLevel, false)
 	// Close closes the log rotator.
 	defer Close()
 	// Create the UI and start the app.
@@ -101,7 +101,7 @@ var welcomeMessage = "Welcome to Decred DEX. Use [#838ac7]Up[white] and " +
 // createApp creates the Screen and adds the menu and the initial view.
 func createApp() {
 	var err error
-	lm, err := CustomLogMaker(nil)
+	lm, err := CustomLogMaker(nil, false)
 	if err != nil {
 		log.Errorf("error creating core logger")
 	}

@@ -39,7 +39,7 @@ func newServerView(tag, addr string, runFunc func(context.Context, string, dex.L
 	logTag := strings.ToUpper(tag) + "SVR"
 	lm, err := CustomLogMaker(func(p []byte) {
 		serverJournal.Write(p)
-	})
+	}, false)
 	if err != nil {
 		log.Errorf("error creating " + logTag + " logger")
 	}
