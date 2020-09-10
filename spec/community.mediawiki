@@ -44,11 +44,10 @@ The cancellation threshold is set by the DEX operator.
 The cancellation rate is evaluated on a 100-order rolling window.
 
 A new user is exempt from the cancellation rate requirement while their
-completed order count (i.e. canceled + fully settled), <code>total</code>,
-is not greater than <code>threshold/(1-threshold)</code>. This follows from
-the possibility of the next completed order being fully-settled and just
-meeting the required cancellation rate threshold:
-<code>total / (total + 1) <= threshold</code>
+completed order count, <code>total</code>, is not greater than
+<code>threshold/(1-threshold)</code>. This follows from the possibility of the
+next completed order being fully-settled and just passing the required
+cancellation rate threshold: <code>total / (total + 1) <= threshold</code>
 
 ===Rule 4: Transaction outputs must be properly sized===
 
