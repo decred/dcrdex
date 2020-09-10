@@ -35,6 +35,7 @@ export default class Application {
       wallets: {}
     }
     this.commitHash = commitHash
+    window.log = (...a) => { this.log(...a) }
     console.log('Decred DEX Client App, Build', this.commitHash.substring(0, 7))
   }
 
@@ -385,9 +386,16 @@ export default class Application {
    * --------   -----------
    * notes      Notifications of all levels.
    * book       Order book feed.
+   * ws.........Websocket connection status changes.
    */
   log (loggerID, ...msg) {
-    if (this.loggers[loggerID]) console.log(`[${loggerID}]:`, ...msg)
+    if (!this.loggers[loggerID]) return
+    const stamp = new Date()
+    const h = stamp.getHours().toString().padStart(2, '0')
+    const m = stamp.getMinutes().toString().padStart(2, '0')
+    const s = stamp.getSeconds().toString().padStart(2, '0')
+    const ms = stamp.getMilliseconds().toString().padStart(3, '0')
+    console.log(`${`${h}:${m}:${s}.${ms}`}[${loggerID}]:`, ...msg)
   }
 
   /* setNoteElements re-builds the drop-down notification list. */
