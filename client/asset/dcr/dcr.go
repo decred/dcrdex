@@ -53,7 +53,7 @@ const (
 )
 
 var (
-	requiredWalletVersion = dex.Semver{Major: 8, Minor: 2, Patch: 0}
+	requiredWalletVersion = dex.Semver{Major: 8, Minor: 3, Patch: 0}
 	requiredNodeVersion   = dex.Semver{Major: 6, Minor: 1, Patch: 2}
 )
 
