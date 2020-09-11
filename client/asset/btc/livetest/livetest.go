@@ -181,21 +181,21 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	// Gamma should only have 10 BTC utxos, so calling fund for less should only
 	// return 1 utxo.
 
-	utxos, err := rig.gamma().FundOrder(ord)
+	utxos, _, err := rig.gamma().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// UTXOs should be locked
-	utxos, _ = rig.gamma().FundOrder(ord)
+	utxos, _, _ = rig.gamma().FundOrder(ord)
 	if inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
 	rig.gamma().ReturnCoins([]asset.Coin{utxo})
 	rig.gamma().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
-	utxos, _ = rig.gamma().FundOrder(ord)
+	utxos, _, _ = rig.gamma().FundOrder(ord)
 	if !splitTx && !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
@@ -203,13 +203,13 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 
 	// Get a separate set of UTXOs for each contract.
 	setOrderValue(contractValue)
-	utxos1, err := rig.gamma().FundOrder(ord)
+	utxos1, _, err := rig.gamma().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
 	setOrderValue(contractValue * 2)
-	utxos2, err := rig.gamma().FundOrder(ord)
+	utxos2, _, err := rig.gamma().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -264,19 +264,18 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		// Alpha should be able to redeem.
-		swapOutput := receipt.Coin()
-		ci, err := rig.alpha().AuditContract(swapOutput.ID(), swapOutput.Redeem())
+		ci, err := rig.alpha().AuditContract(receipt.Coin().ID(), receipt.Contract())
 		if err != nil {
 			t.Fatalf("error auditing contract")
 		}
-		swapOutput = ci.Coin()
+		auditCoin := ci.Coin()
 		if ci.Recipient() != address {
 			t.Fatalf("wrong address. %s != %s", ci.Recipient(), address)
 		}
-		if swapOutput.Value() != swapVal {
-			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, swapOutput.Value())
+		if auditCoin.Value() != swapVal {
+			t.Fatalf("wrong contract value. wanted %d, got %d", swapVal, auditCoin.Value())
 		}
-		confs, err := swapOutput.Confirmations()
+		confs, err := auditCoin.Confirmations()
 		if err != nil {
 			t.Fatalf("error getting confirmations: %v", err)
 		}
@@ -303,10 +302,10 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 
 	// Find the redemption
-	swapCoin := receipts[0].Coin()
+	swapReceipt := receipts[0]
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel()
-	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapCoin.ID())
+	_, checkKey, err := rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -322,13 +321,13 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	}
 	// Check that there is 1 confirmation on the swap
 	checkConfs(1)
-	_, _, err = rig.gamma().FindRedemption(ctx, swapCoin.ID())
+	_, _, err = rig.gamma().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
 
 	// Confirmations should now be an error, since the swap output has been spent.
-	_, err = swapCoin.Confirmations()
+	_, err = swapReceipt.Coin().Confirmations()
 	if err == nil {
 		t.Fatalf("error getting confirmations. has swap output been spent?")
 	}
@@ -340,7 +339,7 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 
 	// Have gamma send a swap contract to the alpha address.
 	setOrderValue(contractValue)
-	utxos, _ = rig.gamma().FundOrder(ord)
+	utxos, _, _ = rig.gamma().FundOrder(ord)
 	contract := &asset.Contract{
 		Address:    address,
 		Value:      contractValue,
@@ -363,9 +362,9 @@ func Run(t *testing.T, newWallet WalletConstructor, address string, dexAsset *de
 	if len(receipts) != 1 {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
 	}
-	swapCoin = receipts[0].Coin()
+	swapReceipt = receipts[0]
 
-	_, err = rig.gamma().Refund(swapCoin.ID(), swapCoin.Redeem())
+	_, err = rig.gamma().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

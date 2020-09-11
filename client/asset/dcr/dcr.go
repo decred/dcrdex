@@ -159,24 +159,22 @@ func (pt *outPoint) String() string {
 // output is information about a transaction output. output satisfies the
 // asset.Coin interface.
 type output struct {
-	pt     outPoint
-	tree   int8
-	value  uint64
-	redeem dex.Bytes
-	node   rpcClient // for calculating confirmations.
+	pt    outPoint
+	tree  int8
+	value uint64
+	node  rpcClient // for calculating confirmations.
 }
 
 // newOutput is the constructor for an output.
-func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64, tree int8, redeem dex.Bytes) *output {
+func newOutput(node rpcClient, txHash *chainhash.Hash, vout uint32, value uint64, tree int8) *output {
 	return &output{
 		pt: outPoint{
 			txHash: *txHash,
 			vout:   vout,
 		},
-		value:  value,
-		redeem: redeem,
-		tree:   tree,
-		node:   node,
+		value: value,
+		tree:  tree,
+		node:  node,
 	}
 }
 
@@ -211,12 +209,6 @@ func (op *output) String() string {
 	return op.pt.String()
 }
 
-// Redeem is any known redeem script required to spend this output. Part of the
-// asset.Coin interface.
-func (op *output) Redeem() dex.Bytes {
-	return op.redeem
-}
-
 // txHash returns the pointer of the outPoint's txHash.
 func (op *output) txHash() *chainhash.Hash {
 	return &op.pt.txHash
@@ -238,6 +230,7 @@ func (op *output) wireOutPoint() *wire.OutPoint {
 type auditInfo struct {
 	output     *output
 	secretHash []byte
+	contract   []byte
 	recipient  dcrutil.Address
 	expiration time.Time
 }
@@ -255,6 +248,11 @@ func (ci *auditInfo) Expiration() time.Time {
 	return ci.expiration
 }
 
+// Contract is the contract script.
+func (ci *auditInfo) Contract() dex.Bytes {
+	return ci.contract
+}
+
 // Coin returns the output as an asset.Coin. Part of the asset.AuditInfo
 // interface.
 func (ci *auditInfo) Coin() asset.Coin {
@@ -270,6 +268,7 @@ func (ci *auditInfo) SecretHash() dex.Bytes {
 // wallet. Satisfies the asset.Receipt interface.
 type swapReceipt struct {
 	output     *output
+	contract   []byte
 	expiration time.Time
 }
 
@@ -277,6 +276,11 @@ type swapReceipt struct {
 // issue a refund transaction. Part of the asset.Receipt interface.
 func (r *swapReceipt) Expiration() time.Time {
 	return r.expiration
+}
+
+// Coin is the contract script. Part of the asset.Receipt interface.
+func (r *swapReceipt) Contract() dex.Bytes {
+	return r.contract
 }
 
 // Coin is the output information as an asset.Coin. Part of the asset.Receipt
@@ -579,12 +583,12 @@ func (dcr *ExchangeWallet) feeRateWithFallback() uint64 {
 // FundOrder selects coins for use in an order. The coins will be locked, and
 // will not be returned in subsequent calls to Fund or calculated in calls to
 // Available, unless they are unlocked with ReturnCoins.
-func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
+func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
 	if ord.Value == 0 {
-		return nil, fmt.Errorf("cannot fund value = 0")
+		return nil, nil, fmt.Errorf("cannot fund value = 0")
 	}
 	if ord.MaxSwapCount == 0 {
-		return nil, fmt.Errorf("cannot fund a zero-lot order")
+		return nil, nil, fmt.Errorf("cannot fund a zero-lot order")
 	}
 
 	//oneInputSize := dexdcr.P2PKHInputSize
@@ -594,9 +598,9 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
 		return sum+toAtoms(unspent.rpc.Amount) >= reqFunds
 	}
 
-	coins, sum, inputsSize, fundingCoins, err := dcr.fund(enough)
+	coins, redeemScripts, sum, inputsSize, fundingCoins, err := dcr.fund(enough)
 	if err != nil {
-		return nil, fmt.Errorf("error funding order value of %d DCR: %w",
+		return nil, nil, fmt.Errorf("error funding order value of %d DCR: %w",
 			ord.Value, err)
 	}
 
@@ -606,12 +610,12 @@ func (dcr *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, error) {
 		if err != nil {
 			dcr.returnCoins(coins)
 		}
-		return splitCoins, err
+		return splitCoins, nil, err // // no redeem script required for split tx output
 	}
 
 	dcr.log.Infof("Funding %d atom order with coins %v worth %d", ord.Value, coins, sum)
 
-	return coins, nil
+	return coins, redeemScripts, nil
 }
 
 // unspents fetches unspent outputs for the ExchangeWallet account using rpc
@@ -628,7 +632,7 @@ func (dcr *ExchangeWallet) unspents() ([]walletjson.ListUnspentResult, error) {
 // check whether adding the provided output would be enough to satisfy the
 // needed value. Preference is given to selecting coins with 1 or more confs,
 // falling back to 0-conf coins where there are not enough 1+ confs coins.
-func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, uint64, uint64, []*fundingCoin, error) {
+func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *compositeUTXO) bool) (asset.Coins, []dex.Bytes, uint64, uint64, []*fundingCoin, error) {
 
 	// Keep a consistent view of spendable and locked coins in the wallet and
 	// the fundingCoins map to make this safe for concurrent use.
@@ -637,26 +641,27 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 
 	unspents, err := dcr.unspents()
 	if err != nil {
-		return nil, 0, 0, nil, err
+		return nil, nil, 0, 0, nil, err
 	}
 	if len(unspents) == 0 {
-		return nil, 0, 0, nil, fmt.Errorf("insufficient funds. 0 DCR available in %q account", dcr.acct)
+		return nil, nil, 0, 0, nil, fmt.Errorf("insufficient funds. 0 DCR available in %q account", dcr.acct)
 	}
 
 	// Parse utxos to include script size for spending input.
 	// Returned utxos will be sorted in ascending order by amount (smallest first).
 	utxos, err := dcr.parseUTXOs(unspents)
 	if err != nil {
-		return nil, 0, 0, nil, fmt.Errorf("error parsing unspent outputs: %v", err)
+		return nil, nil, 0, 0, nil, fmt.Errorf("error parsing unspent outputs: %v", err)
 	}
 	if len(utxos) == 0 {
-		return nil, 0, 0, nil, fmt.Errorf("no funds available")
+		return nil, nil, 0, 0, nil, fmt.Errorf("no funds available")
 	}
 
 	var sum uint64
 	var size uint32
 	var coins asset.Coins
 	var spents []*fundingCoin
+	var redeemScripts []dex.Bytes
 
 	addUTXO := func(unspent *compositeUTXO) error {
 		txHash, err := chainhash.NewHashFromStr(unspent.rpc.TxID)
@@ -669,12 +674,13 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 			return fmt.Errorf("error decoding redeem script for %s, script = %s: %v",
 				unspent.rpc.TxID, unspent.rpc.RedeemScript, err)
 		}
-		op := newOutput(dcr.node, txHash, unspent.rpc.Vout, v, unspent.rpc.Tree, redeemScript)
+		op := newOutput(dcr.node, txHash, unspent.rpc.Vout, v, unspent.rpc.Tree)
 		coins = append(coins, op)
 		spents = append(spents, &fundingCoin{
 			op:   op,
 			addr: unspent.rpc.Address,
 		})
+		redeemScripts = append(redeemScripts, redeemScript)
 		size += unspent.input.Size()
 		sum += v
 		return nil
@@ -718,24 +724,24 @@ func (dcr *ExchangeWallet) fund(enough func(sum uint64, size uint32, unspent *co
 	// First try with confs>0.
 	ok, err := tryUTXOs(1)
 	if err != nil {
-		return nil, 0, 0, nil, err
+		return nil, nil, 0, 0, nil, err
 	}
 	// Fallback to allowing 0-conf outputs.
 	if !ok {
 		ok, err = tryUTXOs(0)
 		if err != nil {
-			return nil, 0, 0, nil, err
+			return nil, nil, 0, 0, nil, err
 		}
 		if !ok {
-			return nil, 0, 0, nil, fmt.Errorf("not enough to cover requested funds. %v available", sum)
+			return nil, nil, 0, 0, nil, fmt.Errorf("not enough to cover requested funds. %v available", sum)
 		}
 	}
 
 	err = dcr.lockFundingCoins(spents)
 	if err != nil {
-		return nil, 0, 0, nil, err
+		return nil, nil, 0, 0, nil, err
 	}
-	return coins, sum, uint64(size), spents, nil
+	return coins, redeemScripts, sum, uint64(size), spents, nil
 }
 
 // split will send a split transaction and return the sized output. If the
@@ -794,7 +800,7 @@ func (dcr *ExchangeWallet) split(value uint64, lots uint64, coins asset.Coins, i
 		dcr.log.Errorf("split - total sent %d does not match expected %d", net, reqFunds)
 	}
 
-	op := newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular, nil)
+	op := newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular)
 
 	// Lock the funding coin.
 	err = dcr.lockFundingCoins([]*fundingCoin{{
@@ -940,7 +946,7 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			if len(txOut.ScriptPubKey.Addresses) > 0 {
 				address = txOut.ScriptPubKey.Addresses[0]
 			}
-			coin := newOutput(dcr.node, txHash, output.Vout, toAtoms(output.Amount), output.Tree, nil)
+			coin := newOutput(dcr.node, txHash, output.Vout, toAtoms(output.Amount), output.Tree)
 			coins = append(coins, coin)
 			dcr.fundingCoins[pt] = &fundingCoin{
 				op:   coin,
@@ -966,12 +972,8 @@ func (dcr *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 		}
 		pt := newOutPoint(txHash, txout.Vout)
 		if notFound[pt] {
-			redeemScript, err := hex.DecodeString(txout.RedeemScript)
-			if err != nil {
-				return nil, fmt.Errorf("error decoding redeem script for %s, script = %s: %v", txout.TxID, txout.RedeemScript, err)
-			}
 			lockers = append(lockers, wire.NewOutPoint(txHash, txout.Vout, txout.Tree))
-			coin := newOutput(dcr.node, txHash, txout.Vout, toAtoms(txout.Amount), txout.Tree, redeemScript)
+			coin := newOutput(dcr.node, txHash, txout.Vout, toAtoms(txout.Amount), txout.Tree)
 			coins = append(coins, coin)
 			dcr.fundingCoins[pt] = &fundingCoin{
 				op:   coin,
@@ -1013,7 +1015,7 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	pkScripts := make([][]byte, 0, len(swaps.Contracts))
+	contractScripts := make([][]byte, 0, len(swaps.Contracts))
 	// Add the contract outputs.
 	for _, contract := range swaps.Contracts {
 		totalOut += contract.Value
@@ -1024,13 +1026,13 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 			return nil, nil, 0, fmt.Errorf("error creating revocation address: %v", err)
 		}
 		// Create the contract, a P2SH redeem script.
-		pkScript, err := dexdcr.MakeContract(contract.Address, revokeAddr.String(), contract.SecretHash, int64(contract.LockTime), chainParams)
+		contractScript, err := dexdcr.MakeContract(contract.Address, revokeAddr.String(), contract.SecretHash, int64(contract.LockTime), chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("unable to create pubkey script for address %s: %v", contract.Address, err)
 		}
-		pkScripts = append(pkScripts, pkScript)
+		contractScripts = append(contractScripts, contractScript)
 		// Make the P2SH address and pubkey script.
-		scriptAddr, err := dcrutil.NewAddressScriptHash(pkScript, chainParams)
+		scriptAddr, err := dcrutil.NewAddressScriptHash(contractScript, chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error encoding script address: %v", err)
 		}
@@ -1088,7 +1090,8 @@ func (dcr *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	txHash := msgTx.TxHash()
 	for i, contract := range swaps.Contracts {
 		receipts = append(receipts, &swapReceipt{
-			output:     newOutput(dcr.node, &txHash, uint32(i), contract.Value, wire.TxTreeRegular, pkScripts[i]),
+			output:     newOutput(dcr.node, &txHash, uint32(i), contract.Value, wire.TxTreeRegular),
+			contract:   contractScripts[i],
 			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
 		})
 	}
@@ -1116,7 +1119,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		}
 		// Extract the swap contract recipient and secret hash and check the secret
 		// hash against the hash of the provided secret.
-		_, receiver, _, secretHash, err := dexdcr.ExtractSwapDetails(cinfo.output.redeem, chainParams)
+		_, receiver, _, secretHash, err := dexdcr.ExtractSwapDetails(cinfo.contract, chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error extracting swap addresses: %v", err)
 		}
@@ -1125,7 +1128,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 			return nil, nil, 0, fmt.Errorf("secret hash mismatch. %x != %x", checkSecretHash[:], secretHash)
 		}
 		addresses = append(addresses, receiver)
-		contracts = append(contracts, cinfo.output.redeem)
+		contracts = append(contracts, cinfo.contract)
 		prevOut := cinfo.output.wireOutPoint()
 		txIn := wire.NewTxIn(prevOut, int64(cinfo.output.value), []byte{})
 		// Sequence = 0xffffffff - 1 is special value that marks the transaction as
@@ -1187,7 +1190,7 @@ func (dcr *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		coinIDs = append(coinIDs, toCoinID(txHash, uint32(i)))
 	}
 
-	return coinIDs, newOutput(dcr.node, txHash, 0, uint64(txOut.Value), wire.TxTreeRegular, nil), fee, nil
+	return coinIDs, newOutput(dcr.node, txHash, 0, uint64(txOut.Value), wire.TxTreeRegular), fee, nil
 }
 
 // SignMessage signs the message with the private key associated with the
@@ -1290,7 +1293,8 @@ func (dcr *ExchangeWallet) AuditContract(coinID, contract dex.Bytes) (asset.Audi
 			contractHash, addr.ScriptAddress())
 	}
 	return &auditInfo{
-		output:     newOutput(dcr.node, txHash, vout, toAtoms(txOut.Value), wire.TxTreeRegular, contract),
+		output:     newOutput(dcr.node, txHash, vout, toAtoms(txOut.Value), wire.TxTreeRegular),
+		contract:   contract,
 		secretHash: secretHash,
 		recipient:  receiver,
 		expiration: time.Unix(int64(stamp), 0).UTC(),
@@ -1737,7 +1741,7 @@ func (dcr *ExchangeWallet) PayFee(address string, regFee uint64) (asset.Coin, er
 		return nil, fmt.Errorf("transaction %s was sent, but the reported value sent was unexpected. "+
 			"expected %d, but %d was reported", msgTx.CachedTxHash(), regFee, sent)
 	}
-	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular, nil), nil
+	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, regFee, wire.TxTreeRegular), nil
 }
 
 // Withdraw withdraws funds to the specified address. Fees are subtracted from
@@ -1751,7 +1755,7 @@ func (dcr *ExchangeWallet) Withdraw(address string, value uint64) (asset.Coin, e
 	if err != nil {
 		return nil, err
 	}
-	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular, nil), nil
+	return newOutput(dcr.node, msgTx.CachedTxHash(), 0, net, wire.TxTreeRegular), nil
 }
 
 // ValidateSecret checks that the secret satisfies the contract.
@@ -1901,10 +1905,10 @@ func (dcr *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 		return nil, err
 	}
 	tree := wire.TxTreeRegular
-	if dexdcr.ParseScriptType(dexdcr.CurrentScriptVersion, pkScript, coin.Redeem()).IsStake() {
+	if dexdcr.IsStakePubkeyHashScript(pkScript) || dexdcr.IsStakeScriptHashScript(pkScript) {
 		tree = wire.TxTreeStake
 	}
-	return newOutput(dcr.node, txHash, vout, coin.Value(), tree, coin.Redeem()), nil
+	return newOutput(dcr.node, txHash, vout, coin.Value(), tree), nil
 }
 
 // sendMinusFees sends the amount to the address. Fees are subtracted from the
@@ -1916,7 +1920,7 @@ func (dcr *ExchangeWallet) sendMinusFees(addr dcrutil.Address, val, feeRate uint
 	enough := func(sum uint64, size uint32, unspent *compositeUTXO) bool {
 		return sum+toAtoms(unspent.rpc.Amount) >= val
 	}
-	coins, _, _, _, err := dcr.fund(enough)
+	coins, _, _, _, _, err := dcr.fund(enough)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error funding request for %d DCR to address %s with feeRate %d: %w",
 			val, addr, feeRate, err)
@@ -1932,7 +1936,7 @@ func (dcr *ExchangeWallet) sendRegFee(addr dcrutil.Address, regFee, netFeeRate u
 		txFee := uint64(size+unspent.input.Size()) * netFeeRate
 		return sum+toAtoms(unspent.rpc.Amount) >= regFee+txFee
 	}
-	coins, _, _, _, err := dcr.fund(enough)
+	coins, _, _, _, _, err := dcr.fund(enough)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error funding fee of %d DCR to address %s with feeRate %d: %w",
 			regFee, addr, netFeeRate, err)
@@ -2160,7 +2164,7 @@ func (dcr *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr dcrutil.Addre
 
 	var change *output
 	if changeAdded {
-		change = newOutput(dcr.node, txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), wire.TxTreeRegular, nil)
+		change = newOutput(dcr.node, txHash, uint32(len(msgTx.TxOut)-1), uint64(changeOutput.Value), wire.TxTreeRegular)
 	}
 	return msgTx, change, lastFee, nil
 }

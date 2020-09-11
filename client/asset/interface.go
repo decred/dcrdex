@@ -72,7 +72,7 @@ type Wallet interface {
 	// Fund selects coins for use in an order. The coins will be locked, and will
 	// not be returned in subsequent calls to Fund or calculated in calls to
 	// Available, unless they are unlocked with ReturnCoins.
-	FundOrder(*Order) (Coins, error)
+	FundOrder(*Order) (Coins, []dex.Bytes, error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error
@@ -172,8 +172,6 @@ type Coin interface {
 	// Confirmations is the number of confirmations on this Coin's block. If the
 	// coin becomes spent, Confirmations should return an error.
 	Confirmations() (uint32, error)
-	// Redeem is any redeem script required to spend the coin.
-	Redeem() dex.Bytes
 }
 
 // Coins a collection of coins as returned by Fund.
@@ -185,6 +183,8 @@ type Receipt interface {
 	Expiration() time.Time
 	// Coin is the contract's coin.
 	Coin() Coin
+	// Contract is the contract script.
+	Contract() dex.Bytes
 	// String provides a human-readable representation of the contract's Coin.
 	String() string
 }
@@ -198,6 +198,8 @@ type AuditInfo interface {
 	Expiration() time.Time
 	// Coin is the coin that contains the contract.
 	Coin() Coin
+	// Contract is the contract script.
+	Contract() dex.Bytes
 	// SecretHash is the contract's secret hash.
 	SecretHash() dex.Bytes
 }

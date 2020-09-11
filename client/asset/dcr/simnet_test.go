@@ -201,21 +201,21 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	// Grab some coins.
-	utxos, err := rig.beta().FundOrder(ord)
+	utxos, _, err := rig.beta().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("Funding error: %v", err)
 	}
 	utxo := utxos[0]
 
 	// Coins should be locked
-	utxos, _ = rig.beta().FundOrder(ord)
+	utxos, _, _ = rig.beta().FundOrder(ord)
 	if !splitTx && inUTXOs(utxo, utxos) {
 		t.Fatalf("received locked output")
 	}
 	rig.beta().ReturnCoins([]asset.Coin{utxo})
 	rig.beta().ReturnCoins(utxos)
 	// Make sure we get the first utxo back with Fund.
-	utxos, _ = rig.beta().FundOrder(ord)
+	utxos, _, _ = rig.beta().FundOrder(ord)
 	if !splitTx && !inUTXOs(utxo, utxos) {
 		t.Fatalf("unlocked output not returned")
 	}
@@ -223,13 +223,13 @@ func runTest(t *testing.T, splitTx bool) {
 
 	// Get a separate set of UTXOs for each contract.
 	setOrderValue(contractValue)
-	utxos1, err := rig.beta().FundOrder(ord)
+	utxos1, _, err := rig.beta().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding first contract: %v", err)
 	}
 	// Get a separate set of UTXOs for each contract.
 	setOrderValue(contractValue * 2)
-	utxos2, err := rig.beta().FundOrder(ord)
+	utxos2, _, err := rig.beta().FundOrder(ord)
 	if err != nil {
 		t.Fatalf("error funding second contract: %v", err)
 	}
@@ -292,7 +292,7 @@ func runTest(t *testing.T, splitTx bool) {
 	makeRedemption := func(swapVal uint64, receipt asset.Receipt, secret []byte) *asset.Redemption {
 		t.Helper()
 		swapOutput := receipt.Coin()
-		ci, err := rig.alpha().AuditContract(swapOutput.ID(), swapOutput.Redeem())
+		ci, err := rig.alpha().AuditContract(swapOutput.ID(), receipt.Contract())
 		if err != nil {
 			t.Fatalf("error auditing contract: %v", err)
 		}
@@ -330,11 +330,11 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 
 	// Find the redemption
-	swapCoin := receipts[0].Coin()
+	swapReceipt := receipts[0]
 	waitNetwork()
 	ctx, cancel := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel()
-	_, checkKey, err := rig.beta().FindRedemption(ctx, swapCoin.ID())
+	_, checkKey, err := rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding unconfirmed redemption: %v", err)
 	}
@@ -352,13 +352,13 @@ func runTest(t *testing.T, splitTx bool) {
 	}
 	ctx, cancel2 := context.WithDeadline(tCtx, time.Now().Add(time.Second*5))
 	defer cancel2()
-	_, _, err = rig.beta().FindRedemption(ctx, swapCoin.ID())
+	_, _, err = rig.beta().FindRedemption(ctx, swapReceipt.Coin().ID())
 	if err != nil {
 		t.Fatalf("error finding confirmed redemption: %v", err)
 	}
 
 	// Confirmations should now be an error, since the swap output has been spent.
-	_, err = swapCoin.Confirmations()
+	_, err = swapReceipt.Coin().Confirmations()
 	if err == nil {
 		t.Fatalf("no error getting confirmations for redeemed swap. has swap output been spent?")
 	}
@@ -370,7 +370,7 @@ func runTest(t *testing.T, splitTx bool) {
 
 	// Have beta send a swap contract to the alpha address.
 	setOrderValue(contractValue)
-	utxos, _ = rig.beta().FundOrder(ord)
+	utxos, _, _ = rig.beta().FundOrder(ord)
 	contract := &asset.Contract{
 		Address:    alphaAddress,
 		Value:      contractValue,
@@ -391,10 +391,10 @@ func runTest(t *testing.T, splitTx bool) {
 	if len(receipts) != 1 {
 		t.Fatalf("expected 1 receipt, got %d", len(receipts))
 	}
-	swapCoin = receipts[0].Coin()
+	swapReceipt = receipts[0]
 
 	waitNetwork()
-	_, err = rig.beta().Refund(swapCoin.ID(), swapCoin.Redeem())
+	_, err = rig.beta().Refund(swapReceipt.Coin().ID(), swapReceipt.Contract())
 	if err != nil {
 		t.Fatalf("refund error: %v", err)
 	}

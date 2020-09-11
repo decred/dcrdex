@@ -51,10 +51,6 @@ func (c *tCoin) Confirmations() (uint32, error) {
 	return c.confs, c.confsErr
 }
 
-func (c *tCoin) Redeem() dex.Bytes {
-	return nil
-}
-
 type TCore struct {
 	balanceErr      error
 	syncBook        *core.OrderBook
