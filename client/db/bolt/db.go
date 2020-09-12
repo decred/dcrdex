@@ -821,7 +821,7 @@ func (db *BoltDB) DEXOrdersWithActiveMatches(dex string) ([]order.OrderID, error
 			// Some revoked matches are inactive depending on match status and
 			// party side. They may need to be refunded or redeemed first.
 			// TakerSwapCast match status requires action on both sides.
-			if proof.IsRevoked && status != order.TakerSwapCast {
+			if proof.IsRevoked() && status != order.TakerSwapCast {
 				// NewlyMatched requires no further action from either side.
 				if status == order.NewlyMatched {
 					return nil

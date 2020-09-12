@@ -254,17 +254,23 @@ type MatchProof struct {
 	TakerRedeem   order.CoinID
 	RefundCoin    order.CoinID
 	Auth          MatchAuth
-	IsRevoked     bool
+	ServerRevoked bool
+	SelfRevoked   bool
 }
 
 // Encode encodes the MatchProof to a versioned blob.
 func (p *MatchProof) Encode() []byte {
 	auth := p.Auth
-	isRevoked := encode.ByteFalse
-	if p.IsRevoked {
-		isRevoked = encode.ByteTrue
+	srvRevoked := encode.ByteFalse
+	if p.ServerRevoked {
+		srvRevoked = encode.ByteTrue
 	}
-	return dbBytes{0}.
+	selfRevoked := encode.ByteFalse
+	if p.SelfRevoked {
+		selfRevoked = encode.ByteTrue
+	}
+
+	return dbBytes{1}.
 		AddData(p.Script).
 		AddData(p.CounterScript).
 		AddData(p.SecretHash).
@@ -284,7 +290,8 @@ func (p *MatchProof) Encode() []byte {
 		AddData(uint64Bytes(auth.RedeemStamp)).
 		AddData(auth.RedemptionSig).
 		AddData(uint64Bytes(auth.RedemptionStamp)).
-		AddData(isRevoked)
+		AddData(srvRevoked).
+		AddData(selfRevoked)
 }
 
 // DecodeMatchProof decodes the versioned blob to a *MatchProof.
@@ -296,13 +303,20 @@ func DecodeMatchProof(b []byte) (*MatchProof, error) {
 	switch ver {
 	case 0:
 		return decodeMatchProof_v0(pushes)
+	case 1:
+		return decodeMatchProof_v1(pushes)
 	}
 	return nil, fmt.Errorf("unknown MatchProof version %d", ver)
 }
 
 func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
-	if len(pushes) != 20 {
-		return nil, fmt.Errorf("DecodeMatchProof: expected 20 pushes, got %d", len(pushes))
+	pushes = append(pushes, encode.ByteFalse)
+	return decodeMatchProof_v1(pushes)
+}
+
+func decodeMatchProof_v1(pushes [][]byte) (*MatchProof, error) {
+	if len(pushes) != 21 {
+		return nil, fmt.Errorf("DecodeMatchProof: expected 21 pushes, got %d", len(pushes))
 	}
 	return &MatchProof{
 		Script:        pushes[0],
@@ -326,8 +340,14 @@ func decodeMatchProof_v0(pushes [][]byte) (*MatchProof, error) {
 			RedemptionSig:   pushes[17],
 			RedemptionStamp: intCoder.Uint64(pushes[18]),
 		},
-		IsRevoked: bytes.Equal(pushes[19], encode.ByteTrue),
+		ServerRevoked: bytes.Equal(pushes[19], encode.ByteTrue),
+		SelfRevoked:   bytes.Equal(pushes[20], encode.ByteTrue),
 	}, nil
+}
+
+// IsRevoked is true if either ServerRevoked or SelfRevoked is true.
+func (p *MatchProof) IsRevoked() bool {
+	return p.ServerRevoked || p.SelfRevoked
 }
 
 // OrderProof is information related to order authentication and matching.
