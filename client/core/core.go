@@ -2853,8 +2853,14 @@ func (c *Core) resumeTrades(dc *dexConnection, trackers []*trackedTrade) assetMa
 				notifyErr("Order coin error", "Source coins retrieval error for %s %s: %v", unbip(wallets.fromAsset.ID), tracker.token(), err)
 				continue
 			}
-			relocks.count(wallets.fromAsset.ID)
 			tracker.coins = mapifyCoins(coins)
+		}
+
+		// Active orders and orders with matches with unsent swaps need the funding
+		// coin(s).
+		// Orders with sent but unspent swaps need to recompute contract-locked amts.
+		if isActive || needsCoins || tracker.unspentContractAmounts(wallets.fromAsset.ID) > 0 {
+			relocks.count(wallets.fromAsset.ID)
 		}
 
 		dc.trades[tracker.ID()] = tracker
