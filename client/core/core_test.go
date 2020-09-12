@@ -5,6 +5,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -1580,11 +1581,17 @@ func TestLogin(t *testing.T) {
 	// Success with some matches in the response.
 	rig = newTestRig()
 	dc := rig.dc
-	lo, dbOrder, preImg, _ := makeLimitOrder(dc, true, 3*tDCR.LotSize, tBTC.RateStep*10)
+	qty := 3 * tDCR.LotSize
+	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep*10)
 	oid := lo.ID()
 	mkt := dc.market(tDcrBtcMktName)
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
 	tracker := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
-		rig.db, rig.queue, nil, nil, nil)
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
 	matchID := ordertest.RandomMatchID()
 	match := &matchTracker{
 		id: matchID,
@@ -1609,7 +1616,32 @@ func TestLogin(t *testing.T) {
 
 	// extra match
 	extraID := ordertest.RandomMatchID()
-	extraMsgMatch := &msgjson.Match{OrderID: oid[:], MatchID: extraID[:]}
+	matchTime := time.Now()
+	extraMsgMatch := &msgjson.Match{
+		OrderID:    oid[:],
+		MatchID:    extraID[:],
+		Side:       uint8(order.Taker),
+		Status:     uint8(order.MakerSwapCast),
+		ServerTime: encode.UnixMilliU(matchTime),
+	}
+
+	// The extra match is already at MakerSwapCast, and we're the taker, which
+	// will invoke match status conflict resolution and a contract audit.
+	_, auditInfo := tMsgAudit(oid, extraID, addr, qty, encode.RandomBytes(32))
+	auditInfo.expiration = encode.DropMilliseconds(matchTime.Add(tracker.lockTimeMaker))
+	tBtcWallet.auditInfo = auditInfo
+	missedContract := encode.RandomBytes(50)
+	rig.ws.queueResponse(msgjson.MatchStatusRoute, func(msg *msgjson.Message, f msgFunc) error {
+		resp, _ := msgjson.NewResponse(msg.ID, []*msgjson.MatchStatusResult{{
+			MatchID:       extraID[:],
+			Status:        uint8(order.MakerSwapCast),
+			MakerContract: missedContract,
+			MakerSwap:     encode.RandomBytes(36),
+			Active:        true,
+		}}, nil)
+		f(resp)
+		return nil
+	})
 
 	dc.trades = map[order.OrderID]*trackedTrade{
 		oid: tracker,
@@ -1626,14 +1658,25 @@ func TestLogin(t *testing.T) {
 	if tracker.matches[missingID].failErr == nil {
 		t.Errorf("failErr not set for missing match tracker")
 	}
-	if !tracker.matches[missingID].MetaData.Proof.IsRevoked {
-		t.Errorf("IsRevoked not true for missing match tracker")
+	if !tracker.matches[missingID].MetaData.Proof.SelfRevoked {
+		t.Errorf("SelfRevoked not true for missing match tracker")
 	}
 	if tracker.matches[matchID].failErr != nil {
 		t.Errorf("failErr set for non-missing match tracker")
 	}
-	if tracker.matches[matchID].MetaData.Proof.IsRevoked {
+	if tracker.matches[matchID].MetaData.Proof.IsRevoked() {
 		t.Errorf("IsRevoked true for non-missing match tracker")
+	}
+	// Conflict resolution will have run negotiate on the extra match from the
+	// connect response, bringing our match count up to 3.
+	if len(tracker.matches) != 3 {
+		t.Errorf("Extra trade not accepted into matches")
+	}
+	tracker.mtx.Lock()
+	match = tracker.matches[extraID]
+	tracker.mtx.Unlock()
+	if !bytes.Equal(match.MetaData.Proof.CounterScript, missedContract) {
+		t.Errorf("Missed maker contract not retrieved, %s, %s", match.id, hex.EncodeToString(match.MetaData.Proof.CounterScript))
 	}
 }
 
@@ -2420,7 +2463,7 @@ func TestTradeTracking(t *testing.T) {
 
 	// requeue an invalid DEX init ack and re-send pending init request
 	rig.ws.queueResponse(msgjson.InitRoute, invalidAcker)
-	err = tracker.resendPendingRequests()
+	err = tCore.resendPendingRequests(tracker)
 	if err == nil {
 		t.Fatalf("no error for invalid server ack for resent init request")
 	}
@@ -2432,7 +2475,7 @@ func TestTradeTracking(t *testing.T) {
 
 	// queue a valid DEX init ack and re-send pending init request
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-	err = tracker.resendPendingRequests()
+	err = tCore.resendPendingRequests(tracker)
 	if err != nil {
 		t.Fatalf("unexpected error for resent pending init request: %v", err)
 	}
@@ -2525,7 +2568,7 @@ func TestTradeTracking(t *testing.T) {
 	redeemCoin := encode.RandomBytes(36)
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	rig.ws.queueResponse(msgjson.RedeemRoute, redeemAcker)
-	dc.tickAsset(tBTC.ID)
+	tCore.tickAsset(dc, tBTC.ID)
 	checkStatus("maker redeemed", order.MakerRedeemed)
 	if !bytes.Equal(proof.MakerRedeem, redeemCoin) {
 		t.Fatalf("redeem coin ID not logged")
@@ -2539,6 +2582,7 @@ func TestTradeTracking(t *testing.T) {
 			CoinID:  redemptionCoin,
 		},
 	}
+	sign(tDexPriv, redemption)
 	msg, _ = msgjson.NewRequest(1, msgjson.RedemptionRoute, redemption)
 	err = handleRedemptionRoute(tCore, rig.dc, msg)
 	if err != nil {
@@ -2633,7 +2677,7 @@ func TestTradeTracking(t *testing.T) {
 	swapID := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: swapID}}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-	dc.tickAsset(tBTC.ID)
+	tCore.tickAsset(dc, tBTC.ID)
 	checkStatus("taker swapped", order.TakerSwapCast)
 	if len(proof.TakerSwap) == 0 {
 		t.Fatalf("swap not broadcast with confirmations")
@@ -2648,6 +2692,7 @@ func TestTradeTracking(t *testing.T) {
 			CoinID:  redemptionCoin,
 		},
 	}
+	sign(tDexPriv, redemption)
 	redeemCoin = encode.RandomBytes(36)
 	tBtcWallet.redeemCoins = []dex.Bytes{redeemCoin}
 	msg, _ = msgjson.NewRequest(1, msgjson.RedemptionRoute, redemption)
@@ -3151,7 +3196,7 @@ func TestRefunds(t *testing.T) {
 	counterScript := encode.RandomBytes(36)
 	tDcrWallet.swapReceipts = []asset.Receipt{&tReceipt{coin: &tCoin{id: counterSwapID}, contract: counterScript}}
 	rig.ws.queueResponse(msgjson.InitRoute, initAcker)
-	dc.tickAsset(tBTC.ID)
+	tCore.tickAsset(dc, tBTC.ID)
 
 	checkStatus("taker swapped", match, order.TakerSwapCast)
 	if !bytes.Equal(match.MetaData.Proof.Script, counterScript) {
@@ -3517,7 +3562,7 @@ func TestCompareServerMatches(t *testing.T) {
 		oidMissing: trackerMissing,
 	}
 
-	exceptions := dc.compareServerMatches(srvMatches)
+	exceptions, _ := dc.compareServerMatches(srvMatches)
 	if len(exceptions) != 2 {
 		t.Fatalf("exceptions did not include both trades, just %d", len(exceptions))
 	}
@@ -4697,5 +4742,443 @@ func TestPreimageSync(t *testing.T) {
 	err = <-errChan
 	if err != nil {
 		t.Fatalf("trade error: %v", err)
+	}
+}
+
+func TestMatchStatusResolution(t *testing.T) {
+	rig := newTestRig()
+	tCore := rig.core
+	dc := rig.dc
+	mkt := dc.market(tDcrBtcMktName)
+
+	dcrWallet, _ := newTWallet(tDCR.ID)
+	tCore.wallets[tDCR.ID] = dcrWallet
+	btcWallet, tBtcWallet := newTWallet(tBTC.ID)
+	tCore.wallets[tBTC.ID] = btcWallet
+	walletSet, _ := tCore.walletSet(dc, tDCR.ID, tBTC.ID, true)
+
+	qty := 3 * tDCR.LotSize
+	secret := encode.RandomBytes(32)
+	secretHash := sha256.Sum256(secret)
+
+	lo, dbOrder, preImg, addr := makeLimitOrder(dc, true, qty, tBTC.RateStep*10)
+	oid := lo.ID()
+	trade := newTrackedTrade(dbOrder, preImg, dc, mkt.EpochLen, rig.core.lockTimeTaker, rig.core.lockTimeMaker,
+		rig.db, rig.queue, walletSet, nil, rig.core.notify)
+
+	dc.trades[trade.ID()] = trade
+	matchID := ordertest.RandomMatchID()
+	matchTime := time.Now()
+	match := &matchTracker{
+		id: matchID,
+		MetaMatch: db.MetaMatch{
+			MetaData: &db.MatchMetaData{
+				Proof: db.MatchProof{},
+			},
+			Match: &order.UserMatch{
+				Address: addr,
+			},
+		},
+	}
+	trade.matches[matchID] = match
+
+	// oid order.OrderID, mid order.MatchID, recipient string, val uint64, secretHash []byte
+	_, auditInfo := tMsgAudit(oid, matchID, addr, qty, secretHash[:])
+	tBtcWallet.auditInfo = auditInfo
+
+	connectMatches := func(status order.MatchStatus) []*msgjson.Match {
+		return []*msgjson.Match{
+			{
+				OrderID: oid[:],
+				MatchID: matchID[:],
+				Status:  uint8(status),
+				Side:    uint8(match.Match.Side),
+			},
+		}
+
+	}
+
+	tBytes := encode.RandomBytes(2)
+	tCoinID := encode.RandomBytes(36)
+
+	setAuthSigs := func(status order.MatchStatus) {
+		isMaker := match.Match.Side == order.Maker
+		match.MetaData.Proof.Auth = db.MatchAuth{}
+		auth := &match.MetaData.Proof.Auth
+		auth.MatchStamp = encode.UnixMilliU(matchTime)
+		if status >= order.MakerSwapCast {
+			if isMaker {
+				auth.InitSig = tBytes
+			} else {
+				auth.AuditSig = tBytes
+			}
+		}
+		if status >= order.TakerSwapCast {
+			if isMaker {
+				auth.AuditSig = tBytes
+			} else {
+				auth.InitSig = tBytes
+			}
+		}
+		if status >= order.MakerRedeemed {
+			if isMaker {
+				auth.RedeemSig = tBytes
+			} else {
+				auth.RedemptionSig = tBytes
+			}
+		}
+		if status >= order.MatchComplete {
+			if isMaker {
+				auth.RedemptionSig = tBytes
+			} else {
+				auth.RedeemSig = tBytes
+			}
+		}
+	}
+
+	// Call setProof before setAuth
+	setProof := func(status order.MatchStatus) {
+		isMaker := match.Match.Side == order.Maker
+		match.SetStatus(status)
+		match.MetaData.Proof = db.MatchProof{}
+		proof := &match.MetaData.Proof
+
+		if isMaker {
+			auditInfo.expiration = matchTime.Add(trade.lockTimeTaker)
+		} else {
+			auditInfo.expiration = matchTime.Add(trade.lockTimeMaker)
+		}
+
+		if status >= order.MakerSwapCast {
+			proof.MakerSwap = tCoinID
+			proof.SecretHash = secretHash[:]
+			if isMaker {
+				proof.Script = tBytes
+				proof.Secret = secret
+			} else {
+				proof.CounterScript = tBytes
+			}
+		}
+		if status >= order.TakerSwapCast {
+			proof.TakerSwap = tCoinID
+			if isMaker {
+				proof.CounterScript = tBytes
+			} else {
+				proof.Script = tBytes
+			}
+		}
+		if status >= order.MakerRedeemed {
+			proof.MakerRedeem = tCoinID
+			if !isMaker {
+				proof.Secret = secret
+			}
+		}
+		if status >= order.MatchComplete {
+			proof.TakerRedeem = tCoinID
+		}
+	}
+
+	setLocalMatchStatus := func(proofStatus, authStatus order.MatchStatus) {
+		setProof(proofStatus)
+		setAuthSigs(authStatus)
+	}
+
+	var tMatchResults *msgjson.MatchStatusResult
+	setMatchResults := func(status order.MatchStatus) *msgjson.MatchStatusResult {
+		tMatchResults = &msgjson.MatchStatusResult{
+			MatchID: matchID[:],
+			Status:  uint8(status),
+			Active:  status != order.MatchComplete,
+		}
+		if status >= order.MakerSwapCast {
+			tMatchResults.MakerContract = tBytes
+			tMatchResults.MakerSwap = tCoinID
+		}
+		if status >= order.TakerSwapCast {
+			tMatchResults.TakerContract = tBytes
+			tMatchResults.TakerSwap = tCoinID
+		}
+		if status >= order.MakerRedeemed {
+			tMatchResults.MakerRedeem = tCoinID
+			tMatchResults.Secret = secret
+		}
+		if status >= order.MatchComplete {
+			tMatchResults.TakerRedeem = tCoinID
+		}
+		return tMatchResults
+	}
+
+	type test struct {
+		ours, servers order.MatchStatus
+		side          order.MatchSide
+		tweaker       func()
+	}
+
+	testName := func(tt *test) string {
+		return fmt.Sprintf("%s / %s (%s)", tt.ours, tt.servers, tt.side)
+	}
+
+	runTest := func(tt *test) order.MatchStatus {
+		match.Match.Side = tt.side
+		setLocalMatchStatus(tt.ours, tt.servers)
+		setMatchResults(tt.servers)
+		if tt.tweaker != nil {
+			tt.tweaker()
+		}
+		rig.queueConnect(nil, connectMatches(tt.servers), nil)
+		rig.ws.queueResponse(msgjson.MatchStatusRoute, func(msg *msgjson.Message, f msgFunc) error {
+			resp, _ := msgjson.NewResponse(msg.ID, []*msgjson.MatchStatusResult{tMatchResults}, nil)
+			f(resp)
+			return nil
+		})
+		tCore.authDEX(dc)
+		trade.mtx.Lock()
+		newStatus := match.MetaData.Status
+		trade.mtx.Unlock()
+		return newStatus
+	}
+
+	// forwardResolvers are recoverable status combos where the server is ahead
+	// of us.
+	forwardResolvers := []*test{
+		{
+			ours:    order.NewlyMatched,
+			servers: order.MakerSwapCast,
+			side:    order.Taker,
+		},
+		{
+			ours:    order.MakerSwapCast,
+			servers: order.TakerSwapCast,
+			side:    order.Maker,
+		},
+		{
+			ours:    order.TakerSwapCast,
+			servers: order.MakerRedeemed,
+			side:    order.Taker,
+		},
+		{
+			ours:    order.MakerRedeemed,
+			servers: order.MatchComplete,
+			side:    order.Maker,
+		},
+	}
+
+	// Check that all of the forwardResolvers update the match status.
+	for _, tt := range forwardResolvers {
+		newStatus := runTest(tt)
+		if newStatus == tt.ours {
+			t.Fatalf("(%s) status not updated for forward resolution path", testName(tt))
+		}
+		if match.MetaData.Proof.SelfRevoked {
+			t.Fatalf("(%s) match self-revoked during forward resolution", testName(tt))
+		}
+	}
+
+	// backwardsResolvers are recoverable status mismatches where we are ahead
+	// of the server but can be resolved by deferring to resendPendingRequests.
+	backWardsResolvers := []*test{
+		{
+			ours:    order.MakerSwapCast,
+			servers: order.NewlyMatched,
+			side:    order.Maker,
+		},
+		{
+			ours:    order.TakerSwapCast,
+			servers: order.MakerSwapCast,
+			side:    order.Taker,
+		},
+		{
+			ours:    order.MakerRedeemed,
+			servers: order.TakerSwapCast,
+			side:    order.Maker,
+		},
+		{
+			ours:    order.MatchComplete,
+			servers: order.MakerRedeemed,
+			side:    order.Taker,
+		},
+		{ // Same status should behave the same way.
+			ours:    order.MakerSwapCast,
+			servers: order.MakerSwapCast,
+			side:    order.Maker,
+		},
+	}
+
+	// Backwards resolvers won't update the match status, but also won't revoke
+	// the match.
+	for _, tt := range backWardsResolvers {
+		newStatus := runTest(tt)
+		if newStatus != tt.ours {
+			t.Fatalf("(%s) status changed for backwards resolution path", testName(tt))
+		}
+		if match.MetaData.Proof.SelfRevoked {
+			t.Fatalf("(%s) match self-revoked during backwards resolution", testName(tt))
+		}
+	}
+
+	// nonsense are status combos that make no sense, so should always result
+	// in a self-revocation.
+	nonsense := []*test{
+		{ // Server has our info before us
+			ours:    order.NewlyMatched,
+			servers: order.MakerSwapCast,
+			side:    order.Maker,
+		},
+		{ // Two steps apart
+			ours:    order.NewlyMatched,
+			servers: order.TakerSwapCast,
+			side:    order.Maker,
+		},
+		{ // Server didn't send contract
+			ours:    order.NewlyMatched,
+			servers: order.MakerSwapCast,
+			side:    order.Taker,
+			tweaker: func() {
+				tMatchResults.MakerContract = nil
+			},
+		},
+		{ // Server didn't send coin ID.
+			ours:    order.NewlyMatched,
+			servers: order.MakerSwapCast,
+			side:    order.Taker,
+			tweaker: func() {
+				tMatchResults.MakerSwap = nil
+			},
+		},
+		{ // Audit failed.
+			ours:    order.NewlyMatched,
+			servers: order.MakerSwapCast,
+			side:    order.Taker,
+			tweaker: func() {
+				auditInfo.expiration = matchTime
+			},
+		},
+		{ // Server has our info before us
+			ours:    order.MakerSwapCast,
+			servers: order.TakerSwapCast,
+			side:    order.Taker,
+		},
+		{ // Server has our info before us
+			ours:    order.MakerSwapCast,
+			servers: order.TakerSwapCast,
+			side:    order.Taker,
+		},
+		{ // Server didn't send contract
+			ours:    order.MakerSwapCast,
+			servers: order.TakerSwapCast,
+			side:    order.Maker,
+			tweaker: func() {
+				tMatchResults.TakerContract = nil
+			},
+		},
+		{ // Server didn't send coin ID.
+			ours:    order.MakerSwapCast,
+			servers: order.TakerSwapCast,
+			side:    order.Maker,
+			tweaker: func() {
+				tMatchResults.TakerSwap = nil
+			},
+		},
+		{ // Audit failed.
+			ours:    order.MakerSwapCast,
+			servers: order.TakerSwapCast,
+			side:    order.Maker,
+			tweaker: func() {
+				auditInfo.expiration = matchTime
+			},
+		},
+		{ // Taker has counter-party info the server doesn't.
+			ours:    order.MakerSwapCast,
+			servers: order.NewlyMatched,
+			side:    order.Taker,
+		},
+		{ // Maker has a server ack, but they say they don't have the data.
+			ours:    order.MakerSwapCast,
+			servers: order.NewlyMatched,
+			side:    order.Maker,
+			tweaker: func() {
+				match.MetaData.Proof.Auth.InitSig = tBytes
+			},
+		},
+		{ // Maker has counter-party info the server doesn't.
+			ours:    order.TakerSwapCast,
+			servers: order.MakerSwapCast,
+			side:    order.Maker,
+		},
+		{ // Taker has a server ack, but they say they don't have the data.
+			ours:    order.TakerSwapCast,
+			servers: order.MakerSwapCast,
+			side:    order.Taker,
+			tweaker: func() {
+				match.MetaData.Proof.Auth.InitSig = tBytes
+			},
+		},
+		{ // Server has redeem info before us.
+			ours:    order.TakerSwapCast,
+			servers: order.MakerRedeemed,
+			side:    order.Maker,
+		},
+		{ // Server didn't provide redemption coin ID.
+			ours:    order.TakerSwapCast,
+			servers: order.MakerRedeemed,
+			side:    order.Taker,
+			tweaker: func() {
+				tMatchResults.MakerRedeem = nil
+			},
+		},
+		{ // Server didn't provide secret.
+			ours:    order.TakerSwapCast,
+			servers: order.MakerRedeemed,
+			side:    order.Taker,
+			tweaker: func() {
+				tMatchResults.Secret = nil
+			},
+		},
+		{ // Server has our redemption data before us.
+			ours:    order.MakerRedeemed,
+			servers: order.MatchComplete,
+			side:    order.Taker,
+		},
+		{ // Server didn't provide redemption coin ID.
+			ours:    order.MakerRedeemed,
+			servers: order.MatchComplete,
+			side:    order.Maker,
+			tweaker: func() {
+				tMatchResults.TakerRedeem = nil
+			},
+		},
+		{ // We have data before the server.
+			ours:    order.MakerRedeemed,
+			servers: order.TakerSwapCast,
+			side:    order.Taker,
+		},
+		{ // We have a server ack, but they say they don't have the data.
+			ours:    order.MakerRedeemed,
+			servers: order.TakerSwapCast,
+			side:    order.Maker,
+			tweaker: func() {
+				match.MetaData.Proof.Auth.RedeemSig = tBytes
+			},
+		},
+		{ // We have data before the server.
+			ours:    order.MatchComplete,
+			servers: order.MakerSwapCast,
+			side:    order.Maker,
+		},
+		{ // We have a server ack, but they say they don't have the data.
+			ours:    order.MatchComplete,
+			servers: order.MakerSwapCast,
+			side:    order.Taker,
+			tweaker: func() {
+				match.MetaData.Proof.Auth.RedeemSig = tBytes
+			},
+		},
+	}
+
+	for _, tt := range nonsense {
+		runTest(tt)
+		if !match.MetaData.Proof.SelfRevoked {
+			t.Fatalf("(%s) match not self-revoked during nonsense resolution", testName(tt))
+		}
 	}
 }

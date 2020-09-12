@@ -316,7 +316,7 @@ func TestMakerGhostingAfterTakerRedeem(t *testing.T) {
 		}
 		tracker.mtx.Unlock()
 		// force next action since trade.tick() will not be called for disconnected dcs.
-		tracker.tick()
+		client.core.tick(tracker)
 		return monitorTrackedTrade(ctx, client, tracker, order.TakerSwapCast, finalStatus)
 	}
 	resumeTrades, ctx := errgroup.WithContext(context.Background())
