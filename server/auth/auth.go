@@ -877,6 +877,7 @@ func (auth *AuthManager) handleMatchStatus(conn comms.Link, msg *msgjson.Message
 				MakerRedeem:   status.MakerRedeem,
 				TakerRedeem:   status.TakerRedeem,
 				Secret:        status.Secret,
+				Active:        status.Active,
 			})
 		}
 	}

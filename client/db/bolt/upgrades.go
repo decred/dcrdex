@@ -6,6 +6,7 @@ package bolt
 import (
 	"fmt"
 
+	dexdb "decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex/encode"
 	"go.etcd.io/bbolt"
 )
@@ -15,7 +16,9 @@ type upgradefunc func(tx *bbolt.Tx) error
 // Each database upgrade function should be keyed by the database
 // version it upgrades.
 var upgrades = [...]upgradefunc{
-	//v1Upgrade, // v0 => v1 adds a version key.
+	// v0 => v1 adds a version key. Upgrades the MatchProof struct to
+	// differentiate between server revokes and self revokes.
+	v1Upgrade,
 }
 
 // DBVersion is the latest version of the database that is understood. Databases
@@ -97,8 +100,8 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 	const newVersion = 1
 
 	dbVersion, err := fetchDBVersion(dbtx)
-	if err == nil {
-		return fmt.Errorf("unexpected database version found")
+	if err != nil {
+		return fmt.Errorf("error fetching database version: %w", err)
 	}
 
 	if dbVersion != oldVersion {
@@ -111,5 +114,32 @@ func v1Upgrade(dbtx *bbolt.Tx) error {
 	}
 
 	// Persist the database version.
-	return setDBVersion(dbtx, newVersion)
+	err = setDBVersion(dbtx, newVersion)
+	if err != nil {
+		return err
+	}
+
+	// Upgrade the match proof. We just have to retrieve and re-store the
+	// buckets. The decoder will recognize the the old version and add the new
+	// field.
+	matches := dbtx.Bucket(matchesBucket)
+	return matches.ForEach(func(k, _ []byte) error {
+		mBkt := matches.Bucket(k)
+		if mBkt == nil {
+			return fmt.Errorf("match %x bucket is not a bucket", k)
+		}
+		proofB := getCopy(mBkt, proofKey)
+		if len(proofB) == 0 {
+			return fmt.Errorf("empty match proof")
+		}
+		proof, err := dexdb.DecodeMatchProof(proofB)
+		if err != nil {
+			return fmt.Errorf("error decoding proof: %w", err)
+		}
+		err = mBkt.Put(proofKey, proof.Encode())
+		if err != nil {
+			return fmt.Errorf("error re-storing match proof: %w", err)
+		}
+		return nil
+	})
 }

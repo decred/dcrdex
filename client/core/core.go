@@ -434,81 +434,19 @@ func (dc *dexConnection) parseMatches(msgMatches []*msgjson.Match, checkSigs boo
 	return matches, acks, err
 }
 
-// runMatches runs the sorted matches returned from parseMatches.
-func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatches) (assetMap, error) {
-	runMatch := func(sm *serverMatches) (assetMap, error) {
-		updatedAssets := make(assetMap)
-		tracker := sm.tracker
-		oid := tracker.ID()
-
-		// Verify and record any cancel Match targeting this trade.
-		if sm.cancel != nil {
-			err := tracker.processCancelMatch(sm.cancel)
-			if err != nil {
-				return updatedAssets, fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %v",
-					sm.cancel.OrderID, oid, err)
-			}
-		}
-
-		// Begin negotiation for any trade Matches.
-		if len(sm.msgMatches) > 0 {
-			err := tracker.negotiate(sm.msgMatches)
-			if err != nil {
-				return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %v", oid, err)
-			}
-
-			// Coins may be returned for canceled orders.
-			tracker.mtx.RLock()
-			if tracker.metaData.Status == order.OrderStatusCanceled {
-				updatedAssets.count(tracker.fromAssetID)
-			}
-			tracker.mtx.RUnlock()
-
-			// Try to tick the trade now, but do not interrupt on error. The
-			// trade will tick again automatically.
-			tickUpdatedAssets, err := tracker.tick()
-			updatedAssets.merge(tickUpdatedAssets)
-			if err != nil {
-				return updatedAssets, fmt.Errorf("tick of order %v failed: %v", oid, err)
-			}
-		}
-
-		return updatedAssets, nil
-	}
-
-	// Process the trades concurrently.
-	type runMatchResult struct {
-		updatedAssets assetMap
-		err           error
-	}
-	resultChan := make(chan *runMatchResult)
-	for _, trade := range tradeMatches {
-		go func(trade *serverMatches) {
-			assetsUpdated, err := runMatch(trade)
-			resultChan <- &runMatchResult{assetsUpdated, err}
-		}(trade)
-	}
-
-	errs := newErrorSet("runMatches - ")
-	assetsUpdated := make(assetMap)
-	for range tradeMatches {
-		result := <-resultChan
-		assetsUpdated.merge(result.updatedAssets) // assets might be updated even if an error occurs
-		if result.err != nil {
-			errs.addErr(result.err)
-		}
-	}
-
-	// Update Market.Orders for each market.
-	dc.refreshMarkets()
-
-	return assetsUpdated, errs.ifAny()
-}
-
+// matchDiscreps specifies a trackedTrades's missing and extra matches compared
+// to the server's list of active matches as returned in the connect response.
 type matchDiscreps struct {
 	trade   *trackedTrade
 	missing []*matchTracker
 	extra   []*msgjson.Match
+}
+
+// matchStatusConflict is a conflict between our status, and the status returned
+// by the server in the connect response.
+type matchStatusConflict struct {
+	trade *trackedTrade
+	match *matchTracker
 }
 
 // compareServerMatches resolves the matches reported by the server in the
@@ -517,7 +455,9 @@ type matchDiscreps struct {
 // Reported matches with missing trackers are already checked by parseMatches,
 // but we also must check for incomplete matches that the server is not
 // reporting.
-func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serverMatches) (exceptions map[order.OrderID]*matchDiscreps) {
+func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serverMatches) (
+	exceptions map[order.OrderID]*matchDiscreps, statusConflicts []*matchStatusConflict) {
+
 	exceptions = make(map[order.OrderID]*matchDiscreps)
 
 	// Identify extra matches named by the server response that we do not
@@ -528,8 +468,16 @@ func (dc *dexConnection) compareServerMatches(srvMatches map[order.OrderID]*serv
 		for _, msgMatch := range match.msgMatches {
 			var matchID order.MatchID
 			copy(matchID[:], msgMatch.MatchID)
-			if match.tracker.matches[matchID] == nil {
+			mt := match.tracker.matches[matchID]
+			if mt == nil {
 				extra = append(extra, msgMatch)
+				continue
+			}
+			if mt.Match.Status != order.MatchStatus(msgMatch.Status) {
+				statusConflicts = append(statusConflicts, &matchStatusConflict{
+					trade: match.tracker,
+					match: mt,
+				})
 			}
 		}
 		match.tracker.mtx.RUnlock()
@@ -725,7 +673,7 @@ func (dc *dexConnection) reconcileTrades(srvOrderStatuses []*msgjson.OrderStatus
 }
 
 // tickAsset checks open matches related to a specific asset for needed action.
-func (dc *dexConnection) tickAsset(assetID uint32) assetMap {
+func (c *Core) tickAsset(dc *dexConnection, assetID uint32) assetMap {
 	dc.tradeMtx.RLock()
 	assetTrades := make([]*trackedTrade, 0, len(dc.trades))
 	for _, trade := range dc.trades {
@@ -739,7 +687,7 @@ func (dc *dexConnection) tickAsset(assetID uint32) assetMap {
 	for _, trade := range assetTrades {
 		trade := trade // bad go, bad
 		go func() {
-			newUpdates, err := trade.tick()
+			newUpdates, err := c.tick(trade)
 			if err != nil {
 				log.Errorf("%s tick error: %v", dc.acct.host, err)
 			}
@@ -2611,6 +2559,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 	}, DefaultResponseTimeout, func() {
 		errChan <- fmt.Errorf("timed out waiting for '%s' response", msgjson.ConnectRoute)
 	})
+
 	// Check the request error.
 	if err != nil {
 		return err
@@ -2638,7 +2587,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		log.Error(err)
 	}
 
-	exceptions := dc.compareServerMatches(matches)
+	exceptions, matchConflicts := dc.compareServerMatches(matches)
 	updatedAssets := make(assetMap)
 	for oid, matchAnomalies := range exceptions {
 		trade := matchAnomalies.trade
@@ -2653,13 +2602,11 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			match.failErr = fmt.Errorf("order not reported by the server on connect")
 			// Must have been revoked while we were gone. Flag to allow recovery
 			// and subsequent retirement of the match and parent trade.
-			match.MetaData.Proof.IsRevoked = true
+			match.MetaData.Proof.SelfRevoked = true
 			if err := c.db.UpdateMatch(&match.MetaMatch); err != nil {
 				log.Errorf("Failed to update missing/revoked match: %v", err)
 			}
 		}
-
-		corder, _ := trade.coreOrderInternal()
 
 		// Send a "Missing matches" order note if there are missing match message.
 		// Also, check if the now-Revoked matches were the last set of matches that
@@ -2668,6 +2615,8 @@ func (c *Core) authDEX(dc *dexConnection) error {
 			if trade.maybeReturnCoins() {
 				updatedAssets.count(trade.wallets.fromAsset.ID)
 			}
+
+			corder, _ := trade.coreOrderInternal()
 			details := fmt.Sprintf("%d matches for order %s were not reported by %q and are considered revoked",
 				len(missing), trade.token(), dc.acct.host)
 			c.notify(newOrderNote("Missing matches", details, db.ErrorLevel, corder))
@@ -2675,13 +2624,29 @@ func (c *Core) authDEX(dc *dexConnection) error {
 
 		// Send a "Match resolution error" if there are extra match messages.
 		if len(extras) > 0 {
-			details := fmt.Sprintf("%d matches reported by %s were not found for %s.",
-				len(extras), dc.acct.host, trade.token())
-			c.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
-			// t.negotiate(extras) // missed match message request, but match not revoked (?!)
 			for _, extra := range extras {
-				log.Errorf("DEX %s reported match %s which is not a known active match for order %s",
+				log.Debugf("DEX %s reported match %s which is not a known active match for order %s",
 					dc.acct.host, extra.MatchID, extra.OrderID)
+
+				err := trade.negotiate(extras)
+				if err != nil {
+					log.Errorf("error negotiating previously unknown match %s, order %s from %s reported on connect: %v",
+						extra.MatchID, extra.OrderID, dc.acct.host, err)
+
+					corder, _ := trade.coreOrderInternal()
+					details := fmt.Sprintf("%d matches reported by %s were not found for %s.",
+						len(extras), dc.acct.host, trade.token())
+					c.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
+				} else if order.MatchSide(extra.Side) == order.Taker && order.MatchStatus(extra.Status) == order.MakerSwapCast {
+					// Have the conflict resolver run resolveMissedMakerAudit
+					// to grab the maker's contract, coin, and secret hash.
+					var matchID order.MatchID
+					copy(matchID[:], extra.MatchID)
+					matchConflicts = append(matchConflicts, &matchStatusConflict{
+						trade: trade,
+						match: trade.matches[matchID],
+					})
+				}
 			}
 		}
 
@@ -2703,10 +2668,13 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		c.notify(newDEXAuthNote("Orders reconciled with DEX", dc.acct.host, false, details, db.Poke))
 	}
 
+	if len(matchConflicts) > 0 {
+		c.resolveMatchConflicts(dc, matchConflicts)
+	}
+
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	}
-
 	return nil
 }
 
@@ -3201,6 +3169,79 @@ func generateDEXMaps(host string, cfg *msgjson.ConfigResult) (map[uint32]*dex.As
 	return assets, marketMap, epochMap, nil
 }
 
+// runMatches runs the sorted matches returned from parseMatches.
+func (c *Core) runMatches(dc *dexConnection, tradeMatches map[order.OrderID]*serverMatches) (assetMap, error) {
+	runMatch := func(sm *serverMatches) (assetMap, error) {
+		updatedAssets := make(assetMap)
+		tracker := sm.tracker
+		oid := tracker.ID()
+
+		// Verify and record any cancel Match targeting this trade.
+		if sm.cancel != nil {
+			err := tracker.processCancelMatch(sm.cancel)
+			if err != nil {
+				return updatedAssets, fmt.Errorf("processCancelMatch for cancel order %v targeting order %v failed: %v",
+					sm.cancel.OrderID, oid, err)
+			}
+		}
+
+		// Begin negotiation for any trade Matches.
+		if len(sm.msgMatches) > 0 {
+			tracker.mtx.Lock()
+			err := tracker.negotiate(sm.msgMatches)
+			tracker.mtx.Unlock()
+			if err != nil {
+				return updatedAssets, fmt.Errorf("negotiate order %v matches failed: %v", oid, err)
+			}
+
+			// Coins may be returned for canceled orders.
+			tracker.mtx.RLock()
+			if tracker.metaData.Status == order.OrderStatusCanceled {
+				updatedAssets.count(tracker.fromAssetID)
+			}
+			tracker.mtx.RUnlock()
+
+			// Try to tick the trade now, but do not interrupt on error. The
+			// trade will tick again automatically.
+			tickUpdatedAssets, err := c.tick(tracker)
+			updatedAssets.merge(tickUpdatedAssets)
+			if err != nil {
+				return updatedAssets, fmt.Errorf("tick of order %v failed: %v", oid, err)
+			}
+		}
+
+		return updatedAssets, nil
+	}
+
+	// Process the trades concurrently.
+	type runMatchResult struct {
+		updatedAssets assetMap
+		err           error
+	}
+	resultChan := make(chan *runMatchResult)
+	for _, trade := range tradeMatches {
+		go func(trade *serverMatches) {
+			assetsUpdated, err := runMatch(trade)
+			resultChan <- &runMatchResult{assetsUpdated, err}
+		}(trade)
+	}
+
+	errs := newErrorSet("runMatches - ")
+	assetsUpdated := make(assetMap)
+	for range tradeMatches {
+		result := <-resultChan
+		assetsUpdated.merge(result.updatedAssets) // assets might be updated even if an error occurs
+		if result.err != nil {
+			errs.addErr(result.err)
+		}
+	}
+
+	// Update Market.Orders for each market.
+	dc.refreshMarkets()
+
+	return assetsUpdated, errs.ifAny()
+}
+
 // connectDEX establishes a ws connection to a DEX server using the provided
 // account info, but does not authenticate the connection through the 'connect'
 // route.
@@ -3419,7 +3460,7 @@ func handleRevokeMatchMsg(c *Core, dc *dexConnection, msg *msgjson.Message) erro
 	var matchID order.MatchID
 	copy(matchID[:], revocation.MatchID)
 
-	err = tracker.revokeMatch(matchID)
+	err = tracker.revokeMatch(matchID, true)
 	if err != nil {
 		return fmt.Errorf("unable to revoke match %s for order %s: %v", matchID, tracker.ID(), err)
 	}
@@ -3548,7 +3589,7 @@ func (c *Core) listen(dc *dexConnection) {
 		}
 
 		for _, trade := range activeTrades {
-			newUpdates, err := trade.tick()
+			newUpdates, err := c.tick(trade)
 			if err != nil {
 				log.Error(err)
 			}
@@ -3744,7 +3785,7 @@ func handleMatchRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	}
 
 	// Begin match negotiation.
-	updatedAssets, err := dc.runMatches(matches)
+	updatedAssets, err := c.runMatches(dc, matches)
 	if len(updatedAssets) > 0 {
 		c.updateBalances(updatedAssets)
 	} else {
@@ -3796,7 +3837,7 @@ func handleAuditRoute(c *Core, dc *dexConnection, msg *msgjson.Message) error {
 	if err != nil {
 		return err
 	}
-	assets, err := tracker.tick()
+	assets, err := c.tick(tracker)
 	if len(assets) > 0 {
 		dc.refreshMarkets()
 		c.updateBalances(assets)
@@ -3823,7 +3864,7 @@ func handleRedemptionRoute(c *Core, dc *dexConnection, msg *msgjson.Message) err
 	if err != nil {
 		return err
 	}
-	assets, err := tracker.tick()
+	assets, err := c.tick(tracker)
 	if len(assets) > 0 {
 		dc.refreshMarkets()
 		c.updateBalances(assets)
@@ -3868,7 +3909,7 @@ func (c *Core) tipChange(assetID uint32, nodeErr error) {
 	c.connMtx.RLock()
 	assets := make(assetMap)
 	for _, dc := range c.conns {
-		newUpdates := dc.tickAsset(assetID)
+		newUpdates := c.tickAsset(dc, assetID)
 		if len(newUpdates) > 0 {
 			dc.refreshMarkets()
 			assets.merge(newUpdates)
