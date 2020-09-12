@@ -8,7 +8,7 @@
   <link rel="icon" href="/img/favicon.png?v=MQq4VTue">
   <meta name="description" content="Decred DEX Client Web Portal">
   <title>{{.Title}}</title>
-  <link href="/css/style.css?v=0c2lC6c" rel="stylesheet">
+  <link href="/css/style.css?v=Ueawg" rel="stylesheet">
 </head>
 <body {{if .UserInfo.DarkMode}} class="dark"{{end}}>
   <div class="poke-note px-2 fs14 d-flex align-items-center" id="pokeNote"><span>Here is a poke note.</span></div>
@@ -20,17 +20,19 @@
 <header id=header class="maintop">
   {{$authed := .UserInfo.Authed}}
   {{$marketsReady := and $authed (gt (len .UserInfo.Exchanges) 0)}}
-  <div data-pagelink="" class="logo"></div>
+  <a href="/" class="logo"></a>
   <div class="mainlinks fs18 offwhite">
-    <span data-pagelink="markets" class="demi hoverbright{{if not $marketsReady}} d-hide{{end}}" id="marketsMenuEntry">Markets</span>
-    <span data-pagelink="wallets" class="demi hoverbright{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">Wallets</span>
-    <span class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="noteMenuEntry">
+
+    <a href="/markets" class="demi hoverbright{{if not $marketsReady}} d-hide{{end}}" id="marketsMenuEntry">Markets</a>
+
+    <a href="/wallets" class="demi hoverbright{{if not $authed}} d-hide{{end}}" id="walletsMenuEntry">Wallets</a>
+
+    <div class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="noteMenuEntry">
+      <span class="ico-bell fs20 hoverbright" id="noteBell"></span>
       <div class="note-indicator" id="noteIndicator"></div>
-      <div id="noteBox">
-        <div class="note-header fs20 demi">
-          <span class="ico-bell fs15 mr-2" id="noteBell"></span>
-          Notifications
-        </div>
+      <div id="noteBox" class="pl-2 pb-2">
+        <div class="icon fs20 ico-bell p-1"></div>
+        <span class="fs17 demi hoverbright">Notifications</span><br>
         <div id="noteList">
           <div id="noteTemplate" class="note fs14 p-2">
             <div class="d-flex justify-content-center align-items-center px-1">
@@ -42,17 +44,19 @@
           </div>
         </div>
       </div>
-      <span class="ico-bell fs20 hoverbright" id="noteBell"></span>
-    </span>
-    <span class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="profileMenuEntry">
-      <div id="profileBox" class="profile-box">
-        <div class="profile-header fs20 demi" id="profileSignout">
-          Sign Out
-        </div>
-      </div>
+    </div>
+
+    <div class="d-inline-block position-relative{{if not $authed}} d-hide{{end}}" id="profileMenuEntry">
       <span class="ico-profile fs20 hoverbright" id="profileIcon"></span>
-    </span>
-    <span class="ico-settings hoverbright fs24" data-pagelink="settings"></span>
+      <div id="profileBox" class="pl-2 pt-1 pb-2 fs15">
+        <div class="icon fs20 ico-profile p-1"></div>
+        <span class="demi hoverbright" id="profileSignout">Sign Out</span><br>
+        <a href="/orders" class="demi hoverbright plainlink">Order History</a>
+      </div>
+    </div>
+
+    <a href="/settings" class="ico-settings hoverbright fs24"></a>
+
   </div>
   <div id="loader" class="fill-abs flex-center d-hide">
     <div class="ico-spinner spinner"></div>
@@ -61,7 +65,7 @@
 {{end}}
 
 {{define "bottom"}}
-<script src="/js/entry.js?v=Y16ori"></script>
+<script src="/js/entry.js?v=rwwys"></script>
 </body>
 </html>
 {{end}}

@@ -58,6 +58,7 @@ var (
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	websocket.Core
+	Network() dex.Network
 	Exchanges() map[string]*core.Exchange
 	Register(*core.RegisterForm) (*core.RegisterResult, error)
 	Login(pw []byte) (*core.LoginResult, error)
@@ -78,9 +79,11 @@ type clientCore interface {
 	SupportedAssets() map[uint32]*core.SupportedAsset
 	Withdraw(pw []byte, assetID uint32, value uint64, address string) (asset.Coin, error)
 	Trade(pw []byte, form *core.TradeForm) (*core.Order, error)
-	Cancel(pw []byte, sid string) error
+	Cancel(pw []byte, oid dex.Bytes) error
 	NotificationFeed() <-chan core.Notification
 	Logout() error
+	Orders(*core.OrderFilter) ([]*core.Order, error)
+	Order(oid dex.Bytes) (*core.Order, error)
 }
 
 var _ clientCore = (*core.Core)(nil)
@@ -150,7 +153,9 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		addTemplate("register", bb, "forms").
 		addTemplate("markets", bb, "forms").
 		addTemplate("wallets", bb, "forms").
-		addTemplate("settings", bb, "forms")
+		addTemplate("settings", bb, "forms").
+		addTemplate("orders", bb).
+		addTemplate("order", bb, "forms")
 	err = tmpl.buildErr()
 	if err != nil {
 		return nil, err
@@ -201,6 +206,8 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 			webInit.Group(func(webAuth chi.Router) {
 				webAuth.Use(s.requireLogin)
 				webAuth.Get(walletsRoute, s.handleWallets)
+				webAuth.With(orderIDCtx).Get("/order/{oid}", s.handleOrder)
+				webAuth.Get(ordersRoute, s.handleOrders)
 
 				// These handlers require a DEX connection.
 				webAuth.Group(func(webDC chi.Router) {
@@ -234,6 +241,8 @@ func New(core clientCore, addr string, logger dex.Logger, reloadHTML bool) (*Web
 		r.Post("/walletsettings", s.apiWalletSettings)
 		r.Post("/setwalletpass", s.apiSetWalletPass)
 		r.Post("/defaultwalletcfg", s.apiDefaultWalletCfg)
+		r.Post("/orders", s.apiOrders)
+		r.Post("/order", s.apiOrder)
 	})
 
 	// Files

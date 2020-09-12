@@ -43,6 +43,10 @@ input:invalid {
   box-shadow: none;
 }
 
+.overflow-y-auto {
+  overflow-y: auto;
+}
+
 header.maintop {
   width: 100%;
   height: 60px;
@@ -55,7 +59,8 @@ header.maintop {
   border-bottom: 1px solid #777;
 }
 
-div.logo {
+a.logo {
+  display: block;
   width: 145px;
   height: 30px;
   margin: 0 20px;
@@ -119,9 +124,49 @@ body.dark button {
   color: #f2fffd;
 }
 
-div.mainlinks > span {
+.dynamicopts {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  flex-wrap: wrap;
+
+  & > div {
+    min-height: 55px;
+    margin-top: 10px;
+    width: 47%;
+  }
+}
+
+div.mainlinks > div,
+div.mainlinks > a {
   padding-right: 1.7em;
   color: #4a4949;
+  cursor: pointer;
+}
+
+.plainlink {
+  color: inherit;
+}
+
+header.maintop a,
+header.maintop a:visited,
+header.maintop a:hover,
+.plainlink,
+.plainlink:visited,
+.plainlink:hover {
+  text-decoration: none;
+  color: inherit;
+}
+
+.subtlelink,
+.subtlelink:visited {
+  text-decoration: none;
+  color: #05053b;
+}
+
+.subtlelink:hover {
+  text-decoration: underline;
+  color: #07075e;
   cursor: pointer;
 }
 
@@ -232,23 +277,28 @@ div.poke-note.active {
 #profileBox {
   position: absolute;
   display: none;
-  top: -10px;
-  right: 10px;
-  width: 450px;
+  top: -6px;
+  right: 20px;
   background-color: white;
   border: 1px solid black;
   z-index: 1;
-  cursor: default;
   font-family: $sans;
+  min-width: 150px;
+  line-height: 2;
+
+  .icon {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+  }
 }
 
-div.note-header,
-div.profile-header {
-  margin: 0 5px;
-  padding: 10px 5px;
-  border-bottom-style: solid;
-  border-width: 2px;
-  border-color: #aaa;
+#noteBox {
+  min-width: 400px;
+}
+
+#profileBox {
+  min-width: 250px;
 }
 
 div.note:not(:last-child) {
@@ -312,38 +362,14 @@ hr.dashed {
   background-color: #7775;
 }
 
-#profileBox.profile-box {
-  max-width: 120px;
-  text-align: center;
-  cursor: pointer;
-  z-index: 2;
-
-  .profile-header {
-    text-decoration: underline;
-    font-size: 16px;
-  }
-}
-
 #tooltip {
   position: absolute;
   left: -10000px;
   z-index: 1000;
-  padding: 5px 10px;
+  padding: 3px 6px;
   background-color: #040012;
   border: 1px solid #333;
   color: white;
   max-width: 500px;
-}
-
-.dynamicopts {
-  display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  flex-wrap: wrap;
-
-  & > div {
-    min-height: 55px;
-    margin-top: 10px;
-    width: 47%;
-  }
+  font-size: 15px;
 }

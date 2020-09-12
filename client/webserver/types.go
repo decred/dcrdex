@@ -4,8 +4,16 @@
 package webserver
 
 import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/calc"
 	"decred.org/dcrdex/dex/encode"
+	"decred.org/dcrdex/dex/order"
 )
 
 // standardResponse is a basic API response when no data needs to be returned.
@@ -57,7 +65,7 @@ type tradeForm struct {
 
 type cancelForm struct {
 	Pass    encode.PassBytes `json:"pw"`
-	OrderID string           `json:"orderID"`
+	OrderID dex.Bytes        `json:"orderID"`
 }
 
 // withdrawForm is sent to initiate a withdraw.
@@ -66,4 +74,410 @@ type withdrawForm struct {
 	Value   uint64           `json:"value"`
 	Address string           `json:"address"`
 	Pass    encode.PassBytes `json:"pw"`
+}
+
+// orderReader wraps a core.Order and provides methods for info display.
+// Whenever possible, add an orderReader methods rather than a template func.
+type orderReader struct {
+	*core.Order
+}
+
+// FromSymbol is the symbol of the asset which will be sent.
+func (ord *orderReader) FromSymbol() string {
+	if ord.Sell {
+		return ord.BaseSymbol
+	}
+	return ord.QuoteSymbol
+}
+
+// FromSymbol is the symbol of the asset which will be received.
+func (ord *orderReader) ToSymbol() string {
+	if ord.Sell {
+		return ord.QuoteSymbol
+	}
+	return ord.BaseSymbol
+}
+
+// FromID is the asset ID of the asset which will be sent.
+func (ord *orderReader) FromID() uint32 {
+	if ord.Sell {
+		return ord.BaseID
+	}
+	return ord.QuoteID
+}
+
+// FromID is the asset ID of the asset which will be received.
+func (ord *orderReader) ToID() uint32 {
+	if ord.Sell {
+		return ord.QuoteID
+	}
+	return ord.BaseID
+}
+
+// Cancelable will be true for standing limit orders in status epoch or booked.
+func (ord *orderReader) Cancelable() bool {
+	return ord.Type == order.LimitOrderType &&
+		ord.TimeInForce == order.StandingTiF &&
+		ord.Status <= order.OrderStatusBooked
+}
+
+// TypeString combines the order type and side into a single string.
+func (ord *orderReader) TypeString() string {
+	s := "market"
+	if ord.Type == order.LimitOrderType {
+		s = "limit"
+		if ord.TimeInForce == order.ImmediateTiF {
+			s += " (i)"
+		}
+	}
+	if ord.Sell {
+		s += " sell"
+	} else {
+		s += " buy"
+	}
+	return s
+}
+
+// OfferString formats the order quantity in units of the outgoing asset,
+// performing a conversion if necessary.
+func (ord *orderReader) OfferString() string {
+	if ord.Sell || ord.Type == order.MarketOrderType {
+		return precision8(ord.Qty)
+	}
+	return precision8(calc.BaseToQuote(ord.Rate, ord.Qty))
+}
+
+// AskString will print the minimum received amount for the filled limit order.
+// The actual settled amount may be more.
+func (ord *orderReader) AskString() string {
+	if ord.Type == order.MarketOrderType {
+		return "market rate"
+	}
+	if ord.Sell {
+		return precision8(calc.BaseToQuote(ord.Rate, ord.Qty))
+	}
+	return precision8(ord.Qty)
+}
+
+// IsMarketBuy is true if this is a market buy order.
+func (ord *orderReader) IsMarketBuy() bool {
+	return ord.Type == order.MarketOrderType && !ord.Sell
+}
+
+// IsMarketOrder is true if this is a market order.
+func (ord *orderReader) IsMarketOrder() bool {
+	return ord.Type == order.MarketOrderType
+}
+
+// SettledFrom is the sum settled incoming asset.
+func (ord *orderReader) SettledFrom() string {
+	return precision8(ord.sumFrom(settledFilter))
+}
+
+// SettledTo is the sum settled of outgoing asset.
+func (ord *orderReader) SettledTo() string {
+	return precision8(ord.sumTo(settledFilter))
+}
+
+// SettledPercent is the percent of the order which has completed settlement.
+func (ord *orderReader) SettledPercent() string {
+	return ord.percent(settledFilter)
+}
+
+// FilledFrom is the sum filled in units of the outgoing asset.
+func (ord *orderReader) FilledFrom() string {
+	return precision8(ord.sumFrom(filledFilter))
+}
+
+// FilledTo is the sum filled in units of the incoming asset.
+func (ord *orderReader) FilledTo() string {
+	return precision8(ord.sumTo(filledFilter))
+}
+
+// FilledPercent is the percent of the order that has filled, without percent
+// sign.
+func (ord *orderReader) FilledPercent() string {
+	return ord.percent(filledFilter)
+}
+
+func (ord *orderReader) percent(filter func(match *core.Match) bool) string {
+	var sum uint64
+	if ord.Sell {
+		sum = ord.sumFrom(filter)
+	} else {
+		sum = ord.sumTo(filter)
+	}
+	return strconv.FormatFloat(float64(sum)/float64(ord.Qty)*100, 'f', 1, 64)
+}
+
+func settledFilter(match *core.Match) bool {
+	return (match.Side == order.Taker && match.Status == order.MatchComplete) ||
+		(match.Side == order.Maker && (match.Status == order.MakerRedeemed || match.Status == order.MatchComplete))
+}
+
+func settlingFilter(match *core.Match) bool {
+	return (match.Side == order.Taker && match.Status < order.MatchComplete) ||
+		(match.Side == order.Maker && match.Status < order.MakerRedeemed)
+}
+
+func filledFilter(match *core.Match) bool { return true }
+
+// sumFrom will sum the match quantities in units of the outgoing asset.
+func (ord *orderReader) sumFrom(filter func(match *core.Match) bool) uint64 {
+	var v uint64
+	add := func(rate, qty uint64) {
+		if ord.Sell {
+			v += qty
+		} else {
+			v += calc.BaseToQuote(rate, qty)
+		}
+	}
+	for _, match := range ord.Matches {
+		if filter(match) {
+			add(match.Rate, match.Qty)
+		}
+	}
+	return v
+}
+
+// sumTo will sum the match quantities in units of the incoming asset.
+func (ord *orderReader) sumTo(filter func(match *core.Match) bool) uint64 {
+	var v uint64
+	add := func(rate, qty uint64) {
+		if ord.Sell {
+			v += calc.BaseToQuote(rate, qty)
+		} else {
+			v += qty
+		}
+	}
+	for _, match := range ord.Matches {
+		if filter(match) {
+			add(match.Rate, match.Qty)
+		}
+	}
+	return v
+}
+
+// hasLiveMatches will be true if there are any matches < MakerRedeemed.
+func (ord *orderReader) hasLiveMatches() bool {
+	for _, match := range ord.Matches {
+		if match.Status < order.MakerRedeemed {
+			return true
+		}
+	}
+	return false
+}
+
+// StatusString is the order status.
+func (ord *orderReader) StatusString() string {
+	isLive := ord.hasLiveMatches()
+	switch ord.Status {
+	case order.OrderStatusUnknown:
+		return "unknown"
+	case order.OrderStatusEpoch:
+		return "epoch"
+	case order.OrderStatusBooked:
+		if ord.Cancelling {
+			return "cancelling"
+		}
+		return "booked"
+	case order.OrderStatusExecuted:
+		if isLive {
+			return "settling"
+		}
+		return "executed"
+	case order.OrderStatusCanceled:
+		if isLive {
+			return "canceled/settling"
+		}
+		return "canceled"
+	case order.OrderStatusRevoked:
+		if isLive {
+			return "revoked/settling"
+		}
+		return "revoked"
+	}
+	return "unknown"
+}
+
+// RateString is a formatted rate with units.
+func (ord *orderReader) RateString() string {
+	if ord.Type == order.MarketOrderType {
+		return "market"
+	}
+	return fmt.Sprintf("%s %s/%s", precision8(ord.Rate), ord.QuoteSymbol, ord.BaseSymbol)
+}
+
+// MatchReaders creates a slice of *matchReader for the order's matches.
+func (ord *orderReader) MatchReaders() []*matchReader {
+	readers := make([]*matchReader, 0, len(ord.Matches))
+	for _, match := range ord.Matches {
+		readers = append(readers, newMatchReader(match, ord))
+	}
+	return readers
+}
+
+// SwapFeesString is a formatted string of the paid swap fees.
+func (ord *orderReader) SwapFeesString() string {
+	return precision8(ord.FeesPaid.Swap)
+}
+
+// RedemptionFeesString is a formatted string of the paid redemption fees.
+func (ord *orderReader) RedemptionFeesString() string {
+	return precision8(ord.FeesPaid.Redemption)
+}
+
+func (ord *orderReader) FundingCoinIDs() []string {
+	ids := make([]string, 0, len(ord.FundingCoins))
+	for i := range ord.FundingCoins {
+		ids = append(ids, decodeCoinID(ord.FromID(), ord.FundingCoins[i]))
+	}
+	return ids
+}
+
+// matchReader wraps a core.Match and provides methods for info display.
+// Whenever possible, add an matchReader methods rather than a template func.
+type matchReader struct {
+	*core.Match
+	ord *orderReader
+}
+
+func newMatchReader(match *core.Match, ord *orderReader) *matchReader {
+	return &matchReader{
+		Match: match,
+		ord:   ord,
+	}
+}
+
+// StatusString is a formatted string of the match status.
+func (m *matchReader) StatusString() string {
+	switch m.Status {
+	case order.NewlyMatched:
+		return "(0 / 4) Newly Matched"
+	case order.MakerSwapCast:
+		return "(1 / 4) First Swap Sent"
+	case order.TakerSwapCast:
+		return "(2 / 4) Second Swap Sent"
+	case order.MakerRedeemed:
+		if m.Side == order.Maker {
+			return "Match Complete"
+		}
+		return "(3 / 4) Maker Redeemed"
+	case order.MatchComplete:
+		return "Match Complete"
+	}
+	return "Unknown Order Status"
+}
+
+// RateString is the formatted match rate, with units.
+func (m *matchReader) RateString() string {
+	return fmt.Sprintf("%s %s/%s", precision8(m.Rate), m.ord.QuoteSymbol, m.ord.BaseSymbol)
+}
+
+// FromQuantityString is the formatted quantity.
+func (m *matchReader) FromQuantityString() string {
+	if m.ord.Sell {
+		return precision8(m.Qty)
+	}
+	return precision8(calc.BaseToQuote(m.Rate, m.Qty))
+}
+
+// ToQuantityString is the formatted quantity.
+func (m *matchReader) ToQuantityString() string {
+	if m.ord.Sell {
+		return precision8(calc.BaseToQuote(m.Rate, m.Qty))
+	}
+	return precision8(m.Qty)
+}
+
+// SwapString is the outgoing swap coin ID, formatted according to asset.
+func (m *matchReader) SwapString() string {
+	if len(m.Swap) == 0 {
+		return ""
+	}
+	fromID := m.ord.QuoteID
+	if m.ord.Sell {
+		fromID = m.ord.BaseID
+	}
+	return decodeCoinID(fromID, m.Swap)
+}
+
+// CounterSwapString is the incoming swap coin ID, formatted according to asset.
+func (m *matchReader) CounterSwapString() string {
+	if len(m.CounterSwap) == 0 {
+		return ""
+	}
+	toID := m.ord.BaseID
+	if m.ord.Sell {
+		toID = m.ord.QuoteID
+	}
+	return decodeCoinID(toID, m.CounterSwap)
+}
+
+// RedeemString is the redemption coin ID, formatted according to asset.
+func (m *matchReader) RedeemString() string {
+	if len(m.Redeem) == 0 {
+		return ""
+	}
+	toID := m.ord.BaseID
+	if m.ord.Sell {
+		toID = m.ord.QuoteID
+	}
+	return decodeCoinID(toID, m.Redeem)
+}
+
+// CounterRedeemString is the counter-party's redemption coin ID, formatted
+// according to asset.
+func (m *matchReader) CounterRedeemString() string {
+	if len(m.CounterRedeem) == 0 {
+		return ""
+	}
+	fromID := m.ord.QuoteID
+	if m.ord.Sell {
+		fromID = m.ord.BaseID
+	}
+	return decodeCoinID(fromID, m.CounterRedeem)
+}
+
+// RefundString is the refund coin ID, formatted according to asset.
+func (m *matchReader) RefundString() string {
+	if len(m.Refund) == 0 {
+		return ""
+	}
+	fromID := m.ord.QuoteID
+	if m.ord.Sell {
+		fromID = m.ord.BaseID
+	}
+	return decodeCoinID(fromID, m.Refund)
+}
+
+// OrderPortion is the percent of the order that this match represents, without
+// percent sign.
+func (m *matchReader) OrderPortion() string {
+	qty := m.ord.Qty
+	matchQty := m.Qty
+	if m.ord.IsMarketBuy() {
+		matchQty = calc.BaseToQuote(matchQty, m.Rate)
+	}
+	return strconv.FormatFloat((float64(matchQty)/float64(qty))*100, 'f', 1, 64)
+}
+
+// TimeString is a formatted string of the match's timestamp.
+func (m *matchReader) TimeString() string {
+	t := encode.UnixTimeMilli(int64(m.Stamp)).Local()
+	return t.Format("Jan 2 2008, 15:04:05 MST")
+}
+
+func decodeCoinID(assetID uint32, coinID []byte) string {
+	cid, err := asset.DecodeCoinID(assetID, coinID)
+	if err != nil {
+		log.Errorf("assetDecodeCoinID error: %v", err)
+		return "invalid coin ID"
+	}
+	return cid
+}
+
+func precision8(v uint64) string {
+	fullPrecision := strconv.FormatFloat(float64(v)/1e8, 'f', 8, 64)
+	return strings.TrimRight(strings.TrimRight(fullPrecision, "0"), ".")
 }

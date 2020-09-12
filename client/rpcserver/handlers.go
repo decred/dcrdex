@@ -36,6 +36,7 @@ const (
 	versionRoute     = "version"
 	walletsRoute     = "wallets"
 	withdrawRoute    = "withdraw"
+	marketsRoute     = "markets"
 )
 
 const (
@@ -355,7 +356,7 @@ func handleTrade(s *RPCServer, params *RawParams) *msgjson.ResponsePayload {
 		return createResponse(tradeRoute, nil, resErr)
 	}
 	tradeRes := &tradeResponse{
-		OrderID: res.ID,
+		OrderID: res.ID.String(),
 		Sig:     res.Sig.String(),
 		Stamp:   res.Stamp,
 	}
@@ -470,7 +471,7 @@ func parseCoreOrder(co *core.Order, b, q uint32) *myOrder {
 		MarketName:  co.MarketID,
 		BaseID:      b,
 		QuoteID:     q,
-		ID:          co.ID,
+		ID:          co.ID.String(),
 		Type:        co.Type.String(),
 		Sell:        co.Sell,
 		Stamp:       co.Stamp,

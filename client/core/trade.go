@@ -165,46 +165,11 @@ func (t *trackedTrade) coreOrder() (*Order, *Order) {
 // returned, otherwise the second returned *Order will be nil. coreOrderInternal
 // should be called with the mtx >= RLocked.
 func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
-	prefix, trade := t.Prefix(), t.Trade()
-	cancelling := t.cancel != nil
-	canceled := cancelling && t.cancel.matches.maker != nil
+	corder := coreOrderFromTrade(t.Order, t.metaData)
+	corder.Epoch = t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime)
 
-	orderEpoch := t.dc.marketEpoch(t.mktID, prefix.ServerTime)
-	var tif order.TimeInForce
-	if lo, ok := t.Order.(*order.LimitOrder); ok {
-		tif = lo.Force
-	}
-	corder := &Order{
-		Host:        t.dc.acct.host,
-		MarketID:    t.mktID,
-		Type:        prefix.OrderType,
-		ID:          t.ID().String(),
-		Stamp:       encode.UnixMilliU(prefix.ServerTime),
-		Sig:         t.metaData.Proof.DEXSig,
-		Status:      t.metaData.Status,
-		Epoch:       orderEpoch,
-		Rate:        t.rate(),
-		Qty:         trade.Quantity,
-		Sell:        trade.Sell,
-		Filled:      trade.Filled(),
-		Cancelling:  cancelling,
-		Canceled:    canceled,
-		TimeInForce: tif,
-		FeesPaid: &FeeBreakdown{
-			Swap:       t.metaData.SwapFeesPaid,
-			Redemption: t.metaData.RedemptionFeesPaid,
-		},
-	}
-	for _, match := range t.matches {
-		dbMatch := match.Match
-		corder.Matches = append(corder.Matches, &Match{
-			MatchID: match.id.String(),
-			Status:  dbMatch.Status,
-			Rate:    dbMatch.Rate,
-			Qty:     dbMatch.Quantity,
-			Side:    dbMatch.Side,
-			FeeRate: dbMatch.FeeRateSwap,
-		})
+	for _, mt := range t.matches {
+		corder.Matches = append(corder.Matches, matchFromMetaMatch(&mt.MetaMatch))
 	}
 	var cancelOrder *Order
 	if t.cancel != nil {
@@ -213,8 +178,8 @@ func (t *trackedTrade) coreOrderInternal() (*Order, *Order) {
 			MarketID: t.mktID,
 			Type:     order.CancelOrderType,
 			Stamp:    encode.UnixMilliU(t.cancel.ServerTime),
-			Epoch:    orderEpoch,
-			TargetID: t.cancel.TargetOrderID.String(),
+			Epoch:    t.dc.marketEpoch(t.mktID, t.Prefix().ServerTime),
+			TargetID: t.cancel.TargetOrderID[:],
 		}
 	}
 	return corder, cancelOrder
@@ -489,6 +454,7 @@ func (t *trackedTrade) makeMetaMatch(msgMatch *msgjson.Match) *db.MetaMatch {
 			DEX:   t.dc.acct.host,
 			Base:  t.Base(),
 			Quote: t.Quote(),
+			Stamp: msgMatch.ServerTime,
 		},
 		Match: &order.UserMatch{
 			OrderID:     oid,

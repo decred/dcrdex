@@ -2,7 +2,19 @@ package webserver
 
 import (
 	"context"
+	"encoding/hex"
+	"fmt"
 	"net/http"
+
+	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
+	"github.com/go-chi/chi"
+)
+
+type ctxID int
+
+const (
+	ctxOID ctxID = iota
 )
 
 // securityMiddleware adds security headers to the server responses.
@@ -85,4 +97,38 @@ func (s *WebServer) requireDEXConnection(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// orderIDCtx embeds order ID into the request context
+func orderIDCtx(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		oid := chi.URLParam(r, "oid")
+		ctx := context.WithValue(r.Context(), ctxOID, oid)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// getOrderIDCtx interprets the context value at ctxOID as a dex.Bytes order ID.
+func getOrderIDCtx(r *http.Request) (dex.Bytes, error) {
+	untypedOID := r.Context().Value(ctxOID)
+	if untypedOID == nil {
+		log.Errorf("nil value for order ID context value")
+	}
+	hexID, ok := untypedOID.(string)
+	if !ok {
+		log.Errorf("getOrderIDCtx type assertion failed. Expected string, got %T", untypedOID)
+		return nil, fmt.Errorf("type assertion failed")
+	}
+
+	if len(hexID) != order.OrderIDSize*2 {
+		log.Errorf("getOrderIDCtx received order ID string of wrong length. wanted %d, got %d",
+			order.OrderIDSize*2, len(hexID))
+		return nil, fmt.Errorf("invalid order ID")
+	}
+	oidB, err := hex.DecodeString(hexID)
+	if err != nil {
+		log.Errorf("getOrderIDCtx received invalid hex for order ID %q", hexID)
+		return nil, fmt.Errorf("")
+	}
+	return oidB, nil
 }

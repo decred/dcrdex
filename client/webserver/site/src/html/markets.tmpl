@@ -282,7 +282,9 @@
 
       {{- /* USER ORDERS: TODO */ -}}
       <div class="bg0 p-0 col-10 d-flex flex-column align-items-stretch">
-        <div class="market-header text-center fs14 py-1 brdrleft">Your Orders</div>
+        <div class="market-header text-center fs14 py-1 brdrleft">
+          Your Orders
+        </div>
         <div class="brdrleft flex-grow-1 bg1 position-relative">
 
           <div class="fill-abs stylish-overflow">
@@ -310,9 +312,17 @@
                   <td data-tmpl="filled"></td>
                   <td data-tmpl="settled"></td>
                   <td data-tmpl="status"></td>
-                  <td class="text-center">
-                    <span data-tmpl="cancelBttn" class="ico-cross d-hide"></span>
+                  <td class="text-right">
+                    <span data-tmpl="cancelBttn" class="ico-cross d-hide" data-tooltip="cancel order"></span>
                     <span data-tmpl="cancelStatus" class="d-hide"></span>
+                    <a data-tmpl="link" class="ico-open fs13 pointer ml-2 plainlink" data-tooltip="order details"></a>
+                  </td>
+                </tr>
+              </tbody>
+              <tbody>
+                <tr>
+                  <td colspan="9" class="text-center">
+                    <a href="/orders" class="d-block fs14 px-2 plainlink">view order history</a>
                   </td>
                 </tr>
               </tbody>
@@ -325,7 +335,7 @@
   </div>
 
   {{- /* POP-UP FORMS */ -}}
-  <div id="forms" class="marketforms d-flex flex-center p-4 overflow-auto d-hide">
+  <div id="forms" class="popupforms d-flex flex-center p-4 overflow-auto d-hide">
 
     {{- /* UNLOCK WALLET */ -}}
     <form class="card bg1 position-relative d-hide" id="openForm" autocomplete="off">
@@ -381,25 +391,7 @@
     </form>
 
     <form class="card bg1 d-hide" id="cancelForm" autocomplete="off">
-      <div class="bg2 px-2 py-1 text-center fs18">
-        Cancel Order
-      </div>
-      <div class="p-3">
-        Enter your password to submit a cancel order for the remaining
-        <span id="cancelRemain"></span>
-        <span id="cancelUnit"></span>.<br>
-        The remaining amount may change before the cancel order is matched.
-      </div>
-      <hr class="dashed mt-2">
-      <div class="d-flex flex-row align-items-end pb-4 px-3">
-        <div class="col-12 p-0">
-          <label for="cancelPass" class="pt-3 pl-1 mb-0">Password</label>
-          <input type="password" class="form-control select" id="cancelPass" autocomplete="off">
-        </div>
-        <div class="col-12 py-1 pl-5">
-          <button id="cancelSubmit" type="button" class="w-100 fs15 bg2 selected">Submit</button>
-        </div>
-      </div>
+      {{template "cancelOrderForm"}}
     </form>
 
   </div>

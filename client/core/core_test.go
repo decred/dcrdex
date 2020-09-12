@@ -312,6 +312,10 @@ func (tdb *TDB) Order(oid order.OrderID) (*db.MetaOrder, error) {
 	return tdb.orderOrders[oid], nil
 }
 
+func (tdb *TDB) Orders(*db.OrderFilter) ([]*db.MetaOrder, error) {
+	return nil, nil
+}
+
 func (tdb *TDB) MarketOrders(dex string, base, quote uint32, n int, since uint64) ([]*db.MetaOrder, error) {
 	return nil, nil
 }
@@ -2097,9 +2101,8 @@ func TestCancel(t *testing.T) {
 		return nil
 	}
 
-	sid := oid.String()
 	rig.ws.queueResponse(msgjson.CancelRoute, handleCancel)
-	err := rig.core.Cancel(tPW, sid)
+	err := rig.core.Cancel(tPW, oid[:])
 	if err != nil {
 		t.Fatalf("cancel error: %v", err)
 	}
@@ -2109,7 +2112,7 @@ func TestCancel(t *testing.T) {
 
 	ensureErr := func(tag string) {
 		t.Helper()
-		err := rig.core.Cancel(tPW, sid)
+		err := rig.core.Cancel(tPW, oid[:])
 		if err == nil {
 			t.Fatalf("%s: no error", tag)
 		}
@@ -2128,11 +2131,11 @@ func TestCancel(t *testing.T) {
 	}
 
 	// Bad order ID
-	ogID := sid
-	sid = "badid"
+	ogID := oid
+	oid = order.OrderID{0x01, 0x02}
 	ensureErr("bad id")
 	ensureNilCancel("bad id")
-	sid = ogID
+	oid = ogID
 
 	// Order not found
 	delete(dc.trades, oid)

@@ -10,6 +10,7 @@ import (
 
 	"decred.org/dcrdex/client/core"
 	"decred.org/dcrdex/dex"
+	"decred.org/dcrdex/dex/order"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 	marketsRoute  = "/markets"
 	walletsRoute  = "/wallets"
 	settingsRoute = "/settings"
+	ordersRoute   = "/orders"
 )
 
 // sendTemplate processes the template and sends the result.
@@ -155,4 +157,63 @@ func (s *WebServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 // handleSettings is the handler for the '/settings' page request.
 func (s *WebServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	s.sendTemplate(w, "settings", commonArgs(r, "Settings | Decred DEX"))
+}
+
+type ordersTmplData struct {
+	CommonArguments
+	Assets   map[uint32]*core.SupportedAsset
+	Hosts    []string
+	Statuses map[uint8]string
+}
+
+var allStatuses = map[uint8]string{
+	uint8(order.OrderStatusEpoch):    order.OrderStatusEpoch.String(),
+	uint8(order.OrderStatusBooked):   order.OrderStatusBooked.String(),
+	uint8(order.OrderStatusExecuted): order.OrderStatusExecuted.String(),
+	uint8(order.OrderStatusCanceled): order.OrderStatusCanceled.String(),
+	uint8(order.OrderStatusRevoked):  order.OrderStatusRevoked.String(),
+}
+
+// handleOrders is the handler for the /orders page request.
+func (s *WebServer) handleOrders(w http.ResponseWriter, r *http.Request) {
+	user := extractUserInfo(r).User
+	hosts := make([]string, 0, len(user.Exchanges))
+	for _, xc := range user.Exchanges {
+		hosts = append(hosts, xc.Host)
+	}
+
+	s.sendTemplate(w, "orders", &ordersTmplData{
+		CommonArguments: *commonArgs(r, "Orders | Decred DEX"),
+		Assets:          user.Assets,
+		Hosts:           hosts,
+		Statuses:        allStatuses,
+	})
+}
+
+type orderTmplData struct {
+	CommonArguments
+	Order *orderReader
+	// Don't use dex.Network because the template parser will use the Stringer.
+	Net uint8
+}
+
+// handleOrder is the handler for the /order/{oid} page request.
+func (s *WebServer) handleOrder(w http.ResponseWriter, r *http.Request) {
+	oid, err := getOrderIDCtx(r)
+	if err != nil {
+		log.Errorf("error retrieving order ID from request context: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	ord, err := s.core.Order(oid)
+	if err != nil {
+		log.Errorf("error retrieving order: %v", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	s.sendTemplate(w, "order", &orderTmplData{
+		CommonArguments: *commonArgs(r, "Order | Decred DEX"),
+		Order:           &orderReader{Order: ord},
+		Net:             uint8(s.core.Network()),
+	})
 }

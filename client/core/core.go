@@ -780,6 +780,11 @@ func addrHost(addr string) string {
 	return net.JoinHostPort(host, port)
 }
 
+// Network returns the current DEX network.
+func (c *Core) Network() dex.Network {
+	return c.net
+}
+
 // Exchanges returns a map of Exchange keyed by host, including a list of markets
 // and their orders.
 func (c *Core) Exchanges() map[string]*Exchange {
@@ -1665,6 +1670,70 @@ func (c *Core) Logout() error {
 	return nil
 }
 
+// Orders fetches a batch of user orders, filtered with the provided
+// OrderFilter.
+func (c *Core) Orders(filter *OrderFilter) ([]*Order, error) {
+	var oid order.OrderID
+	if len(filter.Offset) > 0 {
+		if len(filter.Offset) != order.OrderIDSize*2 {
+			return nil, fmt.Errorf("invalid offset order ID length. wanted %d, got %d", order.OrderIDSize*2, len(filter.Offset))
+		}
+		copy(oid[:], filter.Offset)
+	}
+
+	ords, err := c.db.Orders(&db.OrderFilter{
+		N:        filter.N,
+		Offset:   oid,
+		Hosts:    filter.Hosts,
+		Assets:   filter.Assets,
+		Statuses: filter.Statuses,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("UserOrders error: %v", err)
+	}
+
+	cords := make([]*Order, 0, len(ords))
+	for _, mOrd := range ords {
+		corder, err := c.coreOrderFromMetaOrder(mOrd)
+		if err != nil {
+			return nil, err
+		}
+		cords = append(cords, corder)
+	}
+
+	return cords, nil
+}
+
+// coreOrderFromMetaOrder creates an *Order from a *db.MetaOrder, including
+// loading matches from the database.
+func (c *Core) coreOrderFromMetaOrder(mOrd *db.MetaOrder) (*Order, error) {
+	corder := coreOrderFromTrade(mOrd.Order, mOrd.MetaData)
+	oid := mOrd.Order.ID()
+	matches, err := c.db.MatchesForOrder(oid)
+	if err != nil {
+		return nil, fmt.Errorf("MatchesForOrder error loading matches for %s: %v", oid, err)
+	}
+	corder.Matches = make([]*Match, 0, len(matches))
+	for _, match := range matches {
+		corder.Matches = append(corder.Matches, matchFromMetaMatch(match))
+	}
+	return corder, nil
+}
+
+// Order fetches a single user order.
+func (c *Core) Order(oidB dex.Bytes) (*Order, error) {
+	if len(oidB) != order.OrderIDSize {
+		return nil, fmt.Errorf("wrong oid string length. wanted %d, got %d", order.OrderIDSize, len(oidB))
+	}
+	var oid order.OrderID
+	copy(oid[:], oidB)
+	mOrd, err := c.db.Order(oid)
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving order %s: %w", oid, err)
+	}
+	return c.coreOrderFromMetaOrder(mOrd)
+}
+
 // initializeDEXConnections connects to the DEX servers in the conns map and
 // authenticates the connection. If registration is incomplete, reFee is run and
 // the connection will be authenticated once the `notifyfee` request is sent.
@@ -2240,18 +2309,18 @@ func (c *Core) walletSet(dc *dexConnection, baseID, quoteID uint32, sell bool) (
 }
 
 // Cancel is used to send a cancel order which cancels a limit order.
-func (c *Core) Cancel(pw []byte, tradeID string) error {
+func (c *Core) Cancel(pw []byte, oidB dex.Bytes) error {
 	// Check the user password.
 	_, err := c.encryptionKey(pw)
 	if err != nil {
 		return fmt.Errorf("Cancel password error: %v", err)
 	}
 
-	// Find the order. Make sure it's a limit order.
-	oid, err := order.IDFromHex(tradeID)
-	if err != nil {
-		return err
+	if len(oidB) != order.OrderIDSize {
+		return fmt.Errorf("wrong order ID length. wanted %d, got %d", order.OrderIDSize, len(oidB))
 	}
+	var oid order.OrderID
+	copy(oid[:], oidB)
 
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
@@ -2265,7 +2334,7 @@ func (c *Core) Cancel(pw []byte, tradeID string) error {
 		}
 	}
 
-	return fmt.Errorf("Cancel: failed to find order %s", tradeID)
+	return fmt.Errorf("Cancel: failed to find order %s", oidB)
 }
 
 // authDEX authenticates the connection for a DEX.

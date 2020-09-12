@@ -35,8 +35,7 @@ label.market-search {
   }
 }
 
-div.marketforms,
-div.settingsforms {
+div.popupforms {
   position: fixed;
   left: 0;
   top: 0;
@@ -81,6 +80,7 @@ table.ordertable {
   border-collapse: collapse;
   border: none;
   width: 100%;
+  margin-bottom: 10px;
 
   th {
     font-size: 14px;
