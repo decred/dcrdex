@@ -195,11 +195,6 @@ func (a *TAuth) getSend() *msgjson.Message {
 func (a *TAuth) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
 	return a.RequestWithTimeout(user, msg, f, time.Hour, func() {})
 }
-func (a *TAuth) RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
-	expireTimeout, connectTimeout time.Duration, expireFunc func()) {
-	// TODO
-	a.RequestWithTimeout(user, req, handlerFunc, expireTimeout, expireFunc)
-}
 func (a *TAuth) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message), expDur time.Duration, exp func()) error {
 	log.Infof("Request for user %v", user)
 	// Emulate the client.

@@ -56,12 +56,9 @@ type AuthManager interface {
 	Auth(user account.AccountID, msg, sig []byte) error
 	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message) error
-	SendWhenConnected(account.AccountID, *msgjson.Message, time.Duration, func())
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
 		expireTimeout time.Duration, expireFunc func()) error
-	RequestWhenConnected(user account.AccountID, req *msgjson.Message, handlerFunc func(comms.Link, *msgjson.Message),
-		expireTimeout, connectTimeout time.Duration, expireFunc func())
 	Penalize(user account.AccountID, rule account.Rule) error
 	RecordCancel(user account.AccountID, oid, target order.OrderID, t time.Time)
 	RecordCompletedOrder(user account.AccountID, oid order.OrderID, t time.Time)
@@ -332,12 +329,6 @@ type Swapper struct {
 	// liveWaiters is used to track active coin waiters running in latencyQ.
 	liveWaitersMtx sync.Mutex
 	liveWaiters    map[waiterKey]*handlerArgs
-
-	// liveAckers is used to track acknowledgement requests that are waiting to
-	// be met with client responses. This applies to counterparty contract audit
-	// and redeem acks, and match acks.
-	liveAckersMtx sync.Mutex
-	liveAckers    map[uint64]*msgAckers // keyed by server generated message ID
 }
 
 // Config is the swapper configuration settings. A Config instance is the only
@@ -407,7 +398,6 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 		lockTimeTaker: cfg.LockTimeTaker,
 		lockTimeMaker: cfg.LockTimeMaker,
 		liveWaiters:   make(map[waiterKey]*handlerArgs),
-		liveAckers:    make(map[uint64]*msgAckers),
 	}
 
 	// Ensure txWaitExpiration is not greater than broadcast timeout setting.
@@ -463,8 +453,8 @@ func NewSwapper(cfg *Config) (*Swapper, error) {
 	}
 
 	if state != nil {
-		log.Infof("loaded swap state contains %d live matches with %d pending client acks and %d live coin waiters",
-			len(state.MatchTrackers), len(state.LiveAckers), len(state.LiveWaiters))
+		log.Infof("loaded swap state contains %d live matches and %d live coin waiters",
+			len(state.MatchTrackers), len(state.LiveWaiters))
 		err = swapper.restoreState(state, cfg.AllowPartialRestore)
 		if err != nil {
 			return nil, err
@@ -569,95 +559,6 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	// Order completion/failure tracking data
 	s.orders.orderMatches = state.OrderMatches
 
-	// Live ackers (active acknowledgement requests)
-	//
-	// Resend the RequestWithTimeout(..., processAck) for each acker as done in
-	// processRedeem (RedemptionRoute request), processInit (AuditRoute
-	// request), and revoke (RevokeMatchRoute). For match acks (MatchRoute
-	// request), resend the RequestWithTimeout(..., processMatchAcks) as done in
-	// Negotiate.
-	for _, ackData := range state.LiveAckers {
-		// Get a new request ID.
-		msgID := comms.NextID()
-		req := ackData.Request
-		req.ID = msgID // reset the ID
-		user := ackData.AckData[0].User
-
-		var handlerFun func(link comms.Link, resp *msgjson.Message)
-
-		var requestTimeout time.Duration
-		if req.Route == msgjson.MatchRoute {
-			// Request with a processMatchAcks response handler and a
-			// []*messageAcker for a batch of matches.
-			acks := make([]*messageAcker, 0, len(ackData.AckData))
-			for _, dat := range ackData.AckData {
-				match := s.matches[dat.MatchID]
-				if match == nil {
-					log.Errorf("Unable to find match %v", dat.MatchID)
-					continue
-				}
-				acks = append(acks, &messageAcker{
-					user:    user,
-					match:   match,
-					params:  dat.Params,
-					isMaker: dat.IsMaker,
-					isAudit: req.Route == msgjson.AuditRoute,
-				})
-			}
-
-			s.setLiveAckers(req, acks)
-			handlerFun = func(_ comms.Link, resp *msgjson.Message) {
-				s.processMatchAcks(user, resp, acks) // resp.ID == req.ID == msgID
-			}
-			requestTimeout = auth.DefaultRequestTimeout
-		} else {
-			// Request with a processAck response handler and a single
-			// *messageAcker for the audit/redeem/revoke.
-			if len(ackData.AckData) != 1 {
-				log.Errorf("%v route request has %d data elements, need 1",
-					req.Route, len(ackData.AckData))
-				continue
-			}
-
-			dat := ackData.AckData[0]
-			match := s.matches[dat.MatchID]
-			if match == nil {
-				log.Errorf("Unable to find match %v", dat.MatchID)
-				continue
-			}
-			ack := &messageAcker{
-				user:    user,
-				match:   match,
-				params:  dat.Params,
-				isMaker: dat.IsMaker,
-				isAudit: req.Route == msgjson.AuditRoute,
-			}
-
-			handlerFun = func(_ comms.Link, resp *msgjson.Message) {
-				s.processAck(resp, ack) // resp.ID == req.ID == msgID
-			}
-			// Be generous with the request timeout, although only the audit
-			// request may require the client to wait for network latency to
-			// respond. However, checkInaction still abides by the deadlines
-			// determined by a match's latest action time. (TODO: flag these
-			// matchTrackers for special treatment by checkInaction).
-			requestTimeout = s.bTimeout
-		}
-
-		expireFunc := func() {
-			s.rmLiveAckers(msgID)
-			log.Errorf("Failed to send request to %v for %v ack", user, req.Route)
-		}
-		log.Infof("Sending %v request to user %v", req.Route, user)
-		log.Debug(req)
-		s.authMgr.RequestWhenConnected(user, req, handlerFun, requestTimeout,
-			auth.DefaultConnectTimeout, expireFunc)
-		// NOTE: The user must reconnect to send the ack request. processAck and
-		// processMatchAcks themselves won't require connectivity since there
-		// should be no error response (already validated by virtue of being in
-		// the state's live ackers) and they just save the ack signatures.
-	}
-
 	// Live coin waiters started by the comms handlers for client init and
 	// redeem messages
 	//
@@ -667,12 +568,6 @@ func (s *Swapper) restoreState(state *State, allowPartial bool) error {
 	// waiter requires (1) s.step to get stepInfo and (2) msg.Payload unmarshal
 	// into params, a msgjson.Init or msgjson.Redeem. Manually doing this would
 	// skip the msg and contract/redeem validation.
-	//
-	// The counter-party must be connected so the success function (processInit
-	// or processRedeem) called when the coin is found can send an ack request.
-	// Hence, processInit and processRedeem now use RequestWhenConnected in
-	// conjunction with a grace period where penalty timeout is increased to the
-	// reconnect timeout.
 
 	s.gracePeriod = 1
 	time.AfterFunc(2*auth.DefaultConnectTimeout, func() {
@@ -733,7 +628,6 @@ func (s *Swapper) saveState() {
 		Assets:        assetIDs,
 		MatchTrackers: mtd,
 		OrderMatches:  s.orders.orderMatches,
-		LiveAckers:    s.liveAckers,
 		LiveWaiters:   s.liveWaiters,
 	}
 
@@ -747,8 +641,7 @@ func (s *Swapper) saveState() {
 		log.Errorf("Failed to write swap state data to disk: %v", err)
 	} else {
 		log.Infof("Saved swap state to file %q, containing %d live matches with "+
-			"%d pending client acks and %d live coin waiters", fName,
-			len(st.MatchTrackers), len(st.LiveAckers), len(st.LiveWaiters))
+			"and %d live coin waiters", fName, len(st.MatchTrackers), len(st.LiveWaiters))
 	}
 
 	// Save the filehash of the state file for a consistency check on startup.
@@ -762,47 +655,6 @@ func (s *Swapper) saveState() {
 	if err != nil {
 		log.Errorf("error storing swap hash to disk: %v", err)
 	}
-}
-
-type msgAckers struct {
-	Request *msgjson.Message // request to user, may not be nil
-	AckData []*ackerData
-}
-
-type ackerData struct {
-	User    account.AccountID
-	MatchID order.MatchID    // key for a *matchTrackers map
-	Params  msgjson.Signable // msgjson.{Match,Audit,Redemption,RevokeMatch}
-	IsMaker bool
-	//IsAudit bool // inferred if Params.(*msgjson.Audit)
-}
-
-func (s *Swapper) setLiveAckers(req *msgjson.Message, ackers []*messageAcker) {
-	ackDats := make([]*ackerData, len(ackers))
-	for i, ack := range ackers {
-		ackDats[i] = &ackerData{
-			User:    ack.user,
-			MatchID: ack.match.ID(),
-			Params:  ack.params,
-			IsMaker: ack.isMaker,
-		}
-	}
-	s.liveAckersMtx.Lock()
-	s.liveAckers[req.ID] = &msgAckers{
-		Request: req,
-		AckData: ackDats,
-	}
-	s.liveAckersMtx.Unlock()
-}
-
-func (s *Swapper) setLiveAcker(req *msgjson.Message, ackDat *messageAcker) {
-	s.setLiveAckers(req, []*messageAcker{ackDat})
-}
-
-func (s *Swapper) rmLiveAckers(msgID uint64) {
-	s.liveAckersMtx.Lock()
-	delete(s.liveAckers, msgID)
-	s.liveAckersMtx.Unlock()
 }
 
 // Data input to handleInit and handleRedeem, which both start coin waiters with
@@ -1364,10 +1216,10 @@ func (s *Swapper) respondError(id uint64, user account.AccountID, code int, errM
 		log.Errorf("Failed to create error response with message '%s': %v", msg, err)
 		return // this should not be possible, but don't pass nil msg to SendWhenConnected
 	}
-	s.authMgr.SendWhenConnected(user, msg, auth.DefaultConnectTimeout, func() {
-		log.Infof("Unable to send error response (code %d) to disconnected user %v: %q",
-			code, user, errMsg)
-	})
+	if err := s.authMgr.Send(user, msg); err != nil {
+		log.Infof("Unable to send %s error response (code %d) to disconnected user %v: %q",
+			msg.Route, code, user, errMsg)
+	}
 }
 
 // respondSuccess sends a successful response to a user.
@@ -1377,9 +1229,9 @@ func (s *Swapper) respondSuccess(id uint64, user account.AccountID, result inter
 		log.Errorf("failed to send success: %v", err)
 		return // this should not be possible, but don't pass nil msg to SendWhenConnected
 	}
-	s.authMgr.SendWhenConnected(user, msg, auth.DefaultConnectTimeout, func() {
-		log.Infof("Unable to send success response to disconnected user %v", user)
-	})
+	if err := s.authMgr.Send(user, msg); err != nil {
+		log.Infof("Unable to send %s success response to disconnected user %v", msg.Route, user)
+	}
 }
 
 // step creates a stepInformation structure for the specified match. A new
@@ -1402,8 +1254,6 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 	var actor, counterParty stepActor
 	var nextStep order.MatchStatus
 	maker, taker := match.Maker, match.Taker
-	var reqSigs [][]byte
-	ackType := msgjson.MatchRoute
 
 	// Lock for Status and Sigs.
 	match.mtx.RLock()
@@ -1432,10 +1282,6 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 				log.Debugf("swap %v at status %v missing MakerMatch signature(s) needed for NewlyMatched->MakerSwapCast",
 					match.ID(), match.Status)
 			}
-			// NOTE: Consider requiring TakerMatch too to prevent needless maker
-			// swap if taker bailed out, which should be OK if client retries
-			// the 'init' request.
-			reqSigs = [][]byte{match.Sigs.MakerMatch}
 		} else /* TakerSwapCast */ {
 			nextStep = order.MakerRedeemed
 			isBaseAsset = !maker.Sell // maker redeem: base asset if buy
@@ -1443,8 +1289,6 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 				log.Debugf("swap %v at status %v missing MakerAudit signature(s) needed for TakerSwapCast->MakerRedeemed",
 					match.ID(), match.Status)
 			}
-			reqSigs = [][]byte{match.Sigs.MakerAudit}
-			ackType = msgjson.AuditRoute
 		}
 	case order.MakerSwapCast, order.MakerRedeemed:
 		counterParty.order, actor.order = maker, taker
@@ -1464,8 +1308,6 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 				log.Debugf("swap %v at status %v missing TakerAudit signature(s) needed for MakerSwapCast->TakerSwapCast",
 					match.ID(), match.Status)
 			}
-			reqSigs = [][]byte{match.Sigs.TakerMatch, match.Sigs.TakerAudit}
-			ackType = msgjson.AuditRoute
 		} else /* MakerRedeemed */ {
 			nextStep = order.MatchComplete
 			// Note that the swap is still considered "active" until both
@@ -1475,8 +1317,6 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 				log.Debugf("swap %v at status %v missing TakerRedeem signature(s) needed for MakerRedeemed->MatchComplete",
 					match.ID(), match.Status)
 			}
-			reqSigs = [][]byte{match.Sigs.TakerRedeem}
-			ackType = msgjson.RedemptionRoute
 		}
 	default:
 		return nil, &msgjson.Error{
@@ -1490,16 +1330,6 @@ func (s *Swapper) step(user account.AccountID, matchID order.MatchID) (*stepInfo
 		return nil, &msgjson.Error{
 			Code:    msgjson.SettlementSequenceError,
 			Message: "expected other party to act",
-		}
-	}
-
-	// Verify that they have acknowledged their previous notification(s).
-	for _, s := range reqSigs {
-		if len(s) == 0 {
-			return nil, &msgjson.Error{
-				Code:    msgjson.SettlementSequenceError,
-				Message: "missing acknowledgment for " + ackType + " request",
-			}
 		}
 	}
 
@@ -1560,9 +1390,6 @@ type messageAcker struct {
 // (order.Match).Sigs record. This is required by processInit, processRedeem,
 // and revoke. Match Acknowledgements are handled by processMatchAck.
 func (s *Swapper) processAck(msg *msgjson.Message, acker *messageAcker) {
-	// Remove the live acker from Swapper's tracking.
-	defer s.rmLiveAckers(msg.ID)
-
 	// The time that the ack is received is stored for redeem acks to facilitate
 	// cancellation rate enforcement.
 	tAck := time.Now()
@@ -1783,9 +1610,6 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
-	// respondSuccess works with auth to send on connect like
-	// RequestWhenConnected. If the send fails due to the connect timeout, the
-	// user's client may not be satisfied. Deal with this client-side.
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
 		MatchID: matchID[:],
 		Sig:     params.Sig,
@@ -1818,26 +1642,17 @@ func (s *Swapper) processInit(msg *msgjson.Message, params *msgjson.Init, stepIn
 	// Send the 'audit' request to the counter-party.
 	log.Debugf("processInit: sending contract 'audit' request to counterparty %v (%s) "+
 		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
-
-	// Register that there is an outstanding ack request. This is unregistered
-	// on completion of processAck or request expiry.
-	s.setLiveAcker(notification, ack)
-
-	// Expire function to unregister the outstanding request.
-	expireFunc := func() {
-		s.rmLiveAckers(notification.ID)
-		log.Infof("Timeout waiting for contract 'audit' request from user %v (%s) for match %v",
-			ack.user, makerTaker(ack.isMaker), matchID)
-	}
-
-	// Send the ack request.
+	// Send the request.
 
 	// The counterparty will audit the contract by retrieving it, which may
 	// involve them waiting for up to the broadcast timeout before responding,
 	// so the user gets at least s.bTimeout to the request.
-	s.authMgr.RequestWhenConnected(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
+	s.authMgr.RequestWithTimeout(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
 		s.processAck(resp, ack) // resp.ID == notification.ID
-	}, s.bTimeout, auth.DefaultConnectTimeout, expireFunc)
+	}, s.bTimeout, func() {
+		log.Infof("Timeout waiting for contract 'audit' request acknowledgement from user %v (%s) for match %v",
+			ack.user, makerTaker(ack.isMaker), matchID)
+	})
 
 	return wait.DontTryAgain
 }
@@ -1938,9 +1753,6 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 
 	// Issue a positive response to the actor.
 	s.authMgr.Sign(params)
-	// respondSuccess works with auth to send on connect like
-	// RequestWhenConnected. If the send fails due to the connect timeout, the
-	// user's client may not be satisfied. Deal with this client-side.
 	s.respondSuccess(msg.ID, actor.user, &msgjson.Acknowledgement{
 		MatchID: matchID[:],
 		Sig:     params.Sig,
@@ -1974,26 +1786,13 @@ func (s *Swapper) processRedeem(msg *msgjson.Message, params *msgjson.Redeem, st
 	log.Debugf("processRedeem: sending 'redemption' request to counterparty %v (%s) "+
 		"for match %v", ack.user, makerTaker(ack.isMaker), matchID)
 
-	// Register that there is an outstanding ack request. This is unregistered
-	// on completion of processAck or request expiry.
-	s.setLiveAcker(notification, ack)
-
-	// Expire function to unregister the outstanding request.
-	expireFunc := func() {
-		s.rmLiveAckers(notification.ID)
-		log.Infof("Timeout waiting for 'redemption' request from user %v (%s) for match %v",
-			ack.user, makerTaker(ack.isMaker), matchID)
-	}
-
 	// Send the ack request.
 
-	// The counterparty does not need to actually locate the redemption txn, but
-	// they do need to author and broadcast their own redeem, so allow the
-	// request to wait for a response up until the inaction penalty.
-	s.authMgr.RequestWhenConnected(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
+	// The counterparty does not need to actually locate the redemption on txn,
+	// so use the default request timeout.
+	s.authMgr.Request(ack.user, notification, func(_ comms.Link, resp *msgjson.Message) {
 		s.processAck(resp, ack) // resp.ID == notification.ID
-	}, s.bTimeout, auth.DefaultConnectTimeout, expireFunc)
-	// maybe: s.bTimeout-time.Since(redeemTime) or time.Until(redeemTime.Add(s.bTimeout))
+	})
 
 	return wait.DontTryAgain
 }
@@ -2264,20 +2063,9 @@ func (s *Swapper) revoke(match *matchTracker) {
 			isMaker: isMaker,
 			// isAudit: false,
 		}
-		// Expire function to unregister the outstanding request.
-		expireFunc := func() {
-			s.rmLiveAckers(req.ID)
-			side := order.Taker
-			if isMaker {
-				side = order.Maker
-			}
-			log.Infof("revoke_match request failed for user %v (%s)", user, side)
-		}
-		// Register that there is an outstanding request.
-		s.setLiveAcker(req, ack)
-		s.authMgr.RequestWhenConnected(user, req, func(_ comms.Link, resp *msgjson.Message) {
+		s.authMgr.Request(user, req, func(_ comms.Link, resp *msgjson.Message) {
 			s.processAck(resp, ack)
-		}, auth.DefaultRequestTimeout, 4*time.Hour, expireFunc)
+		})
 	}
 
 	takerParams, takerReq, makerParams, makerReq, err := s.revocationRequests(match)
@@ -2304,9 +2092,6 @@ func extractAddress(ord order.Order) string {
 // with signatures for each match ID. The match acknowledgements were requested
 // from each matched user in Negotiate.
 func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message, matches []*messageAcker) {
-	// Remove the live acker from Swapper's tracking.
-	defer s.rmLiveAckers(msg.ID)
-
 	// NOTE: acks must be in same order as matches []*messageAcker.
 	var acks []msgjson.Acknowledgement
 	err := msg.UnmarshalResult(&acks)
@@ -2359,6 +2144,7 @@ func (s *Swapper) processMatchAcks(user account.AccountID, msg *msgjson.Message,
 			match.Sigs.TakerMatch = ack.Sig
 		}
 		match.mtx.Unlock()
+
 	}
 
 	// Store the signatures in the DB.
@@ -2732,20 +2518,10 @@ func (s *Swapper) Negotiate(matchSets []*order.MatchSet, finalSwap map[order.Ord
 		log.Debugf("Negotiate: sending 'match' ack request to user %v for %d matches",
 			u, len(m))
 
-		// Register that there is an outstanding ack request. This is
-		// unregistered on completion of processAck or request expiry.
-		s.setLiveAckers(req, m)
-
-		// Expire function to unregister the outstanding request.
-		expireFunc := func() {
-			s.rmLiveAckers(req.ID)
-			log.Infof("Failed to send request to %v for match acks.", u)
-		}
-
-		// Send the ack request.
-		s.authMgr.RequestWhenConnected(u, req, func(_ comms.Link, resp *msgjson.Message) {
+		// Send the request.
+		s.authMgr.Request(u, req, func(_ comms.Link, resp *msgjson.Message) {
 			s.processMatchAcks(u, resp, m)
-		}, auth.DefaultRequestTimeout, auth.DefaultConnectTimeout, expireFunc)
+		})
 	}
 }
 

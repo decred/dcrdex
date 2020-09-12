@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -184,12 +183,6 @@ type AuthManager struct {
 	connMtx sync.RWMutex
 	users   map[account.AccountID]*clientInfo
 	conns   map[uint64]*clientInfo
-
-	pendingRequestsMtx sync.Mutex
-	pendingRequests    map[account.AccountID]map[uint64]*timedRequest
-
-	pendingMessagesMtx sync.Mutex
-	pendingMessages    map[account.AccountID]map[uint64]*timedMessage
 }
 
 // Config is the configuration settings for the AuthManager, and the only
@@ -215,18 +208,16 @@ type Config struct {
 // NewAuthManager is the constructor for an AuthManager.
 func NewAuthManager(cfg *Config) *AuthManager {
 	auth := &AuthManager{
-		anarchy:         cfg.Anarchy,
-		users:           make(map[account.AccountID]*clientInfo),
-		conns:           make(map[uint64]*clientInfo),
-		storage:         cfg.Storage,
-		signer:          cfg.Signer,
-		regFee:          cfg.RegistrationFee,
-		checkFee:        cfg.FeeChecker,
-		feeConfs:        cfg.FeeConfs,
-		cancelThresh:    cfg.CancelThreshold,
-		latencyQ:        wait.NewTickerQueue(recheckInterval),
-		pendingRequests: make(map[account.AccountID]map[uint64]*timedRequest),
-		pendingMessages: make(map[account.AccountID]map[uint64]*timedMessage),
+		anarchy:      cfg.Anarchy,
+		users:        make(map[account.AccountID]*clientInfo),
+		conns:        make(map[uint64]*clientInfo),
+		storage:      cfg.Storage,
+		signer:       cfg.Signer,
+		regFee:       cfg.RegistrationFee,
+		checkFee:     cfg.FeeChecker,
+		feeConfs:     cfg.FeeConfs,
+		cancelThresh: cfg.CancelThreshold,
+		latencyQ:     wait.NewTickerQueue(recheckInterval),
 	}
 
 	comms.Route(msgjson.ConnectRoute, auth.handleConnect)
@@ -356,133 +347,6 @@ const DefaultConnectTimeout = 10 * time.Minute
 
 // Response and notification (non-request) messages
 
-// For notifications and responses.
-type pendingMessage struct {
-	user        account.AccountID
-	msg         *msgjson.Message
-	lastAttempt time.Time
-	expireFunc  func()
-}
-
-type timedMessage struct {
-	*pendingMessage
-	T *time.Timer
-}
-
-// Register a pending message that will expire after connectTimeout. If the user
-// connects before that time, the message will be sent to the user.
-func (auth *AuthManager) addUserConnectMsg(data *pendingMessage, connectTimeout time.Duration) {
-	auth.pendingMessagesMtx.Lock()
-	defer auth.pendingMessagesMtx.Unlock()
-
-	user, msgID := data.user, data.msg.ID
-
-	tr := &timedMessage{
-		pendingMessage: data,
-		T: time.AfterFunc(connectTimeout, func() {
-			if auth.rmUserConnectMsg(user, msgID) != nil {
-				// Only run the expireFunc if the timeout removed it vs. a
-				// connect (addClient call) that didn't stop the timer in time.
-				data.expireFunc() // e.g. remove live ackers, penalize, log, etc.
-			}
-		}),
-	}
-
-	userMsgs := auth.pendingMessages[user]
-	if userMsgs == nil {
-		auth.pendingMessages[user] = map[uint64]*timedMessage{
-			msgID: tr,
-		}
-		return
-	}
-	userMsgs[msgID] = tr
-}
-
-// Retrieve and unregister all connection messages for a given user. This should
-// be used to retrieve pending messages on client connection.
-func (auth *AuthManager) rmUserConnectMsgs(user account.AccountID) []*pendingMessage {
-	auth.pendingMessagesMtx.Lock()
-	defer auth.pendingMessagesMtx.Unlock()
-	userMsgs := auth.pendingMessages[user]
-	if userMsgs == nil {
-		return nil
-	}
-	msgs := make([]*pendingMessage, 0, len(userMsgs))
-	for _, tr := range userMsgs {
-		msgs = append(msgs, tr.pendingMessage)
-		// Stop the timer. It's ok if already fired since this timedMessage
-		// would have been removed if we lost the race with AfterFunc's call to
-		// rmUserConnectMsg. Since we're here, we beat the timer.
-		tr.T.Stop()
-	}
-	// Non-request message IDs can be server-generated IDs for notifications, or
-	// client-generated request IDs for responses, so this sort only ensures
-	// that the same kind of messages (responses or notifications) are in order
-	// from oldest to newest, but the two types are potentially interleaved.
-	sort.Slice(msgs, func(i, j int) bool {
-		return msgs[i].msg.ID < msgs[j].msg.ID
-	})
-	delete(auth.pendingMessages, user)
-	return msgs
-}
-
-// Retrieve and unregister a pending message by user and message ID. This is
-// likely to only be used by the connect timeout timer of the timedMessage
-// created by addUserConnectMsg.
-func (auth *AuthManager) rmUserConnectMsg(user account.AccountID, msgID uint64) *pendingMessage {
-	auth.pendingMessagesMtx.Lock()
-	defer auth.pendingMessagesMtx.Unlock()
-	userMsgs := auth.pendingMessages[user]
-	tm := userMsgs[msgID] // ok if user not found, nil map lookup is defined
-	if tm == nil {
-		// The timer probably fired while messages were being retrieved on
-		// connect, and expire lost the race. This return value indicates to the
-		// AfterFunc closure if the expireFunc should be called.
-		return nil
-	}
-	tm.T.Stop() // ok if already fired, and it likely is, triggered by the AfterFunc
-	delete(userMsgs, msgID)
-	if len(userMsgs) == 0 {
-		delete(auth.pendingMessages, user) // ok if user not found
-	}
-	return tm.pendingMessage
-}
-
-func (auth *AuthManager) send(user account.AccountID, msg *msgjson.Message, connectTimeout time.Duration, expire func()) error {
-	stamp := time.Now().UTC()
-	client := auth.user(user)
-	if client == nil {
-		if connectTimeout > 0 {
-			auth.addUserConnectMsg(&pendingMessage{
-				user:        user,
-				msg:         msg,
-				lastAttempt: stamp,
-				expireFunc:  expire,
-			}, connectTimeout)
-			return nil
-		}
-		log.Errorf("Send requested for unknown user %v", user)
-		return dex.NewError(ErrUserNotConnected, user.String())
-	}
-
-	err := client.conn.Send(msg)
-	if err != nil {
-		log.Debugf("error sending on link: %v", err)
-		// Remove client asssuming connection is broken, requiring reconnect.
-		auth.removeClient(client)
-		if connectTimeout > 0 {
-			auth.addUserConnectMsg(&pendingMessage{
-				user:        user,
-				msg:         msg,
-				lastAttempt: stamp,
-				expireFunc:  expire,
-			}, connectTimeout)
-			return nil
-		}
-	}
-	return err
-}
-
 // Send sends the non-Request-type msgjson.Message to the client identified by
 // the specified account ID. The message is sent asynchronously, so an error is
 // only generated if the specified user is not connected and authorized, if the
@@ -490,138 +354,32 @@ func (auth *AuthManager) send(user account.AccountID, msg *msgjson.Message, conn
 // dex/ws.(*WSLink).Send for more information. Use SendWhenConnected to
 // continually retry until a timeout is reached.
 func (auth *AuthManager) Send(user account.AccountID, msg *msgjson.Message) error {
-	return auth.send(user, msg, 0, func() {})
-}
+	client := auth.user(user)
+	if client == nil {
+		log.Errorf("Send requested for unknown user %v", user)
+		return dex.NewError(ErrUserNotConnected, user.String())
+	}
 
-// SendWhenConnected is like Send but if they are not already connected or if
-// sending the message fails, it will create a pending message that
-// handleConnect will attempt if the user does reconnect. The pending message
-// remains valid for connectTimeout. There is no error return since send
-// failures cause the client to be removed (assumed disconnected) and the
-// message to be queued for send on subsequent connect. Error handling should be
-// dealt with in the expire function as that is triggered after connectTimeout
-// if the user has not connected. Each connection reduces connectTimeout.
-func (auth *AuthManager) SendWhenConnected(user account.AccountID, msg *msgjson.Message, connectTimeout time.Duration, expire func()) {
-	// Error is nil when connectTimeout > 0.
-	_ = auth.send(user, msg, connectTimeout, expire)
+	err := client.conn.Send(msg)
+	if err != nil {
+		log.Debugf("Failed to send on link: %v", err)
+		// Remove client asssuming connection is broken, requiring reconnect.
+		auth.removeClient(client)
+	}
+	return err
 }
 
 // Requests
-
-type pendingRequest struct {
-	user            account.AccountID
-	req             *msgjson.Message
-	handlerFunc     func(link comms.Link, resp *msgjson.Message)
-	responseTimeout time.Duration
-	lastAttempt     time.Time
-	expireFunc      func()
-}
-
-type timedRequest struct {
-	*pendingRequest
-	T *time.Timer
-}
-
-// Register a pending request that will expire after connectTimeout. If the user
-// connects before that time, the request will be sent to the user.
-func (auth *AuthManager) addUserConnectReq(data *pendingRequest, connectTimeout time.Duration) {
-	auth.pendingRequestsMtx.Lock()
-	defer auth.pendingRequestsMtx.Unlock()
-
-	user, reqID := data.user, data.req.ID
-
-	tr := &timedRequest{
-		pendingRequest: data,
-		T: time.AfterFunc(connectTimeout, func() {
-			if auth.rmUserConnectReq(user, reqID) != nil {
-				// Only run the expireFunc if the timeout removed it vs. a
-				// connect (addClient call) that didn't stop the timer in time.
-				data.expireFunc() // e.g. remove live ackers, penalize, etc.
-			}
-		}),
-	}
-
-	userReqs := auth.pendingRequests[user]
-	if userReqs == nil {
-		auth.pendingRequests[user] = map[uint64]*timedRequest{
-			reqID: tr,
-		}
-		return
-	}
-	userReqs[reqID] = tr
-}
-
-// Retrieve and unregister all connection requests for a given user. This should
-// be used to retrieve pending requests on client connection.
-func (auth *AuthManager) rmUserConnectReqs(user account.AccountID) []*pendingRequest {
-	auth.pendingRequestsMtx.Lock()
-	defer auth.pendingRequestsMtx.Unlock()
-	userReqs := auth.pendingRequests[user]
-	if userReqs == nil {
-		return nil
-	}
-	reqs := make([]*pendingRequest, 0, len(userReqs))
-	for _, tr := range userReqs {
-		reqs = append(reqs, tr.pendingRequest)
-		// Stop the timer. It's ok if already fired since this timedRequest
-		// would have been removed if we lost the race with AfterFunc's call to
-		// rmUserConnectReq. Since we're here, we beat the timer.
-		tr.T.Stop()
-	}
-	delete(auth.pendingRequests, user)
-	// Request IDs are server generated and monotonically increasing, so this
-	// puts the requests in order from oldest to newest.
-	sort.Slice(reqs, func(i, j int) bool {
-		return reqs[i].req.ID < reqs[j].req.ID
-	})
-	return reqs
-}
-
-// Retrieve and unregister a pending request by user and request ID. This is
-// likely to only be used by the connect timeout timer of the timedRequest
-// created by addUserConnectReq.
-func (auth *AuthManager) rmUserConnectReq(user account.AccountID, reqID uint64) *pendingRequest {
-	auth.pendingRequestsMtx.Lock()
-	defer auth.pendingRequestsMtx.Unlock()
-	userReqs := auth.pendingRequests[user]
-	tr := userReqs[reqID] // ok if user not found, nil map lookup is defined
-	if tr == nil {
-		// The timer probably fired while requests were being retrieved on
-		// connect, and expire lost the race. This return value indicates to the
-		// AfterFunc closure if the expireFunc should be called.
-		return nil
-	}
-	tr.T.Stop() // ok if already fired, and it likely is, triggered by the AfterFunc
-	delete(userReqs, reqID)
-	if len(userReqs) == 0 {
-		delete(auth.pendingRequests, user) // ok if user not found
-	}
-	return tr.pendingRequest
-}
 
 // DefaultRequestTimeout is the default timeout for requests to wait for
 // responses from connected users after the request is successfully sent.
 const DefaultRequestTimeout = 30 * time.Second
 
 func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
-	expireTimeout, connectTimeout time.Duration, expire func()) error {
-	addPending := func() {
-		auth.addUserConnectReq(&pendingRequest{
-			user:            user,
-			req:             msg,
-			handlerFunc:     f,
-			responseTimeout: expireTimeout,
-			lastAttempt:     time.Now().UTC(),
-			expireFunc:      expire,
-		}, connectTimeout)
-	}
+	expireTimeout time.Duration, expire func()) error {
 
 	client := auth.user(user)
 	if client == nil {
-		if connectTimeout > 0 {
-			addPending()
-			return nil
-		}
 		log.Errorf("Send requested for unknown user %v", user)
 		return dex.NewError(ErrUserNotConnected, user.String())
 	}
@@ -638,10 +396,6 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 		client.respHandler(msg.ID) // drop the removed handler
 		// Remove client asssuming connection is broken, requiring reconnect.
 		auth.removeClient(client)
-		if connectTimeout > 0 {
-			addPending()
-			return nil
-		}
 	}
 	return err
 }
@@ -650,25 +404,7 @@ func (auth *AuthManager) request(user account.AccountID, msg *msgjson.Message, f
 // the specified account ID. The user must respond within DefaultRequestTimeout
 // of the request. Late responses are not handled.
 func (auth *AuthManager) Request(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message)) error {
-	return auth.request(user, msg, f, DefaultRequestTimeout, 0, func() {})
-}
-
-// RequestWhenConnected is like RequestWithTimeout but if they are not already
-// connected or if sending the requests fails, it will create a pending request
-// that handleConnect will attempt if the user does reconnect. The pending
-// request remains valid for connectTimeout. There is no error return since send
-// failures cause the client to be removed (assumed disconnected) and the
-// request to be queued for send on subsequent connect. Error handling should be
-// dealt with in the expire function as that is triggered after connectTimeout
-// if the user has not connected or after expireTimeout if the request is
-// successfully sent but not met with a response. Each attempt gets the full
-// expireTimeout for a response. On the other hand, the user should not get the
-// full connectTimeout each time the user connects and a request is resent (see
-// handleConnect).
-func (auth *AuthManager) RequestWhenConnected(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
-	expireTimeout, connectTimeout time.Duration, expire func()) {
-	// Error is nil when connectTimeout > 0.
-	_ = auth.request(user, msg, f, expireTimeout, connectTimeout, expire)
+	return auth.request(user, msg, f, DefaultRequestTimeout, func() {})
 }
 
 // RequestWithTimeout sends the Request-type msgjson.Message to the client
@@ -679,17 +415,16 @@ func (auth *AuthManager) RequestWhenConnected(user account.AccountID, msg *msgjs
 // (see handleResponse).
 func (auth *AuthManager) RequestWithTimeout(user account.AccountID, msg *msgjson.Message, f func(comms.Link, *msgjson.Message),
 	expireTimeout time.Duration, expire func()) error {
-	return auth.request(user, msg, f, expireTimeout, 0, expire)
+	return auth.request(user, msg, f, expireTimeout, expire)
 }
 
 // Notify sends a message to a client. The message should be a notification.
 // See msgjson.NewNotification. The notification is abandoned upon timeout
 // being reached.
-func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message, timeout time.Duration) {
-	missedFn := func() {
-		log.Warnf("user %s missed notification: \n%v", acctID, msg)
+func (auth *AuthManager) Notify(acctID account.AccountID, msg *msgjson.Message) {
+	if err := auth.Send(acctID, msg); err != nil {
+		log.Infof("Failed to send notification to user %s: %v", acctID, err)
 	}
-	auth.SendWhenConnected(acctID, msg, timeout, missedFn)
 }
 
 // Penalize signals that a user has broken a rule of community conduct, and that
@@ -755,13 +490,11 @@ func (auth *AuthManager) conn(conn comms.Link) *clientInfo {
 }
 
 // addClient adds the client to the users and conns maps.
-func (auth *AuthManager) addClient(client *clientInfo) ([]*pendingRequest, []*pendingMessage) {
+func (auth *AuthManager) addClient(client *clientInfo) {
 	auth.connMtx.Lock()
 	defer auth.connMtx.Unlock()
 	auth.users[client.acct.ID] = client
 	auth.conns[client.conn.ID()] = client
-
-	return auth.rmUserConnectReqs(client.acct.ID), auth.rmUserConnectMsgs(client.acct.ID)
 }
 
 // removeClient removes the client from the users and conns map.
@@ -824,6 +557,51 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Code:    msgjson.SignatureError,
 			Message: "signature error: " + err.Error(),
 		}
+	}
+
+	// Check to see if there is already an existing client for this account.
+	respHandlers := make(map[uint64]*respHandler)
+	client := auth.user(acctInfo.ID)
+	if client != nil {
+		// Disconnect and remove known connections. We are creating a new one,
+		// but persist the response handlers.
+		auth.connMtx.Lock() // hold clientInfo maps during conn.Disconnect and respHandlers access
+		delete(auth.users, client.acct.ID)
+		delete(auth.conns, client.conn.ID())
+		client.mtx.Lock()
+		client.conn.Disconnect()
+		respHandlers = client.respHandlers
+		client.mtx.Unlock()
+		auth.connMtx.Unlock()
+	}
+
+	// Retrieve the user's N latest finished (completed or canceled orders)
+	// and store them in a latestOrders.
+	latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, cancelThreshWindow)
+	if err != nil {
+		log.Errorf("unable to retrieve user's executed cancels and completed orders: %v", err)
+		return &msgjson.Error{
+			Code:    msgjson.RPCInternalError,
+			Message: "DB error",
+		}
+	}
+	client = &clientInfo{
+		acct:         acctInfo,
+		conn:         conn,
+		respHandlers: respHandlers,
+		recentOrders: latestFinished,
+		suspended:    !open,
+	}
+	cancels, completions, rate, penalize := auth.checkCancelRate(client)
+	if penalize && open && !auth.anarchy {
+		// Account should already be closed, but perhaps the server crashed
+		// or the account was not penalized before shutdown.
+		client.suspended = true
+		// The account might now be closed if the cancellation rate was
+		// exceeded while the server was running in anarchy mode.
+		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRate)
+		log.Debugf("Suspended account %v (cancellation rate = %.2f%%, %d cancels : %d successes) connected.",
+			acctInfo.ID, cancels, completions, 100*rate)
 	}
 
 	// Get the list of active matches for this user.
@@ -901,116 +679,14 @@ func (auth *AuthManager) handleConnect(conn comms.Link, msg *msgjson.Message) *m
 			Message: "internal error",
 		}
 	}
+
 	err = conn.Send(respMsg)
 	if err != nil {
 		log.Error("error sending connect response: " + err.Error())
 		return nil
 	}
 
-	// Check to see if there is already an existing client for this account.
-	respHandlers := make(map[uint64]*respHandler)
-	client := auth.user(acctInfo.ID)
-	if client != nil {
-		// Disconnect and remove known connections. We are creating a new one,
-		// but persist the response handlers.
-		auth.connMtx.Lock() // hold clientInfo maps during conn.Disconnect and respHandlers access
-		delete(auth.users, client.acct.ID)
-		delete(auth.conns, client.conn.ID())
-		client.mtx.Lock()
-		client.conn.Disconnect()
-		respHandlers = client.respHandlers
-		client.mtx.Unlock()
-		auth.connMtx.Unlock()
-	}
-
-	// Retrieve the user's N latest finished (completed or canceled orders)
-	// and store them in a latestOrders.
-	latestFinished, err := auth.loadRecentFinishedOrders(acctInfo.ID, cancelThreshWindow)
-	if err != nil {
-		log.Errorf("unable to retrieve user's executed cancels and completed orders: %v", err)
-		return &msgjson.Error{
-			Code:    msgjson.RPCInternalError,
-			Message: "DB error",
-		}
-	}
-	client = &clientInfo{
-		acct:         acctInfo,
-		conn:         conn,
-		respHandlers: respHandlers,
-		recentOrders: latestFinished,
-		suspended:    !open,
-	}
-	cancels, completions, rate, penalize := auth.checkCancelRate(client)
-	if penalize && open && !auth.anarchy {
-		// Account should already be closed, but perhaps the server crashed
-		// or the account was not penalized before shutdown.
-		client.suspended = true
-		// The account might now be closed if the cancellation rate was
-		// exceeded while the server was running in anarchy mode.
-		auth.storage.CloseAccount(acctInfo.ID, account.CancellationRate)
-		log.Debugf("Suspended account %v (cancellation rate = %.2f%%, %d cancels : %d successes) connected.",
-			acctInfo.ID, cancels, completions, 100*rate)
-	}
-
-	pendingReqs, pendingMsgs := auth.addClient(client)
-	log.Debugf("User %s connected from %s with %d pending requests and %d pending responses/notifications, cancel rate = %d:%d (%.2f%%)",
-		acctInfo.ID, conn.IP(), len(pendingReqs), len(pendingMsgs), cancels, completions, 100*rate)
-
-	// Send pending requests for this user.
-	for _, pr := range pendingReqs {
-		// Certain match-related messages should only be sent if the match is
-		// still active.
-		mid, err := pr.req.ExtractMatchID()
-		if err != nil {
-			log.Errorf("Failed to read matchid field from '%s' payload: %v", pr.req.Route, err)
-			// just send it
-		} else if mid != nil && pr.req.Route != msgjson.RevokeMatchRoute {
-			// Always send revoke_match, but only send others with matchid set
-			// if the match is still active.
-			var matchID order.MatchID
-			copy(matchID[:], mid)
-			if !activeMatchIDs[matchID] {
-				log.Debugf("Not sending pending '%s' request to %v for inactive match %v.",
-					pr.req.Route, user, matchID)
-				continue // don't send this request
-			}
-		}
-
-		log.Debugf("Sending pending '%s' request to user %v: %v", pr.req.Route, pr.user, pr.req.String())
-		// Use the AuthManager method to send so that failed requests, which
-		// result in client removal, will go back into the client's pending
-		// requests. Subsequent requests that follow removal also fail and go
-		// back into the pending requests.
-		connectTimeout := DefaultConnectTimeout
-		if pr.req.Route == msgjson.RevokeMatchRoute {
-			connectTimeout = 4 * time.Hour // a little extra time for revoke_match to be courteous
-		}
-		// Decrement the connect timeout for repeated attempts.
-		if !pr.lastAttempt.IsZero() {
-			connectTimeout -= time.Since(pr.lastAttempt)
-		} else {
-			log.Warn("last connect attempt Time was not set, using default timeout") // should not happen
-		}
-		auth.RequestWhenConnected(acctInfo.ID, pr.req, pr.handlerFunc,
-			pr.responseTimeout, connectTimeout, pr.expireFunc)
-		// consider not sending *match* ack requests for suspended clients.
-	}
-
-	// Send pending messages for this user.
-	for _, pr := range pendingMsgs {
-		// The only match-related response is Acknowledgement (to an init or
-		// redeem request from client), which are harmless for inactive matches.
-		log.Debugf("Sending pending %s to user %v: %v", pr.msg.Type, pr.user, pr.msg.String())
-		connectTimeout := DefaultConnectTimeout
-		// Decrement the connect timeout for repeated attempts.
-		if !pr.lastAttempt.IsZero() {
-			connectTimeout -= time.Since(pr.lastAttempt)
-		} else {
-			log.Warn("last connect attempt Time was not set, using default timeout") // should not happen
-		}
-		auth.SendWhenConnected(acctInfo.ID, pr.msg, connectTimeout, pr.expireFunc)
-	}
-
+	auth.addClient(client)
 	return nil
 }
 

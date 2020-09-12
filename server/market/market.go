@@ -1045,11 +1045,10 @@ func (m *Market) processOrder(rec *orderRecord, epoch *EpochQueue, notifyChan ch
 	// Inform the client that the order has been received, stamped, signed, and
 	// inserted into the current epoch queue.
 	user := ord.User()
-	m.auth.SendWhenConnected(user, respMsg, DefaultConnectTimeout, func() {
-		log.Infof("Failed to send signed new order response to disconnected user %v, order %v",
+	if err := m.auth.Send(user, respMsg); err != nil {
+		log.Infof("Failed to send signed new order response to user %v, order %v",
 			user, oid)
-		// The user may not respond to preimage requests...
-	})
+	}
 
 	// Send epoch update to epoch queue subscribers.
 	notifyChan <- &updateSignal{
@@ -1078,10 +1077,10 @@ func (m *Market) respondError(id uint64, user account.AccountID, code int, errMs
 	if err != nil {
 		log.Errorf("error creating error response with message '%s': %v", msg, err)
 	}
-	m.auth.SendWhenConnected(user, msg, DefaultConnectTimeout, func() {
-		log.Infof("Unable to send error response (code %d) to disconnected user %v: %q",
-			code, user, errMsg)
-	})
+	if err := m.auth.Send(user, msg); err != nil {
+		log.Infof("Failed to send %s error response (code %d) to user %v: %q",
+			msg.Route, code, user, errMsg)
+	}
 }
 
 // preimage request-response handling data
@@ -1590,7 +1589,9 @@ func (m *Market) processReadyEpoch(epoch *readyEpoch, notifyChan chan<- *updateS
 			log.Errorf("Failed to encode 'nomatch' notification.")
 			continue
 		}
-		m.auth.Send(ord.Order.User(), msg)
+		if err := m.auth.Send(ord.Order.User(), msg); err != nil {
+			log.Infof("Failed to send nomatch to user %s: %v", ord.Order.User(), err)
+		}
 	}
 
 	// Initiate the swaps.

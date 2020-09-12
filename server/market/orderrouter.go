@@ -19,7 +19,6 @@ import (
 	"decred.org/dcrdex/dex/wait"
 	"decred.org/dcrdex/server/account"
 	"decred.org/dcrdex/server/asset"
-	"decred.org/dcrdex/server/auth"
 	"decred.org/dcrdex/server/comms"
 	"decred.org/dcrdex/server/matcher"
 )
@@ -32,7 +31,6 @@ type AuthManager interface {
 	Suspended(user account.AccountID) (found, suspended bool)
 	Sign(...msgjson.Signable) error
 	Send(account.AccountID, *msgjson.Message) error
-	SendWhenConnected(account.AccountID, *msgjson.Message, time.Duration, func())
 	Request(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message)) error
 	RequestWithTimeout(account.AccountID, *msgjson.Message, func(comms.Link, *msgjson.Message), time.Duration, func()) error
 	Penalize(user account.AccountID, rule account.Rule) error
@@ -155,10 +153,10 @@ func (r *OrderRouter) respondError(reqID uint64, user account.AccountID, msgErr 
 		log.Errorf("Failed to create error response with message '%s': %v", msg, err)
 		return // this should not be possible, but don't pass nil msg to SendWhenConnected
 	}
-	r.auth.SendWhenConnected(user, msg, auth.DefaultConnectTimeout, func() {
-		log.Infof("Timeout waiting to send error response to disconnected user %v: %q",
-			user, msgErr)
-	})
+	if err := r.auth.Send(user, msg); err != nil {
+		log.Infof("Failed to send %s error response to disconnected user %v: %q",
+			msg.Route, user, msgErr)
+	}
 }
 
 // handleLimit is the handler for the 'limit' route. This route accepts a

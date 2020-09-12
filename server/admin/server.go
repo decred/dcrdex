@@ -47,7 +47,7 @@ var (
 type SvrCore interface {
 	Accounts() (accts []*db.Account, err error)
 	AccountInfo(acctID account.AccountID) (*db.Account, error)
-	Notify(acctID account.AccountID, msg *msgjson.Message, timeout time.Duration)
+	Notify(acctID account.AccountID, msg *msgjson.Message)
 	NotifyAll(msg *msgjson.Message)
 	ConfigMsg() json.RawMessage
 	MarketRunning(mktName string) (found, running bool)

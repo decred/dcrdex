@@ -261,5 +261,7 @@ func (auth *AuthManager) coinNotFound(acctID account.AccountID, msgID uint64, co
 	if err != nil {
 		log.Error("NewResponse error in (Swapper).loop: %v", err)
 	}
-	auth.Send(acctID, resp)
+	if err := auth.Send(acctID, resp); err != nil {
+		log.Infof("Failed to send coin-not-found error to user %s: %v", acctID, err)
+	}
 }
