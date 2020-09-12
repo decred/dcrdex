@@ -2153,8 +2153,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	result := new(msgjson.OrderResult)
 	err = dc.signAndRequest(msgOrder, route, result, DefaultResponseTimeout)
 	if err != nil {
-		// Do NOT unlock the coins because the request may have actually reached
-		// the server.
+		unlockCoins()
 		return nil, 0, fmt.Errorf("new order request with DEX server %v failed: %w", dc.acct.host, err)
 	}
 
@@ -2189,7 +2188,7 @@ func (c *Core) prepareTrackedTrade(dc *dexConnection, form *TradeForm, crypter e
 	}
 	err = c.db.UpdateOrder(dbOrder)
 	if err != nil {
-		// Do NOT unlock the coins, they're already locked by server.
+		unlockCoins()
 		logAbandon(fmt.Sprintf("failed to store order in database: %v", err))
 		return nil, 0, fmt.Errorf("Order abandoned due to database error: %w", err)
 	}
