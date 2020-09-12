@@ -3716,11 +3716,14 @@ func TestAssetBalance(t *testing.T) {
 		Locked:    2e8,
 	}
 	tWallet.bal = bal
-	balances, err := tCore.AssetBalance(tDCR.ID)
+	walletBal, err := tCore.AssetBalance(tDCR.ID)
 	if err != nil {
 		t.Fatalf("error retreiving asset balance: %v", err)
 	}
-	dbtest.MustCompareAssetBalances(t, "zero-conf", bal, &balances.Balance)
+	dbtest.MustCompareAssetBalances(t, "zero-conf", bal, &walletBal.Balance.Balance)
+	if walletBal.ContractLocked != 0 {
+		t.Fatalf("contractlocked balance %d > expected value 0", walletBal.ContractLocked)
+	}
 }
 
 func TestAssetCounter(t *testing.T) {

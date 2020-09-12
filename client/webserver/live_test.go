@@ -133,7 +133,7 @@ func mkMrkt(base, quote string) *core.Market {
 	}
 }
 
-func mkSupportedAsset(symbol string, state *tWalletState, bal *db.Balance) *core.SupportedAsset {
+func mkSupportedAsset(symbol string, state *tWalletState, bal *core.WalletBalance) *core.SupportedAsset {
 	assetID, _ := dex.BipSymbolID(symbol)
 	winfo := winfos[assetID]
 	var wallet *core.WalletState
@@ -280,7 +280,7 @@ type TCore struct {
 	inited      bool
 	mtx         sync.RWMutex
 	wallets     map[uint32]*tWalletState
-	balances    map[uint32]*db.Balance
+	balances    map[uint32]*core.WalletBalance
 	dexAddr     string
 	marketID    string
 	base        uint32
@@ -299,7 +299,7 @@ type TCore struct {
 func newTCore() *TCore {
 	return &TCore{
 		wallets: make(map[uint32]*tWalletState),
-		balances: map[uint32]*db.Balance{
+		balances: map[uint32]*core.WalletBalance{
 			0:  randomBalance(),
 			2:  randomBalance(),
 			42: randomBalance(),
@@ -463,18 +463,21 @@ func (c *TCore) Unsync(dex string, base, quote uint32) {
 	}
 }
 
-func randomBalance() *db.Balance {
+func randomBalance() *core.WalletBalance {
 	randVal := func() uint64 {
 		return uint64(rand.Float64() * math.Pow10(rand.Intn(6)+6))
 	}
 
-	return &db.Balance{
-		Balance: asset.Balance{
-			Available: randVal(),
-			Immature:  randVal(),
-			Locked:    randVal(),
+	return &core.WalletBalance{
+		Balance: &db.Balance{
+			Balance: asset.Balance{
+				Available: randVal(),
+				Immature:  randVal(),
+				Locked:    randVal(),
+			},
+			Stamp: time.Now().Add(-time.Duration(int64(2 * float64(time.Hour) * rand.Float64()))),
 		},
-		Stamp: time.Now().Add(-time.Duration(int64(2 * float64(time.Hour) * rand.Float64()))),
+		ContractLocked: randVal(),
 	}
 }
 
@@ -486,7 +489,7 @@ func randomBalanceNote(assetID uint32) *core.BalanceNote {
 	}
 }
 
-func (c *TCore) AssetBalance(assetID uint32) (*db.Balance, error) {
+func (c *TCore) AssetBalance(assetID uint32) (*core.WalletBalance, error) {
 	balNote := randomBalanceNote(assetID)
 	balNote.Balance.Stamp = time.Now()
 	c.noteFeed <- balNote

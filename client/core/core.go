@@ -881,31 +881,40 @@ func (c *Core) connectAndUnlock(crypter encrypt.Crypter, wallet *xcWallet) error
 }
 
 // walletBalances retrieves balances for the wallet.
-func (c *Core) walletBalances(wallet *xcWallet) (*db.Balance, error) {
+func (c *Core) walletBalances(wallet *xcWallet) (*WalletBalance, error) {
 	c.connMtx.RLock()
 	defer c.connMtx.RUnlock()
 	bal, err := wallet.Balance()
 	if err != nil {
 		return nil, err
 	}
-	dbBal := &db.Balance{
-		Balance: *bal,
-		Stamp:   time.Now(),
+	walletBal := &WalletBalance{
+		Balance: &db.Balance{
+			Balance: *bal,
+			Stamp:   time.Now(),
+		},
+		ContractLocked: c.unspentContractAmounts(wallet.AssetID),
 	}
-	for _, dc := range c.conns {
-		dc.tradeMtx.RLock()
-		for _, tracker := range dc.trades {
-			dbBal.ContractLocked += tracker.unspentContractAmounts(wallet.AssetID)
-		}
-		dc.tradeMtx.RUnlock()
-	}
-	wallet.setBalance(dbBal)
-	err = c.db.UpdateBalance(wallet.dbID, dbBal)
+	wallet.setBalance(walletBal)
+	err = c.db.UpdateBalance(wallet.dbID, walletBal.Balance)
 	if err != nil {
 		return nil, fmt.Errorf("error updating %s balance in database: %v", unbip(wallet.AssetID), err)
 	}
-	c.notify(newBalanceNote(wallet.AssetID, dbBal))
-	return dbBal, nil
+	c.notify(newBalanceNote(wallet.AssetID, walletBal))
+	return walletBal, nil
+}
+
+// unspentContractAmounts returns the total amount locked in unspent swaps.
+// connMtx lock MUST be held for reads.
+func (c *Core) unspentContractAmounts(assetID uint32) (amount uint64) {
+	for _, dc := range c.conns {
+		dc.tradeMtx.RLock()
+		for _, tracker := range dc.trades {
+			amount += tracker.unspentContractAmounts(assetID)
+		}
+		dc.tradeMtx.RUnlock()
+	}
+	return amount
 }
 
 // updateBalances updates the balance for every key in the counter map.
@@ -1102,9 +1111,14 @@ func (c *Core) CreateWallet(appPW, walletPW []byte, form *WalletForm) error {
 // loadWallet uses the data from the database to construct a new exchange
 // wallet. The returned wallet is running but not connected.
 func (c *Core) loadWallet(dbWallet *db.Wallet) (*xcWallet, error) {
+	c.connMtx.RLock() // required to calculate contractlocked amount
+	defer c.connMtx.RUnlock()
 	wallet := &xcWallet{
 		AssetID: dbWallet.AssetID,
-		balance: dbWallet.Balance,
+		balance: &WalletBalance{
+			Balance:        dbWallet.Balance,
+			ContractLocked: c.unspentContractAmounts(dbWallet.AssetID),
+		},
 		encPW:   dbWallet.EncryptedPW,
 		address: dbWallet.Address,
 		dbID:    dbWallet.ID(),
@@ -1247,9 +1261,11 @@ func (c *Core) ReconfigureWallet(appPW []byte, assetID uint32, cfg map[string]st
 	dbWallet := &db.Wallet{
 		AssetID:     oldWallet.AssetID,
 		Settings:    cfg,
-		Balance:     oldWallet.balance,
 		EncryptedPW: oldWallet.encPW,
 		Address:     oldWallet.address,
+	}
+	if oldWallet.balance != nil {
+		dbWallet.Balance = oldWallet.balance.Balance
 	}
 	// Reload the wallet with the new settings.
 	wallet, err := c.loadWallet(dbWallet)
@@ -2404,7 +2420,7 @@ func (c *Core) authDEX(dc *dexConnection) error {
 }
 
 // AssetBalance retrieves the current wallet balance.
-func (c *Core) AssetBalance(assetID uint32) (*db.Balance, error) {
+func (c *Core) AssetBalance(assetID uint32) (*WalletBalance, error) {
 	wallet, err := c.connectedWallet(assetID)
 	if err != nil {
 		return nil, fmt.Errorf("%d -> %s wallet error: %v", assetID, unbip(assetID), err)

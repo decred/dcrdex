@@ -22,7 +22,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/client/websocket"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/msgjson"
@@ -54,7 +53,7 @@ var (
 // clientCore is satisfied by core.Core.
 type clientCore interface {
 	websocket.Core
-	AssetBalance(assetID uint32) (*db.Balance, error)
+	AssetBalance(assetID uint32) (*core.WalletBalance, error)
 	Book(host string, base, quote uint32) (orderBook *core.OrderBook, err error)
 	Cancel(appPass []byte, orderID string) error
 	CloseWallet(assetID uint32) error

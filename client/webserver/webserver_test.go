@@ -17,7 +17,6 @@ import (
 
 	"decred.org/dcrdex/client/asset"
 	"decred.org/dcrdex/client/core"
-	"decred.org/dcrdex/client/db"
 	"decred.org/dcrdex/dex"
 	"decred.org/dcrdex/dex/encode"
 	"decred.org/dcrdex/dex/order"
@@ -85,7 +84,7 @@ func (c *TCore) SyncBook(dex string, base, quote uint32) (*core.OrderBook, *core
 func (c *TCore) Book(dex string, base, quote uint32) (*core.OrderBook, error) {
 	return &core.OrderBook{}, nil
 }
-func (c *TCore) AssetBalance(assetID uint32) (*db.Balance, error) { return nil, c.balanceErr }
+func (c *TCore) AssetBalance(assetID uint32) (*core.WalletBalance, error) { return nil, c.balanceErr }
 func (c *TCore) WalletState(assetID uint32) *core.WalletState {
 	if c.notHas {
 		return nil

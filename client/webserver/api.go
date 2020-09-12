@@ -251,8 +251,8 @@ func (s *WebServer) apiGetBalance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := &struct {
-		OK      bool        `json:"ok"`
-		Balance *db.Balance `json:"balance"`
+		OK      bool                `json:"ok"`
+		Balance *core.WalletBalance `json:"balance"`
 	}{
 		OK:      true,
 		Balance: bal,

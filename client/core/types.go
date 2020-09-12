@@ -68,15 +68,24 @@ type WalletForm struct {
 	Config  map[string]string
 }
 
+// WalletBalance is an exchange wallet's balance which includes contractlocked
+// amounts in addition to other balance details stored in db.
+type WalletBalance struct {
+	*db.Balance
+	// ContractLocked is the total amount of funds locked in unspent
+	// (i.e. unredeemed / unrefunded) swap contracts.
+	ContractLocked uint64 `json:"contractlocked"`
+}
+
 // WalletState is the current status of an exchange wallet.
 type WalletState struct {
-	Symbol  string      `json:"symbol"`
-	AssetID uint32      `json:"assetID"`
-	Open    bool        `json:"open"`
-	Running bool        `json:"running"`
-	Balance *db.Balance `json:"balance"`
-	Address string      `json:"address"`
-	Units   string      `json:"units"`
+	Symbol  string         `json:"symbol"`
+	AssetID uint32         `json:"assetID"`
+	Open    bool           `json:"open"`
+	Running bool           `json:"running"`
+	Balance *WalletBalance `json:"balance"`
+	Address string         `json:"address"`
+	Units   string         `json:"units"`
 }
 
 // User is information about the user's wallets and DEX accounts.
