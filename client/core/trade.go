@@ -632,12 +632,13 @@ func (t *trackedTrade) activeMatches() []*matchTracker {
 
 // unspentContractAmounts returns the total amount locked in unspent swaps.
 func (t *trackedTrade) unspentContractAmounts(assetID uint32) (amount uint64) {
-	if t.wallets.fromAsset.ID != assetID {
+	if t.fromAssetID != assetID {
 		// Only swaps sent from the specified assetID should count.
 		return 0
 	}
 	t.mtx.RLock()
 	defer t.mtx.RUnlock()
+	swapSentFromQuoteAsset := t.fromAssetID == t.Quote()
 	for _, match := range t.matches {
 		side, status := match.Match.Side, match.Match.Status
 		if status >= order.MakerRedeemed || len(match.MetaData.Proof.RefundCoin) != 0 {
@@ -649,7 +650,7 @@ func (t *trackedTrade) unspentContractAmounts(assetID uint32) (amount uint64) {
 		if (side == order.Maker && status >= order.MakerSwapCast) ||
 			(side == order.Taker && status == order.TakerSwapCast) {
 			swapAmount := match.Match.Quantity
-			if t.Trade().Sell {
+			if swapSentFromQuoteAsset {
 				swapAmount = calc.BaseToQuote(match.Match.Rate, match.Match.Quantity)
 			}
 			amount += swapAmount
