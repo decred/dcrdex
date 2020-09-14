@@ -468,40 +468,27 @@ func (dc *dexConnection) runMatches(tradeMatches map[order.OrderID]*serverMatche
 	}
 
 	// Process the trades concurrently.
-	errChan := make(chan error)
-	assetsUpdatedChan := make(chan assetMap)
+	type runMatchResult struct {
+		updatedAssets assetMap
+		err           error
+	}
+	resultChan := make(chan *runMatchResult)
 	for _, trade := range tradeMatches {
 		go func(trade *serverMatches) {
 			assetsUpdated, err := runMatch(trade)
-			assetsUpdatedChan <- assetsUpdated
-			errChan <- err
+			resultChan <- &runMatchResult{assetsUpdated, err}
 		}(trade)
 	}
 
-	var wg sync.WaitGroup
-
-	wg.Add(1)
 	errs := newErrorSet("runMatches - ")
-	go func() {
-		defer wg.Done()
-		for range tradeMatches {
-			if err := <-errChan; err != nil {
-				errs.addErr(err)
-			}
-		}
-	}()
-
-	wg.Add(1)
 	assetsUpdated := make(assetMap)
-	go func() {
-		defer wg.Done()
-		for range tradeMatches {
-			tradeUpdates := <-assetsUpdatedChan
-			assetsUpdated.merge(tradeUpdates)
+	for range tradeMatches {
+		result := <-resultChan
+		assetsUpdated.merge(result.updatedAssets) // assets might be updated even if an error occurs
+		if result.err != nil {
+			errs.addErr(result.err)
 		}
-	}()
-
-	wg.Wait()
+	}
 
 	// Update Market.Orders for each market.
 	dc.refreshMarkets()
