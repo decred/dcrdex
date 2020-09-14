@@ -69,10 +69,14 @@ type Wallet interface {
 	// confirmations for which to calculate maturity, and returns a list of
 	// corresponding *Balance.
 	Balance() (*Balance, error)
-	// Fund selects coins for use in an order. The coins will be locked, and will
-	// not be returned in subsequent calls to Fund or calculated in calls to
-	// Available, unless they are unlocked with ReturnCoins.
-	FundOrder(*Order) (Coins, []dex.Bytes, error)
+	// FundOrder selects coins for use in an order. The coins will be locked,
+	// and will not be returned in subsequent calls to FundOrder or calculated
+	// in calls to Available, unless they are unlocked with ReturnCoins. The
+	// returned []dex.Bytes contains the redeem scripts for the selected coins.
+	// Equal number of coins and redeemed scripts must be returned. A nil or
+	// empty dex.Bytes should be appended to the redeem scripts collection for
+	// coins with no redeem script.
+	FundOrder(*Order) (coins Coins, redeemScripts []dex.Bytes, err error)
 	// ReturnCoins unlocks coins. This would be necessary in the case of a
 	// canceled order.
 	ReturnCoins(Coins) error

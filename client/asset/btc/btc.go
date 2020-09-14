@@ -589,8 +589,13 @@ func (btc *ExchangeWallet) feeRateWithFallback() uint64 {
 	return feeRate
 }
 
-// FundOrder selects utxos (as asset.Coin) for use in an order. Any Coins
-// returned will be locked. Part of the asset.Wallet interface.
+// FundOrder selects coins for use in an order. The coins will be locked, and
+// will not be returned in subsequent calls to FundOrder or calculated in calls
+// to Available, unless they are unlocked with ReturnCoins.
+// The returned []dex.Bytes contains the redeem scripts for the selected coins.
+// Equal number of coins and redeemed scripts must be returned. A nil or empty
+// dex.Bytes should be appended to the redeem scripts collection for coins with
+// no redeem script.
 func (btc *ExchangeWallet) FundOrder(ord *asset.Order) (asset.Coins, []dex.Bytes, error) {
 	btc.log.Debugf("Attempting to fund order for %d based units of %s", ord.Value, btc.symbol)
 
@@ -664,8 +669,14 @@ out:
 	}
 
 	if btc.useSplitTx && !ord.Immediate {
-		coins, err = btc.split(ord.Value, ord.MaxSwapCount, spents, uint64(size), fundingCoins, ord.DEXConfig)
-		return coins, nil, err // no redeem script required for split tx output
+		splitCoins, split, err := btc.split(ord.Value, ord.MaxSwapCount, spents, uint64(size), fundingCoins, ord.DEXConfig)
+		if err != nil {
+			return nil, nil, err
+		} else if split {
+			return splitCoins, []dex.Bytes{nil}, nil // no redeem script required for split tx output
+		} else {
+			return splitCoins, redeemScripts, nil // splitCoins == coins
+		}
 	}
 
 	btc.log.Infof("Funding %d %s order with coins %v worth %d",
@@ -686,7 +697,8 @@ out:
 // split will send a split transaction and return the sized output. If the
 // split transaction is determined to be un-economical, it will not be sent,
 // there is no error, and the input coins will be returned unmodified, but an
-// info message will be logged.
+// info message will be logged. The returned bool indicates if a split tx was
+// sent (true) or if the original coins were returned unmodified (false).
 //
 // A split transaction nets additional network bytes consisting of
 // - overhead from 1 transaction
@@ -701,7 +713,7 @@ out:
 // order is canceled partially filled, and then the remainder resubmitted. We
 // would already have an output of just the right size, and that would be
 // recognized here.
-func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, inputsSize uint64, fundingCoins map[outPoint]*utxo, nfo *dex.Asset) (asset.Coins, error) {
+func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, inputsSize uint64, fundingCoins map[outPoint]*utxo, nfo *dex.Asset) (asset.Coins, bool, error) {
 	var err error
 	defer func() {
 		if err != nil {
@@ -733,13 +745,13 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 			"%d > %d", baggageFees, excess)
 		btc.log.Infof("Funding %d %s order with coins %v worth %d",
 			value, btc.walletInfo.Units, coins, coinSum)
-		return coins, nil
+		return coins, false, nil
 	}
 
 	// Use an internal address for the sized output.
 	addr, err := btc.wallet.ChangeAddress()
 	if err != nil {
-		return nil, fmt.Errorf("error creating split transaction address: %v", err)
+		return nil, false, fmt.Errorf("error creating split transaction address: %v", err)
 	}
 
 	reqFunds := calc.RequiredOrderFunds(value, dexbtc.RedeemP2WPKHInputSize, lots, nfo)
@@ -747,20 +759,20 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 	baseTx, _, _, err := btc.fundedTx(coins)
 	splitScript, err := txscript.PayToAddrScript(addr)
 	if err != nil {
-		return nil, fmt.Errorf("error creating split tx script: %v", err)
+		return nil, false, fmt.Errorf("error creating split tx script: %v", err)
 	}
 	baseTx.AddTxOut(wire.NewTxOut(int64(reqFunds), splitScript))
 
 	// Grab a change address.
 	changeAddr, err := btc.wallet.ChangeAddress()
 	if err != nil {
-		return nil, fmt.Errorf("error creating change address: %v", err)
+		return nil, false, fmt.Errorf("error creating change address: %v", err)
 	}
 
 	// Sign, add change, and send the transaction.
-	msgTx, _, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, btc.feeRateWithFallback())
+	msgTx, _, _, err := btc.sendWithReturn(baseTx, changeAddr, coinSum, reqFunds, btc.feeRateWithFallback())
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	txHash := msgTx.TxHash()
 
@@ -781,7 +793,7 @@ func (btc *ExchangeWallet) split(value uint64, lots uint64, outputs []*output, i
 
 	// Assign to coins so the deferred function will lock the output.
 	outputs = []*output{op}
-	return asset.Coins{op}, nil
+	return asset.Coins{op}, true, nil
 }
 
 // ReturnCoins unlocks coins. This would be used in the case of a canceled or
@@ -842,52 +854,52 @@ func (btc *ExchangeWallet) FundingCoins(ids []dex.Bytes) (asset.Coins, error) {
 			return nil, fmt.Errorf("error decoding txid from rpc server %s: %v", rpcOP.TxID, err)
 		}
 		pt := newOutPoint(txHash, rpcOP.Vout)
-		if notFound[pt] {
-			txOut, err := btc.node.GetTxOut(txHash, rpcOP.Vout, true)
-			if err != nil {
-				return nil, fmt.Errorf("gettxout error for locked outpoint %v: %v", pt.String(), err)
-			}
-			var address string
-			if len(txOut.ScriptPubKey.Addresses) > 0 {
-				address = txOut.ScriptPubKey.Addresses[0]
-			}
-			utxo := &utxo{
-				txHash:  txHash,
-				vout:    rpcOP.Vout,
-				address: address,
-				amount:  toSatoshi(txOut.Value),
-			}
-			coin := newOutput(btc.node, txHash, rpcOP.Vout, toSatoshi(txOut.Value))
-			coins = append(coins, coin)
-			btc.fundingCoins[pt] = utxo
-			delete(notFound, pt)
-			if len(notFound) == 0 {
-				return coins, nil
-			}
+		if !notFound[pt] {
+			continue
+		}
+		txOut, err := btc.node.GetTxOut(txHash, rpcOP.Vout, true)
+		if err != nil {
+			return nil, fmt.Errorf("gettxout error for locked outpoint %v: %v", pt.String(), err)
+		}
+		var address string
+		if len(txOut.ScriptPubKey.Addresses) > 0 {
+			address = txOut.ScriptPubKey.Addresses[0]
+		}
+		utxo := &utxo{
+			txHash:  txHash,
+			vout:    rpcOP.Vout,
+			address: address,
+			amount:  toSatoshi(txOut.Value),
+		}
+		coin := newOutput(btc.node, txHash, rpcOP.Vout, toSatoshi(txOut.Value))
+		coins = append(coins, coin)
+		btc.fundingCoins[pt] = utxo
+		delete(notFound, pt)
+		if len(notFound) == 0 {
+			return coins, nil
 		}
 	}
 
 	// Some funding coins still not found after checking locked outputs.
-	// Check wallet unspent outputs as last resort. Lock the coins if
-	// they're found.
+	// Check wallet unspent outputs as last resort. Lock the coins if found.
 	_, utxoMap, _, err := btc.spendableUTXOs(0)
 	if err != nil {
 		return nil, err
 	}
-	unlockedOutputs := make([]*output, 0, len(ids))
+	coinsToLock := make([]*output, 0, len(notFound))
 	for pt := range notFound {
 		utxo, found := utxoMap[pt]
 		if !found {
-			return nil, fmt.Errorf("funding coin %s not found", pt.String())
+			return nil, fmt.Errorf("funding coin not found: %s", pt.String())
 		}
 		btc.fundingCoins[pt] = utxo.utxo
 		coin := newOutput(btc.node, utxo.txHash, utxo.vout, utxo.amount)
 		coins = append(coins, coin)
-		unlockedOutputs = append(unlockedOutputs, coin)
+		coinsToLock = append(coinsToLock, coin)
 		delete(notFound, pt)
 	}
-	btc.log.Debugf("locking funding coins that were unlocked %v", unlockedOutputs)
-	err = btc.wallet.LockUnspent(false, unlockedOutputs)
+	btc.log.Debugf("Locking funding coins that were unlocked %v", coinsToLock)
+	err = btc.wallet.LockUnspent(false, coinsToLock)
 	if err != nil {
 		return nil, err
 	}
@@ -933,7 +945,7 @@ func (btc *ExchangeWallet) fundedTx(coins asset.Coins) (*wire.MsgTx, uint64, []o
 // are NOT manually unlocked because they're auto-unlocked when the transaction
 // is broadcasted.
 func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin, uint64, error) {
-	contractScripts := make([][]byte, 0, len(swaps.Contracts))
+	contracts := make([][]byte, 0, len(swaps.Contracts))
 	var totalOut uint64
 	// Start with an empty MsgTx.
 	baseTx, totalIn, pts, err := btc.fundedTx(swaps.Inputs)
@@ -956,7 +968,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("unable to create pubkey script for address %s: %v", contract.Address, err)
 		}
-		contractScripts = append(contractScripts, contractScript)
+		contracts = append(contracts, contractScript)
 		// Make the P2SH address and pubkey script.
 		scriptAddr, err := btcutil.NewAddressScriptHash(contractScript, btc.chainParams)
 		if err != nil {
@@ -987,7 +999,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	}
 
 	// Sign, add change, and send the transaction.
-	msgTx, change, _, fees, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate)
+	msgTx, change, fees, err := btc.sendWithReturn(baseTx, changeAddr, totalIn, totalOut, swaps.FeeRate)
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -998,7 +1010,7 @@ func (btc *ExchangeWallet) Swap(swaps *asset.Swaps) ([]asset.Receipt, asset.Coin
 	for i, contract := range swaps.Contracts {
 		receipts = append(receipts, &swapReceipt{
 			output:     newOutput(btc.node, &txHash, uint32(i), contract.Value),
-			contract:   contractScripts[i],
+			contract:   contracts[i],
 			expiration: time.Unix(int64(contract.LockTime), 0).UTC(),
 		})
 	}
@@ -1052,7 +1064,8 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 		}
 		// Extract the swap contract recipient and secret hash and check the secret
 		// hash against the hash of the provided secret.
-		_, receiver, _, secretHash, err := dexbtc.ExtractSwapDetails(cinfo.contract, btc.chainParams)
+		contract := r.Spends.Contract()
+		_, receiver, _, secretHash, err := dexbtc.ExtractSwapDetails(contract, btc.chainParams)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("error extracting swap addresses: %v", err)
 		}
@@ -1061,7 +1074,7 @@ func (btc *ExchangeWallet) Redeem(redemptions []*asset.Redemption) ([]dex.Bytes,
 			return nil, nil, 0, fmt.Errorf("secret hash mismatch")
 		}
 		addresses = append(addresses, receiver)
-		contracts = append(contracts, cinfo.contract)
+		contracts = append(contracts, contract)
 		txIn := wire.NewTxIn(cinfo.output.wireOutPoint(), []byte{}, nil)
 		// Enable locktime
 		// https://github.com/bitcoin/bips/blob/master/bip-0125.mediawiki#Spending_wallet_policy
@@ -1809,11 +1822,11 @@ func (btc *ExchangeWallet) convertCoin(coin asset.Coin) (*output, error) {
 // sendWithReturn sends the unsigned transaction with an added output (unless
 // dust) for the change.
 func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Address,
-	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *output, []byte, uint64, error) {
+	totalIn, totalOut, feeRate uint64) (*wire.MsgTx, *output, uint64, error) {
 	// Sign the transaction to get an initial size estimate and calculate whether
 	// a change output would be dust.
-	makeErr := func(s string, a ...interface{}) (*wire.MsgTx, *output, []byte, uint64, error) {
-		return nil, nil, nil, 0, fmt.Errorf(s, a...)
+	makeErr := func(s string, a ...interface{}) (*wire.MsgTx, *output, uint64, error) {
+		return nil, nil, 0, fmt.Errorf(s, a...)
 	}
 
 	sigCycles := 1
@@ -1913,10 +1926,8 @@ func (btc *ExchangeWallet) sendWithReturn(baseTx *wire.MsgTx, addr btcutil.Addre
 	var change *output
 	if changeAdded {
 		change = newOutput(btc.node, txHash, uint32(changeIdx), uint64(changeOutput.Value))
-	} else {
-		changeScript = nil
 	}
-	return msgTx, change, changeScript, fee, nil
+	return msgTx, change, fee, nil
 }
 
 // createSig creates and returns the serialized raw signature and compressed
