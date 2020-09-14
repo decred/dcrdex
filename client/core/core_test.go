@@ -222,6 +222,9 @@ func (conn *TWebsocket) Request(msg *msgjson.Message, f msgFunc) error {
 	return conn.RequestWithTimeout(msg, f, 0, func() {})
 }
 func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson.Message), _ time.Duration, _ func()) error {
+	if conn.reqErr != nil {
+		return conn.reqErr
+	}
 	conn.mtx.Lock()
 	defer conn.mtx.Unlock()
 	handlers := conn.handlers[msg.Route]
@@ -230,7 +233,7 @@ func (conn *TWebsocket) RequestWithTimeout(msg *msgjson.Message, f func(*msgjson
 		conn.handlers[msg.Route] = handlers[1:]
 		return handler(msg, f)
 	}
-	return conn.reqErr
+	return fmt.Errorf("no handler for route %s", msg.Route)
 }
 func (conn *TWebsocket) MessageSource() <-chan *msgjson.Message { return conn.msgs }
 func (conn *TWebsocket) IsDown() bool {
@@ -774,6 +777,28 @@ func (rig *testRig) queueConnect(rpcErr *msgjson.Error, matches []*msgjson.Match
 			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
 		} else {
 			resp, _ = msgjson.NewResponse(msg.ID, result, nil)
+		}
+		f(resp)
+		return nil
+	})
+}
+
+func (rig *testRig) queueCancel(rpcErr *msgjson.Error) {
+	rig.ws.queueResponse(msgjson.CancelRoute, func(msg *msgjson.Message, f msgFunc) error {
+		var resp *msgjson.Message
+		if rpcErr == nil {
+			// Need to stamp and sign the message with the server's key.
+			msgOrder := new(msgjson.CancelOrder)
+			err := msg.Unmarshal(msgOrder)
+			if err != nil {
+				rpcErr = msgjson.NewError(msgjson.RPCParseError, "unable to unmarshal request")
+			} else {
+				co := convertMsgCancelOrder(msgOrder)
+				resp = orderResponse(msg.ID, msgOrder, co, false, false, false)
+			}
+		}
+		if rpcErr != nil {
+			resp, _ = msgjson.NewResponse(msg.ID, nil, rpcErr)
 		}
 		f(resp)
 		return nil
@@ -2097,20 +2122,7 @@ func TestCancel(t *testing.T) {
 		rig.db, rig.queue, nil, nil, rig.core.notify)
 	dc.trades[oid] = tracker
 
-	handleCancel := func(msg *msgjson.Message, f msgFunc) error {
-		t.Helper()
-		// Need to stamp and sign the message with the server's key.
-		msgOrder := new(msgjson.CancelOrder)
-		err := msg.Unmarshal(msgOrder)
-		if err != nil {
-			t.Fatalf("unmarshal error: %v", err)
-		}
-		co := convertMsgCancelOrder(msgOrder)
-		f(orderResponse(msg.ID, msgOrder, co, false, false, false))
-		return nil
-	}
-
-	rig.ws.queueResponse(msgjson.CancelRoute, handleCancel)
+	rig.queueCancel(nil)
 	err := rig.core.Cancel(tPW, oid[:])
 	if err != nil {
 		t.Fatalf("cancel error: %v", err)
@@ -3154,7 +3166,7 @@ func TestResolveActiveTrades(t *testing.T) {
 	}
 }
 
-func Test_compareServerMatches(t *testing.T) {
+func TestCompareServerMatches(t *testing.T) {
 	rig := newTestRig()
 	preImg := newPreimage()
 	dc := rig.dc
@@ -3280,18 +3292,97 @@ func Test_compareServerMatches(t *testing.T) {
 		t.Fatalf("exceptions did not include trade %v", oidMissing)
 	}
 	if exc.trade.ID() != oidMissing {
-		t.Errorf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
+		t.Fatalf("wrong trade ID, got %v, want %v", exc.trade.ID(), oidMissing)
 	}
 	if len(exc.missing) != 1 { // no matchIDMissingInactive
-		t.Errorf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
+		t.Fatalf("found %d missing matches for trade %v, expected 1", len(exc.missing), oid)
 	}
 	if exc.missing[0].id != matchIDMissing {
-		t.Errorf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
+		t.Fatalf("wrong missing match, got %v, expected %v", exc.missing[0].id, matchIDMissing)
 	}
 	if len(exc.extra) != 0 {
-		t.Errorf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
+		t.Fatalf("found %d extra matches for trade %v, expected 0", len(exc.extra), oid)
+	}
+}
+
+func TestStaleOrdersResolution(t *testing.T) {
+	rig := newTestRig()
+	dc := rig.dc
+
+	mkt := dc.market(tDcrBtcMktName)
+	notify := func(note Notification) {}
+
+	// Standing order
+	lo, lmtDbOrder, lmtOrderPreImg, _ := makeLimitOrder(dc, true, 3*tDCR.LotSize, tBTC.RateStep*10)
+	lo.Force = order.StandingTiF
+	standingOrderTracker := newTrackedTrade(lmtDbOrder, lmtOrderPreImg, dc, mkt.EpochLen, rig.core.lockTimeTaker,
+		rig.core.lockTimeMaker, rig.db, rig.queue, nil, nil, notify)
+	standingOrderTracker.coinsLocked = false
+	standingOrderID := standingOrderTracker.ID()
+
+	// Non-standing order
+	mo, mktDbOrder, mktOrderPreImg, _ := makeMarketOrder(dc, true, 2*tDCR.LotSize)
+	marketOrderTracker := newTrackedTrade(mktDbOrder, mktOrderPreImg, dc, mkt.EpochLen, rig.core.lockTimeTaker,
+		rig.core.lockTimeMaker, rig.db, rig.queue, nil, nil, notify)
+	marketOrderTracker.coinsLocked = false
+	marketOrderID := marketOrderTracker.ID()
+
+	dc.trades = map[order.OrderID]*trackedTrade{
+		standingOrderID: standingOrderTracker,
+		marketOrderID:   marketOrderTracker,
 	}
 
+	dc.tickInterval = 500 * time.Millisecond
+	rig.core.wg.Add(1)
+	go rig.core.listen(dc) // starts a ticker to check for and retire stale orders
+
+	// Cancel the standing order.
+	rig.queueCancel(nil)
+	err := rig.core.Cancel(tPW, standingOrderID[:])
+	if err != nil {
+		t.Fatalf("cancel order error: %v", err)
+	}
+
+	// Canceling the order again should fail.
+	rig.queueCancel(nil)
+	err = rig.core.Cancel(tPW, standingOrderID[:])
+	if err == nil {
+		t.Fatalf("no error for duplicate order cancellation")
+	}
+
+	// Stale cancel orders should be retired.
+	standingOrderTracker.mtx.Lock()
+	standingOrderTracker.cancel.ServerTime = time.Now().Add(-16 * time.Minute)
+	standingOrderTracker.mtx.Unlock()
+	<-time.After(time.Second) // wait for next tick cycle to check for and retire stale orders
+	if standingOrderTracker.cancel != nil {
+		t.Fatalf("stale cancel order targeting standing order %v not deleted", standingOrderID)
+	}
+
+	// Canceling the order again should succeed.
+	rig.queueCancel(nil)
+	err = rig.core.Cancel(tPW, standingOrderID[:])
+	if err != nil {
+		t.Fatalf("cancel order error after deleting previous stale cancel: %v", err)
+	}
+
+	// Orders are not stale yet
+	<-time.After(time.Second) // wait for next tick cycle to check for and retire stale orders
+	if len(dc.trades) != 2 {
+		t.Fatalf("%d epoch status orders retired without reason", 2-len(dc.trades))
+	}
+
+	// Over 30 minutes since epoch end, orders should be retired now
+	standingOrderTracker.mtx.Lock()
+	marketOrderTracker.mtx.Lock()
+	lo.ServerTime = time.Now().UTC().Add(-31 * time.Minute)
+	mo.ServerTime = time.Now().UTC().Add(-31 * time.Minute)
+	standingOrderTracker.mtx.Unlock()
+	marketOrderTracker.mtx.Unlock()
+	<-time.After(time.Second) // wait for next tick cycle to check for and retire stale orders
+	if len(dc.trades) > 0 {
+		t.Fatalf("%d stale epoch status orders not retired", len(dc.trades))
+	}
 }
 
 func convertMsgLimitOrder(msgOrder *msgjson.LimitOrder) *order.LimitOrder {
@@ -3651,6 +3742,38 @@ func makeLimitOrder(dc *dexConnection, sell bool, qty, rate uint64) (*order.Limi
 		Order: lo,
 	}
 	return lo, dbOrder, preImg, addr
+}
+
+func makeMarketOrder(dc *dexConnection, sell bool, qty uint64) (*order.MarketOrder, *db.MetaOrder, order.Preimage, string) {
+	preImg := newPreimage()
+	addr := ordertest.RandomAddress()
+	mo := &order.MarketOrder{
+		P: order.Prefix{
+			AccountID:  dc.acct.ID(),
+			BaseAsset:  tDCR.ID,
+			QuoteAsset: tBTC.ID,
+			OrderType:  order.LimitOrderType,
+			ClientTime: time.Now(),
+			ServerTime: time.Now().Add(time.Millisecond),
+			Commit:     preImg.Commit(),
+		},
+		T: order.Trade{
+			Sell:     true,
+			Quantity: qty,
+			Address:  addr,
+		},
+	}
+	dbOrder := &db.MetaOrder{
+		MetaData: &db.OrderMetaData{
+			Status: order.OrderStatusEpoch,
+			Host:   dc.acct.host,
+			Proof: db.OrderProof{
+				Preimage: preImg[:],
+			},
+		},
+		Order: mo,
+	}
+	return mo, dbOrder, preImg, addr
 }
 
 func TestAddrHost(t *testing.T) {

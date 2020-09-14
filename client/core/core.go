@@ -2454,11 +2454,15 @@ func (c *Core) authDEX(dc *dexConnection) error {
 		}
 
 		// Send a "Match resolution error" if there are extra match messages.
+		// Must have missed the match request(s) for these matches, but the
+		// matches are not revoked (yet). Hopefully the missed request(s) are
+		// queued by the server so that the client can ack the request(s) and
+		// begin neogitation for these matches. Can't negotiate now because
+		// acking the match request is a requirement.
 		if len(extras) > 0 {
 			details := fmt.Sprintf("%d matches reported by %s were not found for %s.",
 				len(extras), dc.acct.host, trade.token())
 			c.notify(newOrderNote("Match resolution error", details, db.ErrorLevel, corder))
-			// t.negotiate(extras) // missed match message request, but match not revoked (?!)
 			for _, extra := range extras {
 				log.Errorf("DEX %s reported match %s which is not a known active match for order %s",
 					dc.acct.host, extra.MatchID, extra.OrderID)
@@ -3373,6 +3377,8 @@ out:
 			if sinceLast >= 2*dc.tickInterval {
 				// The app likely just woke up from being suspended. Skip this
 				// tick to let DEX connections reconnect and resync matches.
+				// TODO: Need similar check in dc.tickAsset where block updates
+				// could trigger trade.tick().
 				log.Warnf("Long delay since previous trade check (just resumed?): %v. "+
 					"Skipping this check to allow reconnect.", sinceLast)
 				continue
@@ -3380,6 +3386,35 @@ out:
 			updatedAssets := make(assetMap)
 			dc.tradeMtx.Lock()
 			for oid, trade := range dc.trades {
+				stuck, epochEnd := trade.isStuckAtEpochStatus()
+				if stuck {
+					// Orders stuck at epoch status are assumed to be inactive
+					// (Executed / Revoked) because staying at Epoch status for
+					// "so long" implies that we missed the preimage request for
+					// this trade or we sent the preimage but missed the match
+					// or nomatch request.
+					// TODO: Use the order_status route to determine and set the
+					// correct status for this trade. Batch orders of this nature
+					// in a single order_status request, and execute the request
+					// asynchronously to avoid delaying ticking other trades.
+					trade.mtx.Lock()
+					trade.returnCoins()
+					trade.mtx.Unlock()
+					delete(dc.trades, oid)
+					updatedAssets.count(trade.fromAssetID)
+					log.Infof("Order %v in epoch status with server time stamp %v, "+
+						"epoch end %v (%v ago) considered inactive.",
+						oid, trade.Prefix().ServerTime, epochEnd, time.Since(epochEnd))
+					continue
+				}
+
+				// TODO: Consider calling this method outside of the tick cycle
+				// as it might involve sending an order_status request which
+				// could delay ticking other trades. Preferably, rename to
+				// hasStaleCancelOrder() and append to a slice of orders that
+				// require status confirmation via the order_status route.
+				trade.deleteStaleCancelOrder()
+
 				if !trade.isActive() {
 					trade.mtx.Lock()
 					log.Infof("Retiring inactive order %v in status %v", oid, trade.metaData.Status)
